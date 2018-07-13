@@ -5,5 +5,7 @@
 *.npz
 *.in
 *.dmrg
+*.swp
+*.out
 dmrg
 status.txt
