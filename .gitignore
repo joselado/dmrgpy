@@ -2,3 +2,5 @@
 *.pyc
 *.so
 *.o
+*.npz
+*.in
