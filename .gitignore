@@ -4,3 +4,6 @@
 *.o
 *.npz
 *.in
+*.dmrg
+dmrg
+status.txt
