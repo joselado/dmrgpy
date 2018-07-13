@@ -1,0 +1,93 @@
+import numpy as np
+
+def get_moments_dmrg(self,n=1000):
+  """Get the moments with DMRG"""
+  self.setup_sweep()
+  self.setup_task("dos",task={"nkpm":str(n)})
+  self.write_hamiltonian() # write the Hamiltonian to a file
+  self.run() # perform the calculation
+  return np.genfromtxt("KPM_MOMENTS.OUT")
+
+
+
+def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
+  """Get the moments with DMRG"""
+
+  self.setup_sweep()
+  task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
+                "site_i_kpm":str(i),"site_j_kpm":str(j),
+                "kpm_scale":str(self.kpmscale)}
+  if smart: task["smart_kpm_window"] = "true" 
+  self.setup_task("spismj",task=task) 
+  self.write_hamiltonian() # write the Hamiltonian to a file
+  self.run() # perform the calculation
+  return np.genfromtxt("KPM_MOMENTS.OUT")
+
+
+
+
+
+
+import pychain.kpm
+from pychain.kpm import generate_profile
+
+def get_dos(self,n=1000,mode="DMRG",ntries=10):
+  if mode=="DMRG": 
+#  if False: 
+    mus = [get_moments_dmrg(self,n=n) for i in range(ntries)] # get the moments
+    scale = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
+  else:
+    m  = self.get_full_hamiltonian()
+    mus = [pychain.kpm.random_trace(m/15.0,ntries=1,n=1000)
+                 for i in range(ntries)]
+    scale = 1./15.
+  mus = np.mean(np.array(mus),axis=0)
+  mus = mus[0:100]
+  xs = 0.99*np.linspace(-1.0,1.0,2000,endpoint=True) # energies
+  ys = generate_profile(mus,xs,use_fortran=False).real # generate the DOS
+  xs /= scale
+  ys *= scale
+  np.savetxt("DOS.OUT",np.matrix([xs,ys]).T)
+  return (xs,ys)
+
+
+
+def get_spismj(self,n=1000,mode="DMRG",ntries=10,i=0,j=0,smart=True):
+  if mode=="DMRG": 
+# get the moments
+    mus = get_moments_spismj_dmrg(self,n=n,i=i,j=j,smart=smart) 
+    if smart: # smart energy window
+      scale,shift = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
+    else: # convertional brute force window
+      scale = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
+      shift = 0.0 # energy shift
+    # check that the moments do not take absur values
+    mmu = np.max(np.abs(mus[1:n//10])) # average
+#    for i in range(len(mus)):
+#      if abs(mus[i])>mmu*1.1: 
+#        print("WARNING, it seems KPM is breaking")
+#        mus=mus[0:i//2]
+#        break
+    xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
+    ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz").real # generate the DOS
+    xs -= shift # energy shift
+    xs /= scale
+    ys *= scale
+#    e0 = self.gs_energy() # ground state energy
+    e0 = np.genfromtxt("GS_ENERGY.OUT") # ground state energy
+    xs -= e0 # substract GS energy
+    # now retain only an energy window
+  else: 
+    import pychain.build
+    sc = pychain.build.Spin_chain()
+    sc.build((np.array(self.spins)-1.)/2.,use_lib=False)
+    h = sc.add_tensor_interaction(self.get_coupling)
+    import pychain.correlator
+    if mode=="fullKPM":
+      (xs,ys) = pychain.correlator.spismj_kpm(sc,h,n=n)
+    elif mode=="full":
+      delta = float(self.ns)/n*1.5
+      (xs,ys) = pychain.correlator.spismj(sc,h,delta=delta)
+    else: raise
+  np.savetxt("DOS.OUT",np.matrix([xs.real,ys.real]).T)
+  return (xs.real,ys.real)

@@ -1,0 +1,6 @@
+tasks
+{
+GS = true
+gap = true
+correlator = false
+}
