@@ -9,6 +9,7 @@ import numpy as np
 nfull = 2000 # dimension for using full diagonalizetion
 maxfull = 10000 # hard limit using full diagonalizetion
 nprec = 9 # number of digits
+info = False
 
 def degeneracy(h):
   """Get degeneracy of ground state"""
@@ -53,10 +54,10 @@ def eigenstates(h,operator=None,k=None,evals=False):
 def ground_state(h,nmax=nfull):
   """Get a ground state"""
   if h.shape[0]>nmax:  
-    print("Calling ARPACK")
+    if info: print("Calling ARPACK")
     eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
   else:  
-    print("Full diagonalization")
+    if info: print("Full diagonalization")
     eig,eigvec = lg.eigh(h.todense())
   return eig[0],eigvec.transpose()[0]
 

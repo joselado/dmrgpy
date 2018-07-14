@@ -53,6 +53,7 @@ def get_dos(self,n=1000,mode="DMRG",ntries=10):
 
 
 def get_spismj(self,n=1000,mode="DMRG",ntries=10,i=0,j=0,smart=True):
+  self.to_folder() # go to temporal folder
   if mode=="DMRG": 
 # get the moments
     mus = get_moments_spismj_dmrg(self,n=n,i=i,j=j,smart=smart) 
@@ -84,5 +85,6 @@ def get_spismj(self,n=1000,mode="DMRG",ntries=10,i=0,j=0,smart=True):
       delta = float(self.ns)/n*1.5
       (xs,ys) = pychain.correlator.spismj(sc,h,delta=delta)
     else: raise
-  np.savetxt("DOS.OUT",np.matrix([xs.real,ys.real]).T)
+  self.to_origin() # go to origin folder
+  np.savetxt("SPISPJ.OUT",np.matrix([xs.real,ys.real]).T)
   return (xs.real,ys.real)

@@ -11,10 +11,16 @@ import states
 usecpp = False # use c++ library
 
 
-maxsize = 80000 # maximum matrix size
+maxsize = 300000 # maximum matrix size
 tol = 0.0001
 pathlib = "../lib" # path to library
 
+
+def get_dimension(spins):
+  size = 1
+  for s in spins:
+    size *= 2*s+1
+  return int(size)
 
 def generate_inputs(spins=[]):
   """Generate inputs for a certain spin chain,
@@ -124,6 +130,10 @@ class Spin_chain():
   size = 0 # size of the Hamiltonian
   def build(self,spins,use_lib=False,save=False):
     """Creates a spin chain, using as input the spins list"""
+    if get_dimension(spins)>maxsize: 
+      print("Surpased maximum allowed dimension for ED",maxsize)
+      print("Dimension of the requested Hilbert space",get_dimension(spins))
+      raise
     if use_lib: # use already calculated operators
       name = "" # initial name
       for s in spins: name += str(int(round(2*s,0)))+"_" # name
@@ -142,7 +152,7 @@ class Spin_chain():
         read.convert_sop(spins) # convert from C++ to npz format
         os.system("rm -f *.op") # remove C++ files
       else: # do not use the c++ program, use python
-        print("Generating matrices with python")
+#        print("Generating matrices with python")
         import chain
         chain.write_chain(spins) # create all the matrices
       if save: # if save files

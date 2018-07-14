@@ -18,7 +18,8 @@ class Coupling():
 class Spin_Hamiltonian():
   def __init__(self,spins):
     self.spins = spins # list of the spins
-    self.path = os.getcwd()+"/mpsfolder" # folder
+    self.path = os.getcwd()+"/.mpsfolder" # folder of the calculations
+    self.inipath = os.getcwd() # original folder
     self.ns = len(spins) # number of spins
     self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
     self.fields = [] # empty list
@@ -26,7 +27,10 @@ class Spin_Hamiltonian():
     # additional arguments
     self.kpmmaxm = 10 # bond dimension in KPM
     self.kpmscale = 10.0
-    os.system("mkdir -p "+self.path) # create fodler for the calculations
+    os.system("mkdir -p "+self.path) # create folder for the calculations
+  def to_folder(self): os.chdir(self.path) # go to calculation folder
+  def to_origin(self): os.chdir(self.inipath) # go to original folder
+  def clean(self): os.system("rm -r "+self.path) # clean temporal folder
   def set_exchange(self,fun):
     """Set the exchange coupling between spins"""
     self.couplings = [] # empty list
@@ -75,33 +79,44 @@ class Spin_Hamiltonian():
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
   def get_excited(self,n=10,mode="DMRG"):
+    self.to_folder() # go to temporal folder
     if mode=="DMRG":
       self.setup_sweep()
       self.setup_task("excited",task={"nexcited":str(n)})
       self.write_hamiltonian() # write the Hamiltonian to a file
       self.run() # perform the calculation
-      return np.genfromtxt("EXCITED.OUT")
-    else:
-      h = get_full_hamiltonian() # get the Hamiltonian
+      out = np.genfromtxt("EXCITED.OUT")
+    elif mode=="ED":
+      h = self.get_full_hamiltonian() # get the Hamiltonian
       import pychain.spectrum
-      return pychain.spectrum.eigenstates(h,k=n) # return energy
+      out = pychain.spectrum.eigenstates(h,k=n) # return energy
+    else: 
+      self.to_origin() # go to main folder
+      raise
+    self.to_origin() # go to main folder
+    return out
   def gs_energy(self,mode="DMRG"):
     """Return the ground state energy"""
     # write the spins
+    self.to_folder() # go to temporal folder
     if mode=="DMRG":
       self.setup_sweep()
       self.setup_task("GS")
       self.write_hamiltonian() # write the Hamiltonian to a file
       self.run() # perform the calculation
-      return np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
-    else: # use brute force
+      out = np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
+    elif mode=="ED": # use brute force
       import pychain.build
       sc = pychain.build.Spin_chain()
       sc.build((np.array(self.spins)-1.)/2.,use_lib=False)
       h = sc.add_tensor_interaction(self.get_coupling)
       import pychain.spectrum
-      return pychain.spectrum.ground_state(h)[0] # return energy
-#      exit()
+      out = pychain.spectrum.ground_state(h)[0] # return energy
+    else: 
+      self.to_origin() # go to main folder
+      raise
+    self.to_origin() # go to main folder
+    return out
   def correlator(self,pairs=[[]],mode="DMRG"):
     if mode=="DMRG": # DMRG correlation
       self.setup_sweep()
