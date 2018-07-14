@@ -7,6 +7,6 @@
 *.dmrg
 *.swp
 *.out
-dmrg
+mpscpp
 status.txt
 .mpsfolder

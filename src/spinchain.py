@@ -125,9 +125,11 @@ class Spin_Hamiltonian():
   def magnetization(self):
     """Calculate the magnetization of the system"""
     self.gs_energy() # calculate ground state
+    self.to_folder() # go to temporal folder
     mx = np.genfromtxt("MEASURE_SX.OUT").transpose()[1]
     my = np.genfromtxt("MEASURE_SY.OUT").transpose()[1]
     mz = np.genfromtxt("MEASURE_SZ.OUT").transpose()[1]
+    self.to_origin() # go to main folder
     return (mx,my,mz)
 
 
@@ -163,7 +165,7 @@ def write_tasks(self):
 def write_sweeps(self):
   """Write sweep info"""
   fo = open("sweeps.in","w")
-  fo.write("sweeps\n{\nnsweeps = ")
+  fo.write("sweeps\n{\n")
   fo.write("nsweeps = "+self.sweep["n"]+"\n")
   fo.write("maxm = "+self.sweep["maxm"]+"\n}\n")
   fo.close()
@@ -224,11 +226,11 @@ def setup_sweep(self,mode="default"):
   """Setup the sweep parameters"""
   sweep = dict() # dictionary
   if mode=="default": # default mode
-    sweep["n"] = "6"
+    sweep["n"] = "3"
     sweep["maxm"] = "40" 
   elif mode=="fast": # default mode
     sweep["n"] = "3"
-    sweep["maxm"] = "40" 
+    sweep["maxm"] = "20" 
   else: raise
   self.sweep = sweep # initialize
 

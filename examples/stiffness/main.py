@@ -8,7 +8,7 @@ sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 
 
-alphas = np.linspace(0.0,2.0,100)
+alphas = np.linspace(0.0,2.0,30)
 
 def getf(alpha):
   def fun(i,j): # function for the exchange
