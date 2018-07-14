@@ -26,7 +26,7 @@ class Spin_Hamiltonian():
     # additional arguments
     self.kpmmaxm = 10 # bond dimension in KPM
     self.kpmscale = 10.0
-    os.system("mkdir "+self.path) # create fodler for the calculations
+    os.system("mkdir -p "+self.path) # create fodler for the calculations
   def set_exchange(self,fun):
     """Set the exchange coupling between spins"""
     self.couplings = [] # empty list

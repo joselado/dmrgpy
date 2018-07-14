@@ -63,11 +63,6 @@ def get_spismj(self,n=1000,mode="DMRG",ntries=10,i=0,j=0,smart=True):
       shift = 0.0 # energy shift
     # check that the moments do not take absur values
     mmu = np.max(np.abs(mus[1:n//10])) # average
-#    for i in range(len(mus)):
-#      if abs(mus[i])>mmu*1.1: 
-#        print("WARNING, it seems KPM is breaking")
-#        mus=mus[0:i//2]
-#        break
     xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
     ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz").real # generate the DOS
     xs -= shift # energy shift
