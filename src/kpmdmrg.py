@@ -52,7 +52,7 @@ def get_dos(self,n=1000,mode="DMRG",ntries=10):
 
 
 
-def get_spismj(self,n=1000,mode="DMRG",ntries=10,i=0,j=0,smart=True):
+def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=True,window=[-1,10]):
   self.to_folder() # go to temporal folder
   if mode=="DMRG": 
 # get the moments
@@ -86,5 +86,23 @@ def get_spismj(self,n=1000,mode="DMRG",ntries=10,i=0,j=0,smart=True):
       (xs,ys) = pychain.correlator.spismj(sc,h,delta=delta)
     else: raise
   self.to_origin() # go to origin folder
+  (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
   np.savetxt("SPISPJ.OUT",np.matrix([xs.real,ys.real]).T)
   return (xs.real,ys.real)
+
+
+def restrict_interval(x,y,window):
+  """Restrict the result to a certain energy window"""
+  if window is None: return (x,y)
+  i = np.argwhere(x<window[0])[0] # last one
+  j = np.argwhere(x>window[1])[0] # last one
+#  if len(i)==0: i = 0
+#  else: i = i[-1]
+  print(i,j,window[0])
+  return x[i:j],y[i:j]
+
+
+
+
+
+
