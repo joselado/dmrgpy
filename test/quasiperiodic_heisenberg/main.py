@@ -1,25 +1,21 @@
+from __future__ import print_function
 import sys
 import os
 import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 
-n = 6
+n = 20
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+def fb(i): return [0,0,np.cos(i*np.pi*np.sqrt(2))*(-1)**i]
+sc.set_fields(fb)
+
+e = sc.get_excited(n=10)
+print(e)
+exit()
 
 
-# dimerized coupling
-def fj(i,j):
-  if abs(i-j)==1: 
-    ij = (i+j)%4
-    dj = -0.2
-    if ij==1: return 1.0 + dj
-    else: return 1.0 - dj
-  return 0.0
-sc.set_exchange(fj) # set those exchange couplings
-
-sc.kpmmaxm = 10 # KPM max m
 
 fo = open("DCF.OUT","w") # dynamical correlation function
 

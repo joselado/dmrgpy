@@ -2,6 +2,7 @@ from __future__ import print_function
 import numpy as np
 import os
 import kpmdmrg
+import pychainwrapper
 
 dmrgpath = os.environ["DMRGROOT"] # path for the program
 one = np.identity(3)
@@ -69,11 +70,9 @@ class Spin_Hamiltonian():
     self.run() # perform the calculation
     return np.genfromtxt("ENTROPY.OUT")
   def get_full_hamiltonian(self):
-    import pychain.build
-    sc = pychain.build.Spin_chain()
-    sc.build((np.array(self.spins)-1.)/2.,use_lib=False)
-    h = sc.add_tensor_interaction(self.get_coupling)
-    return h
+    return pychainwrapper.get_full_hamiltonian(self)
+  def get_pychain(self):
+    return pychainwrapper.get_pychain(self)
   def get_dos(self,n=1000,mode="DMRG"):
     return kpmdmrg.get_dos(self,n=n,mode=mode)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
@@ -106,10 +105,7 @@ class Spin_Hamiltonian():
       self.run() # perform the calculation
       out = np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
     elif mode=="ED": # use brute force
-      import pychain.build
-      sc = pychain.build.Spin_chain()
-      sc.build((np.array(self.spins)-1.)/2.,use_lib=False)
-      h = sc.add_tensor_interaction(self.get_coupling)
+      h = self.get_full_hamiltonian() # get the Hamiltonian 
       import pychain.spectrum
       out = pychain.spectrum.ground_state(h)[0] # return energy
     else: 

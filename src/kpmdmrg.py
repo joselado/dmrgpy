@@ -1,3 +1,4 @@
+from __future__ import print_function
 import numpy as np
 
 def get_moments_dmrg(self,n=1000):
@@ -74,16 +75,14 @@ def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=True,window=[-1,10]):
     xs -= e0 # substract GS energy
     # now retain only an energy window
   else: 
-    import pychain.build
-    sc = pychain.build.Spin_chain()
-    sc.build((np.array(self.spins)-1.)/2.,use_lib=False)
-    h = sc.add_tensor_interaction(self.get_coupling)
+    h = self.get_full_hamiltonian()
+    sc = self.get_pychain()
     import pychain.correlator
     if mode=="fullKPM":
-      (xs,ys) = pychain.correlator.spismj_kpm(sc,h,n=n)
-    elif mode=="full":
+      (xs,ys) = pychain.correlator.spismj_kpm(sc,h,n=n,i=i,j=j)
+    elif mode=="full" or mode=="ED":
       delta = float(self.ns)/n*1.5
-      (xs,ys) = pychain.correlator.spismj(sc,h,delta=delta)
+      (xs,ys) = pychain.correlator.spismj(sc,h,delta=delta,i=i,j=j)
     else: raise
   self.to_origin() # go to origin folder
   (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
@@ -94,11 +93,12 @@ def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=True,window=[-1,10]):
 def restrict_interval(x,y,window):
   """Restrict the result to a certain energy window"""
   if window is None: return (x,y)
-  i = np.argwhere(x<window[0])[0] # last one
-  j = np.argwhere(x>window[1])[0] # last one
-#  if len(i)==0: i = 0
-#  else: i = i[-1]
-  print(i,j,window[0])
+  i = np.argwhere(x<window[0]) # last one
+  j = np.argwhere(x>window[1]) # last one
+  if len(i)==0: i = 0
+  else: i = i[0][-1]
+  if len(j)==0: j = len(x)
+  else: j = j[0][0]
   return x[i:j],y[i:j]
 
 

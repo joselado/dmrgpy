@@ -13,8 +13,8 @@ def spismj(sc,h0,es=None,i=0,j=0,delta=0.1):
   e0,wf0 = spectrum.ground_state(h0) # get the ground state
   if es is None:
     es = np.linspace(-1.0,7.0,int(40/delta))
-  sm = sc.sxi[i] + 1j*sc.syi[i] # S+
-  sp = sc.sxi[j] - 1j*sc.syi[j] # S-
+  sm = sc.sxi[i] - 1j*sc.syi[i] # S-
+  sp = sc.sxi[j] + 1j*sc.syi[j] # S+
   iden = np.identity(h0.shape[0],dtype=np.complex) # identity
   out = []
   for e in es: # loop over energies
@@ -32,16 +32,17 @@ def spismj_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,delta=0.1,n=500):
   emax,wfmax = lg.eigsh(h0,k=1,ncv=20,which="LA")
   e0,wf0 = -e0[0],np.transpose(wf0)[0]
   emax = emax[0]
-  sm = sc.sxi[i] + 1j*sc.syi[i] # S+
-  sp = sc.sxi[j] - 1j*sc.syi[j] # S-
+  sm = sc.sxi[i] - 1j*sc.syi[i] # S-
+  sp = sc.sxi[j] - 1j*sc.syi[j] # S+
   vi = sm*csc(wf0).transpose() 
+  vj = sp*csc(wf0).transpose() 
   h = -identity(h0.shape[0])*e0+h0
   import kpm
   x = es # energies
   scale = (emax-e0)*1.3
-  (xs,ys) = kpm.dm_vivj_energy(h,vi,vi,scale=scale,
+  (xs,ys) = kpm.dm_vivj_energy(h,vi,vj,scale=scale,
                                     npol=n,ne=n*10,x=x)
-  return xs,ys/scale
+  return xs,ys
 
 
 
