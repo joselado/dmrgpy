@@ -1,0 +1,17 @@
+Got tasks.restart = true
+Using approx/svd conversion of AutoMPO->MPO
+Got sweeps.nsweeps = 3
+Got sweeps.maxm = 40
+Def sweeps.cutoff = 1e-07
+Def tasks.GS = 0
+Def tasks.correlator = 0
+Def tasks.gap = 0
+Def tasks.entropy = 0
+Def tasks.excited = 0
+Def tasks.dos = 0
+Def tasks.spismj = 0
+Got tasks.overlap = true
+Got tasks.restart = true
+Got tasks.restart = true
+Got tasks.restart = true
+Got tasks.restart = true

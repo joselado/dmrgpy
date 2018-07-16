@@ -1,0 +1,153 @@
+Using approx/svd conversion of AutoMPO->MPO
+Def sweeps.nsweeps = 3
+Got sweeps.maxm = 40
+Got tasks.GS = true
+Def sweeps.nsweeps = 3
+Got sweeps.maxm = 40
+Sweep=1, HS=1, Bond=(1,2)
+I 0 q 5E+00 E 4.6340576720
+I 9 q 9E-01 E -6.0396614474
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=5
+Sweep=1, HS=1, Bond=(2,3)
+I 0 q 3E+00 E -6.0396614474
+I 9 q 4E-01 E -11.5589103846
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=2.0E-16, States kept: m=4
+Sweep=1, HS=1, Bond=(3,4)
+I 0 q 2E+00 E -11.5589103846
+I 9 q 1E-01 E -14.1596094628
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=1.4E-16, States kept: m=5
+Sweep=1, HS=1, Bond=(4,5)
+I 0 q 2E+00 E -14.1596094628
+I 9 q 2E-01 E -16.5140192212
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=2, Bond=(4,5)
+I 0 q 2E-01 E -16.5140192212
+I 9 q 3E-02 E -16.5295799800
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=1, HS=2, Bond=(3,4)
+I 0 q 1E+00 E -16.5295799800
+I 9 q 9E-02 E -17.1808790415
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=15
+Sweep=1, HS=2, Bond=(2,3)
+I 0 q 8E-01 E -17.1808790415
+I 9 q 2E-01 E -17.6160018399
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=2.3E-16, States kept: m=30
+
+    vN Entropy at center bond b=2 = 1.284963271091
+    Eigs at center bond b=2: 0.4193 0.4125 0.0440 0.0404 0.0400 0.0394 
+Sweep=1, HS=2, Bond=(1,2)
+I 0 q 2E-01 E -17.6160018399
+I 9 q 7E-03 E -17.6179213735
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=4.8E-16, States kept: m=5
+    Largest m during sweep 1 was 30
+    Largest truncation error: 4.83296e-16
+    Energy after sweep 1 is -17.617921373462
+    Sweep 1 CPU time = 0.0384s (Wall time = 0.0439s)
+Sweep=2, HS=1, Bond=(1,2)
+I 0 q 7E-03 E -17.6179213735
+I 8 q 9E-04 E -17.6179289881
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=5
+Sweep=2, HS=1, Bond=(2,3)
+I 0 q 1E-01 E -17.6179289881
+I 8 q 4E-03 E -17.6201684668
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=30
+Sweep=2, HS=1, Bond=(3,4)
+I 0 q 4E-03 E -17.6201684668
+I 8 q 5E-04 E -17.6201745737
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=3.0E-16, States kept: m=15
+Sweep=2, HS=1, Bond=(4,5)
+I 0 q 3E-04 E -17.6201745737
+I 2 q 9E-05 E -17.6201745925
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=3.3E-16, States kept: m=3
+Sweep=2, HS=2, Bond=(4,5)
+I 0 q 9E-05 E -17.6201745925
+I 1 q 6E-05 E -17.6201745934
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=2, HS=2, Bond=(3,4)
+I 0 q 4E-04 E -17.6201745934
+I 3 q 9E-05 E -17.6201746093
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=15
+Sweep=2, HS=2, Bond=(2,3)
+I 0 q 9E-05 E -17.6201746093
+I 1 q 7E-05 E -17.6201746098
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=1.4E-16, States kept: m=30
+
+    vN Entropy at center bond b=2 = 1.286881809620
+    Eigs at center bond b=2: 0.4157 0.4157 0.0410 0.0410 0.0410 0.0410 
+Sweep=2, HS=2, Bond=(1,2)
+I 0 q 6E-05 E -17.6201746098
+I 1 q 4E-05 E -17.6201746100
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=4.9E-16, States kept: m=5
+    Largest m during sweep 2 was 30
+    Largest truncation error: 4.86094e-16
+    Energy after sweep 2 is -17.620174610001
+    Sweep 2 CPU time = 0.0474s (Wall time = 0.0475s)
+Sweep=3, HS=1, Bond=(1,2)
+I 0 q 4E-05 E -17.6201746100
+I 1 q 4E-05 E -17.6201746101
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=5
+Sweep=3, HS=1, Bond=(2,3)
+I 0 q 5E-05 E -17.6201746101
+I 1 q 4E-05 E -17.6201746103
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=30
+Sweep=3, HS=1, Bond=(3,4)
+I 0 q 4E-05 E -17.6201746103
+I 1 q 4E-05 E -17.6201746104
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=2.9E-16, States kept: m=15
+Sweep=3, HS=1, Bond=(4,5)
+I 0 q 3E-05 E -17.6201746104
+I 1 q 1E-05 E -17.6201746107
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=3.3E-16, States kept: m=3
+Sweep=3, HS=2, Bond=(4,5)
+I 0 q 1E-05 E -17.6201746107
+I 1 q 9E-06 E -17.6201746107
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=3, HS=2, Bond=(3,4)
+I 0 q 3E-05 E -17.6201746107
+I 1 q 2E-05 E -17.6201746108
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=0.0E+00, States kept: m=15
+Sweep=3, HS=2, Bond=(2,3)
+I 0 q 2E-05 E -17.6201746108
+I 1 q 2E-05 E -17.6201746108
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=2.2E-16, States kept: m=30
+
+    vN Entropy at center bond b=2 = 1.286882050663
+    Eigs at center bond b=2: 0.4157 0.4157 0.0410 0.0410 0.0410 0.0410 
+Sweep=3, HS=2, Bond=(1,2)
+I 0 q 2E-05 E -17.6201746108
+I 1 q 1E-05 E -17.6201746108
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=40
+    Trunc. err=4.8E-16, States kept: m=5
+    Largest m during sweep 3 was 30
+    Largest truncation error: 4.76065e-16
+    Energy after sweep 3 is -17.620174610797
+    Sweep 3 CPU time = 0.0306s (Wall time = 0.0306s)
+Def tasks.correlator = 0
+Def tasks.gap = 0
+Def tasks.entropy = 0
+Def tasks.excited = 0
+Def tasks.dos = 0
+Def tasks.spismj = 0

@@ -1,0 +1,8 @@
+tasks
+{
+nkpm = 1000
+spismj = true
+site_j_kpm = 0
+site_i_kpm = 0
+kpmmaxm = 10
+}

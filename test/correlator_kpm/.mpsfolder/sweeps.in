@@ -1,0 +1,7 @@
+sweeps
+{
+nsweeps = 3
+maxm = 40
+}
+cutoff = 1e-06
+}
