@@ -23,7 +23,7 @@ using namespace std;
 #include"get_entropy.h" // compute entanglement entropy
 #include"get_excited.h" // compute excited states
 #include"kpm.h" // KPM routines
-#include"task_overlap.h" // Compute overlap
+#include"compute_overlap.h" // Compute overlap
 
 
 int 
@@ -65,6 +65,6 @@ main()
            get_int_value("site_i_kpm")+1,get_int_value("site_j_kpm")+1) ; 
     }
 // overlap task
-    if (check_task("overlap"))  task_overlap() ; // compute overlap
+    if (check_task("overlap"))  compute_overlap() ; // compute overlap
     return 0;
     }
