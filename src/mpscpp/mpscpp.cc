@@ -10,19 +10,20 @@ using namespace std;
 
 
 
+#include"check_task.h" // read the different tasks
 #include"get_sweeps.h" // get the sweep info
 #include"get_gap.h" // compute the gap
 #include"get_exchange.h" // get the exchange coupling
 #include"get_sites.h" // get the sites from a file
+#include"read_wf.h" // this does not work yet
 #include"get_gs.h" // compute ground state energy and wavefunction
 #include"get_field.h" // get local magnetic fields
 #include"get_correlator.h" // compute correaltors betwee sites
-#include"check_task.h" // read the different tasks
 #include"measure.h" // compute expectation values
-#include"read_wf.h" // this does not work yet
 #include"get_entropy.h" // compute entanglement entropy
 #include"get_excited.h" // compute excited states
 #include"kpm.h" // KPM routines
+#include"task_overlap.h" // Compute overlap
 
 
 int 
@@ -63,5 +64,7 @@ main()
          get_moments_spismj_brute(sites,H,get_int_value("nkpm"),
            get_int_value("site_i_kpm")+1,get_int_value("site_j_kpm")+1) ; 
     }
+// overlap task
+    if (check_task("overlap"))  task_overlap() ; // compute overlap
     return 0;
     }

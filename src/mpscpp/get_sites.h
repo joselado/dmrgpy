@@ -67,10 +67,15 @@ SpinX(Args const& args)
 
 
 
+auto generate_sites() { // function to generate the sites
+    auto sites = SpinX() ; // read from file
+    return sites ;
+}
 
 
 
 auto get_sites() { // function to get the sites
-    auto sites = SpinX() ; // read from file
+    auto sites = generate_sites() ;  // generate the sites
+    if (check_task("restart")) readFromFile("sites.sites",sites);
     return sites ;
 }

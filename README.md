@@ -27,7 +27,7 @@ find the necesary programs.
 
 # Capabilities #
 - Ground state energy
-- Gap
+- Excitation gap
 - Excited states
 - Correlation functions
-- Dynamical correlation functions with Kernel polynomial method
+- Dynamical correlation functions computed with the Kernel polynomial method

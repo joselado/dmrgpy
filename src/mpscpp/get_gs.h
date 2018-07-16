@@ -4,13 +4,17 @@
 
 auto get_gs(auto sites, auto H) {
   auto psi = MPS(sites);
-  auto sweeps = get_sweeps(); // get the DMRG sweeps
-  double energy = dmrg(psi,H,sweeps); // ground state energy
-  ofstream myfile; // create object
-//  writeToFile("sites_file",sites);
-//  writeToFile("psi_GS.dmrg",psi);
-//  writeToFile("sites.dmrg",sites);
-  myfile.open("GS_ENERGY.OUT"); // open file
-  myfile << std::setprecision(8) << energy << endl; // write file
+//  if (check_task("restart")) { // restart the calculation
+//    psi = read_wf() ; // read the wavefunction from a file
+//  } 
+//  else { // perform the calculation of the GS
+    auto sweeps = get_sweeps(); // get the DMRG sweeps
+    double energy = dmrg(psi,H,sweeps); // ground state energy
+    ofstream myfile; // create object
+    writeToFile("psi_GS.mps",psi); // write the GS wavefunction
+    writeToFile("sites.sites",sites); // write the sites
+    myfile.open("GS_ENERGY.OUT"); // open file
+    myfile << std::setprecision(8) << energy << endl; // write file
+//  } ;
   return psi ; // return the ground state
 }

@@ -11,16 +11,16 @@ sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
 def fb(i): return [0,0,np.cos(i*np.pi*np.sqrt(2))*(-1)**i]
 sc.set_fields(fb)
 
-e = sc.get_excited(n=10)
-print(e)
-exit()
+#e = sc.get_excited(n=10)
+#print(e)
+#exit()
 
 
 
 fo = open("DCF.OUT","w") # dynamical correlation function
 
 for i in range(n): # loop over sites
-  (xs,ys) = sc.get_spismj(n=1000,mode="DMRG",i=i,j=i)
+  (xs,ys) = sc.get_spismj(n=2000,mode="DMRG",i=i,j=i)
   print("Doing",i)
   for (x,y) in zip(xs,ys):
     fo.write(str(i)+"  ")

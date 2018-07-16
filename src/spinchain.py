@@ -3,9 +3,10 @@ import numpy as np
 import os
 import kpmdmrg
 import pychainwrapper
+import mps
 
 dmrgpath = os.environ["DMRGROOT"] # path for the program
-one = np.identity(3)
+one = np.matrix(np.identity(3))
 
 
 
@@ -19,7 +20,7 @@ class Coupling():
 class Spin_Hamiltonian():
   def __init__(self,spins):
     self.spins = spins # list of the spins
-    self.path = os.getcwd()+"/.mpsfolder" # folder of the calculations
+    self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
     self.inipath = os.getcwd() # original folder
     self.ns = len(spins) # number of spins
     self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
@@ -28,6 +29,7 @@ class Spin_Hamiltonian():
     # additional arguments
     self.kpmmaxm = 10 # bond dimension in KPM
     self.kpmscale = 10.0
+    self.restart = False # restart the calculation
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
   def to_origin(self): os.chdir(self.inipath) # go to original folder
@@ -60,7 +62,7 @@ class Spin_Hamiltonian():
     write_sites(self) # write the different sites
     write_couplings(self)  # write the couplings
     write_fields(self) # write the fields
-  def run(self): 
+  def run(self,automatic=False): 
     os.system(dmrgpath+"/mpscpp/mpscpp > status.txt") # run the DMRG calculation
   def entropy(self,n=1):
     """Return the entanglement entropy"""
@@ -94,6 +96,11 @@ class Spin_Hamiltonian():
       raise
     self.to_origin() # go to main folder
     return out
+  def get_gs(self):
+    """Return the ground state"""
+    self.gs_energy() # perform a ground state calculation
+    wf = mps.MPS(self) # create an MPS
+    return wf.copy() # return wavefucntion
   def gs_energy(self,mode="DMRG"):
     """Return the ground state energy"""
     # write the spins
@@ -112,6 +119,7 @@ class Spin_Hamiltonian():
       self.to_origin() # go to main folder
       raise
     self.to_origin() # go to main folder
+    self.restart = True
     return out
   def correlator(self,pairs=[[]],mode="DMRG"):
     if mode=="DMRG": # DMRG correlation
@@ -144,6 +152,7 @@ def array2string(m):
 def matrix2string(m):
   """Convert a 3x3 matrix into an string"""
   out = " "
+  m = np.array(m)
   for i in m:
     for j in i:
       out += "  "+str(j)
@@ -154,6 +163,7 @@ def matrix2string(m):
 def write_tasks(self):
   fo = open("tasks.in","w")
   fo.write("tasks\n{\n")
+  if self.restart: fo.write(" restart = true\n")
   for key in self.task:
     fo.write(key+" = "+self.task[key]+"\n")
   fo.write("}\n")
@@ -168,6 +178,7 @@ def write_sweeps(self):
   fo.write("sweeps\n{\n")
   fo.write("nsweeps = "+self.sweep["n"]+"\n")
   fo.write("maxm = "+self.sweep["maxm"]+"\n}\n")
+  fo.write("cutoff = "+str(self.sweep["cutoff"])+"\n}\n")
   fo.close()
 
 
@@ -225,6 +236,7 @@ def write_sites(self):
 def setup_sweep(self,mode="default"):
   """Setup the sweep parameters"""
   sweep = dict() # dictionary
+  sweep["cutoff"] = 1e-06
   if mode=="default": # default mode
     sweep["n"] = "3"
     sweep["maxm"] = "40" 
@@ -254,5 +266,7 @@ def setup_task(self,mode="GS"):
     task["dos"] = "true" 
   elif mode=="spismj": # default mode
     task["spismj"] = "true" 
+  elif mode=="overlap": # default mode
+    task["overlap"] = "true" 
   else: raise
   self.task = task # initialize

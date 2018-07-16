@@ -1,11 +1,11 @@
 // this does not work yet
 
-auto read_wf() {
+auto read_wf(std::string name="psi_GS.mps") {
   auto sites = get_sites();
 //  readFromFile("sites_file",sites);
   sites = get_sites() ;
-  readFromFile("sites.dmrg",sites);
+  readFromFile("sites.sites",sites);
   auto psi = MPS(sites);
-  readFromFile("psi_GS.dmrg",psi);
+  readFromFile(name,psi);
   return psi ;
 }
