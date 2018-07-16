@@ -95,10 +95,10 @@ BLAS_LAPACK_LIBFLAGS=-lpthread -L/usr/lib -lblas -llapack
 ## used to compile optimized and debug code, you can do so here.
 
 ## Flags to give the compiler for "release mode"
-OPTIMIZATIONS=-O2 -DNDEBUG -Wall
+OPTIMIZATIONS=-O3 -DNDEBUG #-Wall
 
 ## Flags to give the compiler for "debug mode"
-DEBUGFLAGS=-DDEBUG -g -Wall -pedantic
+#DEBUGFLAGS=-DDEBUG -g -Wall -pedantic
 #
 ## Set this to 1 if you want ITensor to also build dynamic libraries
 ## These can be faster to link and give smaller binary sizes

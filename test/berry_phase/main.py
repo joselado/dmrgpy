@@ -5,11 +5,11 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 
-n = 10
+n = 6
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
 
-ps = np.linspace(0.,1.0,20) # array
+ps = np.linspace(0.,2.0,40) # array
 wfs = [] # wavefunctions
 
 eout = []
@@ -47,11 +47,22 @@ import matplotlib.pyplot as plt
 # now perform the product
 berry = 1.0+0.0j
 
+for i in range(1,len(wfs)): # gauge to the first one
+  wfs[i] = wfs[i]*np.exp(-1j*np.angle(wfs[0].dot(wfs[i])))
+
+facs = []
+
 for i in range(len(wfs)-1): # loop
   fac = wfs[i].dot(wfs[i+1])
   berry *= fac
-#  print(fac)
+  print(np.abs(fac),np.angle(fac))
+  facs.append(fac)
 
+facs = np.array(facs)
+
+plt.scatter(range(len(facs)),facs.imag)
+plt.show()
+exit()
 berry *= wfs[-1].dot(wfs[0])
 
 print("Berry phase",berry)
