@@ -3,6 +3,7 @@ import numpy as np
 import os
 import kpmdmrg
 import pychainwrapper
+import pychain.spectrum
 import mps
 
 dmrgpath = os.environ["DMRGROOT"] # path for the program
@@ -32,8 +33,10 @@ class Spin_Hamiltonian():
     self.restart = False # restart the calculation
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
-  def to_origin(self): os.chdir(self.inipath) # go to original folder
-  def clean(self): os.system("rm -r "+self.path) # clean temporal folder
+  def to_origin(self): 
+    if os.path.isfile(self.path+"/ERROR"): raise # something wrong
+    os.chdir(self.inipath) # go to original folder
+  def clean(self): os.system("rm -rf "+self.path) # clean temporal folder
   def set_exchange(self,fun):
     """Set the exchange coupling between spins"""
     self.couplings = [] # empty list
@@ -55,9 +58,8 @@ class Spin_Hamiltonian():
     setup_sweep(self,mode=mode)
     write_sweeps(self) # write the sweeps
   def setup_task(self,mode="GS",task=dict()):
-    setup_task(self,mode=mode)
-    for key in task: self.task[key] = task[key] # additional arguments
-    write_tasks(self) # write the tasks
+    from taskdmrg import setup_task
+    setup_task(self,mode=mode,task=task)
   def write_hamiltonian(self):
     write_sites(self) # write the different sites
     write_couplings(self)  # write the couplings
@@ -79,6 +81,10 @@ class Spin_Hamiltonian():
     return kpmdmrg.get_dos(self,n=n,mode=mode)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
+  def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,name="XX",
+                                 delta=0.02):
+    return kpmdmrg.get_dynamical_correlator(self,n=n,mode=mode,
+                     i=i,j=j,name=name,delta=delta)
   def get_excited(self,n=10,mode="DMRG"):
     self.to_folder() # go to temporal folder
     if mode=="DMRG":
@@ -96,11 +102,18 @@ class Spin_Hamiltonian():
       raise
     self.to_origin() # go to main folder
     return out
-  def get_gs(self):
+  def get_gs(self,mode="DMRG"):
     """Return the ground state"""
-    self.gs_energy() # perform a ground state calculation
-    wf = mps.MPS(self) # create an MPS
-    return wf.copy() # return wavefucntion
+    if mode=="DMRG":
+      self.gs_energy() # perform a ground state calculation
+      wf = mps.MPS(self) # create an MPS
+      return wf.copy() # return wavefucntion
+    elif mode=="ED":
+      self.to_folder() # go to temporal folder
+      h = self.get_full_hamiltonian() # get the Hamiltonian 
+      self.to_origin() # go to temporal folder
+      return pychain.spectrum.ground_state(h)[1] # return energy
+    else: raise
   def gs_energy(self,mode="DMRG"):
     """Return the ground state energy"""
     # write the spins
@@ -113,7 +126,6 @@ class Spin_Hamiltonian():
       out = np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
     elif mode=="ED": # use brute force
       h = self.get_full_hamiltonian() # get the Hamiltonian 
-      import pychain.spectrum
       out = pychain.spectrum.ground_state(h)[0] # return energy
     else: 
       self.to_origin() # go to main folder
@@ -160,15 +172,6 @@ def matrix2string(m):
 
 
 
-def write_tasks(self):
-  fo = open("tasks.in","w")
-  fo.write("tasks\n{\n")
-  if self.restart: fo.write(" restart = true\n")
-  for key in self.task:
-    fo.write(key+" = "+self.task[key]+"\n")
-  fo.write("}\n")
-#("GS = true\ngap = false\ncorrelator = false\n}\n")
-  fo.close()
 
 
 
@@ -247,26 +250,3 @@ def setup_sweep(self,mode="default"):
   self.sweep = sweep # initialize
 
 
-
-
-def setup_task(self,mode="GS"):
-  """Setup the sweep parameters"""
-  task = dict() # dictionary
-  if mode=="GS": # default mode
-    task["GS"] = "true"
-  elif mode=="excited": # default mode
-    task["excited"] = "true"
-  elif mode=="correlator": # default mode
-    task["GS"] = "true"
-    task["correlator"] = "true" 
-  elif mode=="entropy": # default mode
-    task["GS"] = "true"
-    task["entropy"] = "true" 
-  elif mode=="dos": # default mode
-    task["dos"] = "true" 
-  elif mode=="spismj": # default mode
-    task["spismj"] = "true" 
-  elif mode=="overlap": # default mode
-    task["overlap"] = "true" 
-  else: raise
-  self.task = task # initialize

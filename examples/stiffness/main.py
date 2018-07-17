@@ -29,13 +29,14 @@ def getf(alpha):
 es = []
 
 for alpha in alphas:
-  n = 20
+  n = 10
   spins = [2 for i in range(n)] # spins
   sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 #  alpha = np.random.random()
   sc.set_exchange(getf(alpha*np.pi))
 #  e = sc.gs_energy(mode="full")
-  e = sc.gs_energy(mode="DMRG")
+#  e = sc.gs_energy(mode="DMRG")
+  e = sc.get_excited(n=10)
 #  print(e0,e1)
 #  exit()
   es.append(e)
@@ -43,9 +44,11 @@ for alpha in alphas:
 #  exit()
 
 es = np.array(es) # array
+es = es.transpose()
   
 import matplotlib.pyplot as plt
 
-plt.scatter(alphas,es)
+for e in es:
+  plt.scatter(alphas,e)
 
 plt.show()

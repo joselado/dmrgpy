@@ -33,8 +33,8 @@ for p in ps:
     return out
   
   sc.set_exchange(fj) # set those exchange couplings
-  e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy
-  print(e0,p)
+  e0 = sc.gs_energy() # compute the ground state energy
+  print(e0)
   es = sc.get_excited(n=2) ; eout.append(es)
   wf = sc.get_gs() # get the ground state as an MPS object
   wfs.append(wf.copy()) # store wavefunction
@@ -47,8 +47,8 @@ import matplotlib.pyplot as plt
 # now perform the product
 berry = 1.0+0.0j
 
-for i in range(1,len(wfs)): # gauge to the first one
-  wfs[i] = wfs[i]*np.exp(-1j*np.angle(wfs[0].dot(wfs[i])))
+#for i in range(1,len(wfs)): # gauge to the first one
+#  wfs[i] = wfs[i]*np.exp(-1j*np.angle(wfs[0].dot(wfs[i])))
 
 facs = []
 
@@ -60,9 +60,9 @@ for i in range(len(wfs)-1): # loop
 
 facs = np.array(facs)
 
-plt.scatter(range(len(facs)),facs.imag)
-plt.show()
-exit()
+#plt.scatter(range(len(facs)),facs.imag)
+#plt.show()
+#exit()
 berry *= wfs[-1].dot(wfs[0])
 
 print("Berry phase",berry)
@@ -74,4 +74,4 @@ for (p,e) in zip(ps,eout):
 
 plt.show()
 
-
+sc.clean()

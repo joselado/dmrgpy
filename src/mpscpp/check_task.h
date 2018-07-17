@@ -21,3 +21,13 @@ auto get_float_value(auto name) {
   return N ;
 }
 
+
+
+
+auto get_str(auto name) {
+  auto input = InputGroup("tasks.in","tasks");
+  return input.getString(name,"");
+}
+
+
+

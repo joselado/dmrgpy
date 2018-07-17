@@ -29,7 +29,7 @@ using namespace std;
 int 
 main()
     {
-
+    system("touch ERROR") ; // create error file
 
 
     // read the number of sites
@@ -64,7 +64,13 @@ main()
          get_moments_spismj_brute(sites,H,get_int_value("nkpm"),
            get_int_value("site_i_kpm")+1,get_int_value("site_j_kpm")+1) ; 
     }
+    if (check_task("dynamical_correlator"))  { // dynamical correlation
+       get_moments_dynamical_correlator(sites,H,get_int_value("nkpm"),
+         get_int_value("site_i_kpm")+1,get_int_value("site_j_kpm")+1,
+         get_str("kpm_operator_i"),get_str("kpm_operator_j")) ; 
+    } ;
 // overlap task
     if (check_task("overlap"))  compute_overlap() ; // compute overlap
+    system("rm -f ERROR") ; // create error file
     return 0;
     }

@@ -16,7 +16,7 @@ import time
 
 
 t1 = time.time()
-(x2,y2) = sc.get_spismj(n=300,mode="DMRG",i=2,j=2)
+(x2,y2) = sc.get_spismj(n=600,mode="DMRG",i=2,j=2)
 t2 = time.time()
 (x3,y3) = sc.get_spismj(n=300,mode="ED",i=2,j=2)
 t3 = time.time()
@@ -35,3 +35,4 @@ plt.legend()
 
 plt.show()
 
+sc.clean()

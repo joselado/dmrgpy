@@ -10,13 +10,16 @@ int moments_vi_vj(auto m, auto vi, auto vj, int n) {
   auto ap = a*1.0 ; // initialize
   auto bk = overlapC(vj,v) ; // overlap
   auto bk1 = overlapC(vj,a) ; // overlap
-  myfile << std::setprecision(8) << real(bk) << endl;
-  myfile << std::setprecision(8) << real(bk1) << endl;
+  myfile << std::setprecision(8) << real(bk) << "  "  
+                       << std::setprecision(8)<< imag(bk) << endl;
+  myfile << std::setprecision(8) << real(bk1) << "  "  
+                       << std::setprecision(8)<< imag(bk1) << endl;
   int i ;
   for(i=0;i<n;i++) {
     ap = sum(2.0*exactApplyMPO(a,m,{"Maxm",kpmmaxm,"Cutoff",1E-7}),-1.0*am,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ; // recursion relation
     bk = overlapC(vj,ap) ; // compute term 
-    myfile << std::setprecision(8) << real(bk) << endl;
+    myfile << std::setprecision(8) << real(bk) << "  "  
+                       << std::setprecision(8)<< imag(bk) << endl;
     am = a*1.0; // next iteration
     a = ap*1.0; // next iteration
   } ;
@@ -104,6 +107,43 @@ int get_moments_spismj_brute(auto sites, auto H, int n, int i, int j) {
 
 
 
+int get_moments_dynamical_correlator(auto sites, auto H, int n,
+      int i, int j, auto namei, auto namej) {
+  auto psi = get_gs(sites,H) ; // get the ground state
+  auto m = scale_hamiltonian(sites,H) ; // scale this Hamiltonian
+  auto ampo1 = AutoMPO(sites); 
+  auto ampo2 = AutoMPO(sites); 
+  ampo1 += 1.0,namei,i ; // operator
+  ampo2 += 1.0,namej,j ; // operator
+  auto m1 = MPO(ampo1); // first operator
+  auto m2 = MPO(ampo2); // second operator
+  int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
+  auto psi1 = exactApplyMPO(psi,m1,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
+  auto psi2 = exactApplyMPO(psi,m2,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
+  moments_vi_vj(m,psi1,psi2,n) ; //compute the KPM moments
+  return 0 ;
+} ;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // compute the Chebyshev polynomials for a certain S+S- correlation
 // using a smart energy window
 int get_moments_spismj(auto sites, auto H, int n, int i, int j) {
@@ -154,5 +194,11 @@ auto scale_hamiltonian(auto sites, auto H) {
   auto m = H*dosscale ; // scale Hamiltonian
   return m ; // return scaled Hamiltonian
 }
+
+
+
+
+
+
 
 
