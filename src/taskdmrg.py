@@ -30,6 +30,7 @@ def select_task(self,mode="GS"):
     task["overlap"] = "true"
   elif mode=="dynamical_correlator": # default mode
     task["dynamical_correlator"] = "true"
+#    task["orthogonal_kpm"] = "true"
   else: raise
   self.task = task # initialize
 

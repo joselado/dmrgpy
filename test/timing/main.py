@@ -6,16 +6,16 @@ sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 import time
 
-ns = range(4,14,2)
+ns = range(10,14,2)
 ts = []
 for n in ns:
 #  spins = [np.random.randint(2,7) for i in range(n)] # spin 1/2 heisenberg chain
-  spins = [3 for i in range(n)] # spin 1/2 heisenberg chain
+  spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
   sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
   t0 = time.time()
 #  e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy
 #  e0 = sc.get_excited(n=4,mode="DMRG") # compute the ground state energy
-  sc.get_dynamical_correlator(mode="DMRG",i=1,j=3,name="XX")
+  sc.get_dynamical_correlator(mode="DMRG",i=1,j=3,name="XX",delta=0.02)
   t1 = time.time()
   ts.append(t1-t0) # store
   print("Time in ",n,t1-t0)

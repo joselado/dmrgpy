@@ -40,6 +40,7 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
                 "site_i_kpm":str(i),"site_j_kpm":str(j),
                 "kpm_scale":str(self.kpmscale),
+                "kpm_cutoff":str(self.kpmcutoff),
                 "kpm_operator_i":namei,"kpm_operator_j":namej}
   self.setup_task("dynamical_correlator",task=task) 
   self.write_hamiltonian() # write the Hamiltonian to a file
@@ -137,13 +138,14 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
 # get the moments
     mus = get_moments_dynamical_correlator_dmrg(self,n=n,i=i,j=j,name=name) 
     scale = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
+    e0 = np.genfromtxt("GS_ENERGY.OUT") # ground state energy
+    minx = -1.0 + (e0*scale) 
+    maxx = -1.0 
     xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
     ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz") # generate the DOS
-    print(ys)
     xs /= scale
     ys *= scale
 #    e0 = self.gs_energy() # ground state energy
-    e0 = np.genfromtxt("GS_ENERGY.OUT") # ground state energy
     xs -= e0 # substract GS energy
     # now retain only an energy window
   else: 
@@ -166,7 +168,6 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
   ne = int(10*(window[1] - window[0])/delta) # number of energies
   xs = np.linspace(window[0],window[1],ne)
   ys = fr(xs) + 1j*fi(xs) # evaluate the interpolator
-#  xs = xs - np.min(xs) + window[0] # ensure the first one is ewindow
   np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)
   return (xs,ys)
 

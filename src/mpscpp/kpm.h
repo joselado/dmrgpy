@@ -1,12 +1,15 @@
+#include"kpmortho.h"
+
 
 // compute the KPM moments for matrix m and vectors vi and vj
 int moments_vi_vj(auto m, auto vi, auto vj, int n) {
   ofstream myfile;
   myfile.open("KPM_MOMENTS.OUT"); // open file
   int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
+  auto kpmcutoff = get_float_value("kpm_cutoff") ; // bond dimension for KPM
   auto v = vi*1.0 ; // initialize
   auto am = vi*1.0 ; // initialize
-  auto a = exactApplyMPO(v,m,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ; // initialize
+  auto a = exactApplyMPO(v,m,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff}) ; // initialize
   auto ap = a*1.0 ; // initialize
   auto bk = overlapC(vj,v) ; // overlap
   auto bk1 = overlapC(vj,a) ; // overlap
@@ -16,7 +19,7 @@ int moments_vi_vj(auto m, auto vi, auto vj, int n) {
                        << std::setprecision(8)<< imag(bk1) << endl;
   int i ;
   for(i=0;i<n;i++) {
-    ap = sum(2.0*exactApplyMPO(a,m,{"Maxm",kpmmaxm,"Cutoff",1E-7}),-1.0*am,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ; // recursion relation
+    ap = sum(2.0*exactApplyMPO(a,m,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff}),-1.0*am,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff}) ; // recursion relation
     bk = overlapC(vj,ap) ; // compute term 
     myfile << std::setprecision(8) << real(bk) << "  "  
                        << std::setprecision(8)<< imag(bk) << endl;
@@ -118,9 +121,12 @@ int get_moments_dynamical_correlator(auto sites, auto H, int n,
   auto m1 = MPO(ampo1); // first operator
   auto m2 = MPO(ampo2); // second operator
   int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
-  auto psi1 = exactApplyMPO(psi,m1,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
-  auto psi2 = exactApplyMPO(psi,m2,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
-  moments_vi_vj(m,psi1,psi2,n) ; //compute the KPM moments
+  if (check_task("orthogonal_kpm")) 
+      moments_kpm_ortho(m,psi,m1,m2,n);  //compute the KPM moments
+  else  {
+    auto psi1 = exactApplyMPO(psi,m1,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
+    auto psi2 = exactApplyMPO(psi,m2,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
+    moments_vi_vj(m,psi1,psi2,n) ; } ; //compute the KPM moments
   return 0 ;
 } ;
 

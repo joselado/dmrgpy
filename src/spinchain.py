@@ -28,7 +28,8 @@ class Spin_Hamiltonian():
     self.fields = [] # empty list
 #    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
     # additional arguments
-    self.kpmmaxm = 10 # bond dimension in KPM
+    self.kpmmaxm = 20 # bond dimension in KPM
+    self.kpmcutoff = 1e-4 # cutoff in KPM
     self.kpmscale = 10.0
     self.restart = False # restart the calculation
     os.system("mkdir -p "+self.path) # create folder for the calculations
@@ -56,7 +57,6 @@ class Spin_Hamiltonian():
     return np.zeros((3,3)) 
   def setup_sweep(self,mode="default"):
     setup_sweep(self,mode=mode)
-    write_sweeps(self) # write the sweeps
   def setup_task(self,mode="GS",task=dict()):
     from taskdmrg import setup_task
     setup_task(self,mode=mode,task=task)
@@ -242,11 +242,12 @@ def setup_sweep(self,mode="default"):
   sweep["cutoff"] = 1e-06
   if mode=="default": # default mode
     sweep["n"] = "3"
-    sweep["maxm"] = "40" 
+    sweep["maxm"] = "100" 
   elif mode=="fast": # default mode
     sweep["n"] = "3"
     sweep["maxm"] = "20" 
   else: raise
   self.sweep = sweep # initialize
+  write_sweeps(self) # write the sweeps
 
 

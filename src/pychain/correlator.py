@@ -100,7 +100,7 @@ def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
   scale = np.max([np.abs(e0),np.abs(emax)])*3.0
   (xs,ys) = kpm.dm_vivj_energy(h,vi,vj,scale=scale,
                                     npol=n*4,ne=n*10,x=x)
-  return xs,ys
+  return xs,np.conjugate(ys)/scale*np.pi
 
 
 
