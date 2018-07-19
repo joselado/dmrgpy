@@ -28,7 +28,7 @@ def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
 
 def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
-  self.setup_sweep()
+  self.setup_sweep("accurate")
   if len(name)!=2: raise
   if name[0]=="X": namei="Sx"
   elif name[0]=="Y": namei="Sy"
