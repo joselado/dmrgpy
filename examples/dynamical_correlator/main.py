@@ -4,21 +4,24 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 
-n = 6
+n = 4
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
 
-sc.set_fields(lambda x: [0.,0.,1.])
+def fj(i,j):
+  if j==(i+1): return np.random.random((3,3))
+  else: return 0.0
+#sc.set_exchange(fj)
+sc.set_fields(lambda x: np.random.random(3))
 
-#sc.kpmmaxm = 10 # KPM max m
-sc.kpmscale = 10.0
+#sc.kpmmaxm = 20 # KPM maxm
 import time
 
 
 t1 = time.time()
-(x2,y2) = sc.get_dynamical_correlator(n=600,mode="DMRG",i=2,j=2)
+(x2,y2) = sc.get_dynamical_correlator(n=600,mode="DMRG",i=0,j=0,delta=0.02)
 t2 = time.time()
-(x3,y3) = sc.get_dynamical_correlator(n=300,mode="ED",i=2,j=2)
+(x3,y3) = sc.get_dynamical_correlator(n=300,mode="ED",i=0,j=0,delta=0.02)
 t3 = time.time()
 
 print("Time with DMRG",t2-t1)

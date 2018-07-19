@@ -246,6 +246,9 @@ def setup_sweep(self,mode="default"):
   elif mode=="fast": # default mode
     sweep["n"] = "3"
     sweep["maxm"] = "20" 
+  elif mode=="accurate": # default mode
+    sweep["n"] = "10"
+    sweep["maxm"] = "50" 
   else: raise
   self.sweep = sweep # initialize
   write_sweeps(self) # write the sweeps

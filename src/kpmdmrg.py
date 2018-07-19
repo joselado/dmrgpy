@@ -3,7 +3,7 @@ import numpy as np
 
 def get_moments_dmrg(self,n=1000):
   """Get the moments with DMRG"""
-  self.setup_sweep()
+  self.setup_sweep("accurate")
   self.setup_task("dos",task={"nkpm":str(n)})
   self.write_hamiltonian() # write the Hamiltonian to a file
   self.run() # perform the calculation
@@ -132,7 +132,7 @@ def restrict_interval(x,y,window):
 def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
              window=[-1,10],name="XX",delta=None):
   if delta is not None: # estimate the number of polynomials
-    n = int(np.sum(self.spins)*1.2/delta)
+    n = int(np.sum(np.array(self.spins)**2)/(2.*delta))
   self.to_folder() # go to temporal folder
   if mode=="DMRG": 
 # get the moments

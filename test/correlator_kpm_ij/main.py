@@ -23,7 +23,7 @@ import time
 t1 = time.time()
 (x2,y2) = sc.get_dynamical_correlator(mode="DMRG",i=0,j=0,name="XZ")
 t2 = time.time()
-(x3,y3) = sc.get_dynamical_correlator(mode="fullKPM",i=0,j=0,name="XZ")
+(x3,y3) = sc.get_dynamical_correlator(mode="ED",i=0,j=0,name="XZ")
 t3 = time.time()
 
 print("Time with DMRG",t2-t1)

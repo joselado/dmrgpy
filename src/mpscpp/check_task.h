@@ -6,6 +6,9 @@ bool check_task(auto name) {
   return dotask ;
 }
 
+
+// functions to get data from the input file
+
 auto get_int_value(auto name) {
   auto input = InputGroup("tasks.in","tasks");
   auto N = input.getInt(name,1);
