@@ -1,7 +1,0 @@
-sweeps
-{
-nsweeps = 3
-maxm = 100
-}
-cutoff = 1e-06
-}
