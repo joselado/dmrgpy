@@ -65,7 +65,7 @@ class Spin_Hamiltonian():
     write_couplings(self)  # write the couplings
     write_fields(self) # write the fields
   def run(self,automatic=False): 
-    os.system(dmrgpath+"/mpscpp/mpscpp > status.txt") # run the DMRG calculation
+    os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt") # run the DMRG calculation
   def entropy(self,n=1):
     """Return the entanglement entropy"""
     self.setup_sweep()

@@ -9,5 +9,6 @@ cd -
 cd src/mpscpp
 make clean 
 make
+mv mpscpp mpscpp.x
 cd -
 

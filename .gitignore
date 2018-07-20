@@ -1,0 +1,14 @@
+*.OUT
+*.pyc
+*.so
+*.o
+*.npz
+*.in
+*.dmrg
+*.swp
+*.out
+mpscpp.x
+status.txt
+*.mps
+*.dmrg
+.mpsfolder
