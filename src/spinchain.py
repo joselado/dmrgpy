@@ -29,7 +29,7 @@ class Spin_Hamiltonian():
 #    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
     # additional arguments
     self.kpmmaxm = 20 # bond dimension in KPM
-    self.kpmcutoff = 1e-4 # cutoff in KPM
+    self.kpmcutoff = 1e-5 # cutoff in KPM
     self.kpmscale = 10.0
     self.restart = False # restart the calculation
     os.system("mkdir -p "+self.path) # create folder for the calculations

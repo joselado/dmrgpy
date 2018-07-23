@@ -3,10 +3,10 @@ from __future__ import print_function
 import os
 from scipy.sparse import csc_matrix as csc
 import scipy.sparse as sparse
-import spectrum
+from . import spectrum
 import numpy as np
-import read
-import states
+from . import read
+from . import states
 
 usecpp = False # use c++ library
 
@@ -153,7 +153,7 @@ class Spin_chain():
         os.system("rm -f *.op") # remove C++ files
       else: # do not use the c++ program, use python
 #        print("Generating matrices with python")
-        import chain
+        from . import chain
         chain.write_chain(spins) # create all the matrices
       if save: # if save files
         name = "" # initial name

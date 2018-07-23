@@ -1,8 +1,8 @@
 from __future__ import print_function
 import os
 import numpy as np
-from inout import save_sparse_csr
-from inout import load_sparse_csr
+from .inout import save_sparse_csr
+from .inout import load_sparse_csr
 from scipy.sparse import csr_matrix
 from scipy.sparse import csc_matrix
 
@@ -123,7 +123,7 @@ def read_sop(spins,check=check):
   sc.sy = sum(syi)
   sc.sz = sum(szi)
   sc.s2 = sc.sx*sc.sx + sc.sy*sc.sy + sc.sz*sc.sz
-  import checking
+  from . import checking
   for i in range(len(spins)):
     checking.angular(sc.sxi[i],sc.syi[i],sc.szi[i])
     checking.angular(sc.syi[i],sc.szi[i],sc.sxi[i])

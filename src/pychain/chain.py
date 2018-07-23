@@ -2,7 +2,7 @@ from __future__ import print_function
 import numpy as np
 #from numba import jit
 from scipy.sparse import csc_matrix
-from read import write_matrix
+from .read import write_matrix
 
 def generate_basis(spins):
    """Generate the basis for a spin chain"""

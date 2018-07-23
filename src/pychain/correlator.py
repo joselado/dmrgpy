@@ -1,7 +1,7 @@
 from __future__ import print_function
 import numpy as np
-from spectrum import viAvj
-import spectrum
+from .spectrum import viAvj
+from . import spectrum
 from scipy.sparse import csc_matrix as csc
 from scipy.sparse import identity
 import scipy.sparse.linalg as lg
