@@ -10,28 +10,43 @@ int measure(auto psi, auto sites) {
   ofile3.open("MEASURE_SZ.OUT"); 
   int N=sites.N();
   int j ; // counter
+  float sxj,syj,szj;
   for(int j=1; j <= N; ++j) 
         {
         //re-gauge psi to get ready to measure at position j
-        psi.position(j);
-
-        ITensor ket = psi.A(j);
-        ITensor bra = dag(prime(ket,Site));
-
-        ITensor Sxjop = sites.op("Sx",j);
-        ITensor Syjop = sites.op("Sy",j);
-        ITensor Szjop = sites.op("Sz",j);
-
-        //take an inner product 
-        auto sxj = (bra*Sxjop*ket).cplx().real();
-        auto syj = (bra*Syjop*ket).cplx().real();
-        auto szj = (bra*Szjop*ket).cplx().real();
-        ofile1 << j << "   "<< sxj << endl ;
-        ofile2 << j << "   "<< syj << endl ;
-        ofile3 << j << "   "<< szj << endl ;
+	if (site_type(j-1)==1) { // fermionic site
+	  sxj = overlap(psi,get_spin_operator(sites,j-1,"Sx"),psi);
+	  syj = overlap(psi,get_spin_operator(sites,j-1,"Sy"),psi);
+	  szj = overlap(psi,get_spin_operator(sites,j-1,"Sz"),psi);
+	};
+	if (site_type(j-1)!=1) { // spin site
+          psi.position(j);
+          ITensor ket = psi.A(j);
+          ITensor bra = dag(prime(ket,Site));
+          ITensor Sxjop = sites.op("Sx",j);
+          ITensor Syjop = sites.op("Sy",j);
+          ITensor Szjop = sites.op("Sz",j);
+          //take an inner product 
+          sxj = (bra*Sxjop*ket).cplx().real();
+          syj = (bra*Syjop*ket).cplx().real();
+          szj = (bra*Szjop*ket).cplx().real();
+	} ;
+        ofile1 << j-1 << "   "<< sxj << endl ;
+        ofile2 << j-1 << "   "<< syj << endl ;
+        ofile3 << j-1 << "   "<< szj << endl ;
         }
   ofile1.close() ; 
   ofile2.close() ; 
   ofile3.close() ; 
+  // measure the occupation
+  ofile1.open("MEASURE_N.OUT"); 
+  for(int j=1; j <= N; ++j) 
+        {
+        //re-gauge psi to get ready to measure at position j
+	if (site_type(j-1)==1) { // fermionic site
+	  auto d = overlap(psi,get_occupation_operator(sites,j-1),psi);
+          ofile1 << j-1 << "   "<< d << endl ;
+	} ;
+	} ;
   return 0 ;
 }

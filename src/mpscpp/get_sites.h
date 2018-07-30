@@ -20,17 +20,27 @@ read(std::istream& s)
     if(N > 0)
         {
         auto store = SiteStore(N);
+        ifstream sfile; // file to read
+        sfile.open("sites.in"); // file with the coupling
+	int N2 = 0;
+        sfile >> N2; // read the number of sites from file
+        auto sites = SiteStore(N); // get an empty list of sites
+	int nm = 0; // initialize
         for(int j = 1; j <= N; ++j)
             {
             auto I = IQIndex{};
+            sfile >> nm ; // read this spin
             I.read(s);
-            if(I.m() == 3) store.set(j,SpinOneSite(I));
-            else if(I.m() == 2) store.set(j,SpinHalfSite(I));
-            else if(I.m() == 4) store.set(j,SpinThreeHalfSite(I));
-            else if(I.m() == 5) store.set(j,SpinTwoSite(I));
-            else if(I.m() == 6) store.set(j,SpinFiveHalfSite(I));
-            else Error(format("SpinX cannot read index of size %d",I.m()));
+	    // S=3/2 is being confusing by spinful fermion!!!!
+            if(nm == 3) store.set(j,SpinOneSite(I));
+            else if(nm == 1) store.set(j,HubbardSite(I));
+            else if(nm == 2) store.set(j,SpinHalfSite(I));
+            else if(nm == 4) store.set(j,SpinThreeHalfSite(I));
+            else if(nm == 5) store.set(j,SpinTwoSite(I));
+            else if(nm == 6) store.set(j,SpinFiveHalfSite(I));
+            else Error(format("SpinX cannot read index of size %d",nm));
             }
+	sfile.close() ;
         init(std::move(store));
         }
     }
@@ -54,10 +64,12 @@ SpinX(Args const& args)
     for (int i=1;i<=N;i++)  {
       sfile >> nm ; // read this spin
       if (nm==2) sites.set(i,SpinHalfSite(i)); // use spin=1/2
+      else if (nm==1) sites.set(i,HubbardSite(i)); // use fermions
       else if (nm==3) sites.set(i,SpinOneSite(i)); // use spin=1
       else if (nm==4) sites.set(i,SpinThreeHalfSite(i)); // use spin=3/2
       else if (nm==5) sites.set(i,SpinTwoSite(i)); // use spin=2
       else if (nm==6) sites.set(i,SpinFiveHalfSite(i)); // use spin=5/2
+      else Error(format("SpinX cannot read index of size "));
     } ;
     sfile.close(); // close file
 
@@ -79,3 +91,22 @@ auto get_sites() { // function to get the sites
     if (check_task("restart")) readFromFile("sites.sites",sites);
     return sites ;
 }
+
+
+
+int site_type(int index) {
+    ifstream sfile; // file to read
+    sfile.open("sites.in"); // file with the sites
+    int N, nm, out=-1;
+    sfile >> N; // read the number of sites and number of projections
+    for (int i=1;i<=N;i++)  {
+      sfile >> nm ; // read this spin
+      if (i-1==index) out = nm ; }
+    sfile.close() ;
+    return out ;
+}
+
+
+
+
+

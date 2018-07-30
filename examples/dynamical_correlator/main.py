@@ -6,6 +6,7 @@ import spinchain
 
 n = 4
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
+#spins = [2,6]
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
 
 def fj(i,j):

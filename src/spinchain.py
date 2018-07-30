@@ -26,6 +26,7 @@ class Spin_Hamiltonian():
     self.ns = len(spins) # number of spins
     self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
     self.fields = [] # empty list
+    self.hoppings = dict() # empty dictionary
 #    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
     # additional arguments
     self.kpmmaxm = 20 # bond dimension in KPM
@@ -48,6 +49,14 @@ class Spin_Hamiltonian():
         if np.sum(np.abs(g))!=0.0: 
           c = Coupling(i,j,g) # create class
           self.couplings.append(c) # store
+  def set_hoppings(self,fun):
+      self.hoppins = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.spins[i]==1 and self.spins[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)>0.0:
+                      self.hoppings[(i,j)] = Coupling(i,j,c) # store
   def set_fields(self,fun):
     self.fields = [fun(i) for i in range(self.ns)] # fields
   def get_coupling(self,i,j):
@@ -63,6 +72,7 @@ class Spin_Hamiltonian():
   def write_hamiltonian(self):
     write_sites(self) # write the different sites
     write_couplings(self)  # write the couplings
+    write_hoppings(self)  # write the hoppings
     write_fields(self) # write the fields
   def run(self,automatic=False): 
     os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt") # run the DMRG calculation
@@ -217,6 +227,29 @@ def write_correlators(pairs):
 
 
 
+
+def write_hoppings(self):
+  """Write couplings in a file"""
+  fo = open("hoppings.in","w")
+  cs = self.hoppings
+  fo.write(str(len(cs))+"\n")
+  for key in self.hoppings: # loop
+    c = self.hoppings[key] # loop
+    if self.spins[c.i]!=1: raise
+    if self.spins[c.j]!=1: raise
+    fo.write(str(c.i)+"  ")
+    fo.write(str(c.j)+"  ")
+    fo.write(str(c.g.real)+"  ")
+    fo.write(str(c.g.imag)+"\n")
+  fo.close()
+
+
+
+
+
+
+
+
 def write_fields(self):
   """Write fields in a file"""
   fo = open("fields.in","w")
@@ -231,9 +264,15 @@ def write_sites(self):
   fo = open("sites.in","w")
   fo.write(str(self.ns)+"\n") # write number of sites
   for si in self.spins: 
-    if 1<si<7: fo.write(str(si)+"\n")
+    if si<7: fo.write(str(si)+"\n")
+    elif si==1: print("Warning, some sites are not spin operators")
     else: raise
   fo.close()
+
+
+
+
+
 
 
 def setup_sweep(self,mode="default"):

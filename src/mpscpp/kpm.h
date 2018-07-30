@@ -131,12 +131,13 @@ int get_moments_dynamical_correlator(auto sites, auto H, int n,
       int i, int j, auto namei, auto namej) {
   auto psi = get_gs(sites,H) ; // get the ground state
   auto m = scale_hamiltonian(sites,H) ; // scale this Hamiltonian
-  auto ampo1 = AutoMPO(sites); 
-  auto ampo2 = AutoMPO(sites); 
-  ampo1 += 1.0,namei,i ; // operator
-  ampo2 += 1.0,namej,j ; // operator
-  auto m1 = MPO(ampo1); // first operator
-  auto m2 = MPO(ampo2); // second operator
+//  auto ampo1 = AutoMPO(sites); 
+//  auto ampo2 = AutoMPO(sites); 
+//  ampo1 += 1.0,namei,i ; // operator
+//  ampo2 += 1.0,namej,j ; // operator
+  auto m1 = get_spin_operator(sites,i,namei); // first operator
+  auto m2 = get_spin_operator(sites,j,namej); // first operator
+//  auto m2 = MPO(ampo2); // second operator
   int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
   if (check_task("orthogonal_kpm")) 
       moments_kpm_ortho(m,psi,m1,m2,n);  //compute the KPM moments
