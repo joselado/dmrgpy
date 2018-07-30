@@ -34,3 +34,11 @@ auto get_str(auto name) {
 
 
 
+bool get_bool(auto name) {
+  auto input = InputGroup("tasks.in","tasks");
+  auto dotask = input.getYesNo(name,false);
+  return dotask ;
+}
+
+
+// functions to get data from the input file
