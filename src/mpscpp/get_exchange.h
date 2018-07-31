@@ -44,31 +44,24 @@ auto get_exchange(auto ampo) {
           ampo += jzy[j],"Sz",j1,"Sy",j2;
           ampo += jzz[j],"Sz",j1,"Sz",j2;
           } ;
+	// one fermion and one spin
 	if ((site_type(j1-1)!=1) and (site_type(j2-1)==1))  {
           ampo += jxx[j],"Sx",j1,"Cdagdn",j2,"Cup",j2;
           ampo += jxx[j],"Sx",j1,"Cdagup",j2,"Cdn",j2;
-	  // H. C.
-//          ampo += jxx[j],"Sx",j1,"C",j2,"Cup",j2;
-//          ampo += jxx[j],"Sx",j1,"Cdagup",j2,"Cdn",j2;
-//          ampo += jxy[j],"Sx",j1,"Sy",j2;
-//          ampo += jxz[j],"Sx",j1,"Sz",j2;
           ampo += -jyy[j],"Sy",j1,"Cdagdn",j2,"CupI",j2;
           ampo += jyy[j],"Sy",j1,"Cdagup",j2,"CdnI",j2;
-//          ampo += jyy[j],"Sy",j1,"Sy",j2;
-//          ampo += jyz[j],"Sy",j1,"Sz",j2;
-//          ampo += jzx[j],"Sz",j1,"Sx",j2;
-//          ampo += jzy[j],"Sz",j1,"Sy",j2;
           ampo += jzz[j],"Sz",j1,"Cdagup",j2,"Cup",j2;
-          ampo += jzz[j],"Sz",j1,"Cdagdn",j2,"Cdn",j2;
+          ampo += -jzz[j],"Sz",j1,"Cdagdn",j2,"Cdn",j2;
           } ;
-//	if ((site_type(j1-1)==1) and (site_type(j2-1)==1))  {
-//          ampo += jxx[j],"Sx",j1,"Cdagdn",j2,"Cup",j2;
-//          ampo += jxx[j],"Sx",j1,"Cdagup",j2,"Cdn",j2;
-//          ampo += -jyy[j],"Sy",j1,"Cdagdn",j2,"CupI",j2;
-//          ampo += jyy[j],"Sy",j1,"Cdagup",j2,"CdnI",j2;
-//          ampo += jzz[j],"Sz",j1,"Cdagup",j2,"Cup",j2;
-//          ampo += jzz[j],"Sz",j1,"Cdagdn",j2,"Cdn",j2;
-//          } ;
+	// one spin and one fermion, the other case
+	if ((site_type(j1-1)==1) and (site_type(j2-1)!=1))  {
+          ampo += jxx[j],"Sx",j2,"Cdagdn",j1,"Cup",j1;
+          ampo += jxx[j],"Sx",j2,"Cdagup",j1,"Cdn",j1;
+          ampo += -jyy[j],"Sy",j2,"Cdagdn",j1,"CupI",j1;
+          ampo += jyy[j],"Sy",j2,"Cdagup",j1,"CdnI",j1;
+          ampo += jzz[j],"Sz",j2,"Cdagup",j1,"Cup",j1;
+          ampo += -jzz[j],"Sz",j2,"Cdagdn",j1,"Cdn",j1;
+          } ;
 	}
     return ampo ;  // return the Hamiltonian with exchange added
 }
