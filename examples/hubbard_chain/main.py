@@ -4,7 +4,7 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import fermionchain
 
-n = 20 # number of spinful fermionic sites
+n = 30 # number of spinful fermionic sites
 fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 
 ####### Input matrices #######
@@ -14,7 +14,11 @@ fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 hopping = np.zeros((n,n))
 hubbard = np.zeros((n,n))
 for i in range(n-1):  hopping[i,i+1] = 1. ; hopping[i+1,i] = 1.
-for i in range(n): U = 4.0 ; hubbard[i,i] = U/2. ; hopping[i,i] = -U #-1.0
+for i in range(n): 
+    if i<n//2: U = 8.0 
+    else: U = -8.0
+    hubbard[i,i] = U/2. 
+    hopping[i,i] = -U #-1.0
 
 # The implemented Hamiltonian is
 # H = \sum_ij hopping[i,j] c^dagger_i c_j + hubbard[i,j] n_i n_j
