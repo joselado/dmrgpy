@@ -40,6 +40,32 @@ return m ;
 
 
 
+
+auto get_occupation2_operator(auto sites, int i) {
+	auto ampo = AutoMPO(sites);
+	if (site_type(i)==1)  // fermionic site
+        	ampo += 1.0,"Ntot",i+1,"Ntot",i+1;
+        auto m = MPO(ampo) ;	
+return m ;
+}
+
+
+
+
+
+auto get_delta_operator(auto sites, int i) {
+	auto ampo = AutoMPO(sites);
+	if (site_type(i)==1)  // fermionic site
+        	ampo += 1.0,"Cdn",i+1,"Cup",i+1;
+        	ampo += 1.0,"Cdagup",i+1,"Cdagdn",i+1;
+        auto m = MPO(ampo) ;	
+return m ;
+}
+
+
+
+
+
 auto get_hopping_operator(auto sites, int i, int j) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // fermionic site

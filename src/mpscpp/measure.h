@@ -38,15 +38,24 @@ int measure(auto psi, auto sites) {
   ofile1.close() ; 
   ofile2.close() ; 
   ofile3.close() ; 
-  // measure the occupation
+  // measure the occupation and anomalous term
   ofile1.open("MEASURE_N.OUT"); 
+  ofile2.open("MEASURE_DELTA.OUT"); 
+  ofile3.open("MEASURE_N2.OUT"); 
   for(int j=1; j <= N; ++j) 
         {
         //re-gauge psi to get ready to measure at position j
 	if (site_type(j-1)==1) { // fermionic site
 	  auto d = overlap(psi,get_occupation_operator(sites,j-1),psi);
+	  auto d2 = overlap(psi,get_occupation2_operator(sites,j-1),psi);
+	  auto delta = overlapC(psi,get_delta_operator(sites,j-1),psi);
           ofile1 << j-1 << "   "<< d << endl ;
+          ofile3 << j-1 << "   "<< d2 << endl ;
+          ofile2 << j-1 << "   "<< real(delta) << "  " << imag(delta) << endl ;
 	} ;
 	} ;
+  ofile1.close() ; // close file
+  ofile2.close() ; // close file
+  ofile3.close() ; // close file
   return 0 ;
 }
