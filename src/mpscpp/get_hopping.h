@@ -17,11 +17,12 @@ auto get_hopping(auto ampo) {
           ampo += ti,"Cdagup",j1+1,"CupI",j2+1;
           ampo += tr,"Cdagdn",j1+1,"Cdn",j2+1; 
           ampo += ti,"Cdagdn",j1+1,"CdnI",j2+1; 
+      }
           // complex conjugate
-          ampo += tr,"Cdagup",j2+1,"Cup",j1+1;
-          ampo += -ti,"Cdagup",j2+1,"CupI",j1+1;
-          ampo += tr,"Cdagdn",j2+1,"Cdn",j1+1; 
-          ampo += -ti,"Cdagdn",j2+1,"CdnI",j1+1; }
+//          ampo += tr,"Cdagup",j2+1,"Cup",j1+1;
+//          ampo += -ti,"Cdagup",j2+1,"CupI",j1+1;
+//          ampo += tr,"Cdagdn",j2+1,"Cdn",j1+1; 
+//          ampo += -ti,"Cdagdn",j2+1,"CdnI",j1+1; }
     } ;
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added

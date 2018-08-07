@@ -135,7 +135,11 @@ def restrict_interval(x,y,window):
 def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
              window=[-1,10],name="XX",delta=None):
   if delta is not None: # estimate the number of polynomials
-    n = int(np.sum(np.array(self.spins)**2)/(2.*delta))
+    scale = 0.
+    for s in self.sites:
+        if s>1: scale += s**2
+        if s==1: scale += 4.
+    n = int(scale/(2.*delta))
   self.to_folder() # go to temporal folder
   if mode=="DMRG": 
 # get the moments

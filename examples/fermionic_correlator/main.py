@@ -3,12 +3,10 @@ import os
 import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import matplotlib.pyplot as plt
-import spinchain
+import fermionchain
 
 n = 10
-spins = [1 for i in range(n)] # spin 1/2 plus fermionic sites
-#spins = [2,2]
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 def ft(i,j):
     if i==j: return 1.0
     if abs(j-i)==1: return 1.0
