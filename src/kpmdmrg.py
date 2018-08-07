@@ -29,14 +29,17 @@ def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
 def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
   self.setup_sweep("accurate")
-  if len(name)!=2: raise
-  if name[0]=="X": namei="Sx"
-  elif name[0]=="Y": namei="Sy"
-  elif name[0]=="Z": namei="Sz"
-  if name[1]=="X": namej="Sx"
-  elif name[1]=="Y": namej="Sy"
-  elif name[1]=="Z": namej="Sz"
-  else: raise
+  if len(name)==2:
+    if name[0]=="X": namei="Sx"
+    elif name[0]=="Y": namei="Sy"
+    elif name[0]=="Z": namei="Sz"
+    if name[1]=="X": namej="Sx"
+    elif name[1]=="Y": namej="Sy"
+    elif name[1]=="Z": namej="Sz"
+    else: raise
+  elif name=="cdc": # fermionic correlator
+    namei = "Cdag"
+    namej = "Cdag"
   task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
                 "site_i_kpm":str(i),"site_j_kpm":str(j),
                 "kpm_scale":str(self.kpmscale),

@@ -7,13 +7,21 @@ auto get_spin_operator(auto sites, int i, auto name) {
         		ampo += 0.5,"Cdagdn",i+1,"Cup",i+1;
         		ampo += 0.5,"Cdagup",i+1,"Cdn",i+1;
         	} ;
-        	if (name=="Sy") {
+		else if (name=="Sy") {
         		ampo += -0.5,"Cdagdn",i+1,"CupI",i+1;
         		ampo += 0.5,"Cdagup",i+1,"CdnI",i+1;
         	} ;
-        	if (name=="Sz") {
+		else if (name=="Sz") {
         		ampo += 0.5,"Cdagup",i+1,"Cup",i+1;
         		ampo += -0.5,"Cdagdn",i+1,"Cdn",i+1;
+        	} ;
+		else if (name=="Cdag") {
+        		ampo += 1.0,"Cdagup",i+1;
+        		ampo += 1.0,"Cdagdn",i+1;
+        	} ;
+		else if (name=="C") {
+        		ampo += 1.0,"Cup",i+1;
+        		ampo += 1.0,"Cdn",i+1;
         	} ;
         }
         auto m = MPO(ampo) ;	
