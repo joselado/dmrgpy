@@ -5,19 +5,19 @@ sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import matplotlib.pyplot as plt
 import spinchain
 
-n = 4
+n = 10
 spins = [1 for i in range(n)] # spin 1/2 plus fermionic sites
 #spins = [2,2]
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
 def ft(i,j):
-#    if i==j: return 1.0
+    if i==j: return -1.0
     if abs(j-i)==1: return 1.0
     return 0.0
 sc.set_hoppings(ft) # hoppings
 
 
 def fu(i,j):
-    if i==j: return 0.0
+    if i==j: return 1.0
     else: return 0.0
 
 sc.set_hubbard(fu)

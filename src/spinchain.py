@@ -27,6 +27,7 @@ class Spin_Hamiltonian():
     self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
     self.fields = [] # empty list
     self.hoppings = dict() # empty dictionary
+    self.hubbard = dict() # empty dictionary
 #    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
     # additional arguments
     self.kpmmaxm = 20 # bond dimension in KPM
@@ -64,7 +65,7 @@ class Spin_Hamiltonian():
               if self.spins[i]==1 and self.spins[j]==1:
                   c = fun(i,j)
                   if np.abs(c)>0.0:
-                      self.hoppings[(i,j)] = Coupling(i,j,c) # store
+                      self.hubbard[(i,j)] = Coupling(i,j,c) # store
   def set_fields(self,fun):
     self.fields = [fun(i) for i in range(self.ns)] # fields
   def get_coupling(self,i,j):
@@ -258,13 +259,13 @@ def write_hubbard(self):
   fo = open("hubbard.in","w")
   cs = self.hubbard
   fo.write(str(len(cs))+"\n")
-  for key in self.hoppings: # loop
-    c = self.hoppings[key] # loop
+  for key in self.hubbard: # loop
+    c = self.hubbard[key] # loop
     if self.spins[c.i]!=1: raise
     if self.spins[c.j]!=1: raise
     fo.write(str(c.i)+"  ")
     fo.write(str(c.j)+"  ")
-    fo.write(str(c.g.real)+"  ")
+    fo.write(str(c.g.real)+"\n")
   fo.close()
 
 
