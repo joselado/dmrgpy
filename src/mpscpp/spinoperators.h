@@ -40,7 +40,26 @@ return m ;
 
 
 
+auto get_hopping_operator(auto sites, int i, int j) {
+	auto ampo = AutoMPO(sites);
+	if (site_type(i)==1)  // fermionic site
+        	ampo += 1.0,"Cdagup",i+1,"Cup",j+1;
+        	ampo += 1.0,"Cdagdn",i+1,"Cdn",j+1;
+        auto m = MPO(ampo) ;	
+return m ;
+}
 
+
+
+auto get_sidotsj_operator(auto sites, int i, int j) {
+	auto ampo = AutoMPO(sites);
+	if (site_type(i)!=1)  // spin site
+        	ampo += 1.0,"Sx",i+1,"Sx",j+1;
+        	ampo += 1.0,"Sy",i+1,"Sy",j+1;
+        	ampo += 1.0,"Sz",i+1,"Sz",j+1;
+        auto m = MPO(ampo) ;	
+return m ;
+}
 
 
 

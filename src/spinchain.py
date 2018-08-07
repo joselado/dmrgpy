@@ -57,6 +57,14 @@ class Spin_Hamiltonian():
                   c = fun(i,j)
                   if np.abs(c)>0.0:
                       self.hoppings[(i,j)] = Coupling(i,j,c) # store
+  def set_hubbard(self,fun):
+      self.hubbard = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.spins[i]==1 and self.spins[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)>0.0:
+                      self.hoppings[(i,j)] = Coupling(i,j,c) # store
   def set_fields(self,fun):
     self.fields = [fun(i) for i in range(self.ns)] # fields
   def get_coupling(self,i,j):
@@ -73,6 +81,7 @@ class Spin_Hamiltonian():
     write_sites(self) # write the different sites
     write_couplings(self)  # write the couplings
     write_hoppings(self)  # write the hoppings
+    write_hubbard(self)  # write hubbard terms
     write_fields(self) # write the fields
   def run(self,automatic=False): 
     os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt") # run the DMRG calculation
@@ -144,14 +153,17 @@ class Spin_Hamiltonian():
     self.restart = True
     return out
   def correlator(self,pairs=[[]],mode="DMRG"):
+    self.to_folder() # go to temporal folder
     if mode=="DMRG": # DMRG correlation
       self.setup_sweep()
       self.setup_task("correlator")
       self.write_hamiltonian() # write the Hamiltonian to a file
       write_correlators(pairs) # write the input file
       self.run() # perform the calculation
-      return np.genfromtxt("CORRELATORS.OUT").transpose()[1] # return the correlators
+      m = np.genfromtxt("CORRELATORS.OUT").transpose()[1] # return the correlators
     else: raise # not implemented
+    self.to_origin() # go to main folder
+    return m
   def magnetization(self):
     """Calculate the magnetization of the system"""
     self.gs_energy() # calculate ground state
@@ -216,11 +228,7 @@ def write_correlators(pairs):
   fo.write(str(len(pairs))+"\n") # write in a file
   for p in pairs:
     # the first has to be smaller than the second
-    if p[0]<p[1]:
-      fo.write(str(p[0])+"  "+str(p[1])+"\n")
-    elif p[0]>p[1]:
-      fo.write(str(p[1])+"  "+str(p[0])+"\n")
-    else: raise # error
+    fo.write(str(p[0])+"  "+str(p[1])+"\n")
   fo.close()
 
 
@@ -242,6 +250,25 @@ def write_hoppings(self):
     fo.write(str(c.g.real)+"  ")
     fo.write(str(c.g.imag)+"\n")
   fo.close()
+
+
+
+def write_hubbard(self):
+  """Write couplings in a file"""
+  fo = open("hubbard.in","w")
+  cs = self.hubbard
+  fo.write(str(len(cs))+"\n")
+  for key in self.hoppings: # loop
+    c = self.hoppings[key] # loop
+    if self.spins[c.i]!=1: raise
+    if self.spins[c.j]!=1: raise
+    fo.write(str(c.i)+"  ")
+    fo.write(str(c.j)+"  ")
+    fo.write(str(c.g.real)+"  ")
+  fo.close()
+
+
+
 
 
 

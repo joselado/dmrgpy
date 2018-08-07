@@ -60,9 +60,15 @@ void get_correlator(auto psi, auto sites)   {
   for (int ic=0;ic<nc;++ic) { // loop over correlators
     cfile >> i >> j; // index of correlators
     c = 0.0 ; // initialize
-    c += single_correlator(psi,sites,i+1,"Sx",j+1,"Sx"); // get this one
-    c += single_correlator(psi,sites,i+1,"Sy",j+1,"Sy"); // get this one
-    c += single_correlator(psi,sites,i+1,"Sz",j+1,"Sz"); // get this one
+    if (site_type(i)!=1) { // Spin
+       c = overlap(psi,get_sidotsj_operator(sites,i,j),psi) ; // add 
+//       c += single_correlator(psi,sites,i+1,"Sx",j+1,"Sx"); // get this one
+//       c += single_correlator(psi,sites,i+1,"Sy",j+1,"Sy"); // get this one
+//       c += single_correlator(psi,sites,i+1,"Sz",j+1,"Sz"); // get this one
+    } ;
+    if (site_type(i)==1) { // fermion
+       c = overlap(psi,get_hopping_operator(sites,i,j),psi) ; // add 
+    } ;
     ofile << ic << "   " << c << endl ;
   };
   ofile.close() ;

@@ -17,6 +17,7 @@ using namespace std;
 #include"spinoperators.h" // read the different tasks
 #include"get_exchange.h" // get the exchange coupling
 #include"get_hopping.h" // get the hoppings (in case there are)
+#include"get_hubbard.h" // get the hoppings (in case there are)
 #include"read_wf.h" // this does not work yet
 #include"get_gs.h" // compute ground state energy and wavefunction
 #include"get_field.h" // get local magnetic fields
@@ -39,7 +40,8 @@ main()
     auto sites = get_sites(); // Get the different sites
     auto ampo = AutoMPO(sites); // create the MPO for the Hamiltonian
     ampo = get_exchange(ampo); // add exchange to the Hamiltonian
-    ampo = get_hopping(ampo); // add exchange to the Hamiltonian
+    ampo = get_hopping(ampo); // add hopping to the Hamiltonian
+    ampo = get_hubbard(ampo); // add hubbard to the Hamiltonian
     ampo = get_field(sites,ampo); // add magnetic field to the Hamiltonian
     auto H = MPO(ampo);  // create the full Hamiltonian
     auto sweeps = get_sweeps(); // get the DMRG sweeps
