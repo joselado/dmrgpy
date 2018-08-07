@@ -1,1 +1,4 @@
-from manybodychain import Spin_Hamiltonian
+from manybodychain import Many_Body_Hamiltonian
+
+Spin_Hamiltonian = Many_Body_Hamiltonian
+
