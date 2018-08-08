@@ -65,6 +65,8 @@ class MPOt : private MPSt<Tensor>
 
     Real
     logRefNorm() const { return logrefNorm_; }
+    void
+    logRefNorm(Real lrn) { logrefNorm_ = lrn; }
 
     MPOt&
     plusEq(const MPOt& R,
@@ -119,7 +121,6 @@ class MPOt : private MPSt<Tensor>
     friend class MPOt<IQTensor>;
     
     public:
-
 
     //
     // Deprecated methods
@@ -180,6 +181,10 @@ operator*(MPOt<T> W, Cplx z) { return W *= z; }
 template<typename T>
 MPOt<T>
 operator*(Cplx z, MPOt<T> W) { return W *= z; }
+
+//Convert an IQMPO to an MPO
+MPO
+toMPO(IQMPO const& K);
 
 template<typename T>
 bool
@@ -294,23 +299,22 @@ zipUpApplyMPO(MPSt<Tensor> const& psi,
               MPSt<Tensor>& res, 
               Args const& args = Args::global());
 
-//Applies an MPO K to an MPS x with no approximation (|res>=K|x>)
-//The bond dimension of res will be the product of bond dimensions
-//of x and K.
-template<class Tensor>
-void 
-exactApplyMPO(MPSt<Tensor> const& x, 
-              MPOt<Tensor> const& K, 
-              MPSt<Tensor>      & res,
-              Args const& args = Args::global());
-
-//Applies an MPO K to an MPS x with no approximation (|res>=K|x>)
-//Returns the result.
+//
+//Applies an MPO K to an MPS x (K|x>) with no approximation
+//made in the application of K to x. Compresses
+//the result back into an MPS whose bond dimension
+//is at most the product of the bond dimension of K
+//and the bond dimension of x. The result can 
+//be controllably truncated further by providing
+//optional truncation args "Cutoff" and "Maxm"
+//
 template<class Tensor>
 MPSt<Tensor>
-exactApplyMPO(MPSt<Tensor> const& x,
-              MPOt<Tensor> const& K,
+exactApplyMPO(MPOt<Tensor> const& K,
+              MPSt<Tensor> const& x,
               Args const& args = Args::global());
+
+
 
 //Applies an MPO K to an MPS psi (|res>=K|psi>) using a sweeping/DMRG-like
 //fitting approach. Warning: this method can get stuck i.e. fail to converge
@@ -321,6 +325,12 @@ exactApplyMPO(MPSt<Tensor> const& x,
 //   Maxm (default: res.maxm()) - maximum number of states to keep
 //   Minm (default: res.minm()) - minimum number of states to keep
 //   Cutoff (default: res.cutoff()) - maximum truncation error goal
+template<class Tensor>
+MPSt<Tensor>
+fitApplyMPO(MPSt<Tensor> const& psi,
+            MPOt<Tensor> const& K,
+            Args const& args = Args::global());
+
 template<class Tensor>
 void
 fitApplyMPO(MPSt<Tensor> const& psi,
@@ -440,6 +450,31 @@ putMPOLinks(IQMPO& W, Args const& args = Args::global());
 template <class Tensor>
 std::ostream& 
 operator<<(std::ostream& s, MPOt<Tensor> const& M);
+
+template<class Tensor>
+Real
+checkMPOProd(MPSt<Tensor> const& psi2,
+             MPOt<Tensor> const& K, 
+             MPSt<Tensor> const& psi1);
+
+//
+// Deprecated interfaces - kept for backwards compatibility
+//
+
+//Older interface for exactApplyMPO with different ordering
+template<class Tensor>
+MPSt<Tensor>
+exactApplyMPO(MPSt<Tensor> const& x,
+              MPOt<Tensor> const& K,
+              Args const& args = Args::global());
+
+//Older interface for exactApplyMPO with reference argument for result
+template<class Tensor>
+void 
+exactApplyMPO(MPSt<Tensor> const& x, 
+              MPOt<Tensor> const& K, 
+              MPSt<Tensor>      & res,
+              Args const& args = Args::global());
 
 } //namespace itensor
 

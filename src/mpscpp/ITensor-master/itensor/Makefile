@@ -36,6 +36,7 @@ SOURCES+= spectrum.cc
 SOURCES+= decomp.cc 
 SOURCES+= svd.cc 
 SOURCES+= hermitian.cc 
+SOURCES+= global.cc
 SOURCES+= mps/mps.cc 
 SOURCES+= mps/mpsalgs.cc 
 SOURCES+= mps/mpo.cc 
@@ -64,17 +65,17 @@ GOBJECTS= $(patsubst %.cc,.debug_objs/%.o, $(SOURCES))
 
 install: build debug
 
-libitensor.a: $(OBJECTS)
+$(ITENSOR_LIBDIR)/libitensor.a: $(OBJECTS)
 	@echo "Building static library $(ITENSOR_LIBDIR)/libitensor.a"
 	@ar r $(ITENSOR_LIBDIR)/libitensor.a $(OBJECTS)
 	@ranlib $(ITENSOR_LIBDIR)/libitensor.a
 
-libitensor-g.a: mkdebugdir $(GOBJECTS)
+$(ITENSOR_LIBDIR)/libitensor-g.a: mkdebugdir $(GOBJECTS)
 	@echo "Building static library $(ITENSOR_LIBDIR)/libitensor-g.a"
 	@ar r $(ITENSOR_LIBDIR)/libitensor-g.a $(GOBJECTS)
 	@ranlib $(ITENSOR_LIBDIR)/libitensor-g.a
 
-libitensor.$(DYLIB_EXT): $(OBJECTS)
+$(ITENSOR_LIBDIR)/libitensor.$(DYLIB_EXT): $(OBJECTS)
 ifdef ITENSOR_MAKE_DYLIB
 ifeq ($(ITENSOR_MAKE_DYLIB),1)
 	@echo "Building dynamic library $(ITENSOR_LIBDIR)/libitensor.$(DYLIB_EXT)"
@@ -82,7 +83,7 @@ ifeq ($(ITENSOR_MAKE_DYLIB),1)
 endif
 endif
 
-libitensor-g.$(DYLIB_EXT): mkdebugdir $(GOBJECTS)
+$(ITENSOR_LIBDIR)/libitensor-g.$(DYLIB_EXT): mkdebugdir $(GOBJECTS)
 ifdef ITENSOR_MAKE_DYLIB
 ifeq ($(ITENSOR_MAKE_DYLIB),1)
 	@echo "Building dynamic library $(ITENSOR_LIBDIR)/libitensor-g.$(DYLIB_EXT)"
@@ -95,9 +96,9 @@ touch_all_headers:
 	@touch all_basic.h
 	@touch all_mps.h
 
-build: libitensor.a libitensor.$(DYLIB_EXT) touch_all_headers
+build: $(ITENSOR_LIBDIR)/libitensor.a $(ITENSOR_LIBDIR)/libitensor.$(DYLIB_EXT) touch_all_headers
 
-debug: libitensor-g.a libitensor-g.$(DYLIB_EXT) touch_all_headers
+debug: $(ITENSOR_LIBDIR)/libitensor-g.a $(ITENSOR_LIBDIR)/libitensor-g.$(DYLIB_EXT) touch_all_headers
 
 mkdebugdir:
 	@mkdir -p .debug_objs
@@ -129,9 +130,9 @@ GDEPHEADERS+= tensor/permutation.h tensor/slicerange.h tensor/sliceten.h \
 tensor/contract.h itdata/task_types.h indexset.ih indexset.h
 tensor/contract.o: $(GDEPHEADERS)
 .debug_objs/tensor/contract.o: $(GDEPHEADERS)
-ITDEPHEADERS= itdata/dense.h
-itdata/dense.o: $(ITDEPHEADERS) $(GDEPHEADERS)
-.debug_objs/itdata/dense.o: $(ITDEPHEADERS) $(GDEPHEADERS)
+ITDEPHEADERS= itdata/dense.h 
+itdata/dense.o: $(ITDEPHEADERS) $(GDEPHEADERS) util/tensorstats.h
+.debug_objs/itdata/dense.o: $(ITDEPHEADERS) $(GDEPHEADERS) util/tensorstats.h
 ITDEPHEADERS+= itdata/diag.h
 itdata/diag.o: $(ITDEPHEADERS) $(GDEPHEADERS)
 .debug_objs/itdata/diag.o: $(ITDEPHEADERS) $(GDEPHEADERS)
@@ -139,8 +140,8 @@ ITDEPHEADERS+= itdata/combiner.h
 itdata/combiner.o: $(ITDEPHEADERS) $(GDEPHEADERS)
 .debug_objs/itdata/combiner.o: $(ITDEPHEADERS) $(GDEPHEADERS)
 ITDEPHEADERS+= itdata/qdense.h itdata/qutil.h
-itdata/qdense.o: $(ITDEPHEADERS) $(GDEPHEADERS)
-.debug_objs/itdata/qdense.o: $(ITDEPHEADERS) $(GDEPHEADERS)
+itdata/qdense.o: $(ITDEPHEADERS) $(GDEPHEADERS) util/tensorstats.h
+.debug_objs/itdata/qdense.o: $(ITDEPHEADERS) $(GDEPHEADERS) util/tensorstats.h
 ITDEPHEADERS+= itdata/qcombiner.h
 itdata/qcombiner.o: $(ITDEPHEADERS) $(GDEPHEADERS)
 .debug_objs/itdata/qcombiner.o: $(ITDEPHEADERS) $(GDEPHEADERS)

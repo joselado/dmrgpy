@@ -196,7 +196,11 @@ parallelDebugWait(Environment const& env)
     {
     char hostname[256];
     gethostname(hostname, sizeof(hostname));
-    printfln("Node %d PID %d on %s",env.rank(),getpid(),hostname);
+    for(int n = 0; n < env.nnodes(); ++n)
+        {
+        if(env.rank() == n) printfln("Node %d PID %d on %s",env.rank(),getpid(),hostname);
+        env.barrier();
+        }
 #ifdef DEBUG
     //
     // If compiled in debug mode, require file GO to exist before
@@ -239,6 +243,7 @@ broadcast(std::stringstream& data) const
         //std::cout << "Doing broadcast (quo,rem) = (" << quo << "," << rem << ")" << std::endl;
         for(int q = 0; q < quo; ++q)
             { 
+            //printfln("Node %d q = %d/%d",rank_,q,(quo-1));
             MPI_Bcast(const_cast<char*>(data.str().data())+q*buffer.size(),buffer.size(),MPI_CHAR,root,MPI_COMM_WORLD); 
             }
         MPI_Bcast(const_cast<char*>(data.str().data())+quo*buffer.size(),rem+shift,MPI_CHAR,root,MPI_COMM_WORLD);
@@ -248,14 +253,17 @@ broadcast(std::stringstream& data) const
         int quo=0,rem=0;
         MPI_Bcast(&quo,1,MPI_INT,root,MPI_COMM_WORLD);
         MPI_Bcast(&rem,1,MPI_INT,root,MPI_COMM_WORLD);
+        //printfln("Node %d got quo,rem = %d,%d",rank_,quo,rem);
         for(int q = 0; q < quo; ++q)
             { 
+            //printfln("Node %d q = %d/%d",rank_,q,(quo-1));
             MPI_Bcast(&buffer.front(),buffer.size(),MPI_CHAR,root,MPI_COMM_WORLD); 
             data.write(&buffer.front(),buffer.size());
             }
         MPI_Bcast(&buffer.front(),rem+shift,MPI_CHAR,root,MPI_COMM_WORLD);
         data.write(&buffer.front(),rem+shift);
         }
+    //printfln("%d reached end of broadcast(stringstream)",rank_);
     }
 
 template <class T>
@@ -265,9 +273,9 @@ broadcast(Environment const& env, T & obj)
     if(env.nnodes() == 1) return;
     const int root = 0;
     std::stringstream datastream;
-    if(env.rank() == root) write(datastream,obj);
+    if(env.rank() == root) itensor::write(datastream,obj);
     env.broadcast(datastream);
-    if(env.rank() != root) read(datastream,obj);
+    if(env.rank() != root) itensor::read(datastream,obj);
     }
 
 template <class T, class... Rest>
@@ -282,7 +290,7 @@ template <class T>
 void Environment::
 broadcast(T& obj) const 
     { 
-    broadcast(*this,obj); 
+    itensor::broadcast<T>(*this,obj); 
     }
 
 template <class T, class... Rest>
@@ -472,7 +480,7 @@ receive(T& obj)
     { 
     std::stringstream data; 
     receive(data); 
-    read(data,obj);
+    itensor::read(data,obj);
     }
 
 template <class T, typename... Args>
@@ -482,7 +490,7 @@ receive(Args&&... args)
     std::stringstream data; 
     receive(data); 
     T obj(std::forward<Args>(args)...);
-    read(data,obj);
+    itensor::read(data,obj);
     return obj;
     }
 
@@ -513,7 +521,7 @@ void inline MailBox::
 send(T const& obj)
     {
     std::stringstream data; 
-    write(data,obj);
+    itensor::write(data,obj);
     send(data); 
     }
 

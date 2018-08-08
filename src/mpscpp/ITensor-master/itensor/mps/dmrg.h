@@ -208,6 +208,7 @@ DMRGWorker(MPSt<Tensor>& psi,
         {
         cpu_time sw_time;
         args.add("Sweep",sw);
+        args.add("NSweep",sweeps.nsweep());
         args.add("Cutoff",sweeps.cutoff(sw));
         args.add("Minm",sweeps.minm(sw));
         args.add("Maxm",sweeps.maxm(sw));
@@ -232,7 +233,7 @@ DMRGWorker(MPSt<Tensor>& psi,
             {
             if(!quiet)
                 {
-                printfln("Sweep=%d, HS=%d, Bond=(%d,%d)",sw,ha,b,(b+1));
+                printfln("Sweep=%d, HS=%d, Bond=%d/%d",sw,ha,b,(N-1));
                 }
 
             PH.position(b,psi);
@@ -260,15 +261,15 @@ DMRGWorker(MPSt<Tensor>& psi,
             args.add("AtBond",b);
             args.add("HalfSweep",ha);
             args.add("Energy",energy); 
+            args.add("Truncerr",spec.truncerr()); 
 
             obs.measure(args);
-
 
             } //for loop over b
 
         auto sm = sw_time.sincemark();
-        printfln("    Sweep %d CPU time = %s (Wall time = %s)",
-                  sw,showtime(sm.time),showtime(sm.wall));
+        printfln("    Sweep %d/%d CPU time = %s (Wall time = %s)",
+                  sw,sweeps.nsweep(),showtime(sm.time),showtime(sm.wall));
 
         if(obs.checkDone(args)) break;
     

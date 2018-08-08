@@ -8,8 +8,8 @@ auto get_spin_operator(auto sites, int i, auto name) {
         		ampo += 0.5,"Cdagup",i+1,"Cdn",i+1;
         	} ;
 		if (name=="Sy") {
-        		ampo += -0.5,"Cdagdn",i+1,"CupI",i+1;
-        		ampo += 0.5,"Cdagup",i+1,"CdnI",i+1;
+        		ampo += -0.5*1i,"Cdagdn",i+1,"Cup",i+1;
+        		ampo += 0.5*1i,"Cdagup",i+1,"Cdn",i+1;
         	} ;
 		if (name=="Sz") {
         		ampo += 0.5,"Cdagup",i+1,"Cup",i+1;
@@ -63,6 +63,13 @@ return m ;
 }
 
 
+auto get_up_creation_operator(auto sites, int i) {
+	auto ampo = AutoMPO(sites);
+	if (site_type(i)==1)  // fermionic site
+        	ampo += 1.0,"Cdagup",i+1;
+        auto m = MPO(ampo) ;	
+return m ;
+}
 
 
 
@@ -99,8 +106,8 @@ auto add_spin_operator(auto ampo, auto sites, float v, int i, auto name) {
         		ampo += v*0.5,"Cdagup",i+1,"Cdn",i+1;
         	} ;
         	if (name=="Sy") {
-        		ampo += -v*0.5,"Cdagdn",i+1,"CupI",i+1;
-        		ampo += v*0.5,"Cdagup",i+1,"CdnI",i+1;
+        		ampo += -v*0.5*1i,"Cdagdn",i+1,"Cup",i+1;
+        		ampo += v*0.5*1i,"Cdagup",i+1,"Cdn",i+1;
         	} ;
         	if (name=="Sz") {
         		ampo += v*0.5,"Cdagup",i+1,"Cup",i+1;

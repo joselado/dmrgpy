@@ -126,12 +126,6 @@ class HubbardSite
             Op.set(UD,DnP,1); 
             }
         else
-        if(opname == "CupI")
-            {
-            Op.set(Up,EmP,Cplx_i); 
-            Op.set(UD,DnP,Cplx_i); 
-            }
-        else
         if(opname == "Cdagup")
             {
             Op.set(Em,UpP,1); 
@@ -142,12 +136,6 @@ class HubbardSite
             {
             Op.set(Dn,EmP,1); 
             Op.set(UD,UpP,-1); 
-            }
-        else
-        if(opname == "CdnI")
-            {
-            Op.set(Dn,EmP,Cplx_i); 
-            Op.set(UD,UpP,-Cplx_i); 
             }
         else
         if(opname == "Cdagdn")
@@ -208,18 +196,6 @@ class HubbardSite
             {
             Op.set(Up,UpP,+0.5); 
             Op.set(Dn,DnP,-0.5);
-            }
-        else
-        if(opname == "Sx")
-            {
-            Op.set(Dn,UpP,+0.5); 
-            Op.set(Dn,UpP,+0.5);
-            }
-        else
-        if(opname == "Sy")
-            {
-            Op.set(Dn,UpP,-0.5*Cplx_i); 
-            Op.set(Dn,UpP,+0.5*Cplx_i);
             }
         else
         if(opname == "S+")

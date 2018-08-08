@@ -143,10 +143,7 @@ combiner(std::vector<Index> inds, Args const& args)
     {
     if(inds.empty()) Error("No indices passed to combiner");
     long rm = 1;
-    for(const auto& i : inds)
-        {
-        rm *= i.m();
-        }
+    for(const auto& i : inds)rm *= i.m();
     //increase size by 1
     inds.push_back(Index());
     //shuffle contents to the end
@@ -159,6 +156,28 @@ combiner(std::vector<Index> inds, Args const& args)
     auto itype = getIndexType(args,"IndexType",Link);
     inds.front() = Index(cname,rm,itype);
     return ITensor(IndexSet(std::move(inds)),Combiner{});
+    }
+
+struct IsCombiner
+    {
+    template<typename D>
+    bool 
+    operator()(D const& d) { return false; }
+    bool
+    operator()(Combiner const& d) { return true; }
+    };
+
+Index
+combinedIndex(ITensor const& C)
+    {
+#ifdef DEBUG
+    auto iscombiner = applyFunc(IsCombiner{},C.store());
+    if(not iscombiner)
+        {
+        throw ITError("Called combinedIndex on ITensor that is not a combiner");
+        }
+#endif
+    return C.inds().front();
     }
 
 } //namespace itensor

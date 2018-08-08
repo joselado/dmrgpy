@@ -20,6 +20,7 @@ using namespace std;
 #include"get_hubbard.h" // get the hoppings (in case there are)
 #include"read_wf.h" // this does not work yet
 #include"get_gs.h" // compute ground state energy and wavefunction
+#include"get_dos.h" // compute the DOS
 #include"get_field.h" // get local magnetic fields
 #include"get_correlator.h" // compute correaltors betwee sites
 #include"measure.h" // compute expectation values
@@ -39,11 +40,16 @@ main()
     ifstream sfile; // file to read
     auto sites = get_sites(); // Get the different sites
     auto ampo = AutoMPO(sites); // create the MPO for the Hamiltonian
+    cout << "Adding exchange couplings" << endl ;
     ampo = get_exchange(ampo); // add exchange to the Hamiltonian
+    cout << "Adding fermionic hoppings" << endl ;
     ampo = get_hopping(ampo); // add hopping to the Hamiltonian
+    cout << "Adding Hubbard interaction" << endl ;
     ampo = get_hubbard(ampo); // add hubbard to the Hamiltonian
+    cout << "Adding magnetic field" << endl ;
     ampo = get_field(sites,ampo); // add magnetic field to the Hamiltonian
     auto H = MPO(ampo);  // create the full Hamiltonian
+//    test_hopping(H,sites); // test the hoppings
     auto sweeps = get_sweeps(); // get the DMRG sweeps
 
     auto psi = MPS(sites);   // create random wavefunction
@@ -60,7 +66,7 @@ main()
       int nexcited = get_int_value("nexcited") ; // number of excited states
       auto wfs = get_excited(H,sites,sweeps,nexcited); // compute states 
     } ;
-    if (check_task("dos")) get_moments_dos(sites,H,get_int_value("nkpm")) ; // get the moments for DOS
+    if (check_task("dos")) get_dos(H,sites) ; // get the DOS
     if (check_task("spismj"))  { // dynamical correlation function
        if (check_task("smart_kpm_window"))
          get_moments_spismj(sites,H,get_int_value("nkpm"),

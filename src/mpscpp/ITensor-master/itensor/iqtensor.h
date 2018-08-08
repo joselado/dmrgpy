@@ -77,6 +77,9 @@ div(IQTensor const& T);
 IQTensor
 combiner(std::vector<IQIndex> inds, Args const& args = Global::args());
 
+IQIndex
+combinedIndex(IQTensor const& C);
+
 template<typename... Inds>
 IQTensor
 combiner(IQIndex const& i1, 
@@ -110,9 +113,16 @@ template <typename... Inds>
 IQTensor
 randomTensor(QN const& q, IQIndex const& i1, Inds &&... inds);
 
+template<typename... Inds>
+IQTensor
+randomTensor(QN const& q, IQIndexSet const& is);
+
 template <typename... VArgs>
 IQTensor
 randomTensorC(QN const& q, VArgs&&... vargs);
+
+bool
+isEmpty(IQTensor const& T);
 
 //mixedIQTensor constructs
 //an IQTensor with MixedQN storage

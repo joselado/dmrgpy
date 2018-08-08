@@ -1044,6 +1044,198 @@ SECTION("Mixed Storage")
         }
     }
 
+SECTION("isEmpty Function")
+    {
+    IQTensor T;
+    CHECK(isEmpty(T));
+
+    T = randomTensor(QN{},S1,S2,S3,S4);
+    CHECK(not isEmpty(T));
+
+    auto D = delta(S3,dag(S1),S4,dag(S2));
+    CHECK(typeOf(D) == QType::QDiagRealAllSame);
+    CHECK(not isEmpty(D));
+    }
+
+SECTION("Order Test")
+{
+auto i = IQIndex("i",Index("i-1",1),QN(-1),
+                     Index("i+1",1),QN(+1));
+auto j = IQIndex("j",Index("j-1",2),QN(-1),
+                     Index("j_0",2),QN( 0),
+                     Index("j+1",2),QN(+1));
+auto k = IQIndex("k",Index("k-1",2),QN(-1),
+                     Index("k_0",3),QN( 0),
+                     Index("k+1",2),QN(+1));
+auto jp = prime(j);
+
+auto IT = randomTensor(QN(0),i,j,jp,dag(k));
+
+auto O1 = order(IT,jp,k,j,i);
+CHECK(IT.inds().index(1)==O1.inds().index(4));
+CHECK(IT.inds().index(2)==O1.inds().index(3));
+CHECK(IT.inds().index(3)==O1.inds().index(1));
+CHECK(IT.inds().index(4)==O1.inds().index(2));
+CHECK(IT.inds().index(1).dir()==O1.inds().index(4).dir());
+CHECK(IT.inds().index(2).dir()==O1.inds().index(3).dir());
+CHECK(IT.inds().index(3).dir()==O1.inds().index(1).dir());
+CHECK(IT.inds().index(4).dir()==O1.inds().index(2).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(IT.real(i(ii),j(jj),jp(jjp),k(kk)),O1.real(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+auto O2 = order(IT,j,i,k,jp);
+CHECK(IT.inds().index(1)==O2.inds().index(2));
+CHECK(IT.inds().index(2)==O2.inds().index(1));
+CHECK(IT.inds().index(3)==O2.inds().index(4));
+CHECK(IT.inds().index(4)==O2.inds().index(3));
+CHECK(IT.inds().index(1).dir()==O2.inds().index(2).dir());
+CHECK(IT.inds().index(2).dir()==O2.inds().index(1).dir());
+CHECK(IT.inds().index(3).dir()==O2.inds().index(4).dir());
+CHECK(IT.inds().index(4).dir()==O2.inds().index(3).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(IT.real(i(ii),j(jj),jp(jjp),k(kk)),O2.real(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+auto CIT = randomTensorC(QN(0),i,j,jp,k);
+
+auto O3 = order(CIT,jp,k,i,j);
+CHECK(CIT.inds().index(1)==O3.inds().index(3));
+CHECK(CIT.inds().index(2)==O3.inds().index(4));
+CHECK(CIT.inds().index(3)==O3.inds().index(1));
+CHECK(CIT.inds().index(4)==O3.inds().index(2));
+CHECK(CIT.inds().index(1).dir()==O3.inds().index(3).dir());
+CHECK(CIT.inds().index(2).dir()==O3.inds().index(4).dir());
+CHECK(CIT.inds().index(3).dir()==O3.inds().index(1).dir());
+CHECK(CIT.inds().index(4).dir()==O3.inds().index(2).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(CIT.cplx(i(ii),j(jj),jp(jjp),k(kk)),O3.cplx(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+}
+
+SECTION("Order Test: Dots Syntax")
+{
+auto i = IQIndex("i",Index("i-1",1),QN(-1),
+                     Index("i+1",1),QN(+1));
+auto j = IQIndex("j",Index("j-1",2),QN(-1),
+                     Index("j_0",2),QN( 0),
+                     Index("j+1",2),QN(+1));
+auto k = IQIndex("k",Index("k-1",2),QN(-1),
+                     Index("k_0",3),QN( 0),
+                     Index("k+1",2),QN(+1));
+auto jp = prime(j);
+
+auto IT = randomTensor(QN(0),i,j,jp,dag(k));
+
+auto O1 = order(IT,"...",i);
+CHECK(IT.inds().index(1)==O1.inds().index(4));
+CHECK(IT.inds().index(1).dir()==O1.inds().index(4).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(IT.real(i(ii),j(jj),jp(jjp),k(kk)),O1.real(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+auto O2 = order(IT,"...",j,i);
+CHECK(IT.inds().index(1)==O2.inds().index(4));
+CHECK(IT.inds().index(2)==O2.inds().index(3));
+CHECK(IT.inds().index(1).dir()==O2.inds().index(4).dir());
+CHECK(IT.inds().index(2).dir()==O2.inds().index(3).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(IT.real(i(ii),j(jj),jp(jjp),k(kk)),O2.real(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+auto O3 = order(IT,"...",k,j,i);
+CHECK(IT.inds().index(1)==O3.inds().index(4));
+CHECK(IT.inds().index(2)==O3.inds().index(3));
+CHECK(IT.inds().index(3)==O3.inds().index(1));
+CHECK(IT.inds().index(4)==O3.inds().index(2));
+CHECK(IT.inds().index(1).dir()==O3.inds().index(4).dir());
+CHECK(IT.inds().index(2).dir()==O3.inds().index(3).dir());
+CHECK(IT.inds().index(3).dir()==O3.inds().index(1).dir());
+CHECK(IT.inds().index(4).dir()==O3.inds().index(2).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(IT.real(i(ii),j(jj),jp(jjp),k(kk)),O3.real(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+auto O4 = order(IT,k,"...");
+CHECK(IT.inds().index(4)==O4.inds().index(1));
+CHECK(IT.inds().index(4).dir()==O4.inds().index(1).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(IT.real(i(ii),j(jj),jp(jjp),k(kk)),O4.real(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+auto O5 = order(IT,k,jp,i,"...");
+CHECK(IT.inds().index(1)==O5.inds().index(3));
+CHECK(IT.inds().index(2)==O5.inds().index(4));
+CHECK(IT.inds().index(3)==O5.inds().index(2));
+CHECK(IT.inds().index(4)==O5.inds().index(1));
+CHECK(IT.inds().index(1).dir()==O5.inds().index(3).dir());
+CHECK(IT.inds().index(2).dir()==O5.inds().index(4).dir());
+CHECK(IT.inds().index(3).dir()==O5.inds().index(2).dir());
+CHECK(IT.inds().index(4).dir()==O5.inds().index(1).dir());
+for(auto ii : range1(i.m()))
+for(auto jj : range1(j.m()))
+for(auto jjp : range1(jp.m()))
+for(auto kk : range1(k.m()))
+    {
+    CHECK_CLOSE(IT.real(i(ii),j(jj),jp(jjp),k(kk)),O5.real(i(ii),j(jj),jp(jjp),k(kk)));
+    }
+
+}
+
+SECTION("Set and Get with int")
+{
+auto I = IQIndex("I",Index("I+",1),QN(+1),
+                     Index("I-",1),QN(-1));
+auto J = IQIndex("J",Index("I+",2),QN(+1),
+                     Index("I-",2),QN(-1));
+auto T = IQTensor(I,J);
+T.set(2,1,21);
+CHECK_CLOSE(T.real(J(1),I(2)),21);
+CHECK_CLOSE(T.real(2,1),21);
+}
+
+SECTION("Set and Get with long int")
+{
+auto I = IQIndex("I",Index("I+",1),QN(+1),
+                     Index("I-",1),QN(-1));
+auto J = IQIndex("J",Index("I+",2),QN(+1),
+                     Index("I-",2),QN(-1));
+auto T = IQTensor(I,J);
+long int i1 = 1,
+         i2 = 2;
+T.set(i2,i1,21);
+CHECK_CLOSE(T.real(J(1),I(2)),21);
+CHECK_CLOSE(T.real(i2,i1),21);
+}
 
 //SECTION("Non-contracting product")
 //    {

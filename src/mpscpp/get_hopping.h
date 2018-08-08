@@ -14,16 +14,34 @@ auto get_hopping(auto ampo) {
       jfile >> j1 >> j2 >> tr >> ti; // get the data
       if ((site_type(j1)==1) and (site_type(j2)==1))  {
           ampo += tr,"Cdagup",j1+1,"Cup",j2+1;
-          ampo += ti,"Cdagup",j1+1,"CupI",j2+1;
+          ampo += ti*1i,"Cdagup",j1+1,"Cup",j2+1;
           ampo += tr,"Cdagdn",j1+1,"Cdn",j2+1; 
-          ampo += ti,"Cdagdn",j1+1,"CdnI",j2+1; 
+          ampo += ti*1i,"Cdagdn",j1+1,"Cdn",j2+1; 
       }
-          // complex conjugate
-//          ampo += tr,"Cdagup",j2+1,"Cup",j1+1;
-//          ampo += -ti,"Cdagup",j2+1,"CupI",j1+1;
-//          ampo += tr,"Cdagdn",j2+1,"Cdn",j1+1; 
-//          ampo += -ti,"Cdagdn",j2+1,"CdnI",j1+1; }
     } ;
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added
 }
+
+
+
+// function to test that the hopping is well implemented
+auto test_hopping(auto H, auto sites) {
+	cout << "BEGIN test hopping" << endl;
+	for (int i=0;i<sites.N();i++) { // loop
+	  for (int j=0;j<sites.N();j++) { // loop
+            if ((site_type(i)==1) and (site_type(j)==1))  {
+              auto state1 = InitState(sites,"Emp");
+              state1.set(i+1,"Up");
+              auto state2 = InitState(sites,"Emp");
+              state2.set(j+1,"Up");
+              auto psi1 = MPS(state1);
+              auto psi2 = MPS(state2);
+              auto c = overlap(psi2,H,psi1);
+	      if (abs(c)>0.0001)   cout << i <<"  "<< j <<"  "<< c << endl ;
+	    }
+	  }
+	}
+	cout << "END test hopping" << endl;
+}
+

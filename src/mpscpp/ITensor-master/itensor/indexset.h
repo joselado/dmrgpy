@@ -6,11 +6,12 @@
 #define __ITENSOR_INDEXSET_H
 #include <algorithm>
 #include "itensor/util/safe_ptr.h"
+#include "itensor/index.h"
+#include "itensor/iqindex.h"
+#include "itensor/tensor/contract.h"
 #include "itensor/tensor/range.h"
 #include "itensor/tensor/types.h"
 #include "itensor/tensor/permutation.h"
-#include "itensor/index.h"
-
 
 namespace itensor {
 
@@ -205,6 +206,11 @@ template<typename IndexT>
 void 
 prime(IndexSetT<IndexT>& is, 
       int inc = 1);
+
+template<typename IndexT, typename... VArgs>
+void
+primeLevel(IndexSetT<IndexT>& is,
+           VArgs&&... vargs);
 
 //
 // Increment primelevels of indices in the

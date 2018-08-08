@@ -63,6 +63,7 @@ SpinX(Args const& args)
     auto sites = SiteStore(N); // get an empty list of sites
     for (int i=1;i<=N;i++)  {
       sfile >> nm ; // read this spin
+      cout << "Reading  " << nm << endl;
       if (nm==2) sites.set(i,SpinHalfSite(i)); // use spin=1/2
       else if (nm==1) sites.set(i,HubbardSite(i)); // use fermions
       else if (nm==3) sites.set(i,SpinOneSite(i)); // use spin=1
@@ -89,6 +90,7 @@ auto generate_sites() { // function to generate the sites
 auto get_sites() { // function to get the sites
     auto sites = generate_sites() ;  // generate the sites
     if (check_task("restart")) readFromFile("sites.sites",sites);
+    cout << "Number of sites " << sites.N() << endl ;
     return sites ;
 }
 
@@ -103,6 +105,7 @@ int site_type(int index) {
       sfile >> nm ; // read this spin
       if (i-1==index) out = nm ; }
     sfile.close() ;
+    cout << index << "  " << out << endl ;
     return out ;
 }
 

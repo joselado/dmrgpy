@@ -378,6 +378,18 @@ getElt(IQIndexSet const& is,
     return nullptr;
     }
 
+template<typename T>
+void
+doTask(Order<IQIndex> const& P,
+       QDense<T>           & dA);
+
+template<typename T>
+void
+permuteQDense(Permutation const& P,
+             QDense<T>    const& dA,
+             IQIndexSet   const& Ais,
+             QDense<T>         & dB,
+             IQIndexSet   const& Bis);
 
 //template<typename BlockSparseStore, typename Indexable>
 //auto
@@ -399,6 +411,10 @@ calcDiv(IQIndexSet const& is,
 template<typename V>
 ITensor
 doTask(ToITensor & T, QDense<V> const& d);
+
+template<typename V>
+bool
+doTask(IsEmpty, QDense<V> const& d) { return d.offsets.empty(); }
 
 } //namespace itensor
 

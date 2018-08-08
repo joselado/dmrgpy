@@ -53,7 +53,7 @@ MPOt(const SiteSet& sites,
     //Set all tensors to identity ops
     for(int j = 1; j <= N(); ++j)
         {
-        Anc(j) = sites.op("Id",j);
+        Aref(j) = sites.op("Id",j);
         }
     putMPOLinks(*this);
     }
@@ -288,13 +288,13 @@ putMPOLinks(MPO& W, Args const& args)
         {
         links.at(b) = Index(format("%s%d",pfix,b));
         }
-    W.Anc(1) *= links.at(1)(1);
+    W.Aref(1) *= links.at(1)(1);
     for(int b = 2; b < W.N(); ++b)
         {
-        W.Anc(b) *= links.at(b-1)(1);
-        W.Anc(b) *= links.at(b)(1);
+        W.Aref(b) *= links.at(b-1)(1);
+        W.Aref(b) *= links.at(b)(1);
         }
-    W.Anc(W.N()) *= links.at(W.N()-1)(1);
+    W.Aref(W.N()) *= links.at(W.N()-1)(1);
     }
 
 void
@@ -313,13 +313,30 @@ putMPOLinks(IQMPO& W, Args const& args)
         links.at(b) = IQIndex(nm,Index(nm),q);
         }
 
-    W.Anc(1) *= links.at(1)(1);
+    W.Aref(1) *= links.at(1)(1);
     for(int b = 2; b < N; ++b)
         {
-        W.Anc(b) *= dag(links.at(b-1)(1));
-        W.Anc(b) *= links.at(b)(1);
+        W.Aref(b) *= dag(links.at(b-1)(1));
+        W.Aref(b) *= links.at(b)(1);
         }
-    W.Anc(N) *= dag(links.at(N-1)(1));
+    W.Aref(N) *= dag(links.at(N-1)(1));
+    }
+
+MPO
+toMPO(IQMPO const& K)
+    {
+    int N = K.N();
+    MPO res;
+    if(K.sites()) res = MPO(K.sites());
+    else          res = MPO(N);
+    res.logRefNorm(K.logRefNorm());
+    for(int j = 0; j <= N+1; ++j)
+        {
+        res.Aref(j) = ITensor(K.A(j));
+        }
+    res.leftLim(K.leftLim());
+    res.rightLim(K.rightLim());
+    return res;
     }
 
 template<typename T>
@@ -467,29 +484,32 @@ overlap(MPSt<Tensor> const& psi,
         MPOt<Tensor> const& K,
         MPSt<Tensor> const& phi, 
         Real& re, 
-        Real& im) //<psi|H K|phi>
+        Real& im)
     {
+    //println("Running psiHKphi");
     if(psi.N() != phi.N() || psi.N() != H.N() || psi.N() != K.N()) Error("Mismatched N in psiHKphi");
     auto N = psi.N();
     auto psidag = psi;
     for(int i = 1; i <= N; i++)
         {
-        psidag.Anc(i) = dag(psi.A(i));
-        psidag.Anc(i).mapprime(0,2);
+        psidag.Aref(i) = dag(prime(psi.A(i),2));
         }
-    MPOt<Tensor> Kp(K);
-    Kp.mapprime(1,2);
-    Kp.mapprime(0,1);
+    auto Hp = H;
+    Hp.mapprime(1,2);
+    Hp.mapprime(0,1);
 
     //scales as m^2 k^2 d
-    auto L = (((phi.A(1) * H.A(1)) * Kp.A(1)) * psidag.A(1));
+    auto L = phi.A(1) * K.A(1) * Hp.A(1) * psidag.A(1);
+    //printfln("L%02d = %s",1,L);
     for(int i = 2; i < N; i++)
         {
         //scales as m^3 k^2 d + m^2 k^3 d^2
-        L = ((((L * phi.A(i)) * H.A(i)) * Kp.A(i)) * psidag.A(i));
+        L = L * phi.A(i) * K.A(i) * Hp.A(i) * psidag.A(i);
+        //printfln("L%02d = %s",i,L);
         }
     //scales as m^2 k^2 d
-    L = ((((L * phi.A(N)) * H.A(N)) * Kp.A(N)) * psidag.A(N));
+    L = L * phi.A(N) * K.A(N) * Hp.A(N) * psidag.A(N);
+    //PrintData(L);
     auto z = L.cplx();
     re = z.real();
     im = z.imag();
@@ -532,5 +552,28 @@ template
 Cplx overlapC(MPSt<ITensor> const& psi, MPOt<ITensor> const& H, MPOt<ITensor> const& K,MPSt<ITensor> const& phi);
 template
 Cplx overlapC(MPSt<IQTensor> const& psi, MPOt<IQTensor> const& H, MPOt<IQTensor> const& K,MPSt<IQTensor> const& phi);
+
+template<class Tensor>
+Real
+checkMPOProd(MPSt<Tensor> const& psi2,
+             MPOt<Tensor> const& K, 
+             MPSt<Tensor> const& psi1)
+    {
+    //||p2> - K|p1>|^2 = (<p2|-<p1|Kd)(|p2>-K|p1>) = <p2|p2>+<p1|Kd*K|p1>-2*Re[<p2|K|p1>]
+    Real res = overlap(psi2,psi2);
+    res += -2.*overlapC(psi2,K,psi1).real();
+    //Compute Kd, Hermitian conjugate of K
+    auto Kd = K;
+    for(auto j : range1(K.N()))
+        {
+        Kd.Aref(j) = dag(swapPrime(K.A(j),0,1,Site));
+        }
+    res += overlap(psi1,Kd,K,psi1);
+    return res;
+    }
+template
+Real checkMPOProd(MPSt<ITensor> const& psi2, MPOt<ITensor> const& K, MPSt<ITensor> const& psi1);
+template
+Real checkMPOProd(MPSt<IQTensor> const& psi2, MPOt<IQTensor> const& K, MPSt<IQTensor> const& psi1);
 
 } //namespace itensor

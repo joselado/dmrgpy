@@ -4,6 +4,7 @@
 #include "itensor/mps/sites/spinone.h"
 #include "itensor/util/print_macro.h"
 #include "itensor/mps/sites/hubbard.h"
+#include "itensor/mps/autompo.h"
 
 using namespace itensor;
 using namespace std;
@@ -125,6 +126,88 @@ SECTION("Regression Test")
     B.Aref(2) = randomTensor(QN("Sz",0,"Nf",0), prime(sites(2)), Ib, dag(sites(2)));
 
     REQUIRE_NOTHROW(A.plusEq(B));
+    }
+
+SECTION("Overlap <psi|HK|phi>")
+    {
+    detail::seed_quickran(1);
+
+    auto N = 10;
+    auto sites = SpinHalf(N);
+
+    auto psi = MPS(sites);
+    auto phi = MPS(sites);
+
+    //Use AutoMPO as a trick to get
+    //an MPO with bond dimension > 1
+    auto ampo = AutoMPO(sites);
+    for(auto j : range1(N-1))
+        {
+        ampo += "Sz",j,"Sz",j+1;
+        ampo += 0.5,"S+",j,"S-",j+1;
+        ampo += 0.5,"S-",j,"S+",j+1;
+        }
+    auto H = MPO(ampo);
+    auto Hdag = H;
+    auto K = H;
+    //Randomize the MPOs to make sure they are non-Hermitian
+    for(auto j : range1(N))
+        {
+        randomize(H.Aref(j));
+        randomize(K.Aref(j));
+        H.Aref(j) *= 0.2;
+        K.Aref(j) *= 0.3;
+        Hdag.Aref(j) = dag(swapPrime(H.A(j),0,1,Site));
+        }
+
+    auto Hdphi = exactApplyMPO(Hdag,phi,{"Cutoff=",1E-13,"Maxm=",5000});
+    auto Kpsi = exactApplyMPO(K,psi,{"Cutoff=",1E-13,"Maxm=",5000});
+
+    //Print(overlap(phi,H,K,psi));
+    //Print(overlap(Hdphi,Kpsi));
+    CHECK_CLOSE(overlap(phi,H,K,psi),overlap(Hdphi,Kpsi));
+    }
+
+SECTION("toMPO function")
+    {
+    auto N = 50;
+    auto sites = Hubbard(N);
+
+    auto makeInds = [N](std::string name) -> vector<IQIndex>
+        {
+        auto ll = vector<IQIndex>(N);
+        for(auto n : range1(N-1))
+            {
+            ll.at(n) = IQIndex(nameint(name,n),
+                               Index("a",2),QN("Sz=",-1,"Nf=",-1),
+                               Index("a",2),QN("Sz=",-1,"Nf=",+1),
+                               Index("b",2),QN("Sz=",-1,"Nf=",0),
+                               Index("c",2),QN("Sz=",+1,"Nf=",0),
+                               Index("d",2),QN("Sz=",+1,"Nf=",-1),
+                               Index("d",2),QN("Sz=",+1,"Nf=",+1));
+            }
+        return ll;
+        };
+
+    auto ll = makeInds("I_");
+
+    auto Z = QN("Sz=",0,"Nf=",0);
+
+    auto A = IQMPO(sites);
+    A.Aref(1) = randomTensor(Z,sites(1),ll.at(1));
+    for(int n = 2; n < N; ++n)
+        {
+        A.Aref(n) = randomTensor(Z,sites(n),dag(ll.at(n-1)),ll.at(n));
+        }
+    A.Aref(N) = randomTensor(Z,sites(N),dag(ll.at(N-1)));
+
+    auto a = toMPO(A);
+
+    for(auto n : range1(N))
+        {
+        CHECK(norm(a.A(n) - ITensor(A.A(n))) < 1E-10);
+        }
+
     }
 
 }

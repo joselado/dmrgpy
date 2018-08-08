@@ -357,9 +357,7 @@ combiner(std::vector<IQIndex> cinds,
     {
     if(cinds.empty()) Error("No indices passed to combiner");
     auto cname = args.getString("IndexName","cmb");
-    auto itype = getIndexType(args,"IndexType",cinds.front().type());
-    auto cr = cinds.size();
-
+    auto itype = getIndexType(args,"IndexType",Link);
 
     auto cdir = Out;
     if(args.defined("IndexDir"))
@@ -396,7 +394,7 @@ combiner(std::vector<IQIndex> cinds,
         QNm qm;
         //For this sector, figure out the total QN (qm.q)
         //and combined sector size (qm.m)
-        for(auto j : range(cr))
+        for(auto j : range(cinds))
             {
             qm.q += cinds[j].qn(1+I[j]) * cinds[j].dir() * cdir;
             qm.m *= cinds[j].index(1+I[j]).m();
@@ -419,7 +417,9 @@ combiner(std::vector<IQIndex> cinds,
 
     auto cstore = stdx::reserve_vector<IndexQN>(qms.size());
     for(auto n : range(qms)) 
+        {
         cstore.emplace_back(Index{nameint("c",n),qms[n].m,itype},qms[n].q);
+        }
     auto cind = IQIndex{cname,std::move(cstore),cdir};
 
     auto newind = IQIndexSetBuilder(1+cinds.size());
@@ -431,6 +431,28 @@ combiner(std::vector<IQIndex> cinds,
         }
 
     return IQTensor{newind.build(),std::move(C)};
+    }
+
+struct IsQCombiner
+    {
+    template<typename D>
+    bool 
+    operator()(D const& d) { return false; }
+    bool
+    operator()(QCombiner const& d) { return true; }
+    };
+
+IQIndex
+combinedIndex(IQTensor const& C)
+    {
+#ifdef DEBUG
+    auto iscombiner = applyFunc(IsQCombiner{},C.store());
+    if(not iscombiner)
+        {
+        throw ITError("Called combinedIndex on ITensor that is not a combiner");
+        }
+#endif
+    return C.inds().front();
     }
 
 IQIndex
@@ -470,17 +492,10 @@ dir(IQTensor const& T,
 	}
 
 bool
-isZero(const IQTensor& T, const Args& args)
+isEmpty(IQTensor const& T)
     {
-    Error("Not implemented");
-    //if(T.empty()) return true;
-    ////done with all fast checks
-    //if(args.getBool("Fast",false)) return false;
-    //for(const ITensor& t : T.blocks())
-    //    {
-    //    if(!isZero(t)) return false;
-    //    }
-    return true;
+    if(not T.store()) return true;
+    return doTask(IsEmpty{},T.store());
     }
 
 //template<typename T>

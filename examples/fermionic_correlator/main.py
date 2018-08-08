@@ -5,10 +5,10 @@ sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import matplotlib.pyplot as plt
 import fermionchain
 
-n = 10
+n = 5
 sc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 def ft(i,j):
-    if i==j: return 1.0
+#    if i==j: return 1.0
     if abs(j-i)==1: return 1.0
     return 0.0
 sc.set_hoppings(ft) # hoppings

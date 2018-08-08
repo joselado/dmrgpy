@@ -21,16 +21,16 @@
 
 #include "itensor/all_basic.h"
 
-//#include "itensor/util/stats.h"
+#include "itensor/util/stats.h"
 
 #include "itensor/mps/dmrg.h"
 #include "itensor/mps/idmrg.h"
-//#include "itensor/mps/tevol.h"
+#include "itensor/mps/tevol.h"
 #include "itensor/mps/hambuilder.h"
 #include "itensor/mps/autompo.h"
 
-//#include "itensor/mps/lattice/square.h"
-//#include "itensor/mps/lattice/triangular.h"
+#include "itensor/mps/lattice/square.h"
+#include "itensor/mps/lattice/triangular.h"
 
 #include "itensor/mps/sites/spinhalf.h"
 #include "itensor/mps/sites/spinone.h"

@@ -5,10 +5,12 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 
-n = 5
+n = 4
 for i in range(10):
   spins = [np.random.randint(2,7) for i in range(n)] # spin 1/2 heisenberg chain
   sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+  def fj(i,j): return np.random.random()
+  sc.set_exchange(fj)
   e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy
   e1 = sc.gs_energy(mode="ED") # compute the ground state energy
   print("Spin chain",spins)
@@ -16,6 +18,6 @@ for i in range(10):
   print("Energy with DMRG",e0)
   print("\n")
   de = np.abs(e1-e0)
-  if de>0.0001: raise
+  if de>0.1: raise
 
 print("Test passed")

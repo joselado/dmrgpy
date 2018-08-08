@@ -190,6 +190,8 @@ class AutoMPO
 
     public:
 
+    AutoMPO() { }
+
     AutoMPO(SiteSet const& sites) 
       : sites_(sites)
         { }
@@ -199,6 +201,9 @@ class AutoMPO
 
     storage const&
     terms() const { return terms_; }
+
+    int
+    size() const { return terms_.size(); }
 
     operator MPO() const { return toMPO<ITensor>(*this); }
 

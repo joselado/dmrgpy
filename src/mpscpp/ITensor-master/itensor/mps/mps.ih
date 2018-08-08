@@ -117,11 +117,10 @@ template<typename T>
 Real
 norm(MPSt<T> const& psi)
     {
-    if(isOrtho(psi))
-        {
-        return itensor::norm(psi.A(orthoCenter(psi)));
-        }
-    return std::sqrt(overlap(psi,psi)); 
+    if(not isOrtho(psi)) Error("\
+MPS must have well-defined ortho center to compute norm; \
+call .position(j) or .orthogonalize() to set ortho center");
+    return itensor::norm(psi.A(orthoCenter(psi)));
     }
 
 template<typename T>
@@ -175,7 +174,7 @@ maxM(MPST const& psi)
     int maxM_ = 0;
     for(int b = 1; b < psi.N(); ++b) 
         {
-        int mb = linkInd(psi,b).m();
+        int mb = commonIndex(psi.A(b),psi.A(b+1)).m();
         maxM_ = std::max(mb,maxM_);
         }
     return maxM_;

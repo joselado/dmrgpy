@@ -99,8 +99,9 @@ class Many_Body_Hamiltonian():
     return pychainwrapper.get_full_hamiltonian(self)
   def get_pychain(self):
     return pychainwrapper.get_pychain(self)
-  def get_dos(self,n=1000,mode="DMRG"):
-    return kpmdmrg.get_dos(self,n=n,mode=mode)
+  def get_dos(self,i=0,n=20,delta=0.1):
+    from dos import get_dos
+    return get_dos(self,i=i,n=n,delta=delta)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
   def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,name="XX",

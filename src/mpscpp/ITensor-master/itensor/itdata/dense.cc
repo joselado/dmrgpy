@@ -10,6 +10,7 @@
 #include "itensor/tensor/sliceten.h"
 #include "itensor/tensor/contract.h"
 #include "itensor/tensor/lapack_wrap.h"
+#include "itensor/util/tensorstats.h"
 
 namespace itensor {
 
@@ -287,6 +288,10 @@ doTask(Contract<Index> & C,
     STOP_TIMER(4)
     auto tN = makeTenRef(nd->data(),nd->size(),&(C.Nis));
 
+#ifdef COLLECT_TSTATS
+    tstats(tL,Lind,tR,Rind,tN,Nind);
+#endif
+
     START_TIMER(2)
     contract(tL,Lind,tR,Rind,tN,Nind);
     STOP_TIMER(2)
@@ -383,6 +388,28 @@ template void doTask(PlusEQ<Index> const&,Dense<Real> const&,Dense<Cplx> const&,
 template void doTask(PlusEQ<Index> const&,Dense<Cplx> const&,Dense<Real> const&,ManageStore &);
 template void doTask(PlusEQ<Index> const&,Dense<Cplx> const&,Dense<Cplx> const&,ManageStore &);
 
-    
+template<typename T>
+void
+permuteDense(Permutation const& P,
+             Dense<T>    const& dA,
+             IndexSet    const& Ais,
+             Dense<T>         & dB,
+             IndexSet    const& Bis)
+    {
+    auto bref = makeTenRef(dB.data(),dB.size(),&Bis);
+    auto aref = makeTenRef(dA.data(),dA.size(),&Ais);
+    bref &= permute(aref,P);
+    }
+
+template<typename T>
+void
+doTask(Order<Index> const& O,
+       Dense<T> & dA)
+    {
+    auto dB = dA;
+    permuteDense(O.perm(),dB,O.is1(),dA,O.is2());
+    }
+template void doTask(Order<Index> const&,Dense<Real> &);
+template void doTask(Order<Index> const&,Dense<Cplx> &); 
 
 } // namespace itensor
