@@ -37,9 +37,12 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
     elif name[1]=="Y": namej="Sy"
     elif name[1]=="Z": namej="Sz"
     else: raise
-  elif name=="cdc": # fermionic correlator
-    namei = "Cdag"
-    namej = "Cdag"
+    if self.sites[i] !=1 or self.sites[j]!=1:
+        if name!="ZZ": raise  # fermions only accept ZZ
+  elif name=="cdc" or name=="ccd": # fermionic correlator
+    if self.sites[i] !=1 or self.sites[j]!=1: raise # only for fermions
+    if name=="cdc": namei = "Cdag" ; namej = "Cdag"
+    elif name=="ccd": namei = "C" ; namej = "C"
   task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
                 "site_i_kpm":str(i),"site_j_kpm":str(j),
                 "kpm_scale":str(self.kpmscale),

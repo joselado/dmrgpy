@@ -110,8 +110,8 @@ auto add_spin_operator(auto ampo, auto sites, float v, int i, auto name) {
         		ampo += v*0.5*1i,"Cdagup",i+1,"Cdn",i+1;
         	} ;
         	if (name=="Sz") {
-        		ampo += v*0.5,"Cdagup",i+1,"Cup",i+1;
-        		ampo += -v*0.5,"Cdagdn",i+1,"Cdn",i+1;
+        		ampo += v*0.5,"Nup",i+1;
+        		ampo += -v*0.5,"Ndn",i+1;
         	} ;
         }
 	return ampo ;

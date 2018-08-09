@@ -103,8 +103,8 @@ def write_sweeps(self):
   """Write sweep info"""
   fo = open("sweeps.in","w")
   fo.write("sweeps\n{\n")
-  fo.write("nsweeps = "+self.sweep["n"]+"\n")
-  fo.write("maxm = "+self.sweep["maxm"]+"\n}\n")
+  fo.write("nsweeps = "+str(self.sweep["n"])+"\n")
+  fo.write("maxm = "+str(self.sweep["maxm"])+"\n")
   fo.write("cutoff = "+str(self.sweep["cutoff"])+"\n}\n")
   fo.close()
 

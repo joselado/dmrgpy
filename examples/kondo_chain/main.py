@@ -8,7 +8,7 @@ import spinchain
 
 
 
-n = 5 # number of sites (including fermions and spins)
+n = 4 # number of sites (including fermions and spins)
 sites = [] # list with the sites
 for i in range(n):
     sites.append(1) # add fermion
@@ -22,8 +22,8 @@ def fh(i,j): # hopping
     return 0.0
 
 def fj(i,j):
-    if i%2==0 and j%2==1: # first one is a fermion, second one a spin
-        if abs(i-j)==1: return 0.0
+    if abs(i-j)==n: return 1.0 # coupling between fermion and spin
+    if i>=n and j>=n and abs(i-j)==1: return 0.0 # coupling between spins
     return 0.0
 
 

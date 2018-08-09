@@ -4,7 +4,7 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import fermionchain
 
-n = 10 # number of spinful fermionic sites
+n = 9 # number of spinful fermionic sites
 fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 
 ####### Input matrices #######
@@ -14,7 +14,7 @@ fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 hopping = np.zeros((n,n))
 hubbard = np.zeros((n,n))
 for i in range(n-1):  hopping[i,i+1] = 1. ; hopping[i+1,i] = 1.
-for i in range(n): U = 0.0 ; hubbard[i,i] = U/2. ; hopping[i,i] = -U
+for i in range(n): U = 2.0 ; hubbard[i,i] = U/2. ; hopping[i,i] = -U #+ 2.0
 
 # The implemented Hamiltonian is
 # H = \sum_ij hopping[i,j] c^dagger_i c_j + hubbard[i,j] n_i n_j
@@ -35,19 +35,21 @@ fc.set_hubbard(lambda i,j: hubbard[i,j]) # set the hubbard constants
 # <0|c_i^dagger \delta(H-E_0-\omega) c_j |0>
 
 i = n//2 # first index of the dynamical correlator
+i = 0
 j = n//2 # second index of the dynamical correlator
 delta = 0.02 # energy resolution (approximate)
 fc.kpmmaxm = 20 # maximum bond dimension in KPM
+fc.maxm = 20 # bond dimension in GS
 
 # The result will be written in a file called DYNAMICAL_CORRELATOR.OUT
-(x,y) = fc.get_dos(n=40,delta=0.01,i=i)
+(x,y) = fc.get_dos(delta=0.05,i=i)
 
 # compute the dynamical correlator using KPM DMRG
 #(x,y) = fc.get_dynamical_correlator(i=i,j=j,delta=delta,name="cdc")
 
 import matplotlib.pyplot as plt
 # plot the result
-plt.plot(x,y.real,marker="o")
+plt.scatter(x,y.real)
 plt.show()
 
 

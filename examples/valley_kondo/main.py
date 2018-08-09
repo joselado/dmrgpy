@@ -4,21 +4,29 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 
-n = 39
+n = 10
 U = 0.0
 spins = [1 for i in range(n)] + [2] # fermionic sites plus 1/2
 #spins = [2,2]
 sc = spinchain.Many_Body_Hamiltonian(spins) # create the spin chain
+
+def getk(i): return float(n//2-i-0.5)
+
+
+
 def ft(i,j):
-    if i<n and j<n: # fermionic sites
-      if abs(i-j)==1: return 1.0
-      if i==j: return -U
+    if i<n and j<n: # fermionic sites, in reciprocal space
+      if i==j:
+          k = getk(i)
+          return -U + k # return energy
     return 0.0
 sc.set_hoppings(ft) # hoppings
 
 
 def fj(i,j):
-    if i==(n//2) and j==n: return 0.5 # AF coupling between impurity and site
+    if j==n: # found impurity
+          k = getk(i)
+          return 1./k
     else: return 0.0
 
 sc.set_exchange(fj) # set exchange couplings

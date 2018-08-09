@@ -33,6 +33,8 @@ class Many_Body_Hamiltonian():
 #    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
     # additional arguments
     self.kpmmaxm = 50 # bond dimension in KPM
+    self.maxm = 30 # bond dimension in wavefunctions
+    self.nsweeps = 8 # number of sweeps
     self.kpmcutoff = 1e-5 # cutoff in KPM
     self.kpmscale = 10.0
     self.restart = False # restart the calculation
@@ -99,15 +101,15 @@ class Many_Body_Hamiltonian():
     return pychainwrapper.get_full_hamiltonian(self)
   def get_pychain(self):
     return pychainwrapper.get_pychain(self)
-  def get_dos(self,i=0,n=20,delta=0.1):
+  def get_dos(self,i=0,delta=0.1,window=5.0):
     from dos import get_dos
-    return get_dos(self,i=i,n=n,delta=delta)
+    return get_dos(self,i=i,delta=delta,window=window)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
   def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,name="XX",
-                                 delta=0.02):
+                                 delta=0.02,window=[-1.0,10.0]):
     return kpmdmrg.get_dynamical_correlator(self,n=n,mode=mode,
-                     i=i,j=j,name=name,delta=delta)
+                     i=i,j=j,name=name,delta=delta,window=window)
   def get_excited(self,n=10,mode="DMRG"):
     self.to_folder() # go to temporal folder
     if mode=="DMRG":
@@ -202,7 +204,7 @@ def setup_sweep(self,mode="default"):
   sweep = dict() # dictionary
   sweep["cutoff"] = 1e-06
   if mode=="default": # default mode
-    sweep["n"] = "3"
+    sweep["n"] = "8"
     sweep["maxm"] = "100" 
   elif mode=="fast": # default mode
     sweep["n"] = "3"
@@ -211,6 +213,8 @@ def setup_sweep(self,mode="default"):
     sweep["n"] = "10"
     sweep["maxm"] = "50" 
   else: raise
+  sweep["n"] = self.nsweeps
+  sweep["maxm"] = self.maxm
   self.sweep = sweep # initialize
   write_sweeps(self) # write the sweeps
 
