@@ -23,6 +23,18 @@ auto get_spin_operator(auto sites, int i, auto name) {
         		ampo += 1.0,"Cup",i+1;
         		ampo += 1.0,"Cdn",i+1;
         	} ;
+		if (name=="Cup") {
+        		ampo += 1.0,"Cup",i+1;
+        	} ;
+		if (name=="Cdn") {
+        		ampo += 1.0,"Cdn",i+1;
+        	} ;
+		if (name=="Cdagup") {
+        		ampo += 1.0,"Cdagup",i+1;
+        	} ;
+		if (name=="Cdagdn") {
+        		ampo += 1.0,"Cdagdn",i+1;
+        	} ;
         }
         auto m = MPO(ampo) ;	
 return m ;
