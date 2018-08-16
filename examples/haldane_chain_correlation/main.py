@@ -10,7 +10,7 @@ import spinchain
 ns = np.array(range(4,30,2))
 es = []
 n = 30
-spins = [2 for i in range(n)]
+spins = [3 for i in range(n)] # spin 1 chain
 sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 pairs = [(i,i+1) for i in range(n-1)] # correlators
 #pairs = [(n//2,n//2+i) for i in range(1,n//2-1)] # correlators
