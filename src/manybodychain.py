@@ -204,7 +204,7 @@ def setup_sweep(self,mode="default"):
   sweep = dict() # dictionary
   sweep["cutoff"] = 1e-06
   if mode=="default": # default mode
-    sweep["n"] = "8"
+    sweep["n"] = "20"
     sweep["maxm"] = "100" 
   elif mode=="fast": # default mode
     sweep["n"] = "3"
