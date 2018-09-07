@@ -35,6 +35,13 @@ auto get_spin_operator(auto sites, int i, auto name) {
 		if (name=="Cdagdn") {
         		ampo += 1.0,"Cdagdn",i+1;
         	} ;
+		// superconducting terms
+		if (name=="delta") {
+        		ampo += 1.0,"Cdn",i+1,"Cup",i+1;
+        	} ;
+		if (name=="deltad") {
+        		ampo += 1.0,"Cdagdn",i+1,"Cdagup",i+1;
+        	} ;
         }
         auto m = MPO(ampo) ;	
 return m ;
