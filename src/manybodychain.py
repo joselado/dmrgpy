@@ -55,7 +55,7 @@ class Many_Body_Hamiltonian():
           c = Coupling(i,j,g) # create class
           self.couplings.append(c) # store
   def set_hoppings(self,fun):
-      self.hoppins = dict()
+      self.hoppings = dict()
       for i in range(self.ns): # loop
           for j in range(self.ns): # loop
               if self.sites[i]==1 and self.sites[j]==1:
