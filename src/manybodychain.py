@@ -38,6 +38,7 @@ class Many_Body_Hamiltonian():
     self.kpmcutoff = 1e-5 # cutoff in KPM
     self.kpmscale = 10.0
     self.restart = False # restart the calculation
+    self.computed_gs = False # computed the GS already
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
   def to_origin(self): 
@@ -131,6 +132,7 @@ class Many_Body_Hamiltonian():
     """Return the ground state"""
     if mode=="DMRG":
       self.gs_energy() # perform a ground state calculation
+      self.computed_gs = True # set to True
       wf = mps.MPS(self) # create an MPS
       return wf.copy() # return wavefucntion
     elif mode=="ED":
@@ -170,15 +172,20 @@ class Many_Body_Hamiltonian():
     else: raise # not implemented
     self.to_origin() # go to main folder
     return m
-  def magnetization(self):
+  def get_magnetization(self):
     """Calculate the magnetization of the system"""
-    self.gs_energy() # calculate ground state
-    self.to_folder() # go to temporal folder
-    mx = np.genfromtxt("MEASURE_SX.OUT").transpose()[1]
-    my = np.genfromtxt("MEASURE_SY.OUT").transpose()[1]
-    mz = np.genfromtxt("MEASURE_SZ.OUT").transpose()[1]
-    self.to_origin() # go to main folder
+    mx = self.get_file("MEASURE_SX.OUT").transpose()[1]
+    my = self.get_file("MEASURE_SY.OUT").transpose()[1]
+    mz = self.get_file("MEASURE_SZ.OUT").transpose()[1]
     return (mx,my,mz)
+  def get_file(self,name):
+    """Return the electronic density"""
+    if not self.computed_gs: self.get_gs() # compute gs
+    self.to_folder() # go to folder
+    m = np.genfromtxt(name) # read file
+    self.to_origin() # go back
+    return m
+
 
 
 #from fermionchain import Fermionic_Hamiltonian

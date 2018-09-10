@@ -4,9 +4,9 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import fermionchain
 
-n = 10 # number of spinful fermionic sites
+n = 30 # number of spinful fermionic sites
 
-def get_fc(u):
+def get_fc(mu):
   fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
   
   ####### Input matrices #######
@@ -16,7 +16,7 @@ def get_fc(u):
   hopping = np.zeros((n,n))
   hubbard = np.zeros((n,n))
   for i in range(n-1):  hopping[i,i+1] = 1. ; hopping[i+1,i] = 1.
-  for i in range(n): U = u ; hubbard[i,i] = U/2. ; hopping[i,i] = -U
+  for i in range(n): U = -0.0 ; hubbard[i,i] = U/2. ; hopping[i,i] = -U + mu
   
   # The implemented Hamiltonian is
   # H = \sum_ij hopping[i,j] c^dagger_i c_j + hubbard[i,j] n_i n_j
@@ -46,22 +46,22 @@ def get_fc(u):
   return fc
 
 
-us = np.linspace(-10.0,10.0,20)
+mus = np.linspace(0.0,2.5,30)
 ds = []
-for u in us:
-  fc = get_fc(u)
-  d = np.mean(fc.get_density_fluctuation())
-  ds.append(d)
-  print(u,d)
+for mu in mus:
+  fc = get_fc(mu)
+  ds.append(np.sum(fc.get_density()))
+  d = np.sum(fc.get_density())
+  print(mu,d)
 
 
 ds = np.array(ds)
 
 
-np.savetxt("D_VS_MU.OUT",np.matrix([us,ds]).T)
+np.savetxt("D_VS_MU.OUT",np.matrix([mus,ds]).T)
 
 import matplotlib.pyplot as plt
-plt.plot(us,ds,marker="o")
+plt.plot(mus,ds)
 plt.show()
 # The result will be written in a file called DYNAMICAL_CORRELATOR.OUT
 fc.gs_energy()
