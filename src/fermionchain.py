@@ -1,5 +1,6 @@
 from manybodychain import Many_Body_Hamiltonian
 import numpy as np
+import scipy.linalg as lg
 
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
@@ -19,6 +20,27 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """Return the electronic density"""
         m = self.get_file("MEASURE_DELTA.OUT") # get the file
         return m.transpose()[1] # return delta
+    def hamiltonian_free(self,pairs=[[]]):
+        """Compute the free correlator"""
+        if len(self.hubbard)!=0: raise
+        else:
+          m = np.zeros((self.ns,self.ns)) # matrix
+          for key in self.hoppings:
+              t = self.hoppings[key]
+              m[t.i,t.j] = t.g
+        return m
+    def correlator_free(self,pairs=[[]]):
+          m = self.hamiltonian_free()
+          (es,vs) = lg.eigh(m) # diagonalize
+          vs = vs.transpose()
+          out = []
+          for p in pairs:
+              o = 0.0 # initialize
+              for (e,v) in zip(es,vs):
+                  if e<=0.0: o += v[p[0]]*np.conjugate(v[p[1]]) # add
+              out.append(o)
+          return np.array(out)*2.0 # return
+
 
 
 

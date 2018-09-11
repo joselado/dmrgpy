@@ -47,6 +47,7 @@ class Many_Body_Hamiltonian():
   def clean(self): os.system("rm -rf "+self.path) # clean temporal folder
   def set_exchange(self,fun):
     """Set the exchange coupling between sites"""
+    self.computed_gs = False # say that GS has not been computed
     self.couplings = [] # empty list
     for i in range(self.ns): # loop
       for j in range(self.ns):  # loop
@@ -56,6 +57,7 @@ class Many_Body_Hamiltonian():
           c = Coupling(i,j,g) # create class
           self.couplings.append(c) # store
   def set_hoppings(self,fun):
+      self.computed_gs = False # say that GS has not been computed
       self.hoppings = dict()
       for i in range(self.ns): # loop
           for j in range(self.ns): # loop
@@ -64,6 +66,7 @@ class Many_Body_Hamiltonian():
                   if np.abs(c)>0.0:
                       self.hoppings[(i,j)] = Coupling(i,j,c) # store
   def set_hubbard(self,fun):
+      self.computed_gs = False # say that GS has not been computed
       self.hubbard = dict()
       for i in range(self.ns): # loop
           for j in range(self.ns): # loop
@@ -72,6 +75,7 @@ class Many_Body_Hamiltonian():
                   if np.abs(c)>0.0:
                       self.hubbard[(i,j)] = Coupling(i,j,c) # store
   def set_fields(self,fun):
+    self.computed_gs = False # say that GS has not been computed
     self.fields = [fun(i) for i in range(self.ns)] # fields
   def get_coupling(self,i,j):
     """Return the coupling between two sites"""

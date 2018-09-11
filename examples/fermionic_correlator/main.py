@@ -5,11 +5,12 @@ sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import matplotlib.pyplot as plt
 import fermionchain
 
-n = 5
+n = 20
 sc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 def ft(i,j):
 #    if i==j: return 1.0
-    if abs(j-i)==1: return 1.0
+    if abs(j-i)==1: return 1.0 #+ np.random.random()
+    if i==j: return np.random.random()
     return 0.0
 sc.set_hoppings(ft) # hoppings
 
@@ -21,7 +22,9 @@ print(sc.gs_energy())
 #exit()
 pairs = [(0,i) for i in range(n)]
 out = sc.correlator(pairs)
-plt.plot(range(n),out,marker="o")
+out2 = sc.correlator_free(pairs)
+plt.plot(range(n),out,c="blue",label="DMRG")
+plt.scatter(range(n),out2,marker="o",c="red",label="ED",s=40)
 #(x2,y2) = sc.get_dynamical_correlator(n=600,mode="DMRG",i=0,j=1,delta=0.02,
 #                                           name="cdc")
 plt.show()
