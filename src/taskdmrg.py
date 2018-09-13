@@ -40,7 +40,9 @@ def select_task(self,mode="GS"):
 def write_tasks(self):
   fo = open("tasks.in","w")
   fo.write("tasks\n{\n")
-  if self.restart: fo.write(" restart = true\n")
+  if self.gs_from_file: fo.write(" gs_from_file = true\n")
+  else: fo.write(" gs_from_file = false\n")
+  fo.write(" starting_file_gs = "+self.starting_file_gs+"\n") # starting WF
   for key in self.task:
     fo.write(key+" = "+self.task[key]+"\n")
   fo.write("}\n")

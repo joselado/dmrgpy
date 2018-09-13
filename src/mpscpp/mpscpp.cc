@@ -18,6 +18,7 @@ using namespace std;
 #include"get_exchange.h" // get the exchange coupling
 #include"get_hopping.h" // get the hoppings (in case there are)
 #include"get_hubbard.h" // get the hoppings (in case there are)
+#include"get_hamiltonian.h" // get the hoppings (in case there are)
 #include"read_wf.h" // this does not work yet
 #include"get_gs.h" // compute ground state energy and wavefunction
 #include"get_dos.h" // compute the DOS
@@ -39,16 +40,7 @@ main()
     // read the number of sites
     ifstream sfile; // file to read
     auto sites = get_sites(); // Get the different sites
-    auto ampo = AutoMPO(sites); // create the MPO for the Hamiltonian
-    cout << "Adding exchange couplings" << endl ;
-    ampo = get_exchange(ampo); // add exchange to the Hamiltonian
-    cout << "Adding fermionic hoppings" << endl ;
-    ampo = get_hopping(ampo); // add hopping to the Hamiltonian
-    cout << "Adding Hubbard interaction" << endl ;
-    ampo = get_hubbard(ampo); // add hubbard to the Hamiltonian
-    cout << "Adding magnetic field" << endl ;
-    ampo = get_field(sites,ampo); // add magnetic field to the Hamiltonian
-    auto H = MPO(ampo);  // create the full Hamiltonian
+    auto H = get_hamiltonian(sites) ; // get the Hamiltonian
 //    test_hopping(H,sites); // test the hoppings
     auto sweeps = get_sweeps(); // get the DMRG sweeps
 

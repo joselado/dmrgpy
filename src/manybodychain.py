@@ -34,10 +34,13 @@ class Many_Body_Hamiltonian():
     # additional arguments
     self.kpmmaxm = 50 # bond dimension in KPM
     self.maxm = 30 # bond dimension in wavefunctions
-    self.nsweeps = 8 # number of sweeps
+    self.nsweeps = 15 # number of sweeps
     self.kpmcutoff = 1e-5 # cutoff in KPM
-    self.kpmscale = 10.0
+    self.kpmscale = 10.0 # this is meaningless
     self.restart = False # restart the calculation
+    self.gs_from_file = False # start from a random wavefunction
+    self.wf0 = None # no initial WF
+    self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
     self.computed_gs = False # computed the GS already
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
@@ -132,28 +135,33 @@ class Many_Body_Hamiltonian():
       raise
     self.to_origin() # go to main folder
     return out
-  def get_gs(self,mode="DMRG"):
+  def set_initial_wf(self,wf):
+      """Use a certain wavefunction as initial guess"""
+      if wf is None: return
+      self.gs_from_file = True # use a wavefunction from a file
+      self.starting_file_gs = wf.name # name of the wavefunction
+  def get_gs(self,mode="DMRG",wf0=None):
     """Return the ground state"""
     if mode=="DMRG":
-      self.gs_energy() # perform a ground state calculation
-      self.computed_gs = True # set to True
-      wf = mps.MPS(self) # create an MPS
-      return wf.copy() # return wavefucntion
+      self.gs_energy(wf0=wf0) # perform a ground state calculation
+      return self.wf0 # return wavefucntion
     elif mode=="ED":
       self.to_folder() # go to temporal folder
       h = self.get_full_hamiltonian() # get the Hamiltonian 
       self.to_origin() # go to temporal folder
       return pychain.spectrum.ground_state(h)[1] # return energy
     else: raise
-  def gs_energy(self,mode="DMRG"):
+  def gs_energy(self,mode="DMRG",wf0=None):
     """Return the ground state energy"""
     # write the sites
     self.to_folder() # go to temporal folder
     if mode=="DMRG":
+      self.set_initial_wf(wf0) # set the initial wavefunction
       self.setup_sweep()
       self.setup_task("GS")
       self.write_hamiltonian() # write the Hamiltonian to a file
       self.run() # perform the calculation
+      self.wf0 = mps.MPS(self).copy() # set the ground state
       out = np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
     elif mode=="ED": # use brute force
       h = self.get_full_hamiltonian() # get the Hamiltonian 

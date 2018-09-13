@@ -89,7 +89,7 @@ auto generate_sites() { // function to generate the sites
 
 auto get_sites() { // function to get the sites
     auto sites = generate_sites() ;  // generate the sites
-    if (check_task("restart")) readFromFile("sites.sites",sites);
+    if (check_task("gs_from_file")) readFromFile("sites.sites",sites);
     cout << "Number of sites " << sites.N() << endl ;
     return sites ;
 }

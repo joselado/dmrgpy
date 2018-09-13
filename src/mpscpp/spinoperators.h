@@ -42,6 +42,17 @@ auto get_spin_operator(auto sites, int i, auto name) {
 		if (name=="deltad") {
         		ampo += 1.0,"Cdagdn",i+1,"Cdagup",i+1;
         	} ;
+		// density terms
+		if (name=="density") {
+        		ampo += 1.0,"Cdagdn",i+1,"Cdn",i+1;
+        		ampo += 1.0,"Cdagup",i+1,"Cup",i+1;
+        	} ;
+		if (name=="density_up") {
+        		ampo += 1.0,"Cdagup",i+1,"Cup",i+1;
+        	} ;
+		if (name=="density_dn") {
+        		ampo += 1.0,"Cdagdn",i+1,"Cdn",i+1;
+        	} ;
         }
         auto m = MPO(ampo) ;	
 return m ;

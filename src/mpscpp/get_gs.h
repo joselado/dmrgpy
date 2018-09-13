@@ -3,7 +3,10 @@
 // the wavefunction into a file
 
 auto get_gs(auto sites, auto H) {
-  auto psi = MPS(sites);
+    // read the GS from a file
+    auto psi = MPS(sites);
+    if (get_bool("gs_from_file")) 
+	    psi = read_wf(get_str("starting_file_gs")) ;
 //  if (check_task("restart")) { // restart the calculation
 //    psi = read_wf() ; // read the wavefunction from a file
 //  } 

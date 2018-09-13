@@ -10,7 +10,8 @@ sc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 def ft(i,j):
 #    if i==j: return 1.0
     if abs(j-i)==1: return 1.0 #+ np.random.random()
-    if i==j: return np.random.random()
+#    if i==j: return np.random.random()
+    if i==j: return 1.1
     return 0.0
 sc.set_hoppings(ft) # hoppings
 
@@ -18,7 +19,12 @@ sc.set_hoppings(ft) # hoppings
 
 #sc.kpmmaxm = 20 # KPM maxm
 import time
-print(sc.gs_energy())
+
+e0 = sc.gs_energy() # compute ground state energy with DMRG
+e1 = sc.gs_energy_free() # compute ground state energy for free electrons
+
+
+print(e0,e1)
 #exit()
 pairs = [(0,i) for i in range(n)]
 out = sc.correlator(pairs)

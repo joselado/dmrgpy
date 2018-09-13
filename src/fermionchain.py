@@ -30,7 +30,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
               m[t.i,t.j] = t.g
         return m
     def correlator_free(self,pairs=[[]]):
-          m = self.hamiltonian_free()
+          """Get the correlator for free fermions"""
+          m = self.hamiltonian_free() # get the single body matrix
           (es,vs) = lg.eigh(m) # diagonalize
           vs = vs.transpose()
           out = []
@@ -40,6 +41,19 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
                   if e<=0.0: o += v[p[0]]*np.conjugate(v[p[1]]) # add
               out.append(o)
           return np.array(out)*2.0 # return
+    def gs_energy_free(self):
+        """Get the energy for free fermions"""
+        m = self.hamiltonian_free() # get the single body matrix
+        es = lg.eigvalsh(m) # get the energies
+        return 2.*np.sum(es[es<0.0]) # return energies
+
+
+
+
+
+
+
+
 
 
 

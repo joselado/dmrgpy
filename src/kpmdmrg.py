@@ -30,7 +30,10 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
   self.setup_sweep("accurate")
   fcorr = ["cdc","cdcup","ccd","cdcdn","deltadelta"] # correlators for fermions
-  if len(name)==2:
+  spins = [] # names for spin correlators
+  for s1 in ["X","Y","Z"]:
+    for s2 in ["X","Y","Z"]: spins += [s1+s2]
+  if name in spins: # spin correlator
     if name[0]=="X": namei="Sx"
     elif name[0]=="Y": namei="Sy"
     elif name[0]=="Z": namei="Sz"
@@ -38,8 +41,8 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
     elif name[1]=="Y": namej="Sy"
     elif name[1]=="Z": namej="Sz"
     else: raise
-    if self.sites[i] !=1 or self.sites[j]!=1:
-        if name!="ZZ": raise  # fermions only accept ZZ
+#    if self.sites[i] !=1 or self.sites[j]!=1:
+#        if name!="ZZ": raise  # fermions only accept ZZ
   elif name in fcorr: # fermionic correlator
     if self.sites[i] !=1 or self.sites[j]!=1: raise # only for fermions
     if name=="cdc": namei = "Cdag" ; namej = "Cdag"
@@ -48,6 +51,8 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
     elif name=="ccd": namei = "C" ; namej = "C"
     elif name=="deltadelta" or name=="delta":
         namei = "delta" ; namej = "delta"
+    elif name=="deltadeltad":
+        namei = "delta" ; namej = "deltad"
     else: raise
   task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
                 "site_i_kpm":str(i),"site_j_kpm":str(j),
