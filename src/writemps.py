@@ -67,7 +67,9 @@ def write_couplings(self):
         l = c.g[ii,jj]
         if np.abs(l)!=0.0: # if nonzero
             out += [(c.i,c.j,ii,jj,l.real,l.imag)] # store
-            if (c.i,c.j,ii,jj) in stored: raise
+            if (c.i,c.j,ii,jj) in stored: 
+                print("Repeated coupling",c.i,c.j,ii,jj)
+                raise
             stored += [(c.i,c.j,ii,jj)] # store
   fo.write(str(len(out))+"\n") # write that number
   for o in out: # loop over elements

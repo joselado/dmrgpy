@@ -54,23 +54,18 @@ class Many_Body_Hamiltonian():
     self.couplings = [] # empty list
     for i in range(self.ns): # loop
       for j in range(i+1,self.ns):  # loop
-        g = fun(i,j) # call the function
+        g = fun(i,j).real # call the function
         g = g*one # multiply by the identity
         if np.sum(np.abs(g))!=0.0: 
           c = Coupling(i,j,g) # create class
           self.couplings.append(c) # store
     # now the onsite ones
-    for i in range(self.ns*0): # loop
+    for i in range(self.ns): # loop
+        g = fun(i,i).real # call the function
         g = g*one # multiply by the identity
         g = (g + g.H)/2. # the onsite one must be hermitian
         if np.sum(np.abs(g))!=0.0: # if nonzero 
-          c = Coupling(i,j,g) # create class
-          g[0,1] = g[0,1] + g[1,0]
-          g[0,2] = g[0,2] + g[2,0]
-          g[1,2] = g[1,2] + g[2,1]
-          g[1,0] = 0.0
-          g[2,0] = 0.0
-          g[2,1] = 0.0
+          c = Coupling(i,i,g) # create class
           self.couplings.append(c) # store
   def set_hoppings(self,fun):
       self.computed_gs = False # say that GS has not been computed
