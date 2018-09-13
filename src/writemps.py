@@ -32,6 +32,30 @@ def write_hoppings(self):
     fo.write(str(c.g.imag)+"\n")
   fo.close()
 
+
+def write_pairing(self):
+  """Write couplings in a file"""
+  fo = open("pairing.in","w")
+  cs = self.pairing
+  fo.write(str(len(cs))+"\n")
+  for key in self.pairing: # loop
+    c = self.pairing[key] # loop
+    if self.sites[c.i]!=1: raise
+    if self.sites[c.j]!=1: raise
+    fo.write(str(c.i)+"  ")
+    fo.write(str(c.j)+"  ")
+    fo.write(str(c.g.real)+"  ")
+    fo.write(str(c.g.imag)+"\n")
+  fo.close()
+
+
+
+
+
+
+
+
+
 def write_fields(self):
   """Write fields in a file"""
   fo = open("fields.in","w")

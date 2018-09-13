@@ -15,9 +15,6 @@ using namespace std;
 #include"get_gap.h" // compute the gap
 #include"get_sites.h" // get the sites from a file
 #include"spinoperators.h" // read the different tasks
-#include"get_exchange.h" // get the exchange coupling
-#include"get_hopping.h" // get the hoppings (in case there are)
-#include"get_hubbard.h" // get the hoppings (in case there are)
 #include"get_hamiltonian.h" // get the hoppings (in case there are)
 #include"read_wf.h" // this does not work yet
 #include"get_gs.h" // compute ground state energy and wavefunction
