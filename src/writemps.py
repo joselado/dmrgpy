@@ -59,11 +59,25 @@ def write_couplings(self):
   """Write couplings in a file"""
   fo = open("couplings.in","w")
   cs = self.couplings
-  fo.write(str(len(cs))+"\n")
+  out = [] # empty list
+  stored = [] # empty list
   for c in cs:
-    fo.write(str(c.i)+"  ")
-    fo.write(str(c.j)+"  ")
-    fo.write(matrix2string(c.g)+"\n")
+    for ii in range(3):
+      for jj in range(3):
+        l = c.g[ii,jj]
+        if np.abs(l)!=0.0: # if nonzero
+            out += [(c.i,c.j,ii,jj,l.real,l.imag)] # store
+            if (c.i,c.j,ii,jj) in stored: raise
+            stored += [(c.i,c.j,ii,jj)] # store
+  fo.write(str(len(out))+"\n") # write that number
+  for o in out: # loop over elements
+        (i,j,ii,jj,p,q) = o
+        fo.write(str(i)+"  ")
+        fo.write(str(j)+"  ")
+        fo.write(str(ii)+"  ")
+        fo.write(str(jj)+"  ")
+        fo.write(str(p)+"  ")
+        fo.write(str(q)+"\n")
   fo.close()
 
 

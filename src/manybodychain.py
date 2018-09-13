@@ -53,11 +53,24 @@ class Many_Body_Hamiltonian():
     self.computed_gs = False # say that GS has not been computed
     self.couplings = [] # empty list
     for i in range(self.ns): # loop
-      for j in range(self.ns):  # loop
+      for j in range(i+1,self.ns):  # loop
         g = fun(i,j) # call the function
         g = g*one # multiply by the identity
         if np.sum(np.abs(g))!=0.0: 
           c = Coupling(i,j,g) # create class
+          self.couplings.append(c) # store
+    # now the onsite ones
+    for i in range(self.ns*0): # loop
+        g = g*one # multiply by the identity
+        g = (g + g.H)/2. # the onsite one must be hermitian
+        if np.sum(np.abs(g))!=0.0: # if nonzero 
+          c = Coupling(i,j,g) # create class
+          g[0,1] = g[0,1] + g[1,0]
+          g[0,2] = g[0,2] + g[2,0]
+          g[1,2] = g[1,2] + g[2,1]
+          g[1,0] = 0.0
+          g[2,0] = 0.0
+          g[2,1] = 0.0
           self.couplings.append(c) # store
   def set_hoppings(self,fun):
       self.computed_gs = False # say that GS has not been computed
@@ -80,11 +93,6 @@ class Many_Body_Hamiltonian():
   def set_fields(self,fun):
     self.computed_gs = False # say that GS has not been computed
     self.fields = [fun(i) for i in range(self.ns)] # fields
-  def get_coupling(self,i,j):
-    """Return the coupling between two sites"""
-    for c in self.couplings:
-      if i==c.i and j==c.j: return c.g
-    return np.zeros((3,3)) 
   def setup_sweep(self,mode="default"):
     setup_sweep(self,mode=mode)
   def setup_task(self,mode="GS",task=dict()):
@@ -116,6 +124,7 @@ class Many_Body_Hamiltonian():
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
   def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,name="XX",
                                  delta=0.02,window=[-1.0,10.0]):
+    self.set_initial_wf(self.wf0) # set the initial wavefunction
     return kpmdmrg.get_dynamical_correlator(self,n=n,mode=mode,
                      i=i,j=j,name=name,delta=delta,window=window)
   def get_excited(self,n=10,mode="DMRG"):
@@ -236,5 +245,8 @@ def setup_sweep(self,mode="default"):
   sweep["maxm"] = self.maxm
   self.sweep = sweep # initialize
   write_sweeps(self) # write the sweeps
+
+
+
 
 

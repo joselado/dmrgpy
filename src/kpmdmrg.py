@@ -32,7 +32,7 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   fcorr = ["cdc","cdcup","ccd","cdcdn","deltadelta"] # correlators for fermions
   spins = [] # names for spin correlators
   for s1 in ["X","Y","Z"]:
-    for s2 in ["X","Y","Z"]: spins += [s1+s2]
+    for s2 in ["X","Y","Z"]: spins += [s1+s2] # create all the possibilities
   if name in spins: # spin correlator
     if name[0]=="X": namei="Sx"
     elif name[0]=="Y": namei="Sy"
@@ -54,6 +54,9 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
     elif name=="deltadeltad":
         namei = "delta" ; namej = "deltad"
     else: raise
+  else:
+      print("Dynamical correlator not recognised")
+      raise
   task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
                 "site_i_kpm":str(i),"site_j_kpm":str(j),
                 "kpm_scale":str(self.kpmscale),

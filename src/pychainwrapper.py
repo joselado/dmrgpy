@@ -5,8 +5,12 @@ import numpy as np
 
 def get_full_hamiltonian(self):
   sc = get_pychain(self) # get pychain object
-  h = sc.add_tensor_interaction(self.get_coupling) # add interaction
-#  print(self.fields)
+  def get_coupling(i,j):
+    """Return the coupling between two sites"""
+    for c in self.couplings:
+      if i==c.i and j==c.j: return c.g
+    return np.zeros((3,3))
+  h = sc.add_tensor_interaction(get_coupling) # add interaction
   h = h + sc.add_exchange(self.fields) # add magnetic fields
   return h
 
