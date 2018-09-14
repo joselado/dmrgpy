@@ -180,6 +180,7 @@ class Many_Body_Hamiltonian():
       self.run() # perform the calculation
       self.wf0 = mps.MPS(self).copy() # set the ground state
       out = np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
+      self.computed_gs = True
     elif mode=="ED": # use brute force
       h = self.get_full_hamiltonian() # get the Hamiltonian 
       out = pychain.spectrum.ground_state(h)[0] # return energy
