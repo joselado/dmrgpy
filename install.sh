@@ -12,3 +12,4 @@ make
 mv mpscpp mpscpp.x
 cd -
 
+python addsystem.py # add route to .bashrc
