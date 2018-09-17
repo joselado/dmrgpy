@@ -29,7 +29,7 @@ def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
 def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
   self.setup_sweep("accurate")
-  fcorr = ["cdc","cdcup","ccd","cdcdn","deltadelta"] # correlators for fermions
+  fcorr = ["cdc","cdcup","ccd","cdcdn","deltadelta","deltadeltad"] # correlators for fermions
   spins = [] # names for spin correlators
   for s1 in ["X","Y","Z"]:
     for s2 in ["X","Y","Z"]: spins += [s1+s2] # create all the possibilities
