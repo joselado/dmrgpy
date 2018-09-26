@@ -189,7 +189,7 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
   from scipy.interpolate import interp1d
   fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
   fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-  ne = int(10*(window[1] - window[0])/delta) # number of energies
+  ne = int(100*(window[1] - window[0])/delta) # number of energies
   xs = np.linspace(window[0],window[1],ne)
   ys = fr(xs) + 1j*fi(xs) # evaluate the interpolator
   np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)

@@ -139,11 +139,12 @@ int get_moments_dynamical_correlator(auto sites, auto H, int n,
   auto m2 = get_spin_operator(sites,j,namej); // first operator
 //  auto m2 = MPO(ampo2); // second operator
   int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
+  auto kpmcutoff = get_float_value("kpm_cutoff") ; // bond dimension for KPM
   if (check_task("orthogonal_kpm")) 
       moments_kpm_ortho(m,psi,m1,m2,n);  //compute the KPM moments
   else  {
-    auto psi1 = exactApplyMPO(psi,m1,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
-    auto psi2 = exactApplyMPO(psi,m2,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ;
+    auto psi1 = exactApplyMPO(psi,m1,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff}) ;
+    auto psi2 = exactApplyMPO(psi,m2,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff}) ;
     moments_vi_vj(m,psi1,psi2,n) ; } ; //compute the KPM moments
   return 0 ;
 } ;

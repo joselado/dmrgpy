@@ -36,7 +36,8 @@ class Many_Body_Hamiltonian():
     self.kpmmaxm = 50 # bond dimension in KPM
     self.maxm = 30 # bond dimension in wavefunctions
     self.nsweeps = 15 # number of sweeps
-    self.kpmcutoff = 1e-5 # cutoff in KPM
+    self.kpmcutoff = 1e-8 # cutoff in KPM
+    self.cutoff = 1e-8 # cutoff in ground state
     self.kpmscale = 10.0 # this is meaningless
     self.restart = False # restart the calculation
     self.gs_from_file = False # start from a random wavefunction
@@ -253,6 +254,7 @@ def setup_sweep(self,mode="default"):
   else: raise
   sweep["n"] = self.nsweeps
   sweep["maxm"] = self.maxm
+  sweep["cutoff"] = self.cutoff
   self.sweep = sweep # initialize
   write_sweeps(self) # write the sweeps
 
