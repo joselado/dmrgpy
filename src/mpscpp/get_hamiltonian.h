@@ -2,6 +2,7 @@
 // return the hamiltonian of the system
 #include"get_exchange.h" // get the exchange coupling
 #include"get_hopping.h" // get the hoppings (in case there are)
+#include"get_spinful_hopping.h" // get the hoppings (in case there are)
 #include"get_pairing.h" // get the hoppings (in case there are)
 #include"get_hubbard.h" // get the hoppings (in case there are)
 
@@ -12,6 +13,8 @@ auto get_hamiltonian(auto sites) {
     ampo = get_exchange(ampo); // add exchange to the Hamiltonian
     cout << "Adding fermionic hoppings" << endl ;
     ampo = get_hopping(ampo); // add hopping to the Hamiltonian
+    cout << "Adding fermionic spinful hoppings" << endl ;
+    ampo = get_spinful_hopping(ampo); // add hopping to the Hamiltonian
     cout << "Adding Hubbard interaction" << endl ;
     ampo = get_hubbard(ampo); // add hubbard to the Hamiltonian
     cout << "Adding magnetic field" << endl ;

@@ -1,6 +1,16 @@
 import numpy as np
 
 
+def write_hamiltonian(self):
+    write_sites(self) # write the different sites
+    write_couplings(self)  # write the couplings
+    write_hoppings(self)  # write the hoppings
+    write_spinful_hoppings(self)  # write the hoppings
+    write_pairing(self)  # write the pairing
+    write_hubbard(self)  # write hubbard terms
+    write_fields(self) # write the fields
+
+
 def write_hubbard(self):
   """Write couplings in a file"""
   fo = open("hubbard.in","w")
@@ -31,6 +41,47 @@ def write_hoppings(self):
     fo.write(str(c.g.real)+"  ")
     fo.write(str(c.g.imag)+"\n")
   fo.close()
+
+
+
+
+
+def write_spinful_hoppings(self):
+  """Write couplings in a file"""
+  fo = open("spinful_hoppings.in","w")
+  cs = self.spinful_hoppings
+  if type(cs)==type(dict()): # dictionary type
+    fo.write(str(4*len(cs))+"\n")
+    for key in self.spinful_hoppings: # loop
+      c = self.hoppings[key] # loop
+      if self.sites[c.i]!=1: raise
+      if self.sites[c.j]!=1: raise
+      # loop over elements
+      g = np.matrix(c.g) # convert to matrix
+      for i in range(2):
+        for j in range(2):
+          fo.write(str(2*c.i+i)+"  ")
+          fo.write(str(2*c.j+j)+"  ")
+          fo.write(str(g[i,j].real)+"  ")
+          fo.write(str(g[i,j].imag)+"\n")
+  else: # assume matrix type
+      from scipy.sparse import coo_matrix
+      cs = coo_matrix(cs) # transform to coo matrix
+      row = cs.row
+      col = cs.col
+      data = cs.data
+      fo.write(str(len(data))+"\n")
+      for (r,c,d) in zip(row,col,data):
+          fo.write(str(r)+"   ")
+          fo.write(str(c)+"   ")
+          fo.write(str(d.real)+"   ")
+          fo.write(str(d.imag)+"\n")
+  fo.close()
+
+
+
+
+
 
 
 def write_pairing(self):

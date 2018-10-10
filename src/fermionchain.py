@@ -24,10 +24,13 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """Compute the free correlator"""
         if len(self.hubbard)!=0: raise
         else:
-          m = np.zeros((self.ns,self.ns)) # matrix
+          m = np.zeros((self.ns*2,self.ns*2)) # matrix
           for key in self.hoppings:
               t = self.hoppings[key]
-              m[t.i,t.j] = t.g
+              m[2*t.i,2*t.j] = 2*t.g
+              m[2*t.i+1,2*t.j+1] = 2*t.g
+        if type(self.spinful_hoppings)!=type(dict()):
+          m = m + self.spinful_hoppings
         return m
     def correlator_free(self,pairs=[[]]):
           """Get the correlator for free fermions"""
@@ -45,7 +48,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """Get the energy for free fermions"""
         m = self.hamiltonian_free() # get the single body matrix
         es = lg.eigvalsh(m) # get the energies
-        return 2.*np.sum(es[es<0.0]) # return energies
+        return np.sum(es[es<0.0]) # return energies
 
 
 

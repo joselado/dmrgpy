@@ -29,6 +29,7 @@ class Many_Body_Hamiltonian():
     self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
     self.fields = [] # empty list
     self.hoppings = dict() # empty dictionary
+    self.spinful_hoppings = dict() # empty dictionary
     self.pairing = dict() # empty dictionary
     self.hubbard = dict() # empty dictionary
 #    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
@@ -79,6 +80,19 @@ class Many_Body_Hamiltonian():
                   c = fun(i,j)
                   if np.abs(c)>0.0:
                       self.hoppings[(i,j)] = Coupling(i,j,c) # store
+  def set_spinful_hoppings(self,fun):
+      """Add the spin independent hoppings"""
+      self.computed_gs = False # say that GS has not been computed
+      if callable(fun):
+        self.spinful_hoppings = dict()
+        for i in range(self.ns): # loop
+            for j in range(self.ns): # loop
+                if self.sites[i]==1 and self.sites[j]==1:
+                    c = fun(i,j)
+                    if np.abs(c)>0.0:
+                        self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
+      else: # assume it is a matrix
+          self.spinful_hoppings = np.matrix(fun)
   def set_pairing(self,fun):
       """Add the up/down pairing"""
       self.computed_gs = False # say that GS has not been computed
@@ -107,12 +121,8 @@ class Many_Body_Hamiltonian():
     from taskdmrg import setup_task
     setup_task(self,mode=mode,task=task)
   def write_hamiltonian(self):
-    write_sites(self) # write the different sites
-    write_couplings(self)  # write the couplings
-    write_hoppings(self)  # write the hoppings
-    write_pairing(self)  # write the pairing
-    write_hubbard(self)  # write hubbard terms
-    write_fields(self) # write the fields
+      from writemps import write_hamiltonian
+      write_hamiltonian(self)
   def run(self,automatic=False): 
     os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt") # run the DMRG calculation
   def entropy(self,n=1):
