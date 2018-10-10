@@ -5,7 +5,7 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 
-n = 6
+n = 2
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
 

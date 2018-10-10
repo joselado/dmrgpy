@@ -6,7 +6,8 @@ import numpy as np
 class MPS():
   """Object for an MPS"""
   def __init__(self,sc,name="psi_GS.mps"):
-    self.sc = sc # spin chain object
+    self.sc = sc # many body object
+    self.sc.wf0 = None # no wavefunction
     self.path = sc.path # path to the spin chain folder
     self.name = name # initial name
     self.factor = 1.0 # factor of the mps

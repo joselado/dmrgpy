@@ -44,6 +44,7 @@ class Many_Body_Hamiltonian():
     self.gs_from_file = False # start from a random wavefunction
     self.wf0 = None # no initial WF
     self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
+    self.sites_from_file = False # read sites from the file
     self.computed_gs = False # computed the GS already
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
@@ -163,6 +164,9 @@ class Many_Body_Hamiltonian():
       raise
     self.to_origin() # go to main folder
     return out
+  def get_gap(self):
+    es = self.get_excited(2)
+    return es[1] -es[0]
   def set_initial_wf(self,wf):
       """Use a certain wavefunction as initial guess"""
       if wf is None: return
