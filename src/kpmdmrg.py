@@ -150,7 +150,7 @@ def restrict_interval(x,y,window):
 
 
 def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
-             window=[-1,10],name="XX",delta=None):
+             window=[-1,10],name="XX",delta=None,es=None):
   if delta is not None: # estimate the number of polynomials
     scale = 0.
     for s in self.sites:
@@ -185,12 +185,17 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
                         j=j,namei=name[0],namej=name[1])
     else: raise
   self.to_origin() # go to origin folder
-  (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
+  if es is None:
+    (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
+  else:
+    (xs,ys) = restrict_interval(xs,ys,[min(es),max(es)]) # restrict the interval
   from scipy.interpolate import interp1d
   fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
   fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-  ne = int(100*(window[1] - window[0])/delta) # number of energies
-  xs = np.linspace(window[0],window[1],ne)
+  if es is None: 
+      ne = int(100*(window[1] - window[0])/delta) # number of energies
+      xs = np.linspace(window[0],window[1],ne)
+  else: xs = np.array(es).copy() # copy input array
   ys = fr(xs) + 1j*fi(xs) # evaluate the interpolator
   np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)
   return (xs,ys)

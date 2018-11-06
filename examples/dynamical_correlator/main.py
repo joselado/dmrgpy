@@ -23,7 +23,8 @@ i = np.random.randint(n)
 j = np.random.randint(n)
 
 t1 = time.time()
-(x2,y2) = sc.get_dynamical_correlator(n=600,mode="DMRG",i=i,j=j,delta=0.02)
+(x2,y2) = sc.get_dynamical_correlator(n=600,mode="DMRG",i=i,j=j,delta=0.02,
+        es=np.linspace(-0.5,15.0,400))
 t2 = time.time()
 print("Time with DMRG",t2-t1)
 (x3,y3) = sc.get_dynamical_correlator(n=300,mode="ED",i=i,j=j,delta=0.02)

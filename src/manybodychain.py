@@ -48,6 +48,9 @@ class Many_Body_Hamiltonian():
     self.computed_gs = False # computed the GS already
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
+  def copy(self):
+      from copy import deepcopy
+      return deepcopy(self)
   def to_origin(self): 
     if os.path.isfile(self.path+"/ERROR"): raise # something wrong
     os.chdir(self.inipath) # go to original folder
@@ -59,6 +62,7 @@ class Many_Body_Hamiltonian():
     for i in range(self.ns): # loop
       for j in range(i+1,self.ns):  # loop
         g = fun(i,j).real # call the function
+        if abs(fun(i,j)-fun(j,i))>1e-5: raise # something wrong
         g = g*one # multiply by the identity
         if np.sum(np.abs(g))!=0.0: 
           c = Coupling(i,j,g) # create class
@@ -143,10 +147,10 @@ class Many_Body_Hamiltonian():
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
   def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,name="XX",
-                                 delta=0.02,window=[-1.0,10.0]):
+                                 delta=0.02,window=[-1.0,10.0],es=None):
     self.set_initial_wf(self.wf0) # set the initial wavefunction
     return kpmdmrg.get_dynamical_correlator(self,n=n,mode=mode,
-                     i=i,j=j,name=name,delta=delta,window=window)
+                     i=i,j=j,name=name,delta=delta,window=window,es=es)
   def get_excited(self,n=10,mode="DMRG"):
     self.to_folder() # go to temporal folder
     if mode=="DMRG":
@@ -222,6 +226,7 @@ class Many_Body_Hamiltonian():
     mx = self.get_file("MEASURE_SX.OUT").transpose()[1]
     my = self.get_file("MEASURE_SY.OUT").transpose()[1]
     mz = self.get_file("MEASURE_SZ.OUT").transpose()[1]
+    np.savetxt("MAGNETIZATION.OUT",np.matrix([mx,my,mz]).T)
     return (mx,my,mz)
   def get_file(self,name):
     """Return the electronic density"""
