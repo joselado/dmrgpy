@@ -62,7 +62,7 @@ class Many_Body_Hamiltonian():
     for i in range(self.ns): # loop
       for j in range(i+1,self.ns):  # loop
         g = fun(i,j).real # call the function
-        if abs(fun(i,j)-fun(j,i))>1e-5: raise # something wrong
+        if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
         g = g*one # multiply by the identity
         if np.sum(np.abs(g))!=0.0: 
           c = Coupling(i,j,g) # create class
