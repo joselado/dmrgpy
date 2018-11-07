@@ -26,35 +26,16 @@ def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
 
 
 
+
+
+
 def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
   self.setup_sweep("accurate")
-  fcorr = ["cdc","cdcup","ccd","cdcdn","deltadelta","deltadeltad"] # correlators for fermions
-  spins = [] # names for spin correlators
-  for s1 in ["X","Y","Z"]:
-    for s2 in ["X","Y","Z"]: spins += [s1+s2] # create all the possibilities
-  if name in spins: # spin correlator
-    if name[0]=="X": namei="Sx"
-    elif name[0]=="Y": namei="Sy"
-    elif name[0]=="Z": namei="Sz"
-    if name[1]=="X": namej="Sx"
-    elif name[1]=="Y": namej="Sy"
-    elif name[1]=="Z": namej="Sz"
-    else: raise
-#    if self.sites[i] !=1 or self.sites[j]!=1:
-#        if name!="ZZ": raise  # fermions only accept ZZ
-  elif name in fcorr: # fermionic correlator
-    if self.sites[i] !=1 or self.sites[j]!=1: raise # only for fermions
-    if name=="cdc": namei = "Cdag" ; namej = "Cdag"
-    elif name=="cdcup": namei = "Cdagup" ; namej = "Cdagup"
-    elif name=="cdcdn": namei = "Cdagdn" ; namej = "Cdagdn"
-    elif name=="ccd": namei = "C" ; namej = "C"
-    elif name=="deltadelta" or name=="delta":
-        namei = "delta" ; namej = "delta"
-    elif name=="deltadeltad":
-        namei = "delta" ; namej = "deltad"
-    else: raise
-  else:
+  try: # select the right operators, be consistent with mpscpp.x
+      import operatornames
+      namei,namej = operatornames.recognize(self,name)
+  except:
       print("Dynamical correlator not recognised")
       raise
   task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
