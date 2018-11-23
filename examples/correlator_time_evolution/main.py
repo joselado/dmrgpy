@@ -9,7 +9,7 @@ import spinchain
 
 ns = np.array(range(4,30,2))
 es = []
-n = 2
+n = 5
 spins = [2 for i in range(n)]
 sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 def fj(i,j):

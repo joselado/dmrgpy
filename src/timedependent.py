@@ -29,12 +29,13 @@ def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.01):
 
 
 
-def correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.1,nt=1000):
+def correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.01,nt=None):
     """Compute a certain dynamical correlator"""
+    if nt is None: nt=int(1000/dt)
     (ts,cs) = evolution(self,dt=dt,nt=nt) # get correlator
-    cs = cs*np.exp(1j*self.e0*ts) # factor out the phase
+    cs = cs*np.exp(-1j*self.e0*ts) # factor out the phase
     ss = np.fft.fft(cs) # fourier transform
-    ws = np.fft.fftfreq(len(cs),d=dt)*8.*np.pi # fourier frequencies
+    ws = np.fft.fftfreq(len(cs),d=dt)*2.*np.pi # fourier frequencies
     from scipy.interpolate import interp1d
     fr = interp1d(ws,ss.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(ws,ss.imag,fill_value=0.0,bounds_error=False)
