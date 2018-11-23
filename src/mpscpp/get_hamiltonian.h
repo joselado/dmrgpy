@@ -7,7 +7,7 @@
 #include"get_hubbard.h" // get the hoppings (in case there are)
 
 
-auto get_hamiltonian(auto sites) {
+auto get_ampo(auto sites) {
     auto ampo = AutoMPO(sites); // create the MPO for the Hamiltonian
     cout << "Adding exchange couplings" << endl ;
     ampo = get_exchange(ampo); // add exchange to the Hamiltonian
@@ -21,6 +21,13 @@ auto get_hamiltonian(auto sites) {
     ampo = get_field(sites,ampo); // add magnetic field to the Hamiltonian
     cout << "Adding superconducting pairing" << endl ;
     ampo = get_pairing(ampo); // add magnetic field to the Hamiltonian
+    return ampo ;
+}
+
+
+
+auto get_hamiltonian(auto sites) {
+    auto ampo = get_ampo(sites) ; // get the ampo
     auto H = MPO(ampo);  // create the full Hamiltonian
     return H ;
 }

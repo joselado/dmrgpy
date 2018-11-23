@@ -103,5 +103,3 @@ def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
   return xs,np.conjugate(ys)/scale*np.pi
 
 
-
-

@@ -5,6 +5,7 @@ import kpmdmrg
 import pychainwrapper
 import pychain.spectrum
 import mps
+import timedependent
 
 dmrgpath = os.environ["DMRGROOT"] # path for the program
 one = np.matrix(np.identity(3))
@@ -42,6 +43,7 @@ class Many_Body_Hamiltonian():
     self.kpmscale = 10.0 # this is meaningless
     self.restart = False # restart the calculation
     self.gs_from_file = False # start from a random wavefunction
+    self.e0 = None # no ground state energy
     self.wf0 = None # no initial WF
     self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
     self.sites_from_file = False # read sites from the file
@@ -146,11 +148,10 @@ class Many_Body_Hamiltonian():
     return get_dos(self,i=i,delta=delta,window=window)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
-  def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,name="XX",
-                                 delta=0.02,window=[-1.0,10.0],es=None):
+  def get_dynamical_correlator(self,use_kpm=True,**kwargs):
     self.set_initial_wf(self.wf0) # set the initial wavefunction
-    return kpmdmrg.get_dynamical_correlator(self,n=n,mode=mode,
-                     i=i,j=j,name=name,delta=delta,window=window,es=es)
+    if use_kpm: return kpmdmrg.get_dynamical_correlator(self,**kwargs)
+    else: return timedependent.correlator(self,**kwargs)
   def get_excited(self,n=10,mode="DMRG"):
     self.to_folder() # go to temporal folder
     if mode=="DMRG":
@@ -199,6 +200,7 @@ class Many_Body_Hamiltonian():
       self.run() # perform the calculation
       self.wf0 = mps.MPS(self).copy() # set the ground state
       out = np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
+      self.e0 = out # store ground state energy
       self.computed_gs = True
     elif mode=="ED": # use brute force
       h = self.get_full_hamiltonian() # get the Hamiltonian 
@@ -235,6 +237,14 @@ class Many_Body_Hamiltonian():
     m = np.genfromtxt(name) # read file
     self.to_origin() # go back
     return m
+  def execute(self,f):
+    """Execute function in the folder"""
+    self.to_folder() # go to folder
+    f()
+    self.to_origin() # go back
+  def evolution(self,**kwargs):
+    import timedependent
+    return timedependent.evolution(self,**kwargs)
 
 
 

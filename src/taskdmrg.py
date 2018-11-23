@@ -30,6 +30,8 @@ def select_task(self,mode="GS"):
     task["overlap"] = "true"
   elif mode=="dynamical_correlator": # default mode
     task["dynamical_correlator"] = "true"
+  elif mode=="time_evolution": # default mode
+    task["time_evolution"] = "true"
 #    task["orthogonal_kpm"] = "true"
   else: raise
   self.task = task # initialize
@@ -46,7 +48,10 @@ def write_tasks(self):
   fo.write(" starting_file_gs = "+self.starting_file_gs+"\n") # starting WF
   for key in self.task:
     fo.write(key+" = "+self.task[key]+"\n")
-  fo.write("}\n")
 #("GS = true\ngap = false\ncorrelator = false\n}\n")
+  # parameters of dmrg algorithm
+  fo.write(" maxm ="+str(self.maxm)+"\n") # maximum bond dimension
+  fo.write(" cutoff ="+str(self.cutoff)+"\n") # maximum discarded weight
+  fo.write("}\n")
   fo.close()
 

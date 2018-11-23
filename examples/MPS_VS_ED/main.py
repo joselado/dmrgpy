@@ -9,8 +9,13 @@ n = 4
 for i in range(10):
   spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
   sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
-  def fj(i,j): return np.random.random((3,3)) # random couplings
-  def fb(i): return np.random.random(3)
+  def fj(i,j): 
+      return 0.3
+#      m = np.random.random((3,3)) # random couplings
+#      return m + m.transpose()
+  def fb(i): 
+      m = np.random.random(3)
+      return m + m.transpose()
   sc.set_exchange(fj)
   sc.set_fields(fb)
   e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy

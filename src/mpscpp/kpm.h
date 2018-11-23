@@ -21,7 +21,7 @@ int moments_vi_vj(auto m, auto vi, auto vj, int n) {
   auto ap = a*1.0 ; // initialize
   auto bk = overlapC(vj,v) ; // overlap
   auto bk1 = overlapC(vj,a) ; // overlap
-  int cindex = v.N()/2 ; // centroal site
+  int cindex = v.N()/2 ; // central site
   myfile << std::setprecision(8) << real(bk) << "  "  
                        << std::setprecision(8)<< imag(bk) << endl;
   myfile << std::setprecision(8) << real(bk1) << "  "  

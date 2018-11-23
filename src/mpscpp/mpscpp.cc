@@ -26,6 +26,7 @@ using namespace std;
 #include"get_excited.h" // compute excited states
 #include"kpm.h" // KPM routines
 #include"compute_overlap.h" // Compute overlap
+#include"time_evolution.h" // Compute overlap
 
 
 int 
@@ -71,6 +72,7 @@ main()
     } ;
 // overlap task
     if (check_task("overlap"))  compute_overlap() ; // compute overlap
+    if (check_task("time_evolution"))  quench(sites) ; // time evolution
     system("rm -f ERROR") ; // create error file
     return 0;
     }

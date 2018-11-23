@@ -144,6 +144,7 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
     mus = get_moments_dynamical_correlator_dmrg(self,n=n,i=i,j=j,name=name) 
     scale = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
     e0 = np.genfromtxt("GS_ENERGY.OUT") # ground state energy
+    self.e0 = e0 # add this quantity
     minx = -1.0 + (e0*scale) 
     maxx = -1.0 
     xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies

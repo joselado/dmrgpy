@@ -18,22 +18,26 @@ def evolve(waves,h,t=0.0,mode="caley",dt=0.01,de=0.0,dp=0.0):
     return [discrete_evolution(w,h,t,dt) for w in waves]
   elif mode=="taylor":
     return [discrete_evolution_taylor2(w,h,t,dt) for w in waves]
-  elif mode=="full":
-    u = lg.expm(1j*h*t) # evolution operator
-    wout = []
-    for wave in waves: # loop over wavefunctions
-      w = u*csc_matrix([wave]).T # evolve
-      w = np.array(w.todense().reshape(w.shape[0]))[0] # convert to array
-      wout.append(w) # store wavefunction
-    return wout # return waves
-  else: raise
+#  elif mode=="full":
+#    u = lg.expm(1j*h*t) # evolution operator
+#    wout = []
+#    for wave in waves: # loop over wavefunctions
+#      w = u*csc_matrix([wave]).T # evolve
+#      w = np.array(w.todense().reshape(w.shape[0]))[0] # convert to array
+#      wout.append(w) # store wavefunction
+#    return wout # return waves
+#  else: raise
 
 
+from scipy.sparse import issparse
 
 # @jit
 def discrete_evolution(wave,h,t=0.0,dt=0.001,order=1):
   """ Evolves a wavefunction using Caley's form"""
-  w = np.array(wave) # convert into sparse matrix
+  if issparse(wave):
+    w = np.array(wave.todense())
+  else:
+    w = np.array(wave) # convert into sparse matrix
   nt = np.round(np.int(t/dt)) # number of steps
   if nt == 0: # no steps
     nt = 1 # one step
