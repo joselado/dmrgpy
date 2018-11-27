@@ -9,7 +9,7 @@ import spinchain
 
 ns = np.array(range(4,30,2))
 es = []
-n = 5
+n = 10
 spins = [2 for i in range(n)]
 sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 def fj(i,j):
@@ -20,9 +20,15 @@ sc.maxm = 10
 sc.get_gs()
 #(x,y) = sc.evolution(nt=300,dt=0.1)
 es = np.linspace(-1.0,10.0,4000)
+import time
+print("Starting")
+t0 = time.time()
 (x1,y1) = sc.get_dynamical_correlator(es=es,use_kpm=True)
+t1 = time.time()
 (x2,y2) = sc.get_dynamical_correlator(es=es,use_kpm=False)
-
+t2 = time.time()
+print("Time in TD",t2-t1)
+print("Time in KPM",t1-t0)
 
 import matplotlib.pyplot as plt
 plt.plot(x1,y1.real)

@@ -48,6 +48,7 @@ class Many_Body_Hamiltonian():
     self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
     self.sites_from_file = False # read sites from the file
     self.computed_gs = False # computed the GS already
+    self.fit_td = False # use fitting procedure in time evolution
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
   def copy(self):

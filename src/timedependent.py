@@ -9,12 +9,15 @@ def evolution(self,mode="DMRG",**kwargs):
         from dmrgpy2pychain.timedependent import evolution as evolution_exact
         return evolution_exact(self,**kwargs)
 
-def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.01):
+def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):
     namei,namej = operatornames.recognize(self,name)
+    if self.fit_td: fittd = "true"
+    else: fittd = "false"
     task = {"time_evolution":"true",
             "tevol_site_i":str(i),
             "tevol_site_j":str(j),
             "tevol_nt":str(nt),
+            "tevol_fit":fittd,
             "tevol_dt":str(dt),
             "tevol_operator_i":namei,
             "tevol_operator_j":namej,

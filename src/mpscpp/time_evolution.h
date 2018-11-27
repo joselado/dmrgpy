@@ -28,8 +28,10 @@ int quench(auto sites) {
 //  normalize(psi1); // normalize
 //  normalize(psi2); // normalize
   auto norm0 = sqrt(overlapC(psi1,psi1)) ;
+  auto fittd = get_bool("tevol_fit_td") ; // use fitting method
   for (it=0;it<nt;it++) { // loop
-	      psi1 = exactApplyMPO(expH,psi1,args); // evolve
+	      if (fittd) fitApplyMPO(psi1,expH,psi1,args) ; // evolve
+	      if (not fittd) psi1 = exactApplyMPO(expH,psi1,args); // evolve
               normalize(psi1); // normalize
 	      psi1 *= norm0 ; // restore initial norm
 	      auto z = overlapC(psi2,psi1) ; // overlap
