@@ -3,15 +3,15 @@ import os
 import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import matplotlib.pyplot as plt
-import fermionchain
+from dmrgpy import fermionchain
 
-n = 20
+n = 10
 sc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 def ft(i,j):
 #    if i==j: return 1.0
     if abs(j-i)==1: return 1.0 #+ np.random.random()
 #    if i==j: return np.random.random()
-    if i==j: return 1.1
+#    if i==j: return 1.1
     return 0.0
 sc.set_hoppings(ft) # hoppings
 

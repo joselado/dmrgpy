@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/bin/bash
 
 python clean.py
 git add .

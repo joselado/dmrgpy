@@ -1,13 +1,14 @@
 from __future__ import print_function
 import numpy as np
 import os
-import kpmdmrg
-import pychainwrapper
-import pychain.spectrum
-import mps
-import timedependent
+from . import kpmdmrg
+from . import pychainwrapper
+from . import pychain
+from . import mps
+from . import timedependent
 
-dmrgpath = os.environ["DMRGROOT"] # path for the program
+#dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
+dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
 one = np.matrix(np.identity(3))
 
 
@@ -126,10 +127,10 @@ class Many_Body_Hamiltonian():
   def setup_sweep(self,mode="default"):
     setup_sweep(self,mode=mode)
   def setup_task(self,mode="GS",task=dict()):
-    from taskdmrg import setup_task
+    from .taskdmrg import setup_task
     setup_task(self,mode=mode,task=task)
   def write_hamiltonian(self):
-      from writemps import write_hamiltonian
+      from .writemps import write_hamiltonian
       write_hamiltonian(self)
   def run(self,automatic=False): 
     os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt") # run the DMRG calculation
@@ -145,7 +146,7 @@ class Many_Body_Hamiltonian():
   def get_pychain(self):
     return pychainwrapper.get_pychain(self)
   def get_dos(self,i=0,delta=0.1,window=5.0):
-    from dos import get_dos
+    from .dos import get_dos
     return get_dos(self,i=i,delta=delta,window=window)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
@@ -163,7 +164,7 @@ class Many_Body_Hamiltonian():
       out = np.genfromtxt("EXCITED.OUT")
     elif mode=="ED":
       h = self.get_full_hamiltonian() # get the Hamiltonian
-      import pychain.spectrum
+      from . import pychain
       out = pychain.spectrum.eigenstates(h,k=n) # return energy
     else: 
       self.to_origin() # go to main folder
@@ -244,7 +245,7 @@ class Many_Body_Hamiltonian():
     f()
     self.to_origin() # go back
   def evolution(self,**kwargs):
-    import timedependent
+    from . import timedependent
     return timedependent.evolution(self,**kwargs)
 
 
@@ -254,14 +255,14 @@ class Many_Body_Hamiltonian():
 
 
 
-from writemps import write_hoppings
-from writemps import write_hubbard
-from writemps import write_fields
-from writemps import write_sites
-from writemps import write_couplings
-from writemps import write_correlators
-from writemps import write_sweeps
-from writemps import write_pairing
+from .writemps import write_hoppings
+from .writemps import write_hubbard
+from .writemps import write_fields
+from .writemps import write_sites
+from .writemps import write_couplings
+from .writemps import write_correlators
+from .writemps import write_sweeps
+from .writemps import write_pairing
 
 
 

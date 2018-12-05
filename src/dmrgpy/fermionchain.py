@@ -1,12 +1,13 @@
-from manybodychain import Many_Body_Hamiltonian
+from .manybodychain import Many_Body_Hamiltonian
 import numpy as np
 import scipy.linalg as lg
 
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     """Class for fermionic Hamiltonians"""
-    def __init__(self,n):
+    def __init__(self,n,spinful=True):
         Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
+        self.spinful = spinful
     def get_density(self):
         """Return the electronic density"""
         m = self.get_file("MEASURE_N.OUT") # get the file
@@ -41,9 +42,13 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           for p in pairs:
               o = 0.0 # initialize
               for (e,v) in zip(es,vs):
-                  if e<=0.0: o += v[p[0]]*np.conjugate(v[p[1]]) # add
+                  if e<=0.0: 
+                      if self.spinful: # spinful Hamiltonian
+                          for i in range(2):
+                            o += v[2*p[0]+i]*np.conjugate(v[2*p[1]+i]) # add
+                      else: raise # not implemented
               out.append(o)
-          return np.array(out)*2.0 # return
+          return np.array(out) # return
     def gs_energy_free(self):
         """Get the energy for free fermions"""
         m = self.hamiltonian_free() # get the single body matrix
@@ -82,7 +87,7 @@ def get_gr_free(self,es=np.linspace(-10.,10.,800),delta=0.1,i=0,j=0):
 
 def get_gr(self,delta=0.002,es=np.linspace(-10.0,10.0,800),i=0,j=0):
     """Compute the advanced Green's function"""
-    import kpmdmrg
+    from . import kpmdmrg
     (x1,y1) = kpmdmrg.get_dynamical_correlator(self,es=es,i=i,j=j,
             name="cdc",delta=delta)
     (x2,y2) = kpmdmrg.get_dynamical_correlator(self,es=es,i=i,j=j,

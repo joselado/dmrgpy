@@ -1,4 +1,4 @@
-from manybodychain import Many_Body_Hamiltonian
+from .manybodychain import Many_Body_Hamiltonian
 import numpy as np
 
 Spin_Hamiltonian = Many_Body_Hamiltonian

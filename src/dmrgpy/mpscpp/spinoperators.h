@@ -105,7 +105,7 @@ return m ;
 
 auto get_hopping_operator(auto sites, int i, int j) {
 	auto ampo = AutoMPO(sites);
-	if (site_type(i)==1)  // fermionic site
+	if (site_type(i)==1)  // spinful fermionic site
         	ampo += 1.0,"Cdagup",i+1,"Cup",j+1;
         	ampo += 1.0,"Cdagdn",i+1,"Cdn",j+1;
         auto m = MPO(ampo) ;	

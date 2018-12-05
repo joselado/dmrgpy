@@ -16,8 +16,8 @@ def get_full_hamiltonian(self):
 
 
 def get_pychain(self):
-  import pychain.build
-  sc = pychain.build.Spin_chain()
+  from .pychain import build
+  sc = build.Spin_chain()
   # the pychain library assumes that s=1/2 is for spin one-half
   # whereas in DMRG s = 2 is for S=1/2
   sc.build((np.array(self.sites)-1.)/2.,use_lib=False) 

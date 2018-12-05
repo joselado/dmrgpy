@@ -1,12 +1,14 @@
 from __future__ import print_function
-import operatornames
-import taskdmrg
+from . import operatornames
+from . import taskdmrg
 import numpy as np
+from scipy.interpolate import interp1d
 
 def evolution(self,mode="DMRG",**kwargs):
     if mode=="DMRG":  return evolution_dmrg(self,**kwargs)
     if mode=="ED":  
-        from dmrgpy2pychain.timedependent import evolution as evolution_exact
+        from . import dmrgpy2pychain
+        evolution_exact = dmrgpy2pychain.timedependent.evolution
         return evolution_exact(self,**kwargs)
 
 def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):
@@ -32,14 +34,25 @@ def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):
 
 
 
-def correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.01,nt=None):
+def correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.01,
+        nt=None,factor=1):
     """Compute a certain dynamical correlator"""
     if nt is None: nt=int(1000/dt)
     (ts,cs) = evolution(self,dt=dt,nt=nt) # get correlator
     cs = cs*np.exp(-1j*self.e0*ts) # factor out the phase
+    # interpolate the time evolution
+    ftr = interp1d(ts,cs.real,fill_value=0.0,bounds_error=False)
+    fti = interp1d(ts,cs.imag,fill_value=0.0,bounds_error=False)
+    # interpolate the time evolution
+#    factor = 10 # interpolation factor
+    tnew = np.linspace(np.min(ts),np.max(ts),len(ts)*factor) # ten times
+    cnew = ftr(tnew) + 1j*fti(tnew)
+    ts = tnew.copy() # overwrite
+    cs = cnew.copy() # overwrite
+    dtnew = dt/factor
+    # do the fourier transform
     ss = np.fft.fft(cs) # fourier transform
-    ws = np.fft.fftfreq(len(cs),d=dt)*2.*np.pi # fourier frequencies
-    from scipy.interpolate import interp1d
+    ws = np.fft.fftfreq(len(cs),d=dtnew)*2.*np.pi # fourier frequencies
     fr = interp1d(ws,ss.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(ws,ss.imag,fill_value=0.0,bounds_error=False)
     if es is None:

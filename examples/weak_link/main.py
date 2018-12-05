@@ -2,7 +2,7 @@ import os
 import sys
 import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-import spinchain
+from dmrgpy import spinchain
 
 
 

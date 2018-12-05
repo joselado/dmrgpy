@@ -2,7 +2,7 @@ import sys
 import os
 import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-import spinchain
+from dmrgpy import spinchain
 
 n = 4
 spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain

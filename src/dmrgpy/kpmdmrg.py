@@ -33,7 +33,7 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
   self.setup_sweep("accurate")
   try: # select the right operators, be consistent with mpscpp.x
-      import operatornames
+      from . import operatornames
       namei,namej = operatornames.recognize(self,name)
   except:
       print("Dynamical correlator not recognised")
@@ -54,8 +54,8 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
 
 
 
-import pychain.kpm
-from pychain.kpm import generate_profile
+from . import pychain
+from .pychain.kpm import generate_profile
 
 def get_dos(self,n=1000,mode="DMRG",ntries=10):
   if mode=="DMRG": 
@@ -101,12 +101,12 @@ def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=True,window=[-1,10]):
   else: 
     h = self.get_full_hamiltonian()
     sc = self.get_pychain()
-    import pychain.correlator
+    from .pychain import correlator as pychain_correlator
     if mode=="fullKPM":
-      (xs,ys) = pychain.correlator.spismj_kpm(sc,h,n=n,i=i,j=j)
+      (xs,ys) = pychain_correlator.spismj_kpm(sc,h,n=n,i=i,j=j)
     elif mode=="full" or mode=="ED":
       delta = float(self.ns)/n*1.5
-      (xs,ys) = pychain.correlator.spismj(sc,h,delta=delta,i=i,j=j)
+      (xs,ys) = pychain_correlator.spismj(sc,h,delta=delta,i=i,j=j)
     else: raise
   self.to_origin() # go to origin folder
   (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
@@ -157,13 +157,13 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
   else: 
     h = self.get_full_hamiltonian()
     sc = self.get_pychain()
-    import pychain.correlator
+    from .pychain import correlator as pychain_correlator
     if delta is None: delta = float(self.ns)/n*1.5
     if mode=="fullKPM":
-      (xs,ys) = pychain.correlator.dynamical_correlator_kpm(sc,h,n=n,i=i,j=j,
+      (xs,ys) = pychain_correlator.dynamical_correlator_kpm(sc,h,n=n,i=i,j=j,
                          namei=name[0],namej=name[1])
     elif mode=="ED":
-      (xs,ys) = pychain.correlator.dynamical_correlator(sc,h,delta=delta,i=i,
+      (xs,ys) = pychain_correlator.dynamical_correlator(sc,h,delta=delta,i=i,
                         j=j,namei=name[0],namej=name[1])
     else: raise
   self.to_origin() # go to origin folder

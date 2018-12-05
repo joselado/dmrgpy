@@ -1,12 +1,12 @@
 # compile Itensor library
-cd src/mpscpp/ITensor-master
+cd src/dmrgpy/mpscpp/ITensor-master
 cp options.save options.mk
 make clean 
 make
 cd -
 
 # compile DMRG program
-cd src/mpscpp
+cd src/dmrgpy/mpscpp
 make clean 
 make
 mv mpscpp mpscpp.x
