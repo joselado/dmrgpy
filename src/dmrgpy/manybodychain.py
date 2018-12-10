@@ -195,18 +195,10 @@ class Many_Body_Hamiltonian():
   def gs_energy(self,mode="DMRG",wf0=None):
     """Return the ground state energy"""
     # write the sites
-    self.to_folder() # go to temporal folder
     if mode=="DMRG":
-      self.set_initial_wf(wf0) # set the initial wavefunction
-      self.setup_sweep()
-      self.setup_task("GS")
-      self.write_hamiltonian() # write the Hamiltonian to a file
-      self.run() # perform the calculation
-      self.wf0 = mps.MPS(self).copy() # set the ground state
-      out = np.genfromtxt("GS_ENERGY.OUT") # return the ground state energy
-      self.e0 = out # store ground state energy
-      self.computed_gs = True
+      out = groundstate.gs_energy(self,wf0=wf0)
     elif mode=="ED": # use brute force
+      self.to_folder() # go to temporal folder
       h = self.get_full_hamiltonian() # get the Hamiltonian 
       out = pychain.spectrum.ground_state(h)[0] # return energy
     else: 
