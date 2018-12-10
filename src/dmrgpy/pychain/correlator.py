@@ -5,6 +5,7 @@ from . import spectrum
 from scipy.sparse import csc_matrix as csc
 from scipy.sparse import identity
 import scipy.sparse.linalg as lg
+from . import algebra
 
 # calculate dynamical correlators
 
@@ -103,3 +104,16 @@ def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
   return xs,np.conjugate(ys)/scale*np.pi
 
 
+
+
+
+def static(sc,h,namei="X",namej="X",i=0,j=0):
+    """Return a certain correlator"""
+    wf = spectrum.ground_state(h)[1] # get wavefunction
+    def getop(name,i):
+        if name=="X": return sc.sxi[i]
+        elif name=="Y": return sc.syi[i]
+        elif name=="Z": return sc.szi[i]
+        else: raise
+    m = getop(namei,i)*getop(namej,j) # get operator
+    return algebra.vAw_braket(wf,m,wf)

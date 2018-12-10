@@ -7,7 +7,7 @@ from scipy.sparse import csc_matrix
 def evolution(self,name="XX",i=0,j=0,nt=100,dt=0.01):
     """Perform time evolution exactly"""
     h = self.get_full_hamiltonian() # get full Hamiltonian
-    from pychainwrapper import get_pychain
+    from ..pychainwrapper import get_pychain
     sc = get_pychain(self) # the pychain spin object
     namei,namej = operatornames.recognize(self,name) # name of the operator
     nd = {"Sx":0,"Sy":1,"Sz":2}
@@ -16,11 +16,11 @@ def evolution(self,name="XX",i=0,j=0,nt=100,dt=0.01):
     Ai = sc.ski[ni][i] # operator
     Aj = sc.ski[nj][j] # operator
     ts = np.array([dt*ii for ii in range(nt)]) # times
-    from pychain.evolution import evolve # evolve the wavefunction
+    from ..pychain.evolution import evolve # evolve the wavefunction
     wf0 = self.get_gs(mode="ED") # get wavefunction
     wf0 = csc_matrix(wf0).T # turn into a matrix
     wf = wf0.copy() # copy wavefunction
-    from pychain.algebra import Av,braket
+    from ..pychain.algebra import Av,braket
     wf = Av(Ai,wf) # apply operator
     cs = [] # empty list
     for it in range(nt): # loop

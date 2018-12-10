@@ -48,7 +48,10 @@ float single_correlator(auto psi,auto sites, auto i,auto namei, int j, auto name
 
 
 // calculate all the correlators
-void get_correlator(auto psi, auto sites)   {
+void get_correlator()   {
+  auto sites = get_sites();
+  auto H = get_hamiltonian(sites) ;
+  auto psi = get_gs(sites,H) ;
   ifstream cfile; // declare
   ofstream ofile; // declare
   cfile.open("correlators.in");  // open file

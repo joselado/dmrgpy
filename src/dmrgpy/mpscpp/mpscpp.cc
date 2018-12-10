@@ -49,7 +49,7 @@ main()
       measure(psi,sites) ; // and compute expectation values
     } ;
 //    if (not(check_task("GS"))) psi = read_wf() ; // read the wavefunction from a file
-    if (check_task("correlator")) get_correlator(psi,sites) ; // write correlators 
+    if (check_task("correlator")) get_correlator() ; // write correlators 
     if (check_task("gap")) get_gap(H,sites,sweeps); // calculate the gap 
     if (check_task("entropy")) get_entropy(psi,2); 
     if (check_task("excited")) {

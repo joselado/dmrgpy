@@ -6,6 +6,7 @@ from . import pychainwrapper
 from . import pychain
 from . import mps
 from . import timedependent
+from . import groundstate
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -179,10 +180,11 @@ class Many_Body_Hamiltonian():
       if wf is None: return
       self.gs_from_file = True # use a wavefunction from a file
       self.starting_file_gs = wf.name # name of the wavefunction
-  def get_gs(self,mode="DMRG",wf0=None):
+  def get_gs(self,mode="DMRG",wf0=None,best=True,n=1):
     """Return the ground state"""
     if mode=="DMRG":
-      self.gs_energy(wf0=wf0) # perform a ground state calculation
+      if best: groundstate.best_gs(self,n=n) # best ground state from a set
+      else: self.gs_energy(wf0=wf0) # perform a ground state calculation
       return self.wf0 # return wavefucntion
     elif mode=="ED":
       self.to_folder() # go to temporal folder
@@ -222,7 +224,9 @@ class Many_Body_Hamiltonian():
       write_correlators(pairs) # write the input file
       self.run() # perform the calculation
       m = np.genfromtxt("CORRELATORS.OUT").transpose()[1] # return the correlators
-    else: raise # not implemented
+    else: 
+      from .dmrgpy2pychain import correlator as correlatorpychain
+      m = correlatorpychain.correlator(self,pairs=pairs)
     self.to_origin() # go to main folder
     return m
   def get_magnetization(self):
