@@ -1,4 +1,4 @@
-auto get_spin_operator(auto sites, int i, auto name) {
+auto get_operator(auto sites, int i, auto name) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)!=1)  // spin site
 		ampo += 1.0,name,i+1 ;

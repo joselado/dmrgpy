@@ -1,6 +1,7 @@
 from .manybodychain import Many_Body_Hamiltonian
 import numpy as np
 import scipy.linalg as lg
+from .pyfermion import mbfermion
 
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
@@ -58,6 +59,12 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         return get_gr(self,**kwargs)
     def get_gr_free(self,**kwargs):
         return get_gr_free(self,**kwargs)
+    def gs_energy(self,mode="DMRG",**kwargs):
+        """Compute ground state energy, overrriding the method"""
+        if mode=="DMRG": return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
+        else: 
+#            return self.gs_energy_free()
+            return mbfermion.gs_energy(self.hamiltonian_free())
 
 
 

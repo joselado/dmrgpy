@@ -15,9 +15,9 @@ int measure(auto psi, auto sites) {
         {
         //re-gauge psi to get ready to measure at position j
 	if (site_type(j-1)==1) { // fermionic site
-	  sxj = overlap(psi,get_spin_operator(sites,j-1,"Sx"),psi);
-	  syj = overlap(psi,get_spin_operator(sites,j-1,"Sy"),psi);
-	  szj = overlap(psi,get_spin_operator(sites,j-1,"Sz"),psi);
+	  sxj = overlap(psi,get_operator(sites,j-1,"Sx"),psi);
+	  syj = overlap(psi,get_operator(sites,j-1,"Sy"),psi);
+	  szj = overlap(psi,get_operator(sites,j-1,"Sz"),psi);
 	};
 	if (site_type(j-1)!=1) { // spin site
           psi.position(j);

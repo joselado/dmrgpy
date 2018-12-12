@@ -6,8 +6,8 @@ int quench(auto sites) {
   auto i1 = get_int_value("tevol_site_i");  // second operator
   auto i2 = get_int_value("tevol_site_j");  // second operator
   // now get the operators
-  auto A1 = get_spin_operator(sites,i1,name1);
-  auto A2 = get_spin_operator(sites,i2,name2);
+  auto A1 = get_operator(sites,i1,name1);
+  auto A2 = get_operator(sites,i2,name2);
   auto H = get_hamiltonian(sites) ; // get the ampo for the Hamiltonian
   auto psi = get_gs(sites,H) ; // get the ground state
   int maxm = get_int_value("maxm") ; // bond dimension for KPM

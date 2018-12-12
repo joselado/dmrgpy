@@ -7,6 +7,8 @@ from . import pychain
 from . import mps
 from . import timedependent
 from . import groundstate
+from . import operatornames
+from . import correlator
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -207,20 +209,10 @@ class Many_Body_Hamiltonian():
     self.to_origin() # go to main folder
     self.restart = True
     return out
-  def correlator(self,pairs=[[]],mode="DMRG"):
-    self.to_folder() # go to temporal folder
-    if mode=="DMRG": # DMRG correlation
-      self.setup_sweep()
-      self.setup_task("correlator")
-      self.write_hamiltonian() # write the Hamiltonian to a file
-      write_correlators(pairs) # write the input file
-      self.run() # perform the calculation
-      m = np.genfromtxt("CORRELATORS.OUT").transpose()[1] # return the correlators
-    else: 
-      from .dmrgpy2pychain import correlator as correlatorpychain
-      m = correlatorpychain.correlator(self,pairs=pairs)
-    self.to_origin() # go to main folder
-    return m
+  def get_correlator(self,**kwargs):
+    """Return a correlator"""
+#    print(mode)
+    return correlator.get_correlator(self,**kwargs)
   def get_magnetization(self):
     """Calculate the magnetization of the system"""
     mx = self.get_file("MEASURE_SX.OUT").transpose()[1]

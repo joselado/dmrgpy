@@ -38,14 +38,14 @@ sc.set_fields(lambda i: np.random.random(3)) # optionally you could add local ma
 # compute ground state energy
 sc.cutoff = 1e-10
 e0 = sc.gs_energy() # compute ground state energy
-sc.get_gs(n=7)
+#sc.get_gs(n=7)
 
 # this array constains the pairs of spins on which you want to compute
 # <GS|S_i S_j GS>
 pairs = [(0,i) for i in range(n)] # between the edge and the rest
 
-cs = sc.correlator(pairs) # get the static correlators
-cs1 = sc.correlator(pairs,mode="ED") # get the static correlators
+cs = sc.get_correlator(pairs,mode="DMRG") # get the static correlators
+cs1 = sc.get_correlator(pairs,mode="ED") # get the static correlators
 
 
 

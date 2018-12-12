@@ -135,8 +135,8 @@ int get_moments_dynamical_correlator(auto sites, auto H, int n,
 //  auto ampo2 = AutoMPO(sites); 
 //  ampo1 += 1.0,namei,i ; // operator
 //  ampo2 += 1.0,namej,j ; // operator
-  auto m1 = get_spin_operator(sites,i,namei); // first operator
-  auto m2 = get_spin_operator(sites,j,namej); // first operator
+  auto m1 = get_operator(sites,i,namei); // first operator
+  auto m2 = get_operator(sites,j,namej); // first operator
 //  auto m2 = MPO(ampo2); // second operator
   int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
   auto kpmcutoff = get_float_value("kpm_cutoff") ; // bond dimension for KPM

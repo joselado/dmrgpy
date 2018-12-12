@@ -60,18 +60,26 @@ void get_correlator()   {
   cfile >> nc; // number of correlators
   float c; // declare float
   int i,j ;
+  int maxm = get_int_value("maxm") ; // bond dimension for KPM
+  auto cutoff = get_float_value("cutoff") ; // bond dimension for KPM
   for (int ic=0;ic<nc;++ic) { // loop over correlators
     cfile >> i >> j; // index of correlators
     c = 0.0 ; // initialize
-    if (site_type(i)!=1) { // Spin
-       c = overlap(psi,get_sidotsj_operator(sites,i,j),psi) ; // add 
+    // get the two operators
+    auto opi = get_operator(sites,i,get_str("correlator_operator_i")) ;
+    auto opj = get_operator(sites,j,get_str("correlator_operator_j")) ;
+    auto psi1 = exactApplyMPO(psi,opi,{"Maxm",maxm,"Cutoff",cutoff}) ;
+    auto psi2 = exactApplyMPO(psi,opj,{"Maxm",maxm,"Cutoff",cutoff}) ;
+    c = overlap(psi1,psi2);
+//    if (site_type(i)!=1) { // Spin
+//       c = overlap(psi,get_sidotsj_operator(sites,i,j),psi) ; // add 
 //       c += single_correlator(psi,sites,i+1,"Sx",j+1,"Sx"); // get this one
 //       c += single_correlator(psi,sites,i+1,"Sy",j+1,"Sy"); // get this one
 //       c += single_correlator(psi,sites,i+1,"Sz",j+1,"Sz"); // get this one
-    } ;
-    if (site_type(i)==1) { // fermion
-       c = overlap(psi,get_hopping_operator(sites,i,j),psi) ; // add 
-    } ;
+//    } ;
+//    if (site_type(i)==1) { // fermion
+//       c = overlap(psi,get_hopping_operator(sites,i,j),psi) ; // add 
+//    } ;
     ofile << ic << "   " << c << endl ;
   };
   ofile.close() ;
