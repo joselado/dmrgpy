@@ -5,6 +5,7 @@ from . import spectrum
 from scipy.sparse import csc_matrix as csc
 from scipy.sparse import identity
 import scipy.sparse.linalg as lg
+import scipy.sparse.linalg as slg
 from . import algebra
 
 # calculate dynamical correlators
@@ -27,8 +28,9 @@ def spismj(sc,h0,es=None,i=0,j=0,delta=0.1):
 
 
 
-def dynamical_correlator(sc,h0,es=None,i=0,j=0,delta=0.1,namei="X",namej="X"):
-  """Calculate a correlation function S+S- in a frequency window"""
+def dynamical_correlator(sc,h0,es=None,i=0,j=0,
+        delta=0.1,namei="X",namej="X",mode="full"):
+  """Calculate a correlation function SiSj in a frequency window"""
   e0,wf0 = spectrum.ground_state(h0) # get the ground state
   if es is None:
     es = np.linspace(-1.0,7.0,int(40/delta))
@@ -40,18 +42,43 @@ def dynamical_correlator(sc,h0,es=None,i=0,j=0,delta=0.1,namei="X",namej="X"):
   elif namej=="Y": sp = sc.syi[j]
   elif namej=="Z": sp = sc.szi[j]
   else: raise
-  iden = np.identity(h0.shape[0],dtype=np.complex) # identity
+  if h0.shape[0]<100: mode = "full"
+  else: mode = "cv"
+  iden = identity(h0.shape[0],dtype=np.complex) # identity
+  if mode=="full": iden = iden.todense() # dense matrix
   out = []
   for e in es: # loop over energies
-    g = ((iden*(e+e0+1j*delta)-h0).I - (iden*(e+e0-1j*delta)-h0).I)/2.
-    op = sp*g*sm # operator
-    o = viAvj(wf0,op,wf0) # correlator
-    out.append(o)
+      if mode=="full": # using exact inversion
+        g = ((iden*(e+e0+1j*delta)-h0).I - (iden*(e+e0-1j*delta)-h0).I)/2.
+        op = sp*g*sm # operator
+        o = viAvj(wf0,op,wf0) # correlator
+      elif mode=="cv": # correction vector algorithm
+          o1 = solve_cv(h0,wf0,sp,sm,e+e0,delta=delta) # conjugate gradient
+          o2 = solve_cv(h0,wf0,sp,sm,e+e0,delta=-delta) # conjugate gradient
+          o = (o1 - o2)/2. # substract
+      else: raise # not recognised
+      out.append(o)
   return es,1j*np.array(out)/np.pi # return result
 
 
 
 
+def solve_cv(h0,wf0,si,sj,w,delta=0.0):
+     # use algorithm to solve A*x = b
+     iden = identity(h0.shape[0],dtype=np.complex) # identity
+     b = -delta*sj*np.matrix(wf0).T # create the b vector
+     A = (h0 - w*iden)*(h0-w*iden) + iden*delta*delta # define A matrix
+     b = np.array(b).reshape((b.shape[0],)) # array
+     x,info = slg.cg(A,b,tol=1e-10) # solve the equation
+#     print(np.max(np.abs(A*np.matrix(x).T-np.matrix(b).T)))
+     x = np.matrix(x).T # column vector
+     x = 1j*x + (h0 - w*iden)*x/delta # full correction vector
+#     v1 = (iden*(w+1j*delta)-h0).todense().I*sj*np.matrix(wf0).T
+#     print(np.max(np.abs(x-v1))) # check the difference
+#     x = v1.copy() # copy
+     x = si*x # apply second operator
+     o = (np.matrix(wf0).H.T*x).trace()[0,0] # compute the braket
+     return o
 
 
 

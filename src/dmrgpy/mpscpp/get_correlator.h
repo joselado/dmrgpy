@@ -61,7 +61,7 @@ void get_correlator()   {
   float c; // declare float
   int i,j ;
   int maxm = get_int_value("maxm") ; // bond dimension for KPM
-  auto cutoff = get_float_value("cutoff") ; // bond dimension for KPM
+  auto cutoff = get_float_value("cutoff") ; // cutoff for KPM
   for (int ic=0;ic<nc;++ic) { // loop over correlators
     cfile >> i >> j; // index of correlators
     c = 0.0 ; // initialize
@@ -70,7 +70,7 @@ void get_correlator()   {
     auto opj = get_operator(sites,j,get_str("correlator_operator_j")) ;
     auto psi1 = exactApplyMPO(psi,opi,{"Maxm",maxm,"Cutoff",cutoff}) ;
     auto psi2 = exactApplyMPO(psi,opj,{"Maxm",maxm,"Cutoff",cutoff}) ;
-    c = overlap(psi1,psi2);
+    c = overlap(psi1,psi2); // compute the overlap
 //    if (site_type(i)!=1) { // Spin
 //       c = overlap(psi,get_sidotsj_operator(sites,i,j),psi) ; // add 
 //       c += single_correlator(psi,sites,i+1,"Sx",j+1,"Sx"); // get this one

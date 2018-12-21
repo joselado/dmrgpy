@@ -4,6 +4,7 @@ import numpy as np
 
 
 def get_correlator(self,pairs=[[]],name="SS"):
+    """Compute a certain static correlator in the spin chain"""
     ########################################
     # workaround for total spin correlator #
     ########################################
