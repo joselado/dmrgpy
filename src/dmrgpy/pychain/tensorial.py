@@ -1,10 +1,9 @@
 from __future__ import print_function
 from scipy.sparse.linalg import LinearOperator
 from scipy.sparse import coo_matrix
-import tensorialf90
 import numpy as np
 
-def tensorial_LO(op1,op2,sparse=True,fortran=True,adapted=True):
+def tensorial_LO(op1,op2,sparse=True,fortran=False,adapted=True):
   """Perform the tensorial product, returning a LinearOperator"""
   op1 = coo_matrix(op1)
   op2 = coo_matrix(op2)
@@ -19,6 +18,7 @@ def tensorial_LO(op1,op2,sparse=True,fortran=True,adapted=True):
   row2 = op2.row+1
   data2 = op2.data
   if fortran:
+    from . import tensorialf90
     if np.sum(np.abs(op1-np.identity(op1.shape[0])))<0.000001 and adapted:
       def fun(v):
         """Function that returns a vector"""

@@ -1,17 +1,17 @@
 from __future__ import print_function,division
-from tensorial import tensorial_LO
+from .tensorial import tensorial_LO
 import numpy as np
-import traceoverf90
-import tensorial
+#from . import traceoverf90
+from . import tensorial
 from scipy.sparse import csc_matrix
 from scipy.sparse import coo_matrix
-import tensorialf90
+from . import tensorialf90
 import time
 from scipy.sparse import linalg as slg # linear algebra library
 from scipy import linalg as lg # linear algebra library
 from scipy.sparse.linalg import LinearOperator
 import scipy.sparse as sp
-import dmrg
+from . import dmrg
 
 diagmax = 100000
 

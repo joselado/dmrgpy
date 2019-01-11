@@ -1,9 +1,9 @@
 from __future__ import print_function
-import build
+from . import build
 import numpy as np
 import scipy.linalg as lg
-import tensorial
-import dmrg
+from . import tensorial
+from . import dmrg
 
 
 

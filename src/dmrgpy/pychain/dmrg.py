@@ -1,8 +1,8 @@
 from __future__ import print_function
 from __future__ import division
-import tensorialf90 # fortran90 library
-import traceoverf90
-import spectrum
+#from . import tensorialf90 # fortran90 library
+#from . import traceoverf90
+from . import spectrum
 from scipy.sparse import linalg as slg # linear algebra library
 from scipy import linalg as lg # linear algebra library
 import scipy.sparse as sp
@@ -11,18 +11,18 @@ from scipy.sparse import coo_matrix
 import numpy as np
 from copy import deepcopy
 import time
-import dmrgmethods
+from . import dmrgmethods
 from scipy.sparse.linalg import LinearOperator
-import ppdmrg # posprocessing library
-import dmrgtk
+from . import ppdmrg # posprocessing library
+from . import dmrgtk
 import os
 
 silent = False
 
 # routines to perform DMRG in spin chains
 
-from tensorial import tensorial_LO
-import tensorial
+from .tensorial import tensorial_LO
+from . import tensorial
 
 
 def test_tensorial(n=8):
@@ -265,7 +265,7 @@ def dmrg_step(indict,periodic=False,LO=True):
 
 
 
-from inout import write_status,output_files
+from .inout import write_status,output_files
 
 
 def copydict(indict):

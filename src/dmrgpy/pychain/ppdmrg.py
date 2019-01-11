@@ -2,7 +2,7 @@ from __future__ import print_function
 import numpy as np
 import scipy.sparse.linalg as slg
 import scipy.sparse as sp
-import tensorial
+from . import tensorial
 
 # functions to perform posprocessing on the DMRG results
 def correlator(indict,outfile="CORRELATORS.OUT"):
