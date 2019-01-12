@@ -4,7 +4,7 @@ import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 
 
-import spinchain
+from dmrgpy import spinchain
 
 ns = np.array(range(4,30,2))
 es = []

@@ -22,7 +22,7 @@ def correlator(indict,outfile="CORRELATORS.OUT"):
   corrs = np.matrix(corrs)
   # now write in file
   np.savetxt(outfile,corrs)
-  print("Correlators written in ",outfile)
+#  print("Correlators written in ",outfile)
 
 
 

@@ -1,7 +1,7 @@
 from __future__ import print_function
 from __future__ import division
-#from . import tensorialf90 # fortran90 library
-#from . import traceoverf90
+from . import tensorialf90 # fortran90 library
+from . import traceoverf90
 from . import spectrum
 from scipy.sparse import linalg as slg # linear algebra library
 from scipy import linalg as lg # linear algebra library
@@ -17,7 +17,7 @@ from . import ppdmrg # posprocessing library
 from . import dmrgtk
 import os
 
-silent = False
+silent = True
 
 # routines to perform DMRG in spin chains
 
@@ -120,7 +120,15 @@ def onfly_update(indict):
   
 
 
-
+class DMRGresult():
+    """Class for the result of a DMRG calculation"""
+    def __init__(self):
+        self.path = os.getcwd()+"/.dmrgfolder/"
+        os.system("rm -rf "+self.path) # remove temporal folder
+        os.system("mkdir "+self.path) # create temporal folder
+        self.inipath = os.getcwd() # initial path
+    def to_folder(self): os.chdir(self.path)
+    def to_origin(self): os.chdir(self.inipath) # go to original folder
 
 
 
@@ -128,6 +136,8 @@ def onfly_update(indict):
 def infinite_dmrg(datadict):
   """Main DMRG loop"""
   # extract variables
+  dmrgout = DMRGresult() # create class
+  dmrgout.to_folder() # go to temporal folder
   right = datadict["right"]
   left = datadict["left"]
   onsite = datadict["onsite"]
@@ -195,7 +205,7 @@ def infinite_dmrg(datadict):
     jdict = copydict(indict)
     for j in range(0,nsites2-2): # do the second half sweep
       # take the right block of the the kdict iteration
-      print("#####  Half sweep  ########")
+      if not silent: print("#####  Half sweep  ########")
       jdict = fusechain(jdict,dicts[nsites2-j-2]) # create chain for the next iteration
       # now perform the DMRG step
       jdict = dmrg_step(jdict) # perform the DMRG step
@@ -226,7 +236,7 @@ def infinite_dmrg(datadict):
       jdict = copydict(dicts_right[avoid]) # start over from the beggining
       for i in range(avoid,L-2-avoid): # do a full sweep to the left
 #        jdict = fusechain(jdict,dicts[L-i-2])
-        print("#####  Left sweep  ########")
+        if not silent: print("#####  Left sweep  ########")
         jdict = reflectdict(jdict) # reflect the Hamiltonian
         jdict = fusechain(jdict,dicts_left[L-i-2])
         jdict = dmrg_step(jdict) # perform the DMRG step
@@ -241,7 +251,7 @@ def infinite_dmrg(datadict):
       if ite==num_ite-1: jdict["store_operators"] = True # store the operators
       jdict["store_full_operators"] = True
       for i in range(avoid,L-2-avoid): # do a full sweep to the right
-        print("#####  Right sweep  ########")
+        if not silent: print("#####  Right sweep  ########")
         jdict = fusechain(jdict,dicts_right[L-i-2])
         jdict = dmrg_step(jdict) # perform the DMRG step
         write_status(idmrg,jdict,outf) # write several things
@@ -253,8 +263,11 @@ def infinite_dmrg(datadict):
           if i==bulkn: # when the length is 3/4 of the total
             ppdmrg.correlator(jdict,outfile="CORRELATORS_BULK.OUT") # write results
 #            ppdmrg.dynamical_correlator(jdict) # write results
-    # write results
   
+    # write results
+  dmrgout.energy = np.genfromtxt("ENERGY.OUT").transpose()[1][-1]
+  dmrgout.to_origin() # go to original folder
+  return dmrgout
 
   
 
@@ -269,7 +282,8 @@ from .inout import write_status,output_files
 
 
 def copydict(indict):
-  """Copy elements of a dictionary, at least hte possible ones"""
+  """Copy elements of a dictionary, at least the possible ones"""
+  return  deepcopy(indict)
   outdict = dict()
   try:
     for key in indict:
@@ -298,7 +312,7 @@ def fusechain(in1,in2,l=None):
   """Function that the relevant term of the two hamiltonians"""
   out = copydict(in1) # copy dictionary
   if l is None: l = in1["length"] # length of the block
-  print("Generating site ",l)
+#  print("Generating site ",l)
   out["lS"] = in1["onsite"](l) # site
   out["rS"] = in1["onsite"](l+1) # site
   out["rB"] = in2["lB"] # block hamiltonian
@@ -412,8 +426,12 @@ def dmrg_BooB(indict,integrate_right=True,LO=True):
     outdict["hamiltonian"] = lSB_rSB # hamiltonian
     # ground state and project on DMRG manifold
     diml,dimr = dim_lB*dim_lS, dim_rB*dim_rS  # right and left dimensions
-    eout,es,wf0,dmat = ground_state(lSB_rSB,diml,dimr,v0=None,
+    gsout = ground_state(lSB_rSB,diml,dimr,v0=None,
                                    indict=outdict) # get the smallest state
+    eout = gsout.energy # GS energy
+    es = gsout.energies # excited states eenrgies
+    wf0 = gsout.wf # wavefunction
+    dmat = gsout.dm  # density matrix
     e0 = es[0] # ground state energy
     sisj = tensorial.exp_val(wf0,lS_plus_rS) # calculate the correlator
     if not silent:
@@ -463,7 +481,7 @@ def dmrg_BooB(indict,integrate_right=True,LO=True):
       ops = indict["site_operator_generator"](0)
       outdict["site_operators"] = [old2new(op,mtype="lS") for op in ops]
       outdict["block_operators"].append(outdict["site_operators"])
-      print("# of stored operators",len(outdict["block_operators"]))
+#      print("# of stored operators",len(outdict["block_operators"]))
       if outdict["store_full_operators"]: # if full operators should be stored
         outdict["has_full_operators"] = True # has full operators
         outdict["left_block_operators_full"] = [[m2full(m,mtype="lB") for m in s ] 
@@ -543,7 +561,11 @@ def dmrg_BoBo(indict,integrate_right=True,LO=False):
     lSB_rSB = lSB_rSB + lS_plus_rB + lB_plus_rS # couple left and right parts
     # ground state and project on DMRG manifold
     diml,dimr = dim_lB*dim_lS, dim_rB*dim_rS  # right and left dimensions
-    e0,wf0,dmat = ground_state(lSB_rSB,diml,dimr,v0=None) # get the smallest state
+    gsout = ground_state(lSB_rSB,diml,dimr,v0=None) # get the smallest state
+    eout = gsout.energy
+    es = gsout.energies
+    wf0 = gsout.wf
+    dmat = gsout.dm
     Ain = tensorial_operator(coupled_hamiltonian(lS_lB,lB_lS),id_rSB,LO=LO)
     sisj = tensorial.exp_val(wf0,lS_plus_rB) # calculate the correlator
 #    Ain = tensorial_operator(tensorial_operator(lS,id_lB),id_rSB)

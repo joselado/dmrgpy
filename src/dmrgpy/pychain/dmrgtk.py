@@ -1,7 +1,7 @@
 from __future__ import print_function,division
 from .tensorial import tensorial_LO
 import numpy as np
-#from . import traceoverf90
+from . import traceoverf90
 from . import tensorial
 from scipy.sparse import csc_matrix
 from scipy.sparse import coo_matrix
@@ -64,10 +64,17 @@ def getentropy(es):
   return s
 
 
+class GSout():
+    """Class for the output of the ground state"""
+    pass
+
+
+
 
 def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
                         indict=None):
   """Get the ground state"""
+  gsout = GSout() # create output
   target = indict["target"] # state to retain
   # if dictionary has been provided
   retain_states = indict["retain_states"]
@@ -124,7 +131,11 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
   for d in dmats: dmat += d # add contribution
   dmat /= retain_states # normalize
 #  dmat = dmat.T # transpose
-  return eout,sorted(es),wfout,dmat # return wavefunction
+  gsout.energy = eout
+  gsout.energies = sorted(es)
+  gsout.wf = wfout
+  gsout.dm = dmat
+  return gsout # return output
 
 
 

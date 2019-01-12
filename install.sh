@@ -12,4 +12,10 @@ make
 mv mpscpp mpscpp.x
 cd -
 
+# compile fortran routines of classic dmrg
+cd src/dmrgpy/pychain/fortran
+bash compile_fortran.sh
+cd -
+
+
 python addsystem.py # add route to .bashrc

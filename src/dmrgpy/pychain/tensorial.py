@@ -3,7 +3,7 @@ from scipy.sparse.linalg import LinearOperator
 from scipy.sparse import coo_matrix
 import numpy as np
 
-def tensorial_LO(op1,op2,sparse=True,fortran=False,adapted=True):
+def tensorial_LO(op1,op2,sparse=True,fortran=True,adapted=True):
   """Perform the tensorial product, returning a LinearOperator"""
   op1 = coo_matrix(op1)
   op2 = coo_matrix(op2)

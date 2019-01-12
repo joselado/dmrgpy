@@ -44,8 +44,10 @@ def monochain(s1,d=0.0,b=[0.,0.,0.],fun=None):
   def onsite(i):
     if callable(d): dtmp = d(i)
     else: dtmp = d
-    return dtmp*(sc.szi[0]*sc.szi[0]) + (b[0]*sc.sxi[0] +
-         b[1]*sc.syi[0] + b[2]*sc.szi[0])
+    if callable(b): raise # bi = b(i) this does not work
+    else: bi = b
+    return dtmp*(sc.szi[0]*sc.szi[0]) + (bi[0]*sc.sxi[0] +
+         bi[1]*sc.syi[0] + bi[2]*sc.szi[0])
   odict = dict() # dictionary
   odict["right"] = right
   odict["left"] = left
