@@ -73,12 +73,12 @@ class GSout():
 
 
 def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
-                        indict=None):
+                        dmrgp=None):
   """Get the ground state"""
   gsout = GSout() # create output
-  target = indict["target"] # state to retain
+  target = dmrgp["target"] # state to retain
   # if dictionary has been provided
-  retain_states = indict["retain_states"]
+  retain_states = dmrgp["retain_states"]
   if h.shape[0]>diagmax:
     if not dmrg.silent: print("Too large dimension, ",h.shape[0])
     raise
@@ -89,16 +89,16 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
   told = time.clock() # old time
   if not dmrg.silent: print("Dimension of the Hamiltonian",h.shape)
 #  if v0 is not None: diag_states = 2
-  diag_states = indict["diag_states"] # state to retain
+  diag_states = dmrgp["diag_states"] # state to retain
   if target>diag_states-1: diag_states = target+1 # if not enough states
   if retain_states>diag_states: diag_states = retain_states # if not enough states
-  if indict["diag_mode"]=="gradient": # ground state
+  if dmrgp["diag_mode"]=="gradient": # ground state
     X = np.random.random((h.shape[0],diag_states)) 
 #+ 1j*np.random.random((h.shape[0],diag_states)) # initial vector
-    (es,wfs) = slg.lobpcg(h,X=X,largest=False,tol=indict["tol"],maxiter=20000)
-  if indict["diag_mode"]=="arpack": # ground state
+    (es,wfs) = slg.lobpcg(h,X=X,largest=False,tol=dmrgp["tol"],maxiter=20000)
+  if dmrgp["diag_mode"]=="arpack": # ground state
     (es,wfs) = slg.eigsh(h,k=diag_states,which="SA",
-                  v0=None,tol=indict["tol"]) # ground state
+                  v0=None,tol=dmrgp["tol"]) # ground state
   wfs = np.transpose(wfs) # transpose
   tnew = time.clock() # old time
   if not dmrg.silent: print("Time in ground state",tnew-told)
@@ -112,19 +112,19 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
     wfout = wfs[0]
   ####################################
   ####################################
-  if callable(indict["target_function"]):
-    target_function = indict["target_function"]   
-    wfsout = []
-    for wfsi in getmanifolds(es,wfs): 
-      wfsout += target_function(indict,wfsi) # so it is in that manifold
-    wfs = wfsout # update list of waves retained
-    print("Found ",len(wfsout),"useful waves") 
-    wfout = wfs[indict["target_state"]] # State that will be stored
-    es = [tensorial.exp_val(wfi,h) for wfi in wfs] # energies
-    eout = tensorial.exp_val(wfout,h) 
-    print("Energies",es-min(es))
-  ####################################
-  ####################################
+#  if callable(dmrgp["target_function"]):
+#    target_function = dmrgp["target_function"]   
+#    wfsout = []
+#    for wfsi in getmanifolds(es,wfs): 
+#      wfsout += target_function(dmrgp,wfsi) # so it is in that manifold
+#    wfs = wfsout # update list of waves retained
+#    print("Found ",len(wfsout),"useful waves") 
+#    wfout = wfs[dmrgp["target_state"]] # State that will be stored
+#    es = [tensorial.exp_val(wfi,h) for wfi in wfs] # energies
+#    eout = tensorial.exp_val(wfout,h) 
+#    print("Energies",es-min(es))
+#  ####################################
+#  ####################################
   # calculate the density matrices
   retain_states = min(retain_states,len(wfs)) # number of waves
   dmats = [traceover(wfs[i],dim1,dim2) for i in range(retain_states)] # trace over right site + block
@@ -135,9 +135,12 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
       B = dmats[0]*dmats[i] # define product difference
       C = A-B # difference
       dmatdis.append((C*C.H).trace()[0,0].real) # distance
-  dmat = 0. # initialize
-  for d in dmats: dmat += d # add contribution
-  dmat /= retain_states # normalize
+
+  if dmrgp["DM_target"] is None: # use all the waves
+    dmat = 0. # initialize
+    for d in dmats: dmat += d # add contribution
+    dmat /= retain_states # normalize
+  else: dmat = dmats[dmrgp["DM_target"]] # use only that one
 #  dmat = dmat.T # transpose
   gsout.energy = eout
   gsout.energies = sorted(es)

@@ -9,7 +9,7 @@ from dmrgpy import simplechains
 b = np.random.random(3)
 J = np.random.random(3)
 
-ssc = simplechains.SSC(s=.5,n=8,b=b,J=J)
+ssc = simplechains.SSC(s=.5,n=14,b=b,J=J)
 
 
 print("Energy with ED",ssc.gs_energy(mode="ED"))

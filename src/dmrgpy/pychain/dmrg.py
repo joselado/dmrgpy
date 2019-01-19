@@ -88,14 +88,15 @@ def dmrgdict():
   ddict["diag_mode"] = "arpack" # use arpack
   ddict["tol"] = 0.00001 # precission in the diagonalization
   ddict["dynamic_target"] = None # ground state
-  ddict["ensure_symmetry"] = True # truncate the DM without breaking symmetry
+  ddict["DM_target"] = None # not set
+  ddict["ensure_symmetry"] = False # truncate the DM without breaking symmetry
   ddict["retain_states"] = 1 # one state
   ddict["dynamic_retain_states"] = None  # retained states
   ddict["periodic"] = False # open boundary
   ddict["finite"] = False # open boundary
   ddict["number_of_states"] = 30 # retained states
   ddict["dynamic_number_of_states"] = None  # retained states
-  ddict["LO"] = True # use linear operator
+  ddict["LO"] = False # use linear operator
   ddict["finite_num_ite"] = 2 # number of iterations in finite DMRG
   ddict["avoid_edge"] = 0 # stop before reaching the edge
   ddict["target_length"] = None # stop before reaching the edge
@@ -104,18 +105,18 @@ def dmrgdict():
   return ddict
 
 
-def update_parameters(indict,datadict,idmrg=0):
+def update_parameters(dmrgp,datadict,idmrg=0):
   """Update the parameters of the DMRG calculation"""
   names = ["number_of_states","retain_states","target"] # different parameters
   for name in names: # loop
     if callable(datadict["dynamic_"+name]): # if it is a function
-      indict[name] = datadict["dynamic_"+name](indict,idmrg=idmrg)
+      dmrgp[name] = datadict["dynamic_"+name](dmrgp,idmrg=idmrg)
     else: # otherwise
-      indict[name] = datadict[name]
+      dmrgp[name] = datadict[name]
 
 
 
-def onfly_update(indict):
+def onfly_update(dmrgp):
   """Update the dictionary by checking a file on the fly"""
   
 
@@ -179,13 +180,13 @@ def infinite_dmrg(datadict):
   ndmrg = datadict["ndmrg"] # number of dmrg steps
   # generate initial guess
   if periodic: raise 
-#indict = initial_BoBo(right,left,onsite,site_operators=site_operators)
+#dmrgp = initial_BoBo(right,left,onsite,site_operators=site_operators)
   else: 
       coupling = datadict["coupling"] # function returning list with couplings
       cs = coupling(0,1) # list with couplings
-      indict = initial_BooB(right,left,onsite,
+      dmrgp = initial_BooB(right,left,onsite,
           site_operators=site_operators,cs=cs) 
-  for key in datadict: indict[key] = datadict[key] # copy dictionary
+  for key in datadict: dmrgp[key] = datadict[key] # copy dictionary
   outf = output_files() # get the dictionary
   #########################################
   #########################################
@@ -195,19 +196,19 @@ def infinite_dmrg(datadict):
   #########################################
   #########################################
   if not finite: # infinite DMRG scheme
-    indict["store_operators"] = False # do not store the operators
+    dmrgp["store_operators"] = False # do not store the operators
     for idmrg in range(1,ndmrg): # loop over dmrg steps
       if not silent: 
         print()
         print("##### Iteration number",idmrg,"######")
-      indict = fusechain(indict,indict) # create the full chain
+      dmrgp = fusechain(dmrgp,dmrgp) # create the full chain
       # perform the DMRG step
-      indict = dmrg_step(indict,periodic=periodic,LO=LO,dmrgout=dmrgout) 
-      update_parameters(indict,datadict,idmrg=idmrg) # update dictionary
+      dmrgp = dmrg_step(dmrgp,periodic=periodic,LO=LO,dmrgout=dmrgout) 
+      update_parameters(dmrgp,datadict,idmrg=idmrg) # update dictionary
       # write all the energies
-      write_status(idmrg,indict,outf) # write several things
+      write_status(idmrg,dmrgp,outf) # write several things
       # next iteration
-#    ppdmrg.correlator(indict) # write results
+#    ppdmrg.correlator(dmrgp) # write results
   #########################################
   #########################################
   #########################################
@@ -220,24 +221,24 @@ def infinite_dmrg(datadict):
     length = datadict["target_length"] # length opf the chain
     if length%2 != 0: raise
     ndmrg = length - 4 # number of dmrg steps
-    indict["store_operators"] = False # do not store the operators
+    dmrgp["store_operators"] = False # do not store the operators
     nsites2 = ndmrg//2 # number of sites
     dicts_right = [None for i in range(ndmrg)] # empty list to store
     dicts_left = [None for i in range(ndmrg)] # empty list to store
     dicts = [None for i in range(ndmrg)] # empty list to store
     if not silent: print("Initial half-sweep")
     # The length will be ndmrg + 4
-    dicts[0] = copydict(indict) # # first one
-    dicts_left[0] = copydict(indict) # # first one
+    dicts[0] = copydict(dmrgp) # # first one
+    dicts_left[0] = copydict(dmrgp) # # first one
     for i in range(0,nsites2): # do the first half sweep
-      indict = fusechain(indict,indict,l=None) # create chain for the next iteration
-      indict = dmrg_step(indict,dmrgout=dmrgout) # perform the DMRG step
-      write_status(idmrg,indict,outf) # write several things
+      dmrgp = fusechain(dmrgp,dmrgp,l=None) # create chain for the next iteration
+      dmrgp = dmrg_step(dmrgp,dmrgout=dmrgout) # perform the DMRG step
+      write_status(idmrg,dmrgp,outf) # write several things
       idmrg += 1 # increase
-      dicts[i+1] = copydict(indict) # save this dictionary (has all the matrices)
+      dicts[i+1] = copydict(dmrgp) # save this dictionary (has all the matrices)
     # now we have stored the matrices for the different lengths, perform scf
     # keep growing the block to the right (first time)
-    jdict = copydict(indict)
+    jdict = copydict(dmrgp)
     for j in range(0,nsites2-2): # do the second half sweep
       # take the right block of the the kdict iteration
       if not silent: print("#####  Half sweep  ########")
@@ -260,7 +261,7 @@ def infinite_dmrg(datadict):
     dicts_right = [copydict(i) for i in dicts] # empty list to store
     dicts_left = [copydict(i) for i in dicts] # empty list to store
     for ite in range(num_ite):
-      avoid = indict["avoid_edge"]
+      avoid = dmrgp["avoid_edge"]
       if not silent:
         print("################################")
         print("Performing iteration number",ite)
@@ -309,23 +310,23 @@ def infinite_dmrg(datadict):
 
   
 
-def dmrg_step(indict,periodic=False,LO=True,dmrgout=None):
+def dmrg_step(dmrgp,periodic=False,LO=True,dmrgout=None):
   """Perform a single DMRG step"""
-  if periodic: return dmrg_BoBo(indict,LO=LO) # infinite DMRG method
-  else: return dmrg_BooB(indict,LO=LO,dmrgout=dmrgout) # infinite DMRG method
+  if periodic: return dmrg_BoBo(dmrgp,LO=LO) # infinite DMRG method
+  else: return dmrg_BooB(dmrgp,LO=LO,dmrgout=dmrgout) # infinite DMRG method
 
 
 
 from .inout import write_status,output_files
 
 
-def copydict(indict):
+def copydict(dmrgp):
   """Copy elements of a dictionary, at least the possible ones"""
-  return  deepcopy(indict)
+  return  deepcopy(dmrgp)
   outdict = dict()
   try:
-    for key in indict:
-      try: outdict[key] = deepcopy(indict[key])
+    for key in dmrgp:
+      try: outdict[key] = deepcopy(dmrgp[key])
       except: 
         if not silent: print("WARNING, not copied",key)
   except: pass
@@ -333,12 +334,12 @@ def copydict(indict):
 
 
 
-def reflectdict(indict,center=0):
+def reflectdict(dmrgp,center=0):
   """Return a dictionary of a chain, but with
   the Hamiltonian reflected from left to right 
   in the site center"""
-  odict = copydict(indict) # copy the dictionary
-  tmpdict = copydict(indict) # copy the dictionary
+  odict = copydict(dmrgp) # copy the dictionary
+  tmpdict = copydict(dmrgp) # copy the dictionary
   # reflect different functions
   odict["onsiste"] = lambda i: tmpdict["onsite"](center-i) # reflect function
   odict["right"] = lambda i: tmpdict["left"](center-i) # reflect function
@@ -374,23 +375,23 @@ def fusechain(in1,in2,l=None):
 # different types of DMRG methods
 
 
-def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
+def dmrg_BooB(dmrgp,integrate_right=True,LO=True,dmrgout=None):
     """Perform a single DMRG step,
        geometry is [ ]oo[ ],
        with open boundary conditions"""
-    outdict = copydict(indict) # output dictionary
+    outdict = copydict(dmrgp) # output dictionary
     ##### Couplings #####
-    rS_rB = indict["rS_rB"] # coupling in the right site
-    lS_lB = indict["lS_lB"] # coupling in the left site
-    lS_rS = indict["lS_rS"] # coupling in the left site
-    rS_lS = indict["rS_lS"] # coupling in the left site
-    rB_rS = indict["rB_rS"] # coupling to the right bloxk
-    lB_lS = indict["lB_lS"] # coupling to the left block
-    rB = indict["rB"] # right hamiltonian
-    lB = indict["lB"] # left hamiltonian
-    rS = indict["rS"] # left hamiltonian
-    lS = indict["lS"] # left hamiltonian
-    coupling = indict["coupling"] # function returning list with couplings
+    rS_rB = dmrgp["rS_rB"] # coupling in the right site
+    lS_lB = dmrgp["lS_lB"] # coupling in the left site
+    lS_rS = dmrgp["lS_rS"] # coupling in the left site
+    rS_lS = dmrgp["rS_lS"] # coupling in the left site
+    rB_rS = dmrgp["rB_rS"] # coupling to the right bloxk
+    lB_lS = dmrgp["lB_lS"] # coupling to the left block
+    rB = dmrgp["rB"] # right hamiltonian
+    lB = dmrgp["lB"] # left hamiltonian
+    rS = dmrgp["rS"] # left hamiltonian
+    lS = dmrgp["lS"] # left hamiltonian
+    coupling = dmrgp["coupling"] # function returning list with couplings
     # perform the calculation
     dim_lS = lS.shape[0] # left site dimension
     dim_rS = rS.shape[0] # right site dimension
@@ -422,17 +423,17 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
       else: raise
       return B
     # create the full operators if needed
-    if callable(indict["target_function"]): # if there is a function
-      outdict["left_site_operators_full"] = m2full(indict["left_site_operators"],
+    if callable(dmrgp["target_function"]): # if there is a function
+      outdict["left_site_operators_full"] = m2full(dmrgp["left_site_operators"],
                                              iterative=True,mtype="lS")
-      outdict["right_site_operators_full"] = m2full(indict["right_site_operators"],
+      outdict["right_site_operators_full"] = m2full(dmrgp["right_site_operators"],
                                              iterative=True,mtype="rS")
-      outdict["sum_right_block_operators_full"] = m2full(indict["sum_right_block_operators"],
+      outdict["sum_right_block_operators_full"] = m2full(dmrgp["sum_right_block_operators"],
                                              iterative=True,mtype="rB")
-      outdict["sum_left_block_operators_full"] = m2full(indict["sum_left_block_operators"],
+      outdict["sum_left_block_operators_full"] = m2full(dmrgp["sum_left_block_operators"],
                                              iterative=True,mtype="lB")
     # index of the new site
-    length = indict["length"]
+    length = dmrgp["length"]
     ###########################
     # couple site to right block
     ###########################
@@ -465,7 +466,7 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
     # ground state and project on DMRG manifold
     diml,dimr = dim_lB*dim_lS, dim_rB*dim_rS  # right and left dimensions
     gsout = ground_state(lSB_rSB,diml,dimr,v0=None,
-                                   indict=outdict) # get the smallest state
+                                   dmrgp=outdict) # get the smallest state
     eout = gsout.energy # GS energy
     # store several quantities
     dmrgout.iteration_energy.append(gsout.energy) # store energy
@@ -481,11 +482,11 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
     sisj = tensorial.exp_val(wf0,lS_plus_rS) # calculate the correlator
     if not silent:
       print("Correlation",sisj)
-      print("Energy per site",e0/(indict["total_length"]+2))
+      print("Energy per site",e0/(dmrgp["total_length"]+2))
       print("Selected energy",eout)
       print()
     # now look for the relevant subspace
-    R,entropy = states_dmat(dmat,indict) # get the proj onto the main space
+    R,entropy = states_dmat(dmat,dmrgp) # get the proj onto the main space
     dmrgout.iteration_entropies.append(entropy) # store energies
     # function to project matrices
     def old2new(A,mtype=None,iterative=False):
@@ -513,25 +514,25 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
     outdict["lB"] = new_lB # left hamiltonian
     outdict["length"] += 1 # the length if the chain has increased by 2 units
     # now store the site operators, in full form (lSB basis)
-    if callable(indict["target_function"]): # if there is a function
+    if callable(dmrgp["target_function"]): # if there is a function
       opsSB = [old2new(oB,mtype="lB") + old2new(oS,mtype="lS") for (oB,oS) in 
-                               zip(indict["sum_block_operators"],indict["left_site_operators"])]
+                               zip(dmrgp["sum_block_operators"],dmrgp["left_site_operators"])]
       outdict["sum_block_operators"] = opsSB # store 
     # first transform the old ones
-    if indict["store_operators"]:
+    if dmrgp["store_operators"]:
       outdict["density_matrix"] = old2new(dmat,mtype="lSB") # store dmat
       outdict["wf"] = wf0 # save wavefunction
       outdict["block_operators"] = [[old2new(m,mtype="lB") for m in s ] 
-                                   for s in indict["block_operators"]]
+                                   for s in dmrgp["block_operators"]]
     # and add the new site
-      ops = indict["site_operator_generator"](0)
+      ops = dmrgp["site_operator_generator"](0)
       outdict["site_operators"] = [old2new(op,mtype="lS") for op in ops]
       outdict["block_operators"].append(outdict["site_operators"])
 #      print("# of stored operators",len(outdict["block_operators"]))
       if outdict["store_full_operators"]: # if full operators should be stored
         outdict["has_full_operators"] = True # has full operators
         outdict["left_block_operators_full"] = [[m2full(m,mtype="lB") for m in s ] 
-                                   for s in indict["block_operators"]]
+                                   for s in dmrgp["block_operators"]]
         outdict["left_site_operators_full"] = [m2full(op,mtype="lS") for op in ops]
         outdict["store_full_operators"] = False # do not do it the next time
    
@@ -541,29 +542,29 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
 #
 #
 #
-#def dmrg_BoBo(indict,integrate_right=True,LO=False):
+#def dmrg_BoBo(dmrgp,integrate_right=True,LO=False):
 #    """Perform a single DMRG step.
 #    The geometry used in this function is
 #            [ ] o [ ] o
 #    using periodic boundary conditions"""
-#    outdict = deepcopy(indict) # output dictionary
+#    outdict = deepcopy(dmrgp) # output dictionary
 #    ##### Couplings #####
-#    rS_rB = indict["rS_rB"] 
-#    lS_lB = indict["lS_lB"] 
-#    lS_rB = indict["lS_rB"] 
-#    rB_rS = indict["rB_rS"] 
-#    rB_lS = indict["rB_lS"] 
-#    rS_lB = indict["rS_lB"] 
-#    lB_lS = indict["lB_lS"] 
-#    lB_rS = indict["lB_rS"] 
+#    rS_rB = dmrgp["rS_rB"] 
+#    lS_lB = dmrgp["lS_lB"] 
+#    lS_rB = dmrgp["lS_rB"] 
+#    rB_rS = dmrgp["rB_rS"] 
+#    rB_lS = dmrgp["rB_lS"] 
+#    rS_lB = dmrgp["rS_lB"] 
+#    lB_lS = dmrgp["lB_lS"] 
+#    lB_rS = dmrgp["lB_rS"] 
 #    #### Onsite Hamiltonians
-#    rB = indict["rB"] # right hamiltonian
-#    lB = indict["lB"] # left hamiltonian
-#    rS = indict["rS"] # left hamiltonian
-#    lS = indict["lS"] # left hamiltonian
-#    nstates = indict["number_of_states"] # number of states retained
-#    target = indict["target"] # number of target states
-#    retain_states = indict["retain_states"] # number of target states
+#    rB = dmrgp["rB"] # right hamiltonian
+#    lB = dmrgp["lB"] # left hamiltonian
+#    rS = dmrgp["rS"] # left hamiltonian
+#    lS = dmrgp["lS"] # left hamiltonian
+#    nstates = dmrgp["number_of_states"] # number of states retained
+#    target = dmrgp["target"] # number of target states
+#    retain_states = dmrgp["retain_states"] # number of target states
 #    # dimensions
 #    dim_lS = lS.shape[0] # left site dimension
 #    dim_rS = rS.shape[0] # right site dimension
@@ -617,7 +618,7 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
 ##    Ain = tensorial_operator(tensorial_operator(lS,id_lB),id_rSB)
 ##    sisj = spectrum.exp_val(wf0,Ain) # calculate the correlator
 #    print("Correlation",sisj)
-#    print("Energy per site",e0/(2*indict["length"]+2))
+#    print("Energy per site",e0/(2*dmrgp["length"]+2))
 #    # now look for the relevant subspace
 #    R,entropy = states_dmat(dmat,nstates=nstates) # get the proj onto the main space
 #    # function to project matrices
@@ -654,9 +655,9 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
 #    # now store the site operators, in full form (lSB basis)
 #    # first transform the old ones
 #    outdict["site_operators"] = [[old2new(m,mtype="lB") for m in s ] 
-#                                   for s in indict["site_operators"]]
+#                                   for s in dmrgp["site_operators"]]
 #    # and add the new site
-#    ops = indict["site_operator_generator"](0)
+#    ops = dmrgp["site_operator_generator"](0)
 #    outdict["site_operators"].append([old2new(op,mtype="lS") for op in ops])  
 #    print("Stored sites",len(outdict["site_operators"]))
 #    return outdict # return the dictionary
@@ -690,27 +691,27 @@ def initial_BooB(right,left,onsite,
   #################################################
   lB_lS = [tensorial_operator(id_lS,r) for r in right(1)]
   rB_rS = lB_lS # same
-  indict = dict()
-  indict["lS_lB"] = left(2) # coupling to the left block
-  indict["lB_lS"] = lB_lS # coupling to the left block
-  indict["lB"] = Block.copy() # left block hamiltonian
-  indict["lS"] = onsite(2) # left site hamiltonian
-  indict["v0"] = None # initial wavefunction
+  dmrgp = dict()
+  dmrgp["lS_lB"] = left(2) # coupling to the left block
+  dmrgp["lB_lS"] = lB_lS # coupling to the left block
+  dmrgp["lB"] = Block.copy() # left block hamiltonian
+  dmrgp["lS"] = onsite(2) # left site hamiltonian
+  dmrgp["v0"] = None # initial wavefunction
 # site operators 
   ops0 = [tensorial_operator(O,id_rS) for O in site_operators(0)]
   ops1 = [tensorial_operator(id_lS,O) for O in site_operators(1)]
-  indict["block_operators"] = [ops0,ops1] 
-  indict["sum_block_operators"] = [o0+o1 for (o0,o1) in zip(ops0,ops1)]
+  dmrgp["block_operators"] = [ops0,ops1] 
+  dmrgp["sum_block_operators"] = [o0+o1 for (o0,o1) in zip(ops0,ops1)]
   # keep in mind that the right site is actually the number 0,
   # whereas the left one is number 1, because the initial geometry is
   # assumed o [01], and this will grow form the left
   # generating function
-#  indict["site_operator_generator"] = site_operators 
-  indict["store_operators"] = True 
-  indict["length"] = 2
-  indict["store_full_operators"] = False # store the full operators
-  indict["has_full_operators"] = False # has the full operators
-  return indict
+#  dmrgp["site_operator_generator"] = site_operators 
+  dmrgp["store_operators"] = True 
+  dmrgp["length"] = 2
+  dmrgp["store_full_operators"] = False # store the full operators
+  dmrgp["has_full_operators"] = False # has the full operators
+  return dmrgp
 
 
 
@@ -744,28 +745,28 @@ def initial_BoBo(right,left,onsite,site_operators=lambda i: []):
   lB = Block.copy()
   rS = onsite(0)
   lS = onsite(0)
-  indict = dict()
-  indict["rS_rB"] = rS_rB # coupling to the right bloxk
-  indict["lS_rB"] = lS_rB # coupling between sites
-  indict["rS_lB"] = rS_lB # coupling between sites
-  indict["lS_lB"] = lS_lB # coupling to the left block
-  indict["rB_rS"] = rB_rS # coupling to the right bloxk
-  indict["rB_lS"] = rB_lS # coupling to the right bloxk
-  indict["lB_lS"] = lB_lS # coupling to the left block
-  indict["lB_rS"] = lB_rS # coupling to the left block
-  indict["rB"] = rB # right block hamiltonian
-  indict["lB"] = lB # left block hamiltonian
-  indict["rS"] = rS # right site hamiltonian
-  indict["lS"] = lS # left site hamiltonian
+  dmrgp = dict()
+  dmrgp["rS_rB"] = rS_rB # coupling to the right bloxk
+  dmrgp["lS_rB"] = lS_rB # coupling between sites
+  dmrgp["rS_lB"] = rS_lB # coupling between sites
+  dmrgp["lS_lB"] = lS_lB # coupling to the left block
+  dmrgp["rB_rS"] = rB_rS # coupling to the right bloxk
+  dmrgp["rB_lS"] = rB_lS # coupling to the right bloxk
+  dmrgp["lB_lS"] = lB_lS # coupling to the left block
+  dmrgp["lB_rS"] = lB_rS # coupling to the left block
+  dmrgp["rB"] = rB # right block hamiltonian
+  dmrgp["lB"] = lB # left block hamiltonian
+  dmrgp["rS"] = rS # right site hamiltonian
+  dmrgp["lS"] = lS # left site hamiltonian
   # site operators
   opsr = [tensorial_operator(id_lS,O) for O in site_operators(1)]
   opsl = [tensorial_operator(O,id_rS) for O in site_operators(0)]
-  indict["site_operators"] = [opsr,opsl] 
-  indict["site_operator_generator"] = site_operators 
-  indict["store_operators"] = False # do not store the operators
-  indict["store_full_operators"] = False # store the full operators
-  indict["has_full_operators"] = False # has the full operators
-  return indict
+  dmrgp["site_operators"] = [opsr,opsl] 
+  dmrgp["site_operator_generator"] = site_operators 
+  dmrgp["store_operators"] = False # do not store the operators
+  dmrgp["store_full_operators"] = False # store the full operators
+  dmrgp["has_full_operators"] = False # has the full operators
+  return dmrgp
 
 
 

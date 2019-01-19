@@ -43,6 +43,16 @@ class SSC():
             self.dmrgp["retain_states"] = n # states to retain in the DM
             es = classicdmrg.infinite_dmrg(self.dmrgp).energies # return energy
             return np.round(es[0:n],5) # return excitation energies
+    def get_dm_dis(self,n=4,mode="classicDMRG"):
+        """
+        Return the distances between the GS DM and excited ones
+        """
+        if mode=="classicDMRG": # classic DMRG mode
+            self.dmrgp["retain_states"] = n # states to retain in the DM
+            self.dmrgp["DM_target"] = 0 # states to use in the DM
+            out = classicdmrg.infinite_dmrg(self.dmrgp) # perform calculation
+            return out.iteration_dmdis # return list
+        else: raise # not implemented
 
 
 
