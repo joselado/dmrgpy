@@ -7,8 +7,8 @@ from scipy.interpolate import interp1d
 def evolution(self,mode="DMRG",**kwargs):
     if mode=="DMRG":  return evolution_dmrg(self,**kwargs)
     if mode=="ED":  
-        from . import dmrgpy2pychain
-        evolution_exact = dmrgpy2pychain.timedependent.evolution
+        from .dmrgpy2pychain import timedependent
+        evolution_exact = timedependent.evolution
         return evolution_exact(self,**kwargs)
 
 def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):

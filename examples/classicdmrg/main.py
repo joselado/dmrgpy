@@ -9,12 +9,13 @@ from dmrgpy.pychain import rlc
 import scipy.linalg as lg
 
 
-ns = 10 # number of spins
+ns = 40 # number of spins
 maxm = 20 # bond dimension
 
-b = np.random.random(3)
+b = np.random.random(3)*0.
+b = [0.,0.,0.1]
 
-hdict = rlc.monochain(0.5,d=0.,b=b,fun = lambda i: 1.+0.2*(-1)**i)
+hdict = rlc.monochain(1.,d=0.,b=b,fun = lambda i: 1.)
 
 def f1(d,idmrg=0):
   if idmrg>40: return 4
@@ -33,7 +34,7 @@ params["diag_mode"] = "arpack"
 params["target_function"] = None
 
 #params["dynamic_number_of_states"] = f2
-params["retain_states"] = 4
+params["retain_states"] = 10
 #params["dynamic_retain_states"] = f1
 params["target_state"] = 0
 params["tol"] = 0.00001
@@ -58,7 +59,10 @@ import profile
 
 out = dmrg.infinite_dmrg(params) # perform calculation
 print("Energy with classic DMRG",out.energy)
+#print(out.iteration_dmdis)
 t1 = time.clock()
+
+e0 = out.energy
 
 
 
@@ -67,7 +71,11 @@ from dmrgpy import spinchain
 sc = spinchain.Spin_Hamiltonian([2 for i in range(ns)])
 sc.set_fields(lambda i: b)
 sc.maxm = maxm # bond dimension
-print("Energy with MPS",sc.gs_energy())
+e1 = sc.gs_energy()
+print("Energy with MPS",e1)
 t2 = time.clock()
 print("Time in classic DMRG",t1-t0)
 print("Time in MPS",t2-t1)
+
+if abs(e0-e1)>0.01: raise
+

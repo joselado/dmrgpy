@@ -3,7 +3,7 @@ from .tensorial import tensorial_LO
 import numpy as np
 from . import traceoverf90
 from . import tensorial
-from scipy.sparse import csc_matrix
+from scipy.sparse import csc_matrix,kron
 from scipy.sparse import coo_matrix
 from . import tensorialf90
 import time
@@ -18,35 +18,36 @@ diagmax = 100000
 
 def tensorialoperator(op1,op2,sparse=True,LO=False):
   """Return the tendorial operator from two input operators"""
-  if LO: return tensorial_LO(op1,op2)
-  n1 = op1.shape[0] # dimension of the first
-  n2 = op2.shape[0] # dimension of the second
-  if sparse: # use sparse routine
-    op1 = coo_matrix(op1) # convert to coo_matrix
-    op2 = coo_matrix(op2) # convert to coo_matrix
-    # fix in case one of the operators is only zeros
-    if len(op1.col) ==0:
-      op1.col = np.array([0])
-      op1.row = np.array([0])
-      op1.data = np.array([0.])
-    if len(op2.col) ==0:
-      op2.col = np.array([0])
-      op2.row = np.array([0])
-      op2.data = np.array([0.])
-    (data3,row3,col3) = tensorialf90.sparse_tensorial_operator(op1.data,
-                     op1.row+1,op1.col+1,op2.data,op2.row+1,op2.col+1,n1,n2)
-    op3 = sp = csc_matrix((data3,(col3-1,row3-1)),shape=(n1*n2,n1*n2))
-#    print("Time in tensorial operator",tnew-told)
-    op3 = csc_matrix(op3)
-    op3.eliminate_zeros() # remove zero entries
-    return op3.T # clear zero entries
-  else:
-    try: op1 = op1.todense() # dense matrices
-    except: pass
-    try: op2 = op2.todense() # dense matrices
-    except: pass
-    op3 = tensorialf90.tensorial_operator(op1,op2) # operator as tensorial  
-  return csc_matrix(op3) # return the tensorial operator
+  return kron(csc_matrix(op1),csc_matrix(op2))
+#  if LO: return tensorial_LO(op1,op2)
+#  n1 = op1.shape[0] # dimension of the first
+#  n2 = op2.shape[0] # dimension of the second
+#  if sparse: # use sparse routine
+#    op1 = coo_matrix(op1) # convert to coo_matrix
+#    op2 = coo_matrix(op2) # convert to coo_matrix
+#    # fix in case one of the operators is only zeros
+#    if len(op1.col) ==0:
+#      op1.col = np.array([0])
+#      op1.row = np.array([0])
+#      op1.data = np.array([0.])
+#    if len(op2.col) ==0:
+#      op2.col = np.array([0])
+#      op2.row = np.array([0])
+#      op2.data = np.array([0.])
+#    (data3,row3,col3) = tensorialf90.sparse_tensorial_operator(op1.data,
+#                     op1.row+1,op1.col+1,op2.data,op2.row+1,op2.col+1,n1,n2)
+#    op3 = sp = csc_matrix((data3,(col3-1,row3-1)),shape=(n1*n2,n1*n2))
+##    print("Time in tensorial operator",tnew-told)
+#    op3 = csc_matrix(op3)
+#    op3.eliminate_zeros() # remove zero entries
+#    return op3.T # clear zero entries
+#  else:
+#    try: op1 = op1.todense() # dense matrices
+#    except: pass
+#    try: op2 = op2.todense() # dense matrices
+#    except: pass
+#    op3 = tensorialf90.tensorial_operator(op1,op2) # operator as tensorial  
+#  return csc_matrix(op3) # return the tensorial operator
 
 
 
@@ -127,6 +128,13 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
   # calculate the density matrices
   retain_states = min(retain_states,len(wfs)) # number of waves
   dmats = [traceover(wfs[i],dim1,dim2) for i in range(retain_states)] # trace over right site + block
+  # compute the "distance" between excited and GS dmat
+  dmatdis = [] # empty list
+  for i in range(1,len(dmats)): # loop
+      A = dmats[i]*dmats[0] # define product difference
+      B = dmats[0]*dmats[i] # define product difference
+      C = A-B # difference
+      dmatdis.append((C*C.H).trace()[0,0].real) # distance
   dmat = 0. # initialize
   for d in dmats: dmat += d # add contribution
   dmat /= retain_states # normalize
@@ -135,6 +143,9 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
   gsout.energies = sorted(es)
   gsout.wf = wfout
   gsout.dm = dmat
+  gsout.dmdis = dmatdis # distance
+  print(dmatdis)
+#  print(es)
   return gsout # return output
 
 
@@ -144,6 +155,7 @@ def coupledhamiltonian(ops1,ops2,cs=None,LO=False):
   id1 = sp.eye(ops1[0].shape[0],dtype=np.complex) # identity operator
   id2 = sp.eye(ops2[0].shape[0],dtype=np.complex) # identity operator
   nout = ops1[0].shape[0]*ops2[0].shape[0] # output dimension 
+  LO = False # do not use linear operators
   if LO: # initialize a trivial linear operator 
     def fun(v): return np.zeros(v.shape[0])
     h = LinearOperator((nout,nout),matvec=fun) # zero linear operator

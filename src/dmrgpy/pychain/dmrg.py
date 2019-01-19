@@ -124,11 +124,40 @@ class DMRGresult():
     """Class for the result of a DMRG calculation"""
     def __init__(self):
         self.path = os.getcwd()+"/.dmrgfolder/"
+        self.iteration_energy = [] # empty list
+        self.iteration_energies = [] # empty list
+        self.iteration_dmdis = [] # empty list
         os.system("rm -rf "+self.path) # remove temporal folder
         os.system("mkdir "+self.path) # create temporal folder
         self.inipath = os.getcwd() # initial path
     def to_folder(self): os.chdir(self.path)
     def to_origin(self): os.chdir(self.inipath) # go to original folder
+    def write(self):
+        """Write several results in a file"""
+        # write the energy #
+        m = self.iteration_energy
+        m = np.matrix([range(len(m)),m]).T
+        np.savetxt("ITERATION_ENERGY.OUT",m)
+        # write the energies #
+        m = self.iteration_energies
+        f = open("ITERATION_ENERGIES.OUT","w")
+        for i in range(len(m)):
+          f.write(str(i)+"   ")
+          for j in range(len(m[i])):
+              f.write(str(m[i][j])+"  ") # 
+          f.write("\n") # 
+        f.close()
+
+        # write the DM distance #
+        m = self.iteration_dmdis
+        f = open("ITERATION_DMDIS.OUT","w")
+        for i in range(len(m)):
+            f.write(str(i)+"  ") # 
+            for j in range(len(m[i])):
+              f.write(str(m[i][j])+"  ") # 
+            f.write("\n") # 
+        f.close()
+
 
 
 
@@ -167,7 +196,8 @@ def infinite_dmrg(datadict):
         print()
         print("##### Iteration number",idmrg,"######")
       indict = fusechain(indict,indict) # create the full chain
-      indict = dmrg_step(indict,periodic=periodic,LO=LO) # perform the DMRG step
+      # perform the DMRG step
+      indict = dmrg_step(indict,periodic=periodic,LO=LO,dmrgout=dmrgout) 
       update_parameters(indict,datadict,idmrg=idmrg) # update dictionary
       # write all the energies
       write_status(idmrg,indict,outf) # write several things
@@ -196,7 +226,7 @@ def infinite_dmrg(datadict):
     dicts_left[0] = copydict(indict) # # first one
     for i in range(0,nsites2): # do the first half sweep
       indict = fusechain(indict,indict,l=None) # create chain for the next iteration
-      indict = dmrg_step(indict) # perform the DMRG step
+      indict = dmrg_step(indict,dmrgout=dmrgout) # perform the DMRG step
       write_status(idmrg,indict,outf) # write several things
       idmrg += 1 # increase
       dicts[i+1] = copydict(indict) # save this dictionary (has all the matrices)
@@ -208,7 +238,7 @@ def infinite_dmrg(datadict):
       if not silent: print("#####  Half sweep  ########")
       jdict = fusechain(jdict,dicts[nsites2-j-2]) # create chain for the next iteration
       # now perform the DMRG step
-      jdict = dmrg_step(jdict) # perform the DMRG step
+      jdict = dmrg_step(jdict,dmrgout=dmrgout) # perform the DMRG step
       write_status(idmrg,jdict,outf) # write several things
       idmrg += 1 # increase
       dicts[nsites2+j+1] = copydict(jdict) # save this dictionary
@@ -239,7 +269,7 @@ def infinite_dmrg(datadict):
         if not silent: print("#####  Left sweep  ########")
         jdict = reflectdict(jdict) # reflect the Hamiltonian
         jdict = fusechain(jdict,dicts_left[L-i-2])
-        jdict = dmrg_step(jdict) # perform the DMRG step
+        jdict = dmrg_step(jdict,dmrgout=dmrgout) # perform the DMRG step
         write_status(idmrg,jdict,outf) # write several things
         idmrg += 1 # increase
         dicts_right[i+1] = copydict(jdict)
@@ -253,7 +283,7 @@ def infinite_dmrg(datadict):
       for i in range(avoid,L-2-avoid): # do a full sweep to the right
         if not silent: print("#####  Right sweep  ########")
         jdict = fusechain(jdict,dicts_right[L-i-2])
-        jdict = dmrg_step(jdict) # perform the DMRG step
+        jdict = dmrg_step(jdict,dmrgout=dmrgout) # perform the DMRG step
         write_status(idmrg,jdict,outf) # write several things
         idmrg += 1 # increase
         dicts_left[i+1] = copydict(jdict) # store the result
@@ -266,15 +296,16 @@ def infinite_dmrg(datadict):
   
     # write results
   dmrgout.energy = np.genfromtxt("ENERGY.OUT").transpose()[1][-1]
+  dmrgout.write() # write all the results
   dmrgout.to_origin() # go to original folder
   return dmrgout
 
   
 
-def dmrg_step(indict,periodic=False,LO=True):
+def dmrg_step(indict,periodic=False,LO=True,dmrgout=None):
   """Perform a single DMRG step"""
   if periodic: return dmrg_BoBo(indict,LO=LO) # infinite DMRG method
-  else: return dmrg_BooB(indict,LO=LO) # infinite DMRG method
+  else: return dmrg_BooB(indict,LO=LO,dmrgout=dmrgout) # infinite DMRG method
 
 
 
@@ -297,7 +328,7 @@ def copydict(indict):
 
 def reflectdict(indict,center=0):
   """Return a dictionary of a chain, but with
-  the Hamiltonian reflect from left to right 
+  the Hamiltonian reflected from left to right 
   in the site center"""
   odict = copydict(indict) # copy the dictionary
   tmpdict = copydict(indict) # copy the dictionary
@@ -309,7 +340,7 @@ def reflectdict(indict,center=0):
 
 
 def fusechain(in1,in2,l=None):
-  """Function that the relevant term of the two hamiltonians"""
+  """Function that fuses the relevant term of the two hamiltonians"""
   out = copydict(in1) # copy dictionary
   if l is None: l = in1["length"] # length of the block
 #  print("Generating site ",l)
@@ -336,7 +367,7 @@ def fusechain(in1,in2,l=None):
 # different types of DMRG methods
 
 
-def dmrg_BooB(indict,integrate_right=True,LO=True):
+def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
     """Perform a single DMRG step,
        geometry is [ ]oo[ ],
        with open boundary conditions"""
@@ -429,6 +460,11 @@ def dmrg_BooB(indict,integrate_right=True,LO=True):
     gsout = ground_state(lSB_rSB,diml,dimr,v0=None,
                                    indict=outdict) # get the smallest state
     eout = gsout.energy # GS energy
+    # store several quantities
+    dmrgout.iteration_energy.append(gsout.energy) # store energy
+    dmrgout.iteration_energies.append(gsout.energies) # store energies
+    dmrgout.iteration_dmdis.append(gsout.dmdis) # store DM distance
+    #########################
     es = gsout.energies # excited states eenrgies
     wf0 = gsout.wf # wavefunction
     dmat = gsout.dm  # density matrix

@@ -1,5 +1,5 @@
 from __future__ import print_function
-import operatornames
+from .. import operatornames
 import numpy as np
 from scipy.sparse import csc_matrix
 

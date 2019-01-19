@@ -1,12 +1,13 @@
 from __future__ import print_function
 from scipy.sparse.linalg import LinearOperator
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix,kron
 import numpy as np
 
 def tensorial_LO(op1,op2,sparse=True,fortran=True,adapted=True):
   """Perform the tensorial product, returning a LinearOperator"""
   op1 = coo_matrix(op1)
   op2 = coo_matrix(op2)
+  return kron(op1,op2) # kronecker delta product
   dim1 = op1.shape[0] # size of the matrix
   dim2 = op2.shape[0] # size of the matrix
   nn1 = len(op1.col)

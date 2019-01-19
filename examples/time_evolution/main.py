@@ -2,14 +2,14 @@ import os
 import sys
 import numpy as np
 sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-import spinchain
+from dmrgpy import spinchain
 
 
 
 
 ns = np.array(range(4,30,2))
 es = []
-n = 2
+n = 3
 spins = [2 for i in range(n)]
 sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 sc.clean()
@@ -23,7 +23,7 @@ sc.maxm = 10
 sc.get_gs()
 i = 0 ; j=1
 (x,y) = sc.evolution(nt=1000,dt=0.03,mode="ED",name="ZZ",i=i,j=j)
-(x1,y1) = sc.evolution(nt=1000,dt=0.3,mode="DMRG",name="ZZ",i=i,j=j)
+(x1,y1) = sc.evolution(nt=1000,dt=0.03,mode="DMRG",name="ZZ",i=i,j=j)
 
 
 import matplotlib.pyplot as plt

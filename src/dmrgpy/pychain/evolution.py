@@ -10,6 +10,14 @@ name_sx = "SX.OUT"
 name_sy = "SY.OUT"
 name_sz = "SZ.OUT"
 
+
+
+
+
+
+
+
+
 def evolve(waves,h,t=0.0,mode="caley",dt=0.01,de=0.0,dp=0.0):
   """Evolve the wavefunctions using the Schrodinger equation"""
   if de != 0.0 or dp != 0.0:

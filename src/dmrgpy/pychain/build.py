@@ -128,8 +128,16 @@ def get_representation(wfs,A):
 
 class Spin_chain():
   size = 0 # size of the Hamiltonian
+  def __init__(self):
+        self.path = os.getcwd()+"/.pychainfolder/"
+        os.system("rm -rf "+self.path) # remove temporal folder
+        os.system("mkdir "+self.path) # create temporal folder
+        self.inipath = os.getcwd() # initial path
+  def to_folder(self): os.chdir(self.path)
+  def to_origin(self): os.chdir(self.inipath) # go to original folder
   def build(self,spins,use_lib=False,save=False):
     """Creates a spin chain, using as input the spins list"""
+    self.to_folder() # go to temporal folder
     if get_dimension(spins)>maxsize: 
       print("Surpased maximum allowed dimension for ED",maxsize)
       print("Dimension of the requested Hilbert space",get_dimension(spins))
@@ -182,6 +190,7 @@ class Spin_chain():
     self.size = self.sxi[0].shape[0] # store size of the Hamiltonian
     # now read the basis
     self.basis = np.genfromtxt("basis.out").astype(int)
+    self.to_origin() # go back
   def generate_hamiltonian(self,xs,ys,js,mode="operator",is_ising=False):
     """Generate a Hamiltonian"""
     h = csc(([],([],[])),shape=(self.size,self.size)) # initialize 
