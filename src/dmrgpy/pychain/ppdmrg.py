@@ -19,7 +19,7 @@ def correlator(indict,outfile="CORRELATORS.OUT"):
     Os = []
     for (o1,o2) in zip(sops,bopsi): Os.append(o1*o2) # store
     corrs.append([float(ns-i)]+[np.sum((dmat*O).diagonal()).real for O in Os]) # compute
-  corrs = np.matrix(corrs)
+  corrs = np.array(corrs)
   # now write in file
   np.savetxt(outfile,corrs)
 #  print("Correlators written in ",outfile)

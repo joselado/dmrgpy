@@ -68,7 +68,7 @@ def states_dmat(dmat,datadict):
   if not silent: print("Truncation error is",error)
   entropy = get_entropy(es) # get the entropy
   if not silent: print("Entropy is",entropy)
-  return csc_matrix(np.matrix((vouts)).T),entropy
+  return csc_matrix(np.array((vouts)).T),entropy
 
 
 
@@ -126,6 +126,7 @@ class DMRGresult():
         self.path = os.getcwd()+"/.dmrgfolder/"
         self.iteration_energy = [] # empty list
         self.iteration_energies = [] # empty list
+        self.iteration_entropies = [] # empty list
         self.iteration_dmdis = [] # empty list
         os.system("rm -rf "+self.path) # remove temporal folder
         os.system("mkdir "+self.path) # create temporal folder
@@ -136,7 +137,7 @@ class DMRGresult():
         """Write several results in a file"""
         # write the energy #
         m = self.iteration_energy
-        m = np.matrix([range(len(m)),m]).T
+        m = np.array([range(len(m)),m]).T
         np.savetxt("ITERATION_ENERGY.OUT",m)
         # write the energies #
         m = self.iteration_energies
@@ -179,7 +180,11 @@ def infinite_dmrg(datadict):
   # generate initial guess
   if periodic: raise 
 #indict = initial_BoBo(right,left,onsite,site_operators=site_operators)
-  else: indict = initial_BooB(right,left,onsite,site_operators=site_operators) 
+  else: 
+      coupling = datadict["coupling"] # function returning list with couplings
+      cs = coupling(0,1) # list with couplings
+      indict = initial_BooB(right,left,onsite,
+          site_operators=site_operators,cs=cs) 
   for key in datadict: indict[key] = datadict[key] # copy dictionary
   outf = output_files() # get the dictionary
   #########################################
@@ -295,9 +300,11 @@ def infinite_dmrg(datadict):
 #            ppdmrg.dynamical_correlator(jdict) # write results
   
     # write results
-  dmrgout.energy = np.genfromtxt("ENERGY.OUT").transpose()[1][-1]
+#  dmrgout.energy = np.genfromtxt("ENERGY.OUT").transpose()[1][-1]
   dmrgout.write() # write all the results
   dmrgout.to_origin() # go to original folder
+  for f in outf: 
+      outf[f].close()
   return dmrgout
 
   
@@ -462,6 +469,8 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
     eout = gsout.energy # GS energy
     # store several quantities
     dmrgout.iteration_energy.append(gsout.energy) # store energy
+    dmrgout.energy = gsout.energy # store energy
+    dmrgout.energies = gsout.energies # store energies
     dmrgout.iteration_energies.append(gsout.energies) # store energies
     dmrgout.iteration_dmdis.append(gsout.dmdis) # store DM distance
     #########################
@@ -477,6 +486,7 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
       print()
     # now look for the relevant subspace
     R,entropy = states_dmat(dmat,indict) # get the proj onto the main space
+    dmrgout.iteration_entropies.append(entropy) # store energies
     # function to project matrices
     def old2new(A,mtype=None,iterative=False):
       """Project a certain operator into the new basis"""
@@ -528,138 +538,140 @@ def dmrg_BooB(indict,integrate_right=True,LO=True,dmrgout=None):
     return outdict # return the dictionary
 
 
+#
+#
+#
+#def dmrg_BoBo(indict,integrate_right=True,LO=False):
+#    """Perform a single DMRG step.
+#    The geometry used in this function is
+#            [ ] o [ ] o
+#    using periodic boundary conditions"""
+#    outdict = deepcopy(indict) # output dictionary
+#    ##### Couplings #####
+#    rS_rB = indict["rS_rB"] 
+#    lS_lB = indict["lS_lB"] 
+#    lS_rB = indict["lS_rB"] 
+#    rB_rS = indict["rB_rS"] 
+#    rB_lS = indict["rB_lS"] 
+#    rS_lB = indict["rS_lB"] 
+#    lB_lS = indict["lB_lS"] 
+#    lB_rS = indict["lB_rS"] 
+#    #### Onsite Hamiltonians
+#    rB = indict["rB"] # right hamiltonian
+#    lB = indict["lB"] # left hamiltonian
+#    rS = indict["rS"] # left hamiltonian
+#    lS = indict["lS"] # left hamiltonian
+#    nstates = indict["number_of_states"] # number of states retained
+#    target = indict["target"] # number of target states
+#    retain_states = indict["retain_states"] # number of target states
+#    # dimensions
+#    dim_lS = lS.shape[0] # left site dimension
+#    dim_rS = rS.shape[0] # right site dimension
+#    dim_rB = rB.shape[0] # dimension of the block 
+#    dim_lB = lB.shape[0] # dimension of the block 
+#    # idensity operators
+#    id_lB = sp.eye(dim_lB,dtype=np.complex) # identity operator
+#    id_rB = sp.eye(dim_rB,dtype=np.complex) # identity operator
+#    id_lS = sp.eye(dim_lS,dtype=np.complex) # identity operator
+#    id_rS = sp.eye(dim_rS,dtype=np.complex) # identity operator
+#    id_rSB = sp.eye(dim_rS*dim_rB,dtype=np.complex) # right identity operator
+#    id_lSB = sp.eye(dim_lS*dim_lB,dtype=np.complex) # right identity operator
+#    ###########################
+#    # couple site to right block
+#    ###########################
+#    rS_plus_rB = (tensorial_operator(id_rS,rB) +
+#                   tensorial_operator(rS,id_rB) + 
+#                   coupled_hamiltonian(rS_rB,rB_rS) ) # block+right site 
+#    ###########################
+#    # couple site to left block
+#    ###########################
+#    lS_plus_lB = (tensorial_operator(id_lS,lB) + 
+#                   tensorial_operator(lS,id_lB) + 
+#                   coupled_hamiltonian(lS_lB,lB_lS) ) # block+right site 
+#    ###########################
+#    # now couple the two halves
+#    ###########################
+## left and right parts
+#    LO = True
+#    lSB_rSB = (tensorial_operator(lS_plus_lB,id_rSB,LO=LO) + 
+#                       tensorial_operator(id_lSB,rS_plus_rB,LO=LO) )
+#    # promote coupling between sites to the new dimension
+#    lS_rB_new = [tensorial_operator(r,id_lB) for r in lS_rB]  
+#    lB_rS_new = [tensorial_operator(id_lS,r) for r in lB_rS]  
+#    rS_lB_new = [tensorial_operator(r,id_rB) for r in rS_lB]  
+#    lB_rS_new = [tensorial_operator(id_lS,r) for r in lB_rS]  
+#    rB_lS_new = [tensorial_operator(id_rS,r) for r in rB_lS]  
+#
+#    lS_plus_rB = coupled_hamiltonian(lS_rB_new,rB_lS_new,LO=LO)   
+#    lB_plus_rS = coupled_hamiltonian(lB_rS_new,rS_lB_new,LO=LO)   
+#    lSB_rSB = lSB_rSB + lS_plus_rB + lB_plus_rS # couple left and right parts
+#    # ground state and project on DMRG manifold
+#    diml,dimr = dim_lB*dim_lS, dim_rB*dim_rS  # right and left dimensions
+#    gsout = ground_state(lSB_rSB,diml,dimr,v0=None) # get the smallest state
+#    eout = gsout.energy
+#    es = gsout.energies
+#    wf0 = gsout.wf
+#    dmat = gsout.dm
+#    Ain = tensorial_operator(coupled_hamiltonian(lS_lB,lB_lS),id_rSB,LO=LO)
+#    sisj = tensorial.exp_val(wf0,lS_plus_rB) # calculate the correlator
+##    Ain = tensorial_operator(tensorial_operator(lS,id_lB),id_rSB)
+##    sisj = spectrum.exp_val(wf0,Ain) # calculate the correlator
+#    print("Correlation",sisj)
+#    print("Energy per site",e0/(2*indict["length"]+2))
+#    # now look for the relevant subspace
+#    R,entropy = states_dmat(dmat,nstates=nstates) # get the proj onto the main space
+#    # function to project matrices
+#    def old2new(A,mtype=None):
+#      """Project a certain operator into the new basis"""
+#      if mtype=="lSB": # left site+block
+#        out = A
+#      elif mtype=="lB": # left site+block
+#        out = tensorial_operator(id_lS,A)
+#      elif mtype=="lS": # left site+block
+#        out = tensorial_operator(A,id_lB)
+#      else: raise # not considered
+#      return project(out,R) # project the operator
+#
+#    # put the couplings in the new basis
+#    new_lB_rS = [old2new(M,mtype="lB") for M in lB_rS] # left block operators, projected
+#    new_lB_lS = [old2new(M,mtype="lS") for M in lS_rB] # left block operators, projected
+#    new_rB_lS = new_lB_rS
+#    new_rB_rS = new_lB_lS 
+#    new_lB = old2new(lS_plus_lB,mtype="lSB") # left block Hamiltonian, projected
+#    new_rB = new_lB # right block Hamiltonian, projected
+#    # store the results
+#    outdict["energy"] = e0
+#    outdict["correlator"] = sisj
+#    outdict["entropy"] = entropy
+#    outdict["lB_rS"] = new_lB_rS # coupling to the left block
+#    outdict["lB_lS"] = new_lB_lS # coupling to the left block
+#    outdict["rB_lS"] = new_rB_lS # coupling to the left block
+#    outdict["rB_rS"] = new_rB_rS # coupling to the left block
+#    outdict["rB"] = new_rB # right hamiltonian
+#    outdict["lB"] = new_lB # left hamiltonian
+#    outdict["length"] += 1 # the length if the chain has increased by 2 units
+#    outdict["density_matrix"] = old2new(dmat,mtype="lSB") # store dmat in new basis
+#    # now store the site operators, in full form (lSB basis)
+#    # first transform the old ones
+#    outdict["site_operators"] = [[old2new(m,mtype="lB") for m in s ] 
+#                                   for s in indict["site_operators"]]
+#    # and add the new site
+#    ops = indict["site_operator_generator"](0)
+#    outdict["site_operators"].append([old2new(op,mtype="lS") for op in ops])  
+#    print("Stored sites",len(outdict["site_operators"]))
+#    return outdict # return the dictionary
+#
+#
+#
 
 
 
-def dmrg_BoBo(indict,integrate_right=True,LO=False):
-    """Perform a single DMRG step.
-    The geometry used in this function is
-            [ ] o [ ] o
-    using periodic boundary conditions"""
-    outdict = deepcopy(indict) # output dictionary
-    ##### Couplings #####
-    rS_rB = indict["rS_rB"] 
-    lS_lB = indict["lS_lB"] 
-    lS_rB = indict["lS_rB"] 
-    rB_rS = indict["rB_rS"] 
-    rB_lS = indict["rB_lS"] 
-    rS_lB = indict["rS_lB"] 
-    lB_lS = indict["lB_lS"] 
-    lB_rS = indict["lB_rS"] 
-    #### Onsite Hamiltonians
-    rB = indict["rB"] # right hamiltonian
-    lB = indict["lB"] # left hamiltonian
-    rS = indict["rS"] # left hamiltonian
-    lS = indict["lS"] # left hamiltonian
-    nstates = indict["number_of_states"] # number of states retained
-    target = indict["target"] # number of target states
-    retain_states = indict["retain_states"] # number of target states
-    # dimensions
-    dim_lS = lS.shape[0] # left site dimension
-    dim_rS = rS.shape[0] # right site dimension
-    dim_rB = rB.shape[0] # dimension of the block 
-    dim_lB = lB.shape[0] # dimension of the block 
-    # idensity operators
-    id_lB = sp.eye(dim_lB,dtype=np.complex) # identity operator
-    id_rB = sp.eye(dim_rB,dtype=np.complex) # identity operator
-    id_lS = sp.eye(dim_lS,dtype=np.complex) # identity operator
-    id_rS = sp.eye(dim_rS,dtype=np.complex) # identity operator
-    id_rSB = sp.eye(dim_rS*dim_rB,dtype=np.complex) # right identity operator
-    id_lSB = sp.eye(dim_lS*dim_lB,dtype=np.complex) # right identity operator
-    ###########################
-    # couple site to right block
-    ###########################
-    rS_plus_rB = (tensorial_operator(id_rS,rB) +
-                   tensorial_operator(rS,id_rB) + 
-                   coupled_hamiltonian(rS_rB,rB_rS) ) # block+right site 
-    ###########################
-    # couple site to left block
-    ###########################
-    lS_plus_lB = (tensorial_operator(id_lS,lB) + 
-                   tensorial_operator(lS,id_lB) + 
-                   coupled_hamiltonian(lS_lB,lB_lS) ) # block+right site 
-    ###########################
-    # now couple the two halves
-    ###########################
-# left and right parts
-    LO = True
-    lSB_rSB = (tensorial_operator(lS_plus_lB,id_rSB,LO=LO) + 
-                       tensorial_operator(id_lSB,rS_plus_rB,LO=LO) )
-    # promote coupling between sites to the new dimension
-    lS_rB_new = [tensorial_operator(r,id_lB) for r in lS_rB]  
-    lB_rS_new = [tensorial_operator(id_lS,r) for r in lB_rS]  
-    rS_lB_new = [tensorial_operator(r,id_rB) for r in rS_lB]  
-    lB_rS_new = [tensorial_operator(id_lS,r) for r in lB_rS]  
-    rB_lS_new = [tensorial_operator(id_rS,r) for r in rB_lS]  
-
-    lS_plus_rB = coupled_hamiltonian(lS_rB_new,rB_lS_new,LO=LO)   
-    lB_plus_rS = coupled_hamiltonian(lB_rS_new,rS_lB_new,LO=LO)   
-    lSB_rSB = lSB_rSB + lS_plus_rB + lB_plus_rS # couple left and right parts
-    # ground state and project on DMRG manifold
-    diml,dimr = dim_lB*dim_lS, dim_rB*dim_rS  # right and left dimensions
-    gsout = ground_state(lSB_rSB,diml,dimr,v0=None) # get the smallest state
-    eout = gsout.energy
-    es = gsout.energies
-    wf0 = gsout.wf
-    dmat = gsout.dm
-    Ain = tensorial_operator(coupled_hamiltonian(lS_lB,lB_lS),id_rSB,LO=LO)
-    sisj = tensorial.exp_val(wf0,lS_plus_rB) # calculate the correlator
-#    Ain = tensorial_operator(tensorial_operator(lS,id_lB),id_rSB)
-#    sisj = spectrum.exp_val(wf0,Ain) # calculate the correlator
-    print("Correlation",sisj)
-    print("Energy per site",e0/(2*indict["length"]+2))
-    # now look for the relevant subspace
-    R,entropy = states_dmat(dmat,nstates=nstates) # get the proj onto the main space
-    # function to project matrices
-    def old2new(A,mtype=None):
-      """Project a certain operator into the new basis"""
-      if mtype=="lSB": # left site+block
-        out = A
-      elif mtype=="lB": # left site+block
-        out = tensorial_operator(id_lS,A)
-      elif mtype=="lS": # left site+block
-        out = tensorial_operator(A,id_lB)
-      else: raise # not considered
-      return project(out,R) # project the operator
-
-    # put the couplings in the new basis
-    new_lB_rS = [old2new(M,mtype="lB") for M in lB_rS] # left block operators, projected
-    new_lB_lS = [old2new(M,mtype="lS") for M in lS_rB] # left block operators, projected
-    new_rB_lS = new_lB_rS
-    new_rB_rS = new_lB_lS 
-    new_lB = old2new(lS_plus_lB,mtype="lSB") # left block Hamiltonian, projected
-    new_rB = new_lB # right block Hamiltonian, projected
-    # store the results
-    outdict["energy"] = e0
-    outdict["correlator"] = sisj
-    outdict["entropy"] = entropy
-    outdict["lB_rS"] = new_lB_rS # coupling to the left block
-    outdict["lB_lS"] = new_lB_lS # coupling to the left block
-    outdict["rB_lS"] = new_rB_lS # coupling to the left block
-    outdict["rB_rS"] = new_rB_rS # coupling to the left block
-    outdict["rB"] = new_rB # right hamiltonian
-    outdict["lB"] = new_lB # left hamiltonian
-    outdict["length"] += 1 # the length if the chain has increased by 2 units
-    outdict["density_matrix"] = old2new(dmat,mtype="lSB") # store dmat in new basis
-    # now store the site operators, in full form (lSB basis)
-    # first transform the old ones
-    outdict["site_operators"] = [[old2new(m,mtype="lB") for m in s ] 
-                                   for s in indict["site_operators"]]
-    # and add the new site
-    ops = indict["site_operator_generator"](0)
-    outdict["site_operators"].append([old2new(op,mtype="lS") for op in ops])  
-    print("Stored sites",len(outdict["site_operators"]))
-    return outdict # return the dictionary
 
 
-
-
-
-
-
-
-def initial_BooB(right,left,onsite,site_operators=lambda i: []):
+def initial_BooB(right,left,onsite,
+        site_operators=lambda i: [],cs=None):
   """Generate the initial dictionary"""
+  if cs is None: raise
   rS_rB = right(0)
   rS_lS = left(0)
   lS_rS = right(0)
@@ -669,8 +681,8 @@ def initial_BooB(right,left,onsite,site_operators=lambda i: []):
   dim_lS = lS_rS[0].shape[0] # dimension of left subspace
   id_rS = sp.eye(dim_rS,dtype=np.complex) # left identity operator
   id_lS = sp.eye(dim_lS,dtype=np.complex) # left identity operator
-  # insitial Hamiltonian
-  Block = (coupled_hamiltonian(right(0),left(1)) +
+  # initial Hamiltonian
+  Block = (coupled_hamiltonian(right(0),left(1),cs=cs) +
             tensorial_operator(id_lS,onsite(1)) +
             tensorial_operator(onsite(0),id_rS) )
   #################################################

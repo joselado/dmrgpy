@@ -31,8 +31,13 @@ def biladder(s1,s2,j1=1.0,j2=1.0,j12=1.0):
   return odict
 
 
-def monochain(s1,d=0.0,b=[0.,0.,0.],fun=None):
-  """Create a chain"""
+def monochain(s1,d=0.0,b=[0.,0.,0.],fun=None,J=[1.,1.,1.]):
+  """
+  Create a chain
+   - b is the magnetic field
+   - J is the different components of the exchange
+   - d is the single ion anisotropy
+  """
   if fun is None: fun = lambda i: 1.
   spins = [s1]
   sc = build.Spin_chain()
@@ -53,8 +58,8 @@ def monochain(s1,d=0.0,b=[0.,0.,0.],fun=None):
   odict["left"] = left
   odict["onsite"] = onsite
   odict["site_operator_generator"] = left
-  def f(i,j): return [1.,1.,1.]
-  odict["coupling"] = f
+  def f(i,j): return J # isotropic by default
+  odict["coupling"] = f # assign function
   dmrgdict = dmrg.dmrgdict() # rest of parameters
   for key in dmrgdict: odict[key] = dmrgdict[key] # copy dictionary
   return odict

@@ -1,0 +1,1156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.5.1" />
+<title>dmrgpy.manybodychain API documentation</title>
+<meta name="description" content="" />
+<link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
+<link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
+<style>.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id=^header-]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:1px solid #ddd;margin:1em 0 1em 4ch}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{font-weight:bold}#index h4 + ul{margin-bottom:.6em}#index .two-column{column-count:2}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.name small{font-weight:normal}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary{background:#ffc;font-weight:400;font-size:.8em;width:11em;text-transform:uppercase;padding:0px 8px;border:1px solid #fd6;border-radius:5px;cursor:pointer}.source summary:hover{background:#fe9 !important}.source[open] summary{background:#fda}.source pre{max-height:500px;overflow-y:scroll;margin-bottom:15px}.hlist{list-syle:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}.admonition{padding:.1em .5em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink;]</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a,a:visited{text-decoration:underline}a[href]:after{content:" (" attr(href) ")"}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title"><code>dmrgpy.manybodychain</code> module</h1>
+</header>
+<section id="section-intro">
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">from __future__ import print_function
+import numpy as np
+import os
+from . import kpmdmrg
+from . import pychainwrapper
+from . import pychain
+from . import mps
+from . import timedependent
+from . import groundstate
+from . import operatornames
+from . import correlator
+
+#dmrgpath = os.environ[&#34;DMRGROOT&#34;]+&#34;/dmrgpy&#34; # path for the program
+dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
+one = np.matrix(np.identity(3))
+
+
+
+class Coupling():
+  def __init__(self,i,j,g):
+    self.i = i
+    self.j = j
+    self.g = g
+
+
+
+
+class Many_Body_Hamiltonian():
+  def __init__(self,sites):
+    self.sites = sites # list of the sites
+    self.path = os.getcwd()+&#34;/.mpsfolder/&#34; # folder of the calculations
+    self.inipath = os.getcwd() # original folder
+    self.ns = len(sites) # number of sites
+    self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
+    self.fields = [] # empty list
+    self.hoppings = dict() # empty dictionary
+    self.spinful_hoppings = dict() # empty dictionary
+    self.pairing = dict() # empty dictionary
+    self.hubbard = dict() # empty dictionary
+#    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
+    # additional arguments
+    self.kpmmaxm = 50 # bond dimension in KPM
+    self.maxm = 30 # bond dimension in wavefunctions
+    self.nsweeps = 15 # number of sweeps
+    self.kpmcutoff = 1e-8 # cutoff in KPM
+    self.cutoff = 1e-8 # cutoff in ground state
+    self.kpmscale = 10.0 # this is meaningless
+    self.restart = False # restart the calculation
+    self.gs_from_file = False # start from a random wavefunction
+    self.e0 = None # no ground state energy
+    self.wf0 = None # no initial WF
+    self.starting_file_gs = &#34;starting_psi_GS.mps&#34; # initial file for GS
+    self.sites_from_file = False # read sites from the file
+    self.computed_gs = False # computed the GS already
+    self.fit_td = False # use fitting procedure in time evolution
+    os.system(&#34;mkdir -p &#34;+self.path) # create folder for the calculations
+  def to_folder(self): os.chdir(self.path) # go to calculation folder
+  def copy(self):
+      from copy import deepcopy
+      return deepcopy(self)
+  def to_origin(self): 
+    if os.path.isfile(self.path+&#34;/ERROR&#34;): raise # something wrong
+    os.chdir(self.inipath) # go to original folder
+  def clean(self): os.system(&#34;rm -rf &#34;+self.path) # clean temporal folder
+  def set_exchange(self,fun):
+    &#34;&#34;&#34;Set the exchange coupling between sites&#34;&#34;&#34;
+    self.computed_gs = False # say that GS has not been computed
+    self.couplings = [] # empty list
+    for i in range(self.ns): # loop
+      for j in range(i+1,self.ns):  # loop
+        g = fun(i,j).real # call the function
+        if np.sum(np.abs(fun(i,j)-fun(j,i)))&gt;1e-5: raise # something wrong
+        g = g*one # multiply by the identity
+        if np.sum(np.abs(g))!=0.0: 
+          c = Coupling(i,j,g) # create class
+          self.couplings.append(c) # store
+    # now the onsite ones
+    for i in range(self.ns): # loop
+        g = fun(i,i).real # call the function
+        g = g*one # multiply by the identity
+        g = (g + g.H)/2. # the onsite one must be hermitian
+        if np.sum(np.abs(g))!=0.0: # if nonzero 
+          c = Coupling(i,i,g) # create class
+          self.couplings.append(c) # store
+  def set_hoppings(self,fun):
+      &#34;&#34;&#34;Add the spin independent hoppings&#34;&#34;&#34;
+      self.computed_gs = False # say that GS has not been computed
+      self.hoppings = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.sites[i]==1 and self.sites[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)&gt;0.0:
+                      self.hoppings[(i,j)] = Coupling(i,j,c) # store
+  def set_spinful_hoppings(self,fun):
+      &#34;&#34;&#34;Add the spin independent hoppings&#34;&#34;&#34;
+      self.computed_gs = False # say that GS has not been computed
+      if callable(fun):
+        self.spinful_hoppings = dict()
+        for i in range(self.ns): # loop
+            for j in range(self.ns): # loop
+                if self.sites[i]==1 and self.sites[j]==1:
+                    c = fun(i,j)
+                    if np.abs(c)&gt;0.0:
+                        self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
+      else: # assume it is a matrix
+          self.spinful_hoppings = np.matrix(fun)
+  def set_pairing(self,fun):
+      &#34;&#34;&#34;Add the up/down pairing&#34;&#34;&#34;
+      self.computed_gs = False # say that GS has not been computed
+      self.pairing = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.sites[i]==1 and self.sites[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)&gt;0.0:
+                      self.pairing[(i,j)] = Coupling(i,j,c) # store
+  def set_hubbard(self,fun):
+      self.computed_gs = False # say that GS has not been computed
+      self.hubbard = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.sites[i]==1 and self.sites[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)&gt;0.0:
+                      self.hubbard[(i,j)] = Coupling(i,j,c) # store
+  def set_fields(self,fun):
+    self.computed_gs = False # say that GS has not been computed
+    self.fields = [fun(i) for i in range(self.ns)] # fields
+  def setup_sweep(self,mode=&#34;default&#34;):
+    setup_sweep(self,mode=mode)
+  def setup_task(self,mode=&#34;GS&#34;,task=dict()):
+    from .taskdmrg import setup_task
+    setup_task(self,mode=mode,task=task)
+  def write_hamiltonian(self):
+      from .writemps import write_hamiltonian
+      write_hamiltonian(self)
+  def run(self,automatic=False): 
+    os.system(dmrgpath+&#34;/mpscpp/mpscpp.x &gt; status.txt&#34;) # run the DMRG calculation
+  def entropy(self,n=1):
+    &#34;&#34;&#34;Return the entanglement entropy&#34;&#34;&#34;
+    self.setup_sweep()
+    self.setup_task(&#34;entropy&#34;)
+    self.write_hamiltonian() # write the Hamiltonian to a file
+    self.run() # perform the calculation
+    return np.genfromtxt(&#34;ENTROPY.OUT&#34;)
+  def get_full_hamiltonian(self):
+    return pychainwrapper.get_full_hamiltonian(self)
+  def get_pychain(self):
+    return pychainwrapper.get_pychain(self)
+  def get_dos(self,i=0,delta=0.1,window=5.0):
+    from .dos import get_dos
+    return get_dos(self,i=i,delta=delta,window=window)
+  def get_spismj(self,n=1000,mode=&#34;DMRG&#34;,i=0,j=0,smart=False):
+    return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
+  def get_dynamical_correlator(self,use_kpm=True,**kwargs):
+    self.set_initial_wf(self.wf0) # set the initial wavefunction
+    if use_kpm: return kpmdmrg.get_dynamical_correlator(self,**kwargs)
+    else: return timedependent.correlator(self,**kwargs)
+  def get_excited(self,n=10,mode=&#34;DMRG&#34;):
+    self.to_folder() # go to temporal folder
+    if mode==&#34;DMRG&#34;:
+      self.setup_sweep()
+      self.setup_task(&#34;excited&#34;,task={&#34;nexcited&#34;:str(n)})
+      self.write_hamiltonian() # write the Hamiltonian to a file
+      self.run() # perform the calculation
+      out = np.genfromtxt(&#34;EXCITED.OUT&#34;)
+    elif mode==&#34;ED&#34;:
+      h = self.get_full_hamiltonian() # get the Hamiltonian
+      from . import pychain
+      out = pychain.spectrum.eigenstates(h,k=n) # return energy
+    else: 
+      self.to_origin() # go to main folder
+      raise
+    self.to_origin() # go to main folder
+    return out
+  def get_gap(self):
+    es = self.get_excited(2)
+    return es[1] -es[0]
+  def set_initial_wf(self,wf):
+      &#34;&#34;&#34;Use a certain wavefunction as initial guess&#34;&#34;&#34;
+      if wf is None: return
+      self.gs_from_file = True # use a wavefunction from a file
+      self.starting_file_gs = wf.name # name of the wavefunction
+  def get_gs(self,mode=&#34;DMRG&#34;,wf0=None,best=True,n=1):
+    &#34;&#34;&#34;Return the ground state&#34;&#34;&#34;
+    if mode==&#34;DMRG&#34;:
+      if best: groundstate.best_gs(self,n=n) # best ground state from a set
+      else: self.gs_energy(wf0=wf0) # perform a ground state calculation
+      return self.wf0 # return wavefucntion
+    elif mode==&#34;ED&#34;:
+      self.to_folder() # go to temporal folder
+      h = self.get_full_hamiltonian() # get the Hamiltonian 
+      self.to_origin() # go to temporal folder
+      return pychain.spectrum.ground_state(h)[1] # return energy
+    else: raise
+  def gs_energy(self,mode=&#34;DMRG&#34;,wf0=None):
+    &#34;&#34;&#34;Return the ground state energy&#34;&#34;&#34;
+    # write the sites
+    if mode==&#34;DMRG&#34;:
+      out = groundstate.gs_energy(self,wf0=wf0)
+    elif mode==&#34;ED&#34;: # use brute force
+      self.to_folder() # go to temporal folder
+      h = self.get_full_hamiltonian() # get the Hamiltonian 
+      out = pychain.spectrum.ground_state(h)[0] # return energy
+    else: 
+      self.to_origin() # go to main folder
+      raise
+    self.to_origin() # go to main folder
+    self.restart = True
+    return out
+  def get_correlator(self,**kwargs):
+    &#34;&#34;&#34;Return a correlator&#34;&#34;&#34;
+#    print(mode)
+    return correlator.get_correlator(self,**kwargs)
+  def get_magnetization(self):
+    &#34;&#34;&#34;Calculate the magnetization of the system&#34;&#34;&#34;
+    mx = self.get_file(&#34;MEASURE_SX.OUT&#34;).transpose()[1]
+    my = self.get_file(&#34;MEASURE_SY.OUT&#34;).transpose()[1]
+    mz = self.get_file(&#34;MEASURE_SZ.OUT&#34;).transpose()[1]
+    np.savetxt(&#34;MAGNETIZATION.OUT&#34;,np.matrix([mx,my,mz]).T)
+    return (mx,my,mz)
+  def get_file(self,name):
+    &#34;&#34;&#34;Return the electronic density&#34;&#34;&#34;
+    if not self.computed_gs: self.get_gs() # compute gs
+    self.to_folder() # go to folder
+    m = np.genfromtxt(name) # read file
+    self.to_origin() # go back
+    return m
+  def execute(self,f):
+    &#34;&#34;&#34;Execute function in the folder&#34;&#34;&#34;
+    self.to_folder() # go to folder
+    f()
+    self.to_origin() # go back
+  def evolution(self,**kwargs):
+    from . import timedependent
+    return timedependent.evolution(self,**kwargs)
+
+
+
+#from fermionchain import Fermionic_Hamiltonian
+#from spinchain import Spin_Hamiltonian
+
+
+
+from .writemps import write_hoppings
+from .writemps import write_hubbard
+from .writemps import write_fields
+from .writemps import write_sites
+from .writemps import write_couplings
+from .writemps import write_correlators
+from .writemps import write_sweeps
+from .writemps import write_pairing
+
+
+
+
+
+
+def setup_sweep(self,mode=&#34;default&#34;):
+  &#34;&#34;&#34;Setup the sweep parameters&#34;&#34;&#34;
+  sweep = dict() # dictionary
+  sweep[&#34;cutoff&#34;] = 1e-06
+  if mode==&#34;default&#34;: # default mode
+    sweep[&#34;n&#34;] = &#34;20&#34;
+    sweep[&#34;maxm&#34;] = &#34;100&#34; 
+  elif mode==&#34;fast&#34;: # default mode
+    sweep[&#34;n&#34;] = &#34;3&#34;
+    sweep[&#34;maxm&#34;] = &#34;20&#34; 
+  elif mode==&#34;accurate&#34;: # default mode
+    sweep[&#34;n&#34;] = &#34;10&#34;
+    sweep[&#34;maxm&#34;] = &#34;50&#34; 
+  else: raise
+  sweep[&#34;n&#34;] = self.nsweeps
+  sweep[&#34;maxm&#34;] = self.maxm
+  sweep[&#34;cutoff&#34;] = self.cutoff
+  self.sweep = sweep # initialize
+  write_sweeps(self) # write the sweeps}</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="dmrgpy.manybodychain.setup_sweep"><code class="name flex">
+<span>def <span class="ident">setup_sweep</span></span>(<span>self, mode=&#39;default&#39;)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Setup the sweep parameters</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def setup_sweep(self,mode=&#34;default&#34;):
+  &#34;&#34;&#34;Setup the sweep parameters&#34;&#34;&#34;
+  sweep = dict() # dictionary
+  sweep[&#34;cutoff&#34;] = 1e-06
+  if mode==&#34;default&#34;: # default mode
+    sweep[&#34;n&#34;] = &#34;20&#34;
+    sweep[&#34;maxm&#34;] = &#34;100&#34; 
+  elif mode==&#34;fast&#34;: # default mode
+    sweep[&#34;n&#34;] = &#34;3&#34;
+    sweep[&#34;maxm&#34;] = &#34;20&#34; 
+  elif mode==&#34;accurate&#34;: # default mode
+    sweep[&#34;n&#34;] = &#34;10&#34;
+    sweep[&#34;maxm&#34;] = &#34;50&#34; 
+  else: raise
+  sweep[&#34;n&#34;] = self.nsweeps
+  sweep[&#34;maxm&#34;] = self.maxm
+  sweep[&#34;cutoff&#34;] = self.cutoff
+  self.sweep = sweep # initialize
+  write_sweeps(self) # write the sweeps}</code></pre>
+</details>
+</dd>
+</dl>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="dmrgpy.manybodychain.Coupling"><code class="flex name class">
+<span>class <span class="ident">Coupling</span></span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">class Coupling():
+  def __init__(self,i,j,g):
+    self.i = i
+    self.j = j
+    self.g = g}</code></pre>
+</details>
+<h3>Methods</h3>
+<dl>
+<dt id="dmrgpy.manybodychain.Coupling.__init__"><code class="name flex">
+<span>def <span class="ident">__init__</span></span>(<span>self, i, j, g)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Initialize self.
+See help(type(self)) for accurate signature.</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def __init__(self,i,j,g):
+  self.i = i
+  self.j = j
+  self.g = g}</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian"><code class="flex name class">
+<span>class <span class="ident">Many_Body_Hamiltonian</span></span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">class Many_Body_Hamiltonian():
+  def __init__(self,sites):
+    self.sites = sites # list of the sites
+    self.path = os.getcwd()+&#34;/.mpsfolder/&#34; # folder of the calculations
+    self.inipath = os.getcwd() # original folder
+    self.ns = len(sites) # number of sites
+    self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
+    self.fields = [] # empty list
+    self.hoppings = dict() # empty dictionary
+    self.spinful_hoppings = dict() # empty dictionary
+    self.pairing = dict() # empty dictionary
+    self.hubbard = dict() # empty dictionary
+#    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
+    # additional arguments
+    self.kpmmaxm = 50 # bond dimension in KPM
+    self.maxm = 30 # bond dimension in wavefunctions
+    self.nsweeps = 15 # number of sweeps
+    self.kpmcutoff = 1e-8 # cutoff in KPM
+    self.cutoff = 1e-8 # cutoff in ground state
+    self.kpmscale = 10.0 # this is meaningless
+    self.restart = False # restart the calculation
+    self.gs_from_file = False # start from a random wavefunction
+    self.e0 = None # no ground state energy
+    self.wf0 = None # no initial WF
+    self.starting_file_gs = &#34;starting_psi_GS.mps&#34; # initial file for GS
+    self.sites_from_file = False # read sites from the file
+    self.computed_gs = False # computed the GS already
+    self.fit_td = False # use fitting procedure in time evolution
+    os.system(&#34;mkdir -p &#34;+self.path) # create folder for the calculations
+  def to_folder(self): os.chdir(self.path) # go to calculation folder
+  def copy(self):
+      from copy import deepcopy
+      return deepcopy(self)
+  def to_origin(self): 
+    if os.path.isfile(self.path+&#34;/ERROR&#34;): raise # something wrong
+    os.chdir(self.inipath) # go to original folder
+  def clean(self): os.system(&#34;rm -rf &#34;+self.path) # clean temporal folder
+  def set_exchange(self,fun):
+    &#34;&#34;&#34;Set the exchange coupling between sites&#34;&#34;&#34;
+    self.computed_gs = False # say that GS has not been computed
+    self.couplings = [] # empty list
+    for i in range(self.ns): # loop
+      for j in range(i+1,self.ns):  # loop
+        g = fun(i,j).real # call the function
+        if np.sum(np.abs(fun(i,j)-fun(j,i)))&gt;1e-5: raise # something wrong
+        g = g*one # multiply by the identity
+        if np.sum(np.abs(g))!=0.0: 
+          c = Coupling(i,j,g) # create class
+          self.couplings.append(c) # store
+    # now the onsite ones
+    for i in range(self.ns): # loop
+        g = fun(i,i).real # call the function
+        g = g*one # multiply by the identity
+        g = (g + g.H)/2. # the onsite one must be hermitian
+        if np.sum(np.abs(g))!=0.0: # if nonzero 
+          c = Coupling(i,i,g) # create class
+          self.couplings.append(c) # store
+  def set_hoppings(self,fun):
+      &#34;&#34;&#34;Add the spin independent hoppings&#34;&#34;&#34;
+      self.computed_gs = False # say that GS has not been computed
+      self.hoppings = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.sites[i]==1 and self.sites[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)&gt;0.0:
+                      self.hoppings[(i,j)] = Coupling(i,j,c) # store
+  def set_spinful_hoppings(self,fun):
+      &#34;&#34;&#34;Add the spin independent hoppings&#34;&#34;&#34;
+      self.computed_gs = False # say that GS has not been computed
+      if callable(fun):
+        self.spinful_hoppings = dict()
+        for i in range(self.ns): # loop
+            for j in range(self.ns): # loop
+                if self.sites[i]==1 and self.sites[j]==1:
+                    c = fun(i,j)
+                    if np.abs(c)&gt;0.0:
+                        self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
+      else: # assume it is a matrix
+          self.spinful_hoppings = np.matrix(fun)
+  def set_pairing(self,fun):
+      &#34;&#34;&#34;Add the up/down pairing&#34;&#34;&#34;
+      self.computed_gs = False # say that GS has not been computed
+      self.pairing = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.sites[i]==1 and self.sites[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)&gt;0.0:
+                      self.pairing[(i,j)] = Coupling(i,j,c) # store
+  def set_hubbard(self,fun):
+      self.computed_gs = False # say that GS has not been computed
+      self.hubbard = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.sites[i]==1 and self.sites[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)&gt;0.0:
+                      self.hubbard[(i,j)] = Coupling(i,j,c) # store
+  def set_fields(self,fun):
+    self.computed_gs = False # say that GS has not been computed
+    self.fields = [fun(i) for i in range(self.ns)] # fields
+  def setup_sweep(self,mode=&#34;default&#34;):
+    setup_sweep(self,mode=mode)
+  def setup_task(self,mode=&#34;GS&#34;,task=dict()):
+    from .taskdmrg import setup_task
+    setup_task(self,mode=mode,task=task)
+  def write_hamiltonian(self):
+      from .writemps import write_hamiltonian
+      write_hamiltonian(self)
+  def run(self,automatic=False): 
+    os.system(dmrgpath+&#34;/mpscpp/mpscpp.x &gt; status.txt&#34;) # run the DMRG calculation
+  def entropy(self,n=1):
+    &#34;&#34;&#34;Return the entanglement entropy&#34;&#34;&#34;
+    self.setup_sweep()
+    self.setup_task(&#34;entropy&#34;)
+    self.write_hamiltonian() # write the Hamiltonian to a file
+    self.run() # perform the calculation
+    return np.genfromtxt(&#34;ENTROPY.OUT&#34;)
+  def get_full_hamiltonian(self):
+    return pychainwrapper.get_full_hamiltonian(self)
+  def get_pychain(self):
+    return pychainwrapper.get_pychain(self)
+  def get_dos(self,i=0,delta=0.1,window=5.0):
+    from .dos import get_dos
+    return get_dos(self,i=i,delta=delta,window=window)
+  def get_spismj(self,n=1000,mode=&#34;DMRG&#34;,i=0,j=0,smart=False):
+    return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
+  def get_dynamical_correlator(self,use_kpm=True,**kwargs):
+    self.set_initial_wf(self.wf0) # set the initial wavefunction
+    if use_kpm: return kpmdmrg.get_dynamical_correlator(self,**kwargs)
+    else: return timedependent.correlator(self,**kwargs)
+  def get_excited(self,n=10,mode=&#34;DMRG&#34;):
+    self.to_folder() # go to temporal folder
+    if mode==&#34;DMRG&#34;:
+      self.setup_sweep()
+      self.setup_task(&#34;excited&#34;,task={&#34;nexcited&#34;:str(n)})
+      self.write_hamiltonian() # write the Hamiltonian to a file
+      self.run() # perform the calculation
+      out = np.genfromtxt(&#34;EXCITED.OUT&#34;)
+    elif mode==&#34;ED&#34;:
+      h = self.get_full_hamiltonian() # get the Hamiltonian
+      from . import pychain
+      out = pychain.spectrum.eigenstates(h,k=n) # return energy
+    else: 
+      self.to_origin() # go to main folder
+      raise
+    self.to_origin() # go to main folder
+    return out
+  def get_gap(self):
+    es = self.get_excited(2)
+    return es[1] -es[0]
+  def set_initial_wf(self,wf):
+      &#34;&#34;&#34;Use a certain wavefunction as initial guess&#34;&#34;&#34;
+      if wf is None: return
+      self.gs_from_file = True # use a wavefunction from a file
+      self.starting_file_gs = wf.name # name of the wavefunction
+  def get_gs(self,mode=&#34;DMRG&#34;,wf0=None,best=True,n=1):
+    &#34;&#34;&#34;Return the ground state&#34;&#34;&#34;
+    if mode==&#34;DMRG&#34;:
+      if best: groundstate.best_gs(self,n=n) # best ground state from a set
+      else: self.gs_energy(wf0=wf0) # perform a ground state calculation
+      return self.wf0 # return wavefucntion
+    elif mode==&#34;ED&#34;:
+      self.to_folder() # go to temporal folder
+      h = self.get_full_hamiltonian() # get the Hamiltonian 
+      self.to_origin() # go to temporal folder
+      return pychain.spectrum.ground_state(h)[1] # return energy
+    else: raise
+  def gs_energy(self,mode=&#34;DMRG&#34;,wf0=None):
+    &#34;&#34;&#34;Return the ground state energy&#34;&#34;&#34;
+    # write the sites
+    if mode==&#34;DMRG&#34;:
+      out = groundstate.gs_energy(self,wf0=wf0)
+    elif mode==&#34;ED&#34;: # use brute force
+      self.to_folder() # go to temporal folder
+      h = self.get_full_hamiltonian() # get the Hamiltonian 
+      out = pychain.spectrum.ground_state(h)[0] # return energy
+    else: 
+      self.to_origin() # go to main folder
+      raise
+    self.to_origin() # go to main folder
+    self.restart = True
+    return out
+  def get_correlator(self,**kwargs):
+    &#34;&#34;&#34;Return a correlator&#34;&#34;&#34;
+#    print(mode)
+    return correlator.get_correlator(self,**kwargs)
+  def get_magnetization(self):
+    &#34;&#34;&#34;Calculate the magnetization of the system&#34;&#34;&#34;
+    mx = self.get_file(&#34;MEASURE_SX.OUT&#34;).transpose()[1]
+    my = self.get_file(&#34;MEASURE_SY.OUT&#34;).transpose()[1]
+    mz = self.get_file(&#34;MEASURE_SZ.OUT&#34;).transpose()[1]
+    np.savetxt(&#34;MAGNETIZATION.OUT&#34;,np.matrix([mx,my,mz]).T)
+    return (mx,my,mz)
+  def get_file(self,name):
+    &#34;&#34;&#34;Return the electronic density&#34;&#34;&#34;
+    if not self.computed_gs: self.get_gs() # compute gs
+    self.to_folder() # go to folder
+    m = np.genfromtxt(name) # read file
+    self.to_origin() # go back
+    return m
+  def execute(self,f):
+    &#34;&#34;&#34;Execute function in the folder&#34;&#34;&#34;
+    self.to_folder() # go to folder
+    f()
+    self.to_origin() # go back
+  def evolution(self,**kwargs):
+    from . import timedependent
+    return timedependent.evolution(self,**kwargs)}</code></pre>
+</details>
+<h3>Methods</h3>
+<dl>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.__init__"><code class="name flex">
+<span>def <span class="ident">__init__</span></span>(<span>self, sites)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Initialize self.
+See help(type(self)) for accurate signature.</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">  def __init__(self,sites):
+    self.sites = sites # list of the sites
+    self.path = os.getcwd()+&#34;/.mpsfolder/&#34; # folder of the calculations
+    self.inipath = os.getcwd() # original folder
+    self.ns = len(sites) # number of sites
+    self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
+    self.fields = [] # empty list
+    self.hoppings = dict() # empty dictionary
+    self.spinful_hoppings = dict() # empty dictionary
+    self.pairing = dict() # empty dictionary
+    self.hubbard = dict() # empty dictionary
+#    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
+    # additional arguments
+    self.kpmmaxm = 50 # bond dimension in KPM
+    self.maxm = 30 # bond dimension in wavefunctions
+    self.nsweeps = 15 # number of sweeps
+    self.kpmcutoff = 1e-8 # cutoff in KPM
+    self.cutoff = 1e-8 # cutoff in ground state
+    self.kpmscale = 10.0 # this is meaningless
+    self.restart = False # restart the calculation
+    self.gs_from_file = False # start from a random wavefunction
+    self.e0 = None # no ground state energy
+    self.wf0 = None # no initial WF
+    self.starting_file_gs = &#34;starting_psi_GS.mps&#34; # initial file for GS
+    self.sites_from_file = False # read sites from the file
+    self.computed_gs = False # computed the GS already
+    self.fit_td = False # use fitting procedure in time evolution
+    os.system(&#34;mkdir -p &#34;+self.path) # create folder for the calculations}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.clean"><code class="name flex">
+<span>def <span class="ident">clean</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def clean(self): os.system(&#34;rm -rf &#34;+self.path) # clean temporal folder}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.copy"><code class="name flex">
+<span>def <span class="ident">copy</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def copy(self):
+    from copy import deepcopy
+    return deepcopy(self)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.entropy"><code class="name flex">
+<span>def <span class="ident">entropy</span></span>(<span>self, n=1)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Return the entanglement entropy</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def entropy(self,n=1):
+  &#34;&#34;&#34;Return the entanglement entropy&#34;&#34;&#34;
+  self.setup_sweep()
+  self.setup_task(&#34;entropy&#34;)
+  self.write_hamiltonian() # write the Hamiltonian to a file
+  self.run() # perform the calculation
+  return np.genfromtxt(&#34;ENTROPY.OUT&#34;)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.evolution"><code class="name flex">
+<span>def <span class="ident">evolution</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def evolution(self,**kwargs):
+  from . import timedependent
+  return timedependent.evolution(self,**kwargs)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.execute"><code class="name flex">
+<span>def <span class="ident">execute</span></span>(<span>self, f)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Execute function in the folder</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def execute(self,f):
+  &#34;&#34;&#34;Execute function in the folder&#34;&#34;&#34;
+  self.to_folder() # go to folder
+  f()
+  self.to_origin() # go back}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_correlator"><code class="name flex">
+<span>def <span class="ident">get_correlator</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Return a correlator</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">  def get_correlator(self,**kwargs):
+    &#34;&#34;&#34;Return a correlator&#34;&#34;&#34;
+#    print(mode)
+    return correlator.get_correlator(self,**kwargs)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_dos"><code class="name flex">
+<span>def <span class="ident">get_dos</span></span>(<span>self, i=0, delta=0.1, window=5.0)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_dos(self,i=0,delta=0.1,window=5.0):
+  from .dos import get_dos
+  return get_dos(self,i=i,delta=delta,window=window)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_dynamical_correlator"><code class="name flex">
+<span>def <span class="ident">get_dynamical_correlator</span></span>(<span>self, use_kpm=True, **kwargs)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_dynamical_correlator(self,use_kpm=True,**kwargs):
+  self.set_initial_wf(self.wf0) # set the initial wavefunction
+  if use_kpm: return kpmdmrg.get_dynamical_correlator(self,**kwargs)
+  else: return timedependent.correlator(self,**kwargs)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_excited"><code class="name flex">
+<span>def <span class="ident">get_excited</span></span>(<span>self, n=10, mode=&#39;DMRG&#39;)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_excited(self,n=10,mode=&#34;DMRG&#34;):
+  self.to_folder() # go to temporal folder
+  if mode==&#34;DMRG&#34;:
+    self.setup_sweep()
+    self.setup_task(&#34;excited&#34;,task={&#34;nexcited&#34;:str(n)})
+    self.write_hamiltonian() # write the Hamiltonian to a file
+    self.run() # perform the calculation
+    out = np.genfromtxt(&#34;EXCITED.OUT&#34;)
+  elif mode==&#34;ED&#34;:
+    h = self.get_full_hamiltonian() # get the Hamiltonian
+    from . import pychain
+    out = pychain.spectrum.eigenstates(h,k=n) # return energy
+  else: 
+    self.to_origin() # go to main folder
+    raise
+  self.to_origin() # go to main folder
+  return out}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_file"><code class="name flex">
+<span>def <span class="ident">get_file</span></span>(<span>self, name)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Return the electronic density</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_file(self,name):
+  &#34;&#34;&#34;Return the electronic density&#34;&#34;&#34;
+  if not self.computed_gs: self.get_gs() # compute gs
+  self.to_folder() # go to folder
+  m = np.genfromtxt(name) # read file
+  self.to_origin() # go back
+  return m}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_full_hamiltonian"><code class="name flex">
+<span>def <span class="ident">get_full_hamiltonian</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_full_hamiltonian(self):
+  return pychainwrapper.get_full_hamiltonian(self)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_gap"><code class="name flex">
+<span>def <span class="ident">get_gap</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_gap(self):
+  es = self.get_excited(2)
+  return es[1] -es[0]}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_gs"><code class="name flex">
+<span>def <span class="ident">get_gs</span></span>(<span>self, mode=&#39;DMRG&#39;, wf0=None, best=True, n=1)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Return the ground state</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_gs(self,mode=&#34;DMRG&#34;,wf0=None,best=True,n=1):
+  &#34;&#34;&#34;Return the ground state&#34;&#34;&#34;
+  if mode==&#34;DMRG&#34;:
+    if best: groundstate.best_gs(self,n=n) # best ground state from a set
+    else: self.gs_energy(wf0=wf0) # perform a ground state calculation
+    return self.wf0 # return wavefucntion
+  elif mode==&#34;ED&#34;:
+    self.to_folder() # go to temporal folder
+    h = self.get_full_hamiltonian() # get the Hamiltonian 
+    self.to_origin() # go to temporal folder
+    return pychain.spectrum.ground_state(h)[1] # return energy
+  else: raise}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_magnetization"><code class="name flex">
+<span>def <span class="ident">get_magnetization</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Calculate the magnetization of the system</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_magnetization(self):
+  &#34;&#34;&#34;Calculate the magnetization of the system&#34;&#34;&#34;
+  mx = self.get_file(&#34;MEASURE_SX.OUT&#34;).transpose()[1]
+  my = self.get_file(&#34;MEASURE_SY.OUT&#34;).transpose()[1]
+  mz = self.get_file(&#34;MEASURE_SZ.OUT&#34;).transpose()[1]
+  np.savetxt(&#34;MAGNETIZATION.OUT&#34;,np.matrix([mx,my,mz]).T)
+  return (mx,my,mz)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_pychain"><code class="name flex">
+<span>def <span class="ident">get_pychain</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_pychain(self):
+  return pychainwrapper.get_pychain(self)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_spismj"><code class="name flex">
+<span>def <span class="ident">get_spismj</span></span>(<span>self, n=1000, mode=&#39;DMRG&#39;, i=0, j=0, smart=False)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def get_spismj(self,n=1000,mode=&#34;DMRG&#34;,i=0,j=0,smart=False):
+  return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.gs_energy"><code class="name flex">
+<span>def <span class="ident">gs_energy</span></span>(<span>self, mode=&#39;DMRG&#39;, wf0=None)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Return the ground state energy</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def gs_energy(self,mode=&#34;DMRG&#34;,wf0=None):
+  &#34;&#34;&#34;Return the ground state energy&#34;&#34;&#34;
+  # write the sites
+  if mode==&#34;DMRG&#34;:
+    out = groundstate.gs_energy(self,wf0=wf0)
+  elif mode==&#34;ED&#34;: # use brute force
+    self.to_folder() # go to temporal folder
+    h = self.get_full_hamiltonian() # get the Hamiltonian 
+    out = pychain.spectrum.ground_state(h)[0] # return energy
+  else: 
+    self.to_origin() # go to main folder
+    raise
+  self.to_origin() # go to main folder
+  self.restart = True
+  return out}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.run"><code class="name flex">
+<span>def <span class="ident">run</span></span>(<span>self, automatic=False)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def run(self,automatic=False): 
+  os.system(dmrgpath+&#34;/mpscpp/mpscpp.x &gt; status.txt&#34;) # run the DMRG calculation}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_exchange"><code class="name flex">
+<span>def <span class="ident">set_exchange</span></span>(<span>self, fun)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Set the exchange coupling between sites</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def set_exchange(self,fun):
+  &#34;&#34;&#34;Set the exchange coupling between sites&#34;&#34;&#34;
+  self.computed_gs = False # say that GS has not been computed
+  self.couplings = [] # empty list
+  for i in range(self.ns): # loop
+    for j in range(i+1,self.ns):  # loop
+      g = fun(i,j).real # call the function
+      if np.sum(np.abs(fun(i,j)-fun(j,i)))&gt;1e-5: raise # something wrong
+      g = g*one # multiply by the identity
+      if np.sum(np.abs(g))!=0.0: 
+        c = Coupling(i,j,g) # create class
+        self.couplings.append(c) # store
+  # now the onsite ones
+  for i in range(self.ns): # loop
+      g = fun(i,i).real # call the function
+      g = g*one # multiply by the identity
+      g = (g + g.H)/2. # the onsite one must be hermitian
+      if np.sum(np.abs(g))!=0.0: # if nonzero 
+        c = Coupling(i,i,g) # create class
+        self.couplings.append(c) # store}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_fields"><code class="name flex">
+<span>def <span class="ident">set_fields</span></span>(<span>self, fun)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def set_fields(self,fun):
+  self.computed_gs = False # say that GS has not been computed
+  self.fields = [fun(i) for i in range(self.ns)] # fields}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_hoppings"><code class="name flex">
+<span>def <span class="ident">set_hoppings</span></span>(<span>self, fun)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Add the spin independent hoppings</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def set_hoppings(self,fun):
+    &#34;&#34;&#34;Add the spin independent hoppings&#34;&#34;&#34;
+    self.computed_gs = False # say that GS has not been computed
+    self.hoppings = dict()
+    for i in range(self.ns): # loop
+        for j in range(self.ns): # loop
+            if self.sites[i]==1 and self.sites[j]==1:
+                c = fun(i,j)
+                if np.abs(c)&gt;0.0:
+                    self.hoppings[(i,j)] = Coupling(i,j,c) # store}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_hubbard"><code class="name flex">
+<span>def <span class="ident">set_hubbard</span></span>(<span>self, fun)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def set_hubbard(self,fun):
+    self.computed_gs = False # say that GS has not been computed
+    self.hubbard = dict()
+    for i in range(self.ns): # loop
+        for j in range(self.ns): # loop
+            if self.sites[i]==1 and self.sites[j]==1:
+                c = fun(i,j)
+                if np.abs(c)&gt;0.0:
+                    self.hubbard[(i,j)] = Coupling(i,j,c) # store}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_initial_wf"><code class="name flex">
+<span>def <span class="ident">set_initial_wf</span></span>(<span>self, wf)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Use a certain wavefunction as initial guess</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def set_initial_wf(self,wf):
+    &#34;&#34;&#34;Use a certain wavefunction as initial guess&#34;&#34;&#34;
+    if wf is None: return
+    self.gs_from_file = True # use a wavefunction from a file
+    self.starting_file_gs = wf.name # name of the wavefunction}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_pairing"><code class="name flex">
+<span>def <span class="ident">set_pairing</span></span>(<span>self, fun)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Add the up/down pairing</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def set_pairing(self,fun):
+    &#34;&#34;&#34;Add the up/down pairing&#34;&#34;&#34;
+    self.computed_gs = False # say that GS has not been computed
+    self.pairing = dict()
+    for i in range(self.ns): # loop
+        for j in range(self.ns): # loop
+            if self.sites[i]==1 and self.sites[j]==1:
+                c = fun(i,j)
+                if np.abs(c)&gt;0.0:
+                    self.pairing[(i,j)] = Coupling(i,j,c) # store}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_spinful_hoppings"><code class="name flex">
+<span>def <span class="ident">set_spinful_hoppings</span></span>(<span>self, fun)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>Add the spin independent hoppings</p></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def set_spinful_hoppings(self,fun):
+    &#34;&#34;&#34;Add the spin independent hoppings&#34;&#34;&#34;
+    self.computed_gs = False # say that GS has not been computed
+    if callable(fun):
+      self.spinful_hoppings = dict()
+      for i in range(self.ns): # loop
+          for j in range(self.ns): # loop
+              if self.sites[i]==1 and self.sites[j]==1:
+                  c = fun(i,j)
+                  if np.abs(c)&gt;0.0:
+                      self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
+    else: # assume it is a matrix
+        self.spinful_hoppings = np.matrix(fun)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.setup_sweep"><code class="name flex">
+<span>def <span class="ident">setup_sweep</span></span>(<span>self, mode=&#39;default&#39;)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def setup_sweep(self,mode=&#34;default&#34;):
+  setup_sweep(self,mode=mode)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.setup_task"><code class="name flex">
+<span>def <span class="ident">setup_task</span></span>(<span>self, mode=&#39;GS&#39;, task={})</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def setup_task(self,mode=&#34;GS&#34;,task=dict()):
+  from .taskdmrg import setup_task
+  setup_task(self,mode=mode,task=task)}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.to_folder"><code class="name flex">
+<span>def <span class="ident">to_folder</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def to_folder(self): os.chdir(self.path) # go to calculation folder}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.to_origin"><code class="name flex">
+<span>def <span class="ident">to_origin</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def to_origin(self): 
+  if os.path.isfile(self.path+&#34;/ERROR&#34;): raise # something wrong
+  os.chdir(self.inipath) # go to original folder}</code></pre>
+</details>
+</dd>
+<dt id="dmrgpy.manybodychain.Many_Body_Hamiltonian.write_hamiltonian"><code class="name flex">
+<span>def <span class="ident">write_hamiltonian</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<section class="desc"></section>
+<details class="source">
+<summary>Source code</summary>
+<pre><code class="python">def write_hamiltonian(self):
+    from .writemps import write_hamiltonian
+    write_hamiltonian(self)}</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="dmrgpy.manybodychain.setup_sweep" href="#dmrgpy.manybodychain.setup_sweep">setup_sweep</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="dmrgpy.manybodychain.Coupling" href="#dmrgpy.manybodychain.Coupling">Coupling</a></code></h4>
+<ul class="">
+<li><code><a title="dmrgpy.manybodychain.Coupling.__init__" href="#dmrgpy.manybodychain.Coupling.__init__">__init__</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian">Many_Body_Hamiltonian</a></code></h4>
+<ul class="two-column">
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.__init__" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.__init__">__init__</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.clean" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.clean">clean</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.copy" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.copy">copy</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.entropy" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.entropy">entropy</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.evolution" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.evolution">evolution</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.execute" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.execute">execute</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_correlator" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_correlator">get_correlator</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_dos" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_dos">get_dos</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_dynamical_correlator" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_dynamical_correlator">get_dynamical_correlator</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_excited" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_excited">get_excited</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_file" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_file">get_file</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_full_hamiltonian" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_full_hamiltonian">get_full_hamiltonian</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_gap" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_gap">get_gap</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_gs" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_gs">get_gs</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_magnetization" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_magnetization">get_magnetization</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_pychain" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_pychain">get_pychain</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.get_spismj" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.get_spismj">get_spismj</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.gs_energy" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.gs_energy">gs_energy</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.run" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.run">run</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_exchange" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.set_exchange">set_exchange</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_fields" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.set_fields">set_fields</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_hoppings" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.set_hoppings">set_hoppings</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_hubbard" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.set_hubbard">set_hubbard</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_initial_wf" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.set_initial_wf">set_initial_wf</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_pairing" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.set_pairing">set_pairing</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.set_spinful_hoppings" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.set_spinful_hoppings">set_spinful_hoppings</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.setup_sweep" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.setup_sweep">setup_sweep</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.setup_task" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.setup_task">setup_task</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.to_folder" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.to_folder">to_folder</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.to_origin" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.to_origin">to_origin</a></code></li>
+<li><code><a title="dmrgpy.manybodychain.Many_Body_Hamiltonian.write_hamiltonian" href="#dmrgpy.manybodychain.Many_Body_Hamiltonian.write_hamiltonian">write_hamiltonian</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.5.1</a>.</p>
+</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+<script>hljs.initHighlightingOnLoad()</script>
+</body>
+</html>

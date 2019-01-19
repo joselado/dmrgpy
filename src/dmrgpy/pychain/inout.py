@@ -46,7 +46,7 @@ def write_status(i,indict,outf):
 
 
 def output_files():
-  """Return ai dictionary for the output files"""
+  """Return a dictionary for the output files"""
   outf = dict() # dictionary
   outf["entropy"] = open("ENTROPY.OUT","w") # file for the entropy
   outf["times"] = open("TIME.OUT","w") # file for the entropy

@@ -144,7 +144,7 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
   gsout.wf = wfout
   gsout.dm = dmat
   gsout.dmdis = dmatdis # distance
-  print(dmatdis)
+#  print(dmatdis)
 #  print(es)
   return gsout # return output
 
@@ -155,11 +155,12 @@ def coupledhamiltonian(ops1,ops2,cs=None,LO=False):
   id1 = sp.eye(ops1[0].shape[0],dtype=np.complex) # identity operator
   id2 = sp.eye(ops2[0].shape[0],dtype=np.complex) # identity operator
   nout = ops1[0].shape[0]*ops2[0].shape[0] # output dimension 
-  LO = False # do not use linear operators
-  if LO: # initialize a trivial linear operator 
-    def fun(v): return np.zeros(v.shape[0])
-    h = LinearOperator((nout,nout),matvec=fun) # zero linear operator
-  else: h = sp.identity(nout)*0. # zero sparse matrix
+#  LO = False # do not use linear operators
+#  if LO: # initialize a trivial linear operator 
+#    def fun(v): return np.zeros(v.shape[0])
+#    h = LinearOperator((nout,nout),matvec=fun) # zero linear operator
+  h = csc_matrix((nout,nout),dtype=np.complex) # zero sparse matrix
+#(nout,nout,dtype=np.complex) # zero sparse matrix
   nc = len(ops1) # number of operators
   if cs is None: cs = [1. for ic in range(nc)]
   for ic in range(nc): # loop over couplings, to right part
