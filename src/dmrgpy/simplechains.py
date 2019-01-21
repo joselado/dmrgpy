@@ -43,6 +43,12 @@ class SSC():
             self.dmrgp["retain_states"] = n # states to retain in the DM
             es = classicdmrg.infinite_dmrg(self.dmrgp).energies # return energy
             return np.round(es[0:n],5) # return excitation energies
+    def get_gap(self,mode="DMRG"):
+        """
+        Compute the gap
+        """
+        es = self.get_excited(mode=mode)
+        return es[1]-es[0]
     def get_dm_dis(self,n=4,mode="classicDMRG"):
         """
         Return the distances between the GS DM and excited ones
