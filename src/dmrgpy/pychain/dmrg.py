@@ -82,27 +82,28 @@ def project(op,R):
 
 def dmrgdict():
   """Returns a dictionary for the dmrg calculation"""
-  ddict = dict() # create dictionary
-  ddict["target"] = 0 # state(s) to use for the DM
-  ddict["diag_states"] = 1 # number of minimum states to diagonalize
-  ddict["diag_mode"] = "arpack" # use arpack
-  ddict["tol"] = 1e-4 # precission in the diagonalization
-  ddict["dynamic_target"] = None # ground state
-  ddict["DM_target"] = None # not set
-  ddict["ensure_symmetry"] = False # truncate the DM without breaking symmetry
-  ddict["retain_states"] = 1 # one state
-  ddict["dynamic_retain_states"] = None  # retained states
-  ddict["periodic"] = False # open boundary
-  ddict["finite"] = False # open boundary
-  ddict["number_of_states"] = 30 # retained states
-  ddict["dynamic_number_of_states"] = None  # retained states
-  ddict["LO"] = False # use linear operator
-  ddict["finite_num_ite"] = 2 # number of iterations in finite DMRG
-  ddict["avoid_edge"] = 0 # stop before reaching the edge
-  ddict["target_length"] = None # stop before reaching the edge
-  ddict["target_function"] = None # Function that decides which states to target
-  ddict["ndmrg"] = 100
-  return ddict
+  dmrgp = dict() # create dictionary
+  dmrgp["target"] = 0 # state(s) to use for the DM
+  dmrgp["diag_states"] = 1 # number of minimum states to diagonalize
+  dmrgp["diag_mode"] = "arpack" # use arpack
+  dmrgp["tol"] = 1e-4 # precission in the diagonalization
+  dmrgp["dynamic_target"] = None # ground state
+  dmrgp["DM_target"] = None # not set
+  dmrgp["ensure_symmetry"] = False # truncate the DM without breaking symmetry
+  dmrgp["retain_states"] = 1 # one state
+  dmrgp["dynamic_retain_states"] = None  # retained states
+  dmrgp["periodic"] = False # open boundary
+  dmrgp["finite"] = False # open boundary
+  dmrgp["number_of_states"] = 30 # retained states
+  dmrgp["dynamic_number_of_states"] = None  # retained states
+  dmrgp["LO"] = False # use linear operator
+  dmrgp["finite_num_ite"] = 2 # number of iterations in finite DMRG
+  dmrgp["avoid_edge"] = 0 # stop before reaching the edge
+  dmrgp["target_length"] = None # stop before reaching the edge
+  dmrgp["target_function"] = None # Function that decides which states to target
+  dmrgp["ndmrg"] = 100
+  dmrgp["function_DM_distance"] = None # no function for DM distance provided
+  return dmrgp
 
 
 def update_parameters(dmrgp,datadict,idmrg=0):
@@ -149,6 +150,7 @@ class DMRGresult():
               f.write(str(m[i][j])+"  ") # 
           f.write("\n") # 
         f.close()
+        return
 
         # write the DM distance #
         m = self.iteration_dmdis

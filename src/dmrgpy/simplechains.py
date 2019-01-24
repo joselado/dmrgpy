@@ -49,13 +49,15 @@ class SSC():
         """
         es = self.get_excited(mode=mode)
         return es[1]-es[0]
-    def get_dm_dis(self,n=4,mode="classicDMRG"):
+    def get_dm_dis(self,n=4,mode="classicDMRG",f=None):
         """
         Return the distances between the GS DM and excited ones
         """
         if mode=="classicDMRG": # classic DMRG mode
             self.dmrgp["retain_states"] = n # states to retain in the DM
             self.dmrgp["DM_target"] = 0 # states to use in the DM
+            self.dmrgp["function_DM_distance"] = f # function to compute DM
+                                                   # distance
             out = classicdmrg.infinite_dmrg(self.dmrgp) # perform calculation
             return out.iteration_dmdis # return list
         else: raise # not implemented

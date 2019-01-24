@@ -129,13 +129,9 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
   retain_states = min(retain_states,len(wfs)) # number of waves
   dmats = [traceover(wfs[i],dim1,dim2) for i in range(retain_states)] # trace over right site + block
   # compute the "distance" between excited and GS dmat
-  dmatdis = [] # empty list
-  for i in range(1,len(dmats)): # loop
-      A = dmats[i]*dmats[0] # define product difference
-      B = dmats[0]*dmats[i] # define product difference
-      C = A-B # difference
-      dmatdis.append((C*C.H).trace()[0,0].real) # distance
-
+  if dmrgp["function_DM_distance"] is None: fDM = fDMdis # use default function
+  else: fDM = dmrgp["function_DM_distance"] # use default function
+  dmatdis = fDM(dmats) # compute distance
   if dmrgp["DM_target"] is None: # use all the waves
     dmat = 0. # initialize
     for d in dmats: dmat += d # add contribution
@@ -151,10 +147,26 @@ def groundstate(h,dim1,dim2,v0=None,target=0,diag_states=20,
 #  print(es)
   return gsout # return output
 
+def fDMdis(dmats):
+    """
+    Function to compute distances between density matrices
+    """
+    dmatdis = [] # empty list
+    for i in range(1,len(dmats)): # loop
+        A = dmats[i]*dmats[0] # define product difference
+        B = dmats[0]*dmats[i] # define product difference
+        C = A-B # difference
+        dmatdis.append((C*C.H).trace()[0,0].real) # distance
+    return dmatdis # return list with distances
+
+
+
 
 
 def coupledhamiltonian(ops1,ops2,cs=None,LO=False):
-  """Calculate the Hamiltonian for two coupled operators"""
+  """
+  Calculate the Hamiltonian for two coupled operators
+  """
   id1 = sp.eye(ops1[0].shape[0],dtype=np.complex) # identity operator
   id2 = sp.eye(ops2[0].shape[0],dtype=np.complex) # identity operator
   nout = ops1[0].shape[0]*ops2[0].shape[0] # output dimension 
