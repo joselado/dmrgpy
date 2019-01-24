@@ -123,7 +123,7 @@ class Many_Body_Hamiltonian():
       self.hubbard = dict()
       for i in range(self.ns): # loop
           for j in range(self.ns): # loop
-              if self.sites[i]==1 and self.sites[j]==1:
+              if self.sites[i] in [0,1] and self.sites[j] in [0,1]:
                   c = fun(i,j)
                   if np.abs(c)>0.0:
                       self.hubbard[(i,j)] = Coupling(i,j,c) # store

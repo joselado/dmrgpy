@@ -20,6 +20,7 @@ sc.nsweeps = 15 # maxm
 import time
 e0 = sc.gs_energy() # compute ground state energy with DMRG
 e1 = sc.gs_energy_free() # compute ground state energy for free electrons
+print(sc.spinful)
 print(e0,e1)
 #exit()
 pairs = [(0,i) for i in range(n)]

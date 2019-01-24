@@ -11,12 +11,11 @@ static auto get_hubbard =[](auto ampo) {
     for (int i=0;i<nt;++i) {
 //      cout << i << endl ;
       jfile >> j1 >> j2 >> U; // get the data
-      if ((site_type(j1)==1) and (site_type(j2)==1))  
+      if ((site_type(j1)==1) and (site_type(j2)==1))  {
           ampo += U,"Nup",j1+1,"Nup",j2+1;
           ampo += U,"Nup",j1+1,"Ndn",j2+1;
           ampo += U,"Ndn",j1+1,"Ndn",j2+1;
-          ampo += U,"Ndn",j1+1,"Nup",j2+1;
-    } ;
+          ampo += U,"Ndn",j1+1,"Nup",j2+1; }
     // spinless fermions
       if ((site_type(j1)==0) and (site_type(j2)==0))  
           ampo += U,"N",j1+1,"N",j2+1;

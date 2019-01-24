@@ -2,7 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
-import fermionchain
+from dmrgpy import fermionchain
 n = 30 # number of spinful fermionic sites
 def get_fc(mu):
   fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain

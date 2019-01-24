@@ -48,7 +48,7 @@ static auto single_correlator=[](auto psi,auto sites, auto i,auto namei, int j, 
 
 
 // calculate all the correlators
-void get_correlator()   {
+int get_correlator()   {
   auto sites = get_sites();
   auto H = get_hamiltonian(sites) ;
   auto psi = get_gs(sites,H) ;

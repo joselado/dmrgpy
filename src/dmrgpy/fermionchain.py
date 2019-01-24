@@ -35,8 +35,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
                 t = self.hoppings[key]
                 m[2*t.i,2*t.j] = t.g
                 m[2*t.i+1,2*t.j+1] = t.g
-          if type(self.spinful_hoppings)!=type(dict()):
-            m = m + self.spinful_hoppings
+            if type(self.spinful_hoppings)!=type(dict()):
+              m = m + self.spinful_hoppings
           else: # spinless Hamiltonian
             m = np.zeros((self.ns,self.ns)) # matrix
             for key in self.hoppings:
