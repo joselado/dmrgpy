@@ -1,6 +1,6 @@
 // conjugate gradient method to solve A*x = b for MPS
 
-auto solveAxb(auto A, auto b )
+static auto solveAxb=[](auto A, auto b )
 {
    double TOLERANCE = 1.0e-10;
    auto X = b*0.; // initialize
@@ -24,14 +24,14 @@ auto solveAxb(auto A, auto b )
       k++;
    }
    return X;
-}
+};
 
 
 
 
 // conjugate gradient method to solve [(H-w)**2 +d**2]*x = b for MPS
 
-auto solveHwdxb(auto H, auto w, auto d, auto b )
+static auto solveHwdxb=[](auto H, auto w, auto d, auto b )
 {
    double TOLERANCE = 1.0e-10;
    auto X = b*0.; // initialize
@@ -60,4 +60,4 @@ auto solveHwdxb(auto H, auto w, auto d, auto b )
    }
    return X;
 }
-
+;

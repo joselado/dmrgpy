@@ -1,0 +1,4987 @@
+Using approx/svd conversion of AutoMPO->MPO
+Sweep=1, HS=1, Bond=(1,2)
+I 0 q 1E+00 E 38.3591537199
+I 8 q 7E-14 E 34.9545744024
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=1, HS=1, Bond=(2,3)
+I 0 q 1E+00 E 34.9545744024
+I 9 q 6E-03 E 33.8004130610
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.7E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(3,4)
+I 0 q 1E+00 E 33.8004130610
+I 9 q 2E-02 E 32.0670981632
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.2E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(4,5)
+I 0 q 1E+00 E 32.0670981632
+I 9 q 9E-03 E 29.5900861394
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.4E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(5,6)
+I 0 q 1E+00 E 29.5900861394
+I 9 q 2E-02 E 28.5548989699
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(6,7)
+I 0 q 1E+00 E 28.5548989699
+I 9 q 6E-03 E 26.3778541408
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-18, States kept: m=3
+Sweep=1, HS=1, Bond=(7,8)
+I 0 q 1E+00 E 26.3778541408
+I 9 q 2E-03 E 24.6368359542
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.8E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(8,9)
+I 0 q 1E+00 E 24.6368359542
+I 9 q 5E-03 E 23.0057426939
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.5E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(9,10)
+I 0 q 1E+00 E 23.0057426939
+I 9 q 8E-03 E 20.7877638816
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.6E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(10,11)
+I 0 q 1E+00 E 20.7877638816
+I 9 q 2E-03 E 19.2091608684
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.5E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(11,12)
+I 0 q 1E+00 E 19.2091608684
+I 9 q 1E-02 E 17.6331971501
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.4E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(12,13)
+I 0 q 1E+00 E 17.6331971501
+I 9 q 3E-02 E 16.8403714867
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(13,14)
+I 0 q 2E+00 E 16.8403714867
+I 9 q 8E-04 E 14.4118647115
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(14,15)
+I 0 q 1E+00 E 14.4118647115
+I 9 q 3E-02 E 13.1806868616
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.4E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(15,16)
+I 0 q 1E+00 E 13.1806868616
+I 9 q 1E-02 E 11.4540853663
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(16,17)
+I 0 q 1E+00 E 11.4540853663
+I 9 q 3E-02 E 9.3698788699
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.0E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(17,18)
+I 0 q 1E+00 E 9.3698788699
+I 9 q 8E-03 E 7.3231001177
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(18,19)
+I 0 q 1E+00 E 7.3231001177
+I 9 q 5E-03 E 5.4345765872
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.9E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(19,20)
+I 0 q 1E+00 E 5.4345765872
+I 9 q 3E-01 E 3.6252210701
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=7.8E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(20,21)
+I 0 q 1E+00 E 3.6252210701
+I 9 q 1E-01 E 1.1991421289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.3E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(21,22)
+I 0 q 1E+00 E 1.1991421289
+I 9 q 3E-03 E -0.4472815950
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(22,23)
+I 0 q 1E+00 E -0.4472815950
+I 9 q 2E-03 E -2.4381793681
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.5E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(23,24)
+I 0 q 1E+00 E -2.4381793681
+I 9 q 2E-03 E -3.9875609781
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.7E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(24,25)
+I 0 q 1E+00 E -3.9875609781
+I 9 q 6E-03 E -5.0067111765
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(25,26)
+I 0 q 1E+00 E -5.0067111765
+I 9 q 2E-03 E -6.8885996922
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(26,27)
+I 0 q 1E+00 E -6.8885996922
+I 9 q 2E-03 E -7.9642665306
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(27,28)
+I 0 q 1E+00 E -7.9642665306
+I 9 q 1E-03 E -9.8779139167
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.3E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(28,29)
+I 0 q 1E+00 E -9.8779139167
+I 9 q 3E-02 E -11.5813427039
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(29,30)
+I 0 q 1E+00 E -11.5813427039
+I 9 q 5E-03 E -14.0894456046
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.6E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(30,31)
+I 0 q 1E+00 E -14.0894456046
+I 9 q 7E-02 E -15.0002913728
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.5E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(31,32)
+I 0 q 1E+00 E -15.0002913728
+I 9 q 8E-03 E -16.4129965960
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.7E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(32,33)
+I 0 q 1E+00 E -16.4129965960
+I 9 q 1E-03 E -17.1628921797
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.4E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(33,34)
+I 0 q 1E+00 E -17.1628921797
+I 9 q 4E-03 E -18.4966443909
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.0E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(34,35)
+I 0 q 1E+00 E -18.4966443909
+I 9 q 1E-02 E -20.3545813562
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.6E-18, States kept: m=3
+Sweep=1, HS=1, Bond=(35,36)
+I 0 q 1E+00 E -20.3545813562
+I 9 q 1E-02 E -22.7940992596
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(36,37)
+I 0 q 1E+00 E -22.7940992596
+I 9 q 2E-03 E -24.1055042289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.7E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(37,38)
+I 0 q 1E+00 E -24.1055042289
+I 9 q 4E-02 E -25.6651411652
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.8E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(38,39)
+I 0 q 1E+00 E -25.6651411652
+I 9 q 6E-03 E -27.4843850255
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.7E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(39,40)
+I 0 q 1E+00 E -27.4843850255
+I 9 q 1E-02 E -28.5572011259
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(40,41)
+I 0 q 1E+00 E -28.5572011259
+I 9 q 9E-04 E -30.5259494864
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(41,42)
+I 0 q 1E+00 E -30.5259494864
+I 9 q 1E-02 E -32.7981132397
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.0E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(42,43)
+I 0 q 1E+00 E -32.7981132397
+I 9 q 8E-04 E -33.7527009289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.8E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(43,44)
+I 0 q 1E+00 E -33.7527009289
+I 9 q 1E-03 E -34.3566621010
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(44,45)
+I 0 q 2E+00 E -34.3566621010
+I 9 q 9E-04 E -36.4341771354
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=7.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(45,46)
+I 0 q 1E+00 E -36.4341771354
+I 9 q 1E-02 E -37.3924296350
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(46,47)
+I 0 q 2E+00 E -37.3924296350
+I 9 q 1E-03 E -39.4080048981
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(47,48)
+I 0 q 1E+00 E -39.4080048981
+I 9 q 1E-01 E -41.2101448715
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(48,49)
+I 0 q 1E+00 E -41.2101448715
+I 9 q 1E-02 E -42.6399048220
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(49,50)
+I 0 q 1E+00 E -42.6399048220
+I 9 q 1E-02 E -43.8600949967
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(50,51)
+I 0 q 1E+00 E -43.8600949967
+I 9 q 1E-01 E -46.0866367781
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.3E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(51,52)
+I 0 q 1E+00 E -46.0866367781
+I 9 q 3E-02 E -48.1983884125
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.5E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(52,53)
+I 0 q 1E+00 E -48.1983884125
+I 9 q 3E-03 E -49.2047538430
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.0E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(53,54)
+I 0 q 1E+00 E -49.2047538430
+I 9 q 6E-03 E -50.2359221120
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.7E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(54,55)
+I 0 q 1E+00 E -50.2359221120
+I 9 q 4E-02 E -51.9987958158
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(55,56)
+I 0 q 1E+00 E -51.9987958158
+I 9 q 1E-03 E -53.6656066226
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.8E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(56,57)
+I 0 q 1E+00 E -53.6656066226
+I 9 q 1E-02 E -54.9623206122
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=9.3E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(57,58)
+I 0 q 1E+00 E -54.9623206122
+I 9 q 5E-03 E -56.8421532019
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(58,59)
+I 0 q 1E+00 E -56.8421532019
+I 9 q 6E-03 E -58.5660767676
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(59,60)
+I 0 q 1E+00 E -58.5660767676
+I 9 q 2E-02 E -60.4254090375
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.8E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(60,61)
+I 0 q 1E+00 E -60.4254090375
+I 9 q 1E-02 E -62.6415585119
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(61,62)
+I 0 q 1E+00 E -62.6415585119
+I 9 q 4E-03 E -64.8033883578
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.3E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(62,63)
+I 0 q 1E+00 E -64.8033883578
+I 9 q 2E-02 E -66.7555231128
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.6E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(63,64)
+I 0 q 1E+00 E -66.7555231128
+I 9 q 8E-03 E -68.9106929904
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(64,65)
+I 0 q 1E+00 E -68.9106929904
+I 9 q 6E-03 E -70.3457046032
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(65,66)
+I 0 q 2E+00 E -70.3457046032
+I 9 q 9E-04 E -71.7041317197
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.6E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(66,67)
+I 0 q 1E+00 E -71.7041317197
+I 9 q 3E-03 E -73.5110049848
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.8E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(67,68)
+I 0 q 1E+00 E -73.5110049848
+I 9 q 4E-03 E -75.2526175814
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(68,69)
+I 0 q 1E+00 E -75.2526175814
+I 9 q 2E-03 E -77.1612267454
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.0E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(69,70)
+I 0 q 1E+00 E -77.1612267454
+I 9 q 3E-03 E -79.0387175865
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.6E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(70,71)
+I 0 q 1E+00 E -79.0387175865
+I 9 q 2E-03 E -80.7437603450
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.6E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(71,72)
+I 0 q 1E+00 E -80.7437603450
+I 9 q 8E-04 E -81.4384979447
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(72,73)
+I 0 q 2E+00 E -81.4384979447
+I 9 q 1E-03 E -82.9514439224
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(73,74)
+I 0 q 1E+00 E -82.9514439224
+I 9 q 3E-03 E -84.5266546594
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.4E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(74,75)
+I 0 q 1E+00 E -84.5266546594
+I 9 q 4E-02 E -86.4134849343
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.7E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(75,76)
+I 0 q 1E+00 E -86.4134849343
+I 9 q 3E-03 E -88.5965627211
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.2E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(76,77)
+I 0 q 1E+00 E -88.5965627211
+I 9 q 4E-03 E -89.4547633738
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(77,78)
+I 0 q 1E+00 E -89.4547633738
+I 9 q 4E-03 E -91.5039148225
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(78,79)
+I 0 q 1E+00 E -91.5039148225
+I 9 q 5E-03 E -93.8927853920
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.8E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(79,80)
+I 0 q 1E+00 E -93.8927853920
+I 9 q 1E-01 E -95.0324368279
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.2E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(80,81)
+I 0 q 1E+00 E -95.0324368279
+I 9 q 4E-02 E -97.2333195967
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.0E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(81,82)
+I 0 q 1E+00 E -97.2333195967
+I 9 q 5E-02 E -99.4174630302
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(82,83)
+I 0 q 1E+00 E -99.4174630302
+I 9 q 9E-03 E -101.8091497428
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(83,84)
+I 0 q 1E+00 E -101.8091497428
+I 9 q 1E-03 E -103.1751394584
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(84,85)
+I 0 q 1E+00 E -103.1751394584
+I 9 q 3E-03 E -104.2804310575
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.9E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(85,86)
+I 0 q 1E+00 E -104.2804310575
+I 9 q 3E-03 E -105.6086420646
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.9E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(86,87)
+I 0 q 1E+00 E -105.6086420646
+I 9 q 2E-02 E -106.7741863880
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.4E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(87,88)
+I 0 q 1E+00 E -106.7741863880
+I 9 q 3E-03 E -108.8008163412
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(88,89)
+I 0 q 1E+00 E -108.8008163412
+I 9 q 7E-02 E -110.7769484593
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.3E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(89,90)
+I 0 q 1E+00 E -110.7769484593
+I 9 q 7E-03 E -112.1487963242
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.0E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(90,91)
+I 0 q 1E+00 E -112.1487963242
+I 9 q 8E-03 E -113.7902874196
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(91,92)
+I 0 q 1E+00 E -113.7902874196
+I 9 q 6E-02 E -115.7331188256
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.0E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(92,93)
+I 0 q 1E+00 E -115.7331188256
+I 9 q 5E-02 E -116.8393272285
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.4E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(93,94)
+I 0 q 1E+00 E -116.8393272285
+I 9 q 3E-02 E -118.2073513758
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.3E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(94,95)
+I 0 q 1E+00 E -118.2073513758
+I 9 q 7E-03 E -120.5205318384
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.1E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(95,96)
+I 0 q 1E+00 E -120.5205318384
+I 9 q 4E-02 E -122.3865873799
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.2E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(96,97)
+I 0 q 1E+00 E -122.3865873799
+I 9 q 5E-01 E -124.7018875859
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(97,98)
+I 0 q 1E+00 E -124.7018875859
+I 9 q 3E-02 E -126.3783808778
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.7E-17, States kept: m=3
+Sweep=1, HS=1, Bond=(98,99)
+I 0 q 1E+00 E -126.3783808777
+I 9 q 1E-01 E -128.5591120689
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.8E-16, States kept: m=3
+Sweep=1, HS=1, Bond=(99,100)
+I 0 q 1E+00 E -128.5591120689
+I 9 q 2E-02 E -129.2425274943
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-16, States kept: m=3
+Sweep=1, HS=2, Bond=(99,100)
+I 0 q 2E-02 E -129.2425274943
+I 9 q 1E-02 E -129.2694953340
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=1, HS=2, Bond=(98,99)
+I 0 q 6E-01 E -129.2694953340
+I 9 q 4E-03 E -129.4190912708
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=1, HS=2, Bond=(97,98)
+I 0 q 4E-01 E -129.4190912708
+I 9 q 2E-01 E -129.5079907947
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.8E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(96,97)
+I 0 q 7E-01 E -129.5079907947
+I 9 q 9E-03 E -129.6820559612
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(95,96)
+I 0 q 6E-01 E -129.6820559612
+I 9 q 1E-02 E -129.8443942430
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=9.5E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(94,95)
+I 0 q 4E-01 E -129.8443942430
+I 9 q 1E-03 E -129.9243022970
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.7E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(93,94)
+I 0 q 6E-01 E -129.9243022970
+I 9 q 1E-02 E -130.1243566503
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=7.1E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(92,93)
+I 0 q 4E-01 E -130.1243566503
+I 9 q 7E-03 E -130.1903777232
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(91,92)
+I 0 q 5E-01 E -130.1903777232
+I 9 q 4E-03 E -130.3208357313
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(90,91)
+I 0 q 5E-01 E -130.3208357313
+I 9 q 7E-03 E -130.4261663021
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.5E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(89,90)
+I 0 q 4E-01 E -130.4261663021
+I 9 q 6E-03 E -130.5080496797
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.0E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(88,89)
+I 0 q 5E-01 E -130.5080496797
+I 9 q 7E-03 E -130.6494999995
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(87,88)
+I 0 q 4E-01 E -130.6494999995
+I 9 q 5E-03 E -130.7367068822
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.4E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(86,87)
+I 0 q 6E-01 E -130.7367068822
+I 9 q 2E-03 E -130.9027660922
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(85,86)
+I 0 q 3E-01 E -130.9027660922
+I 9 q 3E-03 E -130.9525484786
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.8E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(84,85)
+I 0 q 3E-01 E -130.9525484786
+I 9 q 3E-03 E -131.0098512342
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.2E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(83,84)
+I 0 q 3E-01 E -131.0098512342
+I 9 q 4E-03 E -131.0625301267
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(82,83)
+I 0 q 4E-01 E -131.0625301267
+I 9 q 5E-03 E -131.1286678065
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(81,82)
+I 0 q 5E-01 E -131.1286678065
+I 9 q 5E-03 E -131.2388593636
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=7.5E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(80,81)
+I 0 q 4E-01 E -131.2388593636
+I 9 q 1E-03 E -131.3261686447
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.0E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(79,80)
+I 0 q 5E-01 E -131.3261686447
+I 9 q 3E-03 E -131.4473637112
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.5E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(78,79)
+I 0 q 3E-01 E -131.4473637112
+I 9 q 4E-03 E -131.5075694993
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.9E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(77,78)
+I 0 q 4E-01 E -131.5075694993
+I 9 q 3E-03 E -131.6090564848
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.2E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(76,77)
+I 0 q 4E-01 E -131.6090564848
+I 9 q 4E-03 E -131.6747454212
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(75,76)
+I 0 q 3E-01 E -131.6747454212
+I 9 q 3E-03 E -131.7143829208
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.9E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(74,75)
+I 0 q 5E-01 E -131.7143829208
+I 9 q 3E-03 E -131.8386512405
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.2E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(73,74)
+I 0 q 4E-01 E -131.8386512405
+I 9 q 4E-03 E -131.9077248316
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.7E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(72,73)
+I 0 q 4E-01 E -131.9077248316
+I 9 q 3E-03 E -131.9734488051
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.8E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(71,72)
+I 0 q 3E-01 E -131.9734488051
+I 9 q 2E-03 E -132.0090133468
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.7E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(70,71)
+I 0 q 3E-01 E -132.0090133468
+I 9 q 2E-03 E -132.0495149307
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.7E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(69,70)
+I 0 q 4E-01 E -132.0495149307
+I 9 q 3E-03 E -132.1251644044
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.7E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(68,69)
+I 0 q 3E-01 E -132.1251644044
+I 9 q 3E-03 E -132.1774066930
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(67,68)
+I 0 q 3E-01 E -132.1774066930
+I 9 q 3E-03 E -132.2396965215
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.9E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(66,67)
+I 0 q 4E-01 E -132.2396965215
+I 9 q 4E-03 E -132.3232379757
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(65,66)
+I 0 q 3E-01 E -132.3232379757
+I 9 q 4E-03 E -132.3802825247
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=7.1E-18, States kept: m=9
+Sweep=1, HS=2, Bond=(64,65)
+I 0 q 3E-01 E -132.3802825247
+I 9 q 8E-03 E -132.4539859926
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.6E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(63,64)
+I 0 q 5E-01 E -132.4539859926
+I 9 q 2E-03 E -132.5651961240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(62,63)
+I 0 q 6E-01 E -132.5651961240
+I 9 q 4E-03 E -132.7194665879
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.5E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(61,62)
+I 0 q 5E-01 E -132.7194665879
+I 9 q 7E-03 E -132.8331284246
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.5E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(60,61)
+I 0 q 4E-01 E -132.8331284246
+I 9 q 2E-03 E -132.9302442354
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.4E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(59,60)
+I 0 q 6E-01 E -132.9302442354
+I 9 q 3E-03 E -133.0937050434
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(58,59)
+I 0 q 5E-01 E -133.0937050434
+I 9 q 9E-03 E -133.2428213905
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(57,58)
+I 0 q 4E-01 E -133.2428213905
+I 9 q 4E-03 E -133.3021895376
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(56,57)
+I 0 q 7E-01 E -133.3021895376
+I 9 q 4E-03 E -133.4956723860
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.4E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(55,56)
+I 0 q 4E-01 E -133.4956723861
+I 9 q 4E-03 E -133.5685194801
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(54,55)
+I 0 q 3E-01 E -133.5685194801
+I 9 q 3E-03 E -133.6142464382
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.8E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(53,54)
+I 0 q 3E-01 E -133.6142464382
+I 9 q 5E-03 E -133.6732232779
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.9E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(52,53)
+I 0 q 4E-01 E -133.6732232779
+I 9 q 8E-03 E -133.7480095961
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.4E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(51,52)
+I 0 q 5E-01 E -133.7480095961
+I 9 q 1E-02 E -133.8948461198
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.3E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(50,51)
+I 0 q 4E-01 E -133.8948461198
+I 9 q 8E-03 E -133.9962372043
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-16, States kept: m=9
+
+    vN Entropy at center bond b=50 = 0.818985905836
+    Eigs at center bond b=50: 0.5379 0.4372 0.0120 0.0061 0.0035 0.0031 
+Sweep=1, HS=2, Bond=(49,50)
+I 0 q 6E-01 E -133.9962372043
+I 9 q 8E-03 E -134.1657172907
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=9.9E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(48,49)
+I 0 q 5E-01 E -134.1657172907
+I 9 q 4E-03 E -134.2693036306
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.2E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(47,48)
+I 0 q 6E-01 E -134.2693036306
+I 9 q 5E-03 E -134.4387239255
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.3E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(46,47)
+I 0 q 3E-01 E -134.4387239255
+I 9 q 9E-04 E -134.4818372062
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.4E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(45,46)
+I 0 q 4E-01 E -134.4818372062
+I 9 q 3E-03 E -134.5844518957
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.8E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(44,45)
+I 0 q 3E-01 E -134.5844518957
+I 9 q 2E-03 E -134.6250809889
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(43,44)
+I 0 q 3E-01 E -134.6250809889
+I 9 q 2E-03 E -134.6617304795
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.3E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(42,43)
+I 0 q 3E-01 E -134.6617304795
+I 9 q 1E-03 E -134.7010704953
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(41,42)
+I 0 q 4E-01 E -134.7010704953
+I 9 q 4E-03 E -134.7877252319
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.6E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(40,41)
+I 0 q 4E-01 E -134.7877252319
+I 9 q 4E-03 E -134.8846821018
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.3E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(39,40)
+I 0 q 4E-01 E -134.8846821018
+I 9 q 8E-03 E -134.9704766147
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.9E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(38,39)
+I 0 q 4E-01 E -134.9704766147
+I 9 q 5E-03 E -135.0533472966
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.1E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(37,38)
+I 0 q 7E-01 E -135.0533472966
+I 9 q 3E-03 E -135.2397846477
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.4E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(36,37)
+I 0 q 4E-01 E -135.2397846477
+I 9 q 6E-03 E -135.3176197202
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.5E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(35,36)
+I 0 q 4E-01 E -135.3176197202
+I 9 q 7E-03 E -135.4052546475
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.8E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(34,35)
+I 0 q 6E-01 E -135.4052546475
+I 9 q 3E-03 E -135.5725130471
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.9E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(33,34)
+I 0 q 5E-01 E -135.5725130471
+I 9 q 7E-03 E -135.7174632515
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.9E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(32,33)
+I 0 q 4E-01 E -135.7174632515
+I 9 q 5E-03 E -135.8196140345
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=7.9E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(31,32)
+I 0 q 6E-01 E -135.8196140345
+I 9 q 1E-02 E -136.0415544159
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.0E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(30,31)
+I 0 q 5E-01 E -136.0415544159
+I 9 q 6E-03 E -136.1543909213
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.3E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(29,30)
+I 0 q 4E-01 E -136.1543909213
+I 9 q 4E-03 E -136.2186780907
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.9E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(28,29)
+I 0 q 5E-01 E -136.2186780907
+I 9 q 3E-03 E -136.3475603517
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.1E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(27,28)
+I 0 q 4E-01 E -136.3475603517
+I 9 q 5E-03 E -136.4472470857
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.3E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(26,27)
+I 0 q 3E-01 E -136.4472470857
+I 9 q 2E-03 E -136.4848663135
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(25,26)
+I 0 q 3E-01 E -136.4848663135
+I 9 q 3E-03 E -136.5365731502
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.7E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(24,25)
+I 0 q 4E-01 E -136.5365731502
+I 9 q 4E-03 E -136.6162208452
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(23,24)
+I 0 q 3E-01 E -136.6162208452
+I 9 q 3E-03 E -136.6568579114
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.7E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(22,23)
+I 0 q 4E-01 E -136.6568579114
+I 9 q 4E-03 E -136.7263688904
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.9E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(21,22)
+I 0 q 4E-01 E -136.7263688904
+I 9 q 5E-03 E -136.7959927579
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=5.8E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(20,21)
+I 0 q 4E-01 E -136.7959927579
+I 9 q 3E-03 E -136.8722802317
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.0E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(19,20)
+I 0 q 6E-01 E -136.8722802317
+I 9 q 4E-03 E -137.0424228955
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.2E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(18,19)
+I 0 q 4E-01 E -137.0424228955
+I 9 q 5E-03 E -137.1182727591
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=3.0E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(17,18)
+I 0 q 3E-01 E -137.1182727591
+I 9 q 5E-03 E -137.1858175146
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.8E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(16,17)
+I 0 q 4E-01 E -137.1858175146
+I 9 q 5E-03 E -137.2873683377
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=9.1E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(15,16)
+I 0 q 5E-01 E -137.2873683377
+I 9 q 2E-03 E -137.4127681919
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.6E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(14,15)
+I 0 q 6E-01 E -137.4127681919
+I 9 q 3E-03 E -137.5527971295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.2E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(13,14)
+I 0 q 3E-01 E -137.5527971295
+I 9 q 3E-03 E -137.5988933913
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.6E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(12,13)
+I 0 q 3E-01 E -137.5988933913
+I 9 q 2E-03 E -137.6378764959
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=7.6E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(11,12)
+I 0 q 5E-01 E -137.6378764959
+I 9 q 4E-03 E -137.7784651988
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(10,11)
+I 0 q 3E-01 E -137.7784651988
+I 9 q 3E-03 E -137.8151271335
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=6.6E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(9,10)
+I 0 q 4E-01 E -137.8151271335
+I 9 q 3E-03 E -137.9039464998
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.9E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(8,9)
+I 0 q 4E-01 E -137.9039464998
+I 9 q 4E-03 E -137.9950142785
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.0E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(7,8)
+I 0 q 3E-01 E -137.9950142785
+I 9 q 5E-03 E -138.0541500066
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.3E-17, States kept: m=9
+Sweep=1, HS=2, Bond=(6,7)
+I 0 q 4E-01 E -138.0541500066
+I 9 q 4E-03 E -138.1338321762
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=4.2E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(5,6)
+I 0 q 5E-01 E -138.1338321762
+I 9 q 6E-03 E -138.2497017390
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.0E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(4,5)
+I 0 q 4E-01 E -138.2497017390
+I 9 q 1E-03 E -138.3104483086
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.6E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(3,4)
+I 0 q 6E-01 E -138.3104483086
+I 9 q 4E-03 E -138.4796105044
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=1.5E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(2,3)
+I 0 q 4E-01 E -138.4796105044
+I 9 q 6E-02 E -138.5582493310
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=2.5E-16, States kept: m=9
+Sweep=1, HS=2, Bond=(1,2)
+I 0 q 4E-02 E -138.5582493310
+I 9 q 4E-03 E -138.5591787256
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=10
+    Trunc. err=8.9E-17, States kept: m=3
+    Largest m during sweep 1 was 9
+    Largest truncation error: 4.92635e-16
+    Energy after sweep 1 is -138.559178725642
+    Sweep 1 CPU time = 0.188s (Wall time = 0.186s)
+Sweep=2, HS=1, Bond=(1,2)
+I 0 q 4E-03 E -138.5591787256
+I 8 q 3E-04 E -138.5591841534
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=2, HS=1, Bond=(2,3)
+I 0 q 5E-02 E -138.5591841534
+I 8 q 4E-03 E -138.5597122155
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=2, HS=1, Bond=(3,4)
+I 0 q 1E-01 E -138.5597122155
+I 8 q 8E-03 E -138.5644280721
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.7E-08, States kept: m=20
+Sweep=2, HS=1, Bond=(4,5)
+I 0 q 7E-02 E -138.5644282237
+I 8 q 6E-03 E -138.5664741357
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.5E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(5,6)
+I 0 q 8E-02 E -138.5664745691
+I 8 q 7E-03 E -138.5698954915
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(6,7)
+I 0 q 7E-02 E -138.5698959054
+I 8 q 3E-03 E -138.5714811727
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(7,8)
+I 0 q 8E-02 E -138.5714800848
+I 8 q 3E-03 E -138.5742979116
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(8,9)
+I 0 q 8E-02 E -138.5742967910
+I 8 q 2E-03 E -138.5769927275
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(9,10)
+I 0 q 9E-02 E -138.5769910855
+I 8 q 3E-03 E -138.5804467683
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(10,11)
+I 0 q 8E-02 E -138.5804452250
+I 8 q 2E-03 E -138.5832993896
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(11,12)
+I 0 q 1E-01 E -138.5832984797
+I 8 q 3E-03 E -138.5876844892
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(12,13)
+I 0 q 8E-02 E -138.5876828627
+I 8 q 2E-03 E -138.5902607126
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(13,14)
+I 0 q 1E-01 E -138.5902595990
+I 8 q 3E-03 E -138.5942239126
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(14,15)
+I 0 q 1E-01 E -138.5942230038
+I 8 q 3E-03 E -138.5993159883
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(15,16)
+I 0 q 8E-02 E -138.5993145535
+I 8 q 2E-03 E -138.6014363462
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(16,17)
+I 0 q 8E-02 E -138.6014351157
+I 8 q 2E-03 E -138.6043131771
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.1E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(17,18)
+I 0 q 8E-02 E -138.6043119773
+I 8 q 2E-03 E -138.6069774698
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(18,19)
+I 0 q 1E-01 E -138.6069761755
+I 8 q 3E-03 E -138.6110711113
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(19,20)
+I 0 q 1E-01 E -138.6110698766
+I 8 q 3E-03 E -138.6157703124
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=6.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(20,21)
+I 0 q 8E-02 E -138.6157665690
+I 8 q 2E-03 E -138.6180823927
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(21,22)
+I 0 q 1E-01 E -138.6180810404
+I 8 q 3E-03 E -138.6221357779
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(22,23)
+I 0 q 1E-01 E -138.6221345053
+I 8 q 3E-03 E -138.6267762595
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(23,24)
+I 0 q 1E-01 E -138.6267751352
+I 8 q 3E-03 E -138.6314167412
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(24,25)
+I 0 q 1E-01 E -138.6314159095
+I 8 q 4E-03 E -138.6370225847
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(25,26)
+I 0 q 1E-01 E -138.6370213947
+I 8 q 3E-03 E -138.6415792776
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(26,27)
+I 0 q 1E-01 E -138.6415783055
+I 8 q 3E-03 E -138.6469337689
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(27,28)
+I 0 q 1E-01 E -138.6469329212
+I 8 q 4E-03 E -138.6530040788
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(28,29)
+I 0 q 1E-01 E -138.6530029481
+I 8 q 3E-03 E -138.6587101727
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(29,30)
+I 0 q 9E-02 E -138.6587088108
+I 8 q 2E-03 E -138.6616590849
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.1E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(30,31)
+I 0 q 1E-01 E -138.6616579495
+I 8 q 3E-03 E -138.6674523983
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(31,32)
+I 0 q 9E-02 E -138.6674513976
+I 8 q 2E-03 E -138.6706722575
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(32,33)
+I 0 q 6E-02 E -138.6706709854
+I 8 q 5E-04 E -138.6718422989
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.8E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(33,34)
+I 0 q 9E-02 E -138.6718411083
+I 8 q 3E-03 E -138.6750751132
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(34,35)
+I 0 q 9E-02 E -138.6750738143
+I 8 q 2E-03 E -138.6781374170
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.1E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(35,36)
+I 0 q 7E-02 E -138.6781361938
+I 8 q 1E-03 E -138.6797247241
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(36,37)
+I 0 q 9E-02 E -138.6797235609
+I 8 q 3E-03 E -138.6832287538
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.5E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(37,38)
+I 0 q 1E-01 E -138.6832275574
+I 8 q 3E-03 E -138.6878158750
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(38,39)
+I 0 q 7E-02 E -138.6878146421
+I 8 q 1E-03 E -138.6891823588
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(39,40)
+I 0 q 8E-02 E -138.6891812836
+I 8 q 3E-03 E -138.6921499418
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(40,41)
+I 0 q 9E-02 E -138.6921486056
+I 8 q 3E-03 E -138.6958896244
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(41,42)
+I 0 q 1E-01 E -138.6958883995
+I 8 q 3E-03 E -138.6999360059
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(42,43)
+I 0 q 1E-01 E -138.6999347683
+I 8 q 3E-03 E -138.7045112841
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(43,44)
+I 0 q 1E-01 E -138.7045104980
+I 8 q 3E-03 E -138.7100051899
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(44,45)
+I 0 q 1E-01 E -138.7100044770
+I 8 q 3E-03 E -138.7157419977
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(45,46)
+I 0 q 1E-01 E -138.7157412855
+I 8 q 4E-03 E -138.7217816542
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.8E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(46,47)
+I 0 q 1E-01 E -138.7217799018
+I 8 q 3E-03 E -138.7262620758
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(47,48)
+I 0 q 1E-01 E -138.7262610456
+I 8 q 3E-03 E -138.7325009582
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.5E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(48,49)
+I 0 q 7E-02 E -138.7324997367
+I 8 q 2E-03 E -138.7344343258
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(49,50)
+I 0 q 9E-02 E -138.7344331281
+I 8 q 2E-03 E -138.7379051309
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(50,51)
+I 0 q 6E-02 E -138.7379038925
+I 8 q 9E-04 E -138.7392294094
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(51,52)
+I 0 q 8E-02 E -138.7392281720
+I 8 q 2E-03 E -138.7419419043
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(52,53)
+I 0 q 7E-02 E -138.7419408198
+I 8 q 2E-03 E -138.7439453797
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(53,54)
+I 0 q 9E-02 E -138.7439440963
+I 8 q 3E-03 E -138.7476622674
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(54,55)
+I 0 q 1E-01 E -138.7476609791
+I 8 q 3E-03 E -138.7516248165
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(55,56)
+I 0 q 1E-01 E -138.7516239280
+I 8 q 3E-03 E -138.7568934188
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(56,57)
+I 0 q 1E-01 E -138.7568924895
+I 8 q 3E-03 E -138.7621593738
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(57,58)
+I 0 q 7E-02 E -138.7621582506
+I 8 q 1E-03 E -138.7636001196
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(58,59)
+I 0 q 9E-02 E -138.7635990727
+I 8 q 3E-03 E -138.7677234839
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(59,60)
+I 0 q 9E-02 E -138.7677221220
+I 8 q 2E-03 E -138.7711666084
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(60,61)
+I 0 q 7E-02 E -138.7711652069
+I 8 q 1E-03 E -138.7730420529
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(61,62)
+I 0 q 8E-02 E -138.7730408007
+I 8 q 2E-03 E -138.7760176734
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(62,63)
+I 0 q 9E-02 E -138.7760163985
+I 8 q 2E-03 E -138.7790165057
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(63,64)
+I 0 q 7E-02 E -138.7790152837
+I 8 q 2E-03 E -138.7811691551
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.8E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(64,65)
+I 0 q 8E-02 E -138.7811680253
+I 8 q 2E-03 E -138.7835246849
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(65,66)
+I 0 q 9E-02 E -138.7835234367
+I 8 q 3E-03 E -138.7871030296
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.1E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(66,67)
+I 0 q 1E-01 E -138.7871020036
+I 8 q 3E-03 E -138.7916509352
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.5E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(67,68)
+I 0 q 1E-01 E -138.7916498346
+I 8 q 3E-03 E -138.7959928782
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(68,69)
+I 0 q 1E-01 E -138.7959918333
+I 8 q 3E-03 E -138.8005693952
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(69,70)
+I 0 q 1E-01 E -138.8005685478
+I 8 q 3E-03 E -138.8054968136
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(70,71)
+I 0 q 1E-01 E -138.8054958364
+I 8 q 3E-03 E -138.8102669742
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(71,72)
+I 0 q 1E-01 E -138.8102662826
+I 8 q 3E-03 E -138.8153761351
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(72,73)
+I 0 q 1E-01 E -138.8153754494
+I 8 q 3E-03 E -138.8206950019
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(73,74)
+I 0 q 1E-01 E -138.8206942958
+I 8 q 3E-03 E -138.8258406791
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(74,75)
+I 0 q 1E-01 E -138.8258396724
+I 8 q 3E-03 E -138.8311725585
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(75,76)
+I 0 q 9E-02 E -138.8311710374
+I 8 q 2E-03 E -138.8340895166
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(76,77)
+I 0 q 1E-01 E -138.8340885544
+I 8 q 4E-03 E -138.8391950332
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(77,78)
+I 0 q 1E-01 E -138.8391939295
+I 8 q 3E-03 E -138.8440029777
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.1E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(78,79)
+I 0 q 1E-01 E -138.8440014541
+I 8 q 3E-03 E -138.8482131841
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(79,80)
+I 0 q 1E-01 E -138.8482120712
+I 8 q 3E-03 E -138.8537729688
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(80,81)
+I 0 q 8E-02 E -138.8537716540
+I 8 q 2E-03 E -138.8565528849
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(81,82)
+I 0 q 9E-02 E -138.8565517275
+I 8 q 3E-03 E -138.8604740896
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.5E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(82,83)
+I 0 q 9E-02 E -138.8604727651
+I 8 q 3E-03 E -138.8638539494
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(83,84)
+I 0 q 1E-01 E -138.8638527971
+I 8 q 3E-03 E -138.8683756873
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(84,85)
+I 0 q 1E-01 E -138.8683746842
+I 8 q 4E-03 E -138.8739268366
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.4E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(85,86)
+I 0 q 1E-01 E -138.8739258966
+I 8 q 3E-03 E -138.8794146662
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(86,87)
+I 0 q 1E-01 E -138.8794136154
+I 8 q 3E-03 E -138.8854214946
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(87,88)
+I 0 q 7E-02 E -138.8854202967
+I 8 q 1E-03 E -138.8869717058
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.1E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(88,89)
+I 0 q 1E-01 E -138.8869704065
+I 8 q 3E-03 E -138.8913814469
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.1E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(89,90)
+I 0 q 7E-02 E -138.8913802788
+I 8 q 2E-03 E -138.8932623075
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.2E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(90,91)
+I 0 q 1E-01 E -138.8932609980
+I 8 q 3E-03 E -138.8974811560
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(91,92)
+I 0 q 8E-02 E -138.8974801732
+I 8 q 2E-03 E -138.9001785902
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(92,93)
+I 0 q 9E-02 E -138.9001774193
+I 8 q 2E-03 E -138.9035015187
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.6E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(93,94)
+I 0 q 1E-01 E -138.9035007141
+I 8 q 4E-03 E -138.9081404476
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(94,95)
+I 0 q 6E-02 E -138.9081396563
+I 8 q 6E-04 E -138.9091652087
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.3E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(95,96)
+I 0 q 9E-02 E -138.9091643267
+I 8 q 4E-03 E -138.9127758175
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(96,97)
+I 0 q 7E-02 E -138.9127754167
+I 8 q 6E-03 E -138.9151003852
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.7E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(97,98)
+I 0 q 2E-01 E -138.9151002094
+I 8 q 6E-03 E -138.9344477076
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.8E-07, States kept: m=20
+Sweep=2, HS=1, Bond=(98,99)
+I 0 q 4E-03 E -138.9344467705
+I 8 q 1E-03 E -138.9344528185
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-15, States kept: m=9
+Sweep=2, HS=1, Bond=(99,100)
+I 0 q 5E-04 E -138.9344528185
+I 8 q 2E-04 E -138.9344541971
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.5E-16, States kept: m=3
+Sweep=2, HS=2, Bond=(99,100)
+I 0 q 2E-04 E -138.9344541971
+I 2 q 6E-05 E -138.9344542141
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=2, HS=2, Bond=(98,99)
+I 0 q 1E-03 E -138.9344542141
+I 8 q 2E-03 E -138.9344561847
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=2, HS=2, Bond=(97,98)
+I 0 q 5E-03 E -138.9344561847
+I 8 q 6E-04 E -138.9344613156
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.4E-07, States kept: m=20
+Sweep=2, HS=2, Bond=(96,97)
+I 0 q 2E-02 E -138.9344601419
+I 8 q 7E-04 E -138.9345801180
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(95,96)
+I 0 q 1E-02 E -138.9345713261
+I 8 q 3E-04 E -138.9346326329
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.7E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(94,95)
+I 0 q 2E-02 E -138.9346231204
+I 8 q 5E-04 E -138.9347339373
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.6E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(93,94)
+I 0 q 1E-02 E -138.9347178093
+I 8 q 3E-04 E -138.9347809326
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(92,93)
+I 0 q 2E-02 E -138.9347620130
+I 8 q 4E-04 E -138.9348601694
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.5E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(91,92)
+I 0 q 1E-02 E -138.9348391546
+I 8 q 2E-04 E -138.9349016879
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.9E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(90,91)
+I 0 q 1E-02 E -138.9348781859
+I 8 q 2E-04 E -138.9349449432
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.0E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(89,90)
+I 0 q 1E-02 E -138.9349199840
+I 8 q 2E-04 E -138.9349679275
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.1E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(88,89)
+I 0 q 1E-02 E -138.9349428626
+I 8 q 2E-04 E -138.9349903558
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(87,88)
+I 0 q 1E-02 E -138.9349644566
+I 8 q 2E-04 E -138.9350065004
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(86,87)
+I 0 q 1E-02 E -138.9349821097
+I 8 q 2E-04 E -138.9350218402
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(85,86)
+I 0 q 1E-02 E -138.9349970195
+I 8 q 3E-04 E -138.9350474285
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(84,85)
+I 0 q 1E-02 E -138.9350233940
+I 8 q 3E-04 E -138.9350734620
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(83,84)
+I 0 q 1E-02 E -138.9350495589
+I 8 q 3E-04 E -138.9351050871
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(82,83)
+I 0 q 1E-02 E -138.9350812616
+I 8 q 3E-04 E -138.9351338401
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.4E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(81,82)
+I 0 q 1E-02 E -138.9351094522
+I 8 q 3E-04 E -138.9351563031
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(80,81)
+I 0 q 1E-02 E -138.9351325451
+I 8 q 3E-04 E -138.9351820645
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(79,80)
+I 0 q 1E-02 E -138.9351581786
+I 8 q 3E-04 E -138.9352043914
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(78,79)
+I 0 q 1E-02 E -138.9351808948
+I 8 q 3E-04 E -138.9352398863
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(77,78)
+I 0 q 1E-02 E -138.9352160422
+I 8 q 3E-04 E -138.9352701888
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(76,77)
+I 0 q 1E-02 E -138.9352467246
+I 8 q 3E-04 E -138.9353097960
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(75,76)
+I 0 q 1E-02 E -138.9352857786
+I 8 q 3E-04 E -138.9353505542
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(74,75)
+I 0 q 1E-02 E -138.9353268626
+I 8 q 3E-04 E -138.9353814515
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(73,74)
+I 0 q 1E-02 E -138.9353575241
+I 8 q 3E-04 E -138.9354234284
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(72,73)
+I 0 q 1E-02 E -138.9353995732
+I 8 q 4E-04 E -138.9354699271
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(71,72)
+I 0 q 1E-02 E -138.9354456924
+I 8 q 4E-04 E -138.9355184302
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(70,71)
+I 0 q 1E-02 E -138.9354944945
+I 8 q 4E-04 E -138.9355704983
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(69,70)
+I 0 q 1E-02 E -138.9355462255
+I 8 q 4E-04 E -138.9356170855
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(68,69)
+I 0 q 1E-02 E -138.9355928999
+I 8 q 4E-04 E -138.9356687075
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(67,68)
+I 0 q 1E-02 E -138.9356443788
+I 8 q 4E-04 E -138.9357163018
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(66,67)
+I 0 q 1E-02 E -138.9356919168
+I 8 q 4E-04 E -138.9357639211
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(65,66)
+I 0 q 1E-02 E -138.9357393695
+I 8 q 4E-04 E -138.9358118785
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(64,65)
+I 0 q 1E-02 E -138.9357874111
+I 8 q 4E-04 E -138.9358541059
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(63,64)
+I 0 q 1E-02 E -138.9358293699
+I 8 q 3E-04 E -138.9358802287
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(62,63)
+I 0 q 1E-02 E -138.9358555876
+I 8 q 3E-04 E -138.9359029053
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(61,62)
+I 0 q 1E-02 E -138.9358781836
+I 8 q 3E-04 E -138.9359264960
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(60,61)
+I 0 q 1E-02 E -138.9359017460
+I 8 q 2E-04 E -138.9359474152
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(59,60)
+I 0 q 1E-02 E -138.9359226957
+I 8 q 2E-04 E -138.9359653028
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(58,59)
+I 0 q 1E-02 E -138.9359405669
+I 8 q 3E-04 E -138.9359910481
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(57,58)
+I 0 q 1E-02 E -138.9359658720
+I 8 q 3E-04 E -138.9360156290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(56,57)
+I 0 q 1E-02 E -138.9359911690
+I 8 q 3E-04 E -138.9360362435
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(55,56)
+I 0 q 1E-02 E -138.9360112974
+I 8 q 3E-04 E -138.9360717387
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(54,55)
+I 0 q 1E-02 E -138.9360470873
+I 8 q 3E-04 E -138.9361049728
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(53,54)
+I 0 q 1E-02 E -138.9360801871
+I 8 q 3E-04 E -138.9361405278
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(52,53)
+I 0 q 1E-02 E -138.9361158197
+I 8 q 3E-04 E -138.9361694474
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(51,52)
+I 0 q 1E-02 E -138.9361445733
+I 8 q 2E-04 E -138.9361899891
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(50,51)
+I 0 q 1E-02 E -138.9361651204
+I 8 q 2E-04 E -138.9362039341
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+
+    vN Entropy at center bond b=50 = 0.853072247604
+    Eigs at center bond b=50: 0.4857 0.4841 0.0074 0.0074 0.0073 0.0073 
+Sweep=2, HS=2, Bond=(49,50)
+I 0 q 1E-02 E -138.9361790285
+I 8 q 2E-04 E -138.9362167488
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(48,49)
+I 0 q 1E-02 E -138.9361918203
+I 8 q 2E-04 E -138.9362313738
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(47,48)
+I 0 q 1E-02 E -138.9362066778
+I 8 q 2E-04 E -138.9362416226
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.4E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(46,47)
+I 0 q 1E-02 E -138.9362157435
+I 8 q 2E-04 E -138.9362594733
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(45,46)
+I 0 q 1E-02 E -138.9362353422
+I 8 q 2E-04 E -138.9362770959
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.4E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(44,45)
+I 0 q 1E-02 E -138.9362513902
+I 8 q 3E-04 E -138.9362981280
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(43,44)
+I 0 q 1E-02 E -138.9362737588
+I 8 q 3E-04 E -138.9363224533
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(42,43)
+I 0 q 1E-02 E -138.9362971748
+I 8 q 3E-04 E -138.9363514349
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(41,42)
+I 0 q 1E-02 E -138.9363270833
+I 8 q 3E-04 E -138.9363766715
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(40,41)
+I 0 q 1E-02 E -138.9363516355
+I 8 q 3E-04 E -138.9364027247
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(39,40)
+I 0 q 1E-02 E -138.9363783121
+I 8 q 3E-04 E -138.9364303098
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(38,39)
+I 0 q 1E-02 E -138.9364053439
+I 8 q 3E-04 E -138.9364530229
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(37,38)
+I 0 q 1E-02 E -138.9364284294
+I 8 q 2E-04 E -138.9364715719
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(36,37)
+I 0 q 1E-02 E -138.9364466685
+I 8 q 3E-04 E -138.9365020346
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(35,36)
+I 0 q 1E-02 E -138.9364772301
+I 8 q 2E-04 E -138.9365211918
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(34,35)
+I 0 q 1E-02 E -138.9364963892
+I 8 q 2E-04 E -138.9365365022
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(33,34)
+I 0 q 1E-02 E -138.9365115870
+I 8 q 2E-04 E -138.9365547972
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(32,33)
+I 0 q 1E-02 E -138.9365299040
+I 8 q 2E-04 E -138.9365753953
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(31,32)
+I 0 q 1E-02 E -138.9365505843
+I 8 q 2E-04 E -138.9365884989
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(30,31)
+I 0 q 1E-02 E -138.9365635001
+I 8 q 2E-04 E -138.9366003324
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(29,30)
+I 0 q 1E-02 E -138.9365755995
+I 8 q 1E-04 E -138.9366079929
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(28,29)
+I 0 q 1E-02 E -138.9365832611
+I 8 q 1E-04 E -138.9366172001
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(27,28)
+I 0 q 1E-02 E -138.9365924002
+I 8 q 2E-04 E -138.9366308620
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(26,27)
+I 0 q 1E-02 E -138.9366061668
+I 8 q 2E-04 E -138.9366511705
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(25,26)
+I 0 q 1E-02 E -138.9366265960
+I 8 q 2E-04 E -138.9366727920
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(24,25)
+I 0 q 1E-02 E -138.9366481954
+I 8 q 3E-04 E -138.9366980671
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(23,24)
+I 0 q 1E-02 E -138.9366734254
+I 8 q 3E-04 E -138.9367292693
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(22,23)
+I 0 q 1E-02 E -138.9367049115
+I 8 q 3E-04 E -138.9367609461
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(21,22)
+I 0 q 1E-02 E -138.9367362739
+I 8 q 3E-04 E -138.9367915654
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(20,21)
+I 0 q 1E-02 E -138.9367670446
+I 8 q 3E-04 E -138.9368216813
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.3E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(19,20)
+I 0 q 1E-02 E -138.9367972699
+I 8 q 3E-04 E -138.9368449271
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(18,19)
+I 0 q 1E-02 E -138.9368208105
+I 8 q 3E-04 E -138.9368807197
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(17,18)
+I 0 q 1E-02 E -138.9368564864
+I 8 q 3E-04 E -138.9369110543
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(16,17)
+I 0 q 1E-02 E -138.9368873005
+I 8 q 3E-04 E -138.9369364202
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(15,16)
+I 0 q 1E-02 E -138.9369128625
+I 8 q 2E-04 E -138.9369581306
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.2E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(14,15)
+I 0 q 1E-02 E -138.9369347430
+I 8 q 3E-04 E -138.9369822869
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.1E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(13,14)
+I 0 q 1E-02 E -138.9369586473
+I 8 q 3E-04 E -138.9370178980
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.0E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(12,13)
+I 0 q 1E-02 E -138.9369949254
+I 8 q 3E-04 E -138.9370558026
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.0E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(11,12)
+I 0 q 1E-02 E -138.9370322263
+I 8 q 3E-04 E -138.9370837450
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.9E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(10,11)
+I 0 q 1E-02 E -138.9370606886
+I 8 q 4E-04 E -138.9371435953
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.0E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(9,10)
+I 0 q 1E-02 E -138.9371191777
+I 8 q 5E-04 E -138.9371698908
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=4.0E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(8,9)
+I 0 q 2E-02 E -138.9371464137
+I 8 q 1E-03 E -138.9372295784
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.8E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(7,8)
+I 0 q 1E-02 E -138.9372071556
+I 8 q 8E-04 E -138.9372501280
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.4E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(6,7)
+I 0 q 2E-02 E -138.9372307663
+I 8 q 1E-03 E -138.9373305981
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.9E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(5,6)
+I 0 q 1E-02 E -138.9373119836
+I 8 q 1E-03 E -138.9373547174
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.9E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(4,5)
+I 0 q 2E-02 E -138.9373443084
+I 8 q 6E-04 E -138.9374546322
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=1.5E-06, States kept: m=20
+Sweep=2, HS=2, Bond=(3,4)
+I 0 q 9E-03 E -138.9374445027
+I 8 q 1E-04 E -138.9374616914
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.0E-07, States kept: m=20
+Sweep=2, HS=2, Bond=(2,3)
+I 0 q 5E-04 E -138.9374601348
+I 2 q 7E-05 E -138.9374601684
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=2.1E-15, States kept: m=9
+Sweep=2, HS=2, Bond=(1,2)
+I 0 q 4E-05 E -138.9374601684
+I 1 q 8E-05 E -138.9374601709
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=20
+    Trunc. err=3.9E-16, States kept: m=3
+    Largest m during sweep 2 was 20
+    Largest truncation error: 4.37018e-06
+    Energy after sweep 2 is -138.937460170885
+    Sweep 2 CPU time = 0.812s (Wall time = 0.890s)
+Sweep=3, HS=1, Bond=(1,2)
+I 0 q 8E-05 E -138.9374601709
+I 1 q 4E-05 E -138.9374601724
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=3, HS=1, Bond=(2,3)
+I 0 q 8E-05 E -138.9374601724
+I 1 q 6E-05 E -138.9374601736
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=3, HS=1, Bond=(3,4)
+I 0 q 4E-03 E -138.9374601736
+I 3 q 8E-05 E -138.9374617010
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=27
+Sweep=3, HS=1, Bond=(4,5)
+I 0 q 8E-03 E -138.9374617010
+I 5 q 9E-05 E -138.9374718688
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.1E-11, States kept: m=48
+Sweep=3, HS=1, Bond=(5,6)
+I 0 q 8E-03 E -138.9374718679
+I 7 q 1E-04 E -138.9374833846
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=5.8E-11, States kept: m=53
+Sweep=3, HS=1, Bond=(6,7)
+I 0 q 1E-02 E -138.9374833841
+I 7 q 1E-04 E -138.9375035211
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.3E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(7,8)
+I 0 q 1E-02 E -138.9375035205
+I 7 q 1E-04 E -138.9375259742
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.8E-11, States kept: m=53
+Sweep=3, HS=1, Bond=(8,9)
+I 0 q 1E-02 E -138.9375259736
+I 7 q 2E-04 E -138.9375521544
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.6E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(9,10)
+I 0 q 1E-02 E -138.9375521538
+I 7 q 2E-04 E -138.9375829512
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=6.6E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(10,11)
+I 0 q 1E-02 E -138.9375829508
+I 7 q 2E-04 E -138.9376136473
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.6E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(11,12)
+I 0 q 1E-02 E -138.9376136467
+I 7 q 3E-04 E -138.9376464030
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.1E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(12,13)
+I 0 q 1E-02 E -138.9376464024
+I 7 q 2E-04 E -138.9376777942
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.0E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(13,14)
+I 0 q 1E-02 E -138.9376777936
+I 7 q 2E-04 E -138.9377087895
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=53
+Sweep=3, HS=1, Bond=(14,15)
+I 0 q 1E-02 E -138.9377087887
+I 7 q 2E-04 E -138.9377387209
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-11, States kept: m=53
+Sweep=3, HS=1, Bond=(15,16)
+I 0 q 1E-02 E -138.9377387201
+I 7 q 1E-04 E -138.9377680117
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(16,17)
+I 0 q 1E-02 E -138.9377680109
+I 7 q 1E-04 E -138.9377968766
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(17,18)
+I 0 q 1E-02 E -138.9377968757
+I 7 q 1E-04 E -138.9378256683
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(18,19)
+I 0 q 1E-02 E -138.9378256675
+I 7 q 1E-04 E -138.9378546075
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.9E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(19,20)
+I 0 q 1E-02 E -138.9378546067
+I 7 q 9E-05 E -138.9378832418
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(20,21)
+I 0 q 1E-02 E -138.9378832409
+I 7 q 9E-05 E -138.9379119610
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(21,22)
+I 0 q 1E-02 E -138.9379119602
+I 7 q 9E-05 E -138.9379406537
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(22,23)
+I 0 q 1E-02 E -138.9379406528
+I 7 q 9E-05 E -138.9379694563
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(23,24)
+I 0 q 1E-02 E -138.9379694555
+I 7 q 8E-05 E -138.9379979663
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(24,25)
+I 0 q 1E-02 E -138.9379979655
+I 7 q 8E-05 E -138.9380266709
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(25,26)
+I 0 q 1E-02 E -138.9380266700
+I 7 q 8E-05 E -138.9380553274
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(26,27)
+I 0 q 1E-02 E -138.9380553265
+I 7 q 8E-05 E -138.9380839445
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(27,28)
+I 0 q 1E-02 E -138.9380839437
+I 7 q 8E-05 E -138.9381126381
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(28,29)
+I 0 q 1E-02 E -138.9381126373
+I 7 q 8E-05 E -138.9381413964
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(29,30)
+I 0 q 1E-02 E -138.9381413956
+I 7 q 8E-05 E -138.9381701440
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(30,31)
+I 0 q 1E-02 E -138.9381701432
+I 7 q 8E-05 E -138.9381988262
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(31,32)
+I 0 q 1E-02 E -138.9381988253
+I 7 q 8E-05 E -138.9382277841
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(32,33)
+I 0 q 1E-02 E -138.9382277833
+I 7 q 8E-05 E -138.9382565459
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(33,34)
+I 0 q 1E-02 E -138.9382565451
+I 7 q 8E-05 E -138.9382854100
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(34,35)
+I 0 q 1E-02 E -138.9382854091
+I 7 q 8E-05 E -138.9383142649
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(35,36)
+I 0 q 1E-02 E -138.9383142640
+I 7 q 8E-05 E -138.9383430719
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(36,37)
+I 0 q 1E-02 E -138.9383430710
+I 7 q 8E-05 E -138.9383718297
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(37,38)
+I 0 q 1E-02 E -138.9383718288
+I 7 q 8E-05 E -138.9384007602
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(38,39)
+I 0 q 1E-02 E -138.9384007594
+I 7 q 8E-05 E -138.9384293260
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(39,40)
+I 0 q 1E-02 E -138.9384293252
+I 7 q 8E-05 E -138.9384582728
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.4E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(40,41)
+I 0 q 1E-02 E -138.9384582720
+I 7 q 8E-05 E -138.9384866941
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(41,42)
+I 0 q 1E-02 E -138.9384866932
+I 7 q 8E-05 E -138.9385156905
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.4E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(42,43)
+I 0 q 1E-02 E -138.9385156896
+I 7 q 8E-05 E -138.9385440605
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(43,44)
+I 0 q 1E-02 E -138.9385440597
+I 7 q 8E-05 E -138.9385732181
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.3E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(44,45)
+I 0 q 1E-02 E -138.9385732173
+I 7 q 8E-05 E -138.9386015343
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(45,46)
+I 0 q 1E-02 E -138.9386015334
+I 7 q 8E-05 E -138.9386309763
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.2E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(46,47)
+I 0 q 1E-02 E -138.9386309755
+I 7 q 8E-05 E -138.9386590559
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.8E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(47,48)
+I 0 q 1E-02 E -138.9386590550
+I 7 q 8E-05 E -138.9386885609
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.4E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(48,49)
+I 0 q 1E-02 E -138.9386885601
+I 7 q 8E-05 E -138.9387172102
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(49,50)
+I 0 q 1E-02 E -138.9387172094
+I 7 q 8E-05 E -138.9387460892
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(50,51)
+I 0 q 1E-02 E -138.9387460884
+I 7 q 8E-05 E -138.9387749374
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(51,52)
+I 0 q 1E-02 E -138.9387749366
+I 7 q 8E-05 E -138.9388037808
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(52,53)
+I 0 q 1E-02 E -138.9388037800
+I 7 q 8E-05 E -138.9388326383
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(53,54)
+I 0 q 1E-02 E -138.9388326375
+I 7 q 8E-05 E -138.9388613676
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(54,55)
+I 0 q 1E-02 E -138.9388613668
+I 7 q 8E-05 E -138.9388901633
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(55,56)
+I 0 q 1E-02 E -138.9388901625
+I 7 q 8E-05 E -138.9389188343
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(56,57)
+I 0 q 1E-02 E -138.9389188335
+I 7 q 8E-05 E -138.9389477746
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.4E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(57,58)
+I 0 q 1E-02 E -138.9389477737
+I 7 q 8E-05 E -138.9389762447
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(58,59)
+I 0 q 1E-02 E -138.9389762439
+I 7 q 8E-05 E -138.9390053027
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(59,60)
+I 0 q 1E-02 E -138.9390053019
+I 7 q 8E-05 E -138.9390340306
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(60,61)
+I 0 q 1E-02 E -138.9390340298
+I 7 q 8E-05 E -138.9390627234
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(61,62)
+I 0 q 1E-02 E -138.9390627225
+I 7 q 8E-05 E -138.9390914451
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(62,63)
+I 0 q 1E-02 E -138.9390914442
+I 7 q 8E-05 E -138.9391201514
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(63,64)
+I 0 q 1E-02 E -138.9391201506
+I 7 q 8E-05 E -138.9391487707
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(64,65)
+I 0 q 1E-02 E -138.9391487699
+I 7 q 8E-05 E -138.9391774763
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(65,66)
+I 0 q 1E-02 E -138.9391774754
+I 7 q 8E-05 E -138.9392059886
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(66,67)
+I 0 q 1E-02 E -138.9392059878
+I 7 q 8E-05 E -138.9392345737
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(67,68)
+I 0 q 1E-02 E -138.9392345729
+I 7 q 8E-05 E -138.9392630265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(68,69)
+I 0 q 1E-02 E -138.9392630256
+I 7 q 9E-05 E -138.9392914230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.4E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(69,70)
+I 0 q 1E-02 E -138.9392914222
+I 7 q 8E-05 E -138.9393196861
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.4E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(70,71)
+I 0 q 1E-02 E -138.9393196853
+I 7 q 9E-05 E -138.9393480159
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.3E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(71,72)
+I 0 q 1E-02 E -138.9393480151
+I 7 q 9E-05 E -138.9393760483
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.3E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(72,73)
+I 0 q 1E-02 E -138.9393760475
+I 7 q 9E-05 E -138.9394042832
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.1E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(73,74)
+I 0 q 1E-02 E -138.9394042824
+I 7 q 8E-05 E -138.9394322157
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.0E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(74,75)
+I 0 q 1E-02 E -138.9394322149
+I 7 q 9E-05 E -138.9394601965
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.0E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(75,76)
+I 0 q 1E-02 E -138.9394601957
+I 7 q 9E-05 E -138.9394879549
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(76,77)
+I 0 q 1E-02 E -138.9394879539
+I 7 q 9E-05 E -138.9395159826
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(77,78)
+I 0 q 1E-02 E -138.9395159816
+I 7 q 8E-05 E -138.9395434092
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(78,79)
+I 0 q 1E-02 E -138.9395434082
+I 7 q 8E-05 E -138.9395712709
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(79,80)
+I 0 q 1E-02 E -138.9395712700
+I 7 q 8E-05 E -138.9395987365
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(80,81)
+I 0 q 1E-02 E -138.9395987356
+I 7 q 8E-05 E -138.9396266134
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(81,82)
+I 0 q 1E-02 E -138.9396266125
+I 7 q 8E-05 E -138.9396543255
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(82,83)
+I 0 q 1E-02 E -138.9396543245
+I 7 q 8E-05 E -138.9396826445
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.3E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(83,84)
+I 0 q 1E-02 E -138.9396826437
+I 7 q 8E-05 E -138.9397103884
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.1E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(84,85)
+I 0 q 1E-02 E -138.9397103876
+I 7 q 8E-05 E -138.9397382336
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(85,86)
+I 0 q 1E-02 E -138.9397382327
+I 7 q 8E-05 E -138.9397662766
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(86,87)
+I 0 q 1E-02 E -138.9397662757
+I 7 q 9E-05 E -138.9397952434
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.1E-11, States kept: m=53
+Sweep=3, HS=1, Bond=(87,88)
+I 0 q 1E-02 E -138.9397952426
+I 7 q 1E-04 E -138.9398241826
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=52
+Sweep=3, HS=1, Bond=(88,89)
+I 0 q 1E-02 E -138.9398241816
+I 7 q 1E-04 E -138.9398547417
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=53
+Sweep=3, HS=1, Bond=(89,90)
+I 0 q 1E-02 E -138.9398547408
+I 7 q 2E-04 E -138.9398859457
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.6E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(90,91)
+I 0 q 1E-02 E -138.9398859451
+I 7 q 2E-04 E -138.9399175425
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.7E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(91,92)
+I 0 q 1E-02 E -138.9399175418
+I 7 q 3E-04 E -138.9399514956
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.5E-11, States kept: m=55
+Sweep=3, HS=1, Bond=(92,93)
+I 0 q 1E-02 E -138.9399514954
+I 7 q 3E-04 E -138.9399831269
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=54
+Sweep=3, HS=1, Bond=(93,94)
+I 0 q 1E-02 E -138.9399831264
+I 7 q 4E-04 E -138.9400149184
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.0E-11, States kept: m=55
+Sweep=3, HS=1, Bond=(94,95)
+I 0 q 1E-02 E -138.9400149187
+I 7 q 3E-04 E -138.9400411604
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=5.5E-11, States kept: m=55
+Sweep=3, HS=1, Bond=(95,96)
+I 0 q 9E-03 E -138.9400411604
+I 7 q 2E-04 E -138.9400561230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.0E-11, States kept: m=53
+Sweep=3, HS=1, Bond=(96,97)
+I 0 q 9E-03 E -138.9400561228
+I 7 q 1E-04 E -138.9400683718
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.4E-11, States kept: m=51
+Sweep=3, HS=1, Bond=(97,98)
+I 0 q 4E-03 E -138.9400683714
+I 4 q 8E-05 E -138.9400701822
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=6.5E-16, States kept: m=27
+Sweep=3, HS=1, Bond=(98,99)
+I 0 q 6E-05 E -138.9400701822
+I 1 q 6E-05 E -138.9400701836
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.9E-15, States kept: m=9
+Sweep=3, HS=1, Bond=(99,100)
+I 0 q 3E-05 E -138.9400701836
+I 1 q 2E-05 E -138.9400701842
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.8E-16, States kept: m=3
+Sweep=3, HS=2, Bond=(99,100)
+I 0 q 2E-05 E -138.9400701842
+I 1 q 8E-06 E -138.9400701843
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=3, HS=2, Bond=(98,99)
+I 0 q 6E-05 E -138.9400701843
+I 1 q 3E-05 E -138.9400701850
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=3, HS=2, Bond=(97,98)
+I 0 q 7E-05 E -138.9400701850
+I 1 q 4E-05 E -138.9400701856
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=27
+Sweep=3, HS=2, Bond=(96,97)
+I 0 q 1E-04 E -138.9400701856
+I 1 q 5E-05 E -138.9400701882
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.3E-11, States kept: m=53
+Sweep=3, HS=2, Bond=(95,96)
+I 0 q 3E-04 E -138.9400701875
+I 2 q 6E-05 E -138.9400702030
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-11, States kept: m=64
+Sweep=3, HS=2, Bond=(94,95)
+I 0 q 4E-04 E -138.9400702023
+I 2 q 1E-04 E -138.9400702354
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=71
+Sweep=3, HS=2, Bond=(93,94)
+I 0 q 6E-04 E -138.9400702348
+I 4 q 8E-05 E -138.9400703203
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.5E-11, States kept: m=76
+Sweep=3, HS=2, Bond=(92,93)
+I 0 q 8E-04 E -138.9400703197
+I 5 q 8E-05 E -138.9400704777
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=79
+Sweep=3, HS=2, Bond=(91,92)
+I 0 q 9E-04 E -138.9400704771
+I 5 q 9E-05 E -138.9400707269
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(90,91)
+I 0 q 1E-03 E -138.9400707264
+I 6 q 9E-05 E -138.9400711111
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(89,90)
+I 0 q 1E-03 E -138.9400711104
+I 6 q 8E-05 E -138.9400715014
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=84
+Sweep=3, HS=2, Bond=(88,89)
+I 0 q 1E-03 E -138.9400715008
+I 6 q 9E-05 E -138.9400719900
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=85
+Sweep=3, HS=2, Bond=(87,88)
+I 0 q 1E-03 E -138.9400719895
+I 6 q 9E-05 E -138.9400724020
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=85
+Sweep=3, HS=2, Bond=(86,87)
+I 0 q 1E-03 E -138.9400724014
+I 6 q 9E-05 E -138.9400728582
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=3, HS=2, Bond=(85,86)
+I 0 q 1E-03 E -138.9400728577
+I 6 q 8E-05 E -138.9400731891
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=3, HS=2, Bond=(84,85)
+I 0 q 1E-03 E -138.9400731885
+I 6 q 8E-05 E -138.9400735288
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=85
+Sweep=3, HS=2, Bond=(83,84)
+I 0 q 9E-04 E -138.9400735282
+I 5 q 8E-05 E -138.9400737733
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=85
+Sweep=3, HS=2, Bond=(82,83)
+I 0 q 9E-04 E -138.9400737727
+I 5 q 9E-05 E -138.9400740147
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=85
+Sweep=3, HS=2, Bond=(81,82)
+I 0 q 8E-04 E -138.9400740142
+I 4 q 1E-04 E -138.9400742037
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.0E-10, States kept: m=84
+Sweep=3, HS=2, Bond=(80,81)
+I 0 q 8E-04 E -138.9400742031
+I 5 q 7E-05 E -138.9400743923
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=84
+Sweep=3, HS=2, Bond=(79,80)
+I 0 q 8E-04 E -138.9400743917
+I 4 q 8E-05 E -138.9400745525
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=84
+Sweep=3, HS=2, Bond=(78,79)
+I 0 q 8E-04 E -138.9400745519
+I 4 q 8E-05 E -138.9400747105
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=83
+Sweep=3, HS=2, Bond=(77,78)
+I 0 q 7E-04 E -138.9400747099
+I 4 q 7E-05 E -138.9400748543
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=83
+Sweep=3, HS=2, Bond=(76,77)
+I 0 q 7E-04 E -138.9400748537
+I 4 q 7E-05 E -138.9400749975
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=83
+Sweep=3, HS=2, Bond=(75,76)
+I 0 q 7E-04 E -138.9400749969
+I 4 q 6E-05 E -138.9400751324
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=83
+Sweep=3, HS=2, Bond=(74,75)
+I 0 q 7E-04 E -138.9400751317
+I 4 q 6E-05 E -138.9400752661
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(73,74)
+I 0 q 7E-04 E -138.9400752654
+I 4 q 6E-05 E -138.9400753964
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(72,73)
+I 0 q 7E-04 E -138.9400753957
+I 4 q 6E-05 E -138.9400755244
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(71,72)
+I 0 q 7E-04 E -138.9400755237
+I 3 q 1E-04 E -138.9400756487
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(70,71)
+I 0 q 7E-04 E -138.9400756480
+I 4 q 7E-05 E -138.9400757757
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(69,70)
+I 0 q 7E-04 E -138.9400757750
+I 3 q 1E-04 E -138.9400758979
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(68,69)
+I 0 q 7E-04 E -138.9400758972
+I 4 q 6E-05 E -138.9400760228
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(67,68)
+I 0 q 7E-04 E -138.9400760221
+I 3 q 1E-04 E -138.9400761442
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(66,67)
+I 0 q 7E-04 E -138.9400761435
+I 4 q 6E-05 E -138.9400762678
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(65,66)
+I 0 q 7E-04 E -138.9400762671
+I 3 q 1E-04 E -138.9400763877
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(64,65)
+I 0 q 7E-04 E -138.9400763870
+I 4 q 6E-05 E -138.9400765107
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(63,64)
+I 0 q 7E-04 E -138.9400765100
+I 3 q 1E-04 E -138.9400766301
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(62,63)
+I 0 q 7E-04 E -138.9400766293
+I 4 q 6E-05 E -138.9400767521
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(61,62)
+I 0 q 7E-04 E -138.9400767515
+I 3 q 1E-04 E -138.9400768711
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(60,61)
+I 0 q 7E-04 E -138.9400768704
+I 4 q 6E-05 E -138.9400769926
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(59,60)
+I 0 q 7E-04 E -138.9400769919
+I 3 q 1E-04 E -138.9400771115
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(58,59)
+I 0 q 7E-04 E -138.9400771107
+I 4 q 6E-05 E -138.9400772328
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(57,58)
+I 0 q 7E-04 E -138.9400772321
+I 3 q 1E-04 E -138.9400773499
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(56,57)
+I 0 q 7E-04 E -138.9400773492
+I 4 q 6E-05 E -138.9400774723
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(55,56)
+I 0 q 7E-04 E -138.9400774717
+I 3 q 1E-04 E -138.9400775902
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(54,55)
+I 0 q 7E-04 E -138.9400775895
+I 4 q 6E-05 E -138.9400777118
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(53,54)
+I 0 q 7E-04 E -138.9400777112
+I 3 q 1E-04 E -138.9400778303
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(52,53)
+I 0 q 7E-04 E -138.9400778296
+I 4 q 6E-05 E -138.9400779517
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(51,52)
+I 0 q 7E-04 E -138.9400779511
+I 3 q 1E-04 E -138.9400780700
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(50,51)
+I 0 q 7E-04 E -138.9400780692
+I 4 q 6E-05 E -138.9400781907
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+
+    vN Entropy at center bond b=50 = 0.855459320482
+    Eigs at center bond b=50: 0.4848 0.4846 0.0074 0.0074 0.0074 0.0074 
+Sweep=3, HS=2, Bond=(49,50)
+I 0 q 7E-04 E -138.9400781900
+I 3 q 1E-04 E -138.9400783088
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(48,49)
+I 0 q 7E-04 E -138.9400783080
+I 4 q 6E-05 E -138.9400784293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(47,48)
+I 0 q 7E-04 E -138.9400784286
+I 3 q 1E-04 E -138.9400785482
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(46,47)
+I 0 q 7E-04 E -138.9400785475
+I 4 q 6E-05 E -138.9400786660
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(45,46)
+I 0 q 7E-04 E -138.9400786653
+I 3 q 1E-04 E -138.9400787879
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(44,45)
+I 0 q 7E-04 E -138.9400787872
+I 4 q 6E-05 E -138.9400789067
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(43,44)
+I 0 q 7E-04 E -138.9400789060
+I 3 q 1E-04 E -138.9400790277
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(42,43)
+I 0 q 7E-04 E -138.9400790269
+I 4 q 6E-05 E -138.9400791473
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(41,42)
+I 0 q 7E-04 E -138.9400791466
+I 3 q 1E-04 E -138.9400792679
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(40,41)
+I 0 q 7E-04 E -138.9400792671
+I 4 q 6E-05 E -138.9400793883
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(39,40)
+I 0 q 7E-04 E -138.9400793876
+I 3 q 1E-04 E -138.9400795080
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(38,39)
+I 0 q 7E-04 E -138.9400795073
+I 4 q 6E-05 E -138.9400796285
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(37,38)
+I 0 q 7E-04 E -138.9400796278
+I 3 q 1E-04 E -138.9400797477
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(36,37)
+I 0 q 7E-04 E -138.9400797470
+I 4 q 6E-05 E -138.9400798682
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(35,36)
+I 0 q 7E-04 E -138.9400798675
+I 3 q 1E-04 E -138.9400799865
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(34,35)
+I 0 q 7E-04 E -138.9400799858
+I 4 q 6E-05 E -138.9400801074
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(33,34)
+I 0 q 7E-04 E -138.9400801068
+I 3 q 1E-04 E -138.9400802254
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(32,33)
+I 0 q 7E-04 E -138.9400802246
+I 4 q 6E-05 E -138.9400803458
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(31,32)
+I 0 q 7E-04 E -138.9400803452
+I 3 q 1E-04 E -138.9400804642
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(30,31)
+I 0 q 7E-04 E -138.9400804634
+I 4 q 6E-05 E -138.9400805844
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(29,30)
+I 0 q 7E-04 E -138.9400805837
+I 3 q 1E-04 E -138.9400807030
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(28,29)
+I 0 q 7E-04 E -138.9400807023
+I 4 q 6E-05 E -138.9400808245
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(27,28)
+I 0 q 7E-04 E -138.9400808238
+I 3 q 1E-04 E -138.9400809433
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(26,27)
+I 0 q 7E-04 E -138.9400809426
+I 4 q 6E-05 E -138.9400810653
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(25,26)
+I 0 q 7E-04 E -138.9400810647
+I 3 q 1E-04 E -138.9400811858
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(24,25)
+I 0 q 7E-04 E -138.9400811850
+I 4 q 7E-05 E -138.9400813096
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(23,24)
+I 0 q 7E-04 E -138.9400813089
+I 3 q 1E-04 E -138.9400814316
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(22,23)
+I 0 q 7E-04 E -138.9400814308
+I 4 q 7E-05 E -138.9400815598
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(21,22)
+I 0 q 7E-04 E -138.9400815592
+I 4 q 6E-05 E -138.9400816894
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=82
+Sweep=3, HS=2, Bond=(20,21)
+I 0 q 7E-04 E -138.9400816887
+I 4 q 7E-05 E -138.9400818261
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=83
+Sweep=3, HS=2, Bond=(19,20)
+I 0 q 7E-04 E -138.9400818255
+I 4 q 7E-05 E -138.9400819725
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=83
+Sweep=3, HS=2, Bond=(18,19)
+I 0 q 8E-04 E -138.9400819719
+I 4 q 8E-05 E -138.9400821388
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=84
+Sweep=3, HS=2, Bond=(17,18)
+I 0 q 8E-04 E -138.9400821383
+I 4 q 1E-04 E -138.9400823247
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=84
+Sweep=3, HS=2, Bond=(16,17)
+I 0 q 9E-04 E -138.9400823241
+I 5 q 9E-05 E -138.9400825708
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=85
+Sweep=3, HS=2, Bond=(15,16)
+I 0 q 1E-03 E -138.9400825703
+I 5 q 1E-04 E -138.9400828397
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=3, HS=2, Bond=(14,15)
+I 0 q 1E-03 E -138.9400828392
+I 6 q 1E-04 E -138.9400832296
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=3, HS=2, Bond=(13,14)
+I 0 q 1E-03 E -138.9400832291
+I 6 q 9E-05 E -138.9400835973
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=3, HS=2, Bond=(12,13)
+I 0 q 1E-03 E -138.9400835968
+I 7 q 9E-05 E -138.9400841557
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=3, HS=2, Bond=(11,12)
+I 0 q 1E-03 E -138.9400841552
+I 7 q 8E-05 E -138.9400845799
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=85
+Sweep=3, HS=2, Bond=(10,11)
+I 0 q 1E-03 E -138.9400845793
+I 7 q 8E-05 E -138.9400850951
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=84
+Sweep=3, HS=2, Bond=(9,10)
+I 0 q 1E-03 E -138.9400850945
+I 5 q 9E-05 E -138.9400853987
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=83
+Sweep=3, HS=2, Bond=(8,9)
+I 0 q 9E-04 E -138.9400853981
+I 4 q 9E-05 E -138.9400856312
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=81
+Sweep=3, HS=2, Bond=(7,8)
+I 0 q 7E-04 E -138.9400856306
+I 4 q 8E-05 E -138.9400857609
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=77
+Sweep=3, HS=2, Bond=(6,7)
+I 0 q 5E-04 E -138.9400857602
+I 2 q 1E-04 E -138.9400858023
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=72
+Sweep=3, HS=2, Bond=(5,6)
+I 0 q 3E-04 E -138.9400858016
+I 2 q 7E-05 E -138.9400858217
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=64
+Sweep=3, HS=2, Bond=(4,5)
+I 0 q 2E-04 E -138.9400858210
+I 1 q 7E-05 E -138.9400858253
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=53
+Sweep=3, HS=2, Bond=(3,4)
+I 0 q 6E-05 E -138.9400858245
+I 1 q 4E-05 E -138.9400858250
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-16, States kept: m=27
+Sweep=3, HS=2, Bond=(2,3)
+I 0 q 2E-05 E -138.9400858250
+I 1 q 2E-05 E -138.9400858253
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=2.4E-15, States kept: m=9
+Sweep=3, HS=2, Bond=(1,2)
+I 0 q 8E-06 E -138.9400858253
+I 1 q 7E-06 E -138.9400858253
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=3.2E-17, States kept: m=3
+    Largest m during sweep 3 was 86
+    Largest truncation error: 9.97024e-11
+    Energy after sweep 3 is -138.940085825305
+    Sweep 3 CPU time = 5.696s (Wall time = 6.332s)
+Sweep=4, HS=1, Bond=(1,2)
+I 0 q 7E-06 E -138.9400858253
+I 1 q 3E-06 E -138.9400858253
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=4, HS=1, Bond=(2,3)
+I 0 q 2E-05 E -138.9400858253
+I 1 q 1E-05 E -138.9400858254
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=4, HS=1, Bond=(3,4)
+I 0 q 4E-05 E -138.9400858254
+I 1 q 2E-05 E -138.9400858255
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=27
+Sweep=4, HS=1, Bond=(4,5)
+I 0 q 9E-05 E -138.9400858255
+I 1 q 3E-05 E -138.9400858265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-11, States kept: m=53
+Sweep=4, HS=1, Bond=(5,6)
+I 0 q 9E-05 E -138.9400858257
+I 1 q 3E-05 E -138.9400858266
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.8E-11, States kept: m=64
+Sweep=4, HS=1, Bond=(6,7)
+I 0 q 9E-05 E -138.9400858259
+I 1 q 3E-05 E -138.9400858270
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=72
+Sweep=4, HS=1, Bond=(7,8)
+I 0 q 9E-05 E -138.9400858262
+I 1 q 3E-05 E -138.9400858271
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=76
+Sweep=4, HS=1, Bond=(8,9)
+I 0 q 1E-04 E -138.9400858263
+I 1 q 4E-05 E -138.9400858274
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=82
+Sweep=4, HS=1, Bond=(9,10)
+I 0 q 1E-04 E -138.9400858267
+I 1 q 4E-05 E -138.9400858280
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=85
+Sweep=4, HS=1, Bond=(10,11)
+I 0 q 1E-04 E -138.9400858272
+I 1 q 4E-05 E -138.9400858287
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(11,12)
+I 0 q 1E-04 E -138.9400858279
+I 1 q 5E-05 E -138.9400858297
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=4, HS=1, Bond=(12,13)
+I 0 q 1E-04 E -138.9400858290
+I 1 q 7E-05 E -138.9400858313
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=91
+Sweep=4, HS=1, Bond=(13,14)
+I 0 q 1E-04 E -138.9400858306
+I 1 q 8E-05 E -138.9400858337
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=92
+Sweep=4, HS=1, Bond=(14,15)
+I 0 q 1E-04 E -138.9400858331
+I 1 q 9E-05 E -138.9400858367
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=92
+Sweep=4, HS=1, Bond=(15,16)
+I 0 q 2E-04 E -138.9400858361
+I 2 q 9E-05 E -138.9400858435
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=99
+Sweep=4, HS=1, Bond=(16,17)
+I 0 q 2E-04 E -138.9400858432
+I 2 q 8E-05 E -138.9400858505
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=97
+Sweep=4, HS=1, Bond=(17,18)
+I 0 q 2E-04 E -138.9400858501
+I 2 q 9E-05 E -138.9400858583
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=97
+Sweep=4, HS=1, Bond=(18,19)
+I 0 q 2E-04 E -138.9400858579
+I 2 q 9E-05 E -138.9400858657
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=97
+Sweep=4, HS=1, Bond=(19,20)
+I 0 q 2E-04 E -138.9400858653
+I 2 q 9E-05 E -138.9400858730
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=96
+Sweep=4, HS=1, Bond=(20,21)
+I 0 q 2E-04 E -138.9400858727
+I 2 q 8E-05 E -138.9400858792
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=96
+Sweep=4, HS=1, Bond=(21,22)
+I 0 q 2E-04 E -138.9400858789
+I 1 q 9E-05 E -138.9400858831
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=91
+Sweep=4, HS=1, Bond=(22,23)
+I 0 q 1E-04 E -138.9400858825
+I 1 q 9E-05 E -138.9400858862
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=90
+Sweep=4, HS=1, Bond=(23,24)
+I 0 q 2E-04 E -138.9400858855
+I 1 q 9E-05 E -138.9400858892
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=4, HS=1, Bond=(24,25)
+I 0 q 1E-04 E -138.9400858885
+I 1 q 9E-05 E -138.9400858916
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=89
+Sweep=4, HS=1, Bond=(25,26)
+I 0 q 1E-04 E -138.9400858909
+I 1 q 8E-05 E -138.9400858939
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=88
+Sweep=4, HS=1, Bond=(26,27)
+I 0 q 1E-04 E -138.9400858932
+I 1 q 7E-05 E -138.9400858957
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=88
+Sweep=4, HS=1, Bond=(27,28)
+I 0 q 1E-04 E -138.9400858950
+I 1 q 7E-05 E -138.9400858976
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(28,29)
+I 0 q 1E-04 E -138.9400858968
+I 1 q 6E-05 E -138.9400858990
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(29,30)
+I 0 q 1E-04 E -138.9400858983
+I 1 q 6E-05 E -138.9400859006
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(30,31)
+I 0 q 1E-04 E -138.9400858999
+I 1 q 6E-05 E -138.9400859019
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(31,32)
+I 0 q 1E-04 E -138.9400859013
+I 1 q 6E-05 E -138.9400859034
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.0E-10, States kept: m=86
+Sweep=4, HS=1, Bond=(32,33)
+I 0 q 1E-04 E -138.9400859027
+I 1 q 6E-05 E -138.9400859046
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(33,34)
+I 0 q 1E-04 E -138.9400859040
+I 1 q 6E-05 E -138.9400859061
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(34,35)
+I 0 q 1E-04 E -138.9400859054
+I 1 q 6E-05 E -138.9400859073
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(35,36)
+I 0 q 1E-04 E -138.9400859066
+I 1 q 6E-05 E -138.9400859088
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(36,37)
+I 0 q 1E-04 E -138.9400859080
+I 1 q 6E-05 E -138.9400859099
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(37,38)
+I 0 q 1E-04 E -138.9400859093
+I 1 q 6E-05 E -138.9400859114
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(38,39)
+I 0 q 1E-04 E -138.9400859107
+I 1 q 6E-05 E -138.9400859126
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(39,40)
+I 0 q 1E-04 E -138.9400859119
+I 1 q 6E-05 E -138.9400859140
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(40,41)
+I 0 q 1E-04 E -138.9400859133
+I 1 q 6E-05 E -138.9400859152
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(41,42)
+I 0 q 1E-04 E -138.9400859145
+I 1 q 6E-05 E -138.9400859166
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(42,43)
+I 0 q 1E-04 E -138.9400859159
+I 1 q 6E-05 E -138.9400859178
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(43,44)
+I 0 q 1E-04 E -138.9400859171
+I 1 q 6E-05 E -138.9400859193
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(44,45)
+I 0 q 1E-04 E -138.9400859185
+I 1 q 6E-05 E -138.9400859204
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.0E-10, States kept: m=86
+Sweep=4, HS=1, Bond=(45,46)
+I 0 q 1E-04 E -138.9400859197
+I 1 q 6E-05 E -138.9400859218
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(46,47)
+I 0 q 1E-04 E -138.9400859211
+I 1 q 6E-05 E -138.9400859230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(47,48)
+I 0 q 1E-04 E -138.9400859223
+I 1 q 6E-05 E -138.9400859244
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(48,49)
+I 0 q 1E-04 E -138.9400859237
+I 1 q 6E-05 E -138.9400859256
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(49,50)
+I 0 q 1E-04 E -138.9400859249
+I 1 q 6E-05 E -138.9400859271
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(50,51)
+I 0 q 1E-04 E -138.9400859263
+I 1 q 6E-05 E -138.9400859282
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(51,52)
+I 0 q 1E-04 E -138.9400859276
+I 1 q 6E-05 E -138.9400859297
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(52,53)
+I 0 q 1E-04 E -138.9400859289
+I 1 q 6E-05 E -138.9400859308
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.9E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(53,54)
+I 0 q 1E-04 E -138.9400859302
+I 1 q 6E-05 E -138.9400859323
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(54,55)
+I 0 q 1E-04 E -138.9400859316
+I 1 q 6E-05 E -138.9400859334
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.0E-10, States kept: m=86
+Sweep=4, HS=1, Bond=(55,56)
+I 0 q 1E-04 E -138.9400859328
+I 1 q 6E-05 E -138.9400859349
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(56,57)
+I 0 q 1E-04 E -138.9400859341
+I 1 q 6E-05 E -138.9400859360
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(57,58)
+I 0 q 1E-04 E -138.9400859353
+I 1 q 6E-05 E -138.9400859374
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(58,59)
+I 0 q 1E-04 E -138.9400859367
+I 1 q 6E-05 E -138.9400859386
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(59,60)
+I 0 q 1E-04 E -138.9400859379
+I 1 q 6E-05 E -138.9400859400
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(60,61)
+I 0 q 1E-04 E -138.9400859392
+I 1 q 6E-05 E -138.9400859411
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(61,62)
+I 0 q 1E-04 E -138.9400859404
+I 1 q 6E-05 E -138.9400859425
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(62,63)
+I 0 q 1E-04 E -138.9400859418
+I 1 q 6E-05 E -138.9400859437
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(63,64)
+I 0 q 1E-04 E -138.9400859430
+I 1 q 6E-05 E -138.9400859451
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(64,65)
+I 0 q 1E-04 E -138.9400859444
+I 1 q 6E-05 E -138.9400859463
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(65,66)
+I 0 q 1E-04 E -138.9400859455
+I 1 q 6E-05 E -138.9400859477
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(66,67)
+I 0 q 1E-04 E -138.9400859469
+I 1 q 6E-05 E -138.9400859488
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(67,68)
+I 0 q 1E-04 E -138.9400859481
+I 1 q 6E-05 E -138.9400859502
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(68,69)
+I 0 q 1E-04 E -138.9400859495
+I 1 q 6E-05 E -138.9400859514
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.0E-10, States kept: m=86
+Sweep=4, HS=1, Bond=(69,70)
+I 0 q 1E-04 E -138.9400859507
+I 1 q 6E-05 E -138.9400859528
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(70,71)
+I 0 q 1E-04 E -138.9400859521
+I 1 q 6E-05 E -138.9400859540
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(71,72)
+I 0 q 1E-04 E -138.9400859533
+I 1 q 6E-05 E -138.9400859555
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(72,73)
+I 0 q 1E-04 E -138.9400859548
+I 1 q 6E-05 E -138.9400859567
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(73,74)
+I 0 q 1E-04 E -138.9400859561
+I 1 q 6E-05 E -138.9400859581
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=87
+Sweep=4, HS=1, Bond=(74,75)
+I 0 q 1E-04 E -138.9400859574
+I 1 q 6E-05 E -138.9400859594
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=88
+Sweep=4, HS=1, Bond=(75,76)
+I 0 q 1E-04 E -138.9400859588
+I 1 q 6E-05 E -138.9400859608
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=88
+Sweep=4, HS=1, Bond=(76,77)
+I 0 q 1E-04 E -138.9400859601
+I 1 q 6E-05 E -138.9400859623
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=88
+Sweep=4, HS=1, Bond=(77,78)
+I 0 q 1E-04 E -138.9400859616
+I 1 q 7E-05 E -138.9400859640
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=89
+Sweep=4, HS=1, Bond=(78,79)
+I 0 q 1E-04 E -138.9400859633
+I 1 q 8E-05 E -138.9400859661
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=4, HS=1, Bond=(79,80)
+I 0 q 1E-04 E -138.9400859654
+I 1 q 9E-05 E -138.9400859685
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=90
+Sweep=4, HS=1, Bond=(80,81)
+I 0 q 1E-04 E -138.9400859679
+I 1 q 9E-05 E -138.9400859711
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.9E-11, States kept: m=91
+Sweep=4, HS=1, Bond=(81,82)
+I 0 q 2E-04 E -138.9400859706
+I 1 q 1E-04 E -138.9400859745
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=91
+Sweep=4, HS=1, Bond=(82,83)
+I 0 q 2E-04 E -138.9400859739
+I 2 q 9E-05 E -138.9400859801
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=98
+Sweep=4, HS=1, Bond=(83,84)
+I 0 q 2E-04 E -138.9400859798
+I 1 q 9E-05 E -138.9400859842
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=93
+Sweep=4, HS=1, Bond=(84,85)
+I 0 q 2E-04 E -138.9400859836
+I 1 q 9E-05 E -138.9400859876
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=93
+Sweep=4, HS=1, Bond=(85,86)
+I 0 q 2E-04 E -138.9400859870
+I 1 q 1E-04 E -138.9400859911
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=92
+Sweep=4, HS=1, Bond=(86,87)
+I 0 q 2E-04 E -138.9400859905
+I 1 q 1E-04 E -138.9400859943
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=92
+Sweep=4, HS=1, Bond=(87,88)
+I 0 q 2E-04 E -138.9400859938
+I 1 q 9E-05 E -138.9400859975
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=92
+Sweep=4, HS=1, Bond=(88,89)
+I 0 q 1E-04 E -138.9400859969
+I 1 q 9E-05 E -138.9400860003
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=91
+Sweep=4, HS=1, Bond=(89,90)
+I 0 q 1E-04 E -138.9400859997
+I 1 q 8E-05 E -138.9400860026
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=90
+Sweep=4, HS=1, Bond=(90,91)
+I 0 q 1E-04 E -138.9400860020
+I 1 q 7E-05 E -138.9400860046
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=89
+Sweep=4, HS=1, Bond=(91,92)
+I 0 q 1E-04 E -138.9400860040
+I 1 q 6E-05 E -138.9400860061
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=4, HS=1, Bond=(92,93)
+I 0 q 1E-04 E -138.9400860053
+I 1 q 5E-05 E -138.9400860070
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=83
+Sweep=4, HS=1, Bond=(93,94)
+I 0 q 1E-04 E -138.9400860063
+I 1 q 4E-05 E -138.9400860075
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=77
+Sweep=4, HS=1, Bond=(94,95)
+I 0 q 1E-04 E -138.9400860068
+I 1 q 4E-05 E -138.9400860079
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=72
+Sweep=4, HS=1, Bond=(95,96)
+I 0 q 9E-05 E -138.9400860072
+I 1 q 3E-05 E -138.9400860080
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.3E-11, States kept: m=64
+Sweep=4, HS=1, Bond=(96,97)
+I 0 q 9E-05 E -138.9400860073
+I 1 q 2E-05 E -138.9400860082
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.8E-11, States kept: m=53
+Sweep=4, HS=1, Bond=(97,98)
+I 0 q 2E-05 E -138.9400860073
+I 1 q 1E-05 E -138.9400860074
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-16, States kept: m=27
+Sweep=4, HS=1, Bond=(98,99)
+I 0 q 7E-06 E -138.9400860074
+I 1 q 7E-06 E -138.9400860074
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=2.9E-15, States kept: m=9
+Sweep=4, HS=1, Bond=(99,100)
+I 0 q 2E-06 E -138.9400860074
+I 1 q 1E-06 E -138.9400860074
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.9E-16, States kept: m=3
+Sweep=4, HS=2, Bond=(99,100)
+I 0 q 1E-06 E -138.9400860074
+I 1 q 7E-07 E -138.9400860074
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=4, HS=2, Bond=(98,99)
+I 0 q 8E-06 E -138.9400860074
+I 1 q 4E-06 E -138.9400860074
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=4, HS=2, Bond=(97,98)
+I 0 q 1E-05 E -138.9400860074
+I 1 q 9E-06 E -138.9400860074
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=0.0E+00, States kept: m=27
+Sweep=4, HS=2, Bond=(96,97)
+I 0 q 9E-05 E -138.9400860074
+I 1 q 2E-05 E -138.9400860083
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.1E-11, States kept: m=53
+Sweep=4, HS=2, Bond=(95,96)
+I 0 q 8E-05 E -138.9400860075
+I 1 q 2E-05 E -138.9400860083
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=7.9E-11, States kept: m=64
+Sweep=4, HS=2, Bond=(94,95)
+I 0 q 9E-05 E -138.9400860076
+I 1 q 3E-05 E -138.9400860084
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=71
+Sweep=4, HS=2, Bond=(93,94)
+I 0 q 9E-05 E -138.9400860075
+I 1 q 3E-05 E -138.9400860084
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=76
+Sweep=4, HS=2, Bond=(92,93)
+I 0 q 8E-05 E -138.9400860075
+I 1 q 3E-05 E -138.9400860084
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=82
+Sweep=4, HS=2, Bond=(91,92)
+I 0 q 9E-05 E -138.9400860076
+I 1 q 3E-05 E -138.9400860085
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=84
+Sweep=4, HS=2, Bond=(90,91)
+I 0 q 8E-05 E -138.9400860077
+I 1 q 4E-05 E -138.9400860086
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(89,90)
+I 0 q 9E-05 E -138.9400860078
+I 1 q 4E-05 E -138.9400860088
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=89
+Sweep=4, HS=2, Bond=(88,89)
+I 0 q 9E-05 E -138.9400860080
+I 1 q 4E-05 E -138.9400860090
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=90
+Sweep=4, HS=2, Bond=(87,88)
+I 0 q 9E-05 E -138.9400860083
+I 1 q 4E-05 E -138.9400860094
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=90
+Sweep=4, HS=2, Bond=(86,87)
+I 0 q 1E-04 E -138.9400860085
+I 1 q 5E-05 E -138.9400860097
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=90
+Sweep=4, HS=2, Bond=(85,86)
+I 0 q 1E-04 E -138.9400860088
+I 1 q 5E-05 E -138.9400860100
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=90
+Sweep=4, HS=2, Bond=(84,85)
+I 0 q 9E-05 E -138.9400860091
+I 1 q 5E-05 E -138.9400860102
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=91
+Sweep=4, HS=2, Bond=(83,84)
+I 0 q 9E-05 E -138.9400860094
+I 1 q 5E-05 E -138.9400860105
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=90
+Sweep=4, HS=2, Bond=(82,83)
+I 0 q 8E-05 E -138.9400860096
+I 1 q 4E-05 E -138.9400860103
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=91
+Sweep=4, HS=2, Bond=(81,82)
+I 0 q 1E-04 E -138.9400860095
+I 1 q 5E-05 E -138.9400860108
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=4, HS=2, Bond=(80,81)
+I 0 q 9E-05 E -138.9400860099
+I 1 q 5E-05 E -138.9400860111
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=89
+Sweep=4, HS=2, Bond=(79,80)
+I 0 q 1E-04 E -138.9400860103
+I 1 q 5E-05 E -138.9400860116
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=88
+Sweep=4, HS=2, Bond=(78,79)
+I 0 q 1E-04 E -138.9400860108
+I 1 q 5E-05 E -138.9400860121
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(77,78)
+I 0 q 9E-05 E -138.9400860111
+I 1 q 5E-05 E -138.9400860124
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=88
+Sweep=4, HS=2, Bond=(76,77)
+I 0 q 9E-05 E -138.9400860116
+I 1 q 5E-05 E -138.9400860128
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(75,76)
+I 0 q 9E-05 E -138.9400860119
+I 1 q 5E-05 E -138.9400860130
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(74,75)
+I 0 q 9E-05 E -138.9400860122
+I 1 q 4E-05 E -138.9400860132
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(73,74)
+I 0 q 9E-05 E -138.9400860124
+I 1 q 4E-05 E -138.9400860134
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(72,73)
+I 0 q 9E-05 E -138.9400860127
+I 1 q 4E-05 E -138.9400860137
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(71,72)
+I 0 q 9E-05 E -138.9400860128
+I 1 q 4E-05 E -138.9400860139
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(70,71)
+I 0 q 8E-05 E -138.9400860130
+I 1 q 4E-05 E -138.9400860140
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(69,70)
+I 0 q 9E-05 E -138.9400860132
+I 1 q 4E-05 E -138.9400860142
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(68,69)
+I 0 q 8E-05 E -138.9400860134
+I 1 q 4E-05 E -138.9400860143
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(67,68)
+I 0 q 9E-05 E -138.9400860135
+I 1 q 4E-05 E -138.9400860145
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(66,67)
+I 0 q 8E-05 E -138.9400860137
+I 1 q 4E-05 E -138.9400860147
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(65,66)
+I 0 q 8E-05 E -138.9400860139
+I 1 q 4E-05 E -138.9400860149
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(64,65)
+I 0 q 8E-05 E -138.9400860141
+I 1 q 4E-05 E -138.9400860150
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(63,64)
+I 0 q 8E-05 E -138.9400860142
+I 1 q 4E-05 E -138.9400860152
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(62,63)
+I 0 q 8E-05 E -138.9400860144
+I 1 q 4E-05 E -138.9400860154
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(61,62)
+I 0 q 8E-05 E -138.9400860146
+I 1 q 4E-05 E -138.9400860155
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(60,61)
+I 0 q 8E-05 E -138.9400860148
+I 1 q 4E-05 E -138.9400860157
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(59,60)
+I 0 q 8E-05 E -138.9400860149
+I 1 q 4E-05 E -138.9400860159
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(58,59)
+I 0 q 8E-05 E -138.9400860151
+I 1 q 4E-05 E -138.9400860160
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(57,58)
+I 0 q 8E-05 E -138.9400860153
+I 1 q 4E-05 E -138.9400860162
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(56,57)
+I 0 q 8E-05 E -138.9400860154
+I 1 q 4E-05 E -138.9400860164
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(55,56)
+I 0 q 8E-05 E -138.9400860156
+I 1 q 4E-05 E -138.9400860166
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(54,55)
+I 0 q 8E-05 E -138.9400860158
+I 1 q 4E-05 E -138.9400860167
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(53,54)
+I 0 q 8E-05 E -138.9400860160
+I 1 q 4E-05 E -138.9400860169
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(52,53)
+I 0 q 8E-05 E -138.9400860161
+I 1 q 3E-05 E -138.9400860170
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(51,52)
+I 0 q 8E-05 E -138.9400860162
+I 1 q 4E-05 E -138.9400860172
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(50,51)
+I 0 q 8E-05 E -138.9400860164
+I 1 q 3E-05 E -138.9400860173
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+
+    vN Entropy at center bond b=50 = 0.855496706062
+    Eigs at center bond b=50: 0.4848 0.4846 0.0074 0.0074 0.0074 0.0074 
+Sweep=4, HS=2, Bond=(49,50)
+I 0 q 9E-05 E -138.9400860165
+I 1 q 4E-05 E -138.9400860174
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(48,49)
+I 0 q 8E-05 E -138.9400860166
+I 1 q 3E-05 E -138.9400860175
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(47,48)
+I 0 q 9E-05 E -138.9400860168
+I 1 q 4E-05 E -138.9400860177
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(46,47)
+I 0 q 8E-05 E -138.9400860169
+I 1 q 4E-05 E -138.9400860178
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(45,46)
+I 0 q 9E-05 E -138.9400860170
+I 1 q 4E-05 E -138.9400860180
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(44,45)
+I 0 q 8E-05 E -138.9400860172
+I 1 q 4E-05 E -138.9400860181
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(43,44)
+I 0 q 9E-05 E -138.9400860174
+I 1 q 4E-05 E -138.9400860183
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(42,43)
+I 0 q 8E-05 E -138.9400860175
+I 1 q 3E-05 E -138.9400860184
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(41,42)
+I 0 q 9E-05 E -138.9400860176
+I 1 q 4E-05 E -138.9400860186
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(40,41)
+I 0 q 8E-05 E -138.9400860178
+I 1 q 3E-05 E -138.9400860187
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(39,40)
+I 0 q 9E-05 E -138.9400860179
+I 1 q 4E-05 E -138.9400860189
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(38,39)
+I 0 q 8E-05 E -138.9400860181
+I 1 q 3E-05 E -138.9400860190
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(37,38)
+I 0 q 9E-05 E -138.9400860182
+I 1 q 4E-05 E -138.9400860191
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(36,37)
+I 0 q 8E-05 E -138.9400860183
+I 1 q 3E-05 E -138.9400860192
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(35,36)
+I 0 q 9E-05 E -138.9400860185
+I 1 q 4E-05 E -138.9400860194
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(34,35)
+I 0 q 8E-05 E -138.9400860186
+I 1 q 4E-05 E -138.9400860195
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(33,34)
+I 0 q 9E-05 E -138.9400860187
+I 1 q 4E-05 E -138.9400860197
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(32,33)
+I 0 q 8E-05 E -138.9400860189
+I 1 q 4E-05 E -138.9400860198
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(31,32)
+I 0 q 9E-05 E -138.9400860190
+I 1 q 4E-05 E -138.9400860200
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(30,31)
+I 0 q 8E-05 E -138.9400860192
+I 1 q 4E-05 E -138.9400860201
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(29,30)
+I 0 q 8E-05 E -138.9400860193
+I 1 q 4E-05 E -138.9400860203
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(28,29)
+I 0 q 9E-05 E -138.9400860195
+I 1 q 4E-05 E -138.9400860205
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=1.0E-10, States kept: m=86
+Sweep=4, HS=2, Bond=(27,28)
+I 0 q 9E-05 E -138.9400860197
+I 1 q 4E-05 E -138.9400860207
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(26,27)
+I 0 q 9E-05 E -138.9400860199
+I 1 q 5E-05 E -138.9400860210
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.9E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(25,26)
+I 0 q 1E-04 E -138.9400860202
+I 1 q 5E-05 E -138.9400860214
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(24,25)
+I 0 q 1E-04 E -138.9400860205
+I 1 q 5E-05 E -138.9400860218
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(23,24)
+I 0 q 1E-04 E -138.9400860210
+I 1 q 6E-05 E -138.9400860224
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.4E-11, States kept: m=87
+Sweep=4, HS=2, Bond=(22,23)
+I 0 q 1E-04 E -138.9400860216
+I 1 q 6E-05 E -138.9400860230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=88
+Sweep=4, HS=2, Bond=(21,22)
+I 0 q 1E-04 E -138.9400860222
+I 1 q 6E-05 E -138.9400860234
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=89
+Sweep=4, HS=2, Bond=(20,21)
+I 0 q 9E-05 E -138.9400860226
+I 1 q 5E-05 E -138.9400860235
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=90
+Sweep=4, HS=2, Bond=(19,20)
+I 0 q 8E-05 E -138.9400860227
+I 1 q 5E-05 E -138.9400860236
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=91
+Sweep=4, HS=2, Bond=(18,19)
+I 0 q 8E-05 E -138.9400860229
+I 1 q 5E-05 E -138.9400860237
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=91
+Sweep=4, HS=2, Bond=(17,18)
+I 0 q 8E-05 E -138.9400860229
+I 1 q 4E-05 E -138.9400860237
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=92
+Sweep=4, HS=2, Bond=(16,17)
+I 0 q 8E-05 E -138.9400860230
+I 1 q 4E-05 E -138.9400860238
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.1E-11, States kept: m=92
+Sweep=4, HS=2, Bond=(15,16)
+I 0 q 8E-05 E -138.9400860230
+I 1 q 4E-05 E -138.9400860236
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.8E-11, States kept: m=91
+Sweep=4, HS=2, Bond=(14,15)
+I 0 q 9E-05 E -138.9400860228
+I 1 q 4E-05 E -138.9400860238
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.3E-11, States kept: m=91
+Sweep=4, HS=2, Bond=(13,14)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 4E-05 E -138.9400860240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=90
+Sweep=4, HS=2, Bond=(12,13)
+I 0 q 9E-05 E -138.9400860231
+I 1 q 4E-05 E -138.9400860241
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=4, HS=2, Bond=(11,12)
+I 0 q 9E-05 E -138.9400860232
+I 1 q 3E-05 E -138.9400860241
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=88
+Sweep=4, HS=2, Bond=(10,11)
+I 0 q 9E-05 E -138.9400860232
+I 1 q 3E-05 E -138.9400860242
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=4, HS=2, Bond=(9,10)
+I 0 q 9E-05 E -138.9400860232
+I 1 q 3E-05 E -138.9400860241
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=84
+Sweep=4, HS=2, Bond=(8,9)
+I 0 q 9E-05 E -138.9400860232
+I 1 q 2E-05 E -138.9400860240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=4, HS=2, Bond=(7,8)
+I 0 q 9E-05 E -138.9400860232
+I 1 q 2E-05 E -138.9400860241
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.5E-11, States kept: m=76
+Sweep=4, HS=2, Bond=(6,7)
+I 0 q 8E-05 E -138.9400860232
+I 1 q 2E-05 E -138.9400860240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.7E-11, States kept: m=71
+Sweep=4, HS=2, Bond=(5,6)
+I 0 q 8E-05 E -138.9400860231
+I 1 q 2E-05 E -138.9400860238
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=9.9E-11, States kept: m=63
+Sweep=4, HS=2, Bond=(4,5)
+I 0 q 9E-05 E -138.9400860229
+I 1 q 2E-05 E -138.9400860238
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.0E-11, States kept: m=53
+Sweep=4, HS=2, Bond=(3,4)
+I 0 q 9E-06 E -138.9400860230
+I 1 q 3E-06 E -138.9400860230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.7E-16, States kept: m=27
+Sweep=4, HS=2, Bond=(2,3)
+I 0 q 2E-06 E -138.9400860230
+I 1 q 2E-06 E -138.9400860230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=2.9E-15, States kept: m=9
+Sweep=4, HS=2, Bond=(1,2)
+I 0 q 7E-07 E -138.9400860230
+I 1 q 3E-07 E -138.9400860230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=100
+    Trunc. err=8.6E-17, States kept: m=3
+    Largest m during sweep 4 was 99
+    Largest truncation error: 9.99247e-11
+    Energy after sweep 4 is -138.940086022989
+    Sweep 4 CPU time = 8.080s (Wall time = 8.613s)
+Sweep=5, HS=1, Bond=(1,2)
+I 0 q 3E-07 E -138.9400860230
+I 1 q 2E-07 E -138.9400860230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=5, HS=1, Bond=(2,3)
+I 0 q 2E-06 E -138.9400860230
+I 1 q 8E-07 E -138.9400860230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=5, HS=1, Bond=(3,4)
+I 0 q 3E-06 E -138.9400860230
+I 1 q 3E-06 E -138.9400860230
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=0.0E+00, States kept: m=27
+Sweep=5, HS=1, Bond=(4,5)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 2E-05 E -138.9400860238
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.4E-11, States kept: m=53
+Sweep=5, HS=1, Bond=(5,6)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 2E-05 E -138.9400860239
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=63
+Sweep=5, HS=1, Bond=(6,7)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 2E-05 E -138.9400860239
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=71
+Sweep=5, HS=1, Bond=(7,8)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 2E-05 E -138.9400860238
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=76
+Sweep=5, HS=1, Bond=(8,9)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 2E-05 E -138.9400860238
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=5, HS=1, Bond=(9,10)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 2E-05 E -138.9400860239
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=84
+Sweep=5, HS=1, Bond=(10,11)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 3E-05 E -138.9400860240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(11,12)
+I 0 q 9E-05 E -138.9400860230
+I 1 q 3E-05 E -138.9400860239
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=88
+Sweep=5, HS=1, Bond=(12,13)
+I 0 q 9E-05 E -138.9400860231
+I 1 q 3E-05 E -138.9400860240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=5, HS=1, Bond=(13,14)
+I 0 q 9E-05 E -138.9400860231
+I 1 q 3E-05 E -138.9400860240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(14,15)
+I 0 q 8E-05 E -138.9400860231
+I 1 q 3E-05 E -138.9400860240
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.0E-10, States kept: m=91
+Sweep=5, HS=1, Bond=(15,16)
+I 0 q 9E-05 E -138.9400860232
+I 1 q 3E-05 E -138.9400860241
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=91
+Sweep=5, HS=1, Bond=(16,17)
+I 0 q 8E-05 E -138.9400860233
+I 1 q 3E-05 E -138.9400860241
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=92
+Sweep=5, HS=1, Bond=(17,18)
+I 0 q 8E-05 E -138.9400860233
+I 1 q 3E-05 E -138.9400860242
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.8E-11, States kept: m=92
+Sweep=5, HS=1, Bond=(18,19)
+I 0 q 8E-05 E -138.9400860235
+I 1 q 3E-05 E -138.9400860244
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=91
+Sweep=5, HS=1, Bond=(19,20)
+I 0 q 8E-05 E -138.9400860235
+I 1 q 4E-05 E -138.9400860244
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=91
+Sweep=5, HS=1, Bond=(20,21)
+I 0 q 8E-05 E -138.9400860236
+I 1 q 4E-05 E -138.9400860246
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(21,22)
+I 0 q 9E-05 E -138.9400860238
+I 1 q 4E-05 E -138.9400860248
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(22,23)
+I 0 q 9E-05 E -138.9400860240
+I 1 q 4E-05 E -138.9400860251
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=5, HS=1, Bond=(23,24)
+I 0 q 9E-05 E -138.9400860243
+I 1 q 4E-05 E -138.9400860253
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=88
+Sweep=5, HS=1, Bond=(24,25)
+I 0 q 9E-05 E -138.9400860245
+I 1 q 4E-05 E -138.9400860255
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=88
+Sweep=5, HS=1, Bond=(25,26)
+I 0 q 9E-05 E -138.9400860247
+I 1 q 4E-05 E -138.9400860258
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(26,27)
+I 0 q 8E-05 E -138.9400860248
+I 1 q 4E-05 E -138.9400860258
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(27,28)
+I 0 q 8E-05 E -138.9400860250
+I 1 q 3E-05 E -138.9400860259
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(28,29)
+I 0 q 8E-05 E -138.9400860251
+I 1 q 3E-05 E -138.9400860260
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(29,30)
+I 0 q 8E-05 E -138.9400860253
+I 1 q 3E-05 E -138.9400860262
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(30,31)
+I 0 q 8E-05 E -138.9400860253
+I 1 q 3E-05 E -138.9400860262
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(31,32)
+I 0 q 8E-05 E -138.9400860254
+I 1 q 3E-05 E -138.9400860263
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(32,33)
+I 0 q 8E-05 E -138.9400860254
+I 1 q 3E-05 E -138.9400860263
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(33,34)
+I 0 q 8E-05 E -138.9400860255
+I 1 q 3E-05 E -138.9400860263
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(34,35)
+I 0 q 8E-05 E -138.9400860255
+I 1 q 3E-05 E -138.9400860263
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(35,36)
+I 0 q 8E-05 E -138.9400860255
+I 1 q 3E-05 E -138.9400860264
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(36,37)
+I 0 q 8E-05 E -138.9400860255
+I 1 q 3E-05 E -138.9400860264
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(37,38)
+I 0 q 8E-05 E -138.9400860256
+I 1 q 3E-05 E -138.9400860264
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(38,39)
+I 0 q 8E-05 E -138.9400860255
+I 1 q 3E-05 E -138.9400860264
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(39,40)
+I 0 q 8E-05 E -138.9400860256
+I 1 q 3E-05 E -138.9400860264
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(40,41)
+I 0 q 8E-05 E -138.9400860256
+I 1 q 3E-05 E -138.9400860264
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(41,42)
+I 0 q 8E-05 E -138.9400860256
+I 1 q 3E-05 E -138.9400860265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(42,43)
+I 0 q 8E-05 E -138.9400860256
+I 1 q 3E-05 E -138.9400860265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(43,44)
+I 0 q 8E-05 E -138.9400860257
+I 1 q 3E-05 E -138.9400860265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(44,45)
+I 0 q 8E-05 E -138.9400860257
+I 1 q 3E-05 E -138.9400860265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(45,46)
+I 0 q 8E-05 E -138.9400860257
+I 1 q 3E-05 E -138.9400860265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(46,47)
+I 0 q 8E-05 E -138.9400860257
+I 1 q 3E-05 E -138.9400860265
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(47,48)
+I 0 q 8E-05 E -138.9400860257
+I 1 q 3E-05 E -138.9400860266
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(48,49)
+I 0 q 8E-05 E -138.9400860257
+I 1 q 3E-05 E -138.9400860266
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(49,50)
+I 0 q 8E-05 E -138.9400860258
+I 1 q 3E-05 E -138.9400860266
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(50,51)
+I 0 q 8E-05 E -138.9400860258
+I 1 q 3E-05 E -138.9400860266
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(51,52)
+I 0 q 8E-05 E -138.9400860258
+I 1 q 3E-05 E -138.9400860266
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(52,53)
+I 0 q 8E-05 E -138.9400860258
+I 1 q 3E-05 E -138.9400860266
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(53,54)
+I 0 q 8E-05 E -138.9400860258
+I 1 q 3E-05 E -138.9400860267
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(54,55)
+I 0 q 8E-05 E -138.9400860258
+I 1 q 3E-05 E -138.9400860267
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(55,56)
+I 0 q 8E-05 E -138.9400860259
+I 1 q 3E-05 E -138.9400860267
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(56,57)
+I 0 q 8E-05 E -138.9400860259
+I 1 q 3E-05 E -138.9400860267
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(57,58)
+I 0 q 8E-05 E -138.9400860259
+I 1 q 3E-05 E -138.9400860268
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(58,59)
+I 0 q 8E-05 E -138.9400860259
+I 1 q 3E-05 E -138.9400860268
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(59,60)
+I 0 q 8E-05 E -138.9400860260
+I 1 q 3E-05 E -138.9400860268
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(60,61)
+I 0 q 8E-05 E -138.9400860260
+I 1 q 3E-05 E -138.9400860268
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(61,62)
+I 0 q 8E-05 E -138.9400860260
+I 1 q 3E-05 E -138.9400860268
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(62,63)
+I 0 q 8E-05 E -138.9400860260
+I 1 q 3E-05 E -138.9400860268
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(63,64)
+I 0 q 8E-05 E -138.9400860260
+I 1 q 3E-05 E -138.9400860269
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(64,65)
+I 0 q 8E-05 E -138.9400860260
+I 1 q 3E-05 E -138.9400860269
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(65,66)
+I 0 q 8E-05 E -138.9400860261
+I 1 q 3E-05 E -138.9400860269
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(66,67)
+I 0 q 8E-05 E -138.9400860261
+I 1 q 3E-05 E -138.9400860269
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(67,68)
+I 0 q 8E-05 E -138.9400860261
+I 1 q 3E-05 E -138.9400860270
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(68,69)
+I 0 q 8E-05 E -138.9400860261
+I 1 q 3E-05 E -138.9400860270
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(69,70)
+I 0 q 8E-05 E -138.9400860262
+I 1 q 3E-05 E -138.9400860270
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(70,71)
+I 0 q 8E-05 E -138.9400860262
+I 1 q 3E-05 E -138.9400860270
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(71,72)
+I 0 q 8E-05 E -138.9400860262
+I 1 q 3E-05 E -138.9400860271
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=1, Bond=(72,73)
+I 0 q 8E-05 E -138.9400860262
+I 1 q 3E-05 E -138.9400860271
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.0E-10, States kept: m=86
+Sweep=5, HS=1, Bond=(73,74)
+I 0 q 8E-05 E -138.9400860263
+I 1 q 3E-05 E -138.9400860271
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(74,75)
+I 0 q 8E-05 E -138.9400860264
+I 1 q 3E-05 E -138.9400860273
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(75,76)
+I 0 q 9E-05 E -138.9400860264
+I 1 q 4E-05 E -138.9400860274
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(76,77)
+I 0 q 9E-05 E -138.9400860266
+I 1 q 4E-05 E -138.9400860276
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(77,78)
+I 0 q 9E-05 E -138.9400860267
+I 1 q 4E-05 E -138.9400860277
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=88
+Sweep=5, HS=1, Bond=(78,79)
+I 0 q 1E-04 E -138.9400860269
+I 1 q 4E-05 E -138.9400860280
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=88
+Sweep=5, HS=1, Bond=(79,80)
+I 0 q 9E-05 E -138.9400860272
+I 1 q 4E-05 E -138.9400860282
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.0E-10, States kept: m=89
+Sweep=5, HS=1, Bond=(80,81)
+I 0 q 9E-05 E -138.9400860274
+I 1 q 4E-05 E -138.9400860284
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=89
+Sweep=5, HS=1, Bond=(81,82)
+I 0 q 9E-05 E -138.9400860276
+I 1 q 4E-05 E -138.9400860286
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(82,83)
+I 0 q 8E-05 E -138.9400860277
+I 1 q 3E-05 E -138.9400860287
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=91
+Sweep=5, HS=1, Bond=(83,84)
+I 0 q 9E-05 E -138.9400860279
+I 1 q 4E-05 E -138.9400860289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.0E-10, States kept: m=90
+Sweep=5, HS=1, Bond=(84,85)
+I 0 q 9E-05 E -138.9400860280
+I 1 q 3E-05 E -138.9400860289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=91
+Sweep=5, HS=1, Bond=(85,86)
+I 0 q 9E-05 E -138.9400860281
+I 1 q 3E-05 E -138.9400860291
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(86,87)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 3E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(87,88)
+I 0 q 9E-05 E -138.9400860283
+I 1 q 3E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(88,89)
+I 0 q 8E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=90
+Sweep=5, HS=1, Bond=(89,90)
+I 0 q 9E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=88
+Sweep=5, HS=1, Bond=(90,91)
+I 0 q 9E-05 E -138.9400860284
+I 1 q 2E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=87
+Sweep=5, HS=1, Bond=(91,92)
+I 0 q 9E-05 E -138.9400860284
+I 1 q 2E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=84
+Sweep=5, HS=1, Bond=(92,93)
+I 0 q 9E-05 E -138.9400860284
+I 1 q 2E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=5, HS=1, Bond=(93,94)
+I 0 q 9E-05 E -138.9400860283
+I 1 q 2E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=76
+Sweep=5, HS=1, Bond=(94,95)
+I 0 q 9E-05 E -138.9400860283
+I 1 q 2E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=71
+Sweep=5, HS=1, Bond=(95,96)
+I 0 q 8E-05 E -138.9400860283
+I 1 q 2E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=63
+Sweep=5, HS=1, Bond=(96,97)
+I 0 q 9E-05 E -138.9400860281
+I 1 q 2E-05 E -138.9400860289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.4E-11, States kept: m=53
+Sweep=5, HS=1, Bond=(97,98)
+I 0 q 7E-06 E -138.9400860281
+I 1 q 2E-06 E -138.9400860281
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.2E-15, States kept: m=27
+Sweep=5, HS=1, Bond=(98,99)
+I 0 q 9E-07 E -138.9400860281
+I 1 q 9E-07 E -138.9400860281
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=2.1E-15, States kept: m=9
+Sweep=5, HS=1, Bond=(99,100)
+I 0 q 3E-07 E -138.9400860281
+I 1 q 2E-07 E -138.9400860281
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=3.1E-16, States kept: m=3
+Sweep=5, HS=2, Bond=(99,100)
+I 0 q 2E-07 E -138.9400860281
+I 1 q 1E-07 E -138.9400860281
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=0.0E+00, States kept: m=3
+Sweep=5, HS=2, Bond=(98,99)
+I 0 q 9E-07 E -138.9400860281
+I 1 q 5E-07 E -138.9400860281
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=0.0E+00, States kept: m=9
+Sweep=5, HS=2, Bond=(97,98)
+I 0 q 2E-06 E -138.9400860281
+I 1 q 1E-06 E -138.9400860281
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=0.0E+00, States kept: m=27
+Sweep=5, HS=2, Bond=(96,97)
+I 0 q 9E-05 E -138.9400860281
+I 1 q 2E-05 E -138.9400860289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.2E-11, States kept: m=53
+Sweep=5, HS=2, Bond=(95,96)
+I 0 q 9E-05 E -138.9400860281
+I 1 q 2E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=63
+Sweep=5, HS=2, Bond=(94,95)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 2E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=71
+Sweep=5, HS=2, Bond=(93,94)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 2E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=76
+Sweep=5, HS=2, Bond=(92,93)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 2E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=5, HS=2, Bond=(91,92)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 2E-05 E -138.9400860291
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=84
+Sweep=5, HS=2, Bond=(90,91)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 2E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(89,90)
+I 0 q 9E-05 E -138.9400860281
+I 1 q 2E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.6E-11, States kept: m=88
+Sweep=5, HS=2, Bond=(88,89)
+I 0 q 8E-05 E -138.9400860281
+I 1 q 3E-05 E -138.9400860289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=5, HS=2, Bond=(87,88)
+I 0 q 9E-05 E -138.9400860280
+I 1 q 3E-05 E -138.9400860289
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=90
+Sweep=5, HS=2, Bond=(86,87)
+I 0 q 9E-05 E -138.9400860280
+I 1 q 3E-05 E -138.9400860290
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=91
+Sweep=5, HS=2, Bond=(85,86)
+I 0 q 9E-05 E -138.9400860281
+I 1 q 3E-05 E -138.9400860291
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.0E-10, States kept: m=90
+Sweep=5, HS=2, Bond=(84,85)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 3E-05 E -138.9400860291
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=91
+Sweep=5, HS=2, Bond=(83,84)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 3E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.6E-11, States kept: m=90
+Sweep=5, HS=2, Bond=(82,83)
+I 0 q 8E-05 E -138.9400860282
+I 1 q 3E-05 E -138.9400860291
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=90
+Sweep=5, HS=2, Bond=(81,82)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 3E-05 E -138.9400860291
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=89
+Sweep=5, HS=2, Bond=(80,81)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 3E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=89
+Sweep=5, HS=2, Bond=(79,80)
+I 0 q 9E-05 E -138.9400860282
+I 1 q 3E-05 E -138.9400860292
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=89
+Sweep=5, HS=2, Bond=(78,79)
+I 0 q 9E-05 E -138.9400860283
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=88
+Sweep=5, HS=2, Bond=(77,78)
+I 0 q 8E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=88
+Sweep=5, HS=2, Bond=(76,77)
+I 0 q 9E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(75,76)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.6E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(74,75)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(73,74)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(72,73)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(71,72)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(70,71)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(69,70)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(68,69)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(67,68)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.2E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(66,67)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(65,66)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(64,65)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(63,64)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(62,63)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(61,62)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(60,61)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(59,60)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(58,59)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(57,58)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(56,57)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(55,56)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(54,55)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(53,54)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(52,53)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(51,52)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(50,51)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+
+    vN Entropy at center bond b=50 = 0.855497523844
+    Eigs at center bond b=50: 0.4848 0.4846 0.0074 0.0074 0.0074 0.0074 
+Sweep=5, HS=2, Bond=(49,50)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(48,49)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(47,48)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(46,47)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.6E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(45,46)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(44,45)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(43,44)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(42,43)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(41,42)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(40,41)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(39,40)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(38,39)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(37,38)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(36,37)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(35,36)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(34,35)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.0E-10, States kept: m=86
+Sweep=5, HS=2, Bond=(33,34)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(32,33)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(31,32)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(30,31)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(29,30)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(28,29)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(27,28)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(26,27)
+I 0 q 8E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(25,26)
+I 0 q 9E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(24,25)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=87
+Sweep=5, HS=2, Bond=(23,24)
+I 0 q 9E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=1.0E-10, States kept: m=87
+Sweep=5, HS=2, Bond=(22,23)
+I 0 q 8E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=88
+Sweep=5, HS=2, Bond=(21,22)
+I 0 q 8E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.9E-11, States kept: m=89
+Sweep=5, HS=2, Bond=(20,21)
+I 0 q 8E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.1E-11, States kept: m=90
+Sweep=5, HS=2, Bond=(19,20)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=90
+Sweep=5, HS=2, Bond=(18,19)
+I 0 q 8E-05 E -138.9400860284
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.9E-11, States kept: m=91
+Sweep=5, HS=2, Bond=(17,18)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860293
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=92
+Sweep=5, HS=2, Bond=(16,17)
+I 0 q 8E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=92
+Sweep=5, HS=2, Bond=(15,16)
+I 0 q 9E-05 E -138.9400860285
+I 1 q 3E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=91
+Sweep=5, HS=2, Bond=(14,15)
+I 0 q 8E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860294
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=91
+Sweep=5, HS=2, Bond=(13,14)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=90
+Sweep=5, HS=2, Bond=(12,13)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.0E-11, States kept: m=89
+Sweep=5, HS=2, Bond=(11,12)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=88
+Sweep=5, HS=2, Bond=(10,11)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 3E-05 E -138.9400860296
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=86
+Sweep=5, HS=2, Bond=(9,10)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 2E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.3E-11, States kept: m=84
+Sweep=5, HS=2, Bond=(8,9)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 2E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.5E-11, States kept: m=81
+Sweep=5, HS=2, Bond=(7,8)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 2E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.4E-11, States kept: m=76
+Sweep=5, HS=2, Bond=(6,7)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 2E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.7E-11, States kept: m=71
+Sweep=5, HS=2, Bond=(5,6)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 2E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=9.8E-11, States kept: m=63
+Sweep=5, HS=2, Bond=(4,5)
+I 0 q 9E-05 E -138.9400860286
+I 1 q 2E-05 E -138.9400860295
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=8.1E-11, States kept: m=53
+Sweep=5, HS=2, Bond=(3,4)
+I 0 q 9E-06 E -138.9400860287
+I 1 q 1E-06 E -138.9400860287
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=7.5E-16, States kept: m=27
+Sweep=5, HS=2, Bond=(2,3)
+I 0 q 3E-07 E -138.9400860287
+I 1 q 3E-07 E -138.9400860287
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=2.7E-15, States kept: m=9
+Sweep=5, HS=2, Bond=(1,2)
+I 0 q 1E-07 E -138.9400860287
+I 1 q 6E-08 E -138.9400860287
+    Truncated to Cutoff=1.0E-10, Min_m=1, Max_m=200
+    Trunc. err=2.2E-16, States kept: m=3
+    Largest m during sweep 5 was 92
+    Largest truncation error: 9.99683e-11
+    Energy after sweep 5 is -138.940086028671
+    Sweep 5 CPU time = 7.712s (Wall time = 8.207s)
+Ground State Energy = -138.94

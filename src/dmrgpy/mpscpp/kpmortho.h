@@ -1,6 +1,6 @@
 // compute the KPM moments for matrix m and vectors vi and vj
 // orthogonalize them and compute the overlap over the matrix
-int moments_kpm_ortho(auto m, auto wf0, auto A, auto B, int n) {
+static auto moments_kpm_ortho=[](auto m, auto wf0, auto A, auto B, int n) {
   ofstream myfile,myfile1;
   auto kpmwf = std::vector<MPS>(n+2) ; // storage for all the KPM vectors
 //  myfile.open("KPM_MOMENTS.OUT"); // open file

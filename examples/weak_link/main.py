@@ -1,12 +1,8 @@
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 from dmrgpy import spinchain
-
-
-
-
 ns = np.array(range(4,30,2))
 es = []
 n = 80
@@ -19,15 +15,11 @@ def fj(i,j): # function to define the exchange couplings
         return 1.0
     return 0.0
 sc.set_exchange(fj)
-
 # Pairs on sites on which to compute the correlator S_i S_j
 pairs = [(i,i+1) for i in range(n-1)] # correlators, first neighbors
 sc.gs_energy() # compute the ground state energy
 cs = sc.correlator(pairs) # compute the correlator between these sites
-
 # now plot the correlator
 import matplotlib.pyplot as plt
-
 plt.plot(range(len(cs)),cs,marker="o") # correlator using DMRG
-
 plt.show()

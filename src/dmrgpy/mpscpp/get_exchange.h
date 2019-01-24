@@ -1,5 +1,5 @@
 
-auto get_exchange(auto ampo) {
+static auto  get_exchange=[](auto ampo) {
     ifstream jfile; // file to read
     jfile.open("couplings.in"); // file with the coupling
     int nj;
@@ -60,3 +60,4 @@ auto get_exchange(auto ampo) {
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added
 }
+;

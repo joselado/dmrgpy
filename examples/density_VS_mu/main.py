@@ -1,11 +1,9 @@
-import sys
-import os
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import fermionchain
-
 n = 30 # number of spinful fermionic sites
-
 def get_fc(mu):
   fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
   
@@ -45,12 +43,6 @@ def get_fc(mu):
   fc.nsweeps = 14
   fc.kpmmaxm = 20 # maximum bond dimension in KPM
   return fc
-
-
-
-
-
-
 mus = np.linspace(0.5,2.5,30)
 ds = []
 d2s = []
@@ -64,14 +56,9 @@ for mu in mus:
   ds.append(d)
   d2s.append(d2)
   print(mu,d,delta,d2)
-
-
 ds = np.array(ds)
 deltas = np.array(deltas)
-
-
 np.savetxt("D_VS_MU.OUT",np.matrix([mus,deltas,ds,d2s]).T)
-
 import matplotlib.pyplot as plt
 plt.subplot(121)
 plt.plot(mus,ds,marker="o")

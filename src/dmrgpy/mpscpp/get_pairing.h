@@ -1,5 +1,5 @@
 
-auto get_pairing(auto ampo) {
+static auto get_pairing = [](auto ampo) {
     ifstream jfile; // file to read
     jfile.open("pairing.in"); // file with the hoppings
     int nt;
@@ -21,4 +21,4 @@ auto get_pairing(auto ampo) {
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added
 }
-
+;

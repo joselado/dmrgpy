@@ -1,12 +1,8 @@
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 from dmrgpy import spinchain
-
-
-
-
 ns = np.array(range(4,30,2))
 es = []
 n = 3
@@ -24,8 +20,6 @@ sc.get_gs()
 i = 0 ; j=1
 (x,y) = sc.evolution(nt=1000,dt=0.03,mode="ED",name="ZZ",i=i,j=j)
 (x1,y1) = sc.evolution(nt=1000,dt=0.03,mode="DMRG",name="ZZ",i=i,j=j)
-
-
 import matplotlib.pyplot as plt
 plt.subplot(1,2,1)
 plt.plot(x,y.real,c="red",label="ED")
@@ -33,8 +27,7 @@ plt.scatter(x1,y1.real,c="blue",label="DMRG")
 plt.subplot(1,2,2)
 plt.plot(x,y.imag,c="red",label="ED")
 plt.scatter(x1,y1.imag,c="blue",label="DMRG")
+plt.legend()
 #plt.plot(x,y.imag)
 #plt.scatter(x,y.imag)
 plt.show()
-
-

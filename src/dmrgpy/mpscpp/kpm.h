@@ -2,7 +2,7 @@
 
 
 // compute the KPM moments for matrix m and vectors vi and vj
-int moments_vi_vj(auto m, auto vi, auto vj, int n) {
+static auto moments_vi_vj=[](auto m, auto vi, auto vj, int n) {
   // technique use to apply the mpo
 //  auto fitmpo = get_bool("fitmpo_kpm") ;
 //  fitmpo = false ; // this does not work ok
@@ -52,7 +52,7 @@ int moments_vi_vj(auto m, auto vi, auto vj, int n) {
 
 // compute the KPM moments for matrix m and vectors vi and vj
 // and a shift in the energy
-int moments_vi_vj_shift(auto m, auto vi, auto vj, int n, auto shift) {
+static auto moments_vi_vj_shift=[](auto m, auto vi, auto vj, int n, auto shift) {
   ofstream myfile;
   myfile.open("KPM_MOMENTS.OUT"); // open file
   int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
@@ -83,21 +83,8 @@ int moments_vi_vj_shift(auto m, auto vi, auto vj, int n, auto shift) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 // compute the Chebyshev moments for the DOS
-int get_moments_dos(auto sites, auto H, int n) {
+static auto get_moments_dos=[](auto sites, auto H, int n) {
   auto m = scale_hamiltonian(sites,H) ; // scale this Hamiltonian
   auto psi1 = MPS(sites) ; // random wavefunction
   psi1 = psi1*(1.0/sqrt(overlapC(psi1,psi1))) ;
@@ -105,9 +92,25 @@ int get_moments_dos(auto sites, auto H, int n) {
   return 0 ;
 } ;
 
+// scale the Hamiltonian so it lies between -1 and 1
+static auto scale_hamiltonian=[](auto sites, auto H) {
+    auto psi = MPS(sites); // initialize
+    auto sweeps = get_sweeps(); // get the sweeps
+    auto emin = dmrg(psi,H,sweeps,{"Quiet=",true}); // get minimum energy
+    auto emax = dmrg(psi,-1*H,sweeps,{"Quiet=",true}); // get maximum energy
+    auto dosscale = 0.9/max(abs(emin),abs(emax)) ; // energy scale for DOS
+    ofstream myfile;
+    myfile.open("DOS_KPM_SCALE.OUT");
+    myfile << std::setprecision(8) << dosscale << endl;
+    myfile.close() ; // close file
+    auto m = H*dosscale ; // scale Hamiltonian
+    return m ; // return scaled Hamiltonian
+}
+;
+
 
 // compute the Chebyshev polynomials for a certain S+S- correlation
-int get_moments_spismj_brute(auto sites, auto H, int n, int i, int j) {
+static auto get_moments_spismj_brute=[](auto sites, auto H, int n, int i, int j) {
   auto psi = get_gs(sites,H) ; // get the ground state
   auto m = scale_hamiltonian(sites,H) ; // scale this Hamiltonian
   auto ampo1 = AutoMPO(sites); 
@@ -127,7 +130,7 @@ int get_moments_spismj_brute(auto sites, auto H, int n, int i, int j) {
 
 
 
-int get_moments_dynamical_correlator(auto sites, auto H, int n,
+static auto get_moments_dynamical_correlator=[](auto sites, auto H, int n,
       int i, int j, auto namei, auto namej) {
   auto psi = get_gs(sites,H) ; // get the ground state
   auto m = scale_hamiltonian(sites,H) ; // scale this Hamiltonian
@@ -156,22 +159,9 @@ int get_moments_dynamical_correlator(auto sites, auto H, int n,
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 // compute the Chebyshev polynomials for a certain S+S- correlation
 // using a smart energy window
-int get_moments_spismj(auto sites, auto H, int n, int i, int j) {
+static auto get_moments_spismj=[](auto sites, auto H, int n, int i, int j) {
   auto psi = get_gs(sites,H) ; // get the ground state
   float scale = get_float_value("kpm_scale") ; // energy scale
   auto e0 = overlap(psi,H,psi) ; // ground state energy
@@ -204,21 +194,6 @@ int get_moments_spismj(auto sites, auto H, int n, int i, int j) {
 
 
 
-
-// scale the Hamiltonian so it lies between -1 and 1
-auto scale_hamiltonian(auto sites, auto H) {
-  auto psi = MPS(sites); // initialize
-  auto sweeps = get_sweeps(); // get the sweeps
-  auto emin = dmrg(psi,H,sweeps,{"Quiet=",true}); // get minimum energy
-  auto emax = dmrg(psi,-1*H,sweeps,{"Quiet=",true}); // get maximum energy
-  auto dosscale = 0.9/max(abs(emin),abs(emax)) ; // energy scale for DOS
-  ofstream myfile;
-  myfile.open("DOS_KPM_SCALE.OUT");
-  myfile << std::setprecision(8) << dosscale << endl;
-  myfile.close() ; // close file
-  auto m = H*dosscale ; // scale Hamiltonian
-  return m ; // return scaled Hamiltonian
-}
 
 
 

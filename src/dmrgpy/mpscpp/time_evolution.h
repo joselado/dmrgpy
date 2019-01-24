@@ -1,6 +1,6 @@
 // perform a time evolution
 
-int quench(auto sites) {
+static auto quench=[](auto sites) {
   auto name1 = get_str("tevol_operator_i");  // first operator
   auto name2 = get_str("tevol_operator_j");  // second operator
   auto i1 = get_int_value("tevol_site_i");  // second operator
@@ -41,5 +41,5 @@ int quench(auto sites) {
                        << std::setprecision(8)<< imag(z) << endl;
   } ;
   fileevol.close(); // close file
-}
+};
 

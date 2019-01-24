@@ -2,7 +2,7 @@
 // Get the ground state of this Hamiltonian, and write
 // the wavefunction into a file
 
-auto get_gs(auto sites, auto H) {
+static auto get_gs=[](auto sites, auto H) {
     // read the GS from a file
     auto psi = MPS(sites);
     if (get_bool("gs_from_file")) 
@@ -21,3 +21,4 @@ auto get_gs(auto sites, auto H) {
 //  } ;
   return psi ; // return the ground state
 }
+;

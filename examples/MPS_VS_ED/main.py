@@ -1,10 +1,8 @@
-from __future__ import print_function
-import sys
-import os
-import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-from dmrgpy import spinchain
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
+import numpy as np
+from dmrgpy import spinchain
 n = 4
 for i in range(10):
   spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
@@ -26,5 +24,4 @@ for i in range(10):
   print("\n")
   de = np.abs(e1-e0)
   if de>0.1: raise
-
 print("Test passed")

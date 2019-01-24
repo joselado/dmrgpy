@@ -1,10 +1,8 @@
-from __future__ import print_function
-import sys
-import os
-import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-import spinchain
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
+import numpy as np
+import spinchain
 n = 40
 # first one will be a Ising spin
 spins = [3] + [3 for i in range(n)] # spin 1/2 chain

@@ -1,12 +1,9 @@
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 import time
-
-
-
 ns = np.array(range(4,30,2))
 es = []
 n = 4
@@ -31,16 +28,11 @@ def compute(n):
   t1 = time.time()
   print("Time",t1-t0)
   return t1-t0
-
-
 ns = np.array(range(10,12,2))
 ns = [6]
 ts = np.array([compute(n) for n in ns])
-
 out = np.polyfit(np.log(ns),np.log(ts),deg=1)
-
 print("Power",out[0])
-
 import matplotlib.pyplot as plt
 plt.plot(np.log(ns),np.log(ts),marker="o")
 plt.ylabel("Log Time")
@@ -48,5 +40,3 @@ plt.xlabel("Log Size")
 #plt.plot(x,y.imag)
 #plt.scatter(x,y.imag)
 plt.show()
-
-

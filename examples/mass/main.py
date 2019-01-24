@@ -1,14 +1,8 @@
-from __future__ import print_function
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-
-
 import spinchain
-
-
-
 def getf(alpha,g=1.0):
   def fun(i,j): # function for the exchange
     if i==(j+1): # first neighbors
@@ -23,12 +17,8 @@ def getf(alpha,g=1.0):
       return g*m # return matrix
     else: return np.zeros((3,3))
   return fun
-
-
 es = []
-
 ns = np.array(range(4,40,2))
-
 for n in ns:
   alpha = 1./20.
   spins = [2 for i in range(n)] # spins
@@ -46,11 +36,8 @@ for n in ns:
   es.append(e1-e0)
   print(alpha,e0,e1,(e1-e0)*n/alpha)
 #  exit()
-
 es = np.array(es) # array
   
 import matplotlib.pyplot as plt
-
 plt.scatter(ns,es/((alpha/ns)))
-
 plt.show()

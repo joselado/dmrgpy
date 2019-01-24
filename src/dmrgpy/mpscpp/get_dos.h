@@ -1,4 +1,4 @@
-auto get_dos(auto H, auto sites) {
+static auto get_dos=[](auto H, auto sites) {
 	int nexcited = get_int_value("nexcited") ; // number of excited states
 	int isite = get_int_value("dos_site") ; // number of excited states
 	auto sweeps = get_sweeps(); // get the sweeps
@@ -15,4 +15,4 @@ auto get_dos(auto H, auto sites) {
 	}
 	myfile.close(); // close file
 	return 0;
-}
+};

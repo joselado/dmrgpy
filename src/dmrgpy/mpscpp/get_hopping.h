@@ -1,5 +1,5 @@
 
-auto get_hopping(auto ampo) {
+static auto get_hopping=[](auto ampo) {
     ifstream jfile; // file to read
     jfile.open("hoppings.in"); // file with the hoppings
     int nt;
@@ -22,11 +22,11 @@ auto get_hopping(auto ampo) {
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added
 }
-
+;
 
 
 // function to test that the hopping is well implemented
-auto test_hopping(auto H, auto sites) {
+static auto test_hopping=[](auto H, auto sites) {
 	cout << "BEGIN test hopping" << endl;
 	for (int i=0;i<sites.N();i++) { // loop
 	  for (int j=0;j<sites.N();j++) { // loop
@@ -44,4 +44,4 @@ auto test_hopping(auto H, auto sites) {
 	}
 	cout << "END test hopping" << endl;
 }
-
+;

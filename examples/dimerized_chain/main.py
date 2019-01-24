@@ -1,15 +1,11 @@
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
 import matplotlib.pyplot as plt
-
-
 djs = np.linspace(0.0,0.1,40)
-
 fo = open("SWEEP.OUT","w")
-
 for dj in djs:
   print("Doing",dj)
   n = 60
@@ -38,14 +34,11 @@ for dj in djs:
   cs = cs[n//3:2*n//3]
   
   plt.plot(range(len(cs)),cs,label=str(dj)) # correlator using DMRG
-
   for i in range(len(cs)):
     fo.write(str(dj)+"   ")
     fo.write(str(i)+"   ")
     fo.write(str(abs(cs[i]))+"\n")
   fo.flush()
-
 fo.close()
 plt.legend()
-
 plt.show()

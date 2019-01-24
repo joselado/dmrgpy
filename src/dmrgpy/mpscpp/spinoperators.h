@@ -1,4 +1,4 @@
-auto get_operator(auto sites, int i, auto name) {
+static auto get_operator= [](auto sites, int i, auto name) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)!=1)  // spin site
 		ampo += 1.0,name,i+1 ;
@@ -57,33 +57,33 @@ auto get_operator(auto sites, int i, auto name) {
         auto m = MPO(ampo) ;	
 return m ;
 }
+;
 
 
-
-auto get_occupation_operator(auto sites, int i) {
+static auto get_occupation_operator= [](auto sites, int i) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // fermionic site
         	ampo += 1.0,"Ntot",i+1;
         auto m = MPO(ampo) ;	
 return m ;
 }
+;
 
 
 
-
-auto get_occupation2_operator(auto sites, int i) {
+static auto get_occupation2_operator= [](auto sites, int i) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // fermionic site
         	ampo += 1.0,"Ntot",i+1,"Ntot",i+1;
         auto m = MPO(ampo) ;	
 return m ;
 }
+;
 
 
 
 
-
-auto get_delta_operator(auto sites, int i) {
+static auto get_delta_operator= [](auto sites, int i) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // fermionic site
         	ampo += 1.0,"Cdn",i+1,"Cup",i+1;
@@ -91,19 +91,19 @@ auto get_delta_operator(auto sites, int i) {
         auto m = MPO(ampo) ;	
 return m ;
 }
+;
 
-
-auto get_up_creation_operator(auto sites, int i) {
+auto get_up_creation_operator= [](auto sites, int i) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // fermionic site
         	ampo += 1.0,"Cdagup",i+1;
         auto m = MPO(ampo) ;	
 return m ;
 }
+;
 
 
-
-auto get_hopping_operator(auto sites, int i, int j) {
+static auto get_hopping_operator= [](auto sites, int i, int j) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // spinful fermionic site
         	ampo += 1.0,"Cdagup",i+1,"Cup",j+1;
@@ -111,10 +111,9 @@ auto get_hopping_operator(auto sites, int i, int j) {
         auto m = MPO(ampo) ;	
 return m ;
 }
+;
 
-
-
-auto get_sidotsj_operator(auto sites, int i, int j) {
+static auto get_sidotsj_operator= [](auto sites, int i, int j) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)!=1)  // spin site
         	ampo += 1.0,"Sx",i+1,"Sx",j+1;
@@ -123,11 +122,11 @@ auto get_sidotsj_operator(auto sites, int i, int j) {
         auto m = MPO(ampo) ;	
 return m ;
 }
+;
 
 
 
-
-auto add_spin_operator(auto ampo, auto sites, float v, int i, auto name) {
+static auto add_spin_operator= [](auto ampo, auto sites, float v, int i, auto name) {
 	if (site_type(i)!=1)  // spin site
 		ampo += v,name,i+1 ;
 	else if (site_type(i)==1) { // fermionic site
@@ -146,7 +145,6 @@ auto add_spin_operator(auto ampo, auto sites, float v, int i, auto name) {
         }
 	return ampo ;
 }
-
-
+;
 
 

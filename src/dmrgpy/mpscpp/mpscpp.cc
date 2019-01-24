@@ -18,12 +18,11 @@ using namespace std;
 #include"get_hamiltonian.h" // get the hoppings (in case there are)
 #include"read_wf.h" // this does not work yet
 #include"get_gs.h" // compute ground state energy and wavefunction
+#include"get_excited.h" // compute excited states
 #include"get_dos.h" // compute the DOS
-#include"get_field.h" // get local magnetic fields
 #include"get_correlator.h" // compute correaltors betwee sites
 #include"measure.h" // compute expectation values
 #include"get_entropy.h" // compute entanglement entropy
-#include"get_excited.h" // compute excited states
 #include"kpm.h" // KPM routines
 #include"compute_overlap.h" // Compute overlap
 #include"time_evolution.h" // Compute overlap

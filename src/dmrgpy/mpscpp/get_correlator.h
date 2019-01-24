@@ -6,7 +6,7 @@
 
 
 // calculate a single correlator
-float single_correlator(auto psi,auto sites, auto i,auto namei, int j, auto namej) {
+static auto single_correlator=[](auto psi,auto sites, auto i,auto namei, int j, auto namej) {
   
   //Given an MPS or IQMPS called "psi",
   //constructed from a SiteSet "sites"
@@ -43,7 +43,7 @@ float single_correlator(auto psi,auto sites, auto i,auto namei, int j, auto name
   return result ;
 
 }
-
+;
 
 
 
@@ -85,4 +85,3 @@ void get_correlator()   {
   ofile.close() ;
   cfile.close() ;
 }
-

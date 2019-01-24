@@ -1,6 +1,6 @@
 // function to get several excited states
 
-auto get_excited(auto H, auto sites, auto sweeps, int nexcited) {
+static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
   ofstream myfile;
   myfile.open("EXCITED.OUT"); // open file
   auto psi0 = MPS(sites);
@@ -19,14 +19,11 @@ auto get_excited(auto H, auto sites, auto sweeps, int nexcited) {
   } ;
   return wfs ;
 }
+;
 
-
-auto get_new_excited(auto H, auto sites, auto sweeps, auto wfs) {
+static auto get_new_excited=[](auto H, auto sites, auto sweeps, auto wfs) {
   auto psi1 = MPS(sites);
   auto en1 = dmrg(psi1,H,wfs,sweeps,{"Quiet=",true,"Weight=",20.0});
   return psi1 ;
 }
-
-
-
-
+;

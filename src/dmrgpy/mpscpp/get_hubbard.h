@@ -1,5 +1,5 @@
 
-auto get_hubbard(auto ampo) {
+static auto get_hubbard =[](auto ampo) {
     ifstream jfile; // file to read
     jfile.open("hubbard.in"); // file with the hoppings
     int nt;
@@ -20,3 +20,4 @@ auto get_hubbard(auto ampo) {
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added
 }
+;

@@ -1,12 +1,8 @@
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-import spinchain
-
-
-
-
+from dmrgpy import spinchain
 ns = np.array(range(4,30,2))
 es = []
 n = 30
@@ -17,9 +13,6 @@ pairs = [(i,i+1) for i in range(n-1)] # correlators
 #pairs = [(n//2,i+1) for i in range(n-1)] # correlators
 sc.gs_energy() # compute the correlator between these sites
 cs = sc.correlator(pairs) # compute the correlator between these sites
-
 import matplotlib.pyplot as plt
-
 plt.plot(range(len(cs)),cs,marker="o") # correlator using DMRG
-
 plt.show()

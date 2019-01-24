@@ -1,12 +1,10 @@
-import sys
-import os
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-sys.path.append(os.environ["PYGRAROOT"]) # root for pygra
 import matplotlib.pyplot as plt
 import fermionchain
 import geometry
-
 def getfc(n=10):
   g = geometry.chain()
   g = g.supercell(n)
@@ -24,7 +22,6 @@ def getfc(n=10):
   fc.set_spinful_hoppings(h.intra)
   fc.set_pairing(fd)
   return fc
-
 import matplotlib.pyplot as plt
 ns = range(4,44,4)
 f = open("GAP.OUT","w")
@@ -35,4 +32,3 @@ for n in ns:
     f.write(str(g)+"\n")
     f.flush()
 f.close()
-

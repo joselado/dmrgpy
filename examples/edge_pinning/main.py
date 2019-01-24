@@ -1,12 +1,8 @@
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
 import spinchain
-
-
-
-
 ns = np.array(range(4,30,2))
 es = []
 n = 40
@@ -19,7 +15,5 @@ sc.set_fields(fm) # add those local exchange fields
 cs = sc.magnetization()[0] # compute the magnetization
   
 import matplotlib.pyplot as plt
-
 plt.plot(range(len(cs)),cs) # correlator using DMRG
-
 plt.show()

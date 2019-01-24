@@ -1,6 +1,6 @@
 // function to get a gap
 
-float get_gap(auto H, auto sites, auto sweeps) {
+static auto get_gap = [](auto H, auto sites, auto sweeps) {
   
   
   auto psi0 = MPS(sites);
@@ -38,4 +38,4 @@ float get_gap(auto H, auto sites, auto sweeps) {
   myfile.open("GAP.OUT"); // open file
   myfile << en1-en0 << endl; // write file
   return en1-en0 ;
-}
+};

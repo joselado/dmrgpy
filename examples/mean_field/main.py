@@ -1,15 +1,11 @@
-import os
-import sys
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 import numpy as np
-sys.path.append(os.environ["DMRGROOT"]) # root for dmrg
-
-
 import spinchain
 import meanfield
-
 ns = np.array(range(4,30,2))
 es = []
-
 n = 6
 spins = [2 for i in range(n)]
 fo = open("SWEEP.OUT","w")
@@ -24,8 +20,4 @@ for p in ps: # loop over poarameters
 #      fo.write(str(i)+"   ")
       fo.write(str(mz[i])+"\n")
   fo.flush()
-
 fo.close()
-
-
-

@@ -1,14 +1,9 @@
-from __future__ import print_function
-import sys
-import os
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import simplechains
-
-
 # This example shows the quantum phase transition in the trnasverse Ising model
-
-
 # generate a 1D Ising chain
 def get_dm(bx):
     """
@@ -20,14 +15,10 @@ def get_dm(bx):
     o = np.sum(ssc.get_dm_dis(n=10)) # return distance between DM
     print("Computing B_x = ",bx,"result",o)
     return o
-
-
 bs = np.linspace(0.2,2.,5) # list of fields
 gs = [get_dm(b) for b in bs] # list of distances
-
 import matplotlib.pyplot as plt
 plt.plot(bs,gs,marker="o")
 plt.xlabel("Bx")
 plt.ylabel("Gap")
 plt.show()
-

@@ -1,7 +1,7 @@
 // routine to measure the spin in different sites
 
 
-int measure(auto psi, auto sites) {
+static auto measure =[](auto psi, auto sites) {
   ofstream ofile1; // declare
   ofstream ofile2; // declare
   ofstream ofile3; // declare
@@ -59,3 +59,4 @@ int measure(auto psi, auto sites) {
   ofile3.close() ; // close file
   return 0 ;
 }
+;

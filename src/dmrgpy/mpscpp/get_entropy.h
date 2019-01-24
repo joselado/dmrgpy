@@ -1,4 +1,4 @@
-int get_entropy(auto psi, int b) {
+static auto get_entropy=[](auto psi, int b) {
   //Given an MPS or IQMPS called "psi",
   //and some particular bond "b" (1 <= b < psi.N())
   //across which we want to compute the von Neumann entanglement
@@ -32,9 +32,9 @@ int get_entropy(auto psi, int b) {
   myfile << std::setprecision(8) << SvN << endl; // write file
   return 0 ;
 }
+;
 
-
-auto entropy(auto psi, int b) {
+static auto entropy=[](auto psi, int b) {
   psi.position(b); 
   ITensor wf = psi.A(b)*psi.A(b+1);
   auto U = psi.A(b);
@@ -47,8 +47,7 @@ auto entropy(auto psi, int b) {
       } ;
   return SvN ;
 }
-
-
+;
 
 
 

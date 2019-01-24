@@ -1,5 +1,5 @@
 
-auto get_spinful_hopping(auto ampo) {
+static auto get_spinful_hopping=[](auto ampo) {
     ifstream jfile; // file to read
     jfile.open("spinful_hoppings.in"); // file with the hoppings
     int nt;
@@ -30,5 +30,4 @@ auto get_spinful_hopping(auto ampo) {
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added
 }
-
-
+;

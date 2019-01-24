@@ -84,9 +84,9 @@ def dmrgdict():
   """Returns a dictionary for the dmrg calculation"""
   ddict = dict() # create dictionary
   ddict["target"] = 0 # state(s) to use for the DM
-  ddict["diag_states"] = 10 # number of minimum states to diagonalize
+  ddict["diag_states"] = 1 # number of minimum states to diagonalize
   ddict["diag_mode"] = "arpack" # use arpack
-  ddict["tol"] = 0.00001 # precission in the diagonalization
+  ddict["tol"] = 1e-4 # precission in the diagonalization
   ddict["dynamic_target"] = None # ground state
   ddict["DM_target"] = None # not set
   ddict["ensure_symmetry"] = False # truncate the DM without breaking symmetry
@@ -297,7 +297,8 @@ def infinite_dmrg(datadict):
           if i==bulkn-1: # in the next iteration store the full operators
             jdict["store_full_operators"] = True
           if i==bulkn: # when the length is 3/4 of the total
-            ppdmrg.correlator(jdict,outfile="CORRELATORS_BULK.OUT") # write results
+            if jdict["store_operators"]:
+              ppdmrg.correlator(jdict,outfile="CORRELATORS_BULK.OUT") # write results
 #            ppdmrg.dynamical_correlator(jdict) # write results
   
     # write results

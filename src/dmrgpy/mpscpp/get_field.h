@@ -1,5 +1,5 @@
 
-auto get_field(auto sites, auto ampo) {
+static auto get_field = [](auto sites, auto ampo) {
     ifstream bfile; // file to read
     bfile.open("fields.in"); // file with the fields
     int nb=0;
@@ -19,3 +19,4 @@ auto get_field(auto sites, auto ampo) {
     bfile.close() ; // close file
     return ampo ;  // return the Hamiltonian with exchange added
 }
+;

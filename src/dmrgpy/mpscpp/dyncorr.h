@@ -2,7 +2,7 @@
 
 #include"cg.h" // conjugate gradient function
 
-auto dynamical_correlator() {
+static auto dynamical_correlator=[]() {
   auto sites = get_sites(); // get the sites
   auto H = get_hamiltonian(sites) ; // get the Hamiltonian
   auto psi = get_gs(sites,H) ; // get the ground state
@@ -15,5 +15,5 @@ auto dynamical_correlator() {
   auto v = solveHwdb(H,energy,delta,wfi) ; // get the correction vector
   // this is not finished
 
-}
+};
 

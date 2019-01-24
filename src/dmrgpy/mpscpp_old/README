@@ -1,0 +1,31 @@
+# mpscpp.x #
+
+Program to perform density matrix renormalization group
+based on the library ITensor
+
+THIS DOCUMENTATION IS NOT COMPLETE
+
+
+#### Input files ####
+sites.in : number of sites
+couplings.in : coupling between sites, three columns (index_i, index_j, J)
+fields.in : external magnetic fields applied, four columns (index,bx,by,bz), 
+            first line is number of fields
+correlators.in : pair of sites to calculate a correlator
+sweeps.in : parameters for the sweeps
+tasks.in : tasks to do in the calculation 
+    - GS : ground state calculation
+    - gap : gap of the system
+    - correlator : calculate correlators as given in correlators.in
+
+
+
+### Output files ####
+GS_ENERGY.OUT : Ground state energy
+GAP.OUT : Gap of the system 
+CORRELATORS.OUT : correlatros of the system
+KPM_MOMENTS.OUT : Chebyshev moments of the dynamical correlators 
+
+
+
+
