@@ -32,3 +32,5 @@ for n in ns:
     f.write(str(g)+"\n")
     f.flush()
 f.close()
+
+

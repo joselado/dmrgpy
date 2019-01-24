@@ -19,3 +19,5 @@ es = sc.get_spismj(n=1000,mode="DMRG",i=0,j=0)
 #print("Energy per site",e/n)
 #e = sc.gs_energy(mode="aa") # compute the ground state energy
 #print("Energy per site",e/n)
+
+

@@ -3,7 +3,6 @@ import numpy as np
 
 def get_moments_dmrg(self,n=1000):
   """Get the moments with DMRG"""
-  self.setup_sweep("accurate")
   self.setup_task("dos",task={"nkpm":str(n)})
   self.write_hamiltonian() # write the Hamiltonian to a file
   self.run() # perform the calculation
@@ -14,7 +13,6 @@ def get_moments_dmrg(self,n=1000):
 def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
   """Get the moments with DMRG"""
 
-  self.setup_sweep()
   task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
                 "site_i_kpm":str(i),"site_j_kpm":str(j),
                 "kpm_scale":str(self.kpmscale)}
@@ -31,7 +29,6 @@ def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
 
 def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
-  self.setup_sweep("accurate")
   try: # select the right operators, be consistent with mpscpp.x
       from . import operatornames
       namei,namej = operatornames.recognize(self,name)

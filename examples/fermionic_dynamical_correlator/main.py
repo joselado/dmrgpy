@@ -39,3 +39,5 @@ plt.plot(x1,y1.real,label="Up")
 plt.plot(x2,y2.real,label="Dn")
 plt.legend()
 plt.show()
+
+

@@ -57,3 +57,5 @@ plt.show()
 # The result will be written in a file called DYNAMICAL_CORRELATOR.OUT
 fc.gs_energy()
 exit()
+
+

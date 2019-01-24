@@ -33,6 +33,7 @@ read(std::istream& s)
             I.read(s);
 	    // S=3/2 is being confusing by spinful fermion!!!!
             if(nm == 3) store.set(j,SpinOneSite(I));
+            else if (nm==0) sites.set(j,SpinlessSite(I)); // use fermions
             else if(nm == 1) store.set(j,HubbardSite(I));
             else if(nm == 2) store.set(j,SpinHalfSite(I));
             else if(nm == 4) store.set(j,SpinThreeHalfSite(I));
@@ -65,7 +66,8 @@ SpinX(Args const& args)
       sfile >> nm ; // read this spin
       cout << "Reading  " << nm << endl;
       if (nm==2) sites.set(i,SpinHalfSite(i)); // use spin=1/2
-      else if (nm==1) sites.set(i,HubbardSite(i)); // use fermions
+      else if (nm==0) sites.set(i,SpinlessSite(i)); // use fermions
+      else if (nm==1) sites.set(i,HubbardSite(i)); // use spinful fermions
       else if (nm==3) sites.set(i,SpinOneSite(i)); // use spin=1
       else if (nm==4) sites.set(i,SpinThreeHalfSite(i)); // use spin=3/2
       else if (nm==5) sites.set(i,SpinTwoSite(i)); // use spin=2

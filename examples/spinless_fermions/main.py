@@ -5,12 +5,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 5
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
-#m = np.matrix(np.random.random((2*n,2*n))) # random matrix
-#m = m +m.T
+fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
 def ft(i,j):
-#    return m[i,j]
-    if abs(j-i)==1: return 1.0 #+ np.random.random()
+    if abs(j-i)==1: return 1.0 
     return 0.0
 fc.set_hoppings(ft) # hoppings
 e0 = fc.gs_energy(mode="ED") # energy with exact diagonalization

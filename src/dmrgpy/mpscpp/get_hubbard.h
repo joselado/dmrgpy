@@ -17,6 +17,10 @@ static auto get_hubbard =[](auto ampo) {
           ampo += U,"Ndn",j1+1,"Ndn",j2+1;
           ampo += U,"Ndn",j1+1,"Nup",j2+1;
     } ;
+    // spinless fermions
+      if ((site_type(j1)==0) and (site_type(j2)==0))  
+          ampo += U,"N",j1+1,"N",j2+1;
+    } ;
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added
 }

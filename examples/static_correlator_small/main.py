@@ -43,8 +43,11 @@ matplotlib.rcParams.update({'font.size': 18})
 matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
 fig = plt.figure()
 fig.subplots_adjust(0.2,0.2)
-plt.plot(range(n),cs,marker="o",c="blue")
-plt.scatter(range(n),cs1,marker="o",c="red",s=100)
+plt.plot(range(n),cs,marker="o",c="blue",label="DMRG")
+plt.scatter(range(n),cs1,marker="o",c="red",s=100,label="ED")
+plt.legend()
 plt.xlabel("N")
 plt.ylabel("<GS|S_0 S_N |GS>")
 plt.show()
+
+

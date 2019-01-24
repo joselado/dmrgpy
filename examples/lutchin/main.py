@@ -27,3 +27,5 @@ out = fc.correlator(pairs)
 import matplotlib.pyplot as plt
 plt.plot(range(n),out,c="blue",marker="o")
 plt.show()
+
+

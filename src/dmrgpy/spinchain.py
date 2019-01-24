@@ -8,6 +8,8 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
     """Class for spin Hamiltonians"""
     def __init__(self,sites):
         Many_Body_Hamiltonian.__init__(self,sites)
+        # default exchange constants
+        self.set_exchange(lambda i,j: abs(i-j)==1*1.0)
     def sisj_edge(self):
         if not self.computed_gs: self.get_gs() # compute ground state
         pairs = [(0,i) for i in range(self.ns)] # create pairs

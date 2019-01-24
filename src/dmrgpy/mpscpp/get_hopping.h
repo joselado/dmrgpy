@@ -18,6 +18,11 @@ static auto get_hopping=[](auto ampo) {
           ampo += tr,"Cdagdn",j1+1,"Cdn",j2+1; 
           ampo += ti*1i,"Cdagdn",j1+1,"Cdn",j2+1; 
       }
+      // spinless fermions
+      if ((site_type(j1)==0) and (site_type(j2)==0))  {
+          ampo += tr,"Cdag",j1+1,"C",j2+1;
+          ampo += ti*1i,"Cdag",j1+1,"C",j2+1;
+      }
     } ;
     jfile.close() ;
     return ampo ;  // return the Hamiltonian with exchange added

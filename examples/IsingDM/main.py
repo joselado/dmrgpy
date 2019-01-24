@@ -31,3 +31,5 @@ plt.plot(bs,gs,marker="o")
 plt.xlabel("Bx")
 plt.ylabel("Distance between DM matrix")
 plt.show()
+
+

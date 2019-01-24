@@ -18,7 +18,6 @@ def best_gs(sc,n=1):
 def gs_energy(self,wf0=None):
       self.to_folder() # go to temporal folder
       self.set_initial_wf(wf0) # set the initial wavefunction
-      self.setup_sweep()
       self.setup_task("GS")
       self.write_hamiltonian() # write the Hamiltonian to a file
       self.run() # perform the calculation

@@ -45,3 +45,5 @@ for i in range(1):
 #plt.plot(x2,y2.real,label="Dn")
 plt.legend()
 plt.show()
+
+

@@ -19,3 +19,5 @@ fc = fermionchain.Fermionic_Hamiltonian(len(g.r))
 fc.set_spinful_hoppings(h.intra)
 fc.set_pairing(fd)
 fc.get_dynamical_correlator(mode="DMRG",i=0,j=0,name="cdc",delta=0.03)
+
+

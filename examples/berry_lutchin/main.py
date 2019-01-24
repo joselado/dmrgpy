@@ -35,3 +35,5 @@ fc = fermionchain.Fermionic_Hamiltonian(len(g.r))
 fc.set_spinful_hoppings(h.intra)
 print("DMRG",fc.gs_energy())
 print("ED",fc.gs_energy_free())
+
+

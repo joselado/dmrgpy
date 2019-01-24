@@ -40,3 +40,5 @@ import matplotlib.pyplot as plt
 for e in es:
   plt.scatter(alphas,e)
 plt.show()
+
+

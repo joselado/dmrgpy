@@ -1,8 +1,8 @@
 static auto get_operator= [](auto sites, int i, auto name) {
 	auto ampo = AutoMPO(sites);
-	if (site_type(i)!=1)  // spin site
+	if (site_type(i)>1)  // spin site
 		ampo += 1.0,name,i+1 ;
-	else if (site_type(i)==1) { // fermionic site
+	else if (site_type(i)==1) { // spinful fermionic site
         	if (name=="Sx") {
         		ampo += 0.5,"Cdagdn",i+1,"Cup",i+1;
         		ampo += 0.5,"Cdagup",i+1,"Cdn",i+1;
@@ -53,7 +53,26 @@ static auto get_operator= [](auto sites, int i, auto name) {
 		if (name=="density_dn") {
         		ampo += 1.0,"Cdagdn",i+1,"Cdn",i+1;
         	} ;
-        }
+	}
+	else if (site_type(i)==0) { // spinless fermionic site
+		if (name=="Cdag") {
+        		ampo += 1.0,"Cdag",i+1;
+        	} ;
+		if (name=="C") {
+        		ampo += 1.0,"C",i+1;
+        	} ;
+		// superconducting terms
+		if (name=="delta") {
+        		ampo += 1.0,"C",i+1,"C",i+1;
+        	} ;
+		if (name=="deltad") {
+        		ampo += 1.0,"Cdag",i+1,"Cdag",i+1;
+        	} ;
+		// density terms
+		if (name=="density") {
+        		ampo += 1.0,"Cdag",i+1,"C",i+1;
+        	} ;
+        };
         auto m = MPO(ampo) ;	
 return m ;
 }
@@ -64,6 +83,8 @@ static auto get_occupation_operator= [](auto sites, int i) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // fermionic site
         	ampo += 1.0,"Ntot",i+1;
+	if (site_type(i)==0)  // fermionic site
+        	ampo += 1.0,"N",i+1;
         auto m = MPO(ampo) ;	
 return m ;
 }
@@ -75,6 +96,8 @@ static auto get_occupation2_operator= [](auto sites, int i) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)==1)  // fermionic site
         	ampo += 1.0,"Ntot",i+1,"Ntot",i+1;
+	if (site_type(i)==0)  // fermionic site
+        	ampo += 1.0,"N",i+1,"N",i+1;
         auto m = MPO(ampo) ;	
 return m ;
 }
@@ -88,6 +111,8 @@ static auto get_delta_operator= [](auto sites, int i) {
 	if (site_type(i)==1)  // fermionic site
         	ampo += 1.0,"Cdn",i+1,"Cup",i+1;
         	ampo += 1.0,"Cdagup",i+1,"Cdagdn",i+1;
+	if (site_type(i)==0)  // fermionic site
+        	ampo += 1.0,"C",i+1,"C",i+1;
         auto m = MPO(ampo) ;	
 return m ;
 }
@@ -108,6 +133,8 @@ static auto get_hopping_operator= [](auto sites, int i, int j) {
 	if (site_type(i)==1)  // spinful fermionic site
         	ampo += 1.0,"Cdagup",i+1,"Cup",j+1;
         	ampo += 1.0,"Cdagdn",i+1,"Cdn",j+1;
+	if (site_type(i)==0)  // spinless fermionic site
+        	ampo += 1.0,"Cdag",i+1,"C",j+1;
         auto m = MPO(ampo) ;	
 return m ;
 }

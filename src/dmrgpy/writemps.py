@@ -3,7 +3,7 @@ import numpy as np
 
 def write_hamiltonian(self):
     write_sites(self) # write the different sites
-    write_couplings(self)  # write the couplings
+    write_exchange(self)  # write the exchange
     write_hoppings(self)  # write the hoppings
     write_spinful_hoppings(self)  # write the hoppings
     write_pairing(self)  # write the pairing
@@ -12,14 +12,14 @@ def write_hamiltonian(self):
 
 
 def write_hubbard(self):
-  """Write couplings in a file"""
+  """Write exchange in a file"""
   fo = open("hubbard.in","w")
   cs = self.hubbard
   fo.write(str(len(cs))+"\n")
   for key in self.hubbard: # loop
     c = self.hubbard[key] # loop
-    if self.sites[c.i]!=1: raise
-    if self.sites[c.j]!=1: raise
+    if self.sites[c.i] not in [0,1]: raise
+    if self.sites[c.j] not in [0,1]: raise
     fo.write(str(c.i)+"  ")
     fo.write(str(c.j)+"  ")
     fo.write(str(c.g.real)+"\n")
@@ -28,14 +28,14 @@ def write_hubbard(self):
 
 
 def write_hoppings(self):
-  """Write couplings in a file"""
+  """Write exchange in a file"""
   fo = open("hoppings.in","w")
   cs = self.hoppings
   fo.write(str(len(cs))+"\n")
   for key in self.hoppings: # loop
     c = self.hoppings[key] # loop
-    if self.sites[c.i]!=1: raise
-    if self.sites[c.j]!=1: raise
+    if self.sites[c.i] not in [0,1]: raise
+    if self.sites[c.j] not in [0,1]: raise
     fo.write(str(c.i)+"  ")
     fo.write(str(c.j)+"  ")
     fo.write(str(c.g.real)+"  ")
@@ -47,7 +47,7 @@ def write_hoppings(self):
 
 
 def write_spinful_hoppings(self):
-  """Write couplings in a file"""
+  """Write exchange in a file"""
   fo = open("spinful_hoppings.in","w")
   cs = self.spinful_hoppings
   if type(cs)==type(dict()): # dictionary type
@@ -85,7 +85,7 @@ def write_spinful_hoppings(self):
 
 
 def write_pairing(self):
-  """Write couplings in a file"""
+  """Write exchange in a file"""
   fo = open("pairing.in","w")
   cs = self.pairing
   fo.write(str(len(cs))+"\n")
@@ -130,10 +130,10 @@ def write_sites(self):
 
 
 
-def write_couplings(self):
-  """Write couplings in a file"""
-  fo = open("couplings.in","w")
-  cs = self.couplings
+def write_exchange(self):
+  """Write exchange in a file"""
+  fo = open("exchange.in","w")
+  cs = self.exchange
   out = [] # empty list
   stored = [] # empty list
   for c in cs:

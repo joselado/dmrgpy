@@ -23,3 +23,5 @@ cs = sc.correlator(pairs) # compute the correlator between these sites
 import matplotlib.pyplot as plt
 plt.plot(range(len(cs)),cs,marker="o") # correlator using DMRG
 plt.show()
+
+

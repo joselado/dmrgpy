@@ -31,13 +31,14 @@ class Many_Body_Hamiltonian():
     self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
     self.inipath = os.getcwd() # original folder
     self.ns = len(sites) # number of sites
-    self.couplings = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
+    self.exchange = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
+    self.exchange = [] # empty list
     self.fields = [] # empty list
     self.hoppings = dict() # empty dictionary
     self.spinful_hoppings = dict() # empty dictionary
     self.pairing = dict() # empty dictionary
     self.hubbard = dict() # empty dictionary
-#    self.couplings.append(Coupling(0,self.ns-1,one)) # closed boundary
+#    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
     # additional arguments
     self.kpmmaxm = 50 # bond dimension in KPM
     self.maxm = 30 # bond dimension in wavefunctions
@@ -65,7 +66,7 @@ class Many_Body_Hamiltonian():
   def set_exchange(self,fun):
     """Set the exchange coupling between sites"""
     self.computed_gs = False # say that GS has not been computed
-    self.couplings = [] # empty list
+    self.exchange = [] # empty list
     for i in range(self.ns): # loop
       for j in range(i+1,self.ns):  # loop
         g = fun(i,j).real # call the function
@@ -73,7 +74,7 @@ class Many_Body_Hamiltonian():
         g = g*one # multiply by the identity
         if np.sum(np.abs(g))!=0.0: 
           c = Coupling(i,j,g) # create class
-          self.couplings.append(c) # store
+          self.exchange.append(c) # store
     # now the onsite ones
     for i in range(self.ns): # loop
         g = fun(i,i).real # call the function
@@ -81,17 +82,19 @@ class Many_Body_Hamiltonian():
         g = (g + g.H)/2. # the onsite one must be hermitian
         if np.sum(np.abs(g))!=0.0: # if nonzero 
           c = Coupling(i,i,g) # create class
-          self.couplings.append(c) # store
+          self.exchange.append(c) # store
   def set_hoppings(self,fun):
       """Add the spin independent hoppings"""
       self.computed_gs = False # say that GS has not been computed
       self.hoppings = dict()
-      for i in range(self.ns): # loop
-          for j in range(self.ns): # loop
-              if self.sites[i]==1 and self.sites[j]==1:
-                  c = fun(i,j)
-                  if np.abs(c)>0.0:
-                      self.hoppings[(i,j)] = Coupling(i,j,c) # store
+      if callable(fun):
+        for i in range(self.ns): # loop
+            for j in range(self.ns): # loop
+                if self.sites[i] in [0,1] and self.sites[j] in [0,1]:
+                    c = fun(i,j)
+                    if np.abs(c)>0.0:
+                        self.hoppings[(i,j)] = Coupling(i,j,c) # store
+      else: raise # Error
   def set_spinful_hoppings(self,fun):
       """Add the spin independent hoppings"""
       self.computed_gs = False # say that GS has not been computed
@@ -127,8 +130,8 @@ class Many_Body_Hamiltonian():
   def set_fields(self,fun):
     self.computed_gs = False # say that GS has not been computed
     self.fields = [fun(i) for i in range(self.ns)] # fields
-  def setup_sweep(self,mode="default"):
-    setup_sweep(self,mode=mode)
+#  def setup_sweep(self,mode="default"):
+#    setup_sweep(self,mode=mode)
   def setup_task(self,mode="GS",task=dict()):
     from .taskdmrg import setup_task
     setup_task(self,mode=mode,task=task)
@@ -139,7 +142,7 @@ class Many_Body_Hamiltonian():
     os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt") # run the DMRG calculation
   def entropy(self,n=1):
     """Return the entanglement entropy"""
-    self.setup_sweep()
+#    self.setup_sweep()
     self.setup_task("entropy")
     self.write_hamiltonian() # write the Hamiltonian to a file
     self.run() # perform the calculation
@@ -160,7 +163,7 @@ class Many_Body_Hamiltonian():
   def get_excited(self,n=10,mode="DMRG"):
     self.to_folder() # go to temporal folder
     if mode=="DMRG":
-      self.setup_sweep()
+#      self.setup_sweep()
       self.setup_task("excited",task={"nexcited":str(n)})
       self.write_hamiltonian() # write the Hamiltonian to a file
       self.run() # perform the calculation
@@ -247,9 +250,9 @@ from .writemps import write_hoppings
 from .writemps import write_hubbard
 from .writemps import write_fields
 from .writemps import write_sites
-from .writemps import write_couplings
+from .writemps import write_exchange
 from .writemps import write_correlators
-from .writemps import write_sweeps
+#from .writemps import write_sweeps
 from .writemps import write_pairing
 
 
@@ -275,7 +278,7 @@ def setup_sweep(self,mode="default"):
   sweep["maxm"] = self.maxm
   sweep["cutoff"] = self.cutoff
   self.sweep = sweep # initialize
-  write_sweeps(self) # write the sweeps
+#  write_sweeps(self) # write the sweeps
 
 
 

@@ -21,3 +21,5 @@ s = entropy.dynamical_correlator_kpm(sc)
 import matplotlib.pyplot as plt
 plt.plot(range(len(s)),s,c="blue",label="DMRG")
 plt.show()
+
+

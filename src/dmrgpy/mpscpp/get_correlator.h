@@ -66,20 +66,25 @@ void get_correlator()   {
     cfile >> i >> j; // index of correlators
     c = 0.0 ; // initialize
     // get the two operators
-    auto opi = get_operator(sites,i,get_str("correlator_operator_i")) ;
-    auto opj = get_operator(sites,j,get_str("correlator_operator_j")) ;
-    auto psi1 = exactApplyMPO(psi,opi,{"Maxm",maxm,"Cutoff",cutoff}) ;
-    auto psi2 = exactApplyMPO(psi,opj,{"Maxm",maxm,"Cutoff",cutoff}) ;
-    c = overlap(psi1,psi2); // compute the overlap
-//    if (site_type(i)!=1) { // Spin
+    if (site_type(i)>1) { // Spin operators
+      auto opi = get_operator(sites,i,get_str("correlator_operator_i")) ;
+      auto opj = get_operator(sites,j,get_str("correlator_operator_j")) ;
+      auto psi1 = exactApplyMPO(psi,opi,{"Maxm",maxm,"Cutoff",cutoff}) ;
+      auto psi2 = exactApplyMPO(psi,opj,{"Maxm",maxm,"Cutoff",cutoff}) ;
+      c = overlap(psi1,psi2); // compute the overlap
+    }
 //       c = overlap(psi,get_sidotsj_operator(sites,i,j),psi) ; // add 
 //       c += single_correlator(psi,sites,i+1,"Sx",j+1,"Sx"); // get this one
 //       c += single_correlator(psi,sites,i+1,"Sy",j+1,"Sy"); // get this one
 //       c += single_correlator(psi,sites,i+1,"Sz",j+1,"Sz"); // get this one
 //    } ;
-//    if (site_type(i)==1) { // fermion
-//       c = overlap(psi,get_hopping_operator(sites,i,j),psi) ; // add 
-//    } ;
+//  BE CAREFUL
+//  fermionic operators have strings and cannot be computed in the 
+//  previous way, the MPO has to be explicitly created with strings  
+    if (site_type(i)<=1) { // fermions (spinful or spinless)
+// so far only hopping terms have been implemented
+       c = overlap(psi,get_hopping_operator(sites,i,j),psi) ; // add 
+    } ;
     ofile << ic << "   " << c << endl ;
   };
   ofile.close() ;

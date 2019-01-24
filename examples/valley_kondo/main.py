@@ -35,3 +35,5 @@ import time
 print(sc.gs_energy())
 #exit()
 #(x2,y2) = sc.get_dynamical_correlator(n=600,mode="DMRG",i=0,j=0,delta=0.02)
+
+

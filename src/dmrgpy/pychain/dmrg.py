@@ -150,7 +150,6 @@ class DMRGresult():
               f.write(str(m[i][j])+"  ") # 
           f.write("\n") # 
         f.close()
-        return
 
         # write the DM distance #
         m = self.iteration_dmdis

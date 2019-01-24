@@ -22,3 +22,5 @@ plt.plot(bs,gs,marker="o")
 plt.xlabel("Bx")
 plt.ylabel("Gap")
 plt.show()
+
+

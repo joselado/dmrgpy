@@ -35,3 +35,5 @@ plt.show()
 # uncomment this to check the code (only for small systems!!)
 #e1 = sc.gs_energy(mode="ED") # ground state energy using exact diagonalization
 #print("Energy using exact diagonalization",e1)
+
+

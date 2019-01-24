@@ -15,12 +15,12 @@ def spinchain_meanfield(sc,p=0.0,mix=0.9,m0=None,maxerror=1e-06,
         sc = sc0.copy() # copy the initial Hamiltonian
         def m2mf(mnew):
           fnew = np.array([np.zeros(3) for i in range(sc.ns)]) # new mean field
-          for c in sc.couplings: # loop over coupled sites
+          for c in sc.exchange: # loop over coupled sites
               fnew[c.i] += Av(c.g,mnew[c.j])  # contribution to MF
               fnew[c.j] += Av(c.g,mnew[c.i])  # contribution to MF
           return fnew
         fold = m2mf(mold) # magnetization to mean field
-        for c in sc.couplings: c.g *= p # scale the many-body couplings
+        for c in sc.exchange: c.g *= p # scale the many-body exchange
         sc.set_fields(lambda i: (1.-p)*fold[i]) # Add new magnetic fields
         sc.gs_energy() # perform calculation
         mnew = np.array(sc.get_magnetization()).transpose() # magnetization

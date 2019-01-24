@@ -19,3 +19,5 @@ es = sc.get_excited(n=5) # compute excited states with DMRG
 gap = es[4] - es[0]
 print("Haldane gap =",gap)
 sc.clean() # clean files
+
+

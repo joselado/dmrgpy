@@ -17,7 +17,6 @@ def get_correlator(self,pairs=[[]],name="SS"):
     # normal workflow #
     ###################
     self.to_folder() # go to temporal folder
-    self.setup_sweep()
     namei,namej = operatornames.recognize(self,name) # return that one
     task = {"correlator_operator_i":namei,"correlator_operator_j":namej}
     self.setup_task("correlator",task=task)

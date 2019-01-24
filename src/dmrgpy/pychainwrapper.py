@@ -7,7 +7,7 @@ def get_full_hamiltonian(self):
   sc = get_pychain(self) # get pychain object
   def get_coupling(i,j):
     """Return the coupling between two sites"""
-    for c in self.couplings:
+    for c in self.exchange:
       if i==c.i and j==c.j: return c.g
     return np.zeros((3,3))
   h = sc.add_tensor_interaction(get_coupling) # add interaction

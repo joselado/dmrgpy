@@ -17,3 +17,5 @@ cs = sc.magnetization()[0] # compute the magnetization
 import matplotlib.pyplot as plt
 plt.plot(range(len(cs)),cs) # correlator using DMRG
 plt.show()
+
+

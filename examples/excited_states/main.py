@@ -23,3 +23,5 @@ print(es2)
 print("\n")
 print("Relative error",np.sum(np.abs(es1-es2)))
 sc.clean() # remove temporal files
+
+

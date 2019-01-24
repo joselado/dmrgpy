@@ -53,6 +53,7 @@ def write_tasks(self):
   # parameters of dmrg algorithm
   fo.write(" maxm = "+str(self.maxm)+"\n") # maximum bond dimension
   fo.write(" cutoff = "+str(self.cutoff)+"\n") # maximum discarded weight
+  fo.write(" nsweeps = "+str(self.nsweeps)+"\n") # maximum discarded weight
   fo.write("}\n")
   fo.close()
 

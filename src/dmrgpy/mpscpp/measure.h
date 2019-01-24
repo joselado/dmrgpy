@@ -19,7 +19,7 @@ static auto measure =[](auto psi, auto sites) {
 	  syj = overlap(psi,get_operator(sites,j-1,"Sy"),psi);
 	  szj = overlap(psi,get_operator(sites,j-1,"Sz"),psi);
 	};
-	if (site_type(j-1)!=1) { // spin site
+	if (site_type(j-1)>1) { // spin site
           psi.position(j);
           ITensor ket = psi.A(j);
           ITensor bra = dag(prime(ket,Site));

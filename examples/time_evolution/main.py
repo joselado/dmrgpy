@@ -31,3 +31,5 @@ plt.legend()
 #plt.plot(x,y.imag)
 #plt.scatter(x,y.imag)
 plt.show()
+
+

@@ -15,3 +15,5 @@ sc.set_exchange(fj)
 from dmrgpy import multicorrelator
 es = np.linspace(0.0,4.0,100)
 multicorrelator.multicorrelator(sc,es=es)
+
+

@@ -27,3 +27,5 @@ for i in range(10):
   print(e)
 plt.plot(range(len(es)),es,marker="o")
 plt.show()
+
+

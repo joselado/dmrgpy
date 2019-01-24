@@ -26,3 +26,5 @@ m = np.matrix([[fh(i,j) for i in range(n)] for j in range(n)])
 import scipy.linalg as lg
 e = lg.eigvalsh(m)
 print("ED=",2*np.sum(e[e<0.]))
+
+

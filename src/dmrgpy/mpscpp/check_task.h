@@ -21,7 +21,7 @@ static auto get_int_value= [](auto name) {
 
 static auto get_float_value= [](auto name) {
   auto input = InputGroup("tasks.in","tasks");
-  auto N = input.getReal(name,1);
+  auto N = input.getReal(name,0.0);
   return N ;
 }
 ;

@@ -39,3 +39,5 @@ import matplotlib.pyplot as plt
 # plot the result
 plt.plot(x,y.real,marker="o")
 plt.show()
+
+

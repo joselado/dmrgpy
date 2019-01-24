@@ -1,7 +1,7 @@
 
 static auto  get_exchange=[](auto ampo) {
     ifstream jfile; // file to read
-    jfile.open("couplings.in"); // file with the coupling
+    jfile.open("exchange.in"); // file with the coupling
     int nj;
     jfile >> nj; // read the number of couplings
     std::complex<double> jxx; // declare js

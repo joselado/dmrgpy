@@ -42,3 +42,5 @@ print(fc.get_delta())
 import matplotlib.pyplot as plt
 plt.plot(range(len(ds)),ds)
 plt.show()
+
+

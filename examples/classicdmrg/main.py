@@ -58,3 +58,5 @@ t2 = time.clock()
 print("Time in classic DMRG",t1-t0)
 print("Time in MPS",t2-t1)
 if abs(e0-e1)>0.01: raise
+
+

@@ -41,3 +41,5 @@ es = np.array(es) # array
 import matplotlib.pyplot as plt
 plt.scatter(ns,es/((alpha/ns)))
 plt.show()
+
+

@@ -66,3 +66,5 @@ plt.plot(mus,d2s,marker="o")
 plt.subplot(122)
 plt.plot(mus,deltas,marker="o")
 plt.show()
+
+

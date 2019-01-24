@@ -32,3 +32,5 @@ plt.plot(x2,np.abs(y2),label="TD")
 plt.legend()
 #plt.scatter(x,y.imag)
 plt.show()
+
+

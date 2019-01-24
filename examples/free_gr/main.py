@@ -2,7 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
-import fermionchain
+from dmrgpy import fermionchain
 n = 4 # number of spinful fermionic sites
 fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 ####### Input matrices #######
@@ -35,3 +35,5 @@ plt.scatter(xf,yf.real,c="blue")
 plt.plot(x,y.imag,c="red")
 plt.scatter(xf,yf.imag,c="red")
 plt.show()
+
+

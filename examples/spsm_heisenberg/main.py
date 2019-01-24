@@ -40,3 +40,5 @@ plt.xlim([-0.5,4.5])
 plt.legend()
 plt.show()
 #sc.clean()
+
+

@@ -7,7 +7,10 @@ from .pyfermion import mbfermion
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     """Class for fermionic Hamiltonians"""
     def __init__(self,n,spinful=True):
-        Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
+        if spinful:
+          Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
+        else:
+          Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
         self.spinful = spinful
     def get_density(self):
         """Return the electronic density"""
@@ -24,17 +27,29 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         return m.transpose()[1] # return delta
     def hamiltonian_free(self,pairs=[[]]):
         """Compute the free correlator"""
-        if len(self.hubbard)!=0: raise
-        else:
-          m = np.zeros((self.ns*2,self.ns*2)) # matrix
-          for key in self.hoppings:
-              t = self.hoppings[key]
-              m[2*t.i,2*t.j] = t.g
-              m[2*t.i+1,2*t.j+1] = t.g
-        if type(self.spinful_hoppings)!=type(dict()):
-          m = m + self.spinful_hoppings
+        if len(self.hubbard)!=0: raise # not implemented
+        else: # everythin ok so far
+          if self.spinful: # spinful
+            m = np.zeros((self.ns*2,self.ns*2)) # matrix
+            for key in self.hoppings:
+                t = self.hoppings[key]
+                m[2*t.i,2*t.j] = t.g
+                m[2*t.i+1,2*t.j+1] = t.g
+          if type(self.spinful_hoppings)!=type(dict()):
+            m = m + self.spinful_hoppings
+          else: # spinless Hamiltonian
+            m = np.zeros((self.ns,self.ns)) # matrix
+            for key in self.hoppings:
+                t = self.hoppings[key]
+                m[t.i,t.j] = t.g
         return m
-    def correlator_free(self,pairs=[[]]):
+    def get_correlator(self,name="ccd",**kwargs):
+          """
+          Wrapper for static correlator
+          """
+          if name!="ccd": raise # not implemented
+          return Many_Body_Hamiltonian.get_correlator(self,name=name,**kwargs)
+    def get_correlator_free(self,pairs=[[]]):
           """Get the correlator for free fermions"""
           m = self.hamiltonian_free() # get the single body matrix
           (es,vs) = lg.eigh(m) # diagonalize
@@ -47,7 +62,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
                       if self.spinful: # spinful Hamiltonian
                           for i in range(2):
                             o += v[2*p[0]+i]*np.conjugate(v[2*p[1]+i]) # add
-                      else: raise # not implemented
+                      else: 
+                            o += v[p[0]]*np.conjugate(v[p[1]]) # add
               out.append(o)
           return np.array(out) # return
     def gs_energy_free(self):

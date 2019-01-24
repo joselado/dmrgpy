@@ -26,3 +26,5 @@ for i in range(n): # loop over sites
     fo.write(str(y)+"\n")
   fo.flush()
 fo.close()
+
+
