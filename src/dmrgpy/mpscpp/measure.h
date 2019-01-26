@@ -45,7 +45,8 @@ static auto measure =[](auto psi, auto sites) {
   for(int j=1; j <= N; ++j) 
         {
         //re-gauge psi to get ready to measure at position j
-	if (site_type(j-1)==1) { // fermionic site
+//	if (site_type(j-1)==1) { // fermionic site
+	if ((site_type(j-1)==1) or (site_type(j-1)==0)) { // fermionic site
 	  auto d = overlap(psi,get_occupation_operator(sites,j-1),psi);
 	  auto d2 = overlap(psi,get_occupation2_operator(sites,j-1),psi);
 	  auto delta = overlapC(psi,get_delta_operator(sites,j-1),psi);

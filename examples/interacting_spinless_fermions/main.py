@@ -4,16 +4,27 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
-n = 40
+n = 10
 fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
-def ft(i,j):
-    if abs(j-i)==1: return 1.0 
-    return 0.0
-fc.set_hoppings(ft) # hoppings
-fc.set_hubbard(lambda i,j: ft(i,j)*0.) # density-density interaction
 
-e = fc.gs_energy() # energy with DMRG
-print("Ground state energy",e)
+# random matrix for the hoppings
+m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
+m = m + m.H
+m *= 5.
+# random matrix for hubbard
+mu = np.matrix(np.random.random((n,n)))
+mu = mu + mu.H
+mu *= 0.1
+#mu *= 0. ; mu[0,1] = 1.0 ; mu[1,0] = 1.0 ; m = m*0. ; m[0,0] =-2.0;m[1,1]=-2.0
+# create hoppings and hubbard
+fc.set_hoppings(lambda i,j: m[i,j]) # hoppings
+fc.set_hubbard(lambda i,j: mu[i,j]) # density-density interaction
+
+e = fc.gs_energy(mode="DMRG") # energy with DMRG
+e1 = fc.gs_energy(mode="ED") # energy with ED
+print("Ground state energy DMRG",e)
+print("Ground state energy ED",e1)
+exit()
 
 
 import matplotlib.pyplot as plt

@@ -62,8 +62,8 @@ def write_basis(basis):
 
 def fermi_sign(v,i,j):
   """Return the sign coming from statistics"""
-  if v[i]==0: return 0. # next iteration, destructor empty
-  if (i!=j) and v[j]==1: return 0. # next iteration, creator filled
+#  if v[i]==0: return 0. # next iteration, destructor empty
+#  if (i!=j) and v[j]==1: return 0. # next iteration, creator filled
   fac = 1 # start in 1
   for ii in range(i): # how many before destroying 
     if v[ii]==1: fac *= -1 # multiply by -1
@@ -163,6 +163,41 @@ def one2many(m,ne=None):
   nsites = m.shape[0] # shape of the matrix
   basis = generate_basis(nsites,constrain=f) # generate basis
   return one2many_basis(m,basis)
+
+
+def destroy(basis,bdict,nm,isite):
+  """Convert a one body operator into a manybody operator"""
+  if bdict is None: bdict = get_dictionary(basis) # get the dictionary
+  if nm!=len(basis[0]): raise # error if wrong dimensions
+  on = len(basis) # dimension of output matrix
+  nout = len(basis) # length of the output matrix
+  mout = csc_matrix(([],([],[])),shape=(on,on)) # output matrix
+  ii = np.zeros(on,dtype=np.int) # indexes
+  jj = np.zeros(on,dtype=np.int) # indexes
+  vals = np.zeros(on,dtype=np.complex) # values
+  for ib in range(len(basis)): # loop over basis elements
+    b = basis[ib] # get the vector
+    if b[isite]==0: continue # next iteration, destructor empty
+    bo = b.copy() # copy vector
+    bo[isite] = 0 # empty the level
+    jb = bdict[tuple(bo)] # get index of the out vector
+#     except: continue # state is not in basis
+    ii[ib] = ib # store index 
+    jj[ib] = jb # store index 
+    vals[ib] = fermi_sign(b.copy(),isite,0) # store value
+  mi = csc_matrix((vals,(jj,ii)),shape=(on,on)) #  matrix
+  mout = mout + mi # add contribution
+  return mout # return matrix
+  
+
+
+
+
+
+
+
+
+
 
 
 

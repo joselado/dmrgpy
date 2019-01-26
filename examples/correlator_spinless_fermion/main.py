@@ -8,6 +8,7 @@ n = 10
 fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
 def ft(i,j):
     if abs(j-i)==1: return 1.0 
+    if i==j: return 0.5
     return 0.0
 fc.set_hoppings(ft) # hoppings
 

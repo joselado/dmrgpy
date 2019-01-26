@@ -38,6 +38,7 @@ class Many_Body_Hamiltonian():
     self.spinful_hoppings = dict() # empty dictionary
     self.pairing = dict() # empty dictionary
     self.hubbard = dict() # empty dictionary
+    self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
 #    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
     # additional arguments
     self.kpmmaxm = 50 # bond dimension in KPM
@@ -127,6 +128,11 @@ class Many_Body_Hamiltonian():
                   c = fun(i,j)
                   if np.abs(c)>0.0:
                       self.hubbard[(i,j)] = Coupling(i,j,c) # store
+      m = np.zeros((self.ns,self.ns)) # initialize
+      for key in self.hubbard:
+          c = self.hubbard[key]
+          m[c.i,c.j] = c.g # create entry
+      self.hubbard_matrix = m # store matrix
   def set_fields(self,fun):
     self.computed_gs = False # say that GS has not been computed
     self.fields = [fun(i) for i in range(self.ns)] # fields

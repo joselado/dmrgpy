@@ -22,26 +22,30 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         d2 = self.get_file("MEASURE_N2.OUT").transpose()[1] # get the file
         return d2-d**2 # return density fluctuations
     def get_delta(self):
-        """Return the electronic density"""
+        """
+        Return the superfluid density
+        """
         m = self.get_file("MEASURE_DELTA.OUT") # get the file
         return m.transpose()[1] # return delta
     def hamiltonian_free(self,pairs=[[]]):
-        """Compute the free correlator"""
-        if len(self.hubbard)!=0: raise # not implemented
-        else: # everythin ok so far
-          if self.spinful: # spinful
-            m = np.zeros((self.ns*2,self.ns*2)) # matrix
-            for key in self.hoppings:
-                t = self.hoppings[key]
-                m[2*t.i,2*t.j] = t.g
-                m[2*t.i+1,2*t.j+1] = t.g
-            if type(self.spinful_hoppings)!=type(dict()):
-              m = m + self.spinful_hoppings
-          else: # spinless Hamiltonian
-            m = np.zeros((self.ns,self.ns)) # matrix
-            for key in self.hoppings:
-                t = self.hoppings[key]
-                m[t.i,t.j] = t.g
+        """
+        Return the free part of the fermionic Hamiltonian
+        """
+#        if len(self.hubbard)!=0: raise # not implemented
+#        else: # everythin ok so far
+        if self.spinful: # spinful
+          m = np.zeros((self.ns*2,self.ns*2),dtype=np.complex) # matrix
+          for key in self.hoppings:
+              t = self.hoppings[key]
+              m[2*t.i,2*t.j] = t.g
+              m[2*t.i+1,2*t.j+1] = t.g
+          if type(self.spinful_hoppings)!=type(dict()):
+            m = m + self.spinful_hoppings
+        else: # spinless Hamiltonian
+          m = np.zeros((self.ns,self.ns),dtype=np.complex) # matrix
+          for key in self.hoppings:
+              t = self.hoppings[key]
+              m[t.i,t.j] = t.g
         return m
     def get_correlator(self,name="ccd",**kwargs):
           """
@@ -78,9 +82,13 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
         if mode=="DMRG": return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
-        else: 
+        elif mode=="ED": 
 #            return self.gs_energy_free()
-            return mbfermion.gs_energy(self.hamiltonian_free())
+            if not self.spinful: # spinless
+              return mbfermion.gs_energy(self.hamiltonian_free(),
+                    hubbard=self.hubbard_matrix)
+            else: raise # not implemented
+        else: raise # unrecognised
 
 
 
