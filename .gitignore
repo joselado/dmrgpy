@@ -12,3 +12,4 @@ status.txt
 *.mps
 *.dmrg
 __pycache__
+*.a

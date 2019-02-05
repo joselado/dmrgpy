@@ -18,7 +18,6 @@ sample/exthubbard-g
 sample/idmrg
 sample/idmrg-g
 this_dir.mk
-options.mk
 .exrc
 unittest/test-g
 unittest/test
