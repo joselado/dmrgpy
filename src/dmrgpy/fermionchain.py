@@ -53,6 +53,19 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           """
           if name!="ccd": raise # not implemented
           return Many_Body_Hamiltonian.get_correlator(self,name=name,**kwargs)
+    def get_dynamical_correlator(self,name="densitydensity",
+            mode="DMRG",**kwargs):
+        """
+        Compute a dynamical correlator
+        """
+        if mode=="DMRG":
+            if name is not "densitydensity": raise # this does not work
+            return Many_Body_Hamiltonian.get_dynamical_correlator(self,
+                    name=name,**kwargs)
+        elif mode=="ED":
+            MBF = self.get_MBF() # get the object
+            return MBF.get_dynamical_correlator(name=name,**kwargs)
+        else: raise
     def get_correlator_free(self,pairs=[[]]):
           """Get the correlator for free fermions"""
           m = self.hamiltonian_free() # get the single body matrix
@@ -82,13 +95,19 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
         if mode=="DMRG": return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
-        elif mode=="ED": 
-#            return self.gs_energy_free()
-            if not self.spinful: # spinless
-              return mbfermion.gs_energy(self.hamiltonian_free(),
-                    hubbard=self.hubbard_matrix)
-            else: raise # not implemented
+        elif mode=="ED": return self.get_MBF().get_gs()
         else: raise # unrecognised
+    def get_MBF(self):
+        """
+        Return the many body fermion object
+        """
+        if not self.spinful: # spinless
+          m0 = self.hamiltonian_free() # free Hamiltonian
+          MBf = mbfermion.MBFermion(m0.shape[0]) # create object
+          MBf.add_hopping(m0)
+          MBf.add_hubbard(self.hubbard_matrix)
+          return MBf # return the object
+        else: raise # not implemented
 
 
 

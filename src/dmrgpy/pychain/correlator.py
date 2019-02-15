@@ -95,7 +95,7 @@ def spismj_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,delta=0.1,n=500):
   vi = sm*csc(wf0).transpose() 
   vj = sp*csc(wf0).transpose() 
   h = -identity(h0.shape[0])*e0+h0
-  import kpm
+  from . import kpm
   x = es # energies
   scale = (emax-e0)*1.3
   (xs,ys) = kpm.dm_vivj_energy(h,vi,vj,scale=scale,
@@ -108,8 +108,8 @@ def spismj_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,delta=0.1,n=500):
 def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
              n=500,namei="X",namej="X"):
   """Calculate a correlation function S+S- in a frequency window"""
-  e0,wf0 = lg.eigsh(-h0,k=1,ncv=20,which="LA")
-  emax,wfmax = lg.eigsh(h0,k=1,ncv=20,which="LA")
+  e0,wf0 = slg.eigsh(-h0,k=1,ncv=20,which="LA")
+  emax,wfmax = slg.eigsh(h0,k=1,ncv=20,which="LA")
   e0,wf0 = -e0[0],np.transpose(wf0)[0]
   emax = emax[0]
   if namei=="X": sm = sc.sxi[i]
@@ -123,7 +123,7 @@ def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
   vi = sm*csc(wf0).transpose() 
   vj = sp*csc(wf0).transpose() 
   h = -identity(h0.shape[0])*e0+h0
-  import kpm
+  from . import kpm
   x = es # energies
   scale = np.max([np.abs(e0),np.abs(emax)])*3.0
   (xs,ys) = kpm.dm_vivj_energy(h,vi,vj,scale=scale,

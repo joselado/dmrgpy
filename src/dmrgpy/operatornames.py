@@ -33,6 +33,8 @@ def recognize(self,name):
         namei = "delta" ; namej = "delta"
     elif name=="deltadeltad":
         namei = "delta" ; namej = "deltad"
+    elif name=="densitydensity":
+        namei = "density" ; namej = "density"
     else: raise
 #  else:
 #      print("Dynamical correlator not recognised")

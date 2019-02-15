@@ -29,6 +29,7 @@ class Many_Body_Hamiltonian():
   def __init__(self,sites):
     self.sites = sites # list of the sites
     self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
+    self.clean() # clean calculation
     self.inipath = os.getcwd() # original folder
     self.ns = len(sites) # number of sites
     self.exchange = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list

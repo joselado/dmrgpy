@@ -28,10 +28,11 @@ read(std::istream& s)
 	int nm = 0; // initialize
         for(int j = 1; j <= N; ++j)
             {
-            auto I = IQIndex{};
-            sfile >> nm ; // read this spin
-            I.read(s);
-	    // S=3/2 is being confusing by spinful fermion!!!!
+            auto I = IQIndex{}; // generate an identity for this index
+            sfile >> nm ; // read the label of the site from sites.in
+            I.read(s); // read the site from sites.sites
+	    cout << "Reading site from sites.sites "<< nm << endl ;
+	    cout << "Read from sites.sites "<< I << endl ;
             if(nm == 3) store.set(j,SpinOneSite(I));
             else if (nm==0) sites.set(j,SpinlessSite(I)); // use fermions
             else if(nm == 1) store.set(j,HubbardSite(I));
@@ -63,8 +64,8 @@ SpinX(Args const& args)
     sfile >> N; // read the number of sites and number of projections
     auto sites = SiteStore(N); // get an empty list of sites
     for (int i=1;i<=N;i++)  {
-      sfile >> nm ; // read this spin
-      cout << "Reading  " << nm << endl;
+      sfile >> nm ; // read the name of that site
+      cout << "Reading  " << nm << endl; // record this
       if (nm==2) sites.set(i,SpinHalfSite(i)); // use spin=1/2
       else if (nm==0) sites.set(i,SpinlessSite(i)); // use fermions
       else if (nm==1) sites.set(i,HubbardSite(i)); // use spinful fermions
@@ -91,6 +92,7 @@ auto generate_sites() { // function to generate the sites
 
 auto get_sites() { // function to get the sites
     auto sites = generate_sites() ;  // generate the sites
+    // overwrite the sites
     if (check_task("gs_from_file")) readFromFile("sites.sites",sites);
     if (check_task("sites_from_file")) readFromFile("sites.sites",sites);
     cout << "Number of sites " << sites.N() << endl ;

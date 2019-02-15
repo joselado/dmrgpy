@@ -55,6 +55,7 @@ static auto get_operator= [](auto sites, int i, auto name) {
         	} ;
 	}
 	else if (site_type(i)==0) { // spinless fermionic site
+		cout << "Requesting site " << i << endl;
 		if (name=="Cdag") {
         		ampo += 1.0,"Cdag",i+1;
         	} ;

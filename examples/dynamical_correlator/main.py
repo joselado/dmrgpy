@@ -16,6 +16,7 @@ def fj(i,j):
   else: return 0.0
 sc.set_exchange(fj)
 
+sc.get_gs()
 
 #sc.kpmmaxm = 20 # KPM maxm
 import time
@@ -26,10 +27,18 @@ t1 = time.time()
         name="XX")
 t2 = time.time()
 print("Time with DMRG",t2-t1)
+
+
 (x3,y3) = sc.get_dynamical_correlator(mode="ED",i=i,j=j,delta=0.1,
         name="XX")
 t3 = time.time()
 print("Time with ED",t3-t2)
+
+
+(x4,y4) = sc.get_dynamical_correlator(mode="fullKPM",i=i,j=j,delta=0.1,
+        name="XX")
+t4 = time.time()
+print("Time with KPM-ED",t4-t3)
 
 
 
@@ -42,6 +51,7 @@ fig = plt.figure()
 fig.subplots_adjust(0.2,0.2)
 plt.plot(x2,np.abs(y2),c="blue",label="DMRG")
 plt.scatter(x3,np.abs(y3),c="green",label="ED")
+plt.scatter(x4,np.abs(y4),c="red",label="ED KPM")
 plt.legend()
 plt.xlabel("frequency [J]")
 plt.ylabel("Dynamical correlator")

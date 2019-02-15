@@ -128,13 +128,16 @@ def restrict_interval(x,y,window):
 
 
 def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
-             window=[-1,10],name="XX",delta=None,es=None):
+             window=[-1,10],name="XX",delta=2e-2,es=None):
+  """
+  Compute a dynamical correlator using the KPM-DMRG method
+  """
   if delta is not None: # estimate the number of polynomials
     scale = 0.
     for s in self.sites:
-        if s>1: scale += s**2
-        if s==1: scale += 4.
-    n = int(scale/(2.*delta))
+        if s>1: scale += s**2 # spins
+        else: scale += 4. # anything else
+    n = int(scale/(4.*delta))
   self.to_folder() # go to temporal folder
   if mode=="DMRG": 
 # get the moments

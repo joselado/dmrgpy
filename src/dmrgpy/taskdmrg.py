@@ -43,7 +43,15 @@ def write_tasks(self):
   fo = open("tasks.in","w")
   fo.write("tasks\n{\n")
   #
-  if self.gs_from_file: fo.write(" gs_from_file = true\n")
+  if self.gs_from_file: 
+      # this is a workaround
+      from . import fermionchain
+      if isinstance(self,fermionchain.Fermionic_Hamiltonian):
+        print("Restart does not work with fermions")
+ #     fo.write(" gs_from_file = true\n")
+        fo.write(" gs_from_file = false\n")
+      else:
+        fo.write(" gs_from_file = true\n")
   else: fo.write(" gs_from_file = false\n")
   if self.sites_from_file: fo.write(" sites_from_file = true\n")
   fo.write(" starting_file_gs = "+self.starting_file_gs+"\n") # starting WF
