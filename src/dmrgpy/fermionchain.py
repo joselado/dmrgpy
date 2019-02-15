@@ -95,7 +95,10 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
         if mode=="DMRG": return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
-        elif mode=="ED": return self.get_MBF().get_gs()
+        elif mode=="ED": 
+            if np.max(np.abs(self.hubbard_matrix))<1e-6:
+                return self.gs_energy_free()
+            else: return self.get_MBF().get_gs()
         else: raise # unrecognised
     def get_MBF(self):
         """
@@ -107,7 +110,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           MBf.add_hopping(m0)
           MBf.add_hubbard(self.hubbard_matrix)
           return MBf # return the object
-        else: raise # not implemented
+        else: raise 
 
 
 
@@ -115,7 +118,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
 
 def get_gr_free(self,es=np.linspace(-10.,10.,800),delta=0.1,i=0,j=0):
     m = self.hamiltonian_free() # get the single body matrix
-    print(m)
+#    print(m)
     y = np.zeros(es.shape[0],dtype=np.complex) # output
     iden = np.identity(m.shape[0])
     for ii in range(len(es)):

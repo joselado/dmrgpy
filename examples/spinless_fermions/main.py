@@ -15,6 +15,7 @@ def ft(i,j):
 fc.set_hoppings(ft) # hoppings
 e0 = fc.gs_energy(mode="ED") # energy with exact diagonalization
 e1 = fc.gs_energy(mode="DMRG") # energy with DMRG
-print(e0,e1)
+print("Energy with ED",e0)
+print("Energy with DMRG",e1)
 
 
