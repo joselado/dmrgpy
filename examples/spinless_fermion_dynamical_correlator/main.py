@@ -24,7 +24,7 @@ print("Energy with DMRG",e1)
 
 ### Compute the dyamical correlator ###
 
-name = "densitydensity" # name of the correlator
+name = "cc" # name of the correlator
 x0,y0 = fc.get_dynamical_correlator(i=1,j=1,mode="ED",name=name)
 x1,y1 = fc.get_dynamical_correlator(i=1,j=1,mode="DMRG",name=name)
 

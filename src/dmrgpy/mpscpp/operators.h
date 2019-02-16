@@ -1,3 +1,5 @@
+#include"fermionicoperators.h" // library with fermionic operators
+
 static auto get_operator= [](auto sites, int i, auto name) {
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)>1)  // spin site
@@ -60,29 +62,7 @@ static auto get_operator= [](auto sites, int i, auto name) {
   //      		ampo += 1.0,"Cdag",i+1;
     //    	} ;
 		if ((name=="C") or (name=="Cdag")) {
-			if (name=="C") {
-        		ampo += 1.0,"A",i+1; // bosonic one
-			}
-			if (name=="Cdag") {
-        		ampo += 1.0,"Adag",i+1; // bosonic one
-			}
-                        auto m0 = MPO(ampo) ; // create MPO
-                        auto m = MPO(ampo) ; // create MPO
-			for(int j=0;j<i;j++) {
-	                auto ampoi = AutoMPO(sites); // temporal one
-        		ampoi += 1.0,"F",j+1; // string operator
-			auto mi = MPO(ampoi) ; // create MPO
-			nmultMPO(mi,m0,m) ; // multiply MPO
-			m0 = m ; // reassign for next iteration
-			}
-			return m; // return MPO
-        	} ;
-		// superconducting terms
-		if (name=="delta") {
-        		ampo += 1.0,"C",i+1,"C",i+1;
-        	} ;
-		if (name=="deltad") {
-        		ampo += 1.0,"Cdag",i+1,"Cdag",i+1;
+			return fermionic_operator_spinless(sites,i,name) ;
         	} ;
 		// density terms
 		if (name=="density") {
@@ -189,5 +169,3 @@ static auto add_spin_operator= [](auto ampo, auto sites, float v, int i, auto na
 	return ampo ;
 }
 ;
-
-
