@@ -74,43 +74,6 @@ def get_dos(self,n=1000,mode="DMRG",ntries=10):
   return (xs,ys)
 
 
-def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=True,window=[-1,10]):
-  self.to_folder() # go to temporal folder
-  if mode=="DMRG": 
-# get the moments
-    mus = get_moments_spismj_dmrg(self,n=n,i=i,j=j,smart=smart) 
-    if smart: # smart energy window
-      scale,shift = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
-    else: # convertional brute force window
-      scale = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
-      shift = 0.0 # energy shift
-    # check that the moments do not take absur values
-    mmu = np.max(np.abs(mus[1:n//10])) # average
-    xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
-    ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz").real # generate the DOS
-    xs -= shift # energy shift
-    xs /= scale
-    ys *= scale
-#    e0 = self.gs_energy() # ground state energy
-    e0 = np.genfromtxt("GS_ENERGY.OUT") # ground state energy
-    xs -= e0 # substract GS energy
-    # now retain only an energy window
-  else: 
-    h = self.get_full_hamiltonian()
-    sc = self.get_pychain()
-    from .pychain import correlator as pychain_correlator
-    if mode=="fullKPM":
-      (xs,ys) = pychain_correlator.spismj_kpm(sc,h,n=n,i=i,j=j)
-    elif mode=="full" or mode=="ED":
-      delta = float(self.ns)/n*1.5
-      (xs,ys) = pychain_correlator.spismj(sc,h,delta=delta,i=i,j=j)
-    else: raise
-  self.to_origin() # go to origin folder
-  (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
-  np.savetxt("SPISPJ.OUT",np.matrix([xs.real,ys.real]).T)
-  return (xs.real,ys.real)
-
-
 def restrict_interval(x,y,window):
   """Restrict the result to a certain energy window"""
   if window is None: return (x,y)

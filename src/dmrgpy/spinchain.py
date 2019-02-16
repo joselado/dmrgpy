@@ -16,6 +16,18 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         cs = self.correlator(pairs=pairs,mode="DMRG") # compute
         ns = range(len(cs)) # number of correlators
         return np.array([ns,cs])
+    def get_dynamical_correlator(self,mode="DMRG",**kwargs):
+        """
+        Compute the dynamical correlator
+        """
+        if mode=="DMRG": # Use MPS
+            return Many_Body_Hamiltonian.get_dynamical_correlator(self,
+                    **kwargs)
+        else: # use exact diagonalization
+            from . import pychainwrapper
+            return pychainwrapper.get_dynamical_correlator(self,mode=mode,
+                    **kwargs)
+
     def get_correlator(self,pairs=[[]],mode="DMRG",**kwargs):
         """Return the correlator"""
         if mode=="DMRG": # using DMRG
