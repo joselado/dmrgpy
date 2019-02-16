@@ -121,8 +121,8 @@ class MBFermion():
         Return a certain operator
         """
         if name=="density": return self.get_density(i)
-        elif name=="c": return self.get_c(i)
-        elif name=="cd": return self.get_cd(i)
+        elif name=="C": return self.get_c(i)
+        elif name=="Cdag": return self.get_cd(i)
         else: raise
     def get_dynamical_correlator(self,i=0,j=0,
             es=np.linspace(-1.0,10,500),delta=1e-1,

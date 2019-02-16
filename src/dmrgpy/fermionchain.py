@@ -58,8 +58,9 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """
         Compute a dynamical correlator
         """
+        name = "cdc"
         if mode=="DMRG":
-            if name is not "densitydensity": raise # this does not work
+#            if name is not "densitydensity": raise # this does not work
             return Many_Body_Hamiltonian.get_dynamical_correlator(self,
                     name=name,**kwargs)
         elif mode=="ED":
