@@ -15,6 +15,7 @@ def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):
     namei,namej = operatornames.recognize(self,name)
     if self.fit_td: fittd = "true"
     else: fittd = "false"
+    fittd = "true"
     task = {"time_evolution":"true",
             "tevol_site_i":str(i),
             "tevol_site_j":str(j),
@@ -34,11 +35,12 @@ def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):
 
 
 
-def correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.01,
-        nt=None,factor=1):
+def correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.1,
+        nt=None,factor=1,i=0,j=0,delta=1e-1):
     """Compute a certain dynamical correlator"""
-    if nt is None: nt=int(1000/dt)
-    (ts,cs) = evolution(self,dt=dt,nt=nt) # get correlator
+    self.get_gs() # get the ground state
+    if nt is None: nt=int(10/delta/dt)
+    (ts,cs) = evolution(self,dt=dt,nt=nt,i=i,j=j) # get correlator
     cs = cs*np.exp(-1j*self.e0*ts) # factor out the phase
     # interpolate the time evolution
     ftr = interp1d(ts,cs.real,fill_value=0.0,bounds_error=False)
