@@ -45,12 +45,12 @@ def write_tasks(self):
   #
   if self.gs_from_file: 
       # this is a workaround
-      from . import fermionchain
-      if isinstance(self,fermionchain.Fermionic_Hamiltonian):
-        print("Restart does not work with fermions")
+#      from . import fermionchain
+#      if isinstance(self,fermionchain.Fermionic_Hamiltonian):
+#        print("Restart does not work with fermions")
  #     fo.write(" gs_from_file = true\n")
-        fo.write(" gs_from_file = false\n")
-      else:
+#        fo.write(" gs_from_file = false\n")
+#      else:
         fo.write(" gs_from_file = true\n")
   else: fo.write(" gs_from_file = false\n")
   if self.sites_from_file: fo.write(" sites_from_file = true\n")

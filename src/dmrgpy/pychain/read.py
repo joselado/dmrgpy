@@ -128,7 +128,6 @@ def read_sop(spins,check=check):
     checking.angular(sc.sxi[i],sc.syi[i],sc.szi[i])
     checking.angular(sc.syi[i],sc.szi[i],sc.sxi[i])
     checking.angular(sc.szi[i],sc.sxi[i],sc.syi[i])
-
   return sc # return spin class
 
 

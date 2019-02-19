@@ -52,7 +52,7 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
 
 
 from . import pychain
-from .pychain.kpm import generate_profile
+from .algebra.kpm import generate_profile
 
 def get_dos(self,n=1000,mode="DMRG",ntries=10):
   if mode=="DMRG": 
@@ -84,6 +84,7 @@ def restrict_interval(x,y,window):
   if len(j)==0: j = len(x)
   else: j = j[0][0]
   return x[i:j].real,y[i:j]
+
 
 
 

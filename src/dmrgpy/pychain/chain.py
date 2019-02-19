@@ -140,6 +140,33 @@ def write_chain(spins):
 
 
 
+def get_chain(spins,check=False):
+  """ Read all the spin operators"""
+  (sxi,syi,szi) = generate_chain(spins) # return the chain
+  class Sclass: pass
+  sc = Sclass() # empty class
+  # now save in the class
+  sc.sxi = sxi
+  sc.syi = syi
+  sc.szi = szi
+  # and calculate total spins
+  sc.sx = sum(sxi)
+  sc.sy = sum(syi)
+  sc.sz = sum(szi)
+  sc.s2 = sc.sx*sc.sx + sc.sy*sc.sy + sc.sz*sc.sz
+  from . import checking
+  if check:
+    for i in range(len(spins)):
+      checking.angular(sc.sxi[i],sc.syi[i],sc.szi[i])
+      checking.angular(sc.syi[i],sc.szi[i],sc.sxi[i])
+      checking.angular(sc.szi[i],sc.sxi[i],sc.syi[i])
+  return sc # return spin class
+
+
+
+
+
+
 
 if __name__=="__main__":
 #  basis = generate_basis([4,3]) # return the basis

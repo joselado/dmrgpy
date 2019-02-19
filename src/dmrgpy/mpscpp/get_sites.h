@@ -12,7 +12,6 @@ class SpinX : public SiteSet
     };
 
 
-/// this does not work properly
 void inline SpinX::
 read(std::istream& s)
     {
@@ -34,7 +33,7 @@ read(std::istream& s)
 	    cout << "Reading site from sites.sites "<< nm << endl ;
 	    cout << "Read from sites.sites "<< I << endl ;
             if(nm == 3) store.set(j,SpinOneSite(I));
-            else if (nm==0) sites.set(j,SpinlessSite(I)); // use fermions
+            else if (nm==0) store.set(j,SpinlessSite(I)); // use fermions
             else if(nm == 1) store.set(j,HubbardSite(I));
             else if(nm == 2) store.set(j,SpinHalfSite(I));
             else if(nm == 4) store.set(j,SpinThreeHalfSite(I));

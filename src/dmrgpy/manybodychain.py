@@ -245,6 +245,11 @@ class Many_Body_Hamiltonian():
   def evolution(self,**kwargs):
     from . import timedependent
     return timedependent.evolution(self,**kwargs)
+  def get_kpm_scale(self):
+      """
+      Return an estimate of the bandwidth
+      """
+      return 3*self.ns # estimated bandwidth
 
 
 

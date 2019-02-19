@@ -1,6 +1,7 @@
 from scipy.sparse import issparse
 from scipy.sparse import csc_matrix as csc
 import scipy.linalg as dlg
+import scipy.sparse.linalg as slg
 import numpy as np
 
 
@@ -126,5 +127,17 @@ def matrix2vector(v):
     v = np.array(v) # convert to array
     if len(v.shape)==1: return v
     else: return v.reshape(v.shape[0]*v.shape[1])
+
+
+def ground_state(h,nmax=1000):
+  """Get a ground state"""
+  info = False
+  if h.shape[0]>nmax:
+    if info: print("Calling ARPACK")
+    eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
+  else:
+    if info: print("Full diagonalization")
+    eig,eigvec = dlg.eigh(h.todense())
+  return eig[0],eigvec.transpose()[0]
 
 

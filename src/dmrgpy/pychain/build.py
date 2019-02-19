@@ -135,47 +135,18 @@ class Spin_chain():
         self.inipath = os.getcwd() # initial path
   def to_folder(self): os.chdir(self.path)
   def to_origin(self): os.chdir(self.inipath) # go to original folder
-  def build(self,spins,use_lib=False,save=False):
+  def build(self,spins):
     """Creates a spin chain, using as input the spins list"""
     self.to_folder() # go to temporal folder
     if get_dimension(spins)>maxsize: 
       print("Surpased maximum allowed dimension for ED",maxsize)
       print("Dimension of the requested Hilbert space",get_dimension(spins))
       raise
-    if use_lib: # use already calculated operators
-      name = "" # initial name
-      for s in spins: name += str(int(round(2*s,0)))+"_" # name
-      if not os.path.isdir(pathlib+"/"+name): # folder does not exist
-        self.build(spins,use_lib=False,save=True) # recall and save
-        return # end function
-      for t in ["basis.out","*.op*","spins.in"]: # save this files
-        os.system("rm -f "+t) # remove files
-      os.system("cp "+pathlib+"/"+name+"/*.* ./") # copy files
-      print("Reading from",pathlib+"/"+name)
-    else: # generate the inputs
-      if usecpp: # use the c++ program
-        print("Generating matrices with C++")
-        generate_inputs(spins=spins) # generate input file
-        run() # run the c++ program
-        read.convert_sop(spins) # convert from C++ to npz format
-        os.system("rm -f *.op") # remove C++ files
-      else: # do not use the c++ program, use python
-#        print("Generating matrices with python")
-        from . import chain
-        chain.write_chain(spins) # create all the matrices
-      if save: # if save files
-        name = "" # initial name
-        for s in spins: name += str(int(round(2*s,0)))+"_" # name
-        if not os.path.isdir(pathlib+"/"+name): # folder does not exist
-          os.system("mkdir "+pathlib+"/"+name) # create
-        for t in ["basis.out","*.npz","spins.in"]: # save this files
-          os.system("cp "+t+"  "+pathlib+"/"+name) # copy files
-        print("Saving in ",pathlib+"/"+name)
-
+    from . import chain
     ###############################
     # now read the spin operators #
     ###############################
-    sobj = read.read_sop(spins) # return a list of classes with the spins
+    sobj = chain.get_chain(spins) # return a list of classes with the spins
     self.nspins = len(spins)
     self.spins = spins 
     self.sxi = sobj.sxi  # store different sx

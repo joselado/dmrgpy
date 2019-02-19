@@ -6,7 +6,8 @@ from scipy.sparse import csc_matrix as csc
 from scipy.sparse import identity
 import scipy.sparse.linalg as lg
 import scipy.sparse.linalg as slg
-from . import algebra
+from ..algebra import algebra
+from ..algebra import kpm
 
 # calculate dynamical correlators
 
@@ -95,7 +96,6 @@ def spismj_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,delta=0.1,n=500):
   vi = sm*csc(wf0).transpose() 
   vj = sp*csc(wf0).transpose() 
   h = -identity(h0.shape[0])*e0+h0
-  from . import kpm
   x = es # energies
   scale = (emax-e0)*1.3
   (xs,ys) = kpm.dm_vivj_energy(h,vi,vj,scale=scale,
@@ -123,12 +123,11 @@ def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
   vi = sm*csc(wf0).transpose() 
   vj = sp*csc(wf0).transpose() 
   h = -identity(h0.shape[0])*e0+h0
-  from . import kpm
   x = es # energies
   scale = np.max([np.abs(e0),np.abs(emax)])*3.0
   (xs,ys) = kpm.dm_vivj_energy(h,vi,vj,scale=scale,
                                     npol=n*4,ne=n*10,x=x)
-  return xs,np.conjugate(ys)/scale*np.pi
+  return xs,np.conjugate(ys)/scale
 
 
 
@@ -143,4 +142,4 @@ def static(sc,h,namei="X",namej="X",i=0,j=0):
         elif name=="Z": return sc.szi[i]
         else: raise
     m = getop(namei,i)*getop(namej,j) # get operator
-    return algebra.vAw_braket(wf,m,wf)
+    return algebra.braket_wAw(wf,m,wf)

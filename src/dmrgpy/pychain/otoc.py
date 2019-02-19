@@ -1,5 +1,5 @@
 
-from .algebra import Av
+from ..algebra import algebra
 from .evolution import discrete_evolution
 
 

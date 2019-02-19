@@ -1,6 +1,7 @@
 from .manybodychain import Many_Body_Hamiltonian
 import numpy as np
 from .dmrgpy2pychain import correlator as correlatorpychain
+from .dmrgpy2pychain import measure
 
 Spin_Hamiltonian = Many_Body_Hamiltonian
 
@@ -16,6 +17,12 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         cs = self.correlator(pairs=pairs,mode="DMRG") # compute
         ns = range(len(cs)) # number of correlators
         return np.array([ns,cs])
+    def get_magnetization(self,mode="DMRG",**kwargs):
+        if mode=="DMRG": # using DMRG
+            return Many_Body_Hamiltonian.get_magnetization(self)
+        elif mode=="ED": # using ED
+            return measure.get_magnetization(self)
+
     def get_dynamical_correlator(self,mode="DMRG",**kwargs):
         """
         Compute the dynamical correlator

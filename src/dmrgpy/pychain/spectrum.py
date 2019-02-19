@@ -51,16 +51,8 @@ def eigenstates(h,operator=None,k=None,evals=False):
       eigvec = np.conjugate(np.transpose(eigvec)) # arrange
       return eig,eigvec
 
-def ground_state(h,nmax=nfull):
-  """Get a ground state"""
-  if h.shape[0]>nmax:  
-    if info: print("Calling ARPACK")
-    eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
-  else:  
-    if info: print("Full diagonalization")
-    eig,eigvec = lg.eigh(h.todense())
-  return eig[0],eigvec.transpose()[0]
 
+from ..algebra.algebra import ground_state
 
 
 def ground_states(h,k=None,de=0.00001):
@@ -101,17 +93,8 @@ def exp_val(v,A):
   return data # return the value
 
 
-def viAvj(vi,A,vj):
-  """Calculate a certain expectation value"""
-  vi = csc(np.conjugate(vi)) # wavefunction
-  vj = csc(vj).transpose() # wavefunction
-  data = (vi*A*vj).trace()[0,0]
-  return data # return the value
 
-
-
-
-
+from ..algebra.algebra import braket_wAw as viAvj
 
 
 
@@ -158,15 +141,15 @@ def write_splitting(waves,ops):
 
 
 
-def exp_val(v,A):
-  """Calculate a certain expectation value"""
-  vi = csc(np.conjugate(v)) # wavefunction
-  vj = csc(v).transpose() # wavefunction
-  data = (vi*A*vj).todense()[0,0]
-#  data = round(data.real,5)
-  return data.real # return the value
+#def exp_val(v,A):
+#  """Calculate a certain expectation value"""
+#  vi = csc(np.conjugate(v)) # wavefunction
+#  vj = csc(v).transpose() # wavefunction
+#  data = (vi*A*vj).todense()[0,0]
+##  data = round(data.real,5)
+#  return data.real # return the value
 
-
+def exp_val(v,A): return viAvj(v,A).real
 
 
 def variational(h):
