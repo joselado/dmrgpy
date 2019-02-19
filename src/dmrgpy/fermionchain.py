@@ -112,6 +112,9 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           MBf.add_hubbard(self.hubbard_matrix)
           return MBf # return the object
         else: raise 
+    def get_kpm_scale(self):
+        """Energy scale for KPM method"""
+        return self.ns*(2.+10*np.mean(np.abs(self.hubbard_matrix)))
 
 
 

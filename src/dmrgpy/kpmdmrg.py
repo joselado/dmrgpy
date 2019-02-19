@@ -97,10 +97,7 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
   Compute a dynamical correlator using the KPM-DMRG method
   """
   if delta is not None: # estimate the number of polynomials
-    scale = 0.
-    for s in self.sites:
-        if s>1: scale += s**2 # spins
-        else: scale += 4. # anything else
+    scale = self.get_kpm_scale()
     n = int(scale/(4.*delta))
   self.to_folder() # go to temporal folder
   if mode=="DMRG": 
