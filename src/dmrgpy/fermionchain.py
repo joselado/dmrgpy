@@ -6,7 +6,7 @@ from .pyfermion import mbfermion
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     """Class for fermionic Hamiltonians"""
-    def __init__(self,n,spinful=True):
+    def __init__(self,n,spinful=False):
         if spinful:
           Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
         else:

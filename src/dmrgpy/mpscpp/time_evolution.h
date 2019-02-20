@@ -10,8 +10,8 @@ static auto quench=[](auto sites) {
   auto A2 = get_operator(sites,i2,name2);
   auto H = get_hamiltonian(sites) ; // get the ampo for the Hamiltonian
   auto psi = get_gs(sites,H) ; // get the ground state
-  int maxm = get_int_value("maxm") ; // bond dimension for KPM
-  auto cutoff = get_float_value("cutoff") ; // bond dimension for KPM
+  int maxm = get_int_value("maxm") ; // bond dimension
+  auto cutoff = get_float_value("cutoff") ; // cutoff
   // apply the first operator
   // now do the time evolution
   auto nt = get_int_value("tevol_nt"); // number of time steps

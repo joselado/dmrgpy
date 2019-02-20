@@ -9,6 +9,7 @@ from . import timedependent
 from . import groundstate
 from . import operatornames
 from . import correlator
+from . import cvm
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -163,10 +164,14 @@ class Many_Body_Hamiltonian():
     return get_dos(self,i=i,delta=delta,window=window)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
-  def get_dynamical_correlator(self,use_kpm=True,**kwargs):
+  def get_dynamical_correlator(self,submode="KPM",**kwargs):
     self.set_initial_wf(self.wf0) # set the initial wavefunction
-    if use_kpm: return kpmdmrg.get_dynamical_correlator(self,**kwargs)
-    else: return timedependent.correlator(self,**kwargs)
+    if submode=="KPM": # KPM method
+        return kpmdmrg.get_dynamical_correlator(self,**kwargs)
+    elif submode=="TD": # time dependent 
+        return timedependent.dynamical_correlator(self,**kwargs)
+    elif submode=="CVM": # CVM mode
+        return cvm.dynamical_correlator(self,**kwargs)
   def get_excited(self,n=10,mode="DMRG"):
     self.to_folder() # go to temporal folder
     if mode=="DMRG":
@@ -192,7 +197,7 @@ class Many_Body_Hamiltonian():
       if wf is None: return
       self.gs_from_file = True # use a wavefunction from a file
       self.starting_file_gs = wf.name # name of the wavefunction
-  def get_gs(self,mode="DMRG",wf0=None,best=True,n=1):
+  def get_gs(self,mode="DMRG",wf0=None,best=False,n=1):
     """Return the ground state"""
     if mode=="DMRG":
       if best: groundstate.best_gs(self,n=n) # best ground state from a set

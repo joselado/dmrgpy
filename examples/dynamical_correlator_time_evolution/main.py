@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import spinchain
 ns = np.array(range(4,30,2))
 es = []
-n = 4
+n = 8
 spins = [2 for i in range(n)]
 sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 def fj(i,j):
@@ -19,10 +19,10 @@ es = np.linspace(-1.0,10.0,4000)
 import time
 print("Starting")
 t0 = time.time()
-(x1,y1) = sc.get_dynamical_correlator(es=es,use_kpm=True)
+(x1,y1) = sc.get_dynamical_correlator(es=es,submode="KPM")
 t1 = time.time()
 sc.fit_td = True
-(x2,y2) = sc.get_dynamical_correlator(es=es,use_kpm=False)
+(x2,y2) = sc.get_dynamical_correlator(es=es,submode="TD")
 t2 = time.time()
 print("Time in TD",t2-t1)
 print("Time in KPM",t1-t0)

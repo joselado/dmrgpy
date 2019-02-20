@@ -11,7 +11,7 @@
 static auto get_ampo=[](auto sites) {
     auto ampo = AutoMPO(sites); // create the MPO for the Hamiltonian
     cout << "Adding exchange couplings" << endl ;
-    ampo = get_exchange(ampo); // add exchange to the Hamiltonian
+    ampo = get_exchange(ampo); // add exchange couplings to the Hamiltonian
     cout << "Adding fermionic hoppings" << endl ;
     ampo = get_hopping(ampo); // add hopping to the Hamiltonian
     cout << "Adding fermionic spinful hoppings" << endl ;

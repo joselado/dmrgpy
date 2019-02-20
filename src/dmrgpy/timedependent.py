@@ -35,7 +35,7 @@ def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):
 
 
 
-def correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.1,
+def dynamical_correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.1,
         nt=None,factor=1,i=0,j=0,delta=1e-1):
     """Compute a certain dynamical correlator"""
     self.get_gs() # get the ground state
