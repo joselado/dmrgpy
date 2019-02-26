@@ -1,11 +1,7 @@
 
-// STEFAN: uncomment this to put your header
+// CVM library
 #include"cvm.h" // Time evolution
 
-// STEFAN: comment this dummy function to put yours
-//static auto spectral_function=[](auto a1,auto a2,auto a3,auto a4,
-//		auto a5, auto a6, auto a7, auto a8) {
-//	return 1.0 ; } ;
 
 
 // compute the dynamical correlator with CVM
@@ -27,7 +23,6 @@ static auto cvm_dynamical_correlator=[](auto sites) {
   auto tol = get_float_value("cvm_tol") ; // GS energy
   auto omega = get_float_value("cvm_energy") ; // frequency
   auto args = Args("Cutoff=",cutoff,"Maxm=",maxm); // MPS arguments
-  // STEFAN: Here I am calling your function
   // Call the CVM function
   auto z = spectral_function(psi,H,A1,A2,omega,delta,
 		  e0,tol,max_it,maxm,cutoff,sites); // return the correlator

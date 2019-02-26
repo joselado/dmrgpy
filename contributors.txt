@@ -1,0 +1,9 @@
+# Main developer
+Jose Lado
+
+# Contributors
+Michael Ferguson: Mac compatibility C++14 fixing
+Stefan Sack: CVM algorithm (cvm.h)
+
+
+
