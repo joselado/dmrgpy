@@ -11,8 +11,9 @@ def evolution(self,mode="DMRG",**kwargs):
         evolution_exact = timedependent.evolution
         return evolution_exact(self,**kwargs)
 
-def evolution_dmrg(self,name="XX",i=0,j=0,nt=100,dt=0.1):
+def evolution_dmrg(self,name="XX",i=0,j=0,nt=10000,dt=0.1):
     namei,namej = operatornames.recognize(self,name)
+    namei = operatornames.hermitian(namei) # get the Hermitian one
     if self.fit_td: fittd = "true"
     else: fittd = "false"
     fittd = "true"
@@ -39,8 +40,8 @@ def dynamical_correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.1,
         nt=None,factor=1,i=0,j=0,delta=1e-1):
     """Compute a certain dynamical correlator"""
     self.get_gs() # get the ground state
-    if nt is None: nt=int(10/delta/dt)
-    (ts,cs) = evolution(self,dt=dt,nt=nt,i=i,j=j) # get correlator
+    if nt is None: nt=int(100/delta/dt)
+    (ts,cs) = evolution(self,dt=dt,nt=nt,i=i,j=j,name=name) # get correlator
     cs = cs*np.exp(-1j*self.e0*ts) # factor out the phase
     # interpolate the time evolution
     ftr = interp1d(ts,cs.real,fill_value=0.0,bounds_error=False)

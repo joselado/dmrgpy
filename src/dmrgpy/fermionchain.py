@@ -58,7 +58,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """
         Compute a dynamical correlator
         """
-        name = "cdc"
+        if name is not "density" and self.spinful: raise
         if mode=="DMRG":
 #            if name is not "densitydensity": raise # this does not work
             return Many_Body_Hamiltonian.get_dynamical_correlator(self,
@@ -114,7 +114,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         else: raise 
     def get_kpm_scale(self):
         """Energy scale for KPM method"""
-        return self.ns*(2.+10*np.mean(np.abs(self.hubbard_matrix)))
+        return 4*self.ns*(2.+10*np.mean(np.abs(self.hubbard_matrix)))
 
 
 

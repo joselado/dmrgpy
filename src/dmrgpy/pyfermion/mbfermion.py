@@ -133,7 +133,8 @@ class MBFermion():
         from ..algebra import kpm
         from .. import operatornames
         self.get_gs() # compute ground state
-        namei,namej = operatornames.recognize(None,name)
+        namei,namej = operatornames.recognize(None,name) # get the operator
+        namei = operatornames.hermitian(namei) # get the dagger
         A = self.get_operator(namei,i)
         B = self.get_operator(namej,j)
 #        A = self.get_cd(i) # first operator

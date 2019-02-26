@@ -32,6 +32,7 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   try: # select the right operators, be consistent with mpscpp.x
       from . import operatornames
       namei,namej = operatornames.recognize(self,name)
+      namei = operatornames.hermitian(namei) # get the Hermitian operator
   except:
       print("Dynamical correlator not recognised")
       raise

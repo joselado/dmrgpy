@@ -9,7 +9,6 @@ fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
 m = m + m.H # Make it Hermitian
 
-
 def ft(i,j):
     return m[i,j]
 
@@ -29,8 +28,14 @@ print("Energy with DMRG",e1)
 ### Compute the dyamical correlator ###
 
 name = "ccd" # name of the correlator
-x0,y0 = fc.get_dynamical_correlator(i=1,j=1,mode="ED",name=name)
-x1,y1 = fc.get_dynamical_correlator(i=1,j=1,mode="DMRG",submode="CVM",name=name)
+es = np.linspace(-0.5,6.0,100) # energies of the correlator
+delta = 3e-2 # smearing of the correlator
+x0,y0 = fc.get_dynamical_correlator(i=1,j=1,mode="ED",name=name,
+        es=es,delta=delta)
+x1,y1 = fc.get_dynamical_correlator(i=1,j=1,mode="DMRG",submode="KPM",name=name,
+        es=es,delta=delta)
+x2,y2 = fc.get_dynamical_correlator(i=1,j=1,mode="DMRG",submode="CVM",name=name,
+        es=es,delta=delta)
 
 
 
@@ -38,9 +43,10 @@ x1,y1 = fc.get_dynamical_correlator(i=1,j=1,mode="DMRG",submode="CVM",name=name)
 
 import matplotlib.pyplot as plt
 
-plt.plot(x0,y0.real,label="ED")
-plt.plot(x1,y1.real,label="DMRG")
-plt.ylabel("density-density correlator")
+plt.plot(x0,y0.real,label="ED",marker="o")
+plt.plot(x1,y1.real,label="DMRG-KPM",marker="o")
+plt.plot(x2,y2.real,label="DMRG-CVM",marker="o")
+plt.ylabel("Dynamical correlator")
 plt.xlabel("Frequency")
 plt.legend()
 plt.show()
