@@ -10,6 +10,7 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     if not self.computed_gs: self.get_gs() # compute ground state
     out = [] # empty list
     for e in es: # loop over energies
+        print("CVM in E = ",e)
         o = cvm_dmrg(self,name=name,i=i,j=j,delta=delta,e=e)
         out.append(o) # store
     return (es,np.array(out)) # return result
@@ -34,7 +35,8 @@ def cvm_dmrg(self,name="XX",i=0,j=0,delta=1e-1,e=0.0):
             "cvm_site_i":str(i),
             "cvm_site_j":str(j),
             "cvm_e0":str(self.e0),
-            "cvm_nit":str(2*self.ns),
+            "cvm_nit":str(int(self.cvm_nit)),
+            "cvm_tol":str(self.cvm_tol),
             "cvm_operator_i":namei,
             "cvm_operator_j":namej,
             }

@@ -1,72 +1,67 @@
-MPO I() {
-
+MPO Iden(auto sites) {
     auto ampo = AutoMPO(sites);
-    for(int i = 1; i <= N; ++i){
-
-        ampo += "Id", i;
-
-    }
-
-    return (1./N) * MPO(ampo);
-
+    ampo += "Id", 1;
+    return MPO(ampo);
 }
 
-MPS conjugate_(MPS psi){
 
-    auto tmp = psi;
-
-    for(int i = 1; i <= N; ++i){
-
-        tmp.Aref(i).conj();
-
+MPS conjMPS(MPS psi){
+    auto tmp = psi*1.;
+    for(int i = 0; i < tmp.N(); ++i){
+        tmp.Aref(i+1).conj();
     }
-
     return tmp;
 }
 
-MPS conjugate_gradient_squared(MPO A, MPS b, int iter) {
+MPS bicstab(MPO A, MPS b, double tol, int max_it, Args const& args){
 
-    auto x = b;
-    MPS r_old = sum(b, -1 * applyMPO(A, x, args));
+    MPS x = b;
+    MPS r_old = sum(b, -1 * exactApplyMPO(A, x, args));
+    MPS r_new;
     MPS r_ = r_old;
     MPS p = r_old;
-    MPS u = r_old;
-    MPS q;
-    MPS r_new;
+    MPS s;
     MPS Ap;
+    MPS As;
     std::complex<double> alpha;
     std::complex<double> beta;
-    MPS u_q;
+    std::complex<double> w;
+    double res;
+    int k = 0;
 
-    // Print(overlapC(r_old, r_)); // This must not be zero
+    while(k < max_it){
 
-    for(int i = 0; i < iter; ++i){
+        Ap = exactApplyMPO(A, p, args);
+        alpha = overlapC(conjMPS(r_old), r_) / overlapC(conjMPS(Ap), r_);
+        s = sum(r_old, -alpha * Ap, args);
+        As = exactApplyMPO(A, s, args);
+        w = overlapC(conjMPS(As), s) / overlapC(conjMPS(As), As);
+        x = sum(x, sum(alpha * p, w * s, args), args);
+        r_new = sum(s, -w * As, args);
+        res = sqrt(abs(overlapC(conjMPS(r_new), r_new).real()));
 
-        Ap = applyMPO(A, p, args);
-        alpha = overlapC(conjugate_(r_old), r_) / overlapC(conjugate_(Ap), r_);
-        q = sum(u, -alpha * Ap, args);
-        u_q = sum(u, q, args);
-        x = sum(x, alpha * u_q, args);
-        r_new = sum(r_old, -alpha * applyMPO(A, u_q, args), args);
-        beta = overlapC(conjugate_(r_new), r_) / overlapC(conjugate_(r_old), r_);
-        u = sum(r_new, beta * q, args);
-        p = sum(u, beta * sum(q, beta * p, args), args);
+        if(res <= tol){
+            std::cout << "Residue = " << res << std::endl;
+            break;
+        }
+
+        beta = (alpha / w) * overlapC(conjMPS(r_new), r_) / overlapC(conjMPS(r_old), r_);
+        p = sum(r_new, beta * sum(p, -w * Ap, args), args);
         r_old = r_new;
+        k++;
 
-    }
-
-    std::cout << "\nResidue = " << norm(r_old) << std::endl; // This checks convergence
+    };
 
     return x;
 }
 
-double spectral_function(MPS psi, MPO H, MPO S1, MPO S2, double omega, double eta, double energy, int iter, int i, int j) {
+double spectral_function(MPS psi, MPO H, MPO S1, MPO S2, double omega, double eta, double energy, double tol, int max_it, int maxm, double cut, auto sites) {
 
+    auto args = Args({"Maxm", maxm, "Cutoff", cut});
     const std::complex<double> z(omega + energy, eta);
-    auto A = sum(z * I(), -1. * H, args);
-    auto b =  applyMPO(S2j, psi, args);
-    auto x = conjugate_gradient_squared(A, b, iter);
-
+    auto A = sum(z * Iden(sites), -1. * H, args);
+    auto b =  exactApplyMPO(S2, psi, args);
+    auto x = bicstab(A, b, tol, max_it, args);
     std::complex<double> G = overlapC(psi, S1, x);
 
     return -G.imag() / M_PI;
