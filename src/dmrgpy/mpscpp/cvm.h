@@ -13,6 +13,8 @@ MPS conjMPS(MPS psi){
     return tmp;
 }
 
+
+// CVM solver
 MPS bicstab(MPO A, MPS b, double tol, int max_it, Args const& args){
 
     MPS x = b;
@@ -55,7 +57,10 @@ MPS bicstab(MPO A, MPS b, double tol, int max_it, Args const& args){
     return x;
 }
 
-double spectral_function(MPS psi, MPO H, MPO S1, MPO S2, double omega, double eta, double energy, double tol, int max_it, int maxm, double cut, auto sites) {
+// main CVM function
+double spectral_function(MPS psi, MPO H, MPO S1, MPO S2, double omega,
+		double eta, double energy, double tol, int max_it,
+		int maxm, double cut, auto sites) {
 
     auto args = Args({"Maxm", maxm, "Cutoff", cut});
     const std::complex<double> z(omega + energy, eta);

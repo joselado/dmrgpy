@@ -11,7 +11,7 @@ def biladder(s1,s2,j1=1.0,j2=1.0,j12=1.0):
   """Create a ladder"""
   spins = [s1,s2]
   sc = build.Spin_chain()
-  sc.build(spins,use_lib=False)
+  sc.build(spins)
   c1 = np.sqrt(j1+0j) # coupling
   c2 = np.sqrt(j2+0j) # coupling
   c12 = np.sqrt(j12+0j) # coupling
@@ -41,7 +41,7 @@ def monochain(s1,d=0.0,b=[0.,0.,0.],fun=None,J=[1.,1.,1.]):
   if fun is None: fun = lambda i: 1.
   spins = [s1]
   sc = build.Spin_chain()
-  sc.build(spins,use_lib=False)
+  sc.build(spins)
   def left(i):
     return [sc.sxi[0],sc.syi[0],sc.szi[0]]
   def right(i):
@@ -70,7 +70,7 @@ def frusladder(s1,j=1.0,jf=1.0):
   """Create a frustrated ladder"""
   spins = [s1,s1]
   sc = build.Spin_chain()
-  sc.build(spins,use_lib=False)
+  sc.build(spins)
   cf = np.sqrt(jf+0j) # coupling
   c = np.sqrt(j+0j) # coupling
   def left(i):

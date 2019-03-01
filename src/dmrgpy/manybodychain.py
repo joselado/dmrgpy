@@ -49,7 +49,7 @@ class Many_Body_Hamiltonian():
     self.kpmcutoff = 1e-8 # cutoff in KPM
     self.cutoff = 1e-8 # cutoff in ground state
     self.kpmscale = 10.0 # this is meaningless
-    self.cvm_tol = 1e-3 # tolerance for CVM
+    self.cvm_tol = 1e-5 # tolerance for CVM
     self.cvm_nit = 1e3 # iterations for CVM
     self.restart = False # restart the calculation
     self.gs_from_file = False # start from a random wavefunction
