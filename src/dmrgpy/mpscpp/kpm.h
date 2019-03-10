@@ -100,7 +100,7 @@ static auto scale_hamiltonian=[](auto sites, auto H) {
     auto emax = dmrg(psi,-1*H,sweeps,{"Quiet=",true}); // get maximum energy
     auto dosscale = 0.9/max(abs(emin),abs(emax)) ; // energy scale for DOS
     ofstream myfile;
-    myfile.open("DOS_KPM_SCALE.OUT");
+    myfile.open("KPM_SCALE.OUT");
     myfile << std::setprecision(8) << dosscale << endl;
     myfile.close() ; // close file
     auto m = H*dosscale ; // scale Hamiltonian
@@ -173,7 +173,7 @@ static auto get_moments_spismj=[](auto sites, auto H, int n, int i, int j) {
 
   // scaling of the energy
   ofstream myfile;
-  myfile.open("DOS_KPM_SCALE.OUT");
+  myfile.open("KPM_SCALE.OUT");
   myfile << std::setprecision(8) << 1.0/scale << endl;
   myfile << std::setprecision(8) << shift << endl;
   myfile.close() ; // close file

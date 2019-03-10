@@ -3,6 +3,8 @@ from ..pychain.spectrum import ground_state
 import numpy as np
 from scipy.sparse import csc_matrix,identity
 import scipy.sparse.linalg as slg
+from ..algebra import algebra
+from .. import operatornames
 
 
 nmax = 15 # maximum number of levels
@@ -108,14 +110,18 @@ class MBFermion():
                 nj = cj.H*cj
                 m = m + ni*nj*m0[i,j] # add contribution
         return m # return many body hamiltonian
-    def correlator(self,pairs,wf):
+    def get_correlator(self,name="",pairs=[]):
         """
         Compute a set of correlators for a wavefunction
         """
-        out = [] # output list
+        namei,namej = operatornames.recognize(name) # get the operator
+        out = [] # empty list
+        self.get_gs() # get ground state
         for p in pairs: # loop over pairs
-            m = self.get_cd(p[0])*self.get_c(p[1]) # get matrix
-            raise # not finished yet
+            A = self.get_operator(namei,p[0]) # get matrix
+            A = self.get_operator(namej,p[1])*A # get matrix
+            out.append(algebra.braket_wAw(self.wf0,A))
+        return np.array(out) # return array
     def get_operator(self,name,i):
         """
         Return a certain operator
@@ -133,7 +139,7 @@ class MBFermion():
         from ..algebra import kpm
         from .. import operatornames
         self.get_gs() # compute ground state
-        namei,namej = operatornames.recognize(None,name) # get the operator
+        namei,namej = operatornames.recognize(name) # get the operator
         namei = operatornames.hermitian(namei) # get the dagger
         A = self.get_operator(namei,i)
         B = self.get_operator(namej,j)

@@ -12,7 +12,7 @@ def evolution(self,mode="DMRG",**kwargs):
         return evolution_exact(self,**kwargs)
 
 def evolution_dmrg(self,name="XX",i=0,j=0,nt=10000,dt=0.1):
-    namei,namej = operatornames.recognize(self,name)
+    namei,namej = operatornames.recognize(name)
     namei = operatornames.hermitian(namei) # get the Hermitian one
     if self.fit_td: fittd = "true"
     else: fittd = "false"

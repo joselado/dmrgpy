@@ -6,21 +6,21 @@ def get_moments_dmrg(self,n=1000):
   self.setup_task("dos",task={"nkpm":str(n)})
   self.write_hamiltonian() # write the Hamiltonian to a file
   self.run() # perform the calculation
-  return np.genfromtxt("KPM_MOMENTS.OUT").transpose()[0]
+  return self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose()[0])
 
 
 
-def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
-  """Get the moments with DMRG"""
-
-  task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
-                "site_i_kpm":str(i),"site_j_kpm":str(j),
-                "kpm_scale":str(self.kpmscale)}
-  if smart: task["smart_kpm_window"] = "true" 
-  self.setup_task("spismj",task=task) 
-  self.write_hamiltonian() # write the Hamiltonian to a file
-  self.run() # perform the calculation
-  return np.genfromtxt("KPM_MOMENTS.OUT").transpose()[0]
+#def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
+#  """Get the moments with DMRG"""
+#
+#  task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
+#                "site_i_kpm":str(i),"site_j_kpm":str(j),
+#                "kpm_scale":str(self.kpmscale)}
+#  if smart: task["smart_kpm_window"] = "true" 
+#  self.setup_task("spismj",task=task) 
+#  self.write_hamiltonian() # write the Hamiltonian to a file
+#  self.run() # perform the calculation
+#  return np.genfromtxt("KPM_MOMENTS.OUT").transpose()[0]
 
 
 
@@ -31,7 +31,7 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   """Get the moments with DMRG"""
   try: # select the right operators, be consistent with mpscpp.x
       from . import operatornames
-      namei,namej = operatornames.recognize(self,name)
+      namei,namej = operatornames.recognize(name)
       namei = operatornames.hermitian(namei) # get the Hermitian operator
   except:
       print("Dynamical correlator not recognised")
@@ -44,7 +44,7 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   self.setup_task("dynamical_correlator",task=task) 
   self.write_hamiltonian() # write the Hamiltonian to a file
   self.run() # perform the calculation
-  m = np.genfromtxt("KPM_MOMENTS.OUT").transpose()
+  m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
 #  return m[1]
   return m[0]+1j*m[1]
 
@@ -55,24 +55,24 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
 from . import pychain
 from .algebra.kpm import generate_profile
 
-def get_dos(self,n=1000,mode="DMRG",ntries=10):
-  if mode=="DMRG": 
-#  if False: 
-    mus = [get_moments_dmrg(self,n=n) for i in range(ntries)] # get the moments
-    scale = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
-  else:
-    m  = self.get_full_hamiltonian()
-    mus = [pychain.kpm.random_trace(m/15.0,ntries=1,n=1000)
-                 for i in range(ntries)]
-    scale = 1./15.
-  mus = np.mean(np.array(mus),axis=0)
-  mus = mus[0:100]
-  xs = 0.99*np.linspace(-1.0,1.0,2000,endpoint=True) # energies
-  ys = generate_profile(mus,xs,use_fortran=False).real # generate the DOS
-  xs /= scale
-  ys *= scale
-  np.savetxt("DOS.OUT",np.matrix([xs,ys]).T)
-  return (xs,ys)
+#def get_dos(self,n=1000,mode="DMRG",ntries=10):
+#  if mode=="DMRG": 
+##  if False: 
+#    mus = [get_moments_dmrg(self,n=n) for i in range(ntries)] # get the moments
+#    scale = np.genfromtxt("KPM_SCALE.OUT") # scale of the dos
+#  else:
+#    m  = self.get_full_hamiltonian()
+#    mus = [pychain.kpm.random_trace(m/15.0,ntries=1,n=1000)
+#                 for i in range(ntries)]
+#    scale = 1./15.
+#  mus = np.mean(np.array(mus),axis=0)
+#  mus = mus[0:100]
+#  xs = 0.99*np.linspace(-1.0,1.0,2000,endpoint=True) # energies
+#  ys = generate_profile(mus,xs,use_fortran=False).real # generate the DOS
+#  xs /= scale
+#  ys *= scale
+#  np.savetxt("DOS.OUT",np.matrix([xs,ys]).T)
+#  return (xs,ys)
 
 
 def restrict_interval(x,y,window):
@@ -104,8 +104,10 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
   if mode=="DMRG": 
 # get the moments
     mus = get_moments_dynamical_correlator_dmrg(self,n=n,i=i,j=j,name=name) 
-    scale = np.genfromtxt("DOS_KPM_SCALE.OUT") # scale of the dos
-    e0 = np.genfromtxt("GS_ENERGY.OUT") # ground state energy
+    # scale of the dos
+    scale = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
+    # ground state energy
+    e0 = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
     self.e0 = e0 # add this quantity
     minx = -1.0 + (e0*scale) 
     maxx = -1.0 

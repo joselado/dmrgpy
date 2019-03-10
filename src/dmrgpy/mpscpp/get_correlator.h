@@ -48,7 +48,7 @@ static auto single_correlator=[](auto psi,auto sites, auto i,auto namei, int j, 
 
 
 // calculate all the correlators
-int get_correlator()   {
+int get_correlator_old()   {
   auto sites = get_sites();
   auto H = get_hamiltonian(sites) ;
   auto psi = get_gs(sites,H) ;
@@ -86,6 +86,39 @@ int get_correlator()   {
        c = overlap(psi,get_hopping_operator(sites,i,j),psi) ; // add 
     } ;
     ofile << ic << "   " << c << endl ;
+  };
+  ofile.close() ;
+  cfile.close() ;
+}
+
+
+
+
+
+// calculate all the correlators
+int get_correlator()   {
+  auto sites = get_sites();
+  auto H = get_hamiltonian(sites) ;
+  auto psi = get_gs(sites,H) ;
+  ifstream cfile; // declare
+  ofstream ofile; // declare
+  cfile.open("correlators.in");  // open file
+  ofile.open("CORRELATORS.OUT");  // open file
+  int nc; 
+  cfile >> nc; // number of correlators
+  float c; // declare float
+  int i,j ;
+  int maxm = get_int_value("maxm") ; // bond dimension for KPM
+  float cutoff = get_float_value("cutoff") ; // cutoff for KPM
+  for (int ic=0;ic<nc;++ic) { // loop over correlators
+    cfile >> i >> j; // index of correlators
+    // get the two operators
+    auto opi = get_operator(sites,i,get_str("correlator_operator_i")) ;
+    auto opj = get_operator(sites,j,get_str("correlator_operator_j")) ;
+    auto M = opi*1.0; // new MPO
+    nmultMPO(opi,opj, M,{"Maxm",maxm,"Cutoff",cutoff}) ; // multiply MPO
+    auto c = overlapC(psi,M,psi);
+    ofile << ic << "   " << real(c) << "  " << imag(c) << endl ;
   };
   ofile.close() ;
   cfile.close() ;
