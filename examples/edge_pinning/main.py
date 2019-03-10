@@ -2,7 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
-import spinchain
+from dmrgpy import spinchain
 ns = np.array(range(4,30,2))
 es = []
 n = 40
@@ -12,7 +12,7 @@ def fm(i):
   if i==0: return [3.0,0.,0.]
   else: return [0.,0.,0.]
 sc.set_fields(fm) # add those local exchange fields
-cs = sc.magnetization()[0] # compute the magnetization
+cs = sc.get_magnetization()[0] # compute the magnetization
   
 import matplotlib.pyplot as plt
 plt.plot(range(len(cs)),cs) # correlator using DMRG

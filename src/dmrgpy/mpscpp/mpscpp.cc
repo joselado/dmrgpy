@@ -27,6 +27,7 @@ using namespace std;
 #include"compute_overlap.h" // Compute overlap
 #include"cvm_dynamical_correlator.h" // CVM dynamical correlator
 #include"time_evolution.h" // Time evolution
+#include"reduced_dm.h" // Reduced density matrix
 
 
 int 
@@ -74,6 +75,7 @@ main()
 // overlap task
     if (check_task("overlap"))  compute_overlap() ; // compute overlap
     if (check_task("time_evolution"))  quench(sites) ; // time evolution
+    if (check_task("density_matrix"))  reduced_dm() ; // DM
     system("rm -f ERROR") ; // create error file
     return 0;
     }

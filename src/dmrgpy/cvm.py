@@ -25,7 +25,7 @@ def cvm_dmrg(self,name="XX",i=0,j=0,delta=1e-1,e=0.0):
     """
     Return the dynamical correlator for a single energy
     """
-    namei,namej = operatornames.recognize(self,name)
+    namei,namej = operatornames.recognize(name)
     if self.fit_td: fittd = "true"
     else: fittd = "false"
     fittd = "true"

@@ -2,7 +2,7 @@
 
 
 
-def recognize(self,name):
+def recognize(name):
   spins = [] # names for spin correlators
   for s1 in ["X","Y","Z","+","-"]:
     for s2 in ["X","Y","Z","+","-"]: spins += [s1+s2] # create all the possibilities

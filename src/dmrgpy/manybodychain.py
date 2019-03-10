@@ -9,6 +9,8 @@ from . import timedependent
 from . import groundstate
 from . import operatornames
 from . import correlator
+from . import densitymatrix
+from . import taskdmrg
 from . import cvm
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
@@ -138,6 +140,9 @@ class Many_Body_Hamiltonian():
           m[c.i,c.j] = c.g # create entry
       self.hubbard_matrix = m # store matrix
   def set_fields(self,fun):
+    """
+    Add local magnetic fields
+    """
     self.computed_gs = False # say that GS has not been computed
     self.fields = [fun(i) for i in range(self.ns)] # fields
 #  def setup_sweep(self,mode="default"):
@@ -145,11 +150,23 @@ class Many_Body_Hamiltonian():
   def setup_task(self,mode="GS",task=dict()):
     from .taskdmrg import setup_task
     setup_task(self,mode=mode,task=task)
+  def write_task(self):
+      """
+      Write the tasks in tasks.in
+      """
+      self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
   def write_hamiltonian(self):
+      """
+      Write the Hamiltonian in a file
+      """
       from .writemps import write_hamiltonian
       write_hamiltonian(self)
   def run(self,automatic=False): 
-    os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt") # run the DMRG calculation
+      """
+      Run the DMRG calculation
+      """
+      # run the DMRG calculation
+      self.execute(lambda : os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt"))
   def entropy(self,n=1):
     """Return the entanglement entropy"""
 #    self.setup_sweep()
@@ -181,7 +198,7 @@ class Many_Body_Hamiltonian():
       self.setup_task("excited",task={"nexcited":str(n)})
       self.write_hamiltonian() # write the Hamiltonian to a file
       self.run() # perform the calculation
-      out = np.genfromtxt("EXCITED.OUT")
+      out = self.execute(lambda: np.genfromtxt("EXCITED.OUT"))
     elif mode=="ED":
       h = self.get_full_hamiltonian() # get the Hamiltonian
       from . import pychain
@@ -247,11 +264,20 @@ class Many_Body_Hamiltonian():
   def execute(self,f):
     """Execute function in the folder"""
     self.to_folder() # go to folder
-    f()
+    out = f()
     self.to_origin() # go back
+    return out # return result
   def evolution(self,**kwargs):
-    from . import timedependent
-    return timedependent.evolution(self,**kwargs)
+      """
+      Perform time dependent DMRG
+      """
+      from . import timedependent
+      return timedependent.evolution(self,**kwargs)
+  def get_rdm(self,**kwargs):
+      """
+      Compute the reduced density matrix
+      """
+      return densitymatrix.reduced_dm(self,**kwargs) # return DM
   def get_kpm_scale(self):
       """
       Return an estimate of the bandwidth

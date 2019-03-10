@@ -47,12 +47,16 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
               t = self.hoppings[key]
               m[t.i,t.j] = t.g
         return m
-    def get_correlator(self,name="ccd",**kwargs):
+    def get_correlator(self,name="cdc",mode="DMRG",**kwargs):
           """
           Wrapper for static correlator
           """
-          if name!="ccd": raise # not implemented
-          return Many_Body_Hamiltonian.get_correlator(self,name=name,**kwargs)
+          if mode=="DMRG": # using DMRG
+            return Many_Body_Hamiltonian.get_correlator(self,name=name,**kwargs)
+          elif mode=="ED": # using ED
+            MBF = self.get_MBF() # get the object
+            return MBF.get_correlator(name=name,**kwargs)
+          else: raise
     def get_dynamical_correlator(self,name="densitydensity",
             mode="DMRG",**kwargs):
         """
