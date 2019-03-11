@@ -28,7 +28,7 @@ def get_pychain(self):
 
 
 
-def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
+def get_dynamical_correlator(self,n=1000,submode="ED",i=0,j=0,
              window=[-1,10],name="XX",delta=2e-2,es=None):
   """
   Compute a dynamical correlator using the KPM-DMRG method
@@ -44,12 +44,15 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
   sc = self.get_pychain()
   from .pychain import correlator as pychain_correlator
   if delta is None: delta = float(self.ns)/n*1.5
-  if mode=="fullKPM":
+  if submode=="KPM":
     (xs,ys) = pychain_correlator.dynamical_correlator_kpm(sc,h,n=n,i=i,j=j,
                        namei=name[0],namej=name[1])
-  elif mode=="ED":
+  elif submode=="ED" or submode=="CVM":
+    if submode=="ED": mode = "full"
+    elif submode=="CVM": mode = "cv"
+    else: raise
     (xs,ys) = pychain_correlator.dynamical_correlator(sc,h,delta=delta,i=i,
-                      j=j,namei=name[0],namej=name[1])
+                      j=j,namei=name[0],namej=name[1],mode=mode)
   else: raise
   self.to_origin() # go to origin folder
   if es is None:

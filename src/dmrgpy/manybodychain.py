@@ -80,7 +80,7 @@ class Many_Body_Hamiltonian():
         if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
         g = g*one # multiply by the identity
         if np.sum(np.abs(g))!=0.0: 
-          if i!=j: g = g/2. # normalize to count it once
+          g = g/2. # normalize
           c = Coupling(i,j,g) # create class
           self.exchange.append(c) # store
     # now the onsite ones

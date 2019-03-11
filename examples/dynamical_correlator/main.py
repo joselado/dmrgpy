@@ -28,12 +28,14 @@ t2 = time.time()
 print("Time with DMRG",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(mode="ED",i=i,j=j,name="XX")
+(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="CVM",
+        i=i,j=j,name="XX")
 t3 = time.time()
 print("Time with ED",t3-t2)
 
 
-(x4,y4) = sc.get_dynamical_correlator(mode="fullKPM",i=i,j=j,name="XX")
+(x4,y4) = sc.get_dynamical_correlator(mode="ED",submode="KPM",
+        i=i,j=j,name="XX")
 t4 = time.time()
 print("Time with KPM-ED",t4-t3)
 

@@ -32,7 +32,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
                     **kwargs)
         else: # use exact diagonalization
             from . import pychainwrapper
-            return pychainwrapper.get_dynamical_correlator(self,mode=mode,
+            return pychainwrapper.get_dynamical_correlator(self,
                     **kwargs)
 
     def get_correlator(self,pairs=[[]],mode="DMRG",**kwargs):
