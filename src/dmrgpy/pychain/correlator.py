@@ -43,8 +43,7 @@ def dynamical_correlator(sc,h0,es=None,i=0,j=0,
   elif namej=="Y": sp = sc.syi[j]
   elif namej=="Z": sp = sc.szi[j]
   else: raise
-  if h0.shape[0]<100: mode = "full"
-  else: mode = "cv"
+  if mode=="full" and h0.shape[0]>100: mode = "cv"
   iden = identity(h0.shape[0],dtype=np.complex) # identity
   if mode=="full": iden = iden.todense() # dense matrix
   out = []

@@ -52,7 +52,7 @@ def get_dynamical_correlator(self,n=1000,submode="ED",i=0,j=0,
     elif submode=="CVM": mode = "cv"
     else: raise
     (xs,ys) = pychain_correlator.dynamical_correlator(sc,h,delta=delta,i=i,
-                      j=j,namei=name[0],namej=name[1],mode=mode)
+                      j=j,namei=name[0],namej=name[1],mode=mode,es=es)
   else: raise
   self.to_origin() # go to origin folder
   if es is None:
