@@ -75,21 +75,22 @@ class Many_Body_Hamiltonian():
     self.computed_gs = False # say that GS has not been computed
     self.exchange = [] # empty list
     for i in range(self.ns): # loop
-      for j in range(i+1,self.ns):  # loop
+      for j in range(self.ns):  # loop
         g = fun(i,j).real # call the function
         if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
         g = g*one # multiply by the identity
         if np.sum(np.abs(g))!=0.0: 
+          if i!=j: g = g/2. # normalize to count it once
           c = Coupling(i,j,g) # create class
           self.exchange.append(c) # store
     # now the onsite ones
-    for i in range(self.ns): # loop
-        g = fun(i,i).real # call the function
-        g = g*one # multiply by the identity
-        g = (g + g.H)/2. # the onsite one must be hermitian
-        if np.sum(np.abs(g))!=0.0: # if nonzero 
-          c = Coupling(i,i,g) # create class
-          self.exchange.append(c) # store
+#    for i in range(self.ns): # loop
+#        g = fun(i,i).real # call the function
+#        g = g*one # multiply by the identity
+#        g = (g + g.H)/2. # the onsite one must be hermitian
+#        if np.sum(np.abs(g))!=0.0: # if nonzero 
+#          c = Coupling(i,i,g) # create class
+#          self.exchange.append(c) # store
   def set_hoppings(self,fun):
       """Add the spin independent hoppings"""
       self.computed_gs = False # say that GS has not been computed

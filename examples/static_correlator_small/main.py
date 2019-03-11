@@ -18,7 +18,7 @@ def fj(i,j): # function to define the exchange couplings
     if abs(i-j)==1: return 1.0  # first neighbors
     else: return 0.0 # otherwise
 sc.set_exchange(fj) # add the exchange couplings
-sc.set_fields(lambda i: np.random.random(3)) # optionally you could add local magnetic fields
+#sc.set_fields(lambda i: np.random.random(3)) # optionally you could add local magnetic fields
 # parameters controlling the DMRG algorithm, in principle default ones are fine
 #sc.maxm = 40 # maximum bond dimension
 #sc.nsweeps = 12 # number of DMRG sweeps
@@ -28,6 +28,7 @@ sc.set_fields(lambda i: np.random.random(3)) # optionally you could add local ma
 # compute ground state energy
 sc.cutoff = 1e-10
 e0 = sc.gs_energy() # compute ground state energy
+print("Energy",e0/sc.ns)
 #sc.get_gs(n=7)
 # this array constains the pairs of spins on which you want to compute
 # <GS|S_i S_j GS>
