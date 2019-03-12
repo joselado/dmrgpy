@@ -1,8 +1,8 @@
-MPO Iden(auto sites) {
+static auto Iden=[](auto sites) {
     auto ampo = AutoMPO(sites);
     ampo += "Id", 1;
     return MPO(ampo);
-}
+};
 
 
 MPS conjMPS(MPS psi){
