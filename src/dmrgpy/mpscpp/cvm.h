@@ -58,7 +58,7 @@ MPS bicstab(MPO A, MPS b, double tol, int max_it, Args const& args){
 }
 
 // main CVM function
-double spectral_function(MPS psi, MPO H, MPO S1, MPO S2, double omega,
+static auto spectral_function=[](MPS psi, MPO H, MPO S1, MPO S2, double omega,
 		double eta, double energy, double tol, int max_it,
 		int maxm, double cut, auto sites) {
 
