@@ -44,6 +44,7 @@ svdImpl(ITensor const& A,
     auto minm = args.getInt("Minm",1);
     auto doRelCutoff = args.getBool("DoRelCutoff",true);
     auto absoluteCutoff = args.getBool("AbsoluteCutoff",false);
+    auto ignore_degeneracy = args.getBool("IgnoreDegeneracy",true);
     auto lname = args.getString("LeftIndexName","ul");
     auto rname = args.getString("RightIndexName","vl");
     auto itype = getIndexType(args,"IndexType",Link);
@@ -80,8 +81,24 @@ svdImpl(ITensor const& A,
     if(do_truncate)
         {
         tie(truncerr,docut) = truncate(probs,maxm,minm,cutoff,
-                                       absoluteCutoff,doRelCutoff);
-        m = probs.size();
+                                       absoluteCutoff,doRelCutoff,args);
+        if(ignore_degeneracy)
+            {
+            m = probs.size();
+            }
+        else
+            {
+            long total_m = 0;
+            for(decltype(probs.size()) n = 0; n < probs.size() && probs(n) > docut; ++n)
+                {
+                total_m += 1;
+                }
+            m = total_m;
+            }
+
+#ifdef DEBUG
+        if(m==0) throw std::runtime_error("Index of S after SVD is empty. Consider raising Maxm or Cutoff, or making IgnoreDegeneracy true");
+#endif
         resize(DD,m);
         reduceCols(UU,m);
         reduceCols(VV,m);
@@ -105,7 +122,6 @@ svdImpl(ITensor const& A,
 
     //Fix sign to make sure D has positive elements
     Real signfix = (A.scale().sign() == -1) ? -1 : +1;
-
     D = ITensor({uL,vL},
                 Diag<Real>{DD.begin(),DD.end()},
                 A.scale()*signfix);
@@ -117,6 +133,7 @@ svdImpl(ITensor const& A,
     //density matrix eigs
     for(auto& el : DD) el = sqr(el);
 
+#ifdef USESCALE
     if(A.scale().isFiniteReal()) 
         {
         DD *= sqr(A.scale().real0());
@@ -125,6 +142,7 @@ svdImpl(ITensor const& A,
         {
         println("Warning: scale not finite real after svd");
         }
+#endif
 
     return Spectrum(move(DD),{"Truncerr",truncerr});
     }
@@ -139,7 +157,7 @@ svdImpl(IQTensor A,
         IQTensor & U, 
         IQTensor & D, 
         IQTensor & V,
-        Args const& args)
+        Args       args)
     {
     auto do_truncate = args.getBool("Truncate");
     auto thresh = args.getReal("SVDThreshold",1E-3);
@@ -148,6 +166,7 @@ svdImpl(IQTensor A,
     auto minm = args.getInt("Minm",1);
     auto doRelCutoff = args.getBool("DoRelCutoff",true);
     auto absoluteCutoff = args.getBool("AbsoluteCutoff",false);
+    auto ignore_degeneracy = args.getBool("IgnoreDegeneracy",true);
     auto show_eigs = args.getBool("ShowEigs",false);
     auto lname = args.getString("LeftIndexName","ul");
     auto rname = args.getString("RightIndexName","vl");
@@ -155,6 +174,8 @@ svdImpl(IQTensor A,
     auto litype = getIndexType(args,"LeftIndexType",itype);
     auto ritype = getIndexType(args,"RightIndexType",itype);
     auto compute_qn = args.getBool("ComputeQNs",false);
+
+    args.add("IgnoreDegeneracy",ignore_degeneracy);
 
     auto blocks = doTask(GetBlocks<T>{A.inds(),uI,vI},A.store());
 
@@ -205,6 +226,7 @@ svdImpl(IQTensor A,
                 alleigqn.emplace_back(sqr(sval),q);
                 }
             }
+
         }
 
     //Square the singular values into probabilities
@@ -224,7 +246,7 @@ svdImpl(IQTensor A,
     if(do_truncate)
         {
         tie(truncerr,docut) = truncate(probs,maxm,minm,cutoff,
-                                       absoluteCutoff,doRelCutoff);
+                                       absoluteCutoff,doRelCutoff,args);
         m = probs.size();
         alleigqn.resize(m);
         }
@@ -246,6 +268,7 @@ svdImpl(IQTensor A,
     Liq.reserve(Nblock);
     Riq.reserve(Nblock);
 
+    long total_m = 0;
     for(auto b : range(Nblock))
         {
         auto& d = dvecs.at(b);
@@ -255,7 +278,13 @@ svdImpl(IQTensor A,
         long this_m = 0;
         for(decltype(d.size()) n = 0; n < d.size() && sqr(d(n)) > docut; ++n)
             {
-            this_m += 1;
+            //We need to check that the number of states doesn't
+            //go above m, which can happen if there are degeneracies
+            if(m > total_m)
+                {
+                total_m += 1;
+                this_m += 1;
+                }
             if(d(n) < 0) d(n) = 0;
             }
 
@@ -279,7 +308,11 @@ svdImpl(IQTensor A,
         Liq.emplace_back(Index("l",this_m,litype),uI.qn(1+B.i1));
         Riq.emplace_back(Index("r",this_m,ritype),vI.qn(1+B.i2));
         }
-    
+
+#ifdef DEBUG
+    if(Liq.empty() || Riq.empty()) throw std::runtime_error("IQIndex of S after SVD is empty. Consider raising Maxm or Cutoff, or making IgnoreDegeneracy true");
+#endif
+
     auto L = IQIndex(lname,move(Liq),uI.dir());
     auto R = IQIndex(rname,move(Riq),vI.dir());
 
@@ -354,11 +387,10 @@ svdImpl(IQTensor A,
 
     //Fix sign to make sure D has positive elements
     Real signfix = (A.scale().sign() == -1) ? -1. : +1.;
-
     U = IQTensor(Uis,move(Ustore));
     D = IQTensor(Dis,move(Dstore),A.scale()*signfix);
     V = IQTensor(Vis,move(Vstore),LogNum{signfix});
-
+    
     //Originally eigs were found without including scale
     //so put the scale back in
     if(A.scale().isFiniteReal())

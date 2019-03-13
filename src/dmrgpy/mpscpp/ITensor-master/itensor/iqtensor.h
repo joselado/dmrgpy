@@ -75,22 +75,51 @@ QN
 div(IQTensor const& T);
 
 IQTensor
-combiner(std::vector<IQIndex> inds, Args const& args = Global::args());
+combiner(IQIndexSet const& inds, Args const& args = Global::args());
 
-IQIndex
-combinedIndex(IQTensor const& C);
+IQTensor
+combiner(std::vector<IQIndex> const& inds, Args const& args = Global::args());
+
+IQTensor
+combiner(std::initializer_list<IQIndex> inds, Args const& args = Global::args());
+
+template <size_t N>
+IQTensor
+combiner(std::array<IQIndex,N> inds, Args const& args = Global::args())
+    {
+    return combiner(IQIndexSet(inds),args);
+    }
 
 template<typename... Inds>
 IQTensor
 combiner(IQIndex const& i1, 
-         Inds const&... inds);
+         Inds const&... inds)
+    {
+    return combiner(IQIndexSet(i1,inds...));
+    }
+
+IQIndex
+combinedIndex(IQTensor const& C);
 
 //Construct diagonal IQTensor with diagonal 
 //elements set to 1.0
+IQTensor
+delta(IQIndexSet const& is);
+
 template<typename... Inds>
 IQTensor
 delta(IQIndex const& i1,
       Inds const&... inds);
+
+IQTensor
+delta(std::vector<IQIndex> const& is);
+
+template<size_t N>
+IQTensor
+delta(std::array<IQIndex,N> const& is);
+
+IQTensor
+delta(std::initializer_list<IQIndex> is);
 
 IQIndex
 findIQInd(IQTensor const& T, Index const& i);
@@ -146,7 +175,7 @@ typeNameOf(AddITensor const&);
 
 } //namespace itensor
 
-//See file iqtensor.ih for template/inline method implementations
-#include "itensor/iqtensor.ih"
+//See file iqtensor_impl.h for template/inline method implementations
+#include "itensor/iqtensor_impl.h"
 
 #endif

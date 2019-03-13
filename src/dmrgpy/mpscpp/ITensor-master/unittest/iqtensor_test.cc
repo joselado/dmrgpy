@@ -468,6 +468,72 @@ SECTION("Combiner")
             }
         }
 
+    SECTION("Combine / Uncombine 4 - Permute (IQIndexSet constructor)")
+        {
+        auto T = randomTensor(QN(),L1,L2,S1,S2);
+        auto C = combiner(IQIndexSet(L1,S1));
+        auto R = T*C;
+        auto ci = commonIndex(R,C); //get combined index
+        //check that ci exists
+        CHECK(ci);
+        CHECK_CLOSE(norm(T),norm(R));
+        CHECK(div(T) == div(R));
+
+        R *= dag(C); //uncombine
+        //Check that R equals original T
+        for(int i1 = 1; i1 <= L1.m(); ++i1)
+        for(int i2 = 1; i2 <= L2.m(); ++i2)
+        for(int j1 = 1; j1 <= S1.m(); ++j1)
+        for(int j2 = 1; j2 <= S2.m(); ++j2)
+            {
+            CHECK_CLOSE( T.real(L1(i1),L2(i2),S1(j1),S2(j2)), R.real(L1(i1),L2(i2),S1(j1),S2(j2)) );
+            }
+        }
+
+    SECTION("Combine / Uncombine 4 - Permute (initialize_list constructor)")
+        {
+        auto T = randomTensor(QN(),L1,L2,S1,S2);
+        auto C = combiner({L1,S1});
+        auto R = T*C;
+        auto ci = commonIndex(R,C); //get combined index
+        //check that ci exists
+        CHECK(ci);
+        CHECK_CLOSE(norm(T),norm(R));
+        CHECK(div(T) == div(R));
+
+        R *= dag(C); //uncombine
+        //Check that R equals original T
+        for(int i1 = 1; i1 <= L1.m(); ++i1)
+        for(int i2 = 1; i2 <= L2.m(); ++i2)
+        for(int j1 = 1; j1 <= S1.m(); ++j1)
+        for(int j2 = 1; j2 <= S2.m(); ++j2)
+            {
+            CHECK_CLOSE( T.real(L1(i1),L2(i2),S1(j1),S2(j2)), R.real(L1(i1),L2(i2),S1(j1),S2(j2)) );
+            }
+        }
+
+    SECTION("Combine / Uncombine 4 - Permute (array constructor)")
+        {
+        auto T = randomTensor(QN(),L1,L2,S1,S2);
+        auto C = combiner(std::array<IQIndex,2>({L1,S1}));
+        auto R = T*C;
+        auto ci = commonIndex(R,C); //get combined index
+        //check that ci exists
+        CHECK(ci);
+        CHECK_CLOSE(norm(T),norm(R));
+        CHECK(div(T) == div(R));
+
+        R *= dag(C); //uncombine
+        //Check that R equals original T
+        for(int i1 = 1; i1 <= L1.m(); ++i1)
+        for(int i2 = 1; i2 <= L2.m(); ++i2)
+        for(int j1 = 1; j1 <= S1.m(); ++j1)
+        for(int j2 = 1; j2 <= S2.m(); ++j2)
+            {
+            CHECK_CLOSE( T.real(L1(i1),L2(i2),S1(j1),S2(j2)), R.real(L1(i1),L2(i2),S1(j1),S2(j2)) );
+            }
+        }
+
     SECTION("Combine / Uncombine 5 - Permute")
         {
         auto T = randomTensor(QN(),L1,L2,S1,S2);
@@ -1212,30 +1278,62 @@ for(auto kk : range1(k.m()))
 }
 
 SECTION("Set and Get with int")
-{
-auto I = IQIndex("I",Index("I+",1),QN(+1),
-                     Index("I-",1),QN(-1));
-auto J = IQIndex("J",Index("I+",2),QN(+1),
-                     Index("I-",2),QN(-1));
-auto T = IQTensor(I,J);
-T.set(2,1,21);
-CHECK_CLOSE(T.real(J(1),I(2)),21);
-CHECK_CLOSE(T.real(2,1),21);
-}
+    {
+    auto I = IQIndex("I",Index("I+",1),QN(+1),
+                         Index("I-",1),QN(-1));
+    auto J = IQIndex("J",Index("I+",2),QN(+1),
+                         Index("I-",2),QN(-1));
+    auto T = IQTensor(I,J);
+    T.set(2,1,21);
+    CHECK_CLOSE(T.real(J(1),I(2)),21);
+    CHECK_CLOSE(T.real(2,1),21);
+    }
+
+SECTION("Set and Get with vector<int>")
+    {
+    auto I = IQIndex("I",Index("I+",1),QN(+1),
+                         Index("I-",1),QN(-1));
+    auto J = IQIndex("J",Index("I+",2),QN(+1),
+                         Index("I-",2),QN(-1));
+    auto T = IQTensor(I,J);
+    T.set(vector<int>({2,1}),21);
+    CHECK_CLOSE(T.real(vector<IQIndexVal>({J(1),I(2)})),21);
+    CHECK_CLOSE(T.real(vector<int>({2,1})),21);
+    }
 
 SECTION("Set and Get with long int")
-{
-auto I = IQIndex("I",Index("I+",1),QN(+1),
-                     Index("I-",1),QN(-1));
-auto J = IQIndex("J",Index("I+",2),QN(+1),
-                     Index("I-",2),QN(-1));
-auto T = IQTensor(I,J);
-long int i1 = 1,
-         i2 = 2;
-T.set(i2,i1,21);
-CHECK_CLOSE(T.real(J(1),I(2)),21);
-CHECK_CLOSE(T.real(i2,i1),21);
-}
+    {
+    auto I = IQIndex("I",Index("I+",1),QN(+1),
+                         Index("I-",1),QN(-1));
+    auto J = IQIndex("J",Index("I+",2),QN(+1),
+                         Index("I-",2),QN(-1));
+    auto T = IQTensor(I,J);
+    long int i1 = 1,
+             i2 = 2;
+    T.set(i2,i1,21);
+    CHECK_CLOSE(T.real(J(1),I(2)),21);
+    CHECK_CLOSE(T.real(i2,i1),21);
+    }
+
+SECTION("Reindex")
+    {
+
+    auto T = randomTensor(QN(),dag(S1),prime(S1),dag(S2),prime(S2));
+
+    auto nT = reindex(T,S1,S3,S2,S4);
+    
+    CHECK(ord(nT) == 4);
+    CHECK(hasindex(nT,S3));
+    CHECK(hasindex(nT,prime(S3)));
+    CHECK(hasindex(nT,S4));
+    CHECK(hasindex(nT,prime(S4)));
+
+    auto J4 = IQIndex("J4",Index("J4_-",1,Site),QN(-1),
+                           Index("J4_0 ",1,Site),QN(0),
+                           Index("J4_+",1,Site),QN(+1));
+
+    CHECK_THROWS(nT = reindex(T,S1,S3,S2,J4));
+    }
 
 //SECTION("Non-contracting product")
 //    {

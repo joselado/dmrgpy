@@ -128,6 +128,132 @@ SECTION("Regression Test")
     REQUIRE_NOTHROW(A.plusEq(B));
     }
 
+SECTION("applyMPO (DensityMatrix)")
+    {
+
+    auto method = "DensityMatrix";
+
+    auto N = 10;
+    auto sites = SpinHalf(N);
+
+    auto psi = MPS(sites);
+
+    //Use AutoMPO as a trick to get
+    //an MPO with bond dimension > 1
+    auto ampo = AutoMPO(sites);
+    for(auto j : range1(N-1))
+        {
+        ampo += "Sz",j,"Sz",j+1;
+        ampo += 0.5,"S+",j,"S-",j+1;
+        ampo += 0.5,"S-",j,"S+",j+1;
+        }
+    auto H = MPO(ampo);
+    auto K = MPO(ampo);
+    //Randomize the MPOs to make sure they are non-Hermitian
+    for(auto j : range1(N))
+        {
+        randomize(H.Aref(j));
+        randomize(K.Aref(j));
+        H.Aref(j) *= 0.2;
+        K.Aref(j) *= 0.2;
+        }
+
+    // Apply K to psi to entangle psi
+    psi = applyMPO(K,psi,{"Cutoff=",0.,"Maxm=",100});
+    psi /= norm(psi);
+
+    auto Hpsi = applyMPO(H,psi,{"Method=",method,"Cutoff=",1E-13,"Maxm=",5000});
+
+    CHECK_EQUAL(checkMPOProd(Hpsi,H,psi,1E-10),true);
+
+    }
+
+SECTION("applyMPO (Fit)")
+    {
+
+    auto method = "Fit";
+
+    auto N = 10;
+    auto sites = SpinHalf(N);
+
+    auto psi = MPS(sites);
+
+    //Use AutoMPO as a trick to get
+    //an MPO with bond dimension > 1
+    auto ampo = AutoMPO(sites);
+    for(auto j : range1(N-1))
+        {
+        ampo += "Sz",j,"Sz",j+1;
+        ampo += 0.5,"S+",j,"S-",j+1;
+        ampo += 0.5,"S-",j,"S+",j+1;
+        }
+    auto H = MPO(ampo);
+    auto K = MPO(ampo);
+    //Randomize the MPOs to make sure they are non-Hermitian
+    for(auto j : range1(N))
+        {
+        randomize(H.Aref(j));
+        randomize(K.Aref(j));
+        H.Aref(j) *= 0.2;
+        K.Aref(j) *= 0.2;
+        }
+
+    // Apply K to psi to entangle psi
+    psi = applyMPO(K,psi,{"Cutoff=",0.,"Maxm=",100});
+    psi /= norm(psi);
+
+    auto Hpsi = applyMPO(H,psi,{"Method=",method,"Cutoff=",1E-13,"Maxm=",5000,"Sweeps=",100});
+
+    CHECK_EQUAL(checkMPOProd(Hpsi,H,psi,1E-10),true);
+
+    // Now with a trial starting state
+    auto Hpsi_2 = applyMPO(H,psi,Hpsi,{"Method=",method,"Cutoff=",1E-13,"Maxm=",5000,"Sweeps=",100});
+
+    CHECK_EQUAL(checkMPOProd(Hpsi_2,H,psi,1E-10),true);
+
+    }
+
+SECTION("errorMPOProd Scaling")
+    {
+
+    auto method = "DensityMatrix";
+
+    auto N = 10;
+    auto sites = SpinHalf(N);
+
+    auto psi = MPS(sites);
+
+    //Use AutoMPO as a trick to get
+    //an MPO with bond dimension > 1
+    auto ampo = AutoMPO(sites);
+    for(auto j : range1(N-1))
+        {
+        ampo += "Sz",j,"Sz",j+1;
+        ampo += 0.5,"S+",j,"S-",j+1;
+        ampo += 0.5,"S-",j,"S+",j+1;
+        }
+    auto H = MPO(ampo);
+    auto K = MPO(ampo);
+    //Randomize the MPOs to make sure they are non-Hermitian
+    for(auto j : range1(N))
+        {
+        randomize(H.Aref(j));
+        randomize(K.Aref(j));
+        H.Aref(j) *= 10.0; //crazy large tensor
+        K.Aref(j) *= 10.0;
+        }
+
+    // Apply K to psi to entangle psi
+    psi = applyMPO(K,psi,{"Cutoff=",0.,"Maxm=",100});
+    psi /= norm(psi);
+
+    auto Hpsi = applyMPO(H,psi,{"Method=",method,"Cutoff=",1E-13,"Maxm=",5000});
+
+    //<Hpsi|Hpsi> is ~ 1E20, but normalization should take care of that
+    CHECK_CLOSE(errorMPOProd(Hpsi,H,psi),0.);
+
+    }
+
 SECTION("Overlap <psi|HK|phi>")
     {
     detail::seed_quickran(1);
@@ -160,8 +286,8 @@ SECTION("Overlap <psi|HK|phi>")
         Hdag.Aref(j) = dag(swapPrime(H.A(j),0,1,Site));
         }
 
-    auto Hdphi = exactApplyMPO(Hdag,phi,{"Cutoff=",1E-13,"Maxm=",5000});
-    auto Kpsi = exactApplyMPO(K,psi,{"Cutoff=",1E-13,"Maxm=",5000});
+    auto Hdphi = applyMPO(Hdag,phi,{"Cutoff=",1E-13,"Maxm=",5000,"Method=","DensityMatrix"});
+    auto Kpsi = applyMPO(K,psi,{"Cutoff=",1E-13,"Maxm=",5000,"Method=","DensityMatrix"});
 
     //Print(overlap(phi,H,K,psi));
     //Print(overlap(Hdphi,Kpsi));
@@ -208,6 +334,79 @@ SECTION("toMPO function")
         CHECK(norm(a.A(n) - ITensor(A.A(n))) < 1E-10);
         }
 
+    }
+
+
+SECTION("nmultMPO")
+    {
+    detail::seed_quickran(1);
+
+    auto N = 4;
+    auto sites = SpinHalf(N);
+
+    //Use AutoMPO as a trick to get
+    //an MPO with bond dimension > 1
+    auto ampo = AutoMPO(sites);
+    for(auto j : range1(N-1))
+        {
+        ampo += "Sz",j,"Sz",j+1;
+        ampo += 0.5,"S+",j,"S-",j+1;
+        ampo += 0.5,"S-",j,"S+",j+1;
+        }
+    auto H = MPO(ampo);
+    auto K = MPO(ampo);
+    //Randomize the MPOs to make sure they are non-Hermitian
+    for(auto j : range1(N))
+        {
+        randomize(H.Aref(j));
+        randomize(K.Aref(j));
+        H.Aref(j) *= 0.2;
+        K.Aref(j) *= 0.3;
+        }
+
+    auto nsites = SpinHalf(N);
+    for(auto j : range1(N))
+        {
+        K.Aref(j) *= prime(delta(Index(nsites(j)),sites(j)));
+        }
+
+    MPO R;
+    nmultMPO(H,K,R,{"Cutoff=",1E-10});
+
+    auto randomMPS = [](SiteSet const& sites, 
+              int m)
+        {
+        auto psi = MPS(sites);
+        auto N = sites.N();
+        auto links = std::vector<Index>(N+1);
+        for(int j = 0; j <= N; ++j)
+            {
+            links.at(j) = Index(format("l_%d",j),m);
+            }
+        for(int j = 1; j <= N; ++j)
+            {
+            psi.Aref(j) = randomTensor(links.at(j-1),sites(j),links.at(j));
+            psi.Aref(j) /= norm(psi.A(j));
+            }
+        psi.Aref(1) *= randomTensor(links.at(0));
+        psi.Aref(N) *= randomTensor(links.at(N));
+        //printfln("<rpsi|rpsi> = %.12f",overlap(psi,psi));
+        psi.position(1);
+        psi.Aref(1) /= norm(psi.A(1));
+        return psi;
+        };
+
+    //Print(R);
+
+    int Ntest = 4;
+    for(int n = 1; n <= Ntest; ++n)
+        {
+        auto psi = randomMPS(nsites,4);
+        auto phi = randomMPS(sites,4);
+        auto oR = overlap(psi,R,phi);
+        auto oKH = overlap(psi,K,H,phi);
+        CHECK_DIFF(oR,oKH,1E-5);
+        }
     }
 
 }

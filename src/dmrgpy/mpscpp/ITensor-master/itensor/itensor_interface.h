@@ -44,7 +44,7 @@ class ITensorT
     private:
     indexset_type is_;
     mutable storage_ptr store_;
-    scale_type scale_;
+    IF_USESCALE(scale_type scale_;)
     public:
 
     //
@@ -100,10 +100,18 @@ class ITensorT
     Real
     real(IndexVals&&... ivs) const;
 
+    Cplx
+    cplx(std::vector<indexval_type> const& ivs) const;
+
     template <typename IV, typename... IVs>
     auto
     cplx(IV const& iv1, IVs&&... ivs) const
          -> stdx::if_compiles_return<Cplx,decltype(iv1.index),decltype(iv1.val)>;
+
+    template <typename Int>
+    auto
+    cplx(std::vector<Int> const& ints) const
+        -> stdx::enable_if_t<std::is_integral<Int>::value,Cplx>;
 
     template <typename Int, typename... Ints>
     auto
@@ -239,6 +247,7 @@ class ITensorT
     ITensorT& 
     operator-=(ITensorT const& other);
 
+#ifdef USESCALE
     //Multiplication by real scalar
     ITensorT&
     operator*=(Real fac) { scale_ *= fac; return *this; }
@@ -246,6 +255,15 @@ class ITensorT
     //Division by real scalar
     ITensorT&
     operator/=(Real fac) { scale_ /= fac; return *this; }
+#else
+    //Multiplication by real scalar
+    ITensorT&
+    operator*=(Real fac);
+
+    //Division by real scalar
+    ITensorT&
+    operator/=(Real fac);
+#endif
 
     //Multiplication by complex scalar
     ITensorT&
@@ -257,7 +275,7 @@ class ITensorT
 
     //Negation
     ITensorT
-    operator-();
+    operator-() const;
 
     //Non-contracting product
     //All matching Index pairs automatically merged
@@ -317,14 +335,6 @@ class ITensorT
     explicit
     ITensorT(indexset_type const& is);
 
-    //Scale factor, used internally for efficient scalar ops.
-    //Mostly for developer use; not necessary to explicitly involve
-    //scale factors in user-level ITensor operations.
-    scale_type const&
-    scale() const { return scale_; }
-
-    scale_type&
-    scale() { return scale_; }
 
     storage_ptr&
     store() { return store_; }
@@ -332,13 +342,40 @@ class ITensorT
     const_storage_ptr
     store() const { return const_storage_ptr(store_); }
 
-    void 
-    scaleTo(scale_type const& newscale);
-    void 
-    scaleTo(Real newscale);
 
     void
     swap(ITensorT & other);
+    
+    
+#ifdef USESCALE
+
+    scale_type const&
+    scale() const { return scale_; }
+
+    scale_type&
+    scale() { return scale_; }
+    
+    void 
+    scaleTo(scale_type const& newscale);
+    
+    void 
+    scaleTo(Real newscale);
+
+#else //not using scale, default case:
+
+    scale_type
+    scale() const { return scale_type(1.); }
+
+    //scale_type&
+    //scale() { return scale_; }
+    
+    void 
+    scaleTo(scale_type const& newscale) { }
+    
+    void 
+    scaleTo(Real newscale) { }
+
+#endif
 
     }; // class ITensorT
 
@@ -414,9 +451,18 @@ commonIndex(const ITensorT<IndexT>& A,
 //which is NOT shared by tensor B
 template<typename IndexT> 
 IndexT
-uniqueIndex(const ITensorT<IndexT>& A, 
-            const ITensorT<IndexT>& B, 
+uniqueIndex(ITensorT<IndexT> const& A, 
+            ITensorT<IndexT> const& B, 
             IndexType t);
+
+//Find index of tensor A (of optional type t) 
+//which is NOT shared by the tensors "Ts"
+template<typename IndexT, typename... Tensors> 
+IndexT
+uniqueIndex(ITensorT<IndexT> const& A, 
+            ITensorT<IndexT> const& T1,
+            ITensorT<IndexT> const& T2,
+            Tensors const&... Ts);
 
 //
 //Return copy of a tensor with primeLevels plev1 and plev2 swapped
@@ -498,6 +544,12 @@ template<typename I>
 Cplx
 sumelsC(ITensorT<I> const& t);
 
+template<typename IndexT, typename... Inds>
+ITensorT<IndexT>
+reindex(ITensorT<IndexT> const& cT, 
+        IndexT o1, IndexT n1, 
+        Inds... inds);
+
 
 //
 // Given Tensors which represent operator matrices
@@ -519,6 +571,13 @@ template<class I>
 ITensorT<I>
 multSiteOps(ITensorT<I> A, ITensorT<I> const& B);
 
+template<class I>
+detail::IndexValIter<I>
+iterInds(ITensorT<I> const& T)
+    {
+    return iterInds(T.inds());
+    }
+
 std::ostream& 
 operator<<(std::ostream & s, ITensor const& T);
 
@@ -527,7 +586,7 @@ operator<<(std::ostream & s, IQTensor const& T);
 
 } //namespace itensor
 
-#include "itensor_interface.ih"
+#include "itensor_interface_impl.h"
 
 
 #endif

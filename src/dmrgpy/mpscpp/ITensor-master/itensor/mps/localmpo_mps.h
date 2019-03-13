@@ -64,7 +64,7 @@ class LocalMPO_MPS
     void
     position(int b, MPSType const& psi);
 
-    int
+    size_t
     size() const { return lmpo_.size(); }
 
     explicit
@@ -78,7 +78,7 @@ class LocalMPO_MPS
     bool
     doWrite() const { return lmpo_.doWrite(); }
     void
-    doWrite(bool val) { lmpo_.doWrite(val); }
+    doWrite(bool val, Args const& args = Args::global()) { lmpo_.doWrite(val,args); }
 
     };
 

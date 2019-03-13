@@ -23,19 +23,19 @@ import time
 i = np.random.randint(n)
 j = np.random.randint(n)
 t1 = time.time()
-(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="XX")
+(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
 t2 = time.time()
 print("Time with DMRG",t2-t1)
 
 
 (x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="CVM",
-        i=i,j=j,name="XX")
+        i=i,j=j,name="ZZ")
 t3 = time.time()
 print("Time with ED",t3-t2)
 
 
 (x4,y4) = sc.get_dynamical_correlator(mode="ED",submode="KPM",
-        i=i,j=j,name="XX")
+        i=i,j=j,name="ZZ")
 t4 = time.time()
 print("Time with KPM-ED",t4-t3)
 

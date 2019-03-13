@@ -380,10 +380,10 @@ T.set(1,i2,12);
 T.set(i2,1,21);
 T.set(i2,2,22);
 CHECK(!isComplex(T));
-CHECK_CLOSE(T.real(s1(1),s2(1)),11);
-CHECK_CLOSE(T.real(s1(1),s2(2)),12);
-CHECK_CLOSE(T.real(s1(2),s2(1)),21);
-CHECK_CLOSE(T.real(s1(2),s2(2)),22);
+CHECK_CLOSE(T.real(s1(i1),s2(i1)),11);
+CHECK_CLOSE(T.real(s1(i1),s2(2)),12);
+CHECK_CLOSE(T.real(s1(2),s2(i1)),21);
+CHECK_CLOSE(T.real(s1(i2),s2(2)),22);
 CHECK_CLOSE(T.real(i1,i1),11);
 CHECK_CLOSE(T.real(i1,2),12);
 CHECK_CLOSE(T.real(2,i1),21);
@@ -395,26 +395,30 @@ CHECK_CLOSE(T.cplx(s1(2),s2(1)),3+5_i);
 CHECK_CLOSE(T.cplx(i2,i1),3+5_i);
 }
 
-SECTION("Set Using vector<IndexVal>")
+SECTION("Set and Get Using vector<IndexVal>")
 {
 auto T = ITensor(s1,s2);
 auto v12 = vector<IndexVal>{{s2(2),s1(1)}};
 T.set(v12,12);
 auto v21 = vector<IndexVal>{{s1(2),s2(1)}};
 T.set(v21,21);
+CHECK_CLOSE(T.real(vector<IndexVal>({s1(1),s2(2)})),12);
+CHECK_CLOSE(T.real(vector<IndexVal>({s1(2),s2(1)})),21);
 CHECK_CLOSE(T.real(s1(1),s2(2)),12);
 CHECK_CLOSE(T.real(s1(2),s2(1)),21);
 }
 
-SECTION("Set Using vector<int>")
+SECTION("Set and Get Using vector<int>")
 {
 auto T = ITensor(s1,s2);
 auto v12 = vector<int>{{1,2}};
 T.set(v12,12);
 auto v21 = vector<int>{{2,1}};
 T.set(v21,21);
-CHECK_CLOSE(T.real(s1(1),s2(2)),12);
-CHECK_CLOSE(T.real(s1(2),s2(1)),21);
+CHECK_CLOSE(T.real(vector<int>({1,2})),12);
+CHECK_CLOSE(T.real(vector<int>({2,1})),21);
+CHECK_CLOSE(T.real(1,2),12);
+CHECK_CLOSE(T.real(2,1),21);
 }
 
 SECTION("IndexValConstructors")
@@ -1146,85 +1150,85 @@ SECTION("Scalar Result")
     }
 }
 
-SECTION("Non-contracting Product")
-{
-auto i = Index("i",8),
-     j = Index("j",3),
-     k = Index("k",7),
-     l = Index("l",10);
-SECTION("Case 1")
-    {
-    auto A = randomTensor(i,l,j);
-    auto B = randomTensor(k,j,l);
-    auto C = A/B;
-    auto diff = 0.;
-    for(auto ii : range1(i.m()))
-    for(auto jj : range1(j.m()))
-    for(auto kk : range1(k.m()))
-    for(auto ll : range1(l.m()))
-        {
-        diff += C.real(i(ii),l(ll),j(jj),k(kk)) - A.real(l(ll),i(ii),j(jj))*B.real(j(jj),k(kk),l(ll));
-        }
-    CHECK(diff < 1E-13);
-    }
-SECTION("Case 2")
-    {
-    auto A = randomTensor(i,l,j);
-    auto B = randomTensor(l,j,k);
-    auto C = A/B;
-    auto diff = 0.;
-    for(auto ii : range1(i.m()))
-    for(auto jj : range1(j.m()))
-    for(auto kk : range1(k.m()))
-    for(auto ll : range1(l.m()))
-        {
-        diff += C.real(i(ii),l(ll),j(jj),k(kk)) - A.real(l(ll),i(ii),j(jj))*B.real(j(jj),k(kk),l(ll));
-        }
-    CHECK(diff < 1E-11);
-    }
-SECTION("Case 3")
-    {
-    auto A = randomTensor(i,l,j);
-    auto B = randomTensor(l,j,k);
-    auto C = B/A;
-    auto diff = 0.;
-    for(auto ii : range1(i.m()))
-    for(auto jj : range1(j.m()))
-    for(auto kk : range1(k.m()))
-    for(auto ll : range1(l.m()))
-        {
-        diff += C.real(i(ii),l(ll),j(jj),k(kk)) - A.real(l(ll),i(ii),j(jj))*B.real(j(jj),k(kk),l(ll));
-        }
-    CHECK(diff < 1E-13);
-    }
-SECTION("Case 4")
-    {
-    auto A = randomTensor(i);
-    auto B = randomTensor(j);
-    auto C = B/A;
-    auto diff = 0.;
-    for(auto ii : range1(i.m()))
-    for(auto jj : range1(j.m()))
-        {
-        diff += C.real(i(ii),j(jj)) - A.real(i(ii))*B.real(j(jj));
-        }
-    CHECK(diff < 1E-13);
-    }
-SECTION("Case 5")
-    {
-    auto A = randomTensor(i);
-    auto B = randomTensor(j,k);
-    auto C = B/A;
-    auto diff = 0.;
-    for(auto ii : range1(i.m()))
-    for(auto jj : range1(j.m()))
-    for(auto kk : range1(k.m()))
-        {
-        diff += C.real(k(kk),i(ii),j(jj)) - A.real(i(ii))*B.real(k(kk),j(jj));
-        }
-    CHECK(diff < 1E-13);
-    }
-}
+//SECTION("Non-contracting Product")
+//{
+//auto i = Index("i",8),
+//     j = Index("j",3),
+//     k = Index("k",7),
+//     l = Index("l",10);
+//SECTION("Case 1")
+//    {
+//    auto A = randomTensor(i,l,j);
+//    auto B = randomTensor(k,j,l);
+//    auto C = A/B;
+//    auto diff = 0.;
+//    for(auto ii : range1(i.m()))
+//    for(auto jj : range1(j.m()))
+//    for(auto kk : range1(k.m()))
+//    for(auto ll : range1(l.m()))
+//        {
+//        diff += C.real(i(ii),l(ll),j(jj),k(kk)) - A.real(l(ll),i(ii),j(jj))*B.real(j(jj),k(kk),l(ll));
+//        }
+//    CHECK(diff < 1E-13);
+//    }
+//SECTION("Case 2")
+//    {
+//    auto A = randomTensor(i,l,j);
+//    auto B = randomTensor(l,j,k);
+//    auto C = A/B;
+//    auto diff = 0.;
+//    for(auto ii : range1(i.m()))
+//    for(auto jj : range1(j.m()))
+//    for(auto kk : range1(k.m()))
+//    for(auto ll : range1(l.m()))
+//        {
+//        diff += C.real(i(ii),l(ll),j(jj),k(kk)) - A.real(l(ll),i(ii),j(jj))*B.real(j(jj),k(kk),l(ll));
+//        }
+//    CHECK(diff < 1E-11);
+//    }
+//SECTION("Case 3")
+//    {
+//    auto A = randomTensor(i,l,j);
+//    auto B = randomTensor(l,j,k);
+//    auto C = B/A;
+//    auto diff = 0.;
+//    for(auto ii : range1(i.m()))
+//    for(auto jj : range1(j.m()))
+//    for(auto kk : range1(k.m()))
+//    for(auto ll : range1(l.m()))
+//        {
+//        diff += C.real(i(ii),l(ll),j(jj),k(kk)) - A.real(l(ll),i(ii),j(jj))*B.real(j(jj),k(kk),l(ll));
+//        }
+//    CHECK(diff < 1E-13);
+//    }
+//SECTION("Case 4")
+//    {
+//    auto A = randomTensor(i);
+//    auto B = randomTensor(j);
+//    auto C = B/A;
+//    auto diff = 0.;
+//    for(auto ii : range1(i.m()))
+//    for(auto jj : range1(j.m()))
+//        {
+//        diff += C.real(i(ii),j(jj)) - A.real(i(ii))*B.real(j(jj));
+//        }
+//    CHECK(diff < 1E-13);
+//    }
+//SECTION("Case 5")
+//    {
+//    auto A = randomTensor(i);
+//    auto B = randomTensor(j,k);
+//    auto C = B/A;
+//    auto diff = 0.;
+//    for(auto ii : range1(i.m()))
+//    for(auto jj : range1(j.m()))
+//    for(auto kk : range1(k.m()))
+//        {
+//        diff += C.real(k(kk),i(ii),j(jj)) - A.real(i(ii))*B.real(k(kk),j(jj));
+//        }
+//    CHECK(diff < 1E-13);
+//    }
+//}
 
 SECTION("Complex Contracting Product")
 {
@@ -1760,6 +1764,56 @@ SECTION("Combiner")
                 }
             }
 
+        SECTION("Combine 2nd,3rd (IndexSet constructor)")
+            {
+            auto C = combiner(IndexSet(k,j));
+            auto R = T * C;
+            auto ci = commonIndex(C,R);
+
+            CHECK_CLOSE(norm(R),norm(T));
+
+            for(auto i_ : range1(i.m()))
+            for(auto j_ : range1(j.m()))
+            for(auto k_ : range1(k.m()))
+                {
+                auto ci_ = k_ + k.m()*(j_-1);
+                CHECK_CLOSE(R.real(ci(ci_),i(i_)), T.real(i(i_),j(j_),k(k_)));
+                }
+            }
+
+        SECTION("Combine 2nd,3rd (initializer_list constructor)")
+            {
+            auto C = combiner({k,j});
+            auto R = T * C;
+            auto ci = commonIndex(C,R);
+
+            CHECK_CLOSE(norm(R),norm(T));
+
+            for(auto i_ : range1(i.m()))
+            for(auto j_ : range1(j.m()))
+            for(auto k_ : range1(k.m()))
+                {
+                auto ci_ = k_ + k.m()*(j_-1);
+                CHECK_CLOSE(R.real(ci(ci_),i(i_)), T.real(i(i_),j(j_),k(k_)));
+                }
+            }
+
+        SECTION("Combine 2nd,3rd (array constructor)")
+            {
+            auto C = combiner(std::array<Index,2>({k,j}));
+            auto R = T * C;
+            auto ci = commonIndex(C,R);
+
+            CHECK_CLOSE(norm(R),norm(T));
+
+            for(auto i_ : range1(i.m()))
+            for(auto j_ : range1(j.m()))
+            for(auto k_ : range1(k.m()))
+                {
+                auto ci_ = k_ + k.m()*(j_-1);
+                CHECK_CLOSE(R.real(ci(ci_),i(i_)), T.real(i(i_),j(j_),k(k_)));
+                }
+            }
 
         //Uncombine back:
         //auto TT = C * R;
@@ -2657,6 +2711,30 @@ SECTION("ITensor Negation")
         {
         CHECK_CLOSE(oT.real(i(ii),j(ij),k(ik)),T.real(i(ii),j(ij),k(ik)));
         CHECK_CLOSE(-oT.real(i(ii),j(ij),k(ik)),N.real(i(ii),j(ij),k(ik)));
+        }
+    }
+
+SECTION("uniqueIndex")
+    {
+    auto i = Index("i",2);
+    auto j = Index("j",2);
+    auto k = Index("k",3);
+    auto l = Index("l",3);
+
+    SECTION("Test 1")
+        {
+        auto A = ITensor(i,j,k);
+        auto B = ITensor(k,j);
+        CHECK(uniqueIndex(A,B,Link) == i);
+        }
+
+    SECTION("Test 2")
+        {
+        auto A = ITensor(i,j,k,l);
+        auto B = ITensor(i);
+        auto C = ITensor(j);
+        auto D = ITensor(l);
+        CHECK(uniqueIndex(A,B,C,D) == k);
         }
     }
 

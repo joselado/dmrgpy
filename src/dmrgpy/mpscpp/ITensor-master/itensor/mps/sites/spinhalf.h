@@ -69,12 +69,6 @@ class SpinHalfSite
             Op.set(Dn,DnP,-0.5);
             }
         else
-//        if(opname == "F")
-//            {
-//            Op.set(Up,UpP,+1.0);
-//            Op.set(Dn,DnP,+1.0);
-//            }
-//        else
         if(opname == "Sx")
             {
             //mixedIQTensor call needed here

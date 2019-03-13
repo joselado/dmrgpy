@@ -88,11 +88,9 @@ class MPOt : private MPSt<Tensor>
     void 
     primeall()	// sites i,i' -> i',i'';  link:  l -> l'
         {
-        for(int i = 1; i <= this->N(); i++)
+        for(auto i : range1(this->N()))
             {
-            Anc(i).mapprime(0,1,Link);
-            Anc(i).mapprime(1,2,Site);
-            Anc(i).mapprime(0,1,Site);
+            Aref(i).prime();
             }
         }
 
@@ -282,6 +280,19 @@ nmultMPO(MPOType const& Aorig,
          MPOType& res,
          Args args = Args::global());
 
+template<class Tensor>
+MPSt<Tensor>
+applyMPO(MPOt<Tensor> const& K,
+         MPSt<Tensor> const& x,
+         Args const& args = Args::global());
+
+template<class Tensor>
+MPSt<Tensor>
+applyMPO(MPOt<Tensor> const& K,
+         MPSt<Tensor> const& x,
+         MPSt<Tensor> const& x0,
+         Args const& args = Args::global());
+
 //
 // Applies an MPO to an MPS using the zip-up method described
 // more fully in Stoudenmire and White, New. J. Phys. 12, 055026 (2010).
@@ -453,10 +464,22 @@ operator<<(std::ostream& s, MPOt<Tensor> const& M);
 
 template<class Tensor>
 Real
+errorMPOProd(MPSt<Tensor> const& psi2,
+             MPOt<Tensor> const& K, 
+             MPSt<Tensor> const& psi1);
+
+template<class Tensor>
+Real
 checkMPOProd(MPSt<Tensor> const& psi2,
              MPOt<Tensor> const& K, 
              MPSt<Tensor> const& psi1);
 
+template<class Tensor>
+bool
+checkMPOProd(MPSt<Tensor> const& psi2,
+             MPOt<Tensor> const& K, 
+             MPSt<Tensor> const& psi1,
+             Real threshold);
 //
 // Deprecated interfaces - kept for backwards compatibility
 //
@@ -478,6 +501,6 @@ exactApplyMPO(MPSt<Tensor> const& x,
 
 } //namespace itensor
 
-#include "mpo.ih"
+#include "mpo_impl.h"
 
 #endif
