@@ -192,24 +192,12 @@ class Many_Body_Hamiltonian():
         return timedependent.dynamical_correlator(self,**kwargs)
     elif submode=="CVM": # CVM mode
         return cvm.dynamical_correlator(self,**kwargs)
-  def get_excited(self,n=10,mode="DMRG"):
-    self.to_folder() # go to temporal folder
-    if mode=="DMRG":
-#      self.setup_sweep()
-      self.setup_task("excited",task={"nexcited":str(n)})
-      self.write_hamiltonian() # write the Hamiltonian to a file
-      self.run() # perform the calculation
-      out = self.execute(lambda: np.genfromtxt("EXCITED.OUT"))
-    elif mode=="ED":
-      h = self.get_full_hamiltonian() # get the Hamiltonian
-      from . import pychain
-      out = pychain.spectrum.eigenstates(h,k=n) # return energy
-    else: 
-      self.to_origin() # go to main folder
-      raise
-    self.to_origin() # go to main folder
-    return out
+  def get_excited(self,**kwargs):
+    """Return excitation energies"""
+    from . import excited
+    return excited.get_excited(self,**kwargs) # return excitation energies
   def get_gap(self):
+    """Return the gap"""
     es = self.get_excited(2)
     return es[1] -es[0]
   def set_initial_wf(self,wf):

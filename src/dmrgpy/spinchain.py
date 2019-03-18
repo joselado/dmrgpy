@@ -34,7 +34,18 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
             from . import pychainwrapper
             return pychainwrapper.get_dynamical_correlator(self,
                     **kwargs)
-
+    def get_excited(self,mode="DMRG",n=10,**kwargs):
+        """
+        Compute excited state energies
+        """
+        if mode=="DMRG":
+            return Many_Body_Hamiltonian.get_excited(self,n=n,
+                    **kwargs)
+        elif mode=="ED":
+            h = self.get_full_hamiltonian() # get the Hamiltonian
+            from . import pychain
+            return pychain.spectrum.eigenstates(h,k=n) # return energies
+        else: raise
     def get_correlator(self,pairs=[[]],mode="DMRG",**kwargs):
         """Return the correlator"""
         if mode=="DMRG": # using DMRG

@@ -7,6 +7,11 @@ import time
 n = 12 # take n different sites
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+def fj(i,j):
+    if abs(i-j)==1: return 47.
+    return 0.0
+sc.set_exchange(fj)
+
 # n is the number of excited states
 t0 = time.time()
 es1 = sc.get_excited(n=6,mode="DMRG") # compute excited states with DMRG
@@ -22,6 +27,6 @@ print("Excited states with ED")
 print(es2)
 print("\n")
 print("Relative error",np.sum(np.abs(es1-es2)))
-sc.clean() # remove temporal files
+#sc.clean() # remove temporal files
 
 
