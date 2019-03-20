@@ -89,6 +89,7 @@ int get_correlator_old()   {
   };
   ofile.close() ;
   cfile.close() ;
+  return 0 ;
 }
 
 
@@ -122,4 +123,5 @@ int get_correlator()   {
   };
   ofile.close() ;
   cfile.close() ;
+  return 0 ;
 }
