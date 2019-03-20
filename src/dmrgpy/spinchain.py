@@ -46,6 +46,17 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
             from . import pychain
             return pychain.spectrum.eigenstates(h,k=n) # return energies
         else: raise
+    def get_dos(self,mode="DMRG",**kwargs):
+        """
+        Compute the overall density of states
+        """
+        if mode=="DMRG":
+            return Many_Body_Hamiltonian.get_dos(self,**kwargs)
+        elif mode=="ED":
+            h = self.get_full_hamiltonian() # get the Hamiltonian
+            from .pychain import dos
+            return dos.dos_kpm(h,**kwargs)
+
     def get_correlator(self,pairs=[[]],mode="DMRG",**kwargs):
         """Return the correlator"""
         if mode=="DMRG": # using DMRG

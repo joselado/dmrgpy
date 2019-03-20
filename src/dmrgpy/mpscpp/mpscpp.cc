@@ -69,6 +69,9 @@ main()
     if (check_task("dynamical_correlator"))  { // dynamical correlation
        get_moments_dynamical_correlator(sites,H);
     } ;
+    if (check_task("dos"))  { // global DOS
+       get_moments_dos(sites,H);
+    } ;
     if (check_task("cvm"))  cvm_dynamical_correlator(sites) ; // CVM
 // overlap task
     if (check_task("overlap"))  compute_overlap() ; // compute overlap

@@ -103,7 +103,7 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
     # ground state energy
     e0 = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
     self.e0 = e0 # add this quantity
-    e0 = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
+    n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
     xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
     ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz") # generate the DOS
     xs /= scale # scale back the energies
