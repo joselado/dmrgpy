@@ -15,7 +15,6 @@ def fj(i,j):
   if abs(i-j)==1: return 1.0
   else: return 0.0
 sc.set_exchange(fj)
-
 sc.get_gs()
 
 #sc.kpmmaxm = 20 # KPM maxm
@@ -28,7 +27,7 @@ t2 = time.time()
 print("Time with DMRG",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="CVM",
+(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="ED",
         i=i,j=j,name="ZZ")
 t3 = time.time()
 print("Time with ED",t3-t2)

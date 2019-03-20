@@ -10,24 +10,14 @@ def get_moments_dmrg(self,n=1000):
 
 
 
-#def get_moments_spismj_dmrg(self,n=1000,i=0,j=0,smart=True):
-#  """Get the moments with DMRG"""
-#
-#  task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
-#                "site_i_kpm":str(i),"site_j_kpm":str(j),
-#                "kpm_scale":str(self.kpmscale)}
-#  if smart: task["smart_kpm_window"] = "true" 
-#  self.setup_task("spismj",task=task) 
-#  self.write_hamiltonian() # write the Hamiltonian to a file
-#  self.run() # perform the calculation
-#  return np.genfromtxt("KPM_MOMENTS.OUT").transpose()[0]
 
 
 
 
 
 
-def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
+def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
+        name="XX",delta=1e-1):
   """Get the moments with DMRG"""
   try: # select the right operators, be consistent with mpscpp.x
       from . import operatornames
@@ -36,9 +26,11 @@ def get_moments_dynamical_correlator_dmrg(self,n=1000,i=0,j=0,name="XX"):
   except:
       print("Dynamical correlator not recognised")
       raise
-  task= {"nkpm":str(n),"kpmmaxm":str(self.kpmmaxm),
+  task= {       "kpmmaxm":str(self.kpmmaxm),
                 "site_i_kpm":str(i),"site_j_kpm":str(j),
-                "kpm_scale":str(self.kpmscale),
+                "kpm_scale":str(self.kpm_scale),
+                "kpm_n_scale":str(self.kpm_n_scale),
+                "kpm_delta":str(delta),
                 "kpm_cutoff":str(self.kpmcutoff),
                 "kpm_operator_i":namei,"kpm_operator_j":namej}
   self.setup_task("dynamical_correlator",task=task) 
@@ -93,30 +85,30 @@ def restrict_interval(x,y,window):
 
 
 def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
-             window=[-1,10],name="XX",delta=2e-2,es=None):
+             window=[-1,10],name="XX",delta=2e-2,es=None,
+             **kwargs):
   """
   Compute a dynamical correlator using the KPM-DMRG method
   """
-  if delta is not None: # estimate the number of polynomials
-    scale = self.get_kpm_scale()
-    n = int(scale/(4.*delta))
   self.to_folder() # go to temporal folder
   if mode=="DMRG": 
 # get the moments
-    mus = get_moments_dynamical_correlator_dmrg(self,n=n,i=i,j=j,name=name) 
+    mus = get_moments_dynamical_correlator_dmrg(self,i=i,j=j,
+            name=name,delta=delta,**kwargs) 
     # scale of the dos
-    scale = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
+    kpmscales = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
+    emin = kpmscales[0] # minimum energy
+    emax = kpmscales[1] # maximum energy
+    scale = kpmscales[2] # scaling of the energies
     # ground state energy
     e0 = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
     self.e0 = e0 # add this quantity
-    minx = -1.0 + (e0*scale) 
-    maxx = -1.0 
+    e0 = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
     xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
     ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz") # generate the DOS
-    xs /= scale
-    ys *= scale
+    xs /= scale # scale back the energies
+    ys *= scale # renormalize the y positions
 #    e0 = self.gs_energy() # ground state energy
-    xs -= e0 # substract GS energy
     # now retain only an energy window
   else: 
     h = self.get_full_hamiltonian()

@@ -169,3 +169,15 @@ static auto add_spin_operator= [](auto ampo, auto sites, float v, int i, auto na
 	return ampo ;
 }
 ;
+
+
+
+
+static auto Iden=[](auto sites) {
+    auto ampo = AutoMPO(sites);
+    ampo += "Id", 1;
+    return MPO(ampo);
+};
+
+
+

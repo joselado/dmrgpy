@@ -50,9 +50,10 @@ class Many_Body_Hamiltonian():
     self.nsweeps = 15 # number of sweeps
     self.kpmcutoff = 1e-8 # cutoff in KPM
     self.cutoff = 1e-8 # cutoff in ground state
-    self.kpmscale = 10.0 # this is meaningless
     self.cvm_tol = 1e-5 # tolerance for CVM
     self.cvm_nit = 1e3 # iterations for CVM
+    self.kpm_scale = 1.1 # scaling of the spectra for KPM
+    self.kpm_n_scale = 5 # scaling factor for the number of polynomials
     self.restart = False # restart the calculation
     self.gs_from_file = False # start from a random wavefunction
     self.e0 = None # no ground state energy

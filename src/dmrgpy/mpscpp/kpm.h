@@ -1,4 +1,5 @@
 #include"kpmortho.h"
+#include"bandwidth.h"
 
 
 // compute the KPM moments for matrix m and vectors vi and vj
@@ -98,12 +99,20 @@ static auto scale_hamiltonian=[](auto sites, auto H) {
     auto sweeps = get_sweeps(); // get the sweeps
     auto emin = dmrg(psi,H,sweeps,{"Quiet=",true}); // get minimum energy
     auto emax = dmrg(psi,-1*H,sweeps,{"Quiet=",true}); // get maximum energy
-    auto dosscale = 0.9/max(abs(emin),abs(emax)) ; // energy scale for DOS
+    emax = -emax; // set positive
+    int maxm = get_int_value("maxm"); // bond dimension
+    float cutoff = get_float_value("cutoff"); // cutoff
+    auto args = Args({"Maxm", maxm, "Cutoff",cutoff}); // arguments
+    auto m = sum(-emin*Iden(sites),H,args); // shift Hamiltonian 
     ofstream myfile;
+    auto scale = (emax-emin)*get_float_value("kpm_scale"); // scale
+    scale = 1.0/scale ;  // scale of the Hamiltonian
     myfile.open("KPM_SCALE.OUT");
-    myfile << std::setprecision(8) << dosscale << endl;
+    myfile << std::setprecision(8) << emin << "   "; // minimum energy
+    myfile << std::setprecision(8) << emax << "   "; // maximum energy
+    myfile << std::setprecision(8) << scale << endl; // maximum energy
     myfile.close() ; // close file
-    auto m = H*dosscale ; // scale Hamiltonian
+    m = m*scale ; // scale Hamiltonian
     return m ; // return scaled Hamiltonian
 }
 ;
@@ -130,14 +139,22 @@ static auto get_moments_spismj_brute=[](auto sites, auto H, int n, int i, int j)
 
 
 
-static auto get_moments_dynamical_correlator=[](auto sites, auto H, int n,
-      int i, int j, auto namei, auto namej) {
+static auto get_moments_dynamical_correlator=[](auto sites, auto H)
+{
+  auto n = get_int_value("nkpm");
+  auto delta = get_float_value("kpm_delta");
+  // define on the fly the number of polynomials
+  n = int(round(bandwidth(sites,H)/delta))*get_int_value("kpm_n_scale");
+  ofstream myfile;
+  myfile.open("KPM_NUM_POLYNOMIALS.OUT");
+  myfile << std::setprecision(8) << n << endl;
+  myfile.close(); // close file
+  auto i = get_int_value("site_i_kpm");
+  auto j = get_int_value("site_j_kpm");
+  auto namei = get_str("kpm_operator_i");
+  auto namej = get_str("kpm_operator_j");
   auto psi = get_gs(sites,H) ; // get the ground state
   auto m = scale_hamiltonian(sites,H) ; // scale this Hamiltonian
-//  auto ampo1 = AutoMPO(sites); 
-//  auto ampo2 = AutoMPO(sites); 
-//  ampo1 += 1.0,namei,i ; // operator
-//  ampo2 += 1.0,namej,j ; // operator
   cout << "Site " << i << " name " << namei << endl;
   cout << "Site " << j << " name " << namej << endl;
   auto m1 = get_operator(sites,i,namei); // first operator

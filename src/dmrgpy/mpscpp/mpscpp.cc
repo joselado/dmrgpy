@@ -67,9 +67,7 @@ main()
 //           get_int_value("site_i_kpm")+1,get_int_value("site_j_kpm")+1) ; 
 //    }
     if (check_task("dynamical_correlator"))  { // dynamical correlation
-       get_moments_dynamical_correlator(sites,H,get_int_value("nkpm"),
-         get_int_value("site_i_kpm"),get_int_value("site_j_kpm"),
-         get_str("kpm_operator_i"),get_str("kpm_operator_j")) ; 
+       get_moments_dynamical_correlator(sites,H);
     } ;
     if (check_task("cvm"))  cvm_dynamical_correlator(sites) ; // CVM
 // overlap task

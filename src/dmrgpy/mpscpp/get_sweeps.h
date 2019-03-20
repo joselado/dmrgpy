@@ -6,9 +6,13 @@ auto get_sweeps() {
     auto maxm = get_int_value("maxm"); // bond dimension
     auto N = get_int_value("nsweeps"); // bond dimension
     auto cutoff = get_float_value("cutoff"); // bond dimension
+    auto moise = get_float_value("moise"); // bond dimension
     auto sweeps = Sweeps(N); //number of sweeps
     sweeps.maxm() = maxm;
     sweeps.cutoff() = cutoff;
+    sweeps.noise() = moise;
+    // noise only in the first half
+    for (int i=N/2;i<N;i++) sweeps.setnoise(i,0.0) ;
     return sweeps ;
 }
 
