@@ -33,7 +33,8 @@ def get_dos(self,delta=2e-2,**kwargs):
   scale = kpmscales[2] # scaling of the energies
   n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
   xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
-  ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz") # generate the DOS
+  # generate the DOS
+  ys = generate_profile(mus,xs,use_fortran=False,kernel="jackson").real
   xs /= scale # scale back the energies
   xs += emin # shift energy
   ys *= scale # renormalize the y positions

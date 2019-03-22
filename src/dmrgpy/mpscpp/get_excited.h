@@ -12,7 +12,8 @@ static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
   auto wfs = std::vector<MPS>(nexcited);
   for (i=0;i<nexcited;i++) wfs.at(i) = psi0; // initialize with the GS
   auto psi1 = MPS(sites) ; // create new wave
-  auto weight = abs(enmax - en0)*4; // lagrange multiplier
+  // lagrange multiplier
+  float weight = bandwidth(sites,H)*get_float_value("scale_lagrange_excited"); 
   for (i=1;i<nexcited;i++)  { 
     // now compute a new excited state
     // new energy

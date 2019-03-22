@@ -12,6 +12,7 @@ using namespace std;
 
 #include"check_task.h" // read the different tasks
 #include"get_sweeps.h" // get the sweep info
+#include"bandwidth.h"  // return the bandwidth of the hamiltonian
 #include"get_gap.h" // compute the gap
 #include"get_sites.h" // get the sites from a file
 #include"operators.h" // read the different tasks
