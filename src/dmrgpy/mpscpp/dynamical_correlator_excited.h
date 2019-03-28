@@ -30,5 +30,5 @@ int dynamical_correlator_excited() {
 	}
 	fileoverlap.close(); // close file
 	// now that we have the matrix elements, compute the correlator
-	
+	return 0; // return
 }
