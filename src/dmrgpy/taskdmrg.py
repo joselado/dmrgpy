@@ -48,7 +48,7 @@ def write_tasks(self):
   if self.sites_from_file: fo.write(" sites_from_file = true\n")
   fo.write(" starting_file_gs = "+self.starting_file_gs+"\n") # starting WF
   for key in self.task:
-    fo.write(key+" = "+self.task[key]+"\n")
+    fo.write(key+" = "+str(self.task[key])+"\n")
 #("GS = true\ngap = false\ncorrelator = false\n}\n")
   # parameters of dmrg algorithm
   fo.write(" maxm = "+str(self.maxm)+"\n") # maximum bond dimension

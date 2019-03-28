@@ -29,6 +29,7 @@ using namespace std;
 #include"cvm_dynamical_correlator.h" // CVM dynamical correlator
 #include"time_evolution.h" // Time evolution
 #include"reduced_dm.h" // Reduced density matrix
+#include"dynamical_correlator_excited.h" // dynamical correlator with exited
 
 
 int 
@@ -59,14 +60,6 @@ main()
       auto wfs = get_excited(H,sites,sweeps,nexcited); // compute states 
     } ;
     if (check_task("dos")) get_dos(H,sites) ; // get the DOS
-//    if (check_task("spismj"))  { // dynamical correlation function
-//       if (check_task("smart_kpm_window"))
-//         get_moments_spismj(sites,H,get_int_value("nkpm"),
-//           get_int_value("site_i_kpm")+1,get_int_value("site_j_kpm")+1) ;
-//       else 
-//         get_moments_spismj_brute(sites,H,get_int_value("nkpm"),
-//           get_int_value("site_i_kpm")+1,get_int_value("site_j_kpm")+1) ; 
-//    }
     if (check_task("dynamical_correlator"))  { // dynamical correlation
        get_moments_dynamical_correlator(sites,H);
     } ;
@@ -78,6 +71,8 @@ main()
     if (check_task("overlap"))  compute_overlap() ; // compute overlap
     if (check_task("time_evolution"))  quench(sites) ; // time evolution
     if (check_task("density_matrix"))  reduced_dm() ; // DM
-    system("rm -f ERROR") ; // create error file
+    if (check_task("dynamical_correlator_excited"))  
+	    dynamical_correlator_excited(); // DM
+    system("rm -f ERROR") ; // remove error file
     return 0;
     }

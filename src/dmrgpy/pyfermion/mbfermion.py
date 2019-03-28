@@ -31,14 +31,14 @@ class MBFermion():
     """
     Class for a many body fermionic Hamiltonian
     """
-    def __init__(self,n):
+    def __init__(self,n,fconf = lambda x: True):
         """
         Initialize the object
         """
         self.n = n # number of different levels
         if n>nmax: raise # too big system
         self.c_dict = dict() # dictionary with the annhilation operators
-        self.basis = states.generate_basis(self.n,lambda x: True) # basis
+        self.basis = states.generate_basis(self.n,fconf) # basis
         self.nMB = len(self.basis) # dimension of many body hamiltonian
         self.basis_dict = states.get_dictionary(self.basis) # dictionary
         self.h = csc_matrix(([],([],[])),shape=(self.nMB,self.nMB)) # Hamil

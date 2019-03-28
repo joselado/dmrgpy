@@ -12,6 +12,7 @@ from . import correlator
 from . import densitymatrix
 from . import taskdmrg
 from . import cvm
+from . import dcex
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -193,6 +194,9 @@ class Many_Body_Hamiltonian():
         return timedependent.dynamical_correlator(self,**kwargs)
     elif submode=="CVM": # CVM mode
         return cvm.dynamical_correlator(self,**kwargs)
+    elif submode=="EX": # CVM mode
+        return dcex.dynamical_correlator(self,**kwargs)
+    else: raise
   def get_excited(self,**kwargs):
     """Return excitation energies"""
     from . import excited
