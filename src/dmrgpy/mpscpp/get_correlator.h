@@ -119,7 +119,8 @@ int get_correlator()   {
     auto M = opi*1.0; // new MPO
     nmultMPO(opi,opj, M,{"Maxm",maxm,"Cutoff",cutoff}) ; // multiply MPO
     auto c = overlapC(psi,M,psi);
-    ofile << ic << "   " << real(c) << "  " << imag(c) << endl ;
+    ofile << ic << "   "  ; 
+    ofile << std::setprecision(20) << real(c) << "  " << imag(c) << endl ;
   };
   ofile.close() ;
   cfile.close() ;

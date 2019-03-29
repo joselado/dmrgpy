@@ -2,6 +2,7 @@ from .manybodychain import Many_Body_Hamiltonian
 import numpy as np
 import scipy.linalg as lg
 from .pyfermion import mbfermion
+from .algebra import algebra
 
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
@@ -47,6 +48,15 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
               t = self.hoppings[key]
               m[t.i,t.j] = t.g
         return m
+    def get_excited(self,mode="DMRG",**kwargs):
+          """
+          Wrapper for static correlator
+          """
+          if mode=="DMRG": # using DMRG
+            return Many_Body_Hamiltonian.get_excited(self,**kwargs)
+          elif mode=="ED":
+            MBF = self.get_MBF() # get the object
+            return algebra.lowest_eigenvalues(MBF.h,**kwargs)
     def get_correlator(self,name="cdc",mode="DMRG",**kwargs):
           """
           Wrapper for static correlator
@@ -101,9 +111,11 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """Compute ground state energy, overrriding the method"""
         if mode=="DMRG": return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
         elif mode=="ED": 
-            if np.max(np.abs(self.hubbard_matrix))<1e-6:
+            if np.max(np.abs(self.hubbard_matrix))<1e-6 and self.vijkl is None:
                 return self.gs_energy_free()
-            else: return self.get_MBF().get_gs()
+            else:
+                MBF = self.get_MBF()
+                return algebra.lowest_eigenvalues(MBF.h,n=1)[0]
         else: raise # unrecognised
     def get_MBF(self):
         """
@@ -114,6 +126,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           MBf = mbfermion.MBFermion(m0.shape[0]) # create object
           MBf.add_hopping(m0)
           MBf.add_hubbard(self.hubbard_matrix)
+          MBf.add_vijkl(self.vijkl)
           return MBf # return the object
         else: raise 
     def get_kpm_scale(self):

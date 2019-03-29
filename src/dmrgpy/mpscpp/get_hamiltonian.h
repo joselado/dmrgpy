@@ -5,7 +5,8 @@
 #include"get_hopping.h" // get the hoppings (in case there are)
 #include"get_spinful_hopping.h" // get the hoppings (in case there are)
 #include"get_pairing.h" // get the hoppings (in case there are)
-#include"get_hubbard.h" // get the hoppings (in case there are)
+#include"get_hubbard.h" // get hubbard
+#include"get_vijkl.h" // get generalized interaction
 
 
 static auto get_ampo=[](auto sites) {
@@ -18,6 +19,8 @@ static auto get_ampo=[](auto sites) {
     ampo = get_spinful_hopping(ampo); // add hopping to the Hamiltonian
     cout << "Adding Hubbard interaction" << endl ;
     ampo = get_hubbard(ampo); // add hubbard to the Hamiltonian
+    cout << "Adding generalized interaction" << endl ;
+    ampo = get_vijkl(ampo); // add generalized interaction
     cout << "Adding magnetic field" << endl ;
     ampo = get_field(sites,ampo); // add magnetic field to the Hamiltonian
     cout << "Adding superconducting pairing" << endl ;

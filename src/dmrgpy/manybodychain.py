@@ -62,6 +62,7 @@ class Many_Body_Hamiltonian():
     self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
     self.sites_from_file = False # read sites from the file
     self.computed_gs = False # computed the GS already
+    self.vijkl = None # generalized interaction
     self.fit_td = False # use fitting procedure in time evolution
     os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
@@ -72,6 +73,11 @@ class Many_Body_Hamiltonian():
     if os.path.isfile(self.path+"/ERROR"): raise # something wrong
     os.chdir(self.inipath) # go to original folder
   def clean(self): os.system("rm -rf "+self.path) # clean temporal folder
+  def set_vijkl(self,f):
+      """
+      Create the generalized interaction
+      """
+      self.vijkl = f # store
   def set_exchange(self,fun):
     """Set the exchange coupling between sites"""
     self.computed_gs = False # say that GS has not been computed

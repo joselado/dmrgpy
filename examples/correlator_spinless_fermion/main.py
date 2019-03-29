@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 
 # Now compute the ground state correlator
 pairs = [(0,i) for i in range(n)]
-cs0 = fc.get_correlator(pairs=pairs)
-cs1 = fc.get_correlator_free(pairs=pairs)
+cs0 = fc.get_correlator(pairs=pairs,mode="DMRG")
+cs1 = fc.get_correlator(pairs=pairs,mode="ED")
 x = np.array(range(len(cs0))) # distances
 plt.plot(x,cs0,c="blue",label="DMRG")
 plt.scatter(x,cs1,c="red",label="ED")

@@ -7,7 +7,7 @@ static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
   auto en0 = dmrg(psi0,H,sweeps,{"Quiet=",true});
   auto psimax = MPS(sites); // second wavefunction
   auto enmax = dmrg(psimax,-1*H,sweeps,{"Quiet=",true});
-  myfile << std::setprecision(8) << en0 << endl;
+  myfile << std::setprecision(20) << en0 << endl;
   int i; 
   auto wfs = std::vector<MPS>(nexcited);
   for (i=0;i<nexcited;i++) wfs.at(i) = psi0; // initialize with the GS

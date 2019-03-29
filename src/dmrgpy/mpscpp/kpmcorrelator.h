@@ -11,15 +11,15 @@ static auto moments_vi_vj_shift=[](auto m, auto vi, auto vj, int n, auto shift) 
   auto ap = a*1.0 ; // initialize
   auto bk = overlapC(vj,v) ; // overlap
   auto bk1 = overlapC(vj,a) ; // overlap
-  myfile << std::setprecision(8) << real(bk) << endl;
-  myfile << std::setprecision(8) << real(bk1) << endl;
+  myfile << std::setprecision(20) << real(bk) << endl;
+  myfile << std::setprecision(20) << real(bk1) << endl;
   int i ;
   for(i=0;i<n;i++) {
     ap = exactApplyMPO(a,m,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ; // apply
     ap = 2.0*sum(ap,shift*a,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ; // shift
     ap = sum(ap,-1.0*am,{"Maxm",kpmmaxm,"Cutoff",1E-7}) ; // recursion relation
     bk = overlapC(vj,ap) ; // compute term 
-    myfile << std::setprecision(8) << real(bk) << endl;
+    myfile << std::setprecision(20) << real(bk) << endl;
     am = a*1.0; // next iteration
     a = ap*1.0; // next iteration
   } ;

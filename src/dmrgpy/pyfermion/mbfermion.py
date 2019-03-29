@@ -56,18 +56,38 @@ class MBFermion():
         """
         Initialize the Hamiltonian
         """
-        self.h = csc_matrix(([],([],[])),shape=(self.nMB,self.nMB))
+        self.h = self.get_zero()
+    def get_zero(self):
+        """
+        Return the zero matrix
+        """
+        return csc_matrix(([],([],[])),shape=(self.nMB,self.nMB))
     def add_hopping(self,m):
         """
         Add a single particle term to the Hamiltonian
         """
         self.h = self.h + self.one2many(m) # add contribution
+    def get_hopping(self,m):
+        """
+        Return Hopping matrix
+        """
+        return self.one2many(m) # return the matrix
     def add_hubbard(self,hubbard):
         """
         Add a Hubbard term to the hamiltonian
         """
         if hubbard is None: return
         self.h = self.h + self.hubbard(hubbard) # add Hubbard term
+    def add_vijkl(self,f):
+        """
+        Add a generalized interaction
+        """
+        self.h = self.h + self.get_vijkl(f)
+    def get_vijkl(self,f):
+        """
+        Return the generalized interaction
+        """
+        return get_vijkl(self,f)
     def get_gs(self):
         """
         Return the ground state
@@ -156,6 +176,24 @@ class MBFermion():
         return xs,np.conjugate(ys)/scale*np.pi*2 # return correlator
 
 
+
+
+
+
+def get_vijkl(self,f):
+    """
+    Return a generalized interaction in the many body basis
+    """
+    m = self.get_zero()
+    if f is None: return m
+    for i in range(self.n):
+      for j in range(self.n):
+        for k in range(self.n):
+          for l in range(self.n):
+              c = f(i,j,k,l) # get the value
+              if np.abs(c)>1e-8: # non zero
+                  m = m + c*self.get_cd(i)@self.get_c(j)@self.get_cd(k)@self.get_c(l)
+    return m
 
 
 

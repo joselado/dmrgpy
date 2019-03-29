@@ -141,3 +141,16 @@ def ground_state(h,nmax=1000):
   return eig[0],eigvec.transpose()[0]
 
 
+
+def lowest_eigenvalues(h,n=10,nmax=1000):
+  """Get a ground state"""
+  info = False
+  if h.shape[0]>nmax:
+    if info: print("Calling ARPACK")
+    eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+  else:
+    if info: print("Full diagonalization")
+    eig = dlg.eigvalsh(h.todense())
+  return eig[0:n] # return eigenvalues
+
+

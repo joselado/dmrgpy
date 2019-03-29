@@ -17,7 +17,7 @@ static auto get_gs=[](auto sites, auto H) {
     writeToFile("psi_GS.mps",psi); // write the GS wavefunction
     writeToFile("sites.sites",sites); // write the sites
     myfile.open("GS_ENERGY.OUT"); // open file
-    myfile << std::setprecision(8) << energy << endl; // write file
+    myfile << std::setprecision(20) << energy << endl; // write file
 //  } ;
   return psi ; // return the ground state
 }

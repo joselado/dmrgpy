@@ -8,6 +8,7 @@ def write_hamiltonian(self):
     write_spinful_hoppings(self)  # write the hoppings
     write_pairing(self)  # write the pairing
     write_hubbard(self)  # write hubbard terms
+    write_vijkl(self)  # write vijkl terms
     write_fields(self) # write the fields
 
 
@@ -198,4 +199,33 @@ def write_sweeps(self):
   fo.write("maxm = "+str(self.sweep["maxm"])+"\n")
   fo.write("cutoff = "+str(self.sweep["cutoff"])+"\n}\n")
   fo.close()
+
+
+
+
+def write_vijkl(self):
+  """Write exchange in a file"""
+  fo = open("vijkl.in","w")
+  if self.vijkl is None: # nothing provided
+      fo.write("0\n") 
+  elif callable(self.vijkl): # function provided
+      out = [] # empty list
+      for i in range(self.ns):
+        for j in range(self.ns):
+          for k in range(self.ns):
+            for l in range(self.ns):
+                c = self.vijkl(i,j,k,l) # get coupling
+                if np.abs(c)>1e-6: # nonzero
+                  o = str(i) + "  "
+                  o += str(j) + "  "
+                  o += str(k) + "  "
+                  o += str(l) + "  "
+                  o += str(c) + "  "
+                  out.append(o) # store
+      fo.write(str(len(out))+"\n") # number of terms
+      for o in out:
+          fo.write(o+"\n")
+  else: raise # not implemented  
+  fo.close() # close file
+
 
