@@ -36,10 +36,18 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         return np.array([ns,cs])
     def get_magnetization(self,mode="DMRG",**kwargs):
         if mode=="DMRG": # using DMRG
-            return Many_Body_Hamiltonian.get_magnetization(self)
+#            mx = self.get_file("MEASURE_SX.OUT").transpose()[1]
+#            my = self.get_file("MEASURE_SY.OUT").transpose()[1]
+#            mz = self.get_file("MEASURE_SZ.OUT").transpose()[1]
+            pairs = [(i,i) for i in range(self.ns)]
+            mx = self.get_correlator(pairs=pairs,name="X").real
+            my = self.get_correlator(pairs=pairs,name="Y").real
+            mz = self.get_correlator(pairs=pairs,name="Z").real
+            np.savetxt("MAGNETIZATION.OUT",np.matrix([mx,my,mz]).T)
+            return (mx,my,mz)
         elif mode=="ED": # using ED
             return measure.get_magnetization(self)
-
+        else: raise
     def get_dynamical_correlator(self,mode="DMRG",**kwargs):
         """
         Compute the dynamical correlator

@@ -20,8 +20,10 @@ def fj(i,j): # function to define the exchange couplings
     if abs(i-j)==1: return 1.0  # frist neighbors
     else: return 0.0 # otherwise
 
+bs = np.random.random((sc.ns,3))
 
 def fb(i): # function to add local magnetic fields
+    return bs[i]
     if i==0: return [0.,0.,0.4] # field only for the first atom
     else: return [0.,0.,0.] # otherwise
 sc.set_exchange(fj) # add the exchange couplings

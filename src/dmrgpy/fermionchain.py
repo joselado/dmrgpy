@@ -13,14 +13,16 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         else:
           Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
         self.spinful = spinful
-    def get_density(self):
+    def get_density(self,**kwargs):
         """Return the electronic density"""
-        m = self.get_file("MEASURE_N.OUT") # get the file
-        return m.transpose()[1] # return density
-    def get_density_fluctuation(self):
+        pairs = [(i,i) for i in range(self.ns)]
+        return self.get_correlator(pairs=pairs,name="cdc",**kwargs).real
+    def get_density_fluctuation(self,**kwargs):
         """Return the electronic density"""
-        d = self.get_file("MEASURE_N.OUT").transpose()[1] # get the file
-        d2 = self.get_file("MEASURE_N2.OUT").transpose()[1] # get the file
+        d = self.get_density(**kwargs) # get the density
+        pairs = [(i,i) for i in range(self.ns)]
+        d2 = self.get_correlator(pairs=pairs,name="densitydensity",
+                **kwargs).real
         return d2-d**2 # return density fluctuations
     def get_delta(self):
         """
@@ -192,7 +194,15 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
     Class to deal with fermionic Hamiltonians with
     spin degree of freedom
     """
-    pass
+    def __init__(self,n,spinful=False):
+        """ Rewrite the init method to take twice as many sites"""
+        Many_Body_Hamiltonian.__init__(self,[0 for i in range(2*n)])
+    def get_density(**kwargs):
+        """
+        Return the density in each site
+        """
+        ds = Many_Body_Hamiltonian.get_density
+
 
 
 

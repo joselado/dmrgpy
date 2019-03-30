@@ -139,7 +139,7 @@ class MBFermion():
         self.get_gs() # get ground state
         for p in pairs: # loop over pairs
             A = self.get_operator(namei,p[0]) # get matrix
-            A = self.get_operator(namej,p[1])*A # get matrix
+            A = A@self.get_operator(namej,p[1]) # get matrix
             out.append(algebra.braket_wAw(self.wf0,A))
         return np.array(out) # return array
     def get_operator(self,name,i):

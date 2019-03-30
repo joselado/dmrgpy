@@ -224,13 +224,6 @@ class Many_Body_Hamiltonian():
   def get_correlator(self,**kwargs):
       """Return a correlator"""
       return correlator.get_correlator(self,**kwargs)
-  def get_magnetization(self):
-      """Calculate the magnetization of the system"""
-      mx = self.get_file("MEASURE_SX.OUT").transpose()[1]
-      my = self.get_file("MEASURE_SY.OUT").transpose()[1]
-      mz = self.get_file("MEASURE_SZ.OUT").transpose()[1]
-      np.savetxt("MAGNETIZATION.OUT",np.matrix([mx,my,mz]).T)
-      return (mx,my,mz)
   def get_file(self,name):
       """Return the electronic density"""
       if not self.computed_gs: self.get_gs() # compute gs

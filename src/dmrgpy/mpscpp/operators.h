@@ -1,6 +1,18 @@
 #include"fermionicoperators.h" // library with fermionic operators
 
+
+
+static auto Iden=[](auto sites) {
+    auto ampo = AutoMPO(sites);
+    ampo += "Id", 1;
+    return MPO(ampo);
+};
+
+
+
+
 static auto get_operator= [](auto sites, int i, auto name) {
+	if (name=="Id") return Iden(sites) ; // return identity
 	auto ampo = AutoMPO(sites);
 	if (site_type(i)>1)  // spin site
 		ampo += 1.0,name,i+1 ;
@@ -170,14 +182,6 @@ static auto add_spin_operator= [](auto ampo, auto sites, float v, int i, auto na
 }
 ;
 
-
-
-
-static auto Iden=[](auto sites) {
-    auto ampo = AutoMPO(sites);
-    ampo += "Id", 1;
-    return MPO(ampo);
-};
 
 
 
