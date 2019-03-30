@@ -7,12 +7,13 @@ from .algebra import algebra
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     """Class for fermionic Hamiltonians"""
+    spinful = False
     def __init__(self,n,spinful=False):
+        self.spinful = spinful
         if spinful:
           Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
         else:
           Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
-        self.spinful = spinful
     def get_density(self,**kwargs):
         """Return the electronic density"""
         pairs = [(i,i) for i in range(self.ns)]
@@ -111,7 +112,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         return get_gr_free(self,**kwargs)
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
-        if mode=="DMRG": return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
+        if mode=="DMRG": 
+            return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
         elif mode=="ED": 
             if np.max(np.abs(self.hubbard_matrix))<1e-6 and self.vijkl is None:
                 return self.gs_energy_free()
@@ -123,14 +125,12 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """
         Return the many body fermion object
         """
-        if not self.spinful: # spinless
-          m0 = self.hamiltonian_free() # free Hamiltonian
-          MBf = mbfermion.MBFermion(m0.shape[0]) # create object
-          MBf.add_hopping(m0)
-          MBf.add_hubbard(self.hubbard_matrix)
-          MBf.add_vijkl(self.vijkl)
-          return MBf # return the object
-        else: raise 
+        m0 = self.hamiltonian_free() # free Hamiltonian
+        MBf = mbfermion.MBFermion(m0.shape[0]) # create object
+        MBf.add_hopping(m0)
+        MBf.add_hubbard(self.hubbard_matrix)
+        MBf.add_vijkl(self.vijkl)
+        return MBf # return the object
     def get_kpm_scale(self):
         """Energy scale for KPM method"""
         return 4*self.ns*(2.+10*np.mean(np.abs(self.hubbard_matrix)))
@@ -197,11 +197,33 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
     def __init__(self,n,spinful=False):
         """ Rewrite the init method to take twice as many sites"""
         Many_Body_Hamiltonian.__init__(self,[0 for i in range(2*n)])
-    def get_density(**kwargs):
+    def get_density(self,**kwargs):
         """
-        Return the density in each site
+        Return the density in each site, summing over spin channels
         """
-        ds = Many_Body_Hamiltonian.get_density
+        ds = Fermionic_Hamiltonian.get_density(self,**kwargs) # get density
+        return np.array([ds[2*i]+ds[2*i+1] for i in range(len(ds)//2)])
+    def get_magnetization(self,**kwargs):
+        """Return magnetization"""
+        pairsxc = [(2*i,2*i+1) for i in range(self.ns//2)]
+        xc = Fermionic_Hamiltonian.get_correlator(self,pairs=pairsxc,
+                name="cdc",**kwargs)
+        mx = xc.real # get mx
+        my = xc.imag # get my
+        ds = Fermionic_Hamiltonian.get_density(self,**kwargs) # get density
+        mz = np.array([ds[2*i]-ds[2*i+1] for i in range(len(ds)//2)])
+        return np.array([mx,my,mz]).T # return magnetization
+    def set_hubbard(self,fun):
+        """
+        Add Hubbard interation in a spinful manner
+        """
+        def fh(i,j):
+            """Return Hubbard"""
+            if abs(i-j)==1: # first neighbors
+                if (i+j)%4==1: return fun(i,j) # same spinful site
+            return 0.0 # otherwise
+        Many_Body_Hamiltonian.set_hubbard(self,fh) # set hubbard
+
 
 
 

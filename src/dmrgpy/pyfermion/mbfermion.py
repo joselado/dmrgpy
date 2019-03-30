@@ -114,7 +114,7 @@ class MBFermion():
         for i in range(len(m0)):
           for j in range(len(m0)):
               if abs(m0[i,j])>1e-7:
-                m = m + self.get_cd(i)*self.get_c(j)*m0[i,j] # add contribution
+                m = m + self.get_cd(i)@self.get_c(j)*m0[i,j] # add contribution
         return m # return many body hamiltonian
     def hubbard(self,m0):
         """

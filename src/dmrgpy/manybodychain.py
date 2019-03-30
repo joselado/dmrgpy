@@ -29,41 +29,41 @@ class Coupling():
 
 class Many_Body_Hamiltonian():
   def __init__(self,sites):
-    self.sites = sites # list of the sites
-    self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
-    self.clean() # clean calculation
-    self.inipath = os.getcwd() # original folder
-    self.ns = len(sites) # number of sites
-    self.exchange = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
-    self.exchange = [] # empty list
-    self.fields = [] # empty list
-    self.hoppings = dict() # empty dictionary
-    self.spinful_hoppings = dict() # empty dictionary
-    self.pairing = dict() # empty dictionary
-    self.hubbard = dict() # empty dictionary
-    self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
-#    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
-    # additional arguments
-    self.kpmmaxm = 50 # bond dimension in KPM
-    self.maxm = 30 # bond dimension in wavefunctions
-    self.nsweeps = 15 # number of sweeps
-    self.kpmcutoff = 1e-8 # cutoff in KPM
-    self.cutoff = 1e-8 # cutoff in ground state
-    self.cvm_tol = 1e-5 # tolerance for CVM
-    self.cvm_nit = 1e3 # iterations for CVM
-    self.kpm_scale = 1.1 # scaling of the spectra for KPM
-    self.kpm_n_scale = 5 # scaling factor for the number of polynomials
-    self.restart = False # restart the calculation
-    self.gs_from_file = False # start from a random wavefunction
-    self.e0 = None # no ground state energy
-    self.wf0 = None # no initial WF
-    self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
-    self.sites_from_file = False # read sites from the file
-    self.skip_dmrg_gs = False # skip the DMRG minimization
-    self.computed_gs = False # computed the GS already
-    self.vijkl = None # generalized interaction
-    self.fit_td = False # use fitting procedure in time evolution
-    os.system("mkdir -p "+self.path) # create folder for the calculations
+      self.sites = sites # list of the sites
+      self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
+      self.clean() # clean calculation
+      self.inipath = os.getcwd() # original folder
+      self.ns = len(sites) # number of sites
+      self.exchange = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
+      self.exchange = [] # empty list
+      self.fields = [] # empty list
+      self.hoppings = dict() # empty dictionary
+      self.spinful_hoppings = dict() # empty dictionary
+      self.pairing = dict() # empty dictionary
+      self.hubbard = dict() # empty dictionary
+      self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
+  #    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
+      # additional arguments
+      self.kpmmaxm = 50 # bond dimension in KPM
+      self.maxm = 30 # bond dimension in wavefunctions
+      self.nsweeps = 15 # number of sweeps
+      self.kpmcutoff = 1e-8 # cutoff in KPM
+      self.cutoff = 1e-8 # cutoff in ground state
+      self.cvm_tol = 1e-5 # tolerance for CVM
+      self.cvm_nit = 1e3 # iterations for CVM
+      self.kpm_scale = 1.1 # scaling of the spectra for KPM
+      self.kpm_n_scale = 5 # scaling factor for the number of polynomials
+      self.restart = False # restart the calculation
+      self.gs_from_file = False # start from a random wavefunction
+      self.e0 = None # no ground state energy
+      self.wf0 = None # no initial WF
+      self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
+      self.sites_from_file = False # read sites from the file
+      self.skip_dmrg_gs = False # skip the DMRG minimization
+      self.computed_gs = False # computed the GS already
+      self.vijkl = None # generalized interaction
+      self.fit_td = False # use fitting procedure in time evolution
+      os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self): os.chdir(self.path) # go to calculation folder
   def copy(self):
       from copy import deepcopy
@@ -71,7 +71,11 @@ class Many_Body_Hamiltonian():
   def to_origin(self): 
     if os.path.isfile(self.path+"/ERROR"): raise # something wrong
     os.chdir(self.inipath) # go to original folder
-  def clean(self): os.system("rm -rf "+self.path) # clean temporal folder
+  def clean(self): 
+      """
+      Remove the previous folder
+      """
+      os.system("rm -rf "+self.path) # clean temporal folder
   def set_vijkl(self,f):
       """
       Create the generalized interaction
