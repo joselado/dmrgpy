@@ -2,8 +2,6 @@ from __future__ import print_function
 import numpy as np
 import os
 from . import kpmdmrg
-from . import pychainwrapper
-from . import pychain
 from . import mps
 from . import timedependent
 from . import groundstate
@@ -61,6 +59,7 @@ class Many_Body_Hamiltonian():
     self.wf0 = None # no initial WF
     self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
     self.sites_from_file = False # read sites from the file
+    self.skip_dmrg_gs = False # skip the DMRG minimization
     self.computed_gs = False # computed the GS already
     self.vijkl = None # generalized interaction
     self.fit_td = False # use fitting procedure in time evolution
@@ -183,10 +182,6 @@ class Many_Body_Hamiltonian():
     self.write_hamiltonian() # write the Hamiltonian to a file
     self.run() # perform the calculation
     return np.genfromtxt("ENTROPY.OUT")
-  def get_full_hamiltonian(self):
-    return pychainwrapper.get_full_hamiltonian(self)
-  def get_pychain(self):
-    return pychainwrapper.get_pychain(self)
   def get_dos(self,**kwargs):
     from .dos import get_dos
     return get_dos(self,**kwargs)
@@ -213,60 +208,42 @@ class Many_Body_Hamiltonian():
     return es[1] -es[0]
   def set_initial_wf(self,wf):
       """Use a certain wavefunction as initial guess"""
-      if wf is None: return
-      self.gs_from_file = True # use a wavefunction from a file
-      self.starting_file_gs = wf.name # name of the wavefunction
-  def get_gs(self,mode="DMRG",wf0=None,best=False,n=1):
-    """Return the ground state"""
-    if mode=="DMRG":
-      if best: groundstate.best_gs(self,n=n) # best ground state from a set
-      else: self.gs_energy(wf0=wf0) # perform a ground state calculation
+      if wf is None:
+        self.gs_from_file = False # use a wavefunction from a file
+      else:
+        self.gs_from_file = True # use a wavefunction from a file
+        self.starting_file_gs = wf.name # name of the wavefunction
+  def get_gs(self,best=False,n=1,**kwargs):
+      """Return the ground state"""
+      if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
+      else: self.gs_energy(**kwargs) # perform a ground state calculation
       return self.wf0 # return wavefucntion
-    elif mode=="ED":
-      self.to_folder() # go to temporal folder
-      h = self.get_full_hamiltonian() # get the Hamiltonian 
-      self.to_origin() # go to temporal folder
-      return pychain.spectrum.ground_state(h)[1] # return energy
-    else: raise
-  def gs_energy(self,mode="DMRG",wf0=None):
-    """Return the ground state energy"""
-    # write the sites
-    if mode=="DMRG":
-      out = groundstate.gs_energy(self,wf0=wf0)
-    elif mode=="ED": # use brute force
-      self.to_folder() # go to temporal folder
-      h = self.get_full_hamiltonian() # get the Hamiltonian 
-      out = pychain.spectrum.ground_state(h)[0] # return energy
-    else: 
-      self.to_origin() # go to main folder
-      raise
-    self.to_origin() # go to main folder
-    self.restart = True
-    return out
+  def gs_energy(self,**kwargs):
+      """Return the ground state energy"""
+      return groundstate.gs_energy(self,**kwargs)
   def get_correlator(self,**kwargs):
-    """Return a correlator"""
-#    print(mode)
-    return correlator.get_correlator(self,**kwargs)
+      """Return a correlator"""
+      return correlator.get_correlator(self,**kwargs)
   def get_magnetization(self):
-    """Calculate the magnetization of the system"""
-    mx = self.get_file("MEASURE_SX.OUT").transpose()[1]
-    my = self.get_file("MEASURE_SY.OUT").transpose()[1]
-    mz = self.get_file("MEASURE_SZ.OUT").transpose()[1]
-    np.savetxt("MAGNETIZATION.OUT",np.matrix([mx,my,mz]).T)
-    return (mx,my,mz)
+      """Calculate the magnetization of the system"""
+      mx = self.get_file("MEASURE_SX.OUT").transpose()[1]
+      my = self.get_file("MEASURE_SY.OUT").transpose()[1]
+      mz = self.get_file("MEASURE_SZ.OUT").transpose()[1]
+      np.savetxt("MAGNETIZATION.OUT",np.matrix([mx,my,mz]).T)
+      return (mx,my,mz)
   def get_file(self,name):
-    """Return the electronic density"""
-    if not self.computed_gs: self.get_gs() # compute gs
-    self.to_folder() # go to folder
-    m = np.genfromtxt(name) # read file
-    self.to_origin() # go back
-    return m
+      """Return the electronic density"""
+      if not self.computed_gs: self.get_gs() # compute gs
+      self.to_folder() # go to folder
+      m = np.genfromtxt(name) # read file
+      self.to_origin() # go back
+      return m
   def execute(self,f):
-    """Execute function in the folder"""
-    self.to_folder() # go to folder
-    out = f()
-    self.to_origin() # go back
-    return out # return result
+      """Execute function in the folder"""
+      self.to_folder() # go to folder
+      out = f()
+      self.to_origin() # go back
+      return out # return result
   def evolution(self,**kwargs):
       """
       Perform time dependent DMRG
@@ -296,7 +273,6 @@ from .writemps import write_hubbard
 from .writemps import write_fields
 from .writemps import write_sites
 from .writemps import write_exchange
-from .writemps import write_correlators
 #from .writemps import write_sweeps
 from .writemps import write_pairing
 

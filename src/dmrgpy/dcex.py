@@ -43,7 +43,7 @@ def dcex(eex,c1,c2,es=None,delta=1e-1):
     if len(eex)!=len(c1): raise # something wrong
     if len(eex)!=len(c2): raise # something wrong
     if es is None: es = np.linspace(-1.0,np.max(eex),2000)
-    out = np.zeros(es.shape[0],dtype=np.complex) # output
+    out = np.zeros(len(es),dtype=np.complex) # output
     out = [] # empty list
     for e in es: # loop over energies
         o = 0.0j # initialize

@@ -187,6 +187,12 @@ def get_gr(self,delta=0.002,es=np.linspace(-10.0,10.0,800),i=0,j=0):
 
 
 
+class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
+    """
+    Class to deal with fermionic Hamiltonians with
+    spin degree of freedom
+    """
+    pass
 
 
 

@@ -160,15 +160,6 @@ def write_exchange(self):
 
 
 
-def write_correlators(pairs):
-  """Write the pairs of correlators in a file"""
-  fo = open("correlators.in","w") # open the file
-  fo.write(str(len(pairs))+"\n") # write in a file
-  for p in pairs:
-    # the first has to be smaller than the second
-    fo.write(str(p[0])+"  "+str(p[1])+"\n")
-  fo.close()
-
 
 
 

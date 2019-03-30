@@ -33,8 +33,8 @@ print("Energy",e0/sc.ns)
 # this array constains the pairs of spins on which you want to compute
 # <GS|S_i S_j GS>
 pairs = [(0,i) for i in range(n)] # between the edge and the rest
-cs = sc.get_correlator(pairs,mode="DMRG") # get the static correlators
-cs1 = sc.get_correlator(pairs,mode="ED") # get the static correlators
+cs = sc.get_correlator(pairs=pairs,mode="DMRG") # get the static correlators
+cs1 = sc.get_correlator(pairs=pairs,mode="ED") # get the static correlators
 ########################
 # Now plot the results #
 ########################

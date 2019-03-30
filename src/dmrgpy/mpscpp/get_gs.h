@@ -5,12 +5,11 @@
 static auto get_gs=[](auto sites, auto H) {
     // read the GS from a file
     auto psi = MPS(sites);
-    if (get_bool("gs_from_file")) 
+    if (get_bool("gs_from_file"))  {
 	    psi = read_wf(get_str("starting_file_gs")) ;
-//  if (check_task("restart")) { // restart the calculation
-//    psi = read_wf() ; // read the wavefunction from a file
-//  } 
-//  else { // perform the calculation of the GS
+//  check if return this wavefunction 
+           if (get_bool("skip_dmrg_gs")) return psi ;
+    };
     auto sweeps = get_sweeps(); // get the DMRG sweeps
     double energy = dmrg(psi,H,sweeps); // ground state energy
     ofstream myfile; // create object

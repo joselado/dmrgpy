@@ -23,7 +23,7 @@ sc.nsweeps = 1 # one sweep
 es = []
 wf0 = None
 for i in range(10):
-    e = sc.gs_energy(wf0=sc.wf0)
+    e = sc.gs_energy(wf0=sc.wf0,reconverge=True)
     es.append(e)
 import matplotlib.pyplot as plt
 plt.plot(range(len(es)),es,marker="o")

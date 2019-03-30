@@ -15,18 +15,25 @@ def best_gs(sc,n=1):
     sc.set_initial_wf(wf0) # set the wavefunction
 
 
-def gs_energy(self,wf0=None):
-      self.to_folder() # go to temporal folder
-      self.set_initial_wf(wf0) # set the initial wavefunction
-      self.setup_task("GS")
-      self.write_hamiltonian() # write the Hamiltonian to a file
-      self.run() # perform the calculation
-      self.wf0 = mps.MPS(self).copy() # set the ground state
-      # return the ground state energy
-      out = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
-      self.e0 = out # store ground state energy
-      self.computed_gs = True
-      self.to_origin() # go to temporal folder
-      return out # return energy
+def gs_energy(self,wf0=None,reconverge=False):
+    """
+    Return the ground state energy
+    """
+    self.to_folder() # go to temporal folder
+    if wf0 is None: # if not provided
+      self.set_initial_wf(self.wf0) # set the initial wavefunction
+    self.skip_dmrg_gs = not reconverge # if the computation should be rerun
+    self.setup_task("GS")
+    self.write_hamiltonian() # write the Hamiltonian to a file
+    self.run() # perform the calculation
+    self.wf0 = mps.MPS(self,name="psi_GS.mps").copy() # set the ground state
+    # get the ground state energy
+    out = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
+    self.e0 = out # store ground state energy
+    self.computed_gs = True
+    self.gs_from_file = True
+    self.skip_dmrg_gs = True
+    self.to_origin() # go to temporal folder
+    return out # return energy
 
 
