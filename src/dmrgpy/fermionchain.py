@@ -115,9 +115,9 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         if mode=="DMRG": 
             return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
         elif mode=="ED": 
-            if np.max(np.abs(self.hubbard_matrix))<1e-6 and self.vijkl is None:
-                return self.gs_energy_free()
-            else:
+#            if np.max(np.abs(self.hubbard_matrix))<1e-6 and self.vijkl is None:
+#                return self.gs_energy_free()
+#            else:
                 MBF = self.get_MBF()
                 return algebra.lowest_eigenvalues(MBF.h,n=1)[0]
         else: raise # unrecognised
@@ -128,8 +128,9 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         m0 = self.hamiltonian_free() # free Hamiltonian
         MBf = mbfermion.MBFermion(m0.shape[0]) # create object
         MBf.add_hopping(m0)
-        MBf.add_hubbard(self.hubbard_matrix)
-        MBf.add_vijkl(self.vijkl)
+        MBf.add_pairing(self.pairing) # add pairing
+        MBf.add_hubbard(self.hubbard_matrix) # add hubbard term
+        MBf.add_vijkl(self.vijkl) # add generalized interaction
         return MBf # return the object
     def get_kpm_scale(self):
         """Energy scale for KPM method"""

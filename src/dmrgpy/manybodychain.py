@@ -11,6 +11,7 @@ from . import densitymatrix
 from . import taskdmrg
 from . import cvm
 from . import dcex
+from . import funtk
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -39,7 +40,7 @@ class Many_Body_Hamiltonian():
       self.fields = [] # empty list
       self.hoppings = dict() # empty dictionary
       self.spinful_hoppings = dict() # empty dictionary
-      self.pairing = dict() # empty dictionary
+      self.pairing = None # pairing
       self.hubbard = dict() # empty dictionary
       self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
   #    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
@@ -127,16 +128,17 @@ class Many_Body_Hamiltonian():
                         self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
       else: # assume it is a matrix
           self.spinful_hoppings = np.matrix(fun)
-  def set_pairing(self,fun):
+  def set_pairings(self,fun):
       """Add the up/down pairing"""
       self.computed_gs = False # say that GS has not been computed
-      self.pairing = dict()
-      for i in range(self.ns): # loop
-          for j in range(self.ns): # loop
-              if self.sites[i]==1 and self.sites[j]==1:
-                  c = fun(i,j)
-                  if np.abs(c)>0.0:
-                      self.pairing[(i,j)] = Coupling(i,j,c) # store
+      self.pairing = funtk.obj2fun(fun) # set function
+#      self.pairing = dict()
+#      for i in range(self.ns): # loop
+#          for j in range(self.ns): # loop
+#              if self.sites[i]==1 and self.sites[j]==1:
+#                  c = fun(i,j)
+#                  if np.abs(c)>0.0:
+#                      self.pairing[(i,j)] = Coupling(i,j,c) # store
   def set_hubbard(self,fun):
       self.computed_gs = False # say that GS has not been computed
       self.hubbard = dict()

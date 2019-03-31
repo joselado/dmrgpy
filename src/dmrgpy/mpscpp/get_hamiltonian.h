@@ -24,7 +24,7 @@ static auto get_ampo=[](auto sites) {
     cout << "Adding magnetic field" << endl ;
     ampo = get_field(sites,ampo); // add magnetic field to the Hamiltonian
     cout << "Adding superconducting pairing" << endl ;
-    ampo = get_pairing(ampo); // add magnetic field to the Hamiltonian
+    ampo = get_pairing(ampo); // add pairing to the Hamiltonian
     return ampo ;
 }
 ;
@@ -33,6 +33,6 @@ static auto get_ampo=[](auto sites) {
 static auto get_hamiltonian=[](auto sites) {
     auto ampo = get_ampo(sites) ; // get the ampo
     auto H = MPO(ampo);  // create the full Hamiltonian
-    return H ;
+    return H ; // return the Hamiltonian
 }
 ;

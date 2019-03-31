@@ -1,4 +1,5 @@
 import numpy as np
+from . import funtk
 
 
 def write_hamiltonian(self):
@@ -86,18 +87,17 @@ def write_spinful_hoppings(self):
 
 
 def write_pairing(self):
-  """Write exchange in a file"""
+  """
+  Write pairings in a file
+  """
+  cs = funtk.fun2list(self.pairing,self.ns) # get the list with couplings
   fo = open("pairing.in","w")
-  cs = self.pairing
   fo.write(str(len(cs))+"\n")
-  for key in self.pairing: # loop
-    c = self.pairing[key] # loop
-    if self.sites[c.i]!=1: raise
-    if self.sites[c.j]!=1: raise
-    fo.write(str(c.i)+"  ")
-    fo.write(str(c.j)+"  ")
-    fo.write(str(c.g.real)+"  ")
-    fo.write(str(c.g.imag)+"\n")
+  for c in cs: # loop
+    fo.write(str(c[0])+"  ")
+    fo.write(str(c[1])+"  ")
+    fo.write(str(c[2].real)+"  ")
+    fo.write(str(c[2].imag)+"\n")
   fo.close()
 
 

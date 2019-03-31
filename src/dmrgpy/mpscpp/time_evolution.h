@@ -18,8 +18,12 @@ static auto quench=[](auto sites) {
   auto dt = get_float_value("tevol_dt"); // delta of time
   int it;
   auto args = Args("Cutoff=",cutoff,"Maxm=",maxm);
+  // compute ground state energy
+  auto EGS = overlap(psi,H,psi)/overlap(psi,psi); // ground state enrgy
   // get the AutoMPO
   auto ampo = get_ampo(sites) ; // get the ampo for the Hamiltonian
+  // shift by the ground state energy
+  ampo += -EGS,"Id", 1; // minus ground state energy
   auto expH = toExpH<ITensor>(ampo,dt*Cplx_i); // get the exponential of the H
   ofstream fileevol; // file for the evolution
   fileevol.open("TIME_EVOLUTION.OUT"); // time evolution

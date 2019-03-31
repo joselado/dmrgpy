@@ -5,6 +5,7 @@ from scipy.sparse import csc_matrix,identity
 import scipy.sparse.linalg as slg
 from ..algebra import algebra
 from .. import operatornames
+from .. import funtk
 
 
 nmax = 15 # maximum number of levels
@@ -67,6 +68,7 @@ class MBFermion():
         Add a single particle term to the Hamiltonian
         """
         self.h = self.h + self.one2many(m) # add contribution
+
     def get_hopping(self,m):
         """
         Return Hopping matrix
@@ -116,6 +118,19 @@ class MBFermion():
               if abs(m0[i,j])>1e-7:
                 m = m + self.get_cd(i)@self.get_c(j)*m0[i,j] # add contribution
         return m # return many body hamiltonian
+    def get_pairing(self,fun):
+        """
+        Return a pairing term
+        """
+        m = self.get_zero() # get zero matrix
+        out = funtk.fun2list(fun,self.n) # get list of pairings
+        for o in out:
+            i,j,delta = o[0],o[1],o[2] # get the parameters
+            mt = self.get_c(i)@self.get_c(j)*delta
+            m = m + mt + mt.H # add contributions
+        return m # return matrix
+    def add_pairing(self,fun):
+        self.h = self.h + self.get_pairing(fun) # add contribution
     def hubbard(self,m0):
         """
         Return the many body matrix for certain hubbard couplings
