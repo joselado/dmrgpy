@@ -43,12 +43,11 @@ def write_tasks(self):
   fo = open("tasks.in","w")
   fo.write("tasks\n{\n")
   #
-  if self.gs_from_file: 
+  if self.gs_from_file and self.starting_file_gs is not None: 
       fo.write(" gs_from_file = true\n")
       fo.write(" starting_file_gs = "+self.starting_file_gs+"\n") # starting WF
       fo.write(" skip_dmrg_gs = "+obj2str(self.skip_dmrg_gs)+"\n") # starting WF
   else: fo.write(" gs_from_file = false\n")
-  if self.sites_from_file: fo.write(" sites_from_file = true\n")
   for key in self.task:
     fo.write(key+" = "+str(self.task[key])+"\n")
 #("GS = true\ngap = false\ncorrelator = false\n}\n")

@@ -6,7 +6,7 @@ from . import taskdmrg
 
 def get_correlator(self,pairs=[[]],name="SS"):
     """Compute a certain static correlator in the spin chain"""
-    self.get_gs() # compute ground state
+    self.gs_energy() # compute ground state
     ########################################
     # workaround for total spin correlator #
     ########################################

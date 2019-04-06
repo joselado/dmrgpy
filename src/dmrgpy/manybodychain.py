@@ -58,8 +58,7 @@ class Many_Body_Hamiltonian():
       self.gs_from_file = False # start from a random wavefunction
       self.e0 = None # no ground state energy
       self.wf0 = None # no initial WF
-      self.starting_file_gs = "starting_psi_GS.mps" # initial file for GS
-      self.sites_from_file = False # read sites from the file
+      self.starting_file_gs = None # initial file for GS
       self.skip_dmrg_gs = False # skip the DMRG minimization
       self.computed_gs = False # computed the GS already
       self.vijkl = None # generalized interaction
@@ -174,7 +173,7 @@ class Many_Body_Hamiltonian():
       Write the Hamiltonian in a file
       """
       from .writemps import write_hamiltonian
-      write_hamiltonian(self)
+      self.execute(lambda: write_hamiltonian(self))
   def run(self,automatic=False): 
       """
       Run the DMRG calculation

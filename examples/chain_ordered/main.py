@@ -1,5 +1,7 @@
 # Add the root path of the dmrgpy library
-import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+# replace PATH_TO_DMRGPY by your actual path to the library
+# PATH_TO_DMRGPY = /home/jose/programs/dmrgpy/src
+#import os ; import sys ; sys.path.append(PATH_TO_DMRGPY)
 
 import numpy as np # conventional numpy library
 from dmrgpy import spinchain # library dealing with DMRG for spin chains
@@ -26,9 +28,12 @@ def get_energy(ind):
 import random
 n = 10 # length of your list (number of spins of a many body system)
 ind0 = [i for i in range(n)] # initial sequence
-ntries = 20
-emin = 1e10
-indmin = None
+ntries = 20 # do a certain number of random trials
+emin = 1e10 # initalize as a big number
+indmin = None # initialize as None
+
+
+# Now do several random resorting of the indexes and compute their energy
 for i in range(ntries):
   ind = random.sample(ind0,n) # randomize the sequence
   energy = get_energy(ind) # get the energy for this sequence

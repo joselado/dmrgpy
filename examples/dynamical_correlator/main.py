@@ -15,7 +15,7 @@ def fj(i,j):
   if abs(i-j)==1: return 1.0
   else: return 0.0
 sc.set_exchange(fj)
-sc.get_gs()
+#sc.get_gs()
 
 #sc.kpmmaxm = 20 # KPM maxm
 import time
