@@ -19,6 +19,11 @@ def get_moments_dmrg(self,n=1000):
 def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
         name="XX",delta=1e-1):
   """Get the moments with DMRG"""
+  # do some sanity checks
+  if i>=self.ns: raise 
+  if j>=self.ns: raise 
+  if delta<0.0: raise 
+  # go on
   try: # select the right operators, be consistent with mpscpp.x
       from . import operatornames
       namei,namej = operatornames.recognize(name)
@@ -107,6 +112,7 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
     xs = 0.99*np.linspace(-1.0,1.0,n*10,endpoint=True) # energies
     ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz") # generate the DOS
     xs /= scale # scale back the energies
+    xs += (emin+emax)/2. -emin # shift the energies
     ys *= scale # renormalize the y positions
 #    e0 = self.gs_energy() # ground state energy
     # now retain only an energy window

@@ -37,6 +37,7 @@ def get_dos(self,delta=2e-2,**kwargs):
   ys = generate_profile(mus,xs,use_fortran=False,kernel="jackson").real
   xs /= scale # scale back the energies
   xs += emin # shift energy
+  xs += (emin+emax)/2.-emin # shift the energies
   ys *= scale # renormalize the y positions
   self.to_origin() # go to origin folder
   return (xs,ys) # return the DOS

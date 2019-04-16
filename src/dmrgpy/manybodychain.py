@@ -53,7 +53,7 @@ class Many_Body_Hamiltonian():
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
       self.kpm_scale = 1.1 # scaling of the spectra for KPM
-      self.kpm_n_scale = 5 # scaling factor for the number of polynomials
+      self.kpm_n_scale = 1 # scaling factor for the number of polynomials
       self.restart = False # restart the calculation
       self.gs_from_file = False # start from a random wavefunction
       self.e0 = None # no ground state energy
@@ -68,12 +68,23 @@ class Many_Body_Hamiltonian():
   def copy(self):
       from copy import deepcopy
       return deepcopy(self)
+  def clone(self):
+      """
+      Clone the object and create a temporal folder
+      """
+      from copy import deepcopy
+      name = "dmrgpy_clone_"+str(np.random.randint(100000))
+      out = deepcopy(self) 
+      out.path = "/tmp/"+name # new path
+      print("New path",out.path)
+      os.system("cp -r "+self.path+"  "+out.path) # copy to the new path
+      return out # return new object
   def to_origin(self): 
     if os.path.isfile(self.path+"/ERROR"): raise # something wrong
     os.chdir(self.inipath) # go to original folder
   def clean(self): 
       """
-      Remove the previous folder
+      Remove the temporal folder
       """
       os.system("rm -rf "+self.path) # clean temporal folder
   def set_vijkl(self,f):

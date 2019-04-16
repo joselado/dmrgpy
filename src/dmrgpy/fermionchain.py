@@ -214,16 +214,70 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         ds = Fermionic_Hamiltonian.get_density(self,**kwargs) # get density
         mz = np.array([ds[2*i]-ds[2*i+1] for i in range(len(ds)//2)])
         return np.array([mx,my,mz]).T # return magnetization
+    def get_pairing(self,**kwargs):
+        """
+        Return the expectation value of the onsite pairing
+        """
+        pairs = [(2*i,2*i+1) for i in range(self.ns//2)]
+        cs = Fermionic_Hamiltonian.get_correlator(self,pairs=pairs,
+                name="cc",**kwargs)
+        return cs
+    def get_dynamical_correlator(self,name="densitydensity",i=0,j=0,**kwargs):
+        """Return the dynamical correlator of an spinful system"""
+        if name=="densitydensity":
+            (es,uu) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
+                    name="densitydensity",i=2*i,j=2*j,**kwargs)
+            (es,dd) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
+                    name="densitydensity",i=2*i+1,j=2*j+1,**kwargs)
+            return (es,uu+dd) # return the contributions
+        elif name=="cdc":
+            (es,uu) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
+                    name="cdc",i=2*i,j=2*j,**kwargs)
+            (es,dd) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
+                    name="cdc",i=2*i+1,j=2*j+1,**kwargs)
+            return (es,uu+dd) # return the contributions
+        else: raise # not implemented
+
     def set_hubbard(self,fun):
         """
         Add Hubbard interation in a spinful manner
+        The Hubbard term will be defined as
+        n_i n_j, with n_i = n_{i,up} + n_{i,,down}
         """
         def fh(i,j):
             """Return Hubbard"""
-            if abs(i-j)==1: # first neighbors
-                if (i+j)%4==1: return fun(i,j) # same spinful site
-            return 0.0 # otherwise
+            ii = i//2 # index of the site without spin
+            jj = j//2 # index of the site without spin
+            return fun(ii,jj) # return the hubbard term
         Many_Body_Hamiltonian.set_hubbard(self,fh) # set hubbard
+    def set_swave_pairing(self,fun):
+        """
+        Add onsite swave pairing to a spinful Hamiltonian
+        The pairing term is of the form
+        Delta_i c_{i,up} c_{i,down} + h.c.
+        """
+        def fp(i,j):
+            if i//2==j//2 and i!=j: # same site, different spins
+                if i<j: return fun(i//2) # pairing in that site
+                else: return -fun(i//2) # pairing in that site
+            else: return 0.0
+        Many_Body_Hamiltonian.set_pairings(self,fp) # set pairing
+    def get_density_fluctuation(self,**kwargs):
+        """Return the electronic density"""
+        d = self.get_density(**kwargs) # get the total density (up & down sum)
+        # now we need to compute the fluctuations
+        # lets do first the N_up^2 and N_dn^2
+        pairs = [(i,i) for i in range(self.ns)] # different spinless terms
+        duudd = Fermionic_Hamiltonian.get_correlator(self,pairs=pairs,
+                name="densitydensity",**kwargs).real
+        duu = [duudd[2*i] for i in range(self.ns//2)] # N_up^2 fluctuation
+        ddd = [duudd[2*i+1] for i in range(self.ns//2)] # N_dn^2 fluctuation
+        # now compute the cross term
+        pairsc = [(2*i,2*i+1) for i in range(self.ns//2)] 
+        dud = Fermionic_Hamiltonian.get_correlator(self,pairs=pairsc,
+                name="densitydensity",**kwargs).real
+        d2 = np.array(duu) + np.array(ddd) + 2*np.array(dud) # sum contribution
+        return d2-d**2 # return density fluctuations
 
 
 
