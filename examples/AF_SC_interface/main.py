@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 from pygra import geometry
-n = 16 # number of different spinless fermionic orbitals (2 times sites)
+n = 20 # number of different spinless fermionic orbitals (2 times sites)
 g = geometry.bichain()
 g = g.supercell(n//4) # as many sites
 print("Chain with ",len(g.r),"sites")
@@ -18,7 +18,7 @@ h = g.get_hamiltonian(has_spin=True)
 def step(i):
     return (np.tanh(g.r[i][0])+1.0)/2.
 
-h.add_antiferromagnetism(lambda r: step(g.get_index(r)))
+#h.add_antiferromagnetism(lambda r: step(g.get_index(r)))
 
 def funu(i):
     """
@@ -47,7 +47,7 @@ fc = fermionchain.Spinful_Fermionic_Hamiltonian(n//2) # create the object
 fc.maxm = 20
 fc.kpmmaxm = fc.maxm
 fc.set_hoppings(t) # add the term to the Hamiltonian
-fc.set_hubbard(fh) # add the term to the Hamiltonian
+fc.set_hubbard_spinful(fh) # add the term to the Hamiltonian
 fc.set_swave_pairing(lambda i: 0.4*(1-step(i))) # add the term to the Hamiltonian
 e0 = fc.gs_energy() # now get the energy
 
@@ -62,17 +62,17 @@ if n<16: # perform the test
 
 import matplotlib.pyplot as plt
 
-ds = fc.get_density()
-ps = fc.get_pairing()
+ds = fc.get_density_spinful()
+ps = fc.get_onsite_pairing()
 mz = fc.get_magnetization()[:,2]
-fs = fc.get_density_fluctuation()
+fs = fc.get_density_fluctuation_spinful()
 ps = ps/(ps[0]/np.abs(ps[0])) # factor out the phase
 ps = ps.real
 inds = range(len(ds))
 
 
 # compute the dynamical correlator
-if n<20:
+if n<4:
   delta = 0.1
   print("Computing dynamical correlator")
   (es,dcs) = fc.get_dynamical_correlator(name="cdc",i=0,j=0,delta=delta)
