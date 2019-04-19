@@ -4,34 +4,43 @@ import scipy.linalg as lg
 from .pyfermion import mbfermion
 from .algebra import algebra
 from .fermionchaintk import dynamicalcorrelator
+from .fermionchaintk import staticcorrelator
+from .fermionchaintk import hamiltonian
 
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     """Class for fermionic Hamiltonians"""
     spinful = False
     def __init__(self,n,spinful=False):
+        if spinful: raise # this is outdated
         self.spinful = spinful
         if spinful:
           Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
         else:
           Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
+    def get_density_spinless(self,**kwargs):
+        """Return the electronic density"""
+        return staticcorrelator.get_density_spinless(self,**kwargs)
     def get_density(self,**kwargs):
         """Return the electronic density"""
-        pairs = [(i,i) for i in range(self.ns)]
-        return self.get_correlator(pairs=pairs,name="cdc",**kwargs).real
+        return staticcorrelator.get_density_spinless(self,**kwargs)
+    def set_hubbard_spinless(self,fun):
+        """ Hubbard term """
+        hamiltonian.set_hubbard_spinless(self,fun)
+    def set_hubbard(self,fun):
+        """ Hubbard term """
+        hamiltonian.set_hubbard_spinless(self,fun)
+    def get_density_fluctuation_spinless(self,**kwargs):
+        """Return the electronic density fluctuations"""
+        return staticcorrelator.get_density_fluctuation_spinless(self,**kwargs)
     def get_density_fluctuation(self,**kwargs):
-        """Return the electronic density"""
-        d = self.get_density(**kwargs) # get the density
-        pairs = [(i,i) for i in range(self.ns)]
-        d2 = self.get_correlator(pairs=pairs,name="densitydensity",
-                **kwargs).real
-        return d2-d**2 # return density fluctuations
-    def get_delta(self):
+        """Return the electronic density fluctuations"""
+        return staticcorrelator.get_density_fluctuation_spinless(self,**kwargs)
+    def get_pairing(self):
         """
         Return the superfluid density
         """
-        m = self.get_file("MEASURE_DELTA.OUT") # get the file
-        return m.transpose()[1] # return delta
+        return staticcorrelator.get_pairing_spinless(self,**kwargs)
     def hamiltonian_free(self,pairs=[[]]):
         """
         Return the free part of the fermionic Hamiltonian
@@ -61,16 +70,16 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           elif mode=="ED":
             MBF = self.get_MBF() # get the object
             return algebra.lowest_eigenvalues(MBF.h,**kwargs)
-    def get_correlator(self,name="cdc",mode="DMRG",**kwargs):
+    def get_correlator_spinless(self,**kwargs):
           """
-          Wrapper for static correlator
+          Compute static correlator
           """
-          if mode=="DMRG": # using DMRG
-            return super().get_correlator(name=name,**kwargs)
-          elif mode=="ED": # using ED
-            MBF = self.get_MBF() # get the object
-            return MBF.get_correlator(name=name,**kwargs)
-          else: raise
+          return staticcorrelator.get_correlator_spinless(self,**kwargs)
+    def get_correlator(self,**kwargs):
+          """
+          Compute static correlator
+          """
+          return staticcorrelator.get_correlator_spinless(self,**kwargs)
     def get_dynamical_correlator(self,**kwargs):
         """
         Compute a dynamical correlator, standard name
@@ -201,29 +210,20 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         """
         Return the density in each site, summing over spin channels
         """
-        ds = super().get_density(**kwargs) # get density
-        return np.array([ds[2*i]+ds[2*i+1] for i in range(len(ds)//2)])
+        return staticcorrelator.get_density_spinful(self,**kwargs)
+    def get_density(self,**kwargs):
+        """
+        Return the density in each site, summing over spin channels
+        """
+        return staticcorrelator.get_density_spinful(self,**kwargs)
     def get_magnetization(self,**kwargs):
         """Return magnetization"""
-        pairsxc = [(2*i,2*i+1) for i in range(self.ns//2)]
-        xc = super().get_correlator(pairs=pairsxc,
-                name="cdc",**kwargs)
-        mx = xc.real # get mx
-        my = xc.imag # get my
-        pairs = [(i,i) for i in range(self.ns)]
-#        ds = super().get_correlator(pairs=pairs,
-#                name="cdc",**kwargs).real
-        ds = super().get_density(**kwargs) # get density
-        mz = np.array([ds[2*i]-ds[2*i+1] for i in range(len(ds)//2)])
-        return np.array([mx,my,mz]).T # return magnetization
+        return staticcorrelator.get_magnetization_spinful(self,**kwargs)
     def get_onsite_pairing(self,**kwargs):
         """
         Return the expectation value of the onsite pairing
         """
-        pairs = [(2*i,2*i+1) for i in range(self.ns//2)]
-        cs = super().get_correlator(pairs=pairs,
-                name="cc",**kwargs)
-        return cs
+        return staticcorrelator.get_onsite_pairing_spinful(self,**kwargs)
     def get_dynamical_correlator_spinful(self,**kwargs):
         """Return the dynamical correlator of an spinful system"""
         return dynamicalcorrelator.get_dynamical_correlator_spinful(self,
@@ -237,47 +237,38 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         The Hubbard term will be defined as
         n_i n_j, with n_i = n_{i,up} + n_{i,,down}
         """
-        def fh(i,j):
-            """Return Hubbard"""
-            ii = i//2 # index of the site without spin
-            jj = j//2 # index of the site without spin
-            return fun(ii,jj) # return the hubbard term
-        super().set_hubbard(fh) # set hubbard
+        hamiltonian.set_hubbard_spinful(self,fun)
+    def set_hubbard(self,fun):
+        """
+        Add Hubbard interation in a spinful manner
+        The Hubbard term will be defined as
+        n_i n_j, with n_i = n_{i,up} + n_{i,,down}
+        """
+        hamiltonian.set_hubbard_spinful(self,fun)
     def set_swave_pairing(self,fun):
         """
         Add onsite swave pairing to a spinful Hamiltonian
         The pairing term is of the form
         Delta_i c_{i,up} c_{i,down} + h.c.
         """
-        def fp(i,j):
-            if i//2==j//2 and i!=j: # same site, different spins
-                if i<j: return fun(i//2) # pairing in that site
-                else: return -fun(i//2) # pairing in that site
-            else: return 0.0
-        super().set_pairings(fp) # set pairing
+        hamiltonian.set_swave_pairing_spinful(self,fun)
     def get_density_fluctuation_spinful(self,**kwargs):
         """Return the electronic density"""
-        d = self.get_density_spinful(**kwargs) # total density 
-        d2 = self.get_correlator_spinful(name="densitydensity", # fluctuation
-                pairs=[(i,i) for i in range(self.ns//2)]).real
-        return d2-d**2 # return density fluctuations
-    def get_correlator_spinful(self,name="XX",pairs=[[]],**kwargs):
+        return staticcorrelator.get_density_fluctuation_spinful(self,**kwargs)
+    def get_density_fluctuation(self,**kwargs):
+        """Return the electronic density"""
+        return staticcorrelator.get_density_fluctuation_spinful(self,**kwargs)
+    def get_correlator_spinful(self,**kwargs):
         """
         Get a static correlator
         """
-        # overwrite the method for spinful fermions
-        pu = [[p1*2,p2*2] for (p1,p2) in pairs] # up pairs
-        pd = [[p1*2+1,p2*2+1] for (p1,p2) in pairs] # down pairs
-        pud = [[p1*2,p2*2+1] for (p1,p2) in pairs] # up-down pairs
-        pdu = [[p1*2+1,p2*2] for (p1,p2) in pairs] # down-up pairs
-        def f(pp):
-          return Fermionic_Hamiltonian.get_correlator(self,
-                  name="densitydensity",pairs=pp,**kwargs)
-        if name=="ZZ": # ZZ correlator
-            return (f(pu) + f(pd) - f(pud) - f(pdu))/4.
-        elif name=="densitydensity": # density-density correlator
-            return f(pu) + f(pd) + f(pud) + f(pdu)
-        else: raise
+        return staticcorrelator.get_correlator_spinful(self,**kwargs)
+    def get_correlator(self,**kwargs):
+        """
+        Get a static correlator
+        """
+        return staticcorrelator.get_correlator_spinful(self,**kwargs)
+
 
 
 

@@ -138,7 +138,7 @@ class Many_Body_Hamiltonian():
                         self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
       else: # assume it is a matrix
           self.spinful_hoppings = np.matrix(fun)
-  def set_pairings(self,fun):
+  def set_pairings_MB(self,fun):
       """Add the up/down pairing"""
       self.computed_gs = False # say that GS has not been computed
       self.pairing = funtk.obj2fun(fun) # set function
@@ -149,7 +149,7 @@ class Many_Body_Hamiltonian():
 #                  c = fun(i,j)
 #                  if np.abs(c)>0.0:
 #                      self.pairing[(i,j)] = Coupling(i,j,c) # store
-  def set_hubbard(self,fun):
+  def set_hubbard_MB(self,fun):
       self.computed_gs = False # say that GS has not been computed
       self.hubbard = dict()
       for i in range(self.ns): # loop
@@ -237,8 +237,11 @@ class Many_Body_Hamiltonian():
   def gs_energy(self,**kwargs):
       """Return the ground state energy"""
       return groundstate.gs_energy(self,**kwargs)
-  def get_correlator(self,**kwargs):
+  def get_correlator_MB(self,**kwargs):
       """Return a correlator"""
+      return correlator.get_correlator(self,**kwargs)
+  def get_correlator(self,**kwargs):
+      """Return a correlator, default one"""
       return correlator.get_correlator(self,**kwargs)
   def get_file(self,name):
       """Return the electronic density"""

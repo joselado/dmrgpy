@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 from pygra import geometry
-n = 20 # number of different spinless fermionic orbitals (2 times sites)
+n = 40 # number of different spinless fermionic orbitals (2 times sites)
 g = geometry.bichain()
 g = g.supercell(n//4) # as many sites
 print("Chain with ",len(g.r),"sites")

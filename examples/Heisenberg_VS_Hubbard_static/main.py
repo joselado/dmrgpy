@@ -24,9 +24,9 @@ def fu(i,j):
     return 0.0
 
 fc.set_hoppings(ft) # add the term to the Hamiltonian
-fc.set_hubbard_spinful(fu) # add the term to the Hamiltonian
+fc.set_hubbard(fu) # add the term to the Hamiltonian
 pairs = [(0,i) for i in range(n)]
-ch = fc.get_correlator_spinful(pairs=pairs,name="ZZ",mode="DMRG").real
+ch = fc.get_correlator(pairs=pairs,name="ZZ",mode="DMRG").real
 print(fc.get_density_spinful())
 
 # now create the Heisenberg chain
