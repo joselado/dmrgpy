@@ -3,6 +3,7 @@ import numpy as np
 import scipy.linalg as lg
 from .pyfermion import mbfermion
 from .algebra import algebra
+from .fermionchaintk import dynamicalcorrelator
 
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
@@ -70,20 +71,18 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
             MBF = self.get_MBF() # get the object
             return MBF.get_correlator(name=name,**kwargs)
           else: raise
-    def get_dynamical_correlator(self,name="densitydensity",
-            mode="DMRG",**kwargs):
+    def get_dynamical_correlator(self,**kwargs):
         """
-        Compute a dynamical correlator
+        Compute a dynamical correlator, standard name
         """
-        if name is not "density" and self.spinful: raise
-        if mode=="DMRG":
-#            if name is not "densitydensity": raise # this does not work
-            return Many_Body_Hamiltonian.get_dynamical_correlator(self,
-                    name=name,**kwargs)
-        elif mode=="ED":
-            MBF = self.get_MBF() # get the object
-            return MBF.get_dynamical_correlator(name=name,**kwargs)
-        else: raise
+        return dynamicalcorrelator.get_dynamical_correlator_spinless(self,
+                **kwargs)
+    def get_dynamical_correlator_spinless(self,**kwargs):
+        """
+        Compute a dynamical correlator, specific function for spinless
+        """
+        return dynamicalcorrelator.get_dynamical_correlator_spinless(self,
+                **kwargs)
     def get_correlator_free(self,pairs=[[]]):
           """Get the correlator for free fermions"""
           m = self.hamiltonian_free() # get the single body matrix
@@ -225,23 +224,13 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         cs = super().get_correlator(pairs=pairs,
                 name="cc",**kwargs)
         return cs
-    def get_dynamical_correlator_spinful(self,name="densitydensity",
-            i=0,j=0,**kwargs):
+    def get_dynamical_correlator_spinful(self,**kwargs):
         """Return the dynamical correlator of an spinful system"""
-        if name=="densitydensity":
-            (es,uu) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
-                    name="densitydensity",i=2*i,j=2*j,**kwargs)
-            (es,dd) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
-                    name="densitydensity",i=2*i+1,j=2*j+1,**kwargs)
-            return (es,uu+dd) # return the contributions
-        elif name=="cdc":
-            (es,uu) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
-                    name="cdc",i=2*i,j=2*j,**kwargs)
-            (es,dd) = Fermionic_Hamiltonian.get_dynamical_correlator(self,
-                    name="cdc",i=2*i+1,j=2*j+1,**kwargs)
-            return (es,uu+dd) # return the contributions
-        else: raise # not implemented
-
+        return dynamicalcorrelator.get_dynamical_correlator_spinful(self,
+                **kwargs)
+    def get_dynamical_correlator(self,**kwargs):
+        """Return the dynamical correlator of an spinful system"""
+        return self.get_dynamical_correlator_spinful(**kwargs)
     def set_hubbard_spinful(self,fun):
         """
         Add Hubbard interation in a spinful manner
@@ -285,7 +274,7 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
           return Fermionic_Hamiltonian.get_correlator(self,
                   name="densitydensity",pairs=pp,**kwargs)
         if name=="ZZ": # ZZ correlator
-            return f(pu) + f(pd) - f(pud) - f(pdu)
+            return (f(pu) + f(pd) - f(pud) - f(pdu))/4.
         elif name=="densitydensity": # density-density correlator
             return f(pu) + f(pd) + f(pud) + f(pdu)
         else: raise

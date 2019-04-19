@@ -203,7 +203,7 @@ class Many_Body_Hamiltonian():
     return get_dos(self,**kwargs)
   def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
     return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
-  def get_dynamical_correlator(self,submode="KPM",**kwargs):
+  def get_dynamical_correlator_MB(self,submode="KPM",**kwargs):
     self.set_initial_wf(self.wf0) # set the initial wavefunction
     if submode=="KPM": # KPM method
         return kpmdmrg.get_dynamical_correlator(self,**kwargs)

@@ -64,7 +64,8 @@ def obj2str(a):
     """
     Convert into a string
     """
-    if type(a)==bool:
+    if a is None: return "None"
+    elif type(a)==bool:
         if a: return "true"
         else: return "false"
     elif type(a)==str: return a

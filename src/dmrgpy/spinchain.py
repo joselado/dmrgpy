@@ -53,7 +53,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         Compute the dynamical correlator
         """
         if mode=="DMRG": # Use MPS
-            return Many_Body_Hamiltonian.get_dynamical_correlator(self,
+            return Many_Body_Hamiltonian.get_dynamical_correlator_MB(self,
                     **kwargs)
         else: # use exact diagonalization
             from . import pychainwrapper
