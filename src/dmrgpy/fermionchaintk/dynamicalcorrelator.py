@@ -23,18 +23,29 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
     def getd(ii,jj):
         return self.get_dynamical_correlator_spinless(
             name="densitydensity",i=2*i+ii,j=2*j+jj,**kwargs)
+    def getcdc(ii,jj):
+        return = self.get_dynamical_correlator_spinless(
+                name="cdc",i=2*i+ii,j=2*j+jj,**kwargs)
+    def getcc(ii,jj):
+        return = self.get_dynamical_correlator_spinless(
+                name="cc",i=2*i+ii,j=2*j+jj,**kwargs)
     if name=="densitydensity":
-        (es,uu) = self.get_dynamical_correlator_spinless(
-                name="densitydensity",i=2*i,j=2*j,**kwargs)
-        (es,dd) = self.get_dynamical_correlator_spinless(
-                name="densitydensity",i=2*i+1,j=2*j+1,**kwargs)
-        return (es,uu+dd) # return the contributions
+        (es,uu) = getd(0,0) # up up
+        (es,ud) = getd(0,1) # up up
+        (es,dd) = getd(1,1) # down down
+        (es,du) = getd(1,0) # down down
+        return (es,uu+dd+ud+du) # return the contributions
     elif name=="cdc":
-        (es,uu) = self.get_dynamical_correlator_spinless(
-                name="cdc",i=2*i,j=2*j,**kwargs)
-        (es,dd) = self.get_dynamical_correlator_spinless(
-                name="cdc",i=2*i+1,j=2*j+1,**kwargs)
+        (es,uu) = getcdc(0,0)
+        (es,dd) = getcdc(1,1)
         return (es,uu+dd) # return the contributions
+    elif name=="cc":
+        (es,uu) = getcc(0,0)
+        (es,dd) = getcc(1,1)
+    elif name=="cdcup": return getcdc(0,0)
+    elif name=="cdcdn": return getcdc(1,1)
+    elif name=="ccup": return getcc(0,0)
+    elif name=="ccdn": return getcc(1,1)
     elif name=="ZZ":
         (es,uu) = getd(0,0) # up up
         (es,dd) = getd(1,1) # down down
