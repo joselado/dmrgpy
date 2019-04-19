@@ -24,10 +24,10 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
         return self.get_dynamical_correlator_spinless(
             name="densitydensity",i=2*i+ii,j=2*j+jj,**kwargs)
     def getcdc(ii,jj):
-        return = self.get_dynamical_correlator_spinless(
+        return self.get_dynamical_correlator_spinless(
                 name="cdc",i=2*i+ii,j=2*j+jj,**kwargs)
     def getcc(ii,jj):
-        return = self.get_dynamical_correlator_spinless(
+        return self.get_dynamical_correlator_spinless(
                 name="cc",i=2*i+ii,j=2*j+jj,**kwargs)
     if name=="densitydensity":
         (es,uu) = getd(0,0) # up up
