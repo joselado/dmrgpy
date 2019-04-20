@@ -3,7 +3,7 @@ import numpy as np
 
 def get_excited(self,n=2,noise=0.0,scale=1.0):
     """Return excited state energies"""
-    task = {"excited":"true"
+    task = {"excited":"true",
             "nexcited":str(n),
             "noise":str(noise),
             "scale_lagrange_excited":str(scale),
