@@ -41,15 +41,14 @@ def id_generator(size=20, chars=string.ascii_uppercase + string.digits):
 
 def dot(wf1,wf2):
   """Compute scalar product"""
+  raise
   sc = wf1.sc
-  sc.to_folder() # go to the folder
   sc.setup_task(mode="overlap") # compute overlap mode
   os.system("cp "+wf1.path+wf1.name+"  "+wf1.path+"/overlap_wf1.mps") # copy
   os.system("cp "+wf2.path+wf2.name+"  "+wf2.path+"/overlap_wf2.mps") # copy
   os.system("rm -f "+sc.path+"/OVERLAP.OUT") # remove the file
   sc.run(automatic=True) # run the calculation
   out = np.genfromtxt(sc.path+"/OVERLAP.OUT") # get the data
-  sc.to_origin() # go back
   return (out[0]+1j*out[1])*wf1.factor*wf2.factor # return result
 
 
