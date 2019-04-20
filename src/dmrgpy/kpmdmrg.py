@@ -24,7 +24,7 @@ def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
   if i>=self.ns: raise 
   if j>=self.ns: raise 
   if delta<0.0: raise 
-  self.get_gs() # compute ground state
+#  self.get_gs() # compute ground state
   # define the dictionary
   task = {      "dynamical_correlator": "true",
                 "kpmmaxm":str(self.kpmmaxm),
@@ -114,7 +114,6 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
   """
   Compute a dynamical correlator using the KPM-DMRG method
   """
-  self.to_folder() # go to temporal folder
   if mode=="DMRG": 
 # get the moments
     mus = get_moments_dynamical_correlator_dmrg(self,i=i,j=j,
@@ -147,7 +146,6 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
       (xs,ys) = pychain_correlator.dynamical_correlator(sc,h,delta=delta,i=i,
                         j=j,namei=name[0],namej=name[1])
     else: raise
-  self.to_origin() # go to origin folder
   if es is None:
     (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
   else:
@@ -160,7 +158,7 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
       xs = np.linspace(window[0],window[1],ne)
   else: xs = np.array(es).copy() # copy input array
   ys = fr(xs) + 1j*fi(xs) # evaluate the interpolator
-  np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)
+#  np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)
   return (xs,ys)
 
 

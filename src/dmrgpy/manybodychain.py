@@ -65,7 +65,10 @@ class Many_Body_Hamiltonian():
       self.vijkl = None # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
       os.system("mkdir -p "+self.path) # create folder for the calculations
-  def to_folder(self): os.chdir(self.path) # go to calculation folder
+  def to_folder(self):
+      """Go to a certain folder"""
+      self.inipath = os.getcwd() # record the folder
+      os.chdir(self.path) # go to calculation folder
   def copy(self):
       from copy import deepcopy
       return deepcopy(self)
