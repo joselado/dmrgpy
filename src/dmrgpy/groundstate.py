@@ -24,7 +24,7 @@ def gs_energy(self,wf0=None,reconverge=False):
     self.execute(lambda: self.setup_task("GS"))
     self.write_hamiltonian() # write the Hamiltonian to a file
     self.run() # perform the calculation
-    self.wf0 = mps.MPS(self,name="psi_GS.mps").copy() # set the ground state
+    self.wf0 = mps.MPS(self,name="psi_GS.mps")#.copy() # set the ground state
     # get the ground state energy
     out = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
     self.e0 = out # store ground state energy

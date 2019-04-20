@@ -80,6 +80,7 @@ class Many_Body_Hamiltonian():
       name = "dmrgpy_clone_"+str(np.random.randint(100000))
       out = deepcopy(self) 
       out.path = "/tmp/"+name # new path
+      out.inipath = out.path # initial path
       print("New path",out.path)
       os.system("cp -r "+self.path+"  "+out.path) # copy to the new path
       return out # return new object

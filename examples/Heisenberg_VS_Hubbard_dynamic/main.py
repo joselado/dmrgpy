@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 from dmrgpy import spinchain
-n = 4 # number of spin sites
+n = 2 # number of spin sites
 
 # first let us create a Hubabrd model
 
@@ -25,15 +25,17 @@ def fu(i,j):
 
 fc.set_hoppings(ft) # add the term to the Hamiltonian
 fc.set_hubbard_spinful(fu) # add the term to the Hamiltonian
+import os
 pairs = [(0,i) for i in range(n)]
-(esh,ch) = fc.get_dynamical_correlator(name="YY",mode="DMRG",i=0,j=1)
+(esh,ch) = fc.get_dynamical_correlator(name="XX",mode="DMRG",i=0,j=1)
 esh /= 2./U # scale by the estimated effective exchange
 print(fc.get_density_spinful())
+
 
 # now create the Heisenberg chain
 sc = spinchain.Spin_Hamiltonian([2 for i in range(n)])
 sc.set_exchange(lambda i,j: 1.0*(abs(i-j)==1))
-(ess,cs) = sc.get_dynamical_correlator(name="YY",mode="DMRG",i=0,j=1)
+(ess,cs) = sc.get_dynamical_correlator(name="XX",mode="DMRG",i=0,j=1)
 
 import matplotlib.pyplot as plt
 
