@@ -3,15 +3,15 @@ import numpy as np
 
 def get_excited(self,n=2,noise=0.0,scale=1.0):
     """Return excited state energies"""
-    self.to_folder() # go to temporal folder
-    task = {"nexcited":str(n),
+    task = {"excited":"true"
+            "nexcited":str(n),
             "noise":str(noise),
             "scale_lagrange_excited":str(scale),
             }
-    self.setup_task("excited",task=task)
+    self.task = task
+    self.write_task()
     self.write_hamiltonian() # write the Hamiltonian to a file
     self.run() # perform the calculation
     out = self.execute(lambda: np.genfromtxt("EXCITED.OUT"))
-    self.to_origin() # go to main folder
     return out
 
