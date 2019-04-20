@@ -12,6 +12,7 @@ from . import taskdmrg
 from . import cvm
 from . import dcex
 from . import funtk
+from . import vev
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -87,6 +88,16 @@ class Many_Body_Hamiltonian():
       Remove the temporal folder
       """
       os.system("rm -rf "+self.path) # clean temporal folder
+  def vev_MB(self,MO,**kwargs):
+      """
+      Compute a vacuum expectation value
+      """
+      return vev.vev(self,MO,**kwargs)
+  def vev(self,MO,**kwargs):
+      """
+      Compute a vacuum expectation value
+      """
+      return vev.vev(self,MO,**kwargs)
   def set_vijkl(self,f):
       """
       Create the generalized interaction

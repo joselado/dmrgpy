@@ -231,6 +231,12 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
     def get_dynamical_correlator(self,**kwargs):
         """Return the dynamical correlator of an spinful system"""
         return self.get_dynamical_correlator_spinful(**kwargs)
+    def vev_spinless(self,MO,mode="DMRG",**kwargs):
+        """ Return a vaccum expectation value"""
+        if mode=="DMRG":
+            return self.vev_MB(MO,**kwargs)
+        elif mode=="ED": raise # not implemented
+        else: raise # unrecognized
     def set_hubbard_spinful(self,fun):
         """
         Add Hubbard interation in a spinful manner

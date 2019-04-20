@@ -24,13 +24,44 @@ def get_correlator_spinful(self,name="ZZ",pairs=[[]],**kwargs):
     pd = [[p1*2+1,p2*2+1] for (p1,p2) in pairs] # down pairs
     pud = [[p1*2,p2*2+1] for (p1,p2) in pairs] # up-down pairs
     pdu = [[p1*2+1,p2*2] for (p1,p2) in pairs] # down-up pairs
-    def f(pp):
+    def f(pp): # compute a certain density
       return self.get_correlator_spinless(
               name="densitydensity",pairs=pp,**kwargs)
+    def cdc(pp): # compute a certain cdc
+      return self.get_correlator_spinless(
+              name="cdc",pairs=pp,**kwargs)
+    def ffff(i,j,k,l): # compute a four field expectation value
+        out = [] # empty list
+        for p in pairs: # loop
+            mos = [("Cdag",2*p[0]+i),("C",2*p[0]+j), # names of the pairs
+                    ("Cdag",2*p[1]+k),("C",2*p[1]+l)]
+            o = self.vev_spinless(mos,**kwargs)
+            out.append(o)
+        return np.array(out)
+    def aaaa(i,j,k,l): # compute a four field expectation value
+        out = [] # empty list
+        for p in pairs: # loop
+            mos = [("C",2*p[0]+i),("C",2*p[0]+j), # names of the pairs
+                    ("C",2*p[1]+k),("C",2*p[1]+l)]
+            o = self.vev_spinless(mos,**kwargs)
+            out.append(o)
+        return np.array(out)
+    ##################################
+    ### Now do the different cases ###
+    ##################################
     if name=="ZZ": # ZZ correlator
         return (f(pu) + f(pd) - f(pud) - f(pdu))/4.
+    elif name=="cdc": # creation anhilation 
+        return cdc(pu) + cdc(pd)
     elif name=="densitydensity": # density-density correlator
         return f(pu) + f(pd) + f(pud) + f(pdu)
+    #### This is now a workaround for other correlators
+    elif name=="XX": # XX correlator, computed with four field operators
+        return (ffff(1,0,1,0)+ffff(1,0,0,1)+ffff(0,1,1,0)+ffff(0,1,0,1))/4.
+    elif name=="YY": # XX correlator, computed with four field operators
+        return -(ffff(1,0,1,0)-ffff(1,0,0,1)-ffff(0,1,1,0)+ffff(0,1,0,1))/4.
+    elif name=="deltadelta": # delta-delta correlator
+        return aaaa(0,1,0,1)
     else: raise
 
 

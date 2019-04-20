@@ -5,6 +5,7 @@ from scipy.sparse import csc_matrix,identity
 import scipy.sparse.linalg as slg
 from ..algebra import algebra
 from .. import operatornames
+from .. import multioperator
 from .. import funtk
 
 
@@ -63,6 +64,11 @@ class MBFermion():
         Return the zero matrix
         """
         return csc_matrix(([],([],[])),shape=(self.nMB,self.nMB))
+    def get_identity(self):
+        """
+        Return the identity
+        """
+        return identity(self.h.shape[0],dtype=np.complex)
     def add_hopping(self,m):
         """
         Add a single particle term to the Hamiltonian
@@ -157,10 +163,15 @@ class MBFermion():
             A = A@self.get_operator(namej,p[1]) # get matrix
             out.append(algebra.braket_wAw(self.wf0,A))
         return np.array(out) # return array
-    def get_operator(self,name,i):
+    def get_operator(self,name,i=0):
         """
         Return a certain operator
         """
+        if type(name)==multioperator.MultiOperator:
+            m = self.get_identity()
+            for o in name.op: # loop over operators
+                m = m@self.get_operator(o[0],int(o[1]))
+            return m # return operator
         if name=="density": return self.get_density(i)
         elif name=="C": return self.get_c(i)
         elif name=="Cdag": return self.get_cd(i)
@@ -174,10 +185,14 @@ class MBFermion():
         from ..algebra import kpm
         from .. import operatornames
         self.get_gs() # compute ground state
-        namei,namej = operatornames.recognize(name) # get the operator
-        namei = operatornames.hermitian(namei) # get the dagger
-        A = self.get_operator(namei,i)
-        B = self.get_operator(namej,j)
+        if type(name[0])==multioperator.MultiOperator: # multioperator
+          A = self.get_operator(name[0])
+          B = self.get_operator(name[1])
+        else:
+          namei,namej = operatornames.recognize(name) # get the operator
+          namei = operatornames.hermitian(namei) # get the dagger
+          A = self.get_operator(namei,i)
+          B = self.get_operator(namej,j)
 #        A = self.get_cd(i) # first operator
 #        B = self.get_cd(j) # second operator
         vi = A@self.wf0 # first wavefunction

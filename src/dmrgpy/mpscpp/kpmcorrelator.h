@@ -62,17 +62,30 @@ static auto get_moments_dynamical_correlator=[](auto sites, auto H)
   myfile.open("KPM_NUM_POLYNOMIALS.OUT");
   myfile << std::setprecision(8) << n << endl;
   myfile.close(); // close file
-  auto i = get_int_value("site_i_kpm");
-  auto j = get_int_value("site_j_kpm");
-  auto namei = get_str("kpm_operator_i");
-  auto namej = get_str("kpm_operator_j");
   auto psi = get_gs(sites,H) ; // get the ground state
   auto m = scale_hamiltonian(sites,H) ; // scale this Hamiltonian
-  cout << "Site " << i << " name " << namei << endl;
-  cout << "Site " << j << " name " << namej << endl;
-  auto m1 = get_operator(sites,i,namei); // first operator
-  auto m2 = get_operator(sites,j,namej); // first operator
-//  auto m2 = MPO(ampo2); // second operator
+  auto m1 = Iden(sites) ; // identity
+  auto m2 = Iden(sites) ; // identity
+  // now read the operators to use
+  // First the operator i
+  if (get_bool("kpm_multioperator_i")) {
+    m1 = get_multioperator("kpm_multioperator_i");
+  } ;
+  if (not get_bool("kpm_multioperator_i")) {
+    m1 = get_operator(sites,get_int_value("site_i_kpm"),
+		    get_str("kpm_operator_i")); // first operator
+  } ;
+  // afterwards the operator j
+  if (get_bool("kpm_multioperator_j")) {
+    m2 = get_multioperator("kpm_multioperator_j");
+  } ;
+  if (not get_bool("kpm_multioperator_j")) {
+    m2 = get_operator(sites,get_int_value("site_j_kpm"),
+		    get_str("kpm_operator_j")); // first operator
+  } ;
+  ///////////////////////////////////
+  ////// once the operators have been read, continue
+  ///////////////////////////////////
   int kpmmaxm = get_int_value("kpmmaxm") ; // bond dimension for KPM
   auto kpmcutoff = get_float_value("kpm_cutoff") ; // bond dimension for KPM
   if (check_task("orthogonal_kpm")) 

@@ -1,6 +1,7 @@
 import numpy as np
 from . import operatornames
 from . import taskdmrg
+from . import multioperator
 
 def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
         delta=1e-1,name="XX",i=0,j=0):
@@ -25,6 +26,7 @@ def cvm_dmrg(self,name="XX",i=0,j=0,delta=1e-1,e=0.0):
     """
     Return the dynamical correlator for a single energy
     """
+    if type(name)==multioperator.MultiOperator: raise # not implemented
     namei,namej = operatornames.recognize(name)
     if self.fit_td: fittd = "true"
     else: fittd = "false"

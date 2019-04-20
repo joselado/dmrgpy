@@ -18,7 +18,7 @@ class MPS():
     out = deepcopy(self) # copy everything
     name = id_generator()+".mps" # create a new name
     out.name = name
-    os.system("cp "+self.path+self.name+"  "+out.path+out.name)
+    os.system("cp "+self.path+"/"+self.name+"  "+out.path+out.name)
     return out
   def __mul__(self,x):
     """Multiply by an scalar"""

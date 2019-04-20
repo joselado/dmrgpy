@@ -8,6 +8,9 @@ static auto check_task = [](auto name){
 }
 ;
 
+
+
+
 // functions to get data from the input file
 
 static auto get_int_value= [](auto name) {

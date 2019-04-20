@@ -184,4 +184,5 @@ static auto add_spin_operator= [](auto ampo, auto sites, float v, int i, auto na
 
 
 
+#include"multioperator.h" // library to read a multioperator
 

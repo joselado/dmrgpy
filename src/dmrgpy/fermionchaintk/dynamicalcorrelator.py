@@ -1,4 +1,5 @@
 import numpy as np
+from .. import multioperator
 
 
 def get_dynamical_correlator_spinless(self,name="densitydensity",
@@ -32,6 +33,21 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
     def getcc(ii,jj):
         return self.get_dynamical_correlator_spinless(
                 name="cc",i=2*i+ii,j=2*j+jj,**kwargs)
+    ### Worksround for four field operators
+    def caca(ii,jj,kk,ll): # four field operators
+        mi = multioperator.obj2MO([["Cdag",2*i+jj],["C",2*i+ii]]
+            ,name="kpm_multioperator_i")
+        mj = multioperator.obj2MO([["Cdag",2*j+kk],["C",2*j+ll]]
+            ,name="kpm_multioperator_j")
+        return self.get_dynamical_correlator_spinless(name=(mi,mj),
+                **kwargs)
+    def aaaa(ii,jj,kk,ll): # four field operators
+        mi = multioperator.obj2MO([["Cdag",2*i+jj],["Cdag",2*i+ii]]
+            ,name="kpm_multioperator_i")
+        mj = multioperator.obj2MO([["C",2*j+kk],["C",2*j+ll]]
+            ,name="kpm_multioperator_j")
+        return self.get_dynamical_correlator_spinless(name=(mi,mj),
+                **kwargs)
     if name=="densitydensity":
         (es,uu) = getd(0,0) # up up
         (es,ud) = getd(0,1) # up up
@@ -62,6 +78,18 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
         (es,ud) = getd(0,1) # up down
         (es,du) = getd(1,0) # down up
         return (es,(uu+dd-ud-du)/4.0) # return the contributions
+    elif name=="XX":
+        (es,out) = caca(0,1,0,1)
+        out = out + caca(0,1,1,0)[1] 
+        out = out + caca(1,0,1,0)[1] + caca(1,0,1,0)[1] 
+        return (es,out/4.0) # return the contributions
+    elif name=="YY":
+        (es,out) = caca(0,1,0,1)
+        out = out - caca(0,1,1,0)[1] 
+        out = out + caca(1,0,1,0)[1] - caca(1,0,1,0)[1] 
+        return (es,-out/4.0) # return the contributions
+    elif name=="deltadelta": # swave pairing
+        return aaaa(0,1,0,1) # return the swave pairing amplitude
     elif name=="densityZ":
         (es,uu) = getd(0,0) # up up
         (es,dd) = getd(1,1) # down down

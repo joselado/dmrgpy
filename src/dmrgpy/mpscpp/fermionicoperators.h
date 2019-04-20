@@ -10,8 +10,8 @@ static auto fermionic_operator_spinless= [](auto sites, int i, auto name) {
         if (name=="Cdag") {
         ampo += 1.0,"Adag",i+1; // bosonic one
         }
-        int maxm = get_int_value("kpmmaxm") ;
-        auto cutoff = get_float_value("kpm_cutoff") ;
+        int maxm = get_int_value("maxm") ;
+        auto cutoff = get_float_value("cutoff") ;
         auto m0 = MPO(ampo) ; // create MPO
         auto m = MPO(ampo) ; // create MPO
         for(int j=0;j<i;j++) {
