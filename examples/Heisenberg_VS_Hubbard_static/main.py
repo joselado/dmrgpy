@@ -26,13 +26,13 @@ def fu(i,j):
 fc.set_hoppings(ft) # add the term to the Hamiltonian
 fc.set_hubbard(fu) # add the term to the Hamiltonian
 pairs = [(0,i) for i in range(n)]
-ch = fc.get_correlator(pairs=pairs,name="YY",mode="DMRG").real
+ch = fc.get_correlator(pairs=pairs,name="XX",mode="DMRG").real
 print(fc.get_density_spinful())
 
 # now create the Heisenberg chain
 sc = spinchain.Spin_Hamiltonian([2 for i in range(n)])
 sc.set_exchange(lambda i,j: 1.0*(abs(i-j)==1))
-cs = sc.get_correlator(pairs=pairs,name="YY",mode="DMRG").real
+cs = sc.get_correlator(pairs=pairs,name="XX",mode="DMRG").real
 
 import matplotlib.pyplot as plt
 

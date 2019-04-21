@@ -1,5 +1,6 @@
 import numpy as np
 from .. import multioperator
+from . import mop
 
 
 def get_dynamical_correlator_spinless(self,name="densitydensity",
@@ -73,17 +74,29 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
     elif name=="ccup": return getcc(0,0)
     elif name=="ccdn": return getcc(1,1)
     elif name=="ZZ":
-        (es,uu) = getd(0,0) # up up
-        (es,dd) = getd(1,1) # down down
-        (es,ud) = getd(0,1) # up down
-        (es,du) = getd(1,0) # down up
-        return (es,(uu+dd-ud-du)/4.0) # return the contributions
+        mi = mop.get_sz(i=i,name="kpm_multioperator_i") # multioprator for i
+        mj = mop.get_sz(i=j,name="kpm_multioperator_j") # multioprator for i
+        return self.get_dynamical_correlator_spinless(name=(mi,mj),
+                **kwargs)
+#        (es,uu) = getd(0,0) # up up
+#        (es,dd) = getd(1,1) # down down
+#        (es,ud) = getd(0,1) # up down
+#        (es,du) = getd(1,0) # down up
+#        return (es,(uu+dd-ud-du)/4.0) # return the contributions
     elif name=="XX":
-        (es,out) = caca(0,1,0,1)
-        out = out + caca(0,1,1,0)[1] 
-        out = out + caca(1,0,1,0)[1] + caca(1,0,1,0)[1] 
-        return (es,out/4.0) # return the contributions
+        mi = mop.get_sx(i=i,name="kpm_multioperator_i") # multioprator for i
+        mj = mop.get_sx(i=j,name="kpm_multioperator_j") # multioprator for i
+        return self.get_dynamical_correlator_spinless(name=(mi,mj),
+                **kwargs)
+#        (es,out) = caca(0,1,0,1)
+#        out = out + caca(0,1,1,0)[1] 
+#        out = out + caca(1,0,1,0)[1] + caca(1,0,1,0)[1] 
+#        return (es,out/4.0) # return the contributions
     elif name=="YY":
+#        mi = mop.get_sy(i=i,name="kpm_multioperator_i") # multioprator for i
+#        mj = mop.get_sy(i=j,name="kpm_multioperator_j") # multioprator for i
+#        return self.get_dynamical_correlator_spinless(name=(mi,mj),
+#                **kwargs)
         (es,out) = caca(0,1,0,1)
         out = out - caca(0,1,1,0)[1] 
         out = out + caca(1,0,1,0)[1] - caca(1,0,1,0)[1] 

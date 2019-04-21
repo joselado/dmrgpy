@@ -2,8 +2,11 @@
 from __future__ import print_function
 import scipy.linalg as lg
 from . import algebra
+import os
 try:
   from multiprocess import Pool
+  import multiprocess
+  maxcpu = multiprocess.cpu_count()
 except:
     print("Multiprocess not working")
     def Pool(n=1): # workaround
@@ -12,6 +15,7 @@ except:
                   return [f(x) for x in xs]
                 def terminate(self): return None # dummy function
             return mpool()
+    maxcpu = 1 # maximum number of cpus
 
 cores = 1 # call in a single by default
 
@@ -49,7 +53,12 @@ def pcall_mp(fun,args,cores=cores):
 
 
 def pcall(fun,args): # define the function
+  path = os.getcwd() # get the current directory
   global cores
-  if cores==1: return pcall_serial(fun,args) # one core, simply iterate
-  else: return pcall_mp(fun,args,cores=cores) # call in parallel
+  if cores==1: 
+      out = pcall_serial(fun,args) # one core, simply iterate
+  else: 
+      out = pcall_mp(fun,args,cores=cores) # call in parallel
+  os.chdir(path) # go to the original path
+  return out # return outputs
 

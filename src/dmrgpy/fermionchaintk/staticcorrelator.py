@@ -1,4 +1,5 @@
 import numpy as np
+from . import mop # multioperator for spinful fermions
 
 
 def get_correlator_spinless(self,name="cdc",mode="DMRG",**kwargs):
@@ -46,6 +47,8 @@ def get_correlator_spinful(self,name="ZZ",pairs=[[]],**kwargs):
             o = self.vev_spinless(mos,**kwargs)
             out.append(o)
         return np.array(out)
+    def fmop(ops): # compute with multioperator
+            return np.array([self.vev_spinless(o,**kwargs) for o in ops])
     ##################################
     ### Now do the different cases ###
     ##################################
@@ -57,7 +60,9 @@ def get_correlator_spinful(self,name="ZZ",pairs=[[]],**kwargs):
         return f(pu) + f(pd) + f(pud) + f(pdu)
     #### This is now a workaround for other correlators
     elif name=="XX": # XX correlator, computed with four field operators
-        return (ffff(1,0,1,0)+ffff(1,0,0,1)+ffff(0,1,1,0)+ffff(0,1,0,1))/4.
+        ops = [mop.get_sxsx(i=i,j=j) for (i,j) in pairs] 
+        return fmop(ops) 
+#        return (ffff(1,0,1,0)+ffff(1,0,0,1)+ffff(0,1,1,0)+ffff(0,1,0,1))/4.
     elif name=="YY": # XX correlator, computed with four field operators
         return -(ffff(1,0,1,0)-ffff(1,0,0,1)-ffff(0,1,1,0)+ffff(0,1,0,1))/4.
     elif name=="deltadelta": # delta-delta correlator
