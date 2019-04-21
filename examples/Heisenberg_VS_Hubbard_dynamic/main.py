@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 from dmrgpy import spinchain
-n = 2 # number of spin sites
+n = 4 # number of spin sites
 
 # first let us create a Hubabrd model
 

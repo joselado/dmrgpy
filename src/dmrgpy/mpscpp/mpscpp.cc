@@ -11,6 +11,7 @@ using namespace std;
 
 
 #include"check_task.h" // read the different tasks
+#include"mpsalgebra.h" // functions to deal with MPS
 #include"get_sweeps.h" // get the sweep info
 #include"bandwidth.h"  // return the bandwidth of the hamiltonian
 #include"get_gap.h" // compute the gap

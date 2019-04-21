@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 5
+n = 10
 # create a random spin chain
 spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
@@ -22,24 +22,25 @@ import time
 i = np.random.randint(n)
 j = np.random.randint(n)
 j = i
+
+sc.get_gs() # compute ground state
+
 t1 = time.time()
-(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
+sc.kpm_accelerate = True # use acceleration in KPM mode
+(x0,y0) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
 t2 = time.time()
-print("Time with DMRG",t2-t1)
+print("Time with acceleration",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="ED",
-        i=i,j=j,name="ZZ")
+
+sc.kpm_accelerate = False # use acceleration in KPM mode
+(x1,y1) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
 t3 = time.time()
-print("Time with ED",t3-t2)
+print("Time without acceleration",t3-t2)
 
 
-(x4,y4) = sc.get_dynamical_correlator(mode="ED",submode="KPM",
-        i=i,j=j,name="ZZ")
-t4 = time.time()
-print("Time with KPM-ED",t4-t3)
 
-print(os.getcwd())
+
 
 # plot the results
 import matplotlib.pyplot as plt
@@ -48,9 +49,8 @@ import matplotlib
 matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
 fig = plt.figure()
 fig.subplots_adjust(0.2,0.2)
-plt.plot(x2,np.abs(y2),c="blue",label="DMRG")
-plt.scatter(x3,np.abs(y3),c="green",label="ED")
-plt.scatter(x4,np.abs(y4),c="red",label="ED KPM")
+plt.plot(x0,y0.real,c="blue",label="With acceleration")
+plt.scatter(x1,y1.real,c="red",label="Without acceleration")
 plt.legend()
 plt.xlabel("frequency [J]")
 plt.ylabel("Dynamical correlator")

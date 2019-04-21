@@ -49,7 +49,7 @@ def write_tasks(self):
       fo.write(" skip_dmrg_gs = "+obj2str(self.skip_dmrg_gs)+"\n") # starting WF
   else: fo.write(" gs_from_file = false\n")
   for key in self.task:
-    fo.write(key+" = "+str(self.task[key])+"\n")
+    fo.write(key+" = "+obj2str(self.task[key])+"\n")
 #("GS = true\ngap = false\ncorrelator = false\n}\n")
   # parameters of dmrg algorithm
   fo.write(" maxm = "+str(self.maxm)+"\n") # maximum bond dimension
