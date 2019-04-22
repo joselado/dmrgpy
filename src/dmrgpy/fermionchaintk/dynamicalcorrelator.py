@@ -93,14 +93,21 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
 #        out = out + caca(1,0,1,0)[1] + caca(1,0,1,0)[1] 
 #        return (es,out/4.0) # return the contributions
     elif name=="YY":
-#        mi = mop.get_sy(i=i,name="kpm_multioperator_i") # multioprator for i
-#        mj = mop.get_sy(i=j,name="kpm_multioperator_j") # multioprator for i
-#        return self.get_dynamical_correlator_spinless(name=(mi,mj),
-#                **kwargs)
+        mi = mop.get_sy(i=i,name="kpm_multioperator_i") # multioprator for i
+        mj = mop.get_sy(i=j,name="kpm_multioperator_j") # multioprator for i
+        return self.get_dynamical_correlator_spinless(name=(mi,mj),
+                **kwargs)
         (es,out) = caca(0,1,0,1)
         out = out - caca(0,1,1,0)[1] 
         out = out + caca(1,0,1,0)[1] - caca(1,0,1,0)[1] 
         return (es,-out/4.0) # return the contributions
+    elif name=="SS": # return the SS dynamical correlator
+        def getdsi(nn):
+          return  get_dynamical_correlator_spinful(self,name=nn,i=0,j=0,**kwargs)
+        (ex,dx) = getdsi("XX")
+        (ey,dy) = getdsi("YY")
+        (ey,dz) = getdsi("ZZ")
+        return (ex,dx+dy+dz)
     elif name=="deltadelta": # swave pairing
         return aaaa(0,1,0,1) # return the swave pairing amplitude
     elif name=="densityZ":

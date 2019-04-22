@@ -30,7 +30,7 @@ pairs = [(0,i) for i in range(n)]
 
 t0 = time.time()
 
-(esh,ch) = fc.get_dynamical_correlator(name="XX",mode="DMRG",i=0,j=1)
+(esh,ch) = fc.get_dynamical_correlator(name="YY",mode="DMRG",i=0,j=1)
 esh /= 2./U # scale by the estimated effective exchange
 t1 = time.time()
 print("Time with fermions",t1-t0)
