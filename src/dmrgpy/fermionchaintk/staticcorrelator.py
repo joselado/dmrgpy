@@ -64,7 +64,9 @@ def get_correlator_spinful(self,name="ZZ",pairs=[[]],**kwargs):
         return fmop(ops) 
 #        return (ffff(1,0,1,0)+ffff(1,0,0,1)+ffff(0,1,1,0)+ffff(0,1,0,1))/4.
     elif name=="YY": # XX correlator, computed with four field operators
-        return -(ffff(1,0,1,0)-ffff(1,0,0,1)-ffff(0,1,1,0)+ffff(0,1,0,1))/4.
+        ops = [mop.get_sysy(i=i,j=j) for (i,j) in pairs] 
+        return fmop(ops) 
+#        return -(ffff(1,0,1,0)-ffff(1,0,0,1)-ffff(0,1,1,0)+ffff(0,1,0,1))/4.
     elif name=="deltadelta": # delta-delta correlator
         return aaaa(0,1,0,1)
     else: raise

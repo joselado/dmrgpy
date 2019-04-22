@@ -14,3 +14,17 @@ bool same_mps(auto vi, auto vj) {
 	if (real(dd)<1e-10) return true;
 	return false;
 };
+
+
+
+static auto sum_mpo=[](auto A1,auto A2) {
+        int maxm = get_int_value("maxm") ; // bond dimension
+        auto cutoff = get_float_value("cutoff") ;
+	auto args = Args({"Maxm", maxm, "Cutoff", cutoff});
+	auto out = sum(A1,A2, args); // add contribution
+	return out;
+}
+;
+
+
+

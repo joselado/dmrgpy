@@ -1,4 +1,5 @@
 import numpy as np
+from . import mop
 
 
 
@@ -39,8 +40,31 @@ def set_hubbard_spinless(self,fun):
     self.set_hubbard_MB(fun) # set hubbard
 
 
+def set_exchange_spinful(self,fun):
+    """
+    Add exchange coupling to a spinful fermionic Hamiltonian
+    """
+    out = mop.get_zero("hamiltonian_multioperator")
+    for i in range(self.ns//2): # loop over sites
+      for j in range(self.ns//2): # loop over sites
+          if np.max(np.abs(obj2matrix(fun(i,j)-fun(j,i))))>1e-8: raise
+          m = obj2matrix(fun(i,j)) # get the matrix
+          for k in range(3): # loop 
+            for l in range(3): # loop
+              out = out + m[k,l]*mop.get_si(j=k,i=i)*mop.get_si(j=l,i=j)
+    self.hamiltonian_multioperator = out + self.hamiltonian_multioperator
 
 
 
 
+
+
+
+def obj2matrix(a):
+    m = np.zeros((3,3))
+    m[0][0] = 1.0
+    m[1][1] = 1.0
+    m[2][2] = 1.0
+    if np.array(a).shape==(3,3): return a # return matrix
+    else: return a*m  # return identity times input
 

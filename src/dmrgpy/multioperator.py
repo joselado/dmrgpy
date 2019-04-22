@@ -22,6 +22,44 @@ class MultiOperator():
         """Add a new term"""
         self.i += 1 # increase the counter
         self.op.append([c]) # initialize
+    def copy(self):
+        from copy import deepcopy
+        return deepcopy(self) # return a copy
+    def __add__(self,a):
+        """Sum operation"""
+        if a is None: return self.copy() # return the Hamiltonian
+        if type(a)!=MultiOperator: raise # not implemented
+        out = self.copy() # create a copy
+        out.op = self.op + a.op # sum the two operators
+        out.i = self.i + a.i + 1 # increase the index
+        out.clean()
+        return out # return the sum
+    def __rmul__(self,a):
+        """Multiply by a number"""
+        out = self.copy()
+        for i in range(len(out.op)):
+            out.op[i][0] = out.op[i][0]*a # multiply
+        return out
+    def __mul__(self,a):
+        """Compute the product between two multioperators"""
+        out = self.copy() # copy operator
+        out.i = (self.i+1)*(a.i+1) # total number of terms
+        out.op = [] # empty list
+        for io in self.op: # loop over first operator
+          for jo in a.op: # loop over second operator
+              o = [io[0]*jo[0]] # compute coefficient
+              o = o + [io[i] for i in range(1,len(io))] # add
+              o = o + [jo[i] for i in range(1,len(jo))] # add
+              out.op.append(o) # store contribution
+        out.clean()
+        return out # return operator
+    def clean(self):
+        """Remove terms with zero weight"""
+        op = []
+        for o in self.op:
+            if abs(o[0])>1e-8: op.append(o) # store
+        self.i = self.i - (len(self.op)-len(op)) # redefine
+        self.op = op # redefine
     def get_dict(self):
         """Return the dictionary to be used in tasks.in"""
         d = dict()
@@ -39,7 +77,6 @@ class MultiOperator():
               name1 = name+"_term_"+str(i)+"_site"
               d[name0] = o[0]
               d[name1] = o[1]
-        print(d[self.name+"_n"],self.name+"_n")
         return d
 
 

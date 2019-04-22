@@ -1,8 +1,8 @@
 
 // return a multioperator of a certain name
 
-static auto get_multioperator=[](std::string name) {
-	auto sites = get_sites(); //
+static auto get_multioperator=[](std::string name, auto sites) {
+//	auto sites = get_sites(); //
 	auto out = Iden(sites); // get the identity
 	out = 0.*out; // initialize operator
         int maxm = get_int_value("maxm") ; // bond dimension

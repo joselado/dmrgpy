@@ -18,6 +18,19 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
         else:
           Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
+    def set_hoppings(self,fun):
+      """Add the spin independent hoppings"""
+      from .manybodychain import Coupling
+      self.computed_gs = False # say that GS has not been computed
+      self.hoppings = dict()
+      if callable(fun):
+        for i in range(self.ns): # loop
+            for j in range(self.ns): # loop
+                if self.sites[i] in [0,1] and self.sites[j] in [0,1]:
+                    c = fun(i,j)
+                    if np.abs(c)>0.0:
+                        self.hoppings[(i,j)] = Coupling(i,j,c) # store
+      else: raise # Error
     def get_density_spinless(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_spinless(self,**kwargs)
@@ -139,6 +152,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         MBf.add_pairing(self.pairing) # add pairing
         MBf.add_hubbard(self.hubbard_matrix) # add hubbard term
         MBf.add_vijkl(self.vijkl) # add generalized interaction
+        # add generalized term
+        MBf.add_multioperator(self.hamiltonian_multioperator) 
         return MBf # return the object
     def get_kpm_scale(self):
         """Energy scale for KPM method"""
@@ -235,7 +250,9 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         """ Return a vaccum expectation value"""
         if mode=="DMRG":
             return self.vev_MB(MO,**kwargs)
-        elif mode=="ED": raise # not implemented
+        elif mode=="ED": 
+            MBF = self.get_MBF() # get the object
+            return MBF.vev(MO,**kwargs) # return overlap
         else: raise # unrecognized
     def set_hubbard_spinful(self,fun):
         """
@@ -274,6 +291,11 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         Get a static correlator
         """
         return staticcorrelator.get_correlator_spinful(self,**kwargs)
+    def set_exchange(self,fun):
+        """
+        Add exchange coupling betwwen the spinful fermionic sites
+        """
+        hamiltonian.set_exchange_spinful(self,fun) # set the exchange
 
 
 

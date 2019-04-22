@@ -5,6 +5,12 @@ from .dmrgpy2pychain import measure
 from .algebra import algebra
 from . import pychainwrapper
 
+class Coupling():
+  def __init__(self,i,j,g):
+    self.i = i
+    self.j = j
+    self.g = g
+
 Spin_Hamiltonian = Many_Body_Hamiltonian
 
 class Spin_Hamiltonian(Many_Body_Hamiltonian):
@@ -13,6 +19,20 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         Many_Body_Hamiltonian.__init__(self,sites)
         # default exchange constants
         self.set_exchange(lambda i,j: abs(i-j)==1*1.0)
+    def set_exchange(self,fun):
+      """Set the exchange coupling between sites"""
+      one = np.matrix(np.identity(3))
+      self.computed_gs = False # say that GS has not been computed
+      self.exchange = [] # empty list
+      for i in range(self.ns): # loop
+        for j in range(self.ns):  # loop
+          g = fun(i,j).real # call the function
+          if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
+          g = g*one # multiply by the identity
+          if np.sum(np.abs(g))!=0.0:
+            g = g/2. # normalize
+            c = Coupling(i,j,g) # create class
+            self.exchange.append(c) # store
     def gs_energy(self,mode="DMRG",**kwargs):
         """
         Return the ground state energy

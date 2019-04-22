@@ -65,6 +65,7 @@ class Many_Body_Hamiltonian():
       self.computed_gs = False # computed the GS already
       self.vijkl = None # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
+      self.hamiltonian_multioperator = None # Multioperator for the Hamiltonian
       os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self):
       """Go to a certain folder"""
@@ -108,52 +109,20 @@ class Many_Body_Hamiltonian():
       Create the generalized interaction
       """
       self.vijkl = f # store
-  def set_exchange(self,fun):
-    """Set the exchange coupling between sites"""
-    self.computed_gs = False # say that GS has not been computed
-    self.exchange = [] # empty list
-    for i in range(self.ns): # loop
-      for j in range(self.ns):  # loop
-        g = fun(i,j).real # call the function
-        if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
-        g = g*one # multiply by the identity
-        if np.sum(np.abs(g))!=0.0: 
-          g = g/2. # normalize
-          c = Coupling(i,j,g) # create class
-          self.exchange.append(c) # store
-    # now the onsite ones
-#    for i in range(self.ns): # loop
-#        g = fun(i,i).real # call the function
-#        g = g*one # multiply by the identity
-#        g = (g + g.H)/2. # the onsite one must be hermitian
-#        if np.sum(np.abs(g))!=0.0: # if nonzero 
-#          c = Coupling(i,i,g) # create class
-#          self.exchange.append(c) # store
-  def set_hoppings(self,fun):
-      """Add the spin independent hoppings"""
-      self.computed_gs = False # say that GS has not been computed
-      self.hoppings = dict()
-      if callable(fun):
-        for i in range(self.ns): # loop
-            for j in range(self.ns): # loop
-                if self.sites[i] in [0,1] and self.sites[j] in [0,1]:
-                    c = fun(i,j)
-                    if np.abs(c)>0.0:
-                        self.hoppings[(i,j)] = Coupling(i,j,c) # store
-      else: raise # Error
   def set_spinful_hoppings(self,fun):
       """Add the spin independent hoppings"""
-      self.computed_gs = False # say that GS has not been computed
-      if callable(fun):
-        self.spinful_hoppings = dict()
-        for i in range(self.ns): # loop
-            for j in range(self.ns): # loop
-                if self.sites[i]==1 and self.sites[j]==1:
-                    c = fun(i,j)
-                    if np.abs(c)>0.0:
-                        self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
-      else: # assume it is a matrix
-          self.spinful_hoppings = np.matrix(fun)
+      raise # no longer used
+#      self.computed_gs = False # say that GS has not been computed
+#      if callable(fun):
+#        self.spinful_hoppings = dict()
+#        for i in range(self.ns): # loop
+#            for j in range(self.ns): # loop
+#                if self.sites[i]==1 and self.sites[j]==1:
+#                    c = fun(i,j)
+#                    if np.abs(c)>0.0:
+#                        self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
+#      else: # assume it is a matrix
+#          self.spinful_hoppings = np.matrix(fun)
   def set_pairings_MB(self,fun):
       """Add the up/down pairing"""
       self.computed_gs = False # say that GS has not been computed

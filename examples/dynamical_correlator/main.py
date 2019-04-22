@@ -39,7 +39,6 @@ print("Time with ED",t3-t2)
 t4 = time.time()
 print("Time with KPM-ED",t4-t3)
 
-print(os.getcwd())
 
 # plot the results
 import matplotlib.pyplot as plt
