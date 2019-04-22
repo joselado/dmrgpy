@@ -103,7 +103,7 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
         return (es,-out/4.0) # return the contributions
     elif name=="SS": # return the SS dynamical correlator
         def getdsi(nn):
-          return  get_dynamical_correlator_spinful(self,name=nn,i=0,j=0,**kwargs)
+          return  get_dynamical_correlator_spinful(self,name=nn,i=i,j=j,**kwargs)
         (ex,dx) = getdsi("XX")
         (ey,dy) = getdsi("YY")
         (ey,dz) = getdsi("ZZ")
