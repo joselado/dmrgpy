@@ -52,7 +52,12 @@ def set_exchange_spinful(self,fun):
           for k in range(3): # loop 
             for l in range(3): # loop
               out = out + m[k,l]*mop.get_si(j=k,i=i)*mop.get_si(j=l,i=j)
-    self.hamiltonian_multioperator = out + self.hamiltonian_multioperator
+#    self.hamiltonian_multioperator = out + self.hamiltonian_multioperator
+    from .. import multioperator
+    f,mo = multioperator.MO2vijkl(out) # transform into vijkl
+    self.set_vijkl(f) # set the function
+    if mo is not None:
+      self.hamiltonian_multioperator = mo + self.hamiltonian_multioperator
 
 
 

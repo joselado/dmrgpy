@@ -97,4 +97,36 @@ def obj2MO(a,name="multioperator"):
 
 
 
+def list2MO(l):
+    """Convert a list into a multioperator"""
+    mo = MultiOperator(c=l[0]) # create output
+    for i in range(1,len(l)):
+        mo.add_operator(l[i][0],l[i][1])
+    return mo
+
+
+
+
+def MO2vijkl(mo):
+    """Extract from a multioperator the part corresponding to
+    Vijkl interaction"""
+    mout = MultiOperator(term=False) # create output
+    d = dict() # dictionary
+    for o in mo.op: # loop over terms in the sum
+        if len(o)==5: # four products plus scalar
+            if o[1][0]=="Cdag" and o[2][0]=="C" and o[3][0]=="Cdag" and o[4][0]=="C":
+                ind = (o[1][1],o[2][1],o[3][1],o[4][1])
+                d[ind] = o[0] # set the value of the coupling
+        else: mout = mout + list2MO(o) # convert into a multioperator
+    def f(i,j,k,l):
+        try: return d[(i,j,k,l)]
+        except: return 0.0
+    if len(mout.op)==0: mout = None
+    return f,mout
+
+
+
+
+
+
 
