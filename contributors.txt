@@ -3,6 +3,7 @@ Jose Lado
 
 # Contributors
 Michael Ferguson: Mac compatibility C++14 fixing
+Tobias Wolf: Mac compatibility fix
 Stefan Sack: CVM algorithm (cvm.h)
 
 
