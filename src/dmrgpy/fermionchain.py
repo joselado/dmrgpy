@@ -296,6 +296,14 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         Add exchange coupling betwwen the spinful fermionic sites
         """
         hamiltonian.set_exchange_spinful(self,fun) # set the exchange
+    def set_hoppings_spinful(self,fun):
+        """
+        Function to Add hopping in a spinful manner
+        """
+        def fun2(i,j):
+            if i%2==j%2: return fun(i//2,j//2)
+            return 0.0
+        self.set_hoppings(fun2)
 
 
 

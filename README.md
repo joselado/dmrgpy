@@ -80,6 +80,25 @@ sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
 sc.get_dynamical_correlator(i=0,j=0,name="ZZ")
 ```
 
+
+## Spin and charge correlator of the 1D Hubbard model
+```python
+from dmrgpy import fermionchain
+n = 20 # number of sites
+fc = fermionchain.Spinful_Fermionic_Hamiltonian(n)
+# first neighbor hopping
+fc.set_hoppings_spinful(lambda i,j: abs(i-j)==1*1.0) 
+# Hubbard term
+fc.set_hubbard_spinful(lambda i,j: abs(i-j)==1*1.0) 
+pairs = [(0,i) for i in range(n)]
+# compute the two correlators
+zz = fc.get_correlator(pairs=pairs,name="ZZ")
+dd = fc.get_correlator(pairs=pairs,name="densitydensity")
+print("Spin correlators",zz)
+print("Density correlators",dd)
+```
+
+
 ## Generic interacting fermionic Hamiltonian
 ```python
 import numpy as np
