@@ -61,6 +61,30 @@ pairs = [(0,i) for i in range(30)] # between the edge and the rest
 cs = sc.get_correlator(pairs)
 ```
 
+## Magnetization an S=1 spin chain with an edge magnetic field
+```python
+from dmrgpy import spinchain
+spins = [3 for i in range(40)] # 2*S+1=3 for S=1
+sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
+sc.set_fields(lambda i: [0,0,(i==0)*0.01]) # only in the first site
+mx,mx,mz = sc.get_magnetization()
+print("Mz",mz)
+```
+
+## Bond dimension energy convergence for an S=1/2 Heisenberg chain
+```python
+from dmrgpy import spinchain
+spins = [2 for i in range(30)] # 2*S+1=2 for S=1/2
+for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
+  sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+  sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
+  sc.maxm = maxm # set the bond dimension
+  e = sc.gs_energy() # get the ground state energy
+  print("Energy",e,"for bond dimension",maxm)
+```
+
+
 ## Excited states with DMRG and ED 
 ```python
 from dmrgpy import spinchain
@@ -70,6 +94,17 @@ es1 = sc.get_excited(n=6,mode="DMRG")
 es2 = sc.get_excited(n=6,mode="ED")
 print("Excited states with DMRG",es1)
 print("Excited states with ED",es2)
+```
+
+## Singlet-triplet gap of the Haldane Heisenberg S=1 spin chain
+```python
+from dmrgpy import spinchain
+# Haldane chain with S=1/2 on the edge to remove the topological modes
+spins = [2]+[3 for i in range(40)]+[2]
+sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+es = sc.get_excited(n=2,mode="DMRG")
+gap = es[1]-es[0] # compute gap
+print("Gap of the Haldane chain",gap)
 ```
 
 ## Edge dynamical correlator of a Haldane chain
