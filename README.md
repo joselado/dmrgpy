@@ -87,9 +87,9 @@ from dmrgpy import fermionchain
 n = 20 # number of sites
 fc = fermionchain.Spinful_Fermionic_Hamiltonian(n)
 # first neighbor hopping
-fc.set_hoppings_spinful(lambda i,j: abs(i-j)==1*1.0) 
+fc.set_hoppings_spinful(lambda i,j: (abs(i-j)==1)*1.0) 
 # Hubbard term
-fc.set_hubbard_spinful(lambda i,j: abs(i-j)==1*1.0) 
+fc.set_hubbard_spinful(lambda i,j: ((i-j)==0)*1.0) 
 pairs = [(0,i) for i in range(n)]
 # compute the two correlators
 zz = fc.get_correlator(pairs=pairs,name="ZZ")
