@@ -5,7 +5,7 @@
 This is a Python library to compute quasi-one-dimensional
 spin chains and fermionic systems using matrix product states
 with the matrix renormalization group as implemented in ITensor. Most
-of the camputations can be performed both with DMRG and exact
+of the computations can be performed both with DMRG and exact
 diagonalization for small systems, which allows to benchmark the
 results.
 
