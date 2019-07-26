@@ -1,4 +1,4 @@
 #!/bin/sh
 
-python install/install.py # execute installation script
+python install/install2.py # execute installation script
 

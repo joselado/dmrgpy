@@ -175,7 +175,9 @@ class Many_Body_Hamiltonian():
       Run the DMRG calculation
       """
       # run the DMRG calculation
-      self.execute(lambda : os.system(dmrgpath+"/mpscpp/mpscpp.x > status.txt"))
+      mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" # executable
+      if not os.path.isfile(mpscpp): raise
+      self.execute(lambda : os.system(mpscpp+" > status.txt"))
   def entropy(self,n=1):
     """Return the entanglement entropy"""
 #    self.setup_sweep()

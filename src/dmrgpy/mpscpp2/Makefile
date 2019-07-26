@@ -1,4 +1,4 @@
-LIBRARY_DIR=ITensor-master/
+LIBRARY_DIR=ITensor/
 
 APP=mpscpp
 
