@@ -59,7 +59,7 @@ def get_representation(wfs,A):
     vi = csc(np.conjugate(wfs[i])) # first wavefunction
     for j in range(n):
       vj = csc(wfs[j]).transpose() # second wavefunction
-      data = (vi*sa*vj).todense()[0,0]
+      data = (vi@sa@vj).todense()[0,0]
       ma[i,j] = data
   return ma
 

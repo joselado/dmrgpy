@@ -65,6 +65,7 @@ class Many_Body_Hamiltonian():
       self.computed_gs = False # computed the GS already
       self.vijkl = None # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
+      self.itensor_version = 2 # ITensor version
       self.hamiltonian_multioperator = None # Multioperator for the Hamiltonian
       os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self):
@@ -174,8 +175,10 @@ class Many_Body_Hamiltonian():
       """
       Run the DMRG calculation
       """
-      # run the DMRG calculation
-      mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" # executable
+      # executable
+      if self.itensor_version==2: mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" 
+      elif self.itensor_version==3: mpscpp = dmrgpath+"/mpscpp3/mpscpp.x" 
+      else: raise
       if not os.path.isfile(mpscpp): raise
       self.execute(lambda : os.system(mpscpp+" > status.txt"))
   def entropy(self,n=1):
