@@ -138,13 +138,14 @@ def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
 
 
 
-def static(sc,h,namei="X",namej="X",i=0,j=0):
+def static(sc,h,namei="X",namej="X",i=0,j=0,apply_hamiltonian=False):
     """Return a certain correlator"""
     wf = spectrum.ground_state(h)[1] # get wavefunction
     def getop(name,i):
-        if name=="X": return sc.sxi[i]
-        elif name=="Y": return sc.syi[i]
-        elif name=="Z": return sc.szi[i]
+        if name=="X" or name=="Sx": return sc.sxi[i]
+        elif name=="Y" or name=="Sy": return sc.syi[i]
+        elif name=="Z"or name=="Sz": return sc.szi[i]
         else: raise
-    m = getop(namei,i)*getop(namej,j) # get operator
+    if apply_hamiltonian: m = getop(namei,i)@h@getop(namej,j) # get operator
+    else: m = getop(namei,i)@getop(namej,j) # get operator
     return algebra.braket_wAw(wf,m,wf)

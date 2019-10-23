@@ -16,7 +16,7 @@ sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain object
 ##############################
 def fj(i,j): # function to define the exchange couplings
     if abs(i-j)==1: 
-        return np.array([[0,0,0],[0,0,0],[0,0,1]])  # first neighbors
+        return np.array([[1,0,0],[0,1,0],[0,0,1]])  # first neighbors
     else: return 0.0 # otherwise
 sc.set_exchange(fj) # add the exchange couplings
 #sc.set_fields(lambda i: np.random.random(3)) # optionally you could add local magnetic fields

@@ -3,6 +3,7 @@ import numpy as np
 from .dmrgpy2pychain import correlator as correlatorpychain
 from .dmrgpy2pychain import measure
 from .algebra import algebra
+from . import effectivehamiltonian
 from . import pychainwrapper
 
 class Coupling():
@@ -113,3 +114,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
             self.to_origin() # go to main folder
             return m
         else: raise
+    def get_effective_hamiltonian(self,**kwargs):
+        """Return the effective Hamiltonian"""
+        return effectivehamiltonian.get_effective_hamiltonian(self,
+                    name="XX",**kwargs)

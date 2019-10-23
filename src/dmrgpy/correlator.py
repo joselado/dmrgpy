@@ -4,13 +4,14 @@ import numpy as np
 from . import taskdmrg
 
 
-def get_correlator(self,pairs=[[]],name="SS"):
+def get_correlator(self,pairs=[[]],name="SS",apply_hamiltonian=False):
     """Compute a certain static correlator in the spin chain"""
     self.gs_energy() # compute ground state
     ########################################
     # workaround for total spin correlator #
     ########################################
     if name=="SS":
+        if apply_hamiltonian: raise
         m0 = get_correlator(self,pairs=pairs,name="XX")
         m1 = get_correlator(self,pairs=pairs,name="YY")
         m2 = get_correlator(self,pairs=pairs,name="ZZ")
@@ -23,6 +24,7 @@ def get_correlator(self,pairs=[[]],name="SS"):
             "correlator_operator_i":namei,
             "correlator_operator_j":namej
             }
+    if apply_hamiltonian: task["correlator_apply_hamiltonian"] = "true"
     self.task = task # override tasks
     self.execute( lambda : taskdmrg.write_tasks(self))
     # write the Hamiltonian to a file
