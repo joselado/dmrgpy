@@ -117,6 +117,12 @@ int get_correlator()   {
     auto opi = get_operator(sites,i,get_str("correlator_operator_i")) ;
     auto opj = get_operator(sites,j,get_str("correlator_operator_j")) ;
     auto M = opi*1.0; // new MPO
+    // in case the Hamiltonian is applied in the middle
+    if (get_bool("correlator_apply_hamiltonian")) {
+    auto op3 = opi*1.0; // new MPO
+    nmultMPO(H,opi,op3,{"Maxm",maxm,"Cutoff",cutoff});
+    opi = op3; // assign
+    }
     nmultMPO(opj,opi, M,{"Maxm",maxm,"Cutoff",cutoff}) ; // multiply MPO
     auto c = overlapC(psi,M,psi);
     ofile << ic << "   "  ; 

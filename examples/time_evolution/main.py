@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import spinchain
 ns = np.array(range(4,30,2))
 es = []
-n = 10
+n = 6
 spins = [2 for i in range(n)]
 sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 sc.clean()
@@ -17,7 +17,7 @@ sc.set_exchange(fj) # set exchange couplings
 #sc.set_fields(lambda x: [0.2,0.2,0.2]) # set exchange couplings
 sc.maxm = 10
 sc.get_gs()
-i = 0 ; j=1
+i = 0 ; j=5
 (x,y) = sc.evolution(nt=1000,dt=0.03,mode="ED",name="ZZ",i=i,j=j)
 (x1,y1) = sc.evolution(nt=1000,dt=0.03,mode="DMRG",name="ZZ",i=i,j=j)
 import matplotlib.pyplot as plt

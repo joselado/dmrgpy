@@ -15,10 +15,10 @@ name_sz = "SZ.OUT"
 
 
 
+from scipy.integrate import solve_ivp
 
 
-
-def evolve(waves,h,t=0.0,mode="caley",dt=0.01,de=0.0,dp=0.0):
+def evolve(waves,h,t=0.0,mode="scipy",dt=0.01,de=0.0,dp=0.0):
   """Evolve the wavefunctions using the Schrodinger equation"""
   if de != 0.0 or dp != 0.0:
     return [discrete_relaxed_evolution(w,h,t,dt,de=de,dp=dp) for w in waves]
@@ -26,6 +26,9 @@ def evolve(waves,h,t=0.0,mode="caley",dt=0.01,de=0.0,dp=0.0):
     return [discrete_evolution(w,h,t,dt) for w in waves]
   elif mode=="taylor":
     return [discrete_evolution_taylor2(w,h,t,dt) for w in waves]
+  elif mode=="scipy":
+    return [scipy_evolution(w,h,t) for w in waves]
+  else: raise
 #  elif mode=="full":
 #    u = lg.expm(1j*h*t) # evolution operator
 #    wout = []
@@ -35,6 +38,17 @@ def evolve(waves,h,t=0.0,mode="caley",dt=0.01,de=0.0,dp=0.0):
 #      wout.append(w) # store wavefunction
 #    return wout # return waves
 #  else: raise
+
+def scipy_evolution(psi,h,t):
+  def f(t,psi):
+      return 1j*h@psi # evolution
+  tspan = [0.,t] # times
+  t_eval = [tspan[1]]
+  v0 = psi # initial wavefunction
+  sol = solve_ivp(f,tspan,v0,method="RK45",t_eval=t_eval)
+  return sol.y[:,0]
+
+
 
 
 from scipy.sparse import issparse
