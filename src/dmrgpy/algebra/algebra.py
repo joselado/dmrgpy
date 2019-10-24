@@ -5,6 +5,10 @@ import scipy.sparse.linalg as slg
 import numpy as np
 
 
+maxsize = 4000
+
+
+
 def braket_wAw(w,A,wi=None):
   """
   Compute the braket of a wavefunction
@@ -14,6 +18,9 @@ def braket_wAw(w,A,wi=None):
     return (np.conjugate(wi)@A@w) # modern way
   else: # matrices and arrays
     return (np.conjugate(wi)@A@w)[0,0] # modern way
+
+
+
 
 
 
@@ -129,7 +136,7 @@ def matrix2vector(v):
     else: return v.reshape(v.shape[0]*v.shape[1])
 
 
-def ground_state(h,nmax=1000):
+def ground_state(h,nmax=maxsize):
   """Get a ground state"""
   info = False
   if h.shape[0]>nmax:
@@ -142,7 +149,7 @@ def ground_state(h,nmax=1000):
 
 
 
-def lowest_eigenvalues(h,n=10,nmax=1000):
+def lowest_eigenvalues(h,n=10,nmax=maxsize):
   """Get a ground state"""
   info = False
   if h.shape[0]>nmax:
@@ -152,5 +159,12 @@ def lowest_eigenvalues(h,n=10,nmax=1000):
     if info: print("Full diagonalization")
     eig = dlg.eigvalsh(h.todense())
   return eig[0:n] # return eigenvalues
+
+
+def expm(m):
+    if issparse(m):
+        if m.shape[0]>maxsize: raise
+        else: m = m.todense() # turn to dense matrix
+    return lg.expm(m)
 
 
