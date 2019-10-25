@@ -17,8 +17,8 @@ def braket_wAw(w,A,wi=None):
   if issparse(A): # sparse matrices
     return (np.conjugate(wi)@A@w) # modern way
   else: # matrices and arrays
-    return (np.conjugate(wi)@A@w)[0,0] # modern way
-
+      if len(w.shape)==1: return (np.conjugate(wi)@A@w) # modern way
+      else: return (np.conjugate(wi)@A@w)[0,0] # modern way
 
 
 
@@ -84,47 +84,13 @@ accelerate = False
 
 def eigh(m):
     """Wrapper for linalg"""
-    from . import algebraf90
-    if not accelerate: return dlg.eigh(m)
-    # check if doing slices helps
-    n = m.shape[0] # size of the matrix
-    mo = m[0:n:2,1:n:2] # off diagonal is zero
-#    if False: # assume block diagonal
-    if np.max(np.abs(mo))<error: # assume block diagonal
-        # detected block diagonal
-        (es0,vs0) = eigh(m[0:n:2,0:n:2]) # recall
-        (es1,vs1) = eigh(m[1:n:2,1:n:2]) # recall
-        es = np.concatenate([es0,es1]) # concatenate array
-        vs0 = algebraf90.todouble(vs0.T,0)
-        vs1 = algebraf90.todouble(vs1.T,1)
-        vs = np.concatenate([vs0,vs1])
-        return (es,vs.T) # return the eigenvaleus and eigenvectors
-
-    else:
-      if np.max(np.abs(m.imag))<error: # assume real
-          return dlg.eigh(m.real) # diagonalize real matrix
-      else: return dlg.eigh(m) # diagonalize complex matrix
-
+    m = todense(m)
+    return dlg.eigh(m)
 
 def eigvalsh(m):
     """Wrapper for linalg"""
-    if not accelerate: return dlg.eigvalsh(m)
-    # check if doing slices helps
-    n = m.shape[0] # size of the matrix
-    mo = m[0:n:2,1:n:2] # off diagonal is zero
-#    if False: # assume block diagonal
-    if np.max(np.abs(mo))<error: # assume block diagonal
-        # detected block diagonal
-        es0 = eigvalsh(m[0:n:2,0:n:2]) # recall
-        es1 = eigvalsh(m[1:n:2,1:n:2]) # recall
-        es = np.concatenate([es0,es1]) # concatenate array
-        return es
-
-    else:
-      if np.max(np.abs(m.imag))<error: # assume real
-          return dlg.eigvalsh(m.real) # diagonalize real matrix
-      else: return dlg.eigvalsh(m) # diagonalize complex matrix
-
+    m = todense(m)
+    return dlg.eigvalsh(m)
 
 
 def matrix2vector(v):
@@ -148,6 +114,13 @@ def ground_state(h,nmax=maxsize):
   return eig[0],eigvec.transpose()[0]
 
 
+def todense(m):
+    """Turn a matrix dense"""
+    if issparse(m):
+        if m.shape[0]>maxsize: raise
+        else: return m.todense()
+    else: return m
+
 
 def lowest_eigenvalues(h,n=10,nmax=maxsize):
   """Get a ground state"""
@@ -162,9 +135,11 @@ def lowest_eigenvalues(h,n=10,nmax=maxsize):
 
 
 def expm(m):
-    if issparse(m):
-        if m.shape[0]>maxsize: raise
-        else: m = m.todense() # turn to dense matrix
-    return lg.expm(m)
+    m = todense(m)
+    return dlg.expm(m)
 
 
+def inv(m):
+    """Inverse"""
+    m = todense(m)
+    return dlg.inv(m)

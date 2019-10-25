@@ -1,7 +1,6 @@
 from .manybodychain import Many_Body_Hamiltonian
 import numpy as np
 from .dmrgpy2pychain import correlator as correlatorpychain
-from .dmrgpy2pychain import measure
 from .algebra import algebra
 from . import effectivehamiltonian
 from . import pychainwrapper
@@ -41,8 +40,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         if mode=="DMRG":
           return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
         elif mode=="ED":
-          h = self.get_full_hamiltonian() # get the Hamiltonian
-          return algebra.ground_state(h)[0] # return energy
+          return pychainwrapper.gs_energy(self,**kwargs)
     def get_pychain(self):
         return pychainwrapper.get_pychain(self)
     def get_full_hamiltonian(self):
@@ -57,9 +55,6 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         return np.array([ns,cs])
     def get_magnetization(self,mode="DMRG",**kwargs):
         if mode=="DMRG": # using DMRG
-#            mx = self.get_file("MEASURE_SX.OUT").transpose()[1]
-#            my = self.get_file("MEASURE_SY.OUT").transpose()[1]
-#            mz = self.get_file("MEASURE_SZ.OUT").transpose()[1]
             pairs = [(i,i) for i in range(self.ns)]
             mx = self.get_correlator(pairs=pairs,name="X").real
             my = self.get_correlator(pairs=pairs,name="Y").real
@@ -67,7 +62,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
             np.savetxt("MAGNETIZATION.OUT",np.matrix([mx,my,mz]).T)
             return (mx,my,mz)
         elif mode=="ED": # using ED
-            return measure.get_magnetization(self)
+            return pychainwrapper.get_magnetization(self,**kwargs)
         else: raise
     def get_dynamical_correlator(self,mode="DMRG",**kwargs):
         """

@@ -167,15 +167,21 @@ class Spin_chain():
     h = csc(([],([],[])),shape=(self.size,self.size)) # initialize 
     if is_ising: # ising type
       for (x,y,j) in zip(xs,ys,js): # loop over couplings
-        h = h + j*self.szi[x]*self.szi[y] # component
+        h = h + j*self.szi[x]@self.szi[y] # component
     else: # not ising model
       for (x,y,j) in zip(xs,ys,js): # loop over couplings
-        h = h + j*self.sxi[x]*self.sxi[y] # component
-        h = h + j*self.syi[x]*self.syi[y] # component
-        h = h + j*self.szi[x]*self.szi[y] # component
+        h = h + j*self.sxi[x]@self.sxi[y] # component
+        h = h + j*self.syi[x]@self.syi[y] # component
+        h = h + j*self.szi[x]@self.szi[y] # component
     return h
   def add_heisenberg(self,xs,ys,js):
     return self.generate_hamiltonian(xs,ys,js,is_ising=False)
+  def get_operator(self,name,i=0):
+      """Return an operator"""
+      if name=="X" or name=="Sx": return self.sxi[i]
+      elif name=="Y" or name=="Sy": return self.syi[i]
+      elif name=="Z" or name=="Sz": return self.szi[i]
+      else: raise
   def add_exchange(self,xcs,gmatrix=None): 
     """ Return matrix with the exchange field"""
     h = csc(([],([],[])),shape=(self.size,self.size)) # initialize 
@@ -188,8 +194,7 @@ class Spin_chain():
       else:
         for i in range(3):
           for j in range(3):
-            h = h + xc[i]*gmatrix[ii][i,j]*self.ski[j][ii] # add the new term
-#            print(ii,i,j)
+            h = h + xc[i]*gmatrix[ii][i,j]@self.ski[j][ii] # add the new term
       ii += 1 # increase counter
     return h # return zeeman term 
   def add_uniaxial_anisotropy(self,ds=None,axis=None): 
@@ -202,9 +207,9 @@ class Spin_chain():
     for i in range(len(ds)): # loop over spin sites
       r = axis[i] # get the axis
       r = r/np.sqrt(r.dot(r)) # unit vector
-      h = h + ds[i]*r[0]*self.sxi[i]*self.sxi[i] # component
-      h = h + ds[i]*r[1]*self.syi[i]*self.syi[i] # component
-      h = h + ds[i]*r[2]*self.szi[i]*self.szi[i] # component
+      h = h + ds[i]*r[0]*self.sxi[i]@self.sxi[i] # component
+      h = h + ds[i]*r[1]*self.syi[i]@self.syi[i] # component
+      h = h + ds[i]*r[2]*self.szi[i]@self.szi[i] # component
     return h # return anisotropy term    
   def add_dm_interaction(self,dij):
     """Adds DM interaction, favouring spin canting"""

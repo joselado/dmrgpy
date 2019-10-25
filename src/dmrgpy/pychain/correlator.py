@@ -32,26 +32,22 @@ def spismj(sc,h0,es=None,i=0,j=0,delta=0.1):
 def dynamical_correlator(sc,h0,es=None,i=0,j=0,
         delta=0.1,namei="X",namej="X",mode="full"):
   """Calculate a correlation function SiSj in a frequency window"""
-  e0,wf0 = spectrum.ground_state(h0) # get the ground state
+  e0,wf0 = algebra.ground_state(h0) # get the ground state
   if es is None:
     es = np.linspace(-1.0,7.0,int(40/delta))
-  if namei=="X": sm = sc.sxi[i]
-  elif namei=="Y": sm = sc.syi[i]
-  elif namei=="Z": sm = sc.szi[i]
-  else: raise
-  if namej=="X": sp = sc.sxi[j]
-  elif namej=="Y": sp = sc.syi[j]
-  elif namej=="Z": sp = sc.szi[j]
-  else: raise
+  sm = sc.get_operator(namei,i) # get the operator
+  sp = sc.get_operator(namej,j) # get the operator
   if mode=="full" and h0.shape[0]>100: mode = "cv"
   iden = identity(h0.shape[0],dtype=np.complex) # identity
   if mode=="full": iden = iden.todense() # dense matrix
   out = []
   for e in es: # loop over energies
       if mode=="full": # using exact inversion
-        g = ((iden*(e+e0+1j*delta)-h0).I - (iden*(e+e0-1j*delta)-h0).I)/2.
-        op = sp*g*sm # operator
-        o = viAvj(wf0,op,wf0) # correlator
+        g1 = algebra.inv(iden*(e+e0+1j*delta)-h0)
+        g2 = algebra.inv(iden*(e+e0-1j*delta)-h0)
+        g = (g1-g2)/2.
+        op = sp@g@sm # operator
+        o = algebra.braket_wAw(wf0,op) # correlator
       elif mode=="cv": # correction vector algorithm
           o1 = solve_cv(h0,wf0,sp,sm,e+e0,delta=delta) # conjugate gradient
           o2 = solve_cv(h0,wf0,sp,sm,e+e0,delta=-delta) # conjugate gradient
@@ -111,14 +107,8 @@ def dynamical_correlator_kpm(sc,h0,es=np.linspace(-1.0,4.0,300),i=0,j=0,
   emax,wfmax = slg.eigsh(h0,k=1,ncv=20,which="LA")
   e0,wf0 = -e0[0],np.transpose(wf0)[0]
   emax = emax[0]
-  if namei=="X": sm = sc.sxi[i]
-  elif namei=="Y": sm = sc.syi[i]
-  elif namei=="Z": sm = sc.szi[i]
-  else: raise
-  if namej=="X": sp = sc.sxi[j]
-  elif namej=="Y": sp = sc.syi[j]
-  elif namej=="Z": sp = sc.szi[j]
-  else: raise
+  sm = sc.get_operator(namei,i)
+  sp = sc.get_operator(namej,j)
   vi = sm*csc(wf0).transpose() 
   vj = sp*csc(wf0).transpose() 
   h = -identity(h0.shape[0])*e0+h0

@@ -1,5 +1,8 @@
 import numpy as np
 from .kpmdmrg import restrict_interval
+from .algebra import algebra
+from .edtk import finitetemperature
+from . import operatornames
 
 
 # wrapper function for pychain
@@ -25,10 +28,22 @@ def get_pychain(self):
   return sc
 
 
+def get_dynamical_correlator(self,T=0.0,i=0,j=0,name="XX",**kwargs):
+    """Return the dynamical correlator"""
+    if T==0.0: # zero temperature
+        return get_dynamical_correlator_T0(self,name=name,i=i,j=j,**kwargs)
+    else: # finite temperature
+        h = get_full_hamiltonian(self) # get the Hamiltonian
+        sc = get_pychain(self) # get the object
+        n1,n2 = operatornames.recognize(name) # return the names
+        a = sc.get_operator(n1,i) # get operator
+        b = sc.get_operator(n2,j) # get operator
+        return finitetemperature.dynamical_correlator(h,a,b,T=T,**kwargs)
 
 
 
-def get_dynamical_correlator(self,submode="ED",
+
+def get_dynamical_correlator_T0(self,submode="ED",
              window=[-1,10],name="XX",delta=2e-2,es=None,**kwargs):
   """
   Compute a dynamical correlator using the KPM-DMRG method
@@ -72,3 +87,31 @@ def get_dynamical_correlator(self,submode="ED",
   return (xs,ys)
 
 
+def gs_energy(self,T=0.0):
+    """Return the ground state energy"""
+    h = get_full_hamiltonian(self)
+    if T==0.0: # zero temperature
+        return algebra.ground_state(h)[0] # return energy
+    else: # non zero temperature
+        return finitetemperature.gs_energy(h,beta=1./T) # return energy
+
+
+
+def get_magnetization(sc,T=0.0):
+    """Compute a static correlator"""
+    scp = sc.get_pychain() # get pychain spinchain object
+    h = get_full_hamiltonian(sc) # get Hamiltonian
+    ns = sc.ns
+    opx = [scp.sxi[i] for i in range(ns)]
+    opy = [scp.syi[i] for i in range(ns)]
+    opz = [scp.szi[i] for i in range(ns)]
+    if T==0.0: # zero temperature
+        wf = algebra.ground_state(h)[1] # get GS wavefunction
+        mx = np.array([algebra.braket_wAw(wf,op).real for op in opx])
+        my = np.array([algebra.braket_wAw(wf,op).real for op in opy])
+        mz = np.array([algebra.braket_wAw(wf,op).real for op in opz])
+    else: # non zero temperature
+        mx = finitetemperature.measure(h,opx,beta=1./T).real
+        my = finitetemperature.measure(h,opy,beta=1./T).real
+        mz = finitetemperature.measure(h,opz,beta=1./T).real
+    return (mx,my,mz)
