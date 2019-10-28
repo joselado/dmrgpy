@@ -65,7 +65,7 @@ class Many_Body_Hamiltonian():
       self.computed_gs = False # computed the GS already
       self.vijkl = None # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
-      self.itensor_version = 3 # ITensor version
+      self.itensor_version = 2 # ITensor version
       self.hamiltonian_multioperator = None # Multioperator for the Hamiltonian
       os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self):
