@@ -8,6 +8,7 @@ import scipy.sparse.linalg as lg
 import scipy.sparse.linalg as slg
 from ..algebra import algebra
 from ..algebra import kpm
+from ..edtk import dynamics
 
 # calculate dynamical correlators
 
@@ -32,12 +33,15 @@ def spismj(sc,h0,es=None,i=0,j=0,delta=0.1):
 def dynamical_correlator(sc,h0,es=None,i=0,j=0,
         delta=0.1,namei="X",namej="X",mode="full"):
   """Calculate a correlation function SiSj in a frequency window"""
-  e0,wf0 = algebra.ground_state(h0) # get the ground state
   if es is None:
     es = np.linspace(-1.0,7.0,int(40/delta))
   sm = sc.get_operator(namei,i) # get the operator
   sp = sc.get_operator(namej,j) # get the operator
-  if mode=="full" and h0.shape[0]>100: mode = "cv"
+  if mode=="full" and h0.shape[0]>1000: mode = "cv"
+  if mode=="full":
+      return dynamics.dynamical_correlator(h0,sm,sp,delta=delta,es=es)
+  ## default method
+  e0,wf0 = algebra.ground_state(h0) # get the ground state
   iden = identity(h0.shape[0],dtype=np.complex) # identity
   if mode=="full": iden = iden.todense() # dense matrix
   out = []

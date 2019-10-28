@@ -1,4 +1,4 @@
-# routines to spin chains at finite temperature
+# routines for exact diagonalization at finite temperature
 from ..algebra import algebra
 import numpy as np
 from numba import jit

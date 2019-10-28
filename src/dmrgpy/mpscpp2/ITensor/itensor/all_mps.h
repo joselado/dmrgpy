@@ -34,9 +34,6 @@
 
 #include "itensor/mps/sites/spinhalf.h"
 #include "itensor/mps/sites/spinone.h"
-#include "itensor/mps/sites/spintwo.h"
-#include "itensor/mps/sites/spinthreehalf.h"
-#include "itensor/mps/sites/spinfivehalf.h"
 #include "itensor/mps/sites/hubbard.h"
 #include "itensor/mps/sites/spinless.h"
 #include "itensor/mps/sites/tj.h"

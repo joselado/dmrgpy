@@ -25,7 +25,7 @@ static auto get_hopping=[](auto ampo) {
       }
     } ;
     jfile.close() ;
-    return ampo ;  // return the Hamiltonian with exchange added
+    return ampo ;  // return the Hamiltonian with hopping added
 }
 ;
 
