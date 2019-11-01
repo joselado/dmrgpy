@@ -8,6 +8,7 @@ int dynamical_correlator_excited() {
 	auto sweeps = get_sweeps(); // get sweeps
 	auto nexcited = get_int_value("nexcited") ; // get excited states
 	auto wfs = get_excited(H,sites,sweeps,nexcited); // get excited states
+	nexcited = wfs.size() ; // get excited states
         // now compute the different matrix elements
 	auto namei = get_str("operator_i");
         auto namej = get_str("operator_j");

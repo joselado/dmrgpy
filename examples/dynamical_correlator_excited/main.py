@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 4
+n = 6
 # create a random spin chain
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 
@@ -19,6 +19,10 @@ sc.maxm = 20
 sc.kpmmaxm = 20
 
 #sc.kpmmaxm = 20 # KPM maxm
+
+print("Excited DMRG",sc.get_excited(n=14,mode="DMRG"))
+print("Excited ED",sc.get_excited(n=14,mode="ED"))
+
 import time
 i = np.random.randint(n)
 j = np.random.randint(n)

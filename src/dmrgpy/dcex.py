@@ -3,7 +3,7 @@ from . import operatornames
 from . import taskdmrg
 
 def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
-        nex=20,es=None,scale=1.0):
+        nex=10,es=None,scale=3.0):
     """
     Compute dynamical correlator with excited states with DMRG
     """
@@ -21,7 +21,7 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
     self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
     self.execute( lambda : self.run()) # run calculation
     # now read the data
-    eex = self.get_file("EXCITED.OUT") # excitation energies
+    eex = self.get_file("EXCITED.OUT").T[0] # excitation energies
     eex = eex[1:len(eex)] - eex[0] # substract GS energy
     cs = self.get_file("EXCITED_OVERLAPS.OUT") # overlaps with GS
     c1 = cs[:,0] + 1j*cs[:,1] # first overlap
