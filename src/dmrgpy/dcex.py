@@ -3,7 +3,7 @@ from . import operatornames
 from . import taskdmrg
 
 def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
-        nex=10,es=None,scale=3.0):
+        nex=20,es=None,scale=10.0):
     """
     Compute dynamical correlator with excited states with DMRG
     """

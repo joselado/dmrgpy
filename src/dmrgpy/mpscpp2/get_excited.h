@@ -10,10 +10,6 @@ float get_energy_fluctuation(auto psi1, auto H) {
 };
 
 
-
-
-
-
 // function to get several excited states
 
 static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
@@ -26,12 +22,11 @@ static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
   auto psimax = MPS(sites); // second wavefunction
   myfile << std::setprecision(20) << en0 << "  " << de << endl;
   int i; 
-  auto wfs = std::vector<MPS>(nexcited);
-  for (i=0;i<nexcited;i++) wfs.at(i) = psi0; // initialize with the GS
+  auto wfs = std::vector<MPS>(1); // one vector
+  wfs.at(0) = psi0; // initialize with the GS
   auto psi1 = MPS(sites) ; // create new wave
   // lagrange multiplier
   float weight = bandwidth(sites,H)*get_float_value("scale_lagrange_excited"); 
-  int numw=1; // number of wavefunctions found
   for (i=1;i<nexcited;i++)  { 
     // now compute a new excited state
     // new energy
@@ -40,16 +35,13 @@ static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
     // compute H|psi>
     // fluctuation in the energy
     de = get_energy_fluctuation(psi1,H);
-    if (de<1e-5) { // if the fluctuation is small enough
-      wfs.at(numw) = psi1 ; // store this wavefunction
+    if (de<1e-2) { // if the fluctuation is small enough
+      wfs.insert(wfs.end(),psi1); // store this wavefunction
       psi1 = MPS(sites) ; // new random wavefunction
       myfile << std::setprecision(8) << en0 << "  " << de << endl; // write 
-      numw += 1; // increase counter
     };
   } ;
-  auto wfsout = std::vector<MPS>(numw); // wavefunctions found
-  for (i=0;i<numw;i++)  wfsout.at(i) = wfs.at(i); // store
-  return wfsout ;
+  return wfs ;
 }
 ;
 

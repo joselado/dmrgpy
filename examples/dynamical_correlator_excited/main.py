@@ -14,7 +14,7 @@ def fj(i,j):
   if abs(i-j)==1: return 1.0
   else: return 0.0
 sc.set_exchange(fj)
-sc.nsweeps = 4
+sc.nsweeps = 12
 sc.maxm = 20
 sc.kpmmaxm = 20
 
@@ -28,7 +28,7 @@ i = np.random.randint(n)
 j = np.random.randint(n)
 t1 = time.time()
 (x2,y2) = sc.get_dynamical_correlator(mode="DMRG",submode="EX",
-        i=i,j=j,name="ZZ",nex=60)
+        i=i,j=j,name="ZZ")
 t2 = time.time()
 print("Time with DMRG excited states",t2-t1)
 
