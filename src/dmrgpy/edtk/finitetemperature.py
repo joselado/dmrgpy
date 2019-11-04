@@ -6,8 +6,8 @@ try:
   from numba import jit
 except:
   print("Numba is not present")
-  def jit(ob,nopython=True): # dummy
-    return ob
+  def jit(*args,**kwargs): # dummy
+    return *args
 
 def thermal_rho(h,beta=1.0):
     """Return the thermal density matrix"""
