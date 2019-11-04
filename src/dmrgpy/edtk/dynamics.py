@@ -1,6 +1,6 @@
 from ..algebra import algebra
 import numpy as np
-from numba import jit
+#from numba import jit
 
 
 def dynamical_correlator(h,a0,b0,delta=2e-2,
@@ -15,7 +15,7 @@ def dynamical_correlator(h,a0,b0,delta=2e-2,
     out = dynamical_sum(emu,es+1j*delta,A,B,out) # perform the summation
     return (es,out.imag/np.pi) # return correlator
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def dynamical_sum(es,ws,A,B,out):
     """Return the sum giving the dynamical correlator"""
     out = out*0.0 # initialize
