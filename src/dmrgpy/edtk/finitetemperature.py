@@ -1,7 +1,13 @@
 # routines for exact diagonalization at finite temperature
 from ..algebra import algebra
 import numpy as np
-from numba import jit
+
+try:
+  from numba import jit
+except:
+  print("Numba is not present")
+  def jit(ob,nopython=True): # dummy
+    return ob
 
 def thermal_rho(h,beta=1.0):
     """Return the thermal density matrix"""
