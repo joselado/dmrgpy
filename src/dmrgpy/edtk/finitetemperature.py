@@ -1,13 +1,7 @@
 # routines for exact diagonalization at finite temperature
 from ..algebra import algebra
 import numpy as np
-
-try:
-  from numba import jit
-except:
-  print("Numba is not present")
-  def jit(*args,**kwargs): # dummy
-    return *args
+#from numba import jit
 
 def thermal_rho(h,beta=1.0):
     """Return the thermal density matrix"""
@@ -42,7 +36,7 @@ def dynamical_correlator(h,a0,b0,delta=2e-2,
     out = dynamical_sum(emu,1./T,es+1j*delta,A,B,out) # perform the summation
     return (es,out.imag/np.pi) # return correlator
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def dynamical_sum(es,beta,ws,A,B,out):
     """Return the sum giving the dynamical correlator"""
     out = out*0.0 # initialize
