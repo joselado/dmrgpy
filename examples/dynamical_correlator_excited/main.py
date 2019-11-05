@@ -14,7 +14,7 @@ def fj(i,j):
   if abs(i-j)==1: return 1.0
   else: return 0.0
 sc.set_exchange(fj)
-sc.nsweeps = 12
+sc.nsweeps = 10
 sc.maxm = 20
 sc.kpmmaxm = 20
 
