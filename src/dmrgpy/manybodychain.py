@@ -58,6 +58,7 @@ class Many_Body_Hamiltonian():
       self.kpm_n_scale = 3 # scaling factor for the number of polynomials
       self.restart = False # restart the calculation
       self.gs_from_file = False # start from a random wavefunction
+      self.excited_from_file = False # read excited states
       self.e0 = None # no ground state energy
       self.wf0 = None # no initial WF
       self.starting_file_gs = None # initial file for GS
