@@ -69,7 +69,7 @@ static auto get_moments_dynamical_correlator=[](auto sites, auto H)
   // now read the operators to use
   // First the operator i
   if (get_bool("kpm_multioperator_i")) {
-    m1 = get_multioperator("kpm_multioperator_i",sites);
+    m1 = get_mpo_operator("kpm_multioperator_i.in");
   } ;
   if (not get_bool("kpm_multioperator_i")) {
     m1 = get_operator(sites,get_int_value("site_i_kpm"),
@@ -77,7 +77,7 @@ static auto get_moments_dynamical_correlator=[](auto sites, auto H)
   } ;
   // afterwards the operator j
   if (get_bool("kpm_multioperator_j")) {
-    m2 = get_multioperator("kpm_multioperator_j",sites);
+    m2 = get_mpo_operator("kpm_multioperator_j.in");
   } ;
   if (not get_bool("kpm_multioperator_j")) {
     m2 = get_operator(sites,get_int_value("site_j_kpm"),

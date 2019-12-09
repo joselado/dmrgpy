@@ -36,12 +36,12 @@ def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
                 }
   # go on, check the kind of input used to define the correlator
   if type(name[0])==multioperator.MultiOperator: 
-      taski = name[0].get_dict()
-      taskj = name[1].get_dict()
-      for t in taski: task[t] = taski[t]
-      for t in taskj: task[t] = taskj[t]
+      name[0].name = "kpm_multioperator_i"
+      name[1].name = "kpm_multioperator_j"
       task["kpm_multioperator_i"] = "true"
       task["kpm_multioperator_j"] = "true"
+      self.execute(lambda: name[0].write()) # write
+      self.execute(lambda: name[1].write()) # write
   else: # use a keyword, this is the classical way
     try: # select the right operators, be consistent with mpscpp.x
         from . import operatornames

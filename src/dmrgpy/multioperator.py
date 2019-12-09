@@ -6,13 +6,21 @@ import collections
 # for mpscpp.x
 
 
+ampo_counter = 0
+
+
+
 class MultiOperator():
     """
     Object to deal with multioperators in mpscpp.x
     """
-    def __init__(self,name="multioperator",c=1.0,term=True): # do nothing
+    def __init__(self,name=None,c=1.0,term=True): # do nothing
+        global ampo_counter
         self.op = [] # empty list of sums of products
-        self.name = name
+        if name is None:
+            self.name = "ampo_operator_"+str(ampo_counter)
+            ampo_counter += 1
+        else: self.name = name
         self.i = -1 # initialize
         if term: self.new_term(c=c) # generate the first term
     def add_operator(self,name,i):
@@ -60,6 +68,9 @@ class MultiOperator():
             if abs(o[0])>1e-8: op.append(o) # store
         self.i = self.i - (len(self.op)-len(op)) # redefine
         self.op = op # redefine
+    def write(self):
+        """Write in a file"""
+        write(self,self.name+".in")
     def get_dict(self):
         """Return the dictionary to be used in tasks.in"""
         d = dict()
@@ -78,6 +89,31 @@ class MultiOperator():
               d[name0] = o[0]
               d[name1] = o[1]
         return d
+
+
+def zero():
+    return MultiOperator(term=False)
+
+
+def MO2list(self):
+    """Conver a multioperator into a list"""
+    out = []
+    for iop in self.op: # loop over operators
+        o = []
+        o.append(iop[0].real) # real part
+        o.append(iop[0].imag) # imaginary part
+        for i in range(len(iop)-1): # loop over terms
+          otmp = iop[i+1]
+          o.append(otmp[0])
+          o.append(otmp[1]+1)
+        out.append(o)
+    return out
+
+
+def write(MO,name):
+    """Write a multioperator in a file"""
+    from .ampotk import write_ampo
+    write_ampo(MO2list(MO),name) # write in a file
 
 
 

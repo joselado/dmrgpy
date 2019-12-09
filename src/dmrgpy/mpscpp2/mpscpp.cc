@@ -17,6 +17,7 @@ using namespace std;
 #include"bandwidth.h"  // return the bandwidth of the hamiltonian
 #include"get_gap.h" // compute the gap
 #include"get_sites.h" // get the sites from a file
+#include"get_ampo_operator.h" // get an arbitrary AMPO operator
 #include"operators.h" // read the different tasks
 #include"get_hamiltonian.h" // get the hoppings (in case there are)
 #include"read_wf.h" // this does not work yet

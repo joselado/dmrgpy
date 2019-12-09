@@ -44,6 +44,7 @@ class Many_Body_Hamiltonian():
       self.pairing = None # pairing
       self.hubbard = dict() # empty dictionary
       self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
+      self.use_ampo_hamiltonian = False # use ampo Hamiltonian
   #    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
       # additional arguments
       self.kpmmaxm = 50 # bond dimension in KPM

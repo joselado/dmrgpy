@@ -19,6 +19,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         Many_Body_Hamiltonian.__init__(self,sites)
         # default exchange constants
         self.set_exchange(lambda i,j: abs(i-j)==1*1.0)
+        self.use_ampo_hamiltonian = True # use ampo
     def set_exchange(self,fun):
       """Set the exchange coupling between sites"""
       one = np.matrix(np.identity(3))

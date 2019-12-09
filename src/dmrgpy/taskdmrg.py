@@ -43,6 +43,8 @@ def write_tasks(self):
   fo = open("tasks.in","w")
   fo.write("tasks\n{\n")
   #
+  if self.use_ampo_hamiltonian: 
+      fo.write(" use_ampo_hamiltonian = true\n")
   if self.gs_from_file and self.starting_file_gs is not None: 
       fo.write(" gs_from_file = true\n")
       fo.write(" starting_file_gs = "+self.starting_file_gs+"\n") # starting WF

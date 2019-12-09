@@ -6,7 +6,7 @@ static auto vev=[]() {
   psi /= overlap(psi,psi); // normalize
   // now read the operator from tasks.in, this routine assumes
   // that there will be a multioperator
-  auto A = get_multioperator("vev_multioperator",sites); // get the operator
+  auto A = get_mpo_operator("vev_multioperator.in"); // get the operator
   auto c = overlapC(psi,A,psi);
   ofstream ofile; // declare
   ofile.open("VEV.OUT");  // open file
