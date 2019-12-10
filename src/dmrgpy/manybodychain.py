@@ -215,6 +215,12 @@ class Many_Body_Hamiltonian():
     """Return the gap"""
     es = self.get_excited(2)
     return es[1] -es[0]
+  def gs_energy_fluctuation(self,**kwargs):
+      """Compute the energy fluctuations"""
+      h = self.get_hamiltonian()
+      e = self.vev(h)
+      e2 = self.vev(h*h)
+      return np.sqrt(np.abs(e2-e**2))
   def set_initial_wf(self,wf):
       """Use a certain wavefunction as initial guess"""
       if wf is None:
