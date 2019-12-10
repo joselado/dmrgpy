@@ -20,12 +20,15 @@ def get_full_hamiltonian(self):
 
 
 def get_pychain(self):
-  from .pychain import build
-  sc = build.Spin_chain()
-  # the pychain library assumes that s=1/2 is for spin one-half
-  # whereas in DMRG s = 2 is for S=1/2
-  sc.build((np.array(self.sites)-1.)/2.) 
-  return sc
+  if self.pychain_object is None:
+    from .pychain import build
+    sc = build.Spin_chain()
+    # the pychain library assumes that s=1/2 is for spin one-half
+    # whereas in DMRG s = 2 is for S=1/2
+    sc.build((np.array(self.sites)-1.)/2.) 
+    self.pychain_object = sc
+    return sc
+  else: return self.pychain_object # return stored object
 
 
 def get_dynamical_correlator(self,T=0.0,i=0,j=0,name="XX",**kwargs):
@@ -89,6 +92,9 @@ def get_dynamical_correlator_T0(self,submode="ED",
 
 def gs_energy(self,T=0.0):
     """Return the ground state energy"""
+    pyc = self.get_pychain()
+    pyc.hamiltonian = self.get_hamiltonian()
+    return pyc.gs_energy()
     h = get_full_hamiltonian(self)
     if T==0.0: # zero temperature
         return algebra.ground_state(h)[0] # return energy

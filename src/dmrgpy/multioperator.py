@@ -92,7 +92,7 @@ class MultiOperator():
 
 
 def zero():
-    return MultiOperator(term=False)
+    return MultiOperator(term=True,c=0.0)
 
 
 def MO2list(self):
@@ -160,6 +160,19 @@ def MO2vijkl(mo):
     if len(mout.op)==0: mout = None
     return f,mout
 
+
+
+def MO2matrix(MO,obj):
+    """Given a certain object containing the method "get_operator",
+    return a matrix"""
+    out = 0.0
+    for iop in MO.op: # loop over components
+        otmp = iop[0]*obj.get_identity() # factor
+        for i in range(len(iop)-1): # loop over terms in the product
+            term = iop[i+1] # get this term
+            otmp = otmp@obj.get_operator(term[0],term[1]) # multiply
+        out = out + otmp
+    return out # return matrix
 
 
 

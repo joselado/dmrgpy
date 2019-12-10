@@ -43,6 +43,7 @@ class Many_Body_Hamiltonian():
       self.spinful_hoppings = dict() # empty dictionary
       self.pairing = None # pairing
       self.hubbard = dict() # empty dictionary
+      self.hamiltonian = None # Hamiltonian, as a multioperator
       self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
       self.use_ampo_hamiltonian = False # use ampo Hamiltonian
   #    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
@@ -67,7 +68,7 @@ class Many_Body_Hamiltonian():
       self.computed_gs = False # computed the GS already
       self.vijkl = None # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
-      self.itensor_version = 3 # ITensor version
+      self.itensor_version = 2 # ITensor version
       self.hamiltonian_multioperator = None # Multioperator for the Hamiltonian
       os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self):
@@ -102,11 +103,11 @@ class Many_Body_Hamiltonian():
       Compute a vacuum expectation value
       """
       return vev.vev(self,MO,**kwargs)
-  def vev(self,MO,**kwargs):
-      """
-      Compute a vacuum expectation value
-      """
-      return vev.vev(self,MO,**kwargs)
+#  def vev(self,MO,**kwargs):
+#      """
+#      Compute a vacuum expectation value
+#      """
+#      return vev.vev(self,MO,**kwargs)
   def set_vijkl(self,f):
       """
       Create the generalized interaction
@@ -264,6 +265,10 @@ class Many_Body_Hamiltonian():
       Return an estimate of the bandwidth
       """
       return 3*self.ns # estimated bandwidth
+  def get_operator(self,name,i=None):
+      """Return a certain multioperator"""
+      from . import multioperator
+      return multioperator.obj2MO([[name,i]]) # return operator
 
 
 

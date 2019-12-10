@@ -7,6 +7,8 @@ from . import spectrum
 import numpy as np
 from . import read
 from . import states
+from ..algebra import algebra
+from .. import multioperator
 
 usecpp = False # use c++ library
 
@@ -156,6 +158,9 @@ class Spin_chain():
     self.sx = sobj.sx  # store sx
     self.sy = sobj.sy  # store sy
     self.sz = sobj.sz  # store sz
+    self.wf0 = None # ground state
+    self.e0 = None # ground state energy
+    self.hamiltonian = None # Hamiltonian, as a multioperator
     self.sk = [sobj.sx,sobj.sy,sobj.sz]  # store by components
     self.s = self.sx*self.sx + self.sy*self.sy + self.sz*self.sz # total spin
     self.size = self.sxi[0].shape[0] # store size of the Hamiltonian
@@ -176,12 +181,31 @@ class Spin_chain():
     return h
   def add_heisenberg(self,xs,ys,js):
     return self.generate_hamiltonian(xs,ys,js,is_ising=False)
+  def get_identity(self):
+      return sparse.identity(self.sx.shape[0],dtype=np.complex)
+  def gs_energy(self):
+      """Compute ground state energy"""
+      if self.e0 is not None: return self.e0
+      if self.hamiltonian is None: raise # no Hamiltonian
+      h = self.get_operator(self.hamiltonian) # generate the matrix
+      (e0,wf0) = algebra.ground_state(h) # return energy
+      self.wf0 = wf0 # store ground state
+      self.e0 = e0 # store ground state energy
+      return e0 # return energy
+  def vev(self,MO):
+      """Compute a certain expectation value"""
+      self.gs_energy() # compute ground state energy
+      op = self.get_operator(MO) # get operator
+      return algebra.braket_wAw(self.wf0,op).real
   def get_operator(self,name,i=0):
       """Return an operator"""
-      if name=="X" or name=="Sx": return self.sxi[i]
-      elif name=="Y" or name=="Sy": return self.syi[i]
-      elif name=="Z" or name=="Sz": return self.szi[i]
-      else: raise
+      if type(name)==multioperator.MultiOperator:
+          return multioperator.MO2matrix(name,self) # return operator
+      else:
+        if name=="X" or name=="Sx": return self.sxi[i]
+        elif name=="Y" or name=="Sy": return self.syi[i]
+        elif name=="Z" or name=="Sz": return self.szi[i]
+        else: raise
   def add_exchange(self,xcs,gmatrix=None): 
     """ Return matrix with the exchange field"""
     h = csc(([],([],[])),shape=(self.size,self.size)) # initialize 

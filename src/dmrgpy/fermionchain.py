@@ -54,6 +54,15 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         Return the superfluid density
         """
         return staticcorrelator.get_pairing_spinless(self,**kwargs)
+    def vev_spinless(self,MO,mode="DMRG",**kwargs):
+        """ Return a vaccum expectation value"""
+        if mode=="DMRG":
+            return self.vev_MB(MO,**kwargs)
+        elif mode=="ED": 
+            MBF = self.get_MBF() # get the object
+            return MBF.vev(MO,**kwargs) # return overlap
+        else: raise # unrecognized
+    def vev(self,MO,**kwargs): return self.vev_spinless(MO,**kwargs)
     def hamiltonian_free(self,pairs=[[]]):
         """
         Return the free part of the fermionic Hamiltonian
@@ -246,14 +255,6 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
     def get_dynamical_correlator(self,**kwargs):
         """Return the dynamical correlator of an spinful system"""
         return self.get_dynamical_correlator_spinful(**kwargs)
-    def vev_spinless(self,MO,mode="DMRG",**kwargs):
-        """ Return a vaccum expectation value"""
-        if mode=="DMRG":
-            return self.vev_MB(MO,**kwargs)
-        elif mode=="ED": 
-            MBF = self.get_MBF() # get the object
-            return MBF.vev(MO,**kwargs) # return overlap
-        else: raise # unrecognized
     def set_hubbard_spinful(self,fun):
         """
         Add Hubbard interation in a spinful manner

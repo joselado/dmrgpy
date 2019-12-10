@@ -4,6 +4,7 @@ from .dmrgpy2pychain import correlator as correlatorpychain
 from .algebra import algebra
 from . import effectivehamiltonian
 from . import pychainwrapper
+from . import multioperator
 
 class Coupling():
   def __init__(self,i,j,g):
@@ -20,6 +21,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         # default exchange constants
         self.set_exchange(lambda i,j: abs(i-j)==1*1.0)
         self.use_ampo_hamiltonian = True # use ampo
+        self.pychain_object = None # pychain object
     def set_exchange(self,fun):
       """Set the exchange coupling between sites"""
       one = np.matrix(np.identity(3))
@@ -34,6 +36,14 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
             g = g/2. # normalize
             c = Coupling(i,j,g) # create class
             self.exchange.append(c) # store
+    def vev(self,MO,mode="DMRG",**kwargs):
+        """ Return a vaccum expectation value"""
+        if mode=="DMRG":
+            return self.vev_MB(MO,**kwargs)
+        elif mode=="ED":
+            SC = self.get_pychain() # get the object
+            SC.hamiltonian = self.get_hamiltonian() # store the MO
+            return SC.vev(MO,**kwargs) # return overlap
     def gs_energy(self,mode="DMRG",**kwargs):
         """
         Return the ground state energy
@@ -114,3 +124,26 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         """Return the effective Hamiltonian"""
         return effectivehamiltonian.get_effective_hamiltonian(self,
                     name="XX",**kwargs)
+    def get_hamiltonian(self):
+        """Return Hamiltonian as a multioperator"""
+        if self.hamiltonian is not None: return self.hamiltonian
+        else: # conventional way
+            sxs = [self.get_operator("Sx",i) for i in range(self.ns)]
+            sys = [self.get_operator("Sy",i) for i in range(self.ns)]
+            szs = [self.get_operator("Sz",i) for i in range(self.ns)]
+            ss = [sxs,sys,szs]
+        out = multioperator.zero() # initialize
+        for c in self.exchange: # exchange coupling
+            for i in range(3):
+              for j in range(3):
+                out = out + c.g[i,j]*ss[i][c.i]*ss[j][c.j]
+        out.clean()
+        if len(self.fields)>0:
+            for i in range(len(self.fields)):
+                b = self.fields[i]
+                for j in range(3):
+                  out = out + b[j]*ss[j][i]
+        # still have to add the fields!!
+        return out # return multioperator
+
+

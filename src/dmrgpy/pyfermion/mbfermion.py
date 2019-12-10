@@ -177,15 +177,19 @@ class MBFermion():
         Return a certain operator
         """
         if name is None: return self.get_zero() # return zero operator
-        elif type(name)==multioperator.MultiOperator: # Multioperator
-            out = self.get_identity()*0. # initialize
-            for o in name.op: # loop over operators
-                m = self.get_identity()
-                m = m*o[0] # get coefficient
-                for j in range(1,len(o)):
-                  m = m@self.get_operator(o[j][0],int(o[j][1]))
-                out = out + m
-            return out # return operator
+        from .. import multioperator
+        if type(name)==multioperator.MultiOperator:
+            return multioperator.MO2matrix(name,self) # return operator
+
+#        elif type(name)==multioperator.MultiOperator: # Multioperator
+#            out = self.get_identity()*0. # initialize
+#            for o in name.op: # loop over operators
+#                m = self.get_identity()
+#                m = m*o[0] # get coefficient
+#                for j in range(1,len(o)):
+#                  m = m@self.get_operator(o[j][0],int(o[j][1]))
+#                out = out + m
+#            return out # return operator
         ### conventional procedure ###
         elif name=="density": return self.get_density(i)
         elif name=="C": return self.get_c(i)
