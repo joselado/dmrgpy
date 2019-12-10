@@ -14,9 +14,8 @@ def ft(i,j):
     if abs(j-i)==1: return 1.0 
     return 0.0
 fc.set_hoppings(ft) # hoppings
-pairs = [(0,i) for i in range(n)]
 
-den = multioperator.zero()
+den = 0
 
 for i in range(n): # loop over sites
   deni = multioperator.obj2MO([["N",i]])
@@ -25,3 +24,5 @@ for i in range(n): # loop over sites
 print("Total density with DMRG",fc.excited_vev(den,mode="DMRG",n=4).real)
 print("Total density with ED",fc.excited_vev(den,mode="ED",n=4).real)
 
+print("Energies with DMRG",fc.get_excited(mode="DMRG",n=4).real)
+print("Energies with ED",fc.get_excited(mode="ED",n=4).real)
