@@ -5,9 +5,6 @@ from . import ampotk
 
 def write_hamiltonian(self):
     write_sites(self) # write the different sites
-    if self.itensor_version==3:
-        self.use_ampo_hamiltonian = False
-        print("WARNING, AMPO input not implemented in v3")
     if self.use_ampo_hamiltonian:
       ampotk.write_all(self)
     else: # conventional way
