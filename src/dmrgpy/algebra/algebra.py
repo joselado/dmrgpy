@@ -143,3 +143,24 @@ def inv(m):
     """Inverse"""
     m = todense(m)
     return dlg.inv(m)
+
+
+
+def lowest_eigenvectors(h,n=10,nmax=maxsize):
+  """Get a ground state"""
+  info = False
+  if h.shape[0]>nmax:
+    if info: print("Calling ARPACK")
+    eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+  else:
+    if info: print("Full diagonalization")
+    eig,eigvec = dlg.eigh(h.todense())
+  eigvec = eigvec.T # transpose
+#  print(sorted(eig))
+#  eigevec = [v for (e,v) in sorted(zip(eig,eigvec))]
+  return eigvec[0:n] # return eigenvectors
+
+
+def expm(m):
+    m = todense(m)
+

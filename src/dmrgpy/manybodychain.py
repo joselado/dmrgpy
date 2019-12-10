@@ -107,6 +107,13 @@ class Many_Body_Hamiltonian():
       Compute a vacuum expectation value
       """
       return vev.vev(self,MO,**kwargs)
+  def vev(self,MO,**kwargs): return self.vev_MB(MO,**kwargs)
+  def excited_vev_MB(self,MO,**kwargs):
+      """
+      Compute a vacuum expectation value
+      """
+      return vev.excited_vev(self,MO,**kwargs)
+  def excited_vev(self,MO,**kwargs): return self.excited_vev_MB(MO,**kwargs)
 #  def vev(self,MO,**kwargs):
 #      """
 #      Compute a vacuum expectation value

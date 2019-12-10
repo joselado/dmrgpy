@@ -108,6 +108,9 @@ class MBFermion():
         self.energy = e # store energy
         self.wf0 = wf # store wavefunction
         return self.energy
+    def get_excited(self,**kwargs):
+        """Excited states"""
+        return algebra.lowest_eigenvalues(MBF.h,**kwargs)
     def get_cd(self,i):
         """
         Return the creation operator for site i in the many body basis
@@ -172,6 +175,10 @@ class MBFermion():
         m = self.get_operator(A) # return the operator
         self.get_gs() # get ground state
         return algebra.braket_wAw(self.wf0,m) # return the overlap
+    def excited_vev(self,A,**kwargs):
+        m = self.get_operator(A) # return the operator
+        wfs = algebra.lowest_eigenvectors(self.h,**kwargs)
+        return np.array([algebra.braket_wAw(wf,m) for wf in wfs])
     def get_operator(self,name,i=0):
         """
         Return a certain operator
@@ -191,7 +198,7 @@ class MBFermion():
 #                out = out + m
 #            return out # return operator
         ### conventional procedure ###
-        elif name=="density": return self.get_density(i)
+        elif name=="density" or name=="N": return self.get_density(i)
         elif name=="C": return self.get_c(i)
         elif name=="Cdag": return self.get_cd(i)
         else: raise

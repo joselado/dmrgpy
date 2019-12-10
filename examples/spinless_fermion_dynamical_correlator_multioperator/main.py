@@ -27,15 +27,16 @@ print("Energy with DMRG",e1)
 
 
 ### Compute the dyamical correlator ###
-
-name = "ccd" # name of the correlator
-x0,y0 = fc.get_dynamical_correlator(i=0,j=0,mode="ED",name=name,delta=1e-2)
+i,j = 1,3
+name = "densitydensity" # name of the correlator
+x0,y0 = fc.get_dynamical_correlator(i=i,j=j,mode="ED",name=name,delta=1e-2)
 
 from dmrgpy import multioperator
-mi = multioperator.obj2MO([["Cdag",1]])
-mj = multioperator.obj2MO([["Cdag",1]])
+mi = multioperator.obj2MO([["N",i]])
+mj = multioperator.obj2MO([["N",j]])
 
-x1,y1 = fc.get_dynamical_correlator(i=0,j=0,mode="DMRG",name=(mi,mj))
+x1,y1 = fc.get_dynamical_correlator(mode="DMRG",name=(mi,mj))
+#x0,y0 = fc.get_dynamical_correlator(i=i,j=j,mode="DMRG",name=name,delta=1e-2)
 
 
 

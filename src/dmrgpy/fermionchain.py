@@ -63,6 +63,12 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
             return MBF.vev(MO,**kwargs) # return overlap
         else: raise # unrecognized
     def vev(self,MO,**kwargs): return self.vev_spinless(MO,**kwargs)
+    def excited_vev_spinless(self,MO,mode="DMRG",**kwargs):
+        """ Return a vaccum expectation value"""
+        if mode=="DMRG": return self.excited_vev_MB(MO,**kwargs)
+        elif mode=="ED": return self.get_MBF().excited_vev(MO,**kwargs) 
+    def excited_vev(self,MO,**kwargs): 
+        return self.excited_vev_spinless(MO,**kwargs)
     def hamiltonian_free(self,pairs=[[]]):
         """
         Return the free part of the fermionic Hamiltonian

@@ -196,7 +196,7 @@ class Spin_chain():
       """Compute a certain expectation value"""
       self.gs_energy() # compute ground state energy
       op = self.get_operator(MO) # get operator
-      return algebra.braket_wAw(self.wf0,op).real
+      return algebra.braket_wAw(self.wf0,op)
   def get_operator(self,name,i=0):
       """Return an operator"""
       if type(name)==multioperator.MultiOperator:
