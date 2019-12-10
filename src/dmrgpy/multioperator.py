@@ -68,9 +68,10 @@ class MultiOperator():
             if abs(o[0])>1e-8: op.append(o) # store
         self.i = self.i - (len(self.op)-len(op)) # redefine
         self.op = op # redefine
-    def write(self):
+    def write(self,name=None):
         """Write in a file"""
-        write(self,self.name+".in")
+        if name is None: name = self.name+".in"
+        write(self,name)
     def get_dict(self):
         """Return the dictionary to be used in tasks.in"""
         d = dict()

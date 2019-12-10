@@ -90,6 +90,9 @@ class Many_Body_Hamiltonian():
       print("New path",out.path)
       os.system("cp -r "+self.path+"  "+out.path) # copy to the new path
       return out # return new object
+  def set_hamiltonian(self,MO): 
+      """Set the Hamiltonian"""
+      self.hamiltonian = MO
   def to_origin(self): 
     if os.path.isfile(self.path+"/ERROR"): raise # something wrong
     os.chdir(self.inipath) # go to original folder
@@ -97,6 +100,7 @@ class Many_Body_Hamiltonian():
       """
       Remove the temporal folder
       """
+      self.hamiltonian = None
       os.system("rm -rf "+self.path) # clean temporal folder
   def vev_MB(self,MO,**kwargs):
       """
@@ -215,6 +219,7 @@ class Many_Body_Hamiltonian():
     """Return the gap"""
     es = self.get_excited(2)
     return es[1] -es[0]
+  def get_hamiltonian(): return self.hamiltonian
   def gs_energy_fluctuation(self,**kwargs):
       """Compute the energy fluctuations"""
       h = self.get_hamiltonian()

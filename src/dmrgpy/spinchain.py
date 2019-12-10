@@ -22,6 +22,9 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         self.set_exchange(lambda i,j: abs(i-j)==1*1.0)
         self.use_ampo_hamiltonian = True # use ampo
         self.pychain_object = None # pychain object
+        self.Sx = [self.get_operator("Sx",i) for i in range(self.ns)]
+        self.Sy = [self.get_operator("Sy",i) for i in range(self.ns)]
+        self.Sz = [self.get_operator("Sz",i) for i in range(self.ns)]
     def set_exchange(self,fun):
       """Set the exchange coupling between sites"""
       one = np.matrix(np.identity(3))

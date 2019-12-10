@@ -18,6 +18,7 @@ for i in range(10):
       return m + m.transpose()
   sc.set_exchange(fj)
   sc.set_fields(fb)
+  sc.hamiltonian = sc.get_hamiltonian()
   e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy
   e1 = sc.gs_energy(mode="ED") # compute the ground state energy
   print("Spin chain",spins)

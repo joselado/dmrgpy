@@ -5,8 +5,10 @@ from . import ampotk
 
 def write_hamiltonian(self):
     write_sites(self) # write the different sites
-    if self.use_ampo_hamiltonian:
-      ampotk.write_all(self)
+    if self.use_ampo_hamiltonian: # use Hamiltonian as an MPO
+        if self.hamiltonian is not None: # Hamiltonian object created 
+            self.execute(lambda: self.hamiltonian.write("hamiltonian.in"))
+        else: ampotk.write_all(self)
     else: # conventional way
       write_exchange(self)  # write the exchange
       write_hoppings(self)  # write the hoppings

@@ -44,6 +44,7 @@ from dmrgpy import spinchain
 
 
 # Examples
+
 ## Ground state energy of an S=1/2 spin chain
 ```python
 from dmrgpy import spinchain
@@ -59,6 +60,22 @@ spins = [3 for i in range(30)] # 2*S+1=3 for S=1
 sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
 pairs = [(0,i) for i in range(30)] # between the edge and the rest
 cs = sc.get_correlator(pairs)
+```
+
+## Ground state energy of a bilinear-biquadratic Hamiltonian
+```python
+from dmrgpy import spinchain
+ns = 6 # number of sites in the spin chain
+spins = [3 for i in range(ns)] # S=1 chain
+sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+h = 0.0*sc.Sx[0] # initialize Hamiltonian
+Si = [sc.Sx,sc.Sy,sc.Sz] # store the three components
+for i in range(ns-1): # loop 
+    for S in Si: h = h + S[i]*S[i+1]  # bilinear
+    for S in Si: h = h + 1./3.*S[i]*S[i+1]*S[i]*S[i+1]  # biquadratic
+sc.set_hamiltonian(h) # create the Hamiltonian
+print("Energy with DMRG",sc.gs_energy(mode="DMRG"))
+print("Energy with ED",sc.gs_energy(mode="ED"))
 ```
 
 ## Magnetization an S=1 spin chain with an edge magnetic field

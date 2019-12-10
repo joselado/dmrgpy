@@ -16,17 +16,23 @@ static auto get_ampo_operator=[](auto ampo,std::string filename) {
 		    hfile >> cr >> ci >> op0 >> i0; // read
 	            auto cz = cr + ci*1i; // redefine
 		    ampo += cz,op0,i0; // add
-	    };
-	    if (numprod==2) {  // two terms
+	    }
+	    else if (numprod==2) {  // two terms
 		    hfile >> cr >> ci >> op0 >> i0 >> op1 >> i1; // read
 	            auto cz = cr + ci*1i; // redefine
 		    ampo += cz,op0,i0,op1,i1; // add
-	    };
-	    if (numprod==4) {  // two terms
+	    }
+	    else if (numprod==3) {  // two terms
+		    hfile >> cr>> ci >> op0 >> i0 >> op1 >> i1 >> op2 >> i2; 
+	            auto cz = cr + ci*1i; // redefine
+		    ampo += cz,op0,i0,op1,i1,op2,i2; // add
+	    }
+	    else if (numprod==4) {  // two terms
 		    hfile >> cr>> ci >> op0 >> i0 >> op1 >> i1 >> op2 >> i2 >> op3 >>i3; 
 	            auto cz = cr + ci*1i; // redefine
 		    ampo += cz,op0,i0,op1,i1,op2,i2,op3,i3; // add
-	    };
+	    }
+	    else exit(EXIT_FAILURE) ;
     };
     hfile.close();
     return ampo ;
