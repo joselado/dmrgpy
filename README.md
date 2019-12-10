@@ -68,7 +68,7 @@ from dmrgpy import spinchain
 ns = 6 # number of sites in the spin chain
 spins = [3 for i in range(ns)] # S=1 chain
 sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
-h = 0.0*sc.Sx[0] # initialize Hamiltonian
+h = 0 # initialize Hamiltonian
 Si = [sc.Sx,sc.Sy,sc.Sz] # store the three components
 for i in range(ns-1): # loop 
     for S in Si: h = h + S[i]*S[i+1]  # bilinear
