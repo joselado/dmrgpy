@@ -69,6 +69,7 @@ class Many_Body_Hamiltonian():
       self.vijkl = None # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
       self.itensor_version = 2 # ITensor version
+      self.has_ED_obj = False # ED object has been computed
       self.hamiltonian_multioperator = None # Multioperator for the Hamiltonian
       os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self):
@@ -93,6 +94,7 @@ class Many_Body_Hamiltonian():
   def set_hamiltonian(self,MO): 
       """Set the Hamiltonian"""
       self.hamiltonian = MO
+      self.use_ampo_hamiltonian = True # use ampo Hamiltonian
   def to_origin(self): 
     if os.path.isfile(self.path+"/ERROR"): raise # something wrong
     os.chdir(self.inipath) # go to original folder
@@ -107,7 +109,10 @@ class Many_Body_Hamiltonian():
       Compute a vacuum expectation value
       """
       return vev.vev(self,MO,**kwargs)
-  def vev(self,MO,**kwargs): return self.vev_MB(MO,**kwargs)
+  def vev(self,MO,mode="DMRG",**kwargs): 
+      if mode=="DMRG": return self.vev_MB(MO,**kwargs)
+      elif mode=="ED": return self.get_ED_obj().vev(MO,**kwargs) # ED object
+      else: raise
   def excited_vev_MB(self,MO,**kwargs):
       """
       Compute a vacuum expectation value
@@ -218,10 +223,13 @@ class Many_Body_Hamiltonian():
     elif submode=="EX": # CVM mode
         return dcex.dynamical_correlator(self,**kwargs)
     else: raise
-  def get_excited(self,**kwargs):
-    """Return excitation energies"""
-    from . import excited
-    return excited.get_excited(self,**kwargs) # return excitation energies
+  def get_excited(self,mode="DMRG",**kwargs):
+      """Return excitation energies"""
+      if mode=="DMRG":
+        from . import excited
+        return excited.get_excited(self,**kwargs) # return excitation energies
+      elif mode=="ED": return self.get_ED_obj().get_excited(**kwargs) # ED
+      else: raise
   def get_gap(self):
     """Return the gap"""
     es = self.get_excited(2)
@@ -245,9 +253,11 @@ class Many_Body_Hamiltonian():
       if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
       else: self.gs_energy(**kwargs) # perform a ground state calculation
       return self.wf0 # return wavefucntion
-  def gs_energy(self,**kwargs):
+  def gs_energy(self,mode="DMRG",**kwargs):
       """Return the ground state energy"""
-      return groundstate.gs_energy(self,**kwargs)
+      if mode=="DMRG": return groundstate.gs_energy(self,**kwargs)
+      elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
+      else: raise
   def get_correlator_MB(self,**kwargs):
       """Return a correlator"""
       return correlator.get_correlator(self,**kwargs)

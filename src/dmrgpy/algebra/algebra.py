@@ -110,7 +110,7 @@ def ground_state(h,nmax=maxsize):
     eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
   else:
     if info: print("Full diagonalization")
-    eig,eigvec = dlg.eigh(h.todense())
+    eig,eigvec = dlg.eigh(todense(h))
   return eig[0],eigvec.transpose()[0]
 
 

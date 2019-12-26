@@ -110,7 +110,7 @@ class MBFermion():
         return self.energy
     def get_excited(self,**kwargs):
         """Excited states"""
-        return algebra.lowest_eigenvalues(MBF.h,**kwargs)
+        return algebra.lowest_eigenvalues(self.h,**kwargs)
     def get_cd(self,i):
         """
         Return the creation operator for site i in the many body basis
