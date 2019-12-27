@@ -212,7 +212,8 @@ class MBFermion():
         from .. import operatornames
         self.get_gs() # compute ground state
         if type(name[0])==multioperator.MultiOperator: # multioperator
-          A = self.get_operator(name[0])
+          A = name[0].get_dagger() # dagger
+          A = self.get_operator(A)
           B = self.get_operator(name[1])
         else:
           namei,namej = operatornames.recognize(name) # get the operator

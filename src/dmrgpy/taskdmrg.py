@@ -58,11 +58,6 @@ def write_tasks(self):
   fo.write(" cutoff = "+str(self.cutoff)+"\n") # maximum discarded weight
   fo.write(" nsweeps = "+str(self.nsweeps)+"\n") # maximum discarded weight
   ### this is a special addition to allow for generic interactions ###
-  if self.hamiltonian_multioperator is not None: # if there is a multioperator
-      dmh = self.hamiltonian_multioperator.get_dict() # get dictionary
-      fo.write("use_multioperator_hamiltonian = true\n") # set it to true
-      for key in dmh:
-        fo.write(key+" = "+obj2str(dmh[key])+"\n") # write that term
   fo.write("}\n")
   fo.close()
 

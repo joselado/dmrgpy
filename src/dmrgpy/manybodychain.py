@@ -40,6 +40,7 @@ class Many_Body_Hamiltonian():
       self.exchange = [] # empty list
       self.fields = [] # empty list
       self.hoppings = dict() # empty dictionary
+      self.fermionic = False
       self.spinful_hoppings = dict() # empty dictionary
       self.pairing = None # pairing
       self.hubbard = dict() # empty dictionary
@@ -70,7 +71,6 @@ class Many_Body_Hamiltonian():
       self.fit_td = False # use fitting procedure in time evolution
       self.itensor_version = 2 # ITensor version
       self.has_ED_obj = False # ED object has been computed
-      self.hamiltonian_multioperator = None # Multioperator for the Hamiltonian
       os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self):
       """Go to a certain folder"""
@@ -220,7 +220,7 @@ class Many_Body_Hamiltonian():
         return timedependent.dynamical_correlator(self,**kwargs)
     elif submode=="CVM": # CVM mode
         return cvm.dynamical_correlator(self,**kwargs)
-    elif submode=="EX": # CVM mode
+    elif submode=="EX": # EX mode
         return dcex.dynamical_correlator(self,**kwargs)
     else: raise
   def get_excited(self,mode="DMRG",**kwargs):

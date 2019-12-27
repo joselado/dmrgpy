@@ -8,7 +8,7 @@ import numpy as np
 
 
 ampo_counter = 0
-
+use_jordan_wigner = True
 
 
 class MultiOperator():
@@ -34,6 +34,8 @@ class MultiOperator():
     def copy(self):
         from copy import deepcopy
         return deepcopy(self) # return a copy
+    def get_dagger(self):
+        return get_dagger(self)
     def __add__(self,a):
         """Sum operation"""
         if a is None: return self.copy() # return the Hamiltonian
@@ -81,7 +83,9 @@ class MultiOperator():
     def write(self,name=None):
         """Write in a file"""
         if name is None: name = self.name+".in"
-        write(self,name)
+        if use_jordan_wigner: m = jordan_wigner(self)
+        else: m = self
+        write(m,name)
     def get_dict(self):
         """Return the dictionary to be used in tasks.in"""
         d = dict()
@@ -123,8 +127,18 @@ def MO2list(self):
 
 def write(MO,name):
     """Write a multioperator in a file"""
-    from .ampotk import write_ampo
     write_ampo(MO2list(MO),name) # write in a file
+
+
+def write_ampo(out,name):
+    f = open(name,"w")
+    f.write(str(len(out))+"\n") # number of lines
+    for o in out:
+      f.write(str((len(o)-2)//2)+"\n") # number of terms
+      for io in o:
+          f.write(str(io)+"  ")
+      f.write("\n")
+    f.close()
 
 
 
@@ -184,6 +198,61 @@ def MO2matrix(MO,obj):
             otmp = otmp@obj.get_operator(term[0],term[1]) # multiply
         out = out + otmp
     return out # return matrix
+
+
+def jordan_wigner(MO):
+    """Use Jordan Wigner transformationin a multioperator"""
+    from .multioperatortk import jordanwigner
+    m = 0 # initialize output
+    for ii in range(len(MO.op)): # loop over operators
+        opi = MO.op[ii] # take this term
+        n = len(opi)-1 # number of terms in the product
+        c = opi[0] # take the complex value
+        mi = list2MO(opi) # default output
+        ls = [opi[kk+1][0] for kk in range(n)] # names of operators
+        if (n==1): # one point operator
+            i = opi[1][1]
+            if "C" in ls or "Cdag" in ls:
+                mi = c*jordanwigner.one_fermion(ls[0],i)
+        elif (n==2): # two point operators
+            i,j = opi[1][1],opi[2][1]
+            if "C" in ls or "Cdag" in ls:
+                mi = c*jordanwigner.two_fermions(ls[0],i,ls[1],j)
+        elif (n==4): # four point operators
+            i,j,k,l = opi[1][1],opi[2][1],opi[3][1],opi[4][1]
+            if "C" in ls or "Cdag" in ls:
+                mi = c*jordanwigner.four_fermions(ls[0],i,ls[1],j,ls[2],
+                        k,ls[3],l) 
+        else: 
+            if "C" in ls or "Cdag" in ls: raise # not implemented
+        m = m + mi
+    return m
+
+
+
+def get_dagger(self):
+    """Return the dagger of a multioperator"""
+    m = 0 # initialize
+    for opi in self.op: # loop over terms
+        n = len(opi)-1 # number of terms in the product
+        c = opi[0] # coefficient
+        mi = np.conjugate(c) # initialize
+        for i in range(n): # loop over terms in the product
+            name = opi[n-i][0] # name
+            jj = opi[n-i][1] # index
+            if name=="C": name="Cdag"
+            elif name=="Cdag": name="C"
+            elif name=="A": name="Adag"
+            elif name=="Adag": name="A"
+            elif name=="Sp": name="Sm"
+            elif name=="S+": name="S-"
+            elif name=="Sm": name="Sp"
+            elif name=="S-": name="S+"
+            mi = obj2MO([[name,jj]])*mi
+        m = m + mi # add contribution
+    return m # return MO
+
+
 
 
 

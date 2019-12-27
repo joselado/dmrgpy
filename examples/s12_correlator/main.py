@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import spinchain
 ns = np.array(range(4,30,2))
 es = []
-n = 20
+n = 10
 spins = [3 for i in range(n)]
 sc = spinchain.Spin_Hamiltonian(spins) # create the chain
 m = sc.sisj_edge()

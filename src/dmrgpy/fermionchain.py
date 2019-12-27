@@ -14,10 +14,15 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     def __init__(self,n,spinful=False):
         if spinful: raise # this is outdated
         self.spinful = spinful
+        self.C = [self.get_operator("C",i) for i in range(n)]
+        self.N = [self.get_operator("N",i) for i in range(n)]
+        self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
         if spinful:
           Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
         else:
           Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
+        self.fermionic = True
+        self.use_ampo_hamiltonian = True # use ampo
     def set_hoppings(self,fun):
       """Add the spin independent hoppings"""
       from .manybodychain import Coupling
@@ -168,7 +173,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         MBf.add_hubbard(self.hubbard_matrix) # add hubbard term
         MBf.add_vijkl(self.vijkl) # add generalized interaction
         # add generalized term
-        MBf.add_multioperator(self.hamiltonian_multioperator) 
+        MBf.add_multioperator(self.hamiltonian) 
         return MBf # return the object
     def get_kpm_scale(self):
         """Energy scale for KPM method"""
