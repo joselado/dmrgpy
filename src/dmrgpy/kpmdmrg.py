@@ -1,6 +1,7 @@
 from __future__ import print_function
 import numpy as np
 from . import multioperator
+from . import operatornames
 
 def get_moments_dmrg(self,n=1000):
   """Get the moments with DMRG"""
@@ -20,9 +21,13 @@ def get_moments_dmrg(self,n=1000):
 def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
         name="XX",delta=1e-1):
   """Get the moments with DMRG"""
+  if type(name)==str: # string input
+        namei,namej = operatornames.recognize(name)
+        namei = self.get_operator(namei,i)
+        namej = self.get_operator(namej,j)
+        return get_moments_dynamical_correlator_dmrg(self,
+                name=(namei,namej),delta=delta)
   # do some sanity checks
-  if i>=self.ns: raise 
-  if j>=self.ns: raise 
   if delta<0.0: raise 
   self.get_gs() # compute ground state
   # define the dictionary
@@ -43,21 +48,7 @@ def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
       mj = name[1] # second operator
       self.execute(lambda: mi.write(name="kpm_multioperator_i.in")) # write
       self.execute(lambda: mj.write(name="kpm_multioperator_j.in")) # write
-  else: # use a keyword, this is the classical way
-    try: # select the right operators, be consistent with mpscpp.x
-        from . import operatornames
-        namei,namej = operatornames.recognize(name)
-        namei = operatornames.hermitian(namei) # get the Hermitian operator
-    except:
-        print("Dynamical correlator not recognised")
-        raise
-    # setup the necessary elements in the tasks
-    task["kpm_operator_i"] = namei
-    task["kpm_operator_j"] = namej
-    task["site_i_kpm"] = str(i)
-    task["site_j_kpm"] = str(j)
-    task["kpm_multioperator_i"] = "false"
-    task["kpm_multioperator_j"] = "false"
+  else: raise
   self.task = task # assign tasks
   self.write_task() 
   self.write_hamiltonian() # write the Hamiltonian to a file

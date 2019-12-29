@@ -67,17 +67,12 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         cs = self.get_correlator(pairs=pairs,mode="DMRG") # compute
         ns = range(len(cs)) # number of correlators
         return np.array([ns,cs])
-    def get_magnetization(self,mode="DMRG",**kwargs):
-        if mode=="DMRG": # using DMRG
-            pairs = [(i,i) for i in range(self.ns)]
-            mx = self.get_correlator(pairs=pairs,name="X").real
-            my = self.get_correlator(pairs=pairs,name="Y").real
-            mz = self.get_correlator(pairs=pairs,name="Z").real
-            np.savetxt("MAGNETIZATION.OUT",np.matrix([mx,my,mz]).T)
-            return (mx,my,mz)
-        elif mode=="ED": # using ED
-            return pychainwrapper.get_magnetization(self,**kwargs)
-        else: raise
+    def get_magnetization(self,**kwargs):
+        mx = [self.vev(self.Sx[i],**kwargs) for i in range(self.ns)]
+        my = [self.vev(self.Sy[i],**kwargs) for i in range(self.ns)]
+        mz = [self.vev(self.Sz[i],**kwargs) for i in range(self.ns)]
+        np.savetxt("MAGNETIZATION.OUT",np.array([mx,my,mz]).T)
+        return np.array([mx,my,mz]).real
     def get_dynamical_correlator(self,mode="DMRG",**kwargs):
         """
         Compute the dynamical correlator

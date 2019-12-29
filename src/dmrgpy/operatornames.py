@@ -42,9 +42,9 @@ def recognize(name):
     elif name=="deltadeltad":
         namei = "delta" ; namej = "deltad"
     elif name=="densitydensity":
-        namei = "density" ; namej = "density"
+        namei = "N" ; namej = "N"
     elif name=="density": # density density correlator
-        namei = "density" ; namej = "density"
+        namei = "N" ; namej = "N"
     else: raise
 #  else:
 #      print("Dynamical correlator not recognised")
@@ -63,5 +63,19 @@ def hermitian(name):
     elif name=="Cdagup": return "Cup"
     elif name=="Cdag": return "C"
     return name
+
+
+def name2MO(name,self):
+    if name=="C": return self.C
+    elif name=="Cdag": return self.Cdag
+    elif name=="N": return self.N
+    elif name=="Adag": return self.Adag
+    elif name=="A": return self.A
+    elif name=="Sx": return self.Sx
+    elif name=="Sy": return self.Sy
+    elif name=="Sz": return self.Sz
+    else:
+        print(name) ; exit()
+        raise
 
 

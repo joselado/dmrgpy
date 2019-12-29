@@ -1,5 +1,5 @@
 # routines to use autompo features
-
+import numpy as np
 from . import multioperator
 
 def names(i):
@@ -46,9 +46,19 @@ def hubbard2ampo(self):
     for key in self.hubbard:
         i,j = key[0],key[1]
         c = self.hubbard[key].g
-        h = h + self.N[i]*self.N[j]
+        h = h + c*self.N[i]*self.N[j]
     return h
 
+def pairing2ampo(self):
+    if self.pairing is None: return 0
+    ns = self.ns
+    h = 0
+    for i in range(ns):
+      for j in range(ns):
+          c = self.pairing(i,j)
+          out = c*self.C[i]*self.C[j]
+          h = h + out + out.get_dagger()
+    return h
 
 
 def vijkl2ampo(self):
@@ -73,6 +83,7 @@ def write_all(self):
     h = h + field2ampo(self) # get magnetic field
     h = h + hoppings2ampo(self) # get hoppings
     h = h + hubbard2ampo(self) # get hubbard
+    h = h + pairing2ampo(self) # get pairing
     h = h + vijkl2ampo(self) # get Vijkl
     self.execute(lambda: h.write(name="hamiltonian.in"))
 

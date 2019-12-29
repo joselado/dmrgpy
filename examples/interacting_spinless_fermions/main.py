@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 10
-fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
+fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 
 # random matrix for the hoppings
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))

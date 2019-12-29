@@ -1,5 +1,6 @@
 import numpy as np
 from .. import multioperator
+from .. import operatornames
 from . import mop
 
 
@@ -8,7 +9,6 @@ def get_dynamical_correlator_spinless(self,name="densitydensity",
     """
     Compute a dynamical correlator for a spinless chain
     """
-    if name is not "density" and self.spinful: raise
     if mode=="DMRG":
         return self.get_dynamical_correlator_MB(name=name,**kwargs)
     elif mode=="ED":
@@ -74,33 +74,20 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
     elif name=="ccup": return getcc(0,0)
     elif name=="ccdn": return getcc(1,1)
     elif name=="ZZ":
-        mi = mop.get_sz(i=i,name="kpm_multioperator_i") # multioprator for i
-        mj = mop.get_sz(i=j,name="kpm_multioperator_j") # multioprator for i
+        mi = self.Sz[i]
+        mj = self.Sz[j]
         return self.get_dynamical_correlator_spinless(name=(mi,mj),
                 **kwargs)
-#        (es,uu) = getd(0,0) # up up
-#        (es,dd) = getd(1,1) # down down
-#        (es,ud) = getd(0,1) # up down
-#        (es,du) = getd(1,0) # down up
-#        return (es,(uu+dd-ud-du)/4.0) # return the contributions
     elif name=="XX":
-        mi = mop.get_sx(i=i,name="kpm_multioperator_i") # multioprator for i
-        mj = mop.get_sx(i=j,name="kpm_multioperator_j") # multioprator for i
+        mi = self.Sx[i]
+        mj = self.Sx[j]
         return self.get_dynamical_correlator_spinless(name=(mi,mj),
                 **kwargs)
-#        (es,out) = caca(0,1,0,1)
-#        out = out + caca(0,1,1,0)[1] 
-#        out = out + caca(1,0,1,0)[1] + caca(1,0,1,0)[1] 
-#        return (es,out/4.0) # return the contributions
     elif name=="YY":
-        mi = mop.get_sy(i=i,name="kpm_multioperator_i") # multioprator for i
-        mj = mop.get_sy(i=j,name="kpm_multioperator_j") # multioprator for i
+        mi = self.Sy[i]
+        mj = self.Sy[j]
         return self.get_dynamical_correlator_spinless(name=(mi,mj),
                 **kwargs)
-        (es,out) = caca(0,1,0,1)
-        out = out - caca(0,1,1,0)[1] 
-        out = out + caca(1,0,1,0)[1] - caca(1,0,1,0)[1] 
-        return (es,-out/4.0) # return the contributions
     elif name=="SS": # return the SS dynamical correlator
         def getdsi(nn):
           return  get_dynamical_correlator_spinful(self,name=nn,i=i,j=j,**kwargs)
@@ -110,12 +97,6 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
         return (ex,dx+dy+dz)
     elif name=="deltadelta": # swave pairing
         return aaaa(0,1,0,1) # return the swave pairing amplitude
-    elif name=="densityZ":
-        (es,uu) = getd(0,0) # up up
-        (es,dd) = getd(1,1) # down down
-        (es,ud) = getd(0,1) # up down
-        (es,du) = getd(1,0) # down up
-        return (es,(uu-dd-ud+du)/2.0) # return the contributions
     else: raise # not implemented
 
 

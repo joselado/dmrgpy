@@ -43,7 +43,7 @@ def CC(i,j):
         for k in range(i,j-1):
             m = m*obj2MO(["F",k+1])
         return m*obj2MO(["A",j])
-    elif j<i: return -1*CdagC(j,i)
+    elif j<i: return -1*CC(j,i)
 
 
 def CdagCdag(i,j):
@@ -53,7 +53,7 @@ def CdagCdag(i,j):
         for k in range(i,j-1):
             m = m*obj2MO(["F",k+1])
         return m*obj2MO(["Adag",j])
-    elif j<i: return -1*CdagC(j,i)
+    elif j<i: return -1*CdagCdag(j,i)
 
 def CdagCCdagC(i,j,k,l):
     return CdagC(i,j)*CdagC(k,l)

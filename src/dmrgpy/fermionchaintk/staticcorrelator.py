@@ -83,9 +83,11 @@ def get_correlator_spinful(self,name="ZZ",pairs=[[]],**kwargs):
 
 def get_density_spinless(self,**kwargs):
     """Return the electronic density"""
-    pairs = [(i,i) for i in range(self.ns)]
-    return self.get_correlator_spinless(pairs=pairs,
-            name="cdc",**kwargs).real
+    out = [self.vev(self.N[i],**kwargs) for i in range(self.ns)]
+    return np.array(out)
+#    pairs = [(i,i) for i in range(self.ns)]
+#    return self.get_correlator_spinless(pairs=pairs,
+#            name="cdc",**kwargs).real
 
 
 
@@ -97,9 +99,7 @@ def get_density_spinless(self,**kwargs):
 def get_density_fluctuation_spinless(self,**kwargs):
     """Return the electronic density"""
     d = self.get_density_spinless(**kwargs) # get the density
-    pairs = [(i,i) for i in range(self.ns)]
-    d2 = self.get_correlator_spinless(pairs=pairs,name="densitydensity",
-            **kwargs).real
+    d2 = np.array([self.vev(self.N[i]*self.N[i],**kwargs) for i in range(self.ns)])
     return d2-d**2 # return density fluctuations
 
 
@@ -142,8 +142,7 @@ def get_onsite_pairing_spinful(self,**kwargs):
     Return the expectation value of the onsite pairing
     """
     pairs = [(2*i,2*i+1) for i in range(self.ns//2)]
-    cs = self.get_correlator_spinless(pairs=pairs,
-            name="cc",**kwargs)
+    cs = np.array([self.vev(self.C[i]*self.C[j],**kwargs) for (i,j) in pairs])
     return cs
 
 

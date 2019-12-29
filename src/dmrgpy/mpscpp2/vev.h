@@ -1,8 +1,7 @@
 
 static auto vev=[]() {
   auto sites = get_sites(); // 
-  auto H = get_hamiltonian(sites) ; // get Hamiltonian
-  auto psi = get_gs(sites,H) ; // get the ground state
+  auto psi = read_wf(get_str("starting_file_gs")) ; // read GS
   psi /= overlap(psi,psi); // normalize
   // now read the operator from tasks.in, this routine assumes
   // that there will be a multioperator

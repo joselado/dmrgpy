@@ -32,13 +32,13 @@ fc = fermionchain.Spinful_Fermionic_Hamiltonian(n//2) # create the object
 fc.set_hoppings(t) # add the term to the Hamiltonian
 fc.set_hubbard(fh) # add the term to the Hamiltonian
 fc.set_swave_pairing(lambda i: 0.4) # add the term to the Hamiltonian
-e0 = fc.gs_energy() # now get the energy
+#e0 = fc.gs_energy() # now get the energy
 
 
 
 print("Energy with DMRG",fc.gs_energy(mode="DMRG"))
 print("Energy with ED",fc.gs_energy(mode="ED"))
-print("Magnetization with DMRG",fc.get_magnetization(mode="DMRG"))
-print("Magnetization with ED",fc.get_magnetization(mode="ED"))
+print("Magnetization with DMRG",fc.get_density(mode="DMRG"))
+print("Magnetization with ED",fc.get_density(mode="ED"))
 
 

@@ -35,11 +35,11 @@ static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
     // compute H|psi>
     // fluctuation in the energy
     de = get_energy_fluctuation(psi1,H);
-    if (de<1e-2) { // if the fluctuation is small enough
+//    if (de<1e-2) { // if the fluctuation is small enough
       wfs.insert(wfs.end(),psi1); // store this wavefunction
       psi1 = MPS(sites) ; // new random wavefunction
       myfile << std::setprecision(8) << en0 << "  " << de << endl; // write 
-    };
+//    };
   } ;
   return wfs ;
 }

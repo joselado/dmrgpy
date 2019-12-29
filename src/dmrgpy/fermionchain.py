@@ -10,17 +10,11 @@ from .fermionchaintk import hamiltonian
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     """Class for fermionic Hamiltonians"""
-    spinful = False
-    def __init__(self,n,spinful=False):
-        if spinful: raise # this is outdated
-        self.spinful = spinful
+    def __init__(self,n):
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.N = [self.get_operator("N",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
-        if spinful:
-          Many_Body_Hamiltonian.__init__(self,[1 for i in range(n)])
-        else:
-          Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
+        Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
         self.fermionic = True
         self.use_ampo_hamiltonian = True # use ampo
     def set_hoppings(self,fun):
@@ -78,19 +72,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """
         Return the free part of the fermionic Hamiltonian
         """
-#        if len(self.hubbard)!=0: raise # not implemented
-#        else: # everythin ok so far
-        if self.spinful: # spinful
-          m = np.zeros((self.ns*2,self.ns*2),dtype=np.complex) # matrix
-          for key in self.hoppings:
-              t = self.hoppings[key]
-              m[2*t.i,2*t.j] = t.g
-              m[2*t.i+1,2*t.j+1] = t.g
-          if type(self.spinful_hoppings)!=type(dict()):
-            m = m + self.spinful_hoppings
-        else: # spinless Hamiltonian
-          m = np.zeros((self.ns,self.ns),dtype=np.complex) # matrix
-          for key in self.hoppings:
+        m = np.zeros((self.ns,self.ns),dtype=np.complex) # matrix
+        for key in self.hoppings:
               t = self.hoppings[key]
               m[t.i,t.j] = t.g
         return m
@@ -240,7 +223,13 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
     """
     def __init__(self,n):
         """ Rewrite the init method to take twice as many sites"""
-        super().__init__(2*n)
+        super().__init__(2*n) # initialize the Hamiltonian
+        self.Sx = [0.5*self.Cdag[2*i]*self.C[2*i+1] +
+                0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
+        self.Sy = [-0.5*1j*self.Cdag[2*i]*self.C[2*i+1] +
+                1j*0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
+        self.Sz = [0.5*self.Cdag[2*i]*self.C[2*i] +
+                (-1)*0.5*self.Cdag[2*i+1]*self.C[2*i+1] for i in range(n)]
     def get_density_spinful(self,**kwargs):
         """
         Return the density in each site, summing over spin channels
