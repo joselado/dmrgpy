@@ -44,10 +44,10 @@ print("GS energy with ED",fc.gs_energy(mode="ED")) # energy with exact diag
 print("GS energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 
 # now we can compute excited state energies
-print("Excited states with ED",
-        fc.get_excited(n=4,mode="ED")) # energies with exact diag
-print("Excited states with DMRG",
-        fc.get_excited(n=4,mode="DMRG")) # energies with DMRG
+#print("Excited states with ED",
+#        fc.get_excited(n=4,mode="ED")) # energies with exact diag
+#print("Excited states with DMRG",
+#        fc.get_excited(n=4,mode="DMRG")) # energies with DMRG
 
 
 ####################################################

@@ -2,7 +2,7 @@
 static auto vev=[]() {
   auto sites = get_sites(); // 
   auto psi = read_wf(get_str("starting_file_gs")) ; // read GS
-  psi /= overlap(psi,psi); // normalize
+  psi /= sqrt(overlap(psi,psi)); // normalize
   // now read the operator from tasks.in, this routine assumes
   // that there will be a multioperator
   auto A = get_mpo_operator("vev_multioperator.in"); // get the operator
