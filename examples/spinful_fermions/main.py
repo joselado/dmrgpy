@@ -38,7 +38,11 @@ fc.set_swave_pairing(lambda i: 0.4) # add the term to the Hamiltonian
 
 print("Energy with DMRG",fc.gs_energy(mode="DMRG"))
 print("Energy with ED",fc.gs_energy(mode="ED"))
-print("Magnetization with DMRG",fc.get_density(mode="DMRG"))
-print("Magnetization with ED",fc.get_density(mode="ED"))
+mdm = fc.get_density(mode="DMRG")
+med = fc.get_density(mode="ED")
+print("Density with DMRG",mdm)
+print("Density with ED",med)
+
+print("Difference in density",np.max(np.abs((mdm-med))))
 
 

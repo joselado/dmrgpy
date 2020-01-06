@@ -6,7 +6,7 @@ from .algebra import algebra
 from .fermionchaintk import dynamicalcorrelator
 from .fermionchaintk import staticcorrelator
 from .fermionchaintk import hamiltonian
-
+from . import funtk
 
 class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     """Class for fermionic Hamiltonians"""
@@ -230,6 +230,7 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
                 1j*0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
         self.Sz = [0.5*self.Cdag[2*i]*self.C[2*i] +
                 (-1)*0.5*self.Cdag[2*i+1]*self.C[2*i+1] for i in range(n)]
+        self.Delta = [0.5*self.C[2*i]*self.C[2*i+1] for i in range(n)]
     def get_density_spinful(self,**kwargs):
         """
         Return the density in each site, summing over spin channels
