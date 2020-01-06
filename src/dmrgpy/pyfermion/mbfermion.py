@@ -216,10 +216,11 @@ class MBFermion():
           A = self.get_operator(A)
           B = self.get_operator(name[1])
         else:
-          namei,namej = operatornames.recognize(name) # get the operator
-          namei = operatornames.hermitian(namei) # get the dagger
-          A = self.get_operator(namei,i)
-          B = self.get_operator(namej,j)
+          raise # this is no longer used
+#          namei,namej = operatornames.recognize(name) # get the operator
+#          namei = operatornames.hermitian(namei) # get the dagger
+#          A = self.get_operator(namei,i)
+#          B = self.get_operator(namej,j)
 #        A = self.get_cd(i) # first operator
 #        B = self.get_cd(j) # second operator
         vi = A@self.wf0 # first wavefunction

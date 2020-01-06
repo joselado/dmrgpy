@@ -11,6 +11,7 @@ def write_hamiltonian(self):
             self.execute(lambda: h.write("hamiltonian.in"))
         else: ampotk.write_all(self)
     else: # conventional way
+      raise # no longer used
       write_exchange(self)  # write the exchange
       write_hoppings(self)  # write the hoppings
       write_spinful_hoppings(self)  # write the hoppings

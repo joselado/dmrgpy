@@ -20,6 +20,7 @@ def fu(i,j):
 # Initialize the Hamiltonian
 fc.set_hoppings(ft) # hoppings
 fc.set_hubbard(fu) # hoppings
+fc.set_swave_pairing(lambda i: 0.2)
 e0 = fc.gs_energy(mode="ED") # energy with exact diagonalization
 e1 = fc.gs_energy(mode="DMRG") # energy with DMRG
 print("Energy with ED",e0)
@@ -28,7 +29,7 @@ print("Energy with DMRG",e1)
 
 ### Compute the dyamical correlator ###
 
-name = "ccd" # name of the correlator
+name = "deltadelta" # name of the correlator
 x0,y0 = fc.get_dynamical_correlator(i=1,j=1,mode="ED",name=name,delta=1e-2)
 x1,y1 = fc.get_dynamical_correlator(i=1,j=1,mode="DMRG",name=name)
 

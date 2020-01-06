@@ -28,19 +28,19 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
     def getij(mi,mj):
         return self.get_dynamical_correlator_spinless(name=(mi,mj),**kwargs)
     def getd(ii,jj):
-        mi,mj= self.N[2*i+ii],self.N[2*i+jj]
+        mi,mj= self.N[2*i+ii],self.N[2*j+jj]
         return self.get_dynamical_correlator_spinless(
             name=(mi,mj)**kwargs)
     def getcdc(ii,jj):
-        mi,mj= self.Cdag[2*i+ii],self.C[2*i+jj]
+        mi,mj= self.Cdag[2*i+ii],self.C[2*j+jj]
         return self.get_dynamical_correlator_spinless(
                 name=(mi,mj),**kwargs)
     def getccd(ii,jj):
-        mi,mj= self.C[2*i+ii],self.Cdag[2*i+jj]
+        mi,mj= self.C[2*i+ii],self.Cdag[2*j+jj]
         return self.get_dynamical_correlator_spinless(
                 name=(mi,mj),**kwargs)
     def getcc(ii,jj):
-        mi,mj= self.C[2*i+ii],self.C[2*i+jj]
+        mi,mj= self.C[2*i+ii],self.C[2*j+jj]
         return self.get_dynamical_correlator_spinless(
                 name=(mi,mj),**kwargs)
     ### Worksround for four field operators
