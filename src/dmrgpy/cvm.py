@@ -22,27 +22,25 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
 
 
 
-def cvm_dmrg(self,name="XX",i=0,j=0,delta=1e-1,e=0.0):
+def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
     """
     Return the dynamical correlator for a single energy
     """
-    if type(name)==multioperator.MultiOperator: raise # not implemented
-    namei,namej = operatornames.recognize(name)
+    name = operatornames.str2MO(self,name,**kwargs)
     if self.fit_td: fittd = "true"
     else: fittd = "false"
     fittd = "true"
     task = {"cvm":"true",
             "cvm_delta":str(delta),
             "cvm_energy":str(e),
-            "cvm_site_i":str(i),
-            "cvm_site_j":str(j),
             "cvm_e0":str(self.e0),
             "cvm_nit":str(int(self.cvm_nit)),
             "cvm_tol":str(self.cvm_tol),
-            "cvm_operator_i":namei,
-            "cvm_operator_j":namej,
             }
     self.task = task # override tasks
+#    name[0] = name[0].get_dagger()
+    self.execute(lambda: name[0].write(name="dc_multioperator_i.in"))
+    self.execute(lambda: name[1].write(name="dc_multioperator_j.in"))
     self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
     self.execute( lambda : self.run()) # run calculation
     cs = self.get_file("CVM.OUT") # read the correlator

@@ -12,8 +12,12 @@ float get_energy_fluctuation(auto psi1, auto H) {
 
 // function to get several excited states
 
-static auto get_excited=[](auto H, auto sites, auto sweeps, int nexcited) {
+static auto get_excited=[]() {
   ofstream myfile;
+  int nexcited = get_int_value("nexcited") ; // number of excited states
+  auto sites = get_sites(); // Get the different sites
+  auto H = get_hamiltonian(sites) ; // get the Hamiltonian
+  auto sweeps = get_sweeps(); // get the DMRG sweeps
   myfile.open("EXCITED.OUT"); // open file
   auto psi0 = MPS(sites); // first wavefunction
   auto en0 = dmrg(psi0,H,sweeps,{"Quiet=",true});

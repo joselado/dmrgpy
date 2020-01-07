@@ -24,7 +24,7 @@ static auto excited_vev=[]() {
   auto H = get_hamiltonian(sites) ; // get the Hamiltonian
   auto sweeps = get_sweeps(); // get sweeps
   auto nexcited = get_int_value("nexcited") ; // get excited states
-  auto wfs = get_excited(H,sites,sweeps,nexcited); // get excited states
+  auto wfs = get_excited(); // get excited states
   ofstream filevev;
   filevev.open("VEV.OUT"); // open file
   for(int i=0;i<nexcited;i++) {

@@ -12,22 +12,20 @@ def evolution(self,mode="DMRG",**kwargs):
         evolution_exact = timedependent.evolution
         return evolution_exact(self,**kwargs)
 
-def evolution_dmrg(self,name="XX",i=0,j=0,nt=10000,dt=0.1):
-    namei,namej = operatornames.recognize(name)
-    namei = operatornames.hermitian(namei) # get the Hermitian one
+def evolution_dmrg(self,name="XX",nt=10000,dt=0.1,**kwargs):
+    name = operatornames.str2MO(self,name,**kwargs)
     if self.fit_td: fittd = "true"
     else: fittd = "false"
     fittd = "true"
     task = {"time_evolution":"true",
-            "tevol_site_i":str(i),
-            "tevol_site_j":str(j),
             "tevol_nt":str(nt),
             "tevol_fit":fittd,
             "tevol_dt":str(dt),
-            "tevol_operator_i":namei,
-            "tevol_operator_j":namej,
             }
     self.task = task # override tasks
+    name[0] = name[0].get_dagger()
+    self.execute(lambda: name[0].write(name="dc_multioperator_i.in"))
+    self.execute(lambda: name[1].write(name="dc_multioperator_j.in"))
     self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
     self.execute( lambda : self.run()) # run calculation
     cs = self.get_file("TIME_EVOLUTION.OUT").transpose() # time evolution

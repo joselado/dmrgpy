@@ -78,4 +78,17 @@ def name2MO(name,self):
         print(name) ; exit()
         raise
 
+def str2MO(self,name,i=0,j=0):
+    from . import multioperator
+    if type(name)==str:
+        n1,n2 = recognize(name)
+        def f(n,i):
+            if n=="Sx": return self.Sx[i]
+            elif n=="Sy": return self.Sy[i]
+            elif n=="Sz": return self.Sz[i]
+            else: raise
+        return [f(n1,i),f(n2,j)]
+    elif type(name[0])==multioperator.MultiOperator and type(name[1])==multioperator.MultiOperator:
+        return [name[0],name[1]]
+    else: raise
 

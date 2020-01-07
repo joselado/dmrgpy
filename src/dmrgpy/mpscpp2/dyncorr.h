@@ -5,7 +5,7 @@
 static auto dynamical_correlator=[]() {
   auto sites = get_sites(); // get the sites
   auto H = get_hamiltonian(sites) ; // get the Hamiltonian
-  auto psi = get_gs(sites,H) ; // get the ground state
+  auto psi = get_gs() ; // get the ground state
   // get the two operator
   auto opi = get_operator(sites,i,get_str("dynamical_correlator_operator_i")) ;
   auto opj = get_operator(sites,j,get_str("dynamical_correlator_operator_j")) ;

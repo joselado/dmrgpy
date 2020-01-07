@@ -101,15 +101,27 @@ auto get_sites() { // function to get the sites
 
 
 int site_type(int index) {
+    static int called = 0; // define a variable to check the calling
     ifstream sfile; // file to read
-    sfile.open("sites.in"); // file with the sites
-    int N, nm, out=-1;
-    sfile >> N; // read the number of sites and number of projections
-    for (int i=1;i<=N;i++)  {
-      sfile >> nm ; // read this spin
-      if (i-1==index) out = nm ; }
-    sfile.close() ;
-    cout << index << "  " << out << endl ;
+    static int N; // number of sites
+    static auto stypes = std::vector<int>(1); // define a dummy one
+    int out = -1;
+    // first call, read the file
+    if (called==0) { 
+      int nm;
+      sfile.open("sites.in"); // file with the sites
+      sfile >> N; // read the number of sites and number of projections
+      stypes.resize(N); // resize the array
+      for (int i=1;i<=N;i++)  {
+        sfile >> nm ; // read this spin
+	stypes.at(i-1) = nm ;// store
+//        if (i-1==index) out = nm ; 
+        }
+      sfile.close() ;
+      called = 1; // next time do not read
+      };
+    out = stypes.at(index); // get the value
+    cout << index << " site is of type  " << out << endl ;
     return out ;
 }
 

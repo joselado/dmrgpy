@@ -7,15 +7,11 @@ int dynamical_correlator_excited() {
 	auto H = get_hamiltonian(sites) ; // get the Hamiltonian
 	auto sweeps = get_sweeps(); // get sweeps
 	auto nexcited = get_int_value("nexcited") ; // get excited states
-	auto wfs = get_excited(H,sites,sweeps,nexcited); // get excited states
+	auto wfs = get_excited(); // get excited states
 	nexcited = wfs.size() ; // get excited states
         // now compute the different matrix elements
-	auto namei = get_str("operator_i");
-        auto namej = get_str("operator_j");
-	auto ii = get_int_value("site_i");
-        auto jj = get_int_value("site_j");
-	auto A1 = get_operator(sites,ii,namei); // first operator
-	auto A2 = get_operator(sites,jj,namej); // second operator
+	auto A1 = get_mpo_operator("dc_multioperator_i.in");
+	auto A2 = get_mpo_operator("dc_multioperator_j.in");
 	auto psi0 = wfs.at(0); // ground state
 	// open files
 	ofstream fileoverlap;

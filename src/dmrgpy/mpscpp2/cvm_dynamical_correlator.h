@@ -5,16 +5,13 @@
 
 
 // compute the dynamical correlator with CVM
-static auto cvm_dynamical_correlator=[](auto sites) {
-  auto name1 = get_str("cvm_operator_i");  // first operator
-  auto name2 = get_str("cvm_operator_j");  // second operator
-  auto i1 = get_int_value("cvm_site_i");  // second operator
-  auto i2 = get_int_value("cvm_site_j");  // second operator
+static auto cvm_dynamical_correlator=[]() {
+  auto sites = get_sites();
   // now get the operators
-  auto A1 = get_operator(sites,i1,name1); // first operator
-  auto A2 = get_operator(sites,i2,name2); // second operator
+  auto A1 = get_mpo_operator("dc_multioperator_i.in");
+  auto A2 = get_mpo_operator("dc_multioperator_j.in");
   auto H = get_hamiltonian(sites) ; // get the ampo for the Hamiltonian
-  auto psi = get_gs(sites,H) ; // get the ground state
+  auto psi = get_gs() ; // get the ground state
   int maxm = get_int_value("maxm") ; // bond dimension
   int max_it = get_int_value("cvm_nit") ; // number of iterations
   auto cutoff = get_float_value("cutoff") ; // cutoff of DMRG

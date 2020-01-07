@@ -1,7 +1,7 @@
 static auto reduced_dm=[]() {
   auto sites = get_sites(); // 
   auto H = get_hamiltonian(sites) ; // get Hamiltonian
-  auto psi = get_gs(sites,H) ; // get the ground state
+  auto psi = get_gs() ; // get the ground state
   psi /= overlap(psi,psi); // normalize
   //Given an MPS called "psi",
   //and assuming j > i

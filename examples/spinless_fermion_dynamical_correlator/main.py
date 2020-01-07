@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 4
-fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
+fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
 m = m + m.H # Make it Hermitian
 
@@ -27,10 +27,10 @@ print("Energy with DMRG",e1)
 
 
 ### Compute the dyamical correlator ###
-
-name = "ccd" # name of the correlator
-x0,y0 = fc.get_dynamical_correlator(i=1,j=1,mode="ED",name=name,delta=1e-2)
-x1,y1 = fc.get_dynamical_correlator(i=1,j=1,mode="DMRG",name=name)
+i,j = 1,2
+name = (fc.C[i],fc.Cdag[j]) # define the correlator
+x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,delta=1e-2)
+x1,y1 = fc.get_dynamical_correlator(mode="DMRG",name=name)
 
 
 

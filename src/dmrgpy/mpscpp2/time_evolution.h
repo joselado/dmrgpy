@@ -1,15 +1,12 @@
 // perform a time evolution
 
-static auto quench=[](auto sites) {
-  auto name1 = get_str("tevol_operator_i");  // first operator
-  auto name2 = get_str("tevol_operator_j");  // second operator
-  auto i1 = get_int_value("tevol_site_i");  // second operator
-  auto i2 = get_int_value("tevol_site_j");  // second operator
+static auto quench=[]() {
+  auto sites = get_sites();
   // now get the operators
-  auto A1 = get_operator(sites,i1,name1);
-  auto A2 = get_operator(sites,i2,name2);
+  auto A1 = get_mpo_operator("dc_multioperator_i.in");
+  auto A2 = get_mpo_operator("dc_multioperator_j.in");
   auto H = get_hamiltonian(sites) ; // get the ampo for the Hamiltonian
-  auto psi = get_gs(sites,H) ; // get the ground state
+  auto psi = get_gs() ; // get the ground state
   int maxm = get_int_value("maxm") ; // bond dimension
   auto cutoff = get_float_value("cutoff") ; // cutoff
   // apply the first operator
