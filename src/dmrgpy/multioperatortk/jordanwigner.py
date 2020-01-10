@@ -74,3 +74,16 @@ def two_fermions(ni,i,nj,j,**kwargs):
 
 def four_fermions(ni,i,nj,j,nk,k,nl,l,**kwargs):
     return two_fermions(ni,i,nj,j,**kwargs)*two_fermions(nk,k,nl,l,**kwargs)
+
+
+def product2jw(ns,inds):
+    """Transform a generic product of operators into bosonic
+    using Jordan Wigner, the transformation may not be optimal"""
+    out = 1
+    for (ni,i) in zip(ns,inds):
+        if ni=="C" or ni=="Cdag": out = out*one_fermion(ni,i)
+        else: out = out*obj2MO([ni,i])
+    return out
+
+
+

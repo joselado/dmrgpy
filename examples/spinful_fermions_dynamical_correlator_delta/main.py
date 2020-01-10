@@ -37,7 +37,9 @@ print("Energy with DMRG",fc.gs_energy(mode="DMRG"))
 print("Energy with ED",fc.gs_energy(mode="ED"))
 
 i,j = 1,2
-name = (fc.Delta[i],fc.Delta[j])
+op = fc.Nup[i]*fc.Cdagup[i]
+op = fc.Cdagup[i]
+name = (op.get_dagger(),op)
 x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,delta=1e-2)
 x1,y1 = fc.get_dynamical_correlator(mode="DMRG",name=name)
 

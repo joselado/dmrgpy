@@ -212,21 +212,25 @@ def jordan_wigner(MO):
         c = opi[0] # take the complex value
         mi = list2MO(opi) # default output
         ls = [opi[kk+1][0] for kk in range(n)] # names of operators
-        if (n==1): # one point operator
-            i = opi[1][1]
-            if "C" in ls or "Cdag" in ls:
-                mi = c*jordanwigner.one_fermion(ls[0],i)
-        elif (n==2): # two point operators
-            i,j = opi[1][1],opi[2][1]
-            if "C" in ls or "Cdag" in ls:
-                mi = c*jordanwigner.two_fermions(ls[0],i,ls[1],j)
-        elif (n==4): # four point operators
-            i,j,k,l = opi[1][1],opi[2][1],opi[3][1],opi[4][1]
-            if "C" in ls or "Cdag" in ls:
-                mi = c*jordanwigner.four_fermions(ls[0],i,ls[1],j,ls[2],
-                        k,ls[3],l) 
-        else: 
-            if "C" in ls or "Cdag" in ls: raise # not implemented
+        try:
+          if (n==1): # one point operator
+              i = opi[1][1]
+              if "C" in ls or "Cdag" in ls:
+                  mi = c*jordanwigner.one_fermion(ls[0],i)
+          elif (n==2): # two point operators
+              i,j = opi[1][1],opi[2][1]
+              if "C" in ls or "Cdag" in ls:
+                  mi = c*jordanwigner.two_fermions(ls[0],i,ls[1],j)
+          elif (n==4): # four point operators
+              i,j,k,l = opi[1][1],opi[2][1],opi[3][1],opi[4][1]
+              if "C" in ls or "Cdag" in ls:
+                  mi = c*jordanwigner.four_fermions(ls[0],i,ls[1],j,ls[2],
+                          k,ls[3],l) 
+          else: 
+              if "C" in ls or "Cdag" in ls: raise # not implemented
+        except: # brute force 
+            inds = [opi[kk+1][1] for kk in range(n)]
+            mi = c*jordanwigner.product2jw(ls,inds)
         m = m + mi
     return m
 
