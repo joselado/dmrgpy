@@ -23,7 +23,7 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
         i=0,j=0,**kwargs):
     """Return the dynamical correlator of an spinful system"""
     if type(name[0])==multioperator.MultiOperator:
-        return self.get_dynamical_correlator_spinless(self,name=name,**kwargs)
+        return self.get_dynamical_correlator_spinless(name=name,**kwargs)
     # input is a keyword
     def getij(mi,mj):
         return self.get_dynamical_correlator_spinless(name=(mi,mj),**kwargs)
