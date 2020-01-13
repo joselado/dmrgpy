@@ -7,20 +7,17 @@ fc = fermionchain.Fermionic_Hamiltonian(nf) # create the object
 C = fc.C # annihilation
 Cdag = fc.Cdag # creation
 N = fc.N # density
-#N = [Cdag[i]*C[i] for i in range(nf)] # density
 
 H = 0 # initialize Hamiltonian 
 
 # random Hamiltonian
 for i in range(nf-1):
     H = H + Cdag[i]*C[i+1]*np.random.random() # random first neigh. hopping
-#    H = H + Cdag[i+1]*C[i]#*np.random.random() # random first neigh. hopping
+    H = H + C[i]*C[i+1]*np.random.random() # random first neigh. pairing
     H = H + N[i]*N[i+1]*np.random.random() # random first neigh. interaction
 
 H = H + H.get_dagger() # make it Hermitian
 
-fc.set_hamiltonian(H)
-fc.nsweeps = 10
-fc.maxm = 50
+fc.set_hamiltonian(H) # set the Hamiltonian
 print("Energy with DMRG",fc.gs_energy(mode="DMRG"))
 print("Energy with ED",fc.gs_energy(mode="ED"))

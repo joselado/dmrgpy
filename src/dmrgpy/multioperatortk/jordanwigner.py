@@ -13,13 +13,7 @@ def CdagC(i,j):
 
 
 def CCdag(i,j):
-    if i==j: return obj2MO(["A",i])*obj2MO(["Adag",j])
-    elif i<j:
-        m = -1*obj2MO(["A",i])
-        for k in range(i,j-1):
-            m = m*obj2MO(["F",k+1])
-        return m*obj2MO(["Adag",j])
-    elif j<i: return CdagC(j,i)
+    return CdagC(j,i).get_dagger()
 
 
 def C(i):
@@ -47,13 +41,7 @@ def CC(i,j):
 
 
 def CdagCdag(i,j):
-    if i==j: return 0
-    elif i<j:
-        m = -1*obj2MO(["Adag",i])
-        for k in range(i,j-1):
-            m = m*obj2MO(["F",k+1])
-        return m*obj2MO(["Adag",j])
-    elif j<i: return -1*CdagCdag(j,i)
+    return CC(j,i).get_dagger()
 
 def CdagCCdagC(i,j,k,l):
     return CdagC(i,j)*CdagC(k,l)
