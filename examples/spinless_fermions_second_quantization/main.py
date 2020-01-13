@@ -14,7 +14,7 @@ H = 0 # initialize Hamiltonian
 # random Hamiltonian
 for i in range(nf-1):
     H = H + Cdag[i]*C[i+1]*np.random.random() # random first neigh. hopping
-    H = H + -1.*N[i]*N[i+1]*np.random.random() # random first neigh. interaction
+    H = H - N[i]*N[i+1]*np.random.random() # random first neigh. interaction
 
 H = H + H.get_dagger() # make it Hermitian
 
