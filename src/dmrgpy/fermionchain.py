@@ -151,12 +151,14 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """
         m0 = self.hamiltonian_free() # free Hamiltonian
         MBf = mbfermion.MBFermion(m0.shape[0]) # create object
-        MBf.add_hopping(m0)
-        MBf.add_pairing(self.pairing) # add pairing
-        MBf.add_hubbard(self.hubbard_matrix) # add hubbard term
-        MBf.add_vijkl(self.vijkl) # add generalized interaction
+        if self.use_ampo_hamiltonian:
+          MBf.add_multioperator(self.hamiltonian) 
+        else:
+          MBf.add_hopping(m0)
+          MBf.add_pairing(self.pairing) # add pairing
+          MBf.add_hubbard(self.hubbard_matrix) # add hubbard term
+          MBf.add_vijkl(self.vijkl) # add generalized interaction
         # add generalized term
-        MBf.add_multioperator(self.hamiltonian) 
         return MBf # return the object
     def get_kpm_scale(self):
         """Energy scale for KPM method"""
