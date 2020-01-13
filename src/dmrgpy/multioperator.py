@@ -250,15 +250,16 @@ def get_dagger(self):
         for i in range(n): # loop over terms in the product
             name = opi[n-i][0] # name
             jj = opi[n-i][1] # index
-            if name=="C": name="Cdag"
-            elif name=="Cdag": name="C"
-            elif name=="A": name="Adag"
-            elif name=="Adag": name="A"
-            elif name=="Sp": name="Sm"
-            elif name=="S+": name="S-"
-            elif name=="Sm": name="Sp"
-            elif name=="S-": name="S+"
-            mi = obj2MO([[name,jj]])*mi
+            if name=="C": name2="Cdag"
+            elif name=="Cdag": name2="C"
+            elif name=="A": name2="Adag"
+            elif name=="Adag": name2="A"
+            elif name=="Sp": name2="Sm"
+            elif name=="S+": name2="S-"
+            elif name=="Sm": name2="Sp"
+            elif name=="S-": name2="S+"
+            else: name2 = name
+            mi = mi*obj2MO([[name2,jj]])
         m = m + mi # add contribution
     return m # return MO
 

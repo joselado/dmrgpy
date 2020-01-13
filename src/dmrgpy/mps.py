@@ -13,13 +13,27 @@ class MPS():
     self.factor = 1.0 # factor of the mps
   def dot(self,x):
     return dot(self,x) # dot function
-  def copy(self):
+  def copy(self,name=None):
     """Copy this wavefunction"""
     out = deepcopy(self) # copy everything
-    name = id_generator()+".mps" # create a new name
+    if name is None:
+      name = id_generator()+".mps" # create a new name
     out.name = name
-    os.system("cp "+self.path+"/"+self.name+"  "+out.path+out.name)
+    self.execute(lambda: os.system("cp "+self.name+"  "+out.name))
     return out
+  def rename(self,name):
+#      self.copy(name)
+#      self.clean()
+      self.execute(lambda: os.system("mv "+self.name+"  "+name))
+      self.name = name
+  def execute(self,f):
+      pwd = os.getcwd() # path
+      os.chdir(self.path) # go
+      f()
+      os.chdir(pwd) # go back
+  def clean(self):
+      self.execute(lambda: os.system("rm "+self.name))
+      del self
   def __mul__(self,x):
     """Multiply by an scalar"""
     out = self.copy()

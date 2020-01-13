@@ -41,6 +41,7 @@ class Many_Body_Hamiltonian():
       self.fields = [] # empty list
       self.hoppings = dict() # empty dictionary
       self.fermionic = False
+      self.sites_from_file = False
       self.spinful_hoppings = dict() # empty dictionary
       self.pairing = None # pairing
       self.hubbard = dict() # empty dictionary

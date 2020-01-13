@@ -19,7 +19,7 @@ def CCdag(i,j):
         for k in range(i,j-1):
             m = m*obj2MO(["F",k+1])
         return m*obj2MO(["Adag",j])
-    elif j<i: return -1*CdagC(j,i)
+    elif j<i: return CdagC(j,i)
 
 
 def C(i):
