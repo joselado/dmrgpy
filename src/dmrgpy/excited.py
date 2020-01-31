@@ -3,6 +3,7 @@ import numpy as np
 
 def get_excited(self,n=2,noise=0.0,scale=10.0):
     """Return excited state energies"""
+    self.get_gs()
     task = {"excited":"true",
             "nexcited":str(n),
             "noise":str(noise),

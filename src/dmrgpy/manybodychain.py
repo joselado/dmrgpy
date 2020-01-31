@@ -231,9 +231,9 @@ class Many_Body_Hamiltonian():
         return excited.get_excited(self,**kwargs) # return excitation energies
       elif mode=="ED": return self.get_ED_obj().get_excited(**kwargs) # ED
       else: raise
-  def get_gap(self):
+  def get_gap(self,**kwargs):
     """Return the gap"""
-    es = self.get_excited(2)
+    es = self.get_excited(n=2,**kwargs)
     return es[1] -es[0]
   def get_hamiltonian(): return self.hamiltonian
   def gs_energy_fluctuation(self,**kwargs):
