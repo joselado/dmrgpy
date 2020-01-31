@@ -37,7 +37,7 @@ def pcall(fin,xs):
     open(pfolder+"/run.sh","w").write(runsh) # parallel file
     pwd = os.getcwd() # current directory 
     os.chdir(pfolder) # go to the folder
-    os.system("sbatch run.sh") # run calculation
+    os.system("sbatch run.sh >> run.out") # run calculation
     os.chdir(pwd) # back to main
     import time
     from os import path
