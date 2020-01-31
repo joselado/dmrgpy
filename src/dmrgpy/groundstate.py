@@ -62,7 +62,7 @@ def gs_energy_single(self,wf0=None,reconverge=False):
     self.gs_from_file = True
     self.skip_dmrg_gs = True
     self.set_initial_wf(self.wf0) # set the initial wavefunction
-    return out[0] # return energy
+    return out # return energy
 
 def gs_energy(self,policy="single",**kwargs):
     if policy=="single":
