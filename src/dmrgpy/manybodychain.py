@@ -53,6 +53,7 @@ class Many_Body_Hamiltonian():
       self.kpmmaxm = 50 # bond dimension in KPM
       self.maxm = 30 # bond dimension in wavefunctions
       self.nsweeps = 15 # number of sweeps
+      self.noise = 1e-2 # noise for dmrg
       self.kpmcutoff = 1e-8 # cutoff in KPM
       self.cutoff = 1e-8 # cutoff in ground state
       self.tevol_custom_exp = True # custom exponential function for Tevol

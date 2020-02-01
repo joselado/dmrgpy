@@ -57,6 +57,7 @@ def write_tasks(self):
 #("GS = true\ngap = false\ncorrelator = false\n}\n")
   # parameters of dmrg algorithm
   fo.write(" maxm = "+str(self.maxm)+"\n") # maximum bond dimension
+  fo.write(" noise = "+str(self.noise)+"\n") # maximum bond dimension
   fo.write(" cutoff = "+str(self.cutoff)+"\n") # maximum discarded weight
   fo.write(" nsweeps = "+str(self.nsweeps)+"\n") # maximum discarded weight
   ### this is a special addition to allow for generic interactions ###
