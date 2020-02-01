@@ -4,13 +4,13 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 import time
-n = 12 # take n different sites
+n = 8 # take n different sites
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
-def fj(i,j):
-    if abs(i-j)==1: return 47.
-    return 0.0
-sc.set_exchange(fj)
+h = 0
+for i in range(n-1):
+    h = h + np.random.random()*sc.SS(i,i+1)
+sc.set_hamiltonian(h)
 
 # n is the number of excited states
 t0 = time.time()

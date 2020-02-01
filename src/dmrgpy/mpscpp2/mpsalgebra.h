@@ -41,3 +41,14 @@ static auto mult_mpo=[](auto A1,auto A2) {
 
 
 
+static auto sum_mps=[](auto A1,auto A2) {
+	return sum_mpo(A1,A2);
+//        int maxm = get_int_value("maxm") ; // bond dimension
+ //       auto cutoff = get_float_value("cutoff") ;
+//	auto args = Args({"Maxm", maxm, "Cutoff", cutoff});
+//	auto out = sum(A1,A2, args); // add contribution
+//	return out;
+}
+;
+
+

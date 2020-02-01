@@ -36,11 +36,12 @@ class Many_Body_Hamiltonian():
       self.clean() # clean calculation
       self.inipath = os.getcwd() # original folder
       self.ns = len(sites) # number of sites
-      self.exchange = [] # empty list
-      self.fields = [] # empty list
+      self.exchange = 0 # zero
+      self.fields = 0 # zero
       self.hoppings = dict() # empty dictionary
       self.fermionic = False
       self.sites_from_file = False
+      self.excited_gram_schmidt = False # it does not seem very effective
       self.spinful_hoppings = dict() # empty dictionary
       self.pairing = None # pairing
       self.hubbard = dict() # empty dictionary
@@ -170,14 +171,6 @@ class Many_Body_Hamiltonian():
           c = self.hubbard[key]
           m[c.i,c.j] = c.g # create entry
       self.hubbard_matrix = m # store matrix
-  def set_fields(self,fun):
-    """
-    Add local magnetic fields
-    """
-    self.computed_gs = False # say that GS has not been computed
-    self.fields = [fun(i) for i in range(self.ns)] # fields
-#  def setup_sweep(self,mode="default"):
-#    setup_sweep(self,mode=mode)
   def setup_task(self,mode="GS",task=dict()):
     from .taskdmrg import setup_task
     setup_task(self,mode=mode,task=task)

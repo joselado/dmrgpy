@@ -19,26 +19,35 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
     def __init__(self,sites):
         Many_Body_Hamiltonian.__init__(self,sites)
         # default exchange constants
-        self.set_exchange(lambda i,j: abs(i-j)==1*1.0)
         self.use_ampo_hamiltonian = True # use ampo
         self.pychain_object = None # pychain object
         self.Sx = [self.get_operator("Sx",i) for i in range(self.ns)]
         self.Sy = [self.get_operator("Sy",i) for i in range(self.ns)]
         self.Sz = [self.get_operator("Sz",i) for i in range(self.ns)]
+        self.Si = [self.Sx,self.Sy,self.Sz]
+    def SS(self,i,j):
+        return self.Sx[i]*self.Sx[j] + self.Sy[i]*self.Sy[j] + self.Sz[i]*self.Sz[j]
+    def set_fields(self,fun):
+        h = 0
+        for i in range(self.ns):
+            b = fun(i)
+            for j in range(3):  h = h + b[j]*self.Si[j][i]
+        self.fields = h
+        self.hamiltonian = self.exchange + self.fields # update Hamiltonian
     def set_exchange(self,fun):
       """Set the exchange coupling between sites"""
-      one = np.matrix(np.identity(3))
-      self.computed_gs = False # say that GS has not been computed
-      self.exchange = [] # empty list
+      h = 0
       for i in range(self.ns): # loop
         for j in range(self.ns):  # loop
           g = fun(i,j).real # call the function
           if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
+          one = np.identity(3) # identity matrix
           g = g*one # multiply by the identity
-          if np.sum(np.abs(g))!=0.0:
-            g = g/2. # normalize
-            c = Coupling(i,j,g) # create class
-            self.exchange.append(c) # store
+          for ii in range(3):
+            for jj in range(3):
+                h = h + g[ii,jj]*self.Si[ii][i]*self.Si[jj][j]
+      self.exchange = h # exchange matrix
+      self.hamiltonian = self.exchange + self.fields # update Hamiltonian
     def vev(self,MO,mode="DMRG",**kwargs):
         """ Return a vaccum expectation value"""
         if mode=="DMRG":

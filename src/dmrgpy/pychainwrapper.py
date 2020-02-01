@@ -5,6 +5,22 @@ from .edtk import finitetemperature
 from . import operatornames
 from . import multioperator
 
+def old2ampo(self):
+    """Transform an old Hamiltonian into the AMPO form"""
+    if self.use_ampo_hamiltonian: return self.hamiltonian
+    else:
+        h = 0
+        Si = [self.Sx,self.Sy,self.Sz]
+        for c in self.exchange:
+            for i in range(3):
+              for j in range(3): h = h + c.g[i,j]*Si[i][c.i]*Si[j][c.j]
+        if len(self.fields)==len(self.Sz):
+            for i in range(len(fields)):
+                b = fields[i]
+                for j in range(3): h = h + b[j]*Si[j][i]
+        return h
+
+
 
 # wrapper function for pychain
 
@@ -13,14 +29,16 @@ def get_full_hamiltonian(self):
     if self.use_ampo_hamiltonian:
         return multioperator.MO2matrix(self.hamiltonian,sc)
     else: # conventional way
-      def get_coupling(i,j):
-        """Return the coupling between two sites"""
-        for c in self.exchange:
-          if i==c.i and j==c.j: return c.g
-        return np.zeros((3,3))
-      h = sc.add_tensor_interaction(get_coupling) # add interaction
-      h = h + sc.add_exchange(self.fields) # add magnetic fields
-      return h
+        h = old2ampo(self)
+        return multioperator.MO2matrix(h,sc)
+#      def get_coupling(i,j):
+#        """Return the coupling between two sites"""
+#        for c in self.exchange:
+#          if i==c.i and j==c.j: return c.g
+#        return np.zeros((3,3))
+#      h = sc.add_tensor_interaction(get_coupling) # add interaction
+#      h = h + sc.add_exchange(self.fields) # add magnetic fields
+#      return h
 
 
 def get_pychain(self):
