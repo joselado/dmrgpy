@@ -3,20 +3,24 @@ from .kpmdmrg import restrict_interval
 from .algebra import algebra
 from .edtk import finitetemperature
 from . import operatornames
+from . import multioperator
 
 
 # wrapper function for pychain
 
 def get_full_hamiltonian(self):
-  sc = get_pychain(self) # get pychain object
-  def get_coupling(i,j):
-    """Return the coupling between two sites"""
-    for c in self.exchange:
-      if i==c.i and j==c.j: return c.g
-    return np.zeros((3,3))
-  h = sc.add_tensor_interaction(get_coupling) # add interaction
-  h = h + sc.add_exchange(self.fields) # add magnetic fields
-  return h
+    sc = get_pychain(self) # get pychain object
+    if self.use_ampo_hamiltonian:
+        return multioperator.MO2matrix(self.hamiltonian,sc)
+    else: # conventional way
+      def get_coupling(i,j):
+        """Return the coupling between two sites"""
+        for c in self.exchange:
+          if i==c.i and j==c.j: return c.g
+        return np.zeros((3,3))
+      h = sc.add_tensor_interaction(get_coupling) # add interaction
+      h = h + sc.add_exchange(self.fields) # add magnetic fields
+      return h
 
 
 def get_pychain(self):

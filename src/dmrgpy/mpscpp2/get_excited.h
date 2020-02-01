@@ -42,7 +42,7 @@ static auto get_excited=[]() {
 //    if (de<1e-2) { // if the fluctuation is small enough
       wfs.insert(wfs.end(),psi1); // store this wavefunction
       psi1 = MPS(sites) ; // new random wavefunction
-      myfile << std::setprecision(8) << en0 << "  " << de << endl; // write 
+      myfile << std::setprecision(20) << en0 << "  " << de << endl; // write 
 //    };
   } ;
   return wfs ;

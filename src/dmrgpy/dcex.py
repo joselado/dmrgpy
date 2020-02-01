@@ -3,11 +3,12 @@ from . import operatornames
 from . import taskdmrg
 
 def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
-        nex=20,es=None,scale=10.0):
+        nex=20,es=np.linspace(-1.0,10.0,1000),scale=20.0,**kwargs):
     """
     Compute dynamical correlator with excited states with DMRG
     """
-    name = operatornames.str2MO(self,name,**kwargs)
+    self.gs_energy()
+    name = operatornames.str2MO(self,name)
     task = {"dynamical_correlator_excited":"true",
             "scale_lagrange_excited":str(scale),
             "nexcited":str(nex),
@@ -33,7 +34,7 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
 
 
 
-def dcex(eex,c1,c2,es=None,delta=1e-1):
+def dcex(eex,c1,c2,es=np.linspace(-1.0,10.0,300),delta=1e-1):
     """
     Compute a dynamical correlator with excitation energies and
     matrix elements

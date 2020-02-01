@@ -36,7 +36,6 @@ class Many_Body_Hamiltonian():
       self.clean() # clean calculation
       self.inipath = os.getcwd() # original folder
       self.ns = len(sites) # number of sites
-      self.exchange = [Coupling(i,i+1,one) for i in range(self.ns-1)] # empty list
       self.exchange = [] # empty list
       self.fields = [] # empty list
       self.hoppings = dict() # empty dictionary
