@@ -16,10 +16,13 @@ def evolution_dmrg(self,name="XX",nt=10000,dt=0.1,**kwargs):
     name = operatornames.str2MO(self,name,**kwargs)
     if self.fit_td: fittd = "true"
     else: fittd = "false"
+    if self.tevol_custom_exp: tevol_custom_exp = "true"
+    else: tevol_custom_exp = "false"
     fittd = "true"
     task = {"time_evolution":"true",
             "tevol_nt":str(nt),
             "tevol_fit":fittd,
+            "tevol_custom_exp":tevol_custom_exp,
             "tevol_dt":str(dt),
             }
     self.task = task # override tasks
@@ -35,7 +38,7 @@ def evolution_dmrg(self,name="XX",nt=10000,dt=0.1,**kwargs):
 
 
 
-def dynamical_correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.02,
+def dynamical_correlator(self,window=[-1,10],name="ZZ",es=None,dt=0.1,
         nt=None,factor=1,i=0,j=0,delta=1e-1):
     """Compute a certain dynamical correlator"""
     if type(name)==multioperator.MultiOperator: raise # not implemented

@@ -55,6 +55,7 @@ class Many_Body_Hamiltonian():
       self.nsweeps = 15 # number of sweeps
       self.kpmcutoff = 1e-8 # cutoff in KPM
       self.cutoff = 1e-8 # cutoff in ground state
+      self.tevol_custom_exp = True # custom exponential function for Tevol
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
       self.kpm_scale = 0.6 # scaling of the spectra for KPM
