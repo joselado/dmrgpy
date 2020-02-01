@@ -9,7 +9,7 @@ from .. import multioperator
 from .. import funtk
 
 
-nmax = 15 # maximum number of levels
+nmax = 20 # maximum number of levels
 
 def get_spinless_hamiltonian(m0,hubbard=None):
     """Compute ground state energy"""

@@ -5,7 +5,7 @@ import scipy.sparse.linalg as slg
 import numpy as np
 
 
-maxsize = 4000
+maxsize = 3000
 
 
 
