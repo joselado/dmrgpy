@@ -36,7 +36,7 @@ x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,
         es=es,delta=delta)
 x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
         es=es,delta=delta)
-x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="EX",name=name,
+x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="CVM",name=name,
         es=es,delta=delta)
 
 
