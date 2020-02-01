@@ -18,18 +18,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         self.fermionic = True
         self.use_ampo_hamiltonian = True # use ampo
     def set_hoppings(self,fun):
-      """Add the spin independent hoppings"""
-      from .manybodychain import Coupling
-      self.computed_gs = False # say that GS has not been computed
-      self.hoppings = dict()
-      if callable(fun):
-        for i in range(self.ns): # loop
-            for j in range(self.ns): # loop
-                if self.sites[i] in [0,1] and self.sites[j] in [0,1]:
-                    c = fun(i,j)
-                    if np.abs(c)>0.0:
-                        self.hoppings[(i,j)] = Coupling(i,j,c) # store
-      else: raise # Error
+        """Add the spin independent hoppings"""
+        self.set_hoppings_MB(fun)
     def get_density_spinless(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_spinless(self,**kwargs)
@@ -149,17 +139,8 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         """
         Return the many body fermion object
         """
-        m0 = self.hamiltonian_free() # free Hamiltonian
-        MBf = mbfermion.MBFermion(m0.shape[0]) # create object
-#        if self.use_ampo_hamiltonian:
+        MBf = mbfermion.MBFermion(self.ns) # create object
         MBf.add_multioperator(self.hamiltonian) 
-#        else:
-        if True:
-          MBf.add_hopping(m0)
-          MBf.add_pairing(self.pairing) # add pairing
-          MBf.add_hubbard(self.hubbard_matrix) # add hubbard term
-          MBf.add_vijkl(self.vijkl) # add generalized interaction
-        # add generalized term
         return MBf # return the object
     def get_kpm_scale(self):
         """Energy scale for KPM method"""

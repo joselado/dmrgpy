@@ -38,13 +38,12 @@ class Many_Body_Hamiltonian():
       self.ns = len(sites) # number of sites
       self.exchange = 0 # zero
       self.fields = 0 # zero
-      self.hoppings = dict() # empty dictionary
+      self.pairing = 0
+      self.hubbard = 0
+      self.hopping = 0
       self.fermionic = False
       self.sites_from_file = False
       self.excited_gram_schmidt = False # it does not seem very effective
-      self.spinful_hoppings = dict() # empty dictionary
-      self.pairing = None # pairing
-      self.hubbard = dict() # empty dictionary
       self.hamiltonian = None # Hamiltonian, as a multioperator
       self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
       self.use_ampo_hamiltonian = False # use ampo Hamiltonian
@@ -70,7 +69,7 @@ class Many_Body_Hamiltonian():
       self.starting_file_gs = None # initial file for GS
       self.skip_dmrg_gs = False # skip the DMRG minimization
       self.computed_gs = False # computed the GS already
-      self.vijkl = None # generalized interaction
+      self.vijkl = 0 # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
       self.itensor_version = 2 # ITensor version
       self.has_ED_obj = False # ED object has been computed
@@ -131,49 +130,46 @@ class Many_Body_Hamiltonian():
       """
       Create the generalized interaction
       """
-      self.vijkl = f # store
-  def set_spinful_hoppings(self,fun):
-      """Add the spin independent hoppings"""
-      raise # no longer used
-#      self.computed_gs = False # say that GS has not been computed
-#      if callable(fun):
-#        self.spinful_hoppings = dict()
-#        for i in range(self.ns): # loop
-#            for j in range(self.ns): # loop
-#                if self.sites[i]==1 and self.sites[j]==1:
-#                    c = fun(i,j)
-#                    if np.abs(c)>0.0:
-#                        self.spinful_hoppings[(i,j)] = Coupling(i,j,c) # store
-#      else: # assume it is a matrix
-#          self.spinful_hoppings = np.matrix(fun)
-  def set_pairings_MB(self,fun):
-      """Add the up/down pairing"""
-      self.computed_gs = False # say that GS has not been computed
-      self.pairing = funtk.obj2fun(fun) # set function
-#      self.pairing = dict()
-#      for i in range(self.ns): # loop
-#          for j in range(self.ns): # loop
-#              if self.sites[i]==1 and self.sites[j]==1:
-#                  c = fun(i,j)
-#                  if np.abs(c)>0.0:
-#                      self.pairing[(i,j)] = Coupling(i,j,c) # store
-  def set_hubbard_MB(self,fun):
-      self.computed_gs = False # say that GS has not been computed
-      self.hubbard = dict()
+      h = 0
+      C = self.C
+      Cdag = self.Cdag
+      for i in range(self.ns):
+        for j in range(self.ns):
+          for k in range(self.ns):
+            for l in range(self.ns):
+                h = h + f(i,j,k,l)*Cdag[i]*C[j]*Cdag[k]*C[l]
+      h = 0.5*(h+h.get_dagger())
+      self.vijkl = h # store
+      self.update_hamiltonian()
+  def generate_bilinear(self,fun,A,B):
+      """Generic bilinear term"""
+      fun = funtk.obj2fun(fun) # set function
+      h = 0 # initialize
       for i in range(self.ns): # loop
-          for j in range(self.ns): # loop
-              if self.sites[i] in [0,1] and self.sites[j] in [0,1]:
-                  c = fun(i,j)
-                  if np.abs(c)>0.0:
-                      self.hubbard[(i,j)] = Coupling(i,j,c) # store
-      m = np.zeros((self.ns,self.ns)) # initialize
-      for key in self.hubbard:
-          c = self.hubbard[key]
-          m[c.i,c.j] = c.g # create entry
-      self.hubbard_matrix = m # store matrix
+          for j in range(self.ns): h = h + fun(i,j)*A[i]*B[j]
+      return 0.5*(h + h.get_dagger()) # Hermitian
+  def update_hamiltonian(self):
+      h = self.hopping + self.hubbard + self.pairing 
+      h = h + self.vijkl + self.exchange
+      self.set_hamiltonian(h)
+  def set_pairings_MB(self,fun):
+      """Generic pairing term"""
+      h = self.generate_bilinear(fun,self.C,self.C)
+      self.pairing = h
+      self.update_hamiltonian()
+  def set_hubbard_MB(self,fun):
+      """Hubbard term"""
+      h = self.generate_bilinear(fun,self.N,self.N)
+      self.hubbard = h # store
+      self.update_hamiltonian()
+  def set_hoppings_MB(self,fun):
+      """Hubbard term"""
+      h = self.generate_bilinear(fun,self.Cdag,self.C)
+      self.hopping = h # store
+      self.update_hamiltonian()
   def setup_task(self,mode="GS",task=dict()):
-    from .taskdmrg import setup_task
-    setup_task(self,mode=mode,task=task)
+      from .taskdmrg import setup_task
+      setup_task(self,mode=mode,task=task)
   def write_task(self):
       """
       Write the tasks in tasks.in
