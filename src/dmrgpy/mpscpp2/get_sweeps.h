@@ -6,7 +6,7 @@ auto get_sweeps() {
     auto maxm = get_int_value("maxm"); // bond dimension
     auto N = get_int_value("nsweeps"); // bond dimension
     auto cutoff = get_float_value("cutoff"); // bond dimension
-    auto moise = get_float_value("moise"); // bond dimension
+    auto moise = get_float_value("moise"); // noise
     auto sweeps = Sweeps(N); //number of sweeps
     sweeps.maxm() = maxm;
     sweeps.cutoff() = cutoff;

@@ -19,7 +19,7 @@ def get_moments_dmrg(self,n=1000):
 
 
 def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
-        name="XX",delta=1e-1):
+        name="XX",delta=1e-1,noise=1e-2):
   """Get the moments with DMRG"""
   if type(name)==str: # string input
         namei,namej = operatornames.recognize(name)
@@ -37,6 +37,7 @@ def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
                 "kpm_accelerate":self.kpm_accelerate,
                 "kpm_n_scale":str(self.kpm_n_scale),
                 "kpm_delta":str(delta),
+                "noise":str(noise),
                 "kpm_cutoff":str(self.kpmcutoff),
                 }
   # go on, check the kind of input used to define the correlator
