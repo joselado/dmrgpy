@@ -84,7 +84,7 @@ def get_correlator_spinful(self,name="ZZ",pairs=[[]],**kwargs):
 def get_density_spinless(self,**kwargs):
     """Return the electronic density"""
     out = [self.vev(self.N[i],**kwargs) for i in range(self.ns)]
-    return np.array(out)
+    return np.array(out).real
 #    pairs = [(i,i) for i in range(self.ns)]
 #    return self.get_correlator_spinless(pairs=pairs,
 #            name="cdc",**kwargs).real

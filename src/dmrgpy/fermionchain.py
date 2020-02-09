@@ -221,6 +221,7 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
         self.Cdagdn = [self.Cdag[2*i+1] for i in range(n)]
         self.Nup = [self.get_operator("N",2*i) for i in range(n)]
         self.Ndn = [self.get_operator("N",2*i+1) for i in range(n)]
+        self.Ntot = [self.Nup[i]+self.Ndn[i] for i in range(n)]
     def get_density_spinful(self,**kwargs):
         """
         Return the density in each site, summing over spin channels

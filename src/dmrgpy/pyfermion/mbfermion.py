@@ -33,10 +33,12 @@ class MBFermion():
     """
     Class for a many body fermionic Hamiltonian
     """
-    def __init__(self,n,fconf = lambda x: True):
+    def __init__(self,n,nf=None):
         """
         Initialize the object
         """
+        if nf is not None: raise
+        fconf = lambda x: True
         self.n = n # number of different levels
         if n>nmax: raise # too big system
         self.c_dict = dict() # dictionary with the annhilation operators
