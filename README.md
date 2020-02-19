@@ -50,6 +50,12 @@ from dmrgpy import spinchain
 from dmrgpy import spinchain
 spins = [2 for i in range(30)] # 2*S+1=2 for S=1/2
 sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1): 
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h) # create the Hamiltonian
 print("Ground state energy",sc.gs_energy())
 ```
 
@@ -58,6 +64,12 @@ print("Ground state energy",sc.gs_energy())
 from dmrgpy import spinchain
 spins = [3 for i in range(30)] # 2*S+1=3 for S=1
 sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1): 
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h) # create the Hamiltonian
 pairs = [(0,i) for i in range(30)] # between the edge and the rest
 cs = sc.get_correlator(pairs)
 ```
@@ -107,6 +119,7 @@ for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
 from dmrgpy import spinchain
 spins = [2 for i in range(12)] # 2*S+1=2 for S=1/2
 sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
 es1 = sc.get_excited(n=6,mode="DMRG")
 es2 = sc.get_excited(n=6,mode="ED")
 print("Excited states with DMRG",es1)
@@ -119,6 +132,7 @@ from dmrgpy import spinchain
 # Haldane chain with S=1/2 on the edge to remove the topological modes
 spins = [2]+[3 for i in range(40)]+[2]
 sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
 es = sc.get_excited(n=2,mode="DMRG")
 gap = es[1]-es[0] # compute gap
 print("Gap of the Haldane chain",gap)
@@ -129,6 +143,7 @@ print("Gap of the Haldane chain",gap)
 from dmrgpy import spinchain
 spins = [3 for i in range(40)] # 2*S+1=3 for S=1
 sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
 sc.get_dynamical_correlator(i=0,j=0,name="ZZ")
 ```
 
