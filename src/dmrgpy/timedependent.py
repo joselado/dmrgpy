@@ -2,6 +2,7 @@ from __future__ import print_function
 from . import operatornames
 from . import taskdmrg
 import numpy as np
+import os
 from scipy.interpolate import interp1d
 from . import multioperator
 
@@ -12,7 +13,7 @@ def evolution(self,mode="DMRG",**kwargs):
         evolution_exact = timedependent.evolution
         return evolution_exact(self,**kwargs)
 
-def evolution_dmrg(self,name="XX",nt=10000,dt=0.1,**kwargs):
+def evolution_dmrg(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     name = operatornames.str2MO(self,name,**kwargs)
     if self.fit_td: fittd = "true"
     else: fittd = "false"
@@ -26,6 +27,8 @@ def evolution_dmrg(self,name="XX",nt=10000,dt=0.1,**kwargs):
             "tevol_dt":str(dt),
             }
     self.task = task # override tasks
+    if restart: # restart the calculation
+      self.execute(lambda: os.system("cp psi_GS.mps psi_time_evolution.mps"))
     name[0] = name[0].get_dagger()
     self.execute(lambda: name[0].write(name="dc_multioperator_i.in"))
     self.execute(lambda: name[1].write(name="dc_multioperator_j.in"))
@@ -34,6 +37,37 @@ def evolution_dmrg(self,name="XX",nt=10000,dt=0.1,**kwargs):
     cs = self.get_file("TIME_EVOLUTION.OUT").transpose() # time evolution
     ts = np.array([dt*ii for ii in range(nt)]) # times
     return ts,cs[0].real-1j*cs[1] # return
+
+
+
+
+def evolve_and_measure(self,operator=None,nt=1000,dt=1e-2,
+        restart=True,**kwargs):
+    if self.fit_td: fittd = "true"
+    else: fittd = "false"
+    if self.tevol_custom_exp: tevol_custom_exp = "true"
+    else: tevol_custom_exp = "false"
+    fittd = "true"
+    task = {"evolution_measure":"true",
+            "tevol_nt":str(int(nt)),
+            "tevol_fit":fittd,
+            "tevol_custom_exp":tevol_custom_exp,
+            "tevol_dt":str(dt),
+            }
+    self.task = task # override tasks
+    if restart: # restart the calculation
+      self.execute(lambda: os.system("cp psi_GS.mps psi_evolve_and_measure.mps"))
+    self.execute(lambda: operator.write(name="time_evolution_multioperator.in"))
+    self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
+    self.execute( lambda : self.run()) # run calculation
+    cs = self.get_file("TIME_EVOLUTION.OUT").transpose() # time evolution
+    ts = np.array([dt*ii for ii in range(int(nt))]) # times
+    return ts,cs[0].real-1j*cs[1] # return
+
+
+
+
+
 
 
 

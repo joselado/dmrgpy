@@ -33,7 +33,8 @@ using namespace std;
 #include"time_evolution.h" // Time evolution
 #include"reduced_dm.h" // Reduced density matrix
 #include"dynamical_correlator_excited.h" // dynamical correlator with exited
-#include"vev.h" // Reduced density matrix
+#include"vev.h" // VEV
+#include"applyoperator.h" // apply operator to a vector
 
 
 int 
@@ -67,8 +68,11 @@ main()
 // overlap task
     if (check_task("overlap"))  compute_overlap() ; // compute overlap
     if (check_task("time_evolution"))  quench() ; // time evolution
+    if (check_task("evolution_AeiHtB"))  evolution_AeiHtB() ; // time evolution
+    if (check_task("evolution_measure"))  evolution_measure() ; // time evol
     if (check_task("density_matrix"))  reduced_dm() ; // DM
     if (check_task("vev"))  vev() ; // Vacuum expectation value
+    if (check_task("applyoperator"))  applyoperator() ; 
 //    if (check_task("excited_vev"))  excited_vev() ; // VEV excited
     if (check_task("dynamical_correlator_excited"))  
 	    dynamical_correlator_excited(); // DM

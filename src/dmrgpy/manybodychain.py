@@ -97,6 +97,7 @@ class Many_Body_Hamiltonian():
       """Set the Hamiltonian"""
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
+      self.write_hamiltonian()
   def to_origin(self): 
     if os.path.isfile(self.path+"/ERROR"): raise # something wrong
     os.chdir(self.inipath) # go to original folder
