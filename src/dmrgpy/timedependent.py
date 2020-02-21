@@ -68,7 +68,6 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,
             "tevol_dt":str(dt),
             }
     self.task = task # override tasks
-    print(wf.name)
     if wf is None: wf = self.wf0 # get ground state
     wf.copy(name="psi_evolve_and_measure.mps") # copy wavefunction
     self.execute(lambda: operator.write(name="time_evolution_multioperator.in"))

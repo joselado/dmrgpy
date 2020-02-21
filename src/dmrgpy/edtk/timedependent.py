@@ -34,7 +34,7 @@ def evolve_and_measure(self,h,operator=None,**kwargs):
 
 def evolution_ABA(self,h=None,A=None,B=None,**kwargs):
     """Evolve and measure"""
-    return evolution_ABC(self,h,A=A.get_dagger(),B=B,C=A,**kwargs)
+    return evolution_ABC(self,h,A=A,B=B,C=A,**kwargs)
 
 
 
