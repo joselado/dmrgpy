@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt # library to plot the results
 ####################################
 ### Create the spin chain object ###
 ####################################
-n = 40 # total number of spins
+n = 10 # total number of spins
 spins = [2 for i in range(n)] # list with the different spins of your system
 # the spins are labeled by 2s+1, so that 2 means s=1/2, 3 meand S=1 ....
 sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain object

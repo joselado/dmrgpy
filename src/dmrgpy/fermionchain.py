@@ -48,14 +48,14 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         if mode=="DMRG":
             return self.vev_MB(MO,**kwargs)
         elif mode=="ED": 
-            MBF = self.get_MBF() # get the object
+            MBF = self.get_ED_obj() # get the object
             return MBF.vev(MO,**kwargs) # return overlap
         else: raise # unrecognized
     def vev(self,MO,**kwargs): return self.vev_spinless(MO,**kwargs)
     def excited_vev_spinless(self,MO,mode="DMRG",**kwargs):
         """ Return a vaccum expectation value"""
         if mode=="DMRG": return self.excited_vev_MB(MO,**kwargs)
-        elif mode=="ED": return self.get_MBF().excited_vev(MO,**kwargs) 
+        elif mode=="ED": return self.get_ED_obj().excited_vev(MO,**kwargs) 
     def excited_vev(self,MO,**kwargs): 
         return self.excited_vev_spinless(MO,**kwargs)
     def hamiltonian_free(self,pairs=[[]]):
@@ -74,7 +74,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           if mode=="DMRG": # using DMRG
             return Many_Body_Hamiltonian.get_excited(self,**kwargs)
           elif mode=="ED":
-            MBF = self.get_MBF() # get the object
+            MBF = self.get_ED_obj() # get the object
             return algebra.lowest_eigenvalues(MBF.h,**kwargs)
     def get_correlator_spinless(self,**kwargs):
           """
@@ -132,10 +132,10 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
 #            if np.max(np.abs(self.hubbard_matrix))<1e-6 and self.vijkl is None:
 #                return self.gs_energy_free()
 #            else:
-                MBF = self.get_MBF()
+                MBF = self.get_ED_obj()
                 return algebra.lowest_eigenvalues(MBF.h,n=1)[0]
         else: raise # unrecognised
-    def get_MBF(self):
+    def get_ED_obj(self):
         """
         Return the many body fermion object
         """

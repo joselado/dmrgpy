@@ -12,7 +12,7 @@ def get_dynamical_correlator_spinless(self,name="densitydensity",
     if mode=="DMRG":
         return self.get_dynamical_correlator_MB(name=name,**kwargs)
     elif mode=="ED":
-        MBF = self.get_MBF() # get the object
+        MBF = self.get_ED_obj() # get the object
         return MBF.get_dynamical_correlator(name=name,**kwargs)
     else: raise
 

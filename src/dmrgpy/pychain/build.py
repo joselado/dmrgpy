@@ -192,6 +192,10 @@ class Spin_chain():
       self.wf0 = wf0 # store ground state
       self.e0 = e0 # store ground state energy
       return e0 # return energy
+  def get_gs(self):
+      """Return ground state wavefunction"""
+      self.gs_energy()
+      return self.wf0
   def vev(self,MO):
       """Compute a certain expectation value"""
       self.gs_energy() # compute ground state energy
@@ -205,7 +209,10 @@ class Spin_chain():
         if name=="X" or name=="Sx": return self.sxi[i]
         elif name=="Y" or name=="Sy": return self.syi[i]
         elif name=="Z" or name=="Sz": return self.szi[i]
-        else: raise
+        elif name=="Id": return self.get_identity()
+        else: 
+            print(name)
+            raise
   def add_exchange(self,xcs,gmatrix=None): 
     """ Return matrix with the exchange field"""
     h = csc(([],([],[])),shape=(self.size,self.size)) # initialize 

@@ -64,6 +64,8 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
           return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
         elif mode=="ED":
           return pychainwrapper.gs_energy(self,**kwargs)
+    def get_ED_obj(self):
+        return pychainwrapper.get_pychain(self)
     def get_pychain(self):
         return pychainwrapper.get_pychain(self)
     def get_full_hamiltonian(self):

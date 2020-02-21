@@ -114,6 +114,11 @@ def zero():
     return MultiOperator(term=True,c=0.0)
 
 
+def identity():
+    op = MultiOperator(term=True,c=1.0)
+    op.add_operator("Id",1)
+    return op
+
 def MO2list(self):
     """Conver a multioperator into a list"""
     out = []

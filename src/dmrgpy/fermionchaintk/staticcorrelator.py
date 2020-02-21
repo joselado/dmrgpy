@@ -9,7 +9,7 @@ def get_correlator_spinless(self,name="cdc",mode="DMRG",**kwargs):
       if mode=="DMRG": # using DMRG
         return self.get_correlator_MB(name=name,**kwargs)
       elif mode=="ED": # using ED
-        MBF = self.get_MBF() # get the object
+        MBF = self.get_ED_obj() # get the object
         return MBF.get_correlator(name=name,**kwargs)
       else: raise
 

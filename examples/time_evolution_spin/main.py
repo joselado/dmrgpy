@@ -1,8 +1,6 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
-raise # this does not work yet
-
 import numpy as np
 from dmrgpy import spinchain
 ns = np.array(range(4,30,2))
@@ -19,13 +17,11 @@ sc.set_exchange(fj) # set exchange couplings
 #sc.set_fields(lambda x: [0.2,0.2,0.2]) # set exchange couplings
 sc.maxm = 10
 sc.get_gs()
-i = 0 ; j=5
-(x,y) = sc.evolution(nt=1000,dt=0.03,mode="ED",name="ZZ",i=i,j=j)
-(x1,y1) = sc.evolution(nt=500,dt=0.03,mode="DMRG",name="ZZ",i=i,j=j)
-#(x2,y2) = sc.evolution(nt=500,dt=0.03,mode="DMRG",name="ZZ",
-#        i=i,j=j,restart=False)
-#y1 = np.concatenate([y1,y2])
-#x1 = np.concatenate([x1,x2+np.max(x1)])
+
+name = (sc.Sx[0],sc.Sx[2])
+
+(x,y) = sc.evolution(nt=1000,dt=0.03,mode="ED",name=name)
+(x1,y1) = sc.evolution(nt=1000,dt=0.03,mode="DMRG",name=name)
 import matplotlib.pyplot as plt
 plt.subplot(1,2,1)
 plt.plot(x,y.real,c="red",label="ED")

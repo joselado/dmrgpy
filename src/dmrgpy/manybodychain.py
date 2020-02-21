@@ -240,11 +240,13 @@ class Many_Body_Hamiltonian():
       else:
         self.gs_from_file = True # use a wavefunction from a file
         self.starting_file_gs = wf.name # name of the wavefunction
-  def get_gs(self,best=False,n=1,**kwargs):
+  def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
-      if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
-      else: self.gs_energy(**kwargs) # perform a ground state calculation
-      return self.wf0 # return wavefucntion
+      if mode=="DMRG":
+        if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
+        else: self.gs_energy(**kwargs) # perform a ground state calculation
+        return self.wf0 # return wavefunction
+      elif mode=="ED": return self.get_ED_obj().get_gs()
   def gs_energy(self,mode="DMRG",**kwargs):
       """Return the ground state energy"""
       if mode=="DMRG": return groundstate.gs_energy(self,**kwargs)

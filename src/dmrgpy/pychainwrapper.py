@@ -48,7 +48,7 @@ def get_pychain(self):
     # the pychain library assumes that s=1/2 is for spin one-half
     # whereas in DMRG s = 2 is for S=1/2
     sc.build((np.array(self.sites)-1.)/2.) 
-    self.pychain_object = sc
+    sc.hamiltonian = self.hamiltonian
     return sc
   else: return self.pychain_object # return stored object
 
