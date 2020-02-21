@@ -21,9 +21,10 @@ sc.set_exchange(fj) # add the exchange couplings
 sc.set_fields(lambda i: 3.*np.random.random(3)) # optionally you could add local magnetic fields
 sc.nsweeps = 1 # one sweep
 es = []
-wf0 = None
+wf = None # initial guess
 for i in range(10):
-    e = sc.gs_energy(wf0=sc.wf0,reconverge=True)
+    e = sc.gs_energy(wf0=wf,reconverge=True)
+    wf = sc.wf0.copy() # save the wavefunction
     es.append(e)
 import matplotlib.pyplot as plt
 plt.plot(range(len(es)),es,marker="o")
