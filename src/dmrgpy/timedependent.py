@@ -81,7 +81,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,
 def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
     """Apply an operator, evolve and measure"""
     if mode=="DMRG":
-        if wf is None: self.get_gs() # get ground state
+        if wf is None: wf = self.get_gs() # get ground state
         from .applyoperator import applyoperator
         wfA = applyoperator(self,A,wf) # apply wavefunction 
         return evolve_and_measure_dmrg(self,wf=wfA,operator=B,**kwargs)
