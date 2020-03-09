@@ -14,6 +14,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.N = [self.get_operator("N",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
+        self.Id = self.get_operator("Id",1)
         Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
         self.fermionic = True
         self.use_ampo_hamiltonian = True # use ampo
