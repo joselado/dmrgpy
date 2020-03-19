@@ -12,7 +12,6 @@ H = 0 # initialize Hamiltonian
 for i in range(nf):
   for j in range(nf):
     H = H + Cdag[i]*C[j]*np.random.random() # random hopping
-    # random first neigh. interaction
 
 for i in range(nf-1):
     H = H + Cdag[i]*C[i]*Cdag[i+1]*C[i+1]*np.random.random() 

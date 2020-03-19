@@ -108,6 +108,7 @@ def ground_state(h,nmax=maxsize):
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
+    eig = np.sort(eig)
   else:
     if info: print("Full diagonalization")
     eig,eigvec = dlg.eigh(todense(h))
@@ -124,10 +125,11 @@ def todense(m):
 
 def lowest_eigenvalues(h,n=10,nmax=maxsize):
   """Get a ground state"""
-  info = False
+  info = True
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+    eig = np.sort(eig)
   else:
     if info: print("Full diagonalization")
     eig = dlg.eigvalsh(h.todense())
