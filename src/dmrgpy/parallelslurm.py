@@ -4,7 +4,7 @@ import dill as pickle
 import os
 
 
-def pcall(fin,xs):
+def pcall(fin,xs,time=80):
     """Run a parallel calculation with slurm"""
     n = len(xs) # number of calculations
     f = lambda x: fin(x)
@@ -32,7 +32,7 @@ def pcall(fin,xs):
     pickle.dump(f,open(pfolder+"/function.obj","wb")) # write function
     pickle.dump(xs,open(pfolder+"/array.obj","wb")) # write object
     open(pfolder+"/run.py","w").write(main) # write script
-    runsh = "#!/bin/bash\n#SBATCH -n 1\n#SBATCH -t 80:00:00\n"
+    runsh = "#!/bin/bash\n#SBATCH -n 1\n#SBATCH -t "+str(time)+":00:00\n"
     runsh += "#SBATCH --mem-per-cpu=5000\n"
     runsh += "#SBATCH --array=0-"+str(n-1)+"\n"
     runsh += "srun python run.py\n"
