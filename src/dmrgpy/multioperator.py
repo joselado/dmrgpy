@@ -1,10 +1,13 @@
-
+import numbers
 import collections
 import numpy as np
 
 # this class allows to define operators of the form
 # A_0@A_1@....
 # for mpscpp.x
+
+def isnumber(x):
+    return isinstance(x, numbers.Number)
 
 
 ampo_counter = 0
@@ -43,19 +46,23 @@ class MultiOperator():
     def __add__(self,a):
         """Sum operation"""
         if a is None: return self.copy() # return the Hamiltonian
-        if not type(a)==MultiOperator: # assume that it is a number
-            if np.abs(a)==0.0: return self.copy() # return object
-            else: raise
-        else: # multioperator
+        elif isnumber(a): # if it is a number
+            return self+a*identity() # return identity
+        elif type(a)==MultiOperator: # if it is a multioperator
           out = self.copy() # create a copy
           out.op = self.op + a.op # sum the two operators
           out.i = self.i + a.i + 1 # increase the index
           out.clean()
           return out # return the sum
+        else: raise
     def __radd__(self,a): return self.__add__(a)
     def __rmul__(self,a):
         """Multiply by a number"""
         return self.__mul__(a)
+    def __truediv__(self,a):
+        if isnumber(a): # number
+          return 1/a*self
+        else: raise
     def multiply_scalar(self,a):
         out = self.copy()
         for i in range(len(out.op)):
@@ -64,7 +71,8 @@ class MultiOperator():
     def __mul__(self,a):
         """Compute the product between two multioperators"""
         if type(a)==MultiOperator: return self.multiply_MO(a)
-        else: return self.multiply_scalar(a)
+        elif isnumber(a): return self.multiply_scalar(a)
+        else: raise
     def multiply_MO(self,a):
         out = self.copy() # copy operator
         out.i = (self.i+1)*(a.i+1) # total number of terms

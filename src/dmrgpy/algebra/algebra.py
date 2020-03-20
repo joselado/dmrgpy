@@ -125,7 +125,7 @@ def todense(m):
 
 def lowest_eigenvalues(h,n=10,nmax=maxsize):
   """Get a ground state"""
-  info = True
+  info = False
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
@@ -154,10 +154,11 @@ def lowest_eigenvectors(h,n=10,nmax=maxsize):
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+#    eigvec = [v for (e,v) in zip(eig,eigvec.T)]
   else:
     if info: print("Full diagonalization")
     eig,eigvec = dlg.eigh(h.todense())
-  eigvec = eigvec.T # transpose
+    eigvec = eigvec.T # transpose
 #  print(sorted(eig))
 #  eigevec = [v for (e,v) in sorted(zip(eig,eigvec))]
   return eigvec[0:n] # return eigenvectors
