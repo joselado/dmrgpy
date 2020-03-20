@@ -17,6 +17,11 @@ class Parafermionic_Chain(Many_Body_Chain):
         from .pyparafermion import parafermion
         obj = parafermion.Parafermion_Chain(self)
         return obj
+    def get_dynamical_correlator(self,mode="DMRG",**kwargs):
+        if mode=="DMRG":
+            return super().get_dynamical_correlator_MB(**kwargs)
+        elif mode=="ED":
+            return self.get_ED_obj().get_dynamical_correlator(**kwargs)
 
 
 
