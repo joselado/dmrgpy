@@ -49,7 +49,7 @@ from dmrgpy import spinchain
 ```python
 from dmrgpy import spinchain
 spins = [2 for i in range(30)] # 2*S+1=2 for S=1/2
-sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
   h = h + sc.Sx[i]*sc.Sx[i+1]
@@ -63,7 +63,7 @@ print("Ground state energy",sc.gs_energy())
 ```python
 from dmrgpy import spinchain
 spins = [3 for i in range(30)] # 2*S+1=3 for S=1
-sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
   h = h + sc.Sx[i]*sc.Sx[i+1]
@@ -79,7 +79,7 @@ cs = sc.get_correlator(pairs)
 from dmrgpy import spinchain
 ns = 6 # number of sites in the spin chain
 spins = [3 for i in range(ns)] # S=1 chain
-sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 Si = [sc.Sx,sc.Sy,sc.Sz] # store the three components
 for i in range(ns-1): # loop 
@@ -94,7 +94,7 @@ print("Energy with ED",sc.gs_energy(mode="ED"))
 ```python
 from dmrgpy import spinchain
 spins = [3 for i in range(40)] # 2*S+1=3 for S=1
-sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
 sc.set_fields(lambda i: [0,0,(i==0)*0.01]) # only in the first site
 mx,mx,mz = sc.get_magnetization()
@@ -106,7 +106,7 @@ print("Mz",mz)
 from dmrgpy import spinchain
 spins = [2 for i in range(30)] # 2*S+1=2 for S=1/2
 for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
-  sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+  sc = spinchain.Spin_Chain(spins) # create spin chain object
   sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
   sc.maxm = maxm # set the bond dimension
   e = sc.gs_energy() # get the ground state energy
@@ -118,7 +118,7 @@ for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
 ```python
 from dmrgpy import spinchain
 spins = [2 for i in range(12)] # 2*S+1=2 for S=1/2
-sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
 es1 = sc.get_excited(n=6,mode="DMRG")
 es2 = sc.get_excited(n=6,mode="ED")
@@ -131,7 +131,7 @@ print("Excited states with ED",es2)
 from dmrgpy import spinchain
 # Haldane chain with S=1/2 on the edge to remove the topological modes
 spins = [2]+[3 for i in range(40)]+[2]
-sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
 es = sc.get_excited(n=2,mode="DMRG")
 gap = es[1]-es[0] # compute gap
@@ -142,7 +142,7 @@ print("Gap of the Haldane chain",gap)
 ```python
 from dmrgpy import spinchain
 spins = [3 for i in range(40)] # 2*S+1=3 for S=1
-sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
 sc.get_dynamical_correlator(i=0,j=0,name="ZZ")
 ```
@@ -152,7 +152,7 @@ sc.get_dynamical_correlator(i=0,j=0,name="ZZ")
 ```python
 from dmrgpy import fermionchain
 n = 20 # number of sites
-fc = fermionchain.Spinful_Fermionic_Hamiltonian(n)
+fc = fermionchain.Spinful_Fermionic_Chain(n)
 # first neighbor hopping
 fc.set_hoppings_spinful(lambda i,j: (abs(i-j)==1)*1.0) 
 # Hubbard term
@@ -172,7 +172,7 @@ import numpy as np
 from dmrgpy import fermionchain
 n = 6 # number of different spinless fermionic orbitals
 # fc is an object that contains the information of the many body system
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the object
+fc = fermionchain.Fermionic_Chain(n) # create the object
 # create a random Hermitian hopping matrix
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
 m = m + m.H # make it Hermitian
