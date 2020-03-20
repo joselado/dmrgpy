@@ -5,7 +5,7 @@ import numpy as np
 import fermionchain
 n = 30 # number of spinful fermionic sites
 def get_fc(mu):
-  fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
+  fc = fermionchain.Fermionic_Chain(n) # create the chain
   
   ####### Input matrices #######
   

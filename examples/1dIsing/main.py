@@ -10,7 +10,7 @@ def get_gap(bx):
     Compute the gap of the 1D Ising model with DMRG
     """
     print("Computing B_x = ",bx)
-    sc = spinchain.Spin_Hamiltonian([2 for i in range(30)]) # create 
+    sc = spinchain.Spin_Chain([2 for i in range(30)]) # create 
     h = 0
     for i in range(sc.ns-1): h = h + sc.Sz[i]*sc.Sz[i+1]
     for i in range(sc.ns): h = h + bx*sc.Sx[i]

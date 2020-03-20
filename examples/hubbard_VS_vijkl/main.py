@@ -32,14 +32,14 @@ def fh(i,j):
 
 
 # create a chain and add hubbard
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the object
+fc = fermionchain.Fermionic_Chain(n) # create the object
 fc.set_hoppings(t) # add the term to the Hamiltonian
 fc.set_hubbard(fh) # add the term to the Hamiltonian
 e0 = fc.gs_energy() # now get the energy
 
 
 # clean teh Hamiltonian and add vijkl interaction
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the object
+fc = fermionchain.Fermionic_Chain(n) # create the object
 fc.set_hoppings(t) # add the term to the Hamiltonian
 fc.set_vijkl(vijkl) # add the vijkl interaction
 e1 = fc.gs_energy() # now get the energy

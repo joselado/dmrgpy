@@ -5,7 +5,7 @@ import numpy as np
 import spinchain
 n = 30
 spins = [3 for i in range(n)] # spin 1/2 heisenberg chain
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = spinchain.Spin_Chain(spins) # create the spin chain
 sc.kpmmaxm = 10 # KPM max m
 fo = open("DCF.OUT","w") # dynamical correlation function
 for i in range(n): # loop over sites

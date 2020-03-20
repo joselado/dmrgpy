@@ -17,7 +17,7 @@ spins[n//2] = 3 # S=1 in the middle, (3 means S=1)
 
 
 # create first neighbor exchange
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = spinchain.Spin_Chain(spins) # create the spin chain
 def fj(i,j): # first neighbor coupling
   if abs(i-j)==1: # first neighbors
       return 1.0

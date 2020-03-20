@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 10
-fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
+fc = fermionchain.Fermionic_Chain(n,spinful=False) # create the chain
 
 def ft(i,j):
     if i==j: return 0.4

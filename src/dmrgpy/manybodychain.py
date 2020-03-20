@@ -29,7 +29,7 @@ class Coupling():
 
 
 
-class Many_Body_Hamiltonian():
+class Many_Body_Chain():
   def __init__(self,sites):
       self.sites = sites # list of the sites
       self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
@@ -335,4 +335,5 @@ def setup_sweep(self,mode="default"):
 
 
 
+Many_Body_Hamiltonian = Many_Body_Chain # temporal workaround
 

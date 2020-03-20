@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 6
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
+fc = fermionchain.Fermionic_Chain(n) # create the chain
 m = np.random.random((n,n)) + 1j*np.random.random((n,n))
 
 m = m + np.conjugate(m).T

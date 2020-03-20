@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 16
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
+fc = fermionchain.Fermionic_Chain(n) # create the chain
 def ft(i,j):
     if abs(j-i)==1: return 1.0 #+ np.random.random()
     return 0.0

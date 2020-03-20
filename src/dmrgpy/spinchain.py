@@ -1,4 +1,4 @@
-from .manybodychain import Many_Body_Hamiltonian
+from .manybodychain import Many_Body_Chain
 import numpy as np
 from .dmrgpy2pychain import correlator as correlatorpychain
 from .algebra import algebra
@@ -12,12 +12,12 @@ class Coupling():
     self.j = j
     self.g = g
 
-Spin_Hamiltonian = Many_Body_Hamiltonian
+Spin_Chain = Many_Body_Chain
 
-class Spin_Hamiltonian(Many_Body_Hamiltonian):
+class Spin_Chain(Many_Body_Chain):
     """Class for spin Hamiltonians"""
     def __init__(self,sites):
-        Many_Body_Hamiltonian.__init__(self,sites)
+        Many_Body_Chain.__init__(self,sites)
         # default exchange constants
         self.use_ampo_hamiltonian = True # use ampo
         self.pychain_object = None # pychain object
@@ -61,7 +61,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         Return the ground state energy
         """
         if mode=="DMRG":
-          return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
+          return Many_Body_Chain.gs_energy(self,**kwargs)
         elif mode=="ED":
           return pychainwrapper.gs_energy(self,**kwargs)
     def get_ED_obj(self):
@@ -89,7 +89,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         Compute the dynamical correlator
         """
         if mode=="DMRG": # Use MPS
-            return Many_Body_Hamiltonian.get_dynamical_correlator_MB(self,
+            return Many_Body_Chain.get_dynamical_correlator_MB(self,
                     **kwargs)
         else: # use exact diagonalization
             from . import pychainwrapper
@@ -100,7 +100,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         Compute excited state energies
         """
         if mode=="DMRG":
-            return Many_Body_Hamiltonian.get_excited(self,n=n,
+            return Many_Body_Chain.get_excited(self,n=n,
                     **kwargs)
         elif mode=="ED":
             h = self.get_full_hamiltonian() # get the Hamiltonian
@@ -112,7 +112,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         Compute the overall density of states
         """
         if mode=="DMRG":
-            return Many_Body_Hamiltonian.get_dos(self,**kwargs)
+            return Many_Body_Chain.get_dos(self,**kwargs)
         elif mode=="ED":
             h = self.get_full_hamiltonian() # get the Hamiltonian
             from .pychain import dos
@@ -121,7 +121,7 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
     def get_correlator(self,pairs=[[]],mode="DMRG",**kwargs):
         """Return the correlator"""
         if mode=="DMRG": # using DMRG
-            return Many_Body_Hamiltonian.get_correlator(self,pairs=pairs,
+            return Many_Body_Chain.get_correlator(self,pairs=pairs,
                     **kwargs)
         elif mode=="ED": # using exact diagonalization
             self.to_folder()
@@ -155,4 +155,4 @@ class Spin_Hamiltonian(Many_Body_Hamiltonian):
         # still have to add the fields!!
         return out # return multioperator
 
-
+Spin_Hamiltonian = Spin_Chain # backwards compatibility

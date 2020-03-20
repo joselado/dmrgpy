@@ -11,7 +11,7 @@ n = 2 # number of spin sites
 import time
 # first let us create a Hubabrd model
 
-fc = fermionchain.Spinful_Fermionic_Hamiltonian(n) # create the object
+fc = fermionchain.Spinful_Fermionic_Chain(n) # create the object
 fc.maxm = 20
 U = 6.0
 def ft(i,j):
@@ -36,7 +36,7 @@ t1 = time.time()
 print("Time with fermions",t1-t0)
 
 # now create the Heisenberg chain
-sc = spinchain.Spin_Hamiltonian([2 for i in range(n)])
+sc = spinchain.Spin_Chain([2 for i in range(n)])
 sc.set_exchange(lambda i,j: 1.0*(abs(i-j)==1))
 (ess,cs) = sc.get_dynamical_correlator(name="XX",mode="DMRG",i=0,j=1)
 t2 = time.time()

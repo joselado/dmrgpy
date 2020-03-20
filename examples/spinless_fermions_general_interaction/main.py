@@ -9,7 +9,7 @@ from dmrgpy import fermionchain
 n = 6 # number of different spinless fermionic orbitals
 
 # fc is an object that contains the information of the many body system
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the object
+fc = fermionchain.Fermionic_Chain(n) # create the object
 
 # create a random Hermitian hopping matrix
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))

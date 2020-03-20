@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt # library to plot the results
 n = 8 # total number of spins
 spins = [2 for i in range(n)] # list with the different spins of your system
 # the spins are labeled by 2s+1, so that 2 means s=1/2, 3 meand S=1 ....
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain object
+sc = spinchain.Spin_Chain(spins) # create the spin chain object
 def fj(i,j): # function to define the exchange couplings
     if abs(i-j)==1: return 1.0
     else: return 0.0 # otherwise

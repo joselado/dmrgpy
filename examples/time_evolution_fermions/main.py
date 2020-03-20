@@ -6,7 +6,7 @@ from dmrgpy import fermionchain
 ns = np.array(range(4,30,2))
 es = []
 n = 8
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
+fc = fermionchain.Fermionic_Chain(n) # create the chain
 
 h = 0 
 for i in range(n-1): h = h +fc.Cdag[i]*fc.C[i+1]

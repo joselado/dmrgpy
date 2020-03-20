@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import spinchain
 n = 3 # number of sites in the chain
 spins = [2 for i in range(n)] # S=1/2
-sc = spinchain.Spin_Hamiltonian(spins) # create the chain
+sc = spinchain.Spin_Chain(spins) # create the chain
 
 ##################################################################
 # This implements shows how to perform the following measurement #

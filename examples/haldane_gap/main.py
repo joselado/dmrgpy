@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 from dmrgpy import spinchain
 n = 40 # take n sites
 spins = [3 for i in range(n)] # spin 1 Heisenberg chain
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain 
+sc = spinchain.Spin_Chain(spins) # create the spin chain 
 def fj(i,j): # function for the coupling (open boundary)
   if abs(j-i)==1: return 1.0 # first neighbor to the right
   else: return 0.0 # anything else

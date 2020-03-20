@@ -28,7 +28,7 @@ def fh(i,j):
 
 
 # create a chain and add hubbard
-fc = fermionchain.Spinful_Fermionic_Hamiltonian(n//2) # create the object
+fc = fermionchain.Spinful_Fermionic_Chain(n//2) # create the object
 fc.set_hoppings(t) # add the term to the Hamiltonian
 fc.set_hubbard(fh) # add the term to the Hamiltonian
 fc.set_swave_pairing(lambda i: 0.4) # add the term to the Hamiltonian

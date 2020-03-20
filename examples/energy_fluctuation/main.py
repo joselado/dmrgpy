@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt # library to plot the results
 from dmrgpy import spinchain
 spins = [3 for i in range(10)] # 2*S+1=2 for S=1/2
 for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
-  sc = spinchain.Spin_Hamiltonian(spins) # create spin chain object
+  sc = spinchain.Spin_Chain(spins) # create spin chain object
   sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
   sc.maxm = maxm # set the bond dimension
   e = sc.gs_energy() # get the ground state energy

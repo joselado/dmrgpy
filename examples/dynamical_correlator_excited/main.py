@@ -9,7 +9,7 @@ spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 
 
 # create first neighbor exchange
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = spinchain.Spin_Chain(spins) # create the spin chain
 h = 0
 for i in range(n-1):
       j = i+1

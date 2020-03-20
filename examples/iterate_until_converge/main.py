@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import fermionchain
 n = 10
-sc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
+sc = fermionchain.Fermionic_Chain(n) # create the chain
 def ft(i,j):
 #    if i==j: return 1.0
     if abs(j-i)==1: return 1.0 #+ np.random.random()

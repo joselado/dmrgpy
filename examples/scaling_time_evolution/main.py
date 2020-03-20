@@ -9,9 +9,9 @@ es = []
 n = 4
 def compute(n):
   spins = [2 for i in range(n)]
-  sc = spinchain.Spin_Hamiltonian(spins) # create the chain
+  sc = spinchain.Spin_Chain(spins) # create the chain
   sc.clean()
-  sc = spinchain.Spin_Hamiltonian(spins) # create the chain
+  sc = spinchain.Spin_Chain(spins) # create the chain
   def fj(i,j):
       if 0.9<abs(i-j)<1.1: return 1.0
       return 0.0

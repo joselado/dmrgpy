@@ -3,14 +3,14 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 10
+n = 6
 # create a random spin chain
 spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 
 
 # create first neighbor exchange
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = spinchain.Spin_Chain(spins) # create the spin chain
 def fj(i,j):
   if abs(i-j)==1: return 1.0
   else: return 0.0

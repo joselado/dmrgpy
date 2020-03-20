@@ -2,7 +2,7 @@ import numpy as np
 from dmrgpy import fermionchain
 
 nf = 6 # number of different spinless fermionic orbitals
-fc = fermionchain.Fermionic_Hamiltonian(nf) # create the object
+fc = fermionchain.Fermionic_Chain(nf) # create the object
 C = fc.C # annihilation
 Cdag = fc.Cdag # creation
 

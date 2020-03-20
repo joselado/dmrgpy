@@ -6,7 +6,7 @@ from dmrgpy import fermionchain
 ns = 10 # number of spinful fermionic sites
 def get_fc(U):
     n = ns*2
-    fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
+    fc = fermionchain.Fermionic_Chain(n) # create the chain
     C = fc.C
     Cdag = fc.Cdag
     N = fc.N

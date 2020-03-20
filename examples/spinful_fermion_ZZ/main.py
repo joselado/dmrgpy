@@ -11,7 +11,7 @@ n = 6 # number of spin sites
 
 # first let us create a Hubabrd model
 
-fc = fermionchain.Spinful_Fermionic_Hamiltonian(n) # create the object
+fc = fermionchain.Spinful_Fermionic_Chain(n) # create the object
 fc.maxm = 20
 U = 1.0
 def ft(i,j):

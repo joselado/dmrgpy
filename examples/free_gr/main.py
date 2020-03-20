@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import fermionchain
 n = 4 # number of spinful fermionic sites
-fc = fermionchain.Fermionic_Hamiltonian(n) # create the chain
+fc = fermionchain.Fermionic_Chain(n) # create the chain
 ####### Input matrices #######
 # Array with the hoppings and with hubbard couplings
 # These are the matrices that you have to modify

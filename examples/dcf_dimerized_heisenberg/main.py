@@ -5,7 +5,7 @@ import numpy as np
 import spinchain
 n = 20
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = spinchain.Spin_Chain(spins) # create the spin chain
 # dimerized coupling
 def fj(i,j):
   if abs(i-j)==1: 

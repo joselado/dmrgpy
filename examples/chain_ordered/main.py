@@ -11,7 +11,7 @@ def get_energy(ind):
   """Given a certain ordering of the indexes, return the energy"""
   n = len(ind)
   spins = [2 for i in range(n)] # list with the different spins of your system
-  sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain object
+  sc = spinchain.Spin_Chain(spins) # create the spin chain object
   sc.maxm = 10 # bond dimension, controls the accuracy
   sc.nsweeps = 3
   def fj(i,j):

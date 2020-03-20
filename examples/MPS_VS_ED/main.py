@@ -6,7 +6,7 @@ from dmrgpy import spinchain
 n = 4
 for i in range(10):
   spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
-  sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+  sc = spinchain.Spin_Chain(spins) # create the spin chain
   ms = [np.random.random((3,3)) for i in range(n)]
   ms = [m + m.T for m in ms]
   def fj(i,j): 

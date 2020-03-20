@@ -6,7 +6,7 @@ import spinchain
 n = 3
 for i in range(1):
   spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
-  sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+  sc = spinchain.Spin_Chain(spins) # create the spin chain
   def fj(i,j): 
       m = np.random.random((3,3))
 #      return m

@@ -7,7 +7,7 @@ ns = np.array(range(4,30,2))
 es = []
 n = 10
 spins = [2 for i in range(n)]
-sc = spinchain.Spin_Hamiltonian(spins) # create the chain
+sc = spinchain.Spin_Chain(spins) # create the chain
 def fm(i):
   if i==0: return [3.0,0.,0.]
   else: return [0.,0.,0.]

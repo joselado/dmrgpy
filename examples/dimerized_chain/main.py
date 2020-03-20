@@ -10,7 +10,7 @@ for dj in djs:
   print("Doing",dj)
   n = 60
   spins = [2 for i in range(n)]
-  sc = spinchain.Spin_Hamiltonian(spins) # create the chain
+  sc = spinchain.Spin_Chain(spins) # create the chain
   
   b = 1.0+dj
   phi = np.pi*np.random.random()

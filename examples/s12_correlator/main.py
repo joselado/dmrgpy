@@ -7,7 +7,7 @@ ns = np.array(range(4,30,2))
 es = []
 n = 10
 spins = [3 for i in range(n)]
-sc = spinchain.Spin_Hamiltonian(spins) # create the chain
+sc = spinchain.Spin_Chain(spins) # create the chain
 m = sc.sisj_edge()
   
 import matplotlib.pyplot as plt

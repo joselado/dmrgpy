@@ -10,7 +10,7 @@ spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 
 
 # create first neighbor exchange
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = spinchain.Spin_Chain(spins) # create the spin chain
 def fj(i,j):
   if abs(i-j)==1: return 1.0
   else: return 0.0

@@ -11,7 +11,7 @@ from dmrgpy import spinchain # library dealing with DMRG for spin chains
 n = 4 # total number of spins
 spins = [4 for i in range(n)] # list with the different spins of your system
 # the spins are labeled by 2s+1, so that 2 means s=1/2, 3 meand S=1 ....
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain object
+sc = spinchain.Spin_Chain(spins) # create the spin chain object
 
 
 

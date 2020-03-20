@@ -14,7 +14,7 @@ def geth(sc):
       h = h + sc.Sz[i]*sc.Sz[i+1]
   return h
 
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain
+sc = spinchain.Spin_Chain(spins) # create the spin chain
 fc = spinfermionchain.Spin_Fermion_Hamiltonian(["S" for s in spins]) 
 
 sc.set_hamiltonian(geth(sc)) # create Hamiltonian

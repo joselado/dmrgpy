@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 from dmrgpy import multioperator
 n = 6
-fc = fermionchain.Fermionic_Hamiltonian(n,spinful=False) # create the chain
+fc = fermionchain.Fermionic_Chain(n,spinful=False) # create the chain
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
 m = m + m.H
 def ft(i,j):

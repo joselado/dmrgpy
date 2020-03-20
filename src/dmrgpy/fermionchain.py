@@ -1,4 +1,4 @@
-from .manybodychain import Many_Body_Hamiltonian
+from .manybodychain import Many_Body_Chain
 import numpy as np
 import scipy.linalg as lg
 from .pyfermion import mbfermion
@@ -8,14 +8,14 @@ from .fermionchaintk import staticcorrelator
 from .fermionchaintk import hamiltonian
 from . import funtk
 
-class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
+class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
     def __init__(self,n):
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.N = [self.get_operator("N",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
         self.Id = self.get_operator("Id",1)
-        Many_Body_Hamiltonian.__init__(self,[0 for i in range(n)])
+        Many_Body_Chain.__init__(self,[0 for i in range(n)])
         self.fermionic = True
         self.use_ampo_hamiltonian = True # use ampo
     def set_hoppings(self,fun):
@@ -73,7 +73,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
           Wrapper for static correlator
           """
           if mode=="DMRG": # using DMRG
-            return Many_Body_Hamiltonian.get_excited(self,**kwargs)
+            return Many_Body_Chain.get_excited(self,**kwargs)
           elif mode=="ED":
             MBF = self.get_ED_obj() # get the object
             return algebra.lowest_eigenvalues(MBF.h,**kwargs)
@@ -128,7 +128,7 @@ class Fermionic_Hamiltonian(Many_Body_Hamiltonian):
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
         if mode=="DMRG": 
-            return Many_Body_Hamiltonian.gs_energy(self,**kwargs)
+            return Many_Body_Chain.gs_energy(self,**kwargs)
         elif mode=="ED": 
 #            if np.max(np.abs(self.hubbard_matrix))<1e-6 and self.vijkl is None:
 #                return self.gs_energy_free()
@@ -201,7 +201,7 @@ def get_gr(self,delta=0.002,es=np.linspace(-10.0,10.0,800),i=0,j=0):
 
 
 
-class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
+class Spinful_Fermionic_Chain(Fermionic_Chain):
     """
     Class to deal with fermionic Hamiltonians with
     spin degree of freedom
@@ -305,4 +305,8 @@ class Spinful_Fermionic_Hamiltonian(Fermionic_Hamiltonian):
 
 
 
+
+
+Fermionic_Hamiltonian = Fermionic_Chain
+Spinful_Fermionic_Hamiltonian = Spinful_Fermionic_Chain
 

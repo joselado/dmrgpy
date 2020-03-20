@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 4
-fc = fermionchain.Spinful_Fermionic_Hamiltonian(n//2) # create the chain
+fc = fermionchain.Spinful_Fermionic_Chain(n//2) # create the chain
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
 m = m + m.H # Make it Hermitian
 

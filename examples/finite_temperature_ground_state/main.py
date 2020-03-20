@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt # library to plot the results
 ####################################
 n = 2 # total number of spins
 spins = [2 for i in range(n)] # list with the different spins of your system
-sc = spinchain.Spin_Hamiltonian(spins) # create the spin chain object
+sc = spinchain.Spin_Chain(spins) # create the spin chain object
 ##############################
 ### Create the hamiltonian ###
 ##############################
