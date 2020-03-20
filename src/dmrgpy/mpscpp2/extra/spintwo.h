@@ -7,8 +7,6 @@
 #include "itensor/mps/siteset.h"
 #include "itensor/mps/sites/spinhalf.h"
 
-// Code written by Samuel Gozel
-
 namespace itensor {
 
 class SpinTwo : public SiteSet

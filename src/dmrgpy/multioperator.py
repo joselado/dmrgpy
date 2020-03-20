@@ -271,6 +271,10 @@ def get_dagger(self):
             elif name=="S+": name2="S-"
             elif name=="Sm": name2="Sp"
             elif name=="S-": name2="S+"
+            elif name=="Sig": name2="SigDag"
+            elif name=="Tau": name2="TauDag"
+            elif name=="SigDag": name2="Sig"
+            elif name=="TauDag": name2="Tau"
             else: name2 = name
             mi = mi*obj2MO([[name2,jj]])
         m = m + mi # add contribution

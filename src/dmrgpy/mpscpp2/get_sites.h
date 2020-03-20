@@ -39,6 +39,7 @@ read(std::istream& s)
             else if(nm == 4) store.set(j,SpinThreeHalfSite(I));
             else if(nm == 5) store.set(j,SpinTwoSite(I));
             else if(nm == 6) store.set(j,SpinFiveHalfSite(I));
+            else if(nm == -2) store.set(j,Z3Site(I));
             else Error(format("SpinX cannot read index of size %d",nm));
             }
 	sfile.close() ;
@@ -72,6 +73,7 @@ SpinX(Args const& args)
       else if (nm==4) sites.set(i,SpinThreeHalfSite(i)); // use spin=3/2
       else if (nm==5) sites.set(i,SpinTwoSite(i)); // use spin=2
       else if (nm==6) sites.set(i,SpinFiveHalfSite(i)); // use spin=5/2
+      else if (nm==(-2)) sites.set(i,Z3Site(i)); // use spin=5/2
       else Error(format("SpinX cannot read index of size "));
     } ;
     sfile.close(); // close file

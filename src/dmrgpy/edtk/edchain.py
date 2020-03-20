@@ -1,10 +1,14 @@
 from ..algebra import algebra
 from .. import multioperator
+from .one2many import one2many
+import numpy as np
 
 
 class EDchain():
     """Generic class for an ED chain"""
     def __init__(self):
+        self.operators = dict() # empty dictionary
+        self.localdim = [] # empty list
         self.computed_gs = False
     def get_operator(self,name,i=0):
         """Return an operator"""
@@ -33,4 +37,21 @@ class EDchain():
         """Excited states"""
         h = self.get_hamiltonian()
         return algebra.lowest_eigenvalues(h,**kwargs)
+    def create_operator(self,a,i=None,name=None):
+        """Create the different operator"""
+        ns = self.localdim # local dimensions
+        if name is None: raise
+        if i is None: raise
+        if a.shape[0]!=ns[i]: raise
+        # create operators in each site
+        ids = [np.identity(n,dtype=np.complex) for n in ns] # identities
+        op = one2many(ids,a,i) # one to many body
+        self.operators[(name,i)] = op # store in the dictionary
+    def get_identity(self):
+        ids = [np.identity(n,dtype=np.complex) for n in self.localdim] 
+        op = one2many(ids,ids[0],0) # one to many body
+        return op
+
+
+
 
