@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 8
+n = 4
 # create a random spin chain
 spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
@@ -23,19 +23,18 @@ i = np.random.randint(n)
 j = np.random.randint(n)
 j = i
 t1 = time.time()
-(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
+name = (sc.Sz[i],sc.Sz[j])
+(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name)
 t2 = time.time()
 print("Time with DMRG",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="ED",
-        i=i,j=j,name="ZZ")
+(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="ED",name=name)
 t3 = time.time()
 print("Time with ED",t3-t2)
 
 
-(x4,y4) = sc.get_dynamical_correlator(mode="ED",submode="KPM",
-        i=i,j=j,name="ZZ")
+(x4,y4) = sc.get_dynamical_correlator(mode="ED",submode="KPM",name=name)
 t4 = time.time()
 print("Time with KPM-ED",t4-t3)
 

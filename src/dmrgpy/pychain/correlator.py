@@ -30,35 +30,9 @@ def spismj(sc,h0,es=None,i=0,j=0,delta=0.1):
 
 
 
-def dynamical_correlator(sc,h0,es=None,i=0,j=0,
-        delta=0.1,namei="X",namej="X",mode="full"):
-  """Calculate a correlation function SiSj in a frequency window"""
-  if es is None:
-    es = np.linspace(-1.0,7.0,int(40/delta))
-  sm = sc.get_operator(namei,i) # get the operator
-  sp = sc.get_operator(namej,j) # get the operator
-  if mode=="full" and h0.shape[0]>1000: mode = "cv"
-  if mode=="full":
-      return dynamics.dynamical_correlator(h0,sm,sp,delta=delta,es=es)
-  ## default method
-  e0,wf0 = algebra.ground_state(h0) # get the ground state
-  iden = identity(h0.shape[0],dtype=np.complex) # identity
-  if mode=="full": iden = iden.todense() # dense matrix
-  out = []
-  for e in es: # loop over energies
-      if mode=="full": # using exact inversion
-        g1 = algebra.inv(iden*(e+e0+1j*delta)-h0)
-        g2 = algebra.inv(iden*(e+e0-1j*delta)-h0)
-        g = (g1-g2)/2.
-        op = sp@g@sm # operator
-        o = algebra.braket_wAw(wf0,op) # correlator
-      elif mode=="cv": # correction vector algorithm
-          o1 = solve_cv(h0,wf0,sp,sm,e+e0,delta=delta) # conjugate gradient
-          o2 = solve_cv(h0,wf0,sp,sm,e+e0,delta=-delta) # conjugate gradient
-          o = (o1 - o2)/2. # substract
-      else: raise # not recognised
-      out.append(o)
-  return es,1j*np.array(out)/np.pi # return result
+def dynamical_correlator(sc,**kwargs):
+  return dynamics.get_dynamical_correlator(sc,name=(sm,sp),
+              delta=delta,es=es)
 
 
 
