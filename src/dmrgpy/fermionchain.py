@@ -81,12 +81,12 @@ class Fermionic_Chain(Many_Body_Chain):
           Compute static correlator
           """
           return staticcorrelator.get_correlator_spinless(self,**kwargs)
-    def get_dynamical_correlator(self,**kwargs):
-        """
-        Compute a dynamical correlator, standard name
-        """
-        return dynamicalcorrelator.get_dynamical_correlator_spinless(self,
-                **kwargs)
+#    def get_dynamical_correlator(self,**kwargs):
+#        """
+#        Compute a dynamical correlator, standard name
+#        """
+#        return dynamicalcorrelator.get_dynamical_correlator_spinless(self,
+#                **kwargs)
     def get_dynamical_correlator_spinless(self,**kwargs):
         """
         Compute a dynamical correlator, specific function for spinless
