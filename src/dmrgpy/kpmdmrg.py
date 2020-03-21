@@ -62,25 +62,6 @@ def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
 from . import pychain
 from .algebra.kpm import generate_profile
 
-#def get_dos(self,n=1000,mode="DMRG",ntries=10):
-#  if mode=="DMRG": 
-##  if False: 
-#    mus = [get_moments_dmrg(self,n=n) for i in range(ntries)] # get the moments
-#    scale = np.genfromtxt("KPM_SCALE.OUT") # scale of the dos
-#  else:
-#    m  = self.get_full_hamiltonian()
-#    mus = [pychain.kpm.random_trace(m/15.0,ntries=1,n=1000)
-#                 for i in range(ntries)]
-#    scale = 1./15.
-#  mus = np.mean(np.array(mus),axis=0)
-#  mus = mus[0:100]
-#  xs = 0.99*np.linspace(-1.0,1.0,2000,endpoint=True) # energies
-#  ys = generate_profile(mus,xs,use_fortran=False).real # generate the DOS
-#  xs /= scale
-#  ys *= scale
-#  np.savetxt("DOS.OUT",np.matrix([xs,ys]).T)
-#  return (xs,ys)
-
 
 def restrict_interval(x,y,window):
   """Restrict the result to a certain energy window"""

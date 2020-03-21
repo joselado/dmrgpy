@@ -2,28 +2,30 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
-import fermionchain
-n = 10 # number of spinful fermionic sites
-fc = fermionchain.Fermionic_Chain(n) # create the chain
-####### Input matrices #######
-# Array with the hoppings and with hubbard couplings
-# These are the matrices that you have to modify
-hopping = np.zeros((n,n))
-hubbard = np.zeros((n,n))
-for i in range(n-1):  hopping[i,i+1] = 1. ; hopping[i+1,i] = 1.
-for i in range(n): 
-    if i<n//2: U = 8.0 
-    else: U = 8.0
-    hubbard[i,i] = U/2. 
-    hopping[i,i] = -U #-1.0
-# The implemented Hamiltonian is
-# H = \sum_ij hopping[i,j] c^dagger_i c_j + hubbard[i,j] n_i n_j
-# with n_i = c^\dagger_{i,up} c_{i,up} + c^\dagger_{i,dn} c_{i,dn}
-# the previous matrices are for a half filled Hubbard chain
+from dmrgpy import fermionchain
+n = 4 # number of spinful fermionic sites
+fc = fermionchain.Spinful_Fermionic_Chain(n) # create the chain
+#fc.Nup = fc.N
+#fc.Ndn = fc.N
+#fc.Cup = fc.C
+#fc.Cdagup = fc.Cdag
+#fc.Cdn = fc.C
+#fc.Cdagdn = fc.Cdag
+# initialize Hamiltonian #
+h = 0
+for i in range(n-1): # hopping
+    h = h + fc.Cdagup[i]*fc.Cup[i+1]
+    h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
+for i in range(n): # Hubbard
+    h = h + (fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
+h = h + h.get_dagger()
 ##############################
 # Setup the Many Body Hamiltonian
-fc.set_hoppings(lambda i,j: hopping[i,j]) # set the hoppings
-fc.set_hubbard(lambda i,j: hubbard[i,j]) # set the hubbard constants
+fc.maxm = 40
+fc.nsweeps = 40
+fc.set_hamiltonian(h) # set the hoppings
+print(fc.gs_energy(mode="DMRG"))
+print(fc.gs_energy(mode="ED"))
 # Compute the dynamical correlator defined by
 # <0|c_i^dagger \delta(H-E_0-\omega) c_j |0>
 i = 0 # first index of the dynamical correlator
@@ -34,7 +36,8 @@ fc.gs_energy()
 #exit()
 # The result will be written in a file called DYNAMICAL_CORRELATOR.OUT
 # compute the dynamical correlator using KPM DMRG
-(x,y) = fc.get_dynamical_correlator(i=i,j=j,delta=delta,name="ZZ")
+name = (fc.N[0],fc.N[0])
+(x,y) = fc.get_dynamical_correlator(delta=delta,name=name)
 import matplotlib.pyplot as plt
 # plot the result
 plt.plot(x,y.real,marker="o")

@@ -181,8 +181,11 @@ class MBFermion(edchain.EDchain):
 
         elif name=="density" or name=="N": return self.get_density(i)
         elif name=="C": return self.get_c(i)
+        elif name=="Id": return self.get_identity()
         elif name=="Cdag": return self.get_cd(i)
-        else: raise
+        else: 
+            print("Unrecognised operator",name)
+            raise
 
 
 

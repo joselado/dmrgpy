@@ -81,12 +81,6 @@ class Fermionic_Chain(Many_Body_Chain):
           Compute static correlator
           """
           return staticcorrelator.get_correlator_spinless(self,**kwargs)
-    def get_dynamical_correlator_spinless(self,**kwargs):
-        """
-        Compute a dynamical correlator, specific function for spinless
-        """
-        return dynamicalcorrelator.get_dynamical_correlator_spinless(self,
-                **kwargs)
     def get_correlator_free(self,pairs=[[]]):
           """Get the correlator for free fermions"""
           m = self.hamiltonian_free() # get the single body matrix
@@ -201,8 +195,8 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
                 0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
         self.Sy = [-0.5*1j*self.Cdag[2*i]*self.C[2*i+1] +
                 1j*0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
-        self.Sz = [0.5*self.Cdag[2*i]*self.C[2*i] +
-                (-1)*0.5*self.Cdag[2*i+1]*self.C[2*i+1] for i in range(n)]
+        self.Sz = [0.5*self.N[2*i] +
+                (-1)*0.5*self.N[2*i+1] for i in range(n)]
         self.Delta = [0.5*self.C[2*i]*self.C[2*i+1] for i in range(n)]
         self.Cup = [self.C[2*i] for i in range(n)]
         self.Cdagup = [self.Cdag[2*i] for i in range(n)]
@@ -211,6 +205,7 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
         self.Nup = [self.get_operator("N",2*i) for i in range(n)]
         self.Ndn = [self.get_operator("N",2*i+1) for i in range(n)]
         self.Ntot = [self.Nup[i]+self.Ndn[i] for i in range(n)]
+        self.use_ampo_hamiltonian = True # use ampo
     def get_density_spinful(self,**kwargs):
         """
         Return the density in each site, summing over spin channels
@@ -229,13 +224,6 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
         Return the expectation value of the onsite pairing
         """
         return staticcorrelator.get_onsite_pairing_spinful(self,**kwargs)
-    def get_dynamical_correlator_spinful(self,**kwargs):
-        """Return the dynamical correlator of an spinful system"""
-        return dynamicalcorrelator.get_dynamical_correlator_spinful(self,
-                **kwargs)
-    def get_dynamical_correlator(self,**kwargs):
-        """Return the dynamical correlator of an spinful system"""
-        return self.get_dynamical_correlator_spinful(**kwargs)
     def set_hubbard_spinful(self,fun):
         """
         Add Hubbard interation in a spinful manner
