@@ -7,7 +7,7 @@ from ..algebra import algebra
 from .. import operatornames
 from .. import multioperator
 from .. import funtk
-
+from ..edtk import edchain
 
 nmax = 20 # maximum number of levels
 
@@ -29,7 +29,7 @@ def gs_energy(m0,spinless=True,hubbard=None):
 
 
 
-class MBFermion():
+class MBFermion(edchain.EDchain):
     """
     Class for a many body fermionic Hamiltonian
     """
@@ -81,6 +81,7 @@ class MBFermion():
         Add a multioperator Hamiltonian
         """
         self.h = self.h + self.get_operator(m) # add the operator
+        self.hamiltonian = m
     def get_hopping(self,m):
         """
         Return Hopping matrix
@@ -108,6 +109,7 @@ class MBFermion():
         """
         e,wf = ground_state(self.h) # return GS
         self.energy = e # store energy
+        self.e0 = e # store energy
         self.wf0 = wf # store wavefunction
         return self.energy
     def get_excited(self,**kwargs):
@@ -172,11 +174,6 @@ class MBFermion():
             A = A@self.get_operator(namej,p[1]) # get matrix
             out.append(algebra.braket_wAw(self.wf0,A))
         return np.array(out) # return array
-    def vev(self,A):
-        """Return the ground state expectation value"""
-        m = self.get_operator(A) # return the operator
-        self.get_gs() # get ground state
-        return algebra.braket_wAw(self.wf0,m) # return the overlap
     def excited_vev(self,A,**kwargs):
         m = self.get_operator(A) # return the operator
         wfs = algebra.lowest_eigenvectors(self.h,**kwargs)
@@ -190,51 +187,10 @@ class MBFermion():
         if type(name)==multioperator.MultiOperator:
             return multioperator.MO2matrix(name,self) # return operator
 
-#        elif type(name)==multioperator.MultiOperator: # Multioperator
-#            out = self.get_identity()*0. # initialize
-#            for o in name.op: # loop over operators
-#                m = self.get_identity()
-#                m = m*o[0] # get coefficient
-#                for j in range(1,len(o)):
-#                  m = m@self.get_operator(o[j][0],int(o[j][1]))
-#                out = out + m
-#            return out # return operator
-        ### conventional procedure ###
         elif name=="density" or name=="N": return self.get_density(i)
         elif name=="C": return self.get_c(i)
         elif name=="Cdag": return self.get_cd(i)
         else: raise
-    def get_dynamical_correlator(self,i=0,j=0,
-            es=np.linspace(-1.0,10,500),delta=1e-1,
-            name="densitydensity"):
-        """
-        Compute the dynamical correlator
-        """
-        from ..algebra import kpm
-        from .. import operatornames
-        self.get_gs() # compute ground state
-        if type(name[0])==multioperator.MultiOperator: # multioperator
-          A = name[0].get_dagger() # dagger
-          A = self.get_operator(A)
-          B = self.get_operator(name[1])
-        else:
-          raise # this is no longer used
-#          namei,namej = operatornames.recognize(name) # get the operator
-#          namei = operatornames.hermitian(namei) # get the dagger
-#          A = self.get_operator(namei,i)
-#          B = self.get_operator(namej,j)
-#        A = self.get_cd(i) # first operator
-#        B = self.get_cd(j) # second operator
-        vi = A@self.wf0 # first wavefunction
-        vj = B@self.wf0 # second wavefunction
-        m = -identity(self.h.shape[0])*self.energy+self.h # matrix to use
-        emax = slg.eigsh(self.h,k=1,ncv=20,which="LA")[0] # upper energy
-        scale = np.max([np.abs(self.energy),np.abs(emax)])*3.0
-        n = int(scale/delta) # number of polynomials
-        (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
-                                    npol=n*4,ne=n*10,x=es)
-        return xs,np.conjugate(ys)/scale*np.pi*2 # return correlator
-
 
 
 

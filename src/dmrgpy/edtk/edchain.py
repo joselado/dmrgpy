@@ -55,33 +55,9 @@ class EDchain():
         ids = [np.identity(n,dtype=np.complex) for n in self.localdim] 
         op = one2many(ids,ids[0],0) # one to many body
         return op
-    def get_dynamical_correlator(self,
-            es=np.linspace(-1.0,10,500),delta=1e-1,
-            name=None):
-        """
-        Compute the dynamical correlator
-        """
-        from ..algebra import kpm
-        self.get_gs() # compute ground state
-        if name is None: raise
-        if type(name[0])==multioperator.MultiOperator: # multioperator
-          A = name[0].get_dagger() # dagger
-          A = self.get_operator(A)
-          B = self.get_operator(name[1])
-        else:
-          raise # this is no longer used
-        vi = A@self.wf0 # first wavefunction
-        vj = B@self.wf0 # second wavefunction
-        h = self.get_hamiltonian()
-        m = -np.identity(h.shape[0])*self.e0+h # matrix to use
-        emax = slg.eigsh(h,k=1,ncv=20,which="LA")[0] # upper energy
-        scale = np.max([np.abs(self.e0),np.abs(emax)])*3.0
-        n = 10*int(scale/delta) # number of polynomials
-        (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
-                                    npol=n*4,ne=n*10,x=es)
-        return xs,np.conjugate(ys) # return correlator
-
-
+    def get_dynamical_correlator(self,**kwargs):
+        from . import dynamics
+        return dynamics.get_dynamical_correlator(self,**kwargs)
 
 
 

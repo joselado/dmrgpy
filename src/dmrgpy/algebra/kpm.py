@@ -17,6 +17,7 @@ except:
 #  print("FORTRAN library not present, using default python one")
 
 
+use_fortran = False # use python routines
 
 
 def get_moments(v,m,n=100,use_fortran=use_fortran,test=False):
@@ -161,7 +162,6 @@ def get_moments_vivj_python(m0,vi,vj,n=100):
   for ii in range(2,n): 
     ap = 2.*m@a - am # recursion relation
     bk = algebra.braket_ww(vj,ap)
-#    bk = (vj.H*ap).todense().trace()[0,0]
     mus[ii] = bk
     am = a.copy() # new variables
     a = ap.copy() # new variables
