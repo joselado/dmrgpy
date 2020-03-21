@@ -39,7 +39,7 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
     m = -np.identity(h.shape[0])*e0+h # matrix to use
     emax = slg.eigsh(h,k=1,ncv=20,which="LA")[0] # upper energy
     scale = np.max([np.abs(e0),np.abs(emax)])*3.0
-    n = 4*int(scale/delta) # number of polynomials
+    n = int(scale/delta) # number of polynomials
     (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
                                 npol=n*4,ne=n*10,x=es)
     return xs,np.conjugate(ys) # return correlator
@@ -77,7 +77,7 @@ def dynamical_sum(es,ws,A,B,out):
 
 
 def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
-        delta=1e-2,mode="cv"):
+        delta=1e-2,mode="full"):
   """Calculate a correlation function SiSj in a frequency window"""
   ## default method
   iden = np.identity(h0.shape[0],dtype=np.complex) # identity
@@ -88,7 +88,7 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
         g1 = algebra.inv(iden*(e+e0+1j*delta)-h0)
         g2 = algebra.inv(iden*(e+e0-1j*delta)-h0)
         g = 1j*(g1-g2)/2.
-        op = A@g@B # operator
+        op = B@g@A # operator
         o = algebra.braket_wAw(wf0,op) # correlator
       elif mode=="cv": # correction vector algorithm
           o1 = solve_cv(h0,wf0,A,B,e+e0,delta=delta) # conjugate gradient
@@ -102,14 +102,14 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
 
 def solve_cv(h0,wf0,si,sj,w,delta=0.0):
      iden = np.identity(h0.shape[0],dtype=np.complex) # identity
-     b = -delta*sj*np.matrix(wf0).T # create the b vector
-     A = (h0 - w*iden)*(h0-w*iden) + iden*delta*delta # define A matrix
+     b = -delta*sj@np.matrix(wf0).T # create the b vector
+     A = (h0 - w*iden)@(h0-w*iden) + iden*delta*delta # define A matrix
      b = np.array(b).reshape((b.shape[0],)) # array
      x,info = slg.cg(A,b,tol=1e-10) # solve the equation
      x = np.matrix(x).T # column vector
-     x = 1j*x + (h0 - w*iden)*x/delta # full correction vector
-     x = si*x # apply second operator
-     o = (np.matrix(wf0).H.T*x).trace()[0,0] # compute the braket
+     x = 1j*x + (h0 - w*iden)@x/delta # full correction vector
+     x = si@x # apply second operator
+     o = (np.matrix(wf0).H.T@x).trace()[0,0] # compute the braket
      return o
 
 

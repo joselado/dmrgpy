@@ -12,7 +12,7 @@ for i in range(n):
   for j in range(n):
       t = np.random.random() + 1j*np.random.random()
       h = h + fc.Cdag[i]*fc.C[j]*t
-      h = h + fc.N[i]*fc.N[j]*np.random.random()
+#      h = h + -1*fc.N[i]*fc.N[j]*np.random.random()
 
 
 h = h + h.get_dagger()
@@ -27,16 +27,22 @@ print("Energy with DMRG",e1)
 
 ### Compute the dyamical correlator ###
 
-i,j = 1,1
-name = (fc.C[i],fc.Cdag[j])
+def randop():
+    i = np.random.randint(n)
+    j = np.random.randint(n)
+    ci = np.exp(2*1j*np.random.random()*np.pi)
+    cj = np.exp(2*1j*np.random.random()*np.pi)
+    return ci*fc.C[i] + cj*fc.Cdag[j]
 
-es = np.linspace(-0.5,6.0,100) # energies of the correlator
-delta = 3e-2 # smearing of the correlator
-x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,
+name = (randop(),randop())
+
+es = np.linspace(-0.5,6.0,300) # energies of the correlator
+delta = 1e-1 # smearing of the correlator
+x0,y0 = fc.get_dynamical_correlator(mode="ED",submode="KPM",name=name,
         es=es,delta=delta)
 x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
         es=es,delta=delta)
-x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="CVM",name=name,
+x2,y2 = fc.get_dynamical_correlator(mode="ED",submode="INV",name=name,
         es=es,delta=delta)
 
 
@@ -45,9 +51,9 @@ x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="CVM",name=name,
 
 import matplotlib.pyplot as plt
 
-plt.plot(x0,y0.real,label="ED",marker="o")
+plt.plot(x0,y0.real,label="ED-KPM",marker="o")
+plt.plot(x2,y2.real,label="ED-INV",marker="o")
 plt.plot(x1,y1.real,label="DMRG-KPM",marker="o")
-plt.plot(x2,y2.real,label="DMRG-CVM",marker="o")
 plt.ylabel("Dynamical correlator")
 plt.xlabel("Frequency")
 plt.legend()
