@@ -18,15 +18,14 @@ def get_moments_dmrg(self,n=1000):
 
 
 
-def get_moments_dynamical_correlator_dmrg(self,i=0,j=0,
-        name="XX",delta=1e-1):
+def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
   """Get the moments with DMRG"""
-  if type(name)==str: # string input
-        namei,namej = operatornames.recognize(name)
-        namei = self.get_operator(namei,i)
-        namej = self.get_operator(namej,j)
-        return get_moments_dynamical_correlator_dmrg(self,
-                name=(namei,namej),delta=delta)
+#  if type(name)==str: # string input
+#        namei,namej = operatornames.recognize(name)
+#        namei = self.get_operator(namei,i)
+#        namej = self.get_operator(namej,j)
+#        return get_moments_dynamical_correlator_dmrg(self,
+#                name=(namei,namej),delta=delta)
   # do some sanity checks
   if delta<0.0: raise 
   self.get_gs() # compute ground state
