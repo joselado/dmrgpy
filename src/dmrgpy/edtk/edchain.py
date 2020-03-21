@@ -42,7 +42,7 @@ class EDchain():
         h = self.get_hamiltonian()
         return algebra.lowest_eigenvalues(h,**kwargs)
     def create_operator(self,a,i=None,name=None):
-        """Create the different operator"""
+        """Create the different operators"""
         ns = self.localdim # local dimensions
         if name is None: raise
         if i is None: raise

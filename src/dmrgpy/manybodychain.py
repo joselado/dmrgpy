@@ -195,7 +195,7 @@ class Many_Body_Chain():
   def get_dos(self,**kwargs):
     from .dos import get_dos
     return get_dos(self,**kwargs)
-  def get_dynamical_correlator_MB(self,submode="KPM",**kwargs):
+  def get_dynamical_correlator_MB(self,**kwargs):
       return dynamics.get_dynamical_correlator(self,**kwargs)
   def get_dynamical_correlator(self,mode="DMRG",**kwargs):
       if mode=="DMRG": 
