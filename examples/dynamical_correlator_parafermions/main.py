@@ -23,7 +23,7 @@ print(pc.gs_energy(mode="ED"))
 
 print(pc.get_excited(mode="ED",n=10))
 
-name = (pc.Chi[1],pc.Chi[1])
+name = (pc.Sig[0],pc.Sig[1])
 (e1,d1) = pc.get_dynamical_correlator(name=name,mode="ED",submode="INV")
 (e0,d0) = pc.get_dynamical_correlator(name=name,mode="DMRG")
 

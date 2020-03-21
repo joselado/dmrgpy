@@ -77,7 +77,7 @@ def dynamical_sum(es,ws,A,B,out):
 
 
 def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
-        delta=1e-2,mode="full"):
+        delta=3e-2,mode="full"):
   """Calculate a correlation function SiSj in a frequency window"""
   ## default method
   iden = np.identity(h0.shape[0],dtype=np.complex) # identity
