@@ -100,15 +100,15 @@ def restrict_interval(x,y,window):
 
 
 
-def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
-             window=[-1,10],name="XX",delta=2e-2,es=None,
+def get_dynamical_correlator(self,n=1000,
+             window=[-1,10],name=None,delta=2e-2,
+             es=np.linspace(-1.,10,500),
              **kwargs):
-  """
-  Compute a dynamical correlator using the KPM-DMRG method
-  """
-  if mode=="DMRG": 
+    """
+    Compute a dynamical correlator using the KPM-DMRG method
+    """
 # get the moments
-    mus = get_moments_dynamical_correlator_dmrg(self,i=i,j=j,
+    mus = get_moments_dynamical_correlator_dmrg(self,
             name=name,delta=delta,**kwargs) 
     # scale of the dos
     kpmscales = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
@@ -124,34 +124,35 @@ def get_dynamical_correlator(self,n=1000,mode="DMRG",i=0,j=0,
     xs /= scale # scale back the energies
     xs += (emin+emax)/2. -emin # shift the energies
     ys *= scale # renormalize the y positions
+    return (xs,ys)
 #    e0 = self.gs_energy() # ground state energy
     # now retain only an energy window
-  else: 
-    h = self.get_full_hamiltonian()
-    sc = self.get_pychain()
-    from .pychain import correlator as pychain_correlator
-    if delta is None: delta = float(self.ns)/n*1.5
-    if mode=="fullKPM":
-      (xs,ys) = pychain_correlator.dynamical_correlator_kpm(sc,h,n=n,i=i,j=j,
-                         namei=name[0],namej=name[1])
-    elif mode=="ED":
-      (xs,ys) = pychain_correlator.dynamical_correlator(sc,h,delta=delta,i=i,
-                        j=j,namei=name[0],namej=name[1])
-    else: raise
-  if es is None:
-    (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
-  else:
-    (xs,ys) = restrict_interval(xs,ys,[min(es),max(es)]) # restrict the interval
-  from scipy.interpolate import interp1d
-  fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
-  fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-  if es is None: 
-      ne = int(100*(window[1] - window[0])/delta) # number of energies
-      xs = np.linspace(window[0],window[1],ne)
-  else: xs = np.array(es).copy() # copy input array
-  ys = fr(xs) + 1j*fi(xs) # evaluate the interpolator
-#  np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)
-  return (xs,ys)
+#  else: 
+#    h = self.get_full_hamiltonian()
+#    sc = self.get_pychain()
+#    from .pychain import correlator as pychain_correlator
+#    if delta is None: delta = float(self.ns)/n*1.5
+#    if mode=="fullKPM":
+#      (xs,ys) = pychain_correlator.dynamical_correlator_kpm(sc,h,n=n,i=i,j=j,
+#                         namei=name[0],namej=name[1])
+#    elif mode=="ED":
+#      (xs,ys) = pychain_correlator.dynamical_correlator(sc,h,delta=delta,i=i,
+#                        j=j,namei=name[0],namej=name[1])
+#    else: raise
+#  if es is None:
+#    (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
+#  else:
+#    (xs,ys) = restrict_interval(xs,ys,[min(es),max(es)]) # restrict the interval
+#  from scipy.interpolate import interp1d
+#  fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
+#  fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
+#  if es is None: 
+#      ne = int(100*(window[1] - window[0])/delta) # number of energies
+#      xs = np.linspace(window[0],window[1],ne)
+#  else: xs = np.array(es).copy() # copy input array
+#  ys = fr(xs) + 1j*fi(xs) # evaluate the interpolator
+##  np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)
+#  return (xs,ys)
 
 
 

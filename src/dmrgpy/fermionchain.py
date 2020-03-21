@@ -44,15 +44,9 @@ class Fermionic_Chain(Many_Body_Chain):
         Return the superfluid density
         """
         return staticcorrelator.get_pairing_spinless(self,**kwargs)
-    def vev_spinless(self,MO,mode="DMRG",**kwargs):
-        """ Return a vaccum expectation value"""
-        if mode=="DMRG":
-            return self.vev_MB(MO,**kwargs)
-        elif mode=="ED": 
-            MBF = self.get_ED_obj() # get the object
-            return MBF.vev(MO,**kwargs) # return overlap
-        else: raise # unrecognized
-    def vev(self,MO,**kwargs): return self.vev_spinless(MO,**kwargs)
+    def vev_spinless(self,MO,**kwargs):
+        """ Return a vacuum expectation value"""
+        return self.vev(MO,**kwargs)
     def excited_vev_spinless(self,MO,mode="DMRG",**kwargs):
         """ Return a vaccum expectation value"""
         if mode=="DMRG": return self.excited_vev_MB(MO,**kwargs)

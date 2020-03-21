@@ -37,6 +37,7 @@ class MBFermion(edchain.EDchain):
         """
         Initialize the object
         """
+        super().__init__()
         if nf is not None: raise
         fconf = lambda x: True
         self.n = n # number of different levels
@@ -103,15 +104,6 @@ class MBFermion(edchain.EDchain):
         Return the generalized interaction
         """
         return get_vijkl(self,f)
-    def get_gs(self):
-        """
-        Return the ground state
-        """
-        e,wf = ground_state(self.h) # return GS
-        self.energy = e # store energy
-        self.e0 = e # store energy
-        self.wf0 = wf # store wavefunction
-        return self.energy
     def get_excited(self,**kwargs):
         """Excited states"""
         return algebra.lowest_eigenvalues(self.h,**kwargs)

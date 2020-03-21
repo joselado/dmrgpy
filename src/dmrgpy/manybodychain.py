@@ -1,7 +1,6 @@
 from __future__ import print_function
 import numpy as np
 import os
-from . import kpmdmrg
 from . import mps
 from . import timedependent
 from . import groundstate
@@ -9,8 +8,7 @@ from . import operatornames
 from . import correlator
 from . import densitymatrix
 from . import taskdmrg
-from . import cvm
-from . import dcex
+from . import dynamics
 from . import funtk
 from . import vev
 
@@ -113,7 +111,7 @@ class Many_Body_Chain():
       """
       return vev.vev(self,MO,**kwargs)
   def vev(self,MO,mode="DMRG",**kwargs): 
-      if mode=="DMRG": return self.vev_MB(MO,**kwargs)
+      if mode=="DMRG": return vev.vev(self,MO,**kwargs)
       elif mode=="ED": return self.get_ED_obj().vev(MO,**kwargs) # ED object
       else: raise
   def excited_vev_MB(self,MO,**kwargs):
@@ -122,11 +120,6 @@ class Many_Body_Chain():
       """
       return vev.excited_vev(self,MO,**kwargs)
   def excited_vev(self,MO,**kwargs): return self.excited_vev_MB(MO,**kwargs)
-#  def vev(self,MO,**kwargs):
-#      """
-#      Compute a vacuum expectation value
-#      """
-#      return vev.vev(self,MO,**kwargs)
   def set_vijkl(self,f):
       """
       Create the generalized interaction
@@ -202,19 +195,14 @@ class Many_Body_Chain():
   def get_dos(self,**kwargs):
     from .dos import get_dos
     return get_dos(self,**kwargs)
-  def get_spismj(self,n=1000,mode="DMRG",i=0,j=0,smart=False):
-    return kpmdmrg.get_spismj(self,n=n,mode=mode,i=i,j=j,smart=smart)
   def get_dynamical_correlator_MB(self,submode="KPM",**kwargs):
-    self.set_initial_wf(self.wf0) # set the initial wavefunction
-    if submode=="KPM": # KPM method
-        return kpmdmrg.get_dynamical_correlator(self,**kwargs)
-    elif submode=="TD": # time dependent 
-        return timedependent.dynamical_correlator(self,**kwargs)
-    elif submode=="CVM": # CVM mode
-        return cvm.dynamical_correlator(self,**kwargs)
-    elif submode=="EX": # EX mode
-        return dcex.dynamical_correlator(self,**kwargs)
-    else: raise
+      return dynamics.get_dynamical_correlator(self,**kwargs)
+  def get_dynamical_correlator(self,mode="DMRG",**kwargs):
+      if mode=="DMRG": 
+          return dynamics.get_dynamical_correlator(self,**kwargs)
+      elif mode=="ED": 
+          return self.get_ED_obj().get_dynamical_correlator(**kwargs)
+      else: raise
   def get_excited(self,mode="DMRG",**kwargs):
       """Return excitation energies"""
       if mode=="DMRG":

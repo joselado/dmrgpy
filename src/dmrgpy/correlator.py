@@ -4,7 +4,8 @@ import numpy as np
 from . import taskdmrg
 
 
-def get_correlator(self,pairs=[[]],name="SS",apply_hamiltonian=False):
+def get_correlator(self,pairs=[[]],name="SS",
+        apply_hamiltonian=False,**kwargs):
     """Compute a certain static correlator in the spin chain"""
     if name=="SS":
         def getop(i,j): 
@@ -18,7 +19,7 @@ def get_correlator(self,pairs=[[]],name="SS",apply_hamiltonian=False):
       opj = operatornames.name2MO(namej,self)
       def getop(i,j): 
           return opi[i]*opj[j]
-    return np.array([self.vev(getop(i,j)) for (i,j) in pairs])
+    return np.array([self.vev(getop(i,j),**kwargs) for (i,j) in pairs])
 #    ########################################
 #    # workaround for total spin correlator #
 #    ########################################
