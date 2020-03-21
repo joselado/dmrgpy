@@ -6,8 +6,7 @@ import numpy as np
 #from numba import jit
 
 
-def get_dynamical_correlator(self,
-        name=None,submode="KPM",**kwargs):
+def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
     """
     Compute the dynamical correlator
     """
@@ -26,6 +25,11 @@ def get_dynamical_correlator(self,
       return dynamical_correlator_ED(h,A,B,**kwargs)
     elif submode=="INV":
       return dynamical_correlator_inv(h,self.wf0,self.e0,A,B,**kwargs)
+    elif submode=="TD":
+      from .. import timedependent
+      return timedependent.dynamical_correlator(self,mode="ED",
+              name=name,**kwargs)
+    else: raise
 
 
 def dynamical_correlator_kpm(h,e0,wf0,A,B,

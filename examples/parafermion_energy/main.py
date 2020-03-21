@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import parafermionchain
-n = 6
+n = 4
 pc = parafermionchain.Parafermionic_Chain(n) # create the chain
 
 h = 0

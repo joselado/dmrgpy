@@ -9,7 +9,6 @@ fc = fermionchain.Fermionic_Chain(n) # create the chain
 m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
 m = m + m.H # Make it Hermitian
 
-raise # this does not work
 
 h = 0
 

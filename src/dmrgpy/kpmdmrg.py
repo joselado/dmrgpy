@@ -101,7 +101,7 @@ def restrict_interval(x,y,window):
 
 
 def get_dynamical_correlator(self,n=1000,
-             window=[-1,10],name=None,delta=2e-2,
+             name=None,delta=2e-2,
              es=np.linspace(-1.,10,500),
              **kwargs):
     """
@@ -124,7 +124,10 @@ def get_dynamical_correlator(self,n=1000,
     xs /= scale # scale back the energies
     xs += (emin+emax)/2. -emin # shift the energies
     ys *= scale # renormalize the y positions
-    return (xs,ys)
+    from scipy.interpolate import interp1d
+    fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
+    fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
+    return (es,fr(es)+1j*fi(es))
 #    e0 = self.gs_energy() # ground state energy
     # now retain only an energy window
 #  else: 
