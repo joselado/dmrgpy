@@ -214,7 +214,7 @@ def MO2matrix(MO,obj):
         otmp = iop[0]*obj.get_identity() # factor
         for i in range(len(iop)-1): # loop over terms in the product
             term = iop[i+1] # get this term
-            otmp = otmp@obj.get_operator(term[0],term[1]) # multiply
+            otmp = obj.get_operator(term[0],term[1])@otmp # multiply
         out = out + otmp
     return out # return matrix
 

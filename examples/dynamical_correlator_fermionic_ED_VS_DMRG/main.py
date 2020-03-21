@@ -24,6 +24,7 @@ e1 = fc.gs_energy(mode="DMRG") # energy with DMRG
 print("Energy with ED",e0)
 print("Energy with DMRG",e1)
 
+print("Excited",fc.get_excited(mode="ED",n=10))
 
 ### Compute the dyamical correlator ###
 

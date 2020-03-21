@@ -6,7 +6,7 @@ from dmrgpy import spinchain
 n = 4
 # create a random spin chain
 spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
-spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
+#spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 
 
 # create first neighbor exchange
@@ -21,7 +21,6 @@ sc.set_exchange(fj)
 import time
 i = np.random.randint(n)
 j = np.random.randint(n)
-j = i
 t1 = time.time()
 name = (sc.Sz[i],sc.Sz[j])
 (x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name)
@@ -46,9 +45,9 @@ import matplotlib
 matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
 fig = plt.figure()
 fig.subplots_adjust(0.2,0.2)
-plt.plot(x2,np.abs(y2),c="blue",label="DMRG")
-plt.scatter(x3,np.abs(y3),c="green",label="ED")
-plt.scatter(x4,np.abs(y4),c="red",label="ED KPM")
+plt.plot(x2,y2.real,c="blue",label="DMRG")
+plt.scatter(x3,y3.real,c="green",label="ED")
+plt.scatter(x4,y4.real,c="red",label="ED KPM")
 plt.legend()
 plt.xlabel("frequency [J]")
 plt.ylabel("Dynamical correlator")

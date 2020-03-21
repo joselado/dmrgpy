@@ -43,7 +43,6 @@ def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
       task["kpm_multioperator_i"] = "true"
       task["kpm_multioperator_j"] = "true"
       mi = name[0] # first operator
-      mi = mi.get_dagger() # dagger
       mj = name[1] # second operator
       self.execute(lambda: mi.write(name="kpm_multioperator_i.in")) # write
       self.execute(lambda: mj.write(name="kpm_multioperator_j.in")) # write
@@ -101,7 +100,7 @@ def restrict_interval(x,y,window):
 
 
 def get_dynamical_correlator(self,n=1000,
-             name=None,delta=2e-2,
+             name=None,
              es=np.linspace(-1.,10,500),
              **kwargs):
     """
@@ -109,7 +108,7 @@ def get_dynamical_correlator(self,n=1000,
     """
 # get the moments
     mus = get_moments_dynamical_correlator_dmrg(self,
-            name=name,delta=delta,**kwargs) 
+            name=name,**kwargs) 
     # scale of the dos
     kpmscales = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
     emin = kpmscales[0] # minimum energy

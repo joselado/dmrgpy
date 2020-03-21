@@ -10,7 +10,6 @@ pc = parafermionchain.Parafermionic_Chain(n) # create the chain
 h = 0
 for i in range(n):
   for j in range(n):
-      h = h + pc.N[i]*pc.N[j]*np.random.random()
       h = h + pc.Sig[i]*pc.Sig[j]*np.random.random()
       h = h + 1j*pc.Sig[i]*pc.Sigd[j]*np.random.random()
       h = h + pc.Tau[i]*pc.Tau[j]*np.random.random()
@@ -18,26 +17,29 @@ for i in range(n):
 
 h = h + h.get_dagger() # Make the Hamiltonian Hermitian
 pc.set_hamiltonian(h) # set the Hamiltonian
-print(pc.gs_energy(mode="DMRG"))
-print(pc.gs_energy(mode="ED"))
 
-print(pc.get_excited(mode="ED",n=10))
+pc.maxm = 60
+pc.nsweeps = 40
 
 ops = pc.Chi + pc.Psi
 no = 10
+
+print("Energy ED",pc.gs_energy(mode="ED"))
+print("Energy DMRG",pc.gs_energy(mode="DMRG"))
 
 def rando():
     o = ops[np.random.randint(len(ops))]
     return o #+ o.get_dagger()
 
-name = (rando(),rando())
-delta = 1e-1
-(e1,d1) = pc.get_dynamical_correlator(name=name,mode="ED",submode="INV",
-        delta=delta)
-(e0,d0) = pc.get_dynamical_correlator(name=name,mode="DMRG",submode="KPM",
-        delta=delta)
+print(pc.get_excited(mode="ED",n=10))
 
-plt.plot(e0,d0.real,color="red",label="DMRG")
-plt.plot(e1,d1.real,color="blue",label="ED")
+cs = [rando()*rando() for i in range(no)]
+
+c1 = np.array([pc.vev(o,mode="ED") for o in cs])
+c2 = np.array([pc.vev(o,mode="DMRG") for o in cs])
+
+
+plt.plot(range(no),c2.real,color="red",label="DMRG")
+plt.scatter(range(no),c1.real,color="blue",label="ED")
 plt.legend()
 plt.show()
