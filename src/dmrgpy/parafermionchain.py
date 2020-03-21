@@ -14,12 +14,17 @@ class Parafermionic_Chain(Many_Body_Chain):
         Many_Body_Chain.__init__(self,[-2 for i in range(n)])
         self.use_ampo_hamiltonian = True # use ampo
         self.Chi = []
+        self.Dis = []
         self.Psi = []
         for i in range(n): 
             t = 1
             for j in range(i): t = t*self.Tau[j]
             self.Chi.append(t*self.Sig[i])
             self.Psi.append(t*self.Sig[i]*self.Tau[i])
+        for i in range(n): 
+            t = 1
+            for j in range(i+1): t = t*self.Tau[j]
+            self.Dis.append(t)
     def get_ED_obj(self):
         from .pyparafermion import parafermion
         obj = parafermion.Parafermion_Chain(self)
