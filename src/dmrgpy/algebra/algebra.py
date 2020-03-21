@@ -132,9 +132,17 @@ def lowest_eigenvalues(h,n=10,nmax=maxsize):
     eig = np.sort(eig)
   else:
     if info: print("Full diagonalization")
+    ishermitian(h)
     eig = dlg.eigvalsh(h.todense())
   return eig[0:n] # return eigenvalues
 
+
+
+def ishermitian(m):
+    d = m - np.conjugate(m.T)
+    if np.max(np.abs(d))>1e-6: 
+        print("Hamiltonian is not Hermitian")
+        raise
 
 def expm(m):
     m = todense(m)

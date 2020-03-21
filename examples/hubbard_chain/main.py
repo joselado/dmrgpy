@@ -14,8 +14,8 @@ fc = fermionchain.Spinful_Fermionic_Chain(n) # create the chain
 # initialize Hamiltonian #
 h = 0
 for i in range(n-1): # hopping
-    h = h + fc.Cdagup[i]*fc.Cup[i+1]
-    h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
+    h = h + fc.Cdagup[i]*fc.Cdagup[i+1]
+    h = h + fc.Cdn[i]*fc.Cdagdn[i+1]
 for i in range(n): # Hubbard
     h = h + (fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
 h = h + h.get_dagger()
@@ -26,6 +26,7 @@ fc.nsweeps = 40
 fc.set_hamiltonian(h) # set the hoppings
 print(fc.gs_energy(mode="DMRG"))
 print(fc.gs_energy(mode="ED"))
+#exit()
 # Compute the dynamical correlator defined by
 # <0|c_i^dagger \delta(H-E_0-\omega) c_j |0>
 i = 0 # first index of the dynamical correlator
