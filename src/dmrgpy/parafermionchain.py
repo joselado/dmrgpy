@@ -25,6 +25,8 @@ class Parafermionic_Chain(Many_Body_Chain):
             t = 1
             for j in range(i+1): t = t*self.Tau[j]
             self.Dis.append(t)
+        self.Psid = [o.get_dagger() for o in self.Psi]
+        self.Chid = [o.get_dagger() for o in self.Chi]
     def get_ED_obj(self):
         from .pyparafermion import parafermion
         obj = parafermion.Parafermion_Chain(self)
