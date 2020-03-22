@@ -3,6 +3,8 @@
 import dill as pickle
 import os
 
+pickle.settings['recurse'] = True
+
 
 def pcall(fin,xs,time=80):
     """Run a parallel calculation with slurm"""
