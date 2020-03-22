@@ -34,8 +34,8 @@ sc.cutoff = 1e-10
 # this array constains the pairs of spins on which you want to compute
 # <GS|S_i S_j GS>
 pairs = [(0,i) for i in range(n)] # between the edge and the rest
-cs = sc.get_correlator(pairs=pairs,mode="DMRG",name="XX").real # get the static correlators
-cs1 = sc.get_correlator(pairs=pairs,mode="ED",name="XX").real # get the static correlators
+cs = sc.get_correlator(pairs=pairs,mode="DMRG").real # get the static correlators
+cs1 = sc.get_correlator(pairs=pairs,mode="ED").real # get the static correlators
 ########################
 # Now plot the results #
 ########################

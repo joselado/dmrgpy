@@ -18,6 +18,8 @@ for i in range(n):
 
 h = h + h.get_dagger() # Make the Hamiltonian Hermitian
 pc.set_hamiltonian(h) # set the Hamiltonian
+pc.maxm = 60
+pc.kpmmaxm = 60
 print(pc.gs_energy(mode="DMRG"))
 print(pc.gs_energy(mode="ED"))
 
@@ -30,7 +32,7 @@ def rando():
     o = ops[np.random.randint(len(ops))]
     return o #+ o.get_dagger()
 
-name = (rando(),rando())
+name = [rando(),rando()]
 delta = 1e-1
 (e1,d1) = pc.get_dynamical_correlator(name=name,mode="ED",submode="INV",
         delta=delta)

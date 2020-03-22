@@ -10,7 +10,7 @@ pc = parafermionchain.Parafermionic_Chain(n) # create the chain
 h = 0
 for i in range(n):
   for j in range(n):
-      h = h + pc.Sig[i]*pc.Sig[j]*np.random.random()
+      h = h + pc.Sig[i]*pc.Tau[j]*np.random.random()
       h = h + 1j*pc.Sig[i]*pc.Sigd[j]*np.random.random()
       h = h + pc.Tau[i]*pc.Tau[j]*np.random.random()
       h = h + 1j*pc.Tau[i]*pc.Taud[j]*np.random.random()
@@ -33,7 +33,7 @@ def rando():
 
 print(pc.get_excited(mode="ED",n=10))
 
-cs = [rando()*rando() for i in range(no)]
+cs = [rando() for i in range(no)]
 
 c1 = np.array([pc.vev(o,mode="ED") for o in cs])
 c2 = np.array([pc.vev(o,mode="DMRG") for o in cs])

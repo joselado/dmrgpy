@@ -17,6 +17,7 @@ class Parafermion_Chain(edchain.EDchain):
         S[0,2] = 1.0
         S[1,0] = 1.0
         S[2,1] = 1.0
+        S = S.T # be consistent with the itensor basis
         for i in range(n): self.create_operator(S,i=i,name="Sig")
         for i in range(n): self.create_operator(S.T,i=i,name="SigDag")
         T = zero.copy()

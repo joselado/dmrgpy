@@ -1,7 +1,7 @@
 import numpy as np
 from dmrgpy import fermionchain
 
-nf = 6 # number of different spinless fermionic orbitals
+nf = 4 # number of different spinless fermionic orbitals
 fc = fermionchain.Fermionic_Chain(nf) # create the object
 C = fc.C # annihilation
 Cdag = fc.Cdag # creation
@@ -12,6 +12,8 @@ H = 0 # initialize Hamiltonian
 for i in range(nf):
   for j in range(nf):
     H = H + Cdag[i]*C[j]*np.random.random() # random hopping
+
+#H = 1j*Cdag[0]*C[1]
 
 #for i in range(nf-1):
 #    H = H + Cdag[i]*C[i]*Cdag[i+1]*C[i+1]*np.random.random() 

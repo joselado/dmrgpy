@@ -42,8 +42,8 @@ def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
   if type(name[0])==multioperator.MultiOperator: 
       task["kpm_multioperator_i"] = "true"
       task["kpm_multioperator_j"] = "true"
-      mi = name[0] # first operator
-      mj = name[1] # second operator
+      mi = name[1] # first operator
+      mj = name[0] # second operator
       mj = mj.get_dagger()
       self.execute(lambda: mi.write(name="kpm_multioperator_i.in")) # write
       self.execute(lambda: mj.write(name="kpm_multioperator_j.in")) # write

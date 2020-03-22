@@ -16,7 +16,7 @@ print("Sz",fc.vev(fc.Sz[0],mode="DMRG"))
 print("Sz",fc.vev(fc.Sz[0],mode="ED"))
 j = 0 # second index of the dynamical correlator
 delta = 0.1 # energy resolution (approximate)
-name = (fc.Cdag[0],fc.C[0])
+name = (fc.C[0],fc.Cdag[0])
 (x,y) = fc.get_dynamical_correlator(delta=delta,name=name)
 (x1,y1) = fc.get_dynamical_correlator(delta=delta,name=name,mode="ED",
         submode="INV")

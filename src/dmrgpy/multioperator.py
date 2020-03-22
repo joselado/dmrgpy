@@ -154,13 +154,7 @@ def write_ampo(out,name):
       n = (len(o)-2)//2 # number of terms
       if n>90: raise # C++ code needs to be recompiled
       f.write(str((len(o)-2)//2)+"\n") # number of terms
-      # reverse the order for compatibility
-      ops = o
-#      ops = [o[0],o[1]] # keep the first two in the same order
-#      for i in range(n): # loop over terms
-#          ii = 2*n - 2*i # first index
-#          ops = ops + [o[ii],o[ii+1]]
-      for io in ops:
+      for io in o:
           f.write(str(io)+"  ")
       f.write("\n")
     f.close()
@@ -220,7 +214,7 @@ def MO2matrix(MO,obj):
         otmp = iop[0]*obj.get_identity() # factor
         for i in range(len(iop)-1): # loop over terms in the product
             term = iop[i+1] # get this term
-            otmp = obj.get_operator(term[0],term[1])@otmp # multiply
+            otmp = otmp@obj.get_operator(term[0],term[1]) # multiply
         out = out + otmp
     return out # return matrix
 
@@ -259,16 +253,16 @@ def jordan_wigner(MO):
 
 
 
-def get_dagger(self):
+def get_dagger(self,conjugate=True):
     """Return the dagger of a multioperator"""
     m = 0 # initialize
     for opi in self.op: # loop over terms
-        n = len(opi)-1 # number of terms in the product
+        n = len(opi) # number of terms in the product
         c = opi[0] # coefficient
         mi = np.conjugate(c) # initialize
-        for i in range(n): # loop over terms in the product
-            name = opi[n-i][0] # name
-            jj = opi[n-i][1] # index
+        for i in range(1,n): # loop over terms in the product
+            name = opi[i][0] # name
+            jj = opi[i][1] # index
             if name=="C": name2="Cdag"
             elif name=="Cdag": name2="C"
             elif name=="A": name2="Adag"
@@ -282,7 +276,7 @@ def get_dagger(self):
             elif name=="SigDag": name2="Sig"
             elif name=="TauDag": name2="Tau"
             else: name2 = name
-            mi = mi*obj2MO([[name2,jj]])
+            mi = obj2MO([[name2,jj]])*mi
         m = m + mi # add contribution
     return m # return MO
 
