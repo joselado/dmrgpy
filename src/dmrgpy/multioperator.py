@@ -154,7 +154,13 @@ def write_ampo(out,name):
       n = (len(o)-2)//2 # number of terms
       if n>90: raise # C++ code needs to be recompiled
       f.write(str((len(o)-2)//2)+"\n") # number of terms
-      for io in o:
+      # reverse the order for compatibility
+      ops = o
+#      ops = [o[0],o[1]] # keep the first two in the same order
+#      for i in range(n): # loop over terms
+#          ii = 2*n - 2*i # first index
+#          ops = ops + [o[ii],o[ii+1]]
+      for io in ops:
           f.write(str(io)+"  ")
       f.write("\n")
     f.close()

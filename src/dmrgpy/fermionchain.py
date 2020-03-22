@@ -191,8 +191,8 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
         self.Cdagup = [self.Cdag[2*i] for i in range(n)]
         self.Cdn = [self.C[2*i+1] for i in range(n)]
         self.Cdagdn = [self.Cdag[2*i+1] for i in range(n)]
-        self.Nup = [self.get_operator("N",2*i) for i in range(n)]
-        self.Ndn = [self.get_operator("N",2*i+1) for i in range(n)]
+        self.Nup = [self.N[2*i] for i in range(n)]
+        self.Ndn = [self.N[2*i+1] for i in range(n)]
         self.Ntot = [self.Nup[i]+self.Ndn[i] for i in range(n)]
         self.use_ampo_hamiltonian = True # use ampo
     def get_density_spinful(self,**kwargs):
