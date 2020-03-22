@@ -34,10 +34,13 @@ name = (rando(),rando())
 delta = 1e-1
 (e1,d1) = pc.get_dynamical_correlator(name=name,mode="ED",submode="INV",
         delta=delta)
+(e2,d2) = pc.get_dynamical_correlator(name=name,mode="ED",submode="KPM",
+        delta=delta)
 (e0,d0) = pc.get_dynamical_correlator(name=name,mode="DMRG",submode="KPM",
         delta=delta)
 
 plt.plot(e0,d0.real,color="red",label="DMRG")
-plt.plot(e1,d1.real,color="blue",label="ED")
+plt.scatter(e2,d2.real,color="green",label="ED-KPM")
+plt.plot(e1,d1.real,color="blue",label="ED-INV")
 plt.legend()
 plt.show()

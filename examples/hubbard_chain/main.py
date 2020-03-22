@@ -37,11 +37,15 @@ fc.gs_energy()
 #exit()
 # The result will be written in a file called DYNAMICAL_CORRELATOR.OUT
 # compute the dynamical correlator using KPM DMRG
-name = (fc.N[0],fc.N[0])
+name = (fc.Sz[0],fc.Sz[0])
 (x,y) = fc.get_dynamical_correlator(delta=delta,name=name)
+(x1,y1) = fc.get_dynamical_correlator(delta=delta,name=name,mode="ED",
+        submode="INV")
 import matplotlib.pyplot as plt
 # plot the result
-plt.plot(x,y.real,marker="o")
+plt.plot(x,y.real,marker="o",label="DMRG")
+plt.plot(x1,y1.real,marker="o",label="ED")
+plt.legend()
 plt.show()
 
 

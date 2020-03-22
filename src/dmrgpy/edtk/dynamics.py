@@ -12,8 +12,7 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
     """
     if name is None: raise
     if type(name[0])==multioperator.MultiOperator: # multioperator
-      A = name[0].get_dagger() # dagger
-      A = self.get_operator(A)
+      A = self.get_operator(name[0])
       B = self.get_operator(name[1])
     else:
       raise # this is no longer used
@@ -34,9 +33,9 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
 
 def dynamical_correlator_kpm(h,e0,wf0,A,B,
         delta=1e-1,es=np.linspace(-1.,10,400)):
-    B = np.conjugate(B.T)
-    vj = B@wf0 # first wavefunction
-    vi = A@wf0 # second wavefunction
+    A = np.conjugate(A.T)
+    vi = B@wf0 # first wavefunction
+    vj = A@wf0 # second wavefunction
     m = -np.identity(h.shape[0])*e0+h # matrix to use
     emax = slg.eigsh(h,k=1,ncv=20,which="LA")[0] # upper energy
     scale = np.max([np.abs(e0),np.abs(emax)])*3.0
@@ -87,8 +86,8 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
       if mode=="full": # using exact inversion
         g1 = algebra.inv(iden*(e+e0+1j*delta)-h0)
         g2 = algebra.inv(iden*(e+e0-1j*delta)-h0)
-        g = 1j*(g1-g2)/2.
-        op = B@g@A # operator
+        g = 1j*(g1-g2)/2./np.pi
+        op = A@g@B # operator
         o = algebra.braket_wAw(wf0,op) # correlator
       elif mode=="cv": # correction vector algorithm
           o1 = solve_cv(h0,wf0,A,B,e+e0,delta=delta) # conjugate gradient

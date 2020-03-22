@@ -55,6 +55,7 @@ class MBFermion(edchain.EDchain):
             return self.c_dict[i] # return matrix
         else: # not computed yet
             m = states.destroy(self.basis,self.basis_dict,self.n,i)
+#            m = m.H
             self.c_dict[i] = m # store matrix
             return m
     def clean(self):
@@ -111,7 +112,7 @@ class MBFermion(edchain.EDchain):
         """
         Return the creation operator for site i in the many body basis
         """
-        return self.get_c(i).H # return the dagger
+        return np.conjugate(self.get_c(i)).T # return the dagger
     def get_density(self,i):
         """
         Return the density operator

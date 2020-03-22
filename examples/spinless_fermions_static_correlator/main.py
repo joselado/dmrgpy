@@ -13,8 +13,8 @@ for i in range(nf):
   for j in range(nf):
     H = H + Cdag[i]*C[j]*np.random.random() # random hopping
 
-for i in range(nf-1):
-    H = H + Cdag[i]*C[i]*Cdag[i+1]*C[i+1]*np.random.random() 
+#for i in range(nf-1):
+#    H = H + Cdag[i]*C[i]*Cdag[i+1]*C[i+1]*np.random.random() 
 
 H = H + H.get_dagger() # make it Hermitian
 
