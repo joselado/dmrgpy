@@ -171,6 +171,8 @@ class MBFermion(edchain.EDchain):
         m = self.get_operator(A) # return the operator
         wfs = algebra.lowest_eigenvectors(self.h,**kwargs)
         return np.array([algebra.braket_wAw(wf,m) for wf in wfs])
+    def test(self):
+        test_commutation(self)
     def get_operator(self,name,i=0):
         """
         Return a certain operator
@@ -209,6 +211,30 @@ def get_vijkl(self,f):
 
 
 
+def test_commutation(self):
+    """Perform a test of the commutation relations"""
+    C = [self.get_operator("C",i) for i in range(self.n)]
+    Cdag = [self.get_operator("Cdag",i) for i in range(self.n)]
+    Id = self.get_operator("Id")
+    n = len(C) # number of sites
+    ntries = 8 # number of tries
+    for ii in range(ntries):
+        i = np.random.randint(n)
+        j = np.random.randint(n)
+        d = Cdag[i]@Cdag[j] + Cdag[j]@Cdag[i]
+        if np.max(np.abs(d))>1e-7: 
+            print("Cdag,Cdag failed",i,j)
+            raise
+        d = C[i]@C[j] + C[j]@C[i]
+        if np.max(np.abs(d))>1e-7: 
+            print("C,C failed",i,j)
+            raise
+        if i==j: d = Cdag[i]@C[j] + C[j]@Cdag[i] - Id
+        else: d = Cdag[i]@C[j] + C[j]@Cdag[i] 
+        if np.max(np.abs(d))>1e-7:
+            print("Cdag,C failed",i,j)
+            raise
+    print("Commutation test passed")
 
 
 

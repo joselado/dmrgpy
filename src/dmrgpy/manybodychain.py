@@ -114,6 +114,9 @@ class Many_Body_Chain():
       if mode=="DMRG": return vev.vev(self,MO,**kwargs)
       elif mode=="ED": return self.get_ED_obj().vev(MO,**kwargs) # ED object
       else: raise
+  def test_ED(self):
+      """Test the ED object"""
+      self.get_ED_obj().test()
   def excited_vev_MB(self,MO,**kwargs):
       """
       Compute a vacuum expectation value

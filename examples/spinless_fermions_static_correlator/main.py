@@ -17,7 +17,7 @@ for i in range(nf):
 
 #for i in range(nf-1):
 #    H = H + Cdag[i]*C[i]*Cdag[i+1]*C[i+1]*np.random.random() 
-
+fc.test_ED() # test the ED part
 H = H + H.get_dagger() # make it Hermitian
 
 fc.set_hamiltonian(H) # set the Hamiltonian

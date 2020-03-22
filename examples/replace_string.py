@@ -5,7 +5,7 @@ ds = os.walk(os.getcwd())
 
 def modify(ls):
     """Modify an input file to add the path"""
-    return ls.replace("Fermionic_Hamiltonian","Fermionic_Chain")
+    return ls.replace("time.clock","time.perf_counter")
 
 ds = [d[0] for d in ds] # loop
 
