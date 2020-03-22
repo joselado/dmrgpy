@@ -4,8 +4,8 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
-n = 10
-fc = fermionchain.Fermionic_Chain(n,spinful=False) # create the chain
+n = 6
+fc = fermionchain.Fermionic_Chain(n) # create the chain
 def ft(i,j):
     if abs(j-i)==1: return 1.0 
     if i==j: return 0.5

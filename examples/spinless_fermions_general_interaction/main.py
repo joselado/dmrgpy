@@ -59,9 +59,9 @@ print("GS energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 # give the list of pairs (ij) that you want to compute
 
 nc = 10 # compute ten random correlators
-pairs = [[np.random.randint(n),np.random.randint(n)] for i in range(nc)]
-cs0 = fc.get_correlator(pairs=pairs,mode="DMRG")
-cs1 = fc.get_correlator(pairs=pairs,mode="ED")
+pairs = [fc.Cdag[np.random.randint(n)]*fc.C[np.random.randint(n)] for i in range(nc)]
+cs0 = np.array([fc.vev(p,mode="DMRG") for p in pairs])
+cs1 = np.array([fc.vev(p,mode="ED") for p in pairs])
 
 # now plot real and imaginary part
 plt.subplot(121)

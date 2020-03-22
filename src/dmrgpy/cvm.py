@@ -39,8 +39,10 @@ def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
             }
     self.task = task # override tasks
 #    name[0] = name[0].get_dagger()
-    self.execute(lambda: name[0].write(name="dc_multioperator_i.in"))
-    self.execute(lambda: name[1].write(name="dc_multioperator_j.in"))
+    A = name[0]
+    B = name[1]
+    self.execute(lambda: A.write(name="dc_multioperator_i.in"))
+    self.execute(lambda: B.write(name="dc_multioperator_j.in"))
     self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
     self.execute( lambda : self.run()) # run calculation
     cs = self.get_file("CVM.OUT") # read the correlator

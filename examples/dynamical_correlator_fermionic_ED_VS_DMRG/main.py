@@ -31,11 +31,12 @@ print("Excited",fc.get_excited(mode="ED",n=10))
 def randop():
     i = np.random.randint(n)
     j = np.random.randint(n)
+    print(i)
     ci = np.exp(2*1j*np.random.random()*np.pi)
     cj = np.exp(2*1j*np.random.random()*np.pi)
-    return ci*fc.C[i] + cj*fc.Cdag[j]
+    return ci*fc.C[i] #+ cj*fc.Cdag[j]
 
-name = (randop(),randop())
+name = (randop().get_dagger(),randop())
 
 es = np.linspace(-0.5,6.0,300) # energies of the correlator
 delta = 1e-1 # smearing of the correlator

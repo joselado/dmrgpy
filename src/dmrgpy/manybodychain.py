@@ -240,12 +240,20 @@ class Many_Body_Chain():
       if mode=="DMRG": return groundstate.gs_energy(self,**kwargs)
       elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
       else: raise
-  def get_correlator_MB(self,**kwargs):
-      """Return a correlator"""
-      return correlator.get_correlator(self,**kwargs)
-  def get_correlator(self,**kwargs):
+#  def get_correlator_MB(self,**kwargs):
+#      """Return a correlator"""
+#      return correlator.get_correlator(self,**kwargs)
+  def get_correlator(self,pairs=[],**kwargs):
       """Return a correlator, default one"""
-      return correlator.get_correlator(self,**kwargs)
+      print("Method get_correlator is deprecated, use vev instead")
+      from . import spinchain
+      from . import fermionchain
+      if type(self)==spinchain.Spin_Chain: 
+          ops = [self.Sz[i]*self.Sz[j] for (i,j) in pairs]
+      elif type(self)==fermionchain.Fermionic_Chain: 
+          ops = [self.Cdag[i]*self.C[j] for (i,j) in pairs]
+      else: raise
+      return np.array([self.vev(o,**kwargs) for o in ops])
   def get_file(self,name):
       """Return the electronic density"""
       if not self.computed_gs: self.get_gs() # compute gs
