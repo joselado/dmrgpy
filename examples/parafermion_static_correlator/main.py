@@ -18,6 +18,8 @@ for i in range(n):
 h = h + h.get_dagger() # Make the Hamiltonian Hermitian
 pc.set_hamiltonian(h) # set the Hamiltonian
 
+pc.test_ED()
+
 pc.maxm = 60
 pc.nsweeps = 40
 
