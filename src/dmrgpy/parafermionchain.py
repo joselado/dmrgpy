@@ -4,14 +4,17 @@ import numpy as np
 
 class Parafermionic_Chain(Many_Body_Chain):
     """Class for a parafermionic chain"""
-    def __init__(self,n):
+    def __init__(self,n,Z=3):
+        self.Z = Z # type of parafermion
         self.N = [self.get_operator("N",i) for i in range(n)]
         self.Sig = [self.get_operator("Sig",i) for i in range(n)]
         self.Sigd = [self.get_operator("SigDag",i) for i in range(n)]
         self.Tau = [self.get_operator("Tau",i) for i in range(n)]
         self.Taud = [self.get_operator("TauDag",i) for i in range(n)]
         self.Id = self.get_operator("Id",1)
-        Many_Body_Chain.__init__(self,[-2 for i in range(n)])
+        if Z==3: Many_Body_Chain.__init__(self,[-2 for i in range(n)])
+        elif Z==4: Many_Body_Chain.__init__(self,[-3 for i in range(n)])
+        else: raise
         self.use_ampo_hamiltonian = True # use ampo
         self.Chi = []
         self.Dis = []

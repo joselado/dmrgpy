@@ -9,24 +9,21 @@ class Parafermion_Chain(edchain.EDchain):
     def __init__(self,MBO):
         n = MBO.ns # number of sites
         super().__init__() # super initializetion
-        self.localdim = [3 for i in range(n)]
         # create all operators
-        zero = np.zeros((3,3),dtype=np.complex) # get zero
+        Z = MBO.Z # type of parafermion
+        self.Z = Z
+        self.localdim = [Z for i in range(n)]
+        zero = np.zeros((Z,Z),dtype=np.complex) # get zero
         N = zero.copy()
-        N[1,1] = 1.0
-        N[2,2] = 2.0
+        for i in range(Z): N[i,i] = i
         for i in range(n): self.create_operator(N,i=i,name="N")
         S = zero.copy()
-        S[0,2] = 1.0
-        S[1,0] = 1.0
-        S[2,1] = 1.0
-        S = S.T # be consistent with the itensor basis
+        for i in range(Z-1): S[i,i+1] = 1.0
+        S[Z-1,0] = 1.0
         for i in range(n): self.create_operator(S,i=i,name="Sig")
         for i in range(n): self.create_operator(S.T,i=i,name="SigDag")
         T = zero.copy()
-        T[0,0] = 1.0
-        T[1,1] = np.exp(1j*2*np.pi/3.)
-        T[2,2] = np.exp(1j*4*np.pi/3.)
+        for i in range(Z): T[i,i] = np.exp(i*1j*2*np.pi/Z)
         for i in range(n): self.create_operator(T,i=i,name="Tau")
         Td = np.conjugate(T.T)
         for i in range(n): self.create_operator(Td,i=i,name="TauDag")
@@ -55,6 +52,7 @@ def test_commutation(self):
 #    Id = self.get_operator(self.Id)
     n = len(Chi) # number of sites
     ntries = 8 # number of tries
+    omega = np.exp(1j*2*np.pi/self.Z)
     for ii in range(ntries):
         i = np.random.randint(n)
         j = np.random.randint(n)
@@ -71,15 +69,6 @@ def test_commutation(self):
         if np.max(np.abs(d))>1e-7:
             print("Psi,Chi failed",i,j)
             raise
-#        d = C[i]@C[j] + C[j]@C[i]
-#        if np.max(np.abs(d))>1e-7:
-#            print("C,C failed",i,j)
-#            raise
-#        if i==j: d = Cdag[i]@C[j] + C[j]@Cdag[i] - Id
-#        else: d = Cdag[i]@C[j] + C[j]@Cdag[i]
-#        if np.max(np.abs(d))>1e-7:
-#            print("Cdag,C failed",i,j)
-#            raise
     print("Commutation test passed")
 
 
