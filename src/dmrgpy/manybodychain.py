@@ -56,7 +56,7 @@ class Many_Body_Chain():
       self.tevol_custom_exp = True # custom exponential function for Tevol
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
-      self.kpm_scale = 0.7 # scaling of the spectra for KPM
+      self.kpm_scale = 1. # scaling of the spectra for KPM
       self.kpm_accelerate = True # set to true
       self.kpm_n_scale = 3 # scaling factor for the number of polynomials
       self.restart = False # restart the calculation
