@@ -95,7 +95,8 @@ print("Energy with ED",sc.gs_energy(mode="ED"))
 ## Magnetization an S=1 spin chain with an edge magnetic field
 ```python
 from dmrgpy import spinchain
-spins = [3 for i in range(40)] # 2*S+1=3 for S=1
+n = 40
+spins = [3 for i in range(n)] # 2*S+1=3 for S=1
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
@@ -104,7 +105,7 @@ for i in range(len(spins)-1):
   h = h + sc.Sz[i]*sc.Sz[i+1]
 h = h + Sz[0]*0.1 # edge magnetic field
 sc.set_hamiltonian(h) # create the Hamiltonian
-mx,mx,mz = sc.get_magnetization()
+mz = [sc.vev(sc.Sz[i]).real for i in range(n)]
 print("Mz",mz)
 ```
 
