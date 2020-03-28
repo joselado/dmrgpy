@@ -173,15 +173,17 @@ from dmrgpy import fermionchain
 n = 6 # number of different spinless fermionic orbitals
 # fc is an object that contains the information of the many body system
 fc = fermionchain.Fermionic_Chain(n) # create the object
-# create a random Hermitian hopping matrix
-m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
-m = m + m.H # make it Hermitian
-fc.set_hoppings(lambda i,j: m[i,j])
-def vijkl(i,j,k,l):
-    """Function defining the many body interaction"""
-    if i==j and k==l and abs(i-k)==1: return 1.0
-    else: return 0.0
-fc.set_vijkl(vijkl) # add interaction term
+h = 0
+# create random hoppings
+for i in range(n):
+  for j in range(i):
+    h = h + fc.Cdag[i]*fc.C[j]*np.random.random()
+# create random density interactions
+for i in range(n):
+  for j in range(i):
+    h = h + fc.N[i]*fc.N[j]*np.random.random()
+h = h + h.get_dagger() # make the Hamiltonian Hermitian
+fc.set_hamiltonian(h) # set the Hamiltonian in the object
 print("GS energy with ED",fc.gs_energy(mode="ED")) # energy with exact diag
 print("GS energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 ```
