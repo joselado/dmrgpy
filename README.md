@@ -62,7 +62,8 @@ print("Ground state energy",sc.gs_energy())
 ## Static correlator of an S=1 spin chain
 ```python
 from dmrgpy import spinchain
-spins = [3 for i in range(30)] # 2*S+1=3 for S=1
+n = 30
+spins = [3 for i in range(n)] # 2*S+1=3 for S=1
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
@@ -71,7 +72,8 @@ for i in range(len(spins)-1):
   h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h) # create the Hamiltonian
 pairs = [(0,i) for i in range(30)] # between the edge and the rest
-cs = sc.get_correlator(pairs)
+cs = [sc.vev(sc.Sz[0]*fc.Sz[i]).real for i in range(n)]
+print(cs)
 ```
 
 ## Ground state energy of a bilinear-biquadratic Hamiltonian
@@ -95,8 +97,13 @@ print("Energy with ED",sc.gs_energy(mode="ED"))
 from dmrgpy import spinchain
 spins = [3 for i in range(40)] # 2*S+1=3 for S=1
 sc = spinchain.Spin_Chain(spins) # create spin chain object
-sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
-sc.set_fields(lambda i: [0,0,(i==0)*0.01]) # only in the first site
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1): 
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+h = h + Sz[0]*0.1 # edge magnetic field
+sc.set_hamiltonian(h) # create the Hamiltonian
 mx,mx,mz = sc.get_magnetization()
 print("Mz",mz)
 ```
@@ -105,9 +112,15 @@ print("Mz",mz)
 ```python
 from dmrgpy import spinchain
 spins = [2 for i in range(30)] # 2*S+1=2 for S=1/2
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1): 
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+
 for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
   sc = spinchain.Spin_Chain(spins) # create spin chain object
-  sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
+  sc.set_hamiltonian(h) # create the Hamiltonian
   sc.maxm = maxm # set the bond dimension
   e = sc.gs_energy() # get the ground state energy
   print("Energy",e,"for bond dimension",maxm)
@@ -119,7 +132,12 @@ for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
 from dmrgpy import spinchain
 spins = [2 for i in range(12)] # 2*S+1=2 for S=1/2
 sc = spinchain.Spin_Chain(spins) # create spin chain object
-sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1): 
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
 es1 = sc.get_excited(n=6,mode="DMRG")
 es2 = sc.get_excited(n=6,mode="ED")
 print("Excited states with DMRG",es1)
@@ -132,7 +150,12 @@ from dmrgpy import spinchain
 # Haldane chain with S=1/2 on the edge to remove the topological modes
 spins = [2]+[3 for i in range(40)]+[2]
 sc = spinchain.Spin_Chain(spins) # create spin chain object
-sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1): 
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
 es = sc.get_excited(n=2,mode="DMRG")
 gap = es[1]-es[0] # compute gap
 print("Gap of the Haldane chain",gap)
@@ -143,8 +166,13 @@ print("Gap of the Haldane chain",gap)
 from dmrgpy import spinchain
 spins = [3 for i in range(40)] # 2*S+1=3 for S=1
 sc = spinchain.Spin_Chain(spins) # create spin chain object
-sc.set_exchange(lambda i,j: (abs(i-j)==1)*0.5) # first neighbors
-sc.get_dynamical_correlator(i=0,j=0,name="ZZ")
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1): 
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+sc.get_dynamical_correlator(i=0,j=0,name=(sc.Sz[0],sc.Sz[0]))
 ```
 
 
@@ -154,15 +182,21 @@ from dmrgpy import fermionchain
 n = 20 # number of sites
 fc = fermionchain.Spinful_Fermionic_Chain(n)
 # first neighbor hopping
-fc.set_hoppings_spinful(lambda i,j: (abs(i-j)==1)*1.0) 
+h = 0
+for i in range(n-1):
+  h = fc.Cdagup[i]*fc.Cup[i+1]
+  h = fc.Cdagdn[i]*fc.Cdn[i+1]
+h = h.get_dagger() # Make Hermitian
 # Hubbard term
-fc.set_hubbard_spinful(lambda i,j: ((i-j)==0)*1.0) 
+for i in range(n-1):
+  h = 2.*(fc.Nup[i]-.5)*(fc.Cup[i+1]-.5)
+fc.set_hamiltonian(h) # initialize the Hamiltonian
 pairs = [(0,i) for i in range(n)]
 # compute the two correlators
-zz = fc.get_correlator(pairs=pairs,name="ZZ")
-dd = fc.get_correlator(pairs=pairs,name="densitydensity")
+zz = [fc,vev(fc.Sz[0]*fc.Sz[i]).real for i in range(n)]
+cc = [fc,vev(fc.Cdagup[0]*fc.Cup[i]).real for i in range(n)]
 print("Spin correlators",zz)
-print("Density correlators",dd)
+print("Site correlators",cc)
 ```
 
 
