@@ -25,6 +25,8 @@ def compare(n):
   sc = get(n)
   sc.itensor_version = "julia" # setup this version
   e1 = sc.gs_energy() # compute the ground state energy
+  print("Energy with C++",e0)
+  print("Energy with Julia",e1)
   t2 = time.time()
   return t1-t0,t2-t1
 ns = [10,20,40,80,160,320,640]
