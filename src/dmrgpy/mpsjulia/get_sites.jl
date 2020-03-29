@@ -18,11 +18,6 @@ function get_sites()
     if ni==3 
 	site = Index(3,"Site,S=1,n=$i")
     end
-#    print(name,"\n")
-#    TType = TagType{Tag(name)}
-#    if !hasmethod(siteinds,Tuple{TType,Int})
-#      error("Overload of \"siteinds\" function not found for tag type \"$str\"")
-#    end
     push!(sites,site)
   end
   sites = [s for s in sites]
@@ -30,4 +25,3 @@ function get_sites()
   return sites
 end
 
-#get_sites("a")

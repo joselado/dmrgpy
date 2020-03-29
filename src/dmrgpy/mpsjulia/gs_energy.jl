@@ -12,7 +12,5 @@ let
   @show sweeps
   energy, psi = dmrg(H,psi0, sweeps)
   println("Final energy = $energy")
-  open("GS_ENERGY.OUT", "w") do io
-	  write(io, string(energy)) # write energy in a file
-  end
+  write_in_file("GS_ENERGY.OUT", energy)
 end

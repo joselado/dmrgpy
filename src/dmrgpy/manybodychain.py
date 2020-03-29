@@ -185,8 +185,10 @@ class Many_Body_Chain():
       # executable
       if self.itensor_version==2: mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" 
       elif self.itensor_version==3: mpscpp = dmrgpath+"/mpscpp3/mpscpp.x" 
+      elif self.itensor_version=="julia": 
+          mpscpp = "julia "+dmrgpath+"/mpsjulia/mpsjulia.jl" 
       else: raise
-      if not os.path.isfile(mpscpp): raise
+#      if not os.path.isfile(mpscpp): raise
       self.execute(lambda : os.system(mpscpp+" > status.txt"))
   def entropy(self,n=1):
     """Return the entanglement entropy"""

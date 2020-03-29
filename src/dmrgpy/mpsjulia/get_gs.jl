@@ -1,4 +1,8 @@
-using ITensors
+
+function get_gs()
+  sites = get_sites()
+  return get_gs(sites)
+end
 
 function get_gs(sites)
   ampo = read_operator("hamiltonian.in")
@@ -8,6 +12,7 @@ function get_gs(sites)
   maxdim!(sweeps, get_int("maxm"))
   cutoff!(sweeps, get_float("cutoff"))
   energy, psi = dmrg(H,psi0, sweeps)
+  write_in_file("GS_ENERGY.OUT", energy)
   return psi
 end
 

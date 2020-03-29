@@ -28,7 +28,9 @@ sc.set_hamiltonian(h)
 #sc.maxm = 40 # maximum bond dimension
 #sc.nsweeps = 12 # number of DMRG sweeps
 e0 = sc.gs_energy() # compute ground state energy
-print("Ground state energy is",e0)
+e1 = sc.gs_energy(mode="ED") # compute ground state energy
+print("Energy with DMRG is",e0)
+print("Energy with ED is",e1)
 mx,my,mz = sc.get_magnetization() # use DMRG
 mx2,my2,mz2 = sc.get_magnetization(mode="ED") # use ED
 
