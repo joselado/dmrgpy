@@ -6,10 +6,11 @@ import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 n = 16
 fc = fermionchain.Fermionic_Chain(n) # create the chain
-def ft(i,j):
-    if abs(j-i)==1: return 1.0 #+ np.random.random()
-    return 0.0
-fc.set_hoppings(ft) # hoppings
+h = 0
+for i in range(n-1):
+    h = h + fc.C[i]*fc.Cdag[i+1]
+h = h + h.get_dagger()
+fc.set_hamiltonian(h)
 e0 = fc.gs_energy(mode="ED") # energy with exact diagonalization
 e1 = fc.gs_energy(mode="DMRG") # energy with DMRG
 print("Energy with ED",e0)

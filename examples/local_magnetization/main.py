@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 ####################################
 ### Create the spin chain object ###
 ####################################
-n = 10 # total number of spins
+n = 6 # total number of spins
 spins = [2 for i in range(n)] # list with the different spins of your system
 # the spins are labeled by 2s+1, so that 2 means s=1/2, 3 meand S=1 ....
 sc = spinchain.Spin_Chain(spins) # create the spin chain object
@@ -16,21 +16,14 @@ sc = spinchain.Spin_Chain(spins) # create the spin chain object
 ##############################
 ### Create the hamiltonian ###
 ##############################
-def fj(i,j): # function to define the exchange couplings
-    if abs(i-j)==1: return 1.0  # frist neighbors
-    else: return 0.0 # otherwise
+h = 0 
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1]
+    h = h + sc.Sy[i]*sc.Sy[i+1]
+    h = h + sc.Sz[i]*sc.Sz[i+1]
 
-bs = np.random.random((sc.ns,3))
-
-def fb(i): # function to add local magnetic fields
-    return bs[i]
-    if i==0: return [0.,0.,0.4] # field only for the first atom
-    else: return [0.,0.,0.] # otherwise
-sc.set_exchange(fj) # add the exchange couplings
-sc.set_fields(fb) # add local magnetic fields
-
-
-
+h = h + 0.1*sc.Sz[0]
+sc.set_hamiltonian(h)
 # this parameters control the DMRG algorithm, in principle default ones are fine
 #sc.maxm = 40 # maximum bond dimension
 #sc.nsweeps = 12 # number of DMRG sweeps

@@ -3,22 +3,21 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 4
-for i in range(10):
-  spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
+n = 6
+for i in range(5):
+#  spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
+  spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
   sc = spinchain.Spin_Chain(spins) # create the spin chain
   ms = [np.random.random((3,3)) for i in range(n)]
   ms = [m + m.T for m in ms]
-  def fj(i,j): 
-      return ms[i]+ms[j]
-#      m = np.random.random((3,3)) # random couplings
-#      return m + m.transpose()
-  def fb(i): 
-      m = np.random.random(3)
-      return m + m.transpose()
-  sc.set_exchange(fj)
-  sc.set_fields(fb)
-  sc.hamiltonian = sc.get_hamiltonian()
+  h = 0
+  Si = [sc.Sx,sc.Sy,sc.Sz]
+  for i in range(n):
+      for j in range(n):
+          h = h + sc.Sx[i]*sc.Sx[j]*np.random.random()
+          h = h + sc.Sy[i]*sc.Sy[j]*np.random.random()
+          h = h + sc.Sz[i]*sc.Sz[j]*np.random.random()
+  sc.hamiltonian = h
   e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy
   e1 = sc.gs_energy(mode="ED") # compute the ground state energy
   print("Spin chain",spins)
