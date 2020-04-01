@@ -28,7 +28,7 @@ def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
 #                name=(namei,namej),delta=delta)
   # do some sanity checks
   if delta<0.0: raise 
-  self.get_gs() # compute ground state
+  if self.itensor_version!="julia": self.get_gs() # compute ground state
   # define the dictionary
   task = {      "dynamical_correlator": "true",
                 "kpmmaxm":str(self.kpmmaxm),

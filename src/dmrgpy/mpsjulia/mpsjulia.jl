@@ -9,4 +9,7 @@ let
 	if get_bool("vev") # vacuum expectation value
 		get_vev()
 	end
+	if get_bool("dynamical_correlator") # vacuum expectation value
+		dynamical_correlator_kpm()
+	end
 end
