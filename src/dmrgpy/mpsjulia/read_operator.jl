@@ -17,7 +17,7 @@ function read_operator(name::String)
 			push!(out,ind)
 		end
 		out = tuple(out[1:length(out)]...) # convert to tuple
-		print(out,"\n") # print
+#		print(out,"\n") # print
 		ampo += out # Add to the MPO
 	end
 	print(ampo)

@@ -15,13 +15,13 @@ using namespace std;
 #include"get_sites.h" // get the sites from a file
 #include"mpsalgebra.h" // functions to deal with MPS
 #include"get_sweeps.h" // get the sweep info
-#include"bandwidth.h"  // return the bandwidth of the hamiltonian
 #include"get_gap.h" // compute the gap
 #include"get_ampo_operator.h" // get an arbitrary AMPO operator
 #include"operators.h" // read the different tasks
 #include"get_hamiltonian.h" // get the hoppings (in case there are)
 #include"read_wf.h" // this does not work yet
 #include"get_gs.h" // compute ground state energy and wavefunction
+#include"bandwidth.h"  // return the bandwidth of the hamiltonian
 #include"get_excited.h" // compute excited states
 //#include"get_dos.h" // compute the DOS
 //#include"get_correlator.h" // compute correaltors betwee sites

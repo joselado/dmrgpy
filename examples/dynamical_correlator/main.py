@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 4
+n = 8
 # create a random spin chain
 #spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
@@ -25,7 +25,7 @@ i = np.random.randint(n)
 j = np.random.randint(n)
 t1 = time.time()
 name = (sc.Sz[i],sc.Sz[j])
-sc.itensor_version = "julia"
+#sc.itensor_version = "julia"
 (x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name)
 t2 = time.time()
 print("Time with DMRG",t2-t1)

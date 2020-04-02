@@ -59,8 +59,8 @@ function get_moments(A,B,H,wf,n)
 	write_in_file("KPM_MOMENTS.OUT",bk,"w")
 	write_in_file("KPM_MOMENTS.OUT",bk1,"a")
 	for i=1:n # loop over polynomials
-	  bk,am,a = kpm_iterate(am,a,H,vj) # perform one iteration
-	  write_in_file("KPM_MOMENTS.OUT",bk,"a")
+	  @time bk,am,a = kpm_iterate(am,a,H,vj) # perform one iteration
+#	  write_in_file("KPM_MOMENTS.OUT",bk,"a")
 #	  truncate!(a,maxdim=maxdim) 
 #	  truncate!(am,maxdim=maxdim) 
 #	  write_in_file("KPM_MOMENTS.OUT",bk,"a")

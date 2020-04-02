@@ -23,3 +23,11 @@ static auto get_gs=[]() {
   return psi ; // return the ground state
 }
 ;
+
+static auto get_gs_energy=[](auto H) {
+    // read the GS from a file
+    auto wf = get_gs();
+    auto e0 = overlap(wf,H,wf);
+    return e0 ; // return the ground state
+}
+;

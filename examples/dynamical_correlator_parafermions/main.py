@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import parafermionchain
 n = 3
-pc = parafermionchain.Parafermionic_Chain(n,Z=4) # create the chain
+pc = parafermionchain.Parafermionic_Chain(n,Z=3) # create the chain
 pc.test_ED()
 
 h = 0
