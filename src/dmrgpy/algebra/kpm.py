@@ -17,7 +17,6 @@ except:
 #  print("FORTRAN library not present, using default python one")
 
 
-use_fortran = False # use python routines
 
 
 def get_moments(v,m,n=100,use_fortran=use_fortran,test=False):
@@ -162,6 +161,7 @@ def get_moments_vivj_python(m0,vi,vj,n=100):
   for ii in range(2,n): 
     ap = 2.*m@a - am # recursion relation
     bk = algebra.braket_ww(vj,ap)
+#    bk = (vj.H*ap).todense().trace()[0,0]
     mus[ii] = bk
     am = a.copy() # new variables
     a = ap.copy() # new variables
@@ -212,17 +212,17 @@ def local_dos(m_in,i=0,n=200,use_fortran=use_fortran):
 
 
 
-def ldos0d(m_in,i=0,scale=10.,npol=None,ne=500,kernel="jackson"):
+def ldos(m_in,i=0,scale=10.,npol=None,ne=500,kernel="jackson"):
   """Return two arrays with energies and local DOS"""
   if npol is None: npol = ne
-  mus = local_dos(m_in/scale,i=i,n=npol) # get coefficients
+  mus = local_dos(csc_matrix(m_in)/scale,i=i,n=npol) # get coefficients
   xs = np.linspace(-1.0,1.0,ne,endpoint=True)*0.99 # energies
   ys = generate_profile(mus,xs,kernel=kernel)
   return (scale*xs,ys/scale)
 
 
 
-ldos = ldos0d
+ldos0d = ldos
 
 
 
@@ -271,6 +271,8 @@ def random_trace(m_in,ntries=20,n=200,fun=None,operator=None):
     else:
       mus = get_momentsA(v,m,n=2*n,A=operator) # get the chebychev moments
     return mus
+#  from . import parallel
+#  out = [pfun(i) for i in range(ntries)] # perform all the computations
   from . import parallel
   out = parallel.pcall(pfun,range(ntries))
   mus = np.zeros(out[0].shape,dtype=np.complex)

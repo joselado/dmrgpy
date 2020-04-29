@@ -43,6 +43,8 @@ class MultiOperator():
         return -1*self
     def __sub__(self,a):
         return self + (-1)*a
+    def __rsub__(self,a):
+        return self + (-1)*a
     def __add__(self,a):
         """Sum operation"""
         if a is None: return self.copy() # return the Hamiltonian

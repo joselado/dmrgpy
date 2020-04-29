@@ -58,6 +58,10 @@ class EDchain():
     def get_dynamical_correlator(self,**kwargs):
         from . import dynamics
         return dynamics.get_dynamical_correlator(self,**kwargs)
+    def get_distribution(self,**kwargs):
+        """Return a certain distribution"""
+        from . import distribution
+        return distribution.get_distribution(self,**kwargs)
 
 
 

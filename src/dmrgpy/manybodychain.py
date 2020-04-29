@@ -208,6 +208,15 @@ class Many_Body_Chain():
       elif mode=="ED": 
           return self.get_ED_obj().get_dynamical_correlator(**kwargs)
       else: raise
+  def get_distribution(self,mode="DMRG",**kwargs):
+      if mode=="DMRG": 
+          from . import distribution
+          return distribution.get_distribution(self,**kwargs)
+     #     raise # not implemented
+       #   return dynamics.get_dynamical_correlator(self,**kwargs)
+      elif mode=="ED": 
+          return self.get_ED_obj().get_distribution(**kwargs)
+      else: raise
   def get_excited(self,mode="DMRG",**kwargs):
       """Return excitation energies"""
       if mode=="DMRG":
