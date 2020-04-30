@@ -25,13 +25,15 @@ export DMRGROOT=PATH_TO_DMRGPY"/src"
 
 After this, you can write in your Python script
 
-import os ;
-import sys ;
-sys.path.append(os.environ["DMRGROOT"])
+```python
+import os ; import sys ; sys.path.append(os.environ["DMRGROOT"])
+```
 
 And import the sublibrary that you want, for example
 
+```python
 from dmrgpy import spinchain
+```
 
 # Capabilities #
 - Ground state energy
