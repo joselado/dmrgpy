@@ -24,8 +24,7 @@ the following line
 ```
 export DMRGROOT=PATH_TO_DMRGPY"/src"
 ```
-
-After this, you can write in your Python script
+with ```PATH_TO_DMRGPY``` the path to where dmrgpy is. Afterwards, you can write in your Python script
 
 ```python
 import os ; import sys ; sys.path.append(os.environ["DMRGROOT"])
