@@ -21,7 +21,9 @@ The script install.sh will compile both ITensor and a C++ program
 that uses it. Afterwards, it is only required to add to the .bashrc
 the following line
 
+```
 export DMRGROOT=PATH_TO_DMRGPY"/src"
+```
 
 After this, you can write in your Python script
 
