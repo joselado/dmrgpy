@@ -51,7 +51,7 @@ from dmrgpy import spinchain
 ## Ground state energy of an S=1/2 spin chain
 ```python
 from dmrgpy import spinchain
-spins = [2 for i in range(30)] # 2*S+1=2 for S=1/2
+spins = ["S=1/2" for i in range(30)] # spins in each site
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
@@ -66,7 +66,7 @@ print("Ground state energy",sc.gs_energy())
 ```python
 from dmrgpy import spinchain
 n = 30
-spins = [3 for i in range(n)] # 2*S+1=3 for S=1
+spins = ["S=1" for i in range(n)] # S=1 in each site
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
@@ -83,7 +83,7 @@ print(cs)
 ```python
 from dmrgpy import spinchain
 ns = 6 # number of sites in the spin chain
-spins = [3 for i in range(ns)] # S=1 chain
+spins = ["S=1" for i in range(ns)] # S=1 chain
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 Si = [sc.Sx,sc.Sy,sc.Sz] # store the three components
@@ -99,7 +99,7 @@ print("Energy with ED",sc.gs_energy(mode="ED"))
 ```python
 from dmrgpy import spinchain
 n = 40
-spins = [3 for i in range(n)] # 2*S+1=3 for S=1
+spins = ["S=1" for i in range(n)] # S=1 chain
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
@@ -115,7 +115,7 @@ print("Mz",mz)
 ## Bond dimension energy convergence for an S=1/2 Heisenberg chain
 ```python
 from dmrgpy import spinchain
-spins = [2 for i in range(30)] # 2*S+1=2 for S=1/2
+spins = ["S=1/2" for i in range(30)] # 2*S+1=2 for S=1/2
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
   h = h + sc.Sx[i]*sc.Sx[i+1]
@@ -134,7 +134,7 @@ for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
 ## Excited states with DMRG and ED 
 ```python
 from dmrgpy import spinchain
-spins = [2 for i in range(12)] # 2*S+1=2 for S=1/2
+spins = ["S=1/2" for i in range(12)] # 2*S+1=2 for S=1/2
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
@@ -152,7 +152,7 @@ print("Excited states with ED",es2)
 ```python
 from dmrgpy import spinchain
 # Haldane chain with S=1/2 on the edge to remove the topological modes
-spins = [2]+[3 for i in range(40)]+[2]
+spins = ["S=1/2"]+["S=1" for i in range(40)]+["S=1/2"]
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
@@ -168,7 +168,7 @@ print("Gap of the Haldane chain",gap)
 ## Edge dynamical correlator of a Haldane chain
 ```python
 from dmrgpy import spinchain
-spins = [3 for i in range(40)] # 2*S+1=3 for S=1
+spins = ["S=1" for i in range(40)] # S=1 chain
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 

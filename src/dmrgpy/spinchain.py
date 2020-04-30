@@ -14,9 +14,29 @@ class Coupling():
 
 Spin_Chain = Many_Body_Chain
 
+# dictionary for the sites, with a more readable nomenclature
+label2site = dict() # dictionary
+label2site["1/2"] = 2
+label2site["S=1/2"] = 2
+label2site[2] = 2
+label2site["1"] = 3
+label2site["S=1"] = 3
+label2site[3] = 3
+label2site["3/2"] = 4
+label2site["S=3/2"] = 4
+label2site[4] = 4
+label2site["2"] = 5
+label2site["S=2"] = 5
+label2site[5] = 5
+label2site["5/2"] = 6
+label2site["S=5/2"] = 6
+label2site[6] = 6
+
+
 class Spin_Chain(Many_Body_Chain):
     """Class for spin Hamiltonians"""
     def __init__(self,sites):
+        sites = [label2site[s] for s in sites]
         Many_Body_Chain.__init__(self,sites)
         # default exchange constants
         self.use_ampo_hamiltonian = True # use ampo
