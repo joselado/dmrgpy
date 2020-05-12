@@ -40,11 +40,11 @@ class MultiOperator():
     def get_dagger(self):
         return get_dagger(self)
     def __neg__(self):
-        return -1*self
+        return (-1)*self
     def __sub__(self,a):
         return self + (-1)*a
     def __rsub__(self,a):
-        return self + (-1)*a
+        return -self + a
     def __add__(self,a):
         """Sum operation"""
         if a is None: return self.copy() # return the Hamiltonian
