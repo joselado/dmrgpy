@@ -14,3 +14,4 @@ status.txt
 __pycache__
 *.a
 mpscpp3
+setup.py
