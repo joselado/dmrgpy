@@ -11,7 +11,7 @@ from dmrgpy import spinchain
 # inside or have to be provided as an input
 # This is required for the parallelization
 def getm(b):
-  n = 10 # number of sites in your chain
+  n = 100 # number of sites in your chain
   spins = ["S=1/2" for i in range(n)] # create the sites
   sc = spinchain.Spin_Chain(spins) # create the chain
   h = 0
