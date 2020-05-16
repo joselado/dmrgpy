@@ -59,7 +59,6 @@ class Many_Body_Chain():
       self.kpm_scale = 0.7 # scaling of the spectra for KPM
       self.kpm_accelerate = True # set to true
       self.kpm_n_scale = 3 # scaling factor for the number of polynomials
-      self.restart = False # restart the calculation
       self.gs_from_file = False # start from a random wavefunction
       self.excited_from_file = False # read excited states
       self.e0 = None # no ground state energy
@@ -91,19 +90,23 @@ class Many_Body_Chain():
       print("New path",out.path)
       os.system("cp -r "+self.path+"  "+out.path) # copy to the new path
       return out # return new object
-  def set_hamiltonian(self,MO): 
+  def set_hamiltonian(self,MO,restart=True): 
       """Set the Hamiltonian"""
+      if restart: self.restart() # restar the calculation
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
-      self.write_hamiltonian()
   def to_origin(self): 
-    if os.path.isfile(self.path+"/ERROR"): raise # something wrong
-    os.chdir(self.inipath) # go to original folder
+      if os.path.isfile(self.path+"/ERROR"): raise # something wrong
+      os.chdir(self.inipath) # go to original folder
+  def restart(self):
+      """Restart the calculation"""
+      self.computed_gs = False
+      self.gs_from_file = False
+      self.starting_file_gs = None # initial file for GS
   def clean(self): 
       """
       Remove the temporal folder
       """
-      self.hamiltonian = None
       os.system("rm -rf "+self.path) # clean temporal folder
   def vev_MB(self,MO,**kwargs):
       """
