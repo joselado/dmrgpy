@@ -7,8 +7,8 @@ from dmrgpy import spinchain
 
 # define the function that you want to parallelize
 # the variables of this function should be internal, i.e.
-# do not use variables inside the function that are not defined
-# inside or have been provided as an input
+# the variables inside the function have to be defined
+# inside or have to be provided as an input
 # This is required for the parallelization
 def getm(b):
   n = 10 # number of sites in your chain
