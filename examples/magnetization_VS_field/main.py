@@ -27,8 +27,8 @@ for b in np.linspace(0.,4.0,20):
   mz0 = sc.vev(Mz,mode="DMRG").real
   mz1 = sc.vev(Mz,mode="ED").real
   b = round(b,2)
-  mz0 = round(b,2)
-  mz1 = round(b,2)
+  mz0 = round(mz0,2)
+  mz1 = round(mz1,2)
   print("B=",b,"Mz DMRG = ",mz0,"Mz ED",mz1)
 
 

@@ -238,13 +238,18 @@ class Many_Body_Chain():
       e = self.vev(h)
       e2 = self.vev(h*h)
       return np.sqrt(np.abs(e2-e**2))
-  def set_initial_wf(self,wf):
+  def set_initial_wf_guess(self,wf):
+      """Set the initial guess, and perform the DMRG GS calculation"""
+      self.set_initial_wf(wf,reconverge=True)
+  def set_initial_wf(self,wf,reconverge=False):
       """Use a certain wavefunction as initial guess"""
       if wf is None:
         self.gs_from_file = False # use a wavefunction from a file
       else:
         self.gs_from_file = True # use a wavefunction from a file
         self.starting_file_gs = wf.name # name of the wavefunction
+        if reconverge: self.skip_dmrg_gs = False # reconverge the calculation
+        else: self.skip_dmrg_gs = True # reconverge the calculation
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
       if mode=="DMRG":
