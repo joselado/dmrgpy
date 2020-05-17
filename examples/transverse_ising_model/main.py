@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 
-n = 50 # number of sites in your chain
+n = 40 # number of sites in your chain
 spins = ["S=1/2" for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
 
@@ -23,7 +23,7 @@ for i in range(n): Mz = Mz + sc.Sz[i]
 # get a fully ferromagnetic wavefunction (to be used as initial guess later on)
 sc.set_hamiltonian(-Mz) ; wffe = sc.get_gs().copy() # ferromagnetic wavefunction
 
-bs = np.linspace(-1.0,1.0,50) # list of magnetic fields
+bs = np.linspace(-1.0,1.0,40) # list of magnetic fields
 mzs = []
 # loop over magnetic fields
 for b in bs:
@@ -37,16 +37,11 @@ for b in bs:
 np.savetxt("MZ_VS_B.OUT",np.array([bs,mzs]).T) # save in a file
 
 
-# now plot the results
 
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.rcParams.update({'font.size': 18})
-matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
 
 
-plt.plot(bs,mzs,marker="o",c="red",label="L = "+str(n))
-plt.legend()
+plt.plot(bs,mzs,marker="o",c="red")
 plt.xlabel("B")
 plt.ylabel("Sz")
 plt.show()
