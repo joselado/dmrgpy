@@ -12,6 +12,7 @@ def pcall(fin,xs,time=80):
     f = lambda x: fin(x)
     main = "import dill as pickle\nimport os\n"
     from .manybodychain import dmrgpath
+    realdmrgpath = dmrgpath+"/../"
     main += "import sys ; sys.path.append('"+dmrgpath+"')\n"
     main += "try: ii = int(os.environ['SLURM_ARRAY_TASK_ID'])\n"
     main += "except: ii = 0\n"
