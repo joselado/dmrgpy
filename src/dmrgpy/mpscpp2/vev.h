@@ -6,7 +6,18 @@ static auto vev=[]() {
   // now read the operator from tasks.in, this routine assumes
   // that there will be a multioperator
   auto A = get_mpo_operator("vev_multioperator.in"); // get the operator
-  auto c = overlapC(psi,A,psi);
+  auto npow = get_int_value("pow_vev") ; // power of the VEV
+  auto c = 0.0i +1i*0.0 ;
+  if (npow==1) {c = overlapC(psi,A,psi); } // first power
+  // some other power
+  if (npow>1) {
+	  auto maxm = get_float_value("maxm") ;
+	  auto psi1 = psi ; // initialize
+	  for (int i=0;i<npow-1;i++) {
+		  psi1 = exactApplyMPO(psi1,A,{"Maxm",maxm,"Cutoff",1E-7});
+	  };
+	  c = overlapC(psi,A,psi1) ; // compute the overlap
+	  };
   ofstream ofile; // declare
   ofile.open("VEV.OUT");  // open file
   ofile << std::setprecision(20) << real(c) << "  " << imag(c) << endl ;

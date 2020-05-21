@@ -4,7 +4,7 @@ from . import multioperator
 
 import numpy as np
 
-def multi_vev(self,MO,excited=False,n=4,scale=10.0):
+def multi_vev(self,MO,excited=False,n=4,scale=10.0,npow=1):
     """
     Compute a VEV using multioperators
     """
@@ -16,7 +16,9 @@ def multi_vev(self,MO,excited=False,n=4,scale=10.0):
         self.task["excited_vev"] = "true" # do a VEV
         self.task["nexcited"] = n # do a VEV
         self.task["scale_lagrange_excited"] = scale
-    else: self.task["vev"] = "true" # do a VEV
+    else: 
+        self.task["vev"] = "true" # do a VEV
+        self.task["pow_vev"] = int(npow) # power
     self.task["GS"] = "false" # do a VEV
     self.write_task() # write the tasks in a file
     self.write_hamiltonian() # write the Hamiltonian to a file
@@ -27,8 +29,8 @@ def multi_vev(self,MO,excited=False,n=4,scale=10.0):
     return m[0]+1j*m[1] # return result
 
 
-def vev(*args):
-    return multi_vev(*args,excited=False)
+def vev(*args,**kwargs):
+    return multi_vev(*args,excited=False,**kwargs)
 
 
 def excited_vev(*args,**kwargs):
