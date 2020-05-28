@@ -14,6 +14,7 @@ Mx = sum(sc.Sx) # total magnetization in X
 def get(mode):
     sc.set_hamiltonian(Mz) # only magnetic field
     wf = sc.get_gs(mode=mode) # Z ferromagnetic wavefunction
+    # The operator in the exponent MUST be Hermitian
     wf1 = sc.exponential(Mx,wf,mode=mode) # compute exp(Mx)*wf
     c = sc.overlap(wf,wf1,mode=mode) # compute <wf|exp(Mx)|wf>
     return c # return the number
