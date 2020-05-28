@@ -62,6 +62,13 @@ class EDchain():
         """Return a certain distribution"""
         from . import distribution
         return distribution.get_distribution(self,**kwargs)
+    def exponential(self,h,wf):
+        """Exponential of a wavefunction"""
+        h = self.MO2matrix(h) # convert to matrix 
+        return algebra.expm(h)@wf # return
+    def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
+    def overlap(self,wf1,wf2): return np.dot(np.conjugate(wf1),wf2)
+    def applyoperator(self,A,wf): return self.MO2matrix(A)@wf
 
 
 

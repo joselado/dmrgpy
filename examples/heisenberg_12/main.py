@@ -11,6 +11,7 @@ for i in range(n-1):
     h = h +sc.Sx[i]*sc.Sx[i+1]
     h = h +sc.Sy[i]*sc.Sy[i+1]
     h = h +sc.Sz[i]*sc.Sz[i+1]
+
 sc.set_hamiltonian(h)
 e = sc.gs_energy() # compute the ground state energy
 print("Energy",e)

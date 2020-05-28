@@ -68,6 +68,7 @@ main()
 // overlap task
     if (check_task("overlap"))  compute_overlap() ; // compute overlap
     if (check_task("time_evolution"))  quench() ; // time evolution
+    if (check_task("exponential_eMwf"))  exponential_eMwf() ; 
     if (check_task("evolution_AeiHtB"))  evolution_AeiHtB() ; // time evolution
     if (check_task("evolution_measure"))  evolution_measure() ; // time evol
     if (check_task("density_matrix"))  reduced_dm() ; // DM

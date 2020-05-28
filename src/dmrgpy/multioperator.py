@@ -34,6 +34,9 @@ class MultiOperator():
         """Add a new term"""
         self.i += 1 # increase the counter
         self.op.append([c]) # initialize
+    def simplify(self):
+        from .multioperatortk import sympymultioperator
+        return sympymultioperator.simplifyMO(self)
     def copy(self):
         from copy import deepcopy
         return deepcopy(self) # return a copy

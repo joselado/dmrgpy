@@ -174,4 +174,5 @@ def lowest_eigenvectors(h,n=10,nmax=maxsize):
 
 def expm(m):
     m = todense(m)
+    return dlg.expm(m) # exponential matrix
 

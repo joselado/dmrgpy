@@ -11,6 +11,7 @@ from . import taskdmrg
 from . import dynamics
 from . import funtk
 from . import vev
+from . import mpsalgebra
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -86,8 +87,8 @@ class Many_Body_Chain():
       name = "dmrgpy_clone_"+str(np.random.randint(100000))
       out = deepcopy(self) 
       out.path = "/tmp/"+name # new path
-      out.inipath = out.path # initial path
-      print("New path",out.path)
+      out.inipath = os.getcwd() # initial path
+#      print("New path",out.path)
       os.system("cp -r "+self.path+"  "+out.path) # copy to the new path
       return out # return new object
   def set_hamiltonian(self,MO,restart=True): 
@@ -95,6 +96,13 @@ class Many_Body_Chain():
       if restart: self.restart() # restar the calculation
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
+  def bandwidth(self,h,**kwargs):
+      """Compute the bandwidth of an Hermitian operator"""
+      mbc = self.clone() # clone the object
+      mbc.set_hamiltonian(h) ; e0 = mbc.gs_energy(**kwargs)
+      mbc.set_hamiltonian(-h) ; e1 = mbc.gs_energy(**kwargs)
+      mbc.clean() # remove
+      return -e0 -e1
   def to_origin(self): 
       if os.path.isfile(self.path+"/ERROR"): raise # something wrong
       os.chdir(self.inipath) # go to original folder
@@ -152,6 +160,15 @@ class Many_Body_Chain():
       h = self.hopping + self.hubbard + self.pairing 
       h = h + self.vijkl + self.exchange
       self.set_hamiltonian(h)
+  def overlap(self,wf1,wf2,**kwargs):
+      """Compute the overlap"""
+      return mpsalgebra.overlap(self,wf1,wf2,**kwargs)
+  def exponential(self,h,wf,**kwargs):
+      """Compute the overlap"""
+      return mpsalgebra.exponential(self,h,wf,**kwargs)
+  def applyoperator(self,A,wf,**kwargs):
+      """Apply an operator"""
+      return mpsalgebra.applyoperator(self,A,wf,**kwargs)
   def set_pairings_MB(self,fun):
       """Generic pairing term"""
       h = self.generate_bilinear(fun,self.C,self.C)
@@ -192,6 +209,7 @@ class Many_Body_Chain():
           mpscpp = "julia "+dmrgpath+"/mpsjulia/mpsjulia.jl" 
       else: raise
 #      if not os.path.isfile(mpscpp): raise
+      self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
       self.execute(lambda : os.system(mpscpp+" > status.txt"))
   def entropy(self,n=1):
     """Return the entanglement entropy"""

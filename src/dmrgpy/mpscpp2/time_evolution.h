@@ -140,3 +140,38 @@ static auto evolution_measure=[]() {
 
 
 
+
+static auto exponential_eMwf=[]() {
+  auto sites = get_sites();
+  // now get the operators
+  auto H = get_hamiltonian(sites) ; // get the ampo for the Hamiltonian
+  int maxm = get_int_value("maxm") ; // bond dimension
+  auto cutoff = get_float_value("cutoff") ; // cutoff
+  auto dtr = get_float_value("tevol_dt_real"); // delta of time
+  auto dti = get_float_value("tevol_dt_imag"); // delta of time
+  auto nt0 = get_int_value("tevol_n"); // number of time steps
+  auto args = Args("Cutoff=",cutoff,"Maxm=",maxm);
+  // get the AutoMPO
+  auto ampo = get_ampo(sites) ; // get the ampo for the Hamiltonian
+  auto expH = MPO(ampo);
+  Cplx tau = dti*Cplx_i+dtr;
+//  auto bw =  bandwidth(sites,MPO(ampo)); // bandwidth
+//  auto nt = int(round(bw*nt0));
+  auto nt = nt0;
+  auto taui = tau/nt; // small time step
+  expH = toExpH<ITensor>(ampo,taui); // exponential
+  auto psi1 = read_wf("input_wavefunction.mps") ;
+  for (int it=1;it<=nt;it++) { // loop
+	      psi1 = exactApplyMPO(expH,psi1,args); // evolve
+  };
+  writeToFile("output_wavefunction.mps",psi1);
+};
+
+
+
+
+
+
+
+
+
