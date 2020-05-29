@@ -2,6 +2,11 @@ from . import mps
 import numpy as np
 
 def exponential(self,h,wf,mode="DMRG",**kwargs):
+    """Compute the exponential"""
+    dh = h - h.get_dagger() ; dh = dh.simplify()
+    if dh!=0: 
+        print("Operator is not Hermitian")
+        raise
     if mode=="DMRG": return exponential_dmrg(self,h,wf,**kwargs)
     elif mode=="ED": return self.get_ED_obj().exponential(h,wf,**kwargs)
     else: raise

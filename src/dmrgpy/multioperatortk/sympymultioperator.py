@@ -58,6 +58,8 @@ def symbol2MO(t):
     elif type(t)==Integer: return complex(t)
     elif type(t)==numbers.ImaginaryUnit: return 1j
     elif type(t)==Float: return complex(t)
+    elif hasattr(t, 'is_number'): # if it is a sumpy number
+        if t.is_number: return complex(t)
     else: raise
 
 
