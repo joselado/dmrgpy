@@ -4,14 +4,14 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 
-n = 10 # number of sites in your chain
+n = 4 # number of sites in your chain
 spins = ["S=1/2" for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
 
 Mz = sum(sc.Sz) # total magnetization in Z
 Mx = sum(sc.Sx) # total magnetization in X
 
-def get(mode="DMRG",z=1.0):
+def get(mode="DMRG",z=1j):
     print("Doing",z)
     sc.set_hamiltonian(Mz) # only magnetic field
     wf = sc.get_gs(mode=mode) # Z ferromagnetic wavefunction
@@ -23,6 +23,7 @@ def get(mode="DMRG",z=1.0):
 # Compare the result between DMRG and ED
 print("ED",get("ED"))
 print("DMRG",get("DMRG"))
+exit()
 
 
 zs = np.linspace(-1.0,1.0,20)

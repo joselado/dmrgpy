@@ -3,17 +3,23 @@ import numpy as np
 
 def exponential(self,h,wf,mode="DMRG",**kwargs):
     """Compute the exponential"""
-    dh = h - h.get_dagger() ; dh = dh.simplify()
-    if dh!=0: 
-        print("Operator is not Hermitian")
-        raise
-    if mode=="DMRG": return exponential_dmrg(self,h,wf,**kwargs)
-    elif mode=="ED": return self.get_ED_obj().exponential(h,wf,**kwargs)
+    if mode=="DMRG": 
+        dh = h - h.get_dagger() ; dh = dh.simplify()
+        dh2 = h + h.get_dagger() ; dh2 = dh2.simplify()
+        if dh==0: return exponential_dmrg(self,h,wf,dt=1.0,**kwargs)
+        elif dh2==0: return exponential_dmrg(self,-1j*h,wf,dt=1j,**kwargs)
+        else:
+            print("Operator is not Hermitian nor anti-Hermitian")
+            raise
+    elif mode=="ED": 
+        return self.get_ED_obj().exponential(h,wf,**kwargs)
     else: raise
 
 
 def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000):
     """Compute the exponential of a wavefunction"""
+    dh = h - h.get_dagger() ; dh = dh.simplify()
+    if dh!=0: raise
     nt0 = int(self.bandwidth(h)*nt)
     task = {"exponential_eMwf":"true",
             "tevol_dt_real":str(-dt.real),
