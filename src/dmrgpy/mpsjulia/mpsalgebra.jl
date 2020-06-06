@@ -17,18 +17,22 @@ function exponential()
 	nt0 = get_int("tevol_n") # number of steps
 	tau = dtr + im*dti # evolution time
 	taui = tau/nt0 # small time step
+	iden_op = identity_mpo() # identity operator
         for i=1:nt0
-		psi2 = taui*contract(H,psi1,maxdim=maxdim) # sum
-		psi1 = add(psi1,psi2,maxdim=maxdim) # sum
+          	psi2 = taui*contract(H,1*psi1,maxdim=maxdim) # sum
+          	psi2 = contract(iden_op,psi2,maxdim=maxdim) # this fixes a bug
+          	psi1 = add(1*psi1,1*psi2,maxdim=maxdim) # sum
 	end
 	save_mps("output_wavefunction.mps",psi1) # write result
 end
+
+
 
 
 function overlap()
 	wf1 = load_mps("overlap_wf1.mps")
 	wf2 = load_mps("overlap_wf2.mps")
 	c = inner(wf1,wf2)
-	write_in_file("OVERLAP.OUT",convert(Complex,bk),"w")
+	write_in_file("OVERLAP.OUT",convert(Complex,c),"w")
 end
 

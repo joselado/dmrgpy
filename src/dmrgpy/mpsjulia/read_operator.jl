@@ -31,6 +31,13 @@ function read_mpo(name::String)
 	return MPO(ampo,sites)
 end
 
+function identity_mpo()
+  ampo = AutoMPO()
+  ampo +=     ("Id",1)
+  sites = get_sites()
+  return MPO(ampo,sites)
+end
+
 
 #read_operator("hamiltonian.in")
 

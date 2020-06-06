@@ -4,9 +4,10 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 
-n = 25 # number of sites in your chain
+n = 15 # number of sites in your chain
 spins = ["S=1/2" for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
+sc.itensor_version = "julia"
 
 # now define the Hamiltonian
 def geth(b):
@@ -22,7 +23,6 @@ for i in range(n): Mz = Mz + sc.Sz[i]
 
 h = geth(0.6) # get the Hamiltonian
 sc.set_hamiltonian(h) # and initialize the Hamiltonian
-#sc.itensor_version = "julia"
 sc.get_gs() # compute the ground state
 
 #wf = sc.get_gs()

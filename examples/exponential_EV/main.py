@@ -13,7 +13,7 @@ Mx = sum(sc.Sx) # total magnetization in X
 
 sc.itensor_version = "julia"
 
-def get(mode="DMRG",z=1j):
+def get(mode="DMRG",z=1):
     print("Doing",z)
     sc.set_hamiltonian(Mz) # only magnetic field
     wf = sc.get_gs(mode=mode) # Z ferromagnetic wavefunction
