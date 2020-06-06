@@ -21,6 +21,7 @@ class MPS():
         out.name = name
         self.execute(lambda: os.system("cp "+self.name+"  "+out.name))
         return out
+    write = copy
     def rename(self,name):
         self.execute(lambda: os.system("mv "+self.name+"  "+name))
         self.name = name

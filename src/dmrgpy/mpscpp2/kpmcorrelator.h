@@ -50,6 +50,15 @@ static auto get_moments_spismj_brute=[](auto sites, auto H, int n, int i, int j)
 
 
 
+static auto general_kpm=[]()
+{
+  auto sites = get_sites(); // Get the different sites
+  auto wfa = read_wf("wfa.mps") ; // first wavefunction
+  auto wfb = read_wf("wfb.mps") ; // first wavefunction
+  auto m = get_mpo_operator("kpm_operator.in") ;
+  auto num_pol = get_int_value("kpm_num_polynomials");
+  moments_vi_vj(m,wfa,wfb,num_pol) ; //compute the KPM moments
+};
 
 
 static auto get_moments_dynamical_correlator=[]()

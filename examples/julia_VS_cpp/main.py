@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 20
+n = 40
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 def get():
   sc = spinchain.Spin_Chain(spins) # create the spin chain

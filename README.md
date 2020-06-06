@@ -45,7 +45,6 @@ from dmrgpy import spinchain
 - Dynamical correlation functions computed with the Kernel polynomial method
 - Dynamical correlation functions with time dependent DMRG
 
-
 # Examples
 
 ## Ground state energy of an S=1/2 spin chain
@@ -225,4 +224,21 @@ fc.set_hamiltonian(h) # set the Hamiltonian in the object
 print("GS energy with ED",fc.gs_energy(mode="ED")) # energy with exact diag
 print("GS energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 ```
+
+
+# Changing between C++ and Julia ITensor #
+The library uses ITensor in the background. Currently dmrgpy allows to use
+the ITensor2 (C++), or ITensors (Julia). The default version executed is
+the the C++ v2 version, if you want to instead use the Julia version
+write right after creating the "Chain" object .itensor_version = "julia",
+for example
+
+```python
+from dmrgpy import spinchain
+spins = ["S=1/2" for i in range(30)] # spins in each site
+sc = spinchain.Spin_Chain(spins) # create spin chain object
+sc.itensor_version = "julia"
+```
+
+and all the subsequent computations will be performed with Julia
 

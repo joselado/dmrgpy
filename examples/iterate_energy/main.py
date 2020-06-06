@@ -17,8 +17,24 @@ sc = spinchain.Spin_Chain(spins) # create the spin chain object
 def fj(i,j): # function to define the exchange couplings
     if abs(i-j)==1: return 1.0  # first neighbors
     else: return 0.0 # otherwise
-sc.set_exchange(fj) # add the exchange couplings
-sc.set_fields(lambda i: 3.*np.random.random(3)) # optionally you could add local magnetic fields
+
+h = 0
+
+for i in range(n):
+    for j in range(n): 
+        h = h + sc.Sx[i]*sc.Sx[j]*fj(i,j)
+        h = h + sc.Sy[i]*sc.Sy[j]*fj(i,j)
+        h = h + sc.Sz[i]*sc.Sz[j]*fj(i,j)
+
+for i in range(n):
+    h = h + sc.Sx[i]*np.random.random()
+    h = h + sc.Sy[i]*np.random.random()
+    h = h + sc.Sz[i]*np.random.random()
+
+sc.set_hamiltonian(h)
+
+sc.itensor_version = "julia"
+
 sc.nsweeps = 1 # one sweep
 es = []
 wf = None # initial guess

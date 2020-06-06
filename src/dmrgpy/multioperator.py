@@ -37,6 +37,17 @@ class MultiOperator():
     def simplify(self):
         from .multioperatortk import sympymultioperator
         return sympymultioperator.simplifyMO(self)
+    def get_bandwidth(self,MBO):
+        """Get the bandwidth"""
+        return MBO.bandwidth(self)
+    def is_hermitian(self):
+        """Check if an operator is hermitian"""
+        dh = self - self.get_dagger() ; dh = dh.simplify()
+        return dh==0
+    def is_antihermitian(self):
+        """Check if an operator is antiHermitian"""
+        dh = self + self.get_dagger() ; dh = dh.simplify()
+        return dh==0
     def copy(self):
         from copy import deepcopy
         return deepcopy(self) # return a copy

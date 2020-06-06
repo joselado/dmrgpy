@@ -50,31 +50,55 @@ end
 function get_moments(A,B,H,wf,n)
 	"""Compute the moments using the KPM recursion"""
 	maxdim = get_int("maxm")
-	vi = applyMPO(A,wf) # first vector
-	vj = applyMPO(B,wf) # second vector
-	a = applyMPO(H,vi) # first vector
+	vi = contract(A,wf,maxdim=maxdim) # first vector
+	vj = contract(B,wf,maxdim=maxdim) # second vector
+	a = contract(H,vi,maxdim=maxdim) # first vector
 	am = 1.0*vi # define
 	bk = inner(vj,vi) # scalar product
 	bk1 = inner(vj,a) # scalar product
 	write_in_file("KPM_MOMENTS.OUT",bk,"w")
 	write_in_file("KPM_MOMENTS.OUT",bk1,"a")
 	for i=1:n # loop over polynomials
-	  @time bk,am,a = kpm_iterate(am,a,H,vj) # perform one iteration
-#	  write_in_file("KPM_MOMENTS.OUT",bk,"a")
+	  @time bk,am,a = kpm_iterate(am,a,H,vj,maxdim) # perform one iteration
+	  write_in_file("KPM_MOMENTS.OUT",bk,"a")
 #	  truncate!(a,maxdim=maxdim) 
 #	  truncate!(am,maxdim=maxdim) 
 #	  write_in_file("KPM_MOMENTS.OUT",bk,"a")
         end
 end
 
-function kpm_iterate(am,a,H,vj)
+function kpm_iterate(am,a,H,vj,maxdim)
 	  """Perform a single iteration"""
-	  ap = applyMPO(H,a) # first vector
-	  ap = sum(2*ap,-1*am) # redefine the vector
+	  ap = contract(H,a,maxdim=maxdim) # first vector
+	  ap = add(2*ap,-1*am,maxdim=maxdim) # redefine the vector
 	  bk = inner(vj,ap) # scalar product
 #	  truncate!(a,maxdim=maxdim) 
 #	  truncate!(am,maxdim=maxdim) 
 	  return bk,a,ap # redefine
 end
+
+
+function general_kpm()
+        """Compute the moments using the KPM recursion"""
+        sites = get_sites()
+        maxdim = get_int("maxm")
+	vi = load_mps("wfa.mps")
+	vj = load_mps("wfb.mps")
+	H = MPO(read_operator("kpm_operator.in"),sites)
+        a = contract(H,vi,maxdim=maxdim) # first vector
+        am = 1.0*vi # define
+        bk = inner(vj,vi) # scalar product
+        bk1 = inner(vj,a) # scalar product
+        write_in_file("KPM_MOMENTS.OUT",convert(Complex,bk),"w")
+        write_in_file("KPM_MOMENTS.OUT",convert(Complex,bk1),"a")
+	n = get_int("kpm_num_polynomials")
+        for i=1:n # loop over polynomials
+          @time bk,am,a = kpm_iterate(am,a,H,vj,maxdim) # perform one iteration
+	  write_in_file("KPM_MOMENTS.OUT",convert(Complex,bk),"a")
+        end
+end
+
+
+
 
 #dynamical_correlator_kpm()

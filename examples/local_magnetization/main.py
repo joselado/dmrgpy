@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 ### Create the spin chain object ###
 ####################################
 n = 6 # total number of spins
-spins = [2 for i in range(n)] # list with the different spins of your system
+spins = ["S=1/2" for i in range(n)] # list with the different spins 
 # the spins are labeled by 2s+1, so that 2 means s=1/2, 3 meand S=1 ....
 sc = spinchain.Spin_Chain(spins) # create the spin chain object
-
+sc.itensor_version = "julia"
 
 ##############################
 ### Create the hamiltonian ###
@@ -24,6 +24,7 @@ for i in range(n-1):
 
 h = h + 0.1*sc.Sz[0]
 sc.set_hamiltonian(h)
+#sc.itensor_version = "julia"
 # this parameters control the DMRG algorithm, in principle default ones are fine
 #sc.maxm = 40 # maximum bond dimension
 #sc.nsweeps = 12 # number of DMRG sweeps

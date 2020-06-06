@@ -19,10 +19,12 @@ sc.set_hamiltonian(h) # and initialize the Hamiltonian
 sc.maxm = 60
 sc.kpmmaxm = 40
 
+#sc.itensor_version = "julia"
+
 # now define the operator for which you want the distribution
 M = 0
 for i in range(n): M += sc.Sz[i] # total magnetization 
-x,y = sc.get_distribution(X=M,scale=n,delta=1e-1) # compute a distribution
+x,y = sc.get_distribution(X=M,delta=1e-1) # compute a distribution
 x1,y1 = sc.get_distribution(X=M,delta=1e-1,mode="ED") # compute a distribution
 
 # plot the result and save it in a file

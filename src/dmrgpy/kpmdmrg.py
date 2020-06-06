@@ -109,34 +109,47 @@ def get_dynamical_correlator(self,n=1000,
     fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
     return (es,fr(es)+1j*fi(es))
-#    e0 = self.gs_energy() # ground state energy
-    # now retain only an energy window
-#  else: 
-#    h = self.get_full_hamiltonian()
-#    sc = self.get_pychain()
-#    from .pychain import correlator as pychain_correlator
-#    if delta is None: delta = float(self.ns)/n*1.5
-#    if mode=="fullKPM":
-#      (xs,ys) = pychain_correlator.dynamical_correlator_kpm(sc,h,n=n,i=i,j=j,
-#                         namei=name[0],namej=name[1])
-#    elif mode=="ED":
-#      (xs,ys) = pychain_correlator.dynamical_correlator(sc,h,delta=delta,i=i,
-#                        j=j,namei=name[0],namej=name[1])
-#    else: raise
-#  if es is None:
-#    (xs,ys) = restrict_interval(xs,ys,window) # restrict the interval
-#  else:
-#    (xs,ys) = restrict_interval(xs,ys,[min(es),max(es)]) # restrict the interval
-#  from scipy.interpolate import interp1d
-#  fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
-#  fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-#  if es is None: 
-#      ne = int(100*(window[1] - window[0])/delta) # number of energies
-#      xs = np.linspace(window[0],window[1],ne)
-#  else: xs = np.array(es).copy() # copy input array
-#  ys = fr(xs) + 1j*fi(xs) # evaluate the interpolator
-##  np.savetxt("DYNAMICAL_CORRELATOR.OUT",np.matrix([xs.real,ys.real,ys.imag]).T)
-#  return (xs,ys)
 
+
+
+
+
+def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,
+        delta=1e-1,xs=None,**kwargs):
+    """
+    Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
+    """
+    if scale is None: scale = self.bandwidth(X)*1.1
+    if X is None: raise
+    X = X/scale # renormalize the operator for KPM
+    num_p = int(3*scale/delta) # number of polynomial
+    if wf is None: wf = self.get_gs() # no wavefunction provided
+    # compute the wavefunctions
+    if A is not None: wfa = self.applyoperator(A,wf)
+    else: wfa = wf
+    if B is not None: wfb = self.applyoperator(B,wf)
+    else: wfb = wf
+    # write the wavefunctions
+    self.execute(lambda: wfa.write(name="wfa.mps"))
+    self.execute(lambda: wfb.write(name="wfb.mps"))
+    # write the task
+    task = {    "general_kpm": "true",
+                "kpmmaxm":str(self.maxm),
+                "kpm_accelerate":self.kpm_accelerate,
+                "kpm_num_polynomials":str(num_p),
+                "kpm_cutoff":str(self.cutoff),
+                }
+    self.execute(lambda: X.write(name="kpm_operator.in"))
+    self.task = task # assign tasks
+    self.run() # perform the calculation
+    m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
+    mus = m[0]+1j*m[1]
+    # scale of the dos
+    kpmscales = scale
+    xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
+    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel="lorentz") # generate the DOS
+    xs2 *= scale
+    ys2 /= scale
+    return xs2,ys2
 
 

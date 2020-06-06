@@ -27,27 +27,22 @@ def get_moments_distribution(self,X=None,num_p=None):
 
 
 
-def get_distribution(self,X=None,scale=None,delta=1e-1,xs=None,**kwargs):
+def get_distribution(self,**kwargs):
     """
     Compute a dynamical correlator using the KPM-DMRG method
     """
-    if scale is None: raise
-    X = X/scale # renormalize the operator for KPM
-    num_p = int(3*scale/delta) # number of polynomial
-    mus = get_moments_distribution(self,X=X,num_p=num_p)
-    # scale of the dos
-    kpmscales = scale
-    n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
-    xs2 = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
-    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel="lorentz") # generate the DOS
-    xs2 *= scale
-    ys2 /= scale
-    return xs2,ys2
-#    xs /= scale # scale back the energies
-#    xs += (emin+emax)/2. -emin # shift the energies
-#    ys *= scale # renormalize the y values
-#    from scipy.interpolate import interp1d
-#    fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
-#    fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-#    return (es,fr(es)+1j*fi(es))
+    from .kpmdmrg import general_kpm
+    return general_kpm(self,**kwargs)
+#    if scale is None: scale = self.bandwidth(X)*1.1
+#    X = X/scale # renormalize the operator for KPM
+#    num_p = int(3*scale/delta) # number of polynomial
+#    mus = get_moments_distribution(self,X=X,num_p=num_p)
+#    # scale of the dos
+#    kpmscales = scale
+#    n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
+#    xs2 = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
+#    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel="lorentz") # generate the DOS
+#    xs2 *= scale
+#    ys2 /= scale
+#    return xs2,ys2
 

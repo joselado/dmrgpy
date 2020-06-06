@@ -11,6 +11,8 @@ sc = spinchain.Spin_Chain(spins) # create the chain
 Mz = sum(sc.Sz) # total magnetization in Z
 Mx = sum(sc.Sx) # total magnetization in X
 
+sc.itensor_version = "julia"
+
 def get(mode="DMRG",z=1j):
     print("Doing",z)
     sc.set_hamiltonian(Mz) # only magnetic field
@@ -21,9 +23,9 @@ def get(mode="DMRG",z=1j):
     return c # return the number
 
 # Compare the result between DMRG and ED
-print("ED",get("ED"))
-print("DMRG",get("DMRG"))
-exit()
+#print("ED",get("ED"))
+#print("DMRG",get("DMRG"))
+#exit()
 
 
 zs = np.linspace(-1.0,1.0,20)
