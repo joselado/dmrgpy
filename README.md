@@ -4,7 +4,8 @@
 
 This is a Python library to compute quasi-one-dimensional
 spin chains and fermionic systems using matrix product states
-with the density matrix renormalization group as implemented in ITensor. Most
+with the density matrix renormalization group as implemented in ITensor
+(C++ and Julia versions). Most
 of the computations can be performed both with DMRG and exact
 diagonalization for small systems, which allows to benchmark the
 results.
@@ -226,9 +227,10 @@ print("GS energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 ```
 
 
-# Changing between C++ and Julia ITensor #
-The library uses ITensor in the background. Currently dmrgpy allows to use
-the ITensor2 (C++), or ITensors (Julia). The default version executed is
+# Choosing between the C++ and Julia backend #
+The library uses ITensor in the background. Currently dmrgpy allows to 
+choose between
+ITensor2 (C++), or ITensors (Julia). The default version executed is
 the the C++ v2 version, if you want to instead use the Julia version
 write right after creating the "Chain" object .itensor_version = "julia",
 for example
