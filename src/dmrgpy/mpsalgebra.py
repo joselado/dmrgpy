@@ -57,7 +57,6 @@ def applyoperator(self,A,wf,**kwargs):
     else: raise
     if mode=="DMRG": return applyoperator_dmrg(self,A,wf)
     elif mode=="ED": 
-        raise
         return self.get_ED_obj().applyoperator(A,wf)
 
 

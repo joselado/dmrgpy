@@ -68,22 +68,6 @@ class Spin_Chain(Many_Body_Chain):
                 h = h + g[ii,jj]*self.Si[ii][i]*self.Si[jj][j]
       self.exchange = h # exchange matrix
       self.hamiltonian = self.exchange + self.fields # update Hamiltonian
-#    def vev(self,MO,mode="DMRG",**kwargs):
-#        """ Return a vaccum expectation value"""
-#        if mode=="DMRG":
-#            return self.vev_MB(MO,**kwargs)
-#        elif mode=="ED":
-#            SC = self.get_pychain() # get the object
-#            SC.hamiltonian = self.get_hamiltonian() # store the MO
-#            return SC.vev(MO,**kwargs) # return overlap
-#    def gs_energy(self,mode="DMRG",**kwargs):
-#        """
-#        Return the ground state energy
-#        """
-#        if mode=="DMRG":
-#          return Many_Body_Chain.gs_energy(self,**kwargs)
-#        elif mode=="ED":
-#          return pychainwrapper.gs_energy(self,**kwargs)
     def get_ED_obj(self):
         return pychainwrapper.get_pychain(self)
     def get_pychain(self):
@@ -98,40 +82,6 @@ class Spin_Chain(Many_Body_Chain):
         mz = [self.vev(self.Sz[i],**kwargs) for i in range(self.ns)]
         np.savetxt("MAGNETIZATION.OUT",np.array([mx,my,mz]).T)
         return np.array([mx,my,mz]).real
-#    def get_excited(self,mode="DMRG",n=10,**kwargs):
-#        """
-#        Compute excited state energies
-#        """
-#        if mode=="DMRG":
-#            return Many_Body_Chain.get_excited(self,n=n,
-#                    **kwargs)
-#        elif mode=="ED":
-#            h = self.get_full_hamiltonian() # get the Hamiltonian
-#            from . import pychain
-#            return pychain.spectrum.eigenstates(h,k=n) # return energies
-#        else: raise
-#    def get_dos(self,mode="DMRG",**kwargs):
-#        """
-#        Compute the overall density of states
-#        """
-#        if mode=="DMRG":
-#            return Many_Body_Chain.get_dos(self,**kwargs)
-#        elif mode=="ED":
-#            h = self.get_full_hamiltonian() # get the Hamiltonian
-#            from .pychain import dos
-#            return dos.dos_kpm(h,**kwargs)
-
-#    def get_correlator(self,pairs=[[]],mode="DMRG",**kwargs):
-#        """Return the correlator"""
-#        if mode=="DMRG": # using DMRG
-#            return Many_Body_Chain.get_correlator(self,pairs=pairs,
-#                    **kwargs)
-#        elif mode=="ED": # using exact diagonalization
-#            self.to_folder()
-#            m = correlatorpychain.correlator(self,pairs=pairs,**kwargs)
-#            self.to_origin() # go to main folder
-#            return m
-#        else: raise
     def get_effective_hamiltonian(self,**kwargs):
         """Return the effective Hamiltonian"""
         return effectivehamiltonian.get_effective_hamiltonian(self,

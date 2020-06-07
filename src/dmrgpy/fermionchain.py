@@ -115,9 +115,15 @@ class Fermionic_Chain(Many_Body_Chain):
         MBf = mbfermion.MBFermion(self.ns) # create object
         MBf.add_multioperator(self.hamiltonian) 
         return MBf # return the object
-    def get_kpm_scale(self):
-        """Energy scale for KPM method"""
-        return 4*self.ns*(2.+10*np.mean(np.abs(self.hubbard_matrix)))
+    def execute(self,f):
+        """
+        This is a temporal fix to use the C operators in Julia ITensor
+        """
+        if self.itensor_version=="julia": # use the fermionic representation
+            from . import multioperator
+            multioperator.use_jordan_wigner = False
+        return Many_Body_Chain.execute(self,f)
+
 
 
 

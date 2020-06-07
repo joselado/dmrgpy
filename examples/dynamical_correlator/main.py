@@ -11,6 +11,7 @@ spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
 # create first neighbor exchange
 sc = spinchain.Spin_Chain(spins) # create the spin chain
+#sc.itensor_version = "julia"
 h = 0
 for i in range(n-1):
     h = h + sc.Sx[i]*sc.Sx[i+1]
@@ -25,7 +26,6 @@ i = np.random.randint(n)
 j = np.random.randint(n)
 t1 = time.time()
 name = (sc.Sz[i],sc.Sz[j])
-sc.itensor_version = "julia"
 (x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name)
 t2 = time.time()
 print("Time with DMRG",t2-t1)
