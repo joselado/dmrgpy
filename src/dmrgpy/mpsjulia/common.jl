@@ -2,7 +2,7 @@ __precompile__()
 module common
 using ITensors
 using Serialization
-export get_gs,get_bool,get_vev,dynamical_correlator_kpm,applyoperator,general_kpm,overlap,exponential
+export get_gs,get_bool,get_vev,dynamical_correlator_kpm,applyoperator,general_kpm,overlap,exponential,summps
 include("read_operator.jl")
 include("read_wf.jl")
 include("get_input.jl")

@@ -7,28 +7,30 @@ from dmrgpy import spinchain
 n = 10 # number of sites in your chain
 spins = [2 for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
+#sc.itensor_version = "julia"
 
 # now define the Hamiltonian
 h = 0
 for i in range(n-1): h = h - sc.Sz[i]*sc.Sz[i+1] # add exchange
-for i in range(n): h = h - .2*sc.Sx[i] # add transverse field
+for i in range(n): h = h - .5*sc.Sx[i] # add transverse field
 #h = h - sc.Sz[n-1]*sc.Sz[0] # and apply periodic boundary conditions
 sc.set_hamiltonian(sum(sc.Sz)) ; wf = sc.get_gs()
 sc.set_hamiltonian(h) # and initialize the Hamiltonian
-sc.restart()
 sc.get_gs(wf0=wf)
-print(sc.vev(sum(sc.Sz)))
-exit()
 # setup some parameters
 sc.maxm = 60
 sc.kpmmaxm = sc.maxm
 
-#sc.itensor_version = "julia"
 
 # now define the operator for which you want the distribution
 M = 0
 for i in range(n): M += sc.Sz[i] # total magnetization 
-x,y = sc.get_distribution(X=M,delta=3e-1) # compute a distribution
+x,y = sc.get_distribution(X=M,delta=1e-1) # compute a distribution
+import time
+t0 = time.clock()
+x,y = sc.get_distribution(X=M,delta=1e-1) # compute a distribution
+t1 = time.clock()
+print("Time",t1-t0)
 #x1,y1 = sc.get_distribution(X=M,delta=1e-1,mode="ED") # compute a distribution
 
 # plot the result and save it in a file

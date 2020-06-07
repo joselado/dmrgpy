@@ -7,6 +7,7 @@ import numpy as np
 # for mpscpp.x
 
 def isnumber(x):
+#    print(type(x),isinstance(x, numbers.Number))
     return isinstance(x, numbers.Number)
 
 
@@ -87,8 +88,9 @@ class MultiOperator():
     def __mul__(self,a):
         """Compute the product between two multioperators"""
         if type(a)==MultiOperator: return self.multiply_MO(a)
+        elif type(a)==np.ndarray: raise  # prevent using rmul in array
         elif isnumber(a): return self.multiply_scalar(a)
-        else: raise
+        else: return NotImplemented
     def multiply_MO(self,a):
         out = self.copy() # copy operator
         out.i = (self.i+1)*(a.i+1) # total number of terms

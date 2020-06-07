@@ -49,13 +49,13 @@ def gs_energy_single(self,wf0=None,reconverge=None):
     Return the ground state energy
     """
     if wf0 is not None: 
+        self.execute(wf0.write) # write wavefunction
         self.set_initial_wf(wf0,reconverge=True) # set the initial wavefunction
     if reconverge is not None: # overwrite skip_dmrg_gs
         self.skip_dmrg_gs = not reconverge # if the computation should be rerun
     self.execute(lambda: self.setup_task("GS"))
     self.write_hamiltonian() # write the Hamiltonian to a file
     self.run() # perform the calculation
-    self.wf0 = mps.MPS(self,name="psi_GS.mps").copy() # set the ground state
     # get the ground state energy
     out = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
     self.e0 = out # store ground state energy
@@ -63,7 +63,8 @@ def gs_energy_single(self,wf0=None,reconverge=None):
     self.sites_from_file = True
     self.gs_from_file = True
     self.skip_dmrg_gs = True
-    self.set_initial_wf(self.wf0) # set the initial wavefunction
+    wf0 = mps.MPS(MBO=self,name="psi_GS.mps").copy() # set GS
+    self.set_initial_wf(wf0) # set the initial wavefunction
     return out # return energy
 
 def gs_energy(self,policy="single",**kwargs):

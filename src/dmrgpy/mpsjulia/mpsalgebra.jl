@@ -3,9 +3,23 @@ function applyoperator()
 	nameop = get_string("applyoperator_multioperator")
 	A = read_mpo(nameop) # read the operator
 	psi0 = load_mps(get_string("applyoperator_wf0"))
-	psi1 = contract(A,psi0,maxdim=get_int("maxm"))
+	iden_op = identity_mpo() # identity operator
+	maxdim = get_int("maxm")
+	psi1 = contract(A,psi0,maxdim=maxdim)
+	psi1 = contract(iden_op,psi1,maxdim=maxdim) # this fixes a bug
 	save_mps(get_string("applyoperator_wf1"),psi1)
 end
+
+
+function summps()
+	sites = get_sites()
+	psi1 = load_mps("summps_wf1.mps")
+	psi2 = load_mps("summps_wf2.mps")
+	maxdim = get_int("maxm")
+	psi3 = add(psi1,psi2,maxdim=maxdim)
+	save_mps("summps_wf3.mps",psi3)
+end
+
 
 
 function exponential()
@@ -35,4 +49,6 @@ function overlap()
 	c = inner(wf1,wf2)
 	write_in_file("OVERLAP.OUT",convert(Complex,c),"w")
 end
+
+
 

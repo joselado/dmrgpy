@@ -24,6 +24,9 @@ let
 	if get_bool("overlap") # apply an operator
 		overlap()
 	end
+	if get_bool("summps") # sum two mps
+		summps()
+	end
 	if get_bool("exponential_eMwf") # apply an operator
 		exponential()
 	end

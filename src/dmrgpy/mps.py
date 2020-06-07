@@ -2,26 +2,45 @@ from __future__ import print_function
 from copy import deepcopy
 import os
 import numpy as np
+from . import multioperator
 
 class MPS():
     """Object for an MPS"""
-    def __init__(self,sc,name="psi_GS.mps"):
-        self.sc = sc # many body object
-        self.sc.wf0 = None # no wavefunction
-        self.path = sc.path # path to the spin chain folder
+    def __init__(self,MBO=None,name="psi_GS.mps"):
+#        self.sc = sc # many body object
+#        self.sc.wf0 = None # no wavefunction
+        if MBO is None:
+            self.path = os.getcwd() # current directory
+            self.MBO = None
+        else:
+            self.path = MBO.path # path to the many body object folder
+            self.MBO = MBO
         self.name = name # initial name
-        self.factor = 1.0 # factor of the mps
+#        self.factor = 1.0 # factor of the mps
+        self.mps = open(self.path+"/"+name,"rb").read() # read the MPS
+        self.sites = open(self.path+"/sites.sites","rb").read() # read sites
     def dot(self,x):
-        return dot(self,x) # dot function
+        if self.MBO is not None: return self.MBO.overlap(self,x)
+        else: raise
+    def overlap(self,x):
+        if self.MBO is not None: return self.MBO.overlap(self,x)
+        else: raise
+    def __add__(self,x):
+        if self.MBO is not None: return self.MBO.summps(self,x)
+        else: raise
     def copy(self,name=None):
         """Copy this wavefunction"""
         out = deepcopy(self) # copy everything
         if name is None:
           name = id_generator()+".mps" # create a new name
         out.name = name
-        self.execute(lambda: os.system("cp "+self.name+"  "+out.name))
+#        self.execute(lambda: os.system("cp "+self.name+"  "+out.name))
         return out
-    write = copy
+    def write(self,name=None):
+        """Write the MPS in a folder"""
+        if name is None: name = self.name
+        open(self.path+"/"+name,"wb").write(self.mps) # write the MPS
+        open(self.path+"/sites.sites","wb").write(self.sites) # write the sites
     def rename(self,name):
         self.execute(lambda: os.system("mv "+self.name+"  "+name))
         self.name = name
@@ -33,11 +52,15 @@ class MPS():
     def clean(self):
         self.execute(lambda: os.system("rm "+self.name))
         del self
-    def __mul__(self,x):
-        """Multiply by an scalar"""
-        out = self.copy()
-        out.factor *= x # multiply
-        return out
+    def __rmul__(self,A):
+        """Multiply by an operator"""
+        if self.MBO is not None:
+            if type(A)==multioperator.MultiOperator: # MO type
+                return self.MBO.applyoperator(A,self) # apply the operator
+            elif multioperator.isnumber(A):
+                return A*multioperator.identity()*self
+            else: raise
+        else: raise
 
 
 

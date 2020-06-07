@@ -51,4 +51,3 @@ static auto sum_mps=[](auto A1,auto A2) {
 }
 ;
 
-

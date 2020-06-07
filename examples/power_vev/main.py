@@ -9,8 +9,6 @@ spins = ["S=1/2" for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
 sc.itensor_version = "julia"
 
-from dmrgpy import juliarun
-#juliarun.precompile = True
 
 # now define the Hamiltonian
 def geth(b):

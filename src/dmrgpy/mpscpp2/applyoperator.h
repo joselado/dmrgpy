@@ -10,3 +10,14 @@ static auto applyoperator=[]() {
   writeToFile(get_str("applyoperator_wf1"),psi1);
 };
 
+
+
+static auto get_summps=[]() {
+  // now get the MPS
+  auto psi1 = read_wf("summps_wf1.mps") ; // get the WF
+  auto psi2 = read_wf("summps_wf2.mps") ; // get the WF
+  auto psi3 = sum_mps(psi1,psi2) ;
+  writeToFile("summps_wf3.mps",psi3);
+};
+
+

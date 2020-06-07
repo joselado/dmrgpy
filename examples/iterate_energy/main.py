@@ -33,8 +33,7 @@ for i in range(n):
 
 sc.set_hamiltonian(h)
 
-sc.itensor_version = "julia"
-
+#sc.itensor_version = "julia"
 sc.nsweeps = 1 # one sweep
 es = []
 wf = None # initial guess

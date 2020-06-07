@@ -64,7 +64,6 @@ class Many_Body_Chain():
       self.excited_from_file = False # read excited states
       self.e0 = None # no ground state energy
       self.wf0 = None # no initial WF
-      self.starting_file_gs = None # initial file for GS
       self.skip_dmrg_gs = False # skip the DMRG minimization
       self.computed_gs = False # computed the GS already
       self.vijkl = 0 # generalized interaction
@@ -111,7 +110,7 @@ class Many_Body_Chain():
       self.computed_gs = False
       self.gs_from_file = False
       self.skip_dmrg_gs = False
-      self.starting_file_gs = None # initial file for GS
+      self.wf0 = None # initial file for GS
   def clean(self): 
       """
       Remove the temporal folder
@@ -170,6 +169,9 @@ class Many_Body_Chain():
   def applyoperator(self,A,wf,**kwargs):
       """Apply an operator"""
       return mpsalgebra.applyoperator(self,A,wf,**kwargs)
+  def summps(self,wf1,wf2,**kwargs):
+      """Apply an operator"""
+      return mpsalgebra.summps(self,wf1,wf2,**kwargs)
   def set_pairings_MB(self,fun):
       """Generic pairing term"""
       h = self.generate_bilinear(fun,self.C,self.C)
@@ -269,7 +271,7 @@ class Many_Body_Chain():
         self.gs_from_file = False # use a wavefunction from a file
       else:
         self.gs_from_file = True # use a wavefunction from a file
-        self.starting_file_gs = wf.name # name of the wavefunction
+        self.wf0 = wf.copy() # name of the wavefunction
         if reconverge: self.skip_dmrg_gs = False # reconverge the calculation
         else: self.skip_dmrg_gs = True # reconverge the calculation
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):

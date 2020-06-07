@@ -26,9 +26,9 @@ def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000):
             "tevol_n":str(nt0),
             }
     self.task = task # override tasks
-    wfa.copy(name="input_wavefunction.mps") # copy wavefunction
+    self.execute(lambda: wfa.write(name="input_wavefunction.mps")) # copy WF
     self.execute(lambda: h.write(name="hamiltonian.in"))
-    self.execute(lambda : self.run()) # run calculation
+    self.execute(lambda: self.run()) # run calculation
     wf = mps.MPS(self,name="output_wavefunction.mps").copy() # output
     return wf
 
@@ -40,23 +40,52 @@ def overlap(self,wf1,wf2,mode="DMRG"):
 
 def overlap_dmrg(self,wf1,wf2):
     """Compute the overlap between wavefunctions"""
+
     task = {"overlap":"true",
             }
     self.task = task # override tasks
-    wf1.copy(name="overlap_wf1.mps") # copy wavefunction
-    wf2.copy(name="overlap_wf2.mps") # copy wavefunction
+    wf1.write(name="overlap_wf1.mps") # copy wavefunction
+    wf2.write(name="overlap_wf2.mps") # copy wavefunction
     self.execute( lambda : self.run()) # run calculation
     m = self.execute( lambda : np.genfromtxt("OVERLAP.OUT")) # run calculation
     return m[0] + 1j*m[1]
 
 
-def applyoperator(self,A,wf,mode="DMRG"):
+def applyoperator(self,A,wf,**kwargs):
+    if type(wf)==mps.MPS: mode="DMRG"
+    elif type(wf)==np.ndarray: mode="ED"
+    else: raise
     if mode=="DMRG": return applyoperator_dmrg(self,A,wf)
-    elif mode=="ED": return self.get_ED_obj().applyoperator(A,wf)
+    elif mode=="ED": 
+        raise
+        return self.get_ED_obj().applyoperator(A,wf)
+
+
+
+def summps(self,wf1,wf2,**kwargs):
+    if type(wf1)==mps.MPS: mode="DMRG"
+    elif type(wf1)==np.ndarray: mode="ED"
+    else: raise
+    if mode=="DMRG": return summps_dmrg(self,wf1,wf2)
+    elif mode=="ED": return wf1 + wf2 #self.get_ED_obj().summps(A,wf1,wf2)
+
+
+
+def summps_dmrg(self,wf1,wf2):
+    """Apply operator to a many body wavefunction"""
+    self.execute(lambda: wf1.write(name="summps_wf1.mps")) # write WF
+    self.execute(lambda: wf2.write(name="summps_wf2.mps")) # write WF
+    task = {"summps":"true",
+            }
+    self.task = task
+    self.execute(lambda : self.run()) # run calculation
+    return mps.MPS(self,name="summps_wf3.mps").copy() # copy
+
 
 
 def applyoperator_dmrg(self,A,wf):
     """Apply operator to a many body wavefunction"""
+    self.execute(lambda: wf.write()) # write WF
     task = {"applyoperator":"true",
             "applyoperator_wf0":wf.name,
             "applyoperator_multioperator":"applyoperator_multioperator.in",

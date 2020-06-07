@@ -45,9 +45,10 @@ def write_tasks(self):
   #
   if self.use_ampo_hamiltonian: 
       fo.write(" use_ampo_hamiltonian = true\n")
-  if self.gs_from_file and self.starting_file_gs is not None: 
+  if self.gs_from_file and self.wf0 is not None: 
+      self.execute(self.wf0.write) # write WF
       fo.write(" gs_from_file = true\n")
-      fo.write(" starting_file_gs = "+self.starting_file_gs+"\n") # starting WF
+      fo.write(" starting_file_gs = "+self.wf0.name+"\n") # starting WF
       fo.write(" skip_dmrg_gs = "+obj2str(self.skip_dmrg_gs)+"\n") # starting WF
   else: fo.write(" gs_from_file = false\n")
   for key in self.task:

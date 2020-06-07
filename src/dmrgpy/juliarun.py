@@ -5,6 +5,11 @@ dmrgpath = os.path.dirname(os.path.realpath(__file__))
 
 precompile = False
 
+from julia.api import Julia
+jlsession = Julia(compiled_modules=False) # start the Julia session
+jlsession.eval("using Suppressor") # suppress output
+
+
 def run(self):
     if precompile:
         mpsjl = dmrgpath+"/mpsjulia/mpsjulia.jl"
@@ -22,8 +27,9 @@ def run(self):
         self.execute(lambda: os.system("julia run_and_compile.jl > status.jl"))
         print("FINISHED precompiling Julia")
     else:
-        mpscpp = "julia "+dmrgpath+"/mpsjulia/mpsjulia.jl"
-        self.execute(lambda : os.system(mpscpp+" > status.txt"))
+        import contextlib
+        c = "@suppress_out include(\""+dmrgpath+"/mpsjulia/mpsjulia.jl\");"
+        self.execute(lambda: jlsession.eval(c)) # evaluate Julia
 
 
 

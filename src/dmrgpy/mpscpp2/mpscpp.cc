@@ -74,6 +74,7 @@ main()
     if (check_task("density_matrix"))  reduced_dm() ; // DM
     if (check_task("vev"))  vev() ; // Vacuum expectation value
     if (check_task("applyoperator"))  applyoperator() ; 
+    if (check_task("summps"))  get_summps() ; 
     if (check_task("distribution"))  get_moments_distribution() ; 
     if (check_task("general_kpm"))  general_kpm() ; 
 //    if (check_task("excited_vev"))  excited_vev() ; // VEV excited
