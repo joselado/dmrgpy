@@ -19,7 +19,9 @@ This library is still under heavy development.
 # How to install #
 
 The script install.sh will compile both ITensor and a C++ program
-that uses it. Afterwards, it is only required to add to the .bashrc
+that uses it. Alternatively, in case you just want to use the Julia version,
+execute the script install_julia.sh. 
+Afterwards, it is only required to add to the .bashrc
 the following line
 
 ```
