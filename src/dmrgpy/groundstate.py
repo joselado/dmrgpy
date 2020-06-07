@@ -49,7 +49,7 @@ def gs_energy_single(self,wf0=None,reconverge=None):
     Return the ground state energy
     """
     if wf0 is not None: 
-        self.set_initial_wf(wf0) # set the initial wavefunction
+        self.set_initial_wf(wf0,reconverge=True) # set the initial wavefunction
     if reconverge is not None: # overwrite skip_dmrg_gs
         self.skip_dmrg_gs = not reconverge # if the computation should be rerun
     self.execute(lambda: self.setup_task("GS"))

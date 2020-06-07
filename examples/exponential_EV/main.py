@@ -13,6 +13,10 @@ Mx = sum(sc.Sx) # total magnetization in X
 
 sc.itensor_version = "julia"
 
+from dmrgpy import juliarun
+#juliarun.precompile = True
+
+
 def get(mode="DMRG",z=1):
     print("Doing",z)
     sc.set_hamiltonian(Mz) # only magnetic field

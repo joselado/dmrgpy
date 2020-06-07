@@ -110,6 +110,7 @@ class Many_Body_Chain():
       """Restart the calculation"""
       self.computed_gs = False
       self.gs_from_file = False
+      self.skip_dmrg_gs = False
       self.starting_file_gs = None # initial file for GS
   def clean(self): 
       """
@@ -203,13 +204,16 @@ class Many_Body_Chain():
       Run the DMRG calculation
       """
       # executable
+      self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
       if self.itensor_version==2: mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" 
       elif self.itensor_version==3: mpscpp = dmrgpath+"/mpscpp3/mpscpp.x" 
       elif self.itensor_version=="julia": 
-          mpscpp = "julia "+dmrgpath+"/mpsjulia/mpsjulia.jl" 
+          from . import juliarun
+          juliarun.run(self)
+          return
+     #     mpscpp = "julia "+dmrgpath+"/mpsjulia/mpsjulia.jl" 
       else: raise
 #      if not os.path.isfile(mpscpp): raise
-      self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
       self.execute(lambda : os.system(mpscpp+" > status.txt"))
   def entropy(self,n=1):
     """Return the entanglement entropy"""
