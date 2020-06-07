@@ -5,7 +5,8 @@ function applyoperator()
 	psi0 = load_mps(get_string("applyoperator_wf0"))
 	iden_op = identity_mpo() # identity operator
 	maxdim = get_int("maxm")
-	psi1 = contract(A,psi0,maxdim=maxdim)
+	cutoff = get_float("cutoff")
+	psi1 = contract(A,psi0,maxdim=maxdim,cutoff=cutoff)
 	psi1 = contract(iden_op,psi1,maxdim=maxdim) # this fixes a bug
 	save_mps(get_string("applyoperator_wf1"),psi1)
 end
@@ -26,6 +27,7 @@ function exponential()
 	dtr = get_float("tevol_dt_real")
 	dti = get_float("tevol_dt_imag")
 	maxdim = get_int("maxm")
+	cutoff = get_float("cutoff")
 	H = read_mpo("hamiltonian.in")  # input wavefunction
 	psi1 = load_mps("input_wavefunction.mps") # Operator to exponentiate
 	nt0 = get_int("tevol_n") # number of steps
