@@ -20,20 +20,11 @@ This library is still under heavy development.
 
 The script install.sh will compile both ITensor and a C++ program
 that uses it. Alternatively, in case you just want to use the Julia version,
-execute the script install_julia.py. 
-Afterwards, it is only required to add to the .bashrc
-the following line
+execute the script install_julia.py. The installation scripts will
+also add dmrgpy to the PYTHONPATH of the python interpreter you used
+to execute them.
 
-```
-export DMRGROOT=PATH_TO_DMRGPY"/src"
-```
-with ```PATH_TO_DMRGPY``` the path to where dmrgpy is. Afterwards, you can write in your Python script
-
-```python
-import os ; import sys ; sys.path.append(os.environ["DMRGROOT"])
-```
-
-And import the sublibrary that you want, for example
+Afterwards you can import the dmrgpy sublibrary that you want, for example
 
 ```python
 from dmrgpy import spinchain
