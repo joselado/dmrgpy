@@ -35,10 +35,12 @@ function exponential()
 	taui = tau/nt0 # small time step
 	iden_op = identity_mpo() # identity operator
         for i=1:nt0
-          	psi2 = taui*contract(H,1*psi1;maxdim=maxdim,cutoff=cutoff) # sum
-          	psi2 = contract(iden_op,psi2;maxdim=maxdim,cutoff=cutoff) # fix
-          	psi1 = add(1*psi1,1*psi2;maxdim=maxdim,cutoff=cutoff) # sum
-		truncate!(psi1;maxdim=maxdim,cutoff=cutoff)
+          	psi2 = taui*contract(H,psi1;maxdim=maxdim,cutoff=cutoff,
+				     method = "densitymatrix") # sum
+          	psi2 = contract(iden_op,psi2;maxdim=maxdim,cutoff=cutoff,
+				method = "densitymatrix") # fix
+          	psi1 = add(psi1,psi2;maxdim=maxdim,cutoff=cutoff,
+			   method = "densitymatrix") # sum
 	end
 	save_mps("output_wavefunction.mps",psi1) # write result
 end

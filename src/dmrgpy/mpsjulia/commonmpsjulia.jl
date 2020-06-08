@@ -1,5 +1,6 @@
 __precompile__()
-module common
+push!(LOAD_PATH, @__DIR__) # include this path
+module commonmpsjulia
 using ITensors
 using Serialization
 export get_gs,get_bool,get_vev,dynamical_correlator_kpm,applyoperator,general_kpm,overlap,exponential,summps

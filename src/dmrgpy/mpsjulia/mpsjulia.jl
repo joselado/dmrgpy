@@ -1,6 +1,6 @@
 #include("common.jl")
 push!(LOAD_PATH, @__DIR__) # include this path
-using common
+using commonmpsjulia
 
 let
 	if get_bool("GS") # ground state energy
