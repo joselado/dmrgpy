@@ -21,7 +21,7 @@ if not hasjulia: # if the correct Julia version is not present
     os.system("wget https://julialang-s3.julialang.org/bin/linux/x64/1.4/julia-1.4.2-linux-x86_64.tar.gz")
     os.system("tar -xvf julia-1.4.2-linux-x86_64.tar.gz") # untar the file
     os.system("rm julia-1.4.2-linux-x86_64.tar.gz") # untar the file
-    julia = mpath+"/julia-1.4.2/bin/julia" # path for julia
+    julia = mpath+"/src/julia/julia-1.4.2/bin/julia" # path for julia
     os.chdir(mpath) # go back
 
 else: 
