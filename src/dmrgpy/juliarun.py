@@ -1,7 +1,22 @@
 # routines to run the code with Julia
 import os
+import subprocess
 
 dmrgpath = os.path.dirname(os.path.realpath(__file__))
+
+try:
+    out,err = subprocess.Popen(['julia', '--version'],
+           stdout=subprocess.PIPE,
+           stderr=subprocess.STDOUT).communicate()
+except: out = ""
+# check if Julia has the correct version
+hasjulia = "julia version 1.4" in str(out)
+
+if not hasjulia: # no julia present, add manually to the path
+  jpath = dmrgpath + "/../julia/julia-1.4.2/bin/"
+  os.environ["PATH"] = jpath+":"+os.environ["PATH"] 
+
+
 
 precompile = False
 

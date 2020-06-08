@@ -207,9 +207,10 @@ class Many_Body_Chain():
       """
       # executable
       self.execute(lambda : taskdmrg.write_tasks(self)) # write tasks
-      if self.itensor_version==2: mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" 
-      elif self.itensor_version==3: mpscpp = dmrgpath+"/mpscpp3/mpscpp.x" 
-      elif self.itensor_version=="julia": 
+      if self.itensor_version in [2,"2","v2","C++","cpp","c","C"]: 
+          mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" 
+#      elif self.itensor_version==3: mpscpp = dmrgpath+"/mpscpp3/mpscpp.x" 
+      elif self.itensor_version in ["julia","Julia","jl"]: 
           from . import juliarun
           juliarun.run(self)
           return
