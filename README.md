@@ -88,7 +88,7 @@ print("Energy with DMRG",sc.gs_energy(mode="DMRG"))
 print("Energy with ED",sc.gs_energy(mode="ED"))
 ```
 
-## Magnetization an S=1 spin chain with an edge magnetic field
+## Magnetization of an S=1 spin chain with an edge magnetic field
 ```python
 from dmrgpy import spinchain
 n = 40
@@ -181,12 +181,12 @@ fc = fermionchain.Spinful_Fermionic_Chain(n)
 # first neighbor hopping
 h = 0
 for i in range(n-1):
-  h = fc.Cdagup[i]*fc.Cup[i+1]
-  h = fc.Cdagdn[i]*fc.Cdn[i+1]
+  h = h + fc.Cdagup[i]*fc.Cup[i+1]
+  h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
 h = h.get_dagger() # Make Hermitian
 # Hubbard term
-for i in range(n-1):
-  h = 2.*(fc.Nup[i]-.5)*(fc.Cup[i+1]-.5)
+for i in range(n):
+  h = 2.*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
 fc.set_hamiltonian(h) # initialize the Hamiltonian
 pairs = [(0,i) for i in range(n)]
 # compute the two correlators
