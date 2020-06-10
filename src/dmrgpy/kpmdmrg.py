@@ -150,6 +150,11 @@ def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,
     ys2 = generate_profile(mus,xs2,use_fortran=False,kernel="lorentz") # generate the DOS
     xs2 *= scale
     ys2 /= scale
-    return xs2,ys2
+    if xs is None: return xs2,ys2
+    else:
+      from scipy.interpolate import interp1d
+      fr = interp1d(xs2, ys2.real,fill_value=0.0,bounds_error=False)
+      fi = interp1d(xs2, ys2.imag,fill_value=0.0,bounds_error=False)
+      return xs,fr(xs)+1j*fi(xs)
 
 
