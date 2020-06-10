@@ -14,7 +14,7 @@ hasjulia = "julia version 1.4" in str(out)
 
 if not hasjulia: # no julia present, add manually to the path
   jpath = dmrgpath + "/../julia/julia-1.4.2/bin/"
-  os.environ["PATH"] = jpath+":"+os.environ["PATH"] 
+  os.environ["PATH"] = jpath+":"+os.environ["PATH"]
 
 
 
@@ -45,8 +45,5 @@ def run(self):
         import contextlib
         c = "@suppress_out include(\""+dmrgpath+"/mpsjulia/mpsjulia.jl\");"
         self.execute(lambda: jlsession.eval(c)) # evaluate Julia
-
-
-
 
 

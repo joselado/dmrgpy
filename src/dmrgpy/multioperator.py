@@ -78,7 +78,7 @@ class MultiOperator():
         return self.__mul__(a)
     def __truediv__(self,a):
         if isnumber(a): # number
-          return 1/a*self
+          return (1./a)*self
         else: raise
     def multiply_scalar(self,a):
         out = self.copy()
