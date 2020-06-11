@@ -99,7 +99,7 @@ for i in range(len(spins)-1):
   h = h + sc.Sx[i]*sc.Sx[i+1]
   h = h + sc.Sy[i]*sc.Sy[i+1]
   h = h + sc.Sz[i]*sc.Sz[i+1]
-h = h + Sz[0]*0.1 # edge magnetic field
+h = h + sc.Sz[0]*0.1 # edge magnetic field
 sc.set_hamiltonian(h) # create the Hamiltonian
 mz = [sc.vev(sc.Sz[i]).real for i in range(n)]
 print("Mz",mz)
