@@ -183,7 +183,7 @@ h = 0
 for i in range(n-1):
   h = h + fc.Cdagup[i]*fc.Cup[i+1]
   h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-h = h.get_dagger() # Make Hermitian
+h = h + h.get_dagger() # Make Hermitian
 # Hubbard term
 for i in range(n):
   h = 2.*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
