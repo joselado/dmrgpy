@@ -41,6 +41,12 @@ class MPS():
         if name is None: name = self.name
         open(self.path+"/"+name,"wb").write(self.mps) # write the MPS
         open(self.path+"/sites.sites","wb").write(self.sites) # write the sites
+    def get_entropy(self,b=None):
+        """Compute entanglement entropy in a bond"""
+        if b is None: # compute all 
+            return np.mean([self.get_entropy(i) for i in range(1,self.MBO.ns)])
+        if self.MBO is not None: return self.MBO.get_entropy(self,b=b)
+        else: raise
     def rename(self,name):
         self.execute(lambda: os.system("mv "+self.name+"  "+name))
         self.name = name

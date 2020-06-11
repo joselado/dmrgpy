@@ -1,8 +1,11 @@
-static auto get_entropy=[](auto psi, int b) {
+// adapted from itensor.org
+
+static auto get_entropy=[]() {
   //Given an MPS or IQMPS called "psi",
   //and some particular bond "b" (1 <= b < psi.N())
   //across which we want to compute the von Neumann entanglement
-  
+  auto psi = read_wf("wavefunction.mps"); 
+  auto b = get_int_value("bond_entropy") ; // bond to compute
   //"Gauge" the MPS to site b
   psi.position(b); 
   
@@ -29,7 +32,7 @@ static auto get_entropy=[](auto psi, int b) {
       } ;
   ofstream myfile; // create object
   myfile.open("ENTROPY.OUT"); // open file
-  myfile << std::setprecision(8) << SvN << endl; // write file
+  myfile << std::setprecision(16) << SvN << endl; // write file
   return 0 ;
 }
 ;

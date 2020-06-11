@@ -221,16 +221,12 @@ class Many_Body_Chain():
           self.itensor_version = "julia" # turn to Julia
           return self.run() # rerun with julia
       self.execute(lambda : os.system(mpscpp+" > status.txt"))
-  def entropy(self,n=1):
-    """Return the entanglement entropy"""
-#    self.setup_sweep()
-    self.setup_task("entropy")
-    self.write_hamiltonian() # write the Hamiltonian to a file
-    self.run() # perform the calculation
-    return np.genfromtxt("ENTROPY.OUT")
-  def get_dos(self,**kwargs):
-    from .dos import get_dos
-    return get_dos(self,**kwargs)
+  def get_entropy(self,wf,mode="DMRG",**kwargs):
+      """Return the entanglement entropy"""
+      if mode=="DMRG":
+          from . import entropy
+          return entropy.compute_entropy(self,wf,**kwargs)
+      else: return NotImplemented
   def get_dynamical_correlator_MB(self,**kwargs):
       return dynamics.get_dynamical_correlator(self,**kwargs)
   def get_dynamical_correlator(self,mode="DMRG",**kwargs):
