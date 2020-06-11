@@ -169,7 +169,7 @@ for i in range(len(spins)-1):
   h = h + sc.Sy[i]*sc.Sy[i+1]
   h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
-sc.get_dynamical_correlator(i=0,j=0,name=(sc.Sz[0],sc.Sz[0]))
+sc.get_dynamical_correlator(name=(sc.Sz[0],sc.Sz[0]))
 ```
 
 
