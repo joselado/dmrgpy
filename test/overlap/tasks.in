@@ -1,5 +1,0 @@
-tasks
-{
- restart = true
-overlap = true
-}
