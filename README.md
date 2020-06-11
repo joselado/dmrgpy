@@ -68,7 +68,7 @@ for i in range(len(spins)-1):
   h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h) # create the Hamiltonian
 pairs = [(0,i) for i in range(30)] # between the edge and the rest
-cs = [sc.vev(sc.Sz[0]*fc.Sz[i]).real for i in range(n)]
+cs = [sc.vev(sc.Sz[0]*sc.Sz[i]).real for i in range(n)]
 print(cs)
 ```
 
@@ -109,6 +109,7 @@ print("Mz",mz)
 ```python
 from dmrgpy import spinchain
 spins = ["S=1/2" for i in range(30)] # 2*S+1=2 for S=1/2
+sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
 for i in range(len(spins)-1): 
   h = h + sc.Sx[i]*sc.Sx[i+1]
@@ -116,7 +117,6 @@ for i in range(len(spins)-1):
   h = h + sc.Sz[i]*sc.Sz[i+1]
 
 for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
-  sc = spinchain.Spin_Chain(spins) # create spin chain object
   sc.set_hamiltonian(h) # create the Hamiltonian
   sc.maxm = maxm # set the bond dimension
   e = sc.gs_energy() # get the ground state energy
@@ -190,8 +190,8 @@ for i in range(n):
 fc.set_hamiltonian(h) # initialize the Hamiltonian
 pairs = [(0,i) for i in range(n)]
 # compute the two correlators
-zz = [fc,vev(fc.Sz[0]*fc.Sz[i]).real for i in range(n)]
-cc = [fc,vev(fc.Cdagup[0]*fc.Cup[i]).real for i in range(n)]
+zz = [fc.vev(fc.Sz[0]*fc.Sz[i]).real for i in range(n)]
+cc = [fc.vev(fc.Cdagup[0]*fc.Cup[i]).real for i in range(n)]
 print("Spin correlators",zz)
 print("Site correlators",cc)
 ```
