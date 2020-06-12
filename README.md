@@ -18,7 +18,7 @@ This library is still under heavy development.
 
 # How to install #
 
-The script 
+Execute the script 
 
 ```bash
 python install.py 
