@@ -11,7 +11,7 @@ def dynamical_correlator_kpm(self):
 
 def compute_entropy(self,psi,b=1):
     """Compute entanglement entropy in a bond"""
-    if i<1 or i>self.ns: raise
+    if b<1 or b>self.ns: raise
     self.execute(lambda: psi.write(name="wavefunction.mps"))
     # write the task
     task = {    "entropy": "true",
