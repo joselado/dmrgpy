@@ -54,6 +54,10 @@ static auto get_excited=[]() {
       psi1 = MPS(sites) ; // new random wavefunction
 //    };
   } ;
+  // write all the excited states in files
+  for (i=0;i<nexcited;i++)  { 
+	  writeToFile("wavefunction_"+std::to_string(i)+".mps",wfs.at(i));
+  };
   // perform gram schmidt algorithm
   if (get_bool("excited_gram_schmidt")) wfs = gram_schmidt(wfs); 
   myfile.open("EXCITED.OUT"); // open file

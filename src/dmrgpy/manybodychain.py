@@ -12,6 +12,7 @@ from . import dynamics
 from . import funtk
 from . import vev
 from . import mpsalgebra
+from . import excited
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -199,8 +200,9 @@ class Many_Body_Chain():
       """
       Write the Hamiltonian in a file
       """
-      from .writemps import write_hamiltonian
-      self.execute(lambda: write_hamiltonian(self))
+      from .writemps import write_sites
+      self.execute(lambda: write_sites(self)) # write the different sites
+      self.execute(lambda: self.hamiltonian.write("hamiltonian.in"))
   def run(self,automatic=False): 
       """
       Run the DMRG calculation
@@ -247,10 +249,15 @@ class Many_Body_Chain():
   def get_excited(self,mode="DMRG",**kwargs):
       """Return excitation energies"""
       if mode=="DMRG":
-        from . import excited
-        return excited.get_excited(self,**kwargs) # return excitation energies
-      elif mode=="ED": return self.get_ED_obj().get_excited(**kwargs) # ED
+          return excited.get_excited(self,**kwargs) # return excitation energies
+      elif mode=="ED": 
+          return self.get_ED_obj().get_excited(**kwargs) # ED
       else: raise
+  def get_excited_states(self,mode="DMRG",**kwargs):
+      """Return excitation energies"""
+      if mode=="DMRG":
+        return excited.get_excited_states(self,**kwargs) # return es and waves
+      else: return NotImplemented
   def get_gap(self,**kwargs):
     """Return the gap"""
     es = self.get_excited(n=2,**kwargs)

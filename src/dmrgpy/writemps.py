@@ -4,7 +4,7 @@ from . import ampotk
 from . import multioperator
 
 def write_hamiltonian(self):
-    write_sites(self) # write the different sites
+    self.execute(lambda: write_sites(self)) # write the different sites
     if self.use_ampo_hamiltonian: # use Hamiltonian as an MPO
         if self.hamiltonian is not None: # Hamiltonian object created 
             h = self.hamiltonian

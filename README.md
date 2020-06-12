@@ -18,9 +18,21 @@ This library is still under heavy development.
 
 # How to install #
 
-The script install.sh will compile both ITensor and a C++ program
+The script 
+
+```bash
+python install.py 
+```
+
+and it will compile both ITensor and a C++ program
 that uses it. Alternatively, in case you just want to use the Julia version,
-execute the script install_julia.py. The installation scripts will
+execute the script 
+
+```bash
+python install_julia.py
+```
+
+The installation scripts will
 also add dmrgpy to the PYTHONPATH of the python interpreter you used
 to execute them.
 
@@ -34,10 +46,12 @@ from dmrgpy import spinchain
 - Ground state energy
 - Excitation gap
 - Excited states
-- Static correlation functions
+- Arbitrary expectation values, including static correlation functions
 - Time evolution and measurements
+- MPS and MPO algebra
 - Dynamical correlation functions computed with the Kernel polynomial method
 - Dynamical correlation functions with time dependent DMRG
+- Generic operator distributions computed with the Kernel polynomial method
 
 # Examples
 
