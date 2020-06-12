@@ -28,6 +28,10 @@ class MPS():
     def __add__(self,x):
         if self.MBO is not None: return self.MBO.summps(self,x)
         else: raise
+    def __sub__(self,x):
+        return self + (-1)*x
+    def __neg__(self,x):
+        return (-1)*x
     def copy(self,name=None):
         """Copy this wavefunction"""
         out = deepcopy(self) # copy everything

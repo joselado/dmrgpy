@@ -33,10 +33,13 @@ def get_excited(*args,**kwargs):
 
 
 
-def get_excited_states(self,purify=True,**kwargs):
+def get_excited_states(self,n=2,purify=True,**kwargs):
     """Excited states"""
-    es,ws = get_excited_states_dmrg(self,**kwargs) # compute excitations
-    if purify: # purify the states (so far just the energies)
+    if not purify: # purify the states (so far just the energies)
+        return get_excited_states_dmrg(self,n=n,**kwargs) # compute 
+    else: # purify the states (so far just the energies)
+        es,ws = get_excited_states_dmrg(self,n=n+2,**kwargs) # compute 
+        ws = gram_smith(ws) # orthogonalize the MPS
         ne = len(es)
         h = np.zeros((ne,ne),dtype=np.complex)
         for i in range(ne):
@@ -44,6 +47,19 @@ def get_excited_states(self,purify=True,**kwargs):
               h[i,j] = ws[i].overlap(self.hamiltonian*ws[j])
         es = lg.eigvalsh(h) # redefine eigenvalues
         # TODO redefine also the eigenvectors
-    return (es,ws)
+        return (es[0:n],ws[0:n])
+
+
+def gram_smith(ws):
+    """Gram smith orthogonalization"""
+    out = []
+    n = len(ws)
+    for i in range(n):
+        w = ws[i].copy() # copy wavefunction
+        for wj in out: # loop over stored wavefunctions
+            w = w - w.overlap(wj)*wj # remove the overlap with each WF
+        w = 1/np.sqrt((w.overlap(w))).real*w # normalize
+        out.append(w) # store
+    return out
 
 
