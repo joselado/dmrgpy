@@ -115,7 +115,7 @@ def get_dynamical_correlator(self,n=1000,
 
 
 def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,
-        delta=1e-1,xs=None,**kwargs):
+        delta=1e-1,kernel="lorentz",xs=None,**kwargs):
     """
     Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
     """
@@ -147,7 +147,7 @@ def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,
     # scale of the dos
     kpmscales = scale
     xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
-    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel="lorentz") # generate the DOS
+    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel) # generate the DOS
     xs2 *= scale
     ys2 /= scale
     if xs is None: return xs2,ys2
