@@ -26,17 +26,21 @@ i = np.random.randint(n)
 j = np.random.randint(n)
 t1 = time.time()
 name = (sc.Sz[i],sc.Sz[j])
-(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name)
+es = np.linspace(-0.5,6,2000)
+delta = 5e-2
+(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name,es=es,delta=delta)
 t2 = time.time()
 print("Time with DMRG",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="ED",name=name)
+(x3,y3) = sc.get_dynamical_correlator(mode="ED",submode="ED",name=name,es=es,
+        delta=delta)
 t3 = time.time()
 print("Time with ED",t3-t2)
 
 
-(x4,y4) = sc.get_dynamical_correlator(mode="ED",submode="KPM",name=name)
+(x4,y4) = sc.get_dynamical_correlator(mode="ED",submode="KPM",name=name,es=es,
+        delta=delta)
 t4 = time.time()
 print("Time with KPM-ED",t4-t3)
 

@@ -101,7 +101,7 @@ def get_dynamical_correlator(self,n=1000,
     self.e0 = e0 # add this quantity
     n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
     xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
-    ys = generate_profile(mus,xs,use_fortran=False,kernel="lorentz") # generate the DOS
+    ys = generate_profile(mus,xs,use_fortran=False,kernel="jackson") # generate the DOS
     xs /= scale # scale back the energies
     xs += (emin+emax)/2. -emin # shift the energies
     ys *= scale # renormalize the y values
@@ -115,7 +115,7 @@ def get_dynamical_correlator(self,n=1000,
 
 
 def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,
-        delta=1e-1,kernel="lorentz",xs=None,**kwargs):
+        delta=1e-1,kernel="jackson",xs=None,**kwargs):
     """
     Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
     """

@@ -39,7 +39,7 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
     m = -np.identity(h.shape[0])*e0+h # matrix to use
     emax = slg.eigsh(h,k=1,ncv=20,which="LA")[0] # upper energy
     scale = np.max([np.abs(e0),np.abs(emax)])*3.0
-    n = int(scale/delta) # number of polynomials
+    n = int(2*scale/delta) # number of polynomials
     (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
                                 npol=n*4,ne=n*10,x=es)
     return xs,np.conjugate(ys) # return correlator
@@ -59,7 +59,7 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     out = 0.0+es*0.0*1j # initialize
     out = dynamical_sum(emu,es+1j*delta,A,B,out) # perform the summation
     out -= dynamical_sum(emu,es-1j*delta,A,B,out) # perform the summation
-    return (es,-out.imag/np.pi) # return correlator
+    return (es,-out.imag/(2*np.pi)) # return correlator
 
 #@jit(nopython=True)
 def dynamical_sum(es,ws,A,B,out):

@@ -352,12 +352,18 @@ def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
   if np.sum(np.abs(mus.imag))>0.001:
 #    print("WARNING, off diagonal has nonzero imaginary elements",np.sum(np.abs(mus.imag)))
     pass
-  if x is None: xs = np.linspace(-1.0,1.0,ne,endpoint=True)*0.99 # energies
-  else: xs = x/scale # use from input
-  ysr = generate_profile(mus.real,xs,kernel="lorentz",use_fortran=use_fortran)/scale*np.pi # so it is the Green function
+  xs = np.linspace(-1.0,1.0,npol*10,endpoint=True)*0.95 # energies
+  ysr = generate_profile(mus.real,xs,kernel="jackson",use_fortran=use_fortran)/scale*np.pi # so it is the Green function
   ysi = generate_profile(mus.imag,xs,kernel="jackson",use_fortran=use_fortran)/scale*np.pi # so it is the Green function
   ys = ysr - 1j*ysi
-  return (scale*xs,ys)
+  xs = scale*xs # reescale
+  ys = ys/scale # reescale
+  if x is None: return xs,ys
+  else: 
+      from scipy.interpolate import interp1d
+      yout = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)(x)
+      yout=yout+1j*interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)(x)
+      return x,yout
 
 
 
