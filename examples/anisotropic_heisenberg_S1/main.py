@@ -3,8 +3,9 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 20
+n = 40
 spins = ["S=1/2"]+["S=1" for i in range(n)]+["S=1/2"] # spin 1/2 heisenberg chain
+spins = ["S=1" for i in range(n)] # spin 1 heisenberg chain
 
 def get(D):
     sc = spinchain.Spin_Chain(spins) # create the spin chain
@@ -24,7 +25,7 @@ def get(D):
 import matplotlib.pyplot as plt
 
 
-for d in np.linspace(0.,2.0,20):
+for d in np.linspace(-2.0,2.0,40):
     print(d)
     s = get(d)
     plt.scatter(s*0.+d,s,c="black")

@@ -16,3 +16,4 @@ __pycache__
 mpscpp3
 setup.py
 julia*
+.mpsfolder
