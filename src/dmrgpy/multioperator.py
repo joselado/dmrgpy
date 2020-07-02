@@ -170,7 +170,7 @@ def write_ampo(out,name):
     f.write(str(len(out))+"\n") # number of lines
     for o in out:
       n = (len(o)-2)//2 # number of terms
-      if n>90: raise # C++ code needs to be recompiled
+      if n>=200: raise # C++ code needs to be recompiled
       f.write(str((len(o)-2)//2)+"\n") # number of terms
       for io in o:
           f.write(str(io)+"  ")

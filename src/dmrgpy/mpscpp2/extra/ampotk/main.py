@@ -1,6 +1,6 @@
 
 
-n = 100 # maximum number of operators
+n = 200 # maximum number of operators
 
 f = open("ampotk.h","w")
 
