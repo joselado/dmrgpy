@@ -257,7 +257,9 @@ class Many_Body_Chain():
       """Return excitation energies"""
       if mode=="DMRG":
         return excited.get_excited_states(self,**kwargs) # return es and waves
-      else: return NotImplemented
+      elif mode=="ED": 
+          return self.get_ED_obj().get_excited_states(**kwargs) # ED
+      else: raise
   def get_gap(self,**kwargs):
     """Return the gap"""
     es = self.get_excited(n=2,**kwargs)

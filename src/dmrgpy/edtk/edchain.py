@@ -41,6 +41,12 @@ class EDchain():
         """Excited states"""
         h = self.get_hamiltonian()
         return algebra.lowest_eigenvalues(h,**kwargs)
+    def get_excited_states(self,**kwargs):
+        """Excited states"""
+        h = self.get_hamiltonian()
+        (es,ws) = algebra.lowest_states(h,**kwargs)
+        ws = [State(w,self) for w in ws] # transform to states
+        return (es,ws)
     def create_operator(self,a,i=None,name=None):
         """Create the different operators"""
         ns = self.localdim # local dimensions
@@ -69,6 +75,26 @@ class EDchain():
     def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
     def overlap(self,wf1,wf2): return np.dot(np.conjugate(wf1),wf2)
     def applyoperator(self,A,wf): return self.MO2matrix(A)@wf
+
+
+
+
+class State():
+    """This is a dummy class to contain states"""
+    def __init__(self,v,MBO):
+        self.v = v # store the vector
+        self.MBO = MBO # store the many-body object
+    def __rmul__(self,a):
+        """Multiply by something"""
+        if type(a)==multioperator.MultiOperator: # multioperator
+            A = self.MBO.MO2matrix(a)  # get the matrix
+            w = A@self.v # multiply
+            return State(w,self.MBO) # create a new object
+        else: raise # not implemented
+    def overlap(self,a):
+        if type(a)==State: # state object
+            return np.dot(np.conjugate(self.v),a.v)
+        else: raise # not implemented
 
 
 

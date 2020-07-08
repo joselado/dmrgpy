@@ -137,6 +137,25 @@ def lowest_eigenvalues(h,n=10,nmax=maxsize):
   return eig[0:n] # return eigenvalues
 
 
+def lowest_states(h,n=10,nmax=maxsize):
+  """Get a ground state"""
+  info = False
+  if h.shape[0]>nmax:
+    if info: print("Calling ARPACK")
+    eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+    eigvec = [v for (e,v) in sorted(eig.eigvec.T)]
+    eig = np.sort(eig)
+    return (eig,eigvec)
+  else:
+    if info: print("Full diagonalization")
+    ishermitian(h)
+    eig,vs = dlg.eigh(h.todense())
+  return eig[0:n],vs.T[0:n] 
+
+
+
+
+
 
 def ishermitian(m):
     d = m - np.conjugate(m.T)
@@ -175,4 +194,11 @@ def lowest_eigenvectors(h,n=10,nmax=maxsize):
 def expm(m):
     m = todense(m)
     return dlg.expm(m) # exponential matrix
+
+
+
+
+def ismatrix(m):
+    return type(m)==np.ndarray or issparse(m) or type(m)==np.matrix
+
 

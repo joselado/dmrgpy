@@ -21,17 +21,25 @@ import scipy.linalg as lg
 
 
 
-def get_effective_hamiltonian(self,mode="spin",n=4):
+def get_effective_hamiltonian(self,mode="DMRG",n=4,method="single",
+        tol=1e-3):
     """Return an effective Hamiltonian"""
-    (es,ws) = self.get_excited_states(n=n) # return the excited states
+    (es,ws) = self.get_excited_states(n=n,mode=mode) # return the excited states
     ops = dict() # different operators considered
-    op = get_projection_operators(self,mode=mode) # return the operators
+    op = get_projection_operators(self) # return the operators
+    opm = dict() 
+    if method=="single": # compute each operator
+      for key in op: opm[key] = get_representation(ws,op[key])
     ops[("Id")] = np.identity(len(es)) # identity
     # use just by quadratic operators
     for key1 in op:   # loop
       for key2 in op:  # loop
-          o = op[key1]*op[key2] # get the operator
-          m = get_representation(ws,o) # get the representation of this matrix
+          if method=="single":
+              m = opm[key1]@opm[key2] # get the operator
+          elif method=="full":
+              o = op[key1]*op[key2] # get the operator
+              m = get_representation(ws,o) # get the representation 
+          else: raise
 #          print((key1,key2))
 #          print(np.round(m,1))
           if acceptable_matrix(m,ops): # if the matrix can be accepted
@@ -42,18 +50,18 @@ def get_effective_hamiltonian(self,mode="spin",n=4):
     del coef[("Id")] # remove identity
 #    for key in coef:
 #        print(coef[key],key)
-    return dict2latex(coef) # return the latex form
+    return dict2latex(coef,tol=tol) # return the latex form
 
 
 
-def dict2latex(d):
+def dict2latex(d,tol=1e-3):
     """Transform the dictionary into a latex form"""
     cs = [d[key] for key in d] # coefficients
     cmax = np.round(np.max(np.abs(cs)),3) # maximum value
     out = "H = \n"+str(cmax)+" \[ \n" # output string
     for key in d: # loop
         c = np.round(d[key]/cmax,3) # round the number
-        if c==0: continue
+        if np.abs(c)<tol: continue
         out += str(c) + "  " # normalize
         for k in key: out += k + "  "
         out += " + \n" # new line
