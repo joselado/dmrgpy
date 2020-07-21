@@ -13,6 +13,7 @@ from . import funtk
 from . import vev
 from . import mpsalgebra
 from . import excited
+from . import effectivehamiltonian
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -96,6 +97,10 @@ class Many_Body_Chain():
       if restart: self.restart() # restar the calculation
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
+  def get_heff(self,**kwargs):
+      """Return effective Hamiltonian"""
+      return effectivehamiltonian.get_effective_hamiltonian_coefficients(self,
+              **kwargs)
   def bandwidth(self,h,**kwargs):
       """Compute the bandwidth of an Hermitian operator"""
       mbc = self.clone() # clone the object

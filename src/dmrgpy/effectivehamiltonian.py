@@ -19,10 +19,26 @@ import scipy.linalg as lg
 #    return h,b # return effective hamiltonian
 
 
+def get_effective_hamiltonian_coefficients(self,mode="DMRG",n=4,
+        tol=1e-3,operators=None):
+    """Return an effective Hamiltonian"""
+    if operators is None: return NotImplemented
+    (es,ws) = self.get_excited_states(n=n,mode=mode) # return the excited states
+    ops = dict() # different operators considered
+    opm = dict() # representation of the different operators considered
+    for i in range(len(operators)):  ops[i] = operators[i] # convert to dict
+    for key in ops: opm[key] = get_representation(ws,ops[key])
+    h = get_representation(ws,self.hamiltonian) # return the representation
+    # now fit the matrix with the other ones
+    opm[("Id")] = np.identity(len(es)) # identity
+    coef = fit_matrix(h,opm) # fit the matrix with that dictionary
+    del coef[("Id")] # remove identity
+    return [coef[key] for key in coef] # return list
 
 
-def get_effective_hamiltonian(self,mode="DMRG",n=4,method="single",
-        tol=1e-3):
+
+def get_effective_hamiltonian_couplings(self,mode="DMRG",n=4,method="single",
+        tol=1e-3,operators=None):
     """Return an effective Hamiltonian"""
     (es,ws) = self.get_excited_states(n=n,mode=mode) # return the excited states
     ops = dict() # different operators considered
@@ -40,16 +56,19 @@ def get_effective_hamiltonian(self,mode="DMRG",n=4,method="single",
               o = op[key1]*op[key2] # get the operator
               m = get_representation(ws,o) # get the representation 
           else: raise
-#          print((key1,key2))
-#          print(np.round(m,1))
           if acceptable_matrix(m,ops): # if the matrix can be accepted
               ops[(key1,key2)] = m # store this matrix
     h = get_representation(ws,self.hamiltonian) # return the representation
     # now fit the matrix with the other ones
     coef = fit_matrix(h,ops) # fit the matrix with that dictionary
     del coef[("Id")] # remove identity
-#    for key in coef:
-#        print(coef[key],key)
+    return coef
+
+
+
+def get_effective_hamiltonian(self,tol=1e-3,**kwargs):
+    """Compute the effective Hamiltonian and return its latex form"""
+    coef = get_effective_hamiltonian_couplings(self,**kwargs)
     return dict2latex(coef,tol=tol) # return the latex form
 
 
@@ -145,8 +164,8 @@ def fit_matrix(h,d,cutoff=1e-4):
           out[key] = x[ii]
           h0 = h0 + x[ii]*d[key]
         ii += 1 # increase counter
-    print(np.round(h,2),"Original Hamiltonian")
-    print(np.round(h0,2),"Computed Hamiltonian")
+#    print(np.round(h,2),"Original Hamiltonian")
+#    print(np.round(h0,2),"Computed Hamiltonian")
     return out # return the coefficients
 
 
