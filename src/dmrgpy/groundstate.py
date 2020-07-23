@@ -44,7 +44,7 @@ def gs_energy_many(self,n=20,**kwargs):
     print("Final energy",self.vev(self.hamiltonian).real)
     return emin
 
-def gs_energy_single(self,wf0=None,reconverge=None):
+def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy
     """
@@ -65,6 +65,23 @@ def gs_energy_single(self,wf0=None,reconverge=None):
     self.skip_dmrg_gs = True
     wf0 = mps.MPS(MBO=self,name="psi_GS.mps").copy() # set GS
     self.set_initial_wf(wf0) # set the initial wavefunction
+    if maxde is not None: # enforce a maximum fluctuation in the energy
+      e = self.vev(self.hamiltonian)  
+      e2 = self.vev(self.hamiltonian,npow=2) 
+      de = np.sqrt(abs(e2-e**2)) # fluctuation in the energy
+      de = de/self.ns # normalize by the number of sites
+      if de>maxde and maxdepth>0: # if a maximum energy fluctuation 
+          maxm,nsweeps = self.maxm,self.nsweeps
+          noise = self.noise
+          print("Energy fluctuation = ",de,maxm)
+          self.maxm = maxm*2
+          self.nsweeps = 2 # just two sweeps
+          self.noise = 0.0
+          gs_energy_single(self,maxde=maxde,reconverge=True,
+                  maxdepth=maxdepth-1) # execute again
+          self.maxm = maxm
+          self.nsweeps = nsweeps # restore
+          self.noise = noise
     return out # return energy
 
 def gs_energy(self,policy="single",**kwargs):

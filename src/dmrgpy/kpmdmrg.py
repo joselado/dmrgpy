@@ -20,14 +20,9 @@ def get_moments_dmrg(self,n=1000):
 
 def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
   """Get the moments with DMRG"""
-#  if type(name)==str: # string input
-#        namei,namej = operatornames.recognize(name)
-#        namei = self.get_operator(namei,i)
-#        namej = self.get_operator(namej,j)
-#        return get_moments_dynamical_correlator_dmrg(self,
-#                name=(namei,namej),delta=delta)
   # do some sanity checks
   if delta<0.0: raise 
+  if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
   if self.itensor_version!="julia": self.get_gs() # compute ground state
   # define the dictionary
   task = {      "dynamical_correlator": "true",
@@ -54,7 +49,12 @@ def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
   self.run() # perform the calculation
   m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
 #  return m[1]
-  return m[0]+1j*m[1]
+  mus = m[0]+1j*m[1]
+  from .algebra import kpm
+  if self.kpm_extrapolate: 
+      return kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor)
+  else: return mus
+
 
 
 
@@ -101,6 +101,7 @@ def get_dynamical_correlator(self,n=1000,
     self.e0 = e0 # add this quantity
     n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
     xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
+#    if self.kpm_extrapolate: kernel = None # no kernel
     ys = generate_profile(mus,xs,use_fortran=False,kernel="jackson") # generate the DOS
     xs /= scale # scale back the energies
     xs += (emin+emax)/2. -emin # shift the energies

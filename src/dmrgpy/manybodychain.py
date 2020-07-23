@@ -54,8 +54,8 @@ class Many_Body_Chain():
       self.maxm = 30 # bond dimension in wavefunctions
       self.nsweeps = 15 # number of sweeps
       self.noise = 1e-1 # noise for dmrg
-      self.kpmcutoff = 1e-8 # cutoff in KPM
-      self.cutoff = 1e-8 # cutoff in ground state
+      self.kpmcutoff = 1e-12 # cutoff in KPM
+      self.cutoff = 1e-12 # cutoff in ground state
       self.tevol_custom_exp = True # custom exponential function for Tevol
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
@@ -72,6 +72,8 @@ class Many_Body_Chain():
       self.fit_td = False # use fitting procedure in time evolution
       self.itensor_version = 2 # ITensor version
       self.has_ED_obj = False # ED object has been computed
+      self.kpm_extrapolate = False # use extrapolation
+      self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       os.system("mkdir -p "+self.path) # create folder for the calculations
   def to_folder(self):
       """Go to a certain folder"""

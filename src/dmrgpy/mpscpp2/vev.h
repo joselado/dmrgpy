@@ -11,10 +11,11 @@ static auto vev=[]() {
   if (npow==1) {c = overlapC(psi,A,psi); } // first power
   // some other power
   if (npow>1) {
-	  auto maxm = get_float_value("maxm") ;
+	  auto maxm = get_int_value("maxm") ;
+	  auto cutoff = get_float_value("cutoff") ;
 	  auto psi1 = psi ; // initialize
 	  for (int i=0;i<npow-1;i++) {
-		  psi1 = exactApplyMPO(psi1,A,{"Maxm",maxm,"Cutoff",1E-7});
+		  psi1 = exactApplyMPO(psi1,A,{"Maxm",maxm,"Cutoff",cutoff});
 	  };
 	  c = overlapC(psi,A,psi1) ; // compute the overlap
 	  };
