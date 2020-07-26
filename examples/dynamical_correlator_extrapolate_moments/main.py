@@ -5,9 +5,9 @@ import numpy as np
 from dmrgpy import spinchain
 
 
-n = 8
+n = 10
 # create a random spin chain
-spins = ["S=1" for i in range(n)] # spin 1/2 heisenberg chain
+spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
 
 # create first neighbor exchange

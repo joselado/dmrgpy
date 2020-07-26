@@ -62,15 +62,15 @@ class Fermionic_Chain(Many_Body_Chain):
               t = self.hoppings[key]
               m[t.i,t.j] = t.g
         return m
-    def get_excited(self,mode="DMRG",**kwargs):
-          """
-          Wrapper for static correlator
-          """
-          if mode=="DMRG": # using DMRG
-            return Many_Body_Chain.get_excited(self,**kwargs)
-          elif mode=="ED":
-            MBF = self.get_ED_obj() # get the object
-            return algebra.lowest_eigenvalues(MBF.h,**kwargs)
+#    def get_excited(self,mode="DMRG",**kwargs):
+#          """
+#          Wrapper for static correlator
+#          """
+#          if mode=="DMRG": # using DMRG
+#            return Many_Body_Chain.get_excited(self,**kwargs)
+#          elif mode=="ED":
+#            MBF = self.get_ED_obj() # get the object
+#            return algebra.lowest_eigenvalues(MBF.h,**kwargs)
     def get_correlator_free(self,pairs=[[]]):
           """Get the correlator for free fermions"""
           m = self.hamiltonian_free() # get the single body matrix
@@ -175,6 +175,25 @@ def get_gr(self,delta=0.002,es=np.linspace(-10.0,10.0,800),i=0,j=0):
 #    y = 1j*y
 #    y = 1j*yr
     return (es,y)
+
+
+
+class Majorana_Chain(Fermionic_Chain):
+    def __init__(self,n):
+        """ Rewrite the init method to take twice as many sites"""
+        nf = (n+1)//2 # number of conventional fermions
+        nf = max([2,nf]) # fix
+        super().__init__(nf) # initialize the Hamiltonian
+        # define the Majorana operators
+        G = [0 for i in range(nf*2)] # empty list
+        for jf in range(nf): # loop over fermions
+            G[2*jf] = (self.C[jf] + self.Cdag[jf])/np.sqrt(2)
+            G[2*jf+1] = 1j*(self.C[jf] - self.Cdag[jf])/np.sqrt(2)
+        self.G = [G[i] for i in range(n)] # sotre those operators
+        del self.C  # clean
+        del self.Cdag  # clean
+        del self.N # clean
+
 
 
 

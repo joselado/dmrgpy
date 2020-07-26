@@ -110,6 +110,11 @@ class Many_Body_Chain():
       mbc.set_hamiltonian(-h) ; e1 = mbc.gs_energy(**kwargs)
       mbc.clean() # remove
       return -e0 -e1
+  def lowest_eigenvalue(self,X,**kwargs):
+      """Given an operator X, return its smallest eigenvalue"""
+      mbc = self.clone() # clone the object
+      mbc.set_hamiltonian(X) 
+      return mbc.gs_energy(**kwargs)
   def to_origin(self): 
       if os.path.isfile(self.path+"/ERROR"): raise # something wrong
       os.chdir(self.inipath) # go to original folder

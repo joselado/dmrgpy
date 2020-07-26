@@ -2,6 +2,7 @@ from __future__ import print_function
 import numpy as np
 from . import multioperator
 from . import operatornames
+from .algebra import kpm
 
 def get_moments_dmrg(self,n=1000):
   """Get the moments with DMRG"""
@@ -115,15 +116,21 @@ def get_dynamical_correlator(self,n=1000,
 
 
 
-def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,
+def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,a=-0.9,b=0.9,
         delta=1e-1,kernel="jackson",xs=None,**kwargs):
     """
     Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
     """
-    if scale is None: scale = self.bandwidth(X)*1.1
     if X is None: raise
-    X = X/scale # renormalize the operator for KPM
-    num_p = int(3*scale/delta) # number of polynomial
+    # extrapolate
+    if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
+    if scale is not None: 
+        X = X/scale # renormalize the operator for KPM
+        shift = 0.0 # no additional shift
+    else: # no scale provided
+        X,scale,shift = scale_operator(self,X,a=a,b=b)
+    num_p = int(3*scale/delta) # number of polynomials
+    print(num_p)
     if wf is None: wf = self.get_gs() # no wavefunction provided
     # compute the wavefunctions
     if A is not None: wfa = self.applyoperator(A,wf)
@@ -145,17 +152,37 @@ def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,
     self.run() # perform the calculation
     m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
     mus = m[0]+1j*m[1]
+    # perform extrapolation if 
+    if self.kpm_extrapolate: 
+      mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor)
     # scale of the dos
     kpmscales = scale
     xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
     ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel) # generate the DOS
-    xs2 *= scale
-    ys2 /= scale
+    xs2 += shift # add the shift
+    xs2 *= scale # scale
+    ys2 /= scale # scale
     if xs is None: return xs2,ys2
     else:
       from scipy.interpolate import interp1d
       fr = interp1d(xs2, ys2.real,fill_value=0.0,bounds_error=False)
       fi = interp1d(xs2, ys2.imag,fill_value=0.0,bounds_error=False)
       return xs,fr(xs)+1j*fi(xs)
+
+
+def scale_operator(self,X,a=-0.9,b=0.9):
+    """Scale an operator so its spectra falls in the interval [a,b]"""
+    A = self.lowest_eigenvalue(X) # compute the lowest eigenvalue
+    B = -self.lowest_eigenvalue(-X) # compute the highest eigenvalue
+    ab = b - a  # width of the output
+    AB = B - A # width of the input
+    X = X - A # shift to zero
+    X = X/AB*ab # redefine width
+    X = X + a # shift to the right point
+    X = X.simplify() # simplify
+    scale = AB/ab # scaling of the operator
+    shift = (a*B - b*A)/(A-B) # required shift
+    return X,scale,shift # return the new operator
+
 
 

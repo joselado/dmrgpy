@@ -33,16 +33,4 @@ def get_distribution(self,**kwargs):
     """
     from .kpmdmrg import general_kpm
     return general_kpm(self,**kwargs)
-#    if scale is None: scale = self.bandwidth(X)*1.1
-#    X = X/scale # renormalize the operator for KPM
-#    num_p = int(3*scale/delta) # number of polynomial
-#    mus = get_moments_distribution(self,X=X,num_p=num_p)
-#    # scale of the dos
-#    kpmscales = scale
-#    n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
-#    xs2 = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
-#    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel="lorentz") # generate the DOS
-#    xs2 *= scale
-#    ys2 /= scale
-#    return xs2,ys2
 
