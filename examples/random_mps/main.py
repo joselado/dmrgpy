@@ -8,5 +8,6 @@ spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Chain(spins) # create the spin chain
 wf = sc.random_mps() # random wavefunction
 print(wf.overlap(wf))
+sc.test()
 
 

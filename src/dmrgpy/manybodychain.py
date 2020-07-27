@@ -187,7 +187,7 @@ class Many_Body_Chain():
       return mpsalgebra.operator_norm(self,op,**kwargs)
   def is_zero_operator(self,op,**kwargs):
       """Check if this is the zero operator"""
-      out = operator_norm(self,op,**kwargs)
+      out = self.operator_norm(op,**kwargs)
       return out<1e-4
   def exponential(self,h,wf,**kwargs):
       """Compute the overlap"""

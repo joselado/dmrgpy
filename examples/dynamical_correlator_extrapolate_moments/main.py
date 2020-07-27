@@ -26,18 +26,18 @@ sc.maxm = 20 # KPM maxm
 import time
 i = np.random.randint(n)
 j = np.random.randint(n)
-t1 = time.time()
 name = (sc.Sz[i],sc.Sz[j])
 es = np.linspace(-0.5,6,2000)
 delta = 1e-1
 sc.kpm_extrapolate = False
+(x1,y1) = sc.get_dynamical_correlator(name=name,es=es,delta=delta*2)
+t1 = time.time()
 (x2,y2) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
 t2 = time.time()
 print("Time without extrapolation",t2-t1)
 
 sc.kpm_extrapolate = True
-(x3,y3) = sc.get_dynamical_correlator(name=name,es=es,
-        delta=delta)
+(x3,y3) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
 t3 = time.time()
 print("Time with extrapolation",t3-t2)
 
@@ -50,6 +50,7 @@ import matplotlib
 matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
 fig = plt.figure()
 fig.subplots_adjust(0.2,0.2)
+plt.scatter(x1,y1.real,c="red",label="Reduced quality")
 plt.plot(x2,y2.real,c="blue",label="No extrapolation")
 plt.scatter(x3,y3.real,c="green",label="Extrapolation")
 plt.legend()
