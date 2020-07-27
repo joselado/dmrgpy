@@ -35,6 +35,7 @@ using namespace std;
 #include"dynamical_correlator_excited.h" // dynamical correlator with exited
 #include"vev.h" // VEV
 #include"applyoperator.h" // apply operator to a vector
+#include"get_random_mps.h" // get a random MPS
 
 
 int 
@@ -54,6 +55,7 @@ main()
 //    if (check_task("correlator")) get_correlator() ; // write correlators 
 //    if (check_task("gap")) get_gap(H,sites,sweeps); // calculate the gap 
     if (check_task("entropy")) get_entropy(); 
+    if (check_task("write_sites")) write_sites(); 
     if (check_task("excited")) {
       get_excited(); // compute states 
     } ;
@@ -75,6 +77,7 @@ main()
     if (check_task("vev"))  vev() ; // Vacuum expectation value
     if (check_task("applyoperator"))  applyoperator() ; 
     if (check_task("summps"))  get_summps() ; 
+    if (check_task("random_mps"))  get_random_mps() ; 
     if (check_task("distribution"))  get_moments_distribution() ; 
     if (check_task("general_kpm"))  general_kpm() ; 
 //    if (check_task("excited_vev"))  excited_vev() ; // VEV excited

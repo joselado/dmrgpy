@@ -84,5 +84,15 @@ def id_generator(size=20, chars=string.ascii_uppercase + string.digits):
 
 
 
-
+from . import taskdmrg
+def random_mps(self,normalize=True):
+    """Apply operator to a many body wavefunction"""
+    task = {"random_mps":"true",
+            }
+    self.task = task
+    self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
+    self.execute( lambda : self.run()) # run calculation
+    out = MPS(self,name="random.mps").copy() # copy
+    norm = np.sqrt(out.overlap(out))
+    return (1./norm)*out # return the eigenvector 
 

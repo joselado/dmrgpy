@@ -98,3 +98,16 @@ def applyoperator_dmrg(self,A,wf):
 
 
 
+def operator_norm(self,op,ntries=5,simplify=True):
+    """Given a certain operator, compute its norm"""
+    if simplify: op = op.simplify() # simplify the operator
+    out = [] # empty list
+    for i in range(ntries):
+        wf = self.random_mps() # random wavefunction
+        wf = op*wf # apply the operator
+        o = (wf.overlap(wf)).real
+        out.append(o)
+    return np.mean(out) # return the norm
+
+
+

@@ -14,5 +14,4 @@ def applyoperator(self,A,wf):
     self.execute( lambda : self.run()) # run calculation
     return mps.MPS(self,name="applyoperator_wf1.mps").copy() # copy
 
-
-
+random_mps = mps.random_mps

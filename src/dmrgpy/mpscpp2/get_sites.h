@@ -103,6 +103,12 @@ auto get_sites() { // function to get the sites
 }
 
 
+auto write_sites() { // function to get the sites
+    auto sites = get_sites(); // Get the different sites
+    writeToFile("sites.sites",sites); // write the sites
+}
+
+
 
 int site_type(int index) {
     static int called = 0; // define a variable to check the calling

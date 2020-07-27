@@ -14,6 +14,7 @@ from . import vev
 from . import mpsalgebra
 from . import excited
 from . import effectivehamiltonian
+from .writemps import write_sites
 
 #dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
@@ -75,6 +76,11 @@ class Many_Body_Chain():
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       os.system("mkdir -p "+self.path) # create folder for the calculations
+      # and initialize the sites
+      self.task = {"write_sites":"true"}
+      self.execute(lambda: write_sites(self)) # write the different sites
+      self.run() # run the calculation
+      self.sites_from_file = True
   def to_folder(self):
       """Go to a certain folder"""
 #      self.inipath = os.getcwd() # record the folder
@@ -176,6 +182,13 @@ class Many_Body_Chain():
   def overlap(self,wf1,wf2,**kwargs):
       """Compute the overlap"""
       return mpsalgebra.overlap(self,wf1,wf2,**kwargs)
+  def operator_norm(self,op,**kwargs):
+      """Estimate the norm of an operator"""
+      return mpsalgebra.operator_norm(self,op,**kwargs)
+  def is_zero_operator(self,op,**kwargs):
+      """Check if this is the zero operator"""
+      out = operator_norm(self,op,**kwargs)
+      return out<1e-4
   def exponential(self,h,wf,**kwargs):
       """Compute the overlap"""
       return mpsalgebra.exponential(self,h,wf,**kwargs)
@@ -350,6 +363,10 @@ class Many_Body_Chain():
       Return an estimate of the bandwidth
       """
       return 3*self.ns # estimated bandwidth
+  def random_mps(self):
+      """Generate a random MPS"""
+      from . import applyoperator
+      return applyoperator.random_mps(self)
   def get_operator(self,name,i=None):
       """Return a certain multioperator"""
       from . import multioperator
@@ -365,9 +382,7 @@ class Many_Body_Chain():
 from .writemps import write_hoppings
 from .writemps import write_hubbard
 from .writemps import write_fields
-from .writemps import write_sites
 from .writemps import write_exchange
-#from .writemps import write_sweeps
 from .writemps import write_pairing
 
 
