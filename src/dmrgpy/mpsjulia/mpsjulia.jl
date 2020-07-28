@@ -9,6 +9,9 @@ let
 	if get_bool("vev") # vacuum expectation value
 		get_vev()
 	end
+	if get_bool("write_sites") # vacuum expectation value
+		get_sites()
+	end
 	if get_bool("many_vev") # vacuum expectation value
 		get_many_vev()
 	end

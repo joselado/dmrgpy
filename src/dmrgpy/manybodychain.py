@@ -43,6 +43,8 @@ class Many_Body_Chain():
       self.pairing = 0
       self.hubbard = 0
       self.hopping = 0
+      self.resorder = False # reorder the indexes
+      self.resordered_indexes = None # reordered indexes
       self.fermionic = False
       self.sites_from_file = False
       self.excited_gram_schmidt = False # it does not seem very effective
@@ -76,7 +78,10 @@ class Many_Body_Chain():
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       os.system("mkdir -p "+self.path) # create folder for the calculations
+      self.initialize()
       # and initialize the sites
+  def initialize(self):
+      self.sites_from_file = False
       self.task = {"write_sites":"true"}
       self.execute(lambda: write_sites(self)) # write the different sites
       self.run() # run the calculation

@@ -2,6 +2,7 @@ using ITensors
 
 
 function get_sites()
+	# Something wrong when loading the sites
 	if get_bool("sites_from_file") return deserialize("sites.sites")
 	else 
 		sites = generate_sites()

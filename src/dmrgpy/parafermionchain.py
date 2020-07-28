@@ -42,8 +42,42 @@ class Parafermionic_Chain(Many_Body_Chain):
             return super().get_dynamical_correlator_MB(**kwargs)
         elif mode=="ED":
             return self.get_ED_obj().get_dynamical_correlator(**kwargs)
+    def test(self,**kwargs):
+        return test_commutation(self,**kwargs)
 
 
 
 
+
+
+
+
+def test_commutation(self):
+    """Perform a test of the commutation relations"""
+    Chi = self.Chi
+    Chid = self.Chid
+    Tau = self.Tau 
+    Taud = self.Taud
+    Psi = self.Psi
+    Psid = self.Psid
+    n = len(Chi) # number of sites
+    ntries = 3 # number of tries
+    omega = np.exp(1j*2*np.pi/self.Z)
+    for ii in range(ntries):
+        i = np.random.randint(n)
+        j = np.random.randint(n)
+        if i>=j: continue
+        d = Chi[i]*Chi[j] - omega*Chi[j]*Chi[i]
+        if not self.is_zero_operator(d):
+            print("Chi,Chi failed",i,j)
+            raise
+        d = Psi[i]*Psi[j] - omega*Psi[j]*Psi[i]
+        if not self.is_zero_operator(d):
+            print("Psi,Psi failed",i,j)
+            raise
+        d = Chi[i]*Psi[j] - omega*Psi[j]*Chi[i]
+        if not self.is_zero_operator(d):
+            print("Psi,Chi failed",i,j)
+            raise
+    print("Commutation test passed")
 

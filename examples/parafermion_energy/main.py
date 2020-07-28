@@ -17,6 +17,7 @@ for i in range(n):
       h = h + pc.Tau[i]*pc.Taud[j]*np.random.random()
 
 h = h +h.get_dagger() # Make the Hamiltonian Hermitian
+pc.test()
 pc.set_hamiltonian(h) # set the Hamiltonian
 print(pc.gs_energy(mode="DMRG"))
 print(pc.gs_energy(mode="ED"))
