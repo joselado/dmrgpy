@@ -51,3 +51,27 @@ def extrapolate_moments(mus,fac):
 #    mus2 = jackson_kernel(mus2) # use jackson kernel
 #    return mus2
 
+
+
+
+
+
+def deconvolution(es,gs,mode=None,delta0=1e-6,delta=None):
+    if mode is None: return es,gs
+    elif mode=="pm": # poor man deconvolution
+        selfh = es - 1j/gs +1j*delta0 # finite size selfenergy
+        self = es - 1j/gs - 1j*delta + 1j*delta0 # infinite selfenergy
+        return es,1j/(es-self+1j*delta0) # return the sharpened one
+    else: raise
+
+
+
+
+
+
+
+
+
+
+
+

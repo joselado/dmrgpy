@@ -246,7 +246,7 @@ for example
 from dmrgpy import spinchain
 spins = ["S=1/2" for i in range(30)] # spins in each site
 sc = spinchain.Spin_Chain(spins) # create spin chain object
-sc.itensor_version = "julia"
+sc.setup_julia()
 ```
 
 and all the subsequent computations will be performed with Julia

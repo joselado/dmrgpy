@@ -7,8 +7,7 @@ from dmrgpy import spinchain
 def get(version,n=30):
   spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
   sc = spinchain.Spin_Chain(spins) # create the spin chain
-  sc.itensor_version = version
-  sc.initialize()
+  if version=="julia": sc.setup_julia() # setup the Julia mode
   h = 0
   for i in range(n-1):
       h = h +sc.Sx[i]*sc.Sx[i+1]

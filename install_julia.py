@@ -37,6 +37,7 @@ else:
 os.system(julia+" "+mpath+"/install/juliainstall.jl") # julia installation
 # install python dependences
 os.system("pip install julia")
+os.system("pip install pmdarima")
 
 
 

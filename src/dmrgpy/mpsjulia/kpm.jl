@@ -50,9 +50,9 @@ end
 function get_moments(A,B,H,wf,n)
 	"""Compute the moments using the KPM recursion"""
 	maxdim = get_int("maxm")
-	vi = contract(A,wf,maxdim=maxdim) # first vector
-	vj = contract(B,wf,maxdim=maxdim) # second vector
-	a = contract(H,vi,maxdim=maxdim) # first vector
+	vi = contract(A,wf;maxdim=maxdim) # first vector
+	vj = contract(B,wf;maxdim=maxdim) # second vector
+	a = contract(H,vi;maxdim=maxdim) # first vector
 	am = 1.0*vi # define
 	bk = inner(vj,vi) # scalar product
 	bk1 = inner(vj,a) # scalar product
@@ -69,8 +69,8 @@ end
 
 function kpm_iterate(am,a,H,vj,maxdim)
 	  """Perform a single iteration"""
-	  ap = contract(H,a,maxdim=maxdim) # first vector
-	  ap = add(2*ap,-1*am,maxdim=maxdim) # redefine the vector
+	  ap = contract(H,a;maxdim=maxdim) # first vector
+	  ap = add(2*ap,-1*am;maxdim=maxdim) # redefine the vector
 	  bk = inner(vj,ap) # scalar product
 #	  truncate!(a,maxdim=maxdim) 
 #	  truncate!(am,maxdim=maxdim) 
@@ -85,7 +85,7 @@ function general_kpm()
 	vi = load_mps("wfa.mps")
 	vj = load_mps("wfb.mps")
 	H = MPO(read_operator("kpm_operator.in"),sites)
-        a = contract(H,vi,maxdim=maxdim) # first vector
+        a = contract(H,vi;maxdim=maxdim) # first vector
         am = 1.0*vi # define
         bk = inner(vj,vi) # scalar product
         bk1 = inner(vj,a) # scalar product

@@ -86,6 +86,14 @@ class Many_Body_Chain():
       self.execute(lambda: write_sites(self)) # write the different sites
       self.run() # run the calculation
       self.sites_from_file = True
+  def setup_julia(self):
+      """Setup the Julia mode"""
+      self.itensor_version = "julia"
+      self.initialize()
+  def setup_cpp(self):
+      """Setup the Julia mode"""
+      self.itensor_version = "2"
+      self.initialize()
   def to_folder(self):
       """Go to a certain folder"""
 #      self.inipath = os.getcwd() # record the folder

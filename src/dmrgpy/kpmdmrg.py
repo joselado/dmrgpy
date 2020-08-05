@@ -83,14 +83,14 @@ def restrict_interval(x,y,window):
 
 
 def get_dynamical_correlator(self,n=1000,
-             name=None,
-             es=np.linspace(-1.,10,500),
+             name=None,delta=1e-1,kernel="jackson",
+             es=np.linspace(-1.,10,500),deconvolve=None,
              **kwargs):
     """
     Compute a dynamical correlator using the KPM-DMRG method
     """
 # get the moments
-    mus = get_moments_dynamical_correlator_dmrg(self,
+    mus = get_moments_dynamical_correlator_dmrg(self,delta=delta,
             name=name,**kwargs) 
     # scale of the dos
     kpmscales = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
@@ -103,14 +103,18 @@ def get_dynamical_correlator(self,n=1000,
     n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
     xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
 #    if self.kpm_extrapolate: kernel = None # no kernel
-    ys = generate_profile(mus,xs,use_fortran=False,kernel="jackson") # generate the DOS
+    ys = generate_profile(mus,xs,use_fortran=False,kernel=kernel) # generate the DOS
     xs /= scale # scale back the energies
     xs += (emin+emax)/2. -emin # shift the energies
     ys *= scale # renormalize the y values
     from scipy.interpolate import interp1d
     fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-    return (es,fr(es)+1j*fi(es))
+    (es,z) = (es,fr(es)+1j*fi(es)) # interpolate
+    return (es,z)
+#    from .algebra import kpm
+#    (es,z) = kpm.deconvolution(es,z,mode=deconvolve,delta=delta)
+#    return es,z
 
 
 

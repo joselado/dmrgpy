@@ -27,6 +27,9 @@ os.system("rm -f "+p) # remove the symbolic link
 os.system("ln -s "+mpath+"/src/dmrgpy  "+p) # remove the symbolic link
 
 
+# install two required python libraries
+#os.system("pip install julia")
+os.system("pip install pmdarima")
 
 
 

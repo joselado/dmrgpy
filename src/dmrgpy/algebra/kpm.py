@@ -495,4 +495,4 @@ def edge_dos(intra0,inter0,scale=4.,w=20,npol=300,ne=500,bulk=False,
   else: return (xs,ds/w,dsb/w)
 
 
-from .kpmextrapolate import extrapolate_moments
+from .kpmextrapolate import extrapolate_moments,deconvolution
