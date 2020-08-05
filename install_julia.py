@@ -14,7 +14,7 @@ try:
            stderr=subprocess.STDOUT).communicate()
 except: out = ""
 # check if JUlia has the correct version
-hasjulia = "julia version 1.4" in str(out)
+hasjulia = "julia version 1.5" in str(out)
 #print(hasjulia) ; exit()
 
 if not hasjulia: # if the correct Julia version is not present
@@ -22,10 +22,11 @@ if not hasjulia: # if the correct Julia version is not present
     os.system("mkdir "+mpath+"/src/julia") # create a subfodler for julia
     os.chdir(mpath+"/src/julia") # go to the subfolder
 # download julia
-    os.system("wget https://julialang-s3.julialang.org/bin/linux/x64/1.4/julia-1.4.2-linux-x86_64.tar.gz")
-    os.system("tar -xvf julia-1.4.2-linux-x86_64.tar.gz") # untar the file
-    os.system("rm julia-1.4.2-linux-x86_64.tar.gz") # rm the file
-    julia = mpath+"/src/julia/julia-1.4.2/bin/julia" # path for julia
+    juliafile = "julia-1.5.0-linux-x86_64.tar.gz" # julia file
+    os.system("wget https://julialang-s3.julialang.org/bin/linux/x64/1.5/"+juliafile)
+    os.system("tar -xvf "+juliafile) # untar the file
+    os.system("rm "+juliafile) # rm the file
+    julia = mpath+"/src/julia/julia-1.5.0/bin/julia" # path for julia
     os.chdir(mpath) # go back
 
 else: 
@@ -34,7 +35,9 @@ else:
 
 # install Itensor julia
 
-os.system(julia+" "+mpath+"/install/juliainstall.jl") # julia installation
+import src.dmrgpy.juliarun as juliarun
+juliarun.install() # install Julia dependences
+
 # install python dependences
 os.system("pip install julia")
 os.system("pip install pmdarima")

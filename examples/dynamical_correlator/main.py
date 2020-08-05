@@ -11,8 +11,7 @@ spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
 # create first neighbor exchange
 sc = spinchain.Spin_Chain(spins) # create the spin chain
-#sc.itensor_version = "julia"
-#sc.initialize()
+#sc.setup_julia()
 h = 0
 for i in range(n-1):
     h = h + sc.Sx[i]*sc.Sx[i+1]
