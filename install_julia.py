@@ -33,16 +33,15 @@ else:
     julia = "julia"
     print("Correct Julia version found in path")
 
-# install Itensor julia
-
-import src.dmrgpy.juliarun as juliarun
-juliarun.install() # install Julia dependences
 
 # install python dependences
 os.system("pip install julia")
 os.system("pip install pmdarima")
 
 
+# install Itensor julia
+import src.dmrgpy.juliarun as juliarun
+juliarun.install() # install Julia dependences
 
 
 

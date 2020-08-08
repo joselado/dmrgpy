@@ -4,14 +4,6 @@ import subprocess
 
 dmrgpath = os.path.dirname(os.path.realpath(__file__))
 
-#try:
-#    out,err = subprocess.Popen(['julia', '--version'],
-#           stdout=subprocess.PIPE,
-#           stderr=subprocess.STDOUT).communicate()
-#except: 
-#    print("Julia is not present")
-#    exit()
-#    out = ""
 
 
 
@@ -23,11 +15,13 @@ if not os.path.isfile(sysimage):
     print("No ITensors system image found, this may take some time")
     sysimage = None
 
-
-from julia.api import Julia
-jlsession = Julia(compiled_modules=False,
-        sysimage=sysimage) # start the Julia session
-jlsession.eval("using Suppressor") # suppress output
+try: # create the executable
+    from julia.api import Julia
+    jlsession = Julia(compiled_modules=False,
+            sysimage=sysimage) # start the Julia session
+    jlsession.eval("using Suppressor") # suppress output
+except:
+    print("Julia cannot be executed")
 
 
 def run(self):
@@ -40,7 +34,11 @@ def run(self):
 
 def install():
     """Install Julia and ITensor"""
-    jlsession.eval("import Pkg; Pkg.add(\"ITensors\")") # install ITensor
-    jlsession.eval("import Pkg; Pkg.add(\"PyCall\")") # install PyCall
-    jlsession.eval("using ITensors; ITensors.compile()") # compile ITensor
+    julia = "julia" # julia command
+    os.system(julia+" --eval "+"\"import Pkg; Pkg.add(\\\"ITensors\\\")\"")
+    os.system(julia+" --eval "+"\"import Pkg; Pkg.add(\\\"PyCall\\\")\"")
+    os.system(julia+"--eval  \"using ITensors; ITensors.compile()\"") 
+#    jlsession.eval("import Pkg; Pkg.add(\"ITensors\")") # install ITensor
+#    jlsession.eval("import Pkg; Pkg.add(\"PyCall\")") # install PyCall
+#    jlsession.eval("using ITensors; ITensors.compile()") # compile ITensor
 
