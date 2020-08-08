@@ -37,7 +37,7 @@ def install():
     julia = "julia" # julia command
     os.system(julia+" --eval "+"\"import Pkg; Pkg.add(\\\"ITensors\\\")\"")
     os.system(julia+" --eval "+"\"import Pkg; Pkg.add(\\\"PyCall\\\")\"")
-    os.system(julia+"--eval  \"using ITensors; ITensors.compile()\"") 
+    os.system(julia+" --eval  \"using ITensors; ITensors.compile()\"") 
 #    jlsession.eval("import Pkg; Pkg.add(\"ITensors\")") # install ITensor
 #    jlsession.eval("import Pkg; Pkg.add(\"PyCall\")") # install PyCall
 #    jlsession.eval("using ITensors; ITensors.compile()") # compile ITensor
