@@ -282,6 +282,17 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
 
 
 
+class Spinon_Chain(Spinful_Fermionic_Chain):
+    """Class for spinon chains"""
+    def set_hamiltonian(self,h,**kwargs):
+        """Redefine the write Hamiltonian method"""
+        U = 6. # remove the single/double occupied states
+        for i in range(len(self.Sx)): 
+            h = h + U*(self.Nup[i]-.5)*(self.Ndn[i]-.5)
+        super().set_hamiltonian(h,**kwargs) # set the modified Hamiltonian
+
+
+
 
 
 

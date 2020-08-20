@@ -12,13 +12,8 @@ def multi_vev(self,MO,excited=False,n=4,scale=10.0,npow=1):
     if MO.name!="vev_multioperator": raise
     self.get_gs()
     taskd = MO.get_dict() # get the dictionary
-    if excited: 
-        self.task["excited_vev"] = "true" # do a VEV
-        self.task["nexcited"] = n # do a VEV
-        self.task["scale_lagrange_excited"] = scale
-    else: 
-        self.task["vev"] = "true" # do a VEV
-        self.task["pow_vev"] = int(npow) # power
+    self.task["vev"] = "true" # do a VEV
+    self.task["pow_vev"] = int(npow) # power
     self.write_task() # write the tasks in a file
     self.write_hamiltonian() # write the Hamiltonian to a file
     self.execute(lambda: MO.write()) # write multioperator

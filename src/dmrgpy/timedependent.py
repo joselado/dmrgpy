@@ -96,7 +96,7 @@ def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
 
 
 def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
-        nt=None,factor=1,delta=1e-1,**kwargs):
+        nt=None,factor=1,delta=5e-2,**kwargs):
     """Compute a certain dynamical correlator"""
     self.get_gs() # get the ground state
     if nt is None: nt=int(100/delta/dt)

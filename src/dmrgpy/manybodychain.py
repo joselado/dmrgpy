@@ -254,13 +254,13 @@ class Many_Body_Chain():
           from . import juliarun
           juliarun.run(self)
           return
-     #     mpscpp = "julia "+dmrgpath+"/mpsjulia/mpsjulia.jl" 
       else: raise
       if not os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
           print("C++ backend not found, trying tu run with Julia version")
-          self.itensor_version = "julia" # turn to Julia
+          self.setup_julia() # turn to Julia
           return self.run() # rerun with julia
-      self.execute(lambda : os.system(mpscpp+" > status.txt"))
+      from . import cpprun
+      cpprun.run(self) # run the C++ version
   def get_entropy(self,wf,mode="DMRG",**kwargs):
       """Return the entanglement entropy"""
       if mode=="DMRG":
@@ -314,6 +314,7 @@ class Many_Body_Chain():
       self.set_initial_wf(wf,reconverge=True)
   def set_initial_wf(self,wf,reconverge=False):
       """Use a certain wavefunction as initial guess"""
+      self.computed_gs = False
       if wf is None:
         self.gs_from_file = False # use a wavefunction from a file
       else:
@@ -323,6 +324,7 @@ class Many_Body_Chain():
         else: self.skip_dmrg_gs = True # reconverge the calculation
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
+      if self.computed_gs: return self.wf0
       if mode=="DMRG":
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
         else: self.gs_energy(**kwargs) # perform a ground state calculation

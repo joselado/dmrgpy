@@ -6,7 +6,6 @@ from dmrgpy import fermionchain
 
 nf = 4 # number of different spinless fermionic orbitals
 fc = fermionchain.Fermionic_Chain(nf) # create the object
-fc.itensor_version = "julia"
 C = fc.C # annihilation
 Cdag = fc.Cdag # creation
 
