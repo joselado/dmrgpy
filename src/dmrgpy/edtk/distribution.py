@@ -2,12 +2,14 @@ import scipy.sparse.linalg as slg
 from ..algebra import kpm
 import numpy as np
 from scipy.interpolate import interp1d
+from .edchain import State
 
-def get_distribution(self,X=None,**kwargs):
+def get_distribution(self,X=None,wf=None,**kwargs):
     """Get a certain distribution"""
-    wf0 = self.get_gs() # ground state
+    if wf is None: wf = self.get_gs() # ground state
+    elif type(wf)==State: wf = wf.v
     X = self.get_operator(X)
-    return distribution_kpm(wf0,X=X,**kwargs)
+    return distribution_kpm(wf,X=X,**kwargs)
 
 
 def distribution_kpm(wf0,X=None,scale=10.0,
