@@ -69,7 +69,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,
             }
     self.task = task # override tasks
     if wf is None: wf = self.wf0 # get ground state
-    wf.copy(name="psi_evolve_and_measure.mps") # copy wavefunction
+    wf.write(name="psi_evolve_and_measure.mps") # copy wavefunction
     self.execute(lambda: operator.write(name="time_evolution_multioperator.in"))
     self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
     self.execute( lambda : self.run()) # run calculation
