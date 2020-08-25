@@ -1,4 +1,5 @@
 import numbers
+import types
 import collections
 import numpy as np
 
@@ -8,7 +9,7 @@ import numpy as np
 
 def isnumber(x):
 #    print(type(x),isinstance(x, numbers.Number))
-    return isinstance(x, numbers.Number)
+    return isinstance(x, numbers.Number) or np.iscomplex(x)
 
 
 ampo_counter = 0

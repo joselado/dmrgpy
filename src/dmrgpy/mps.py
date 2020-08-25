@@ -71,6 +71,10 @@ class MPS():
                 return A*multioperator.identity()*self
             else: raise
         else: raise
+    def __mul__(self,x):
+        if multioperator.isnumber(x):
+            return x*multioperator.identity()*self
+        else: raise
 
 
 

@@ -378,10 +378,13 @@ class Many_Body_Chain():
       Return an estimate of the bandwidth
       """
       return 3*self.ns # estimated bandwidth
-  def random_mps(self):
+  def random_mps(self,mode="DMRG"):
       """Generate a random MPS"""
-      from . import applyoperator
-      return applyoperator.random_mps(self)
+      if mode=="DMRG":
+          from . import applyoperator
+          return applyoperator.random_mps(self)
+      elif mode=="ED":
+          return self.get_ED_obj().random_state()
   def get_operator(self,name,i=None):
       """Return a certain multioperator"""
       from . import multioperator

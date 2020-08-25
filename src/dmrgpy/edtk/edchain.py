@@ -75,6 +75,11 @@ class EDchain():
     def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
     def overlap(self,wf1,wf2): return np.dot(np.conjugate(wf1),wf2)
     def applyoperator(self,A,wf): return self.MO2matrix(A)@wf
+    def random_state(self):
+        """Return a random state"""
+        n = self.get_hamiltonian().shape[0] # convert to matrix
+        v = np.random.random(n)-.5 + 1j*(np.random.random(n)-.5)
+        return State(v,self) # return the state
 
 
 
@@ -90,11 +95,34 @@ class State():
             A = self.MBO.MO2matrix(a)  # get the matrix
             w = A@self.v # multiply
             return State(w,self.MBO) # create a new object
+        elif multioperator.isnumber(a):
+            w = a*self.v # multiply
+            return State(w,self.MBO) # create a new object
         else: raise # not implemented
+    def __add__(self,a):
+        if type(a)==State: return State(self.v + a.v,self.MBO)
+        else: raise
+    def __mul__(self,x):
+        if multioperator.isnumber(x): 
+            return State(x*self.v,self.MBO)
+        else: raise
+    def __truediv__(self,a):
+        if multioperator.isnumber(a): # number
+          return (1./a)*self
+        else: raise
+    def __sub__(self,a):
+        return self + (-1)*a
+    def __neg__(self):
+        return (-1)*self
     def overlap(self,a):
         if type(a)==State: # state object
             return np.dot(np.conjugate(self.v),a.v)
         else: raise # not implemented
+    def copy(self):
+        from copy import deepcopy
+        return deepcopy(self)
+    def dot(self,a):
+        return np.sum(np.conjugate(self.v)*a.v)
 
 
 

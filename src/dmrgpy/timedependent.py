@@ -54,8 +54,9 @@ def evolve_and_measure(self,mode="DMRG",**kwargs):
 
 
 
-def evolve_and_measure_dmrg(self,operator=None,nt=1000,
+def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         dt=1e-2,wf=None,**kwargs):
+    if h is None: h = self.hamiltonian # Hamiltonian
     if self.fit_td: fittd = "true"
     else: fittd = "false"
     if self.tevol_custom_exp: tevol_custom_exp = "true"
@@ -70,6 +71,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,
     self.task = task # override tasks
     if wf is None: wf = self.wf0 # get ground state
     wf.write(name="psi_evolve_and_measure.mps") # copy wavefunction
+    self.execute(lambda: h.write(name="hamiltonian.in"))
     self.execute(lambda: operator.write(name="time_evolution_multioperator.in"))
     self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
     self.execute( lambda : self.run()) # run calculation
@@ -80,10 +82,11 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,
 
 def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
     """Apply an operator, evolve and measure"""
+    if A is None: A = multioperator.identity()
+    if B is None: B = multioperator.identity()
     if mode=="DMRG":
         if wf is None: wf = self.get_gs() # get ground state
-        from .applyoperator import applyoperator
-        wfA = applyoperator(self,A,wf) # apply wavefunction 
+        wfA = A*wf # apply the operator
         return evolve_and_measure_dmrg(self,wf=wfA,operator=B,**kwargs)
     elif mode=="ED":
         edobj = self.get_ED_obj() # get the ED object
@@ -125,6 +128,20 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
 
 
 
+
+def generic_evolution(H,wf,normalize=True,dt=1e-2,nt=100,A=None):
+    """Perform a time evolution and project onto itself,
+    assuming U = e^tH """
+    wf0 = wf.copy() # copy wavefunction
+    wf1 = wf.copy() # copy wavefunction
+    out = []
+    for i in range(int(nt)): # loop
+        wf1 = wf1 + dt*H*wf1
+        if normalize:  wf1 = wf1*(1./np.sqrt(wf1.dot(wf1)))
+  #      out.append(wf0.dot(wf1)) # compute
+        out.append(wf1.dot(A*wf1)) # compute
+        print(i)
+    return np.array(range(int(nt)))*dt,np.array(out) # retunr result
 
 
 
