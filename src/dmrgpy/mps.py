@@ -19,6 +19,10 @@ class MPS():
 #        self.factor = 1.0 # factor of the mps
         self.mps = open(self.path+"/"+name,"rb").read() # read the MPS
         self.sites = open(self.path+"/sites.sites","rb").read() # read sites
+    def set_MBO(self,MBO):
+        """Set the MBO"""
+        self.path = MBO.path # path to the many body object folder
+        self.MBO = MBO
     def dot(self,x):
         if self.MBO is not None: return self.MBO.overlap(self,x)
         else: raise
@@ -88,15 +92,14 @@ def id_generator(size=20, chars=string.ascii_uppercase + string.digits):
 
 
 
-from . import taskdmrg
-def random_mps(self,normalize=True):
-    """Apply operator to a many body wavefunction"""
-    task = {"random_mps":"true",
-            }
-    self.task = task
-    self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
-    self.execute( lambda : self.run()) # run calculation
-    out = MPS(self,name="random.mps").copy() # copy
-    norm = np.sqrt(out.overlap(out))
-    return (1./norm)*out # return the eigenvector 
+from .randommps import random_mps
+from .randommps import random_product_state
+
+
+
+
+
+
+
+
 

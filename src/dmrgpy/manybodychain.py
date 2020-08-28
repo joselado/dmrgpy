@@ -381,8 +381,8 @@ class Many_Body_Chain():
   def random_mps(self,mode="DMRG"):
       """Generate a random MPS"""
       if mode=="DMRG":
-          from . import applyoperator
-          return applyoperator.random_mps(self)
+          from . import mps
+          return mps.random_mps(self)
       elif mode=="ED":
           return self.get_ED_obj().random_state()
   def get_operator(self,name,i=None):
