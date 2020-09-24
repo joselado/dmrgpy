@@ -133,7 +133,9 @@ def write_sites(self):
   for si in self.sites:
     if si<7: fo.write(str(si)+"\n")
     elif si==1: print("Warning, some sites are not spin operators")
-    else: raise
+    else: 
+        print("Not with DMRG yet")
+   #     raise
   fo.close()
 
 

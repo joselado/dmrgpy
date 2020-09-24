@@ -22,7 +22,7 @@ class MPS():
     def set_MBO(self,MBO):
         """Set the MBO"""
         self.path = MBO.path # path to the many body object folder
-        self.MBO = MBO
+        self.MBO = MBO # set the object
     def dot(self,x):
         if self.MBO is not None: return self.MBO.overlap(self,x)
         else: raise

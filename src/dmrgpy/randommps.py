@@ -23,13 +23,13 @@ def random_mps_dummy(self,normalize=True):
 def random_product_state(self):
     """Generate a random product state, this ensures a correct
     statistical distribution of the generated states"""
-    from .fermionchain import Fermionic_Chain
+    from .fermionchain import Fermionic_Chain, Spinful_Fermionic_Chain
     from .spinchain import Spin_Chain
     mbc = self.clone() # clone the object
     mbc.maxm = 5
     mbc.nsweeps = 10
     h = 0 
-    if type(mbc)==Fermionic_Chain: # fermionic chain
+    if type(mbc)==Fermionic_Chain or type(mbc)==Spinful_Fermionic_Chain: 
         for i in range(len(mbc.N)): # loop over sites
             if np.random.randint(2)==0: h = h + mbc.N[i] # empty
             else: h = h - mbc.N[i] # full
@@ -39,8 +39,8 @@ def random_product_state(self):
             h = h + m[0]*mbc.Sx[i] + m[1]*mbc.Sy[i] + m[2]*mbc.Sz[i]  # empty
     else: raise # not implemented
     mbc.set_hamiltonian(h) # set the Hamiltonian
-    wf = mbc.get_gs()
-    wf.set_MBO(self)
+    wf = mbc.get_gs() # get the ground state
+    wf.set_MBO(self) # set the correct MBO
     return wf
 
 

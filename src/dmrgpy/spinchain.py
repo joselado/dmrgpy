@@ -30,6 +30,7 @@ label2site["S=2"] = 5
 label2site[5] = 5
 label2site["5/2"] = 6
 label2site["S=5/2"] = 6
+label2site["S=3"] = 7
 label2site[6] = 6
 
 

@@ -6,6 +6,7 @@ from .algebra import algebra
 from .fermionchaintk import staticcorrelator
 from .fermionchaintk import hamiltonian
 from . import funtk
+from . import gap
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
@@ -18,6 +19,9 @@ class Fermionic_Chain(Many_Body_Chain):
         Many_Body_Chain.__init__(self,[0 for i in range(n)])
         self.fermionic = True
         self.use_ampo_hamiltonian = True # use ampo
+    def get_charge_gap(self,**kwargs):
+        """Return the charge gap"""
+        return gap.sector_gap(self,sum(self.N),**kwargs)
     def set_hoppings(self,fun):
         """Add the spin independent hoppings"""
         self.set_hoppings_MB(fun)

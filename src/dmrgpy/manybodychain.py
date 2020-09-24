@@ -99,6 +99,7 @@ class Many_Body_Chain():
 #      self.inipath = os.getcwd() # record the folder
       os.chdir(self.path) # go to calculation folder
   def copy(self):
+      return self.clone() # clone and create a new one
       from copy import deepcopy
       return deepcopy(self)
   def clone(self):
