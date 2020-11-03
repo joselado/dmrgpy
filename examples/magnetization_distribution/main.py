@@ -4,8 +4,8 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 
-n = 40 # number of sites in your chain
-spins = [2 for i in range(n)] # create the sites
+n = 20 # number of sites in your chain
+spins = ["S=1/2" for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
 #sc.itensor_version = "julia"
 
@@ -18,7 +18,7 @@ sc.set_hamiltonian(sum(sc.Sz)) ; wf = sc.get_gs()
 sc.set_hamiltonian(h) # and initialize the Hamiltonian
 sc.get_gs(wf0=wf)
 # setup some parameters
-sc.maxm = 60
+sc.maxm = 20
 sc.kpmmaxm = sc.maxm
 
 

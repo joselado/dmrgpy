@@ -34,3 +34,12 @@ def get_distribution(self,**kwargs):
     from .kpmdmrg import general_kpm
     return general_kpm(self,**kwargs)
 
+
+
+def get_distribution_moments(self,**kwargs):
+    """
+    Compute a dynamical correlator using the KPM-DMRG method
+    """
+    from .kpmdmrg import general_kpm_moments
+    return general_kpm_moments(self,**kwargs)
+

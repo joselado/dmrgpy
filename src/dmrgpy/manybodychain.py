@@ -285,6 +285,13 @@ class Many_Body_Chain():
       elif mode=="ED": 
           return self.get_ED_obj().get_distribution(**kwargs)
       else: raise
+  def get_distribution_moments(self,mode="DMRG",**kwargs):
+      if mode=="DMRG":
+          from . import distribution
+          return distribution.get_distribution_moments(self,**kwargs)
+      elif mode=="ED":
+          raise
+      else: raise
   def get_excited(self,mode="DMRG",**kwargs):
       """Return excitation energies"""
       if mode=="DMRG":

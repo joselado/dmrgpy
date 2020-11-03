@@ -496,3 +496,21 @@ def edge_dos(intra0,inter0,scale=4.,w=20,npol=300,ne=500,bulk=False,
 
 
 from .kpmextrapolate import extrapolate_moments,deconvolution
+
+
+
+def reconstruct_chebyshev(mus,shift=0.,scale=1.0,
+        x=np.linspace(-1.,1.,2000),kernel="jackson"):
+    num_p = len(mus)
+    xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
+    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel) # generate the DOS
+    xs2 += shift # add the shift
+    xs2 *= scale # scale
+    ys2 /= scale # scale
+    if x is None: return xs2,ys2
+    else:
+      from scipy.interpolate import interp1d
+      fr = interp1d(xs2, ys2.real,fill_value=0.0,bounds_error=False)
+      fi = interp1d(xs2, ys2.imag,fill_value=0.0,bounds_error=False)
+      return x,fr(x)+1j*fi(x)
+

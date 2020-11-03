@@ -120,7 +120,8 @@ def get_dynamical_correlator(self,n=1000,
 
 
 
-def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,a=-0.9,b=0.9,
+def general_kpm_moments(self,X=None,A=None,B=None,
+        scale=None,wf=None,a=-0.8,b=0.8,
         delta=1e-1,kernel="jackson",xs=None,**kwargs):
     """
     Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
@@ -159,8 +160,16 @@ def general_kpm(self,X=None,A=None,B=None,scale=None,wf=None,a=-0.9,b=0.9,
     # perform extrapolation if 
     if self.kpm_extrapolate: 
       mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor)
-    # scale of the dos
+    return mus,shift,scale
+
+def general_kpm(self,kernel="jackson",xs=None,**kwargs):
+    """
+    Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
+    """
+    mus,shift,scale = general_kpm_moments(self,**kwargs)
+    # scale of the distribution
     kpmscales = scale
+    num_p = len(mus)
     xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
     ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel) # generate the DOS
     xs2 += shift # add the shift
