@@ -239,8 +239,7 @@ The library uses ITensor in the background. Currently dmrgpy allows to
 choose between
 ITensor2 (C++), or ITensors (Julia). The default version executed is
 the the C++ v2 version, if you want to instead use the Julia version
-write right after creating the "Chain" object .itensor_version = "julia",
-for example
+execute the method ".setup_julia()", for example
 
 ```python
 from dmrgpy import spinchain
