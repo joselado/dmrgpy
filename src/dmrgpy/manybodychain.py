@@ -268,6 +268,9 @@ class Many_Body_Chain():
           from . import entropy
           return entropy.compute_entropy(self,wf,**kwargs)
       else: return NotImplemented
+  def get_correlation_matrix(self,**kwargs):
+      from . import entanglement
+      return entanglement.get_correlation_matrix(self,**kwargs)
   def get_dynamical_correlator_MB(self,**kwargs):
       return dynamics.get_dynamical_correlator(self,**kwargs)
   def get_dynamical_correlator(self,mode="DMRG",**kwargs):
@@ -332,6 +335,7 @@ class Many_Body_Chain():
         else: self.skip_dmrg_gs = True # reconverge the calculation
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
+      print(self.computed_gs)
       if self.computed_gs: return self.wf0
       if mode=="DMRG":
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state

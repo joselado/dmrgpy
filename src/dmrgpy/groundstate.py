@@ -82,6 +82,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
           self.maxm = maxm
           self.nsweeps = nsweeps # restore
           self.noise = noise
+    self.computed_gs = True # ground state has been computed
     return out # return energy
 
 def gs_energy(self,policy="single",**kwargs):
