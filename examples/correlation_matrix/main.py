@@ -6,11 +6,11 @@ from dmrgpy import fermionchain
 n = 10 # number of spinful fermionic sites
 fc = fermionchain.Spinful_Fermionic_Chain(n) # create the chain
 h = 0
-U = 0.1
+U = 0.0
 for i in range(n-1): # hopping
     h = h + fc.Cdagup[i]*fc.Cup[i+1]
     h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-for i in range(n): # hopping
+for i in [0]: # Hubbard
     h = h + U*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
 h = h + h.get_dagger()
 ##############################
