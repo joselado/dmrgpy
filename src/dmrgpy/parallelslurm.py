@@ -35,7 +35,6 @@ def pcall_single(fin,xs,time=10,error=None):
     from .manybodychain import dmrgpath
     realdmrgpath = dmrgpath+"/../"
     main = "import sys ; sys.path.append('"+realdmrgpath+"')\n"
-    main += "try: ii = int(os.environ['SLURM_ARRAY_TASK_ID'])\n"
     main += "import dill as pickle\nimport os\n"
     main += "try: ii = int(os.environ['SLURM_ARRAY_TASK_ID'])\n"
     main += "except: ii = 0\n"
