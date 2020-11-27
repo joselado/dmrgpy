@@ -6,7 +6,7 @@ from . import filesystem as fs
 import signal
 import subprocess
 
-#pickle.settings['recurse'] = True
+pickle.settings['recurse'] = True
 
 def pcall(fin,xs,batch_size=1,**kwargs):
     """Wrapper to allow for a batch size"""
