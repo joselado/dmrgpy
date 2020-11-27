@@ -14,8 +14,8 @@ fc = fermionchain.Spinful_Fermionic_Chain(n) # create the chain
 # initialize Hamiltonian #
 h = 0
 for i in range(n-1): # hopping
-    h = h + fc.Cdagup[i]*fc.Cdagup[i+1]
-    h = h + fc.Cdn[i]*fc.Cdagdn[i+1]
+    h = h + fc.Cdagup[i]*fc.Cup[i+1]
+    h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
 for i in range(n): # Hubbard
     h = h + (fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
 h = h + h.get_dagger()

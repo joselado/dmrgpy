@@ -12,6 +12,7 @@ from . import dynamics
 from . import funtk
 from . import vev
 from . import mpsalgebra
+from . import entanglement
 from . import excited
 from . import effectivehamiltonian
 from .writemps import write_sites
@@ -269,8 +270,15 @@ class Many_Body_Chain():
           return entropy.compute_entropy(self,wf,**kwargs)
       else: return NotImplemented
   def get_correlation_matrix(self,**kwargs):
-      from . import entanglement
       return entanglement.get_correlation_matrix(self,**kwargs)
+  def get_correlation_eigenvalues(self,**kwargs):
+      return entanglement.get_correlation_eigenvalues(self,**kwargs)
+  def get_correlation_entropy(self,**kwargs):
+      return entanglement.get_correlation_entropy(self,**kwargs)
+  def get_correlated_orbitals(self,**kwargs):
+      return entanglement.get_correlated_orbitals(self,**kwargs)
+  def get_correlated_density(self,**kwargs):
+      return entanglement.get_correlated_density(self,**kwargs)
   def get_dynamical_correlator_MB(self,**kwargs):
       return dynamics.get_dynamical_correlator(self,**kwargs)
   def get_dynamical_correlator(self,mode="DMRG",**kwargs):
