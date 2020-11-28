@@ -16,11 +16,14 @@ def get_correlation_matrix(self,operators=None,wf=None,**kwargs):
     cm = np.zeros((n,n),dtype=np.complex)
     for i in range(n):
         A = operators[i].get_dagger()
-        for j in range(n):
+        for j in range(i,n):
             B = operators[j]
             C = A*B
             print(i,j)
-            cm[i,j] = self.vev(C,**kwargs)
+    #        out = self.vev(C,**kwargs)
+            out = wf.dot(C*wf) # overlap
+            cm[i,j] = out
+            cm[j,i] = np.conjugate(out)
     return cm # return matrix
  
 
@@ -39,14 +42,14 @@ def get_correlation_entropy(self,**kwargs):
     return -out
 
 
-def get_correlated_orbitals(self,**kwargs):
+def get_correlated_orbitals(self,ordered=True,**kwargs):
     """Return the most correlated orbitals"""
     cm = get_correlation_matrix(self,**kwargs)
     es,vs = lg.eigh(cm) # diagonalize
     print(np.round(es,3))
     vs = np.abs(vs.T)**2 # transpose
     esa = np.abs(es-.5)
-    vs = [y for (x,y) in sorted(zip(esa,vs),key=lambda x: x[0])]
+    if ordered: vs = [y for (x,y) in sorted(zip(esa,vs),key=lambda x: x[0])]
     return vs
 
 
