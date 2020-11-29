@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import fermionchain
-n = 40 # number of spinful fermionic sites
+n = 20 # number of spinful fermionic sites
 fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 V = -0.9
@@ -15,18 +15,13 @@ for i in range(n-1): # hopping
 h = h + h.get_dagger()
 ##############################
 # Setup the Many Body Hamiltonian
-fc.maxm = 40
+fc.maxm = 20
+fc.kpmmaxm = fc.maxm
 fc.nsweeps = 10
 fc.set_hamiltonian(h) # set the hoppings
 fc.get_gs()
 
-#print(fc.get_correlation_entropy()) ; exit()
-out = fc.get_correlated_orbitals(ordered=False)
-f = open("MAP.OUT","w")
-for i in range(len(out)):
-  for j in range(len(out[0])):
-      f.write(str(i)+"  ")
-      f.write(str(j)+"  ")
-      f.write(str(out[i][j])+"\n")
+ii = 0#n//2
+(es,ds) = fc.get_dynamical_correlator(es=np.linspace(0.,3.,600),name=(fc.Cdag[ii],fc.C[ii]),delta=1e-1)
 
-f.close()
+np.savetxt("DOS.OUT",np.array([es,ds.real]).T)
