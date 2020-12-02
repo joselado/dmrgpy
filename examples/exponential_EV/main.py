@@ -20,13 +20,13 @@ def get(mode="DMRG",z=1):
     wf = sc.get_gs(mode=mode) # Z ferromagnetic wavefunction
     # The operator in the exponent MUST be Hermitian
     wf1 = sc.exponential(z*Mx,wf,mode=mode) # compute exp(Mx)*wf
-    c = sc.overlap(wf,wf1,mode=mode) # compute <wf|exp(Mx)|wf>
+    c = wf.dot(wf1)
     return c # return the number
 
 # Compare the result between DMRG and ED
-#print("ED",get("ED"))
-#print("DMRG",get("DMRG"))
-#exit()
+print("ED",get("ED"))
+print("DMRG",get("DMRG"))
+exit()
 
 
 zs = np.linspace(-1.0,1.0,20)

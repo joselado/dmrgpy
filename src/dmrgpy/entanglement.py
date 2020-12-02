@@ -1,9 +1,9 @@
 import numpy as np
 import scipy.linalg as lg
-from . import fermionchain
 
 def get_correlation_matrix(self,operators=None,wf=None,**kwargs):
     """Compute the correlation matrix of a ground state"""
+    from . import fermionchain
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
     if operators is None:
         if type(self)==fermionchain.Fermionic_Chain:
