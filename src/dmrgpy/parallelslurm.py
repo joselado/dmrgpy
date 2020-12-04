@@ -31,7 +31,8 @@ def pcall(fin,xs,batch_size=1,**kwargs):
 def pcall_single(fin,xs,time=10,error=None):
     """Run a parallel calculation with slurm"""
     n = len(xs) # number of calculations
-    f = lambda x: fin(x)
+#    f = lambda x: fin(x)
+    f = fin
     from .manybodychain import dmrgpath
     realdmrgpath = dmrgpath+"/../"
     main = "import sys ; sys.path.append('"+realdmrgpath+"')\n"
