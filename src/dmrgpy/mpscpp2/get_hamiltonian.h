@@ -37,16 +37,7 @@ static auto get_ampo=[](auto sites) {
 
 
 static auto get_hamiltonian=[](auto sites) {
-    auto ampo = get_ampo(sites) ; // get the ampo
-    auto H = MPO(ampo);  // create the full Hamiltonian
-      // workaround for generic interactions not supported by iTensor
-      if (get_bool("use_multioperator_hamiltonian")) {
-              cout << "WARNING, using multioperator hamiltonian" << endl ;
-	      auto hm = get_multioperator("hamiltonian_multioperator",sites);
-	      auto out = sum_mpo(H,hm); // sum the contributions
-	      return out; // return the sum
-      };
-    return H ; // return the Hamiltonian
+    return get_mpo_operator("hamiltonian.in") ;
 }
 ;
 

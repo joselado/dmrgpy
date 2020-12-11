@@ -13,6 +13,8 @@ class Fermionic_Chain(Many_Body_Chain):
     def __init__(self,n):
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
+        self.A = [self.get_operator("A",i) for i in range(n)]
+        self.Adag = [self.get_operator("Adag",i) for i in range(n)]
         self.N = [self.get_operator("N",i) for i in range(n)]
 #        self.N = [self.Cdag[i]*self.C[i] for i in range(n)]
         self.Id = self.get_operator("Id",1)

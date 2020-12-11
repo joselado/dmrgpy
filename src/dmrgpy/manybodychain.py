@@ -56,6 +56,7 @@ class Many_Body_Chain():
       # additional arguments
       self.kpmmaxm = 50 # bond dimension in KPM
       self.maxm = 30 # bond dimension in wavefunctions
+      self.mpomaxm = 5000 # bond dimension for operators
       self.nsweeps = 15 # number of sweeps
       self.noise = 1e-1 # noise for dmrg
       self.kpmcutoff = 1e-12 # cutoff in KPM

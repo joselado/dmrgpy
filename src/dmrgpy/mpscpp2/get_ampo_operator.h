@@ -22,8 +22,8 @@ static auto get_mpo_operator=[](std::string filename) {
 	auto sites = get_sites(); // read sites
 	auto ampo = AutoMPO(sites); // generate ampo
 	ampo = get_ampo_operator(ampo,filename) ; // generate ampo
-	return MPO(ampo); // return mpo
+        int mpomaxm = get_int_value("mpomaxm") ; // get bond dimension
+	if (mpomaxm<5) { mpomaxm = 5000 ;}; // default value
+	return toMPO<ITensor>(ampo,{"Maxm",mpomaxm,"Exact",false}); // return mpo
 };
-
-
 
