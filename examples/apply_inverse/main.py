@@ -17,7 +17,7 @@ wf = sc.get_gs()
 def f(e):
   wf1 = sc.applyinverse(h -e +1j*1e-1,wf)
   return -wf.dot(wf1).imag
-es = np.linspace(-3,1,100)
+es = np.linspace(-4,1,100)
 ds = [f(e) for e in es]
 e = sc.gs_energy() # compute the ground state energy
 print("Energy",e)
