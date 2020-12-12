@@ -60,6 +60,14 @@ def applyoperator(self,A,wf,**kwargs):
         return self.get_ED_obj().applyoperator(A,wf)
 
 
+def applyinverse(self,A,wf,**kwargs):
+    if type(wf)==mps.MPS: mode="DMRG"
+    elif type(wf)==np.ndarray: mode="ED"
+    else: raise
+    if mode=="DMRG": return applyinverse_dmrg(self,A,wf,**kwargs)
+    elif mode=="ED": raise
+#        return self.get_ED_obj().applyoperator(A,wf)
+
 
 def summps(self,wf1,wf2,**kwargs):
     if type(wf1)==mps.MPS: mode="DMRG"
@@ -95,6 +103,18 @@ def applyoperator_dmrg(self,A,wf):
     self.execute( lambda : self.run()) # run calculation
     return mps.MPS(self,name="applyoperator_wf1.mps").copy() # copy
 
+
+def applyinverse_dmrg(self,A,wf,tol=1e-4,maxn=100):
+    """Apply operator to a many body wavefunction"""
+    self.execute(lambda: wf.write(name="apply_inverse_wf0.mps")) # write WF
+    task = {"apply_inverse":"true",
+            "cvm_tol":tol,
+            "cvm_nit":maxn,
+            }
+    self.execute(lambda: A.write(name="apply_inverse_multioperator.in"))
+    self.task = task
+    self.execute( lambda : self.run()) # run calculation
+    return mps.MPS(self,name="apply_inverse_wf1.mps").copy() # copy
 
 
 

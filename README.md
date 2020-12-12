@@ -44,11 +44,11 @@ from dmrgpy import spinchain
 
 # Capabilities #
 - Ground state energy
-- Excitation gap
-- Excited states
+- Excitation energies
+- Excited wavefunctions
 - Arbitrary expectation values, including static correlation functions
 - Time evolution and measurements
-- MPS and MPO algebra
+- MPS and MPO algebra, including exponential and inverse
 - Dynamical correlation functions computed with the Kernel polynomial method
 - Dynamical correlation functions with time dependent DMRG
 - Generic operator distributions computed with the Kernel polynomial method

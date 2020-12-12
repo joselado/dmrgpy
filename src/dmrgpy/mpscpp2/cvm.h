@@ -66,3 +66,20 @@ static auto spectral_function=[](MPS psi, MPO H, MPO S1, MPO S2, double omega,
 
     return -G.imag() / M_PI;
 };
+
+
+
+// main CVM function
+static auto apply_inverse=[]() {
+    int maxm = get_int_value("maxm") ; // bond dimension
+    int max_it = get_int_value("cvm_nit") ; // number of iterations
+    auto cutoff = get_float_value("cutoff") ; // cutoff of DMRG
+    auto tol = get_float_value("cvm_tol") ; // GS energy
+    auto args = Args("Cutoff",cutoff,"Maxm",maxm); // MPS arguments
+    auto A = get_mpo_operator("apply_inverse_multioperator.in");
+    auto wf = read_wf("apply_inverse_wf0.mps") ; 
+    auto x = bicstab(A, wf, tol, max_it, args);
+    writeToFile("apply_inverse_wf1.mps",x);
+    return 0;
+};
+

@@ -211,6 +211,9 @@ class Many_Body_Chain():
   def applyoperator(self,A,wf,**kwargs):
       """Apply an operator"""
       return mpsalgebra.applyoperator(self,A,wf,**kwargs)
+  def applyinverse(self,A,wf,**kwargs):
+      """Apply an operator"""
+      return mpsalgebra.applyinverse(self,A,wf,**kwargs)
   def summps(self,wf1,wf2,**kwargs):
       """Apply an operator"""
       return mpsalgebra.summps(self,wf1,wf2,**kwargs)
