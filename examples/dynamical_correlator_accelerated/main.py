@@ -27,14 +27,15 @@ sc.get_gs() # compute ground state
 
 t1 = time.time()
 sc.kpm_accelerate = True # use acceleration in KPM mode
-(x0,y0) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
+name = (sc.Sx[i],sc.Sx[j])
+(x0,y0) = sc.get_dynamical_correlator(mode="DMRG",name=name)
 t2 = time.time()
 print("Time with acceleration",t2-t1)
 
 
 
 sc.kpm_accelerate = False # use acceleration in KPM mode
-(x1,y1) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
+(x1,y1) = sc.get_dynamical_correlator(mode="DMRG",name=name)
 t3 = time.time()
 print("Time without acceleration",t3-t2)
 
