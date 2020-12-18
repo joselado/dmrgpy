@@ -64,15 +64,17 @@ class MultiOperator():
     def __add__(self,a):
         """Sum operation"""
         if a is None: return self.copy() # return the Hamiltonian
-        elif isnumber(a): # if it is a number
-            return self+a*identity() # return identity
         elif type(a)==MultiOperator: # if it is a multioperator
           out = self.copy() # create a copy
           out.op = self.op + a.op # sum the two operators
           out.i = self.i + a.i + 1 # increase the index
           out.clean()
           return out # return the sum
-        else: raise
+        elif isnumber(a): # if it is a number
+            return self+a*identity() # return identity
+        else: 
+            print(type(a),a)
+            raise
     def __radd__(self,a): return self.__add__(a)
     def __rmul__(self,a):
         """Multiply by a number"""

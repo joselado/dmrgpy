@@ -16,16 +16,16 @@ sc.set_hamiltonian(h)
 wf = sc.get_gs()
 def f(e):
   wf1 = sc.applyinverse(h -e +1j*1e-1,wf)
-  return -wf.dot(wf1).imag
+  return wf.dot(wf1)
 es = np.linspace(-4,4,100)
-ds = [f(e) for e in es]
+ds = [-f(e).imag for e in es]
 dsz = [f(1j*e) for e in es]
 from dmrgpy.analyticcontinuation import imag2real
-es1,ds1 = imag2real(1j*es,dsz)
+es1,ds1 = imag2real(1j*es+1j*1e-1,dsz,x=es+1j*1e-1)
 
 e = sc.gs_energy() # compute the ground state energy
 print("Energy",e)
 import matplotlib.pyplot as plt
-plt.plot(es,ds,marker="o")
-plt.plot(es1,ds1,marker="o")
+plt.plot(es,ds,marker="x")
+plt.plot(es1.real,-ds1.imag,marker="o")
 plt.show()

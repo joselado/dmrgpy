@@ -50,7 +50,10 @@ def get_distribution_maxent(self,X=None,wf=None,n=10,**kwargs):
     Compute a distribuion using a maxentropy method
     """
     if wf is None: wf = self.get_gs(**kwargs) # get wavefunction
-    from .maxenttk.pymaxent import reconstruct
+    try: from .maxenttk.pymaxent import reconstruct
+    except:
+        print("Not functional yet")
+        exit()
     from .vev import power_vev
     mu = power_vev(self,n=n,X=X,wf=wf).real
 #    mu = [self.vev(X,npow=i).real for i in range(n)] # compute moments

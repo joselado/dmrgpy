@@ -22,6 +22,9 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
 
 
 
+
+
+
 def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
     """
     Return the dynamical correlator for a single energy
@@ -47,4 +50,36 @@ def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
     self.execute( lambda : self.run()) # run calculation
     cs = self.get_file("CVM.OUT") # read the correlator
     return cs[0] + 1j*cs[1] # return the correlator
+
+
+
+
+def dynamical_correlator_analytic_continuation(self,name=None,
+        delta=1e-1,es=np.linspace(0.,5.0,300)):
+    """
+    Compute the dynamical correlator using analytic continuation
+    """
+    A,B = name[0],name[1]
+    wf = self.get_gs() # get the ground state
+    wfa = A.get_dagger()*wf # apply A to the GS
+    wfb = B*wf # apply B to the GS
+    e0 = self.gs_energy() # ground state energy
+    Hp = self.hamiltonian - e0
+    def f(e): # function to compute
+        wfi = self.applyinverse(-self.hamiltonian+(e0+e),wfa)
+        return wfb.dot(wfi) # return result
+#    return es,-np.array([f(e+1j*delta*10) for e in es]).imag*2/np.pi # brute force
+    from .analyticcontinuation import imag2real
+    xz = es*1j
+    xz = np.linspace(delta*10,10.,100)*1j
+    xz = np.concatenate([-xz,xz])
+#    xz = [np.random.random()-.5+1j*np.random.random()+0.5j for i in range(40)]
+#    xz = 40.*np.array(xz)
+    outz = np.array([f(z) for z in xz]) # complex axis
+    esz,out = imag2real(xz,outz,x=es+1j*delta)
+    out = -out.imag*2/np.pi
+    return es,out
+
+
+
 

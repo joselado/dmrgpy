@@ -5,8 +5,8 @@ import numpy as np
 from dmrgpy import spinchain
 n = 5
 # create a random spin chain
-spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
+
 
 # create first neighbor exchange
 sc = spinchain.Spin_Chain(spins) # create the spin chain
@@ -18,18 +18,14 @@ for i in range(n-1):
 
 
 sc.set_hamiltonian(h)
-
-
 sc.get_gs()
 
 import time
-i = np.random.randint(n)
-j = np.random.randint(n)
+i = 0#np.random.randint(n)
+j = 0#np.random.randint(n)
 t1 = time.time()
 sc.maxm = 10 # bond dimension
 sc.kpmmaxm = 10 # KPM bond dimension
-sc.cvm_tol = 1e-3 # tolerancy in CVM
-sc.cvm_nit = 1e2 # maximum number of iterations in CVM
 es = np.linspace(-0.5,5.,100) # energies to use
 
 
@@ -40,7 +36,7 @@ t2 = time.time()
 print("Time with KPM",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(submode="CVM",name=(sc.Sx[i],sc.Sx[j]),es=es,
+(x3,y3) = sc.get_dynamical_correlator(submode="CVMimag",name=(sc.Sx[i],sc.Sx[j]),es=es,
         delta=5e-2)
 t3 = time.time()
 print("Time with CVM",t3-t2)
