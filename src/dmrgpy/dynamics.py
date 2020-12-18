@@ -15,6 +15,9 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         return cvm.dynamical_correlator_analytic_continuation(self,**kwargs)
     elif submode=="EX": # EX mode
         return dcex.dynamical_correlator(self,**kwargs)
+    elif submode=="maxent": # Max ent mode
+        from .distribution import dynamical_correlator_positive_defined
+        return dynamical_correlator_positive_defined(self,**kwargs)
     else: raise
 
 

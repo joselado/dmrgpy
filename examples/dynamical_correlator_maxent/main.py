@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 20
+n = 10
 # create a random spin chain
 spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
 
@@ -30,16 +30,16 @@ es = np.linspace(-0.5,5.,500) # energies to use
 
 
 
-(x2,y2) = sc.get_dynamical_correlator(submode="KPM",name=(sc.Sx[i],sc.Sx[j]),es=es,
-        delta=5e-2)
+(x2,y2) = sc.get_dynamical_correlator(submode="KPM",
+        name=(sc.Sx[i],sc.Sx[j]),es=es,delta=1e-1)
 t2 = time.time()
 print("Time with KPM",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(submode="CVMimag",name=(sc.Sx[i],sc.Sx[j]),es=es,
+(x3,y3) = sc.get_dynamical_correlator(submode="maxent",name=(sc.Sx[i],sc.Sx[j]),es=es,
         delta=5e-2)
 t3 = time.time()
-print("Time with CVM",t3-t2)
+print("Time with Maximum entropy",t3-t2)
 
 
 
@@ -52,7 +52,7 @@ matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
 fig = plt.figure()
 fig.subplots_adjust(0.2,0.2)
 plt.plot(x2,np.abs(y2),c="blue",label="KPM")
-plt.plot(x3,np.abs(y3),c="green",label="CVM",marker="o")
+plt.plot(x3,np.abs(y3),c="green",label="Max entropy",marker="o")
 plt.legend()
 plt.xlabel("frequency [J]")
 plt.ylabel("Dynamical correlator")

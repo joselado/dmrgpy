@@ -50,6 +50,8 @@ class MultiOperator():
         """Check if an operator is antiHermitian"""
         dh = self + self.get_dagger() ; dh = dh.simplify()
         return dh==0
+    def is_zero(self):
+        return self.simplify()==0
     def copy(self):
         from copy import deepcopy
         return deepcopy(self) # return a copy

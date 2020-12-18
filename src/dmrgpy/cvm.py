@@ -73,6 +73,7 @@ def dynamical_correlator_analytic_continuation(self,name=None,
     xz = es*1j
     xz = np.linspace(delta*10,10.,100)*1j
     xz = np.concatenate([-xz,xz])
+    xz = np.linspace(min(es),max(es),20) + delta*40*1j
 #    xz = [np.random.random()-.5+1j*np.random.random()+0.5j for i in range(40)]
 #    xz = 40.*np.array(xz)
     outz = np.array([f(z) for z in xz]) # complex axis
