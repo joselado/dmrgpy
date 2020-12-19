@@ -14,7 +14,10 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
         print("CVM in E = ",e)
         o = cvm_dmrg(self,name=name,i=i,j=j,delta=delta,e=e)
         out.append(o) # store
-    return (es,np.array(out)) # return result
+    out = np.array(out)
+#    from .inference import points2function
+#    (es,out) = points2function(es,out)
+    return (es,out) # return result
 
 
 

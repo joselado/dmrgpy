@@ -31,6 +31,8 @@ sc.kpmmaxm = 10 # KPM bond dimension
 sc.cvm_tol = 1e-3 # tolerancy in CVM
 sc.cvm_nit = 1e2 # maximum number of iterations in CVM
 es = np.linspace(-0.5,5.,100) # energies to use
+#es0 = np.linspace(-0.5,5.,50) # energies to use
+es0 = es
 
 
 
@@ -40,8 +42,8 @@ t2 = time.time()
 print("Time with KPM",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(submode="CVM",name=(sc.Sx[i],sc.Sx[j]),es=es,
-        delta=5e-2)
+(x3,y3) = sc.get_dynamical_correlator(submode="CVM",name=(sc.Sx[i],sc.Sx[j]),
+        es=es0,delta=1e-1)
 t3 = time.time()
 print("Time with CVM",t3-t2)
 
