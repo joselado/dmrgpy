@@ -4,6 +4,7 @@ def points2function(x,y,bounds=None):
     """Given a set of points for a holomorphic function,
     derive the continuum function that fullfills the
     analiticity condition"""
+    raise # this does not work yet
     yr = y.real # real part
     yi = y.imag # imaginary part
     from scipy.signal import hilbert

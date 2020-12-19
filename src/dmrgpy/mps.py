@@ -29,13 +29,16 @@ class MPS():
     def overlap(self,x):
         if self.MBO is not None: return self.MBO.overlap(self,x)
         else: raise
+    def __radd__(self,x): return self + x
     def __add__(self,x):
+        if x==0: return self # do nothing
         if self.MBO is not None: return self.MBO.summps(self,x)
         else: raise
     def __sub__(self,x):
         return self + (-1)*x
     def __neg__(self,x):
         return (-1)*x
+    def __truediv__(self,x): return self*(1./x)
     def copy(self,name=None):
         """Copy this wavefunction"""
         out = deepcopy(self) # copy everything
@@ -66,6 +69,11 @@ class MPS():
     def clean(self):
         self.execute(lambda: os.system("rm "+self.name))
         del self
+    def normalize(self):
+        """Normalize a wavefunction"""
+        norm = np.sqrt(self.dot(self).real) # norm
+        if norm>1e-8: return self*(1./norm)
+        else: return None
     def __rmul__(self,A):
         """Multiply by an operator"""
         if self.MBO is not None:

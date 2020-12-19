@@ -52,13 +52,12 @@ def get_excited_states(self,n=2,purify=False,**kwargs):
 
 def gram_smith(ws):
     """Gram smith orthogonalization"""
+    from .mpsalgebra import gram_smith_single 
     out = []
     n = len(ws)
     for i in range(n):
         w = ws[i].copy() # copy wavefunction
-        for wj in out: # loop over stored wavefunctions
-            w = w - w.overlap(wj)*wj # remove the overlap with each WF
-        w = 1/np.sqrt((w.overlap(w))).real*w # normalize
+        w = gram_smith_single(w,out) # orthogonalize
         out.append(w) # store
     return out
 

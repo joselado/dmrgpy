@@ -14,7 +14,7 @@ h = 0
 for i in range(n-1): 
     h = h + sc.Sx[i]*sc.Sx[i+1] # add exchange
     h = h + sc.Sy[i]*sc.Sy[i+1] # add exchange
-    h = h + 0.5*sc.Sz[i]*sc.Sz[i+1] # add exchange
+    h = h + 1.*sc.Sz[i]*sc.Sz[i+1] # add exchange
 for i in range(n-1): 
     h = h + -1.1*sc.Sz[i]*sc.Sz[i] # add single ion anisotropy
 sc.set_hamiltonian(sum(sc.Sx)) ; wf = sc.get_gs()
