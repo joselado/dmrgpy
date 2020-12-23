@@ -160,8 +160,8 @@ def get_pairing_spinless(self,pairs=[[]],**kwargs):
 
 def get_density_fluctuation_spinful(self,**kwargs):
     """Return the electronic density"""
-    d = self.get_density_spinful(**kwargs) # total density
-    d2 = self.get_correlator_spinful(name="densitydensity", # fluctuation
-            pairs=[(i,i) for i in range(self.ns//2)]).real
+    d = self.get_density(**kwargs) # total density
+    d2 = [self.vev(Ni*Ni,**kwargs) for Ni in self.Ntot] # density fluctuation
+    d2 = np.array(d2).real
     return d2-d**2 # return density fluctuations
 

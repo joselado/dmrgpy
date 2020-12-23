@@ -133,7 +133,7 @@ def operator_norm(self,op,ntries=5,simplify=True):
 
 
 def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
-        n=6,maxde=1e-4,maxit=30,**kwargs):
+        n=6,maxde=1e-4,mode="SI",maxit=30,**kwargs):
     """Compute an eigenvector using the Arnoldi algorithm"""
     wfs = []
     if wf is None: 
@@ -167,7 +167,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
     if error<maxde: return wf
     if maxit<0: return wf
     if nw==1: return wf
-    else: return mpsarnoldi(self,H,wf=wf,e=e,
+    else: return mpsarnoldi(self,H,wf=wf,e=e,mode=mode,
             delta=delta,n=n,maxit=maxit-1,**kwargs)
 
 
