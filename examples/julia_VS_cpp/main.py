@@ -4,6 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 
+
 def get(version,n=30):
   spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
   sc = spinchain.Spin_Chain(spins) # create the spin chain
@@ -34,7 +35,7 @@ def time_ratio(n):
   return (t1-t0)/(t2-t1)
 
 
-for n in range(10,30,2):
+for n in range(14,16):
     print("Length",n,"C++/Julia",time_ratio(n))
 
 
