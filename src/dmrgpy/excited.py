@@ -35,7 +35,7 @@ def get_excited(*args,**kwargs):
 
 def get_excited_states(self,n=2,purify=False,**kwargs):
     """Excited states"""
-    if not purify: # purify the states (so far just the energies)
+    if not purify: # just compute excited states
         return get_excited_states_dmrg(self,n=n,**kwargs) # compute 
     else: # purify the states (so far just the energies)
         es,ws = get_excited_states_dmrg(self,n=n+2,**kwargs) # compute 

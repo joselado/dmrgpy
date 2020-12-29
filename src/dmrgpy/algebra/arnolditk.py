@@ -4,7 +4,7 @@ import scipy.linalg as lg
 # routines to perform iterative diagonalization
 
 def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
-        mode="SI",**kwargs):
+        mode="SI",P=None,**kwargs):
     """Compute an eigenvector using the Arnoldi algorithm"""
     if mode=="SI": # target a specific energy
         M = H - (e+delta*1j) # shift
@@ -15,7 +15,8 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
     elif mode=="GS": # target the ground state
         shift = self.ns/2. # number of sites
         M = H-shift # start with the Hamiltonian
-        Op = lambda x: M*x # operator to apply
+        if P is None: Op = lambda x: M*x # operator to apply
+        else: Op = lambda x: M*(P*x) # operator to apply
         def fe(es): # function return the right WF
             return np.where(es==np.min(es))[0][0] # return the index
     else: raise

@@ -2,11 +2,12 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
-from dmrgpy import fermionchain
-n = 4
+from dmrgpy import fermionchain,spinchain
+n = 5
 
 # create first neighbor exchange
 sc = fermionchain.Spinon_Chain(n) # create the spin chain
+#sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)]) # create the spin chain
 #sc.setup_julia()
 h = 0
 for i in range(n-1):
@@ -14,12 +15,12 @@ for i in range(n-1):
     h = h + sc.Sy[i]*sc.Sy[i+1]
     h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
+print(sc.gs_energy())
+exit()
 sc.get_gs()
 
 
 print(sc.vev(sc.Cdagup[0]*sc.Cup[1]))
-exit()
-
 
 #sc.kpmmaxm = 20 # KPM maxm
 import time

@@ -48,7 +48,7 @@ def random_mps(self):
     """Return a random MPS"""
     try: return random_product_state(self)
     except:
-        print("Using the default routine")
+#        print("Using the default routine")
         return random_mps_dummy(self)
 
 
