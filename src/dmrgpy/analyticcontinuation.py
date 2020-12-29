@@ -19,7 +19,7 @@ def polyexp_fit(zs,us,n=10,bnds=[-5.,5.]):
     """Perform an analytic continuation using a polyexp fit"""
     def f(lamb):
       """Polynomial function"""
-      return lambda x: np.exp(np.sum([lamb[i]*x**i for i in range(len(lamb)))])
+      return lambda x: np.exp(np.sum([lamb[i]*x**i for i in range(len(lamb))]))
     from scipy.integrate import quad
     def errorf(lamb):
         """Function to compute the error"""
