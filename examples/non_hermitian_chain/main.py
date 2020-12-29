@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import fermionchain
 n = 6
-fc = fermionchain.Fermionic_Chain(n) # create the spin chain
+fc = fermionchain.Fermionic_Chain(n) # create the fermion chain
 mh = np.zeros((n,n),dtype=np.complex) # TB matrix
 for i in range(n-1):
     mh[i,i+1] = 1.0
@@ -20,7 +20,6 @@ wfs = mpsalgebra.mpsarnoldi(fc,h,mode="GS",n=10,nwf=4,verbose=0)
 es = np.array([wf.dot(h*wf) for wf in wfs]) # energies
 wf = [y for (x,y) in sorted(zip(es.real,wfs))][0] # lowest energy
 
-# now compute S(S+1) to check we get the "right" eigenvector
 print("MPS Energy",wf.dot(h*wf))
 import scipy.linalg as lg
 es = lg.eigvals(mh) # eigenvalues
