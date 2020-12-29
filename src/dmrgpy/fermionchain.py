@@ -298,12 +298,14 @@ class Spinon_Chain(Spinful_Fermionic_Chain):
             P = P*(-2*self.Nup[i]*self.Ndn[i] + self.Ndn[i] + self.Nup[i])
             #P = P*(1.- self.Nup[i]*self.Ndn[i]) #  Gutzwiller projection
         from .mpsalgebra import mpsarnoldi
-#        super().gs_energy(**kwargs) # get the GS
-#        wf = self.wf0
-        wf = None # no initial guess
+        super().gs_energy(**kwargs) # get the GS
+        wf = self.wf0
+#        wf = None # no initial guess
 #        print("Projection",wf.dot(P*wf).real)
         wf = mpsarnoldi(self,self.hamiltonian,mode="GS",P=P,wf=wf)
         print("Projection",wf.dot(P*wf).real)
+        self.computed_gs = True # computed GS
+        self.wf0 = wf # store ground state
         return wf
     def gs_energy(self,**kwargs):
         wf = self.get_gs(**kwargs) # ground state

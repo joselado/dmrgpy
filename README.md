@@ -52,6 +52,7 @@ from dmrgpy import spinchain
 - Dynamical correlation functions computed with the Kernel polynomial method
 - Dynamical correlation functions with time dependent DMRG
 - Generic operator distributions computed with the Kernel polynomial method
+- Iterative MPS Hermitian and non-Hermitian diagonalization solvers 
 
 # Examples
 

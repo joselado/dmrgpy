@@ -93,3 +93,21 @@ def gs_energy(self,policy="single",**kwargs):
     else: raise
 
 
+
+
+
+def lowest_energy(self,h):
+    """Return the lowest energy of the Hamiltonian"""
+    raise # not finished yet
+    self.execute(lambda: h.write("hamiltonian.in")) # write Hamiltonian
+    task = {"GS":"true",
+            }
+    self.task = task
+    self.write_task()
+    self.run() # perform the calculation
+    out = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
+    return out
+
+
+
+
