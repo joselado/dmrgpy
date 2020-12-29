@@ -24,7 +24,7 @@ def get_ex(mode="DMRG",purify=True,nsweeps=10):
 esed = get_ex(mode="ED") # get the "true" excited states with ED
 diffpure = [] # empty list
 diff = [] # empty list
-ns = range(2,7,1) # different number of sweeps
+ns = range(2,7,2) # different number of sweeps
 
 for ii in ns: # loop over sweeps
   es = get_ex(mode="DMRG",purify=False,nsweeps=ii) # no purification
