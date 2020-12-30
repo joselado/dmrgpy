@@ -151,10 +151,14 @@ def lowest_states(h,n=10,nmax=maxsize):
     if info: print("Calling ARPACK")
     if ishermitian(h): # Hermitian matrix
       eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
-      eigvec = [v for (e,v) in sorted(eig.eigvec.T)]
+      eigvec = [v for (e,v) in sorted(eig,eigvec.T)]
       eig = np.sort(eig)
       return (eig,eigvec)
-    else: raise
+    else: 
+      eig,eigvec = slg.eigsh(h,k=n,which="LM",maxiter=100000)
+      eigvec = [v for (e,v) in sorted(eig.real,eigvec.T)]
+      eig = np.sort(eig.real)
+      return (eig,eigvec)
   else:
     if info: print("Full diagonalization")
     if ishermitian(h): # Hermitian matrix

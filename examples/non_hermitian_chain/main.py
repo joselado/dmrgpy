@@ -19,7 +19,7 @@ from dmrgpy import mpsalgebra
 # the GS mode targets the state with minimum Re(E)
 
 fc.set_hamiltonian(h)
-print(fc.gs_energy(mode="ED"))  ; exit()
+print(fc.get_excited(mode="ED"))  ; exit()
 
 wfs = mpsalgebra.mpsarnoldi(fc,h,mode="GS",n=5,nwf=5,verbose=1)
 es = np.array([wf.dot(h*wf) for wf in wfs]) # energies
