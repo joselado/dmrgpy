@@ -128,13 +128,20 @@ def lowest_eigenvalues(h,n=10,nmax=maxsize):
   info = False
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
-    eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
-    eig = np.sort(eig)
+    if ishermitian(h):
+      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+      eig = np.sort(eig)
+    else:
+      eig,eigvec = slg.eigs(h,k=n,which="SA",maxiter=100000)
+      eig = [y for (x,y) in sorted(zip(eig.real,eig))]
   else:
     if info: print("Full diagonalization")
-    ishermitian(h)
-    eig = dlg.eigvalsh(h.todense())
-  return eig[0:n] # return eigenvalues
+    if ishermitian(h):
+      eig = dlg.eigvalsh(h.todense())
+    else:
+      eig = dlg.eigvals(h.todense())
+      eig = [y for (x,y) in sorted(zip(eig.real,eig))]
+  return eig[0:n]
 
 
 def lowest_states(h,n=10,nmax=maxsize):
@@ -142,15 +149,22 @@ def lowest_states(h,n=10,nmax=maxsize):
   info = False
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
-    eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
-    eigvec = [v for (e,v) in sorted(eig.eigvec.T)]
-    eig = np.sort(eig)
-    return (eig,eigvec)
+    if ishermitian(h): # Hermitian matrix
+      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+      eigvec = [v for (e,v) in sorted(eig.eigvec.T)]
+      eig = np.sort(eig)
+      return (eig,eigvec)
+    else: raise
   else:
     if info: print("Full diagonalization")
-    ishermitian(h)
-    eig,vs = dlg.eigh(h.todense())
-  return eig[0:n],vs.T[0:n] 
+    if ishermitian(h): # Hermitian matrix
+      eig,vs = dlg.eigh(h.todense())
+      return eig[0:n],vs.T[0:n] 
+    else: # non Hermitian matrix
+      eig,vs = dlg.eig(h.todense())
+      e0 = [y for (x,y) in sorted(zip(eig.real,eig))][0]
+      wf0 = [y for (x,y) in sorted(zip(eig.real,vs.T))][0]
+      return e0,wf0
 
 
 
@@ -158,10 +172,10 @@ def lowest_states(h,n=10,nmax=maxsize):
 
 
 def ishermitian(m):
+    """Check if a matrix is Hermitian"""
     d = m - np.conjugate(m.T)
-    if np.max(np.abs(d))>1e-6: 
-        print("Hamiltonian is not Hermitian")
-        raise
+    if np.max(np.abs(d))>1e-6: return False
+    return True
 
 def expm(m):
     m = todense(m)

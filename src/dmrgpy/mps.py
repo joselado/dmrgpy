@@ -101,6 +101,7 @@ def id_generator(size=20, chars=string.ascii_uppercase + string.digits):
 
 
 from .randommps import random_mps
+from .randommps import orthogonal_random_mps
 from .randommps import random_product_state
 
 

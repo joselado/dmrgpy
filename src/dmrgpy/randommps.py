@@ -49,7 +49,20 @@ def random_mps(self):
     try: return random_product_state(self)
     except:
 #        print("Using the default routine")
-        return random_mps_dummy(self)
+        wf = random_mps_dummy(self)
+        wf = wf.normalize()
+        return wf
+
+
+def orthogonal_random_mps(self,wfs):
+    """Generate an MPS that is orthogonal to a list"""
+    from .algebra.arnolditk import gram_smith_single
+    while True: # infinite loop
+        wf = self.random_mps() # generate a random MPS
+        wf = gram_smith_single(wf,wfs)
+        if wf is not None: return wf # return this wavefunction
+
+
 
 
 

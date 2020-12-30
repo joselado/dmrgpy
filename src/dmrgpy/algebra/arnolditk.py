@@ -62,7 +62,7 @@ def mpsarnoldi_iteration(self,Op,H,wf,fe,maxit=30,
         maxde=1e-4,
         maxdwf = 1e-2, # maximum change in the wavefunction
         wfskip=[], # wavefunctions to skip
-        verbose=1,
+        verbose=0,
         n=6):
     """Single iteration of the restarted arnoldi algorithm"""
     wfs = []
@@ -76,9 +76,13 @@ def mpsarnoldi_iteration(self,Op,H,wf,fe,maxit=30,
     for i in range(n-len(wfs)): # loop over Krylov vectors
         wf = Op(wf) # apply operator
         wf = gram_smith_single(wf,wfs+wfskip) # orthogonalize
-        if wf is None: break # stop the loop
+        if wf is None: 
+            if len(wfs)>1: break # stop the loop
+            else: # just make some orthogonal guess
+                wf = self.random_mps(orthogonal=wfs+wfskip) # guess
         wfs.append(wf.copy()) # store
     nw = len(wfs) # number of wavefunction
+    if nw==0: raise # something wrong
     mh = np.zeros((nw,nw),dtype=np.complex) # output matrix
     for i in range(nw):
       for j in range(nw):

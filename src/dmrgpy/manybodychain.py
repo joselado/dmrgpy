@@ -401,11 +401,12 @@ class Many_Body_Chain():
       Return an estimate of the bandwidth
       """
       return 3*self.ns # estimated bandwidth
-  def random_mps(self,mode="DMRG"):
+  def random_mps(self,mode="DMRG",orthogonal=None):
       """Generate a random MPS"""
       if mode=="DMRG":
-          from . import mps
-          return mps.random_mps(self)
+         from . import mps
+         if orthogonal is None:  return mps.random_mps(self)
+         else: return mps.orthogonal_random_mps(self,orthogonal)
       elif mode=="ED":
           return self.get_ED_obj().random_state()
   def get_operator(self,name,i=None):
