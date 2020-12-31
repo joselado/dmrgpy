@@ -24,8 +24,8 @@ Hn  = h + 1j*(hi-ss1) # non-Hermitian Hamiltonian
 # We will target the most negative eigenvalues with Im(e)=0
 # delta is the tolerancy for the imaginary part
 sc.maxm = 10
-wf = mpsalgebra.mpsarnoldi(sc,h+1j*(hi-ss1),mode="MRGS",n=6,delta=1e-3)
+e,wf = mpsalgebra.mpsarnoldi(sc,h+1j*(hi-ss1),mode="MRGS",n=6,delta=1e-3)
 
 # now compute S(S+1) to check we get the "right" eigenvector
 print("S(S+1)",wf.dot(hi*wf).real)
-print("Energy",wf.dot(Hn*wf))
+print("Energy",e)

@@ -29,6 +29,8 @@ class MPS():
     def overlap(self,x):
         if self.MBO is not None: return self.MBO.overlap(self,x)
         else: raise
+    def aMb(self,M,b):
+        return self.dot(M*b) # workaround
     def __radd__(self,x): return self + x
     def __add__(self,x):
         if x==0: return self # do nothing

@@ -15,5 +15,6 @@ for i in range(n-1):
 sc.set_hamiltonian(h)
 #print(sc.get_excited(n=40,mode="ED")) ; exit()
 from dmrgpy import mpsalgebra
-wf = mpsalgebra.mpsarnoldi(sc,h,mode="GS",n=4)
-print(sc.gs_energy())
+e,wf = mpsalgebra.mpsarnoldi(sc,h,mode="GS")
+print("Arnoldi",e.real)
+print("DMRG",sc.gs_energy())

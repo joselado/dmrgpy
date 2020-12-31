@@ -52,15 +52,5 @@ def get_excited_states(self,n=2,purify=False,**kwargs):
         return (es[0:n],ws[0:n])
 
 
-def gram_smith(ws):
-    """Gram smith orthogonalization"""
-    from .mpsalgebra import gram_smith_single 
-    out = []
-    n = len(ws)
-    for i in range(n):
-        w = ws[i].copy() # copy wavefunction
-        w = gram_smith_single(w,out) # orthogonalize
-        out.append(w) # store
-    return out
-
+from .algebra.arnolditk import gram_smith
 
