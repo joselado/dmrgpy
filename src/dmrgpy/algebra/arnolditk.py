@@ -226,13 +226,13 @@ def lowest_energy(self,H,**kwargs):
     return mpsarnoldi(self,H,mode="GS",shift=-np.abs(emax),**kwargs) 
 
 
-def lowest_energy_non_hermitian(self,H,n=1,**kwargs):
+def lowest_energy_non_hermitian(self,H,n=1,npm=30,**kwargs):
     """Compute the most negative energy of a Hamiltonian,
     assuming a non Hermitian Hamiltonian"""
-    emax,wf = mpsarnoldi(self,H,mode="LM",n0=300,n=1,nwf=1,
+    emax,wf = mpsarnoldi(self,H,mode="LM",n0=npm,n=1,nwf=1,
             **kwargs) # warm up
     # most negative real part
-    return mpsarnoldi(self,H,mode="GS",n0=300,n=2*n+1,nwf=n,maxit=1,
+    return mpsarnoldi(self,H,mode="GS",n0=npm,n=3*n+1,nwf=n,maxit=6,
             shift=-np.abs(emax),**kwargs)
 
 

@@ -61,7 +61,7 @@ def diagonalize(mh):
     if np.max(np.abs(mh-np.conjugate(mh.T)))<1e-6:
         return lg.eigh(mh)
     else: # non Hermitian
-        return lg.eig(mh)
+        return lg.eig(np.conjugate(mh).T)
 
 
 

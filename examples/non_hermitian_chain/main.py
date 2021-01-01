@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import fermionchain
-n = 12
+n = 6
 fc = fermionchain.Fermionic_Chain(n) # create the fermion chain
 mh = np.zeros((n,n),dtype=np.complex) # TB matrix
 for i in range(n-1):
