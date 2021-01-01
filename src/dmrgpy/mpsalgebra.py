@@ -132,4 +132,6 @@ def operator_norm(self,op,ntries=5,simplify=True):
 
 
 from .algebra.arnolditk import mpsarnoldi
+from .algebra.arnolditk import lowest_energy as lowest_energy_arnoldi
+from .algebra.arnolditk import lowest_energy_non_hermitian as lowest_energy_non_hermitian_arnoldi
 from .algebra.arnolditk import gram_smith_single
