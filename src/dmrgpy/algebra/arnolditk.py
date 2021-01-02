@@ -72,7 +72,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
 
 
 def mpsarnoldi_iteration(self,Op,H,fe,maxit=1,
-        maxde=1e-4,
+        maxde=1e-2,
         ne=1, # number of energies to return
         maxdwf = 1e-3, # maximum change in the wavefunction
         wfskip=None, # wavefunctions to skip
@@ -87,23 +87,16 @@ def mpsarnoldi_iteration(self,Op,H,fe,maxit=1,
     if verbose>1:
         print("Eigenvalue shift",shift)
     if len(wfs)==0: # no vectors given
-        wf = self.random_mps() # random initial guess
-        wf = wf.normalize()
-        for i in range(n0):
-            if verbose>1: print("Pre-iteration",i)
-            wfold = wf.copy() # copy
-            wf = Op(wf) + shift*wf # apply operator
-            wf = wf.normalize()
-#            mix = 0.0 # quench oscillations
-#            wf = mix*wf + (1-mix)*wfold # mix
-#            wf = wf.normalize()
-            if verbose>1: print("Eigen",wf.aMb(H,wf))
-            wf = gram_smith_single(wf,wfskip) # orthogonalize
+        # initial guess with power method
+        emax,wf = power_method(self,H,n0=n0,
+                verbose=verbose,
+                shift=shift) 
         wf0 = None
         if n==1 and ne==1: # power method
             return wf.dot(Op(wf)),wf # return WF and energy
     else: 
-        wf = wfs[-1].copy() # take the "worst" one
+    #    wf = most_mixed_wf(H,wfs,info=verbose>1) # take the most mixed WF
+        wf = wfs[0] # use the "worst" one
         wf0 = wf.copy() # store initial wavefunction
     for i in range(n-len(wfs)): # loop over Krylov vectors
         wf = Op(wf) + shift*wf # apply operator
@@ -125,9 +118,10 @@ def mpsarnoldi_iteration(self,Op,H,fe,maxit=1,
     es = recompute_energies(H,vs.T,wfs) # recompute the energies
     ef,wf = selectwf(es,vs.T,wfs,fe,ne=ne) # select the wavefunctions
     if verbose>1: # print the orthogonality matrix 
-        iden = krylov_matrix_representation(1.,wf)
-        print("Orthogonality") # get the representation
-        print(np.round(iden,1)) # get the representation
+        if ne>1: # if just one
+          iden = krylov_matrix_representation(1.,wf)
+          print("Orthogonality") # get the representation
+          print(np.round(iden,1)) # get the representation
     if maxit<2: return ef,wf # if last iteration has been reached
     #########################################
     # if the algorithm is recursive, continue
@@ -137,17 +131,18 @@ def mpsarnoldi_iteration(self,Op,H,fe,maxit=1,
     ef = np.array([wfi.aMb(H,wfi) for wfi in wf]) # compute energies
     ef2 = np.array([wfi.aMb(H,H*wfi) for wfi in wf]) # compute energies square
     error = np.sqrt(np.abs(ef2-ef**2)) # compute the error
+    error = error/ef2 # normalize
 #    dwf = 1.0 # difference with respect to the initial wf
 #    if wf0 is not None:
 #        dwf = 1.0 - np.abs(wf0.dot(wf)) # difference between WF
     if verbose>0: 
-        print("Energies",np.round(ef,2))
-        print("Error in energies",np.round(error,2))
+        print("Energies",np.round(ef,3))
+        print("Error in energies",np.round(error,3))
 #        if wf0 is not None: print("Error in WF",dwf)
     # stop according to several criteria
-    if np.sum(error)<maxde: return ef,wf # return wavefunctions 
+    if np.max(error)<maxde: return ef,wf # return wavefunctions 
     # if this point is reached, recall
-    nk = max([2,n//2]) # number of vector to keep
+    nk = min([ne,max([2,n//2])]) # number of vectors to keep
     eout,wfout = selectwf(es,vs.T,wfs,fe,ne=nk) # select nk "best" WF
     if nk==1: 
         wfout = [wfout]
@@ -162,6 +157,7 @@ def mpsarnoldi_iteration(self,Op,H,fe,maxit=1,
             verbose=verbose,
             shift = shift, # shift operator
             n=n,
+            n0=n0,
             wfs = wfout, # initial wavefunctions
             maxdwf=maxdwf,
             ne=ne,
@@ -173,6 +169,8 @@ from .krylov import gram_smith_single
 from .krylov import gram_smith
 from .krylov import diagonalize
 from .krylov import rediagonalize
+from .krylov import most_mixed_wf
+from .krylov import krylov_eigenstates
 
 
 
@@ -217,23 +215,70 @@ def sortwf(es,wfs,fe):
 
 
 
-def lowest_energy(self,H,**kwargs):
+def lowest_energy(self,H,npm=10,verbose=0,n=1,**kwargs):
     """Compute the most negative energy of a Hamiltonian,
     assuming a Hermitian Hamiltonian"""
-    emax,wf = mpsarnoldi(self,H,mode="LM",n0=20,n=4,
-            **kwargs) # warm up
+    emax,wf = power_method(self,H,n0=npm,verbose=verbose) # PM estimate
     # most negative
-    return mpsarnoldi(self,H,mode="GS",shift=-np.abs(emax),**kwargs) 
+    return mpsarnoldi(self,H,mode="GS",shift=-np.abs(emax),n0=npm,
+            n=2*n+1,nwf=n,maxit=3,
+            verbose=verbose,**kwargs) 
 
 
-def lowest_energy_non_hermitian(self,H,n=1,npm=30,**kwargs):
+def lowest_energy_non_hermitian(self,H,n=1,npm=10,verbose=0,**kwargs):
     """Compute the most negative energy of a Hamiltonian,
     assuming a non Hermitian Hamiltonian"""
-    emax,wf = mpsarnoldi(self,H,mode="LM",n0=npm,n=1,nwf=1,
-            **kwargs) # warm up
+#    emax,wf = mpsarnoldi(self,H,mode="LM",n0=npm,n=1,nwf=1,maxit=1,
+#            **kwargs) # warm up
+    emax,wf = power_method(self,H,n0=npm,verbose=verbose) # PM estimate
     # most negative real part
-    return mpsarnoldi(self,H,mode="GS",n0=npm,n=3*n+1,nwf=n,maxit=6,
-            shift=-np.abs(emax),**kwargs)
+    return mpsarnoldi(self,H,mode="GS",n0=npm,n=2*n+1,nwf=n,maxit=10,
+            shift=-np.abs(emax),verbose=verbose,**kwargs)
+
+def most_positive_energy(self,H,npm=10,verbose=0,dt=0.1,n=1,**kwargs):
+    """Compute the most negative energy of a Hamiltonian,
+    assuming a Hermitian Hamiltonian"""
+    emax,wf = power_method(self,H,n0=npm,verbose=verbose) # PM estimate
+    Hs = H -np.abs(emax) # shift the energy
+    Hs = Hs/emax # scale the Hamiltonian to approx [0,1]
+    Hexp = 1. + dt*Hs # approximation to the exponential
+    # most negative
+    (es,wfs) = mpsarnoldi(self,Hexp,mode="LM",n0=npm,
+            n=2*n+1,nwf=n,maxit=3,
+            verbose=verbose,**kwargs)
+    es = [wfi.aMb(H,wfi) for wfi in wfs] # compute energies
+    return np.array(es),wfs
+
+
+def most_negative_energy(self,H,**kwargs):
+    """Compute the most negative energy"""
+    es,wfs = most_positive_energy(self,-H,**kwargs)
+    return -es,wfs
+
+#lowest_energy_non_hermitian = most_negative_energy
+
+def power_method(self,H,verbose=0,n0=10,ntries=10,shift=0.0,
+        orthogonal=None):
+    """Simple implementation of the power method"""
+    def f(): # function to perform a single power method iteration
+        M = H + shift
+        wf = self.random_mps(orthogonal=orthogonal) # take a random MPS
+        for i in range(n0): # number of tries
+            wf = M*wf # perform one iteration
+            wf = wf.normalize() # normalize wavefunction
+            if verbose>2: print("Energy in this iteration",wf.aMb(H,wf))
+        if verbose>1: print("PM energy",wf.aMb(H,wf))
+        return wf.aMb(H,wf),wf # return energy and wavefunction
+    es,wfs = [],[]
+    for i in range(ntries): # make several tries
+        if verbose>0: print("Power method #",i)
+        e,wf = f() # use the power method
+        es.append(np.abs(e)) # store
+        wfs.append(wf.copy()) # store
+    ind = np.where(es==np.max(es))[0][0] # index of the maximum error
+    if verbose>0: print("Selected energy in PM",es[ind])
+    return es[ind],wfs[ind].copy() # return this one
+
 
 
 

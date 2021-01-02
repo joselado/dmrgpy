@@ -82,3 +82,43 @@ def rediagonalize(H,wfs):
         wfout.append(wf.copy()) # store wavefunction
     return wfout
 
+
+def most_mixed_wf(H,wfs,info=False):
+    """Return the most mixed wavefunction"""
+    ef,wfk = krylov_eigenstates(H,wfs) # compute eigenstates
+#    wfk = wfs
+#    if info:
+#        iden = krylov_matrix_representation(1.,wfk)
+#        print("Krylov orthogonality") # get the representation
+#        print(np.round(iden,1)) # get the representation
+    ef = np.array([wfi.aMb(H,wfi) for wfi in wfk]) # compute energies
+    ef2 = np.array([wfi.aMb(H,H*wfi) for wfi in wfk]) # compute energies square
+    error = np.sqrt(np.abs(ef2-ef**2)) # compute the error
+    ind = np.where(error==np.max(error))[0][0] # index of the maximum error
+    if info: print("Index of the most mixed",ind)
+    if info: print("Energy of the most mixed",np.round(ef[ind],2))
+    if info: print("Eigenenergies",np.round(ef,2))
+    if info: print("Fluctuations",np.round(error,2))
+    return wfk[ind].copy() # return the most mixed WF
+
+
+def krylov_eigenstates(H,wfs):
+    """Return the eigenstates and eigenenergies of an operator"""
+    mh = krylov_matrix_representation(H,wfs) # get the representation
+    (es,vs) = diagonalize(mh) # diagonalize
+    wfout = unitary_transformation(vs.T,wfs) # output eigenfunctions
+    return es,wfout # return eigenstates
+
+
+
+def unitary_transformation(vs,wfs):
+    """Perform a unitary transformation"""
+    wfout = [] # storage
+    for v0 in vs: # loop over WF
+        wf = 0
+        for i in range(len(wfs)):
+            wf = wf + np.conjugate(v0[i])*wfs[i] # add
+        wf = wf.normalize()
+        wfout.append(wf.copy()) # store wavefunction
+    return wfout # return transformed wavefunctions
+

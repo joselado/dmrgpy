@@ -49,7 +49,9 @@ def random_mps(self):
     try: return random_product_state(self)
     except:
 #        print("Using the default routine")
-        wf = random_mps_dummy(self)
+        wfr = random_mps_dummy(self)
+        wfi = random_mps_dummy(self)
+        wf = wfr + 1j*wfi # just a linear combination
         wf = wf.normalize()
         return wf
 
