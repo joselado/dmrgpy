@@ -21,3 +21,16 @@ static auto get_summps=[]() {
 };
 
 
+static auto overlap_aMb=[]() {
+  // now get the MPS
+  auto psi1 = read_wf("overlap_aMb_wf1.mps") ; // get the WF
+  auto psi2 = read_wf("overlap_aMb_wf2.mps") ; // get the WF
+  auto A = get_mpo_operator("overlap_aMb_M.in"); // get the operator
+  auto c = overlapC(psi1,A,psi2) ; // compute overlap
+  ofstream ofile; // declare
+  ofile.open("OVERLAP_aMb.OUT");  // open file
+  ofile << std::setprecision(20) << real(c) << "  " << imag(c) << endl ;
+  ofile.close() ; // close file
+};
+
+

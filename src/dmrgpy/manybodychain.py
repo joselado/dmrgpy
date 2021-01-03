@@ -198,6 +198,9 @@ class Many_Body_Chain():
   def overlap(self,wf1,wf2,**kwargs):
       """Compute the overlap"""
       return mpsalgebra.overlap(self,wf1,wf2,**kwargs)
+  def aMb(self,wf1,M,wf2,**kwargs):
+      """Compute the overlap <a|M|b>"""
+      return mpsalgebra.overlap_aMb(self,wf1,M,wf2,**kwargs)
   def operator_norm(self,op,**kwargs):
       """Estimate the norm of an operator"""
       return mpsalgebra.operator_norm(self,op,**kwargs)
@@ -262,17 +265,23 @@ class Many_Body_Chain():
           return
       else: raise
       if not os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
-          print("C++ backend not found, trying tu run with Julia version")
+          print("C++ backend not found, trying to run with Julia version")
           self.setup_julia() # turn to Julia
           return self.run() # rerun with julia
       from . import cpprun
       cpprun.run(self) # run the C++ version
-  def get_entropy(self,wf,mode="DMRG",**kwargs):
-      """Return the entanglement entropy"""
-      if mode=="DMRG":
-          from . import entropy
-          return entropy.compute_entropy(self,wf,**kwargs)
-      else: return NotImplemented
+  def get_bond_entropy(self,wf,i,j):
+      """Return the entanglement entropy of two sites"""
+      from . import entropy
+      return entropy.bond_entropy(self,wf,i,j)
+  def get_site_entropy(self,wf,b):
+      """Return the entanglement entropy of a site"""
+      from . import entropy
+      return entropy.site_entropy(self,wf,b)
+#      if mode=="DMRG":
+#          from . import entropy
+#          return entropy.compute_entropy(self,wf,**kwargs)
+#      else: return NotImplemented
   def get_correlation_matrix(self,**kwargs):
       return entanglement.get_correlation_matrix(self,**kwargs)
   def get_correlation_eigenvalues(self,**kwargs):

@@ -76,6 +76,7 @@ main()
     if (check_task("density_matrix"))  reduced_dm() ; // DM
     if (check_task("vev"))  vev() ; // Vacuum expectation value
     if (check_task("applyoperator"))  applyoperator() ; 
+    if (check_task("overlap_aMb"))  overlap_aMb() ; 
     if (check_task("summps"))  get_summps() ; 
     if (check_task("random_mps"))  get_random_mps() ; 
     if (check_task("distribution"))  get_moments_distribution() ; 

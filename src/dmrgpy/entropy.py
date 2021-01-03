@@ -37,3 +37,33 @@ def compute_entropy_single(self,psi,b=1):
 
 
 
+def bond_entropy(self,wf,i,j):
+    """Compute the entropy of a state in bond i"""
+    from .densitymatrix import reduced_dm_projective
+    dm = reduced_dm_projective(self,wf,i=i,j=j) # compute density matrix
+    return entropy_dm(dm,normalize=True) # return the entropy
+
+
+def site_entropy(self,wf,i):
+    """Compute the entropy of a state in bond i"""
+    from .densitymatrix import reduced_dm_projective
+    dm = reduced_dm_projective(self,wf,i=i,j=None) # compute density matrix
+    return entropy_dm(dm,normalize=True) # return the entropy
+
+
+def entropy_dm(dm,normalize=False):
+    from scipy.linalg import eigvalsh
+    if np.abs(1.-np.trace(dm))>1e-3: raise
+    ds = eigvalsh(dm) # compute eigenvalues
+    ds = ds[ds>1e-6]
+    if normalize: 
+        n = dm.shape[0]
+        norm = np.log(n) # normalize
+    else: norm = 1.
+    return -np.sum(ds*np.log(ds))/norm # return the entropy
+
+
+    
+
+
+

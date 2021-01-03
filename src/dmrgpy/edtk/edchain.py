@@ -123,6 +123,7 @@ class State():
         return deepcopy(self)
     def dot(self,a):
         return np.sum(np.conjugate(self.v)*a.v)
+    def aMb(self,M,b): return self.dot(M*b)
 
 
 

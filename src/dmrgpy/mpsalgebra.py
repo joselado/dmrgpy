@@ -38,6 +38,14 @@ def overlap(self,wf1,wf2,mode="DMRG"):
     else: raise
 
 
+def overlap_aMb(self,wf1,A,wf2,mode="DMRG"):
+    """Compute the overlap <wf1|M|wf2>"""
+    #return wf1.dot(A*wf2) # workaround
+    if mode=="DMRG": return overlap_aMb_dmrg(self,wf1,A,wf2)
+    elif mode=="ED": return wf1.dot(A*wf2) # workaround
+    else: raise
+
+
 def overlap_dmrg(self,wf1,wf2):
     """Compute the overlap between wavefunctions"""
 
@@ -48,6 +56,21 @@ def overlap_dmrg(self,wf1,wf2):
     wf2.write(name="overlap_wf2.mps") # copy wavefunction
     self.execute( lambda : self.run()) # run calculation
     m = self.execute( lambda : np.genfromtxt("OVERLAP.OUT")) # run calculation
+    return m[0] + 1j*m[1]
+
+
+def overlap_aMb_dmrg(self,wf1,A,wf2):
+    """Compute the overlap between wavefunctions"""
+    from .multioperator import obj2MO
+    A = obj2MO(A) # convert to a MO
+    task = {"overlap_aMb":"true",
+            }
+    self.task = task # override tasks
+    self.execute(lambda: wf1.write(name="overlap_aMb_wf1.mps"))
+    self.execute(lambda: wf2.write(name="overlap_aMb_wf2.mps"))
+    self.execute(lambda: A.write(name="overlap_aMb_M.in"))
+    self.execute(lambda: self.run()) # run calculation
+    m = self.execute(lambda : np.genfromtxt("OVERLAP_aMb.OUT")) # read
     return m[0] + 1j*m[1]
 
 

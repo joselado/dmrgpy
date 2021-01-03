@@ -30,6 +30,7 @@ class MPS():
         if self.MBO is not None: return self.MBO.overlap(self,x)
         else: raise
     def aMb(self,M,b):
+        if self.MBO is not None: return self.MBO.aMb(self,M,b)
         return self.dot(M*b) # workaround
     def __radd__(self,x): return self + x
     def __add__(self,x):
@@ -60,6 +61,12 @@ class MPS():
             return np.mean([self.get_entropy(i) for i in range(1,self.MBO.ns)])
         if self.MBO is not None: return self.MBO.get_entropy(self,b=b)
         else: raise
+    def get_site_entropy(self,i):
+        if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
+        else: raise # not implemented
+    def get_bond_entropy(self,i,j):
+        if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
+        else: raise # not implemented
     def rename(self,name):
         self.execute(lambda: os.system("mv "+self.name+"  "+name))
         self.name = name
