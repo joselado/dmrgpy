@@ -379,6 +379,7 @@ def generate_profile(mus,xs,kernel="jackson",use_fortran=use_fortran):
   t = xs.copy()
   if kernel=="jackson": mus = jackson_kernel(mus)
   elif kernel=="lorentz": mus = lorentz_kernel(mus)
+  elif kernel=="plain": pass # do nothing
   elif kernel is None: pass
   else: raise
   if use_fortran: # call the fortran routine

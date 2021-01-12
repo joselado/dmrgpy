@@ -135,7 +135,6 @@ def general_kpm_moments(self,X=None,A=None,B=None,
     else: # no scale provided
         X,scale,shift = scale_operator(self,X,a=a,b=b)
     num_p = int(3*scale/delta) # number of polynomials
-    print(num_p)
     if wf is None: wf = self.get_gs() # no wavefunction provided
     # compute the wavefunctions
     if A is not None: wfa = self.applyoperator(A,wf)

@@ -34,9 +34,10 @@ mus,shift,scale = sc.get_distribution_moments(X=M,delta=2e-2)
 # to compute less polynomials
 
 # once we have the moments, lets reconstruct the function
+# the available kernels are jackson, lorentz and plain
 from dmrgpy.algebra.kpm import reconstruct_chebyshev
 x,y = reconstruct_chebyshev(mus,shift=shift,
-        scale=scale,x=np.linspace(-.7,.7,2000))
+        scale=scale,x=np.linspace(-.7,.7,2000),kernel="jackson")
 
 import matplotlib.pyplot as plt
 np.savetxt("DISTRIBUTION.OUT",np.array([x,y.real]).T)
