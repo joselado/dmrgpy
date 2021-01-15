@@ -130,12 +130,7 @@ def write_fields(self):
 def write_sites(self):
   fo = open("sites.in","w")
   fo.write(str(self.ns)+"\n") # write number of sites
-  for si in self.sites:
-    if si<7: fo.write(str(si)+"\n")
-    elif si==1: print("Warning, some sites are not spin operators")
-    else: 
-        print("Not with DMRG yet")
-   #     raise
+  for si in self.sites: fo.write(str(si)+"\n")
   fo.close()
 
 
