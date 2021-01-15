@@ -79,6 +79,7 @@ class Many_Body_Chain():
       self.has_ED_obj = False # ED object has been computed
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
+      self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
       os.system("mkdir -p "+self.path) # create folder for the calculations
       self.initialize()
       # and initialize the sites

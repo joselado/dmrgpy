@@ -53,7 +53,8 @@ def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
   mus = m[0]+1j*m[1]
   from .algebra import kpm
   if self.kpm_extrapolate: 
-      return kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor)
+      return kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+              extrapolation_mode=self.kpm_extrapolate_mode)
   else: return mus
 
 
@@ -158,7 +159,8 @@ def general_kpm_moments(self,X=None,A=None,B=None,
     mus = m[0]+1j*m[1]
     # perform extrapolation if 
     if self.kpm_extrapolate: 
-      mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor)
+      mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+              extrapolation_mode=self.kpm_extrapolate_mode)
     return mus,shift,scale
 
 def general_kpm(self,kernel="jackson",xs=None,**kwargs):

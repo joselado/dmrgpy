@@ -372,30 +372,30 @@ def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
 
 
 def generate_profile(mus,xs,kernel="jackson",use_fortran=use_fortran):
-  """ Uses the Chebychev expansion to create a certain profile"""
-  # initialize polynomials
-#  xs = np.array([0.])
-  tm = np.zeros(xs.shape) +1.
-  t = xs.copy()
-  if kernel=="jackson": mus = jackson_kernel(mus)
-  elif kernel=="lorentz": mus = lorentz_kernel(mus)
-  elif kernel=="plain": pass # do nothing
-  elif kernel is None: pass
-  else: raise
-  if use_fortran: # call the fortran routine
-    ys = kpmf90.generate_profile(mus,xs) 
-  else: # do a python loop
-    ys = np.zeros(xs.shape,dtype=np.complex) + mus[0] # first term
-    # loop over all contributions
-    for i in range(1,len(mus)):
-      mu = mus[i]
-      ys += 2.*mu*t # add contribution
-      tp = 2.*xs*t - tm # chebychev recursion relation
-      tm = t + 0.
-      t = 0. + tp # next iteration
-    ys = ys/np.sqrt(1.-xs*xs) # prefactor
-  ys = ys/np.pi
-  return ys
+    """ Uses the Chebychev expansion to create a certain profile"""
+    # initialize polynomials
+  #  xs = np.array([0.])
+    tm = np.zeros(xs.shape) +1.
+    t = xs.copy()
+    if kernel=="jackson": mus = jackson_kernel(mus)
+    elif kernel=="lorentz": mus = lorentz_kernel(mus)
+    elif kernel=="plain": pass # do nothing
+    elif kernel is None: pass
+    else: raise
+    if use_fortran: # call the fortran routine
+      ys = kpmf90.generate_profile(mus,xs) 
+    else: # do a python loop
+      ys = np.zeros(xs.shape,dtype=np.complex) + mus[0] # first term
+      # loop over all contributions
+      for i in range(1,len(mus)):
+        mu = mus[i]
+        ys += 2.*mu*t # add contribution
+        tp = 2.*xs*t - tm # chebychev recursion relation
+        tm = t + 0.
+        t = 0. + tp # next iteration
+      ys = ys/np.sqrt(1.-xs*xs) # prefactor
+    ys = ys/np.pi
+    return ys
 
 
 

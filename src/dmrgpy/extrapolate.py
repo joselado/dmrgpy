@@ -14,4 +14,8 @@ def size_extrapolation(x,y,n=1):
 
 
 
+#from sklearn.decomposition import PCA
+#pca = PCA(n_components=2)
+#pca.fit(X)
+
 
