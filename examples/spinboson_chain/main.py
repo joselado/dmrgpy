@@ -37,4 +37,3 @@ for i in range(ns,ns+nb):
     print("Single occupation",np.round(bc.vev(bc.D1[i]).real,2))
     print("Double occupation",np.round(bc.vev(bc.D2[i]).real,2))
     print("Triple occupation",np.round(bc.vev(bc.D3[i]).real,2))
-#print("Energy",e)
