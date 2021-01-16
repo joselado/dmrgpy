@@ -43,7 +43,7 @@ from dmrgpy import spinchain
 ```
 
 # Capabilities #
-- Possible models include spinless fermions, spinful fermions, spins, and parafermions
+- Possible models include spinless fermions, spinful fermions, spins, parafermions and bosons
 - Ground state energy
 - Excitation energies
 - Excited wavefunctions
