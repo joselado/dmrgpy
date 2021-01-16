@@ -33,6 +33,10 @@ label2site["S=5/2"] = 6
 label2site["S=3"] = 7
 label2site[6] = 6
 
+def get_site(label):
+    if label in label2site: return label2site[label]
+    else: return None
+
 
 class Spin_Chain(Many_Body_Chain):
     """Class for spin Hamiltonians"""
