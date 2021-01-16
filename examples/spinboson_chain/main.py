@@ -3,8 +3,8 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import bosonchain
-ns = 2 # 6 site sin total, 2 spins and 2 bosons
-nb = 4 # 6 site sin total, 2 spins and 2 bosons
+ns = 2 # 6 sites in total, 2 spins
+nb = 4 # and 4 bosons
 sites = ["S=1/2" for i in range(ns)] # add spins
 sites = sites + ["B" for i in range(nb)] # add bosons
 bc = bosonchain.SpinBoson_Chain(sites) # create the bosonic chain
