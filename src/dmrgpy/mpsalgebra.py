@@ -3,6 +3,7 @@ import numpy as np
 
 def exponential(self,h,wf,mode="DMRG",**kwargs):
     """Compute the exponential"""
+    if self.mode is not None: mode = self.mode # redefine
     if mode=="DMRG": 
         if h.is_hermitian(): 
             return exponential_dmrg(self,h,wf,dt=1.0,**kwargs)
@@ -33,6 +34,7 @@ def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000):
     return wf
 
 def overlap(self,wf1,wf2,mode="DMRG"):
+    if self.mode is not None: mode = self.mode # redefine
     if mode=="DMRG": return overlap_dmrg(self,wf1,wf2)
     elif mode=="ED": return self.get_ED_obj().overlap(wf1,wf2)
     else: raise
@@ -40,6 +42,7 @@ def overlap(self,wf1,wf2,mode="DMRG"):
 
 def overlap_aMb(self,wf1,A,wf2,mode="DMRG"):
     """Compute the overlap <wf1|M|wf2>"""
+    if self.mode is not None: mode = self.mode # redefine
     #return wf1.dot(A*wf2) # workaround
     if mode=="DMRG": return overlap_aMb_dmrg(self,wf1,A,wf2)
     elif mode=="ED": return wf1.dot(A*wf2) # workaround

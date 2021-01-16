@@ -39,6 +39,7 @@ class Many_Body_Chain():
       self.clean() # clean calculation
       self.inipath = os.getcwd() # original folder
       self.ns = len(sites) # number of sites
+      self.mode = None # no mode (use the input parameter)
       self.exchange = 0 # zero
       self.fields = 0 # zero
       self.pairing = 0
@@ -158,6 +159,7 @@ class Many_Body_Chain():
       """
       return vev.vev(self,MO,**kwargs)
   def vev(self,MO,mode="DMRG",**kwargs): 
+      if self.mode is not None: mode = self.mode # redefine
       if mode=="DMRG": return vev.vev(self,MO,**kwargs)
       elif mode=="ED": return self.get_ED_obj().vev(MO,**kwargs) # ED object
       else: raise
@@ -357,6 +359,7 @@ class Many_Body_Chain():
         else: self.skip_dmrg_gs = True # reconverge the calculation
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
+      if self.mode is not None: mode = self.mode # redefine
       if self.computed_gs: return self.wf0
       if mode=="DMRG":
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
@@ -365,6 +368,7 @@ class Many_Body_Chain():
       elif mode=="ED": return self.get_ED_obj().get_gs()
   def gs_energy(self,mode="DMRG",**kwargs):
       """Return the ground state energy"""
+      if self.mode is not None: mode = self.mode # redefine
       if mode=="DMRG": return groundstate.gs_energy(self,**kwargs)
       elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
       else: raise
@@ -413,6 +417,7 @@ class Many_Body_Chain():
       return 3*self.ns # estimated bandwidth
   def random_mps(self,mode="DMRG",orthogonal=None):
       """Generate a random MPS"""
+      if self.mode is not None: mode = self.mode # redefine
       if mode=="DMRG":
          from . import mps
          if orthogonal is None:  return mps.random_mps(self)

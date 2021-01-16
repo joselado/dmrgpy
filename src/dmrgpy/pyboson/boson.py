@@ -27,6 +27,19 @@ class bosonchain(EDchain):
             dop[("A",i)] = op # creation
             dop[("Adag",i)] = np.transpose(np.conjugate(op)) # annhilation
             dop[("density",i)] = np.transpose(np.conjugate(op))@op
+            dop[("N",i)] = np.transpose(np.conjugate(op))@op
+        for i in range(self.nsites): 
+            op = one2many(ids,ids[i],i)
+            dop[("Id",i)] = op
+        # now create the occupation operators
+        for i in range(self.nsites): # loop over sites
+            ops = ids[i]*0.0 # initialize
+            for n in range(ops.shape[0]): # loop over occupations
+                name = "N"+str(n) # name
+                op = ops*0.0 # initialize
+                op[n] = 1.0
+                op = one2many(ids,op,i) # to many-body
+                dop[(name,i)] = op
         # create density operators
         self.operators = dop # store dictionary
     def get_identity(self):
