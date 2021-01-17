@@ -83,10 +83,9 @@ class SpinBoson_Chain(Many_Body_Chain):
                 self.Adag[i] = 0 # set to zero
     def get_ED_obj(self):
         """Return the associated ED object"""
-        raise # not implemented yet!
         if not self.has_ED_obj: # not computed
           if np.exp(np.sum(np.log(self.maxnb)))>10000: raise
-          out = boson.bosonchain(self.maxnb)
+          out = boson.SpinBosonChain(self.maxnb)
           out.hamiltonian = self.hamiltonian
           self.ed_obj = out # store object
           return out
