@@ -48,5 +48,28 @@ class BosonChain(EDchain):
         return one2many(ids)
 
 
+class SpinBosonChain(EDchain):
+    """Object that simultanously incorporates bosons and spins"""
+    def __init__(self,sites):
+        """Initialize the object"""
+        from ..bosonchain import is_boson,get_site
+        nsites = len(sites) # number of sites
+        idsites = [get_site(s) for s in sites] # transform the name to a number
+        isboson = [is_boson(s) for s in idsites] # if this site is a boson 
+        spins = [] # empty list
+        bosons = [] # empty list
+        for i in range(nsites): # loop over sites
+            if isboson[i]: bosons.append(sites[i]) # add to bosons
+            else: spins.append(sites[i]) # add to spins
+        self.nsites = len(nsites) # number of sites
+        raise # this is not finished
+        EDchain.__init__(self) # parent initialization
+        ### Now create all the operators
+
+
+
+
+
+
 bosonchain = BosonChain
 
