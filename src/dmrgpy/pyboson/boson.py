@@ -4,12 +4,12 @@ from ..edtk.one2many import one2many
 from ..edtk.edchain import EDchain
 
 
-class bosonchain(EDchain):
+class BosonChain(EDchain):
     def __init__(self,maxnb):
         """Initialize"""
         self.nsites = len(maxnb) # number of sites
         self.maxnb = maxnb # list with the maximum number of bosons in each site
-        EDchain.__init__(self)
+        EDchain.__init__(self) # parent initialization
         self.create_operators() # initialize operators
     def create_operators(self):
         """Create the different operators"""
@@ -43,9 +43,10 @@ class bosonchain(EDchain):
         # create density operators
         self.operators = dop # store dictionary
     def get_identity(self):
+        """Identity operator"""
         ids = [np.identity(n,dtype=np.complex) for n in self.maxnb] # identities
         return one2many(ids)
 
 
-
+bosonchain = BosonChain
 
