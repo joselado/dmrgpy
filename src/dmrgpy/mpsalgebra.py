@@ -8,7 +8,7 @@ def exponential(self,h,wf,mode="DMRG",**kwargs):
         if h.is_hermitian(): 
             return exponential_dmrg(self,h,wf,dt=1.0,**kwargs)
         elif h.is_antihermitian(): 
-            return exponential_dmrg(self,-1j*h,wf,dt=1j,**kwargs)
+            return exponential_dmrg(self,-1j*h,wf,dt=-1j,**kwargs)
         else:
             print("Operator is not Hermitian nor anti-Hermitian")
             raise
@@ -17,14 +17,14 @@ def exponential(self,h,wf,mode="DMRG",**kwargs):
     else: raise
 
 
-def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000):
+def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000,nt0=None):
     """Compute the exponential of a wavefunction"""
     if not h.is_hermitian(): raise
-    nt0 = int(h.get_bandwidth(self)*nt)
+    if nt0 is None: nt0 = int(h.get_bandwidth(self)*nt)
     task = {"exponential_eMwf":"true",
             "tevol_dt_real":str(-dt.real),
             "tevol_dt_imag":str(dt.imag),
-            "tevol_n":str(nt0),
+            "tevol_n":str(int(nt0)),
             }
     self.task = task # override tasks
     self.execute(lambda: wfa.write(name="input_wavefunction.mps")) # copy WF

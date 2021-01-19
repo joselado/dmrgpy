@@ -70,7 +70,5 @@ class SpinBosonChain(EDchain):
 
 
 
-
-
-bosonchain = BosonChain
+bosonchain = BosonChain # for backwards compatibility
 

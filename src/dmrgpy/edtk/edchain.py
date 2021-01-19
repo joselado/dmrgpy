@@ -23,7 +23,13 @@ class EDchain():
         """Return ground state energy"""
         self.h = self.get_hamiltonian()
         return algebra.ground_state(self.h)[0]
-    def get_gs(self):
+    def get_gs(self,array_mode=True):
+        """Get the ground state"""
+        if array_mode: 
+            print("This will be deprecated")
+            return self.get_gs_array()
+        else: return State(self.get_gs_array(),self)
+    def get_gs_array(self):
         """Get ground state wavefunction"""
         if self.computed_gs: return self.wf0
         else: 
@@ -34,7 +40,7 @@ class EDchain():
           return self.wf0
     def vev(self,op):
         """Return a vacuum expectation value"""
-        wf0 = self.get_gs()
+        wf0 = self.get_gs_array()
         op = multioperator.MO2matrix(op,self) # return operator
         return algebra.braket_wAw(wf0,op)
     def get_excited(self,**kwargs):
@@ -70,11 +76,15 @@ class EDchain():
         return distribution.get_distribution(self,**kwargs)
     def exponential(self,h,wf):
         """Exponential of a wavefunction"""
+        wf = State(wf,self) # conver to State
         h = self.MO2matrix(h) # convert to matrix 
-        return algebra.expm(h)@wf # return
+        return State(algebra.expm(h)*wf.v,self) # return
     def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
-    def overlap(self,wf1,wf2): return np.dot(np.conjugate(wf1),wf2)
-    def applyoperator(self,A,wf): return self.MO2matrix(A)@wf
+    def overlap(self,wf1,wf2):
+        return wf1.dot(wf2) 
+    def applyoperator(self,A,wf): 
+        wf = State(wf,self)
+        return A*wf #return self.MO2matrix(A)@wf
     def random_state(self):
         """Return a random state"""
         n = self.get_hamiltonian().shape[0] # convert to matrix
@@ -87,8 +97,12 @@ class EDchain():
 class State():
     """This is a dummy class to contain states"""
     def __init__(self,v,MBO):
-        self.v = v # store the vector
-        self.MBO = MBO # store the many-body object
+        if type(v)==State:
+            self.v = v.v
+            self.MBO = v.MBO
+        else:
+            self.v = v # store the vector
+            self.MBO = MBO # store the many-body object
     def __rmul__(self,a):
         """Multiply by something"""
         if type(a)==multioperator.MultiOperator: # multioperator
@@ -124,6 +138,8 @@ class State():
     def dot(self,a):
         return np.sum(np.conjugate(self.v)*a.v)
     def aMb(self,M,b): return self.dot(M*b)
+    def normalize(self):
+        return self/np.sqrt(self.dot(self).real)
 
 
 

@@ -178,6 +178,7 @@ def ishermitian(m):
     return True
 
 def expm(m):
+    """Compute exponential"""
     m = todense(m)
     return dlg.expm(m)
 
@@ -210,6 +211,15 @@ def expm(m):
     m = todense(m)
     return dlg.expm(m) # exponential matrix
 
+#def expm(m):
+#    m = todense(m)
+#    es,vs = dlg.eig(m)
+#    d = np.zeros(m.shape,dtype=np.complex)
+#    for i in range(len(es)): d[i,i] = np.exp(es[i])
+#    R = vs.T
+#    Rh = np.conjugate(R.T)
+#    U = Rh@d@R
+#    return U
 
 
 

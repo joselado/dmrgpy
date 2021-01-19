@@ -26,7 +26,7 @@ def get(mode="DMRG",z=1):
 # Compare the result between DMRG and ED
 print("ED",get("ED"))
 print("DMRG",get("DMRG"))
-exit()
+#exit()
 
 
 zs = np.linspace(-1.0,1.0,20)
