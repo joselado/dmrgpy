@@ -35,7 +35,7 @@ def get(ts,mode):
 
 
 
-ts = np.linspace(0.0,4.0,50)
+ts = np.linspace(0.0,5.0,50)
 sc.set_hamiltonian(h) # set Hamiltonian
 # do DMRG
 us0 = get(ts,"DMRG")
