@@ -19,7 +19,10 @@ for i in range(n-1):
 #sc.itensor_version = "julia"
 
 h = h + h.get_dagger()
+sc.set_hamiltonian(h) # set Hamiltonian
 h = h/2.
+e = sc.gs_energy()
+h = h - e
 
 def get(ts,mode):
     sc.set_hamiltonian(h) # set Hamiltonian

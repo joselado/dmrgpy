@@ -6,16 +6,16 @@ from .mps import MPS
 def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-1):
     """Time evolve a wavefunction"""
     if not h.is_hermitian(): raise # only for hermitian Hamiltonians
-#    if type(wf)==State: # ED version
-#        out = []
-#        for t in ts:
-#            wf0 = wf.copy()
-#            wf1 = wf.MBO.exponential(1j*t*h,wf0)
-#            out.append(wf1.copy())
-#        return out
-##        return [wf.MBO.exponential(1j*t*h,wf) for t in ts]
-#    elif type(wf)==MPS: # DMRG version
-    if True:
+    if type(wf)==State: # ED version
+        out = []
+        for t in ts:
+            wf0 = wf.copy()
+            wf1 = wf.MBO.exponential(1j*t*h,wf0)
+            out.append(wf1.copy())
+        return out
+#        return [wf.MBO.exponential(1j*t*h,wf) for t in ts]
+    elif type(wf)==MPS: # DMRG version
+#    if True:
         print("Here")
         from .mpsalgebra import exponential_dmrg
         wf0 = wf.copy() # copy wavefunction
@@ -24,7 +24,7 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-1):
         for i in range(len(ts)):
             t1 = ts[i] # final time
             dt01 = t1-t0 # time difference
-#            wf1 = exponential_dmrg(wf.MBO,h,wf0,dt=1j*dt01,nt0=10) # evolve
+#            wf1 = exponential_dmrg(wf.MBO,h,wf0,dt=1j*dt01) # evolve
 #            wf1 = (1.+1j*dt01*h)*wf0 # taylor expansion
             wf1 = first_order_exponential(h,wf0,dt01)
             wf0 = wf1.copy() # store

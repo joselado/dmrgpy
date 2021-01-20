@@ -360,8 +360,8 @@ class Many_Body_Chain():
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
       if self.mode is not None: mode = self.mode # redefine
-      if self.computed_gs: return self.wf0
-      if mode=="DMRG":
+      if mode=="DMRG": # DMRG mode
+        if self.computed_gs: return self.wf0
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
         else: self.gs_energy(**kwargs) # perform a ground state calculation
         return self.wf0 # return wavefunction

@@ -3,6 +3,7 @@ from scipy.sparse import linalg as slg
 from scipy.sparse import identity
 from .tdtk import evolve # evolve the wavefunction
 from .. import multioperator
+from .edchain import State
 
 def evolution_ABC(self,h,A=None,B=None,C=None,wf=None,nt=100,dt=0.01):
     """Aply operator C, evolve, apply operator B, evolve back,
@@ -16,6 +17,8 @@ def evolution_ABC(self,h,A=None,B=None,C=None,wf=None,nt=100,dt=0.01):
     if wf is None: 
         e0,wf = slg.eigsh(-Hop,k=1,ncv=20,which="LA")
         wf = wf.reshape(wf.shape[0])
+    else: # use the wavefunction provided
+        if type(wf)==State: wf = wf.v # get the vector
     wfA = Aop@wf # apply operator
     wfC = Cop@wf # apply operator
     cs = [] # empty list

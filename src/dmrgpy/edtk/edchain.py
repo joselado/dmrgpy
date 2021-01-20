@@ -76,7 +76,7 @@ class EDchain():
         return distribution.get_distribution(self,**kwargs)
     def exponential(self,h,wf):
         """Exponential of a wavefunction"""
-        wf = State(wf,self) # conver to State
+        wf = State(wf,self) # convert to State
         h = self.MO2matrix(h) # convert to matrix 
         return State(algebra.expm(h)*wf.v,self) # return
     def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
