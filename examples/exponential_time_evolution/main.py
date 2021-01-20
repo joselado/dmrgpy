@@ -36,7 +36,6 @@ def get(ts,mode):
 
 
 ts = np.linspace(0.0,10.0,100) # times to compute
-sc.set_hamiltonian(h) # set Hamiltonian
 # do DMRG
 us0 = get(ts,"DMRG")
 # do ED
