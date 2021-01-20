@@ -27,8 +27,8 @@ def get(ts,mode):
     wf = sc.Sx[0]*wf # apply a flip operator to not have an eigenstate
     wf = wf.normalize() # normalize hte initial wavefunction
     wf0 = wf.copy() # copy the initial state
-    from dmrgpy.timeevolution import evolve_WF # function to perform t-evol
-    wfs = evolve_WF(h,wf,ts=ts) # this computes e^{iht}*wf for each t 
+    from dmrgpy.timeevolution import imaginary_exponential # function to perform t-evol
+    wfs = imaginary_exponential(h,wf,ts=ts) # this computes e^{iht}*wf for each t 
     out = [wf0.dot(wfi) for wfi in wfs] # compute overlap
     out = np.array(out).real # take the real part of the time evolution
     return out # return result

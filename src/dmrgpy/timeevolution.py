@@ -33,6 +33,7 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
     else: raise # unrecognized option
 
 
+imaginary_exponential = evolve_WF # just a wrapper exponential
 
 def first_order_exponential(h,wf,dt):
     print(dt)
