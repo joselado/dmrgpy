@@ -29,6 +29,8 @@ def get(ts,mode):
     wf0 = wf.copy() # copy the initial state
     from dmrgpy.timeevolution import imaginary_exponential # function to perform t-evol
     wfs = imaginary_exponential(h,wf,ts=ts) # this computes e^{iht}*wf for each t 
+    # if wf was a conventional array and h a matrix, the previous line would be like
+    # wfs = [scipy.linalg.expm(1j*t*h)@wf for t in ts] 
     out = [wf0.dot(wfi) for wfi in wfs] # compute overlap
     out = np.array(out).real # take the real part of the time evolution
     return out # return result
