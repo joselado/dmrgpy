@@ -16,14 +16,14 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
       B = self.get_operator(name[1])
     else:
       raise # this is no longer used
-    self.get_gs() # compute ground state
+    wf0 = self.get_gs_array() # compute ground state
     h = self.get_operator(self.hamiltonian) # Hamiltonian in matrix form
     if submode=="KPM":
-      return dynamical_correlator_kpm(h,self.e0,self.wf0,A,B,**kwargs)
+      return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)
     elif submode=="ED":
       return dynamical_correlator_ED(h,A,B,**kwargs)
     elif submode=="INV":
-      return dynamical_correlator_inv(h,self.wf0,self.e0,A,B,**kwargs)
+      return dynamical_correlator_inv(h,wf0,self.e0,A,B,**kwargs)
     elif submode=="TD":
       from .. import timedependent
       return timedependent.dynamical_correlator(self,mode="ED",

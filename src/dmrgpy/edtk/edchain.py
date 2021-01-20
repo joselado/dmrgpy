@@ -25,10 +25,11 @@ class EDchain():
         return algebra.ground_state(self.h)[0]
     def get_gs(self,array_mode=True):
         """Get the ground state"""
-        if array_mode: 
-            print("This will be deprecated")
-            return self.get_gs_array()
-        else: return State(self.get_gs_array(),self)
+#        if array_mode: 
+#            print("This will be deprecated")
+#            return self.get_gs_array()
+#        else: 
+        return State(self.get_gs_array(),self)
     def get_gs_array(self):
         """Get ground state wavefunction"""
         if self.computed_gs: return self.wf0
@@ -78,7 +79,7 @@ class EDchain():
         """Exponential of a wavefunction"""
         wf = State(wf,self) # convert to State
         h = self.MO2matrix(h) # convert to matrix 
-        return State(algebra.expm(h)*wf.v,self) # return
+        return State(algebra.expm(h)@wf.v,self) # return
     def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
     def overlap(self,wf1,wf2):
         return wf1.dot(wf2) 
@@ -98,7 +99,7 @@ class State():
     """This is a dummy class to contain states"""
     def __init__(self,v,MBO):
         if type(v)==State:
-            self.v = v.v
+            self.v = v.v.copy()
             self.MBO = v.MBO
         else:
             self.v = v # store the vector
