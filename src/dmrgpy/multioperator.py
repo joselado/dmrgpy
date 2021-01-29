@@ -39,6 +39,8 @@ class MultiOperator():
     def simplify(self):
         from .multioperatortk import sympymultioperator
         return sympymultioperator.simplifyMO(self)
+    def max_op_prod(self):
+        """Maximum number of oprators in a product"""
     def get_bandwidth(self,MBO):
         """Get the bandwidth"""
         return MBO.bandwidth(self)

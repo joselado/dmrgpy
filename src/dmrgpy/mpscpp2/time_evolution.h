@@ -15,6 +15,23 @@ static auto evoloperator=[](auto H, auto dt) {
 }
 ;
 
+static auto custom_exp=[](auto H, auto z) {
+  auto sites = get_sites();
+  auto ampo = AutoMPO(sites); // generate ampo
+  ampo += 1.0,"Id", 1;
+  auto Iden = MPO(ampo); // identity
+  auto out = sum_mpo(Iden,z*H) ;
+  auto H2 = mult_mpo(H,H);
+//  auto H3 = mult_mpo(H,H2);
+  out = sum_mpo(out,(0.5*z*z)*H2);
+//  out = sum_mpo(out,(z*z*z/6.0)*H2);
+  return out;
+}
+;
+
+
+
+
 
 static auto quench=[]() {
   auto sites = get_sites();
@@ -159,7 +176,9 @@ static auto exponential_eMwf=[]() {
 //  auto nt = int(round(bw*nt0));
   auto nt = nt0;
   auto taui = tau/nt; // small time step
-  expH = toExpH<ITensor>(ampo,taui); // exponential
+  if (get_bool("tevol_custom_exp")) 
+    expH = custom_exp(MPO(ampo),taui) ; // custom exponential
+  else expH = toExpH<ITensor>(ampo,taui); // exponential
   auto psi1 = read_wf("input_wavefunction.mps") ;
   for (int it=1;it<=nt;it++) { // loop
 	      psi1 = exactApplyMPO(expH,psi1,args); // evolve

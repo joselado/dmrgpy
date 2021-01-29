@@ -26,6 +26,7 @@ def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000,nt0=None):
             "tevol_dt_imag":str(dt.imag),
             "tevol_n":str(int(nt0)),
             }
+    if self.tevol_custom_exp: task["tevol_custom_exp"] = "true"
     self.task = task # override tasks
     self.execute(lambda: wfa.write(name="input_wavefunction.mps")) # copy WF
     self.execute(lambda: h.write(name="hamiltonian.in"))
