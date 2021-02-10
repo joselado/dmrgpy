@@ -57,7 +57,7 @@ def symbol2MO(t):
             out = out*symbol2MO(t.args[0]) # multiply
         return out
     elif type(t)==Integer: return complex(t)
-    elif type(t)==numbers.ImaginaryUnit: return 1j
+#    elif type(t)==numbers.ImaginaryUnit: return 1j
     elif type(t)==Float: return complex(t)
     elif hasattr(t, 'is_number'): # if it is a sumpy number
         if t.is_number: return complex(t)
