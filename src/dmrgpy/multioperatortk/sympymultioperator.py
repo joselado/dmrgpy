@@ -1,4 +1,5 @@
 from sympy import *
+import numbers
 from .. import multioperator as classicMO
 
 class MultiOperator(Symbol):
