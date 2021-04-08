@@ -361,7 +361,9 @@ class Many_Body_Chain():
       """Return the ground state"""
       if self.mode is not None: mode = self.mode # redefine
       if mode=="DMRG": # DMRG mode
-        if self.computed_gs: return self.wf0
+        if self.computed_gs: # if stored, rewrite and return
+            self.wf0.write(name=self.wf0.name,path=self.path)
+            return self.wf0
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
         else: self.gs_energy(**kwargs) # perform a ground state calculation
         return self.wf0 # return wavefunction

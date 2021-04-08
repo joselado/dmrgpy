@@ -5,9 +5,8 @@ import numpy as np
 from dmrgpy import spinchain
 
 n = 10 # number of sites in your chain
-spins = [2 for i in range(n)] # create the sites
+spins = ["S=1/2" for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
-#sc.itensor_version = "julia"
 
 hfe = sum(sc.Sz) # Fully ferromagnetic
 sc.set_hamiltonian(-hfe) ; wfup = sc.get_gs() # Fully up wavefunction

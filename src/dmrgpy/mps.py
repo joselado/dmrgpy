@@ -50,11 +50,12 @@ class MPS():
         out.name = name
 #        self.execute(lambda: os.system("cp "+self.name+"  "+out.name))
         return out
-    def write(self,name=None):
+    def write(self,name=None,path=None):
         """Write the MPS in a folder"""
         if name is None: name = self.name
-        open(self.path+"/"+name,"wb").write(self.mps) # write the MPS
-        open(self.path+"/sites.sites","wb").write(self.sites) # write the sites
+        if path is None: path = self.path
+        open(path+"/"+name,"wb").write(self.mps) # write the MPS
+        open(path+"/sites.sites","wb").write(self.sites) # write the sites
     def get_entropy(self,b=None):
         """Compute entanglement entropy in a bond"""
         if b is None: # compute all 
