@@ -342,7 +342,7 @@ class Many_Body_Chain():
       """Compute the energy fluctuations"""
       h = self.get_hamiltonian()
       e = self.vev(h)
-      e2 = self.vev(h*h)
+      e2 = self.vev(h,npow=2)
       return np.sqrt(np.abs(e2-e**2))
   def set_initial_wf_guess(self,wf):
       """Set the initial guess, and perform the DMRG GS calculation"""
