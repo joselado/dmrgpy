@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import spinchain
 n = 8
 # create an S=1/2 spin chain
-spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
+spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
 
 # create first neighbor exchange
@@ -16,6 +16,7 @@ for i in range(n-1):
     h = h + sc.Sy[i]*sc.Sy[i+1]
     h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
+
 
 sc.kpmmaxm = 20 # KPM maxm
 xs = [] # empty list

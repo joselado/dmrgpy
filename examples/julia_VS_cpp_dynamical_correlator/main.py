@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 def get(n):
-  spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
+  spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
   sc = spinchain.Spin_Chain(spins) # create the spin chain
   h = 0
   for i in range(n-1):
@@ -26,11 +26,15 @@ def compare(n):
   sc.get_dynamical_correlator(name=name)
   t1 = time.time()
   sc = get(n)
-  sc.itensor_version = "julia" # setup this version
+#  sc.itensor_version = "julia" # setup this version
+  sc.setup_julia()
   sc.get_dynamical_correlator(name=name)
 #  e1 = sc.gs_energy() # compute the ground state energy
   t2 = time.time()
   return t1-t0,t2-t1
+
+
+
 ns = [4,8,10,20]
 f = open("TIMES.OUT","w")
 for n in ns:

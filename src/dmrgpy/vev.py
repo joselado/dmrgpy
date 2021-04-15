@@ -20,28 +20,29 @@ def power_vev(self,wf=None,n=4,X=None,**kwargs):
 
 
 
-def multi_vev(self,MO,excited=False,n=4,scale=10.0,npow=1):
+def multi_vev(self,MO,wf=None,npow=1,**kwargs):
     """
     Compute a VEV using multioperators
     """
     MO = multioperator.obj2MO(MO,name="vev_multioperator")
     if MO.name!="vev_multioperator": raise
     if npow==0: return 1.0
-    self.get_gs()
+    if wf is None: wf = self.get_gs() # get the ground state
+    wf.write(name="wf_vev.mps") # write wavefunction
     taskd = MO.get_dict() # get the dictionary
     self.task["vev"] = "true" # do a VEV
+    self.task["wf_vev"] = "wf_vev.mps" # WF to use VEV
     self.task["pow_vev"] = int(npow) # power
     self.write_task() # write the tasks in a file
     self.write_hamiltonian() # write the Hamiltonian to a file
     self.execute(lambda: MO.write()) # write multioperator
     self.run() # perform the calculation
     m = self.execute(lambda: np.genfromtxt("VEV.OUT"))
-    if excited: m = m.T
     return m[0]+1j*m[1] # return result
 
 
 def vev(*args,**kwargs):
-    return multi_vev(*args,excited=False,**kwargs)
+    return multi_vev(*args,**kwargs)
 
 
 def excited_vev(*args,**kwargs):
