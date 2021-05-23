@@ -19,7 +19,7 @@ from dmrgpy import mpsalgebra
 # the GS mode targets the state with minimum Re(E)
 
 fc.set_hamiltonian(h) ; print(fc.get_excited(mode="ED",n=3)) 
-exit()
+#exit()
 #fc.set_hamiltonian(h) 
 #e,wf = fc.get_excited_states(mode="ED",n=1)
 #wf=wf[0]
@@ -27,7 +27,11 @@ exit()
 #exit()
 
 #e,wf = mpsalgebra.mpsarnoldi(fc,h,mode="GS",n=10,verbose=2,nwf=3,maxit=3)
-e,wf = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=2,n=3)
+fc.maxm = 20
+e,wf = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=2,n=3,
+maxit=3)
+e,wf = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=2,n=3,
+maxit=3,wfs=wf)
 
 print("MPS Energy",e)
 #import scipy.linalg as lg

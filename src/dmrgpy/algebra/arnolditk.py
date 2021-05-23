@@ -225,14 +225,21 @@ def lowest_energy(self,H,npm=10,verbose=0,n=1,**kwargs):
             verbose=verbose,**kwargs) 
 
 
-def lowest_energy_non_hermitian(self,H,n=1,npm=10,verbose=0,**kwargs):
+def lowest_energy_non_hermitian(self,H,n=1,npm=10,verbose=0,
+    wfs=None, # initial guess
+    **kwargs):
     """Compute the most negative energy of a Hamiltonian,
     assuming a non Hermitian Hamiltonian"""
 #    emax,wf = mpsarnoldi(self,H,mode="LM",n0=npm,n=1,nwf=1,maxit=1,
 #            **kwargs) # warm up
-    emax,wf = power_method(self,H,n0=npm,verbose=verbose) # PM estimate
+    if wfs is None:
+        emax,wf = power_method(self,H,n0=npm,verbose=verbose) # PM estimate
+    else:
+        emax = wfs[0].dot(H*wfs[0])
+        print("Energy",emax)
+        emax = -np.abs(emax)
     # most negative real part
-    return mpsarnoldi(self,H,mode="GS",n0=npm,n=2*n+1,nwf=n,maxit=10,
+    return mpsarnoldi(self,H,mode="GS",n0=npm,n=2*n+1,nwf=n,wfs=wfs,
             shift=-np.abs(emax),verbose=verbose,**kwargs)
 
 def most_positive_energy(self,H,npm=10,verbose=0,dt=0.1,n=1,**kwargs):
