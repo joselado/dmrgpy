@@ -11,12 +11,22 @@ sc = spinchain.Spin_Chain(spins) # create the chain
 
 # now define the Hamiltonian
 h = 0
-for i in range(n-1): h = h - sc.Sz[i]*sc.Sz[i+1] # add exchange
-for i in range(n): h = h - .5*sc.Sx[i] # add transverse field
+for i in range(n-1): 
+    h = h + sc.Sx[i]*sc.Sx[i+1] # add exchange
+    h = h + sc.Sy[i]*sc.Sy[i+1] # add exchange
+    h = h + sc.Sz[i]*sc.Sz[i+1] # add exchange
+for i in range(n): h = h - .6*sc.Sx[i] # add transverse field
 #h = h - sc.Sz[n-1]*sc.Sz[0] # and apply periodic boundary conditions
-sc.set_hamiltonian(sum(sc.Sz)) ; wf = sc.get_gs()
+#sc.set_hamiltonian(sum(sc.Sz)) ; wf = sc.get_gs()
 sc.set_hamiltonian(h) # and initialize the Hamiltonian
-sc.get_gs(wf0=wf)
+wf = sc.get_gs()
+
+mz = sum(sc.Sz)
+mzv = wf.dot(mz*wf).real
+mz2v = wf.dot(mz*(mz*wf)).real
+
+print("Error",mz2v-mzv**2,mz2v,mzv)
+#exit()
 # setup some parameters
 sc.maxm = 20
 sc.kpmmaxm = sc.maxm
