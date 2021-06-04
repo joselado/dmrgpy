@@ -49,6 +49,7 @@ def get(V=0.0,c=1.0):
     es,wfs = fc.get_excited_states(mode="ED",n=nex) # get excited states
     return es - es[0] # return energies
 
+# open file
 f = open("EIGS.OUT","w")
 
 # compute for different interactions
