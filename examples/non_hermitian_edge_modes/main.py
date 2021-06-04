@@ -40,10 +40,9 @@ def get(V=0.0,c=1.0):
     for i in range(ns-1): h = h + V*(fc.N[i]-0.5)*(fc.N[i+1]-0.5)
     
     
-    # Compute with ED
-    # the GS mode targets the state with minimum Re(E)
     fc.set_hamiltonian(h)
     nex = 10 # lowest states
+    # the following methods target the states with minimum Re(E)
     # use this if you wanted to use MPS
 #    es,wfs = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=1,n=nex,maxit=7)
     # this method is just for ED
@@ -62,5 +61,4 @@ for V in np.linspace(0.0,1.0,20):
         f.write(str(V)+"\n")
     f.flush()
 f.close()
-#np.savetxt("EIGS.OUT",np.array([esed.real,esed.imag]).T)
 
