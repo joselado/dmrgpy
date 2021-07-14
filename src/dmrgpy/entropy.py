@@ -58,7 +58,17 @@ def site_entropy(self,wf,i):
     """Compute the entropy of a state in bond i"""
     from .densitymatrix import reduced_dm_projective
     dm = reduced_dm_projective(self,wf,i=i,j=None) # compute density matrix
-    return entropy_dm(dm,normalize=True) # return the entropy
+    return entropy_dm(dm,normalize=False) # return the entropy
+
+
+def mutual_information(self,wf,i,j):
+    """Compute the mutual information"""
+    si = site_entropy(self,wf,i) # entropy in i
+    sj = site_entropy(self,wf,j) # entropy in i
+    sij = pair_entropy(self,wf,i,j) # joint entropy
+    print(si,sj,sij)
+    return si + sj - sij # return the mutual information
+
 
 
 def entropy_dm(dm,normalize=False):

@@ -6,12 +6,12 @@ from dmrgpy import spinchain
 n = 4
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
-# This example shows how compute the entropy between sites (0,1) and
+# This example shows how compute the mutual information
 # (2,3) of a spin chain with 4 sites
 
 # function computing the entropy
 def get(c01):
-    """Compute entropy"""
+    """Compute mutual information"""
     # Heisenberg model
     sc = spinchain.Spin_Chain(spins) # create the spin chain
     h = 0
@@ -23,19 +23,17 @@ def get(c01):
         h = h +c*sc.Sz[i]*sc.Sz[i+1]
     sc.set_hamiltonian(h)
     wf = sc.get_gs() # compute ground state
-    s = wf.get_pair_entropy(0,1) # entropy of the sites (0,1) with the rest
-#   Alternative method
-#    s1 = wf.get_bond_entropy(1,2) # compute entropy at this bond
-#    print(s,s1,s1/s)
+    s = wf.get_mutual_information(1,2) # mutual information
+    print(c01,s)
     return s
 
-cs = np.linspace(0.,1.,20) # coupling between left and right parts
+cs = np.linspace(0.,1.,10) # coupling between left and right parts
 ss = [get(c) for c in cs] # compute all the entropies
 
 import matplotlib.pyplot as plt
 
 plt.plot(cs,ss,marker="o")
 plt.xlabel("Coupling between (1,2) and (3,4)")
-plt.ylabel("Entanglement entropy of the (1,2) pair")
+plt.ylabel("Mutual information")
 plt.show()
 

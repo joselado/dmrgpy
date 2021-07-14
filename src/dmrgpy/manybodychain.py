@@ -280,6 +280,9 @@ class Many_Body_Chain():
   def get_site_entropy(self,wf,b):
       """Return the entanglement entropy of a site"""
       return entropy.site_entropy(self,wf,b)
+  def get_mutual_information(self,wf,i,j):
+      """Return the mutual information"""
+      return entropy.mutual_information(self,wf,i,j)
   def get_pair_entropy(self,wf,i,j):
       """Return the entanglement entropy of two sites with the
       rest of the system"""
