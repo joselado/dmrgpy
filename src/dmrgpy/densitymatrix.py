@@ -39,7 +39,7 @@ def reduced_dm_projective(self,wf,i=0,j=None):
         else: raise # not implemented
     Pi = projectors(i) # projectors for site i
     if j is not None: Pj = projectors(j) # projectors for site j
-    else: Pj = [1] # workaorund for a single site
+    else: Pj = [1] # workaround for a single site
     Pk = [] # projectors in the ij subspace
     for pi in Pi:
         for pj in Pj: Pk.append(pi*pj) # store the projector in this subspace

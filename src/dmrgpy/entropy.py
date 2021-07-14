@@ -39,9 +39,19 @@ def compute_entropy_single(self,psi,b=1):
 
 def bond_entropy(self,wf,i,j):
     """Compute the entropy of a state in bond i"""
+    if abs(i-j)==1: # use the DMRG approach
+        return compute_entropy_single(self,wf,b=max([i,j]))
+    else: raise
+#    from .densitymatrix import reduced_dm_projective
+#    dm = reduced_dm_projective(self,wf,i=i,j=j) # compute density matrix
+#    return entropy_dm(dm,normalize=True) # return the entropy
+
+
+def pair_entropy(self,wf,i,j):
+    """Compute the entropy of a state in bond i"""
     from .densitymatrix import reduced_dm_projective
     dm = reduced_dm_projective(self,wf,i=i,j=j) # compute density matrix
-    return entropy_dm(dm,normalize=True) # return the entropy
+    return entropy_dm(dm,normalize=False) # return the entropy
 
 
 def site_entropy(self,wf,i):

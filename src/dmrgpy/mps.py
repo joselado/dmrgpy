@@ -68,6 +68,9 @@ class MPS():
     def get_bond_entropy(self,i,j):
         if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
         else: raise # not implemented
+    def get_pair_entropy(self,i,j):
+        if self.MBO is not None: return self.MBO.get_pair_entropy(self,i,j)
+        else: raise # not implemented
     def rename(self,name):
         self.execute(lambda: os.system("mv "+self.name+"  "+name))
         self.name = name

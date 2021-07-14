@@ -13,6 +13,7 @@ from . import funtk
 from . import vev
 from . import mpsalgebra
 from . import entanglement
+from . import entropy
 from . import excited
 from . import effectivehamiltonian
 from .writemps import write_sites
@@ -275,16 +276,14 @@ class Many_Body_Chain():
       cpprun.run(self) # run the C++ version
   def get_bond_entropy(self,wf,i,j):
       """Return the entanglement entropy of two sites"""
-      from . import entropy
       return entropy.bond_entropy(self,wf,i,j)
   def get_site_entropy(self,wf,b):
       """Return the entanglement entropy of a site"""
-      from . import entropy
       return entropy.site_entropy(self,wf,b)
-#      if mode=="DMRG":
-#          from . import entropy
-#          return entropy.compute_entropy(self,wf,**kwargs)
-#      else: return NotImplemented
+  def get_pair_entropy(self,wf,i,j):
+      """Return the entanglement entropy of two sites with the
+      rest of the system"""
+      return entropy.pair_entropy(self,wf,i,j)
   def get_correlation_matrix(self,**kwargs):
       return entanglement.get_correlation_matrix(self,**kwargs)
   def get_correlation_eigenvalues(self,**kwargs):
