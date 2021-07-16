@@ -64,9 +64,8 @@ def site_entropy(self,wf,i):
 def mutual_information(self,wf,i,j):
     """Compute the mutual information"""
     si = site_entropy(self,wf,i) # entropy in i
-    sj = site_entropy(self,wf,j) # entropy in i
+    sj = site_entropy(self,wf,j) # entropy in j
     sij = pair_entropy(self,wf,i,j) # joint entropy
-    print(si,sj,sij)
     return si + sj - sij # return the mutual information
 
 
