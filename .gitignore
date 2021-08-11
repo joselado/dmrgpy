@@ -20,3 +20,6 @@ julia*
 ERROR
 maxenttk
 padetk
+*.egg.*
+setup.py
+pipupdate.sh
