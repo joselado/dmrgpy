@@ -4,8 +4,8 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import fermionchain
 
-n = 1 # number of tetramers
-ns = 4*n # number of unit cells
+n = 1 # number of unit cells
+ns = 4*n # total number of sites
 
 # create the tight binding matrix
 mh = np.zeros((ns,ns),dtype=np.complex) # TB matrix
@@ -46,7 +46,7 @@ fc.maxm = 20 # increase it if you need more accuracy
 es,wfs = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,
          verbose=1, # print info on how it is progressing
          n=3, # number of excited states
-         maxit=7 # this sets a cutoff in the number of itnerrations
+         maxit=7 # this sets a cutoff in the number of iterations
          )
 
 
