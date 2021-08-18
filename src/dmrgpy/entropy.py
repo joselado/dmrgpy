@@ -57,6 +57,7 @@ def pair_entropy(self,wf,i,j):
 def site_entropy(self,wf,i):
     """Compute the entropy of a state in bond i"""
     from .densitymatrix import reduced_dm_projective
+    wf = wf.normalize() # normalize the wavefunction
     dm = reduced_dm_projective(self,wf,i=i,j=None) # compute density matrix
     return entropy_dm(dm,normalize=False) # return the entropy
 
