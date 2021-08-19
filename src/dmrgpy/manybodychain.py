@@ -113,7 +113,7 @@ class Many_Body_Chain():
       """
       from copy import deepcopy
       name = "dmrgpy_clone_"+str(np.random.randint(1000000))
-      os.system("rm -rf /tmp/"+path) # clean the directory
+      os.system("rm -rf /tmp/"+name) # clean the directory
       out = deepcopy(self) 
       out.path = "/tmp/"+name # new path
       out.inipath = os.getcwd() # initial path
