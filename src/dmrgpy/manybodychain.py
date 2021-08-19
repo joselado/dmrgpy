@@ -112,9 +112,9 @@ class Many_Body_Chain():
       Clone the object and create a temporal folder
       """
       from copy import deepcopy
-      name = "dmrgpy_clone_"+str(np.random.randint(1000000))
+      name = "dmrgpy_clone_"+str(np.random.randint(10000))
       os.system("rm -rf /tmp/"+name) # clean the new directory
-      out = deepcopy(self) 
+      out = deepcopy(self) # full copy of the object 
       out.path = "/tmp/"+name # new path
       out.inipath = os.getcwd() # initial path
 #      print("New path",out.path)
