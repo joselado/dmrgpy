@@ -106,12 +106,16 @@ class State():
             self.MBO = MBO # store the many-body object
     def __rmul__(self,a):
         """Multiply by something"""
+        from ..algebra.algebra import ismatrix
         if type(a)==multioperator.MultiOperator: # multioperator
             A = self.MBO.MO2matrix(a)  # get the matrix
             w = A@self.v # multiply
             return State(w,self.MBO) # create a new object
         elif multioperator.isnumber(a):
             w = a*self.v # multiply
+            return State(w,self.MBO) # create a new object
+        elif ismatrix(a):
+            w = a@self.v
             return State(w,self.MBO) # create a new object
         else: raise # not implemented
     def __add__(self,a):

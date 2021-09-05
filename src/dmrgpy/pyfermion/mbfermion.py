@@ -47,6 +47,8 @@ class MBFermion(edchain.EDchain):
         self.nMB = len(self.basis) # dimension of many body hamiltonian
         self.basis_dict = states.get_dictionary(self.basis) # dictionary
         self.h = csc_matrix(([],([],[])),shape=(self.nMB,self.nMB)) # Hamil
+        self.C = [self.get_c(i) for i in range(n)]
+        self.Cdag = [self.get_cd(i) for i in range(n)]
     def get_c(self,i):
         """
         Return the annhilation operator for site i in the many body basis
@@ -173,6 +175,9 @@ class MBFermion(edchain.EDchain):
         return np.array([algebra.braket_wAw(wf,m) for wf in wfs])
     def test(self):
         test_commutation(self)
+    def get_gs(self,**kwargs):
+        out = super().get_gs(**kwargs)
+        return Fermionic_State(out,out.MBO)
     def get_operator(self,name,i=0):
         """
         Return a certain operator
@@ -238,5 +243,11 @@ def test_commutation(self):
 
 
 
+class Fermionic_State(edchain.State):
+    """Special object for many-body fermions"""
+    def get_dm(self,**kwargs):
+        """Special fucntion to compute density matrix"""
+        from ..dmtk.densitymatrix import dm_fermionic
+        return dm_fermionic(self,**kwargs)
 
 

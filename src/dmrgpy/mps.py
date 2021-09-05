@@ -104,6 +104,10 @@ class MPS():
         if multioperator.isnumber(x):
             return x*multioperator.identity()*self
         else: raise
+    def get_dm(self,**kwargs):
+        """COmpute the density matrix"""
+        from .dmtk.densitymatrix import dm
+        return dm(self,**kwargs)
 
 
 
