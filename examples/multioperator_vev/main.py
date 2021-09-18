@@ -21,3 +21,12 @@ for i in range(1,n): op = op*sc.Sx[i]
 
 print("VEV with DMRG",sc.vev(op,mode="DMRG").real)
 print("VEV with ED",sc.vev(op,mode="ED").real)
+
+
+
+
+
+
+
+
+

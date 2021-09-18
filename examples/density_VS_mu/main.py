@@ -68,3 +68,12 @@ plt.plot(mus,deltas,marker="o")
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

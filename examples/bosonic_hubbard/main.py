@@ -22,3 +22,12 @@ print(bc.gs_energy(mode="ED"))
 
 ds = [bc.vev(bc.get_operator("density",i),mode="ED").real for i in range(n)]
 print(ds)
+
+
+
+
+
+
+
+
+

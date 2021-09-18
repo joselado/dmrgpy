@@ -46,3 +46,12 @@ plt.xlabel("B")
 plt.ylabel("Sz")
 plt.show()
 
+
+
+
+
+
+
+
+
+

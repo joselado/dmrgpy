@@ -18,3 +18,12 @@ plt.plot(range(len(cs)),cs,marker="o") # correlator using DMRG
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

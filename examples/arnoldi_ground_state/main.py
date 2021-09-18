@@ -18,3 +18,12 @@ from dmrgpy import mpsalgebra
 e,wf = mpsalgebra.lowest_energy_arnoldi(sc,h,verbose=1)
 print("Arnoldi",e.real)
 print("DMRG",sc.gs_energy())
+
+
+
+
+
+
+
+
+

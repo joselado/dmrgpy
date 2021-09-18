@@ -1,5 +1,6 @@
-
+# Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 
 import numpy as np
 from dmrgpy import fermionchain
@@ -41,5 +42,14 @@ plt.plot(range(nc),c2.real,label="ED",c="red")
 plt.legend()
 
 plt.show()
+
+
+
+
+
+
+
+
+
 
 

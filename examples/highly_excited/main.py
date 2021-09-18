@@ -17,3 +17,12 @@ sc.set_hamiltonian(h)
 from dmrgpy import mpsalgebra
 e,wf = mpsalgebra.mpsarnoldi(sc,h,e=.4,mode="ShiftInv")
 print("Energy",e)
+
+
+
+
+
+
+
+
+

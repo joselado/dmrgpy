@@ -37,3 +37,12 @@ plt.plot(us,gs,marker="o")
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

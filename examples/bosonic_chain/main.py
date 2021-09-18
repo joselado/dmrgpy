@@ -25,3 +25,12 @@ for i in range(n):
     print("Double occupation",np.round(bc.vev(bc.D2[i]).real,2))
     print("Triple occupation",np.round(bc.vev(bc.D3[i]).real,2))
 #print("Energy",e)
+
+
+
+
+
+
+
+
+

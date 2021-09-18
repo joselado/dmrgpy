@@ -29,3 +29,12 @@ import matplotlib.pyplot as plt
 plt.plot(es,ds,marker="x")
 plt.plot(es1.real,-ds1.imag,marker="o")
 plt.show()
+
+
+
+
+
+
+
+
+

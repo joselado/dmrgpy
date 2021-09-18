@@ -21,3 +21,12 @@ pc.test()
 pc.set_hamiltonian(h) # set the Hamiltonian
 print(pc.gs_energy(mode="DMRG"))
 print(pc.gs_energy(mode="ED"))
+
+
+
+
+
+
+
+
+

@@ -19,3 +19,12 @@ print("Energies with MPS",ssc.get_excited(mode="MPS",n=ne))
 print("Energies with classic DMRG",ssc.get_excited(mode="classicDMRG",n=ne))
 
 
+
+
+
+
+
+
+
+
+

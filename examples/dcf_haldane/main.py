@@ -19,3 +19,12 @@ for i in range(n): # loop over sites
 fo.close()
 
 
+
+
+
+
+
+
+
+
+

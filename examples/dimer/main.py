@@ -20,3 +20,12 @@ h = h + c0*S111*S111
 
 sc.set_hamiltonian(h)
 print(sc.get_excited(n=9,mode="ED"))
+
+
+
+
+
+
+
+
+

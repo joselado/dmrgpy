@@ -32,3 +32,12 @@ for b in np.linspace(0.,4.0,20):
   print("B=",b,"Mz DMRG = ",mz0,"Mz ED",mz1)
 
 
+
+
+
+
+
+
+
+
+

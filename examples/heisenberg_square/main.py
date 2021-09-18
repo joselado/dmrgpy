@@ -21,3 +21,12 @@ for j2 in j2s:
 
 for i in range(1,len(j2s)):
     print(np.abs(wfs[i-1].dot(wfs[i])))
+
+
+
+
+
+
+
+
+

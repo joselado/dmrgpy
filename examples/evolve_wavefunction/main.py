@@ -1,6 +1,6 @@
-#------------------------------------------------------------------
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+#------------------------------------------------------------------
 import numpy as np
 from dmrgpy import spinchain
 
@@ -32,4 +32,13 @@ def get_wf(h, ts, wf_initial=wf0):
     return wf_final 
 
 wf_final = get_wf(h, ts, wf_initial=wf0)
+
+
+
+
+
+
+
+
+
 

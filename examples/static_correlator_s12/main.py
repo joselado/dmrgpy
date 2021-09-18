@@ -55,3 +55,12 @@ plt.ylabel("<GS|S_0 S_N |GS>")
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

@@ -27,3 +27,12 @@ inds = range(n) # indexes of the sites
 import matplotlib.pyplot as plt
 plt.plot(inds,Mz,marker="o")
 plt.show()
+
+
+
+
+
+
+
+
+

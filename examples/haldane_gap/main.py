@@ -22,3 +22,12 @@ gap = es[4] - es[0]
 print("Haldane gap =",gap)
 
 
+
+
+
+
+
+
+
+
+

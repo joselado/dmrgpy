@@ -49,3 +49,12 @@ plt.legend()
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

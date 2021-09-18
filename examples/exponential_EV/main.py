@@ -42,3 +42,12 @@ plt.legend()
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

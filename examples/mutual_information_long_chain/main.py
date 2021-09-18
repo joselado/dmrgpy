@@ -28,3 +28,12 @@ plt.xlabel("Bond")
 plt.ylabel("Mutual information")
 plt.show()
 
+
+
+
+
+
+
+
+
+

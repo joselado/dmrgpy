@@ -37,3 +37,12 @@ np.savetxt("M_VS_B.OUT",np.array([bs,ms]).T) # save in a file
 
 
 
+
+
+
+
+
+
+
+
+

@@ -37,3 +37,12 @@ plt.scatter(xf,yf.imag,c="red")
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

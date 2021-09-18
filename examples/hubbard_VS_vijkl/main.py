@@ -1,7 +1,7 @@
-# Add the root path of the dmrgpy library and uncomment the next two lines
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 # for example PATH = /home/jose/programs/dmrgpy/src
 #PATH = PATH_TO_DMRGPY_LIBRARY
-#import os ; import sys ; sys.path.append(PATH)
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -46,4 +46,13 @@ e1 = fc.gs_energy() # now get the energy
 
 print("Energy with Hubbard",e0)
 print("Energy with Vijkl",e1)
+
+
+
+
+
+
+
+
+
 

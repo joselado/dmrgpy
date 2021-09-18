@@ -27,3 +27,12 @@ wfs = wfup + 3.7*wfdn # sum the two wavefunctions
 
 print("Overlap with the sum",wfdn.overlap(wfs).real)
 
+
+
+
+
+
+
+
+
+

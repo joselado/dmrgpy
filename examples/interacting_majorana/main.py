@@ -25,3 +25,12 @@ ii = 0#n//2
 (es,ds) = fc.get_dynamical_correlator(es=np.linspace(0.,3.,600),name=(fc.Cdag[ii],fc.C[ii]),delta=1e-1)
 
 np.savetxt("DOS.OUT",np.array([es,ds.real]).T)
+
+
+
+
+
+
+
+
+

@@ -16,3 +16,12 @@ sc.set_exchange(fj)
 e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy
 
 
+
+
+
+
+
+
+
+
+

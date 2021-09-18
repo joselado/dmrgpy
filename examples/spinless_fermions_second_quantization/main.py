@@ -1,5 +1,6 @@
-
+# Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+
 
 import numpy as np
 from dmrgpy import fermionchain
@@ -23,3 +24,12 @@ H = H + H.get_dagger() # make it Hermitian
 fc.set_hamiltonian(H) # set the Hamiltonian
 print("Energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 print("Energy with ED",fc.gs_energy(mode="ED")) # energy with exact diag.
+
+
+
+
+
+
+
+
+

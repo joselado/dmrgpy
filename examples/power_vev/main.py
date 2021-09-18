@@ -42,3 +42,12 @@ print("Mz2 by brute force",d0,"and time spent",t2-t1)
 print("\nPerformace improvement\n",(t2-t1)/(t1-t0))
 
 
+
+
+
+
+
+
+
+
+

@@ -37,3 +37,12 @@ plt.xlabel("Coupling between (1,2) and (3,4)")
 plt.ylabel("Mutual information")
 plt.show()
 
+
+
+
+
+
+
+
+
+

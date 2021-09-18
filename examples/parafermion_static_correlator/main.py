@@ -45,3 +45,12 @@ plt.plot(range(no),c2.real,color="red",label="DMRG")
 plt.scatter(range(no),c1.real,color="blue",label="ED")
 plt.legend()
 plt.show()
+
+
+
+
+
+
+
+
+

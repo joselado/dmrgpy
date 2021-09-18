@@ -41,3 +41,12 @@ for n in ns:
     print("Time with Julia",dt1)
     print()
 f.close()
+
+
+
+
+
+
+
+
+

@@ -27,3 +27,12 @@ print(l) # write the Hamiltonian in latex
 
 
 
+
+
+
+
+
+
+
+
+

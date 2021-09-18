@@ -38,3 +38,12 @@ for b in bs:
         fo.write(str(mzs[i])+ "\n")
     print(mzs)
 fo.close()
+
+
+
+
+
+
+
+
+

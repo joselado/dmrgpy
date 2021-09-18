@@ -46,3 +46,12 @@ plt.xlabel("Frequency")
 plt.legend()
 plt.show()
 
+
+
+
+
+
+
+
+
+

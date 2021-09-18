@@ -28,3 +28,12 @@ for i in range(len(out)):
       f.write(str(out[i][j])+"\n")
 
 f.close()
+
+
+
+
+
+
+
+
+

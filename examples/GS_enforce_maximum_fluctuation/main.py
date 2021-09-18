@@ -17,3 +17,12 @@ sc.maxm = 10
 sc.set_hamiltonian(h)
 e = sc.gs_energy(maxde=1e-6) # compute the ground state energy
 print("Energy",e)
+
+
+
+
+
+
+
+
+

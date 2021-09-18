@@ -23,3 +23,12 @@ for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
     de = sc.gs_energy_fluctuation() # fluctuation
     print("Energy",e,"fluctuation",de,"for bond dimension",maxm)
 
+
+
+
+
+
+
+
+
+

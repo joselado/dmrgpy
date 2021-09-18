@@ -46,3 +46,12 @@ plt.plot(range(len(es)),es,marker="o")
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

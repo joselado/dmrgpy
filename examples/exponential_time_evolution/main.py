@@ -50,3 +50,12 @@ plt.legend()
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

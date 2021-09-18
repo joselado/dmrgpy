@@ -19,3 +19,12 @@ de1 = sc.get_excited(n=20,fluctuations=True)[1]
 
 print("Average fluctuation with GM",np.mean(de0))
 print("Average fluctuation without GM",np.mean(de1))
+
+
+
+
+
+
+
+
+

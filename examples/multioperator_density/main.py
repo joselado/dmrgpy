@@ -37,3 +37,12 @@ for i in range(n): # loop over sites
 print("Density DMRG",[fc.vev(di,mode="DMRG").real for di in den])
 print("Density ED",[fc.vev(di,mode="ED").real for di in den])
 
+
+
+
+
+
+
+
+
+

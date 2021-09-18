@@ -1,5 +1,5 @@
 # Add the root path of the dmrgpy library
-#import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
@@ -49,5 +49,14 @@ plt.xlabel("magnetization")
 plt.ylabel("distribution")
 plt.legend()
 plt.show()
+
+
+
+
+
+
+
+
+
 
 

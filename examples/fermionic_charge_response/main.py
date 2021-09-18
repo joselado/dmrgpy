@@ -1,6 +1,5 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
-#import os ; import sys ; sys.path.append(os.environ["PYGRAROOT"])
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -61,4 +60,13 @@ plt.ylabel("Dynamical correlator")
 plt.xlabel("Frequency")
 plt.legend()
 plt.show()
+
+
+
+
+
+
+
+
+
 

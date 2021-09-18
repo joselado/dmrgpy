@@ -19,3 +19,12 @@ sc.set_hamiltonian(h) # create the Hamiltonian
 print("Energy with DMRG",sc.gs_energy(mode="DMRG"))
 print("Energy with ED",sc.gs_energy(mode="ED"))
 
+
+
+
+
+
+
+
+
+

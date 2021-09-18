@@ -1,7 +1,7 @@
 # Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 # replace PATH_TO_DMRGPY by your actual path to the library
 # PATH_TO_DMRGPY = /home/jose/programs/dmrgpy/src
-#import os ; import sys ; sys.path.append(PATH_TO_DMRGPY)
 
 import numpy as np # conventional numpy library
 from dmrgpy import spinchain # library dealing with DMRG for spin chains
@@ -49,6 +49,15 @@ print("\n")
 print("Now the best energy that could be found (by construction)")
 print("Energy for optimal sorting",get_energy(ind0))
 print("Optimal sorting",ind0)
+
+
+
+
+
+
+
+
+
 
 
 

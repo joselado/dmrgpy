@@ -47,3 +47,12 @@ plt.show()
 #print("Energy using exact diagonalization",e1)
 
 
+
+
+
+
+
+
+
+
+

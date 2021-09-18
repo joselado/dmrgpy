@@ -25,3 +25,12 @@ print("Energy with fermions",fc.gs_energy())
 print(fc.get_density())
 
 
+
+
+
+
+
+
+
+
+

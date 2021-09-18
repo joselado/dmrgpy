@@ -1,3 +1,5 @@
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
@@ -31,4 +33,13 @@ xs = np.linspace(0.,.6,30)
 ys = [get(d) for d in xs]
 
 np.savetxt("SWEEP.OUT",np.array([xs,ys]).T)
+
+
+
+
+
+
+
+
+
 

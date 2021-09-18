@@ -15,3 +15,12 @@ for i in range(n-1):
 sc.set_hamiltonian(h)
 e = sc.gs_energy(mode="ED") # compute the ground state energy
 print("Energy",e)
+
+
+
+
+
+
+
+
+

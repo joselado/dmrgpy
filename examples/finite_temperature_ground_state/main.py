@@ -26,3 +26,12 @@ sc.mode = "ED"
 
 wf = sc.get_gs()
 print(wf.dot(h*wf).real)
+
+
+
+
+
+
+
+
+

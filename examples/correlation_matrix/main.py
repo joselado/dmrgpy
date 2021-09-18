@@ -35,3 +35,12 @@ exit()
 cm = fc.get_correlation_matrix()
 import scipy.linalg as lg
 print(lg.eigvalsh(cm))
+
+
+
+
+
+
+
+
+

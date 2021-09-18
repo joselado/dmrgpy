@@ -1,7 +1,7 @@
-# Add the root path of the dmrgpy library and uncomment the next two lines
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 # for example PATH = /home/jose/programs/dmrgpy/src
 #PATH = PATH_TO_DMRGPY_LIBRARY
-#import os ; import sys ; sys.path.append(PATH)
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,7 +30,6 @@ print([fc.vev(o).real for o in fc.Sx])
 print([fc.vev(o).real for o in fc.Sy])
 print([fc.vev(o).real for o in fc.Sz])
 #print(fc.get_excited(n=4,mode="ED"))
-import os
 
 es = np.linspace(-1,6,600)
 
@@ -66,6 +65,15 @@ plt.legend()
 plt.xlabel("Site")
 plt.ylabel("Correlator")
 plt.show()
+
+
+
+
+
+
+
+
+
 
 
 

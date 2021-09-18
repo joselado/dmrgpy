@@ -18,3 +18,12 @@ plt.scatter(ns,es/ns)
 plt.show()
 
 
+
+
+
+
+
+
+
+
+

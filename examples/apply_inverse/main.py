@@ -24,3 +24,12 @@ print("Energy",e)
 import matplotlib.pyplot as plt
 plt.plot(es,ds,marker="o")
 plt.show()
+
+
+
+
+
+
+
+
+

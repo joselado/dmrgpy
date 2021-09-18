@@ -1,7 +1,7 @@
-# Add the root path of the dmrgpy library and uncomment the next two lines
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 # for example PATH = /home/jose/programs/dmrgpy/src
 #PATH = PATH_TO_DMRGPY_LIBRARY
-#import os ; import sys ; sys.path.append(PATH)
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -44,6 +44,15 @@ plt.legend()
 plt.xlabel("Site")
 plt.ylabel("Correlator")
 plt.show()
+
+
+
+
+
+
+
+
+
 
 
 

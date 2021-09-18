@@ -39,3 +39,12 @@ for n in range(14,16):
     print("Length",n,"C++/Julia",time_ratio(n))
 
 
+
+
+
+
+
+
+
+
+

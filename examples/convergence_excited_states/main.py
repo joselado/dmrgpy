@@ -24,3 +24,12 @@ for n in [4,6,8,10,20,30]:
     es = sc.get_excited(n=6,scale=scale) # compute excited states with DMRG
     error = np.mean(np.abs(np.array(es0) - np.array(es))) # error
     print(n,error)
+
+
+
+
+
+
+
+
+

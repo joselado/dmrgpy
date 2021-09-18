@@ -26,3 +26,12 @@ print("Total density with ED",fc.excited_vev(den,mode="ED",n=4).real)
 
 print("Energies with DMRG",fc.get_excited(mode="DMRG",n=4).real)
 print("Energies with ED",fc.get_excited(mode="ED",n=4).real)
+
+
+
+
+
+
+
+
+

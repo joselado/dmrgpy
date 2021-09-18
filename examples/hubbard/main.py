@@ -59,3 +59,12 @@ fc.gs_energy()
 exit()
 
 
+
+
+
+
+
+
+
+
+

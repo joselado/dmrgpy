@@ -1,5 +1,5 @@
 # Add the root path of the dmrgpy library
-import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
 import fermionchain
@@ -57,5 +57,14 @@ plt.show()
 # The result will be written in a file called DYNAMICAL_CORRELATOR.OUT
 fc.gs_energy()
 exit()
+
+
+
+
+
+
+
+
+
 
 

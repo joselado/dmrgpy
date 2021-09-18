@@ -17,3 +17,12 @@ fc.set_hamiltonian(h)
 print("Many-body gap",fc.get_gap())
 g = fc.get_charge_gap(d=2)
 print("Charge gap",g)
+
+
+
+
+
+
+
+
+

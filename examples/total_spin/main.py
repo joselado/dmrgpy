@@ -27,3 +27,12 @@ for s in sc.Sz: szt = szt + s
 print("Total spin DMRG",sc.vev(sxt*sxt+syt*syt+szt*szt,mode="DMRG"))
 print("Total spin ED",sc.vev(sxt*sxt+syt*syt+szt*szt,mode="ED"))
 
+
+
+
+
+
+
+
+
+

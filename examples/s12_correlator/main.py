@@ -15,3 +15,12 @@ plt.plot(m[0],m[1],marker="o")
 plt.show()
 
 
+
+
+
+
+
+
+
+
+
