@@ -65,7 +65,8 @@ class MPS():
     def get_site_entropy(self,i):
         if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
         else: raise # not implemented
-    def get_bond_entropy(self,i,j):
+    def get_bond_entropy(self,i,j=None):
+        if j is None: j = i + 1
         if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
         else: raise # not implemented
     def get_pair_entropy(self,i,j):

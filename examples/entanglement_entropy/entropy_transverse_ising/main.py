@@ -14,7 +14,7 @@ def gets(b):
     
     sc.set_hamiltonian(h)
     wf = sc.get_gs() # compute ground state
-    return wf.get_entropy(n//2)
+    return wf.get_bond_entropy(n//2)
 
 import matplotlib.pyplot as plt
 bs = np.linspace(0.,1.0,30)
