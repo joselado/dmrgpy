@@ -24,6 +24,7 @@ def compile(gpp="g++"):
           print("#######################################################")
           print("and afterwards rerun the installation script with")
           print("python install.py --cpp=g++-6")
+          exit()
 #          import autoinstallubuntu
 #          autoinstallubuntu.install() # install dependencies
 #          # replace the compiler in options.mk
