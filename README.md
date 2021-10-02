@@ -25,7 +25,15 @@ python install.py
 ```
 
 and it will compile both ITensor and a C++ program
-that uses it. Alternatively, in case you just want to use the Julia version,
+that uses it. 
+
+If your default C++ compiler is not g++ (version 6 or higher), execute the installation script providing the specific compiler to use (g++-6 for example)
+
+```bash
+python install.py gpp=g++-6 
+```
+
+Alternatively, in case you just want to use the Julia version,
 execute the script 
 
 ```bash

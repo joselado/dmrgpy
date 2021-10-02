@@ -1,10 +1,10 @@
 import os
 
-def cppversion():
+def cppversion(gpp="g++"):
     """
     Return the C++ version
     """
-    os.system("g++ --version > /tmp/cpp.txt")
+    os.system(gpp+" --version > /tmp/cpp.txt")
     out = open("/tmp/cpp.txt").read()
     out = out.split("\n")[0].split() # get the first line
     out = out[-1] # last one
@@ -13,8 +13,8 @@ def cppversion():
     return out
 
 
-def correct_version():
-    try: out = cppversion() # get the version
+def correct_version(**kwargs):
+    try: out = cppversion(**kwargs) # get the version
     except: return False
     if out[0]>=6: return True
     else: return False

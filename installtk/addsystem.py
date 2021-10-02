@@ -10,7 +10,7 @@ import os
 import platform
 
 
-def addbashrc():
+def addrc():
     """
     Add program to the .bashrc
     """
