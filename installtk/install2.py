@@ -6,13 +6,13 @@ def compile(gpp="g++"):
     path = os.path.dirname(os.path.realpath(__file__))+"/../" # main path
     os.chdir(path+"/src/dmrgpy/mpscpp2/ITensor")
     import platform
-    if platform.system()=="Linux": # Linux system
+    if platform.system()=="Linux" or platform.system()=="Darwin": # System
       os.system("cp options.save options.mk")
-      print("Detected Linux system")
+      print("Detected Unix system")
       from . import cppversion
+      writemk(gpp=gpp) # write options.mk
       if cppversion.correct_version(gpp=gpp):
           print("C++ compiler "+gpp+" is ok and will be used")
-          writemk(gpp=gpp) # write options.mk
       else: # C++ compiler is not the right one
           print("You may need to install the GNU C++ compiler")
           print("In Ubuntu systems, run the following commands")
@@ -30,9 +30,7 @@ def compile(gpp="g++"):
 #          out = open("options.mk").read().replace("CCCOM=g++","CCCOM=g++-6")
 #          open("options.mk","w").write(out) # write new file
     else:
-      print("Detected Mac system")
-      print("You may need to install the GNU C++ compiler")
-      os.system("cp options.mac options.mk")
+      print("Not a Unix system. The code only works in Unix systems. Stopping")
     # now do the compilation
     os.system("make clean ")
     os.system("make")
