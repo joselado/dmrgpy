@@ -32,6 +32,7 @@ def compile(gpp="g++"):
 #          open("options.mk","w").write(out) # write new file
     else:
       print("Not a Unix system. The code only works in Unix systems. Stopping")
+      exit()
     # now do the compilation
     os.system("make clean ")
     os.system("make")
