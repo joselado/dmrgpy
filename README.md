@@ -109,7 +109,7 @@ for i in range(n): h = h + 0.5*sc.Sx[i] # transverse field
 sc.set_hamiltonian(h) # set the Hamiltonian
 sc.maxm = 200 # increase bond dimension for a critical system
 wf = sc.get_gs() # compute ground state
-print("Central charge",wf.get_central_charge()) # compute central charge
+print("Central charge",wf.get_CFT_central_charge()) # compute central charge
 ```
 
 ## Ground state energy of a bilinear-biquadratic Hamiltonian
