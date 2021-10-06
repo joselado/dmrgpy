@@ -2,6 +2,7 @@ from __future__ import print_function
 from copy import deepcopy
 import os
 import numpy as np
+from . import entropy
 from . import multioperator
 
 class MPS():
@@ -69,6 +70,8 @@ class MPS():
         if j is None: j = i + 1
         if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
         else: raise # not implemented
+    def get_central_charge(self):
+        return entropy.central_charge(self)
     def get_pair_entropy(self,i,j):
         if self.MBO is not None: return self.MBO.get_pair_entropy(self,i,j)
         else: raise # not implemented

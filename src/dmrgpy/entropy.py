@@ -83,7 +83,20 @@ def entropy_dm(dm,normalize=False):
     return -np.sum(ds*np.log(ds))/norm # return the entropy
 
 
-    
-
-
+def central_charge(wf):
+    """Compute the central charge of a wavefunction assuming it is critical"""
+    L = len(wf.MBO.sites) # number of sites
+    sr = [wf.get_bond_entropy(i-1,i) for i in range(1,L)] # entropy
+    sr = np.array(sr)
+    ls = np.array(range(1,L)) # lengths
+    def f(x): # function to fit
+        c = x[0] # central charge
+        cons = x[1] # shift
+        a = 1.0 # factor
+        # central charge formula from J.Stat.Mech.0406:P06002,2004
+        sf = c/6.*np.log(2*L/(np.pi*a)*np.sin(np.pi*ls/L)) + cons
+        return np.sum((sr-sf)**2)
+    from .functionfit import fit
+    x0 = np.random.random(2) # random initial guess
+    return fit(f,x0)[0] # return central charge
 
