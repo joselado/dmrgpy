@@ -19,10 +19,10 @@ try: # create the executable
             sysimage=sysimage) # start the Julia session
     jlsession.eval("using Suppressor") # suppress output
 except:
-    print("Julia cannot be executed")
+    print("Julia cannot be executed, you probably need to install the Julia version")
     class JLdummy(): 
         def eval(self,c):
-            print("Julia cannot be executed")
+            print("Julia cannot be executed, you probably need to install the Julia version")
             exit()
     jlsession = JLdummy()
 
