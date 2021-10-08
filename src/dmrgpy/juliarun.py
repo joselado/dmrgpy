@@ -20,6 +20,11 @@ try: # create the executable
     jlsession.eval("using Suppressor") # suppress output
 except:
     print("Julia cannot be executed")
+    class JLdummy(): 
+        def eval(self,c):
+            print("Julia cannot be executed")
+            exit()
+    jlsession = JLdummy()
 
 
 def run(self):
