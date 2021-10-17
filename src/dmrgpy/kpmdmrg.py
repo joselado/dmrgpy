@@ -16,9 +16,6 @@ def get_moments_dmrg(self,n=1000):
 
 
 
-
-
-
 def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
   """Get the moments with DMRG"""
   # do some sanity checks

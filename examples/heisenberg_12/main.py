@@ -13,7 +13,7 @@ for i in range(n-1):
     h = h +sc.Sz[i]*sc.Sz[i+1]
 
 sc.set_hamiltonian(h)
-e = sc.gs_energy(mode="ED") # compute the ground state energy
+e = sc.gs_energy() # compute the ground state energy
 print("Energy",e)
 
 
