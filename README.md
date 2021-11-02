@@ -18,6 +18,8 @@ This library is still under heavy development.
 
 # How to install #
 
+## Linux and Mac ##
+
 Execute the script 
 
 ```bash
@@ -49,6 +51,14 @@ Afterwards you can import the dmrgpy sublibrary that you want, for example
 ```python
 from dmrgpy import spinchain
 ```
+
+## Windows ##
+
+For using this program in Windows, the easiest solution is to create a virtual
+machine using [Virtual Box](https://www.virtualbox.org/), installing
+a version of [Ubuntu](https://releases.ubuntu.com/20.04/)
+in that virtual machine, and following the previous
+instructions.
 
 # Capabilities #
 - Possible models include spinless fermions, spinful fermions, spins, parafermions and bosons
