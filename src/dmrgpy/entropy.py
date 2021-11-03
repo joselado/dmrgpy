@@ -7,7 +7,9 @@ def dynamical_correlator_kpm(self):
     s = self.execute(lambda: np.genfromtxt("KPM_ENTROPY.OUT"))
     return s
 
-from statistics import geometric_mean
+try:
+    from statistics import geometric_mean
+except: pass
 
 def gmean(x):
     if np.max(x)<1e-10: return 0.0
