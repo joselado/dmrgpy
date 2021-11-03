@@ -9,7 +9,9 @@ def dynamical_correlator_kpm(self):
 
 try:
     from statistics import geometric_mean
-except: pass
+except:
+    def geometric_mean(x):
+        return np.exp(np.mean(np.log(x)))
 
 def gmean(x):
     if np.max(x)<1e-10: return 0.0
