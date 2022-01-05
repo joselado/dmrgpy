@@ -16,9 +16,9 @@ sc.set_hamiltonian(h)
 
 # n is the number of excited states
 t0 = time.time()
-es1 = sc.get_excited(n=6,mode="DMRG") # compute excited states with DMRG
+es1,ws1 = sc.get_excited_states(n=6,mode="DMRG") # compute excited states with DMRG
 t1 = time.time()
-es2 = sc.get_excited(n=6,mode="ED") # compute excited states with ED
+es2,ws1 = sc.get_excited_states(n=6,mode="ED") # compute excited states with ED
 t2 = time.time()
 print("Time spent in DMRG",t1-t0)
 print("Excited states with DMRG")
