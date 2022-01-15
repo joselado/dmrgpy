@@ -79,6 +79,7 @@ class Many_Body_Chain():
       self.fit_td = False # use fitting procedure in time evolution
       self.itensor_version = 2 # ITensor version
       self.has_ED_obj = False # ED object has been computed
+      self.ED_obj = None
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
@@ -329,6 +330,8 @@ class Many_Body_Chain():
       elif mode=="ED": 
           return self.get_ED_obj().get_excited(**kwargs) # ED
       else: raise
+  def get_full_matrix(self,name):
+      return self.get_ED_obj().get_operator(name) # get the full operator
   def get_excited_states(self,mode="DMRG",**kwargs):
       """Return excitation energies"""
       if mode=="DMRG":

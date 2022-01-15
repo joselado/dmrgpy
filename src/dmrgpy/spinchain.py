@@ -71,21 +71,25 @@ class Spin_Chain(Many_Body_Chain):
             if i==j: op = op - 1j*Sz[i]
             if not self.is_zero_operator(op,**kwargs): raise
     def set_exchange(self,fun):
-      """Set the exchange coupling between sites"""
-      h = 0
-      for i in range(self.ns): # loop
-        for j in range(self.ns):  # loop
-          g = fun(i,j).real # call the function
-          if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
-          one = np.identity(3) # identity matrix
-          g = g*one # multiply by the identity
-          for ii in range(3):
-            for jj in range(3):
-                h = h + g[ii,jj]*self.Si[ii][i]*self.Si[jj][j]
-      self.exchange = h # exchange matrix
-      self.hamiltonian = self.exchange + self.fields # update Hamiltonian
+        """Set the exchange coupling between sites"""
+        h = 0
+        for i in range(self.ns): # loop
+          for j in range(self.ns):  # loop
+            g = fun(i,j).real # call the function
+            if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
+            one = np.identity(3) # identity matrix
+            g = g*one # multiply by the identity
+            for ii in range(3):
+              for jj in range(3):
+                  h = h + g[ii,jj]*self.Si[ii][i]*self.Si[jj][j]
+        self.exchange = h # exchange matrix
+        self.hamiltonian = self.exchange + self.fields # update Hamiltonian
     def get_ED_obj(self):
-        return pychainwrapper.get_pychain(self)
+        if self.has_ED_obj: 
+            return self.ED_obj
+        else:
+            self.ED_obj = pychainwrapper.get_pychain(self)
+            return self.ED_obj
     def get_pychain(self):
         return pychainwrapper.get_pychain(self)
     def get_full_hamiltonian(self):
