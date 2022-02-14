@@ -14,13 +14,17 @@ def get_correlation_matrix(self,T=0.,**kwargs):
 def get_correlation_matrix_finiteT(self,T=1.,**kwargs):
     """Wrapper for finite temperature"""
     ### This is currently only implemented with ED
-    raise # not finished yet
     n = len(self.C) # number of sites
     if n>14: raise # not implemented
-    (es,wfs) = fc.get_excited_states(mode="ED",n=2**n)
+    (es,wfs) = self.get_excited_states(mode="ED",n=2**n)
     dms = [get_correlation_matrix_zeroT(self,wf=wf) for wf in wfs]
     es = es - np.min(es) # minus ground state energy
-    return dm
+    dm = 0j # initialize
+    Z = 0. # initialize
+    for i in range(len(es)): # loop over energies
+        dm = dm + dms[i]*np.exp(es[i]/T)
+        Z = Z + np.exp(es[i]/T)
+    return dm/Z # return matrix
 
 
 
