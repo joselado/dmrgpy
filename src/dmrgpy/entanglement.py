@@ -1,30 +1,7 @@
 import numpy as np
 import scipy.linalg as lg
+from .entropytk.correlationenetropy import get_correlation_matrix
 
-def get_correlation_matrix(self,operators=None,wf=None,**kwargs):
-    """Compute the correlation matrix of a ground state"""
-    from . import fermionchain
-    if wf is None: wf = self.get_gs(**kwargs) # compute ground state
-    if operators is None:
-        if type(self)==fermionchain.Fermionic_Chain:
-            operators = self.C # fermionic operators
-        elif type(self)==fermionchain.Spinful_Fermionic_Chain:
-            operators = self.C # fermionic operators
-        else: raise
-    # create the matrix
-    n = len(operators)
-    cm = np.zeros((n,n),dtype=np.complex)
-    for i in range(n):
-        A = operators[i].get_dagger()
-        for j in range(i,n):
-            B = operators[j]
-            C = A*B
-            print(i,j)
-    #        out = self.vev(C,**kwargs)
-            out = wf.dot(C*wf) # overlap
-            cm[i,j] = out
-            cm[j,i] = np.conjugate(out)
-    return cm # return matrix
  
 
 def get_correlation_eigenvalues(self,**kwargs):
@@ -46,7 +23,6 @@ def get_correlated_orbitals(self,ordered=True,**kwargs):
     """Return the most correlated orbitals"""
     cm = get_correlation_matrix(self,**kwargs)
     es,vs = lg.eigh(cm) # diagonalize
-    print(np.round(es,3))
     vs = np.abs(vs.T)**2 # transpose
     esa = np.abs(es-.5)
     if ordered: vs = [y for (x,y) in sorted(zip(esa,vs),key=lambda x: x[0])]

@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import fermionchain
 
 def get(U):
-    n = 10 # number of spinful fermionic sites
+    n = 6 # number of spinful fermionic sites
     fc = fermionchain.Fermionic_Chain(n) # create the chain
     h = 0
     for i in range(n-1): # hopping
@@ -17,7 +17,7 @@ def get(U):
     fc.maxm = 40
     fc.nsweeps = 10
     fc.set_hamiltonian(h) # set the hoppings
-    fc.get_gs()
+    fc.get_gs(mode="ED")
     return fc.get_correlation_entropy()
 
 Us = np.linspace(-2.,0.,60)
