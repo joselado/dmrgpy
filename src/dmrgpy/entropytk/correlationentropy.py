@@ -73,11 +73,11 @@ def get_highorder_correlation_matrix(self,operators=None,wf=None,**kwargs):
     cm = np.zeros((n,n,n,n),dtype=np.complex)
     for i in range(n):
         A = operators[i].get_dagger()
-        for j in range(n):
+        for j in range(i+1,n):
             B = operators[j].get_dagger()
             for k in range(n):
                 C = operators[k]
-                for l in range(n):
+                for l in range(k+1,n):
                     D = operators[l]
                     Op = A*B*D*C
                     out = wf.dot(Op*wf) # overlap
