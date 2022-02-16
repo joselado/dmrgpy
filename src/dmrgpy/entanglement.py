@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.linalg as lg
-from .entropytk.correlationenetropy import get_correlation_matrix
+from .entropytk.correlationentropy import get_correlation_matrix
 
  
 
@@ -36,3 +36,14 @@ def get_correlated_density(self,n=4,**kwargs):
 
 
 
+def get_second_order_correlation_entropy(self,**kwargs):
+    """Return the second_order correlation entropy"""
+    from .entropytk.correlationentropy import get_highorder_correlation_matrix
+    cm = get_highorder_correlation_matrix(self,**kwargs)
+    print(np.sum(np.abs(cm-np.conjugate(cm.T))))
+    vs = lg.eigvalsh(cm) # return eigenvalues
+    print(np.round(vs,3))
+    out = 0.0
+    for v in vs:
+        if v>1e-6: out = out + v*np.log(v)
+    return -out

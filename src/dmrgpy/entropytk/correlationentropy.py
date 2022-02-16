@@ -46,10 +46,79 @@ def get_correlation_matrix_zeroT(self,operators=None,wf=None,**kwargs):
         for j in range(i,n):
             B = operators[j]
             C = A*B
-            print(i,j)
+#            print(i,j)
     #        out = self.vev(C,**kwargs)
             out = wf.dot(C*wf) # overlap
             cm[i,j] = out
             cm[j,i] = np.conjugate(out)
     return cm # return matrix
+
+
+
+
+## High order correlation entropy
+
+
+def get_highorder_correlation_matrix(self,operators=None,wf=None,**kwargs):
+    """Compute the correlation matrix of a ground state"""
+    if wf is None: wf = self.get_gs(**kwargs) # compute ground state
+    if operators is None:
+        if type(self)==fermionchain.Fermionic_Chain:
+            operators = self.C # fermionic operators
+        elif type(self)==fermionchain.Spinful_Fermionic_Chain:
+            operators = self.C # fermionic operators
+        else: raise
+    # create the matrix
+    n = len(operators)
+    cm = np.zeros((n,n,n,n),dtype=np.complex)
+    for i in range(n):
+        A = operators[i].get_dagger()
+        for j in range(n):
+            B = operators[j].get_dagger()
+            for k in range(n):
+                C = operators[k]
+                for l in range(n):
+                    D = operators[l]
+                    Op = A*B*D*C
+                    out = wf.dot(Op*wf) # overlap
+                    cm[i,j,k,l] = out
+#                    if np.abs(out)>1e-4:
+#                       print(i,j,k,l,np.round(out,2))
+#    print("Trace",np.sum([cm[i,i,i,i] for i in range(n)]))
+    cm = four2two(cm) 
+    if np.sum(np.abs(cm-np.conjugate(cm.T)))>1e-4: raise
+    return cm # return matrix
+
+
+
+
+
+
+
+
+
+def four2two(m):
+    n = m.shape[0] # dimension
+    out = np.zeros((n*n,n*n),dtype=np.complex) # output
+    ii = 0
+    for i in range(n-1):
+      for j in range(i+1,n):
+        jj = 0
+        for k in range(n-1):
+          for l in range(k+1,n):
+              out[ii,jj] = m[i,j,k,l]
+              jj += 1
+        ii += 1
+    return out[0:ii,0:ii]
+
+
+
+
+
+
+
+
+
+
+
 
