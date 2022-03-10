@@ -264,18 +264,20 @@ class Many_Body_Chain():
       self.execute(lambda : taskdmrg.write_tasks(self)) # write tasks
       if self.itensor_version in [2,"2","v2","C++","cpp","c","C"]: 
           mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" 
+          if os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
+              from . import cpprun
+              cpprun.run(self) # run the C++ version
+              return
 #      elif self.itensor_version==3: mpscpp = dmrgpath+"/mpscpp3/mpscpp.x" 
       elif self.itensor_version in ["julia","Julia","jl"]: 
           from . import juliarun
           juliarun.run(self)
           return
       else: raise
-      if not os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
-          print("C++ backend not found, trying to run with Julia version")
-          self.setup_julia() # turn to Julia
-          return self.run() # rerun with julia
-      from . import cpprun
-      cpprun.run(self) # run the C++ version
+#      if not os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
+#          print("C++ backend not found, trying to run with Julia version")
+#          self.setup_julia() # turn to Julia
+#          return self.run() # rerun with julia
   def get_bond_entropy(self,wf,i,j):
       """Return the entanglement entropy of two sites"""
       return entropy.bond_entropy(self,wf,i,j)
