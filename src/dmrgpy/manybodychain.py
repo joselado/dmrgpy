@@ -17,9 +17,9 @@ from . import entropy
 from . import excited
 from . import effectivehamiltonian
 from .writemps import write_sites
+from .mode import dmrgpath
 
-#dmrgpath = os.environ["DMRGROOT"]+"/dmrgpy" # path for the program
-dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path for the program
+
 one = np.matrix(np.identity(3))
 
 
@@ -100,6 +100,9 @@ class Many_Body_Chain():
       """Setup the Julia mode"""
       self.itensor_version = "2"
       self.initialize()
+  def get_mode(self,**kwargs):
+      from .mode import get_mode
+      return get_mode(self,**kwargs)
   def to_folder(self):
       """Go to a certain folder"""
 #      self.inipath = os.getcwd() # record the folder
@@ -162,7 +165,7 @@ class Many_Body_Chain():
       """
       return vev.vev(self,MO,**kwargs)
   def vev(self,MO,mode="DMRG",**kwargs): 
-      if self.mode is not None: mode = self.mode # redefine
+      mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": return vev.vev(self,MO,**kwargs)
       elif mode=="ED": return self.get_ED_obj().vev(MO,**kwargs) # ED object
       else: raise
@@ -256,28 +259,9 @@ class Many_Body_Chain():
       from .writemps import write_sites
       self.execute(lambda: write_sites(self)) # write the different sites
       self.execute(lambda: self.hamiltonian.write("hamiltonian.in"))
-  def run(self,automatic=False): 
-      """
-      Run the DMRG calculation
-      """
-      # executable
-      self.execute(lambda : taskdmrg.write_tasks(self)) # write tasks
-      if self.itensor_version in [2,"2","v2","C++","cpp","c","C"]: 
-          mpscpp = dmrgpath+"/mpscpp2/mpscpp.x" 
-          if os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
-              from . import cpprun
-              cpprun.run(self) # run the C++ version
-              return
-#      elif self.itensor_version==3: mpscpp = dmrgpath+"/mpscpp3/mpscpp.x" 
-      elif self.itensor_version in ["julia","Julia","jl"]: 
-          from . import juliarun
-          juliarun.run(self)
-          return
-      else: raise
-#      if not os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
-#          print("C++ backend not found, trying to run with Julia version")
-#          self.setup_julia() # turn to Julia
-#          return self.run() # rerun with julia
+  def run(self,**kwargs): 
+      from .mode import run
+      return run(self,**kwargs)
   def get_bond_entropy(self,wf,i,j):
       """Return the entanglement entropy of two sites"""
       return entropy.bond_entropy(self,wf,i,j)
@@ -304,6 +288,7 @@ class Many_Body_Chain():
   def get_dynamical_correlator_MB(self,**kwargs):
       return dynamics.get_dynamical_correlator(self,**kwargs)
   def get_dynamical_correlator(self,mode="DMRG",**kwargs):
+      mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": 
           return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED": 
@@ -327,6 +312,7 @@ class Many_Body_Chain():
       else: raise
   def get_excited(self,mode="DMRG",**kwargs):
       """Return excitation energies"""
+      mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG":
           return excited.get_excited(self,**kwargs) # return excitation energies
       elif mode=="ED": 
@@ -367,7 +353,7 @@ class Many_Body_Chain():
         else: self.skip_dmrg_gs = True # reconverge the calculation
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
-      if self.mode is not None: mode = self.mode # redefine
+      mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": # DMRG mode
         if self.computed_gs: # if stored, rewrite and return
             self.wf0.write(name=self.wf0.name,path=self.path)
@@ -378,7 +364,7 @@ class Many_Body_Chain():
       elif mode=="ED": return self.get_ED_obj().get_gs(**kwargs)
   def gs_energy(self,mode="DMRG",**kwargs):
       """Return the ground state energy"""
-      if self.mode is not None: mode = self.mode # redefine
+      mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": return groundstate.gs_energy(self,**kwargs)
       elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
       else: raise

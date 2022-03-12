@@ -8,7 +8,7 @@ n = 4
 fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 
-raise
+raise # this should be double checked
 
 for i in range(n):
   for j in range(n):
