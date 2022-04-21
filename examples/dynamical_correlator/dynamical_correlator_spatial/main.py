@@ -24,7 +24,7 @@ ys = [] # empty list
 zs = [] # empty list
 for i in range(n): # loop over sites
   print("Doing ",i)
-  name = (sc.Sx[i],sc.Sx[i])
+  name = (sc.Sz[i],sc.Sz[i])
   (e,s) = sc.get_dynamical_correlator(mode="DMRG",name=name,
           es=np.linspace(-0.5,4.0,200),delta=0.05)
   zs.append(s.real) # store
