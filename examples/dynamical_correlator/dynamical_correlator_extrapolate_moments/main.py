@@ -30,7 +30,7 @@ j = np.random.randint(n)
 j = i
 name = (sc.Sz[i],sc.Sz[j])
 es = np.linspace(-0.5,6,2000)
-factor = 3.
+factor = 2.
 delta = 2e-1
 sc.kpm_extrapolate = False
 (x1,y1) = sc.get_dynamical_correlator(name=name,es=es,delta=delta*factor)
