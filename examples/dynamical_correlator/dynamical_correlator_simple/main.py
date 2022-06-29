@@ -22,7 +22,7 @@ wf = sc.get_gs() # get the ground state wavefunction
 sc.kpmmaxm = 20 # bond dimension for KPM
 sc.maxm = 20 # bond dimension
 
-name = (sc.Sz[n-1],sc.Sz[0]) # correlator to compute
+name = (sc.Sz[0],sc.Sz[0]) # correlator to compute
 es = np.linspace(-0.5,4,2000)
 delta = 5e-2
 (x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
