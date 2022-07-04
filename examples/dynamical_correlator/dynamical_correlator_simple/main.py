@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 10
+n = 16
 # create a random spin chain
 #spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
@@ -25,7 +25,7 @@ sc.maxm = 20 # bond dimension
 name = (sc.Sz[0],sc.Sz[0]) # correlator to compute
 es = np.linspace(-0.5,4,2000)
 delta = 5e-2
-(x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
+(x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta,mode="ED")
 
 import matplotlib.pyplot as plt
 plt.plot(x,y.real,c="blue",label="DMRG")
