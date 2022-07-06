@@ -138,7 +138,7 @@ def lowest_eigenvalues(h,n=10,nmax=maxsize):
   return eig[0:n]
 
 
-def lowest_states(h,n=10,nmax=maxsize):
+def lowest_states(h,n=10,nmax=maxsize,**kwargs):
   """Get a ground state"""
   info = False
   if h.shape[0]>nmax:
@@ -226,4 +226,29 @@ def expm(m):
 def ismatrix(m):
     return type(m)==np.ndarray or issparse(m) or type(m)==np.matrix
 
+
+
+
+
+def smooth_gauge(w1,w2):
+  """Perform a gauge rotation so that the second set of waves are smooth
+  with respect to the first one"""
+  m = uij(w1,w2) # matrix of wavefunctions
+  U, s, V = np.linalg.svd(m, full_matrices=True) # sing val decomp
+  R = (U@V).H # rotation matrix
+  wnew = [w.copy()*0. for w in w2] # new WF
+  wold = [w.copy() for w in w2] # old WF
+  for ii in range(R.shape[0]):
+    for jj in range(R.shape[0]):
+      wnew[ii] = wnew[ii] + R[jj,ii]*wold[jj]
+  return wnew
+
+
+
+def uij(wf1,wf2):
+  m = np.matrix(np.zeros((len(wf1),len(wf2)),dtype=np.complex))
+  for i in range(len(wf1)):
+    for j in range(len(wf2)):
+      m[i,j] = wf1[i].dot(wf2[j])
+  return m
 

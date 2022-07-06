@@ -110,4 +110,21 @@ def lowest_energy(self,h):
 
 
 
+def get_gs_manifold(MBO,n=2,tol=1e-3,**kwargs):
+    """Return the ground state manifold, i.e. all the states with the
+    lowest energy"""
+    (es,wfs) = MBO.get_excited_states(n=n,**kwargs)
+    e0 = np.min(es) # ground state
+    ngs = len(es[np.abs(es-e0)<tol]) # number of ground states
+    if ngs<n: # all the GS found
+        wfo = []
+        for (e,w) in zip(es,wfs):
+            if np.abs(e-e0)<tol: wfo.append(w)
+        return wfo
+    else: 
+        print("Recalling with ",n,"states")
+        return get_gs_manifold(MBO,n=n+1,tol=tol,**kwargs)
+
+
+
 

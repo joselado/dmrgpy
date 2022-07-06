@@ -33,7 +33,7 @@ def get_excited(*args,**kwargs):
 
 
 
-def get_excited_states(self,n=2,purify=False,**kwargs):
+def get_excited_states(self,n=2,purify=True,**kwargs):
     """Excited states"""
     if not purify: # just compute excited states
         return get_excited_states_dmrg(self,n=n,**kwargs) # compute 
@@ -47,8 +47,8 @@ def get_excited_states(self,n=2,purify=False,**kwargs):
               h[i,j] = ws[i].overlap(self.hamiltonian*ws[j])
         es = lg.eigvalsh(h) # redefine eigenvalues
         # TODO redefine also the eigenvectors
-        #from .algebra.arnolditk import rediagonalize
-        #ws = rediagonalize(self.hamiltonian,ws) # rediagonalize
+        from .algebra.arnolditk import rediagonalize
+        ws = rediagonalize(self.hamiltonian,ws) # rediagonalize
         return (es[0:n],ws[0:n])
 
 

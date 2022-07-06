@@ -362,6 +362,8 @@ class Many_Body_Chain():
         else: self.gs_energy(**kwargs) # perform a ground state calculation
         return self.wf0 # return wavefunction
       elif mode=="ED": return self.get_ED_obj().get_gs(**kwargs)
+  def get_gs_manifold(self,**kwargs):
+      return groundstate.get_gs_manifold(self,**kwargs)
   def gs_energy(self,mode="DMRG",**kwargs):
       """Return the ground state energy"""
       mode = self.get_mode(mode=mode) # overwrite mode
