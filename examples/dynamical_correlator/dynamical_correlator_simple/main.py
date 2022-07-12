@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 16
+n = 6
 # create a random spin chain
 #spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain

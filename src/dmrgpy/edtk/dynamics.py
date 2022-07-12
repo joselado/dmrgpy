@@ -40,7 +40,6 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
     m = -identity(h.shape[0])*e0+h # matrix to use
     emax = slg.eigsh(h,k=1,ncv=20,which="LA")[0][0] # upper energy
     scale = np.max([np.abs(e0),np.abs(emax)])*3.0
-    scale = scale[0]
     n = int(2*scale/delta) # number of polynomials
     (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
                                 npol=n*4,ne=n*10,x=es)
