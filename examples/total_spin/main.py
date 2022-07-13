@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt # library to plot the results
 
 from dmrgpy import spinchain
 ns = 6 # number of sites in the spin chain
-spins = [3 for i in range(ns-1)]+[2] # S=1 chain
+spins = ["S=1" for i in range(ns-1)]+["S=1/2"] # S=1 chain
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 
 # now define a custom Hamiltonian
