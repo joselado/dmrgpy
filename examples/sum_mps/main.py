@@ -19,9 +19,9 @@ wfflip = wfdn.copy()
 for i in range(n): wfflip = 2.*sc.Sx[i]*wfflip
 
 # Now do some simple algebra with MPS
-print("Rotate and overlap",wfup.overlap(wfflip).real)
-print("Magnetization up",wfup.overlap(hfe*wfup).real)
-print("Magnetization down",wfdn.overlap(hfe*wfdn).real)
+print("Rotate and overlap",wfup.dot(wfflip).real)
+print("Magnetization up",wfup.dot(hfe*wfup).real)
+print("Magnetization down",wfdn.dot(hfe*wfdn).real)
 
 wfs = wfup + 3.7*wfdn # sum the two wavefunctions
 
