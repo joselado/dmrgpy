@@ -32,7 +32,7 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
         (e,wfsp) = MBO.get_excited_states(n=ngs,**kwargs) # get GS manifold
         MBO.set_hamiltonian(Hm) # set the Hamiltonian
         (e,wfsm) = MBO.get_excited_states(n=ngs,**kwargs) # get GS manifold
-        if ngs>1: # not properly implemented, this is just a workaround
+        if ngs>1: # several waves
             from .algebra.algebra import smooth_gauge
             wfsp = smooth_gauge(wfs,wfsp) # smooth gauge
             wfsm = smooth_gauge(wfs,wfsm) # smooth gauge
