@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 8
+n = 6
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Chain(spins) # create the spin chain
 
@@ -22,7 +22,7 @@ def get(l):
 
 #get(0.5) ; exit()
 
-ls = np.linspace(0.,2.,30)
+ls = np.linspace(0.,2.,60)
 fs = [get(l) for l in ls]
 
 import matplotlib.pyplot as plt
