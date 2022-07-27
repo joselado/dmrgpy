@@ -1,4 +1,5 @@
 import numpy as np
+from .algebra import algebra
 
 def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
       dl = 1e-2,n=2,
@@ -31,13 +32,22 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
         (e,wfsp) = MBO.get_excited_states(n=ngs,**kwargs) # get GS manifold
         MBO.set_hamiltonian(Hm) # set the Hamiltonian
         (e,wfsm) = MBO.get_excited_states(n=ngs,**kwargs) # get GS manifold
-        if ngs>1: # not implemented
+        if ngs>1: # not properly implemented, this is just a workaround
             from .algebra.algebra import smooth_gauge
             wfsp = smooth_gauge(wfs,wfsp) # smooth gauge
             wfsm = smooth_gauge(wfs,wfsm) # smooth gauge
-            w = wfs[0]
-            wp = wfsp[0]
-            wm = wfsm[0]
+            def Uij(ws1,ws2):
+                m = np.zeros((ngs,ngs),dtype=np.complex) # empy matrix
+                for i in range(ngs):
+                  for j in range(ngs):
+                      m[i,j] = ws1[i].dot(ws2[j]) # scalar product
+                return m # return matrix
+            Um = Uij(wfs,wfsm) # below
+            Up = Uij(wfs,wfsp) # above
+            U = Uij(wfs,wfs) # above
+            Ud = ((Up-U)-(U-Um))/dl**2 # difference
+            chi = np.abs(algebra.det(Ud))
+            return chi
         else: # just one wave
             w = wfs[0]
             wp = wfsp[0]
@@ -45,8 +55,9 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
             # factor the phase just in case
             wp = wp*np.exp(1j*np.angle(wp.dot(w)))
             wm = wm*np.exp(1j*np.angle(wm.dot(w)))
-        chi = np.abs(w.dot(wp)-w.dot(wm))/(dl**2)
-        return chi
+            dw2 = (wp - w) - (w - wm) # difference
+            chi = np.abs(w.dot(dw2))/(dl**2)
+            return chi
 
 
 

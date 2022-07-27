@@ -5,6 +5,8 @@ import scipy.sparse.linalg as slg
 import numpy as np
 
 
+det = dlg.det
+
 maxsize = 3000
 
 
