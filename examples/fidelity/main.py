@@ -16,13 +16,14 @@ def get(l):
     h0 = h0 + 4*sc.Sz[0]*sc.Sz[n-1]
     # perturbation
     h1 = 0
+    print(l)
     for i in range(n): h1 = h1 + 2*sc.Sx[i]
     from dmrgpy import fidelity
     return fidelity.get_fidelity(sc,h0,h1,l,n=3,mode="ED")
 
 #get(0.5) ; exit()
 
-ls = np.linspace(0.,2.,60)
+ls = np.linspace(0.,2.,40)
 fs = [get(l) for l in ls]
 
 import matplotlib.pyplot as plt
