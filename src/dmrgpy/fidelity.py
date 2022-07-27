@@ -2,7 +2,7 @@ import numpy as np
 from .algebra import algebra
 
 def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
-      dl = 1e-2,n=2,
+      dl = 1e-1,n=2,
       fmode="derivative",**kwargs):
     """Given two Hamiltonians H0 and H1, compute the fidelity as a function
     of lambda.
@@ -29,15 +29,22 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
         wfs = MBO.get_gs_manifold(n=n,tol=delta,**kwargs) # get GS manifold
         ngs = len(wfs) # ground state degeneracy
         MBO.set_hamiltonian(Hp) # set the Hamiltonian
-        (e,wfsp) = MBO.get_excited_states(n=ngs,**kwargs) # get GS manifold
+        (e,wfsp) = MBO.get_excited_states(n=ngs,purify=False,
+                                      **kwargs) # get GS manifold
         MBO.set_hamiltonian(Hm) # set the Hamiltonian
-        (e,wfsm) = MBO.get_excited_states(n=ngs,**kwargs) # get GS manifold
-        if ngs>1: # several waves
+        (e,wfsm) = MBO.get_excited_states(n=ngs,purify=False,
+                                      **kwargs) # get GS manifold
+        # make orthogonal just in case
+        if True: # several waves
+            from .algebra.arnolditk import gram_smith
+            wfs = gram_smith(wfs) # orthogonalize
+            wfsp = gram_smith(wfsp) # orthogonalize
+            wfsm = gram_smith(wfsm) # orthogonalize
             from .algebra.algebra import smooth_gauge
             wfsp = smooth_gauge(wfs,wfsp) # smooth gauge
             wfsm = smooth_gauge(wfs,wfsm) # smooth gauge
             def Uij(ws1,ws2):
-                m = np.zeros((ngs,ngs),dtype=np.complex) # empy matrix
+                m = np.zeros((ngs,ngs),dtype=np.complex) # empty matrix
                 for i in range(ngs):
                   for j in range(ngs):
                       m[i,j] = ws1[i].dot(ws2[j]) # scalar product
@@ -45,6 +52,9 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
             Um = Uij(wfs,wfsm) # below
             Up = Uij(wfs,wfsp) # above
             U = Uij(wfs,wfs) # above
+#            print(np.round(np.abs(Um),4))
+#            print(np.round(np.abs(Up),4))
+#            print(np.round(np.abs(U),4))
             Ud = ((Up-U)-(U-Um))/dl**2 # difference
             chi = np.abs(algebra.det(Ud))
             return chi

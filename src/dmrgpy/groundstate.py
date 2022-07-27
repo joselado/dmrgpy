@@ -122,7 +122,7 @@ def get_gs_manifold(MBO,n=2,tol=1e-3,**kwargs):
             if np.abs(e-e0)<tol: wfo.append(w)
         return wfo
     else: 
-        print("Recalling with ",n,"states")
+        print("Recalling with ",n+1,"states")
         return get_gs_manifold(MBO,n=n+1,tol=tol,**kwargs)
 
 
