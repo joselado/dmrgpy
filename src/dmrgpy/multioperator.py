@@ -88,6 +88,7 @@ class MultiOperator():
           return (1./a)*self
         else: raise
     def multiply_scalar(self,a):
+        if not isnumber(a): raise # number
         out = self.copy()
         for i in range(len(out.op)):
             out.op[i][0] = out.op[i][0]*a # multiply

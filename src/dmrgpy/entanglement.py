@@ -7,7 +7,11 @@ from .entropytk.correlationentropy import get_correlation_matrix
 def get_correlation_eigenvalues(self,**kwargs):
     """Return the correlation eigenvalues"""
     cm = get_correlation_matrix(self,**kwargs)
-    return lg.eigvalsh(cm) # return eigenvalues
+    ce = lg.eigvalsh(cm) # return eigenvalues
+    # a sanity check
+    if np.max(ce)>1.01: raise # they should be at most 1.
+    if np.min(ce)<-0.01: raise # they should be zero the smallest
+    return ce
 
 
 def get_correlation_entropy(self,**kwargs):

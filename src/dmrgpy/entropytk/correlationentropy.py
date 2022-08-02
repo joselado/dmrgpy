@@ -28,15 +28,19 @@ def get_correlation_matrix_finiteT(self,T=1.,**kwargs):
 
 
 
-def get_correlation_matrix_zeroT(self,operators=None,wf=None,**kwargs):
+def get_correlation_matrix_zeroT(self,operators=None,
+                              basis ="electron", 
+                              wf=None,**kwargs):
     """Compute the correlation matrix of a ground state"""
     from .. import fermionchain
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
-    if operators is None:
-        if type(self)==fermionchain.Fermionic_Chain:
-            operators = self.C # fermionic operators
-        elif type(self)==fermionchain.Spinful_Fermionic_Chain:
-            operators = self.C # fermionic operators
+    if operators is None: # no operators provided
+        if type(self)==fermionchain.Fermionic_Chain or type(self)==fermionchain.Spinful_Fermionic_Chain:
+            if basis=="Nambu": 
+              operators = [o for o in self.C] 
+              operators += [o for o in self.Cdag] 
+            else: # just normal basis
+              operators = self.C # fermionic operators
         else: raise
     # create the matrix
     n = len(operators)
@@ -46,8 +50,6 @@ def get_correlation_matrix_zeroT(self,operators=None,wf=None,**kwargs):
         for j in range(i,n):
             B = operators[j]
             C = A*B
-#            print(i,j)
-    #        out = self.vev(C,**kwargs)
             out = wf.dot(C*wf) # overlap
             cm[i,j] = out
             cm[j,i] = np.conjugate(out)
