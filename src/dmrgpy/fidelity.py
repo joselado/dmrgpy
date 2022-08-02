@@ -41,20 +41,18 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
             wfsp = gram_smith(wfsp) # orthogonalize
             wfsm = gram_smith(wfsm) # orthogonalize
             from .algebra.algebra import smooth_gauge
-            wfsp = smooth_gauge(wfs,wfsp) # smooth gauge
-            wfsm = smooth_gauge(wfs,wfsm) # smooth gauge
             def Uij(ws1,ws2):
                 m = np.zeros((ngs,ngs),dtype=np.complex) # empty matrix
                 for i in range(ngs):
                   for j in range(ngs):
                       m[i,j] = ws1[i].dot(ws2[j]) # scalar product
                 return m # return matrix
+#            return -2*np.log(np.abs(algebra.det(Uij(wfsm,wfsp))))/dl**2
+            wfsp = smooth_gauge(wfs,wfsp) # smooth gauge
+            wfsm = smooth_gauge(wfs,wfsm) # smooth gauge
             Um = Uij(wfs,wfsm) # below
             Up = Uij(wfs,wfsp) # above
             U = Uij(wfs,wfs) # above
-#            print(np.round(np.abs(Um),4))
-#            print(np.round(np.abs(Up),4))
-#            print(np.round(np.abs(U),4))
             Ud = ((Up-U)-(U-Um))/dl**2 # difference
             chi = np.abs(algebra.det(Ud))
             return chi
