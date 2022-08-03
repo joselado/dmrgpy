@@ -70,6 +70,9 @@ def excited_states_non_hermitian(self,n=3,**kwargs):
                 recursive_arnoldi=True,
                 n = n + 2, # number of Krylov vectors
                 **kwargs)
+    if n==1: 
+        es = [es]
+        wf = [wf]  
     return (es,wf)
 
 

@@ -52,7 +52,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
             d = 1./(esr**2 +esi**2/delta + delta) # weight for each eigenvalue
             return np.where(d==np.max(d))[0][0] # return the index
     else: raise
-    if nwf==1: 
+    if nwf==1: # just the ground state
         return mpsarnoldi_iteration(self,Op,H,fe,ne=1,**kwargs)
     else: 
         if recursive_arnoldi:
