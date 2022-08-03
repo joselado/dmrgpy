@@ -16,8 +16,10 @@ h = h + 0.2j # add some imaginary part
 
 sc.set_hamiltonian(h) # set Hamiltonian
 
-es = sc.get_excited(mode="ED",n=4)
-for e in es:
-  print(np.round(e,2))
+for mode in ["ED","DMRG"]:
+    print("Computing using",mode,"mode")
+    es = sc.get_excited(mode=mode,n=4)
+    for e in es:
+        print("Energies",np.round(e,2))
 
 

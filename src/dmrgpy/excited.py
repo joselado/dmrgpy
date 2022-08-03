@@ -35,6 +35,10 @@ def get_excited(*args,**kwargs):
 
 def get_excited_states(self,n=2,purify=True,**kwargs):
     """Excited states"""
+    H = self.hamiltonian # make a check
+    if not self.is_zero_operator(H-H.get_dagger()):
+#        print("Non-Hermitian Hamiltonian, using Arnoldi method")
+        return excited_states_non_hermitian(self,n=n,**kwargs)
     if n==1: # workaround for just the ground state
         w = self.get_gs(**kwargs)
         e0 = self.gs_energy(**kwargs)
@@ -57,4 +61,15 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
 
 
 from .algebra.arnolditk import gram_smith
+
+
+def excited_states_non_hermitian(self,n=3,**kwargs):
+    from . import mpsalgebra
+    (es,wf) = mpsalgebra.mpsarnoldi(self,self.hamiltonian,mode="GS",
+                nwf=n, # number of wavefunctions
+                recursive_arnoldi=True,
+                n = n + 2, # number of Krylov vectors
+                **kwargs)
+    return (es,wf)
+
 
