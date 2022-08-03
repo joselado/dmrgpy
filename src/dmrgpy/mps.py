@@ -70,6 +70,9 @@ class MPS():
         if j is None: j = i + 1
         if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
         else: raise # not implemented
+    def get_correlation_entropy(self,**kwargs):
+        from . import entanglement
+        return entanglement.get_correlation_entropy_from_wf(self,**kwargs)
     def get_CFT_central_charge(self):
         return entropy.central_charge(self)
     def get_pair_entropy(self,i,j):

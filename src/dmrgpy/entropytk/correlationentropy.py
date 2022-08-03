@@ -35,18 +35,20 @@ def get_correlation_matrix_zeroT(self,operators=None,
     from .. import fermionchain
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
     if operators is None: # no operators provided
-        if type(self)==fermionchain.Fermionic_Chain or type(self)==fermionchain.Spinful_Fermionic_Chain:
+        if fermionchain.isfermion(self):
             if basis=="Nambu": 
               operators = [o for o in self.C] 
               operators += [o for o in self.Cdag] 
             else: # just normal basis
               operators = self.C # fermionic operators
-        else: raise
+        else: 
+            print("Unrecognized type",type(self))
+            raise
     # create the matrix
     n = len(operators)
     cm = np.zeros((n,n),dtype=np.complex)
     for i in range(n):
-        A = operators[i].get_dagger()
+        A = self.get_dagger(operators[i])
         for j in range(i,n):
             B = operators[j]
             C = A*B

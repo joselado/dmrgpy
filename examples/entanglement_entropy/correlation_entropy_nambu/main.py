@@ -11,16 +11,17 @@ def get(U):
     for i in range(n-1): # hopping
         h = h + fc.Cdag[i]*fc.C[i+1]
         h = h + U*(fc.N[i]-.5)*(fc.N[i+1]-.5)
-    for i in range(n-1): # superconductivity
-        h = h + .4*fc.C[i]*fc.C[i+1]
+#    for i in range(n-1): # superconductivity
+#        h = h + .4*fc.C[i]*fc.C[i+1]
     h = h + h.get_dagger()
     ##############################
     # Setup the Many Body Hamiltonian
-    fc.maxm = 40
-    fc.nsweeps = 10
     fc.set_hamiltonian(h) # set the hoppings
-    fc.get_gs(mode="ED")
-    return fc.get_correlation_entropy(mode="ED",basis="Nambu")
+    wf = fc.get_gs(mode="ED")
+    return wf.get_correlation_entropy(basis="Nambu")
+
+
+
 
 Us = np.linspace(-2.,0.,60)
 Ss = [get(U) for U in Us]

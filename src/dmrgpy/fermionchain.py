@@ -323,3 +323,15 @@ class Spinon_Chain(Spinful_Fermionic_Chain):
 Fermionic_Hamiltonian = Fermionic_Chain
 Spinful_Fermionic_Hamiltonian = Spinful_Fermionic_Chain
 
+
+def isfermion(self):
+    """Function to determine if an object is a valid fermionic object"""
+    from .pyfermion.mbfermion import MBFermion
+    if type(self)==Fermionic_Chain: return True
+    if type(self)==Spinful_Fermionic_Chain: return True
+    if type(self)==MBFermion: return True
+    else: return False
+    
+
+
+

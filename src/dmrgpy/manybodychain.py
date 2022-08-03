@@ -204,6 +204,7 @@ class Many_Body_Chain():
       h = self.hopping + self.hubbard + self.pairing 
       h = h + self.vijkl + self.exchange
       self.set_hamiltonian(h)
+  def get_dagger(self,m): return m.get_dagger() # dummy method
   def overlap(self,wf1,wf2,**kwargs):
       """Compute the overlap"""
       return mpsalgebra.overlap(self,wf1,wf2,**kwargs)

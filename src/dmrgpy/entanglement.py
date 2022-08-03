@@ -23,6 +23,17 @@ def get_correlation_entropy(self,**kwargs):
     return -out
 
 
+
+def get_correlation_entropy_from_wf(self,**kwargs):
+    """Return the correlation entropy of a wavefunction"""
+    if self.MBO is not None: # if it has an MBO
+        return get_correlation_entropy(self.MBO,wf=self,**kwargs)
+    else: raise
+
+
+
+
+
 def get_correlated_orbitals(self,ordered=True,**kwargs):
     """Return the most correlated orbitals"""
     cm = get_correlation_matrix(self,**kwargs)

@@ -91,6 +91,9 @@ class MBFermion(edchain.EDchain):
         Return Hopping matrix
         """
         return self.one2many(m) # return the matrix
+    def get_dagger(self,m):
+        """Return the dagger of an operator, assuming it is a matrix"""
+        return np.conjugate(m).T
     def add_hubbard(self,hubbard):
         """
         Add a Hubbard term to the hamiltonian
