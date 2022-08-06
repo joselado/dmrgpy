@@ -51,8 +51,9 @@ def get_correlation_matrix_zeroT(self,operators=None,
         A = self.get_dagger(operators[i])
         for j in range(i,n):
             B = operators[j]
-            C = A*B
-            out = wf.dot(C*wf) # overlap
+            wf1 = B*wf # first operator
+            wf2 = A*wf1 # second operator
+            out = wf.dot(wf2) # overlap
             cm[i,j] = out
             cm[j,i] = np.conjugate(out)
     return cm # return matrix
