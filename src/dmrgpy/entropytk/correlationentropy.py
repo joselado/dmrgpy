@@ -30,6 +30,7 @@ def get_correlation_matrix_finiteT(self,T=1.,**kwargs):
 
 def get_correlation_matrix_zeroT(self,operators=None,
                               basis ="electron", 
+                              dmmode="fast",
                               wf=None,**kwargs):
     """Compute the correlation matrix of a ground state"""
     from .. import fermionchain
@@ -45,6 +46,11 @@ def get_correlation_matrix_zeroT(self,operators=None,
             print("Unrecognized type",type(self))
             raise
     # create the matrix
+    if dmmode=="simple":
+        return correlation_matrix_clean(operators,wf,self)
+    elif dmmode=="fast":
+        return correlation_matrix_fast(operators,wf)
+    elif: raise # not implemented
     n = len(operators)
     cm = np.zeros((n,n),dtype=np.complex)
     for i in range(n):
@@ -58,6 +64,38 @@ def get_correlation_matrix_zeroT(self,operators=None,
             cm[j,i] = np.conjugate(out)
     return cm # return matrix
 
+
+
+def correlation_matrix_clean(operators,wf,self):
+    """Compute the correlation matrix of a wavefunction with the fastest 
+    algorithm"""
+    # create the matrix
+    n = len(operators)
+    cm = np.zeros((n,n),dtype=np.complex)
+    for i in range(n):
+        A = self.get_dagger(operators[i])
+        for j in range(i,n):
+            B = operators[j]
+            wf1 = B*wf # first operator
+            wf2 = A*wf1 # second operator
+            out = wf.dot(wf2) # overlap
+            cm[i,j] = out
+            cm[j,i] = np.conjugate(out)
+    return cm # return matrix
+
+def correlation_matrix_fast(operators,wf):
+    """Compute the correlation matrix of a wavefunction with the fastest 
+    algorithm"""
+    # create the matrix
+    n = len(operators)
+    wfs = [o*wf for o in operators] # compute all the wavefunctions
+    cm = np.zeros((n,n),dtype=np.complex)
+    for i in range(n):
+        for j in range(i,n):
+            out = wfs[i].dot(wfs[j]) # overlap
+            cm[i,j] = out
+            cm[j,i] = np.conjugate(out)
+    return cm # return matrix
 
 
 
