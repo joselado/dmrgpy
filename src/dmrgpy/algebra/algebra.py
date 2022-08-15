@@ -24,7 +24,8 @@ def braket_wAw(w,A,wi=None):
 
 
 
-
+def dagger(m):
+  return np.conjugate(m.T)
 
 
 def braket_ww(w,wi):

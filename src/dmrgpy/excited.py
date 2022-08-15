@@ -36,7 +36,7 @@ def get_excited(*args,**kwargs):
 def get_excited_states(self,n=2,purify=True,**kwargs):
     """Excited states"""
     H = self.hamiltonian # make a check
-    if not self.is_zero_operator(H-H.get_dagger()):
+    if not self.is_hermitian(H): # non-Hermitian Hamiltonians
 #        print("Non-Hermitian Hamiltonian, using Arnoldi method")
         return excited_states_non_hermitian(self,n=n,**kwargs)
     if n==1: # workaround for just the ground state
@@ -45,7 +45,7 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
         return ([e0],[w]) # return
     if not purify: # just compute excited states
         return get_excited_states_dmrg(self,n=n,**kwargs) # compute 
-    else: # purify the states (so far just the energies)
+    else: # purify the states
         es,ws = get_excited_states_dmrg(self,n=n+2,**kwargs) # compute 
         ws = gram_smith(ws) # orthogonalize the MPS
         ne = len(es)

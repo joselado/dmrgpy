@@ -86,11 +86,18 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     return out # return energy
 
 def gs_energy(self,policy="single",**kwargs):
-    if policy=="single":
-        return gs_energy_single(self,**kwargs)
-    if policy=="many":
-        return gs_energy_many(self,**kwargs)
-    else: raise
+    if self.is_hermitian(self.hamiltonian): # put a check for Hermitian
+        if policy=="single":
+            return gs_energy_single(self,**kwargs)
+        if policy=="many":
+            return gs_energy_many(self,**kwargs)
+        else: raise
+    else:
+        es,ws = self.get_excited_states(n=1)
+        self.computed_gs = True
+        self.e0 = es[0]
+        self.wf0 = ws[0].copy() # copy wavefunction
+        return self.e0
 
 
 

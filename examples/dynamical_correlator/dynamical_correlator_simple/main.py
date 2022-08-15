@@ -16,16 +16,18 @@ for i in range(n-1):
     h = h + sc.Sx[i]*sc.Sx[i+1]
     h = h + sc.Sy[i]*sc.Sy[i+1]
     h = h + sc.Sz[i]*sc.Sz[i+1]
-sc.set_hamiltonian(h)
-wf = sc.get_gs() # get the ground state wavefunction
+sc.set_hamiltonian(h+0.01j)
+
+#print(sc.gs_energy())
 
 sc.kpmmaxm = 20 # bond dimension for KPM
 sc.maxm = 20 # bond dimension
 
 name = (sc.Sz[0],sc.Sz[0]) # correlator to compute
-es = np.linspace(-0.5,4,2000)
+es = np.linspace(-0.5,4,200)
 delta = 5e-2
-(x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta,mode="ED")
+(x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta,mode="ED",
+          submode="CVM")
 
 import matplotlib.pyplot as plt
 plt.plot(x,y.real,c="blue",label="DMRG")

@@ -23,6 +23,7 @@ def random_mps_dummy(self,normalize=True):
 def random_product_state(self):
     """Generate a random product state, this ensures a correct
     statistical distribution of the generated states"""
+    raise # this is not functional now
     from .fermionchain import Fermionic_Chain, Spinful_Fermionic_Chain
     from .spinchain import Spin_Chain
     mbc = self.clone() # clone the object
@@ -46,14 +47,14 @@ def random_product_state(self):
 
 def random_mps(self):
     """Return a random MPS"""
-    try: return random_product_state(self)
-    except:
+#    try: return random_product_state(self)
+#    except:
 #        print("Using the default routine")
-        wfr = random_mps_dummy(self)
-        wfi = random_mps_dummy(self)
-        wf = wfr + 1j*wfi # just a linear combination
-        wf = wf.normalize()
-        return wf
+    wfr = random_mps_dummy(self)
+    wfi = random_mps_dummy(self)
+    wf = wfr + 1j*wfi # just a linear combination
+    wf = wf.normalize()
+    return wf
 
 
 def orthogonal_random_mps(self,wfs):

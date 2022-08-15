@@ -158,6 +158,19 @@ def operator_norm(self,op,ntries=5,simplify=True):
 
 
 
+def is_hermitian(self,op):
+    """Given a certain operator, check if it is Hermitian"""
+    op = op - op.get_dagger()
+    wf = self.random_mps() # random wavefunction
+    wf = op*wf # apply the operator
+    norm = (wf.dot(wf)).real
+    return not norm>1e-4
+
+
+
+
+
+
 from .algebra.arnolditk import mpsarnoldi
 from .algebra.arnolditk import lowest_energy as lowest_energy_arnoldi
 from .algebra.arnolditk import lowest_energy_non_hermitian as lowest_energy_non_hermitian_arnoldi

@@ -38,6 +38,10 @@ def get_mode(self,mode="DMRG"):
         return "ED" # use exact diagonalization
     # if there is an enforced mode, then use that one
     if self.mode is not None: return self.mode # use the enforced mode
-    else: return mode # use default
+    else: 
+        if mode in ["ED","DMRG"]: return mode # use default
+        else:
+            print("Unrecognized mode",mode)
+            raise
 
 

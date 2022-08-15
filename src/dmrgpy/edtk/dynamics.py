@@ -6,6 +6,14 @@ import numpy as np
 #from numba import jit
 
 
+def is_hermitian(h):
+    h = h - algebra.dagger(h) # difference
+    h = h@h
+    t = h.diagonal().sum() # this should be a trace
+    return t>1e-5
+
+
+
 def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
     """
     Compute the dynamical correlator
@@ -18,12 +26,15 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
       raise # this is no longer used
     wf0 = self.get_gs_array() # compute ground state
     h = self.get_operator(self.hamiltonian) # Hamiltonian in matrix form
+    if not is_hermitian(h):  submode = "INV" # for non-Hermitian Hamiltonians
     if submode=="KPM":
       return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)
     elif submode=="ED":
       return dynamical_correlator_ED(h,A,B,**kwargs)
     elif submode=="INV":
       return dynamical_correlator_inv(h,wf0,self.e0,A,B,**kwargs)
+    elif submode=="CVM":
+      return dynamical_correlator_inv(h,wf0,self.e0,A,B,mode="cv",**kwargs)
     elif submode=="TD":
       from .. import timedependent
       return timedependent.dynamical_correlator(self,mode="ED",
@@ -78,8 +89,8 @@ def dynamical_sum(es,ws,A,B,out):
 
 
 def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
-        delta=3e-2,mode="full"):
-  """Calculate a correlation function SiSj in a frequency window"""
+        delta=3e-2,mode="cv"):
+  """Calculate a correlation function AB in a frequency window"""
   ## default method
   iden = np.identity(h0.shape[0],dtype=np.complex) # identity
   out = []

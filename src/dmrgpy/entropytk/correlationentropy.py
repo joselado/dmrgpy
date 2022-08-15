@@ -50,7 +50,9 @@ def get_correlation_matrix_zeroT(self,operators=None,
         return correlation_matrix_clean(operators,wf,self)
     elif dmmode=="fast":
         return correlation_matrix_fast(operators,wf)
-    elif: raise # not implemented
+    else: 
+        print(dmmode,"not recognized")
+        raise # not implemented
     n = len(operators)
     cm = np.zeros((n,n),dtype=np.complex)
     for i in range(n):
