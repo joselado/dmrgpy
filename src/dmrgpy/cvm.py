@@ -93,8 +93,8 @@ def dynamical_correlator_cvm_explicit(self,name=None,
     """
     ### So far this just works for onsite correlators
     A,B = name[0],name[1]
-    if not self.is_zero_operator(A-B): 
-        print("Only implemented for A=B")
+    if not self.is_zero_operator(A.get_dagger()-B): 
+        print("Only implemented for A^\dagger=B")
         raise
     wf = self.get_gs() # get the ground state
     wfa = A.get_dagger()*wf # apply A to the GS

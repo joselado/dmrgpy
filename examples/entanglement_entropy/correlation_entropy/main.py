@@ -17,8 +17,8 @@ def get(U):
     fc.maxm = 40
     fc.nsweeps = 10
     fc.set_hamiltonian(h) # set the hoppings
-    fc.get_gs(mode="ED")
-    return fc.get_correlation_entropy(mode="ED")
+    wf = fc.get_gs(mode="ED")
+    return wf.get_correlation_entropy(mode="ED")
 
 Us = np.linspace(-2.,0.,60)
 Ss = [get(U) for U in Us]
