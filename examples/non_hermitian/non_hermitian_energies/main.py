@@ -12,7 +12,10 @@ for i in range(n-1):
     h = h +sc.Sy[i]*sc.Sy[i+1]
     h = h +sc.Sz[i]*sc.Sz[i+1]
 
-h = h + 0.2j # add some imaginary part
+for i in range(n):
+    h = h + (-1)**i*sc.Sz[i]*0.3j # add some imaginary part
+
+#h = h +0.2j
 
 sc.set_hamiltonian(h) # set Hamiltonian
 
