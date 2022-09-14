@@ -19,9 +19,9 @@ for i in range(n):
 
 sc.set_hamiltonian(h) # set Hamiltonian
 
-for mode in ["ED","DMRG"]:
+for mode in ["DMRG"]:
     print("Computing using",mode,"mode")
-    es = sc.get_excited(mode=mode,n=4)
+    es = sc.get_excited(mode=mode,n=4,verbose=1)
     for e in es:
         print("Energies",np.round(e,2))
 

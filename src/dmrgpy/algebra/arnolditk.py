@@ -73,7 +73,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
 
 def mpsarnoldi_iteration(self,Op,H,fe,
         verbose=0, # verbosity
-        maxde=1e-3, # maximum error in the energies
+        maxde=1e-4, # maximum error in the energies
         maxit=1, # maximum number of recursive iterations
         wfs = None, # initial Krylov vectors
         nkry_min = None, # minimum number of krylov vectors
@@ -98,13 +98,15 @@ def mpsarnoldi_iteration(self,Op,H,fe,
             ef = np.array([wfi.aMb(H,wfi) for wfi in wfs]) # compute energies
             ef2 = np.array([wfi.aMb(H,H*wfi) for wfi in wfs]) # compute energies square
             error = np.sqrt(np.abs(ef2-ef**2)) # compute the error
-  #          dnk = np.min([np.abs(1./np.log(maxde)/np.log(error)),1])
-  #          nkry = int(np.round(dnk*nkry_max + (1.-dnk)*nkry_min)) # new number of krylov vectors
+            dnk = np.abs(np.log(np.max(error))/np.log(maxde)) # rescaled error
+            dnk = np.min([dnk,1.]) # upper cutoff
+            dnk = np.max([0,dnk]) # lower cutoff
+            nkry = int(np.round(dnk*nkry_max + (1.-dnk)*nkry_min)) # new number of krylov vectors
             if verbose>0:
 #                print(ef**2)
 #                print(ef2)
                 print("Error in Arnoldi iteration",np.round(error,3))
-  #              print("Krylov update",dnk)
+                print("Krylov update",dnk)
             # now redefine the number of krylov vectors
             if np.max(error)<maxde: break # stop if the error is smaller than the threshold
         return es,wfs # return energies and wavefunctions

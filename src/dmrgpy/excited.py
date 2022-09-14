@@ -68,9 +68,9 @@ def excited_states_non_hermitian(self,n=3,**kwargs):
     (es,wf) = mpsalgebra.mpsarnoldi(self,self.hamiltonian,mode="GS",
                 nwf=n, # number of wavefunctions
                 recursive_arnoldi=True, # recursive?
-                maxit = 10, # max number of Arnoldi iterations
-                nkry_min =6, # minimum number of Krylov vectors
-                nkry_max =6, # minimum number of Krylov vectors
+                maxit = 20, # max number of Arnoldi iterations
+                nkry_min =2, # minimum number of Krylov vectors
+                nkry_max =6, # maximum number of Krylov vectors
                 **kwargs)
 #    if n==1: 
 #        es = [es]
