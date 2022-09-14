@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 4
+n = 10
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Chain(spins) # create the spin chain
 h = 0
@@ -21,7 +21,7 @@ sc.set_hamiltonian(h) # set Hamiltonian
 
 for mode in ["ED","DMRG"]:
     print("Computing using",mode,"mode")
-    es = sc.get_excited(mode=mode,n=4)
+    es = sc.get_excited(mode=mode,n=2)
     for e in es:
         print("Energies",np.round(e,2))
 
