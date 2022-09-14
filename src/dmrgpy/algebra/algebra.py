@@ -110,7 +110,10 @@ def ground_state(h,nmax=maxsize):
   info = False
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
-    eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
+    try: 
+      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
+    except:
+      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000,tol=1e-7)
     eig = np.sort(eig)
   else:
     if info: print("Full diagonalization")

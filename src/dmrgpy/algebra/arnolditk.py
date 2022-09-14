@@ -76,20 +76,36 @@ def mpsarnoldi_iteration(self,Op,H,fe,
         maxde=1e-3, # maximum error in the energies
         maxit=1, # maximum number of recursive iterations
         wfs = None, # initial Krylov vectors
+        nkry_min = None, # minimum number of krylov vectors
+        nkry_max = None, # maximum number of krylov vectors
+        ne=1, # number of energies to return
         **kwargs # other arguments
         ):
         """Recurrent version of the MPS Arnoldi algorithm"""
+        if nkry_min is None: nkry_min = ne + 2 # default value
+        if nkry_max is None: 
+            if nkry_max is None:
+                nkry_max = ne + 2 # default value
+            else: nkry_max = nkyr_min # set as the minimum
+        nkry = nkry_min # initialize
         for i in range(maxit): # loop over iterations
             # get the new vectors
             if verbose>0:
                 print("Arnoldi iteration #",i)
-            es,wfs = mpsarnoldi_iteration_single(self,Op,H,fe,
+                print("Number of Krylov vectors",nkry)
+            es,wfs = mpsarnoldi_iteration_single(self,Op,H,fe,ne=ne,n=nkry,
                            wfs=wfs,verbose=verbose,**kwargs)
             ef = np.array([wfi.aMb(H,wfi) for wfi in wfs]) # compute energies
             ef2 = np.array([wfi.aMb(H,H*wfi) for wfi in wfs]) # compute energies square
             error = np.sqrt(np.abs(ef2-ef**2)) # compute the error
+  #          dnk = np.min([np.abs(1./np.log(maxde)/np.log(error)),1])
+  #          nkry = int(np.round(dnk*nkry_max + (1.-dnk)*nkry_min)) # new number of krylov vectors
             if verbose>0:
-                print("Error in arnoldi iteration",np.round(error,3))
+#                print(ef**2)
+#                print(ef2)
+                print("Error in Arnoldi iteration",np.round(error,3))
+  #              print("Krylov update",dnk)
+            # now redefine the number of krylov vectors
             if np.max(error)<maxde: break # stop if the error is smaller than the threshold
         return es,wfs # return energies and wavefunctions
 
@@ -104,7 +120,8 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         verbose=0, # verbosity
         n0=20, # number of warm up iterations
         wfs = None, # initial Krylov vectors
-        n=10 # dimension of krylov space
+        n=10, # dimension of krylov space
+        ntries_pm=3 # tries for the power method
         ):
     """Single iteration of the restarted arnoldi algorithm"""
     if wfs is None: wfs=[]
@@ -115,14 +132,14 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         # initial guess with power method
         emax,wf = power_method(self,H,n0=n0,
                 verbose=verbose,error=maxde*10,
-                shift=shift) 
+                shift=shift,ntries=ntries_pm) 
         wf0 = None
         if n==1 and ne==1: # power method
             return wf.dot(Op(wf)),wf # return WF and energy
     else: 
-    #    wf = most_mixed_wf(H,wfs,info=verbose>1) # take the most mixed WF
         wfs = gram_smith(wfs) # orthogonalize the basis
-        wf = self.random_mps(orthogonal=wfs) # random MPS
+        wf = most_mixed_wf(H,wfs,info=verbose>1) # take the most mixed WF
+    #    wf = self.random_mps(orthogonal=wfs) # random MPS
     #    wf = wfs[-1] # use the "worst" one
     #    wf0 = wf.copy() # store initial wavefunction
     #    wfs = gram_smith(wfs) # orthogonalize the basis

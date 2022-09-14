@@ -21,7 +21,7 @@ sc.set_hamiltonian(h) # set Hamiltonian
 
 for mode in ["ED","DMRG"]:
     print("Computing using",mode,"mode")
-    es = sc.get_excited(mode=mode,n=2)
+    es = sc.get_excited(mode=mode,n=4)
     for e in es:
         print("Energies",np.round(e,2))
 

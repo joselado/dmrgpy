@@ -85,6 +85,7 @@ def rediagonalize(H,wfs):
 
 def most_mixed_wf(H,wfs,info=False):
     """Return the most mixed wavefunction"""
+    if len(wfs)==1: return wfs[0].copy() # return wavefunction
     ef,wfk = krylov_eigenstates(H,wfs) # compute eigenstates
 #    wfk = wfs
 #    if info:
