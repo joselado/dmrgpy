@@ -73,7 +73,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
 
 def mpsarnoldi_iteration(self,Op,H,fe,
         verbose=0, # verbosity
-        maxde=1e-4, # maximum error in the energies
+        maxde=1e-3, # maximum error in the energies
         maxit=1, # maximum number of recursive iterations
         wfs = None, # initial Krylov vectors
         nkry_min = None, # minimum number of krylov vectors
@@ -93,12 +93,12 @@ def mpsarnoldi_iteration(self,Op,H,fe,
             if verbose>0:
                 print("Arnoldi iteration #",i)
                 print("Number of Krylov vectors",nkry)
-            es,wfs = mpsarnoldi_iteration_single(self,Op,H,fe,ne=ne,n=nkry,
+            es,wfs = mpsarnoldi_iteration_single(self,Op,H,fe,ne=ne,n=ne+nkry,
                            wfs=wfs,verbose=verbose,**kwargs)
             ef = np.array([wfi.aMb(H,wfi) for wfi in wfs]) # compute energies
             ef2 = np.array([wfi.aMb(H,H*wfi) for wfi in wfs]) # compute energies square
             error = np.sqrt(np.abs(ef2-ef**2)) # compute the error
-            dnk = np.abs(np.log(np.max(error))/np.log(maxde)) # rescaled error
+            dnk = np.abs(np.log(np.mean(error))/np.log(maxde)) # rescaled error
             dnk = np.min([dnk,1.]) # upper cutoff
             dnk = np.max([0,dnk]) # lower cutoff
             nkry = int(np.round(dnk*nkry_max + (1.-dnk)*nkry_min)) # new number of krylov vectors
@@ -120,6 +120,7 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         wfskip=None, # wavefunctions to skip
         shift = 0.0, # shift for the operator
         verbose=0, # verbosity
+        mix = 0., # mixing for the new wavefunction
         n0=20, # number of warm up iterations
         wfs = None, # initial Krylov vectors
         n=10, # dimension of krylov space
@@ -141,13 +142,16 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
     else: 
         wfs = gram_smith(wfs) # orthogonalize the basis
         wf = most_mixed_wf(H,wfs,info=verbose>1) # take the most mixed WF
-    #    wf = self.random_mps(orthogonal=wfs) # random MPS
+        if mix!=0.: # finite mixing
+            wf = (1.-mix)*wf + mix*self.random_mps() # random MPS
+            wf = wf.normalize()
+            wf = gram_smith_single(wf,wfs) # orthogonalize
     #    wf = wfs[-1] # use the "worst" one
     #    wf0 = wf.copy() # store initial wavefunction
     #    wfs = gram_smith(wfs) # orthogonalize the basis
     for i in range(n-len(wfs)): # loop over Krylov vectors
         wf = Op(wf) # apply operator
-        if shift!=0.: wf = wf + shift*wf # make a shift
+#        if shift!=0.: wf = wf + shift*wf # make a shift
         wf = gram_smith_single(wf,wfs+wfskip) # orthogonalize
         if verbose>1: print("Krylov vector #",i)
         if wf is None: 
