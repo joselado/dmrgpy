@@ -73,7 +73,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
 
 def mpsarnoldi_iteration(self,Op,H,fe,
         verbose=0, # verbosity
-        maxde=1e-3, # maximum error in the energies
+        maxde=1e-4, # maximum error in the energies
         maxit=1, # maximum number of recursive iterations
         wfs = None, # initial Krylov vectors
         nkry_min = None, # minimum number of krylov vectors
@@ -264,32 +264,23 @@ def sortwf(es,wfs,fe):
 
 
 
-def lowest_energy(self,H,npm=10,verbose=0,n=1,**kwargs):
+def lowest_energy(self,H,n=1,**kwargs):
     """Compute the most negative energy of a Hamiltonian,
     assuming a Hermitian Hamiltonian"""
-    emax,wf = power_method(self,H,n0=npm,verbose=verbose) # PM estimate
-    # most negative
-    return mpsarnoldi(self,H,mode="GS",shift=-np.abs(emax),n0=npm,
-            n=2*n+1,nwf=n,maxit=3,
-            verbose=verbose,**kwargs) 
+    return mpsarnoldi(self,H,mode="GS",nwf=n,**kwargs) 
 
 
-def lowest_energy_non_hermitian(self,H,n=1,npm=10,verbose=0,
-    wfs=None, # initial guess
-    **kwargs):
+def lowest_energy_non_hermitian(self,H,n=1,**kwargs):
     """Compute the most negative energy of a Hamiltonian,
     assuming a non Hermitian Hamiltonian"""
 #    emax,wf = mpsarnoldi(self,H,mode="LM",n0=npm,n=1,nwf=1,maxit=1,
 #            **kwargs) # warm up
-    if wfs is None:
-        emax,wf = power_method(self,H,n0=npm,verbose=verbose) # PM estimate
-    else:
-        emax = wfs[0].dot(H*wfs[0])
-        print("Energy",emax)
-        emax = -np.abs(emax)
     # most negative real part
-    return mpsarnoldi(self,H,mode="GS",n0=npm,n=2*n+1,nwf=n,wfs=wfs,
-            shift=-np.abs(emax),verbose=verbose,**kwargs)
+    return mpsarnoldi(self,H,mode="GS",nwf=n,**kwargs)
+
+
+
+
 
 def most_positive_energy(self,H,npm=10,verbose=0,dt=0.1,n=1,**kwargs):
     """Compute the most negative energy of a Hamiltonian,

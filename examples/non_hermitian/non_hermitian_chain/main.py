@@ -18,25 +18,11 @@ for i in range(n-1): h = h + (fc.N[i]-0.5)*(fc.N[i+1]-0.5)
 from dmrgpy import mpsalgebra
 # the GS mode targets the state with minimum Re(E)
 
-fc.set_hamiltonian(h) ; print(fc.get_excited(mode="ED",n=3)) 
-#exit()
-#fc.set_hamiltonian(h) 
-#e,wf = fc.get_excited_states(mode="ED",n=1)
-#wf=wf[0]
-#print(wf.dot(sum(fc.N)*wf)) ; exit()
-#exit()
+fc.set_hamiltonian(h) 
+print("ED energies",fc.get_excited(mode="ED",n=3)) 
+e,wf = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,n=3)
 
-#e,wf = mpsalgebra.mpsarnoldi(fc,h,mode="GS",n=10,verbose=2,nwf=3,maxit=3)
-fc.maxm = 20
-e,wf = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=2,n=3,
-maxit=3)
-e,wf = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=2,n=3,
-maxit=3,wfs=wf)
-
-print("MPS Energy",e)
-#import scipy.linalg as lg
-#es = lg.eigvals(mh) # eigenvalues
-#print("Exact TB energy",np.sum(es[es.real<0.0]))
+print("MPS Energies",e)
 
 
 
