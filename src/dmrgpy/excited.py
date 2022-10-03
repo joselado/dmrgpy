@@ -63,14 +63,15 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
 from .algebra.arnolditk import gram_smith
 
 
-def excited_states_non_hermitian(self,n=3,**kwargs):
+def excited_states_non_hermitian(self,n=3,recursive=True,
+     **kwargs):
     from . import mpsalgebra
     (es,wf) = mpsalgebra.mpsarnoldi(self,self.hamiltonian,mode="GS",
                 nwf=n, # number of wavefunctions
-                recursive_arnoldi=True, # recursive?
+                recursive_arnoldi=recursive, # recursive?
                 maxit = 20, # max number of Arnoldi iterations
                 nkry_min =1, # minimum number of Krylov vectors
-                nkry_max =5, # maximum number of Krylov vectors
+                nkry_max =8, # maximum number of Krylov vectors
                 **kwargs)
 #    if n==1: 
 #        es = [es]

@@ -35,6 +35,7 @@ using namespace std;
 #include"dynamical_correlator_excited.h" // dynamical correlator with exited
 #include"vev.h" // VEV
 #include"applyoperator.h" // apply operator to a vector
+#include"pureapplyoperator.h" // apply a pure operator to a vector
 #include"get_random_mps.h" // get a random MPS
 
 
@@ -76,6 +77,8 @@ main()
     if (check_task("density_matrix"))  reduced_dm() ; // DM
     if (check_task("vev"))  vev() ; // Vacuum expectation value
     if (check_task("applyoperator"))  applyoperator() ; 
+    if (check_task("pureapplyoperator"))  pureapplyoperator() ; 
+    if (check_task("gen_pureoperator"))  gen_pureoperator() ; 
     if (check_task("overlap_aMb"))  overlap_aMb() ; 
     if (check_task("summps"))  get_summps() ; 
     if (check_task("random_mps"))  get_random_mps() ; 
