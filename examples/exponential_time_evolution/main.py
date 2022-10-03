@@ -25,7 +25,7 @@ def get(ts,mode):
     sc.set_hamiltonian(h) # set Hamiltonian
     wf = sc.get_gs(mode=mode) # get the ground state
     wf = sc.Sx[0]*wf # apply a flip operator to not have an eigenstate
-    wf = wf.normalize() # normalize hte initial wavefunction
+    wf = wf.normalize() # normalize the initial wavefunction
     wf0 = wf.copy() # copy the initial state
     from dmrgpy.timeevolution import imaginary_exponential # function to perform t-evol
     wfs = imaginary_exponential(h,wf,ts=ts) # this computes e^{iht}*wf for each t 

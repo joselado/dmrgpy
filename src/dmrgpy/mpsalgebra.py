@@ -67,11 +67,10 @@ def overlap_aMb_dmrg(self,wf1,A,wf2):
     """Compute the overlap between wavefunctions"""
     from .multioperator import MultiOperator
     from .multioperatortk.staticoperator import StaticOperator
-    if type(A)==MultiOperator:
-        return overlap_aMb_dmrg_MO(self,wf1,A,wf2)
-    elif type(A)==multioperator.StaticOperator:
+    if type(A)==StaticOperator:
         return wf1.dot(A*wf2) # workaround
-    else: raise
+    else:
+        return overlap_aMb_dmrg_MO(self,wf1,A,wf2)
 
 
 

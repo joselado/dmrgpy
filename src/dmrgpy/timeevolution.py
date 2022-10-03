@@ -19,13 +19,22 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
         wf0 = wf.copy() # copy wavefunction
         wfout = [] # empty list
         t0 = 0.0 # initial time
+        tmode="TEBD"
+        if tmode=="TEBD":
+            def TP(wf0,dt01,nt=2):
+                return  exponential_dmrg(wf.MBO,h,wf0,dt=1j*dt01,nt0=nt) 
+        elif tmode=="Taylor":
+            from .multioperatortk.staticoperator import StaticOperator
+            SO = StaticOperator(h,wf.MBO)
+            def TP(wf0,dt01,**kwargs):
+                return first_order_exponential(SO,wf0,dt01)
+        else: raise
         for i in range(len(ts)):
             t1 = ts[i] # final time
             dt01 = t1-t0 # time difference
             nt = max([int(dt01/dt),2]) # number of time-steps
-            wf1 = exponential_dmrg(wf.MBO,h,wf0,dt=1j*dt01,nt0=nt) # evolve
-#            wf1 = (1.+1j*dt01*h)*wf0 # taylor expansion
-#            wf1 = first_order_exponential(h,wf0,dt01)
+#            wf1 = exponential_dmrg(wf.MBO,h,wf0,dt=1j*dt01,nt0=nt) # evolve
+            wf1 = TP(wf0,dt01,nt=nt)
             wf0 = wf1.copy() # store
             wfout.append(wf1.copy()) # store
             t0 = t1+0.0 # new old time
@@ -36,9 +45,8 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
 imaginary_exponential = evolve_WF # just a wrapper exponential
 
 def first_order_exponential(h,wf,dt):
-    print(dt)
     norm = np.sqrt(wf.dot(wf).real) # norm
-    wf1 = (1.+1j*dt*h)*wf #- dt**2*h*(h*wf)/2. + (1j*dt)**3*h*(h*(h*wf))/6.
+    wf1 = wf+1j*dt*(h*wf) #- dt**2*h*(h*wf)/2. + (1j*dt)**3*h*(h*(h*wf))/6.
 #    wf1 = (1.+1j*dt*h)*wf - dt**2*h*(h*wf)
     wf1 = wf1.normalize()
 #    return wf1

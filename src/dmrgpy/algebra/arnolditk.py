@@ -24,7 +24,10 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
         # for non-Hermitian matrices, this targets the eigenvalues
         # with most negative real part
         M = H # start with the Hamiltonian
-        if P is None: Op = lambda x: M*x # operator to apply
+        if P is None: 
+            from ..multioperatortk.staticoperator import StaticOperator
+            M = StaticOperator(H,self) # accelerate
+            Op = lambda x: M*x # operator to apply
         else: Op = lambda x: M*(P*x) # operator to apply
         def fe(es): # function return the right WF
             es = es.real # take the real part
@@ -169,6 +172,8 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
     (es,vs) = diagonalize(mh) # diagonalize
 #    es = recompute_energies(H,vs.T,wfs) # recompute the energies
     ef,wf = selectwf(es,vs.T,wfs,fe,ne=ne) # select the wavefunctions
+    if verbose>0:
+        print("Energies",np.round(ef,2))
     if verbose>1: # print the orthogonality matrix 
         if ne>1: # if just one
           iden = krylov_matrix_representation(1.,wf)

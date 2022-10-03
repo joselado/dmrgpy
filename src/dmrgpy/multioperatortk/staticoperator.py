@@ -18,9 +18,9 @@ class StaticOperator():
 
 def pure_applyoperator_dmrg(self,A,wf):
     """Apply a pure operator to a many body wavefunction"""
-    self.execute(lambda: wf.write()) # write WF
+    self.execute(lambda: wf.write(name="pureapplyoperator_wf1.mps")) 
     task = {"pureapplyoperator":"true",
-            "pureapplyoperator_wf0":wf.name,
+            "pureapplyoperator_wf0":"pureapplyoperator_wf1.mps",
             "pureapplyoperator_operator":"pureapplyoperator_operator.mpo",
             "pureapplyoperator_wf1":"pureapplyoperator_wf1.mps",
             }
@@ -36,7 +36,7 @@ def generate_SO(A,MBO):
             "gen_pureoperator_operator_in":"gen_pureoperator_operator.in",
             "gen_pureoperator_operator_out":"gen_pureoperator_operator.mpo",
             }
-    MBO.execute(lambda: A.write(name="pureapplyoperator_operator.in"))
+    MBO.execute(lambda: A.write(name="gen_pureoperator_operator.in"))
     MBO.task = task
     MBO.execute(lambda : MBO.run()) # run calculation
     return open(MBO.path+"/gen_pureoperator_operator.mpo","rb").read() 
