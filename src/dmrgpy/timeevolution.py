@@ -19,7 +19,7 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
         wf0 = wf.copy() # copy wavefunction
         wfout = [] # empty list
         t0 = 0.0 # initial time
-        tmode="TEBD"
+        tmode="TEBD" # mode for the calculation
         if tmode=="TEBD":
             def TP(wf0,dt01,nt=2):
                 return  exponential_dmrg(wf.MBO,h,wf0,dt=1j*dt01,nt0=nt) 
@@ -34,7 +34,7 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
             dt01 = t1-t0 # time difference
             nt = max([int(dt01/dt),2]) # number of time-steps
 #            wf1 = exponential_dmrg(wf.MBO,h,wf0,dt=1j*dt01,nt0=nt) # evolve
-            wf1 = TP(wf0,dt01,nt=nt)
+            wf1 = TP(wf0,dt01,nt=nt) # evolve the wavefunction
             wf0 = wf1.copy() # store
             wfout.append(wf1.copy()) # store
             t0 = t1+0.0 # new old time
