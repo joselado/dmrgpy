@@ -73,6 +73,10 @@ class MPS():
     def get_correlation_entropy(self,**kwargs):
         from . import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,**kwargs)
+    def get_correlation_entropy_density(self,**kwargs):
+        from . import entanglement
+        return entanglement.get_correlation_entropy_density(self.MBO,
+                 wf=self,**kwargs)
     def get_CFT_central_charge(self):
         return entropy.central_charge(self)
     def get_pair_entropy(self,i,j):

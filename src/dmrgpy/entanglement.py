@@ -2,6 +2,22 @@ import numpy as np
 import scipy.linalg as lg
 from .entropytk.correlationentropy import get_correlation_matrix
 
+
+def get_correlation_entropy_density(self,**kwargs):
+    """Compute the density of spinless correlation entropy"""
+    from . import fermionchain
+    cm = get_correlation_matrix(self,**kwargs)
+    ce,ws = lg.eigh(cm) # return eigenvalues
+    ws = ws.T # transpose
+    ce[ce<1e-6] = 1. # set to 1, so that they have zero entropy
+    ss = -ce*np.log(ce) # entropies 
+    out = 0.*ws[0].real # initialize
+    for i in range(len(ss)): out = out + ss[i]*np.abs(ws[i])**2
+    if type(self)==fermionchain.Fermionic_Chain: pass
+    elif type(self)==fermionchain.Spinful_Fermionic_Chain:
+      out = [out[2*i]+out[2*i+1] for i in range(len(out)//2)]
+    return np.array(out) # return the density
+
  
 
 def get_correlation_eigenvalues(self,**kwargs):
