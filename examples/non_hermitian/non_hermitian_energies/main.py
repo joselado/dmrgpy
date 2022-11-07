@@ -19,9 +19,13 @@ for i in range(n):
 
 sc.set_hamiltonian(h) # set Hamiltonian
 
-for mode in ["DMRG"]:
+from dmrgpy.algebra import arnolditk
+#arnolditk.arnoldimode = "DMRG" # this is to force a mode in arnoldi
+
+
+for mode in ["DMRG","ED"]:
     print("Computing using",mode,"mode")
-    es = sc.get_excited(mode=mode,n=4,verbose=1,recursive=False)
+    es = sc.get_excited(mode=mode,n=4)
     for e in es:
         print("Energies",np.round(e,2))
 

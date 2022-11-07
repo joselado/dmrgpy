@@ -169,7 +169,9 @@ class EDOperator():
             return out
         elif type(v)==MultiOperator: # input is a multioperator
             return self*EDOperator(v,self.MBO)
-        else: raise
+        else: 
+            print("Incompatible object",type(v))
+            raise
     def __rmul__(self,v):
         from ..multioperator import MultiOperator
         if type(v)==MultiOperator: # input is a multioperator

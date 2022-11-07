@@ -3,6 +3,13 @@ import scipy.linalg as lg
 
 # routines to perform iterative diagonalization
 
+
+
+
+arnoldimode = "DMRG" # mode of the arnoldi method
+
+
+
 def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
         mode="GS",P=None,
         recursive_arnoldi=False,
@@ -26,7 +33,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
         M = H # start with the Hamiltonian
         if P is None: 
             from ..multioperatortk.staticoperator import StaticOperator
-            M = StaticOperator(H,self) # accelerate
+            M = self.toMPO(H,mode=arnoldimode) # accelerate
             Op = lambda x: M*x # operator to apply
         else: Op = lambda x: M*(P*x) # operator to apply
         def fe(es): # function return the right WF
@@ -124,7 +131,7 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         shift = 0.0, # shift for the operator
         verbose=0, # verbosity
         mix = 0., # mixing for the new wavefunction
-        n0=20, # number of warm up iterations
+        n0=8, # number of warm up iterations
         wfs = None, # initial Krylov vectors
         n=10, # dimension of krylov space
         ntries_pm=3 # tries for the power method
@@ -146,7 +153,7 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         wfs = gram_smith(wfs) # orthogonalize the basis
         wf = most_mixed_wf(H,wfs,info=verbose>1) # take the most mixed WF
         if mix!=0.: # finite mixing
-            wf = (1.-mix)*wf + mix*self.random_mps() # random MPS
+            wf = (1.-mix)*wf + mix*random_state(self) # random MPS
             wf = wf.normalize()
             wf = gram_smith_single(wf,wfs) # orthogonalize
     #    wf = wfs[-1] # use the "worst" one
@@ -159,7 +166,7 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         if verbose>1: print("Krylov vector #",i)
         if wf is None: 
             if verbose>1: print("Zero vector found, use a random one")
-            wf = self.random_mps(orthogonal=wfs+wfskip) # random MPS
+            wf = random_state(self,orthogonal=wfs+wfskip) # random MPS
         wf = wf.normalize()
         wfs.append(wf.copy()) # store
     nw = len(wfs) # number of wavefunction
@@ -244,7 +251,7 @@ def selectwf(es,vs,wfs,fe,ne=1):
         del vlist[ie] # ignore in the next iteration
     wfout = [] # output wavefunctions
     for v0 in vstore: # loop over WF
-        wf = 0
+        wf = 0*wfs[0]
         for i in range(len(wfs)): 
             wf = wf + np.conjugate(v0[i])*wfs[i] # add
         wf = wf.normalize()
@@ -314,7 +321,7 @@ def power_method(self,H,verbose=0,n0=10,ntries=10,shift=0.0,
     """Simple implementation of the power method"""
     def f(): # function to perform a single power method iteration
         M = H + shift
-        wf = self.random_mps(orthogonal=orthogonal) # take a random MPS
+        wf = random_state(self,orthogonal=orthogonal) # take a random MPS
         eold = -1e20
         for i in range(n0): # number of tries
             wf = M*wf # perform one iteration
@@ -338,5 +345,16 @@ def power_method(self,H,verbose=0,n0=10,ntries=10,shift=0.0,
     return es[ind],wfs[ind].copy() # return this one
 
 
+
+def random_state(self,orthogonal=None):
+    """Generate a random state"""
+    if orthogonal is None:
+        if arnoldimode=="DMRG": return self.random_mps()
+        elif arnoldimode=="ED": return self.get_ED_obj().random_state()
+    else:
+        while True: # infinite loop
+            wf = random_state(self) # generate a random state
+            wf = gram_smith_single(wf,wfs)
+            if wf is not None: return wf # return this wavefunction
 
 

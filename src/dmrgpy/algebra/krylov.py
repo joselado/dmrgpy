@@ -116,7 +116,7 @@ def unitary_transformation(vs,wfs):
     """Perform a unitary transformation"""
     wfout = [] # storage
     for v0 in vs: # loop over WF
-        wf = 0
+        wf = 0*wfs[0] # initialize
         for i in range(len(wfs)):
             wf = wf + np.conjugate(v0[i])*wfs[i] # add
         wf = wf.normalize()
