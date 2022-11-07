@@ -152,4 +152,41 @@ class State():
 
 
 
+class EDOperator():
+    """This is a dummy class for operators, so that it resembles the
+    tensor network Static Operator. Useful for testing purposes"""
+    def __init__(self,MO,MBO):
+        """Init, takes as input a multioperator and the MBO"""
+        self.MBO = MBO # store the many-body object
+        self.SO = MBO.get_operator(MO) # generate the static operator
+    def __mul__(self,v):
+        from ..multioperator import MultiOperator
+        if type(v)==State: # input is an MPS
+            return State(self.SO@v.v,self.MBO)
+        elif type(v)==EDOperator: # input is an MPO
+            out = self.copy() # copy
+            out.SO = self.SO@v.SO # matrix multiplication
+            return out
+        elif type(v)==MultiOperator: # input is a multioperator
+            return self*EDOperator(v,self.MBO)
+        else: raise
+    def __rmul__(self,v):
+        from ..multioperator import MultiOperator
+        if type(v)==MultiOperator: # input is a multioperator
+            return EDOperator(v,self.MBO)*self
+        else: raise
+    def copy(self):
+        from copy import deepcopy
+        return deepcopy(self)
+    def trace(self):
+        from ..algebra.algebra import trace
+        return trace(self.SO)
+
+
+
+
+
+
+
+
 

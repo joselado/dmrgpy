@@ -3,6 +3,7 @@
 # algebra
 
 from ..mps import MPS
+import numpy as np
 
 class StaticOperator():
     def __init__(self,MO,MBO):
@@ -10,9 +11,26 @@ class StaticOperator():
         self.MBO = MBO # store the many-body object
         self.SO = generate_SO(MO,MBO) # generate the static operator
     def __mul__(self,v):
+        from ..multioperator import MultiOperator
         if type(v)==MPS: # input is an MPS
             return pure_applyoperator_dmrg(self.MBO,self.SO,v)
+        elif type(v)==StaticOperator: # input is an MPO
+            out = self.copy()
+            out.SO = mult_pureoperator(self.MBO,self.SO,v.SO)
+            return out
+        elif type(v)==MultiOperator: # input is a multioperator
+            return self*StaticOperator(v,self.MBO)
         else: raise
+    def __rmul__(self,v):
+        from ..multioperator import MultiOperator
+        if type(v)==MultiOperator: # input is a multioperator
+            return StaticOperator(v,self.MBO)*self
+        else: raise
+    def copy(self):
+        from copy import deepcopy
+        return deepcopy(self)
+    def trace(self):
+        return trace_pureoperator(self.MBO,self.SO)
 
 
 
@@ -41,4 +59,33 @@ def generate_SO(A,MBO):
     MBO.execute(lambda : MBO.run()) # run calculation
     return open(MBO.path+"/gen_pureoperator_operator.mpo","rb").read() 
 
+
+
+
+def mult_pureoperator(self,A,B):
+    """Apply a pure operator to a many body wavefunction"""
+    task = {"multmpo_operator":"true",
+            "multmpo_pureoperator_A":"multmpo_pureoperator_A.mpo",
+            "multmpo_pureoperator_B":"multmpo_pureoperator_B.mpo",
+            "multmpo_pureoperator_C":"multmpo_pureoperator_C.mpo",
+            }
+    self.execute(lambda: open(self.path+"/multmpo_pureoperator_A.mpo","wb").write(A))
+    self.execute(lambda: open(self.path+"/multmpo_pureoperator_B.mpo","wb").write(B))
+    self.task = task
+    self.execute(lambda : self.run()) # run calculation
+    return open(self.path+"/multmpo_pureoperator_C.mpo","rb").read() 
+
+
+
+
+def trace_pureoperator(self,A):
+    """Compute the trace of a pure operator"""
+    task = {"trace_mpo_operator":"true",
+            "trace_pureoperator":"trace_pureoperator.mpo",
+            }
+    self.execute(lambda: open(self.path+"/trace_pureoperator.mpo","wb").write(A))
+    self.task = task
+    self.execute(lambda : self.run()) # run calculation
+    m = self.execute( lambda : np.genfromtxt("TRACE.OUT")) # run calculation
+    return m[0] + 1j*m[1]
 

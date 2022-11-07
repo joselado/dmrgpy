@@ -19,7 +19,7 @@ def exponential(self,h,wf,mode="DMRG",**kwargs):
 
 def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000,nt0=None):
     """Compute the exponential of a wavefunction"""
-    if not h.is_hermitian(): raise
+    if not self.is_hermitian(h): raise
     if nt0 is None: nt0 = int(h.get_bandwidth(self)*nt)
     task = {"exponential_eMwf":"true",
             "tevol_dt_real":str(-dt.real),
@@ -186,3 +186,18 @@ from .algebra.arnolditk import mpsarnoldi
 from .algebra.arnolditk import lowest_energy as lowest_energy_arnoldi
 from .algebra.arnolditk import lowest_energy_non_hermitian as lowest_energy_non_hermitian_arnoldi
 from .algebra.arnolditk import gram_smith_single
+
+
+def toMPO(self,H,mode="DMRG"):
+    """Transport an operator into a matrix-product operator"""
+    if mode=="DMRG":
+        from .multioperatortk.staticoperator import StaticOperator
+        return StaticOperator(H,self) 
+    elif mode=="ED":
+        from .edtk.edchain import EDOperator
+        return EDOperator(H,self.get_ED_obj())
+    else: raise
+
+
+
+

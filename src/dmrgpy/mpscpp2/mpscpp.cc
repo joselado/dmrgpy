@@ -36,6 +36,7 @@ using namespace std;
 #include"vev.h" // VEV
 #include"applyoperator.h" // apply operator to a vector
 #include"pureapplyoperator.h" // apply a pure operator to a vector
+#include"multmpo.h" // apply a pure operator to a vector
 #include"get_random_mps.h" // get a random MPS
 
 
@@ -79,6 +80,8 @@ main()
     if (check_task("applyoperator"))  applyoperator() ; 
     if (check_task("pureapplyoperator"))  pureapplyoperator() ; 
     if (check_task("gen_pureoperator"))  gen_pureoperator() ; 
+    if (check_task("multmpo_operator"))  multmpo_operator() ; 
+    if (check_task("trace_mpo_operator"))  trace_mpo_operator() ; 
     if (check_task("overlap_aMb"))  overlap_aMb() ; 
     if (check_task("summps"))  get_summps() ; 
     if (check_task("random_mps"))  get_random_mps() ; 

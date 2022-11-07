@@ -186,3 +186,25 @@ static auto add_spin_operator= [](auto ampo, auto sites, float v, int i, auto na
 
 #include"multioperator.h" // library to read a multioperator
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+static auto trace_mpo=[](auto A) {
+        auto sites = get_sites(); // Get the different sites
+        auto m1 = Iden(sites) ; // identity
+        return overlap(m1,A);
+}
+;
+

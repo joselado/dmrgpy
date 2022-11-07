@@ -5,7 +5,7 @@ from .mps import MPS
 
 def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
     """Time evolve a wavefunction"""
-    if not h.is_hermitian(): raise # only for hermitian Hamiltonians
+#    if not h.is_hermitian(): raise # only for hermitian Hamiltonians
     if type(wf)==State: # ED version
         out = []
         for t in ts:

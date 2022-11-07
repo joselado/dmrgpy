@@ -176,6 +176,9 @@ class Many_Body_Chain():
   def test_ED(self):
       """Test the ED object"""
       self.get_ED_obj().test()
+  def toMPO(self,H,**kwargs):
+      """Transport an operator into a matrix-product operator"""
+      return mpsalgebra.toMPO(self,H,**kwargs)
   def excited_vev_MB(self,MO,**kwargs):
       """
       Compute a vacuum expectation value

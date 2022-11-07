@@ -258,3 +258,11 @@ def uij(wf1,wf2):
       m[i,j] = wf1[i].dot(wf2[j])
   return m
 
+
+def trace(A):
+    """Compute trace"""
+    if issparse(A): return A.trace()
+    else: return np.trace(A)
+
+
+
