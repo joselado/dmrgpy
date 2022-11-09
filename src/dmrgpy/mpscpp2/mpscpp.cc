@@ -83,6 +83,7 @@ main()
     if (check_task("multmpo_operator"))  multmpo_operator() ; 
     if (check_task("trace_mpo_operator"))  trace_mpo_operator() ; 
     if (check_task("overlap_aMb"))  overlap_aMb() ; 
+    if (check_task("overlap_aMb_static"))  overlap_aMb_static() ; 
     if (check_task("summps"))  get_summps() ; 
     if (check_task("random_mps"))  get_random_mps() ; 
     if (check_task("distribution"))  get_moments_distribution() ; 

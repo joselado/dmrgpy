@@ -13,17 +13,14 @@ for i in range(n-1):
     h = h +sc.Sz[i]*sc.Sz[i+1]
 
 for i in range(n):
-    h = h + (-1)**i*sc.Sz[i]*0.3j # add some imaginary part
+    h = h + (-1)**i*sc.Sz[i]*0.6j # add some imaginary part
 
-#h = h +0.2j
 
 sc.set_hamiltonian(h) # set Hamiltonian
 
-from dmrgpy.algebra import arnolditk
-#arnolditk.arnoldimode = "DMRG" # this is to force a mode in arnoldi
 
 
-for mode in ["DMRG","ED"]:
+for mode in ["ED","DMRG"]:
     print("Computing using",mode,"mode")
     es = sc.get_excited(mode=mode,n=4)
     for e in es:

@@ -61,7 +61,8 @@ def diagonalize(mh):
     if np.max(np.abs(mh-np.conjugate(mh.T)))<1e-6:
         return lg.eigh(mh)
     else: # non Hermitian
-        return lg.eig(np.conjugate(mh).T)
+        es,ws = lg.eig(np.conjugate(mh).T)
+        return np.conjugate(es),ws
 
 
 
@@ -95,12 +96,16 @@ def most_mixed_wf(H,wfs,info=False):
     ef = np.array([wfi.aMb(H,wfi) for wfi in wfk]) # compute energies
     ef2 = np.array([wfi.aMb(H,H*wfi) for wfi in wfk]) # compute energies square
     error = np.sqrt(np.abs(ef2-ef**2)) # compute the error
-    ind = np.where(error==np.max(error))[0][0] # index of the maximum error
-    if info: print("Index of the most mixed",ind)
-    if info: print("Energy of the most mixed",np.round(ef[ind],2))
+    weight = error + 1e-6 # normalize
+    weight = weight/np.max(weight) # weight
+    wfo = wfs[0]*0. # initialize
+    for i in range(len(wfs)):
+        phi = np.exp(1j*np.random.random()*np.pi*2) # random phase
+        wfo = wfo + phi*weight[i]*wfs[i] # output
+    wfo = wfo.normalize() # normalize wavefunction
     if info: print("Eigenenergies",np.round(ef,2))
     if info: print("Fluctuations",np.round(error,2))
-    return wfk[ind].copy() # return the most mixed WF
+    return wfo
 
 
 def krylov_eigenstates(H,wfs):
@@ -122,4 +127,66 @@ def unitary_transformation(vs,wfs):
         wf = wf.normalize()
         wfout.append(wf.copy()) # store wavefunction
     return wfout # return transformed wavefunctions
+
+
+
+
+def generalized_diagonalize(H,wfs):
+    """Return the eigenvalues and eigenvectors of a generalized
+    eigenvalue problem"""
+    mh = krylov_matrix_representation(H,wfs) # matrix representation
+    b = krylov_matrix_representation(1.,wfs) # matrix representation
+#    print(np.round(b,2))
+    if np.max(np.abs(mh-np.conjugate(mh.T)))<1e-6:
+        return lg.eigh(mh,b=b)
+    else: # non Hermitian
+        es,ws = lg.eig(np.conjugate(mh).T,b=b)
+        return np.conjugate(es),ws 
+
+
+
+def select_states(es,vs,fe,ne=1):
+    """Select states according to a criteria"""
+    elist = [e for e in es] # list with the energies
+    vlist = [v for v in vs] # list with the states
+    vstore = [] # empty list
+    estore = [] # empty list
+    einds = [] # indexes
+    for i in range(ne): # loop over desired energies
+        ie = fe(np.array(elist)) # get the desired index
+        estore.append(elist[ie]) # store this energy
+        vstore.append(vlist[ie]) # store this WF
+        del elist[ie] # ignore in the next iteration
+        del vlist[ie] # ignore in the next iteration
+    return estore,vstore
+
+
+def selectwf(es,vs,wfs,fe,ne=1):
+    """Select the wavefunctions that should be returned"""
+    estore,vstore = select_states(es,vs,fe,ne=ne)
+    wfout = [] # output wavefunctions
+    for v0 in vstore: # loop over WF
+        wf = 0*wfs[0]
+        for i in range(len(wfs)):
+            wf = wf + np.conjugate(v0[i])*wfs[i] # add
+        wf = wf.normalize() # normalize
+        wfout.append(wf.copy()) # store wavefunction
+    eout = np.array(estore) # convert to array
+    return eout,wfout
+
+
+
+
+def krylov2states(H,wfs,criteria=None,**kwargs):
+    """Given a Hamiltonian and a set of states, return the eigenstates
+    that fufill a certain criteria"""
+    if criteria is None: return wfs # return all
+    mh = krylov_matrix_representation(H,wfs) # get the representation
+    (es,vs) = diagonalize(mh) # diagonalize
+    # select the wavefunctions
+    ef,wf = selectwf(es,vs.T,wfs,criteria,**kwargs,ne=len(wfs)) 
+    return wf
+
+
+
 

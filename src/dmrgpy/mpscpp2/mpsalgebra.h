@@ -28,7 +28,7 @@ static auto sum_mpo=[](auto A1,auto A2) {
 
 
 static auto mult_mpo=[](auto A1,auto A2) {
-        int maxm = get_int_value("maxm") ; // bond dimension
+        int maxm = get_int_value("mpomaxm") ; // bond dimension
         auto cutoff = get_float_value("cutoff") ;
 	auto args = Args({"Maxm", maxm, "Cutoff", cutoff});
 	auto sites = get_sites();

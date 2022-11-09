@@ -68,7 +68,8 @@ def overlap_aMb_dmrg(self,wf1,A,wf2):
     from .multioperator import MultiOperator
     from .multioperatortk.staticoperator import StaticOperator
     if type(A)==StaticOperator:
-        return wf1.dot(A*wf2) # workaround
+        return A.aMb(wf1,wf2)
+#        return wf1.dot(A*wf2) # workaround
     else:
         return overlap_aMb_dmrg_MO(self,wf1,A,wf2)
 
@@ -130,9 +131,9 @@ def summps_dmrg(self,wf1,wf2):
 
 def applyoperator_dmrg(self,A,wf):
     """Apply operator to a many body wavefunction"""
-    self.execute(lambda: wf.write()) # write WF
+    self.execute(lambda: wf.write(name="applyoperator_wf0.mps")) # write WF
     task = {"applyoperator":"true",
-            "applyoperator_wf0":wf.name,
+            "applyoperator_wf0":"applyoperator_wf0.mps",
             "applyoperator_multioperator":"applyoperator_multioperator.in",
             "applyoperator_wf1":"applyoperator_wf1.mps",
             }

@@ -31,6 +31,8 @@ class StaticOperator():
         return deepcopy(self)
     def trace(self):
         return trace_pureoperator(self.MBO,self.SO)
+    def aMb(self,wf1,wf2):
+        return overlap_aMb_static(self.MBO,wf1,self.SO,wf2)
 
 
 
@@ -88,4 +90,27 @@ def trace_pureoperator(self,A):
     self.execute(lambda : self.run()) # run calculation
     m = self.execute( lambda : np.genfromtxt("TRACE.OUT")) # run calculation
     return m[0] + 1j*m[1]
+
+
+def overlap_aMb_static(self,wf1,A,wf2):
+    """Compute the overlap between wavefunctions, with A a StaticOperator"""
+    task = {"overlap_aMb_static":"true",
+            }
+    self.task = task # override tasks
+    self.execute(lambda: wf1.write(name="overlap_aMb_wf1.mps"))
+    self.execute(lambda: wf2.write(name="overlap_aMb_wf2.mps"))
+    self.execute(lambda: open(self.path+"/overlap_aMb_pureoperator.mpo","wb").write(A))
+    self.execute(lambda: self.run()) # run calculation
+    m = self.execute(lambda : np.genfromtxt("OVERLAP_aMb.OUT")) # read
+    return m[0] + 1j*m[1]
+
+
+
+
+
+
+
+
+
+
 

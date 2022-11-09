@@ -27,3 +27,19 @@ static auto gen_pureoperator=[]() {
 };
 
 
+
+
+
+static auto overlap_aMb_static=[]() {
+  // now get the MPS
+  auto psi1 = read_wf("overlap_aMb_wf1.mps") ; // get the WF
+  auto psi2 = read_wf("overlap_aMb_wf2.mps") ; // get the WF
+  auto A = get_mpo("overlap_aMb_pureoperator.mpo"); // get the MPO
+  auto c = overlapC(psi1,A,psi2) ; // compute overlap
+  ofstream ofile; // declare
+  ofile.open("OVERLAP_aMb.OUT");  // open file
+  ofile << std::setprecision(20) << real(c) << "  " << imag(c) << endl ;
+  ofile.close() ; // close file
+};
+
+

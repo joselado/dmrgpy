@@ -63,8 +63,8 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
 from .algebra.arnolditk import gram_smith
 
 
-def excited_states_non_hermitian(self,n=3,recursive=True,
-        maxit=20,nkry_min =1,nkry_max =8,
+def excited_states_non_hermitian(self,n=3,recursive=False,
+        maxit=40,nkry_min =3,nkry_max =10,
      **kwargs):
     from . import mpsalgebra
     (es,wf) = mpsalgebra.mpsarnoldi(self,self.hamiltonian,mode="GS",
