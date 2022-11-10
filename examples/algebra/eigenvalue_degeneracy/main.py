@@ -12,16 +12,16 @@ for i in range(n-1):
     h = h +sc.Sy[i]*sc.Sy[i+1]
     h = h +sc.Sz[i]*sc.Sz[i+1]
 
-h = h +1j
+h = -h 
 
 mode = "ED"
 sc.set_hamiltonian(h)
 e0 = sc.gs_energy(mode=mode) # get ground state energy
 print("Energy",e0)
 from dmrgpy.degeneracy import pole_eigenvalue_degeneracy
-deg = pole_eigenvalue_degeneracy(sc,h,e0,mode=mode) # compute the degeneracy
+deg = pole_eigenvalue_degeneracy(sc,h,e0,mode=mode,delta=0.01) # compute the degeneracy
 print("Degeneracy",deg)
-
+print("Excited states",sc.get_excited(n=int(deg)+1,mode=mode))
 
 
 

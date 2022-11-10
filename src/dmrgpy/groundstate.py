@@ -93,7 +93,7 @@ def gs_energy(self,policy="single",**kwargs):
             return gs_energy_many(self,**kwargs)
         else: raise
     else:
-        es,ws = self.get_excited_states(n=1)
+        es,ws = self.get_excited_states(n=1,**kwargs)
         self.computed_gs = True
         self.e0 = es[0]
         self.wf0 = ws[0].copy() # copy wavefunction

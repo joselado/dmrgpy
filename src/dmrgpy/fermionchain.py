@@ -27,6 +27,8 @@ class Fermionic_Chain(Many_Body_Chain):
     def set_hoppings(self,fun):
         """Add the spin independent hoppings"""
         self.set_hoppings_MB(fun)
+    def get_logdimension(self):
+        return len(self.C)*np.log(2) # log dimension
     def get_density_spinless(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_spinless(self,**kwargs)

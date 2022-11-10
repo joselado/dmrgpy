@@ -63,15 +63,18 @@ instructions.
 # Capabilities #
 - Possible models include spinless fermions, spinful fermions, spins, parafermions and bosons
 - Ground state energy
+- Ground state wavefunction
 - Excitation energies
 - Excited wavefunctions
 - Arbitrary expectation values, including static correlation functions
-- Time evolution and measurements
-- MPS and MPO algebra, including exponential and inverse
+- Time evolution of arbitrary states
+- MPS algebra: sum of MPS, application of operators, exponential and inverse
+- MPO algebra: sums, products, trace, trace of inverse for generic operators
 - Dynamical correlation functions computed with the Kernel polynomial method
 - Dynamical correlation functions with time dependent DMRG
 - Generic operator distributions computed with the Kernel polynomial method
 - Iterative MPS Hermitian and non-Hermitian diagonalization solvers 
+- Hermitian and non-Hermitian degeneracy detection
 
 # Examples
 
