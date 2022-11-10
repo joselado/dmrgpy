@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 3 # number of sites in the spin chain
+n = 6 # number of sites in the spin chain
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 sc = spinchain.Spin_Chain(spins) # create the spin chain
 Sx,Sy,Sz = sc.Sx,sc.Sy,sc.Sz # lists with the respective operators
