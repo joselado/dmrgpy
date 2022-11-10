@@ -15,7 +15,7 @@ use_gs_gen_diag = True  # use gram smith (for Krylov in gen diag)
 use_gram_smith = not use_generalized_diagonalize or (use_generalized_diagonalize and use_gs_gen_diag)
 
 
-def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
+def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-3,
         mode="GS",P=None,
         recursive_arnoldi=False,
         nwf=1, 
@@ -23,8 +23,9 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
     """Compute an eigenvector using the Arnoldi algorithm"""
     shift = 0. # zero shift unless stated otherwise
     if mode=="ShiftInv": # target a specific energy with shift and invert
-        M = H - (e+delta*1j) # shift
-        Op = lambda x: self.applyinverse(M,x) # operator to apply
+        Mi = H - e # shift
+        M = self.toMPO(H,mode=arnoldimode) # accelerate
+        Op = lambda x: self.applyinverse(Mi,x,delta=delta,maxn=20) # operator to apply
         def fe(es): # function return the right WF
             es = np.abs(es-e) # minimum energy
             return np.where(es==np.min(es))[0][0] # return the index
@@ -70,8 +71,8 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
             return np.where(d==np.max(d))[0][0] # return the index
     else: raise
     if nwf==1: # just the ground state
-        return mpsarnoldi_iteration(self,Op,H,fe,ne=1,
-                shift=shift,
+        return mpsarnoldi_iteration(self,Op,M,fe,ne=1,
+                shift=shift,maxde=delta,
                 **kwargs)
     else: 
         if recursive_arnoldi:
@@ -79,21 +80,23 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-1,
             eout = [] # empty list
             for i in range(nwf): # loop over desired wavefunctions
                 ei,wfi = mpsarnoldi_iteration(self,
-                        Op,H,fe,ne=1,
-                        wfs=[],
+                        Op,M,fe,ne=1,
+                        wfs=[],maxde=delta,
                         wfskip=wfout,**kwargs)
                 wfout.append(wfi[0].copy()) # store wavefunction
                 eout.append(ei[0]) # store wavefunction
             eout,wfout = sortwf(eout,wfout,fe) # resort the result
             return np.array(eout),wfout # return wavefunctions
         else:
-          return mpsarnoldi_iteration(self,Op,M,fe,ne=nwf,**kwargs)
+          return mpsarnoldi_iteration(self,Op,M,fe,
+                  maxde=delta,
+                  ne=nwf,**kwargs)
 
 
 def mpsarnoldi_iteration(self,Op,H,fe,
         verbose=0, # verbosity
         maxde=1e-3, # maximum error in the energies
-        maxit=1, # maximum number of recursive iterations
+        maxit=10, # maximum number of recursive iterations
         wfs = None, # initial Krylov vectors
         nkry_min = None, # minimum number of krylov vectors
         nkry_max = None, # maximum number of krylov vectors
@@ -125,10 +128,10 @@ def mpsarnoldi_iteration(self,Op,H,fe,
             if verbose>0:
 #                print(ef**2)
 #                print(ef2)
+                print(maxde)
                 print("Eigenergies of eigenvectors",np.round(ef,3))
-                print("Normalized eigenergies",np.round(ef/norms,3))
                 print("Error in Arnoldi iteration",np.round(error,3))
-                print("Total error",np.round(np.sum(error),3))
+                print("Mean error",np.round(np.mean(error),3))
                 print("Krylov update",dnk)
             # now redefine the number of krylov vectors
             if np.max(error)<maxde: break # stop if the error is smaller than the threshold
@@ -156,7 +159,9 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         print("Eigenvalue shift",shift)
     if len(wfs)==0: # no vectors given
         # initial guess with power method
-        if n0==0: wf = random_state(self) # random state
+        if n0==0: 
+            wf = random_state(self) # random state
+            wfs = [wf]
         else: # use power method
             emax,wfs = powermethod.multi_power_method(self,
                     H,n0=n0,
@@ -282,6 +287,7 @@ def most_negative_energy(self,H,**kwargs):
     return -es,wfs
 
 #lowest_energy_non_hermitian = most_negative_energy
+
 
 
 def random_state(self,orthogonal=None):

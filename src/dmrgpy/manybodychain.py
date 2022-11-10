@@ -168,6 +168,9 @@ class Many_Body_Chain():
       Compute a vacuum expectation value
       """
       return vev.vev(self,MO,**kwargs)
+  def get_gs_degeneracy(self,**kwargs):
+      from . import degeneracy
+      return degeneracy.gs_degeneracy(self,**kwargs)
   def vev(self,MO,mode="DMRG",**kwargs): 
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": return vev.vev(self,MO,**kwargs)
@@ -237,6 +240,10 @@ class Many_Body_Chain():
   def summps(self,wf1,wf2,**kwargs):
       """Apply an operator"""
       return mpsalgebra.summps(self,wf1,wf2,**kwargs)
+  def trace(self,A,**kwargs):
+      return mpsalgebra.trace(self,A,**kwargs)
+  def inverse_trace(self,A,**kwargs):
+      return mpsalgebra.inverse_trace(self,A,**kwargs)
   def set_pairings_MB(self,fun):
       """Generic pairing term"""
       h = self.generate_bilinear(fun,self.C,self.C)

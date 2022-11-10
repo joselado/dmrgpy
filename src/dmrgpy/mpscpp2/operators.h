@@ -204,7 +204,7 @@ static auto add_spin_operator= [](auto ampo, auto sites, float v, int i, auto na
 static auto trace_mpo=[](auto A) {
         auto sites = get_sites(); // Get the different sites
         auto m1 = Iden(sites) ; // identity
-        return overlap(m1,A);
+        return overlapC(m1,A);
 }
 ;
 

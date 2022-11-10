@@ -100,11 +100,13 @@ def applyoperator(self,A,wf,**kwargs):
 
 
 def applyinverse(self,A,wf,**kwargs):
+    from .edtk.edchain import State
     if type(wf)==mps.MPS: mode="DMRG"
-    elif type(wf)==np.ndarray: mode="ED"
+    elif type(wf)==State: mode="ED"
     else: raise
     if mode=="DMRG": return applyinverse_dmrg(self,A,wf,**kwargs)
-    elif mode=="ED": raise
+    elif mode=="ED": 
+        return wf.applyinverse(A)
 #        return self.get_ED_obj().applyoperator(A,wf)
 
 
@@ -143,11 +145,13 @@ def applyoperator_dmrg(self,A,wf):
     return mps.MPS(self,name="applyoperator_wf1.mps").copy() # copy
 
 
-def applyinverse_dmrg(self,A,wf,tol=1e-4,maxn=100):
+def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     """Apply operator to a many body wavefunction"""
+    if delta is None: delta = self.cvm_tol # overwrite
+    if maxn is None: maxn = self.cvm_nit # overwrite
     self.execute(lambda: wf.write(name="apply_inverse_wf0.mps")) # write WF
     task = {"apply_inverse":"true",
-            "cvm_tol":tol,
+            "cvm_tol":delta,
             "cvm_nit":maxn,
             }
     self.execute(lambda: A.write(name="apply_inverse_multioperator.in"))
@@ -198,6 +202,12 @@ def toMPO(self,H,mode="DMRG"):
         from .edtk.edchain import EDOperator
         return EDOperator(H,self.get_ED_obj())
     else: raise
+
+
+from .mpsalgebratk.trace import trace
+from .mpsalgebratk.trace import inverse_trace
+
+
 
 
 

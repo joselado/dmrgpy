@@ -15,7 +15,10 @@ class EDchain():
         """Return an operator"""
         if type(name)==multioperator.MultiOperator: # input is a MO
             return multioperator.MO2matrix(name,self)
-        return self.operators[(name,i)] # return the operator
+        elif type(name)==str: # string
+            return self.operators[(name,i)] # return the operator
+        else: # unrecognized type
+            print("Unrecognized operator in EDchain",type(name))
     def get_hamiltonian(self):
         """Return the Hamiltonian"""
         return self.get_operator(self.hamiltonian) # return operator
@@ -88,9 +91,9 @@ class EDchain():
         return A*wf #return self.MO2matrix(A)@wf
     def random_state(self):
         """Return a random state"""
-        n = self.get_hamiltonian().shape[0] # convert to matrix
+        n = self.get_operator("Id").shape[0] # dimension
         v = np.random.random(n)-.5 + 1j*(np.random.random(n)-.5)
-        return State(v,self) # return the state
+        return State(v,self).normalize() # return the state
 
 
 
@@ -148,6 +151,15 @@ class State():
     def get_correlation_entropy(self,**kwargs):
         from .. import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,**kwargs)
+    def applyinverse(self,a,**kwargs):
+        if type(a)==multioperator.MultiOperator: # multioperator
+            A = self.MBO.MO2matrix(a)  # get the matrix
+        elif type(a)==EDOperator: # multioperator
+            A = a.SO  # get the matrix
+        else: raise
+        w = algebra.applyinverse(A,self.v)
+        return State(w,self.MBO) # create a new object
+
 
 
 
@@ -158,7 +170,13 @@ class EDOperator():
     def __init__(self,MO,MBO):
         """Init, takes as input a multioperator and the MBO"""
         self.MBO = MBO # store the many-body object
-        self.SO = MBO.get_operator(MO) # generate the static operator
+        if type(MO)==multioperator.MultiOperator: # multioperator
+            self.SO = MBO.get_operator(MO) # generate the static operator
+        elif type(MO)==EDOperator:
+            self.SO = MO.SO.copy() # dummy copy
+        else: 
+            print("Unrecognized type in EDOperator",type(MO))
+            raise
     def __mul__(self,v):
         from ..multioperator import MultiOperator
         if type(v)==State: # input is an MPS

@@ -141,7 +141,7 @@ def lowest_eigenvalues(h,n=10,nmax=maxsize):
     else:
       eig = dlg.eigvals(h.todense())
       eig = [y for (x,y) in sorted(zip(eig.real,eig))]
-  return eig[0:n]
+  return np.array(eig[0:n])
 
 
 def lowest_states(h,n=10,nmax=maxsize,**kwargs):
@@ -263,6 +263,20 @@ def trace(A):
     """Compute trace"""
     if issparse(A): return A.trace()
     else: return np.trace(A)
+
+
+
+
+def applyinverse(A,b):
+    """Apply A^-1 to b"""
+    if A.shape[0]<0: return inv(A)@v
+    else: return slg.spsolve(A,b)
+
+
+
+
+
+
 
 
 

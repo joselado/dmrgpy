@@ -29,7 +29,7 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
 def get_excited(*args,**kwargs):
     """Return the excited state energies"""
     (es,ws) = get_excited_states(*args,**kwargs)
-    return es
+    return np.array(es)
 
 
 
