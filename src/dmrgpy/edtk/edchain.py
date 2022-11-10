@@ -24,8 +24,7 @@ class EDchain():
         return self.get_operator(self.hamiltonian) # return operator
     def gs_energy(self):
         """Return ground state energy"""
-        self.h = self.get_hamiltonian()
-        return algebra.ground_state(self.h)[0]
+        return self.get_excited(n=1)[0]
     def get_gs(self,array_mode=True):
         """Get the ground state"""
 #        if array_mode: 
