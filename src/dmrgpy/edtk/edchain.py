@@ -147,7 +147,9 @@ class State():
         return np.sum(np.conjugate(self.v)*a.v)
     def aMb(self,M,b): return self.dot(M*b)
     def normalize(self):
-        return self/np.sqrt(self.dot(self).real)
+        norm = np.sqrt(self.dot(self).real) # norm
+        if norm>1e-8: return self/norm
+        else: return None
     def get_correlation_entropy(self,**kwargs):
         from .. import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,**kwargs)

@@ -12,7 +12,7 @@ def inverse_trace(self,A,mode="ED",**kwargs):
     if mode=="ED": 
         return inverse_trace_ED(self,A)
     if mode=="DMRG":
-#        return stochastic_inverse_trace(self,A,mode="ED",**kwargs)
+        return stochastic_inverse_trace(self,A,mode="ED",**kwargs)
         return stochastic_inverse_trace(self,A,mode="DMRG",**kwargs)
 
 

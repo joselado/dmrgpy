@@ -68,17 +68,20 @@ def orthogonal_random_mps(self,wfs):
 
 
 
-def random_state(self,mode="DMRG",orthogonal=None):
+def random_state(self,mode="DMRG",orthogonal=None,ntries=-1):
     """Generate a random state"""
     if orthogonal is None:
         if mode=="DMRG": return self.random_mps()
         elif mode=="ED": return self.get_ED_obj().random_state()
     else:
         from .algebra.krylov import gram_smith_single
+        ii = 0 # counter
         while True: # infinite loop
             wf = random_state(self,mode=mode) # generate a random state
             wf = gram_smith_single(wf,orthogonal)
             if wf is not None: return wf # return this wavefunction
+            ii += 1 # increase counter
+            if ii==ntries: return None # return anyway
 
 
 
@@ -88,7 +91,10 @@ def random_states(self,n=10,orthogonal=True,**kwargs):
     wfs = []
     for i in range(n):
         if orthogonal:
-            wfs.append(random_state(self,orthogonal=wfs,**kwargs))
+            wf = random_state(self,orthogonal=wfs,
+                    ntries=1,**kwargs) # get state
+            if wf is None: break
+            else: wfs.append(wf)
         else:
             wfs.append(random_state(self,**kwargs))
     return wfs
