@@ -20,12 +20,18 @@ class StaticOperator():
             return out
         elif type(v)==MultiOperator: # input is a multioperator
             return self*StaticOperator(v,self.MBO)
-        else: raise
+        else: 
+            print("Unrecognized type in __mul__",type(v))
+            raise
     def __rmul__(self,v):
         from ..multioperator import MultiOperator
         if type(v)==MultiOperator: # input is a multioperator
             return StaticOperator(v,self.MBO)*self
         else: raise
+    def get_dagger(self):
+        out = self.copy()
+        out.SO = hermitian_mpo_operator(self.MBO,self.SO)
+        return out
     def copy(self):
         from copy import deepcopy
         return deepcopy(self)
@@ -107,7 +113,16 @@ def overlap_aMb_static(self,wf1,A,wf2):
 
 
 
-
+def hermitian_mpo_operator(self,A):
+    """Get the dagger of an operator"""
+    task = {"hermitian_mpo_operator":"true",
+            "mpo_pureoperator_A":"mpo_pureoperator_A.mpo",
+            "mpo_pureoperator_B":"mpo_pureoperator_B.mpo",
+            }
+    self.execute(lambda: open(self.path+"/mpo_pureoperator_A.mpo","wb").write(A))
+    self.task = task
+    self.execute(lambda : self.run()) # run calculation
+    return open(self.path+"/mpo_pureoperator_B.mpo","rb").read()
 
 
 

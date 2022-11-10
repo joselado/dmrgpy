@@ -202,6 +202,11 @@ class EDOperator():
     def trace(self):
         from ..algebra.algebra import trace
         return trace(self.SO)
+    def get_dagger(self):
+        out = self.copy()
+        from ..algebra.algebra import dagger
+        out.SO = dagger(self.SO)
+        return out
 
 
 

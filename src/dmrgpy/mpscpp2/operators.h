@@ -208,3 +208,18 @@ static auto trace_mpo=[](auto A) {
 }
 ;
 
+
+
+
+
+
+static auto hermitian_mpo=[](auto K) {
+    auto Kd = K;
+    for(auto j : range1(K.N()))
+        {
+        Kd.Aref(j) = dag(swapPrime(K.A(j),0,1,Site));
+        }
+    return Kd; // return MPO
+}
+;
+

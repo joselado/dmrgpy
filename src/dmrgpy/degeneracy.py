@@ -61,13 +61,18 @@ def pole_eigenvalue_degeneracy(self,A,e,delta=1e-1,**kwargs):
     """Compute the degeneracy of an eigenvalue using Cauchy's theorem"""
     # delta controls the "radious" of the area in the complex plane
     B = A - e # shift to the origin, so that the poles are there
-    thetas = np.linspace(0.,1.,10) # angles around the origin
+    thetas = np.linspace(0.,1.,20) # angles around the origin
     zs = delta*np.exp(1j*2*np.pi*thetas) # complex number
     fs = [self.inverse_trace(B-z,delta=1e-3,**kwargs) for z in zs] # function
     ldim = self.get_logdimension() # return the dimensionality of the problem
     fs = np.array(fs) # convert to array
     intz = np.sum(fs*zs)/len(fs) # integral
     pole = -intz # compute pole
+    nt = len(zs) # number of thetas
+    dzs = [zs[(i+1)%nt] - zs[(i-1)%nt] for i in range(len(zs))] # finite differences
+    pole2 = 1j*np.sum(fs*dzs)/4./np.pi # integral, but now with finite difference
+#    print(pole,pole2)
+    #pole = (pole + pole2)*np.exp(ldim)/2. # return the value of the pole
     pole = pole*np.exp(ldim) # return the value of the pole
     return pole
 

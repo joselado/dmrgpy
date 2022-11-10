@@ -18,4 +18,8 @@ static auto trace_mpo_operator=[]() {
 };
 
 
-
+static auto hermitianmpo_operator=[]() {
+  auto A = get_mpo(get_str("mpo_pureoperator_A"));
+  auto B = hermitian_mpo(A);
+  writeToFile(get_str("mpo_pureoperator_B"),B) ;
+};
