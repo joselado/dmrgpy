@@ -18,11 +18,13 @@ xs = [] # empty list
 ys = [] # empty list
 zs = [] # empty list
 for i in range(n): # loop over sites
-  name = (sc.Sz[i],sc.Sz[i])
+  name = (sc.Sz[0],sc.Sz[i])
   (e,s) = sc.get_dynamical_correlator(mode="DMRG",name=name,
           es=np.linspace(-0.5,4.0,200),delta=0.05)
   zs.append(s.real) # store
 
+
+  print(i)
 xs = range(n)
 ys = e
 zs = np.array(zs).transpose()
@@ -39,7 +41,8 @@ matplotlib.rcParams.update({'font.size': 14})
 matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
 fig = plt.figure()
 fig.subplots_adjust(0.2,0.2)
-plt.contourf(xs,ys,zs,100,cmap="magma")
+vmax = np.max(np.abs(zs))
+plt.contourf(xs,ys,zs,100,cmap="bwr",vmin=-vmax,vmax=vmax)
 plt.ylabel("frequency [J]")
 plt.xlabel("Site")
 plt.show()

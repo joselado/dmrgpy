@@ -178,21 +178,28 @@ print("Mz",mz)
 ## Bond dimension energy convergence for an S=1/2 Heisenberg chain
 ```python
 from dmrgpy import spinchain
-spins = ["S=1/2" for i in range(30)] # 2*S+1=2 for S=1/2
+import numpy as np
+n= 30 # size of the chain
+spins = ["S=1/2" for i in range(n)] # S=1/2 chain
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
-for i in range(len(spins)-1): 
+for i in range(len(spins)-1):
   h = h + sc.Sx[i]*sc.Sx[i+1]
   h = h + sc.Sy[i]*sc.Sy[i+1]
   h = h + sc.Sz[i]*sc.Sz[i+1]
-
-for maxm in [1,2,5,10,20,30,40]: # loop over bond dimension
+bds = range(3,20,2) # bond dimension
+es,des = [],[] # storage of energies and fluctuations
+for maxm in bds: # loop over bond dimension
   sc.set_hamiltonian(h) # create the Hamiltonian
   sc.maxm = maxm # set the bond dimension
   e = sc.gs_energy() # get the ground state energy
-  print("Energy",e,"for bond dimension",maxm)
+  wf = sc.get_gs() ; de = wf.dot(h*(h*wf)) # Energy square
+  de = np.sqrt(np.abs(de-e**2)) # energy fluctuation
+  es.append(e/n) # store energy
+  des.append(de/n) # energy fluctuation
 ```
 
+![Alt text](images/bond_dimension.png?raw=true "Convergence of the energy as a function of the bond dimension for an S=1/2 chain")
 
 ## Excited states with DMRG and ED 
 ```python
@@ -228,20 +235,80 @@ gap = es[1]-es[0] # compute gap
 print("Gap of the Haldane chain",gap)
 ```
 
-## Edge dynamical correlator of a Haldane chain
+
+
+## Local dynamical spin correlator of an S=1/2 chain
+```python
+import numpy as np
+from dmrgpy import spinchain
+n = 10
+# create an S=1/2 spin chain
+spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
+# create first neighbor exchange
+sc = spinchain.Spin_Chain(spins) # create the spin chain
+h = 0
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1]
+    h = h + sc.Sy[i]*sc.Sy[i+1]
+    h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+xs = [] # empty list
+ys = [] # empty list
+zs = [] # empty list
+for i in range(n): # loop over sites
+  name = (sc.Sz[i],sc.Sz[i])
+  (e,s) = sc.get_dynamical_correlator(mode="DMRG",name=name,
+          es=np.linspace(-0.5,4.0,200),delta=0.05)
+  zs.append(s) # store
+```
+
+![Alt text](images/dyn_corr_map.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+
+
+## Non-local dynamical spin correlator of an S=1/2 chain
+```python
+import numpy as np
+from dmrgpy import spinchain
+n = 10
+# create an S=1/2 spin chain
+spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
+# create first neighbor exchange
+sc = spinchain.Spin_Chain(spins) # create the spin chain
+h = 0
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1]
+    h = h + sc.Sy[i]*sc.Sy[i+1]
+    h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+xs = [] # empty list
+ys = [] # empty list
+zs = [] # empty list
+for i in range(n): # loop over sites
+  name = (sc.Sz[0],sc.Sz[i])
+  (e,s) = sc.get_dynamical_correlator(mode="DMRG",name=name,
+          es=np.linspace(-0.5,4.0,200),delta=0.05)
+  zs.append(s) # store
+```
+
+![Alt text](images/dyn_corr_nonlocal_spatial.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+
+
+## Bulk and edge dynamical correlator of a Haldane chain
 ```python
 from dmrgpy import spinchain
-spins = ["S=1" for i in range(40)] # S=1 chain
+n = 20 ; spins = ["S=1" for i in range(n)] # S=1 chain
 sc = spinchain.Spin_Chain(spins) # create spin chain object
 h = 0 # initialize Hamiltonian
-for i in range(len(spins)-1): 
+for i in range(len(spins)-1):
   h = h + sc.Sx[i]*sc.Sx[i+1]
   h = h + sc.Sy[i]*sc.Sy[i+1]
   h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
-sc.get_dynamical_correlator(name=(sc.Sz[0],sc.Sz[0]))
+(e0,d0) = sc.get_dynamical_correlator(name=(sc.Sz[0],sc.Sz[0]))
+(eb,db) = sc.get_dynamical_correlator(name=(sc.Sz[n//2],sc.Sz[n//2]))
 ```
 
+![Alt text](images/dyn_corr_bulk_edge.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
 
 ## Spin and charge correlator of the 1D Hubbard model
 ```python
