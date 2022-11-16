@@ -290,7 +290,7 @@ for i in range(n): # loop over sites
   zs.append(s) # store
 ```
 
-![Alt text](images/dyn_corr_nonlocal_spatial.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+![Alt text](images/dyn_corr_nonlocal_spatial.png?raw=true "Dynamical non-local spin correlator for different sites of an S=1/2 chain")
 
 
 ## Bulk and edge dynamical correlator of a Haldane chain
@@ -308,7 +308,7 @@ sc.set_hamiltonian(h)
 (eb,db) = sc.get_dynamical_correlator(name=(sc.Sz[n//2],sc.Sz[n//2]))
 ```
 
-![Alt text](images/dyn_corr_bulk_edge.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+![Alt text](images/dyn_corr_bulk_edge.png?raw=true "Dynamical spin correlator for different sites of an S=1 chain")
 
 ## Spin and charge correlator of the 1D Hubbard model
 ```python
@@ -323,15 +323,14 @@ for i in range(n-1):
 h = h + h.get_dagger() # Make Hermitian
 # Hubbard term
 for i in range(n):
-  h = 2.*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
+  h = h + 4.*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
 fc.set_hamiltonian(h) # initialize the Hamiltonian
-pairs = [(0,i) for i in range(n)]
 # compute the two correlators
 zz = [fc.vev(fc.Sz[0]*fc.Sz[i]).real for i in range(n)]
 cc = [fc.vev(fc.Cdagup[0]*fc.Cup[i]).real for i in range(n)]
-print("Spin correlators",zz)
-print("Site correlators",cc)
 ```
+
+![Alt text](images/hubbard_correlator.png?raw=true "Spin and charge correlator in the Hubbard model")
 
 
 ## Generic interacting fermionic Hamiltonian
