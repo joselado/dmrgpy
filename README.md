@@ -107,7 +107,7 @@ for i in range(len(spins)-1):
 sc.set_hamiltonian(h) # create the Hamiltonian
 cs = [sc.vev(sc.Sz[0]*sc.Sz[i]).real for i in range(n)]
 ```
-![Alt text](images/S1chain_correlator.png?raw=true "Static correlator in an S=1/2 chain, showing power-law decay of correlations")
+![Alt text](images/S12chain_correlator.png?raw=true "Static correlator in an S=1/2 chain, showing power-law decay of correlations")
 
 
 ## Static correlator of an S=1 spin chain
