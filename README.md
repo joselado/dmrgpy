@@ -333,6 +333,38 @@ cc = [fc.vev(fc.Cdagup[0]*fc.Cup[i]).real for i in range(n)]
 ![Alt text](images/hubbard_correlator.png?raw=true "Spin and charge correlator in the Hubbard model")
 
 
+![Alt text](images/dyn_corr_bulk_edge.png?raw=true "Dynamical spin correlator for different sites of an S=1 chain")
+
+## Spin correlator in the Hubbard model as function of the interaction
+```python
+from dmrgpy import fermionchain
+import numpy as np
+n = 14 # number of sites
+fc = fermionchain.Spinful_Fermionic_Chain(n)
+# first neighbor hopping
+h = 0
+for i in range(n-1):
+  h = h + fc.Cdagup[i]*fc.Cup[i+1]
+  h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
+h = h + h.get_dagger() # Make Hermitian
+# Hubbard term
+hU = 0
+for i in range(n):
+  hU = hU + (fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
+
+zzs = [] # storage for correlators
+Us = np.linspace(0.,4.,6) # Hubbard Us 
+for U in Us:
+  fc.set_hamiltonian(h+U*hU) # initialize the Hamiltonian
+  zz = [fc.vev(fc.Sz[0]*fc.Sz[i]).real for i in range(n)]
+  zzs.append(zz) # store zz correlator
+```
+
+![Alt text](images/hubbard_correlator_VS_U.png?raw=true "Spin correlator in the Hubbard model for different interactions U")
+
+
+
+
 ## Generic interacting fermionic Hamiltonian
 ```python
 import numpy as np

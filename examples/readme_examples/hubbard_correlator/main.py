@@ -16,8 +16,12 @@ for i in range(n):
 fc.set_hamiltonian(h) # initialize the Hamiltonian
 # compute the two correlators
 zz = [fc.vev(fc.Sz[0]*fc.Sz[i]).real for i in range(n)]
-dd = [fc.vev(fc.N[i]).real for i in range(n)]
 cc = [fc.vev(fc.Cdagup[0]*fc.Cup[i]).real for i in range(n)]
+
+
+
+
+dd = [fc.vev(fc.N[i]).real for i in range(n)]
 print(n,len(zz))
 print(dd)
 
