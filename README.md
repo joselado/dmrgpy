@@ -262,7 +262,7 @@ for i in range(n): # loop over sites
   zs.append(s) # store
 ```
 
-![Alt text](images/dyn_corr_map.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+![Alt text](images/dyn_corr_spatial.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
 
 
 ## Non-local dynamical spin correlator of an S=1/2 chain
