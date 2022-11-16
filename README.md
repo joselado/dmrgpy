@@ -92,6 +92,24 @@ sc.set_hamiltonian(h) # create the Hamiltonian
 print("Ground state energy",sc.gs_energy())
 ```
 
+
+## Static correlator of an S=1/2 spin chain
+```python
+from dmrgpy import spinchain
+n = 30
+spins = ["S=1/2" for i in range(n)] # S=1 in each site
+sc = spinchain.Spin_Chain(spins) # create spin chain object
+h = 0 # initialize Hamiltonian
+for i in range(len(spins)-1):
+  h = h + sc.Sx[i]*sc.Sx[i+1]
+  h = h + sc.Sy[i]*sc.Sy[i+1]
+  h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h) # create the Hamiltonian
+cs = [sc.vev(sc.Sz[0]*sc.Sz[i]).real for i in range(n)]
+```
+![Alt text](images/S1chain_correlator.png?raw=true "Static correlator in an S=1/2 chain, showing power-law decay of correlations")
+
+
 ## Static correlator of an S=1 spin chain
 ```python
 from dmrgpy import spinchain
@@ -104,10 +122,9 @@ for i in range(len(spins)-1):
   h = h + sc.Sy[i]*sc.Sy[i+1]
   h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h) # create the Hamiltonian
-pairs = [(0,i) for i in range(30)] # between the edge and the rest
 cs = [sc.vev(sc.Sz[0]*sc.Sz[i]).real for i in range(n)]
-print(cs)
 ```
+![Alt text](images/S1chain_correlator.png?raw=true "Static correlator in an S=1 chain, showing coupling of the emergent edge excitations")
 
 
 ## Conformal field theory central charge of a critical Ising model
