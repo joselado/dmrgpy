@@ -265,6 +265,35 @@ for i in range(n): # loop over sites
 ![Alt text](images/dyn_corr_spatial.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
 
 
+## Local dynamical spin correlator of an S=1/2 chain
+```python
+import numpy as np
+from dmrgpy import spinchain
+spins = ["S=1/2" for i in range(4)] # spin 1/2 heisenberg chain
+spins = spins + ["S=1"] + spins # put S=1 in the middle
+n = len(spins) # total number of spins
+# create first neighbor exchange
+sc = spinchain.Spin_Chain(spins) # create the spin chain
+h = 0
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1]
+    h = h + sc.Sy[i]*sc.Sy[i+1]
+    h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+xs = [] # empty list
+ys = [] # empty list
+zs = [] # empty list
+for i in range(n): # loop over sites
+  name = (sc.Sz[i],sc.Sz[i])
+  (e,s) = sc.get_dynamical_correlator(mode="DMRG",name=name,
+          es=np.linspace(-0.5,4.0,200),delta=0.05)
+  zs.append(s.real) # store
+```
+
+![Alt text](images/dyn_corr_spatial_impurity.png?raw=true "Dynamical spin correlator for an S=1/2 with an S=1 impurity in the middle")
+
+
+
 ## Non-local dynamical spin correlator of an S=1/2 chain
 ```python
 import numpy as np
@@ -333,7 +362,6 @@ cc = [fc.vev(fc.Cdagup[0]*fc.Cup[i]).real for i in range(n)]
 ![Alt text](images/hubbard_correlator.png?raw=true "Spin and charge correlator in the Hubbard model")
 
 
-![Alt text](images/dyn_corr_bulk_edge.png?raw=true "Dynamical spin correlator for different sites of an S=1 chain")
 
 ## Spin correlator in the Hubbard model as function of the interaction
 ```python
