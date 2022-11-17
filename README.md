@@ -241,7 +241,7 @@ print("Gap of the Haldane chain",gap)
 ```python
 import numpy as np
 from dmrgpy import spinchain
-n = 10
+n = 40
 # create an S=1/2 spin chain
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 # create first neighbor exchange
@@ -252,8 +252,6 @@ for i in range(n-1):
     h = h + sc.Sy[i]*sc.Sy[i+1]
     h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
-xs = [] # empty list
-ys = [] # empty list
 zs = [] # empty list
 for i in range(n): # loop over sites
   name = (sc.Sz[i],sc.Sz[i])
@@ -262,10 +260,10 @@ for i in range(n): # loop over sites
   zs.append(s) # store
 ```
 
-![Alt text](images/dyn_corr_spatial.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+![Alt text](images/dyn_corr_spatial_long.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
 
 
-## Local dynamical spin correlator of an S=1/2 chain
+## Local dynamical spin correlator of an S=1/2 chain with a S=1 impurity
 ```python
 import numpy as np
 from dmrgpy import spinchain
@@ -280,8 +278,6 @@ for i in range(n-1):
     h = h + sc.Sy[i]*sc.Sy[i+1]
     h = h + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
-xs = [] # empty list
-ys = [] # empty list
 zs = [] # empty list
 for i in range(n): # loop over sites
   name = (sc.Sz[i],sc.Sz[i])
