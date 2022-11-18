@@ -10,7 +10,7 @@ def is_hermitian(h):
     h = h - algebra.dagger(h) # difference
     h = h@h
     t = h.diagonal().sum() # this should be a trace
-    return t>1e-5
+    return t<1e-5
 
 
 
@@ -92,7 +92,9 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
         delta=3e-2,mode="cv"):
   """Calculate a correlation function AB in a frequency window"""
   ## default method
-  iden = np.identity(h0.shape[0],dtype=np.complex) # identity
+#  iden = np.identity(h0.shape[0],dtype=np.complex) # identity
+  from scipy.sparse import identity
+  iden = identity(h0.shape[0],dtype=np.complex) # matrix to use
   out = []
   for e in es: # loop over energies
       if mode=="full": # using exact inversion
@@ -112,7 +114,9 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
 
 
 def solve_cv(h0,wf0,si,sj,w,delta=0.0):
-     iden = np.identity(h0.shape[0],dtype=np.complex) # identity
+     from scipy.sparse import identity
+     iden = identity(h0.shape[0],dtype=np.complex) # matrix to use
+#     iden = np.identity(h0.shape[0],dtype=np.complex) # identity
      b = -delta*sj@np.matrix(wf0).T # create the b vector
      A = (h0 - w*iden)@(h0-w*iden) + iden*delta*delta # define A matrix
      b = np.array(b).reshape((b.shape[0],)) # array
