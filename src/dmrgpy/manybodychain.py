@@ -37,6 +37,8 @@ class Many_Body_Chain():
   def __init__(self,sites):
       self.sites = sites # list of the sites
       self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
+#      self.path = id_generator() # random ID in dmrgpy_tmp
+#      print(self.path)
       self.clean() # clean calculation
       self.inipath = os.getcwd() # original folder
       self.ns = len(sites) # number of sites
@@ -54,7 +56,6 @@ class Many_Body_Chain():
       self.hamiltonian = None # Hamiltonian, as a multioperator
       self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
       self.use_ampo_hamiltonian = False # use ampo Hamiltonian
-  #    self.exchange.append(Coupling(0,self.ns-1,one)) # closed boundary
       # additional arguments
       self.kpmmaxm = 50 # bond dimension in KPM
       self.maxm = 30 # bond dimension in wavefunctions
@@ -79,7 +80,7 @@ class Many_Body_Chain():
       self.fit_td = False # use fitting procedure in time evolution
       self.itensor_version = 2 # ITensor version
       self.has_ED_obj = False # ED object has been computed
-      self.ED_obj = None
+      self.ED_obj = None # no ED object
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
@@ -91,6 +92,7 @@ class Many_Body_Chain():
       self.task = {"write_sites":"true"}
       self.execute(lambda: write_sites(self)) # write the different sites
       self.run() # run the calculation
+      self.bin_sites = open(self.path+"/sites.sites","rb").read() # read sites
       self.sites_from_file = True
   def setup_julia(self):
       """Setup the Julia mode"""
@@ -484,4 +486,15 @@ def setup_sweep(self,mode="default"):
 
 
 Many_Body_Hamiltonian = Many_Body_Chain # temporal workaround
+
+
+import string
+import random
+
+def id_generator(size=20, chars=string.ascii_uppercase + string.digits):
+   out = ''.join(random.choice(chars) for _ in range(size))
+   return "/tmp/dmrgpy_tmp/"+out # temporal folder
+
+
+
 

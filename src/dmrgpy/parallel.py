@@ -62,3 +62,23 @@ def pcall(fun,args): # define the function
   os.chdir(path) # go to the original path
   return out # return outputs
 
+
+
+#
+#def clean_MBO(f,*args,**kwargs):
+#    """Redefine the function so that the MBO objects are cleaned after
+#    the call"""
+#    out = f(*args,**kwargs)
+#    ds = locals()
+#    from .manybodychain import Many_Body_Chain
+#    for d in ds:
+#        o = ds[d] # get object
+#        if issubclass(o, Many_Body_Chain):
+#            print(o)
+#    return out # return output
+#
+#
+
+
+
+

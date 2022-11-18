@@ -78,6 +78,7 @@ def pcall_single(fin,xs,time=10,error=None):
     from os import path
     time.sleep(0.5) # wait half a second
     while True:
+        time.sleep(1.) # wait one second
         finished = True
         for i in range(n):
             if not path.exists(pfolder+"/folder_"+str(i)+"/DONE"):
