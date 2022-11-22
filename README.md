@@ -262,12 +262,38 @@ for i in range(n): # loop over sites
 
 ![Alt text](images/dyn_corr_spatial_long.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
 
+## Local dynamical spin correlator of an S=1/2 chain
+```python
+import numpy as np
+from dmrgpy import spinchain
+n = 40
+# create an S=1/2 spin chain
+spins = ["S=1" for i in range(n)] # spin 1/2 heisenberg chain
+# create first neighbor exchange
+sc = spinchain.Spin_Chain(spins) # create the spin chain
+h = 0
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1]
+    h = h + sc.Sy[i]*sc.Sy[i+1]
+    h = h + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+zs = [] # empty list
+for i in range(n): # loop over sites
+  name = (sc.Sz[i],sc.Sz[i])
+  (e,s) = sc.get_dynamical_correlator(mode="DMRG",name=name,
+          es=np.linspace(-0.5,4.0,200),delta=0.05)
+  zs.append(s) # store
+```
+
+![Alt text](images/dyn_corr_spatial_long_S1.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+
+
 
 ## Local dynamical spin correlator of an S=1/2 chain with a S=1 impurity
 ```python
 import numpy as np
 from dmrgpy import spinchain
-spins = ["S=1/2" for i in range(4)] # spin 1/2 heisenberg chain
+spins = ["S=1/2" for i in range(14)] # spin 1/2 heisenberg chain
 spins = spins + ["S=1"] + spins # put S=1 in the middle
 n = len(spins) # total number of spins
 # create first neighbor exchange
