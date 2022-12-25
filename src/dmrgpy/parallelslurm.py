@@ -30,6 +30,11 @@ def pcall(fin,xs,batch_size=1,**kwargs):
 
 def pcall_single(fin,xs,time=10,error=None):
     """Run a parallel calculation with slurm"""
+    # create the parallel folder
+    pfolder = os.getcwd()+"/.parallel"
+    os.system("rm -rf "+pfolder) # remove directory
+    fs.mkdir(pfolder) # create directory
+    # now go with the rest
     n = len(xs) # number of calculations
 #    f = lambda x: fin(x)
     f = fin
@@ -52,9 +57,6 @@ def pcall_single(fin,xs,time=10,error=None):
     main += "print(out)\n"
     main += "pickle.dump(out,open('out.obj','wb'))\n"
     main += "os.system('touch DONE')\n"
-    pfolder = os.getcwd()+"/.parallel"
-    os.system("rm -rf "+pfolder) # remove directory
-    fs.mkdir(pfolder) # create directory
 
     pickle.dump(f,open(pfolder+"/function.obj","wb")) # write function
     pickle.dump(xs,open(pfolder+"/array.obj","wb")) # write object
