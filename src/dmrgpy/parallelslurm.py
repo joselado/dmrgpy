@@ -52,7 +52,7 @@ def pcall_single(fin,xs,time=10,error=None):
     main += "print(out)\n"
     main += "pickle.dump(out,open('out.obj','wb'))\n"
     main += "os.system('touch DONE')\n"
-    pfolder = ".parallel"
+    pfolder = os.getcwd()+"/.parallel"
     fs.rmdir(pfolder) # create directory
     fs.mkdir(pfolder) # create directory
 
