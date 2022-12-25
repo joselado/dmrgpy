@@ -280,7 +280,7 @@ def is_zero_matrix(h,tol=1e-8):
 
 def applyinverse(A,b):
     """Apply A^-1 to b"""
-    if A.shape[0]<0: return inv(A)@v
+    if A.shape[0]<30: return inv(A)@v
     else: return slg.spsolve(A,b)
 
 

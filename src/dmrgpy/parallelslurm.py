@@ -80,15 +80,18 @@ def pcall_single(fin,xs,time=10,error=None):
     while True:
         time.sleep(1.) # wait one second
         finished = True
-        for i in range(n):
+        for i in range(n): # check all the folders
             if not path.exists(pfolder+"/folder_"+str(i)+"/DONE"):
                 finished = False
+        if path.exists(pfolder+"/STOP"): # stop by force .parallel
+            finished = True
         if finished: break
     # get all the data
     ys = []
     for i in range(n):
         folder = pfolder+"/folder_"+str(i)+"/"
-        y = pickle.load(open(folder+'out.obj','rb'))
+        try: y = pickle.load(open(folder+'out.obj','rb')) # get the output
+        except: y = None # in case there are errors
         if y is None: y = error # use this as backup variable
         ys.append(y)
     return ys
