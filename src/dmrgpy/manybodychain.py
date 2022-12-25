@@ -92,7 +92,9 @@ class Many_Body_Chain():
       self.task = {"write_sites":"true"}
       self.execute(lambda: write_sites(self)) # write the different sites
       self.run() # run the calculation
-#      self.bin_sites = open(self.path+"/sites.sites","rb").read() # read sites
+      from .mode import get_mode
+      if not get_mode(self)=="ED":
+          self.bin_sites = open(self.path+"/sites.sites","rb").read() 
       self.sites_from_file = True
   def setup_julia(self):
       """Setup the Julia mode"""

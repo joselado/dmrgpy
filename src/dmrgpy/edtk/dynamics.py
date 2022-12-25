@@ -5,13 +5,7 @@ from ..algebra import kpm
 import numpy as np
 #from numba import jit
 
-
-def is_hermitian(h):
-    h = h - algebra.dagger(h) # difference
-    h = h@h
-    t = h.diagonal().sum() # this should be a trace
-    return t<1e-5
-
+is_hermitian = algebra.is_hermitian
 
 
 def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
@@ -26,7 +20,10 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
       raise # this is no longer used
     wf0 = self.get_gs_array() # compute ground state
     h = self.get_operator(self.hamiltonian) # Hamiltonian in matrix form
-    if not is_hermitian(h):  submode = "INV" # for non-Hermitian Hamiltonians
+    if not is_hermitian(h): # non Hermitian Hamiltonians
+        from ..nonhermitian.dynamics import dynamical_correlator_non_hermitian
+        return dynamical_correlator_non_hermitian(self,name=name,**kwargs)
+    # for Hermitian Hamiltonians, continue
     if submode=="KPM":
       return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)
     elif submode=="ED":

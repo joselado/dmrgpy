@@ -6,7 +6,9 @@ from . import dcex
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
     self.set_initial_wf(self.wf0) # set the initial wavefunction
     if not self.is_hermitian(self.hamiltonian): # non Hermitian Hamiltonian
-        submode = "CVM_explicit" # only mode that works with non-Hemrmitian
+        from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
+        return dynamical_correlator_non_hermitian(self,**kwargs)
+#        submode = "CVM_explicit" # only mode that works with non-Hemrmitian
     if submode=="KPM": # KPM method
         return kpmdmrg.get_dynamical_correlator(self,**kwargs)
     elif submode=="TD": # time dependent 

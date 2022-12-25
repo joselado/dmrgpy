@@ -266,6 +266,17 @@ def trace(A):
 
 
 
+def is_hermitian(h,**kwargs):
+    h = h - dagger(h) # difference
+    return is_zero_matrix(h,**kwargs)
+
+
+def is_zero_matrix(h,tol=1e-8):
+    h = h@dagger(h)
+    t = np.abs(trace(h)) # this should be a trace
+    return t<tol
+
+
 
 def applyinverse(A,b):
     """Apply A^-1 to b"""

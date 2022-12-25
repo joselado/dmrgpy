@@ -93,6 +93,14 @@ class EDchain():
         n = self.get_operator("Id").shape[0] # dimension
         v = np.random.random(n)-.5 + 1j*(np.random.random(n)-.5)
         return State(v,self).normalize() # return the state
+    def is_zero_operator(self,A):
+        """Check if this is a zero operator"""
+        return algebra.is_zero_matrix(self.obj2matrix(A))
+    def obj2matrix(self,a):
+        return obj2matrix(self,a)
+    def applyinverse(self,A,wf):
+        """Apply inverse, A is the matrix, wf the wavefunction"""
+        return wf.applyinverse(A)
 
 
 
@@ -161,6 +169,15 @@ class State():
         w = algebra.applyinverse(A,self.v)
         return State(w,self.MBO) # create a new object
 
+
+
+def obj2matrix(self,a):
+    """ Transform to a matrix, self is an MBO and a the object to transform"""
+    if type(a)==multioperator.MultiOperator: # multioperator
+        return self.MO2matrix(a)  # get the matrix
+    elif type(a)==EDOperator: # EDoperator
+        return a.SO  # get the matrix
+    else: raise
 
 
 
