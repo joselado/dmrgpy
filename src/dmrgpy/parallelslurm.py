@@ -88,6 +88,7 @@ def pcall_single(fin,xs,time=10,error=None):
         if path.exists(pfolder+"/STOP"): # stop by force .parallel
             finished = True
         if finished: break
+    kill_process(job) # kill all the processes just in case
     # get all the data
     ys = []
     for i in range(n):
@@ -116,5 +117,13 @@ def jobkill(n):
       exit()
     signal.signal(signal.SIGINT, killf)
     signal.signal(signal.SIGTERM, killf)
+
+
+
+def kill_process(n):
+    """Command to kill the prcesses"""
+    subprocess.Popen(["scancel",str(n)],stdout=subprocess.PIPE).communicate()
+    print("Job killed")
+
 
 
