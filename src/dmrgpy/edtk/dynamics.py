@@ -111,18 +111,17 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
 
 
 def solve_cv(h0,wf0,si,sj,w,delta=0.0):
-     from scipy.sparse import identity
-     iden = identity(h0.shape[0],dtype=np.complex) # matrix to use
-#     iden = np.identity(h0.shape[0],dtype=np.complex) # identity
-     b = -delta*sj@np.matrix(wf0).T # create the b vector
-     A = (h0 - w*iden)@(h0-w*iden) + iden*delta*delta # define A matrix
-     b = np.array(b).reshape((b.shape[0],)) # array
-     x,info = slg.cg(A,b,tol=1e-10) # solve the equation
-     x = np.matrix(x).T # column vector
-     x = 1j*x + (h0 - w*iden)@x/delta # full correction vector
-     x = si@x # apply second operator
-     o = (np.matrix(wf0).H.T@x).trace()[0,0] # compute the braket
-     return o
+    """Solve the dynamical correlator using conjugate gradient method"""
+    ## This function may need some benchmarking
+    from scipy.sparse import identity
+    iden = identity(h0.shape[0],dtype=np.complex) # matrix to use
+    b = -delta*sj@wf0 # create the b vector
+    A = (h0 - w*iden)@(h0-w*iden) + iden*delta*delta # define A matrix
+    x,info = slg.cg(A,b,tol=1e-10) # solve the equation
+    x = 1j*x + (h0 - w*iden)@x/delta # full correction vector
+    x = si@x # apply second operator
+    o = np.dot(np.conjugate(wf0),x) # compute the braket
+    return o
 
 
 

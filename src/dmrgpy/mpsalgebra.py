@@ -147,8 +147,10 @@ def applyoperator_dmrg(self,A,wf):
 
 def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     """Apply operator to a many body wavefunction"""
+    from .algebra.inverse import solve_Ab
     if delta is None: delta = self.cvm_tol # overwrite
     if maxn is None: maxn = self.cvm_nit # overwrite
+#    return solve_Ab(A,wf,tol=delta,nmax=1e2)
     self.execute(lambda: wf.write(name="apply_inverse_wf0.mps")) # write WF
     task = {"apply_inverse":"true",
             "cvm_tol":delta,

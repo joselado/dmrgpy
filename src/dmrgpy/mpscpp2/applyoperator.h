@@ -29,7 +29,7 @@ static auto overlap_aMb=[]() {
   auto c = overlapC(psi1,A,psi2) ; // compute overlap
   ofstream ofile; // declare
   ofile.open("OVERLAP_aMb.OUT");  // open file
-  ofile << std::setprecision(20) << real(c) << "  " << imag(c) << endl ;
+  ofile << std::setprecision(40) << real(c) << "  " << imag(c) << endl ;
   ofile.close() ; // close file
 };
 

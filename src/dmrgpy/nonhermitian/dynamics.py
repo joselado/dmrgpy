@@ -11,7 +11,7 @@ def dynamical_correlator_cvm_explicit(self,name=None,
     """
     Compute the dynamical correlator using analytic continuation
     """
-    print("Non Hermitian mode")
+    print("Non Hermitian mode in dynamical correlator")
     ### So far this just works for onsite correlators
     A,B = name[0],name[1]
     if not self.is_zero_operator(A.get_dagger()-B):

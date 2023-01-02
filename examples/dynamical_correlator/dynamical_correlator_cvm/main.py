@@ -3,10 +3,9 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 5
+n = 4
 # create a random spin chain
-spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
-spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
+spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
 # create first neighbor exchange
 sc = spinchain.Spin_Chain(spins) # create the spin chain
@@ -25,6 +24,7 @@ sc.get_gs()
 import time
 i = np.random.randint(n)
 j = np.random.randint(n)
+i,j = 0,0
 t1 = time.time()
 sc.maxm = 10 # bond dimension
 sc.kpmmaxm = 10 # KPM bond dimension
@@ -37,13 +37,12 @@ es0 = es
 
 
 (x2,y2) = sc.get_dynamical_correlator(submode="KPM",name=(sc.Sx[i],sc.Sx[j]),es=es,
-        delta=5e-2)
+        delta=1e-1)
 t2 = time.time()
 print("Time with KPM",t2-t1)
 
 
-(x3,y3) = sc.get_dynamical_correlator(submode="CVM",name=(sc.Sx[i],sc.Sx[j]),
-        es=es0,delta=1e-1)
+(x3,y3) = sc.get_dynamical_correlator(submode="CVM",name=(sc.Sx[i],sc.Sx[j]),es=es0,delta=1e-1)
 t3 = time.time()
 print("Time with CVM",t3-t2)
 

@@ -97,6 +97,8 @@ class MPS():
     def clean(self):
         self.execute(lambda: os.system("rm "+self.name))
         del self
+    def norm(self):
+        return np.sqrt(self.dot(self).real) # norm
     def normalize(self):
         """Normalize a wavefunction"""
         norm = np.sqrt(self.dot(self).real) # norm
