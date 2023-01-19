@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-# This example shows the quantum phase transition in the trnasverse Ising model
+# This example shows the quantum phase transition in the transverse Ising model
 # generate a 1D Ising chain
 def get_gap(bx):
     """
@@ -15,7 +15,8 @@ def get_gap(bx):
     for i in range(sc.ns-1): h = h + sc.Sz[i]*sc.Sz[i+1]
     for i in range(sc.ns): h = h + bx*sc.Sx[i]
     sc.set_hamiltonian(h)
-    return abs(sc.vev(sc.Sz[0]))
+    # if you wanted to compute the Mz magnetization instead, uncomment this line
+#    return abs(sc.vev(sc.Sz[0]))
     es = sc.get_excited(mode="DMRG",n=2) # compute the first two energies
     return es[1] - es[0] # return the gap
 bs = np.linspace(0.,1.,30) # list of fields

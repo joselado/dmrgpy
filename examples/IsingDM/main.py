@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import simplechains
-# This example shows the quantum phase transition in the trnasverse Ising model
+# This example shows the quantum phase transition in the transverse Ising model
 # generate a 1D Ising chain
 def get_dm(bx):
     """
