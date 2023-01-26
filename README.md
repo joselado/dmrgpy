@@ -262,7 +262,7 @@ for i in range(n): # loop over sites
 
 ![Alt text](images/dyn_corr_spatial_long.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
 
-## Local dynamical spin correlator of an S=1/2 chain
+## Local dynamical spin correlator of an S=1 chain
 ```python
 import numpy as np
 from dmrgpy import spinchain
@@ -285,7 +285,7 @@ for i in range(n): # loop over sites
   zs.append(s) # store
 ```
 
-![Alt text](images/dyn_corr_spatial_long_S1.png?raw=true "Dynamical spin correlator for different sites of an S=1/2 chain")
+![Alt text](images/dyn_corr_spatial_long_S1.png?raw=true "Dynamical spin correlator for different sites of an S=1 chain")
 
 
 
