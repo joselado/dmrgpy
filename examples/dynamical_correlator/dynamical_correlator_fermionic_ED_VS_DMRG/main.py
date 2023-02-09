@@ -9,9 +9,10 @@ fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 
 for i in range(n):
-  for j in range(n):
-      t = np.random.random() + 1j*np.random.random()
-      h = h + fc.Cdag[i]*fc.C[j]*t
+  h = h + fc.Cdag[i]*fc.C[i]
+#  for j in range(n):
+#      t = np.random.random() + 1j*np.random.random()
+#      h = h + fc.Cdag[i]*fc.C[j]*t
 #      h = h + -1*fc.N[i]*fc.N[j]*np.random.random()
 
 
@@ -36,7 +37,8 @@ def randop():
     cj = np.exp(2*1j*np.random.random()*np.pi)
     return ci*fc.C[i] #+ cj*fc.Cdag[j]
 
-name = (randop().get_dagger(),randop())
+A = randop().get_dagger()
+name = (A.get_dagger(),A)
 
 es = np.linspace(-0.5,6.0,300) # energies of the correlator
 delta = 1e-1 # smearing of the correlator
@@ -47,7 +49,9 @@ x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
 x2,y2 = fc.get_dynamical_correlator(mode="ED",submode="INV",name=name,
         es=es,delta=delta)
 
-
+print("ED",np.trapz(y0,x=x0))
+print("DMRG",np.trapz(y1,x=x1))
+print("ED",np.trapz(y2,x=x2))
 
 ### Plot the result ###
 

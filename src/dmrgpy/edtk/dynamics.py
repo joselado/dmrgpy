@@ -51,7 +51,7 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
     n = int(2*scale/delta) # number of polynomials
     (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
                                 npol=n*4,ne=n*10,x=es)
-    return xs,np.conjugate(ys) # return correlator
+    return xs,np.conjugate(ys)*scale/np.pi # return correlator
 
 
 
@@ -106,7 +106,7 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
           o = 1j*(o1 - o2)/2. # substract
       else: raise # not recognised
       out.append(o)
-  return es,np.array(out) # return result
+  return es,np.array(out)/np.pi # return result
 
 
 

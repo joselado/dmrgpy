@@ -362,7 +362,7 @@ def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
   else: 
       from scipy.interpolate import interp1d
       yout = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)(x)
-      yout=yout+1j*interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)(x)
+      yout=yout+1j*interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)(x)
       return x,yout
 
 
