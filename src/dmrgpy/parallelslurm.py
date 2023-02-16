@@ -72,7 +72,8 @@ def pcall_single(fin,xs,time=10,error=None):
     pwd = os.getcwd() # current directory 
     os.chdir(pfolder) # go to the folder
 #    os.system("sbatch run.sh >> run.out") # run calculation
-    out,err = subprocess.Popen(["sbatch","run.sh"],stdout=subprocess.PIPE).communicate()
+    env = get_env() # get the cleaned environment
+    out,err = subprocess.Popen(["sbatch","run.sh"],stdout=subprocess.PIPE,env=env).communicate()
     job = job_number(out) # job number
     jobkill(job) # kill the job if exiting
     os.chdir(pwd) # back to main
@@ -99,6 +100,15 @@ def pcall_single(fin,xs,time=10,error=None):
         ys.append(y)
     return ys
 
+
+def get_env():
+    """Get a cleaned up environment"""
+    env = os.environ # dictionary
+    envout = {} # output dictionary
+    for key in env:
+        if "SLURM_" not in key and "SBATCH_" not in key:
+           envout[key] = env[key] # store
+    return envout # return this dictionary
 
 
 def job_number(out):
