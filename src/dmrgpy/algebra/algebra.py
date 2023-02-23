@@ -8,6 +8,7 @@ import numpy as np
 det = dlg.det
 
 maxsize = 3000
+tol = 1e-7 # tolerancy
 
 
 
@@ -113,7 +114,7 @@ def ground_state(h,nmax=maxsize):
     try: 
       eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
     except:
-      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000,tol=1e-7)
+      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000,tol=tol)
     eig = np.sort(eig)
   else:
     if info: print("Full diagonalization")
@@ -150,11 +151,11 @@ def lowest_states(h,n=10,nmax=maxsize,**kwargs):
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     if ishermitian(h): # Hermitian matrix
-      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
+      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000,tol=tol)
       eig,eigvec = sorteigen(eig,eigvec.T)
       return (eig,eigvec)
     else: 
-      eig,eigvec = slg.eigs(h,k=n,which="SR",maxiter=100000)
+      eig,eigvec = slg.eigs(h,k=n,which="SR",maxiter=100000,tol=tol)
       eig,eigvec = sorteigen(eig,eigvec.T)
       return (eig,eigvec)
   else:
