@@ -10,7 +10,8 @@ pickle.settings['recurse'] = True
 
 def pcall(fin,xs,batch_size=1,**kwargs):
     """Wrapper to allow for a batch size"""
-    if batch_size==1: return pcall_single(fin,xs,**kwargs)
+    if batch_size==1: 
+        return pcall_rerun_failed(fin,xs,**kwargs)
     else: 
         nx = len(xs) # number of xs
         xsn = [] # empty list
@@ -92,20 +93,54 @@ def pcall_single(fin,xs,time=10,error=None):
     kill_process(job) # kill all the processes just in case
     # get all the data
     ys = []
-    for i in range(n):
+    for i in range(n): # loop over outputs
         folder = pfolder+"/folder_"+str(i)+"/"
         try: y = pickle.load(open(folder+'out.obj','rb')) # get the output
         except: y = None # in case there are errors
         if y is None: y = error # use this as backup variable
-        ys.append(y)
-    return ys
+        ys.append(y) # store in the output
+    time.sleep(1.) # wait one second
+    return ys # return all the data 
+
+
+
+
+def rerun_failed(fun,ys,xs,**kwargs):
+    """Rerun those calculations that failed"""
+    nc = len(ys) # number of calculations
+    dd = dict() # dictionary
+    for i in range(nc): # loop over calculations
+        if ys[i] is None: # this one failed
+            dd[i] = xs[i] # store this input to run
+            print(xs[i],"failed, rerunning")
+    if len(ins)==0: # all calculations ok
+        return ys # return the outputs
+    else: # some have failed
+        # run again all the calculations that failed
+        xsnew = [dd[key] for key in dd] # inputs
+        ysnew = pcall_single(fun,xsnew,**kwargs) # call the function
+        # store in the array
+        ii = 0 # counter
+        for key in dd: # loop over keys
+            ys[key] = ysnew[ii] # store
+        return ys # return outputs
+
+
+def pcall_rerun_failed(fun,xs,call_tries=10,**kwargs):
+    """Call for all the inputs, and rerun those that failed"""
+    ys = pcall_single(fun,xs,**kwargs) # call the function
+    for ic in range(call_tries): # call several times
+        ys = rerun_failed(fun,ys,xs,**kwargs) # rerun those that failed
+    return ys # return all
+
+
 
 
 def get_env():
-    """Get a cleaned up environment"""
+    """Get a cleaned up environment for slurm"""
     env = os.environ # dictionary
     envout = {} # output dictionary
-    for key in env:
+    for key in env: # loop over environmental variables
         if "SLURM_" not in key and "SBATCH_" not in key:
            envout[key] = env[key] # store
     return envout # return this dictionary
