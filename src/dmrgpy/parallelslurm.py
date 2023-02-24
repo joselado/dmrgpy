@@ -89,7 +89,7 @@ def pcall_single(fin,xs,time=10,error=None):
                 finished = False
         if path.exists(pfolder+"/STOP"): # stop by force .parallel
             finished = True
-        if finished: break
+        if finished: break # exit the loop
     kill_process(job) # kill all the processes just in case
     # get all the data
     ys = []
@@ -114,7 +114,7 @@ def rerun_failed(fun,ys,xs,**kwargs):
             dd[i] = xs[i] # store this input to run
             print("Job ",i,xs[i],"failed, rerunning")
     # run again all the calculations that failed
-    xsnew = [dd[key] for key in dd] # inputs
+    xsnew = [dd[key] for key in dd] # inputs that failed
     if len(xsnew)==0: # all calculations ok
         return ys # return the outputs
     else: # some have failed
@@ -123,6 +123,7 @@ def rerun_failed(fun,ys,xs,**kwargs):
         ii = 0 # counter
         for key in dd: # loop over keys
             ys[key] = ysnew[ii] # store
+            ii += 1
         return ys # return outputs
 
 
