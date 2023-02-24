@@ -112,7 +112,7 @@ def rerun_failed(fun,ys,xs,**kwargs):
     for i in range(nc): # loop over calculations
         if ys[i] is None: # this one failed
             dd[i] = xs[i] # store this input to run
-            print(xs[i],"failed, rerunning")
+            print("Job ",i,xs[i],"failed, rerunning")
     # run again all the calculations that failed
     xsnew = [dd[key] for key in dd] # inputs
     if len(xsnew)==0: # all calculations ok
