@@ -113,11 +113,11 @@ def rerun_failed(fun,ys,xs,**kwargs):
         if ys[i] is None: # this one failed
             dd[i] = xs[i] # store this input to run
             print(xs[i],"failed, rerunning")
-    if len(ins)==0: # all calculations ok
+    # run again all the calculations that failed
+    xsnew = [dd[key] for key in dd] # inputs
+    if len(xsnew)==0: # all calculations ok
         return ys # return the outputs
     else: # some have failed
-        # run again all the calculations that failed
-        xsnew = [dd[key] for key in dd] # inputs
         ysnew = pcall_single(fun,xsnew,**kwargs) # call the function
         # store in the array
         ii = 0 # counter
