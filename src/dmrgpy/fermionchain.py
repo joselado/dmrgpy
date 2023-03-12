@@ -331,9 +331,43 @@ def isfermion(self):
     from .pyfermion.mbfermion import MBFermion
     if type(self)==Fermionic_Chain: return True
     if type(self)==Spinful_Fermionic_Chain: return True
+    if type(self)==Spinful_F_Fermionic_Chain: return True
     if type(self)==MBFermion: return True
     else: return False
     
+
+
+
+class Spinful_F_Fermionic_Chain(Fermionic_Chain):
+    """
+    Class to deal with fermionic Hamiltonians with
+    spin degree of freedom
+    """
+    def __init__(self,n):
+        """ Rewrite the init method to take twice as many sites"""
+        super().__init__(3*n) # initialize the Hamiltonian
+        self.Sx = [0.5*self.Cdag[3*i]*self.C[3*i+1] +
+                0.5*self.Cdag[3*i+1]*self.C[3*i] for i in range(n)]
+        self.Sy = [-0.5*1j*self.Cdag[3*i]*self.C[3*i+1] +
+                1j*0.5*self.Cdag[3*i+1]*self.C[3*i] for i in range(n)]
+        self.Sz = [0.5*self.N[3*i] +
+                (-1)*0.5*self.N[3*i+1] for i in range(n)]
+        self.Cup = [self.C[3*i] for i in range(n)]
+        self.Cdagup = [self.Cdag[3*i] for i in range(n)]
+        self.Cdn = [self.C[3*i+1] for i in range(n)]
+        self.Cdagdn = [self.Cdag[3*i+1] for i in range(n)]
+        self.F = [self.C[3*i+2] for i in range(n)]
+        self.Fdag = [self.Cdag[3*i+2] for i in range(n)]
+        self.Nup = [self.N[3*i] for i in range(n)]
+        self.Ndn = [self.N[3*i+1] for i in range(n)]
+        self.NF = [self.N[3*i+2] for i in range(n)]
+
+
+
+
+
+
+
 
 
 
