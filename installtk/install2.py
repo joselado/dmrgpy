@@ -35,7 +35,6 @@ def compile(gpp="g++",check_gpp=True):
     else:
       print("Not a Unix system. The code only works in Unix systems. Stopping")
       exit()
-    exit()
     # now do the compilation
     os.system("make clean ")
     os.system("make")
