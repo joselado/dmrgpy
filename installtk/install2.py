@@ -1,7 +1,7 @@
 import os
 
 
-def compile(gpp="g++"):
+def compile(gpp="g++",check_gpp=True):
     # compile Itensor library
     path = os.path.dirname(os.path.realpath(__file__))+"/../" # main path
     os.chdir(path+"/src/dmrgpy/mpscpp2/ITensor")
@@ -11,9 +11,11 @@ def compile(gpp="g++"):
       print("Detected Unix system")
       from . import cppversion
       writemk(gpp=gpp) # write options.mk
-      if cppversion.correct_version(gpp=gpp):
+      if check_gpp: # check the compiler
+        print("Checking if the compilar is ok")
+        if cppversion.correct_version(gpp=gpp):
           print("C++ compiler "+gpp+" is ok and will be used")
-      else: # C++ compiler is not the right one
+        else: # C++ compiler is not the right one
           print("You may need to install the GNU C++ compiler")
           print("In Ubuntu systems, run the following commands")
           print("#######################################################")
@@ -33,6 +35,7 @@ def compile(gpp="g++"):
     else:
       print("Not a Unix system. The code only works in Unix systems. Stopping")
       exit()
+    exit()
     # now do the compilation
     os.system("make clean ")
     os.system("make")
