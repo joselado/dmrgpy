@@ -74,6 +74,8 @@ def excited_states_non_hermitian(self,n=3,recursive=False,
                 nkry_min = nkry_min, # minimum number of Krylov vectors
                 nkry_max = nkry_max, # maximum number of Krylov vectors
                 **kwargs)
+    from .algebra.algebra import sorteigen
+    es,wf = sorteigen(es,wf)
     return (es,wf)
 
 

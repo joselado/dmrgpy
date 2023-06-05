@@ -7,8 +7,9 @@ import numpy as np
 
 det = dlg.det
 
-maxsize = 3000
+maxsize = 10000
 tol = 1e-7 # tolerancy
+maxiter = 1e6 # maximum number of iterations
 
 
 
@@ -112,9 +113,9 @@ def ground_state(h,nmax=maxsize):
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     try: 
-      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000)
+      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=maxiter)
     except:
-      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=100000,tol=tol)
+      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=maxiter,tol=tol)
     eig = np.sort(eig)
   else:
     if info: print("Full diagonalization")
@@ -130,10 +131,10 @@ def todense(m):
     else: return m
 
 
-def lowest_eigenvalues(h,n=10,nmax=maxsize):
+def lowest_eigenvalues(h,n=10):
   """Get a ground state"""
   info = False
-  if h.shape[0]>nmax: # for sparse use arpack
+  if h.shape[0]>maxsize: # for sparse use arpack
       eig,vs = lowest_states(h,n=n)
   else:
     if info: print("Full diagonalization")
@@ -141,21 +142,22 @@ def lowest_eigenvalues(h,n=10,nmax=maxsize):
       eig = dlg.eigvalsh(h.todense())
     else:
       eig = dlg.eigvals(h.todense())
-      eig = [y for (x,y) in sorted(zip(eig.real,eig))]
+      eig,eigvec = sorteigen(eig,eig)
   return np.array(eig[0:n])
 
 
-def lowest_states(h,n=10,nmax=maxsize,**kwargs):
+def lowest_states(h,n=10,**kwargs):
   """Get a ground state"""
+  nmax = maxsize
   info = False
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     if ishermitian(h): # Hermitian matrix
-      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000,tol=tol)
+      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=maxiter,tol=tol)
       eig,eigvec = sorteigen(eig,eigvec.T)
       return (eig,eigvec)
     else: 
-      eig,eigvec = slg.eigs(h,k=n,which="SR",maxiter=100000,tol=tol)
+      eig,eigvec = slg.eigs(h,k=n,which="SR",maxiter=maxiter,tol=tol)
       eig,eigvec = sorteigen(eig,eigvec.T)
       return (eig,eigvec)
   else:
@@ -172,8 +174,11 @@ lowest_eigenvectors = lowest_states
 
 def sorteigen(eig,vs):
     """Return sorted eigenvalues and eigenvectors"""
-    vs = [y for (x,y) in sorted(zip(eig.real,vs),key=lambda x: x[0])]
-    eig = [y for (x,y) in sorted(zip(eig.real,eig),key=lambda x: x[0])]
+    w = eig - np.min(eig.real) # smallest real part
+    imweight = 1e-3 # how much to weight im when sorting 
+    wz = w.real + imweight*w.imag
+    vs = [y for (x,y) in sorted(zip(wz,vs),key=lambda x: x[0])]
+    eig = [y.copy() for (x,y) in sorted(zip(wz,eig),key=lambda x: x[0])]
     return np.array(eig),vs
 
 
