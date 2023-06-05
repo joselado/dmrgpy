@@ -113,9 +113,9 @@ def ground_state(h,nmax=maxsize):
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     try: 
-      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=maxiter)
+      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=int(maxiter))
     except:
-      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=maxiter,tol=tol)
+      eig,eigvec = slg.eigsh(h,k=10,which="SA",maxiter=int(maxiter),tol=tol)
     eig = np.sort(eig)
   else:
     if info: print("Full diagonalization")
@@ -153,11 +153,11 @@ def lowest_states(h,n=10,**kwargs):
   if h.shape[0]>nmax:
     if info: print("Calling ARPACK")
     if ishermitian(h): # Hermitian matrix
-      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=maxiter,tol=tol)
+      eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=int(maxiter),tol=tol)
       eig,eigvec = sorteigen(eig,eigvec.T)
       return (eig,eigvec)
     else: 
-      eig,eigvec = slg.eigs(h,k=n,which="SR",maxiter=maxiter,tol=tol)
+      eig,eigvec = slg.eigs(h,k=n,which="SR",maxiter=int(maxiter),tol=tol)
       eig,eigvec = sorteigen(eig,eigvec.T)
       return (eig,eigvec)
   else:
@@ -200,23 +200,6 @@ def inv(m):
     m = todense(m)
     return dlg.inv(m)
 
-
-#
-#def lowest_eigenvectors(h,n=10,nmax=maxsize):
-#  """Get a ground state"""
-#  info = False
-#  if h.shape[0]>nmax:
-#    if info: print("Calling ARPACK")
-#    eig,eigvec = slg.eigsh(h,k=n,which="SA",maxiter=100000)
-##    eigvec = [v for (e,v) in zip(eig,eigvec.T)]
-#  else:
-#    if info: print("Full diagonalization")
-#    eig,eigvec = dlg.eigh(h.todense())
-#    eigvec = eigvec.T # transpose
-##  print(sorted(eig))
-##  eigevec = [v for (e,v) in sorted(zip(eig,eigvec))]
-#  return eigvec[0:n] # return eigenvectors
-#
 
 
 def expm(m):
