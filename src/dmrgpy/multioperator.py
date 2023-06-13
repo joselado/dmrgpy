@@ -1,6 +1,7 @@
 import numbers
 import types
 import collections
+from collections.abc import Iterable
 import numpy as np
 
 # this class allows to define operators of the form
@@ -191,7 +192,7 @@ def obj2MO(a,name="multioperator"):
     """
     Convert an input in a multioperator
     """
-    if isinstance(a, collections.Iterable): # if it is a tuple
+    if isinstance(a, Iterable): # if it is a tuple
         mo = MultiOperator(name=name) # create object
         for ia in a:
             mo.add_operator(ia[0],ia[1])
