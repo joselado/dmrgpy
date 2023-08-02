@@ -13,10 +13,10 @@ class znchain():
         """Create the different operators"""
         dop = dict() # dictionary
         # create operators in each site
-        ids = [np.identity(n,dtype=np.complex) for n in ns] # identities
+        ids = [np.identity(n,dtype=np.complex_) for n in ns] # identities
         taus = [] # empty list
         for n in ns:
-            tau = np.zeros((n,n),dtype=np.complex)
+            tau = np.zeros((n,n),dtype=np.complex_)
             omega = 1j*2.*np.pi/n
             for i in range(n): tau[i,i] = omega**i
             taus.append(tau) # store

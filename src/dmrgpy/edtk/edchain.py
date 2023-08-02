@@ -63,11 +63,11 @@ class EDchain():
         if i is None: raise
         if a.shape[0]!=ns[i]: raise
         # create operators in each site
-        ids = [np.identity(n,dtype=np.complex) for n in ns] # identities
+        ids = [np.identity(n,dtype=np.complex_) for n in ns] # identities
         op = one2many(ids,a,i) # one to many body
         self.operators[(name,i)] = op # store in the dictionary
     def get_identity(self):
-        ids = [np.identity(n,dtype=np.complex) for n in self.localdim] 
+        ids = [np.identity(n,dtype=np.complex_) for n in self.localdim] 
         op = one2many(ids,ids[0],0) # one to many body
         return op
     def get_dynamical_correlator(self,**kwargs):

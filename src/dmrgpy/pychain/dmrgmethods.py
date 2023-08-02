@@ -16,9 +16,9 @@ def dmrg_BooB(indict,integrate_right=True):
     diml = ls[0].shape[0] # left site dimension
     dimr = rs[0].shape[0] # right site dimension
     dimc = hr.shape[0] # dimension of the block 
-    idc = sp.eye(hr.shape[0],dtype=np.complex) # block identity operator
-    idl = sp.eye(diml,dtype=np.complex) # block identity operator
-    idr = sp.eye(dimr,dtype=np.complex) # block identity operator
+    idc = sp.eye(hr.shape[0],dtype=np.complex_) # block identity operator
+    idl = sp.eye(diml,dtype=np.complex_) # block identity operator
+    idr = sp.eye(dimr,dtype=np.complex_) # block identity operator
     # couple site to right block
     hr = tensorial_operator(idr,hr) # block+right site 
     if not rons is None: # add right onsite
@@ -32,8 +32,8 @@ def dmrg_BooB(indict,integrate_right=True):
     hl = hl + coupled_hamiltonian(ls,cls) # couple site to block
     ls = [tensorial_operator(l,idc) for l in ls] # left site to block 
     # now couple the two halves
-    idr2 = sp.eye(hr.shape[0],dtype=np.complex) # right identity operator
-    idl2 = sp.eye(hl.shape[0],dtype=np.complex) # right identity operator
+    idr2 = sp.eye(hr.shape[0],dtype=np.complex_) # right identity operator
+    idl2 = sp.eye(hl.shape[0],dtype=np.complex_) # right identity operator
 # left and right parts
     h = tensorial_operator(hl,idr2) + tensorial_operator(idl2,hr)
 #    print(np.sum(hl-hr))

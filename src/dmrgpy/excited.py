@@ -49,7 +49,7 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
         es,ws = get_excited_states_dmrg(self,n=n+2,**kwargs) # compute 
         ws = gram_smith(ws) # orthogonalize the MPS
         ne = len(es)
-        h = np.zeros((ne,ne),dtype=np.complex)
+        h = np.zeros((ne,ne),dtype=np.complex_)
         for i in range(ne):
           for j in range(ne):
               h[i,j] = ws[i].overlap(self.hamiltonian*ws[j])

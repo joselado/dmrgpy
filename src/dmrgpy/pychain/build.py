@@ -184,7 +184,7 @@ class Spin_chain(edchain.EDchain):
   def add_heisenberg(self,xs,ys,js):
     return self.generate_hamiltonian(xs,ys,js,is_ising=False)
   def get_identity(self):
-      return sparse.identity(self.sx.shape[0],dtype=np.complex)
+      return sparse.identity(self.sx.shape[0],dtype=np.complex_)
   def get_operator(self,name,i=0):
       """Return an operator"""
       if type(name)==multioperator.MultiOperator:

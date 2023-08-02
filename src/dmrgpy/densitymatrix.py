@@ -57,7 +57,7 @@ def reduced_dm_projective(self,wf,i=0,j=None):
         for pj in Pj: Pk.append(pi*pj) # store the projector in this subspace
     # now compute the density matrix in this subspace
     n = len(Pk) # number of components
-    dm = np.zeros((n,n),dtype=np.complex) # initialize
+    dm = np.zeros((n,n),dtype=np.complex_) # initialize
     for i in range(n):
         wfi = Pk[i]*wf # projector
         for j in range(n):

@@ -74,7 +74,7 @@ class MBFermion(edchain.EDchain):
         """
         Return the identity
         """
-        return identity(self.h.shape[0],dtype=np.complex)
+        return identity(self.h.shape[0],dtype=np.complex_)
     def add_hopping(self,m):
         """
         Add a single particle term to the Hamiltonian

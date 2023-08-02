@@ -55,7 +55,7 @@ def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,**kwargs):
     wf = Aop@wf # apply operator
     wfc = np.conjugate(wf0) # conjugate wavefunction
     cs = [] # empty list
-    ht = Hop + e0[0]*identity(Hop.shape[0],dtype=np.complex)
+    ht = Hop + e0[0]*identity(Hop.shape[0],dtype=np.complex_)
     for it in range(nt): # loop
         wf = evolve(wf,ht,t=dt,dt=dt) # evolve wavefunction
         wf = wf.reshape((wf.shape[0]))

@@ -42,7 +42,7 @@ def distribution_inversion(wf0,X=None,scale=10.0,
   """Calculate a correlation function SiSj in a frequency window"""
   es=np.linspace(-scale,scale,5*int(scale/delta))
   ## default method
-  iden = np.identity(X.shape[0],dtype=np.complex) # identity
+  iden = np.identity(X.shape[0],dtype=np.complex_) # identity
   out = []
   for e in es: # loop over energies
       if mode=="full": # using exact inversion

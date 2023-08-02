@@ -89,9 +89,9 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
         delta=3e-2,mode="cv"):
   """Calculate a correlation function AB in a frequency window"""
   ## default method
-#  iden = np.identity(h0.shape[0],dtype=np.complex) # identity
+#  iden = np.identity(h0.shape[0],dtype=np.complex_) # identity
   from scipy.sparse import identity
-  iden = identity(h0.shape[0],dtype=np.complex) # matrix to use
+  iden = identity(h0.shape[0],dtype=np.complex_) # matrix to use
   out = []
   for e in es: # loop over energies
       if mode=="full": # using exact inversion
@@ -114,7 +114,7 @@ def solve_cv(h0,wf0,si,sj,w,delta=0.0):
     """Solve the dynamical correlator using conjugate gradient method"""
     ## This function may need some benchmarking
     from scipy.sparse import identity
-    iden = identity(h0.shape[0],dtype=np.complex) # matrix to use
+    iden = identity(h0.shape[0],dtype=np.complex_) # matrix to use
     b = -delta*sj@wf0 # create the b vector
     A = (h0 - w*iden)@(h0-w*iden) + iden*delta*delta # define A matrix
     x,info = slg.cg(A,b,tol=1e-10) # solve the equation

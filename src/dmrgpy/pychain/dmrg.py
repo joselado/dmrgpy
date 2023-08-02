@@ -400,12 +400,12 @@ def dmrg_BooB(dmrgp,integrate_right=True,LO=True,dmrgout=None):
     dim_rB = rB.shape[0] # dimension of the block 
     dim_lB = lB.shape[0] # dimension of the block 
     # idensity operators
-    id_lB = sp.eye(dim_lB,dtype=np.complex) # identity operator
-    id_rB = sp.eye(dim_rB,dtype=np.complex) # identity operator
-    id_lS = sp.eye(dim_lS,dtype=np.complex) # identity operator
-    id_rS = sp.eye(dim_rS,dtype=np.complex) # identity operator
-    id_rSB = sp.eye(dim_rS*dim_rB,dtype=np.complex) # right identity operator
-    id_lSB = sp.eye(dim_lS*dim_lB,dtype=np.complex) # right identity operator
+    id_lB = sp.eye(dim_lB,dtype=np.complex_) # identity operator
+    id_rB = sp.eye(dim_rB,dtype=np.complex_) # identity operator
+    id_lS = sp.eye(dim_lS,dtype=np.complex_) # identity operator
+    id_rS = sp.eye(dim_rS,dtype=np.complex_) # identity operator
+    id_rSB = sp.eye(dim_rS*dim_rB,dtype=np.complex_) # right identity operator
+    id_lSB = sp.eye(dim_lS*dim_lB,dtype=np.complex_) # right identity operator
     # function to upgrade an operator to the full space
     def m2full(A,mtype=None,iterative=False):
       """Function that builds a full operator"""
@@ -573,12 +573,12 @@ def dmrg_BooB(dmrgp,integrate_right=True,LO=True,dmrgout=None):
 #    dim_rB = rB.shape[0] # dimension of the block 
 #    dim_lB = lB.shape[0] # dimension of the block 
 #    # idensity operators
-#    id_lB = sp.eye(dim_lB,dtype=np.complex) # identity operator
-#    id_rB = sp.eye(dim_rB,dtype=np.complex) # identity operator
-#    id_lS = sp.eye(dim_lS,dtype=np.complex) # identity operator
-#    id_rS = sp.eye(dim_rS,dtype=np.complex) # identity operator
-#    id_rSB = sp.eye(dim_rS*dim_rB,dtype=np.complex) # right identity operator
-#    id_lSB = sp.eye(dim_lS*dim_lB,dtype=np.complex) # right identity operator
+#    id_lB = sp.eye(dim_lB,dtype=np.complex_) # identity operator
+#    id_rB = sp.eye(dim_rB,dtype=np.complex_) # identity operator
+#    id_lS = sp.eye(dim_lS,dtype=np.complex_) # identity operator
+#    id_rS = sp.eye(dim_rS,dtype=np.complex_) # identity operator
+#    id_rSB = sp.eye(dim_rS*dim_rB,dtype=np.complex_) # right identity operator
+#    id_lSB = sp.eye(dim_lS*dim_lB,dtype=np.complex_) # right identity operator
 #    ###########################
 #    # couple site to right block
 #    ###########################
@@ -682,8 +682,8 @@ def initial_BooB(right,left,onsite,
   # identity operators
   dim_rS = rS_rB[0].shape[0] # dimension of right subspace
   dim_lS = lS_rS[0].shape[0] # dimension of left subspace
-  id_rS = sp.eye(dim_rS,dtype=np.complex) # left identity operator
-  id_lS = sp.eye(dim_lS,dtype=np.complex) # left identity operator
+  id_rS = sp.eye(dim_rS,dtype=np.complex_) # left identity operator
+  id_lS = sp.eye(dim_lS,dtype=np.complex_) # left identity operator
   # initial Hamiltonian
   Block = (coupled_hamiltonian(right(0),left(1),cs=cs) +
             tensorial_operator(id_lS,onsite(1)) +
@@ -727,8 +727,8 @@ def initial_BoBo(right,left,onsite,site_operators=lambda i: []):
   # identity operators
   dim_rS = rS_rB[0].shape[0] # dimension of right subspace
   dim_lS = lS_rS[0].shape[0] # dimension of left subspace
-  id_rS = sp.eye(dim_rS,dtype=np.complex) # left identity operator
-  id_lS = sp.eye(dim_lS,dtype=np.complex) # left identity operator
+  id_rS = sp.eye(dim_rS,dtype=np.complex_) # left identity operator
+  id_lS = sp.eye(dim_lS,dtype=np.complex_) # left identity operator
   # insitial Hamiltonian
   Block = (coupled_hamiltonian(lS_rS,rS_lS) +
             tensorial_operator(id_lS,onsite(0)) +

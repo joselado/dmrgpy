@@ -102,7 +102,7 @@ def frusladder(s1,j=1.0,jf=1.0):
 def get_representation(A,wfs):
   """Get representation of an operator"""
   nw = len(wfs) # number of waves
-  m = np.matrix(np.zeros((nw,nw),dtype=np.complex))
+  m = np.matrix(np.zeros((nw,nw),dtype=np.complex_))
   for i in range(nw):
     for j in range(nw):
       m[j,i] = np.conjugate(wfs[i]).dot(A*wfs[j])

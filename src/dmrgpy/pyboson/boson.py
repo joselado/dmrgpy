@@ -15,10 +15,10 @@ class BosonChain(EDchain):
         """Create the different operators"""
         dop = dict() # dictionary
         # create operators in each site
-        ids = [np.identity(n,dtype=np.complex) for n in self.maxnb] # identities
+        ids = [np.identity(n,dtype=np.complex_) for n in self.maxnb] # identities
         ds = [] # empty list
         for n in self.maxnb:
-            d = np.zeros((n,n),dtype=np.complex)
+            d = np.zeros((n,n),dtype=np.complex_)
             for i in range(n-1): d[i,i+1] = np.sqrt(i+1) # one more boson
             ds.append(d) # store
         # now create the many body basis
@@ -44,7 +44,7 @@ class BosonChain(EDchain):
         self.operators = dop # store dictionary
     def get_identity(self):
         """Identity operator"""
-        ids = [np.identity(n,dtype=np.complex) for n in self.maxnb] # identities
+        ids = [np.identity(n,dtype=np.complex_) for n in self.maxnb] # identities
         return one2many(ids)
 
 

@@ -76,7 +76,7 @@ def convert_matrix(namefile):
     row = m[0].astype(int) # row
     col = m[1].astype(int) # column
     data = m[2] + 1j*m[3] # data
-    mout = csc_matrix((data,(row,col)),shape=(d,d),dtype=np.complex) # create the matrix
+    mout = csc_matrix((data,(row,col)),shape=(d,d),dtype=np.complex_) # create the matrix
 #    if np.max(np.abs(mout.todense() - mout.todense().H))>0.00001: raise
     write_matrix(namefile,mout) # save matrix as numpy object
     return mout

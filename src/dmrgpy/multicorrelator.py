@@ -28,7 +28,7 @@ def multicorrelator(self,rs=None,es=np.linspace(0.0,4.0,100),**kwargs):
     fo.write(name0+"\n") # name of the file
     fo.flush() # flush
   fo.close() # close file
-  dt = np.zeros(es.shape,dtype=np.complex) # initialize
+  dt = np.zeros(es.shape,dtype=np.complex_) # initialize
   for di in ds: dt += di # add
   np.savetxt("MULTILDOS/DOS.OUT",np.matrix([es,np.abs(dt)]).T) # save the total
   fo = open("CORRELATORMAP.OUT","w")

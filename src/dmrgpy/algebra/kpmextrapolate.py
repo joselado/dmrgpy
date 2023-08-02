@@ -104,7 +104,7 @@ def extrapolate_moments(mus0,fac,extrapolation_mode="1/n"):
 
 #    pred = model.predict(n_periods=P-L) # prediction
     pred = model.predict(start=L,end=P-1) # prediction
-    mus2 = np.zeros(P,dtype=np.complex) 
+    mus2 = np.zeros(P,dtype=np.complex_) 
     mus2[0:L] = mus[0:L] # initial data
     mus2[L:P] = pred[:] # predicted data
     mus2 = ftransinv(mus2) # transform back

@@ -6,7 +6,7 @@ def krylov_matrix_representation(H,wfs):
     accelerate=False
     nw = len(wfs) # number of wavefunction
     if nw==0: raise # something wrong
-    mh = np.zeros((nw,nw),dtype=np.complex) # output matrix
+    mh = np.zeros((nw,nw),dtype=np.complex_) # output matrix
     if accelerate:
         for i in range(nw):
             mh[i,i] = wfs[i].aMb(H,wfs[i]) # compute representation
@@ -69,7 +69,7 @@ def diagonalize(mh):
 def rediagonalize(H,wfs):
     """Given certain eigenfunctions, rediagonalize a Hamiltonian"""
     n = len(wfs) # number of wavefunctions
-    mh = np.zeros((n,n),dtype=np.complex) # empty Hamiltonian
+    mh = np.zeros((n,n),dtype=np.complex_) # empty Hamiltonian
     for i in range(n):
       for j in range(n):
           mh[i,j] = wfs[j].aMb(H,wfs[i]) # compute representation

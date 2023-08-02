@@ -22,7 +22,7 @@ def reduced_density_matrix(wave,basis,site=0,use_fortran=True):
     dmat = dm90.reduced_density_matrix(wave,basis.T+1,site+1,dimdm)
   else:
     print("PROBLEM WITH FORTRAN COMPILATION, ENTROPY IS NOT CALCULATED")
-    dmat = np.zeros((dimdm,dimdm),dtype=np.complex)
+    dmat = np.zeros((dimdm,dimdm),dtype=np.complex_)
     dmat[0,0] = 1.
   return dmat
 
