@@ -84,8 +84,8 @@ def one2many_basis(m,basis,bdict=None):
   for i in range(nm): # loop over states
     for j in range(nm): # loop over states
       a = m[j,i] # matrix element
-      ii = np.zeros(on,dtype=np.int) # indexes
-      jj = np.zeros(on,dtype=np.int) # indexes
+      ii = np.zeros(on,dtype=np.int_) # indexes
+      jj = np.zeros(on,dtype=np.int_) # indexes
       vals = np.zeros(on,dtype=np.complex_) # values
       for ib in range(len(basis)): # loop over basis elements
         b = basis[ib] # get the vector
@@ -116,8 +116,8 @@ def four2many(m,basis,bdict=None):
       for k in range(nm): # loop over states
         for l in range(nm): # loop over states
           a = m[l][k][j][i] # matrix element
-          ii = np.zeros(on,dtype=np.int) # indexes
-          jj = np.zeros(on,dtype=np.int) # indexes
+          ii = np.zeros(on,dtype=np.int_) # indexes
+          jj = np.zeros(on,dtype=np.int_) # indexes
           vals = np.zeros(on,dtype=np.complex_) # values
           for ib in range(len(basis)): # loop over basis elements
             b = basis[ib] # get the vector
@@ -172,8 +172,8 @@ def destroy(basis,bdict,nm,isite):
   on = len(basis) # dimension of output matrix
   nout = len(basis) # length of the output matrix
   mout = csc_matrix(([],([],[])),shape=(on,on)) # output matrix
-  ii = np.zeros(on,dtype=np.int) # indexes
-  jj = np.zeros(on,dtype=np.int) # indexes
+  ii = np.zeros(on,dtype=np.int_) # indexes
+  jj = np.zeros(on,dtype=np.int_) # indexes
   vals = np.zeros(on,dtype=np.complex_) # values
   for ib in range(len(basis)): # loop over basis elements
     b = basis[ib] # get the vector

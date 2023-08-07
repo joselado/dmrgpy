@@ -37,8 +37,8 @@ def get_dictionary(basis):
 
 def get_szi(spins,basis,ispin):
   """Get the Sz operator"""
-  ii = np.zeros(len(basis),dtype=np.int) # i index 
-  jj = np.zeros(len(basis),dtype=np.int) # j index
+  ii = np.zeros(len(basis),dtype=np.int_) # i index 
+  jj = np.zeros(len(basis),dtype=np.int_) # j index
   vals = np.zeros(len(basis),dtype=np.complex_) # value
 #  l = (spins[ispin] - 1.)/2. # total spin in this site
   l = spins[ispin]  # total spin in this site
@@ -53,8 +53,8 @@ def get_szi(spins,basis,ispin):
 
 def get_spi(spins,basis,ispin,bdict=None):
   """Get the Sz operators operator"""
-  ii = np.zeros(len(basis),dtype=np.int) # i index 
-  jj = np.zeros(len(basis),dtype=np.int) # j index
+  ii = np.zeros(len(basis),dtype=np.int_) # i index 
+  jj = np.zeros(len(basis),dtype=np.int_) # j index
   vals = np.zeros(len(basis),dtype=np.complex_) # value
   l = spins[ispin]  # total spin in this site
   if bdict is None: bdict = get_dictionary(basis) # generate the dictionary
@@ -77,8 +77,8 @@ def get_spi(spins,basis,ispin,bdict=None):
 
 def get_smi(spins,basis,ispin,bdict=None):
   """Get the Sz operators operator"""
-  ii = np.zeros(len(basis),dtype=np.int) # i index 
-  jj = np.zeros(len(basis),dtype=np.int) # j index
+  ii = np.zeros(len(basis),dtype=np.int_) # i index 
+  jj = np.zeros(len(basis),dtype=np.int_) # j index
   vals = np.zeros(len(basis),dtype=np.complex_) # value
   l = spins[ispin]  # total spin in this site
   if bdict is None: bdict = get_dictionary(basis) # generate the dictionary
