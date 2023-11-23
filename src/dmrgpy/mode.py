@@ -22,7 +22,9 @@ def run(self,automatic=False):
         from . import juliarun
         juliarun.run(self)
         return
-    else: raise
+    else: 
+        print("Unrecognized mode",get_mode(self))
+        raise
 #      if not os.path.isfile(mpscpp): # mpscpp.x not found, rerun with julia
 #          print("C++ backend not found, trying to run with Julia version")
 #          self.setup_julia() # turn to Julia

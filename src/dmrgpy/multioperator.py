@@ -155,7 +155,7 @@ def identity():
     return op
 
 def MO2list(self):
-    """Conver a multioperator into a list"""
+    """Convert a multioperator into a list"""
     out = []
     for iop in self.op: # loop over operators
         o = []
@@ -237,7 +237,7 @@ def MO2vijkl(mo):
 def MO2matrix(MO,obj):
     """Given a certain object containing the method "get_operator",
     return a matrix"""
-    out = 0.0
+    out = 0.0*obj.get_identity() # initialize
     for iop in MO.op: # loop over components
         otmp = iop[0]*obj.get_identity() # factor
         for i in range(len(iop)-1): # loop over terms in the product
@@ -250,7 +250,7 @@ def MO2matrix(MO,obj):
 def jordan_wigner(MO):
     """Use Jordan Wigner transformationin a multioperator"""
     from .multioperatortk import jordanwigner
-    m = 0 # initialize output
+    m = 0*identity() # initialize output
     for ii in range(len(MO.op)): # loop over operators
         opi = MO.op[ii] # take this term
         n = len(opi)-1 # number of terms in the product
@@ -283,7 +283,7 @@ def jordan_wigner(MO):
 
 def get_dagger(self,conjugate=True):
     """Return the dagger of a multioperator"""
-    m = 0 # initialize
+    m = 0*identity() # initialize
     for opi in self.op: # loop over terms
         n = len(opi) # number of terms in the product
         c = opi[0] # coefficient
@@ -306,7 +306,7 @@ def get_dagger(self,conjugate=True):
             else: name2 = name
             mi = obj2MO([[name2,jj]])*mi
         m = m + mi # add contribution
-    return m # return MO
+    return obj2MO(m) # return MO
 
 
 

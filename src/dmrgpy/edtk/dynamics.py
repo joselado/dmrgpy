@@ -13,7 +13,7 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
     Compute the dynamical correlator
     """
     if name is None: raise
-    if type(name[0])==multioperator.MultiOperator: # multioperator
+    if type(name[0])==multioperator.MultiOperator and type(name[1])==multioperator.MultiOperator: # multioperator
       A = self.get_operator(name[0])
       B = self.get_operator(name[1])
     else:
