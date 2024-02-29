@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import spinchain
 
-n = 10 # number of sites in your chain
+n = 20 # number of sites in your chain
 spins = ["S=1/2" for i in range(n)] # create the sites
 sc = spinchain.Spin_Chain(spins) # create the chain
 
@@ -16,6 +16,13 @@ print("Overlap between orthogonal wavefunctions",wfup.dot(wfdn).real)
 
 # Flip all the spin in each site, to go from up to down
 wfflip = wfdn.copy() 
+import time
+t0 = time.time()
+for i in range(n):
+  wfflip = (sc.Sx[0]*sc.Sx[2])*wfflip
+#wfflip = (sc.Sx[0])*wfflip
+t1 = time.time()
+print("Time",t1-t0) ; exit()
 for i in range(n): wfflip = 2.*sc.Sx[i]*wfflip
 
 # Now do some simple algebra with MPS

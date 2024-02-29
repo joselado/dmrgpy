@@ -101,9 +101,14 @@ class MPS():
         return np.sqrt(self.dot(self).real) # norm
     def normalize(self):
         """Normalize a wavefunction"""
+        # This function has problems for too many sites due to
+        # the orthogonality catastrophe. Probably MPS should be 
+        # orthogonalized at the C++ level
         norm = np.sqrt(self.dot(self).real) # norm
         if norm>1e-8: return self*(1./norm)
-        else: return None
+        else: 
+            print("WARNING, state is not normalizable. Returning None")
+            return None
     def __rmul__(self,A):
         """Multiply by an operator"""
         if self.MBO is not None:
