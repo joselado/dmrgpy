@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "dmrgpy"
+version = "0.1.0"
+description = "This is a Python library to compute quasi-one-dimensional spin chains and fermionic systems using matrix product states with the density matrix renormalization group as implemented in ITensor (C++ and Julia versions). Most of the computations can be performed both with DMRG and exact diagonalization for small systems, which allows to benchmark the results."
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
