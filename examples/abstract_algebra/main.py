@@ -40,6 +40,14 @@ for i in range(n-1): # loop over NN links
 
 Psi4 = H*Psi2 # apply operator to the state
 
+# if you wish to define a method to do this, you can do it int he following way
+Hp = H.copy()
+import types
+dot = lambda self,v: self*v # apply operator to vector
+Hp.dot = types.MethodType(dot, Hp) # add method to the object
+Psi4p = Hp.dot(Psi2) # matrix times vector with a method
+
+
 # states can be summed as if it were conventional vector |5> = |2> + |4>
 
 Psi5 = Psi2 + Psi4 # sum two states

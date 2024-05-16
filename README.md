@@ -44,7 +44,7 @@ python install_julia.py
 
 The installation scripts will
 also add dmrgpy to the PYTHONPATH of the python interpreter you used
-to execute them.
+to execute them. Compiling the C++ program requires having installed LAPACK and BLAS in your system.
 
 Afterwards you can import the dmrgpy sublibrary that you want, for example
 
