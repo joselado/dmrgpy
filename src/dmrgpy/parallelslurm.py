@@ -73,7 +73,7 @@ def pcall_single(fin,xs,time=10,error=None):
     pwd = os.getcwd() # current directory 
     os.chdir(pfolder) # go to the folder
 #    os.system("sbatch run.sh >> run.out") # run calculation
-    env = get_env() # get the cleaned environment
+#    env = get_env() # get the cleaned environment
     out,err = subprocess.Popen(["sbatch","run.sh"],stdout=subprocess.PIPE,env=env).communicate()
     job = job_number(out) # job number
     jobkill(job) # kill the job if exiting
