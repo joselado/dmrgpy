@@ -150,7 +150,9 @@ def get_env():
 def job_number(out):
     """Get the job number"""
     out = str(out)
-    out = out.split("job")[1]
+    print(out)
+    out = out.split("Submitted batch job")[1]
+    print(out)
     out = out.split("\\n")[0]
     return int(out) # return the job
 
