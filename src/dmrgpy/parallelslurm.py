@@ -136,23 +136,21 @@ def pcall_rerun_failed(fun,xs,call_tries=10,**kwargs):
 
 
 
-
-def get_env():
-    """Get a cleaned up environment for slurm"""
-    env = os.environ # dictionary
-    envout = {} # output dictionary
-    for key in env: # loop over environmental variables
-        if "SLURM_" not in key and "SBATCH_" not in key:
-           envout[key] = env[key] # store
-    return envout # return this dictionary
-
+#
+#def get_env():
+#    """Get a cleaned up environment for slurm"""
+#    env = os.environ # dictionary
+#    envout = {} # output dictionary
+#    for key in env: # loop over environmental variables
+#        if "SLURM_" not in key and "SBATCH_" not in key:
+#           envout[key] = env[key] # store
+#    return envout # return this dictionary
+#
 
 def job_number(out):
     """Get the job number"""
     out = str(out)
-    print(out)
     out = out.split("Submitted batch job")[1]
-    print(out)
     out = out.split("\\n")[0]
     return int(out) # return the job
 
