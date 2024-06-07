@@ -36,7 +36,10 @@ class EDchain():
         """Get ground state wavefunction"""
         if self.computed_gs: return self.wf0
         else: 
-          e0,wf0 = algebra.ground_state(self.get_hamiltonian())
+#          e0,wf0 = algebra.ground_state(self.get_hamiltonian())
+          (es,ws) = algebra.lowest_states(self.get_hamiltonian(),n=3)
+          e0 = es[0]
+          wf0 = ws[0]
           self.wf0 = wf0
           self.e0 = e0
           self.computed_gs = True

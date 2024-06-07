@@ -18,11 +18,11 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
       B = self.get_operator(name[1])
     else:
       raise # this is no longer used
-    wf0 = self.get_gs_array() # compute ground state
     h = self.get_operator(self.hamiltonian) # Hamiltonian in matrix form
     if not is_hermitian(h): # non Hermitian Hamiltonians
         from ..nonhermitian.dynamics import dynamical_correlator_non_hermitian
         return dynamical_correlator_non_hermitian(self,name=name,**kwargs)
+    wf0 = self.get_gs_array() # compute ground state
     # for Hermitian Hamiltonians, continue
     if submode=="KPM":
       return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)
@@ -59,6 +59,7 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
 def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
         es=np.linspace(-1.0,10.0,600)):
     """Compute a dynamical correlator"""
+    raise # this is buggy
     emu,vs = algebra.eigh(h)
     U = np.array(vs) # matrix
     Uh = np.conjugate(np.transpose(U)) # Hermitian

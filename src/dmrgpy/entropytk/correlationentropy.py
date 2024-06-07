@@ -136,9 +136,18 @@ def get_highorder_correlation_matrix(self,operators=None,wf=None,**kwargs):
     return cm # return matrix
 
 
-
-
-
+def entropy_density(dm):
+    """Compute the entropy density"""
+    from scipy.linalg import eigh
+    (es,ws) = eigh(dm) # compute
+    ws = ws.T # transpose
+    d = 0. # initialize
+    for i in range(len(es)):
+        e = es[i]
+        w = ws[i] ; w2 = np.abs(w)**2
+        if e>1e-8:
+            d = d + e*np.log(e)*w2
+    return -d
 
 
 
