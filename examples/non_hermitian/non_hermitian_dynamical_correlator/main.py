@@ -27,7 +27,7 @@ fc.get_gs(mode="ED")
 fc.get_gs(mode="ED")
 
 out = []
-energies = np.linspace(-1.0,3.0,40)
+energies = np.linspace(-0.1,3.0,200)
 for i in range(n):
     name = fc.C[i],fc.Cdag[i]
     (es,ds) = fc.get_dynamical_correlator(name=name,mode="ED",
