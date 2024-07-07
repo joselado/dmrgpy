@@ -452,5 +452,5 @@ sc = spinchain.Spin_Chain(spins) # create spin chain object
 sc.setup_julia()
 ```
 
-and all the subsequent computations will be performed with Julia
+and all the subsequent computations will be performed with Julia.
 

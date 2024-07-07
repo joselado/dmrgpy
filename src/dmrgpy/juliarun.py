@@ -34,10 +34,17 @@ def run(self):
     self.execute(lambda: jlsession.eval(c)) # evaluate Julia
 
 
+def get_julia_path():
+    result = subprocess.run(['which', 'julia'], stdout=subprocess.PIPE)
+    return result.stdout.decode('utf-8').strip()
+
+
+
 
 def install():
     """Install Julia and ITensor"""
-    julia = "julia" # julia command
+#    julia = "julia" # julia command
+    julia = get_julia_path()
     os.system(julia+" --eval "+"\"import Pkg; Pkg.add(\\\"ITensors\\\")\"")
     os.system(julia+" --eval "+"\"import Pkg; Pkg.add(\\\"PyCall\\\")\"")
     os.system(julia+" --eval "+"\"import Pkg; Pkg.add(\\\"Suppressor\\\")\"")

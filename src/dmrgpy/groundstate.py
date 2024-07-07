@@ -85,19 +85,33 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     self.computed_gs = True # ground state has been computed
     return out # return energy
 
-def gs_energy(self,policy="single",**kwargs):
+def gs_energy(self,**kwargs):
     if self.is_hermitian(self.hamiltonian): # put a check for Hermitian
-        if policy=="single":
-            return gs_energy_single(self,**kwargs)
-        if policy=="many":
-            return gs_energy_many(self,**kwargs)
-        else: raise
+        if self.itensor_version==2: # C++ version
+            return gs_energy_cpp(self,**kwargs)
+        elif self.itensor_version=="julia_live":
+            from .mpsjulialive.groundstate import get_gs_dmrg
+            e0,wf0 = get_gs_dmrg(self,**kwargs)
+            self.wf0 = wf0
+            return e0
     else:
         es,ws = self.get_excited_states(n=1,**kwargs)
         self.computed_gs = True
         self.e0 = es[0]
         self.wf0 = ws[0].copy() # copy wavefunction
         return self.e0
+
+
+
+
+def gs_energy_cpp(self,policy="single",**kwargs):
+    """Compute ground state with C++ DMRG"""
+    if policy=="single":
+        return gs_energy_single(self,**kwargs)
+    if policy=="many":
+        return gs_energy_many(self,**kwargs)
+    else: raise
+
 
 
 

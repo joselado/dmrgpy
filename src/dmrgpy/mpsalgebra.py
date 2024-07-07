@@ -198,8 +198,13 @@ from .algebra.arnolditk import gram_smith_single
 def toMPO(self,H,mode="DMRG"):
     """Transport an operator into a matrix-product operator"""
     if mode=="DMRG":
-        from .multioperatortk.staticoperator import StaticOperator
-        return StaticOperator(H,self) 
+        if self.itensor_version==2:
+            from .multioperatortk.staticoperator import StaticOperator
+            return StaticOperator(H,self) 
+        elif self.itensor_version=="julia_live":
+            from .mpsjulialive.mpo import MPO
+            return MPO(H,MBO=self)
+        else: raise # not implemented
     elif mode=="ED":
         from .edtk.edchain import EDOperator
         return EDOperator(H,self.get_ED_obj())

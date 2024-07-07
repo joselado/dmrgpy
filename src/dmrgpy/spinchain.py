@@ -47,9 +47,9 @@ def get_site(label):
 
 class Spin_Chain(Many_Body_Chain):
     """Class for spin Hamiltonians"""
-    def __init__(self,sites):
+    def __init__(self,sites,**kwargs):
         sites = [label2site[s] for s in sites]
-        Many_Body_Chain.__init__(self,sites)
+        Many_Body_Chain.__init__(self,sites,**kwargs)
         # default exchange constants
         self.use_ampo_hamiltonian = True # use ampo
         self.pychain_object = None # pychain object

@@ -34,13 +34,9 @@ class Coupling():
 
 
 class Many_Body_Chain():
-  def __init__(self,sites):
+  def __init__(self,sites,**kwargs):
       self.sites = sites # list of the sites
-      self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
 #      self.path = id_generator() # random ID in dmrgpy_tmp
-#      print(self.path)
-      self.clean() # clean calculation
-      self.inipath = os.getcwd() # original folder
       self.ns = len(sites) # number of sites
       self.mode = None # no mode (use the input parameter)
       self.exchange = 0 # zero
@@ -84,25 +80,25 @@ class Many_Body_Chain():
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
-      os.system("mkdir -p "+self.path) # create folder for the calculations
-      self.initialize()
+      self.initialize(**kwargs)
       # and initialize the sites
-  def initialize(self):
-      self.sites_from_file = False
-      self.task = {"write_sites":"true"}
-      self.execute(lambda: write_sites(self)) # write the different sites
-      self.run() # run the calculation
-      from .mode import get_mode
-      if not get_mode(self)=="ED":
-          self.bin_sites = open(self.path+"/sites.sites","rb").read() 
-      self.sites_from_file = True
+  def initialize(self,**kwargs):
+      """Initialize the sites"""
+      if self.mode=="ED": return # do nothing
+      if self.itensor_version in [2,"julia"]:
+          from .sites import initialize
+          initialize(self)
+      elif self.itensor_version=="julia_live":
+          from .mpsjulialive.sites import initialize
+          initialize(self)
+      else: raise
   def setup_julia(self):
       """Setup the Julia mode"""
-      self.itensor_version = "julia"
+      self.itensor_version = "julia_live"
       self.initialize()
   def setup_cpp(self):
-      """Setup the Julia mode"""
-      self.itensor_version = "2"
+      """Setup the C++ mode"""
+      self.itensor_version = 2
       self.initialize()
   def get_mode(self,**kwargs):
       from .mode import get_mode
@@ -177,7 +173,13 @@ class Many_Body_Chain():
       return degeneracy.gs_degeneracy(self,**kwargs)
   def vev(self,MO,mode="DMRG",**kwargs): 
       mode = self.get_mode(mode=mode) # overwrite mode
-      if mode=="DMRG": return vev.vev(self,MO,**kwargs)
+      if mode=="DMRG": 
+          if self.itensor_version==2: # C++ version
+              return vev.vev(self,MO,**kwargs)
+          elif self.itensor_version=="julia_live": # julia live version
+              from .mpsjulialive.vev import vev as vevjl
+              return vevjl(self,MO,**kwargs)
+          else: raise
       elif mode=="ED": return self.get_ED_obj().vev(MO,**kwargs) # ED object
       else: raise
   def test_ED(self):
@@ -373,7 +375,7 @@ class Many_Body_Chain():
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": # DMRG mode
         if self.computed_gs: # if stored, rewrite and return
-            self.wf0.write(name=self.wf0.name,path=self.path)
+#            self.wf0.write(name=self.wf0.name,path=self.path)
             return self.wf0
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
         else: self.gs_energy(**kwargs) # perform a ground state calculation
@@ -436,11 +438,16 @@ class Many_Body_Chain():
       """Generate a random MPS"""
       if self.mode is not None: mode = self.mode # redefine
       if mode in ["DMRG","MPS"]:
-         from . import mps
-         if orthogonal is None:  return mps.random_mps(self)
-         else: return mps.orthogonal_random_mps(self,orthogonal)
+         if self.itensor_version==2: # C++ version
+             from . import mps
+             if orthogonal is None: return mps.random_mps(self)
+             else: return mps.orthogonal_random_mps(self,orthogonal)
+         elif self.itensor_version=="julia_live": # Julia version
+             from .mpsjulialive import mps
+             return mps.random_mps(self)
       elif mode=="ED":
           return self.get_ED_obj().random_state()
+      else: raise
   def random_mps(self,**kwargs): return self.random_state(**kwargs)
   def get_operator(self,name,i=None):
       """Return a certain multioperator"""
