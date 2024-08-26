@@ -25,10 +25,10 @@ for k in ks: # loop over kpoints
     Sm0 = Sp0.get_dagger() # S-_n
     # add the last link
     Ji = 1. + delta*(-1)**(n-1) # exchange
-    h = h + z*(Spn*Sm0)/2. + zc*(Sp0*Smn)/2. + sc.Sz[0]*sc.Sz[n-1]
+    h = h + Ji*(z*(Spn*Sm0)/2. + zc*(Sp0*Smn)/2. + sc.Sz[0]*sc.Sz[n-1])
     # set the Hamiltonian
     sc.set_hamiltonian(h)
-    wf0 = sc.get_gs(mode="ED") # compute ground state
+    wf0 = sc.get_gs(mode="DMRG") # compute ground state
     wfs.append(wf0) # store
 
 phi = 1. # initialize
