@@ -57,14 +57,31 @@ def reduced_dm_projective(self,wf,i=0,j=None):
         for pj in Pj: Pk.append(pi*pj) # store the projector in this subspace
     # now compute the density matrix in this subspace
     n = len(Pk) # number of components
-    dm = np.zeros((n,n),dtype=np.complex_) # initialize
+    dm = np.zeros((n,n),dtype=np.complex128) # initialize
     for i in range(n):
         wfi = Pk[i]*wf # projector
         for j in range(n):
             dm[i,j] = wfi.aMb(Pk[j],wf) # project
-    print(dm.real)
+#    print(dm.real)
     return dm # return density matrix
 
 
 
+#
+#def explicit_dm(sc,wf,inds=[0]):
+#    """Compute the density matrix explicitly by summing
+#    over all the vectors. This is a very heavy procedure, but good
+#    for benchmarking and debugging"""
+#    sc = sc.copy() # make a copy
+#    for site in sc.sites: # check that you only have S=1/2
+#        if site !=2: 
+#            print("Only implemented for S=1/2")
+#            raise # stop
+#    # now loop over all the sites
+#    for ii in inds: # loop over sites where you want the entropy
+#        for Bz in [-1,1]: # the two combinations
+#            Hi = sc.Sz[ii] # the two magnetic fields
+#
+#
+#
 

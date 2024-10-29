@@ -25,7 +25,7 @@ from dmrgpy.timeevolution import imaginary_exponential as evolve
 def evolve_and_entropy(t):
     """Evolve for some time and compute the entropy of the resulting state"""
     wf = evolve(h,wf0,ts=[t])[0] # this is the final wavefunction at t
-    return wf.get_site_entropy(0) # comptue the entropy
+    return wf.get_site_entropy(0) # compute the entropy
 
 # compute entropies for different times
 ts = np.linspace(0.,4.,40)

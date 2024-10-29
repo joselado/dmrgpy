@@ -65,7 +65,7 @@ class Fermionic_Chain(Many_Body_Chain):
         """
         Return the free part of the fermionic Hamiltonian
         """
-        m = np.zeros((self.ns,self.ns),dtype=np.complex_) # matrix
+        m = np.zeros((self.ns,self.ns),dtype=np.complex128) # matrix
         for key in self.hoppings:
               t = self.hoppings[key]
               m[t.i,t.j] = t.g
@@ -140,7 +140,7 @@ class Fermionic_Chain(Many_Body_Chain):
 def get_gr_free(self,es=np.linspace(-10.,10.,800),delta=0.1,i=0,j=0):
     m = self.hamiltonian_free() # get the single body matrix
 #    print(m)
-    y = np.zeros(es.shape[0],dtype=np.complex_) # output
+    y = np.zeros(es.shape[0],dtype=np.complex128) # output
     iden = np.identity(m.shape[0])
     for ii in range(len(es)):
         yi = np.matrix(m-(es[ii]+1j*delta)*iden).I[i,j]

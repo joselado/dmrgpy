@@ -13,7 +13,7 @@ class Parafermion_Chain(edchain.EDchain):
         Z = MBO.Z # type of parafermion
         self.Z = Z
         self.localdim = [Z for i in range(n)]
-        zero = np.zeros((Z,Z),dtype=np.complex_) # get zero
+        zero = np.zeros((Z,Z),dtype=np.complex128) # get zero
         N = zero.copy()
         for i in range(Z): N[i,i] = i
         for i in range(n): self.create_operator(N,i=i,name="N")

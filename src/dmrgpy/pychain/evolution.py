@@ -64,7 +64,7 @@ def discrete_evolution(wave,h,t=0.0,dt=0.001,order=1):
   if nt == 0: # no steps
     nt = 1 # one step
   dt = t/nt # renormalize time interval steps
-  iden = identity(h.shape[0],dtype=np.complex_)
+  iden = identity(h.shape[0],dtype=np.complex128)
   if order==1: # order of pade approximant
     u1 = iden + 1j*h*dt/2.
     u2 = iden - 1j*h*dt/2.
@@ -83,7 +83,7 @@ def discrete_evolution_taylor2(wave,h,t=0.0,dt=0.001):
   if nt == 0: # no steps
     nt = 1 # one step
   dt = t/nt # renormalize time interval steps
-  iden = identity(h.shape[0],dtype=np.complex_)
+  iden = identity(h.shape[0],dtype=np.complex128)
   for i in range(nt): # loop over steps
     wtmp = h*dt*w # temporal vector
     w = (iden - h*dt/2.)*wtmp + 1j*wtmp # second order formula
@@ -105,7 +105,7 @@ def discrete_relaxed_evolution(wave,h,t=0.0,dt=0.001,order=1,de=0.0,dp=0.0):
   if nt == 0: # no steps
     nt = 1 # one step
   dt = t/nt # renormalize time interval steps
-  iden = identity(h.shape[0],dtype=np.complex_)
+  iden = identity(h.shape[0],dtype=np.complex128)
   if order==1: # order of pade approximant
     u1 = iden + (1j*h - de*h)*dt
     u2 = iden - (1j*h - de*h)*dt

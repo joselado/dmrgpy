@@ -3,7 +3,7 @@ from scipy.sparse import csc_matrix
 
 def one2many(ids,op=None,i=-1):
    """Function to transform to many body basis given identity operators"""
-   tmp = np.zeros((1,1),dtype=np.complex_) # initialize
+   tmp = np.zeros((1,1),dtype=np.complex128) # initialize
    tmp[0,0] = 1.0
    for j in range(len(ids)): # loop over sites
        if i!=j: op2 = ids[j] # identity

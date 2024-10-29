@@ -2,14 +2,10 @@ import numpy as np
 from numba import jit
 import scipy.linalg as lg
 from numpy.polynomial.polynomial import polyfit
-from statsmodels.tsa.ar_model import AutoReg
 #from statsmodels.tsa.ar_model import sarimax 
 
 
 import warnings
-from statsmodels.tsa.ar_model import AR
-
-from statsmodels.tsa.arima_model import ARIMA
 
 #import pmdarima as pm
 
@@ -90,6 +86,9 @@ def extrapolate_moments(mus0,fac,extrapolation_mode="1/n"):
     test = mus[L:T] # test data
 #    model = AR(train).fit(ic="aic") # get the model
     lags = round(12*(len(train)/100.)**(1/4.))
+    from statsmodels.tsa.ar_model import AR
+    from statsmodels.tsa.arima_model import ARIMA
+    from statsmodels.tsa.ar_model import AutoReg
     model = AutoReg(train,lags=lags,trend="ct").fit(cov_type="HC1") # get the model
 
 #    model = pm.auto_arima(train, start_p=1, start_q=1,
@@ -104,7 +103,7 @@ def extrapolate_moments(mus0,fac,extrapolation_mode="1/n"):
 
 #    pred = model.predict(n_periods=P-L) # prediction
     pred = model.predict(start=L,end=P-1) # prediction
-    mus2 = np.zeros(P,dtype=np.complex_) 
+    mus2 = np.zeros(P,dtype=np.complex128) 
     mus2[0:L] = mus[0:L] # initial data
     mus2[L:P] = pred[:] # predicted data
     mus2 = ftransinv(mus2) # transform back

@@ -19,7 +19,7 @@ def spismj(sc,h0,es=None,i=0,j=0,delta=0.1):
     es = np.linspace(-1.0,7.0,int(40/delta))
   sm = sc.sxi[i] - 1j*sc.syi[i] # S-
   sp = sc.sxi[j] + 1j*sc.syi[j] # S+
-  iden = np.identity(h0.shape[0],dtype=np.complex_) # identity
+  iden = np.identity(h0.shape[0],dtype=np.complex128) # identity
   out = []
   for e in es: # loop over energies
     g = ((iden*(e+e0+1j*delta)-h0).I - (iden*(e+e0-1j*delta)-h0).I)/2.
@@ -39,7 +39,7 @@ def dynamical_correlator(sc,**kwargs):
 
 def solve_cv(h0,wf0,si,sj,w,delta=0.0):
      # use algorithm to solve A*x = b
-     iden = identity(h0.shape[0],dtype=np.complex_) # identity
+     iden = identity(h0.shape[0],dtype=np.complex128) # identity
      b = -delta*sj*np.matrix(wf0).T # create the b vector
      A = (h0 - w*iden)*(h0-w*iden) + iden*delta*delta # define A matrix
      b = np.array(b).reshape((b.shape[0],)) # array

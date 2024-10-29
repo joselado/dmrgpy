@@ -65,7 +65,7 @@ def get_representation(wfs,A):
   Gets the matrix representation of a certain operator
   """
   n = len(wfs) # number of eigenfunctions
-  ma = np.zeros((n,n),dtype=np.complex_) # representation of A
+  ma = np.zeros((n,n),dtype=np.complex128) # representation of A
   sa = csc(A) # sparse matrix
   for i in range(n):
     vi = csc(np.conjugate(wfs[i])) # first wavefunction
@@ -209,7 +209,7 @@ def expm(m):
 #def expm(m):
 #    m = todense(m)
 #    es,vs = dlg.eig(m)
-#    d = np.zeros(m.shape,dtype=np.complex_)
+#    d = np.zeros(m.shape,dtype=np.complex128)
 #    for i in range(len(es)): d[i,i] = np.exp(es[i])
 #    R = vs.T
 #    Rh = np.conjugate(R.T)
@@ -241,7 +241,7 @@ def smooth_gauge(w1,w2):
 
 
 def uij(wf1,wf2):
-  m = np.matrix(np.zeros((len(wf1),len(wf2)),dtype=np.complex_))
+  m = np.matrix(np.zeros((len(wf1),len(wf2)),dtype=np.complex128))
   for i in range(len(wf1)):
     for j in range(len(wf2)):
       m[i,j] = wf1[i].dot(wf2[j])

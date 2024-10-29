@@ -86,7 +86,7 @@ def one2many_basis(m,basis,bdict=None):
       a = m[j,i] # matrix element
       ii = np.zeros(on,dtype=np.int_) # indexes
       jj = np.zeros(on,dtype=np.int_) # indexes
-      vals = np.zeros(on,dtype=np.complex_) # values
+      vals = np.zeros(on,dtype=np.complex128) # values
       for ib in range(len(basis)): # loop over basis elements
         b = basis[ib] # get the vector
         if b[i]==0: continue # next iteration, destructor empty
@@ -118,7 +118,7 @@ def four2many(m,basis,bdict=None):
           a = m[l][k][j][i] # matrix element
           ii = np.zeros(on,dtype=np.int_) # indexes
           jj = np.zeros(on,dtype=np.int_) # indexes
-          vals = np.zeros(on,dtype=np.complex_) # values
+          vals = np.zeros(on,dtype=np.complex128) # values
           for ib in range(len(basis)): # loop over basis elements
             b = basis[ib] # get the vector
             if b[i]==0: continue # next iteration
@@ -174,7 +174,7 @@ def destroy(basis,bdict,nm,isite):
   mout = csc_matrix(([],([],[])),shape=(on,on)) # output matrix
   ii = np.zeros(on,dtype=np.int_) # indexes
   jj = np.zeros(on,dtype=np.int_) # indexes
-  vals = np.zeros(on,dtype=np.complex_) # values
+  vals = np.zeros(on,dtype=np.complex128) # values
   for ib in range(len(basis)): # loop over basis elements
     b = basis[ib] # get the vector
     if b[isite]==0: continue # next iteration, destructor empty

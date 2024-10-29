@@ -54,7 +54,7 @@ def get_correlation_matrix_zeroT(self,operators=None,
         print(dmmode,"not recognized")
         raise # not implemented
     n = len(operators)
-    cm = np.zeros((n,n),dtype=np.complex_)
+    cm = np.zeros((n,n),dtype=np.complex128)
     for i in range(n):
         A = self.get_dagger(operators[i])
         for j in range(i,n):
@@ -73,7 +73,7 @@ def correlation_matrix_clean(operators,wf,self):
     algorithm"""
     # create the matrix
     n = len(operators)
-    cm = np.zeros((n,n),dtype=np.complex_)
+    cm = np.zeros((n,n),dtype=np.complex128)
     for i in range(n):
         A = self.get_dagger(operators[i])
         for j in range(i,n):
@@ -91,7 +91,7 @@ def correlation_matrix_fast(operators,wf):
     # create the matrix
     n = len(operators)
     wfs = [o*wf for o in operators] # compute all the wavefunctions
-    cm = np.zeros((n,n),dtype=np.complex_)
+    cm = np.zeros((n,n),dtype=np.complex128)
     for i in range(n):
         for j in range(i,n):
             out = wfs[i].dot(wfs[j]) # overlap
@@ -116,7 +116,7 @@ def get_highorder_correlation_matrix(self,operators=None,wf=None,**kwargs):
         else: raise
     # create the matrix
     n = len(operators)
-    cm = np.zeros((n,n,n,n),dtype=np.complex_)
+    cm = np.zeros((n,n,n,n),dtype=np.complex128)
     for i in range(n):
         A = operators[i].get_dagger()
         for j in range(i+1,n):
@@ -154,7 +154,7 @@ def entropy_density(dm):
 
 def four2two(m):
     n = m.shape[0] # dimension
-    out = np.zeros((n*n,n*n),dtype=np.complex_) # output
+    out = np.zeros((n*n,n*n),dtype=np.complex128) # output
     ii = 0
     for i in range(n-1):
       for j in range(i+1,n):

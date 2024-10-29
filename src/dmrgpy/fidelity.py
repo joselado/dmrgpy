@@ -42,7 +42,7 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
             wfsm = gram_smith(wfsm) # orthogonalize
             from .algebra.algebra import smooth_gauge
             def Uij(ws1,ws2):
-                m = np.zeros((ngs,ngs),dtype=np.complex_) # empty matrix
+                m = np.zeros((ngs,ngs),dtype=np.complex128) # empty matrix
                 for i in range(ngs):
                   for j in range(ngs):
                       m[i,j] = ws1[i].dot(ws2[j]) # scalar product

@@ -12,7 +12,7 @@ def dm(self,**kwargs):
 def dm_fermionic(self,inds=[0]):
     """Compute the density matrix of a system"""
     n = len(inds) # number of sites
-    out = np.zeros((n,n),dtype=np.complex_) # complex output
+    out = np.zeros((n,n),dtype=np.complex128) # complex output
     for i in range(n):
         for j in range(n):
             wfi = self.MBO.C[i]*self # first wavefunction

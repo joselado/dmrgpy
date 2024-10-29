@@ -167,15 +167,15 @@ def coupledhamiltonian(ops1,ops2,cs=None,LO=False):
   """
   Calculate the Hamiltonian for two coupled operators
   """
-  id1 = sp.eye(ops1[0].shape[0],dtype=np.complex_) # identity operator
-  id2 = sp.eye(ops2[0].shape[0],dtype=np.complex_) # identity operator
+  id1 = sp.eye(ops1[0].shape[0],dtype=np.complex128) # identity operator
+  id2 = sp.eye(ops2[0].shape[0],dtype=np.complex128) # identity operator
   nout = ops1[0].shape[0]*ops2[0].shape[0] # output dimension 
 #  LO = False # do not use linear operators
 #  if LO: # initialize a trivial linear operator 
 #    def fun(v): return np.zeros(v.shape[0])
 #    h = LinearOperator((nout,nout),matvec=fun) # zero linear operator
-  h = csc_matrix((nout,nout),dtype=np.complex_) # zero sparse matrix
-#(nout,nout,dtype=np.complex_) # zero sparse matrix
+  h = csc_matrix((nout,nout),dtype=np.complex128) # zero sparse matrix
+#(nout,nout,dtype=np.complex128) # zero sparse matrix
   nc = len(ops1) # number of operators
   if cs is None: cs = [1. for ic in range(nc)]
   for ic in range(nc): # loop over couplings, to right part

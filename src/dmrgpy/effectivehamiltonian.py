@@ -10,8 +10,8 @@ import scipy.linalg as lg
 #            pairs.append([i,j]) # store
 #    cs = self.get_correlator(pairs=pairs,apply_hamiltonian=True,**kwargs)
 #    norm = self.get_correlator(pairs=pairs,apply_hamiltonian=False,**kwargs)
-#    h = np.zeros((n,n),dtype=np.complex_) # create matrix with coefficients
-#    b = np.zeros((n,n),dtype=np.complex_) # create matrix with overlaps
+#    h = np.zeros((n,n),dtype=np.complex128) # create matrix with coefficients
+#    b = np.zeros((n,n),dtype=np.complex128) # create matrix with overlaps
 #    for k in range(len(cs)): # loop
 #        i,j = pairs[k] # get index
 #        h[i,j] = cs[k] # store
@@ -105,7 +105,7 @@ def get_projection_operators(self,mode="spin"):
 def get_representation(ws,op):
     """Return the representation of a certain operator"""
     ne = len(ws)
-    h = np.zeros((ne,ne),dtype=np.complex_)
+    h = np.zeros((ne,ne),dtype=np.complex128)
     for i in range(ne):
         for j in range(ne):
             h[i,j] = ws[i].overlap(op*ws[j])
