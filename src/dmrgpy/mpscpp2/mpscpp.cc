@@ -32,12 +32,13 @@ using namespace std;
 #include"cvm_dynamical_correlator.h" // CVM dynamical correlator
 #include"time_evolution.h" // Time evolution
 #include"reduced_dm.h" // Reduced density matrix
-#include"dynamical_correlator_excited.h" // dynamical correlator with exited
+#include"dynamical_correlator_excited.h" // dynamical correlator with excited
 #include"vev.h" // VEV
 #include"applyoperator.h" // apply operator to a vector
 #include"pureapplyoperator.h" // apply a pure operator to a vector
 #include"multmpo.h" // apply a pure operator to a vector
 #include"get_random_mps.h" // get a random MPS
+#include"conjugatemps.h" // conjugate the MPS
 
 
 int 
@@ -90,6 +91,7 @@ main()
     if (check_task("distribution"))  get_moments_distribution() ; 
     if (check_task("general_kpm"))  general_kpm() ; 
     if (check_task("apply_inverse"))  apply_inverse() ; 
+    if (check_task("conjugate_mps"))  conjugate_mps() ; 
 //    if (check_task("excited_vev"))  excited_vev() ; // VEV excited
     if (check_task("dynamical_correlator_excited"))  
 	    dynamical_correlator_excited(); // DM

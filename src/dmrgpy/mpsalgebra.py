@@ -211,6 +211,17 @@ def toMPO(self,H,mode="DMRG"):
     else: raise
 
 
+
+def conjugate_mps(self,wf):
+    """Apply operator to a many body wavefunction"""
+    self.execute(lambda: wf.write(name="wf1.mps")) # write WF
+    task = {"conjugate_mps":"true",
+            }
+    self.task = task
+    self.execute( lambda : self.run()) # run calculation
+    return mps.MPS(self,name="wf2.mps").copy() # copy
+
+
 from .mpsalgebratk.trace import trace
 from .mpsalgebratk.trace import inverse_trace
 

@@ -99,6 +99,11 @@ class MPS():
         del self
     def norm(self):
         return np.sqrt(self.dot(self).real) # norm
+    def get_conjugate(self):
+        """Return the conjugate wavefunction"""
+        from .mpsalgebra import conjugate_mps
+        if self.MBO is None: raise
+        return conjugate_mps(self.MBO,self)
     def normalize(self,tol=1e-8):
         """Normalize a wavefunction"""
         # This function has problems for too many sites due to

@@ -134,6 +134,10 @@ class State():
     def __add__(self,a):
         if type(a)==State: return State(self.v + a.v,self.MBO)
         else: raise
+    def get_conjugate(self):
+        out = self.copy()
+        out.v = np.conjugate(self.v) # conjugate wavefunction
+        return out
     def __mul__(self,x):
         if multioperator.isnumber(x): 
             return State(x*self.v,self.MBO)
