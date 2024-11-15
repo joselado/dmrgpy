@@ -60,6 +60,15 @@ a version of [Ubuntu](https://releases.ubuntu.com/20.04/)
 in that virtual machine, and following the previous
 instructions.
 
+# Tutorials #
+You can find several tutorials [here](https://github.com/joselado/Advanced_Computational_Methods_Physics_2024), in particular organized around the following topics
+
+- [Many-body quantum magnets](https://github.com/joselado/Advanced_Computational_Methods_Physics_2024/blob/main/jupyter-notebooks/quantum_magnetism.ipynb)
+- [Many-body correlated fermionic systems](https://github.com/joselado/Advanced_Computational_Methods_Physics_2024/blob/main/jupyter-notebooks/quantum_interacting_fermions.ipynb)
+- [Tensor networks for many-body quantum magnets](https://github.com/joselado/Advanced_Computational_Methods_Physics_2024/blob/main/jupyter-notebooks/mps_quantum_magnets.ipynb)
+- [Tensor netowrks for many-body correlated fermionic systems](https://github.com/joselado/Advanced_Computational_Methods_Physics_2024/blob/main/jupyter-notebooks/mps_many_body_fermionic.ipynb)
+
+
 # Capabilities #
 - Possible models include spinless fermions, spinful fermions, spins, parafermions and bosons
 - Ground state energy
