@@ -226,6 +226,7 @@ from .mpsalgebratk.trace import trace
 from .mpsalgebratk.trace import inverse_trace
 
 
+from .mpsalgebratk.disentangle import disentangle_manifold
 
 
 

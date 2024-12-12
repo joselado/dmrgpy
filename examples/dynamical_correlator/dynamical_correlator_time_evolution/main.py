@@ -6,14 +6,17 @@ from dmrgpy import spinchain
 ns = np.array(range(4,30,2))
 es = []
 n = 5
-spins = [2 for i in range(n)]
+spins = ["S=1/2" for i in range(n)]
 sc = spinchain.Spin_Chain(spins) # create the chain
-def fj(i,j):
-    if 0.9<abs(i-j)<1.1: return 1.0
-    return 0.0
-sc.set_exchange(fj) # set exchange couplings
+h = 0
+for i in range(n-1):
+    h = h +sc.Sx[i]*sc.Sx[i+1]
+    h = h +sc.Sy[i]*sc.Sy[i+1]
+    h = h +sc.Sz[i]*sc.Sz[i+1]
+
+sc.set_hamiltonian(h)
+
 sc.maxm = 10
-sc.get_gs()
 es = np.linspace(-1.0,10.0,4000)
 name = (sc.Sx[0],sc.Sx[0]) # correlator to compute
 

@@ -61,19 +61,19 @@ def disentangle_manifold(wfs,A):
 
 
 def get_representation(wfs,A):
-  """
-  Gets the matrix representation of a certain operator
-  """
-  n = len(wfs) # number of eigenfunctions
-  ma = np.zeros((n,n),dtype=np.complex128) # representation of A
-  sa = csc(A) # sparse matrix
-  for i in range(n):
-    vi = csc(np.conjugate(wfs[i])) # first wavefunction
-    for j in range(n):
-      vj = csc(wfs[j]).transpose() # second wavefunction
-      data = (vi@sa@vj).todense()[0,0]
-      ma[i,j] = data
-  return ma
+    """
+    Gets the matrix representation of a certain operator
+    """
+    n = len(wfs) # number of eigenfunctions
+    ma = np.zeros((n,n),dtype=np.complex128) # representation of A
+    sa = csc(A) # sparse matrix
+    for i in range(n):
+      vi = csc(np.conjugate(wfs[i])) # first wavefunction
+      for j in range(n):
+        vj = csc(wfs[j]).transpose() # second wavefunction
+        data = (vi@sa@vj).todense()[0,0]
+        ma[i,j] = data
+    return ma
 
 
 

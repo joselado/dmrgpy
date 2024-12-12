@@ -117,6 +117,7 @@ class State():
         else:
             self.v = v # store the vector
             self.MBO = MBO # store the many-body object
+        self.mode = "ED" # exact diagonalization mode
     def __rmul__(self,a):
         """Multiply by something"""
         from ..algebra.algebra import ismatrix

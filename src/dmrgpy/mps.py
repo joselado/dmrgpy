@@ -20,6 +20,7 @@ class MPS():
 #        self.factor = 1.0 # factor of the mps
         self.mps = open(self.path+"/"+name,"rb").read() # read the MPS
         self.sites = open(self.path+"/sites.sites","rb").read() # read sites
+        self.mode = "DMRG" # mode of the object
     def set_MBO(self,MBO):
         """Set the MBO"""
         self.path = MBO.path # path to the many body object folder
