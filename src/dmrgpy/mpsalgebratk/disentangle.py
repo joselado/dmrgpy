@@ -9,7 +9,8 @@ def disentangle_manifold(wfs,A,**kwargs):
   """
   ma = get_representation(wfs,A) # get the matrix form of the operator
   wfsout = [] # empty list
-  evals,evecs = dlg.eigh(ma) # diagonalize
+  if A.is_hermitian(): evals,evecs = dlg.eigh(ma) # diagonalize
+  else: evals,evecs = dlg.eig(ma) # diagonalize
   evecs = evecs.transpose() # transpose eigenvectors
   for v in evecs: # loop over eigenvectors
     wf = wfs[0]*0.0j
