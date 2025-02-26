@@ -29,7 +29,7 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
     elif submode=="ED":
       return dynamical_correlator_ED(h,A,B,**kwargs)
     elif submode=="INV":
-      return dynamical_correlator_inv(h,wf0,self.e0,A,B,**kwargs)
+      return dynamical_correlator_inv(h,wf0,self.e0,A,B,mode="full",**kwargs)
     elif submode=="CVM":
       return dynamical_correlator_inv(h,wf0,self.e0,A,B,mode="cv",**kwargs)
     elif submode=="TD":
@@ -96,11 +96,11 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
   out = []
   for e in es: # loop over energies
       if mode=="full": # using exact inversion
-        g1 = algebra.inv(iden*(e+e0+1j*delta)-h0)
-        g2 = algebra.inv(iden*(e+e0-1j*delta)-h0)
-        g = 1j*(g1-g2)/2./np.pi
-        op = A@g@B # operator
-        o = algebra.braket_wAw(wf0,op) # correlator
+          g1 = algebra.inv(iden*(e+e0+1j*delta)-h0)
+          g2 = algebra.inv(iden*(e+e0-1j*delta)-h0)
+          g = 1j*(g1-g2)/2./np.pi
+          op = A@g@B # operator
+          o = algebra.braket_wAw(wf0,op) # correlator
       elif mode=="cv": # correction vector algorithm
           o1 = solve_cv(h0,wf0,A,B,e+e0,delta=delta) # conjugate gradient
           o2 = solve_cv(h0,wf0,A,B,e+e0,delta=-delta) # conjugate gradient

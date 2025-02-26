@@ -85,6 +85,7 @@ class EDchain():
         wf = State(wf,self) # convert to State
         h = self.MO2matrix(h) # convert to matrix 
         return State(algebra.expm(h)@wf.v,self) # return
+    def get_ED_obj(self): return self
     def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
     def overlap(self,wf1,wf2):
         return wf1.dot(wf2) 
