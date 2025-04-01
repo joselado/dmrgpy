@@ -8,7 +8,7 @@ n = 4
 fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 
-raise # this should be double checked
+#raise # this should be double checked
 
 for i in range(n):
   for j in range(n):
@@ -40,7 +40,7 @@ x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="INV",
         es=es,delta=delta)
 x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
         es=es,delta=delta)
-x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="CVM",name=name,
+x2,y2 = fc.get_dynamical_correlator(mode="ED",submode="CVM",name=name,
         es=es,delta=delta)
 
 
