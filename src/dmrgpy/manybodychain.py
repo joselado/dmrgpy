@@ -370,6 +370,10 @@ class Many_Body_Chain():
         self.wf0 = wf.copy() # name of the wavefunction
         if reconverge: self.skip_dmrg_gs = False # reconverge the calculation
         else: self.skip_dmrg_gs = True # reconverge the calculation
+  def set_gs(self,wf):
+      """Set the ground state"""
+      from .groundstate import set_gs 
+      groundstate.set_gs(self,wf) # set this as ground state
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
       """Return the ground state"""
       mode = self.get_mode(mode=mode) # overwrite mode

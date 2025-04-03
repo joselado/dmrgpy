@@ -149,3 +149,14 @@ def get_gs_manifold(MBO,n=2,tol=1e-3,**kwargs):
 
 
 
+def set_gs(MBO,wf):
+    """Set the ground state int he object"""
+    mode = wf.mode # get the mode
+    if mode=="DMRG": # DMRG mode
+        MBO.computed_gs = True 
+        MBO.wf0 = wf.copy() # set the wavefunction
+    elif mode=="ED": # ED mode
+        MBO.get_ED_obj() # generate the ED object
+        MBO.ED_obj.computed_gs = True # comptued GS
+        MBO.ED_obj.wf0 = wf.v.copy() # copy the array
+

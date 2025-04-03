@@ -111,6 +111,10 @@ class Spin_Chain(Many_Body_Chain):
         mz = [self.vev(self.Sz[i],**kwargs) for i in range(self.ns)]
         np.savetxt("MAGNETIZATION.OUT",np.array([mx,my,mz]).T)
         return np.array([mx,my,mz]).real
+    def get_full_SS_correlator(self,**kwargs):
+        """Return the full spin correlator"""
+        from .dynamicstk import spincorrelators
+        return spincorrelators.get_full_SS_correlator(self,**kwargs)
     def get_effective_hamiltonian(self,**kwargs):
         """Return the effective Hamiltonian"""
         return effectivehamiltonian.get_effective_hamiltonian(self,
