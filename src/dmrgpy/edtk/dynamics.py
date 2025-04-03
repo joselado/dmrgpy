@@ -8,7 +8,8 @@ import numpy as np
 is_hermitian = algebra.is_hermitian
 
 
-def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
+def get_dynamical_correlator(self,name=None,submode="KPM",
+        wf0=None,**kwargs):
     """
     Compute the dynamical correlator
     """
@@ -19,10 +20,14 @@ def get_dynamical_correlator(self,name=None,submode="KPM",**kwargs):
     else:
       raise # this is no longer used
     h = self.get_operator(self.hamiltonian) # Hamiltonian in matrix form
+    if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
+    else: 
+        wf0 = wf0.v.copy()
     if not is_hermitian(h): # non Hermitian Hamiltonians
         from ..nonhermitian.dynamics import dynamical_correlator_non_hermitian
         return dynamical_correlator_non_hermitian(self,name=name,**kwargs)
-    wf0 = self.get_gs_array() # compute ground state
+#    print(wf0)
+#    print(np.round(wf0,2))
     # for Hermitian Hamiltonians, continue
     if submode=="KPM":
       return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)

@@ -98,6 +98,7 @@ class Spin_Chain(Many_Body_Chain):
             return self.ED_obj
         else:
             self.ED_obj = pychainwrapper.get_pychain(self)
+            self.has_ED_obj = True # store
             return self.ED_obj
     def get_pychain(self):
         return pychainwrapper.get_pychain(self)
