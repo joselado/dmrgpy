@@ -3,7 +3,8 @@ import numpy as np
 
 def exponential(self,h,wf,mode="DMRG",**kwargs):
     """Compute the exponential"""
-    if self.mode is not None: mode = self.mode # redefine
+    mode = wf.mode # mode of the wavefunction
+#    if self.mode is not None: mode = self.mode # redefine
     if mode=="DMRG": 
         if h.is_hermitian(): 
             return exponential_dmrg(self,h,wf,dt=1.0,**kwargs)

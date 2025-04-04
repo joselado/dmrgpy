@@ -35,6 +35,7 @@ def get_correlation_matrix_zeroT(self,operators=None,
     """Compute the correlation matrix of a ground state"""
     from .. import fermionchain
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
+    wf = wf/np.sqrt(wf.dot(wf).real) # normalize wavefunction
     if operators is None: # no operators provided
         if fermionchain.isfermion(self):
             if basis=="Nambu": 
