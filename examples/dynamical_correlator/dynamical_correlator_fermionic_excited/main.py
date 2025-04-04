@@ -27,16 +27,20 @@ print("Energy with DMRG",e1)
 
 ### Compute the dyamical correlator ###
 
-i,j = 1,1
+i,j = 1,2
 name = (fc.C[i],fc.Cdag[j])
 
 es = np.linspace(-0.5,6.0,100) # energies of the correlator
+eskpm = np.linspace(min(es),max(es),len(es)*8) # finer grid for KPM
+
+
 delta = 3e-2 # smearing of the correlator
-x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,
-        es=es,delta=delta)
+x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="KPM",
+        es=eskpm,delta=delta)
 x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
-        es=es,delta=delta)
+        es=eskpm,delta=delta)
 x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="EX",name=name,
+        nex=20, # number of excited states
         es=es,delta=delta)
 
 
