@@ -11,8 +11,11 @@ def exponential(self,h,wf,mode="DMRG",**kwargs):
         elif h.is_antihermitian(): 
             return exponential_dmrg(self,-1j*h,wf,dt=-1j,**kwargs)
         else:
-            print("Operator is not Hermitian nor anti-Hermitian")
-            raise
+            print("Warning, using 3rd order taylor expansion mode")
+            wf1 = h*wf # apply Hamiltonian
+            wf2 = h*wf1 # apply Hamiltonian
+            return wf + wf1 + wf2/2.
+#            raise
     elif mode=="ED": 
         return self.get_ED_obj().exponential(h,wf,**kwargs)
     else: raise

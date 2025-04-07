@@ -33,6 +33,14 @@ def get_excited(*args,**kwargs):
 
 
 
+def remove_none(ws):
+    wout = []
+    for w in ws:
+        if w is not None: wout.append(w)
+    return wout
+
+
+
 def get_excited_states(self,n=2,purify=True,**kwargs):
     """Excited states"""
     H = self.hamiltonian # make a check
@@ -48,7 +56,8 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
     else: # purify the states
         es,ws = get_excited_states_dmrg(self,n=n+2,**kwargs) # compute 
         ws = gram_smith(ws) # orthogonalize the MPS
-        ne = len(es)
+        ws = remove_none(ws) # remove None wavefunctions
+        ne = len(ws) # number of states
         h = np.zeros((ne,ne),dtype=np.complex128)
         for i in range(ne):
           for j in range(ne):
@@ -56,7 +65,9 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
         es = lg.eigvalsh(h) # redefine eigenvalues
         # redefine also the eigenvectors
         from .algebra.arnolditk import rediagonalize
+        # there is something wrong with this function
         ws = rediagonalize(self.hamiltonian,ws) # rediagonalize
+        if ne<n: n = ne # redefine
         return (es[0:n],ws[0:n])
 
 

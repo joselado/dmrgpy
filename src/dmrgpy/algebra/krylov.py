@@ -53,7 +53,8 @@ def gram_smith(ws):
     for i in range(n):
         w = ws[i].copy() # copy wavefunction
         w = gram_smith_single(w,out) # orthogonalize
-        out.append(w) # store
+        if w is not None:
+            out.append(w) # store
     return out
 
 

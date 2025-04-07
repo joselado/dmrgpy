@@ -3,9 +3,9 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
 from dmrgpy import spinchain
-n = 6
+n = 4
 # create a random spin chain
-spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
+spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
 
 # create first neighbor exchange
