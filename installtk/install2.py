@@ -54,7 +54,7 @@ def writemk(gpp="g++",openblas=False):
     path = path+"/src/dmrgpy/mpscpp2/ITensor"
     out = open(path+"/options.save").read().replace("CCCOM=g++","CCCOM="+gpp)
     if openblas:
-        out.replace("-lblas -llapack","-lopenblas")
+        out = out.replace("-lblas -llapack","-lopenblas")
     open(path+"/options.mk","w").write(out) # write file
 
 
