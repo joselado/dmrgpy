@@ -26,7 +26,7 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
 #    c1 = cs[:,0] + 1j*cs[:,1] # first overlap
 #    c2 = cs[:,2] - 1j*cs[:,3] # second overlap
     # compute the two correlators
-    esex,wsex = self.get_excited_states(n=nex,**kwargs)
+    esex,wsex = self.get_excited_states(n=nex,purify=False,**kwargs)
     A,B = name[0].get_dagger(),name[1] # operators
     wf0 = wsex[0] # ground state
     from .algebra.arnolditk import gram_smith

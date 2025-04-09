@@ -1,7 +1,7 @@
 import os
 
 
-def compile(gpp="g++",check_gpp=True):
+def compile(gpp="g++",check_gpp=True,**kwargs):
     # compile Itensor library
     path = os.path.dirname(os.path.realpath(__file__))+"/../" # main path
     os.chdir(path+"/src/dmrgpy/mpscpp2/ITensor")
@@ -10,7 +10,7 @@ def compile(gpp="g++",check_gpp=True):
       os.system("cp options.save options.mk")
       print("Detected Unix system")
       from . import cppversion
-      writemk(gpp=gpp) # write options.mk
+      writemk(gpp=gpp,**kwargs) # write options.mk
       if check_gpp: # check the compiler
         print("Checking if the compilar is ok")
         if cppversion.correct_version(gpp=gpp):
@@ -48,11 +48,13 @@ def compile(gpp="g++",check_gpp=True):
     os.chdir(path) # go to the main path
 
 
-def writemk(gpp="g++"):
+def writemk(gpp="g++",openblas=False):
     """Write options.mk"""
     path = os.path.dirname(os.path.realpath(__file__))+"/../" # main path
     path = path+"/src/dmrgpy/mpscpp2/ITensor"
     out = open(path+"/options.save").read().replace("CCCOM=g++","CCCOM="+gpp)
+    if openblas:
+        out.replace("-lblas -llapack","-lopenblas")
     open(path+"/options.mk","w").write(out) # write file
 
 
