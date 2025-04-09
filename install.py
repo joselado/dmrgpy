@@ -16,7 +16,7 @@ args = parser.parse_args() # get the arguments
 from installtk import install2
 check_gpp = "True"==args.check_gpp # if gpp is checked
 openblas = "True"==args.openblas # if openblas should be used
-install2.compile(gpp=args.gpp,check_gpp=check_gpp) # compile the C++ library
+install2.compile(gpp=args.gpp,check_gpp=check_gpp,openblas=openblas) # compile the C++ library
 from installtk import addpythonpath
 addpythonpath.addpath() # add the library to the Python path
 from installtk import addsystem
