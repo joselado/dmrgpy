@@ -37,7 +37,6 @@ eskpm = np.linspace(min(es),max(es),len(es)*8) # finer grid for KPM
 
 delta = 3e-2 # smearing of the correlator
 x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="EX",name=name,
-        purify = False,
         nex=10, # number of excited states
         es=eskpm,delta=delta)
 x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="KPM",
