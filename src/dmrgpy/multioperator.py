@@ -15,6 +15,7 @@ def isnumber(x):
 
 ampo_counter = 0
 use_jordan_wigner = True
+n_mpo_max = 200 # maximum number of MPO products
 
 
 class MultiOperator():
@@ -179,7 +180,7 @@ def write_ampo(out,name):
     f.write(str(len(out))+"\n") # number of lines
     for o in out:
       n = (len(o)-2)//2 # number of terms
-      if n>=200: raise # C++ code needs to be recompiled
+      if n>=n_mpo_max: raise # C++ code needs to be recompiled
       f.write(str((len(o)-2)//2)+"\n") # number of terms
       for io in o:
           f.write(str(io)+"  ")
