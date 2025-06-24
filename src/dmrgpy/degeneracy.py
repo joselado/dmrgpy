@@ -24,8 +24,11 @@ def gs_degeneracy_simple(self,dmode="real",delta=1e-2,n=1,**kwargs):
             emin = np.min(es.real) # ground state energy
             des = np.abs(es.real-emin)**2 # distance to the minimum energy
         elif dmode=="complex": # for complex energies
-            emin = np.min(es.real) # ground state energy
-            des = np.abs(es-emin)**2 # distance to the minimum energy
+            esre = es.real # real part of the energy
+            emin = np.min(esre) # ground state energy (real part)
+            ind = np.where(esre==emin)[0][0]# index in the array
+            ezmin = es[ind] # complex energy of the ground state
+            des = np.abs(es-ezmin)**2 # distance to the minimum energy
         else: raise
         deg = np.sum(np.exp(-(des/delta)**2)) # return degeneracy
         if deg<n: break # consider it done
