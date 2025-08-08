@@ -47,30 +47,36 @@ def get(V=0.0,c=1.0,eta=1.0):
     # this method is just for ED
     es,wfs = fc.get_excited_states(mode="ED",n=nex) # get excited states
     es = es - es[0] # return energies
-    return es
+    deg = fc.get_gs_degeneracy(mode="ED",delta=0.1)
+    return es,deg
 
 xp = []
 yp = []
 zp = []
-
+degs = []
+ps = np.linspace(0.0,1.0,20)
 # compute for different interactions
-for p in np.linspace(0.0,1.0,20):
-    esed = get(c=p,V=0.,eta=1.0)
+for p in ps:
+    esed,deg = get(c=p,V=0.,eta=1.0)
     print(np.round(np.abs(esed.real),3))
     yp += [e for e in esed] # store
     xp += [p for e in esed] # store
     zp += [i for i in range(len(esed))] # store
+    degs.append(deg)
 
 
 import matplotlib.pyplot as plt
 xp = np.array(xp)
 yp = np.array(yp)
-plt.subplot(1,2,1) ; plt.xlabel("Open-Closed boundary")
+plt.subplot(1,3,1) ; plt.xlabel("Open-Closed boundary")
 plt.ylabel("Re(E)")
 plt.scatter(xp,yp.real,c=zp,cmap="rainbow")
-plt.subplot(1,2,2) ; plt.xlabel("Open-Closed boundary")
+plt.subplot(1,3,2) ; plt.xlabel("Open-Closed boundary")
 plt.ylabel("Im(E)")
 plt.scatter(xp,yp.imag,c=zp,cmap="rainbow")
+plt.subplot(1,3,3) ; plt.xlabel("Open-Closed boundary")
+plt.ylabel("Degeneracy")
+plt.scatter(ps,degs)
 
 plt.tight_layout()
 plt.show()
