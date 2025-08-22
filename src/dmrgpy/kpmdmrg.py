@@ -197,3 +197,80 @@ def scale_operator(self,X,a=-0.9,b=0.9):
 
 
 
+# this function is a bit redundant with general_kpm
+def kpm_wfa_wfb(self,kernel="jackson",xs=None,**kwargs):
+    """
+    Compute a dynamical correlator of wfa and wfb
+    """
+    mus,shift,scale = kpm_moments_wfa_wfb(self,**kwargs)
+    # scale of the distribution
+    kpmscales = scale
+    num_p = len(mus)
+    xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
+    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel) # generate the DOS
+    xs2 += shift # add the shift
+    xs2 *= scale # scale
+    ys2 /= scale # scale
+    if xs is None: return xs2,ys2
+    else:
+      from scipy.interpolate import interp1d
+      fr = interp1d(xs2, ys2.real,fill_value=0.0,bounds_error=False)
+      fi = interp1d(xs2, ys2.imag,fill_value=0.0,bounds_error=False)
+      return xs,fr(xs)+1j*fi(xs)
+
+
+
+def kpm_moments_wfa_wfb(self,X=None,wfa=None,wfb=None,
+        scale=None,a=-0.8,b=0.8,
+        delta=1e-1,kernel="jackson",xs=None,**kwargs):
+    """
+    Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
+    """
+    if X is None: raise
+    # extrapolate
+    if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
+    if scale is not None:
+        X = X/scale # renormalize the operator for KPM
+        shift = 0.0 # no additional shift
+    else: # no scale provided
+        X,scale,shift = scale_operator(self,X,a=a,b=b)
+    num_p = int(3*scale/delta) # number of polynomials
+    if wfa is None or wfb is None: 
+        print("Wavefunctions must be provided")
+        raise
+    # write the wavefunctions
+    self.execute(lambda: wfa.write(name="wfa.mps"))
+    self.execute(lambda: wfb.write(name="wfb.mps"))
+    # write the task
+    task = {    "general_kpm": "true",
+                "kpmmaxm":str(self.maxm),
+                "kpm_accelerate": "false",
+                "kpm_num_polynomials":str(num_p),
+                "kpm_cutoff":str(self.cutoff),
+                }
+    self.execute(lambda: X.write(name="kpm_operator.in"))
+    self.task = task # assign tasks
+    self.run() # perform the calculation
+    m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
+    mus = m[0]+1j*m[1]
+    # perform extrapolation if 
+    if self.kpm_extrapolate:
+      mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+              extrapolation_mode=self.kpm_extrapolate_mode)
+    return mus,shift,scale
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
