@@ -126,16 +126,16 @@ class State():
         if type(a)==multioperator.MultiOperator: # multioperator
             A = self.MBO.MO2matrix(a)  # get the matrix
             w = A@self.v # multiply
-            return State(w,self.MBO) # create a new object
+            return type(self)(w,self.MBO) # create a new object
         elif multioperator.isnumber(a):
             w = a*self.v # multiply
-            return State(w,self.MBO) # create a new object
+            return type(self)(w,self.MBO) # create a new object
         elif ismatrix(a):
             w = a@self.v
-            return State(w,self.MBO) # create a new object
+            return type(self)(w,self.MBO) # create a new object
         else: raise # not implemented
     def __add__(self,a):
-        if type(a)==State: return State(self.v + a.v,self.MBO)
+        if isinstance(a,State): return type(self)(self.v + a.v,self.MBO)
         else: raise
     def get_conjugate(self):
         out = self.copy()
@@ -143,7 +143,7 @@ class State():
         return out
     def __mul__(self,x):
         if multioperator.isnumber(x): 
-            return State(x*self.v,self.MBO)
+            return type(self)(x*self.v,self.MBO)
         else: raise
     def __truediv__(self,a):
         if multioperator.isnumber(a): # number
@@ -154,7 +154,7 @@ class State():
     def __neg__(self):
         return (-1)*self
     def overlap(self,a):
-        if type(a)==State: # state object
+        if isinstance(a,State): # state object
             return np.dot(np.conjugate(self.v),a.v)
         else: raise # not implemented
     def copy(self):
@@ -177,7 +177,7 @@ class State():
             A = a.SO  # get the matrix
         else: raise
         w = algebra.applyinverse(A,self.v)
-        return State(w,self.MBO) # create a new object
+        return type(self)(w,self.MBO) # create a new object
 
 
 
