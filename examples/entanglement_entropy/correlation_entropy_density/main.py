@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import fermionchain
 
 def get(U=1.,mode="ED"):
-    n = 8 # number of spinful fermionic sites
+    n = 8 # number of spinless fermionic sites
     fc = fermionchain.Fermionic_Chain(n) # create the chain
     h = 0
     for i in range(n-1): # hopping
@@ -23,7 +23,7 @@ def get(U=1.,mode="ED"):
 
 Sed = get(mode="ED") # get from ED
 Stn = get(mode="DMRG") # get from MPS
-inds = range(len(Sed))
+inds = range(len(Sed)) # site indexes
 import matplotlib.pyplot as plt
 
 plt.plot(inds,Sed,label="ED",c="red")
