@@ -252,5 +252,10 @@ class Fermionic_State(edchain.State):
         """Special fucntion to compute density matrix"""
         from ..dmtk.densitymatrix import dm_fermionic
         return dm_fermionic(self,**kwargs)
+    def get_correlation_entropy_density(self,**kwargs):
+        from .. import entanglement
+        return entanglement.get_correlation_entropy_density(self.MBO,
+                 wf=self,**kwargs)
+
 
 
