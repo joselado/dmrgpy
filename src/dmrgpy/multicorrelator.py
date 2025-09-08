@@ -1,6 +1,6 @@
 import numpy as np
 import os
-
+import subprocess
 
 
 
@@ -15,8 +15,8 @@ def multicorrelator(self,rs=None,es=np.linspace(0.0,4.0,100),**kwargs):
     (ei,di) = self.get_dynamical_correlator(i=ii,j=ii,es=es,**kwargs)
     ds.append(di) # store
   ds = np.array(ds) 
-  os.system("rm -rf MULTILDOS") # remove folder
-  os.system("mkdir MULTILDOS") # create folder
+  subprocess.run(["rm","-rf","MULTILDOS"]) # remove folder
+  subprocess.run(["mkdir","MULTILDOS"]) # create folder
   fo = open("MULTILDOS/MULTILDOS.TXT","w") # files with the names
   ie = 0 # start
   for e in es: # loop over energies
