@@ -28,6 +28,8 @@ es = np.linspace(-0.5,4,200)
 delta = 5e-2
 (x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
 
+wf = sc.get_gs() # get ground state
+
 import matplotlib.pyplot as plt
 plt.plot(x,y.real,c="blue",label="DMRG")
 plt.show()

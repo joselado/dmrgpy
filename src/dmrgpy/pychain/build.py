@@ -127,15 +127,15 @@ def get_representation(wfs,A):
   return ma
 
 
-
+import subprocess
 
 class Spin_chain(edchain.EDchain):
   size = 0 # size of the Hamiltonian
   def __init__(self):
         super().__init__()
         self.path = os.getcwd()+"/.pychainfolder/"
-        os.system("rm -rf "+self.path) # remove temporal folder
-        os.system("mkdir "+self.path) # create temporal folder
+        subprocess.run(["rm","-rf",self.path]) # remove temporal folder
+        subprocess.run(["mkdir",self.path]) # create temporal folder
         self.inipath = os.getcwd() # initial path
   def to_folder(self): os.chdir(self.path)
   def to_origin(self): os.chdir(self.inipath) # go to original folder

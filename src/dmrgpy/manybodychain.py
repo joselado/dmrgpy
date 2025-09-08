@@ -18,7 +18,7 @@ from . import excited
 from . import effectivehamiltonian
 from .writemps import write_sites
 from .mode import dmrgpath
-
+import subprocess
 
 one = np.matrix(np.identity(3))
 
@@ -117,12 +117,12 @@ class Many_Body_Chain():
       """
       from copy import deepcopy
       name = "dmrgpy_clone_"+str(np.random.randint(10000))
-      os.system("rm -rf /tmp/"+name) # clean the new directory
+      subprocess.run(["rm","-rf","/tmp/"+name]) # clean the new directory
       out = deepcopy(self) # full copy of the object 
       out.path = "/tmp/"+name # new path
       out.inipath = os.getcwd() # initial path
 #      print("New path",out.path)
-      os.system("cp -r "+self.path+"  "+out.path) # copy to the new path
+      subprocess.run(["cp","-r",self.path,out.path]) # copy to the new path
       return out # return new object
   def set_hamiltonian(self,MO,restart=True): 
       """Set the Hamiltonian"""
@@ -162,7 +162,7 @@ class Many_Body_Chain():
       """
       Remove the temporal folder
       """
-      os.system("rm -rf "+self.path) # clean temporal folder
+      subprocess.run(["rm","-rf",self.path]) # clean temporal folder
   def vev_MB(self,MO,**kwargs):
       """
       Compute a vacuum expectation value

@@ -1,12 +1,13 @@
 # initialize the sites for the C++ calculation
 from .writemps import write_sites
+import subprocess
 import os
 
 def initialize(self,**kwargs):
     self.path = os.getcwd()+"/.mpsfolder/" # folder of the calculations
     self.clean() # clean calculation
     self.inipath = os.getcwd() # original folder
-    os.system("mkdir -p "+self.path) # create folder for the calculations
+    subprocess.run(["mkdir","-p",self.path]) # create folder
     self.sites_from_file = False
     self.task = {"write_sites":"true"}
     self.execute(lambda: write_sites(self)) # write the different sites

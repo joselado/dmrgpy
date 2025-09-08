@@ -4,6 +4,7 @@ import os
 import numpy as np
 from . import entropy
 from . import multioperator
+import subprocess
 
 class MPS():
     """Object for an MPS"""
@@ -50,7 +51,6 @@ class MPS():
         if name is None:
           name = id_generator()+".mps" # create a new name
         out.name = name
-#        self.execute(lambda: os.system("cp "+self.name+"  "+out.name))
         return out
     def write(self,name=None,path=None):
         """Write the MPS in a folder"""
@@ -88,7 +88,7 @@ class MPS():
             return self.MBO.get_mutual_information(self,i,j)
         else: raise # not implemented
     def rename(self,name):
-        self.execute(lambda: os.system("mv "+self.name+"  "+name))
+        self.execute(lambda: subprocess.run(["mv",self.name,name]))
         self.name = name
     def execute(self,f):
         pwd = os.getcwd() # path
@@ -96,7 +96,7 @@ class MPS():
         f()
         os.chdir(pwd) # go back
     def clean(self):
-        self.execute(lambda: os.system("rm "+self.name))
+        self.execute(lambda: subprocess.run(["rm",self.name]))
         del self
     def norm(self):
         return np.sqrt(self.dot(self).real) # norm
