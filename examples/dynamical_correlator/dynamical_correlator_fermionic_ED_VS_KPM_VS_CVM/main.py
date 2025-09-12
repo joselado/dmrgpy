@@ -37,18 +37,17 @@ es = np.linspace(-0.5,6.0,10) # energies of the correlator
 delta = 3e-2 # smearing of the correlator
 import time
 t0 = time.time()
-x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="INV",
+x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="EX",
         es=es,delta=delta)
-t1 = time.clock()
+t1 = time.time()
 #x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
 #        es=es,delta=delta)
 x2,y2 = fc.get_dynamical_correlator(mode="ED",submode="CVM",name=name,
         es=es,delta=delta)
-t2 = time.clock()
+t2 = time.time()
 
 print(t1-t0,"Time with INV")
 print(t2-t1,"Time with CVM")
-
 
 
 ### Plot the result ###
