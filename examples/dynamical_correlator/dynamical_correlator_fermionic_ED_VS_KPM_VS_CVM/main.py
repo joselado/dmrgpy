@@ -12,7 +12,7 @@ h = 0
 for i in range(n):
   for j in range(n):
       t = np.random.random() + 1j*np.random.random()
-      h = h + fc.Cdag[i]*fc.C[j]*t
+      h = h + fc.Cdag[i]*fc.C[j]*t*np.exp(1j*np.random.random())
 #      h = h + fc.Cdag[i]*fc.C[i]*fc.Cdag[j]*fc.C[j]*np.random.random()
 #      h = h + fc.N[i]*fc.N[j]*np.random.random()
 
@@ -37,7 +37,7 @@ es = np.linspace(-0.5,6.0,10) # energies of the correlator
 delta = 3e-2 # smearing of the correlator
 import time
 t0 = time.time()
-x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="EX",
+x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="ED",
         es=es,delta=delta)
 t1 = time.time()
 #x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,

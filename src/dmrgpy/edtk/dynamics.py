@@ -67,7 +67,7 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
 def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
         es=np.linspace(-1.0,10.0,600)):
     """Compute a dynamical correlator"""
-    raise # this is buggy
+#    raise # this was buggy, but now it seems to work
     emu,vs = algebra.eigh(h)
     U = np.array(vs) # matrix
     Uh = np.conjugate(np.transpose(U)) # Hermitian
@@ -79,7 +79,9 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     out -= dynamical_sum(emu,es-1j*delta,A,B,out) # perform the summation
     return (es,-out.imag/(2*np.pi)) # return correlator
 
-#@jit(nopython=True)
+from numba import jit
+
+@jit(nopython=True)
 def dynamical_sum(es,ws,A,B,out):
     """Return the sum giving the dynamical correlator"""
     out = out*0.0 # initialize
