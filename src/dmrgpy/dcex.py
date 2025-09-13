@@ -51,7 +51,7 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
     eex = esex - esex[0] # difference
     es,adv = dcex(eex,c1,c2,es=es,delta=delta) # return correlator
     es,ret = dcex(eex,c2,c1,es=es,delta=-delta) # return correlator
-    return es,1j*(adv-ret)/np.pi # return correlator
+    return es,1j*(adv-ret)/(2.*np.pi) # return correlator
 
 
 

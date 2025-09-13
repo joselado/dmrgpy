@@ -18,7 +18,8 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
       A = self.get_operator(name[0])
       B = self.get_operator(name[1])
     else:
-      raise # this is no longer used
+        print("Unrecognized operator pair")
+        raise 
     h = self.get_operator(self.hamiltonian) # Hamiltonian in matrix form
     if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
     else: 
@@ -71,7 +72,7 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     emu,vs = algebra.eigh(h)
     U = np.array(vs) # matrix
     Uh = np.conjugate(np.transpose(U)) # Hermitian
-    b0 = np.conjugate(b0.T)
+#    b0 = np.conjugate(b0.T) # dagger of the second operator
     A = Uh@a0@U # get the matrix elements
     B = Uh@b0@U # get the matrix elements
     out = 0.0+es*0.0*1j # initialize
@@ -89,7 +90,7 @@ def dynamical_sum(es,ws,A,B,out):
     n = len(es) # number of energies
     for iw in range(len(ws)): # loop over frequencies
         i = 0
-        for j in range(n): # loop over energies
+        for j in range(n): # loop over eigenenergies
             tmp = A[i,j]*B[j,i]
             tmp *= 1./(ws[iw]+es[i] - es[j])
             out[iw] = out[iw] + tmp
@@ -108,7 +109,7 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
       if mode=="full": # using exact inversion
           g1 = algebra.inv(iden*(e+e0+1j*delta)-h0)
           g2 = algebra.inv(iden*(e+e0-1j*delta)-h0)
-          g = 1j*(g1-g2)/2./np.pi
+          g = 1j*(g1-g2)/2.
           op = A@g@B # operator
           o = algebra.braket_wAw(wf0,op) # correlator
       elif mode=="cv": # correction vector algorithm
