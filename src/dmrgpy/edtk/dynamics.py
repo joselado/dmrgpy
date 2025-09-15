@@ -66,7 +66,7 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
 
 
 def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
-        dex = 1e-5, 
+        dex = 1e-5, # this is a tolerancy to consider something a GS
         es=np.linspace(-1.0,10.0,600)):
     """Compute a dynamical correlator"""
 #    raise # this was buggy, but now it seems to work
