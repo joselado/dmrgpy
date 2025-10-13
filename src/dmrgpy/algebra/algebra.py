@@ -7,7 +7,7 @@ import numpy as np
 
 det = dlg.det
 
-maxsize = 10000
+maxsize = 2000
 tol = 1e-7 # tolerancy
 maxiter = 1e6 # maximum number of iterations
 
