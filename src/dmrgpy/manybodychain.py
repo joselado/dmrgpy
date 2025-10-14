@@ -152,6 +152,7 @@ class Many_Body_Chain():
       """Restart the calculation"""
       self.computed_gs = False
       self.gs_from_file = False
+      self.has_ED_obj = False # restart ED obj
       self.skip_dmrg_gs = False
       self.wf0 = None # initial file for GS
   def is_hermitian(self,H):
