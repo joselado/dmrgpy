@@ -24,7 +24,7 @@ def evolution(self,name="XX",i=0,j=0,nt=100,dt=0.01):
     wf = wf0.copy() # copy wavefunction
     wf = Ai@wf # apply operator
     cs = [] # empty list
-    ht = h + e0[0]*identity(h.shape[0],dtype=np.complex_)
+    ht = h + e0[0]*identity(h.shape[0],dtype=np.complex128)
     from ..algebra.algebra import braket_wAw
     for it in range(nt): # loop
         wf = evolve([wf],-ht,t=dt,dt=dt)[0] # evolve wavefunction
