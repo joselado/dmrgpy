@@ -11,6 +11,7 @@ class EDchain():
         self.operators = dict() # empty dictionary
         self.localdim = [] # empty list
         self.computed_gs = False
+        self.EDHamiltonian = None # initialize as None
     def get_operator(self,name,i=0):
         """Return an operator"""
         if type(name)==multioperator.MultiOperator: # input is a MO
@@ -21,7 +22,11 @@ class EDchain():
             print("Unrecognized operator in EDchain",type(name))
     def get_hamiltonian(self):
         """Return the Hamiltonian"""
-        return self.get_operator(self.hamiltonian) # return operator
+        if self.EDHamiltonian is None:
+            out = self.get_operator(self.hamiltonian) # return operator
+            self.EDHamiltonian = out
+            return out
+        else: return self.EDHamiltonian
     def gs_energy(self):
         """Return ground state energy"""
         return self.get_excited(n=1)[0]

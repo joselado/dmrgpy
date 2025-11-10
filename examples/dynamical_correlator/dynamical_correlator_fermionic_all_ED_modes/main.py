@@ -4,7 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
-n = 10
+n = 4
 fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 
