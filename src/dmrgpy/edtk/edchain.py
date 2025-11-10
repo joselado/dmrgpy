@@ -36,6 +36,7 @@ class EDchain():
         """Get ground state wavefunction"""
         if self.computed_gs: return self.wf0
         else: 
+#          print("Computing GS")
 #          e0,wf0 = algebra.ground_state(self.get_hamiltonian())
           (es,ws) = algebra.lowest_states(self.get_hamiltonian(),n=3)
           e0 = es[0]
@@ -205,13 +206,27 @@ class EDOperator():
         else: 
             print("Unrecognized type in EDOperator",type(MO))
             raise
+    def __add__(self,a):
+        if multioperator.isnumber(a): # adding a number
+            out = self.copy() # make a copy
+            o = self.SO + a*self.MBO.get_identity() # create the identity
+            out.SO = o.copy()
+            return out # return 
+    def __radd__(self,a): return a + self
+    def __sub__(self,a): return self + (-1)*a
+    def __rsub__(self,a): return -self + a
+    def __neg__(self): return (-1)*self
     def __mul__(self,v):
         from ..multioperator import MultiOperator
-        if type(v)==State: # input is an MPS
+        if isinstance(v,State): # input is a state
             return State(self.SO@v.v,self.MBO)
         elif type(v)==EDOperator: # input is an MPO
             out = self.copy() # copy
             out.SO = self.SO@v.SO # matrix multiplication
+            return out
+        elif multioperator.isnumber(v): # adding a number
+            out = self.copy() # copy
+            out.SO = v*self.SO # scalar multiplication
             return out
         elif type(v)==MultiOperator: # input is a multioperator
             return self*EDOperator(v,self.MBO)

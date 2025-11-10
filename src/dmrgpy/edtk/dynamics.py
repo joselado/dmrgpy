@@ -3,6 +3,9 @@ from .. import multioperator
 import scipy.sparse.linalg as slg
 from ..algebra import kpm
 import numpy as np
+from .edchain import EDOperator
+
+
 #from numba import jit
 
 is_hermitian = algebra.is_hermitian
@@ -14,13 +17,12 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     Compute the dynamical correlator
     """
     if name is None: raise
-    if type(name[0])==multioperator.MultiOperator and type(name[1])==multioperator.MultiOperator: # multioperator
-      A = self.get_operator(name[0])
-      B = self.get_operator(name[1])
-    else:
-        print("Unrecognized operator pair")
-        raise 
-    h = self.get_operator(self.hamiltonian) # Hamiltonian in matrix form
+
+    A = EDOperator(name[0],self).SO # create first operator
+    B = EDOperator(name[1],self).SO # create second operator
+
+    h = EDOperator(self.hamiltonian,self).SO # Hamiltonian as matrix
+
     if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
     else: 
         wf0 = wf0.v.copy()

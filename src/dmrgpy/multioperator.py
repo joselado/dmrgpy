@@ -29,6 +29,7 @@ class MultiOperator():
             self.name = "ampo_operator_"+str(ampo_counter)
             ampo_counter += 1
         else: self.name = name
+        # self.i could be eventually removed, as it does nothing
         self.i = -1 # initialize
         if term: self.new_term(c=c) # generate the first term
     def add_operator(self,name,i):

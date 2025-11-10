@@ -120,9 +120,14 @@ class Fermionic_Chain(Many_Body_Chain):
         """
         Return the many body fermion object
         """
-        MBf = mbfermion.MBFermion(self.ns) # create object
-        MBf.add_multioperator(self.hamiltonian) 
-        return MBf # return the object
+        if self.has_ED_obj: # if the ED object has been computed
+            return self.ED_obj # return the stored object
+        else:
+            MBf = mbfermion.MBFermion(self.ns) # create object
+            MBf.add_multioperator(self.hamiltonian) # add the Hamiltonian
+            self.ED_obj = MBf # store the object
+            self.has_ED_obj = True # set to True
+            return self.ED_obj # return the object
     def execute(self,f):
         """
         This is a temporal fix to use the C operators in Julia ITensor
