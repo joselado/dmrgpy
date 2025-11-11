@@ -90,7 +90,8 @@ accelerate = False
 def eigh(m):
     """Wrapper for linalg"""
     m = todense(m)
-    return dlg.eigh(m)
+    o = dlg.eigh(m)
+    return o
 
 def eigvalsh(m):
     """Wrapper for linalg"""

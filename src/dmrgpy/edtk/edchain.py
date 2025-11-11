@@ -12,6 +12,7 @@ class EDchain():
         self.localdim = [] # empty list
         self.computed_gs = False
         self.EDHamiltonian = None # initialize as None
+        self.Diagonalized_Hamiltonian = None # initialize as None
     def get_operator(self,name,i=0):
         """Return an operator"""
         if type(name)==multioperator.MultiOperator: # input is a MO
@@ -27,6 +28,14 @@ class EDchain():
             self.EDHamiltonian = out
             return out
         else: return self.EDHamiltonian
+    def get_diagonalized_hamiltonian(self):
+        """Return Hamiltonian in diagonal form, eigenvalues and eigenvectors"""
+        if self.Diagonalized_Hamiltonian is None:
+            h = self.get_hamiltonian() # get the Hamiltonian
+            emu,vs = algebra.eigh(h) # eigenvectors and eigenvalues
+            self.Diagonalized_Hamiltonian = (emu,vs) # store
+            return (emu,vs)
+        else: return self.Diagonalized_Hamiltonian
     def gs_energy(self):
         """Return ground state energy"""
         return self.get_excited(n=1)[0]

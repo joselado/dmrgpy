@@ -20,8 +20,7 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
 
     A = EDOperator(name[0],self).SO # create first operator
     B = EDOperator(name[1],self).SO # create second operator
-
-    h = EDOperator(self.hamiltonian,self).SO # Hamiltonian as matrix
+    h = self.get_hamiltonian() # Hamiltonian as matrix
 
     if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
     else: 
@@ -33,9 +32,10 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
 #    print(np.round(wf0,2))
     # for Hermitian Hamiltonians, continue
     if submode=="KPM":
-      return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)
+        return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)
     elif submode=="ED":
-      return dynamical_correlator_ED(h,A,B,**kwargs)
+        emu,vs = self.get_diagonalized_hamiltonian()
+        return dynamical_correlator_ED(h,A,B,emu=emu,vs=vs,**kwargs)
     elif submode=="EX":
         from .. import dcex
         return dcex.dynamical_correlator(self,name=name,**kwargs)
@@ -68,18 +68,26 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,
 
 
 def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
+        emu=None,vs = None,
         dex = 1e-5, # this is a tolerancy to consider something a GS
         es=np.linspace(-1.0,10.0,600)):
     """Compute a dynamical correlator"""
-#    raise # this was buggy, but now it seems to work
-    emu,vs = algebra.eigh(h)
+    if emu is None or vs is None: # if not provided
+        emu,vs = algebra.eigh(h)
+    ex = emu-np.min(emu) # excitations
+
+    # crop to the needed states
+    emax = np.max(es) # maximum energy
+    vs = vs[:,emu<emax] # restrict
+    emu = emu[emu<emax] # restrict
+    # finnish cropping
+
+    # compute the needed matrix elements
     U = np.array(vs) # matrix
-    Uh = np.conjugate(np.transpose(U)) # Hermitian
-#    b0 = np.conjugate(b0.T) # dagger of the second operator
+    Uh = np.conjugate(np.transpose(U)) # dagger
     A = Uh@a0@U # get the matrix elements
     B = Uh@b0@U # get the matrix elements
     out = 0.0+es*0.0*1j # initialize
-    ex = emu-np.min(emu) # excitations
     nex = len(ex[ex<dex]) # number of excited states
     out = dynamical_sum(emu,es+1j*delta,A,B,out,nex=nex) # perform the summation
     out -= dynamical_sum(emu,es-1j*delta,A,B,out,nex=nex) # perform the summation
