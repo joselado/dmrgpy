@@ -73,7 +73,7 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
         es=np.linspace(-1.0,10.0,600)):
     """Compute a dynamical correlator"""
     if emu is None or vs is None: # if not provided
-        emu,vs = algebra.eigh(h)
+        emu,vs = algebra.eigh(h) # compute them
     ex = emu-np.min(emu) # excitations
 
     # crop to the needed states

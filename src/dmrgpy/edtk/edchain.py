@@ -11,6 +11,7 @@ class EDchain():
         self.operators = dict() # empty dictionary
         self.localdim = [] # empty list
         self.computed_gs = False
+        self.Identity = None # placeholder for identity
         self.EDHamiltonian = None # initialize as None
         self.Diagonalized_Hamiltonian = None # initialize as None
     def get_operator(self,name,i=0):
@@ -19,6 +20,8 @@ class EDchain():
             return multioperator.MO2matrix(name,self)
         elif type(name)==str: # string
             return self.operators[(name,i)] # return the operator
+        elif type(name)==EDOperator:
+            return name.SO
         else: # unrecognized type
             print("Unrecognized operator in EDchain",type(name))
     def get_hamiltonian(self):
@@ -85,9 +88,12 @@ class EDchain():
         op = one2many(ids,a,i) # one to many body
         self.operators[(name,i)] = op # store in the dictionary
     def get_identity(self):
-        ids = [np.identity(n,dtype=np.complex128) for n in self.localdim] 
-        op = one2many(ids,ids[0],0) # one to many body
-        return op
+        if self.Identity is None:
+            ids = [np.identity(n,dtype=np.complex128) for n in self.localdim] 
+            op = one2many(ids,ids[0],0) # one to many body
+            self.Identity = op
+            return op
+        else: return self.Identity
     def get_dynamical_correlator(self,**kwargs):
         from . import dynamics
         return dynamics.get_dynamical_correlator(self,**kwargs)
@@ -226,10 +232,17 @@ class EDOperator():
             o = self.SO + a*self.MBO.get_identity() # create the identity
             out.SO = o.copy()
             return out # return 
-    def __radd__(self,a): return a + self
-    def __sub__(self,a): return self + (-1)*a
-    def __rsub__(self,a): return -self + a
-    def __neg__(self): return (-1)*self
+        elif type(a)==EDOperator:
+            out = self.copy() # make a copy
+            out.SO = self.SO + a.SO
+            return out
+        else:
+            print("Not recognized",type(a))
+            raise
+    def __radd__(self,a): return self + a # commutative
+    def __sub__(self,a): return self + (-1)*a # commutative
+    def __rsub__(self,a): return -self + a # commutative
+    def __neg__(self): return (-1)*self  # use product
     def __mul__(self,v):
         from ..multioperator import MultiOperator
         if isinstance(v,State): # input is a state
@@ -251,6 +264,8 @@ class EDOperator():
         from ..multioperator import MultiOperator
         if type(v)==MultiOperator: # input is a multioperator
             return EDOperator(v,self.MBO)*self
+        elif multioperator.isnumber(v): # adding a number
+            return self*v
         else: raise
     def copy(self):
         from copy import deepcopy
