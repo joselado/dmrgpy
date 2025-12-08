@@ -34,6 +34,10 @@ def get_correlation_matrix_zeroT(self,operators=None,
                               wf=None,**kwargs):
     """Compute the correlation matrix of a ground state"""
     from .. import fermionchain
+    if dmmode=="full" and basis=="Nambu":
+        dmmode="fast"
+        print("C++ mode not implemented with Nambu basis")
+    print(dmmode)
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
     wf = wf.normalize() # normalize wavefunction
     if operators is None: # no operators provided
@@ -51,6 +55,8 @@ def get_correlation_matrix_zeroT(self,operators=None,
         return correlation_matrix_clean(operators,wf,self)
     elif dmmode=="fast":
         return correlation_matrix_fast(operators,wf)
+    elif dmmode=="full":
+        return cpp_correlation_matrix(wf)
     else: 
         print(dmmode,"not recognized")
         raise # not implemented
@@ -171,7 +177,19 @@ def four2two(m):
 
 
 
-
+def cpp_correlation_matrix(wf):
+    """Compute the correlation matrix using the C++
+    specialized function"""
+    self = wf.MBO
+    task = {"correlation_matrix":"true"}
+    self.task = task ; self.write_task() # write the task
+    wf.write("wavefunction.mps") # read wavefunction
+    self.run() # compute
+    m = self.execute(lambda: np.genfromtxt("CORRELATION_MATRIX.OUT")) # read
+    m = m[:,0] + 1j*m[:,1] # real and imaginary
+    n = len(self.sites)
+    m = m.reshape((n,n)) # reshape
+    return m # return matrix
 
 
 
