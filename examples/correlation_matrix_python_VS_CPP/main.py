@@ -3,7 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import fermionchain
-n = 60 # number of fermionic sites
+n = 20 # number of fermionic sites
 fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 U = -0.95

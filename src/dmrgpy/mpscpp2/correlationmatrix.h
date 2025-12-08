@@ -25,7 +25,7 @@ static auto get_correlation_matrix=[]() {
 	for (int i=0;i<N;i++) {
 	   for (int j=0;j<N;j++) {
                 auto c = matrix[i][j] ; // get element
-		myfile << real(c) << "  " << imag(c) << endl ;
+		myfile << std::setprecision(20) << real(c) << "  " << imag(c) << endl ;
 	   }
 	}
 	myfile.close(); // close file
