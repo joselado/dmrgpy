@@ -16,7 +16,7 @@ def get_gs_dmrg(self,ishermitian=True,wf0=None):
         else: psi0 = wf0 # from input
         # technically itensor can also run with nonhermitian=False,
         # but by default we will use the NH routine
-        if is_hermitian: use_dmrg = True # use conventional DMRG
+        if ishermitian: use_dmrg = True # use conventional DMRG
         else: # non-Hermitian Hamiltonian
             if NH_dmrg: use_dmrg = False # use the NH version
             else: use_dmrg = True # use conventional DMRG
