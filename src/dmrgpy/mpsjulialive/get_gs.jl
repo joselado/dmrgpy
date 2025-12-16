@@ -1,6 +1,7 @@
 
 using ITensorMPS
 using ITensors
+using ITensorNHDMRG
 
 
 
@@ -15,6 +16,37 @@ function get_gs_dmrg(H,psi0; nsweeps = 10,cutoff=1e-8,maxm=80,
         end
     end
 end
+
+
+
+
+function get_gs_nhdmrg(H,psi0; nsweeps = 10,cutoff=1e-8,maxm=80,
+        alg="onesided",biorthoalg = "biorthoblock",
+	eigsolve_krylovdim=30,eigsolve_maxite=3)
+  sweeps = Sweeps(nsweeps)
+  maxdim!(sweeps, maxm)
+  cutoff!(sweeps, cutoff)
+  open("/dev/null", "w") do devnull
+        redirect_stdout(devnull) do
+            e, wfl0, wfr0= nhdmrg(
+            H,
+            psi0,
+            psi0,
+            sweeps;
+            alg=alg,
+            biorthoalg=biorthoalg,
+            outputlevel=1,
+            eigsolve_krylovdim=eigsolve_krylovdim,
+            eigsolve_maxiter=eigsolve_maxite,
+        )
+        return e,wfl0,wfr0
+
+        end
+    end
+end
+
+
+
 
 
 #### test the function
