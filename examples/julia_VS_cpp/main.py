@@ -35,7 +35,7 @@ def time_ratio(n):
   return (t1-t0)/(t2-t1)
 
 
-for n in range(14,16):
+for n in range(14,40):
     print("Length",n,"C++/Julia",time_ratio(n))
 
 

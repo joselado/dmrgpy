@@ -52,13 +52,8 @@ class MPS():
         else: raise
     def get_site_entropy(self,i):
         raise # not implemented
-        if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
-        else: raise # not implemented
     def get_bond_entropy(self,i,j=None):
         raise # not implemented
-        if j is None: j = i + 1
-        if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
-        else: raise # not implemented
     def get_correlation_entropy(self,**kwargs):
         from .. import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,**kwargs)
@@ -68,16 +63,10 @@ class MPS():
                  wf=self,**kwargs)
     def get_CFT_central_charge(self):
         raise # not implemented
-        return entropy.central_charge(self)
     def get_pair_entropy(self,i,j):
         raise # not implemented
-        if self.MBO is not None: return self.MBO.get_pair_entropy(self,i,j)
-        else: raise # not implemented
     def get_mutual_information(self,i,j):
         raise # not implemented
-        if self.MBO is not None: 
-            return self.MBO.get_mutual_information(self,i,j)
-        else: raise # not implemented
     def rename(self,name):
         return # dummy method
     def execute(self,f):
@@ -114,7 +103,7 @@ class MPS():
             return x*self
         else: raise
     def get_dm(self,**kwargs):
-        """COmpute the density matrix"""
+        """Compute the density matrix"""
         from ..dmtk.densitymatrix import dm
         return dm(self,**kwargs)
 

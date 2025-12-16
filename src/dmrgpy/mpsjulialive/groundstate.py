@@ -1,6 +1,6 @@
 from .juliasession import Main as Mainjl
 
-def get_gs_dmrg(self,wf0=None):
+def get_gs_dmrg(self,ishermitian=True,wf0=None):
     """Compute the ground state using DMRG"""
     if self.computed_gs: # if stored, just return
         return self.wf0 # return wavefunction
@@ -10,7 +10,7 @@ def get_gs_dmrg(self,wf0=None):
             psi0 = self.random_state() # random state
         else: psi0 = wf0 # from input
         e0,wf0 = Mainjl.get_gs_dmrg(H.jlmpo,psi0.jlmps,nsweeps=self.nsweeps,
-                cutoff=self.cutoff,maxm=self.maxm)
+                cutoff=self.cutoff,maxm=self.maxm,ishermitian=ishermitian)
         from .mps import MPS
         WF = MPS(wf0,MBO=self) 
         self.wf0 = WF # store wavefunction

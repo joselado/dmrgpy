@@ -41,7 +41,7 @@ end
 
 
 function random_state(sites)
-	return randomMPS(sites)
+	return random_mps(sites)
 end
 
 

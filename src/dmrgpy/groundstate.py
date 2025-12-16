@@ -94,12 +94,20 @@ def gs_energy(self,**kwargs):
             e0,wf0 = get_gs_dmrg(self,**kwargs)
             self.wf0 = wf0
             return e0
-    else:
-        es,ws = self.get_excited_states(n=1,**kwargs)
-        self.computed_gs = True
-        self.e0 = es[0]
-        self.wf0 = ws[0].copy() # copy wavefunction
-        return self.e0
+        else: raise
+    else: # non-Hermitian excited states
+        # Julia version has its own function
+        if self.itensor_version=="julia_live":
+            from .mpsjulialive.groundstate import get_gs_dmrg
+            e0,wf0 = get_gs_dmrg(self,ishermitian=False,**kwargs)
+            self.wf0 = wf0
+            return e0
+        else: # C++ needs to use Krylov
+            es,ws = self.get_excited_states(n=1,**kwargs)
+            self.computed_gs = True
+            self.e0 = es[0]
+            self.wf0 = ws[0].copy() # copy wavefunction
+            return self.e0
 
 
 

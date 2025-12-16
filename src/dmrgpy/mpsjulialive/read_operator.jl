@@ -1,4 +1,5 @@
 using ITensors
+using ITensorMPS
 
 function read_operator(ls::Vector{String})
 	nterms = parse(Int,ls[1]) # number of terms in the operator

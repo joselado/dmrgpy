@@ -34,7 +34,7 @@ class Coupling():
 
 
 class Many_Body_Chain():
-  def __init__(self,sites,**kwargs):
+  def __init__(self,sites,itensor_version=2,**kwargs):
       self.sites = sites # list of the sites
 #      self.path = id_generator() # random ID in dmrgpy_tmp
       self.ns = len(sites) # number of sites
@@ -74,7 +74,7 @@ class Many_Body_Chain():
       self.computed_gs = False # computed the GS already
       self.vijkl = 0 # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
-      self.itensor_version = 2 # ITensor version
+      self.itensor_version = itensor_version # ITensor version
       self.has_ED_obj = False # ED object has been computed
       self.ED_obj = None # no ED object
       self.kpm_extrapolate = False # use extrapolation

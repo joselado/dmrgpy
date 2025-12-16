@@ -10,7 +10,7 @@ from . import gap
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
-    def __init__(self,n):
+    def __init__(self,n,**kwargs):
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
         self.A = [self.get_operator("A",i) for i in range(n)]
@@ -18,7 +18,7 @@ class Fermionic_Chain(Many_Body_Chain):
         self.N = [self.get_operator("N",i) for i in range(n)]
 #        self.N = [self.Cdag[i]*self.C[i] for i in range(n)]
         self.Id = self.get_operator("Id",1)
-        Many_Body_Chain.__init__(self,[0 for i in range(n)])
+        Many_Body_Chain.__init__(self,[0 for i in range(n)],**kwargs)
         self.fermionic = True
         self.use_ampo_hamiltonian = True # use ampo
     def get_charge_gap(self,**kwargs):
