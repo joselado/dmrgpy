@@ -17,12 +17,9 @@ def explicit_parity(wf):
 
 
 
-def fermi_string_parity(wf):
+def fermi_string_parity_iterative(wf):
     """Given a wavefunction, compute the parity using
-    an explicit algorithm"""
-#    if not isinstance(wf.MBO,Fermionic_Chain): # check
-#        print("Only implemented for fermionic systems")
-#        raise
+    an explicit algorithm using Fermi strings"""
     F = wf.MBO.F # Fermi string operators
     wf0 = wf.copy() # make a copy
     for Fi in F: # loop over operators
@@ -31,3 +28,10 @@ def fermi_string_parity(wf):
 
 
 
+def fermi_string_parity(wf):
+    """Create the full parity operator"""
+    F = wf.MBO.F # Fermi string operators
+    O = 1. # initialize
+    for Fi in F: # loop over operators
+        O = Fi*O # iterate
+    return wf.aMb(O,wf) # return the parity
