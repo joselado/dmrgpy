@@ -49,6 +49,8 @@ class MBFermion(edchain.EDchain):
         self.h = csc_matrix(([],([],[])),shape=(self.nMB,self.nMB)) # Hamil
         self.C = [self.get_c(i) for i in range(n)]
         self.N = [self.get_density(i) for i in range(n)]
+        Id = self.get_identity() # identity
+        self.F = [Id - 2.*Ni for Ni in self.N] # Fermi string
         self.Cdag = [self.get_cd(i) for i in range(n)]
     def get_c(self,i):
         """

@@ -11,6 +11,7 @@ from . import gap
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
     def __init__(self,n,**kwargs):
+        self.F = [self.get_operator("F",i) for i in range(n)] # Fermi string
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
         self.A = [self.get_operator("A",i) for i in range(n)]
