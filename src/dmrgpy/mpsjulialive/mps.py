@@ -21,8 +21,6 @@ class MPS():
         return Mainjl.overlap(self.jlmps,x.jlmps)
     def aMb(self,M,b):
         return self.dot(M*b) # workaround
-#        if self.MBO is not None: return self.MBO.aMb(self,M,b)
-#        return self.dot(M*b) # workaround
     def __radd__(self,x): return self + x
     def __add__(self,x):
         if x==0: return self # do nothing
@@ -39,40 +37,21 @@ class MPS():
     def copy(self,name=None):
         """Copy this wavefunction"""
         return MPS(self.jlmps,MBO=self.MBO)
-#        out = deepcopy(self) # copy everything
-#        return out
     def write(self,name=None,path=None):
         return # dummy method
-    def get_entropy(self,b=None):
-        """Compute entanglement entropy in a bond"""
-        raise # not implemented
-        if b is None: # compute all 
-            return np.mean([self.get_entropy(i) for i in range(1,self.MBO.ns)])
-        if self.MBO is not None: return self.MBO.get_entropy(self,b=b)
-        else: raise
-    def get_site_entropy(self,i):
-        raise # not implemented
-    def get_bond_entropy(self,i,j=None):
-        raise # not implemented
     def get_correlation_entropy(self,**kwargs):
         from .. import entanglement
-        return entanglement.get_correlation_entropy_from_wf(self,**kwargs)
+        return entanglement.get_correlation_entropy_from_wf(self,
+                 dmmode = "explicit", # only working one
+                 **kwargs)
     def get_correlation_entropy_density(self,**kwargs):
         from .. import entanglement
         return entanglement.get_correlation_entropy_density(self.MBO,
+                 dmmode = "explicit", # only working one
                  wf=self,**kwargs)
-    def get_CFT_central_charge(self):
-        raise # not implemented
-    def get_pair_entropy(self,i,j):
-        raise # not implemented
-    def get_mutual_information(self,i,j):
-        raise # not implemented
-    def rename(self,name):
-        return # dummy method
-    def execute(self,f):
-        return # dummy method
-    def clean(self):
-        return # dummy method
+    def rename(self,name): return # dummy method
+    def execute(self,f): return # dummy method
+    def clean(self):  return # dummy method
     def norm(self):
         return np.sqrt(self.dot(self).real) # norm
     def normalize(self,tol=1e-8):
@@ -105,7 +84,7 @@ class MPS():
     def get_dm(self,**kwargs):
         """Compute the density matrix"""
         from ..dmtk.densitymatrix import dm
-        return dm(self,**kwargs)
+        return dm(self,dmmode="explicit",**kwargs)
 
 
 def random_mps(self):

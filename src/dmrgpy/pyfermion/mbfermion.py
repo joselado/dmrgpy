@@ -48,6 +48,7 @@ class MBFermion(edchain.EDchain):
         self.basis_dict = states.get_dictionary(self.basis) # dictionary
         self.h = csc_matrix(([],([],[])),shape=(self.nMB,self.nMB)) # Hamil
         self.C = [self.get_c(i) for i in range(n)]
+        self.N = [self.get_density(i) for i in range(n)]
         self.Cdag = [self.get_cd(i) for i in range(n)]
     def get_c(self,i):
         """

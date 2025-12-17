@@ -55,6 +55,8 @@ def get_correlation_matrix_zeroT(self,operators=None,
         return correlation_matrix_clean(operators,wf,self)
     elif dmmode=="fast":
         return correlation_matrix_fast(operators,wf)
+    elif dmmode=="explicit":
+        return correlation_matrix_explicit(operators,wf)
     elif dmmode=="full":
         return cpp_correlation_matrix(wf)
     else: 
@@ -72,6 +74,23 @@ def get_correlation_matrix_zeroT(self,operators=None,
             cm[i,j] = out
             cm[j,i] = np.conjugate(out)
     return cm # return matrix
+
+
+
+def correlation_matrix_explicit(operators,wf):
+    """Compute the correlation entropy using a version that works
+    for Julia ITensor"""
+    n = len(operators) # number of operators
+    As = operators # operators
+    Bs = [A.get_dagger() for A in As] # dagger operators
+    m = np.zeros((n,n),dtype=np.complex128) # initialize
+    for i in range(n):
+        for j in range(i,n):
+            C = Bs[i]*As[j] # operator
+            cij = wf.aMb(C,wf) # overlap
+            m[i,j] = cij # original
+            m[j,i] = np.conjugate(cij) # conjugate
+    return m
 
 
 
