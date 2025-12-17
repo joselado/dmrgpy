@@ -158,6 +158,9 @@ class State():
     def __add__(self,a):
         if isinstance(a,State): return type(self)(self.v + a.v,self.MBO)
         else: raise
+    def get_fermionic_parity(self,**kwargs):
+        from ..fermionicparity import get_fermionic_parity
+        return get_fermionic_parity(self,**kwargs) # parity of the state
     def get_conjugate(self):
         out = self.copy()
         out.v = np.conjugate(self.v) # conjugate wavefunction

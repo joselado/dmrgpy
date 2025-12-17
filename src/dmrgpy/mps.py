@@ -58,6 +58,9 @@ class MPS():
         if path is None: path = self.path
         open(path+"/"+name,"wb").write(self.mps) # write the MPS
         open(path+"/sites.sites","wb").write(self.sites) # write the sites
+    def get_fermionic_parity(self,**kwargs):
+        from .fermionicparity import get_fermionic_parity
+        return get_fermionic_parity(self,**kwargs) # parity of the state
     def get_entropy(self,b=None):
         """Compute entanglement entropy in a bond"""
         if b is None: # compute all 

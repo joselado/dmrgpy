@@ -35,3 +35,11 @@ def fermi_string_parity(wf):
     for Fi in F: # loop over operators
         O = Fi*O # iterate
     return wf.aMb(O,wf) # return the parity
+
+
+
+def get_fermionic_parity(wf,**kwargs):
+    return fermi_string_parity(wf) # parity of the state
+
+
+

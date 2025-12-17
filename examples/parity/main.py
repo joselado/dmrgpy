@@ -22,10 +22,8 @@ def get_den_par(mu=0.,U=0.5,Bz=1.0,delta=0.5):
     h = h + Bz*fc.Sz[0] # add magnetic impurity
     h = h + h.get_dagger()
     fc.set_hamiltonian(h)
-    wf = fc.get_gs(mode="DMRG")
-    from dmrgpy.fermionicparity import explicit_parity,fermi_string_parity
-#    p = explicit_parity(wf) # parity of the state
-    p = fermi_string_parity(wf) # parity of the state
+    wf = fc.get_gs(mode="DMRG") # compute ground state
+    p = wf.get_fermionic_parity() # parity of the state
     n = wf.dot(sum(fc.N)*wf) # total number of electrons 
     return n,p
 

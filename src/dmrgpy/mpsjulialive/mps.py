@@ -81,6 +81,9 @@ class MPS():
         if multioperator.isnumber(x):
             return x*self
         else: raise
+    def get_fermionic_parity(self,**kwargs):
+        from ..fermionicparity import get_fermionic_parity
+        return get_fermionic_parity(self,**kwargs) # parity of the state
     def get_dm(self,**kwargs):
         """Compute the density matrix"""
         from ..dmtk.densitymatrix import dm
