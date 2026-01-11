@@ -211,11 +211,11 @@ def cpp_correlation_matrix(wf):
     return m # return matrix
 
 
-def get_four_correlation_tensor(wf,ctmode="full",**kwargs):
-    """Return the correlation tensor as <cd_i cj cd_k c_l>"""
-    if ctmode=="full":
+def get_four_correlation_tensor(wf,ctmode="explicit",**kwargs):
+    """Return the correlation tensor as <Cdag_i C_j Cdag_k C_l>"""
+    if ctmode=="explicit":
         return get_four_correlation_tensor_explicit(wf,**kwargs)
-    elif ctmode=="fast":
+    elif ctmode=="full":
         return get_four_correlation_tensor_cpp(wf,**kwargs)
     else: raise
 

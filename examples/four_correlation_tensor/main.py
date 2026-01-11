@@ -31,22 +31,25 @@ import time
 
 # first the full explicit MPS Python version
 t0 = time.time()
-m1 = wf.get_four_correlation_tensor(ctmode="full")
+m1 = wf.get_four_correlation_tensor(ctmode="explicit")
 t1 = time.time()
 
 
 # now the accelerated MPS algorithm
-m2 = wf.get_four_correlation_tensor(ctmode="fast")
+m2 = wf.get_four_correlation_tensor(ctmode="full")
 t2 = time.time()
 
 # ED as a reference
 
 med = wfed.get_four_correlation_tensor()
+
+
+# print the times
 print("Python mode",t1-t0)
 print("C++ mode",t2-t1)
 
 def diff(m1,m2): return np.round(np.mean(np.abs(m1-m2)),5)
 
-print("Difference full MPS and fast MPS",diff(m1,m2))
-print("Difference full MPS and ED",diff(m1,med))
+print("Difference full MPS and explicit MPS",diff(m1,m2))
+print("Difference full MPS and ED",diff(m2,med))
 
