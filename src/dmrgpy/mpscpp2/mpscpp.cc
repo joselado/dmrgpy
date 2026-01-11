@@ -40,6 +40,7 @@ using namespace std;
 #include"get_random_mps.h" // get a random MPS
 #include"conjugatemps.h" // conjugate the MPS
 #include"correlationmatrix.h" // fermionic correlation matrix
+#include"fourcorrelationtensor.h" // fermionic four correlation tensor
 
 
 int 
@@ -92,6 +93,7 @@ main()
     if (check_task("distribution"))  get_moments_distribution() ; 
     if (check_task("general_kpm"))  general_kpm() ; 
     if (check_task("correlation_matrix"))  get_correlation_matrix() ; 
+    if (check_task("four_correlation_tensor"))  get_four_correlation_tensor() ; 
     if (check_task("apply_inverse"))  apply_inverse() ; 
     if (check_task("conjugate_mps"))  conjugate_mps() ; 
 //    if (check_task("excited_vev"))  excited_vev() ; // VEV excited

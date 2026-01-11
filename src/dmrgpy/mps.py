@@ -78,6 +78,9 @@ class MPS():
         from . import entanglement
         return entanglement.get_correlation_matrix(self.MBO,
                 wf=self,**kwargs)
+    def get_four_correlation_tensor(self,**kwargs):
+        from . import entanglement
+        return entanglement.get_four_correlation_tensor(self,**kwargs)
     def get_correlation_entropy(self,**kwargs):
         from . import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,**kwargs)

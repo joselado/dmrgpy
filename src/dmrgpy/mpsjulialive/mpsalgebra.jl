@@ -1,15 +1,19 @@
 
-
-function applyoperator(sites,A,psi0,maxdim,cutoff)
+function aMb(a,M,b,maxdim,cutoff; alg = "densitymatrix")
 	iden_op = identity_mpo(sites) # identity operator
-	psi1 = contract(A,psi0,maxdim=maxdim,cutoff=cutoff,alg = "densitymatrix")
-	psi1 = contract(iden_op,psi1,maxdim=maxdim,alg = "densitymatrix") # this fixes a bug
+	return contract(a,M,b)
+end
+
+function applyoperator(sites,A,psi0,maxdim,cutoff; alg = "densitymatrix")
+	iden_op = identity_mpo(sites) # identity operator
+	psi1 = contract(A,psi0,maxdim=maxdim,cutoff=cutoff,alg = alg)
+	psi1 = contract(iden_op,psi1,maxdim=maxdim,alg = alg) # this fixes a bug
 	return psi1
 end
 
 
-function summps(psi1,psi2,maxdim)
-	psi3 = add(psi1,psi2,maxdim=maxdim,alg = "densitymatrix")
+function summps(psi1,psi2,maxdim; alg = "densitymatrix")
+	psi3 = add(psi1,psi2,maxdim=maxdim,alg = alg)
 	return psi3
 end
 

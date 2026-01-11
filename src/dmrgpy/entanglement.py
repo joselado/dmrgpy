@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.linalg as lg
 from .entropytk.correlationentropy import get_correlation_matrix
+from .entropytk.correlationentropy import get_four_correlation_tensor
 
 
 def get_correlation_entropy_density(self,**kwargs):

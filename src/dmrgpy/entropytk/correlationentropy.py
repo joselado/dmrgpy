@@ -37,7 +37,7 @@ def get_correlation_matrix_zeroT(self,operators=None,
     if dmmode=="full" and basis=="Nambu":
         dmmode="fast"
         print("C++ mode not implemented with Nambu basis")
-    print(dmmode)
+#    print(dmmode)
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
     wf = wf.normalize() # normalize wavefunction
     if operators is None: # no operators provided
@@ -211,7 +211,45 @@ def cpp_correlation_matrix(wf):
     return m # return matrix
 
 
+def get_four_correlation_tensor(wf,ctmode="full",**kwargs):
+    """Return the correlation tensor as <cd_i cj cd_k c_l>"""
+    if ctmode=="full":
+        return get_four_correlation_tensor_explicit(wf,**kwargs)
+    elif ctmode=="fast":
+        return get_four_correlation_tensor_cpp(wf,**kwargs)
+    else: raise
 
 
 
 
+def get_four_correlation_tensor_explicit(wf,**kwargs):
+    """Compute the four field correlation tensor explicitly"""
+#    C = [wf.MBO.toMPO(Ci) for Ci in wf.MBO.C] # operators
+#    Cdag = [wf.MBO.toMPO(Cdagi) for Cdagi in wf.MBO.Cdag] # operators
+    C = wf.MBO.C
+    Cdag = wf.MBO.Cdag
+    n = len(C) # dimension
+    ct = np.zeros((n,n,n,n),dtype=np.complex128)
+    for i in range(n):
+        for j in range(n):
+            for k in range(n):
+                for l in range(n):
+                    Op = (Cdag[i]*C[j])*(Cdag[k]*C[l])
+                    out = wf.aMb(Op,wf) # overlap
+                    ct[i,j,k,l] = out
+    return ct
+
+
+def get_four_correlation_tensor_cpp(wf,**kwargs):
+    """Compute the correlation tensor using the C++
+    specialized function"""
+    self = wf.MBO
+    task = {"four_correlation_tensor":"true"}
+    self.task = task ; self.write_task() # write the task
+    wf.write("wavefunction.mps") # read wavefunction
+    self.run() # compute
+    m = self.execute(lambda: np.genfromtxt("FOUR_CORRELATION_TENSOR.OUT")) 
+    m = m[:,0] + 1j*m[:,1] # real and imaginary
+    n = len(self.sites)
+    m = m.reshape((n,n,n,n)) # reshape
+    return m # return tensor

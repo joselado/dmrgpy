@@ -20,6 +20,7 @@ class MPS():
     def overlap(self,x):
         return Mainjl.overlap(self.jlmps,x.jlmps)
     def aMb(self,M,b):
+#        return Mainjl.aMb(self.jlmps,M.jlmpo,b.jlmps) # efficient function
         return self.dot(M*b) # workaround
     def __radd__(self,x): return self + x
     def __add__(self,x):

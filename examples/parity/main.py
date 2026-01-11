@@ -4,6 +4,12 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 import numpy as np
 from dmrgpy import fermionchain
 
+##################
+# this example shows how to compute the parity of a many-body fermionic
+# state, meaning whether if it made of an odd or even number of electrons
+##################
+
+
 def get_den_par(mu=0.,U=0.5,Bz=1.0,delta=0.5):
     """Return parity and number of electrons"""
     L = 4 # number of fermionic sites
