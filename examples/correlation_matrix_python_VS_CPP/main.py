@@ -8,7 +8,7 @@ fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 U = -0.95
 for i in range(n-1): # hopping
-    h = h + fc.Cdag[i]*fc.C[i+1]
+    h = h + 1j*fc.Cdag[i]*fc.C[i+1] # complex, just to check things are ok
     h = h + U*(fc.N[i]-.5)*(fc.N[i+1]-.5)
 h = h + h.get_dagger()
 ##############################

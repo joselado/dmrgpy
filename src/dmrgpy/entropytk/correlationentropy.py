@@ -240,11 +240,13 @@ def get_four_correlation_tensor_explicit(wf,**kwargs):
     return ct
 
 
-def get_four_correlation_tensor_cpp(wf,**kwargs):
+def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
     """Compute the correlation tensor using the C++
     specialized function"""
     self = wf.MBO
     task = {"four_correlation_tensor":"true"}
+    if accelerate: task["four_correlation_tensor_accelerate"] = "true"
+    else: task["four_correlation_tensor_accelerate"] = "false"
     self.task = task ; self.write_task() # write the task
     wf.write("wavefunction.mps") # read wavefunction
     self.run() # compute

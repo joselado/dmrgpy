@@ -3,12 +3,12 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
 import numpy as np
 from dmrgpy import fermionchain
-n = 4 # number of fermionic sites
+n = 8 # number of fermionic sites
 fc = fermionchain.Fermionic_Chain(n) # create the chain
 h = 0
 U = 1.
 for i in range(n-1): # hopping
-    h = h + fc.Cdag[i]*fc.C[i+1]
+    h = h + (1.+1j)*fc.Cdag[i]*fc.C[i+1]
     h = h + U*(fc.N[i]-.5)*(fc.N[i+1]-.5)
 h = h + h.get_dagger()
 ##############################
@@ -35,9 +35,13 @@ m1 = wf.get_four_correlation_tensor(ctmode="explicit")
 t1 = time.time()
 
 
-# now the accelerated MPS algorithm
-m2 = wf.get_four_correlation_tensor(ctmode="full")
+# now the accelerated MPS algorithm without symmetry
+m2 = wf.get_four_correlation_tensor(ctmode="full",accelerate=False)
 t2 = time.time()
+
+# now the accelerated MPS algorithm with symmetry
+m3 = wf.get_four_correlation_tensor(ctmode="full",accelerate=True)
+t3 = time.time()
 
 # ED as a reference
 
@@ -46,10 +50,12 @@ med = wfed.get_four_correlation_tensor()
 
 # print the times
 print("Python mode",t1-t0)
-print("C++ mode",t2-t1)
+print("C++ mode, non-accelerated",t2-t1)
+print("C++ mode, accelerated",t3-t2)
 
 def diff(m1,m2): return np.round(np.mean(np.abs(m1-m2)),5)
 
 print("Difference full MPS and explicit MPS",diff(m1,m2))
 print("Difference full MPS and ED",diff(m2,med))
+print("Difference accelerated MPS and non-accelerated MPS",diff(m2,m3))
 

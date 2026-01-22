@@ -12,6 +12,38 @@ static auto get_four_correlation_tensor=[]() {
         )
     )
 );
+
+	// accelerated way using the Hermitian of the operator
+	if (check_task("four_correlation_tensor_accelerate")) {
+
+        for (int i=0; i<N; i++) {
+            for (int j=0; j<N; j++) {
+                for (int k=0; k<N; k++) {
+                    for (int l=0; l<N; l++) {
+                        std::tuple<int,int,int,int> current{i,j,k,l};
+                        std::tuple<int,int,int,int> conjugate{l,k,j,i};
+                        if(current <= conjugate) {
+                            auto ampo = AutoMPO(sites);
+                            ampo += 1.0, "Cdag", i+1, "C", j+1, "Cdag", k+1, "C", l+1;
+                            auto op = MPO(ampo);
+                            auto c = overlapC(psi, op, psi);
+                            
+                            tensor[i][j][k][l] = c;
+                            
+                            if(current != conjugate) {
+                                tensor[l][k][j][i] = std::conj(c);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+	}
+	else {
+
+
+	// explicit code, just as backup
+
 	for (int i=0;i<N;i++) {
 	   for (int j=0;j<N;j++) {
 	     for (int k=0;k<N;k++) {
@@ -22,9 +54,11 @@ static auto get_four_correlation_tensor=[]() {
         		auto op = MPO(ampo) ; // convert to MPO
         		auto c = overlapC(psi,op,psi) ;
         		tensor[i][j][k][l] = c ; // store
+        		tensor[l][k][j][i] = std::conj(c) ; // store
 	   };
 	   };
 	   };
+	}
 	}
 	// write in a file
 	ofstream myfile; // open file
