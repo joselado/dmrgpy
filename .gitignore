@@ -8,6 +8,7 @@
 *.swp
 *.out
 mpscpp.x
+mpscpp
 status.txt
 *.mps
 *.dmrg
