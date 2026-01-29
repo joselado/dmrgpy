@@ -69,7 +69,7 @@ def get_fermionic_parity(wf,fpmode="full",**kwargs):
     if fpmode=="full":
         return fermi_string_parity(wf) # parity of the state
     elif fpmode=="iterative":
-        return fermi_string_parity_iterative_collect(wf) # parity of the state
+        return fermi_string_parity_iterative(wf) # parity of the state
     else: raise
 
 
