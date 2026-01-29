@@ -36,6 +36,7 @@ class Coupling():
 class Many_Body_Chain():
   def __init__(self,sites,itensor_version=2,**kwargs):
       self.sites = sites # list of the sites
+      self.Id = self.get_operator("Id",0)
 #      self.path = id_generator() # random ID in dmrgpy_tmp
       self.ns = len(sites) # number of sites
       self.mode = None # no mode (use the input parameter)

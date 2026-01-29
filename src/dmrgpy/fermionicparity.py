@@ -26,8 +26,8 @@ def fermi_string_parity_iterative_collect(wf):
     F = wf.MBO.F # Fermi string operators
     wf0 = wf.copy() # make a copy
     ii = 0 # initialize counter
-    O = 1.0 # initialize
-    Ot = 1.0 # initialize
+    O = MBO.Id # initialize
+    Ot = MBO.Id # initialize
     Ot = MBO.toMPO(Ot) # transform to MPO
     for Fi in F: # loop over operators
         O = Fi*O # iterate
@@ -37,10 +37,9 @@ def fermi_string_parity_iterative_collect(wf):
             Ot = Ot*O # iterate
 #            wf = O*wf # apply to wavefunction
             ii = 0 # start over
-            O = 1.0 # start over
+            O = MBO.Id # start over
 #        wf = Fi*wf # iterate over the wavefunction
     return wf.aMb(Ot,wf) # return the parity
-    return wf0.dot(wf) # return the parity
 
 
 
@@ -70,7 +69,7 @@ def get_fermionic_parity(wf,fpmode="full",**kwargs):
     if fpmode=="full":
         return fermi_string_parity(wf) # parity of the state
     elif fpmode=="iterative":
-        return fermi_string_parity_iterative(wf) # parity of the state
+        return fermi_string_parity_iterative_collect(wf) # parity of the state
     else: raise
 
 

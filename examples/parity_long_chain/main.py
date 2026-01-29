@@ -30,6 +30,6 @@ def get_par(mu=0.,U=0.5,Bz=1.0,delta=0.5,fpmode="full",L=4):
     wf = fc.get_gs(mode="DMRG") # compute ground state
     return  wf.get_fermionic_parity(fpmode=fpmode) # parity of the state
 
-p = get_par(L=60,fpmode="iterative")
+p = get_par(L=20,fpmode="iterative")
 print("Parity",p)
 
