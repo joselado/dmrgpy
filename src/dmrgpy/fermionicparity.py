@@ -17,6 +17,34 @@ def explicit_parity(wf):
 
 
 
+
+def fermi_string_parity_iterative_collect(wf):
+    """Given a wavefunction, compute the parity using
+    an explicit algorithm using Fermi strings"""
+    ncut = 40 # perform as many products
+    MBO = wf.MBO
+    F = wf.MBO.F # Fermi string operators
+    wf0 = wf.copy() # make a copy
+    ii = 0 # initialize counter
+    O = 1.0 # initialize
+    Ot = 1.0 # initialize
+    Ot = MBO.toMPO(Ot) # transform to MPO
+    for Fi in F: # loop over operators
+        O = Fi*O # iterate
+        ii += 1 # increase counter
+        if ii==ncut: # maximum number reached
+            O = MBO.toMPO(O) # transform to MPO
+            Ot = Ot*O # iterate
+#            wf = O*wf # apply to wavefunction
+            ii = 0 # start over
+            O = 1.0 # start over
+#        wf = Fi*wf # iterate over the wavefunction
+    return wf.aMb(Ot,wf) # return the parity
+    return wf0.dot(wf) # return the parity
+
+
+
+
 def fermi_string_parity_iterative(wf):
     """Given a wavefunction, compute the parity using
     an explicit algorithm using Fermi strings"""
@@ -38,8 +66,12 @@ def fermi_string_parity(wf):
 
 
 
-def get_fermionic_parity(wf,**kwargs):
-    return fermi_string_parity(wf) # parity of the state
+def get_fermionic_parity(wf,fpmode="full",**kwargs):
+    if fpmode=="full":
+        return fermi_string_parity(wf) # parity of the state
+    elif fpmode=="iterative":
+        return fermi_string_parity_iterative(wf) # parity of the state
+    else: raise
 
 
 
