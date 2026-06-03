@@ -18,7 +18,7 @@ def addrc():
     if "bash" in shell: shellrc = ".bashrc"
     elif "zsh" in shell: shellrc = ".zshrc"
     else:
-        print("Unrecognise shell",name)
+        print("Unrecognise shell",shell)
         exit()
     pwd = os.path.dirname(os.path.realpath(__file__))+"/../" 
     if platform.system()=="Linux":
