@@ -1,5 +1,6 @@
 ### functions to compute the fermionic parity
 
+import numpy as np
 
 from .fermionchain import Fermionic_Chain
 

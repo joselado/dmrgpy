@@ -26,10 +26,12 @@ def get_par(mu=0.,U=0.5,Bz=1.0,delta=0.5,fpmode="full",L=4):
         h = h + U*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
     h = h + Bz*fc.Sz[0] # add magnetic impurity
     h = h + h.get_dagger()
+#    fc.maxm = 200
+    fc.nsweeps = 80 # very large number of sweeps
     fc.set_hamiltonian(h)
     wf = fc.get_gs(mode="DMRG") # compute ground state
     return  wf.get_fermionic_parity(fpmode=fpmode) # parity of the state
 
-p = get_par(L=20,fpmode="iterative")
+p = get_par(L=60,fpmode="iterative")
 print("Parity",p)
 
