@@ -1,7 +1,9 @@
 import numpy as np
 
 
-def get_orbital_cotunneling(fc,es=[0.],mode="ED",submode="ED",delta=1e-3):
+def get_orbital_cotunneling(fc,es=[0.],mode="ED",
+                            submode="ED",delta=1e-3,
+                            iorb=0):
     """Get the orbital cotunneling component of the IETS"""
     es = np.array(es) ; es = es[es>0.] # only positive energies
     ne = len(es) # number of energies
@@ -16,11 +18,11 @@ def get_orbital_cotunneling(fc,es=[0.],mode="ED",submode="ED",delta=1e-3):
 
     y_neg, y_pos = 0.,0. # initialize
 
-    iorb0 = 0 # input orbital
-    for iorb in range(5): # loop over output orbitals
-        if iorb0==iorb: continue # skip this iteration
-        for Op1 in [Cdagup[iorb0],Cdagdn[iorb0]]: # loop over input orbital
-            for Op2 in [Cup[iorb],Cdn[iorb]]: # loop over output orbital
+    iorb = 0 # input orbital
+    for iorbj in range(5): # loop over output orbitals
+        if iorb==iorbj: continue # skip this iteration
+        for Op1 in [Cdagup[iorb],Cdagdn[iorb]]: # loop over input orbital
+            for Op2 in [Cup[iorbj],Cdn[iorbj]]: # loop over output orbital
                 A01 = Op1*Op2 # in and out
                 A01 = A01 - wf.dot(A01*wf) # minus the average 
                 T01 = (A01,A01.get_dagger()) # positive bias operator
@@ -46,7 +48,9 @@ def get_orbital_cotunneling(fc,es=[0.],mode="ED",submode="ED",delta=1e-3):
     return x_combined, y_combined    
 
 
-def get_spinflip(fc,es=[0.],mode="ED",submode="ED",delta=1e-3):
+def get_spinflip(fc,es=[0.],mode="ED",submode="ED",delta=1e-3,
+                 iorb=0 # orbital for the spin flip
+                 ):
     """Get the spin flip excitations"""
     es = np.array(es) ; es = es[es>0.] # only positive energies
     ne=len(es) # number of energies
