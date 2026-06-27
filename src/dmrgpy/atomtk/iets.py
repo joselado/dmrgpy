@@ -3,7 +3,8 @@ import numpy as np
 
 def get_orbital_cotunneling(fc,es=[0.],mode="ED",
                             submode="ED",delta=1e-3,
-                            iorb=0):
+                            iorb=0,
+                            **kwargs):
     """Get the orbital cotunneling component of the IETS"""
     es = np.array(es) ; es = es[es>0.] # only positive energies
     ne = len(es) # number of energies
@@ -28,9 +29,9 @@ def get_orbital_cotunneling(fc,es=[0.],mode="ED",
                 T01 = (A01,A01.get_dagger()) # positive bias operator
                 T10 = (A01.get_dagger(),A01) # negative bias operator
                 x_pos,ypt = fc.get_dynamical_correlator(name=T01,
-                                                        mode=mode,submode=submode,es=es,delta=delta)
+                                                        mode=mode,submode=submode,es=es,delta=delta,**kwargs)
                 x_neg,ynt = fc.get_dynamical_correlator(name=T10,
-                                                        mode=mode,submode=submode,es=es,delta=delta)
+                                                        mode=mode,submode=submode,es=es,delta=delta,**kwargs)
                 y_pos = y_pos + ypt # add contribution
                 y_neg = y_neg + ynt # add contribution
         
@@ -49,7 +50,8 @@ def get_orbital_cotunneling(fc,es=[0.],mode="ED",
 
 
 def get_spinflip(fc,es=[0.],mode="ED",submode="ED",delta=1e-3,
-                 iorb=0 # orbital for the spin flip
+                 iorb=0, # orbital for the spin flip
+                 **kwargs,
                  ):
     """Get the spin flip excitations"""
     es = np.array(es) ; es = es[es>0.] # only positive energies
@@ -60,7 +62,8 @@ def get_spinflip(fc,es=[0.],mode="ED",submode="ED",delta=1e-3,
     y_sum = 0. # initialize
     for Si in Sis: # loop over spin operators
         name = (Si - fc.vev(Si,mode=mode), Si - fc.vev(Si,mode=mode)) # correlator to compute
-        x, y = fc.get_dynamical_correlator(delta=delta, name=name, es=es,mode=mode,submode=submode)
+        x, y = fc.get_dynamical_correlator(delta=delta, name=name, 
+                es=es,mode=mode,submode=submode,**kwargs)
         y_sum = y_sum + y # add contribution
     
     # add the negative energies

@@ -33,6 +33,7 @@ def get_r2h_d(orbs):
 
 
 def get_T(orbs):
+    """Get the transformation from real to spherical harmonics"""
     return get_r2h_d(orbs)
 
 
@@ -51,12 +52,23 @@ def generate_atom(orbs=None, # orbitals
                           lamb_Ne = 200, # lagrange multiplier
                           ):
     """Build the Hamiltonian"""
-    # get transformation from real orbital to spherical harmonics
-    if tij is None: raise
-    if orbs is None: raise
+    # first some initial checks
+    if tij is None: 
+        print("Hopping matrix must be provided")
+        raise
+    if orbs is None: 
+        print("Orbital indexes must be provided")
+        raise
+    if len(tij)!=len(orbs):
+        print("tij size must be the same as orbitals given")
+        raise
 #    orbs = ["dz2","dxz","dyz","dx2y2","dxy"]
+    # get transformation from real orbital to spherical harmonics
     T = get_T(orbs)
 
+    if len(orbs)!=5:
+        print("So far only implemented for d-orbitals")
+        raise
     # angular momenta operators
     Lzp = np.diag([2, 1, 0, -1, -2])
 
