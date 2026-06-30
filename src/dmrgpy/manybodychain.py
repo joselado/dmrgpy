@@ -182,7 +182,9 @@ class Many_Body_Chain():
               from .mpsjulialive.vev import vev as vevjl
               return vevjl(self,MO,**kwargs)
           else: raise
-      elif mode=="ED": return self.get_ED_obj().vev(MO,**kwargs) # ED object
+      elif mode=="ED": 
+          MOf = self.toMPO(MO,mode="ED") # fast operator
+          return self.get_ED_obj().vev(MOf,**kwargs) # ED object
       else: raise
   def test_ED(self):
       """Test the ED object"""

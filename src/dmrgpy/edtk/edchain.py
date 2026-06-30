@@ -62,11 +62,15 @@ class EDchain():
           self.e0 = e0
           self.computed_gs = True
           return self.wf0
-    def vev(self,op):
+    def vev(self,op,T=0.):
         """Return a vacuum expectation value"""
-        wf0 = self.get_gs_array()
-        op = multioperator.MO2matrix(op,self) # return operator
-        return algebra.braket_wAw(wf0,op)
+        if T==0.: # zero temperature
+            wf0 = self.get_gs_array()
+            op = self.MO2matrix(op) # return operator
+            return algebra.braket_wAw(wf0,op)
+        else: # finite temperature
+            from ..vevtk.thermalvev import thermal_vev_ex
+            return thermal_vev_ex(self,op,T=T) # return thermal VEV
     def get_excited(self,**kwargs):
         """Excited states"""
         h = self.get_hamiltonian()
@@ -108,7 +112,9 @@ class EDchain():
 #        print(wf) ; exit()
         return State(algebra.expm(h)@wf.v,self) # return
     def get_ED_obj(self): return self
-    def MO2matrix(self,m): return multioperator.MO2matrix(m,self)
+    def MO2matrix(self,m): 
+        if type(m)==EDOperator: return m.SO # static operator
+        else: return multioperator.MO2matrix(m,self)
     def overlap(self,wf1,wf2):
         return wf1.dot(wf2) 
     def applyoperator(self,A,wf): 

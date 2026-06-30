@@ -46,6 +46,7 @@ def generate_atom(orbs=None, # orbitals
                   tij=None,  # single particle spinless hopping
                           U=4., # interaction 
                           B=[0.,0.,0.], # magnetic field
+                          Js=[0.,0.,0.], # exchange field, to spin channel
                           soc=0., # SOC
                           J=0.5, # Hund's coupling
                           Ne = 5, # number of electrons
@@ -148,6 +149,9 @@ def generate_atom(orbs=None, # orbitals
     Sy = one2many(ms=sigma_y) # Sy operator
     Sz = one2many(ms=sigma_z) # Sz operator
 
+    Lx2 = one2many(ml=lx@lx) # Lx2 operator
+    Ly2 = one2many(ml=ly@ly) # Ly2 operator
+    Lz2 = one2many(ml=lz@lz) # Lz2 operator
 
     S2 = Sz*Sz + Sx*Sx + Sy*Sy     # total spin (many-body)
     L2 = Lz*Lz + Lx*Lx + Ly*Ly     # total L (many-body)
@@ -160,6 +164,11 @@ def generate_atom(orbs=None, # orbitals
     h = h + B[1]*(2*Sy+Ly)
     h = h + B[2]*(2*Sz+Lz)
 
+    # Add the exchange field to the spin channel
+    h = h + Js[0]*Sx
+    h = h + Js[1]*Sy
+    h = h + Js[2]*Sz
+
     # save the operators
     fc.STx = Sx
     fc.STy = Sy
@@ -167,6 +176,9 @@ def generate_atom(orbs=None, # orbitals
     fc.LTx = Lx
     fc.LTy = Ly
     fc.LTz = Lz
+    fc.LTx2 = Lx2
+    fc.LTy2 = Ly2
+    fc.LTz2 = Lz2
     fc.LT2 = L2
     fc.ST2 = S2
     # uncomment if you want to check the commutations
