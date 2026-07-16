@@ -84,6 +84,7 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("set_sweep_params",&Chain::set_sweep_params,
              py::arg("maxm"),py::arg("nsweeps"),py::arg("cutoff"),py::arg("noise"))
         .def("set_mpomaxm",&Chain::set_mpomaxm,py::arg("mpomaxm"))
+        .def("random_mps",&Chain::random_mps)
         .def("set_hamiltonian",[](Chain& self, std::vector<PyTerm> const& terms) {
                 self.set_hamiltonian(terms_from_python(terms));
             }, py::arg("terms"))

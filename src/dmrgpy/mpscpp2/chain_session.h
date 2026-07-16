@@ -53,6 +53,18 @@ class Chain
     int
     site_dim(int site) const { return sites_.si(site).m(); }
 
+    // Mirrors get_random_mps.h exactly: a default-constructed MPS on this
+    // Chain's sites (not a rigorously random state on its own -- see
+    // randommps.py's random_mps(), which combines two of these with a
+    // random complex phase and normalizes). This is what is_hermitian()/
+    // gs_energy()'s Hermiticity check ultimately depends on, so without
+    // it the old file-based backend stayed a hard dependency for every
+    // single gs_energy() call even with the extension otherwise fully
+    // wired up (one extra subprocess spawn per call, not just leftover
+    // dead code).
+    MPS
+    random_mps() const { return MPS(sites_); }
+
     void
     set_sweep_params(int maxm, int nsweeps, double cutoff, double noise)
         {
