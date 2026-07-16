@@ -200,6 +200,8 @@ def cpp_correlation_matrix(wf):
     """Compute the correlation matrix using the C++
     specialized function"""
     self = wf.MBO
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return self._session.correlation_matrix(wf.cpp_handle)
     task = {"correlation_matrix":"true"}
     self.task = task ; self.write_task() # write the task
     wf.write("wavefunction.mps") # read wavefunction
@@ -244,6 +246,8 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
     """Compute the correlation tensor using the C++
     specialized function"""
     self = wf.MBO
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return self._session.four_correlation_tensor(wf.cpp_handle,accelerate)
     task = {"four_correlation_tensor":"true"}
     if accelerate: task["four_correlation_tensor_accelerate"] = "true"
     else: task["four_correlation_tensor_accelerate"] = "false"

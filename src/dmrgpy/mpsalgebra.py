@@ -56,7 +56,8 @@ def overlap_aMb(self,wf1,A,wf2,mode="DMRG"):
 
 def overlap_dmrg(self,wf1,wf2):
     """Compute the overlap between wavefunctions"""
-
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return self._session.overlap(wf1.cpp_handle,wf2.cpp_handle)
     task = {"overlap":"true",
             }
     self.task = task # override tasks
@@ -83,6 +84,8 @@ def overlap_aMb_dmrg_MO(self,wf1,A,wf2):
     """Compute the overlap between wavefunctions, with A a multioperator"""
     from .multioperator import obj2MO
     A = obj2MO(A) # convert to a MO
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return self._session.overlap_aMb(wf1.cpp_handle,A.to_terms(),wf2.cpp_handle)
     task = {"overlap_aMb":"true",
             }
     self.task = task # override tasks
@@ -125,6 +128,9 @@ def summps(self,wf1,wf2,**kwargs):
 
 def summps_dmrg(self,wf1,wf2):
     """Apply operator to a many body wavefunction"""
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        handle = self._session.sum_mps(wf1.cpp_handle,wf2.cpp_handle)
+        return mps.MPS(self,cpp_handle=handle).copy()
     self.execute(lambda: wf1.write(name="summps_wf1.mps")) # write WF
     self.execute(lambda: wf2.write(name="summps_wf2.mps")) # write WF
     task = {"summps":"true",
@@ -230,6 +236,9 @@ def toMPO(self,H,mode="DMRG"):
 
 def conjugate_mps(self,wf):
     """Apply operator to a many body wavefunction"""
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        handle = self._session.conjugate(wf.cpp_handle)
+        return mps.MPS(self,cpp_handle=handle).copy()
     self.execute(lambda: wf.write(name="wf1.mps")) # write WF
     task = {"conjugate_mps":"true",
             }

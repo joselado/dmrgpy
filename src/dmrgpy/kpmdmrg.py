@@ -87,9 +87,12 @@ def get_dynamical_correlator(self,n=1000,
     """
     Compute a dynamical correlator using the KPM-DMRG method
     """
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return get_dynamical_correlator_cpp_ext(self,n=n,name=name,
+                delta=delta,kernel=kernel,es=es,**kwargs)
 # get the moments
     mus = get_moments_dynamical_correlator_dmrg(self,delta=delta,
-            name=name,**kwargs) 
+            name=name,**kwargs)
     # scale of the dos
     kpmscales = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
     emin = kpmscales[0] # minimum energy
@@ -113,6 +116,42 @@ def get_dynamical_correlator(self,n=1000,
 #    from .algebra import kpm
 #    (es,z) = kpm.deconvolution(es,z,mode=deconvolve,delta=delta)
 #    return es,z
+
+
+def get_dynamical_correlator_cpp_ext(self,n=1000,name=None,delta=1e-1,
+             kernel="jackson",es=np.linspace(-1.,10,500),**kwargs):
+    """
+    Dynamical correlator via the in-process pybind11 extension
+    (mpscpp2/chain_session.h's Chain::kpm_dynamical_correlator), mirroring
+    get_dynamical_correlator()+get_moments_dynamical_correlator_dmrg()
+    exactly but as a single in-memory call instead of a KPM_MOMENTS.OUT/
+    KPM_SCALE.OUT/GS_ENERGY.OUT/KPM_NUM_POLYNOMIALS.OUT file round-trip.
+    """
+    if delta<0.0: raise
+    if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
+    self.get_gs() # compute ground state (also sets self.e0)
+    if type(name[0])!=multioperator.MultiOperator: raise
+    mi = name[1] # first operator
+    mj = name[0].get_dagger() # second operator
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator(
+            mi.to_terms(),mj.to_terms(),
+            self.kpmmaxm,self.kpm_scale,self.kpm_accelerate,
+            self.kpm_n_scale,delta,self.kpmcutoff)
+    mus = np.array(moments)
+    if self.kpm_extrapolate:
+        mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+                extrapolation_mode=self.kpm_extrapolate_mode)
+    xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
+    ys = generate_profile(mus,xs,use_fortran=False,kernel=kernel) # generate the DOS
+    xs /= scale # scale back the energies
+    xs += (emin+emax)/2. -emin # shift the energies
+    ys *= scale # renormalize the y values
+    from scipy.interpolate import interp1d
+    fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
+    fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
+    return (es,fr(es)+1j*fi(es)) # interpolate
 
 
 
