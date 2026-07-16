@@ -44,23 +44,36 @@ mkdebugdir:
 	mkdir -p .debug_objs
 
 #################################################################
-# Phase 1 scaffold: pybind11 extension module (see bindings.cc). Builds
-# _dmrgcpp<ext-suffix>.so against the same vendored ITensor static library
-# used by $(APP).
+# pybind11 extension module (see bindings.cc). Builds _dmrgcpp<ext-suffix>.so
+# against the same vendored ITensor static library used by $(APP).
 #
-# Deliberately dynamically linked against libstdc++ (NOT -static-libstdc++):
-# an earlier version of this target used -static-libstdc++/-static-libgcc to
-# work around conda Python bundling an older libstdc++ than this system
-# compiler needs. That "fix" was itself the cause of a hard segfault (not
-# just a missing-symbol error): once any *other* C++ extension in the same
-# process (e.g. scipy.linalg/scipy.sparse, which dmrgpy itself imports)
-# loads its own dynamic libstdc++, having a second, statically-embedded copy
-# of libstdc++'s globals/exception tables/RTTI alongside it crashes. Plain
-# dynamic linking avoids that; the original missing-symbol problem is
-# instead handled at import time by cppext.py, which preloads the correct
-# libstdc++ globally before anything else gets a chance to load a different
-# one (see dmrgpy/__init__.py, which imports cppext first for exactly this
-# reason).
+# Built with a *different* compiler than $(APP) when Python's own
+# environment provides one (PYBIND_CCCOM below), specifically to avoid a
+# real, reproducible segfault: $(CCCOM) is whatever system compiler builds
+# ITensor/$(APP), which never has to coexist with anything else in a
+# process. This extension does -- it's loaded into the same Python process
+# as numpy/scipy, which (at least under conda) load their own bundled
+# libstdc++/BLAS. Compiling this extension with the *system* compiler needs
+# a libstdc++ newer than conda's; a couple of things were tried and
+# rejected before landing here:
+#   - static-linking libstdc++ into the extension: crashes once numpy/scipy
+#     load a second, different libstdc++ into the same process (duplicate
+#     globals/exception tables/RTTI).
+#   - preloading the newer system libstdc++ at Python import time
+#     (ctypes.CDLL(...,RTLD_GLOBAL)): only works if nothing else loaded a
+#     conflicting libstdc++ first, which numpy alone already does in
+#     practice (see git history for cppext.py) -- not reliable enough.
+#   - renaming/isolating BLAS+LAPACK+libstdc++ into private-SONAME copies
+#     via patchelf: works for BLAS/LAPACK, but doing the same to libstdc++
+#     hits the same duplicate-runtime crash as static linking.
+# The fix that actually works: build with a compiler whose own libstdc++
+# *is* the one Python's environment already provides (e.g. conda's own
+# gxx_linux-64 package), so there's only ever one libstdc++/BLAS image in
+# the process, regardless of import order. Confirmed empirically to survive
+# the worst case (scipy.linalg/scipy.sparse imported before dmrgpy).
+# Falls back to $(CCCOM) if no such compiler is found -- same-compiler
+# builds (e.g. a plain venv without a bundled libstdc++/BLAS) don't have
+# this problem in the first place.
 #################################################################
 
 PYTHON=python3
@@ -68,8 +81,17 @@ PYBIND_INCLUDES=$(shell $(PYTHON) -m pybind11 --includes)
 EXT_SUFFIX=$(shell $(PYTHON)-config --extension-suffix)
 EXT_MODULE=_dmrgcpp$(EXT_SUFFIX)
 
+CONDA_GXX=$(shell d=$$(dirname $$(command -v $(PYTHON)) 2>/dev/null); ls $$d/*-conda*-g++ 2>/dev/null | head -1)
+ifeq ($(CONDA_GXX),)
+PYBIND_CCCOM=$(CCCOM)
+PYBIND_LIBFLAGS=$(LIBFLAGS)
+else
+PYBIND_CCCOM=$(CONDA_GXX) -m64 -std=c++14 -fPIC
+PYBIND_LIBFLAGS=-L$(ITENSOR_LIBDIR) -litensor -lpthread -L/usr/lib/x86_64-linux-gnu -lblas -llapack
+endif
+
 pybind: $(EXT_MODULE)
 
 $(EXT_MODULE): bindings.cc $(ITENSOR_LIBS)
-	$(CCCOM) -shared $(CCFLAGS) $(PYBIND_INCLUDES) bindings.cc -o $(EXT_MODULE) $(LIBFLAGS)
+	$(PYBIND_CCCOM) -shared $(CCFLAGS) $(PYBIND_INCLUDES) bindings.cc -o $(EXT_MODULE) $(PYBIND_LIBFLAGS)
 
