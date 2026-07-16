@@ -1,32 +1,46 @@
 #!/usr/bin/python3
+"""Compile ITensor and the in-process pybind11 DMRG extension, then wire
+dmrgpy into the current Python interpreter's path.
 
-# create the optional arguments
+Runs in two phases: first every requirement (C++ compiler, LAPACK/BLAS,
+pybind11, make) is checked -- and the compiler/BLAS choice is validated
+with an actual trial compile+link, auto-detecting a conda-provided
+compiler when run from an Anaconda/conda Python -- and only once all of
+that succeeds does compilation begin.
+"""
 import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("--gpp",default="g++",
-        help='C++ Compiler to be used')
-parser.add_argument("--check_gpp",default="True",
-        help='C++ Compiler to be used')
-parser.add_argument("--openblas",default="False",
-        help='Use openblas, instead of usual lapack')
-parser.add_argument("--openblas_libdir",default=None,
-        help='Path to the directory containing libopenblas (only used '
-             'together with --openblas True), for clusters/modules where '
-             'OpenBLAS is not on the default linker search path')
-parser.add_argument("--openblas_includedir",default=None,
-        help='Path to the directory containing OpenBLAS headers (only '
-             'used together with --openblas True)')
-args = parser.parse_args() # get the arguments
+
+parser = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--gpp", default=None,
+        help="C++ compiler to use. Default: auto-detect (a conda-provided "
+             "compiler when run from a conda Python, else the system g++).")
+parser.add_argument("--check-gpp", "--check_gpp",
+        dest="check_gpp", default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Verify the C++ compiler's version and that it can actually "
+             "compile (default: on).")
+parser.add_argument("--openblas", default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Use OpenBLAS instead of auto-detecting LAPACK/BLAS.")
+parser.add_argument("--openblas_libdir", default=None,
+        help="Path to the directory containing libopenblas (only used "
+             "together with --openblas), for clusters/modules where "
+             "OpenBLAS is not on the default linker search path.")
+parser.add_argument("--openblas_includedir", default=None,
+        help="Path to the directory containing OpenBLAS headers (only "
+             "used together with --openblas).")
+args = parser.parse_args()
 
 
+from installtk import requirements
+config = requirements.check(args) # phase 1: check everything first
 
 from installtk import install2
-check_gpp = "True"==args.check_gpp # if gpp is checked
-openblas = "True"==args.openblas # if openblas should be used
-install2.compile(gpp=args.gpp,check_gpp=check_gpp,openblas=openblas,
-        openblas_libdir=args.openblas_libdir,
-        openblas_includedir=args.openblas_includedir) # compile the C++ library
+install2.compile(config) # phase 2: only reached once phase 1 passed
+
 from installtk import addpythonpath
 addpythonpath.addpath() # add the library to the Python path
+
 from installtk import addsystem
-addsystem.addrc() # add the library to the bash file
+addsystem.addrc() # add DMRGROOT to the shell rc file

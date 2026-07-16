@@ -1,82 +1,59 @@
 import os
 import re
+import subprocess
+import sys
 
 
-def compile(gpp="g++",check_gpp=True,**kwargs):
-    # compile Itensor library
-    path = os.path.dirname(os.path.realpath(__file__))+"/../" # main path
-    os.chdir(path+"/src/dmrgpy/mpscpp2/ITensor")
-    import platform
-    if platform.system()=="Linux" or platform.system()=="Darwin": # System
-      os.system("cp options.save options.mk")
-      print("Detected Unix system")
-      from . import cppversion
-      writemk(gpp=gpp,**kwargs) # write options.mk
-      if check_gpp: # check the compiler
-        print("Checking if the compilar is ok")
-        if cppversion.correct_version(gpp=gpp):
-          print("C++ compiler "+gpp+" is ok and will be used")
-        else: # C++ compiler is not the right one
-          print("You may need to install the GNU C++ compiler")
-          print("In Ubuntu systems, run the following commands")
-          print("#######################################################")
-          print("sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y")
-          print("sudo apt-get update -y")
-          print("sudo sudo apt-get install g++-6 -y")
-          print("sudo apt-get install liblapack-dev -y")
-          print("#######################################################")
-          print("and afterwards rerun the installation script with")
-          print("python install.py --cpp=g++-6")
-          exit()
-#          import autoinstallubuntu
-#          autoinstallubuntu.install() # install dependencies
-#          # replace the compiler in options.mk
-#          out = open("options.mk").read().replace("CCCOM=g++","CCCOM=g++-6")
-#          open("options.mk","w").write(out) # write new file
-    else:
-      print("Not a Unix system. The code only works in Unix systems. Stopping")
-      exit()
-    # now do the compilation
-    os.system("make clean ")
-    os.system("make")
-    os.chdir(path) # original directory
-
-    # build the in-process pybind11 extension (mpscpp2/bindings.cc), the
-    # only DMRG backend besides ED and the (separate) Julia backend
-    os.chdir(path+"/src/dmrgpy/mpscpp2")
-    os.system("make clean")
-    if cppversion.has_pybind11():
-        os.system("make pybind")
-    else:
-        print("pybind11 not found, skipping the in-process extension build")
-        print("Install it with: pip install pybind11")
-    os.chdir(path) # go to the main path
+def _run(cmd, cwd):
+    """Run a build command, streaming its output, and stop with a clear
+    error (instead of silently continuing, as bare os.system() calls used
+    to) if it fails."""
+    print("$ "+" ".join(cmd)+"   (in "+cwd+")")
+    proc = subprocess.run(cmd, cwd=cwd)
+    if proc.returncode != 0:
+        print("\n### Build step failed: "+" ".join(cmd)+" ###")
+        sys.exit(proc.returncode)
 
 
-def writemk(gpp="g++",openblas=False,openblas_libdir=None,openblas_includedir=None):
-    """Write options.mk"""
-    path = os.path.dirname(os.path.realpath(__file__))+"/../" # main path
-    path = path+"/src/dmrgpy/mpscpp2/ITensor"
-    out = open(path+"/options.save").read().replace("CCCOM=g++","CCCOM="+gpp)
-    if openblas:
-        # PLATFORM matters beyond linking: itensor/tensor/lapack_wrap.h
-        # branches on -DPLATFORM_$(PLATFORM) for the LAPACK_COMPLEX layout
-        # and several function signatures, so just swapping the link flags
-        # (as before) risks a silent ABI mismatch against libopenblas.
-        libflags = "-lpthread"
-        if openblas_libdir:
-            libflags += " -L"+openblas_libdir
-        libflags += " -lopenblas"
-        includeflags = "-DHAVE_LAPACK_CONFIG_H -DLAPACK_COMPLEX_STRUCTURE"
-        if openblas_includedir:
-            includeflags = "-I"+openblas_includedir+" "+includeflags
-        out = out.replace("PLATFORM=lapack","PLATFORM=openblas")
-        out = re.sub(r"(?m)^BLAS_LAPACK_LIBFLAGS=.*$",
-                "BLAS_LAPACK_LIBFLAGS="+libflags+
-                "\nBLAS_LAPACK_INCLUDEFLAGS="+includeflags,
-                out,count=1)
-    open(path+"/options.mk","w").write(out) # write file
+def compile(config):
+    """Compile ITensor and the in-process pybind11 extension using an
+    already-validated installtk.requirements.BuildConfig -- every choice
+    made here (compiler, BLAS/LAPACK flags) was already trial-compiled and
+    trial-linked during the preflight check, so nothing is re-guessed."""
+    root = os.path.dirname(os.path.realpath(__file__))+"/.." # main path
+    itensor_dir = root+"/src/dmrgpy/mpscpp2/ITensor"
+    mpscpp2_dir = root+"/src/dmrgpy/mpscpp2"
+
+    writemk(itensor_dir, config)
+    # CCCOM must carry the same "-m64 -std=c++14 -fPIC" suffix writemk()
+    # put in options.mk -- without -fPIC in particular, the final pybind
+    # extension link fails with a TLS relocation error, since a shared
+    # object needs position-independent code throughout.
+    cccom = config.gpp+" -m64 -std=c++14 -fPIC"
+
+    print("### Compiling ITensor (this is the slow step, several minutes) ###")
+    _run(["make", "clean"], itensor_dir)
+    _run(["make"], itensor_dir) # CCCOM already correct via options.mk
+
+    print("### Compiling the in-process pybind11 extension ###")
+    _run(["make", "clean"], mpscpp2_dir)
+    _run(["make", "pybind",
+          "PYBIND_CCCOM="+cccom,
+          "PYTHON="+config.python_exe],
+         mpscpp2_dir)
 
 
-#import addsystem
-#addsystem.addbashrc() # add to the .bashrc
+def writemk(itensor_dir, config):
+    """Write options.mk from options.save, with the resolved compiler and
+    BLAS/LAPACK configuration substituted in."""
+    out = open(itensor_dir+"/options.save").read()
+    out = re.sub(r"(?m)^CCCOM=.*$",
+            "CCCOM="+config.gpp+" -m64 -std=c++14 -fPIC", out, count=1)
+    out = re.sub(r"(?m)^PLATFORM=.*$", "PLATFORM="+config.platform, out,
+            count=1)
+    replacement = "BLAS_LAPACK_LIBFLAGS="+config.libflags
+    if config.includeflags:
+        replacement += "\nBLAS_LAPACK_INCLUDEFLAGS="+config.includeflags
+    out = re.sub(r"(?m)^BLAS_LAPACK_LIBFLAGS=.*$", replacement, out,
+            count=1)
+    open(itensor_dir+"/options.mk", "w").write(out)

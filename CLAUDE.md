@@ -31,12 +31,32 @@ python install.py --gpp=g++-6        # use a specific compiler (needs g++ >= 6, 
 python install_julia.py              # alternative: Julia backend instead of/alongside C++
 ```
 
-`install.py` calls `installtk/install2.py`, which compiles the vendored
-ITensor static library and then `mpscpp2`'s `pybind` Makefile target
-(needs `pybind11` installed; skipped with a warning if it isn't), then
-adds the repo's `src` to the Python path and to the user's shell rc file
-(`installtk/addpythonpath.py`, `installtk/addsystem.py`). There is no
-separate lint or CI config in this repo.
+`install.py` runs in two phases: `installtk/requirements.py` first checks
+every build requirement -- OS, `make`, a C++ compiler, LAPACK/BLAS,
+`pybind11` -- actually trial-compiling/trial-linking each one (not just
+checking a version string), and only once everything checks out does
+`installtk/install2.py` compile the vendored ITensor static library and
+`mpscpp2`'s `pybind` Makefile target. `pybind11` is a hard requirement
+(auto-installed via `pip` into the current interpreter if missing, since
+the pybind11 extension is the only DMRG backend besides ED). The compiler
+is auto-detected rather than defaulting to plain `g++`:
+`installtk/cppversion.py::find_conda_compiler()` looks for a
+conda-provided compiler (e.g. the `gxx_linux-64` package) next to the
+running interpreter when it's a conda Python, and uses that same compiler
+for *both* the ITensor build and the pybind extension link (`--gpp`
+overrides this). This matters because the extension is loaded into the
+same process as conda's own numpy/scipy, which bundle their own
+libstdc++ -- building against the system compiler instead has
+reproducibly segfaulted in the past (see the long comment in
+`mpscpp2/Makefile`). `installtk/blaslapack.py::find_working_config()`
+similarly tries several LAPACK/BLAS candidates (conda's own libs, system
+`-lblas -llapack`, OpenBLAS, and a Debian/Ubuntu-multiarch workaround that
+asks the system compiler where it actually finds `libblas.so`/
+`liblapack.so`) and picks the first one that actually links, rather than
+assuming a fixed default. Finally, `install.py` adds the repo's `src` to
+the Python path and to the user's shell rc file
+(`installtk/addpythonpath.py`, `installtk/addsystem.py`, both idempotent
+across reruns). There is no separate lint or CI config in this repo.
 
 ## Running / verifying changes
 

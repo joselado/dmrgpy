@@ -26,13 +26,22 @@ Execute the script
 python install.py 
 ```
 
-and it will compile both ITensor and a C++ program
-that uses it. 
+It first checks that everything needed to build is present (a C++
+compiler, LAPACK/BLAS, `pybind11`, `make`), auto-detecting the right C++
+compiler for the Python interpreter you used to run it (including a
+conda-provided compiler if you're using Anaconda/Miniconda), and only then
+compiles ITensor and the in-process C++ extension that uses it.
 
-If your default C++ compiler is not g++ (version 6 or higher), execute the installation script providing the specific compiler to use (g++-6 for example)
+If you need to override the auto-detected C++ compiler (version 6 or higher, or a matching Clang), pass it explicitly
 
 ```bash
-python install.py gpp=g++-6 
+python install.py --gpp=g++-6 
+```
+
+If LAPACK/BLAS can't be found automatically, point the script at OpenBLAS explicitly
+
+```bash
+python install.py --openblas --openblas_libdir=/path/to/openblas/lib --openblas_includedir=/path/to/openblas/include
 ```
 
 Alternatively, in case you just want to use the Julia version,
@@ -42,9 +51,9 @@ execute the script
 python install_julia.py
 ```
 
-The installation scripts will
+The installation script will
 also add dmrgpy to the PYTHONPATH of the python interpreter you used
-to execute them. Compiling the C++ program requires having installed LAPACK and BLAS in your system.
+to execute it.
 
 Afterwards you can import the dmrgpy sublibrary that you want, for example
 
