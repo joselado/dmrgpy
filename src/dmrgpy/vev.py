@@ -28,6 +28,8 @@ def multi_vev(self,MO,wf=None,npow=1,**kwargs):
     if MO.name!="vev_multioperator": raise
     if npow==0: return 1.0
     if wf is None: wf = self.get_gs() # get the ground state
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return multi_vev_cpp_ext(self,MO,wf,npow)
     wf.write(name="wf_vev.mps") # write wavefunction
     taskd = MO.get_dict() # get the dictionary
     self.task["vev"] = "true" # do a VEV
@@ -39,6 +41,18 @@ def multi_vev(self,MO,wf=None,npow=1,**kwargs):
     self.run() # perform the calculation
     m = self.execute(lambda: np.genfromtxt("VEV.OUT"))
     return m[0]+1j*m[1] # return result
+
+
+def multi_vev_cpp_ext(self,MO,wf,npow):
+    """
+    Compute a VEV via the in-process pybind11 extension
+    (mpscpp2/chain_session.h's Chain::vev), mirroring multi_vev()'s
+    DMRG path exactly but with no file I/O.
+    """
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    c = self._session.vev(MO.to_terms(),wf.cpp_handle,npow=int(npow))
+    return c
 
 
 def vev(*args,**kwargs):

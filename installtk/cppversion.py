@@ -20,6 +20,16 @@ def correct_version(**kwargs):
     else: return False
 
 
+def has_pybind11():
+    """Check whether pybind11 is importable, for the optional in-process
+    extension build (see mpscpp2/bindings.cc)"""
+    try:
+        import pybind11
+        return True
+    except ImportError:
+        return False
+
+
 if __name__=="__main__":
     print(cppversion())
     print(correct_version())

@@ -1,31 +1,48 @@
 
+// Explicit cache replacing the previous hidden per-function statics.
+// Kept as a single process-wide instance today (identical lifetime/semantics
+// to the statics it replaces: populated on first use, reused after that
+// within one mpscpp.x invocation), but named and resettable so a future
+// persistent-process backend can give each independent chain/session its
+// own instance instead of sharing this one across chains.
+struct BandwidthCache
+    {
+    bool have_min = false; // whether the minimum energy has been computed
+    bool have_max = false; // whether the maximum energy has been computed
+    double emin = 0.0; // cached minimum energy
+    double emax = 0.0; // cached maximum energy
+    };
+
+static BandwidthCache bandwidth_cache;
+
+void inline
+reset_bandwidth_cache()
+    {
+    bandwidth_cache = BandwidthCache(); // drop any cached energies
+    }
 
 auto minimum_energy=[](auto sites, auto H) {
-    static int called = 0; // check if the function has been called
-    static double saved_mine = 0.0; // minimum energy
-    if (called==0) {
+    if (!bandwidth_cache.have_min) {
 //      auto psi = MPS(sites); // initialize
 //      auto sweeps = get_sweeps(); // get the sweeps
 //      auto emin = dmrg(psi,H,sweeps,{"Quiet=",true}); // get minimum energy
       auto emin = get_gs_energy(H); // get the Hamiltonian
-      saved_mine = emin; // saved energy
-      called = 1; // called
+      bandwidth_cache.emin = emin; // saved energy
+      bandwidth_cache.have_min = true; // called
     };
-    return saved_mine ; // return energy
+    return bandwidth_cache.emin ; // return energy
 }
 ;
 
 auto maximum_energy=[](auto sites, auto H) {
-    static int called = 0; // check if the function has been called
-    static double saved_maxe = 0.0; // minimum energy
-    if (called==0) {
+    if (!bandwidth_cache.have_max) {
       auto psi = MPS(sites); // initialize
       auto sweeps = get_sweeps(); // get the sweeps
       auto emax = -dmrg(psi,-1*H,sweeps,{"Quiet=",true}); // get maximum energy
-      saved_maxe = emax; // saved energy
-      called = 1; // called
+      bandwidth_cache.emax = emax; // saved energy
+      bandwidth_cache.have_max = true; // called
     };
-    return saved_maxe ; // return energy
+    return bandwidth_cache.emax ; // return energy
 }
 ;
 // scale the Hamiltonian so it lies between -1 and 1

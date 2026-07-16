@@ -81,6 +81,12 @@ class Many_Body_Chain():
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
+      # use the in-process pybind11 extension (mpscpp2/bindings.cc) instead
+      # of the subprocess/file-based backend, for the subset of methods
+      # that have been ported so far; defaults to False so existing
+      # behavior is completely unchanged unless explicitly requested
+      self.use_cpp_extension = kwargs.get("use_cpp_extension",False)
+      self._session = None # in-process extension session, if any
       self.initialize(**kwargs)
       # and initialize the sites
   def initialize(self,**kwargs):
@@ -93,6 +99,21 @@ class Many_Body_Chain():
           from .mpsjulialive.sites import initialize
           initialize(self)
       else: raise
+  def __deepcopy__(self,memo):
+      """Deepcopy that never tries to copy the in-process extension session
+      (an opaque pybind11 Chain object, see mpscpp2/bindings.cc): it has no
+      pickle/deepcopy support, and cloning a live C++ session doesn't have
+      a well-defined meaning anyway. clone() (used by bandwidth()/
+      lowest_eigenvalue()) gets a clone with _session=None instead, which
+      safely falls back to the file-based backend for that clone."""
+      from copy import deepcopy
+      cls = self.__class__
+      out = cls.__new__(cls)
+      memo[id(self)] = out
+      for k,v in self.__dict__.items():
+          if k=="_session": out.__dict__[k] = None
+          else: out.__dict__[k] = deepcopy(v,memo)
+      return out
   def setup_julia(self):
       """Setup the Julia mode"""
       self.itensor_version = "julia_live"

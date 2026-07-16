@@ -48,7 +48,10 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy
     """
-    if wf0 is not None: 
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return gs_energy_single_cpp_ext(self,wf0=wf0,reconverge=reconverge,
+                maxde=maxde,maxdepth=maxdepth)
+    if wf0 is not None:
         self.execute(wf0.write) # write wavefunction
         self.set_initial_wf(wf0,reconverge=True) # set the initial wavefunction
     if reconverge is not None: # overwrite skip_dmrg_gs
@@ -84,6 +87,51 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
           self.noise = noise
     self.computed_gs = True # ground state has been computed
     return out # return energy
+
+
+def gs_energy_single_cpp_ext(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
+    """
+    Ground state energy via the in-process pybind11 extension
+    (mpscpp2/chain_session.h's Chain), mirroring gs_energy_single() exactly
+    but with no file I/O: the Hamiltonian/sweep params/wavefunction are
+    passed as in-memory arguments to self._session instead of being written
+    to hamiltonian.in/tasks.in and read back from GS_ENERGY.OUT/psi_GS.mps.
+    """
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    self._session.set_hamiltonian(self.hamiltonian.to_terms())
+    if wf0 is not None:
+        self._session.set_wavefunction(wf0.cpp_handle)
+    if reconverge is not None: # overwrite skip_dmrg_gs
+        self.skip_dmrg_gs = not reconverge # if the computation should be rerun
+    out = self._session.gs_energy(skip_dmrg=self.skip_dmrg_gs)
+    self.e0 = out # store ground state energy
+    self.computed_gs = True
+    self.sites_from_file = True
+    self.gs_from_file = True
+    self.skip_dmrg_gs = True
+    wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
+    self.set_initial_wf(wf0) # set the initial wavefunction
+    if maxde is not None: # enforce a maximum fluctuation in the energy
+      e = self.vev(self.hamiltonian)
+      e2 = self.vev(self.hamiltonian,npow=2)
+      de = np.sqrt(abs(e2-e**2)) # fluctuation in the energy
+      de = de/self.ns # normalize by the number of sites
+      if de>maxde and maxdepth>0: # if a maximum energy fluctuation
+          maxm,nsweeps = self.maxm,self.nsweeps
+          noise = self.noise
+          print("Energy fluctuation = ",de,maxm)
+          self.maxm = maxm*2
+          self.nsweeps = 2 # just two sweeps
+          self.noise = 0.0
+          gs_energy_single_cpp_ext(self,maxde=maxde,reconverge=True,
+                  maxdepth=maxdepth-1) # execute again
+          self.maxm = maxm
+          self.nsweeps = nsweeps # restore
+          self.noise = noise
+    self.computed_gs = True # ground state has been computed
+    return out # return energy
+
 
 def gs_energy(self,**kwargs):
     if self.is_hermitian(self.hamiltonian): # put a check for Hermitian

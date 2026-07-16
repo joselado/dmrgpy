@@ -137,6 +137,8 @@ def summps_dmrg(self,wf1,wf2):
 
 def applyoperator_dmrg(self,A,wf):
     """Apply operator to a many body wavefunction"""
+    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+        return applyoperator_dmrg_cpp_ext(self,A,wf)
     self.execute(lambda: wf.write(name="applyoperator_wf0.mps")) # write WF
     task = {"applyoperator":"true",
             "applyoperator_wf0":"applyoperator_wf0.mps",
@@ -147,6 +149,16 @@ def applyoperator_dmrg(self,A,wf):
     self.task = task
     self.execute( lambda : self.run()) # run calculation
     return mps.MPS(self,name="applyoperator_wf1.mps").copy() # copy
+
+
+def applyoperator_dmrg_cpp_ext(self,A,wf):
+    """Apply operator via the in-process pybind11 extension
+    (mpscpp2/chain_session.h's Chain::apply_operator), mirroring
+    applyoperator_dmrg() exactly but with no file I/O."""
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    handle = self._session.apply_operator(A.to_terms(),wf.cpp_handle)
+    return mps.MPS(self,cpp_handle=handle).copy()
 
 
 def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):

@@ -5,6 +5,12 @@ class SpinX : public SiteSet
 
     SpinX(Args const& args = Args::global());
 
+    // Build directly from in-memory per-site type codes, with no file I/O
+    // at all (same type-code convention as the sites.in-based constructor
+    // below). This is what the in-process Chain session (chain_session.h)
+    // uses instead of writing/reading sites.in + sites.sites.
+    SpinX(std::vector<int> const& site_types);
+
 
     void
     read(std::istream& s);
@@ -86,6 +92,30 @@ SpinX(Args const& args)
     }
 
 
+inline SpinX::
+SpinX(std::vector<int> const& site_types)
+    {
+    int N = site_types.size();
+    auto sites = SiteStore(N); // get an empty list of sites
+    for (int i=1;i<=N;i++)  {
+      int nm = site_types.at(i-1); // read the name of that site
+      if (nm==2) sites.set(i,SpinHalfSite(i)); // use spin=1/2
+      else if (nm==0) sites.set(i,SpinlessSite(i)); // use fermions
+      else if (nm==1) sites.set(i,HubbardSite(i)); // use spinful fermions
+      else if (nm==3) sites.set(i,SpinOneSite(i)); // use spin=1
+      else if (nm==4) sites.set(i,SpinThreeHalfSite(i)); // use spin=3/2
+      else if (nm==5) sites.set(i,SpinTwoSite(i)); // use spin=2
+      else if (nm==6) sites.set(i,SpinFiveHalfSite(i)); // use spin=5/2
+      else if (nm==104) sites.set(i,BosonFourSite(i)); // use Boson
+      else if (nm==(-2)) sites.set(i,Z3Site(i)); // use Z3
+      else if (nm==(-3)) sites.set(i,Z4Site(i)); // use Z4
+      else Error(format("SpinX cannot read index of size "));
+    } ;
+
+    SiteSet::init(std::move(sites));
+    }
+
+
 
 
 auto generate_sites() { // function to generate the sites
@@ -112,27 +142,42 @@ auto write_sites() { // function to get the sites
 
 
 
+// Explicit cache replacing the previous hidden per-function statics.
+// Same lifetime/semantics as before (populated on first use, reused for the
+// rest of one mpscpp.x invocation), but named and resettable so a future
+// persistent-process backend can give each independent chain/session its
+// own instance instead of silently sharing this one across chains of
+// different site-type composition.
+struct SiteTypeCache
+    {
+    bool loaded = false; // whether sites.in has been read
+    int N = 0; // number of sites
+    std::vector<int> stypes; // site type code per site
+    };
+
+static SiteTypeCache site_type_cache;
+
+void inline
+reset_site_type_cache()
+    {
+    site_type_cache = SiteTypeCache(); // drop any cached site types
+    }
+
 int site_type(int index) {
-    static int called = 0; // define a variable to check the calling
-    ifstream sfile; // file to read
-    static int N; // number of sites
-    static auto stypes = std::vector<int>(1); // define a dummy one
-    int out = -1;
-    // first call, read the file
-    if (called==0) { 
+    if (!site_type_cache.loaded) {
+      ifstream sfile; // file to read
       int nm;
       sfile.open("sites.in"); // file with the sites
-      sfile >> N; // read the number of sites and number of projections
-      stypes.resize(N); // resize the array
-      for (int i=1;i<=N;i++)  {
+      sfile >> site_type_cache.N; // read the number of sites and number of projections
+      site_type_cache.stypes.resize(site_type_cache.N); // resize the array
+      for (int i=1;i<=site_type_cache.N;i++)  {
         sfile >> nm ; // read this spin
-	stypes.at(i-1) = nm ;// store
-//        if (i-1==index) out = nm ; 
+	site_type_cache.stypes.at(i-1) = nm ;// store
         }
       sfile.close() ;
-      called = 1; // next time do not read
+      site_type_cache.loaded = true; // next time do not read
       };
-    out = stypes.at(index); // get the value
+    int out = site_type_cache.stypes.at(index); // get the value
     cout << index << " site is of type  " << out << endl ;
     return out ;
 }

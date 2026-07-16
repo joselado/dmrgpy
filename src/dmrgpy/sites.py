@@ -16,6 +16,16 @@ def initialize(self,**kwargs):
     if not get_mode(self)=="ED":
         self.bin_sites = open(self.path+"/sites.sites","rb").read()
     self.sites_from_file = True
+    # additionally build the in-process extension session, if requested;
+    # the file-based setup above still always runs too, since only a
+    # subset of methods have been ported to use this session so far (see
+    # cppext.py) -- everything else keeps using the subprocess backend
+    # regardless of use_cpp_extension
+    if getattr(self,"use_cpp_extension",False) and self.itensor_version==2:
+        from . import cppext
+        backend = cppext.get_backend()
+        if backend is not None:
+            self._session = backend.Chain(self.sites)
 
 
 

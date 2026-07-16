@@ -48,6 +48,12 @@ main()
     {
     system("touch ERROR") ; // create error file
 
+    // Each invocation is a fresh process today, so these caches already
+    // start out empty; reset them explicitly anyway so the reset point is
+    // named and in the same place a future persistent-process backend would
+    // call it (once per new chain/session) instead of once per process.
+    reset_bandwidth_cache() ;
+    reset_site_type_cache() ;
 
     // read the number of sites
     ifstream sfile; // file to read

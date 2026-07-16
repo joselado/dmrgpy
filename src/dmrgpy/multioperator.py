@@ -127,6 +127,18 @@ class MultiOperator():
         if use_jordan_wigner: m = jordan_wigner(self)
         else: m = self
         write(m,name)
+    def to_terms(self):
+        """
+        Return this operator as [(coeff, [(name,1-based-site),...]), ...],
+        for the in-process pybind11 extension (mpscpp2/bindings.cc). This is
+        exactly what write()/get_dict() already compute (Jordan-Wigner
+        transform, 1-based site indices), just returned as Python objects
+        instead of being written to a file/tasks.in dict.
+        """
+        if use_jordan_wigner: m = jordan_wigner(self)
+        else: m = self
+        return [(complex(term[0]),[(name,i+1) for (name,i) in term[1:]])
+                for term in m.op]
     def get_dict(self):
         """Return the dictionary to be used in tasks.in"""
         d = dict()

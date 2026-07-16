@@ -39,12 +39,21 @@ def compile(gpp="g++",check_gpp=True,**kwargs):
     os.system("make clean ")
     os.system("make")
     os.chdir(path) # original directory
-    
+
     # compile DMRG program
     os.chdir(path+"/src/dmrgpy/mpscpp2")
     os.system("make clean")
     os.system("make")
     os.system("mv mpscpp mpscpp.x")
+    # build the in-process pybind11 extension alongside the old
+    # subprocess-based executable (see the file-I/O-to-in-memory migration
+    # plan); kept optional/best-effort for now since it's not yet used by
+    # the Python side (that starts once mpscpp2/*.h are refactored)
+    if cppversion.has_pybind11():
+        os.system("make pybind")
+    else:
+        print("pybind11 not found, skipping the in-process extension build")
+        print("Install it with: pip install pybind11")
     os.chdir(path) # go to the main path
 
 

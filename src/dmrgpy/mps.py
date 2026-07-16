@@ -8,7 +8,7 @@ import subprocess
 
 class MPS():
     """Object for an MPS"""
-    def __init__(self,MBO=None,name="psi_GS.mps"):
+    def __init__(self,MBO=None,name="psi_GS.mps",cpp_handle=None):
 #        self.sc = sc # many body object
 #        self.sc.wf0 = None # no wavefunction
         if MBO is None:
@@ -19,8 +19,15 @@ class MPS():
             self.MBO = MBO
         self.name = name # initial name
 #        self.factor = 1.0 # factor of the mps
-        self.mps = open(self.path+"/"+name,"rb").read() # read the MPS
-        self.sites = open(self.path+"/sites.sites","rb").read() # read sites
+        self.cpp_handle = cpp_handle # opaque in-process extension handle
+        if cpp_handle is not None:
+            # in-process backend: the extension already holds this
+            # wavefunction in memory, nothing to read from disk
+            self.mps = None
+            self.sites = None
+        else:
+            self.mps = open(self.path+"/"+name,"rb").read() # read the MPS
+            self.sites = open(self.path+"/sites.sites","rb").read() # read sites
         self.mode = "DMRG" # mode of the object
     def set_MBO(self,MBO):
         """Set the MBO"""
@@ -47,13 +54,24 @@ class MPS():
     def __truediv__(self,x): return self*(1./x)
     def copy(self,name=None):
         """Copy this wavefunction"""
-        out = deepcopy(self) # copy everything
         if name is None:
           name = id_generator()+".mps" # create a new name
+        if self.cpp_handle is not None:
+            # deepcopy chokes on the opaque pybind11 handle (it has no
+            # pickle/deepcopy support) -- share the same handle instead of
+            # cloning it. Safe because nothing on the C++ side ever mutates
+            # an MPS in place: every Chain method takes wf by const
+            # reference and returns a brand-new MPS (see chain_session.h).
+            out = MPS.__new__(MPS)
+            out.__dict__.update(self.__dict__)
+            out.name = name
+            return out
+        out = deepcopy(self) # copy everything
         out.name = name
         return out
     def write(self,name=None,path=None):
         """Write the MPS in a folder"""
+        if self.cpp_handle is not None: return # already in memory, nothing to write
         if name is None: name = self.name
         if path is None: path = self.path
         open(path+"/"+name,"wb").write(self.mps) # write the MPS
