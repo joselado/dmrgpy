@@ -91,7 +91,19 @@ PYBIND_CCCOM=$(CONDA_GXX) -m64 -std=c++14 -fPIC
 # branch stays in sync with whatever backend $(APP) itself was built
 # against (plain lapack, OpenBLAS, MKL, ...) instead of hardcoding
 # -lblas -llapack, which silently ignored that configuration.
-PYBIND_LIBFLAGS=-L$(ITENSOR_LIBDIR) -litensor $(BLAS_LAPACK_LIBFLAGS)
+#
+# On Debian/Ubuntu multiarch systems libblas.so/liblapack.so live under
+# /usr/lib/<triplet>/, not directly under /usr/lib/ as BLAS_LAPACK_LIBFLAGS
+# assumes. The system compiler that builds $(APP) has that multiarch path
+# wired in by default so "-L/usr/lib -lblas" resolves anyway, but the
+# isolated conda cross-linker used here does not, and fails with "cannot
+# find -lblas"/"-llapack". Ask the system compiler where it actually found
+# the libraries and add that directory explicitly; if it can't find them
+# either (e.g. macOS, or a non-default BLAS setup) this resolves to a
+# harmless "-L." no-op.
+SYS_BLAS_LIBDIR=$(shell dirname $$($(firstword $(CCCOM)) -print-file-name=libblas.so) 2>/dev/null)
+SYS_LAPACK_LIBDIR=$(shell dirname $$($(firstword $(CCCOM)) -print-file-name=liblapack.so) 2>/dev/null)
+PYBIND_LIBFLAGS=-L$(ITENSOR_LIBDIR) -litensor $(BLAS_LAPACK_LIBFLAGS) -L$(SYS_BLAS_LIBDIR) -L$(SYS_LAPACK_LIBDIR)
 endif
 
 pybind: $(EXT_MODULE)
