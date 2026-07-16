@@ -1,20 +1,11 @@
 import numpy as np
 
-from . import taskdmrg
 from .mps import MPS
 
 def random_mps_dummy(self,normalize=True):
     """Generate a random MPS, beware of a complicated statistial
     distribution"""
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
-        out = MPS(self,cpp_handle=self._session.random_mps()).copy()
-    else:
-        task = {"random_mps":"true",
-                }
-        self.task = task
-        self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
-        self.execute( lambda : self.run()) # run calculation
-        out = MPS(self,name="random.mps").copy() # copy
+    out = MPS(self,cpp_handle=self._session.random_mps()).copy()
     norm = np.sqrt(out.overlap(out))
     return (1./norm)*out # return the eigenvector
 

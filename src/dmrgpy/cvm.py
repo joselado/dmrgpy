@@ -1,6 +1,5 @@
 import numpy as np
 from . import operatornames
-from . import taskdmrg
 from . import multioperator
 
 def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
@@ -30,41 +29,15 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
 
 def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
     """
-    Return the dynamical correlator for a single energy
+    Return the dynamical correlator for a single energy, via the
+    in-process pybind11 extension (mpscpp2/chain_session.h's
+    Chain::cvm_dynamical_correlator). Parameter names differ from the C++
+    side's (omega, eta, energy) to match this file's existing naming:
+    e -> omega, delta -> eta, self.e0 -> energy.
     """
     name = operatornames.str2MO(self,name,**kwargs)
     A = name[0]
     B = name[1]
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
-        return cvm_dmrg_cpp_ext(self,A,B,delta,e)
-    if self.fit_td: fittd = "true"
-    else: fittd = "false"
-    fittd = "true"
-    task = {"cvm":"true",
-            "cvm_delta":str(delta),
-            "cvm_energy":str(e),
-            "cvm_e0":str(self.e0),
-            "cvm_nit":str(int(self.cvm_nit)),
-            "cvm_tol":str(self.cvm_tol),
-            }
-    self.task = task # override tasks
-#    name[0] = name[0].get_dagger()
-    self.execute(lambda: A.write(name="dc_multioperator_i.in"))
-    self.execute(lambda: B.write(name="dc_multioperator_j.in"))
-    self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
-    self.execute( lambda : self.run()) # run calculation
-    cs = self.get_file("CVM.OUT") # read the correlator
-    return cs[0] + 1j*cs[1] # return the correlator
-
-
-def cvm_dmrg_cpp_ext(self,A,B,delta,e):
-    """
-    CVM dynamical correlator via the in-process pybind11 extension
-    (mpscpp2/chain_session.h's Chain::cvm_dynamical_correlator), mirroring
-    cvm_dmrg() exactly but with no file I/O. Parameter names differ from
-    the C++ side's (omega, eta, energy) to match this file's existing
-    naming: e -> omega, delta -> eta, self.e0 -> energy.
-    """
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     return self._session.cvm_dynamical_correlator(

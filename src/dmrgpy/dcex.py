@@ -1,6 +1,5 @@
 import numpy as np
 from . import operatornames
-from . import taskdmrg
 
 def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
         nex=20,es=np.linspace(-1.0,10.0,1000),scale=20.0,**kwargs):

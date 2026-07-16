@@ -6,7 +6,6 @@ import numpy as np
 
 # this class allows to define operators of the form
 # A_0@A_1@....
-# for mpscpp.x
 
 def isnumber(x):
 #    print(type(x),isinstance(x, numbers.Number))
@@ -20,7 +19,7 @@ n_mpo_max = 100 # maximum number of MPO products
 
 class MultiOperator():
     """
-    Object to deal with multioperators in mpscpp.x
+    Object to deal with multioperators
     """
     def __init__(self,name=None,c=1.0,term=True): # do nothing
         global ampo_counter

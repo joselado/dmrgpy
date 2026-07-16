@@ -1,11 +1,5 @@
 LIBRARY_DIR=ITensor/
 
-APP=mpscpp
-
-HEADERS=
-
-CCFILES=$(APP).cc
-
 #################################################################
 #################################################################
 #################################################################
@@ -14,44 +8,22 @@ CCFILES=$(APP).cc
 include $(LIBRARY_DIR)/this_dir.mk
 include $(LIBRARY_DIR)/options.mk
 
-#Mappings --------------
-OBJECTS=$(patsubst %.cc,%.o, $(CCFILES))
-GOBJECTS=$(patsubst %,.debug_objs/%, $(OBJECTS))
-
-#Rules ------------------
-
-%.o: %.cc $(HEADERS)
-	$(CCCOM) -c $(CCFLAGS) -o $@ $<
-
-.debug_objs/%.o: %.cc $(HEADERS)
-	$(CCCOM) -c $(CCGFLAGS) -o $@ $<
-
 #Targets -----------------
 
-build: $(APP)
-debug: $(APP)-g
-
-$(APP): $(OBJECTS) $(ITENSOR_LIBS)
-	$(CCCOM) $(CCFLAGS) $(OBJECTS) -o $(APP) $(LIBFLAGS)
-
-$(APP)-g: mkdebugdir $(GOBJECTS) $(ITENSOR_GLIBS)
-	$(CCCOM) $(CCGFLAGS) $(GOBJECTS) -o $(APP)-g $(LIBGFLAGS)
+build: pybind
 
 clean:
-	rm -fr .debug_objs *.o $(APP) $(APP)-g _dmrgcpp*.so
-
-mkdebugdir:
-	mkdir -p .debug_objs
+	rm -fr .debug_objs *.o _dmrgcpp*.so
 
 #################################################################
 # pybind11 extension module (see bindings.cc). Builds _dmrgcpp<ext-suffix>.so
-# against the same vendored ITensor static library used by $(APP).
+# against the vendored ITensor static library.
 #
-# Built with a *different* compiler than $(APP) when Python's own
-# environment provides one (PYBIND_CCCOM below), specifically to avoid a
-# real, reproducible segfault: $(CCCOM) is whatever system compiler builds
-# ITensor/$(APP), which never has to coexist with anything else in a
-# process. This extension does -- it's loaded into the same Python process
+# Built with a *different* compiler than the one that builds ITensor itself
+# when Python's own environment provides one (PYBIND_CCCOM below),
+# specifically to avoid a real, reproducible segfault: $(CCCOM) is whatever
+# system compiler builds ITensor, which never has to coexist with anything
+# else in a process. This extension does -- it's loaded into the same Python process
 # as numpy/scipy, which (at least under conda) load their own bundled
 # libstdc++/BLAS. Compiling this extension with the *system* compiler needs
 # a libstdc++ newer than conda's; a couple of things were tried and
@@ -88,7 +60,7 @@ PYBIND_LIBFLAGS=$(LIBFLAGS)
 else
 PYBIND_CCCOM=$(CONDA_GXX) -m64 -std=c++14 -fPIC
 # BLAS/LAPACK flags come from options.mk (BLAS_LAPACK_LIBFLAGS), so this
-# branch stays in sync with whatever backend $(APP) itself was built
+# branch stays in sync with whatever backend ITensor itself was built
 # against (plain lapack, OpenBLAS, MKL, ...) instead of hardcoding
 # -lblas -llapack, which silently ignored that configuration.
 PYBIND_LIBFLAGS=-L$(ITENSOR_LIBDIR) -litensor $(BLAS_LAPACK_LIBFLAGS)

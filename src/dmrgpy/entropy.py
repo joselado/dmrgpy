@@ -29,18 +29,7 @@ def compute_entropy(self,psi,b=1):
 def compute_entropy_single(self,psi,b=1):
     """Compute entanglement entropy in a bond"""
     if b<1 or b>self.ns: raise
-    if (getattr(self,"use_cpp_extension",False) and self._session is not None
-            and psi.cpp_handle is not None):
-        return np.abs(self._session.bond_entropy(psi.cpp_handle,b))
-    self.execute(lambda: psi.write(name="wavefunction.mps"))
-    # write the task
-    task = {    "entropy": "true",
-                "bond_entropy":str(b),
-                }
-    self.task = task # assign tasks
-    self.run() # perform the calculation
-    entr = self.execute(lambda: np.genfromtxt("ENTROPY.OUT"))
-    return np.abs(entr)
+    return np.abs(self._session.bond_entropy(psi.cpp_handle,b))
 
 
 

@@ -200,18 +200,7 @@ def cpp_correlation_matrix(wf):
     """Compute the correlation matrix using the C++
     specialized function"""
     self = wf.MBO
-    if (getattr(self,"use_cpp_extension",False) and self._session is not None
-            and wf.cpp_handle is not None):
-        return self._session.correlation_matrix(wf.cpp_handle)
-    task = {"correlation_matrix":"true"}
-    self.task = task ; self.write_task() # write the task
-    wf.write("wavefunction.mps") # read wavefunction
-    self.run() # compute
-    m = self.execute(lambda: np.genfromtxt("CORRELATION_MATRIX.OUT")) # read
-    m = m[:,0] + 1j*m[:,1] # real and imaginary
-    n = len(self.sites)
-    m = m.reshape((n,n)) # reshape
-    return m # return matrix
+    return self._session.correlation_matrix(wf.cpp_handle)
 
 
 def get_four_correlation_tensor(wf,ctmode="explicit",**kwargs):
@@ -247,17 +236,4 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
     """Compute the correlation tensor using the C++
     specialized function"""
     self = wf.MBO
-    if (getattr(self,"use_cpp_extension",False) and self._session is not None
-            and wf.cpp_handle is not None):
-        return self._session.four_correlation_tensor(wf.cpp_handle,accelerate)
-    task = {"four_correlation_tensor":"true"}
-    if accelerate: task["four_correlation_tensor_accelerate"] = "true"
-    else: task["four_correlation_tensor_accelerate"] = "false"
-    self.task = task ; self.write_task() # write the task
-    wf.write("wavefunction.mps") # read wavefunction
-    self.run() # compute
-    m = self.execute(lambda: np.genfromtxt("FOUR_CORRELATION_TENSOR.OUT")) 
-    m = m[:,0] + 1j*m[:,1] # real and imaginary
-    n = len(self.sites)
-    m = m.reshape((n,n,n,n)) # reshape
-    return m # return tensor
+    return self._session.four_correlation_tensor(wf.cpp_handle,accelerate)

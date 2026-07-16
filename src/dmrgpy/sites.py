@@ -1,5 +1,4 @@
 # initialize the sites for the C++ calculation
-from .writemps import write_sites
 import subprocess
 import os
 
@@ -8,20 +7,11 @@ def initialize(self,**kwargs):
     self.clean() # clean calculation
     self.inipath = os.getcwd() # original folder
     subprocess.run(["mkdir","-p",self.path]) # create folder
-    self.sites_from_file = False
-    self.task = {"write_sites":"true"}
-    self.execute(lambda: write_sites(self)) # write the different sites
-    self.run() # run the calculation
-    from .mode import get_mode
-    if not get_mode(self)=="ED":
-        self.bin_sites = open(self.path+"/sites.sites","rb").read()
-    self.sites_from_file = True
-    # additionally build the in-process extension session, if requested;
-    # the file-based setup above still always runs too, since only a
-    # subset of methods have been ported to use this session so far (see
-    # cppext.py) -- everything else keeps using the subprocess backend
-    # regardless of use_cpp_extension
-    if getattr(self,"use_cpp_extension",False) and self.itensor_version==2:
+    # build the in-process extension session (mpscpp2/chain_session.h's
+    # Chain). If the extension isn't compiled, self._session stays None
+    # and mode.py's get_mode() falls back to ED for this chain -- there is
+    # no file-based DMRG backend left to fall back to.
+    if self.itensor_version==2:
         from . import cppext
         backend = cppext.get_backend()
         if backend is not None:

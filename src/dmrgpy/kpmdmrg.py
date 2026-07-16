@@ -4,57 +4,6 @@ from . import multioperator
 from . import operatornames
 from .algebra import kpm
 
-def get_moments_dmrg(self,n=1000):
-  """Get the moments with DMRG"""
-  self.setup_task("dos",task={"nkpm":str(n)})
-  self.write_hamiltonian() # write the Hamiltonian to a file
-  self.run() # perform the calculation
-  return self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose()[0])
-
-
-
-
-
-
-def get_moments_dynamical_correlator_dmrg(self,name=None,delta=1e-1):
-  """Get the moments with DMRG"""
-  # do some sanity checks
-  if delta<0.0: raise 
-  if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
-  if self.itensor_version!="julia": self.get_gs() # compute ground state
-  # define the dictionary
-  task = {      "dynamical_correlator": "true",
-                "kpmmaxm":str(self.kpmmaxm),
-                "kpm_scale":str(self.kpm_scale),
-                "kpm_accelerate":self.kpm_accelerate,
-                "kpm_n_scale":str(self.kpm_n_scale),
-                "kpm_delta":str(delta),
-                "kpm_cutoff":str(self.kpmcutoff),
-                }
-  # go on, check the kind of input used to define the correlator
-  if type(name[0])==multioperator.MultiOperator: 
-      task["kpm_multioperator_i"] = "true"
-      task["kpm_multioperator_j"] = "true"
-      mi = name[1] # first operator
-      mj = name[0] # second operator
-      mj = mj.get_dagger()
-      self.execute(lambda: mi.write(name="kpm_multioperator_i.in")) # write
-      self.execute(lambda: mj.write(name="kpm_multioperator_j.in")) # write
-  else: raise
-  self.task = task # assign tasks
-  self.write_task() 
-  self.write_hamiltonian() # write the Hamiltonian to a file
-  self.run() # perform the calculation
-  m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
-#  return m[1]
-  mus = m[0]+1j*m[1]
-  from .algebra import kpm
-  if self.kpm_extrapolate: 
-      return kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
-              extrapolation_mode=self.kpm_extrapolate_mode)
-  else: return mus
-
-
 
 
 
@@ -85,47 +34,9 @@ def get_dynamical_correlator(self,n=1000,
              es=np.linspace(-1.,10,500),deconvolve=None,
              **kwargs):
     """
-    Compute a dynamical correlator using the KPM-DMRG method
-    """
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
-        return get_dynamical_correlator_cpp_ext(self,n=n,name=name,
-                delta=delta,kernel=kernel,es=es,**kwargs)
-# get the moments
-    mus = get_moments_dynamical_correlator_dmrg(self,delta=delta,
-            name=name,**kwargs)
-    # scale of the dos
-    kpmscales = self.execute(lambda: np.genfromtxt("KPM_SCALE.OUT"))
-    emin = kpmscales[0] # minimum energy
-    emax = kpmscales[1] # maximum energy
-    scale = kpmscales[2] # scaling of the energies
-    # ground state energy
-    e0 = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
-    self.e0 = e0 # add this quantity
-    n = self.execute(lambda: np.genfromtxt("KPM_NUM_POLYNOMIALS.OUT"))
-    xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
-#    if self.kpm_extrapolate: kernel = None # no kernel
-    ys = generate_profile(mus,xs,use_fortran=False,kernel=kernel) # generate the DOS
-    xs /= scale # scale back the energies
-    xs += (emin+emax)/2. -emin # shift the energies
-    ys *= scale # renormalize the y values
-    from scipy.interpolate import interp1d
-    fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
-    fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-    (es,z) = (es,fr(es)+1j*fi(es)) # interpolate
-    return (es,z)
-#    from .algebra import kpm
-#    (es,z) = kpm.deconvolution(es,z,mode=deconvolve,delta=delta)
-#    return es,z
-
-
-def get_dynamical_correlator_cpp_ext(self,n=1000,name=None,delta=1e-1,
-             kernel="jackson",es=np.linspace(-1.,10,500),**kwargs):
-    """
-    Dynamical correlator via the in-process pybind11 extension
-    (mpscpp2/chain_session.h's Chain::kpm_dynamical_correlator), mirroring
-    get_dynamical_correlator()+get_moments_dynamical_correlator_dmrg()
-    exactly but as a single in-memory call instead of a KPM_MOMENTS.OUT/
-    KPM_SCALE.OUT/GS_ENERGY.OUT/KPM_NUM_POLYNOMIALS.OUT file round-trip.
+    Compute a dynamical correlator using the KPM-DMRG method, via the
+    in-process pybind11 extension (mpscpp2/chain_session.h's
+    Chain::kpm_dynamical_correlator).
     """
     if delta<0.0: raise
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
@@ -178,32 +89,10 @@ def general_kpm_moments(self,X=None,A=None,B=None,
     else: wfa = wf
     if B is not None: wfb = self.applyoperator(B,wf)
     else: wfb = wf
-    if (getattr(self,"use_cpp_extension",False) and self._session is not None
-            and wfa.cpp_handle is not None and wfb.cpp_handle is not None):
-        mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,self.kpm_accelerate)
-        if self.kpm_extrapolate:
-            mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
-                    extrapolation_mode=self.kpm_extrapolate_mode)
-        return mus,shift,scale
-    # write the wavefunctions
-    self.execute(lambda: wfa.write(name="wfa.mps"))
-    self.execute(lambda: wfb.write(name="wfb.mps"))
-    # write the task
-    task = {    "general_kpm": "true",
-                "kpmmaxm":str(self.maxm),
-                "kpm_accelerate":self.kpm_accelerate,
-                "kpm_num_polynomials":str(num_p),
-                "kpm_cutoff":str(self.cutoff),
-                }
-    self.execute(lambda: X.write(name="kpm_operator.in"))
-    self.task = task # assign tasks
-    self.run() # perform the calculation
-    m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
-    mus = m[0]+1j*m[1]
-    # perform extrapolation if
+    mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,self.kpm_accelerate)
     if self.kpm_extrapolate:
-      mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
-              extrapolation_mode=self.kpm_extrapolate_mode)
+        mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+                extrapolation_mode=self.kpm_extrapolate_mode)
     return mus,shift,scale
 
 
@@ -302,32 +191,10 @@ def kpm_moments_wfa_wfb(self,X=None,wfa=None,wfb=None,
     if wfa is None or wfb is None:
         print("Wavefunctions must be provided")
         raise
-    if (getattr(self,"use_cpp_extension",False) and self._session is not None
-            and wfa.cpp_handle is not None and wfb.cpp_handle is not None):
-        mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,False)
-        if self.kpm_extrapolate:
-            mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
-                    extrapolation_mode=self.kpm_extrapolate_mode)
-        return mus,shift,scale
-    # write the wavefunctions
-    self.execute(lambda: wfa.write(name="wfa.mps"))
-    self.execute(lambda: wfb.write(name="wfb.mps"))
-    # write the task
-    task = {    "general_kpm": "true",
-                "kpmmaxm":str(self.maxm),
-                "kpm_accelerate": "false",
-                "kpm_num_polynomials":str(num_p),
-                "kpm_cutoff":str(self.cutoff),
-                }
-    self.execute(lambda: X.write(name="kpm_operator.in"))
-    self.task = task # assign tasks
-    self.run() # perform the calculation
-    m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
-    mus = m[0]+1j*m[1]
-    # perform extrapolation if
+    mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,False)
     if self.kpm_extrapolate:
-      mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
-              extrapolation_mode=self.kpm_extrapolate_mode)
+        mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+                extrapolation_mode=self.kpm_extrapolate_mode)
     return mus,shift,scale
 
 

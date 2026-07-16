@@ -1,8 +1,6 @@
 from __future__ import print_function
 from . import operatornames
-from . import taskdmrg
 import numpy as np
-import os
 from scipy.interpolate import interp1d
 from . import multioperator
 from .edtk import timedependent as tded
@@ -18,53 +16,23 @@ def evolution_DC(self,mode="DMRG",**kwargs):
 
 
 def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
+    """
+    Real-time quench dynamical correlator via the in-process pybind11
+    extension (mpscpp2/chain_session.h's Chain::quench).
+
+    fit_td is hardcoded False here, not read from self.fit_td: the removed
+    file-based backend wrote it to tasks.in under the key "tevol_fit", but
+    time_evolution.h actually read "tevol_fit_td" (a pre-existing,
+    unrelated key-name mismatch) -- so the fitApplyMPO branch there was
+    unreachable regardless of self.fit_td, and False reproduces that
+    actual behavior rather than the intended-but-never-taken one.
+
+    "restart" has no effect: quench()'s C++ implementation always starts
+    from get_gs() regardless of its value.
+    """
     name = operatornames.str2MO(self,name,**kwargs)
     name[0] = name[0].get_dagger()
     A,B = name[0],name[1]
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
-        return evolution_dmrg_DC_cpp_ext(self,A,B,nt,dt)
-    if self.fit_td: fittd = "true"
-    else: fittd = "false"
-    if self.tevol_custom_exp: tevol_custom_exp = "true"
-    else: tevol_custom_exp = "false"
-    fittd = "true"
-    task = {"time_evolution":"true",
-            "tevol_nt":str(nt),
-            "tevol_fit":fittd,
-            "tevol_custom_exp":tevol_custom_exp,
-            "tevol_dt":str(dt),
-            }
-    self.task = task # override tasks
-    if restart: # restart the calculation
-      self.execute(lambda: os.system("cp psi_GS.mps psi_time_evolution.mps"))
-    self.execute(lambda: A.write(name="dc_multioperator_i.in"))
-    self.execute(lambda: B.write(name="dc_multioperator_j.in"))
-    self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
-    self.execute( lambda : self.run()) # run calculation
-    cs = self.get_file("TIME_EVOLUTION.OUT").transpose() # time evolution
-    ts = np.array([dt*ii for ii in range(nt)]) # times
-    return ts,cs[0].real-1j*cs[1] # return
-
-
-def evolution_dmrg_DC_cpp_ext(self,A,B,nt,dt):
-    """
-    Real-time quench dynamical correlator via the in-process pybind11
-    extension (mpscpp2/chain_session.h's Chain::quench), mirroring
-    evolution_dmrg_DC()'s DMRG path exactly but with no file I/O.
-
-    fit_td is hardcoded False here, not read from self.fit_td: the old
-    path writes it to tasks.in under the key "tevol_fit", but
-    time_evolution.h actually reads "tevol_fit_td" (a pre-existing,
-    unrelated key-name mismatch) -- so the fitApplyMPO branch there is
-    unreachable today regardless of self.fit_td, and False reproduces
-    that actual behavior rather than the intended-but-never-taken one.
-
-    "restart" is not passed through either: quench()'s C++ implementation
-    always starts from get_gs() regardless of its value -- the
-    restart/"cp psi_GS.mps psi_time_evolution.mps" step above is
-    vestigial in the old backend too, since psi_time_evolution.mps is
-    only ever written, never read, by quench().
-    """
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     correlator,_wf = self._session.quench(
@@ -88,43 +56,16 @@ def evolve_and_measure(self,mode="DMRG",**kwargs):
 
 def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         dt=1e-2,wf=None,**kwargs):
-    if h is None: h = self.hamiltonian # Hamiltonian
-    if wf is None: wf = self.wf0 # get ground state
-    if (getattr(self,"use_cpp_extension",False) and self._session is not None
-            and wf.cpp_handle is not None):
-        return evolve_and_measure_dmrg_cpp_ext(self,operator,h,wf,nt,dt)
-    if self.fit_td: fittd = "true"
-    else: fittd = "false"
-    if self.tevol_custom_exp: tevol_custom_exp = "true"
-    else: tevol_custom_exp = "false"
-    fittd = "true"
-    task = {"evolution_measure":"true",
-            "tevol_nt":str(int(nt)),
-            "tevol_fit":fittd,
-            "tevol_custom_exp":tevol_custom_exp,
-            "tevol_dt":str(dt),
-            }
-    self.task = task # override tasks
-    wf.write(name="psi_evolve_and_measure.mps") # copy wavefunction
-    self.execute(lambda: h.write(name="hamiltonian.in"))
-    self.execute(lambda: operator.write(name="time_evolution_multioperator.in"))
-    self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
-    self.execute( lambda : self.run()) # run calculation
-    cs = self.get_file("TIME_EVOLUTION.OUT").transpose() # time evolution
-    ts = np.array([dt*ii for ii in range(int(nt))]) # times
-    return ts,cs[0].real-1j*cs[1] # return
-
-
-def evolve_and_measure_dmrg_cpp_ext(self,operator,h,wf,nt,dt):
     """
     Real-time evolution + measurement via the in-process pybind11
-    extension (mpscpp2/chain_session.h's Chain::evolve_and_measure),
-    mirroring evolve_and_measure_dmrg()'s DMRG path exactly but with no
-    file I/O. fit_td hardcoded False for the same reason as
-    evolution_dmrg_DC_cpp_ext (see its docstring): the "tevol_fit"/
-    "tevol_fit_td" key-name mismatch means the old backend's fitApplyMPO
-    branch is unreachable regardless of self.fit_td.
+    extension (mpscpp2/chain_session.h's Chain::evolve_and_measure).
+    fit_td is hardcoded False for the same reason as evolution_dmrg_DC
+    (see its docstring): the "tevol_fit"/"tevol_fit_td" key-name mismatch
+    meant the old file-based backend's fitApplyMPO branch was unreachable
+    regardless of self.fit_td.
     """
+    if h is None: h = self.hamiltonian # Hamiltonian
+    if wf is None: wf = self.wf0 # get ground state
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     correlator,_wf = self._session.evolve_and_measure(

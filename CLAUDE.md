@@ -6,17 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DMRGPY is a Python library for quasi-one-dimensional spin chains, fermionic
 systems, parafermion and bosonic models using matrix product states (MPS).
-It exposes a single Python API (`src/dmrgpy/`) backed by two interchangeable
+It exposes a single Python API (`src/dmrgpy/`) backed by interchangeable
 solvers per calculation:
 
-- **DMRG**, executed by an external ITensor-based backend (C++ or Julia)
+- **DMRG**, executed in-process via a pybind11 extension over ITensor
+  (C++), or via a separate Julia/ITensors.jl backend
 - **ED** (exact diagonalization), a pure-Python fallback used for small
-  systems and for cross-checking DMRG results
+  systems, for cross-checking DMRG results, and automatically whenever the
+  C++ extension isn't compiled
 
 The Python layer is what this project actually develops. The C++/ITensor
 backend under `src/dmrgpy/mpscpp2/ITensor/` is a vendored copy of the
-ITensor library maintained upstream — treat it as a black box invoked via a
-compiled executable, not code to read or modify here.
+ITensor library maintained upstream — treat it as a black box, not code to
+read or modify here.
 
 ## Install / build
 
@@ -24,12 +26,14 @@ There is no `setup.py`/`pyproject.toml`; the project is used from `src/`
 via a path added to `PYTHONPATH` (or a symlink into `site-packages`).
 
 ```bash
-python install.py                    # compiles ITensor + the C++ backend (mpscpp.x)
+python install.py                    # compiles ITensor + the pybind11 extension
 python install.py --gpp=g++-6        # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
-python install_julia.py              # alternative: Julia backend instead of C++
+python install_julia.py              # alternative: Julia backend instead of/alongside C++
 ```
 
-`install.py` calls `installtk/install2.py` to compile the C++ program, then
+`install.py` calls `installtk/install2.py`, which compiles the vendored
+ITensor static library and then `mpscpp2`'s `pybind` Makefile target
+(needs `pybind11` installed; skipped with a warning if it isn't), then
 adds the repo's `src` to the Python path and to the user's shell rc file
 (`installtk/addpythonpath.py`, `installtk/addsystem.py`). There is no
 separate lint or CI config in this repo.
@@ -80,92 +84,84 @@ representation: the *same* `MultiOperator` is later either
 fermionic operators, static/long-range operator construction, sympy-based
 symbolic building).
 
-### Dual backend dispatch (DMRG vs ED)
+### Backend dispatch (DMRG vs ED, C++ vs Julia)
 
 `mode.py` decides, per call, whether a calculation runs via DMRG or ED
-(`get_mode`/`run`), based on `self.mode`, whether `mpscpp.x` is compiled, and
-`self.itensor_version` (`2`/`"C++"` → C++ backend via `cpprun.py`;
-`"julia"` → `juliarun.py`). Most public methods on `Many_Body_Chain` accept a
-`mode="DMRG"|"ED"` kwarg so results can be cross-validated between solvers
-(see the bilinear-biquadratic example in `README.md`).
+(`get_mode`/`run`): DMRG unless `self.mode` forces ED, or unless
+`self.itensor_version==2` and the pybind11 extension isn't compiled (see
+`cppext.available()`), in which case it silently falls back to ED. Most
+public methods on `Many_Body_Chain` accept a `mode="DMRG"|"ED"` kwarg so
+results can be cross-validated between solvers (see the
+bilinear-biquadratic example in `README.md`).
 
-- **DMRG path, in-process extension (default)**: see "In-process pybind11
-  extension" below.
-- **DMRG path, file-based (fallback)**: `taskdmrg.py` writes a `tasks.in`
-  file describing the requested task (`GS`, `excited`, `correlator`,
-  `dynamical_correlator`, `time_evolution`, ...) plus DMRG parameters
-  (`maxm`, `nsweeps`, `cutoff`, etc.), then `cpprun.py`/`juliarun.py` invoke
-  the compiled backend (`mpscpp2/mpscpp.x`, built from the headers in
-  `mpscpp2/*.h` on top of vendored ITensor) or the Julia scripts in
-  `mpsjulia/`. Each call runs in an isolated temp working directory
-  (`/tmp/dmrgpy_tmp/<random-id>`, see `filesystem.py` and
-  `id_generator`/`to_folder`/`execute` in `manybodychain.py`) so concurrent
-  chains don't collide. This path still fully exists and is what runs
-  whenever the in-process extension is unavailable or hasn't been ported
-  for a given call.
+- **DMRG, C++ (`itensor_version=2`, the default)**: entirely in-process,
+  see "In-process pybind11 extension" below. There is no file-based/
+  subprocess fallback for this path — if the extension isn't compiled,
+  `mode.py` routes to ED instead.
+- **DMRG, Julia (`itensor_version="julia_live"`)**: a live, in-process
+  Julia session (`mpsjulialive/`, via `pyjulia`/`juliasession.py`) with its
+  own parallel set of modules (`mpsjulialive/groundstate.py`,
+  `vev.py`, `mps.py`, `mpo.py`, ...) mirroring the top-level ones but
+  talking to Julia's ITensors.jl instead of the C++ pybind11 extension.
+  `Many_Body_Chain.setup_julia()` switches a chain to this mode.
+  `itensor_version="julia"` (a separate, older subprocess-based Julia path
+  via `juliarun.py`) is not reachable through the normal public API today
+  (`gs_energy()` and friends only special-case `2` and `"julia_live"`)
+  and should be treated as legacy/inert.
 - **ED path**: `edtk/edchain.py` (`EDchain`) builds dense/sparse operators
   directly in Python/NumPy/SciPy (`pyfermion/`, `pyspin/`, `pyboson/`,
   `pyzn/` provide the per-statistics many-body operator construction,
   `edtk/one2many.py` promotes single-site operators to the full Hilbert
   space) and diagonalizes with `scipy.sparse.linalg`.
 
-### In-process pybind11 extension (default DMRG path)
+### In-process pybind11 extension (the C++ DMRG backend)
 
 `mpscpp2/bindings.cc` compiles a pybind11 extension module
 (`mpscpp2/_dmrgcpp*.so`, built by the `pybind` target in `mpscpp2/Makefile`)
-that embeds the same ITensor-based DMRG code as the file-based backend but
-runs it in-process — no `tasks.in`, no operator files, no subprocess, no
-temp directory. This is the default backend as of `use_cpp_extension=True`
-(`manybodychain.py`); the file-based backend above is kept as a complete,
-independent fallback, not dead code.
+that runs DMRG entirely in-process against vendored ITensor — no task
+files, no operator files, no subprocess, no temp directory. This is the
+only C++ DMRG path; a previous file-based/subprocess design (writing
+`tasks.in` and invoking a standalone `mpscpp.x` executable) has been
+removed.
 
 - **`cppext.py`** lazily imports the compiled extension and caches whether
-  it loaded (`get_backend()`/`available()`). If the `.so` isn't built (or
-  `itensor_version != 2`), the extension is simply absent and every call
-  site below falls back to the file-based path — nothing needs a `--flag`
-  to degrade gracefully.
+  it loaded (`get_backend()`/`available()`).
 - **`mpscpp2/chain_session.h`**'s `Chain` class is the stateful, in-process
-  counterpart to the whole file-based task protocol: one `Chain` instance
-  per `Many_Body_Chain` (held as `self._session`, created in
-  `sites.py::initialize`), with a method per DMRG task (`gs_energy`, `vev`,
-  `apply_operator`, KPM/CVM dynamical correlators, `correlation_matrix`,
-  `reduced_dm`, `excited_states`, time evolution, ...). It is built
-  directly against ITensor's `AutoMPO`/`MPS`/`MPO` APIs, not by shelling
-  out to `mpscpp.x`.
+  session: one `Chain` instance per `Many_Body_Chain` (held as
+  `self._session`, created in `sites.py::initialize` whenever
+  `itensor_version==2` and the extension is available), with a method per
+  DMRG task (`gs_energy`, `vev`, `apply_operator`, KPM/CVM dynamical
+  correlators, `correlation_matrix`, `reduced_dm`, `excited_states`, time
+  evolution, ...), built directly against ITensor's
+  `AutoMPO`/`MPS`/`MPO` APIs. `check_task.h`, `get_sites.h` and
+  `mo_terms.h` are the only other `mpscpp2/*.h` headers it depends on;
+  everything else it needs is self-contained in `chain_session.h`.
 - **`mpscpp2/mo_terms.h`** and `MultiOperator.to_terms()`
-  (`multioperator.py`) are the in-memory replacement for the AMPO operator
-  file format: a `MultiOperator` converts to a plain list of
+  (`multioperator.py`) convert a `MultiOperator` into a plain list of
   `(coefficient, [(opname, site), ...])` tuples that `Chain` turns directly
   into an ITensor `HTerm`/`AutoMPO`.
 - **The `cpp_handle` pattern**: `mps.py::MPS` and
   `multioperatortk/staticoperator.py::StaticOperator` both carry an opaque
-  `cpp_handle` attribute — `None` means "this object lives in the
-  file-based world" (an `.mps`/`.mpo` file on disk), non-`None` means "this
-  is a pybind11-wrapped ITensor object living only in C++ memory". Every
-  dispatch site that can take either kind of object must check
-  `self._session is not None` **and** that every wavefunction/operator
-  involved has a non-`None` `cpp_handle` before taking the in-process path
-  (see `mpsalgebra.py::_use_cpp_ext`) — a chain can have the extension
-  available while still holding file-based objects produced by a
-  not-yet-ported code path, and the two must never be mixed.
+  `cpp_handle` attribute holding the pybind11-wrapped ITensor object living
+  in C++ memory — these classes have no other representation now, so
+  `cpp_handle` is always set for `itensor_version==2` chains (it's `None`
+  only for objects that were never meant to touch the C++ backend, e.g.
+  `mpsjulialive`'s own `MPS`/`MPO` classes are separate types entirely).
 - Because `cpp_handle` objects have no pickle/deepcopy support, `MPS.copy()`
   / `StaticOperator.copy()` use a shallow `copy.copy()` (never
-  `deepcopy()`), and `Many_Body_Chain.__deepcopy__` explicitly drops
-  `_session` (set to `None`) on any clone.
-- A few **pre-existing bugs in the original file-based backend are
-  deliberately reproduced, not fixed**, in the in-process port (see
-  comments at the call sites for details): `evoloperator()`'s z³/6 term
-  multiplies `H2` instead of the computed `H3`; `tasks.in`'s `"noise"` key
-  is read back as `"moise"`; `"tevol_fit"` is written but
-  `"tevol_fit_td"` is read, making the `fitApplyMPO` time-evolution branch
-  unreachable in both backends. If ITensor results look numerically
-  "close but not exact" to a hand-derivation, check here before assuming a
-  porting bug.
-- Not every feature has an in-process implementation yet — anything built
-  under `mpscpp2/` that doesn't route through `chain_session.h` (e.g. the
-  `"dos"` task, which is dead/commented-out in `mpscpp.cc` itself) simply
-  never gets a `cpp_handle`-carrying object, so it stays on the file-based
-  path automatically.
+  `deepcopy()`). `Many_Body_Chain.__deepcopy__` never copies `_session`
+  directly (a live C++ session has no well-defined "copy" semantics);
+  instead it builds a fresh `Chain` for the clone when the original had
+  one, which is what `clone()`/`bandwidth()`/`lowest_eigenvalue()` rely on.
+- A few **pre-existing bugs in the original design are deliberately
+  reproduced, not fixed**, in `chain_session.h` (see comments at the call
+  sites for details): `evoloperator()`'s z³/6 term multiplies `H2` instead
+  of the computed `H3`; the old file-based backend's `"noise"` tasks.in key
+  was actually read back as `"moise"`, and `"tevol_fit"` was written but
+  `"tevol_fit_td"` was read, making that fitting branch unreachable — both
+  reproduced as hardcoded values rather than silently "fixed". If ITensor
+  results look numerically "close but not exact" to a hand-derivation,
+  check here before assuming a porting bug.
 
 ### Supporting `*tk` packages
 
@@ -180,18 +176,22 @@ counterpart.
 ### KPM / dynamical correlators
 
 Dynamical correlators and generic operator distributions are computed with
-the Kernel Polynomial Method (`kpmdmrg.py`, `mpscpp2/kpm*.h` on the DMRG
-side, `pyfermion/algebra/kpm.py` on the ED side) rather than direct spectral
+the Kernel Polynomial Method (`kpmdmrg.py`, `Chain::kpm_dynamical_correlator`/
+`Chain::general_kpm` in `mpscpp2/chain_session.h` on the C++ DMRG side,
+`pyfermion/algebra/kpm.py` on the ED side) rather than direct spectral
 decomposition, since exact diagonalization of the full spectrum is
 infeasible for large chains.
 
 ### Julia vs C++ backend
 
-Both backends implement the same task protocol (read `tasks.in` + operator
-files, write results back to the working directory). `mpsjulia/*.jl` is the
-Julia mirror of `mpscpp2/*.h`; when a feature exists in one backend but not
-the other, check `mode.py`/`juliarun.py`/`cpprun.py` for how the dispatch
-falls back (currently ED is the fallback when `mpscpp.x` isn't compiled).
+The two DMRG backends are independent implementations, not a shared
+protocol: the C++ path runs in-process through the pybind11 extension (see
+above), while `itensor_version="julia_live"` (`mpsjulialive/`) drives a
+live Julia/ITensors.jl session via `pyjulia` with its own mirrored set of
+modules. A feature missing on one side simply isn't implemented there yet
+(check the relevant `mpsjulialive/*.py` file, or lack thereof) rather than
+falling back automatically — the only automatic fallback is DMRG → ED when
+the C++ extension isn't compiled (`mode.py`).
 
 ### ITensor library
 the ITensor folder is a library that is developed elsewhere, hence you do not need to read it carefully. Read it only if there is some feature that does not work with the mpscpp code, and you need to figure out why

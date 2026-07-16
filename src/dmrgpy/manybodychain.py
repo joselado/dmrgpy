@@ -7,7 +7,6 @@ from . import groundstate
 from . import operatornames
 from . import correlator
 from . import densitymatrix
-from . import taskdmrg
 from . import dynamics
 from . import funtk
 from . import vev
@@ -16,9 +15,9 @@ from . import entanglement
 from . import entropy
 from . import excited
 from . import effectivehamiltonian
-from .writemps import write_sites
-from .mode import dmrgpath
 import subprocess
+
+dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path to this package
 
 one = np.matrix(np.identity(3))
 
@@ -81,15 +80,11 @@ class Many_Body_Chain():
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
-      # use the in-process pybind11 extension (mpscpp2/bindings.cc) instead
-      # of the subprocess/file-based backend. Defaults to True; every
-      # call site that consumes this also checks self._session is not
-      # None, and sites.py leaves _session as None whenever the extension
-      # isn't compiled or itensor_version!=2, so this falls back to the
-      # old file-based backend automatically when the extension isn't
-      # available. Pass use_cpp_extension=False to force the old backend.
-      self.use_cpp_extension = kwargs.get("use_cpp_extension",True)
-      self._session = None # in-process extension session, if any
+      # in-process pybind11 extension session (mpscpp2/bindings.cc), built
+      # in sites.py::initialize() for itensor_version==2. Stays None if the
+      # extension isn't compiled, in which case mode.py falls back to ED --
+      # there is no file-based DMRG backend left to fall back to.
+      self._session = None
       self.initialize(**kwargs)
       # and initialize the sites
   def initialize(self,**kwargs):
@@ -107,8 +102,10 @@ class Many_Body_Chain():
       (an opaque pybind11 Chain object, see mpscpp2/bindings.cc): it has no
       pickle/deepcopy support, and cloning a live C++ session doesn't have
       a well-defined meaning anyway. clone() (used by bandwidth()/
-      lowest_eigenvalue()) gets a clone with _session=None instead, which
-      safely falls back to the file-based backend for that clone."""
+      lowest_eigenvalue()) needs a working session of its own though, so a
+      fresh Chain is built for the clone instead of copying the original
+      one (a Chain only needs the site list to construct; any wavefunction/
+      Hamiltonian state is set up again by whatever the clone is used for)."""
       from copy import deepcopy
       cls = self.__class__
       out = cls.__new__(cls)
@@ -116,6 +113,9 @@ class Many_Body_Chain():
       for k,v in self.__dict__.items():
           if k=="_session": out.__dict__[k] = None
           else: out.__dict__[k] = deepcopy(v,memo)
+      if self._session is not None:
+          from . import cppext
+          out._session = cppext.get_backend().Chain(out.sites)
       return out
   def setup_julia(self):
       """Setup the Julia mode"""
@@ -293,22 +293,7 @@ class Many_Body_Chain():
       h = self.generate_bilinear(fun,self.Cdag,self.C)
       self.hopping = h # store
       self.update_hamiltonian()
-  def setup_task(self,mode="GS",task=dict()):
-      from .taskdmrg import setup_task
-      setup_task(self,mode=mode,task=task)
-  def write_task(self):
-      """
-      Write the tasks in tasks.in
-      """
-      self.execute( lambda : taskdmrg.write_tasks(self)) # write tasks
-  def write_hamiltonian(self):
-      """
-      Write the Hamiltonian in a file
-      """
-      from .writemps import write_sites
-      self.execute(lambda: write_sites(self)) # write the different sites
-      self.execute(lambda: self.hamiltonian.write("hamiltonian.in"))
-  def run(self,**kwargs): 
+  def run(self,**kwargs):
       from .mode import run
       return run(self,**kwargs)
   def get_bond_entropy(self,wf,i,j):
@@ -490,14 +475,6 @@ class Many_Body_Chain():
 
 #from fermionchain import Fermionic_Hamiltonian
 #from spinchain import Spin_Hamiltonian
-
-
-
-from .writemps import write_hoppings
-from .writemps import write_hubbard
-from .writemps import write_fields
-from .writemps import write_exchange
-from .writemps import write_pairing
 
 
 

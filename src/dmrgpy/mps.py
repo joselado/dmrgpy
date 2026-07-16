@@ -7,10 +7,10 @@ from . import multioperator
 import subprocess
 
 class MPS():
-    """Object for an MPS"""
+    """Object for an MPS, backed by an opaque in-process extension handle
+    (mpscpp2/chain_session.h's MPS, see mpscpp2/bindings.cc) -- nothing is
+    read from or written to disk."""
     def __init__(self,MBO=None,name="psi_GS.mps",cpp_handle=None):
-#        self.sc = sc # many body object
-#        self.sc.wf0 = None # no wavefunction
         if MBO is None:
             self.path = os.getcwd() # current directory
             self.MBO = None
@@ -18,16 +18,7 @@ class MPS():
             self.path = MBO.path # path to the many body object folder
             self.MBO = MBO
         self.name = name # initial name
-#        self.factor = 1.0 # factor of the mps
         self.cpp_handle = cpp_handle # opaque in-process extension handle
-        if cpp_handle is not None:
-            # in-process backend: the extension already holds this
-            # wavefunction in memory, nothing to read from disk
-            self.mps = None
-            self.sites = None
-        else:
-            self.mps = open(self.path+"/"+name,"rb").read() # read the MPS
-            self.sites = open(self.path+"/sites.sites","rb").read() # read sites
         self.mode = "DMRG" # mode of the object
     def set_MBO(self,MBO):
         """Set the MBO"""
@@ -57,13 +48,12 @@ class MPS():
         if name is None:
           name = id_generator()+".mps" # create a new name
         # A shallow copy is enough, and deliberately used instead of a deep
-        # one: self.mps/self.sites are immutable bytes (or None, in
-        # cpp_handle mode), the opaque cpp_handle is never mutated in place
-        # (every Chain method takes wf by const reference and returns a
-        # brand-new MPS, see chain_session.h), and self.MBO should stay
-        # shared -- there is no reason to duplicate the whole chain object
-        # just to copy one wavefunction. A real deepcopy would also choke on
-        # cpp_handle, which has no pickle/deepcopy support.
+        # one: the opaque cpp_handle is never mutated in place (every Chain
+        # method takes wf by const reference and returns a brand-new MPS,
+        # see chain_session.h), and self.MBO should stay shared -- there is
+        # no reason to duplicate the whole chain object just to copy one
+        # wavefunction. A real deepcopy would also choke on cpp_handle,
+        # which has no pickle/deepcopy support.
         out = _shallow_copy(self)
         out.name = name
         return out
@@ -73,12 +63,10 @@ class MPS():
         recurse needlessly into self.MBO)."""
         return self.copy()
     def write(self,name=None,path=None):
-        """Write the MPS in a folder"""
-        if self.cpp_handle is not None: return # already in memory, nothing to write
-        if name is None: name = self.name
-        if path is None: path = self.path
-        open(path+"/"+name,"wb").write(self.mps) # write the MPS
-        open(path+"/sites.sites","wb").write(self.sites) # write the sites
+        """No-op: the wavefunction already lives in self.cpp_handle,
+        nothing to write to disk. Kept as a callable so existing call
+        sites (e.g. self.execute(wf.write)) don't need special-casing."""
+        pass
     def get_fermionic_parity(self,**kwargs):
         from .fermionicparity import get_fermionic_parity
         return get_fermionic_parity(self,**kwargs) # parity of the state
