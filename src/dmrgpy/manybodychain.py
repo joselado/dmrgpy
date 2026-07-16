@@ -82,10 +82,13 @@ class Many_Body_Chain():
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
       # use the in-process pybind11 extension (mpscpp2/bindings.cc) instead
-      # of the subprocess/file-based backend, for the subset of methods
-      # that have been ported so far; defaults to False so existing
-      # behavior is completely unchanged unless explicitly requested
-      self.use_cpp_extension = kwargs.get("use_cpp_extension",False)
+      # of the subprocess/file-based backend. Defaults to True; every
+      # call site that consumes this also checks self._session is not
+      # None, and sites.py leaves _session as None whenever the extension
+      # isn't compiled or itensor_version!=2, so this falls back to the
+      # old file-based backend automatically when the extension isn't
+      # available. Pass use_cpp_extension=False to force the old backend.
+      self.use_cpp_extension = kwargs.get("use_cpp_extension",True)
       self._session = None # in-process extension session, if any
       self.initialize(**kwargs)
       # and initialize the sites
