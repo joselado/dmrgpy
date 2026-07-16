@@ -38,6 +38,15 @@ struct ExcitedResult
     std::vector<MPS> wavefunctions;
     };
 
+// Result of quench()/evolve_and_measure(): the per-timestep overlap/
+// expectation value (mirrors TIME_EVOLUTION.OUT) plus the final
+// wavefunction (mirrors psi_time_evolution.mps/psi_evolve_and_measure.mps).
+struct TimeEvolutionResult
+    {
+    std::vector<std::complex<double>> correlator;
+    MPS final_wf;
+    };
+
 class Chain
     {
     public:
@@ -284,6 +293,90 @@ class Chain
         auto psi1 = wf;
         for (int it=1;it<=nsteps;it++) psi1 = exactApplyMPO(expH,psi1,args);
         return psi1;
+        }
+
+    // Von Neumann entanglement entropy across the bond between sites b and
+    // b+1 (1-based), mirroring get_entropy.h's get_entropy() task /
+    // entropy() helper exactly.
+    double
+    bond_entropy(MPS const& wf, int b) const
+        {
+        auto psi = wf;
+        psi.position(b);
+        ITensor twosite = psi.A(b)*psi.A(b+1);
+        auto U = psi.A(b);
+        ITensor S,V;
+        auto spectrum = svd(twosite,U,S,V);
+        double SvN = 0.0;
+        for (auto p : spectrum.eigs()) if (p>1E-12) SvN += -p*std::log(p);
+        return SvN;
+        }
+
+    // Real-time quench dynamical correlator, mirroring time_evolution.h's
+    // quench() task (the "time_evolution" task): evolves two probe
+    // wavefunctions (A1|GS>, A2|GS>) under exp(-i dt (H-EGS)) and records
+    // their overlap at each step. H is passed as an explicit term list
+    // (like exponential_apply/evolve_and_measure below) since
+    // timedependent.py's evolution_dmrg_DC always takes an explicit h
+    // parameter (defaulting to, but not necessarily, this chain's own
+    // Hamiltonian). Only the tevol_custom_exp=true path (evoloperator(),
+    // not toExpH<ITensor>) is implemented, matching every other
+    // time-evolution method ported so far -- see exponential_apply's note.
+    TimeEvolutionResult
+    quench(std::vector<MOTerm> const& terms_h,
+           std::vector<MOTerm> const& terms_i,
+           std::vector<MOTerm> const& terms_j,
+           int nt, double dt, bool fit_td=true)
+        {
+        if (!have_wf0_) gs_energy();
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto args = Args("Cutoff",cutoff_,"Maxm",maxm_);
+        double EGS = overlap(wf0_,H,wf0_)/overlap(wf0_,wf0_);
+        auto ampo = build_ampo(sites_,terms_h);
+        ampo += -EGS,"Id",1;
+        auto expH = evoloperator(MPO(ampo),dt);
+        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
+        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto psi1 = exactApplyMPO(wf0_,A1,args);
+        auto psi2 = exactApplyMPO(wf0_,A2,args);
+        Cplx norm0 = std::sqrt(overlapC(psi1,psi1));
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            if (fit_td) fitApplyMPO(psi1,expH,psi1,args);
+            else psi1 = exactApplyMPO(expH,psi1,args);
+            normalize(psi1);
+            psi1 *= norm0;
+            out.correlator.push_back(overlapC(psi2,psi1));
+            }
+        out.final_wf = psi1;
+        return out;
+        }
+
+    // Real-time evolution of an explicit wavefunction, measuring an
+    // operator's expectation value at each step, mirroring
+    // time_evolution.h's evolution_measure() task exactly (no energy
+    // shift here, unlike quench() -- matches the original, which builds
+    // expH straight from get_ampo(sites) with no "-EGS" term added).
+    TimeEvolutionResult
+    evolve_and_measure(std::vector<MOTerm> const& terms_h,
+                        std::vector<MOTerm> const& terms_op,
+                        MPS const& wf, int nt, double dt, bool fit_td=true)
+        {
+        auto args = Args("Cutoff",cutoff_,"Maxm",maxm_);
+        auto ampo = build_ampo(sites_,terms_h);
+        auto expH = evoloperator(MPO(ampo),dt);
+        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto psi = wf;
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            if (fit_td) fitApplyMPO(psi,expH,psi,args);
+            else psi = exactApplyMPO(expH,psi,args);
+            out.correlator.push_back(overlapC(psi,A,psi));
+            }
+        out.final_wf = psi;
+        return out;
         }
 
     // Correction-vector-method (CVM) dynamical correlator at a single
@@ -647,6 +740,32 @@ class Chain
         auto out = sum_mpo(Iden,z*H);
         auto H2 = mult_mpo(H,H);
         out = sum_mpo(out,(0.5*z*z)*H2);
+        return out;
+        }
+
+    // exp(-i*dt*H) Taylor-expanded to (nominally) 3rd order, mirroring
+    // time_evolution.h's evoloperator() -- used by quench()/
+    // evolve_and_measure() above -- *verbatim*, including a latent bug in
+    // the original: H3 (H^3) is computed but the z^3/6 term multiplies H2
+    // again instead of H3, so this is not actually a 3rd-order expansion
+    // despite the name. Not fixed here: this migration changes how
+    // Python and C++ exchange data, not the numerics any existing
+    // calculation depends on, and silently correcting this would make
+    // old-vs-new comparisons diverge for a reason unrelated to the
+    // migration itself.
+    MPO
+    evoloperator(MPO const& H, double dt) const
+        {
+        auto ampo = AutoMPO(sites_);
+        ampo += 1.0,"Id",1;
+        Cplx z(0.0,-dt);
+        auto Iden = MPO(ampo);
+        auto out = sum_mpo(Iden,z*H);
+        auto H2 = mult_mpo(H,H);
+        auto H3 = mult_mpo(H,H2); // computed to match the original; unused below, see note
+        (void)H3;
+        out = sum_mpo(out,(0.5*z*z)*H2);
+        out = sum_mpo(out,(z*z*z/6.0)*H2); // NOTE: original uses H2 here, not H3
         return out;
         }
 

@@ -178,6 +178,13 @@ def general_kpm_moments(self,X=None,A=None,B=None,
     else: wfa = wf
     if B is not None: wfb = self.applyoperator(B,wf)
     else: wfb = wf
+    if (getattr(self,"use_cpp_extension",False) and self._session is not None
+            and wfa.cpp_handle is not None and wfb.cpp_handle is not None):
+        mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,self.kpm_accelerate)
+        if self.kpm_extrapolate:
+            mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+                    extrapolation_mode=self.kpm_extrapolate_mode)
+        return mus,shift,scale
     # write the wavefunctions
     self.execute(lambda: wfa.write(name="wfa.mps"))
     self.execute(lambda: wfb.write(name="wfb.mps"))
@@ -193,11 +200,29 @@ def general_kpm_moments(self,X=None,A=None,B=None,
     self.run() # perform the calculation
     m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
     mus = m[0]+1j*m[1]
-    # perform extrapolation if 
-    if self.kpm_extrapolate: 
+    # perform extrapolation if
+    if self.kpm_extrapolate:
       mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
               extrapolation_mode=self.kpm_extrapolate_mode)
     return mus,shift,scale
+
+
+def general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,accelerate):
+    """
+    KPM moments of an arbitrary operator between two wavefunctions via the
+    in-process pybind11 extension (mpscpp2/chain_session.h's
+    Chain::general_kpm), mirroring general_kpm_moments()/
+    kpm_moments_wfa_wfb()'s DMRG path exactly but with no file I/O. Shared
+    by both callers -- the only difference between them is whether
+    kpm_accelerate is self.kpm_accelerate or hardcoded false, which the
+    caller now passes in directly.
+    """
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    mus = self._session.general_kpm(X.to_terms(),wfa.cpp_handle,wfb.cpp_handle,
+            self.maxm,accelerate,int(num_p),self.cutoff)
+    return np.array(mus)
+
 
 def general_kpm(self,kernel="jackson",xs=None,**kwargs):
     """
@@ -274,9 +299,16 @@ def kpm_moments_wfa_wfb(self,X=None,wfa=None,wfb=None,
     else: # no scale provided
         X,scale,shift = scale_operator(self,X,a=a,b=b)
     num_p = int(3*scale/delta) # number of polynomials
-    if wfa is None or wfb is None: 
+    if wfa is None or wfb is None:
         print("Wavefunctions must be provided")
         raise
+    if (getattr(self,"use_cpp_extension",False) and self._session is not None
+            and wfa.cpp_handle is not None and wfb.cpp_handle is not None):
+        mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,False)
+        if self.kpm_extrapolate:
+            mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+                    extrapolation_mode=self.kpm_extrapolate_mode)
+        return mus,shift,scale
     # write the wavefunctions
     self.execute(lambda: wfa.write(name="wfa.mps"))
     self.execute(lambda: wfb.write(name="wfb.mps"))
@@ -292,7 +324,7 @@ def kpm_moments_wfa_wfb(self,X=None,wfa=None,wfb=None,
     self.run() # perform the calculation
     m = self.execute(lambda: np.genfromtxt("KPM_MOMENTS.OUT").transpose())
     mus = m[0]+1j*m[1]
-    # perform extrapolation if 
+    # perform extrapolation if
     if self.kpm_extrapolate:
       mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
               extrapolation_mode=self.kpm_extrapolate_mode)

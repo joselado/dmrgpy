@@ -162,6 +162,28 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return self.exponential_apply(terms_from_python(terms),wf,tau,nsteps);
             }, py::arg("terms"),py::arg("wf"),py::arg("tau"),py::arg("nsteps"),
                "Applies exp(tau*H) to wf via nsteps repeated 2nd-order Taylor steps")
+        .def("bond_entropy",&Chain::bond_entropy,py::arg("wf"),py::arg("b"))
+        .def("quench",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_i,
+                          std::vector<PyTerm> const& terms_j,
+                          int nt, double dt, bool fit_td) {
+                auto out = self.quench(terms_from_python(terms_h),
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    nt,dt,fit_td);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_i"),py::arg("terms_j"),
+               py::arg("nt"),py::arg("dt"),py::arg("fit_td")=true,
+               "Returns (correlator, final_wf)")
+        .def("evolve_and_measure",
+            [](Chain& self, std::vector<PyTerm> const& terms_h,
+               std::vector<PyTerm> const& terms_op, MPS const& wf,
+               int nt, double dt, bool fit_td) {
+                auto out = self.evolve_and_measure(terms_from_python(terms_h),
+                    terms_from_python(terms_op),wf,nt,dt,fit_td);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
+               py::arg("nt"),py::arg("dt"),py::arg("fit_td")=true,
+               "Returns (correlator, final_wf)")
         .def("overlap",&Chain::overlap_mps,py::arg("wf1"),py::arg("wf2"))
         .def("overlap_aMb",[](Chain& self, MPS const& wf1,
                                std::vector<PyTerm> const& terms, MPS const& wf2) {
