@@ -29,6 +29,7 @@ def multi_vev(self,MO,wf=None,npow=1,**kwargs):
     if npow==0: return 1.0
     if wf is None: wf = self.get_gs() # get the ground state
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     c = self._session.vev(MO.to_terms(),wf.cpp_handle,npow=int(npow))
     return c

@@ -126,6 +126,7 @@ def applyoperator_dmrg(self,A,wf):
     """Apply operator via the in-process pybind11 extension
     (mpscpp2/chain_session.h's Chain::apply_operator)."""
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     handle = self._session.apply_operator(A.to_terms(),wf.cpp_handle)
     return mps.MPS(self,cpp_handle=handle).copy()
@@ -136,6 +137,7 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     if delta is None: delta = self.cvm_tol # overwrite
     if maxn is None: maxn = self.cvm_nit # overwrite
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     handle = self._session.apply_inverse(A.to_terms(),wf.cpp_handle,
             delta,int(maxn))

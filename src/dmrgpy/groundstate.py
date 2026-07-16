@@ -51,6 +51,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     wavefunction are passed as in-memory arguments to self._session.
     """
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     self._session.set_hamiltonian(self.hamiltonian.to_terms())
     if wf0 is not None:

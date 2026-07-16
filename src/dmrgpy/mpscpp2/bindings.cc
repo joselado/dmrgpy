@@ -85,6 +85,9 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("set_sweep_params",&Chain::set_sweep_params,
              py::arg("maxm"),py::arg("nsweeps"),py::arg("cutoff"),py::arg("noise"))
         .def("set_mpomaxm",&Chain::set_mpomaxm,py::arg("mpomaxm"))
+        .def("set_verbose",&Chain::set_verbose,py::arg("verbose"),
+             "Enable/disable ITensor's per-sweep DMRG progress output "
+             "(disabled by default)")
         .def("random_mps",&Chain::random_mps)
         .def("set_hamiltonian",[](Chain& self, std::vector<PyTerm> const& terms) {
                 self.set_hamiltonian(terms_from_python(terms));

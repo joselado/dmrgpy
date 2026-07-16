@@ -34,6 +34,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     name[0] = name[0].get_dagger()
     A,B = name[0],name[1]
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     correlator,_wf = self._session.quench(
             self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
@@ -67,6 +68,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     if h is None: h = self.hamiltonian # Hamiltonian
     if wf is None: wf = self.wf0 # get ground state
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     correlator,_wf = self._session.evolve_and_measure(
             h.to_terms(),operator.to_terms(),wf.cpp_handle,

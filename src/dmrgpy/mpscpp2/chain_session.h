@@ -86,6 +86,16 @@ class Chain
     void
     set_mpomaxm(int mpomaxm) { mpomaxm_ = mpomaxm; }
 
+    // Controls whether ITensor's dmrg() prints its per-sweep/per-bond
+    // progress (energy, truncation error, states kept, ...) to stdout.
+    // Off by default -- the old file-based backend inherited this same
+    // chattiness from ITensor's default Args (neither "Quiet" nor "Silent"
+    // set), which dumped it all to mpscpp.x's own stdout/task log where
+    // nobody had to look at it; here it would otherwise land directly in
+    // the calling Python process's terminal on every DMRG call.
+    void
+    set_verbose(bool verbose) { verbose_ = verbose; }
+
     // Builds and caches the Hamiltonian MPO. Because this is a member
     // (rather than re-read from hamiltonian.in on every single call, as
     // get_hamiltonian.h does today), repeated gs_energy()/vev()/... calls
@@ -113,7 +123,7 @@ class Chain
             have_wf0_ = true;
             }
         auto sweeps = make_sweeps();
-        double energy = dmrg(wf0_,H_,sweeps);
+        double energy = dmrg(wf0_,H_,sweeps,dmrg_args());
         wf0_energy_ = energy;
         have_wf0_energy_ = true;
         return energy;
@@ -157,7 +167,9 @@ class Chain
         for (int i=1;i<n;i++)
             {
             MPS psi1(sites_);
-            dmrg(psi1,H_,wfs,sweeps,{"Quiet",true,"Weight",weight});
+            auto args = dmrg_args();
+            args.add("Weight",weight);
+            dmrg(psi1,H_,wfs,sweeps,args);
             normalize(psi1);
             wfs.push_back(psi1);
             }
@@ -601,6 +613,13 @@ class Chain
         }
 
     private:
+    // ITensor's dmrg() defaults to neither "Quiet" nor "Silent", i.e. full
+    // per-bond/per-sweep progress printing; this collapses that down to a
+    // single knob (verbose_) so every dmrg() call site here stays quiet
+    // unless verbose_ is explicitly turned on (see set_verbose() above).
+    Args
+    dmrg_args() const { return Args("Quiet",!verbose_,"Silent",!verbose_); }
+
     Sweeps
     make_sweeps() const
         {
@@ -650,7 +669,7 @@ class Chain
             auto psi = MPS(sites_);
             auto sweeps = make_sweeps();
             auto negH = (-1.0)*H_;
-            bandwidth_emax_ = -dmrg(psi,negH,sweeps);
+            bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args());
             have_bandwidth_max_ = true;
             }
         return bandwidth_emax_;
@@ -910,4 +929,5 @@ class Chain
     double cutoff_ = 1e-12;
     double noise_ = 1e-1;
     int mpomaxm_ = 5000;
+    bool verbose_ = false;
     };

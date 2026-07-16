@@ -45,6 +45,7 @@ def get_dynamical_correlator(self,n=1000,
     mi = name[1] # first operator
     mj = name[0].get_dagger() # second operator
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator(
             mi.to_terms(),mj.to_terms(),
@@ -107,6 +108,7 @@ def general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,accelerate):
     caller now passes in directly.
     """
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     mus = self._session.general_kpm(X.to_terms(),wfa.cpp_handle,wfb.cpp_handle,
             self.maxm,accelerate,int(num_p),self.cutoff)

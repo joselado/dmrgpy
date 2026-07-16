@@ -58,6 +58,7 @@ class Many_Body_Chain():
       self.mpomaxm = 5000 # bond dimension for operators
       self.nsweeps = 15 # number of sweeps
       self.noise = 1e-1 # noise for dmrg
+      self.verbose = False # print the C++ DMRG per-sweep progress output
       self.kpmcutoff = 1e-12 # cutoff in KPM
       self.cutoff = 1e-12 # cutoff in ground state
       self.tevol_custom_exp = True # custom exponential function for Tevol

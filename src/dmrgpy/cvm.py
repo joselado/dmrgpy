@@ -39,6 +39,7 @@ def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
     A = name[0]
     B = name[1]
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     return self._session.cvm_dynamical_correlator(
             A.to_terms(),B.to_terms(),e,delta,self.e0,

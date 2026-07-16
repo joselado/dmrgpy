@@ -15,6 +15,7 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     """
     wf0 = self.get_gs()
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     energies,fluctuations,handles = self._session.excited_states(
             n,scale,self.excited_gram_schmidt)
