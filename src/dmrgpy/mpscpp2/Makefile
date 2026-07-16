@@ -87,7 +87,11 @@ PYBIND_CCCOM=$(CCCOM)
 PYBIND_LIBFLAGS=$(LIBFLAGS)
 else
 PYBIND_CCCOM=$(CONDA_GXX) -m64 -std=c++14 -fPIC
-PYBIND_LIBFLAGS=-L$(ITENSOR_LIBDIR) -litensor -lpthread -L/usr/lib/x86_64-linux-gnu -lblas -llapack
+# BLAS/LAPACK flags come from options.mk (BLAS_LAPACK_LIBFLAGS), so this
+# branch stays in sync with whatever backend $(APP) itself was built
+# against (plain lapack, OpenBLAS, MKL, ...) instead of hardcoding
+# -lblas -llapack, which silently ignored that configuration.
+PYBIND_LIBFLAGS=-L$(ITENSOR_LIBDIR) -litensor $(BLAS_LAPACK_LIBFLAGS)
 endif
 
 pybind: $(EXT_MODULE)

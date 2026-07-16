@@ -1,4 +1,5 @@
 import os
+import re
 
 
 def compile(gpp="g++",check_gpp=True,**kwargs):
@@ -57,13 +58,28 @@ def compile(gpp="g++",check_gpp=True,**kwargs):
     os.chdir(path) # go to the main path
 
 
-def writemk(gpp="g++",openblas=False):
+def writemk(gpp="g++",openblas=False,openblas_libdir=None,openblas_includedir=None):
     """Write options.mk"""
     path = os.path.dirname(os.path.realpath(__file__))+"/../" # main path
     path = path+"/src/dmrgpy/mpscpp2/ITensor"
     out = open(path+"/options.save").read().replace("CCCOM=g++","CCCOM="+gpp)
     if openblas:
-        out = out.replace("-lblas -llapack","-lopenblas")
+        # PLATFORM matters beyond linking: itensor/tensor/lapack_wrap.h
+        # branches on -DPLATFORM_$(PLATFORM) for the LAPACK_COMPLEX layout
+        # and several function signatures, so just swapping the link flags
+        # (as before) risks a silent ABI mismatch against libopenblas.
+        libflags = "-lpthread"
+        if openblas_libdir:
+            libflags += " -L"+openblas_libdir
+        libflags += " -lopenblas"
+        includeflags = "-DHAVE_LAPACK_CONFIG_H -DLAPACK_COMPLEX_STRUCTURE"
+        if openblas_includedir:
+            includeflags = "-I"+openblas_includedir+" "+includeflags
+        out = out.replace("PLATFORM=lapack","PLATFORM=openblas")
+        out = re.sub(r"(?m)^BLAS_LAPACK_LIBFLAGS=.*$",
+                "BLAS_LAPACK_LIBFLAGS="+libflags+
+                "\nBLAS_LAPACK_INCLUDEFLAGS="+includeflags,
+                out,count=1)
     open(path+"/options.mk","w").write(out) # write file
 
 
