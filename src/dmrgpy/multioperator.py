@@ -1,26 +1,42 @@
 import numbers
 import types
 import collections
-from collections.abc import Iterable
 import numpy as np
 
 # this class allows to define operators of the form
 # A_0@A_1@....
 
+# Concrete scalar types checked first (fast path): isinstance() against the
+# numbers.Number ABC has to walk its __instancecheck__ machinery, which is
+# measurably slower than a plain isinstance() against a tuple of concrete
+# types, and this is called on every MultiOperator +/-/*. Uncommon numeric
+# types (e.g. exotic numpy/Python Number subclasses) still fall back to the
+# ABC check below.
+_fast_number_types = (int, float, complex, np.integer, np.floating,
+                       np.complexfloating)
+
 def isnumber(x):
-#    print(type(x),isinstance(x, numbers.Number))
-    return isinstance(x, numbers.Number) or np.iscomplex(x)
+    return isinstance(x, _fast_number_types) or isinstance(x, numbers.Number)
 
 
 ampo_counter = 0
 use_jordan_wigner = True
 n_mpo_max = 100 # maximum number of MPO products
+clean_threshold = 1e-8 # coefficient magnitude below which a term is dropped
+
+
+def _filter_small(op):
+    """Return a new term list with near-zero-coefficient terms dropped,
+    without mutating the input (terms may be shared between several
+    MultiOperator objects, see MultiOperator.copy)."""
+    return [o for o in op if abs(o[0])>clean_threshold]
 
 
 class MultiOperator():
     """
     Object to deal with multioperators
     """
+    __slots__ = ("op","name","i")
     def __init__(self,name=None,c=1.0,term=True): # do nothing
         global ampo_counter
         self.op = [] # empty list of sums of products
@@ -57,8 +73,19 @@ class MultiOperator():
     def is_zero(self):
         return self.simplify()==0
     def copy(self):
-        from copy import deepcopy
-        return deepcopy(self) # return a copy
+        """Return a cheap copy of this operator.
+
+        Terms are never mutated in place once they are part of self.op
+        (multiply_scalar, multiply_MO, etc. always build fresh term
+        lists instead), so sharing the term objects between the
+        original and the copy and only duplicating the outer list is
+        safe, and much cheaper than copy.deepcopy.
+        """
+        out = MultiOperator.__new__(MultiOperator)
+        out.op = list(self.op)
+        out.name = self.name
+        out.i = self.i
+        return out
     def get_dagger(self):
         return get_dagger(self)
     def __neg__(self):
@@ -73,8 +100,13 @@ class MultiOperator():
         elif type(a)==MultiOperator: # if it is a multioperator
           out = self.copy() # create a copy
           out.op = self.op + a.op # sum the two operators
-          out.i = self.i + a.i + 1 # increase the index
-          out.clean()
+          out.i = len(out.op)-1 # increase the index
+          # No clean() here: concatenating two already-clean term lists
+          # cannot introduce new near-zero terms, and calling clean()
+          # (an O(len(op)) rescan) on every "+" is what made building a
+          # Hamiltonian one term at a time (H = H + term, used pervasively
+          # across this codebase) quadratic. Filtering happens lazily,
+          # once, right before terms are consumed (write()/to_terms()).
           return out # return the sum
         elif isnumber(a): # if it is a number
             return self+a*identity() # return identity
@@ -92,8 +124,10 @@ class MultiOperator():
     def multiply_scalar(self,a):
         if not isnumber(a): raise # number
         out = self.copy()
-        for i in range(len(out.op)):
-            out.op[i][0] = out.op[i][0]*a # multiply
+        # Build fresh term lists rather than mutating out.op[i][0] in
+        # place: out.copy() shares the term objects with self (see
+        # copy()), so mutating them here would silently corrupt self too.
+        out.op = [[o[0]*a]+o[1:] for o in self.op]
         return out
     def __mul__(self,a):
         """Compute the product between two multioperators"""
@@ -102,24 +136,19 @@ class MultiOperator():
         elif isnumber(a): return self.multiply_scalar(a)
         else: return NotImplemented
     def multiply_MO(self,a):
-        out = self.copy() # copy operator
-        out.i = (self.i+1)*(a.i+1) # total number of terms
-        out.op = [] # empty list
-        for io in self.op: # loop over first operator
-          for jo in a.op: # loop over second operator
-              o = [io[0]*jo[0]] # compute coefficient
-              o = o + [io[i] for i in range(1,len(io))] # add
-              o = o + [jo[i] for i in range(1,len(jo))] # add
-              out.op.append(o) # store contribution
-        out.clean()
+        # self.op gets fully replaced below, so there is no point copying
+        # it first (the old code's self.copy() here just deepcopied self.op
+        # only to immediately discard it) - build a fresh, empty object.
+        out = MultiOperator.__new__(MultiOperator)
+        out.name = self.name
+        sop,aop = self.op,a.op
+        out.op = [[io[0]*jo[0]]+io[1:]+jo[1:] for io in sop for jo in aop]
+        out.i = len(out.op)-1
         return out # return operator
     def clean(self):
         """Remove terms with zero weight"""
-        op = []
-        for o in self.op:
-            if abs(o[0])>1e-8: op.append(o) # store
-        self.i = self.i - (len(self.op)-len(op)) # redefine
-        self.op = op # redefine
+        self.op = _filter_small(self.op)
+        self.i = len(self.op)-1
     def write(self,name=None):
         """Write in a file"""
         if name is None: name = self.name+".in"
@@ -137,7 +166,7 @@ class MultiOperator():
         if use_jordan_wigner: m = jordan_wigner(self)
         else: m = self
         return [(complex(term[0]),[(name,i+1) for (name,i) in term[1:]])
-                for term in m.op]
+                for term in _filter_small(m.op)]
     def get_dict(self):
         """Return the dictionary to be used in tasks.in"""
         d = dict()
@@ -170,12 +199,11 @@ def identity():
 def MO2list(self):
     """Convert a multioperator into a list"""
     out = []
-    for iop in self.op: # loop over operators
-        o = []
+    for iop in _filter_small(self.op): # loop over operators, dropping
+        o = []                         # any near-zero-weight ones
         o.append(iop[0].real) # real part
         o.append(iop[0].imag) # imaginary part
-        for i in range(len(iop)-1): # loop over terms
-          otmp = iop[i+1]
+        for otmp in iop[1:]: # loop over terms
           o.append(otmp[0])
           o.append(otmp[1]+1)
         out.append(o)
@@ -207,7 +235,7 @@ def obj2MO(a,name="multioperator"):
     """
     Convert an input in a multioperator
     """
-    if isinstance(a, Iterable): # if it is a tuple
+    if isinstance(a, (list,tuple)): # if it is a list/tuple of [name,site]
         mo = MultiOperator(name=name) # create object
         for ia in a:
             mo.add_operator(ia[0],ia[1])
@@ -265,12 +293,15 @@ def MO2matrix(MO,obj):
 def jordan_wigner(MO):
     """Use Jordan Wigner transformationin a multioperator"""
     from .multioperatortk import jordanwigner
-    m = 0*identity() # initialize output
-    for ii in range(len(MO.op)): # loop over operators
-        opi = MO.op[ii] # take this term
+    # Accumulate into a flat Python list and wrap once at the end, instead
+    # of "m = m + mi" per term: the latter goes through the public "+"
+    # (copy + list concat) once per term of MO.op, which turns this loop
+    # into an accidental O(n^2) even though the work is inherently O(n).
+    outterms = []
+    for opi in MO.op: # loop over operators
         n = len(opi)-1 # number of terms in the product
         c = opi[0] # take the complex value
-        mi = list2MO(opi) # default output
+        mi = None # None means "term unchanged", set below if JW applies
         ls = [opi[kk+1][0] for kk in range(n)] # names of operators
         try:
           if (n==1): # one point operator
@@ -285,43 +316,44 @@ def jordan_wigner(MO):
               i,j,k,l = opi[1][1],opi[2][1],opi[3][1],opi[4][1]
               if "C" in ls or "Cdag" in ls:
                   mi = c*jordanwigner.four_fermions(ls[0],i,ls[1],j,ls[2],
-                          k,ls[3],l) 
-          else: 
+                          k,ls[3],l)
+          else:
               if "C" in ls or "Cdag" in ls: raise # not implemented
-        except: # brute force 
+        except: # brute force
             inds = [opi[kk+1][1] for kk in range(n)]
             mi = c*jordanwigner.product2jw(ls,inds)
-        m = m + mi
-    return m
+        if mi is None: outterms.append(list(opi)) # term unchanged
+        else: outterms.extend(mi.op) # flatten in the transformed terms
+    out = MultiOperator(term=False)
+    out.op = outterms
+    out.i = len(outterms)-1
+    return out
 
 
+
+_dagger_name = {"C":"Cdag","Cdag":"C","A":"Adag","Adag":"A",
+                "Sp":"Sm","S+":"S-","Sm":"Sp","S-":"S+",
+                "Sig":"SigDag","Tau":"TauDag","SigDag":"Sig","TauDag":"Tau"}
 
 def get_dagger(self,conjugate=True):
     """Return the dagger of a multioperator"""
-    m = 0*identity() # initialize
+    # Same accumulation fix as jordan_wigner(): build the flat term list
+    # directly instead of combining one term at a time with "+".
+    outterms = []
     for opi in self.op: # loop over terms
         n = len(opi) # number of terms in the product
         c = opi[0] # coefficient
-        mi = np.conjugate(c) # initialize
-        for i in range(1,n): # loop over terms in the product
+        newterm = [np.conjugate(c)] # initialize
+        for i in range(n-1,0,-1): # reversed: (AB...)^dagger = ...B^dagger A^dagger
             name = opi[i][0] # name
             jj = opi[i][1] # index
-            if name=="C": name2="Cdag"
-            elif name=="Cdag": name2="C"
-            elif name=="A": name2="Adag"
-            elif name=="Adag": name2="A"
-            elif name=="Sp": name2="Sm"
-            elif name=="S+": name2="S-"
-            elif name=="Sm": name2="Sp"
-            elif name=="S-": name2="S+"
-            elif name=="Sig": name2="SigDag"
-            elif name=="Tau": name2="TauDag"
-            elif name=="SigDag": name2="Sig"
-            elif name=="TauDag": name2="Tau"
-            else: name2 = name
-            mi = obj2MO([[name2,jj]])*mi
-        m = m + mi # add contribution
-    return obj2MO(m) # return MO
+            name2 = _dagger_name.get(name,name)
+            newterm.append([name2,jj])
+        outterms.append(newterm)
+    out = MultiOperator(term=False)
+    out.op = outterms
+    out.i = len(outterms)-1
+    return obj2MO(out) # return MO
 
 
 
