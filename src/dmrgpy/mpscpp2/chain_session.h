@@ -295,6 +295,65 @@ class Chain
         return psi1;
         }
 
+    // The methods below mirror multioperatortk/staticoperator.py's
+    // StaticOperator: a *pre-compiled* operator handle (an ITensor MPO
+    // held directly, no re-parsing of a term list on every use), matching
+    // pureapplyoperator.h/multmpo.h's "pureoperator" family of tasks
+    // (which serialize/deserialize a plain ITensor MPO to/from a .mpo
+    // file, as distinct from get_ampo_operator.h's ampotk text format
+    // used everywhere else in this class). build_operator() is the bridge
+    // from a term list to such a handle, mirroring gen_pureoperator().
+
+    MPO
+    build_operator(std::vector<MOTerm> const& terms) const
+        {
+        return build_mpo(sites_,terms,mpomaxm_);
+        }
+
+    // Mirrors pureapplyoperator.h's pureapplyoperator() task.
+    MPS
+    apply_pure_operator(MPO const& A, MPS const& wf) const
+        {
+        auto args = Args("Cutoff",cutoff_,"Maxm",maxm_);
+        return exactApplyMPO(wf,A,args);
+        }
+
+    // Mirrors multmpo.h's multmpo_operator() task.
+    MPO
+    multiply_operators(MPO const& A, MPO const& B) const
+        {
+        return mult_mpo(A,B);
+        }
+
+    // Mirrors multmpo.h's trace_mpo_operator() task / operators.h's
+    // trace_mpo() (Tr[A] = <Id|A>).
+    std::complex<double>
+    trace_operator(MPO const& A) const
+        {
+        auto ampo = AutoMPO(sites_);
+        ampo += 1.0,"Id",1;
+        auto ident = MPO(ampo);
+        return overlapC(ident,A);
+        }
+
+    // Mirrors multmpo.h's hermitianmpo_operator() task / operators.h's
+    // hermitian_mpo(): daggers each site tensor and swaps its Site-type
+    // prime level 0<->1.
+    MPO
+    hermitian_operator(MPO const& A) const
+        {
+        auto out = A;
+        for (auto j : range1(out.N())) out.Aref(j) = dag(swapPrime(out.A(j),0,1,Site));
+        return out;
+        }
+
+    // Mirrors pureapplyoperator.h's overlap_aMb_static() task.
+    std::complex<double>
+    overlap_aMb_operator(MPS const& wf1, MPO const& A, MPS const& wf2) const
+        {
+        return overlapC(wf1,A,wf2);
+        }
+
     // Von Neumann entanglement entropy across the bond between sites b and
     // b+1 (1-based), mirroring get_entropy.h's get_entropy() task /
     // entropy() helper exactly.

@@ -78,6 +78,7 @@ PYBIND11_MODULE(_dmrgcpp, m)
           "and executes ITensor code (not just imports).");
 
     py::class_<MPS>(m,"MPS"); // opaque handle, no Python-visible methods yet
+    py::class_<MPO>(m,"MPO"); // opaque handle, for StaticOperator
 
     py::class_<Chain>(m,"Chain")
         .def(py::init<std::vector<int> const&>(), py::arg("site_types"))
@@ -162,6 +163,17 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return self.exponential_apply(terms_from_python(terms),wf,tau,nsteps);
             }, py::arg("terms"),py::arg("wf"),py::arg("tau"),py::arg("nsteps"),
                "Applies exp(tau*H) to wf via nsteps repeated 2nd-order Taylor steps")
+        .def("build_operator",[](Chain& self, std::vector<PyTerm> const& terms) {
+                return self.build_operator(terms_from_python(terms));
+            }, py::arg("terms"))
+        .def("apply_pure_operator",&Chain::apply_pure_operator,
+             py::arg("A"),py::arg("wf"))
+        .def("multiply_operators",&Chain::multiply_operators,
+             py::arg("A"),py::arg("B"))
+        .def("trace_operator",&Chain::trace_operator,py::arg("A"))
+        .def("hermitian_operator",&Chain::hermitian_operator,py::arg("A"))
+        .def("overlap_aMb_operator",&Chain::overlap_aMb_operator,
+             py::arg("wf1"),py::arg("A"),py::arg("wf2"))
         .def("bond_entropy",&Chain::bond_entropy,py::arg("wf"),py::arg("b"))
         .def("quench",[](Chain& self, std::vector<PyTerm> const& terms_h,
                           std::vector<PyTerm> const& terms_i,
