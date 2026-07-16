@@ -15,6 +15,7 @@ from . import entanglement
 from . import entropy
 from . import excited
 from . import effectivehamiltonian
+from . import multioperator
 import subprocess
 
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path to this package
@@ -227,23 +228,19 @@ class Many_Body_Chain():
       """
       Create the generalized interaction
       """
-      h = 0
       C = self.C
       Cdag = self.Cdag
-      for i in range(self.ns):
-        for j in range(self.ns):
-          for k in range(self.ns):
-            for l in range(self.ns):
-                h = h + f(i,j,k,l)*Cdag[i]*C[j]*Cdag[k]*C[l]
+      h = multioperator.msum(f(i,j,k,l)*Cdag[i]*C[j]*Cdag[k]*C[l]
+              for i in range(self.ns) for j in range(self.ns)
+              for k in range(self.ns) for l in range(self.ns))
       h = 0.5*(h+h.get_dagger())
       self.vijkl = h # store
       self.update_hamiltonian()
   def generate_bilinear(self,fun,A,B):
       """Generic bilinear term"""
       fun = funtk.obj2fun(fun) # set function
-      h = 0 # initialize
-      for i in range(self.ns): # loop
-          for j in range(self.ns): h = h + fun(i,j)*A[i]*B[j]
+      h = multioperator.msum(fun(i,j)*A[i]*B[j]
+              for i in range(self.ns) for j in range(self.ns))
       return 0.5*(h + h.get_dagger()) # Hermitian
   def update_hamiltonian(self):
       h = self.hopping + self.hubbard + self.pairing 

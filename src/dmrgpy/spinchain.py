@@ -81,16 +81,17 @@ class Spin_Chain(Many_Body_Chain):
         return get_logdimension(self)
     def set_exchange(self,fun):
         """Set the exchange coupling between sites"""
-        h = 0
-        for i in range(self.ns): # loop
-          for j in range(self.ns):  # loop
-            g = fun(i,j).real # call the function
-            if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
-            one = np.identity(3) # identity matrix
-            g = g*one # multiply by the identity
-            for ii in range(3):
-              for jj in range(3):
-                  h = h + g[ii,jj]*self.Si[ii][i]*self.Si[jj][j]
+        def terms():
+            for i in range(self.ns): # loop
+              for j in range(self.ns):  # loop
+                g = fun(i,j).real # call the function
+                if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
+                one = np.identity(3) # identity matrix
+                g = g*one # multiply by the identity
+                for ii in range(3):
+                  for jj in range(3):
+                      yield g[ii,jj]*self.Si[ii][i]*self.Si[jj][j]
+        h = multioperator.msum(terms())
         self.exchange = h # exchange matrix
         self.hamiltonian = self.exchange + self.fields # update Hamiltonian
     def get_ED_obj(self):
@@ -128,17 +129,14 @@ class Spin_Chain(Many_Body_Chain):
             sys = [self.get_operator("Sy",i) for i in range(self.ns)]
             szs = [self.get_operator("Sz",i) for i in range(self.ns)]
             ss = [sxs,sys,szs]
-        out = multioperator.zero() # initialize
-        for c in self.exchange: # exchange coupling
-            for i in range(3):
-              for j in range(3):
-                out = out + c.g[i,j]*ss[i][c.i]*ss[j][c.j]
+        out = multioperator.msum(c.g[i,j]*ss[i][c.i]*ss[j][c.j]
+                for c in self.exchange # exchange coupling
+                for i in range(3) for j in range(3))
         out.clean()
         if len(self.fields)>0:
-            for i in range(len(self.fields)):
-                b = self.fields[i]
-                for j in range(3):
-                  out = out + b[j]*ss[j][i]
+            fieldterms = multioperator.msum(b[j]*ss[j][i]
+                    for i,b in enumerate(self.fields) for j in range(3))
+            out = out + fieldterms
         # still have to add the fields!!
         return out # return multioperator
 

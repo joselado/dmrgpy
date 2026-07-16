@@ -2,6 +2,7 @@
 import numpy as np
 
 from .spinchain import Spin_Chain
+from . import multioperator
 
 class Thermal_Spin_Chain():
     def __init__(self,sites,T=0.1,**kwargs):
@@ -29,11 +30,12 @@ class Thermal_Spin_Chain():
         if self.computed_gs: 
             return self.wf0
         else:
-            h = 0. # initialize
-            for i in range(len(self.Sx)):
-                h = h + self.all_Sx[2*i]*self.all_Sx[2*i+1]
-                h = h + self.all_Sy[2*i]*self.all_Sy[2*i+1]
-                h = h + self.all_Sz[2*i]*self.all_Sz[2*i+1]
+            def terms():
+                for i in range(len(self.Sx)):
+                    yield self.all_Sx[2*i]*self.all_Sx[2*i+1]
+                    yield self.all_Sy[2*i]*self.all_Sy[2*i+1]
+                    yield self.all_Sz[2*i]*self.all_Sz[2*i+1]
+            h = multioperator.msum(terms()) # initialize
             self.MBChain.mode = self.mode # overwrite the mode
 #            wf = self.MBChain.random_mps()
             if self.T>1e-5: # non-zero temperature

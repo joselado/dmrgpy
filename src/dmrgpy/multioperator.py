@@ -191,6 +191,33 @@ def zero():
     return MultiOperator(term=True,c=0.0)
 
 
+def msum(ops):
+    """Sum an iterable of MultiOperator objects (bare 0/None entries are
+    treated as no-ops) in a single linear pass over all their terms.
+
+    This is the bulk equivalent of writing "h = h + term" in a loop: doing
+    that N times is O(N^2) (each "+" copies/concatenates the whole term
+    list built so far), while collecting the terms and summing once here
+    is O(total number of terms). Prefer this in any loop that assembles
+    an operator out of many pieces (long-range couplings, sums over
+    site/orbital indices, ...).
+    """
+    terms = []
+    name = None
+    for o in ops:
+        if o is None: continue
+        if isnumber(o):
+            if o==0: continue
+            o = o*identity()
+        if name is None: name = o.name
+        terms.extend(o.op)
+    out = MultiOperator(term=False)
+    if name is not None: out.name = name
+    out.op = terms
+    out.i = len(terms)-1
+    return out
+
+
 def identity():
     op = MultiOperator(term=True,c=1.0)
     op.add_operator("Id",1)

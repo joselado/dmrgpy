@@ -44,16 +44,16 @@ def set_exchange_spinful(self,fun):
     """
     Add exchange coupling to a spinful fermionic Hamiltonian
     """
-    out = mop.get_zero("hamiltonian_multioperator")
-    for i in range(self.ns//2): # loop over sites
-      for j in range(self.ns//2): # loop over sites
-          if np.max(np.abs(obj2matrix(fun(i,j)-fun(j,i))))>1e-8: raise
-          m = obj2matrix(fun(i,j)) # get the matrix
-          for k in range(3): # loop 
-            for l in range(3): # loop
-              out = out + m[k,l]*mop.get_si(j=k,i=i)*mop.get_si(j=l,i=j)
-#    self.hamiltonian_multioperator = out + self.hamiltonian_multioperator
     from .. import multioperator
+    def terms():
+        for i in range(self.ns//2): # loop over sites
+          for j in range(self.ns//2): # loop over sites
+              if np.max(np.abs(obj2matrix(fun(i,j)-fun(j,i))))>1e-8: raise
+              m = obj2matrix(fun(i,j)) # get the matrix
+              for k in range(3): # loop
+                for l in range(3): # loop
+                  yield m[k,l]*mop.get_si(j=k,i=i)*mop.get_si(j=l,i=j)
+    out = multioperator.msum(terms())
     f,mo = multioperator.MO2vijkl(out) # transform into vijkl
     self.set_vijkl(f) # set the function
     if mo is not None:
