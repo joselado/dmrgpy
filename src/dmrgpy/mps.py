@@ -1,5 +1,5 @@
 from __future__ import print_function
-from copy import deepcopy
+from copy import copy as _shallow_copy
 import os
 import numpy as np
 from . import entropy
@@ -56,19 +56,22 @@ class MPS():
         """Copy this wavefunction"""
         if name is None:
           name = id_generator()+".mps" # create a new name
-        if self.cpp_handle is not None:
-            # deepcopy chokes on the opaque pybind11 handle (it has no
-            # pickle/deepcopy support) -- share the same handle instead of
-            # cloning it. Safe because nothing on the C++ side ever mutates
-            # an MPS in place: every Chain method takes wf by const
-            # reference and returns a brand-new MPS (see chain_session.h).
-            out = MPS.__new__(MPS)
-            out.__dict__.update(self.__dict__)
-            out.name = name
-            return out
-        out = deepcopy(self) # copy everything
+        # A shallow copy is enough, and deliberately used instead of a deep
+        # one: self.mps/self.sites are immutable bytes (or None, in
+        # cpp_handle mode), the opaque cpp_handle is never mutated in place
+        # (every Chain method takes wf by const reference and returns a
+        # brand-new MPS, see chain_session.h), and self.MBO should stay
+        # shared -- there is no reason to duplicate the whole chain object
+        # just to copy one wavefunction. A real deepcopy would also choke on
+        # cpp_handle, which has no pickle/deepcopy support.
+        out = _shallow_copy(self)
         out.name = name
         return out
+    def __deepcopy__(self,memo):
+        """Defer to copy(): see the note there for why a shallow copy is
+        already correct and a real deep copy would fail on cpp_handle (or
+        recurse needlessly into self.MBO)."""
+        return self.copy()
     def write(self,name=None,path=None):
         """Write the MPS in a folder"""
         if self.cpp_handle is not None: return # already in memory, nothing to write

@@ -48,7 +48,8 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy
     """
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+    if (getattr(self,"use_cpp_extension",False) and self._session is not None
+            and (wf0 is None or wf0.cpp_handle is not None)):
         return gs_energy_single_cpp_ext(self,wf0=wf0,reconverge=reconverge,
                 maxde=maxde,maxdepth=maxdepth)
     if wf0 is not None:

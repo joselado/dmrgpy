@@ -6,7 +6,10 @@ def reduced_dm(self,i=0):
     """
     Compute the reduced density matrix
     """
-    self.get_gs() # compute ground state
+    wf = self.get_gs() # compute ground state
+    if (getattr(self,"use_cpp_extension",False) and self._session is not None
+            and wf.cpp_handle is not None):
+        return self._session.reduced_dm(wf.cpp_handle,i+1)
     task = {"density_matrix":"true",
             "index_i_DM":str(i+1)
 #            "index_j_DM":str(j+1)

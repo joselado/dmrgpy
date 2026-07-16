@@ -1,6 +1,20 @@
 from . import mps
 import numpy as np
 
+def _use_cpp_ext(self,*wfs):
+    """Whether the in-process extension session should be used for a call
+    involving the given wavefunction(s). Checking the session alone is not
+    enough: not every MPS-producing code path is ported yet (e.g.
+    randommps.py's random_mps_dummy() still goes through the old
+    file-based backend even when a session is active, since is_hermitian()
+    -- called on every gs_energy() -- uses it), so a wavefunction reaching
+    here may be file-based (cpp_handle is None) even on a chain with an
+    active session. Falling through to the old path in that case is what
+    keeps the two backends safely mixable on the same chain."""
+    if not (getattr(self,"use_cpp_extension",False) and self._session is not None):
+        return False
+    return all(wf.cpp_handle is not None for wf in wfs)
+
 def exponential(self,h,wf,mode="DMRG",**kwargs):
     """Compute the exponential"""
     mode = wf.mode # mode of the wavefunction
@@ -25,6 +39,15 @@ def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000,nt0=None):
     """Compute the exponential of a wavefunction"""
     if not self.is_hermitian(h): raise
     if nt0 is None: nt0 = int(h.get_bandwidth(self)*nt)
+    # the extension only implements the custom_exp (2nd-order Taylor)
+    # variant, which is what tevol_custom_exp=True (the default) selects
+    # below in the old-backend path too; fall through to that path if it's
+    # been explicitly turned off (toExpH<ITensor> is not ported)
+    if self.tevol_custom_exp and _use_cpp_ext(self,wfa):
+        tau = complex(-dt.real,dt.imag)
+        handle = self._session.exponential_apply(h.to_terms(),wfa.cpp_handle,
+                tau,int(nt0))
+        return mps.MPS(self,cpp_handle=handle).copy()
     task = {"exponential_eMwf":"true",
             "tevol_dt_real":str(-dt.real),
             "tevol_dt_imag":str(dt.imag),
@@ -56,7 +79,7 @@ def overlap_aMb(self,wf1,A,wf2,mode="DMRG"):
 
 def overlap_dmrg(self,wf1,wf2):
     """Compute the overlap between wavefunctions"""
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+    if _use_cpp_ext(self,wf1,wf2):
         return self._session.overlap(wf1.cpp_handle,wf2.cpp_handle)
     task = {"overlap":"true",
             }
@@ -84,7 +107,7 @@ def overlap_aMb_dmrg_MO(self,wf1,A,wf2):
     """Compute the overlap between wavefunctions, with A a multioperator"""
     from .multioperator import obj2MO
     A = obj2MO(A) # convert to a MO
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+    if _use_cpp_ext(self,wf1,wf2):
         return self._session.overlap_aMb(wf1.cpp_handle,A.to_terms(),wf2.cpp_handle)
     task = {"overlap_aMb":"true",
             }
@@ -128,7 +151,7 @@ def summps(self,wf1,wf2,**kwargs):
 
 def summps_dmrg(self,wf1,wf2):
     """Apply operator to a many body wavefunction"""
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+    if _use_cpp_ext(self,wf1,wf2):
         handle = self._session.sum_mps(wf1.cpp_handle,wf2.cpp_handle)
         return mps.MPS(self,cpp_handle=handle).copy()
     self.execute(lambda: wf1.write(name="summps_wf1.mps")) # write WF
@@ -143,7 +166,7 @@ def summps_dmrg(self,wf1,wf2):
 
 def applyoperator_dmrg(self,A,wf):
     """Apply operator to a many body wavefunction"""
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+    if _use_cpp_ext(self,wf):
         return applyoperator_dmrg_cpp_ext(self,A,wf)
     self.execute(lambda: wf.write(name="applyoperator_wf0.mps")) # write WF
     task = {"applyoperator":"true",
@@ -236,7 +259,7 @@ def toMPO(self,H,mode="DMRG"):
 
 def conjugate_mps(self,wf):
     """Apply operator to a many body wavefunction"""
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+    if _use_cpp_ext(self,wf):
         handle = self._session.conjugate(wf.cpp_handle)
         return mps.MPS(self,cpp_handle=handle).copy()
     self.execute(lambda: wf.write(name="wf1.mps")) # write WF

@@ -28,7 +28,8 @@ def multi_vev(self,MO,wf=None,npow=1,**kwargs):
     if MO.name!="vev_multioperator": raise
     if npow==0: return 1.0
     if wf is None: wf = self.get_gs() # get the ground state
-    if getattr(self,"use_cpp_extension",False) and self._session is not None:
+    if (getattr(self,"use_cpp_extension",False) and self._session is not None
+            and wf.cpp_handle is not None):
         return multi_vev_cpp_ext(self,MO,wf,npow)
     wf.write(name="wf_vev.mps") # write wavefunction
     taskd = MO.get_dict() # get the dictionary
