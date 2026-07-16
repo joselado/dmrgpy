@@ -195,6 +195,12 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     from .algebra.inverse import solve_Ab
     if delta is None: delta = self.cvm_tol # overwrite
     if maxn is None: maxn = self.cvm_nit # overwrite
+    if _use_cpp_ext(self,wf):
+        self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+        self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+        handle = self._session.apply_inverse(A.to_terms(),wf.cpp_handle,
+                delta,int(maxn))
+        return mps.MPS(self,cpp_handle=handle).copy()
 #    return solve_Ab(A,wf,tol=delta,nmax=1e2)
     self.execute(lambda: wf.write(name="apply_inverse_wf0.mps")) # write WF
     task = {"apply_inverse":"true",

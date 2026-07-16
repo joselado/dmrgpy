@@ -5,7 +5,10 @@ from scipy import linalg as lg
 
 def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     """Return excited state energies"""
-    self.get_gs()
+    wf0 = self.get_gs()
+    if (getattr(self,"use_cpp_extension",False) and self._session is not None
+            and wf0.cpp_handle is not None):
+        return get_excited_states_dmrg_cpp_ext(self,n=n,scale=scale)
     if self.excited_gram_schmidt: sm = "true"
     else: sm = "false"
     task = {"excited":"true",
@@ -20,10 +23,29 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     self.run() # perform the calculation
     wfs = [] # read the wavefunctions
     for i in range(n):
-        wf = mps.MPS(MBO=self,name="wavefunction_"+str(i)+".mps").copy() 
+        wf = mps.MPS(MBO=self,name="wavefunction_"+str(i)+".mps").copy()
         wfs.append(wf) # store this one
     out = self.execute(lambda: np.genfromtxt("EXCITED.OUT").T)
-    return out[0],wfs # return energies and wavefunctions 
+    return out[0],wfs # return energies and wavefunctions
+
+
+def get_excited_states_dmrg_cpp_ext(self,n=2,scale=10.0):
+    """
+    Excited states via the in-process pybind11 extension
+    (mpscpp2/chain_session.h's Chain::excited_states), mirroring
+    get_excited_states_dmrg() exactly but with no file I/O. The "noise"
+    kwarg is intentionally not passed through: in the old path it's
+    written to tasks.in under the key "noise", but get_sweeps.h actually
+    reads the (differently spelled) key "moise" for the Sweeps object, so
+    that kwarg has never actually affected anything -- not reproducing a
+    pre-existing no-op.
+    """
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    energies,fluctuations,handles = self._session.excited_states(
+            n,scale,self.excited_gram_schmidt)
+    wfs = [mps.MPS(MBO=self,cpp_handle=h).copy() for h in handles]
+    return np.array(energies),wfs
 
 
 def get_excited(*args,**kwargs):

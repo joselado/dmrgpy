@@ -28,6 +28,16 @@ struct KPMResult
     int num_polynomials;
     };
 
+// Result of excited_states(): mirrors get_excited.h's EXCITED.OUT
+// (energy + energy-fluctuation per state) plus the wavefunctions
+// themselves (get_excited.h writes those to wavefunction_<i>.mps).
+struct ExcitedResult
+    {
+    std::vector<double> energies;
+    std::vector<double> fluctuations;
+    std::vector<MPS> wavefunctions;
+    };
+
 class Chain
     {
     public:
@@ -101,6 +111,44 @@ class Chain
         wf0_ = wf;
         have_wf0_ = true;
         have_wf0_energy_ = false; // energy no longer matches wf0_
+        }
+
+    // Excited states via the state-targeting/Lagrange-multiplier technique,
+    // mirroring get_excited.h's get_excited() exactly, with one deliberate
+    // difference: the original computes a *second*, independent, unused
+    // ground state (a fresh MPS(sites)+dmrg() whose result is immediately
+    // discarded in favor of get_gs()'s already-cached one -- dead work, an
+    // artifact of the file-based code having no memory of what an earlier
+    // task already computed) before seeding wfs[0] from get_gs(); here
+    // wfs[0] is seeded directly from gs_energy()'s cached ground state, one
+    // fewer full DMRG run for exactly the same result.
+    ExcitedResult
+    excited_states(int n, double scale_lagrange=1.0, bool do_gram_schmidt=false)
+        {
+        if (!have_H_) Error("Chain::excited_states called before set_hamiltonian");
+        if (!have_wf0_) gs_energy(); // ensure a ground state is available
+        auto sweeps = make_sweeps();
+        std::vector<MPS> wfs;
+        auto psi0 = wf0_;
+        normalize(psi0);
+        wfs.push_back(psi0);
+        double weight = bandwidth()*scale_lagrange;
+        for (int i=1;i<n;i++)
+            {
+            MPS psi1(sites_);
+            dmrg(psi1,H_,wfs,sweeps,{"Quiet",true,"Weight",weight});
+            normalize(psi1);
+            wfs.push_back(psi1);
+            }
+        if (do_gram_schmidt) wfs = gram_schmidt(wfs);
+        ExcitedResult out;
+        for (auto& wf : wfs)
+            {
+            out.fluctuations.push_back(energy_fluctuation(wf,H_));
+            out.energies.push_back(overlap(wf,H_,wf));
+            out.wavefunctions.push_back(wf);
+            }
+        return out;
         }
 
     // Generic vacuum expectation value <wf|A^npow|wf>, mirroring vev.h's
@@ -224,6 +272,49 @@ class Chain
         auto psi1 = wf;
         for (int it=1;it<=nsteps;it++) psi1 = exactApplyMPO(expH,psi1,args);
         return psi1;
+        }
+
+    // Correction-vector-method (CVM) dynamical correlator at a single
+    // frequency point, mirroring cvm_dynamical_correlator.h's task plus
+    // cvm.h's spectral_function()/bicstab() exactly, but taking the two
+    // operators/frequency/energy directly instead of reading
+    // dc_multioperator_i.in/dc_multioperator_j.in/tasks.in, and using this
+    // Chain's own cached ground state (wf0_) instead of an internal
+    // get_gs() call (mirrors kpm_dynamical_correlator's same choice).
+    // energy is taken as an explicit parameter (not read from wf0_energy_)
+    // to match the original, which takes it from Python's self.e0 rather
+    // than recomputing/reusing it internally.
+    double
+    cvm_dynamical_correlator(std::vector<MOTerm> const& terms_i,
+                             std::vector<MOTerm> const& terms_j,
+                             double omega, double eta, double energy,
+                             double tol, int max_it) const
+        {
+        if (!have_wf0_) Error("Chain::cvm_dynamical_correlator called before gs_energy");
+        auto S1 = build_mpo(sites_,terms_i,mpomaxm_);
+        auto S2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto args = Args("Cutoff",cutoff_,"Maxm",maxm_);
+        const Cplx z(omega+energy,eta);
+        auto ampo = AutoMPO(sites_);
+        ampo += z,"Id",1;
+        auto zId = MPO(ampo);
+        auto A = sum(zId,(-1.0)*H_,args);
+        auto b = exactApplyMPO(S2,wf0_,args);
+        auto x = bicstab(A,b,tol,max_it,args);
+        Cplx G = overlapC(wf0_,S1,x);
+        return -G.imag()/M_PI;
+        }
+
+    // Solves A x = wf for x via BiCGSTAB, mirroring cvm.h's apply_inverse()
+    // task (used by mpsalgebra.py's applyinverse_dmrg, e.g. for analytic-
+    // continuation dynamical correlators).
+    MPS
+    apply_inverse(std::vector<MOTerm> const& terms, MPS const& wf,
+                  double tol, int max_it) const
+        {
+        auto A = build_mpo(sites_,terms,mpomaxm_);
+        auto args = Args("Cutoff",cutoff_,"Maxm",maxm_);
+        return bicstab(A,wf,tol,max_it,args);
         }
 
     // Fermionic single-particle correlation matrix <Cdag_i C_j>, mirroring
@@ -401,6 +492,46 @@ class Chain
         return bandwidth_emax_;
         }
 
+    // emax-emin, mirroring bandwidth.h's bandwidth(), using this Chain's
+    // own cached minimum_energy()/maximum_energy() rather than the
+    // process-global bandwidth_cache in bandwidth.h (which is still used
+    // by the old file-based executable and is fine there -- one process
+    // per task -- but would leak state across independent chains here).
+    double
+    bandwidth() { return maximum_energy()-minimum_energy(); }
+
+    // Mirrors get_excited.h's get_energy_fluctuation(): <H^2>-<H>^2 for a
+    // (locally normalized) copy of wf -- psi1 is taken by value, matching
+    // the original's local-copy-then-normalize semantics.
+    double
+    energy_fluctuation(MPS psi1, MPO const& H) const
+        {
+        normalize(psi1);
+        auto psi2 = exactApplyMPO(psi1,H,{"Maxm",maxm_,"Cutoff",cutoff_});
+        double de = overlap(psi1,psi2);
+        de = overlap(psi2,psi2)-de*de;
+        return de;
+        }
+
+    // Mirrors get_excited.h's gram_schmidt(): orthogonalizes a sequence of
+    // MPS against each other in order, using this Chain's own sum_mps
+    // instead of the free sum_mps() in mpsalgebra.h.
+    std::vector<MPS>
+    gram_schmidt(std::vector<MPS> wfs) const
+        {
+        for (size_t i=1;i<wfs.size();i++)
+            {
+            for (size_t j=0;j<i;j++)
+                {
+                auto proj = overlapC(wfs.at(j),wfs.at(i))*wfs.at(j);
+                auto wf = sum_mps(wfs.at(i),(-1.0)*proj);
+                normalize(wf);
+                wfs.at(i) = wf;
+                }
+            }
+        return wfs;
+        }
+
     struct HamiltonianScale { MPO scaled_H; double emin, emax, scale; };
 
     // Mirrors scalehamiltonian.h's scale_hamiltonian(): shift+rescale H_ so
@@ -455,6 +586,40 @@ class Chain
         auto out = MPO(ampo);
         nmultMPO(A1,A2,out,{"Maxm",mpomaxm_,"Cutoff",cutoff_});
         return out;
+        }
+
+    // BiCGSTAB iterative solver for A x = b (MPO/MPS), mirroring cvm.h's
+    // bicstab() exactly, using this Chain's own conjugate() instead of the
+    // free conjMPS() (both do the same thing -- conjugate every tensor of
+    // a copy of the MPS). Used by apply_inverse() and
+    // cvm_dynamical_correlator() above.
+    MPS
+    bicstab(MPO const& A, MPS const& b, double tol, int max_it, Args const& args) const
+        {
+        MPS x = b;
+        MPS r_old = sum(b,(-1.0)*exactApplyMPO(A,x,args),args);
+        MPS r_ = r_old;
+        MPS p = r_old;
+        MPS s, Ap, As, r_new;
+        Cplx alpha, beta, w;
+        int k = 0;
+        while (k<max_it)
+            {
+            Ap = exactApplyMPO(A,p,args);
+            alpha = overlapC(conjugate(r_old),r_) / overlapC(conjugate(Ap),r_);
+            s = sum(r_old,(-alpha)*Ap,args);
+            As = exactApplyMPO(A,s,args);
+            w = overlapC(conjugate(As),s) / overlapC(conjugate(As),As);
+            x = sum(x,sum(alpha*p,w*s,args),args);
+            r_new = sum(s,(-w)*As,args);
+            double res = std::sqrt(std::abs(overlapC(conjugate(r_new),r_new).real()));
+            if (res<=tol) break;
+            beta = (alpha/w) * overlapC(conjugate(r_new),r_) / overlapC(conjugate(r_old),r_);
+            p = sum(r_new,beta*sum(p,(-w)*Ap,args),args);
+            r_old = r_new;
+            k++;
+            }
+        return x;
         }
 
     // 2nd-order Taylor-expanded exp(z*H), mirroring time_evolution.h's

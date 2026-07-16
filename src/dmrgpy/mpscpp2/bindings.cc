@@ -91,6 +91,14 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("gs_wavefunction",&Chain::gs_wavefunction,
              py::return_value_policy::copy)
         .def("set_wavefunction",&Chain::set_wavefunction,py::arg("wf"))
+        .def("excited_states",[](Chain& self, int n, double scale_lagrange,
+                                  bool gram_schmidt) {
+                auto out = self.excited_states(n,scale_lagrange,gram_schmidt);
+                return py::make_tuple(out.energies,out.fluctuations,
+                                      out.wavefunctions);
+            }, py::arg("n"),py::arg("scale_lagrange")=1.0,
+               py::arg("gram_schmidt")=false,
+               "Returns (energies, fluctuations, wavefunctions)")
         .def("vev",[](Chain& self, std::vector<PyTerm> const& terms,
                        MPS const& wf, int npow) {
                 return self.vev(terms_from_python(terms),wf,npow);
@@ -160,5 +168,18 @@ PYBIND11_MODULE(_dmrgcpp, m)
             }, py::arg("wf1"),py::arg("terms"),py::arg("wf2"))
         .def("sum_mps",&Chain::sum_mps,py::arg("wf1"),py::arg("wf2"))
         .def("conjugate",&Chain::conjugate,py::arg("wf"))
+        .def("cvm_dynamical_correlator",
+            [](Chain& self, std::vector<PyTerm> const& terms_i,
+               std::vector<PyTerm> const& terms_j, double omega, double eta,
+               double energy, double tol, int max_it) {
+                return self.cvm_dynamical_correlator(
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    omega,eta,energy,tol,max_it);
+            }, py::arg("terms_i"),py::arg("terms_j"),py::arg("omega"),
+               py::arg("eta"),py::arg("energy"),py::arg("tol"),py::arg("max_it"))
+        .def("apply_inverse",[](Chain& self, std::vector<PyTerm> const& terms,
+                                 MPS const& wf, double tol, int max_it) {
+                return self.apply_inverse(terms_from_python(terms),wf,tol,max_it);
+            }, py::arg("terms"),py::arg("wf"),py::arg("tol"),py::arg("max_it"))
         ;
     }
