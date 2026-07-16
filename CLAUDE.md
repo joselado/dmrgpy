@@ -34,6 +34,55 @@ adds the repo's `src` to the Python path and to the user's shell rc file
 (`installtk/addpythonpath.py`, `installtk/addsystem.py`). There is no
 separate lint or CI config in this repo.
 
+### How compilation actually works
+
+`installtk/install2.py::compile()` does, per the platform check in
+`cppversion.py`:
+
+1. Writes `mpscpp2/ITensor/options.mk` from `options.save`
+   (`writemk()`), substituting the requested compiler (`--gpp`) and the
+   BLAS/LAPACK link flags (default `PLATFORM=lapack`,
+   `-L/usr/lib -lblas -llapack`; `--openblas` swaps in OpenBLAS instead —
+   see `writemk()`'s comment on why `PLATFORM` matters beyond linking).
+2. `make clean && make` in `ITensor/itensor/` — compiles the vendored
+   ITensor sources into `lib/libitensor.a`, **twice** (an optimized pass,
+   then a `.debug_objs/` debug pass). This is by far the slowest step: the
+   build is single-threaded (no `-j`), so on a single-core machine the
+   full `python install.py` run can take 5-10+ minutes, almost entirely
+   here. Modern g++ (e.g. 13.x) also emits many harmless
+   `-Wstringop-overread` warnings compiling this pre-C++17 code — noisy,
+   not errors, safe to ignore.
+3. `make clean && make` in `mpscpp2/` — links `mpscpp` (renamed to
+   `mpscpp.x`) against `libitensor.a`, with the same compiler used for
+   step 2 (`$(CCCOM)` from `options.mk`).
+4. `make pybind` in `mpscpp2/` (only if `pybind11` is importable) — builds
+   the in-process extension `_dmrgcpp*.so` (see "In-process pybind11
+   extension" below). **This step deliberately uses a different compiler
+   than step 3 when one is available**: `mpscpp2/Makefile`'s
+   `PYBIND_CCCOM` prefers a conda-provided `*-conda*-g++` next to the
+   `python3` on `PATH` over `$(CCCOM)`, to keep the extension's libstdc++
+   ABI matched to whatever libstdc++/BLAS numpy/scipy already loaded into
+   the process — a plain `$(CCCOM)` build reproducibly segfaults once
+   imported alongside conda's numpy/scipy (see the long comment above
+   `PYBIND_CCCOM` for the full story and rejected alternatives). One
+   consequence: **on Debian/Ubuntu multiarch systems this step can fail
+   with `cannot find -lblas`/`-llapack` even though step 3 just linked
+   fine with the identical flags** — the system compiler has
+   `/usr/lib/x86_64-linux-gnu` wired in as a default library search path,
+   but the isolated conda cross-linker doesn't, and `libblas.so`/
+   `liblapack.so` aren't directly under `/usr/lib` on these systems.
+   `PYBIND_LIBFLAGS` works around this by asking `$(CCCOM)` where it
+   actually found the libraries (`-print-file-name=libblas.so`/
+   `liblapack.so`) and passing that directory to the conda linker
+   explicitly (`SYS_BLAS_LIBDIR`/`SYS_LAPACK_LIBDIR`). If a *new* pybind
+   link failure shows up, this is the first place to look.
+
+`pybind11 not found, skipping the in-process extension build` printed
+instead of step 4 just means the in-process extension won't be available
+that session — `cppext.available()` returns `False` and every call
+transparently falls back to the file-based path, so this by itself is not
+a build failure worth chasing.
+
 ## Running / verifying changes
 
 There is no unit test suite for the Python code (the only `test.py`/`*_test.cc`
