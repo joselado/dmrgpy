@@ -103,16 +103,6 @@ class MBFermion(edchain.EDchain):
         """
         if hubbard is None: return
         self.h = self.h + self.hubbard(hubbard) # add Hubbard term
-    def add_vijkl(self,f):
-        """
-        Add a generalized interaction
-        """
-        self.h = self.h + self.get_vijkl(f)
-    def get_vijkl(self,f):
-        """
-        Return the generalized interaction
-        """
-        return get_vijkl(self,f)
     def get_excited(self,**kwargs):
         """Excited states"""
         return algebra.lowest_eigenvalues(self.h,**kwargs)
@@ -202,23 +192,6 @@ class MBFermion(edchain.EDchain):
             raise
 
 
-
-
-
-def get_vijkl(self,f):
-    """
-    Return a generalized interaction in the many body basis
-    """
-    m = self.get_zero()
-    if f is None: return m
-    for i in range(self.n):
-      for j in range(self.n):
-        for k in range(self.n):
-          for l in range(self.n):
-              c = f(i,j,k,l) # get the value
-              if np.abs(c)>1e-8: # non zero
-                  m = m + c*self.get_cd(i)@self.get_c(j)@self.get_cd(k)@self.get_c(l)
-    return m
 
 
 

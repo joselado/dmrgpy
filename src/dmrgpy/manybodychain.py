@@ -74,7 +74,6 @@ class Many_Body_Chain():
       self.wf0 = None # no initial WF
       self.skip_dmrg_gs = False # skip the DMRG minimization
       self.computed_gs = False # computed the GS already
-      self.vijkl = 0 # generalized interaction
       self.fit_td = False # use fitting procedure in time evolution
       self.itensor_version = itensor_version # ITensor version
       self.has_ED_obj = False # ED object has been computed
@@ -224,18 +223,6 @@ class Many_Body_Chain():
       """
       return vev.excited_vev(self,MO,**kwargs)
   def excited_vev(self,MO,**kwargs): return self.excited_vev_MB(MO,**kwargs)
-  def set_vijkl(self,f):
-      """
-      Create the generalized interaction
-      """
-      C = self.C
-      Cdag = self.Cdag
-      h = multioperator.msum(f(i,j,k,l)*Cdag[i]*C[j]*Cdag[k]*C[l]
-              for i in range(self.ns) for j in range(self.ns)
-              for k in range(self.ns) for l in range(self.ns))
-      h = 0.5*(h+h.get_dagger())
-      self.vijkl = h # store
-      self.update_hamiltonian()
   def generate_bilinear(self,fun,A,B):
       """Generic bilinear term"""
       fun = funtk.obj2fun(fun) # set function
@@ -243,8 +230,8 @@ class Many_Body_Chain():
               for i in range(self.ns) for j in range(self.ns))
       return 0.5*(h + h.get_dagger()) # Hermitian
   def update_hamiltonian(self):
-      h = self.hopping + self.hubbard + self.pairing 
-      h = h + self.vijkl + self.exchange
+      h = self.hopping + self.hubbard + self.pairing
+      h = h + self.exchange
       self.set_hamiltonian(h)
   def get_dagger(self,m): return m.get_dagger() # dummy method
   def overlap(self,wf1,wf2,**kwargs):

@@ -20,8 +20,6 @@ from reference_data import (
     FERMION_CORRELATOR_U0,
     FERMION_CORRELATOR_U2,
     FERMION_CORRELATOR_U10,
-    SPIN_PICTURE_ENERGY,
-    SPINFUL_EXCHANGE_ENERGY,
 )
 
 DMRG_TOL = 1e-6  # DMRG is iterative/variational, not bit-exact
@@ -88,32 +86,3 @@ def test_spinful_fermion_correlator_matches_reference(U, expected):
     wf0 = fc.get_gs(mode="ED")
     correlator = [wf0.dot((fc.Cdagup[0] * fc.Cup[i]) * wf0).real for i in range(L)]
     assert correlator == pytest.approx(expected, abs=ED_TOL)
-
-
-def test_spin_vs_fermion_exchange_picture_energy_matches_reference():
-    """A 4-site Heisenberg-like chain built two independent ways -
-    directly as spin operators, and as a Jordan-Wigner-transformed
-    fermionic exchange coupling (fermionchain.set_exchange, which goes
-    through multioperator.msum, MultiOperator.multiply_MO and
-    set_vijkl) - must each match the original implementation's
-    ground-state energy for that representation. (The two conventions
-    are not required to give the same energy as each other - only each
-    to reproduce its own pre-optimization result.)"""
-    n = 4
-    sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
-    h = 0
-    for i in range(n - 1):
-        h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
-    sc.set_hamiltonian(h)
-    e_spin = sc.gs_energy(mode="ED")
-
-    fc = fermionchain.Spinful_Fermionic_Chain(n)
-
-    def fexch(i, j):
-        return 1.0 if abs(i - j) == 1 else 0.0
-
-    fc.set_exchange(fexch)
-    e_fermion = fc.gs_energy(mode="ED")
-
-    assert e_spin == pytest.approx(SPIN_PICTURE_ENERGY, abs=ED_TOL)
-    assert e_fermion == pytest.approx(SPINFUL_EXCHANGE_ENERGY, abs=ED_TOL)

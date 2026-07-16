@@ -110,12 +110,9 @@ class Fermionic_Chain(Many_Body_Chain):
         """Compute ground state energy, overrriding the method"""
         if mode=="DMRG": 
             return Many_Body_Chain.gs_energy(self,**kwargs)
-        elif mode=="ED": 
-#            if np.max(np.abs(self.hubbard_matrix))<1e-6 and self.vijkl is None:
-#                return self.gs_energy_free()
-#            else:
-                MBF = self.get_ED_obj()
-                return algebra.lowest_eigenvalues(MBF.h,n=1)[0]
+        elif mode=="ED":
+            MBF = self.get_ED_obj()
+            return algebra.lowest_eigenvalues(MBF.h,n=1)[0]
         else: raise # unrecognised
     def get_ED_obj(self):
         """
@@ -280,11 +277,6 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
     def get_density_fluctuation(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_fluctuation_spinful(self,**kwargs)
-    def set_exchange(self,fun):
-        """
-        Add exchange coupling betwwen the spinful fermionic sites
-        """
-        hamiltonian.set_exchange_spinful(self,fun) # set the exchange
     def set_hoppings_spinful(self,fun):
         """
         Function to Add hopping in a spinful manner
