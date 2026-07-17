@@ -81,17 +81,18 @@ class Many_Body_Chain():
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
-      # in-process pybind11 extension session (mpscpp2/bindings.cc), built
-      # in sites.py::initialize() for itensor_version==2. Stays None if the
-      # extension isn't compiled, in which case mode.py falls back to ED --
-      # there is no file-based DMRG backend left to fall back to.
+      # in-process pybind11 extension session (mpscpp2/mpscpp3's
+      # bindings.cc, depending on itensor_version), built in
+      # sites.py::initialize() for itensor_version in (2,3). Stays None if
+      # the extension isn't compiled, in which case mode.py falls back to
+      # ED -- there is no file-based DMRG backend left to fall back to.
       self._session = None
       self.initialize(**kwargs)
       # and initialize the sites
   def initialize(self,**kwargs):
       """Initialize the sites"""
       if self.mode=="ED": return # do nothing
-      if self.itensor_version in [2,"julia"]:
+      if self.itensor_version in [2,3,"julia"]:
           from .sites import initialize
           initialize(self)
       elif self.itensor_version=="julia_live":
@@ -100,13 +101,14 @@ class Many_Body_Chain():
       else: raise
   def __deepcopy__(self,memo):
       """Deepcopy that never tries to copy the in-process extension session
-      (an opaque pybind11 Chain object, see mpscpp2/bindings.cc): it has no
-      pickle/deepcopy support, and cloning a live C++ session doesn't have
-      a well-defined meaning anyway. clone() (used by bandwidth()/
-      lowest_eigenvalue()) needs a working session of its own though, so a
-      fresh Chain is built for the clone instead of copying the original
-      one (a Chain only needs the site list to construct; any wavefunction/
-      Hamiltonian state is set up again by whatever the clone is used for)."""
+      (an opaque pybind11 Chain object, see mpscpp2/mpscpp3's bindings.cc):
+      it has no pickle/deepcopy support, and cloning a live C++ session
+      doesn't have a well-defined meaning anyway. clone() (used by
+      bandwidth()/lowest_eigenvalue()) needs a working session of its own
+      though, so a fresh Chain is built for the clone instead of copying
+      the original one (a Chain only needs the site list to construct; any
+      wavefunction/Hamiltonian state is set up again by whatever the clone
+      is used for)."""
       from copy import deepcopy
       cls = self.__class__
       out = cls.__new__(cls)
@@ -116,15 +118,15 @@ class Many_Body_Chain():
           else: out.__dict__[k] = deepcopy(v,memo)
       if self._session is not None:
           from . import cppext
-          out._session = cppext.get_backend().Chain(out.sites)
+          out._session = cppext.get_backend(self.itensor_version).Chain(out.sites)
       return out
   def setup_julia(self):
       """Setup the Julia mode"""
       self.itensor_version = "julia_live"
       self.initialize()
-  def setup_cpp(self):
-      """Setup the C++ mode"""
-      self.itensor_version = 2
+  def setup_cpp(self,version=2):
+      """Setup the C++ mode (version 2 = ITensor v2, 3 = ITensor v3)"""
+      self.itensor_version = version
       self.initialize()
   def get_mode(self,**kwargs):
       from .mode import get_mode
@@ -200,8 +202,8 @@ class Many_Body_Chain():
       return degeneracy.gs_degeneracy(self,**kwargs)
   def vev(self,MO,mode="DMRG",**kwargs): 
       mode = self.get_mode(mode=mode) # overwrite mode
-      if mode=="DMRG": 
-          if self.itensor_version==2: # C++ version
+      if mode=="DMRG":
+          if self.itensor_version in (2,3): # C++ version
               return vev.vev(self,MO,**kwargs)
           elif self.itensor_version=="julia_live": # julia live version
               from .mpsjulialive.vev import vev as vevjl
@@ -440,7 +442,7 @@ class Many_Body_Chain():
       """Generate a random MPS"""
       if self.mode is not None: mode = self.mode # redefine
       if mode in ["DMRG","MPS"]:
-         if self.itensor_version==2: # C++ version
+         if self.itensor_version in (2,3): # C++ version
              from . import mps
              if orthogonal is None: return mps.random_mps(self)
              else: return mps.orthogonal_random_mps(self,orthogonal)

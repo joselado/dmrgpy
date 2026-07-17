@@ -30,14 +30,23 @@ parser.add_argument("--openblas_libdir", default=None,
 parser.add_argument("--openblas_includedir", default=None,
         help="Path to the directory containing OpenBLAS headers (only "
              "used together with --openblas).")
+parser.add_argument("--itensor-version", "--itensor_version",
+        dest="itensor_version", default="2", choices=["2", "3", "both"],
+        help="Which C++ DMRG backend(s) to compile: 2 = ITensor v2 "
+             "(mpscpp2, itensor_version=2 in Python), 3 = ITensor v3 "
+             "(mpscpp3, itensor_version=3), both = compile both, "
+             "one after the other (default: 2, matching the historical "
+             "single-backend behavior).")
 args = parser.parse_args()
 
+versions = [2, 3] if args.itensor_version == "both" else [int(args.itensor_version)]
 
 from installtk import requirements
 config = requirements.check(args) # phase 1: check everything first
 
 from installtk import install2
-install2.compile(config) # phase 2: only reached once phase 1 passed
+for version in versions:
+    install2.compile(config, version=version) # phase 2: only reached once phase 1 passed
 
 from installtk import addpythonpath
 addpythonpath.addpath() # add the library to the Python path

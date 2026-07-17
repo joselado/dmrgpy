@@ -89,7 +89,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
 
 def gs_energy(self,**kwargs):
     if self.is_hermitian(self.hamiltonian): # put a check for Hermitian
-        if self.itensor_version==2: # C++ version
+        if self.itensor_version in (2,3): # C++ version
             return gs_energy_cpp(self,**kwargs)
         elif self.itensor_version=="julia_live":
             from .mpsjulialive.groundstate import get_gs_dmrg

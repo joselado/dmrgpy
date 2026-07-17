@@ -22,9 +22,9 @@ def get_mode(self,mode="DMRG"):
     """Return the mode of the calculation"""
     # if the in-process C++ extension isn't available for a C++ chain,
     # fall back to ED (Julia chains are unaffected by this check)
-    if self.itensor_version==2:
+    if self.itensor_version in (2,3):
         from . import cppext
-        if not cppext.available():
+        if not cppext.available(self.itensor_version):
             print("C++ extension not compiled, using default ED routines")
             return "ED" # use exact diagonalization
     # if there is an enforced mode, then use that one

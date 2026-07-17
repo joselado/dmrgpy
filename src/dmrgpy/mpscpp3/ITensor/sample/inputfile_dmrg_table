@@ -1,0 +1,18 @@
+input
+    {
+    N = 100
+
+    nsweeps = 5
+    sweeps
+        {
+        maxdim  mindim  cutoff  niter  noise
+        50      20      1E-6    4      1E-7
+        80      20      1E-8    3      1E-8
+        100     10      1E-10   2      1E-10
+        150     10      1E-12   2      0
+        150     10      1E-12   2      0
+        }
+
+    quiet = no
+
+    }
