@@ -35,7 +35,20 @@ def test_hubbard_chain_ground_state_energy():
 def test_static_hopping_correlator():
     """Static correlator <Cdagup_0 Cup_j> on the same 3-site Hubbard
     chain (examples/fermionic_static_correlator), checked against golden
-    regression values for each site j."""
+    regression values for each site j.
+
+    The plain Hamiltonian is symmetric under swapping up and down spins,
+    so its ground state is exactly 2-fold degenerate (confirmed via ED:
+    the two lowest eigenvalues coincide to machine precision) -- an
+    unconstrained DMRG search (no fixed Sz/N sector, see CLAUDE.md) can
+    converge to either member of that degenerate subspace, and <Nup_0>
+    is *not* symmetric under the up/down swap, so it differs between
+    them. This was only invisible while every "DMRG" call in this repo's
+    dev environment silently fell back to ED (see mode.py): running the
+    literal same test against a real compiled DMRG backend converged to
+    the right energy but a correlator wildly off from the ED value here.
+    A small explicit Zeeman-like term breaks the degeneracy so the
+    ground state -- and this observable -- are uniquely defined."""
     n = 3
     fc = fermionchain.Spinful_Fermionic_Chain(n)
     h = 0
@@ -46,8 +59,10 @@ def test_static_hopping_correlator():
     for i in range(n):
         h = h + U * (fc.Nup[i] - .5) * (fc.Ndn[i] - .5)
     h = h + h.get_dagger()
+    eps = 0.3  # lifts the up/down degeneracy
+    h = h + eps * (fc.Nup[0] - fc.Ndn[0])
 
-    expected = [0.1881966011250103, -0.26180339887498927, 0.11180339887498948]
+    expected = [0.09204667896906626, -0.20764359692352258, 0.09821625446016191]
     for j in range(n):
         op = fc.Cdagup[0] * fc.Cup[j]
         v_ed, v_v2, v_v3 = vev_ed_v2_v3(fc, h, op)
