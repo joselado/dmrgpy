@@ -29,7 +29,7 @@ def stochastic_inverse_trace(self,A,n=10,delta=1e-2,mode="DMRG",**kwargs):
     from ..randommps import random_states
     wfs = random_states(self,mode=mode,n=n,orthogonal=True) # states
     n = len(wfs) # overwrite
-    wBw = [wf.dot(self.applyinverse(A,wf,delta=1e-4)) for wf in wfs] # inverses
+    wBw = [wf.dot(self.applyinverse(A,wf,delta=delta)) for wf in wfs] # inverses
     from scipy.stats import tstd
 #    print("Fluctuation",tstd(wBw)/np.sqrt(n))
     return np.sum(wBw)/len(wBw) # return the sum

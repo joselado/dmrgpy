@@ -10,8 +10,16 @@ def get_correlation_entropy_density(self,**kwargs):
     cm = get_correlation_matrix(self,**kwargs)
     ce,ws = lg.eigh(cm) # return eigenvalues
     ws = ws.T # transpose
-    ce[ce<1e-6] = 1. # set to 1, so that they have zero entropy
-    ss = -ce*np.log(ce) # entropies 
+    # per-mode entanglement entropy of a free-fermion/orbital occupation
+    # number n: -[n*log(n) + (1-n)*log(1-n)] (Peschel's formula), not just
+    # -n*log(n) -- the single-term version silently discarded the
+    # complementary contribution, undercounting the entropy by roughly 2x
+    # for eigenvalues away from 0/1 (confirmed against the ED backend on
+    # examples/entanglement_entropy/correlation_entropy's model). Clipping
+    # both ends avoids log(0) without needing the old ce<1e-6 special case,
+    # since both terms already vanish smoothly as n->0 or n->1.
+    ce = np.clip(ce.real,1e-12,1.-1e-12)
+    ss = -(ce*np.log(ce) + (1.-ce)*np.log(1.-ce)) # entropies
     out = 0.*ws[0].real # initialize
     for i in range(len(ss)): out = out + ss[i]*np.abs(ws[i])**2
     if type(self)==fermionchain.Fermionic_Chain: pass
@@ -34,10 +42,10 @@ def get_correlation_eigenvalues(self,**kwargs):
 def get_correlation_entropy(self,**kwargs):
     """Return the correlation entropy"""
     vs = get_correlation_eigenvalues(self,**kwargs)
-    out = 0.0
-    for v in vs:
-        if v>1e-6: out = out + v*np.log(v)
-    return -out
+    # see get_correlation_entropy_density's comment: use the symmetric
+    # -[v*log(v) + (1-v)*log(1-v)] formula, not just -v*log(v)
+    vs = np.clip(vs.real,1e-12,1.-1e-12)
+    return -np.sum(vs*np.log(vs) + (1.-vs)*np.log(1.-vs))
 
 
 
@@ -74,9 +82,9 @@ def get_second_order_correlation_entropy(self,**kwargs):
     cm = get_highorder_correlation_matrix(self,**kwargs)
 #    print(np.sum(np.abs(cm-np.conjugate(cm.T))))
     vs = lg.eigvalsh(cm) # return eigenvalues
-    out = 0.0
-    for v in vs:
-        if v>1e-6: out = out + v*np.log(v)
-    out = -out
+    # see get_correlation_entropy_density's comment: use the symmetric
+    # -[v*log(v) + (1-v)*log(1-v)] formula, not just -v*log(v)
+    vs = np.clip(vs.real,1e-12,1.-1e-12)
+    out = -np.sum(vs*np.log(vs) + (1.-vs)*np.log(1.-vs))
 #    print(np.round(vs,3),np.round(out,2))
     return out
