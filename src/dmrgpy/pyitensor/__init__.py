@@ -14,9 +14,18 @@ no changes needed anywhere else in dmrgpy.
 from .index import Index, sim
 from .tensor import ITensor, prime, noPrime, mapPrime, swapPrime, dag, commonIndex, delta
 from .svd import svd, Spectrum
+from .mpscontainer import MPS, MPO
+from .mpsalgebra import inner, innerC, traceC, sum, applyMPO, nmultMPO, randomMPS
+from .sweeps import Sweeps
+from .autompo import HTerm, AutoMPO
+from .mpobuilder import to_mpo
 
 __all__ = [
     "Index", "sim",
     "ITensor", "prime", "noPrime", "mapPrime", "swapPrime", "dag", "commonIndex", "delta",
     "svd", "Spectrum",
+    "MPS", "MPO",
+    "inner", "innerC", "traceC", "sum", "applyMPO", "nmultMPO", "randomMPS",
+    "Sweeps",
+    "HTerm", "AutoMPO", "to_mpo",
 ]
