@@ -4,11 +4,12 @@ can run without a compiled C++ extension. See mpscpp3/chain_session.h,
 get_sites.h, mo_terms.h and TDVP/tdvp.h for the API surface this mirrors --
 this package is not, and is not meant to be, a general ITensor port.
 
-Phase 1 (this file's current contents): the Index/ITensor tensor core.
-Later phases add SiteSet types, AutoMPO, MPS/MPO, DMRG, TDVP, and finally a
-Chain facade with the same method surface as mpscpp3/bindings.cc's pybind11
-class, so it can be registered as a new itensor_version in cppext.py with
-no changes needed anywhere else in dmrgpy.
+Phases 1-7 (this file's current contents): the Index/ITensor tensor core,
+site types, AutoMPO, MPS/MPO algebra, DMRG, TDVP, and a Chain facade
+(chain.Chain) with the same method surface as mpscpp3/bindings.cc's
+pybind11 class, so it can be registered as a new itensor_version in
+cppext.py with no changes needed anywhere else in dmrgpy (Phase 8,
+not yet done).
 """
 
 from .index import Index, sim
@@ -19,6 +20,7 @@ from .mpsalgebra import inner, innerC, traceC, sum, applyMPO, nmultMPO, randomMP
 from .sweeps import Sweeps
 from .autompo import HTerm, AutoMPO
 from .mpobuilder import to_mpo
+from .chain import Chain
 
 __all__ = [
     "Index", "sim",
@@ -28,4 +30,5 @@ __all__ = [
     "inner", "innerC", "traceC", "sum", "applyMPO", "nmultMPO", "randomMPS",
     "Sweeps",
     "HTerm", "AutoMPO", "to_mpo",
+    "Chain",
 ]
