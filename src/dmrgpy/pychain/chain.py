@@ -1,8 +1,6 @@
 from __future__ import print_function
 import numpy as np
-#from numba import jit
 from scipy.sparse import csc_matrix
-from .read import write_matrix
 
 def generate_basis(spins):
    """Generate the basis for a spin chain"""
@@ -18,7 +16,7 @@ def generate_basis(spins):
      if v[ns-1]==ms[ns-1]: # if maximum has been reached
        return basis # return the basis
      basis.append(v.copy()) # append this vector
-     v[0] += 1 # increase the first value 
+     v[0] += 1 # increase the first value
 
 
 
@@ -32,15 +30,11 @@ def get_dictionary(basis):
    return d
 
 
-  
-
-
 def get_szi(spins,basis,ispin):
   """Get the Sz operator"""
-  ii = np.zeros(len(basis),dtype=np.int_) # i index 
+  ii = np.zeros(len(basis),dtype=np.int_) # i index
   jj = np.zeros(len(basis),dtype=np.int_) # j index
   vals = np.zeros(len(basis),dtype=np.complex128) # value
-#  l = (spins[ispin] - 1.)/2. # total spin in this site
   l = spins[ispin]  # total spin in this site
   for ib in range(len(basis)): # loop over basis vectors
     ii[ib] = ib # store index
@@ -53,7 +47,7 @@ def get_szi(spins,basis,ispin):
 
 def get_spi(spins,basis,ispin,bdict=None):
   """Get the Sz operators operator"""
-  ii = np.zeros(len(basis),dtype=np.int_) # i index 
+  ii = np.zeros(len(basis),dtype=np.int_) # i index
   jj = np.zeros(len(basis),dtype=np.int_) # j index
   vals = np.zeros(len(basis),dtype=np.complex128) # value
   l = spins[ispin]  # total spin in this site
@@ -77,7 +71,7 @@ def get_spi(spins,basis,ispin,bdict=None):
 
 def get_smi(spins,basis,ispin,bdict=None):
   """Get the Sz operators operator"""
-  ii = np.zeros(len(basis),dtype=np.int_) # i index 
+  ii = np.zeros(len(basis),dtype=np.int_) # i index
   jj = np.zeros(len(basis),dtype=np.int_) # j index
   vals = np.zeros(len(basis),dtype=np.complex128) # value
   l = spins[ispin]  # total spin in this site
@@ -99,21 +93,9 @@ def get_smi(spins,basis,ispin,bdict=None):
   return sp
 
 
-def write_basis(basis):
-  """Write the basis in basis.out"""
-  fo = open("basis.out","w")
-  fo.write("# SIZE = "+str(len(basis))+"\n")
-  for b in basis: # loop over states
-    for ib in b: fo.write(str(ib)+"   ")
-    fo.write("\n")
-  fo.close()
-
-
-
 def generate_chain(spins):
-  """Generate the terms for a certain Hamiltonian from a certian basis"""
+  """Generate the terms for a certain Hamiltonian from a certain basis"""
   basis = generate_basis(spins) # get the basis vectors
-  write_basis(basis) # write the basis
   bdict = get_dictionary(basis) # generate dictionary
   sxs,sys,szs = [],[],[]
   for ispin in range(len(spins)): # loop over different spins
@@ -125,27 +107,16 @@ def generate_chain(spins):
     sxs.append(sxi)
     sys.append(syi)
     szs.append(szi)
-  return sxs,sys,szs
-
-def write_chain(spins):
-  """Write all the files for the chains"""
-  (sxs,sys,szs) = generate_chain(spins) # return the chain
-  ispin = 0
-  for sxi,syi,szi in zip(sxs,sys,szs):
-    write_matrix("sx_"+str(ispin)+"_.op",sxi)
-    write_matrix("sy_"+str(ispin)+"_.op",syi)
-    write_matrix("sz_"+str(ispin)+"_.op",szi)
-    ispin += 1
+  return basis,sxs,sys,szs
 
 
-
-
-def get_chain(spins,check=False):
-  """ Read all the spin operators"""
-  (sxi,syi,szi) = generate_chain(spins) # return the chain
+def get_chain(spins):
+  """ Return all the spin operators for a spin chain"""
+  (basis,sxi,syi,szi) = generate_chain(spins) # return the chain
   class Sclass: pass
   sc = Sclass() # empty class
   # now save in the class
+  sc.basis = np.array(basis).astype(int)
   sc.sxi = sxi
   sc.syi = syi
   sc.szi = szi
@@ -153,23 +124,10 @@ def get_chain(spins,check=False):
   sc.sx = sum(sxi)
   sc.sy = sum(syi)
   sc.sz = sum(szi)
-  sc.s2 = sc.sx*sc.sx + sc.sy*sc.sy + sc.sz*sc.sz
-  from . import checking
-  if check:
-    for i in range(len(spins)):
-      checking.angular(sc.sxi[i],sc.syi[i],sc.szi[i])
-      checking.angular(sc.syi[i],sc.szi[i],sc.sxi[i])
-      checking.angular(sc.szi[i],sc.sxi[i],sc.syi[i])
   return sc # return spin class
 
 
 
-
-
-
-
 if __name__=="__main__":
-#  basis = generate_basis([4,3]) # return the basis
-#  d = get_dictionary(basis)
   chain = generate_chain([4,3]) # return the basis
   print(chain)
