@@ -4,8 +4,8 @@
 # fermionic case.
 import numpy as np
 
-from dmrgpy.pyitensor import AutoMPO, Sweeps, randomMPS, to_mpo
-from dmrgpy.pyitensor.dmrg import dmrg
+from dmrgpy.pyitensor import AutoMPO, Sweeps, inner, randomMPS, to_mpo
+from dmrgpy.pyitensor.dmrg import dmrg, dmrg_excited
 from dmrgpy.pyitensor.sites import SiteX
 from dmrgpy.pyfermion.mbfermion import MBFermion
 
@@ -87,8 +87,57 @@ def test_fermion_hopping_chain():
           abs(energy - ref) < 1e-6)
 
 
+def test_excited_states_penalty_method():
+    # A non-uniform field breaks the Heisenberg chain's degeneracies so the
+    # first excited state is unambiguous, then dmrg_excited() (the
+    # overlap-penalty method chain_session.h's excited_states() uses) is
+    # cross-checked against the two lowest eigenvalues of exact
+    # diagonalization, and the found states' mutual overlap is checked to
+    # be small (the penalty actually did its job).
+    np.random.seed(2)
+    n = 6
+    sites = SiteX([2] * n)
+    ampo = AutoMPO(sites)
+    for i in range(1, n):
+        ampo.add(1.0, "Sz", i, "Sz", i + 1)
+        ampo.add(0.5, "Sp", i, "Sm", i + 1)
+        ampo.add(0.5, "Sm", i, "Sp", i + 1)
+    for i in range(1, n + 1):
+        ampo.add(0.1 * i, "Sz", i)
+    ref = np.linalg.eigvalsh(ampo.dense_matrix())
+    H = to_mpo(ampo, cutoff=1e-14, maxdim=5000)
+
+    # The penalty method's own local minima mean it can wander for several
+    # sweeps before settling (confirmed directly: 12 sweeps sometimes still
+    # oscillating, 18+ reliably converged) -- generous sweep/niter counts
+    # here are about giving the *algorithm* room to converge, not a
+    # precision knob.
+    sweeps = Sweeps(18)
+    sweeps.maxdim = 60
+    sweeps.cutoff = 1e-13
+    sweeps.niter = 50
+
+    psi0 = randomMPS(sites, 60)
+    e0 = dmrg(psi0, H, sweeps, quiet=True)
+    check("excited-states test: ground energy matches exact diagonalization",
+          abs(e0 - ref[0].real) < 1e-6)
+
+    bandwidth = ref[-1].real - ref[0].real
+    weight = bandwidth  # mirrors chain_session.h's weight = bandwidth()*scale_lagrange
+    psi1 = randomMPS(sites, 60)
+    dmrg_excited(psi1, H, [psi0], weight, sweeps, quiet=True)
+    psi1.normalize()
+    e1 = inner(psi1, H, psi1).real
+
+    check("first excited-state energy matches exact diagonalization "
+          "(ref={:.8f}, dmrg={:.8f})".format(ref[1].real, e1), abs(e1 - ref[1].real) < 1e-5)
+    check("the penalty method actually suppressed overlap with the ground state",
+          abs(inner(psi0, psi1)) < 1e-4)
+
+
 if __name__ == "__main__":
     test_heisenberg_chain()
     test_heisenberg_chain_open_random_restart()
     test_fermion_hopping_chain()
+    test_excited_states_penalty_method()
     print("All pyitensor Phase 5 checks passed.")

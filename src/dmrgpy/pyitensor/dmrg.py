@@ -233,3 +233,131 @@ def dmrg(psi, H, sweeps, quiet=True):
             print("sweep {}: energy = {}".format(sweep_i, energy))
 
     return energy
+
+
+# -- excited states: overlap-penalty method --------------------------------
+#
+# mirrors chain_session.h's excited_states(): dmrg(psi1,H_,wfs,sweeps,args)
+# with a "Weight" arg augments the objective with weight*sum_k|wfs_k><wfs_k|,
+# penalizing overlap with already-found lower states. Since there's no H
+# operator mediating a projector term, its 2-site-local contribution is
+# just a plain overlap: for a fixed already-found state wfs_k, precompute
+# proj_k = <wfs_k(left)|psi(left)> * wfs_k's own 2-site tensor *
+# <wfs_k(right)|psi(right)> once per bond (independent of the Krylov
+# vector) -- since proj_k ends up expressed in exactly psi's own current
+# link+physical indices (see the derivation this was checked against in
+# selftest_dmrg.py), its contribution to the effective-Hamiltonian matvec
+# is just weight * <proj_k|v> * proj_k, a rank-1 update computed directly
+# on flat numpy arrays alongside the ordinary two_site_heff matvec.
+#
+# No bra/ket link-identity collision risk here (unlike the H-environments'
+# _relabel_bra_local dance): wfs_k and psi are always genuinely different
+# MPS objects with independently-minted link ids, so a plain dag() on
+# wfs_k's tensors is safe.
+
+def _extend_overlap_left(L, wfs_k, psi, i):
+    piece = dag(wfs_k.A(i)) * psi.A(i)
+    return piece if L is None else L * piece
+
+
+def _extend_overlap_right(R, wfs_k, psi, i):
+    piece = dag(wfs_k.A(i)) * psi.A(i)
+    return piece if R is None else piece * R
+
+
+def _all_overlap_right(wfs_k, psi):
+    n = psi.length()
+    env = {n + 1: None}
+    for i in range(n, 1, -1):
+        env[i] = _extend_overlap_right(env[i + 1], wfs_k, psi, i)
+    return env
+
+
+def _bond_projections(penalty_states, left_ov, right_ov, i):
+    projs = []
+    for k, wk in enumerate(penalty_states):
+        Lk, Rk = left_ov[k].get(i - 1), right_ov[k].get(i + 2)
+        p = wk.A(i) * wk.A(i + 1)
+        p = p if Lk is None else Lk * p
+        p = p if Rk is None else p * Rk
+        projs.append(p)
+    return projs
+
+
+def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, weight):
+    """Same as _local_ground_state, but the matvec also adds
+    weight*sum_k|proj_k><proj_k| (see this section's module-level note)."""
+    matvec_H, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
+    proj_flats = [p.transpose_to(order_in).reshape(-1) for p in projs]
+
+    def matvec(v):
+        out = matvec_H(v)
+        for pf in proj_flats:
+            out = out + weight * np.vdot(pf, v) * pf
+        return out
+
+    dim = x0.size
+    if dim <= 3:
+        basis = np.eye(dim, dtype=complex)
+        Hmat = np.column_stack([matvec(basis[:, k]) for k in range(dim)])
+        w, v = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
+        eval0, evec0 = w[0], v[:, 0]
+    else:
+        Heff = LinearOperator((dim, dim), matvec=matvec, dtype=complex)
+        ncv = min(dim, max(2 * niter + 1, 20))
+        w, v = eigsh(Heff, k=1, which="SA", v0=x0, maxiter=max(niter, 200), ncv=ncv)
+        eval0, evec0 = w[0], v[:, 0]
+
+    theta = ITensor(tuple(order_in), evec0.reshape(shape))
+    return float(eval0.real), theta
+
+
+def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True):
+    """Two-site DMRG penalized against overlap with `penalty_states` (each
+    weighted by `weight`) -- mirrors chain_session.h's
+    dmrg(psi1,H_,wfs,sweeps,args-with-Weight) overload, used by
+    excited_states() to find higher eigenstates one at a time. Mutates psi
+    in place; returns the (penalized) objective's final local eigenvalue,
+    which chain_session.h doesn't actually use as the reported energy
+    either -- see excited_states() in chain.py, which recomputes
+    <psi|H|psi> directly once converged."""
+    n = psi.length()
+    k_states = len(penalty_states)
+    energy = None
+    for sweep_i in range(sweeps.nsweep):
+        maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
+
+        right_env = _all_right_environments(H, psi)
+        right_ov = [_all_overlap_right(wk, psi) for wk in penalty_states]
+        left_env = {0: (None, None)}
+        left_ov = [{0: None} for _ in range(k_states)]
+        for i in range(1, n):
+            L, Lbra = left_env[i - 1]
+            R, Rbra = right_env[i + 2]
+            projs = _bond_projections(penalty_states, left_ov, right_ov, i)
+            energy, theta = _local_ground_state_penalized(
+                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight)
+            _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
+            left_env[i] = _extend_left(L, Lbra, H, psi, i)
+            for k, wk in enumerate(penalty_states):
+                left_ov[k][i] = _extend_overlap_left(left_ov[k][i - 1], wk, psi, i)
+
+        right_env = {n + 1: (None, None)}
+        right_ov = [{n + 1: None} for _ in range(k_states)]
+        for i in range(n - 1, 0, -1):
+            L, Lbra = left_env[i - 1]
+            R, Rbra = right_env[i + 2]
+            projs = _bond_projections(penalty_states, left_ov, right_ov, i)
+            energy, theta = _local_ground_state_penalized(
+                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight)
+            _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
+            right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
+            for k, wk in enumerate(penalty_states):
+                right_ov[k][i + 1] = _extend_overlap_right(right_ov[k][i + 2], wk, psi, i + 1)
+        left_env = {0: (None, None)}
+        left_ov = [{0: None} for _ in range(k_states)]
+
+        if not quiet:
+            print("sweep {}: penalized energy = {}".format(sweep_i, energy))
+
+    return energy

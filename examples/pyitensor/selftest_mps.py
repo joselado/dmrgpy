@@ -74,6 +74,32 @@ def test_inner():
     check("inner(A,B) matches dense <A|B>", np.isclose(inner(a, b), np.vdot(da, db), atol=1e-8))
 
 
+def test_inner_three_arg_self_overlap():
+    # Regression test for a real bug: inner(bra,M,ket) with bra and ket
+    # literally the *same* MPS object (e.g. <psi|H|psi>, the single most
+    # common pattern in DMRG) used to silently produce garbage, because the
+    # bra's physical leg was never primed to match M's output leg before
+    # contracting -- both ended up matching the *ket* instead, leaving M's
+    # output leg and the bra's own physical leg dangling. Caught via
+    # dmrg.py's excited-states test calling inner(psi,H,psi) on a converged
+    # DMRG state and getting a rank-12 tensor back instead of a scalar.
+    np.random.seed(4)
+    n = 4
+    sites = SiteX([2] * n)
+    ampo = AutoMPO(sites)
+    for i in range(1, n):
+        ampo.add(1.0, "Sz", i, "Sz", i + 1)
+        ampo.add(0.5, "Sp", i, "Sm", i + 1)
+        ampo.add(0.5, "Sm", i, "Sp", i + 1)
+    H = to_mpo(ampo, cutoff=0.0, maxdim=1000)
+    psi = randomMPS(sites, 6)
+    dense_psi = mps_to_dense(psi)
+    dense_H = mpo_to_dense(H)
+    ref = np.vdot(dense_psi, dense_H @ dense_psi)
+    check("inner(psi,H,psi) with psi as both bra and ket matches dense <psi|H|psi>",
+          np.isclose(inner(psi, H, psi), ref, atol=1e-8))
+
+
 def test_autompo_to_mpo_spin():
     n = 4
     sites = SiteX([2] * n)
@@ -135,6 +161,7 @@ if __name__ == "__main__":
     test_random_mps_and_position()
     test_sum_mps()
     test_inner()
+    test_inner_three_arg_self_overlap()
     test_autompo_to_mpo_spin()
     test_autompo_to_mpo_fermion()
     test_apply_mpo()

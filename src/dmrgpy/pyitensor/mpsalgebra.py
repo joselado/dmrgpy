@@ -27,6 +27,7 @@ from .index import Index
 from .mpscontainer import MPO, MPS, _link_at
 from .svd import svd
 from .tensor import ITensor, commonIndex
+from .tensor import prime as _t_prime
 
 
 def _fresh_link_copy(chain):
@@ -84,7 +85,14 @@ def inner(*args):
         bra_tensors = _fresh_link_copy(bra)
         env = None
         for i in range(1, n + 1):
-            piece = _dag_local(bra_tensors[i - 1]) * M.A(i) * ket.A(i)
+            # M.A(i)'s "in" (unprimed) leg must contract against ket's
+            # physical leg, and its "out" (primed) leg against the bra's --
+            # so the bra's physical leg needs priming first, exactly like
+            # dmrg.py's own <psi|H|psi> environments (_relabel_bra_local)
+            # do. Without this, both legs accidentally match the *ket*
+            # (same plev), leaving M's output leg and the bra's own
+            # physical leg dangling uncontracted instead.
+            piece = _dag_local(_t_prime(bra_tensors[i - 1], "Site")) * M.A(i) * ket.A(i)
             env = piece if env is None else env * piece
         return env.scalar()
     raise ValueError("inner: expected 2 or 3 arguments, got {}".format(len(args)))
