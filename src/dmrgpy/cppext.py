@@ -13,10 +13,15 @@ extension may not be built (pybind11 wasn't available at install time, or
 should fall back to ED, not fail outright (see mode.py).
 """
 
+# Single source of truth for dmrgpy's default C++ DMRG backend version.
+# Every other default (Many_Body_Chain.__init__, setup_cpp, get_backend,
+# available) is derived from this one constant -- change it here only.
+DEFAULT_ITENSOR_VERSION = 3
+
 _backends = {} # version -> compiled _dmrgcpp module, or None if unavailable
 
 
-def get_backend(version=2):
+def get_backend(version=DEFAULT_ITENSOR_VERSION):
     """Return the compiled _dmrgcpp module for the given C++ DMRG backend
     version (2 = ITensor v2, 3 = ITensor v3), or None if it isn't available"""
     if version not in _backends:
@@ -37,6 +42,6 @@ def _load(version):
         return None
 
 
-def available(version=2):
+def available(version=DEFAULT_ITENSOR_VERSION):
     """Whether the in-process extension for this backend version can be used"""
     return get_backend(version) is not None

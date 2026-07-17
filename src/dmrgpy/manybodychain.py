@@ -16,6 +16,7 @@ from . import entropy
 from . import excited
 from . import effectivehamiltonian
 from . import multioperator
+from .cppext import DEFAULT_ITENSOR_VERSION
 import subprocess
 
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path to this package
@@ -34,7 +35,7 @@ class Coupling():
 
 
 class Many_Body_Chain():
-  def __init__(self,sites,itensor_version=2,**kwargs):
+  def __init__(self,sites,itensor_version=DEFAULT_ITENSOR_VERSION,**kwargs):
       self.sites = sites # list of the sites
       self.Id = self.get_operator("Id",0)
 #      self.path = id_generator() # random ID in dmrgpy_tmp
@@ -124,7 +125,7 @@ class Many_Body_Chain():
       """Setup the Julia mode"""
       self.itensor_version = "julia_live"
       self.initialize()
-  def setup_cpp(self,version=2):
+  def setup_cpp(self,version=DEFAULT_ITENSOR_VERSION):
       """Setup the C++ mode (version 2 = ITensor v2, 3 = ITensor v3)"""
       self.itensor_version = version
       self.initialize()

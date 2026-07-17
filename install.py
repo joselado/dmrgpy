@@ -10,6 +10,8 @@ that succeeds does compilation begin.
 """
 import argparse
 
+from installtk import DEFAULT_ITENSOR_VERSION
+
 parser = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("--gpp", default=None,
@@ -31,12 +33,13 @@ parser.add_argument("--openblas_includedir", default=None,
         help="Path to the directory containing OpenBLAS headers (only "
              "used together with --openblas).")
 parser.add_argument("--itensor-version", "--itensor_version",
-        dest="itensor_version", default="2", choices=["2", "3", "both"],
+        dest="itensor_version", default=str(DEFAULT_ITENSOR_VERSION),
+        choices=["2", "3", "both"],
         help="Which C++ DMRG backend(s) to compile: 2 = ITensor v2 "
              "(mpscpp2, itensor_version=2 in Python), 3 = ITensor v3 "
              "(mpscpp3, itensor_version=3), both = compile both, "
-             "one after the other (default: 2, matching the historical "
-             "single-backend behavior).")
+             "one after the other (default: %(default)s, matching the "
+             "default backend in Python).")
 args = parser.parse_args()
 
 versions = [2, 3] if args.itensor_version == "both" else [int(args.itensor_version)]

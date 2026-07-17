@@ -3,6 +3,8 @@ import re
 import subprocess
 import sys
 
+from installtk import DEFAULT_ITENSOR_VERSION
+
 
 # Per-backend-version knobs: which mpscpp<version> directory to build, and
 # the language-standard suffix CCCOM needs. ITensor v2 only needs C++14; v3
@@ -39,7 +41,7 @@ def _run(cmd, cwd):
         sys.exit(proc.returncode)
 
 
-def compile(config, version=2):
+def compile(config, version=DEFAULT_ITENSOR_VERSION):
     """Compile ITensor and the in-process pybind11 extension for the given
     C++ DMRG backend version (2 = ITensor v2/mpscpp2, 3 = ITensor v3/
     mpscpp3), using an already-validated installtk.requirements.BuildConfig
