@@ -74,9 +74,13 @@ def name2MO(name,self):
     elif name=="Sx": return self.Sx
     elif name=="Sy": return self.Sy
     elif name=="Sz": return self.Sz
+    # Sp/Sm have no native backend operator name (unlike Sx/Sy/Sz), so build
+    # them from Sx/Sy on the fly: S+ = Sx + i*Sy, S- = Sx - i*Sy (matching
+    # the Sp<->Sm dagger convention in multioperator.py/sympymultioperator.py)
+    elif name=="Sp": return [self.Sx[i]+1j*self.Sy[i] for i in range(self.ns)]
+    elif name=="Sm": return [self.Sx[i]-1j*self.Sy[i] for i in range(self.ns)]
     else:
-        print(name) ; exit()
-        raise
+        raise ValueError("Unrecognized operator name "+str(name))
 
 def str2MO(self,name,i=0,j=0):
     from . import multioperator
@@ -86,6 +90,8 @@ def str2MO(self,name,i=0,j=0):
             if n=="Sx": return self.Sx[i]
             elif n=="Sy": return self.Sy[i]
             elif n=="Sz": return self.Sz[i]
+            elif n=="Sp": return self.Sx[i]+1j*self.Sy[i]
+            elif n=="Sm": return self.Sx[i]-1j*self.Sy[i]
             else: raise
         return [f(n1,i),f(n2,j)]
     elif type(name[0])==multioperator.MultiOperator and type(name[1])==multioperator.MultiOperator:

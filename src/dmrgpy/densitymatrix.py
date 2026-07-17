@@ -34,7 +34,7 @@ def reduced_dm_projective(self,wf,i=0,j=None):
           P01 = self.Cdag[k] # create an electron
           # we need to project on up/dn and rotate to up!
           return [N,P01] # return the projectors
-        elif type(self)==Fermionic_Chain: # spin chain object
+        elif type(self)==Spinful_Fermionic_Chain: # spin chain object
           raise # not implemented yet
         else: raise # not implemented
     Pi = projectors(i) # projectors for site i

@@ -4,14 +4,14 @@ import numpy as np
 
 def best_gs(sc,n=1):
     """Compute many ground states, and retain only the best one"""
-    wfs = [] # list with GS
-    es = [] # list with energies
     emin = 1e8 # grund state energy
     wf0 = None
     for i in range(n): # loop
         sc.computed_gs = False # initialize
         e0 = sc.gs_energy() # ground state energy
-        if e0<emin: wf0 = sc.wf0 # copy wavefunction
+        if e0<emin: # only keep this one if it actually improves on the best
+            wf0 = sc.wf0 # copy wavefunction
+            emin = e0
     sc.set_initial_wf(wf0) # set the wavefunction
 
 def gs_energy_bestof(self,**kwargs):

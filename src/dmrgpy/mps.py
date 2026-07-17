@@ -40,8 +40,8 @@ class MPS():
         else: raise
     def __sub__(self,x):
         return self + (-1)*x
-    def __neg__(self,x):
-        return (-1)*x
+    def __neg__(self):
+        return (-1)*self
     def __truediv__(self,x): return self*(1./x)
     def copy(self,name=None):
         """Copy this wavefunction"""
