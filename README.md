@@ -88,6 +88,19 @@ Afterwards you can import the dmrgpy sublibrary that you want, for example
 from dmrgpy import spinchain
 ```
 
+If you are running it in Triton cluster, load the modules
+
+```bash
+module load scicomp-python-env
+module load gcc
+```
+
+and then compile it as 
+
+```bash
+python install.py 
+```
+
 ## Windows ##
 
 For using this program in Windows, the easiest solution is to create a virtual
