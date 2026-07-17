@@ -71,9 +71,18 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
 from .algebra.arnolditk import gram_smith
 
 
-def excited_states_non_hermitian(self,n=3,recursive=False,
+def excited_states_non_hermitian(self,n=3,recursive=True,
         maxit=40,nkry_min =3,nkry_max =10,
      **kwargs):
+    # recursive=True (one state at a time, each deflated against the
+    # previous ones) is the default rather than a single simultaneous
+    # (n>1) Arnoldi search: a shared Krylov subspace across several
+    # requested eigenvalues can fail to resolve a (near-)degenerate pair
+    # -- confirmed on a non-Hermitian chain with a 2-fold-degenerate
+    # excited state, where the simultaneous search converged to two
+    # spurious values instead. The one-at-a-time search is slower but
+    # reliable, since each state gets its own warm start explicitly
+    # deflated against the others.
     from . import mpsalgebra
     (es,wf) = mpsalgebra.mpsarnoldi(self,self.hamiltonian,mode="GS",
                 nwf=n, # number of wavefunctions
