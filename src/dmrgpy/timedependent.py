@@ -131,12 +131,33 @@ def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
 
 
 def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
-        nt=None,factor=1,delta=5e-2,**kwargs):
-    """Compute a certain dynamical correlator"""
+        nt=None,factor=1,delta=5e-2,damping_periods=6,**kwargs):
+    """
+    Compute a dynamical correlator from real-time evolution + Fourier
+    transform (submode="TD", TDVP-backed for itensor_version=3).
+
+    The raw finite-time correlator C(t) is windowed with an exponential
+    decay exp(-delta*t) before the FFT. This is what actually turns
+    `delta` into a Lorentzian broadening of width `delta` in the resulting
+    spectral function -- matching what `delta` means in the KPM/CVM
+    submodes -- and lets the required total evolution time follow directly
+    from the decay itself: `damping_periods`/delta e-foldings of exp(-delta*t)
+    make the truncation error exp(-damping_periods) negligible (default 6
+    -> ~0.25%), instead of the previous undamped 100/delta default, which
+    had no explicit broadening mechanism and relied on brute-force long
+    evolution (and the resulting rectangular-window ringing) to get a
+    comparably resolved spectrum. This cuts the number of time steps -- and
+    thus wall-clock cost, the dominant cost of this submode -- by more than
+    an order of magnitude for the same `delta`, making it competitive with
+    KPM. The Fourier sum is normalized as a Riemann sum (factor dtnew) to
+    match the analytic Fourier-transform convention of the other submodes,
+    replacing the previous ad hoc 1/sqrt(nt) scaling that was tied to the
+    old undamped/long-time convention.
+    """
     self.get_gs() # get the ground state
-    if nt is None: nt=int(100/delta/dt)
+    if nt is None: nt=int(damping_periods/delta/dt)
     (ts,cs) = evolution_DC(self,dt=dt,nt=nt,**kwargs) # get correlator
-#    cs = cs*np.exp(-1j*self.e0*ts) # factor out the phase
+    cs = cs*np.exp(-delta*ts) # damping window -> Lorentzian broadening "delta"
     # interpolate the time evolution
     ftr = interp1d(ts,cs.real,fill_value=0.0,bounds_error=False)
     fti = interp1d(ts,cs.imag,fill_value=0.0,bounds_error=False)
@@ -147,7 +168,7 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     cs = cnew.copy() # overwrite
     dtnew = dt/factor
     # do the fourier transform
-    ss = np.fft.fft(cs) # fourier transform
+    ss = np.fft.fft(cs)*dtnew # fourier transform (Riemann-sum normalization)
     ws = np.fft.fftfreq(len(cs),d=dtnew)*2.*np.pi # fourier frequencies
     fr = interp1d(ws,ss.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(ws,ss.imag,fill_value=0.0,bounds_error=False)
@@ -156,7 +177,7 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     gr = fr(es)+ 1j*fi(es) # advanced
     ga = np.conjugate(gr) # retarded
 #    gp = fr(es) - fr(-es) + 1j*fi(es) + 1j*fi(-es)
-    return (es,gr/np.sqrt(nt))
+    return (es,gr)
 
 
 
