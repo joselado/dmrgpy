@@ -5,7 +5,7 @@ import numpy as np
 from dmrgpy import fermionchain
 n = 4
 fc = fermionchain.Fermionic_Chain(n) # create the fermion chain
-mh = np.zeros((n,n),dtype=np.complex) # TB matrix
+mh = np.zeros((n,n),dtype=complex) # TB matrix
 for i in range(n-1):
     mh[i,i+1] = 1.0
     mh[i+1,i] = 1.0
