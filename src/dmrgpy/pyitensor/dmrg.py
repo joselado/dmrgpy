@@ -95,9 +95,14 @@ def _all_left_environments(H, ket):
     return env
 
 
-def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
-    """Diagonalize the 2-site effective Hamiltonian at bond (i,i+1) for its
-    lowest eigenpair. Returns (energy, theta_ITensor)."""
+def two_site_heff(L, Lbra, H, ket, i, R, Rbra):
+    """The 2-site effective Hamiltonian at bond (i,i+1), as a matvec over
+    flat arrays shaped like ket.A(i)*ket.A(i+1) -- shared by dmrg.py's own
+    Lanczos ground-state search and tdvp.py's Krylov real-time propagation,
+    so both build the identical operator. Returns (matvec, order_in,
+    shape, x0) where x0 is ket's own current 2-site tensor, flattened in
+    `order_in`'s axis order (which the caller reshapes results back into
+    to build an ITensor)."""
     Ti, Tj = ket.A(i), ket.A(i + 1)
     left_link = _link_at(ket, i, i - 1)
     right_link = _link_at(ket, i + 1, i + 2)
@@ -106,8 +111,7 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
 
     order_in = ([left_link] if left_link else []) + [s_i, s_j] + ([right_link] if right_link else [])
     shape = tuple(ind.dim for ind in order_in)
-    theta0 = (Ti * Tj).transpose_to(order_in)
-    x0 = theta0.reshape(-1)
+    x0 = (Ti * Tj).transpose_to(order_in).reshape(-1)
 
     s_i_out, s_j_out = s_i.prime(1), s_j.prime(1)
     order_out = ([Lbra] if Lbra else []) + [s_i_out, s_j_out] + ([Rbra] if Rbra else [])
@@ -119,6 +123,46 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
         for p in pieces:
             t = t * p
         return t.transpose_to(order_out).reshape(-1)
+
+    return matvec, order_in, shape, x0
+
+
+def one_site_heff(L, Lbra, H, ket, i, R, Rbra):
+    """The 1-site effective Hamiltonian at site i alone -- the "backward
+    evolution" piece that is specifically what makes two-site TDVP
+    different from two independent single-bond time-evolution steps (see
+    tdvp.py's module docstring). Acts on ket.A(i) itself (bond * physical
+    leg together, e.g. S*V from a neighboring bond's SVD split, temporarily
+    written into ket.A(i) by the caller so link identities resolve
+    consistently -- see tdvp.py's half-sweep functions). Same shape of
+    return value as two_site_heff()."""
+    T = ket.A(i)
+    left_link = _link_at(ket, i, i - 1)
+    right_link = _link_at(ket, i, i + 1)
+    s_i = next(ind for ind in T.inds if ind.hastags("Site"))
+
+    order_in = ([left_link] if left_link else []) + [s_i] + ([right_link] if right_link else [])
+    shape = tuple(ind.dim for ind in order_in)
+    x0 = T.transpose_to(order_in).reshape(-1)
+
+    s_i_out = s_i.prime(1)
+    order_out = ([Lbra] if Lbra else []) + [s_i_out] + ([Rbra] if Rbra else [])
+    H_i = H.A(i)
+    pieces = [p for p in (L, H_i, R) if p is not None]
+
+    def matvec(v):
+        t = ITensor(tuple(order_in), v.reshape(shape))
+        for p in pieces:
+            t = t * p
+        return t.transpose_to(order_out).reshape(-1)
+
+    return matvec, order_in, shape, x0
+
+
+def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
+    """Diagonalize the 2-site effective Hamiltonian at bond (i,i+1) for its
+    lowest eigenpair. Returns (energy, theta_ITensor)."""
+    matvec, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
 
     dim = x0.size
     if dim <= 3:
