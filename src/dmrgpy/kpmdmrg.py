@@ -8,7 +8,6 @@ from .algebra import kpm
 
 
 
-from . import pychain
 from .algebra.kpm import generate_profile
 
 

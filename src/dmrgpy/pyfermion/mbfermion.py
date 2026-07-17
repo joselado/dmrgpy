@@ -1,5 +1,4 @@
 from . import states
-from ..pychain.spectrum import ground_state
 import numpy as np
 from scipy.sparse import csc_matrix,identity
 import scipy.sparse.linalg as slg
@@ -10,22 +9,6 @@ from .. import funtk
 from ..edtk import edchain
 
 nmax = 20 # maximum number of levels
-
-def get_spinless_hamiltonian(m0,hubbard=None):
-    """Compute ground state energy"""
-    MBf = MBFermion(len(m0)) # create many body fermion object
-    MBf.add_hopping(m0)
-#    h = MBf.one2many(m0) # get the single body matrix
-#    h = states.one2many(m0) # single to many body Hamiltonian
-    if hubbard is not None: # if hubbard given
-        MBf.add_hubbard(hubbard)
-    return MBf.h
-
-def gs_energy(m0,spinless=True,hubbard=None):
-    if spinless:
-      h = get_spinless_hamiltonian(m0,hubbard=hubbard)
-    else: raise
-    return ground_state(h)[0] # return GS energy
 
 
 

@@ -1,6 +1,5 @@
 from .manybodychain import Many_Body_Chain
 import numpy as np
-from .dmrgpy2pychain import correlator as correlatorpychain
 from .algebra import algebra
 from . import effectivehamiltonian
 from . import pychainwrapper
