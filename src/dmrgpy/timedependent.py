@@ -21,9 +21,10 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     extension.
 
     Defaults to TDVP (mpscpp3/chain_session.h's Chain::quench_tdvp(), see
-    TDVP/ and self.tevol_method) for itensor_version=3; falls back to the
-    legacy MPO-Taylor Chain::quench() otherwise (itensor_version=2, or
-    self.tevol_method="MPO" explicitly).
+    TDVP/ and self.tevol_method) for itensor_version=3 or "python" (the
+    pure-Python backend has its own TDVP, see pyitensor/tdvp.py); falls
+    back to the legacy MPO-Taylor Chain::quench() otherwise
+    (itensor_version=2, or self.tevol_method="MPO" explicitly).
 
     fit_td is hardcoded False in the MPO fallback, not read from
     self.fit_td: the removed file-based backend wrote it to tasks.in under
@@ -42,7 +43,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    if self.itensor_version==3 and self.tevol_method=="TDVP":
+    if self.itensor_version in (3,"python") and self.tevol_method=="TDVP":
         correlator,_wf = self._session.quench_tdvp(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                 int(nt),dt)
@@ -74,7 +75,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
 
     Defaults to TDVP (mpscpp3/chain_session.h's
     Chain::evolve_and_measure_tdvp(), see TDVP/ and self.tevol_method) for
-    itensor_version=3; falls back to the legacy MPO-Taylor
+    itensor_version=3 or "python"; falls back to the legacy MPO-Taylor
     Chain::evolve_and_measure() otherwise (itensor_version=2, or
     self.tevol_method="MPO" explicitly).
 
@@ -95,7 +96,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    if self.itensor_version==3 and self.tevol_method=="TDVP":
+    if self.itensor_version in (3,"python") and self.tevol_method=="TDVP":
         correlator,_wf = self._session.evolve_and_measure_tdvp(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,
                 int(nt),dt)
