@@ -100,6 +100,28 @@ def test_inner_three_arg_self_overlap():
           np.isclose(inner(psi, H, psi), ref, atol=1e-8))
 
 
+def test_empty_autompo_gives_zero_mpo():
+    # Regression test: an AutoMPO with no terms at all is a real, legitimate
+    # case dmrgpy's own backend-agnostic code can produce (e.g.
+    # algebra/arnolditk.py's Arnoldi orthogonalize() multiplies an MPS by
+    # coefficient*multioperator.identity(), and MultiOperator.to_terms()
+    # filters near-zero-coefficient terms -- so a coefficient that's
+    # numerically zero yields an empty term list). to_mpo() used to raise
+    # ValueError on this; it should instead build the zero operator.
+    # Caught via dmrgpy.fermionchain.Spinful_Fermionic_Chain's non-Hermitian
+    # (Arnoldi) ground-state path hitting exactly this on its very first
+    # orthogonalization step.
+    n = 3
+    sites = SiteX([2] * n)
+    empty = AutoMPO(sites)
+    mpo = to_mpo(empty, cutoff=0.0, maxdim=100)
+    psi = randomMPS(sites, 4)
+    out = applyMPO(mpo, psi, cutoff=0.0, maxdim=100)
+    out.noPrime("Site")
+    check("to_mpo() on an empty AutoMPO builds the zero MPO (applying it gives the zero vector)",
+          np.allclose(mps_to_dense(out), 0))
+
+
 def test_autompo_to_mpo_spin():
     n = 4
     sites = SiteX([2] * n)
@@ -162,6 +184,7 @@ if __name__ == "__main__":
     test_sum_mps()
     test_inner()
     test_inner_three_arg_self_overlap()
+    test_empty_autompo_gives_zero_mpo()
     test_autompo_to_mpo_spin()
     test_autompo_to_mpo_fermion()
     test_apply_mpo()
