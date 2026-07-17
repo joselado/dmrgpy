@@ -1,5 +1,18 @@
 #include <tuple>
 
+// TDVP/tdvp.h is a quoted include, so it resolves relative to this file's
+// own directory (mpscpp3/) with no Makefile/include-path change needed.
+// mpscpp3-only: TDVP/ has no v2 counterpart (mpscpp2's Chain has no TDVP
+// methods at all), so tdvp_step()/quench_tdvp()/evolve_and_measure_tdvp()
+// below only exist in this file. Only the two-site TDVP algorithm is used
+// (NumCenter=2 in tdvp_step() below) -- two-site TDVP grows bond dimension
+// via SVD the same way two-site DMRG does, which is enough for the
+// quench/correlator use cases this class exposes, so the global subspace
+// expansion machinery in TDVP/basisextension.h (needed mainly for one-site
+// TDVP, or long-range Hamiltonians where two-site growth is too slow) is
+// deliberately not wired in here. See TDVP/README.md for the algorithm.
+#include "TDVP/tdvp.h"
+
 // Port of mpscpp2/chain_session.h to the ITensor v3 API. The Chain class's
 // public methods, semantics, and preserved-not-fixed quirks (see
 // evoloperator()'s note below) are unchanged from the v2 session/handle
@@ -363,6 +376,61 @@ class Chain
         return out;
         }
 
+    // TDVP counterparts of quench()/evolve_and_measure() above: same
+    // physics (real-time evolution under H_, same EGS-shift convention in
+    // quench_tdvp() so results are directly comparable to the MPO-Taylor
+    // backup), but each per-step evolution is done with two-site TDVP
+    // (tdvp_step(), see its comment below) instead of applying the
+    // Taylor-expanded evoloperator() MPO. No fit_td flag: TDVP has no
+    // MPO-fit variant.
+    TimeEvolutionResult
+    quench_tdvp(std::vector<MOTerm> const& terms_h,
+                std::vector<MOTerm> const& terms_i,
+                std::vector<MOTerm> const& terms_j,
+                int nt, double dt)
+        {
+        if (!have_wf0_) gs_energy();
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
+        double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
+        auto ampo = build_ampo(sites_,terms_h);
+        ampo += -EGS,"Id",1;
+        auto Hshift = toMPO(ampo);
+        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
+        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto psi1 = apply_mpo(A1,wf0_,args);
+        auto psi2 = apply_mpo(A2,wf0_,args);
+        Cplx norm0 = std::sqrt(innerC(psi1,psi1));
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            psi1 = tdvp_step(Hshift,psi1,dt);
+            psi1.normalize();
+            psi1 *= norm0;
+            out.correlator.push_back(innerC(psi2,psi1));
+            }
+        out.final_wf = psi1;
+        return out;
+        }
+
+    TimeEvolutionResult
+    evolve_and_measure_tdvp(std::vector<MOTerm> const& terms_h,
+                             std::vector<MOTerm> const& terms_op,
+                             MPS const& wf, int nt, double dt)
+        {
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto psi = wf;
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            psi = tdvp_step(H,psi,dt);
+            out.correlator.push_back(innerC(psi,A,psi));
+            }
+        out.final_wf = psi;
+        return out;
+        }
+
     double
     cvm_dynamical_correlator(std::vector<MOTerm> const& terms_i,
                              std::vector<MOTerm> const& terms_j,
@@ -536,6 +604,29 @@ class Chain
         auto out = applyMPO(K,x,x0,args);
         out.noPrime(TagSet("Site"));
         return out;
+        }
+
+    // One real-time step exp(-i*dt*H) of two-site TDVP (TDVP/tdvp.h).
+    // t=(0,-dt): TDVP's own convention is U=exp(t*H), so real-time
+    // evolution needs a purely imaginary t (see TDVP/README.md). One
+    // Sweeps(1) TDVP "sweep" is a left-to-right pass with a t/2 step
+    // followed by a right-to-left pass with another t/2 step, i.e. exactly
+    // one full step of size t -- matching how quench()/evolve_and_measure()
+    // apply their evoloperator() MPO once per iteration. niter=50 bounds
+    // the Lanczos iterations used to solve each local effective TDVP
+    // equation (tdvp.h's "MaxIter"); not exposed as a knob since neither
+    // the MPO-Taylor path this replaces has an equivalent one.
+    MPS
+    tdvp_step(MPO const& H, MPS psi, double dt) const
+        {
+        Cplx t(0.0,-dt);
+        auto sweeps = Sweeps(1);
+        sweeps.maxdim() = maxm_;
+        sweeps.cutoff() = cutoff_;
+        sweeps.niter() = 50;
+        tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
+                              "NumCenter",2,"DoNormalize",true});
+        return psi;
         }
 
     Args

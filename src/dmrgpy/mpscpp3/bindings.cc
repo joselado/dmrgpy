@@ -204,6 +204,27 @@ PYBIND11_MODULE(_dmrgcpp, m)
             }, py::arg("terms_h"),py::arg("terms_i"),py::arg("terms_j"),
                py::arg("nt"),py::arg("dt"),py::arg("fit_td")=true,
                "Returns (correlator, final_wf)")
+        .def("quench_tdvp",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_i,
+                          std::vector<PyTerm> const& terms_j,
+                          int nt, double dt) {
+                auto out = self.quench_tdvp(terms_from_python(terms_h),
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    nt,dt);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_i"),py::arg("terms_j"),
+               py::arg("nt"),py::arg("dt"),
+               "TDVP counterpart of quench(). Returns (correlator, final_wf)")
+        .def("evolve_and_measure_tdvp",
+            [](Chain& self, std::vector<PyTerm> const& terms_h,
+               std::vector<PyTerm> const& terms_op, MPS const& wf,
+               int nt, double dt) {
+                auto out = self.evolve_and_measure_tdvp(terms_from_python(terms_h),
+                    terms_from_python(terms_op),wf,nt,dt);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
+               py::arg("nt"),py::arg("dt"),
+               "TDVP counterpart of evolve_and_measure(). Returns (correlator, final_wf)")
         .def("evolve_and_measure",
             [](Chain& self, std::vector<PyTerm> const& terms_h,
                std::vector<PyTerm> const& terms_op, MPS const& wf,

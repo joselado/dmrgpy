@@ -64,6 +64,13 @@ class Many_Body_Chain():
       self.kpmcutoff = 1e-12 # cutoff in KPM
       self.cutoff = 1e-12 # cutoff in ground state
       self.tevol_custom_exp = True # custom exponential function for Tevol
+      self.tevol_method = "TDVP" # real-time MPS evolution method: "TDVP"
+          # (default, itensor_version=3 only, mpscpp3/chain_session.h's
+          # quench_tdvp()/evolve_and_measure_tdvp()) or "MPO" (the legacy
+          # 2nd-order Taylor-expanded evoloperator() backup, the only
+          # option for itensor_version=2 since TDVP/ only exists under
+          # mpscpp3). See timedependent.py's evolution_dmrg_DC()/
+          # evolve_and_measure_dmrg() for the actual dispatch.
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
       self.kpm_scale = 0.7 # scaling of the spectra for KPM

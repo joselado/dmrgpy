@@ -277,6 +277,24 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   imaginary part is exactly 0 — confirmed directly, the KPM dynamical
   correlator path aborted here in `same_mps()` until every "Re[<x|y>]" use
   in `chain_session.h` was changed to `innerC(...).real()`.
+- **`mpscpp3`-specific: real-time MPS evolution defaults to TDVP.**
+  `mpscpp3/TDVP/` (vendored from ITensor's own TDVP repo, see its
+  `README.md`) provides a proper two-site TDVP integrator, wired into
+  `chain_session.h` as `Chain::quench_tdvp()`/
+  `Chain::evolve_and_measure_tdvp()` (via the private `tdvp_step()`
+  helper) alongside the pre-existing `Chain::quench()`/
+  `Chain::evolve_and_measure()`, which apply a hand-rolled 2nd-order
+  Taylor expansion of `exp(-i dt H)` as an MPO (`evoloperator()`) instead.
+  `Many_Body_Chain.tevol_method` (`manybodychain.py`, default `"TDVP"`)
+  picks between them in `timedependent.py`'s `evolution_dmrg_DC()`/
+  `evolve_and_measure_dmrg()` — `"TDVP"` only applies when
+  `itensor_version==3` (mpscpp2 has no `TDVP/` and no `_tdvp` methods at
+  all); any other combination silently falls back to the MPO-Taylor path,
+  which remains the only option for `itensor_version=2`. Only the
+  two-site TDVP algorithm is used (`NumCenter=2`); the global subspace
+  expansion machinery in `TDVP/basisextension.h` (mainly useful for
+  one-site TDVP or long-range Hamiltonians) is not wired in, since
+  two-site TDVP already grows bond dimension via SVD like two-site DMRG.
 - **Both backends can be loaded in the same process** (needed for anything
   that directly compares `itensor_version=2` vs `=3` results, e.g.
   `examples/v2_VS_v3_*`, or `examples/dynamical_correlator/

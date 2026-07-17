@@ -18,14 +18,20 @@ def evolution_DC(self,mode="DMRG",**kwargs):
 def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     """
     Real-time quench dynamical correlator via the in-process pybind11
-    extension (mpscpp2/chain_session.h's Chain::quench).
+    extension.
 
-    fit_td is hardcoded False here, not read from self.fit_td: the removed
-    file-based backend wrote it to tasks.in under the key "tevol_fit", but
-    time_evolution.h actually read "tevol_fit_td" (a pre-existing,
-    unrelated key-name mismatch) -- so the fitApplyMPO branch there was
-    unreachable regardless of self.fit_td, and False reproduces that
-    actual behavior rather than the intended-but-never-taken one.
+    Defaults to TDVP (mpscpp3/chain_session.h's Chain::quench_tdvp(), see
+    TDVP/ and self.tevol_method) for itensor_version=3; falls back to the
+    legacy MPO-Taylor Chain::quench() otherwise (itensor_version=2, or
+    self.tevol_method="MPO" explicitly).
+
+    fit_td is hardcoded False in the MPO fallback, not read from
+    self.fit_td: the removed file-based backend wrote it to tasks.in under
+    the key "tevol_fit", but time_evolution.h actually read
+    "tevol_fit_td" (a pre-existing, unrelated key-name mismatch) -- so the
+    fitApplyMPO branch there was unreachable regardless of self.fit_td,
+    and False reproduces that actual behavior rather than the
+    intended-but-never-taken one.
 
     "restart" has no effect: quench()'s C++ implementation always starts
     from get_gs() regardless of its value.
@@ -36,9 +42,14 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    correlator,_wf = self._session.quench(
-            self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
-            int(nt),dt,False)
+    if self.itensor_version==3 and self.tevol_method=="TDVP":
+        correlator,_wf = self._session.quench_tdvp(
+                self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
+                int(nt),dt)
+    else:
+        correlator,_wf = self._session.quench(
+                self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
+                int(nt),dt,False)
     cs = np.array(correlator)
     ts = np.array([dt*ii for ii in range(nt)])
     return ts,cs.real-1j*cs.imag
@@ -56,25 +67,48 @@ def evolve_and_measure(self,mode="DMRG",**kwargs):
 
 
 def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
-        dt=1e-2,wf=None,**kwargs):
+        dt=1e-2,wf=None,return_wf=False,**kwargs):
     """
     Real-time evolution + measurement via the in-process pybind11
-    extension (mpscpp2/chain_session.h's Chain::evolve_and_measure).
-    fit_td is hardcoded False for the same reason as evolution_dmrg_DC
-    (see its docstring): the "tevol_fit"/"tevol_fit_td" key-name mismatch
-    meant the old file-based backend's fitApplyMPO branch was unreachable
-    regardless of self.fit_td.
+    extension.
+
+    Defaults to TDVP (mpscpp3/chain_session.h's
+    Chain::evolve_and_measure_tdvp(), see TDVP/ and self.tevol_method) for
+    itensor_version=3; falls back to the legacy MPO-Taylor
+    Chain::evolve_and_measure() otherwise (itensor_version=2, or
+    self.tevol_method="MPO" explicitly).
+
+    fit_td is hardcoded False in the MPO fallback, for the same reason as
+    evolution_dmrg_DC (see its docstring): the "tevol_fit"/"tevol_fit_td"
+    key-name mismatch meant the old file-based backend's fitApplyMPO
+    branch was unreachable regardless of self.fit_td.
+
+    return_wf=True additionally returns the final wavefunction (wrapped as
+    an mps.MPS, see mpsalgebra.py's exponential_dmrg() for the same
+    cpp_handle-wrapping pattern) as a third element -- e.g. to chain a
+    forward evolution into a subsequent backward one for a round-trip
+    fidelity check where ED isn't feasible (see
+    examples/tdvp_VS_ED_time_evolution/benchmark_scaling.py).
     """
     if h is None: h = self.hamiltonian # Hamiltonian
     if wf is None: wf = self.wf0 # get ground state
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    correlator,_wf = self._session.evolve_and_measure(
-            h.to_terms(),operator.to_terms(),wf.cpp_handle,
-            int(nt),dt,False)
+    if self.itensor_version==3 and self.tevol_method=="TDVP":
+        correlator,_wf = self._session.evolve_and_measure_tdvp(
+                h.to_terms(),operator.to_terms(),wf.cpp_handle,
+                int(nt),dt)
+    else:
+        correlator,_wf = self._session.evolve_and_measure(
+                h.to_terms(),operator.to_terms(),wf.cpp_handle,
+                int(nt),dt,False)
     cs = np.array(correlator)
     ts = np.array([dt*ii for ii in range(int(nt))])
+    if return_wf:
+        from . import mps as mpsmod
+        wf_final = mpsmod.MPS(self,cpp_handle=_wf).copy()
+        return ts,cs.real-1j*cs.imag,wf_final
     return ts,cs.real-1j*cs.imag
 
 
