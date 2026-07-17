@@ -73,6 +73,10 @@ class Many_Body_Chain():
           # evolve_and_measure_dmrg() for the actual dispatch.
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
+      self.cvm_maxm = self.maxm # bond dimension for the CVM correction
+          # vector, independent of the ground state's own maxm (mirrors
+          # kpmmaxm): a correction vector solving [(H-omega)^2+eta^2]xc=b
+          # can need a different entanglement structure than the GS.
       self.kpm_scale = 0.7 # scaling of the spectra for KPM
       self.kpm_accelerate = True # set to true
       self.kpm_n_scale = 3 # scaling factor for the number of polynomials
