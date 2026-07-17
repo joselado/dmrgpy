@@ -40,12 +40,24 @@ parser.add_argument("--itensor-version", "--itensor_version",
              "(mpscpp3, itensor_version=3), both = compile both, "
              "one after the other (default: %(default)s, matching the "
              "default backend in Python).")
+parser.add_argument("--doctor", "--check-only", dest="doctor",
+        action="store_true", default=False,
+        help="Only run the requirement checks (compiler, LAPACK/BLAS, "
+             "pybind11) and report what would be used, without compiling "
+             "anything. Useful for diagnosing a broken environment (e.g. "
+             "an HPC cluster) before committing to the "
+             "several-minutes-long ITensor build.")
 args = parser.parse_args()
 
 versions = [2, 3] if args.itensor_version == "both" else [int(args.itensor_version)]
 
 from installtk import requirements
 config = requirements.check(args) # phase 1: check everything first
+
+if args.doctor:
+    print("### --doctor: requirements OK, stopping before compilation ###")
+    import sys
+    sys.exit(0)
 
 from installtk import install2
 for version in versions:

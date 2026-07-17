@@ -74,6 +74,46 @@ def find_conda_compiler(python_exe=None):
     return None
 
 
+def backend_missing(gpp, prog="cc1plus"):
+    """True if `gpp`'s own driver can't locate its compilation backend
+    (`cc1plus`, the actual C++ compiler -- `gpp` itself is just a driver
+    that execs it). Uses `gpp -print-prog-name=`, the same lookup gcc/clang
+    use internally, so this is a real check, not a guess -- and it's much
+    cheaper and more specific than waiting for a full trial_compile() to
+    fail with a raw "posix_spawnp: No such file or directory".
+
+    This exists because `--version` and `shutil.which()` both pass for a
+    compiler that's just a driver front-end with no matching backend
+    package installed -- confirmed on Aalto's Triton cluster, where the
+    `scicomp-python-env` module's bundled conda-style
+    `x86_64-conda-linux-gnu-g++` wrapper resolves and runs `--version`
+    fine but has no `cc1plus` behind it.
+    """
+    try:
+        out = subprocess.run([gpp, "-print-prog-name="+prog],
+                capture_output=True, text=True, timeout=15).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if not out or out == prog:
+        # gcc/clang echo the bare program name back unchanged when they
+        # can't resolve it to a path at all
+        return True
+    return not os.path.isfile(out)
+
+
+def lmod_state():
+    """Return (lmod_present, loaded_module_names) using the environment
+    variables Lmod itself sets ($LMOD_CMD/$MODULEPATH, $LOADEDMODULES).
+    Many HPC clusters (e.g. Aalto's Triton) provide no compiler at all on
+    PATH until a module is loaded -- detecting this lets error messages
+    point at 'module load ...' instead of the apt-get/brew hints that are
+    meaningless (no sudo) or simply wrong on a cluster."""
+    present = bool(os.environ.get("LMOD_CMD")) or \
+            bool(os.environ.get("MODULEPATH"))
+    loaded = [m for m in os.environ.get("LOADEDMODULES", "").split(":") if m]
+    return present, loaded
+
+
 def trial_compile(gpp, extra_flags=(), link_flags=(), source=None):
     """Try to compile (and link) a small C++ program with `gpp`, using
     `extra_flags` for compilation and `link_flags` for linking. Returns

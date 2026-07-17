@@ -44,6 +44,33 @@ If LAPACK/BLAS can't be found automatically, point the script at OpenBLAS explic
 python install.py --openblas --openblas_libdir=/path/to/openblas/lib --openblas_includedir=/path/to/openblas/include
 ```
 
+To check what the script would use (compiler, BLAS/LAPACK) without
+actually running the several-minutes-long ITensor build, use
+
+```bash
+python install.py --doctor
+```
+
+### HPC clusters with environment modules (e.g. Aalto's Triton) ###
+
+On clusters using Lmod/environment modules, no C++ compiler may be on
+PATH at all until a module is loaded, e.g. on Triton:
+
+```bash
+module load <stack> gcc/<version>   # e.g. triton/2024.1-gcc gcc/12.3.0
+python install.py
+```
+
+If you're using a module-provided Python distribution (e.g. Triton's
+`scicomp-python-env`), its bundled conda-style compiler wrapper can
+sometimes be present but broken (missing its `cc1plus` backend) -- if so,
+`install.py` automatically falls back to the system/module-loaded
+compiler and prints a note about it. Whichever compiler ends up being
+used, and whichever modules/conda environment were loaded at install
+time, must be loaded/activated again in every later session (including
+job scripts) that imports `dmrgpy` -- the compiled extension depends on
+them.
+
 Alternatively, in case you just want to use the Julia version,
 execute the script 
 

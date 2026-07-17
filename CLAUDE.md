@@ -50,16 +50,39 @@ the identical compiler/BLAS/LAPACK configuration resolved in phase 1.
 `pybind11` is a hard requirement (auto-installed via `pip` into the
 current interpreter if missing, since the pybind11 extension is the only
 DMRG backend besides ED). The compiler is auto-detected rather than
-defaulting to plain `g++`:
-`installtk/cppversion.py::find_conda_compiler()` looks for a
-conda-provided compiler (e.g. the `gxx_linux-64` package) next to the
-running interpreter when it's a conda Python, and uses that same compiler
-for *both* the ITensor build and the pybind extension link (`--gpp`
-overrides this). This matters because the extension is loaded into the
-same process as conda's own numpy/scipy, which bundle their own
-libstdc++ -- building against the system compiler instead has
-reproducibly segfaulted in the past (see the long comment in
-`mpscpp2/Makefile`). `installtk/blaslapack.py::find_working_config()`
+defaulting to plain `g++`, via a cascade of candidates rather than a
+single guess: `installtk/requirements.py::_compiler_candidates()` yields
+a conda-provided compiler first when running under a conda Python
+(`installtk/cppversion.py::find_conda_compiler()` looks for one, e.g. the
+`gxx_linux-64` package, next to the running interpreter -- preferred
+because the extension is loaded into the same process as conda's own
+numpy/scipy, which bundle their own libstdc++, and building against the
+system compiler instead has reproducibly segfaulted in the past, see the
+long comment in `mpscpp2/Makefile`), then falls back to the system
+`g++`/`c++` on PATH if that candidate doesn't actually work (`--gpp`
+overrides the whole cascade with a single hard choice). Each candidate is
+verified for real, not just checked for existence: besides an actual
+trial compile+link (`cppversion.trial_compile()`),
+`cppversion.backend_missing()` proactively asks the driver
+(`gpp -print-prog-name=cc1plus`) whether it can even locate its own
+compilation backend, since `--version`/`shutil.which()` both pass for a
+compiler binary that's present but incomplete. This isn't hypothetical:
+confirmed directly on Aalto's Triton cluster, whose `scicomp-python-env`
+module ships a conda-style Python distribution with exactly such a
+broken `x86_64-conda-linux-gnu-g++` wrapper (no matching `cc1plus`
+installed) -- the cascade transparently falls back to Triton's login-node
+system compiler in that case and prints a note about it.
+`installtk/cppversion.py::lmod_state()` detects environment-module
+systems (Lmod, via `$LMOD_CMD`/`$MODULEPATH`) so failure messages can
+suggest `module load ...` instead of the sudo-based apt-get/brew hints
+that are meaningless (no sudo) or simply wrong on a cluster; `check()`
+also prints a reminder to reload the same modules/conda environment used
+at install time in any later session that imports `dmrgpy`, since the
+compiled extension depends on them being present again at import time.
+`install.py --doctor` runs only this requirement-checking phase and
+exits, without starting the multi-minute ITensor build -- useful for
+diagnosing a cluster environment or reporting a bug.
+`installtk/blaslapack.py::find_working_config()`
 similarly tries several LAPACK/BLAS candidates (conda's own libs, system
 `-lblas -llapack`, OpenBLAS, and a Debian/Ubuntu-multiarch workaround that
 asks the system compiler where it actually finds `libblas.so`/
