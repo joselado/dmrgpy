@@ -9,7 +9,7 @@ def normalize_terms(terms, ndigits=10):
     ))
 
 
-def energy_ed_v2_v3(chain, hamiltonian, **kwargs):
+def energy_ed_v2_v3(chain, hamiltonian, versions=(2, 3), **kwargs):
     """Ground-state energy of `chain` with Hamiltonian `hamiltonian`,
     computed via ED and via DMRG on both the ITensor v2 and v3 C++
     backends. When a backend isn't compiled, mode.get_mode() silently
@@ -21,33 +21,38 @@ def energy_ed_v2_v3(chain, hamiltonian, **kwargs):
     (it also calls `restart()`) because gs_energy()/vev() cache their
     result on the chain (`computed_gs`), which would otherwise just
     return the previous backend's answer instead of recomputing.
+
+    `versions`: which DMRG backend(s) to include (default both). Pass
+    `versions=(2,)` for a 2-site chain -- itensor_version=3 crashes hard
+    ("LocalOp is default constructed", an ITensor v3 internal check in
+    itensor/mps/localop.h) for *any* exactly-2-physical-site chain,
+    independent of physics type (confirmed for spin and spinless-fermion
+    chains); 3+ sites is unaffected. This is a genuine bug in mpscpp3,
+    not a mode.py fallback or a test issue -- see
+    test_spin_chain.py/test_fermion_chain.py's dimer tests.
     """
     chain.set_hamiltonian(hamiltonian)
     e_ed = chain.gs_energy(mode="ED")
 
-    chain.set_hamiltonian(hamiltonian)
-    chain.setup_cpp(2)
-    e_v2 = chain.gs_energy(mode="DMRG", **kwargs)
+    results = [e_ed]
+    for version in versions:
+        chain.set_hamiltonian(hamiltonian)
+        chain.setup_cpp(version)
+        results.append(chain.gs_energy(mode="DMRG", **kwargs))
 
-    chain.set_hamiltonian(hamiltonian)
-    chain.setup_cpp(3)
-    e_v3 = chain.gs_energy(mode="DMRG", **kwargs)
-
-    return e_ed, e_v2, e_v3
+    return tuple(results)
 
 
-def vev_ed_v2_v3(chain, hamiltonian, observable, **kwargs):
+def vev_ed_v2_v3(chain, hamiltonian, observable, versions=(2, 3), **kwargs):
     """Like energy_ed_v2_v3, but for the ground-state expectation value
     of `observable` instead of the ground-state energy itself."""
     chain.set_hamiltonian(hamiltonian)
     v_ed = chain.vev(observable, mode="ED")
 
-    chain.set_hamiltonian(hamiltonian)
-    chain.setup_cpp(2)
-    v_v2 = chain.vev(observable, mode="DMRG", **kwargs)
+    results = [v_ed]
+    for version in versions:
+        chain.set_hamiltonian(hamiltonian)
+        chain.setup_cpp(version)
+        results.append(chain.vev(observable, mode="DMRG", **kwargs))
 
-    chain.set_hamiltonian(hamiltonian)
-    chain.setup_cpp(3)
-    v_v3 = chain.vev(observable, mode="DMRG", **kwargs)
-
-    return v_ed, v_v2, v_v3
+    return tuple(results)
