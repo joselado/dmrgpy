@@ -98,7 +98,7 @@ module load gcc
 and then compile it as 
 
 ```bash
-python install.py 
+python3 install.py 
 ```
 
 ## Windows ##
