@@ -1,9 +1,11 @@
-# Self-check for the optional JAX-accelerated kernel layer
-# (dmrgpy.pyitensor.kernels). Runs regardless of whether JAX is actually
-# installed: if it isn't, available() is False and the JAX-specific checks
-# are skipped, but make_matvec()'s NumPy fallback path (identical to what
-# ran before this module existed) is still exercised by every other
-# selftest_*.py script's DMRG/TDVP runs.
+# Self-check for the optional JAX- and numba-accelerated kernel layers
+# (dmrgpy.pyitensor.kernels). Runs regardless of whether JAX/numba are
+# actually installed: if either isn't, its checks are skipped, but
+# make_matvec()'s NumPy fallback path (identical to what ran before this
+# module existed) is still exercised by every other selftest_*.py script's
+# DMRG/TDVP runs. Both JAX and numba default OFF (see kernels.py's module
+# docstring for the measured regressions behind each default) -- these
+# tests only check the opt-in paths' correctness, not their defaults.
 import numpy as np
 
 from dmrgpy.pyitensor import AutoMPO, randomMPS, to_mpo
@@ -55,12 +57,34 @@ def test_jax_and_numpy_matvec_agree():
     matvec_jax, order_in, shape, x0 = two_site_heff(None, None, H, psi, 1, R, Rbra)
     kernels.USE_JAX = False
     matvec_np, *_ = two_site_heff(None, None, H, psi, 1, R, Rbra)
-    kernels.USE_JAX = kernels._HAVE_JAX  # restore default
+    kernels.USE_JAX = kernels._detect_default_use_jax()  # restore default
 
     out_jax = matvec_jax(x0)
     out_np = matvec_np(x0)
     rel_err = np.max(np.abs(out_jax - out_np)) / np.max(np.abs(out_np))
     check("JAX and NumPy matvec kernels agree to near machine precision "
+          "(relative error={:.2e})".format(rel_err), rel_err < 1e-10)
+
+
+def test_numba_and_numpy_matvec_agree():
+    # numba defaults OFF (see kernels.py's docstring: real per-contraction
+    # win, but its own compile-time tax outweighs it for this library's
+    # one-shot-script usage pattern) -- this only checks correctness of the
+    # opt-in path, not that it's enabled by default.
+    if not kernels._HAVE_NUMBA:
+        print("[SKIP] numba not installed -- nothing to compare against NumPy")
+        return
+    H, psi, R, Rbra = _build_bond1_heff()
+
+    kernels.USE_NUMBA = True
+    matvec_numba, order_in, shape, x0 = two_site_heff(None, None, H, psi, 1, R, Rbra)
+    kernels.USE_NUMBA = False
+    matvec_np, *_ = two_site_heff(None, None, H, psi, 1, R, Rbra)
+
+    out_numba = matvec_numba(x0)
+    out_np = matvec_np(x0)
+    rel_err = np.max(np.abs(out_numba - out_np)) / np.max(np.abs(out_np))
+    check("numba and NumPy matvec kernels agree to near machine precision "
           "(relative error={:.2e})".format(rel_err), rel_err < 1e-10)
 
 
@@ -91,5 +115,6 @@ def test_numpy_fallback_is_the_pairwise_chain_not_einsum():
 if __name__ == "__main__":
     test_compile_contraction_labels_deterministically()
     test_jax_and_numpy_matvec_agree()
+    test_numba_and_numpy_matvec_agree()
     test_numpy_fallback_is_the_pairwise_chain_not_einsum()
     print("All pyitensor kernels checks passed.")

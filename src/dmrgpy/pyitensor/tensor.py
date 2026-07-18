@@ -32,6 +32,35 @@ def _find(inds, target):
     return None
 
 
+def mul_plan(a_inds, b_inds):
+    """The index-matching decision behind ITensor.__mul__ (a*b), factored
+    out as a pure function of index *structure* alone (no array data) so
+    it can be computed once and reused across many calls with the same
+    tensor shapes -- see kernels.py's numba matvec chain, which calls this
+    at matvec-build time (once per bond) rather than per Lanczos iteration
+    (dozens of times per bond), to plan a fixed sequence of transpose+
+    reshape+matmul steps ahead of time.
+
+    Returns (a_axes, b_axes, a_free, b_free): a_axes/b_axes are the
+    matched-and-therefore-contracted axis positions (same order, i.e.
+    a_axes[k] pairs with b_axes[k]); a_free/b_free are the remaining axis
+    positions, in their original order -- exactly what np.tensordot(a, b,
+    axes=(a_axes, b_axes)) needs, with the output index order being
+    a_inds[a_free] + b_inds[b_free]."""
+    a_axes, b_axes, a_free = [], [], []
+    used_b = set()
+    for i, ind in enumerate(a_inds):
+        j = _find(b_inds, ind)
+        if j is not None and j not in used_b:
+            a_axes.append(i)
+            b_axes.append(j)
+            used_b.add(j)
+        else:
+            a_free.append(i)
+    b_free = [j for j in range(len(b_inds)) if j not in used_b]
+    return a_axes, b_axes, a_free, b_free
+
+
 class ITensor:
     __slots__ = ("inds", "array")
 
@@ -87,17 +116,7 @@ class ITensor:
             return ITensor(self.inds, self.array * other)
         if not isinstance(other, ITensor):
             return NotImplemented
-        self_axes, other_axes, self_free = [], [], []
-        used_other = set()
-        for i, ind in enumerate(self.inds):
-            j = _find(other.inds, ind)
-            if j is not None and j not in used_other:
-                self_axes.append(i)
-                other_axes.append(j)
-                used_other.add(j)
-            else:
-                self_free.append(i)
-        other_free = [j for j in range(len(other.inds)) if j not in used_other]
+        self_axes, other_axes, self_free, other_free = mul_plan(self.inds, other.inds)
         arr = np.tensordot(self.array, other.array, axes=(self_axes, other_axes))
         out_inds = tuple(self.inds[i] for i in self_free) + tuple(other.inds[j] for j in other_free)
         return ITensor(out_inds, arr)
