@@ -31,7 +31,7 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from . import kernels
 from .mpsalgebra import _link_at
 from .svd import svd
-from .tensor import ITensor, dag
+from .tensor import ITensor, contract_many, dag
 from .tensor import prime as _t_prime
 
 
@@ -63,16 +63,24 @@ def _relabel_bra_local(T, chain, i, left_bra, right_bra):
 def _extend_left(L, left_bra, H, ket, i):
     T = ket.A(i)
     bra_piece, _, right_bra = _relabel_bra_local(T, ket, i, left_bra, None)
-    piece = bra_piece * H.A(i) * T
-    new_L = piece if L is None else L * piece
+    # contract_many(), not a left-to-right `piece = bra_piece*H.A(i)*T;
+    # new_L = piece if L is None else L*piece` chain: that ordering builds
+    # bra_piece*H.A(i)*T *before* L ever gets a chance to cancel away one
+    # side of bra_piece's/T's own link legs, so the intermediate carries
+    # both of them simultaneously -- measured directly at maxdim=60 on a
+    # 14-site chain, a 92-million-element intermediate (1.5s) instead of
+    # a few thousand elements (0.0006s) for the mathematically identical
+    # contract_many() result. See tensor.py's contract_many() docstring.
+    pieces = [p for p in (L, bra_piece, H.A(i), T) if p is not None]
+    new_L = contract_many(pieces)
     return new_L, right_bra
 
 
 def _extend_right(R, right_bra, H, ket, i):
     T = ket.A(i)
     bra_piece, left_bra, _ = _relabel_bra_local(T, ket, i, None, right_bra)
-    piece = bra_piece * H.A(i) * T
-    new_R = piece if R is None else piece * R
+    pieces = [p for p in (R, bra_piece, H.A(i), T) if p is not None]
+    new_R = contract_many(pieces)
     return new_R, left_bra
 
 
@@ -268,10 +276,8 @@ def _bond_projections(penalty_states, left_ov, right_ov, i):
     projs = []
     for k, wk in enumerate(penalty_states):
         Lk, Rk = left_ov[k].get(i - 1), right_ov[k].get(i + 2)
-        p = wk.A(i) * wk.A(i + 1)
-        p = p if Lk is None else Lk * p
-        p = p if Rk is None else p * Rk
-        projs.append(p)
+        pieces = [p for p in (Lk, wk.A(i), wk.A(i + 1), Rk) if p is not None]
+        projs.append(contract_many(pieces))
     return projs
 
 
