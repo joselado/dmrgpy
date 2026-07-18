@@ -1,10 +1,12 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
-# Compare ITensor v2 vs v3 for a (spinful) Hubbard chain, built the same
-# way as examples/hubbard_gap/main.py: two interleaved spinless-fermion
-# sites (up/down) per physical site, plus an on-site U(n_up-1/2)(n_dn-1/2)
-# interaction.
+# Compare ITensor v2 vs v3 vs the pure-Python backend (itensor_version=
+# "python") for a (spinful) Hubbard chain, built the same way as
+# examples/hubbard_gap/main.py: two interleaved spinless-fermion sites
+# (up/down) per physical site, plus an on-site U(n_up-1/2)(n_dn-1/2)
+# interaction. Exercises Fermionic_Chain (not just Spin_Chain) and
+# pyitensor's ElectronSite/Jordan-Wigner threading on the python backend.
 import numpy as np
 from dmrgpy import fermionchain
 
@@ -27,7 +29,10 @@ def get_energy(itensor_version):
 
 e2 = get_energy(2)
 e3 = get_energy(3)
+epy = get_energy("python")
 
-print("Ground state energy (ITensor v2) =",e2)
-print("Ground state energy (ITensor v3) =",e3)
-print("Difference =",abs(e2-e3))
+print("Ground state energy (ITensor v2)     =",e2)
+print("Ground state energy (ITensor v3)     =",e3)
+print("Ground state energy (pure Python)    =",epy)
+print("Difference v2 vs v3                  =",abs(e2-e3))
+print("Difference v3 vs pure Python         =",abs(e3-epy))

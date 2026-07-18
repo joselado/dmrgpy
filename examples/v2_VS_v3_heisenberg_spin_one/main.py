@@ -1,9 +1,10 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 
-# Compare ITensor v2 vs v3 for a spin-1 Heisenberg chain (a different local
-# Hilbert space than spin-1/2, exercising the stock SpinOne site type on
-# both backends).
+# Compare ITensor v2 vs v3 vs the pure-Python backend (itensor_version=
+# "python") for a spin-1 Heisenberg chain (a different local Hilbert space
+# than spin-1/2, exercising the stock SpinOne site type on all three
+# backends).
 import numpy as np
 from dmrgpy import spinchain
 
@@ -22,7 +23,10 @@ def get_energy(itensor_version):
 
 e2 = get_energy(2)
 e3 = get_energy(3)
+epy = get_energy("python")
 
-print("Ground state energy (ITensor v2) =",e2)
-print("Ground state energy (ITensor v3) =",e3)
-print("Difference =",abs(e2-e3))
+print("Ground state energy (ITensor v2)     =",e2)
+print("Ground state energy (ITensor v3)     =",e3)
+print("Ground state energy (pure Python)    =",epy)
+print("Difference v2 vs v3                  =",abs(e2-e3))
+print("Difference v3 vs pure Python         =",abs(e3-epy))

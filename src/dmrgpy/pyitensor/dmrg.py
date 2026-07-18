@@ -248,7 +248,22 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
         w, v = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
         eval0, evec0 = w[0], v[:, 0]
     else:
-        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=niter)
+        # The Sweeps schedule's own niter (e.g. ITensor's usual default of
+        # 2) is deliberately small -- it relies on DMRG's many sweeps to
+        # refine the state rather than fully converging each local
+        # diagonalization -- but that only works once the sweep is already
+        # close to converged; the OLD eigsh call floored this at
+        # max(niter,200) (via maxiter=) for exactly this reason, and
+        # dropping that floor when eigsh was replaced was a real
+        # regression, confirmed directly: without it, larger local Hilbert
+        # spaces (e.g. spin-3/2) and the excited-states penalty method
+        # stopped converging to the true ground/target state (up to 4.7e-4
+        # energy error on a case that should match ED to ~1e-14, and a
+        # first-excited-state gap off by 2.7x). _lanczos_ground_state's own
+        # early-stop-on-stable-Ritz-value logic means this floor costs
+        # little in practice -- most bonds still exit in far fewer than
+        # 200 iterations once bond dimension saturates.
+        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=max(niter, 200))
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(eval0.real), theta
@@ -374,7 +389,22 @@ def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, wei
         w, v = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
         eval0, evec0 = w[0], v[:, 0]
     else:
-        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=niter)
+        # The Sweeps schedule's own niter (e.g. ITensor's usual default of
+        # 2) is deliberately small -- it relies on DMRG's many sweeps to
+        # refine the state rather than fully converging each local
+        # diagonalization -- but that only works once the sweep is already
+        # close to converged; the OLD eigsh call floored this at
+        # max(niter,200) (via maxiter=) for exactly this reason, and
+        # dropping that floor when eigsh was replaced was a real
+        # regression, confirmed directly: without it, larger local Hilbert
+        # spaces (e.g. spin-3/2) and the excited-states penalty method
+        # stopped converging to the true ground/target state (up to 4.7e-4
+        # energy error on a case that should match ED to ~1e-14, and a
+        # first-excited-state gap off by 2.7x). _lanczos_ground_state's own
+        # early-stop-on-stable-Ritz-value logic means this floor costs
+        # little in practice -- most bonds still exit in far fewer than
+        # 200 iterations once bond dimension saturates.
+        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=max(niter, 200))
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(eval0.real), theta
@@ -398,16 +428,28 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True):
     (too-high) eigenvalue rather than slowly converging to the right one --
     not just occasional slow convergence, but real stationary points of
     the wrong energy. Doubling scale_lagrange and adding a few sweeps
-    fixed every case checked, matching standard DMRG practice that the
-    penalty weight needs real margin above the bandwidth, but callers
+    fixed every case checked *in that sweep*, matching standard DMRG
+    practice that the penalty weight needs real margin above the
+    bandwidth -- but this is not a universal fix. Confirmed directly on a
+    different case (an 8-site transverse-field Ising chain, see
+    examples/v2_VS_v3_excited_states_gap): the first-excited gap settled
+    ~6e-4 off from the exact value, and this residual was *completely*
+    insensitive to maxdim, sweep count (tested to 100, vs. the usual ~15-
+    25), and scale_lagrange (tested 1x-100x bandwidth) -- a genuine
+    stationary point the search cannot escape by throwing more of any of
+    those knobs at it, for this Hamiltonian. So: more sweeps/weight is
+    worth trying first (often sufficient, per the case above), but callers
     should treat a returned `fluctuations` entry that isn't small as a
-    sign the search didn't actually converge, not just trust the energy.
-    This sensitivity is inherent to the algorithm as implemented (verified
-    directly against the JAX-vs-NumPy kernel comparison in kernels.py: a
-    single matvec call agrees to ~1e-15 relative between the two, so tiny,
-    ordinary floating-point differences between them are what's enough to
-    occasionally tip a marginal case, not a correctness bug in either
-    kernel)."""
+    sign the search didn't actually converge and may not be fixable by
+    parameter tuning alone -- only a real noise-term-style escape
+    mechanism (not implemented here) would close this class of gap in
+    general. This sensitivity is inherent to the algorithm as implemented,
+    not a floating-point precision issue (verified directly against the
+    JAX-vs-NumPy kernel comparison in kernels.py: a single matvec call
+    agrees to ~1e-15 relative between the two, so tiny, ordinary floating-
+    point differences between them are what's enough to occasionally tip
+    an already-marginal case, not the root cause of a 6e-4 stationary
+    point)."""
     n = psi.length()
     k_states = len(penalty_states)
     energy = None
