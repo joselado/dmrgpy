@@ -454,12 +454,15 @@ A_i(\omega)=-\frac1\pi\,\mathrm{Im}\,G^R_{ii}(\omega)
 with $G^R_{ii}(\omega)$ built from $\langle c_i(t)c_i^\dagger(0)\rangle$
 ($\omega>0$) and $\langle c_i^\dagger(t)c_i(0)\rangle$ ($\omega<0$),
 i.e.\ the particle-addition and particle-removal (electron/hole)
-branches of the local Green's function concatenated across $\omega=0$:
-
-\begin{lstlisting}
-from dmrgpy import fermiondos
-es, ldos = fermiondos.get_dos(fc, i=0)
-\end{lstlisting}
+branches of the local Green's function concatenated across $\omega=0$.
+There is no ready-made helper for this (the module this section used to
+point to, \texttt{fermiondos.py}, relied on a
+\texttt{get\_dynamical\_correlator} calling convention that no longer
+exists and was removed) --- build the two branches directly with
+\texttt{get\_dynamical\_correlator} instead, using
+\texttt{(fc.C[i], fc.Cdag[i])} for the particle-removal branch and
+\texttt{(fc.Cdag[i], fc.C[i])} for the particle-addition branch, then
+concatenate.
 
 \section{Finite temperature}
 \label{sec:thermal}

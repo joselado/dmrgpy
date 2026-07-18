@@ -22,14 +22,18 @@ def energy_ed_v2_v3(chain, hamiltonian, versions=(2, 3), **kwargs):
     result on the chain (`computed_gs`), which would otherwise just
     return the previous backend's answer instead of recomputing.
 
-    `versions`: which DMRG backend(s) to include (default both). Pass
-    `versions=(2,)` for a 2-site chain -- itensor_version=3 crashes hard
-    ("LocalOp is default constructed", an ITensor v3 internal check in
-    itensor/mps/localop.h) for *any* exactly-2-physical-site chain,
-    independent of physics type (confirmed for spin and spinless-fermion
-    chains); 3+ sites is unaffected. This is a genuine bug in mpscpp3,
-    not a mode.py fallback or a test issue -- see
-    test_spin_chain.py/test_fermion_chain.py's dimer tests.
+    `versions`: which DMRG backend(s) to include (default both). ITensor
+    v3's two-site dmrg() used to crash hard ("LocalOp is default
+    constructed", an ITensor v3 internal check in itensor/mps/localop.h)
+    for any exactly-2-physical-site chain, independent of physics type;
+    mode.py's get_mode() now falls back to ED automatically for
+    itensor_version==3 with ns<3 (same mechanism as its "extension not
+    compiled" fallback), so that no longer crashes -- a v3 request on a
+    2-site chain just transparently returns the ED answer instead. The
+    `versions` kwarg is kept for tests that want to explicitly restrict
+    which backend(s) they exercise (e.g. to keep a "real DMRG on 3+
+    sites" test from silently degrading into an ED-only check if the
+    chain size ever shrinks), not because including v3 is unsafe.
     """
     chain.set_hamiltonian(hamiltonian)
     e_ed = chain.gs_energy(mode="ED")

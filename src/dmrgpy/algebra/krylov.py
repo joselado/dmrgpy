@@ -68,7 +68,11 @@ def diagonalize(mh):
 
 
 def rediagonalize(H,wfs):
-    """Given certain eigenfunctions, rediagonalize a Hamiltonian"""
+    """Given certain eigenfunctions, rediagonalize a Hamiltonian, returning
+    both the refined eigenvalues and eigenvectors (as MPS linear
+    combinations of the input wfs). Returning the eigenvalues here too
+    lets callers avoid building the same O(n^2) representation matrix a
+    second time just to get them (see excited.py's purify=True path)."""
     n = len(wfs) # number of wavefunctions
     mh = np.zeros((n,n),dtype=np.complex128) # empty Hamiltonian
     for i in range(n):
@@ -82,7 +86,7 @@ def rediagonalize(H,wfs):
         for i in range(n): # loop over components
             wf = wf + np.conjugate(v0[i])*wfs[i] # add
         wfout.append(wf.copy()) # store wavefunction
-    return wfout
+    return es,wfout
 
 
 def most_mixed_wf(H,wfs,info=False):

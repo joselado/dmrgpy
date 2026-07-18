@@ -1,8 +1,30 @@
 import numpy as np
 from . import operatornames
 
+
+def get_cached_excited_states(self,n=20,scale=10.0,**kwargs):
+    """Wrapper around self.get_excited_states(purify=False,...) that
+    reuses a previous excited-state search on the same chain instance
+    when the (n,scale,gram_schmidt) settings match. The excited states
+    themselves don't depend on the two operators A,B being correlated,
+    so computing them again for every dynamical_correlator(name=(A,B))
+    call on the same Hamiltonian -- e.g. looping over several operator
+    pairs, as several examples/dynamical_correlator/*_excited scripts do
+    -- used to rerun the whole O(n) sequential DMRG excited-state search
+    from scratch each time. The cache is invalidated by
+    Many_Body_Chain.restart()/set_hamiltonian (see manybodychain.py),
+    since a new ground state changes what "the excited states" means."""
+    key = (n,scale,getattr(self,"excited_gram_schmidt",False))
+    cache = getattr(self,"_dcex_excited_cache",None)
+    if cache is not None and cache[0]==key:
+        return cache[1]
+    result = self.get_excited_states(n=n,purify=False,scale=scale,**kwargs)
+    self._dcex_excited_cache = (key,result)
+    return result
+
+
 def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
-        nex=20,es=np.linspace(-1.0,10.0,1000),scale=20.0,**kwargs):
+        nex=20,es=np.linspace(-1.0,10.0,1000),scale=10.0,**kwargs):
     """
     Compute dynamical correlator with excited states with DMRG
     """
@@ -24,8 +46,14 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
 #    cs = self.get_file("EXCITED_OVERLAPS.OUT") # overlaps with GS
 #    c1 = cs[:,0] + 1j*cs[:,1] # first overlap
 #    c2 = cs[:,2] - 1j*cs[:,3] # second overlap
-    # compute the two correlators
-    esex,wsex = self.get_excited_states(n=nex,purify=False,**kwargs)
+    # compute the two correlators. "scale" here used to be silently
+    # dropped (never forwarded to get_excited_states, due to this
+    # function's own "scale" kwarg shadowing it) -- now passed through
+    # explicitly, with the default kept at 10.0 to match what
+    # get_excited_states_dmrg's own default actually was, so this fix
+    # doesn't change default behavior, only lets a caller-supplied
+    # scale= finally take effect.
+    esex,wsex = get_cached_excited_states(self,n=nex,scale=scale,**kwargs)
     A,B = name[0].get_dagger(),name[1] # operators
     wf0 = wsex[0] # ground state
     from .algebra.arnolditk import gram_smith

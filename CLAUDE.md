@@ -94,11 +94,44 @@ across reruns). There is no separate lint or CI config in this repo.
 
 ## Running / verifying changes
 
-There is no unit test suite for the Python code (the only `test.py`/`*_test.cc`
-files live under `pychain/` and inside the vendored ITensor tree). The
-`examples/` directory (100+ self-contained scripts, one per physical model or
-feature) is the de facto regression suite — to check that a change works,
-run the relevant example(s) directly, e.g.:
+There is a `tests/` directory with a real pytest suite (`test_spin_chain.py`,
+`test_fermion_chain.py`, `test_spinful_fermion_chain.py`,
+`test_parafermion_chain.py`, `test_dynamical_correlator.py`,
+`test_entanglement.py`, `test_excited_states.py`, `test_time_evolution.py`,
+`test_long_chain.py`, `test_jordan_wigner.py`, `test_internal_consistency.py`,
+`test_benchmarks.py`) — run it with `python run_tests.py` from the repo root
+(a thin wrapper: runs `pytest tests` from the repo root, then `clean.py`) or
+plain `pytest tests`. `tests/conftest.py` inserts this checkout's own `src/`
+at the front of `sys.path`, so — unlike running an `examples/*/main.py`
+script directly — pytest always exercises the current working tree's code,
+never a stale `site-packages`/symlinked checkout (see the worktree-symlink
+pitfall below). `tests/_helpers.py`'s `energy_ed_v2_v3`/`vev_ed_v2_v3` are the
+standard way most tests cross-check ED against DMRG on the C++ backends (a
+`versions=` kwarg lets a test opt a specific `itensor_version` out — e.g. v3
+on an exactly-2-site chain, a real `mpscpp3` bug, see below); `versions=`
+only covers `(2, 3)` today, not the pure-Python backend
+(`itensor_version="python"`) — no existing test in `tests/` covers it yet.
+`tests/reference_data.py` holds shared golden values pinned to a specific
+historical commit (its own module docstring explains how to regenerate
+them); several individual test files also just inline their own golden
+values as local constants instead, which is equally fine for values that
+are only used in one place. When a test's assertion is against exact
+DMRG/ED agreement (not a golden regression value), prefer
+`pytest.approx(..., abs=1e-6)`-style tolerances over exact equality, since
+DMRG is iterative.
+
+The `examples/` directory (100+ self-contained scripts, one per physical
+model or feature) is a second, complementary regression surface — broader
+and more exploratory than `tests/` (most scripts just print/plot rather than
+assert), but also covers more ground (every physical model, every dynamical-
+correlator submode, every backend combination including `"python"`). Some
+`examples/*/main.py` scripts *do* use real `assert`s and are meant as
+regression tests in the same spirit as `tests/` (e.g. `tdvp_VS_ED_time_evolution`,
+`backend_switch_consistency`, `thermal_purification_VS_exact`,
+`static_correlator_VS_ED`, `entanglement_entropy_VS_ED`,
+`dynamical_correlator_VS_ED` — several of these were added specifically to
+lock in bugs found and fixed in this codebase, and are good templates for
+adding another one). To run one:
 
 ```bash
 cd examples/static_correlator_S12 && python <script>.py
@@ -113,6 +146,34 @@ systems) — the fastest way to check a `mpscpp3` change didn't diverge from
 removes generated working directories (`.mpsfolder`, `.pychainfolder`,
 `.dmrgfolder`) and stray `ERROR`/`*.OUT` files from the tree.
 
+**Worktree/symlink pitfall**: `~/.local/lib/python3.13/site-packages/dmrgpy`
+is typically a symlink into *one specific* checkout's `src/dmrgpy/` (often
+the primary working directory, not whichever worktree you're in). Since
+every `examples/*/main.py` does `sys.path.append(...)` (append, not
+prepend/insert), that symlinked package can resolve *before* the appended
+path when running a script directly with plain `python3 main.py` from a
+different worktree — silently testing the wrong checkout's code with no
+error. Force the intended checkout explicitly, e.g.
+`PYTHONPATH=/path/to/this/worktree/src python3 main.py`, or insert
+`sys.path.insert(0, ...)` in a one-off driver script instead of relying on
+the example's own `sys.path.append`. `tests/conftest.py` (see above) avoids
+this problem entirely for anything run through pytest.
+
+**A real, confirmed `mpscpp3` bug**: ITensor v3's two-site `dmrg()` (see
+`chain_session.h`'s `dmrg_args()`) aborts the whole process (`SIGABRT`,
+`"LocalOp is default constructed"`, an internal ITensor v3 check in
+`itensor/mps/localop.h`) for any chain with fewer than 3 physical sites,
+independent of physics type — confirmed for spin, fermionic, and other
+chains. `mode.py`'s `get_mode()` now falls back to ED automatically for
+`itensor_version==3` with `self.ns<3` (same mechanism as the existing
+"extension not compiled" fallback), so this no longer crashes — but a few
+older tests under `tests/` predate that fix and still manually exclude v3 for
+2-site chains via `_helpers.py`'s `versions=` kwarg (see
+`test_spin_chain.py`/`test_fermion_chain.py`'s dimer tests,
+`test_entanglement.py`'s Bell-pair test, and `_helpers.py`'s own docstring)
+— those exclusions are now redundant defense-in-depth rather than required
+to avoid a crash, not something to "fix" by removing.
+
 ## Architecture
 
 ### Entry point classes
@@ -126,7 +187,7 @@ Hilbert space and convenience operators:
 
 - `spinchain.py` → `Spin_Chain` (aliased directly to `Many_Body_Chain`)
 - `fermionchain.py` → `Fermionic_Chain` (spinless fermions, `C`/`Cdag`/`N`/Fermi-string `F`)
-- `spinfermionchain.py`, `bosonchain.py`, `parafermionchain.py`, `kondochain.py` — same pattern for other statistics/models
+- `spinfermionchain.py`, `bosonchain.py`, `parafermionchain.py` — same pattern for other statistics/models
 
 ### Operator representation: `MultiOperator`
 

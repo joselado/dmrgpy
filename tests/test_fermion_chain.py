@@ -18,18 +18,22 @@ def test_spinless_fermion_dimer_hopping_energy():
     has E=0, doubly-occupied has E=0 too since there's no interaction)
     is the singly-occupied bonding orbital at E=-t.
 
-    v2 only (not both v2 and v3): itensor_version=3 crashes hard for any
-    exactly-2-physical-site chain regardless of physics type -- see
+    Includes both v2 and v3: itensor_version=3's two-site dmrg() used to
+    crash hard for any exactly-2-physical-site chain regardless of
+    physics type -- mode.py's get_mode() now falls back to ED
+    automatically for itensor_version==3 with ns<3, so requesting v3
+    here transparently returns the ED answer instead of crashing (see
     _helpers.energy_ed_v2_v3's docstring and test_spin_chain.py's dimer
-    test, which hits the same mpscpp3 bug."""
+    test, which hits the same mpscpp3 bug)."""
     n = 2
     fc = fermionchain.Fermionic_Chain(n)
     h = fc.Cdag[0] * fc.C[1]
     h = h + h.get_dagger()
 
-    e_ed, e_v2 = energy_ed_v2_v3(fc, h, versions=(2,))
+    e_ed, e_v2, e_v3 = energy_ed_v2_v3(fc, h)
     assert e_ed == pytest.approx(-1.0, abs=1e-8)
     assert e_v2 == pytest.approx(-1.0, abs=DMRG_TOL)
+    assert e_v3 == pytest.approx(-1.0, abs=DMRG_TOL)
 
 
 def test_total_particle_number_conservation():

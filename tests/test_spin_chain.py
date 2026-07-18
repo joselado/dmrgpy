@@ -22,20 +22,22 @@ def test_heisenberg_dimer_exact_singlet_energy():
     """Two-site Heisenberg dimer: exact ground state is the singlet,
     with energy -3/4 (in units where the exchange coupling is 1).
 
-    v3 only (not both v2 and v3): itensor_version=3 crashes hard
-    ("LocalOp is default constructed", an ITensor v3 internal check)
-    for any exactly-2-physical-site chain, independent of physics type
-    -- a genuine bug in mpscpp3, not something this test can route
-    around via mode.py's ED fallback. See _helpers.energy_ed_v2_v3's
-    docstring and test_fermion_chain.py's dimer test, which hits the
-    same thing."""
+    Includes both v2 and v3: itensor_version=3's two-site dmrg() used to
+    crash hard ("LocalOp is default constructed", an ITensor v3 internal
+    check) for any exactly-2-physical-site chain, independent of physics
+    type -- mode.py's get_mode() now falls back to ED automatically for
+    itensor_version==3 with ns<3, so requesting v3 here transparently
+    returns the ED answer instead of crashing (see
+    _helpers.energy_ed_v2_v3's docstring and test_fermion_chain.py's
+    dimer test, which hits the same thing)."""
     spins = ["S=1/2", "S=1/2"]
     sc = spinchain.Spin_Chain(spins)
     h = sc.Sx[0] * sc.Sx[1] + sc.Sy[0] * sc.Sy[1] + sc.Sz[0] * sc.Sz[1]
 
-    e_ed, e_v2 = energy_ed_v2_v3(sc, h, versions=(2,))
+    e_ed, e_v2, e_v3 = energy_ed_v2_v3(sc, h)
     assert e_ed == pytest.approx(-0.75, abs=1e-8)
     assert e_v2 == pytest.approx(-0.75, abs=DMRG_TOL)
+    assert e_v3 == pytest.approx(-0.75, abs=DMRG_TOL)
 
 
 def test_transverse_field_ising_energy_and_zero_magnetization():
