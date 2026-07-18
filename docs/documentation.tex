@@ -1,0 +1,464 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{longtable}
+\usepackage{array}
+
+\lstdefinestyle{pystyle}{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{gray},
+  stringstyle=\color{orange!70!black},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  language=Python,
+}
+\lstset{style=pystyle}
+
+\title{DMRGPY Documentation}
+\author{}
+\date{}
+
+\sloppy
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Overview}
+
+DMRGPY is a Python library for quasi-one-dimensional quantum lattice
+models --- spin chains, spinless and spinful fermionic chains, Kondo
+chains, parafermion chains, and bosonic chains --- solved with matrix
+product state (MPS) methods, principally the density matrix
+renormalization group (DMRG). Most calculations can also be run with
+exact diagonalization (ED) on small systems, so DMRG results can be
+cross-checked against an exact reference.
+
+The library exposes a single, backend-agnostic Python API
+(\texttt{src/dmrgpy/}). The same physics --- Hamiltonian, observables,
+sites --- is written once, and DMRGPY dispatches the actual numerical
+work to whichever solver is requested or available:
+
+\begin{itemize}
+  \item \textbf{DMRG}, run in-process through a compiled C++ extension
+    (\texttt{itensor\_version=2} or \texttt{3}, built against a vendored
+    copy of the \href{https://itensor.org/}{ITensor} library);
+  \item \textbf{DMRG}, run through a live, in-process Julia session using
+    ITensors.jl (\texttt{itensor\_version="julia\_live"});
+  \item \textbf{DMRG}, run in a from-scratch, pure-Python/NumPy/SciPy
+    reimplementation of the ITensor v3 API subset DMRGPY needs
+    (\texttt{itensor\_version="python"}) --- no compiler or external
+    language runtime required at all;
+  \item \textbf{ED}, a pure-Python fallback for small systems
+    (dense/sparse matrices via NumPy/SciPy), used automatically whenever
+    a requested compiled backend is not available, and useful on its own
+    as a correctness reference for DMRG.
+\end{itemize}
+
+\section{Installation}
+
+There is no \texttt{setup.py}/\texttt{pyproject.toml}; DMRGPY is used
+directly from \texttt{src/}, added to \texttt{PYTHONPATH} (or symlinked
+into \texttt{site-packages}) by the installer.
+
+\begin{lstlisting}[language=bash]
+python install.py                        # compiles ITensor v2 (mpscpp2) + its pybind11 extension
+python install.py --itensor-version=3     # compiles ITensor v3 (mpscpp3) instead
+python install.py --itensor-version=both  # compiles both v2 and v3 backends
+python install.py --gpp=g++-6             # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
+python install.py --doctor                # check build requirements only, skip the build
+python install_julia.py                   # alternative/additional: Julia backend
+\end{lstlisting}
+
+\texttt{install.py} first verifies every build requirement by actually
+trial compiling and trial linking it (a C++ compiler, LAPACK/BLAS,
+\texttt{pybind11}, \texttt{make}) rather than just checking version
+strings, auto-detecting a working compiler (preferring a conda-provided
+one when running under conda Python, since the extension shares a
+process with conda's own numpy/scipy). Only once every requirement is
+confirmed does it compile the vendored ITensor static library and the
+pybind11 extension for the requested backend version(s). If nothing is
+compiled at all (the extension build fails, or the user only ran
+\texttt{install\_julia.py}), DMRGPY still works:
+\texttt{itensor\_version="python"} requires no compiled extension, and
+every call transparently falls back to ED when a requested compiled
+backend isn't present.
+
+No compiler or pybind11 is needed at all to use
+\texttt{itensor\_version="python"} --- only NumPy/SciPy (and optionally
+\texttt{numba}/\texttt{jax} for faster execution, see
+Section~\ref{sec:perf}).
+
+\section{Quick start}
+
+\begin{lstlisting}
+from dmrgpy import spinchain
+
+spins = ["S=1/2" for i in range(30)]      # 30-site spin-1/2 chain
+sc = spinchain.Spin_Chain(spins)          # create the chain object
+
+h = 0                                     # build the Hamiltonian symbolically
+for i in range(len(spins) - 1):
+    h = h + sc.Sx[i] * sc.Sx[i + 1]
+    h = h + sc.Sy[i] * sc.Sy[i + 1]
+    h = h + sc.Sz[i] * sc.Sz[i + 1]
+sc.set_hamiltonian(h)
+
+print("Ground state energy:", sc.gs_energy())
+\end{lstlisting}
+
+Every calculation follows this pattern: build a chain object for the
+model of interest, build a Hamiltonian (and any observables) out of the
+chain's own operators, call \texttt{set\_hamiltonian}, then call one of
+\texttt{Many\_Body\_Chain}'s methods (\texttt{gs\_energy},
+\texttt{get\_gs}, \texttt{vev}, \texttt{get\_excited},
+\texttt{get\_dynamical\_correlator}, time-evolution methods, \ldots).
+Most methods accept a \texttt{mode="DMRG"|"ED"} keyword so a result can
+be cross-checked against exact diagonalization on small systems, e.g.:
+
+\begin{lstlisting}
+print("Energy with DMRG:", sc.gs_energy(mode="DMRG"))
+print("Energy with ED:",   sc.gs_energy(mode="ED"))
+\end{lstlisting}
+
+The \texttt{examples/} directory contains 100+ self-contained scripts,
+one per physical model or feature, and doubles as the project's de facto
+regression suite (there is no separate unit-test suite for the Python
+code). See \texttt{examples/readme\_examples/} for the snippets shown in
+\texttt{README.md}, and \texttt{examples/v2\_VS\_v3\_*} /
+\texttt{examples/backend\_timing\_gs\_energy/} for scripts that directly
+compare backends against each other on correctness and timing
+respectively.
+
+\section{Architecture}
+
+\subsection{Entry-point classes}
+
+Each physical model is a thin subclass of \texttt{Many\_Body\_Chain}
+(\texttt{manybodychain.py}), which holds all shared state --- bond
+dimension, sweep count, cutoffs, mode, temp folder, etc. --- and
+implements the generic operations: \texttt{set\_hamiltonian},
+\texttt{gs\_energy}, \texttt{vev}, \texttt{get\_gs}, correlators, time
+evolution, entanglement entropy, and more. Model modules just define the
+local Hilbert space and convenience operators for that statistics:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Module & Class & Notes \\
+\midrule
+\texttt{spinchain.py} & \texttt{Spin\_Chain} & alias of \texttt{Many\_Body\_Chain} itself \\
+\texttt{fermionchain.py} & \texttt{Fermionic\_Chain} & spinless fermions; C/Cdag/N, JW string F \\
+\texttt{spinfermionchain.py} & \texttt{Spin\_Fermionic\_Chain} & spinful fermions \\
+\texttt{bosonchain.py} & \texttt{Boson\_Chain} & bosonic sites \\
+\texttt{parafermionchain.py} & \texttt{Parafermion\_Chain} & parafermion sites \\
+\texttt{kondochain.py} & \texttt{Kondo\_Chain} & spins Kondo-coupled to a fermionic chain \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Operator representation: \texttt{MultiOperator}}
+
+Hamiltonians and observables are built as \texttt{MultiOperator} objects
+(\texttt{multioperator.py}) --- sums of products of named single-site
+operators, e.g.\ \texttt{Sx[i]*Sx[j]}. This is a backend-agnostic
+intermediate representation: the \emph{same} \texttt{MultiOperator} is
+later either
+
+\begin{itemize}
+  \item converted into a plain list of
+    \texttt{(coefficient, [(opname, site), \ldots])} terms and written
+    directly into an ITensor \texttt{AutoMPO}/\texttt{HTerm} by the
+    C++/pyitensor DMRG backends, or
+  \item converted into a sparse matrix via
+    \texttt{multioperator.MO2matrix} for the ED backend
+    (\texttt{edtk/edchain.py}).
+\end{itemize}
+
+\texttt{multioperatortk/} holds the supporting machinery: Jordan-Wigner
+string threading for fermionic operators, static/long-range operator
+construction, and sympy-based symbolic building.
+
+\subsection{Backend dispatch}
+
+\texttt{mode.py} decides, per call, whether a calculation runs via DMRG
+or ED (the \texttt{get\_mode}/\texttt{run} functions): DMRG unless
+\texttt{self.mode} forces ED, or unless \texttt{self.itensor\_version} is
+\texttt{2} or \texttt{3} and the corresponding compiled pybind11
+extension isn't available (\texttt{cppext.available(version)}) --- in
+which case DMRGPY silently falls back to ED.
+\texttt{itensor\_version="python"} never falls back this way, since it
+has no compiled-extension precondition at all. Most public
+\texttt{Many\_Body\_Chain} methods accept \texttt{mode="DMRG"|"ED"} so
+results can be cross-validated between the two solver families.
+
+\begin{center}
+\begin{tabular}{@{}lp{0.32\textwidth}p{0.18\textwidth}l@{}}
+\toprule
+\texttt{itensor\_version} & Engine & Requires & Fallback \\
+\midrule
+\texttt{2} (default) & ITensor v2, in-process C++ (mpscpp2) & compiled pybind11 ext. & ED \\
+\texttt{3} & ITensor v3, in-process C++ (mpscpp3) & compiled pybind11 ext. & ED \\
+\texttt{"python"} & pure-Python \texttt{pyitensor/} & NumPy/SciPy only & none \\
+\texttt{"julia\_live"} & live in-process Julia (mpsjulialive), ITensors.jl & pyjulia + Julia & none (per-feature) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Regardless of \texttt{itensor\_version}, if \texttt{self.mode} is forced
+to \texttt{"ED"}, or the requested backend isn't available, calculations
+run through \texttt{edtk/edchain.py} (\texttt{EDchain}): dense/sparse
+operators built directly in Python/NumPy/SciPy (\texttt{pyfermion/},
+\texttt{pyspin/}, \texttt{pyboson/}, \texttt{pyzn/} provide per-statistics
+many-body operator construction; \texttt{edtk/one2many.py} promotes
+single-site operators to the full Hilbert space), diagonalized with
+\texttt{scipy.sparse.linalg}.
+
+\subsection{The in-process C++ backend (ITensor v2 and v3)}
+
+\texttt{mpscpp2/bindings.cc} and \texttt{mpscpp3/bindings.cc} each
+compile a pybind11 extension (\texttt{mpscpp2/\_dmrgcpp*.so} /
+\texttt{mpscpp3/\_dmrgcpp*.so}) that runs DMRG entirely in-process against
+its own vendored ITensor copy --- no task files, no operator files, no
+subprocess, no temp directory. \texttt{mpscpp3} is a line-by-line port of
+\texttt{mpscpp2} to the ITensor v3 API (which merges
+\texttt{IQTensor}/\texttt{IQIndex} into a single \texttt{ITensor}/
+\texttt{Index} type carrying QN blocks on the Index), exposing an
+identical \texttt{Chain} class and Python surface. \texttt{cppext.py}
+lazily imports whichever compiled extension a chain needs
+(\texttt{get\_backend(version)}, \texttt{available(version)}).
+
+\texttt{mpscppN/chain\_session.h}'s \texttt{Chain} class is the stateful,
+in-process session --- one instance per \texttt{Many\_Body\_Chain} (held
+as \texttt{self.\_session}) --- with a method per DMRG task:
+\texttt{gs\_energy}, \texttt{vev}, \texttt{apply\_operator}, KPM/CVM
+dynamical correlators, \texttt{correlation\_matrix}, \texttt{reduced\_dm},
+\texttt{excited\_states}, time evolution, and more.
+
+Notable, deliberate implementation details (not bugs to ``fix''):
+
+\begin{itemize}
+  \item \texttt{mpscpp3} builds every site with \texttt{ConserveQNs=false}
+    and starts DMRG from an actual \texttt{randomMPS}, not a plain
+    product state --- matching v2's real (unconstrained-search) behavior
+    rather than ITensor v3's stricter, QN-conserving-from-the-start
+    convention, at the cost of losing the QN block-sparsity speedup for
+    \texttt{itensor\_version=3}.
+  \item \texttt{mpscpp3}'s real-time MPS evolution defaults to a proper
+    two-site TDVP integrator (vendored under \texttt{mpscpp3/TDVP/}),
+    selectable via \texttt{Many\_Body\_Chain.tevol\_method} (default
+    \texttt{"TDVP"}); \texttt{mpscpp2} has no TDVP and always uses a
+    hand-rolled 2nd-order Taylor expansion of $\exp(-i\,dt\,H)$ as an MPO
+    instead.
+  \item A few pre-existing bugs in the original (pre-refactor) file-based
+    backend are deliberately reproduced rather than silently fixed --- see
+    the call-site comments in \texttt{chain\_session.h} for both
+    versions.
+\end{itemize}
+
+\subsection{The pure-Python backend (\texttt{pyitensor/})}
+
+\texttt{pyitensor/} is a from-scratch, pure-Python/NumPy/SciPy
+reimplementation of exactly the ITensor v3 API subset
+\texttt{mpscpp3/chain\_session.h} uses: an \texttt{Index}/\texttt{ITensor}
+tensor core, the same ten site types, an \texttt{AutoMPO} term compiler
+with its own Jordan-Wigner threading, MPS/MPO algebra, two-site
+Lanczos-based DMRG (ground and excited states via the overlap-penalty
+method), two-site Krylov-based TDVP, and a \texttt{chain.Chain} facade
+exposing the identical method surface as the compiled backends'
+\texttt{self.\_session}. Because of that shared surface, every call site
+elsewhere in DMRGPY that accepts \texttt{itensor\_version in (2, 3)}
+treats \texttt{"python"} as a third, always-available option with no
+separate code path.
+
+It exists so DMRG/TDVP work with zero compiler/pybind11 dependency, at
+the cost of being slower than compiled ITensor by default (no
+block-sparsity, no JIT) --- see Section~\ref{sec:perf} for how much
+slower in practice, and how \texttt{numba}/\texttt{jax} narrow that gap.
+
+\subsection{The Julia backend (\texttt{mpsjulialive/})}
+
+\texttt{itensor\_version="julia\_live"} drives a live, in-process Julia
+session (via \texttt{pyjulia}) with its own set of modules mirroring the
+top-level ones (\texttt{mpsjulialive/groundstate.py}, \texttt{vev.py},
+\texttt{mps.py}, \texttt{mpo.py}, \ldots) that talk to Julia's
+ITensors.jl instead of the C++ pybind11 extension. This is an
+independent implementation, not a shared protocol with the C++ path --- a
+feature missing on one side simply isn't implemented there yet. (A
+separate, older subprocess-based Julia path,
+\texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
+reachable through the normal public API and should be treated as
+legacy/inert.)
+
+\subsection{Supporting \texttt{*tk} packages}
+
+Functionality is generally split into a top-level module (the public
+method) and a \texttt{<topic>tk/} package with the implementation, e.g.\
+\texttt{correlator.py} / \texttt{fermionchaintk/staticcorrelator.py},
+\texttt{dynamics.py} / \texttt{dynamicstk/}, \texttt{entropy.py} /
+\texttt{entropytk/}, \texttt{mpsalgebra.py} / \texttt{mpsalgebratk/}.
+When changing behavior for a specific feature, check both the thin
+dispatch module and its \texttt{tk} counterpart.
+
+\subsection{KPM / dynamical correlators}
+
+Dynamical correlators and generic operator distributions are computed
+with the Kernel Polynomial Method (\texttt{kpmdmrg.py};
+\texttt{Chain::kpm\_dynamical\_correlator} / \texttt{Chain::general\_kpm}
+in \texttt{chain\_session.h} on the C++ side;
+\texttt{pyfermion/algebra/kpm.py}-style moment recursion on the ED side)
+rather than by direct spectral decomposition, since exact
+diagonalization of the full spectrum is infeasible for large chains.
+
+\section{Backend performance: v3 vs the pure-Python backend}
+\label{sec:perf}
+
+The pure-Python backend (\texttt{itensor\_version="python"}) trades raw
+speed for zero build dependencies. Numbers below were measured directly
+on one machine, with \texttt{numba} installed (pyitensor's default
+accelerated matvec/effective-Hamiltonian kernel, see
+\texttt{pyitensor/kernels.py}) --- absolute times will vary by machine
+and load, but the qualitative trends should hold.
+
+\subsection{Ground state energy (Heisenberg spin-1/2 chain)}
+
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+$n$ & v3 (s) & python (s) & ratio (python / v3) \\
+\midrule
+8  & 0.10 & 0.16  & 1.6$\times$ \\
+12 & 0.38 & 0.51  & 1.3$\times$ \\
+16 & 0.66 & 1.12  & 1.7$\times$ \\
+20 & 1.09 & 2.44  & 2.2$\times$ \\
+24 & 1.58 & 4.06  & 2.6$\times$ \\
+28 & 1.84 & 6.93  & 3.8$\times$ \\
+30 & 2.57 & 10.84 & 4.2$\times$ \\
+32 & 2.80 & 14.20 & 5.1$\times$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The ratio grows with system size: v3 benefits from real ITensor's
+QN-block-sparse tensors, which \texttt{pyitensor}'s dense NumPy tensors
+don't have even with numba JIT acceleration on the hot matvec loop. For
+quick, small-system exploratory work the pure-Python backend is quite
+competitive (1.3--2$\times$); for production-size chains ($n \gtrsim 30$)
+expect it to be several times slower.
+
+\subsection{KPM dynamical correlator ($\langle S^z_0(t) S^z_0(0)\rangle$, Heisenberg chain)}
+
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+$n$ & v3 (s) & python (s) & ratio \\
+\midrule
+6  & 0.19 & 0.35 & 1.8$\times$ \\
+8  & 0.39 & 1.58 & 4.0$\times$ \\
+10 & 1.11 & 4.54 & 4.1$\times$ \\
+12 & 3.63 & 8.17 & 2.2$\times$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Dynamical correlators are generally worse for the Python backend than
+plain ground-state DMRG (2--4$\times$ vs 1.3--2.6$\times$ at comparable
+$n$): KPM performs many moment-recursion sweeps at a fixed, comparatively
+large bond dimension (\texttt{kpmmaxm=50} by default, vs
+\texttt{maxm=30} for ground states), so the missing block-sparsity cost
+is paid on every sweep rather than amortized. Systems around $n\approx
+30$ were not benchmarked to completion here --- extrapolating from this
+table, expect a KPM correlator run at that size on the pure-Python
+backend to take on the order of minutes or more.
+
+\subsection{Other calculation types (single-run timings, $n=6$--$8$)}
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+Calculation & v3 & python & ratio \\
+\midrule
+Excited-state gap (TFIM, $n=8$) & 0.41s & 2.35s & 5.7$\times$ \\
+TDVP quench evolution ($n=6$, 30 steps) & 0.11s & 0.97s & 8.9$\times$ \\
+Hubbard ground state (3 sites) & 0.04s & 0.11s & 3.1$\times$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+These single-run numbers include a one-time numba JIT compilation cost
+($\sim$0.1--0.4s) for each distinct kernel the first time it runs in a
+process --- a script that repeats the same calculation type many times
+(e.g.\ a parameter sweep) amortizes this and approaches the steady-state
+ratios shown above, not these first-call numbers.
+
+\subsection{Practical guidance}
+
+\begin{itemize}
+  \item Use \texttt{itensor\_version="python"} for quick prototyping,
+    CI/environments without a C++ toolchain, or small systems ($n
+    \lesssim 20$) where the 1.3--2$\times$ overhead doesn't matter.
+  \item Install \texttt{numba} (and optionally \texttt{jax}) alongside
+    the pure-Python backend --- without it, \texttt{pyitensor} falls back
+    to plain NumPy loops and is substantially slower than the numbers
+    above (see \texttt{pyitensor/\_\_init\_\_.py}'s own docstring).
+  \item For production-size chains, dynamical correlators, or anything
+    performance-sensitive, compile the C++ extension
+    (\texttt{python install.py}) and use \texttt{itensor\_version=2} or
+    \texttt{3}.
+  \item \texttt{examples/backend\_timing\_gs\_energy/main.py} reproduces
+    the ground-state table directly against the current codebase and
+    current machine --- re-run it rather than trusting these numbers
+    verbatim on a different setup.
+\end{itemize}
+
+\section{Directory reference}
+
+\begin{center}
+\begin{longtable}{@{}p{0.42\textwidth}p{0.5\textwidth}@{}}
+\toprule
+Path & Contents \\
+\midrule
+\endhead
+\texttt{src/dmrgpy/} & the Python library \\
+\texttt{src/dmrgpy/manybodychain.py} & \texttt{Many\_Body\_Chain}, the shared base class \\
+\texttt{src/dmrgpy/multioperator.py}, \texttt{multioperatortk/} & backend-agnostic operator representation \\
+\texttt{src/dmrgpy/mode.py}, \texttt{cppext.py} & DMRG/ED and backend dispatch \\
+\texttt{src/dmrgpy/mpscpp2/}, \texttt{mpscpp3/} & vendored ITensor C++ (v2, v3) + pybind11 bindings \\
+\texttt{src/dmrgpy/pyitensor/} & pure-Python ITensor-v3-subset reimplementation \\
+\texttt{src/dmrgpy/mpsjulialive/}, \texttt{mpsjulia/} & Julia/ITensors.jl backend modules \\
+\texttt{src/dmrgpy/edtk/}, \texttt{pyfermion/}, \texttt{pyspin/}, \texttt{pyboson/}, \texttt{pyzn/} & exact-diagonalization backend \\
+\texttt{src/dmrgpy/kpmdmrg.py} & Kernel Polynomial Method dynamical correlators \\
+\texttt{examples/} & 100+ self-contained example scripts (also the regression suite) \\
+\texttt{examples/v2\_VS\_v3\_*} & backend-vs-backend correctness comparisons \\
+\texttt{examples/backend\_timing\_gs\_energy/} & backend-vs-backend timing comparison \\
+\texttt{installtk/} & build-requirement checking and ITensor/extension compilation \\
+\texttt{docs/} & this document, and its Markdown counterpart \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\section{Further reading}
+
+\begin{itemize}
+  \item \texttt{README.md} --- installation quick-start and further usage
+    examples (static correlators, CFT central charge, bond-dimension
+    convergence).
+  \item \texttt{CLAUDE.md} --- a more detailed, implementation-level
+    architecture reference (written for AI coding assistants working in
+    this repository, but equally useful to a human maintainer diving
+    into a specific subsystem).
+  \item Tutorials linked from \texttt{README.md} cover many-body quantum
+    magnetism, correlated fermionic systems, and tensor-network methods
+    more broadly.
+\end{itemize}
+
+\end{document}
