@@ -367,3 +367,17 @@ the C++ extension isn't compiled (`mode.py`).
 
 ### ITensor library
 the ITensor folders (`mpscpp2/ITensor` = v2, `mpscpp3/ITensor` = v3) are a library that is developed elsewhere, hence you do not need to read them carefully. Read them only if there is some feature that does not work with the mpscpp2/mpscpp3 code, and you need to figure out why
+
+## Documentation
+
+`docs/documentation.{md,tex}` covers the architecture (backends, dispatch,
+directory layout); `docs/user_guide.{md,tex}` covers the physics-facing
+API (what calculation each method performs, with the formula behind it).
+Whenever a new feature is implemented — a new physical model, a new
+`Many_Body_Chain` method, a new dynamical-correlator submode, a new
+post-processing tool, etc. — update `docs/user_guide.md` **and**
+`docs/user_guide.tex` accordingly (and `docs/documentation.{md,tex}` too,
+if the change affects architecture/backend dispatch rather than just
+physics). Keep the two formats of each document in sync; verify the
+`.tex` file still compiles cleanly with `pdflatex` (no errors, ideally no
+overfull-hbox warnings) after editing it.
