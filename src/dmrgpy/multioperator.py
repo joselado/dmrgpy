@@ -289,7 +289,15 @@ def MO2matrix(MO,obj):
     """Given a certain object containing the method "get_operator",
     return a matrix"""
     out = 0.0*obj.get_identity() # initialize
-    for iop in MO.op: # loop over components
+    # This is a consumption point (like write()/to_terms()), so drop
+    # near-zero-coefficient terms here too -- e.g. the "0*identity()"
+    # placeholder that "0 + MultiOperator" (the "h = 0; h = h + term"
+    # idiom used pervasively across this codebase) creates via __radd__.
+    # Without this, a term naming an operator/site combination that was
+    # never registered with obj (e.g. Parafermionic_Chain's ED backend
+    # has no ("Id",1) entry) crashes get_operator() below even though
+    # its contribution is exactly zero.
+    for iop in _filter_small(MO.op): # loop over components
         otmp = iop[0]*obj.get_identity() # factor
         for i in range(len(iop)-1): # loop over terms in the product
             term = iop[i+1] # get this term

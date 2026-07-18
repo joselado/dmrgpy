@@ -71,8 +71,8 @@ directly from \texttt{src/}, added to \texttt{PYTHONPATH} (or symlinked
 into \texttt{site-packages}) by the installer.
 
 \begin{lstlisting}[language=bash]
-python install.py                        # compiles ITensor v2 (mpscpp2) + its pybind11 extension
-python install.py --itensor-version=3     # compiles ITensor v3 (mpscpp3) instead
+python install.py                        # compiles ITensor v3 (mpscpp3, the default) + its pybind11 extension
+python install.py --itensor-version=2     # compiles ITensor v2 (mpscpp2) instead
 python install.py --itensor-version=both  # compiles both v2 and v3 backends
 python install.py --gpp=g++-6             # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
 python install.py --doctor                # check build requirements only, skip the build
@@ -206,8 +206,8 @@ results can be cross-validated between the two solver families.
 \toprule
 \texttt{itensor\_version} & Engine & Requires & Fallback \\
 \midrule
-\texttt{2} (default) & ITensor v2, in-process C++ (mpscpp2) & compiled pybind11 ext. & ED \\
-\texttt{3} & ITensor v3, in-process C++ (mpscpp3) & compiled pybind11 ext. & ED \\
+\texttt{2} & ITensor v2, in-process C++ (mpscpp2) & compiled pybind11 ext. & ED \\
+\texttt{3} (default) & ITensor v3, in-process C++ (mpscpp3) & compiled pybind11 ext. & ED \\
 \texttt{"python"} & pure-Python \texttt{pyitensor/} & NumPy/SciPy only & none \\
 \texttt{"julia\_live"} & live in-process Julia (mpsjulialive), ITensors.jl & pyjulia + Julia & none (per-feature) \\
 \bottomrule
@@ -315,7 +315,7 @@ Dynamical correlators and generic operator distributions are computed
 with the Kernel Polynomial Method (\texttt{kpmdmrg.py};
 \texttt{Chain::kpm\_dynamical\_correlator} / \texttt{Chain::general\_kpm}
 in \texttt{chain\_session.h} on the C++ side;
-\texttt{pyfermion/algebra/kpm.py}-style moment recursion on the ED side)
+\texttt{algebra/kpm.py}-style moment recursion on the ED side)
 rather than by direct spectral decomposition, since exact
 diagonalization of the full spectrum is infeasible for large chains.
 
@@ -324,10 +324,17 @@ diagonalization of the full spectrum is infeasible for large chains.
 
 The pure-Python backend (\texttt{itensor\_version="python"}) trades raw
 speed for zero build dependencies. Numbers below were measured directly
-on one machine, with \texttt{numba} installed (pyitensor's default
-accelerated matvec/effective-Hamiltonian kernel, see
-\texttt{pyitensor/kernels.py}) --- absolute times will vary by machine
-and load, but the qualitative trends should hold.
+on one machine, with \texttt{numba} installed \emph{and} explicitly
+opted in (\texttt{pyitensor.kernels.USE\_NUMBA = True}) for its
+accelerated matvec/effective-Hamiltonian kernel (see
+\texttt{pyitensor/kernels.py}). This kernel is \textbf{not} used
+automatically just by having \texttt{numba} installed --- \texttt{USE\_NUMBA}
+defaults to \texttt{False}, because the one-time JIT compile cost is a
+net regression for this library's typical one-shot-script usage pattern
+(see \texttt{kernels.py}'s own docstring for measured numbers). Set
+\texttt{kernels.USE\_NUMBA = True} yourself before running DMRG if you
+want this path. Absolute times will vary by machine and load, but the
+qualitative trends should hold.
 
 \subsection{Ground state energy (Heisenberg spin-1/2 chain)}
 
@@ -407,7 +414,9 @@ ratios shown above, not these first-call numbers.
     CI/environments without a C++ toolchain, or small systems ($n
     \lesssim 20$) where the 1.3--2$\times$ overhead doesn't matter.
   \item Install \texttt{numba} (and optionally \texttt{jax}) alongside
-    the pure-Python backend --- without it, \texttt{pyitensor} falls back
+    the pure-Python backend \emph{and} set
+    \texttt{pyitensor.kernels.USE\_NUMBA = True} (off by default, see the
+    note above) --- without both steps, \texttt{pyitensor} falls back
     to plain NumPy loops and is substantially slower than the numbers
     above (see \texttt{pyitensor/\_\_init\_\_.py}'s own docstring).
   \item For production-size chains, dynamical correlators, or anything
@@ -415,9 +424,10 @@ ratios shown above, not these first-call numbers.
     (\texttt{python install.py}) and use \texttt{itensor\_version=2} or
     \texttt{3}.
   \item \texttt{examples/backend\_timing\_gs\_energy/main.py} reproduces
-    the ground-state table directly against the current codebase and
-    current machine --- re-run it rather than trusting these numbers
-    verbatim on a different setup.
+    the $n=8..20$ rows of the ground-state table directly against the
+    current codebase and current machine ($n=24..32$ aren't included, to
+    keep the example fast to run) --- re-run it rather than trusting
+    these numbers verbatim on a different setup.
 \end{itemize}
 
 \section{Directory reference}

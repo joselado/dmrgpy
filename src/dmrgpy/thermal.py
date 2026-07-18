@@ -60,9 +60,16 @@ class Thermal_Spin_Chain():
                 
 def anneal(sc,h,wf,T,dbeta=0.1):
     """Anneal a certain wavefunction using an exponential"""
-    beta = 1./T # beta part
-    n = int(beta/dbeta) # number of steps
-    h0 = h*(beta/n) # this temperature step
+    # Purification convention: |Psi(beta)> = e^{-beta*H/2}|Psi(0)>, so that
+    # tracing out the ancilla out of |Psi(beta)><Psi(beta)| gives
+    # rho ~ e^{-beta*H}, i.e. the physical thermal state at the requested
+    # T = 1/beta. Applying the full beta here (as this used to) doses the
+    # wavefunction with e^{-beta*H} instead of e^{-beta*H/2}, which after
+    # tracing out the ancilla is the thermal state of T/2, not T -- confirmed
+    # numerically against exact ED thermal averages (see docs/user_guide).
+    beta_half = 1./(2.*T) # half-beta part
+    n = int(beta_half/dbeta) # number of steps
+    h0 = h*(beta_half/n) # this temperature step
     wf = wf.normalize() # normalize
     for i in range(n): # do as many steps
         print("Annealing, energy",wf.dot(h*wf).real)

@@ -453,28 +453,38 @@ parameter $\lambda$, the fidelity susceptibility measures how sharply
 the ground state changes as $\lambda$ varies — and diverges at a quantum
 phase transition, where the gap to the first excited state closes:
 
-$$\chi(\lambda)=\sum_{n\neq0}\frac{|\langle 0|H_1|n\rangle|^2}{(E_n-E_0)^2+\delta^2}\qquad(\text{perturbative form})$$
+$$\chi(\lambda)=\sum_{n\neq0}\frac{|\langle 0|H_1|n\rangle|^2}{(E_n-E_0)^2+\delta^2}\qquad(\text{perturbative form, }\texttt{fmode="PT"})$$
+
+`get_fidelity`'s **default** is not this perturbative form but a
+non-perturbative estimator (`fmode="derivative"`) that computes $\chi$
+directly from finite differences of the ground-state overlap matrix
+between nearby $\lambda$ values, which also handles a (near-)degenerate
+ground-state manifold via a smooth gauge choice:
 
 ```python
 from dmrgpy import fidelity
-chi = fidelity.get_fidelity(sc, h0, h1, lam, n=3)
+chi = fidelity.get_fidelity(sc, h0, h1, lam, n=3) # fmode="derivative" (default)
+chi_pt = fidelity.get_fidelity(sc, h0, h1, lam, n=3, fmode="PT") # perturbative form above
 ```
 
 Scanning $\lambda$ and plotting $\chi(\lambda)$, a peak (sharpening and
 diverging with system size) locates a quantum critical point without
-needing to know its universality class in advance. An alternative,
-non-perturbative estimator computes $\chi$ directly from finite
-differences of the ground-state overlap matrix between nearby $\lambda$
-values (`fmode="derivative"`), which also handles a (near-)degenerate
-ground-state manifold via a smooth gauge choice.
+needing to know its universality class in advance.
 
 ## 13. Ground-state degeneracy
 
 Exact and near (e.g.\ symmetry-protected, or finite-size-split
-topological) ground-state degeneracies are estimated by a
-Gaussian-broadened level count around the ground-state energy:
+topological) ground-state degeneracies are estimated by a narrow,
+super-Gaussian-broadened level count around the ground-state energy
+(`degeneracy.py`'s `gs_degeneracy_simple`/`eigenvalue_degeneracy`):
 
-$$g(E_0)\approx\sum_i\exp\!\left[-\left(\frac{E_i-E_0}{\delta}\right)^2\right]$$
+$$g(E_0)\approx\sum_i\exp\!\left[-\left(\frac{(E_i-E_0)^2}{\delta}\right)^2\right]$$
+
+Note the quartic falloff in $(E_i-E_0)$ (not a plain Gaussian) — this
+makes the window considerably narrower than $\delta$ would suggest for a
+standard Gaussian, so `delta` needs to be picked accordingly (typically
+larger than the target energy resolution) to count near-degenerate
+levels rather than only exactly-degenerate ones.
 
 summed over a growing number of low-lying computed eigenstates $E_i$
 until the count converges — a value near an integer $g$ signals a
