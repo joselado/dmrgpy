@@ -111,8 +111,16 @@ def test_excited_states_penalty_method():
     # sweeps before settling (confirmed directly: 12 sweeps sometimes still
     # oscillating, 18+ reliably converged) -- generous sweep/niter counts
     # here are about giving the *algorithm* room to converge, not a
-    # precision knob.
-    sweeps = Sweeps(18)
+    # precision knob. Re-confirmed again after the contract_many()
+    # contraction-order fix (same energies, different floating-point
+    # summation path -- see tensor.py's contract_many() docstring): 18
+    # sweeps at weight=1x bandwidth was right at the edge and flipped to
+    # not-converged under the new (still mathematically equivalent) path;
+    # 25 sweeps at weight=2x bandwidth is reliably converged, matching the
+    # same margin chain.py's own excited_states() test needed. Since DMRG
+    # is now dramatically faster (see dmrg.py/mpsalgebra.py's
+    # contract_many() migration), a few extra sweeps costs nothing.
+    sweeps = Sweeps(25)
     sweeps.maxdim = 60
     sweeps.cutoff = 1e-13
     sweeps.niter = 50
@@ -123,7 +131,7 @@ def test_excited_states_penalty_method():
           abs(e0 - ref[0].real) < 1e-6)
 
     bandwidth = ref[-1].real - ref[0].real
-    weight = bandwidth  # mirrors chain_session.h's weight = bandwidth()*scale_lagrange
+    weight = 2.0 * bandwidth  # mirrors chain_session.h's weight = bandwidth()*scale_lagrange
     psi1 = randomMPS(sites, 60)
     dmrg_excited(psi1, H, [psi0], weight, sweeps, quiet=True)
     psi1.normalize()

@@ -243,10 +243,17 @@ def test_excited_states_via_chain():
     # implemented (no noise-term perturbation, see dmrg.py's module
     # docstring) -- not something this test works around by cherry-picking
     # a lucky seed without saying so.
+    #
+    # Re-confirmed yet again after the contract_many() contraction-order
+    # fix (tensor.py/dmrg.py/mpsalgebra.py): mathematically identical
+    # results, different floating-point summation order, and that alone
+    # was enough to flip nsweeps=20 from converged to not for this seed --
+    # nsweeps=25 is reliably converged. Since DMRG is now dramatically
+    # faster, the extra sweeps cost is negligible.
     np.random.seed(2)
     n = 6
     chain = Chain([2] * n)
-    chain.set_sweep_params(maxm=60, nsweeps=20, cutoff=1e-13, noise=0.1)
+    chain.set_sweep_params(maxm=60, nsweeps=25, cutoff=1e-13, noise=0.1)
     terms = heisenberg_terms(n, field=0.1)
     chain.set_hamiltonian(terms)
     Hdense = dense_reference(chain.sites, terms)
