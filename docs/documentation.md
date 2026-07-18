@@ -36,8 +36,8 @@ There is no `setup.py`/`pyproject.toml`; DMRGPY is used directly from
 installer.
 
 ```bash
-python install.py                        # compiles ITensor v2 (mpscpp2) + its pybind11 extension
-python install.py --itensor-version=3     # compiles ITensor v3 (mpscpp3) instead
+python install.py                        # compiles ITensor v3 (mpscpp3, the default) + its pybind11 extension
+python install.py --itensor-version=2     # compiles ITensor v2 (mpscpp2) instead
 python install.py --itensor-version=both  # compiles both v2 and v3 backends
 python install.py --gpp=g++-6             # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
 python install.py --doctor                # check build requirements only, skip the build
@@ -152,8 +152,8 @@ between the two solver families.
 
 | `itensor_version` | Engine | Requires | Fallback |
 |---|---|---|---|
-| `2` (default) | ITensor v2, in-process C++ (`mpscpp2`) | compiled pybind11 extension | ED |
-| `3` | ITensor v3, in-process C++ (`mpscpp3`) | compiled pybind11 extension | ED |
+| `2` | ITensor v2, in-process C++ (`mpscpp2`) | compiled pybind11 extension | ED |
+| `3` (default) | ITensor v3, in-process C++ (`mpscpp3`) | compiled pybind11 extension | ED |
 | `"python"` | pure-Python `pyitensor/` | NumPy/SciPy only | none |
 | `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `pyjulia` + Julia install | none (feature-by-feature; missing methods simply aren't implemented) |
 
@@ -243,7 +243,7 @@ both the thin dispatch module and its `tk` counterpart.
 Dynamical correlators and generic operator distributions are computed
 with the Kernel Polynomial Method (`kpmdmrg.py`;
 `Chain::kpm_dynamical_correlator` / `Chain::general_kpm` in
-`chain_session.h` on the C++ side; `pyfermion/algebra/kpm.py`-style
+`chain_session.h` on the C++ side; `algebra/kpm.py`-style
 moment recursion on the ED side) rather than by direct spectral
 decomposition, since exact diagonalization of the full spectrum is
 infeasible for large chains.
@@ -252,10 +252,16 @@ infeasible for large chains.
 
 The pure-Python backend (`itensor_version="python"`) trades raw speed for
 zero build dependencies. Numbers below were measured directly on one
-machine, with `numba` installed (pyitensor's default accelerated
-matvec/effective-Hamiltonian kernel, see `pyitensor/kernels.py`) —
-absolute times will vary by machine and load, but the qualitative trends
-should hold.
+machine, with `numba` installed *and* explicitly opted in
+(`pyitensor.kernels.USE_NUMBA = True`) for its accelerated
+matvec/effective-Hamiltonian kernel (see `pyitensor/kernels.py`). This
+kernel is **not** used automatically just by having `numba` installed --
+`USE_NUMBA` defaults to `False`, because the one-time JIT compile cost is
+a net regression for this library's typical one-shot-script usage
+pattern (see `kernels.py`'s own docstring for measured numbers). Set
+`kernels.USE_NUMBA = True` yourself before running DMRG if you want this
+path. Absolute times will vary by machine and load, but the qualitative
+trends should hold.
 
 ### 5.1 Ground state energy (Heisenberg spin-1/2 chain)
 
@@ -315,15 +321,18 @@ shown in §5.1/§5.2, not these first-call numbers.
   without a C++ toolchain, or small systems (n ≲ 20) where the 1.3–2x
   overhead doesn't matter.
 - Install `numba` (and optionally `jax`) alongside the pure-Python
-  backend — without it, `pyitensor` falls back to plain NumPy loops and
-  is substantially slower than the numbers above (see
-  `pyitensor/__init__.py`'s own docstring).
+  backend *and* set `pyitensor.kernels.USE_NUMBA = True` (off by
+  default, see §5's note above) — without both steps, `pyitensor` falls
+  back to plain NumPy loops and is substantially slower than the numbers
+  above (see `pyitensor/__init__.py`'s own docstring).
 - For production-size chains, dynamical correlators, or anything
   performance-sensitive, compile the C++ extension (`python install.py`)
   and use `itensor_version=2` or `3`.
-- `examples/backend_timing_gs_energy/main.py` reproduces the §5.1 table
-  directly against the current codebase and current machine — re-run it
-  rather than trusting these numbers verbatim on a different setup.
+- `examples/backend_timing_gs_energy/main.py` reproduces the n=8..20
+  rows of the §5.1 table directly against the current codebase and
+  current machine (n=24..32 aren't included, to keep the example fast to
+  run) — re-run it rather than trusting these numbers verbatim on a
+  different setup.
 
 ## 6. Directory reference
 

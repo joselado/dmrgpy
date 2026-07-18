@@ -137,18 +137,38 @@ class Many_Body_Chain():
           from . import cppext
           out._session = cppext.get_backend(self.itensor_version).Chain(out.sites)
       return out
+  def _reset_dmrg_state(self):
+      """Invalidate any cached ground state computed under the previous
+      backend/session. Without this, switching backend on an existing
+      chain (setup_cpp/setup_python/setup_julia) would leave
+      self.computed_gs=True and self.wf0 pointing at the OLD backend's
+      wavefunction: gs_energy() would then silently return the stale
+      energy without recomputing on the new backend, and vev()/get_gs()
+      would hand the old backend's MPS handle to the new backend's
+      session (a hard crash for the C++ backends, since an mpscpp2 MPS
+      cpp_handle is not valid input to an mpscpp3 Chain, or vice versa).
+      Same fields restart() resets, minus has_ED_obj (the ED backend is
+      independent of itensor_version, so it doesn't need invalidating
+      just because the DMRG backend changed)."""
+      self.computed_gs = False
+      self.gs_from_file = False
+      self.skip_dmrg_gs = False
+      self.wf0 = None
   def setup_julia(self):
       """Setup the Julia mode"""
       self.itensor_version = "julia_live"
+      self._reset_dmrg_state()
       self.initialize()
   def setup_cpp(self,version=DEFAULT_ITENSOR_VERSION):
       """Setup the C++ mode (version 2 = ITensor v2, 3 = ITensor v3)"""
       self.itensor_version = version
+      self._reset_dmrg_state()
       self.initialize()
   def setup_python(self):
       """Setup the pure-Python DMRG backend (pyitensor.chain.Chain, no
       compiler/pybind11 needed) -- see cppext.py."""
       self.itensor_version = "python"
+      self._reset_dmrg_state()
       self.initialize()
   def get_mode(self,**kwargs):
       from .mode import get_mode
