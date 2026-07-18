@@ -1,0 +1,702 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{array}
+
+\lstdefinestyle{pystyle}{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{gray},
+  stringstyle=\color{orange!70!black},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  language=Python,
+}
+\lstset{style=pystyle}
+
+\title{DMRGPY Physics User Guide}
+\author{}
+\date{}
+
+\sloppy
+
+\begin{document}
+\maketitle
+
+This guide explains what DMRGPY computes from a \textbf{physics} point
+of view --- the quantities each method returns, the formula behind
+them, and when to reach for which method. It intentionally says nothing
+about the solver backends (DMRG vs.\ ED, C++ vs.\ Python vs.\ Julia) or
+code layout --- see \texttt{docs/documentation.tex} for that. Every
+\texttt{Many\_Body\_Chain} subclass (\texttt{Spin\_Chain},
+\texttt{Fermionic\_Chain}, \texttt{Bosonic\_Chain}, \ldots) exposes the
+same physics-facing API described here, with \texttt{mode="DMRG"|"ED"}
+selectable on almost every call so a result can be cross-checked against
+an exact reference on small systems.
+
+\tableofcontents
+
+\section{Physical models and Hilbert spaces}
+
+Every model is a chain of $n$ local Hilbert spaces $\mathcal
+H=\bigotimes_{i=1}^n\mathcal H_i$, on which a Hamiltonian and
+observables are built out of local operators.
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{0.28\textwidth}p{0.32\textwidth}p{0.3\textwidth}@{}}
+\toprule
+Chain class & Local Hilbert space & Key operators \\
+\midrule
+\texttt{spinchain.\allowbreak Spin\_Chain} & spin-$S$, $S\in\{\tfrac12,1,\tfrac32,2,\tfrac52,3\}$ per site & $S^x_i,S^y_i,S^z_i$ \\
+\texttt{fermionchain.\allowbreak Fermionic\_Chain} & spinless fermion (occupied/empty) & $c_i,c_i^\dagger,n_i=c_i^\dagger c_i$, JW string $F_i$ \\
+\texttt{fermionchain.\allowbreak Majorana\_Chain} & Majorana fermion & Majorana operators built from \texttt{Fermionic\_Chain} \\
+\texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_Chain} & spin-$\tfrac12$ fermion (4 states), two interleaved spinless sites per physical site & $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$; derived spin and pairing operators (see text) \\
+\texttt{bosonchain.\allowbreak Bosonic\_Chain} & truncated boson Fock space, $n_i\le n_{\max}$ (default 4) & $a_i,a_i^\dagger,n_i$, occupation projectors \\
+\texttt{parafermionchain.\allowbreak Parafermionic\_\allowbreak Chain} & $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ & clock/shift operators $\sigma_i,\tau_i$, composite $\chi_i,\psi_i$ \\
+\bottomrule
+\end{tabular}
+\normalsize
+\end{center}
+
+Spinful fermionic chains are built by \emph{interleaving} two spinless
+fermionic sites per physical site (site $2i$ = spin up, site $2i+1$ =
+spin down) rather than by a genuinely 4-dimensional local space, so that
+the same Jordan-Wigner machinery used for spinless fermions applies
+unchanged; \texttt{Spinful\_Fermionic\_Chain} wraps this bookkeeping for
+you.
+
+\section{Building a Hamiltonian and observables}
+
+Any Hamiltonian or observable is written exactly as its
+second-quantized or spin-operator expression, using operator lists
+indexed by site, e.g.\ for the spin-$\tfrac12$ Heisenberg chain
+
+\begin{equation}
+H=\sum_{i=1}^{n-1}J\,\mathbf S_i\cdot\mathbf S_{i+1}=\sum_{i=1}^{n-1}J\left(S_i^xS_{i+1}^x+S_i^yS_{i+1}^y+S_i^zS_{i+1}^z\right)
+\end{equation}
+
+\begin{lstlisting}
+from dmrgpy import spinchain
+spins = ["S=1/2" for i in range(30)]
+sc = spinchain.Spin_Chain(spins)
+h = 0
+for i in range(29):
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+\end{lstlisting}
+
+Any sum of products of these operators is a valid \texttt{MultiOperator},
+so essentially any local (or long-range) Hamiltonian on the given
+lattice can be built term by term: single-ion anisotropy
+$D(S_i^z)^2$, Dzyaloshinskii-Moriya terms $\mathbf D\cdot(\mathbf
+S_i\times\mathbf S_{i+1})$, biquadratic exchange $(\mathbf S_i\cdot
+\mathbf S_{i+1})^2$, hopping $t\sum_i(c_i^\dagger c_{i+1}+\text{h.c.})$,
+Hubbard interaction $U\sum_i n_{i\uparrow}n_{i\downarrow}$, and so on ---
+see Section~\ref{sec:cookbook} for concrete Hamiltonians.
+
+\section{Ground-state properties}
+
+\textbf{Ground-state energy}
+
+\begin{equation}
+E_0=\langle\mathrm{GS}|H|\mathrm{GS}\rangle=\min_{|\psi\rangle}\frac{\langle\psi|H|\psi\rangle}{\langle\psi|\psi\rangle}
+\end{equation}
+
+\begin{lstlisting}
+e0 = sc.gs_energy()          # E0
+wf = sc.get_gs()             # the |GS> wavefunction itself
+\end{lstlisting}
+
+\textbf{Expectation values and moments.} For any operator $O$ built the
+same way as $H$,
+
+\begin{equation}
+\langle O\rangle=\langle\mathrm{GS}|O|\mathrm{GS}\rangle,\qquad
+\langle O^n\rangle=\langle\mathrm{GS}|O^n|\mathrm{GS}\rangle
+\end{equation}
+
+\begin{lstlisting}
+mz = [sc.vev(sc.Sz[i]).real for i in range(n)]        # local magnetization profile
+e2 = sc.vev(h, npow=2)                                  # <H^2>, e.g. for fluctuations
+\end{lstlisting}
+
+\textbf{Energy fluctuation} (a measure of how sharply the DMRG/ED state
+is an eigenstate, and physically the variance of $H$ in the prepared
+state):
+
+\begin{equation}
+\delta E=\sqrt{\langle H^2\rangle-\langle H\rangle^2}
+\end{equation}
+
+\begin{lstlisting}
+de = sc.gs_energy_fluctuation()
+\end{lstlisting}
+
+\textbf{Static two-point correlators.} \texttt{sc.vev(sc.Sz[0]*sc.Sz[i])}
+gives $\langle S^z_0 S^z_i\rangle$ directly; \texttt{correlator.get\_correlator}
+provides shorthand names for common correlators over a list of site
+pairs, e.g.\ \texttt{"SS"} for the full dot product
+
+\begin{equation}
+\langle\mathbf S_i\cdot\mathbf S_j\rangle=\langle S_i^xS_j^x\rangle+\langle S_i^yS_j^y\rangle+\langle S_i^zS_j^z\rangle
+\end{equation}
+
+or fermionic correlators like \texttt{"cdc"} ($\langle c_i^\dagger
+c_j\rangle$), \texttt{"density"}/\texttt{"densitydensity"} ($\langle
+n_in_j\rangle$), and pairing correlators \texttt{"delta"}/
+\texttt{"deltadeltad"}. These static correlators are the equal-time
+limit of the dynamical correlators in Section~\ref{sec:dynamical}, and
+are what you Fourier-transform to get an equal-time structure factor
+$S(q)=\sum_{i,j}e^{iq(i-j)}\langle O_iO_j\rangle$.
+
+\section{Excited states and energy gaps}
+
+\textbf{Low-lying spectrum.}
+
+\begin{lstlisting}
+es = sc.get_excited(n=4)          # [E0, E1, E2, E3]
+gap = sc.get_gap()                # E1 - E0
+\end{lstlisting}
+
+\texttt{get\_excited\_states(n, purify=True)} additionally returns the
+wavefunctions; \texttt{purify=True} re-diagonalizes $H$ in the
+Gram-Schmidt orthogonalized subspace spanned by the raw excited-state
+MPS, correcting for near-degenerate states that DMRG's iterative solvers
+can otherwise mix.
+
+\textbf{Sector (charge) gaps.} For a conserved quantity $A$ with
+$[H,A]=0$ (e.g.\ total particle number $\hat N=\sum_i n_i$, or total
+$S^z$), the gap to the lowest state with $\langle A\rangle$ shifted by
+$d$ from the ground-state sector is obtained by adding a
+Lagrange-multiplier penalty and increasing $\lambda$ until the
+constraint is satisfied:
+
+\begin{equation}
+H_\lambda=H+\lambda\big(A-\langle A\rangle_0-d\big)^2,\qquad
+\Delta_A(d)=E_\lambda-E_0
+\end{equation}
+
+\begin{lstlisting}
+gap_charge = fc.get_charge_gap(d=2)   # gap to add/remove a pair of particles
+\end{lstlisting}
+
+This is exactly how a superconducting/charging gap is extracted in a
+finite fermionic chain: $d=2$ probes the energy cost of adding a pair of
+particles (Cooper-pair-like excitation) rather than a single particle,
+which avoids odd/even-parity finite-size artifacts.
+
+\textbf{Example: the Haldane gap.} For the spin-1 Heisenberg chain, the
+famous Haldane gap between the (nearly four-fold degenerate, due to
+fractionalized $S=\tfrac12$ edge states) ground-state manifold and the
+first bulk excitation is
+
+\begin{lstlisting}
+es = sc.get_excited(n=6)
+haldane_gap = es[4] - es[0]     # skip the 4 near-degenerate edge states
+\end{lstlisting}
+
+\section{Entanglement and quantum information}
+
+\textbf{Entanglement entropy of a real-space bipartition.} Cutting the
+chain at bond $(i,i+1)$, the Schmidt decomposition of the ground state
+is $|\mathrm{GS}\rangle=\sum_\alpha\lambda_\alpha|\alpha\rangle_L\otimes
+|\alpha\rangle_R$ and the von Neumann entanglement entropy of either
+half is
+
+\begin{equation}
+S_i=-\sum_\alpha\lambda_\alpha^2\log\lambda_\alpha^2=-\mathrm{Tr}\big[\rho_L\log\rho_L\big],\qquad
+\rho_L=\mathrm{Tr}_R|\mathrm{GS}\rangle\langle\mathrm{GS}|
+\end{equation}
+
+\begin{lstlisting}
+s = wf.get_bond_entropy(i, i+1)
+\end{lstlisting}
+
+\texttt{get\_site\_entropy(i)}/\texttt{get\_pair\_entropy(i,j)} instead
+build a reduced density matrix from local \emph{projectors} (e.g.\
+$S^z=\pm\tfrac12$ for spin-$\tfrac12$, occupation number for fermions)
+rather than a full MPS bond cut, which lets you ask about the
+entanglement of a single site or a pair of (possibly non-adjacent)
+sites with the rest of the system.
+
+\textbf{Mutual information} between two sites (or subsystems) $i,j$:
+
+\begin{equation}
+I(i,j)=S_i+S_j-S_{ij}
+\end{equation}
+
+\begin{lstlisting}
+mi = wf.get_mutual_information(1, 2)
+\end{lstlisting}
+
+quantifies total (classical + quantum) correlation between $i$ and $j$,
+and is often used to map out effective couplings or emergent degrees of
+freedom (e.g.\ between the two edge spins of a Haldane chain).
+
+\textbf{CFT central charge.} For a critical (gapless) chain, the
+entanglement entropy of a cut at position $\ell$ in an open chain of
+length $L$ follows the Calabrese-Cardy formula:
+
+\begin{equation}
+S(\ell)=\frac{c}{6}\log\!\left[\frac{2L}{\pi a}\sin\frac{\pi\ell}{L}\right]+\text{const.}
+\end{equation}
+
+DMRGPY computes $S(\ell)$ at every bond and least-squares fits this
+formula to extract the central charge $c$ --- the universal number that
+identifies the underlying conformal field theory (e.g.\ $c=\tfrac12$
+for the critical Ising chain, $c=1$ for a free boson / XX chain):
+
+\begin{lstlisting}
+c = wf.get_CFT_central_charge()
+\end{lstlisting}
+
+\textbf{Single-particle correlation matrix and orbital entanglement.}
+For fermionic systems, the correlation matrix
+
+\begin{equation}
+C_{ij}=\langle c_i^\dagger c_j\rangle
+\end{equation}
+
+is directly accessible (\texttt{sc.get\_correlation\_matrix()}), and
+diagonalizing it, $C=U\,n\,U^\dagger$, gives natural-orbital occupations
+$n_\alpha\in[0,1]$ (\texttt{get\_correlated\_orbitals}) and an
+orbital-resolved entanglement entropy
+
+\begin{equation}
+S=-\sum_\alpha\Big[n_\alpha\log n_\alpha+(1-n_\alpha)\log(1-n_\alpha)\Big]
+\end{equation}
+
+(\texttt{get\_correlation\_entropy}). \texttt{get\_highorder\_correlation\_matrix}
+and \texttt{get\_four\_correlation\_tensor} give the corresponding
+two-particle correlators $\langle c_i^\dagger c_j^\dagger c_l
+c_k\rangle$ and $\langle c_i^\dagger c_j c_k^\dagger c_l\rangle$.
+
+\section{Dynamical (frequency-dependent) correlators}
+\label{sec:dynamical}
+
+The central quantity is a retarded correlator (Green's function)
+between two operators $A,B$,
+
+\begin{equation}
+G_{AB}(\omega)=\langle\mathrm{GS}|A\,\frac{1}{\omega-H+E_0+i\delta}\,B|\mathrm{GS}\rangle,\qquad
+S_{AB}(\omega)=-\frac1\pi\,\mathrm{Im}\,G_{AB}(\omega)
+\end{equation}
+
+where $\delta$ is a small broadening. Choosing $A=B=S^z_i$ at the same
+site gives the local dynamical spin structure factor
+$S^{zz}_{ii}(\omega)$ (what a local probe like NMR/ESR couples to);
+choosing $A=S^z_i$, $B=S^z_j$ at different sites and Fourier-transforming
+over $i-j$ gives the momentum-resolved dynamical structure factor
+$S(q,\omega)$ measured in inelastic neutron scattering. All five
+submodes below compute $G_{AB}(\omega)$ (or equivalently
+$S_{AB}(\omega)$); they differ only in \emph{how}, and therefore in what
+energy range/resolution/cost trade-off they offer:
+
+\begin{lstlisting}
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                      name=(sc.Sz[0], sc.Sz[0]))
+\end{lstlisting}
+
+\textbf{\texttt{submode="KPM"} --- Kernel Polynomial Method.} $H$ is
+linearly rescaled into $\tilde H=(H-b)/a$ so its full spectrum lies in
+$[-1,1]$ (\texttt{kpm\_scale}, default 0.7, sets how much margin is left
+inside $[-1,1]$), then $G_{AB}$'s spectral function is expanded in
+Chebyshev polynomials $T_m(\tilde H)$:
+
+\begin{equation}
+\mu_m=\langle\mathrm{GS}|A\,T_m(\tilde H)\,B|\mathrm{GS}\rangle,\qquad
+S_{AB}(\tilde\omega)=\frac{1}{\pi\sqrt{1-\tilde\omega^2}}\left[\mu_0+2\sum_{m=1}^{N-1}g_m\,\mu_m\,T_m(\tilde\omega)\right]
+\end{equation}
+
+with Jackson-kernel damping coefficients $g_m$ suppressing Gibbs
+ringing from the truncation at $N$ moments (\texttt{kpm\_n\_scale}
+scales $N$, i.e.\ the energy resolution, relative to the rescaled
+bandwidth). This is the default, general-purpose method: robust, works
+across the whole spectrum at once, cost grows only linearly with the
+number of moments.
+
+\textbf{\texttt{submode="CVM"} --- correction-vector method.} Instead of
+a global polynomial expansion, this solves directly for the correction
+vector at one frequency $\omega$ at a time, via the positive-definite
+linear system
+
+\begin{equation}
+\big[(H-\omega-E_0)^2+\eta^2\big]\,x_c=-\eta\,B|\mathrm{GS}\rangle
+\end{equation}
+
+(solved by conjugate gradient in MPS form), from which
+
+\begin{equation}
+x=(\omega+E_0+i\eta-H)^{-1}B|\mathrm{GS}\rangle=i\,x_c+\frac{H-\omega-E_0}{\eta}\,x_c,\qquad
+G_{AB}(\omega)=\langle\mathrm{GS}|A|x\rangle
+\end{equation}
+
+Here $\eta$ (\texttt{delta}) is the artificial broadening that
+regularizes the resolvent at a real frequency. CVM is more accurate at a
+single targeted frequency/energy window (e.g.\ zooming in on a sharp
+resonance) than a global KPM expansion, at the cost of re-solving the
+linear system for every $\omega$ on the requested grid.
+
+\textbf{\texttt{submode="TD"} --- time-dependent DMRG.} Real-time
+evolution gives the correlator directly in the time domain,
+
+\begin{equation}
+C(t)=\langle\mathrm{GS}|A(t)B(0)|\mathrm{GS}\rangle=e^{iE_0t}\langle\mathrm{GS}|A\,e^{-iHt}\,B|\mathrm{GS}\rangle
+\end{equation}
+
+which is then windowed with an exponential damping factor $e^{-\delta
+t}$ (equivalent to a Lorentzian broadening of width $\delta$ in
+frequency) and Fourier transformed,
+
+\begin{equation}
+S_{AB}(\omega)=\frac1\pi\,\mathrm{Re}\!\int_0^{T}\!dt\;e^{i\omega t}\,C(t)\,e^{-\delta t}
+\end{equation}
+
+The total simulated time $T$ (\texttt{damping\_periods}/$\delta$) must
+be long enough that the damping has suppressed truncation ringing by
+$t=T$. Frequency resolution is set by $T$ (via the usual $\Delta\omega
+\sim1/T$ time-frequency uncertainty), so this method is best when you
+want fine resolution over a \emph{narrow} frequency window, at the cost
+of a real dynamical simulation (bond dimension grows with entanglement
+generated during the evolution).
+
+\textbf{\texttt{submode="EX"} --- exact diagonalization in a truncated
+DMRG subspace.} Builds $A$, $B$, $H$ explicitly in the subspace spanned
+by the lowest \texttt{nex} (orthogonalized) DMRG excited states, then
+evaluates the exact Lehmann sum in that subspace,
+
+\begin{equation}
+G_{AB}(\omega)=\sum_{n=1}^{n_{ex}}\frac{\langle\mathrm{GS}|A|n\rangle\langle n|B|\mathrm{GS}\rangle}{\omega-E_n+i\delta}
+\end{equation}
+
+i.e.\ a small, explicit sum over poles at the computed excited-state
+energies $E_n$, each with residue given by the transition matrix
+elements. Cheap and exact \emph{within} the truncated subspace; only as
+good as how many/which excited states were computed.
+
+\textbf{\texttt{submode="maxent"} --- maximum-entropy reconstruction.}
+Reconstructs a positive-definite spectral function from a finite set of
+moments $\langle(H-E_0)^k\rangle$ using a maximum-entropy method
+(\texttt{distribution.get\_distribution\_maxent}), rather than a
+Chebyshev expansion --- useful when positivity of the reconstructed
+$S(\omega)$ matters more than matching KPM's polynomial-expansion
+artifacts.
+
+\textbf{Choosing a method:} KPM (default) for a first look at the full
+spectrum; CVM or TD when you need high resolution in a specific,
+narrow frequency window; EX when a handful of excited states already
+capture the physics (e.g.\ a small gapped system); maxent when you want
+a guaranteed-positive reconstruction from limited moment data (e.g.\
+combined with finite-temperature ED, see Section~\ref{sec:thermal}).
+
+\section{Real-time dynamics: quenches}
+
+Beyond frequency-domain correlators, DMRGPY directly simulates real-time
+unitary evolution $|\psi(t)\rangle=e^{-iHt}|\psi(0)\rangle$ and measures
+an observable along the way:
+
+\begin{lstlisting}
+from dmrgpy import timedependent
+wf0 = sc.get_gs()                          # prepare |GS> of H0
+sc.set_hamiltonian(h1)                     # quench to a different H
+(ts, sz) = timedependent.evolve_and_measure(sc, operator=sc.Sz[0],
+                                             nt=200, dt=1e-2, wf=wf0)
+\end{lstlisting}
+
+giving $\langle\psi(t)|S^z_0|\psi(t)\rangle$ as a function of time after
+a Hamiltonian quench $H_0\to H_1$ --- the standard non-equilibrium
+quantum quench setup: prepare the ground state of one Hamiltonian
+(e.g.\ a symmetry-broken/N\'eel-ordered $H_0$), then let it evolve
+under a different $H_1$ (e.g.\ the isotropic Heisenberg point) and watch
+observables relax, oscillate, or thermalize. \texttt{evolution\_ABA}
+similarly lets you apply an operator $A$ as an instantaneous local
+quench (e.g.\ flip a spin, or add a particle) before evolving and
+measuring $B(t)$. \texttt{timeevolution.imaginary\_exponential} computes
+autocorrelation functions directly, $\langle\psi_0|e^{iHt}|\psi_0
+\rangle$, without a separate measurement operator.
+
+\section{Density of states}
+
+\textbf{Many-body density of states.} The full many-body spectral
+density
+
+\begin{equation}
+\rho(E)=\sum_n\delta(E-E_n)
+\end{equation}
+
+(sum over \emph{all} eigenstates of $H$, not resolved by any operator)
+is obtained via the same KPM machinery as Section~\ref{sec:dynamical}
+applied directly to $H$ itself:
+
+\begin{lstlisting}
+from dmrgpy import dos
+es, rho = dos.get_dos(sc)
+\end{lstlisting}
+
+\textbf{Single-particle local density of states.} For fermionic chains,
+the physically distinct quantity usually meant by ``DOS'' (e.g.\ as
+measured by scanning tunneling spectroscopy) is the local
+single-particle spectral function at site $i$,
+
+\begin{equation}
+A_i(\omega)=-\frac1\pi\,\mathrm{Im}\,G^R_{ii}(\omega)
+\end{equation}
+
+with $G^R_{ii}(\omega)$ built from $\langle c_i(t)c_i^\dagger(0)\rangle$
+($\omega>0$) and $\langle c_i^\dagger(t)c_i(0)\rangle$ ($\omega<0$),
+i.e.\ the particle-addition and particle-removal (electron/hole)
+branches of the local Green's function concatenated across $\omega=0$:
+
+\begin{lstlisting}
+from dmrgpy import fermiondos
+es, ldos = fermiondos.get_dos(fc, i=0)
+\end{lstlisting}
+
+\section{Finite temperature}
+\label{sec:thermal}
+
+Thermal (mixed-state, finite-$T$) expectation values are obtained via
+\textbf{purification}: each physical site is paired with an ancilla
+site, and the maximally-entangled state of every physical-ancilla pair
+(e.g.\ the singlet-forming Heisenberg coupling $\mathbf S_i^{\rm
+phys}\cdot\mathbf S_i^{\rm anc}$ as the ``Hamiltonian'' preparing that
+state) is exactly the purification of the infinite-temperature
+($T=\infty$) physical density matrix $\rho\propto\mathbb 1$.
+Imaginary-time evolving this purified state under the \emph{physical}
+Hamiltonian $H$,
+
+\begin{equation}
+|\Psi(\beta)\rangle=e^{-\beta H/2}|\Psi(0)\rangle,\qquad\beta=1/T
+\end{equation}
+
+(stepped via repeated small first-order updates
+$|\Psi(\beta+\Delta\beta)\rangle\propto(1-\Delta\beta\,H)|\Psi(\beta)\rangle$,
+renormalized at each step) and tracing out the ancillas gives exactly
+the thermal (Gibbs) density matrix of the physical chain,
+$\rho(T)=\mathrm{Tr}_{\rm anc}|\Psi(\beta)\rangle\langle\Psi(\beta)|
+\propto e^{-\beta H}$:
+
+\begin{lstlisting}
+from dmrgpy import thermal
+tc = thermal.Thermal_Spin_Chain(spins, T=0.1)
+\end{lstlisting}
+
+$T=0$ recovers ordinary ground-state DMRG. For small systems
+($n\lesssim14$), \texttt{get\_correlation\_matrix(T=...)} instead
+computes the exact thermal average directly by brute-force ED,
+$\rho=\sum_nZ^{-1}e^{-E_n/T}|n\rangle\langle n|$ --- a useful
+cross-check of the purification approach.
+
+\section{Topological invariants}
+
+\textbf{Many-body Berry phase.} For a ground state that depends on an
+adiabatic parameter $k$ threaded around a closed loop (e.g.\ inserted
+flux), the discretized Berry phase
+
+\begin{equation}
+\gamma=\arg\prod_{k}\langle\psi(k)|\psi(k+\delta k)\rangle
+\end{equation}
+
+quantized (typically in units of $\pi$) signals a topologically
+nontrivial ground state / obstruction to adiabatic continuity --- the
+many-body generalization of a Zak/Berry phase, computed by running DMRG
+at a discrete set of parameter points and chaining ground-state
+overlaps.
+
+\textbf{Single-particle Berry phase / Wilson loop.} For a
+translationally invariant single-particle Hamiltonian $H(k)$ with a set
+of occupied bands, the non-Abelian Wilson loop over one Brillouin-zone
+circuit is
+
+\begin{equation}
+W=\det\Big[\textstyle\prod_k U(k,k+\delta k)\Big],\qquad
+U_{mn}(k,k+\delta k)=\langle u_m(k)|u_n(k+\delta k)\rangle
+\end{equation}
+
+with $m,n$ running over occupied bands; $\gamma=\arg W$ is the
+polarization/Zak phase of that band manifold (and, combined with a scan
+over a second momentum direction, the ingredient for a Chern number).
+
+\section{Mean-field decoupling}
+
+For a spin Hamiltonian with exchange couplings $J_{ij}$, a
+self-consistent mean-field (Weiss-field) decoupling replaces the
+two-body exchange term with a one-body field,
+
+\begin{equation}
+H_{\rm MF}=\sum_i\mathbf h_i\cdot\mathbf S_i,\qquad
+\mathbf h_i=(1-p)\sum_jJ_{ij}\langle\mathbf S_j\rangle
+\end{equation}
+
+iterated to self-consistency: solve for $\langle\mathbf S_i\rangle$
+under $H_{\rm MF}$ (by DMRG), rebuild $\mathbf h_i$ from the new
+expectation values, mix old/new fields, and repeat until
+$\max_i|\Delta\langle\mathbf S_i\rangle|$ falls below a tolerance. The
+parameter $p\in[0,1]$ interpolates between pure mean-field theory
+($p=0$) and keeping a fraction $p$ of the original many-body exchange
+treated exactly alongside the self-consistent field (useful for hybrid
+mean-field-plus-fluctuations treatments of, e.g., magnetically ordered
+phases where pure MF overestimates order).
+
+\begin{lstlisting}
+from dmrgpy import meanfield
+meanfield.spinchain_meanfield(sc, p=0.0)
+\end{lstlisting}
+
+\section{Fidelity susceptibility and quantum phase transitions}
+
+For a Hamiltonian $H(\lambda)=H_0+\lambda H_1$ depending on a tuning
+parameter $\lambda$, the fidelity susceptibility measures how sharply
+the ground state changes as $\lambda$ varies --- and diverges at a
+quantum phase transition, where the gap to the first excited state
+closes:
+
+\begin{equation}
+\chi(\lambda)=\sum_{n\neq0}\frac{|\langle 0|H_1|n\rangle|^2}{(E_n-E_0)^2+\delta^2}
+\qquad(\text{perturbative form})
+\end{equation}
+
+\begin{lstlisting}
+from dmrgpy import fidelity
+chi = fidelity.get_fidelity(sc, h0, h1, lam, n=3)
+\end{lstlisting}
+
+Scanning $\lambda$ and plotting $\chi(\lambda)$, a peak (sharpening and
+diverging with system size) locates a quantum critical point without
+needing to know its universality class in advance. An alternative,
+non-perturbative estimator computes $\chi$ directly from finite
+differences of the ground-state overlap matrix between nearby $\lambda$
+values (\texttt{fmode="derivative"}), which also handles a
+(near-)degenerate ground-state manifold via a smooth gauge choice.
+
+\section{Ground-state degeneracy}
+
+Exact and near (e.g.\ symmetry-protected, or finite-size-split
+topological) ground-state degeneracies are estimated by a
+Gaussian-broadened level count around the ground-state energy:
+
+\begin{equation}
+g(E_0)\approx\sum_i\exp\!\left[-\left(\frac{E_i-E_0}{\delta}\right)^2\right]
+\end{equation}
+
+summed over a growing number of low-lying computed eigenstates $E_i$
+until the count converges --- a value near an integer $g$ signals a
+$g$-fold degenerate (or near-degenerate, at the working precision
+$\delta$) ground-state manifold, as expected e.g.\ for the four
+edge-state-split ground states of an open Haldane chain, or a
+symmetry-broken ordered phase.
+
+\begin{lstlisting}
+from dmrgpy import degeneracy
+g = sc.get_gs_degeneracy()
+\end{lstlisting}
+
+\section{Reduced density matrices and operator distributions}
+
+\textbf{Reduced density matrix.} The single-site reduced density matrix
+$\rho_i=\mathrm{Tr}_{j\neq i}|\mathrm{GS}\rangle\langle\mathrm{GS}|$ is
+available directly (\texttt{sc.get\_rdm(i=0)}), the basic object
+entanglement entropies, local observables, and further post-processing
+(e.g.\ local susceptibilities) are built from.
+
+\textbf{Operator distributions.} More generally, the full probability
+distribution of an arbitrary Hermitian operator $X$ (not just its
+expectation value) in the ground state,
+
+\begin{equation}
+P(x)=\langle\mathrm{GS}|\,\delta(X-x)\,|\mathrm{GS}\rangle
+\end{equation}
+
+is computed via the same KPM machinery as the dynamical correlators of
+Section~\ref{sec:dynamical} (\texttt{sc.get\_distribution}), or
+reconstructed from a finite set of raw moments $\langle X^k\rangle$ via
+maximum entropy (\texttt{get\_distribution\_maxent}). Useful for e.g.\
+full counting statistics of a conserved charge, or distinguishing a
+sharply peaked (well-defined quantum number) ground state from a
+broadly spread one.
+
+\section{Post-processing tools}
+
+\begin{itemize}
+  \item \textbf{Analytic continuation} (\texttt{analyticcontinuation.py}):
+    Pad\'e continuation of a correlator known on the
+    imaginary/complex-frequency axis (e.g.\ from a Matsubara-like or
+    complex-shifted CVM calculation, Section~\ref{sec:dynamical}'s
+    \texttt{submode="CVMimag"}) to the real frequency axis, where the
+    physical spectral function lives.
+  \item \textbf{Function fitting} (\texttt{functionfit.py}): a generic
+    multi-start Powell minimizer used e.g.\ to fit the Calabrese-Cardy
+    entropy formula in Section~4.
+  \item \textbf{Finite-size extrapolation} (\texttt{extrapolate.py}):
+    polynomial extrapolation in $1/L$ of a size-dependent quantity
+    $y(L)$ toward the thermodynamic limit $L\to\infty$ --- standard
+    practice for extracting bulk quantities (energy density, order
+    parameters, gaps) from finite DMRG chains.
+  \item \textbf{Maximum-entropy reconstruction} (\texttt{reconstruct.py}):
+    reconstructs a positive spectral function from a truncated moment
+    expansion, underlying both the \texttt{"maxent"} dynamical-correlator
+    submode and \texttt{get\_distribution\_maxent}.
+\end{itemize}
+
+\section{Worked-example cookbook}
+\label{sec:cookbook}
+
+\textbf{Central charge of a critical transverse-field Ising chain}
+($H=\sum_iS_i^zS_{i+1}^z+\tfrac12\sum_iS_i^x$ at the critical field,
+expected $c=\tfrac12$):
+
+\begin{lstlisting}
+sc.maxm = 200          # larger bond dimension: needed at criticality
+wf = sc.get_gs()
+print(wf.get_CFT_central_charge())
+\end{lstlisting}
+
+\textbf{Haldane gap of the spin-1 chain} (see Section~4):
+
+\begin{lstlisting}
+spins = ["S=1" for i in range(n)]
+sc = spinchain.Spin_Chain(spins)
+# ... build Heisenberg h ...
+es = sc.get_excited(n=6)
+print("Haldane gap:", es[4]-es[0])
+\end{lstlisting}
+
+\textbf{Charge gap of a Hubbard chain} (see Section~4):
+
+\begin{lstlisting}
+print("Single-particle gap:", fc.get_gap())
+print("Charge (pair) gap:", fc.get_charge_gap(d=2))
+\end{lstlisting}
+
+\textbf{Fidelity susceptibility across the Ising transition} (see
+Section~12):
+
+\begin{lstlisting}
+h0 = 4*sum(sc.Sz[i]*sc.Sz[i+1] for i in range(n-1))   # Ising coupling
+h1 = 2*sum(sc.Sx[i] for i in range(n))                # transverse field
+for lam in lambdas:
+    chis.append(fidelity.get_fidelity(sc, h0, h1, lam, n=3))
+\end{lstlisting}
+
+\textbf{Momentum- and frequency-resolved dynamical structure factor}
+$S(q,\omega)$ (see Section~\ref{sec:dynamical}), by combining the
+site-resolved KPM correlator with a lattice Fourier transform:
+
+\begin{lstlisting}
+Sqw = {}
+for i in range(n):
+    for j in range(n):
+        x, y = sc.get_dynamical_correlator(submode="KPM", name=(sc.Sz[i], sc.Sz[j]))
+        Sqw[(i, j)] = (x, y)          # combine with sum_ij e^{iq(i-j)} S_ij(w) offline
+\end{lstlisting}
+
+\end{document}
