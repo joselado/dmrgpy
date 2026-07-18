@@ -108,3 +108,45 @@ def test_kpm_dynamical_correlator_peak_matches_exact_gap(itensor_version):
     x, y = np.array(x), np.array(y).real
     peak = x[np.argmax(y)]
     assert peak == pytest.approx(HEISENBERG_4_GAP, abs=0.05)
+
+
+@pytest.mark.parametrize("itensor_version", [2, 3, "python"])
+def test_ex_dynamical_correlator_peak_matches_exact_gap(itensor_version):
+    """EX (dcex.py) builds the correlator from a small number of
+    explicitly-computed DMRG excited states (Lehmann sum over a
+    Lagrange-multiplier-penalty excited-state search, see excited.py/
+    chain_session.h's Chain::excited_states) rather than KPM's Chebyshev
+    expansion or CVM's resolvent linear solve. Like CVM, for a small
+    system where the excited-state search essentially recovers the exact
+    spectrum, its peak should land on the exact gap to within the
+    frequency grid spacing, consistently across all three DMRG backends
+    -- this is the cross-backend consistency check for submode="EX"
+    (previously untested, see dcex.py/excited.py)."""
+    sc = _heisenberg_chain()
+    _setup_backend(sc, itensor_version)
+    name = (sc.Sz[0], sc.Sz[0])
+    x, y = sc.get_dynamical_correlator(mode="DMRG", submode="EX", name=name,
+                                        es=_PEAK_ES, delta=DELTA, nex=6)
+    x, y = np.array(x), np.array(y).real
+    peak = x[np.argmax(y)]
+    assert peak == pytest.approx(HEISENBERG_4_GAP, abs=0.02)
+
+
+def test_ex_dynamical_correlator_peak_matches_kpm_and_cvm():
+    """Benchmark submode="EX" directly against the other two DMRG
+    dynamical-correlator submodes (KPM and CVM) on the same chain/
+    operator/frequency grid, rather than only against the analytic gap:
+    all three must locate their dominant peak at the same frequency,
+    since they are three different numerical routes to the same
+    physical spectral function."""
+    sc = _heisenberg_chain()
+    name = (sc.Sz[0], sc.Sz[0])
+    peaks = {}
+    for submode, kwargs in [("EX", {"nex": 6}), ("KPM", {}), ("CVM", {})]:
+        x, y = sc.get_dynamical_correlator(mode="DMRG", submode=submode,
+                                            name=name, es=_PEAK_ES,
+                                            delta=DELTA, **kwargs)
+        x, y = np.array(x), np.array(y).real
+        peaks[submode] = x[np.argmax(y)]
+    assert peaks["EX"] == pytest.approx(peaks["KPM"], abs=1e-9)
+    assert peaks["EX"] == pytest.approx(peaks["CVM"], abs=1e-9)

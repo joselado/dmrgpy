@@ -52,6 +52,9 @@ class Many_Body_Chain():
       self.sites_from_file = False
       self.excited_gram_schmidt = False # it does not seem very effective
       self.hamiltonian = None # Hamiltonian, as a multioperator
+      self._dcex_excited_cache = None # cache for dcex.py's excited-state
+          # search (submode="EX" dynamical correlator), invalidated in
+          # restart()
       self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
       self.use_ampo_hamiltonian = False # use ampo Hamiltonian
       # additional arguments
@@ -225,6 +228,8 @@ class Many_Body_Chain():
       self.has_ED_obj = False # restart ED obj
       self.skip_dmrg_gs = False
       self.wf0 = None # initial file for GS
+      self._dcex_excited_cache = None # invalidate cached excited states
+          # (dcex.py), tied to the ground state being replaced above
   def is_hermitian(self,H):
       """Check if an operator is Hermitian"""
       from .mpsalgebra import is_hermitian

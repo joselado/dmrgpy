@@ -1,6 +1,5 @@
 import numpy as np
 from . import mps
-from scipy import linalg as lg
 
 
 def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
@@ -51,19 +50,17 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
     if not purify: # just compute excited states
         return get_excited_states_dmrg(self,n=n,**kwargs) # compute 
     else: # purify the states
-        es,ws = get_excited_states_dmrg(self,n=n+2,**kwargs) # compute 
+        es,ws = get_excited_states_dmrg(self,n=n+2,**kwargs) # compute
         ws = gram_smith(ws) # orthogonalize the MPS
         ws = remove_none(ws) # remove None wavefunctions
         ne = len(ws) # number of states
-        h = np.zeros((ne,ne),dtype=np.complex128)
-        for i in range(ne):
-          for j in range(ne):
-              h[i,j] = ws[i].overlap(self.hamiltonian*ws[j])
-        es = lg.eigvalsh(h) # redefine eigenvalues
-        # redefine also the eigenvectors
+        # rediagonalize the Hamiltonian in this subspace once, taking
+        # both refined eigenvalues and eigenvectors from the same
+        # O(ne^2) representation matrix (this used to be built twice:
+        # once here just for eigvalsh's eigenvalues, then again from
+        # scratch inside rediagonalize for the eigenvectors)
         from .algebra.arnolditk import rediagonalize
-        # there is something wrong with this function
-        ws = rediagonalize(self.hamiltonian,ws) # rediagonalize
+        es,ws = rediagonalize(self.hamiltonian,ws) # rediagonalize
         if ne<n: n = ne # redefine
         return (es[0:n],ws[0:n])
 
