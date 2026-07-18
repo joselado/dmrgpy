@@ -100,6 +100,47 @@ def test_inner_three_arg_self_overlap():
           np.isclose(inner(psi, H, psi), ref, atol=1e-8))
 
 
+def test_to_mpo_reaches_constant_bond_dimension():
+    # Regression test for a real (and, in practice, more consequential
+    # than it sounds) performance bug: to_mpo()'s per-pairwise-sum
+    # compression alone left the Heisenberg chain's H bond dimension
+    # growing *linearly* in N (39 at N=14) instead of the well-known
+    # constant ~5, because a single one-directional SVD sweep per sum
+    # can't see redundancy shared across sums that happened earlier in
+    # the accumulation. Caught while benchmarking the JAX kernel layer on
+    # a 14-site chain -- it OOM'd building environments long before any
+    # DMRG sweep ran, which traced back to this, not the kernel. Fixed by
+    # a final there-and-back compression pass in to_mpo(); this checks
+    # the fix directly (bond dimension bounded well below N for growing
+    # chain length) for both a spin chain and a fermionic (JW-threaded)
+    # one, cross-checked against AutoMPO.dense_matrix() so this isn't
+    # just "the number is small", it's still the right operator.
+    # N=12 (Hilbert space 4096 for spin, 4096 for spinless fermion --
+    # cheap to cross-check densely) is already plenty to show the
+    # difference: without the fix, bond dimension there would reach
+    # roughly 3*(N-2)+1 =~ 31, comfortably above the N//2=6 threshold
+    # checked below.
+    for site_types, terms_fn, label in [
+        ([2] * 12, lambda n: [(1.0, [("Sz", i), ("Sz", i + 1)]) for i in range(1, n)]
+                    + [(0.5, [("Sp", i), ("Sm", i + 1)]) for i in range(1, n)]
+                    + [(0.5, [("Sm", i), ("Sp", i + 1)]) for i in range(1, n)],
+         "Heisenberg-12"),
+        ([0] * 12, lambda n: [(1.0, [("Cdag", i), ("C", i + 1)]) for i in range(1, n)]
+                    + [(1.0, [("Cdag", i + 1), ("C", i)]) for i in range(1, n)],
+         "fermion-hopping-12"),
+    ]:
+        n = len(site_types)
+        sites = SiteX(site_types)
+        ampo = AutoMPO.from_terms(sites, terms_fn(n))
+        mpo = to_mpo(ampo, cutoff=1e-14, maxdim=5000)
+        bond_dims = [mpo.A(i).array.shape[-1] for i in range(1, mpo.length())]
+        check("{}: to_mpo bond dimension stays small (max={}) instead of "
+              "growing toward N={}".format(label, max(bond_dims), n),
+              max(bond_dims) < n // 2)
+        check("{}: compressed MPO still matches the dense reference".format(label),
+              np.allclose(mpo_to_dense(mpo), ampo.dense_matrix(), atol=1e-8))
+
+
 def test_empty_autompo_gives_zero_mpo():
     # Regression test: an AutoMPO with no terms at all is a real, legitimate
     # case dmrgpy's own backend-agnostic code can produce (e.g.
@@ -184,6 +225,7 @@ if __name__ == "__main__":
     test_sum_mps()
     test_inner()
     test_inner_three_arg_self_overlap()
+    test_to_mpo_reaches_constant_bond_dimension()
     test_empty_autompo_gives_zero_mpo()
     test_autompo_to_mpo_spin()
     test_autompo_to_mpo_fermion()

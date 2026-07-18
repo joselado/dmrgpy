@@ -28,6 +28,7 @@ mpscpp3/chain_session.h's make_sweeps()) but otherwise unused.
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, eigsh
 
+from . import kernels
 from .mpsalgebra import _link_at
 from .svd import svd
 from .tensor import ITensor, dag
@@ -117,12 +118,7 @@ def two_site_heff(L, Lbra, H, ket, i, R, Rbra):
     order_out = ([Lbra] if Lbra else []) + [s_i_out, s_j_out] + ([Rbra] if Rbra else [])
     H_i, H_j = H.A(i), H.A(i + 1)
     pieces = [p for p in (L, H_i, H_j, R) if p is not None]
-
-    def matvec(v):
-        t = ITensor(tuple(order_in), v.reshape(shape))
-        for p in pieces:
-            t = t * p
-        return t.transpose_to(order_out).reshape(-1)
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
 
     return matvec, order_in, shape, x0
 
@@ -149,12 +145,7 @@ def one_site_heff(L, Lbra, H, ket, i, R, Rbra):
     order_out = ([Lbra] if Lbra else []) + [s_i_out] + ([Rbra] if Rbra else [])
     H_i = H.A(i)
     pieces = [p for p in (L, H_i, R) if p is not None]
-
-    def matvec(v):
-        t = ITensor(tuple(order_in), v.reshape(shape))
-        for p in pieces:
-            t = t * p
-        return t.transpose_to(order_out).reshape(-1)
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
 
     return matvec, order_in, shape, x0
 
@@ -320,7 +311,26 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True):
     in place; returns the (penalized) objective's final local eigenvalue,
     which chain_session.h doesn't actually use as the reported energy
     either -- see excited_states() in chain.py, which recomputes
-    <psi|H|psi> directly once converged."""
+    <psi|H|psi> directly once converged.
+
+    Convergence margin is genuinely thin here, more so than plain
+    ground-state dmrg(): with no noise-term perturbation (see this
+    module's docstring) to escape local minima of the penalized objective,
+    a sweep over many random starting seeds at scale_lagrange=1.0 and a
+    middling sweep count found a substantial fraction landing on the wrong
+    (too-high) eigenvalue rather than slowly converging to the right one --
+    not just occasional slow convergence, but real stationary points of
+    the wrong energy. Doubling scale_lagrange and adding a few sweeps
+    fixed every case checked, matching standard DMRG practice that the
+    penalty weight needs real margin above the bandwidth, but callers
+    should treat a returned `fluctuations` entry that isn't small as a
+    sign the search didn't actually converge, not just trust the energy.
+    This sensitivity is inherent to the algorithm as implemented (verified
+    directly against the JAX-vs-NumPy kernel comparison in kernels.py: a
+    single matvec call agrees to ~1e-15 relative between the two, so tiny,
+    ordinary floating-point differences between them are what's enough to
+    occasionally tip a marginal case, not a correctness bug in either
+    kernel)."""
     n = psi.length()
     k_states = len(penalty_states)
     energy = None

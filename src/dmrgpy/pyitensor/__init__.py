@@ -4,12 +4,15 @@ can run without a compiled C++ extension. See mpscpp3/chain_session.h,
 get_sites.h, mo_terms.h and TDVP/tdvp.h for the API surface this mirrors --
 this package is not, and is not meant to be, a general ITensor port.
 
-Phases 1-7 (this file's current contents): the Index/ITensor tensor core,
-site types, AutoMPO, MPS/MPO algebra, DMRG, TDVP, and a Chain facade
-(chain.Chain) with the same method surface as mpscpp3/bindings.cc's
-pybind11 class, so it can be registered as a new itensor_version in
-cppext.py with no changes needed anywhere else in dmrgpy (Phase 8,
-not yet done).
+Index/ITensor tensor core, site types, AutoMPO, MPS/MPO algebra, DMRG
+(ground + excited states), TDVP, and a Chain facade (chain.Chain) with the
+same method surface as mpscpp3/bindings.cc's pybind11 class -- registered
+as itensor_version="python" in cppext.py, with no other changes needed
+anywhere else in dmrgpy (mps.py's MPS/staticoperator.py's StaticOperator
+only ever treat the session's return values as an opaque cpp_handle).
+kernels.py is an optional, JAX-accelerated fast path for the single
+hottest loop (the DMRG/TDVP effective-Hamiltonian matvec) -- never a hard
+dependency; everything here works with only NumPy/SciPy installed.
 """
 
 from .index import Index, sim
@@ -21,6 +24,7 @@ from .sweeps import Sweeps
 from .autompo import HTerm, AutoMPO
 from .mpobuilder import to_mpo
 from .chain import Chain
+from . import kernels
 
 __all__ = [
     "Index", "sim",
@@ -31,4 +35,5 @@ __all__ = [
     "Sweeps",
     "HTerm", "AutoMPO", "to_mpo",
     "Chain",
+    "kernels",
 ]
