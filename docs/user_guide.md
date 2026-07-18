@@ -364,12 +364,14 @@ spectral function at site $i$,
 $$A_i(\omega)=-\frac1\pi\,\mathrm{Im}\,G^R_{ii}(\omega),\qquad G^R_{ii}(\omega)\ \text{built from}\ \langle c_i(t)c_i^\dagger(0)\rangle\ (\omega>0)\ \text{and}\ \langle c_i^\dagger(t)c_i(0)\rangle\ (\omega<0)$$
 
 i.e.\ the particle-addition and particle-removal (electron/hole)
-branches of the local Green's function concatenated across $\omega=0$:
-
-```python
-from dmrgpy import fermiondos
-es, ldos = fermiondos.get_dos(fc, i=0)
-```
+branches of the local Green's function concatenated across $\omega=0$.
+There is no ready-made helper for this (the module this section used to
+point to, `fermiondos.py`, relied on a `get_dynamical_correlator` calling
+convention that no longer exists and was removed) -- build the two
+branches directly with `get_dynamical_correlator` instead, using
+`(fc.C[i], fc.Cdag[i])` for the particle-removal branch and
+`(fc.Cdag[i], fc.C[i])` for the particle-addition branch, then
+concatenate.
 
 ## 9. Finite temperature
 

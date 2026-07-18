@@ -187,7 +187,7 @@ Hilbert space and convenience operators:
 
 - `spinchain.py` → `Spin_Chain` (aliased directly to `Many_Body_Chain`)
 - `fermionchain.py` → `Fermionic_Chain` (spinless fermions, `C`/`Cdag`/`N`/Fermi-string `F`)
-- `spinfermionchain.py`, `bosonchain.py`, `parafermionchain.py`, `kondochain.py` — same pattern for other statistics/models
+- `spinfermionchain.py`, `bosonchain.py`, `parafermionchain.py` — same pattern for other statistics/models
 
 ### Operator representation: `MultiOperator`
 

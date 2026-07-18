@@ -119,7 +119,6 @@ for that statistics:
 | `spinfermionchain.py` | `Spin_Fermionic_Chain` | spinful fermions |
 | `bosonchain.py` | `Boson_Chain` | bosonic sites |
 | `parafermionchain.py` | `Parafermion_Chain` | parafermion sites |
-| `kondochain.py` | `Kondo_Chain` | spins Kondo-coupled to a fermionic chain |
 
 ### 4.2 Operator representation: `MultiOperator`
 
