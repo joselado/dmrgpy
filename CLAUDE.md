@@ -148,9 +148,11 @@ symbolic building).
 (`get_mode`/`run`): DMRG unless `self.mode` forces ED, or unless
 `self.itensor_version` is `2` or `3` and the corresponding pybind11
 extension isn't compiled (see `cppext.available(version)`), in which case
-it silently falls back to ED. Most public methods on `Many_Body_Chain`
-accept a `mode="DMRG"|"ED"` kwarg so results can be cross-validated
-between solvers (see the bilinear-biquadratic example in `README.md`).
+it silently falls back to ED. `itensor_version="python"` never falls back
+(see below — it has no compiled-extension precondition at all). Most
+public methods on `Many_Body_Chain` accept a `mode="DMRG"|"ED"` kwarg so
+results can be cross-validated between solvers (see the
+bilinear-biquadratic example in `README.md`).
 
 - **DMRG, C++ (`itensor_version=2` (the default) or `itensor_version=3`)**:
   entirely in-process, see "In-process pybind11 extension" below. Both
@@ -162,6 +164,26 @@ between solvers (see the bilinear-biquadratic example in `README.md`).
   between them. There is no file-based/subprocess fallback for either —
   if the requested extension isn't compiled, `mode.py` routes to ED
   instead.
+- **DMRG, pure Python (`itensor_version="python"`)**: `pyitensor/`
+  (`Many_Body_Chain.setup_python()` switches an existing chain to it) is a
+  from-scratch, pure-Python/NumPy/SciPy reimplementation of exactly the
+  ITensor v3 API subset `mpscpp3/chain_session.h` uses — Index/ITensor
+  tensor core, the same ten site types, an AutoMPO term compiler with its
+  own from-scratch Jordan-Wigner threading, MPS/MPO algebra, two-site
+  Lanczos-based DMRG (ground + excited states via the overlap-penalty
+  method), two-site Krylov-based TDVP, and a `pyitensor/chain.py::Chain`
+  exposing the identical method surface as the compiled backends'
+  `self._session`, so every `itensor_version in (2,3)` call site elsewhere
+  in this codebase treats `"python"` as a third, always-available option
+  wherever such a site was updated to include it — no separate code path.
+  Exists so DMRG/TDVP work with zero compiler/pybind11 dependency, at the
+  cost of being substantially slower than compiled ITensor (no
+  block-sparsity, no JIT) — see `pyitensor/__init__.py`'s docstring and
+  the module-level docstrings throughout `pyitensor/` for the specific
+  simplifications taken versus real ITensor v3 (e.g. MPO construction sums
+  exact per-term bond-dim-1 MPOs rather than porting ITensor's automaton
+  compression algorithm) and why each one doesn't affect dmrgpy's own
+  results, only internal performance/bond-dimension efficiency.
 - **DMRG, Julia (`itensor_version="julia_live"`)**: a live, in-process
   Julia session (`mpsjulialive/`, via `pyjulia`/`juliasession.py`) with its
   own parallel set of modules (`mpsjulialive/groundstate.py`,

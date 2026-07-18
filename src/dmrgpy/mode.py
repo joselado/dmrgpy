@@ -21,8 +21,10 @@ def run(self,automatic=False):
 def get_mode(self,mode="DMRG"):
     """Return the mode of the calculation"""
     # if the in-process C++ extension isn't available for a C++ chain,
-    # fall back to ED (Julia chains are unaffected by this check)
-    if self.itensor_version in (2,3):
+    # fall back to ED (Julia chains are unaffected by this check). The
+    # "python" backend always passes this check (cppext.available("python")
+    # is unconditionally True -- no compiled extension to be missing).
+    if self.itensor_version in (2,3,"python"):
         from . import cppext
         if not cppext.available(self.itensor_version):
             print("C++ extension not compiled, using default ED routines")

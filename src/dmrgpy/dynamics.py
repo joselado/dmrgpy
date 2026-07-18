@@ -4,7 +4,7 @@ from . import cvm
 from . import dcex
 
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
-    if self.itensor_version in (2,3): # C++
+    if self.itensor_version in (2,3,"python"): # C++ or pure-Python
         self.set_initial_wf(self.wf0) # set the initial wavefunction
         if not self.is_hermitian(self.hamiltonian): # non Hermitian Hamiltonian
             from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
