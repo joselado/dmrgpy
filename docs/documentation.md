@@ -247,6 +247,48 @@ moment recursion on the ED side) rather than by direct spectral
 decomposition, since exact diagonalization of the full spectrum is
 infeasible for large chains.
 
+### 4.9 TDZ / complex-time-evolution dynamical correlator
+
+`tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,
+"Dynamical correlation functions from complex time evolution",
+arXiv:2311.10909): instead of evolving along the real-time axis
+(`submode="TD"`, `timedependent.py`), it evolves along a complex-time
+contour `z(t,alpha0)`, whose negative imaginary part damps high-energy
+content as the simulation proceeds, keeping the MPS bond dimension
+needed for a given accuracy much smaller than under real-time evolution
+alone. The true real-time correlator is then recovered order by order
+via a perturbative Taylor expansion in `alpha0` around the simulated
+contour (`_reconstruct_real_axis`, hardcoding the paper's own explicit
+n<=4 Appendix-B formulas). Each order needs only a fixed set of
+precomputed overlap targets (`{H^n(B|GS>)}`, built once via repeated
+`toMPO`/`StaticOperator` application, independent of t) plus pure scalar
+contour integrals -- no new tensor-network machinery beyond a single new
+per-step propagator primitive:
+
+- **`itensor_version` 3 or `"python"`, `tevol_method="TDVP"`** (the
+  paper's own setup): a single two-site-TDVP step with a *complex* time
+  argument -- `pyitensor/tdvp.py`'s Krylov-exponentiation core
+  (`_lanczos_expm_multiply`) was already fully generic to complex
+  coefficients with no changes needed; `mpscpp3/chain_session.h`'s
+  `Chain::tdvp_step` (moved from a private helper to a public method and
+  widened from `double dt` to `Cplx dt`) simply forwards to the vendored
+  `TDVP/tdvp.h`, which documents its own time argument as natively "real,
+  imaginary, or complex".
+- **`itensor_version=2`** (mpscpp2 has no TDVP at all): a single
+  MPO-Taylor step, `Chain::evolve_taylor_step` in both
+  `mpscpp2/chain_session.h` and `mpscpp3/chain_session.h` (the latter as
+  a cross-check / non-TDVP alternative), built on the existing
+  `evoloperator()` Taylor-expansion of `exp(z*H)` (also mpscpp2-only,
+  now widened from a real `dt` to a complex `z` throughout, including
+  `pyitensor/chain.py`'s own `_evoloperator`) -- the pre-existing
+  deliberately-reproduced "z^3/6 multiplies H2 not H3" quirk (see
+  CLAUDE.md) is unaffected by this widening.
+
+Current scope: only the "greater" branch of the correlator is computed
+(the same simplification `submode="TD"` already makes), fed into the
+same windowing/FFT tail as `"TD"` (factored out into
+`timedependent._fourier_transform_correlator` so both submodes share it).
+
 ## 5. Backend performance: v3 vs the pure-Python backend
 
 The pure-Python backend (`itensor_version="python"`) trades raw speed for
@@ -346,6 +388,7 @@ shown in §5.1/§5.2, not these first-call numbers.
 | `src/dmrgpy/mpsjulialive/`, `mpsjulia/` | Julia/ITensors.jl backend modules |
 | `src/dmrgpy/edtk/`, `pyfermion/`, `pyspin/`, `pyboson/`, `pyzn/` | exact-diagonalization backend |
 | `src/dmrgpy/kpmdmrg.py` | Kernel Polynomial Method dynamical correlators |
+| `src/dmrgpy/tdz.py` | complex-time-evolution dynamical correlator ("TDZ", arXiv:2311.10909) |
 | `examples/` | 100+ self-contained example scripts (also the regression suite) |
 | `examples/v2_VS_v3_*` | backend-vs-backend correctness comparisons |
 | `examples/backend_timing_gs_energy/` | backend-vs-backend timing comparison |

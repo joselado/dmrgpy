@@ -225,6 +225,25 @@ PYBIND11_MODULE(_dmrgcpp, m)
             }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
                py::arg("nt"),py::arg("dt"),
                "TDVP counterpart of evolve_and_measure(). Returns (correlator, final_wf)")
+        .def("tdvp_step",&Chain::tdvp_step,
+             py::arg("H"),py::arg("wf"),py::arg("dt"),
+             "One two-site-TDVP step of size dt (may be complex -- see "
+             "TDVP/README.md's own \"t\" convention) applied to an "
+             "already-built MPO H and MPS wf. Lets a caller drive the "
+             "evolution one variable-sized step at a time, unlike "
+             "quench_tdvp/evolve_and_measure_tdvp above, which loop "
+             "internally over a fixed number of equal, real dt steps "
+             "(used by the \"TDZ\" complex-time-evolution dynamical "
+             "correlator, see tdz.py, whose per-step contour increment "
+             "varies with t).")
+        .def("evolve_taylor_step",&Chain::evolve_taylor_step,
+             py::arg("H"),py::arg("wf"),py::arg("z"),
+             "Applies one Taylor-expanded exp(z*H) step (z may be "
+             "complex) to an already-built MPO H and MPS wf -- the "
+             "MPO-Taylor (non-TDVP) analogue of tdvp_step() above, used "
+             "by \"TDZ\" (tdz.py) as a cross-check / non-TDVP "
+             "alternative here, and as mpscpp2's only route to TDZ "
+             "(mpscpp2 has no TDVP).")
         .def("evolve_and_measure",
             [](Chain& self, std::vector<PyTerm> const& terms_h,
                std::vector<PyTerm> const& terms_op, MPS const& wf,

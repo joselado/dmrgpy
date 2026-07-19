@@ -2,6 +2,7 @@ from . import kpmdmrg
 from . import timedependent
 from . import cvm
 from . import dcex
+from . import tdz
 
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
     if self.itensor_version in (2,3,"python"): # C++ or pure-Python
@@ -12,8 +13,10 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
     #        submode = "CVM_explicit" # only mode that works with non-Hemrmitian
         if submode=="KPM": # KPM method
             return kpmdmrg.get_dynamical_correlator(self,**kwargs)
-        elif submode=="TD": # time dependent 
+        elif submode=="TD": # time dependent
             return timedependent.dynamical_correlator(self,**kwargs)
+        elif submode=="TDZ": # complex-time evolution (arXiv:2311.10909)
+            return tdz.dynamical_correlator_tdz(self,**kwargs)
         elif submode=="CVM_explicit": # CVM mode
             return cvm.dynamical_correlator_cvm_explicit(self,**kwargs)
         elif submode=="CVM": # CVM mode

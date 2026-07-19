@@ -450,6 +450,25 @@ class Chain
         return out;
         }
 
+    // Applies one Taylor-expanded exp(z*H) step (evoloperator() below,
+    // see its own comment for the pre-existing z^3/6-uses-H2-not-H3
+    // quirk this preserves unchanged) to wf, given an already-built MPO
+    // H and a possibly-complex z -- exposed for callers (tdz.py's "TDZ"
+    // complex-time-evolution dynamical correlator) that need a
+    // per-step-varying complex increment, unlike quench()/
+    // evolve_and_measure() above, which use one fixed real dt for their
+    // whole internal loop. This is mpscpp2's only route to TDZ, since it
+    // has no TDVP (see mpscpp3/chain_session.h's own public tdvp_step());
+    // mpscpp3 exposes this same method too, as a cross-check / non-TDVP
+    // alternative there.
+    MPS
+    evolve_taylor_step(MPO const& H, MPS const& wf, Cplx z) const
+        {
+        auto expH = evoloperator(H,z);
+        auto args = Args("Cutoff",cutoff_,"Maxm",maxm_);
+        return exactApplyMPO(expH,wf,args);
+        }
+
     // Correction-vector-method (CVM) dynamical correlator at a single
     // frequency point, mirroring cvm_dynamical_correlator.h's task plus
     // cvm.h's spectral_function()/bicstab() exactly, but taking the two
@@ -832,11 +851,11 @@ class Chain
     // old-vs-new comparisons diverge for a reason unrelated to the
     // migration itself.
     MPO
-    evoloperator(MPO const& H, double dt) const
+    evoloperator(MPO const& H, Cplx dt) const
         {
         auto ampo = AutoMPO(sites_);
         ampo += 1.0,"Id",1;
-        Cplx z(0.0,-dt);
+        Cplx z = Cplx(0.0,-1.0)*dt;
         auto Iden = MPO(ampo);
         auto out = sum_mpo(Iden,z*H);
         auto H2 = mult_mpo(H,H);
