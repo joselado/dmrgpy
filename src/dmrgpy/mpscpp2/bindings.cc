@@ -199,6 +199,16 @@ PYBIND11_MODULE(_dmrgcpp, m)
             }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
                py::arg("nt"),py::arg("dt"),py::arg("fit_td")=true,
                "Returns (correlator, final_wf)")
+        .def("evolve_taylor_step",&Chain::evolve_taylor_step,
+             py::arg("H"),py::arg("wf"),py::arg("z"),
+             "Applies one Taylor-expanded exp(z*H) step (z may be "
+             "complex) to an already-built MPO H and MPS wf. Lets a "
+             "caller drive the evolution one variable-sized step at a "
+             "time, unlike quench()/evolve_and_measure() above, which "
+             "use one fixed real dt for their whole internal loop (used "
+             "by the \"TDZ\" complex-time-evolution dynamical "
+             "correlator, see tdz.py -- mpscpp2's only route there, "
+             "since it has no TDVP).")
         .def("overlap",&Chain::overlap_mps,py::arg("wf1"),py::arg("wf2"))
         .def("overlap_aMb",[](Chain& self, MPS const& wf1,
                                std::vector<PyTerm> const& terms, MPS const& wf2) {

@@ -23,7 +23,7 @@ from .mpsalgebra import randomMPS, traceC
 from .sites import SiteX
 from .svd import svd
 from .sweeps import Sweeps
-from .tdvp import tdvp_step
+from .tdvp import tdvp_step as _tdvp_step_fn
 from .tensor import commonIndex, dag, prime, swapPrime
 
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
@@ -189,6 +189,35 @@ class Chain:
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)
 
+    def tdvp_step(self, H, wf, dt):
+        """One two-site-TDVP step of size dt, given an already-built MPO H
+        (e.g. from build_operator()) and a raw MPS handle wf -- lets a
+        caller (tdz.py's TDZ submode) drive the evolution one
+        variable-sized step at a time, unlike quench_tdvp/
+        evolve_and_measure_tdvp above, which loop internally over a fixed
+        number of equal, real dt steps and thus can't be reused for a
+        per-step-varying complex time increment. dt may be any complex
+        number: tdvp.py's tdvp_step() forward/backward coefficients are
+        already generic to complex dt (the backward half-sweep's
+        coefficient is just the negative of the forward one, not its
+        conjugate -- the real-time-only case just happens to make those
+        coincide), so real time (dt purely imaginary by this module's own
+        -i*dt convention, matching mpscpp3's chain_session.h) and complex
+        time (TDZ) share this same code path unchanged."""
+        return _tdvp_step_fn(wf.copy(), H, dt, cutoff=self.cutoff,
+                maxdim=self.maxm, niter=50)
+
+    def evolve_taylor_step(self, H, wf, z):
+        """Applies one Taylor-expanded exp(z*H) step (_evoloperator()
+        above, z may be complex) to an already-built MPO H and MPS wf --
+        the MPO-Taylor (non-TDVP) analogue of tdvp_step() above, used by
+        tdz.py's "TDZ" submode as a cross-check / non-TDVP alternative
+        here, matching mpscpp2/mpscpp3's own evolve_taylor_step()
+        bindings (mpscpp2 has no TDVP, so this is its only route to
+        TDZ)."""
+        expH = self._evoloperator(H, z)
+        return self._apply_mpo(expH, wf)
+
     def multiply_operators(self, A, B):
         return self._mult_mpo(A, B)
 
@@ -265,7 +294,7 @@ class Chain:
         norm0 = np.sqrt(inner(psi1, psi1))
         correlator = []
         for _ in range(nt):
-            psi1 = tdvp_step(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
+            psi1 = _tdvp_step_fn(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
             psi1.normalize()
             psi1 = psi1 * norm0
             correlator.append(inner(psi2, psi1))
@@ -277,7 +306,7 @@ class Chain:
         psi = wf
         correlator = []
         for _ in range(nt):
-            psi = tdvp_step(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
+            psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
             correlator.append(inner(psi, A, psi))
         return correlator, psi
 
@@ -471,9 +500,12 @@ class Chain:
         # port of mpscpp3/chain_session.h's evoloperator(), including its
         # deliberately-reproduced quirk: H3 is computed but the z^3/6 term
         # multiplies H2 again, not H3. See that file's own comment for why
-        # this is preserved rather than fixed.
+        # this is preserved rather than fixed. dt may be complex (see
+        # evolve_taylor_step() below, used by tdz.py's "TDZ" submode):
+        # z=-1j*dt generalizes complex(0.0,-dt) correctly for that case
+        # (the two coincide whenever dt is real).
         Iden = self._identity_mpo()
-        z = complex(0.0, -dt)
+        z = -1j * dt
         out = self._sum_mpo(Iden, H * z)
         H2 = self._mult_mpo(H, H)
         H3 = self._mult_mpo(H, H2)  # computed to match the original; unused below, see note

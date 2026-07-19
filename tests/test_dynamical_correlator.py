@@ -150,3 +150,25 @@ def test_ex_dynamical_correlator_peak_matches_kpm_and_cvm():
         peaks[submode] = x[np.argmax(y)]
     assert peaks["EX"] == pytest.approx(peaks["KPM"], abs=1e-9)
     assert peaks["EX"] == pytest.approx(peaks["CVM"], abs=1e-9)
+
+
+@pytest.mark.parametrize("itensor_version", [2, 3, "python"])
+def test_tdz_dynamical_correlator_peak_matches_exact_gap(itensor_version):
+    """TDZ (tdz.py, complex-time evolution + perturbative real-axis
+    reconstruction, arXiv:2311.10909) should locate its dominant peak at
+    the exact gap to within the dt=0.1 (default) time-discretization
+    error, consistently across all three DMRG backends: TDVP
+    (itensor_version 3 or "python") and the MPO-Taylor fallback
+    (itensor_version=2, which has no TDVP -- see tdz.py's
+    _advance_complex_time_step). Confirmed directly (see this module's
+    own dev notes) that all three backends land on the identical peak
+    here, i.e. the TDVP-vs-Taylor-MPO choice does not itself introduce a
+    cross-backend discrepancy at this alpha0/n_max/dt."""
+    sc = _heisenberg_chain()
+    _setup_backend(sc, itensor_version)
+    name = (sc.Sz[0], sc.Sz[0])
+    x, y = sc.get_dynamical_correlator(mode="DMRG", submode="TDZ", name=name,
+                                        es=_PEAK_ES, delta=DELTA)
+    x, y = np.array(x), np.array(y).real
+    peak = x[np.argmax(y)]
+    assert peak == pytest.approx(HEISENBERG_4_GAP, abs=0.03)

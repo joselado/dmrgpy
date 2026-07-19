@@ -289,6 +289,54 @@ fine resolution over a *narrow* frequency window, at the cost of a real
 dynamical simulation (bond dimension grows with entanglement generated
 during the evolution).
 
+**`submode="TDZ"` — complex-time evolution (Cao, Lu, Stoudenmire &
+Parcollet, arXiv:2311.10909).** Real-time evolution (`"TD"` above) grows
+entanglement, so the MPS bond dimension needed for a given accuracy
+grows with the simulated time $T$. TDZ instead evolves along a complex
+time contour
+
+$$z(t,\alpha_0)=\int_0^t e^{-i\alpha_0 f(t')}\,dt',\qquad f(t)=e^{-t\omega_0},\qquad \omega_0=2\pi/t_{\max}$$
+
+Since $\mathrm{Im}\,z(t,\alpha_0)<0$ for $\alpha_0>0$, this progressively
+damps high-energy content as it evolves, so the bond dimension needed
+for a given accuracy grows far more slowly than under real-time
+evolution alone (the original paper reports $\chi\sim20$–$30$ vs
+$\chi\sim500$–$700$ for comparable accuracy on the Anderson impurity
+model). The true real-time ($\alpha_0=0$) correlator is then recovered
+order by order via a perturbative Taylor expansion in $\alpha_0$ around
+the simulated contour,
+
+$$C(t,0)\approx\phi^{(0)}(t,\alpha_0)+\sum_{n=1}^{n_{\max}}g^{(n)}(t,\alpha_0)$$
+
+where $\phi^{(n)}(t,\alpha_0)=\langle H^n B|\mathrm{GS}\rangle\cdot
+|\psi(t,\alpha_0)\rangle$ (precomputed once per $n$, reused as a fixed
+overlap target at every time step) and $g^{(n)}$ are explicit
+combinatorial expressions in $\phi^{(1..n)}$ and the pure contour
+integrals $J^{(n)}(t,\alpha_0)=-i\,\partial^n_{\alpha_0}z(t,\alpha_0)$
+(see the paper's Appendix B; this implementation hardcodes $n\le4$,
+which the paper finds always suffices for $\alpha_0\lesssim0.3$). The
+reconstructed $C(t,0)$ is then windowed/Fourier-transformed exactly as
+in `"TD"`.
+
+```python
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="TDZ",
+                                      name=(sc.Sz[0], sc.Sz[0]),
+                                      alpha0=0.1, n_max=4, dt=0.05)
+```
+
+`alpha0` is the contour angle parameter (larger reduces the bond
+dimension needed further, but requires a larger `n_max` to reconstruct
+the real axis accurately); `n_max` (≤4) is the reconstruction order;
+`dt`/`tmax`/`nt` set the underlying time step/duration exactly as in
+`"TD"`. Uses two-site TDVP when available (`itensor_version` 3 or
+`"python"`, `tevol_method="TDVP"`, the paper's own setup) or falls back
+to the MPO-Taylor propagator otherwise (`itensor_version=2`, which has
+no TDVP) — the same TDVP-vs-Taylor choice `"TD"` already makes. Current
+scope: only the "greater" branch of the correlator is computed (the same
+simplification `"TD"` itself already makes), so this is best used the
+same way as `"TD"`: high-resolution work in a narrow frequency window,
+now reachable at a lower bond-dimension cost for a given simulated time.
+
 **`submode="EX"` — exact diagonalization in a truncated DMRG subspace.**
 Builds $A$, $B$, $H$ explicitly in the subspace spanned by the lowest
 `nex` (orthogonalized) DMRG excited states, then evaluates the exact
@@ -310,7 +358,9 @@ matters more than matching KPM's polynomial-expansion artifacts.
 
 **Choosing a method:** KPM (default) for a first look at the full
 spectrum; CVM or TD when you need high resolution in a specific,
-narrow frequency window; EX when a handful of excited states already
+narrow frequency window; TDZ instead of TD when that window also needs
+long simulated times/low frequencies, where TD's real-time bond-dimension
+growth becomes limiting; EX when a handful of excited states already
 capture the physics (e.g. a small gapped system); maxent when you want a
 guaranteed-positive reconstruction from limited moment data (e.g.\
 combined with finite-temperature ED, see §9).

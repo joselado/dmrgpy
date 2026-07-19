@@ -376,6 +376,24 @@ class Chain
         return out;
         }
 
+    // Applies one Taylor-expanded exp(z*H) step (evoloperator() below,
+    // see its own comment for the pre-existing z^3/6-uses-H2-not-H3
+    // quirk this preserves unchanged) to wf, given an already-built MPO
+    // H and a possibly-complex z -- exposed for callers (tdz.py's "TDZ"
+    // complex-time-evolution dynamical correlator) that need a
+    // per-step-varying complex increment, unlike quench()/
+    // evolve_and_measure() above, which use one fixed real dt for their
+    // whole internal loop. mpscpp2 (which has no TDVP) uses this same
+    // method as its only route to TDZ; here it's a cross-check /
+    // non-TDVP alternative to the public tdvp_step() below.
+    MPS
+    evolve_taylor_step(MPO const& H, MPS const& wf, Cplx z) const
+        {
+        auto expH = evoloperator(H,z);
+        auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
+        return apply_mpo(expH,wf,args);
+        }
+
     // TDVP counterparts of quench()/evolve_and_measure() above: same
     // physics (real-time evolution under H_, same EGS-shift convention in
     // quench_tdvp() so results are directly comparable to the MPO-Taylor
@@ -429,6 +447,43 @@ class Chain
             }
         out.final_wf = psi;
         return out;
+        }
+
+    // One step exp(dt*H) of two-site TDVP (TDVP/tdvp.h), given an
+    // already-built MPO H (e.g. from build_operator()) and MPS psi --
+    // exposed publicly (moved here from a private helper of the same
+    // name used only by quench_tdvp()/evolve_and_measure_tdvp() above)
+    // so a caller can drive the evolution one variable-sized step at a
+    // time, unlike those two methods, which loop internally over a fixed
+    // number of equal, real dt steps and thus can't be reused for a
+    // per-step-varying complex time increment (see tdz.py's "TDZ"
+    // dynamical-correlator submode, which needs exactly that: the
+    // per-step contour increment dz_k = exp(-i*alpha0*f(t_k))*dt varies
+    // with t_k). dt may be any complex number: TDVP/README.md documents
+    // its own "t" argument (here dt, since tdvp()'s own convention is
+    // U=exp(t*H)) as "real, imaginary, or complex" -- real time
+    // evolution (dt purely imaginary here, by this method's own
+    // -i*dt convention) and complex time evolution (TDZ) share this same
+    // code path unchanged, nothing backend-specific needed for either.
+    // One Sweeps(1) TDVP "sweep" is a left-to-right pass with a dt/2 step
+    // followed by a right-to-left pass with another dt/2 step, i.e.
+    // exactly one full step of size dt -- matching how
+    // quench()/evolve_and_measure() apply their evoloperator() MPO once
+    // per iteration. niter=50 bounds the Lanczos iterations used to
+    // solve each local effective TDVP equation (tdvp.h's "MaxIter"); not
+    // exposed as a knob since neither the MPO-Taylor path this replaces
+    // has an equivalent one.
+    MPS
+    tdvp_step(MPO const& H, MPS psi, Cplx dt) const
+        {
+        Cplx t = Cplx(0.0,-1.0)*dt;
+        auto sweeps = Sweeps(1);
+        sweeps.maxdim() = maxm_;
+        sweeps.cutoff() = cutoff_;
+        sweeps.niter() = 50;
+        tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
+                              "NumCenter",2,"DoNormalize",true});
+        return psi;
         }
 
     double
@@ -606,29 +661,6 @@ class Chain
         return out;
         }
 
-    // One real-time step exp(-i*dt*H) of two-site TDVP (TDVP/tdvp.h).
-    // t=(0,-dt): TDVP's own convention is U=exp(t*H), so real-time
-    // evolution needs a purely imaginary t (see TDVP/README.md). One
-    // Sweeps(1) TDVP "sweep" is a left-to-right pass with a t/2 step
-    // followed by a right-to-left pass with another t/2 step, i.e. exactly
-    // one full step of size t -- matching how quench()/evolve_and_measure()
-    // apply their evoloperator() MPO once per iteration. niter=50 bounds
-    // the Lanczos iterations used to solve each local effective TDVP
-    // equation (tdvp.h's "MaxIter"); not exposed as a knob since neither
-    // the MPO-Taylor path this replaces has an equivalent one.
-    MPS
-    tdvp_step(MPO const& H, MPS psi, double dt) const
-        {
-        Cplx t(0.0,-dt);
-        auto sweeps = Sweeps(1);
-        sweeps.maxdim() = maxm_;
-        sweeps.cutoff() = cutoff_;
-        sweeps.niter() = 50;
-        tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
-                              "NumCenter",2,"DoNormalize",true});
-        return psi;
-        }
-
     Args
     dmrg_args() const { return Args("Quiet",!verbose_,"Silent",!verbose_); }
 
@@ -803,11 +835,11 @@ class Chain
     // the z^3/6 term multiplies H2 again instead of H3. See the v2 file's
     // comment for why this is preserved rather than fixed.
     MPO
-    evoloperator(MPO const& H, double dt) const
+    evoloperator(MPO const& H, Cplx dt) const
         {
         auto ampo = AutoMPO(sites_);
         ampo += 1.0,"Id",1;
-        Cplx z(0.0,-dt);
+        Cplx z = Cplx(0.0,-1.0)*dt;
         auto Iden = toMPO(ampo);
         auto out = sum_mpo(Iden,z*H);
         auto H2 = mult_mpo(H,H);

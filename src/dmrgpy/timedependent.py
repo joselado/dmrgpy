@@ -158,6 +158,22 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     self.get_gs() # get the ground state
     if nt is None: nt=int(damping_periods/delta/dt)
     (ts,cs) = evolution_DC(self,dt=dt,nt=nt,**kwargs) # get correlator
+    return _fourier_transform_correlator(ts,cs,dt,es=es,window=window,
+            delta=delta,factor=factor)
+
+
+def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
+        delta=5e-2,factor=1):
+    """
+    Shared time-domain -> frequency-domain tail: exponential-decay
+    windowing (turns `delta` into a Lorentzian broadening, see
+    dynamical_correlator's docstring), interpolation onto a uniform
+    (optionally oversampled by `factor`) grid, a Riemann-sum-normalized
+    FFT, and interpolation onto the requested frequencies `es`. Factored
+    out of dynamical_correlator (submode "TD") so other time-domain
+    submodes (e.g. "TDZ", see tdz.py) can reuse it unchanged instead of
+    duplicating the FFT/windowing convention.
+    """
     cs = cs*np.exp(-delta*ts) # damping window -> Lorentzian broadening "delta"
     # interpolate the time evolution
     ftr = interp1d(ts,cs.real,fill_value=0.0,bounds_error=False)
