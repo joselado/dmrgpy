@@ -866,13 +866,28 @@ class Chain
     // Restarted Arnoldi on a matrix-free operator over ITensor "vectors"
     // (the two-site blocks of nhdmrg()): builds a krylovdim-step Krylov
     // space with modified Gram-Schmidt (plus one re-orthogonalization
-    // pass), diagonalizes the small Hessenberg matrix with ITensor's
-    // dense non-hermitian eigen(), keeps the Ritz pair whose eigenvalue
-    // has the smallest real part, and restarts from that Ritz vector.
-    // This is the C++ stand-in for the reference's KrylovKit
-    // eigsolve(...; ishermitian=false, which=:SR) local solver -- like
-    // there, it runs at low accuracy per bond (the outer DMRG sweeps do
-    // the actual converging, so krylovdim/restarts stay small).
+    // pass), diagonalizes the small Hessenberg matrix once per build with
+    // ITensor's dense non-hermitian eigen(), keeps the Ritz pair selected
+    // by `sel`, and restarts from that Ritz vector. This is the C++
+    // stand-in for the reference's KrylovKit eigsolve(...;
+    // ishermitian=false, which=:SR) local solver -- like there, it runs
+    // at low accuracy per bond (the outer DMRG sweeps do the actual
+    // converging). Remaining restarts are skipped when the standard
+    // Arnoldi residual bound ||A y - lambda y|| = |h(m+1,m)|*|last
+    // Ritz-vector component| certifies the build already converged --
+    // that check reuses the one end-of-build diagonalization, so it is
+    // free, and it halves the matvec count on already-converged bonds.
+    // A per-step stop-on-stable-Ritz-value exit (the idea pyitensor's
+    // hermitian _lanczos_ground_state uses) was tried and reverted:
+    // unlike the symmetric tridiagonal solve there, the non-hermitian
+    // Hessenberg eigen() per step costs as much as the matvec it hopes
+    // to save at these block sizes -- measured directly on a 20-site
+    // chain, the per-step variant REGRESSED nhdmrg from ~30s to ~104s.
+    // (The vendored ITensor/itensor/iterativesolvers.h has its own
+    // arnoldi(), but it only supports LargestMagnitude/SmallestReal
+    // selection -- neither the Closest anchoring nor the SRTieBreak
+    // below is expressible with it, and those selections are
+    // load-bearing, see the Sel notes.)
     //
     // Ritz-value selection (`sel`):
     //  - SR: smallest real part (the reference's :SR).
@@ -889,13 +904,19 @@ class Chain
     //    chain). Anchoring the left solve to the right solve's eigenvalue
     //    pins both onto the same eigenpair.
     //  - SRTieBreak: smallest real part, but among Ritz values whose real
-    //    parts are degenerate within a small tolerance, the one closest to
-    //    `target` (the previous bond's eigenvalue). Used by the right
-    //    solve from the second bond on, so a Re-degenerate +-Im pair
-    //    cannot make consecutive bond solves flip branch mid-sweep (the
-    //    same failure mode as above, one level up: each flip re-targets
-    //    the truncation onto a different eigenstate, and the sweep stalls
-    //    at a non-eigenstate -- also confirmed on the same XX chain).
+    //    parts sit within a small tolerance of the *global* minimum, the
+    //    one closest to `target` (the previous bond's eigenvalue). Used
+    //    by the right solve from the second bond on, so a Re-degenerate
+    //    +-Im pair cannot make consecutive bond solves flip branch
+    //    mid-sweep (the same failure mode as above, one level up: each
+    //    flip re-targets the truncation onto a different eigenstate, and
+    //    the sweep stalls at a non-eigenstate -- also confirmed on the
+    //    same XX chain). The global-min-then-candidates formulation is
+    //    deliberately identical to pyitensor/nhdmrg.py's _select_ritz
+    //    (an earlier greedy running-best variant here could settle on a
+    //    different member of a degenerate cluster than the Python port,
+    //    silently diverging the backends on exactly the spectra the
+    //    tie-break exists for).
     enum class Sel { SR, Closest, SRTieBreak };
     template <typename Fn>
     std::pair<Cplx,ITensor>
@@ -942,24 +963,39 @@ class Chain
             ITensor W,D;
             eigen(Hm,W,D);
             auto c = commonIndex(W,D);
+            std::vector<Cplx> ev(m);
+            for (int k=1;k<=m;++k) ev[k-1] = eltC(D,c(k),prime(c)(k));
+            // Ritz-value selection; the global-min-then-candidates
+            // SRTieBreak formulation is deliberately identical to
+            // pyitensor/nhdmrg.py's _select_ritz
             int kbest = 1;
-            Cplx ebest = 0;
-            for (int k=1;k<=m;++k)
+            if (sel==Sel::Closest)
                 {
-                auto ek = eltC(D,c(k),prime(c)(k));
-                bool better = false;
-                if (sel==Sel::Closest)
-                    better = std::abs(ek-target)<std::abs(ebest-target);
-                else if (sel==Sel::SRTieBreak)
-                    {
-                    double degtol = 1e-6*(1.0+std::abs(ebest.real()));
-                    if (ek.real()<ebest.real()-degtol) better = true;
-                    else if (ek.real()<ebest.real()+degtol)
-                        better = std::abs(ek-target)<std::abs(ebest-target);
-                    }
-                else better = ek.real()<ebest.real();
-                if (k==1 || better) { ebest = ek; kbest = k; }
+                for (int k=2;k<=m;++k)
+                    if (std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
+                        kbest = k;
                 }
+            else
+                {
+                double remin = ev[0].real();
+                for (int k=2;k<=m;++k) remin = std::min(remin,ev[k-1].real());
+                if (sel==Sel::SRTieBreak)
+                    {
+                    double degtol = 1e-6*(1.0+std::abs(remin));
+                    kbest = 0;
+                    for (int k=1;k<=m;++k)
+                        if (ev[k-1].real()<remin+degtol)
+                            if (kbest==0 ||
+                                std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
+                                kbest = k;
+                    }
+                else
+                    {
+                    for (int k=2;k<=m;++k)
+                        if (ev[k-1].real()<ev[kbest-1].real()) kbest = k;
+                    }
+                }
+            Cplx ebest = ev[kbest-1];
             ITensor xnew;
             for (int i=0;i<m;++i)
                 {
@@ -969,6 +1005,13 @@ class Chain
                 }
             lambda = ebest;
             x0 = xnew;
+            // standard Arnoldi residual bound for the selected Ritz pair:
+            // ||A y - lambda y|| = |h(m+1,m)| * |last component of the
+            // Hessenberg eigenvector|; when the build already converged,
+            // further restarts would just rebuild the same subspace
+            double resid_est = h.at(m).at(m-1).real()
+                              *std::abs(eltC(W,a(m),c(kbest)));
+            if (resid_est<1e-10*(1.0+std::abs(ebest))) break;
             }
         return {lambda,x0};
         }

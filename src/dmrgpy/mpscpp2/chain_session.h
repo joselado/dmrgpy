@@ -810,8 +810,11 @@ class Chain
 
     // Restarted Arnoldi on a matrix-free operator over ITensor "vectors";
     // back-port of mpscpp3/chain_session.h's arnoldi_smallest_real (the
-    // annotated original, including the rationale for the three Sel
-    // eigenvalue-selection modes) to the v2 API.
+    // annotated original: see there for the Sel eigenvalue-selection
+    // rationale, the global-min SRTieBreak semantics shared with
+    // pyitensor's _select_ritz, the residual-bound restart skip, and the
+    // measured reason there is deliberately NO per-step early exit) to
+    // the v2 API.
     enum class Sel { SR, Closest, SRTieBreak };
     template <typename Fn>
     std::pair<Cplx,ITensor>
@@ -858,24 +861,36 @@ class Chain
             ITensor W,D;
             eigen(Hm,W,D);
             auto c = commonIndex(W,D);
+            std::vector<Cplx> ev(m);
+            for (int k=1;k<=m;++k) ev[k-1] = D.cplx(c(k),prime(c)(k));
             int kbest = 1;
-            Cplx ebest = 0;
-            for (int k=1;k<=m;++k)
+            if (sel==Sel::Closest)
                 {
-                auto ek = D.cplx(c(k),prime(c)(k));
-                bool better = false;
-                if (sel==Sel::Closest)
-                    better = std::abs(ek-target)<std::abs(ebest-target);
-                else if (sel==Sel::SRTieBreak)
-                    {
-                    double degtol = 1e-6*(1.0+std::abs(ebest.real()));
-                    if (ek.real()<ebest.real()-degtol) better = true;
-                    else if (ek.real()<ebest.real()+degtol)
-                        better = std::abs(ek-target)<std::abs(ebest-target);
-                    }
-                else better = ek.real()<ebest.real();
-                if (k==1 || better) { ebest = ek; kbest = k; }
+                for (int k=2;k<=m;++k)
+                    if (std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
+                        kbest = k;
                 }
+            else
+                {
+                double remin = ev[0].real();
+                for (int k=2;k<=m;++k) remin = std::min(remin,ev[k-1].real());
+                if (sel==Sel::SRTieBreak)
+                    {
+                    double degtol = 1e-6*(1.0+std::abs(remin));
+                    kbest = 0;
+                    for (int k=1;k<=m;++k)
+                        if (ev[k-1].real()<remin+degtol)
+                            if (kbest==0 ||
+                                std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
+                                kbest = k;
+                    }
+                else
+                    {
+                    for (int k=2;k<=m;++k)
+                        if (ev[k-1].real()<ev[kbest-1].real()) kbest = k;
+                    }
+                }
+            Cplx ebest = ev[kbest-1];
             ITensor xnew;
             for (int i=0;i<m;++i)
                 {
@@ -885,6 +900,12 @@ class Chain
                 }
             lambda = ebest;
             x0 = xnew;
+            // standard Arnoldi residual bound for the selected Ritz pair
+            // (see the mpscpp3 original's comment); skip further restarts
+            // once the build already converged
+            double resid_est = h.at(m).at(m-1).real()
+                              *std::abs(W.cplx(a(m),c(kbest)));
+            if (resid_est<1e-10*(1.0+std::abs(ebest))) break;
             }
         return {lambda,x0};
         }

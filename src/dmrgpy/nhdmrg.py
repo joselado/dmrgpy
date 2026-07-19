@@ -20,16 +20,15 @@ now only a fallback for backends without a session (julia_live keeps its
 own path in groundstate.py).
 """
 
-import numpy as np
 from . import mps
 
 
 def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
-    """Run non-Hermitian DMRG on a v3 chain. Returns (energy,psil,psir)
-    with energy the (complex) eigenvalue of smallest real part and
-    psil/psir the biorthogonal left/right eigenvector MPS, normalized so
-    that <psil|psir> = 1 (each tensor pair shares its site and link
-    indices, so both behave as ordinary MPS individually).
+    """Run non-Hermitian DMRG on a session-backend chain. Returns
+    (energy,psil,psir) with energy the (complex) eigenvalue of smallest
+    real part and psil/psir the biorthogonal left/right eigenvector MPS,
+    normalized so that <psil|psir> = 1 (each tensor pair shares its site
+    and link indices, so both behave as ordinary MPS individually).
 
     - H: operator to diagonalize (defaults to self.hamiltonian)
     - krylovdim/restarts: per-bond local Arnoldi effort; the outer DMRG
@@ -37,12 +36,16 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
     - tol/ntries: eigen-residual certificate. The non-Hermitian "energy"
       is not a variational bound, so a (rare) stalled sweep can report a
       spurious value below the true spectrum with nothing else looking
-      wrong; the only reliable convergence certificate is the residual
-      ||H|psir> - E|psir>||. Each C++ run starts from its own random MPS,
-      so runs are re-drawn (up to ntries times) until the relative
-      residual drops below tol, and the best run is returned regardless
-      (converged runs sit at ~1e-14 while stalls sit at ~1e-1, so tol's
-      exact value is uncritical).
+      wrong; the only reliable convergence certificate is the pair of
+      residuals ||H|psir> - E|psir>|| and ||Hdag|psil> - E*|psil>||. Both
+      are checked: the right residual alone would accept a run whose
+      anchored adjoint solve locked psil onto a *different* eigenstate,
+      since <psil|H|psir>/<psil|psir> equals E identically whenever psir
+      alone is an eigenvector. Each run starts from its own random MPS,
+      so runs are re-drawn (up to ntries times) until the worse of the
+      two relative residuals drops below tol, and the best run is
+      returned regardless (converged runs sit at ~1e-14 while stalls sit
+      at ~1e-1, so tol's exact value is uncritical).
     """
     if self.itensor_version not in (2,3,"python"):
         raise NotImplementedError("nhdmrg requires itensor_version 2, 3 "
@@ -54,8 +57,9 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
             self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    Hd = H.get_dagger()
     terms = H.to_terms()
-    terms_dag = H.get_dagger().to_terms()
+    terms_dag = Hd.to_terms()
     best = None
     for i in range(max(1,int(ntries))):
         energy,hl,hr = self._session.nhdmrg(terms,terms_dag,
@@ -63,7 +67,8 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
         psil = mps.MPS(self,cpp_handle=hl).copy()
         psir = mps.MPS(self,cpp_handle=hr).copy()
         r = H*psir - energy*psir
-        resid = abs(r.dot(r))**0.5/(1.0+abs(energy))
+        l = Hd*psil - energy.conjugate()*psil
+        resid = max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(1.0+abs(energy))
         if best is None or resid<best[0]:
             best = (resid,energy,psil,psir)
         if resid<tol: break
@@ -81,10 +86,29 @@ def gs_energy_nhdmrg(self,**kwargs):
     """gs_energy-style entry point: run NH-DMRG and store the right
     eigenvector as the chain's ground state wavefunction (the state
     observables like vev() act on), mirroring what the Arnoldi
-    non-Hermitian branch of groundstate.gs_energy stores."""
-    e0,psil,psir = nhdmrg(self,**kwargs)
+    non-Hermitian branch of groundstate.gs_energy stores -- including its
+    unit normalization of wf0 (nhdmrg()'s own psir carries <psil|psir>=1
+    biorthogonal normalization instead, so it is renormalized here; the
+    biorthogonal pair as such stays available through nhdmrg()).
+
+    Accepts (and ignores) unknown keyword arguments: gs_energy() forwards
+    its **kwargs here for non-Hermitian Hamiltonians, and the previous
+    Arnoldi route accepted a different set of solver knobs
+    (maxit/delta/nkry_min/... -- see algebra/arnolditk.py's mpsarnoldi),
+    so a strict signature would turn previously-working calls like
+    get_gs_degeneracy(delta=...) into TypeErrors."""
+    known = ("H","krylovdim","restarts","tol","ntries")
+    passed = {k:v for k,v in kwargs.items() if k in known}
+    ignored = [k for k in kwargs if k not in known]
+    if ignored and self.verbose>0:
+        print("nhdmrg: ignoring keyword arguments",ignored,
+              "(not NH-DMRG parameters)")
+    e0,psil,psir = nhdmrg(self,**passed)
     self.computed_gs = True
     self.e0 = e0
-    self.wf0 = psir.copy()
+    # unit norm, matching the Arnoldi route's convention (MPS.normalize
+    # returns a fresh normalized copy, or None for a degenerate state)
+    wf0 = psir.normalize()
+    self.wf0 = wf0 if wf0 is not None else psir.copy()
     self.nh_left_wf = psil.copy() # left eigenvector, for biorthogonal use
     return self.e0

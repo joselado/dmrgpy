@@ -137,9 +137,17 @@ def _relabel_bra_local(T, chain, i, left_bra, right_bra):
     return bra_piece, left_bra, right_bra
 
 
-def _extend_left(L, left_bra, H, ket, i):
+def _extend_left(L, left_bra, H, ket, i, bra=None):
+    """One more site of the left environment <bra|H|ket>. `bra` defaults
+    to `ket` (the ordinary self-overlap environments of ground-state
+    DMRG); nhdmrg.py passes a *different* MPS as bra (its two-sided
+    environments), which works unchanged because the fidelity-truncated
+    left/right MPS share link Index objects, hitting the exact same
+    bra/ket link-identity collision _relabel_bra_local exists to solve."""
+    if bra is None:
+        bra = ket
     T = ket.A(i)
-    bra_piece, _, right_bra = _relabel_bra_local(T, ket, i, left_bra, None)
+    bra_piece, _, right_bra = _relabel_bra_local(bra.A(i), bra, i, left_bra, None)
     # contract_many(), not a left-to-right `piece = bra_piece*H.A(i)*T;
     # new_L = piece if L is None else L*piece` chain: that ordering builds
     # bra_piece*H.A(i)*T *before* L ever gets a chance to cancel away one
@@ -153,21 +161,23 @@ def _extend_left(L, left_bra, H, ket, i):
     return new_L, right_bra
 
 
-def _extend_right(R, right_bra, H, ket, i):
+def _extend_right(R, right_bra, H, ket, i, bra=None):
+    if bra is None:
+        bra = ket
     T = ket.A(i)
-    bra_piece, left_bra, _ = _relabel_bra_local(T, ket, i, None, right_bra)
+    bra_piece, left_bra, _ = _relabel_bra_local(bra.A(i), bra, i, None, right_bra)
     pieces = [p for p in (R, bra_piece, H.A(i), T) if p is not None]
     new_R = contract_many(pieces)
     return new_R, left_bra
 
 
-def _all_right_environments(H, ket):
+def _all_right_environments(H, ket, bra=None):
     """{i: (R_tensor_or_None, dangling_bra_link_or_None)} for i = N+1..2."""
     n = ket.length()
     env = {n + 1: (None, None)}
     for i in range(n, 1, -1):
         R_next, bra_next = env[i + 1]
-        env[i] = _extend_right(R_next, bra_next, H, ket, i)
+        env[i] = _extend_right(R_next, bra_next, H, ket, i, bra=bra)
     return env
 
 

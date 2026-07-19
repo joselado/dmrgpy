@@ -60,3 +60,14 @@ def vev_ed_v2_v3(chain, hamiltonian, observable, versions=(2, 3), **kwargs):
         results.append(chain.vev(observable, mode="DMRG", **kwargs))
 
     return tuple(results)
+
+
+def setup_backend(chain, itensor_version):
+    """Switch `chain` onto the requested DMRG backend: itensor_version 2
+    or 3 selects the corresponding compiled C++ extension, "python" the
+    pure-Python pyitensor engine. Shared by the multi-backend test files
+    (each used to hand-roll this same dispatch locally)."""
+    if itensor_version == "python":
+        chain.setup_python()
+    else:
+        chain.setup_cpp(version=itensor_version)

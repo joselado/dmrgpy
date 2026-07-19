@@ -30,11 +30,7 @@ def _heisenberg_chain(n=4):
     return sc
 
 
-def _setup_backend(sc, itensor_version):
-    if itensor_version == "python":
-        sc.setup_python()
-    else:
-        sc.setup_cpp(itensor_version)
+from _helpers import setup_backend as _setup_backend
 
 
 def test_dynamical_correlator_peaks_at_excitation_gap():

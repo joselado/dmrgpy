@@ -24,6 +24,8 @@ import pytest
 
 from dmrgpy import fermionchain, spinchain, cppext
 
+from _helpers import setup_backend
+
 VERSIONS = [
     pytest.param(2, marks=pytest.mark.skipif(
         not cppext.available(2),
@@ -33,13 +35,6 @@ VERSIONS = [
         reason="requires the compiled mpscpp3 (ITensor v3) extension")),
     pytest.param("python", id="python"),
 ]
-
-
-def setup_backend(chain, version):
-    if version == "python":
-        chain.setup_python()
-    else:
-        chain.setup_cpp(version=version)
 
 
 def nh_fermion_chain(n, version):
