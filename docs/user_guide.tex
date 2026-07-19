@@ -362,7 +362,11 @@ terminates early once the bond-dimension truncation
 past that floor the iteration cannot improve the tracked best solution
 any further (the truncated recurrence in fact diverges), so the solver
 returns the best correction vector seen instead of burning the full
-\texttt{cvm\_nit} iteration budget. Neither feature changes the answer.
+\texttt{cvm\_nit} iteration budget (\texttt{cvm\_patience} sets how
+many iterations without meaningful improvement conclude the floor is
+reached, and \texttt{cvm\_blowup} how far past the best residual the
+running one may diverge before stopping). Neither feature changes the
+answer.
 Each point reports its CG iteration count and best residual; if that
 residual stalls far above \texttt{cvm\_tol}, the correction vector is
 not converged at this bond dimension and the fix is a larger

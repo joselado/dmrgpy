@@ -69,9 +69,15 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     # reference) makes the cache self-invalidating whenever a fresh
     # Chain is created (setup_cpp/setup_python/__deepcopy__); comparing
     # the to_terms() output (not the MultiOperator identity) catches
-    # in-place mutation of self.hamiltonian.
+    # in-place mutation of self.hamiltonian. Every solver parameter that
+    # a re-run would pick up (maxm, nsweeps, cutoff, noise, and the MPO
+    # bond dimension the Hamiltonian is built with) is part of the key:
+    # the session's energy cache survives a skipped re-send, so a user
+    # bumping any of these between bare gs_energy() calls must get a
+    # fresh solve, not the cached energy computed under the old params.
     terms = self.hamiltonian.to_terms()
-    key = (max(self.maxm,self.mpomaxm),terms)
+    key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
+           max(self.maxm,self.mpomaxm),terms)
     cache = getattr(self,'_session_ham_cache',None)
     if cache is None or cache[0] is not self._session or cache[1]!=key:
         self._session.set_hamiltonian(terms)

@@ -247,9 +247,11 @@ The session caches its ground-state energy and (for KPM) both band
 edges, but \texttt{Chain::set\_hamiltonian} unconditionally invalidates
 those caches --- so the Python side
 (\texttt{groundstate.py::gs\_energy\_single}) only re-sends the
-Hamiltonian when its \texttt{to\_terms()} output (or the effective MPO
-bond dimension, or the session object itself) actually changed since
-the last send (\texttt{\_session\_ham\_cache}). Repeated calculations
+Hamiltonian when its \texttt{to\_terms()} output, any solver parameter
+a re-run would pick up (\texttt{maxm}, \texttt{nsweeps},
+\texttt{cutoff}, \texttt{noise}, the effective MPO bond dimension), or
+the session object itself actually changed since the last send
+(\texttt{\_session\_ham\_cache}). Repeated calculations
 on an unchanged Hamiltonian (e.g.\ successive
 \texttt{get\_dynamical\_correlator} calls, each of which re-verifies
 the ground state) then hit the session's caches instead of re-running

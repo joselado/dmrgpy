@@ -18,10 +18,9 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     cold start reached, shifting the correlator by ~50%), so it is
     deliberately not done.
     """
-    if not self.computed_gs: self.get_gs() # compute ground state
     AB = operatornames.str2MO(self,name,i=i,j=j) # resolve operators once
     A,B = AB[0],AB[1]
-    wf0 = self.get_gs() # ground state (cached; also sets self.e0)
+    wf0 = self.get_gs() # computes or returns the cached GS; also sets self.e0
     # sweep parameters used both by B*wf0 below and by every CG solve
     self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
@@ -29,7 +28,7 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     b = (-delta)*(B*wf0) # -eta*B|GS>, identical for every frequency
     out = [] # empty list
     for e in es: # loop over energies
-        o,xc,nit,res = cvm_correction_vector(self,A,B,e,delta,
+        o,_,nit,res = cvm_correction_vector(self,A,B,e,delta,
                 tol=self.cvm_tol,max_it=int(self.cvm_nit),b=b)
         print("CVM in E = ",e," CG iterations = ",nit," residual = ",res)
         out.append(o) # store
@@ -45,25 +44,6 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
 
 
 
-
-
-def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
-    """
-    Return the dynamical correlator for a single energy/frequency using
-    the Correction Vector Method, computed entirely in Python (see
-    cvm_correction_vector below) rather than via the in-process pybind11
-    extension's Chain::cvm_dynamical_correlator/bicstab (which is a hand-
-    rolled, unguarded BiCGSTAB on the non-Hermitian z-H operator, prone to
-    breakdown/blow-up for small eta -- see cvm_correction_vector's
-    docstring). Parameter names differ from the underlying convention
-    (omega, eta, energy) to match this file's existing naming: e -> omega,
-    delta -> eta, self.e0 -> energy.
-    """
-    name = operatornames.str2MO(self,name,**kwargs)
-    A = name[0]
-    B = name[1]
-    return cvm_correction_vector(self,A,B,e,delta,
-            tol=self.cvm_tol,max_it=int(self.cvm_nit))[0]
 
 
 def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
@@ -112,7 +92,13 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
     self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.cvm_maxm,self.mpomaxm))
-    Hshift = self.toMPO(self.hamiltonian-(self.e0+omega)) # (H-omega-E0), built once
+    # (H-omega-E0) as an MPO, rebuilt per omega: measured at ~1 ms, i.e.
+    # negligible next to a single CG iteration (~2 MPO applications,
+    # ~0.03-0.1 s at 12-20 sites). Applying the shift at MPS level
+    # instead (HmE0*v - omega*v, one shared MPO) was benchmarked ~2x
+    # SLOWER per application (extra truncated sums), so don't "optimize"
+    # this line by hoisting it out of the frequency loop.
+    Hshift = self.toMPO(self.hamiltonian-(self.e0+omega))
     def applyA(v): return Hshift*(Hshift*v) + (eta*eta)*v # (H-omega-E0)^2+eta^2
     if b is None: b = (-eta)*(B*wf0) # -eta*B|GS>
     xc = b # initial guess, matches the old bicstab's own x=b start
@@ -120,21 +106,27 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
     p = r
     rs_old = r.dot(r).real # ||r||^2, real since A is Hermitian PD
     best_xc,best_res = xc,np.sqrt(abs(rs_old))
-    # Early-termination guards around the best-residual tracking. The
-    # MPS truncation (maxdim=cvm_maxm) puts a floor on the reachable
-    # residual; once CG hits it, the recurrence doesn't just stall, it
-    # actively diverges (confirmed directly on a 20-site Heisenberg
-    # chain at cvm_maxm=30: best_res froze at ~6e-2 within the first
-    # ~hundred iterations while the running residual grew monotonically
-    # to ~3e4 by iteration 1000). Every iteration past that point is
-    # pure waste -- best_xc never changes again -- so stop (a) after
+    # Early-termination guards. The MPS truncation (maxdim=cvm_maxm)
+    # puts a floor on the reachable residual; once CG hits it, the
+    # recurrence doesn't just stall, it actively diverges (confirmed
+    # directly on a 20-site Heisenberg chain at cvm_maxm=30: best_res
+    # froze within the first ~hundred iterations while the running
+    # residual grew monotonically to ~3e4 by iteration 1000), so
+    # continuing to iterate is almost always pure waste. Stop (a) after
     # `patience` iterations without a meaningful (>0.1% relative)
     # improvement of the best residual, or (b) as soon as the running
-    # residual has blown up far past the best one. Neither guard changes
-    # the returned result: it is the same best_xc the full max_it run
-    # would return, just without the dead iterations after the floor.
-    patience = 50
-    blowup = 100.0
+    # residual has blown up far past the best one. The best-vector
+    # tracking itself stays plain (any improvement updates best_xc, the
+    # 0.1% threshold only gates the patience counter), so the returned
+    # vector is the best iterate actually visited. In every regime
+    # traced so far the guards return the same vector the full max_it
+    # run would; a residual that plateaus for more than `patience`
+    # iterations and only then meaningfully improves would be cut short
+    # -- if that is ever suspected, widen self.cvm_patience /
+    # self.cvm_blowup (manybodychain.py) rather than editing this loop.
+    patience = int(getattr(self,'cvm_patience',50))
+    blowup = float(getattr(self,'cvm_blowup',100.0))
+    mark = best_res # best residual at the last *meaningful* improvement
     since_best = 0
     niter = 0
     for k in range(max_it):
@@ -146,8 +138,9 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
         rs_new = r.dot(r).real
         res = np.sqrt(abs(rs_new))
         niter = k+1
-        if res<best_res*(1.-1e-3): # meaningful improvement of the floor
-            best_xc,best_res = xc,res # guard against truncation-driven non-monotonicity
+        if res<best_res: best_xc,best_res = xc,res # guard against truncation-driven non-monotonicity
+        if res<mark*(1.-1e-3): # meaningful improvement -> reset patience
+            mark = res
             since_best = 0
         else:
             since_best += 1

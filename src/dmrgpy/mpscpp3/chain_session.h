@@ -665,16 +665,19 @@ class Chain
     dmrg_args() const { return Args("Quiet",!verbose_,"Silent",!verbose_); }
 
     Sweeps
-    make_sweeps() const
+    make_sweeps(int ns, int maxdim) const
         {
-        auto sweeps = Sweeps(nsweeps_);
-        sweeps.maxdim() = maxm_;
+        auto sweeps = Sweeps(ns);
+        sweeps.maxdim() = maxdim;
         sweeps.cutoff() = cutoff_;
         sweeps.noise() = noise_;
         // noise only in the first half, mirrors get_sweeps.h
-        for (int i=nsweeps_/2;i<nsweeps_;i++) sweeps.setnoise(i,0.0);
+        for (int i=ns/2;i<ns;i++) sweeps.setnoise(i,0.0);
         return sweeps;
         }
+
+    Sweeps
+    make_sweeps() const { return make_sweeps(nsweeps_,maxm_); }
 
     double
     minimum_energy()
@@ -711,13 +714,7 @@ class Chain
             // into more moments; the residual risk of a too-tight bound
             // is caught loudly by kpm_moments_*'s divergence guard.
             auto psi = default_mps();
-            int ns = std::min(nsweeps_,5);
-            auto sweeps = Sweeps(ns);
-            sweeps.maxdim() = std::min(maxm_,20);
-            sweeps.cutoff() = cutoff_;
-            sweeps.noise() = noise_;
-            // noise only in the first half, mirrors make_sweeps()
-            for (int i=ns/2;i<ns;i++) sweeps.setnoise(i,0.0);
+            auto sweeps = make_sweeps(std::min(nsweeps_,5),std::min(maxm_,20));
             auto negH = (-1.0)*H_;
             bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args());
             have_bandwidth_max_ = true;
@@ -884,6 +881,10 @@ class Chain
         auto am = 1.0*vi;
         auto a = apply_mpo(m,v,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
         auto ap = 1.0*a;
+        // legitimate moments <vj|T_k|vi> are bounded by ||vi||*||vj||
+        // (NOT by the zeroth moment <vj|vi>, which can be ~0 for a
+        // near-orthogonal cross-correlator pair) -- see check_kpm_moment
+        double bound = std::sqrt(innerC(vi,vi).real()*innerC(vj,vj).real());
         out.push_back(innerC(vj,v));
         out.push_back(innerC(vj,a));
         for (int i=0;i<n;i++)
@@ -891,7 +892,7 @@ class Chain
             ap = apply_mpo(m,a,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
             ap = sum(2.0*ap,-1.0*am,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
             out.push_back(innerC(vj,ap));
-            check_kpm_moment(out);
+            check_kpm_moment(out,bound);
             am = 1.0*a;
             a = 1.0*ap;
             }
@@ -909,6 +910,8 @@ class Chain
         auto ap = 1.0*a;
         Cplx mu0 = innerC(vi,vi);
         Cplx mu1 = innerC(vi,a);
+        // here vi==vj, so the moment bound ||vi||*||vj|| is just mu0
+        double bound = std::abs(mu0);
         out.push_back(mu0);
         out.push_back(mu1);
         for (int i=0;i<n/2;i++)
@@ -919,7 +922,7 @@ class Chain
             Cplx bk1 = 2.0*innerC(a,ap) - mu1;
             out.push_back(bk);
             out.push_back(bk1);
-            check_kpm_moment(out);
+            check_kpm_moment(out,bound);
             am = 1.0*a;
             a = 1.0*ap;
             }
@@ -927,17 +930,22 @@ class Chain
         }
 
     // Chebyshev moments of a correctly scaled Hamiltonian (spectrum
-    // inside [-1,1]) are bounded by the zeroth moment; exponential
-    // growth beyond that means the scaled spectrum leaked outside
-    // [-1,1] (band-edge estimate too tight for the chosen kpm_scale --
-    // see maximum_energy()) and every subsequent moment is garbage, so
-    // fail loudly instead of returning a silently wrong correlator.
+    // inside [-1,1]) satisfy |<vj|T_k|vi>| <= ||vi||*||vj|| = `bound`
+    // (passed by the caller; for the auto-correlator path that is just
+    // the zeroth moment, for the cross path it is NOT -- <vj|vi> can be
+    // ~0 for near-orthogonal pairs while the moments stay O(bound)).
+    // Exponential growth beyond the bound means the scaled spectrum
+    // leaked outside [-1,1] (band-edge estimate too tight for the
+    // chosen kpm_scale) and every subsequent moment is garbage, so fail
+    // loudly instead of returning a silently wrong correlator. The +1.0
+    // keeps the threshold meaningful when both norms are tiny.
     static void
-    check_kpm_moment(std::vector<std::complex<double>> const& out)
+    check_kpm_moment(std::vector<std::complex<double>> const& out, double bound)
         {
-        if (std::abs(out.back()) > 1e3*(std::abs(out[0])+1.0))
+        if (std::abs(out.back()) > 1e3*(bound+1.0))
             Error("KPM moments diverging: scaled spectrum outside [-1,1] "
-                  "(band-edge estimate too tight for this kpm_scale)");
+                  "(band-edge estimate too tight; increasing kpm_scale "
+                  "widens the safety margin)");
         }
 
     std::vector<std::complex<double>>

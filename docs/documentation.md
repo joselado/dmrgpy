@@ -185,9 +185,10 @@ KPM/CVM dynamical correlators, `correlation_matrix`, `reduced_dm`,
 The session caches its ground-state energy and (for KPM) both band
 edges, but `Chain::set_hamiltonian` unconditionally invalidates those
 caches — so the Python side (`groundstate.py::gs_energy_single`) only
-re-sends the Hamiltonian when its `to_terms()` output (or the effective
-MPO bond dimension, or the session object itself) actually changed since
-the last send (`_session_ham_cache`). Repeated calculations on an
+re-sends the Hamiltonian when its `to_terms()` output, any solver
+parameter a re-run would pick up (`maxm`, `nsweeps`, `cutoff`, `noise`,
+the effective MPO bond dimension), or the session object itself actually
+changed since the last send (`_session_ham_cache`). Repeated calculations on an
 unchanged Hamiltonian (e.g. successive `get_dynamical_correlator` calls,
 each of which re-verifies the ground state) then hit the session's
 caches instead of re-running warm DMRG sweeps and band-edge solves. Code
