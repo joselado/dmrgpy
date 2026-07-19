@@ -77,6 +77,12 @@ struct TimeEvolutionResult
     MPS final_wf;
     };
 
+struct NHDMRGResult
+    {
+    std::complex<double> energy;
+    MPS psil, psir;
+    };
+
 class Chain
     {
     public:
@@ -180,6 +186,202 @@ class Chain
             out.energies.push_back(innerC(wf,H_,wf).real());
             out.wavefunctions.push_back(wf);
             }
+        return out;
+        }
+
+    // Non-Hermitian DMRG (NH-DMRG), mpscpp3-only: variationally optimizes a
+    // biorthogonal left/right eigenpair (<psil|, |psir>) of a non-Hermitian
+    // H, targeting the eigenvalue with the smallest real part (dmrgpy's
+    // "ground state" convention for non-Hermitian Hamiltonians, matching
+    // mpsalgebra's Arnoldi mode="GS"). Port of ITensorNHDMRG.jl
+    // (https://github.com/tipfom/ITensorNHDMRG.jl) in its default
+    // configuration: the "onesided" local solver (independent Arnoldi
+    // solves of A|x>=lambda|x> on the right block and
+    // Adag|y>=conj(lambda)|y> on the left block -- ordering by real part
+    // is identical for both spectra, so the two solves target the same
+    // eigenpair) combined with the "fidelity" truncation of Yamamoto et
+    // al., Phys. Rev. B 105, 205125: both MPS are truncated with the
+    // *same* isometry, obtained from the hermitian average
+    // rho=(rho_l+rho_r)/2 of the left and right two-site reduced density
+    // matrices. That shared isometry is what keeps psil and psir on
+    // identical site *and* link Index objects throughout the sweep, which
+    // in turn makes the projected two-site eigenproblem's input and
+    // output spaces literally the same index space (the alternative
+    // "biorthoblock" truncation of arXiv:2401.15000 needs a non-unitary
+    // Schur/Sylvester transform per bond and is not ported). The adjoint
+    // Hamiltonian arrives as its own term list, built on the Python side
+    // via MultiOperator.get_dagger(), rather than reconstructing
+    // dag(swapPrime(H)) index-by-index here -- it reuses build_mpo
+    // unchanged and sidesteps v3's prime-level conventions entirely.
+    // Starting both MPS from the *same* normalized state makes the pair
+    // trivially biorthonormal (<psil|psir>=1 exactly), replacing the
+    // reference's initial biorthogonalize! pass (a no-op for identical
+    // inputs); the two states then diverge from the first bond update on.
+    NHDMRGResult
+    nhdmrg(std::vector<MOTerm> const& terms_h,
+           std::vector<MOTerm> const& terms_hadj,
+           int krylovdim=20, int restarts=2)
+        {
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto HA = build_mpo(sites_,terms_hadj,mpomaxm_);
+        int N = sites_.length();
+        // always a fresh random start (never wf0_): the non-Hermitian
+        // energy is not a variational bound, so a rare stalled run can
+        // only be detected by the caller's eigen-residual check and cured
+        // by re-running -- which requires every run to draw its own
+        // random initial state (see nhdmrg.py's retry loop)
+        MPS psir = default_mps();
+        psir.position(1);
+        psir.normalize();
+        MPS psil = psir;
+        // Two-sided environments (bra psil', ket psir for H; roles swapped
+        // for the adjoint problem), one tensor per site; a
+        // default-constructed ITensor stands for the scalar 1 past the
+        // chain ends. L[i] covers sites 1..i, R[i] covers i..N.
+        std::vector<ITensor> Lh(N+2), Rh(N+2), La(N+2), Ra(N+2);
+        auto make_env = [&](std::vector<ITensor>& E, MPO const& W,
+                            MPS const& ket, MPS const& bra, int i, int prev)
+            {
+            auto T = E[prev] ? E[prev]*ket.A(i) : ket.A(i);
+            T *= W.A(i);
+            T *= dag(prime(bra.A(i)));
+            E[i] = T;
+            };
+        for (int i=N;i>=3;--i)
+            {
+            make_env(Rh,H,psir,psil,i,i+1);
+            make_env(Ra,HA,psil,psir,i,i+1);
+            }
+        // Projected two-site operator at bond b: env legs and MPO output
+        // legs all come out primed, so a single noPrime() maps the result
+        // back onto the input's own index space (valid because psil and
+        // psir share link indices -- see the fidelity note above).
+        auto apply_proj = [&](MPO const& W, std::vector<ITensor> const& L,
+                              std::vector<ITensor> const& R, int b, ITensor v)
+            {
+            if (L[b-1]) v *= L[b-1];
+            v *= W.A(b);
+            v *= W.A(b+1);
+            if (R[b+2]) v *= R[b+2];
+            v.noPrime();
+            return v;
+            };
+        Cplx energy = 0;
+        bool have_energy = false;
+        for (int sw=1;sw<=nsweeps_;++sw)
+            {
+            // mirrors make_sweeps(): noise only in the first half-schedule
+            double noise = (sw<=nsweeps_/2) ? noise_ : 0.0;
+            for (int ha=1;ha<=2;++ha)
+            for (int bi=0;bi<N-1;++bi)
+                {
+                int b = (ha==1) ? 1+bi : N-1-bi;
+                auto thl = psil.A(b)*psil.A(b+1);
+                auto thr = psir.A(b)*psir.A(b+1);
+                // smallest real part, with Re-degenerate candidates
+                // tie-broken toward the previous bond's eigenvalue (see
+                // arnoldi_smallest_real's Sel comment)
+                auto er_thr = arnoldi_smallest_real(
+                    [&](ITensor const& v) { return apply_proj(H,Lh,Rh,b,v); },
+                    thr,krylovdim,restarts,
+                    have_energy ? Sel::SRTieBreak : Sel::SR,energy);
+                // anchor the adjoint solve to the right solve's eigenvalue
+                auto el_thl = arnoldi_smallest_real(
+                    [&](ITensor const& v) { return apply_proj(HA,La,Ra,b,v); },
+                    thl,krylovdim,restarts,
+                    Sel::Closest,std::conj(er_thr.first));
+                energy = er_thr.first;
+                have_energy = true;
+                thr = er_thr.second;
+                thl = el_thl.second;
+                thl /= norm(thl);
+                thr /= norm(thr);
+                // rescale so <thl|thr> = 1 (split between the two states,
+                // with the reference's separate real branch: for a real
+                // negative overlap the complex branch's sqrt(conj(z))
+                // lands on the wrong side of std::sqrt's branch cut and
+                // would leave the overlap at -1 instead of +1)
+                auto ov = eltC(dag(thl)*thr);
+                if (std::abs(ov)>1e-12)
+                    {
+                    if (std::abs(ov.imag())<1e-14*std::abs(ov))
+                        {
+                        double sq = std::sqrt(std::abs(ov.real()));
+                        thl /= sq;
+                        thr /= (ov.real()<0 ? -sq : sq);
+                        }
+                    else
+                        {
+                        thl /= std::sqrt(std::conj(ov));
+                        thr /= std::sqrt(ov);
+                        }
+                    }
+                // fidelity truncation: hermitian average of the left and
+                // right reduced density matrices over the indices kept on
+                // the orthogonality-moving side of the bond
+                auto keep = (ha==1) ? commonInds(psil.A(b),thl)
+                                    : commonInds(psil.A(b+1),thl);
+                auto rl = thl;
+                auto rr = thr;
+                for (auto const& I : keep) { rl = prime(rl,I); rr = prime(rr,I); }
+                rl *= dag(thl);
+                rr *= dag(thr);
+                auto rho = 0.5*(rl+rr);
+                if (noise>0)
+                    {
+                    // reference's noiseterm(): cross term between the left
+                    // and right blocks, hermitized here since rho feeds a
+                    // hermitian eigensolver (the Julia fidelity path adds
+                    // it unhermitized and relies on eigen(ishermitian=true)
+                    // only reading one triangle)
+                    ITensor X = (ha==1) ? H.A(b) : H.A(b+1);
+                    if (ha==1 && Lh[b-1]) X = Lh[b-1]*X;
+                    if (ha==2 && Rh[b+2]) X = X*Rh[b+2];
+                    auto nt = (X*thl)*dag(noPrime(X*thr));
+                    rho += (noise/2.0)*(nt+dag(swapPrime(nt,0,1)));
+                    }
+                ITensor U,D;
+                diagPosSemiDef(rho,U,D,{"MaxDim",maxm_,"Cutoff",cutoff_,
+                                        "Tags","Link,NH"});
+                if (ha==1)
+                    {
+                    psil.ref(b) = U;
+                    psil.ref(b+1) = dag(U)*thl;
+                    psir.ref(b) = U;
+                    psir.ref(b+1) = dag(U)*thr;
+                    if (b<N-1)
+                        {
+                        make_env(Lh,H,psir,psil,b,b-1);
+                        make_env(La,HA,psil,psir,b,b-1);
+                        }
+                    }
+                else
+                    {
+                    psil.ref(b+1) = U;
+                    psil.ref(b) = thl*dag(U);
+                    psir.ref(b+1) = U;
+                    psir.ref(b) = thr*dag(U);
+                    if (b>1)
+                        {
+                        make_env(Rh,H,psir,psil,b+1,b+2);
+                        make_env(Ra,HA,psil,psir,b+1,b+2);
+                        }
+                    }
+                }
+            if (verbose_)
+                printfln("NH-DMRG sweep %d energy = %.12f + %.12f i",
+                         sw,energy.real(),energy.imag());
+            }
+        // both sweeps end at bond 1 with ortho "right": center at site 1
+        psil.leftLim(0); psil.rightLim(2);
+        psir.leftLim(0); psir.rightLim(2);
+        NHDMRGResult out;
+        // definitive energy: the biorthogonal Rayleigh quotient of the
+        // final pair (the last local eigenvalue tracks it but lags half a
+        // bond update behind)
+        out.energy = innerC(psil,H,psir)/innerC(psil,psir);
+        out.psil = psil;
+        out.psir = psir;
         return out;
         }
 
@@ -659,6 +861,116 @@ class Chain
         auto out = applyMPO(K,x,x0,args);
         out.noPrime(TagSet("Site"));
         return out;
+        }
+
+    // Restarted Arnoldi on a matrix-free operator over ITensor "vectors"
+    // (the two-site blocks of nhdmrg()): builds a krylovdim-step Krylov
+    // space with modified Gram-Schmidt (plus one re-orthogonalization
+    // pass), diagonalizes the small Hessenberg matrix with ITensor's
+    // dense non-hermitian eigen(), keeps the Ritz pair whose eigenvalue
+    // has the smallest real part, and restarts from that Ritz vector.
+    // This is the C++ stand-in for the reference's KrylovKit
+    // eigsolve(...; ishermitian=false, which=:SR) local solver -- like
+    // there, it runs at low accuracy per bond (the outer DMRG sweeps do
+    // the actual converging, so krylovdim/restarts stay small).
+    //
+    // Ritz-value selection (`sel`):
+    //  - SR: smallest real part (the reference's :SR).
+    //  - Closest: closest to `target`. nhdmrg() uses this for the adjoint
+    //    (left-eigenvector) solve, with target=conj(lambda_right): the
+    //    reference selects :SR independently on both sides, but when
+    //    several eigenvalues share the smallest real part (e.g. a complex-
+    //    conjugate pair of a PT-symmetric Hamiltonian, where Re-ordering
+    //    cannot distinguish a+bi from a-bi) the two independent solves can
+    //    lock onto *different* members of that degenerate set -- and the
+    //    left/right vectors of different eigenstates are mutually
+    //    biorthogonal, so <thl|thr> collapses to ~0 and the sweep never
+    //    converges (confirmed directly on a staggered-imaginary-field XX
+    //    chain). Anchoring the left solve to the right solve's eigenvalue
+    //    pins both onto the same eigenpair.
+    //  - SRTieBreak: smallest real part, but among Ritz values whose real
+    //    parts are degenerate within a small tolerance, the one closest to
+    //    `target` (the previous bond's eigenvalue). Used by the right
+    //    solve from the second bond on, so a Re-degenerate +-Im pair
+    //    cannot make consecutive bond solves flip branch mid-sweep (the
+    //    same failure mode as above, one level up: each flip re-targets
+    //    the truncation onto a different eigenstate, and the sweep stalls
+    //    at a non-eigenstate -- also confirmed on the same XX chain).
+    enum class Sel { SR, Closest, SRTieBreak };
+    template <typename Fn>
+    std::pair<Cplx,ITensor>
+    arnoldi_smallest_real(Fn&& A, ITensor x0, int krylovdim, int restarts,
+                          Sel sel=Sel::SR, Cplx target=0) const
+        {
+        Cplx lambda = 0;
+        for (int r=0;r<restarts;++r)
+            {
+            double nx = norm(x0);
+            if (nx<1e-14) break; // degenerate start, keep whatever we have
+            x0 /= nx;
+            std::vector<ITensor> V;
+            V.push_back(x0);
+            std::vector<std::vector<Cplx>> h(krylovdim+1,
+                    std::vector<Cplx>(krylovdim,Cplx(0,0)));
+            int m = 0;
+            for (int j=0;j<krylovdim;++j)
+                {
+                auto w = A(V.at(j));
+                for (int i=0;i<=j;++i)
+                    {
+                    auto c = eltC(dag(V.at(i))*w);
+                    h.at(i).at(j) = c;
+                    w -= c*V.at(i);
+                    }
+                for (int i=0;i<=j;++i)
+                    {
+                    auto c = eltC(dag(V.at(i))*w);
+                    h.at(i).at(j) += c;
+                    w -= c*V.at(i);
+                    }
+                m = j+1;
+                double nw = norm(w);
+                h.at(j+1).at(j) = nw;
+                if (nw<1e-13) break; // happy breakdown: invariant subspace
+                if (j+1<krylovdim) V.push_back(w/nw);
+                }
+            auto a = Index(m,"a");
+            auto Hm = ITensor(prime(a),a);
+            for (int i=0;i<m;++i)
+            for (int j=0;j<m;++j)
+                if (i<=j+1) Hm.set(prime(a)(i+1),a(j+1),h.at(i).at(j));
+            ITensor W,D;
+            eigen(Hm,W,D);
+            auto c = commonIndex(W,D);
+            int kbest = 1;
+            Cplx ebest = 0;
+            for (int k=1;k<=m;++k)
+                {
+                auto ek = eltC(D,c(k),prime(c)(k));
+                bool better = false;
+                if (sel==Sel::Closest)
+                    better = std::abs(ek-target)<std::abs(ebest-target);
+                else if (sel==Sel::SRTieBreak)
+                    {
+                    double degtol = 1e-6*(1.0+std::abs(ebest.real()));
+                    if (ek.real()<ebest.real()-degtol) better = true;
+                    else if (ek.real()<ebest.real()+degtol)
+                        better = std::abs(ek-target)<std::abs(ebest-target);
+                    }
+                else better = ek.real()<ebest.real();
+                if (k==1 || better) { ebest = ek; kbest = k; }
+                }
+            ITensor xnew;
+            for (int i=0;i<m;++i)
+                {
+                auto coef = eltC(W,a(i+1),c(kbest));
+                if (!xnew) xnew = coef*V.at(i);
+                else xnew += coef*V.at(i);
+                }
+            lambda = ebest;
+            x0 = xnew;
+            }
+        return {lambda,x0};
         }
 
     Args

@@ -186,6 +186,27 @@ class Chain:
     def build_operator(self, terms):
         return to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
 
+    def nhdmrg(self, terms_h, terms_hadj, krylovdim=20, restarts=2):
+        """Non-Hermitian DMRG: optimize a biorthogonal left/right
+        eigenpair of the non-Hermitian operator given by terms_h,
+        targeting the eigenvalue with smallest real part; terms_hadj must
+        be the adjoint operator's terms (MultiOperator.get_dagger() on
+        the Python side). Port of mpscpp3/chain_session.h's Chain::nhdmrg
+        (the annotated original) -- see nhdmrg.py in this package.
+        Returns (energy, psil, psir)."""
+        from .nhdmrg import nhdmrg as _nhdmrg
+        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h),
+                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        HA = to_mpo(AutoMPO.from_terms(self.sites, terms_hadj),
+                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        # fresh random start every run (never wf0): stalled runs are
+        # detected by the caller's eigen-residual check and re-drawn
+        # (see dmrgpy's nhdmrg.py retry loop)
+        psi0 = self._default_mps()
+        sweeps = self._make_sweeps()
+        return _nhdmrg(H, HA, psi0, sweeps, krylovdim=krylovdim,
+                       restarts=restarts, quiet=not self.verbose)
+
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)
 

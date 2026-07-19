@@ -47,6 +47,17 @@ struct TimeEvolutionResult
     MPS final_wf;
     };
 
+// Result of nhdmrg(): the smallest-real-part eigenvalue together with the
+// biorthogonal left/right eigenvector pair (see mpscpp3/chain_session.h's
+// Chain::nhdmrg for the algorithm documentation -- unlike everything else
+// in this file, NH-DMRG originated on the v3 backend and was back-ported
+// here, so the v3 copy carries the reference comments).
+struct NHDMRGResult
+    {
+    std::complex<double> energy;
+    MPS psil, psir;
+    };
+
 class Chain
     {
     public:
@@ -181,6 +192,170 @@ class Chain
             out.energies.push_back(overlap(wf,H_,wf));
             out.wavefunctions.push_back(wf);
             }
+        return out;
+        }
+
+    // Non-Hermitian DMRG. Back-port of mpscpp3/chain_session.h's
+    // Chain::nhdmrg (see the long comment there for the algorithm and its
+    // two deliberate deviations from the ITensorNHDMRG.jl reference; the
+    // v3 copy is the annotated original) to the ITensor v2 API. The only
+    // v2-specific differences, all mechanical:
+    //  - innerC/eltC/noPrime/psi.ref() become overlapC/.cplx()/noprime/
+    //    psi.Aref(); normalize() is the free function.
+    //  - the truncated hermitian diagonalization is diagHermitian with
+    //    "Maxm" (v2 has no diagPosSemiDef, but its diagHermitian truncates
+    //    with the same Maxm/Cutoff args -- it is what v2's own
+    //    exactApplyMPO density-matrix step uses, see mpoalgs.cc).
+    //  - the "keep" index list for the truncation density matrix is built
+    //    explicitly from the site index and bond link (v2 has no
+    //    commonInds(ITensor,ITensor) helper).
+    //  - the random start is v2's own MPS(sites_) (a random bond-dim-1
+    //    product state, the same start every other v2 DMRG here uses);
+    //    the two-site update grows the bond dimension from there.
+    NHDMRGResult
+    nhdmrg(std::vector<MOTerm> const& terms_h,
+           std::vector<MOTerm> const& terms_hadj,
+           int krylovdim=20, int restarts=2)
+        {
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto HA = build_mpo(sites_,terms_hadj,mpomaxm_);
+        int N = sites_.N();
+        // fresh random start every run (never wf0_): stalled runs are
+        // detected by the caller's eigen-residual check and re-drawn
+        // (see nhdmrg.py's retry loop)
+        MPS psir(sites_);
+        psir.position(1);
+        normalize(psir);
+        MPS psil = psir;
+        std::vector<ITensor> Lh(N+2), Rh(N+2), La(N+2), Ra(N+2);
+        auto make_env = [&](std::vector<ITensor>& E, MPO const& W,
+                            MPS const& ket, MPS const& bra, int i, int prev)
+            {
+            auto T = E[prev] ? E[prev]*ket.A(i) : ket.A(i);
+            T *= W.A(i);
+            T *= dag(prime(bra.A(i)));
+            E[i] = T;
+            };
+        for (int i=N;i>=3;--i)
+            {
+            make_env(Rh,H,psir,psil,i,i+1);
+            make_env(Ra,HA,psil,psir,i,i+1);
+            }
+        auto apply_proj = [&](MPO const& W, std::vector<ITensor> const& L,
+                              std::vector<ITensor> const& R, int b, ITensor v)
+            {
+            if (L[b-1]) v *= L[b-1];
+            v *= W.A(b);
+            v *= W.A(b+1);
+            if (R[b+2]) v *= R[b+2];
+            v.noprime();
+            return v;
+            };
+        Cplx energy = 0;
+        bool have_energy = false;
+        for (int sw=1;sw<=nsweeps_;++sw)
+            {
+            // mirrors make_sweeps(): noise only in the first half-schedule
+            double noise = (sw<=nsweeps_/2) ? noise_ : 0.0;
+            for (int ha=1;ha<=2;++ha)
+            for (int bi=0;bi<N-1;++bi)
+                {
+                int b = (ha==1) ? 1+bi : N-1-bi;
+                auto thl = psil.A(b)*psil.A(b+1);
+                auto thr = psir.A(b)*psir.A(b+1);
+                auto er_thr = arnoldi_smallest_real(
+                    [&](ITensor const& v) { return apply_proj(H,Lh,Rh,b,v); },
+                    thr,krylovdim,restarts,
+                    have_energy ? Sel::SRTieBreak : Sel::SR,energy);
+                auto el_thl = arnoldi_smallest_real(
+                    [&](ITensor const& v) { return apply_proj(HA,La,Ra,b,v); },
+                    thl,krylovdim,restarts,
+                    Sel::Closest,std::conj(er_thr.first));
+                energy = er_thr.first;
+                have_energy = true;
+                thr = er_thr.second;
+                thl = el_thl.second;
+                thl /= norm(thl);
+                thr /= norm(thr);
+                auto ov = (dag(thl)*thr).cplx();
+                if (std::abs(ov)>1e-12)
+                    {
+                    if (std::abs(ov.imag())<1e-14*std::abs(ov))
+                        {
+                        double sq = std::sqrt(std::abs(ov.real()));
+                        thl /= sq;
+                        thr /= (ov.real()<0 ? -sq : sq);
+                        }
+                    else
+                        {
+                        thl /= std::sqrt(std::conj(ov));
+                        thr /= std::sqrt(ov);
+                        }
+                    }
+                // "keep" indices: the block whose new basis is being formed
+                std::vector<Index> keep;
+                if (ha==1)
+                    {
+                    keep.push_back(sites_.si(b));
+                    if (b>1) keep.push_back(commonIndex(psil.A(b-1),psil.A(b)));
+                    }
+                else
+                    {
+                    keep.push_back(sites_.si(b+1));
+                    if (b+1<N) keep.push_back(commonIndex(psil.A(b+1),psil.A(b+2)));
+                    }
+                auto rl = thl;
+                auto rr = thr;
+                for (auto const& I : keep) { rl = prime(rl,I); rr = prime(rr,I); }
+                rl *= dag(thl);
+                rr *= dag(thr);
+                auto rho = 0.5*(rl+rr);
+                if (noise>0)
+                    {
+                    ITensor X = (ha==1) ? H.A(b) : H.A(b+1);
+                    if (ha==1 && Lh[b-1]) X = Lh[b-1]*X;
+                    if (ha==2 && Rh[b+2]) X = X*Rh[b+2];
+                    auto nt = (X*thl)*dag(noprime(X*thr));
+                    rho += (noise/2.0)*(nt+dag(swapPrime(nt,0,1)));
+                    }
+                ITensor U,D;
+                diagHermitian(rho,U,D,{"Maxm",maxm_,"Cutoff",cutoff_});
+                if (ha==1)
+                    {
+                    psil.Aref(b) = U;
+                    psil.Aref(b+1) = dag(U)*thl;
+                    psir.Aref(b) = U;
+                    psir.Aref(b+1) = dag(U)*thr;
+                    if (b<N-1)
+                        {
+                        make_env(Lh,H,psir,psil,b,b-1);
+                        make_env(La,HA,psil,psir,b,b-1);
+                        }
+                    }
+                else
+                    {
+                    psil.Aref(b+1) = U;
+                    psil.Aref(b) = thl*dag(U);
+                    psir.Aref(b+1) = U;
+                    psir.Aref(b) = thr*dag(U);
+                    if (b>1)
+                        {
+                        make_env(Rh,H,psir,psil,b+1,b+2);
+                        make_env(Ra,HA,psil,psir,b+1,b+2);
+                        }
+                    }
+                }
+            if (verbose_)
+                printfln("NH-DMRG sweep %d energy = %.12f + %.12f i",
+                         sw,energy.real(),energy.imag());
+            }
+        // both sweeps end at bond 1 with ortho "right": center at site 1
+        psil.leftLim(0); psil.rightLim(2);
+        psir.leftLim(0); psir.rightLim(2);
+        NHDMRGResult out;
+        out.energy = overlapC(psil,H,psir)/overlapC(psil,psir);
+        out.psil = psil;
+        out.psir = psir;
         return out;
         }
 
@@ -632,6 +807,88 @@ class Chain
         }
 
     private:
+
+    // Restarted Arnoldi on a matrix-free operator over ITensor "vectors";
+    // back-port of mpscpp3/chain_session.h's arnoldi_smallest_real (the
+    // annotated original, including the rationale for the three Sel
+    // eigenvalue-selection modes) to the v2 API.
+    enum class Sel { SR, Closest, SRTieBreak };
+    template <typename Fn>
+    std::pair<Cplx,ITensor>
+    arnoldi_smallest_real(Fn&& A, ITensor x0, int krylovdim, int restarts,
+                          Sel sel=Sel::SR, Cplx target=0) const
+        {
+        Cplx lambda = 0;
+        for (int r=0;r<restarts;++r)
+            {
+            double nx = norm(x0);
+            if (nx<1e-14) break; // degenerate start, keep whatever we have
+            x0 /= nx;
+            std::vector<ITensor> V;
+            V.push_back(x0);
+            std::vector<std::vector<Cplx>> h(krylovdim+1,
+                    std::vector<Cplx>(krylovdim,Cplx(0,0)));
+            int m = 0;
+            for (int j=0;j<krylovdim;++j)
+                {
+                auto w = A(V.at(j));
+                for (int i=0;i<=j;++i)
+                    {
+                    auto c = (dag(V.at(i))*w).cplx();
+                    h.at(i).at(j) = c;
+                    w -= c*V.at(i);
+                    }
+                for (int i=0;i<=j;++i)
+                    {
+                    auto c = (dag(V.at(i))*w).cplx();
+                    h.at(i).at(j) += c;
+                    w -= c*V.at(i);
+                    }
+                m = j+1;
+                double nw = norm(w);
+                h.at(j+1).at(j) = nw;
+                if (nw<1e-13) break; // happy breakdown: invariant subspace
+                if (j+1<krylovdim) V.push_back(w/nw);
+                }
+            auto a = Index("a",m);
+            auto Hm = ITensor(prime(a),a);
+            for (int i=0;i<m;++i)
+            for (int j=0;j<m;++j)
+                if (i<=j+1) Hm.set(prime(a)(i+1),a(j+1),h.at(i).at(j));
+            ITensor W,D;
+            eigen(Hm,W,D);
+            auto c = commonIndex(W,D);
+            int kbest = 1;
+            Cplx ebest = 0;
+            for (int k=1;k<=m;++k)
+                {
+                auto ek = D.cplx(c(k),prime(c)(k));
+                bool better = false;
+                if (sel==Sel::Closest)
+                    better = std::abs(ek-target)<std::abs(ebest-target);
+                else if (sel==Sel::SRTieBreak)
+                    {
+                    double degtol = 1e-6*(1.0+std::abs(ebest.real()));
+                    if (ek.real()<ebest.real()-degtol) better = true;
+                    else if (ek.real()<ebest.real()+degtol)
+                        better = std::abs(ek-target)<std::abs(ebest-target);
+                    }
+                else better = ek.real()<ebest.real();
+                if (k==1 || better) { ebest = ek; kbest = k; }
+                }
+            ITensor xnew;
+            for (int i=0;i<m;++i)
+                {
+                auto coef = W.cplx(a(i+1),c(kbest));
+                if (!xnew) xnew = coef*V.at(i);
+                else xnew += coef*V.at(i);
+                }
+            lambda = ebest;
+            x0 = xnew;
+            }
+        return {lambda,x0};
+        }
+
     // ITensor's dmrg() defaults to neither "Quiet" nor "Silent", i.e. full
     // per-bond/per-sweep progress printing; this collapses that down to a
     // single knob (verbose_) so every dmrg() call site here stays quiet
