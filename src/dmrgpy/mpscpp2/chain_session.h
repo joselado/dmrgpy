@@ -640,16 +640,19 @@ class Chain
     dmrg_args() const { return Args("Quiet",!verbose_,"Silent",!verbose_); }
 
     Sweeps
-    make_sweeps() const
+    make_sweeps(int ns, int maxm) const
         {
-        auto sweeps = Sweeps(nsweeps_);
-        sweeps.maxm() = maxm_;
+        auto sweeps = Sweeps(ns);
+        sweeps.maxm() = maxm;
         sweeps.cutoff() = cutoff_;
         sweeps.noise() = noise_;
         // noise only in the first half, mirrors get_sweeps.h
-        for (int i=nsweeps_/2;i<nsweeps_;i++) sweeps.setnoise(i,0.0);
+        for (int i=ns/2;i<ns;i++) sweeps.setnoise(i,0.0);
         return sweeps;
         }
+
+    Sweeps
+    make_sweeps() const { return make_sweeps(nsweeps_,maxm_); }
 
     // Ground/anti-ground energy of H_, used to set the KPM energy scale
     // (scaled_hamiltonian below). These replace bandwidth.h's
@@ -685,8 +688,22 @@ class Chain
         {
         if (!have_bandwidth_max_)
             {
+            // Reduced-effort DMRG on -H, mirroring mpscpp3's
+            // maximum_energy(): this value is only ever consumed as a
+            // spectral *bound* (scaled_hamiltonian()'s Chebyshev window,
+            // excited_states()' overlap-penalty weight), never as a
+            // physical result. DMRG is variational, so this always
+            // *under*estimates emax, and scaled_hamiltonian()'s
+            // kpm_scale (default 0.7) leaves enough headroom inside the
+            // Chebyshev domain [-1,1] to tolerate an underestimate up to
+            // ~bandwidth/6 -- orders of magnitude above what a few
+            // sweeps at modest bond dimension miss by for the
+            // low-entanglement extremal state of a local 1D chain. An
+            // underestimate also *shrinks* the KPM moment count, and a
+            // too-tight bound is caught loudly by kpm_moments_*'s
+            // divergence guard.
             auto psi = MPS(sites_);
-            auto sweeps = make_sweeps();
+            auto sweeps = make_sweeps(std::min(nsweeps_,5),std::min(maxm_,20));
             auto negH = (-1.0)*H_;
             bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args());
             have_bandwidth_max_ = true;
@@ -880,6 +897,10 @@ class Chain
         auto am = 1.0*vi;
         auto a = exactApplyMPO(v,m,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff});
         auto ap = 1.0*a;
+        // legitimate moments <vj|T_k|vi> are bounded by ||vi||*||vj||
+        // (NOT by the zeroth moment <vj|vi>, which can be ~0 for a
+        // near-orthogonal cross-correlator pair) -- see check_kpm_moment
+        double bound = std::sqrt(overlapC(vi,vi).real()*overlapC(vj,vj).real());
         out.push_back(overlapC(vj,v));
         out.push_back(overlapC(vj,a));
         for (int i=0;i<n;i++)
@@ -887,6 +908,7 @@ class Chain
             ap = exactApplyMPO(a,m,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff});
             ap = sum(2.0*ap,-1.0*am,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff});
             out.push_back(overlapC(vj,ap));
+            check_kpm_moment(out,bound);
             am = 1.0*a;
             a = 1.0*ap;
             }
@@ -907,6 +929,8 @@ class Chain
         auto ap = 1.0*a;
         Cplx mu0 = overlapC(vi,vi);
         Cplx mu1 = overlapC(vi,a);
+        // here vi==vj, so the moment bound ||vi||*||vj|| is just mu0
+        double bound = std::abs(mu0);
         out.push_back(mu0);
         out.push_back(mu1);
         for (int i=0;i<n/2;i++)
@@ -917,10 +941,31 @@ class Chain
             Cplx bk1 = 2.0*overlapC(a,ap) - mu1;
             out.push_back(bk);
             out.push_back(bk1);
+            check_kpm_moment(out,bound);
             am = 1.0*a;
             a = 1.0*ap;
             }
         return out;
+        }
+
+    // Chebyshev moments of a correctly scaled Hamiltonian (spectrum
+    // inside [-1,1]) satisfy |<vj|T_k|vi>| <= ||vi||*||vj|| = `bound`
+    // (passed by the caller; for the auto-correlator path that is just
+    // the zeroth moment, for the cross path it is NOT -- <vj|vi> can be
+    // ~0 for near-orthogonal pairs while the moments stay O(bound)).
+    // Exponential growth beyond the bound means the scaled spectrum
+    // leaked outside [-1,1] (band-edge estimate too tight for the
+    // chosen kpm_scale) and every subsequent moment is garbage, so fail
+    // loudly instead of returning a silently wrong correlator. The +1.0
+    // keeps the threshold meaningful when both norms are tiny. Mirrors
+    // mpscpp3's check_kpm_moment.
+    static void
+    check_kpm_moment(std::vector<std::complex<double>> const& out, double bound)
+        {
+        if (std::abs(out.back()) > 1e3*(bound+1.0))
+            Error("KPM moments diverging: scaled spectrum outside [-1,1] "
+                  "(band-edge estimate too tight; increasing kpm_scale "
+                  "widens the safety margin)");
         }
 
     // Dispatcher, mirroring kpmmoments.h's moments_vi_vj(): picks the

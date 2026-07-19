@@ -253,6 +253,15 @@ ringing from the truncation at $N$ moments (`kpm_n_scale` scales $N$,
 i.e.\ the energy resolution, relative to the rescaled bandwidth). This is
 the default, general-purpose method: robust, works across the whole
 spectrum at once, cost grows only linearly with the number of moments.
+The band edges entering the rescaling are obtained variationally: the
+lower edge reuses the ground-state energy, and the upper edge runs a
+deliberately reduced-effort DMRG on $-H$ (few sweeps at modest bond
+dimension) — it is only a spectral *bound*, protected by the
+`kpm_scale` margin, not a physical result, and a variational
+underestimate only shrinks the number of moments. If the bound is ever
+too tight for the chosen `kpm_scale`, the moment recursion detects the
+resulting exponential divergence and aborts with an explicit error
+rather than returning a silently wrong spectrum.
 
 **`submode="CVM"` — correction-vector method.** Instead of a global
 polynomial expansion, this solves directly for the correction vector at
@@ -268,7 +277,26 @@ Here $\eta$ (`delta`) is the artificial broadening that regularizes the
 resolvent at a real frequency. CVM is more accurate at a single targeted
 frequency/energy window (e.g. zooming in on a sharp resonance) than a
 global KPM expansion, at the cost of re-solving the linear system for
-every $\omega$ on the requested grid.
+every $\omega$ on the requested grid. Two things keep that per-$\omega$
+cost down. First, everything $\omega$-independent is computed once per
+sweep instead of once per point — in particular the right-hand side
+$-\eta B|\mathrm{GS}\rangle$. Second, the CG loop terminates early once
+the bond-dimension truncation (`cvm_maxm`) puts a floor under the
+reachable residual — past that floor the iteration cannot improve the
+tracked best solution any further (the truncated recurrence in fact
+diverges), so the solver returns the best correction vector seen
+instead of burning the full `cvm_nit` iteration budget (`cvm_patience`
+sets how many iterations without meaningful improvement conclude the
+floor is reached, and `cvm_blowup` how far past the best residual the
+running one may diverge before stopping). Neither feature
+changes the answer. Each point reports its CG iteration count and best
+residual; if that residual stalls far above `cvm_tol`, the correction
+vector is not converged at this bond dimension and the fix is a larger
+`cvm_maxm`, not more iterations. (Warm-starting each point's CG from
+the neighboring point's correction vector was tried and measured to
+*hurt* — truncated CG from a nearby-but-wrong start can stagnate at a
+much worse residual than from the cold start — so each point is solved
+independently.)
 
 **`submode="TD"` — time-dependent DMRG.** Real-time evolution gives the
 correlator directly in the time domain,

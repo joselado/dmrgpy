@@ -395,12 +395,16 @@ class Chain:
         out.noPrime("Site")
         return out
 
-    def _make_sweeps(self):
-        sweeps = Sweeps(self.nsweeps)
-        sweeps.maxdim = self.maxm
+    def _make_sweeps(self, ns=None, maxdim=None):
+        if ns is None:
+            ns = self.nsweeps
+        if maxdim is None:
+            maxdim = self.maxm
+        sweeps = Sweeps(ns)
+        sweeps.maxdim = maxdim
         sweeps.cutoff = self.cutoff
         sweeps.noise = self.noise
-        for i in range(self.nsweeps // 2, self.nsweeps):
+        for i in range(ns // 2, ns):
             sweeps.setnoise(i, 0.0)
         return sweeps
 
@@ -411,8 +415,16 @@ class Chain:
 
     def _maximum_energy(self):
         if self._bandwidth_max is None:
+            # Reduced-effort DMRG on -H, mirroring the compiled
+            # backends' maximum_energy(): only a spectral *bound*
+            # (Chebyshev window / excited-state penalty weight), never a
+            # physical result. A variational underestimate is tolerated
+            # by kpm_scale's margin (~bandwidth/6 of headroom) and only
+            # shrinks the KPM moment count; a too-tight bound is caught
+            # loudly by _check_kpm_moment.
             psi = self._default_mps()
-            sweeps = self._make_sweeps()
+            sweeps = self._make_sweeps(ns=min(self.nsweeps, 5),
+                                       maxdim=min(self.maxm, 20))
             neg_H = self.H * (-1.0)
             self._bandwidth_max = -dmrg(psi, neg_H, sweeps, quiet=not self.verbose)
         return self._bandwidth_max
@@ -524,12 +536,17 @@ class Chain:
         v = vi * 1.0
         am = vi * 1.0
         a = self._apply_mpo_with(m, v, kpmcutoff, kpmmaxm)
+        # legitimate moments <vj|T_k|vi> are bounded by ||vi||*||vj||
+        # (NOT by the zeroth moment <vj|vi>, which can be ~0 for a
+        # near-orthogonal cross-correlator pair)
+        bound = np.sqrt(abs(inner(vi, vi).real * inner(vj, vj).real))
         out.append(inner(vj, v))
         out.append(inner(vj, a))
         for _ in range(n):
             ap = self._apply_mpo_with(m, a, kpmcutoff, kpmmaxm)
             ap = mps_sum(ap * 2.0, am * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
             out.append(inner(vj, ap))
+            self._check_kpm_moment(out, bound)
             am = a * 1.0
             a = ap * 1.0
         return out
@@ -540,6 +557,8 @@ class Chain:
         am = vi * 1.0
         mu0 = inner(vi, vi)
         mu1 = inner(vi, a)
+        # here vi==vj, so the moment bound ||vi||*||vj|| is just mu0
+        bound = abs(mu0)
         out.append(mu0)
         out.append(mu1)
         for _ in range(n // 2):
@@ -549,9 +568,25 @@ class Chain:
             bk1 = 2.0 * inner(a, ap) - mu1
             out.append(bk)
             out.append(bk1)
+            self._check_kpm_moment(out, bound)
             am = a * 1.0
             a = ap * 1.0
         return out
+
+    @staticmethod
+    def _check_kpm_moment(out, bound):
+        # Chebyshev moments of a correctly scaled Hamiltonian (spectrum
+        # inside [-1,1]) satisfy |<vj|T_k|vi>| <= ||vi||*||vj|| = bound;
+        # exponential growth beyond it means the scaled spectrum leaked
+        # outside [-1,1] (band-edge estimate too tight for the chosen
+        # kpm_scale) and every subsequent moment is garbage. Mirrors the
+        # compiled backends' check_kpm_moment; the +1.0 keeps the
+        # threshold meaningful when both norms are tiny.
+        if abs(out[-1]) > 1e3 * (bound + 1.0):
+            raise RuntimeError(
+                "KPM moments diverging: scaled spectrum outside [-1,1] "
+                "(band-edge estimate too tight; increasing kpm_scale "
+                "widens the safety margin)")
 
     def _kpm_moments(self, m, vi, vj, n, kpmmaxm, kpmcutoff, accelerate):
         if accelerate and self._same_mps(vi, vj, self.maxm, self.cutoff):

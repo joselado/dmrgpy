@@ -182,6 +182,21 @@ with a method per DMRG task: `gs_energy`, `vev`, `apply_operator`,
 KPM/CVM dynamical correlators, `correlation_matrix`, `reduced_dm`,
 `excited_states`, time evolution, and more.
 
+The session caches its ground-state energy and (for KPM) both band
+edges, but `Chain::set_hamiltonian` unconditionally invalidates those
+caches — so the Python side (`groundstate.py::gs_energy_single`) only
+re-sends the Hamiltonian when its `to_terms()` output, any solver
+parameter a re-run would pick up (`maxm`, `nsweeps`, `cutoff`, `noise`,
+the effective MPO bond dimension), or the session object itself actually
+changed since the last send (`_session_ham_cache`). Repeated calculations on an
+unchanged Hamiltonian (e.g. successive `get_dynamical_correlator` calls,
+each of which re-verifies the ground state) then hit the session's
+caches instead of re-running warm DMRG sweeps and band-edge solves. Code
+paths that *want* a fresh solve of the same Hamiltonian either pass
+through `restart()`/`set_hamiltonian` (which force DMRG via
+`skip_dmrg_gs=False`) or clear `_session_ham_cache` explicitly (see
+`groundstate.py`'s best-of-`n` loops).
+
 Notable, deliberate implementation details (not bugs to "fix"):
 
 - `mpscpp3` builds every site with `ConserveQNs=false` and starts DMRG

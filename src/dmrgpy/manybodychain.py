@@ -76,6 +76,13 @@ class Many_Body_Chain():
           # evolve_and_measure_dmrg() for the actual dispatch.
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
+      self.cvm_patience = 50 # CVM CG early stop: iterations without a
+          # meaningful (>0.1% relative) best-residual improvement before
+          # concluding the truncation-imposed residual floor is reached
+          # (see cvm.py::cvm_correction_vector)
+      self.cvm_blowup = 100.0 # CVM CG early stop: running residual this
+          # many times above the best one means the truncated recurrence
+          # is diverging past the floor
       self.cvm_maxm = self.maxm # bond dimension for the CVM correction
           # vector, independent of the ground state's own maxm (mirrors
           # kpmmaxm): a correction vector solving [(H-omega)^2+eta^2]xc=b
@@ -135,6 +142,12 @@ class Many_Body_Chain():
       memo[id(self)] = out
       for k,v in self.__dict__.items():
           if k=="_session": out.__dict__[k] = None
+          elif k=="_session_ham_cache": out.__dict__[k] = None
+              # groundstate.py's Hamiltonian-send cache holds a reference
+              # to the session itself: deepcopying it would try to copy
+              # the pybind11 Chain (unsupported), and the clone gets a
+              # fresh, empty session below anyway, so it must start with
+              # no send-cache
           else: out.__dict__[k] = deepcopy(v,memo)
       if self._session is not None:
           from . import cppext
@@ -230,6 +243,11 @@ class Many_Body_Chain():
       self.wf0 = None # initial file for GS
       self._dcex_excited_cache = None # invalidate cached excited states
           # (dcex.py), tied to the ground state being replaced above
+      self._session_ham_cache = None # invalidate groundstate.py's
+          # Hamiltonian-send cache so the next gs_energy() re-sends the
+          # Hamiltonian (clearing the session's energy/band-edge caches)
+          # even when the terms are unchanged -- restart() promises a
+          # genuinely cold recalculation
   def is_hermitian(self,H):
       """Check if an operator is Hermitian"""
       from .mpsalgebra import is_hermitian

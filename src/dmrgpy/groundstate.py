@@ -8,6 +8,10 @@ def best_gs(sc,n=1):
     wf0 = None
     for i in range(n): # loop
         sc.computed_gs = False # initialize
+        # force a fresh session solve: with the Hamiltonian unchanged the
+        # send-cache in gs_energy_single would otherwise return the
+        # previous iteration's cached energy instead of re-running DMRG
+        sc._session_ham_cache = None
         e0 = sc.gs_energy() # ground state energy
         if e0<emin: # only keep this one if it actually improves on the best
             wf0 = sc.wf0 # copy wavefunction
@@ -32,6 +36,7 @@ def gs_energy_many(self,n=20,**kwargs):
         self.computed_gs = False # initialize
         self.gs_from_file = False
         self.skip_dmrg_gs = False
+        self._session_ham_cache = None # force a fresh session solve (see best_gs)
         e0 = gs_energy_single(self,reconverge=False,
                 **kwargs) # ground state energy
         if e0<emin: 
@@ -53,7 +58,30 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    self._session.set_hamiltonian(self.hamiltonian.to_terms())
+    # Only re-send the Hamiltonian when it (or the MPO bond dimension it
+    # is built with) actually changed since the last send to this same
+    # session: the session's set_hamiltonian() invalidates its energy
+    # and band-edge caches unconditionally, so an unconditional re-send
+    # here turned every get_dynamical_correlator() call's internal
+    # ground-state re-verification into a real warm re-sweep and forced
+    # KPM to redo its band-edge DMRG on every call even with an
+    # unchanged Hamiltonian. Keying on the session object itself (by
+    # reference) makes the cache self-invalidating whenever a fresh
+    # Chain is created (setup_cpp/setup_python/__deepcopy__); comparing
+    # the to_terms() output (not the MultiOperator identity) catches
+    # in-place mutation of self.hamiltonian. Every solver parameter that
+    # a re-run would pick up (maxm, nsweeps, cutoff, noise, and the MPO
+    # bond dimension the Hamiltonian is built with) is part of the key:
+    # the session's energy cache survives a skipped re-send, so a user
+    # bumping any of these between bare gs_energy() calls must get a
+    # fresh solve, not the cached energy computed under the old params.
+    terms = self.hamiltonian.to_terms()
+    key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
+           max(self.maxm,self.mpomaxm),terms)
+    cache = getattr(self,'_session_ham_cache',None)
+    if cache is None or cache[0] is not self._session or cache[1]!=key:
+        self._session.set_hamiltonian(terms)
+        self._session_ham_cache = (self._session,key)
     if wf0 is not None:
         self._session.set_wavefunction(wf0.cpp_handle)
     if reconverge is not None: # overwrite skip_dmrg_gs
