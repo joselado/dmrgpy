@@ -14,27 +14,29 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 #
 # CVM solves one linear system per requested frequency point (its cost
 # is therefore *per point*, not a fixed cost for the whole spectrum like
-# the other three submodes). Directly measuring even a handful of points
-# here made this script itself impractically slow to re-run (confirmed
-# directly: 40 points took ~1.9 hours on one machine, ~170.8 s/point) --
-# so CVM's per-point cost below is a fixed, separately-measured constant
-# rather than timed inline (marked with "*" in the printed table, since
-# it's the one row that isn't a live measurement from this run); rerun
-# _measure_cvm_per_point_cost() yourself (see bottom of this file) if
-# you want a fresh number on your machine.
+# the other three submodes). It used to be prohibitively slow to measure
+# here (~170.8 s/point, ~1.9 hours for these 40 points, measured before
+# cvm.py's CG loop learned to stop at the truncation-imposed residual
+# floor instead of always burning the full cvm_nit iteration budget --
+# at this system size and cvm_maxm the residual floor is hit almost
+# immediately, so nearly all of those iterations changed nothing in the
+# returned correction vector, confirmed directly: the pre-fix code's
+# value and the post-fix value agree to every printed digit while the
+# time per point dropped ~19x). It is now cheap enough to just measure
+# live below like the other three submodes. Watch the per-point
+# "residual = ..." prints, though: at this size and the default
+# cvm_maxm, CG stalls far above cvm_tol, i.e. the CVM numbers time an
+# *under-converged* solve -- raising cvm_maxm makes CVM slower but
+# actually converged; see docs/user_guide.md's CVM section.
 #
 # Each get_dynamical_correlator() call below internally re-verifies the
-# ground state before computing its own correlator -- dynamics.py's
-# get_dynamical_correlator() unconditionally calls set_initial_wf(wf0),
-# and set_hamiltonian() (called on every such re-verification) always
-# invalidates the DMRG energy cache regardless of skip_dmrg, so this is
-# a real (currently ~1 s here), warm-started re-sweep, not a free cache
-# hit. That cost is folded into each of the KPM/TD/TDZ/CVM numbers below
-# rather than isolated in the "ground state" line -- small relative to
-# their total (~2-5%), but real, and the reason the numbers below aren't
-# a perfectly clean measurement of "submode cost alone". Fixing that
-# properly is a groundstate.py/chain_session.h caching issue, out of
-# scope for this timing example.
+# ground state before computing its own correlator (dynamics.py calls
+# set_initial_wf(wf0) unconditionally). Since groundstate.py stopped
+# re-sending an unchanged Hamiltonian to the session (which used to
+# invalidate the session's energy cache and turn every re-verification
+# into a real ~1 s warm re-sweep -- and, for KPM, invalidate the cached
+# band edges too), that re-verification is now an actual cache hit, so
+# the numbers below are a clean measurement of each submode's own cost.
 #
 # Confirmed directly on one machine (numbers will vary by machine/load --
 # this script is meant to be re-run, not read as a fixed benchmark
@@ -68,11 +70,6 @@ if not cppext.available(3):
         "(see mode.py), which is not what this script is meant to time. "
         "Run `python install.py --itensor-version=3` (or `=both`) first.")
 
-# Directly measured on one machine: 40 points at (n=20, delta=0.15, ITensor
-# v3) took 6833.19 s total, i.e. 170.83 s/point -- see module docstring.
-CVM_SECONDS_PER_POINT = 170.83
-
-
 def make_chain(n=20):
     spins = ["S=1/2" for i in range(n)]
     sc = spinchain.Spin_Chain(spins, itensor_version=3)
@@ -98,7 +95,9 @@ t0 = time.perf_counter()
 sc.get_dynamical_correlator(mode="DMRG", submode="KPM", name=name, es=es, delta=delta)
 results["KPM"] = time.perf_counter() - t0
 
-results["CVM"] = CVM_SECONDS_PER_POINT * len(es)  # extrapolated, see module docstring
+t0 = time.perf_counter()
+sc.get_dynamical_correlator(mode="DMRG", submode="CVM", name=name, es=es, delta=delta)
+results["CVM"] = time.perf_counter() - t0
 
 t0 = time.perf_counter()
 sc.get_dynamical_correlator(mode="DMRG", submode="TD", name=name, es=es, delta=delta)
@@ -111,22 +110,6 @@ results["TDZ"] = time.perf_counter() - t0
 
 print(f"{'submode':>8}{'time (s)':>12}   note")
 print(f"{'KPM':>8}{results['KPM']:12.2f}   one Chebyshev-moment run, full spectrum")
-print(f"{'CVM*':>8}{results['CVM']:12.2f}   extrapolated: {CVM_SECONDS_PER_POINT:.2f} s/point x {len(es)} points")
+print(f"{'CVM':>8}{results['CVM']:12.2f}   one linear solve per point x {len(es)} points ({results['CVM']/len(es):.2f} s/point)")
 print(f"{'TD':>8}{results['TD']:12.2f}   one real-time evolution run, full spectrum (FFT)")
 print(f"{'TDZ':>8}{results['TDZ']:12.2f}   one complex-time evolution run, full spectrum (FFT)")
-print("* not measured this run -- a separately-measured constant, see module docstring")
-
-
-def _measure_cvm_per_point_cost(n_points=4, sc=sc, name=name):
-    """Re-measure CVM_SECONDS_PER_POINT yourself (slow: ~170 s/point on
-    the machine this was developed on, see module docstring) rather than
-    trusting the hardcoded constant above -- not called by default.
-    Reuses the module-level `sc`/`name` (already-converged ground state,
-    bound as default arguments here) unless overridden with a different
-    chain/operator pair, since none of kpmdmrg.py/timedependent.py/
-    tdz.py mutate the Hamiltonian or wavefunction in a way that would
-    make rebuilding one from scratch necessary here."""
-    t0 = time.perf_counter()
-    sc.get_dynamical_correlator(mode="DMRG", submode="CVM", name=name,
-            es=es[:n_points], delta=delta)
-    return (time.perf_counter() - t0) / n_points

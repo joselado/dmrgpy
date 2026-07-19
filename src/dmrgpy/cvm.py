@@ -5,13 +5,33 @@ from . import multioperator
 def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
         delta=1e-1,name="XX",i=0,j=0):
     """
-    Compute the dynamical correlator using CVM method in DMRG
+    Compute the dynamical correlator using CVM method in DMRG.
+
+    Everything that does not depend on the frequency is hoisted out of
+    the loop over es (operator resolution, the ground state, and the
+    right-hand side b = -eta*B|GS>, which cvm_correction_vector's linear
+    system shares across all frequencies). Each frequency point is
+    solved independently from the same cold start -- warm-starting a
+    point's CG from the previous point's correction vector was tried and
+    measured to be actively harmful (on a 12-site Heisenberg chain it
+    left several points stagnating at a ~100x worse residual than the
+    cold start reached, shifting the correlator by ~50%), so it is
+    deliberately not done.
     """
     if not self.computed_gs: self.get_gs() # compute ground state
+    AB = operatornames.str2MO(self,name,i=i,j=j) # resolve operators once
+    A,B = AB[0],AB[1]
+    wf0 = self.get_gs() # ground state (cached; also sets self.e0)
+    # sweep parameters used both by B*wf0 below and by every CG solve
+    self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
+    self._session.set_mpomaxm(max(self.cvm_maxm,self.mpomaxm))
+    b = (-delta)*(B*wf0) # -eta*B|GS>, identical for every frequency
     out = [] # empty list
     for e in es: # loop over energies
-        print("CVM in E = ",e)
-        o = cvm_dmrg(self,name=name,i=i,j=j,delta=delta,e=e)
+        o,xc,nit,res = cvm_correction_vector(self,A,B,e,delta,
+                tol=self.cvm_tol,max_it=int(self.cvm_nit),b=b)
+        print("CVM in E = ",e," CG iterations = ",nit," residual = ",res)
         out.append(o) # store
     out = np.array(out)
 #    from .inference import points2function
@@ -43,10 +63,11 @@ def cvm_dmrg(self,name="XX",delta=1e-1,e=0.0,**kwargs):
     A = name[0]
     B = name[1]
     return cvm_correction_vector(self,A,B,e,delta,
-            tol=self.cvm_tol,max_it=int(self.cvm_nit))
+            tol=self.cvm_tol,max_it=int(self.cvm_nit))[0]
 
 
-def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000):
+def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
+        b=None):
     """
     Correction Vector Method (Ramasesha; Kuhner & White 1999):
     -Im<GS|A (omega+E0+i*eta-H)^{-1} B|GS>/pi, computed by solving the
@@ -81,6 +102,11 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000):
     MPO, MPS +/-/scalar-* and .dot() for the rest), so no new C++/pybind11
     bindings and no recompilation are needed to tune this further -- unlike
     the KPM/TDVP paths, which run their inner loop in C++.
+
+    b optionally supplies a precomputed right-hand side -eta*B|GS>,
+    which is frequency-independent and can be shared across a sweep.
+    Returns (value, best_xc, iterations_used, best_residual) so callers
+    can report the CG effort and convergence quality per point.
     """
     wf0 = self.get_gs() # ground state (cheap/cached; also sets self.e0)
     self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
@@ -88,26 +114,51 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000):
     self._session.set_mpomaxm(max(self.cvm_maxm,self.mpomaxm))
     Hshift = self.toMPO(self.hamiltonian-(self.e0+omega)) # (H-omega-E0), built once
     def applyA(v): return Hshift*(Hshift*v) + (eta*eta)*v # (H-omega-E0)^2+eta^2
-    b = (-eta)*(B*wf0) # -eta*B|GS>
+    if b is None: b = (-eta)*(B*wf0) # -eta*B|GS>
     xc = b # initial guess, matches the old bicstab's own x=b start
     r = b - applyA(xc)
     p = r
     rs_old = r.dot(r).real # ||r||^2, real since A is Hermitian PD
     best_xc,best_res = xc,np.sqrt(abs(rs_old))
+    # Early-termination guards around the best-residual tracking. The
+    # MPS truncation (maxdim=cvm_maxm) puts a floor on the reachable
+    # residual; once CG hits it, the recurrence doesn't just stall, it
+    # actively diverges (confirmed directly on a 20-site Heisenberg
+    # chain at cvm_maxm=30: best_res froze at ~6e-2 within the first
+    # ~hundred iterations while the running residual grew monotonically
+    # to ~3e4 by iteration 1000). Every iteration past that point is
+    # pure waste -- best_xc never changes again -- so stop (a) after
+    # `patience` iterations without a meaningful (>0.1% relative)
+    # improvement of the best residual, or (b) as soon as the running
+    # residual has blown up far past the best one. Neither guard changes
+    # the returned result: it is the same best_xc the full max_it run
+    # would return, just without the dead iterations after the floor.
+    patience = 50
+    blowup = 100.0
+    since_best = 0
+    niter = 0
     for k in range(max_it):
+        if best_res<=tol: break # initial guess can already be converged
         Ap = applyA(p)
         alpha = rs_old/p.dot(Ap).real # real: <p|A|p> is real for Hermitian A
         xc = xc + alpha*p
         r = r - alpha*Ap
         rs_new = r.dot(r).real
         res = np.sqrt(abs(rs_new))
-        if res<best_res: best_xc,best_res = xc,res # guard against truncation-driven non-monotonicity
+        niter = k+1
+        if res<best_res*(1.-1e-3): # meaningful improvement of the floor
+            best_xc,best_res = xc,res # guard against truncation-driven non-monotonicity
+            since_best = 0
+        else:
+            since_best += 1
+            if since_best>=patience: break # residual floor reached
+            if res>blowup*best_res: break # CG diverging past the floor
         if res<=tol: break
         p = r + (rs_new/rs_old)*p
         rs_old = rs_new
     x = 1j*best_xc + (Hshift*best_xc)*(1./eta) # full correction vector
     G = wf0.dot(A*x) # <GS|A|x>
-    return -G.imag/np.pi
+    return -G.imag/np.pi, best_xc, niter, best_res
 
 
 

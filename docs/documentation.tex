@@ -243,6 +243,22 @@ as \texttt{self.\_session}) --- with a method per DMRG task:
 dynamical correlators, \texttt{correlation\_matrix}, \texttt{reduced\_dm},
 \texttt{excited\_states}, time evolution, and more.
 
+The session caches its ground-state energy and (for KPM) both band
+edges, but \texttt{Chain::set\_hamiltonian} unconditionally invalidates
+those caches --- so the Python side
+(\texttt{groundstate.py::gs\_energy\_single}) only re-sends the
+Hamiltonian when its \texttt{to\_terms()} output (or the effective MPO
+bond dimension, or the session object itself) actually changed since
+the last send (\texttt{\_session\_ham\_cache}). Repeated calculations
+on an unchanged Hamiltonian (e.g.\ successive
+\texttt{get\_dynamical\_correlator} calls, each of which re-verifies
+the ground state) then hit the session's caches instead of re-running
+warm DMRG sweeps and band-edge solves. Code paths that \emph{want} a
+fresh solve of the same Hamiltonian either pass through
+\texttt{restart()}/\texttt{set\_hamiltonian} (which force DMRG via
+\texttt{skip\_dmrg\_gs=False}) or clear \texttt{\_session\_ham\_cache}
+explicitly (see \texttt{groundstate.py}'s best-of-$n$ loops).
+
 Notable, deliberate implementation details (not bugs to ``fix''):
 
 \begin{itemize}

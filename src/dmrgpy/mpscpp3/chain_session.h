@@ -692,8 +692,32 @@ class Chain
         {
         if (!have_bandwidth_max_)
             {
+            // Reduced-effort DMRG on -H: this value is only ever consumed
+            // as a spectral *bound* (scaled_hamiltonian()'s Chebyshev
+            // window, excited_states()' overlap-penalty weight), never as
+            // a physical result, so the full make_sweeps() ground-state
+            // schedule (nsweeps_ sweeps at maxm_) is overkill. Safety:
+            // DMRG is variational, so this always *under*estimates emax,
+            // and scaled_hamiltonian()'s kpm_scale (default 0.7) already
+            // maps the estimated spectrum only into
+            // [-1/(2*kpm_scale),+1/(2*kpm_scale)] (~[-0.71,0.71]) of the
+            // Chebyshev domain [-1,1] -- headroom that tolerates an emax
+            // underestimate up to ~bandwidth/6 before the true spectrum
+            // leaks outside [-1,1], orders of magnitude above what a few
+            // sweeps at modest bond dimension miss by (the top edge of
+            // -H is a low-entanglement, ferromagnet-like state). An
+            // underestimate also *shrinks* the KPM moment count
+            // (n ~ bandwidth/delta), so a looser solve can't backfire
+            // into more moments; the residual risk of a too-tight bound
+            // is caught loudly by kpm_moments_*'s divergence guard.
             auto psi = default_mps();
-            auto sweeps = make_sweeps();
+            int ns = std::min(nsweeps_,5);
+            auto sweeps = Sweeps(ns);
+            sweeps.maxdim() = std::min(maxm_,20);
+            sweeps.cutoff() = cutoff_;
+            sweeps.noise() = noise_;
+            // noise only in the first half, mirrors make_sweeps()
+            for (int i=ns/2;i<ns;i++) sweeps.setnoise(i,0.0);
             auto negH = (-1.0)*H_;
             bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args());
             have_bandwidth_max_ = true;
@@ -867,6 +891,7 @@ class Chain
             ap = apply_mpo(m,a,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
             ap = sum(2.0*ap,-1.0*am,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
             out.push_back(innerC(vj,ap));
+            check_kpm_moment(out);
             am = 1.0*a;
             a = 1.0*ap;
             }
@@ -894,10 +919,25 @@ class Chain
             Cplx bk1 = 2.0*innerC(a,ap) - mu1;
             out.push_back(bk);
             out.push_back(bk1);
+            check_kpm_moment(out);
             am = 1.0*a;
             a = 1.0*ap;
             }
         return out;
+        }
+
+    // Chebyshev moments of a correctly scaled Hamiltonian (spectrum
+    // inside [-1,1]) are bounded by the zeroth moment; exponential
+    // growth beyond that means the scaled spectrum leaked outside
+    // [-1,1] (band-edge estimate too tight for the chosen kpm_scale --
+    // see maximum_energy()) and every subsequent moment is garbage, so
+    // fail loudly instead of returning a silently wrong correlator.
+    static void
+    check_kpm_moment(std::vector<std::complex<double>> const& out)
+        {
+        if (std::abs(out.back()) > 1e3*(std::abs(out[0])+1.0))
+            Error("KPM moments diverging: scaled spectrum outside [-1,1] "
+                  "(band-edge estimate too tight for this kpm_scale)");
         }
 
     std::vector<std::complex<double>>

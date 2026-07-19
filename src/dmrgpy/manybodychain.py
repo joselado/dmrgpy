@@ -135,6 +135,12 @@ class Many_Body_Chain():
       memo[id(self)] = out
       for k,v in self.__dict__.items():
           if k=="_session": out.__dict__[k] = None
+          elif k=="_session_ham_cache": out.__dict__[k] = None
+              # groundstate.py's Hamiltonian-send cache holds a reference
+              # to the session itself: deepcopying it would try to copy
+              # the pybind11 Chain (unsupported), and the clone gets a
+              # fresh, empty session below anyway, so it must start with
+              # no send-cache
           else: out.__dict__[k] = deepcopy(v,memo)
       if self._session is not None:
           from . import cppext
