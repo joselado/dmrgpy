@@ -223,10 +223,20 @@ def _check_pybind11(python_exe):
         _fail("Could not determine the Python extension suffix for '"
               +python_exe+"'.")
 
-    config_tool = python_exe+"-config"
-    if not os.path.isfile(config_tool):
-        _fail("'"+config_tool+"' was not found -- needed by the pybind11 "
-              "extension Makefile to compute its own include/link flags.\n"
+    # Check for the C headers directly rather than for a
+    # '<python_exe>-config' binary: conda installs 'python3-config'/
+    # 'python3.13-config' but no 'python-config', so the old name-based
+    # check spuriously failed whenever install.py was run as 'python'
+    # instead of 'python3' (the Makefile no longer uses python-config
+    # either -- it asks the interpreter for EXT_SUFFIX via sysconfig).
+    header = subprocess.run([python_exe, "-c",
+            "import sysconfig, os; "
+            "print(os.path.join(sysconfig.get_paths()['include'], "
+            "'Python.h'))"],
+            capture_output=True, text=True)
+    if header.returncode != 0 or not os.path.isfile(header.stdout.strip()):
+        _fail("'Python.h' was not found for '"+python_exe+"' -- needed "
+              "to compile the pybind11 extension.\n"
               "This usually means the interpreter's *-dev/*-devel package "
               "isn't installed, e.g.:\n"
               "  Ubuntu/Debian: sudo apt-get install python3-dev")

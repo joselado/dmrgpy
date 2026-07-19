@@ -50,7 +50,10 @@ clean:
 
 PYTHON=python3
 PYBIND_INCLUDES=$(shell $(PYTHON) -m pybind11 --includes)
-EXT_SUFFIX=$(shell $(PYTHON)-config --extension-suffix)
+# Ask the interpreter itself for the suffix (not $(PYTHON)-config):
+# conda ships python3-config but no python-config, so the -config
+# form breaks whenever PYTHON is a bare 'python'.
+EXT_SUFFIX=$(shell $(PYTHON) -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 EXT_MODULE=_dmrgcpp$(EXT_SUFFIX)
 
 CONDA_GXX=$(shell d=$$(dirname $$(command -v $(PYTHON)) 2>/dev/null); ls $$d/*-conda*-g++ 2>/dev/null | head -1)
