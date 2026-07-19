@@ -41,6 +41,13 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
     """Excited states"""
     H = self.hamiltonian # make a check
     if not self.is_hermitian(H): # non-Hermitian Hamiltonians
+        if n==1 and self.itensor_version in (2,3,"python"):
+            # ground state only: use the same NH-DMRG solve gs_energy()
+            # routes to (groundstate.py's non-Hermitian branch), so the
+            # two entry points cannot return different eigenpair members
+            # of a degenerate multiplet or differently-normalized states
+            e0 = self.gs_energy(**kwargs)
+            return (np.array([e0]),[self.wf0.copy()])
 #        print("Non-Hermitian Hamiltonian, using Arnoldi method")
         return excited_states_non_hermitian(self,n=n,**kwargs)
     if n==1: # workaround for just the ground state

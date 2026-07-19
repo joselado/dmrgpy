@@ -127,7 +127,8 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return py::make_tuple(out.energy,out.psil,out.psir);
             }, py::arg("terms_h"),py::arg("terms_hadj"),
                py::arg("krylovdim")=20,py::arg("restarts")=2,
-               "Non-Hermitian DMRG (mpscpp3-only, no mpscpp2 counterpart): "
+               "Non-Hermitian DMRG (this file is the annotated original; "
+               "mpscpp2 carries a v2-API back-port): "
                "optimizes a biorthogonal left/right eigenpair of the "
                "non-Hermitian operator given by terms_h, targeting the "
                "eigenvalue with smallest real part; terms_hadj must be the "

@@ -13,8 +13,9 @@ and the two deliberate deviations) to this package's engine:
   density matrices), which keeps psil and psir on identical site *and*
   link Index objects throughout -- so the environments hit the exact same
   bra/ket link-identity collision dmrg.py's self-overlap environments do,
-  and reuse its _relabel_bra_local machinery, just with the bra tensors
-  drawn from the *other* MPS.
+  and reuse its _extend_left/_extend_right/_all_right_environments
+  builders directly (their bra= parameter draws the bra tensors from the
+  *other* MPS).
 
 Everything bond-local is done on flat numpy arrays (via dmrg.py's
 two_site_heff matvec factory): the Arnoldi iteration, the biorthogonal
@@ -35,45 +36,46 @@ backends).
 
 import numpy as np
 
-from .dmrg import (_relabel_bra_local, two_site_heff)
+from .dmrg import (_all_right_environments, _extend_left, _extend_right,
+                   two_site_heff)
 from .index import Index
 from .mpsalgebra import inner
 from .svd import _truncate
-from .tensor import ITensor, contract_many
+from .tensor import ITensor
 
 
-def _extend_left_nh(L, left_bra, W, ket, bra, i):
-    """One more site of the two-sided left environment <bra|W|ket>: same
-    as dmrg.py's _extend_left except the bra tensor comes from a different
-    MPS than the ket (they share link Index objects, so the relabeling
-    dance is identical)."""
-    bra_piece, _, right_bra = _relabel_bra_local(bra.A(i), bra, i, left_bra, None)
-    pieces = [p for p in (L, bra_piece, W.A(i), ket.A(i)) if p is not None]
-    return contract_many(pieces), right_bra
-
-
-def _extend_right_nh(R, right_bra, W, ket, bra, i):
-    bra_piece, left_bra, _ = _relabel_bra_local(bra.A(i), bra, i, None, right_bra)
-    pieces = [p for p in (R, bra_piece, W.A(i), ket.A(i)) if p is not None]
-    return contract_many(pieces), left_bra
-
-
-def _all_right_nh(W, ket, bra):
-    n = ket.length()
-    env = {n + 1: (None, None)}
-    for i in range(n, 1, -1):
-        R_next, bra_next = env[i + 1]
-        env[i] = _extend_right_nh(R_next, bra_next, W, ket, bra, i)
-    return env
+def _select_ritz(evals, sel, target):
+    """Index of the Ritz value selected by `sel` ("SR" = smallest real
+    part, "closest" = closest to `target`, "SRTieBreak" = smallest real
+    part with Re-degenerate candidates tie-broken toward `target`). This
+    global-min-then-candidates formulation is the reference semantics all
+    three backends implement (the C++ ports mirror it exactly), so the
+    backends cannot silently target different members of a degenerate
+    Ritz cluster."""
+    if sel == "closest":
+        return int(np.argmin(np.abs(evals - target)))
+    if sel == "SRTieBreak":
+        remin = evals.real.min()
+        degtol = 1e-6 * (1.0 + abs(remin))
+        cand = np.flatnonzero(evals.real < remin + degtol)
+        return int(cand[np.argmin(np.abs(evals[cand] - target))])
+    return int(np.argmin(evals.real))
 
 
 def _arnoldi_smallest_real(matvec, x0, krylovdim, restarts,
                            sel="SR", target=0.0):
     """Restarted Arnoldi over flat numpy vectors; keeps the Ritz pair
-    selected by `sel` ("SR" = smallest real part, "closest" = closest to
-    `target`, "SRTieBreak" = smallest real part with Re-degenerate values
-    tie-broken toward `target`). Mirrors chain_session.h's
-    arnoldi_smallest_real (see the Sel rationale there)."""
+    selected by `sel` (see _select_ritz). Mirrors chain_session.h's
+    arnoldi_smallest_real (see the Sel rationale there). Remaining
+    restarts are skipped when the standard Arnoldi residual bound
+    ||A y - lam y|| = |h[m+1,m]|*|last Ritz-vector component| certifies
+    the build already converged -- computed from the one end-of-build
+    Hessenberg diagonalization, so it is free. A per-step
+    stop-on-stable-Ritz-value exit (dmrg.py's _lanczos_ground_state
+    pattern) was tried and reverted: the non-hermitian np.linalg.eig per
+    step -- unlike the cheap symmetric tridiagonal solve there -- costs
+    as much as the matvec it hopes to save at these block sizes
+    (measured: 18s -> 55s on a 20-site chain)."""
     lam = 0.0 + 0.0j
     x0 = np.asarray(x0, dtype=complex)
     for _ in range(restarts):
@@ -103,17 +105,12 @@ def _arnoldi_smallest_real(matvec, x0, krylovdim, restarts,
             if j + 1 < m:
                 Q.append(w / nw)
         evals, evecs = np.linalg.eig(h[:built, :built])
-        if sel == "closest":
-            k = int(np.argmin(np.abs(evals - target)))
-        elif sel == "SRTieBreak":
-            remin = evals.real.min()
-            degtol = 1e-6 * (1.0 + abs(remin))
-            cand = np.flatnonzero(evals.real < remin + degtol)
-            k = int(cand[np.argmin(np.abs(evals[cand] - target))])
-        else:
-            k = int(np.argmin(evals.real))
+        k = _select_ritz(evals, sel, target)
         lam = complex(evals[k])
         x0 = np.column_stack(Q[:built]) @ evecs[:, k]
+        resid_est = abs(h[built, built - 1]) * abs(evecs[built - 1, k])
+        if resid_est < 1e-10 * (1.0 + abs(lam)):
+            break
     return lam, x0
 
 
@@ -130,14 +127,17 @@ def nhdmrg(H, HA, psi0, sweeps, krylovdim=20, restarts=2, quiet=True):
 
     energy = 0.0 + 0.0j
     have_energy = False
+    # (env tensor, dangling bra link) per boundary, one family per
+    # projected problem: H sandwiched between <psil| and |psir>, and
+    # Hdag sandwiched between <psir| and |psil>. Built once and then
+    # maintained incrementally by the sweeps themselves (each backward
+    # half-sweep refreshes every right entry, each forward half-sweep
+    # every left entry), like the C++ ports -- a per-sweep rebuild would
+    # be redundant work.
+    right_h = _all_right_environments(H, psir, bra=psil)
+    right_a = _all_right_environments(HA, psil, bra=psir)
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, _niter = sweeps.at(sweep_i)
-
-        # (env tensor, dangling bra link) per boundary, one family per
-        # projected problem: H sandwiched between <psil| and |psir>, and
-        # Hdag sandwiched between <psir| and |psil>
-        right_h = _all_right_nh(H, psir, psil)
-        right_a = _all_right_nh(HA, psil, psir)
         left_h = {0: (None, None)}
         left_a = {0: (None, None)}
 
@@ -150,12 +150,14 @@ def nhdmrg(H, HA, psi0, sweeps, krylovdim=20, restarts=2, quiet=True):
                 Ra, Rbra_a = right_a[b + 2]
                 mv_r, order_in, shape, x0r = two_site_heff(
                     Lh, Lbra_h, H, psir, b, Rh, Rbra_h)
-                mv_l, _order_l, _shape_l, x0l = two_site_heff(
+                mv_l, _, _, x0l = two_site_heff(
                     La, Lbra_a, HA, psil, b, Ra, Rbra_a)
                 er, thr = _arnoldi_smallest_real(
                     mv_r, x0r, krylovdim, restarts,
                     sel="SRTieBreak" if have_energy else "SR", target=energy)
-                _el, thl = _arnoldi_smallest_real(
+                # only the eigenvector is needed from the adjoint solve
+                # (its eigenvalue is conj(er) by construction)
+                _, thl = _arnoldi_smallest_real(
                     mv_l, x0l, krylovdim, restarts,
                     sel="closest", target=np.conj(er))
                 energy = er
@@ -246,16 +248,16 @@ def nhdmrg(H, HA, psi0, sweeps, krylovdim=20, restarts=2, quiet=True):
                     psil.set_A(b + 1, center_l)
                     psir.set_A(b + 1, center_r)
                     psil.center = psir.center = b + 1
-                    left_h[b] = _extend_left_nh(Lh, Lbra_h, H, psir, psil, b)
-                    left_a[b] = _extend_left_nh(La, Lbra_a, HA, psil, psir, b)
+                    left_h[b] = _extend_left(Lh, Lbra_h, H, psir, b, bra=psil)
+                    left_a[b] = _extend_left(La, Lbra_a, HA, psil, b, bra=psir)
                 else:
                     psil.set_A(b + 1, site_T)
                     psir.set_A(b + 1, site_T)
                     psil.set_A(b, center_l)
                     psir.set_A(b, center_r)
                     psil.center = psir.center = b
-                    right_h[b + 1] = _extend_right_nh(Rh, Rbra_h, H, psir, psil, b + 1)
-                    right_a[b + 1] = _extend_right_nh(Ra, Rbra_a, HA, psil, psir, b + 1)
+                    right_h[b + 1] = _extend_right(Rh, Rbra_h, H, psir, b + 1, bra=psil)
+                    right_a[b + 1] = _extend_right(Ra, Rbra_a, HA, psil, b + 1, bra=psir)
 
         if not quiet:
             print("NH-DMRG sweep {}: energy = {}".format(sweep_i, energy))

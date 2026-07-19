@@ -183,13 +183,14 @@ sc.gs_energy()                  # same E; stores psir as the ground state
 ```
 
 Because a non-Hermitian "energy" is not a variational bound, `nhdmrg()`
-certifies convergence through the eigen-residual
-$\lVert H|\psi_R\rangle-E|\psi_R\rangle\rVert$ and re-runs from a fresh
-random state (up to `ntries` times) if it stalls; `krylovdim`/`restarts`
-tune the per-bond Arnoldi effort. The MPS Arnoldi route
-(`get_excited_states`) remains available on every backend, but is
-typically several orders of magnitude less accurate than NH-DMRG at
-comparable cost — see
+certifies convergence through both eigen-residuals
+$\lVert H|\psi_R\rangle-E|\psi_R\rangle\rVert$ and
+$\lVert H^\dagger|\psi_L\rangle-E^{*}|\psi_L\rangle\rVert$ and re-runs
+from a fresh random state (up to `ntries` times) if either stalls;
+`krylovdim`/`restarts` tune the per-bond Arnoldi effort. The MPS Arnoldi
+route (`get_excited_states`, now used for non-Hermitian *excited* states,
+$n\ge 2$) remains available on every backend, but is typically several
+orders of magnitude less accurate than NH-DMRG at comparable cost — see
 `examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`, which cross-checks
 NH-DMRG on all three backends against exact diagonalization and the
 Arnoldi route on an interacting fermionic chain with a staggered
