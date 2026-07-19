@@ -416,6 +416,13 @@ class Many_Body_Chain():
     es = self.get_excited(n=2,**kwargs)
     return es[1] -es[0]
   def get_hamiltonian(): return self.hamiltonian
+  def nhdmrg(self,**kwargs):
+      """Non-Hermitian DMRG (itensor_version=3 only): return
+      (energy,psil,psir), the eigenvalue with smallest real part of the
+      Hamiltonian (or of an operator passed as H=...) together with the
+      biorthogonal left/right eigenvector MPS. See nhdmrg.py"""
+      from .nhdmrg import nhdmrg
+      return nhdmrg(self,**kwargs)
   def gs_energy_fluctuation(self,**kwargs):
       """Compute the energy fluctuations"""
       h = self.get_hamiltonian()

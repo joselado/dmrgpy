@@ -119,6 +119,20 @@ PYBIND11_MODULE(_dmrgcpp, m)
             }, py::arg("n"),py::arg("scale_lagrange")=1.0,
                py::arg("gram_schmidt")=false,
                "Returns (energies, fluctuations, wavefunctions)")
+        .def("nhdmrg",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_hadj,
+                          int krylovdim, int restarts) {
+                auto out = self.nhdmrg(terms_from_python(terms_h),
+                    terms_from_python(terms_hadj),krylovdim,restarts);
+                return py::make_tuple(out.energy,out.psil,out.psir);
+            }, py::arg("terms_h"),py::arg("terms_hadj"),
+               py::arg("krylovdim")=20,py::arg("restarts")=2,
+               "Non-Hermitian DMRG (mpscpp3-only, no mpscpp2 counterpart): "
+               "optimizes a biorthogonal left/right eigenpair of the "
+               "non-Hermitian operator given by terms_h, targeting the "
+               "eigenvalue with smallest real part; terms_hadj must be the "
+               "adjoint operator's terms (MultiOperator.get_dagger() on the "
+               "Python side). Returns (energy, psil, psir)")
         .def("vev",[](Chain& self, std::vector<PyTerm> const& terms,
                        MPS const& wf, int npow) {
                 return self.vev(terms_from_python(terms),wf,npow);

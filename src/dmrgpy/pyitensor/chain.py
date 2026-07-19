@@ -186,6 +186,20 @@ class Chain:
     def build_operator(self, terms):
         return to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
 
+    def nhdmrg(self, terms_h, terms_hadj, krylovdim=20, restarts=2):
+        """Not implemented here: non-Hermitian DMRG (a biorthogonal
+        left/right eigenpair solver, see mpscpp3/chain_session.h's
+        Chain::nhdmrg) only exists on the compiled ITensor v3 backend.
+        This stub keeps the Chain method surface aligned with mpscpp3's
+        and fails with a pointer instead of a bare AttributeError;
+        nhdmrg.py's own itensor_version check normally fires first, and
+        the Arnoldi route (algebra/arnolditk.py) remains the
+        non-Hermitian solver for this backend."""
+        raise NotImplementedError(
+            "nhdmrg is only implemented on the compiled ITensor v3 "
+            "backend (itensor_version=3); use setup_cpp(version=3), or "
+            "the Arnoldi route (get_excited_states) on this backend")
+
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)
 

@@ -155,6 +155,44 @@ es = sc.get_excited(n=6)
 haldane_gap = es[4] - es[0]     # skip the 4 near-degenerate edge states
 ```
 
+**Non-Hermitian Hamiltonians.** For $H\neq H^\dagger$ (complex hopping
+amplitudes, gain/loss terms, PT-symmetric models, ...) the "ground
+state" convention throughout dmrgpy is the eigenvalue with the smallest
+real part. Eigenvalues come in left/right eigenpairs,
+
+$$H\,|\psi_R\rangle=E\,|\psi_R\rangle,\qquad
+H^\dagger|\psi_L\rangle=E^{*}|\psi_L\rangle,\qquad
+\langle\psi_L|\psi_R\rangle=1 .$$
+
+On the ITensor v3 backend (`sc.setup_cpp(version=3)`), `gs_energy()`
+solves this with a genuine non-Hermitian DMRG (NH-DMRG) — a port of
+[ITensorNHDMRG.jl](https://github.com/tipfom/ITensorNHDMRG.jl) in its
+default configuration: independent Arnoldi solves of the two-site
+eigenproblem for $H$ and $H^\dagger$ ("onesided" solver, targeting the
+smallest real part), with both MPS truncated by the same isometry
+obtained from the Hermitian average $\rho=(\rho_L+\rho_R)/2$ of the
+left/right reduced density matrices (the "fidelity" algorithm of
+Yamamoto et al., [PRB 105, 205125
+(2022)](https://doi.org/10.1103/PhysRevB.105.205125)). The full eigenpair
+is available directly:
+
+```python
+e, psil, psir = sc.nhdmrg()     # E, left and right eigenvector MPS
+sc.gs_energy()                  # same E; stores psir as the ground state
+```
+
+Because a non-Hermitian "energy" is not a variational bound, `nhdmrg()`
+certifies convergence through the eigen-residual
+$\lVert H|\psi_R\rangle-E|\psi_R\rangle\rVert$ and re-runs from a fresh
+random state (up to `ntries` times) if it stalls; `krylovdim`/`restarts`
+tune the per-bond Arnoldi effort. On the other backends (v2, pure
+Python), non-Hermitian problems keep using the MPS Arnoldi route
+(`get_excited_states`), which is typically several orders of magnitude
+less accurate than NH-DMRG at comparable cost — see
+`examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`, which cross-checks
+NH-DMRG against exact diagonalization and the Arnoldi route on an
+interacting fermionic chain with a staggered imaginary potential.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain

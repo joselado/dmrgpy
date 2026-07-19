@@ -276,6 +276,20 @@ Notable, deliberate implementation details (not bugs to ``fix''):
     \texttt{"TDVP"}); \texttt{mpscpp2} has no TDVP and always uses a
     hand-rolled 2nd-order Taylor expansion of $\exp(-i\,dt\,H)$ as an MPO
     instead.
+  \item \texttt{mpscpp3} also has a real non-Hermitian DMRG
+    (\texttt{Chain::nhdmrg}, driven by \texttt{nhdmrg.py}, exposed as
+    \texttt{Many\_Body\_Chain.nhdmrg()}): a port of ITensorNHDMRG.jl's
+    ``onesided''+``fidelity'' algorithm that optimizes a biorthogonal
+    left/right eigenpair of a non-Hermitian $H$, targeting the eigenvalue
+    with smallest real part. \texttt{groundstate.py}'s non-Hermitian
+    \texttt{gs\_energy} branch routes to it for
+    \texttt{itensor\_version==3}; the other C++/Python backends keep the
+    (much less accurate) MPS Arnoldi fallback
+    (\texttt{algebra/arnolditk.py}). The adjoint MPO is built from
+    \texttt{MultiOperator.get\_dagger()}'s terms on the Python side, and
+    since the non-Hermitian energy is not variational, \texttt{nhdmrg.py}
+    certifies each run by the eigen-residual and redraws a fresh random
+    start when a run stalls.
   \item A few pre-existing bugs in the original (pre-refactor) file-based
     backend are deliberately reproduced rather than silently fixed --- see
     the call-site comments in \texttt{chain\_session.h} for both
