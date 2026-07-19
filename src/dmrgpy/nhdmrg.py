@@ -1,10 +1,13 @@
 """
-Non-Hermitian DMRG (NH-DMRG) driver for the ITensor v3 C++ backend.
+Non-Hermitian DMRG (NH-DMRG) driver, shared by every DMRG backend that
+implements the session-level Chain.nhdmrg method: the compiled ITensor
+v3 backend (mpscpp3/chain_session.h's Chain::nhdmrg -- the annotated
+original), the compiled ITensor v2 backend (mpscpp2's back-port), and
+the pure-Python backend (pyitensor/nhdmrg.py).
 
-Thin Python wrapper around mpscpp3/chain_session.h's Chain::nhdmrg (see
-the long comment there for the algorithm), a port of ITensorNHDMRG.jl
-(https://github.com/tipfom/ITensorNHDMRG.jl) in its default configuration:
-"onesided" local Arnoldi solves of A|x> = lambda|x> and
+The algorithm is a port of ITensorNHDMRG.jl
+(https://github.com/tipfom/ITensorNHDMRG.jl) in its default
+configuration: "onesided" local Arnoldi solves of A|x> = lambda|x> and
 Adag|y> = conj(lambda)|y> on each two-site block, combined with the
 "fidelity" truncation of Yamamoto et al., Phys. Rev. B 105, 205125 (both
 MPS truncated with the same isometry from the hermitian average
@@ -12,10 +15,9 @@ rho = (rho_l + rho_r)/2 of the left/right reduced density matrices).
 
 The optimization targets the eigenvalue with the smallest real part --
 the same "ground state" convention used by the pre-existing MPS Arnoldi
-route for non-Hermitian Hamiltonians (mpsalgebra's mode="GS"), which
-remains the fallback for the other backends. Only itensor_version==3
-implements this method: mpscpp2 has no Chain::nhdmrg at all, and the
-pure-Python backend does not implement it either.
+route for non-Hermitian Hamiltonians (mpsalgebra's mode="GS"), which is
+now only a fallback for backends without a session (julia_live keeps its
+own path in groundstate.py).
 """
 
 import numpy as np
@@ -42,10 +44,11 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
       (converged runs sit at ~1e-14 while stalls sit at ~1e-1, so tol's
       exact value is uncritical).
     """
-    if self.itensor_version!=3:
-        raise NotImplementedError("nhdmrg requires itensor_version=3 "
-                "(got "+str(self.itensor_version)+"); use the Arnoldi "
-                "route (get_excited_states) for the other backends")
+    if self.itensor_version not in (2,3,"python"):
+        raise NotImplementedError("nhdmrg requires itensor_version 2, 3 "
+                "or \"python\" (got "+str(self.itensor_version)+"); use "
+                "the Arnoldi route (get_excited_states) for the other "
+                "backends")
     if H is None: H = self.hamiltonian
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,
             self.noise)

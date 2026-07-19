@@ -209,18 +209,24 @@ Notable, deliberate implementation details (not bugs to "fix"):
   `Many_Body_Chain.tevol_method` (default `"TDVP"`); `mpscpp2` has no TDVP
   and always uses a hand-rolled 2nd-order Taylor expansion of
   `exp(-i dt H)` as an MPO instead.
-- `mpscpp3` also has a real non-Hermitian DMRG (`Chain::nhdmrg`, driven
-  by `nhdmrg.py`, exposed as `Many_Body_Chain.nhdmrg()`): a port of
-  ITensorNHDMRG.jl's "onesided"+"fidelity" algorithm that optimizes a
-  biorthogonal left/right eigenpair of a non-Hermitian `H`, targeting the
-  eigenvalue with smallest real part. `groundstate.py`'s non-Hermitian
-  `gs_energy` branch routes to it for `itensor_version==3`; the other
-  C++/Python backends keep the (much less accurate) MPS Arnoldi fallback
-  (`algebra/arnolditk.py`). The adjoint MPO is built from
-  `MultiOperator.get_dagger()`'s terms on the Python side, and since the
-  non-Hermitian energy is not variational, `nhdmrg.py` certifies each run
-  by the eigen-residual and redraws a fresh random start when a run
-  stalls.
+- All three session backends implement a real non-Hermitian DMRG
+  (`Chain::nhdmrg`, driven by `nhdmrg.py`, exposed as
+  `Many_Body_Chain.nhdmrg()`): a port of ITensorNHDMRG.jl's
+  "onesided"+"fidelity" algorithm that optimizes a biorthogonal
+  left/right eigenpair of a non-Hermitian `H`, targeting the eigenvalue
+  with smallest real part. `mpscpp3/chain_session.h`'s copy is the
+  annotated original (including two deliberate deviations from the
+  reference for Re-degenerate spectra); `mpscpp2`'s is its v2-API
+  back-port, and `pyitensor/nhdmrg.py` is the pure-Python port (built on
+  `dmrg.py`'s environment/matvec machinery; unlike `dmrg.py` it *does*
+  implement the noise term, because for NH-DMRG it measurably matters).
+  `groundstate.py`'s non-Hermitian `gs_energy` branch routes to it for
+  `itensor_version` 2, 3 and `"python"`; the MPS Arnoldi route
+  (`algebra/arnolditk.py`) remains as the fallback for other backends.
+  The adjoint MPO is built from `MultiOperator.get_dagger()`'s terms on
+  the Python side, and since the non-Hermitian energy is not variational,
+  `nhdmrg.py` certifies each run by the eigen-residual and redraws a
+  fresh random start when a run stalls.
 - A few pre-existing bugs in the original (pre-refactor) file-based
   backend are deliberately reproduced rather than silently fixed —
   see the call-site comments in `chain_session.h` for both versions.

@@ -187,18 +187,25 @@ class Chain:
         return to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
 
     def nhdmrg(self, terms_h, terms_hadj, krylovdim=20, restarts=2):
-        """Not implemented here: non-Hermitian DMRG (a biorthogonal
-        left/right eigenpair solver, see mpscpp3/chain_session.h's
-        Chain::nhdmrg) only exists on the compiled ITensor v3 backend.
-        This stub keeps the Chain method surface aligned with mpscpp3's
-        and fails with a pointer instead of a bare AttributeError;
-        nhdmrg.py's own itensor_version check normally fires first, and
-        the Arnoldi route (algebra/arnolditk.py) remains the
-        non-Hermitian solver for this backend."""
-        raise NotImplementedError(
-            "nhdmrg is only implemented on the compiled ITensor v3 "
-            "backend (itensor_version=3); use setup_cpp(version=3), or "
-            "the Arnoldi route (get_excited_states) on this backend")
+        """Non-Hermitian DMRG: optimize a biorthogonal left/right
+        eigenpair of the non-Hermitian operator given by terms_h,
+        targeting the eigenvalue with smallest real part; terms_hadj must
+        be the adjoint operator's terms (MultiOperator.get_dagger() on
+        the Python side). Port of mpscpp3/chain_session.h's Chain::nhdmrg
+        (the annotated original) -- see nhdmrg.py in this package.
+        Returns (energy, psil, psir)."""
+        from .nhdmrg import nhdmrg as _nhdmrg
+        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h),
+                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        HA = to_mpo(AutoMPO.from_terms(self.sites, terms_hadj),
+                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        # fresh random start every run (never wf0): stalled runs are
+        # detected by the caller's eigen-residual check and re-drawn
+        # (see dmrgpy's nhdmrg.py retry loop)
+        psi0 = self._default_mps()
+        sweeps = self._make_sweeps()
+        return _nhdmrg(H, HA, psi0, sweeps, krylovdim=krylovdim,
+                       restarts=restarts, quiet=not self.verbose)
 
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)

@@ -1,39 +1,53 @@
-"""Tests for the non-Hermitian DMRG (NH-DMRG) solver of the ITensor v3
-backend (mpscpp3/chain_session.h's Chain::nhdmrg, driven by nhdmrg.py) --
-a port of ITensorNHDMRG.jl's default "onesided" + "fidelity"
-configuration. Each test cross-checks against exact diagonalization
-(mode="ED", which diagonalizes the full non-Hermitian matrix), and one
-also against the pre-existing MPS Arnoldi route
-(mpsalgebra.lowest_energy_non_hermitian_arnoldi), which remains the
-non-Hermitian fallback for the other backends.
+"""Tests for the non-Hermitian DMRG (NH-DMRG) solver -- a port of
+ITensorNHDMRG.jl's default "onesided" + "fidelity" configuration,
+implemented on all three session backends: mpscpp3 (the annotated
+original, mpscpp3/chain_session.h's Chain::nhdmrg), mpscpp2 (its v2-API
+back-port), and pyitensor (pyitensor/nhdmrg.py), all driven by the shared
+retry/certificate wrapper in nhdmrg.py. Each test cross-checks against
+exact diagonalization (mode="ED", which diagonalizes the full
+non-Hermitian matrix), and one also against the pre-existing MPS Arnoldi
+route (mpsalgebra.lowest_energy_non_hermitian_arnoldi), the previous
+non-Hermitian fallback.
 
 Conventions checked: the targeted eigenvalue is the one with smallest
 real part; (energy, psil, psir) is a biorthogonal left/right eigenpair
 with <psil|psir> = 1.
 
 NH-DMRG starts from an unseeded random MPS, so equality assertions
-against ED go through moderately loose tolerances (the converged runs
-observed while developing this sit at ~1e-14; 1e-6 leaves headroom
-without letting a stalled run through)."""
+against ED go through moderately loose tolerances; residual assertions
+use 1e-3, comfortably above the driver's own acceptance certificate
+(relative 1e-4 -- an accepted run can sit just below that) and far below
+a stalled run's ~1e-1."""
 
 import numpy as np
 import pytest
 
 from dmrgpy import fermionchain, spinchain, cppext
 
-pytestmark = pytest.mark.skipif(
-    not cppext.available(3),
-    reason="requires the compiled mpscpp3 (ITensor v3) extension",
-)
+VERSIONS = [
+    pytest.param(2, marks=pytest.mark.skipif(
+        not cppext.available(2),
+        reason="requires the compiled mpscpp2 (ITensor v2) extension")),
+    pytest.param(3, marks=pytest.mark.skipif(
+        not cppext.available(3),
+        reason="requires the compiled mpscpp3 (ITensor v3) extension")),
+    pytest.param("python", id="python"),
+]
 
 
-def nh_fermion_chain(n):
+def setup_backend(chain, version):
+    if version == "python":
+        chain.setup_python()
+    else:
+        chain.setup_cpp(version=version)
+
+
+def nh_fermion_chain(n, version):
     """Interacting fermionic chain with a staggered imaginary potential
     (the model of examples/non_hermitian/non_hermitian_chain): complex
     spectrum, unique smallest-real-part value up to a conjugate pair."""
     fc = fermionchain.Fermionic_Chain(n)
-    fc.itensor_version = 3
-    fc.setup_cpp(version=3)
+    setup_backend(fc, version)
     h = 0
     for i in range(n - 1):
         h = h + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
@@ -45,7 +59,7 @@ def nh_fermion_chain(n):
     return fc, h
 
 
-def nh_pt_spin_chain(n, g=0.3):
+def nh_pt_spin_chain(n, version, g=0.3):
     """PT-symmetric XX chain with a staggered imaginary field (the model
     class of Yamamoto et al., PRB 105, 205125): several eigenvalues share
     the smallest real part (a complex-conjugate pair plus real ones), the
@@ -53,8 +67,7 @@ def nh_pt_spin_chain(n, g=0.3):
     right solve's eigenvalue (see arnoldi_smallest_real's Sel comment in
     mpscpp3/chain_session.h)."""
     sc = spinchain.Spin_Chain(["S=1/2"] * n)
-    sc.itensor_version = 3
-    sc.setup_cpp(version=3)
+    setup_backend(sc, version)
     h = 0
     for i in range(n - 1):
         h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
@@ -64,8 +77,9 @@ def nh_pt_spin_chain(n, g=0.3):
     return sc, h
 
 
-def test_nhdmrg_matches_ed_fermionic_chain():
-    fc, h = nh_fermion_chain(4)
+@pytest.mark.parametrize("version", VERSIONS)
+def test_nhdmrg_matches_ed_fermionic_chain(version):
+    fc, h = nh_fermion_chain(4, version)
     es_ed = fc.get_excited(mode="ED", n=4)
     e, psil, psir = fc.nhdmrg()
     # smallest real part reproduced (the ED list is sorted by real part)
@@ -75,17 +89,18 @@ def test_nhdmrg_matches_ed_fermionic_chain():
     assert min(abs(e - x) for x in es_ed) == pytest.approx(0.0, abs=1e-6)
 
 
-def test_nhdmrg_left_right_eigenpair():
-    fc, h = nh_fermion_chain(4)
+@pytest.mark.parametrize("version", VERSIONS)
+def test_nhdmrg_left_right_eigenpair(version):
+    fc, h = nh_fermion_chain(4, version)
     e, psil, psir = fc.nhdmrg()
     # biorthonormal pair
     assert psil.dot(psir) == pytest.approx(1.0, abs=1e-8)
     # right eigenvector: H|r> = E|r>
     r = h * psir - e * psir
-    assert abs(r.dot(r))**0.5 == pytest.approx(0.0, abs=1e-6)
+    assert abs(r.dot(r))**0.5 == pytest.approx(0.0, abs=1e-3)
     # left eigenvector: Hdag|l> = conj(E)|l>
     l = h.get_dagger() * psil - np.conj(e) * psil
-    assert abs(l.dot(l))**0.5 == pytest.approx(0.0, abs=1e-6)
+    assert abs(l.dot(l))**0.5 == pytest.approx(0.0, abs=1e-3)
     # biorthogonal Rayleigh quotient reproduces the eigenvalue
     assert psil.aMb(h, psir) / psil.dot(psir) == pytest.approx(e, abs=1e-8)
 
@@ -97,7 +112,9 @@ def test_nhdmrg_matches_arnoldi():
     cross-tolerance is Arnoldi's, and each is also pinned to ED at its
     own accuracy)."""
     from dmrgpy import mpsalgebra
-    fc, h = nh_fermion_chain(4)
+    if not cppext.available(3):
+        pytest.skip("requires the compiled mpscpp3 (ITensor v3) extension")
+    fc, h = nh_fermion_chain(4, 3)
     es_ed = fc.get_excited(mode="ED", n=4)
     e, psil, psir = fc.nhdmrg()
     ea, wfa = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc, h, n=1)
@@ -106,8 +123,9 @@ def test_nhdmrg_matches_arnoldi():
     assert min(abs(e - x) for x in es_ed) == pytest.approx(0.0, abs=1e-6)
 
 
-def test_nhdmrg_pt_symmetric_spin_chain():
-    sc, h = nh_pt_spin_chain(6)
+@pytest.mark.parametrize("version", VERSIONS)
+def test_nhdmrg_pt_symmetric_spin_chain(version):
+    sc, h = nh_pt_spin_chain(6, version)
     es_ed = sc.get_excited(mode="ED", n=6)
     e, psil, psir = sc.nhdmrg()
     assert e.real == pytest.approx(es_ed[0].real, abs=1e-6)
@@ -116,19 +134,20 @@ def test_nhdmrg_pt_symmetric_spin_chain():
     # non-Hermitian "energy" is not a variational bound, so the residual
     # is the meaningful convergence certificate)
     r = h * psir - e * psir
-    assert abs(r.dot(r))**0.5 == pytest.approx(0.0, abs=1e-6)
+    assert abs(r.dot(r))**0.5 == pytest.approx(0.0, abs=1e-3)
 
 
-def test_gs_energy_routes_to_nhdmrg_on_v3():
-    """For a non-Hermitian Hamiltonian on itensor_version=3, gs_energy()
-    now runs NH-DMRG (groundstate.py's non-Hermitian branch) instead of
-    the Arnoldi route, stores the right eigenvector as wf0, and returns
-    the smallest-real-part eigenvalue."""
-    fc, h = nh_fermion_chain(4)
+@pytest.mark.parametrize("version", VERSIONS)
+def test_gs_energy_routes_to_nhdmrg(version):
+    """For a non-Hermitian Hamiltonian on any session backend (v2, v3,
+    pure Python), gs_energy() now runs NH-DMRG (groundstate.py's
+    non-Hermitian branch) instead of the Arnoldi route, stores the right
+    eigenvector as wf0, and returns the smallest-real-part eigenvalue."""
+    fc, h = nh_fermion_chain(4, version)
     es_ed = fc.get_excited(mode="ED", n=4)
     e0 = fc.gs_energy()
     assert e0.real == pytest.approx(es_ed[0].real, abs=1e-6)
     assert fc.computed_gs
     # wf0 holds the right eigenvector
     r = h * fc.wf0 - e0 * fc.wf0
-    assert abs(r.dot(r))**0.5 == pytest.approx(0.0, abs=1e-6)
+    assert abs(r.dot(r))**0.5 == pytest.approx(0.0, abs=1e-3)

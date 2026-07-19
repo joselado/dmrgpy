@@ -164,8 +164,9 @@ $$H\,|\psi_R\rangle=E\,|\psi_R\rangle,\qquad
 H^\dagger|\psi_L\rangle=E^{*}|\psi_L\rangle,\qquad
 \langle\psi_L|\psi_R\rangle=1 .$$
 
-On the ITensor v3 backend (`sc.setup_cpp(version=3)`), `gs_energy()`
-solves this with a genuine non-Hermitian DMRG (NH-DMRG) — a port of
+On every session backend (ITensor v3, ITensor v2, and the pure-Python
+engine — `itensor_version` 2, 3 or `"python"`), `gs_energy()` solves
+this with a genuine non-Hermitian DMRG (NH-DMRG) — a port of
 [ITensorNHDMRG.jl](https://github.com/tipfom/ITensorNHDMRG.jl) in its
 default configuration: independent Arnoldi solves of the two-site
 eigenproblem for $H$ and $H^\dagger$ ("onesided" solver, targeting the
@@ -185,13 +186,14 @@ Because a non-Hermitian "energy" is not a variational bound, `nhdmrg()`
 certifies convergence through the eigen-residual
 $\lVert H|\psi_R\rangle-E|\psi_R\rangle\rVert$ and re-runs from a fresh
 random state (up to `ntries` times) if it stalls; `krylovdim`/`restarts`
-tune the per-bond Arnoldi effort. On the other backends (v2, pure
-Python), non-Hermitian problems keep using the MPS Arnoldi route
-(`get_excited_states`), which is typically several orders of magnitude
-less accurate than NH-DMRG at comparable cost — see
+tune the per-bond Arnoldi effort. The MPS Arnoldi route
+(`get_excited_states`) remains available on every backend, but is
+typically several orders of magnitude less accurate than NH-DMRG at
+comparable cost — see
 `examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`, which cross-checks
-NH-DMRG against exact diagonalization and the Arnoldi route on an
-interacting fermionic chain with a staggered imaginary potential.
+NH-DMRG on all three backends against exact diagonalization and the
+Arnoldi route on an interacting fermionic chain with a staggered
+imaginary potential.
 
 ## 5. Entanglement and quantum information
 

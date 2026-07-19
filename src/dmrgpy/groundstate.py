@@ -132,10 +132,10 @@ def gs_energy(self,**kwargs):
             e0,wf0 = get_gs_dmrg(self,ishermitian=False,**kwargs)
             self.wf0 = wf0
             return e0
-        elif self.itensor_version==3: # v3 has a real non-Hermitian DMRG
+        elif self.itensor_version in (2,3,"python"): # real non-Hermitian DMRG
             from .nhdmrg import gs_energy_nhdmrg
             return gs_energy_nhdmrg(self,**kwargs)
-        else: # v2/python need to use Krylov
+        else: # any other backend falls back to Krylov
             es,ws = self.get_excited_states(n=1,**kwargs)
             self.computed_gs = True
             self.e0 = es[0]
