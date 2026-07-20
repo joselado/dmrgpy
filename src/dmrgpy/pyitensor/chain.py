@@ -475,6 +475,49 @@ class Chain:
         m = to_mpo(AutoMPO.from_terms(self.sites, terms_x), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         return self._kpm_moments(m, wfa, wfb, num_polynomials, kpmmaxm, kpm_cutoff, kpm_accelerate)
 
+    def nhkpm_moments(self, terms_hs, terms_hs_dag, wfa, wfb, n, kpmmaxm, kpmcutoff):
+        """Non-Hermitian KPM (port of NHKPM.jl, see
+        mpscpp3/chain_session.h's Chain::nhkpm_moments for the full
+        algorithm comment and nonhermitian/kpm.py for the calling
+        convention): biorthogonal Chebyshev moments from a coupled
+        forward/adjoint recursion built from hs=(z*Id-H)/E_max and its
+        dagger (terms_hs/terms_hs_dag, built at the MultiOperator level in
+        Python -- one call per requested frequency z). Returns mu_n,
+        length n, with mu_n[k] = <wfb|vn_{2k-1}> in the 1-based notation
+        of the reference."""
+        if n < 1:
+            raise ValueError("Chain.nhkpm_moments: n must be >= 1")
+        hs = to_mpo(AutoMPO.from_terms(self.sites, terms_hs),
+                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        hsd = to_mpo(AutoMPO.from_terms(self.sites, terms_hs_dag),
+                     cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+
+        v = wfa * 1.0
+        alpha_prev2 = self._apply_mpo_with(hsd, v, kpmcutoff, kpmmaxm)  # alpha[1]
+        alpha_prev1 = mps_sum(self._apply_mpo_with(hs, alpha_prev2, kpmcutoff, kpmmaxm) * 2.0,
+                               v * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)  # alpha[2]
+
+        vn_prev2 = v * 1.0  # vn[1]
+        vn_prev1 = self._apply_mpo_with(hs, vn_prev2, kpmcutoff, kpmmaxm) * 2.0  # vn[2]
+
+        mu = [inner(wfb, vn_prev2)]
+        for _ in range(1, n):
+            alpha_x = mps_sum(self._apply_mpo_with(hsd, alpha_prev1, kpmcutoff, kpmmaxm) * 2.0,
+                               alpha_prev2 * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
+            alpha_y = mps_sum(self._apply_mpo_with(hs, alpha_x, kpmcutoff, kpmmaxm) * 2.0,
+                               alpha_prev1 * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
+            t = mps_sum(self._apply_mpo_with(hsd, vn_prev1, kpmcutoff, kpmmaxm) * 2.0,
+                        vn_prev2 * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
+            vn_x = mps_sum(alpha_prev1 * 2.0, t, cutoff=kpmcutoff, maxdim=kpmmaxm)
+            vn_y = mps_sum(self._apply_mpo_with(hs, vn_x, kpmcutoff, kpmmaxm) * 2.0,
+                           vn_prev1 * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
+
+            mu.append(inner(wfb, vn_x))
+
+            alpha_prev2, alpha_prev1 = alpha_x, alpha_y
+            vn_prev2, vn_prev1 = vn_x, vn_y
+        return mu
+
     # -- private helpers, mirroring chain_session.h's own private section --
 
     def _default_mps(self):

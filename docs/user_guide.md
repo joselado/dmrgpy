@@ -214,7 +214,9 @@ orders of magnitude less accurate than NH-DMRG at comparable cost — see
 `examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`, which cross-checks
 NH-DMRG on all three backends against exact diagonalization and the
 Arnoldi route on an interacting fermionic chain with a staggered
-imaginary potential.
+imaginary potential. The biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
+is also what feeds the non-Hermitian dynamical correlator,
+`get_dynamical_correlator(submode="KPM")` for $H\neq H^\dagger$ — see §6.
 
 ## 5. Entanglement and quantum information
 
@@ -447,6 +449,48 @@ $\langle(H-E_0)^k\rangle$ using a maximum-entropy method
 expansion — useful when positivity of the reconstructed $S(\omega)$
 matters more than matching KPM's polynomial-expansion artifacts.
 
+**`submode="KPM"` for non-Hermitian Hamiltonians.** When $H\neq H^\dagger$
+(§4), `submode="KPM"` automatically routes to a different algorithm, a
+port of the non-Hermitian Kernel Polynomial Method (NH-KPM) of
+[NHKPM.jl](https://github.com/GUANGZECHEN/NHKPM.jl) ([Phys. Rev. Lett.
+130, 100401](https://doi.org/10.1103/PhysRevLett.130.100401)):
+
+```python
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                      name=(sc.Sz[0], sc.Sz[0]), E_max=10)
+```
+
+The ground state is now the biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
+from NH-DMRG (§4) rather than a single self-dual $|\mathrm{GS}\rangle$,
+and the correlator computed is
+$\langle\psi_L|A(z)\,B|\psi_R\rangle$. Because the spectrum of $H$ is
+complex, the ordinary Chebyshev recursion (which needs a *real* rescaled
+spectrum in $[-1,1]$) does not apply; NH-KPM instead expands the
+frequency-shifted operator $\tilde H(z)=(z\,\mathbb{1}-H)/E_{\max}$ using
+a *coupled* forward/adjoint recursion built from both $\tilde H(z)$ and
+$\tilde H(z)^\dagger$ (see `src/dmrgpy/algebra/kpm.py`'s
+`get_mu_n_nh`/`spec_from_moments_nh`, ported line-for-line from the
+reference's `get_vn_NH`/`get_spec_kpm_NH`). The key practical consequence
+is that, unlike the Hermitian case, the moments depend on $z$ itself, so
+they are recomputed from scratch at every requested frequency rather than
+amortized once over the whole spectrum — this mirrors the reference
+algorithm's own cost profile, and is why NH-KPM is noticeably more
+expensive per frequency point than the Hermitian `"KPM"` path. `E_max`
+(an upper bound on the spectral radius of $H$) must be supplied
+explicitly: unlike the Hermitian case's variational band-edge estimate
+(see above), there is no automatic estimator yet for a non-Hermitian
+spectral bound. Implemented so far for the ED backend, `itensor_version=3`,
+and `itensor_version="python"`; `itensor_version=2` raises
+`NotImplementedError`. See `examples/non_hermitian/nhkpm_v3_VS_ED`
+(ED vs `itensor_version=3`, machine-precision agreement on a small
+interacting fermionic chain with a staggered imaginary potential) and
+`examples/non_hermitian/nhkpm_python_VS_v3_timing` (`itensor_version=3`
+vs `"python"` on a non-uniform hopping/non-uniform imaginary-onsite-energy
+chain, same machine-precision agreement — the pure-Python backend runs
+roughly 2x slower than v3 for this workload, since NH-KPM's
+per-frequency moment recursion is far more matvec-heavy than the
+Hermitian KPM path).
+
 **Choosing a method:** KPM (default) for a first look at the full
 spectrum; CVM or TD when you need high resolution in a specific,
 narrow frequency window; TDZ instead of TD when that window also needs
@@ -454,7 +498,10 @@ long simulated times/low frequencies, where TD's real-time bond-dimension
 growth becomes limiting; EX when a handful of excited states already
 capture the physics (e.g. a small gapped system); maxent when you want a
 guaranteed-positive reconstruction from limited moment data (e.g.\
-combined with finite-temperature ED, see §9).
+combined with finite-temperature ED, see §9). For a non-Hermitian $H$,
+`"KPM"` is currently the only submode with a genuine biorthogonal
+implementation (see above); the other submodes fall back to a
+correction-vector method that assumes $A^\dagger=B$.
 
 ## 7. Real-time dynamics: quenches
 
