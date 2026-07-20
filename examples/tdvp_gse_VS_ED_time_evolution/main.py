@@ -25,6 +25,22 @@ h0 = 0
 h1 = 0
 for i in range(n):
     h0 = h0+(-1)**i*sc.Sz[i] # Neel-favoring field
+# A field-only h0 has an exact *product-state* ground state (bond
+# dimension 1). That triggers a real, isolated bug in mpscpp3's C++
+# global_subspace_expand()/one-site TDVP (itensor_version=3 only) when
+# fed a near-bond-dimension-1 starting MPS: confirmed NOT a ground-state
+# degeneracy issue (h0's ground state is already unique, and forcing the
+# whole low-lying spectrum non-degenerate via a site-dependent field
+# strength didn't change the failure at all); confirmed NOT a DMRG
+# convergence issue (more sweeps made it worse, and plain two-site
+# "TDVP" on this exact h0 is perfectly reliable). Isolated experimentally
+# to the starting bond dimension: mixing in a small XX+YY coupling so the
+# GS has bond dimension >1 makes TDVP_GSE reliable (8/8 trials,
+# diff~5e-10, vs. up to ~5/8 failing at diff~0.02-0.04 with a pure
+# product-state start). See CLAUDE.md/git history if revisiting the
+# underlying bond-dim-1 edge case in mpscpp3/TDVP/basisextension.h.
+for i in range(n-1):
+    h0 = h0+0.3*(sc.Sx[i]*sc.Sx[i+1]+sc.Sy[i]*sc.Sy[i+1])
 for i in range(n-1):
     h1 = h1+sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 

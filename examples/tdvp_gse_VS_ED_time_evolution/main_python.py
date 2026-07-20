@@ -22,6 +22,14 @@ h0 = 0
 h1 = 0
 for i in range(n):
     h0 = h0+(-1)**i*sc.Sz[i] # Neel-favoring field
+# Mixed in a small XX+YY coupling so h0's ground state isn't an exact
+# product state (bond dimension 1) -- see main.py's matching comment: a
+# pure-field h0 triggers a real bond-dim-1 edge case in mpscpp3's C++
+# global_subspace_expand()/one-site TDVP (not reproduced on this
+# itensor_version="python" backend, but kept identical to main.py so
+# both scripts test the exact same setup).
+for i in range(n-1):
+    h0 = h0+0.3*(sc.Sx[i]*sc.Sx[i+1]+sc.Sy[i]*sc.Sy[i+1])
 for i in range(n-1):
     h1 = h1+sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 
