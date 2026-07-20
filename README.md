@@ -18,6 +18,21 @@ This library is still under heavy development.
 
 # How to install #
 
+## From PyPI ##
+
+```bash
+pip install dmrgpy
+```
+
+This installs the pure-Python part of the package, which is fully usable
+out of the box: the exact-diagonalization (ED) backend and the
+pure-Python DMRG/TDVP backend (`itensor_version="python"`) both work
+immediately, with no compiler needed. The compiled C++ DMRG backends
+(`itensor_version=2`/`3`, built against a vendored copy of ITensor) are
+not distributed on PyPI -- they are compiled in place from a git clone of
+this repository (see below); without them compiled, `dmrgpy` transparently
+falls back to ED.
+
 ## Linux and Mac ##
 
 Execute the script 

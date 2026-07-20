@@ -31,9 +31,23 @@ whichever solver is requested or available:
 
 ## 2. Installation
 
-There is no `setup.py`/`pyproject.toml`; DMRGPY is used directly from
-`src/`, added to `PYTHONPATH` (or symlinked into `site-packages`) by the
-installer.
+There are two independent install paths, and they cover different
+backends:
+
+- **`pip install dmrgpy`** (via the repo's `pyproject.toml`) installs the
+  pure-Python part of the package only — the ED backend and the
+  pure-Python `itensor_version="python"` DMRG/TDVP backend both work
+  immediately, no compiler needed. The compiled C++ backends
+  (`itensor_version=2`/`3`) are *not* on PyPI: they're built against a
+  ~400MB vendored copy of ITensor, and `pyproject.toml` excludes
+  `mpscpp2`/`mpscpp3` from the distributed package entirely (see its own
+  comments). Without them, DMRGPY still works end to end — it just falls
+  back to ED/`"python"` (see mode.py) — but if you want the compiled
+  backends you need the git-clone path below instead.
+- **A git clone + `python install.py`** is required for the compiled C++
+  backends (and is how this repository is developed). DMRGPY is used
+  directly from `src/`, added to `PYTHONPATH` (or symlinked into
+  `site-packages`) by the installer.
 
 ```bash
 python install.py                        # compiles ITensor v3 (mpscpp3, the default) + its pybind11 extension
@@ -58,8 +72,13 @@ and every call transparently falls back to ED when a requested compiled
 backend isn't present.
 
 No compiler or pybind11 is needed at all to use `itensor_version="python"`
-— only NumPy/SciPy (and optionally `numba`/`jax` for faster execution,
-see §5.4).
+— only NumPy/SciPy/SymPy/`numba` (all four are core `pip install dmrgpy`
+dependencies; `numba` is required rather than optional because
+`algebra/kpmextrapolate.py` imports it at module level, and that module
+is reached unconditionally from `manybodychain.py` via
+`dynamics.py`/`kpmdmrg.py` — this is separate from `pyitensor`'s own
+opt-in JAX/numba-accelerated matvec kernel, which *is* genuinely optional
+and off by default, see §5.4). `jax` is optional either way.
 
 ## 3. Quick start
 
@@ -530,11 +549,12 @@ shown in §5.1/§5.2, not these first-call numbers.
 - Use `itensor_version="python"` for quick prototyping, CI/environments
   without a C++ toolchain, or small systems (n ≲ 20) where the 1.3–2x
   overhead doesn't matter.
-- Install `numba` (and optionally `jax`) alongside the pure-Python
-  backend *and* set `pyitensor.kernels.USE_NUMBA = True` (off by
-  default, see §5's note above) — without both steps, `pyitensor` falls
-  back to plain NumPy loops and is substantially slower than the numbers
-  above (see `pyitensor/__init__.py`'s own docstring).
+- `numba` is already installed (it's a core dependency, see §2); also
+  install `jax` and set `pyitensor.kernels.USE_NUMBA = True` (off by
+  default, see §5's note above) if you want the accelerated matvec
+  kernel — without that opt-in, `pyitensor` falls back to plain NumPy
+  loops and is substantially slower than the numbers above (see
+  `pyitensor/__init__.py`'s own docstring).
 - For production-size chains, dynamical correlators, or anything
   performance-sensitive, compile the C++ extension (`python install.py`)
   and use `itensor_version=2` or `3`.

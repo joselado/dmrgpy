@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dmrgpy"
+version = "0.1.0"
+description = "Quasi-one-dimensional spin, fermionic, parafermion and bosonic systems with matrix product states (DMRG/ED)"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE.md"]
+authors = [{name = "Jose Lado", email = "jose.lado@aalto.fi"}]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "scipy",
+    "sympy",
+    "numba",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS",
+]
+
+[project.urls]
+Homepage = "https://github.com/joselado/dmrgpy"
+Repository = "https://github.com/joselado/dmrgpy"
+Issues = "https://github.com/joselado/dmrgpy/issues"
+
+# Extras for optional, non-default backends/tools that are only imported
+# lazily by specific submodules -- never required just to `import dmrgpy`.
+# (numba is NOT here: algebra/kpmextrapolate.py imports it at module level,
+# and that module is reached unconditionally via manybodychain -> dynamics
+# -> kpmdmrg -> algebra.kpm -> algebra.kpmextrapolate, so it's a core
+# dependency in practice, not an optional one.)
+[project.optional-dependencies]
+julia = ["julia"]          # juliarun.py, mpsjulialive/juliasession.py (itensor_version="julia"/"julia_live")
+jax = ["jax"]               # pyitensor/kernels.py
+stats = ["statsmodels"]     # algebra/kpmextrapolate.py (function-local import)
+parallel = ["multiprocess", "dill"]  # parallel.py, algebra/parallel.py, parallelslurm.py
+full = ["dmrgpy[julia,jax,stats,parallel]"]
+
+# NOTE: this PyPI package ships the pure-Python part of dmrgpy only (the ED
+# backend and the pure-Python "pyitensor" DMRG/TDVP backend both work
+# out of the box). The compiled C++ DMRG backends (itensor_version=2/3,
+# built against a ~400MB vendored ITensor copy) are not distributed on
+# PyPI -- they are compiled in place from a git checkout via
+# `python install.py`, which is a repo-level build step, not a pip
+# extension build (see CLAUDE.md / install.py). Without them compiled,
+# dmrgpy transparently falls back to ED (see mode.py), so the package is
+# fully usable as installed; run install.py from a clone of the repo for
+# the faster compiled backends.
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["dmrgpy*"]
+exclude = ["dmrgpy.mpscpp2", "dmrgpy.mpscpp2.*", "dmrgpy.mpscpp3", "dmrgpy.mpscpp3.*"]
+
+[tool.setuptools.package-data]
+dmrgpy = ["mpsjulia/*.jl", "mpsjulia/compiler/*.jl"]
+"dmrgpy.mpsjulialive" = ["*.jl"]
+"dmrgpy.algebra" = ["fortran/algebra/*.f90"]
