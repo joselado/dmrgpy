@@ -491,15 +491,31 @@ pattern can trigger; \texttt{"python"} measured $\sim$1.8--2x slower
 than v3 for this workload, consistent with NH-KPM's per-frequency
 moment recursion being far more matvec-heavy than the Hermitian KPM
 path, which amortizes its moments over the whole spectrum instead of
-recomputing per frequency). Validation against
-the reference Julia implementation itself was done by hand (the coupled
-recursion reproduces an independently-derived scalar recursion exactly,
-and the reconstructed density correctly peaks at known eigenvalues and
-sharpens with more moments) rather than against the reference's own
-shipped \texttt{.OUT} output files, which did not reproduce under the
-parameters recorded in the currently-checked-in example scripts ---
-plausibly stale, given the upstream repo ships multiple undated
-\texttt{\_backup}/\texttt{\_old} source variants of the same algorithm.
+recomputing per frequency). Validated directly against the live
+upstream Julia implementation, not just by hand: the reference's own
+shipped \texttt{.OUT} output files did not reproduce under the
+parameters recorded in the currently-checked-in example scripts
+(plausibly stale, given the upstream repo ships multiple undated
+\texttt{\_backup}/\texttt{\_old} source variants of the same
+algorithm), so instead the exact
+\texttt{get\_vn\_NH}/\texttt{get\_mu\_n\_NH}/\texttt{get\_spec\_kpm\_NH}/
+\texttt{dos\_kpm\_NH} function bodies were run directly (Julia was
+available; only the \texttt{mode="matrix"} branches were needed, which
+have no ITensors.jl/Arpack.jl dependency) on the same single-particle
+Hatano-Nelson-type chain used in the reference's own
+\texttt{Hatano.jl} example (asymmetric-hopping non-Hermitian SSH chain,
+$N=20$, all-real spectrum). Comparing the resulting tDOS$(E)$ ($E$
+scanned along the real axis at fixed small imaginary broadening)
+against this dmrgpy port on the identical matrix and identical
+$E_{\max}$/moment count/kernel/energy grid: all 22 detected peaks land
+at bit-for-bit identical energies and heights (max relative difference
+$\sim3\times10^{-15}$, i.e.\ floating-point round-off, not an
+algorithmic discrepancy), and every peak sits at the real part of a
+genuine eigenvalue of the underlying matrix, to within the energy
+grid's resolution. (Earlier, weaker checks are kept for context: the
+coupled recursion also reproduces an independently-derived scalar
+recursion exactly for a $1\times1$ test case, and the reconstructed
+density correctly sharpens with more moments.)
 
 \subsection{TDZ / complex-time-evolution dynamical correlator}
 

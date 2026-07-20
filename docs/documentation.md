@@ -393,15 +393,28 @@ trigger; `"python"` measured ~1.8-2x slower than v3 for this workload,
 consistent with NH-KPM's per-frequency moment recursion being far more
 matvec-heavy than the Hermitian KPM path, which amortizes its moments
 over the whole spectrum instead of recomputing per frequency).
-Validation against the reference
-Julia implementation itself was done by hand (the coupled recursion
-reproduces an independently-derived scalar recursion exactly, and the
-reconstructed density correctly peaks at known eigenvalues and sharpens
-with more moments) rather than against the reference's own shipped
-`.OUT` output files, which did not reproduce under the parameters
-recorded in the currently-checked-in example scripts — plausibly stale,
-given the upstream repo ships multiple undated `_backup`/`_old` source
-variants of the same algorithm.
+Validated directly against the live upstream Julia implementation, not
+just by hand: the reference's own shipped `.OUT` output files did not
+reproduce under the parameters recorded in the currently-checked-in
+example scripts (plausibly stale, given the upstream repo ships
+multiple undated `_backup`/`_old` source variants of the same
+algorithm), so instead the exact `get_vn_NH`/`get_mu_n_NH`/
+`get_spec_kpm_NH`/`dos_kpm_NH` function bodies were run directly (Julia
+was available; only the `mode="matrix"` branches were needed, which
+have no `ITensors.jl`/`Arpack.jl` dependency) on the same single-particle
+Hatano-Nelson-type chain used in the reference's own `Hatano.jl`
+example (asymmetric-hopping non-Hermitian SSH chain, N=20, all-real
+spectrum). Comparing the resulting tDOS(E) (E scanned along the real
+axis at fixed small imaginary broadening) against this dmrgpy port on
+the identical matrix and identical E_max/N/kernel/energy grid: all 22
+detected peaks land at bit-for-bit identical energies and heights
+(max relative difference ~3e-15, i.e. floating-point round-off, not an
+algorithmic discrepancy), and every peak sits at the real part of a
+genuine eigenvalue of the underlying matrix, to within the energy
+grid's resolution. (Earlier, weaker checks are kept for context: the
+coupled recursion also reproduces an independently-derived scalar
+recursion exactly for a 1x1 test case, and the reconstructed density
+correctly sharpens with more moments.)
 
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
