@@ -54,6 +54,25 @@ def _truncate(s, cutoff, maxdim, mindim):
     return keep, discarded
 
 
+def eigh_truncate(rho, cutoff, maxdim, mindim=1):
+    """Truncated eigendecomposition of a Hermitian matrix rho (typically a
+    reduced/companion density matrix): diagonalize, sort eigenvalues
+    descending, treat their (clipped, non-negative) square roots as an
+    SVD-like singular-value spectrum, and keep the largest via _truncate()'s
+    usual Cutoff/MaxDim/mindim rule. Returns (Uk, keep): Uk is rho's
+    eigenvectors for the kept eigenvalues as columns (descending order),
+    keep is how many were kept. Factored out because pyitensor/gse.py's
+    Krylov-subspace basis enrichment and pyitensor/nhdmrg.py's fidelity
+    truncation both reduce to exactly this step, once each has built its
+    own (differently constructed) rho."""
+    evals, evecs = np.linalg.eigh(rho)
+    order = np.argsort(evals)[::-1]
+    evals, evecs = evals[order], evecs[:, order]
+    svals = np.sqrt(np.clip(evals, 0.0, None))
+    keep, _discarded = _truncate(svals, cutoff, maxdim, mindim)
+    return evecs[:, :keep], keep
+
+
 def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
     """Split ITensor T into U * S * V (contracting U*S*V reconstructs T up
     to the requested truncation), grouping `left_inds` onto U and every

@@ -188,6 +188,10 @@ PYBIND11_MODULE(_dmrgcpp, m)
              py::arg("A"),py::arg("wf"))
         .def("multiply_operators",&Chain::multiply_operators,
              py::arg("A"),py::arg("B"))
+        .def("sum_operators",&Chain::sum_operators,
+             py::arg("A"),py::arg("B"))
+        .def("scale_operator",&Chain::scale_operator,
+             py::arg("A"),py::arg("z"))
         .def("trace_operator",&Chain::trace_operator,py::arg("A"))
         .def("hermitian_operator",&Chain::hermitian_operator,py::arg("A"))
         .def("overlap_aMb_operator",&Chain::overlap_aMb_operator,

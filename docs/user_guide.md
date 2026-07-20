@@ -75,6 +75,26 @@ hopping $t\sum_i(c_i^\dagger c_{i+1}+\text{h.c.})$, Hubbard interaction
 $U\sum_i n_{i\uparrow}n_{i\downarrow}$, and so on — see §16 for concrete
 Hamiltonians.
 
+**Algebra on already-built operators.** `sc.toMPO(h)` compiles a
+`MultiOperator` into a `StaticOperator` (an already-built matrix product
+operator, `itensor_version` 2, 3, and `"python"` only — not
+`"julia_live"` yet). Two `StaticOperator`s can then be combined directly
+with `+`, `-`, unary `-`, and scalar `*`/`/`, without going back through
+the symbolic `MultiOperator` form:
+
+```python
+A = sc.toMPO(sc.Sz[0])
+B = sc.toMPO(sc.Sx[0]*sc.Sx[1])
+C = A + 2*B - A          # still a StaticOperator
+```
+
+This is a compressed direct sum at the tensor-network level (like
+ITensorMPS.jl's `+(::MPO, ::MPO)`), useful for combining operators that
+only exist as already-built `StaticOperator`s (e.g. two independently
+constructed products or exponentials); for the common case of combining
+Hamiltonians before ever building an MPO, summing the underlying
+`MultiOperator`s directly (as `h = h + ...` above) remains preferred.
+
 ## 3. Ground-state properties
 
 **Ground-state energy**
@@ -398,9 +418,11 @@ dimension needed further, but requires a larger `n_max` to reconstruct
 the real axis accurately); `n_max` (≤4) is the reconstruction order;
 `dt`/`tmax`/`nt` set the underlying time step/duration exactly as in
 `"TD"`. Uses two-site TDVP when available (`itensor_version` 3 or
-`"python"`, `tevol_method="TDVP"`, the paper's own setup) or falls back
-to the MPO-Taylor propagator otherwise (`itensor_version=2`, which has
-no TDVP) — the same TDVP-vs-Taylor choice `"TD"` already makes. Current
+`"python"`, `tevol_method="TDVP"`, the paper's own setup), one-site TDVP
+with global subspace expansion (`tevol_method="TDVP_GSE"`, see §7 — same
+`itensor_version` support as `"TDVP"`), or falls back to the MPO-Taylor
+propagator otherwise (`tevol_method="MPO"`, or `itensor_version=2`, which
+has no TDVP) — the same TDVP-vs-Taylor choice `"TD"` already makes. Current
 scope: only the "greater" branch of the correlator is computed (the same
 simplification `"TD"` itself already makes), so this is best used the
 same way as `"TD"`: high-resolution work in a narrow frequency window,
@@ -459,6 +481,36 @@ flip a spin, or add a particle) before evolving and measuring $B(t)$.
 `timeevolution.imaginary_exponential` computes autocorrelation functions
 directly, $\langle\psi_0|e^{iHt}|\psi_0\rangle$, without a separate
 measurement operator.
+
+**Choosing the propagator: `sc.tevol_method`.** Three options:
+
+- `"TDVP"` (the default) — two-site TDVP, which grows the MPS bond
+  dimension via SVD the same way ground-state DMRG does. Used whenever
+  `itensor_version` is `3` or `"python"`; `itensor_version=2` falls back
+  to `"MPO"` (below) even with this default.
+- `"TDVP_GSE"` (`itensor_version` 3 or `"python"` only, same support as
+  plain `"TDVP"` above) — one-site TDVP preceded, for the first
+  `sc.tdvp_gse_sweeps` steps (default 3), by a *global subspace
+  expansion* step: a Krylov subspace $\{\psi,H\psi,H^2\psi,\dots\}$ of
+  dimension `sc.tdvp_gse_krylov_order` (default 3) is used to enlarge the
+  MPS's bond dimension *without changing the state it represents*, using
+  a cutoff `sc.tdvp_gse_cutoff` (default $10^{-8}$) — the scheme of Yang
+  & White, [arXiv:2005.06104](https://arxiv.org/abs/2005.06104)/Phys.
+  Rev. B 102, 094315 (2020). Most useful when the starting state's bond
+  dimension is small (e.g.\ a product-state quench) and one-site TDVP
+  alone (which conserves bond dimension exactly) wouldn't be able to grow
+  into the entanglement the subsequent evolution generates.
+- `"MPO"` — a hand-rolled 2nd-order Taylor expansion of $e^{-iH\,dt}$
+  applied as an MPO each step; the only option on `itensor_version=2`
+  (which has no TDVP at all), and available (if slower/less accurate for
+  a given bond dimension) everywhere else too.
+
+```python
+sc.tevol_method = "TDVP_GSE"
+sc.tdvp_gse_sweeps = 3
+sc.tdvp_gse_krylov_order = 3
+sc.tdvp_gse_cutoff = 1e-8
+```
 
 ## 8. Density of states
 

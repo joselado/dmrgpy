@@ -245,6 +245,30 @@ def one_site_heff(L, Lbra, H, ket, i, R, Rbra):
     return matvec, order_in, shape, x0
 
 
+def zero_site_heff(L, Lbra, R, Rbra, C, left_link, right_link):
+    """The 0-site ("bond") effective Hamiltonian sitting between two
+    already-extended environments L (through some site i) and R (through
+    site i+1 onward), with no local MPO tensor of its own in between since
+    a bond carries no physical index -- the backward-evolution piece that
+    makes one-site TDVP's forward site-update sweep equivalent to
+    evolving the whole state by tau under all of H at once (Haegeman et
+    al., "Unifying time evolution and optimization with matrix product
+    states"), exactly one_site_heff's role in two-site TDVP but one rank
+    lower. C is the current bond tensor (indices left_link, right_link
+    only); left_link must be the index shared with L's own dangling ket
+    leg, right_link the one shared with R's. Same shape of return value
+    as one_site_heff/two_site_heff."""
+    order_in = ([left_link] if left_link else []) + ([right_link] if right_link else [])
+    shape = tuple(ind.dim for ind in order_in)
+    x0 = C.transpose_to(order_in).reshape(-1)
+
+    order_out = ([Lbra] if Lbra else []) + ([Rbra] if Rbra else [])
+    pieces = [p for p in (L, R) if p is not None]
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
+
+    return matvec, order_in, shape, x0
+
+
 def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
     """Diagonalize the 2-site effective Hamiltonian at bond (i,i+1) for its
     lowest eigenpair. Returns (energy, theta_ITensor)."""

@@ -1,6 +1,7 @@
-# library for immutable operators,
-# they can act over a wavefunction, but they do not have
-# algebra
+# library for immutable operators: they can act over a wavefunction,
+# and (see __add__/__sub__/__neg__/__mul__/__truediv__ below) support
+# direct-sum/scalar algebra with each other on itensor_version 2, 3
+# and "python" (not "julia_live" yet)
 
 from ..mps import MPS
 from copy import copy as _shallow_copy
@@ -11,7 +12,7 @@ class StaticOperator():
         self.MBO = MBO # store the many-body object
         self.cpp_handle = MBO._session.build_operator(MO.to_terms())
     def __mul__(self,v):
-        from ..multioperator import MultiOperator
+        from ..multioperator import MultiOperator, isnumber
         if type(v)==MPS: # input is an MPS
             handle = self.MBO._session.apply_pure_operator(self.cpp_handle,v.cpp_handle)
             return MPS(self.MBO,cpp_handle=handle).copy()
@@ -21,14 +22,43 @@ class StaticOperator():
             return out
         elif type(v)==MultiOperator: # input is a multioperator
             return self*StaticOperator(v,self.MBO)
+        elif isnumber(v): # scalar rescale, no contraction/bond growth
+            out = self.copy()
+            out.cpp_handle = self.MBO._session.scale_operator(self.cpp_handle,complex(v))
+            return out
         else:
             print("Unrecognized type in __mul__",type(v))
             raise
     def __rmul__(self,v):
-        from ..multioperator import MultiOperator
+        from ..multioperator import MultiOperator, isnumber
         if type(v)==MultiOperator: # input is a multioperator
             return StaticOperator(v,self.MBO)*self
+        elif isnumber(v): return self*v
         else: raise
+    def __truediv__(self,v): return self*(1./v)
+    def __neg__(self): return (-1)*self
+    def __radd__(self,v): return self + v
+    def __add__(self,v):
+        """Sum of two already-built MPOs, mirroring ITensorMPS.jl's
+        `+(::MPO, ::MPO)` (abstractmps.jl): a compressed direct sum at the
+        tensor-network level, without going back through the symbolic
+        MultiOperator representation. MultiOperator already supports `+`
+        on its own (see multioperator.py) for the common case of combining
+        Hamiltonians before ever building an MPO; this is for combining
+        operators that only exist as already-built StaticOperators (e.g.
+        two independently constructed products/exponentials)."""
+        if v==0: return self # allows sum([...]) starting from 0
+        if type(v)!=StaticOperator:
+            raise TypeError("Can only add a StaticOperator to another "
+                    "StaticOperator (got "+str(type(v))+")")
+        if not hasattr(self.MBO._session,"sum_operators"):
+            raise NotImplementedError("MPO sum is not implemented for "
+                    "this backend yet (itensor_version 2, 3 and "
+                    "'python' support it, 'julia_live' doesn't)")
+        out = self.copy()
+        out.cpp_handle = self.MBO._session.sum_operators(self.cpp_handle,v.cpp_handle)
+        return out
+    def __sub__(self,v): return self + (-1)*v
     def get_dagger(self):
         out = self.copy()
         out.cpp_handle = self.MBO._session.hermitian_operator(self.cpp_handle)

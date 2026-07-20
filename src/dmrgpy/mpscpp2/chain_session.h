@@ -512,6 +512,31 @@ class Chain
         return mult_mpo(A,B);
         }
 
+    // Public wrapper around the private sum_mpo() helper below (mirrors
+    // multiply_operators()/mult_mpo() just above), exposed so StaticOperator
+    // on the Python side can add two already-built MPOs directly. sum_mpo()
+    // itself is just ITensor v2's own sum(MPO,MPO,args) -- a compressed
+    // direct sum, algorithmically the same construction as ITensorMPS.jl's
+    // `+(::MPO, ::MPO)` (abstractmps.jl's default "densitymatrix" algorithm).
+    MPO
+    sum_operators(MPO const& A, MPO const& B) const
+        {
+        return sum_mpo(A,B);
+        }
+
+    // Scalar multiple of an already-built MPO -- a plain tensor rescale
+    // (multiplies one site's tensor by z), not a contraction, so unlike
+    // multiply_operators()/sum_mpo() this doesn't touch bond dimension.
+    // Exposed so StaticOperator can implement negation/subtraction on top
+    // of sum_operators(), mirroring how Julia's `-(A,B) = +(A,-B)` for
+    // MPS/MPO in ITensorMPS.jl's abstractmps.jl reduces to `+` plus a
+    // scalar multiple.
+    MPO
+    scale_operator(MPO const& A, Cplx z) const
+        {
+        return z*A;
+        }
+
     // Mirrors multmpo.h's trace_mpo_operator() task / operators.h's
     // trace_mpo() (Tr[A] = <Id|A>).
     std::complex<double>

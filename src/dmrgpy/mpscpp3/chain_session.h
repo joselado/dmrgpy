@@ -1,17 +1,19 @@
 #include <tuple>
 
-// TDVP/tdvp.h is a quoted include, so it resolves relative to this file's
-// own directory (mpscpp3/) with no Makefile/include-path change needed.
-// mpscpp3-only: TDVP/ has no v2 counterpart (mpscpp2's Chain has no TDVP
-// methods at all), so tdvp_step()/quench_tdvp()/evolve_and_measure_tdvp()
-// below only exist in this file. Only the two-site TDVP algorithm is used
-// (NumCenter=2 in tdvp_step() below) -- two-site TDVP grows bond dimension
-// via SVD the same way two-site DMRG does, which is enough for the
-// quench/correlator use cases this class exposes, so the global subspace
-// expansion machinery in TDVP/basisextension.h (needed mainly for one-site
-// TDVP, or long-range Hamiltonians where two-site growth is too slow) is
-// deliberately not wired in here. See TDVP/README.md for the algorithm.
+// TDVP/tdvp.h and TDVP/basisextension.h are quoted includes, so they
+// resolve relative to this file's own directory (mpscpp3/) with no
+// Makefile/include-path change needed. mpscpp3-only: TDVP/ has no v2
+// counterpart (mpscpp2's Chain has no TDVP methods at all), so
+// tdvp_step()/quench_tdvp()/evolve_and_measure_tdvp()/
+// global_subspace_expand() below only exist in this file. tdvp_step()'s
+// num_center parameter selects one-site (1) or two-site (2, the default)
+// TDVP; two-site TDVP grows bond dimension via SVD the same way two-site
+// DMRG does, so global_subspace_expand() (TDVP/basisextension.h's
+// addBasis(), implementing the Krylov-subspace basis-enrichment scheme of
+// arXiv:2005.06104/Phys. Rev. B 102, 094315) is what lets one-site TDVP
+// grow bond dimension instead -- see TDVP/README.md for the algorithm.
 #include "TDVP/tdvp.h"
+#include "TDVP/basisextension.h"
 
 // Port of mpscpp2/chain_session.h to the ITensor v3 API. The Chain class's
 // public methods, semantics, and preserved-not-fixed quirks (see
@@ -489,6 +491,31 @@ class Chain
         return mult_mpo(A,B);
         }
 
+    // Public wrapper around the private sum_mpo() helper below (mirrors
+    // multiply_operators()/mult_mpo() just above), exposed so StaticOperator
+    // on the Python side can add two already-built MPOs directly. sum_mpo()
+    // itself is just ITensor v3's own sum(MPO,MPO,args) -- a compressed
+    // direct sum, algorithmically the same construction as ITensorMPS.jl's
+    // `+(::MPO, ::MPO)` (abstractmps.jl's default "densitymatrix" algorithm).
+    MPO
+    sum_operators(MPO const& A, MPO const& B) const
+        {
+        return sum_mpo(A,B);
+        }
+
+    // Scalar multiple of an already-built MPO -- a plain tensor rescale
+    // (multiplies one site's tensor by z), not a contraction, so unlike
+    // multiply_operators()/sum_mpo() this doesn't touch bond dimension.
+    // Exposed so StaticOperator can implement negation/subtraction on top
+    // of sum_operators(), mirroring how Julia's `-(A,B) = +(A,-B)` for
+    // MPS/MPO in ITensorMPS.jl's abstractmps.jl reduces to `+` plus a
+    // scalar multiple.
+    MPO
+    scale_operator(MPO const& A, Cplx z) const
+        {
+        return z*A;
+        }
+
     // Mirrors multmpo.h's trace_mpo_operator() task / operators.h's
     // trace_mpo() (Tr[A] = <Id|A>); v3 provides this directly via traceC()
     // instead of needing to build an explicit identity MPO first.
@@ -651,6 +678,70 @@ class Chain
         return out;
         }
 
+    // GSE counterparts of quench_tdvp()/evolve_and_measure_tdvp() just
+    // above: identical setup/measurement, but each per-step evolution is
+    // one-site TDVP (tdvp_step(...,1)) preceded by a global_subspace_expand()
+    // call for the first gse_sweeps steps -- the Yang-White scheme
+    // (arXiv:2005.06104) that lets one-site TDVP's bond dimension keep up
+    // with two-site TDVP's own SVD-driven growth. The driver loop stays in
+    // C++ (like quench_tdvp/evolve_and_measure_tdvp) rather than in Python,
+    // both for consistency with those and to avoid nt Python<->C++ round
+    // trips for the (typically large) default nt.
+    TimeEvolutionResult
+    quench_tdvp_gse(std::vector<MOTerm> const& terms_h,
+                     std::vector<MOTerm> const& terms_i,
+                     std::vector<MOTerm> const& terms_j,
+                     int nt, double dt, int gse_sweeps, int krylov_order,
+                     double gse_cutoff)
+        {
+        if (!have_wf0_) gs_energy();
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
+        double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
+        auto ampo = build_ampo(sites_,terms_h);
+        ampo += -EGS,"Id",1;
+        auto Hshift = toMPO(ampo);
+        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
+        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto psi1 = apply_mpo(A1,wf0_,args);
+        auto psi2 = apply_mpo(A2,wf0_,args);
+        Cplx norm0 = std::sqrt(innerC(psi1,psi1));
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            if (it<gse_sweeps)
+                psi1 = global_subspace_expand(Hshift,psi1,krylov_order,gse_cutoff,0);
+            psi1 = tdvp_step(Hshift,psi1,dt,1);
+            psi1.normalize();
+            psi1 *= norm0;
+            out.correlator.push_back(innerC(psi2,psi1));
+            }
+        out.final_wf = psi1;
+        return out;
+        }
+
+    TimeEvolutionResult
+    evolve_and_measure_tdvp_gse(std::vector<MOTerm> const& terms_h,
+                                 std::vector<MOTerm> const& terms_op,
+                                 MPS const& wf, int nt, double dt,
+                                 int gse_sweeps, int krylov_order,
+                                 double gse_cutoff)
+        {
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto psi = wf;
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            if (it<gse_sweeps)
+                psi = global_subspace_expand(H,psi,krylov_order,gse_cutoff,0);
+            psi = tdvp_step(H,psi,dt,1);
+            out.correlator.push_back(innerC(psi,A,psi));
+            }
+        out.final_wf = psi;
+        return out;
+        }
+
     // One step exp(dt*H) of two-site TDVP (TDVP/tdvp.h), given an
     // already-built MPO H (e.g. from build_operator()) and MPS psi --
     // exposed publicly (moved here from a private helper of the same
@@ -674,9 +765,15 @@ class Chain
     // per iteration. niter=50 bounds the Lanczos iterations used to
     // solve each local effective TDVP equation (tdvp.h's "MaxIter"); not
     // exposed as a knob since neither the MPO-Taylor path this replaces
-    // has an equivalent one.
+    // has an equivalent one. num_center selects one-site (1) or two-site
+    // (2, the default -- matches every existing caller, which all predate
+    // this parameter) TDVP; "Truncate" follows TDVP/README.md's own
+    // stated per-NumCenter default (off for one-site, on for two-site)
+    // since one-site TDVP conserves bond dimension exactly and truncating
+    // it would only ever shrink it, never grow it -- growth for one-site
+    // comes from global_subspace_expand() below instead.
     MPS
-    tdvp_step(MPO const& H, MPS psi, Cplx dt) const
+    tdvp_step(MPO const& H, MPS psi, Cplx dt, int num_center=2) const
         {
         Cplx t = Cplx(0.0,-1.0)*dt;
         auto sweeps = Sweeps(1);
@@ -684,8 +781,86 @@ class Chain
         sweeps.cutoff() = cutoff_;
         sweeps.niter() = 50;
         tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
-                              "NumCenter",2,"DoNormalize",true});
+                              "NumCenter",num_center,
+                              "Truncate",num_center==2,
+                              "DoNormalize",true});
         return psi;
+        }
+
+    // Global subspace expansion (TDVP/basisextension.h's addBasis()):
+    // enriches phi's local bases with a Krylov subspace {phi, H*phi,
+    // H^2*phi, ...} of dimension krylov_order, then discards the least
+    // significant directions via density-matrix truncation -- the
+    // Yang-White scheme (arXiv:2005.06104) that lets one-site TDVP grow
+    // bond dimension the way two-site TDVP does via SVD. Mirrors
+    // TDVP/sample/run.cc's own call: a flat per-order cutoff (truncK, one
+    // entry per one of the krylov_order-1 MPO applications) is simpler to
+    // expose as a single Python-level knob than a per-order vector, and
+    // is what the sample itself uses (epsilonK = {1E-12, 1E-12}). When
+    // maxdim>0 the maxdimK overload is used instead (README's "typical
+    // strategy" for when phi's bond dimension is no longer small: cap
+    // each Krylov application at a fixed bond dimension rather than a
+    // fixed truncation error) -- exposed for that future use case, but
+    // every current caller (quench_tdvp_gse/evolve_and_measure_tdvp_gse
+    // below, and pyitensor/gse.py's mirrored maxdim parameter) always
+    // passes maxdim=0, so this branch is unreached in practice today.
+    MPS
+    global_subspace_expand(MPO const& H, MPS phi, int krylov_order,
+                            double cutoff, int maxdim) const
+        {
+        // krylov_order<=1 means zero Krylov companions (krylov_order-1
+        // MPO applications) -- a no-op, mirrored by pyitensor/gse.py's own
+        // identical guard. Without this, krylov_order<=0 would make
+        // krylov_order-1 negative, which as the std::vector<...> size
+        // argument just below underflows to a huge unsigned value and
+        // throws std::length_error instead of doing nothing.
+        if (krylov_order<=1) return phi;
+        auto args = Args("Cutoff",cutoff,"Method","DensityMatrix",
+                          "KrylovOrd",krylov_order,"DoNormalize",true,
+                          "Quiet",!verbose_);
+        if (maxdim>0)
+            {
+            auto maxdimK = std::vector<int>(krylov_order-1,maxdim);
+            addBasis(phi,H,maxdimK,args);
+            }
+        else
+            {
+            auto truncK = std::vector<Real>(krylov_order-1,cutoff);
+            addBasis(phi,H,truncK,args);
+            }
+        // addBasis()/denmatSumDecomp() (basisextension.h, vendored
+        // unmodified from upstream) only bounds each bond's *new*
+        // directions by cutoff -- there's no per-call cap on the
+        // resulting *total* bond dimension, so for a large-enough system
+        // with genuinely entangled Krylov vectors, every one of the
+        // requested gse_sweeps calls can keep adding more, with no
+        // ceiling (confirmed directly: n=20, default settings, bond
+        // dimension ran to 370 -- 9x this chain's own maxm=40 -- before
+        // being killed). Passing "MaxDim",maxm_ into addBasis()'s own
+        // Args doesn't fix this either: it caps the *new* directions
+        // alone (denmatSumDecomp's diag_hermitian call) at maxm_, not
+        // "new+existing" -- so growth is merely slower (+40 per call
+        // instead of unbounded) rather than actually capped.
+        //
+        // A separate, explicit truncating sweep afterward fixes the
+        // *count*, but critically must use "Cutoff",0.0 here, NOT
+        // `cutoff` -- GSE's whole point is that the directions it just
+        // added carry ~zero weight in phi's own state (that's what makes
+        // it state-preserving), *before* any subsequent one-site TDVP
+        // evolution has a chance to rotate/populate them. A Cutoff-based
+        // truncation right after GSE therefore always discards exactly
+        // those directions again, which was confirmed directly to
+        // silently turn every later one-site TDVP step into a pure
+        // global-phase no-op (bond dimension right back to phi's
+        // original rank, and a rank-1 local tensor under one-site TDVP
+        // literally cannot do anything but rotate its own phase). A
+        // MaxDim-only (Cutoff=0) truncation only trims anything at all
+        // once the *count* actually exceeds maxm_, leaving GSE's added
+        // directions alone whenever there's room -- exactly the desired
+        // "hard cap, but don't undo GSE" behavior.
+        phi.position(length(phi),{"Cutoff",0.0,"MaxDim",maxm_});
+        phi.position(1,{"Cutoff",0.0,"MaxDim",maxm_});
+        return phi;
         }
 
     double

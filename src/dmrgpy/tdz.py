@@ -106,7 +106,7 @@ def _reconstruct_real_axis(alpha0, n_max, Jn, phi):
     return phi[0] + gsum
 
 
-def _advance_complex_time_step(self, Hop, wf, dz):
+def _advance_complex_time_step(self, Hop, wf, dz, do_gse=False):
     """
     One complex-time evolution step of size dz (a possibly-complex
     scalar), advancing wf under exp(-i*dz*Hop). Uses two-site TDVP
@@ -120,9 +120,25 @@ def _advance_complex_time_step(self, Hop, wf, dz):
     mpscpp2/mpscpp3's own evoloperator()/pyitensor's _evoloperator())
     otherwise -- mpscpp2's only route to TDZ, since it has no TDVP at
     all.
+
+    self.tevol_method="TDVP_GSE" instead runs one-site TDVP; when
+    do_gse=True (the caller gates this to the first self.tdvp_gse_sweeps
+    steps, mirroring quench_tdvp_gse()/evolve_and_measure_tdvp_gse()) a
+    global_subspace_expand() call precedes the one-site step, since dz's
+    per-step contour increment varies with t here (unlike quench_tdvp_gse's
+    fixed real dt), which is exactly why this stays a Python-level driver
+    loop instead of a C++ one like those two. Same itensor_version support
+    as plain "TDVP" (3 or "python" only) -- see evolution_dmrg_DC's
+    docstring for why a v2 port isn't available here.
     """
     if self.itensor_version in (3, "python") and self.tevol_method == "TDVP":
         handle = self._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, dz)
+    elif self.itensor_version in (3, "python") and self.tevol_method == "TDVP_GSE":
+        wf_handle = wf.cpp_handle
+        if do_gse:
+            wf_handle = self._session.global_subspace_expand(Hop.cpp_handle,
+                    wf_handle, self.tdvp_gse_krylov_order, self.tdvp_gse_cutoff, 0)
+        handle = self._session.tdvp_step(Hop.cpp_handle, wf_handle, dz, 1)
     else:
         handle = self._session.evolve_taylor_step(Hop.cpp_handle, wf.cpp_handle, dz)
     from . import mps as mpsmod
@@ -168,7 +184,8 @@ def _complex_time_correlator(self, A, B, alpha0, n_max, dt, nt, omega0):
         for n in range(n_max+1):
             phi[n][k] = bras[n].dot(wf_fwd)
         if k < nt:
-            wf_fwd = _advance_complex_time_step(self, Hop, wf_fwd, dz[k])
+            wf_fwd = _advance_complex_time_step(self, Hop, wf_fwd, dz[k],
+                    do_gse=(k < self.tdvp_gse_sweeps))
 
     cs = _reconstruct_real_axis(alpha0, n_max, Jn, phi)
     return ts[:nt], cs[:nt]

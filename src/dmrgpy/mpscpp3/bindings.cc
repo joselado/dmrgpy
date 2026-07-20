@@ -203,6 +203,10 @@ PYBIND11_MODULE(_dmrgcpp, m)
              py::arg("A"),py::arg("wf"))
         .def("multiply_operators",&Chain::multiply_operators,
              py::arg("A"),py::arg("B"))
+        .def("sum_operators",&Chain::sum_operators,
+             py::arg("A"),py::arg("B"))
+        .def("scale_operator",&Chain::scale_operator,
+             py::arg("A"),py::arg("z"))
         .def("trace_operator",&Chain::trace_operator,py::arg("A"))
         .def("hermitian_operator",&Chain::hermitian_operator,py::arg("A"))
         .def("overlap_aMb_operator",&Chain::overlap_aMb_operator,
@@ -240,17 +244,53 @@ PYBIND11_MODULE(_dmrgcpp, m)
             }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
                py::arg("nt"),py::arg("dt"),
                "TDVP counterpart of evolve_and_measure(). Returns (correlator, final_wf)")
+        .def("quench_tdvp_gse",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_i,
+                          std::vector<PyTerm> const& terms_j,
+                          int nt, double dt, int gse_sweeps, int krylov_order,
+                          double gse_cutoff) {
+                auto out = self.quench_tdvp_gse(terms_from_python(terms_h),
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    nt,dt,gse_sweeps,krylov_order,gse_cutoff);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_i"),py::arg("terms_j"),
+               py::arg("nt"),py::arg("dt"),py::arg("gse_sweeps"),
+               py::arg("krylov_order"),py::arg("gse_cutoff"),
+               "One-site-TDVP-with-global-subspace-expansion counterpart of "
+               "quench_tdvp(). Returns (correlator, final_wf)")
+        .def("evolve_and_measure_tdvp_gse",
+            [](Chain& self, std::vector<PyTerm> const& terms_h,
+               std::vector<PyTerm> const& terms_op, MPS const& wf,
+               int nt, double dt, int gse_sweeps, int krylov_order,
+               double gse_cutoff) {
+                auto out = self.evolve_and_measure_tdvp_gse(terms_from_python(terms_h),
+                    terms_from_python(terms_op),wf,nt,dt,gse_sweeps,krylov_order,
+                    gse_cutoff);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
+               py::arg("nt"),py::arg("dt"),py::arg("gse_sweeps"),
+               py::arg("krylov_order"),py::arg("gse_cutoff"),
+               "One-site-TDVP-with-global-subspace-expansion counterpart of "
+               "evolve_and_measure_tdvp(). Returns (correlator, final_wf)")
         .def("tdvp_step",&Chain::tdvp_step,
-             py::arg("H"),py::arg("wf"),py::arg("dt"),
-             "One two-site-TDVP step of size dt (may be complex -- see "
+             py::arg("H"),py::arg("wf"),py::arg("dt"),py::arg("num_center")=2,
+             "One TDVP step of size dt (may be complex -- see "
              "TDVP/README.md's own \"t\" convention) applied to an "
-             "already-built MPO H and MPS wf. Lets a caller drive the "
-             "evolution one variable-sized step at a time, unlike "
+             "already-built MPO H and MPS wf, one-site (num_center=1) or "
+             "two-site (num_center=2, the default). Lets a caller drive "
+             "the evolution one variable-sized step at a time, unlike "
              "quench_tdvp/evolve_and_measure_tdvp above, which loop "
              "internally over a fixed number of equal, real dt steps "
              "(used by the \"TDZ\" complex-time-evolution dynamical "
              "correlator, see tdz.py, whose per-step contour increment "
-             "varies with t).")
+             "varies with t). One-site TDVP doesn't grow bond dimension "
+             "on its own -- pair with global_subspace_expand() below.")
+        .def("global_subspace_expand",&Chain::global_subspace_expand,
+             py::arg("H"),py::arg("phi"),py::arg("krylov_order"),
+             py::arg("cutoff"),py::arg("maxdim")=0,
+             "Krylov-subspace global subspace expansion (arXiv:2005.06104), "
+             "growing phi's bond dimension using H so one-site TDVP can "
+             "keep up with two-site TDVP's own SVD-driven growth.")
         .def("evolve_taylor_step",&Chain::evolve_taylor_step,
              py::arg("H"),py::arg("wf"),py::arg("z"),
              "Applies one Taylor-expanded exp(z*H) step (z may be "
