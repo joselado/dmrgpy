@@ -374,10 +374,26 @@ attributes no longer satisfy that biorthogonal relation together;
 (`psil = psil/conj(psil.dot(psir))`) before using the pair, rather than
 assuming the convention still holds after `gs_energy()`.
 
-Implemented so far for the ED backend and `itensor_version=3` only
-(`itensor_version` 2 and `"python"` raise `NotImplementedError` from the
-DMRG-side driver); cross-checked to machine precision between the two in
-`examples/non_hermitian/nhkpm_v3_VS_ED`. Validation against the reference
+Implemented so far for the ED backend, `itensor_version=3`, and
+`itensor_version="python"` (`itensor_version=2` raises
+`NotImplementedError` from the DMRG-side driver, matching the same
+scope limitation `nhdmrg()` itself doesn't have but this feature's C++
+side does — no `Chain::nhkpm_moments` was ported to `mpscpp2`). The
+pure-Python backend's own `Chain.nhkpm_moments`
+(`pyitensor/chain.py`) is a line-for-line transcription of
+`mpscpp3/chain_session.h`'s version, built on the same MPO/MPS algebra
+(`applyMPO`/`sum`/`inner`) `general_kpm` already used there; no new
+pyitensor primitives were needed. All three backends agree to machine
+precision (`examples/non_hermitian/nhkpm_v3_VS_ED` for ED vs v3,
+`examples/non_hermitian/nhkpm_python_VS_v3_timing` for v3 vs
+`"python"` — the latter on a non-uniform-hopping, non-uniform
+imaginary-onsite-energy interacting fermionic chain, chosen to avoid
+the Re-degenerate-ground-state pitfall a uniform staggered pattern can
+trigger; `"python"` measured ~1.8-2x slower than v3 for this workload,
+consistent with NH-KPM's per-frequency moment recursion being far more
+matvec-heavy than the Hermitian KPM path, which amortizes its moments
+over the whole spectrum instead of recomputing per frequency).
+Validation against the reference
 Julia implementation itself was done by hand (the coupled recursion
 reproduces an independently-derived scalar recursion exactly, and the
 reconstructed density correctly peaks at known eigenvalues and sharpens

@@ -479,12 +479,17 @@ expensive per frequency point than the Hermitian `"KPM"` path. `E_max`
 (an upper bound on the spectral radius of $H$) must be supplied
 explicitly: unlike the Hermitian case's variational band-edge estimate
 (see above), there is no automatic estimator yet for a non-Hermitian
-spectral bound. Implemented so far for the ED backend and
-`itensor_version=3`; `itensor_version` 2 and `"python"` raise
-`NotImplementedError`. See
-`examples/non_hermitian/nhkpm_v3_VS_ED`, which cross-checks the ED and
-`itensor_version=3` results (agreement to machine precision on a small
-interacting fermionic chain with a staggered imaginary potential).
+spectral bound. Implemented so far for the ED backend, `itensor_version=3`,
+and `itensor_version="python"`; `itensor_version=2` raises
+`NotImplementedError`. See `examples/non_hermitian/nhkpm_v3_VS_ED`
+(ED vs `itensor_version=3`, machine-precision agreement on a small
+interacting fermionic chain with a staggered imaginary potential) and
+`examples/non_hermitian/nhkpm_python_VS_v3_timing` (`itensor_version=3`
+vs `"python"` on a non-uniform hopping/non-uniform imaginary-onsite-energy
+chain, same machine-precision agreement — the pure-Python backend runs
+roughly 2x slower than v3 for this workload, since NH-KPM's
+per-frequency moment recursion is far more matvec-heavy than the
+Hermitian KPM path).
 
 **Choosing a method:** KPM (default) for a first look at the full
 spectrum; CVM or TD when you need high resolution in a specific,

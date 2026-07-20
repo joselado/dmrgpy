@@ -18,22 +18,22 @@ from ..algebra import algebra
 
 def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
         es=np.linspace(0.,5.0,300),E_max=None,n=200,kernel="jackson"):
-    """NH-KPM dynamical correlator for the DMRG backends (mpscpp3 only for
-    now). name=(A,B) computes <psi_L|A(z) B|psi_R> at z=e0+es+1j*delta,
-    with (psi_L,psi_R) the biorthogonal ground state pair from nhdmrg().
-    E_max (a real upper bound for the spectral radius of H) must be
-    supplied by the user - there is no automatic estimator yet for
-    non-Hermitian operators (see maximum_energy() in chain_session.h,
-    which only works for Hermitian H)."""
+    """NH-KPM dynamical correlator for the DMRG backends (itensor_version
+    3 and "python" so far). name=(A,B) computes <psi_L|A(z) B|psi_R> at
+    z=e0+es+1j*delta, with (psi_L,psi_R) the biorthogonal ground state
+    pair from nhdmrg(). E_max (a real upper bound for the spectral radius
+    of H) must be supplied by the user - there is no automatic estimator
+    yet for non-Hermitian operators (see maximum_energy() in
+    chain_session.h, which only works for Hermitian H)."""
     if name is None: raise ValueError("name=(A,B) must be provided")
     if E_max is None:
         raise ValueError("E_max (an upper bound for the spectral radius "
                 "of the Hamiltonian) must be provided for the "
                 "non-Hermitian KPM dynamical correlator")
-    if self.itensor_version!=3:
+    if self.itensor_version not in (3,"python"):
         raise NotImplementedError("NH-KPM dynamical correlator is only "
-                "implemented for itensor_version=3 so far, got "
-                +str(self.itensor_version))
+                "implemented for itensor_version 3 or \"python\" so far, "
+                "got "+str(self.itensor_version))
     from .. import multioperator
     e0 = self.gs_energy() # routes to nhdmrg, sets self.wf0/self.nh_left_wf
     psir = self.wf0
