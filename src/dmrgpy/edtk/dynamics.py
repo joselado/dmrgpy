@@ -26,6 +26,9 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     else: 
         wf0 = wf0.v.copy()
     if not is_hermitian(h): # non Hermitian Hamiltonians
+        if submode=="KPM": # non-Hermitian KPM
+            from ..nonhermitian.kpm import dynamical_correlator_nhkpm_ed
+            return dynamical_correlator_nhkpm_ed(self,name=name,**kwargs)
         from ..nonhermitian.dynamics import dynamical_correlator_non_hermitian
         return dynamical_correlator_non_hermitian(self,name=name,**kwargs)
 #    print(wf0)

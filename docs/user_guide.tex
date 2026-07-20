@@ -181,6 +181,7 @@ are what you Fourier-transform to get an equal-time structure factor
 $S(q)=\sum_{i,j}e^{iq(i-j)}\langle O_iO_j\rangle$.
 
 \section{Excited states and energy gaps}
+\label{sec:excited}
 
 \textbf{Low-lying spectrum.}
 
@@ -266,7 +267,10 @@ less accurate than NH-DMRG at comparable cost --- see
 \texttt{examples/non\_hermitian/nhdmrg\_VS\_ED\_VS\_arnoldi}, which
 cross-checks NH-DMRG on all three backends against exact diagonalization
 and the Arnoldi route on an interacting fermionic chain with a staggered
-imaginary potential.
+imaginary potential. The biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
+is also what feeds the non-Hermitian dynamical correlator,
+\lstinline|get_dynamical_correlator(submode="KPM")| for $H\neq H^\dagger$
+--- see Section~\ref{sec:dynamical}.
 
 \section{Entanglement and quantum information}
 
@@ -543,6 +547,48 @@ Chebyshev expansion --- useful when positivity of the reconstructed
 $S(\omega)$ matters more than matching KPM's polynomial-expansion
 artifacts.
 
+\textbf{\texttt{submode="KPM"} for non-Hermitian Hamiltonians.} When
+$H\neq H^\dagger$ (Section~\ref{sec:excited}), \texttt{submode="KPM"}
+automatically routes to a different algorithm, a port of the
+non-Hermitian Kernel Polynomial Method (NH-KPM) of
+NHKPM.jl\footnote{\url{https://github.com/GUANGZECHEN/NHKPM.jl}}
+(Phys.\ Rev.\ Lett.\ \textbf{130}, 100401):
+
+\begin{lstlisting}
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                      name=(sc.Sz[0], sc.Sz[0]), E_max=10)
+\end{lstlisting}
+
+The ground state is now the biorthogonal pair
+$|\psi_R\rangle,|\psi_L\rangle$ from NH-DMRG (Section~\ref{sec:excited})
+rather than a single self-dual $|\mathrm{GS}\rangle$, and the correlator
+computed is $\langle\psi_L|A(z)\,B|\psi_R\rangle$. Because the spectrum
+of $H$ is complex, the ordinary Chebyshev recursion (which needs a
+\emph{real} rescaled spectrum in $[-1,1]$) does not apply; NH-KPM instead
+expands the frequency-shifted operator
+$\tilde H(z)=(z\,\mathbb{1}-H)/E_{\max}$ using a \emph{coupled}
+forward/adjoint recursion built from both $\tilde H(z)$ and $\tilde
+H(z)^\dagger$ (see \texttt{src/dmrgpy/algebra/kpm.py}'s
+\texttt{get\_mu\_n\_nh}/\texttt{spec\_from\_moments\_nh}, ported
+line-for-line from the reference's
+\texttt{get\_vn\_NH}/\texttt{get\_spec\_kpm\_NH}). The key practical
+consequence is that, unlike the Hermitian case, the moments depend on
+$z$ itself, so they are recomputed from scratch at every requested
+frequency rather than amortized once over the whole spectrum --- this
+mirrors the reference algorithm's own cost profile, and is why NH-KPM is
+noticeably more expensive per frequency point than the Hermitian
+\texttt{"KPM"} path. \texttt{E\_max} (an upper bound on the spectral
+radius of $H$) must be supplied explicitly: unlike the Hermitian case's
+variational band-edge estimate (see above), there is no automatic
+estimator yet for a non-Hermitian spectral bound. Implemented so far for
+the ED backend and \lstinline|itensor_version=3|;
+\lstinline|itensor_version| 2 and \lstinline|"python"| raise
+\lstinline|NotImplementedError|. See
+\texttt{examples/non\_hermitian/nhkpm\_v3\_VS\_ED}, which cross-checks
+the ED and \lstinline|itensor_version=3| results (agreement to machine
+precision on a small interacting fermionic chain with a staggered
+imaginary potential).
+
 \textbf{Choosing a method:} KPM (default) for a first look at the full
 spectrum; CVM or TD when you need high resolution in a specific,
 narrow frequency window; TDZ instead of TD when that window also needs
@@ -550,7 +596,10 @@ long simulated times/low frequencies, where TD's real-time bond-dimension
 growth becomes limiting; EX when a handful of excited states already
 capture the physics (e.g.\ a small gapped system); maxent when you want
 a guaranteed-positive reconstruction from limited moment data (e.g.\
-combined with finite-temperature ED, see Section~\ref{sec:thermal}).
+combined with finite-temperature ED, see Section~\ref{sec:thermal}). For
+a non-Hermitian $H$, \texttt{"KPM"} is currently the only submode with a
+genuine biorthogonal implementation (see above); the other submodes fall
+back to a correction-vector method that assumes $A^\dagger=B$.
 
 \section{Real-time dynamics: quenches}
 \label{sec:quenches}

@@ -8,6 +8,9 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
     if self.itensor_version in (2,3,"python"): # C++ or pure-Python
         self.set_initial_wf(self.wf0) # set the initial wavefunction
         if not self.is_hermitian(self.hamiltonian): # non Hermitian Hamiltonian
+            if submode=="KPM": # non-Hermitian KPM
+                from .nonhermitian.kpm import dynamical_correlator_nhkpm
+                return dynamical_correlator_nhkpm(self,**kwargs)
             from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
             return dynamical_correlator_non_hermitian(self,**kwargs)
     #        submode = "CVM_explicit" # only mode that works with non-Hemrmitian

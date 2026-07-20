@@ -986,6 +986,67 @@ class Chain
         return kpm_moments(m,wfa,wfb,num_polynomials,kpmmaxm,kpm_cutoff,kpm_accelerate);
         }
 
+    // Non-Hermitian KPM (port of NHKPM.jl, https://github.com/GUANGZECHEN/
+    // NHKPM.jl, itself implementing the method of Phys. Rev. Lett. 130,
+    // 100401): biorthogonal Chebyshev moments from a *coupled*
+    // forward/adjoint recursion. A genuinely non-Hermitian scaled operator
+    // hs=(z*Id-H)/E_max has no real spectrum, so the plain single-operator
+    // Chebyshev recursion used by kpm_moments_full (valid only once H is
+    // rescaled onto the real interval [-1,1]) doesn't apply; the reference
+    // instead builds a second sequence (alpha) from hs_dag alongside the
+    // usual Chebyshev-like vectors (vn) of hs, which makes vn a valid
+    // expansion for the complex-shifted operator. terms_hs/terms_hs_dag
+    // are hs and its conjugate transpose, built at the Python/
+    // MultiOperator level (see nonhermitian/kpm.py) -- unlike ordinary
+    // KPM, the expansion operator itself depends on the frequency z, so
+    // this is called once per requested z rather than once for the whole
+    // spectrum. wfa/wfb are the ket/bra-side states, already dressed by
+    // whichever operators define the correlator. Returns mu_n, length n,
+    // with mu_n[k] = <wfb|vn_{2k-1}> in the 1-based notation of the
+    // reference (only the odd-order vn ever get dotted with wfb; see
+    // nonhermitian/kpm.py's spec_from_moments_nh for the final
+    // reconstruction, which is what actually needs those odd orders).
+    std::vector<std::complex<double>>
+    nhkpm_moments(std::vector<MOTerm> const& terms_hs,
+                  std::vector<MOTerm> const& terms_hs_dag,
+                  MPS const& wfa, MPS const& wfb,
+                  int n, int kpmmaxm, double kpmcutoff) const
+        {
+        if (n<1) Error("Chain::nhkpm_moments: n must be >= 1");
+        auto hs = build_mpo(sites_,terms_hs,mpomaxm_);
+        auto hsd = build_mpo(sites_,terms_hs_dag,mpomaxm_);
+
+        auto v = 1.0*wfa;
+        auto alpha_prev2 = apply_mpo(hsd,v,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}); // alpha[1]
+        auto alpha_prev1 = sum(2.0*apply_mpo(hs,alpha_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                                -1.0*v,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}); // alpha[2]
+
+        auto vn_prev2 = 1.0*v; // vn[1]
+        auto vn_prev1 = 2.0*apply_mpo(hs,vn_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}); // vn[2]
+
+        std::vector<std::complex<double>> mu;
+        mu.reserve(n);
+        mu.push_back(innerC(wfb,vn_prev2));
+        for (int k=1;k<n;k++)
+            {
+            auto alpha_x = sum(2.0*apply_mpo(hsd,alpha_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                                -1.0*alpha_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto alpha_y = sum(2.0*apply_mpo(hs,alpha_x,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                                -1.0*alpha_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto t = sum(2.0*apply_mpo(hsd,vn_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                         -1.0*vn_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto vn_x = sum(2.0*alpha_prev1,t,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto vn_y = sum(2.0*apply_mpo(hs,vn_x,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                            -1.0*vn_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+
+            mu.push_back(innerC(wfb,vn_x));
+
+            alpha_prev2 = alpha_x; alpha_prev1 = alpha_y;
+            vn_prev2 = vn_x; vn_prev1 = vn_y;
+            }
+        return mu;
+        }
+
     private:
     // v2's plain "MPS(sites_)" (no InitState) doesn't carry over as a bare
     // MPS(SiteSet)/InitState-based product state: with sites_ built

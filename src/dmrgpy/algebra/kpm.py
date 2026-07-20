@@ -175,8 +175,79 @@ def get_moments_vivj_fortran(m0,vi,vj,n=100):
     vi1 = vi.todense() # convert to conventional vector
     vj1 = vj.todense() # convert to conventional vector
 # call the fortran routine
-    mus = get_moments_vivj(mo.row+1,mo.col+1,mo.data,vi,vj,n) 
+    mus = get_moments_vivj(mo.row+1,mo.col+1,mo.data,vi,vj,n)
     return mus # return fortran result
+
+
+
+def get_mu_n_nh(hs,hs_dag,wfa,wfb,n=100):
+  """Non-Hermitian KPM biorthogonal Chebyshev moments (port of NHKPM.jl's
+  get_vn_NH/get_mu_n_NH, https://github.com/GUANGZECHEN/NHKPM.jl).
+
+  hs, hs_dag are the already shifted-and-rescaled operator (z*I-H)/E_max
+  and its conjugate transpose (matrices, not necessarily Hermitian - hs_dag
+  need not equal hs). wfa,wfb are the ket/bra-side wavefunctions (already
+  dressed by whichever operators define the correlator). Returns mu_n,
+  length n, complex, with mu_n[k] = <wfb|vn[2k-1]> in the notation of the
+  reference (only the odd-order Chebyshev vectors of the coupled H/H^dagger
+  recursion enter the final reconstruction, see spec_from_moments_nh)."""
+  hs = csc_matrix(hs,dtype=np.complex128)
+  hs_dag = csc_matrix(hs_dag,dtype=np.complex128)
+  v = algebra.matrix2vector(wfa)
+  wfb = algebra.matrix2vector(wfb)
+
+  alpha_prev2 = hs_dag@v                                  # alpha[1]
+  alpha_prev1 = 2.*(hs@alpha_prev2) - v                   # alpha[2]
+
+  vn_prev2 = v                                            # vn[1]
+  vn_prev1 = 2.*(hs@vn_prev2)                             # vn[2]
+
+  mus = np.zeros(n,dtype=np.complex128)
+  mus[0] = algebra.braket_ww(wfb,vn_prev2)
+  for k in range(1,n):
+    alpha_x = 2.*(hs_dag@alpha_prev1) - alpha_prev2
+    alpha_y = 2.*(hs@alpha_x) - alpha_prev1
+    vn_x = 2.*alpha_prev1 + 2.*(hs_dag@vn_prev1) - vn_prev2
+    vn_y = 2.*(hs@vn_x) - vn_prev1
+
+    mus[k] = algebra.braket_ww(wfb,vn_x)
+
+    alpha_prev2,alpha_prev1 = alpha_x,alpha_y
+    vn_prev2,vn_prev1 = vn_x,vn_y
+  return mus
+
+
+def spec_from_moments_nh(mu_n,kernel="jackson"):
+  """Reconstruct the non-Hermitian KPM spectral function rho(z) from the
+  moments mu_n returned by get_mu_n_nh (see get_spec_kpm_nh), following
+  NHKPM.jl's get_spec_kpm_NH: rho = sum_k gn[2k-1]*mu_n[k]*sin((2k-1)*pi/2),
+  with gn the requested kernel's coefficients of order 2*len(mu_n)-1."""
+  n = len(mu_n)
+  ones = np.ones(2*n-1,dtype=np.complex128)
+  if kernel=="jackson": gn_full = jackson_kernel(ones)
+  elif kernel=="lorentz": gn_full = lorentz_kernel(ones)
+  elif kernel in ("dirichlet","plain",None): gn_full = ones
+  else: raise ValueError("Unknown kernel: "+str(kernel))
+  gn = gn_full[0::2] # odd Chebyshev orders only (1-based indices 1,3,5,...)
+  signs = (-1.)**np.arange(n) # sin((2k-1)*pi/2) for 0-based k
+  return np.sum(gn*np.asarray(mu_n)*signs)
+
+
+def get_spec_kpm_nh(h,z,wfa,wfb,E_max,n=100,kernel="jackson"):
+  """Non-Hermitian KPM dynamical correlator/spectral function at a single
+  complex frequency z: <wfb| delta-like-kernel(z-h) |wfa>, computed by
+  rescaling hs=(z*I-h)/E_max and running the biorthogonal Chebyshev
+  recursion (get_mu_n_nh) followed by the kernel reconstruction
+  (spec_from_moments_nh). Unlike ordinary (Hermitian) KPM, the moments
+  depend on z itself, so this recomputes them from scratch for every z -
+  matching the reference algorithm's own cost profile."""
+  dim = h.shape[0]
+  hs = (-csc_matrix(h,dtype=np.complex128)+z*csc_matrix(
+          (np.ones(dim),(range(dim),range(dim))),shape=(dim,dim),
+          dtype=np.complex128))/E_max
+  hs_dag = algebra.dagger(hs.todense())
+  mu_n = get_mu_n_nh(hs,hs_dag,wfa,wfb,n=n)
+  return spec_from_moments_nh(mu_n,kernel=kernel)
 
 
 

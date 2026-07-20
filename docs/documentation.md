@@ -324,6 +324,69 @@ moment recursion on the ED side) rather than by direct spectral
 decomposition, since exact diagonalization of the full spectrum is
 infeasible for large chains.
 
+### 4.8b Non-Hermitian KPM (NH-KPM)
+
+For a non-Hermitian Hamiltonian, `dynamics.py`/`edtk/dynamics.py`'s
+`submode="KPM"` gate routes to `nonhermitian/kpm.py` instead of
+`kpmdmrg.py`/`algebra/kpm.py`'s Hermitian moment machinery (previously
+every submode fell through unconditionally to the correction-vector
+fallback `nonhermitian/dynamics.dynamical_correlator_non_hermitian`,
+which assumes `A^\dagger=B` and never used the left ground state at all).
+NH-KPM is a port of the biorthogonal Chebyshev-moment algorithm in
+[NHKPM.jl](https://github.com/GUANGZECHEN/NHKPM.jl) (Phys. Rev. Lett.
+130, 100401): rather than a single self-dual ground state, it uses the
+biorthogonal pair `(psi_L,psi_R)` already produced by NH-DMRG (§4.4,
+`nhdmrg()`/`gs_energy_nhdmrg`) on the DMRG side, or
+`algebra.biorthogonal_ground_state` (a small addition to `algebra.py`
+diagonalizing both `h` and `dagger(h)` and matching/normalizing the pair
+so `<psi_L|psi_R>=1`) on the ED side.
+
+The algorithmic difference from Hermitian KPM: a non-Hermitian rescaled
+operator `hs=(z*Id-H)/E_max` has no real spectrum, so the ordinary
+single-operator Chebyshev recursion (valid once `H` is rescaled onto
+`[-1,1]`) doesn't apply. NH-KPM instead builds a *coupled*
+forward/adjoint recursion from both `hs` and `hs_dag` (`get_mu_n_nh`/
+`spec_from_moments_nh` in `algebra/kpm.py`, `Chain::nhkpm_moments` in
+`mpscpp3/chain_session.h`, ported line-for-line from the reference's
+`get_vn_NH`/`get_mu_n_NH`/`get_spec_kpm_NH`). The practical consequence:
+unlike Hermitian KPM (moments computed once, reused at every frequency
+via cheap Chebyshev polynomial evaluation), NH-KPM's expansion operator
+depends on `z` itself, so `nonhermitian/kpm.py` rebuilds the MPO/matrix
+and recomputes the full moment recursion at *every* requested frequency
+point — mirroring the reference algorithm's own cost profile, not a
+missed optimization. `E_max` must be supplied by the caller: there is no
+automatic spectral-radius estimator yet for a non-Hermitian operator
+(`chain_session.h`'s `maximum_energy()`, used for the Hermitian case,
+runs ordinary variational DMRG on `-H` and is meaningless once `H` isn't
+Hermitian).
+
+On the DMRG side, the `(z*Id-H)/E_max` operator and its dagger are built
+once per frequency as ordinary `MultiOperator`s in Python (`z*identity()
+- self.hamiltonian`, then `.get_dagger()`), converted via the existing
+`to_terms()`/`build_mpo` machinery — no new MPO arithmetic was needed in
+C++, only the new coupled-recursion primitive `Chain::nhkpm_moments`
+(public, alongside `general_kpm`) and its `bindings.cc` wrapper. One
+non-obvious bookkeeping fix was needed to reuse NH-DMRG's own state:
+`gs_energy_nhdmrg` renormalizes `wf0=psir.normalize()` to unit norm but
+leaves `nh_left_wf` at NH-DMRG's own `<psi_L|psi_R>=1` scale, so the two
+attributes no longer satisfy that biorthogonal relation together;
+`nonhermitian.kpm.dynamical_correlator_nhkpm` restores it explicitly
+(`psil = psil/conj(psil.dot(psir))`) before using the pair, rather than
+assuming the convention still holds after `gs_energy()`.
+
+Implemented so far for the ED backend and `itensor_version=3` only
+(`itensor_version` 2 and `"python"` raise `NotImplementedError` from the
+DMRG-side driver); cross-checked to machine precision between the two in
+`examples/non_hermitian/nhkpm_v3_VS_ED`. Validation against the reference
+Julia implementation itself was done by hand (the coupled recursion
+reproduces an independently-derived scalar recursion exactly, and the
+reconstructed density correctly peaks at known eigenvalues and sharpens
+with more moments) rather than against the reference's own shipped
+`.OUT` output files, which did not reproduce under the parameters
+recorded in the currently-checked-in example scripts — plausibly stale,
+given the upstream repo ships multiple undated `_backup`/`_old` source
+variants of the same algorithm.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,
@@ -465,6 +528,7 @@ shown in §5.1/§5.2, not these first-call numbers.
 | `src/dmrgpy/mpsjulialive/`, `mpsjulia/` | Julia/ITensors.jl backend modules |
 | `src/dmrgpy/edtk/`, `pyfermion/`, `pyspin/`, `pyboson/`, `pyzn/` | exact-diagonalization backend |
 | `src/dmrgpy/kpmdmrg.py` | Kernel Polynomial Method dynamical correlators |
+| `src/dmrgpy/nonhermitian/kpm.py` | non-Hermitian KPM dynamical correlator (NHKPM.jl port, ED + itensor_version=3) |
 | `src/dmrgpy/tdz.py` | complex-time-evolution dynamical correlator ("TDZ", arXiv:2311.10909) |
 | `examples/` | 100+ self-contained example scripts (also the regression suite) |
 | `examples/v2_VS_v3_*` | backend-vs-backend correctness comparisons |
