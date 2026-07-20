@@ -25,6 +25,16 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     pure-Python backend has its own TDVP, see pyitensor/tdvp.py); falls
     back to the legacy MPO-Taylor Chain::quench() otherwise
     (itensor_version=2, or self.tevol_method="MPO" explicitly).
+    self.tevol_method="TDVP_GSE" instead runs one-site TDVP with Krylov
+    global subspace expansion (Chain::quench_tdvp_gse(), arXiv:2005.06104)
+    for the first self.tdvp_gse_sweeps steps -- same itensor_version
+    support as "TDVP" (3 or "python" only). A v2-API port
+    (mpscpp2/TDVP/) was attempted and briefly landed here but was removed:
+    it was numerically correct (verified against ED and against v3/
+    "python") but had a severe, unresolved performance regression at
+    n>~10 sites (the dynamical-correlator step didn't finish in 25
+    minutes at n=12, versus under a second for the same computation on
+    v3/"python") that couldn't be root-caused in the time available.
 
     fit_td is hardcoded False in the MPO fallback, not read from
     self.fit_td: the removed file-based backend wrote it to tasks.in under
@@ -47,6 +57,11 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
         correlator,_wf = self._session.quench_tdvp(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                 int(nt),dt)
+    elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_GSE":
+        correlator,_wf = self._session.quench_tdvp_gse(
+                self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
+                int(nt),dt,self.tdvp_gse_sweeps,self.tdvp_gse_krylov_order,
+                self.tdvp_gse_cutoff)
     else:
         correlator,_wf = self._session.quench(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
@@ -77,7 +92,10 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     Chain::evolve_and_measure_tdvp(), see TDVP/ and self.tevol_method) for
     itensor_version=3 or "python"; falls back to the legacy MPO-Taylor
     Chain::evolve_and_measure() otherwise (itensor_version=2, or
-    self.tevol_method="MPO" explicitly).
+    self.tevol_method="MPO" explicitly). self.tevol_method="TDVP_GSE"
+    instead runs one-site TDVP with Krylov global subspace expansion
+    (Chain::evolve_and_measure_tdvp_gse(), arXiv:2005.06104) for the first
+    self.tdvp_gse_sweeps steps -- see evolution_dmrg_DC's docstring.
 
     fit_td is hardcoded False in the MPO fallback, for the same reason as
     evolution_dmrg_DC (see its docstring): the "tevol_fit"/"tevol_fit_td"
@@ -100,6 +118,11 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         correlator,_wf = self._session.evolve_and_measure_tdvp(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,
                 int(nt),dt)
+    elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_GSE":
+        correlator,_wf = self._session.evolve_and_measure_tdvp_gse(
+                h.to_terms(),operator.to_terms(),wf.cpp_handle,
+                int(nt),dt,self.tdvp_gse_sweeps,self.tdvp_gse_krylov_order,
+                self.tdvp_gse_cutoff)
     else:
         correlator,_wf = self._session.evolve_and_measure(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,

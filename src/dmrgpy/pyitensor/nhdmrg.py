@@ -20,7 +20,9 @@ and the two deliberate deviations) to this package's engine:
 Everything bond-local is done on flat numpy arrays (via dmrg.py's
 two_site_heff matvec factory): the Arnoldi iteration, the biorthogonal
 normalization, and the fidelity truncation (a dense eigh of the small
-rho matrix, truncated with svd.py's own _truncate rule). Unlike dmrg.py
+rho matrix, truncated with svd.py's own eigh_truncate() -- shared with
+gse.py's Krylov-subspace basis enrichment, which reduces to the same
+step). Unlike dmrg.py
 -- which deliberately skips noise-term support -- the reference's
 noise/perturbation term IS implemented here (hermitized, exactly as in
 the C++ ports), because for NH-DMRG it demonstrably matters: measured on
@@ -40,7 +42,7 @@ from .dmrg import (_all_right_environments, _extend_left, _extend_right,
                    two_site_heff)
 from .index import Index
 from .mpsalgebra import inner
-from .svd import _truncate
+from .svd import eigh_truncate
 from .tensor import ITensor
 
 
@@ -225,13 +227,7 @@ def nhdmrg(H, HA, psi0, sweeps, krylovdim=20, restarts=2, quiet=True):
                     Ar = Xr.transpose_to(keep_out + rest_out).reshape(kd, -1)
                     nt = Al @ Ar.conj().T
                     rho = rho + (noise / 2.0) * (nt + nt.conj().T)
-                w, U = np.linalg.eigh(rho)
-                idx = np.argsort(w)[::-1]
-                w = w[idx]
-                U = U[:, idx]
-                svals = np.sqrt(np.clip(w, 0.0, None))
-                keep, _disc = _truncate(svals, cutoff, maxdim, 1)
-                Uk = U[:, :keep]
+                Uk, keep = eigh_truncate(rho, cutoff, maxdim, mindim=1)
 
                 link = Index(keep, tags="Link")
                 keep_shape = tuple(ind.dim for ind in keep_inds)

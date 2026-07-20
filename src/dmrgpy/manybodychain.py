@@ -68,12 +68,31 @@ class Many_Body_Chain():
       self.cutoff = 1e-12 # cutoff in ground state
       self.tevol_custom_exp = True # custom exponential function for Tevol
       self.tevol_method = "TDVP" # real-time MPS evolution method: "TDVP"
-          # (default, itensor_version=3 only, mpscpp3/chain_session.h's
-          # quench_tdvp()/evolve_and_measure_tdvp()) or "MPO" (the legacy
-          # 2nd-order Taylor-expanded evoloperator() backup, the only
-          # option for itensor_version=2 since TDVP/ only exists under
-          # mpscpp3). See timedependent.py's evolution_dmrg_DC()/
+          # (default, itensor_version in (3,"python"), two-site TDVP via
+          # mpscpp3/chain_session.h's or pyitensor's quench_tdvp()/
+          # evolve_and_measure_tdvp()), "TDVP_GSE" (one-site TDVP with
+          # Krylov global subspace expansion, arXiv:2005.06104 -- same
+          # itensor_version support as "TDVP"; see tdvp_gse_* below), or
+          # "MPO" (the legacy 2nd-order Taylor-expanded evoloperator()
+          # backup, the only option for itensor_version=2, since neither
+          # TDVP flavor exists there -- a v2-API port was attempted but
+          # reverted after a severe, unresolved performance regression at
+          # n>~10 sites, see git history around mpscpp2/TDVP/ if picking
+          # this up again). See timedependent.py's evolution_dmrg_DC()/
           # evolve_and_measure_dmrg() for the actual dispatch.
+      self.tdvp_gse_sweeps = 3 # "TDVP_GSE" only: number of leading TDVP
+          # sweeps preceded by a global-subspace-expansion step; after
+          # that, bond dimension is left to whatever GSE already grew it
+          # to (one-site TDVP alone never grows it further) and only
+          # plain one-site TDVP sweeps run. Mirrors mpscpp3/TDVP/sample/
+          # run.cc's own "if(n<3)" -- GSE mainly matters early, while the
+          # state's bond dimension is still small.
+      self.tdvp_gse_krylov_order = 3 # "TDVP_GSE" only: dimension of the
+          # Krylov subspace {phi,H*phi,...} built at each GSE step
+          # (TDVP/README.md's "KrylovOrd").
+      self.tdvp_gse_cutoff = 1e-8 # "TDVP_GSE" only: SVD cutoff used both
+          # for each Krylov-vector MPO application and for the final
+          # density-matrix truncation in global_subspace_expand().
       self.cvm_tol = 1e-5 # tolerance for CVM
       self.cvm_nit = 1e3 # iterations for CVM
       self.cvm_patience = 50 # CVM CG early stop: iterations without a

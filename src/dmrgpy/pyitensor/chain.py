@@ -24,6 +24,7 @@ from .sites import SiteX
 from .svd import svd
 from .sweeps import Sweeps
 from .tdvp import tdvp_step as _tdvp_step_fn
+from .gse import global_subspace_expand as _global_subspace_expand_fn
 from .tensor import commonIndex, dag, prime, swapPrime
 
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
@@ -210,23 +211,44 @@ class Chain:
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)
 
-    def tdvp_step(self, H, wf, dt):
-        """One two-site-TDVP step of size dt, given an already-built MPO H
-        (e.g. from build_operator()) and a raw MPS handle wf -- lets a
-        caller (tdz.py's TDZ submode) drive the evolution one
-        variable-sized step at a time, unlike quench_tdvp/
-        evolve_and_measure_tdvp above, which loop internally over a fixed
-        number of equal, real dt steps and thus can't be reused for a
-        per-step-varying complex time increment. dt may be any complex
-        number: tdvp.py's tdvp_step() forward/backward coefficients are
-        already generic to complex dt (the backward half-sweep's
-        coefficient is just the negative of the forward one, not its
-        conjugate -- the real-time-only case just happens to make those
-        coincide), so real time (dt purely imaginary by this module's own
-        -i*dt convention, matching mpscpp3's chain_session.h) and complex
-        time (TDZ) share this same code path unchanged."""
+    def tdvp_step(self, H, wf, dt, num_center=2):
+        """One TDVP step of size dt, given an already-built MPO H (e.g.
+        from build_operator()) and a raw MPS handle wf -- lets a caller
+        (tdz.py's TDZ submode) drive the evolution one variable-sized step
+        at a time, unlike quench_tdvp/evolve_and_measure_tdvp above,
+        which loop internally over a fixed number of equal, real dt steps
+        and thus can't be reused for a per-step-varying complex time
+        increment. dt may be any complex number: tdvp.py's tdvp_step()
+        forward/backward coefficients are already generic to complex dt
+        (the backward half-sweep's coefficient is just the negative of
+        the forward one, not its conjugate -- the real-time-only case
+        just happens to make those coincide), so real time (dt purely
+        imaginary by this module's own -i*dt convention, matching
+        mpscpp3's chain_session.h) and complex time (TDZ) share this same
+        code path unchanged. num_center=2 (default) is two-site TDVP;
+        num_center=1 is one-site TDVP, which doesn't grow bond dimension
+        on its own -- pair with global_subspace_expand() below. NOTE: this
+        method's own (H, wf, dt) argument order (matching mpscpp3's
+        Chain::tdvp_step(H, psi, dt, ...)) is the REVERSE of the
+        module-level tdvp.py::tdvp_step(psi, H, dt, ...) it calls below --
+        any new call site added here should double check which of the two
+        orderings it means to match."""
         return _tdvp_step_fn(wf.copy(), H, dt, cutoff=self.cutoff,
-                maxdim=self.maxm, niter=50)
+                maxdim=self.maxm, niter=50, num_center=num_center)
+
+    def global_subspace_expand(self, H, phi, krylov_order, cutoff, maxdim=0):
+        """Krylov-subspace global subspace expansion (arXiv:2005.06104),
+        growing phi's bond dimension using H so one-site TDVP can keep up
+        with two-site TDVP's own SVD-driven growth. maxdim=0 (matching
+        the mpscpp3 binding's own sentinel) means "uncapped" for the
+        per-Krylov-vector applyMPO steps; the *enlarged* bond dimension
+        itself is always hard-capped at self.maxm (matching
+        Chain::global_subspace_expand()'s own "MaxDim",maxm_ on the
+        v3/mpscpp3 side -- see gse.py's own comment for why this is
+        needed regardless of maxdim)."""
+        return _global_subspace_expand_fn(H, phi, krylov_order, cutoff,
+                maxdim=(maxdim if maxdim > 0 else None),
+                bond_maxdim=self.maxm)
 
     def evolve_taylor_step(self, H, wf, z):
         """Applies one Taylor-expanded exp(z*H) step (_evoloperator()
@@ -241,6 +263,12 @@ class Chain:
 
     def multiply_operators(self, A, B):
         return self._mult_mpo(A, B)
+
+    def sum_operators(self, A, B):
+        return self._sum_mpo(A, B)
+
+    def scale_operator(self, A, z):
+        return A * z
 
     def trace_operator(self, A):
         return traceC(A)
@@ -328,6 +356,52 @@ class Chain:
         correlator = []
         for _ in range(nt):
             psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
+            correlator.append(inner(psi, A, psi))
+        return correlator, psi
+
+    def quench_tdvp_gse(self, terms_h, terms_i, terms_j, nt, dt, gse_sweeps,
+            krylov_order, gse_cutoff):
+        """GSE counterpart of quench_tdvp() above: identical setup/
+        measurement, but each per-step evolution is one-site TDVP
+        (num_center=1) preceded by a global_subspace_expand() call for
+        the first gse_sweeps steps -- mirrors
+        Chain::quench_tdvp_gse()/mpscpp3/chain_session.h."""
+        if self.wf0 is None:
+            self.gs_energy()
+        ampo_h = AutoMPO.from_terms(self.sites, terms_h)
+        H = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        EGS = inner(self.wf0, H, self.wf0).real / inner(self.wf0, self.wf0).real
+        ampo_h.add(-EGS, "Id", 1)
+        Hshift = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        psi1 = self._apply_mpo(A1, self.wf0)
+        psi2 = self._apply_mpo(A2, self.wf0)
+        norm0 = np.sqrt(inner(psi1, psi1))
+        correlator = []
+        for it in range(nt):
+            if it < gse_sweeps:
+                psi1 = self.global_subspace_expand(Hshift, psi1, krylov_order, gse_cutoff)
+            psi1 = _tdvp_step_fn(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm,
+                    niter=50, num_center=1)
+            psi1.normalize()
+            psi1 = psi1 * norm0
+            correlator.append(inner(psi2, psi1))
+        return correlator, psi1
+
+    def evolve_and_measure_tdvp_gse(self, terms_h, terms_op, wf, nt, dt, gse_sweeps,
+            krylov_order, gse_cutoff):
+        """GSE counterpart of evolve_and_measure_tdvp() above -- see
+        quench_tdvp_gse()'s docstring."""
+        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        psi = wf
+        correlator = []
+        for it in range(nt):
+            if it < gse_sweeps:
+                psi = self.global_subspace_expand(H, psi, krylov_order, gse_cutoff)
+            psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm,
+                    niter=50, num_center=1)
             correlator.append(inner(psi, A, psi))
         return correlator, psi
 

@@ -103,6 +103,28 @@ S_i\times\mathbf S_{i+1})$, biquadratic exchange $(\mathbf S_i\cdot
 Hubbard interaction $U\sum_i n_{i\uparrow}n_{i\downarrow}$, and so on ---
 see Section~\ref{sec:cookbook} for concrete Hamiltonians.
 
+\textbf{Algebra on already-built operators.} \texttt{sc.toMPO(h)} compiles
+a \texttt{MultiOperator} into a \texttt{StaticOperator} (an already-built
+matrix product operator, \texttt{itensor\_version} 2, 3, and
+\texttt{"python"} only --- not \texttt{"julia\_live"} yet). Two
+\texttt{StaticOperator}s can then be combined directly with \texttt{+},
+\texttt{-}, unary \texttt{-}, and scalar \texttt{*}/\texttt{/}, without
+going back through the symbolic \texttt{MultiOperator} form:
+
+\begin{lstlisting}
+A = sc.toMPO(sc.Sz[0])
+B = sc.toMPO(sc.Sx[0]*sc.Sx[1])
+C = A + 2*B - A          # still a StaticOperator
+\end{lstlisting}
+
+This is a compressed direct sum at the tensor-network level (like
+ITensorMPS.jl's \texttt{+(::MPO, ::MPO)}), useful for combining operators
+that only exist as already-built \texttt{StaticOperator}s (e.g.\ two
+independently constructed products or exponentials); for the common case
+of combining Hamiltonians before ever building an MPO, summing the
+underlying \texttt{MultiOperator}s directly (as \texttt{h = h + ...}
+above) remains preferred.
+
 \section{Ground-state properties}
 
 \textbf{Ground-state energy}
@@ -486,9 +508,12 @@ reconstruct the real axis accurately); \texttt{n\_max} ($\le4$) is the
 reconstruction order; \texttt{dt}/\texttt{tmax}/\texttt{nt} set the
 underlying time step/duration exactly as in \texttt{"TD"}. Uses
 two-site TDVP when available (\texttt{itensor\_version} 3 or
-\texttt{"python"}, \texttt{tevol\_method="TDVP"}, the paper's own setup)
-or falls back to the MPO-Taylor propagator otherwise
-(\texttt{itensor\_version=2}, which has no TDVP) --- the same
+\texttt{"python"}, \texttt{tevol\_method="TDVP"}, the paper's own setup),
+one-site TDVP with global subspace expansion
+(\texttt{tevol\_method="TDVP\_GSE"}, see \S\ref{sec:quenches} --- same
+\texttt{itensor\_version} support as \texttt{"TDVP"}), or falls back to
+the MPO-Taylor propagator otherwise (\texttt{tevol\_method="MPO"}, or
+\texttt{itensor\_version=2}, which has no TDVP) --- the same
 TDVP-vs-Taylor choice \texttt{"TD"} already makes. Current scope: only
 the ``greater'' branch of the correlator is computed (the same
 simplification \texttt{"TD"} itself already makes), so this is best
@@ -528,6 +553,7 @@ a guaranteed-positive reconstruction from limited moment data (e.g.\
 combined with finite-temperature ED, see Section~\ref{sec:thermal}).
 
 \section{Real-time dynamics: quenches}
+\label{sec:quenches}
 
 Beyond frequency-domain correlators, DMRGPY directly simulates real-time
 unitary evolution $|\psi(t)\rangle=e^{-iHt}|\psi(0)\rangle$ and measures
@@ -552,6 +578,44 @@ quench (e.g.\ flip a spin, or add a particle) before evolving and
 measuring $B(t)$. \texttt{timeevolution.imaginary\_exponential} computes
 autocorrelation functions directly, $\langle\psi_0|e^{iHt}|\psi_0
 \rangle$, without a separate measurement operator.
+
+\textbf{Choosing the propagator: \texttt{sc.tevol\_method}.} Three
+options:
+
+\begin{itemize}
+  \item \texttt{"TDVP"} (the default) --- two-site TDVP, which grows the
+    MPS bond dimension via SVD the same way ground-state DMRG does. Used
+    whenever \texttt{itensor\_version} is \texttt{3} or \texttt{"python"};
+    \texttt{itensor\_version=2} falls back to \texttt{"MPO"} (below) even
+    with this default.
+  \item \texttt{"TDVP\_GSE"} (\texttt{itensor\_version} 3 or
+    \texttt{"python"} only, same support as plain \texttt{"TDVP"} above)
+    --- one-site TDVP preceded, for the first
+    \texttt{sc.tdvp\_gse\_sweeps} steps (default 3), by a \emph{global
+    subspace expansion} step: a Krylov subspace
+    $\{\psi,H\psi,H^2\psi,\dots\}$ of dimension
+    \texttt{sc.tdvp\_gse\_krylov\_order} (default 3) is used to enlarge
+    the MPS's bond dimension \emph{without changing the state it
+    represents}, using a cutoff \texttt{sc.tdvp\_gse\_cutoff} (default
+    $10^{-8}$) --- the scheme of Yang \& White,
+    \href{https://arxiv.org/abs/2005.06104}{arXiv:2005.06104}/Phys.\ Rev.\
+    B 102, 094315 (2020). Most useful when the starting state's bond
+    dimension is small (e.g.\ a product-state quench) and one-site TDVP
+    alone (which conserves bond dimension exactly) wouldn't be able to
+    grow into the entanglement the subsequent evolution generates.
+  \item \texttt{"MPO"} --- a hand-rolled 2nd-order Taylor expansion of
+    $e^{-iH\,dt}$ applied as an MPO each step; the only option on
+    \texttt{itensor\_version=2} (which has no TDVP at all), and available
+    (if slower/less accurate for a given bond dimension) everywhere else
+    too.
+\end{itemize}
+
+\begin{lstlisting}
+sc.tevol_method = "TDVP_GSE"
+sc.tdvp_gse_sweeps = 3
+sc.tdvp_gse_krylov_order = 3
+sc.tdvp_gse_cutoff = 1e-8
+\end{lstlisting}
 
 \section{Density of states}
 

@@ -1,4 +1,4 @@
-"""Two-site TDVP real-time evolution.
+"""Two-site and one-site TDVP real-time evolution.
 
 One time step of size dt is two half-sweeps (mirrors mpscpp3's own
 tdvp_step()/TDVP/README.md convention: a left-to-right pass evolving by
@@ -44,16 +44,31 @@ _extend_left/_extend_right identify a site's link by looking at its
 neighbor, so each half-sweep writes a consistent (if not yet
 backward-evolved) placeholder to the neighbor *before* extending the
 environment past the just-updated site.
+
+One-site TDVP (tdvp_step's num_center=1) follows the identical two-half-
+sweep structure, one tensor rank lower throughout: forward-evolve psi.A(i)
+alone (dmrg.py's one_site_heff, not two_site_heff -- no SVD truncation,
+since one-site TDVP must conserve bond dimension exactly), split it
+*losslessly* into a left/right-orthogonal site tensor and a bond tensor C,
+backward-evolve C (dmrg.py's zero_site_heff -- one_site_heff's own
+"backward correction" piece, one rank lower again, since a bond carries no
+physical leg), and absorb it into the next site. Since one-site TDVP alone
+never grows bond dimension, it needs pairing with gse.py's
+global_subspace_expand() (the Yang-White Krylov global-subspace-expansion
+scheme, arXiv:2005.06104/Phys. Rev. B 102, 094315) beforehand, mirroring
+mpscpp3/chain_session.h's tdvp_step()/global_subspace_expand() and
+TDVP/tdvp.h+TDVP/basisextension.h's own NumCenter=1 + addBasis() pairing.
 """
 
 import numpy as np
 from scipy.linalg import expm as _dense_expm
 
 from .dmrg import (_all_left_environments, _all_right_environments,
-                    _extend_left, _extend_right, one_site_heff, two_site_heff)
+                    _extend_left, _extend_right, one_site_heff, two_site_heff,
+                    zero_site_heff)
 from .mpsalgebra import _link_at
 from .svd import svd
-from .tensor import ITensor
+from .tensor import ITensor, commonIndex
 
 
 def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12):
@@ -117,6 +132,24 @@ def _evolve_one_site(L, Lbra, H, ket, i, R, Rbra, tau, niter):
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
+def _evolve_one_site_forward(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+    """Forward (-i*tau) one-site evolution -- one-site TDVP's own local
+    update, using the same one_site_heff() as _evolve_one_site() above
+    (there used only for two-site TDVP's *backward* correction, +i*tau)."""
+    matvec, order_in, shape, x0 = one_site_heff(L, Lbra, H, ket, i, R, Rbra)
+    evolved = _lanczos_expm_multiply(matvec, x0, -1j * tau, niter=niter)
+    return ITensor(tuple(order_in), evolved.reshape(shape))
+
+
+def _evolve_zero_site(L, Lbra, R, Rbra, C, left_link, right_link, tau, niter):
+    """Backward (+i*tau) evolution of a bond tensor -- one-site TDVP's
+    counterpart to _evolve_one_site() above, one rank lower (see
+    dmrg.py's zero_site_heff())."""
+    matvec, order_in, shape, x0 = zero_site_heff(L, Lbra, R, Rbra, C, left_link, right_link)
+    evolved = _lanczos_expm_multiply(matvec, x0, 1j * tau, niter=niter)
+    return ITensor(tuple(order_in), evolved.reshape(shape))
+
+
 def _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter):
     n = psi.length()
     right_env = _all_right_environments(H, psi)  # sites i+1..N, ket = psi BEFORE this half-sweep
@@ -173,14 +206,99 @@ def _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter):
     psi.center = 1
 
 
-def tdvp_step(psi, H, dt, cutoff, maxdim, niter=50):
-    """One real-time step exp(-i*dt*H) via two-site TDVP: a left-to-right
-    half-sweep evolving by dt/2, then a right-to-left half-sweep evolving
-    by another dt/2 -- mirrors mpscpp3/chain_session.h's tdvp_step()
-    (NumCenter=2 there; this module doesn't implement one-site TDVP or the
-    global subspace-expansion machinery, matching that file's own
-    comment on why it's unnecessary here). Mutates psi in place."""
+def _half_sweep_lr_onesite(psi, H, tau, niter):
+    """One-site analogue of _half_sweep_lr() above: at each site i,
+    forward-evolve psi.A(i) alone (one_site_heff, not two_site_heff -- no
+    SVD truncation, since one-site TDVP must conserve bond dimension
+    exactly), split it *losslessly* (QR-equivalent: svd with cutoff=0,
+    maxdim=None) into a left-orthogonal Q kept at site i and a bond
+    tensor C, then backward-evolve C (zero_site_heff, dmrg.py) and absorb
+    it into site i+1 before that site's own forward step. Mirrors
+    TDVP/tdvp.h's NumCenter=1 sweep. Pair with global_subspace_expand()
+    (gse.py) beforehand -- this alone never grows bond dimension."""
+    n = psi.length()
+    right_env = _all_right_environments(H, psi)  # sites i+1..N, BEFORE this half-sweep
+    left_env = {0: (None, None)}
+    for i in range(1, n + 1):
+        L, Lbra = left_env[i - 1]
+        Rn, Rnbra = right_env[i + 1]
+        left_link = _link_at(psi, i, i - 1)
+        right_link = _link_at(psi, i, i + 1)
+        A_new = _evolve_one_site_forward(L, Lbra, H, psi, i, Rn, Rnbra, tau, niter)
+        if i == n:
+            psi.set_A(i, A_new)
+            continue
+        s_i = next(ind for ind in A_new.inds if ind.hastags("Site"))
+        Q, S, V, _spec = svd(A_new, ([left_link] if left_link else []) + [s_i],
+                              cutoff=0.0, maxdim=None)
+        psi.set_A(i, Q)
+        new_link = commonIndex(Q, S)
+        C = S * V
+        orig_next = psi.A(i + 1)
+        # Write a consistent (if not yet backward-evolved) placeholder to
+        # site i+1 *before* extending the environment past site i: Q's own
+        # new link isn't shared with orig_next yet, and _extend_left looks
+        # up a site's link by its neighbor (mirrors _half_sweep_lr's own
+        # same wrinkle, see this module's docstring -- except there C is
+        # already a full site-shaped tensor from splitting a 2-site blob,
+        # so it doubles directly as the placeholder; here C is bond-only,
+        # so C*orig_next is used instead).
+        psi.set_A(i + 1, C * orig_next)
+        left_env[i] = _extend_left(L, Lbra, H, psi, i)
+        Lnew, Lnewbra = left_env[i]
+        C_evolved = _evolve_zero_site(Lnew, Lnewbra, Rn, Rnbra, C, new_link, right_link, tau, niter)
+        psi.set_A(i + 1, C_evolved * orig_next)
+    psi.center = n
+
+
+def _half_sweep_rl_onesite(psi, H, tau, niter):
+    """Mirror of _half_sweep_lr_onesite() above, sweeping right to left."""
+    n = psi.length()
+    left_env = _all_left_environments(H, psi)  # sites 1..i-1, BEFORE this half-sweep
+    right_env = {n + 1: (None, None)}
+    for i in range(n, 0, -1):
+        L2, L2bra = left_env[i - 1]
+        R, Rbra = right_env[i + 1]
+        left_link = _link_at(psi, i, i - 1)
+        right_link = _link_at(psi, i, i + 1)
+        A_new = _evolve_one_site_forward(L2, L2bra, H, psi, i, R, Rbra, tau, niter)
+        if i == 1:
+            psi.set_A(i, A_new)
+            continue
+        s_i = next(ind for ind in A_new.inds if ind.hastags("Site"))
+        right_of_bond = [s_i] + ([right_link] if right_link else [])
+        left_of_bond = [ind for ind in A_new.inds if ind not in right_of_bond]
+        U, S, V, _spec = svd(A_new, left_of_bond, cutoff=0.0, maxdim=None)
+        psi.set_A(i, V)
+        new_link = commonIndex(S, V)
+        C = U * S
+        orig_prev = psi.A(i - 1)
+        # Placeholder write before extending past site i -- see
+        # _half_sweep_lr_onesite's matching comment.
+        psi.set_A(i - 1, orig_prev * C)
+        right_env[i] = _extend_right(R, Rbra, H, psi, i)
+        Rnew, Rnewbra = right_env[i]
+        C_evolved = _evolve_zero_site(L2, L2bra, Rnew, Rnewbra, C, left_link, new_link, tau, niter)
+        psi.set_A(i - 1, orig_prev * C_evolved)
+    psi.center = 1
+
+
+def tdvp_step(psi, H, dt, cutoff, maxdim, niter=50, num_center=2):
+    """One real-time step exp(-i*dt*H) via TDVP: a left-to-right half-sweep
+    evolving by dt/2, then a right-to-left half-sweep evolving by another
+    dt/2 -- mirrors mpscpp3/chain_session.h's tdvp_step(). num_center=2
+    (default, matches every pre-existing caller) runs two-site TDVP,
+    which grows bond dimension via each bond's SVD truncation (cutoff,
+    maxdim used); num_center=1 runs one-site TDVP, which conserves bond
+    dimension exactly (cutoff/maxdim unused -- pair with
+    gse.global_subspace_expand() to grow it beforehand, the Yang-White
+    scheme this module's own one-site path is meant to be paired with).
+    Mutates psi in place."""
     tau = dt / 2.0
-    _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter)
-    _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter)
+    if num_center == 1:
+        _half_sweep_lr_onesite(psi, H, tau, niter)
+        _half_sweep_rl_onesite(psi, H, tau, niter)
+    else:
+        _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter)
+        _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter)
     return psi

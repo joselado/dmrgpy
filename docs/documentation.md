@@ -204,11 +204,38 @@ Notable, deliberate implementation details (not bugs to "fix"):
   real (unconstrained-search) behavior rather than ITensor v3's stricter,
   QN-conserving-from-the-start convention, at the cost of losing the QN
   block-sparsity speedup for `itensor_version=3`.
-- `mpscpp3`'s real-time MPS evolution defaults to a proper two-site TDVP
-  integrator (vendored under `mpscpp3/TDVP/`), selectable via
-  `Many_Body_Chain.tevol_method` (default `"TDVP"`); `mpscpp2` has no TDVP
-  and always uses a hand-rolled 2nd-order Taylor expansion of
-  `exp(-i dt H)` as an MPO instead.
+- `mpscpp3`'s (and `pyitensor`'s) real-time MPS evolution defaults to a
+  proper two-site TDVP integrator (vendored under `mpscpp3/TDVP/`;
+  `pyitensor/tdvp.py` for the pure-Python backend), selectable via
+  `Many_Body_Chain.tevol_method` (default `"TDVP"`, `itensor_version` 3 or
+  `"python"` only); `mpscpp2` has no TDVP and always uses a hand-rolled
+  2nd-order Taylor expansion of `exp(-i dt H)` as an MPO instead.
+- `tevol_method="TDVP_GSE"` (`itensor_version` 3 or `"python"` only,
+  same support as plain `"TDVP"`) runs one-site TDVP with Krylov *global
+  subspace expansion* (GSE) beforehand for the first `tdvp_gse_sweeps`
+  steps (default 3) — the scheme of Yang & White, arXiv:2005.06104/Phys.
+  Rev. B 102, 094315 (2020): a Krylov subspace `{psi, H*psi, H^2*psi,
+  ...}` of dimension `tdvp_gse_krylov_order` (built via repeated MPO
+  application) enlarges the MPS's local bond bases *without changing the
+  represented state*, giving one-site TDVP (which conserves bond
+  dimension exactly on its own, unlike two-site) room to grow into the
+  entanglement the subsequent evolution generates. `itensor_version=3`
+  (`Chain::global_subspace_expand()`/`Chain::tdvp_step(...,num_center=1)`,
+  `mpscpp3/TDVP/basisextension.h`, vendored unmodified from upstream) and
+  `"python"` (`pyitensor/gse.py`) implement this. A v2-API port
+  (`mpscpp2/TDVP/`) was attempted and briefly landed: numerically correct
+  (verified against ED and against v3/`"python"`, exact agreement on a
+  6-site cross-check), built on a from-scratch Lanczos `applyExp` (v2's
+  own `itensor/iterativesolvers.h` never had one) since v2's stock
+  `LocalMPO` also turned out to have no working one-site local
+  Hamiltonian at all (confirmed in `LocalMPO::position()`, which
+  unconditionally builds a two-site block regardless of `numCenter()`),
+  paired with two-site TDVP instead as a result. It was reverted after a
+  severe, unresolved performance regression at `n≳10` sites (the
+  dynamical-correlator step didn't finish in 25 minutes at `n=12`, versus
+  under a second for the same computation on `itensor_version=3`) that
+  couldn't be root-caused in the time available — see git history around
+  `mpscpp2/TDVP/` if picking this up again.
 - All three session backends implement a real non-Hermitian DMRG
   (`Chain::nhdmrg`, driven by `nhdmrg.py`, exposed as
   `Many_Body_Chain.nhdmrg()`): a port of ITensorNHDMRG.jl's
@@ -230,6 +257,23 @@ Notable, deliberate implementation details (not bugs to "fix"):
 - A few pre-existing bugs in the original (pre-refactor) file-based
   backend are deliberately reproduced rather than silently fixed —
   see the call-site comments in `chain_session.h` for both versions.
+- `itensor_version` 2, 3 (and `"python"`) expose MPO algebra directly on
+  already-built operators: `StaticOperator` supports `+`, `-`, unary `-`,
+  and scalar `*`/`/` between two `StaticOperator`s (or a scalar), on top
+  of the pre-existing `*` for `StaticOperator*MPS`/`StaticOperator`
+  contraction. `A + B` (`Chain::sum_operators`, a public wrapper each
+  backend already had internally as a private `sum_mpo()` helper used by
+  `custom_exp()`/`evoloperator()`) is a compressed direct sum at the
+  tensor-network level — algorithmically the same construction as
+  ITensorMPS.jl's `+(::MPO, ::MPO)` (`abstractmps.jl`'s default
+  `"densitymatrix"` algorithm) — not a MultiOperator-level symbolic sum
+  (which already existed, see §4.2, and remains the preferred way to
+  combine Hamiltonians before ever building an MPO). It exists for
+  combining operators that only exist as already-built `StaticOperator`s,
+  e.g. two independently constructed products or exponentials.
+  `"julia_live"` doesn't implement this yet (`StaticOperator.__add__`
+  raises `NotImplementedError` rather than silently doing something
+  backend-specific).
 
 ### 4.5 The pure-Python backend (`pyitensor/`)
 
