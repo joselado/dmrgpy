@@ -24,4 +24,5 @@ padetk
 setup.py
 pipupdate.sh
 dist/
+build/
 .parallel/

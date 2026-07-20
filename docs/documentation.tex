@@ -65,10 +65,30 @@ work to whichever solver is requested or available:
 \end{itemize}
 
 \section{Installation}
+\label{sec:install}
 
-There is no \texttt{setup.py}/\texttt{pyproject.toml}; DMRGPY is used
-directly from \texttt{src/}, added to \texttt{PYTHONPATH} (or symlinked
-into \texttt{site-packages}) by the installer.
+There are two independent install paths, and they cover different
+backends:
+
+\begin{itemize}
+  \item \textbf{\texttt{pip install dmrgpy}} (via the repo's
+    \texttt{pyproject.toml}) installs the pure-Python part of the
+    package only --- the ED backend and the pure-Python
+    \texttt{itensor\_version="python"} DMRG/TDVP backend both work
+    immediately, no compiler needed. The compiled C++ backends
+    (\texttt{itensor\_version=2}/\texttt{3}) are \emph{not} on PyPI:
+    they're built against a $\sim$400MB vendored copy of ITensor, and
+    \texttt{pyproject.toml} excludes \texttt{mpscpp2}/\texttt{mpscpp3}
+    from the distributed package entirely. Without them, DMRGPY still
+    works end to end --- it just falls back to ED/\texttt{"python"} (see
+    mode.py) --- but if you want the compiled backends you need the
+    git-clone path below instead.
+  \item \textbf{A git clone + \texttt{python install.py}} is required
+    for the compiled C++ backends (and is how this repository is
+    developed). DMRGPY is used directly from \texttt{src/}, added to
+    \texttt{PYTHONPATH} (or symlinked into \texttt{site-packages}) by
+    the installer.
+\end{itemize}
 
 \begin{lstlisting}[language=bash]
 python install.py                        # compiles ITensor v3 (mpscpp3, the default) + its pybind11 extension
@@ -94,9 +114,15 @@ every call transparently falls back to ED when a requested compiled
 backend isn't present.
 
 No compiler or pybind11 is needed at all to use
-\texttt{itensor\_version="python"} --- only NumPy/SciPy (and optionally
-\texttt{numba}/\texttt{jax} for faster execution, see
-Section~\ref{sec:perf}).
+\texttt{itensor\_version="python"} --- only NumPy/SciPy/SymPy/\texttt{numba}
+(all four are core \texttt{pip install dmrgpy} dependencies;
+\texttt{numba} is required rather than optional because
+\texttt{algebra/kpmextrapolate.py} imports it at module level, and that
+module is reached unconditionally from \texttt{manybodychain.py} via
+\texttt{dynamics.py}/\texttt{kpmdmrg.py} --- this is separate from
+\texttt{pyitensor}'s own opt-in JAX/numba-accelerated matvec kernel,
+which \emph{is} genuinely optional and off by default, see
+Section~\ref{sec:perf}). \texttt{jax} is optional either way.
 
 \section{Quick start}
 
@@ -661,12 +687,13 @@ ratios shown above, not these first-call numbers.
   \item Use \texttt{itensor\_version="python"} for quick prototyping,
     CI/environments without a C++ toolchain, or small systems ($n
     \lesssim 20$) where the 1.3--2$\times$ overhead doesn't matter.
-  \item Install \texttt{numba} (and optionally \texttt{jax}) alongside
-    the pure-Python backend \emph{and} set
+  \item \texttt{numba} is already installed (it's a core dependency, see
+    Section~\ref{sec:install}); also install \texttt{jax} and set
     \texttt{pyitensor.kernels.USE\_NUMBA = True} (off by default, see the
-    note above) --- without both steps, \texttt{pyitensor} falls back
-    to plain NumPy loops and is substantially slower than the numbers
-    above (see \texttt{pyitensor/\_\_init\_\_.py}'s own docstring).
+    note above) if you want the accelerated matvec kernel --- without
+    that opt-in, \texttt{pyitensor} falls back to plain NumPy loops and
+    is substantially slower than the numbers above (see
+    \texttt{pyitensor/\_\_init\_\_.py}'s own docstring).
   \item For production-size chains, dynamical correlators, or anything
     performance-sensitive, compile the C++ extension
     (\texttt{python install.py}) and use \texttt{itensor\_version=2} or
