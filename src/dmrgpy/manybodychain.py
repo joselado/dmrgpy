@@ -312,8 +312,15 @@ class Many_Body_Chain():
   def generate_bilinear(self,fun,A,B):
       """Generic bilinear term"""
       fun = funtk.obj2fun(fun) # set function
+      # Index by len(A)/len(B), not self.ns: for chain classes whose
+      # per-site operator lists are indexed by logical location rather
+      # than physical site (e.g. Spinful_Fermionic_Chain,
+      # Mixed_Spin_Fermion_Chain), len(A)/len(B) < self.ns, and indexing
+      # up to self.ns would raise IndexError. For every chain whose
+      # lists are physical-site-indexed already, len(A)==len(B)==self.ns,
+      # so this is unchanged there.
       h = multioperator.msum(fun(i,j)*A[i]*B[j]
-              for i in range(self.ns) for j in range(self.ns))
+              for i in range(len(A)) for j in range(len(B)))
       return 0.5*(h + h.get_dagger()) # Hermitian
   def update_hamiltonian(self):
       h = self.hopping + self.hubbard + self.pairing

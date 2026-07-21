@@ -25,18 +25,22 @@ def reduced_dm_projective(self,wf,i=0,j=None):
               # we need to project on up/dn and rotate to up!
               return [Szk+0.5,P01] 
           elif site==3: # S=1 site
-              raise # not finished
+              raise NotImplementedError("reduced_dm_projective: S=1 "
+                      "site projectors are not finished")
               Szk = self.Sz[k]
-              return [Szk*(Szk+1)/2.,-(Szk-1)*(Szk+1),Szk*(1-Szk)/2.] 
-          else: raise # not implemented
+              return [Szk*(Szk+1)/2.,-(Szk-1)*(Szk+1),Szk*(1-Szk)/2.]
+          else: raise NotImplementedError("reduced_dm_projective: no "
+                  "projectors for site type "+str(site))
         elif type(self)==Fermionic_Chain: # spin chain object
           N = self.N[k] # density operator
           P01 = self.Cdag[k] # create an electron
           # we need to project on up/dn and rotate to up!
           return [N,P01] # return the projectors
         elif type(self)==Spinful_Fermionic_Chain: # spin chain object
-          raise # not implemented yet
-        else: raise # not implemented
+          raise NotImplementedError("reduced_dm_projective: not "
+                  "implemented yet for Spinful_Fermionic_Chain")
+        else: raise NotImplementedError("reduced_dm_projective: not "
+                "implemented for chain type "+type(self).__name__)
     Pi = projectors(i) # projectors for site i
     if j is not None: Pj = projectors(j) # projectors for site j
     else: Pj = [1] # workaround for a single site
