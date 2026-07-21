@@ -152,6 +152,7 @@ evolution, entanglement entropy, and more. Model modules just define the
 local Hilbert space and convenience operators for that statistics:
 
 \begin{center}
+\footnotesize
 \begin{tabular}{lll}
 \toprule
 Module & Class & Notes \\
@@ -161,9 +162,40 @@ Module & Class & Notes \\
 \texttt{spinfermionchain.py} & \texttt{Spin\_Fermionic\_Chain} & spinful fermions \\
 \texttt{bosonchain.py} & \texttt{Boson\_Chain} & bosonic sites \\
 \texttt{parafermionchain.py} & \texttt{Parafermion\_Chain} & parafermion sites \\
+\texttt{mixedchain.py} & \texttt{Mixed\_Spin\_\allowbreak Fermion\_Chain} & spin \& spinful-fermion mix \\
 \bottomrule
 \end{tabular}
+\normalsize
 \end{center}
+
+All of the above build \texttt{self.sites}, the list of per-site type
+codes passed to \texttt{Many\_Body\_Chain.\_\_init\_\_}, from a
+\emph{uniform} repetition of a single type code (e.g.\ \texttt{[0]*n}
+for \texttt{Fermionic\_Chain}). Nothing in \texttt{sites.py}/the C++ or
+pyitensor \texttt{Chain} constructors actually requires this --- the
+site-construction layer (\texttt{mpscppN/get\_sites.h}'s
+\texttt{SpinX(std::vector<int> const\&)},
+\texttt{pyitensor/sites/siteset.py::SiteX}) already accepts an
+arbitrary, heterogeneous per-site type-code list.
+\texttt{bosonchain.py::SpinBoson\_Chain} and
+\texttt{mixedchain.py::Mixed\_Spin\_Fermion\_Chain} are the two model
+classes that build such a heterogeneous list directly (spin+boson and
+spin+spinful-fermion respectively), each following the same pattern:
+build every operator that could be meaningful at \emph{any} site, then
+mask the invalid combinations to the literal int 0 per site.
+\texttt{Mixed\_Spin\_Fermion\_Chain} represents a spinful-fermion
+location as a pair of physical spinless-fermion (type-code 0) sites,
+exactly like \texttt{fermionchain.Spinful\_Fermionic\_Chain}, so it
+reuses the existing C/Cdag/A/Adag/F operator vocabulary and
+Jordan-Wigner code unchanged. It currently only supports
+\texttt{itensor\_version} \texttt{3} and \texttt{"python"}: a
+Jordan-Wigner string that has to cross a non-fermionic (spin) site
+relies on \texttt{SiteSet::op()}'s ``unrecognized F request resolves to
+identity'' fallback, present in ITensor v3
+(\texttt{mpscpp3/ITensor/itensor/mps/siteset.h}) and in pyitensor's own
+\texttt{SiteType.matrix()} (\texttt{pyitensor/sites/base.py}), but not
+in ITensor v2 (\texttt{mpscpp2/ITensor/itensor/mps/siteset.h}), which
+would hard-abort instead.
 
 \subsection{Operator representation: \texttt{MultiOperator}}
 

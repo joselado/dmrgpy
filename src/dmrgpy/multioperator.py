@@ -270,7 +270,10 @@ def obj2MO(a,name="multioperator"):
     elif type(a)==MultiOperator:
         a.name = name
         return a
-    elif isnumber(a): return a*identity() 
+    elif isnumber(a):
+        out = a*identity()
+        out.name = name # a bare number has no name of its own to keep
+        return out
     else: raise # unidentified input
 
 

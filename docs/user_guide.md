@@ -41,12 +41,30 @@ Every model is a chain of $n$ local Hilbert spaces $\mathcal H=\bigotimes_{i=1}^
 | `fermionchain.Spinful_Fermionic_Chain` | spin-$\tfrac12$ fermion (4 states: $0,\uparrow,\downarrow,\uparrow\downarrow$), built from two interleaved spinless sites per physical site | $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$, plus derived $S^x_i,S^y_i,S^z_i=\tfrac12(n_{i\uparrow}-n_{i\downarrow})$, onsite pairing $\Delta_i=\tfrac12 c_{i\uparrow}c_{i\downarrow}$ |
 | `bosonchain.Bosonic_Chain` | truncated boson Fock space, $n_i\in\{0,\ldots,n_{\max}\}$ (default $n_{\max}=4$) | $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}=\lvert k\rangle\langle k\rvert$ |
 | `parafermionchain.Parafermionic_Chain` | $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ | clock/shift operators $\sigma_i,\tau_i$ and composite parafermion operators $\chi_i,\psi_i$ built as $\tau$-string $\times\sigma_i$ |
+| `mixedchain.Mixed_Spin_Fermion_Chain` | mixes genuine spin-$S$ sites and spinful-fermion locations *in the same chain*, one entry per logical location | at a spin location: native $S^x_i,S^y_i,S^z_i$; at a fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived $S^x_i,S^y_i,S^z_i,\Delta_i$ as in `Spinful_Fermionic_Chain` |
 
 Spinful fermionic chains are built by *interleaving* two spinless
 fermionic sites per physical site (site $2i$ = spin up, site $2i+1$ =
 spin down) rather than by a genuinely 4-dimensional local space, so that
 the same Jordan-Wigner machinery used for spinless fermions applies
 unchanged; `Spinful_Fermionic_Chain` wraps this bookkeeping for you.
+
+`Mixed_Spin_Fermion_Chain` is for models that need a literal local
+moment next to a conduction-electron site (e.g. Kondo-lattice-like
+Hamiltonians), rather than the large-$U$ two-fermion-site trick
+`Spinful_Fermionic_Chain`/`spinfermionchain.py` use to emulate a spin.
+Its `sitesin` constructor argument is a list with one entry per logical
+location, each either a spin label (`"1/2"`, `"1"`, ... as in
+`Spin_Chain`) or a fermion marker (`"F"`); a fermion location expands
+internally to a spin-up/spin-down site pair, exactly like
+`Spinful_Fermionic_Chain`. All operator lists (`Sx`/`Sy`/`Sz`,
+`Cup`/`Cdagup`/`Cdn`/`Cdagdn`/`Nup`/`Ndn`/`Ntot`/`Delta`) are indexed by
+*logical* location, not by physical site — the fermion-only operators
+read as the literal integer `0` at spin locations, since they have no
+meaning there. Currently only `itensor_version=3` (and `"python"`) are
+supported; see `mixedchain.py`'s module docstring for why
+`itensor_version=2` isn't yet, and `examples/mixed_spin_fermion_chain`
+for a worked Kondo-lattice example.
 
 ## 2. Building a Hamiltonian and observables
 

@@ -119,6 +119,32 @@ for that statistics:
 | `spinfermionchain.py` | `Spin_Fermionic_Chain` | spinful fermions |
 | `bosonchain.py` | `Boson_Chain` | bosonic sites |
 | `parafermionchain.py` | `Parafermion_Chain` | parafermion sites |
+| `mixedchain.py` | `Mixed_Spin_Fermion_Chain` | mixes spin sites and spinful-fermion locations in one chain |
+
+All of the above build `self.sites`, the list of per-site type codes
+passed to `Many_Body_Chain.__init__`, from a **uniform** repetition of a
+single type code (e.g. `[0]*n` for `Fermionic_Chain`). Nothing in
+`sites.py`/the C++ or pyitensor `Chain` constructors actually requires
+this — the site-construction layer (`mpscppN/get_sites.h`'s
+`SpinX(std::vector<int> const&)`, `pyitensor/sites/siteset.py::SiteX`)
+already accepts an arbitrary, heterogeneous per-site type-code list.
+`bosonchain.py::SpinBoson_Chain` and `mixedchain.py::Mixed_Spin_Fermion_Chain`
+are the two model classes that build such a heterogeneous list directly
+(spin+boson and spin+spinful-fermion respectively), each following the
+same pattern: build every operator that could be meaningful at *any*
+site, then mask the invalid combinations to the literal int `0` per
+site. `Mixed_Spin_Fermion_Chain` represents a spinful-fermion location as
+a pair of physical spinless-fermion (type-code 0) sites, exactly like
+`fermionchain.Spinful_Fermionic_Chain`, so it reuses the existing
+`C`/`Cdag`/`A`/`Adag`/`F` operator vocabulary and Jordan-Wigner code
+unchanged. It currently only supports `itensor_version` `3` and
+`"python"`: a Jordan-Wigner string that has to cross a non-fermionic
+(spin) site relies on `SiteSet::op()`'s "unrecognized `F` request
+resolves to identity" fallback, present in ITensor v3
+(`mpscpp3/ITensor/itensor/mps/siteset.h`) and in pyitensor's own
+`SiteType.matrix()` (`pyitensor/sites/base.py`), but not in ITensor v2
+(`mpscpp2/ITensor/itensor/mps/siteset.h`), which would hard-abort
+instead.
 
 ### 4.2 Operator representation: `MultiOperator`
 

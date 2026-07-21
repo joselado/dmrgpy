@@ -62,6 +62,7 @@ Chain class & Local Hilbert space & Key operators \\
 \texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_Chain} & spin-$\tfrac12$ fermion (4 states), two interleaved spinless sites per physical site & $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$; derived spin and pairing operators (see text) \\
 \texttt{bosonchain.\allowbreak Bosonic\_Chain} & truncated boson Fock space, $n_i\le n_{\max}$ (default 4) & $a_i,a_i^\dagger,n_i$, occupation projectors \\
 \texttt{parafermionchain.\allowbreak Parafermionic\_\allowbreak Chain} & $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ & clock/shift operators $\sigma_i,\tau_i$, composite $\chi_i,\psi_i$ \\
+\texttt{mixedchain.\allowbreak Mixed\_Spin\_\allowbreak Fermion\_Chain} & mixes spin-$S$ sites and spinful-fermion locations in the same chain & spin location: native $S^x_i,S^y_i,S^z_i$; fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived spin/pairing operators \\
 \bottomrule
 \end{tabular}
 \normalsize
@@ -73,6 +74,26 @@ spin down) rather than by a genuinely 4-dimensional local space, so that
 the same Jordan-Wigner machinery used for spinless fermions applies
 unchanged; \texttt{Spinful\_Fermionic\_Chain} wraps this bookkeeping for
 you.
+
+\texttt{Mixed\_Spin\_Fermion\_Chain} is for models that need a literal
+local moment next to a conduction-electron site (e.g.\ Kondo-lattice-like
+Hamiltonians), rather than the large-$U$ two-fermion-site trick
+\texttt{Spinful\_Fermionic\_Chain}/\texttt{spinfermionchain.py} use to
+emulate a spin. Its \texttt{sitesin} constructor argument is a list with
+one entry per logical location, each either a spin label (\texttt{"1/2"},
+\texttt{"1"}, \ldots{} as in \texttt{Spin\_Chain}) or a fermion marker
+(\texttt{"F"}); a fermion location expands internally to a spin-up/spin-down
+site pair, exactly like \texttt{Spinful\_Fermionic\_Chain}. All operator
+lists (\texttt{Sx}/\texttt{Sy}/\texttt{Sz},
+\texttt{Cup}/\texttt{Cdagup}/\texttt{Cdn}/\texttt{Cdagdn}/\texttt{Nup}/
+\texttt{Ndn}/\texttt{Ntot}/\texttt{Delta}) are indexed by \emph{logical}
+location, not by physical site -- the fermion-only operators read as the
+literal integer 0 at spin locations, since they have no meaning there.
+Currently only \texttt{itensor\_version=3} (and \texttt{"python"}) are
+supported; see \texttt{mixedchain.py}'s module docstring for why
+\texttt{itensor\_version=2} isn't yet, and
+\texttt{examples/mixed\_spin\_fermion\_chain} for a worked Kondo-lattice
+example.
 
 \section{Building a Hamiltonian and observables}
 
