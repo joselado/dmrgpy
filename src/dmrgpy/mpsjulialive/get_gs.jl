@@ -4,17 +4,37 @@ using ITensors
 using ITensorNHDMRG
 
 
-
-function get_gs_dmrg(H,psi0; nsweeps = 10,cutoff=1e-8,maxm=80,
-	ishermitian=true)
+# Shared by every mpsjulialive/*.jl DMRG-family entry point (get_gs_dmrg/
+# get_gs_nhdmrg here, excited_state_dmrg in excited.jl) -- factored out
+# after the same Sweeps-construction + stdout-silencing pair had been
+# copy-pasted a third time in excited.jl. Defined here (loaded before
+# excited.jl, see juliasession.py's initialize() file list) but usable
+# from any later-loaded file: Julia resolves a global function call at
+# call time, not at the calling function's definition time, so load
+# order only needs to put this before the point of first *use*, which is
+# well after every mpsjulialive/*.jl file has finished loading.
+function make_sweeps(nsweeps,maxm,cutoff)
   sweeps = Sweeps(nsweeps)
   maxdim!(sweeps, maxm)
   cutoff!(sweeps, cutoff)
+  return sweeps
+end
+
+function run_quiet(f)
   open("/dev/null", "w") do devnull
-        redirect_stdout(devnull) do
-            return dmrg(H,psi0, sweeps,ishermitian=ishermitian)
-        end
+    redirect_stdout(devnull) do
+      return f()
     end
+  end
+end
+
+
+function get_gs_dmrg(H,psi0; nsweeps = 10,cutoff=1e-8,maxm=80,
+	ishermitian=true)
+  sweeps = make_sweeps(nsweeps,maxm,cutoff)
+  run_quiet() do
+    dmrg(H,psi0,sweeps,ishermitian=ishermitian)
+  end
 end
 
 
@@ -23,26 +43,21 @@ end
 function get_gs_nhdmrg(H,psi0; nsweeps = 10,cutoff=1e-8,maxm=80,
         alg="onesided",biorthoalg = "biorthoblock",
 	eigsolve_krylovdim=30,eigsolve_maxite=3)
-  sweeps = Sweeps(nsweeps)
-  maxdim!(sweeps, maxm)
-  cutoff!(sweeps, cutoff)
-  open("/dev/null", "w") do devnull
-        redirect_stdout(devnull) do
-            e, wfl0, wfr0= nhdmrg(
-            H,
-            psi0,
-            psi0,
-            sweeps;
-            alg=alg,
-            biorthoalg=biorthoalg,
-            outputlevel=1,
-            eigsolve_krylovdim=eigsolve_krylovdim,
-            eigsolve_maxiter=eigsolve_maxite,
-        )
-        return e,wfl0,wfr0
-
-        end
-    end
+  sweeps = make_sweeps(nsweeps,maxm,cutoff)
+  run_quiet() do
+    e, wfl0, wfr0 = nhdmrg(
+        H,
+        psi0,
+        psi0,
+        sweeps;
+        alg=alg,
+        biorthoalg=biorthoalg,
+        outputlevel=1,
+        eigsolve_krylovdim=eigsolve_krylovdim,
+        eigsolve_maxiter=eigsolve_maxite,
+    )
+    e,wfl0,wfr0
+  end
 end
 
 

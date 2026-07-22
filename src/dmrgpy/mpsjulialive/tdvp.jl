@@ -25,16 +25,38 @@ function tdvp_step(H,psi,dt,cutoff,maxdim)
 	# instead of relying on each call site to remember to pre-clean.
 	psi = noprime(copy(psi),"Link")
 	orthogonalize!(psi,1)
-	# mindim=2 is a cheap defensive floor against degenerate dim-1 bonds.
+	# No mindim override: an earlier version forced mindim=2 as a guessed
+	# workaround for a DimensionMismatch that turned out to be the
+	# stale-prime issue above, not a degenerate dim-1 bond -- confirmed
+	# never actually necessary once that real cause was fixed. Neither
+	# mpscpp3/chain_session.h's own tdvp_step (no MinDim set, so ITensor's
+	# own default of 1) nor pyitensor/tdvp.py's svd calls (mindim=1
+	# default) force a floor either; matching them keeps this backend
+	# numerically comparable to both on small/near-product-state chains,
+	# where forcing mindim=2 would otherwise pad in a spurious near-zero
+	# singular value at a bond whose true Schmidt rank is 1.
 	return tdvp(H,-im*dt,psi;time_step=-im*dt,cutoff=cutoff,maxdim=maxdim,
-	            mindim=2,normalize=false,outputlevel=0)
+	            normalize=false,outputlevel=0)
 end
 
 function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim)
-	psi = wf
+	# tdvp_step()'s internal normalize=false is deliberate and must stay
+	# false at that shared level: advance_complex_time_step() (tdz.jl's
+	# TDZ caller, see tdvp_step's own docstring) reuses tdvp_step for
+	# complex-time evolution, where the norm is *meant* to decay -- that
+	# decay is the whole damping mechanism TDZ's method relies on
+	# (arXiv:2311.10909), not a numerical artifact to correct away.
+	# Renormalizing there would silently break TDZ's physics. For plain
+	# real-time evolution (this function), norm drift from per-step MPS
+	# truncation *is* purely numerical, so renormalize explicitly here
+	# instead -- same pattern quench_tdvp already uses below, and matches
+	# mpscpp3/chain_session.h's own tdvp_step, which passes
+	# "DoNormalize",true internally for exactly the real-time case.
+	psi = wf*(1.0/sqrt(abs(inner(wf,wf))))
 	correlator = ComplexF64[]
 	for it=1:nt
 		psi = tdvp_step(Hmpo,psi,dt,cutoff,maxdim)
+		psi = psi*(1.0/sqrt(abs(inner(psi,psi))))
 		push!(correlator,inner(psi,Aop,psi))
 	end
 	return correlator,psi

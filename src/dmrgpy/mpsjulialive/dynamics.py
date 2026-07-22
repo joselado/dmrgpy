@@ -14,16 +14,25 @@ def _max_energy_bound(self,H):
     live Julia session handles (self.jlsites/self.wf0.jlmps aren't part
     of Python's copy protocol, see manybodychain.py's __deepcopy__), so
     this can't go through bandwidth()/lowest_eigenvalue() the way the
-    C++/pure-Python backends do."""
+    C++/pure-Python backends do.
+
+    The restore runs in a finally block: without it, a self.gs_energy()
+    failure on the negated Hamiltonian (a real possibility for a live
+    juliacall session -- e.g. a JuliaError from the DMRG call) would
+    propagate with self.hamiltonian still pointing at -H and
+    self.maxm/self.nsweeps still clamped down, corrupting every later
+    call on this chain object, not just this one."""
     maxm0,nsweeps0 = self.maxm,self.nsweeps
     self.maxm = min(self.maxm,20)
     self.nsweeps = min(self.nsweeps,5)
     self.restart()
     self.set_hamiltonian(-1*H,restart=False)
-    emax = -self.gs_energy()
-    self.maxm,self.nsweeps = maxm0,nsweeps0
-    self.restart()
-    self.set_hamiltonian(H,restart=False)
+    try:
+        emax = -self.gs_energy()
+    finally:
+        self.maxm,self.nsweeps = maxm0,nsweeps0
+        self.restart()
+        self.set_hamiltonian(H,restart=False)
     return emax
 
 

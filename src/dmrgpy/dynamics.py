@@ -30,6 +30,21 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             return dynamical_correlator_positive_defined(self,**kwargs)
         else: raise
     elif self.itensor_version=="julia_live": # Julia version
+        if not self.is_hermitian(self.hamiltonian): # non-Hermitian Hamiltonian
+            # unlike the (2,3,"python") branch above, there is no
+            # non-Hermitian route to fall back to here: dynamical_correlator_
+            # non_hermitian ultimately needs applyinverse_dmrg(), which is
+            # self._session-only (mpsalgebra.py) and also dispatches on
+            # type(wf)==mps.MPS -- the *top-level* MPS class, not
+            # mpsjulialive.mps.MPS -- so it would fail regardless. Silently
+            # running the Hermitian-only KPM/CVM/TDZ math on a non-Hermitian
+            # Hamiltonian (the previous behavior here) produces numerically
+            # wrong output with no error; raise instead.
+            raise NotImplementedError(
+                "get_dynamical_correlator: itensor_version='julia_live' "
+                "does not implement non-Hermitian Hamiltonians (the KPM/"
+                "CVM/TDZ submodes all assume a Hermitian one); use "
+                "itensor_version in (2,3,'python') instead")
         from .mpsjulialive import dynamics as dynamicsjl
         return dynamicsjl.get_dynamical_correlator(self,submode=submode,**kwargs)
     else: raise

@@ -590,6 +590,65 @@ Julia primitive" pattern every fix above followed:
   than a small addition, so left as a documented follow-up rather than
   implemented here.
 
+**Fixes from an independent multi-angle code review of the whole Julia
+backend** (8 finder passes + per-finding verification, run once the above
+was otherwise feature-complete): six real, confirmed issues, all fixed
+directly rather than left as follow-ups —
+
+- `cvm.py`'s `_set_cvm_sweep_params` (the `julia_live` equivalent of
+  `self._session.set_sweep_params`) is now a context manager
+  (`_cvm_sweep_params`) instead of a plain set-and-return-the-old-value
+  function: `self.maxm` is restored via `finally`, so a CG blow-up mid-loop
+  (or a standalone call to the public `cvm_correction_vector`, which
+  previously never restored it at all) can no longer leave `self.maxm`
+  permanently stuck at `cvm_maxm`.
+- `dynamics.py`'s `julia_live` branch now checks `self.is_hermitian(...)`
+  before dispatching, the same way the `(2,3,"python")` branch already
+  does — previously a non-Hermitian Hamiltonian silently ran the
+  Hermitian-only KPM/CVM/TDZ math and returned numerically wrong output.
+  There's no non-Hermitian route to fall back to for `julia_live` yet
+  (that needs `applyinverse()`, C++-only today), so this raises a clear
+  `NotImplementedError` instead.
+- `mpsjulialive/excited.py`'s `get_excited_states_dmrg` now honors
+  `self.excited_gram_schmidt` (previously silently dropped — `excited.jl`
+  has no Gram-Schmidt step of its own), applying the same generic,
+  backend-agnostic `algebra.arnolditk.gram_smith` the top-level
+  `get_excited_states`'s own `purify=True` path already uses, and
+  recomputing energies against the orthogonalized states to match.
+- `mpsjulialive/dynamics.py`'s `_max_energy_bound` now restores
+  `self.maxm`/`self.nsweeps`/`self.hamiltonian` in a `finally` block —
+  previously a `self.gs_energy()` failure partway through (a real
+  possibility for a live juliacall session) would leave the chain
+  object with a negated Hamiltonian and clamped bond dimension/sweep
+  count for every later call.
+- `mpsjulialive/tdvp.jl`'s `evolve_and_measure_tdvp` now explicitly
+  renormalizes every step (matching `quench_tdvp`'s own existing pattern,
+  and `mpscpp3/chain_session.h`'s `tdvp_step`, which passes
+  `"DoNormalize",true`) — `tdvp_step`'s own `normalize=false` stays
+  unchanged, since `tdz.py`'s `advance_complex_time_step` also calls
+  `tdvp_step` directly and its physically-meaningful norm decay (the
+  whole point of TDZ's damping mechanism, arXiv:2311.10909) must not be
+  renormalized away.
+- `mpsjulialive/tdvp.jl`'s `tdvp_step` no longer forces `mindim=2`: that
+  floor was a guessed fix for a bug later found to be the stale-Link-prime
+  issue (fixed separately, see above) and was never confirmed necessary:
+  neither `mpscpp3`'s own `tdvp_step` nor `pyitensor/tdvp.py`'s `svd`
+  calls force a floor above ITensor's own default of 1, and forcing 2
+  could pad in a spurious singular value at a bond whose true Schmidt
+  rank genuinely is 1 (e.g. a near-product state on a small chain).
+
+One more finding was fixed as a cleanup rather than a correctness bug:
+`mpsjulialive/excited.jl`'s `excited_state_dmrg` had copy-pasted the
+`Sweeps`-construction + stdout-silencing boilerplate a third time
+(`get_gs.jl` already had two near-identical copies); both are now built
+on shared `make_sweeps`/`run_quiet` helpers in `get_gs.jl`.
+
+A seventh candidate (`densitymatrix.jl`/`entropy.jl` lacking a bounds
+check when `site`/`b` is the chain's last site) was investigated and
+found to be a pre-existing, deliberately-preserved limitation shared
+identically by `pyitensor/chain.py` and `mpscpp3/chain_session.h` (see
+`reduced_dm`'s own docstring above) — not a new risk, so left as-is.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)

@@ -1,3 +1,4 @@
+import contextlib
 import numpy as np
 from . import operatornames
 from . import multioperator
@@ -22,22 +23,22 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     A,B = AB[0],AB[1]
     wf0 = self.get_gs() # computes or returns the cached GS; also sets self.e0
     # sweep parameters used both by B*wf0 below and by every CG solve
-    maxm0 = _set_cvm_sweep_params(self)
-    b = (-delta)*(B*wf0) # -eta*B|GS>, identical for every frequency
-    out = [] # empty list
-    for e in es: # loop over energies
-        o,_,nit,res = cvm_correction_vector(self,A,B,e,delta,
-                tol=self.cvm_tol,max_it=int(self.cvm_nit),b=b)
-        print("CVM in E = ",e," CG iterations = ",nit," residual = ",res)
-        out.append(o) # store
-    if self.itensor_version=="julia_live": self.maxm = maxm0
+    with _cvm_sweep_params(self):
+        b = (-delta)*(B*wf0) # -eta*B|GS>, identical for every frequency
+        out = [] # empty list
+        for e in es: # loop over energies
+            o,_,nit,res = cvm_correction_vector(self,A,B,e,delta,
+                    tol=self.cvm_tol,max_it=int(self.cvm_nit),b=b)
+            print("CVM in E = ",e," CG iterations = ",nit," residual = ",res)
+            out.append(o) # store
     out = np.array(out)
 #    from .inference import points2function
 #    (es,out) = points2function(es,out)
     return (es,out) # return result
 
 
-def _set_cvm_sweep_params(self):
+@contextlib.contextmanager
+def _cvm_sweep_params(self):
     """Point every MPO application/MPS truncation at cvm_maxm rather than
     the DMRG maxm, for the duration of a CVM computation. The C++
     backends do this via self._session.set_sweep_params(...) (no
@@ -45,7 +46,15 @@ def _set_cvm_sweep_params(self):
     overrides self.maxm instead -- mpsjulialive/mpo.py's MPO.__mul__ and
     mps.py's MPS.__add__ both read self.MBO.maxm directly, no other
     channel to override the bond dimension exists for that backend.
-    Returns the maxm value to restore afterward."""
+    A context manager (not a plain set-and-return-the-old-value function)
+    so self.maxm is restored via `finally` even if the CG solve inside
+    raises -- confirmed directly that the previous plain-function version
+    left self.maxm permanently stuck at cvm_maxm on any exception, since
+    its restore was a bare statement after the frequency loop. Safe to
+    nest: cvm_correction_vector wraps itself in this too (so it stays
+    correct when called standalone, not just from dynamical_correlator's
+    loop), and each nested entry/exit only ever restores the self.maxm
+    value that was live when *it* was entered."""
     maxm0 = self.maxm
     if self.itensor_version=="julia_live":
         self.maxm = self.cvm_maxm
@@ -53,7 +62,11 @@ def _set_cvm_sweep_params(self):
         self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
         self._session.set_verbose(self.verbose)
         self._session.set_mpomaxm(max(self.cvm_maxm,self.mpomaxm))
-    return maxm0
+    try:
+        yield
+    finally:
+        if self.itensor_version=="julia_live":
+            self.maxm = maxm0
 
 
 
@@ -107,67 +120,67 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
     can report the CG effort and convergence quality per point.
     """
     wf0 = self.get_gs() # ground state (cheap/cached; also sets self.e0)
-    _set_cvm_sweep_params(self)
-    # (H-omega-E0) as an MPO, rebuilt per omega: measured at ~1 ms, i.e.
-    # negligible next to a single CG iteration (~2 MPO applications,
-    # ~0.03-0.1 s at 12-20 sites). Applying the shift at MPS level
-    # instead (HmE0*v - omega*v, one shared MPO) was benchmarked ~2x
-    # SLOWER per application (extra truncated sums), so don't "optimize"
-    # this line by hoisting it out of the frequency loop.
-    Hshift = self.toMPO(self.hamiltonian-(self.e0+omega))
-    def applyA(v): return Hshift*(Hshift*v) + (eta*eta)*v # (H-omega-E0)^2+eta^2
-    if b is None: b = (-eta)*(B*wf0) # -eta*B|GS>
-    xc = b # initial guess, matches the old bicstab's own x=b start
-    r = b - applyA(xc)
-    p = r
-    rs_old = r.dot(r).real # ||r||^2, real since A is Hermitian PD
-    best_xc,best_res = xc,np.sqrt(abs(rs_old))
-    # Early-termination guards. The MPS truncation (maxdim=cvm_maxm)
-    # puts a floor on the reachable residual; once CG hits it, the
-    # recurrence doesn't just stall, it actively diverges (confirmed
-    # directly on a 20-site Heisenberg chain at cvm_maxm=30: best_res
-    # froze within the first ~hundred iterations while the running
-    # residual grew monotonically to ~3e4 by iteration 1000), so
-    # continuing to iterate is almost always pure waste. Stop (a) after
-    # `patience` iterations without a meaningful (>0.1% relative)
-    # improvement of the best residual, or (b) as soon as the running
-    # residual has blown up far past the best one. The best-vector
-    # tracking itself stays plain (any improvement updates best_xc, the
-    # 0.1% threshold only gates the patience counter), so the returned
-    # vector is the best iterate actually visited. In every regime
-    # traced so far the guards return the same vector the full max_it
-    # run would; a residual that plateaus for more than `patience`
-    # iterations and only then meaningfully improves would be cut short
-    # -- if that is ever suspected, widen self.cvm_patience /
-    # self.cvm_blowup (manybodychain.py) rather than editing this loop.
-    patience = int(getattr(self,'cvm_patience',50))
-    blowup = float(getattr(self,'cvm_blowup',100.0))
-    mark = best_res # best residual at the last *meaningful* improvement
-    since_best = 0
-    niter = 0
-    for k in range(max_it):
-        if best_res<=tol: break # initial guess can already be converged
-        Ap = applyA(p)
-        alpha = rs_old/p.dot(Ap).real # real: <p|A|p> is real for Hermitian A
-        xc = xc + alpha*p
-        r = r - alpha*Ap
-        rs_new = r.dot(r).real
-        res = np.sqrt(abs(rs_new))
-        niter = k+1
-        if res<best_res: best_xc,best_res = xc,res # guard against truncation-driven non-monotonicity
-        if res<mark*(1.-1e-3): # meaningful improvement -> reset patience
-            mark = res
-            since_best = 0
-        else:
-            since_best += 1
-            if since_best>=patience: break # residual floor reached
-            if res>blowup*best_res: break # CG diverging past the floor
-        if res<=tol: break
-        p = r + (rs_new/rs_old)*p
-        rs_old = rs_new
-    x = 1j*best_xc + (Hshift*best_xc)*(1./eta) # full correction vector
-    G = wf0.dot(A*x) # <GS|A|x>
-    return -G.imag/np.pi, best_xc, niter, best_res
+    with _cvm_sweep_params(self):
+        # (H-omega-E0) as an MPO, rebuilt per omega: measured at ~1 ms, i.e.
+        # negligible next to a single CG iteration (~2 MPO applications,
+        # ~0.03-0.1 s at 12-20 sites). Applying the shift at MPS level
+        # instead (HmE0*v - omega*v, one shared MPO) was benchmarked ~2x
+        # SLOWER per application (extra truncated sums), so don't "optimize"
+        # this line by hoisting it out of the frequency loop.
+        Hshift = self.toMPO(self.hamiltonian-(self.e0+omega))
+        def applyA(v): return Hshift*(Hshift*v) + (eta*eta)*v # (H-omega-E0)^2+eta^2
+        if b is None: b = (-eta)*(B*wf0) # -eta*B|GS>
+        xc = b # initial guess, matches the old bicstab's own x=b start
+        r = b - applyA(xc)
+        p = r
+        rs_old = r.dot(r).real # ||r||^2, real since A is Hermitian PD
+        best_xc,best_res = xc,np.sqrt(abs(rs_old))
+        # Early-termination guards. The MPS truncation (maxdim=cvm_maxm)
+        # puts a floor on the reachable residual; once CG hits it, the
+        # recurrence doesn't just stall, it actively diverges (confirmed
+        # directly on a 20-site Heisenberg chain at cvm_maxm=30: best_res
+        # froze within the first ~hundred iterations while the running
+        # residual grew monotonically to ~3e4 by iteration 1000), so
+        # continuing to iterate is almost always pure waste. Stop (a) after
+        # `patience` iterations without a meaningful (>0.1% relative)
+        # improvement of the best residual, or (b) as soon as the running
+        # residual has blown up far past the best one. The best-vector
+        # tracking itself stays plain (any improvement updates best_xc, the
+        # 0.1% threshold only gates the patience counter), so the returned
+        # vector is the best iterate actually visited. In every regime
+        # traced so far the guards return the same vector the full max_it
+        # run would; a residual that plateaus for more than `patience`
+        # iterations and only then meaningfully improves would be cut short
+        # -- if that is ever suspected, widen self.cvm_patience /
+        # self.cvm_blowup (manybodychain.py) rather than editing this loop.
+        patience = int(getattr(self,'cvm_patience',50))
+        blowup = float(getattr(self,'cvm_blowup',100.0))
+        mark = best_res # best residual at the last *meaningful* improvement
+        since_best = 0
+        niter = 0
+        for k in range(max_it):
+            if best_res<=tol: break # initial guess can already be converged
+            Ap = applyA(p)
+            alpha = rs_old/p.dot(Ap).real # real: <p|A|p> is real for Hermitian A
+            xc = xc + alpha*p
+            r = r - alpha*Ap
+            rs_new = r.dot(r).real
+            res = np.sqrt(abs(rs_new))
+            niter = k+1
+            if res<best_res: best_xc,best_res = xc,res # guard against truncation-driven non-monotonicity
+            if res<mark*(1.-1e-3): # meaningful improvement -> reset patience
+                mark = res
+                since_best = 0
+            else:
+                since_best += 1
+                if since_best>=patience: break # residual floor reached
+                if res>blowup*best_res: break # CG diverging past the floor
+            if res<=tol: break
+            p = r + (rs_new/rs_old)*p
+            rs_old = rs_new
+        x = 1j*best_xc + (Hshift*best_xc)*(1./eta) # full correction vector
+        G = wf0.dot(A*x) # <GS|A|x>
+        return -G.imag/np.pi, best_xc, niter, best_res
 
 
 
