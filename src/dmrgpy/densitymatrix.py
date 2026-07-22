@@ -6,6 +6,9 @@ def reduced_dm(self,i=0):
     Compute the reduced density matrix
     """
     wf = self.get_gs() # compute ground state
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive import densitymatrix as dmjl
+        return dmjl.reduced_dm(self,wf,i)
     return self._session.reduced_dm(wf.cpp_handle,i+1)
 
 

@@ -29,6 +29,9 @@ def compute_entropy(self,psi,b=1):
 def compute_entropy_single(self,psi,b=1):
     """Compute entanglement entropy in a bond"""
     if b<1 or b>self.ns: raise
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive import entropy as entjl
+        return np.abs(entjl.bond_entropy(psi,b))
     return np.abs(self._session.bond_entropy(psi.cpp_handle,b))
 
 

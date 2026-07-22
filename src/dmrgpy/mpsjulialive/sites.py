@@ -11,8 +11,6 @@ def sites_text(self):
 def initialize(self):
     """Initialize the sites for the Julia calculation"""
     ls = sites_text(self)
-    from .juliasession import Main
-    Main.sites_string = ls
-#    jlsites = Main.get_sites(Main.sites_string)
-    jlsites = Main.eval('get_sites(sites_string)')
+    from .juliasession import Main, to_julia_strvec
+    jlsites = Main.get_sites(to_julia_strvec(ls))
     self.jlsites = jlsites

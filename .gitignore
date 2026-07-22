@@ -16,6 +16,12 @@ __pycache__
 *.a
 setup.py
 julia*
+# the pattern above is meant for locally-downloaded Julia binaries (e.g.
+# the old install_julia.py's src/julia/ tarball extraction target), but
+# being unanchored it also matches legitimate source files anywhere in
+# the tree whose name happens to start with "julia" -- un-ignore those
+!src/dmrgpy/juliapkg.json
+!src/dmrgpy/mpsjulialive/juliasession.py
 .mpsfolder
 ERROR
 maxenttk

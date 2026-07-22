@@ -12,6 +12,9 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     that kwarg never actually affected anything even before this backend
     was removed -- not reproducing a pre-existing no-op.
     """
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive import excited as exjl
+        return exjl.get_excited_states_dmrg(self,n=n,noise=noise,scale=scale)
     wf0 = self.get_gs()
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)

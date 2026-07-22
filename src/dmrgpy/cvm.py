@@ -22,9 +22,7 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     A,B = AB[0],AB[1]
     wf0 = self.get_gs() # computes or returns the cached GS; also sets self.e0
     # sweep parameters used both by B*wf0 below and by every CG solve
-    self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
-    self._session.set_verbose(self.verbose)
-    self._session.set_mpomaxm(max(self.cvm_maxm,self.mpomaxm))
+    maxm0 = _set_cvm_sweep_params(self)
     b = (-delta)*(B*wf0) # -eta*B|GS>, identical for every frequency
     out = [] # empty list
     for e in es: # loop over energies
@@ -32,10 +30,30 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
                 tol=self.cvm_tol,max_it=int(self.cvm_nit),b=b)
         print("CVM in E = ",e," CG iterations = ",nit," residual = ",res)
         out.append(o) # store
+    if self.itensor_version=="julia_live": self.maxm = maxm0
     out = np.array(out)
 #    from .inference import points2function
 #    (es,out) = points2function(es,out)
     return (es,out) # return result
+
+
+def _set_cvm_sweep_params(self):
+    """Point every MPO application/MPS truncation at cvm_maxm rather than
+    the DMRG maxm, for the duration of a CVM computation. The C++
+    backends do this via self._session.set_sweep_params(...) (no
+    _session object exists to call on julia_live), so this temporarily
+    overrides self.maxm instead -- mpsjulialive/mpo.py's MPO.__mul__ and
+    mps.py's MPS.__add__ both read self.MBO.maxm directly, no other
+    channel to override the bond dimension exists for that backend.
+    Returns the maxm value to restore afterward."""
+    maxm0 = self.maxm
+    if self.itensor_version=="julia_live":
+        self.maxm = self.cvm_maxm
+    else:
+        self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
+        self._session.set_verbose(self.verbose)
+        self._session.set_mpomaxm(max(self.cvm_maxm,self.mpomaxm))
+    return maxm0
 
 
 
@@ -89,9 +107,7 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
     can report the CG effort and convergence quality per point.
     """
     wf0 = self.get_gs() # ground state (cheap/cached; also sets self.e0)
-    self._session.set_sweep_params(self.cvm_maxm,self.nsweeps,self.cutoff,self.noise)
-    self._session.set_verbose(self.verbose)
-    self._session.set_mpomaxm(max(self.cvm_maxm,self.mpomaxm))
+    _set_cvm_sweep_params(self)
     # (H-omega-E0) as an MPO, rebuilt per omega: measured at ~1 ms, i.e.
     # negligible next to a single CG iteration (~2 MPO applications,
     # ~0.03-0.1 s at 12-20 sites). Applying the shift at MPS level

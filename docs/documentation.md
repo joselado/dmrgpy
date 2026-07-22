@@ -199,7 +199,7 @@ between the two solver families.
 | `2` | ITensor v2, in-process C++ (`mpscpp2`) | compiled pybind11 extension | ED |
 | `3` (default) | ITensor v3, in-process C++ (`mpscpp3`) | compiled pybind11 extension | ED |
 | `"python"` | pure-Python `pyitensor/` | NumPy/SciPy only | none |
-| `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `pyjulia` + Julia install | none (feature-by-feature; missing methods simply aren't implemented) |
+| `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `juliacall`/PythonCall.jl (self-provisions Julia) | none (feature-by-feature; missing methods simply aren't implemented) |
 
 Regardless of `itensor_version`, if `self.mode` is forced to `"ED"`, or
 the requested backend isn't available, calculations run through
@@ -341,11 +341,274 @@ block-sparsity, no JIT) — see §5 for how much slower in practice, and how
 ### 4.6 The Julia backend (`mpsjulialive/`)
 
 `itensor_version="julia_live"` drives a live, in-process Julia session
-(via `pyjulia`) with its own set of modules mirroring the top-level ones
-(`mpsjulialive/groundstate.py`, `vev.py`, `mps.py`, `mpo.py`, ...) that
-talk to Julia's ITensors.jl instead of the C++ pybind11 extension. This
-is an independent implementation, not a shared protocol with the C++
-path — a feature missing on one side simply isn't implemented there yet.
+(via [`juliacall`/PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl),
+`mpsjulialive/juliasession.py`) with its own set of modules mirroring the
+top-level ones (`mpsjulialive/groundstate.py`, `vev.py`, `mps.py`,
+`mpo.py`, `dynamics.py`, ...) that talk to Julia's ITensors.jl instead of
+the C++ pybind11 extension. This is an independent implementation, not a
+shared protocol with the C++ path — a feature missing on one side simply
+isn't implemented there yet.
+
+`juliacall` replaced an earlier PyJulia-based bridge: PyJulia requires the
+Julia build's PyCall to be linked against a matching libpython (the same
+class of ABI landmine documented in §2 for the C++ extension) and needs a
+`compiled_modules=False` workaround for slow/broken precompilation.
+`juliacall` avoids both, and self-provisions Julia plus the required
+packages (`ITensors`, `ITensorMPS`, `ITensorNHDMRG`, pinned in
+`src/dmrgpy/juliapkg.json`) into its own managed project the first time
+`mpsjulialive` is imported — no manual Julia download step. One porting
+detail worth knowing: unlike PyJulia, `juliacall` does *not* implicitly
+convert a Python `list` of `str` into a Julia `Vector{String}` (it wraps
+it as a lazy `PyList{Any}`, which fails to dispatch against
+strictly-typed Julia functions like `sites.jl`'s `get_sites`); every call
+site that used to rely on that now goes through
+`juliasession.to_julia_strvec()`, which forces the conversion explicitly
+via `juliacall.convert`.
+
+The KPM dynamical correlator's Chebyshev-moment recursion runs natively
+in Julia (`mpsjulialive/kpm.jl`'s `kpm_moments_full`/
+`kpm_moments_accelerated`, driven through `mpsalgebra.jl`'s own
+`applyoperator`/`summps`), one call per correlator rather than one
+Python↔Julia round trip per Chebyshev step. `mpsjulialive/dynamics.py`
+only builds the scaled-Hamiltonian MPO and the two seed wavefunctions in
+Python (mirroring `pyitensor/chain.py`'s own pure-Python KPM algorithm,
+since `julia_live` has no single `Chain` session object comparable to
+`self._session` on the C++/pure-Python backends for `kpmdmrg.py` to
+dispatch to directly), then hands the whole moment loop to Julia in one
+call. Measured directly on a 30-site Heisenberg chain: eliminating the
+per-step round trip only closed part of the gap to the compiled ITensor
+v3 backend (v3: 23.4s, Julia native loop warm: 34.0s, vs. 37.7s for the
+earlier per-step Python loop) — most of the remaining time is genuine
+Julia-side tensor-contraction/truncation cost (`alg="densitymatrix"`
+SVD-based `add`/`contract`), not Python↔Julia marshaling overhead.
+
+Real-time TDVP evolution (`timedependent.py`'s `evolve_and_measure_dmrg`/
+`evolution_dmrg_DC`, submode `"TD"`) is implemented the same way —
+`mpsjulialive/tdvp.jl`'s `evolve_and_measure_tdvp`/`quench_tdvp` run the
+whole nt-step trajectory in one Julia call, driving `ITensorMPS.jl`'s own
+`tdvp()` (already exported by the `ITensorMPS` dependency; no separate
+`ITensorTDVP.jl` package needed). One real-time step is `exp(-i·dt·H)`,
+i.e. `tdvp()`'s complex evolution parameter is `-im*dt`. Two real,
+non-obvious `ITensorMPS`/`ITensors` bugs had to be worked around to get
+this correct, both confirmed by direct inspection of the intermediate
+tensors' index structure rather than guessed at from the stack trace
+alone:
+
+- `mpsalgebra.jl`'s `applyoperator()` (`contract(A,psi)` plus a
+  second contraction against an identity MPO, "this fixes a bug" — a
+  *Site*-index priming issue) leaves the *Link* indices of its result
+  carrying a stale nonzero prime level. This is invisible to KPM (which
+  only ever feeds `applyoperator()`'s output back into more
+  `applyoperator`/`summps`/`inner` calls), but `tdvp()`'s internal
+  environment bookkeeping (`ProjMPO`) cannot handle it: it aborts deep
+  inside `KrylovKit.expintegrator` with "... but the indices are not
+  permutations of each other" on the affected Link index. `tdvp.jl`'s
+  `apply_clean()` uses `ITensorMPS`'s higher-level `apply()` instead
+  (`contract()` is the lower-level primitive both `applyoperator()` and
+  `apply()` are built on, but only `apply()` avoids the stale prime).
+- Whenever `tdvp()`'s input MPS did not come straight from `dmrg()`
+  (e.g. `evolution_ABA()` first applies an operator via
+  `mpsjulialive/mpo.py`'s `MPO.__mul__`, which still goes through
+  `applyoperator()` for other callers' sake), the same stale Link prime
+  reappears — and, confirmed directly, `orthogonalize!()` alone does
+  *not* clear it. `evolve_and_measure_tdvp()` therefore explicitly
+  `noprime(copy(wf),"Link")`s (never mutating the caller's own MPS) before
+  `orthogonalize!()`-ing and starting the TDVP loop.
+
+Both paths were validated directly against exact diagonalization
+(quench from a Néel-favoring field to a Heisenberg chain, mirroring
+`examples/tdvp_VS_ED_time_evolution`): `evolve_and_measure` agreed with
+ED to ~8e-7 on a 4-site chain, and `evolution_DC`'s quench correlator
+agreed to ~9e-11 on a 6-site chain.
+
+Excited states (`get_excited_states`/`get_excited`, `n>1`, Hermitian) and
+the single-site reduced density matrix (`get_rdm`) are implemented the
+same way: `mpsjulialive/excited.jl`'s `excited_states_dmrg` runs the
+whole *n*-state loop in one Julia call (one new random-start warm state
+per additional excited state, deflated against every wavefunction found
+so far via `ITensorMPS.jl`'s own orthogonality-penalty
+`dmrg(H, wfs, psi0, sweeps; weight)`, mirroring
+`mpscpp3/chain_session.h`'s `Chain::excited_states` and
+`pyitensor/chain.py`'s `excited_states`); `mpsjulialive/densitymatrix.jl`'s
+`reduced_dm` is a direct Julia port of `pyitensor/chain.py`'s
+`reduced_dm` (itself a port of `Chain::reduced_dm`), including its
+"divide by the norm squared, not its square root" quirk, preserved for
+cross-backend consistency (in practice a no-op, since the ground state
+is essentially always already unit-norm). Validated directly: excited
+energies match the golden regression values in
+`tests/test_excited_states.py` to ~3e-15 on a 4-site chain, and
+`get_rdm` matches the existing backend-agnostic `reduced_dm_projective`
+to ~1e-15. `n==1` and non-Hermitian excited states already worked before
+this — they route through `gs_energy()`/the generic Arnoldi method
+(`mpsalgebra.mpsarnoldi`), neither of which is backend-specific.
+
+Bond entanglement entropy (`MPS.get_bond_entropy`, used e.g. by
+`entropy.py`'s `central_charge`) was missing entirely on the Julia
+backend (`mpsjulialive/mps.py`'s `MPS` class had no `get_bond_entropy`/
+`get_site_entropy` methods at all — a plain `AttributeError`, not a
+crash inside a dispatch branch). `mpsjulialive/entropy.jl`'s
+`bond_entropy` computes it the standard MPS way, via SVD of the two-site
+tensor at that bond (mirrors `pyitensor/chain.py`'s `bond_entropy`,
+itself a port of `Chain::bond_entropy`) — much cheaper than the generic
+`get_correlation_entropy`/`"explicit"`-dmmode fallback the Julia backend
+already had (still the only option for multi-site correlation entropy,
+just not for a single bond). Validated directly: a 2-site Heisenberg
+singlet gives exactly ln 2 (the analytically known Bell-pair
+entanglement), and on a 6-site chain the bond entropy at the first bond
+exactly matches the existing generic `get_site_entropy` (which computes
+the same quantity a completely different way, through
+`reduced_dm_projective`).
+
+The CVM dynamical-correlator submode (`get_dynamical_correlator(...,
+submode="CVM")`, `cvm.py`) needed almost no Julia-specific code at all:
+its correction-vector CG solve (`cvm.py::cvm_correction_vector`) is
+already implemented purely with backend-agnostic MPS/MPO algebra
+(`self.toMPO()`, MPS `+`/`-`/scalar-`*`, `.dot()`), which already works
+against `julia_live`'s `mpsjulialive.mpo.MPO`/`mpsjulialive.mps.MPS`
+classes without any changes. The only thing standing in the way was that
+`cvm.py` unconditionally called `self._session.set_sweep_params(...)` to
+point every MPO application at `cvm_maxm` rather than the DMRG `maxm`
+(no `_session` object exists for `julia_live` to call this on);
+`cvm.py::_set_cvm_sweep_params` now temporarily overrides `self.maxm`
+instead for that backend, since that's what
+`mpsjulialive/mpo.py`/`mps.py` actually read. Validated against ED with
+the same tolerance `examples/dynamical_correlator_VS_ED/main.py` uses
+for the C++/pure-Python backends (`1e-6`) — matched to `~2e-15` here, in
+3 CG iterations per frequency point.
+
+Wiring this up surfaced a real bug in
+`mpsjulialive/dynamics.py::get_dynamical_correlator`: its first version
+declared `name=`/`delta=`/`es=` as its own named parameters (with
+KPM-flavored defaults) purely so it could compute the KPM moments
+directly in the same function, which silently captured a caller's
+`es=`/`name=`/`delta=` kwargs out of `**kwargs` before they could reach
+`cvm.dynamical_correlator` — confirmed directly, `submode="CVM"` ran on
+a completely different, wrong frequency grid as a result (CVM's own
+`np.linspace(0.,10.0,100)` default instead of the caller's requested
+window). Fixed by splitting the KPM implementation out into its own
+`_kpm_dynamical_correlator` and making the public
+`get_dynamical_correlator(self,submode="KPM",**kwargs)` take no named
+parameters of its own — mirroring the top-level
+`dynamics.py::get_dynamical_correlator`'s own signature, which was never
+vulnerable to this because it never declared submode-specific parameters
+either.
+
+The TDZ dynamical-correlator submode (complex-time evolution +
+perturbative real-axis reconstruction, `tdz.py`, arXiv:2311.10909) needed
+only one new backend primitive, same as CVM: the whole algorithm is
+otherwise generic MPS/MPO algebra (`self.toMPO()`, `.dot()`) already
+working on `julia_live`. That one primitive is a single complex-time-step
+propagator (`tdz.py::_advance_complex_time_step`, formerly gated to
+`itensor_version in (3,"python")`) — `mpsjulialive/tdvp.jl`'s `tdvp_step`
+already generalizes to it with **no changes**, since `-im*dz` is exactly
+the right formula whether `dz` is real (the `evolve_and_measure_tdvp`/
+`quench_tdvp` case) or genuinely complex (TDZ's per-step contour
+increment); only a thin Python wrapper
+(`mpsjulialive/timedependent.py::advance_complex_time_step`) was needed.
+
+Wiring TDZ up caught a second occurrence of the same stale-Link-prime bug
+documented above for TDVP: `tdz.py`'s first evolved state,
+`self.toMPO(A)*wf_g`, goes through the same `applyoperator()` path
+`evolution_ABA()` does, and `tdvp_step` had only been sanitized against
+that inside `evolve_and_measure_tdvp`'s own wrapper loop, not inside
+`tdvp_step` itself — so any *other* direct caller (TDZ's driver loop in
+`_complex_time_correlator`) hit the identical failure. Fixed by moving
+the `noprime(copy(psi),"Link")` + `orthogonalize!()` sanitization into
+`tdvp_step` itself, so it runs on every step regardless of caller,
+instead of relying on each call site to remember to pre-clean its input
+— a small, one-time cost next to the sweep itself. Validated against the
+same golden test `tests/test_dynamical_correlator.py` uses for the other
+backends: peak within `0.03` of the exact 4-site Heisenberg gap
+(`0.658919`) — landed at `0.68`.
+
+The last two dynamical-correlator submodes needed no new Julia code at
+all, only dispatch routing: `dcex.py` (submode `"EX"`, correlator via
+exact diagonalization in the excited-state subspace) only calls
+`self.get_excited_states()` (already backend-agnostic, see above) and
+generic `MultiOperator`/MPS algebra (`.dot()`, `A*wf`) before dropping
+into plain NumPy/SciPy (`eigh`); `distribution.py`'s maxent path
+(submode `"maxent"`) is built the same way on top of
+`vev.py::power_vev`. Validated `"EX"` the same way
+`tests/test_dynamical_correlator.py` already does for the other
+backends — cross-checked directly against `"KPM"` and `"CVM"` on the
+same chain/operator/frequency grid, landing on the exact same peak
+(diff `0.0`) rather than just the analytic gap. `"maxent"` is wired up
+for parity but not actually functional on *any* backend right now —
+`distribution.py::get_distribution_maxent` imports
+`dmrgpy.maxenttk.pymaxent`, which doesn't exist in this checkout
+(confirmed directly: `ModuleNotFoundError`), so it hits the same
+`except: print("Not functional yet"); exit()` regardless of
+`itensor_version` — a pre-existing, cross-backend gap, not something
+introduced or left broken by this work.
+
+The fermionic 4-point correlator tensor (`MPS.get_four_correlation_tensor`,
+`<Cdag_i C_j Cdag_k C_l>`) was missing the same way bond entropy was — no
+`get_four_correlation_tensor` method at all on `mpsjulialive/mps.py`'s
+`MPS` class — and needed the same fix: just add the method, delegating
+to `entropytk/correlationentropy.py`'s default `ctmode="explicit"` (a
+Python loop of `MultiOperator` products + `.aMb()`/`.dot()`, already
+generic; `ctmode="full"`, a native per-element AutoMPO build, mirrors
+`pyitensor/chain.py`'s own `four_correlation_tensor` but isn't ported to
+Julia). Validated directly against ED on the same well-gapped free-fermion
+model `tests/test_four_point_correlator.py` uses (agreement to `~2e-15`).
+
+Investigated whether `get_correlation_matrix`'s default `dmmode="fast"`
+(`entropytk/correlationentropy.py::correlation_matrix_fast`, `n` MPO
+applications total rather than `explicit`'s `n(n+1)/2` two-operator
+products) could also work on `julia_live` — `mpsjulialive/mps.py`'s
+`get_correlation_entropy`/`get_correlation_entropy_density` already
+force `dmmode="explicit"`, and this turned out to be necessary, not an
+arbitrary choice: `dmmode="fast"` builds an MPO for a single bare
+fermionic operator (`Cdag[i]`, odd particle-number parity) before
+combining it with another, and `ITensorMPS.jl`'s OpSum-to-MPO compiler
+rejects that outright ("Parity-odd fermionic terms not yet supported by
+OpSum to MPO conversion", confirmed directly) — `explicit` avoids the
+problem by always building the two-operator *product* (`Cdag_i C_j`,
+even parity) before ever converting to an MPO. Not pursued further: it's
+a real `ITensorMPS.jl` limitation, not a bug on this side, and
+`explicit` is already fast in absolute terms (0.29s for a 10-site
+chain's full correlation matrix) — a from-scratch fermionic-JW-string
+MPO builder to work around it would be a disproportionate amount of new
+code for a performance-only win on an already-cheap operation.
+
+A final sweep of every remaining `self._session.` call site reachable
+from `julia_live` (`grep -rl "self\._session\." *.py`, checked against
+what each call site's own top-level dispatcher actually routes for that
+`itensor_version`) turned up two more real gaps, deliberately left
+unfixed rather than pursued further, since both fall outside the
+"already-generic code, just needs a dispatch branch or a small native
+Julia primitive" pattern every fix above followed:
+
+- **`vev.py`'s `npow=` kwarg** (`sc.vev(op, npow=2)`, computes
+  `<X^2>`/`<X^n>` via repeated MPO application instead of building the
+  `O(n^2)`-term squared operator directly) — `mpsjulialive/vev.py`'s
+  `vev(MBO,MO)` takes no `**kwargs` at all, so this raises a plain
+  `TypeError` for `julia_live` rather than silently misbehaving. The one
+  example exercising it, `examples/power_vev/main.py`, sets
+  `sc.itensor_version = "julia"` directly (bypassing
+  `setup_julia()`/`_reset_dmrg_state()` entirely) — the legacy,
+  already-inert subprocess-based backend documented below, not
+  `julia_live` — so it wouldn't validate this fix even if made.
+- **`get_distribution`/`kpmdmrg.py::general_kpm`** (spectral distribution
+  of an arbitrary operator, not just the Hamiltonian; has example
+  coverage in four `examples/magnetization_distribution*` scripts and
+  `examples/dynamical_correlator/dynamical_correlator_shift`, but no
+  `pytest` coverage) — unlike everything above, this is not a
+  wire-up-already-generic-code fix: `kpmdmrg.py::general_kpm_moments`
+  depends on `scale_operator()`, which calls `self.lowest_eigenvalue()`/
+  `self.bandwidth()` (`manybodychain.py`), both of which route through
+  `self.clone()` → `deepcopy(self)` — and `julia_live`'s live Julia
+  session handles (`self.jlsites`, every `MPS.jlmps`/`MPO.jlmpo`) are not
+  established to be deepcopy-safe (this is exactly why
+  `dynamics.py::_max_energy_bound`/`excited.py`'s energy-bound helpers
+  were written as their own mutate-and-restore functions instead of
+  calling `bandwidth()`/`lowest_eigenvalue()` directly, see their
+  docstrings). Doing this properly means generalizing that same
+  mutate-and-restore pattern from "the Hamiltonian, negated" to "an
+  arbitrary caller-supplied operator" — real, but new design work rather
+  than a small addition, so left as a documented follow-up rather than
+  implemented here.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)

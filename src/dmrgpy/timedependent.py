@@ -47,6 +47,9 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     "restart" has no effect: quench()'s C++ implementation always starts
     from get_gs() regardless of its value.
     """
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive import timedependent as tdjl
+        return tdjl.evolution_dmrg_DC(self,name=name,nt=nt,dt=dt,**kwargs)
     name = operatornames.str2MO(self,name,**kwargs)
     name[0] = name[0].get_dagger()
     A,B = name[0],name[1]
@@ -109,6 +112,10 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     fidelity check where ED isn't feasible (see
     examples/tdvp_VS_ED_time_evolution/benchmark_scaling.py).
     """
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive import timedependent as tdjl
+        return tdjl.evolve_and_measure_dmrg(self,operator=operator,nt=nt,
+                h=h,dt=dt,wf=wf,return_wf=return_wf,**kwargs)
     if h is None: h = self.hamiltonian # Hamiltonian
     if wf is None: wf = self.wf0 # get ground state
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)

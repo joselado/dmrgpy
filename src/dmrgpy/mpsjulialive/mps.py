@@ -40,6 +40,21 @@ class MPS():
         return MPS(self.jlmps,MBO=self.MBO)
     def write(self,name=None,path=None):
         return # dummy method
+    def get_site_entropy(self,i):
+        if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
+        else: raise # not implemented
+    def get_bond_entropy(self,i,j=None):
+        if j is None: j = i + 1
+        if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
+        else: raise # not implemented
+    def get_four_correlation_tensor(self,**kwargs):
+        """<Cdag_i C_j Cdag_k C_l>, via entropytk/correlationentropy.py's
+        default ctmode="explicit" (a Python loop of MultiOperator products
+        + generic aMb()/.dot() -- no julia_live-specific code needed,
+        unlike ctmode="full" which needs a native per-element AutoMPO
+        build and is not implemented for this backend)."""
+        from .. import entanglement
+        return entanglement.get_four_correlation_tensor(self,**kwargs)
     def get_correlation_entropy(self,**kwargs):
         from .. import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,
