@@ -26,7 +26,8 @@ class MPS():
     def __add__(self,x):
         if x==0: return self # do nothing
         if self.MBO is not None:
-            jlmps = Mainjl.summps(self.jlmps,x.jlmps,self.MBO.maxm)
+            jlmps = Mainjl.summps(self.jlmps,x.jlmps,self.MBO.maxm,
+                    self.MBO.cutoff)
             wf3 = MPS(jlmps,MBO=self.MBO)
             return wf3
         else: raise

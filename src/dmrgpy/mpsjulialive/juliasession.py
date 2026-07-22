@@ -37,9 +37,9 @@ def initialize():
     files += ["read_operator.jl"]
     files += ["mpsalgebra.jl"]
     files += ["kpm.jl"] # KPM moment recursion; calls mpsalgebra.jl's own
-                         # applyoperator/summps, so must load after it
+                         # apply_op/summps, so must load after it
     files += ["tdvp.jl"] # real-time TDVP evolution; also calls
-                          # mpsalgebra.jl's applyoperator, must load after it
+                          # mpsalgebra.jl's apply_op, must load after it
     files += ["excited.jl"] # orthogonality-penalty excited-state dmrg()
     files += ["densitymatrix.jl"] # single-site reduced density matrix
     files += ["entropy.jl"] # SVD-based bond entanglement entropy

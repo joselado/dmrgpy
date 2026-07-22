@@ -370,14 +370,26 @@ step, which does *two* truncated MPO-MPS contractions per call
 the same "fixes a bug" workaround documented above for `tdvp.jl`'s
 `apply_clean`, which switched to `ITensorMPS`'s own higher-level
 `apply()` for the same reason, on the TDVP side, to fix a *different*
-bug). `kpm.jl` now has its own `apply_op()` doing the same swap, cutting
-one of the two contractions per moment (not a clean 2×, since the
-identity-MPO contraction is against a trivial bond-dimension-1 operator,
-much cheaper than the contraction against the real, bond-growing scaled
-Hamiltonian). Measured directly on the same 30-site chain: 34.5s → 28.4s
-warm (~18% faster), narrowing the gap to v3 from ~1.47× to ~1.21×
-slower. Peak positions confirmed unchanged against the existing ED
-cross-check after the change.
+bug). `mpsalgebra.jl`'s `apply_op()` does the same swap, cutting one of
+the two contractions per moment (not a clean 2×, since the identity-MPO
+contraction is against a trivial bond-dimension-1 operator, much cheaper
+than the contraction against the real, bond-growing scaled Hamiltonian).
+Measured directly on the same 30-site chain: 34.5s → 28.4s warm (~18%
+faster), narrowing the gap to v3 from ~1.47× to ~1.21× slower. Peak
+positions confirmed unchanged against the existing ED cross-check after
+the change. `apply_op()` is shared between `kpm.jl`'s recursion and
+`tdvp.jl`'s `apply_clean()` (which layers its own `orthogonalize!()` on
+top, needed for `tdvp()`/`dmrg()` inputs but not for KPM's) — it lives in
+`mpsalgebra.jl`, loaded before both, rather than as two independently
+maintained near-duplicates. `mpsalgebra.jl`'s `summps()` (the `add()`
+wrapper the Chebyshev recursion sums consecutive Chebyshev vectors with)
+now also takes an explicit `cutoff` argument: `add()`'s own default
+(`1e-15`) is three orders tighter than dmrgpy's usual configured cutoffs,
+so every moment step used to silently keep far more Schmidt values than
+`self.kpmcutoff` called for, up to `kpmmaxm`. The KPM seed vectors
+(`psi1`/`psi2` in `mpsjulialive/dynamics.py`) are now also built via
+`apply_op()` rather than the older `applyoperator()`, closing the one
+spot the original optimization pass left on the old primitive.
 
 Real-time TDVP evolution (`timedependent.py`'s `evolve_and_measure_dmrg`/
 `evolution_dmrg_DC`, submode `"TD"`) is implemented the same way —
@@ -668,6 +680,52 @@ identically by `pyitensor/chain.py` and `mpscpp3/chain_session.h` (see
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)
+
+**A second review round** (run against the KPM optimization + the six
+fixes above together) found two of those fixes were themselves
+incorrect, plus several smaller cleanup items — all fixed, and this time
+backed by persisted regression coverage (`tests/test_julia_live.py`,
+`julia_live`'s first, since the first round's validation was ad hoc and
+non-committed):
+
+- `evolve_and_measure_tdvp`'s new renormalization (previous round, above)
+  forced the state to *unit* norm every step instead of preserving its
+  own starting norm — diverging from `quench_tdvp`'s existing
+  `norm0`-target pattern in the same file, and silently rescaling every
+  result by `1/‖wf‖²` whenever the input wasn't already unit-norm (e.g.
+  `evolution_ABA()`'s `wfA = A*wf`, for any non-unitary `A`). Now
+  captures `norm0 = ‖wf‖` once at entry and renormalizes to that every
+  step, matching `quench_tdvp` and the pure-Python reference's physical
+  behavior.
+- The non-Hermitian guard added to `dynamics.py`'s `julia_live` branch
+  (previous round, above) ran *before* submode dispatch, so it
+  unconditionally blocked every submode — including `submode="EX"`,
+  which already has a working, itensor_version-agnostic non-Hermitian
+  path (`dcex.py` → `excited.py`'s `excited_states_non_hermitian`, not
+  gated on `itensor_version` at all) and `submode="maxent"`. The guard
+  now only fires for `submode in ("KPM","CVM","TDZ")`, matching what its
+  own error message already claimed.
+- Both renormalization sites now use `norm(psi)` instead of
+  `sqrt(abs(inner(psi,psi)))`: `tdvp_step()`'s own `orthogonalize!(psi,1)`
+  guarantees a well-defined orthogonality center on its output, so
+  `ITensorMPS`'s `norm()` short-circuits to a cheap `O(D²)` single-tensor
+  norm instead of a full `O(N·D³)` chain contraction — confirmed via a
+  live benchmark (`N=40`, `D=60`: ~4ms vs ~1.18s per call).
+- `mpsjulialive/dynamics.py`'s `_same_mps` had an unused `jlsites`
+  parameter left over from the same cleanup that removed it from its
+  sibling `_kpm_moments_full`/`_kpm_moments_accelerated` — dropped, and
+  `same_mps`/`summps` on the Julia side gained the `cutoff` argument
+  described above.
+
+The commit that introduced this round's fixes claimed "new targeted
+tests" without actually adding any (`tests/`/`examples/` were untouched)
+— `tests/test_julia_live.py` now covers exactly the four behaviors that
+commit described validating: CVM's `maxm` restoration, the non-Hermitian
+dispatch split, `evolution_ABA`'s norm preservation, and the KPM peak
+position after the `apply_op`/`summps` changes. The whole file is skipped
+if `juliacall`/Julia isn't available, the same way `tests/` already skips
+itensor_version 2/3 when the corresponding compiled extension isn't
+present.
 
 ### 4.7 Supporting `*tk` packages
 

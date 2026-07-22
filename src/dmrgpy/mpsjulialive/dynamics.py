@@ -36,16 +36,16 @@ def _max_energy_bound(self,H):
     return emax
 
 
-def _same_mps(jlsites,vi,vj,maxm):
+def _same_mps(vi,vj,maxm,cutoff):
     from .juliasession import Main as Mainjl
-    return bool(Mainjl.same_mps(vi,vj,maxm))
+    return bool(Mainjl.same_mps(vi,vj,maxm,cutoff))
 
 
 def _kpm_moments_full(jlmpo,vi,vj,n,kpmmaxm,kpmcutoff):
     """Chebyshev moments <vj|T_k(scaledH)|vi>, via the standard three-term
     recursion T_{k+1} = 2*scaledH*T_k - T_{k-1}. The whole loop runs
     natively in Julia (kpm.jl's kpm_moments_full, driven through
-    kpm.jl's own apply_op()/mpsalgebra.jl's summps) rather than one
+    mpsalgebra.jl's own apply_op()/summps) rather than one
     Python<->Julia round trip per Chebyshev step -- confirmed directly
     that the per-step-round-trip version this replaced was ~1.7x slower
     than the compiled ITensor v3 backend even with a warm Julia session
@@ -158,11 +158,9 @@ def _kpm_dynamical_correlator(self,n=1000,
     Hscaled = MPO(Hscaled_MO,MBO=self)
     Aop = MPO(mi,MBO=self)
     Bop = MPO(mj,MBO=self)
-    psi1 = Mainjl.applyoperator(self.jlsites,Aop.jlmpo,wf0.jlmps,
-            self.kpmmaxm,self.kpmcutoff)
-    psi2 = Mainjl.applyoperator(self.jlsites,Bop.jlmpo,wf0.jlmps,
-            self.kpmmaxm,self.kpmcutoff)
-    if self.kpm_accelerate and _same_mps(self.jlsites,psi1,psi2,self.kpmmaxm):
+    psi1 = Mainjl.apply_op(Aop.jlmpo,wf0.jlmps,self.kpmmaxm,self.kpmcutoff)
+    psi2 = Mainjl.apply_op(Bop.jlmpo,wf0.jlmps,self.kpmmaxm,self.kpmcutoff)
+    if self.kpm_accelerate and _same_mps(psi1,psi2,self.kpmmaxm,self.kpmcutoff):
         moments = _kpm_moments_accelerated(Hscaled.jlmpo,psi1,
                 n,self.kpmmaxm,self.kpmcutoff)
     else:
