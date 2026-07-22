@@ -522,6 +522,36 @@ for parity but not actually functional on *any* backend right now —
 `itensor_version` — a pre-existing, cross-backend gap, not something
 introduced or left broken by this work.
 
+The fermionic 4-point correlator tensor (`MPS.get_four_correlation_tensor`,
+`<Cdag_i C_j Cdag_k C_l>`) was missing the same way bond entropy was — no
+`get_four_correlation_tensor` method at all on `mpsjulialive/mps.py`'s
+`MPS` class — and needed the same fix: just add the method, delegating
+to `entropytk/correlationentropy.py`'s default `ctmode="explicit"` (a
+Python loop of `MultiOperator` products + `.aMb()`/`.dot()`, already
+generic; `ctmode="full"`, a native per-element AutoMPO build, mirrors
+`pyitensor/chain.py`'s own `four_correlation_tensor` but isn't ported to
+Julia). Validated directly against ED on the same well-gapped free-fermion
+model `tests/test_four_point_correlator.py` uses (agreement to `~2e-15`).
+
+Investigated whether `get_correlation_matrix`'s default `dmmode="fast"`
+(`entropytk/correlationentropy.py::correlation_matrix_fast`, `n` MPO
+applications total rather than `explicit`'s `n(n+1)/2` two-operator
+products) could also work on `julia_live` — `mpsjulialive/mps.py`'s
+`get_correlation_entropy`/`get_correlation_entropy_density` already
+force `dmmode="explicit"`, and this turned out to be necessary, not an
+arbitrary choice: `dmmode="fast"` builds an MPO for a single bare
+fermionic operator (`Cdag[i]`, odd particle-number parity) before
+combining it with another, and `ITensorMPS.jl`'s OpSum-to-MPO compiler
+rejects that outright ("Parity-odd fermionic terms not yet supported by
+OpSum to MPO conversion", confirmed directly) — `explicit` avoids the
+problem by always building the two-operator *product* (`Cdag_i C_j`,
+even parity) before ever converting to an MPO. Not pursued further: it's
+a real `ITensorMPS.jl` limitation, not a bug on this side, and
+`explicit` is already fast in absolute terms (0.29s for a 10-site
+chain's full correlation matrix) — a from-scratch fermionic-JW-string
+MPO builder to work around it would be a disproportionate amount of new
+code for a performance-only win on an already-cheap operation.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)

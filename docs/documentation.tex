@@ -646,6 +646,43 @@ the same \texttt{except: print("Not functional yet"); exit()} regardless
 of \texttt{itensor\_version} --- a pre-existing, cross-backend gap, not
 something introduced or left broken by this work.
 
+The fermionic 4-point correlator tensor
+(\texttt{MPS.get\_four\_correlation\_tensor}, $\langle
+C^\dagger_i C_j C^\dagger_k C_l \rangle$) was missing the same way bond
+entropy was --- no \texttt{get\_four\_correlation\_tensor} method at all
+on \texttt{mpsjulialive/mps.py}'s \texttt{MPS} class --- and needed the
+same fix: just add the method, delegating to
+\texttt{entropytk/correlationentropy.py}'s default
+\texttt{ctmode="explicit"} (a Python loop of \texttt{MultiOperator}
+products + \texttt{.aMb()}/\texttt{.dot()}, already generic;
+\texttt{ctmode="full"}, a native per-element AutoMPO build, mirrors
+\texttt{pyitensor/chain.py}'s own \texttt{four\_correlation\_tensor} but
+isn't ported to Julia). Validated directly against ED on the same
+well-gapped free-fermion model \texttt{tests/test\_four\_point\_correlator.py}
+uses (agreement to $\sim 2 \times 10^{-15}$).
+
+Investigated whether \texttt{get\_correlation\_matrix}'s default
+\texttt{dmmode="fast"}
+(\texttt{entropytk/correlationentropy.py::correlation\_matrix\_fast}, $n$
+MPO applications total rather than \texttt{explicit}'s $n(n+1)/2$
+two-operator products) could also work on \texttt{julia\_live} ---
+\texttt{mpsjulialive/mps.py}'s \texttt{get\_correlation\_entropy}/
+\texttt{get\_correlation\_entropy\_density} already force
+\texttt{dmmode="explicit"}, and this turned out to be necessary, not an
+arbitrary choice: \texttt{dmmode="fast"} builds an MPO for a single bare
+fermionic operator (\texttt{Cdag[i]}, odd particle-number parity) before
+combining it with another, and \texttt{ITensorMPS.jl}'s OpSum-to-MPO
+compiler rejects that outright ("Parity-odd fermionic terms not yet
+supported by OpSum to MPO conversion", confirmed directly) ---
+\texttt{explicit} avoids the problem by always building the two-operator
+\emph{product} ($C^\dagger_i C_j$, even parity) before ever converting
+to an MPO. Not pursued further: it's a real \texttt{ITensorMPS.jl}
+limitation, not a bug on this side, and \texttt{explicit} is already
+fast in absolute terms (0.29s for a 10-site chain's full correlation
+matrix) --- a from-scratch fermionic-JW-string MPO builder to work
+around it would be a disproportionate amount of new code for a
+performance-only win on an already-cheap operation.
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as
