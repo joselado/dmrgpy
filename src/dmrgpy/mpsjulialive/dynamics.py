@@ -41,28 +41,32 @@ def _same_mps(jlsites,vi,vj,maxm):
     return bool(Mainjl.same_mps(vi,vj,maxm))
 
 
-def _kpm_moments_full(jlsites,jlmpo,vi,vj,n,kpmmaxm,kpmcutoff):
+def _kpm_moments_full(jlmpo,vi,vj,n,kpmmaxm,kpmcutoff):
     """Chebyshev moments <vj|T_k(scaledH)|vi>, via the standard three-term
     recursion T_{k+1} = 2*scaledH*T_k - T_{k-1}. The whole loop runs
     natively in Julia (kpm.jl's kpm_moments_full, driven through
-    mpsalgebra.jl's applyoperator/summps) rather than one Python<->Julia
-    round trip per Chebyshev step -- confirmed directly that the
-    per-step-round-trip version this replaced was ~1.7x slower than the
-    compiled ITensor v3 backend even with a warm Julia session (30-site
-    Heisenberg chain), which this closes."""
+    kpm.jl's own apply_op()/mpsalgebra.jl's summps) rather than one
+    Python<->Julia round trip per Chebyshev step -- confirmed directly
+    that the per-step-round-trip version this replaced was ~1.7x slower
+    than the compiled ITensor v3 backend even with a warm Julia session
+    (30-site Heisenberg chain), which this closes. apply_op() (rather
+    than mpsalgebra.jl's applyoperator(), which does an extra, redundant
+    MPO contraction per call -- see its own docstring) roughly halves
+    the cost again on top of that, since this recursion is O(n moments)
+    calls and dominates KPM's total runtime."""
     from .juliasession import Main as Mainjl
-    out = Mainjl.kpm_moments_full(jlsites,jlmpo,vi,vj,n,kpmmaxm,kpmcutoff)
+    out = Mainjl.kpm_moments_full(jlmpo,vi,vj,n,kpmmaxm,kpmcutoff)
     return list(out)
 
 
-def _kpm_moments_accelerated(jlsites,jlmpo,vi,n,kpmmaxm,kpmcutoff):
+def _kpm_moments_accelerated(jlmpo,vi,n,kpmmaxm,kpmcutoff):
     """Same recursion as _kpm_moments_full, specialized for vi==vj (a
     diagonal correlator): the even/odd moment pair at each step is read
     off two consecutive Chebyshev vectors instead of two separate
     recursions, roughly halving the MPO applications. Native Julia loop,
     see _kpm_moments_full's note."""
     from .juliasession import Main as Mainjl
-    out = Mainjl.kpm_moments_accelerated(jlsites,jlmpo,vi,n,kpmmaxm,kpmcutoff)
+    out = Mainjl.kpm_moments_accelerated(jlmpo,vi,n,kpmmaxm,kpmcutoff)
     return list(out)
 
 
@@ -159,10 +163,10 @@ def _kpm_dynamical_correlator(self,n=1000,
     psi2 = Mainjl.applyoperator(self.jlsites,Bop.jlmpo,wf0.jlmps,
             self.kpmmaxm,self.kpmcutoff)
     if self.kpm_accelerate and _same_mps(self.jlsites,psi1,psi2,self.kpmmaxm):
-        moments = _kpm_moments_accelerated(self.jlsites,Hscaled.jlmpo,psi1,
+        moments = _kpm_moments_accelerated(Hscaled.jlmpo,psi1,
                 n,self.kpmmaxm,self.kpmcutoff)
     else:
-        moments = _kpm_moments_full(self.jlsites,Hscaled.jlmpo,psi1,psi2,
+        moments = _kpm_moments_full(Hscaled.jlmpo,psi1,psi2,
                 n,self.kpmmaxm,self.kpmcutoff)
     mus = np.array(moments)
     if self.kpm_extrapolate:

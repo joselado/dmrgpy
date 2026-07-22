@@ -442,13 +442,13 @@ conversion explicitly via \texttt{juliacall.convert}.
 
 The KPM dynamical correlator's Chebyshev-moment recursion runs natively
 in Julia (\texttt{mpsjulialive/kpm.jl}'s \texttt{kpm\_moments\_full}/
-\texttt{kpm\_moments\_accelerated}, driven through \texttt{mpsalgebra.jl}'s
-own \texttt{applyoperator}/\texttt{summps}), one call per correlator
-rather than one Python$\leftrightarrow$Julia round trip per Chebyshev
-step. \texttt{mpsjulialive/dynamics.py} only builds the scaled-Hamiltonian
-MPO and the two seed wavefunctions in Python (mirroring
-\texttt{pyitensor/chain.py}'s own pure-Python KPM algorithm, since
-\texttt{julia\_live} has no single \texttt{Chain} session object
+\texttt{kpm\_moments\_accelerated}, driven through \texttt{kpm.jl}'s own
+\texttt{apply\_op}/\texttt{mpsalgebra.jl}'s \texttt{summps}), one call
+per correlator rather than one Python$\leftrightarrow$Julia round trip
+per Chebyshev step. \texttt{mpsjulialive/dynamics.py} only builds the
+scaled-Hamiltonian MPO and the two seed wavefunctions in Python
+(mirroring \texttt{pyitensor/chain.py}'s own pure-Python KPM algorithm,
+since \texttt{julia\_live} has no single \texttt{Chain} session object
 comparable to \texttt{self.\_session} on the C++/pure-Python backends for
 \texttt{kpmdmrg.py} to dispatch to directly), then hands the whole moment
 loop to Julia in one call. Measured directly on a 30-site Heisenberg
@@ -458,6 +458,25 @@ to the compiled ITensor v3 backend (v3: 23.4s, Julia native loop warm:
 remaining time is genuine Julia-side tensor-contraction/truncation cost
 (\texttt{alg="densitymatrix"} SVD-based \texttt{add}/\texttt{contract}),
 not Python$\leftrightarrow$Julia marshaling overhead.
+
+\textbf{Follow-up optimization}: \texttt{kpm\_moments\_full}/
+\texttt{kpm\_moments\_accelerated} originally called
+\texttt{mpsalgebra.jl}'s \texttt{applyoperator()} once per Chebyshev
+step, which does \emph{two} truncated MPO-MPS contractions per call
+(\texttt{contract(A,psi)} plus a second contraction against an identity
+MPO --- the same "fixes a bug" workaround documented above for
+\texttt{tdvp.jl}'s \texttt{apply\_clean}, which switched to
+\texttt{ITensorMPS}'s own higher-level \texttt{apply()} for the same
+reason, on the TDVP side, to fix a \emph{different} bug).
+\texttt{kpm.jl} now has its own \texttt{apply\_op()} doing the same
+swap, cutting one of the two contractions per moment (not a clean
+$2\times$, since the identity-MPO contraction is against a trivial
+bond-dimension-1 operator, much cheaper than the contraction against the
+real, bond-growing scaled Hamiltonian). Measured directly on the same
+30-site chain: 34.5s $\to$ 28.4s warm ($\sim$18\% faster), narrowing the
+gap to v3 from $\sim$1.47$\times$ to $\sim$1.21$\times$ slower. Peak
+positions confirmed unchanged against the existing ED cross-check after
+the change.
 
 Real-time TDVP evolution (\texttt{timedependent.py}'s
 \texttt{evolve\_and\_measure\_dmrg}/\texttt{evolution\_dmrg\_DC}, submode

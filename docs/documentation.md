@@ -348,8 +348,8 @@ via `juliacall.convert`.
 
 The KPM dynamical correlator's Chebyshev-moment recursion runs natively
 in Julia (`mpsjulialive/kpm.jl`'s `kpm_moments_full`/
-`kpm_moments_accelerated`, driven through `mpsalgebra.jl`'s own
-`applyoperator`/`summps`), one call per correlator rather than one
+`kpm_moments_accelerated`, driven through `kpm.jl`'s own `apply_op`/
+`mpsalgebra.jl`'s `summps`), one call per correlator rather than one
 Python↔Julia round trip per Chebyshev step. `mpsjulialive/dynamics.py`
 only builds the scaled-Hamiltonian MPO and the two seed wavefunctions in
 Python (mirroring `pyitensor/chain.py`'s own pure-Python KPM algorithm,
@@ -362,6 +362,22 @@ v3 backend (v3: 23.4s, Julia native loop warm: 34.0s, vs. 37.7s for the
 earlier per-step Python loop) — most of the remaining time is genuine
 Julia-side tensor-contraction/truncation cost (`alg="densitymatrix"`
 SVD-based `add`/`contract`), not Python↔Julia marshaling overhead.
+
+**Follow-up optimization**: `kpm_moments_full`/`kpm_moments_accelerated`
+originally called `mpsalgebra.jl`'s `applyoperator()` once per Chebyshev
+step, which does *two* truncated MPO-MPS contractions per call
+(`contract(A,psi)` plus a second contraction against an identity MPO —
+the same "fixes a bug" workaround documented above for `tdvp.jl`'s
+`apply_clean`, which switched to `ITensorMPS`'s own higher-level
+`apply()` for the same reason, on the TDVP side, to fix a *different*
+bug). `kpm.jl` now has its own `apply_op()` doing the same swap, cutting
+one of the two contractions per moment (not a clean 2×, since the
+identity-MPO contraction is against a trivial bond-dimension-1 operator,
+much cheaper than the contraction against the real, bond-growing scaled
+Hamiltonian). Measured directly on the same 30-site chain: 34.5s → 28.4s
+warm (~18% faster), narrowing the gap to v3 from ~1.47× to ~1.21×
+slower. Peak positions confirmed unchanged against the existing ED
+cross-check after the change.
 
 Real-time TDVP evolution (`timedependent.py`'s `evolve_and_measure_dmrg`/
 `evolution_dmrg_DC`, submode `"TD"`) is implemented the same way —
