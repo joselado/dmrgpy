@@ -60,6 +60,7 @@ Chain class & Local Hilbert space & Key operators \\
 \texttt{fermionchain.\allowbreak Fermionic\_Chain} & spinless fermion (occupied/empty) & $c_i,c_i^\dagger,n_i=c_i^\dagger c_i$, JW string $F_i$ \\
 \texttt{fermionchain.\allowbreak Majorana\_Chain} & Majorana fermion & Majorana operators built from \texttt{Fermionic\_Chain} \\
 \texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_Chain} & spin-$\tfrac12$ fermion (4 states), two interleaved spinless sites per physical site & $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$; derived spin and pairing operators (see text) \\
+\texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_\allowbreak Chain\_\allowbreak Native} & same physics, genuinely 4-dimensional local space, one site per physical site (\texttt{itensor\_version=3} only) & identical operator lists/formulas as \texttt{Spinful\_Fermionic\_Chain} \\
 \texttt{bosonchain.\allowbreak Bosonic\_Chain} & truncated boson Fock space, $n_i\le n_{\max}$ (default 4) & $a_i,a_i^\dagger,n_i$, occupation projectors \\
 \texttt{parafermionchain.\allowbreak Parafermionic\_\allowbreak Chain} & $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ & clock/shift operators $\sigma_i,\tau_i$, composite $\chi_i,\psi_i$ \\
 \texttt{mixedchain.\allowbreak Mixed\_Spin\_\allowbreak Fermion\_Chain} & mixes spin-$S$ sites and spinful-fermion locations in the same chain & spin location: native $S^x_i,S^y_i,S^z_i$; fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived spin/pairing operators \\
@@ -74,6 +75,24 @@ spin down) rather than by a genuinely 4-dimensional local space, so that
 the same Jordan-Wigner machinery used for spinless fermions applies
 unchanged; \texttt{Spinful\_Fermionic\_Chain} wraps this bookkeeping for
 you.
+
+\texttt{Spinful\_Fermionic\_Chain\_Native} is the alternative built
+directly on a genuinely 4-dimensional local space (ITensor v3's own
+\texttt{Electron}/\texttt{Hubbard} site type) instead: one
+tensor-network site per physical site, with the same operator lists and
+identical physics/sign convention as \texttt{Spinful\_Fermionic\_Chain}
+-- the two classes are drop-in equivalent for any given Hamiltonian,
+cross-checked to agree exactly under ED and to DMRG tolerance under
+\texttt{itensor\_version=3} (the only DMRG backend this class wires
+up). Despite halving the site count, it is \emph{not} generally faster
+in practice: two-site DMRG's per-sweep cost is driven by the local
+dimension of the two-site block being diagonalized, which grows faster
+($4\times4=16$ per pair of native sites, versus $2\times2=4$ per pair of
+interleaved sites) than the site-count halving saves, at least for the
+ground-state Hubbard-chain benchmarks tried so far (see
+\texttt{fermionchain.py}'s class docstring for measured numbers). Prefer
+\texttt{Spinful\_Fermionic\_Chain} unless there is a specific reason to
+want a genuinely 4-dimensional local space.
 
 \texttt{Mixed\_Spin\_Fermion\_Chain} is for models that need a literal
 local moment next to a conduction-electron site (e.g.\ Kondo-lattice-like

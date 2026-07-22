@@ -309,9 +309,13 @@ def MO2matrix(MO,obj):
     return out # return matrix
 
 
+_spinful_fermion_names = {"Cup","Cdagup","Cdn","Cdagdn"}
+
+
 def jordan_wigner(MO):
     """Use Jordan Wigner transformationin a multioperator"""
     from .multioperatortk import jordanwigner
+    from .multioperatortk import jordanwigner_spinful
     # Accumulate into a flat Python list and wrap once at the end, instead
     # of "m = m + mi" per term: the latter goes through the public "+"
     # (copy + list concat) once per term of MO.op, which turns this loop
@@ -322,23 +326,33 @@ def jordan_wigner(MO):
         c = opi[0] # take the complex value
         mi = None # None means "term unchanged", set below if JW applies
         ls = [opi[kk+1][0] for kk in range(n)] # names of operators
-        try:
-          if (n==1): # one point operator
-              i = opi[1][1]
-              if "C" in ls or "Cdag" in ls:
-                  mi = c*jordanwigner.one_fermion(ls[0],i)
-          elif (n==2): # two point operators
-              i,j = opi[1][1],opi[2][1]
-              if "C" in ls or "Cdag" in ls:
-                  mi = c*jordanwigner.two_fermions(ls[0],i,ls[1],j)
-          elif (n==4): # four point operators
-              i,j,k,l = opi[1][1],opi[2][1],opi[3][1],opi[4][1]
-              if "C" in ls or "Cdag" in ls:
-                  mi = c*jordanwigner.four_fermions(ls[0],i,ls[1],j,ls[2],
-                          k,ls[3],l)
-          else:
-              if "C" in ls or "Cdag" in ls: raise # not implemented
-        except: # brute force
+        if any(l in _spinful_fermion_names for l in ls):
+            # Native spinful-fermion sites (fermionchain.py's
+            # Spinful_Fermionic_Chain_Native): always use the generic
+            # per-factor dressing, there is no separate optimized 2-/
+            # 4-point path for this operator family (see
+            # jordanwigner_spinful.py's docstring for why the generic
+            # recipe is already exact, not an approximation).
+            inds = [opi[kk+1][1] for kk in range(n)]
+            mi = c*jordanwigner_spinful.product2jw(ls,inds)
+        else:
+          try:
+            if (n==1): # one point operator
+                i = opi[1][1]
+                if "C" in ls or "Cdag" in ls:
+                    mi = c*jordanwigner.one_fermion(ls[0],i)
+            elif (n==2): # two point operators
+                i,j = opi[1][1],opi[2][1]
+                if "C" in ls or "Cdag" in ls:
+                    mi = c*jordanwigner.two_fermions(ls[0],i,ls[1],j)
+            elif (n==4): # four point operators
+                i,j,k,l = opi[1][1],opi[2][1],opi[3][1],opi[4][1]
+                if "C" in ls or "Cdag" in ls:
+                    mi = c*jordanwigner.four_fermions(ls[0],i,ls[1],j,ls[2],
+                            k,ls[3],l)
+            else:
+                if "C" in ls or "Cdag" in ls: raise # not implemented
+          except: # brute force
             inds = [opi[kk+1][1] for kk in range(n)]
             mi = c*jordanwigner.product2jw(ls,inds)
         if mi is None: outterms.append(list(opi)) # term unchanged
@@ -351,6 +365,8 @@ def jordan_wigner(MO):
 
 
 _dagger_name = {"C":"Cdag","Cdag":"C","A":"Adag","Adag":"A",
+                "Cup":"Cdagup","Cdagup":"Cup","Cdn":"Cdagdn","Cdagdn":"Cdn",
+                "Aup":"Adagup","Adagup":"Aup","Adn":"Adagdn","Adagdn":"Adn",
                 "Sp":"Sm","S+":"S-","Sm":"Sp","S-":"S+",
                 "Sig":"SigDag","Tau":"TauDag","SigDag":"Sig","TauDag":"Tau"}
 

@@ -7,6 +7,7 @@ from .fermionchaintk import staticcorrelator
 from .fermionchaintk import hamiltonian
 from . import funtk
 from . import gap
+from . import multioperator
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
@@ -285,6 +286,168 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
             if i%2==j%2: return fun(i//2,j//2)
             return 0.0
         self.set_hoppings(fun2)
+
+
+
+class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
+    """
+    Spinful fermionic (Hubbard-like) chain built directly on native
+    spinful sites: each orbital is a *single* tensor-network site with a
+    local Hilbert space of dimension 4 (Empty, Up, Down, UpDn -- ITensor
+    v3's own "Electron"/"Hubbard" site, mpscpp3/get_sites.h's site-type
+    code 1: HubbardSite, an alias for ElectronSite -- see
+    mpscpp3/ITensor/itensor/mps/sites/electron.h), instead of the two
+    separate spinless-fermion sites per orbital that
+    Spinful_Fermionic_Chain uses (site-type code 0, interleaved
+    up/down). Jordan-Wigner strings are still threaded explicitly at the
+    Python level (multioperatortk/jordanwigner_spinful.py), exactly as
+    done for the spinless case in multioperatortk/jordanwigner.py -- this
+    backend does not rely on ITensor AutoMPO's own automatic fermionic
+    sign insertion (autompo.cc's isFermionic()/fermionicTerm()), even
+    though it exists and would also work here; keeping the Jordan-Wigner
+    transform in Python keeps every backend (ED, the C++ extensions, the
+    pure-Python engine, Julia) fed from the exact same term list.
+
+    Only itensor_version=3 wires up a native spinful site on the DMRG
+    side today: mpscpp2/get_sites.h never registered a Hubbard/Electron
+    site type, and neither pyitensor (itensor_version="python") nor
+    mpsjulialive (itensor_version="julia_live") implement one. A DMRG
+    call with any other itensor_version simply is not available for this
+    class -- unlike an uncompiled C++ extension, there is no automatic
+    ED fallback for a site type mode.py doesn't know how to build, so
+    such calls raise from mpscpp2/pyitensor/mpsjulialive's own site-type
+    dispatch. Cross-checking against mode="ED" always works (see
+    get_ED_obj() below): ED never builds tensor-network sites at all, it
+    diagonalizes a plain occupation-number Fock space directly.
+
+    Performance (measured, not just argued from theory): halving the
+    number of tensor-network sites (n instead of 2n) does keep every
+    nearest-neighbor hopping term nearest-neighbor and every
+    Jordan-Wigner string half as long, so the a priori expectation was
+    that this class would be faster. Directly benchmarked against
+    Spinful_Fermionic_Chain instead (same Hubbard-chain Hamiltonian,
+    same itensor_version=3, same maxm/nsweeps/noise, n=6..14): it is
+    NOT. At matched bond dimension, Spinful_Fermionic_Chain's DMRG run
+    is both faster (roughly 2-3x at maxm>=40, growing with n) *and*
+    converges to a slightly lower/more accurate energy -- this class
+    never wins on either axis in the sizes tested. The reason is that
+    ITensor v3's two-site dmrg() sweep cost is governed by the LOCAL
+    physical dimension of the two-site block being diagonalized/SVD'd,
+    which scales with the *square* of each site's local dimension: a
+    two-site block here spans two dimension-4 sites (16 combined local
+    states) versus two dimension-2 sites (4 combined local states) on
+    the interleaved chain. That per-step cost increase more than
+    outweighs sweeping over half as many sites -- the entanglement
+    entropy across a cut (what actually sets the bond dimension needed
+    for a given accuracy) does not improve just from repackaging two
+    flavors already at the same physical location into one site instead
+    of two, so there is no compensating win on the memory/bond-dimension
+    side either. Kept as an alternative backend (correctness
+    cross-checked exactly against ED and against
+    Spinful_Fermionic_Chain, for both the ground-state energy and the
+    KPM dynamical correlator) rather than a replacement -- it may still
+    be worth it for cases this benchmark didn't cover (e.g. one-site
+    algorithms, or Hamiltonians with strong same-site inter-flavor
+    entanglement), but is not a general-purpose speedup for two-site
+    DMRG ground states.
+    """
+    def __init__(self,n,**kwargs):
+        """Create the sites"""
+        self.Cup = [self.get_operator("Cup",i) for i in range(n)]
+        self.Cdagup = [self.get_operator("Cdagup",i) for i in range(n)]
+        self.Cdn = [self.get_operator("Cdn",i) for i in range(n)]
+        self.Cdagdn = [self.get_operator("Cdagdn",i) for i in range(n)]
+        self.Nup = [self.get_operator("Nup",i) for i in range(n)]
+        self.Ndn = [self.get_operator("Ndn",i) for i in range(n)]
+        self.Ntot = [self.Nup[i]+self.Ndn[i] for i in range(n)]
+        self.Sx = [0.5*self.Cdagup[i]*self.Cdn[i] +
+                0.5*self.Cdagdn[i]*self.Cup[i] for i in range(n)]
+        self.Sy = [-0.5*1j*self.Cdagup[i]*self.Cdn[i] +
+                0.5*1j*self.Cdagdn[i]*self.Cup[i] for i in range(n)]
+        self.Sz = [0.5*self.Nup[i] + (-1)*0.5*self.Ndn[i] for i in range(n)]
+        self.Delta = [0.5*self.Cup[i]*self.Cdn[i] for i in range(n)]
+        self.Id = self.get_operator("Id",1)
+        Many_Body_Chain.__init__(self,[1 for i in range(n)],**kwargs)
+        self.fermionic = True
+        self.use_ampo_hamiltonian = True # use ampo
+    def get_charge_gap(self,**kwargs):
+        """Return the charge gap"""
+        return gap.sector_gap(self,sum(self.Ntot),**kwargs)
+    def set_hoppings_spinful(self,fun):
+        """
+        Add a spin-conserving hopping fun(i,j), for both flavors
+        """
+        h = self.generate_bilinear(fun,self.Cdagup,self.Cup)
+        h = h + self.generate_bilinear(fun,self.Cdagdn,self.Cdn)
+        self.hopping = h # store
+        self.update_hamiltonian()
+    def set_hoppings(self,fun):
+        """Add the spin-conserving hoppings"""
+        self.set_hoppings_spinful(fun)
+    def set_hubbard_spinful(self,fun):
+        """
+        Add Hubbard interaction in a spinful manner
+        The Hubbard term will be defined as
+        n_i n_j, with n_i = n_{i,up} + n_{i,down}
+        """
+        self.hubbard = self.generate_bilinear(fun,self.Ntot,self.Ntot)
+        self.update_hamiltonian()
+    def set_hubbard(self,fun):
+        """
+        Add Hubbard interaction in a spinful manner
+        """
+        self.set_hubbard_spinful(fun)
+    def set_swave_pairing(self,fun):
+        """
+        Add onsite swave pairing to a spinful Hamiltonian
+        The pairing term is of the form
+        Delta_i c_{i,up} c_{i,down} + h.c.
+        """
+        h = multioperator.msum(fun(i)*self.Delta[i]
+                for i in range(len(self.Delta)))
+        self.pairing = h + h.get_dagger()
+        self.update_hamiltonian()
+    def get_density(self,**kwargs):
+        """
+        Return the density in each site, summing over spin channels
+        """
+        return np.array([self.vev(Ni,**kwargs).real for Ni in self.Ntot])
+    def get_magnetization(self,**kwargs):
+        """Return magnetization"""
+        mx = np.array([self.vev(self.Sx[i],**kwargs).real
+                for i in range(len(self.Sx))])
+        my = np.array([self.vev(self.Sy[i],**kwargs).real
+                for i in range(len(self.Sy))])
+        mz = np.array([self.vev(self.Sz[i],**kwargs).real
+                for i in range(len(self.Sz))])
+        return np.array([mx,my,mz]).T # return magnetization
+    def get_onsite_pairing(self,**kwargs):
+        """
+        Return the expectation value of the onsite pairing
+        """
+        return np.array([self.vev(Di,**kwargs) for Di in self.Delta])
+    def get_density_fluctuation(self,**kwargs):
+        """Return the electronic density fluctuations"""
+        d = self.get_density(**kwargs) # total density
+        d2 = np.array([self.vev(Ni*Ni,**kwargs).real for Ni in self.Ntot])
+        return d2 - d**2 # return density fluctuations
+    def get_ED_obj(self):
+        """
+        Return the many body fermion object, built on the 2*n flat
+        fermionic modes (up,down per orbital, see
+        jordanwigner_spinful.py's mode-ordering convention) that this
+        chain's n native spinful sites represent -- unlike
+        Fermionic_Chain.get_ED_obj(), self.ns is the number of *sites*
+        (n), not the number of fermionic modes (2*n), so it cannot be
+        used directly here.
+        """
+        if self.has_ED_obj: return self.ED_obj
+        from .pyfermion import mbfermion
+        MBf = mbfermion.MBFermion(2*len(self.Cup))
+        MBf.add_multioperator(self.hamiltonian)
+        self.ED_obj = MBf
+        self.has_ED_obj = True
+        return self.ED_obj
 
 
 

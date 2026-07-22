@@ -170,7 +170,23 @@ class MBFermion(edchain.EDchain):
         elif name=="C": return self.get_c(i)
         elif name=="Id": return self.get_identity()
         elif name=="Cdag": return self.get_cd(i)
-        else: 
+        # Flavor-resolved spinful-fermion operators, for cross-checking
+        # fermionchain.Spinful_Fermionic_Chain_Native against ED: `i` is a
+        # *physical* site index (one native Electron-type site per
+        # orbital), mapped here onto this MBFermion's own flat two-mode-
+        # per-site Fock space (mode 2*i = up, 2*i+1 = down -- same
+        # convention as the interleaved Spinful_Fermionic_Chain, see
+        # jordanwigner_spinful.py). No Jordan-Wigner dressing is needed
+        # here (unlike the DMRG path): ED's occupation-number basis
+        # already encodes fermion statistics exactly via get_c()/get_cd().
+        elif name=="Cup": return self.get_c(2*i)
+        elif name=="Cdagup": return self.get_cd(2*i)
+        elif name=="Cdn": return self.get_c(2*i+1)
+        elif name=="Cdagdn": return self.get_cd(2*i+1)
+        elif name=="Nup": return self.get_density(2*i)
+        elif name=="Ndn": return self.get_density(2*i+1)
+        elif name=="Ntot": return self.get_density(2*i)+self.get_density(2*i+1)
+        else:
             print("Unrecognised operator",name)
             raise
 

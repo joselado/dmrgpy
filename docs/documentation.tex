@@ -223,6 +223,26 @@ identity'' fallback, present in ITensor v3
 in ITensor v2 (\texttt{mpscpp2/ITensor/itensor/mps/siteset.h}), which
 would hard-abort instead.
 
+\texttt{fermionchain.Spinful\_Fermionic\_Chain\_Native} uses site-type
+code 1 instead (\texttt{HubbardSite}/\texttt{ElectronSite}, ITensor
+v3's own stock 4-state site,
+\texttt{mpscpp3/ITensor/itensor/mps/sites/electron.h}) --- one
+tensor-network site per physical site instead of
+\texttt{Spinful\_Fermionic\_Chain}'s two interleaved type-0 sites.
+\texttt{mpscppN/get\_sites.h}'s site-type dispatch already had a branch
+for code 1 (\texttt{SpinX}'s \texttt{HubbardSite} case, both
+constructors) before this class existed; only \texttt{mpscpp3} (the C++
+side) and ED (\texttt{pyfermion.mbfermion.MBFermion.get\_operator},
+extended to understand
+\texttt{Cup}/\texttt{Cdn}/\texttt{Cdagup}/\texttt{Cdagdn}/\texttt{Nup}/
+\texttt{Ndn}/\texttt{Ntot} at a physical site index) actually wire it up
+today --- \texttt{mpscpp2} never registered a Hubbard/Electron site, and
+neither pyitensor nor \texttt{mpsjulialive} implement site-type code 1.
+See \texttt{fermionchain.py}'s class docstring for why this alternative
+is not a general-purpose speedup over \texttt{Spinful\_Fermionic\_Chain}
+despite the halved site count (a directly measured result, not a
+theoretical claim).
+
 \subsection{Operator representation: \texttt{MultiOperator}}
 
 Hamiltonians and observables are built as \texttt{MultiOperator} objects
@@ -243,7 +263,20 @@ later either
 
 \texttt{multioperatortk/} holds the supporting machinery: Jordan-Wigner
 string threading for fermionic operators, static/long-range operator
-construction, and sympy-based symbolic building.
+construction, and sympy-based symbolic building. Spinless fermionic
+operators (\texttt{C}/\texttt{Cdag}, one fermionic mode per site) are
+threaded by \texttt{jordanwigner.py}; flavor-resolved operators on a
+native spinful site
+(\texttt{Cup}/\texttt{Cdn}/\texttt{Cdagup}/\texttt{Cdagdn}, two
+fermionic modes per site, \texttt{Spinful\_Fermionic\_Chain\_Native})
+are threaded by the separate \texttt{jordanwigner\_spinful.py} instead,
+dispatched by operator name in \texttt{multioperator.jordan\_wigner()}.
+The two never mix within one term (the operator name sets are
+disjoint), and \texttt{jordanwigner\_spinful.py} always uses the generic
+per-factor dressing recipe (no separate optimized 2-/4-point path the
+way \texttt{jordanwigner.py} has for plain \texttt{C}/\texttt{Cdag}),
+since that recipe is already exact for an arbitrary product/order of
+factors --- see its module docstring.
 
 \subsection{Backend dispatch}
 
