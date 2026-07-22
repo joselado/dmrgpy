@@ -38,6 +38,8 @@ def initialize():
     files += ["mpsalgebra.jl"]
     files += ["kpm.jl"] # KPM moment recursion; calls mpsalgebra.jl's own
                          # applyoperator/summps, so must load after it
+    files += ["tdvp.jl"] # real-time TDVP evolution; also calls
+                          # mpsalgebra.jl's applyoperator, must load after it
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

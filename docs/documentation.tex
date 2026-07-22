@@ -459,6 +459,55 @@ remaining time is genuine Julia-side tensor-contraction/truncation cost
 (\texttt{alg="densitymatrix"} SVD-based \texttt{add}/\texttt{contract}),
 not Python$\leftrightarrow$Julia marshaling overhead.
 
+Real-time TDVP evolution (\texttt{timedependent.py}'s
+\texttt{evolve\_and\_measure\_dmrg}/\texttt{evolution\_dmrg\_DC}, submode
+\texttt{"TD"}) is implemented the same way ---
+\texttt{mpsjulialive/tdvp.jl}'s \texttt{evolve\_and\_measure\_tdvp}/
+\texttt{quench\_tdvp} run the whole nt-step trajectory in one Julia call,
+driving \texttt{ITensorMPS.jl}'s own \texttt{tdvp()} (already exported by
+the \texttt{ITensorMPS} dependency; no separate \texttt{ITensorTDVP.jl}
+package needed). One real-time step is $\exp(-i \cdot dt \cdot H)$, i.e.\
+\texttt{tdvp()}'s complex evolution parameter is \texttt{-im*dt}. Two
+real, non-obvious \texttt{ITensorMPS}/\texttt{ITensors} bugs had to be
+worked around to get this correct, both confirmed by direct inspection
+of the intermediate tensors' index structure rather than guessed at from
+the stack trace alone:
+
+\begin{itemize}
+\item \texttt{mpsalgebra.jl}'s \texttt{applyoperator()}
+  (\texttt{contract(A,psi)} plus a second contraction against an
+  identity MPO, "this fixes a bug" --- a \emph{Site}-index priming
+  issue) leaves the \emph{Link} indices of its result carrying a stale
+  nonzero prime level. This is invisible to KPM (which only ever feeds
+  \texttt{applyoperator()}'s output back into more
+  \texttt{applyoperator}/\texttt{summps}/\texttt{inner} calls), but
+  \texttt{tdvp()}'s internal environment bookkeeping (\texttt{ProjMPO})
+  cannot handle it: it aborts deep inside
+  \texttt{KrylovKit.expintegrator} with "... but the indices are not
+  permutations of each other" on the affected Link index.
+  \texttt{tdvp.jl}'s \texttt{apply\_clean()} uses \texttt{ITensorMPS}'s
+  higher-level \texttt{apply()} instead (\texttt{contract()} is the
+  lower-level primitive both \texttt{applyoperator()} and
+  \texttt{apply()} are built on, but only \texttt{apply()} avoids the
+  stale prime).
+\item Whenever \texttt{tdvp()}'s input MPS did not come straight from
+  \texttt{dmrg()} (e.g.\ \texttt{evolution\_ABA()} first applies an
+  operator via \texttt{mpsjulialive/mpo.py}'s \texttt{MPO.\_\_mul\_\_},
+  which still goes through \texttt{applyoperator()} for other callers'
+  sake), the same stale Link prime reappears --- and, confirmed
+  directly, \texttt{orthogonalize!()} alone does \emph{not} clear it.
+  \texttt{evolve\_and\_measure\_tdvp()} therefore explicitly
+  \texttt{noprime(copy(wf),"Link")}s (never mutating the caller's own
+  MPS) before \texttt{orthogonalize!()}-ing and starting the TDVP loop.
+\end{itemize}
+
+Both paths were validated directly against exact diagonalization (quench
+from a N\'eel-favoring field to a Heisenberg chain, mirroring
+\texttt{examples/tdvp\_VS\_ED\_time\_evolution}):
+\texttt{evolve\_and\_measure} agreed with ED to $\sim 8 \times 10^{-7}$
+on a 4-site chain, and \texttt{evolution\_DC}'s quench correlator agreed
+to $\sim 9 \times 10^{-11}$ on a 6-site chain.
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as

@@ -363,6 +363,45 @@ earlier per-step Python loop) — most of the remaining time is genuine
 Julia-side tensor-contraction/truncation cost (`alg="densitymatrix"`
 SVD-based `add`/`contract`), not Python↔Julia marshaling overhead.
 
+Real-time TDVP evolution (`timedependent.py`'s `evolve_and_measure_dmrg`/
+`evolution_dmrg_DC`, submode `"TD"`) is implemented the same way —
+`mpsjulialive/tdvp.jl`'s `evolve_and_measure_tdvp`/`quench_tdvp` run the
+whole nt-step trajectory in one Julia call, driving `ITensorMPS.jl`'s own
+`tdvp()` (already exported by the `ITensorMPS` dependency; no separate
+`ITensorTDVP.jl` package needed). One real-time step is `exp(-i·dt·H)`,
+i.e. `tdvp()`'s complex evolution parameter is `-im*dt`. Two real,
+non-obvious `ITensorMPS`/`ITensors` bugs had to be worked around to get
+this correct, both confirmed by direct inspection of the intermediate
+tensors' index structure rather than guessed at from the stack trace
+alone:
+
+- `mpsalgebra.jl`'s `applyoperator()` (`contract(A,psi)` plus a
+  second contraction against an identity MPO, "this fixes a bug" — a
+  *Site*-index priming issue) leaves the *Link* indices of its result
+  carrying a stale nonzero prime level. This is invisible to KPM (which
+  only ever feeds `applyoperator()`'s output back into more
+  `applyoperator`/`summps`/`inner` calls), but `tdvp()`'s internal
+  environment bookkeeping (`ProjMPO`) cannot handle it: it aborts deep
+  inside `KrylovKit.expintegrator` with "... but the indices are not
+  permutations of each other" on the affected Link index. `tdvp.jl`'s
+  `apply_clean()` uses `ITensorMPS`'s higher-level `apply()` instead
+  (`contract()` is the lower-level primitive both `applyoperator()` and
+  `apply()` are built on, but only `apply()` avoids the stale prime).
+- Whenever `tdvp()`'s input MPS did not come straight from `dmrg()`
+  (e.g. `evolution_ABA()` first applies an operator via
+  `mpsjulialive/mpo.py`'s `MPO.__mul__`, which still goes through
+  `applyoperator()` for other callers' sake), the same stale Link prime
+  reappears — and, confirmed directly, `orthogonalize!()` alone does
+  *not* clear it. `evolve_and_measure_tdvp()` therefore explicitly
+  `noprime(copy(wf),"Link")`s (never mutating the caller's own MPS) before
+  `orthogonalize!()`-ing and starting the TDVP loop.
+
+Both paths were validated directly against exact diagonalization
+(quench from a Néel-favoring field to a Heisenberg chain, mirroring
+`examples/tdvp_VS_ED_time_evolution`): `evolve_and_measure` agreed with
+ED to ~8e-7 on a 4-site chain, and `evolution_DC`'s quench correlator
+agreed to ~9e-11 on a 6-site chain.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)
