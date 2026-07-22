@@ -57,23 +57,52 @@ def _kpm_moments_accelerated(jlsites,jlmpo,vi,n,kpmmaxm,kpmcutoff):
     return list(out)
 
 
-def get_dynamical_correlator(self,n=1000,submode="KPM",
+def get_dynamical_correlator(self,submode="KPM",**kwargs):
+    """Dispatch a dynamical correlator computation on the Julia backend.
+    submode="KPM" (see docs/documentation.md §4.6) and submode="CVM" are
+    implemented; other submodes (TD -- use
+    timedependent.dynamical_correlator/evolution_DC instead, which
+    already dispatch to julia_live -- TDZ, EX, maxent, ...) are only
+    implemented for the C++/pure-Python backends (dynamics.py).
+
+    Deliberately takes submode + **kwargs only (mirroring the top-level
+    dynamics.py::get_dynamical_correlator's own signature), not named
+    parameters like name=/es=/delta=: an earlier version of this function
+    declared those as its own named parameters with KPM-flavored
+    defaults, which silently captured the caller's es=/name=/delta=
+    kwargs out of **kwargs before they could reach cvm.dynamical_correlator
+    (whose own, different defaults would then be used unless the caller's
+    values happened to be explicitly re-forwarded) -- confirmed directly,
+    this caused CVM to silently run on a totally different frequency grid
+    than the one requested. Each submode's own function applies its own
+    defaults now, exactly as the C++/pure-Python dispatch already does."""
+    if submode=="CVM":
+        # cvm.py's CG solve is already backend-agnostic MPS/MPO algebra
+        # (self.toMPO()/MPS +,-,scalar-*,.dot()), which already works for
+        # julia_live -- the only thing that needed fixing was its own
+        # self._session.set_sweep_params(...) calls, see
+        # cvm.py::_set_cvm_sweep_params.
+        from .. import cvm
+        return cvm.dynamical_correlator(self,**kwargs)
+    if submode!="KPM":
+        raise NotImplementedError(
+            "itensor_version='julia_live' only implements submode='KPM'/"
+            "'CVM' for get_dynamical_correlator, got submode=%r"%submode)
+    return _kpm_dynamical_correlator(self,**kwargs)
+
+
+def _kpm_dynamical_correlator(self,n=1000,
              name=None,delta=1e-1,kernel="jackson",
              es=np.linspace(-1.,10,500),deconvolve=None,
              **kwargs):
-    """Compute a dynamical correlator on the Julia backend. Only
-    submode="KPM" is implemented so far (see docs/documentation.md
-    §4.6); other submodes (TD, TDZ, CVM, EX, maxent, ...) are only
-    implemented for the C++/pure-Python backends (dynamics.py). Mirrors
-    kpmdmrg.py::get_dynamical_correlator (the C++/pure-Python KPM entry
-    point) and its Chebyshev-moment post-processing exactly, but computes
-    the moments with the mpsjulialive Julia MPS/MPO primitives instead of
-    self._session.kpm_dynamical_correlator (julia_live has no such
-    session object)."""
-    if submode!="KPM":
-        raise NotImplementedError(
-            "itensor_version='julia_live' only implements submode='KPM' "
-            "for get_dynamical_correlator, got submode=%r"%submode)
+    """The submode="KPM" implementation, factored out of
+    get_dynamical_correlator so its own named-parameter defaults can't
+    shadow another submode's kwargs (see that function's docstring).
+    Mirrors kpmdmrg.py::get_dynamical_correlator (the C++/pure-Python KPM
+    entry point) and its Chebyshev-moment post-processing exactly, but
+    computes the moments with the mpsjulialive Julia MPS/MPO primitives
+    instead of self._session.kpm_dynamical_correlator (julia_live has no
+    such session object)."""
     if delta<0.0: raise
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
     if type(name[0])!=multioperator.MultiOperator: raise

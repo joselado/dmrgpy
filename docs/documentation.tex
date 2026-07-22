@@ -551,6 +551,46 @@ bond entropy at the first bond exactly matches the existing generic
 \texttt{get\_site\_entropy} (which computes the same quantity a
 completely different way, through \texttt{reduced\_dm\_projective}).
 
+The CVM dynamical-correlator submode
+(\texttt{get\_dynamical\_correlator(..., submode="CVM")},
+\texttt{cvm.py}) needed almost no Julia-specific code at all: its
+correction-vector CG solve (\texttt{cvm.py::cvm\_correction\_vector}) is
+already implemented purely with backend-agnostic MPS/MPO algebra
+(\texttt{self.toMPO()}, MPS \texttt{+}/\texttt{-}/scalar-\texttt{*},
+\texttt{.dot()}), which already works against \texttt{julia\_live}'s
+\texttt{mpsjulialive.mpo.MPO}/\texttt{mpsjulialive.mps.MPS} classes
+without any changes. The only thing standing in the way was that
+\texttt{cvm.py} unconditionally called
+\texttt{self.\_session.set\_sweep\_params(...)} to point every MPO
+application at \texttt{cvm\_maxm} rather than the DMRG \texttt{maxm} (no
+\texttt{\_session} object exists for \texttt{julia\_live} to call this
+on); \texttt{cvm.py::\_set\_cvm\_sweep\_params} now temporarily
+overrides \texttt{self.maxm} instead for that backend, since that's what
+\texttt{mpsjulialive/mpo.py}/\texttt{mps.py} actually read. Validated
+against ED with the same tolerance
+\texttt{examples/dynamical\_correlator\_VS\_ED/main.py} uses for the
+C++/pure-Python backends ($10^{-6}$) --- matched to
+$\sim 2 \times 10^{-15}$ here, in 3 CG iterations per frequency point.
+
+Wiring this up surfaced a real bug in
+\texttt{mpsjulialive/dynamics.py::get\_dynamical\_correlator}: its first
+version declared \texttt{name=}/\texttt{delta=}/\texttt{es=} as its own
+named parameters (with KPM-flavored defaults) purely so it could compute
+the KPM moments directly in the same function, which silently captured a
+caller's \texttt{es=}/\texttt{name=}/\texttt{delta=} kwargs out of
+\texttt{**kwargs} before they could reach
+\texttt{cvm.dynamical\_correlator} --- confirmed directly,
+\texttt{submode="CVM"} ran on a completely different, wrong frequency
+grid as a result (CVM's own \texttt{np.linspace(0.,10.0,100)} default
+instead of the caller's requested window). Fixed by splitting the KPM
+implementation out into its own \texttt{\_kpm\_dynamical\_correlator}
+and making the public
+\texttt{get\_dynamical\_correlator(self,submode="KPM",**kwargs)} take no
+named parameters of its own --- mirroring the top-level
+\texttt{dynamics.py::get\_dynamical\_correlator}'s own signature, which
+was never vulnerable to this because it never declared submode-specific
+parameters either.
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as

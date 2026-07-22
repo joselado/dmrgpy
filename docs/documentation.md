@@ -440,6 +440,40 @@ exactly matches the existing generic `get_site_entropy` (which computes
 the same quantity a completely different way, through
 `reduced_dm_projective`).
 
+The CVM dynamical-correlator submode (`get_dynamical_correlator(...,
+submode="CVM")`, `cvm.py`) needed almost no Julia-specific code at all:
+its correction-vector CG solve (`cvm.py::cvm_correction_vector`) is
+already implemented purely with backend-agnostic MPS/MPO algebra
+(`self.toMPO()`, MPS `+`/`-`/scalar-`*`, `.dot()`), which already works
+against `julia_live`'s `mpsjulialive.mpo.MPO`/`mpsjulialive.mps.MPS`
+classes without any changes. The only thing standing in the way was that
+`cvm.py` unconditionally called `self._session.set_sweep_params(...)` to
+point every MPO application at `cvm_maxm` rather than the DMRG `maxm`
+(no `_session` object exists for `julia_live` to call this on);
+`cvm.py::_set_cvm_sweep_params` now temporarily overrides `self.maxm`
+instead for that backend, since that's what
+`mpsjulialive/mpo.py`/`mps.py` actually read. Validated against ED with
+the same tolerance `examples/dynamical_correlator_VS_ED/main.py` uses
+for the C++/pure-Python backends (`1e-6`) — matched to `~2e-15` here, in
+3 CG iterations per frequency point.
+
+Wiring this up surfaced a real bug in
+`mpsjulialive/dynamics.py::get_dynamical_correlator`: its first version
+declared `name=`/`delta=`/`es=` as its own named parameters (with
+KPM-flavored defaults) purely so it could compute the KPM moments
+directly in the same function, which silently captured a caller's
+`es=`/`name=`/`delta=` kwargs out of `**kwargs` before they could reach
+`cvm.dynamical_correlator` — confirmed directly, `submode="CVM"` ran on
+a completely different, wrong frequency grid as a result (CVM's own
+`np.linspace(0.,10.0,100)` default instead of the caller's requested
+window). Fixed by splitting the KPM implementation out into its own
+`_kpm_dynamical_correlator` and making the public
+`get_dynamical_correlator(self,submode="KPM",**kwargs)` take no named
+parameters of its own — mirroring the top-level
+`dynamics.py::get_dynamical_correlator`'s own signature, which was never
+vulnerable to this because it never declared submode-specific parameters
+either.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)
