@@ -51,3 +51,17 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         wf_final = MPS(wf_final_jl,MBO=self)
         return ts,cs.real-1j*cs.imag,wf_final
     return ts,cs.real-1j*cs.imag
+
+
+def advance_complex_time_step(self,Hop,wf,dz):
+    """One complex-time TDVP step exp(-i*dz*Hop) on the Julia backend --
+    used by tdz.py's submode="TDZ" (arXiv:2311.10909). Reuses
+    tdvp.jl's tdvp_step completely unchanged: -im*dz is already the
+    correct generalization for a complex dz (real dt, used by
+    evolve_and_measure_tdvp/quench_tdvp above, is just the dz.imag==0
+    special case) -- Julia's `-im*dz` doesn't care whether dz is real or
+    complex."""
+    from .juliasession import Main as Mainjl
+    from .mps import MPS
+    psi = Mainjl.tdvp_step(Hop.jlmpo,wf.jlmps,dz,self.cutoff,self.maxm)
+    return MPS(psi,MBO=self)

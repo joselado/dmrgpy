@@ -474,6 +474,34 @@ parameters of its own — mirroring the top-level
 vulnerable to this because it never declared submode-specific parameters
 either.
 
+The TDZ dynamical-correlator submode (complex-time evolution +
+perturbative real-axis reconstruction, `tdz.py`, arXiv:2311.10909) needed
+only one new backend primitive, same as CVM: the whole algorithm is
+otherwise generic MPS/MPO algebra (`self.toMPO()`, `.dot()`) already
+working on `julia_live`. That one primitive is a single complex-time-step
+propagator (`tdz.py::_advance_complex_time_step`, formerly gated to
+`itensor_version in (3,"python")`) — `mpsjulialive/tdvp.jl`'s `tdvp_step`
+already generalizes to it with **no changes**, since `-im*dz` is exactly
+the right formula whether `dz` is real (the `evolve_and_measure_tdvp`/
+`quench_tdvp` case) or genuinely complex (TDZ's per-step contour
+increment); only a thin Python wrapper
+(`mpsjulialive/timedependent.py::advance_complex_time_step`) was needed.
+
+Wiring TDZ up caught a second occurrence of the same stale-Link-prime bug
+documented above for TDVP: `tdz.py`'s first evolved state,
+`self.toMPO(A)*wf_g`, goes through the same `applyoperator()` path
+`evolution_ABA()` does, and `tdvp_step` had only been sanitized against
+that inside `evolve_and_measure_tdvp`'s own wrapper loop, not inside
+`tdvp_step` itself — so any *other* direct caller (TDZ's driver loop in
+`_complex_time_correlator`) hit the identical failure. Fixed by moving
+the `noprime(copy(psi),"Link")` + `orthogonalize!()` sanitization into
+`tdvp_step` itself, so it runs on every step regardless of caller,
+instead of relying on each call site to remember to pre-clean its input
+— a small, one-time cost next to the sweep itself. Validated against the
+same golden test `tests/test_dynamical_correlator.py` uses for the other
+backends: peak within `0.03` of the exact 4-site Heisenberg gap
+(`0.658919`) — landed at `0.68`.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)

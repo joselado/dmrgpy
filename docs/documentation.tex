@@ -591,6 +591,40 @@ named parameters of its own --- mirroring the top-level
 was never vulnerable to this because it never declared submode-specific
 parameters either.
 
+The TDZ dynamical-correlator submode (complex-time evolution + perturbative
+real-axis reconstruction, \texttt{tdz.py}, arXiv:2311.10909) needed only
+one new backend primitive, same as CVM: the whole algorithm is otherwise
+generic MPS/MPO algebra (\texttt{self.toMPO()}, \texttt{.dot()}) already
+working on \texttt{julia\_live}. That one primitive is a single
+complex-time-step propagator
+(\texttt{tdz.py::\_advance\_complex\_time\_step}, formerly gated to
+\texttt{itensor\_version in (3,"python")}) ---
+\texttt{mpsjulialive/tdvp.jl}'s \texttt{tdvp\_step} already generalizes
+to it with \emph{no changes}, since \texttt{-im*dz} is exactly the right
+formula whether \texttt{dz} is real (the
+\texttt{evolve\_and\_measure\_tdvp}/\texttt{quench\_tdvp} case) or
+genuinely complex (TDZ's per-step contour increment); only a thin Python
+wrapper
+(\texttt{mpsjulialive/timedependent.py::advance\_complex\_time\_step})
+was needed.
+
+Wiring TDZ up caught a second occurrence of the same stale-Link-prime bug
+documented above for TDVP: \texttt{tdz.py}'s first evolved state,
+\texttt{self.toMPO(A)*wf\_g}, goes through the same
+\texttt{applyoperator()} path \texttt{evolution\_ABA()} does, and
+\texttt{tdvp\_step} had only been sanitized against that inside
+\texttt{evolve\_and\_measure\_tdvp}'s own wrapper loop, not inside
+\texttt{tdvp\_step} itself --- so any \emph{other} direct caller (TDZ's
+driver loop in \texttt{\_complex\_time\_correlator}) hit the identical
+failure. Fixed by moving the \texttt{noprime(copy(psi),"Link")} +
+\texttt{orthogonalize!()} sanitization into \texttt{tdvp\_step} itself,
+so it runs on every step regardless of caller, instead of relying on
+each call site to remember to pre-clean its input --- a small, one-time
+cost next to the sweep itself. Validated against the same golden test
+\texttt{tests/test\_dynamical\_correlator.py} uses for the other
+backends: peak within $0.03$ of the exact 4-site Heisenberg gap
+($0.658919$) --- landed at $0.68$.
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as

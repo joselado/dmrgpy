@@ -8,25 +8,30 @@
 # exp(-i*dt*H), i.e. tdvp's evolution parameter is -im*dt.
 
 function tdvp_step(H,psi,dt,cutoff,maxdim)
-	# mindim=2 is a cheap defensive floor against degenerate dim-1 bonds;
-	# kept even though the actual bug hit here (see apply_clean() below)
-	# turned out to be elsewhere.
+	# psi isn't always straight out of dmrg() or a previous tdvp_step()
+	# call (e.g. evolution_ABA()/tdz.py's first step both start from an
+	# operator applied via mpsjulialive/mpo.py's MPO.__mul__, which goes
+	# through mpsalgebra.jl's applyoperator() -- confirmed directly to
+	# leave a stale nonzero prime level on the result's Link indices).
+	# tdvp()'s internal environment bookkeeping (ProjMPO) can't handle
+	# that: it aborts deep inside KrylovKit's expintegrator ("... but the
+	# indices are not permutations of each other", or a related
+	# broadcast-shape failure in the same call chain). orthogonalize!()
+	# alone does NOT clear the stale prime (confirmed directly), so the
+	# Link indices need an explicit noprime() first; copy() so this never
+	# mutates the caller's own MPS in place. Sanitizing on every step
+	# rather than just the first is deliberate -- cheap next to the sweep
+	# itself, and keeps every caller of tdvp_step correct by construction
+	# instead of relying on each call site to remember to pre-clean.
+	psi = noprime(copy(psi),"Link")
+	orthogonalize!(psi,1)
+	# mindim=2 is a cheap defensive floor against degenerate dim-1 bonds.
 	return tdvp(H,-im*dt,psi;time_step=-im*dt,cutoff=cutoff,maxdim=maxdim,
 	            mindim=2,normalize=false,outputlevel=0)
 end
 
 function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim)
-	# wf isn't always straight out of dmrg() (e.g. evolution_ABA() first
-	# applies an operator via mpsjulialive/mpo.py's MPO.__mul__, which
-	# goes through mpsalgebra.jl's applyoperator() -- confirmed directly
-	# to leave a stale nonzero prime level on the result's Link indices,
-	# same as apply_clean()'s docstring below explains for quench_tdvp's
-	# inputs. orthogonalize!() alone does NOT clear this -- confirmed
-	# directly, the stale prime survives it -- so the Link indices need
-	# an explicit noprime() first. copy() first so this doesn't mutate
-	# the caller's own wf in place.
-	psi = noprime(copy(wf),"Link")
-	orthogonalize!(psi,1)
+	psi = wf
 	correlator = ComplexF64[]
 	for it=1:nt
 		psi = tdvp_step(Hmpo,psi,dt,cutoff,maxdim)

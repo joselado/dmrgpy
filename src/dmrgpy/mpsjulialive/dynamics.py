@@ -59,10 +59,10 @@ def _kpm_moments_accelerated(jlsites,jlmpo,vi,n,kpmmaxm,kpmcutoff):
 
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
     """Dispatch a dynamical correlator computation on the Julia backend.
-    submode="KPM" (see docs/documentation.md §4.6) and submode="CVM" are
-    implemented; other submodes (TD -- use
+    submode="KPM" (see docs/documentation.md §4.6), submode="CVM" and
+    submode="TDZ" are implemented; other submodes (TD -- use
     timedependent.dynamical_correlator/evolution_DC instead, which
-    already dispatch to julia_live -- TDZ, EX, maxent, ...) are only
+    already dispatch to julia_live -- EX, maxent, ...) are only
     implemented for the C++/pure-Python backends (dynamics.py).
 
     Deliberately takes submode + **kwargs only (mirroring the top-level
@@ -84,10 +84,17 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         # cvm.py::_set_cvm_sweep_params.
         from .. import cvm
         return cvm.dynamical_correlator(self,**kwargs)
+    if submode=="TDZ":
+        # tdz.py is already backend-agnostic MPS/MPO algebra too, apart
+        # from one primitive (a single complex-time TDVP step); see
+        # tdz.py::_advance_complex_time_step's julia_live branch and
+        # mpsjulialive/timedependent.py::advance_complex_time_step.
+        from .. import tdz
+        return tdz.dynamical_correlator_tdz(self,**kwargs)
     if submode!="KPM":
         raise NotImplementedError(
             "itensor_version='julia_live' only implements submode='KPM'/"
-            "'CVM' for get_dynamical_correlator, got submode=%r"%submode)
+            "'CVM'/'TDZ' for get_dynamical_correlator, got submode=%r"%submode)
     return _kpm_dynamical_correlator(self,**kwargs)
 
 

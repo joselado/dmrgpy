@@ -130,7 +130,16 @@ def _advance_complex_time_step(self, Hop, wf, dz, do_gse=False):
     loop instead of a C++ one like those two. Same itensor_version support
     as plain "TDVP" (3 or "python" only) -- see evolution_dmrg_DC's
     docstring for why a v2 port isn't available here.
+
+    julia_live always takes the plain two-site TDVP branch below (its
+    default self.tevol_method is "TDVP"; there is no TDVP_GSE or
+    MPO-Taylor fallback wired up for this backend) -- see
+    mpsjulialive/tdvp.jl's tdvp_step, which already generalizes cleanly
+    to a complex dz with no changes needed.
     """
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive.timedependent import advance_complex_time_step
+        return advance_complex_time_step(self,Hop,wf,dz)
     if self.itensor_version in (3, "python") and self.tevol_method == "TDVP":
         handle = self._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, dz)
     elif self.itensor_version in (3, "python") and self.tevol_method == "TDVP_GSE":
