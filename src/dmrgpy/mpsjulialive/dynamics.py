@@ -14,46 +14,59 @@ def _max_energy_bound(self,H):
     live Julia session handles (self.jlsites/self.wf0.jlmps aren't part
     of Python's copy protocol, see manybodychain.py's __deepcopy__), so
     this can't go through bandwidth()/lowest_eigenvalue() the way the
-    C++/pure-Python backends do."""
+    C++/pure-Python backends do.
+
+    The restore runs in a finally block: without it, a self.gs_energy()
+    failure on the negated Hamiltonian (a real possibility for a live
+    juliacall session -- e.g. a JuliaError from the DMRG call) would
+    propagate with self.hamiltonian still pointing at -H and
+    self.maxm/self.nsweeps still clamped down, corrupting every later
+    call on this chain object, not just this one."""
     maxm0,nsweeps0 = self.maxm,self.nsweeps
     self.maxm = min(self.maxm,20)
     self.nsweeps = min(self.nsweeps,5)
     self.restart()
     self.set_hamiltonian(-1*H,restart=False)
-    emax = -self.gs_energy()
-    self.maxm,self.nsweeps = maxm0,nsweeps0
-    self.restart()
-    self.set_hamiltonian(H,restart=False)
+    try:
+        emax = -self.gs_energy()
+    finally:
+        self.maxm,self.nsweeps = maxm0,nsweeps0
+        self.restart()
+        self.set_hamiltonian(H,restart=False)
     return emax
 
 
-def _same_mps(jlsites,vi,vj,maxm):
+def _same_mps(vi,vj,maxm,cutoff):
     from .juliasession import Main as Mainjl
-    return bool(Mainjl.same_mps(vi,vj,maxm))
+    return bool(Mainjl.same_mps(vi,vj,maxm,cutoff))
 
 
-def _kpm_moments_full(jlsites,jlmpo,vi,vj,n,kpmmaxm,kpmcutoff):
+def _kpm_moments_full(jlmpo,vi,vj,n,kpmmaxm,kpmcutoff):
     """Chebyshev moments <vj|T_k(scaledH)|vi>, via the standard three-term
     recursion T_{k+1} = 2*scaledH*T_k - T_{k-1}. The whole loop runs
     natively in Julia (kpm.jl's kpm_moments_full, driven through
-    mpsalgebra.jl's applyoperator/summps) rather than one Python<->Julia
-    round trip per Chebyshev step -- confirmed directly that the
-    per-step-round-trip version this replaced was ~1.7x slower than the
-    compiled ITensor v3 backend even with a warm Julia session (30-site
-    Heisenberg chain), which this closes."""
+    mpsalgebra.jl's own apply_op()/summps) rather than one
+    Python<->Julia round trip per Chebyshev step -- confirmed directly
+    that the per-step-round-trip version this replaced was ~1.7x slower
+    than the compiled ITensor v3 backend even with a warm Julia session
+    (30-site Heisenberg chain), which this closes. apply_op() (rather
+    than mpsalgebra.jl's applyoperator(), which does an extra, redundant
+    MPO contraction per call -- see its own docstring) roughly halves
+    the cost again on top of that, since this recursion is O(n moments)
+    calls and dominates KPM's total runtime."""
     from .juliasession import Main as Mainjl
-    out = Mainjl.kpm_moments_full(jlsites,jlmpo,vi,vj,n,kpmmaxm,kpmcutoff)
+    out = Mainjl.kpm_moments_full(jlmpo,vi,vj,n,kpmmaxm,kpmcutoff)
     return list(out)
 
 
-def _kpm_moments_accelerated(jlsites,jlmpo,vi,n,kpmmaxm,kpmcutoff):
+def _kpm_moments_accelerated(jlmpo,vi,n,kpmmaxm,kpmcutoff):
     """Same recursion as _kpm_moments_full, specialized for vi==vj (a
     diagonal correlator): the even/odd moment pair at each step is read
     off two consecutive Chebyshev vectors instead of two separate
     recursions, roughly halving the MPO applications. Native Julia loop,
     see _kpm_moments_full's note."""
     from .juliasession import Main as Mainjl
-    out = Mainjl.kpm_moments_accelerated(jlsites,jlmpo,vi,n,kpmmaxm,kpmcutoff)
+    out = Mainjl.kpm_moments_accelerated(jlmpo,vi,n,kpmmaxm,kpmcutoff)
     return list(out)
 
 
@@ -145,15 +158,13 @@ def _kpm_dynamical_correlator(self,n=1000,
     Hscaled = MPO(Hscaled_MO,MBO=self)
     Aop = MPO(mi,MBO=self)
     Bop = MPO(mj,MBO=self)
-    psi1 = Mainjl.applyoperator(self.jlsites,Aop.jlmpo,wf0.jlmps,
-            self.kpmmaxm,self.kpmcutoff)
-    psi2 = Mainjl.applyoperator(self.jlsites,Bop.jlmpo,wf0.jlmps,
-            self.kpmmaxm,self.kpmcutoff)
-    if self.kpm_accelerate and _same_mps(self.jlsites,psi1,psi2,self.kpmmaxm):
-        moments = _kpm_moments_accelerated(self.jlsites,Hscaled.jlmpo,psi1,
+    psi1 = Mainjl.apply_op(Aop.jlmpo,wf0.jlmps,self.kpmmaxm,self.kpmcutoff)
+    psi2 = Mainjl.apply_op(Bop.jlmpo,wf0.jlmps,self.kpmmaxm,self.kpmcutoff)
+    if self.kpm_accelerate and _same_mps(psi1,psi2,self.kpmmaxm,self.kpmcutoff):
+        moments = _kpm_moments_accelerated(Hscaled.jlmpo,psi1,
                 n,self.kpmmaxm,self.kpmcutoff)
     else:
-        moments = _kpm_moments_full(self.jlsites,Hscaled.jlmpo,psi1,psi2,
+        moments = _kpm_moments_full(Hscaled.jlmpo,psi1,psi2,
                 n,self.kpmmaxm,self.kpmcutoff)
     mus = np.array(moments)
     if self.kpm_extrapolate:

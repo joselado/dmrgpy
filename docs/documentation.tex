@@ -467,13 +467,13 @@ conversion explicitly via \texttt{juliacall.convert}.
 
 The KPM dynamical correlator's Chebyshev-moment recursion runs natively
 in Julia (\texttt{mpsjulialive/kpm.jl}'s \texttt{kpm\_moments\_full}/
-\texttt{kpm\_moments\_accelerated}, driven through \texttt{mpsalgebra.jl}'s
-own \texttt{applyoperator}/\texttt{summps}), one call per correlator
-rather than one Python$\leftrightarrow$Julia round trip per Chebyshev
-step. \texttt{mpsjulialive/dynamics.py} only builds the scaled-Hamiltonian
-MPO and the two seed wavefunctions in Python (mirroring
-\texttt{pyitensor/chain.py}'s own pure-Python KPM algorithm, since
-\texttt{julia\_live} has no single \texttt{Chain} session object
+\texttt{kpm\_moments\_accelerated}, driven through \texttt{kpm.jl}'s own
+\texttt{apply\_op}/\texttt{mpsalgebra.jl}'s \texttt{summps}), one call
+per correlator rather than one Python$\leftrightarrow$Julia round trip
+per Chebyshev step. \texttt{mpsjulialive/dynamics.py} only builds the
+scaled-Hamiltonian MPO and the two seed wavefunctions in Python
+(mirroring \texttt{pyitensor/chain.py}'s own pure-Python KPM algorithm,
+since \texttt{julia\_live} has no single \texttt{Chain} session object
 comparable to \texttt{self.\_session} on the C++/pure-Python backends for
 \texttt{kpmdmrg.py} to dispatch to directly), then hands the whole moment
 loop to Julia in one call. Measured directly on a 30-site Heisenberg
@@ -483,6 +483,41 @@ to the compiled ITensor v3 backend (v3: 23.4s, Julia native loop warm:
 remaining time is genuine Julia-side tensor-contraction/truncation cost
 (\texttt{alg="densitymatrix"} SVD-based \texttt{add}/\texttt{contract}),
 not Python$\leftrightarrow$Julia marshaling overhead.
+
+\textbf{Follow-up optimization}: \texttt{kpm\_moments\_full}/
+\texttt{kpm\_moments\_accelerated} originally called
+\texttt{mpsalgebra.jl}'s \texttt{applyoperator()} once per Chebyshev
+step, which does \emph{two} truncated MPO-MPS contractions per call
+(\texttt{contract(A,psi)} plus a second contraction against an identity
+MPO --- the same "fixes a bug" workaround documented above for
+\texttt{tdvp.jl}'s \texttt{apply\_clean}, which switched to
+\texttt{ITensorMPS}'s own higher-level \texttt{apply()} for the same
+reason, on the TDVP side, to fix a \emph{different} bug).
+\texttt{mpsalgebra.jl}'s \texttt{apply\_op()} does the same
+swap, cutting one of the two contractions per moment (not a clean
+$2\times$, since the identity-MPO contraction is against a trivial
+bond-dimension-1 operator, much cheaper than the contraction against the
+real, bond-growing scaled Hamiltonian). Measured directly on the same
+30-site chain: 34.5s $\to$ 28.4s warm ($\sim$18\% faster), narrowing the
+gap to v3 from $\sim$1.47$\times$ to $\sim$1.21$\times$ slower. Peak
+positions confirmed unchanged against the existing ED cross-check after
+the change. \texttt{apply\_op()} is shared between \texttt{kpm.jl}'s
+recursion and \texttt{tdvp.jl}'s \texttt{apply\_clean()} (which layers
+its own \texttt{orthogonalize!()} on top, needed for
+\texttt{tdvp()}/\texttt{dmrg()} inputs but not for KPM's) --- it lives in
+\texttt{mpsalgebra.jl}, loaded before both, rather than as two
+independently maintained near-duplicates. \texttt{mpsalgebra.jl}'s
+\texttt{summps()} (the \texttt{add()} wrapper the Chebyshev recursion
+sums consecutive Chebyshev vectors with) now also takes an explicit
+\texttt{cutoff} argument: \texttt{add()}'s own default ($10^{-15}$) is
+three orders tighter than dmrgpy's usual configured cutoffs, so every
+moment step used to silently keep far more Schmidt values than
+\texttt{self.kpmcutoff} called for, up to \texttt{kpmmaxm}. The KPM seed
+vectors (\texttt{psi1}/\texttt{psi2} in
+\texttt{mpsjulialive/dynamics.py}) are now also built via
+\texttt{apply\_op()} rather than the older \texttt{applyoperator()},
+closing the one spot the original optimization pass left on the old
+primitive.
 
 Real-time TDVP evolution (\texttt{timedependent.py}'s
 \texttt{evolve\_and\_measure\_dmrg}/\texttt{evolution\_dmrg\_DC}, submode
@@ -755,10 +790,137 @@ small native Julia primitive" pattern every fix above followed:
   so left as a documented follow-up rather than implemented here.
 \end{itemize}
 
+\textbf{Fixes from an independent multi-angle code review of the whole
+Julia backend} (8 finder passes + per-finding verification, run once the
+above was otherwise feature-complete): six real, confirmed issues, all
+fixed directly rather than left as follow-ups ---
+
+\begin{itemize}
+\item \texttt{cvm.py}'s \texttt{\_set\_cvm\_sweep\_params} (the
+  \texttt{julia\_live} equivalent of
+  \texttt{self.\_session.set\_sweep\_params}) is now a context manager
+  (\texttt{\_cvm\_sweep\_params}) instead of a plain
+  set-and-return-the-old-value function: \texttt{self.maxm} is restored
+  via \texttt{finally}, so a CG blow-up mid-loop (or a standalone call to
+  the public \texttt{cvm\_correction\_vector}, which previously never
+  restored it at all) can no longer leave \texttt{self.maxm} permanently
+  stuck at \texttt{cvm\_maxm}.
+\item \texttt{dynamics.py}'s \texttt{julia\_live} branch now checks
+  \texttt{self.is\_hermitian(...)} before dispatching, the same way the
+  \texttt{(2,3,"python")} branch already does --- previously a
+  non-Hermitian Hamiltonian silently ran the Hermitian-only KPM/CVM/TDZ
+  math and returned numerically wrong output. There's no non-Hermitian
+  route to fall back to for \texttt{julia\_live} yet (that needs
+  \texttt{applyinverse()}, C++-only today), so this raises a clear
+  \texttt{NotImplementedError} instead.
+\item \texttt{mpsjulialive/excited.py}'s \texttt{get\_excited\_states\_dmrg}
+  now honors \texttt{self.excited\_gram\_schmidt} (previously silently
+  dropped --- \texttt{excited.jl} has no Gram-Schmidt step of its own),
+  applying the same generic, backend-agnostic
+  \texttt{algebra.arnolditk.gram\_smith} the top-level
+  \texttt{get\_excited\_states}'s own \texttt{purify=True} path already
+  uses, and recomputing energies against the orthogonalized states to
+  match.
+\item \texttt{mpsjulialive/dynamics.py}'s \texttt{\_max\_energy\_bound}
+  now restores \texttt{self.maxm}/\texttt{self.nsweeps}/
+  \texttt{self.hamiltonian} in a \texttt{finally} block --- previously a
+  \texttt{self.gs\_energy()} failure partway through (a real possibility
+  for a live juliacall session) would leave the chain object with a
+  negated Hamiltonian and clamped bond dimension/sweep count for every
+  later call.
+\item \texttt{mpsjulialive/tdvp.jl}'s \texttt{evolve\_and\_measure\_tdvp}
+  now explicitly renormalizes every step (matching \texttt{quench\_tdvp}'s
+  own existing pattern, and \texttt{mpscpp3/chain\_session.h}'s
+  \texttt{tdvp\_step}, which passes \texttt{"DoNormalize",true}) ---
+  \texttt{tdvp\_step}'s own \texttt{normalize=false} stays unchanged,
+  since \texttt{tdz.py}'s \texttt{advance\_complex\_time\_step} also
+  calls \texttt{tdvp\_step} directly and its physically-meaningful norm
+  decay (the whole point of TDZ's damping mechanism, arXiv:2311.10909)
+  must not be renormalized away.
+\item \texttt{mpsjulialive/tdvp.jl}'s \texttt{tdvp\_step} no longer forces
+  \texttt{mindim=2}: that floor was a guessed fix for a bug later found
+  to be the stale-Link-prime issue (fixed separately, see above) and was
+  never confirmed necessary: neither \texttt{mpscpp3}'s own
+  \texttt{tdvp\_step} nor \texttt{pyitensor/tdvp.py}'s \texttt{svd} calls
+  force a floor above ITensor's own default of 1, and forcing 2 could pad
+  in a spurious singular value at a bond whose true Schmidt rank
+  genuinely is 1 (e.g.\ a near-product state on a small chain).
+\end{itemize}
+
+One more finding was fixed as a cleanup rather than a correctness bug:
+\texttt{mpsjulialive/excited.jl}'s \texttt{excited\_state\_dmrg} had
+copy-pasted the \texttt{Sweeps}-construction + stdout-silencing
+boilerplate a third time (\texttt{get\_gs.jl} already had two
+near-identical copies); both are now built on shared
+\texttt{make\_sweeps}/\texttt{run\_quiet} helpers in \texttt{get\_gs.jl}.
+
+A seventh candidate (\texttt{densitymatrix.jl}/\texttt{entropy.jl}
+lacking a bounds check when \texttt{site}/\texttt{b} is the chain's last
+site) was investigated and found to be a pre-existing,
+deliberately-preserved limitation shared identically by
+\texttt{pyitensor/chain.py} and \texttt{mpscpp3/chain\_session.h} (see
+\texttt{reduced\_dm}'s own docstring above) --- not a new risk, so left
+as-is.
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as
 legacy/inert.)
+
+\textbf{A second review round} (run against the KPM optimization + the
+six fixes above together) found two of those fixes were themselves
+incorrect, plus several smaller cleanup items --- all fixed, and this
+time backed by persisted regression coverage
+(\texttt{tests/test\_julia\_live.py}, \texttt{julia\_live}'s first,
+since the first round's validation was ad hoc and non-committed):
+
+\begin{itemize}
+\item \texttt{evolve\_and\_measure\_tdvp}'s new renormalization (previous
+  round, above) forced the state to \emph{unit} norm every step instead
+  of preserving its own starting norm --- diverging from
+  \texttt{quench\_tdvp}'s existing \texttt{norm0}-target pattern in the
+  same file, and silently rescaling every result by $1/\lVert wf\rVert^2$
+  whenever the input wasn't already unit-norm (e.g.\
+  \texttt{evolution\_ABA()}'s \texttt{wfA = A*wf}, for any non-unitary
+  \texttt{A}). Now captures \texttt{norm0 = }$\lVert wf\rVert$ once at
+  entry and renormalizes to that every step, matching
+  \texttt{quench\_tdvp} and the pure-Python reference's physical
+  behavior.
+\item The non-Hermitian guard added to \texttt{dynamics.py}'s
+  \texttt{julia\_live} branch (previous round, above) ran \emph{before}
+  submode dispatch, so it unconditionally blocked every submode ---
+  including \texttt{submode="EX"}, which already has a working,
+  itensor\_version-agnostic non-Hermitian path (\texttt{dcex.py}
+  $\to$ \texttt{excited.py}'s \texttt{excited\_states\_non\_hermitian},
+  not gated on \texttt{itensor\_version} at all) and
+  \texttt{submode="maxent"}. The guard now only fires for
+  \texttt{submode in ("KPM","CVM","TDZ")}, matching what its own error
+  message already claimed.
+\item Both renormalization sites now use \texttt{norm(psi)} instead of
+  \texttt{sqrt(abs(inner(psi,psi)))}: \texttt{tdvp\_step()}'s own
+  \texttt{orthogonalize!(psi,1)} guarantees a well-defined orthogonality
+  center on its output, so \texttt{ITensorMPS}'s \texttt{norm()}
+  short-circuits to a cheap $O(D^2)$ single-tensor norm instead of a full
+  $O(N{\cdot}D^3)$ chain contraction --- confirmed via a live benchmark
+  ($N=40$, $D=60$: $\sim$4ms vs $\sim$1.18s per call).
+\item \texttt{mpsjulialive/dynamics.py}'s \texttt{\_same\_mps} had an
+  unused \texttt{jlsites} parameter left over from the same cleanup that
+  removed it from its sibling \texttt{\_kpm\_moments\_full}/
+  \texttt{\_kpm\_moments\_accelerated} --- dropped, and
+  \texttt{same\_mps}/\texttt{summps} on the Julia side gained the
+  \texttt{cutoff} argument described above.
+\end{itemize}
+
+The commit that introduced this round's fixes claimed "new targeted
+tests" without actually adding any (\texttt{tests/}/\texttt{examples/}
+were untouched) --- \texttt{tests/test\_julia\_live.py} now covers
+exactly the four behaviors that commit described validating: CVM's
+\texttt{maxm} restoration, the non-Hermitian dispatch split,
+\texttt{evolution\_ABA}'s norm preservation, and the KPM peak position
+after the \texttt{apply\_op}/\texttt{summps} changes. The whole file is
+skipped if \texttt{juliacall}/Julia isn't available, the same way
+\texttt{tests/} already skips itensor\_version 2/3 when the corresponding
+compiled extension isn't present.
 
 \subsection{Supporting \texttt{*tk} packages}
 

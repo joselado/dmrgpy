@@ -23,5 +23,18 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
             int(n),weight,self.jlsites,self.nsweeps,self.cutoff,self.maxm)
     from .mps import MPS
     wfs = [MPS(w,MBO=self) for w in wfs_jl]
-    energies = np.array([complex(e).real for e in energies_jl])
+    if self.excited_gram_schmidt:
+        # mirrors mpscpp3/chain_session.h's Chain::excited_states and
+        # pyitensor.chain.Chain.excited_states, both of which apply
+        # gram-schmidt to wfs *before* computing the returned energies
+        # (previously silently skipped here -- excited.jl's own
+        # excited_states_dmrg has no gram-schmidt step at all, unlike the
+        # C++/pyitensor backends' self._session.excited_states(n,scale,
+        # self.excited_gram_schmidt)). gram_smith() only uses generic
+        # MPS algebra (.copy()/.normalize()/.dot()), already julia_live-safe.
+        from ..algebra.arnolditk import gram_smith
+        wfs = gram_smith(wfs)
+        energies = np.array([wfi.dot(Hop*wfi).real for wfi in wfs])
+    else:
+        energies = np.array([complex(e).real for e in energies_jl])
     return energies,wfs

@@ -5,13 +5,12 @@
 # turn mirrors mpscpp3/chain_session.h's Chain::excited_states().
 
 function excited_state_dmrg(H,wfs,psi0,weight,nsweeps,cutoff,maxm)
-	sweeps = Sweeps(nsweeps)
-	maxdim!(sweeps,maxm)
-	cutoff!(sweeps,cutoff)
-	open("/dev/null","w") do devnull
-		redirect_stdout(devnull) do
-			return dmrg(H,wfs,psi0,sweeps;weight=weight)
-		end
+	# make_sweeps/run_quiet are defined in get_gs.jl, loaded earlier by
+	# juliasession.py's initialize() -- shared rather than a third
+	# copy-pasted Sweeps-construction+stdout-silencing block.
+	sweeps = make_sweeps(nsweeps,maxm,cutoff)
+	run_quiet() do
+		dmrg(H,wfs,psi0,sweeps;weight=weight)
 	end
 end
 
