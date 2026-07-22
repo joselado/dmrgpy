@@ -533,6 +533,24 @@ worked before this --- they route through \texttt{gs\_energy()}/the
 generic Arnoldi method (\texttt{mpsalgebra.mpsarnoldi}), neither of
 which is backend-specific.
 
+Bond entanglement entropy (\texttt{MPS.get\_bond\_entropy}, used e.g.\ by
+\texttt{entropy.py}'s \texttt{central\_charge}) was missing entirely on
+the Julia backend (\texttt{mpsjulialive/mps.py}'s \texttt{MPS} class had
+no \texttt{get\_bond\_entropy}/\texttt{get\_site\_entropy} methods at
+all --- a plain \texttt{AttributeError}, not a crash inside a dispatch
+branch). \texttt{mpsjulialive/entropy.jl}'s \texttt{bond\_entropy}
+computes it the standard MPS way, via SVD of the two-site tensor at that
+bond (mirrors \texttt{pyitensor/chain.py}'s \texttt{bond\_entropy},
+itself a port of \texttt{Chain::bond\_entropy}) --- much cheaper than
+the generic \texttt{get\_correlation\_entropy}/\texttt{"explicit"}-dmmode
+fallback the Julia backend already had (still the only option for
+multi-site correlation entropy, just not for a single bond). Validated
+directly: a 2-site Heisenberg singlet gives exactly $\ln 2$ (the
+analytically known Bell-pair entanglement), and on a 6-site chain the
+bond entropy at the first bond exactly matches the existing generic
+\texttt{get\_site\_entropy} (which computes the same quantity a
+completely different way, through \texttt{reduced\_dm\_projective}).
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as

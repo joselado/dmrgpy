@@ -42,6 +42,7 @@ def initialize():
                           # mpsalgebra.jl's applyoperator, must load after it
     files += ["excited.jl"] # orthogonality-penalty excited-state dmrg()
     files += ["densitymatrix.jl"] # single-site reduced density matrix
+    files += ["entropy.jl"] # SVD-based bond entanglement entropy
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

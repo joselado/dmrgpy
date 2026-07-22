@@ -423,6 +423,23 @@ to ~1e-15. `n==1` and non-Hermitian excited states already worked before
 this — they route through `gs_energy()`/the generic Arnoldi method
 (`mpsalgebra.mpsarnoldi`), neither of which is backend-specific.
 
+Bond entanglement entropy (`MPS.get_bond_entropy`, used e.g. by
+`entropy.py`'s `central_charge`) was missing entirely on the Julia
+backend (`mpsjulialive/mps.py`'s `MPS` class had no `get_bond_entropy`/
+`get_site_entropy` methods at all — a plain `AttributeError`, not a
+crash inside a dispatch branch). `mpsjulialive/entropy.jl`'s
+`bond_entropy` computes it the standard MPS way, via SVD of the two-site
+tensor at that bond (mirrors `pyitensor/chain.py`'s `bond_entropy`,
+itself a port of `Chain::bond_entropy`) — much cheaper than the generic
+`get_correlation_entropy`/`"explicit"`-dmmode fallback the Julia backend
+already had (still the only option for multi-site correlation entropy,
+just not for a single bond). Validated directly: a 2-site Heisenberg
+singlet gives exactly ln 2 (the analytically known Bell-pair
+entanglement), and on a 6-site chain the bond entropy at the first bond
+exactly matches the existing generic `get_site_entropy` (which computes
+the same quantity a completely different way, through
+`reduced_dm_projective`).
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)
