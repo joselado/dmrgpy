@@ -1,49 +1,34 @@
 #!/usr/bin/python3
 import os
 import sys
-import subprocess
 
 
-mpath = os.path.dirname(os.path.realpath(__file__)) 
-
-
-# main path
-try:
-    out,err = subprocess.Popen(['julia', '--version'],
-           stdout=subprocess.PIPE,
-           stderr=subprocess.STDOUT).communicate()
-except: out = ""
-# check if JUlia has the correct version
-hasjulia = "julia version 1.5" in str(out)
-#print(hasjulia) ; exit()
-
-if not hasjulia: # if the correct Julia version is not present
-    print("Julia not present in path, downloading")
-    os.system("mkdir "+mpath+"/src/julia") # create a subfodler for julia
-    os.chdir(mpath+"/src/julia") # go to the subfolder
-# download julia
-    juliafile = "julia-1.5.0-linux-x86_64.tar.gz" # julia file
-    os.system("wget https://julialang-s3.julialang.org/bin/linux/x64/1.5/"+juliafile)
-    os.system("tar -xvf "+juliafile) # untar the file
-    os.system("rm "+juliafile) # rm the file
-    julia = mpath+"/src/julia/julia-1.5.0/bin/julia" # path for julia
-    os.chdir(mpath) # go back
-
-else: 
-    julia = "julia"
-    print("Correct Julia version found in path")
+mpath = os.path.dirname(os.path.realpath(__file__))
 
 
 # install python dependences
-os.system("pip install julia")
+os.system("pip install juliacall") # bridge to the live Julia session
+                                    # (mpsjulialive/), replacing the old
+                                    # PyJulia ("pip install julia") bridge
 os.system("pip install pmdarima")
 
 
-# install Itensor julia
-import src.dmrgpy.juliarun as juliarun
-juliarun.install() # install Julia dependences
-
-
+# Trigger juliacall/juliapkg to provision Julia (via juliaup, reusing any
+# existing Julia install juliapkg finds; no manual download/tarball dance
+# needed here any more) and resolve+precompile the packages declared in
+# src/dmrgpy/juliapkg.json (ITensors, ITensorMPS, ITensorNHDMRG) into its
+# own managed project. This can take several minutes the first time
+# (registry update + precompilation); later imports reuse the same
+# managed project and are fast.
+print("Setting up the Julia backend (juliacall) -- this may take a few "
+      "minutes the first time")
+sys.path.insert(0,mpath+"/src")
+try:
+    import dmrgpy.mpsjulialive.juliasession
+    print("Julia backend ready")
+except Exception as e:
+    print("Could not set up the Julia backend:",e)
+    print("setup_julia() will not be usable until this is resolved")
 
 
 ##################

@@ -180,7 +180,7 @@ between the two solver families.
 | `2` | ITensor v2, in-process C++ (`mpscpp2`) | compiled pybind11 extension | ED |
 | `3` (default) | ITensor v3, in-process C++ (`mpscpp3`) | compiled pybind11 extension | ED |
 | `"python"` | pure-Python `pyitensor/` | NumPy/SciPy only | none |
-| `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `pyjulia` + Julia install | none (feature-by-feature; missing methods simply aren't implemented) |
+| `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `juliacall`/PythonCall.jl (self-provisions Julia) | none (feature-by-feature; missing methods simply aren't implemented) |
 
 Regardless of `itensor_version`, if `self.mode` is forced to `"ED"`, or
 the requested backend isn't available, calculations run through
@@ -322,11 +322,47 @@ block-sparsity, no JIT) — see §5 for how much slower in practice, and how
 ### 4.6 The Julia backend (`mpsjulialive/`)
 
 `itensor_version="julia_live"` drives a live, in-process Julia session
-(via `pyjulia`) with its own set of modules mirroring the top-level ones
-(`mpsjulialive/groundstate.py`, `vev.py`, `mps.py`, `mpo.py`, ...) that
-talk to Julia's ITensors.jl instead of the C++ pybind11 extension. This
-is an independent implementation, not a shared protocol with the C++
-path — a feature missing on one side simply isn't implemented there yet.
+(via [`juliacall`/PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl),
+`mpsjulialive/juliasession.py`) with its own set of modules mirroring the
+top-level ones (`mpsjulialive/groundstate.py`, `vev.py`, `mps.py`,
+`mpo.py`, `dynamics.py`, ...) that talk to Julia's ITensors.jl instead of
+the C++ pybind11 extension. This is an independent implementation, not a
+shared protocol with the C++ path — a feature missing on one side simply
+isn't implemented there yet.
+
+`juliacall` replaced an earlier PyJulia-based bridge: PyJulia requires the
+Julia build's PyCall to be linked against a matching libpython (the same
+class of ABI landmine documented in §2 for the C++ extension) and needs a
+`compiled_modules=False` workaround for slow/broken precompilation.
+`juliacall` avoids both, and self-provisions Julia plus the required
+packages (`ITensors`, `ITensorMPS`, `ITensorNHDMRG`, pinned in
+`src/dmrgpy/juliapkg.json`) into its own managed project the first time
+`mpsjulialive` is imported — no manual Julia download step. One porting
+detail worth knowing: unlike PyJulia, `juliacall` does *not* implicitly
+convert a Python `list` of `str` into a Julia `Vector{String}` (it wraps
+it as a lazy `PyList{Any}`, which fails to dispatch against
+strictly-typed Julia functions like `sites.jl`'s `get_sites`); every call
+site that used to rely on that now goes through
+`juliasession.to_julia_strvec()`, which forces the conversion explicitly
+via `juliacall.convert`.
+
+The KPM dynamical correlator's Chebyshev-moment recursion runs natively
+in Julia (`mpsjulialive/kpm.jl`'s `kpm_moments_full`/
+`kpm_moments_accelerated`, driven through `mpsalgebra.jl`'s own
+`applyoperator`/`summps`), one call per correlator rather than one
+Python↔Julia round trip per Chebyshev step. `mpsjulialive/dynamics.py`
+only builds the scaled-Hamiltonian MPO and the two seed wavefunctions in
+Python (mirroring `pyitensor/chain.py`'s own pure-Python KPM algorithm,
+since `julia_live` has no single `Chain` session object comparable to
+`self._session` on the C++/pure-Python backends for `kpmdmrg.py` to
+dispatch to directly), then hands the whole moment loop to Julia in one
+call. Measured directly on a 30-site Heisenberg chain: eliminating the
+per-step round trip only closed part of the gap to the compiled ITensor
+v3 backend (v3: 23.4s, Julia native loop warm: 34.0s, vs. 37.7s for the
+earlier per-step Python loop) — most of the remaining time is genuine
+Julia-side tensor-contraction/truncation cost (`alg="densitymatrix"`
+SVD-based `add`/`contract`), not Python↔Julia marshaling overhead.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)

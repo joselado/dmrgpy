@@ -21,14 +21,8 @@ def text_mpo(MO):
 def get_MPO(MO,MBO):
     """Transform a multioperator into a matrix product operator"""
     ls = text_mpo(MO)
-#    print(ls) ; exit()
-    from .juliasession import Main
-    Main.mpo_ls = ls
-#    print(type(Main.mpo_ls),type(MBO.jlsites))
-#    Main.mpo_ls = Main.eval('convert(Vector{String}, mpo_ls)')
-#    MPO = Main.eval('toMPO(mpo_ls)')
-    MPO = Main.toMPO(Main.mpo_ls,MBO.jlsites)
-#    print(MPO)
+    from .juliasession import Main, to_julia_strvec
+    MPO = Main.toMPO(to_julia_strvec(ls),MBO.jlsites)
     return MPO
 
 import numpy as np

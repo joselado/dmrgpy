@@ -1,7 +1,7 @@
 
 function get_sites(ls::Vector{String})
   n = parse(Int,ls[1]) # number of sites
-  sites = []
+  sites = Index[]
   for i=1:n
     ni = parse(Int,ls[i+1]) # index of the site
     if ni==0 

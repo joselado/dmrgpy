@@ -65,6 +65,7 @@ work to whichever solver is requested or available:
 \end{itemize}
 
 \section{Installation}
+\label{sec:install}
 
 There is no \texttt{setup.py}/\texttt{pyproject.toml}; DMRGPY is used
 directly from \texttt{src/}, added to \texttt{PYTHONPATH} (or symlinked
@@ -411,13 +412,54 @@ slower in practice, and how \texttt{numba}/\texttt{jax} narrow that gap.
 \subsection{The Julia backend (\texttt{mpsjulialive/})}
 
 \texttt{itensor\_version="julia\_live"} drives a live, in-process Julia
-session (via \texttt{pyjulia}) with its own set of modules mirroring the
-top-level ones (\texttt{mpsjulialive/groundstate.py}, \texttt{vev.py},
-\texttt{mps.py}, \texttt{mpo.py}, \ldots) that talk to Julia's
-ITensors.jl instead of the C++ pybind11 extension. This is an
-independent implementation, not a shared protocol with the C++ path --- a
-feature missing on one side simply isn't implemented there yet. (A
-separate, older subprocess-based Julia path,
+session (via
+\href{https://github.com/JuliaPy/PythonCall.jl}{\texttt{juliacall}/PythonCall.jl},
+\texttt{mpsjulialive/juliasession.py}) with its own set of modules
+mirroring the top-level ones (\texttt{mpsjulialive/groundstate.py},
+\texttt{vev.py}, \texttt{mps.py}, \texttt{mpo.py}, \texttt{dynamics.py},
+\ldots) that talk to Julia's ITensors.jl instead of the C++ pybind11
+extension. This is an independent implementation, not a shared protocol
+with the C++ path --- a feature missing on one side simply isn't
+implemented there yet.
+
+\texttt{juliacall} replaced an earlier PyJulia-based bridge: PyJulia
+requires the Julia build's PyCall to be linked against a matching
+libpython (the same class of ABI landmine documented in
+Section~\ref{sec:install} for the C++ extension) and needs a
+\texttt{compiled\_modules=False} workaround for slow/broken
+precompilation. \texttt{juliacall} avoids both, and self-provisions Julia
+plus the required packages (\texttt{ITensors}, \texttt{ITensorMPS},
+\texttt{ITensorNHDMRG}, pinned in \texttt{src/dmrgpy/juliapkg.json}) into
+its own managed project the first time \texttt{mpsjulialive} is imported
+--- no manual Julia download step. One porting detail worth knowing:
+unlike PyJulia, \texttt{juliacall} does \emph{not} implicitly convert a
+Python \texttt{list} of \texttt{str} into a Julia \texttt{Vector\{String\}}
+(it wraps it as a lazy \texttt{PyList\{Any\}}, which fails to dispatch
+against strictly-typed Julia functions like \texttt{sites.jl}'s
+\texttt{get\_sites}); every call site that used to rely on that now goes
+through \texttt{juliasession.to\_julia\_strvec()}, which forces the
+conversion explicitly via \texttt{juliacall.convert}.
+
+The KPM dynamical correlator's Chebyshev-moment recursion runs natively
+in Julia (\texttt{mpsjulialive/kpm.jl}'s \texttt{kpm\_moments\_full}/
+\texttt{kpm\_moments\_accelerated}, driven through \texttt{mpsalgebra.jl}'s
+own \texttt{applyoperator}/\texttt{summps}), one call per correlator
+rather than one Python$\leftrightarrow$Julia round trip per Chebyshev
+step. \texttt{mpsjulialive/dynamics.py} only builds the scaled-Hamiltonian
+MPO and the two seed wavefunctions in Python (mirroring
+\texttt{pyitensor/chain.py}'s own pure-Python KPM algorithm, since
+\texttt{julia\_live} has no single \texttt{Chain} session object
+comparable to \texttt{self.\_session} on the C++/pure-Python backends for
+\texttt{kpmdmrg.py} to dispatch to directly), then hands the whole moment
+loop to Julia in one call. Measured directly on a 30-site Heisenberg
+chain: eliminating the per-step round trip only closed part of the gap
+to the compiled ITensor v3 backend (v3: 23.4s, Julia native loop warm:
+34.0s, vs.\ 37.7s for the earlier per-step Python loop) --- most of the
+remaining time is genuine Julia-side tensor-contraction/truncation cost
+(\texttt{alg="densitymatrix"} SVD-based \texttt{add}/\texttt{contract}),
+not Python$\leftrightarrow$Julia marshaling overhead.
+
+(A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as
 legacy/inert.)
