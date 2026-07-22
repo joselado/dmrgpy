@@ -502,6 +502,26 @@ same golden test `tests/test_dynamical_correlator.py` uses for the other
 backends: peak within `0.03` of the exact 4-site Heisenberg gap
 (`0.658919`) — landed at `0.68`.
 
+The last two dynamical-correlator submodes needed no new Julia code at
+all, only dispatch routing: `dcex.py` (submode `"EX"`, correlator via
+exact diagonalization in the excited-state subspace) only calls
+`self.get_excited_states()` (already backend-agnostic, see above) and
+generic `MultiOperator`/MPS algebra (`.dot()`, `A*wf`) before dropping
+into plain NumPy/SciPy (`eigh`); `distribution.py`'s maxent path
+(submode `"maxent"`) is built the same way on top of
+`vev.py::power_vev`. Validated `"EX"` the same way
+`tests/test_dynamical_correlator.py` already does for the other
+backends — cross-checked directly against `"KPM"` and `"CVM"` on the
+same chain/operator/frequency grid, landing on the exact same peak
+(diff `0.0`) rather than just the analytic gap. `"maxent"` is wired up
+for parity but not actually functional on *any* backend right now —
+`distribution.py::get_distribution_maxent` imports
+`dmrgpy.maxenttk.pymaxent`, which doesn't exist in this checkout
+(confirmed directly: `ModuleNotFoundError`), so it hits the same
+`except: print("Not functional yet"); exit()` regardless of
+`itensor_version` — a pre-existing, cross-backend gap, not something
+introduced or left broken by this work.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)

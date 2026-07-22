@@ -91,10 +91,25 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         # mpsjulialive/timedependent.py::advance_complex_time_step.
         from .. import tdz
         return tdz.dynamical_correlator_tdz(self,**kwargs)
+    if submode=="EX":
+        # dcex.py needs no julia_live-specific code at all: it only calls
+        # self.get_excited_states() (already fixed, see excited.py) and
+        # generic MultiOperator/MPS algebra (.dot(), A*wf) plus plain
+        # numpy/scipy (eigh) from there on.
+        from .. import dcex
+        return dcex.dynamical_correlator(self,**kwargs)
+    if submode=="maxent":
+        # distribution.py's maxent path is also already backend-agnostic
+        # (vev.py::power_vev only uses MultiOperator*MPS/.dot(), then
+        # pure numpy/scipy maxent reconstruction) -- needs no
+        # julia_live-specific code either.
+        from ..distribution import dynamical_correlator_positive_defined
+        return dynamical_correlator_positive_defined(self,**kwargs)
     if submode!="KPM":
         raise NotImplementedError(
             "itensor_version='julia_live' only implements submode='KPM'/"
-            "'CVM'/'TDZ' for get_dynamical_correlator, got submode=%r"%submode)
+            "'CVM'/'TDZ'/'EX'/'maxent' for get_dynamical_correlator, "
+            "got submode=%r"%submode)
     return _kpm_dynamical_correlator(self,**kwargs)
 
 

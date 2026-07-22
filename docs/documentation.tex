@@ -625,6 +625,27 @@ cost next to the sweep itself. Validated against the same golden test
 backends: peak within $0.03$ of the exact 4-site Heisenberg gap
 ($0.658919$) --- landed at $0.68$.
 
+The last two dynamical-correlator submodes needed no new Julia code at
+all, only dispatch routing: \texttt{dcex.py} (submode \texttt{"EX"},
+correlator via exact diagonalization in the excited-state subspace) only
+calls \texttt{self.get\_excited\_states()} (already backend-agnostic,
+see above) and generic \texttt{MultiOperator}/MPS algebra
+(\texttt{.dot()}, \texttt{A*wf}) before dropping into plain NumPy/SciPy
+(\texttt{eigh}); \texttt{distribution.py}'s maxent path (submode
+\texttt{"maxent"}) is built the same way on top of
+\texttt{vev.py::power\_vev}. Validated \texttt{"EX"} the same way
+\texttt{tests/test\_dynamical\_correlator.py} already does for the other
+backends --- cross-checked directly against \texttt{"KPM"} and
+\texttt{"CVM"} on the same chain/operator/frequency grid, landing on the
+exact same peak (diff $0.0$) rather than just the analytic gap.
+\texttt{"maxent"} is wired up for parity but not actually functional on
+\emph{any} backend right now --- \texttt{distribution.py::get\_distribution\_maxent}
+imports \texttt{dmrgpy.maxenttk.pymaxent}, which doesn't exist in this
+checkout (confirmed directly: \texttt{ModuleNotFoundError}), so it hits
+the same \texttt{except: print("Not functional yet"); exit()} regardless
+of \texttt{itensor\_version} --- a pre-existing, cross-backend gap, not
+something introduced or left broken by this work.
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as
