@@ -683,6 +683,53 @@ matrix) --- a from-scratch fermionic-JW-string MPO builder to work
 around it would be a disproportionate amount of new code for a
 performance-only win on an already-cheap operation.
 
+A final sweep of every remaining \texttt{self.\_session} call site
+reachable from \texttt{julia\_live} (grepped across the package, checked
+against what each call site's own top-level dispatcher actually routes
+for that \texttt{itensor\_version}) turned up two more real gaps,
+deliberately left unfixed rather than pursued further, since both fall
+outside the "already-generic code, just needs a dispatch branch or a
+small native Julia primitive" pattern every fix above followed:
+
+\begin{itemize}
+\item \textbf{\texttt{vev.py}'s \texttt{npow=} kwarg}
+  (\texttt{sc.vev(op, npow=2)}, computes $\langle X^2\rangle$/$\langle
+  X^n\rangle$ via repeated MPO application instead of building the
+  $O(n^2)$-term squared operator directly) --- \texttt{mpsjulialive/vev.py}'s
+  \texttt{vev(MBO,MO)} takes no \texttt{**kwargs} at all, so this raises
+  a plain \texttt{TypeError} for \texttt{julia\_live} rather than
+  silently misbehaving. The one example exercising it,
+  \texttt{examples/power\_vev/main.py}, sets
+  \texttt{sc.itensor\_version = "julia"} directly (bypassing
+  \texttt{setup\_julia()}/\texttt{\_reset\_dmrg\_state()} entirely) ---
+  the legacy, already-inert subprocess-based backend documented below,
+  not \texttt{julia\_live} --- so it wouldn't validate this fix even if
+  made.
+\item \textbf{\texttt{get\_distribution}/\texttt{kpmdmrg.py::general\_kpm}}
+  (spectral distribution of an arbitrary operator, not just the
+  Hamiltonian; has example coverage in four
+  \texttt{examples/magnetization\_distribution*} scripts and
+  \texttt{examples/dynamical\_correlator/dynamical\_correlator\_shift},
+  but no \texttt{pytest} coverage) --- unlike everything above, this is
+  not a wire-up-already-generic-code fix:
+  \texttt{kpmdmrg.py::general\_kpm\_moments} depends on
+  \texttt{scale\_operator()}, which calls
+  \texttt{self.lowest\_eigenvalue()}/\texttt{self.bandwidth()}
+  (\texttt{manybodychain.py}), both of which route through
+  \texttt{self.clone()} $\to$ \texttt{deepcopy(self)} --- and
+  \texttt{julia\_live}'s live Julia session handles
+  (\texttt{self.jlsites}, every \texttt{MPS.jlmps}/\texttt{MPO.jlmpo})
+  are not established to be deepcopy-safe (this is exactly why
+  \texttt{dynamics.py::\_max\_energy\_bound}/\texttt{excited.py}'s
+  energy-bound helpers were written as their own mutate-and-restore
+  functions instead of calling \texttt{bandwidth()}/
+  \texttt{lowest\_eigenvalue()} directly, see their docstrings). Doing
+  this properly means generalizing that same mutate-and-restore pattern
+  from "the Hamiltonian, negated" to "an arbitrary caller-supplied
+  operator" --- real, but new design work rather than a small addition,
+  so left as a documented follow-up rather than implemented here.
+\end{itemize}
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as
