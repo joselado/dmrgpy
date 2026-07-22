@@ -402,6 +402,27 @@ Both paths were validated directly against exact diagonalization
 ED to ~8e-7 on a 4-site chain, and `evolution_DC`'s quench correlator
 agreed to ~9e-11 on a 6-site chain.
 
+Excited states (`get_excited_states`/`get_excited`, `n>1`, Hermitian) and
+the single-site reduced density matrix (`get_rdm`) are implemented the
+same way: `mpsjulialive/excited.jl`'s `excited_states_dmrg` runs the
+whole *n*-state loop in one Julia call (one new random-start warm state
+per additional excited state, deflated against every wavefunction found
+so far via `ITensorMPS.jl`'s own orthogonality-penalty
+`dmrg(H, wfs, psi0, sweeps; weight)`, mirroring
+`mpscpp3/chain_session.h`'s `Chain::excited_states` and
+`pyitensor/chain.py`'s `excited_states`); `mpsjulialive/densitymatrix.jl`'s
+`reduced_dm` is a direct Julia port of `pyitensor/chain.py`'s
+`reduced_dm` (itself a port of `Chain::reduced_dm`), including its
+"divide by the norm squared, not its square root" quirk, preserved for
+cross-backend consistency (in practice a no-op, since the ground state
+is essentially always already unit-norm). Validated directly: excited
+energies match the golden regression values in
+`tests/test_excited_states.py` to ~3e-15 on a 4-site chain, and
+`get_rdm` matches the existing backend-agnostic `reduced_dm_projective`
+to ~1e-15. `n==1` and non-Hermitian excited states already worked before
+this — they route through `gs_energy()`/the generic Arnoldi method
+(`mpsalgebra.mpsarnoldi`), neither of which is backend-specific.
+
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
 should be treated as legacy/inert.)

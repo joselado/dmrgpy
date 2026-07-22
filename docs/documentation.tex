@@ -508,6 +508,31 @@ from a N\'eel-favoring field to a Heisenberg chain, mirroring
 on a 4-site chain, and \texttt{evolution\_DC}'s quench correlator agreed
 to $\sim 9 \times 10^{-11}$ on a 6-site chain.
 
+Excited states (\texttt{get\_excited\_states}/\texttt{get\_excited},
+$n>1$, Hermitian) and the single-site reduced density matrix
+(\texttt{get\_rdm}) are implemented the same way:
+\texttt{mpsjulialive/excited.jl}'s \texttt{excited\_states\_dmrg} runs
+the whole $n$-state loop in one Julia call (one new random-start warm
+state per additional excited state, deflated against every wavefunction
+found so far via \texttt{ITensorMPS.jl}'s own orthogonality-penalty
+\texttt{dmrg(H, wfs, psi0, sweeps; weight)}, mirroring
+\texttt{mpscpp3/chain\_session.h}'s \texttt{Chain::excited\_states} and
+\texttt{pyitensor/chain.py}'s \texttt{excited\_states});
+\texttt{mpsjulialive/densitymatrix.jl}'s \texttt{reduced\_dm} is a
+direct Julia port of \texttt{pyitensor/chain.py}'s \texttt{reduced\_dm}
+(itself a port of \texttt{Chain::reduced\_dm}), including its "divide by
+the norm squared, not its square root" quirk, preserved for
+cross-backend consistency (in practice a no-op, since the ground state
+is essentially always already unit-norm). Validated directly: excited
+energies match the golden regression values in
+\texttt{tests/test\_excited\_states.py} to $\sim 3 \times 10^{-15}$ on a
+4-site chain, and \texttt{get\_rdm} matches the existing
+backend-agnostic \texttt{reduced\_dm\_projective} to
+$\sim 1 \times 10^{-15}$. $n=1$ and non-Hermitian excited states already
+worked before this --- they route through \texttt{gs\_energy()}/the
+generic Arnoldi method (\texttt{mpsalgebra.mpsarnoldi}), neither of
+which is backend-specific.
+
 (A separate, older subprocess-based Julia path,
 \texttt{itensor\_version="julia"} via \texttt{juliarun.py}, is not
 reachable through the normal public API and should be treated as
