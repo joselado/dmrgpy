@@ -65,11 +65,12 @@ faster in practice: see its class docstring
 the local dimension of the two-site block being diagonalized, which
 grows faster (dimension $4\times4=16$ per pair of native sites, versus
 $2\times2=4$ per pair of interleaved sites) than the site-count halving
-saves, at least for the ground-state Hubbard-chain benchmarks tried so
-far. Prefer `Spinful_Fermionic_Chain` unless you have a specific reason
-to want a genuinely 4-dimensional local space (e.g. as a starting point
-for a different algorithm, or a case with unusually strong
-same-site inter-flavor entanglement).
+saves. The same disadvantage held up under every other regime checked
+too: strong on-site coupling, long-range/power-law hopping, two-site
+and one-site+subspace-expansion (`"TDVP_GSE"`) real-time evolution, and
+the KPM dynamical correlator itself -- see the class docstring for the
+full rundown. Prefer `Spinful_Fermionic_Chain`; no case tried so far
+makes the native-site class faster.
 
 `Mixed_Spin_Fermion_Chain` is for models that need a literal local
 moment next to a conduction-electron site (e.g. Kondo-lattice-like

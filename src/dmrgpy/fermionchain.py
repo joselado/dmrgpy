@@ -342,14 +342,33 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
     for a given accuracy) does not improve just from repackaging two
     flavors already at the same physical location into one site instead
     of two, so there is no compensating win on the memory/bond-dimension
-    side either. Kept as an alternative backend (correctness
-    cross-checked exactly against ED and against
-    Spinful_Fermionic_Chain, for both the ground-state energy and the
-    KPM dynamical correlator) rather than a replacement -- it may still
-    be worth it for cases this benchmark didn't cover (e.g. one-site
-    algorithms, or Hamiltonians with strong same-site inter-flavor
-    entanglement), but is not a general-purpose speedup for two-site
-    DMRG ground states.
+    side either.
+
+    The same disadvantage was checked, and confirmed, in every other
+    regime that could plausibly have favored native sites instead:
+    strong on-site coupling (U/t=20, where the two flavors' entanglement
+    is purely local -- doubled still wins, at every bond dimension
+    tried); long-range/power-law-decaying hopping (where native sites'
+    shorter Jordan-Wigner strings should shrink the MPO the most --
+    doubled still wins at matched bond dimension, from maxm=20 up to
+    160); real-time evolution via two-site TDVP (same combined-local-
+    dimension penalty as two-site DMRG -- doubled wins by a wider margin
+    once an actual entangling quench is run, not just a near-static
+    check); one-site TDVP with global subspace expansion
+    ("TDVP_GSE", the one method whose cost is linear rather than
+    quadratic in local dimension, so the best a priori candidate -- near
+    parity on a weakly-entangling test, but doubled again slightly ahead
+    once a real quench is run); and the KPM dynamical correlator itself
+    (doubled faster at every kpmmaxm tried, by a smaller margin than the
+    ground-state case -- roughly 1.2-1.6x rather than 2-3x, since KPM's
+    per-moment cost is an MPO-MPS application/truncation rather than a
+    two-site diagonalization+SVD, but still not a win). No case tried so
+    far makes this class faster than Spinful_Fermionic_Chain. Kept as an
+    alternative backend (correctness cross-checked exactly against ED
+    and against Spinful_Fermionic_Chain, for both the ground-state
+    energy and the KPM dynamical correlator) for whatever future use
+    still wants a genuinely 4-dimensional local space, not because it is
+    a general-purpose speedup.
     """
     def __init__(self,n,**kwargs):
         """Create the sites"""

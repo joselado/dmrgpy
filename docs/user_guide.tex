@@ -88,11 +88,14 @@ up). Despite halving the site count, it is \emph{not} generally faster
 in practice: two-site DMRG's per-sweep cost is driven by the local
 dimension of the two-site block being diagonalized, which grows faster
 ($4\times4=16$ per pair of native sites, versus $2\times2=4$ per pair of
-interleaved sites) than the site-count halving saves, at least for the
-ground-state Hubbard-chain benchmarks tried so far (see
-\texttt{fermionchain.py}'s class docstring for measured numbers). Prefer
-\texttt{Spinful\_Fermionic\_Chain} unless there is a specific reason to
-want a genuinely 4-dimensional local space.
+interleaved sites) than the site-count halving saves. The same
+disadvantage held up under every other regime checked too: strong
+on-site coupling, long-range/power-law hopping, two-site and
+one-site+subspace-expansion (\texttt{"TDVP\_GSE"}) real-time evolution,
+and the KPM dynamical correlator itself -- see
+\texttt{fermionchain.py}'s class docstring for the full rundown. Prefer
+\texttt{Spinful\_Fermionic\_Chain}; no case tried so far makes the
+native-site class faster.
 
 \texttt{Mixed\_Spin\_Fermion\_Chain} is for models that need a literal
 local moment next to a conduction-electron site (e.g.\ Kondo-lattice-like
