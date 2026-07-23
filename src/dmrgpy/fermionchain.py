@@ -362,13 +362,36 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
     (doubled faster at every kpmmaxm tried, by a smaller margin than the
     ground-state case -- roughly 1.2-1.6x rather than 2-3x, since KPM's
     per-moment cost is an MPO-MPS application/truncation rather than a
-    two-site diagonalization+SVD, but still not a win). No case tried so
-    far makes this class faster than Spinful_Fermionic_Chain. Kept as an
-    alternative backend (correctness cross-checked exactly against ED
-    and against Spinful_Fermionic_Chain, for both the ground-state
-    energy and the KPM dynamical correlator) for whatever future use
-    still wants a genuinely 4-dimensional local space, not because it is
-    a general-purpose speedup.
+    two-site diagonalization+SVD, but still not a win).
+
+    One case DOES flip in this class's favor: the 4-point correlator
+    tensor <Cdag_i C_j Cdag_k C_l> (mps.MPS.get_four_correlation_tensor(),
+    entropytk/correlationentropy.py). This class exposes self.C/self.Cdag
+    as flat, single-flavor-per-entry lists (mode 2*i=up, 2*i+1=down,
+    matching Spinful_Fermionic_Chain's own indexing exactly, so the two
+    classes' tensors are directly comparable index for index) purely so
+    the existing, backend-agnostic ctmode="explicit" implementation works
+    unchanged. That implementation is a Python loop of independent
+    static overlaps <wf|Op|wf> (one per (i,j,k,l), each a single-shot
+    MPO-MPS-MPS contraction, not an iterative two-site variational
+    search), so it does not pay the combined-local-dimension penalty
+    that dominates two-site DMRG/TDVP. Measured (n=3..6 orbitals, same
+    Hubbard-chain Hamiltonian): this class's ctmode="explicit" beats not
+    only Spinful_Fermionic_Chain's own ctmode="explicit", but also its
+    specialized ctmode="full" (mpscpp3/chain_session.h's C++-accelerated
+    AutoMPO implementation) at every size tried, by a growing margin
+    (n=6: ~13s vs ~16s) -- see examples/four_correlation_tensor_spinful_native.
+    ctmode="full" is not available for this class at all: it hardcodes
+    the literal "Cdag"/"C" operator names, which ITensor's ElectronSite
+    does not define (only Cup/Cdn/Cdagup/Cdagdn are), so there was
+    nothing to lose by comparing against it here.
+
+    Kept as an alternative backend (correctness cross-checked exactly
+    against ED and against Spinful_Fermionic_Chain, for the ground-state
+    energy, the KPM dynamical correlator, and the 4-point correlator
+    tensor) -- a genuine, if narrow, performance edge for the one
+    static-overlap calculation checked so far, not a general-purpose
+    speedup for anything iterative.
     """
     def __init__(self,n,**kwargs):
         """Create the sites"""
@@ -385,6 +408,25 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
                 0.5*1j*self.Cdagdn[i]*self.Cup[i] for i in range(n)]
         self.Sz = [0.5*self.Nup[i] + (-1)*0.5*self.Ndn[i] for i in range(n)]
         self.Delta = [0.5*self.Cup[i]*self.Cdn[i] for i in range(n)]
+        # Flat, single-flavor-per-entry operator lists (2*n entries: mode
+        # 2*i = up, 2*i+1 = down at physical site i), matching exactly
+        # the same flat-mode convention used throughout
+        # jordanwigner_spinful.py and the interleaved
+        # Spinful_Fermionic_Chain's own self.C/self.Cdag (there, C[2*i]
+        # and C[2*i+1] literally *are* two separate spinless-fermion
+        # sites; here they are the same Cup[i]/Cdn[i] MultiOperators
+        # already built above, just re-exposed under the generic
+        # name/indexing entropytk/correlationentropy.py's
+        # get_four_correlation_tensor()/get_correlation_matrix() expect
+        # (via wf.MBO.C/wf.MBO.Cdag) -- this is what makes those
+        # backend-agnostic functions work unchanged for this class too,
+        # and keeps the resulting tensor/matrix indices directly
+        # comparable, index for index, against Spinful_Fermionic_Chain's.
+        self.C = []
+        self.Cdag = []
+        for i in range(n):
+            self.C.append(self.Cup[i]); self.C.append(self.Cdn[i])
+            self.Cdag.append(self.Cdagup[i]); self.Cdag.append(self.Cdagdn[i])
         self.Id = self.get_operator("Id",1)
         Many_Body_Chain.__init__(self,[1 for i in range(n)],**kwargs)
         self.fermionic = True
@@ -511,6 +553,7 @@ def isfermion(self):
     from .pyfermion.mbfermion import MBFermion
     if type(self)==Fermionic_Chain: return True
     if type(self)==Spinful_Fermionic_Chain: return True
+    if type(self)==Spinful_Fermionic_Chain_Native: return True
     if type(self)==Spinful_F_Fermionic_Chain: return True
     if type(self)==MBFermion: return True
     else: return False

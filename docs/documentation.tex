@@ -754,6 +754,38 @@ isn't ported to Julia). Validated directly against ED on the same
 well-gapped free-fermion model \texttt{tests/test\_four\_point\_correlator.py}
 uses (agreement to $\sim 2 \times 10^{-15}$).
 
+\texttt{get\_four\_correlation\_tensor\_explicit}'s Python loop
+(\texttt{entropytk/correlationentropy.py}) did not exploit the tensor's
+own Hermitian symmetry ($\langle C^\dagger_i C_j C^\dagger_k
+C_l\rangle^\dagger = C^\dagger_l C_k C^\dagger_j C_i$, so
+\texttt{ct[i,j,k,l]} and \texttt{ct[l,k,j,i]} are complex conjugates)
+the way \texttt{ctmode="full"}'s C++/pyitensor implementations already
+did via their own \texttt{accelerate} flag --- added the same
+\texttt{accelerate=True} default there too (skip one representative of
+each \texttt{(current,conjugate)} pair, fill in its mirror from the
+other), an exact, not approximate, speedup. This mattered for
+\texttt{fermionchain.Spinful\_Fermionic\_Chain\_Native} (added
+alongside the interleaved \texttt{Spinful\_Fermionic\_Chain}, see the
+model table above): its \texttt{self.C}/\texttt{self.Cdag} are flat,
+single-flavor-per-entry lists (\texttt{Cup}/\texttt{Cdn} interleaved as
+mode $2i$/$2i+1$, matching \texttt{Spinful\_Fermionic\_Chain}'s own
+indexing exactly, so the two classes' tensors compare index for index)
+added purely so this already-generic \texttt{ctmode="explicit"} path
+works unchanged for it --- \texttt{ctmode="full"} is not available for
+this class at all (\texttt{Chain::four\_correlation\_tensor} hardcodes
+the literal \texttt{"Cdag"}/\texttt{"C"} operator names, undefined on
+ITensor's \texttt{ElectronSite}). With the \texttt{accelerate} fix,
+\texttt{Spinful\_Fermionic\_Chain\_Native}'s only available mode
+(\texttt{ctmode="explicit"}) measures \emph{faster} than
+\texttt{Spinful\_Fermionic\_Chain}'s specialized \texttt{ctmode="full"}
+at every size tried ($n=3..6$ orbitals, see
+\texttt{examples/four\_correlation\_tensor\_spinful\_native}) --- the
+one calculation checked so far where the native-site class wins, since
+it is a Python loop of independent static overlaps rather than an
+iterative two-site search, so it never pays the two-site combined-
+local-dimension penalty documented in
+\texttt{Spinful\_Fermionic\_Chain\_Native}'s own class docstring.
+
 Investigated whether \texttt{get\_correlation\_matrix}'s default
 \texttt{dmmode="fast"}
 (\texttt{entropytk/correlationentropy.py::correlation\_matrix\_fast}, $n$

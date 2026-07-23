@@ -214,8 +214,17 @@ def get_four_correlation_tensor(wf,ctmode="explicit",**kwargs):
 
 
 
-def get_four_correlation_tensor_explicit(wf,**kwargs):
-    """Compute the four field correlation tensor explicitly"""
+def get_four_correlation_tensor_explicit(wf,accelerate=True,**kwargs):
+    """Compute the four field correlation tensor explicitly.
+
+    <Cdag_i C_j Cdag_k C_l>^dagger = Cdag_l C_k Cdag_j C_i, so
+    ct[i,j,k,l] and ct[l,k,j,i] are complex conjugates of each other --
+    accelerate=True (the default) exploits this to only ever evaluate
+    one representative of each (current,conjugate) pair, same as
+    get_four_correlation_tensor_cpp()'s own accelerate flag and
+    pyitensor.chain.Chain.four_correlation_tensor()'s (this was the one
+    of the three implementations that didn't have it yet).
+    """
 #    C = [wf.MBO.toMPO(Ci) for Ci in wf.MBO.C] # operators
 #    Cdag = [wf.MBO.toMPO(Cdagi) for Cdagi in wf.MBO.Cdag] # operators
     C = wf.MBO.C
@@ -226,9 +235,13 @@ def get_four_correlation_tensor_explicit(wf,**kwargs):
         for j in range(n):
             for k in range(n):
                 for l in range(n):
+                    current,conjugate = (i,j,k,l),(l,k,j,i)
+                    if accelerate and current>conjugate: continue
                     Op = (Cdag[i]*C[j])*(Cdag[k]*C[l])
                     out = wf.aMb(Op,wf) # overlap
                     ct[i,j,k,l] = out
+                    if accelerate and current!=conjugate:
+                        ct[l,k,j,i] = np.conjugate(out)
     return ct
 
 

@@ -93,8 +93,17 @@ disadvantage held up under every other regime checked too: strong
 on-site coupling, long-range/power-law hopping, two-site and
 one-site+subspace-expansion (\texttt{"TDVP\_GSE"}) real-time evolution,
 and the KPM dynamical correlator itself -- see
-\texttt{fermionchain.py}'s class docstring for the full rundown. Prefer
-\texttt{Spinful\_Fermionic\_Chain}; no case tried so far makes the
+\texttt{fermionchain.py}'s class docstring for the full rundown. One
+case does flip in its favor, though: the 4-point correlator tensor
+$\langle c^\dagger_i c_j c^\dagger_k c_l\rangle$
+(\texttt{mps.MPS.get\_four\_correlation\_tensor()}, \S5) is a Python
+loop of independent \emph{static} overlaps rather than an iterative
+two-site search, so it does not pay the two-site combined-local-
+dimension penalty above -- measured ($n=3..6$ orbitals),
+\texttt{Spinful\_Fermionic\_Chain\_Native} beats even
+\texttt{Spinful\_Fermionic\_Chain}'s specialized C++-accelerated path
+there, by a growing margin. Otherwise prefer
+\texttt{Spinful\_Fermionic\_Chain}; no other case tried so far makes the
 native-site class faster.
 
 \texttt{Mixed\_Spin\_Fermion\_Chain} is for models that need a literal

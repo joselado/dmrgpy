@@ -608,6 +608,35 @@ generic; `ctmode="full"`, a native per-element AutoMPO build, mirrors
 Julia). Validated directly against ED on the same well-gapped free-fermion
 model `tests/test_four_point_correlator.py` uses (agreement to `~2e-15`).
 
+`get_four_correlation_tensor_explicit`'s Python loop
+(`entropytk/correlationentropy.py`) didn't exploit the tensor's own
+Hermitian symmetry
+(`<Cdag_i C_j Cdag_k C_l>^dagger = Cdag_l C_k Cdag_j C_i`, so
+`ct[i,j,k,l]` and `ct[l,k,j,i]` are complex conjugates) the way
+`ctmode="full"`'s C++/pyitensor implementations already did via their
+own `accelerate` flag — added the same `accelerate=True` default there
+too (skip one representative of each `(current,conjugate)` pair,
+fill in its mirror from the other), an exact, not approximate,
+speedup. This mattered for `fermionchain.Spinful_Fermionic_Chain_Native`
+(added alongside the interleaved `Spinful_Fermionic_Chain`, see the
+model table above): its self.C/self.Cdag are flat, single-flavor-per-
+entry lists (`Cup`/`Cdn` interleaved as mode `2*i`/`2*i+1`, matching
+`Spinful_Fermionic_Chain`'s own indexing exactly, so the two classes'
+tensors compare index for index) added purely so this already-generic
+`ctmode="explicit"` path works unchanged for it — `ctmode="full"` is
+not available for this class at all (`Chain::four_correlation_tensor`
+hardcodes the literal `"Cdag"`/`"C"` operator names, undefined on
+ITensor's `ElectronSite`). With the `accelerate` fix,
+`Spinful_Fermionic_Chain_Native`'s only available mode
+(`ctmode="explicit"`) measures *faster* than `Spinful_Fermionic_Chain`'s
+specialized `ctmode="full"` at every size tried (n=3..6 orbitals,
+see `examples/four_correlation_tensor_spinful_native`) — the one
+calculation checked so far where the native-site class wins, since it
+is a Python loop of independent static overlaps rather than an
+iterative two-site search, so it never pays the two-site combined-
+local-dimension penalty documented in
+`Spinful_Fermionic_Chain_Native`'s own class docstring.
+
 Investigated whether `get_correlation_matrix`'s default `dmmode="fast"`
 (`entropytk/correlationentropy.py::correlation_matrix_fast`, `n` MPO
 applications total rather than `explicit`'s `n(n+1)/2` two-operator
