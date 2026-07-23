@@ -7,6 +7,7 @@ from . import multioperator
 
 class Coupling():
   def __init__(self,i,j,g):
+    """Store a two-site coupling constant g between sites i and j"""
     self.i = i
     self.j = j
     self.g = g
@@ -47,6 +48,8 @@ def get_site(label):
 class Spin_Chain(Many_Body_Chain):
     """Class for spin Hamiltonians"""
     def __init__(self,sites,**kwargs):
+        """Build a spin chain from a list of site labels (e.g. "1/2",
+        "1", "3/2", ..., see label2site)"""
         sites = [label2site[s] for s in sites]
         Many_Body_Chain.__init__(self,sites,**kwargs)
         # default exchange constants
@@ -57,8 +60,10 @@ class Spin_Chain(Many_Body_Chain):
         self.Sz = [self.get_operator("Sz",i) for i in range(self.ns)]
         self.Si = [self.Sx,self.Sy,self.Sz]
     def SS(self,i,j):
+        """Return the Heisenberg dot product S_i . S_j"""
         return self.Sx[i]*self.Sx[j] + self.Sy[i]*self.Sy[j] + self.Sz[i]*self.Sz[j]
     def set_fields(self,fun):
+        """Set the local magnetic field term of the Hamiltonian"""
         h = 0
         for i in range(self.ns):
             b = fun(i)
@@ -77,6 +82,7 @@ class Spin_Chain(Many_Body_Chain):
             if i==j: op = op - 1j*Sz[i]
             if not self.is_zero_operator(op,**kwargs): raise
     def get_logdimension(self):
+        """Return the logarithm of the Hilbert space dimension"""
         return get_logdimension(self)
     def set_exchange(self,fun):
         """Set the exchange coupling between sites"""
@@ -94,19 +100,24 @@ class Spin_Chain(Many_Body_Chain):
         self.exchange = h # exchange matrix
         self.hamiltonian = self.exchange + self.fields # update Hamiltonian
     def get_ED_obj(self):
-        if self.has_ED_obj: 
+        """Return the ED object (pychain wrapper), building it if not
+        already cached"""
+        if self.has_ED_obj:
             return self.ED_obj
         else:
             self.ED_obj = pychainwrapper.get_pychain(self)
             self.has_ED_obj = True # store
             return self.ED_obj
     def get_pychain(self):
+        """Return the underlying pychain object"""
         return pychainwrapper.get_pychain(self)
     def get_full_hamiltonian(self):
         """Return the full Hamiltonian"""
         from . import pychainwrapper
         return pychainwrapper.get_full_hamiltonian(self)
     def get_magnetization(self,**kwargs):
+        """Return the magnetization on each site, and save it to
+        MAGNETIZATION.OUT"""
         mx = [self.vev(self.Sx[i],**kwargs) for i in range(self.ns)]
         my = [self.vev(self.Sy[i],**kwargs) for i in range(self.ns)]
         mz = [self.vev(self.Sz[i],**kwargs) for i in range(self.ns)]
