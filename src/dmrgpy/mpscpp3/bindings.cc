@@ -158,6 +158,18 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return arr;
             }, py::arg("wf"), py::arg("accelerate")=true,
                "Returns <Cdag_i C_j Cdag_k C_l> as an (N,N,N,N) array")
+        .def("four_correlation_tensor_spinful",
+            [](Chain& self, MPS const& wf, bool accelerate) {
+                int n = 2*self.num_sites(); // flat modes: 2 per native site
+                auto flat = self.four_correlation_tensor_spinful(wf,accelerate);
+                py::array_t<std::complex<double>> arr({n,n,n,n});
+                std::copy(flat.begin(),flat.end(),arr.mutable_data());
+                return arr;
+            }, py::arg("wf"), py::arg("accelerate")=true,
+               "Native-spinful-site (Electron/Hubbard) version of "
+               "four_correlation_tensor: returns <Cdag_i C_j Cdag_k C_l> "
+               "as a (2N,2N,2N,2N) array over flat fermionic modes "
+               "(mode 2*s=up, 2*s+1=down at physical site s)")
         .def("kpm_dynamical_correlator",
             [](Chain& self, std::vector<PyTerm> const& terms_i,
                std::vector<PyTerm> const& terms_j, int kpmmaxm,

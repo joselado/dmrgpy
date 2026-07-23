@@ -249,4 +249,14 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
     """Compute the correlation tensor using the C++
     specialized function"""
     self = wf.MBO
+    from .. import fermionchain
+    if type(self)==fermionchain.Spinful_Fermionic_Chain_Native:
+        # Native (Electron/Hubbard) sites: ITensor's ElectronSite has no
+        # plain "Cdag"/"C" operator (only Cup/Cdn/Cdagup/Cdagdn), so the
+        # generic four_correlation_tensor() C++ method can't be used
+        # as-is -- four_correlation_tensor_spinful() is the flavor-
+        # resolved counterpart (mpscpp3/chain_session.h), returning the
+        # same tensor over the 2*n flat fermionic modes this chain's n
+        # native sites represent.
+        return self._session.four_correlation_tensor_spinful(wf.cpp_handle,accelerate)
     return self._session.four_correlation_tensor(wf.cpp_handle,accelerate)

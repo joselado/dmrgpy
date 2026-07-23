@@ -375,30 +375,54 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
     static overlaps <wf|Op|wf> (one per (i,j,k,l), each a single-shot
     MPO-MPS-MPS contraction, not an iterative two-site variational
     search), so it does not pay the combined-local-dimension penalty
-    that dominates two-site DMRG/TDVP. Measured (n=3,4,5,6,12 orbitals,
-    same Hubbard-chain Hamiltonian): this class's ctmode="explicit" beats
-    not only Spinful_Fermionic_Chain's own ctmode="explicit", but also
-    its specialized ctmode="full" (mpscpp3/chain_session.h's
-    C++-accelerated AutoMPO implementation) at n=3..6, by a margin that
-    grows with n there (n=6: ~13-22s vs ~16-35s depending on run) --
-    but that growth does NOT continue indefinitely: at n=12 (24 flat
-    modes) the two are back to essentially tied, ~700s each, with
-    ctmode="full" very slightly ahead (697s vs 707s) -- see
-    examples/four_correlation_tensor_spinful_native. So the win is real
-    but bounded to smaller/moderate sizes, not an asymptotic advantage;
-    treat "native wins here" as size-dependent, not as a rule that
-    extrapolates to larger n. ctmode="full" is not available for this
-    class at all: it hardcodes the literal "Cdag"/"C" operator names,
-    which ITensor's ElectronSite does not define (only
-    Cup/Cdn/Cdagup/Cdagdn are), so there was nothing to lose by
-    comparing against it here.
+    that dominates two-site DMRG/TDVP.
+
+    ctmode="full" (mpscpp3/chain_session.h's C++-accelerated AutoMPO
+    implementation) is ALSO available for this class, via a dedicated
+    Chain::four_correlation_tensor_spinful() -- unlike every other
+    Jordan-Wigner string in this codebase (threaded explicitly at the
+    Python level for backend-agnosticism, see multioperatortk/
+    jordanwigner_spinful.py), this one instead hands ITensor's own
+    AutoMPO the literal flavor-resolved "Cdagup"/"Cup"/"Cdagdn"/"Cdn"
+    operator names directly and lets its built-in automatic fermionic-
+    sign machinery (autompo.cc's isFermionic()/fermionicTerm(), which
+    triggers on any operator name starting with 'C') do the threading;
+    safe to do only for this one, self-contained, always-freshly-built
+    AutoMPO calculation, not a change to the general Hamiltonian/MPO
+    pipeline. The plain (non-spinful) Chain::four_correlation_tensor()
+    can't be reused as-is: it hardcodes the literal "Cdag"/"C" operator
+    names, which ITensor's ElectronSite doesn't define (only
+    Cup/Cdn/Cdagup/Cdagdn are).
+
+    Measured (n=3,4,5,6,12 orbitals, same Hubbard-chain Hamiltonian):
+    this class's ctmode="full" is the fastest option among all four
+    combinations tried (native/interleaved x explicit/full) at every
+    size, including n=12 (24 flat modes) -- e.g. n=6: ~13s (native
+    full) vs ~17s (native explicit) vs ~23s (interleaved full) vs ~28s
+    (interleaved explicit); n=12: ~620s (native full) vs ~890s
+    (interleaved full), a ~30% win that held up even though absolute
+    wall-clock numbers at this size are noisy (measured on a
+    memory-pressured interactive machine, not a dedicated benchmark
+    node -- the *ordering* between native and interleaved, measured in
+    the same run under the same conditions, is what's meaningful here,
+    not the absolute seconds). Before this C++-accelerated path
+    existed, native's only option (ctmode="explicit") still beat
+    interleaved's ctmode="full" at n=3..6 by a margin that grew with n
+    there, but that growth did NOT continue to n=12, where the two
+    ctmode="explicit" numbers alone came back to essentially tied
+    (~700s each) -- adding ctmode="full" for this class is what
+    restores and extends the win at n=12. See
+    examples/four_correlation_tensor_spinful_native for the full
+    picture across all four combinations and sizes. Prefer
+    ctmode="full" for this class whenever it's available (it always is,
+    for itensor_version=3).
 
     Kept as an alternative backend (correctness cross-checked exactly
     against ED and against Spinful_Fermionic_Chain, for the ground-state
     energy, the KPM dynamical correlator, and the 4-point correlator
-    tensor) -- a genuine, if narrow and size-bounded, performance edge
-    for the one static-overlap calculation checked so far, not a general-purpose
-    speedup for anything iterative.
+    tensor, in both ctmode="explicit" and ctmode="full") -- a genuine
+    performance edge for this one static-overlap calculation, not a
+    general-purpose speedup for anything iterative.
     """
     def __init__(self,n,**kwargs):
         """Create the sites"""

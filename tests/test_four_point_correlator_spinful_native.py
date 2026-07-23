@@ -109,8 +109,9 @@ MODELS = {
 }
 
 
+@pytest.mark.parametrize("ctmode", ["explicit", "full"])
 @pytest.mark.parametrize("model", MODELS.keys())
-def test_four_correlation_tensor_matches_ed(model):
+def test_four_correlation_tensor_matches_ed(model, ctmode):
     build = MODELS[model]
 
     fc_ed = build()
@@ -120,20 +121,46 @@ def test_four_correlation_tensor_matches_ed(model):
     fc_dmrg = build()
     fc_dmrg.setup_cpp(3)
     wf_dmrg = fc_dmrg.get_gs(mode="DMRG")
-    ct_dmrg = wf_dmrg.get_four_correlation_tensor(ctmode="explicit")
+    ct_dmrg = wf_dmrg.get_four_correlation_tensor(ctmode=ctmode)
 
     assert np.max(np.abs(ct_dmrg - ct_ed)) == pytest.approx(0.0, abs=DMRG_TOL)
 
 
-def test_four_correlation_tensor_matches_interleaved_chain():
+def test_four_correlation_tensor_ctmode_and_accelerate_agree():
+    """ctmode="full" (Chain::four_correlation_tensor_spinful(),
+    mpscpp3/chain_session.h -- ITensor's own AutoMPO fed the literal
+    flavor-resolved "Cdagup"/"Cup"/"Cdagdn"/"Cdn" names directly, relying
+    on its built-in automatic Jordan-Wigner insertion) and ctmode=
+    "explicit" (multioperatortk's own Jordan-Wigner, see
+    jordanwigner_spinful.py) are two independent implementations of the
+    same tensor for this class -- they should agree with each other
+    regardless of whether they also happen to agree with ED. Likewise
+    accelerate=True (the Hermitian-symmetry shortcut) must reproduce the
+    non-accelerated ctmode="full" result exactly."""
+    fc = hopping_hubbard_chain()
+    fc.setup_cpp(3)
+    wf = fc.get_gs(mode="DMRG")
+
+    ct_full_accel = wf.get_four_correlation_tensor(ctmode="full", accelerate=True)
+    ct_full_noaccel = wf.get_four_correlation_tensor(ctmode="full", accelerate=False)
+    ct_explicit = wf.get_four_correlation_tensor(ctmode="explicit")
+
+    assert np.max(np.abs(ct_full_accel - ct_full_noaccel)) == pytest.approx(0.0, abs=1e-8)
+    assert np.max(np.abs(ct_full_accel - ct_explicit)) == pytest.approx(0.0, abs=1e-8)
+
+
+@pytest.mark.parametrize("native_ctmode", ["explicit", "full"])
+def test_four_correlation_tensor_matches_interleaved_chain(native_ctmode):
     """Spinful_Fermionic_Chain_Native's self.C/self.Cdag use exactly the
     same flat (2*i=up, 2*i+1=down) convention as
     Spinful_Fermionic_Chain's own, so the two classes' 4-point tensors
     must agree index for index for the same physical Hamiltonian --
     cross-checked here against Spinful_Fermionic_Chain's own
     ctmode="full" (C++-accelerated, ITensor's native AutoMPO Jordan-
-    Wigner) result, an independent implementation from the ctmode=
-    "explicit" path both classes otherwise share.
+    Wigner) result, independent of native's own ctmode
+    ("explicit": multioperatortk's Jordan-Wigner; "full":
+    Chain::four_correlation_tensor_spinful(), a separate C++ AutoMPO
+    implementation specific to native/Electron sites).
     """
     U = 1.3
 
@@ -155,7 +182,7 @@ def test_four_correlation_tensor_matches_interleaved_chain():
 
     fc_native = build(fermionchain.Spinful_Fermionic_Chain_Native)
     ct_native = fc_native.get_gs(mode="DMRG").get_four_correlation_tensor(
-            ctmode="explicit")
+            ctmode=native_ctmode)
 
     fc_double = build(fermionchain.Spinful_Fermionic_Chain)
     ct_double = fc_double.get_gs(mode="DMRG").get_four_correlation_tensor(

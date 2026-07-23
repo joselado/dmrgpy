@@ -73,14 +73,20 @@ full rundown. One case does flip in its favor, though: the 4-point
 correlator tensor `<Cdag_i C_j Cdag_k C_l>`
 (`mps.MPS.get_four_correlation_tensor()`, §5) is a Python loop of
 independent *static* overlaps rather than an iterative two-site search,
-so it does not pay the two-site combined-local-dimension penalty above
--- measured (n=3,4,5,6,12 orbitals), `Spinful_Fermionic_Chain_Native`
-beats even `Spinful_Fermionic_Chain`'s specialized C++-accelerated path
-there at n=3..6, by a margin that grows with n in that range -- but not
-indefinitely: at n=12 the two are back to essentially tied (~700s
-each). So this win is real but bounded to smaller/moderate sizes, not
-an asymptotic advantage. Otherwise prefer `Spinful_Fermionic_Chain`; no
-other case tried so far makes the native-site class faster.
+so it does not pay the two-site combined-local-dimension penalty above.
+Both classes support a `ctmode="full"` C++-accelerated path in addition
+to the generic `ctmode="explicit"` one -- `Spinful_Fermionic_Chain_Native`
+gets its own (`Chain::four_correlation_tensor_spinful()`, using ITensor's
+own automatic Jordan-Wigner insertion on the flavor-resolved operator
+names, since ITensor's `ElectronSite` has no bare `"Cdag"`/`"C"` the
+plain version needs). Measured (n=3,4,5,6,12 orbitals),
+`Spinful_Fermionic_Chain_Native`'s `ctmode="full"` is the fastest of all
+four combinations at every size tried, including n=12 (24 flat modes:
+~620s vs ~890s for `Spinful_Fermionic_Chain`'s own `ctmode="full"`, a
+~30% win). Prefer `ctmode="full"` for this class whenever it's
+available (it always is, for `itensor_version=3`). Otherwise prefer
+`Spinful_Fermionic_Chain`; no other calculation tried so far makes the
+native-site class faster.
 
 `Mixed_Spin_Fermion_Chain` is for models that need a literal local
 moment next to a conduction-electron site (e.g. Kondo-lattice-like

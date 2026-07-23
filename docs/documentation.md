@@ -623,22 +623,44 @@ model table above): its self.C/self.Cdag are flat, single-flavor-per-
 entry lists (`Cup`/`Cdn` interleaved as mode `2*i`/`2*i+1`, matching
 `Spinful_Fermionic_Chain`'s own indexing exactly, so the two classes'
 tensors compare index for index) added purely so this already-generic
-`ctmode="explicit"` path works unchanged for it — `ctmode="full"` is
-not available for this class at all (`Chain::four_correlation_tensor`
+`ctmode="explicit"` path works unchanged for it.
+
+`ctmode="full"` (the C++-accelerated path) was then added for this
+class too, via a dedicated `Chain::four_correlation_tensor_spinful()`
+(`mpscpp3/chain_session.h`/`bindings.cc`) — the existing
+`Chain::four_correlation_tensor()` couldn't be reused as-is, since it
 hardcodes the literal `"Cdag"`/`"C"` operator names, undefined on
-ITensor's `ElectronSite`). With the `accelerate` fix,
-`Spinful_Fermionic_Chain_Native`'s only available mode
-(`ctmode="explicit"`) measures *faster* than `Spinful_Fermionic_Chain`'s
-specialized `ctmode="full"` at n=3..6 orbitals, by a margin that grows
-with n in that range — but not indefinitely: at n=12 (24 flat modes)
-the two are back to essentially tied (~700s each, see
-`examples/four_correlation_tensor_spinful_native`), so this is a real
-but size-bounded win, not an asymptotic advantage. It's the one
+ITensor's `ElectronSite` (only `Cup`/`Cdn`/`Cdagup`/`Cdagdn` are). The
+new method instead hands ITensor's own `AutoMPO` the flavor-resolved
+names directly and relies on its built-in automatic fermionic-sign
+insertion (`autompo.cc`'s `isFermionic()`/`fermionicTerm()`, triggered
+by any operator name starting with `'C'`) to do the Jordan-Wigner
+threading — a deliberate, one-off exception to this codebase's usual
+rule of threading Jordan-Wigner strings explicitly at the Python level
+for backend-agnosticism (see `multioperatortk/jordanwigner_spinful.py`);
+safe here only because this calculation always builds and discards its
+own fresh, self-contained `AutoMPO`, not a change to the general
+Hamiltonian/MPO pipeline. `entropytk/correlationentropy.py::
+get_four_correlation_tensor_cpp` dispatches to whichever C++ method
+matches `type(wf.MBO)`.
+
+Measured (n=3,4,5,6,12 orbitals): `Spinful_Fermionic_Chain_Native`'s
+`ctmode="full"` is the fastest of all four combinations (native/
+interleaved × explicit/full) tried at every size, including n=12 (24
+flat modes: ~620s vs ~890s for `Spinful_Fermionic_Chain`'s own
+`ctmode="full"`, a ~30% win — see
+`examples/four_correlation_tensor_spinful_native`). Before this
+C++-accelerated path existed, native's only option
+(`ctmode="explicit"`) still beat interleaved's `ctmode="full"` at
+n=3..6, by a margin that grew with n there but did not continue to
+n=12 (the two `ctmode="explicit"` numbers alone came back to
+essentially tied, ~700s each) — adding `ctmode="full"` for this class
+is what restores and extends the win at n=12. This remains the one
 calculation checked so far where the native-site class wins at all,
-since it is a Python loop of independent static overlaps rather than an
-iterative two-site search, so it never pays the two-site combined-
-local-dimension penalty documented in
-`Spinful_Fermionic_Chain_Native`'s own class docstring.
+since it is a static overlap computation rather than an iterative
+two-site search, so it never pays the two-site combined-local-
+dimension penalty documented in `Spinful_Fermionic_Chain_Native`'s own
+class docstring.
 
 Investigated whether `get_correlation_matrix`'s default `dmmode="fast"`
 (`entropytk/correlationentropy.py::correlation_matrix_fast`, `n` MPO
