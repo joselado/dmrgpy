@@ -1,5 +1,5 @@
 from .base import SiteType, is_fermionic
-from .boson import BosonFourSite
+from .boson import BosonFourSite, get_boson_site
 from .fermion import ElectronSite, FermionSite, HubbardSite, SpinlessSite
 from .parafermion import Z3Site, Z4Site
 from .siteset import SiteX, TYPE_CODE_TO_SITE
@@ -11,5 +11,5 @@ __all__ = [
     "SiteX", "TYPE_CODE_TO_SITE",
     "SpinHalfSite", "SpinOneSite", "SpinThreeHalfSite", "SpinTwoSite", "SpinFiveHalfSite",
     "FermionSite", "SpinlessSite", "ElectronSite", "HubbardSite",
-    "BosonFourSite", "Z3Site", "Z4Site",
+    "BosonFourSite", "get_boson_site", "Z3Site", "Z4Site",
 ]

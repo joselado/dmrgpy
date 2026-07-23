@@ -40,7 +40,7 @@ Every model is a chain of $n$ local Hilbert spaces $\mathcal H=\bigotimes_{i=1}^
 | `fermionchain.Majorana_Chain` | Majorana fermion | Majorana operators built from `Fermionic_Chain` |
 | `fermionchain.Spinful_Fermionic_Chain` | spin-$\tfrac12$ fermion (4 states: $0,\uparrow,\downarrow,\uparrow\downarrow$), built from two interleaved spinless sites per physical site | $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$, plus derived $S^x_i,S^y_i,S^z_i=\tfrac12(n_{i\uparrow}-n_{i\downarrow})$, onsite pairing $\Delta_i=\tfrac12 c_{i\uparrow}c_{i\downarrow}$ |
 | `fermionchain.Spinful_Fermionic_Chain_Native` | same physics as `Spinful_Fermionic_Chain`, but on a genuinely 4-dimensional local space (one tensor-network site per physical site, `itensor_version=3` only) | identical operator lists/formulas as `Spinful_Fermionic_Chain` |
-| `bosonchain.Bosonic_Chain` | truncated boson Fock space, $n_i\in\{0,\ldots,n_{\max}\}$ (default $n_{\max}=4$) | $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}=\lvert k\rangle\langle k\rvert$ |
+| `bosonchain.Bosonic_Chain` | truncated boson Fock space, $n_i\in\{0,\ldots,\text{maxnb}_i-1\}$, per-site dimension `maxnb` (default 4, i.e. up to 3 bosons/site) settable via `Bosonic_Chain(n, maxnb=[...])` | $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}=\lvert k\rangle\langle k\rvert$ for $k=0,\ldots,\text{maxnb}_i-1$ (`bc.D[i][k]`, plus `bc.D0`..`bc.D3` when every site has `maxnb`$\,\ge 4$) |
 | `parafermionchain.Parafermionic_Chain` | $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ | clock/shift operators $\sigma_i,\tau_i$ and composite parafermion operators $\chi_i,\psi_i$ built as $\tau$-string $\times\sigma_i$ |
 | `mixedchain.Mixed_Spin_Fermion_Chain` | mixes genuine spin-$S$ sites and spinful-fermion locations *in the same chain*, one entry per logical location | at a spin location: native $S^x_i,S^y_i,S^z_i$; at a fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived $S^x_i,S^y_i,S^z_i,\Delta_i$ as in `Spinful_Fermionic_Chain` |
 
@@ -104,6 +104,19 @@ meaning there. Currently only `itensor_version=3` (and `"python"`) are
 supported; see `mixedchain.py`'s module docstring for why
 `itensor_version=2` isn't yet, and `examples/mixed_spin_fermion_chain`
 for a worked Kondo-lattice example.
+
+`Bosonic_Chain(n, maxnb=[...])` takes a per-site local dimension list
+(defaulting to `[4]*n`, i.e. up to 3 bosons/site); ED always honors it
+exactly (`pyboson/boson.py`). On the DMRG side, `itensor_version=3` and
+`itensor_version="python"` both thread a non-default `maxnb` through to
+the tensor-network site itself (encoded as the site type code
+$100+\text{maxnb}_i$, see `mpscpp3/get_sites.h`/`extra/bosonfour.h` and,
+on the pure-Python side, `pyitensor/sites/boson.py`'s `get_boson_site()`
+factory) — `itensor_version=2` and the Julia backend still only
+understand the single fixed 4-level boson site regardless of what
+`maxnb` requests, so a non-default `maxnb` should be run under
+`itensor_version=3` (the default) or `"python"` for DMRG/ED results to
+actually agree; see `examples/boson_maxnb_v3_VS_ED`.
 
 ## 2. Building a Hamiltonian and observables
 

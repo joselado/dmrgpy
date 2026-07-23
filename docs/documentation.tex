@@ -186,7 +186,7 @@ Module & Class & Notes \\
 \texttt{spinchain.py} & \texttt{Spin\_Chain} & alias of \texttt{Many\_Body\_Chain} itself \\
 \texttt{fermionchain.py} & \texttt{Fermionic\_Chain} & spinless fermions; C/Cdag/N, JW string F \\
 \texttt{spinfermionchain.py} & \texttt{Spin\_Fermionic\_Chain} & spinful fermions \\
-\texttt{bosonchain.py} & \texttt{Boson\_Chain} & bosonic sites \\
+\texttt{bosonchain.py} & \texttt{Bosonic\_Chain} & bosonic sites \\
 \texttt{parafermionchain.py} & \texttt{Parafermion\_Chain} & parafermion sites \\
 \texttt{mixedchain.py} & \texttt{Mixed\_Spin\_\allowbreak Fermion\_Chain} & spin \& spinful-fermion mix \\
 \bottomrule
@@ -242,6 +242,34 @@ See \texttt{fermionchain.py}'s class docstring for why this alternative
 is not a general-purpose speedup over \texttt{Spinful\_Fermionic\_Chain}
 despite the halved site count (a directly measured result, not a
 theoretical claim).
+
+\texttt{bosonchain.Bosonic\_Chain} uses a \emph{range} of type codes
+rather than a single one: $100+\text{dim}$ per site, dim being the
+requested local Hilbert space dimension
+(\texttt{Bosonic\_Chain(n, maxnb=[\ldots])}, default $\text{dim}=4$,
+i.e.\ code 104). This lets \texttt{mpscpp3/get\_sites.h}'s
+\texttt{BosonFourSite} (\texttt{extra/bosonfour.h}, generalized from a
+hardcoded 4-level site to an \texttt{Args("MaxOcc",\ldots)}-driven
+arbitrary occupation cutoff) build a site of the actual requested
+dimension instead of always the fixed 4-level one regardless of
+\texttt{maxnb} --- previously a real, silent bug: the DMRG session only
+ever saw type code 104 no matter what \texttt{maxnb} was, so DMRG and ED
+results silently diverged for any non-default value.
+\texttt{itensor\_version=3} and \texttt{itensor\_version="python"} both
+understand the extended $102..199$ range today --- pyitensor's
+\texttt{siteset.py::\_site\_class()} routes it to
+\texttt{sites/boson.py::get\_boson\_site(dim)}, a small factory that
+builds (and caches) a \texttt{SiteType} subclass per requested dimension
+the same way \texttt{BosonFourSite} is generalized on the C++ side,
+since pyitensor's \texttt{SiteType} machinery is otherwise entirely
+class-level (no per-instance state) and has no other way to
+parameterize a site's dimension. \texttt{mpscpp2} and
+\texttt{mpsjulialive} still only handle the single code 104, so a
+non-default \texttt{maxnb} should be run under
+\texttt{itensor\_version=3} (the default) or \texttt{"python"} for
+cross-backend agreement. ED (\texttt{pyboson/boson.py::BosonChain})
+always builds the exact requested per-site dimension regardless of
+backend.
 
 \subsection{Operator representation: \texttt{MultiOperator}}
 
