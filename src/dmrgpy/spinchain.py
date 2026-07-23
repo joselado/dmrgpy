@@ -149,5 +149,53 @@ class Spin_Chain(Many_Body_Chain):
             out = out + fieldterms
         # still have to add the fields!!
         return out # return multioperator
+    def get_kondo_spectrum(self, eV, site=0, Jrho_s=0.0, U=0.0, T=1.0,
+                            T0=1.0, omega0=20e-3, Gamma0=5e-6, order=3,
+                            kB=8.617333262e-5):
+        """Third-order STM/Kondo perturbation-theory tunneling spectrum
+        dI/dV(eV) for a single impurity site under the tip, following
+        Ternes, New J. Phys. 17 063016 (2015), arXiv:1505.04430. Always
+        uses full ED diagonalization of this chain's Hamiltonian (every
+        eigenstate is needed as a possible virtual intermediate state, not
+        just the low-energy ones DMRG/Lanczos-type ED would target), via
+        kondospectrumtk.edkondo.KondoSpectrum -- independent of this
+        chain's own itensor_version/DMRG-vs-ED mode setting.
+
+        Parameters (see kondospectrumtk.conductance for the underlying
+        equations):
+          eV: array of bias energies (same units as the Hamiltonian, e.g.
+              eV if built with eV-scale couplings)
+          site: chain site index coupled to the tip
+          Jrho_s: dimensionless Kondo exchange coupling (J*rho_sample)
+          U: dimensionless potential-scattering ratio (eq. "Matrix1")
+          T: temperature in Kelvin (kB below is eV/K by default; pass a
+             matching kB if your Hamiltonian is in different energy units)
+          T0: overall tunneling-strength scale (only sets the absolute
+              scale of the returned dI/dV, in units of 2*pi*e^2*T0^2/hbar)
+          omega0, Gamma0: band cutoff and lifetime broadening for the
+              third-order Kondo function F(eps,T)
+          order: 2 for the second-order (Fermi golden rule) term alone, 3
+              to add the third-order Kondo and (if U!=0) potential-
+              interference terms. The third-order terms are d(I^{t->s})/dV
+              only -- see third_order_kondo_dIdV's docstring for why (the
+              paper never gives a general t<->s formula for them); the
+              second-order term is the full, bidirectional net-current
+              derivative.
+
+        Returns (eV, dIdV)."""
+        from .kondospectrumtk.edkondo import KondoSpectrum
+        from .kondospectrumtk import conductance
+        if order not in (2, 3): raise ValueError("order must be 2 or 3")
+        ks = KondoSpectrum(self, site, T, kB=kB)
+        eV = np.asarray(eV, dtype=float)
+        dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
+        if order == 3:
+            dIdV = dIdV + conductance.third_order_kondo_dIdV(
+                    ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0)
+            if U != 0.0:
+                dIdV = dIdV + conductance.third_order_potential_dIdV(
+                        ks, eV, Jrho_s, U, T0=T0, omega0=omega0,
+                        Gamma0=Gamma0)
+        return eV, dIdV
 
 Spin_Hamiltonian = Spin_Chain # backwards compatibility

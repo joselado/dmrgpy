@@ -28,6 +28,7 @@ reference on small systems.
 14. [Reduced density matrices and operator distributions](#14-reduced-density-matrices-and-operator-distributions)
 15. [Post-processing tools](#15-post-processing-tools)
 16. [Worked-example cookbook](#16-worked-example-cookbook)
+17. [STM/Kondo tunneling spectra (third-order perturbation theory)](#17-stmkondo-tunneling-spectra-third-order-perturbation-theory)
 
 ## 1. Physical models and Hilbert spaces
 
@@ -891,3 +892,78 @@ for i in range(n):
         x, y = sc.get_dynamical_correlator(submode="KPM", name=(sc.Sz[i], sc.Sz[j]))
         Sqw[(i, j)] = (x, y)          # combine with sum_ij e^{iq(i-j)} S_ij(w) offline
 ```
+
+## 17. STM/Kondo tunneling spectra (third-order perturbation theory)
+
+`Spin_Chain.get_kondo_spectrum` computes the differential tunneling
+conductance $dI/dV(eV)$ of an STM tip coupled to one site of a spin
+chain, following the weak-coupling (Kondo-scattering) perturbation
+theory of Ternes, *New J. Phys.* **17**, 063016 (2015),
+[arXiv:1505.04430](https://arxiv.org/abs/1505.04430). This is a
+different observable from the dynamical correlators of §6: instead of a
+retarded Green's function of the spin system alone, it is the full
+Fermi's-golden-rule tunneling current through tip+spin+sample, expanded
+to third order in the tip-sample tunneling amplitude, evaluated by full
+exact diagonalization of the chain's Hamiltonian (every eigenstate is
+needed as a possible virtual intermediate state, not just the low-energy
+ones — DMRG is not used here regardless of the chain's own
+`itensor_version`/mode setting).
+
+```python
+sc = spinchain.Spin_Chain(["1/2"])
+sc.set_hamiltonian(g*muB*B*sc.Sz[0])   # Zeeman-split S=1/2 impurity
+eV, dIdV = sc.get_kondo_spectrum(eV_grid, site=0, Jrho_s=-0.05, U=0.25,
+                                  T=1.0, order=3)
+```
+
+**Second order** (`order=2`) is the plain spin-flip/potential-scattering
+Fermi golden rule result,
+
+$$\frac{\partial I}{\partial V}(eV)\propto\sum_{i,f}p_i\Big[\tfrac12|\langle f|S_-|i\rangle|^2+\tfrac12|\langle f|S_+|i\rangle|^2+|\langle f|S_z|i\rangle|^2\Big]\,\Theta(eV-\epsilon_{if})+U^2$$
+
+summed over both tunneling directions, with $p_i$ the Boltzmann
+occupation of eigenstate $i$ at temperature $T$ and $\Theta$ a
+temperature-broadened step function. This reproduces the textbook
+inelastic-tunneling spin-flip steps at $eV=\pm(\epsilon_f-\epsilon_i)$
+(e.g. the Zeeman step of a single $S=1/2$ impurity).
+
+**Third order** (`order=3`, the default) adds two corrections that
+require summing over *all* eigenstates as virtual intermediate states
+$m$ (energy conservation is not required for $m$): a Kondo term (a
+Levi-Civita triple product of spin matrix elements $\langle i|S|f\rangle$,
+$\langle f|S|m\rangle$, $\langle m|S|i\rangle$, weighted by a
+temperature-broadened logarithmic function $F(eV-\epsilon_m,T)$ that
+produces the characteristic zero-bias Kondo-like resonance, splitting
+into two peaks under a Zeeman field), and — when `U!=0` — a
+potential-scattering interference term responsible for a bias-asymmetric
+lineshape.
+
+**Scope and known limitations**, worth reading before trusting specific
+numbers:
+
+- Only a single chain site couples to the tip (`site=`); the paper's own
+  model allows several sites with independent tip couplings, not
+  implemented here.
+- The third-order terms (`order=3`) are $\partial I^{t\to s}/\partial V$
+  only, not the full bidirectional net-current derivative that
+  `order=2` provides. The paper never gives a general $t\leftrightarrow
+  s$ formula for them — its own worked $S=1/2$ example shows the two
+  directions are related by more than a plain $eV\to-eV$ mirror, so no
+  such generalization is attempted here. This mainly affects the
+  *symmetry* of the returned third-order spectrum, not its second-order
+  part.
+- The paper's own closed-form equations for two numerical building
+  blocks — the temperature-broadened step $\Theta(x)$ and the
+  temperature-broadened Kondo log function $F(\epsilon,T)$ — do not
+  reproduce the physics the paper itself describes for them (checked
+  directly: the printed $\Theta(x)$ diverges rather than saturating, and
+  the printed $F$ closed form drops its own temperature broadening).
+  `kondospectrumtk/stepfunctions.py` uses corrected forms instead,
+  re-derived from the paper's own unambiguous defining integrals and
+  verified against digitized values from the paper's own figures (see
+  that module's docstring, and `examples/kondo_spectrum_VS_paper/`).
+- The potential-interference term's general-spin closed form (`U!=0` in
+  `order=3`) is an extrapolation from the paper's own worked $S=1/2$
+  example (only that special case is spelled out in closed form in the
+  paper) and carries lower confidence than the other terms; treat it as
+  provisional.

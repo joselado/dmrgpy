@@ -962,6 +962,34 @@ coupled recursion also reproduces an independently-derived scalar
 recursion exactly for a 1x1 test case, and the reconstructed density
 correctly sharpens with more moments.)
 
+### 4.8c STM/Kondo tunneling spectra (`kondospectrumtk/`)
+
+`Spin_Chain.get_kondo_spectrum` (physics documented in the user guide,
+§17) is a different kind of ED calculation from the dynamical-correlator
+machinery above: it needs the *full* spectrum (every eigenstate, as a
+possible virtual intermediate state in the third-order perturbation
+theory), not just the ground state or a resolvent at a target frequency.
+It reuses the ED backend's existing `EDchain.get_diagonalized_hamiltonian`
+(dense `eigh`, already used elsewhere for small systems) rather than
+adding a new diagonalization path, and is deliberately independent of a
+chain's own `itensor_version`/mode setting -- DMRG cannot supply the
+full spectrum this method needs regardless of which backend a chain
+would otherwise use, so `KondoSpectrum` (`kondospectrumtk/edkondo.py`)
+always goes through `Spin_Chain.get_ED_obj()` directly.
+
+Two of the source paper's own closed-form equations for supporting
+numerical functions (the temperature-broadened step and a
+temperature-broadened logarithmic Kondo function) do not reproduce the
+behavior the paper itself describes and plots for them; `kondospectrumtk/
+stepfunctions.py` re-derives both from the paper's own unambiguous
+defining integrals instead, each independently verified against
+digitized values from the paper's own figures. See that module's
+docstring and `docs/user_guide.md`'s §17 for the full derivation notes
+and the feature's other scope limitations (single tip-coupled site,
+third-order terms are single-direction only, the potential-scattering
+interference term's general-spin form is an extrapolation from the
+paper's own worked example).
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,
