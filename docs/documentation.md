@@ -31,9 +31,23 @@ whichever solver is requested or available:
 
 ## 2. Installation
 
-There is no `setup.py`/`pyproject.toml`; DMRGPY is used directly from
-`src/`, added to `PYTHONPATH` (or symlinked into `site-packages`) by the
-installer.
+There are two independent install paths, and they cover different
+backends:
+
+- **`pip install dmrgpy`** (via the repo's `pyproject.toml`) installs the
+  pure-Python part of the package only — the ED backend and the
+  pure-Python `itensor_version="python"` DMRG/TDVP backend both work
+  immediately, no compiler needed. The compiled C++ backends
+  (`itensor_version=2`/`3`) are *not* on PyPI: they're built against a
+  ~400MB vendored copy of ITensor, and `pyproject.toml` excludes
+  `mpscpp2`/`mpscpp3` from the distributed package entirely (see its own
+  comments). Without them, DMRGPY still works end to end — it just falls
+  back to ED/`"python"` (see mode.py) — but if you want the compiled
+  backends you need the git-clone path below instead.
+- **A git clone + `python install.py`** is required for the compiled C++
+  backends (and is how this repository is developed). DMRGPY is used
+  directly from `src/`, added to `PYTHONPATH` (or symlinked into
+  `site-packages`) by the installer.
 
 ```bash
 python install.py                        # compiles ITensor v3 (mpscpp3, the default) + its pybind11 extension
@@ -58,8 +72,13 @@ and every call transparently falls back to ED when a requested compiled
 backend isn't present.
 
 No compiler or pybind11 is needed at all to use `itensor_version="python"`
-— only NumPy/SciPy (and optionally `numba`/`jax` for faster execution,
-see §5.4).
+— only NumPy/SciPy/SymPy/`numba` (all four are core `pip install dmrgpy`
+dependencies; `numba` is required rather than optional because
+`algebra/kpmextrapolate.py` imports it at module level, and that module
+is reached unconditionally from `manybodychain.py` via
+`dynamics.py`/`kpmdmrg.py` — this is separate from `pyitensor`'s own
+opt-in JAX/numba-accelerated matvec kernel, which *is* genuinely optional
+and off by default, see §5.4). `jax` is optional either way.
 
 ## 3. Quick start
 
@@ -146,6 +165,22 @@ resolves to identity" fallback, present in ITensor v3
 (`mpscpp2/ITensor/itensor/mps/siteset.h`), which would hard-abort
 instead.
 
+`fermionchain.Spinful_Fermionic_Chain_Native` uses site-type code `1`
+instead (`HubbardSite`/`ElectronSite`, ITensor v3's own stock 4-state
+site, `mpscpp3/ITensor/itensor/mps/sites/electron.h`) -- one
+tensor-network site per physical site instead of `Spinful_Fermionic_Chain`'s
+two interleaved type-0 sites. `mpscppN/get_sites.h`'s site-type dispatch
+already had a branch for code `1` (`SpinX`'s `HubbardSite` case, both
+constructors) before this class existed; only `mpscpp3` (the C++ side)
+and ED (`pyfermion.mbfermion.MBFermion.get_operator`, extended to
+understand `Cup`/`Cdn`/`Cdagup`/`Cdagdn`/`Nup`/`Ndn`/`Ntot` at a physical
+site index) actually wire it up today -- `mpscpp2` never registered a
+Hubbard/Electron site, and neither pyitensor nor `mpsjulialive`
+implement site-type code 1. See `fermionchain.py`'s class docstring for
+why this alternative isn't a general-purpose speedup over
+`Spinful_Fermionic_Chain` despite the halved site count (a directly
+measured result, not a theoretical claim).
+
 ### 4.2 Operator representation: `MultiOperator`
 
 Hamiltonians and observables are built as `MultiOperator` objects
@@ -161,7 +196,19 @@ representation: the *same* `MultiOperator` is later either
 
 `multioperatortk/` holds the supporting machinery: Jordan-Wigner string
 threading for fermionic operators, static/long-range operator
-construction, and sympy-based symbolic building.
+construction, and sympy-based symbolic building. Spinless fermionic
+operators (`C`/`Cdag`, one fermionic mode per site, `Fermionic_Chain`/
+`Spinful_Fermionic_Chain`'s interleaved sites) are threaded by
+`jordanwigner.py`; flavor-resolved operators on a native spinful site
+(`Cup`/`Cdn`/`Cdagup`/`Cdagdn`, two fermionic modes per site,
+`Spinful_Fermionic_Chain_Native`) are threaded by the separate
+`jordanwigner_spinful.py` instead, dispatched by operator name in
+`multioperator.jordan_wigner()`. The two never mix within one term (the
+operator name sets are disjoint), and `jordanwigner_spinful.py` always
+uses the generic per-factor dressing recipe (no separate optimized
+2-/4-point path the way `jordanwigner.py` has for plain `C`/`Cdag`),
+since that recipe is already exact for an arbitrary product/order of
+factors — see its module docstring.
 
 ### 4.3 Backend dispatch
 
@@ -561,6 +608,60 @@ generic; `ctmode="full"`, a native per-element AutoMPO build, mirrors
 Julia). Validated directly against ED on the same well-gapped free-fermion
 model `tests/test_four_point_correlator.py` uses (agreement to `~2e-15`).
 
+`get_four_correlation_tensor_explicit`'s Python loop
+(`entropytk/correlationentropy.py`) didn't exploit the tensor's own
+Hermitian symmetry
+(`<Cdag_i C_j Cdag_k C_l>^dagger = Cdag_l C_k Cdag_j C_i`, so
+`ct[i,j,k,l]` and `ct[l,k,j,i]` are complex conjugates) the way
+`ctmode="full"`'s C++/pyitensor implementations already did via their
+own `accelerate` flag — added the same `accelerate=True` default there
+too (skip one representative of each `(current,conjugate)` pair,
+fill in its mirror from the other), an exact, not approximate,
+speedup. This mattered for `fermionchain.Spinful_Fermionic_Chain_Native`
+(added alongside the interleaved `Spinful_Fermionic_Chain`, see the
+model table above): its self.C/self.Cdag are flat, single-flavor-per-
+entry lists (`Cup`/`Cdn` interleaved as mode `2*i`/`2*i+1`, matching
+`Spinful_Fermionic_Chain`'s own indexing exactly, so the two classes'
+tensors compare index for index) added purely so this already-generic
+`ctmode="explicit"` path works unchanged for it.
+
+`ctmode="full"` (the C++-accelerated path) was then added for this
+class too, via a dedicated `Chain::four_correlation_tensor_spinful()`
+(`mpscpp3/chain_session.h`/`bindings.cc`) — the existing
+`Chain::four_correlation_tensor()` couldn't be reused as-is, since it
+hardcodes the literal `"Cdag"`/`"C"` operator names, undefined on
+ITensor's `ElectronSite` (only `Cup`/`Cdn`/`Cdagup`/`Cdagdn` are). The
+new method instead hands ITensor's own `AutoMPO` the flavor-resolved
+names directly and relies on its built-in automatic fermionic-sign
+insertion (`autompo.cc`'s `isFermionic()`/`fermionicTerm()`, triggered
+by any operator name starting with `'C'`) to do the Jordan-Wigner
+threading — a deliberate, one-off exception to this codebase's usual
+rule of threading Jordan-Wigner strings explicitly at the Python level
+for backend-agnosticism (see `multioperatortk/jordanwigner_spinful.py`);
+safe here only because this calculation always builds and discards its
+own fresh, self-contained `AutoMPO`, not a change to the general
+Hamiltonian/MPO pipeline. `entropytk/correlationentropy.py::
+get_four_correlation_tensor_cpp` dispatches to whichever C++ method
+matches `type(wf.MBO)`.
+
+Measured (n=3,4,5,6,12 orbitals): `Spinful_Fermionic_Chain_Native`'s
+`ctmode="full"` is the fastest of all four combinations (native/
+interleaved × explicit/full) tried at every size, including n=12 (24
+flat modes: ~620s vs ~890s for `Spinful_Fermionic_Chain`'s own
+`ctmode="full"`, a ~30% win — see
+`examples/four_correlation_tensor_spinful_native`). Before this
+C++-accelerated path existed, native's only option
+(`ctmode="explicit"`) still beat interleaved's `ctmode="full"` at
+n=3..6, by a margin that grew with n there but did not continue to
+n=12 (the two `ctmode="explicit"` numbers alone came back to
+essentially tied, ~700s each) — adding `ctmode="full"` for this class
+is what restores and extends the win at n=12. This remains the one
+calculation checked so far where the native-site class wins at all,
+since it is a static overlap computation rather than an iterative
+two-site search, so it never pays the two-site combined-local-
+dimension penalty documented in `Spinful_Fermionic_Chain_Native`'s own
+class docstring.
+
 Investigated whether `get_correlation_matrix`'s default `dmmode="fast"`
 (`entropytk/correlationentropy.py::correlation_matrix_fast`, `n` MPO
 applications total rather than `explicit`'s `n(n+1)/2` two-operator
@@ -746,6 +847,98 @@ moment recursion on the ED side) rather than by direct spectral
 decomposition, since exact diagonalization of the full spectrum is
 infeasible for large chains.
 
+### 4.8b Non-Hermitian KPM (NH-KPM)
+
+For a non-Hermitian Hamiltonian, `dynamics.py`/`edtk/dynamics.py`'s
+`submode="KPM"` gate routes to `nonhermitian/kpm.py` instead of
+`kpmdmrg.py`/`algebra/kpm.py`'s Hermitian moment machinery (previously
+every submode fell through unconditionally to the correction-vector
+fallback `nonhermitian/dynamics.dynamical_correlator_non_hermitian`,
+which assumes `A^\dagger=B` and never used the left ground state at all).
+NH-KPM is a port of the biorthogonal Chebyshev-moment algorithm in
+[NHKPM.jl](https://github.com/GUANGZECHEN/NHKPM.jl) (Phys. Rev. Lett.
+130, 100401): rather than a single self-dual ground state, it uses the
+biorthogonal pair `(psi_L,psi_R)` already produced by NH-DMRG (§4.4,
+`nhdmrg()`/`gs_energy_nhdmrg`) on the DMRG side, or
+`algebra.biorthogonal_ground_state` (a small addition to `algebra.py`
+diagonalizing both `h` and `dagger(h)` and matching/normalizing the pair
+so `<psi_L|psi_R>=1`) on the ED side.
+
+The algorithmic difference from Hermitian KPM: a non-Hermitian rescaled
+operator `hs=(z*Id-H)/E_max` has no real spectrum, so the ordinary
+single-operator Chebyshev recursion (valid once `H` is rescaled onto
+`[-1,1]`) doesn't apply. NH-KPM instead builds a *coupled*
+forward/adjoint recursion from both `hs` and `hs_dag` (`get_mu_n_nh`/
+`spec_from_moments_nh` in `algebra/kpm.py`, `Chain::nhkpm_moments` in
+`mpscpp3/chain_session.h`, ported line-for-line from the reference's
+`get_vn_NH`/`get_mu_n_NH`/`get_spec_kpm_NH`). The practical consequence:
+unlike Hermitian KPM (moments computed once, reused at every frequency
+via cheap Chebyshev polynomial evaluation), NH-KPM's expansion operator
+depends on `z` itself, so `nonhermitian/kpm.py` rebuilds the MPO/matrix
+and recomputes the full moment recursion at *every* requested frequency
+point — mirroring the reference algorithm's own cost profile, not a
+missed optimization. `E_max` must be supplied by the caller: there is no
+automatic spectral-radius estimator yet for a non-Hermitian operator
+(`chain_session.h`'s `maximum_energy()`, used for the Hermitian case,
+runs ordinary variational DMRG on `-H` and is meaningless once `H` isn't
+Hermitian).
+
+On the DMRG side, the `(z*Id-H)/E_max` operator and its dagger are built
+once per frequency as ordinary `MultiOperator`s in Python (`z*identity()
+- self.hamiltonian`, then `.get_dagger()`), converted via the existing
+`to_terms()`/`build_mpo` machinery — no new MPO arithmetic was needed in
+C++, only the new coupled-recursion primitive `Chain::nhkpm_moments`
+(public, alongside `general_kpm`) and its `bindings.cc` wrapper. One
+non-obvious bookkeeping fix was needed to reuse NH-DMRG's own state:
+`gs_energy_nhdmrg` renormalizes `wf0=psir.normalize()` to unit norm but
+leaves `nh_left_wf` at NH-DMRG's own `<psi_L|psi_R>=1` scale, so the two
+attributes no longer satisfy that biorthogonal relation together;
+`nonhermitian.kpm.dynamical_correlator_nhkpm` restores it explicitly
+(`psil = psil/conj(psil.dot(psir))`) before using the pair, rather than
+assuming the convention still holds after `gs_energy()`.
+
+Implemented so far for the ED backend, `itensor_version=3`, and
+`itensor_version="python"` (`itensor_version=2` raises
+`NotImplementedError` from the DMRG-side driver, matching the same
+scope limitation `nhdmrg()` itself doesn't have but this feature's C++
+side does — no `Chain::nhkpm_moments` was ported to `mpscpp2`). The
+pure-Python backend's own `Chain.nhkpm_moments`
+(`pyitensor/chain.py`) is a line-for-line transcription of
+`mpscpp3/chain_session.h`'s version, built on the same MPO/MPS algebra
+(`applyMPO`/`sum`/`inner`) `general_kpm` already used there; no new
+pyitensor primitives were needed. All three backends agree to machine
+precision (`examples/non_hermitian/nhkpm_v3_VS_ED` for ED vs v3,
+`examples/non_hermitian/nhkpm_python_VS_v3_timing` for v3 vs
+`"python"` — the latter on a non-uniform-hopping, non-uniform
+imaginary-onsite-energy interacting fermionic chain, chosen to avoid
+the Re-degenerate-ground-state pitfall a uniform staggered pattern can
+trigger; `"python"` measured ~1.8-2x slower than v3 for this workload,
+consistent with NH-KPM's per-frequency moment recursion being far more
+matvec-heavy than the Hermitian KPM path, which amortizes its moments
+over the whole spectrum instead of recomputing per frequency).
+Validated directly against the live upstream Julia implementation, not
+just by hand: the reference's own shipped `.OUT` output files did not
+reproduce under the parameters recorded in the currently-checked-in
+example scripts (plausibly stale, given the upstream repo ships
+multiple undated `_backup`/`_old` source variants of the same
+algorithm), so instead the exact `get_vn_NH`/`get_mu_n_NH`/
+`get_spec_kpm_NH`/`dos_kpm_NH` function bodies were run directly (Julia
+was available; only the `mode="matrix"` branches were needed, which
+have no `ITensors.jl`/`Arpack.jl` dependency) on the same single-particle
+Hatano-Nelson-type chain used in the reference's own `Hatano.jl`
+example (asymmetric-hopping non-Hermitian SSH chain, N=20, all-real
+spectrum). Comparing the resulting tDOS(E) (E scanned along the real
+axis at fixed small imaginary broadening) against this dmrgpy port on
+the identical matrix and identical E_max/N/kernel/energy grid: all 22
+detected peaks land at bit-for-bit identical energies and heights
+(max relative difference ~3e-15, i.e. floating-point round-off, not an
+algorithmic discrepancy), and every peak sits at the real part of a
+genuine eigenvalue of the underlying matrix, to within the energy
+grid's resolution. (Earlier, weaker checks are kept for context: the
+coupled recursion also reproduces an independently-derived scalar
+recursion exactly for a 1x1 test case, and the reconstructed density
+correctly sharpens with more moments.)
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,
@@ -860,11 +1053,12 @@ shown in §5.1/§5.2, not these first-call numbers.
 - Use `itensor_version="python"` for quick prototyping, CI/environments
   without a C++ toolchain, or small systems (n ≲ 20) where the 1.3–2x
   overhead doesn't matter.
-- Install `numba` (and optionally `jax`) alongside the pure-Python
-  backend *and* set `pyitensor.kernels.USE_NUMBA = True` (off by
-  default, see §5's note above) — without both steps, `pyitensor` falls
-  back to plain NumPy loops and is substantially slower than the numbers
-  above (see `pyitensor/__init__.py`'s own docstring).
+- `numba` is already installed (it's a core dependency, see §2); also
+  install `jax` and set `pyitensor.kernels.USE_NUMBA = True` (off by
+  default, see §5's note above) if you want the accelerated matvec
+  kernel — without that opt-in, `pyitensor` falls back to plain NumPy
+  loops and is substantially slower than the numbers above (see
+  `pyitensor/__init__.py`'s own docstring).
 - For production-size chains, dynamical correlators, or anything
   performance-sensitive, compile the C++ extension (`python install.py`)
   and use `itensor_version=2` or `3`.
@@ -887,6 +1081,7 @@ shown in §5.1/§5.2, not these first-call numbers.
 | `src/dmrgpy/mpsjulialive/`, `mpsjulia/` | Julia/ITensors.jl backend modules |
 | `src/dmrgpy/edtk/`, `pyfermion/`, `pyspin/`, `pyboson/`, `pyzn/` | exact-diagonalization backend |
 | `src/dmrgpy/kpmdmrg.py` | Kernel Polynomial Method dynamical correlators |
+| `src/dmrgpy/nonhermitian/kpm.py` | non-Hermitian KPM dynamical correlator (NHKPM.jl port, ED + itensor_version=3) |
 | `src/dmrgpy/tdz.py` | complex-time-evolution dynamical correlator ("TDZ", arXiv:2311.10909) |
 | `examples/` | 100+ self-contained example scripts (also the regression suite) |
 | `examples/v2_VS_v3_*` | backend-vs-backend correctness comparisons |

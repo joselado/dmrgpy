@@ -39,6 +39,7 @@ Every model is a chain of $n$ local Hilbert spaces $\mathcal H=\bigotimes_{i=1}^
 | `fermionchain.Fermionic_Chain` | spinless fermion (occupied/empty) | $c_i,c_i^\dagger,n_i=c_i^\dagger c_i$, Jordan-Wigner string $F_i$ |
 | `fermionchain.Majorana_Chain` | Majorana fermion | Majorana operators built from `Fermionic_Chain` |
 | `fermionchain.Spinful_Fermionic_Chain` | spin-$\tfrac12$ fermion (4 states: $0,\uparrow,\downarrow,\uparrow\downarrow$), built from two interleaved spinless sites per physical site | $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$, plus derived $S^x_i,S^y_i,S^z_i=\tfrac12(n_{i\uparrow}-n_{i\downarrow})$, onsite pairing $\Delta_i=\tfrac12 c_{i\uparrow}c_{i\downarrow}$ |
+| `fermionchain.Spinful_Fermionic_Chain_Native` | same physics as `Spinful_Fermionic_Chain`, but on a genuinely 4-dimensional local space (one tensor-network site per physical site, `itensor_version=3` only) | identical operator lists/formulas as `Spinful_Fermionic_Chain` |
 | `bosonchain.Bosonic_Chain` | truncated boson Fock space, $n_i\in\{0,\ldots,n_{\max}\}$ (default $n_{\max}=4$) | $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}=\lvert k\rangle\langle k\rvert$ |
 | `parafermionchain.Parafermionic_Chain` | $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ | clock/shift operators $\sigma_i,\tau_i$ and composite parafermion operators $\chi_i,\psi_i$ built as $\tau$-string $\times\sigma_i$ |
 | `mixedchain.Mixed_Spin_Fermion_Chain` | mixes genuine spin-$S$ sites and spinful-fermion locations *in the same chain*, one entry per logical location | at a spin location: native $S^x_i,S^y_i,S^z_i$; at a fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived $S^x_i,S^y_i,S^z_i,\Delta_i$ as in `Spinful_Fermionic_Chain` |
@@ -48,6 +49,44 @@ fermionic sites per physical site (site $2i$ = spin up, site $2i+1$ =
 spin down) rather than by a genuinely 4-dimensional local space, so that
 the same Jordan-Wigner machinery used for spinless fermions applies
 unchanged; `Spinful_Fermionic_Chain` wraps this bookkeeping for you.
+
+`Spinful_Fermionic_Chain_Native` is the alternative built directly on a
+genuinely 4-dimensional local space (ITensor v3's own `Electron`/
+`Hubbard` site type) instead: one tensor-network site per physical site,
+with the same operator lists (`Cup`/`Cdagup`/`Cdn`/`Cdagdn`/`Nup`/`Ndn`/
+`Ntot`/`Sx`/`Sy`/`Sz`/`Delta`) and identical physics/sign convention as
+`Spinful_Fermionic_Chain` -- the two classes are drop-in equivalent for
+any given Hamiltonian, cross-checked to agree exactly under ED and to
+DMRG tolerance under `itensor_version=3` (the only DMRG backend this
+class wires up). Despite halving the site count, it is *not* generally
+faster in practice: see its class docstring
+(`fermionchain.py`) for a measured comparison against
+`Spinful_Fermionic_Chain` -- two-site DMRG's per-sweep cost is driven by
+the local dimension of the two-site block being diagonalized, which
+grows faster (dimension $4\times4=16$ per pair of native sites, versus
+$2\times2=4$ per pair of interleaved sites) than the site-count halving
+saves. The same disadvantage held up under every other regime checked
+too: strong on-site coupling, long-range/power-law hopping, two-site
+and one-site+subspace-expansion (`"TDVP_GSE"`) real-time evolution, and
+the KPM dynamical correlator itself -- see the class docstring for the
+full rundown. One case does flip in its favor, though: the 4-point
+correlator tensor `<Cdag_i C_j Cdag_k C_l>`
+(`mps.MPS.get_four_correlation_tensor()`, §5) is a Python loop of
+independent *static* overlaps rather than an iterative two-site search,
+so it does not pay the two-site combined-local-dimension penalty above.
+Both classes support a `ctmode="full"` C++-accelerated path in addition
+to the generic `ctmode="explicit"` one -- `Spinful_Fermionic_Chain_Native`
+gets its own (`Chain::four_correlation_tensor_spinful()`, using ITensor's
+own automatic Jordan-Wigner insertion on the flavor-resolved operator
+names, since ITensor's `ElectronSite` has no bare `"Cdag"`/`"C"` the
+plain version needs). Measured (n=3,4,5,6,12 orbitals),
+`Spinful_Fermionic_Chain_Native`'s `ctmode="full"` is the fastest of all
+four combinations at every size tried, including n=12 (24 flat modes:
+~620s vs ~890s for `Spinful_Fermionic_Chain`'s own `ctmode="full"`, a
+~30% win). Prefer `ctmode="full"` for this class whenever it's
+available (it always is, for `itensor_version=3`). Otherwise prefer
+`Spinful_Fermionic_Chain`; no other calculation tried so far makes the
+native-site class faster.
 
 `Mixed_Spin_Fermion_Chain` is for models that need a literal local
 moment next to a conduction-electron site (e.g. Kondo-lattice-like
@@ -232,7 +271,9 @@ orders of magnitude less accurate than NH-DMRG at comparable cost — see
 `examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`, which cross-checks
 NH-DMRG on all three backends against exact diagonalization and the
 Arnoldi route on an interacting fermionic chain with a staggered
-imaginary potential.
+imaginary potential. The biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
+is also what feeds the non-Hermitian dynamical correlator,
+`get_dynamical_correlator(submode="KPM")` for $H\neq H^\dagger$ — see §6.
 
 ## 5. Entanglement and quantum information
 
@@ -465,6 +506,48 @@ $\langle(H-E_0)^k\rangle$ using a maximum-entropy method
 expansion — useful when positivity of the reconstructed $S(\omega)$
 matters more than matching KPM's polynomial-expansion artifacts.
 
+**`submode="KPM"` for non-Hermitian Hamiltonians.** When $H\neq H^\dagger$
+(§4), `submode="KPM"` automatically routes to a different algorithm, a
+port of the non-Hermitian Kernel Polynomial Method (NH-KPM) of
+[NHKPM.jl](https://github.com/GUANGZECHEN/NHKPM.jl) ([Phys. Rev. Lett.
+130, 100401](https://doi.org/10.1103/PhysRevLett.130.100401)):
+
+```python
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                      name=(sc.Sz[0], sc.Sz[0]), E_max=10)
+```
+
+The ground state is now the biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
+from NH-DMRG (§4) rather than a single self-dual $|\mathrm{GS}\rangle$,
+and the correlator computed is
+$\langle\psi_L|A(z)\,B|\psi_R\rangle$. Because the spectrum of $H$ is
+complex, the ordinary Chebyshev recursion (which needs a *real* rescaled
+spectrum in $[-1,1]$) does not apply; NH-KPM instead expands the
+frequency-shifted operator $\tilde H(z)=(z\,\mathbb{1}-H)/E_{\max}$ using
+a *coupled* forward/adjoint recursion built from both $\tilde H(z)$ and
+$\tilde H(z)^\dagger$ (see `src/dmrgpy/algebra/kpm.py`'s
+`get_mu_n_nh`/`spec_from_moments_nh`, ported line-for-line from the
+reference's `get_vn_NH`/`get_spec_kpm_NH`). The key practical consequence
+is that, unlike the Hermitian case, the moments depend on $z$ itself, so
+they are recomputed from scratch at every requested frequency rather than
+amortized once over the whole spectrum — this mirrors the reference
+algorithm's own cost profile, and is why NH-KPM is noticeably more
+expensive per frequency point than the Hermitian `"KPM"` path. `E_max`
+(an upper bound on the spectral radius of $H$) must be supplied
+explicitly: unlike the Hermitian case's variational band-edge estimate
+(see above), there is no automatic estimator yet for a non-Hermitian
+spectral bound. Implemented so far for the ED backend, `itensor_version=3`,
+and `itensor_version="python"`; `itensor_version=2` raises
+`NotImplementedError`. See `examples/non_hermitian/nhkpm_v3_VS_ED`
+(ED vs `itensor_version=3`, machine-precision agreement on a small
+interacting fermionic chain with a staggered imaginary potential) and
+`examples/non_hermitian/nhkpm_python_VS_v3_timing` (`itensor_version=3`
+vs `"python"` on a non-uniform hopping/non-uniform imaginary-onsite-energy
+chain, same machine-precision agreement — the pure-Python backend runs
+roughly 2x slower than v3 for this workload, since NH-KPM's
+per-frequency moment recursion is far more matvec-heavy than the
+Hermitian KPM path).
+
 **Choosing a method:** KPM (default) for a first look at the full
 spectrum; CVM or TD when you need high resolution in a specific,
 narrow frequency window; TDZ instead of TD when that window also needs
@@ -472,7 +555,10 @@ long simulated times/low frequencies, where TD's real-time bond-dimension
 growth becomes limiting; EX when a handful of excited states already
 capture the physics (e.g. a small gapped system); maxent when you want a
 guaranteed-positive reconstruction from limited moment data (e.g.\
-combined with finite-temperature ED, see §9).
+combined with finite-temperature ED, see §9). For a non-Hermitian $H$,
+`"KPM"` is currently the only submode with a genuine biorthogonal
+implementation (see above); the other submodes fall back to a
+correction-vector method that assumes $A^\dagger=B$.
 
 ## 7. Real-time dynamics: quenches
 

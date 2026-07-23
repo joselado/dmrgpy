@@ -173,6 +173,26 @@ def lowest_states(h,n=10,**kwargs):
 
 lowest_eigenvectors = lowest_states
 
+
+def biorthogonal_ground_state(h,**kwargs):
+    """Return (e0,vr,vl), the ground state of a (possibly non-Hermitian)
+    matrix h as a biorthogonal right/left pair: h@vr = e0*vr and
+    dagger(h)@vl = conj(e0)*vl, normalized so that conj(vl)@vr = 1 (the
+    convention needed by braket_ww-style expectation values). vr/vl pick
+    the state with smallest real part of the eigenvalue, matching
+    lowest_states' own non-Hermitian ordering."""
+    er,vsr = lowest_states(h,n=1,**kwargs)
+    el,vsl = lowest_states(dagger(h),n=1,**kwargs)
+    vr = matrix2vector(vsr[0])
+    vl = matrix2vector(vsl[0])
+    norm = np.conjugate(vl)@vr
+    if np.abs(norm)<1e-8:
+        raise ValueError("Right and left ground states are (near) "
+                "orthogonal, <vl|vr> = "+str(norm)+" - biorthogonal "
+                "normalization failed")
+    vl = vl/np.conjugate(norm)
+    return er[0],vr,vl
+
 def sorteigen(eig,vs):
     """Return sorted eigenvalues and eigenvectors"""
     w = eig - np.min(eig.real) # smallest real part

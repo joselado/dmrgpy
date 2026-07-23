@@ -957,6 +957,78 @@ class Chain
         return out;
         }
 
+    // Native-spinful-site (Electron/Hubbard, site-type code 1) version of
+    // four_correlation_tensor() above: returns the same
+    // <Cdag_i C_j Cdag_k C_l> tensor, but indexed over the 2*N flat
+    // fermionic modes (mode 2*s=up, 2*s+1=down at physical site s) that
+    // this chain's N native sites represent -- matching exactly the flat
+    // indexing fermionchain.Spinful_Fermionic_Chain_Native's own
+    // self.C/self.Cdag use (see jordanwigner_spinful.py's module
+    // docstring for the convention). Unlike every other Jordan-Wigner
+    // string in this codebase (threaded explicitly at the Python level,
+    // see mo_terms.h/build_ampo()), this one instead hands ITensor's own
+    // AutoMPO the literal flavor-resolved "Cdagup"/"Cup"/"Cdagdn"/"Cdn"
+    // names directly and lets its built-in isFermionic()/fermionicTerm()
+    // machinery (autompo.cc) do the threading -- those names all start
+    // with 'C' (ITensor's own trigger for automatic fermionic handling)
+    // and are exactly the ones ElectronSite defines, unlike the bare
+    // "Cdag"/"C" the non-spinful four_correlation_tensor() above relies
+    // on, which ElectronSite has no operator for at all. This is safe to
+    // do only for this one, self-contained, always-freshly-built-AutoMPO
+    // calculation -- it is not a change to the general Hamiltonian/MPO
+    // pipeline (mo_terms.h), which still always receives pre-dressed
+    // Python-level Jordan-Wigner terms, for consistency across backends.
+    std::vector<std::complex<double>>
+    four_correlation_tensor_spinful(MPS const& wf, bool accelerate=true) const
+        {
+        int Ns = sites_.length(); // number of physical (Electron) sites
+        int N = 2*Ns; // number of flat fermionic modes
+        std::vector<std::complex<double>> out(N*N*N*N,0.0);
+        auto idx = [N](int i,int j,int k,int l) { return ((i*N+j)*N+k)*N+l; };
+        auto cdagname = [](int flat) { return (flat%2==0) ? "Cdagup" : "Cdagdn"; };
+        auto cname    = [](int flat) { return (flat%2==0) ? "Cup" : "Cdn"; };
+        auto site1based = [](int flat) { return flat/2+1; };
+        auto build_mpo = [&](int i,int j,int k,int l)
+            {
+            auto ampo = AutoMPO(sites_);
+            ampo += 1.0,cdagname(i),site1based(i),cname(j),site1based(j),
+                        cdagname(k),site1based(k),cname(l),site1based(l);
+            return toMPO(ampo);
+            };
+        if (accelerate)
+            {
+            for (int i=0;i<N;i++)
+            for (int j=0;j<N;j++)
+            for (int k=0;k<N;k++)
+            for (int l=0;l<N;l++)
+                {
+                std::tuple<int,int,int,int> current{i,j,k,l};
+                std::tuple<int,int,int,int> conjugate{l,k,j,i};
+                if (current<=conjugate)
+                    {
+                    auto op = build_mpo(i,j,k,l);
+                    auto c = innerC(wf,op,wf);
+                    out[idx(i,j,k,l)] = c;
+                    if (current!=conjugate) out[idx(l,k,j,i)] = std::conj(c);
+                    }
+                }
+            }
+        else
+            {
+            for (int i=0;i<N;i++)
+            for (int j=0;j<N;j++)
+            for (int k=0;k<N;k++)
+            for (int l=0;l<N;l++)
+                {
+                auto op = build_mpo(i,j,k,l);
+                auto c = innerC(wf,op,wf);
+                out[idx(i,j,k,l)] = c;
+                out[idx(l,k,j,i)] = std::conj(c);
+                }
+            }
+        return out;
+        }
+
     KPMResult
     kpm_dynamical_correlator(std::vector<MOTerm> const& terms_i,
                              std::vector<MOTerm> const& terms_j,
@@ -984,6 +1056,67 @@ class Chain
         {
         auto m = build_mpo(sites_,terms_x,mpomaxm_);
         return kpm_moments(m,wfa,wfb,num_polynomials,kpmmaxm,kpm_cutoff,kpm_accelerate);
+        }
+
+    // Non-Hermitian KPM (port of NHKPM.jl, https://github.com/GUANGZECHEN/
+    // NHKPM.jl, itself implementing the method of Phys. Rev. Lett. 130,
+    // 100401): biorthogonal Chebyshev moments from a *coupled*
+    // forward/adjoint recursion. A genuinely non-Hermitian scaled operator
+    // hs=(z*Id-H)/E_max has no real spectrum, so the plain single-operator
+    // Chebyshev recursion used by kpm_moments_full (valid only once H is
+    // rescaled onto the real interval [-1,1]) doesn't apply; the reference
+    // instead builds a second sequence (alpha) from hs_dag alongside the
+    // usual Chebyshev-like vectors (vn) of hs, which makes vn a valid
+    // expansion for the complex-shifted operator. terms_hs/terms_hs_dag
+    // are hs and its conjugate transpose, built at the Python/
+    // MultiOperator level (see nonhermitian/kpm.py) -- unlike ordinary
+    // KPM, the expansion operator itself depends on the frequency z, so
+    // this is called once per requested z rather than once for the whole
+    // spectrum. wfa/wfb are the ket/bra-side states, already dressed by
+    // whichever operators define the correlator. Returns mu_n, length n,
+    // with mu_n[k] = <wfb|vn_{2k-1}> in the 1-based notation of the
+    // reference (only the odd-order vn ever get dotted with wfb; see
+    // nonhermitian/kpm.py's spec_from_moments_nh for the final
+    // reconstruction, which is what actually needs those odd orders).
+    std::vector<std::complex<double>>
+    nhkpm_moments(std::vector<MOTerm> const& terms_hs,
+                  std::vector<MOTerm> const& terms_hs_dag,
+                  MPS const& wfa, MPS const& wfb,
+                  int n, int kpmmaxm, double kpmcutoff) const
+        {
+        if (n<1) Error("Chain::nhkpm_moments: n must be >= 1");
+        auto hs = build_mpo(sites_,terms_hs,mpomaxm_);
+        auto hsd = build_mpo(sites_,terms_hs_dag,mpomaxm_);
+
+        auto v = 1.0*wfa;
+        auto alpha_prev2 = apply_mpo(hsd,v,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}); // alpha[1]
+        auto alpha_prev1 = sum(2.0*apply_mpo(hs,alpha_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                                -1.0*v,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}); // alpha[2]
+
+        auto vn_prev2 = 1.0*v; // vn[1]
+        auto vn_prev1 = 2.0*apply_mpo(hs,vn_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}); // vn[2]
+
+        std::vector<std::complex<double>> mu;
+        mu.reserve(n);
+        mu.push_back(innerC(wfb,vn_prev2));
+        for (int k=1;k<n;k++)
+            {
+            auto alpha_x = sum(2.0*apply_mpo(hsd,alpha_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                                -1.0*alpha_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto alpha_y = sum(2.0*apply_mpo(hs,alpha_x,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                                -1.0*alpha_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto t = sum(2.0*apply_mpo(hsd,vn_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                         -1.0*vn_prev2,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto vn_x = sum(2.0*alpha_prev1,t,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            auto vn_y = sum(2.0*apply_mpo(hs,vn_x,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}),
+                            -1.0*vn_prev1,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+
+            mu.push_back(innerC(wfb,vn_x));
+
+            alpha_prev2 = alpha_x; alpha_prev1 = alpha_y;
+            vn_prev2 = vn_x; vn_prev1 = vn_y;
+            }
+        return mu;
         }
 
     private:
