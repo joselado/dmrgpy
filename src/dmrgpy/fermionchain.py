@@ -7,10 +7,12 @@ from .fermionchaintk import staticcorrelator
 from .fermionchaintk import hamiltonian
 from . import funtk
 from . import gap
+from . import multioperator
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
     def __init__(self,n,**kwargs):
+        """Build a spinless fermionic chain of n sites"""
         self.F = [self.get_operator("F",i) for i in range(n)] # Fermi string
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
@@ -29,6 +31,7 @@ class Fermionic_Chain(Many_Body_Chain):
         """Add the spin independent hoppings"""
         self.set_hoppings_MB(fun)
     def get_logdimension(self):
+        """Return the logarithm of the Hilbert space dimension"""
         return len(self.C)*np.log(2) # log dimension
     def get_density_spinless(self,**kwargs):
         """Return the electronic density"""
@@ -60,7 +63,8 @@ class Fermionic_Chain(Many_Body_Chain):
         """ Return a vaccum expectation value"""
         if mode=="DMRG": return self.excited_vev_MB(MO,**kwargs)
         elif mode=="ED": return self.get_ED_obj().excited_vev(MO,**kwargs) 
-    def excited_vev(self,MO,**kwargs): 
+    def excited_vev(self,MO,**kwargs):
+        """Compute a vacuum expectation value using excited states"""
         return self.excited_vev_spinless(MO,**kwargs)
     def hamiltonian_free(self,pairs=[[]]):
         """
@@ -103,8 +107,10 @@ class Fermionic_Chain(Many_Body_Chain):
         es = lg.eigvalsh(m) # get the energies
         return np.sum(es[es<0.0]) # return energies
     def get_gr(self,**kwargs):
+        """Return the retarded Green's function"""
         return get_gr(self,**kwargs)
     def get_gr_free(self,**kwargs):
+        """Return the retarded Green's function for free fermions"""
         return get_gr_free(self,**kwargs)
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
@@ -215,7 +221,9 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
     spin degree of freedom
     """
     def __init__(self,n):
-        """ Rewrite the init method to take twice as many sites"""
+        """ Rewrite the init method to take twice as many sites (n
+        orbitals, each represented by two interleaved spinless-fermion
+        sites for the up/down flavors)"""
         super().__init__(2*n) # initialize the Hamiltonian
         self.Sx = [0.5*self.Cdag[2*i]*self.C[2*i+1] +
                 0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
@@ -288,6 +296,260 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
 
 
 
+class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
+    """
+    Spinful fermionic (Hubbard-like) chain built directly on native
+    spinful sites: each orbital is a *single* tensor-network site with a
+    local Hilbert space of dimension 4 (Empty, Up, Down, UpDn -- ITensor
+    v3's own "Electron"/"Hubbard" site, mpscpp3/get_sites.h's site-type
+    code 1: HubbardSite, an alias for ElectronSite -- see
+    mpscpp3/ITensor/itensor/mps/sites/electron.h), instead of the two
+    separate spinless-fermion sites per orbital that
+    Spinful_Fermionic_Chain uses (site-type code 0, interleaved
+    up/down). Jordan-Wigner strings are still threaded explicitly at the
+    Python level (multioperatortk/jordanwigner_spinful.py), exactly as
+    done for the spinless case in multioperatortk/jordanwigner.py -- this
+    backend does not rely on ITensor AutoMPO's own automatic fermionic
+    sign insertion (autompo.cc's isFermionic()/fermionicTerm()), even
+    though it exists and would also work here; keeping the Jordan-Wigner
+    transform in Python keeps every backend (ED, the C++ extensions, the
+    pure-Python engine, Julia) fed from the exact same term list.
+
+    Only itensor_version=3 wires up a native spinful site on the DMRG
+    side today: mpscpp2/get_sites.h never registered a Hubbard/Electron
+    site type, and neither pyitensor (itensor_version="python") nor
+    mpsjulialive (itensor_version="julia_live") implement one. A DMRG
+    call with any other itensor_version simply is not available for this
+    class -- unlike an uncompiled C++ extension, there is no automatic
+    ED fallback for a site type mode.py doesn't know how to build, so
+    such calls raise from mpscpp2/pyitensor/mpsjulialive's own site-type
+    dispatch. Cross-checking against mode="ED" always works (see
+    get_ED_obj() below): ED never builds tensor-network sites at all, it
+    diagonalizes a plain occupation-number Fock space directly.
+
+    Performance (measured, not just argued from theory): halving the
+    number of tensor-network sites (n instead of 2n) does keep every
+    nearest-neighbor hopping term nearest-neighbor and every
+    Jordan-Wigner string half as long, so the a priori expectation was
+    that this class would be faster. Directly benchmarked against
+    Spinful_Fermionic_Chain instead (same Hubbard-chain Hamiltonian,
+    same itensor_version=3, same maxm/nsweeps/noise, n=6..14): it is
+    NOT. At matched bond dimension, Spinful_Fermionic_Chain's DMRG run
+    is both faster (roughly 2-3x at maxm>=40, growing with n) *and*
+    converges to a slightly lower/more accurate energy -- this class
+    never wins on either axis in the sizes tested. The reason is that
+    ITensor v3's two-site dmrg() sweep cost is governed by the LOCAL
+    physical dimension of the two-site block being diagonalized/SVD'd,
+    which scales with the *square* of each site's local dimension: a
+    two-site block here spans two dimension-4 sites (16 combined local
+    states) versus two dimension-2 sites (4 combined local states) on
+    the interleaved chain. That per-step cost increase more than
+    outweighs sweeping over half as many sites -- the entanglement
+    entropy across a cut (what actually sets the bond dimension needed
+    for a given accuracy) does not improve just from repackaging two
+    flavors already at the same physical location into one site instead
+    of two, so there is no compensating win on the memory/bond-dimension
+    side either.
+
+    The same disadvantage was checked, and confirmed, in every other
+    regime that could plausibly have favored native sites instead:
+    strong on-site coupling (U/t=20, where the two flavors' entanglement
+    is purely local -- doubled still wins, at every bond dimension
+    tried); long-range/power-law-decaying hopping (where native sites'
+    shorter Jordan-Wigner strings should shrink the MPO the most --
+    doubled still wins at matched bond dimension, from maxm=20 up to
+    160); real-time evolution via two-site TDVP (same combined-local-
+    dimension penalty as two-site DMRG -- doubled wins by a wider margin
+    once an actual entangling quench is run, not just a near-static
+    check); one-site TDVP with global subspace expansion
+    ("TDVP_GSE", the one method whose cost is linear rather than
+    quadratic in local dimension, so the best a priori candidate -- near
+    parity on a weakly-entangling test, but doubled again slightly ahead
+    once a real quench is run); and the KPM dynamical correlator itself
+    (doubled faster at every kpmmaxm tried, by a smaller margin than the
+    ground-state case -- roughly 1.2-1.6x rather than 2-3x, since KPM's
+    per-moment cost is an MPO-MPS application/truncation rather than a
+    two-site diagonalization+SVD, but still not a win).
+
+    One case DOES flip in this class's favor: the 4-point correlator
+    tensor <Cdag_i C_j Cdag_k C_l> (mps.MPS.get_four_correlation_tensor(),
+    entropytk/correlationentropy.py). This class exposes self.C/self.Cdag
+    as flat, single-flavor-per-entry lists (mode 2*i=up, 2*i+1=down,
+    matching Spinful_Fermionic_Chain's own indexing exactly, so the two
+    classes' tensors are directly comparable index for index) purely so
+    the existing, backend-agnostic ctmode="explicit" implementation works
+    unchanged. That implementation is a Python loop of independent
+    static overlaps <wf|Op|wf> (one per (i,j,k,l), each a single-shot
+    MPO-MPS-MPS contraction, not an iterative two-site variational
+    search), so it does not pay the combined-local-dimension penalty
+    that dominates two-site DMRG/TDVP.
+
+    ctmode="full" (mpscpp3/chain_session.h's C++-accelerated AutoMPO
+    implementation) is ALSO available for this class, via a dedicated
+    Chain::four_correlation_tensor_spinful() -- unlike every other
+    Jordan-Wigner string in this codebase (threaded explicitly at the
+    Python level for backend-agnosticism, see multioperatortk/
+    jordanwigner_spinful.py), this one instead hands ITensor's own
+    AutoMPO the literal flavor-resolved "Cdagup"/"Cup"/"Cdagdn"/"Cdn"
+    operator names directly and lets its built-in automatic fermionic-
+    sign machinery (autompo.cc's isFermionic()/fermionicTerm(), which
+    triggers on any operator name starting with 'C') do the threading;
+    safe to do only for this one, self-contained, always-freshly-built
+    AutoMPO calculation, not a change to the general Hamiltonian/MPO
+    pipeline. The plain (non-spinful) Chain::four_correlation_tensor()
+    can't be reused as-is: it hardcodes the literal "Cdag"/"C" operator
+    names, which ITensor's ElectronSite doesn't define (only
+    Cup/Cdn/Cdagup/Cdagdn are).
+
+    Measured (n=3,4,5,6,12 orbitals, same Hubbard-chain Hamiltonian):
+    this class's ctmode="full" is the fastest option among all four
+    combinations tried (native/interleaved x explicit/full) at every
+    size, including n=12 (24 flat modes) -- e.g. n=6: ~13s (native
+    full) vs ~17s (native explicit) vs ~23s (interleaved full) vs ~28s
+    (interleaved explicit); n=12: ~620s (native full) vs ~890s
+    (interleaved full), a ~30% win that held up even though absolute
+    wall-clock numbers at this size are noisy (measured on a
+    memory-pressured interactive machine, not a dedicated benchmark
+    node -- the *ordering* between native and interleaved, measured in
+    the same run under the same conditions, is what's meaningful here,
+    not the absolute seconds). Before this C++-accelerated path
+    existed, native's only option (ctmode="explicit") still beat
+    interleaved's ctmode="full" at n=3..6 by a margin that grew with n
+    there, but that growth did NOT continue to n=12, where the two
+    ctmode="explicit" numbers alone came back to essentially tied
+    (~700s each) -- adding ctmode="full" for this class is what
+    restores and extends the win at n=12. See
+    examples/four_correlation_tensor_spinful_native for the full
+    picture across all four combinations and sizes. Prefer
+    ctmode="full" for this class whenever it's available (it always is,
+    for itensor_version=3).
+
+    Kept as an alternative backend (correctness cross-checked exactly
+    against ED and against Spinful_Fermionic_Chain, for the ground-state
+    energy, the KPM dynamical correlator, and the 4-point correlator
+    tensor, in both ctmode="explicit" and ctmode="full") -- a genuine
+    performance edge for this one static-overlap calculation, not a
+    general-purpose speedup for anything iterative.
+    """
+    def __init__(self,n,**kwargs):
+        """Create the sites"""
+        self.Cup = [self.get_operator("Cup",i) for i in range(n)]
+        self.Cdagup = [self.get_operator("Cdagup",i) for i in range(n)]
+        self.Cdn = [self.get_operator("Cdn",i) for i in range(n)]
+        self.Cdagdn = [self.get_operator("Cdagdn",i) for i in range(n)]
+        self.Nup = [self.get_operator("Nup",i) for i in range(n)]
+        self.Ndn = [self.get_operator("Ndn",i) for i in range(n)]
+        self.Ntot = [self.Nup[i]+self.Ndn[i] for i in range(n)]
+        self.Sx = [0.5*self.Cdagup[i]*self.Cdn[i] +
+                0.5*self.Cdagdn[i]*self.Cup[i] for i in range(n)]
+        self.Sy = [-0.5*1j*self.Cdagup[i]*self.Cdn[i] +
+                0.5*1j*self.Cdagdn[i]*self.Cup[i] for i in range(n)]
+        self.Sz = [0.5*self.Nup[i] + (-1)*0.5*self.Ndn[i] for i in range(n)]
+        self.Delta = [0.5*self.Cup[i]*self.Cdn[i] for i in range(n)]
+        # Flat, single-flavor-per-entry operator lists (2*n entries: mode
+        # 2*i = up, 2*i+1 = down at physical site i), matching exactly
+        # the same flat-mode convention used throughout
+        # jordanwigner_spinful.py and the interleaved
+        # Spinful_Fermionic_Chain's own self.C/self.Cdag (there, C[2*i]
+        # and C[2*i+1] literally *are* two separate spinless-fermion
+        # sites; here they are the same Cup[i]/Cdn[i] MultiOperators
+        # already built above, just re-exposed under the generic
+        # name/indexing entropytk/correlationentropy.py's
+        # get_four_correlation_tensor()/get_correlation_matrix() expect
+        # (via wf.MBO.C/wf.MBO.Cdag) -- this is what makes those
+        # backend-agnostic functions work unchanged for this class too,
+        # and keeps the resulting tensor/matrix indices directly
+        # comparable, index for index, against Spinful_Fermionic_Chain's.
+        self.C = []
+        self.Cdag = []
+        for i in range(n):
+            self.C.append(self.Cup[i]); self.C.append(self.Cdn[i])
+            self.Cdag.append(self.Cdagup[i]); self.Cdag.append(self.Cdagdn[i])
+        self.Id = self.get_operator("Id",1)
+        Many_Body_Chain.__init__(self,[1 for i in range(n)],**kwargs)
+        self.fermionic = True
+        self.use_ampo_hamiltonian = True # use ampo
+    def get_charge_gap(self,**kwargs):
+        """Return the charge gap"""
+        return gap.sector_gap(self,sum(self.Ntot),**kwargs)
+    def set_hoppings_spinful(self,fun):
+        """
+        Add a spin-conserving hopping fun(i,j), for both flavors
+        """
+        h = self.generate_bilinear(fun,self.Cdagup,self.Cup)
+        h = h + self.generate_bilinear(fun,self.Cdagdn,self.Cdn)
+        self.hopping = h # store
+        self.update_hamiltonian()
+    def set_hoppings(self,fun):
+        """Add the spin-conserving hoppings"""
+        self.set_hoppings_spinful(fun)
+    def set_hubbard_spinful(self,fun):
+        """
+        Add Hubbard interaction in a spinful manner
+        The Hubbard term will be defined as
+        n_i n_j, with n_i = n_{i,up} + n_{i,down}
+        """
+        self.hubbard = self.generate_bilinear(fun,self.Ntot,self.Ntot)
+        self.update_hamiltonian()
+    def set_hubbard(self,fun):
+        """
+        Add Hubbard interaction in a spinful manner
+        """
+        self.set_hubbard_spinful(fun)
+    def set_swave_pairing(self,fun):
+        """
+        Add onsite swave pairing to a spinful Hamiltonian
+        The pairing term is of the form
+        Delta_i c_{i,up} c_{i,down} + h.c.
+        """
+        h = multioperator.msum(fun(i)*self.Delta[i]
+                for i in range(len(self.Delta)))
+        self.pairing = h + h.get_dagger()
+        self.update_hamiltonian()
+    def get_density(self,**kwargs):
+        """
+        Return the density in each site, summing over spin channels
+        """
+        return np.array([self.vev(Ni,**kwargs).real for Ni in self.Ntot])
+    def get_magnetization(self,**kwargs):
+        """Return magnetization"""
+        mx = np.array([self.vev(self.Sx[i],**kwargs).real
+                for i in range(len(self.Sx))])
+        my = np.array([self.vev(self.Sy[i],**kwargs).real
+                for i in range(len(self.Sy))])
+        mz = np.array([self.vev(self.Sz[i],**kwargs).real
+                for i in range(len(self.Sz))])
+        return np.array([mx,my,mz]).T # return magnetization
+    def get_onsite_pairing(self,**kwargs):
+        """
+        Return the expectation value of the onsite pairing
+        """
+        return np.array([self.vev(Di,**kwargs) for Di in self.Delta])
+    def get_density_fluctuation(self,**kwargs):
+        """Return the electronic density fluctuations"""
+        d = self.get_density(**kwargs) # total density
+        d2 = np.array([self.vev(Ni*Ni,**kwargs).real for Ni in self.Ntot])
+        return d2 - d**2 # return density fluctuations
+    def get_ED_obj(self):
+        """
+        Return the many body fermion object, built on the 2*n flat
+        fermionic modes (up,down per orbital, see
+        jordanwigner_spinful.py's mode-ordering convention) that this
+        chain's n native spinful sites represent -- unlike
+        Fermionic_Chain.get_ED_obj(), self.ns is the number of *sites*
+        (n), not the number of fermionic modes (2*n), so it cannot be
+        used directly here.
+        """
+        if self.has_ED_obj: return self.ED_obj
+        from .pyfermion import mbfermion
+        MBf = mbfermion.MBFermion(2*len(self.Cup))
+        MBf.add_multioperator(self.hamiltonian)
+        self.ED_obj = MBf
+        self.has_ED_obj = True
+        return self.ED_obj
+
+
+
 class Spinon_Chain(Spinful_Fermionic_Chain):
     """Class for spinon chains"""
     def get_gs(self,**kwargs):
@@ -308,6 +570,7 @@ class Spinon_Chain(Spinful_Fermionic_Chain):
         self.wf0 = wf # store ground state
         return wf
     def gs_energy(self,**kwargs):
+        """Return the projected ground-state energy"""
         wf = self.get_gs(**kwargs) # ground state
         return wf.dot(self.hamiltonian*wf).real # return energy
 
@@ -329,6 +592,7 @@ def isfermion(self):
     from .pyfermion.mbfermion import MBFermion
     if type(self)==Fermionic_Chain: return True
     if type(self)==Spinful_Fermionic_Chain: return True
+    if type(self)==Spinful_Fermionic_Chain_Native: return True
     if type(self)==Spinful_F_Fermionic_Chain: return True
     if type(self)==MBFermion: return True
     else: return False

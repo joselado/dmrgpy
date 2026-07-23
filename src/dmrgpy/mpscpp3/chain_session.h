@@ -957,6 +957,78 @@ class Chain
         return out;
         }
 
+    // Native-spinful-site (Electron/Hubbard, site-type code 1) version of
+    // four_correlation_tensor() above: returns the same
+    // <Cdag_i C_j Cdag_k C_l> tensor, but indexed over the 2*N flat
+    // fermionic modes (mode 2*s=up, 2*s+1=down at physical site s) that
+    // this chain's N native sites represent -- matching exactly the flat
+    // indexing fermionchain.Spinful_Fermionic_Chain_Native's own
+    // self.C/self.Cdag use (see jordanwigner_spinful.py's module
+    // docstring for the convention). Unlike every other Jordan-Wigner
+    // string in this codebase (threaded explicitly at the Python level,
+    // see mo_terms.h/build_ampo()), this one instead hands ITensor's own
+    // AutoMPO the literal flavor-resolved "Cdagup"/"Cup"/"Cdagdn"/"Cdn"
+    // names directly and lets its built-in isFermionic()/fermionicTerm()
+    // machinery (autompo.cc) do the threading -- those names all start
+    // with 'C' (ITensor's own trigger for automatic fermionic handling)
+    // and are exactly the ones ElectronSite defines, unlike the bare
+    // "Cdag"/"C" the non-spinful four_correlation_tensor() above relies
+    // on, which ElectronSite has no operator for at all. This is safe to
+    // do only for this one, self-contained, always-freshly-built-AutoMPO
+    // calculation -- it is not a change to the general Hamiltonian/MPO
+    // pipeline (mo_terms.h), which still always receives pre-dressed
+    // Python-level Jordan-Wigner terms, for consistency across backends.
+    std::vector<std::complex<double>>
+    four_correlation_tensor_spinful(MPS const& wf, bool accelerate=true) const
+        {
+        int Ns = sites_.length(); // number of physical (Electron) sites
+        int N = 2*Ns; // number of flat fermionic modes
+        std::vector<std::complex<double>> out(N*N*N*N,0.0);
+        auto idx = [N](int i,int j,int k,int l) { return ((i*N+j)*N+k)*N+l; };
+        auto cdagname = [](int flat) { return (flat%2==0) ? "Cdagup" : "Cdagdn"; };
+        auto cname    = [](int flat) { return (flat%2==0) ? "Cup" : "Cdn"; };
+        auto site1based = [](int flat) { return flat/2+1; };
+        auto build_mpo = [&](int i,int j,int k,int l)
+            {
+            auto ampo = AutoMPO(sites_);
+            ampo += 1.0,cdagname(i),site1based(i),cname(j),site1based(j),
+                        cdagname(k),site1based(k),cname(l),site1based(l);
+            return toMPO(ampo);
+            };
+        if (accelerate)
+            {
+            for (int i=0;i<N;i++)
+            for (int j=0;j<N;j++)
+            for (int k=0;k<N;k++)
+            for (int l=0;l<N;l++)
+                {
+                std::tuple<int,int,int,int> current{i,j,k,l};
+                std::tuple<int,int,int,int> conjugate{l,k,j,i};
+                if (current<=conjugate)
+                    {
+                    auto op = build_mpo(i,j,k,l);
+                    auto c = innerC(wf,op,wf);
+                    out[idx(i,j,k,l)] = c;
+                    if (current!=conjugate) out[idx(l,k,j,i)] = std::conj(c);
+                    }
+                }
+            }
+        else
+            {
+            for (int i=0;i<N;i++)
+            for (int j=0;j<N;j++)
+            for (int k=0;k<N;k++)
+            for (int l=0;l<N;l++)
+                {
+                auto op = build_mpo(i,j,k,l);
+                auto c = innerC(wf,op,wf);
+                out[idx(i,j,k,l)] = c;
+                out[idx(l,k,j,i)] = std::conj(c);
+                }
+            }
+        return out;
+        }
+
     KPMResult
     kpm_dynamical_correlator(std::vector<MOTerm> const& terms_i,
                              std::vector<MOTerm> const& terms_j,
