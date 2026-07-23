@@ -442,3 +442,14 @@ if the change affects architecture/backend dispatch rather than just
 physics). Keep the two formats of each document in sync; verify the
 `.tex` file still compiles cleanly with `pdflatex` (no errors, ideally no
 overfull-hbox warnings) after editing it.
+
+## Git workflow
+
+New work (a new branch, a new PR) should start from `master`, not from
+another feature/staging branch, unless explicitly told otherwise. This
+repo previously reused a long-lived branch (`mpo-algebra-tdvp-gse`) as a
+staging area for several stacked PRs; once `master` and the staging
+branch diverged (each gained commits the other lacked), a PR built on
+the staging branch picked up unrelated content and produced conflicting/
+misleading diffs against `master`. Branching from `master` (`git fetch
+origin master && git checkout -b <branch> origin/master`) avoids this.
