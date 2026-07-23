@@ -27,6 +27,7 @@ one = np.matrix(np.identity(3))
 
 class Coupling():
   def __init__(self,i,j,g):
+    """Store a two-site coupling constant g between sites i and j"""
     self.i = i
     self.j = j
     self.g = g
@@ -36,6 +37,8 @@ class Coupling():
 
 class Many_Body_Chain():
   def __init__(self,sites,itensor_version=DEFAULT_ITENSOR_VERSION,**kwargs):
+      """Create a many-body chain over the given list of sites, and
+      initialize its DMRG/ED backend (itensor_version selects which one)"""
       self.sites = sites # list of the sites
       self.Id = self.get_operator("Id",0)
 #      self.path = id_generator() # random ID in dmrgpy_tmp
@@ -206,6 +209,8 @@ class Many_Body_Chain():
       self._reset_dmrg_state()
       self.initialize()
   def get_mode(self,**kwargs):
+      """Resolve the effective calculation mode ("DMRG" or "ED") for this
+      chain, see mode.py"""
       from .mode import get_mode
       return get_mode(self,**kwargs)
   def to_folder(self):
@@ -213,6 +218,7 @@ class Many_Body_Chain():
 #      self.inipath = os.getcwd() # record the folder
       os.chdir(self.path) # go to calculation folder
   def copy(self):
+      """Return a copy of the chain (alias for clone())"""
       return self.clone() # clone and create a new one
       from copy import deepcopy
       return deepcopy(self)
@@ -250,7 +256,9 @@ class Many_Body_Chain():
       mbc = self.clone() # clone the object
       mbc.set_hamiltonian(X) 
       return mbc.gs_energy(**kwargs)
-  def to_origin(self): 
+  def to_origin(self):
+      """Go back to the original folder, raising if the calculation
+      left an ERROR file behind"""
       if os.path.isfile(self.path+"/ERROR"): raise # something wrong
       os.chdir(self.inipath) # go to original folder
   def restart(self):
@@ -282,9 +290,12 @@ class Many_Body_Chain():
       """
       return vev.vev(self,MO,**kwargs)
   def get_gs_degeneracy(self,**kwargs):
+      """Return the degeneracy of the ground state"""
       from . import degeneracy
       return degeneracy.gs_degeneracy(self,**kwargs)
-  def vev(self,MO,mode="DMRG",**kwargs): 
+  def vev(self,MO,mode="DMRG",**kwargs):
+      """Compute the vacuum expectation value <GS|MO|GS> of an operator,
+      dispatching between DMRG and ED"""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG":
           if self.itensor_version in (2,3,"python"): # C++ or pure-Python version
@@ -308,7 +319,9 @@ class Many_Body_Chain():
       Compute a vacuum expectation value
       """
       return vev.excited_vev(self,MO,**kwargs)
-  def excited_vev(self,MO,**kwargs): return self.excited_vev_MB(MO,**kwargs)
+  def excited_vev(self,MO,**kwargs):
+      """Compute a vacuum expectation value using excited states"""
+      return self.excited_vev_MB(MO,**kwargs)
   def generate_bilinear(self,fun,A,B):
       """Generic bilinear term"""
       fun = funtk.obj2fun(fun) # set function
@@ -323,10 +336,14 @@ class Many_Body_Chain():
               for i in range(len(A)) for j in range(len(B)))
       return 0.5*(h + h.get_dagger()) # Hermitian
   def update_hamiltonian(self):
+      """Rebuild the Hamiltonian from the stored hopping/hubbard/pairing/
+      exchange terms"""
       h = self.hopping + self.hubbard + self.pairing
       h = h + self.exchange
       self.set_hamiltonian(h)
-  def get_dagger(self,m): return m.get_dagger() # dummy method
+  def get_dagger(self,m):
+      """Return the Hermitian conjugate of an operator"""
+      return m.get_dagger() # dummy method
   def overlap(self,wf1,wf2,**kwargs):
       """Compute the overlap"""
       return mpsalgebra.overlap(self,wf1,wf2,**kwargs)
@@ -353,8 +370,10 @@ class Many_Body_Chain():
       """Apply an operator"""
       return mpsalgebra.summps(self,wf1,wf2,**kwargs)
   def trace(self,A,**kwargs):
+      """Compute the trace of an operator"""
       return mpsalgebra.trace(self,A,**kwargs)
   def inverse_trace(self,A,**kwargs):
+      """Compute the trace of the inverse of an operator"""
       return mpsalgebra.inverse_trace(self,A,**kwargs)
   def set_pairings_MB(self,fun):
       """Generic pairing term"""
@@ -372,6 +391,7 @@ class Many_Body_Chain():
       self.hopping = h # store
       self.update_hamiltonian()
   def run(self,**kwargs):
+      """Run the calculation, dispatching through mode.py"""
       from .mode import run
       return run(self,**kwargs)
   def get_bond_entropy(self,wf,i,j):
@@ -388,25 +408,34 @@ class Many_Body_Chain():
       rest of the system"""
       return entropy.pair_entropy(self,wf,i,j)
   def get_correlation_matrix(self,**kwargs):
+      """Return the correlation matrix"""
       return entanglement.get_correlation_matrix(self,**kwargs)
   def get_correlation_eigenvalues(self,**kwargs):
+      """Return the eigenvalues of the correlation matrix"""
       return entanglement.get_correlation_eigenvalues(self,**kwargs)
   def get_correlation_entropy(self,**kwargs):
+      """Return the entanglement entropy computed from the correlation
+      matrix"""
       return entanglement.get_correlation_entropy(self,**kwargs)
   def get_correlated_orbitals(self,**kwargs):
+      """Return the correlated orbitals"""
       return entanglement.get_correlated_orbitals(self,**kwargs)
   def get_correlated_density(self,**kwargs):
+      """Return the correlated density"""
       return entanglement.get_correlated_density(self,**kwargs)
   def get_dynamical_correlator_MB(self,**kwargs):
+      """Return a dynamical correlator, computed with DMRG"""
       return dynamics.get_dynamical_correlator(self,**kwargs)
   def get_dynamical_correlator(self,mode="DMRG",**kwargs):
+      """Return a dynamical correlator, dispatching between DMRG and ED"""
       mode = self.get_mode(mode=mode) # overwrite mode
-      if mode=="DMRG": 
+      if mode=="DMRG":
           return dynamics.get_dynamical_correlator(self,**kwargs)
-      elif mode=="ED": 
+      elif mode=="ED":
           return self.get_ED_obj().get_dynamical_correlator(**kwargs)
   def get_distribution(self,mode="DMRG",**kwargs):
-      if mode=="DMRG": 
+      """Return the distribution of an operator's spectrum"""
+      if mode=="DMRG":
           from . import distribution
           return distribution.get_distribution(self,**kwargs)
      #     raise # not implemented
@@ -415,6 +444,7 @@ class Many_Body_Chain():
           return self.get_ED_obj().get_distribution(**kwargs)
       else: raise
   def get_distribution_moments(self,mode="DMRG",**kwargs):
+      """Return the moments of the distribution of an operator's spectrum"""
       if mode=="DMRG":
           from . import distribution
           return distribution.get_distribution_moments(self,**kwargs)
@@ -429,6 +459,7 @@ class Many_Body_Chain():
       elif mode=="ED": 
           return self.get_ED_obj().get_excited(**kwargs) # ED
   def get_full_matrix(self,name):
+      """Return the full matrix of a named operator, via ED"""
       return self.get_ED_obj().get_operator(name) # get the full operator
   def get_excited_states(self,mode="DMRG",**kwargs):
       """Return excitation energies"""
@@ -441,7 +472,9 @@ class Many_Body_Chain():
     """Return the gap"""
     es = self.get_excited(n=2,**kwargs)
     return es[1] -es[0]
-  def get_hamiltonian(): return self.hamiltonian
+  def get_hamiltonian():
+      """Return the Hamiltonian as a multioperator"""
+      return self.hamiltonian
   def nhdmrg(self,**kwargs):
       """Non-Hermitian DMRG (itensor_version 2, 3 or "python"): return
       (energy,psil,psir), the eigenvalue with smallest real part of the
@@ -484,6 +517,7 @@ class Many_Body_Chain():
         return self.wf0 # return wavefunction
       elif mode=="ED": return self.get_ED_obj().get_gs(**kwargs)
   def get_gs_manifold(self,**kwargs):
+      """Return the ground-state manifold"""
       return groundstate.get_gs_manifold(self,**kwargs)
   def gs_energy(self,mode="DMRG",**kwargs):
       """Return the ground state energy"""
@@ -550,7 +584,9 @@ class Many_Body_Chain():
       elif mode=="ED":
           return self.get_ED_obj().random_state()
       else: raise
-  def random_mps(self,**kwargs): return self.random_state(**kwargs)
+  def random_mps(self,**kwargs):
+      """Generate a random MPS (alias for random_state)"""
+      return self.random_state(**kwargs)
   def get_operator(self,name,i=None):
       """Return a certain multioperator"""
       from . import multioperator

@@ -12,6 +12,7 @@ from . import multioperator
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
     def __init__(self,n,**kwargs):
+        """Build a spinless fermionic chain of n sites"""
         self.F = [self.get_operator("F",i) for i in range(n)] # Fermi string
         self.C = [self.get_operator("C",i) for i in range(n)]
         self.Cdag = [self.get_operator("Cdag",i) for i in range(n)]
@@ -30,6 +31,7 @@ class Fermionic_Chain(Many_Body_Chain):
         """Add the spin independent hoppings"""
         self.set_hoppings_MB(fun)
     def get_logdimension(self):
+        """Return the logarithm of the Hilbert space dimension"""
         return len(self.C)*np.log(2) # log dimension
     def get_density_spinless(self,**kwargs):
         """Return the electronic density"""
@@ -61,7 +63,8 @@ class Fermionic_Chain(Many_Body_Chain):
         """ Return a vaccum expectation value"""
         if mode=="DMRG": return self.excited_vev_MB(MO,**kwargs)
         elif mode=="ED": return self.get_ED_obj().excited_vev(MO,**kwargs) 
-    def excited_vev(self,MO,**kwargs): 
+    def excited_vev(self,MO,**kwargs):
+        """Compute a vacuum expectation value using excited states"""
         return self.excited_vev_spinless(MO,**kwargs)
     def hamiltonian_free(self,pairs=[[]]):
         """
@@ -104,8 +107,10 @@ class Fermionic_Chain(Many_Body_Chain):
         es = lg.eigvalsh(m) # get the energies
         return np.sum(es[es<0.0]) # return energies
     def get_gr(self,**kwargs):
+        """Return the retarded Green's function"""
         return get_gr(self,**kwargs)
     def get_gr_free(self,**kwargs):
+        """Return the retarded Green's function for free fermions"""
         return get_gr_free(self,**kwargs)
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
@@ -216,7 +221,9 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
     spin degree of freedom
     """
     def __init__(self,n):
-        """ Rewrite the init method to take twice as many sites"""
+        """ Rewrite the init method to take twice as many sites (n
+        orbitals, each represented by two interleaved spinless-fermion
+        sites for the up/down flavors)"""
         super().__init__(2*n) # initialize the Hamiltonian
         self.Sx = [0.5*self.Cdag[2*i]*self.C[2*i+1] +
                 0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
@@ -563,6 +570,7 @@ class Spinon_Chain(Spinful_Fermionic_Chain):
         self.wf0 = wf # store ground state
         return wf
     def gs_energy(self,**kwargs):
+        """Return the projected ground-state energy"""
         wf = self.get_gs(**kwargs) # ground state
         return wf.dot(self.hamiltonian*wf).real # return energy
 
