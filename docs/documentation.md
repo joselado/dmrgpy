@@ -136,7 +136,7 @@ for that statistics:
 | `spinchain.py` | `Spin_Chain` | alias of `Many_Body_Chain` itself |
 | `fermionchain.py` | `Fermionic_Chain` | spinless fermions; `C`/`Cdag`/`N`, Jordan-Wigner string `F` |
 | `spinfermionchain.py` | `Spin_Fermionic_Chain` | spinful fermions |
-| `bosonchain.py` | `Boson_Chain` | bosonic sites |
+| `bosonchain.py` | `Bosonic_Chain` | bosonic sites |
 | `parafermionchain.py` | `Parafermion_Chain` | parafermion sites |
 | `mixedchain.py` | `Mixed_Spin_Fermion_Chain` | mixes spin sites and spinful-fermion locations in one chain |
 
@@ -180,6 +180,29 @@ implement site-type code 1. See `fermionchain.py`'s class docstring for
 why this alternative isn't a general-purpose speedup over
 `Spinful_Fermionic_Chain` despite the halved site count (a directly
 measured result, not a theoretical claim).
+
+`bosonchain.Bosonic_Chain` uses a *range* of type codes rather than a
+single one: `100+dim` per site, `dim` being the requested local Hilbert
+space dimension (`Bosonic_Chain(n, maxnb=[...])`, default `dim=4`, i.e.
+code `104`). This lets `mpscpp3/get_sites.h`'s `BosonFourSite`
+(`extra/bosonfour.h`, generalized from a hardcoded 4-level site to an
+`Args("MaxOcc",...)`-driven arbitrary occupation cutoff) build a site of
+the actual requested dimension instead of always the fixed 4-level one
+regardless of `maxnb` — previously a real, silent bug: the DMRG session
+only ever saw type code `104` no matter what `maxnb` was, so DMRG and ED
+results silently diverged for any non-default value. `itensor_version=3`
+and `itensor_version="python"` both understand the extended `102..199`
+range today — pyitensor's `siteset.py::_site_class()` routes it to
+`sites/boson.py::get_boson_site(dim)`, a small factory that builds (and
+caches) a `SiteType` subclass per requested dimension the same way
+`BosonFourSite` is generalized on the C++ side, since pyitensor's
+`SiteType` machinery is otherwise entirely class-level (no per-instance
+state) and has no other way to parameterize a site's dimension.
+`mpscpp2` and `mpsjulialive` still only handle the single code `104`, so
+a non-default `maxnb` should be run under `itensor_version=3` (the
+default) or `"python"` for cross-backend agreement. ED
+(`pyboson/boson.py::BosonChain`) always builds the exact requested
+per-site dimension regardless of backend.
 
 ### 4.2 Operator representation: `MultiOperator`
 

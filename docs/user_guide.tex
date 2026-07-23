@@ -61,7 +61,7 @@ Chain class & Local Hilbert space & Key operators \\
 \texttt{fermionchain.\allowbreak Majorana\_Chain} & Majorana fermion & Majorana operators built from \texttt{Fermionic\_Chain} \\
 \texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_Chain} & spin-$\tfrac12$ fermion (4 states), two interleaved spinless sites per physical site & $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$; derived spin and pairing operators (see text) \\
 \texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_\allowbreak Chain\_\allowbreak Native} & same physics, genuinely 4-dimensional local space, one site per physical site (\texttt{itensor\_version=3} only) & identical operator lists/formulas as \texttt{Spinful\_Fermionic\_Chain} \\
-\texttt{bosonchain.\allowbreak Bosonic\_Chain} & truncated boson Fock space, $n_i\le n_{\max}$ (default 4) & $a_i,a_i^\dagger,n_i$, occupation projectors \\
+\texttt{bosonchain.\allowbreak Bosonic\_Chain} & truncated boson Fock space, $n_i\in\{0,\ldots,\text{maxnb}_i-1\}$, per-site dimension \texttt{maxnb} (default 4) settable via \texttt{Bosonic\_Chain(n,\allowbreak maxnb=[\ldots])} & $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}$ for $k=0,\ldots,\text{maxnb}_i-1$ \\
 \texttt{parafermionchain.\allowbreak Parafermionic\_\allowbreak Chain} & $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ & clock/shift operators $\sigma_i,\tau_i$, composite $\chi_i,\psi_i$ \\
 \texttt{mixedchain.\allowbreak Mixed\_Spin\_\allowbreak Fermion\_Chain} & mixes spin-$S$ sites and spinful-fermion locations in the same chain & spin location: native $S^x_i,S^y_i,S^z_i$; fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived spin/pairing operators \\
 \bottomrule
@@ -135,6 +135,21 @@ supported; see \texttt{mixedchain.py}'s module docstring for why
 \texttt{itensor\_version=2} isn't yet, and
 \texttt{examples/mixed\_spin\_fermion\_chain} for a worked Kondo-lattice
 example.
+
+\texttt{Bosonic\_Chain(n, maxnb=[\ldots])} takes a per-site local
+dimension list (defaulting to \texttt{[4]*n}, i.e.\ up to 3 bosons/site);
+ED always honors it exactly (\texttt{pyboson/boson.py}). On the DMRG
+side, \texttt{itensor\_version=3} and \texttt{itensor\_version="python"}
+both thread a non-default \texttt{maxnb} through to the tensor-network
+site itself (encoded as the site type code $100+\text{maxnb}_i$, see
+\texttt{mpscpp3/get\_sites.h}/\texttt{extra/bosonfour.h} and, on the
+pure-Python side, \texttt{pyitensor/sites/boson.py}'s
+\texttt{get\_boson\_site()} factory) -- \texttt{itensor\_version=2} and
+the Julia backend still only understand the single fixed 4-level boson
+site regardless of what \texttt{maxnb} requests, so a non-default
+\texttt{maxnb} should be run under \texttt{itensor\_version=3} (the
+default) or \texttt{"python"} for DMRG/ED results to actually agree;
+see \texttt{examples/boson\_maxnb\_v3\_VS\_ED}.
 
 \section{Building a Hamiltonian and observables}
 

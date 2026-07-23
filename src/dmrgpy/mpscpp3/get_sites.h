@@ -3,7 +3,15 @@
 // Site-type code convention is unchanged from v2 (see chain_session.h's
 // Chain constructor / manybodychain.py's callers): 2=spin-1/2, 0=spinless
 // fermion, 1=spinful fermion (Hubbard), 3=spin-1, 4=spin-3/2, 5=spin-2,
-// 6=spin-5/2, 104=Boson (4 levels), -2=Z3, -3=Z4.
+// 6=spin-5/2, -2=Z3, -3=Z4. Boson is a *range* of codes, 102..199,
+// v3-only (mpscpp2/pyitensor still only understand the single 104 code):
+// code = 100+dim, dim being the local Hilbert space dimension (dmrgpy's
+// own "maxnb" convention, see bosonchain.py's Bosonic_Chain) so 104 is
+// the original fixed 4-level site and e.g. 108 is an 8-level site. This
+// generalizes BosonFourSite's fixed dim=4 to an arbitrary MaxOcc=dim-1
+// (see extra/bosonfour.h) so DMRG can actually honor a non-default
+// maxnb instead of silently truncating to dim 4 regardless of what the
+// Python layer requested.
 //
 // Class-name changes vs v2: SpinlessSite/HubbardSite are v3's own
 // deprecated-but-supported aliases for FermionSite/ElectronSite (same
@@ -82,7 +90,7 @@ read(std::istream& s)
             else if(nm == 6) store.set(j,SpinFiveHalfSite(I));
             else if(nm == -2) store.set(j,Z3Site(I));
             else if(nm == -3) store.set(j,Z4Site(I));
-            else if(nm == 104) store.set(j,BosonFourSite(I));
+            else if(nm > 100 && nm < 200) store.set(j,BosonFourSite(I)); // dim baked into serialized Index I
             else Error(tinyformat::format("SpinX cannot read index of size %d",nm));
             }
 	sfile.close() ;
@@ -116,7 +124,7 @@ SpinX(Args const& args)
       else if (nm==4) sites.set(i,SpinThreeHalfSite(i,{"ConserveQNs",false})); // use spin=3/2
       else if (nm==5) sites.set(i,SpinTwoSite({"SiteNumber=",i,"ConserveQNs=",false})); // use spin=2
       else if (nm==6) sites.set(i,SpinFiveHalfSite(i,{"ConserveQNs",false})); // use spin=5/2
-      else if (nm==104) sites.set(i,BosonFourSite(i,{"ConserveQNs",false})); // use Boson
+      else if (nm>100 && nm<200) sites.set(i,BosonFourSite(i,{"ConserveQNs",false,"MaxOcc",nm-101})); // Boson, dim=nm-100
       else if (nm==(-2)) sites.set(i,Z3Site({"SiteNumber=",i,"ConserveQNs=",false})); // use Z3
       else if (nm==(-3)) sites.set(i,Z4Site(i,{"ConserveQNs",false})); // use Z4
       else Error(tinyformat::format("SpinX cannot read index of size "));
@@ -141,7 +149,7 @@ SpinX(std::vector<int> const& site_types)
       else if (nm==4) sites.set(i,SpinThreeHalfSite(i,{"ConserveQNs",false})); // use spin=3/2
       else if (nm==5) sites.set(i,SpinTwoSite({"SiteNumber=",i,"ConserveQNs=",false})); // use spin=2
       else if (nm==6) sites.set(i,SpinFiveHalfSite(i,{"ConserveQNs",false})); // use spin=5/2
-      else if (nm==104) sites.set(i,BosonFourSite(i,{"ConserveQNs",false})); // use Boson
+      else if (nm>100 && nm<200) sites.set(i,BosonFourSite(i,{"ConserveQNs",false,"MaxOcc",nm-101})); // Boson, dim=nm-100
       else if (nm==(-2)) sites.set(i,Z3Site({"SiteNumber=",i,"ConserveQNs=",false})); // use Z3
       else if (nm==(-3)) sites.set(i,Z4Site(i,{"ConserveQNs",false})); // use Z4
       else Error(tinyformat::format("SpinX cannot read index of size "));
