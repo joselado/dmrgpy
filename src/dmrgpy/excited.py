@@ -1,5 +1,34 @@
+import warnings
 import numpy as np
 from . import mps
+
+
+def _warn_unconverged_excited_states(energies,fluctuations,factor=100.0,floor=1e-8):
+    """fluctuations[i] is <H^2>-<H>^2 for the i-th returned state
+    (mpscpp2/mpscpp3's Chain::excited_states and pyitensor's
+    Chain.excited_states both compute this for every state already, at no
+    extra cost -- it was simply discarded by the caller until now).
+    fluctuations[0] is the plain, unpenalized ground state's own
+    fluctuation: a reliable per-Hamiltonian reference for how tight DMRG
+    can make a genuine eigenstate at the current maxm/cutoff/nsweeps.
+    States i>0 come from the overlap-penalty method instead, which has a
+    confirmed failure mode (pyitensor/dmrg.py's dmrg_excited docstring:
+    the penalized local solve can settle into a spurious, wrong-energy
+    stationary point that more sweeps/weight cannot fix) that the plain
+    ground-state solve doesn't share -- so a fluctuation many times above
+    that reference is a cheap, already-computed sign a state is not a
+    clean eigenstate, worth surfacing even though nothing here can fix it
+    automatically."""
+    ref = max(fluctuations[0],floor)
+    for i,f in enumerate(fluctuations):
+        if f>factor*ref:
+            warnings.warn(
+                "excited_states: state {} (E={:.6g}) has energy "
+                "fluctuation <H^2>-<H>^2 = {:.3g}, {:.1f}x the ground "
+                "state's ({:.3g}) -- this excited state may not have "
+                "converged to a genuine eigenstate; treat its energy "
+                "and wavefunction with caution".format(
+                    i,energies[i],f,f/ref,ref))
 
 
 def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
@@ -21,6 +50,7 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     energies,fluctuations,handles = self._session.excited_states(
             n,scale,self.excited_gram_schmidt)
+    _warn_unconverged_excited_states(energies,fluctuations)
     wfs = [mps.MPS(MBO=self,cpp_handle=h).copy() for h in handles]
     return np.array(energies),wfs
 

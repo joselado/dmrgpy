@@ -166,6 +166,20 @@ orthogonalized subspace spanned by the raw excited-state MPS, correcting
 for near-degenerate states that DMRG's iterative solvers can otherwise
 mix.
 
+Excited states beyond the ground state are found with an overlap-penalty
+method (each state is optimized against $H+w\sum_k|\psi_k\rangle\langle\psi_k|$
+for the states already found), which can occasionally converge to a
+spurious, non-eigenstate stationary point instead of the true excited
+state (`itensor_version` 2, 3, and `"python"` are all susceptible). Every
+call to `get_excited_states`/`get_excited` on a DMRG backend checks each
+returned state's energy fluctuation $\langle H^2\rangle-\langle
+H\rangle^2$ against the ground state's own (both already computed as a
+byproduct of the search) and emits a `UserWarning` if a state's
+fluctuation is far above that reference — a cheap, always-on sanity check,
+though not a fix; a warned-about state's energy and wavefunction should
+be treated with caution (e.g. cross-checked against `mode="ED"` on a
+smaller system, or recomputed with a larger `scale`/more sweeps).
+
 **Sector (charge) gaps.** For a conserved quantity $A$ with $[H,A]=0$
 (e.g. total particle number $\hat N=\sum_i n_i$, or total $S^z$), the gap
 to the lowest state with $\langle A\rangle$ shifted by $d$ from the
