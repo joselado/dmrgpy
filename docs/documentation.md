@@ -629,10 +629,13 @@ hardcodes the literal `"Cdag"`/`"C"` operator names, undefined on
 ITensor's `ElectronSite`). With the `accelerate` fix,
 `Spinful_Fermionic_Chain_Native`'s only available mode
 (`ctmode="explicit"`) measures *faster* than `Spinful_Fermionic_Chain`'s
-specialized `ctmode="full"` at every size tried (n=3..6 orbitals,
-see `examples/four_correlation_tensor_spinful_native`) — the one
-calculation checked so far where the native-site class wins, since it
-is a Python loop of independent static overlaps rather than an
+specialized `ctmode="full"` at n=3..6 orbitals, by a margin that grows
+with n in that range — but not indefinitely: at n=12 (24 flat modes)
+the two are back to essentially tied (~700s each, see
+`examples/four_correlation_tensor_spinful_native`), so this is a real
+but size-bounded win, not an asymptotic advantage. It's the one
+calculation checked so far where the native-site class wins at all,
+since it is a Python loop of independent static overlaps rather than an
 iterative two-site search, so it never pays the two-site combined-
 local-dimension penalty documented in
 `Spinful_Fermionic_Chain_Native`'s own class docstring.

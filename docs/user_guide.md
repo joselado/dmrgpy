@@ -74,9 +74,12 @@ correlator tensor `<Cdag_i C_j Cdag_k C_l>`
 (`mps.MPS.get_four_correlation_tensor()`, §5) is a Python loop of
 independent *static* overlaps rather than an iterative two-site search,
 so it does not pay the two-site combined-local-dimension penalty above
--- measured (n=3..6 orbitals), `Spinful_Fermionic_Chain_Native` beats
-even `Spinful_Fermionic_Chain`'s specialized C++-accelerated path there,
-by a growing margin. Otherwise prefer `Spinful_Fermionic_Chain`; no
+-- measured (n=3,4,5,6,12 orbitals), `Spinful_Fermionic_Chain_Native`
+beats even `Spinful_Fermionic_Chain`'s specialized C++-accelerated path
+there at n=3..6, by a margin that grows with n in that range -- but not
+indefinitely: at n=12 the two are back to essentially tied (~700s
+each). So this win is real but bounded to smaller/moderate sizes, not
+an asymptotic advantage. Otherwise prefer `Spinful_Fermionic_Chain`; no
 other case tried so far makes the native-site class faster.
 
 `Mixed_Spin_Fermion_Chain` is for models that need a literal local

@@ -375,22 +375,29 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
     static overlaps <wf|Op|wf> (one per (i,j,k,l), each a single-shot
     MPO-MPS-MPS contraction, not an iterative two-site variational
     search), so it does not pay the combined-local-dimension penalty
-    that dominates two-site DMRG/TDVP. Measured (n=3..6 orbitals, same
-    Hubbard-chain Hamiltonian): this class's ctmode="explicit" beats not
-    only Spinful_Fermionic_Chain's own ctmode="explicit", but also its
-    specialized ctmode="full" (mpscpp3/chain_session.h's C++-accelerated
-    AutoMPO implementation) at every size tried, by a growing margin
-    (n=6: ~13s vs ~16s) -- see examples/four_correlation_tensor_spinful_native.
-    ctmode="full" is not available for this class at all: it hardcodes
-    the literal "Cdag"/"C" operator names, which ITensor's ElectronSite
-    does not define (only Cup/Cdn/Cdagup/Cdagdn are), so there was
-    nothing to lose by comparing against it here.
+    that dominates two-site DMRG/TDVP. Measured (n=3,4,5,6,12 orbitals,
+    same Hubbard-chain Hamiltonian): this class's ctmode="explicit" beats
+    not only Spinful_Fermionic_Chain's own ctmode="explicit", but also
+    its specialized ctmode="full" (mpscpp3/chain_session.h's
+    C++-accelerated AutoMPO implementation) at n=3..6, by a margin that
+    grows with n there (n=6: ~13-22s vs ~16-35s depending on run) --
+    but that growth does NOT continue indefinitely: at n=12 (24 flat
+    modes) the two are back to essentially tied, ~700s each, with
+    ctmode="full" very slightly ahead (697s vs 707s) -- see
+    examples/four_correlation_tensor_spinful_native. So the win is real
+    but bounded to smaller/moderate sizes, not an asymptotic advantage;
+    treat "native wins here" as size-dependent, not as a rule that
+    extrapolates to larger n. ctmode="full" is not available for this
+    class at all: it hardcodes the literal "Cdag"/"C" operator names,
+    which ITensor's ElectronSite does not define (only
+    Cup/Cdn/Cdagup/Cdagdn are), so there was nothing to lose by
+    comparing against it here.
 
     Kept as an alternative backend (correctness cross-checked exactly
     against ED and against Spinful_Fermionic_Chain, for the ground-state
     energy, the KPM dynamical correlator, and the 4-point correlator
-    tensor) -- a genuine, if narrow, performance edge for the one
-    static-overlap calculation checked so far, not a general-purpose
+    tensor) -- a genuine, if narrow and size-bounded, performance edge
+    for the one static-overlap calculation checked so far, not a general-purpose
     speedup for anything iterative.
     """
     def __init__(self,n,**kwargs):

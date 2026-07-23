@@ -99,10 +99,13 @@ $\langle c^\dagger_i c_j c^\dagger_k c_l\rangle$
 (\texttt{mps.MPS.get\_four\_correlation\_tensor()}, \S5) is a Python
 loop of independent \emph{static} overlaps rather than an iterative
 two-site search, so it does not pay the two-site combined-local-
-dimension penalty above -- measured ($n=3..6$ orbitals),
+dimension penalty above -- measured ($n=3,4,5,6,12$ orbitals),
 \texttt{Spinful\_Fermionic\_Chain\_Native} beats even
 \texttt{Spinful\_Fermionic\_Chain}'s specialized C++-accelerated path
-there, by a growing margin. Otherwise prefer
+at $n=3..6$, by a margin that grows with $n$ in that range -- but not
+indefinitely: at $n=12$ the two are back to essentially tied
+($\sim700$s each). So this win is real but bounded to smaller/moderate
+sizes, not an asymptotic advantage. Otherwise prefer
 \texttt{Spinful\_Fermionic\_Chain}; no other case tried so far makes the
 native-site class faster.
 

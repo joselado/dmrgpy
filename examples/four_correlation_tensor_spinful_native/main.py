@@ -29,6 +29,15 @@ from dmrgpy import fermionchain
 # variational search, so native sites' "half as many sites, same total
 # mode count" advantage shows through without the offsetting two-site
 # combined-local-dimension penalty that dominates ground-state DMRG.
+#
+# That win is size-bounded, not asymptotic, though: Part 2 below only
+# sweeps n=3..6 (fast, growing margin in native's favor there), but a
+# separate n=12 check (24 flat modes; not included in the loop below
+# since it alone takes ~12 minutes per class) found the two back to
+# essentially tied (~700s each, native's explicit slightly *behind*
+# doubled's C++-accelerated full at 707s vs 697s) -- the O(n^4) growth
+# in the number of (i,j,k,l) overlaps evaluated eventually swamps
+# native's per-overlap advantage.
 
 n = 4
 U = 1.3
