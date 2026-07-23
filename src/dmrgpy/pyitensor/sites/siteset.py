@@ -3,12 +3,16 @@ constructor -- a SiteSet built directly from in-memory per-site type codes,
 with no file I/O, using the exact same type-code convention as
 manybodychain.py's callers (see get_sites.h's comment and CLAUDE.md):
 2=spin-1/2, 0=spinless fermion, 1=spinful fermion (Hubbard), 3=spin-1,
-4=spin-3/2, 5=spin-2, 6=spin-5/2, 104=Boson (4 levels), -2=Z3, -3=Z4.
+4=spin-3/2, 5=spin-2, 6=spin-5/2, -2=Z3, -3=Z4. Boson is a *range* of
+codes, 102..199 (code = 100+dim, dim being the requested local Hilbert
+space dimension -- see bosonchain.Bosonic_Chain's "maxnb"), routed to
+boson.get_boson_site(dim) below instead of a single dict entry -- the
+same generalization mpscpp3/get_sites.h applies to BosonFourSite.
 """
 
 from ..index import Index
 from ..tensor import ITensor
-from .boson import BosonFourSite
+from .boson import BosonFourSite, get_boson_site
 from .fermion import ElectronSite, FermionSite
 from .parafermion import Z3Site, Z4Site
 from .spin import SpinFiveHalfSite, SpinHalfSite, SpinOneSite, SpinThreeHalfSite, SpinTwoSite
@@ -27,12 +31,18 @@ TYPE_CODE_TO_SITE = {
 }
 
 
+def _site_class(type_code):
+    if 100 < type_code < 200:
+        return get_boson_site(type_code - 100)
+    try:
+        return TYPE_CODE_TO_SITE[type_code]
+    except KeyError as e:
+        raise ValueError("SiteX cannot build a site of type code {}".format(e.args[0]))
+
+
 class SiteX:
     def __init__(self, site_types):
-        try:
-            self._types = [TYPE_CODE_TO_SITE[t] for t in site_types]
-        except KeyError as e:
-            raise ValueError("SiteX cannot build a site of type code {}".format(e.args[0]))
+        self._types = [_site_class(t) for t in site_types]
         self._indices = [Index(t.dim, tags="Site,n={}".format(i + 1))
                           for i, t in enumerate(self._types)]
 

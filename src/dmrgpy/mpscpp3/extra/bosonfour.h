@@ -2,9 +2,24 @@
 #ifndef __ITENSOR_BOSONFOUR_H
 #define __ITENSOR_BOSONFOUR_H
 #include "itensor/mps/siteset.h"
+#include <algorithm>
+#include <cctype>
+#include <string>
 
 // Port of mpscpp2/extra/bosonfour.h to the ITensor v3 API, see
 // spinthreehalf.h in this directory for the general porting notes.
+//
+// Generalized (v3 only, not ported back to mpscpp2) from a fixed 4-level
+// site to an arbitrary occupation cutoff, driven by the "MaxOcc" Args key
+// (dimension = MaxOcc+1, defaulting to 3 i.e. the original 4-level site)
+// -- see get_sites.h's boson type-code range (100+dim, 102..199) for how a
+// dmrgpy-level Bosonic_Chain(maxnb=...) selects MaxOcc. Operator names N,
+// A, Adag, and the occupation-projectors N0..N{MaxOcc} generalize the
+// original hardcoded N0..N3 the same way pyboson/boson.py's ED BosonChain
+// already did (that side was always dimension-generic, see its own
+// per-site "maxnb" loop) -- this brings the DMRG side to the same
+// generality instead of silently truncating to dim 4 regardless of the
+// Python-level maxnb (a real, previously-silent DMRG/ED mismatch bug).
 
 namespace itensor {
 
@@ -34,46 +49,45 @@ class BosonFourSite
 
     BosonFourSite(int n, Args const& args = Args::global())
 		{
-        auto ts = TagSet("Site,Boson=4,n="+str(n));
+        auto maxOcc = args.getInt("MaxOcc",3); // dimension = maxOcc+1, default 4-level site
+        auto dim = maxOcc+1;
+        auto ts = TagSet("Site,Boson="+str(dim)+",n="+str(n));
         if(args.getBool("ConserveQNs",true))
             {
-            s = Index(QN({"Sz",+3}),1,
-                      QN({"Sz",+1}),1,
-                      QN({"Sz",-1}),1,
-                      QN({"Sz",-3}),1,Out,ts);
+            auto qints = Index::qnstorage(dim);
+            for(int occ : range(dim)) qints[occ] = QNInt(QN({"Nb",occ}),1);
+            s = Index(std::move(qints),Out,ts);
             }
         else
             {
-            s = Index(4,ts);
+            s = Index(dim,ts);
             }
 		}
 
     Index
     index() const { return s; }
 
+    // Plain occupation-number strings ("0".."MaxOcc") only. The original
+    // fixed-dim=4 site additionally accepted "Up"/"Upi"/"Dni"/"Dn" and
+    // read its numeric strings ("3","1","-1","-3") as *Sz labels* from
+    // its old fixed QN scheme (matching the +3,+1,-1,-3 Sz values that
+    // scheme's QN block used, i.e. inverted relative to occupation
+    // number: old "3" meant occupation 0, not 3) -- not carried forward
+    // here since MaxOcc is now arbitrary and that convention doesn't
+    // generalize. No caller in this codebase currently invokes
+    // state() for a boson site (dmrg()'s default_mps() always starts
+    // from randomMPS, never InitState), so this is a behavior change
+    // with no live effect today, not a regression -- flagged here for
+    // whoever adds the first real caller.
     IndexVal
     state(std::string const& state)
 		{
-        if (state == "Up" || state == "3")
+        auto maxOcc = dim(s)-1;
+        for(auto occ : range(1+maxOcc))
             {
-            return s(1);
+            if(state == str(occ)) return s(1+occ);
             }
-        else if (state == "Upi" || state == "1")
-            {
-            return s(2);
-            }
-        else if (state == "Dni" || state == "-1")
-            {
-            return s(3);
-            }
-        else if (state == "Dn" || state == "-3")
-            {
-            return s(4);
-            }
-        else
-            {
-            throw ITError("State " + state + " not recognized");
-            }
+        throw ITError("State " + state + " not recognized");
         return IndexVal{};
 		}
 
@@ -81,57 +95,32 @@ class BosonFourSite
     op(std::string const& opname,
        Args const& args) const
 		{
-
-	const Real val1 = std::sqrt(1.0);
-	const Real val2 = std::sqrt(2.0);
-	const Real val3 = std::sqrt(3.0);
         auto sP = prime(s);
-
-        auto A0  = s(1);
-        auto A0P = sP(1);
-        auto A1  = s(2);
-        auto A1P = sP(2);
-        auto A2  = s(3);
-        auto A2P = sP(3);
-        auto A3  = s(4);
-        auto A3P = sP(4);
+        auto maxOcc = dim(s)-1;
 
         auto Op = ITensor(dag(s),sP);
 
         if (opname == "N")
             {
-            Op.set(A0,A0P,+0.0);
-            Op.set(A1,A1P,+1.0);
-            Op.set(A2,A2P,+2.0);
-            Op.set(A3,A3P,+3.0);
-            }
-        else if (opname == "N0")
-            {
-            Op.set(A0,A0P,+1.0);
-            }
-        else if (opname == "N1")
-            {
-            Op.set(A1,A1P,+1.0);
-            }
-        else if (opname == "N2")
-            {
-            Op.set(A2,A2P,+1.0);
-            }
-        else if (opname == "N3")
-            {
-            Op.set(A3,A3P,+1.0);
+            for(auto occ : range1(1+maxOcc)) Op.set(s=occ,sP=occ,occ-1);
             }
         else if (opname == "Adag")
             {
-            Op.set(A0,A1P,val1);
-            Op.set(A1,A2P,val2);
-            Op.set(A2,A3P,val3);
+            for(auto occ : range1(maxOcc)) Op.set(s=occ,sP=occ+1,std::sqrt((Real)occ));
             }
         else if (opname == "A")
             {
-            Op.set(A1,A0P,val1);
-            Op.set(A2,A1P,val2);
-            Op.set(A3,A2P,val3);
+            for(auto occ : range1(maxOcc)) Op.set(s=occ+1,sP=occ,std::sqrt((Real)occ));
+            }
+        else if (opname.size()>1 && opname[0]=='N' &&
+                 std::all_of(opname.begin()+1,opname.end(),::isdigit))
+            {
+            // occupation-number projector N<k>, k=0..maxOcc (generalizes
+            // the original hardcoded N0..N3)
+            auto level = std::stoi(opname.substr(1));
+            if(level<0 || level>maxOcc)
+                throw ITError("Operator " + opname + " out of range for this site's MaxOcc");
+            Op.set(s=level+1,sP=level+1,+1.0);
             }
         else
             {
@@ -152,7 +141,7 @@ BosonFour(int N,
 
     for(int j = start; j < N; ++j)
         {
-        sites.set(j,BosonFourSite(j));
+        sites.set(j,BosonFourSite(j,args));
         }
 
     SiteSet::init(std::move(sites));
