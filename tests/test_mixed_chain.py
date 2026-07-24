@@ -70,7 +70,10 @@ def test_pure_fermion_degenerate_case_matches_spinful_fermionic_chain_ed():
 
     mc = mixedchain.Mixed_Spin_Fermion_Chain(["F"]*n, itensor_version=3)
     mc.maxm = 60
-    mc.nsweeps = 20
+    mc.nsweeps = 40 # 20 was occasionally missing DMRG_TOL by a few 1e-5
+                     # (run-to-run DMRG convergence noise, confirmed
+                     # directly: the same case passes cleanly in
+                     # isolation) -- doubled for a wider convergence margin
     h_mc = 0
     for i in range(n-1):
         t = 0.6 + 0.3*i
