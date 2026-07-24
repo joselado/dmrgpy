@@ -146,6 +146,9 @@ def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
         for jj, j in enumerate(_AXES):
             psi_j_t2 = t2_wfs_by_j[j][it2]
             for kk, k in enumerate(_AXES):
+                if jj == kk: continue # eps_jkl==0 for every l here -- skip
+                                       # the expensive tau trajectory itself,
+                                       # not just the (already-guarded) sum
                 branch = ops[k][site]*psi_j_t2
                 tau_times, tau_wfs = _tdvp_trajectory(chain, Hop, branch,
                                                        dtau, n_tau_half)
@@ -159,16 +162,37 @@ def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
 
 
 def two_time_kondo_term_dmrg(chain, site, eVs, omega0=20e-3, Gamma0=5e-6,
-                              dt2=1.0, n_t2_half=200, dtau=1.0,
-                              n_tau_half=200):
+                              dt2=None, n_t2_half=None, dtau=None,
+                              n_tau_half=None):
     """DMRG counterpart of edtwotimeref.two_time_kondo_term_ed -- see
-    this module's docstring for the algorithm and its important
-    untested-in-development caveat. dt2/n_t2_half and dtau/n_tau_half
-    set the (uniform) time grids in each leg; see twotime.py's module
-    docstring for the resolution/range requirements (K_W needs t2
+    this module's docstring for the algorithm and its validation status.
+
+    dt2/n_t2_half and dtau/n_tau_half set the (uniform) time grids in
+    each leg and have no default (all four required): see twotime.py's
+    module docstring for the resolution/range requirements (K_W needs t2
     spacing finer than 1/omega0 and a range wider than several/Gamma0;
-    the Hilbert-transform-based Theta0 filter is comparatively
-    forgiving)."""
+    the Hilbert-transform-based Theta0 filter is comparatively forgiving
+    about dtau/n_tau_half). There is no numeric default that is both
+    correct and practical to pick automatically: a grid fine/wide enough
+    to actually resolve the default omega0/Gamma0 (e.g. dt2 ~ 1/omega0,
+    t2 range ~ 25/Gamma0) needs order 10^5-10^6 t2 checkpoints, each its
+    own real TDVP trajectory -- computationally infeasible as a silent
+    default -- while a small, fast default (e.g. the flat dt2=1.0,
+    n_t2_half=200 tried initially) is wildly under-resolved for those
+    same omega0/Gamma0 and returns a finite but silently, badly wrong
+    result instead of erroring (confirmed directly). Pick values
+    deliberately for your own omega0/Gamma0 and desired accuracy/cost
+    tradeoff instead (the tests in
+    test_kondo_spectrum_dmrgtwotime.py use dt2=25./Gamma0/n_t2_half with
+    n_t2_half=10 and dtau=(2*pi/2e-5)/n_tau_half with n_tau_half=15 as a
+    small, fast, deliberately-coarse example -- not a recommended
+    production resolution)."""
+    if dt2 is None or n_t2_half is None or dtau is None or n_tau_half is None:
+        raise ValueError(
+            "dt2, n_t2_half, dtau, n_tau_half must all be given "
+            "explicitly: no default grid is both correct and practical "
+            "for arbitrary omega0/Gamma0 -- see this function's own "
+            "docstring")
     def batches():
         for t2_chunk, _tau_row, G_chunk in _levi_civita_coeff_G_batches_dmrg(
                 chain, site, dt2, n_t2_half, dtau, n_tau_half):

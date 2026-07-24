@@ -1013,9 +1013,16 @@ DMRG (raises `NotImplementedError`); the second-order term's `es`
 frequency-grid parameter has no safe default and must be supplied
 explicitly (it needs to cover every relevant transition energy, which is
 a property of the chain's spectrum, not of the `eV` sweep range — see
-`second_order_dIdV_dc`'s docstring); chains need at least 3 sites (a
-1-site chain hits an internal ITensor v3 error unrelated to this
-feature, building the Hamiltonian MPO).
+`second_order_dIdV_dc`'s docstring); the third-order term's `dt2`,
+`n_t2_half`, `dtau`, `n_tau_half` time-grid parameters likewise have no
+safe default and must be supplied explicitly (a grid fine/wide enough for
+the default $\omega_0$/$\Gamma_0$ needs $\sim10^5$–$10^6$ $t_2$
+checkpoints, each its own real TDVP trajectory — infeasible as a silent
+default — while a small, fast default is wildly under-resolved and
+returns a finite but silently wrong result instead of erroring, confirmed
+directly; see `two_time_kondo_term_dmrg`'s docstring); chains need at
+least 3 sites (a 1-site chain hits an internal ITensor v3 error unrelated
+to this feature, building the Hamiltonian MPO).
 
 `kondospectrumtk/dmrgtwotime.py` was written against this codebase's
 existing, verified DMRG API and validated once a compiled ITensor v3

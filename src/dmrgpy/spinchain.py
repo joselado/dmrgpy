@@ -198,7 +198,13 @@ class Spin_Chain(Many_Body_Chain):
               that function's docstring -- and must be supplied when
               order requests it); `dt2`, `n_t2_half`, `dtau`, `n_tau_half`
               to kondospectrumtk.dmrgtwotime.two_time_kondo_term_dmrg for
-              the third-order term. Validated against ITensor v3 once a
+              the third-order term (order=3) -- these four also have no
+              safe default (see that function's docstring: a grid fine/
+              wide enough for the default omega0/Gamma0 is computationally
+              infeasible to pick automatically, while a small fast
+              default silently returns a badly wrong result instead of
+              erroring) and must be supplied explicitly. Validated
+              against ITensor v3 once a
               compiled backend became available (see
               test_kondo_spectrum_dmrgtwotime.py and
               kondospectrumtk/dmrgtwotime.py's module docstring for what
@@ -241,8 +247,8 @@ class Spin_Chain(Many_Body_Chain):
         return eV, dIdV
     def _get_kondo_spectrum_dmrg(self, eV, site, Jrho_s, U, T0, omega0,
                                   Gamma0, order, submode="KPM", delta=2e-6,
-                                  es=None, dt2=1.0, n_t2_half=200, dtau=1.0,
-                                  n_tau_half=200):
+                                  es=None, dt2=None, n_t2_half=None,
+                                  dtau=None, n_tau_half=None):
         from .kondospectrumtk.secondorder_dc import second_order_dIdV_dc
         if U != 0.0 and order == 3:
             raise NotImplementedError(

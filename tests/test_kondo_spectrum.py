@@ -215,3 +215,20 @@ def test_get_kondo_spectrum_mode_dmrg_rejects_nonzero_T_and_U():
         sc.get_kondo_spectrum(eVs, site=0, T=0.0, U=0.1, order=3, mode="DMRG")
     with pytest.raises(ValueError):
         sc.get_kondo_spectrum(eVs, site=0, mode="bogus")
+
+
+def test_two_time_kondo_term_dmrg_requires_explicit_grid():
+    """dt2/n_t2_half/dtau/n_tau_half have no numeric default (see
+    two_time_kondo_term_dmrg's docstring in dmrgtwotime.py): a small, fast
+    default silently returns a badly wrong result for the also-default
+    omega0/Gamma0 instead of erroring, so all four are mandatory. This
+    check fires before the (here, nonsense) chain/site arguments are ever
+    touched, so it needs no compiled itensor_version=3 backend -- unlike
+    the rest of dmrgtwotime.py's coverage in
+    test_kondo_spectrum_dmrgtwotime.py, which is skipped without one."""
+    from dmrgpy.kondospectrumtk.dmrgtwotime import two_time_kondo_term_dmrg
+    with pytest.raises(ValueError):
+        two_time_kondo_term_dmrg(None, 0, [0.0])
+    with pytest.raises(ValueError):
+        two_time_kondo_term_dmrg(None, 0, [0.0], dt2=1.0, n_t2_half=5,
+                                  dtau=1.0, n_tau_half=None)

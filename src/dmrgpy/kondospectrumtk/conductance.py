@@ -122,8 +122,10 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     instead)."""
     eVs = np.asarray(eVs, dtype=float)
     coeff = np.imag(_triple_product_coefficients(ks))/4. # Re[X/(4i)] = Im[X]/4
-    eps_if = ks.e[None, :] - ks.e[:, None] # eps_if[i,f] = e_f - e_i
-    eps_im = ks.e[None, :] - ks.e[:, None] # eps_im[i,m] = e_m - e_i
+    # eps_if[i,f] = e_f - e_i and eps_im[i,m] = e_m - e_i are the same
+    # array (e[None,:]-e[:,None]) under two names for readability at the
+    # call sites below
+    eps_if = eps_im = ks.e[None, :] - ks.e[:, None]
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
     dim = ks.dim
     Fim = Fcall((eVs[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
