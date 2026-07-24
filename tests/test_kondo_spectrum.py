@@ -132,6 +132,55 @@ def test_get_kondo_spectrum_order2_matches_second_order_dIdV():
     assert np.allclose(dIdV, ref)
 
 
+def test_third_order_kondo_eps_if_sign_on_asymmetric_spectrum():
+    """Regression test for a real sign bug: third_order_kondo_dIdV used
+    to build eps_if as e_i-e_f instead of e_f-e_i (the convention its own
+    module docstring and second_order_dIdV both state), silently -- every
+    other test/example here only exercises symmetric two-level (S=1/2)
+    systems, where swapping i<->f just permutes which pair gets which
+    energy and the bug has no effect on the Boltzmann-weighted sum. An
+    S=1 impurity with both anisotropy and a field has a non-degenerate,
+    asymmetric-under-relabeling spectrum, so it does distinguish the two
+    conventions: cross-check third_order_kondo_dIdV against an
+    independently written reference that only uses the (m,i) energy
+    differences and Boltzmann weights, not the module's own eps_if."""
+    sc = spinchain.Spin_Chain(["1"])
+    D, B = 3e-4, 4.0
+    sc.set_hamiltonian(D*sc.Sz[0]*sc.Sz[0] + G*MUB*B*sc.Sz[0])
+    ks = KondoSpectrum(sc, site=0, T=1.0)
+    assert len(set(np.round(ks.e, 12))) == ks.dim # genuinely non-degenerate
+
+    eVs = np.linspace(-2e-3, 2e-3, 11)
+    Jrho_s = -0.05
+    got = third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0)
+
+    # independent reference: same physics, written from scratch here
+    Xi = np.stack([ks.Sx, ks.Sy, ks.Sz], axis=-1)
+    eps3 = np.zeros((3, 3, 3))
+    for a, b, c in [(0, 1, 2), (1, 2, 0), (2, 0, 1)]:
+        eps3[a, b, c] = 1.
+    for a, b, c in [(0, 2, 1), (2, 1, 0), (1, 0, 2)]:
+        eps3[a, b, c] = -1.
+    coeff = np.imag(np.einsum('jkl,ifl,fmk,mij->ifm', eps3, Xi, Xi, Xi))/4.
+    kT = ks.kB*ks.T
+    from dmrgpy.kondospectrumtk.stepfunctions import FBuilder
+    Fb = FBuilder(ks.T) # build once, reuse (F() alone would be far too slow here)
+    ref = np.zeros(len(eVs))
+    for e_idx, eV in enumerate(eVs):
+        acc = 0.
+        for i in range(ks.dim):
+            for f in range(ks.dim):
+                eps_if_ref = ks.e[f] - ks.e[i] # unambiguous by construction
+                th = Theta(np.array([(eV - eps_if_ref)/kT]))[0]
+                for m in range(ks.dim):
+                    eps_im_ref = ks.e[m] - ks.e[i]
+                    fsum = (Fb(np.array([eV - eps_im_ref]))[0]
+                            + Fb(np.array([eV + eps_im_ref]))[0])
+                    acc += ks.p[i]*coeff[i, f, m]*th*fsum
+        ref[e_idx] = 4*np.pi*1.0**2*Jrho_s*acc
+    assert np.allclose(got, ref, atol=1e-8)
+
+
 def test_get_kondo_spectrum_order3_is_finite_and_real():
     sc = spinchain.Spin_Chain(["1/2"])
     sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])

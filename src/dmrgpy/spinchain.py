@@ -185,16 +185,20 @@ class Spin_Chain(Many_Body_Chain):
         Returns (eV, dIdV)."""
         from .kondospectrumtk.edkondo import KondoSpectrum
         from .kondospectrumtk import conductance
+        from .kondospectrumtk.stepfunctions import FBuilder
         if order not in (2, 3): raise ValueError("order must be 2 or 3")
         ks = KondoSpectrum(self, site, T, kB=kB)
         eV = np.asarray(eV, dtype=float)
         dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
+            # shared between both calls below: building it tabulates an
+            # expensive adaptive-quadrature integral (see FBuilder)
+            Fb = FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB)
             dIdV = dIdV + conductance.third_order_kondo_dIdV(
-                    ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0)
+                    ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0, Fb=Fb)
             if U != 0.0:
                 dIdV = dIdV + conductance.third_order_potential_dIdV(
-                        ks, eV, Jrho_s, U, T0=T0, omega0=omega0,
+                        ks, eV, Jrho_s, U, T0=T0, omega0=omega0, Fb=Fb,
                         Gamma0=Gamma0)
         return eV, dIdV
 

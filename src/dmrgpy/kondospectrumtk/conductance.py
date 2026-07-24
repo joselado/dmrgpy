@@ -71,7 +71,8 @@ def _triple_product_coefficients(ks):
     return np.einsum('jkl,ifl,fmk,mij->ifm', _EPS3, Xi, Xi, Xi, optimize=True)
 
 
-def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6):
+def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
+                            Fb=None):
     """Third-order Kondo term, eqs. "3rd-normal" (direct diagram) +
     "3rd-reversed" (exchange diagram -- despite the name this is NOT the
     s->t tunneling direction: the paper's own "t -R-> s" notation on eq.
@@ -93,13 +94,20 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6):
 
     This is an O(dim^3 * len(eVs)) calculation, inherent to the triple sum
     over eigenstates -- expected to be the bottleneck for larger Hilbert
-    spaces."""
+    spaces.
+
+    Fb: an existing FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
+    to reuse instead of building a new one -- building it tabulates
+    _band_integral over hundreds of adaptive-quadrature points, so
+    callers that also need third_order_potential_dIdV with the same
+    T/omega0/Gamma0 (e.g. Spin_Chain.get_kondo_spectrum) should build it
+    once and pass it to both."""
     eVs = np.asarray(eVs, dtype=float)
     kT = ks.kB*ks.T
     coeff = np.imag(_triple_product_coefficients(ks))/4. # Re[X/(4i)] = Im[X]/4
-    eps_if = ks.e[:, None] - ks.e[None, :] # eps_if[i,f] = e_f - e_i
+    eps_if = ks.e[None, :] - ks.e[:, None] # eps_if[i,f] = e_f - e_i
     eps_im = ks.e[None, :] - ks.e[:, None] # eps_im[i,m] = e_m - e_i
-    Fb = FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
+    if Fb is None: Fb = FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
     dim = ks.dim
     Fim = Fb((eVs[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
     Fmi = Fb((eVs[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
@@ -110,7 +118,7 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6):
 
 
 def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
-                                Gamma0=5e-6):
+                                Gamma0=5e-6, Fb=None):
     """Third-order potential-scattering interference term, eq. "U-M"
     (the origin of the bias asymmetry in Fig. 3c/d).
 
@@ -136,12 +144,15 @@ def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
     that function's docstring for why the s->t direction is not attempted
     here (the paper's own worked example shows it is not a plain eV ->
     -eV mirror, which is exactly the bias asymmetry this term is meant to
-    produce in the first place)."""
+    produce in the first place).
+
+    Fb: see third_order_kondo_dIdV's docstring -- pass the same FBuilder
+    to both to avoid rebuilding its expensive tabulation twice."""
     eVs = np.asarray(eVs, dtype=float)
     Xi = np.stack([ks.Sx, ks.Sy, ks.Sz], axis=-1) # Xi[a,b,alpha]=<a|S_alpha|b>
     loop = np.real(np.einsum('imk,mik->im', Xi, Xi)) # sum_k |<i|Sk|m>|^2
     eps_im = ks.e[None, :] - ks.e[:, None] # eps_im[i,m] = e_m - e_i
-    Fb = FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
+    if Fb is None: Fb = FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
     dim = ks.dim
     Fim = Fb((eVs[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
     Fmi = Fb((eVs[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)

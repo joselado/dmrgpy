@@ -137,7 +137,6 @@ class FBuilder():
                           for e in grid])
         self._spline = CubicSpline(grid, vals, extrapolate=False)
         self._grid_min, self._grid_max = grid[0], grid[-1]
-        self._val_min, self._val_max = vals[0], vals[-1]
         width = nwidth*self.kT
         self._fp_grid = np.linspace(-width, width, npts)
         self._fp = _fermi_prime(self._fp_grid, self.kT)
