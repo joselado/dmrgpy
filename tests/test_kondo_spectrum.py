@@ -189,3 +189,29 @@ def test_get_kondo_spectrum_order3_is_finite_and_real():
             eVs, site=0, Jrho_s=-0.05, U=0.2, T=1.0, order=3)
     assert dIdV.dtype == np.float64
     assert np.all(np.isfinite(dIdV))
+
+
+def test_get_kondo_spectrum_mode_ed_T0_matches_direct_call():
+    """mode="ED" (the default) accepts T=0 directly, matching a manual
+    KondoSpectrum(T=0) + conductance call."""
+    sc = spinchain.Spin_Chain(["1/2"])
+    sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
+    eVs = np.linspace(-1e-3, 1e-3, 11)
+    eV_out, dIdV = sc.get_kondo_spectrum(eVs, site=0, Jrho_s=-0.05, T=0.0,
+                                          order=3)
+    ks = KondoSpectrum(sc, site=0, T=0.0)
+    ref = (second_order_dIdV(ks, eVs, T0=1.0, U=0.0)
+           + third_order_kondo_dIdV(ks, eVs, -0.05, T0=1.0))
+    assert np.allclose(dIdV, ref)
+
+
+def test_get_kondo_spectrum_mode_dmrg_rejects_nonzero_T_and_U():
+    sc = spinchain.Spin_Chain(["1/2"])
+    sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
+    eVs = np.linspace(-1e-3, 1e-3, 5)
+    with pytest.raises(ValueError):
+        sc.get_kondo_spectrum(eVs, site=0, T=1.0, mode="DMRG")
+    with pytest.raises(NotImplementedError):
+        sc.get_kondo_spectrum(eVs, site=0, T=0.0, U=0.1, order=3, mode="DMRG")
+    with pytest.raises(ValueError):
+        sc.get_kondo_spectrum(eVs, site=0, mode="bogus")
