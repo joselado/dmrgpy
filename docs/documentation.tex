@@ -1203,6 +1203,56 @@ terms are single-direction only, the potential-scattering interference
 term's general-spin form is an extrapolation from the paper's own worked
 example).
 
+\textbf{\texttt{mode="DMRG"}} (\texttt{T=0} only) is a second,
+independent route through this same feature that \emph{does} stay within
+\texttt{itensor\_version=3}, never diagonalizing beyond the ground state
+-- viable because at \texttt{T=0} both terms simplify enough to avoid
+needing the full spectrum \texttt{mode="ED"} requires:
+
+\begin{itemize}
+\item The second-order term (\texttt{secondorder\_dc.py}) becomes a
+  \texttt{Theta0}-weighted cumulative integral of the ordinary
+  \texttt{T=0} dynamical structure factor, so it reuses
+  \texttt{get\_dynamical\_correlator} (\texttt{submode="KPM"}/\texttt{"CVM"})
+  as-is.
+\item The third-order Kondo term (\texttt{twotime.py},
+  \texttt{dmrgtwotime.py}) is a genuinely new construction: a Heisenberg
+  three-point function
+  \texttt{G(t2,tau)=<GS|Sl(t2+tau)Sk(t2)Sj(0)|GS>} built via real TDVP
+  time evolution (a "checkpoint-and-branch" pattern: evolve
+  \texttt{Sj|GS>} forward and backward through \texttt{t2}, apply
+  \texttt{Sk} at each checkpoint, evolve each branch further through
+  \texttt{tau}, overlap with a fixed \texttt{Sl|GS>} reference at every
+  step -- reusing the single-step \texttt{tdvp\_step} primitive
+  \texttt{tdz.py} already drives manually the same way), then converted
+  to a frequency-domain quantity via two closed-form time-domain kernels
+  (\texttt{Theta0}'s Cauchy-principal-value kernel, computed via an
+  FFT-based Hilbert transform; \texttt{F0}'s kernel, smooth and
+  closed-form) rather than by evaluating those functions pointwise on a
+  discrete frequency grid -- an initial FFT-grid attempt at the same
+  physics did not converge robustly (a discontinuous step function and a
+  log singularity both have slowly-decaying spectral content that a
+  finite discrete grid resolves poorly), which is why this construction
+  exists in the first place rather than a simpler direct approach.
+  \texttt{twotime.py}'s functions are backend-agnostic (they only ever
+  consume a discretely-sampled \texttt{G(t2,tau)} array or batches
+  thereof) -- \texttt{edtwotimeref.py} supplies the same interface via
+  exact ED eigenbasis time evolution, used both as the development-time
+  reference this construction was validated against and as a fast, exact
+  ground truth for \texttt{dmrgtwotime.py}'s own test.
+\end{itemize}
+
+\texttt{dmrgtwotime.py} specifically -- unlike every other piece of this
+feature, each cross-checked against an independent reference to
+sub-percent accuracy -- was written against this codebase's existing,
+verified DMRG API but has not been executed or numerically validated
+against a compiled ITensor v3 backend (none was available in the
+environment it was developed in).
+\texttt{tests/test\_kondo\_spectrum\_dmrgtwotime.py} would validate it
+against the ED two-time reference in an environment where
+\texttt{itensor\_version=3} is compiled; it is skipped automatically
+otherwise.
+
 \subsection{TDZ / complex-time-evolution dynamical correlator}
 
 \texttt{tdz.py} implements \texttt{submode="TDZ"} (Cao, Lu, Stoudenmire

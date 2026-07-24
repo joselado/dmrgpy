@@ -81,3 +81,35 @@ assert np.allclose(third_order_potential_dIdV(ksB, eVs4, Jrho_s=-0.05, U=0.0, T0
 assert not np.allclose(dU_only, dU_only[::-1], atol=1e-8) # bias-asymmetric
 
 print("All Kondo-spectrum checks against the paper's Figs. F/2/3 passed.")
+
+# --- T=0: exact closed-form limit, consistent with small-but-finite T ------
+from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum as KS0
+scB2 = make_chain(10.0)
+eVs5 = np.linspace(-2e-3, 2e-3, 21)
+_, dIdV_T0 = scB2.get_kondo_spectrum(eVs5, site=0, Jrho_s=-0.05, T=0.0, order=3)
+_, dIdV_smallT = scB2.get_kondo_spectrum(eVs5, site=0, Jrho_s=-0.05, T=1e-3, order=3)
+assert np.max(np.abs(dIdV_T0 - dIdV_smallT)) < 1e-2
+
+# --- T=0 third-order Kondo term via the excited-state-free two-time
+# construction (kondospectrumtk/twotime.py + edtwotimeref.py), the
+# building block a DMRG (itensor_version=3) implementation reuses on top
+# of real TDVP time evolution instead of ED's eigenbasis-exact evolution
+# -- checked here against the ordinary excited-state-sum reference, using
+# deliberately modest/fast grid parameters (see that module's own tests
+# for the resolution/accuracy tradeoffs).
+from dmrgpy.kondospectrumtk.conductance import third_order_kondo_dIdV as tokd
+from dmrgpy.kondospectrumtk.edtwotimeref import two_time_kondo_term_ed
+
+scC = make_chain(10.0)
+ksC = KS0(scC, site=0, T=0.0)
+eVs6 = np.linspace(-2e-3, 2e-3, 9)
+omega0_tt, Gamma0_tt = 2e-3, 5e-6
+twotime_term = 4*np.pi*1.0**2*(-0.05)*two_time_kondo_term_ed(
+        ksC, eVs6, omega0=omega0_tt, Gamma0=Gamma0_tt,
+        t2_width=25/Gamma0_tt, t2_npts=40_000, t2_batch=10_000,
+        tau_width=2*np.pi/2e-5, tau_npts=1_000)
+excited_state_sum_term = tokd(ksC, eVs6, -0.05, T0=1.0, omega0=omega0_tt,
+                               Gamma0=Gamma0_tt)
+assert np.max(np.abs(twotime_term - excited_state_sum_term)) < 0.02
+
+print("All T=0 / two-time-correlator checks passed.")

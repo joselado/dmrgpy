@@ -1064,11 +1064,20 @@ different observable from the dynamical correlators of
 Section~\ref{sec:dynamical}: instead of a retarded Green's function of
 the spin system alone, it is the full Fermi's-golden-rule tunneling
 current through tip+spin+sample, expanded to third order in the
-tip-sample tunneling amplitude, evaluated by full exact diagonalization
-of the chain's Hamiltonian (every eigenstate is needed as a possible
-virtual intermediate state, not just the low-energy ones -- DMRG is not
-used here regardless of the chain's own \texttt{itensor\_version}/mode
-setting).
+tip-sample tunneling amplitude.
+
+Two backends are available via \texttt{mode=}:
+
+\begin{itemize}
+\item \texttt{mode="ED"} (default): full exact diagonalization of the
+  chain's Hamiltonian (every eigenstate is needed as a possible virtual
+  intermediate state, not just the low-energy ones), independent of the
+  chain's own \texttt{itensor\_version}/mode setting. Works at any
+  $T\geq0$.
+\item \texttt{mode="DMRG"}: \texttt{itensor\_version=3} throughout, never
+  diagonalizing beyond the ground state -- only $T=0$ is supported. See
+  "T=0 and the DMRG backend" below.
+\end{itemize}
 
 \begin{lstlisting}
 sc = spinchain.Spin_Chain(["1/2"])
@@ -1133,5 +1142,61 @@ specific numbers:
   out in closed form in the paper) and carries lower confidence than the
   other terms; treat it as provisional.
 \end{itemize}
+
+\textbf{T=0 and the DMRG backend} (\texttt{mode="DMRG"}). At $T=0$ only
+the ground state is thermally populated, which simplifies both terms
+enough to avoid diagonalizing beyond the ground state entirely -- the
+actual motivation for supporting \texttt{mode="DMRG"} in the first
+place, since DMRG cannot enumerate excited states the way
+\texttt{mode="ED"} does:
+
+\begin{itemize}
+\item \textbf{Second order} reduces to a $\Theta_0$-weighted (the exact,
+  closed-form Heaviside limit of $\Theta$) cumulative integral of the
+  ordinary $T=0$ dynamical structure factor
+  $S_{\alpha\alpha}(\omega)=\sum_f|\langle f|S_\alpha|\mathrm{GS}\rangle|^2\delta(\omega-\epsilon_{f0})$,
+  which \texttt{get\_dynamical\_correlator} already computes
+  (\texttt{submode="KPM"} or \texttt{"CVM"}) without any excited-state
+  enumeration (\texttt{kondospectrumtk/secondorder\_dc.py}).
+\item \textbf{Third order} cannot be reduced to a two-operator correlator
+  (it is a three-vertex object, with two \emph{different} intermediate
+  states each weighted by a different function, $\Theta_0$ and $F_0$) --
+  instead it is built from a Heisenberg three-point function
+  $G(t_2,\tau)=\langle\mathrm{GS}|S_l(t_2+\tau)S_k(t_2)S_j(0)|\mathrm{GS}\rangle$,
+  obtained via real-time TDVP evolution with a "checkpoint-and-branch"
+  construction (evolve $S_j|\mathrm{GS}\rangle$ forward/backward in
+  $t_2$, apply $S_k$ at each checkpoint, evolve each branch further in
+  $\tau$, overlap with a fixed $S_l|\mathrm{GS}\rangle$ reference at
+  every step), then extracted via two closed-form time-domain kernels
+  (derived by inverse-Fourier-transforming $\Theta_0$ and $F_0$) rather
+  than by evaluating those functions pointwise on a discrete frequency
+  grid, which does not converge robustly for this construction -- see
+  \texttt{kondospectrumtk/twotime.py}'s module docstring for the full
+  derivation and the numerical pitfalls it was built to avoid
+  ($\Theta_0$'s kernel is a Cauchy principal value, computed via an
+  FFT-based Hilbert transform for machine-precision accuracy). This is
+  the expensive part: cost scales with the number of $t_2$ checkpoints,
+  each its own short TDVP trajectory
+  (\texttt{kondospectrumtk/dmrgtwotime.py}).
+\end{itemize}
+
+Further \texttt{mode="DMRG"} limitations beyond the general ones above:
+the potential-interference term (\texttt{U!=0}, \texttt{order=3}) is not
+implemented for DMRG (raises \texttt{NotImplementedError}); the
+second-order term's \texttt{es} frequency-grid parameter has no safe
+default and must be supplied explicitly (it needs to cover every
+relevant transition energy, which is a property of the chain's spectrum,
+not of the \texttt{eV} sweep range -- see \texttt{second\_order\_dIdV\_dc}'s
+docstring). Most importantly, \texttt{kondospectrumtk/dmrgtwotime.py} was
+written against this codebase's existing, already-verified DMRG API
+(\texttt{toMPO}, the \texttt{tdvp\_step} primitive, MPS operator
+application/overlap) but has not been executed or numerically validated
+against a compiled ITensor v3 backend -- unlike every other piece of this
+feature (each cross-checked against an independent reference to
+sub-percent accuracy), it should be treated as provisional until
+confirmed in an environment where \texttt{itensor\_version=3} is actually
+compiled (\texttt{tests/test\_kondo\_spectrum\_dmrgtwotime.py}, which
+compares it against the ED two-time reference, is skipped automatically
+otherwise).
 
 \end{document}

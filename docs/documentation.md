@@ -990,6 +990,50 @@ third-order terms are single-direction only, the potential-scattering
 interference term's general-spin form is an extrapolation from the
 paper's own worked example).
 
+**`mode="DMRG"`** (`T=0` only) is a second, independent route through
+this same feature that *does* stay within `itensor_version=3`, never
+diagonalizing beyond the ground state -- viable because at `T=0` both
+terms simplify enough to avoid needing the full spectrum `mode="ED"`
+requires:
+
+- The second-order term (`secondorder_dc.py`) becomes a `Theta0`-weighted
+  cumulative integral of the ordinary `T=0` dynamical structure factor,
+  so it reuses `get_dynamical_correlator` (`submode="KPM"`/`"CVM"`)
+  as-is.
+- The third-order Kondo term (`twotime.py`, `dmrgtwotime.py`) is a
+  genuinely new construction: a Heisenberg three-point function
+  `G(t2,tau)=<GS|Sl(t2+tau)Sk(t2)Sj(0)|GS>` built via real TDVP time
+  evolution (a "checkpoint-and-branch" pattern: evolve `Sj|GS>` forward
+  and backward through `t2`, apply `Sk` at each checkpoint, evolve each
+  branch further through `tau`, overlap with a fixed `Sl|GS>` reference
+  at every step -- reusing the single-step `tdvp_step` primitive
+  `tdz.py` already drives manually the same way), then converted to a
+  frequency-domain quantity via two closed-form time-domain kernels
+  (`Theta0`'s Cauchy-principal-value kernel, computed via an FFT-based
+  Hilbert transform; `F0`'s kernel, smooth and closed-form) rather than
+  by evaluating those functions pointwise on a discrete frequency grid --
+  an initial FFT-grid attempt at the same physics did not converge
+  robustly (a discontinuous step function and a log singularity both
+  have slowly-decaying spectral content that a finite discrete grid
+  resolves poorly), which is why this construction exists in the first
+  place rather than a simpler direct approach. `twotime.py`'s functions
+  are backend-agnostic (they only ever consume a discretely-sampled
+  `G(t2,tau)` array or batches thereof) -- `edtwotimeref.py` supplies
+  the same interface via exact ED eigenbasis time evolution, used both
+  as the development-time reference this construction was validated
+  against and as a fast, exact ground truth for `dmrgtwotime.py`'s own
+  test.
+
+`dmrgtwotime.py` specifically -- unlike every other piece of this
+feature, each cross-checked against an independent reference to
+sub-percent accuracy -- was written against this codebase's existing,
+verified DMRG API but has not been executed or numerically validated
+against a compiled ITensor v3 backend (none was available in the
+environment it was developed in). `tests/test_kondo_spectrum_dmrgtwotime.py`
+would validate it against the ED two-time reference in an environment
+where `itensor_version=3` is compiled; it is skipped automatically
+otherwise.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

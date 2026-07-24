@@ -903,11 +903,17 @@ theory of Ternes, *New J. Phys.* **17**, 063016 (2015),
 different observable from the dynamical correlators of §6: instead of a
 retarded Green's function of the spin system alone, it is the full
 Fermi's-golden-rule tunneling current through tip+spin+sample, expanded
-to third order in the tip-sample tunneling amplitude, evaluated by full
-exact diagonalization of the chain's Hamiltonian (every eigenstate is
-needed as a possible virtual intermediate state, not just the low-energy
-ones — DMRG is not used here regardless of the chain's own
-`itensor_version`/mode setting).
+to third order in the tip-sample tunneling amplitude.
+
+Two backends are available via `mode=`:
+
+- `mode="ED"` (default): full exact diagonalization of the chain's
+  Hamiltonian (every eigenstate is needed as a possible virtual
+  intermediate state, not just the low-energy ones), independent of the
+  chain's own `itensor_version`/mode setting. Works at any `T>=0`.
+- `mode="DMRG"`: `itensor_version=3` throughout, never diagonalizing
+  beyond the ground state — only `T=0` is supported. See "T=0 and the
+  DMRG backend" below.
 
 ```python
 sc = spinchain.Spin_Chain(["1/2"])
@@ -967,3 +973,54 @@ numbers:
   example (only that special case is spelled out in closed form in the
   paper) and carries lower confidence than the other terms; treat it as
   provisional.
+
+**T=0 and the DMRG backend** (`mode="DMRG"`). At $T=0$ only the ground
+state is thermally populated, which simplifies both terms enough to
+avoid diagonalizing beyond the ground state entirely — the actual
+motivation for supporting `mode="DMRG"` in the first place, since DMRG
+cannot enumerate excited states the way `mode="ED"` does:
+
+- **Second order** reduces to a $\Theta_0$-weighted (the exact,
+  closed-form Heaviside limit of $\Theta$) cumulative integral of the
+  ordinary $T=0$ dynamical structure factor
+  $S_{\alpha\alpha}(\omega)=\sum_f|\langle f|S_\alpha|\mathrm{GS}\rangle|^2\delta(\omega-\epsilon_{f0})$,
+  which `get_dynamical_correlator` already computes (`submode="KPM"` or
+  `"CVM"`) without any excited-state enumeration
+  (`kondospectrumtk/secondorder_dc.py`).
+- **Third order** cannot be reduced to a two-operator correlator (it is
+  a three-vertex object, with two *different* intermediate states each
+  weighted by a different function, $\Theta_0$ and $F_0$) — instead it
+  is built from a Heisenberg three-point function
+  $G(t_2,\tau)=\langle\mathrm{GS}|S_l(t_2+\tau)S_k(t_2)S_j(0)|\mathrm{GS}\rangle$,
+  obtained via real-time TDVP evolution with a "checkpoint-and-branch"
+  construction (evolve $S_j|\mathrm{GS}\rangle$ forward/backward in
+  $t_2$, apply $S_k$ at each checkpoint, evolve each branch further in
+  $\tau$, overlap with a fixed $S_l|\mathrm{GS}\rangle$ reference at
+  every step), then extracted via two closed-form time-domain kernels
+  (derived by inverse-Fourier-transforming $\Theta_0$ and $F_0$) rather
+  than by evaluating those functions pointwise on a discrete frequency
+  grid, which does not converge robustly for this construction — see
+  `kondospectrumtk/twotime.py`'s module docstring for the full
+  derivation and the numerical pitfalls it was built to avoid ($\Theta_0$'s
+  kernel is a Cauchy principal value, computed via an FFT-based Hilbert
+  transform for machine-precision accuracy). This is the expensive part:
+  cost scales with the number of $t_2$ checkpoints, each its own short
+  TDVP trajectory (`kondospectrumtk/dmrgtwotime.py`).
+
+Further `mode="DMRG"` limitations beyond the general ones above: the
+potential-interference term (`U!=0`, `order=3`) is not implemented for
+DMRG (raises `NotImplementedError`); the second-order term's `es`
+frequency-grid parameter has no safe default and must be supplied
+explicitly (it needs to cover every relevant transition energy, which is
+a property of the chain's spectrum, not of the `eV` sweep range — see
+`second_order_dIdV_dc`'s docstring). Most importantly,
+`kondospectrumtk/dmrgtwotime.py` was written against this codebase's
+existing, already-verified DMRG API (`toMPO`, the `tdvp_step` primitive,
+MPS operator application/overlap) but has not been executed or
+numerically validated against a compiled ITensor v3 backend — unlike
+every other piece of this feature (each cross-checked against an
+independent reference to sub-percent accuracy), it should be treated as
+provisional until confirmed in an environment where `itensor_version=3`
+is actually compiled (`tests/test_kondo_spectrum_dmrgtwotime.py`, which
+compares it against the ED two-time reference, is skipped automatically
+otherwise).
