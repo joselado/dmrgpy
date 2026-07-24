@@ -46,6 +46,8 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
       return dynamical_correlator_inv(h,wf0,self.e0,A,B,mode="full",**kwargs)
     elif submode=="CVM":
       return dynamical_correlator_inv(h,wf0,self.e0,A,B,mode="cv",**kwargs)
+    elif submode=="ROOTN":
+      return dynamical_correlator_rootn(h,self.e0,wf0,A,B,**kwargs)
     elif submode=="TD":
       from .. import timedependent
       return timedependent.dynamical_correlator(self,mode="ED",
@@ -84,6 +86,27 @@ def dynamical_correlator_kpm(h,e0,wf0,A,B,chain=None,
     return xs,np.conjugate(ys)*scale/np.pi # return correlator
 
 
+
+
+def dynamical_correlator_rootn(h,e0,wf0,A,B,delta=1e-1,
+        es=np.linspace(-1.,10,400),N=8,nkry=20):
+    """Compute the dynamical correlator with the root-N Krylov-space
+    correction-vector method (Nocera & Alvarez, arXiv:2204.03165), against
+    the exact ED Hamiltonian -- see algebra/rootn.py for the algorithm.
+    N is the number of root-N steps (N=1 recovers the "conventional"
+    Krylov-space correction-vector method of Nocera, PRE 2016); nkry is
+    the Lanczos subspace dimension used at every step (the ED analogue of
+    the bond dimension m in the paper's MPS/DMRG setting).
+
+    Follows the same <GS|A(omega-H+E0+i*eta)^{-1}B|GS> convention (A used
+    as-is, no dagger) as dynamical_correlator_ED/dynamical_correlator_inv
+    above, so results are directly comparable to submode="ED"/"CVM"/"INV"
+    -- unlike dynamical_correlator_kpm, which conjugate-transposes A for
+    its own (different) vi/vj construction."""
+    from ..algebra.rootn import rootn_correction_vector
+    out = [rootn_correction_vector(h,wf0,e0,A,B,e,delta,N=N,nkry=nkry)
+            for e in es]
+    return es,np.array(out)
 
 
 def dynamical_correlator_ED(h,a0,b0,delta=2e-2,

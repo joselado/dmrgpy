@@ -446,6 +446,76 @@ the neighboring point's correction vector was tried and measured to
 much worse residual than from the cold start — so each point is solved
 independently.)
 
+**`submode="ROOTN"` — root-$N$ Krylov-space correction vector.**
+Implements Nocera & Alvarez, "Root-$N$ Krylov-space correction-vectors
+for spectral functions with the density matrix renormalization group"
+([arXiv:2204.03165](https://arxiv.org/abs/2204.03165)). Rather than
+building the correction vector $x(\omega+i\eta)=(\omega-H+E_0+i\eta)^{-1}B|\mathrm{GS}\rangle$
+in one shot, it is built as $N$ sequential fractional-power steps,
+
+$$x^{p/N}(\omega+i\eta)=\Big(\frac{1}{\omega-H+E_0+i\eta}\Big)^{p/N}B|\mathrm{GS}\rangle,\qquad p=1,\dots,N,$$
+
+where each step re-seeds a Krylov (Lanczos) subspace of dimension `nkry`
+with the *previous* step's vector, tridiagonalizes $H$ in that subspace,
+and applies the $1/N$-power resolvent in the resulting eigenbasis before
+handing the result forward as the next step's seed. `N=1` reduces to the
+"conventional" Krylov-space correction vector (Nocera, PRE 2016) that the
+paper compares against. In the paper's MPS/DMRG setting, `nkry`'s role is
+played by the bond dimension $m$, and building the correction vector in
+$N$ smaller steps lets the entanglement grow gradually instead of needing
+a single very large $m$ at high target frequency; here, `nkry` directly
+caps the Lanczos subspace size at each step, and the same qualitative
+effect is observed: at a fixed, small `nkry`, increasing $N$ reduces the
+error against the exact answer, especially near the top of the many-body
+bandwidth. With `nkry` equal to the full Hilbert space dimension, root-$N$
+reproduces the exact answer for any $N$, since the Krylov subspace is
+then exact — a useful self-consistency check of the recursion itself,
+independent of the Krylov truncation.
+
+```python
+(x, y) = sc.get_dynamical_correlator(mode="ED", submode="ROOTN",
+                                      name=(sc.Sz[0], sc.Sz[0]),
+                                      N=8, nkry=20)
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="ROOTN",
+                                      name=(sc.Sz[0], sc.Sz[0]),
+                                      N=8, nkry=20) # itensor_version in (2,3,"python")
+```
+
+Two implementations exist, both cross-checked to agree at machine
+precision on small chains (see
+`examples/dynamical_correlator/dynamical_correlator_rootn_ED` and
+`examples/dynamical_correlator/dynamical_correlator_rootn_v3_VS_ED`):
+
+- `mode="ED"` (`src/dmrgpy/algebra/rootn.py`): the recursion above against
+  the exact ED Hamiltonian, with the Krylov subspace built from plain
+  numpy vectors.
+- `mode="DMRG"` (`src/dmrgpy/rootndmrg.py`, `itensor_version` in
+  `(2,3,"python")`): the *same* recursion, but with the Krylov subspace
+  built out of *global* MPS vectors — each Lanczos step is a truncated
+  MPO application (`self.toMPO(self.hamiltonian)*v`) rather than a
+  local, per-bond update. This is deliberately *not* how the paper's own
+  Appendix algorithm works (a multi-target state-averaged DMRG sweep,
+  jointly representing $|\mathrm{GS}\rangle$, $B|\mathrm{GS}\rangle$,
+  $\mathrm{Re}(x)$, $\mathrm{Im}(x)$ in one block MPS compressed together
+  at every bond, so the correction vector's local tensor is built
+  directly from the ground state's own environment): a first attempt at
+  a more literal, per-bond local-sweep implementation (in
+  `mpscpp3/chain_session.h`, using `LocalMPO` and a Lanczos-based
+  fractional-power update at each bond, modeled on `applyExp`/TDVP) gave
+  numerically *wrong* results (sign-flipping, unstable) when cross-checked
+  against exact ED — reapplying the local update bond-by-bond on a single
+  self-referential MPS does not correctly realize "apply $f(H)$ once"
+  globally, unlike TDVP (a well-defined local Trotter step) or
+  ground-state DMRG (repeated local energy minimization provably
+  converges to the global minimum). The global-Krylov approach here
+  avoids that failure mode entirely by only ever using already-tested
+  whole-MPS primitives (truncated MPO application, inner products, MPS
+  addition) — the same primitives `submode="CVM"`'s conjugate gradient
+  already relies on — at the cost of not reproducing the paper's own
+  bond-dimension bookkeeping across the four channels, and of every
+  Lanczos step costing a full MPO application rather than a cheap local
+  tensor contraction.
+
 **`submode="TD"` — time-dependent DMRG.** Real-time evolution gives the
 correlator directly in the time domain,
 
