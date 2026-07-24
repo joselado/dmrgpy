@@ -1178,12 +1178,20 @@ place, since DMRG cannot enumerate excited states the way
   the expensive part: cost scales with the number of $t_2$ checkpoints,
   each its own short TDVP trajectory
   (\texttt{kondospectrumtk/dmrgtwotime.py}).
+\item \textbf{Potential-interference term} (\texttt{U!=0}, part of
+  \texttt{order=3}) is also supported: its own $T=0$ limit collapses the
+  excited-state sum to a convolution of the \emph{same} $T=0$ dynamical
+  structure factor against the $F_0$ kernel instead of $\Theta_0$'s
+  cumulative-sum weighting, so it reuses \texttt{get\_dynamical\_correlator}
+  exactly like the second-order term above, needing no excited-state
+  enumeration either (\texttt{kondospectrumtk/potentialdc.py}). Carries
+  the same general-spin extrapolation caveat as
+  \texttt{conductance.third\_order\_potential\_dIdV} (see that function's
+  docstring).
 \end{itemize}
 
 Further \texttt{mode="DMRG"} limitations beyond the general ones above:
-the potential-interference term (\texttt{U!=0}, \texttt{order=3}) is not
-implemented for DMRG (raises \texttt{NotImplementedError}); the
-second-order term's \texttt{es} frequency-grid parameter has no safe
+the second-order term's \texttt{es} frequency-grid parameter has no safe
 default and must be supplied explicitly (it needs to cover every
 relevant transition energy, which is a property of the chain's spectrum,
 not of the \texttt{eV} sweep range -- see \texttt{second\_order\_dIdV\_dc}'s

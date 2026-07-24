@@ -1064,6 +1064,27 @@ tens of percent at thresholds, consistent with the expected
 delta-broadening/moment-truncation error on top of what the ED path
 already has.
 
+The potential-interference term (`U!=0`, part of `order=3`) is also
+supported for `mode="DMRG"`, via `potentialdc.py`: its own `T=0` limit
+collapses the excited-state sum to a convolution of the *same* `T=0`
+dynamical structure factor against the `F0` kernel instead of `Theta0`'s
+cumulative-sum weighting (`Theta0(eV-x)` is a step, integrated
+cumulatively; `F0` is not, so this piece genuinely convolves rather than
+cumulatively sums) -- so it reuses `get_dynamical_correlator` exactly
+like the second-order term above, needing no excited-state enumeration
+either, and no new DMRG-side primitive. Verified (`mode="ED"`,
+`submode="ED"`) against the excited-state-sum
+`conductance.third_order_potential_dIdV` to ~0.07% relative error
+(`tests/test_kondo_spectrum_potentialdc.py`); a real `mode="DMRG"`,
+`submode="KPM"` run through the full public API was tried directly but
+found impractically expensive for a routine test -- a single KPM
+dynamical-correlator call took ~40s on the development machine even with
+a trivially small number of moments, confirmed directly -- so the
+`Spin_Chain._get_kondo_spectrum_dmrg` wiring that combines this term
+with the other two is instead checked with the three underlying
+(expensive) calls monkeypatched out
+(`tests/test_kondo_spectrum.py::test_get_kondo_spectrum_dmrg_combines_terms_correctly`).
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

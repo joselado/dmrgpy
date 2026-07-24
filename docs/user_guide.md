@@ -1006,10 +1006,18 @@ cannot enumerate excited states the way `mode="ED"` does:
   transform for machine-precision accuracy). This is the expensive part:
   cost scales with the number of $t_2$ checkpoints, each its own short
   TDVP trajectory (`kondospectrumtk/dmrgtwotime.py`).
+- **Potential-interference term** (`U!=0`, part of `order=3`) is also
+  supported: its own $T=0$ limit collapses the excited-state sum to a
+  convolution of the *same* $T=0$ dynamical structure factor against the
+  $F_0$ kernel instead of $\Theta_0$'s cumulative-sum weighting, so it
+  reuses `get_dynamical_correlator` exactly like the second-order term
+  above, needing no excited-state enumeration either
+  (`kondospectrumtk/potentialdc.py`). Carries the same general-spin
+  extrapolation caveat as `conductance.third_order_potential_dIdV` (see
+  that function's docstring).
 
 Further `mode="DMRG"` limitations beyond the general ones above: the
-potential-interference term (`U!=0`, `order=3`) is not implemented for
-DMRG (raises `NotImplementedError`); the second-order term's `es`
+second-order term's `es`
 frequency-grid parameter has no safe default and must be supplied
 explicitly (it needs to cover every relevant transition energy, which is
 a property of the chain's spectrum, not of the `eV` sweep range — see

@@ -205,16 +205,69 @@ def test_get_kondo_spectrum_mode_ed_T0_matches_direct_call():
     assert np.allclose(dIdV, ref)
 
 
-def test_get_kondo_spectrum_mode_dmrg_rejects_nonzero_T_and_U():
+def test_get_kondo_spectrum_mode_dmrg_rejects_nonzero_T_and_missing_kwargs():
     sc = spinchain.Spin_Chain(["1/2"])
     sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
     eVs = np.linspace(-1e-3, 1e-3, 5)
     with pytest.raises(ValueError):
         sc.get_kondo_spectrum(eVs, site=0, T=1.0, mode="DMRG")
-    with pytest.raises(NotImplementedError):
+    # U!=0, order=3 is implemented for mode="DMRG" (potentialdc.py), but
+    # still requires the same mandatory `es` kwarg as the plain
+    # second-order term (checked before the potential term is reached) --
+    # see test_kondo_spectrum_potentialdc.py and
+    # test_kondo_spectrum_dmrgtwotime.py for the functional coverage of
+    # this path with a compiled backend.
+    with pytest.raises(ValueError):
         sc.get_kondo_spectrum(eVs, site=0, T=0.0, U=0.1, order=3, mode="DMRG")
     with pytest.raises(ValueError):
         sc.get_kondo_spectrum(eVs, site=0, mode="bogus")
+
+
+def test_get_kondo_spectrum_dmrg_combines_terms_correctly(monkeypatch):
+    """Unit-level check of Spin_Chain._get_kondo_spectrum_dmrg's wiring --
+    the correct linear combination of the second-order term, third-order
+    Kondo term, and (if U!=0) the potential-interference term -- with the
+    three underlying (expensive) computations monkeypatched out entirely.
+    The individual pieces are numerically validated against their ED
+    references elsewhere (test_kondo_spectrum_potentialdc.py,
+    test_kondo_spectrum_dmrgtwotime.py); a real end-to-end run through
+    mode="DMRG" submode="KPM" was tried here first and found
+    impractically expensive for a routine test -- a single KPM dynamical-
+    correlator call took ~40s on this repo's test hardware even with a
+    trivially small number of moments, confirmed directly -- so this
+    checks the arithmetic only, with no real DMRG computation and no
+    compiled-backend dependency (the local `from .kondospectrumtk.X
+    import Y` imports inside _get_kondo_spectrum_dmrg re-resolve Y from
+    X's namespace on every call, so patching X.Y here is picked up)."""
+    import dmrgpy.kondospectrumtk.secondorder_dc as secondorder_dc
+    import dmrgpy.kondospectrumtk.potentialdc as potentialdc
+    import dmrgpy.kondospectrumtk.dmrgtwotime as dmrgtwotime
+
+    eVs = np.linspace(-1e-3, 1e-3, 3)
+    monkeypatch.setattr(secondorder_dc, "second_order_dIdV_dc",
+                         lambda *a, **kw: np.full(len(eVs), 1.0))
+    monkeypatch.setattr(dmrgtwotime, "two_time_kondo_term_dmrg",
+                         lambda *a, **kw: np.full(len(eVs), 2.0))
+    monkeypatch.setattr(potentialdc, "third_order_potential_dIdV_dc",
+                         lambda *a, **kw: np.full(len(eVs), 3.0))
+
+    sc = spinchain.Spin_Chain(["1/2"])
+    sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
+    T0, Jrho_s = 2.0, 0.5
+    common = dict(es=np.array([0.]), dt2=1., n_t2_half=1, dtau=1.,
+                  n_tau_half=1)
+
+    _, dIdV = sc._get_kondo_spectrum_dmrg(eVs, 0, Jrho_s, 0.0, T0, 20e-3,
+                                           5e-6, order=3, **common)
+    assert np.allclose(dIdV, 1.0 + 4*np.pi*T0**2*Jrho_s*2.0) # U=0: no potential term
+
+    _, dIdV = sc._get_kondo_spectrum_dmrg(eVs, 0, Jrho_s, 0.3, T0, 20e-3,
+                                           5e-6, order=3, **common)
+    assert np.allclose(dIdV, 1.0 + 4*np.pi*T0**2*Jrho_s*2.0 + 3.0)
+
+    _, dIdV = sc._get_kondo_spectrum_dmrg(eVs, 0, Jrho_s, 0.3, T0, 20e-3,
+                                           5e-6, order=2, **common)
+    assert np.allclose(dIdV, 1.0) # order=2: no third-order terms at all
 
 
 def test_two_time_kondo_term_dmrg_requires_explicit_grid():
