@@ -14,6 +14,7 @@ class EDchain():
         self.Identity = None # placeholder for identity
         self.EDHamiltonian = None # initialize as None
         self.Diagonalized_Hamiltonian = None # initialize as None
+        self._kpm_emax_cache = None # (e0,emax) cache for the KPM dynamical correlator
     def get_operator(self,name,i=0):
         """Return an operator"""
         if type(name)==multioperator.MultiOperator: # input is a MO
