@@ -11,7 +11,9 @@ import numpy as np
 # w, broadened by its own `delta`/`eta` parameter) without ever
 # diagonalizing beyond the ground state -- e.g. via submode="KPM" (a
 # Chebyshev moment expansion) or "CVM" (correction-vector method), both
-# already implemented for itensor_version=3.
+# already implemented for itensor_version=3 and itensor_version="python"
+# (pyitensor) alike -- confirmed directly, this function works unmodified
+# against a pyitensor chain (no compiled extension needed at all).
 #
 # Convention note: get_dynamical_correlator(name=(A,B)) computes
 # G_AB(w) = <GS|A (w-H+E0+i*delta)^-1 B|GS>. To get the POSITIVE spectral

@@ -21,6 +21,25 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../src')
 # (confirmed directly: delta=2e-6 took ~40s per call: delta=2e-5 takes
 # ~1s and is still fine enough to resolve this chain's ~1.16meV Zeeman
 # splitting).
+#
+# Gamma0 is also set much larger here (2e-3) than kondospectrumtk's
+# default (5e-6): the third-order Kondo term's t2/tau grid needs spacing
+# finer than 1/omega0 and a *range* wider than several/Gamma0 (see
+# dmrgtwotime.py's/twotime.py's module docstrings) -- reusing this
+# feature's own test suite's "deliberately coarse, fast, not a
+# recommended production resolution" grid (n_t2_half=10, n_tau_half=15)
+# at the *default* Gamma0=5e-6 was tried first here and is not just
+# "somewhat coarse", it is wildly under-resolved (dt2 comes out around
+# 500000, over 100x the ~3142 oscillation period set by omega0) --
+# confirmed directly, it produced third-order-Kondo values roughly
+# consistent between v3/pyitensor but off from the true (ED, exact)
+# answer by O(1), i.e. useless as an accuracy demonstration even though
+# both DMRG backends "agreed" with each other (they were both equally
+# under-resolved). Gamma0=2e-3 shrinks the required t2 *range* by ~400x,
+# letting a much smaller grid (n_t2_half=n_tau_half=20 below) actually
+# converge to within a few percent of the exact answer, still fast
+# enough for a demo (see examples/kondo_third_order_timing_ED_v3_pyitensor
+# for per-backend timings at this same resolution).
 import numpy as np
 from dmrgpy import spinchain
 
@@ -42,10 +61,11 @@ sc.get_gs()
 eVs = np.linspace(-2e-3, 2e-3, 41)
 es = np.linspace(-3e-3, 3e-3, 800) # must cover the ~1.16meV Zeeman gap
 Jrho_s = 0.05
-omega0, Gamma0 = 2e-3, 5e-6
-n_t2_half, n_tau_half = 10, 15
-dt2 = 25./Gamma0/n_t2_half
-dtau = (2*np.pi/2e-5)/n_tau_half
+omega0, Gamma0 = 2e-3, 2e-3 # see the module docstring for why Gamma0 is
+                             # much larger than kondospectrumtk's own
+                             # default (5e-6) here
+n_t2_half, n_tau_half = 20, 20
+dt2, dtau = 150.0, 150.0
 
 print("Computing the third-order Kondo spectrum via mode=\"ED\" ...")
 _, dIdV_ed = sc.get_kondo_spectrum(eVs, site=0, Jrho_s=Jrho_s, U=0.0, T=0.0,
@@ -60,11 +80,13 @@ _, dIdV_dmrg = sc.get_kondo_spectrum(
 
 diff = np.max(np.abs(dIdV_dmrg-dIdV_ed))
 print("max |DMRG - ED| = %.3f (max |ED| = %.3f)"%(diff, np.max(np.abs(dIdV_ed))))
-# a qualitative/order-of-magnitude check, not a tight precision test: the
-# DMRG path carries KPM delta-broadening error (second-order term) and
-# t2/tau-grid discretization error (third-order Kondo term) on top of
-# what the ED path has
-assert diff < 0.3*np.max(np.abs(dIdV_ed))
+# a handful of percent, not machine precision: the DMRG path carries KPM
+# delta-broadening error (second-order term) and t2/tau-grid
+# discretization error (third-order Kondo term) on top of what the ED
+# path has -- but with a properly-converged grid (see above) this should
+# be a genuinely tight, meaningful check, not a coincidence of a loose
+# tolerance
+assert diff < 0.15*np.max(np.abs(dIdV_ed))
 
 import matplotlib.pyplot as plt
 
