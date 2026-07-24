@@ -136,6 +136,15 @@ You can find several tutorials [here](https://github.com/joselado/Advanced_Compu
 
 # Examples
 
+The snippets below are mirrored as self-contained scripts under
+`examples/readme_examples/`; the full `examples/` directory has 100+
+further scripts, one per physical model or feature. When adding a new
+one there, it's good practice to make it produce a plot (with
+matplotlib) in addition to any printed/asserted checks -- a plot is
+often the fastest way to sanity-check a result by eye, and makes the
+example far more useful as a demonstration for others browsing the
+directory.
+
 ## Ground state energy of an S=1/2 spin chain
 ```python
 from dmrgpy import spinchain
