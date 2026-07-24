@@ -35,7 +35,7 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
 #    print(np.round(wf0,2))
     # for Hermitian Hamiltonians, continue
     if submode=="KPM":
-        return dynamical_correlator_kpm(h,self.e0,wf0,A,B,**kwargs)
+        return dynamical_correlator_kpm(h,self.e0,wf0,A,B,chain=self,**kwargs)
     elif submode=="ED":
         emu,vs = self.get_diagonalized_hamiltonian()
         return dynamical_correlator_ED(h,A,B,emu=emu,vs=vs,**kwargs)
@@ -53,14 +53,30 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     else: raise
 
 
-def dynamical_correlator_kpm(h,e0,wf0,A,B,
+def get_kpm_emax(chain,m,e0):
+    """Return the KPM energy-scale estimate (top of the spectrum of the
+    shifted Hamiltonian m=h-e0*Id), cached on the chain. This depends
+    only on the Hamiltonian and its ground-state energy, not on the
+    operators being correlated, so callers that sweep the same chain
+    over several sites/operators (e.g. dynamicstk/spincorrelators.py)
+    would otherwise repeat this ARPACK/dense eigenvalue solve on every
+    single call."""
+    if chain is not None and chain._kpm_emax_cache is not None:
+        (cached_e0,cached_emax) = chain._kpm_emax_cache
+        if cached_e0==e0: return cached_emax
+    emax = -algebra.lowest_eigenvalues(-m,n=3)[0] # lowest energy
+    if chain is not None: chain._kpm_emax_cache = (e0,emax)
+    return emax
+
+
+def dynamical_correlator_kpm(h,e0,wf0,A,B,chain=None,
         delta=1e-1,es=np.linspace(-1.,10,400)):
     A = np.conjugate(A.T)
     vi = B@wf0 # first wavefunction
     vj = A@wf0 # second wavefunction
     from scipy.sparse import identity
     m = -identity(h.shape[0])*e0+h # matrix to use
-    emax = -algebra.lowest_eigenvalues(-m,n=3)[0] # lowest energy
+    emax = get_kpm_emax(chain,m,e0) # lowest energy (cached per chain)
     scale = np.max([np.abs(e0),np.abs(emax)])*3.0
     n = int(2*scale/delta) # number of polynomials
     (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
@@ -90,28 +106,33 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     Uh = np.conjugate(np.transpose(U)) # dagger
     A = Uh@a0@U # get the matrix elements
     B = Uh@b0@U # get the matrix elements
-    out = 0.0+es*0.0*1j # initialize
     nex = len(ex[ex<dex]) # number of excited states
-    out = dynamical_sum(emu,es+1j*delta,A,B,out,nex=nex) # perform the summation
-    out -= dynamical_sum(emu,es-1j*delta,A,B,out,nex=nex) # perform the summation
+    out = dynamical_sum(emu,es,delta,A,B,nex=nex) # perform the summation
     return (es,-out.imag/(2*np.pi)) # return correlator
 
 from numba import jit
 
 @jit(nopython=True)
-def dynamical_sum(es,ws,A,B,out,nex=1):
-    """Return the sum giving the dynamical correlator"""
-    out = out*0.0 # initialize
+def dynamical_sum(es,ws,delta,A,B,nex=1):
+    """Return the sum giving the dynamical correlator, i.e.
+    sum_iw(ws+i*delta) - sum_iw(ws-i*delta). Both terms share the same
+    matrix element A[i,j]*B[j,i], so they are accumulated together in a
+    single pass over (i,j,iw) instead of two separate passes, each
+    recomputing that matrix element from scratch."""
     es = es-np.min(es) # remove minimum energy (ground state)
     n = len(es) # number of eigenenergies
+    out = np.zeros(len(ws),dtype=np.complex128) # initialize
     for i in range(nex): # loop over excited states
       for iw in range(len(ws)): # loop over frequencies
 #        i = 0 # initial wavefunction (Ground state)
         # this will not work properly if there are degeneracies
+        w = ws[iw]
+        acc = 0.0+0.0j
         for j in range(n): # loop over eigenenergies
             tmp = A[i,j]*B[j,i] # relevant matrix element
-            tmp *= 1./(ws[iw]+es[i] - es[j])
-            out[iw] = out[iw] + tmp
+            acc = acc + tmp*(1./(w+1j*delta+es[i]-es[j])
+                            - 1./(w-1j*delta+es[i]-es[j]))
+        out[iw] = out[iw] + acc
     return out/nex # return dynamical correlator
 
 
