@@ -1172,6 +1172,142 @@ coupled recursion also reproduces an independently-derived scalar
 recursion exactly for a $1\times1$ test case, and the reconstructed
 density correctly sharpens with more moments.)
 
+\subsection{STM/Kondo tunneling spectra (\texttt{kondospectrumtk/})}
+
+\texttt{Spin\_Chain.get\_kondo\_spectrum} (physics documented in the user
+guide's ``STM/Kondo tunneling spectra'' section) is a different kind of
+ED calculation from the dynamical-correlator machinery above: it needs the
+\emph{full} spectrum (every eigenstate, as a possible virtual
+intermediate state in the third-order perturbation theory), not just the
+ground state or a resolvent at a target frequency. It reuses the ED
+backend's existing \texttt{EDchain.get\_diagonalized\_hamiltonian} (dense
+\texttt{eigh}, already used elsewhere for small systems) rather than
+adding a new diagonalization path, and is deliberately independent of a
+chain's own \texttt{itensor\_version}/mode setting -- DMRG cannot supply
+the full spectrum this method needs regardless of which backend a chain
+would otherwise use, so \texttt{KondoSpectrum}
+(\texttt{kondospectrumtk/edkondo.py}) always goes through
+\texttt{Spin\_Chain.get\_ED\_obj()} directly.
+
+Two of the source paper's own closed-form equations for supporting
+numerical functions (the temperature-broadened step and a
+temperature-broadened logarithmic Kondo function) do not reproduce the
+behavior the paper itself describes and plots for them;
+\texttt{kondospectrumtk/stepfunctions.py} re-derives both from the
+paper's own unambiguous defining integrals instead, each independently
+verified against digitized values from the paper's own figures. See
+that module's docstring and the user guide's ``STM/Kondo tunneling
+spectra'' section for the full derivation notes and the
+feature's other scope limitations (single tip-coupled site, third-order
+terms are single-direction only, the potential-scattering interference
+term's general-spin form is an extrapolation from the paper's own worked
+example).
+
+\textbf{\texttt{mode="DMRG"}} (\texttt{T=0} only) is a second,
+independent route through this same feature that \emph{does} stay within
+\texttt{itensor\_version=3}, never diagonalizing beyond the ground state
+-- viable because at \texttt{T=0} both terms simplify enough to avoid
+needing the full spectrum \texttt{mode="ED"} requires:
+
+\begin{itemize}
+\item The second-order term (\texttt{secondorder\_dc.py}) becomes a
+  \texttt{Theta0}-weighted cumulative integral of the ordinary
+  \texttt{T=0} dynamical structure factor, so it reuses
+  \texttt{get\_dynamical\_correlator} (\texttt{submode="KPM"}/\texttt{"CVM"})
+  as-is.
+\item The third-order Kondo term (\texttt{twotime.py},
+  \texttt{dmrgtwotime.py}) is a genuinely new construction: a Heisenberg
+  three-point function
+  \texttt{G(t2,tau)=<GS|Sl(t2+tau)Sk(t2)Sj(0)|GS>} built via real TDVP
+  time evolution (a "checkpoint-and-branch" pattern: evolve
+  \texttt{Sj|GS>} forward and backward through \texttt{t2}, apply
+  \texttt{Sk} at each checkpoint, evolve each branch further through
+  \texttt{tau}, overlap with a fixed \texttt{Sl|GS>} reference at every
+  step -- reusing the single-step \texttt{tdvp\_step} primitive
+  \texttt{tdz.py} already drives manually the same way), then converted
+  to a frequency-domain quantity via two closed-form time-domain kernels
+  (\texttt{Theta0}'s Cauchy-principal-value kernel, computed via an
+  FFT-based Hilbert transform; \texttt{F0}'s kernel, smooth and
+  closed-form) rather than by evaluating those functions pointwise on a
+  discrete frequency grid -- an initial FFT-grid attempt at the same
+  physics did not converge robustly (a discontinuous step function and a
+  log singularity both have slowly-decaying spectral content that a
+  finite discrete grid resolves poorly), which is why this construction
+  exists in the first place rather than a simpler direct approach.
+  \texttt{twotime.py}'s functions are backend-agnostic (they only ever
+  consume a discretely-sampled \texttt{G(t2,tau)} array or batches
+  thereof) -- \texttt{edtwotimeref.py} supplies the same interface via
+  exact ED eigenbasis time evolution, used both as the development-time
+  reference this construction was validated against and as a fast, exact
+  ground truth for \texttt{dmrgtwotime.py}'s own test.
+\end{itemize}
+
+\texttt{dmrgtwotime.py} was written against this codebase's existing,
+verified DMRG API and validated once a compiled ITensor v3 backend
+became available: \texttt{G(t2,tau)} matches the ED reference to
+$\sim10^{-9}$--$10^{-10}$ pointwise, and the swept third-order Kondo term
+matches a grid-consistent ED reference to $\sim10^{-10}$
+(\texttt{tests/test\_kondo\_spectrum\_dmrgtwotime.py}, skipped
+automatically when no compiled \texttt{itensor\_version=3} backend is
+available). Getting there surfaced three real bugs, none of which showed
+up in the ED-only testing this module was originally written against:
+
+\begin{itemize}
+\item \texttt{tdvp\_step} silently renormalizes its output to unit norm
+  on \emph{every} call. \texttt{Sj|GS>} (the state each two-time
+  trajectory starts from) is generally not unit-norm (\texttt{Sj} isn't
+  norm-preserving), so letting that renormalization stand discarded the
+  true amplitude at every step -- confirmed directly, it produced
+  overlaps exactly a factor of 2 too large end to end for a state of
+  norm 0.5. Fixed by evolving a normalized copy and rescaling every
+  returned checkpoint by the true original norm.
+\item The forward/backward time-stepping loop shared one running
+  \texttt{times} list, so the "backward" branch kept counting down from
+  the forward branch's endpoint instead of from \texttt{t=0} -- it never
+  actually reached negative times at all. Fixed by walking forward and
+  backward from \texttt{t=0} independently and merging afterward.
+\item \texttt{twotime.py}'s \texttt{t2}-integral used \texttt{np.trapz}
+  per chunk, which is exactly 0 for a single-point chunk (no width to
+  integrate over) -- and DMRG chunks are always single-point (each
+  \texttt{t2} checkpoint is its own real trajectory), so this silently
+  zeroed the entire third-order Kondo term end to end. Fixed with a
+  uniform Riemann-sum accumulation (trapezoidal endpoint correction only
+  at the true global first/last \texttt{t2} points) that is well defined
+  for any chunk size.
+\end{itemize}
+
+A 1-site test chain also hit an unrelated internal ITensor v3 error
+(building the Hamiltonian MPO, distinct from the two-site-\texttt{dmrg()}
+short-chain crash \texttt{mode.py}'s ED fallback already guards against)
+-- chains need at least 3 sites for this feature. The second-order term
+(\texttt{submode="KPM"}) was spot-checked too, agreeing to within a few
+tens of percent at thresholds, consistent with the expected
+delta-broadening/moment-truncation error on top of what the ED path
+already has.
+
+The potential-interference term (\texttt{U!=0}, part of
+\texttt{order=3}) is also supported for \texttt{mode="DMRG"}, via
+\texttt{potentialdc.py}: its own $T=0$ limit collapses the excited-state
+sum to a convolution of the \emph{same} $T=0$ dynamical structure factor
+against the $F_0$ kernel instead of $\Theta_0$'s cumulative-sum
+weighting ($\Theta_0(\mathrm{eV}-x)$ is a step, integrated cumulatively;
+$F_0$ is not, so this piece genuinely convolves rather than cumulatively
+sums) -- so it reuses \texttt{get\_dynamical\_correlator} exactly like
+the second-order term above, needing no excited-state enumeration
+either, and no new DMRG-side primitive. Verified (\texttt{mode="ED"},
+\texttt{submode="ED"}) against the excited-state-sum
+\texttt{conductance.third\_order\_potential\_dIdV} to $\sim0.07\%$
+relative error (\texttt{tests/test\_kondo\_spectrum\_potentialdc.py}); a
+real \texttt{mode="DMRG"}, \texttt{submode="KPM"} run through the full
+public API was tried directly but found impractically expensive for a
+routine test -- a single KPM dynamical-correlator call took $\sim40$s on
+the development machine even with a trivially small number of moments,
+confirmed directly -- so the
+\texttt{Spin\_Chain.\_get\_kondo\_spectrum\_dmrg} wiring that combines
+this term with the other two is instead checked with the three
+underlying (expensive) calls monkeypatched out
+(\texttt{tests/test\_kondo\_spectrum.py::test\_get\_kondo\_spectrum\_dmrg\_combines\_terms\_correctly}).
+
 \subsection{TDZ / complex-time-evolution dynamical correlator}
 
 \texttt{tdz.py} implements \texttt{submode="TDZ"} (Cao, Lu, Stoudenmire

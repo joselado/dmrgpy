@@ -149,5 +149,138 @@ class Spin_Chain(Many_Body_Chain):
             out = out + fieldterms
         # still have to add the fields!!
         return out # return multioperator
+    def get_kondo_spectrum(self, eV, site=0, Jrho_s=0.0, U=0.0, T=1.0,
+                            T0=1.0, omega0=20e-3, Gamma0=5e-6, order=3,
+                            kB=8.617333262e-5, mode="ED", **kwargs):
+        """Third-order STM/Kondo perturbation-theory tunneling spectrum
+        dI/dV(eV) for a single impurity site under the tip, following
+        Ternes, New J. Phys. 17 063016 (2015), arXiv:1505.04430.
+
+        Parameters (see kondospectrumtk.conductance for the underlying
+        equations):
+          eV: array of bias energies (same units as the Hamiltonian, e.g.
+              eV if built with eV-scale couplings)
+          site: chain site index coupled to the tip
+          Jrho_s: dimensionless Kondo exchange coupling (J*rho_sample)
+          U: dimensionless potential-scattering ratio (eq. "Matrix1")
+          T: temperature in Kelvin (kB below is eV/K by default; pass a
+             matching kB if your Hamiltonian is in different energy units).
+             T=0 is a valid, exact limit, not an error.
+          T0: overall tunneling-strength scale (only sets the absolute
+              scale of the returned dI/dV, in units of 2*pi*e^2*T0^2/hbar)
+          omega0, Gamma0: band cutoff and lifetime broadening for the
+              third-order Kondo function F(eps,T)
+          order: 2 for the second-order (Fermi golden rule) term alone, 3
+              to add the third-order Kondo and (if U!=0) potential-
+              interference terms. The third-order terms are d(I^{t->s})/dV
+              only -- see third_order_kondo_dIdV's docstring for why (the
+              paper never gives a general t<->s formula for them); the
+              second-order term is the full, bidirectional net-current
+              derivative.
+          mode: "ED" (default) always uses full ED diagonalization of this
+              chain's Hamiltonian (every eigenstate is needed as a
+              possible virtual intermediate state), via
+              kondospectrumtk.edkondo.KondoSpectrum -- independent of this
+              chain's own itensor_version/DMRG-vs-ED mode setting, and
+              valid at any T>=0.
+              "DMRG" instead uses itensor_version=3 real time evolution
+              throughout, never diagonalizing beyond the ground state --
+              see kondospectrumtk/twotime.py's module docstring for the
+              construction. Only T=0 is supported (the T>0 excited-state
+              Boltzmann sum this feature was originally scoped around was
+              never built for DMRG -- T=0 turned out to admit a cleaner,
+              diagonalization-free construction instead, which is what
+              shipped). The potential-interference term (U!=0, order=3)
+              is also supported for DMRG, via
+              kondospectrumtk.potentialdc.third_order_potential_dIdV_dc --
+              like the second-order term, its T=0 limit collapses to a
+              dynamical-correlator convolution (against the F0 kernel
+              instead of a Theta0-weighted cumulative sum), so it needs
+              no excited-state enumeration either; it carries the same
+              general-S-extrapolation caveat as
+              conductance.third_order_potential_dIdV (see that
+              function's docstring). Extra
+              kwargs are forwarded: `submode` (default "KPM"), `delta`,
+              `es` to kondospectrumtk.secondorder_dc.second_order_dIdV_dc
+              (second-order term) and
+              kondospectrumtk.potentialdc.third_order_potential_dIdV_dc
+              (potential-interference term, if U!=0) (`es` has no safe
+              default -- see either function's docstring -- and must be
+              supplied when order requests it). Any further kwargs (e.g.
+              `n`, the number of KPM moments -- its own default of 1000
+              is accurate but expensive; a compiled-backend smoke test
+              may want far fewer) are forwarded on to
+              chain.get_dynamical_correlator via both of the above, for
+              whichever mode/submode combination is in use. `dt2`, `n_t2_half`,
+              `dtau`, `n_tau_half`
+              to kondospectrumtk.dmrgtwotime.two_time_kondo_term_dmrg for
+              the third-order Kondo term (order=3) -- these four also have
+              no safe default (see that function's docstring: a grid
+              fine/wide enough for the default omega0/Gamma0 is
+              computationally infeasible to pick automatically, while a
+              small fast default silently returns a badly wrong result
+              instead of erroring) and must be supplied explicitly.
+              Validated against ITensor v3 once a
+              compiled backend became available (see
+              test_kondo_spectrum_dmrgtwotime.py and
+              kondospectrumtk/dmrgtwotime.py's module docstring for what
+              that surfaced and fixed): the third-order Kondo term's
+              G(t2,tau) matches the ED reference to ~1e-9-1e-10, and the
+              swept second-order term (KPM) agrees to within a few tens
+              of percent at thresholds, consistent with the expected
+              delta-broadening/moment-truncation error.
+
+        Returns (eV, dIdV)."""
+        if order not in (2, 3): raise ValueError("order must be 2 or 3")
+        eV = np.asarray(eV, dtype=float)
+        if mode == "ED":
+            return self._get_kondo_spectrum_ed(eV, site, Jrho_s, U, T, T0,
+                                                omega0, Gamma0, order, kB)
+        elif mode == "DMRG":
+            if T != 0.:
+                raise ValueError("mode=\"DMRG\" only supports T=0")
+            return self._get_kondo_spectrum_dmrg(eV, site, Jrho_s, U, T0,
+                                                  omega0, Gamma0, order,
+                                                  **kwargs)
+        else: raise ValueError("mode must be \"ED\" or \"DMRG\"")
+    def _get_kondo_spectrum_ed(self, eV, site, Jrho_s, U, T, T0, omega0,
+                                Gamma0, order, kB):
+        from .kondospectrumtk.edkondo import KondoSpectrum
+        from .kondospectrumtk import conductance
+        from .kondospectrumtk.stepfunctions import FBuilder
+        ks = KondoSpectrum(self, site, T, kB=kB)
+        dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
+        if order == 3:
+            # shared between both calls below: building it tabulates an
+            # expensive adaptive-quadrature integral (see FBuilder)
+            Fb = FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB) if T>0. else None
+            dIdV = dIdV + conductance.third_order_kondo_dIdV(
+                    ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0, Fb=Fb)
+            if U != 0.0:
+                dIdV = dIdV + conductance.third_order_potential_dIdV(
+                        ks, eV, Jrho_s, U, T0=T0, omega0=omega0, Fb=Fb,
+                        Gamma0=Gamma0)
+        return eV, dIdV
+    def _get_kondo_spectrum_dmrg(self, eV, site, Jrho_s, U, T0, omega0,
+                                  Gamma0, order, submode="KPM", delta=2e-6,
+                                  es=None, dt2=None, n_t2_half=None,
+                                  dtau=None, n_tau_half=None, **dc_kwargs):
+        from .kondospectrumtk.secondorder_dc import second_order_dIdV_dc
+        dIdV = second_order_dIdV_dc(self, site, eV, T0=T0, U=U, mode="DMRG",
+                                     submode=submode, delta=delta, es=es,
+                                     **dc_kwargs)
+        if order == 3:
+            from .kondospectrumtk.dmrgtwotime import two_time_kondo_term_dmrg
+            term = two_time_kondo_term_dmrg(
+                    self, site, eV, omega0=omega0, Gamma0=Gamma0, dt2=dt2,
+                    n_t2_half=n_t2_half, dtau=dtau, n_tau_half=n_tau_half)
+            dIdV = dIdV + 4*np.pi*T0**2*Jrho_s*term
+            if U != 0.0:
+                from .kondospectrumtk.potentialdc import third_order_potential_dIdV_dc
+                dIdV = dIdV + third_order_potential_dIdV_dc(
+                        self, site, eV, Jrho_s, U, T0=T0, omega0=omega0,
+                        Gamma0=Gamma0, mode="DMRG", submode=submode,
+                        delta=delta, es=es, **dc_kwargs)
+        return eV, dIdV
 
 Spin_Hamiltonian = Spin_Chain # backwards compatibility
