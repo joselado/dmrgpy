@@ -10,19 +10,22 @@ from .twotime import kondo_term_from_two_time
 # that machinery only ever consumes a discretely-sampled G(t2,tau) array
 # -- it does not care how G was computed.
 #
-# IMPORTANT CAVEAT: this module was written against the verified,
-# already-used-elsewhere DMRG API (Many_Body_Chain.toMPO, the C++
-# tdvp_step single-step primitive already driven manually by tdz.py's
-# _advance_complex_time_step, MPS operator application/overlap) but could
-# NOT be executed or numerically validated in the environment this was
-# developed in (no compiled C++ backend available: cppext.available(3) is
-# False there). Treat it as a best-effort implementation that follows the
-# same patterns already proven correct elsewhere in this codebase, not as
-# independently verified the way edtwotimeref.py/twotime.py's ED path is
-# (which matches the excited-state-sum reference to ~0.01-1%, depending
-# on grid resolution). Run test_kondo_spectrum_dmrgtwotime.py (skipped
-# automatically when no C++ backend is compiled) in an environment with
-# itensor_version=3 compiled to actually check this.
+# VALIDATED (see test_kondo_spectrum_dmrgtwotime.py): after a compiled
+# itensor_version=3 backend became available, this module's G(t2,tau)
+# matched the ED reference (edtwotimeref.py) to ~1e-9-1e-10 pointwise,
+# and the full eV-swept third-order Kondo term matched a grid-consistent
+# ED reference to ~1e-10. Getting there surfaced three real bugs, none of
+# which had shown up in the ED-only testing this module was originally
+# written against -- see _tdvp_trajectory's and
+# twotime.kondo_term_from_two_time's docstrings for the details (in
+# short: tdvp_step silently renormalizes every step to unit norm, which
+# discards Sj|GS>'s true amplitude unless corrected for explicitly; a
+# forward/backward time-stepping bug meant "backward" checkpoints never
+# actually reached negative times; and a per-chunk np.trapz integral is
+# exactly 0 for the single-t2-point chunks this module's real-time
+# evolution necessarily produces). A 1-site test chain also hit an
+# internal ITensor v3 error unrelated to any of the above -- see
+# _build_chain in the test file for why chains need >=3 sites.
 #
 # Algorithm (the "checkpoint-and-branch" construction from the design
 # discussion): for each j in {Sx,Sy,Sz} (the eq. "3rd-normal" vertex
@@ -65,25 +68,48 @@ def _tdvp_trajectory(chain, Hop, wf0, dt, n_half):
     _advance_complex_time_step drives manually; here with a plain real
     dt, forward for positive steps and backward -- i.e. dt<0, which
     tdvp_step already supports as a "possibly complex/signed" time step,
-    per its own docstring -- for negative ones)."""
+    per its own docstring -- for negative ones).
+
+    tdvp_step renormalizes its output to unit norm at every single call
+    (confirmed directly: even a near-zero dt=0.01 step takes an
+    input norm^2=0.25 state straight to norm^2=1) -- correct/harmless for
+    evolving an already-normalized physical state, but wf0 here is
+    Sj|GS> or Sk|psi(t2)>, which is generally NOT unit-norm (Sj isn't
+    norm-preserving). Silently letting that renormalization stand would
+    throw away wf0's true amplitude at every step -- confirmed directly,
+    it produced overlaps exactly a factor of 2 too large end to end for a
+    wf0 of norm 0.5. Fixed by normalizing wf0 before the loop and
+    rescaling every returned checkpoint by the true original norm
+    afterward, so the trajectory is evolved on a unit-norm state
+    throughout (where tdvp_step's renormalization is a no-op) but
+    reported at wf0's actual scale."""
     from .. import mps as mpsmod
-    times = [0.0]
-    wfs = [wf0]
-    wf = wf0
-    for _ in range(n_half):
-        handle = chain._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, dt)
-        wf = mpsmod.MPS(chain, cpp_handle=handle).copy()
-        times.append(times[-1] + dt)
-        wfs.append(wf)
-    wf = wf0
-    for _ in range(n_half):
-        handle = chain._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, -dt)
-        wf = mpsmod.MPS(chain, cpp_handle=handle).copy()
-        times.append(times[-1] - dt)
-        wfs.append(wf)
-    order = np.argsort(times)
-    times = np.array(times)[order]
-    wfs = [wfs[i] for i in order]
+    norm0 = np.sqrt(wf0.dot(wf0).real)
+    wf0_unit = wf0*(1./norm0) if norm0 > 1e-12 else wf0
+
+    def _walk(step):
+        # forward (step=dt) or backward (step=-dt) checkpoints from t=0,
+        # NOT including t=0 itself -- each direction must restart its own
+        # time counter at 0 rather than continuing the other direction's
+        # (confirmed directly: sharing one running `times` list across
+        # both loops made the "backward" branch keep counting down from
+        # the forward branch's endpoint instead of from 0, so it never
+        # actually reached negative times at all -- e.g. n_half=3,
+        # dt=1000 produced times=[0,0,1000,1000,2000,2000,3000], not the
+        # intended [-3000,...,0,...,3000])
+        t, wf, out_t, out_wf = 0.0, wf0_unit, [], []
+        for _ in range(n_half):
+            handle = chain._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, step)
+            wf = mpsmod.MPS(chain, cpp_handle=handle).copy()
+            t = t + step
+            out_t.append(t); out_wf.append(wf)
+        return out_t, out_wf
+
+    fwd_t, fwd_wf = _walk(dt)
+    bwd_t, bwd_wf = _walk(-dt)
+    times = np.array(bwd_t[::-1] + [0.0] + fwd_t)
+    wfs = bwd_wf[::-1] + [wf0_unit] + fwd_wf
+    wfs = [norm0*wf for wf in wfs]
     return times, wfs
 
 

@@ -25,7 +25,12 @@ import numpy as np
 # rule (total spectral weight) matches to ~0.06%, and the swept dI/dV
 # matches to within ~0.7% (the residual is the expected effect of the
 # finite `delta` broadening the otherwise-sharp Theta0 threshold -- it
-# shrinks as delta/es resolution are tightened).
+# shrinks as delta/es resolution are tightened). Also spot-checked with
+# mode="DMRG", submode="KPM" against a compiled itensor_version=3
+# backend once one became available: same qualitative agreement (a few
+# tens of percent at the thresholds, matching elsewhere), with the
+# expected additional KPM moment-truncation error on top of the delta
+# broadening.
 
 
 def _cumulative_theta0_weight(chain, op, eVs, mode, submode, delta, es,

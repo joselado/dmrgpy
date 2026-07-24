@@ -97,7 +97,15 @@ def kondo_term_from_two_time(t2_grid, tau_grid, G_batches, eVs, omega0, Gamma0):
     is visited exactly once, regardless of len(eVs) -- computing G is the
     expensive part (a real time evolution on the DMRG side), so this
     shares that one pass across the whole eV sweep instead of rebuilding
-    G per eV.
+    G per eV. Chunks may be as small as a single t2 point (as they are on
+    the DMRG side, where every t2 checkpoint is its own real trajectory) --
+    the t2 integral is done as a uniform Riemann sum weighted by t2_grid's
+    own spacing (with the standard trapezoidal half-weight only at the two
+    true endpoints of the *full* t2_grid, not per chunk), which is well
+    defined for any chunk size; a per-chunk np.trapz (tried first) silently
+    returns exactly 0 for every single-point chunk -- confirmed directly,
+    it produced an all-zero result end to end -- since a trapezoidal rule
+    needs at least two points to have any width to integrate over.
 
     Returns an array of real-valued Term(eV), one per eVs entry (already
     includes the Im[...]/4 from Re[X/(4i)]=Im[X]/4, matching eq.
@@ -107,9 +115,14 @@ def kondo_term_from_two_time(t2_grid, tau_grid, G_batches, eVs, omega0, Gamma0):
     (excited-state-sum-based) construction)."""
     eVs = np.atleast_1d(np.asarray(eVs, dtype=float))
     totals = np.zeros(len(eVs), dtype=complex)
+    dt2 = t2_grid[1] - t2_grid[0]
+    t2_first, t2_last = t2_grid[0], t2_grid[-1]
     for t2_chunk, G_chunk in G_batches:
+        weights = np.full(len(t2_chunk), dt2)
+        weights[np.isclose(t2_chunk, t2_first)] *= 0.5
+        weights[np.isclose(t2_chunk, t2_last)] *= 0.5
         for i, eV in enumerate(eVs):
             h_t2 = theta0_filter(tau_grid, G_chunk, eV)
             kw = K_W(t2_chunk, eV, omega0, Gamma0)
-            totals[i] += np.trapz(kw*h_t2, t2_chunk)
+            totals[i] += np.sum(kw*h_t2*weights)
     return np.imag(totals)/4.

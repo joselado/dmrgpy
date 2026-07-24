@@ -1013,14 +1013,27 @@ DMRG (raises `NotImplementedError`); the second-order term's `es`
 frequency-grid parameter has no safe default and must be supplied
 explicitly (it needs to cover every relevant transition energy, which is
 a property of the chain's spectrum, not of the `eV` sweep range — see
-`second_order_dIdV_dc`'s docstring). Most importantly,
+`second_order_dIdV_dc`'s docstring); chains need at least 3 sites (a
+1-site chain hits an internal ITensor v3 error unrelated to this
+feature, building the Hamiltonian MPO).
+
 `kondospectrumtk/dmrgtwotime.py` was written against this codebase's
-existing, already-verified DMRG API (`toMPO`, the `tdvp_step` primitive,
-MPS operator application/overlap) but has not been executed or
-numerically validated against a compiled ITensor v3 backend — unlike
-every other piece of this feature (each cross-checked against an
-independent reference to sub-percent accuracy), it should be treated as
-provisional until confirmed in an environment where `itensor_version=3`
-is actually compiled (`tests/test_kondo_spectrum_dmrgtwotime.py`, which
-compares it against the ED two-time reference, is skipped automatically
-otherwise).
+existing, verified DMRG API and validated once a compiled ITensor v3
+backend became available: $G(t_2,\tau)$ matches the ED reference to
+$\sim10^{-9}$–$10^{-10}$ pointwise, and the swept third-order Kondo term
+matches a grid-consistent ED reference to $\sim10^{-10}$
+(`tests/test_kondo_spectrum_dmrgtwotime.py`, skipped automatically when
+no compiled `itensor_version=3` backend is available). Getting there
+surfaced three real bugs, none of which showed up in the ED-only testing
+this module was originally written against — see that module's own
+docstring for the details (in short: `tdvp_step` silently renormalizes
+every step to unit norm, discarding $S_j|\mathrm{GS}\rangle$'s true
+amplitude unless corrected for explicitly; a forward/backward
+time-stepping bug meant "backward" checkpoints never actually reached
+negative times; and a naive per-chunk trapezoidal integral is exactly 0
+for the single-$t_2$-point chunks real-time evolution necessarily
+produces, silently zeroing the entire term). The second-order term
+(`submode="KPM"`) was spot-checked too, agreeing to within a few tens of
+percent at thresholds, consistent with the expected
+$\delta$-broadening/moment-truncation error on top of what the ED path
+already has.

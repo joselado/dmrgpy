@@ -198,10 +198,15 @@ class Spin_Chain(Many_Body_Chain):
               that function's docstring -- and must be supplied when
               order requests it); `dt2`, `n_t2_half`, `dtau`, `n_tau_half`
               to kondospectrumtk.dmrgtwotime.two_time_kondo_term_dmrg for
-              the third-order term. The DMRG path was written against
-              this codebase's existing, verified DMRG API but could not
-              be executed/validated in ITensor v3, treat it as
-              provisional pending independent confirmation.
+              the third-order term. Validated against ITensor v3 once a
+              compiled backend became available (see
+              test_kondo_spectrum_dmrgtwotime.py and
+              kondospectrumtk/dmrgtwotime.py's module docstring for what
+              that surfaced and fixed): the third-order term's G(t2,tau)
+              matches the ED reference to ~1e-9-1e-10, and the swept
+              second-order term (KPM) agrees to within a few tens of
+              percent at thresholds, consistent with the expected
+              delta-broadening/moment-truncation error.
 
         Returns (eV, dIdV)."""
         if order not in (2, 3): raise ValueError("order must be 2 or 3")

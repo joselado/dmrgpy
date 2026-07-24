@@ -1024,15 +1024,45 @@ requires:
   against and as a fast, exact ground truth for `dmrgtwotime.py`'s own
   test.
 
-`dmrgtwotime.py` specifically -- unlike every other piece of this
-feature, each cross-checked against an independent reference to
-sub-percent accuracy -- was written against this codebase's existing,
-verified DMRG API but has not been executed or numerically validated
-against a compiled ITensor v3 backend (none was available in the
-environment it was developed in). `tests/test_kondo_spectrum_dmrgtwotime.py`
-would validate it against the ED two-time reference in an environment
-where `itensor_version=3` is compiled; it is skipped automatically
-otherwise.
+`dmrgtwotime.py` was written against this codebase's existing, verified
+DMRG API and validated once a compiled ITensor v3 backend became
+available: `G(t2,tau)` matches the ED reference to ~1e-9-1e-10
+pointwise, and the swept third-order Kondo term matches a
+grid-consistent ED reference to ~1e-10
+(`tests/test_kondo_spectrum_dmrgtwotime.py`, skipped automatically when
+no compiled `itensor_version=3` backend is available). Getting there
+surfaced three real bugs, none of which showed up in the ED-only testing
+this module was originally written against:
+
+- `tdvp_step` silently renormalizes its output to unit norm on *every*
+  call. `Sj|GS>` (the state each two-time trajectory starts from) is
+  generally not unit-norm (`Sj` isn't norm-preserving), so letting that
+  renormalization stand discarded the true amplitude at every step --
+  confirmed directly, it produced overlaps exactly a factor of 2 too
+  large end to end for a state of norm 0.5. Fixed by evolving a
+  normalized copy and rescaling every returned checkpoint by the true
+  original norm.
+- The forward/backward time-stepping loop shared one running `times`
+  list, so the "backward" branch kept counting down from the forward
+  branch's endpoint instead of from `t=0` -- it never actually reached
+  negative times at all. Fixed by walking forward and backward from
+  `t=0` independently and merging afterward.
+- `twotime.py`'s `t2`-integral used `np.trapz` per chunk, which is
+  exactly 0 for a single-point chunk (no width to integrate over) -- and
+  DMRG chunks are always single-point (each `t2` checkpoint is its own
+  real trajectory), so this silently zeroed the entire third-order Kondo
+  term end to end. Fixed with a uniform Riemann-sum accumulation
+  (trapezoidal endpoint correction only at the true global first/last
+  `t2` points) that is well defined for any chunk size.
+
+A 1-site test chain also hit an unrelated internal ITensor v3 error
+(building the Hamiltonian MPO, distinct from the two-site-`dmrg()`
+short-chain crash `mode.py`'s ED fallback already guards against) --
+chains need at least 3 sites for this feature. The second-order
+term (`submode="KPM"`) was spot-checked too, agreeing to within a few
+tens of percent at thresholds, consistent with the expected
+delta-broadening/moment-truncation error on top of what the ED path
+already has.
 
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
