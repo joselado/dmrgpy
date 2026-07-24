@@ -3,6 +3,7 @@ from . import timedependent
 from . import cvm
 from . import dcex
 from . import tdz
+from . import rootndmrg
 
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
     if self.itensor_version in (2,3,"python"): # C++ or pure-Python
@@ -26,6 +27,8 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             return cvm.dynamical_correlator(self,**kwargs)
         elif submode=="CVMimag": # CVM mode
             return cvm.dynamical_correlator_analytic_continuation(self,**kwargs)
+        elif submode=="ROOTN": # root-N Krylov correction-vector
+            return rootndmrg.dynamical_correlator(self,**kwargs)
         elif submode=="EX": # EX mode
             return dcex.dynamical_correlator(self,**kwargs)
         elif submode=="maxent": # Max ent mode
