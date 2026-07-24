@@ -19,8 +19,12 @@ class KondoSpectrum():
     def __init__(self, chain, site, T, kB=8.617333262e-5):
         # kB in eV/K by default (so T is given in Kelvin, energies in eV,
         # matching how the rest of dmrgpy's examples quote energies); pass
-        # kB=1 if you'd rather work in units where T is already an energy
-        if T <= 0.: raise ValueError("KondoSpectrum requires T>0")
+        # kB=1 if you'd rather work in units where T is already an energy.
+        # T=0 is a valid, exact limit (not an error): both the spin
+        # system's Boltzmann occupation and the tunneling-electron thermal
+        # smearing (Theta/F -> Theta0/F0) collapse to their T=0 closed
+        # forms, see stepfunctions.py.
+        if T < 0.: raise ValueError("KondoSpectrum requires T>=0")
         self.chain = chain
         self.site = site
         self.T = T
@@ -34,9 +38,12 @@ class KondoSpectrum():
         self.e = emu - emu[0] # ground state energy set to 0
         self.vs = vs
         self.dim = len(self.e)
-        kT = kB*T
-        p = np.exp(-self.e/kT)
-        self.p = p/np.sum(p) # Boltzmann occupations, eq. "boltzmann"
+        if T == 0.:
+            self.p = np.zeros(self.dim); self.p[0] = 1. # only the GS is occupied
+        else:
+            kT = kB*T
+            p = np.exp(-self.e/kT)
+            self.p = p/np.sum(p) # Boltzmann occupations, eq. "boltzmann"
         self.Sx = self._eigenbasis_spin_operator("Sx")
         self.Sy = self._eigenbasis_spin_operator("Sy")
         self.Sz = self._eigenbasis_spin_operator("Sz")

@@ -1,5 +1,5 @@
 import numpy as np
-from .stepfunctions import Theta, FBuilder
+from .stepfunctions import Theta, Theta0, FBuilder, F0
 
 # Second- and third-order dI/dV for the STM/Kondo perturbation theory of
 # Ternes, New J. Phys. 17 063016 (2015), arXiv:1505.04430, assembled from
@@ -25,6 +25,23 @@ from .stepfunctions import Theta, FBuilder
 # two directions.
 
 
+def _theta_raw(ks, x):
+    """Theta evaluated at a raw energy argument x (not yet divided by kT);
+    ks.T==0 dispatches to the closed-form Heaviside limit Theta0(x)."""
+    if ks.T == 0.: return Theta0(x)
+    return Theta(x/(ks.kB*ks.T))
+
+
+def _get_F(ks, omega0, Gamma0, Fb):
+    """Return a callable F(x_array)->array: the closed-form F0 at ks.T==0,
+    otherwise a (possibly caller-supplied, shared) FBuilder."""
+    if ks.T == 0.:
+        return lambda x: F0(x, omega0=omega0, Gamma0=Gamma0)
+    if Fb is None:
+        return FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
+    return Fb
+
+
 def _spin_matrix_elements_squared(ks):
     """|M_if|^2 = 1/2|<f|S-|i>|^2 + 1/2|<f|S+|i>|^2 + |<f|Sz|i>|^2,
     eq. "SA-transitionmatrix" (unpolarized tip and sample)."""
@@ -42,15 +59,15 @@ def second_order_dIdV(ks, eVs, T0=1.0, U=0.0):
     and is not included here (a polarized-lead generalization would need
     the appendix's eq. "Matrix-appendix")."""
     eVs = np.asarray(eVs, dtype=float)
-    kT = ks.kB*ks.T
     M2 = _spin_matrix_elements_squared(ks) # [f,i]
     eps = ks.e[:, None] - ks.e[None, :] # eps[f,i] = e_f - e_i
     weight = ks.p[None, :]*M2 # weight[f,i] = p_i*|M_if|^2
-    x_ts = (eVs[:, None, None] - eps[None, :, :])/kT
-    x_st = (-eVs[:, None, None] - eps[None, :, :])/kT
-    spin_term = (np.einsum('fi,efi->e', weight, Theta(x_ts))
-                 + np.einsum('fi,efi->e', weight, Theta(x_st)))
-    # elastic potential scattering: eps_ii=0, Theta(eV/kT)+Theta(-eV/kT)=1
+    x_ts = eVs[:, None, None] - eps[None, :, :]
+    x_st = -eVs[:, None, None] - eps[None, :, :]
+    spin_term = (np.einsum('fi,efi->e', weight, _theta_raw(ks, x_ts))
+                 + np.einsum('fi,efi->e', weight, _theta_raw(ks, x_st)))
+    # elastic potential scattering: eps_ii=0, Theta(eV)+Theta(-eV)=1
+    # (Theta0(0)+Theta0(-0)=1 too, by the same convention)
     U_term = (U**2)*np.ones_like(eVs)
     return 2*np.pi*T0**2*(spin_term + U_term)
 
@@ -101,17 +118,17 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     _band_integral over hundreds of adaptive-quadrature points, so
     callers that also need third_order_potential_dIdV with the same
     T/omega0/Gamma0 (e.g. Spin_Chain.get_kondo_spectrum) should build it
-    once and pass it to both."""
+    once and pass it to both. Ignored at ks.T==0 (uses the closed-form F0
+    instead)."""
     eVs = np.asarray(eVs, dtype=float)
-    kT = ks.kB*ks.T
     coeff = np.imag(_triple_product_coefficients(ks))/4. # Re[X/(4i)] = Im[X]/4
     eps_if = ks.e[None, :] - ks.e[:, None] # eps_if[i,f] = e_f - e_i
     eps_im = ks.e[None, :] - ks.e[:, None] # eps_im[i,m] = e_m - e_i
-    if Fb is None: Fb = FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
+    Fcall = _get_F(ks, omega0, Gamma0, Fb)
     dim = ks.dim
-    Fim = Fb((eVs[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
-    Fmi = Fb((eVs[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
-    Th = Theta((eVs[:, None, None] - eps_if[None, :, :])/kT)
+    Fim = Fcall((eVs[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
+    Fmi = Fcall((eVs[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
+    Th = _theta_raw(ks, eVs[:, None, None] - eps_if[None, :, :])
     Fsum = Fim + Fmi # direct (eps_im) + exchange (eps_mi=-eps_im) diagrams
     total = np.einsum('i,ifm,eif,eim->e', ks.p, coeff, Th, Fsum, optimize=True)
     return 4*np.pi*T0**2*Jrho_s*total
@@ -147,16 +164,17 @@ def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
     produce in the first place).
 
     Fb: see third_order_kondo_dIdV's docstring -- pass the same FBuilder
-    to both to avoid rebuilding its expensive tabulation twice."""
+    to both to avoid rebuilding its expensive tabulation twice. Ignored at
+    ks.T==0 (uses the closed-form F0 instead)."""
     eVs = np.asarray(eVs, dtype=float)
     Xi = np.stack([ks.Sx, ks.Sy, ks.Sz], axis=-1) # Xi[a,b,alpha]=<a|S_alpha|b>
     loop = np.real(np.einsum('imk,mik->im', Xi, Xi)) # sum_k |<i|Sk|m>|^2
     eps_im = ks.e[None, :] - ks.e[:, None] # eps_im[i,m] = e_m - e_i
-    if Fb is None: Fb = FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
+    Fcall = _get_F(ks, omega0, Gamma0, Fb)
     dim = ks.dim
-    Fim = Fb((eVs[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
-    Fmi = Fb((eVs[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
+    Fim = Fcall((eVs[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
+    Fmi = Fcall((eVs[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(eVs), dim, dim)
     Fsum = Fim + Fmi
     weighted = np.einsum('i,im,eim->e', ks.p, loop, Fsum, optimize=True)
-    total = weighted*Theta(eVs/(ks.kB*ks.T))
+    total = weighted*_theta_raw(ks, eVs)
     return 4*np.pi*T0**2*Jrho_s*U*total

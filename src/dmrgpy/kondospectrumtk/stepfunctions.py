@@ -157,3 +157,31 @@ def F(x, T, omega0=20e-3, Gamma0=5e-6, kB=8.617333262e-5):
     for the efficient, precomputed-kernel version used when sweeping many
     eV points against a fixed set of intermediate-state energies)."""
     return FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB)(x)
+
+
+def Theta0(x):
+    """T=0 limit of Theta(x): a Heaviside step, Theta0(0)=1/2. Both the
+    spin system's Boltzmann occupation and the tunneling-electron thermal
+    smearing collapse at T=0, so this is not merely "Theta at very small
+    T" evaluated numerically -- it is the exact, closed-form limit."""
+    x = np.asarray(x, dtype=float)
+    return np.where(x > 0, 1., np.where(x < 0, 0., 0.5))
+
+
+def F0(x, omega0=20e-3, Gamma0=5e-6):
+    """T=0 limit of F(eps,T) (see FBuilder/F). At T=0, f'(ep,T) -> -delta(ep)
+    in equ. "F_1", collapsing its outer eps''-integral entirely and leaving
+    just the (still Gamma0-regularized) inner eps'-integral evaluated
+    exactly at eps -- i.e. this is _band_integral's own T->0 limit, not an
+    independent approximation:
+
+        F0(eps) = 1/2 ln[(omega0-eps)^2+Gamma0^2] - 1/2 ln[eps^2+Gamma0^2]
+
+    Verified numerically against FBuilder(T) for T shrinking to ~0 (an
+    earlier candidate closed form, ln(omega0+|eps|)-1/2 ln(eps^2+Gamma0^2),
+    was checked the same way and found to only agree for eps<0 -- it is
+    NOT F0, despite superficially resembling it; this form is the one
+    confirmed to match _band_integral pointwise over the full range,
+    including inside the band where the two candidates diverge)."""
+    x = np.asarray(x, dtype=float)
+    return 0.5*np.log((omega0-x)**2+Gamma0**2) - 0.5*np.log(x**2+Gamma0**2)
