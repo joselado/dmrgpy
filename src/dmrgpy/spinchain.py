@@ -183,10 +183,19 @@ class Spin_Chain(Many_Body_Chain):
               kondospectrumtk.edkondo.KondoSpectrum -- independent of this
               chain's own itensor_version/DMRG-vs-ED mode setting, and
               valid at any T>=0.
-              "DMRG" instead uses itensor_version=3 real time evolution
-              throughout, never diagonalizing beyond the ground state --
-              see kondospectrumtk/twotime.py's module docstring for the
-              construction. Only T=0 is supported (the T>0 excited-state
+              "DMRG" instead uses this chain's own itensor_version
+              (3 or "python", i.e. either the compiled ITensor v3
+              extension or the pure-Python pyitensor backend -- both
+              expose the identical Chain method surface this feature's
+              DMRG-side modules call through, so neither is hardcoded
+              anywhere in kondospectrumtk/dmrgtwotime.py or
+              secondorder_dc.py) real time evolution throughout, never
+              diagonalizing beyond the ground state -- see
+              kondospectrumtk/twotime.py's module docstring for the
+              construction, and
+              examples/kondo_third_order_timing_ED_v3_pyitensor for a
+              three-way ED/v3/pyitensor timing comparison. Only T=0 is
+              supported (the T>0 excited-state
               Boltzmann sum this feature was originally scoped around was
               never built for DMRG -- T=0 turned out to admit a cleaner,
               diagonalization-free construction instead, which is what

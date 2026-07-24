@@ -1,14 +1,27 @@
 import numpy as np
 from .twotime import kondo_term_from_two_time
 
-# DMRG (itensor_version=3) construction of the two-time third-order Kondo
-# term (twotime.py), replacing edtwotimeref.py's exact eigenbasis time
-# evolution with real TDVP time evolution -- avoiding excited-state
-# enumeration/diagonalization entirely, as requested. Reuses the exact
-# same kernel machinery (theta0_filter, K_W) already validated against
-# the excited-state-sum third_order_kondo_dIdV via edtwotimeref.py, since
+# DMRG construction of the two-time third-order Kondo term (twotime.py),
+# replacing edtwotimeref.py's exact eigenbasis time evolution with real
+# TDVP time evolution -- avoiding excited-state enumeration/
+# diagonalization entirely, as requested. Reuses the exact same kernel
+# machinery (theta0_filter, K_W) already validated against the
+# excited-state-sum third_order_kondo_dIdV via edtwotimeref.py, since
 # that machinery only ever consumes a discretely-sampled G(t2,tau) array
 # -- it does not care how G was computed.
+#
+# Backend-generic by construction: every call below goes through
+# chain._session/chain.toMPO/MPS's cpp_handle-based dispatch (see
+# CLAUDE.md's "In-process pybind11 extension" section and
+# mpsalgebra.py/mps.py), never anything itensor_version==3-specific, so
+# this module works unmodified for itensor_version in (3, "python") --
+# confirmed directly, running it against a pyitensor
+# (itensor_version="python") chain matches the ED reference to ~1e-14 (no
+# compiled extension needed at all), even tighter than the ~1e-9-1e-10
+# match against the compiled v3 backend below (pyitensor's Krylov-based
+# TDVP appears to be closer to exact for a system this small/weakly
+# entangled). See examples/kondo_third_order_timing_ED_v3_pyitensor for a
+# three-way timing comparison.
 #
 # VALIDATED (see test_kondo_spectrum_dmrgtwotime.py): after a compiled
 # itensor_version=3 backend became available, this module's G(t2,tau)
@@ -24,8 +37,11 @@ from .twotime import kondo_term_from_two_time
 # actually reached negative times; and a per-chunk np.trapz integral is
 # exactly 0 for the single-t2-point chunks this module's real-time
 # evolution necessarily produces). A 1-site test chain also hit an
-# internal ITensor v3 error unrelated to any of the above -- see
-# _build_chain in the test file for why chains need >=3 sites.
+# internal ITensor v3 error unrelated to any of the above (pyitensor
+# handles a 1-site chain fine -- this is specifically an ITensor v3
+# limitation, see CLAUDE.md) -- see _build_chain in the test file for why
+# these tests still use >=3 sites regardless (kept uniform across both
+# backends for a fair timing/correctness comparison).
 #
 # Algorithm (the "checkpoint-and-branch" construction from the design
 # discussion): for each j in {Sx,Sy,Sz} (the eq. "3rd-normal" vertex
