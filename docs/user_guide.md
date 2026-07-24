@@ -446,6 +446,49 @@ the neighboring point's correction vector was tried and measured to
 much worse residual than from the cold start — so each point is solved
 independently.)
 
+**`submode="ROOTN"` — root-$N$ Krylov-space correction vector (ED
+backend only, prototype).** Implements Nocera & Alvarez, "Root-$N$
+Krylov-space correction-vectors for spectral functions with the density
+matrix renormalization group" ([arXiv:2204.03165](https://arxiv.org/abs/2204.03165)).
+Rather than building the correction vector $x(\omega+i\eta)=(\omega-H+E_0+i\eta)^{-1}B|\mathrm{GS}\rangle$
+in one shot, it is built as $N$ sequential fractional-power steps,
+
+$$x^{p/N}(\omega+i\eta)=\Big(\frac{1}{\omega-H+E_0+i\eta}\Big)^{p/N}B|\mathrm{GS}\rangle,\qquad p=1,\dots,N,$$
+
+where each step re-seeds a Krylov (Lanczos) subspace of dimension `nkry`
+with the *previous* step's vector, tridiagonalizes $H$ in that subspace,
+and applies the $1/N$-power resolvent in the resulting eigenbasis before
+handing the result forward as the next step's seed
+(`src/dmrgpy/algebra/rootn.py`). `N=1` reduces to the "conventional"
+Krylov-space correction vector (Nocera, PRE 2016) that the paper compares
+against. In the paper's MPS/DMRG setting, `nkry`'s role is played by the
+bond dimension $m$, and building the correction vector in $N$ smaller
+steps lets the entanglement grow gradually instead of needing a single
+very large $m$ at high target frequency; here, on the ED backend, `nkry`
+directly caps the Lanczos subspace size at each step, and the same
+qualitative effect is observed: at a fixed, small `nkry`, increasing $N$
+reduces the error against the exact Lehmann-sum answer, especially near
+the top of the many-body bandwidth (see
+`examples/dynamical_correlator/dynamical_correlator_rootn_ED`). With
+`nkry` equal to the full Hilbert space dimension, root-$N$ reproduces the
+exact answer for any $N$, since the Krylov subspace is then exact — a
+useful self-consistency check of the recursion itself, independent of the
+Krylov truncation.
+
+```python
+(x, y) = sc.get_dynamical_correlator(mode="ED", submode="ROOTN",
+                                      name=(sc.Sz[0], sc.Sz[0]),
+                                      N=8, nkry=20)
+```
+
+Currently implemented only for the ED backend (`mode="ED"`); there is no
+MPS/DMRG (`mode="DMRG"`) implementation yet — extending it to the DMRG
+backends would require the paper's multi-target state-averaging DMRG
+sweep (jointly representing $|\mathrm{GS}\rangle$, $B|\mathrm{GS}\rangle$,
+$\mathrm{Re}(x)$, $\mathrm{Im}(x)$ in one block MPS, compressed together
+at every bond) to see the paper's actual bond-dimension benefit, which is
+a substantially larger undertaking than this ED-only prototype.
+
 **`submode="TD"` — time-dependent DMRG.** Real-time evolution gives the
 correlator directly in the time domain,
 
