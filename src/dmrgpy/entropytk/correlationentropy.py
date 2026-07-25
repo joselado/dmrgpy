@@ -10,20 +10,43 @@ def get_correlation_matrix(self,T=0.,**kwargs):
 
 
 
-def get_correlation_matrix_finiteT(self,T=1.,**kwargs):
-    """Wrapper for finite temperature"""
-    ### This is currently only implemented with ED
-    n = len(self.C) # number of sites
-    if n>14: raise # not implemented
-    (es,wfs) = self.get_excited_states(mode="ED",n=2**n)
-    dms = [get_correlation_matrix_zeroT(self,wf=wf) for wf in wfs]
-    es = es - np.min(es) # minus ground state energy
-    dm = 0j # initialize
-    Z = 0. # initialize
-    for i in range(len(es)): # loop over energies
-        dm = dm + dms[i]*np.exp(es[i]/T)
-        Z = Z + np.exp(es[i]/T)
-    return dm/Z # return matrix
+def get_correlation_matrix_finiteT(self,T=1.,n=None,**kwargs):
+    """Correlation matrix at finite temperature, ED only: sum
+    Boltzmann-weighted per-eigenstate correlation matrices
+    (get_correlation_matrix_zeroT with wf=eigenstate) over a set of
+    exact eigenstates, exactly the same excited-states pattern as
+    vevtk.thermalvev.thermal_vev_ex -- `n` controls how many eigenstates
+    are summed over (default: the full Hilbert space whenever that's
+    small enough to diagonalize exactly, matching algebra.maxsize;
+    otherwise the same truncated n=10 that algebra.lowest_states falls
+    back to on its own). `**kwargs` (operators=, basis=, dmmode=, ...)
+    is forwarded to get_correlation_matrix_zeroT for each eigenstate,
+    not to the excited-state search.
+
+    A truncated sum whose highest-included state still carries
+    non-negligible Boltzmann weight raises RuntimeError instead of
+    silently returning a wrong average -- pass a larger n= in that case."""
+    from ..algebra.algebra import maxsize
+    dim = self.get_ED_obj().get_hamiltonian().shape[0] # full Hilbert space dimension
+    if n is None: # caller did not request a specific truncation
+        n_used = dim if dim<=maxsize else 10 # matches lowest_states' own default
+    else: n_used = n
+    truncated = n_used<dim # did we actually leave out any eigenstates?
+    (es,wfs) = self.get_excited_states(mode="ED",n=n_used)
+    es = es - np.min(es) # with respect to the GS
+    beta = 1./T
+    P = np.exp(-beta*es) # Boltzmann probabilities
+    P = P/np.sum(P) # normalize
+    if truncated and P[-1]>1e-6*np.max(P):
+        raise RuntimeError(
+            "get_correlation_matrix_finiteT: the "+str(n_used)+" excited states "
+            "computed do not capture the full Boltzmann weight at T="+str(T)+
+            " (highest included state has relative weight "+str(P[-1]/np.max(P))+
+            " of the largest). Pass a larger n= to include more excited states.")
+    dms = [get_correlation_matrix_zeroT(self,wf=wf,**kwargs) for wf in wfs]
+    dm = np.zeros_like(dms[0])
+    for i in range(len(es)): dm = dm + P[i]*dms[i] # Boltzmann-weighted average
+    return dm # return matrix
 
 
 
