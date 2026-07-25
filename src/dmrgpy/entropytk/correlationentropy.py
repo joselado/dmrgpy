@@ -209,6 +209,8 @@ def get_four_correlation_tensor(wf,ctmode="explicit",**kwargs):
         return get_four_correlation_tensor_explicit(wf,**kwargs)
     elif ctmode=="full":
         return get_four_correlation_tensor_cpp(wf,**kwargs)
+    elif ctmode=="sweep":
+        return get_four_correlation_tensor_sweep(wf,**kwargs)
     else: raise
 
 
@@ -260,3 +262,37 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
         # native sites represent.
         return self._session.four_correlation_tensor_spinful(wf.cpp_handle,accelerate)
     return self._session.four_correlation_tensor(wf.cpp_handle,accelerate)
+
+
+def get_four_correlation_tensor_sweep(wf,accelerate=True,**kwargs):
+    """Compute the four-point correlator tensor with the fast,
+    single-sweep, environment-reuse C++ method (mpscpp3/chain_session.h's
+    Chain::four_correlation_tensor_sweep -- see its docstring for the
+    algorithm, which follows the reuse idea of ITensorCorrelators.jl,
+    https://github.com/ITensor/ITensorCorrelators.jl, rather than
+    get_four_correlation_tensor_cpp()'s independent per-tuple AutoMPO
+    build). Real, measured speedup over ctmode="full" that grows with
+    system size (roughly 1.2x at n=6 up to >2x at n=12 for a Hubbard
+    chain at maxm=60, see examples/staticcorrelators/
+    four_correlation_tensor_sweep_VS_full), at machine-precision agreement
+    -- prefer this over ctmode="full" whenever it's available.
+
+    Only implemented for itensor_version=3 on the plain (non-native-
+    spinful) fermionic sites: it needs the compiled mpscpp3 extension, and
+    has no counterpart yet for Spinful_Fermionic_Chain_Native (whose
+    four_correlation_tensor_spinful() instead hands ITensor's AutoMPO the
+    literal flavor-resolved Cdagup/Cup/Cdagdn/Cdn names and lets its own
+    automatic fermionic threading handle two flavors sharing one physical
+    site -- a different JW convention this sweep's per-flat-mode gap rule
+    doesn't reproduce as-is)."""
+    self = wf.MBO
+    from .. import fermionchain
+    if type(self)==fermionchain.Spinful_Fermionic_Chain_Native:
+        raise NotImplementedError("ctmode=\"sweep\" has no native-spinful-site "
+                "counterpart yet; use ctmode=\"full\" "
+                "(four_correlation_tensor_spinful) instead")
+    if self.itensor_version!=3 or not hasattr(self._session,"four_correlation_tensor_sweep"):
+        raise NotImplementedError("ctmode=\"sweep\" requires itensor_version=3 "
+                "with the compiled mpscpp3 extension, got itensor_version="
+                +str(self.itensor_version))
+    return self._session.four_correlation_tensor_sweep(wf.cpp_handle,accelerate)

@@ -692,6 +692,46 @@ two-site search, so it never pays the two-site combined-local-
 dimension penalty documented in `Spinful_Fermionic_Chain_Native`'s own
 class docstring.
 
+A third implementation, `ctmode="sweep"` (`Chain::four_correlation_tensor_sweep`,
+`mpscpp3/chain_session.h`/`bindings.cc`, plain non-native-spinful sites
+only), replaces `ctmode="full"`'s `O(N^4)` *independent* AutoMPO builds
+with a single-sweep, environment-reuse algorithm following the idea of
+[ITensorCorrelators.jl](https://github.com/ITensor/ITensorCorrelators.jl).
+Only the `N(N-1)(N-2)(N-3)` pairwise-distinct-index entries go through
+the fast sweep (nested loops over four strictly increasing sites
+`a<b<c<d`, each level extending a running left environment by exactly
+one site rather than rebuilding it, with both `Cdag`/`C` tried at each
+of the four operator sites); the remaining, subdominant `O(N^3)`
+repeated-index entries fall back to the same per-tuple AutoMPO method
+`ctmode="full"` uses, since those need same-site multi-operator products
+(e.g. `Cdag_i C_i = N_i`) the sweep isn't built to produce. Reordering
+the four fermionic operators from the abstract `(i,j,k,l)` order into
+physical site order picks up the standard fermion-anticommutation sign
+(parity of the reordering permutation) *plus* one further correction:
+of the six possible `Cdag`/`C` type patterns across the four sorted
+sites, the two that strictly alternate (`Cdag,C,Cdag,C` or
+`C,Cdag,C,Cdag`) need no extra sign, but the other four (which have at
+least one pair of *adjacent same-type* operators) need one more flip on
+top of the plain permutation parity — this was found empirically (every
+entry with such a pattern disagreed with `ctmode="full"` by exactly this
+sign, for every site quadruple and chain length tried, before the
+correction was added) rather than purely re-derived by hand from Jordan-
+Wigner strings, though it traces to the same extra `-1` that
+`jordanwigner.py`'s `CC()`/`CdagCdag()` carry but `CdagC()`/`CCdag()`
+don't (reordering two *same-type* operators into JW-canonical form costs
+one more local `F`/`Adag` or `F`/`A` anticommutation than a mixed pair
+does). Validated to machine precision against `ctmode="full"` and to ED
+solver tolerance across `n=4..8` (every index tuple, not just a sample)
+and spot-checked at `n=16,20`; measurably faster than `ctmode="full"` at
+every size tried, by a margin growing with `n` (~1.4x at `n=6` up to
+~4.4x at `n=20` for a nearest-neighbor Hubbard chain at fixed `maxm=60`
+— see `examples/staticcorrelators/four_correlation_tensor_sweep_VS_full`).
+Not ported to `Spinful_Fermionic_Chain_Native`: that class's
+`ctmode="full"` gets its Jordan-Wigner threading for free from ITensor's
+own `AutoMPO` acting on flavor-resolved operator names, since two
+flavors share one physical site there — a different threading problem
+than this sweep's per-flat-mode gap rule solves, not attempted here.
+
 Investigated whether `get_correlation_matrix`'s default `dmmode="fast"`
 (`entropytk/correlationentropy.py::correlation_matrix_fast`, `n` MPO
 applications total rather than `explicit`'s `n(n+1)/2` two-operator

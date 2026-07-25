@@ -440,6 +440,30 @@ and \texttt{get\_four\_correlation\_tensor} give the corresponding
 two-particle correlators $\langle c_i^\dagger c_j^\dagger c_l
 c_k\rangle$ and $\langle c_i^\dagger c_j c_k^\dagger c_l\rangle$.
 
+\texttt{get\_four\_correlation\_tensor(ctmode=...)} has three
+implementations: \texttt{ctmode="explicit"} (backend-agnostic Python loop
+of \texttt{vev()}s, always available), \texttt{ctmode="full"}
+(C++-accelerated, \texttt{itensor\_version=3}, builds and applies an
+independent AutoMPO per $(i,j,k,l)$ tuple), and \texttt{ctmode="sweep"}
+(also \texttt{itensor\_version=3}, plain non-native-spinful fermionic
+sites only) -- a single-sweep, environment-reuse implementation following
+the algorithmic idea of
+\href{https://github.com/ITensor/ITensorCorrelators.jl}{ITensorCorrelators.jl}:
+rather than rebuilding a fresh MPO for every tuple, it reuses partial
+tensor-network contractions across the whole $(N,N,N,N)$ tensor. Agrees
+with \texttt{ctmode="full"} and ED to machine precision / solver
+tolerance, and is measurably faster than \texttt{ctmode="full"} at every
+size tried, by a margin that grows with $n$ (roughly 1.2x at $n=6$ up to
+over 2x at $n=12$--$14$ for a Hubbard chain) -- see
+\texttt{examples/staticcorrelators/four\_correlation\_tensor\_sweep\_VS\_full}
+and \texttt{Chain::four\_correlation\_tensor\_sweep}'s own docstring
+(\texttt{mpscpp3/chain\_session.h}) for the full algorithm and the
+measured numbers. Prefer \texttt{ctmode="sweep"} over
+\texttt{ctmode="full"} whenever it is available;
+\texttt{Spinful\_Fermionic\_Chain\_Native} still needs
+\texttt{ctmode="full"} (its own \texttt{four\_correlation\_tensor\_spinful()}),
+since the sweep has no native-spinful-site counterpart yet.
+
 \section{Dynamical (frequency-dependent) correlators}
 \label{sec:dynamical}
 

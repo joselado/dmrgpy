@@ -170,6 +170,20 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "four_correlation_tensor: returns <Cdag_i C_j Cdag_k C_l> "
                "as a (2N,2N,2N,2N) array over flat fermionic modes "
                "(mode 2*s=up, 2*s+1=down at physical site s)")
+        .def("four_correlation_tensor_sweep",
+            [](Chain& self, MPS const& wf, bool accelerate) {
+                int n = self.num_sites();
+                auto flat = self.four_correlation_tensor_sweep(wf,accelerate);
+                py::array_t<std::complex<double>> arr({n,n,n,n});
+                std::copy(flat.begin(),flat.end(),arr.mutable_data());
+                return arr;
+            }, py::arg("wf"), py::arg("accelerate")=true,
+               "Single-sweep, environment-reuse version of "
+               "four_correlation_tensor (see chain_session.h's "
+               "four_correlation_tensor_sweep for the algorithm, following "
+               "ITensorCorrelators.jl): returns the same <Cdag_i C_j Cdag_k "
+               "C_l> (N,N,N,N) array, computed without rebuilding a fresh "
+               "AutoMPO per (i,j,k,l) tuple")
         .def("kpm_dynamical_correlator",
             [](Chain& self, std::vector<PyTerm> const& terms_i,
                std::vector<PyTerm> const& terms_j, int kpmmaxm,

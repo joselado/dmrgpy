@@ -366,6 +366,28 @@ $$S=-\sum_\alpha\Big[n_\alpha\log n_\alpha+(1-n_\alpha)\log(1-n_\alpha)\Big]$$
 correlators $\langle c_i^\dagger c_j^\dagger c_l c_k\rangle$ and
 $\langle c_i^\dagger c_j c_k^\dagger c_l\rangle$.
 
+`get_four_correlation_tensor(ctmode=...)` has three implementations:
+`ctmode="explicit"` (backend-agnostic Python loop of `vev()`s, always
+available), `ctmode="full"` (C++-accelerated, `itensor_version=3`, builds
+and applies an independent AutoMPO per $(i,j,k,l)$ tuple), and
+`ctmode="sweep"` (also `itensor_version=3`, plain non-native-spinful
+fermionic sites only) — a single-sweep, environment-reuse implementation
+following the algorithmic idea of
+[ITensorCorrelators.jl](https://github.com/ITensor/ITensorCorrelators.jl):
+rather than rebuilding a fresh MPO for every tuple, it reuses partial
+tensor-network contractions across the whole $(N,N,N,N)$ tensor. Agrees
+with `ctmode="full"` and ED to machine precision / solver tolerance, and
+is measurably faster than `ctmode="full"` at every size tried, by a
+margin that grows with $n$ (roughly 1.2x at $n=6$ up to over 2x at
+$n=12$–$14$ for a Hubbard chain) — see
+`examples/staticcorrelators/four_correlation_tensor_sweep_VS_full` and
+`Chain::four_correlation_tensor_sweep`'s own docstring
+(`mpscpp3/chain_session.h`) for the full algorithm and the measured
+numbers. Prefer `ctmode="sweep"` over `ctmode="full"` whenever it's
+available; `Spinful_Fermionic_Chain_Native` still needs `ctmode="full"`
+(its own `four_correlation_tensor_spinful()`), since the sweep has no
+native-spinful-site counterpart yet.
+
 ## 6. Dynamical (frequency-dependent) correlators
 
 The central quantity is a retarded correlator (Green's function) between
