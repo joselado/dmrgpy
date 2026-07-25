@@ -304,10 +304,16 @@ class Many_Body_Chain():
               from .mpsjulialive.vev import vev as vevjl
               return vevjl(self,MO,**kwargs)
           else: raise
-      elif mode=="ED": 
+      elif mode=="ED":
           MOf = self.toMPO(MO,mode="ED") # fast operator
           return self.get_ED_obj().vev(MOf,**kwargs) # ED object
       else: raise
+  def metts_vev(self,MO,T,**kwargs):
+      """Finite-temperature <MO> via METTS sampling (White & Stoudenmire,
+      arXiv:1002.1305) -- see vevtk/mettsvev.py. Implemented for
+      itensor_version='python' and 3 (not 2, which has no TDVP)."""
+      from .vevtk.mettsvev import metts_vev as _metts_vev
+      return _metts_vev(self,MO,T,**kwargs)
   def test_ED(self):
       """Test the ED object"""
       self.get_ED_obj().test()
