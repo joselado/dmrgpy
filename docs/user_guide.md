@@ -811,9 +811,18 @@ from dmrgpy import thermal
 tc = thermal.Thermal_Spin_Chain(spins, T=0.1)
 ```
 
-`T=0` recovers ordinary ground-state DMRG. For small systems ($n\lesssim
-14$), `get_correlation_matrix(T=...)` instead computes the exact thermal
-average directly by brute-force ED, $\rho=\sum_nZ^{-1}e^{-E_n/T}|n\rangle\langle n|$ — a useful cross-check of the purification approach.
+`T=0` recovers ordinary ground-state DMRG. For small systems (Hilbert
+space dimension $\lesssim2000$, `algebra.maxsize`), `get_correlation_matrix(T=...)`
+(ED only, `entropytk/correlationentropy.py`'s `get_correlation_matrix_finiteT`)
+instead computes the exact thermal average directly by brute-force ED,
+$\rho=\sum_nP_n|n\rangle\langle n|$, $P_n=Z^{-1}e^{-(E_n-E_0)/T}$ — a
+useful cross-check of the purification approach, following the same
+excited-states pattern as `vev(mode="ED", T=...)` below (full spectrum
+whenever it's small enough to diagonalize exactly, an explicit `n=` and
+a `RuntimeError` on inadequate truncation otherwise). Automatic default
+operators (no `operators=` kwarg) are only defined for fermionic chains
+today (`self.C`); on a `Spin_Chain`/`Thermal_Spin_Chain` pass an explicit
+`operators=[...]` (e.g.\ `[sc.Sz[i] for i in range(n)]`).
 
 **`vev(O, mode="ED", T=...)`** is a second, independent way to get the
 same brute-force ED thermal average
