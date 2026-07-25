@@ -63,7 +63,7 @@ class EDchain():
           self.e0 = e0
           self.computed_gs = True
           return self.wf0
-    def vev(self,op,T=0.):
+    def vev(self,op,T=0.,**kwargs):
         """Return a vacuum expectation value"""
         if T==0.: # zero temperature
             wf0 = self.get_gs_array()
@@ -71,7 +71,7 @@ class EDchain():
             return algebra.braket_wAw(wf0,op)
         else: # finite temperature
             from ..vevtk.thermalvev import thermal_vev_ex
-            return thermal_vev_ex(self,op,T=T) # return thermal VEV
+            return thermal_vev_ex(self,op,T=T,**kwargs) # return thermal VEV
     def get_excited(self,**kwargs):
         """Excited states"""
         h = self.get_hamiltonian()

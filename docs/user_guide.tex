@@ -964,6 +964,26 @@ computes the exact thermal average directly by brute-force ED,
 $\rho=\sum_nZ^{-1}e^{-E_n/T}|n\rangle\langle n|$ --- a useful
 cross-check of the purification approach.
 
+\textbf{\texttt{vev(O, mode="ED", T=...)}} is a second, independent way
+to get the same brute-force ED thermal average
+$\langle O\rangle=\sum_nP_n\langle n|O|n\rangle$,
+$P_n=Z^{-1}e^{-(E_n-E_0)/T}$, for a single operator rather than the whole
+correlation matrix (\texttt{edtk/edchain.py}'s \texttt{EDchain.vev}
+$\to$ \texttt{vevtk/thermalvev.py}'s \texttt{thermal\_vev\_ex}). The sum
+only ever runs over a finite set of exact eigenstates obtained from
+\texttt{algebra.lowest\_states}; whenever the full Hilbert space is small
+enough to diagonalize exactly anyway (the same \texttt{maxsize=2000}-state
+threshold \texttt{algebra.lowest\_states} itself uses),
+\texttt{thermal\_vev\_ex} defaults to using the \emph{entire} spectrum,
+so the thermal average is exact for any $T$. Above that size only a
+sparse, truncated set of the lowest states is available (an explicit
+\texttt{n=} kwarg, forwarded from \texttt{vev(...)}, controls how many);
+\texttt{thermal\_vev\_ex} then checks the Boltzmann weight of the
+highest included state and raises \texttt{RuntimeError} rather than
+silently returning a wrong average if that state still carries
+non-negligible weight at the requested $T$ --- pass a larger \texttt{n=}
+in that case.
+
 \section{Topological invariants}
 
 \textbf{Many-body Berry phase.} For a ground state that depends on an

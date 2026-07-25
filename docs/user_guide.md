@@ -815,6 +815,24 @@ tc = thermal.Thermal_Spin_Chain(spins, T=0.1)
 14$), `get_correlation_matrix(T=...)` instead computes the exact thermal
 average directly by brute-force ED, $\rho=\sum_nZ^{-1}e^{-E_n/T}|n\rangle\langle n|$ — a useful cross-check of the purification approach.
 
+**`vev(O, mode="ED", T=...)`** is a second, independent way to get the
+same brute-force ED thermal average
+$\langle O\rangle=\sum_nP_n\langle n|O|n\rangle$, $P_n=Z^{-1}e^{-(E_n-E_0)/T}$,
+for a single operator rather than the whole correlation matrix
+(`edtk/edchain.py`'s `EDchain.vev` → `vevtk/thermalvev.py`'s
+`thermal_vev_ex`). The sum only ever runs over a finite set of exact
+eigenstates obtained from `algebra.lowest_states`; whenever the full
+Hilbert space is small enough to diagonalize exactly anyway (the same
+`maxsize=2000`-state threshold `algebra.lowest_states` itself uses),
+`thermal_vev_ex` defaults to using the *entire* spectrum, so the thermal
+average is exact for any `T`. Above that size only a sparse, truncated
+set of the lowest states is available (an explicit `n=` kwarg, forwarded
+from `vev(...)`, controls how many); `thermal_vev_ex` then checks the
+Boltzmann weight of the highest included state and raises `RuntimeError`
+rather than silently returning a wrong average if that state still
+carries non-negligible weight at the requested `T` — pass a larger `n=`
+in that case.
+
 ## 10. Topological invariants
 
 **Many-body Berry phase.** For a ground state that depends on an
