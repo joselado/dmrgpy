@@ -112,12 +112,19 @@ print("Energy with ED:",   sc.gs_energy(mode="ED"))
 ```
 
 The `examples/` directory contains 100+ self-contained scripts, one per
-physical model or feature, and doubles as the project's de facto
-regression suite (there is no separate unit-test suite for the Python
-code). See `examples/readme_examples/` for the snippets shown in
-`README.md`, and `examples/v2_VS_v3_*` /
-`examples/backend_timing_gs_energy/` for scripts that directly compare
-backends against each other on correctness and timing respectively.
+physical model or feature, organized into thematic subfolders
+(`groundstate/`, `staticcorrelators/`, `dynamical_correlator/`,
+`spin_models/`, `fermion_models/`, `boson_models/`, `time_evolution/`,
+`excited_states/`, `entanglement/`, `topological/`, `kondo/`,
+`non_hermitian/`, `finite_temperature/`, `magnetization/`,
+`backend_comparison/`, `utilities/`, `algebra/`, ...), and doubles as the
+project's de facto regression suite (there is no separate unit-test
+suite for the Python code). See `examples/readme_examples/` for the
+snippets shown in `README.md`, and `examples/backend_comparison/` plus
+the `v2_VS_v3_*`-named examples living inside each theme folder (e.g.
+`examples/spin_models/v2_VS_v3_heisenberg_spin_half`) for scripts that
+directly compare backends against each other on correctness, and
+`examples/groundstate/backend_timing_gs_energy/` for timing.
 
 ## 4. Architecture
 
@@ -496,7 +503,7 @@ alone:
 
 Both paths were validated directly against exact diagonalization
 (quench from a Néel-favoring field to a Heisenberg chain, mirroring
-`examples/tdvp_VS_ED_time_evolution`): `evolve_and_measure` agreed with
+`examples/time_evolution/tdvp_VS_ED_time_evolution`): `evolve_and_measure` agreed with
 ED to ~8e-7 on a 4-site chain, and `evolution_DC`'s quench correlator
 agreed to ~9e-11 on a 6-site chain.
 
@@ -551,7 +558,7 @@ point every MPO application at `cvm_maxm` rather than the DMRG `maxm`
 `cvm.py::_set_cvm_sweep_params` now temporarily overrides `self.maxm`
 instead for that backend, since that's what
 `mpsjulialive/mpo.py`/`mps.py` actually read. Validated against ED with
-the same tolerance `examples/dynamical_correlator_VS_ED/main.py` uses
+the same tolerance `examples/dynamical_correlator/dynamical_correlator_VS_ED/main.py` uses
 for the C++/pure-Python backends (`1e-6`) — matched to `~2e-15` here, in
 3 CG iterations per frequency point.
 
@@ -672,7 +679,7 @@ Measured (n=3,4,5,6,12 orbitals): `Spinful_Fermionic_Chain_Native`'s
 interleaved × explicit/full) tried at every size, including n=12 (24
 flat modes: ~620s vs ~890s for `Spinful_Fermionic_Chain`'s own
 `ctmode="full"`, a ~30% win — see
-`examples/four_correlation_tensor_spinful_native`). Before this
+`examples/staticcorrelators/four_correlation_tensor_spinful_native`). Before this
 C++-accelerated path existed, native's only option
 (`ctmode="explicit"`) still beat interleaved's `ctmode="full"` at
 n=3..6, by a margin that grew with n there but did not continue to
@@ -717,14 +724,14 @@ Julia primitive" pattern every fix above followed:
   `O(n^2)`-term squared operator directly) — `mpsjulialive/vev.py`'s
   `vev(MBO,MO)` takes no `**kwargs` at all, so this raises a plain
   `TypeError` for `julia_live` rather than silently misbehaving. The one
-  example exercising it, `examples/power_vev/main.py`, sets
+  example exercising it, `examples/utilities/power_vev/main.py`, sets
   `sc.itensor_version = "julia"` directly (bypassing
   `setup_julia()`/`_reset_dmrg_state()` entirely) — the legacy,
   already-inert subprocess-based backend documented below, not
   `julia_live` — so it wouldn't validate this fix even if made.
 - **`get_distribution`/`kpmdmrg.py::general_kpm`** (spectral distribution
   of an arbitrary operator, not just the Hamiltonian; has example
-  coverage in four `examples/magnetization_distribution*` scripts and
+  coverage in four `examples/magnetization/magnetization_distribution*` scripts and
   `examples/dynamical_correlator/dynamical_correlator_shift`, but no
   `pytest` coverage) — unlike everything above, this is not a
   wire-up-already-generic-code fix: `kpmdmrg.py::general_kpm_moments`
@@ -1208,7 +1215,7 @@ shown in §5.1/§5.2, not these first-call numbers.
 - For production-size chains, dynamical correlators, or anything
   performance-sensitive, compile the C++ extension (`python install.py`)
   and use `itensor_version=2` or `3`.
-- `examples/backend_timing_gs_energy/main.py` reproduces the n=8..20
+- `examples/groundstate/backend_timing_gs_energy/main.py` reproduces the n=8..20
   rows of the §5.1 table directly against the current codebase and
   current machine (n=24..32 aren't included, to keep the example fast to
   run) — re-run it rather than trusting these numbers verbatim on a
@@ -1230,8 +1237,8 @@ shown in §5.1/§5.2, not these first-call numbers.
 | `src/dmrgpy/nonhermitian/kpm.py` | non-Hermitian KPM dynamical correlator (NHKPM.jl port, ED + itensor_version=3) |
 | `src/dmrgpy/tdz.py` | complex-time-evolution dynamical correlator ("TDZ", arXiv:2311.10909) |
 | `examples/` | 100+ self-contained example scripts (also the regression suite) |
-| `examples/v2_VS_v3_*` | backend-vs-backend correctness comparisons |
-| `examples/backend_timing_gs_energy/` | backend-vs-backend timing comparison |
+| `examples/backend_comparison/`, `v2_VS_v3_*` examples within each theme folder | backend-vs-backend correctness comparisons |
+| `examples/groundstate/backend_timing_gs_energy/` | backend-vs-backend timing comparison |
 | `installtk/` | build-requirement checking and ITensor/extension compilation |
 | `docs/` | this document, and its LaTeX counterpart |
 

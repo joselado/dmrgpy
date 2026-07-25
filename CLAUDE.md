@@ -102,7 +102,7 @@ There is a `tests/` directory with a real pytest suite (`test_spin_chain.py`,
 `test_benchmarks.py`) — run it with `python run_tests.py` from the repo root
 (a thin wrapper: runs `pytest tests` from the repo root, then `clean.py`) or
 plain `pytest tests`. `tests/conftest.py` inserts this checkout's own `src/`
-at the front of `sys.path`, so — unlike running an `examples/*/main.py`
+at the front of `sys.path`, so — unlike running an `examples/*/*/main.py`
 script directly — pytest always exercises the current working tree's code,
 never a stale `site-packages`/symlinked checkout (see the worktree-symlink
 pitfall below). `tests/_helpers.py`'s `energy_ed_v2_v3`/`vev_ed_v2_v3` are the
@@ -121,24 +121,33 @@ DMRG/ED agreement (not a golden regression value), prefer
 DMRG is iterative.
 
 The `examples/` directory (100+ self-contained scripts, one per physical
-model or feature) is a second, complementary regression surface — broader
-and more exploratory than `tests/` (most scripts just print/plot rather than
-assert), but also covers more ground (every physical model, every dynamical-
-correlator submode, every backend combination including `"python"`). Some
-`examples/*/main.py` scripts *do* use real `assert`s and are meant as
-regression tests in the same spirit as `tests/` (e.g. `tdvp_VS_ED_time_evolution`,
-`backend_switch_consistency`, `thermal_purification_VS_exact`,
-`static_correlator_VS_ED`, `entanglement_entropy_VS_ED`,
-`dynamical_correlator_VS_ED` — several of these were added specifically to
-lock in bugs found and fixed in this codebase, and are good templates for
-adding another one). To run one:
+model or feature, organized into thematic subfolders — `groundstate/`,
+`staticcorrelators/`, `dynamical_correlator/`, `spin_models/`,
+`fermion_models/`, `boson_models/`, `time_evolution/`, `excited_states/`,
+`entanglement/`, `topological/`, `kondo/`, `non_hermitian/`,
+`finite_temperature/`, `magnetization/`, `backend_comparison/`,
+`utilities/`, `algebra/`, ...) is a second, complementary regression
+surface — broader and more exploratory than `tests/` (most scripts just
+print/plot rather than assert), but also covers more ground (every
+physical model, every dynamical-correlator submode, every backend
+combination including `"python"`). Some `examples/*/*/main.py` scripts
+*do* use real `assert`s and are meant as regression tests in the same
+spirit as `tests/` (e.g. `time_evolution/tdvp_VS_ED_time_evolution`,
+`backend_comparison/backend_switch_consistency`,
+`finite_temperature/thermal_purification_VS_exact`,
+`staticcorrelators/static_correlator_VS_ED`,
+`entanglement/entanglement_entropy_VS_ED`,
+`dynamical_correlator/dynamical_correlator_VS_ED` — several of these were
+added specifically to lock in bugs found and fixed in this codebase, and
+are good templates for adding another one). To run one:
 
 ```bash
-cd examples/static_correlator_S12 && python <script>.py
+cd examples/readme_examples/static_correlator_S12 && python <script>.py
 ```
 
 `examples/readme_examples/` mirrors the snippets shown in `README.md`.
-`examples/v2_VS_v3_*` and `examples/dynamical_correlator/
+`examples/backend_comparison/`, the `v2_VS_v3_*`-named examples living
+inside each theme folder, and `examples/dynamical_correlator/
 dynamical_correlator_v2_VS_v3` directly compare the ITensor v2 and v3 C++
 backends against each other (same script, both `itensor_version`s, small
 systems) — the fastest way to check a `mpscpp3` change didn't diverge from
@@ -149,7 +158,7 @@ removes generated working directories (`.mpsfolder`, `.pychainfolder`,
 **Worktree/symlink pitfall**: `~/.local/lib/python3.13/site-packages/dmrgpy`
 is typically a symlink into *one specific* checkout's `src/dmrgpy/` (often
 the primary working directory, not whichever worktree you're in). Since
-every `examples/*/main.py` does `sys.path.append(...)` (append, not
+every `examples/*/*/main.py` does `sys.path.append(...)` (append, not
 prepend/insert), that symlinked package can resolve *before* the appended
 path when running a script directly with plain `python3 main.py` from a
 different worktree — silently testing the wrong checkout's code with no
@@ -379,9 +388,10 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   one-site TDVP or long-range Hamiltonians) is not wired in, since
   two-site TDVP already grows bond dimension via SVD like two-site DMRG.
 - **Both backends can be loaded in the same process** (needed for anything
-  that directly compares `itensor_version=2` vs `=3` results, e.g.
-  `examples/v2_VS_v3_*`, or `examples/dynamical_correlator/
-  dynamical_correlator_v2_VS_v3`) only because `mpscpp3/bindings.cc`
+  that directly compares `itensor_version=2` vs `=3` results, e.g. the
+  `v2_VS_v3_*`-named examples in each theme folder, or `examples/
+  dynamical_correlator/dynamical_correlator_v2_VS_v3`) only because
+  `mpscpp3/bindings.cc`
   registers its pybind11 types with `py::module_local()`. Without it,
   `mpscpp2` and `mpscpp3` define their own, ABI-incompatible
   `Chain`/`MPS`/`MPO` C++ types (same unqualified/unnamespaced names,

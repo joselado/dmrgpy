@@ -103,7 +103,7 @@ internally to a spin-up/spin-down site pair, exactly like
 read as the literal integer `0` at spin locations, since they have no
 meaning there. Currently only `itensor_version=3` (and `"python"`) are
 supported; see `mixedchain.py`'s module docstring for why
-`itensor_version=2` isn't yet, and `examples/mixed_spin_fermion_chain`
+`itensor_version=2` isn't yet, and `examples/fermion_models/mixed_spin_fermion_chain`
 for a worked Kondo-lattice example.
 
 `Bosonic_Chain(n, maxnb=[...])` takes a per-site local dimension list
@@ -117,7 +117,7 @@ factory) — `itensor_version=2` and the Julia backend still only
 understand the single fixed 4-level boson site regardless of what
 `maxnb` requests, so a non-default `maxnb` should be run under
 `itensor_version=3` (the default) or `"python"` for DMRG/ED results to
-actually agree; see `examples/boson_maxnb_v3_VS_ED`.
+actually agree; see `examples/boson_models/boson_maxnb_v3_VS_ED`.
 
 ## 2. Building a Hamiltonian and observables
 
@@ -1037,7 +1037,7 @@ numbers:
   `kondospectrumtk/stepfunctions.py` uses corrected forms instead,
   re-derived from the paper's own unambiguous defining integrals and
   verified against digitized values from the paper's own figures (see
-  that module's docstring, and `examples/kondo_spectrum_VS_paper/`).
+  that module's docstring, and `examples/kondo/kondo_spectrum_VS_paper/`).
 - The potential-interference term's general-spin closed form (`U!=0` in
   `order=3`) is an extrapolation from the paper's own worked $S=1/2$
   example (only that special case is spelled out in closed form in the
