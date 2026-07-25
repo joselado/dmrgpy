@@ -855,6 +855,145 @@ two-site search, so it never pays the two-site combined-local-
 dimension penalty documented in
 \texttt{Spinful\_Fermionic\_Chain\_Native}'s own class docstring.
 
+A third implementation, \texttt{ctmode="sweep"}
+(\texttt{Chain::four\_correlation\_tensor\_sweep},
+\texttt{mpscpp3/chain\_session.h}/\texttt{bindings.cc}, plain
+non-native-spinful sites only), replaces \texttt{ctmode="full"}'s
+$O(N^4)$ \emph{independent} AutoMPO builds with a single-sweep,
+environment-reuse algorithm following the idea of
+\href{https://github.com/ITensor/ITensorCorrelators.jl}{ITensorCorrelators.jl}.
+Only the $N(N-1)(N-2)(N-3)$ pairwise-distinct-index entries go through
+the fast sweep (nested loops over four strictly increasing sites
+$a<b<c<d$, each level extending a running left environment by exactly
+one site rather than rebuilding it, with both \texttt{Cdag}/\texttt{C}
+tried at each of the four operator sites); the remaining, subdominant
+$O(N^3)$ repeated-index entries fall back to the same per-tuple AutoMPO
+method \texttt{ctmode="full"} uses, since those need same-site
+multi-operator products (e.g.\ $C^\dagger_i C_i = n_i$) the sweep is not
+built to produce. Reordering the four fermionic operators from the
+abstract $(i,j,k,l)$ order into physical site order picks up the
+standard fermion-anticommutation sign (parity of the reordering
+permutation) \emph{plus} one further correction: of the six possible
+\texttt{Cdag}/\texttt{C} type patterns across the four sorted sites, the
+two that strictly alternate (\texttt{Cdag,C,Cdag,C} or
+\texttt{C,Cdag,C,Cdag}) need no extra sign, but the other four (which
+have at least one pair of \emph{adjacent same-type} operators) need one
+more flip on top of the plain permutation parity --- this was found
+empirically (every entry with such a pattern disagreed with
+\texttt{ctmode="full"} by exactly this sign, for every site quadruple
+and chain length tried, before the correction was added) rather than
+purely re-derived by hand from Jordan-Wigner strings, though it traces
+to the same extra $-1$ that \texttt{jordanwigner.py}'s
+\texttt{CC()}/\texttt{CdagCdag()} carry but
+\texttt{CdagC()}/\texttt{CCdag()} don't (reordering two \emph{same-type}
+operators into JW-canonical form costs one more local $F/A^\dagger$ or
+$F/A$ anticommutation than a mixed pair does). Validated to machine
+precision against \texttt{ctmode="full"} and to ED solver tolerance
+across $n=4..8$ (every index tuple, not just a sample) and spot-checked
+at $n=16$; measurably faster than \texttt{ctmode="full"} at every size
+tried, by a margin growing with $n$ ($\sim1.4\times$ at $n=6$ up to over
+$2.5\times$ at $n=16$ for a nearest-neighbor Hubbard chain at fixed
+\texttt{maxm=60} --- absolute numbers are noisy across runs on a shared
+machine (measured $2.8$--$3.4\times$ at $n=16$ across separate runs),
+but the \emph{trend}, measured within any single run, consistently
+holds --- see
+\texttt{examples/staticcorrelators/four\_correlation\_tensor\_sweep\_VS\_full},
+whose Part 3 loop actually runs and reproduces this trend, rather than
+reporting only development-time measurements that would not be
+reproducible from the checked-in tree; $n=20$ was also checked
+informally during development, $\sim4.4\times$, but is not part of the
+shipped example since a single $n=20$ \texttt{ctmode="full"} call alone
+takes $\sim5$ minutes). \texttt{accelerate} (default \texttt{True}) only
+gates the subdominant repeated-index fallback here --- unlike
+\texttt{ctmode="full"}'s own \texttt{accelerate}, which skips $\sim$half
+of the \emph{dominant} per-tuple AutoMPO builds via conjugate-pair
+symmetry, this method's dominant pairwise-distinct sweep pays its cost
+(the shared environment sweep, and six cheap per-pattern
+\texttt{eltC()} evaluations) once regardless of how many output entries
+a given leaf value gets scattered into, so there is no equivalent saving
+to skip there --- confirmed directly (\texttt{accelerate=True} vs.\
+\texttt{False} gives identical wall-clock on the dominant part).
+
+\texttt{four\_correlation\_tensor\_sweep()} originally renormalized its
+internal copy of \texttt{wf} before the fast-sweep computation
+(\texttt{psi /= innerC(psi,psi).real()}, mirroring \texttt{reduced\_dm()}'s
+own convention), but the repeated-index fallback loop calls
+\texttt{innerC(wf,...)} on the raw, un-renormalized \texttt{wf} --- a
+real bug, caught by code review, not by any of the (unit-norm-only)
+validation above: for any non-unit-norm input MPS (e.g.\ \texttt{wf*c}
+for a scalar $c$, as opposed to an already-converged DMRG ground state,
+which is unit-norm to solver precision and so did not expose it), the
+two halves of one output tensor came back scaled inconsistently with
+each other \emph{and} with \texttt{ctmode="full"}/\texttt{"explicit"}.
+Fixed by dropping the renormalization entirely, matching
+\texttt{four\_correlation\_tensor()}'s own convention (no enforced
+normalization, caller's responsibility) exactly --- confirmed with a
+direct repro (\texttt{wf*3.0}: \texttt{ctmode="full"} scales every entry
+by $3^2=9$ as expected; \texttt{ctmode="sweep"} did too only on the
+repeated-index entries, and by $1/9$ on the pairwise-distinct ones,
+before the fix). The same bug, same fix, applies to the
+\texttt{pyitensor/chain.py} port below.
+
+Not ported to \texttt{Spinful\_Fermionic\_Chain\_Native}: that class's
+\texttt{ctmode="full"} gets its Jordan-Wigner threading for free from
+ITensor's own \texttt{AutoMPO} acting on flavor-resolved operator names,
+since two flavors share one physical site there --- a different
+threading problem than this sweep's per-flat-mode gap rule solves, not
+attempted here.
+
+The same algorithm was then ported to \texttt{pyitensor/chain.py}'s
+\texttt{Chain.four\_correlation\_tensor\_sweep} for
+\texttt{itensor\_version="python"} --- close to a mechanical
+transcription of the C++ version, including
+\texttt{\_four\_pt\_perm\_table()} (the same sign/index-role table,
+generated with \texttt{itertools.permutations} instead of a hand-rolled
+\texttt{next\_permutation}), with one adaptation: this engine never
+primes \texttt{Link}-tagged indices to keep a self-overlap's bra and ket
+from colliding the way \texttt{chain\_session.h}'s
+\texttt{dag(prime(psi.A(site), TagSet("Link")))} does (see
+\texttt{mpsalgebra.py}'s \texttt{inner()}) --- instead the bra side is
+built once per outer site $a$ via \texttt{mpsalgebra.py}'s own
+\texttt{\_fresh\_link\_copy(psi)} (freshly relabeled \texttt{Link}
+indices, physical indices untouched), and the running environment
+carries one leg from the \emph{ket}'s own unrelabeled links and one from
+this fresh bra copy's links; the boundary \texttt{delta} ``shortcut''
+tensors are built from \texttt{commonIndex} on each side (ket vs.\
+fresh-bra) rather than from a single primed/unprimed pair. Matched the
+C++ version and ED to machine precision immediately (0 mismatches out of
+every distinct- and repeated-index tuple tried, $n=5$), confirming the
+ported sign table is correct and the fresh-link-copy substitution is a
+faithful translation, not just an analogous-looking one. Real but
+smaller speedup than the C++ version ($\sim1.2$--$1.4\times$ at
+$n=5..7$, vs.\ $\sim1.4$--$4.4\times$ at $n=6..20$ for
+\texttt{itensor\_version=3}): pure-Python loop/function-call overhead is
+a bigger fraction of the per-step cost here than the underlying NumPy
+linear algebra, so there is less for environment reuse to save on
+relative to the total.
+
+\texttt{get\_four\_correlation\_tensor(ctmode=...)}'s default changed
+from a fixed \texttt{ctmode="explicit"} to \texttt{ctmode=None}, resolved
+per-wavefunction by the new
+\texttt{\_four\_correlation\_tensor\_default\_ctmode()}
+(\texttt{entropytk/correlationentropy.py}): \texttt{"sweep"} whenever it
+applies (\texttt{itensor\_version} in \texttt{(3,"python")},
+non-native-spinful), else \texttt{"full"} whenever it applies
+(\texttt{itensor\_version} in \texttt{(2,3,"python")}, or native-spinful
+under \texttt{itensor\_version=3}), else \texttt{"explicit"}. An explicit
+\texttt{ctmode=} argument is unaffected --- it is still a hard request
+that raises if unavailable, not a hint the resolver can override.
+ED-backed wavefunctions (\texttt{edtk/edchain.py},
+\texttt{pyfermion/mbfermion.py}) never reach the resolver at all: they
+hardcode \texttt{ctmode="explicit"} themselves, as before. Verified the
+resolver picks the right mode across every backend actually reachable
+from the public API (\texttt{itensor\_version} \texttt{2} falling back
+to ED when the C++ extension is not compiled, \texttt{3},
+\texttt{"python"}, and \texttt{Spinful\_Fermionic\_Chain\_Native}), and
+made it use \texttt{getattr()}/\texttt{hasattr()} defensively rather
+than assume \texttt{wf.MBO} always carries
+\texttt{.itensor\_version}/\texttt{.\_session} --- cheap insurance since
+the function is easy to reach with an unusual \texttt{wf.MBO} from
+outside the two call sites it is actually designed for.
+
 Investigated whether \texttt{get\_correlation\_matrix}'s default
 \texttt{dmmode="fast"}
 (\texttt{entropytk/correlationentropy.py::correlation\_matrix\_fast}, $n$

@@ -12,6 +12,9 @@ file is a close transcription, not a redesign, precisely so it inherits
 that file's already-debugged behavior rather than re-deriving it.
 """
 
+import itertools
+from functools import lru_cache
+
 import numpy as np
 
 from .autompo import AutoMPO
@@ -20,14 +23,41 @@ from .mpobuilder import to_mpo
 from .mpsalgebra import applyMPO, inner, nmultMPO
 from .mpsalgebra import sum as mps_sum
 from .mpsalgebra import randomMPS, traceC
+from .mpsalgebra import _fresh_link_copy
 from .sites import SiteX
 from .svd import svd
 from .sweeps import Sweeps
 from .tdvp import tdvp_step as _tdvp_step_fn
 from .gse import global_subspace_expand as _global_subspace_expand_fn
-from .tensor import commonIndex, dag, prime, swapPrime
+from .tensor import commonIndex, contract_many, dag, delta, noPrime, prime, swapPrime
 
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
+
+
+@lru_cache(maxsize=1)
+def _four_pt_perm_table():
+    """Sign and index-role data for all 4! ways a strictly increasing site
+    quadruple (a,b,c,d) can be assigned to (i,j,k,l) of <Cdag_i C_j Cdag_k
+    C_l> -- a direct port of the same table built in
+    Chain::four_correlation_tensor_sweep (mpscpp3/chain_session.h; see its
+    docstring for the full derivation, including the empirically-found
+    extra sign for non-alternating Cdag/C type patterns). Returns a tuple
+    of (mask, irank, jrank, krank, lrank, sign) rows."""
+    table = []
+    for p in itertools.permutations(range(4)):
+        inv = [0, 0, 0, 0]
+        for r in range(4):
+            inv[p[r]] = r
+        inversions = sum(1 for x in range(4) for y in range(x + 1, 4) if p[x] > p[y])
+        mask = 0
+        for r in range(4):
+            if p[r] % 2 == 0:
+                mask |= (1 << r)
+        sign = 1 if inversions % 2 == 0 else -1
+        if mask not in (5, 10):
+            sign = -sign
+        table.append((mask, inv[0], inv[1], inv[2], inv[3], sign))
+    return tuple(table)
 
 
 class Chain:
@@ -454,6 +484,145 @@ class Chain:
                         out[i, j, k, l] = c
                         if current != conj_idx or not accelerate:
                             out[l, k, j, i] = np.conj(c)
+        return out
+
+    def four_correlation_tensor_sweep(self, wf, accelerate=True):
+        """Single-sweep, environment-reuse four-point correlator tensor
+        <Cdag_i C_j Cdag_k C_l> -- a close port of
+        Chain::four_correlation_tensor_sweep (mpscpp3/chain_session.h; see
+        its docstring for the full algorithm and the derivation of the
+        sign table in _four_pt_perm_table() above), so itensor_version=
+        "python" gets the same speedup over four_correlation_tensor()'s
+        independent per-tuple AutoMPO builds that itensor_version=3 does.
+
+        Only the pairwise-distinct-index entries go through the fast
+        sweep; the remaining (subdominant) repeated-index entries fall
+        back to four_correlation_tensor()'s own per-tuple AutoMPO method,
+        same as the C++ version.
+
+        The "prime the bra's Link tags" trick chain_session.h uses to keep
+        a self-overlap's bra and ket legs from colliding doesn't apply
+        here (this engine never primes Link indices for that purpose, see
+        mpsalgebra.py's inner()) -- instead, following inner()'s own
+        convention, the bra side is built once per outer site 'a' via
+        _fresh_link_copy(psi) (freshly relabeled Link indices, physical
+        indices untouched), and the running environment carries one leg
+        from the *ket*'s own (unrelabeled) links and one from this fresh
+        bra copy's links.
+
+        `accelerate` only gates the (subdominant) repeated-index fallback
+        loop below, unlike four_correlation_tensor()'s own accelerate,
+        which skips ~half of the *dominant* per-tuple AutoMPO builds via
+        conjugate-pair symmetry. The pairwise-distinct fast-sweep body's
+        dominant cost (the shared environment sweep, and the six
+        per-pattern scalar() evaluations) is paid once regardless of how
+        many output entries a given leaf value gets scattered into, so
+        there is no equivalent saving to skip there -- don't expect
+        accelerate=True to give the same speedup here it gives
+        four_correlation_tensor().
+        """
+        n = self.sites.length()
+        out = np.zeros((n, n, n, n), dtype=complex)
+
+        # Deliberately NOT renormalized: four_correlation_tensor() computes
+        # the raw inner(wf,op,wf) with no enforced normalization, and the
+        # repeated-index fallback loop below calls inner(wf,...) on this
+        # same, unmodified wf -- both must agree on that convention, or the
+        # two halves of one output tensor would carry different,
+        # inconsistent overall scales for any non-unit-norm wf (an earlier
+        # version of this method normalized psi here, mirroring
+        # chain_session.h's reduced_dm() convention, which is harmless for
+        # an already-unit-norm ground state but silently mis-scaled the
+        # pairwise-distinct entries against the repeated-index fallback for
+        # any wf that wasn't already unit-normalized, e.g. wf*c). psi is
+        # still copied (not aliased) because position() mutates its gauge
+        # in place.
+        psi = wf.copy()
+
+        def apply_local(T, site, name):
+            if name is None:
+                return T
+            return noPrime(T * self.sites.op(name, site), "Site")
+
+        def fold(E, bra_tensors, site, apply_f, opname):
+            T = psi.A(site)
+            if apply_f:
+                T = apply_local(T, site, "F")
+            T = apply_local(T, site, opname)
+            piece = dag(bra_tensors[site - 1])
+            pieces = [p for p in (E, T, piece) if p is not None]
+            return contract_many(pieces)
+
+        for ai in range(0, n - 3):
+            a = ai + 1
+            psi.position(a)
+            bra_tensors = _fresh_link_copy(psi)
+            lbase = None
+            if a > 1:
+                ket_link = commonIndex(psi.A(a - 1), psi.A(a))
+                bra_link = commonIndex(bra_tensors[a - 2], bra_tensors[a - 1])
+                lbase = delta(ket_link, bra_link)
+            for opa_i in range(2):
+                opa = "Cdag" if opa_i == 0 else "C"
+                la = fold(lbase, bra_tensors, a, False, opa)
+                lab_running = la
+                for bi in range(ai + 1, n - 2):
+                    b = bi + 1
+                    if bi > ai + 1:  # gap (a,b): 1 op so far -> F
+                        lab_running = fold(lab_running, bra_tensors, b - 1, True, None)
+                    for opb_i in range(2):
+                        opb = "Cdag" if opb_i == 0 else "C"
+                        lab = fold(lab_running, bra_tensors, b, False, opb)
+                        labc_running = lab
+                        for ci in range(bi + 1, n - 1):
+                            c = ci + 1
+                            if ci > bi + 1:  # gap (b,c): 2 ops -> no F
+                                labc_running = fold(labc_running, bra_tensors, c - 1, False, None)
+                            for opc_i in range(2):
+                                opc = "Cdag" if opc_i == 0 else "C"
+                                labc = fold(labc_running, bra_tensors, c, False, opc)
+                                labcd_running = labc
+                                for di in range(ci + 1, n):
+                                    d = di + 1
+                                    if di > ci + 1:  # gap (c,d): 3 ops -> F
+                                        labcd_running = fold(labcd_running, bra_tensors, d - 1, True, None)
+                                    for opd_i in range(2):
+                                        mask = ((1 if opa_i == 0 else 0) | (2 if opb_i == 0 else 0) |
+                                                (4 if opc_i == 0 else 0) | (8 if opd_i == 0 else 0))
+                                        if bin(mask).count("1") != 2:
+                                            continue  # not a Cdag,C,Cdag,C pattern
+                                        opd = "Cdag" if opd_i == 0 else "C"
+                                        labcd = fold(labcd_running, bra_tensors, d, False, opd)
+                                        if d < n:
+                                            ket_link = commonIndex(psi.A(d), psi.A(d + 1))
+                                            bra_link = commonIndex(bra_tensors[d - 1], bra_tensors[d])
+                                            labcd = labcd * delta(ket_link, bra_link)
+                                        val = labcd.scalar()
+                                        pos = (a - 1, b - 1, c - 1, d - 1)
+                                        for (pmask, ir, jr, kr, lr, sign) in _four_pt_perm_table():
+                                            if pmask != mask:
+                                                continue
+                                            i, j, k, l = pos[ir], pos[jr], pos[kr], pos[lr]
+                                            out[i, j, k, l] = sign * val
+
+        # Repeated-index entries (subdominant, not covered above): same
+        # per-tuple AutoMPO method as four_correlation_tensor().
+        for i in range(n):
+            for j in range(n):
+                for k in range(n):
+                    for l in range(n):
+                        if len({i, j, k, l}) == 4:
+                            continue
+                        current, conj_idx = (i, j, k, l), (l, k, j, i)
+                        if accelerate and current > conj_idx:
+                            continue
+                        ampo = AutoMPO(self.sites)
+                        ampo.add(1.0, "Cdag", i + 1, "C", j + 1, "Cdag", k + 1, "C", l + 1)
+                        op_ = to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+                        corr_val = inner(wf, op_, wf)
+                        out[i, j, k, l] = corr_val
+                        if current != conj_idx or not accelerate:
+                            out[l, k, j, i] = np.conj(corr_val)
         return out
 
     def kpm_dynamical_correlator(self, terms_i, terms_j, kpmmaxm, kpm_scale, kpm_accelerate,

@@ -203,12 +203,25 @@ def cpp_correlation_matrix(wf):
     return self._session.correlation_matrix(wf.cpp_handle)
 
 
-def get_four_correlation_tensor(wf,ctmode="explicit",**kwargs):
-    """Return the correlation tensor as <Cdag_i C_j Cdag_k C_l>"""
+def get_four_correlation_tensor(wf,ctmode=None,**kwargs):
+    """Return the correlation tensor as <Cdag_i C_j Cdag_k C_l>.
+
+    ctmode=None (the default) auto-selects the fastest method actually
+    available for this wavefunction's backend/chain type -- "sweep"
+    whenever it applies (itensor_version in (3,"python"), non-native-
+    spinful fermionic sites), else "full" whenever it applies, else the
+    always-correct but slowest "explicit" fallback (see
+    _four_correlation_tensor_default_ctmode()). Passing a ctmode
+    explicitly is still a hard request: it raises rather than silently
+    falling back if that method isn't available for this wavefunction."""
+    if ctmode is None:
+        ctmode = _four_correlation_tensor_default_ctmode(wf)
     if ctmode=="explicit":
         return get_four_correlation_tensor_explicit(wf,**kwargs)
     elif ctmode=="full":
         return get_four_correlation_tensor_cpp(wf,**kwargs)
+    elif ctmode=="sweep":
+        return get_four_correlation_tensor_sweep(wf,**kwargs)
     else: raise
 
 
@@ -260,3 +273,83 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
         # native sites represent.
         return self._session.four_correlation_tensor_spinful(wf.cpp_handle,accelerate)
     return self._session.four_correlation_tensor(wf.cpp_handle,accelerate)
+
+
+def get_four_correlation_tensor_sweep(wf,accelerate=True,**kwargs):
+    """Compute the four-point correlator tensor with the fast,
+    single-sweep, environment-reuse method (mpscpp3/chain_session.h's
+    Chain::four_correlation_tensor_sweep for itensor_version=3,
+    pyitensor/chain.py's own port of the same algorithm for
+    itensor_version="python" -- see either docstring for the algorithm,
+    which follows the reuse idea of ITensorCorrelators.jl,
+    https://github.com/ITensor/ITensorCorrelators.jl, rather than
+    get_four_correlation_tensor_cpp()'s independent per-tuple AutoMPO
+    build). Real, measured speedup over ctmode="full" that grows with
+    system size (roughly 1.2x at n=6 up to >2.5x at n=16 for a Hubbard
+    chain at maxm=60 under itensor_version=3 -- reproduced directly by
+    examples/staticcorrelators/four_correlation_tensor_sweep_VS_full),
+    at machine-precision agreement -- this is the default ctmode whenever
+    it's available (see get_four_correlation_tensor()'s ctmode=None
+    handling).
+
+    accelerate only gates the (subdominant) repeated-index fallback here,
+    unlike get_four_correlation_tensor_cpp()'s own accelerate, which
+    skips ~half of the *dominant* per-tuple AutoMPO builds via conjugate-
+    pair symmetry -- there's no equivalent saving available in this
+    method's dominant pairwise-distinct sweep (see either
+    four_correlation_tensor_sweep()'s own docstring, C++ or pyitensor,
+    for why), so don't expect the usual ~2x win from accelerate=True here.
+
+    Only implemented for itensor_version in (3,"python") on the plain
+    (non-native-spinful) fermionic sites: itensor_version=3 needs the
+    compiled mpscpp3 extension, and neither has a counterpart yet for
+    Spinful_Fermionic_Chain_Native (whose four_correlation_tensor_spinful()
+    instead hands ITensor's AutoMPO the literal flavor-resolved
+    Cdagup/Cup/Cdagdn/Cdn names and lets its own automatic fermionic
+    threading handle two flavors sharing one physical site -- a different
+    JW convention this sweep's per-flat-mode gap rule doesn't reproduce
+    as-is)."""
+    self = wf.MBO
+    from .. import fermionchain
+    if type(self)==fermionchain.Spinful_Fermionic_Chain_Native:
+        raise NotImplementedError("ctmode=\"sweep\" has no native-spinful-site "
+                "counterpart yet; use ctmode=\"full\" "
+                "(four_correlation_tensor_spinful) instead")
+    if self.itensor_version not in (3,"python") or \
+            not hasattr(self._session,"four_correlation_tensor_sweep"):
+        raise NotImplementedError("ctmode=\"sweep\" requires itensor_version=3 "
+                "(with the compiled mpscpp3 extension) or \"python\", got "
+                "itensor_version="+str(self.itensor_version))
+    return self._session.four_correlation_tensor_sweep(wf.cpp_handle,accelerate)
+
+
+def _four_correlation_tensor_default_ctmode(wf):
+    """Pick the best available ctmode for get_four_correlation_tensor()
+    when the caller didn't request one explicitly: "sweep" whenever it
+    applies (itensor_version in (3,"python"), non-native-spinful), else
+    "full" whenever it applies (itensor_version in (2,3,"python"), or
+    native-spinful under itensor_version=3), else "explicit" (always
+    correct, backend-agnostic, but the slowest option). Only ever reached
+    for DMRG-backed wavefunctions (mps.py/mpsjulialive's own
+    get_four_correlation_tensor): ED-backed ones (edtk/edchain.py,
+    pyfermion/mbfermion.py) always force ctmode="explicit" themselves and
+    never call this -- so wf.MBO here is guaranteed a proper
+    Many_Body_Chain with .itensor_version/._session, but getattr() is used
+    anyway rather than assuming that, since a missing/unexpected attribute
+    should just fall back to "explicit" (always correct) rather than
+    crash."""
+    self = wf.MBO
+    from .. import fermionchain
+    is_native_spinful = type(self)==fermionchain.Spinful_Fermionic_Chain_Native
+    itensor_version = getattr(self,"itensor_version",None)
+    session = getattr(self,"_session",None)
+    if not is_native_spinful and itensor_version in (3,"python") \
+            and hasattr(session,"four_correlation_tensor_sweep"):
+        return "sweep"
+    if is_native_spinful:
+        if itensor_version==3 and hasattr(session,"four_correlation_tensor_spinful"):
+            return "full"
+        return "explicit"
+    if itensor_version in (2,3,"python") and hasattr(session,"four_correlation_tensor"):
+        return "full"
+    return "explicit"

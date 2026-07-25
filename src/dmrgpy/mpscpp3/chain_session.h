@@ -1,4 +1,5 @@
 #include <tuple>
+#include <algorithm> // std::next_permutation (four_correlation_tensor_sweep)
 
 // TDVP/tdvp.h and TDVP/basisextension.h are quoted includes, so they
 // resolve relative to this file's own directory (mpscpp3/) with no
@@ -1025,6 +1026,263 @@ class Chain
                 out[idx(i,j,k,l)] = c;
                 out[idx(l,k,j,i)] = std::conj(c);
                 }
+            }
+        return out;
+        }
+
+    // Fast single-sweep four-point correlator tensor <Cdag_i C_j Cdag_k C_l>
+    // for the plain (non-spinful) case, following the algorithmic idea of
+    // ITensorCorrelators.jl (https://github.com/ITensor/ITensorCorrelators.jl):
+    // instead of building and applying a fresh AutoMPO for every (i,j,k,l)
+    // tuple independently (four_correlation_tensor() above -- O(N^4)
+    // AutoMPO/MPO builds, each an O(N)-ish term compilation + MPO
+    // compression + full inner-product sweep), reuse a single left-to-right
+    // sweep's worth of partial contractions ("environments") across the
+    // whole tensor.
+    //
+    // Scope: only the N(N-1)(N-2)(N-3) entries with i,j,k,l *pairwise
+    // distinct* go through the fast sweep below; the remaining (subdominant,
+    // O(N^3) of the O(N^4) total) entries with a repeated index fall back to
+    // the same per-tuple AutoMPO method as four_correlation_tensor() (see
+    // the tail of this function). Repeats need same-site multi-operator
+    // products (e.g. Cdag_i C_i = N_i, or Cdag_i Cdag_i = 0) that the sweep
+    // below -- keyed on four *strictly increasing* site positions -- isn't
+    // built to produce, and since they're a lower order of the total work a
+    // slower fallback there doesn't cost the overall asymptotic win.
+    //
+    // Algorithm, for four strictly increasing sites a<b<c<d: any assignment
+    // of these to (i,j,k,l) is some permutation of which of
+    // {Cdag_i,C_j,Cdag_k,C_l} sits at which of {a,b,c,d}. Reordering
+    // fermionic operators from the abstract (i,j,k,l) order into the
+    // physical site order a<b<c<d picks up a sign equal to the parity of
+    // that permutation -- standard fermion anticommutation: swapping any two
+    // operators at *different* sites flips the sign of the expectation
+    // value, regardless of which specific operator types they are. The
+    // value in site order is then obtained by threading a Jordan-Wigner "F"
+    // (fermion parity) string through every *gap* site strictly between two
+    // consecutively-applied operators, alternating: F in the first gap
+    // (a,b) (one operator applied so far = odd), none in the second gap
+    // (b,c) (two applied = even), F in the third gap (c,d) (three applied =
+    // odd). This "odd/even by operator count" rule depends only on *how
+    // many* operators have been swept past, not on which types they are, so
+    // it is identical for all six possible Cdag/C type patterns at a given
+    // (a,b,c,d) -- which is exactly what lets one (a,b,c,d) sweep serve
+    // every (i,j,k,l) permutation that maps onto it. This mirrors
+    // ITensorCorrelators.jl's add_operator_fermi (site-sorted operator
+    // application plus a "par = 1-2*parity(sortperm(...))" sign correction),
+    // specialized to a fixed 4-operator Cdag/C/Cdag/C string rather than
+    // porting its fully generic n-operator/repeated-site recursion engine.
+    //
+    // Environment reuse: the nested loops over a<b<c<d each carry a
+    // "running" environment extended by exactly one new site per loop step
+    // (never rebuilt from scratch), so the O(N) cost of threading the
+    // F-string through a gap is paid once per gap endpoint pair, not once
+    // per (i,j,k,l) tuple -- turning the O(N^4) independent O(N)-cost MPO
+    // builds of four_correlation_tensor() into O(N^4) total *cheap* local
+    // tensor contractions (four O(N) nested loops, O(1) amortized work per
+    // step, times a small constant from trying both Cdag/C at each of the
+    // four operator sites). The two ends outside [a,d] use the standard
+    // mixed-canonical-form shortcut instead of being folded in site by
+    // site: psi.position(a) makes everything left of a collapse to an
+    // identity on the bond just before a, and -- since d>a -- everything
+    // right of d is *also* already right-orthonormal in that same gauge, so
+    // it collapses too (delta on the bond just after d). The three
+    // *interior* gaps do need an explicit per-site fold, since only one
+    // side of the chain is canonical relative to the fixed orthogonality
+    // center 'a' at a time.
+    //
+    // `accelerate` here only gates the (subdominant, O(N^3)) repeated-
+    // index fallback loop below, unlike four_correlation_tensor()/
+    // four_correlation_tensor_spinful() where it skips ~half of the
+    // *dominant* per-tuple AutoMPO builds via the (i,j,k,l)<->(l,k,j,i)
+    // conjugate-pair symmetry. There is no equivalent saving available in
+    // the pairwise-distinct fast-sweep body above: its dominant cost is
+    // the shared environment sweep across (a,b,c,d) and the six per-
+    // pattern eltC() evaluations, both already paid once regardless of
+    // how many of the (up to 24) output entries a given leaf value gets
+    // scattered into, so skipping half of those *output writes* would not
+    // skip any of the actual work -- confirmed directly (identical wall-
+    // clock and identical results for accelerate=true vs false on the
+    // dominant part). Don't read `accelerate=true` here as implying the
+    // same roughly-2x win it gives four_correlation_tensor().
+    std::vector<std::complex<double>>
+    four_correlation_tensor_sweep(MPS const& wf, bool accelerate=true) const
+        {
+        int N = sites_.length();
+        std::vector<std::complex<double>> out(N*N*N*N,0.0);
+        auto idx = [N](int i,int j,int k,int l) { return ((i*N+j)*N+k)*N+l; };
+
+        // Deliberately NOT renormalized (unlike reduced_dm()'s psi above):
+        // four_correlation_tensor() computes the raw innerC(wf,op,wf) with
+        // no enforced normalization, and the repeated-index fallback loop
+        // below calls innerC(wf,...) on this same, unmodified wf -- both
+        // must agree on that convention, or the two halves of one output
+        // tensor would carry different, inconsistent overall scales for
+        // any non-unit-norm wf (confirmed directly: an earlier version of
+        // this method normalized psi here, which is harmless for an
+        // already-unit-norm ground state but silently returned a tensor
+        // scaled by 1/norm^4 on the pairwise-distinct entries against a
+        // scaled-by-norm^2 fallback on the repeated-index entries for any
+        // wf that wasn't already unit-normalized -- e.g. wf*c for any
+        // scalar c). psi is still copied (not aliased) because position()
+        // mutates its gauge in place.
+        auto psi = wf;
+
+        // Apply a single-site operator (by name; "" = no-op) to a ket
+        // tensor and restore the standard unprimed physical-index
+        // convention -- same idiom as apply_mpo()'s noPrime(TagSet("Site")).
+        auto apply_local = [&](ITensor T, int site1based, std::string const& name) -> ITensor
+            {
+            if (name.empty()) return T;
+            T = T*op(sites_,name,site1based);
+            T.noPrime(TagSet("Site"));
+            return T;
+            };
+        // Fold one more site into a running left environment: apply an
+        // optional operator (or "F" for a plain JW-string gap site) to the
+        // ket, then contract against the bra (Link-tagged indices primed,
+        // so the physical/site index directly traces out for a bare fold
+        // and threads through the operator otherwise) -- same pattern as
+        // reduced_dm()'s trace sweep above.
+        auto fold = [&](ITensor E, int site1based, bool applyF, std::string const& opname) -> ITensor
+            {
+            ITensor T = psi.A(site1based);
+            if (applyF) T = apply_local(T,site1based,"F");
+            T = apply_local(T,site1based,opname);
+            T = (E ? E*T : T);
+            return T*dag(prime(psi.A(site1based),TagSet("Link")));
+            };
+
+        // Every strictly increasing quadruple of sites (a,b,c,d) can be
+        // assigned to (i,j,k,l) in 4! = 24 ways; precompute, once, the sign
+        // and the "which rank supplies which of i,j,k,l" data for all 24 --
+        // see the algorithm comment above for the sign rule. mask's bit r
+        // (r=0..3, standing for a,b,c,d respectively) is set iff the
+        // operator landing at that rank is Cdag-typed (i.e. came from slot
+        // 0=i or slot 2=k of the original Cdag_i C_j Cdag_k C_l string).
+        struct PermEntry { int mask; int irank,jrank,krank,lrank; int sign; };
+        static const std::vector<PermEntry> perms = [] {
+            std::vector<PermEntry> t;
+            int p[4] = {0,1,2,3}; // p[rank] = which original slot (i,j,k,l) lands at that rank
+            do {
+                int inv[4]; for (int r=0;r<4;++r) inv[p[r]] = r; // inv[slot] = rank
+                int inversions = 0;
+                for (int x=0;x<4;++x) for (int y=x+1;y<4;++y) if (p[x]>p[y]) ++inversions;
+                int mask = 0; for (int r=0;r<4;++r) if (p[r]%2==0) mask |= (1<<r);
+                int sign = (inversions%2==0) ? 1 : -1;
+                // Extra correction beyond plain reordering parity: of the
+                // six weight-2 masks, only 5 (0b0101, Cdag,C,Cdag,C) and 10
+                // (0b1010, C,Cdag,C,Cdag) strictly alternate type at every
+                // rank; the other four (3,6,9,12, which all have at least
+                // one pair of *adjacent same-type* operators) need one more
+                // sign flip on top of the permutation parity above. This
+                // isn't a plain fermion-anticommutation fact (that's fully
+                // captured by `inversions` already, for genuinely distinct
+                // sites): it traces back to the same "-1" that
+                // jordanwigner.py's CC()/CdagCdag() carry but CdagC()/
+                // CCdag() don't -- reordering two *same-type* operators
+                // (Cdag,Cdag or C,C) into JW-string-canonical form takes one
+                // extra local F/Adag or F/A anticommutation beyond what a
+                // mixed Cdag,C pair needs. Confirmed empirically (not just
+                // derived): every mask-3/6/9/12 entry disagreed with
+                // four_correlation_tensor() by exactly this sign, for every
+                // (a,b,c,d) and N tried, before this correction was added.
+                if (mask!=5 && mask!=10) sign = -sign;
+                t.push_back({mask,inv[0],inv[1],inv[2],inv[3],sign});
+                } while (std::next_permutation(p,p+4));
+            return t;
+            }();
+
+        for (int ai=0; ai<=N-4; ++ai)
+            {
+            int a = ai+1; // 1-indexed ITensor site
+            psi.position(a);
+            ITensor Lbase; // default-constructed = trivial "1" when a==1
+            if (a>1)
+                {
+                auto ln = commonIndex(psi.A(a-1),psi.A(a));
+                Lbase = delta(dag(prime(ln)),ln);
+                }
+            for (int opAi=0; opAi<2; ++opAi)
+                {
+                std::string opA = (opAi==0) ? "Cdag" : "C";
+                ITensor La = fold(Lbase,a,false,opA);
+                ITensor LabRunning = La; // extended incrementally as bi grows
+                for (int bi=ai+1; bi<=N-3; ++bi)
+                    {
+                    int b = bi+1;
+                    if (bi>ai+1) LabRunning = fold(LabRunning,b-1,true,""); // gap (a,b): 1 op so far -> F
+                    for (int opBi=0; opBi<2; ++opBi)
+                        {
+                        std::string opB = (opBi==0) ? "Cdag" : "C";
+                        ITensor Lab = fold(LabRunning,b,false,opB);
+                        ITensor LabcRunning = Lab;
+                        for (int ci=bi+1; ci<=N-2; ++ci)
+                            {
+                            int c = ci+1;
+                            if (ci>bi+1) LabcRunning = fold(LabcRunning,c-1,false,""); // gap (b,c): 2 ops -> no F
+                            for (int opCi=0; opCi<2; ++opCi)
+                                {
+                                std::string opC = (opCi==0) ? "Cdag" : "C";
+                                ITensor Labc = fold(LabcRunning,c,false,opC);
+                                ITensor LabcdRunning = Labc;
+                                for (int di=ci+1; di<N; ++di)
+                                    {
+                                    int d = di+1;
+                                    if (di>ci+1) LabcdRunning = fold(LabcdRunning,d-1,true,""); // gap (c,d): 3 ops -> F
+                                    for (int opDi=0; opDi<2; ++opDi)
+                                        {
+                                        int mask = (opAi==0?1:0)|(opBi==0?2:0)|
+                                                   (opCi==0?4:0)|(opDi==0?8:0);
+                                        if (__builtin_popcount((unsigned)mask)!=2) continue; // not a Cdag,C,Cdag,C pattern
+                                        std::string opD = (opDi==0) ? "Cdag" : "C";
+                                        ITensor Labcd = fold(LabcdRunning,d,false,opD);
+                                        if (d<N)
+                                            {
+                                            auto rn = commonIndex(psi.A(d),psi.A(d+1));
+                                            Labcd = Labcd*delta(dag(prime(rn)),rn);
+                                            }
+                                        Cplx val = eltC(Labcd);
+                                        int posArr[4] = {a-1,b-1,c-1,d-1}; // back to 0-indexed sites
+                                        for (auto const& e : perms)
+                                            {
+                                            if (e.mask!=mask) continue;
+                                            int i = posArr[e.irank], j = posArr[e.jrank],
+                                                k = posArr[e.krank], l = posArr[e.lrank];
+                                            out[idx(i,j,k,l)] = double(e.sign)*val;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+        // Repeated-index entries (subdominant, not covered above): same
+        // per-tuple AutoMPO method as four_correlation_tensor(), applied to
+        // the *original* (unnormalized-assumption-only, un-mutated) wf.
+        auto build_mpo = [&](int i,int j,int k,int l)
+            {
+            auto ampo = AutoMPO(sites_);
+            ampo += 1.0,"Cdag",i+1,"C",j+1,"Cdag",k+1,"C",l+1;
+            return toMPO(ampo);
+            };
+        for (int i=0;i<N;i++)
+        for (int j=0;j<N;j++)
+        for (int k=0;k<N;k++)
+        for (int l=0;l<N;l++)
+            {
+            bool distinct = (i!=j && i!=k && i!=l && j!=k && j!=l && k!=l);
+            if (distinct) continue;
+            std::tuple<int,int,int,int> current{i,j,k,l};
+            std::tuple<int,int,int,int> conjugate{l,k,j,i};
+            if (accelerate && current>conjugate) continue;
+            auto op_ = build_mpo(i,j,k,l);
+            auto c = innerC(wf,op_,wf);
+            out[idx(i,j,k,l)] = c;
+            if (!accelerate || current!=conjugate) out[idx(l,k,j,i)] = std::conj(c);
             }
         return out;
         }
