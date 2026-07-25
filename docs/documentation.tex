@@ -157,13 +157,24 @@ print("Energy with ED:",   sc.gs_energy(mode="ED"))
 \end{lstlisting}
 
 The \texttt{examples/} directory contains 100+ self-contained scripts,
-one per physical model or feature, and doubles as the project's de facto
-regression suite (there is no separate unit-test suite for the Python
-code). See \texttt{examples/readme\_examples/} for the snippets shown in
-\texttt{README.md}, and \texttt{examples/v2\_VS\_v3\_*} /
-\texttt{examples/backend\_timing\_gs\_energy/} for scripts that directly
-compare backends against each other on correctness and timing
-respectively.
+one per physical model or feature, organized into thematic subfolders
+(\texttt{groundstate/}, \texttt{staticcorrelators/},
+\texttt{dynamical\_correlator/}, \texttt{spin\_models/},
+\texttt{fermion\_models/}, \texttt{boson\_models/},
+\texttt{time\_evolution/}, \texttt{excited\_states/},
+\texttt{entanglement/}, \texttt{topological/}, \texttt{kondo/},
+\texttt{non\_hermitian/}, \texttt{finite\_temperature/},
+\texttt{magnetization/}, \texttt{backend\_comparison/},
+\texttt{utilities/}, \texttt{algebra/}, ...), and doubles as the
+project's de facto regression suite (there is no separate unit-test
+suite for the Python code). See \texttt{examples/readme\_examples/} for
+the snippets shown in \texttt{README.md}, and
+\texttt{examples/backend\_comparison/} plus the \texttt{v2\_VS\_v3\_*}-named
+examples living inside each theme folder (e.g.
+\texttt{examples/spin\_models/v2\_VS\_v3\_heisenberg\_spin\_half}) for
+scripts that directly compare backends against each other on
+correctness, and \texttt{examples/groundstate/backend\_timing\_gs\_energy/}
+for timing.
 
 \section{Architecture}
 
@@ -624,7 +635,7 @@ the stack trace alone:
 
 Both paths were validated directly against exact diagonalization (quench
 from a N\'eel-favoring field to a Heisenberg chain, mirroring
-\texttt{examples/tdvp\_VS\_ED\_time\_evolution}):
+\texttt{examples/time\_evolution/tdvp\_VS\_ED\_time\_evolution}):
 \texttt{evolve\_and\_measure} agreed with ED to $\sim 8 \times 10^{-7}$
 on a 4-site chain, and \texttt{evolution\_DC}'s quench correlator agreed
 to $\sim 9 \times 10^{-11}$ on a 6-site chain.
@@ -689,7 +700,7 @@ on); \texttt{cvm.py::\_set\_cvm\_sweep\_params} now temporarily
 overrides \texttt{self.maxm} instead for that backend, since that's what
 \texttt{mpsjulialive/mpo.py}/\texttt{mps.py} actually read. Validated
 against ED with the same tolerance
-\texttt{examples/dynamical\_correlator\_VS\_ED/main.py} uses for the
+\texttt{examples/dynamical\_correlator/dynamical\_correlator\_VS\_ED/main.py} uses for the
 C++/pure-Python backends ($10^{-6}$) --- matched to
 $\sim 2 \times 10^{-15}$ here, in 3 CG iterations per frequency point.
 
@@ -830,7 +841,7 @@ the fastest of all four combinations (native/interleaved $\times$
 explicit/full) tried at every size, including $n=12$ (24 flat modes:
 $\sim620$s vs $\sim890$s for \texttt{Spinful\_Fermionic\_Chain}'s own
 \texttt{ctmode="full"}, a $\sim30\%$ win --- see
-\texttt{examples/four\_correlation\_tensor\_spinful\_native}). Before
+\texttt{examples/staticcorrelators/four\_correlation\_tensor\_spinful\_native}). Before
 this C++-accelerated path existed, native's only option
 (\texttt{ctmode="explicit"}) still beat interleaved's
 \texttt{ctmode="full"} at $n=3..6$, by a margin that grew with $n$
@@ -882,7 +893,7 @@ small native Julia primitive" pattern every fix above followed:
   \texttt{vev(MBO,MO)} takes no \texttt{**kwargs} at all, so this raises
   a plain \texttt{TypeError} for \texttt{julia\_live} rather than
   silently misbehaving. The one example exercising it,
-  \texttt{examples/power\_vev/main.py}, sets
+  \texttt{examples/utilities/power\_vev/main.py}, sets
   \texttt{sc.itensor\_version = "julia"} directly (bypassing
   \texttt{setup\_julia()}/\texttt{\_reset\_dmrg\_state()} entirely) ---
   the legacy, already-inert subprocess-based backend documented below,
@@ -891,7 +902,7 @@ small native Julia primitive" pattern every fix above followed:
 \item \textbf{\texttt{get\_distribution}/\texttt{kpmdmrg.py::general\_kpm}}
   (spectral distribution of an arbitrary operator, not just the
   Hamiltonian; has example coverage in four
-  \texttt{examples/magnetization\_distribution*} scripts and
+  \texttt{examples/magnetization/magnetization\_distribution*} scripts and
   \texttt{examples/dynamical\_correlator/dynamical\_correlator\_shift},
   but no \texttt{pytest} coverage) --- unlike everything above, this is
   not a wire-up-already-generic-code fix:
@@ -1463,7 +1474,7 @@ ratios shown above, not these first-call numbers.
     performance-sensitive, compile the C++ extension
     (\texttt{python install.py}) and use \texttt{itensor\_version=2} or
     \texttt{3}.
-  \item \texttt{examples/backend\_timing\_gs\_energy/main.py} reproduces
+  \item \texttt{examples/groundstate/backend\_timing\_gs\_energy/main.py} reproduces
     the $n=8..20$ rows of the ground-state table directly against the
     current codebase and current machine ($n=24..32$ aren't included, to
     keep the example fast to run) --- re-run it rather than trusting
@@ -1490,8 +1501,8 @@ Path & Contents \\
 \texttt{src/dmrgpy/nonhermitian/kpm.py} & non-Hermitian KPM dynamical correlator (NHKPM.jl port, ED + itensor\_version=3) \\
 \texttt{src/dmrgpy/tdz.py} & complex-time-evolution dynamical correlator (``TDZ'', arXiv:2311.10909) \\
 \texttt{examples/} & 100+ self-contained example scripts (also the regression suite) \\
-\texttt{examples/v2\_VS\_v3\_*} & backend-vs-backend correctness comparisons \\
-\texttt{examples/backend\_timing\_gs\_energy/} & backend-vs-backend timing comparison \\
+\texttt{examples/backend\_comparison/}, \texttt{v2\_VS\_v3\_*} examples & backend-vs-backend correctness comparisons \\
+\texttt{examples/groundstate/\allowbreak backend\_timing\_gs\_energy/} & backend-vs-backend timing comparison \\
 \texttt{installtk/} & build-requirement checking and ITensor/extension compilation \\
 \texttt{docs/} & this document, and its Markdown counterpart \\
 \bottomrule

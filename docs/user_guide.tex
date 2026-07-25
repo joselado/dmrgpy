@@ -133,7 +133,7 @@ literal integer 0 at spin locations, since they have no meaning there.
 Currently only \texttt{itensor\_version=3} (and \texttt{"python"}) are
 supported; see \texttt{mixedchain.py}'s module docstring for why
 \texttt{itensor\_version=2} isn't yet, and
-\texttt{examples/mixed\_spin\_fermion\_chain} for a worked Kondo-lattice
+\texttt{examples/fermion\_models/mixed\_spin\_fermion\_chain} for a worked Kondo-lattice
 example.
 
 \texttt{Bosonic\_Chain(n, maxnb=[\ldots])} takes a per-site local
@@ -149,7 +149,7 @@ the Julia backend still only understand the single fixed 4-level boson
 site regardless of what \texttt{maxnb} requests, so a non-default
 \texttt{maxnb} should be run under \texttt{itensor\_version=3} (the
 default) or \texttt{"python"} for DMRG/ED results to actually agree;
-see \texttt{examples/boson\_maxnb\_v3\_VS\_ED}.
+see \texttt{examples/boson\_models/boson\_maxnb\_v3\_VS\_ED}.
 
 \section{Building a Hamiltonian and observables}
 
@@ -1214,7 +1214,7 @@ specific numbers:
   instead, re-derived from the paper's own unambiguous defining
   integrals and verified against digitized values from the paper's own
   figures (see that module's docstring, and
-  \texttt{examples/kondo\_spectrum\_VS\_paper/}).
+  \texttt{examples/kondo/kondo\_spectrum\_VS\_paper/}).
 \item The potential-interference term's general-spin closed form
   (\texttt{U!=0} in \texttt{order=3}) is an extrapolation from the
   paper's own worked $S=1/2$ example (only that special case is spelled
