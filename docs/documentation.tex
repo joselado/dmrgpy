@@ -902,6 +902,59 @@ since two flavors share one physical site there --- a different
 threading problem than this sweep's per-flat-mode gap rule solves, not
 attempted here.
 
+The same algorithm was then ported to \texttt{pyitensor/chain.py}'s
+\texttt{Chain.four\_correlation\_tensor\_sweep} for
+\texttt{itensor\_version="python"} --- close to a mechanical
+transcription of the C++ version, including
+\texttt{\_four\_pt\_perm\_table()} (the same sign/index-role table,
+generated with \texttt{itertools.permutations} instead of a hand-rolled
+\texttt{next\_permutation}), with one adaptation: this engine never
+primes \texttt{Link}-tagged indices to keep a self-overlap's bra and ket
+from colliding the way \texttt{chain\_session.h}'s
+\texttt{dag(prime(psi.A(site), TagSet("Link")))} does (see
+\texttt{mpsalgebra.py}'s \texttt{inner()}) --- instead the bra side is
+built once per outer site $a$ via \texttt{mpsalgebra.py}'s own
+\texttt{\_fresh\_link\_copy(psi)} (freshly relabeled \texttt{Link}
+indices, physical indices untouched), and the running environment
+carries one leg from the \emph{ket}'s own unrelabeled links and one from
+this fresh bra copy's links; the boundary \texttt{delta} ``shortcut''
+tensors are built from \texttt{commonIndex} on each side (ket vs.\
+fresh-bra) rather than from a single primed/unprimed pair. Matched the
+C++ version and ED to machine precision immediately (0 mismatches out of
+every distinct- and repeated-index tuple tried, $n=5$), confirming the
+ported sign table is correct and the fresh-link-copy substitution is a
+faithful translation, not just an analogous-looking one. Real but
+smaller speedup than the C++ version ($\sim1.2$--$1.4\times$ at
+$n=5..7$, vs.\ $\sim1.4$--$4.4\times$ at $n=6..20$ for
+\texttt{itensor\_version=3}): pure-Python loop/function-call overhead is
+a bigger fraction of the per-step cost here than the underlying NumPy
+linear algebra, so there is less for environment reuse to save on
+relative to the total.
+
+\texttt{get\_four\_correlation\_tensor(ctmode=...)}'s default changed
+from a fixed \texttt{ctmode="explicit"} to \texttt{ctmode=None}, resolved
+per-wavefunction by the new
+\texttt{\_four\_correlation\_tensor\_default\_ctmode()}
+(\texttt{entropytk/correlationentropy.py}): \texttt{"sweep"} whenever it
+applies (\texttt{itensor\_version} in \texttt{(3,"python")},
+non-native-spinful), else \texttt{"full"} whenever it applies
+(\texttt{itensor\_version} in \texttt{(2,3,"python")}, or native-spinful
+under \texttt{itensor\_version=3}), else \texttt{"explicit"}. An explicit
+\texttt{ctmode=} argument is unaffected --- it is still a hard request
+that raises if unavailable, not a hint the resolver can override.
+ED-backed wavefunctions (\texttt{edtk/edchain.py},
+\texttt{pyfermion/mbfermion.py}) never reach the resolver at all: they
+hardcode \texttt{ctmode="explicit"} themselves, as before. Verified the
+resolver picks the right mode across every backend actually reachable
+from the public API (\texttt{itensor\_version} \texttt{2} falling back
+to ED when the C++ extension is not compiled, \texttt{3},
+\texttt{"python"}, and \texttt{Spinful\_Fermionic\_Chain\_Native}), and
+made it use \texttt{getattr()}/\texttt{hasattr()} defensively rather
+than assume \texttt{wf.MBO} always carries
+\texttt{.itensor\_version}/\texttt{.\_session} --- cheap insurance since
+the function is easy to reach with an unusual \texttt{wf.MBO} from
+outside the two call sites it is actually designed for.
+
 Investigated whether \texttt{get\_correlation\_matrix}'s default
 \texttt{dmmode="fast"}
 (\texttt{entropytk/correlationentropy.py::correlation\_matrix\_fast}, $n$

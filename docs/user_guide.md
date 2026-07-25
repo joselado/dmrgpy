@@ -368,25 +368,38 @@ $\langle c_i^\dagger c_j c_k^\dagger c_l\rangle$.
 
 `get_four_correlation_tensor(ctmode=...)` has three implementations:
 `ctmode="explicit"` (backend-agnostic Python loop of `vev()`s, always
-available), `ctmode="full"` (C++-accelerated, `itensor_version=3`, builds
-and applies an independent AutoMPO per $(i,j,k,l)$ tuple), and
-`ctmode="sweep"` (also `itensor_version=3`, plain non-native-spinful
-fermionic sites only) — a single-sweep, environment-reuse implementation
-following the algorithmic idea of
+available), `ctmode="full"` (native per-element AutoMPO build — C++ for
+`itensor_version` `2`/`3`, pure Python for `"python"` — builds and
+applies an independent AutoMPO per $(i,j,k,l)$ tuple), and
+`ctmode="sweep"` (`itensor_version` `3` or `"python"`, plain
+non-native-spinful fermionic sites only) — a single-sweep,
+environment-reuse implementation following the algorithmic idea of
 [ITensorCorrelators.jl](https://github.com/ITensor/ITensorCorrelators.jl):
 rather than rebuilding a fresh MPO for every tuple, it reuses partial
 tensor-network contractions across the whole $(N,N,N,N)$ tensor. Agrees
-with `ctmode="full"` and ED to machine precision / solver tolerance, and
-is measurably faster than `ctmode="full"` at every size tried, by a
-margin that grows with $n$ (roughly 1.2x at $n=6$ up to over 2x at
-$n=12$–$14$ for a Hubbard chain) — see
-`examples/staticcorrelators/four_correlation_tensor_sweep_VS_full` and
+with `ctmode="full"` and ED to machine precision / solver tolerance on
+both backends, and is measurably faster than `ctmode="full"` at every
+size tried on both, by a margin that grows with $n$ (roughly 1.2x at
+$n=6$ up to over 2x at $n=12$–$14$ under `itensor_version=3`; a smaller
+but still real margin under `"python"`, whose per-step cost is dominated
+by Python-level overhead rather than the underlying linear algebra) —
+see `examples/staticcorrelators/four_correlation_tensor_sweep_VS_full`,
 `Chain::four_correlation_tensor_sweep`'s own docstring
-(`mpscpp3/chain_session.h`) for the full algorithm and the measured
-numbers. Prefer `ctmode="sweep"` over `ctmode="full"` whenever it's
-available; `Spinful_Fermionic_Chain_Native` still needs `ctmode="full"`
-(its own `four_correlation_tensor_spinful()`), since the sweep has no
-native-spinful-site counterpart yet.
+(`mpscpp3/chain_session.h`), and `pyitensor/chain.py`'s port of the same
+method, for the full algorithm and the measured numbers.
+
+`ctmode=None` (the default) auto-selects the fastest method actually
+available for the wavefunction's backend/chain type: `"sweep"` whenever
+it applies, else `"full"` whenever it applies (any `itensor_version` in
+`2`/`3`/`"python"`, or `Spinful_Fermionic_Chain_Native` under
+`itensor_version=3` via its own `four_correlation_tensor_spinful()`),
+else the always-correct `"explicit"` fallback (e.g. for
+`itensor_version="julia_live"`, which has no `"full"`/`"sweep"`
+implementation). Passing a `ctmode` explicitly is still a hard request —
+it raises rather than silently falling back if that method isn't
+available for the wavefunction at hand. `Spinful_Fermionic_Chain_Native`
+always needs `ctmode="full"` (or the default, which resolves to it):
+the sweep has no native-spinful-site counterpart yet.
 
 ## 6. Dynamical (frequency-dependent) correlators
 

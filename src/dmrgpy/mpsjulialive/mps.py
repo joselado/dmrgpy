@@ -50,10 +50,12 @@ class MPS():
         else: raise # not implemented
     def get_four_correlation_tensor(self,**kwargs):
         """<Cdag_i C_j Cdag_k C_l>, via entropytk/correlationentropy.py's
-        default ctmode="explicit" (a Python loop of MultiOperator products
-        + generic aMb()/.dot() -- no julia_live-specific code needed,
-        unlike ctmode="full" which needs a native per-element AutoMPO
-        build and is not implemented for this backend)."""
+        auto-selected ctmode="explicit" (a Python loop of MultiOperator
+        products + generic aMb()/.dot() -- no julia_live-specific code
+        needed, unlike ctmode="full"/"sweep" which need a native
+        per-element AutoMPO build/environment sweep and aren't implemented
+        for this backend, so _four_correlation_tensor_default_ctmode()
+        falls through to "explicit" here)."""
         from .. import entanglement
         return entanglement.get_four_correlation_tensor(self,**kwargs)
     def get_correlation_entropy(self,**kwargs):
