@@ -285,11 +285,20 @@ def get_four_correlation_tensor_sweep(wf,accelerate=True,**kwargs):
     https://github.com/ITensor/ITensorCorrelators.jl, rather than
     get_four_correlation_tensor_cpp()'s independent per-tuple AutoMPO
     build). Real, measured speedup over ctmode="full" that grows with
-    system size (roughly 1.2x at n=6 up to >4x at n=20 for a Hubbard
-    chain at maxm=60 under itensor_version=3, see examples/
-    staticcorrelators/four_correlation_tensor_sweep_VS_full), at machine-
-    precision agreement -- this is the default ctmode whenever it's
-    available (see get_four_correlation_tensor()'s ctmode=None handling).
+    system size (roughly 1.2x at n=6 up to >2.5x at n=16 for a Hubbard
+    chain at maxm=60 under itensor_version=3 -- reproduced directly by
+    examples/staticcorrelators/four_correlation_tensor_sweep_VS_full),
+    at machine-precision agreement -- this is the default ctmode whenever
+    it's available (see get_four_correlation_tensor()'s ctmode=None
+    handling).
+
+    accelerate only gates the (subdominant) repeated-index fallback here,
+    unlike get_four_correlation_tensor_cpp()'s own accelerate, which
+    skips ~half of the *dominant* per-tuple AutoMPO builds via conjugate-
+    pair symmetry -- there's no equivalent saving available in this
+    method's dominant pairwise-distinct sweep (see either
+    four_correlation_tensor_sweep()'s own docstring, C++ or pyitensor,
+    for why), so don't expect the usual ~2x win from accelerate=True here.
 
     Only implemented for itensor_version in (3,"python") on the plain
     (non-native-spinful) fermionic sites: itensor_version=3 needs the

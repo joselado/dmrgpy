@@ -722,10 +722,46 @@ don't (reordering two *same-type* operators into JW-canonical form costs
 one more local `F`/`Adag` or `F`/`A` anticommutation than a mixed pair
 does). Validated to machine precision against `ctmode="full"` and to ED
 solver tolerance across `n=4..8` (every index tuple, not just a sample)
-and spot-checked at `n=16,20`; measurably faster than `ctmode="full"` at
+and spot-checked at `n=16`; measurably faster than `ctmode="full"` at
 every size tried, by a margin growing with `n` (~1.4x at `n=6` up to
-~4.4x at `n=20` for a nearest-neighbor Hubbard chain at fixed `maxm=60`
-— see `examples/staticcorrelators/four_correlation_tensor_sweep_VS_full`).
+over 2.5x at `n=16` for a nearest-neighbor Hubbard chain at fixed
+`maxm=60` — absolute numbers are noisy across runs on a shared machine
+(measured 2.8x-3.4x at `n=16` across separate runs), but the *trend*,
+measured within any single run, consistently holds — see
+`examples/staticcorrelators/four_correlation_tensor_sweep_VS_full`,
+whose Part 3 loop actually runs and reproduces this trend, rather than
+reporting only development-time measurements that would not be
+reproducible from the checked-in tree; `n=20` was also checked
+informally during development, ~4.4x, but is not part of the shipped
+example since a single `n=20` `ctmode="full"` call alone takes ~5
+minutes). `accelerate` (default `True`) only gates the subdominant
+repeated-index fallback here — unlike `ctmode="full"`'s own
+`accelerate`, which skips ~half of the *dominant* per-tuple AutoMPO
+builds via conjugate-pair symmetry, this method's dominant pairwise-
+distinct sweep pays its cost (the shared environment sweep, and six
+cheap per-pattern `eltC()` evaluations) once regardless of how many
+output entries a given leaf value gets scattered into, so there's no
+equivalent saving to skip there — confirmed directly (`accelerate=True`
+vs.\ `False` gives identical wall-clock on the dominant part).
+
+`four_correlation_tensor_sweep()` originally renormalized its internal
+copy of `wf` before the fast-sweep computation (`psi /=
+innerC(psi,psi).real()`, mirroring `reduced_dm()`'s own convention), but
+the repeated-index fallback loop calls `innerC(wf,...)` on the raw,
+un-renormalized `wf` — a real bug, caught by code review, not by any of
+the (unit-norm-only) validation above: for any non-unit-norm input MPS
+(e.g. `wf*c` for a scalar `c`, as opposed to an already-converged DMRG
+ground state, which is unit-norm to solver precision and so didn't
+expose it), the two halves of one output tensor came back scaled
+inconsistently with each other *and* with `ctmode="full"`/`"explicit"`.
+Fixed by dropping the renormalization entirely, matching
+`four_correlation_tensor()`'s own convention (no enforced normalization,
+caller's responsibility) exactly — confirmed with a direct repro
+(`wf*3.0`: `ctmode="full"` scales every entry by $3^2=9$ as expected;
+`ctmode="sweep"` did too only on the repeated-index entries, and by
+$1/9$ on the pairwise-distinct ones, before the fix). The same bug,
+same fix, applies to the `pyitensor/chain.py` port below.
+
 Not ported to `Spinful_Fermionic_Chain_Native`: that class's
 `ctmode="full"` gets its Jordan-Wigner threading for free from ITensor's
 own `AutoMPO` acting on flavor-resolved operator names, since two

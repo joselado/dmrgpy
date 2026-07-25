@@ -890,11 +890,50 @@ operators into JW-canonical form costs one more local $F/A^\dagger$ or
 $F/A$ anticommutation than a mixed pair does). Validated to machine
 precision against \texttt{ctmode="full"} and to ED solver tolerance
 across $n=4..8$ (every index tuple, not just a sample) and spot-checked
-at $n=16,20$; measurably faster than \texttt{ctmode="full"} at every
-size tried, by a margin growing with $n$ ($\sim1.4\times$ at $n=6$ up to
-$\sim4.4\times$ at $n=20$ for a nearest-neighbor Hubbard chain at fixed
-\texttt{maxm=60} --- see
-\texttt{examples/staticcorrelators/four\_correlation\_tensor\_sweep\_VS\_full}).
+at $n=16$; measurably faster than \texttt{ctmode="full"} at every size
+tried, by a margin growing with $n$ ($\sim1.4\times$ at $n=6$ up to over
+$2.5\times$ at $n=16$ for a nearest-neighbor Hubbard chain at fixed
+\texttt{maxm=60} --- absolute numbers are noisy across runs on a shared
+machine (measured $2.8$--$3.4\times$ at $n=16$ across separate runs),
+but the \emph{trend}, measured within any single run, consistently
+holds --- see
+\texttt{examples/staticcorrelators/four\_correlation\_tensor\_sweep\_VS\_full},
+whose Part 3 loop actually runs and reproduces this trend, rather than
+reporting only development-time measurements that would not be
+reproducible from the checked-in tree; $n=20$ was also checked
+informally during development, $\sim4.4\times$, but is not part of the
+shipped example since a single $n=20$ \texttt{ctmode="full"} call alone
+takes $\sim5$ minutes). \texttt{accelerate} (default \texttt{True}) only
+gates the subdominant repeated-index fallback here --- unlike
+\texttt{ctmode="full"}'s own \texttt{accelerate}, which skips $\sim$half
+of the \emph{dominant} per-tuple AutoMPO builds via conjugate-pair
+symmetry, this method's dominant pairwise-distinct sweep pays its cost
+(the shared environment sweep, and six cheap per-pattern
+\texttt{eltC()} evaluations) once regardless of how many output entries
+a given leaf value gets scattered into, so there is no equivalent saving
+to skip there --- confirmed directly (\texttt{accelerate=True} vs.\
+\texttt{False} gives identical wall-clock on the dominant part).
+
+\texttt{four\_correlation\_tensor\_sweep()} originally renormalized its
+internal copy of \texttt{wf} before the fast-sweep computation
+(\texttt{psi /= innerC(psi,psi).real()}, mirroring \texttt{reduced\_dm()}'s
+own convention), but the repeated-index fallback loop calls
+\texttt{innerC(wf,...)} on the raw, un-renormalized \texttt{wf} --- a
+real bug, caught by code review, not by any of the (unit-norm-only)
+validation above: for any non-unit-norm input MPS (e.g.\ \texttt{wf*c}
+for a scalar $c$, as opposed to an already-converged DMRG ground state,
+which is unit-norm to solver precision and so did not expose it), the
+two halves of one output tensor came back scaled inconsistently with
+each other \emph{and} with \texttt{ctmode="full"}/\texttt{"explicit"}.
+Fixed by dropping the renormalization entirely, matching
+\texttt{four\_correlation\_tensor()}'s own convention (no enforced
+normalization, caller's responsibility) exactly --- confirmed with a
+direct repro (\texttt{wf*3.0}: \texttt{ctmode="full"} scales every entry
+by $3^2=9$ as expected; \texttt{ctmode="sweep"} did too only on the
+repeated-index entries, and by $1/9$ on the pairwise-distinct ones,
+before the fix). The same bug, same fix, applies to the
+\texttt{pyitensor/chain.py} port below.
+
 Not ported to \texttt{Spinful\_Fermionic\_Chain\_Native}: that class's
 \texttt{ctmode="full"} gets its Jordan-Wigner threading for free from
 ITensor's own \texttt{AutoMPO} acting on flavor-resolved operator names,

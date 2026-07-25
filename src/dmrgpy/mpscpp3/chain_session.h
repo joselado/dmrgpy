@@ -1090,6 +1090,21 @@ class Chain
     // *interior* gaps do need an explicit per-site fold, since only one
     // side of the chain is canonical relative to the fixed orthogonality
     // center 'a' at a time.
+    //
+    // `accelerate` here only gates the (subdominant, O(N^3)) repeated-
+    // index fallback loop below, unlike four_correlation_tensor()/
+    // four_correlation_tensor_spinful() where it skips ~half of the
+    // *dominant* per-tuple AutoMPO builds via the (i,j,k,l)<->(l,k,j,i)
+    // conjugate-pair symmetry. There is no equivalent saving available in
+    // the pairwise-distinct fast-sweep body above: its dominant cost is
+    // the shared environment sweep across (a,b,c,d) and the six per-
+    // pattern eltC() evaluations, both already paid once regardless of
+    // how many of the (up to 24) output entries a given leaf value gets
+    // scattered into, so skipping half of those *output writes* would not
+    // skip any of the actual work -- confirmed directly (identical wall-
+    // clock and identical results for accelerate=true vs false on the
+    // dominant part). Don't read `accelerate=true` here as implying the
+    // same roughly-2x win it gives four_correlation_tensor().
     std::vector<std::complex<double>>
     four_correlation_tensor_sweep(MPS const& wf, bool accelerate=true) const
         {
@@ -1097,8 +1112,21 @@ class Chain
         std::vector<std::complex<double>> out(N*N*N*N,0.0);
         auto idx = [N](int i,int j,int k,int l) { return ((i*N+j)*N+k)*N+l; };
 
+        // Deliberately NOT renormalized (unlike reduced_dm()'s psi above):
+        // four_correlation_tensor() computes the raw innerC(wf,op,wf) with
+        // no enforced normalization, and the repeated-index fallback loop
+        // below calls innerC(wf,...) on this same, unmodified wf -- both
+        // must agree on that convention, or the two halves of one output
+        // tensor would carry different, inconsistent overall scales for
+        // any non-unit-norm wf (confirmed directly: an earlier version of
+        // this method normalized psi here, which is harmless for an
+        // already-unit-norm ground state but silently returned a tensor
+        // scaled by 1/norm^4 on the pairwise-distinct entries against a
+        // scaled-by-norm^2 fallback on the repeated-index entries for any
+        // wf that wasn't already unit-normalized -- e.g. wf*c for any
+        // scalar c). psi is still copied (not aliased) because position()
+        // mutates its gauge in place.
         auto psi = wf;
-        psi /= innerC(psi,psi).real(); // normalize (see note in mpscpp2/chain_session.h)
 
         // Apply a single-site operator (by name; "" = no-op) to a ket
         // tensor and restore the standard unprimed physical-index

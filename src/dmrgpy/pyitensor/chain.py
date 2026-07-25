@@ -509,14 +509,35 @@ class Chain:
         indices untouched), and the running environment carries one leg
         from the *ket*'s own (unrelabeled) links and one from this fresh
         bra copy's links.
+
+        `accelerate` only gates the (subdominant) repeated-index fallback
+        loop below, unlike four_correlation_tensor()'s own accelerate,
+        which skips ~half of the *dominant* per-tuple AutoMPO builds via
+        conjugate-pair symmetry. The pairwise-distinct fast-sweep body's
+        dominant cost (the shared environment sweep, and the six
+        per-pattern scalar() evaluations) is paid once regardless of how
+        many output entries a given leaf value gets scattered into, so
+        there is no equivalent saving to skip there -- don't expect
+        accelerate=True to give the same speedup here it gives
+        four_correlation_tensor().
         """
         n = self.sites.length()
         out = np.zeros((n, n, n, n), dtype=complex)
 
+        # Deliberately NOT renormalized: four_correlation_tensor() computes
+        # the raw inner(wf,op,wf) with no enforced normalization, and the
+        # repeated-index fallback loop below calls inner(wf,...) on this
+        # same, unmodified wf -- both must agree on that convention, or the
+        # two halves of one output tensor would carry different,
+        # inconsistent overall scales for any non-unit-norm wf (an earlier
+        # version of this method normalized psi here, mirroring
+        # chain_session.h's reduced_dm() convention, which is harmless for
+        # an already-unit-norm ground state but silently mis-scaled the
+        # pairwise-distinct entries against the repeated-index fallback for
+        # any wf that wasn't already unit-normalized, e.g. wf*c). psi is
+        # still copied (not aliased) because position() mutates its gauge
+        # in place.
         psi = wf.copy()
-        # normalize (divide by norm *squared*, matching chain_session.h's
-        # reduced_dm()/four_correlation_tensor_sweep() convention)
-        psi = psi * (1.0 / inner(psi, psi).real)
 
         def apply_local(T, site, name):
             if name is None:

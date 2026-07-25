@@ -27,7 +27,7 @@ from dmrgpy import fermionchain
 # None -- see _four_correlation_tensor_default_ctmode()'s docstring for
 # the full priority order across every backend).
 #
-# Measured below (n=6..14 for itensor_version=3, n=5..7 for "python" --
+# Measured below (n=6..16 for itensor_version=3, n=5..7 for "python" --
 # the pure-Python engine is much slower in absolute terms so isn't run at
 # the larger sizes here, same random-hopping + nearest-neighbor-
 # interaction chain, same maxm/nsweeps for every ctmode/size at a given
@@ -35,7 +35,7 @@ from dmrgpy import fermionchain
 # precision / ED's solver tolerance at every size and on both backends,
 # and is *faster* than ctmode="full" at every size tried on both, by a
 # margin that *grows* with n under itensor_version=3 (roughly 1.2x at
-# n=6, up to >2x at n=12-14) -- consistent with turning
+# n=6, up to >2.5x at n=16) -- consistent with turning
 # four_correlation_tensor()'s O(N^4) independent O(N)-cost MPO builds
 # into four_correlation_tensor_sweep()'s O(N^4) total *cheap* local
 # tensor contractions (see that method's own docstring in
@@ -43,6 +43,18 @@ from dmrgpy import fermionchain
 # same qualitative win (~1.2-1.4x at n=5-7) at a much smaller absolute
 # margin, since Python-level loop/function-call overhead is a bigger
 # fraction of the per-step cost there than in the compiled backend.
+#
+# `accelerate` (default True on every ctmode) only speeds up the
+# *repeated*-index entries here (a subdominant O(N^3) slice of the total
+# tensor): unlike ctmode="full", where it skips ~half of the dominant
+# per-tuple AutoMPO builds via conjugate-pair symmetry, ctmode="sweep"'s
+# dominant pairwise-distinct-index sweep pays its cost once regardless
+# (shared environment sweep across (a,b,c,d) plus six cheap per-pattern
+# scalar evaluations) -- see four_correlation_tensor_sweep()'s own
+# docstring (either backend) for why there's no equivalent saving to skip
+# there. Not benchmarked separately below since the timing difference
+# between accelerate=True/False on ctmode="sweep" is not expected to be
+# meaningful.
 
 np.random.seed(0)
 
@@ -104,7 +116,7 @@ assert diff_py_ed < 1e-4
 
 print()
 print("### Part 3: performance comparison, itensor_version=3 ###")
-for n in [6, 8, 10, 12, 14]:
+for n in [6, 8, 10, 12, 14, 16]:
     fc = build(n, itensor_version=3)
     wf = fc.get_gs(mode="DMRG")
 

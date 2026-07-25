@@ -386,7 +386,13 @@ by Python-level overhead rather than the underlying linear algebra) —
 see `examples/staticcorrelators/four_correlation_tensor_sweep_VS_full`,
 `Chain::four_correlation_tensor_sweep`'s own docstring
 (`mpscpp3/chain_session.h`), and `pyitensor/chain.py`'s port of the same
-method, for the full algorithm and the measured numbers.
+method, for the full algorithm and the measured numbers. `accelerate`
+(default `True`, accepted on every `ctmode`) only speeds up the
+subdominant repeated-index entries for `ctmode="sweep"` — unlike
+`ctmode="full"`, its dominant pairwise-distinct-index sweep has no
+equivalent conjugate-pair saving to skip (see either backend's own
+docstring for why), so don't expect the usual ~2x win `accelerate`
+gives `ctmode="full"`.
 
 `ctmode=None` (the default) auto-selects the fastest method actually
 available for the wavefunction's backend/chain type: `"sweep"` whenever
