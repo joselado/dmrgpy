@@ -26,6 +26,8 @@ give several-sigma headroom without an unreasonably slow test.
 import pytest
 
 from dmrgpy import cppext, spinchain
+from dmrgpy.pyitensor.index import reseed_id_counter_past
+from dmrgpy.pyitensor.metts import _run_chain_worker
 
 from _helpers import setup_backend
 
@@ -92,6 +94,29 @@ def test_metts_matches_ed_three_site_energy_and_magnetization(version):
 
     assert metts_e.real == pytest.approx(ed_e.real, abs=0.05)
     assert metts_sz.real == pytest.approx(ed_sz.real, abs=0.05)
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_metts_vev_multi_op_matches_separate_calls(version):
+    """Op may be a list/tuple of MultiOperators, measured together on one
+    shared METTS sample chain (see vevtk/mettsvev.py's docstring) instead
+    of forcing one full sampling run per operator. Given the same seed,
+    the shared-chain multi-op path must reproduce -- bit for bit, not just
+    approximately -- the same per-operator results as calling metts_vev
+    separately for each operator, since it's sampling the exact same
+    Markov chain of METTS states and just measuring more operators against
+    each sampled state."""
+    sc, h = _heisenberg_field_chain(3, version, B=0.4)
+    T = 0.8
+    kwargs = dict(nsamples=40, nwarmup=10, dbeta_half_step=0.08, seed=77)
+
+    metts_e, err_e = sc.metts_vev(h, T, **kwargs)
+    metts_sz, err_sz = sc.metts_vev(sc.Sz[1], T, **kwargs)
+
+    results = sc.metts_vev([h, sc.Sz[1]], T, **kwargs)
+    assert len(results) == 2
+    assert results[0] == (metts_e, err_e)
+    assert results[1] == (metts_sz, err_sz)
 
 
 def test_metts_vev_requires_supported_backend():
@@ -178,6 +203,51 @@ def test_metts_vev_njobs_parallel_chains_match_ed():
 
     assert metts_e.real == pytest.approx(ed_e.real, abs=0.05)
     assert metts_sz.real == pytest.approx(ed_sz.real, abs=0.05)
+
+
+def test_metts_vev_njobs_worker_survives_colliding_index_ids():
+    """A spawned njobs>1 worker is a fresh interpreter: pyitensor/
+    index.py's process-local Index _id_counter restarts at 0 there, but
+    the H/sites/ops MPO/MPS objects it receives were pickled in the
+    *parent* process and carry whatever ids that process's own counter
+    had already assigned (pickling round-trips Index._id verbatim, it
+    never goes through Index.__init__/_id_counter). Since
+    Index.__eq__/__hash__ compare id (and prime level) alone, with no
+    dim/tags check, a worker that mints its own new indices starting from
+    0 (e.g. every sample's classical-product-state bond links) can
+    collide with an unrelated, differently-shaped Index from the
+    unpickled task -- confirmed directly, this made
+    metts_vev(..., njobs=2) reliably raise 'ValueError: shape-mismatch
+    for sum' before pyitensor/metts.py's _run_chain_worker() started
+    calling index.py's reseed_id_counter_past() first. Rather than rely
+    on multiprocessing.Pool actually reproducing that race (order/timing
+    dependent, and confirmed to intermittently pass by luck when *other*
+    tests already pushed this process's own id_counter to large values
+    before this one runs), this reproduces the exact failure mode
+    directly and deterministically: force this process's counter back
+    down into a colliding low range (standing in for a freshly spawned
+    worker's real fresh-interpreter id_counter=0), then call
+    _run_chain_worker() in-process (no actual multiprocessing.Pool
+    needed -- it's a plain function) and confirm it still produces a
+    normal, non-crashing result."""
+    sc, h = _heisenberg_field_chain(3, "python", B=0.4)
+    T = 0.8
+    # Populate self._session.H/sites the same way metts_vev() itself does,
+    # via one cheap real call, then reach into the session for the same
+    # (H, sites, ops) triple _run_chain_worker() is handed under njobs>1.
+    sc.metts_vev(sc.Sz[0], T, nsamples=1, nwarmup=0, dbeta_half_step=0.5, seed=1)
+    chain = sc._session
+    from dmrgpy.pyitensor.autompo import AutoMPO
+    from dmrgpy.pyitensor.mpobuilder import to_mpo
+    op = to_mpo(AutoMPO.from_terms(chain.sites, sc.Sz[1].to_terms()),
+                cutoff=1e-14, maxdim=chain.mpomaxm)
+
+    reseed_id_counter_past(-1)  # force this process's next Index() id to 0
+    means, stderrs, n = _run_chain_worker(
+        (chain.H, chain.sites, [op], 1.0 / T, 5, 2, 0.2, chain.cutoff,
+         chain.maxm, ("Sz", "Sx"), None, 123, 30))
+    assert n == 5
+    assert len(means) == 1 and len(stderrs) == 1
 
 
 def test_metts_vev_njobs_rejects_v3():

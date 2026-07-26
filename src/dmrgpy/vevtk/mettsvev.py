@@ -30,7 +30,13 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
 
     MB: a Many_Body_Chain with itensor_version in ("python", 3) and a
         Hamiltonian already set via MB.set_hamiltonian(...).
-    Op: a MultiOperator (the observable to measure).
+    Op: a MultiOperator (the observable to measure), or a list/tuple of
+        MultiOperators to measure together on one shared METTS sample
+        chain. The (nwarmup+nsamples) imaginary-time evolutions are the
+        expensive part of this method, and both backends' metts_vev
+        already sample every requested operator off the same chain of
+        METTS states, so measuring several operators this way is far
+        cheaper than calling metts_vev once per operator.
     njobs: run njobs independent METTS Markov chains in parallel worker
         processes and pool their statistics -- itensor_version="python"
         only (see pyitensor.metts.metts_thermal_average's own docstring
@@ -55,9 +61,10 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
         per-shape compile tax never gets amortized within a realistic
         sample count -- confirmed directly, ~4x-24x slower with
         kernels.USE_NUMBA=True depending on chain length, not faster.
-    Returns (mean, stderr) -- see
-    pyitensor.metts.metts_thermal_average's own docstring for the
-    stderr's (Markov-correlated, so optimistic) meaning.
+    Returns (mean, stderr) for a single Op, or a list of (mean, stderr)
+    pairs -- one per operator, same order as given -- for a list/tuple of
+    Ops. See pyitensor.metts.metts_thermal_average's own docstring for
+    the stderr's (Markov-correlated, so optimistic) meaning.
     """
     if MB.itensor_version not in ("python", 3):
         raise NotImplementedError(
@@ -109,6 +116,10 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
             "metts_vev: njobs>1 (parallel independent Markov chains) is "
             "only implemented for itensor_version='python' so far (got "
             "itensor_version=%r)" % (MB.itensor_version,))
+    single = not isinstance(Op, (list, tuple))
+    ops = [Op] if single else list(Op)
+    if not ops:
+        raise ValueError("metts_vev: Op list/tuple must be non-empty")
     MB._session.set_sweep_params(MB.maxm, MB.nsweeps, MB.cutoff, MB.noise)
     MB._session.set_verbose(MB.verbose)
     MB._session.set_mpomaxm(max(MB.maxm, MB.mpomaxm))
@@ -119,10 +130,15 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
     # non-reproducible-by-default behavior every other seed= kwarg in
     # this codebase has, rather than silently becoming deterministic.
     seed_arg = seed if seed is not None else random.getrandbits(63)
+    terms_ops = [op.to_terms() for op in ops]
     if MB.itensor_version == "python":
-        return MB._session.metts_vev(
-            Op.to_terms(), T, nsamples, nwarmup,
+        means, stderrs = MB._session.metts_vev(
+            terms_ops, T, nsamples, nwarmup,
             dbeta_half_step, list(basis_ops), seed_arg, niter, njobs=njobs)
-    return MB._session.metts_vev(
-        Op.to_terms(), T, nsamples, nwarmup,
-        dbeta_half_step, list(basis_ops), seed_arg, niter)
+    else:
+        means, stderrs = MB._session.metts_vev(
+            terms_ops, T, nsamples, nwarmup,
+            dbeta_half_step, list(basis_ops), seed_arg, niter)
+    if single:
+        return means[0], stderrs[0]
+    return list(zip(means, stderrs))

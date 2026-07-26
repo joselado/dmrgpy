@@ -323,21 +323,27 @@ PYBIND11_MODULE(_dmrgcpp, m)
              "correlator, see tdz.py, whose per-step contour increment "
              "varies with t). One-site TDVP doesn't grow bond dimension "
              "on its own -- pair with global_subspace_expand() below.")
-        .def("metts_vev",[](Chain& self, std::vector<PyTerm> const& terms_op,
+        .def("metts_vev",[](Chain& self, std::vector<std::vector<PyTerm>> const& terms_ops,
                              double T, int nsamples, int nwarmup,
                              double dbeta_half_step,
                              std::vector<std::string> const& basis_ops,
                              unsigned long seed, int niter) {
-                return self.metts_vev(terms_from_python(terms_op),T,nsamples,
+                std::vector<std::vector<MOTerm>> terms_ops_cpp;
+                terms_ops_cpp.reserve(terms_ops.size());
+                for (auto const& terms_op : terms_ops)
+                    terms_ops_cpp.push_back(terms_from_python(terms_op));
+                return self.metts_vev(terms_ops_cpp,T,nsamples,
                     nwarmup,dbeta_half_step,basis_ops,seed,niter);
-            }, py::arg("terms_op"),py::arg("T"),py::arg("nsamples")=200,
+            }, py::arg("terms_ops"),py::arg("T"),py::arg("nsamples")=200,
                py::arg("nwarmup")=20,py::arg("dbeta_half_step")=0.05,
                py::arg("basis_ops")=std::vector<std::string>{"Sz","Sx"},
                py::arg("seed")=0,py::arg("niter")=30,
-               "Finite-temperature <A> via METTS sampling (White & "
-               "Stoudenmire, arXiv:1002.1305 -- see Chain::metts_vev's own "
-               "comment and pyitensor/metts.py for the full algorithm). "
-               "Returns (mean, stderr).")
+               "Finite-temperature <A> for one or more operators via METTS "
+               "sampling (White & Stoudenmire, arXiv:1002.1305 -- see "
+               "Chain::metts_vev's own comment and pyitensor/metts.py for "
+               "the full algorithm). terms_ops is a list of operators, all "
+               "measured on the same sampled Markov chain. Returns "
+               "(means, stderrs), lists matching terms_ops.")
         .def("global_subspace_expand",&Chain::global_subspace_expand,
              py::arg("H"),py::arg("phi"),py::arg("krylov_order"),
              py::arg("cutoff"),py::arg("maxdim")=0,

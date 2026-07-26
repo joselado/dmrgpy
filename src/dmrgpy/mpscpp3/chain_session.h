@@ -812,13 +812,20 @@ class Chain
     // distribution already carries the correct Boltzmann weight -- no
     // importance reweighting needed (paper, Eq. (3)-(5)).
     //
-    // Returns (mean, stderr): stderr is a naive i.i.d. estimate over the
-    // nsamples retained samples (after nwarmup discarded equilibration
-    // steps), so -- since consecutive METTS samples are Markov-correlated
-    // -- it's likely optimistic unless dbeta_half_step/nwarmup are
-    // generous enough that samples actually decorrelate.
-    std::pair<Cplx,double>
-    metts_vev(std::vector<MOTerm> const& terms_op, double T, int nsamples,
+    // Returns (means, stderrs), one entry per op in terms_ops: stderrs[k]
+    // is a naive i.i.d. estimate over the nsamples retained samples (after
+    // nwarmup discarded equilibration steps), so -- since consecutive
+    // METTS samples are Markov-correlated -- it's likely optimistic unless
+    // dbeta_half_step/nwarmup are generous enough that samples actually
+    // decorrelate. All ops in terms_ops are measured on the same sampled
+    // Markov chain of METTS states -- the (nwarmup+nsamples) imaginary-
+    // time evolutions below are the expensive part, so sharing them across
+    // every requested op (rather than resampling once per op) is the
+    // whole point of taking a list here instead of a single op (mirrors
+    // pyitensor/metts.py's metts_thermal_average, which already worked
+    // this way).
+    std::pair<std::vector<Cplx>,std::vector<double>>
+    metts_vev(std::vector<std::vector<MOTerm>> const& terms_ops, double T, int nsamples,
               int nwarmup, double dbeta_half_step,
               std::vector<std::string> const& basis_ops,
               unsigned long seed, int niter=30) const
@@ -827,7 +834,11 @@ class Chain
         if (T<=0) Error("Chain::metts_vev: T must be > 0");
         if (basis_ops.empty()) Error("Chain::metts_vev: basis_ops must be non-empty");
         if (nsamples<1) Error("Chain::metts_vev: nsamples must be >= 1");
-        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        if (terms_ops.empty()) Error("Chain::metts_vev: terms_ops must be non-empty");
+        std::vector<MPO> ops;
+        ops.reserve(terms_ops.size());
+        for (auto const& terms_op : terms_ops) ops.push_back(build_mpo(sites_,terms_op,mpomaxm_));
+        int nops = (int)ops.size();
         double beta_half = 1.0/(2.0*T);
         int nsteps = std::max(1,(int)std::ceil(beta_half/dbeta_half_step));
         Cplx dt = Cplx(0.0,-1.0)*(beta_half/double(nsteps));
@@ -837,8 +848,8 @@ class Chain
         auto eigcache = metts_build_eigcache(basis_ops);
         MPS cps = random_cps(basis_ops[0],rng,eigcache);
 
-        std::vector<Cplx> samples;
-        samples.reserve(nsamples);
+        std::vector<std::vector<Cplx>> samples(nops);
+        for (auto& s : samples) s.reserve(nsamples);
         int total_iters = nwarmup+nsamples;
         for (int it=0; it<total_iters; ++it)
             {
@@ -848,7 +859,10 @@ class Chain
                 phi = tdvp_step(H_,phi,dt,2,niter);
                 phi /= sqrt(innerC(phi,phi).real());
                 }
-            if (it>=nwarmup) samples.push_back(innerC(phi,A,phi));
+            if (it>=nwarmup)
+                {
+                for (int k=0; k<nops; ++k) samples[k].push_back(innerC(phi,ops[k],phi));
+                }
             cps = collapse_to_cps(phi,basis_ops[it % nbasis],rng,eigcache);
             }
 
@@ -858,20 +872,27 @@ class Chain
         // kwargs, but not guarded against a caller passing an oversized
         // nwarmup either, so check explicitly rather than silently
         // returning NaN.
-        if (samples.empty())
+        if (samples[0].empty())
             Error("Chain::metts_vev: no samples were retained (nwarmup >= nwarmup+nsamples?)");
-        Cplx mean = 0;
-        for (auto& v : samples) mean += v;
-        mean /= double(samples.size());
-        double var = 0.0;
-        for (auto& v : samples)
+        std::vector<Cplx> means(nops,Cplx(0.0,0.0));
+        std::vector<double> stderrs(nops,0.0);
+        for (int k=0; k<nops; ++k)
             {
-            double d = std::abs(v-mean);
-            var += d*d;
+            Cplx mean = 0;
+            for (auto& v : samples[k]) mean += v;
+            mean /= double(samples[k].size());
+            double var = 0.0;
+            for (auto& v : samples[k])
+                {
+                double d = std::abs(v-mean);
+                var += d*d;
+                }
+            double stderr_ = samples[k].size()>1
+                ? std::sqrt(var/double(samples[k].size()-1)/double(samples[k].size())) : 0.0;
+            means[k] = mean;
+            stderrs[k] = stderr_;
             }
-        double stderr_ = samples.size()>1
-            ? std::sqrt(var/double(samples.size()-1)/double(samples.size())) : 0.0;
-        return {mean,stderr_};
+        return {means,stderrs};
         }
 
     // Global subspace expansion (TDVP/basisextension.h's addBasis()):

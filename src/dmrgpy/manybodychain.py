@@ -311,7 +311,11 @@ class Many_Body_Chain():
   def metts_vev(self,MO,T,**kwargs):
       """Finite-temperature <MO> via METTS sampling (White & Stoudenmire,
       arXiv:1002.1305) -- see vevtk/mettsvev.py. Implemented for
-      itensor_version='python' and 3 (not 2, which has no TDVP)."""
+      itensor_version='python' and 3 (not 2, which has no TDVP). MO may
+      also be a list/tuple of MultiOperators, measured together on one
+      shared METTS sample chain (returns a list of (mean,stderr) pairs
+      instead of a single pair) -- much cheaper than one metts_vev call
+      per operator."""
       from .vevtk.mettsvev import metts_vev as _metts_vev
       return _metts_vev(self,MO,T,**kwargs)
   def test_ED(self):

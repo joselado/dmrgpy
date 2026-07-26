@@ -645,35 +645,41 @@ class Chain:
         m = to_mpo(AutoMPO.from_terms(self.sites, terms_x), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         return self._kpm_moments(m, wfa, wfb, num_polynomials, kpmmaxm, kpm_cutoff, kpm_accelerate)
 
-    def metts_vev(self, terms_op, T, nsamples=200, nwarmup=20,
+    def metts_vev(self, terms_ops, T, nsamples=200, nwarmup=20,
                   dbeta_half_step=0.05, basis_ops=("Sz", "Sx"), seed=None, niter=30,
                   njobs=1):
-        """Finite-temperature <A> via METTS sampling (White & Stoudenmire,
-        arXiv:1002.1305 -- see metts.py for the full algorithm). Reuses
-        self.H (already built by set_hamiltonian) and this chain's own
-        cutoff/maxm as the TDVP truncation controls, same convention as
-        every other method here. Single-operator signature (terms_op is
-        one MultiOperator.to_terms() output), matching every other vev-
-        like method's surface here (vev, overlap_aMb, ...) -- this keeps
-        the same call signature mpscpp3's own Chain::metts_vev exposes
-        (njobs is therefore a keyword-only *addition*, python-only --
-        vevtk/mettsvev.py never forwards it to the compiled v3 session,
-        see that module's own njobs guard).
+        """Finite-temperature <A> for one or more operators A via METTS
+        sampling (White & Stoudenmire, arXiv:1002.1305 -- see metts.py for
+        the full algorithm). Reuses self.H (already built by
+        set_hamiltonian) and this chain's own cutoff/maxm as the TDVP
+        truncation controls, same convention as every other method here.
+        njobs is a keyword-only *addition*, python-only -- vevtk/
+        mettsvev.py never forwards it to the compiled v3 session, see that
+        module's own njobs guard.
 
-        Returns (mean, stderr) -- see metts_thermal_average()'s own
-        docstring for what these mean and their (Markov-correlated, so
-        optimistic) error bars.
+        terms_ops: a list of MultiOperator.to_terms() outputs, one per
+        observable. All operators are measured on the *same* sampled
+        Markov chain of METTS states -- the (nwarmup+nsamples) imaginary-
+        time evolutions are the expensive part of this method, and
+        metts_thermal_average() already shares them across every op in
+        `ops`, so this just exposes that instead of forcing one full
+        sampling run per operator (see vevtk/mettsvev.py, the
+        Many_Body_Chain-facing wrapper, for the single-operator
+        convenience path built on top of this).
+
+        Returns (means, stderrs), each a list matching terms_ops -- see
+        metts_thermal_average()'s own docstring for what these mean and
+        their (Markov-correlated, so optimistic) error bars.
         """
         if not self.have_H:
             raise RuntimeError("Chain.metts_vev called before set_hamiltonian")
-        op = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF,
-                    maxdim=self.mpomaxm)
+        ops = [to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF,
+                      maxdim=self.mpomaxm) for terms_op in terms_ops]
         beta = 1.0 / T
-        means, stderrs = _metts_thermal_average(
-            self.H, self.sites, [op], beta, nsamples, nwarmup=nwarmup,
+        return _metts_thermal_average(
+            self.H, self.sites, ops, beta, nsamples, nwarmup=nwarmup,
             dbeta_half_step=dbeta_half_step, cutoff=self.cutoff, maxdim=self.maxm,
             basis_ops=basis_ops, seed=seed, niter=niter, njobs=njobs)
-        return means[0], stderrs[0]
 
     def nhkpm_moments(self, terms_hs, terms_hs_dag, wfa, wfb, n, kpmmaxm, kpmcutoff):
         """Non-Hermitian KPM (port of NHKPM.jl, see

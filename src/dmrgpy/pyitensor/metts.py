@@ -58,7 +58,7 @@ import multiprocessing
 
 import numpy as np
 
-from .index import Index
+from .index import Index, reseed_id_counter_past
 from .mpscontainer import MPS
 from .mpsalgebra import inner
 from .tdvp import tdvp_step
@@ -257,11 +257,34 @@ def _metts_single_chain(H, sites, ops, beta, nsamples, nwarmup,
     return means, stderrs, nsamples
 
 
+def _max_index_id(sites, H, ops):
+    """Highest Index.id reachable from sites/H/ops -- see index.py's
+    reseed_id_counter_past() docstring for why _run_chain_worker() below
+    needs this before it lets this (freshly spawned) process mint any
+    Index of its own."""
+    max_id = -1
+    for i in range(1, sites.length() + 1):
+        max_id = max(max_id, sites.si(i).id)
+    for mpo in [H] + list(ops):
+        for i in range(1, mpo.length() + 1):
+            for ind in mpo.A(i).inds:
+                max_id = max(max_id, ind.id)
+    return max_id
+
+
 def _run_chain_worker(args):
     """Top-level (picklable) target for multiprocessing.Pool -- a bound
     method or closure wouldn't survive pickling under the 'spawn' start
     method, so this just unpacks a plain tuple and calls
-    _metts_single_chain() directly."""
+    _metts_single_chain() directly. Reseeds this worker's own Index id
+    counter first, past every id already present in the H/sites/ops it
+    just received (see index.py's reseed_id_counter_past() for why a
+    freshly spawned worker's ids otherwise restart at 0 and can silently
+    collide with those -- confirmed directly, this used to make njobs>1
+    raise "shape-mismatch for sum" deep inside a worker's own tensor
+    contraction, or worse, silently mismatch same-dimension legs)."""
+    H, sites, ops = args[0], args[1], args[2]
+    reseed_id_counter_past(_max_index_id(sites, H, ops))
     return _metts_single_chain(*args)
 
 
