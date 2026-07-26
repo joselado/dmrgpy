@@ -896,6 +896,32 @@ the entanglement of a single ever-more-thermalized wavefunction) — see
 `examples/finite_temperature/metts_VS_exact` for a cross-check against
 the exact ED thermal average on a small Heisenberg chain.
 
+For `itensor_version="python"`, an `njobs` keyword (default 1) runs
+`njobs` independent METTS Markov chains in parallel worker processes and
+pools their statistics, instead of one longer sequential chain —
+`nsamples` is split as evenly as possible across them, each chain gets
+its own `nwarmup` equilibration and an independently-seeded RNG, and
+their per-chain `(mean, stderr, count)` triples are combined into the
+same `(mean, stderr)` a single pooled run over all the raw samples would
+give (no raw samples need to cross the process boundary, so this is
+exact, not an approximation). Measured directly on a 6-site chain
+(`nsamples=200`, `nwarmup=20`): wall time went from 34s at `njobs=1`
+down to 14s at `njobs=8` — real but sub-linear speedup, since every
+extra chain repeats the full `nwarmup` rather than sharing it. This is
+the effective optimization for this backend: its per-sample cost is
+dominated by `pyitensor`'s own generic-tensor-engine Python overhead
+(confirmed by profiling), not shared BLAS work, so splitting across OS
+processes helps where the `kernels.py` JAX/numba contraction-kernel
+route does not (see that module's docstring, and
+`pyitensor/metts.py`'s own comment, on why numba is measurably *slower*
+for METTS specifically — each sample restarts from a fresh
+bond-dimension-1 product state, so a run exercises many distinct
+contraction shapes rather than reusing one, and the fixed per-shape
+compile tax never amortizes). `njobs` is not available for
+`itensor_version=3`: its session is a single live in-process C++ object
+with no per-worker copy a process pool could hand out; requesting
+`njobs>1` there raises rather than silently falling back to `njobs=1`.
+
 ## 10. Topological invariants
 
 **Many-body Berry phase.** For a ground state that depends on an

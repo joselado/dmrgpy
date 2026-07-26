@@ -25,12 +25,36 @@ import random
 
 
 def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
-              basis_ops=("Sz", "Sx"), seed=None, niter=30):
+              basis_ops=("Sz", "Sx"), seed=None, niter=30, njobs=1):
     """Thermal <Op> at temperature T via METTS sampling.
 
     MB: a Many_Body_Chain with itensor_version in ("python", 3) and a
         Hamiltonian already set via MB.set_hamiltonian(...).
     Op: a MultiOperator (the observable to measure).
+    njobs: run njobs independent METTS Markov chains in parallel worker
+        processes and pool their statistics -- itensor_version="python"
+        only (see pyitensor.metts.metts_thermal_average's own docstring
+        for why, and for the exact pooling this uses). Measured directly
+        (6-site Heisenberg+field chain, nsamples=200, nwarmup=20): wall
+        time went 34s/21s/17s/14s for njobs=1/2/4/8 -- real but sublinear
+        speedup (diminishing returns, not a bug), since each additional
+        chain repeats the *full* nwarmup rather than sharing it, and each
+        spawned worker pays its own fresh-interpreter startup cost (see
+        below on why 'spawn' rather than fork). Worth it whenever
+        nsamples/njobs stays comfortably above nwarmup. Unlike
+        itensor_version=3, whose single, live in-process C++ session has
+        no multiprocessing story (no per-worker copy to hand out), and
+        unlike naively raising nsamples in a single chain, which buys no
+        parallelism at all. There is no equivalent knob for
+        itensor_version=3 here; see CLAUDE.md/kernels.py's own findings
+        on why the numba/JAX contraction-kernel route (the other lever
+        available for this pure-Python engine) makes METTS *slower*, not
+        faster: every sample restarts from a fresh bond-dimension-1
+        product state, so a run exercises many distinct contraction
+        shapes rather than the same one repeatedly, and the fixed
+        per-shape compile tax never gets amortized within a realistic
+        sample count -- confirmed directly, ~4x-24x slower with
+        kernels.USE_NUMBA=True depending on chain length, not faster.
     Returns (mean, stderr) -- see
     pyitensor.metts.metts_thermal_average's own docstring for the
     stderr's (Markov-correlated, so optimistic) meaning.
@@ -70,6 +94,21 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
         raise ValueError("metts_vev: basis_ops must be non-empty")
     if nsamples < 1:
         raise ValueError("metts_vev: nsamples must be >= 1, got %r" % (nsamples,))
+    if njobs < 1:
+        raise ValueError("metts_vev: njobs must be >= 1, got %r" % (njobs,))
+    if njobs > 1 and MB.itensor_version != "python":
+        # mpscpp3's Chain is a single live in-process C++ session (see
+        # CLAUDE.md's cpp_handle section) -- there's no per-worker copy a
+        # multiprocessing pool could hand out the way pyitensor's Chain.H/
+        # sites (plain Python/numpy objects, confirmed picklable) allow.
+        # Rebuilding a whole separate v3 session per worker process is a
+        # bigger undertaking than this parameter is meant to cover, so
+        # this raises rather than silently ignoring njobs or silently
+        # falling back to a single sequential v3 chain.
+        raise NotImplementedError(
+            "metts_vev: njobs>1 (parallel independent Markov chains) is "
+            "only implemented for itensor_version='python' so far (got "
+            "itensor_version=%r)" % (MB.itensor_version,))
     MB._session.set_sweep_params(MB.maxm, MB.nsweeps, MB.cutoff, MB.noise)
     MB._session.set_verbose(MB.verbose)
     MB._session.set_mpomaxm(max(MB.maxm, MB.mpomaxm))
@@ -80,6 +119,10 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
     # non-reproducible-by-default behavior every other seed= kwarg in
     # this codebase has, rather than silently becoming deterministic.
     seed_arg = seed if seed is not None else random.getrandbits(63)
+    if MB.itensor_version == "python":
+        return MB._session.metts_vev(
+            Op.to_terms(), T, nsamples, nwarmup,
+            dbeta_half_step, list(basis_ops), seed_arg, niter, njobs=njobs)
     return MB._session.metts_vev(
         Op.to_terms(), T, nsamples, nwarmup,
         dbeta_half_step, list(basis_ops), seed_arg, niter)
