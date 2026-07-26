@@ -16,7 +16,9 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     """
     Compute the dynamical correlator
     """
-    if name is None: raise
+    if name is None:
+        raise ValueError("get_dynamical_correlator: name (the two-operator "
+                          "tuple) must be given")
 
     A = EDOperator(name[0],self).SO # create first operator
     B = EDOperator(name[1],self).SO # create second operator
@@ -52,7 +54,17 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
       from .. import timedependent
       return timedependent.dynamical_correlator(self,mode="ED",
               name=name,**kwargs)
-    else: raise
+    else:
+        # A bare `raise` here (no active exception to re-raise) used to
+        # crash with a confusing "RuntimeError: No active exception to
+        # reraise" instead of naming the actual problem -- confirmed
+        # directly: reachable via mode.py's own silent DMRG->ED fallback
+        # whenever the requested submode (e.g. "TDZ", a DMRG/TDVP-only
+        # complex-time-evolution method with no ED counterpart at all)
+        # isn't one of the ones implemented above.
+        raise NotImplementedError(
+            "get_dynamical_correlator: submode=%r has no ED implementation"
+            % (submode,))
 
 
 def get_kpm_emax(chain,m,e0):
