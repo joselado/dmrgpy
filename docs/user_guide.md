@@ -842,6 +842,60 @@ rather than silently returning a wrong average if that state still
 carries non-negligible weight at the requested `T` — pass a larger `n=`
 in that case.
 
+**`metts_vev(O, T, ...)`** is a third, independent finite-temperature
+method: METTS (Minimally Entangled Typical Thermal States, E.M.
+Stoudenmire and S.R. White, *New J. Phys.* **12**, 055026 (2010),
+arXiv:1002.1305), implemented for `itensor_version="python"`
+(`pyitensor/metts.py`) and `itensor_version=3`
+(`mpscpp3/chain_session.h`'s `Chain::metts_vev`, a direct port of the
+same algorithm onto real ITensor v3, not an independent
+reimplementation) — not for `itensor_version=2` (mpscpp2 has no TDVP
+module at all, and METTS needs imaginary-time TDVP). On `itensor_version
+=3`, a chain shorter than 3 sites raises `NotImplementedError` rather
+than crashing: ITensor v3's two-site TDVP hits the same "LocalOp is
+default constructed" abort as its two-site `dmrg()` for such short
+chains (see §Architecture's note on that `mpscpp3` bug). Rather than
+purification's single, growing-entanglement wavefunction or ED's exact
+sum over eigenstates, METTS samples a Markov chain of *unentangled*
+classical product states (CPS) $|i\rangle$: each is imaginary-time
+evolved by half the inverse temperature,
+$|\phi_i\rangle=e^{-\beta H/2}|i\rangle/\lVert e^{-\beta H/2}|i\rangle\rVert$
+(via imaginary-time TDVP — `tdvp_step` with a purely real, rather than
+imaginary, effective time step), then collapsed back down to a new CPS
+$|i'\rangle$ by sampling a definite outcome at each site in turn, with
+probability $|\langle i'|\phi_i\rangle|^2$, from a single left-to-right
+sweep (no need to ever form the full $2^N$ amplitude vector — a
+canonicalized MPS's marginal at one site, conditioned on those already
+sampled to its left, is already diagonal). A plain (unweighted) sample
+average of $\langle\phi_i|O|\phi_i\rangle$ over the resulting chain then
+converges to the true thermal average, because this specific Markov
+chain's stationary distribution already carries the correct Boltzmann
+weight — no importance reweighting needed. The collapse basis is
+alternated between two choices from one sample to the next
+(`basis_ops=("Sz","Sx")` by default) since collapsing repeatedly in the
+same basis can trap the chain in one symmetry sector for many steps,
+inflating autocorrelation (the paper's own finding):
+
+```python
+mean, stderr = sc.metts_vev(sc.Sz[0], T, nsamples=300, nwarmup=30,
+                             dbeta_half_step=0.05, basis_ops=("Sz","Sx"))
+```
+
+`nwarmup` discards that many initial Markov-chain steps before
+averaging (equilibration); `dbeta_half_step` sets the imaginary-time
+TDVP step size for the $e^{-\beta H/2}$ evolution (split into
+$\lceil(\beta/2)/\texttt{dbeta\_half\_step}\rceil$ equal steps). Being a
+Monte Carlo method, `metts_vev` returns `(mean, stderr)` rather than an
+exact value — `stderr` is a naive i.i.d. estimate and, since consecutive
+METTS samples are Markov-correlated, is likely optimistic unless
+`dbeta_half_step`/`nwarmup` are generous enough that samples actually
+decorrelate. Its main advantage over purification is that the sampled
+states stay unentangled classical product states between imaginary-time
+evolutions (no ancilla doubling, and bond dimension never has to carry
+the entanglement of a single ever-more-thermalized wavefunction) — see
+`examples/finite_temperature/metts_VS_exact` for a cross-check against
+the exact ED thermal average on a small Heisenberg chain.
+
 ## 10. Topological invariants
 
 **Many-body Berry phase.** For a ground state that depends on an

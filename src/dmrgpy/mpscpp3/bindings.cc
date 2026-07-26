@@ -311,6 +311,7 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "evolve_and_measure_tdvp(). Returns (correlator, final_wf)")
         .def("tdvp_step",&Chain::tdvp_step,
              py::arg("H"),py::arg("wf"),py::arg("dt"),py::arg("num_center")=2,
+             py::arg("niter")=50,
              "One TDVP step of size dt (may be complex -- see "
              "TDVP/README.md's own \"t\" convention) applied to an "
              "already-built MPO H and MPS wf, one-site (num_center=1) or "
@@ -322,6 +323,21 @@ PYBIND11_MODULE(_dmrgcpp, m)
              "correlator, see tdz.py, whose per-step contour increment "
              "varies with t). One-site TDVP doesn't grow bond dimension "
              "on its own -- pair with global_subspace_expand() below.")
+        .def("metts_vev",[](Chain& self, std::vector<PyTerm> const& terms_op,
+                             double T, int nsamples, int nwarmup,
+                             double dbeta_half_step,
+                             std::vector<std::string> const& basis_ops,
+                             unsigned long seed, int niter) {
+                return self.metts_vev(terms_from_python(terms_op),T,nsamples,
+                    nwarmup,dbeta_half_step,basis_ops,seed,niter);
+            }, py::arg("terms_op"),py::arg("T"),py::arg("nsamples")=200,
+               py::arg("nwarmup")=20,py::arg("dbeta_half_step")=0.05,
+               py::arg("basis_ops")=std::vector<std::string>{"Sz","Sx"},
+               py::arg("seed")=0,py::arg("niter")=30,
+               "Finite-temperature <A> via METTS sampling (White & "
+               "Stoudenmire, arXiv:1002.1305 -- see Chain::metts_vev's own "
+               "comment and pyitensor/metts.py for the full algorithm). "
+               "Returns (mean, stderr).")
         .def("global_subspace_expand",&Chain::global_subspace_expand,
              py::arg("H"),py::arg("phi"),py::arg("krylov_order"),
              py::arg("cutoff"),py::arg("maxdim")=0,

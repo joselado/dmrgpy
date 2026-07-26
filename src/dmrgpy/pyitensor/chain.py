@@ -24,6 +24,7 @@ from .mpsalgebra import applyMPO, inner, nmultMPO
 from .mpsalgebra import sum as mps_sum
 from .mpsalgebra import randomMPS, traceC
 from .mpsalgebra import _fresh_link_copy
+from .metts import metts_thermal_average as _metts_thermal_average
 from .sites import SiteX
 from .svd import svd
 from .sweeps import Sweeps
@@ -643,6 +644,32 @@ class Chain:
     def general_kpm(self, terms_x, wfa, wfb, kpmmaxm, kpm_accelerate, num_polynomials, kpm_cutoff):
         m = to_mpo(AutoMPO.from_terms(self.sites, terms_x), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         return self._kpm_moments(m, wfa, wfb, num_polynomials, kpmmaxm, kpm_cutoff, kpm_accelerate)
+
+    def metts_vev(self, terms_op, T, nsamples=200, nwarmup=20,
+                  dbeta_half_step=0.05, basis_ops=("Sz", "Sx"), seed=None, niter=30):
+        """Finite-temperature <A> via METTS sampling (White & Stoudenmire,
+        arXiv:1002.1305 -- see metts.py for the full algorithm). Reuses
+        self.H (already built by set_hamiltonian) and this chain's own
+        cutoff/maxm as the TDVP truncation controls, same convention as
+        every other method here. Single-operator signature (terms_op is
+        one MultiOperator.to_terms() output), matching every other vev-
+        like method's surface here (vev, overlap_aMb, ...) -- this keeps
+        the same call signature mpscpp3's own Chain::metts_vev exposes.
+
+        Returns (mean, stderr) -- see metts_thermal_average()'s own
+        docstring for what these mean and their (Markov-correlated, so
+        optimistic) error bars.
+        """
+        if not self.have_H:
+            raise RuntimeError("Chain.metts_vev called before set_hamiltonian")
+        op = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF,
+                    maxdim=self.mpomaxm)
+        beta = 1.0 / T
+        means, stderrs = _metts_thermal_average(
+            self.H, self.sites, [op], beta, nsamples, nwarmup=nwarmup,
+            dbeta_half_step=dbeta_half_step, cutoff=self.cutoff, maxdim=self.maxm,
+            basis_ops=basis_ops, seed=seed, niter=niter)
+        return means[0], stderrs[0]
 
     def nhkpm_moments(self, terms_hs, terms_hs_dag, wfa, wfb, n, kpmmaxm, kpmcutoff):
         """Non-Hermitian KPM (port of NHKPM.jl, see

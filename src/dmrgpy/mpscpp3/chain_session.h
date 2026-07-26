@@ -1,5 +1,7 @@
 #include <tuple>
+#include <map> // Chain::MettsEigCache (Chain::metts_vev)
 #include <algorithm> // std::next_permutation (four_correlation_tensor_sweep)
+#include <random> // std::mt19937_64/std::discrete_distribution (Chain::metts_vev)
 
 // TDVP/tdvp.h and TDVP/basisextension.h are quoted includes, so they
 // resolve relative to this file's own directory (mpscpp3/) with no
@@ -773,19 +775,103 @@ class Chain
     // since one-site TDVP conserves bond dimension exactly and truncating
     // it would only ever shrink it, never grow it -- growth for one-site
     // comes from global_subspace_expand() below instead.
+    // niter=50 matches every pre-existing caller (none passed anything
+    // else); metts_vev() below is the first caller that needs a
+    // different value, hence the added (default-preserving) parameter
+    // rather than a second near-duplicate method.
     MPS
-    tdvp_step(MPO const& H, MPS psi, Cplx dt, int num_center=2) const
+    tdvp_step(MPO const& H, MPS psi, Cplx dt, int num_center=2, int niter=50) const
         {
         Cplx t = Cplx(0.0,-1.0)*dt;
         auto sweeps = Sweeps(1);
         sweeps.maxdim() = maxm_;
         sweeps.cutoff() = cutoff_;
-        sweeps.niter() = 50;
+        sweeps.niter() = niter;
         tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
                               "NumCenter",num_center,
                               "Truncate",num_center==2,
                               "DoNormalize",true});
         return psi;
+        }
+
+    // METTS (Minimally Entangled Typical Thermal States; E.M. Stoudenmire
+    // and S.R. White, arXiv:1002.1305) -- a direct port of
+    // pyitensor/metts.py's algorithm onto real ITensor v3 (see that
+    // module's own docstring for the full derivation this only summarizes
+    // here). Samples a Markov chain of classical product states (CPS):
+    // each is imaginary-time evolved by beta/2 via tdvp_step() above
+    // (dt=Cplx(0,-1)*step -- that method's own -i*dt convention already
+    // makes a purely real dt give genuine decay rather than rotation, so
+    // no new evolution primitive is needed here), then collapsed back
+    // down to a new CPS by collapse_to_cps() (private, below) using
+    // diagHermitian() for the per-site basis rotation, alternating the
+    // collapse basis through basis_ops from one sample to the next for
+    // ergodicity (paper, Sec. 3.3). A plain sample average of
+    // <phi|A|phi> over the resulting chain converges to the true thermal
+    // average, because this specific Markov chain's stationary
+    // distribution already carries the correct Boltzmann weight -- no
+    // importance reweighting needed (paper, Eq. (3)-(5)).
+    //
+    // Returns (mean, stderr): stderr is a naive i.i.d. estimate over the
+    // nsamples retained samples (after nwarmup discarded equilibration
+    // steps), so -- since consecutive METTS samples are Markov-correlated
+    // -- it's likely optimistic unless dbeta_half_step/nwarmup are
+    // generous enough that samples actually decorrelate.
+    std::pair<Cplx,double>
+    metts_vev(std::vector<MOTerm> const& terms_op, double T, int nsamples,
+              int nwarmup, double dbeta_half_step,
+              std::vector<std::string> const& basis_ops,
+              unsigned long seed, int niter=30) const
+        {
+        if (!have_H_) Error("Chain::metts_vev called before set_hamiltonian");
+        if (T<=0) Error("Chain::metts_vev: T must be > 0");
+        if (basis_ops.empty()) Error("Chain::metts_vev: basis_ops must be non-empty");
+        if (nsamples<1) Error("Chain::metts_vev: nsamples must be >= 1");
+        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        double beta_half = 1.0/(2.0*T);
+        int nsteps = std::max(1,(int)std::ceil(beta_half/dbeta_half_step));
+        Cplx dt = Cplx(0.0,-1.0)*(beta_half/double(nsteps));
+
+        std::mt19937_64 rng(seed);
+        int nbasis = (int)basis_ops.size();
+        auto eigcache = metts_build_eigcache(basis_ops);
+        MPS cps = random_cps(basis_ops[0],rng,eigcache);
+
+        std::vector<Cplx> samples;
+        samples.reserve(nsamples);
+        int total_iters = nwarmup+nsamples;
+        for (int it=0; it<total_iters; ++it)
+            {
+            MPS phi = cps;
+            for (int s=0; s<nsteps; ++s)
+                {
+                phi = tdvp_step(H_,phi,dt,2,niter);
+                phi /= sqrt(innerC(phi,phi).real());
+                }
+            if (it>=nwarmup) samples.push_back(innerC(phi,A,phi));
+            cps = collapse_to_cps(phi,basis_ops[it % nbasis],rng,eigcache);
+            }
+
+        // nwarmup>=total_iters (e.g. nwarmup alone consuming every
+        // iteration) would otherwise leave samples empty and divide by
+        // zero below -- not reachable through the Python-facing default
+        // kwargs, but not guarded against a caller passing an oversized
+        // nwarmup either, so check explicitly rather than silently
+        // returning NaN.
+        if (samples.empty())
+            Error("Chain::metts_vev: no samples were retained (nwarmup >= nwarmup+nsamples?)");
+        Cplx mean = 0;
+        for (auto& v : samples) mean += v;
+        mean /= double(samples.size());
+        double var = 0.0;
+        for (auto& v : samples)
+            {
+            double d = std::abs(v-mean);
+            var += d*d;
+            }
+        double stderr_ = samples.size()>1
+            ? std::sqrt(var/double(samples.size()-1)/double(samples.size())) : 0.0;
+        return {mean,stderr_};
         }
 
     // Global subspace expansion (TDVP/basisextension.h's addBasis()):
@@ -1394,6 +1480,152 @@ class Chain
     // search that isn't trapped at a symmetric starting point.
     MPS
     default_mps() const { return randomMPS(sites_,maxm_); }
+
+    // -- METTS helpers (Chain::metts_vev, public, above) --
+
+    // A CPS (classical product state: bond dimension 1 throughout) built
+    // from per-site rank-1 ITensors over each site's bare physical index
+    // (no Link legs yet). Fresh dim-1 Link indices are attached here via
+    // setElt() -- the same "outer product with a one-hot tensor" idiom
+    // MPS's own init_tensors() (mps.cc, backing the MPS(InitState)
+    // constructor) uses to build a product state from named basis
+    // states, generalized here to an arbitrary per-site vector (a
+    // METTS collapse outcome is a diagHermitian() eigenvector, not
+    // necessarily one of a site type's named states). leftLim/rightLim
+    // are set to match MPS(InitState)'s own convention (orthogonality
+    // center at site 1) since a bond-dimension-1 chain is trivially
+    // canonical everywhere once each site vector is unit-normalized (true
+    // here: every vector handed in is either a diagHermitian()
+    // eigenvector or built from one).
+    MPS
+    build_product_state(std::vector<ITensor> const& site_vectors) const
+        {
+        int N = sites_.length();
+        MPS psi(N);
+        std::vector<Index> links;
+        links.reserve(N-1);
+        for (int k=1; k<N; ++k) links.push_back(Index(1,TagSet("Link,l="+std::to_string(k))));
+        for (int i=1; i<=N; ++i)
+            {
+            ITensor T = site_vectors[i-1];
+            if (i>1) T *= setElt(links[i-2](1));
+            if (i<N) T *= setElt(links[i-1](1));
+            psi.set(i,T);
+            }
+        psi.leftLim(0);
+        psi.rightLim(2);
+        return psi;
+        }
+
+    // Per-(opname,site) diagHermitian() result, cached by
+    // metts_build_eigcache() below so random_cps()/collapse_to_cps()
+    // don't recompute the same site operator's eigendecomposition from
+    // scratch at every one of a METTS run's nwarmup+nsamples iterations
+    // -- a given (opname,i)'s eigenbasis never changes across the whole
+    // sampling run. D (the eigenvalue tensor diagHermitian also produces)
+    // is never read anywhere in this file, so only U and its eig index
+    // are kept.
+    struct MettsEigBasis { ITensor U; Index eig; };
+    using MettsEigCache = std::map<std::pair<std::string,int>,MettsEigBasis>;
+
+    MettsEigCache
+    metts_build_eigcache(std::vector<std::string> const& basis_ops) const
+        {
+        MettsEigCache cache;
+        int N = sites_.length();
+        for (auto const& opname : basis_ops)
+            for (int i=1; i<=N; ++i)
+                {
+                auto key = std::make_pair(opname,i);
+                if (cache.count(key)) continue;
+                auto opT = sites_.op(opname,i);
+                ITensor U,D;
+                diagHermitian(opT,U,D);
+                cache[key] = MettsEigBasis{U,uniqueIndex(U,opT)};
+                }
+        return cache;
+        }
+
+    // A random CPS: at each site, uniformly picks one eigenstate of the
+    // named single-site Hermitian operator opname (e.g. "Sz") -- a valid
+    // seed for the METTS Markov chain regardless of choice (the chain's
+    // stationary distribution doesn't depend on the starting CPS, only
+    // how many warmup steps are needed to reach it -- White & Stoudenmire,
+    // arXiv:1002.1305, Sec. 2).
+    MPS
+    random_cps(std::string const& opname, std::mt19937_64& rng,
+               MettsEigCache const& eigcache) const
+        {
+        int N = sites_.length();
+        std::vector<ITensor> vectors(N);
+        for (int i=1; i<=N; ++i)
+            {
+            auto const& eb = eigcache.at(std::make_pair(opname,i));
+            std::uniform_int_distribution<int> dist(1,itensor::dim(eb.eig));
+            int k = dist(rng);
+            vectors[i-1] = eb.U*setElt(eb.eig(k));
+            }
+        return build_product_state(vectors);
+        }
+
+    // Sequential ("perfect sampling") collapse of MPS wf onto a new CPS
+    // built from eigenstates of the single-site Hermitian operator
+    // opname -- direct port of pyitensor/metts.py's collapse_to_cps(),
+    // see its own docstring for the full derivation; the paper's "quantum
+    // measurement" collapse step (Sec. 2.2) generalized from a single
+    // qubit measurement to the whole chain via one left-to-right sweep.
+    //
+    // Canonicalizing to site 1 first (wf.position(1)) makes every site
+    // i>1 right-orthonormal; contracting the running "collapsed-so-far"
+    // amplitude L into site i's tensor and rotating into the eigenbasis
+    // via dag(U) gives `rot`, whose diagonal marginal probabilities
+    // (summed over whatever's left of the chain to the right) fall out
+    // directly as the diagonal of rot*dag(prime(rot,eig)) -- no explicit
+    // partial trace needed, since right-orthonormality already performs
+    // it, and (unlike the manual-index-bookkeeping pyitensor port) no
+    // special-casing of the last site either: ITensor's own automatic
+    // index contraction handles "no right link left" (i==N) the same way
+    // as any other site.
+    MPS
+    collapse_to_cps(MPS wf, std::string const& opname, std::mt19937_64& rng,
+                     MettsEigCache const& eigcache) const
+        {
+        int N = sites_.length();
+        wf.position(1);
+        std::vector<ITensor> vectors(N);
+        ITensor L; // default-constructed/"null" (operator bool()==false) until i>1's first assignment
+        for (int i=1; i<=N; ++i)
+            {
+            auto const& eb = eigcache.at(std::make_pair(opname,i));
+            auto const& U = eb.U;
+            auto const& eig = eb.eig;
+            int dim_i = itensor::dim(eig);
+
+            ITensor T = wf.A(i);
+            if (L) T *= L;
+            ITensor rot = dag(U)*T;
+            ITensor probs = rot*dag(prime(rot,eig));
+
+            std::vector<double> probs_raw(dim_i), p(dim_i);
+            double total = 0.0;
+            for (int k=1; k<=dim_i; ++k)
+                {
+                probs_raw[k-1] = probs.eltC(eig(k),prime(eig)(k)).real();
+                total += probs_raw[k-1];
+                }
+            for (int k=0; k<dim_i; ++k) p[k] = probs_raw[k]/total;
+            std::discrete_distribution<int> dist(p.begin(),p.end());
+            int k = dist(rng)+1; // 1-based
+
+            vectors[i-1] = U*setElt(eig(k));
+            if (i<N)
+                {
+                ITensor Lnew = rot*setElt(eig(k));
+                L = Lnew*(1.0/std::sqrt(probs_raw[k-1]));
+                }
+            }
+        return build_product_state(vectors);
+        }
 
     // Thin wrappers around v3's applyMPO() that always restore the result's
     // physical index to the standard, unprimed convention. Plain applyMPO()
