@@ -311,6 +311,7 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "evolve_and_measure_tdvp(). Returns (correlator, final_wf)")
         .def("tdvp_step",&Chain::tdvp_step,
              py::arg("H"),py::arg("wf"),py::arg("dt"),py::arg("num_center")=2,
+             py::arg("niter")=50,
              "One TDVP step of size dt (may be complex -- see "
              "TDVP/README.md's own \"t\" convention) applied to an "
              "already-built MPO H and MPS wf, one-site (num_center=1) or "

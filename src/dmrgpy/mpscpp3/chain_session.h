@@ -1,4 +1,5 @@
 #include <tuple>
+#include <map> // Chain::MettsEigCache (Chain::metts_vev)
 #include <algorithm> // std::next_permutation (four_correlation_tensor_sweep)
 #include <random> // std::mt19937_64/std::discrete_distribution (Chain::metts_vev)
 
@@ -774,14 +775,18 @@ class Chain
     // since one-site TDVP conserves bond dimension exactly and truncating
     // it would only ever shrink it, never grow it -- growth for one-site
     // comes from global_subspace_expand() below instead.
+    // niter=50 matches every pre-existing caller (none passed anything
+    // else); metts_vev() below is the first caller that needs a
+    // different value, hence the added (default-preserving) parameter
+    // rather than a second near-duplicate method.
     MPS
-    tdvp_step(MPO const& H, MPS psi, Cplx dt, int num_center=2) const
+    tdvp_step(MPO const& H, MPS psi, Cplx dt, int num_center=2, int niter=50) const
         {
         Cplx t = Cplx(0.0,-1.0)*dt;
         auto sweeps = Sweeps(1);
         sweeps.maxdim() = maxm_;
         sweeps.cutoff() = cutoff_;
-        sweeps.niter() = 50;
+        sweeps.niter() = niter;
         tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
                               "NumCenter",num_center,
                               "Truncate",num_center==2,
@@ -819,6 +824,9 @@ class Chain
               unsigned long seed, int niter=30) const
         {
         if (!have_H_) Error("Chain::metts_vev called before set_hamiltonian");
+        if (T<=0) Error("Chain::metts_vev: T must be > 0");
+        if (basis_ops.empty()) Error("Chain::metts_vev: basis_ops must be non-empty");
+        if (nsamples<1) Error("Chain::metts_vev: nsamples must be >= 1");
         auto A = build_mpo(sites_,terms_op,mpomaxm_);
         double beta_half = 1.0/(2.0*T);
         int nsteps = std::max(1,(int)std::ceil(beta_half/dbeta_half_step));
@@ -826,7 +834,8 @@ class Chain
 
         std::mt19937_64 rng(seed);
         int nbasis = (int)basis_ops.size();
-        MPS cps = random_cps(basis_ops[0],rng);
+        auto eigcache = metts_build_eigcache(basis_ops);
+        MPS cps = random_cps(basis_ops[0],rng,eigcache);
 
         std::vector<Cplx> samples;
         samples.reserve(nsamples);
@@ -836,13 +845,21 @@ class Chain
             MPS phi = cps;
             for (int s=0; s<nsteps; ++s)
                 {
-                phi = metts_tdvp_step(H_,phi,dt,niter);
+                phi = tdvp_step(H_,phi,dt,2,niter);
                 phi /= sqrt(innerC(phi,phi).real());
                 }
             if (it>=nwarmup) samples.push_back(innerC(phi,A,phi));
-            cps = collapse_to_cps(phi,basis_ops[it % nbasis],rng);
+            cps = collapse_to_cps(phi,basis_ops[it % nbasis],rng,eigcache);
             }
 
+        // nwarmup>=total_iters (e.g. nwarmup alone consuming every
+        // iteration) would otherwise leave samples empty and divide by
+        // zero below -- not reachable through the Python-facing default
+        // kwargs, but not guarded against a caller passing an oversized
+        // nwarmup either, so check explicitly rather than silently
+        // returning NaN.
+        if (samples.empty())
+            Error("Chain::metts_vev: no samples were retained (nwarmup >= nwarmup+nsamples?)");
         Cplx mean = 0;
         for (auto& v : samples) mean += v;
         mean /= double(samples.size());
@@ -1466,27 +1483,6 @@ class Chain
 
     // -- METTS helpers (Chain::metts_vev, public, above) --
 
-    // Same imaginary-time step as the public tdvp_step() above (dt=
-    // Cplx(0,-1)*dt already gives genuine decay for a purely real dt, see
-    // that method's own comment), but with a caller-chosen Lanczos
-    // iteration count instead of tdvp_step()'s hardcoded niter=50 --
-    // metts_vev()'s own niter parameter needs to actually reach the TDVP
-    // solver, unlike a plain delegation to tdvp_step() would allow.
-    MPS
-    metts_tdvp_step(MPO const& H, MPS psi, Cplx dt, int niter) const
-        {
-        Cplx t = Cplx(0.0,-1.0)*dt;
-        auto sweeps = Sweeps(1);
-        sweeps.maxdim() = maxm_;
-        sweeps.cutoff() = cutoff_;
-        sweeps.niter() = niter;
-        tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
-                              "NumCenter",2,
-                              "Truncate",true,
-                              "DoNormalize",true});
-        return psi;
-        }
-
     // A CPS (classical product state: bond dimension 1 throughout) built
     // from per-site rank-1 ITensors over each site's bare physical index
     // (no Link legs yet). Fresh dim-1 Link indices are attached here via
@@ -1521,6 +1517,35 @@ class Chain
         return psi;
         }
 
+    // Per-(opname,site) diagHermitian() result, cached by
+    // metts_build_eigcache() below so random_cps()/collapse_to_cps()
+    // don't recompute the same site operator's eigendecomposition from
+    // scratch at every one of a METTS run's nwarmup+nsamples iterations
+    // -- a given (opname,i)'s eigenbasis never changes across the whole
+    // sampling run. D (the eigenvalue tensor diagHermitian also produces)
+    // is never read anywhere in this file, so only U and its eig index
+    // are kept.
+    struct MettsEigBasis { ITensor U; Index eig; };
+    using MettsEigCache = std::map<std::pair<std::string,int>,MettsEigBasis>;
+
+    MettsEigCache
+    metts_build_eigcache(std::vector<std::string> const& basis_ops) const
+        {
+        MettsEigCache cache;
+        int N = sites_.length();
+        for (auto const& opname : basis_ops)
+            for (int i=1; i<=N; ++i)
+                {
+                auto key = std::make_pair(opname,i);
+                if (cache.count(key)) continue;
+                auto opT = sites_.op(opname,i);
+                ITensor U,D;
+                diagHermitian(opT,U,D);
+                cache[key] = MettsEigBasis{U,uniqueIndex(U,opT)};
+                }
+        return cache;
+        }
+
     // A random CPS: at each site, uniformly picks one eigenstate of the
     // named single-site Hermitian operator opname (e.g. "Sz") -- a valid
     // seed for the METTS Markov chain regardless of choice (the chain's
@@ -1528,19 +1553,17 @@ class Chain
     // how many warmup steps are needed to reach it -- White & Stoudenmire,
     // arXiv:1002.1305, Sec. 2).
     MPS
-    random_cps(std::string const& opname, std::mt19937_64& rng) const
+    random_cps(std::string const& opname, std::mt19937_64& rng,
+               MettsEigCache const& eigcache) const
         {
         int N = sites_.length();
         std::vector<ITensor> vectors(N);
         for (int i=1; i<=N; ++i)
             {
-            auto opT = sites_.op(opname,i);
-            ITensor U,D;
-            diagHermitian(opT,U,D);
-            auto eig = uniqueIndex(U,opT);
-            std::uniform_int_distribution<int> dist(1,itensor::dim(eig));
+            auto const& eb = eigcache.at(std::make_pair(opname,i));
+            std::uniform_int_distribution<int> dist(1,itensor::dim(eb.eig));
             int k = dist(rng);
-            vectors[i-1] = U*setElt(eig(k));
+            vectors[i-1] = eb.U*setElt(eb.eig(k));
             }
         return build_product_state(vectors);
         }
@@ -1564,7 +1587,8 @@ class Chain
     // index contraction handles "no right link left" (i==N) the same way
     // as any other site.
     MPS
-    collapse_to_cps(MPS wf, std::string const& opname, std::mt19937_64& rng) const
+    collapse_to_cps(MPS wf, std::string const& opname, std::mt19937_64& rng,
+                     MettsEigCache const& eigcache) const
         {
         int N = sites_.length();
         wf.position(1);
@@ -1572,10 +1596,9 @@ class Chain
         ITensor L; // default-constructed/"null" (operator bool()==false) until i>1's first assignment
         for (int i=1; i<=N; ++i)
             {
-            auto opT = sites_.op(opname,i);
-            ITensor U,D;
-            diagHermitian(opT,U,D);
-            auto eig = uniqueIndex(U,opT);
+            auto const& eb = eigcache.at(std::make_pair(opname,i));
+            auto const& U = eb.U;
+            auto const& eig = eb.eig;
             int dim_i = itensor::dim(eig);
 
             ITensor T = wf.A(i);

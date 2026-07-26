@@ -27,6 +27,8 @@ import pytest
 
 from dmrgpy import cppext, spinchain
 
+from _helpers import setup_backend
+
 VERSIONS = [
     "python",
     pytest.param(3, marks=pytest.mark.skipif(
@@ -37,10 +39,7 @@ VERSIONS = [
 
 def _heisenberg_field_chain(n, version, J=1.0, B=0.3):
     sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
-    if version == "python":
-        sc.setup_python()
-    else:
-        sc.setup_cpp(version=version)
+    setup_backend(sc, version)
     h = 0
     for i in range(n - 1):
         h = h + J * sc.Sx[i] * sc.Sx[i + 1] + J * sc.Sy[i] * sc.Sy[i + 1] + J * sc.Sz[i] * sc.Sz[i + 1]
@@ -119,3 +118,51 @@ def test_metts_vev_v3_rejects_short_chain():
     sc.itensor_version = 3
     with pytest.raises(NotImplementedError):
         sc.metts_vev(sc.Sz[0], 1.0, nsamples=2, nwarmup=1)
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_metts_vev_rejects_non_positive_temperature(version):
+    """T<=0 must raise rather than silently flip the imaginary-time step's
+    sign (beta=1/T negative would make the 'decay' amplify high-energy
+    components instead of suppressing them, a silently wrong thermal
+    average with no error). Checked in vevtk/mettsvev.py *before*
+    dispatching to either backend's own session: mpscpp3/chain_session.h's
+    Chain::metts_vev does validate this too, but via ITensor's Error(),
+    which calls abort() directly (see itensor/util/error.h) rather than
+    throwing a catchable exception -- confirmed directly, a T<=0 call used
+    to SIGABRT the whole interpreter instead of raising. That C++-side
+    check is only a last-resort safety net against direct
+    _session.metts_vev() misuse, not something a Python test can exercise
+    without crashing the test process, so this test only ever reaches the
+    Python-level guard."""
+    sc, h = _heisenberg_field_chain(3, version)
+    with pytest.raises(ValueError):
+        sc.metts_vev(sc.Sz[0], -1.0, nsamples=2, nwarmup=1)
+    with pytest.raises(ValueError):
+        sc.metts_vev(sc.Sz[0], 0.0, nsamples=2, nwarmup=1)
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_metts_vev_rejects_empty_basis_ops(version):
+    """An empty basis_ops would otherwise index basis_ops[0] out of bounds
+    (undefined behavior in the C++ port) or KeyError deep inside the
+    Python one -- caught by vevtk/mettsvev.py's own check before either
+    backend's session ever sees it (see
+    test_metts_vev_rejects_non_positive_temperature's docstring on why
+    the C++-side check alone isn't something a Python test can rely on)."""
+    sc, h = _heisenberg_field_chain(3, version)
+    with pytest.raises(ValueError):
+        sc.metts_vev(sc.Sz[0], 1.0, nsamples=2, nwarmup=1, basis_ops=())
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_metts_vev_rejects_non_positive_nsamples(version):
+    """nsamples<1 would otherwise leave the retained-samples list empty
+    and divide by zero when averaging (silently producing NaN in the C++
+    port before this guard was added) -- caught by vevtk/mettsvev.py's own
+    check before either backend's session ever sees it (see
+    test_metts_vev_rejects_non_positive_temperature's docstring on why the
+    C++-side check alone isn't something a Python test can rely on)."""
+    sc, h = _heisenberg_field_chain(3, version)
+    with pytest.raises(ValueError):
+        sc.metts_vev(sc.Sz[0], 1.0, nsamples=0, nwarmup=1)

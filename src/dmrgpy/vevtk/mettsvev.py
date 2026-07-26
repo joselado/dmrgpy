@@ -55,6 +55,21 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
             "whole process for chains below 3 sites (the same vendored-"
             "ITensor limitation as its two-site dmrg(), see CLAUDE.md). "
             "Use itensor_version='python' instead for small chains." % (MB.ns,))
+    # Validate here rather than relying on either backend's own checks:
+    # mpscpp3/chain_session.h's Chain::metts_vev does validate T/basis_ops/
+    # nsamples too, but via ITensor's Error(), which -- unlike a normal C++
+    # exception -- calls abort() directly (see itensor/util/error.h) and so
+    # can never be caught from Python; it's only a last-resort safety net
+    # against direct _session.metts_vev() misuse, not a substitute for a
+    # real, catchable check here (confirmed directly: a T<=0 call used to
+    # SIGABRT the whole interpreter instead of raising before this check
+    # was added).
+    if T <= 0:
+        raise ValueError("metts_vev: T must be > 0, got %r" % (T,))
+    if not basis_ops:
+        raise ValueError("metts_vev: basis_ops must be non-empty")
+    if nsamples < 1:
+        raise ValueError("metts_vev: nsamples must be >= 1, got %r" % (nsamples,))
     MB._session.set_sweep_params(MB.maxm, MB.nsweeps, MB.cutoff, MB.noise)
     MB._session.set_verbose(MB.verbose)
     MB._session.set_mpomaxm(max(MB.maxm, MB.mpomaxm))

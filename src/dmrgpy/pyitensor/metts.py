@@ -92,6 +92,20 @@ def _eigenbasis(sites, opname, i):
     return np.linalg.eigh(M)
 
 
+def _build_eigcache(sites, basis_ops):
+    """{(opname, i): (evals, evecs)} for every (opname, site) pair the
+    sampling run will ever need, computed once up front. Without this,
+    random_cps()/collapse_to_cps() would recompute the same operator's
+    eigendecomposition from scratch at every site on every one of the
+    nwarmup+nsamples Markov-chain iterations, even though a given
+    (opname, i)'s eigenbasis never changes across the whole run -- with
+    n sites and O(200-300) iterations that's tens of thousands of
+    redundant eigh() calls for no reason."""
+    n = sites.length()
+    return {(opname, i): _eigenbasis(sites, opname, i)
+            for opname in set(basis_ops) for i in range(1, n + 1)}
+
+
 def product_state(sites, vectors):
     """An MPS product state (bond dimension 1 throughout) from a list of
     per-site complex vectors (vectors[i-1], length sites.dim(i)). Trivial
@@ -119,22 +133,25 @@ def product_state(sites, vectors):
     return mps
 
 
-def random_cps(sites, opname, rng):
+def random_cps(sites, opname, rng, eigcache=None):
     """A random classical product state: at each site, uniformly pick one
     eigenstate of the named single-site operator (e.g. "Sz"). Valid seed
     for the METTS Markov chain regardless of choice -- the chain's
     stationary distribution doesn't depend on the starting CPS (paper,
-    Sec. 2), only how many warmup steps are needed to reach it."""
+    Sec. 2), only how many warmup steps are needed to reach it.
+
+    eigcache: optional {(opname, i): (evals, evecs)} from
+    _build_eigcache(), used instead of recomputing on every call."""
     n = sites.length()
     vectors = []
     for i in range(1, n + 1):
-        _, evecs = _eigenbasis(sites, opname, i)
+        _, evecs = eigcache[(opname, i)] if eigcache is not None else _eigenbasis(sites, opname, i)
         k = rng.integers(0, sites.dim(i))
         vectors.append(evecs[:, k].copy())
     return product_state(sites, vectors)
 
 
-def collapse_to_cps(psi, sites, opname, rng):
+def collapse_to_cps(psi, sites, opname, rng, eigcache=None):
     """Sequential ("perfect") sampling collapse of MPS `psi` onto a new
     classical product state built from eigenstates of the single-site
     Hermitian operator `opname` (e.g. "Sz" or "Sx") -- the paper's
@@ -153,6 +170,9 @@ def collapse_to_cps(psi, sites, opname, rng):
     original MPS's own truncation), never requiring the full
     exponentially-sized amplitude vector.
 
+    eigcache: optional {(opname, i): (evals, evecs)} from
+    _build_eigcache(), used instead of recomputing on every call.
+
     Returns (new_cps_mps, outcomes): outcomes[i-1] is the sampled
     eigenvalue (float) at site i, for diagnostics only.
     """
@@ -163,7 +183,7 @@ def collapse_to_cps(psi, sites, opname, rng):
     outcomes = []
     L = None  # running collapsed-prefix amplitude, an ITensor over the current left link, or None at site 1
     for i in range(1, n + 1):
-        evals, evecs = _eigenbasis(sites, opname, i)
+        evals, evecs = eigcache[(opname, i)] if eigcache is not None else _eigenbasis(sites, opname, i)
         T = work.A(i)
         if L is not None:
             T = L * T
@@ -225,11 +245,19 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
     the true error unless dbeta_half_step/nwarmup are generous enough
     that consecutive samples actually decorrelate (paper, Sec. 3.3).
     """
+    if beta <= 0:
+        raise ValueError("metts_thermal_average: beta (1/T) must be > 0, got %r" % (beta,))
+    if not basis_ops:
+        raise ValueError("metts_thermal_average: basis_ops must be non-empty")
+    if nsamples < 1:
+        raise ValueError("metts_thermal_average: nsamples must be >= 1, got %r" % (nsamples,))
+
     rng = np.random.default_rng(seed)
     beta_half = beta / 2.0
     nsteps = max(1, int(np.ceil(beta_half / dbeta_half_step)))
+    eigcache = _build_eigcache(sites, basis_ops)
 
-    cps = initial_cps if initial_cps is not None else random_cps(sites, basis_ops[0], rng)
+    cps = initial_cps if initial_cps is not None else random_cps(sites, basis_ops[0], rng, eigcache)
 
     nbasis = len(basis_ops)
     samples = [[] for _ in ops]
@@ -240,7 +268,7 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
             for j, A in enumerate(ops):
                 samples[j].append(inner(phi, A, phi))
         basis = basis_ops[it % nbasis]
-        cps, _ = collapse_to_cps(phi, sites, basis, rng)
+        cps, _ = collapse_to_cps(phi, sites, basis, rng, eigcache)
 
     means, stderrs = [], []
     for vals in samples:
