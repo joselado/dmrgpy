@@ -318,6 +318,18 @@ class Many_Body_Chain():
       per operator."""
       from .vevtk.mettsvev import metts_vev as _metts_vev
       return _metts_vev(self,MO,T,**kwargs)
+  def metts_dynamical_correlator(self,name,T,**kwargs):
+      """Real-time finite-temperature dynamical correlator
+      C_AB(t) = <A(t)B>_T via dynamical METTS sampling (Wang, McClarty,
+      Dankova, Honecker & Wietek, arXiv:2405.18484, Sec. II) -- see
+      vevtk/mettsdynamicalcorrelator.py. Implemented for
+      itensor_version='python' and 3 (not 2, which has no TDVP), same
+      restriction as metts_vev. Validate against
+      self.get_dynamical_correlator(mode="ED", submode="ED", T=T,
+      name=name) (edtk/dynamics.py's dynamical_correlator_finite_T), the
+      exact Lehmann-sum reference for small systems."""
+      from .vevtk.mettsdynamicalcorrelator import metts_dynamical_correlator as _mdc
+      return _mdc(self,name,T,**kwargs)
   def test_ED(self):
       """Test the ED object"""
       self.get_ED_obj().test()

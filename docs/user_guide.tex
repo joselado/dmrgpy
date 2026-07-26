@@ -1094,6 +1094,79 @@ in-process C++ object with no per-worker copy a process pool could hand
 out; requesting \texttt{njobs>1} there raises rather than silently
 falling back to \texttt{njobs=1}.
 
+\textbf{\texttt{metts\_dynamical\_correlator(name, T, ...)}} extends
+METTS from static expectation values to real-time finite-temperature
+\emph{dynamical} correlators
+$\mathcal{C}_{AB}(t)=\langle A(t)B\rangle_T=\langle e^{iHt}Ae^{-iHt}B\rangle_T$
+(Z. Wang, P. McClarty, D. Dankova, A. Honecker and A. Wietek,
+``Spectroscopy and complex-time correlations using minimally entangled
+typical thermal states'', arXiv:2405.18484, Sec.~II, ``Dynamical METTS
+algorithm''), implemented for the same two backends as
+\texttt{metts\_vev} (\texttt{itensor\_version="python"} and \texttt{3},
+not \texttt{2}). For every METTS sample $|\psi_i\rangle$ produced by the
+exact same Markov chain \texttt{metts\_vev} already samples
+(imaginary-time evolution + sequential-sampling collapse), define
+$|v_i(0)\rangle=B|\psi_i\rangle$, $|w_i(0)\rangle=|\psi_i\rangle$,
+real-time evolve both independently under $H$ (two-site TDVP), and
+measure $\mathcal{C}^i(t)=\langle w_i(t)|A|v_i(t)\rangle$ at each
+requested time step. A plain (unweighted) sample average of
+$\mathcal{C}^i(t)$ over retained samples converges to
+$\mathcal{C}_{AB}(t)$, for the same reason \texttt{metts\_vev}'s own
+plain average converges to the thermal average --- no importance
+reweighting needed:
+
+\begin{lstlisting}
+ts, means, stderrs = sc.metts_dynamical_correlator(
+    (sc.Sz[0], sc.Sz[0]), T, nt=100, dt=0.1, nsamples=200, nwarmup=30,
+    dbeta_half_step=0.05, basis_ops=("Sz","Sx"))
+\end{lstlisting}
+
+\texttt{name} follows the same \texttt{(A,B)} convention as
+\texttt{get\_dynamical\_correlator}'s own \texttt{name=} (a string like
+\texttt{"ZZ"}, or an explicit
+\texttt{(MultiOperator,MultiOperator)} tuple/list) --- $A$,$B$ are used
+exactly as given, with no dagger applied to either, matching
+\texttt{get\_dynamical\_correlator(mode="ED", submode="ED", T=...)}'s own
+convention (see below) so the two are directly comparable. \texttt{nt},
+\texttt{dt} set the (uniformly spaced) real-time measurement grid
+$t=0,\Delta t,\dots,(n_t-1)\Delta t$; \texttt{nsamples}, \texttt{nwarmup},
+\texttt{dbeta\_half\_step}, \texttt{basis\_ops}, \texttt{seed},
+\texttt{niter}, \texttt{njobs} all mean exactly what they mean for
+\texttt{metts\_vev} (same shared Markov chain, same caveats on
+\texttt{stderrs} being a Markov-correlated, likely-optimistic naive
+estimate). \texttt{tdvp\_niter} separately bounds the Krylov iterations
+used for the \emph{real-time} evolution of
+$|v_i(t)\rangle$/$|w_i(t)\rangle$ specifically (default 50), independent
+of \texttt{niter}'s bound on the imaginary-time sampling step (default
+30) --- the two generally warrant different settings since
+$|v_i(t)\rangle$/$|w_i(t)\rangle$ typically become more entangled over
+the course of real-time evolution than the METTS samples
+$|\psi_i\rangle$ themselves ever do. No Fourier transform/windowing is
+performed internally: \texttt{metts\_dynamical\_correlator} returns the
+raw time-domain samples/statistics, matching \texttt{evolution\_DC}'s own
+\texttt{(ts,cs)} convention --- apply a window (e.g.\ a Hann window, as
+the reference paper recommends) and FFT separately if a
+frequency-domain spectral function is wanted.
+
+For a direct, exact reference to validate against,
+\texttt{get\_dynamical\_correlator(mode="ED", submode="ED", T=...,
+name=...)} computes the finite-temperature dynamical correlator's
+spectral function via a full Boltzmann-weighted Lehmann sum over
+\emph{every} ED eigenstate,
+\begin{equation}
+\mathcal{C}_{AB}(\omega)=\frac{1}{\mathcal{Z}}\sum_{n,m}e^{-\beta E_n}\langle n|A|m\rangle\langle m|B|n\rangle\,[\text{kernel at }\omega=E_m-E_n],
+\end{equation}
+the finite-$T$ generalization of the existing $T=0$
+\texttt{submode="ED"} near-degenerate-ground-state sum to every
+eigenstate weighted by its exact Boltzmann factor (exact, since it
+starts from a full dense diagonalization, unlike
+\texttt{thermal\_vev\_ex}'s own partial-diagonalization
+truncation-safety check, which this doesn't need). See
+\texttt{examples/finite\_temperature/dynamical\_metts\_VS\_ED} for a
+cross-check of \texttt{metts\_dynamical\_correlator} (both backends)
+against this exact ED reference, evaluated directly in the time domain,
+on a small Heisenberg chain.
+
 \section{Topological invariants}
 
 \textbf{Many-body Berry phase.} For a ground state that depends on an

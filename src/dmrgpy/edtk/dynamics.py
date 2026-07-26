@@ -12,7 +12,7 @@ is_hermitian = algebra.is_hermitian
 
 
 def get_dynamical_correlator(self,name=None,submode="KPM",
-        wf0=None,**kwargs):
+        wf0=None,T=0.,**kwargs):
     """
     Compute the dynamical correlator
     """
@@ -24,8 +24,24 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     B = EDOperator(name[1],self).SO # create second operator
     h = self.get_hamiltonian() # Hamiltonian as matrix
 
+    if T>0.: # finite-temperature Lehmann sum -- the exact reference used
+        # to validate the finite-T MPS/METTS dynamical correlator (see
+        # vevtk/mettsdynamicalcorrelator.py), the dynamical analog of
+        # thermal_vev_ex's static Boltzmann sum in vevtk/thermalvev.py.
+        if submode!="ED":
+            raise NotImplementedError(
+                "get_dynamical_correlator: T>0 is only implemented for "
+                "submode='ED' (the exact Lehmann sum) so far, got "
+                "submode=%r" % (submode,))
+        if not is_hermitian(h):
+            raise NotImplementedError(
+                "get_dynamical_correlator: T>0 is not implemented for "
+                "non-Hermitian Hamiltonians")
+        emu,vs = self.get_diagonalized_hamiltonian()
+        return dynamical_correlator_finite_T(h,A,B,T,emu=emu,vs=vs,**kwargs)
+
     if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
-    else: 
+    else:
         wf0 = wf0.v.copy()
     if not is_hermitian(h): # non Hermitian Hamiltonians
         if submode=="KPM": # non-Hermitian KPM
@@ -169,6 +185,78 @@ def dynamical_sum(es,ws,delta,A,B,nex=1):
                             - 1./(w-1j*delta+es[i]-es[j]))
         out[iw] = out[iw] + acc
     return out/nex # return dynamical correlator
+
+
+def dynamical_correlator_finite_T(h,a0,b0,T,delta=2e-2,
+        emu=None,vs=None,
+        es=np.linspace(-1.0,10.0,600)):
+    """Finite-temperature dynamical correlator via the exact Lehmann sum
+    (arXiv:2405.18484, Eq. before Sec. II.D):
+
+        C_AB(omega) = (1/Z) sum_{n,m} exp(-beta*E_n) <n|A|m><m|B|n>
+                      * [same +-i*delta kernel dynamical_sum uses at
+                         omega = E_m - E_n]
+
+    the finite-T generalization of dynamical_correlator_ED's T=0 sum
+    (dynamical_sum's `nex`-averaged near-degenerate-ground-state sum)
+    to a full thermal average over every eigenstate weighted by its
+    exact Boltzmann factor. Unlike thermal_vev_ex (vevtk/thermalvev.py),
+    which sums over a possibly-truncated set of excited states obtained
+    from sparse/partial diagonalization and must therefore check the
+    left-out Boltzmann weight is negligible, emu/vs here always come from
+    a full dense diagonalization (get_diagonalized_hamiltonian ->
+    algebra.eigh), so the Boltzmann weight is exact and no truncation
+    safety check is needed -- the only limit is algebra.maxsize's
+    existing hard cap on how large a Hilbert space can be fully
+    diagonalized at all."""
+    if emu is None or vs is None: # if not provided
+        emu,vs = algebra.eigh(h) # compute them
+    ex = emu-np.min(emu) # excitations, ascending
+
+    # crop to the needed states, same as dynamical_correlator_ED -- note
+    # this only drops *final* states above the requested frequency
+    # window; the *initial*-state Boltzmann weights below are computed
+    # from the full (uncropped) spectrum, so Z stays exact regardless
+    emax = np.max(es) # maximum energy
+    beta = 1./T
+    weights_full = np.exp(-beta*ex)
+    Z = weights_full.sum()
+    keep = emu<emax
+    vs_c = vs[:,keep] # restrict
+    ex_c = ex[keep] # restrict
+    weights = weights_full[keep]/Z # normalized Boltzmann weight per kept state
+
+    # compute the needed matrix elements
+    U = np.array(vs_c) # matrix
+    Uh = np.conjugate(np.transpose(U)) # dagger
+    A = Uh@a0@U # get the matrix elements
+    B = Uh@b0@U # get the matrix elements
+    out = dynamical_sum_thermal(ex_c,es,delta,A,B,weights) # perform the summation
+    return (es,-out.imag/(2*np.pi)) # return correlator
+
+
+@jit(nopython=True)
+def dynamical_sum_thermal(es,ws,delta,A,B,weights):
+    """Thermal generalization of dynamical_sum() above: sums over *every*
+    initial state i (not just the first `nex` near-degenerate ones),
+    weighting each by its own Boltzmann factor `weights[i]` (already
+    normalized to sum to 1 over the full spectrum) instead of a uniform
+    1/nex."""
+    es = es-np.min(es) # remove minimum energy (ground state)
+    n = len(es) # number of eigenenergies
+    out = np.zeros(len(ws),dtype=np.complex128) # initialize
+    for i in range(n): # loop over every initial state
+      wi = weights[i]
+      if wi==0.0: continue # skip states with no Boltzmann weight at all
+      for iw in range(len(ws)): # loop over frequencies
+        w = ws[iw]
+        acc = 0.0+0.0j
+        for j in range(n): # loop over eigenenergies
+            tmp = A[i,j]*B[j,i] # relevant matrix element
+            acc = acc + tmp*(1./(w+1j*delta+es[i]-es[j])
+                            - 1./(w-1j*delta+es[i]-es[j]))
+        out[iw] = out[iw] + wi*acc
+    return out # return dynamical correlator
 
 
 def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),

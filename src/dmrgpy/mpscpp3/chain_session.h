@@ -895,6 +895,134 @@ class Chain
         return {means,stderrs};
         }
 
+    // Dynamical METTS (real-time finite-T correlators), arXiv:2405.18484
+    // (Wang, McClarty, Dankova, Honecker & Wietek, "Spectroscopy and
+    // complex-time correlations using minimally entangled typical thermal
+    // states"), Sec. II / Algorithm 1 -- a direct port of
+    // pyitensor/metts.py's metts_dynamical_correlator() onto real ITensor
+    // v3, following the exact same METTS Markov chain metts_vev() above
+    // does (imaginary-time tdvp_step + collapse_to_cps), generalized from
+    // the static <A>_beta average to the two-time correlator
+    // C_AB(t) = <A(t)B>_beta = <e^{iHt} A e^{-iHt} B>_beta: for every
+    // retained sample |phi>, set |v(0)>=B|phi>, |w(0)>=|phi>, measure
+    // C(t_k)=<w(t_k)|A|v(t_k)>, then real-time-evolve both |v> and |w>
+    // independently under H_ via tdvp_step (dt real here -- that
+    // method's own -i*dt convention already makes a purely real dt give
+    // genuine rotation, i.e. real time, exactly as quench_tdvp() above
+    // already relies on). A plain sample average over every retained
+    // METTS sample converges to C_AB(t), for the same reason
+    // metts_vev()'s own plain average converges to <A>_beta -- see that
+    // method's comment above.
+    //
+    // Returns (means,stderrs), each a length-nt array over
+    // t=0,dt,...,(nt-1)*dt -- same (means,stderrs) convention as
+    // metts_vev() above, just array-valued per time step instead of
+    // per-operator; the ts array itself is left for the Python-facing
+    // wrapper to construct from (nt,dt), same as
+    // pyitensor.chain.Chain.metts_dynamical_correlator's own split.
+    std::pair<std::vector<Cplx>,std::vector<double>>
+    metts_dynamical_correlator(std::vector<MOTerm> const& terms_a,
+              std::vector<MOTerm> const& terms_b,
+              double T, int nt, double dt, int nsamples,
+              int nwarmup, double dbeta_half_step,
+              std::vector<std::string> const& basis_ops,
+              unsigned long seed, int niter=30, int tdvp_niter=50) const
+        {
+        if (!have_H_) Error("Chain::metts_dynamical_correlator called before set_hamiltonian");
+        if (T<=0) Error("Chain::metts_dynamical_correlator: T must be > 0");
+        if (basis_ops.empty()) Error("Chain::metts_dynamical_correlator: basis_ops must be non-empty");
+        if (nsamples<1) Error("Chain::metts_dynamical_correlator: nsamples must be >= 1");
+        if (nt<1) Error("Chain::metts_dynamical_correlator: nt must be >= 1");
+
+        auto A = build_mpo(sites_,terms_a,mpomaxm_);
+        auto B = build_mpo(sites_,terms_b,mpomaxm_);
+        double beta_half = 1.0/(2.0*T);
+        int nsteps = std::max(1,(int)std::ceil(beta_half/dbeta_half_step));
+        Cplx dtau = Cplx(0.0,-1.0)*(beta_half/double(nsteps));
+        Cplx dtr = Cplx(dt,0.0); // real time step, tdvp_step's own -i*dt convention
+
+        std::mt19937_64 rng(seed);
+        int nbasis = (int)basis_ops.size();
+        auto eigcache = metts_build_eigcache(basis_ops);
+        MPS cps = random_cps(basis_ops[0],rng,eigcache);
+        auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
+
+        std::vector<std::vector<Cplx>> samples(nt); // samples[k] over retained METTS samples
+        for (auto& s : samples) s.reserve(nsamples);
+
+        int total_iters = nwarmup+nsamples;
+        for (int it=0; it<total_iters; ++it)
+            {
+            MPS phi = cps;
+            for (int s=0; s<nsteps; ++s)
+                {
+                phi = tdvp_step(H_,phi,dtau,2,niter);
+                phi /= sqrt(innerC(phi,phi).real());
+                }
+            if (it>=nwarmup)
+                {
+                MPS v = apply_mpo(B,phi,args);
+                // |v(t)> is deliberately *not* unit-norm (paper's own
+                // Eq. right after (eq:auxstatewi): "while |w_i(t)> is
+                // normalized, we generically have <v_i(t)|v_i(t)> =
+                // constant != 1") -- but tdvp_step()'s underlying
+                // ITensorTDVP tdvp() call always passes "DoNormalize",
+                // true, which force-renormalizes its *input* MPS to unit
+                // norm on every single call, silently corrupting v's own
+                // (should-stay-constant, generically !=1) norm at the
+                // very first step and pinning it at 1 forever after --
+                // confirmed directly (a factor-of-2 discrepancy against
+                // the exact ED reference for a v(0) with norm 0.5). Same
+                // fix quench_tdvp()/quench_tdvp_gse() above already apply
+                // to their own similarly-unnormalized psi1: save the true
+                // norm once, then restore it after every tdvp_step() call
+                // (undoing that forced renormalization to 1) -- w needs
+                // no such correction since it starts at unit norm (a
+                // normalized METTS sample) and real-time evolution
+                // preserves that exactly, making DoNormalize's forced
+                // renormalization to 1 a no-op for it.
+                Cplx normv0 = std::sqrt(innerC(v,v));
+                MPS w = phi;
+                for (int k=0; k<nt; ++k)
+                    {
+                    samples[k].push_back(innerC(w,A,v));
+                    if (k<nt-1)
+                        {
+                        v = tdvp_step(H_,v,dtr,2,tdvp_niter);
+                        v.normalize();
+                        v *= normv0;
+                        w = tdvp_step(H_,w,dtr,2,tdvp_niter);
+                        }
+                    }
+                }
+            cps = collapse_to_cps(phi,basis_ops[it % nbasis],rng,eigcache);
+            }
+
+        // Same reachable-only-with-an-oversized-nwarmup guard as
+        // metts_vev() above.
+        if (samples[0].empty())
+            Error("Chain::metts_dynamical_correlator: no samples were retained (nwarmup >= nwarmup+nsamples?)");
+        std::vector<Cplx> means(nt,Cplx(0.0,0.0));
+        std::vector<double> stderrs(nt,0.0);
+        for (int k=0; k<nt; ++k)
+            {
+            Cplx mean = 0;
+            for (auto& v : samples[k]) mean += v;
+            mean /= double(samples[k].size());
+            double var = 0.0;
+            for (auto& v : samples[k])
+                {
+                double d = std::abs(v-mean);
+                var += d*d;
+                }
+            double stderr_ = samples[k].size()>1
+                ? std::sqrt(var/double(samples[k].size()-1)/double(samples[k].size())) : 0.0;
+            means[k] = mean;
+            stderrs[k] = stderr_;
+            }
+        return {means,stderrs};
+        }
+
     // Global subspace expansion (TDVP/basisextension.h's addBasis()):
     // enriches phi's local bases with a Krylov subspace {phi, H*phi,
     // H^2*phi, ...} of dimension krylov_order, then discards the least

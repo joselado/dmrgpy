@@ -344,6 +344,29 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "the full algorithm). terms_ops is a list of operators, all "
                "measured on the same sampled Markov chain. Returns "
                "(means, stderrs), lists matching terms_ops.")
+        .def("metts_dynamical_correlator",
+            [](Chain& self, std::vector<PyTerm> const& terms_a,
+               std::vector<PyTerm> const& terms_b,
+               double T, int nt, double dt, int nsamples, int nwarmup,
+               double dbeta_half_step,
+               std::vector<std::string> const& basis_ops,
+               unsigned long seed, int niter, int tdvp_niter) {
+                return self.metts_dynamical_correlator(
+                    terms_from_python(terms_a),terms_from_python(terms_b),
+                    T,nt,dt,nsamples,nwarmup,dbeta_half_step,basis_ops,
+                    seed,niter,tdvp_niter);
+            }, py::arg("terms_a"),py::arg("terms_b"),py::arg("T"),
+               py::arg("nt")=200,py::arg("dt")=0.1,py::arg("nsamples")=100,
+               py::arg("nwarmup")=20,py::arg("dbeta_half_step")=0.05,
+               py::arg("basis_ops")=std::vector<std::string>{"Sz","Sx"},
+               py::arg("seed")=0,py::arg("niter")=30,py::arg("tdvp_niter")=50,
+               "Real-time finite-temperature correlator C_AB(t)=<A(t)B>_T "
+               "via dynamical METTS sampling (Wang, McClarty, Dankova, "
+               "Honecker & Wietek, arXiv:2405.18484, Sec. II -- see "
+               "Chain::metts_dynamical_correlator's own comment and "
+               "pyitensor/metts.py's metts_dynamical_correlator for the "
+               "full algorithm). Returns (means, stderrs), length-nt "
+               "arrays over t=0,dt,...,(nt-1)*dt.")
         .def("global_subspace_expand",&Chain::global_subspace_expand,
              py::arg("H"),py::arg("phi"),py::arg("krylov_order"),
              py::arg("cutoff"),py::arg("maxdim")=0,

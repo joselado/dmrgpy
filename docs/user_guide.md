@@ -935,6 +935,71 @@ compile tax never amortizes). `njobs` is not available for
 with no per-worker copy a process pool could hand out; requesting
 `njobs>1` there raises rather than silently falling back to `njobs=1`.
 
+**`metts_dynamical_correlator(name, T, ...)`** extends METTS from static
+expectation values to real-time finite-temperature *dynamical*
+correlators
+$\mathcal{C}_{AB}(t)=\langle A(t)B\rangle_T=\langle e^{iHt}Ae^{-iHt}B\rangle_T$
+(Z. Wang, P. McClarty, D. Dankova, A. Honecker and A. Wietek,
+"Spectroscopy and complex-time correlations using minimally entangled
+typical thermal states", arXiv:2405.18484, Sec. II, "Dynamical METTS
+algorithm"), implemented for the same two backends as `metts_vev`
+(`itensor_version="python"` and `3`, not `2`). For every METTS sample
+$|\psi_i\rangle$ produced by the exact same Markov chain `metts_vev`
+already samples (imaginary-time evolution + sequential-sampling
+collapse), define $|v_i(0)\rangle=B|\psi_i\rangle$,
+$|w_i(0)\rangle=|\psi_i\rangle$, real-time evolve both independently
+under $H$ (two-site TDVP), and measure
+$\mathcal{C}^i(t)=\langle w_i(t)|A|v_i(t)\rangle$ at each requested time
+step. A plain (unweighted) sample average of $\mathcal{C}^i(t)$ over
+retained samples converges to $\mathcal{C}_{AB}(t)$, for the same reason
+`metts_vev`'s own plain average converges to the thermal average — no
+importance reweighting needed:
+
+```python
+ts, means, stderrs = sc.metts_dynamical_correlator(
+    (sc.Sz[0], sc.Sz[0]), T, nt=100, dt=0.1, nsamples=200, nwarmup=30,
+    dbeta_half_step=0.05, basis_ops=("Sz","Sx"))
+```
+
+`name` follows the same `(A,B)` convention as
+`get_dynamical_correlator`'s own `name=` (a string like `"ZZ"`, or an
+explicit `(MultiOperator,MultiOperator)` tuple/list) — `A`,`B` are used
+exactly as given, with no dagger applied to either, matching
+`get_dynamical_correlator(mode="ED", submode="ED", T=...)`'s own
+convention (see below) so the two are directly comparable. `nt`,`dt` set
+the (uniformly spaced) real-time measurement grid
+$t=0,\Delta t,\dots,(n_t-1)\Delta t$; `nsamples`, `nwarmup`,
+`dbeta_half_step`, `basis_ops`, `seed`, `niter`, `njobs` all mean exactly
+what they mean for `metts_vev` (same shared Markov chain, same caveats on
+`stderrs` being a Markov-correlated, likely-optimistic naive estimate).
+`tdvp_niter` separately bounds the Krylov iterations used for the
+*real-time* evolution of $|v_i(t)\rangle$/$|w_i(t)\rangle$ specifically
+(default 50), independent of `niter`'s bound on the imaginary-time
+sampling step (default 30) — the two generally warrant different
+settings since $|v_i(t)\rangle$/$|w_i(t)\rangle$ typically become more
+entangled over the course of real-time evolution than the METTS samples
+$|\psi_i\rangle$ themselves ever do. No Fourier transform/windowing is
+performed internally: `metts_dynamical_correlator` returns the raw
+time-domain samples/statistics, matching `evolution_DC`'s own `(ts,cs)`
+convention — apply a window (e.g. a Hann window, as the reference paper
+recommends) and FFT separately if a frequency-domain spectral function is
+wanted.
+
+For a direct, exact reference to validate against, `get_dynamical_correlator(
+mode="ED", submode="ED", T=..., name=...)` computes the finite-temperature
+dynamical correlator's spectral function via a full Boltzmann-weighted
+Lehmann sum over *every* ED eigenstate
+$\mathcal{C}_{AB}(\omega)=\frac{1}{\mathcal{Z}}\sum_{n,m}e^{-\beta E_n}\langle n|A|m\rangle\langle m|B|n\rangle\,[\text{kernel at }\omega=E_m-E_n]$
+— the finite-$T$ generalization of the existing T=0 `submode="ED"`
+near-degenerate-ground-state sum to every eigenstate weighted by its
+exact Boltzmann factor (exact, since it starts from a full dense
+diagonalization, unlike `thermal_vev_ex`'s own partial-diagonalization
+truncation-safety check, which this doesn't need). See
+`examples/finite_temperature/dynamical_metts_VS_ED` for a cross-check of
+`metts_dynamical_correlator` (both backends) against this exact ED
+reference, evaluated directly in the time domain, on a small Heisenberg
+chain.
+
 ## 10. Topological invariants
 
 **Many-body Berry phase.** For a ground state that depends on an
