@@ -101,11 +101,21 @@ def test_metts_vev_multi_op_matches_separate_calls(version):
     """Op may be a list/tuple of MultiOperators, measured together on one
     shared METTS sample chain (see vevtk/mettsvev.py's docstring) instead
     of forcing one full sampling run per operator. Given the same seed,
-    the shared-chain multi-op path must reproduce -- bit for bit, not just
-    approximately -- the same per-operator results as calling metts_vev
-    separately for each operator, since it's sampling the exact same
-    Markov chain of METTS states and just measuring more operators against
-    each sampled state."""
+    the shared-chain multi-op path must reproduce the same per-operator
+    results as calling metts_vev separately for each operator, since it's
+    sampling the exact same Markov chain of METTS states and just
+    measuring more operators against each sampled state. Compared with
+    pytest.approx rather than exact equality, this codebase's usual
+    convention for iterative-method comparisons (see e.g.
+    test_metts_matches_ed_*): the two backends here dispatch matrix
+    contractions/SVDs through real BLAS/LAPACK, whose reduction order
+    (and so bit-exact rounding) isn't guaranteed identical across two
+    separate calls on every machine/build, even with the same seed and
+    inputs -- a tight but non-zero tolerance still catches an actual
+    algorithmic divergence (e.g. the multi-op path accidentally sampling
+    a *different* Markov chain than the single-op path) while not
+    depending on bit-for-bit floating-point reproducibility this test
+    doesn't actually need."""
     sc, h = _heisenberg_field_chain(3, version, B=0.4)
     T = 0.8
     kwargs = dict(nsamples=40, nwarmup=10, dbeta_half_step=0.08, seed=77)
@@ -115,8 +125,10 @@ def test_metts_vev_multi_op_matches_separate_calls(version):
 
     results = sc.metts_vev([h, sc.Sz[1]], T, **kwargs)
     assert len(results) == 2
-    assert results[0] == (metts_e, err_e)
-    assert results[1] == (metts_sz, err_sz)
+    assert results[0][0] == pytest.approx(metts_e, abs=1e-8)
+    assert results[0][1] == pytest.approx(err_e, abs=1e-8)
+    assert results[1][0] == pytest.approx(metts_sz, abs=1e-8)
+    assert results[1][1] == pytest.approx(err_sz, abs=1e-8)
 
 
 def test_metts_vev_requires_supported_backend():
