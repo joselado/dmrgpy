@@ -33,6 +33,7 @@ from .. import operatornames
 def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
                                 nwarmup=20, dbeta_half_step=0.05,
                                 basis_ops=("Sz", "Sx"), seed=None, niter=30,
+                                tdvp_cutoff=None, tdvp_maxdim=None,
                                 tdvp_niter=50, njobs=1):
     """Real-time dynamical correlator C_AB(t) = <A(t)B>_T at temperature T
     via dynamical METTS sampling (arXiv:2405.18484, Sec. II).
@@ -57,6 +58,18 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     nsamples, nwarmup, dbeta_half_step, basis_ops, seed, niter: as in
         MB.metts_vev() -- control the shared METTS Markov chain
         (imaginary-time sampling) each retained sample is measured from.
+    tdvp_cutoff, tdvp_maxdim: truncation controls for the *real-time*
+        evolution of |v_i(t)>/|w_i(t)> specifically, separate from this
+        chain's own cutoff/maxm (used for the imaginary-time METTS
+        sampling step) -- default None, meaning "same as this chain's own
+        cutoff/maxm" (see pyitensor.metts.metts_dynamical_correlator's own
+        docstring on why real-time evolution generally wants a looser
+        cutoff/larger bond dimension). itensor_version="python" only --
+        v3's Chain::metts_dynamical_correlator has no such knob (always
+        uses this chain's own cutoff/maxm for both imaginary- and
+        real-time evolution, like every other v3 TDVP method); passing
+        either on itensor_version=3 raises rather than silently ignoring
+        it.
     tdvp_niter: Krylov-iteration bound for the *real-time* TDVP evolution
         of |v_i(t)>/|w_i(t)> specifically (separate from `niter`, which
         only controls the imaginary-time sampling step) -- see
@@ -107,6 +120,14 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
             "metts_dynamical_correlator: njobs>1 (parallel independent "
             "Markov chains) is only implemented for itensor_version="
             "'python' so far (got itensor_version=%r)" % (MB.itensor_version,))
+    if MB.itensor_version != "python" and (tdvp_cutoff is not None or tdvp_maxdim is not None):
+        # v3's Chain::metts_dynamical_correlator has no separate real-time
+        # cutoff/maxdim knob at all -- raise rather than silently ignoring
+        # a value the caller explicitly asked for.
+        raise NotImplementedError(
+            "metts_dynamical_correlator: tdvp_cutoff/tdvp_maxdim are only "
+            "implemented for itensor_version='python' so far (got "
+            "itensor_version=%r)" % (MB.itensor_version,))
 
     resolved = operatornames.str2MO(MB, name)
     A, B = resolved[0], resolved[1]
@@ -123,7 +144,8 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     if MB.itensor_version == "python":
         means, stderrs = MB._session.metts_dynamical_correlator(
             terms_a, terms_b, T, nt, dt, nsamples, nwarmup, dbeta_half_step,
-            list(basis_ops), seed_arg, niter, tdvp_niter=tdvp_niter, njobs=njobs)
+            list(basis_ops), seed_arg, niter, tdvp_cutoff=tdvp_cutoff,
+            tdvp_maxdim=tdvp_maxdim, tdvp_niter=tdvp_niter, njobs=njobs)
     else:
         means, stderrs = MB._session.metts_dynamical_correlator(
             terms_a, terms_b, T, nt, dt, nsamples, nwarmup, dbeta_half_step,

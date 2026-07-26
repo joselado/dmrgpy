@@ -685,14 +685,18 @@ class Chain:
     def metts_dynamical_correlator(self, terms_a, terms_b, T, nt, dt, nsamples,
                                     nwarmup=20, dbeta_half_step=0.05,
                                     basis_ops=("Sz", "Sx"), seed=None, niter=30,
+                                    tdvp_cutoff=None, tdvp_maxdim=None,
                                     tdvp_niter=50, njobs=1):
         """Real-time finite-temperature correlator C_AB(t)=<A(t)B>_T via
         dynamical METTS sampling (arXiv:2405.18484, Sec. II) -- see
         metts.py's metts_dynamical_correlator() for the algorithm itself.
         Reuses self.H (already built by set_hamiltonian) and this chain's
-        own cutoff/maxm for both the imaginary-time METTS sampling and
-        (as a default; see metts.py's own tdvp_cutoff/tdvp_maxdim
-        docstring) the real-time evolution of |v_i(t)>/|w_i(t)>.
+        own cutoff/maxm for the imaginary-time METTS sampling; tdvp_cutoff/
+        tdvp_maxdim (default None -> this chain's own cutoff/maxm, same as
+        metts.py's own default) separately control the real-time evolution
+        of |v_i(t)>/|w_i(t)> -- see metts.py's own tdvp_cutoff/tdvp_maxdim
+        docstring for why that evolution generally wants a looser cutoff/
+        larger bond dimension than the imaginary-time sampling step.
 
         terms_a, terms_b: MultiOperator.to_terms() outputs for A and B --
         used exactly as given (no dagger), same convention as
@@ -711,6 +715,7 @@ class Chain:
         return _metts_dynamical_correlator(
             self.H, self.sites, A, B, beta, nt, dt, nsamples, nwarmup=nwarmup,
             dbeta_half_step=dbeta_half_step, cutoff=self.cutoff, maxdim=self.maxm,
+            tdvp_cutoff=tdvp_cutoff, tdvp_maxdim=tdvp_maxdim,
             basis_ops=basis_ops, seed=seed, niter=niter, tdvp_niter=tdvp_niter,
             njobs=njobs)
 

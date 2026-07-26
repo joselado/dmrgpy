@@ -173,6 +173,38 @@ def test_metts_dynamical_correlator_njobs_rejects_v3():
                                        nsamples=4, nwarmup=1, njobs=2)
 
 
+def test_metts_dynamical_correlator_tdvp_cutoff_maxdim_reach_python_backend():
+    """tdvp_cutoff/tdvp_maxdim must actually be reachable end-to-end from
+    Many_Body_Chain.metts_dynamical_correlator down to
+    pyitensor.metts.metts_dynamical_correlator (not silently dropped
+    somewhere in the vevtk/mettsdynamicalcorrelator.py <-> pyitensor.chain
+    <-> pyitensor.metts call chain, which used to leave them dead -- no
+    caller could ever set them to anything but their None-default,
+    confirmed by code review). Exercised via a value tight enough to
+    force truncation (tdvp_maxdim=1, well below what a real evolution
+    would need) so the call path is genuinely exercised, not just
+    accepted and ignored; only checks the call succeeds and returns
+    sane-shaped output, not the resulting numerical accuracy."""
+    sc, h = _heisenberg_field_chain(3, "python", B=0.4)
+    ts, means, stderrs = sc.metts_dynamical_correlator(
+        (sc.Sz[0], sc.Sz[0]), 1.0, nt=3, dt=0.1, nsamples=3, nwarmup=1,
+        seed=1, tdvp_cutoff=1e-6, tdvp_maxdim=1)
+    assert len(ts) == len(means) == len(stderrs) == 3
+
+
+def test_metts_dynamical_correlator_v3_rejects_tdvp_cutoff_maxdim():
+    """v3's Chain::metts_dynamical_correlator has no separate real-time
+    cutoff/maxdim knob at all -- passing either must raise rather than
+    silently being ignored."""
+    sc, h = _heisenberg_field_chain(3, 3)
+    with pytest.raises(NotImplementedError):
+        sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), 1.0, nt=2, dt=0.1,
+                                       nsamples=2, nwarmup=1, tdvp_cutoff=1e-6)
+    with pytest.raises(NotImplementedError):
+        sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), 1.0, nt=2, dt=0.1,
+                                       nsamples=2, nwarmup=1, tdvp_maxdim=10)
+
+
 def test_metts_dynamical_correlator_rejects_non_positive_njobs():
     sc, h = _heisenberg_field_chain(3, "python")
     with pytest.raises(ValueError):

@@ -213,48 +213,57 @@ def dynamical_correlator_finite_T(h,a0,b0,T,delta=2e-2,
         emu,vs = algebra.eigh(h) # compute them
     ex = emu-np.min(emu) # excitations, ascending
 
-    # crop to the needed states, same as dynamical_correlator_ED -- note
-    # this only drops *final* states above the requested frequency
-    # window; the *initial*-state Boltzmann weights below are computed
-    # from the full (uncropped) spectrum, so Z stays exact regardless
-    emax = np.max(es) # maximum energy
     beta = 1./T
-    weights_full = np.exp(-beta*ex)
-    Z = weights_full.sum()
-    keep = emu<emax
-    vs_c = vs[:,keep] # restrict
-    ex_c = ex[keep] # restrict
-    weights = weights_full[keep]/Z # normalized Boltzmann weight per kept state
+    weights = np.exp(-beta*ex)
+    weights = weights/weights.sum() # exact Boltzmann weight, full spectrum
 
-    # compute the needed matrix elements
-    U = np.array(vs_c) # matrix
-    Uh = np.conjugate(np.transpose(U)) # dagger
-    A = Uh@a0@U # get the matrix elements
-    B = Uh@b0@U # get the matrix elements
-    out = dynamical_sum_thermal(ex_c,es,delta,A,B,weights) # perform the summation
+    # Crop only the *final*-state (j) index space to the requested
+    # frequency window, same approximation dynamical_correlator_ED already
+    # makes -- the *initial*-state (i) sum below always ranges over the
+    # FULL spectrum with its exact weight. Cropping i's index space too
+    # (as an earlier version of this function did) would silently drop
+    # any thermally-populated state above emax from the numerator while
+    # `weights` (computed from the full spectrum, above) still counted it
+    # in the normalization -- a real, silent under-count at any T large
+    # enough for excited states above emax to still carry non-negligible
+    # weight, confirmed by code review.
+    emax = np.max(es) # maximum energy
+    keep_j = emu<emax
+    ex_j = ex[keep_j] # restrict
+
+    Ufull = np.array(vs) # (dim, n) -- every eigenstate, for the i axis
+    Uj = np.array(vs[:,keep_j]) # (dim, nj) -- cropped, for the j axis
+    A = np.conjugate(np.transpose(Ufull))@a0@Uj # (n,nj): <i|A|j>
+    B = np.conjugate(np.transpose(Uj))@b0@Ufull # (nj,n): <j|B|i>
+    out = dynamical_sum_thermal(ex,ex_j,es,delta,A,B,weights) # perform the summation
     return (es,-out.imag/(2*np.pi)) # return correlator
 
 
 @jit(nopython=True)
-def dynamical_sum_thermal(es,ws,delta,A,B,weights):
+def dynamical_sum_thermal(ex_i,ex_j,ws,delta,A,B,weights):
     """Thermal generalization of dynamical_sum() above: sums over *every*
     initial state i (not just the first `nex` near-degenerate ones),
     weighting each by its own Boltzmann factor `weights[i]` (already
     normalized to sum to 1 over the full spectrum) instead of a uniform
-    1/nex."""
-    es = es-np.min(es) # remove minimum energy (ground state)
-    n = len(es) # number of eigenenergies
+    1/nex. A is (n_i,n_j) = <i|A|j>, B is (n_j,n_i) = <j|B|i>; ex_i/ex_j
+    are already expressed relative to the same shared zero (the global
+    ground-state energy, both derived from the same `ex` in the caller)
+    -- deliberately *not* independently re-zeroed against their own
+    separate minima here, since ex_i and ex_j only agree on their zero
+    point because both were shifted the same way before being split."""
+    ni = len(ex_i)
+    nj = len(ex_j)
     out = np.zeros(len(ws),dtype=np.complex128) # initialize
-    for i in range(n): # loop over every initial state
+    for i in range(ni): # loop over every initial state
       wi = weights[i]
       if wi==0.0: continue # skip states with no Boltzmann weight at all
       for iw in range(len(ws)): # loop over frequencies
         w = ws[iw]
         acc = 0.0+0.0j
-        for j in range(n): # loop over eigenenergies
+        for j in range(nj): # loop over the cropped final-state space
             tmp = A[i,j]*B[j,i] # relevant matrix element
-            acc = acc + tmp*(1./(w+1j*delta+es[i]-es[j])
-                            - 1./(w-1j*delta+es[i]-es[j]))
+            acc = acc + tmp*(1./(w+1j*delta+ex_i[i]-ex_j[j])
+                            - 1./(w-1j*delta+ex_i[i]-ex_j[j]))
         out[iw] = out[iw] + wi*acc
     return out # return dynamical correlator
 
