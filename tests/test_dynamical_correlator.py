@@ -7,9 +7,27 @@ systems -- no KPM polynomial-order tuning needed."""
 import numpy as np
 import pytest
 
-from dmrgpy import spinchain
+from dmrgpy import cppext, spinchain
 
 DELTA = 0.05
+
+# itensor_version=2 exercises TDZ's real MPO-Taylor-fallback path (see
+# test_tdz_dynamical_correlator_peak_matches_exact_gap's own docstring) --
+# when mpscpp2 isn't compiled, mode.py's own DMRG->ED fallback (see
+# CLAUDE.md) silently redirects here instead, and ED has no TDZ
+# implementation at all (a DMRG/TDVP-only complex-time-evolution method),
+# so this needs the same skip other multi-backend test files already use
+# for an optional/uncompiled extension (e.g. test_nh_dmrg.py,
+# test_four_point_correlator.py), not just for itensor_version=3.
+_TDZ_VERSIONS = [
+    pytest.param(2, marks=pytest.mark.skipif(
+        not cppext.available(2),
+        reason="requires the compiled mpscpp2 (ITensor v2) extension")),
+    pytest.param(3, marks=pytest.mark.skipif(
+        not cppext.available(3),
+        reason="requires the compiled mpscpp3 (ITensor v3) extension")),
+    pytest.param("python", id="python"),
+]
 
 # 4-site Heisenberg chain: ground state is a non-degenerate singlet, and
 # the first excited state is a 3-fold degenerate triplet at this exact
@@ -153,7 +171,7 @@ def test_ex_dynamical_correlator_peak_matches_kpm_and_cvm():
     assert peaks["EX"] == pytest.approx(peaks["CVM"], abs=1e-9)
 
 
-@pytest.mark.parametrize("itensor_version", [2, 3, "python"])
+@pytest.mark.parametrize("itensor_version", _TDZ_VERSIONS)
 def test_tdz_dynamical_correlator_peak_matches_exact_gap(itensor_version):
     """TDZ (tdz.py, complex-time evolution + perturbative real-axis
     reconstruction, arXiv:2311.10909) should locate its dominant peak at
