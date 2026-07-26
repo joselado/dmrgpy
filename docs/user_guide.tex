@@ -1051,6 +1051,21 @@ ever-more-thermalized wavefunction) --- see
 \texttt{examples/finite\_temperature/metts\_VS\_exact} for a cross-check
 against the exact ED thermal average on a small Heisenberg chain.
 
+\texttt{O} can also be a list/tuple of operators, measured together on
+one shared sampled Markov chain instead of resampling from scratch for
+each:
+
+\begin{lstlisting}
+results = sc.metts_vev([sc.Sz[0], sc.Sz[1], H], T, nsamples=300, nwarmup=30)
+# results == [(mean_Sz0, stderr_Sz0), (mean_Sz1, stderr_Sz1), (mean_H, stderr_H)]
+\end{lstlisting}
+
+Since the \texttt{nwarmup+nsamples} imaginary-time evolutions dominate
+the cost of \texttt{metts\_vev}, not the handful of extra
+$\langle\phi|O_k|\phi\rangle$ measurements per sample, batching several
+observables this way is far cheaper than calling \texttt{metts\_vev}
+once per operator.
+
 For \texttt{itensor\_version="python"}, an \texttt{njobs} keyword
 (default 1) runs \texttt{njobs} independent METTS Markov chains in
 parallel worker processes and pools their statistics, instead of one

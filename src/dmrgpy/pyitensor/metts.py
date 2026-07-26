@@ -58,7 +58,7 @@ import multiprocessing
 
 import numpy as np
 
-from .index import Index
+from .index import Index, reseed_id_counter_past
 from .mpscontainer import MPS
 from .mpsalgebra import inner
 from .tdvp import tdvp_step
@@ -257,11 +257,43 @@ def _metts_single_chain(H, sites, ops, beta, nsamples, nwarmup,
     return means, stderrs, nsamples
 
 
+def _max_index_id(sites, H, ops, initial_cps=None):
+    """Highest Index.id reachable from sites/H/ops/initial_cps -- see
+    index.py's reseed_id_counter_past() docstring for why
+    _run_chain_worker() below needs this before it lets this (freshly
+    spawned) process mint any Index of its own. initial_cps is normally
+    None here (metts_thermal_average() rejects initial_cps together with
+    njobs>1, the only caller of _run_chain_worker), but is still scanned
+    -- not just H/sites/ops -- so this stays correct if that guard is
+    ever relaxed, or if _run_chain_worker() is ever called directly with
+    a real initial_cps (as tests/test_metts_vev.py's own collision
+    regression test does)."""
+    max_id = -1
+    for i in range(1, sites.length() + 1):
+        max_id = max(max_id, sites.si(i).id)
+    chains = [H] + list(ops)
+    if initial_cps is not None:
+        chains.append(initial_cps)
+    for chain in chains:
+        for i in range(1, chain.length() + 1):
+            for ind in chain.A(i).inds:
+                max_id = max(max_id, ind.id)
+    return max_id
+
+
 def _run_chain_worker(args):
     """Top-level (picklable) target for multiprocessing.Pool -- a bound
     method or closure wouldn't survive pickling under the 'spawn' start
     method, so this just unpacks a plain tuple and calls
-    _metts_single_chain() directly."""
+    _metts_single_chain() directly. Reseeds this worker's own Index id
+    counter first, past every id already present in the H/sites/ops/
+    initial_cps it just received (see index.py's reseed_id_counter_past()
+    for why a freshly spawned worker's ids otherwise restart at 0 and can
+    silently collide with those -- confirmed directly, this used to make
+    njobs>1 raise "shape-mismatch for sum" deep inside a worker's own
+    tensor contraction, or worse, silently mismatch same-dimension legs)."""
+    H, sites, ops, initial_cps = args[0], args[1], args[2], args[10]
+    reseed_id_counter_past(_max_index_id(sites, H, ops, initial_cps))
     return _metts_single_chain(*args)
 
 
