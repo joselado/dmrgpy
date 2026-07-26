@@ -155,6 +155,53 @@ def test_metts_vev_rejects_empty_basis_ops(version):
         sc.metts_vev(sc.Sz[0], 1.0, nsamples=2, nwarmup=1, basis_ops=())
 
 
+def test_metts_vev_njobs_parallel_chains_match_ed():
+    """njobs>1 (pyitensor/metts.py's parallel-independent-Markov-chains
+    path, python-only -- see that module's own docstring) must still
+    reproduce the same physics as the sequential njobs=1 path: nsamples
+    split across njobs independent chains, each with its own nwarmup and
+    an independently-seeded RNG, then combined via
+    _pool_chain_results()'s exact pooled-mean/pooled-variance formula.
+    Same generous tolerance as the other ED cross-checks above -- this
+    isn't re-testing METTS's own accuracy, only that splitting the work
+    across processes doesn't silently change the sampled distribution."""
+    sc, h = _heisenberg_field_chain(3, "python", B=0.4)
+    T = 0.8
+
+    ed_e = sc.vev(h, mode="ED", T=T)
+    ed_sz = sc.vev(sc.Sz[1], mode="ED", T=T)
+
+    metts_e, err_e = sc.metts_vev(h, T, nsamples=300, nwarmup=30,
+                                   dbeta_half_step=0.08, seed=77, njobs=3)
+    metts_sz, err_sz = sc.metts_vev(sc.Sz[1], T, nsamples=300, nwarmup=30,
+                                     dbeta_half_step=0.08, seed=77, njobs=3)
+
+    assert metts_e.real == pytest.approx(ed_e.real, abs=0.05)
+    assert metts_sz.real == pytest.approx(ed_sz.real, abs=0.05)
+
+
+def test_metts_vev_njobs_rejects_v3():
+    """itensor_version=3's Chain is a single live in-process C++ session
+    (see CLAUDE.md's cpp_handle section) with no per-worker copy a
+    multiprocessing pool could hand out, unlike pyitensor's picklable
+    plain-Python/numpy H/sites -- njobs>1 must raise rather than silently
+    ignoring the request or crashing deep inside a forked/pickled C++
+    handle."""
+    sc, h = _heisenberg_field_chain(3, 3)
+    with pytest.raises(NotImplementedError):
+        sc.metts_vev(sc.Sz[0], 1.0, nsamples=4, nwarmup=1, njobs=2)
+
+
+def test_metts_vev_rejects_non_positive_njobs():
+    """njobs<1 would otherwise silently fall through the njobs==1 fast
+    path's `if` check as false and hit divmod(nsamples, 0) -- caught by
+    metts_thermal_average's own guard before that, same convention as
+    every other parameter here."""
+    sc, h = _heisenberg_field_chain(3, "python")
+    with pytest.raises(ValueError):
+        sc.metts_vev(sc.Sz[0], 1.0, nsamples=4, nwarmup=1, njobs=0)
+
+
 @pytest.mark.parametrize("version", VERSIONS)
 def test_metts_vev_rejects_non_positive_nsamples(version):
     """nsamples<1 would otherwise leave the retained-samples list empty

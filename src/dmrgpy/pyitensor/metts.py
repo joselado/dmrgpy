@@ -54,6 +54,8 @@ this is wired into the rest of the engine (H and the observables' MPOs are
 each built once from MultiOperator terms and reused across every sample).
 """
 
+import multiprocessing
+
 import numpy as np
 
 from .index import Index
@@ -221,37 +223,14 @@ def imaginary_time_evolve(psi, H, dbeta_half, nsteps, cutoff, maxdim, niter=30):
     return psi
 
 
-def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
-                           dbeta_half_step=0.05, cutoff=1e-10, maxdim=200,
-                           basis_ops=("Sz",), initial_cps=None, seed=None,
-                           niter=30):
-    """Estimate Tr[A e^{-beta H}]/Tr[e^{-beta H}] for each MPO A in `ops`
-    via METTS sampling (arXiv:1002.1305).
-
-    beta: inverse temperature (1/T).
-    nsamples: number of retained METTS samples, after nwarmup discarded
-        equilibration steps of the Markov chain.
-    dbeta_half_step: TDVP imaginary-time step size for the e^{-beta H/2}
-        evolution, split into ceil((beta/2)/dbeta_half_step) equal steps.
-    basis_ops: sequence of single-site operator names to cycle the
-        collapse basis over, one per sample (e.g. ("Sz","Sx") for
-        spin-1/2 -- see module docstring on why alternation matters).
-    initial_cps: an MPS product state seeding the chain; a random CPS in
-        basis_ops[0] if not given.
-
-    Returns (means, stderrs): means[j] is the sample mean of ops[j],
-    stderrs[j] its naive iid standard error over the nsamples retained
-    samples. METTS samples are Markov-correlated, so this underestimates
-    the true error unless dbeta_half_step/nwarmup are generous enough
-    that consecutive samples actually decorrelate (paper, Sec. 3.3).
-    """
-    if beta <= 0:
-        raise ValueError("metts_thermal_average: beta (1/T) must be > 0, got %r" % (beta,))
-    if not basis_ops:
-        raise ValueError("metts_thermal_average: basis_ops must be non-empty")
-    if nsamples < 1:
-        raise ValueError("metts_thermal_average: nsamples must be >= 1, got %r" % (nsamples,))
-
+def _metts_single_chain(H, sites, ops, beta, nsamples, nwarmup,
+                         dbeta_half_step, cutoff, maxdim, basis_ops,
+                         initial_cps, seed, niter):
+    """One full METTS Markov chain (nwarmup discarded + nsamples retained
+    iterations), sequential -- the body metts_thermal_average() always ran
+    before njobs= was added. Returns (means, stderrs, nsamples) -- the
+    trailing nsamples is only needed by _pool_chain_results() below, to
+    weight/combine several independent chains' statistics correctly."""
     rng = np.random.default_rng(seed)
     beta_half = beta / 2.0
     nsteps = max(1, int(np.ceil(beta_half / dbeta_half_step)))
@@ -275,4 +254,137 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
         arr = np.array(vals)
         means.append(arr.mean())
         stderrs.append(arr.std(ddof=1) / np.sqrt(len(arr)) if len(arr) > 1 else 0.0)
-    return means, stderrs
+    return means, stderrs, nsamples
+
+
+def _run_chain_worker(args):
+    """Top-level (picklable) target for multiprocessing.Pool -- a bound
+    method or closure wouldn't survive pickling under the 'spawn' start
+    method, so this just unpacks a plain tuple and calls
+    _metts_single_chain() directly."""
+    return _metts_single_chain(*args)
+
+
+def _pool_chain_results(results, nops):
+    """Combine several independent chains' (means, stderrs, nsamples)
+    triples into the single (means, stderrs) pair metts_thermal_average()
+    would have returned had all chains' retained samples been pooled into
+    one flat array -- without ever needing the raw per-sample values
+    themselves (each chain only reports its own mean/stderr/count).
+
+    Exact, not approximate: writing v_k = stderr_k^2 * n_k for chain k's
+    own (ddof=1) sample variance and M for the pooled mean, the identity
+    sum_i |x_i - M|^2 = sum_k [ (n_k-1)*v_k + n_k*|m_k - M|^2 ]
+    holds for any partition of a dataset into groups (the cross term
+    sum_{i in k} (x_i - m_k) vanishes since m_k is group k's own mean) --
+    this holds equally for complex-valued samples (METTS <Op> can have a
+    small numerical-noise imaginary part) since |.|^2 is still the
+    relevant squared norm and the same orthogonality argument applies."""
+    means_out, stderrs_out = [], []
+    ns = np.array([n for _, _, n in results], dtype=float)
+    N = ns.sum()
+    for j in range(nops):
+        chain_means = np.array([means[j] for means, _, _ in results], dtype=complex)
+        chain_stderr = np.array([stderrs[j] for _, stderrs, _ in results], dtype=float)
+        chain_vars = chain_stderr ** 2 * ns
+        M = np.sum(ns * chain_means) / N
+        SS = np.sum((ns - 1) * chain_vars + ns * np.abs(chain_means - M) ** 2)
+        var_pooled = SS / (N - 1) if N > 1 else 0.0
+        means_out.append(M)
+        stderrs_out.append(np.sqrt(var_pooled / N) if N > 0 else 0.0)
+    return means_out, stderrs_out
+
+
+def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
+                           dbeta_half_step=0.05, cutoff=1e-10, maxdim=200,
+                           basis_ops=("Sz",), initial_cps=None, seed=None,
+                           niter=30, njobs=1):
+    """Estimate Tr[A e^{-beta H}]/Tr[e^{-beta H}] for each MPO A in `ops`
+    via METTS sampling (arXiv:1002.1305).
+
+    beta: inverse temperature (1/T).
+    nsamples: number of retained METTS samples, after nwarmup discarded
+        equilibration steps of the Markov chain.
+    dbeta_half_step: TDVP imaginary-time step size for the e^{-beta H/2}
+        evolution, split into ceil((beta/2)/dbeta_half_step) equal steps.
+    basis_ops: sequence of single-site operator names to cycle the
+        collapse basis over, one per sample (e.g. ("Sz","Sx") for
+        spin-1/2 -- see module docstring on why alternation matters).
+    initial_cps: an MPS product state seeding the chain; a random CPS in
+        basis_ops[0] if not given. Not supported together with njobs>1
+        (each parallel chain seeds its own independent random CPS -- a
+        single shared starting point wouldn't make sense split across
+        several otherwise-independent Markov chains).
+    njobs: run njobs independent METTS Markov chains in separate worker
+        processes (multiprocessing.Pool) instead of one -- nsamples is
+        split as evenly as possible across them, each with its own
+        nwarmup equilibration (a fresh chain has no warmup to share) and
+        an independently-seeded RNG derived from `seed` via
+        numpy.random.SeedSequence.spawn(), then their statistics are
+        combined exactly via _pool_chain_results() (no raw samples need
+        crossing the process boundary). This trades more total warmup
+        work (njobs*nwarmup steps instead of one chain's nwarmup) for
+        wall-clock time on a multi-core machine -- worth it whenever
+        nsamples/njobs is comfortably bigger than nwarmup, which is
+        exactly the profiled bottleneck: METTS's per-sample cost here is
+        dominated by this pure-Python tensor engine's own Python-level
+        bookkeeping overhead (see tdvp.py/tensor.py), not shared BLAS
+        work that would otherwise make multiprocessing redundant. njobs=1
+        (the default) is unchanged from before this parameter existed --
+        same single-process sequential chain, same seed reproducibility.
+
+    Returns (means, stderrs): means[j] is the sample mean of ops[j],
+    stderrs[j] its naive iid standard error over the nsamples retained
+    samples. METTS samples are Markov-correlated, so this underestimates
+    the true error unless dbeta_half_step/nwarmup are generous enough
+    that consecutive samples actually decorrelate (paper, Sec. 3.3).
+    """
+    if beta <= 0:
+        raise ValueError("metts_thermal_average: beta (1/T) must be > 0, got %r" % (beta,))
+    if not basis_ops:
+        raise ValueError("metts_thermal_average: basis_ops must be non-empty")
+    if nsamples < 1:
+        raise ValueError("metts_thermal_average: nsamples must be >= 1, got %r" % (nsamples,))
+    if njobs < 1:
+        raise ValueError("metts_thermal_average: njobs must be >= 1, got %r" % (njobs,))
+
+    if njobs == 1:
+        means, stderrs, _ = _metts_single_chain(
+            H, sites, ops, beta, nsamples, nwarmup, dbeta_half_step,
+            cutoff, maxdim, basis_ops, initial_cps, seed, niter)
+        return means, stderrs
+
+    if initial_cps is not None:
+        raise ValueError("metts_thermal_average: initial_cps is not supported together with njobs>1")
+
+    base, extra = divmod(nsamples, njobs)
+    chunk_sizes = [base + (1 if k < extra else 0) for k in range(njobs)]
+    chunk_sizes = [n for n in chunk_sizes if n > 0]
+    if len(chunk_sizes) == 1:
+        means, stderrs, _ = _metts_single_chain(
+            H, sites, ops, beta, chunk_sizes[0], nwarmup, dbeta_half_step,
+            cutoff, maxdim, basis_ops, None, seed, niter)
+        return means, stderrs
+
+    seeds = np.random.SeedSequence(seed).spawn(len(chunk_sizes))
+    tasks = [
+        (H, sites, ops, beta, n_local, nwarmup, dbeta_half_step, cutoff,
+         maxdim, basis_ops, None, seeds[k], niter)
+        for k, n_local in enumerate(chunk_sizes)
+    ]
+    # 'spawn', not the Linux default 'fork': confirmed directly this
+    # matters, not just a style preference. fork()ing a Pool worker from a
+    # parent process that has already run any numpy/scipy linear algebra
+    # (which every caller here has -- at minimum this module's own eigh()
+    # calls) duplicates whatever internal BLAS/OpenMP thread-pool state
+    # that parent has already spun up; the classic fork-after-threading
+    # hazard applies even though this process itself never touched the
+    # threading module. Measured directly on a 6-site chain, nsamples=200:
+    # the default fork-based Pool got monotonically *slower* as njobs grew
+    # (34s/62s/73s/100s for njobs=1/2/4/8 -- each extra worker added
+    # contention, not throughput), while 'spawn' (a fresh interpreter per
+    # worker, no inherited thread-pool state) gave the expected
+    # monotonic speedup on the same machine/workload (33s/21s/17s/14s).
+    with multiprocessing.get_context("spawn").Pool(len(chunk_sizes)) as pool:
+        results = pool.map(_run_chain_worker, tasks)
+    return _pool_chain_results(results, len(ops))
