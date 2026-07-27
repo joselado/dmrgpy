@@ -325,10 +325,27 @@ reseeded restarts) remains available directly for comparison — the two
 can trade places on hard (near-degenerate) spectra, see
 `examples/non_hermitian/arnoldi_vs_iram_benchmark`, which benchmarks
 both head to head (Op-count, wall time, accuracy) in both ED and DMRG
-mode — and is still used internally wherever IRAM's mode-1
-(standard-eigenproblem) formulation doesn't apply: shift-invert searches
-(`degeneracy.py`'s `eigenvalue_degeneracy`) and Krylov operators with a
-projector baked in (`fermionchain.py`'s `Spinon_Chain.get_gs`).
+mode — and is still used internally for Krylov operators with a
+projector baked in (`fermionchain.py`'s `Spinon_Chain.get_gs`, which
+IRAM's interface doesn't (yet) support).
+
+`arpacktk.py` also implements ARPACK's shift-invert mode
+(`dmrgpy.mpsalgebra.mpsiram_shift_invert`, ARPACK's mode 3,
+$\mathrm{OP}=(A-\sigma I)^{-1}$), used to find the eigenvalues closest to
+a target energy $e$ rather than an extremal one — `degeneracy.py`'s
+`eigenvalue_degeneracy` (used by `gs_degeneracy(mode="DMRG")` on
+non-Hermitian Hamiltonians) is built on it. Since dmrgpy has no exact
+MPO inverse — `self.applyinverse` is itself only an iterative
+correction-vector solve — this departs from ARPACK's own mode-3
+assumption that $\mathrm{OP}$'s eigenvalues are *exactly*
+$1/(\lambda-\sigma)$: only the IRAM restart *direction* (which Krylov
+directions the implicit shifts filter away) comes from
+$\mathrm{OP}$'s own cheap Hessenberg matrix (`which="LM"`, since the
+largest $|\mathrm{OP}\text{-eigenvalue}|$ is the $H$-eigenvalue closest
+to $e$); convergence and the reported eigenpairs are instead recomputed
+every outer iteration from $H$'s own exact (still cheap, $O(\text{ncv}^2)$)
+representation on the Krylov basis $\mathrm{OP}$ builds — the same
+accommodation arnolditk's own `mode="ShiftInv"` path already made.
 
 ## 5. Entanglement and quantum information
 

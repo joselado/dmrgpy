@@ -389,11 +389,30 @@ Rayleigh-Ritz reseeded restarts) remains available directly for
 comparison --- the two can trade places on hard (near-degenerate)
 spectra, see \texttt{examples/non\_hermitian/arnoldi\_vs\_iram\_benchmark},
 which benchmarks both head to head (Op-count, wall time, accuracy) in
-both ED and DMRG mode --- and is still used internally wherever IRAM's
-mode-1 (standard-eigenproblem) formulation doesn't apply: shift-invert
-searches (\texttt{degeneracy.py}'s \lstinline|eigenvalue_degeneracy|)
-and Krylov operators with a projector baked in
-(\texttt{fermionchain.py}'s \lstinline|Spinon_Chain.get_gs|).
+both ED and DMRG mode --- and is still used internally for Krylov
+operators with a projector baked in (\texttt{fermionchain.py}'s
+\lstinline|Spinon_Chain.get_gs|, which IRAM's interface doesn't (yet)
+support).
+
+\texttt{algebra/arpacktk.py} also implements ARPACK's shift-invert mode
+(\lstinline|dmrgpy.mpsalgebra.mpsiram_shift_invert|, ARPACK's mode 3,
+$\mathrm{OP}=(A-\sigma I)^{-1}$), used to find the eigenvalues closest
+to a target energy $e$ rather than an extremal one ---
+\texttt{degeneracy.py}'s \lstinline|eigenvalue_degeneracy| (used by
+\lstinline|gs_degeneracy(mode="DMRG")| on non-Hermitian Hamiltonians) is
+built on it. Since dmrgpy has no exact MPO inverse ---
+\lstinline|self.applyinverse| is itself only an iterative
+correction-vector solve --- this departs from ARPACK's own mode-3
+assumption that $\mathrm{OP}$'s eigenvalues are \emph{exactly}
+$1/(\lambda-\sigma)$: only the IRAM restart \emph{direction} (which
+Krylov directions the implicit shifts filter away) comes from
+$\mathrm{OP}$'s own cheap Hessenberg matrix (\lstinline|which="LM"|,
+since the largest $|\mathrm{OP}\text{-eigenvalue}|$ is the
+$H$-eigenvalue closest to $e$); convergence and the reported eigenpairs
+are instead recomputed every outer iteration from $H$'s own exact
+(still cheap, $O(\mathrm{ncv}^2)$) representation on the Krylov basis
+$\mathrm{OP}$ builds --- the same accommodation arnolditk's own
+\lstinline|mode="ShiftInv"| path already made.
 
 \section{Entanglement and quantum information}
 

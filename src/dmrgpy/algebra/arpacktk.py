@@ -51,16 +51,25 @@ Ported pieces, and their ARPACK sources:
                       convergence, adjust kev to avoid stagnation exactly
                       as znaup2 does, restart, repeat)
 
-This is deliberately the *matrix-free, mode-1* subset of ARPACK (OP=A,
-B=I; no shift-invert modes 2-4, no reverse communication, no B-inner
-product) -- everything dmrgpy's own MPS/ED objects need
-(``self.random_mps()``/``EDchain``, ``.dot()``, ``.normalize()``,
-``.copy()``, ``+``/``-``/scalar ``*``) and nothing more.
+This is the *matrix-free, mode-1* subset of ARPACK (OP=A, B=I; no
+reverse communication, no B-inner product) -- everything dmrgpy's own
+MPS/ED objects need (``self.random_mps()``/``EDchain``, ``.dot()``,
+``.normalize()``, ``.copy()``, ``+``/``-``/scalar ``*``) and nothing
+more -- plus ``mpsiram_shift_invert``, a shift-invert mode (ARPACK's
+mode 3, OP=inv(A-sigma*I), B=I) adapted to dmrgpy's only *approximate*
+matrix inverse (``self.applyinverse``, an iterative correction-vector
+solve, not an exact linear solve) -- see its own docstring for how that
+changes the convergence/selection machinery relative to ARPACK's own
+mode-3 assumption of an exact inverse.
 """
 import numpy as np
 
 from .arnolditk import random_state
 from . import arnolditk
+from .krylov import krylov_matrix_representation
+from .krylov import diagonalize as krylov_diagonalize
+from .krylov import select_states as krylov_select_states
+from .krylov import unitary_transformation as krylov_unitary_transformation
 
 
 def _goodness(which, ritz):
@@ -270,6 +279,105 @@ def mpsiram(self, H, which="SR", nev=1, ncv=None, tol=1e-8, maxiter=200,
     es = np.array([wf.aMb(H, wf) for wf in wfs])
     # most-wanted first (Y_sel's last column was the most wanted)
     return es[::-1], wfs[::-1]
+
+
+def mpsiram_shift_invert(self, H, e=0.0, nev=1, ncv=None, delta=1e-3,
+        maxn=20, maxiter=50, verbose=0, wfskip=None):
+    """Shift-invert IRAM (ARPACK mode 3: OP=inv(A-sigma*I), B=I),
+    adapted for dmrgpy's own ``self.applyinverse``, which is only an
+    *approximate* inverse (an iterative correction-vector solve, not an
+    exact linear solve) -- the same accommodation arnolditk's own
+    mode="ShiftInv" (``op_is_affine=False``) path makes. Finds the nev
+    eigenvalues of H closest to the target `e`.
+
+    ARPACK's own mode 3 assumes OP's eigenvalues theta are *exactly*
+    1/(lambda-sigma), so it can cheaply select/report Ritz pairs from
+    OP's own (free) Hessenberg matrix and untransform at the end. That
+    assumption breaks once OP is only approximate, so -- exactly like
+    arnolditk -- convergence and the reported eigenpairs are instead
+    recomputed every outer iteration from H's own exact (still cheap,
+    O(ncv^2)) representation on the Krylov basis OP builds
+    (``krylov_matrix_representation``/``diagonalize``/``select_states``/
+    ``unitary_transformation``, reused directly from ``krylov.py`` rather
+    than re-derived, since that machinery -- including its Ritz-value
+    conjugation convention for non-Hermitian H -- is already exercised by
+    arnolditk's own ShiftInv path). Only the *restart direction* (which
+    unwanted Krylov directions IRAM's implicit shifts filter away) still
+    uses OP's own cheap Hessenberg matrix with which="LM": largest
+    |OP-eigenvalue| corresponds to the H-eigenvalue closest to `e`,
+    exactly the criterion a shift-invert operator is built to sharpen --
+    that part of the algorithm only cares about OP's own Krylov
+    factorization, regardless of what physical operator OP approximates.
+
+    The residual/Ritz-estimate bound is a heuristic proxy, not a
+    rigorous one (there is no genuine Arnoldi relation tying H itself to
+    this basis): OP's own trailing residual norm times the candidate
+    H-eigenvector's last Krylov-basis component -- again the same proxy
+    arnolditk's ShiftInv path already relies on. Convergence is judged
+    against this bound directly (``delta``, an absolute threshold, not a
+    tolerance relative to the eigenvalue's own magnitude as in
+    ``mpsiram``), matching arnolditk's own ShiftInv convention, since
+    `e` may be numerically close to zero.
+    """
+    if wfskip is None: wfskip = []
+    else: wfskip = list(wfskip)
+    if ncv is None: ncv = 2 * nev + 4
+    ncv = max(ncv, nev + 2)
+    Mi = H - e
+    Op = lambda x: self.applyinverse(Mi, x, delta=delta, maxn=maxn)
+
+    def fe_target(es):
+        es = np.abs(es - e)
+        return np.where(es == np.min(es))[0][0]
+
+    kev = nev
+    resid = random_state(self, orthogonal=wfskip if wfskip else None)
+    rnorm = 1.0
+    V, Hm = [], np.zeros((0, 0), dtype=complex)
+    V, Hm, resid, rnorm = arnoldi_extend(self, Op, V, Hm, resid, rnorm,
+            0, kev, wfskip=wfskip, verbose=verbose)
+
+    for it in range(maxiter):
+        npcur = ncv - kev
+        if npcur > 0:
+            V, Hm, resid, rnorm = arnoldi_extend(self, Op, V, Hm, resid,
+                    rnorm, kev, npcur, wfskip=wfskip, verbose=verbose)
+
+        Htrue = krylov_matrix_representation(H, V)
+        ritz_true, vs_true = krylov_diagonalize(Htrue)
+        nsel = min(nev, len(V))
+        estore, vstore = krylov_select_states(ritz_true, vs_true.T,
+                fe_target, ne=nsel)
+        error = np.array([np.abs(rnorm * v0[-1]) for v0 in vstore])
+        nconv = int(np.sum(error <= delta))
+
+        if verbose > 0:
+            print("ShiftInv IRAM iter", it, "kev", kev, "nconv", nconv,
+                    "ritz", np.round(estore, 6), "error", np.round(error, 6))
+
+        np_apply = ncv - kev
+        if nconv >= nev or np_apply == 0:
+            break
+
+        ritz_op, bounds_op, _ = hessenberg_ritz(Hm, rnorm)
+        order_op = np.argsort(_goodness("LM", ritz_op))
+        ritz_op, bounds_op = ritz_op[order_op], bounds_op[order_op]
+
+        shifts = ritz_op[:np_apply]
+        shift_bounds = bounds_op[:np_apply]
+        shift_order = np.argsort(-np.abs(shift_bounds))
+        shifts = shifts[shift_order]
+
+        V, Hm, resid, rnorm = apply_shifts(V, Hm, resid, shifts, kev)
+
+    Htrue = krylov_matrix_representation(H, V)
+    ritz_true, vs_true = krylov_diagonalize(Htrue)
+    nsel = min(nev, len(V))
+    estore, vstore = krylov_select_states(ritz_true, vs_true.T,
+            fe_target, ne=nsel)
+    wfs = krylov_unitary_transformation(vstore, V)
+    es = np.array([wf.aMb(H, wf) for wf in wfs])
+    return es, wfs
 
 
 def excited_states(self, H, nwf=1, which="SR", recursive=True,
