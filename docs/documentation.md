@@ -351,8 +351,11 @@ Notable, deliberate implementation details (not bugs to "fix"):
   `dmrg.py`'s environment/matvec machinery; unlike `dmrg.py` it *does*
   implement the noise term, because for NH-DMRG it measurably matters).
   `groundstate.py`'s non-Hermitian `gs_energy` branch routes to it for
-  `itensor_version` 2, 3 and `"python"`; the MPS Arnoldi route
-  (`algebra/arnolditk.py`) remains as the fallback for other backends.
+  `itensor_version` 2, 3 and `"python"`; the MPS Arnoldi route (default
+  `algebra/arpacktk.py`, an Implicitly Restarted Arnoldi Method ported
+  from ARPACK; `algebra/arnolditk.py`'s explicit-restart Arnoldi remains
+  available for comparison, see `mpsalgebra.py`) remains as the fallback
+  for other backends.
   The adjoint MPO is built from `MultiOperator.get_dagger()`'s terms on
   the Python side, and since the non-Hermitian energy is not variational,
   `nhdmrg.py` certifies each run by the eigen-residual and redraws a
@@ -525,8 +528,10 @@ energies match the golden regression values in
 `tests/test_excited_states.py` to ~3e-15 on a 4-site chain, and
 `get_rdm` matches the existing backend-agnostic `reduced_dm_projective`
 to ~1e-15. `n==1` and non-Hermitian excited states already worked before
-this — they route through `gs_energy()`/the generic Arnoldi method
-(`mpsalgebra.mpsarnoldi`), neither of which is backend-specific.
+this — they route through `gs_energy()`/the generic MPS Arnoldi method
+(default `algebra/arpacktk.py`'s IRAM, via `mpsalgebra.mps_excited_states`;
+`algebra/arnolditk.py`'s `mpsarnoldi` remains available for comparison),
+neither of which is backend-specific.
 
 Bond entanglement entropy (`MPS.get_bond_entropy`, used e.g. by
 `entropy.py`'s `central_charge`) was missing entirely on the Julia

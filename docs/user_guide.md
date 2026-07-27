@@ -303,6 +303,68 @@ imaginary potential. The biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
 is also what feeds the non-Hermitian dynamical correlator,
 `get_dynamical_correlator(submode="KPM")` for $H\neq H^\dagger$ — see §6.
 
+Two independent MPS Arnoldi implementations are available, both
+matrix-free (they only ever apply $H$ to a wavefunction, never build a
+matrix) and both usable in ED mode or DMRG mode on any backend.
+`dmrgpy.mpsalgebra.lowest_energy_non_hermitian_iram` (`algebra/
+arpacktk.py`) is an Implicitly Restarted Arnoldi Method (IRAM), adapted
+from [ARPACK](https://bitbucket.org/chaoyang2013/arpack)'s
+`znaupd`/`znaup2`/`znaitr`/`znapps` — the same exact-shift
+polynomial-filter restart ARPACK's own `eigs`-style solvers use,
+re-derived here for dmrgpy's own MPS/ED wavefunction objects instead of
+flat arrays (no BLAS/LAPACK Fortran dependency). It is the **default**
+MPS Arnoldi solver (`dmrgpy.mpsalgebra.lowest_energy_non_hermitian`, and
+the route `get_excited_states` uses for non-Hermitian $H$ with $n\ge2$,
+`excited_states_non_hermitian` in `excited.py`), since it compresses and
+reuses its existing Krylov subspace instead of rebuilding it from
+scratch on every restart, needing noticeably fewer $H\,|\psi\rangle$
+applications to reach the same tolerance on most spectra.
+`dmrgpy.mpsalgebra.lowest_energy_non_hermitian_arnoldi` (`algebra/
+arnolditk.py`, a restarted Arnoldi method with explicit Rayleigh-Ritz
+reseeded restarts) remains available directly for comparison — the two
+can trade places on hard (near-degenerate) spectra, see
+`examples/non_hermitian/arnoldi_vs_iram_benchmark`, which benchmarks
+both head to head (Op-count, wall time, accuracy) in both ED and DMRG
+mode — and is still used internally for Krylov operators with a
+projector baked in (`fermionchain.py`'s `Spinon_Chain.get_gs`, which
+IRAM's interface doesn't (yet) support).
+
+`arpacktk.py` also implements ARPACK's shift-invert mode
+(`dmrgpy.mpsalgebra.mpsiram_shift_invert`, ARPACK's mode 3,
+$\mathrm{OP}=(A-\sigma I)^{-1}$), used to find the eigenvalues closest to
+a target energy $e$ rather than an extremal one — `degeneracy.py`'s
+`eigenvalue_degeneracy` (used by `gs_degeneracy(mode="DMRG")` on
+non-Hermitian Hamiltonians) is built on it. Since dmrgpy has no exact
+MPO inverse — `self.applyinverse` is itself only an iterative
+correction-vector solve — this departs from ARPACK's own mode-3
+assumption that $\mathrm{OP}$'s eigenvalues are *exactly*
+$1/(\lambda-\sigma)$: only the IRAM restart *direction* (which Krylov
+directions the implicit shifts filter away) comes from
+$\mathrm{OP}$'s own cheap Hessenberg matrix (`which="LM"`, since the
+largest $|\mathrm{OP}\text{-eigenvalue}|$ is the $H$-eigenvalue closest
+to $e$); convergence and the reported eigenpairs are instead recomputed
+every outer iteration from $H$'s own exact (still cheap, $O(\text{ncv}^2)$)
+representation on the Krylov basis $\mathrm{OP}$ builds — the same
+accommodation arnolditk's own `mode="ShiftInv"` path already made.
+
+`arpacktk.py` also implements ARPACK's mode 2 — the generalized
+eigenproblem $A|\psi\rangle=\lambda M|\psi\rangle$ for a Hermitian
+positive-definite $M$
+(`dmrgpy.mpsalgebra.mpsiram_generalized`/`generalized_excited_states`,
+$\mathrm{OP}=M^{-1}A$, $B=M$). Unlike mode 1/3, the Krylov basis must be
+orthonormal in the $M$-weighted inner product
+$\langle u,v\rangle_M=\langle u|M|v\rangle$ rather than the plain one, so
+building it uses a separate routine
+(`arnoldi_extend_generalized`) rather than adding a conditional $M$ to
+the mode-1/3 one. $\mathrm{OP}$ again goes through
+`self.applyinverse` (the same approximate-inverse caveat as mode 3, here
+with the trivial shift $\sigma=0$) — but unlike mode 3, $\mathrm{OP}$'s
+own Hessenberg-matrix eigenvalues stay directly meaningful (there is no
+shift to undo), so convergence/selection follow the same pattern as
+plain `mpsiram`, just built with the $M$-inner product. Verified against
+`scipy.linalg.eigh`'s generalized Hermitian-definite eigensolver in both
+ED and DMRG mode.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain
