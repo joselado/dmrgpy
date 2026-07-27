@@ -181,3 +181,64 @@ def test_nhdmrg_generalized_v3_short_chain_does_not_crash():
     _setup(fc, 3, maxm=20, nsweeps=8)
     lam = fc.gs_energy_generalized(m)  # must not raise or crash
     assert np.isfinite(lam.real) and np.isfinite(lam.imag)
+
+
+def test_nhdmrg_generalized_lam0_bare_float_nan_is_treated_as_unset():
+    """Regression test for a code-review finding: nhdmrg_generalized()'s
+    original lam0 "unset" check was `isinstance(lam, complex) and
+    np.isnan(lam.real)`, so a caller passing a *bare float* NaN (a
+    reasonable thing to do given this function's own docstring wording,
+    "None or a NaN real part") failed the isinstance(complex) gate and
+    fed a live NaN straight into the first outer sweep instead of
+    triggering the documented auto-seed fallback. lam0_is_unset()
+    (dmrg.py, shared with the Hermitian solver) now coerces via
+    complex(lam0) instead, so a bare float NaN must be treated exactly
+    like None."""
+    fc, h, m = _nh_generalized_fermion_problem(n=4, seed=2)
+    w = _nh_generalized_ground_truth(fc, h, m)
+    _setup(fc, "python")
+    lam = fc.gs_energy_generalized(m, lam0=float('nan'))
+    assert abs(lam - w[0]) < 1e-3
+
+
+def test_nhdmrg_generalized_retry_loop_survives_a_transient_runtime_error(monkeypatch):
+    """Regression test for a code-review finding: the ntries retry loop
+    had no try/except around the session call, so the new "<psi_L|A|
+    psi_R> collapsed to ~0" guard (raised on an unlucky random draw)
+    aborted every remaining attempt instead of being retried like an
+    ordinary resid>=tol failure -- defeating the whole point of
+    ntries>1 (each attempt starts from an independent fresh random
+    state). Simulated here via monkeypatch (reliably reproducing a real
+    near-null-space draw is not deterministic) rather than trying to
+    engineer a genuinely bad random seed."""
+    fc, h, m = _nh_generalized_fermion_problem(n=4, seed=2)
+    _setup(fc, "python")
+    real_method = fc._session.nhdmrg_generalized
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated near-null-space collapse")
+        return real_method(*args, **kwargs)
+
+    monkeypatch.setattr(fc._session, "nhdmrg_generalized", flaky)
+    lam, psil, psir = _nhdmrg_generalized_toplevel(fc, m, H=h, ntries=3)
+    assert calls["n"] >= 2  # the first (failing) attempt was retried, not fatal
+    assert abs(psil.dot(psir) - 1.0) < 1e-6
+
+
+def test_nhdmrg_generalized_all_attempts_failing_raises_clear_error(monkeypatch):
+    """If every attempt (up to ntries) hits the collapse guard, the
+    top-level wrapper must raise a clear RuntimeError of its own rather
+    than crashing on an unbound `best` variable or silently returning
+    None-derived garbage."""
+    fc, h, m = _nh_generalized_fermion_problem(n=4, seed=2)
+    _setup(fc, "python")
+
+    def always_fails(*args, **kwargs):
+        raise RuntimeError("simulated near-null-space collapse")
+
+    monkeypatch.setattr(fc._session, "nhdmrg_generalized", always_fails)
+    with pytest.raises(RuntimeError):
+        _nhdmrg_generalized_toplevel(fc, m, H=h, ntries=3)

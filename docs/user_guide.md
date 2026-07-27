@@ -469,6 +469,16 @@ for *two* Arnoldi solves (right block and its adjoint) regardless of
 backend, narrowing the compiled-vs-pure-Python gap relative to plain
 ground-state DMRG's single local diagonalization per bond.
 
+**Caveat (both Hermitian and non-Hermitian `gs_energy_generalized`).**
+Afterward, `fc.wf0`/`fc.e0` hold the eigenstate/eigenvalue of the
+*generalized* problem, not a plain eigenstate of `fc.hamiltonian` alone --
+every other method that reads `fc.wf0` as an ordinary ground state
+(`get_excited_states()`, any dynamical/KPM correlator, ...) has no way to
+tell the difference and will silently build on the wrong reference state
+if called afterward. Call `gs_energy_generalized()` as the last step of a
+calculation, or recompute a genuine ground state (`gs_energy()`/`nhdmrg()`)
+first if you need one of those other methods too.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain

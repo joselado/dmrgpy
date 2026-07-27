@@ -169,7 +169,23 @@ def gs_energy_generalized(self,A,lam0=None):
     biorthogonal-quotient generalization of NH-DMRG, mirroring how this
     function itself generalizes plain gs_energy()) -- implemented on the
     same itensor_version="python"/3 pair as the Hermitian path above (no
-    mpscpp2 support either way)."""
+    mpscpp2 support either way).
+
+    CAVEAT (found via code review, not fixed -- see this codebase's usual
+    "document the quirk" convention rather than adding a state-tracking
+    flag threaded through every consumer): self.wf0/self.e0/computed_gs
+    afterward hold the eigenvector/eigenvalue of the *shifted* problem
+    H-lambda*A (or its biorthogonal NH counterpart), not a plain
+    eigenstate of self.hamiltonian alone. Every other method that treats
+    self.wf0 as an ordinary ground state -- get_excited_states() (its
+    overlap-penalty anchor), any dynamical/KPM correlator, NH-KPM
+    (nonhermitian/kpm.py) -- has no way to detect this and will silently
+    build on the wrong reference state if called afterward without first
+    recomputing a genuine ground state (gs_energy()/nhdmrg(), which reset
+    wf0 to a real eigenstate of self.hamiltonian). Call
+    gs_energy_generalized() as the last step of a calculation, or
+    explicitly recompute the plain ground state before using any other
+    method that reads self.wf0."""
     if self.mode=="ED":
         raise NotImplementedError(
             "gs_energy_generalized has no ED implementation -- unset "

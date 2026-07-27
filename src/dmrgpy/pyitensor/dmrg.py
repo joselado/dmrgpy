@@ -375,6 +375,30 @@ def dmrg(psi, H, sweeps, quiet=True):
     return energy
 
 
+def lam0_is_unset(lam0):
+    """True if lam0 (a dmrg_generalized()/nhdmrg_generalized() starting
+    lambda estimate) means "unset": None, or a float/complex/numpy scalar
+    whose real part is NaN. Both a bare None and a NaN sentinel are
+    accepted (see dmrg_generalized()'s own docstring for why NaN needs to
+    be accepted at all -- the C++/pybind11 session methods have no None
+    equivalent). Coerces via complex(lam0) rather than gating on a
+    specific type (isinstance(..., float) or isinstance(..., complex))
+    precisely because either gate misses the *other* numeric type: a
+    caller passing a bare float NaN to nhdmrg_generalized() (whose own
+    check used to require isinstance(..., complex)) or a complex lam0 to
+    dmrg_generalized() (whose own check used to require
+    isinstance(..., float)) would otherwise silently skip the auto-seed
+    fallback and feed a live NaN straight into the first outer
+    iteration's Heff construction -- confirmed directly, found via code
+    review."""
+    if lam0 is None:
+        return True
+    try:
+        return np.isnan(complex(lam0).real)
+    except (TypeError, ValueError):
+        return False
+
+
 def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
     """Generalized-eigenvalue ground-state DMRG: finds the smallest
     lambda solving $H|\\psi\\rangle=\\lambda A|\\psi\\rangle$ for a Hermitian
@@ -436,7 +460,7 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
     with inf/NaN instead of failing loudly.
     """
     lam = lam0
-    if lam is None or (isinstance(lam, float) and np.isnan(lam)):
+    if lam0_is_unset(lam):
         a0 = inner(psi, A, psi).real
         h0 = inner(psi, H, psi).real
         lam = h0 / a0 if abs(a0) > 1e-14 else 0.0
@@ -446,12 +470,17 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
         Heff = mps_sum(H, A * (-lam))
         _dmrg_one_sweep(psi, Heff, maxdim, cutoff, niter)
         a_psi = inner(psi, A, psi).real
-        if abs(a_psi) < 1e-14:
+        if not (abs(a_psi) > 1e-14):
+            # written as "not (> tol)" rather than "< tol": a NaN a_psi
+            # (e.g. from numerical blowup elsewhere) fails *both*
+            # comparisons, so the more obvious "< tol" form would let a
+            # NaN silently slip past this guard and propagate as a
+            # seemingly-converged NaN lambda -- confirmed by code review.
             raise RuntimeError(
-                "dmrg_generalized: <psi|A|psi> collapsed to ~0 mid-iteration "
-                "(A may not be positive definite, or the sweep drove psi "
-                "toward A's near-null-space) -- cannot form a meaningful "
-                "generalized Rayleigh quotient")
+                "dmrg_generalized: <psi|A|psi> collapsed to ~0 (or NaN) "
+                "mid-iteration (A may not be positive definite, or the "
+                "sweep drove psi toward A's near-null-space) -- cannot "
+                "form a meaningful generalized Rayleigh quotient")
         h_psi = inner(psi, H, psi).real
         lam = h_psi / a_psi
         if not quiet:

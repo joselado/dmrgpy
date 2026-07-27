@@ -118,12 +118,76 @@ def test_gs_energy_generalized_lam0_hint_does_not_change_result(itensor_version)
     assert abs(lam - w[0]) < 1e-4
 
 
+def test_lam0_is_unset_treats_float_and_complex_nan_alike():
+    """Regression test for a code-review finding: dmrg_generalized()'s
+    original lam0 "unset" check was `isinstance(lam, float) and
+    np.isnan(lam)`, so a *complex*-typed NaN (e.g. what a caller mirroring
+    the C++ binding's own sentinel convention might pass) silently skipped
+    the auto-seed fallback and fed a live NaN straight into the first
+    outer sweep. lam0_is_unset() (dmrg.py) now coerces via complex(lam0)
+    instead of gating on a specific numeric type, so it must treat None,
+    a bare float NaN, and a complex NaN identically -- and must not
+    mistake an ordinary finite value (of either type) for "unset"."""
+    from dmrgpy.pyitensor.dmrg import lam0_is_unset
+    assert lam0_is_unset(None)
+    assert lam0_is_unset(float('nan'))
+    assert lam0_is_unset(complex(float('nan'), 0.0))
+    assert lam0_is_unset(complex('nan+nanj'))
+    assert not lam0_is_unset(0.0)
+    assert not lam0_is_unset(1.5)
+    assert not lam0_is_unset(complex(1.5, -0.3))
+    assert not lam0_is_unset(0)
+
+
+def test_gs_energy_generalized_lam0_complex_nan_is_treated_as_unset():
+    """End-to-end regression test for the same finding, on the pyitensor
+    backend: passing a complex-typed NaN as lam0 to the *Hermitian*
+    solver (whose own Rayleigh quotient is real-valued, so a real caller
+    would only ever pass a bare float) must still be treated as "unset"
+    and converge normally, not silently corrupt the run with a NaN shift.
+    itensor_version=3 only, not both: the C++ binding's own lam0
+    parameter is statically typed as a real float (SupportsFloat), so a
+    complex lam0 there is a TypeError at the pybind11 boundary -- a
+    correct, structurally-enforced rejection, not the duck-typing gap
+    this test targets on the pure-Python side."""
+    fc, a, m = _generalized_fermion_problem(n=4, seed=2)
+    w = _generalized_ground_truth(fc, a, m)
+    _setup(fc, "python")
+    lam = fc.gs_energy_generalized(m, lam0=complex(float('nan'), 0.0))
+    assert abs(lam - w[0]) < 1e-4
+
+
+@pytest.mark.parametrize("itensor_version", ["python"])
+def test_gs_energy_generalized_near_singular_metric_raises_not_nan(itensor_version):
+    """The <psi|A|psi> collapse guard must fire even if a_psi is exactly
+    NaN, not just a small-but-finite value -- the original "abs(a_psi) <
+    1e-14" form let NaN slip through silently (any comparison with NaN is
+    False in both directions), found via code review. A genuinely
+    singular metric (A = 0, not positive definite at all) is the cleanest
+    way to force this: <psi|0|psi> is exactly 0 for any psi, well within
+    the guard's threshold regardless of the NaN-vs-small-value question,
+    so this also just confirms the guard's basic behavior end-to-end
+    (itensor_version=3 not included: the C++ zero-MPO term-list path
+    behaves differently at the AutoMPO level and isn't the point of this
+    test)."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    a = 0
+    for i in range(n - 1):
+        a = a + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+    fc.set_hamiltonian(a)
+    _setup(fc, itensor_version)
+    zero_metric = 0.0 * mo_identity()
+    with pytest.raises(RuntimeError):
+        fc.gs_energy_generalized(zero_metric)
+
+
 def test_gs_energy_generalized_requires_supported_backend():
     """The generalized solver only exists on itensor_version 'python' and
-    3 so far (see CLAUDE.md's "Implement in pyitensor first" scoping,
-    since extended to v3) -- mpscpp2 (itensor_version=2) and julia_live
-    don't have this session method yet, so this must fail loudly rather
-    than silently doing the wrong thing on those backends."""
+    3 so far (implemented in pyitensor first, later ported to v3) --
+    mpscpp2 (itensor_version=2) and julia_live don't have this session
+    method yet, so this must fail loudly rather than silently doing the
+    wrong thing on those backends."""
     fc, a, m = _generalized_fermion_problem(n=4, seed=2)
     fc.setup_cpp(version=2)
     with pytest.raises(NotImplementedError):

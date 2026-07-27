@@ -554,7 +554,11 @@ class Many_Body_Chain():
       H|psi>=lambda*A|psi> (H the chain's own Hamiltonian, A a Hermitian
       positive-definite metric MultiOperator). See
       groundstate.gs_energy_generalized's docstring -- itensor_version
-      "python" or 3 only, for now."""
+      "python" or 3 only, for now, and its own CAVEAT paragraph: afterward
+      self.wf0 is an eigenstate of the shifted problem, not a plain
+      eigenstate of self.hamiltonian, which other methods that read
+      self.wf0 (get_excited_states, dynamical/KPM correlators, ...) have
+      no way to detect."""
       return groundstate.gs_energy_generalized(self,A,**kwargs)
 #  def get_correlator_MB(self,**kwargs):
 #      """Return a correlator"""

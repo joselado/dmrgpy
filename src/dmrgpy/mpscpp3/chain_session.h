@@ -255,11 +255,17 @@ class Chain
             sweeps1.noise() = (sw<=nsweeps_/2) ? noise_ : 0.0;
             dmrg(wf0_,Heff,sweeps1,dmrg_args());
             double a_psi = innerC(wf0_,A,wf0_).real();
-            if (std::abs(a_psi)<1e-14)
+            if (!(std::abs(a_psi)>1e-14))
+                // "!(>tol)", not "<tol": a NaN a_psi fails *both*
+                // comparisons, so the more obvious "<tol" form would let
+                // a NaN silently slip past this guard -- found via code
+                // review, same fix applied to pyitensor/dmrg.py's
+                // identical guard.
                 Error("Chain::gs_energy_generalized: <psi|A|psi> collapsed to "
-                      "~0 mid-iteration (A may not be positive definite, or "
-                      "the sweep drove psi toward A's near-null-space) -- "
-                      "cannot form a meaningful generalized Rayleigh quotient");
+                      "~0 (or NaN) mid-iteration (A may not be positive "
+                      "definite, or the sweep drove psi toward A's "
+                      "near-null-space) -- cannot form a meaningful "
+                      "generalized Rayleigh quotient");
             double h_psi = innerC(wf0_,H_,wf0_).real();
             lam = h_psi/a_psi;
             }
@@ -486,6 +492,12 @@ class Chain
         return energy;
         }
 
+    // Non-Hermitian DMRG (NH-DMRG): the algorithm itself -- ITensorNHDMRG.jl
+    // port, "onesided" local solver, "fidelity" truncation, the
+    // biorthogonal-start rationale -- is documented on nhdmrg_one_sweep()
+    // just above (this method is now a thin per-sweep driver around it, see
+    // its own comment for why nhdmrg_one_sweep rebuilds environments fresh
+    // every call rather than reusing them across sweeps here).
     NHDMRGResult
     nhdmrg(std::vector<MOTerm> const& terms_h,
            std::vector<MOTerm> const& terms_hadj,
@@ -608,12 +620,15 @@ class Chain
             nhdmrg_one_sweep(psil,psir,Heff,HAeff,krylovdim,restarts,noise,
                               Cplx(0,0),false);
             Cplx a_psi = innerC(psil,A,psir);
-            if (std::abs(a_psi)<1e-14)
+            if (!(std::abs(a_psi)>1e-14))
+                // "!(>tol)", not "<tol": see gs_energy_generalized's
+                // identical guard for why the negated form is needed to
+                // also catch NaN.
                 Error("Chain::nhdmrg_generalized: <psi_L|A|psi_R> collapsed "
-                      "to ~0 mid-iteration (A may not be positive definite, "
-                      "or the sweep drove the biorthogonal pair toward A's "
-                      "near-null-space) -- cannot form a meaningful "
-                      "generalized Rayleigh quotient");
+                      "to ~0 (or NaN) mid-iteration (A may not be positive "
+                      "definite, or the sweep drove the biorthogonal pair "
+                      "toward A's near-null-space) -- cannot form a "
+                      "meaningful generalized Rayleigh quotient");
             Cplx h_psi = innerC(psil,H,psir);
             lam = h_psi/a_psi;
             if (verbose_)

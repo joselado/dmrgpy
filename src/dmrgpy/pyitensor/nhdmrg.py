@@ -50,7 +50,7 @@ Hermiticity assumption on H itself, only on the metric A.
 import numpy as np
 
 from .dmrg import (_all_right_environments, _extend_left, _extend_right,
-                   two_site_heff)
+                   lam0_is_unset, two_site_heff)
 from .index import Index
 from .mpsalgebra import inner
 from .mpsalgebra import sum as mps_sum
@@ -346,10 +346,15 @@ def nhdmrg_generalized(H, HA, A, psi0, sweeps, krylovdim=20, restarts=2,
 
     # None or NaN (real part) both mean "unset" -- NaN accepted too since
     # Chain::nhdmrg_generalized's own C++/pybind11 binding has no None
-    # equivalent and uses a NaN real part as its own "unset" sentinel (see
-    # dmrg.py's dmrg_generalized() for the same accommodation).
+    # equivalent and uses a NaN real part as its own "unset" sentinel.
+    # lam0_is_unset() (dmrg.py) coerces via complex(lam0) rather than
+    # gating on isinstance(lam0, complex): a caller passing a bare float
+    # NaN here (a reasonable thing to do given this docstring's own "None
+    # or a NaN real part" wording) would otherwise silently skip this
+    # fallback and feed a live NaN into the first outer iteration instead
+    # -- confirmed directly, found via code review.
     lam = lam0
-    if lam is None or (isinstance(lam, complex) and np.isnan(lam.real)):
+    if lam0_is_unset(lam):
         a0 = inner(psil, A, psir)
         h0 = inner(psil, H, psir)
         lam = h0 / a0 if abs(a0) > 1e-14 else 0.0 + 0.0j
@@ -362,11 +367,13 @@ def nhdmrg_generalized(H, HA, A, psi0, sweeps, krylovdim=20, restarts=2,
         _nhdmrg_one_sweep(psil, psir, Heff, HAeff, maxdim, cutoff, noise,
                 krylovdim, restarts, 0.0 + 0.0j, False)
         a_psi = inner(psil, A, psir)
-        if abs(a_psi) < 1e-14:
+        if not (abs(a_psi) > 1e-14):
+            # "not (> tol)", not "< tol": see dmrg.py's identical guard
+            # for why the negated form is needed to also catch NaN.
             raise RuntimeError(
-                "nhdmrg_generalized: <psi_L|A|psi_R> collapsed to ~0 "
-                "mid-iteration (A may not be positive definite, or the "
-                "sweep drove the biorthogonal pair toward A's near-"
+                "nhdmrg_generalized: <psi_L|A|psi_R> collapsed to ~0 (or "
+                "NaN) mid-iteration (A may not be positive definite, or "
+                "the sweep drove the biorthogonal pair toward A's near-"
                 "null-space) -- cannot form a meaningful generalized "
                 "Rayleigh quotient")
         h_psi = inner(psil, H, psir)

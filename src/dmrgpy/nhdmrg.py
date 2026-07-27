@@ -150,8 +150,23 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
         session_lam0 = complex(float('nan'),0.0) if lam0 is None else lam0
     best = None
     for i in range(max(1,int(ntries))):
-        lam,hl,hr = self._session.nhdmrg_generalized(terms,terms_dag,terms_a,
-                int(krylovdim),int(restarts),lam0=session_lam0)
+        # Each attempt's fresh random start (see docstring) can, on rare
+        # unlucky draws, drive the biorthogonal pair into the metric A's
+        # near-null-space -- nhdmrg_generalized()'s own guard against that
+        # (both backends) raises RuntimeError rather than returning a
+        # meaningless lambda. Treated the same as an ordinary
+        # resid>=tol failure below (redraw and retry) rather than letting
+        # it abort every remaining attempt -- exactly the class of "bad
+        # random draw" ntries>1 exists to route around in the first
+        # place; found via code review.
+        try:
+            lam,hl,hr = self._session.nhdmrg_generalized(terms,terms_dag,
+                    terms_a,int(krylovdim),int(restarts),lam0=session_lam0)
+        except RuntimeError as e:
+            if self.verbose>0:
+                print("nhdmrg_generalized attempt",i,"raised",repr(e),
+                      "-- retrying with a fresh random start")
+            continue
         psil = mps.MPS(self,cpp_handle=hl).copy()
         psir = mps.MPS(self,cpp_handle=hr).copy()
         r = H*psir - lam*(A*psir)
@@ -162,6 +177,11 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
         if resid<tol: break
         if self.verbose>0:
             print("nhdmrg_generalized attempt",i,"did not converge, residual",resid)
+    if best is None:
+        raise RuntimeError(
+            "nhdmrg_generalized: every attempt (of "+str(ntries)+") hit "
+            "the near-null-space guard -- A is likely not positive "
+            "definite for this problem")
     resid,lam,psil,psir = best
     if resid>=tol:
         print("Warning: nhdmrg_generalized did not reach the residual "
@@ -180,12 +200,13 @@ def gs_energy_generalized_nhdmrg(self,A,**kwargs):
     lam,psil,psir = nhdmrg_generalized(self,A,**kwargs)
     self.e0 = lam
     wf0 = psir.normalize()
-    self.wf0 = wf0 if wf0 is not None else psir.copy()
+    if wf0 is None: wf0 = psir.copy()
     self.nh_left_wf = psil.copy() # left eigenvector, for biorthogonal use
-    self.set_initial_wf(self.wf0) # resets computed_gs=False, so...
-    self.computed_gs = True        # ...this must come after, not before
-                                    # (see gs_energy_generalized's own fix
-                                    # for exactly this ordering bug)
+    self.set_initial_wf(wf0) # sets self.wf0 (one copy) and resets
+                              # computed_gs=False, so...
+    self.computed_gs = True  # ...this must come after, not before (see
+                              # gs_energy_generalized's own fix for
+                              # exactly this ordering bug)
     return lam
 
 
