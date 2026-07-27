@@ -399,6 +399,26 @@ the cost of being slower than compiled ITensor by default (no
 block-sparsity, no JIT) — see §5 for how much slower in practice, and how
 `numba`/`jax` narrow that gap.
 
+One exception to that shared-surface rule: `dmrg.py::dmrg_generalized`
+(exposed as `Chain.gs_energy_generalized`/
+`Many_Body_Chain.gs_energy_generalized`) solves the generalized
+eigenproblem $H|\psi\rangle=\lambda A|\psi\rangle$ for a Hermitian
+positive-definite metric MPO $A$ — a self-consistent Lagrange-multiplier
+iteration built directly on top of `dmrg()`'s own per-sweep machinery
+(factored into a shared `_dmrg_one_sweep` helper): each outer iteration
+rebuilds the MPO $H-\lambda A$ from the current $\lambda$ estimate,
+sweeps it with the ordinary two-site solver, then updates $\lambda$ to
+the swept state's generalized Rayleigh quotient
+$\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$. It exists only on
+this backend (`Many_Body_Chain.gs_energy_generalized` raises
+`NotImplementedError` for `itensor_version` 2/3/`"julia_live"`) — unlike
+every other pyitensor feature described above, `mpscpp2`/`mpscpp3`'s
+`chain_session.h` have no analogous session method to fall back to, so
+there is no "third option, no separate code path" here yet. See
+`examples/groundstate/dmrg_generalized_benchmark`, which cross-checks it
+against `algebra/arpacktk.py`'s pre-existing ARPACK-mode-2 route
+(`mpsiram_generalized`) on the same test problem.
+
 ### 4.6 The Julia backend (`mpsjulialive/`)
 
 `itensor_version="julia_live"` drives a live, in-process Julia session

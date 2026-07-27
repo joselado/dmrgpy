@@ -365,6 +365,45 @@ plain `mpsiram`, just built with the $M$-inner product. Verified against
 `scipy.linalg.eigh`'s generalized Hermitian-definite eigensolver in both
 ED and DMRG mode.
 
+**Generalized-eigenvalue DMRG.** For the same problem
+$H|\psi\rangle=\lambda A|\psi\rangle$ ($A$ Hermitian positive definite),
+`gs_energy_generalized(A)` solves it with a genuine DMRG sweep instead of
+a Krylov method, needing no approximate operator inverse at all (unlike
+`mpsiram_generalized` above, which must invert $M$ iteratively since
+dmrgpy has no exact MPO inverse):
+
+```python
+lam = fc.gs_energy_generalized(a_metric_operator)   # smallest lambda
+```
+
+The trick is a self-consistent Lagrange multiplier: minimizing
+$\langle\psi|H|\psi\rangle$ subject to the metric normalization
+$\langle\psi|A|\psi\rangle=1$ has stationarity condition
+$(H-\lambda A)|\psi\rangle=\mu|\psi\rangle$ for multiplier $\lambda$ --
+the *ordinary* ($\mu$,$\psi$) eigenproblem of the plain-normalized shifted
+operator $H-\lambda A$, exactly what a standard two-site DMRG sweep
+already finds. At $\mu=0$ this is precisely
+$H|\psi\rangle=\lambda A|\psi\rangle$, so each outer iteration (i) builds
+the MPO $H-\lambda A$ from the current $\lambda$ estimate, (ii) runs one
+ordinary DMRG sweep against it, then (iii) updates $\lambda$ to the
+freshly-swept state's generalized Rayleigh quotient
+$\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$ -- one outer
+iteration per `Sweeps` schedule entry, so bond dimension ramps exactly as
+an ordinary `gs_energy()` run's own schedule does. $A=\mathrm{Id}$
+reduces this exactly to plain ground-state DMRG.
+
+Only implemented on the pure-Python (pyitensor) backend so far
+(`itensor_version="python"`, i.e. after `chain.setup_python()`) --
+`dmrgpy.pyitensor.dmrg.dmrg_generalized` is the underlying routine; the
+compiled ITensor v2/v3 sessions and `julia_live` raise
+`NotImplementedError`. See
+`examples/groundstate/dmrg_generalized_benchmark`, which heads it up
+against `mpsiram_generalized` on the same interacting-fermion-chain test
+problem: needing no approximate inverse, the DMRG route is both
+noticeably more accurate and (since ARPACK mode 2's own correction-vector
+solve gets more expensive, and less accurate, as the chain grows) an
+order of magnitude or more faster on an 8-site chain.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain

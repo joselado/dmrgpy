@@ -40,12 +40,19 @@ product state), and dropping it is exactly the kind of optionality
 CLAUDE.md's plan allows as long as dmrgpy's own results aren't affected.
 Sweeps.noise is accepted (for call-signature compatibility with
 mpscpp3/chain_session.h's make_sweeps()) but otherwise unused.
+
+dmrg_generalized() below solves the *generalized* eigenproblem
+H|psi>=lambda*A|psi> (A Hermitian positive definite) by reusing the same
+per-sweep machinery (_dmrg_one_sweep, factored out of dmrg()'s own loop
+body) against a shifted operator H-lambda*A, self-consistently updating
+lambda between sweeps -- see its own docstring for the derivation.
 """
 
 import numpy as np
 
 from . import kernels
-from .mpsalgebra import _link_at
+from .mpsalgebra import _link_at, inner
+from .mpsalgebra import sum as mps_sum
 from .svd import svd
 from .tensor import ITensor, contract_many, dag
 from .tensor import prime as _t_prime
@@ -322,37 +329,105 @@ def _apply_local_update(ket, i, theta, cutoff, maxdim, direction):
         ket.center = i
 
 
+def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter):
+    """One full right-then-left two-site ground-state sweep against a
+    fixed H, mutating psi in place. Returns the last local bond's
+    eigenvalue (dmrg()'s own returned-`energy` convention -- see its
+    docstring). Factored out of dmrg()'s own per-sweep loop body so
+    dmrg_generalized() below can reuse the identical sweep machinery
+    while rebuilding H itself between sweeps."""
+    n = psi.length()
+    energy = None
+
+    right_env = _all_right_environments(H, psi)
+    left_env = {0: (None, None)}
+    for i in range(1, n):
+        L, Lbra = left_env[i - 1]
+        R, Rbra = right_env[i + 2]
+        energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter)
+        _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
+        left_env[i] = _extend_left(L, Lbra, H, psi, i)
+
+    right_env = {n + 1: (None, None)}
+    for i in range(n - 1, 0, -1):
+        L, Lbra = left_env[i - 1]
+        R, Rbra = right_env[i + 2]
+        energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter)
+        _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
+        right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
+
+    return energy
+
+
 def dmrg(psi, H, sweeps, quiet=True):
     """Two-site ground-state DMRG. Mutates psi in place and returns the
     final energy -- mirrors ITensor's own dmrg(psi,H,sweeps,args) signature
     (minus the Args bag, which this package uses explicit kwargs for
     throughout, and minus the excited-state penalty overload -- see
     dmrg_excited() for that)."""
-    n = psi.length()
     energy = None
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
-
-        right_env = _all_right_environments(H, psi)
-        left_env = {0: (None, None)}
-        for i in range(1, n):
-            L, Lbra = left_env[i - 1]
-            R, Rbra = right_env[i + 2]
-            energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter)
-            _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
-            left_env[i] = _extend_left(L, Lbra, H, psi, i)
-
-        right_env = {n + 1: (None, None)}
-        for i in range(n - 1, 0, -1):
-            L, Lbra = left_env[i - 1]
-            R, Rbra = right_env[i + 2]
-            energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter)
-            _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
-            right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
-        left_env = {0: (None, None)}
-
+        energy = _dmrg_one_sweep(psi, H, maxdim, cutoff, niter)
         if not quiet:
             print("sweep {}: energy = {}".format(sweep_i, energy))
+
+    return energy
+
+
+def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
+    """Generalized-eigenvalue ground-state DMRG: finds the smallest
+    lambda solving $H|\\psi\\rangle=\\lambda A|\\psi\\rangle$ for a Hermitian
+    positive-definite metric MPO A (A = the identity MPO reduces this
+    exactly to plain dmrg()). Mutates psi in place and returns the final
+    lambda.
+
+    The trick: minimizing $\\langle\\psi|H|\\psi\\rangle$ subject to the
+    *metric* normalization $\\langle\\psi|A|\\psi\\rangle=1$ has stationarity
+    condition $(H-\\lambda A)|\\psi\\rangle=\\mu|\\psi\\rangle$ for Lagrange
+    multiplier lambda -- the ordinary (mu,psi) eigenproblem of the
+    *plain*-normalized ($\\langle\\psi|\\psi\\rangle=1$) shifted operator
+    $H-\\lambda A$, exactly what a standard two-site DMRG sweep already
+    finds. At $\\mu=0$ this is precisely $H|\\psi\\rangle=\\lambda
+    A|\\psi\\rangle$, so each outer iteration here (i) builds the MPO
+    $H_\\mathrm{eff}=H-\\lambda A$ from the current lambda estimate, (ii)
+    runs one ordinary DMRG sweep (_dmrg_one_sweep, unmodified) against
+    $H_\\mathrm{eff}$, then (iii) updates lambda to the freshly-swept
+    state's generalized Rayleigh quotient
+    $\\langle\\psi|H|\\psi\\rangle/\\langle\\psi|A|\\psi\\rangle$ -- a
+    self-consistent-field-style fixed-point iteration on lambda that also
+    drives mu to 0 at convergence. One outer iteration per Sweeps
+    schedule entry, so bond dimension/cutoff/niter ramp exactly as an
+    ordinary dmrg() run's own schedule specifies. $H_\\mathrm{eff}$ is
+    rebuilt from the *original* H, A each outer iteration (never
+    accumulated), so its own bond dimension never grows across outer
+    iterations -- always at most bondDim(H)+bondDim(A), summed exactly
+    (cutoff=0, maxdim=None: H and A are typically already-compressed,
+    modest-bond-dimension Hamiltonian-like MPOs, so an exact sum costs
+    little and avoids silently truncating the shift term).
+
+    lam0 (optional): starting lambda estimate; defaults to psi's own
+    current generalized Rayleigh quotient $\\langle\\psi|H|\\psi\\rangle/
+    \\langle\\psi|A|\\psi\\rangle$, which costs two cheap inner()s and gives
+    the first outer sweep a head start over starting from lambda=0.
+    """
+    lam = lam0
+    if lam is None:
+        a0 = inner(psi, A, psi).real
+        h0 = inner(psi, H, psi).real
+        lam = h0 / a0 if abs(a0) > 1e-14 else 0.0
+
+    energy = lam
+    for sweep_i in range(sweeps.nsweep):
+        maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
+        Heff = mps_sum(H, A * (-lam))
+        _dmrg_one_sweep(psi, Heff, maxdim, cutoff, niter)
+        a_psi = inner(psi, A, psi).real
+        h_psi = inner(psi, H, psi).real
+        lam = h_psi / a_psi
+        energy = lam
+        if not quiet:
+            print("sweep {}: lambda = {}".format(sweep_i, energy))
 
     return energy
 

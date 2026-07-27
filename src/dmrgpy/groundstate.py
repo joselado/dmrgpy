@@ -145,6 +145,39 @@ def gs_energy(self,**kwargs):
 
 
 
+def gs_energy_generalized(self,A,lam0=None):
+    """Smallest generalized eigenvalue lambda solving H|psi>=lambda*A|psi>
+    for this chain's own Hamiltonian (self.hamiltonian, already set via
+    set_hamiltonian()) and a Hermitian positive-definite metric operator
+    A (a MultiOperator, same calling convention as vev()). Stores the
+    resulting wavefunction as this chain's ground state, mirroring
+    gs_energy_single()'s own wf0 handling.
+
+    Only implemented for itensor_version="python" (pyitensor) so far --
+    see pyitensor/dmrg.py's dmrg_generalized() for the self-consistent
+    Lagrange-multiplier algorithm this reduces to; the compiled ITensor
+    v2/v3 sessions and julia_live don't have this session method yet
+    (CLAUDE.md's "Implement in pyitensor first" scoping)."""
+    if self.itensor_version!="python":
+        raise NotImplementedError(
+            "gs_energy_generalized is only implemented for "
+            "itensor_version='python' so far -- call chain.setup_python() first")
+    if self.hamiltonian is None:
+        raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
+    from . import multioperator
+    A = multioperator.obj2MO(A)
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    self._session.set_hamiltonian(self.hamiltonian.to_terms())
+    lam = self._session.gs_energy_generalized(A.to_terms(),lam0=lam0)
+    self.e0 = lam
+    self.computed_gs = True
+    wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
+    self.set_initial_wf(wf0) # set the initial wavefunction
+    return lam
+
+
 def gs_energy_cpp(self,policy="single",**kwargs):
     """Compute ground state with C++ DMRG"""
     if policy=="single":

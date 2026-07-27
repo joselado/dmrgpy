@@ -18,7 +18,7 @@ from functools import lru_cache
 import numpy as np
 
 from .autompo import AutoMPO
-from .dmrg import dmrg, dmrg_excited
+from .dmrg import dmrg, dmrg_excited, dmrg_generalized
 from .mpobuilder import to_mpo
 from .mpsalgebra import applyMPO, inner, nmultMPO
 from .mpsalgebra import sum as mps_sum
@@ -128,6 +128,29 @@ class Chain:
     def set_wavefunction(self, wf):
         self.wf0 = wf
         self._wf0_energy = None  # energy no longer matches wf0
+
+    def gs_energy_generalized(self, terms_a, lam0=None):
+        """Smallest generalized eigenvalue lambda solving
+        H|psi>=lambda*A|psi> for this chain's own Hamiltonian H (already
+        built via set_hamiltonian()) and a metric operator A given by
+        terms_a. A must be Hermitian positive definite for the
+        self-consistent Lagrange-multiplier iteration in
+        dmrg_generalized() (dmrg.py) to converge to the smallest
+        generalized eigenvalue -- not checked here, same convention as
+        set_hamiltonian() not checking H is Hermitian either. Mutates
+        and stores self.wf0 like gs_energy(), but doesn't share its
+        plain-<H> energy cache (skip_dmrg=True on a later gs_energy()
+        call would otherwise return this generalized run's lambda,
+        which is not <psi|H|psi>) -- invalidated below instead."""
+        if not self.have_H:
+            raise RuntimeError("Chain.gs_energy_generalized called before set_hamiltonian")
+        A = to_mpo(AutoMPO.from_terms(self.sites, terms_a), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        if self.wf0 is None:
+            self.wf0 = self._default_mps()
+        sweeps = self._make_sweeps()
+        lam = dmrg_generalized(self.wf0, self.H, A, sweeps, quiet=not self.verbose, lam0=lam0)
+        self._wf0_energy = None  # stale: no longer <wf0|H|wf0>, see docstring
+        return lam
 
     def excited_states(self, n, scale_lagrange=1.0, do_gram_schmidt=False):
         if not self.have_H:
