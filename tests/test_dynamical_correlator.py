@@ -191,3 +191,43 @@ def test_tdz_dynamical_correlator_peak_matches_exact_gap(itensor_version):
     x, y = np.array(x), np.array(y).real
     peak = x[np.argmax(y)]
     assert peak == pytest.approx(HEISENBERG_4_GAP, abs=0.03)
+
+
+def test_finite_T_dynamical_correlator_independent_of_es_window():
+    """get_dynamical_correlator(mode="ED", submode="ED", T=...) (the
+    finite-temperature Lehmann sum, edtk/dynamics.py's
+    dynamical_correlator_finite_T) must return the same values at a given
+    frequency regardless of how far the requested `es` window extends,
+    since the *initial*-state Boltzmann sum is physically independent of
+    which frequencies the caller happens to be asking for.
+
+    Regression test for a real bug (caught by code review): an earlier
+    version cropped the initial-state index space to `es`'s own window
+    too (not just the final-state space), which silently dropped any
+    thermally-populated state above the window's max energy from the
+    numerator while the partition function Z (from the full spectrum)
+    still counted it in the denominator -- a systematic under-count
+    growing with how much Boltzmann weight got left out. At T=2.0 on this
+    4-site chain, an es window capped at 1.0 only captures ~41% of the
+    total Boltzmann weight (the bulk of the spectrum sits above that),
+    so the old bug would have inflated every value here by roughly
+    1/0.41 =~ 2.4x relative to a window wide enough to capture ~100%."""
+    n = 4
+    sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
+    sc.set_hamiltonian(h)
+
+    name = (sc.Sz[0], sc.Sz[0])
+    T = 2.0
+    es_narrow = np.linspace(-1.0, 1.0, 41)
+    es_wide = np.linspace(-1.0, 6.0, 141)
+
+    x1, y1 = sc.get_dynamical_correlator(mode="ED", submode="ED", name=name,
+                                          T=T, es=es_narrow, delta=0.05)
+    x2, y2 = sc.get_dynamical_correlator(mode="ED", submode="ED", name=name,
+                                          T=T, es=es_wide, delta=0.05)
+    y2_on_x1 = np.interp(x1, x2, y2.real)
+
+    assert y1.real == pytest.approx(y2_on_x1, abs=1e-6)

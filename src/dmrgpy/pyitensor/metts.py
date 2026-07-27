@@ -60,7 +60,7 @@ import numpy as np
 
 from .index import Index, reseed_id_counter_past
 from .mpscontainer import MPS
-from .mpsalgebra import inner
+from .mpsalgebra import applyMPO, inner
 from .tdvp import tdvp_step
 from .tensor import ITensor, noPrime
 
@@ -420,3 +420,192 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
     with multiprocessing.get_context("spawn").Pool(len(chunk_sizes)) as pool:
         results = pool.map(_run_chain_worker, tasks)
     return _pool_chain_results(results, len(ops))
+
+
+# -- Dynamical METTS (real-time finite-T correlators), arXiv:2405.18484 --
+#
+# Wang, McClarty, Dankova, Honecker & Wietek, "Spectroscopy and complex-time
+# correlations using minimally entangled typical thermal states" (2024),
+# Sec. II / Algorithm 1. Generalizes the static thermal_average above from
+# <A>_beta to the two-time correlator C_AB(t) = <A(t)B>_beta =
+# <e^{iHt} A e^{-iHt} B>_beta, following the exact same METTS Markov chain
+# (imaginary_time_evolve + collapse_to_cps): for each retained sample
+# |psi_i>, define
+#   |v_i(0)> = B|psi_i>,  |w_i(0)> = |psi_i>,
+#   C^i(t) = <w_i(t)|A|v_i(t)>,
+# and real-time-evolve |v_i(t)> and |w_i(t)> independently (both under H,
+# via tdvp_step with dt real -- this module's own -i*dt convention, see
+# the module docstring, already makes a purely real dt give genuine
+# rotation rather than decay, i.e. real time). A plain (unweighted)
+# average of C^i(t) over samples converges to C_AB(t), for exactly the
+# same reason metts_thermal_average()'s plain average of <phi|A|phi>
+# converges to <A>_beta -- the METTS Markov chain's stationary
+# distribution already carries the Boltzmann weight p_i/Z (paper's
+# Eq. (3)-(5), Sec. 2 above), no importance reweighting needed.
+#
+# No Fourier transform/windowing is done here -- this returns the raw
+# time-domain samples/statistics; the frequency-domain spectral function
+# (paper's Eq. (eq:mettspectral), via a Hann-windowed FFT, Sec. "Spectral
+# analysis and windowing") is left to the caller (see
+# vevtk/mettsdynamicalcorrelator.py), mirroring how timedependent.py's
+# evolution_dmrg_DC returns (ts,cs) and dynamical_correlator() does its
+# own separate FFT step on top.
+
+
+def _metts_dynamical_single_chain(H, sites, A, B, beta, nt, dt, nsamples,
+                                   nwarmup, dbeta_half_step, cutoff, maxdim,
+                                   basis_ops, initial_cps, seed, niter,
+                                   tdvp_cutoff, tdvp_maxdim, tdvp_niter):
+    """One full METTS Markov chain (nwarmup discarded + nsamples retained
+    iterations) producing the time-dependent correlator C^i(t) for every
+    retained sample -- the dynamical analog of _metts_single_chain()
+    above. Returns (means, stderrs, nsamples): means/stderrs are complex/
+    real arrays of length nt."""
+    rng = np.random.default_rng(seed)
+    beta_half = beta / 2.0
+    nsteps = max(1, int(np.ceil(beta_half / dbeta_half_step)))
+    eigcache = _build_eigcache(sites, basis_ops)
+
+    cps = initial_cps if initial_cps is not None else random_cps(sites, basis_ops[0], rng, eigcache)
+
+    nbasis = len(basis_ops)
+    samples = np.zeros((nsamples, nt), dtype=complex)
+    kept = 0
+    total_iters = nwarmup + nsamples
+    for it in range(total_iters):
+        phi = imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, niter=niter)
+        if it >= nwarmup:
+            v = applyMPO(B, phi, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim)
+            v.noPrime("Site")
+            w = phi.copy()
+            for k in range(nt):
+                samples[kept, k] = inner(w, A, v)
+                if k < nt - 1:
+                    v = tdvp_step(v, H, dt, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim, niter=tdvp_niter)
+                    w = tdvp_step(w, H, dt, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim, niter=tdvp_niter)
+            kept += 1
+        basis = basis_ops[it % nbasis]
+        cps, _ = collapse_to_cps(phi, sites, basis, rng, eigcache)
+
+    means = samples.mean(axis=0)
+    if nsamples > 1:
+        stderrs = samples.std(axis=0, ddof=1) / np.sqrt(nsamples)
+    else:
+        stderrs = np.zeros(nt)
+    return means, stderrs, nsamples
+
+
+def _run_dynamical_chain_worker(args):
+    """Top-level (picklable) target for multiprocessing.Pool, mirroring
+    _run_chain_worker() above -- same reseed-past-every-existing-Index.id
+    rationale (index.py's reseed_id_counter_past()), scanning H/sites/A/B
+    (and initial_cps, normally None here) rather than a single-op list."""
+    H, sites, A, B, initial_cps = args[0], args[1], args[2], args[3], args[13]
+    reseed_id_counter_past(_max_index_id(sites, H, [A, B], initial_cps))
+    return _metts_dynamical_single_chain(*args)
+
+
+def _pool_chain_results_dynamical(results, nt):
+    """Combine several independent chains' (means, stderrs, nsamples)
+    triples (each means/stderrs now length-nt arrays) into pooled
+    (means, stderrs) arrays -- elementwise application of
+    _pool_chain_results()'s same exact pooled-variance identity, one time
+    point at a time (that identity holds independently at every t)."""
+    ns = np.array([n for _, _, n in results], dtype=float)
+    N = ns.sum()
+    chain_means = np.array([means for means, _, _ in results], dtype=complex)  # (nchains, nt)
+    chain_stderr = np.array([stderrs for _, stderrs, _ in results], dtype=float)  # (nchains, nt)
+    chain_vars = chain_stderr ** 2 * ns[:, None]
+    M = np.sum(ns[:, None] * chain_means, axis=0) / N
+    SS = np.sum((ns[:, None] - 1) * chain_vars + ns[:, None] * np.abs(chain_means - M[None, :]) ** 2, axis=0)
+    var_pooled = SS / (N - 1) if N > 1 else np.zeros(nt)
+    stderrs_out = np.sqrt(var_pooled / N) if N > 0 else np.zeros(nt)
+    return M, stderrs_out
+
+
+def metts_dynamical_correlator(H, sites, A, B, beta, nt, dt, nsamples,
+                                nwarmup=20, dbeta_half_step=0.05,
+                                cutoff=1e-10, maxdim=200,
+                                basis_ops=("Sz", "Sx"), initial_cps=None,
+                                seed=None, niter=30,
+                                tdvp_cutoff=None, tdvp_maxdim=None,
+                                tdvp_niter=50, njobs=1):
+    """Estimate the real-time finite-temperature correlator
+    C_AB(t) = <A(t)B>_beta = <e^{iHt} A e^{-iHt} B>_beta via dynamical
+    METTS sampling (arXiv:2405.18484, Sec. II, Algorithm 1).
+
+    H, A, B: already-built MPOs (e.g. from Chain.build_operator()) -- A,
+        B used exactly as given (no conjugation/dagger), matching
+        edtk/dynamics.py's dynamical_correlator_ED/dynamical_correlator_kpm
+        convention this is meant to be validated against.
+    beta: inverse temperature (1/T).
+    nt, dt: number of real-time measurements and the (uniform) time step
+        between them, i.e. C(t) is returned at t=0,dt,...,(nt-1)*dt --
+        same convention as timedependent.py's evolution_dmrg_DC(nt,dt).
+    nsamples, nwarmup, dbeta_half_step, cutoff, maxdim, basis_ops,
+        initial_cps, seed, niter: as in metts_thermal_average() above --
+        control the shared METTS Markov chain (imaginary-time sampling)
+        each retained sample's correlator is measured from.
+    tdvp_cutoff, tdvp_maxdim, tdvp_niter: TDVP truncation controls for the
+        *real-time* evolution of |v_i(t)>/|w_i(t)> specifically -- default
+        to `cutoff`/`maxdim`/50 (the real-time evolution typically wants a
+        looser cutoff and a larger bond dimension than the imaginary-time
+        sampling step, since |v_i(t)>/|w_i(t)> generically become more
+        entangled than the METTS states |psi_i> themselves, see the
+        paper's Sec. "Time-evolution using matrix product states";
+        exposed separately rather than reusing cutoff/maxdim outright).
+    njobs: as in metts_thermal_average() above -- run njobs independent
+        Markov chains in parallel worker processes and pool statistics
+        (itensor_version="python" only).
+
+    Returns (means, stderrs): means[k] is the sample-averaged C_AB(k*dt)
+    (complex), stderrs[k] its naive iid standard error over nsamples --
+    see metts_thermal_average()'s own docstring for the same
+    Markov-correlation caveat (likely optimistic unless dbeta_half_step/
+    nwarmup are generous enough for samples to decorrelate).
+    """
+    if beta <= 0:
+        raise ValueError("metts_dynamical_correlator: beta (1/T) must be > 0, got %r" % (beta,))
+    if not basis_ops:
+        raise ValueError("metts_dynamical_correlator: basis_ops must be non-empty")
+    if nsamples < 1:
+        raise ValueError("metts_dynamical_correlator: nsamples must be >= 1, got %r" % (nsamples,))
+    if nt < 1:
+        raise ValueError("metts_dynamical_correlator: nt must be >= 1, got %r" % (nt,))
+    if njobs < 1:
+        raise ValueError("metts_dynamical_correlator: njobs must be >= 1, got %r" % (njobs,))
+    if tdvp_cutoff is None: tdvp_cutoff = cutoff
+    if tdvp_maxdim is None: tdvp_maxdim = maxdim
+
+    if njobs == 1:
+        means, stderrs, _ = _metts_dynamical_single_chain(
+            H, sites, A, B, beta, nt, dt, nsamples, nwarmup, dbeta_half_step,
+            cutoff, maxdim, basis_ops, initial_cps, seed, niter,
+            tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+        return means, stderrs
+
+    if initial_cps is not None:
+        raise ValueError("metts_dynamical_correlator: initial_cps is not supported together with njobs>1")
+
+    base, extra = divmod(nsamples, njobs)
+    chunk_sizes = [base + (1 if k < extra else 0) for k in range(njobs)]
+    chunk_sizes = [n for n in chunk_sizes if n > 0]
+    if len(chunk_sizes) == 1:
+        means, stderrs, _ = _metts_dynamical_single_chain(
+            H, sites, A, B, beta, nt, dt, chunk_sizes[0], nwarmup, dbeta_half_step,
+            cutoff, maxdim, basis_ops, None, seed, niter,
+            tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+        return means, stderrs
+
+    seeds = np.random.SeedSequence(seed).spawn(len(chunk_sizes))
+    tasks = [
+        (H, sites, A, B, beta, nt, dt, n_local, nwarmup, dbeta_half_step,
+         cutoff, maxdim, basis_ops, None, seeds[k], niter,
+         tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+        for k, n_local in enumerate(chunk_sizes)
+    ]
+    # 'spawn', not fork -- see metts_thermal_average()'s own comment on
+    # this same choice above (fork-after-BLAS-threading hazard).
+    with multiprocessing.get_context("spawn").Pool(len(chunk_sizes)) as pool:
+        results = pool.map(_run_dynamical_chain_worker, tasks)
+    return _pool_chain_results_dynamical(results, nt)
