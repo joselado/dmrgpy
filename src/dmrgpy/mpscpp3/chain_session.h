@@ -2,6 +2,8 @@
 #include <map> // Chain::MettsEigCache (Chain::metts_vev)
 #include <algorithm> // std::next_permutation (four_correlation_tensor_sweep)
 #include <random> // std::mt19937_64/std::discrete_distribution (Chain::metts_vev)
+#include <cmath> // std::isnan (Chain::gs_energy_generalized's lam0 sentinel)
+#include <limits> // std::numeric_limits<double>::quiet_NaN() (ditto)
 
 // TDVP/tdvp.h and TDVP/basisextension.h are quoted includes, so they
 // resolve relative to this file's own directory (mpscpp3/) with no
@@ -161,6 +163,69 @@ class Chain
         wf0_ = wf;
         have_wf0_ = true;
         have_wf0_energy_ = false; // energy no longer matches wf0_
+        }
+
+    // Generalized-eigenvalue DMRG: solves H|psi>=lambda*A|psi> for a
+    // Hermitian positive-definite metric operator A (A=identity reduces
+    // this exactly to plain gs_energy()) via a self-consistent Lagrange-
+    // multiplier iteration -- a line-for-line port of pyitensor/dmrg.py's
+    // dmrg_generalized() against ITensor v3's own dmrg()/Sweeps/sum()
+    // instead of the hand-rolled two-site sweep pyitensor uses (see that
+    // function's own docstring for the full derivation). Minimizing
+    // <psi|H|psi> subject to the metric normalization <psi|A|psi>=1 has
+    // stationarity condition (H-lambda*A)|psi>=mu|psi> for Lagrange
+    // multiplier lambda -- the *ordinary* (plain-normalized) eigenproblem
+    // of the shifted operator H-lambda*A, exactly what a standard DMRG
+    // sweep already finds; at mu=0 this is precisely H|psi>=lambda*A|psi>.
+    // Each outer iteration therefore (i) builds the MPO H-lambda*A from
+    // the current lambda estimate, (ii) runs *one* ordinary DMRG sweep
+    // against it (a length-1 Sweeps object, reusing wf0_ as the warm
+    // start every iteration -- ITensor's own dmrg() always starts from
+    // whatever MPS it's handed, exactly like gs_energy()'s own re-use of
+    // wf0_ across calls), then (iii) updates lambda to the freshly-swept
+    // state's generalized Rayleigh quotient <psi|H|psi>/<psi|A|psi>. One
+    // outer iteration per nsweeps_, with noise halved off partway through
+    // exactly like nhdmrg()'s own per-sweep loop above (this can't just
+    // hand the whole make_sweeps() schedule to one dmrg() call the way
+    // gs_energy() does, since lambda must be updated between sweeps).
+    // H-lambda*A is rebuilt from the *original* H_, A each outer
+    // iteration (never accumulated), so its own bond dimension never
+    // grows across outer iterations -- always at most
+    // bondDim(H_)+bondDim(A). lam0 (optional, NaN meaning "unset"):
+    // starting lambda estimate; NaN (the default) instead seeds it from
+    // wf0_'s own current generalized Rayleigh quotient.
+    double
+    gs_energy_generalized(std::vector<MOTerm> const& terms_a,
+                           double lam0=std::numeric_limits<double>::quiet_NaN())
+        {
+        if (!have_H_) Error("Chain::gs_energy_generalized called before set_hamiltonian");
+        auto A = build_mpo(sites_,terms_a,mpomaxm_);
+        if (!have_wf0_)
+            {
+            wf0_ = default_mps();
+            have_wf0_ = true;
+            }
+        double lam = lam0;
+        if (std::isnan(lam))
+            {
+            double a0 = innerC(wf0_,A,wf0_).real();
+            double h0 = innerC(wf0_,H_,wf0_).real();
+            lam = (std::abs(a0)>1e-14) ? h0/a0 : 0.0;
+            }
+        for (int sw=1;sw<=nsweeps_;++sw)
+            {
+            auto Heff = sum(H_,(-lam)*A,{"MaxDim",mpomaxm_,"Cutoff",cutoff_});
+            auto sweeps1 = Sweeps(1);
+            sweeps1.maxdim() = maxm_;
+            sweeps1.cutoff() = cutoff_;
+            sweeps1.noise() = (sw<=nsweeps_/2) ? noise_ : 0.0;
+            dmrg(wf0_,Heff,sweeps1,dmrg_args());
+            double a_psi = innerC(wf0_,A,wf0_).real();
+            double h_psi = innerC(wf0_,H_,wf0_).real();
+            lam = h_psi/a_psi;
+            }
+        have_wf0_energy_ = false; // stale: wf0_ no longer optimizes plain <H_>
+        return lam;
         }
 
     ExcitedResult

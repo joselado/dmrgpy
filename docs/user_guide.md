@@ -392,17 +392,22 @@ iteration per `Sweeps` schedule entry, so bond dimension ramps exactly as
 an ordinary `gs_energy()` run's own schedule does. $A=\mathrm{Id}$
 reduces this exactly to plain ground-state DMRG.
 
-Only implemented on the pure-Python (pyitensor) backend so far
+Implemented on the pure-Python (pyitensor) backend
 (`itensor_version="python"`, i.e. after `chain.setup_python()`) --
-`dmrgpy.pyitensor.dmrg.dmrg_generalized` is the underlying routine; the
-compiled ITensor v2/v3 sessions and `julia_live` raise
-`NotImplementedError`. See
-`examples/groundstate/dmrg_generalized_benchmark`, which heads it up
-against `mpsiram_generalized` on the same interacting-fermion-chain test
-problem: needing no approximate inverse, the DMRG route is both
-noticeably more accurate and (since ARPACK mode 2's own correction-vector
-solve gets more expensive, and less accurate, as the chain grows) an
-order of magnitude or more faster on an 8-site chain.
+`dmrgpy.pyitensor.dmrg.dmrg_generalized` is the underlying routine -- and
+on compiled ITensor v3 (`itensor_version=3`, i.e. after
+`chain.setup_cpp(version=3)`), where `Chain::gs_energy_generalized`
+(`mpscpp3/chain_session.h`) runs the identical algorithm against ITensor
+v3's own `dmrg()`/`Sweeps`/`sum()` instead of pyitensor's hand-rolled
+two-site sweep. `itensor_version=2` (mpscpp2) and `julia_live` don't have
+this session method yet and raise `NotImplementedError`. See
+`examples/groundstate/dmrg_generalized_benchmark`, which heads all three
+solvers up against each other on the same interacting-fermion-chain test
+problem: needing no approximate inverse, both DMRG routes are far more
+accurate than ARPACK mode 2 (whose own correction-vector solve also gets
+more expensive, and less accurate, as the chain grows -- two orders of
+magnitude slower and $10^{9}$ times less accurate on an 8-site chain),
+and v3 is itself consistently ~2-4x faster than pyitensor at these sizes.
 
 ## 5. Entanglement and quantum information
 

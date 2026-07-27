@@ -153,15 +153,30 @@ def gs_energy_generalized(self,A,lam0=None):
     resulting wavefunction as this chain's ground state, mirroring
     gs_energy_single()'s own wf0 handling.
 
-    Only implemented for itensor_version="python" (pyitensor) so far --
-    see pyitensor/dmrg.py's dmrg_generalized() for the self-consistent
-    Lagrange-multiplier algorithm this reduces to; the compiled ITensor
-    v2/v3 sessions and julia_live don't have this session method yet
-    (CLAUDE.md's "Implement in pyitensor first" scoping)."""
-    if self.itensor_version!="python":
+    Implemented for itensor_version="python" (pyitensor/dmrg.py's
+    dmrg_generalized()) and itensor_version=3 (mpscpp3/chain_session.h's
+    Chain::gs_energy_generalized, a line-for-line port of the same
+    self-consistent Lagrange-multiplier algorithm against ITensor v3's
+    own dmrg()/Sweeps/sum()) -- see either docstring for the derivation.
+    mpscpp2 (itensor_version=2) and julia_live don't have this session
+    method yet."""
+    if self.itensor_version not in (3,"python"):
         raise NotImplementedError(
             "gs_energy_generalized is only implemented for "
-            "itensor_version='python' so far -- call chain.setup_python() first")
+            "itensor_version=3 or 'python' so far -- call "
+            "chain.setup_cpp(version=3) or chain.setup_python() first")
+    if self._session is None:
+        # itensor_version==3 but no compiled extension for it (sites.py's
+        # initialize() leaves self._session as None in that case, the
+        # same "extension not compiled" state mode.py's own get_mode()
+        # falls back to ED for elsewhere) -- there is no ED fallback for
+        # this method, so fail with an actionable message instead of an
+        # AttributeError on the calls below.
+        raise RuntimeError(
+            "gs_energy_generalized needs a compiled ITensor v3 extension "
+            "(itensor_version=3) but none is available for this chain -- "
+            "run `python install.py --itensor-version=3`, or call "
+            "chain.setup_python() to use the pure-Python backend instead")
     if self.hamiltonian is None:
         raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
     from . import multioperator
@@ -170,7 +185,11 @@ def gs_energy_generalized(self,A,lam0=None):
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     self._session.set_hamiltonian(self.hamiltonian.to_terms())
-    lam = self._session.gs_energy_generalized(A.to_terms(),lam0=lam0)
+    if self.itensor_version=="python": # pyitensor accepts lam0=None directly
+        session_lam0 = lam0
+    else: # the compiled v3 binding takes a plain float, NaN meaning "unset"
+        session_lam0 = float('nan') if lam0 is None else lam0
+    lam = self._session.gs_energy_generalized(A.to_terms(),lam0=session_lam0)
     self.e0 = lam
     self.computed_gs = True
     wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()

@@ -6,6 +6,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/complex.h>
 #include <pybind11/numpy.h>
+#include <limits> // std::numeric_limits<double>::quiet_NaN() (gs_energy_generalized's lam0 default)
 #include "itensor/all.h"
 #include "extra/all.h" // dmrgpy's own extra site types (spin-3/2, Z4, Boson-4, ...)
 
@@ -111,6 +112,17 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("gs_wavefunction",&Chain::gs_wavefunction,
              py::return_value_policy::copy)
         .def("set_wavefunction",&Chain::set_wavefunction,py::arg("wf"))
+        .def("gs_energy_generalized",[](Chain& self, std::vector<PyTerm> const& terms_a,
+                                         double lam0) {
+                return self.gs_energy_generalized(terms_from_python(terms_a),lam0);
+            }, py::arg("terms_a"),
+               py::arg("lam0")=std::numeric_limits<double>::quiet_NaN(),
+               "Generalized-eigenvalue DMRG: solves H|psi>=lambda*A|psi> for "
+               "a Hermitian positive-definite metric operator A (terms_a), "
+               "self-consistently updating the Lagrange multiplier lambda "
+               "between DMRG sweeps -- see Chain::gs_energy_generalized's "
+               "own comment for the algorithm. Returns lambda; A=identity "
+               "reduces this exactly to plain gs_energy().")
         .def("excited_states",[](Chain& self, int n, double scale_lagrange,
                                   bool gram_schmidt) {
                 auto out = self.excited_states(n,scale_lagrange,gram_schmidt);

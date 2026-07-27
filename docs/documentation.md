@@ -380,6 +380,29 @@ Notable, deliberate implementation details (not bugs to "fix"):
   `"julia_live"` doesn't implement this yet (`StaticOperator.__add__`
   raises `NotImplementedError` rather than silently doing something
   backend-specific).
+- `mpscpp3`-specific: `Chain::gs_energy_generalized`
+  (`mpscpp3/chain_session.h`, exposed as
+  `Many_Body_Chain.gs_energy_generalized`) solves the generalized
+  eigenproblem $H|\psi\rangle=\lambda A|\psi\rangle$ for a Hermitian
+  positive-definite metric MPO $A$ via a self-consistent
+  Lagrange-multiplier iteration: each outer iteration builds the MPO
+  $H-\lambda A$ (`sum()`) from the current $\lambda$ estimate, sweeps it
+  with ITensor v3's own `dmrg()` for a single length-1 `Sweeps` step
+  (looping outer iterations by hand rather than handing the whole
+  schedule to one `dmrg()` call, since $\lambda$ must be updated between
+  sweeps — noise is halved off partway through exactly like `nhdmrg()`'s
+  own per-sweep loop above), then updates $\lambda$ to the swept state's
+  generalized Rayleigh quotient
+  $\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$. A line-for-line
+  port of `pyitensor/dmrg.py`'s `dmrg_generalized` (§4.5) against real
+  ITensor v3 calls instead of the hand-rolled two-site sweep pyitensor
+  uses; `mpscpp2` has no analogous session method yet, so
+  `itensor_version=2` still raises `NotImplementedError`. See
+  `examples/groundstate/dmrg_generalized_benchmark`, which heads all
+  three available routes (pyitensor, v3, and `algebra/arpacktk.py`'s
+  pre-existing ARPACK-mode-2 `mpsiram_generalized`) up against each
+  other on the same test problem — v3 is consistently the fastest of the
+  three at the (small) sizes benchmarked there.
 
 ### 4.5 The pure-Python backend (`pyitensor/`)
 
@@ -399,8 +422,8 @@ the cost of being slower than compiled ITensor by default (no
 block-sparsity, no JIT) — see §5 for how much slower in practice, and how
 `numba`/`jax` narrow that gap.
 
-One exception to that shared-surface rule: `dmrg.py::dmrg_generalized`
-(exposed as `Chain.gs_energy_generalized`/
+One partial exception to that shared-surface rule:
+`dmrg.py::dmrg_generalized` (exposed as `Chain.gs_energy_generalized`/
 `Many_Body_Chain.gs_energy_generalized`) solves the generalized
 eigenproblem $H|\psi\rangle=\lambda A|\psi\rangle$ for a Hermitian
 positive-definite metric MPO $A$ — a self-consistent Lagrange-multiplier
@@ -409,15 +432,12 @@ iteration built directly on top of `dmrg()`'s own per-sweep machinery
 rebuilds the MPO $H-\lambda A$ from the current $\lambda$ estimate,
 sweeps it with the ordinary two-site solver, then updates $\lambda$ to
 the swept state's generalized Rayleigh quotient
-$\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$. It exists only on
-this backend (`Many_Body_Chain.gs_energy_generalized` raises
-`NotImplementedError` for `itensor_version` 2/3/`"julia_live"`) — unlike
-every other pyitensor feature described above, `mpscpp2`/`mpscpp3`'s
-`chain_session.h` have no analogous session method to fall back to, so
-there is no "third option, no separate code path" here yet. See
-`examples/groundstate/dmrg_generalized_benchmark`, which cross-checks it
-against `algebra/arpacktk.py`'s pre-existing ARPACK-mode-2 route
-(`mpsiram_generalized`) on the same test problem.
+$\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$. `mpscpp3` has
+since gained a line-for-line port of this same algorithm against real
+ITensor v3 calls (§4.4's own `mpscpp3`-specific bullet), so
+`itensor_version` 3 supports it too now — only `mpscpp2`
+(`itensor_version=2`) and `"julia_live"` still raise
+`NotImplementedError`, not having an analogous session method yet.
 
 ### 4.6 The Julia backend (`mpsjulialive/`)
 

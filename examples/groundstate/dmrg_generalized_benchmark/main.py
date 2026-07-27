@@ -1,13 +1,12 @@
-"""Head-to-head benchmark: the new self-consistent-Lagrange-multiplier
-generalized-eigenvalue DMRG (Many_Body_Chain.gs_energy_generalized(),
-pyitensor/dmrg.py's dmrg_generalized() -- see its own docstring for the
-algorithm) vs the pre-existing ARPACK-mode-2 route
-(dmrgpy.algebra.arpacktk.mpsiram_generalized, OP=inv(M)*A via the
-approximate correction-vector self.applyinverse), both solving the same
-generalized eigenproblem H|psi>=lambda*A|psi> for a Hermitian
-positive-definite metric A, in DMRG mode on the pure-Python (pyitensor)
-backend -- the only backend the new solver is implemented on so far (see
-CLAUDE.md's "Implement in pyitensor first" scoping).
+"""Head-to-head benchmark: the self-consistent-Lagrange-multiplier
+generalized-eigenvalue DMRG (Many_Body_Chain.gs_energy_generalized())
+across its two implementations -- the pure-Python pyitensor engine
+(pyitensor/dmrg.py's dmrg_generalized()) and its ITensor v3 C++ port
+(Chain::gs_energy_generalized, mpscpp3/chain_session.h) -- against the
+pre-existing ARPACK-mode-2 route (dmrgpy.algebra.arpacktk.
+mpsiram_generalized, OP=inv(M)*A via the approximate correction-vector
+self.applyinverse), all solving the same generalized eigenproblem
+H|psi>=lambda*A|psi> for a Hermitian positive-definite metric A.
 
 dmrg_generalized() builds an actual materialized MPO H-lambda*A each
 outer sweep and runs ordinary two-site DMRG against it, needing no
@@ -16,12 +15,21 @@ one iterative correction-vector solve (self.applyinverse) per Krylov
 step, which is only ever approximate in DMRG mode (there is no exact MPO
 inverse -- see arpacktk.py's own module docstring) -- so besides wall
 time, this benchmark is also a direct check of how much accuracy that
-approximation costs relative to a method with no such step.
+approximation costs relative to a method with no such step. The two
+dmrg_generalized() implementations should agree with each other (and
+with ED) to near machine precision -- they run the identical algorithm,
+line-for-line, just against a hand-rolled two-site sweep in pure Python
+vs the real, compiled ITensor v3 library -- so the interesting
+comparison between them is wall time, not accuracy.
 
 Ground truth is scipy.linalg.eigh's exact generalized Hermitian-definite
 eigensolver, built from the ED sparse matrices of H and A (same
-convention as tests/test_arpacktk_iram.py and
-tests/test_pyitensor_dmrg_generalized.py).
+convention as tests/test_dmrg_generalized.py and
+tests/test_arpacktk_iram.py).
+
+The v3 rows are skipped automatically if the compiled extension isn't
+available (see cppext.available(3)) -- run `python install.py
+--itensor-version=3` first to include them.
 
 Usage: python main.py [--json out.json]
 """
@@ -32,7 +40,7 @@ sys.path.append(os.getcwd() + '/../../../src')
 import numpy as np
 import scipy.linalg as sla
 
-from dmrgpy import fermionchain
+from dmrgpy import cppext, fermionchain
 from dmrgpy.algebra import arnolditk, arpacktk
 
 
@@ -41,7 +49,7 @@ from dmrgpy.algebra import arnolditk, arpacktk
 # hopping + nearest-neighbor interaction) and a diagonal, strictly
 # positive metric A = 1 + 0.5*sum(N_i) -- identical construction to
 # test_arpacktk_iram.py's _generalized_fermion_problem and
-# test_pyitensor_dmrg_generalized.py's own copy, so results here are
+# tests/test_dmrg_generalized.py's own copy, so results here are
 # directly comparable to those tests' tolerances.
 # ---------------------------------------------------------------------
 
@@ -72,9 +80,12 @@ def ground_truth(fc, h, m):
 # Runners
 # ---------------------------------------------------------------------
 
-def run_dmrg_generalized(n, seed, maxm, nsweeps, cutoff=1e-12):
+def run_dmrg_generalized(n, seed, maxm, nsweeps, itensor_version, cutoff=1e-12):
     fc, h, m = generalized_fermion_problem(n, seed)
-    fc.setup_python()
+    if itensor_version == "python":
+        fc.setup_python()
+    else:
+        fc.setup_cpp(version=itensor_version)
     fc.maxm, fc.nsweeps, fc.cutoff = maxm, nsweeps, cutoff
     t0 = time.time()
     try:
@@ -107,6 +118,22 @@ CASES = [
     dict(name="fermion_n8", n=8, seed=3, maxm=80, nsweeps=16),
 ]
 
+V3_AVAILABLE = cppext.available(3)
+ALGOS = ["dmrg_generalized_python"] + (["dmrg_generalized_v3"] if V3_AVAILABLE else []) \
+        + ["arpack_mode2"]
+
+
+def run_algo(algo, case, tol):
+    if algo == "dmrg_generalized_python":
+        return run_dmrg_generalized(case["n"], case["seed"], case["maxm"],
+                case["nsweeps"], "python")
+    if algo == "dmrg_generalized_v3":
+        return run_dmrg_generalized(case["n"], case["seed"], case["maxm"],
+                case["nsweeps"], 3)
+    if algo == "arpack_mode2":
+        return run_arpack_mode2(case["n"], case["seed"], tol=tol)
+    raise ValueError(algo)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -115,35 +142,40 @@ def main():
             help="ARPACK mode-2 convergence tolerance")
     args = ap.parse_args()
 
+    if not V3_AVAILABLE:
+        print("(ITensor v3 extension not compiled -- skipping "
+              "dmrg_generalized_v3 rows; run `python install.py "
+              "--itensor-version=3` to include them)\n")
+
     results = []
     for case in CASES:
         fc, h, m = generalized_fermion_problem(case["n"], case["seed"])
         gt = ground_truth(fc, h, m)
         print(f"=== {case['name']} (n={case['n']}) === ground truth lambda0 = {gt:.8f}")
 
-        r_dmrg = run_dmrg_generalized(case["n"], case["seed"], case["maxm"], case["nsweeps"])
-        r_iram = run_arpack_mode2(case["n"], case["seed"], tol=args.tol)
-
-        for algo, res in [("dmrg_generalized", r_dmrg), ("arpack_mode2", r_iram)]:
+        for algo in ALGOS:
+            res = run_algo(algo, case, args.tol)
             err = abs(res["energy"] - gt) if res["ok"] else None
             res.update(name=case["name"], n=case["n"], algo=algo, ground_truth=gt,
                     error=err)
             results.append(res)
             e_str = f"{res['energy']:.8f}" if res["ok"] else res["err"]
             err_str = f"{err:.2e}" if err is not None else "n/a"
-            print(f"  algo={algo:17s} ok={res['ok']!s:5s} "
+            print(f"  algo={algo:24s} ok={res['ok']!s:5s} "
                   f"time={res['time']:7.3f}s  error={err_str:>10s}  energy={e_str}")
 
-    print("\n=== Summary: wall time and accuracy, dmrg_generalized vs arpack_mode2 ===")
+    print("\n=== Summary: wall time relative to dmrg_generalized_python ===")
     for case in CASES:
-        a = [r for r in results if r["name"] == case["name"] and r["algo"] == "dmrg_generalized"][0]
-        b = [r for r in results if r["name"] == case["name"] and r["algo"] == "arpack_mode2"][0]
-        if a["ok"] and b["ok"]:
-            ratio = b["time"] / a["time"] if a["time"] > 0 else float("inf")
-            faster = "dmrg_generalized" if ratio >= 1 else "arpack_mode2"
-            print(f"  {case['name']:12s} dmrg_generalized: {a['time']:7.3f}s (err {a['error']:.2e})"
-                  f"   arpack_mode2: {b['time']:7.3f}s (err {b['error']:.2e})"
-                  f"   -> {faster} is {max(ratio, 1/ratio):.2f}x faster")
+        rows = {r["algo"]: r for r in results if r["name"] == case["name"]}
+        base = rows["dmrg_generalized_python"]
+        print(f"  {case['name']}:")
+        for algo in ALGOS:
+            r = rows[algo]
+            if not (r["ok"] and base["ok"]):
+                continue
+            ratio = r["time"] / base["time"] if base["time"] > 0 else float("inf")
+            print(f"    {algo:24s} {r['time']:7.3f}s (err {r['error']:.2e})"
+                  f"   -> {ratio:.2f}x the pure-Python dmrg_generalized time")
 
     if args.json:
         with open(args.json, "w") as f:

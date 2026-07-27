@@ -459,19 +459,26 @@ iteration per \lstinline|Sweeps| schedule entry, so bond dimension ramps
 exactly as an ordinary \lstinline|gs_energy()| run's own schedule does.
 $A=\mathrm{Id}$ reduces this exactly to plain ground-state DMRG.
 
-Only implemented on the pure-Python (pyitensor) backend so far
+Implemented on the pure-Python (pyitensor) backend
 (\lstinline|itensor_version="python"|, i.e. after
 \lstinline|chain.setup_python()|) ---
 \lstinline|dmrgpy.pyitensor.dmrg.dmrg_generalized| is the underlying
-routine; the compiled ITensor v2/v3 sessions and \lstinline|julia_live|
-raise \lstinline|NotImplementedError|. See
-\texttt{examples/groundstate/dmrg\_generalized\_benchmark}, which heads
-it up against \lstinline|mpsiram_generalized| on the same
+routine --- and on compiled ITensor v3 (\lstinline|itensor_version=3|,
+i.e. after \lstinline|chain.setup_cpp(version=3)|), where
+\lstinline|Chain::gs_energy_generalized|
+(\texttt{mpscpp3/chain\_session.h}) runs the identical algorithm against
+ITensor v3's own \lstinline|dmrg()|/\lstinline|Sweeps|/\lstinline|sum()|
+instead of pyitensor's hand-rolled two-site sweep.
+\lstinline|itensor_version=2| (mpscpp2) and \lstinline|julia_live| don't
+have this session method yet and raise \lstinline|NotImplementedError|.
+See \texttt{examples/groundstate/dmrg\_generalized\_benchmark}, which
+heads all three solvers up against each other on the same
 interacting-fermion-chain test problem: needing no approximate inverse,
-the DMRG route is both noticeably more accurate and (since ARPACK mode
-2's own correction-vector solve gets more expensive, and less accurate,
-as the chain grows) an order of magnitude or more faster on an 8-site
-chain.
+both DMRG routes are far more accurate than ARPACK mode 2 (whose own
+correction-vector solve also gets more expensive, and less accurate, as
+the chain grows --- two orders of magnitude slower and $10^{9}$ times
+less accurate on an 8-site chain), and v3 is itself consistently
+$\sim2$--$4\times$ faster than pyitensor at these sizes.
 
 \section{Entanglement and quantum information}
 
