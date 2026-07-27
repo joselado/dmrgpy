@@ -61,7 +61,7 @@ TDVP/tdvp.h+TDVP/basisextension.h's own NumCenter=1 + addBasis() pairing.
 """
 
 import numpy as np
-from scipy.linalg import expm as _dense_expm
+from scipy.linalg import eigh_tridiagonal
 
 from .dmrg import (_all_left_environments, _all_right_environments,
                     _extend_left, _extend_right, one_site_heff, two_site_heff,
@@ -76,48 +76,58 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12):
     matvec function) via a Krylov (Lanczos) subspace of dimension up to
     `niter`: build an orthonormal basis {v0, A v0, A^2 v0, ...} via the
     Lanczos recursion (with full reorthogonalization -- the subspace is
-    small enough, niter ~ tens, that this costs nothing and buys real
-    numerical stability), project A onto it as a small tridiagonal matrix
-    T, exponentiate T exactly (cheap, dense), and map back. Standard
+    small enough, niter ~ tens, that this costs nothing relative to the
+    matvec itself and buys real numerical stability), project A onto it as
+    a small tridiagonal matrix, exponentiate it, and map back. Standard
     Krylov-propagator technique for real-time quantum dynamics; this is
     what tdvp_step()'s "niter=50 bounds the Lanczos iterations" comment in
-    mpscpp3/chain_session.h refers to on the compiled-backend side."""
+    mpscpp3/chain_session.h refers to on the compiled-backend side.
+
+    Reorthogonalization is done as two BLAS matrix-vector products against
+    the (preallocated, incrementally filled) basis built so far, not a
+    per-vector Python loop -- confirmed via cProfile that this function's
+    *own* bookkeeping (independent of matvec cost) became the dominant
+    remaining cost of a dynamical-METTS run after kernels.py's matvec-
+    planning fix (see that module's docstring), and the O(niter) Python-
+    level np.vdot calls per Lanczos step (O(niter^2) total per call here)
+    were the biggest piece of it. The projected Krylov matrix is real
+    tridiagonal by construction (alpha=vdot(...).real, beta=norm(...) are
+    both always real), so it's exponentiated via eigh_tridiagonal's direct
+    eigendecomposition rather than a generic dense expm() Pade computation
+    -- cheaper, and only the first column of the exponentiated matrix is
+    ever used, so the full matrix is never assembled."""
     beta0 = np.linalg.norm(v0)
     if beta0 == 0:
         return v0.copy()
-    q = v0 / beta0
-    qs = [q]
+
+    m = min(niter, v0.size)
+    Q = np.empty((v0.size, m), dtype=complex)
+    Q[:, 0] = v0 / beta0
     alphas = []
     betas = []
-    w = matvec(q)
-    alpha = np.vdot(q, w).real
+
+    w = matvec(Q[:, 0])
+    alpha = np.vdot(Q[:, 0], w).real
     alphas.append(alpha)
-    w = w - alpha * q
-    m = min(niter, v0.size)
-    for _ in range(1, m):
+    w = w - alpha * Q[:, 0]
+    k = 1
+    while k < m:
         beta = np.linalg.norm(w)
         if beta < tol:
             break
         betas.append(beta)
-        q_new = w / beta
-        qs.append(q_new)
-        w = matvec(q_new)
-        alpha = np.vdot(q_new, w).real
+        Qprev = Q[:, :k]  # every vector built so far, *excluding* the new one
+        Q[:, k] = w / beta
+        w = matvec(Q[:, k])
+        alpha = np.vdot(Q[:, k], w).real
         alphas.append(alpha)
-        w = w - alpha * q_new - beta * qs[-2]
-        for qk in qs[:-1]:
-            w = w - np.vdot(qk, w) * qk
+        w = w - alpha * Q[:, k] - beta * Qprev[:, -1]
+        w = w - Qprev @ (Qprev.conj().T @ w)
+        k += 1
 
-    k = len(alphas)
-    T = np.zeros((k, k), dtype=complex)
-    for idx in range(k):
-        T[idx, idx] = alphas[idx]
-    for idx in range(k - 1):
-        T[idx, idx + 1] = betas[idx]
-        T[idx + 1, idx] = betas[idx]
-    Q = np.column_stack(qs[:k])
-    expT = _dense_expm(coeff * T)
-    return beta0 * (Q @ expT[:, 0])
+    evals, evecs = eigh_tridiagonal(np.array(alphas), np.array(betas))
+    exp_col0 = evecs @ (np.exp(coeff * evals) * evecs[0, :])
+    return beta0 * (Q[:, :k] @ exp_col0)
 
 
 def _evolve_two_site(L, Lbra, H, ket, i, R, Rbra, tau, niter):

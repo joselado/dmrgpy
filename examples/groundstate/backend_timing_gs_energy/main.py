@@ -16,12 +16,17 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 #
 # Confirmed directly on one machine (numbers will vary by machine/load --
 # this script is meant to be re-run, not read as a fixed benchmark table):
-# with numba installed (pyitensor's default accelerated kernel path, see
-# pyitensor/kernels.py), the python backend was only ~1.5-2.5x slower than
-# v3 for n=8-20, but the gap widened with n (~4-5x by n=28-32) -- v3
-# benefits from real ITensor's QN block-sparsity, which pyitensor's dense
-# NumPy tensors don't have even with numba JIT acceleration. Without numba,
-# expect a much larger gap (see pyitensor/__init__.py's own docstring).
+# at the default (small) bond dimension this script uses, the python
+# backend is ~1.5-2x slower than v3 for n=8-20 -- numba is NOT on by
+# default (pyitensor/kernels.py's USE_NUMBA defaults to False; see that
+# module's docstring for why, and examples/finite_temperature/
+# backend_timing_metts_dynamical_correlator for a workload where the gap
+# is much larger and numba's tradeoffs actually matter). At *larger* bond
+# dimension ground-state DMRG tells a different story entirely: pyitensor
+# is at parity with, or faster than, v3 (e.g. n=24/maxdim=300: v3 ~107s vs
+# python ~25-31s) because mpscpp3 in this repo runs with ConserveQNs=false
+# and a random-MPS start (see CLAUDE.md/documentation.md), sacrificing the
+# QN block-sparsity that would otherwise help it at scale.
 import time
 from dmrgpy import spinchain
 
