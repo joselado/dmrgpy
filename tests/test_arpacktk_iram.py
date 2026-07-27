@@ -16,6 +16,34 @@ from dmrgpy.algebra.arpacktk import mpsiram, mpsiram_shift_invert
 from dmrgpy.algebra.arpacktk import mpsiram_generalized, generalized_excited_states
 
 
+@pytest.fixture(autouse=True)
+def _isolate_shared_global_state():
+    """Two pieces of shared, module/process-global state this file must
+    not leak or depend on:
+
+    arnolditk.arnoldimode -- the module-level flag arpacktk.py's
+    random_state()/toMPO() read to pick ED vs DMRG. Tests here set it to
+    exercise both modes; without saving/restoring it, whatever the last
+    test in this file left it set to would leak into every other test
+    file that runs after it (this file has no control over execution
+    order).
+
+    numpy's global RNG -- edtk/edchain.py's State.random_state() (the ED
+    IRAM start-vector generator) draws from np.random.random() directly,
+    not a seeded local generator, so how many prior np.random calls
+    happened anywhere earlier in the process (other tests, or even
+    earlier iterations of the same IRAM run) affects the exact numerical
+    trajectory and hence convergence precision -- confirmed directly: a
+    recursive multi-state test passed in isolation but failed when run
+    after other tests in this file consumed different amounts of the
+    global stream. Seeding it fresh before every test makes each test's
+    outcome depend only on its own random draws, not on execution order."""
+    original = arnolditk.arnoldimode
+    np.random.seed(12345)
+    yield
+    arnolditk.arnoldimode = original
+
+
 def _heisenberg_chain(n=6, seed=1):
     rng = np.random.RandomState(seed)
     sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
@@ -120,6 +148,30 @@ def test_excited_states_non_hermitian_default_matches_ed():
     es_sorted = np.array(sorted(es, key=lambda x: x.real))
     for e_iram, e_ed in zip(es_sorted, es_ed):
         assert abs(e_iram.real - e_ed.real) < 1e-3
+
+
+def test_excited_states_non_hermitian_accepts_legacy_nkry_kwargs():
+    """excited_states_non_hermitian's old arnolditk-based signature had
+    nkry_min/nkry_max as explicit named parameters; the arpacktk swap
+    replaced them with ncv, but any caller still passing nkry_min/
+    nkry_max explicitly (e.g. via get_excited_states(..., nkry_min=...))
+    would otherwise hit a TypeError several calls deep once those stray
+    kwargs reached mpsiram (no **kwargs catch-all there) -- confirmed via
+    direct reproduction. Both must still be accepted (and produce a
+    correct result), even though IRAM has no direct equivalent of
+    arnolditk's adaptive Krylov-size range."""
+    fc, h = _staggered_fermion_chain(n=4, seed=3)
+    fc.setup_python()
+    es_ed = np.array(sorted(fc.get_excited(mode="ED", n=3), key=lambda x: x.real))
+    es, wfs = fc.get_excited_states(n=2, nkry_min=2)
+    es_sorted = np.array(sorted(es, key=lambda x: x.real))
+    for e_iram, e_ed in zip(es_sorted, es_ed[:2]):
+        assert abs(e_iram.real - e_ed.real) < 1e-2
+    # nkry_max together with nkry_min must also still work
+    es2, wfs2 = fc.get_excited_states(n=2, nkry_min=3, nkry_max=8)
+    es2_sorted = np.array(sorted(es2, key=lambda x: x.real))
+    for e_iram, e_ed in zip(es2_sorted, es_ed[:2]):
+        assert abs(e_iram.real - e_ed.real) < 1e-2
 
 
 def test_eigenvalue_degeneracy_non_degenerate_target_ed():

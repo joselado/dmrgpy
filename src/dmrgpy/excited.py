@@ -109,7 +109,7 @@ from .algebra.arnolditk import gram_smith
 
 
 def excited_states_non_hermitian(self,n=3,recursive=True,
-        maxit=40,ncv=10,
+        maxit=40,ncv=10,nkry_min=None,nkry_max=None,
      **kwargs):
     # recursive=True (one state at a time, each deflated against the
     # previous ones) is the default rather than a single simultaneous
@@ -134,6 +134,16 @@ def excited_states_non_hermitian(self,n=3,recursive=True,
     # shrink this back down to 6 for the common recursive n=1-per-call
     # case, right where the near-degenerate-safe extra margin matters
     # most.
+    # nkry_min/nkry_max are accepted only for backward compatibility with
+    # the old arnolditk-based signature (an adaptive Krylov-size range) --
+    # any caller that used to pass them explicitly would otherwise now
+    # hit a TypeError several calls deep (they'd flow through **kwargs
+    # into mpsiram, which has no catch-all). IRAM has no equivalent
+    # adaptive range, only a single fixed ncv per restart cycle, so
+    # nkry_max (the closest matching concept, the "widest" Krylov size
+    # arnolditk would ever grow to) overrides ncv when given; nkry_min
+    # has no equivalent and is accepted but otherwise unused.
+    if nkry_max is not None: ncv = nkry_max
     from .algebra import arpacktk
     (es,wf) = arpacktk.excited_states(self,self.hamiltonian,
                 nwf=n, # number of wavefunctions
