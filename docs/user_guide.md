@@ -347,6 +347,24 @@ every outer iteration from $H$'s own exact (still cheap, $O(\text{ncv}^2)$)
 representation on the Krylov basis $\mathrm{OP}$ builds — the same
 accommodation arnolditk's own `mode="ShiftInv"` path already made.
 
+`arpacktk.py` also implements ARPACK's mode 2 — the generalized
+eigenproblem $A|\psi\rangle=\lambda M|\psi\rangle$ for a Hermitian
+positive-definite $M$
+(`dmrgpy.mpsalgebra.mpsiram_generalized`/`generalized_excited_states`,
+$\mathrm{OP}=M^{-1}A$, $B=M$). Unlike mode 1/3, the Krylov basis must be
+orthonormal in the $M$-weighted inner product
+$\langle u,v\rangle_M=\langle u|M|v\rangle$ rather than the plain one, so
+building it uses a separate routine
+(`arnoldi_extend_generalized`) rather than adding a conditional $M$ to
+the mode-1/3 one. $\mathrm{OP}$ again goes through
+`self.applyinverse` (the same approximate-inverse caveat as mode 3, here
+with the trivial shift $\sigma=0$) — but unlike mode 3, $\mathrm{OP}$'s
+own Hessenberg-matrix eigenvalues stay directly meaningful (there is no
+shift to undo), so convergence/selection follow the same pattern as
+plain `mpsiram`, just built with the $M$-inner product. Verified against
+`scipy.linalg.eigh`'s generalized Hermitian-definite eigensolver in both
+ED and DMRG mode.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain

@@ -182,6 +182,8 @@ from .algebra.arpacktk import lowest_energy_non_hermitian as lowest_energy_non_h
 from .algebra.arpacktk import excited_states as mps_excited_states
 from .algebra.arpacktk import mpsiram_shift_invert
 from .algebra.arpacktk import shift_invert_excited_states
+from .algebra.arpacktk import mpsiram_generalized
+from .algebra.arpacktk import generalized_excited_states
 
 # IRAM (algebra/arpacktk.py, ported from ARPACK) is the default MPS
 # Arnoldi solver: it reuses its compressed Krylov subspace across

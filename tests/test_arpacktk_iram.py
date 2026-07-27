@@ -13,6 +13,7 @@ import pytest
 from dmrgpy import spinchain, fermionchain
 from dmrgpy.algebra import arnolditk
 from dmrgpy.algebra.arpacktk import mpsiram, mpsiram_shift_invert
+from dmrgpy.algebra.arpacktk import mpsiram_generalized, generalized_excited_states
 
 
 def _heisenberg_chain(n=6, seed=1):
@@ -156,3 +157,73 @@ def test_mpsiram_dmrg_mode_matches_ed(itensor_version):
     es_ed = np.sort(np.array(sc.get_excited(mode="ED", n=1)).real)
     es, wfs = mpsiram(sc, h, which="SR", nev=1, tol=1e-6)
     assert abs(es[0].real - es_ed[0]) < 1e-4
+
+
+def _generalized_fermion_problem(n=5, seed=2):
+    """A*x = lambda*M*x: A a Hermitian interacting fermion Hamiltonian,
+    M = 1 + 0.5*sum(N_i) a Hermitian positive-definite weight operator
+    (diagonal, eigenvalues in [1, 1+0.5n], never zero)."""
+    rng = np.random.RandomState(seed)
+    fc = fermionchain.Fermionic_Chain(n)
+    a = 0
+    for i in range(n - 1):
+        a = a + rng.random() * (fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i])
+    for i in range(n - 1):
+        a = a + rng.random() * (fc.N[i] - 0.5) * (fc.N[i + 1] - 0.5)
+    m = 1
+    for i in range(n):
+        m = m + 0.5 * fc.N[i]
+    fc.set_hamiltonian(a)
+    return fc, a, m
+
+
+def _generalized_ground_truth(fc, a, m):
+    import scipy.linalg as sla
+    Amat = fc.get_ED_obj().MO2matrix(a)
+    Mmat = fc.get_ED_obj().MO2matrix(m)
+    Amat = Amat.toarray() if hasattr(Amat, "toarray") else np.array(Amat)
+    Mmat = Mmat.toarray() if hasattr(Mmat, "toarray") else np.array(Mmat)
+    return np.sort(sla.eigh(Amat, Mmat, eigvals_only=True))
+
+
+def test_mpsiram_generalized_ground_state_ed():
+    """mode 2 (A*x=lambda*M*x, OP=inv(M)*A, B=M) ground state must match
+    scipy.linalg.eigh's generalized Hermitian-definite eigensolver."""
+    fc, a, m = _generalized_fermion_problem(n=5, seed=2)
+    arnolditk.arnoldimode = "ED"
+    w = _generalized_ground_truth(fc, a, m)
+    es, wfs = mpsiram_generalized(fc, a, m, which="SR", nev=1, tol=1e-8)
+    assert abs(es[0].real - w[0]) < 1e-5
+    wf = wfs[0]
+    assert abs(wf.dot(wf) - 1.0) < 1e-8 # plain-normalized, not M-normalized
+
+
+def test_mpsiram_generalized_simultaneous_multi_eigenvalue_ed():
+    fc, a, m = _generalized_fermion_problem(n=5, seed=2)
+    arnolditk.arnoldimode = "ED"
+    w = _generalized_ground_truth(fc, a, m)
+    es, wfs = mpsiram_generalized(fc, a, m, which="SR", nev=3, tol=1e-6)
+    for e_iram, e_true in zip(sorted(es.real), w[:3]):
+        assert abs(e_iram - e_true) < 1e-4
+
+
+def test_generalized_excited_states_recursive_ed():
+    fc, a, m = _generalized_fermion_problem(n=5, seed=2)
+    arnolditk.arnoldimode = "ED"
+    w = _generalized_ground_truth(fc, a, m)
+    es, wfs = generalized_excited_states(fc, a, m, nwf=3, which="SR",
+            recursive=True, tol=1e-6)
+    for e_iram, e_true in zip(sorted(es.real), w[:3]):
+        assert abs(e_iram - e_true) < 1e-4
+
+
+@pytest.mark.parametrize("itensor_version", ["python"])
+def test_mpsiram_generalized_dmrg_mode_matches_ed(itensor_version):
+    """Real MPS/MPO (pyitensor backend) mode-2 ground state must agree
+    with the generalized-eigenvalue ED ground truth."""
+    fc, a, m = _generalized_fermion_problem(n=4, seed=2)
+    w = _generalized_ground_truth(fc, a, m)
+    fc.setup_python()
+    arnolditk.arnoldimode = "DMRG"
+    es, wfs = mpsiram_generalized(fc, a, m, which="SR", nev=1, tol=1e-6)
+    assert abs(es[0].real - w[0]) < 1e-4

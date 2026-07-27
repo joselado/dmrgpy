@@ -51,16 +51,31 @@ Ported pieces, and their ARPACK sources:
                       convergence, adjust kev to avoid stagnation exactly
                       as znaup2 does, restart, repeat)
 
-This is the *matrix-free, mode-1* subset of ARPACK (OP=A, B=I; no
-reverse communication, no B-inner product) -- everything dmrgpy's own
-MPS/ED objects need (``self.random_mps()``/``EDchain``, ``.dot()``,
-``.normalize()``, ``.copy()``, ``+``/``-``/scalar ``*``) and nothing
-more -- plus ``mpsiram_shift_invert``, a shift-invert mode (ARPACK's
-mode 3, OP=inv(A-sigma*I), B=I) adapted to dmrgpy's only *approximate*
-matrix inverse (``self.applyinverse``, an iterative correction-vector
-solve, not an exact linear solve) -- see its own docstring for how that
-changes the convergence/selection machinery relative to ARPACK's own
-mode-3 assumption of an exact inverse.
+The core (``mpsiram``) is the *matrix-free, mode-1* subset of ARPACK
+(OP=A, B=I; no reverse communication, no B-inner product) -- everything
+dmrgpy's own MPS/ED objects need (``self.random_mps()``/``EDchain``,
+``.dot()``, ``.normalize()``, ``.copy()``, ``+``/``-``/scalar ``*``) and
+nothing more. Two more ARPACK modes build on it:
+
+  ``mpsiram_shift_invert`` -- ARPACK mode 3, OP=inv(A-sigma*I), B=I,
+  adapted to dmrgpy's only *approximate* matrix inverse
+  (``self.applyinverse``, an iterative correction-vector solve, not an
+  exact linear solve) -- see its own docstring for how that changes the
+  convergence/selection machinery relative to ARPACK's own mode-3
+  assumption of an exact inverse.
+
+  ``mpsiram_generalized`` -- ARPACK mode 2, the generalized eigenproblem
+  A*x=lambda*M*x (OP=inv(M)*A, B=M): the Krylov basis must be
+  orthonormal in the M-weighted inner product <u,v>_M=<u|M|v> instead of
+  the plain one, so it uses a separate ``arnoldi_extend_generalized``
+  rather than ``arnoldi_extend`` (see that function's own docstring for
+  why it's kept separate rather than adding a conditional B to
+  ``arnoldi_extend`` itself). Reuses ``self.applyinverse`` too (the same
+  approximate-inverse caveat as mode 3 applies, here with the trivial
+  shift sigma=0), but -- unlike mode 3 -- OP's own Hessenberg matrix
+  eigenvalues remain directly meaningful (no shift to untransform
+  through), so convergence/selection stay on the standard ``mpsiram``
+  pattern, just built with the M-inner product.
 """
 import numpy as np
 
@@ -151,6 +166,77 @@ def arnoldi_extend(self, Op, V, H, resid, rnorm, k, npsteps,
     return Vout, Hnew, resid, beta
 
 
+def arnoldi_extend_generalized(self, Op, B, V, H, resid, rnorm, k, npsteps,
+        wfskip=None, verbose=0):
+    """Generalized-inner-product counterpart of arnoldi_extend, for
+    ARPACK mode 2 (A*x=lambda*M*x, M Hermitian positive definite,
+    OP=inv(M)*A, B=M): the identical classical-Gram-Schmidt-with-
+    iterative-refinement algorithm, but every inner product/norm uses
+    <u,v>_B = <u|B|v> instead of the plain <u|v>, matching mode 2's
+    B-orthogonal Krylov basis (V^H*B*V=I) rather than mode 1/3's plain
+    orthogonal one (B=I). Kept as a separate function rather than adding
+    an optional B to arnoldi_extend itself (mirroring how
+    mpsiram_shift_invert is a separate function from mpsiram, not a
+    branch inside it): the extra per-inner-product B-application this
+    needs throughout would otherwise have to be threaded past every one
+    of arnoldi_extend's .dot() calls behind a conditional, for no benefit
+    to the already-tested, B=I-only mode-1/mode-3 callers. B is applied
+    fresh wherever needed here (no incremental linear-combination
+    caching of B images, unlike e.g. the Ritz-estimate bookkeeping
+    elsewhere) -- simpler to verify correct at the cost of a few extra
+    (cheap MPO-application-class, not full Op(x)-class) B-evaluations
+    per Krylov step, acceptable for a mode with no established dmrgpy
+    call site yet to optimize against."""
+    def bdot(u, v): return u.dot(B(v))
+    if wfskip is None: wfskip = []
+    kplusp = k + npsteps
+    Hnew = np.zeros((kplusp, kplusp), dtype=complex)
+    if k > 0: Hnew[:k, :k] = H
+    Vout = list(V)
+    beta = rnorm
+    for j in range(k, kplusp):
+        if beta < 1e-12:
+            if verbose > 0:
+                print("arnoldi_extend_generalized: invariant subspace, restarting")
+            resid = random_state(self, orthogonal=Vout + wfskip)
+            beta = np.sqrt(abs(bdot(resid, resid)))
+        vj = resid * (1. / beta)
+        Vout.append(vj)
+        w = Op(vj)
+        if wfskip:
+            for s in wfskip:
+                w = w - bdot(s, w) * s
+        coeffs = np.array([bdot(Vout[i], w) for i in range(j + 1)], dtype=complex)
+        r = w
+        for i in range(j + 1): r = r - coeffs[i] * Vout[i]
+        if j > 0: Hnew[j, j - 1] = beta
+        Hnew[:j + 1, j] = coeffs
+        wnorm = np.sqrt(abs(bdot(w, w)))
+        rnorm1 = np.sqrt(abs(bdot(r, r)))
+        if wnorm > 0 and rnorm1 <= 0.717 * wnorm:
+            # iterative refinement, same 0.717/2-try policy as arnoldi_extend
+            converged = False
+            for _try in range(2):
+                if wfskip:
+                    for s in wfskip:
+                        r = r - bdot(s, r) * s
+                s = np.array([bdot(Vout[i], r) for i in range(j + 1)], dtype=complex)
+                for i in range(j + 1): r = r - s[i] * Vout[i]
+                Hnew[:j + 1, j] += s
+                rnorm2 = np.sqrt(abs(bdot(r, r)))
+                prev = rnorm1
+                rnorm1 = rnorm2
+                if rnorm2 > 0.717 * prev:
+                    converged = True
+                    break
+            if not converged:
+                r = r * 0.0
+                rnorm1 = 0.0
+        resid = r
+        beta = rnorm1
+    return Vout, Hnew, resid, beta
+
+
 def hessenberg_ritz(H, rnorm):
     """Port of zneigh: eigenvalues of the (small, dense) Hessenberg
     matrix H and their Ritz estimates (= rnorm * |last eigenvector
@@ -186,10 +272,15 @@ def select_shifts(ritz, bounds, np_apply):
     return shifts[order]
 
 
-def apply_shifts(V, H, resid, shifts, kev):
+def apply_shifts(V, H, resid, shifts, kev, B=None):
     """Port of znapps (see module docstring for why dense QR replaces the
     bulge chase): compress a length len(V) Arnoldi factorization down to
-    length kev by applying the given shifts."""
+    length kev by applying the given shifts. B (optional): the ARPACK
+    mode-2/generalized inner-product weight (B=None, the default, is
+    mode 1/3's B=I) -- only affects the final residual norm, since the
+    rest of this routine is pure dense linear algebra on the Hessenberg
+    matrix plus linear combinations of V, agnostic to which inner
+    product built them."""
     kplusp = H.shape[0]
     Hc = H.copy()
     Q = np.eye(kplusp, dtype=complex)
@@ -210,7 +301,8 @@ def apply_shifts(V, H, resid, shifts, kev):
     if abs(betak) > 1e-13:
         resid_new = resid_new + betak * Vnew[kev]
     Hnew = Hc[:kev, :kev].copy()
-    rnorm_new = np.sqrt(abs(resid_new.dot(resid_new)))
+    Bresid = resid_new if B is None else B(resid_new)
+    rnorm_new = np.sqrt(abs(resid_new.dot(Bresid)))
     return Vnew[:kev], Hnew, resid_new, rnorm_new
 
 
@@ -468,6 +560,128 @@ def shift_invert_excited_states(self, H, e=0.0, nwf=1, wfskip=None, **kwargs):
     for i in range(nwf):
         es, wfs = mpsiram_shift_invert(self, H, e=e, nev=1, wfskip=wfskip,
                 **kwargs)
+        eout.append(es[0])
+        wfout.append(wfs[0])
+        wfskip.append(wfs[0])
+    return np.array(eout), wfout
+
+
+def mpsiram_generalized(self, A, M, which="SR", nev=1, ncv=None, tol=1e-8,
+        maxiter=200, delta=1e-3, maxn=20, verbose=0, wfskip=None):
+    """Generalized-eigenvalue IRAM (ARPACK mode 2: A*x = lambda*M*x, M
+    Hermitian positive definite, OP=inv(M)*A, B=M), finding the nev
+    eigenpairs selected by `which` ({LM,SM,LR,SR,LI,SI}, same convention
+    as mpsiram).
+
+    OP(x) applies A, then the approximate inv(M) via
+    self.applyinverse(M, A*x, delta, maxn) -- the identical iterative
+    correction-vector solve mpsiram_shift_invert already uses for
+    inv(A-sigma*M), here with the trivial shift sigma=0 (dmrgpy has no
+    exact MPO inverse, same caveat as mode 3). Unlike mode 1/3 (B=I),
+    the Krylov basis here must be orthonormal in the M-weighted inner
+    product <u,v>_M = <u|M|v>, not the plain Hermitian one -- see
+    arnoldi_extend_generalized. Because OP is only approximate, its own
+    Hessenberg matrix's eigenvalues are still directly meaningful here
+    (unlike mode 3): mode 2 has no shift to untransform through, OP's
+    eigenvalues approximate A's own generalized eigenvalues directly
+    (OP=inv(M)*A, so an exact OP would have exactly A's eigenvalues), so
+    the standard mpsiram-style convergence/selection (on OP's own
+    Hessenberg matrix) is used, just built with the M-inner product.
+
+    Returns (es, wfs): es are the generalized Rayleigh quotient
+    <wf|A|wf>/<wf|M|wf> -- invariant under wf's overall scale, so this
+    is correct regardless of which normalization convention wfs
+    themselves carry. wfs are plain-normalized (<wf|wf>=1, the same
+    convention every other wavefunction in this codebase uses, *not*
+    M-normalized), MPS/ED-state linear combinations of the final Krylov
+    basis, ordered most-wanted-first.
+    """
+    if wfskip is None: wfskip = []
+    if ncv is None: ncv = 2 * nev + 4
+    ncv = max(ncv, nev + 2)
+    MA = self.toMPO(A, mode=arnolditk.arnoldimode)
+    MM = self.toMPO(M, mode=arnolditk.arnoldimode)
+    Op = lambda x: self.applyinverse(M, MA * x, delta=delta, maxn=maxn)
+    B = lambda x: MM * x
+
+    eps23 = np.finfo(float).eps ** (2. / 3.)
+    kev = nev
+    resid = random_state(self, orthogonal=wfskip if wfskip else None)
+    rnorm = np.sqrt(abs(resid.dot(B(resid)))) # true M-norm, not assumed 1
+    V, Hm = [], np.zeros((0, 0), dtype=complex)
+    V, Hm, resid, rnorm = arnoldi_extend_generalized(self, Op, B, V, Hm,
+            resid, rnorm, 0, kev, wfskip=wfskip, verbose=verbose)
+
+    for it in range(maxiter):
+        npcur = ncv - kev
+        if npcur > 0:
+            V, Hm, resid, rnorm = arnoldi_extend_generalized(self, Op, B,
+                    V, Hm, resid, rnorm, kev, npcur, wfskip=wfskip,
+                    verbose=verbose)
+
+        ritz, bounds, Y = hessenberg_ritz(Hm, rnorm)
+        ritz, bounds = sort_ritz(which, ritz, bounds)
+
+        np_apply = ncv - kev
+        wanted_ritz = ritz[np_apply:]
+        wanted_bounds = bounds[np_apply:]
+        scale = np.maximum(eps23, np.abs(wanted_ritz))
+        nconv = int(np.sum(wanted_bounds <= tol * scale))
+
+        if verbose > 0:
+            print("Generalized IRAM iter", it, "kev", kev, "nconv", nconv,
+                    "ritz", np.round(wanted_ritz, 6))
+
+        if nconv >= nev or np_apply == 0:
+            break
+
+        if nconv > 0:
+            bump = min(nconv, np_apply // 2)
+            if bump > 0:
+                kev = min(kev + bump, ncv - 2)
+
+        np_apply = ncv - kev
+        shifts = select_shifts(ritz, bounds, np_apply)
+        V, Hm, resid, rnorm = apply_shifts(V, Hm, resid, shifts, kev, B=B)
+
+    ritz, bounds, Y = hessenberg_ritz(Hm, rnorm)
+    order = np.argsort(_goodness(which, ritz))
+    ritz, Y = ritz[order], Y[:, order]
+    nsel = min(nev, Hm.shape[0])
+    Y_sel = Y[:, -nsel:]
+
+    wfs = []
+    for i in range(nsel):
+        y = Y_sel[:, i]
+        wf = y[0] * V[0]
+        for j in range(1, len(V)):
+            wf = wf + y[j] * V[j]
+        wfs.append(wf.normalize())
+    es = np.array([wf.aMb(A, wf) / wf.aMb(M, wf) for wf in wfs])
+    return es[::-1], wfs[::-1]
+
+
+def generalized_excited_states(self, A, M, nwf=1, which="SR", recursive=True,
+        wfskip=None, **kwargs):
+    """Find nwf generalized eigenpairs (A*x=lambda*M*x), either
+    recursively -- one at a time, each deflated against the previously
+    found ones via wfskip -- or as a single simultaneous block IRAM
+    search (nev=nwf in one mpsiram_generalized call). Mirrors
+    excited_states' own recursive toggle; see its docstring and
+    shift_invert_excited_states' docstring for the same caveat about
+    .dot()-based deflation not being rigorous for non-Hermitian A."""
+    if wfskip is None: wfskip = []
+    else: wfskip = list(wfskip)
+    if nwf == 1:
+        return mpsiram_generalized(self, A, M, which=which, nev=1,
+                wfskip=wfskip, **kwargs)
+    if not recursive:
+        return mpsiram_generalized(self, A, M, which=which, nev=nwf,
+                wfskip=wfskip, **kwargs)
+    eout, wfout = [], []
+    for i in range(nwf):
+        es, wfs = mpsiram_generalized(self, A, M, which=which, nev=1,
+                wfskip=wfskip, **kwargs)
         eout.append(es[0])
         wfout.append(wfs[0])
         wfskip.append(wfs[0])
