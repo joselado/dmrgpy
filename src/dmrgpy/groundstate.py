@@ -162,7 +162,14 @@ def gs_energy_generalized(self,A,lam0=None):
     method yet. There is also no ED implementation of this method at all
     (unlike vev()/gs_energy()/..., which all honor self.mode="ED" for
     cross-validation) -- self.mode="ED" is rejected explicitly below
-    rather than silently ignored."""
+    rather than silently ignored.
+
+    Non-Hermitian self.hamiltonian is dispatched to a separate solver,
+    nhdmrg.py's nhdmrg_generalized() (the non-Hermitian, complex-lambda,
+    biorthogonal-quotient generalization of NH-DMRG, mirroring how this
+    function itself generalizes plain gs_energy()) -- itensor_version=
+    "python" only for that path so far, stricter than the Hermitian
+    path's "3 or python" above."""
     if self.mode=="ED":
         raise NotImplementedError(
             "gs_energy_generalized has no ED implementation -- unset "
@@ -200,16 +207,23 @@ def gs_energy_generalized(self,A,lam0=None):
     if self.hamiltonian is None:
         raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
     if not self.is_hermitian(self.hamiltonian):
-        # gs_energy()'s own non-Hermitian branch dispatches to NH-DMRG;
-        # this method has no such dispatch, and the local two-site solver
-        # in both backends silently Hermitizes its effective-Hamiltonian
-        # matrix before diagonalizing -- so a non-Hermitian H would
-        # otherwise produce a well-defined but physically meaningless
-        # "eigenvalue" with no warning at all.
-        raise ValueError(
-            "gs_energy_generalized: self.hamiltonian is not Hermitian -- "
-            "only Hermitian H is supported (A must additionally be "
-            "Hermitian positive definite, not checked here)")
+        # Non-Hermitian H: dispatch to the NH-DMRG generalized solver
+        # (nhdmrg.py's nhdmrg_generalized()/gs_energy_generalized_nhdmrg())
+        # -- mirrors gs_energy()'s own non-Hermitian dispatch to NH-DMRG.
+        # Without this branch, the local two-site solver in both backends
+        # would silently Hermitize its effective-Hamiltonian matrix before
+        # diagonalizing, producing a well-defined but physically
+        # meaningless "eigenvalue" with no warning at all. Only
+        # implemented for itensor_version="python" so far (stricter than
+        # the Hermitian path's "3 or python" above -- v3 has no
+        # Chain::nhdmrg_generalized yet).
+        if self.itensor_version!="python":
+            raise NotImplementedError(
+                "gs_energy_generalized for a non-Hermitian Hamiltonian is "
+                "only implemented for itensor_version='python' so far -- "
+                "call chain.setup_python() first")
+        from .nhdmrg import gs_energy_generalized_nhdmrg
+        return gs_energy_generalized_nhdmrg(self,A,lam0=lam0)
     from . import multioperator
     A = multioperator.obj2MO(A)
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)

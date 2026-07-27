@@ -263,6 +263,36 @@ class Chain:
         return _nhdmrg(H, HA, psi0, sweeps, krylovdim=krylovdim,
                        restarts=restarts, quiet=not self.verbose)
 
+    def nhdmrg_generalized(self, terms_h, terms_hadj, terms_a,
+            krylovdim=20, restarts=2, lam0=None):
+        """Non-Hermitian generalized-eigenvalue NH-DMRG: solves
+        H|psi_R>=lambda*A|psi_R> for a possibly non-Hermitian operator
+        (terms_h, with terms_hadj its adjoint -- same
+        MultiOperator.get_dagger() convention as nhdmrg() above) and a
+        Hermitian positive-definite metric operator A (terms_a). See
+        nhdmrg.py's nhdmrg_generalized() for the self-consistent
+        Lagrange-multiplier algorithm (the non-Hermitian counterpart of
+        gs_energy_generalized()'s own, generalized to a complex lambda
+        and biorthogonal expectation values). Returns
+        (lambda, psil, psir) with <psil|psir> = 1, same convention as
+        nhdmrg()."""
+        from .nhdmrg import nhdmrg_generalized as _nhdmrg_generalized
+        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h),
+                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        HA = to_mpo(AutoMPO.from_terms(self.sites, terms_hadj),
+                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = to_mpo(AutoMPO.from_terms(self.sites, terms_a),
+                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        # fresh random start every run (never wf0), same rationale as
+        # nhdmrg() above: the non-Hermitian "energy" is not a variational
+        # bound, so a stalled run can only be detected/cured by the
+        # caller's eigen-residual check and a redraw.
+        psi0 = self._default_mps()
+        sweeps = self._make_sweeps()
+        return _nhdmrg_generalized(H, HA, A, psi0, sweeps,
+                krylovdim=krylovdim, restarts=restarts,
+                quiet=not self.verbose, lam0=lam0)
+
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)
 

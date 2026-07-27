@@ -179,20 +179,35 @@ def test_gs_energy_generalized_leaves_computed_gs_true(itensor_version):
 
 
 @pytest.mark.parametrize("itensor_version", ITENSOR_VERSIONS)
-def test_gs_energy_generalized_rejects_non_hermitian_hamiltonian(itensor_version):
-    """A non-Hermitian self.hamiltonian must be rejected rather than
-    silently Hermitized by the local two-site solver (both backends'
-    local eigensolver projects its effective-Hamiltonian matrix onto its
-    Hermitian part before diagonalizing, with no warning)."""
+def test_gs_energy_generalized_dispatches_non_hermitian_by_backend(itensor_version):
+    """A non-Hermitian self.hamiltonian is no longer rejected outright --
+    it dispatches to a dedicated non-Hermitian solver (nhdmrg.py's
+    nhdmrg_generalized(), see tests/test_nhdmrg_generalized.py for its
+    own correctness coverage), available on itensor_version="python" but
+    not yet on itensor_version=3 (no Chain::nhdmrg_generalized there).
+    This only checks the dispatch itself succeeds/fails on the right
+    backend, not the returned value's correctness. Uses a genuinely
+    diagonalizable non-Hermitian H (hopping + h.c. + a staggered
+    imaginary potential, same construction as test_nh_dmrg.py's
+    nh_fermion_chain) rather than a single bare directional hopping term
+    -- that simpler-looking construction is actually defective (no
+    complete biorthogonal eigenbasis at all), which made
+    nhdmrg_generalized() correctly raise its own <psi_L|A|psi_R>~0 guard
+    rather than "not raise" as this test expects."""
     n = 4
     fc = fermionchain.Fermionic_Chain(n)
     h = 0
     for i in range(n - 1):
-        h = h + 1j * fc.Cdag[i] * fc.C[i + 1]  # non-Hermitian: no h.c. term
+        h = h + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+    for i in range(n):
+        h = h + 1j * (-1) ** i * 0.3 * fc.N[i]
     fc.set_hamiltonian(h)
-    _setup(fc, itensor_version)
-    with pytest.raises(ValueError):
-        fc.gs_energy_generalized(mo_identity())
+    _setup(fc, itensor_version, nsweeps=4)  # dispatch check only, keep it cheap
+    if itensor_version == "python":
+        fc.gs_energy_generalized(mo_identity())  # must not raise
+    else:
+        with pytest.raises(NotImplementedError):
+            fc.gs_energy_generalized(mo_identity())
 
 
 @pytest.mark.parametrize("itensor_version", ITENSOR_VERSIONS)

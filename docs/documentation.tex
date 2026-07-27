@@ -555,6 +555,29 @@ real ITensor v3 calls (\S4.4's own \texttt{mpscpp3}-specific bullet), so
 \texttt{"julia\_live"} still raise \texttt{NotImplementedError}, not
 having an analogous session method yet.
 
+\texttt{nhdmrg.py::nhdmrg\_generalized} is the non-Hermitian counterpart,
+generalizing NH-DMRG (\S4.4's own bullet above, and pyitensor's own port
+of it) exactly the way \texttt{dmrg\_generalized} generalizes plain
+\texttt{dmrg()}: \texttt{groundstate.gs\_energy\_generalized} checks
+\texttt{self.hamiltonian} for Hermiticity and transparently dispatches a
+non-Hermitian one here instead of raising. Since $A$ is Hermitian,
+$(\lambda A)^\dagger=\bar\lambda A$, so the same trick carries over with
+a \emph{complex} $\lambda$ and \emph{biorthogonal} (not plain)
+expectation values: each outer iteration shifts both $H$ and its
+precomputed adjoint $H^\dagger$ by $\lambda A$/$\bar\lambda A$
+respectively, runs one ordinary NH-DMRG sweep
+(\texttt{\_nhdmrg\_one\_sweep}, factored out of \texttt{nhdmrg()}'s own
+loop body the same way \texttt{\_dmrg\_one\_sweep} was) against the
+shifted pair, then updates $\lambda$ to
+$\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|A|\psi_R\rangle$.
+Pyitensor-only so far, no v3 port yet unlike the Hermitian case above ---
+see \texttt{examples/non\_hermitian/nhdmrg\_generalized\_benchmark}, which
+cross-checks it against \texttt{mpsiram\_generalized} (ARPACK mode 2
+needs no adaptation at all for a non-Hermitian primary operator, only its
+own $M$ positive-definite precondition was ever required) on a
+non-Hermitian test problem, with the same accuracy/speed pattern as the
+Hermitian benchmark.
+
 \subsection{The Julia backend (\texttt{mpsjulialive/})}
 
 \texttt{itensor\_version="julia\_live"} drives a live, in-process Julia

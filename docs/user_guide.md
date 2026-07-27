@@ -409,6 +409,55 @@ more expensive, and less accurate, as the chain grows -- two orders of
 magnitude slower and $10^{9}$ times less accurate on an 8-site chain),
 and v3 is itself consistently ~2-4x faster than pyitensor at these sizes.
 
+**Non-Hermitian generalized-eigenvalue DMRG.** `gs_energy_generalized`
+also accepts a non-Hermitian $H$: `self.hamiltonian` is checked for
+Hermiticity, and a non-Hermitian one is transparently dispatched to a
+dedicated solver (nhdmrg.py's `nhdmrg_generalized`) instead of raising --
+same calling convention, same "smallest real part" convention as
+non-Hermitian `gs_energy()`/NH-DMRG (§4) above:
+
+```python
+lam = fc.gs_energy_generalized(a_metric_operator)   # complex lambda, smallest Re
+```
+
+The metric $A$ must still be Hermitian positive definite (mirroring
+`mpsiram_generalized`'s own $M$ precondition -- and, following ARPACK's
+own convention there, the *primary* operator needs no Hermiticity
+assumption at all, only the metric does). The self-consistent
+Lagrange-multiplier trick generalizes directly: since $A$ is Hermitian,
+$(\lambda A)^\dagger=\bar\lambda A$, so minimizing (in the NH-DMRG sense
+-- smallest real part, not a variational bound) subject to the metric
+*biorthogonal* normalization $\langle\psi_L|A|\psi_R\rangle=1$ gives
+stationarity condition
+$(H-\lambda A)|\psi_R\rangle=\mu|\psi_R\rangle$,
+$(H-\lambda A)^\dagger|\psi_L\rangle=\bar\mu|\psi_L\rangle$ -- the
+*ordinary* ($\langle\psi_L|\psi_R\rangle=1$-normalized) NH-DMRG
+eigenproblem of the shifted pair $(H-\lambda A,\,H^\dagger-\bar\lambda A)$,
+exactly what one ordinary NH-DMRG sweep already finds. At $\mu=0$ this is
+precisely $H|\psi_R\rangle=\lambda A|\psi_R\rangle$, so each outer
+iteration (i) builds $H-\lambda A$ and $H^\dagger-\bar\lambda A$ from the
+current (complex) $\lambda$ estimate, (ii) runs one ordinary NH-DMRG
+sweep against them, then (iii) updates $\lambda$ to the freshly-swept
+pair's generalized *biorthogonal* Rayleigh quotient
+$\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|A|\psi_R\rangle$ in place of
+the Hermitian case's plain one. $A=\mathrm{Id}$ reduces this exactly to
+plain NH-DMRG.
+
+Only implemented on the pure-Python (pyitensor) backend so far --
+`dmrgpy.pyitensor.nhdmrg.nhdmrg_generalized` is the underlying routine;
+no ITensor v3 port yet (unlike the Hermitian case above), so
+`itensor_version=3` raises `NotImplementedError` for a non-Hermitian $H$
+specifically. See
+`examples/non_hermitian/nhdmrg_generalized_benchmark`, which heads it up
+against `mpsiram_generalized` on a non-Hermitian interacting-fermion-chain
+test problem (a staggered imaginary on-site potential): ARPACK mode 2
+needs no adaptation at all for a non-Hermitian primary operator (its
+$M$-positive-definite precondition was always the only one), so this is a
+fair like-for-like comparison, and the same pattern as the Hermitian
+benchmark holds -- needing no approximate inverse, `nhdmrg_generalized` is
+both far more accurate and (as the chain grows) up to two orders of
+magnitude faster.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain
