@@ -487,6 +487,60 @@ Notable, deliberate implementation details (not bugs to ``fix''):
     (\texttt{StaticOperator.\_\_add\_\_} raises
     \texttt{NotImplementedError} rather than silently doing something
     backend-specific).
+\item \texttt{mpscpp3}-specific: \texttt{Chain::gs\_energy\_generalized}
+    (\texttt{mpscpp3/chain\_session.h}, exposed as
+    \texttt{Many\_Body\_Chain.gs\_energy\_generalized}) solves the
+    generalized eigenproblem $H|\psi\rangle=\lambda A|\psi\rangle$ for a
+    Hermitian positive-definite metric MPO $A$ via a self-consistent
+    Lagrange-multiplier iteration: each outer iteration builds the MPO
+    $H-\lambda A$ (\lstinline|sum()|) from the current $\lambda$
+    estimate, sweeps it with ITensor v3's own \lstinline|dmrg()| for a
+    single length-1 \lstinline|Sweeps| step (looping outer iterations by
+    hand rather than handing the whole schedule to one \lstinline|dmrg()|
+    call, since $\lambda$ must be updated between sweeps --- noise is
+    halved off partway through exactly like \texttt{nhdmrg()}'s own
+    per-sweep loop above), then updates $\lambda$ to the swept state's
+    generalized Rayleigh quotient
+    $\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$. A
+    line-for-line port of \texttt{pyitensor/dmrg.py}'s
+    \texttt{dmrg\_generalized} (\S4.5) against real ITensor v3 calls
+    instead of the hand-rolled two-site sweep pyitensor uses;
+    \texttt{mpscpp2} has no analogous session method yet, so
+    \texttt{itensor\_version=2} still raises
+    \texttt{NotImplementedError}. See
+    \texttt{examples/groundstate/dmrg\_generalized\_benchmark}, which
+    heads all three available routes (pyitensor, v3, and
+    \texttt{algebra/arpacktk.py}'s pre-existing ARPACK-mode-2
+    \texttt{mpsiram\_generalized}) up against each other on the same
+    test problem --- v3 is consistently the fastest of the three at the
+    (small) sizes benchmarked there.
+\item \texttt{mpscpp3}-specific: \texttt{Chain::nhdmrg\_generalized}
+    (exposed as \texttt{Many\_Body\_Chain.gs\_energy\_generalized} for a
+    non-Hermitian \texttt{self.hamiltonian}) is the non-Hermitian
+    counterpart of the bullet above, generalizing \texttt{Chain::nhdmrg}
+    (\S4.4's own NH-DMRG bullet) the same way
+    \texttt{gs\_energy\_generalized} generalizes plain
+    \texttt{gs\_energy()}. Since the metric $A$ is Hermitian,
+    $(\lambda A)^\dagger=\bar\lambda A$, so the same self-consistent
+    Lagrange-multiplier trick carries over with a \emph{complex} $\lambda$
+    and \emph{biorthogonal} (not plain) expectation values: each outer
+    iteration shifts both $H$ and its precomputed adjoint $H^\dagger$ by
+    $\lambda A$/$\bar\lambda A$ respectively, runs one ordinary NH-DMRG
+    sweep (a new private \texttt{nhdmrg\_one\_sweep} helper, factored out
+    of \texttt{Chain::nhdmrg}'s own loop body) against the shifted pair,
+    then updates $\lambda$ to
+    $\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|A|\psi_R\rangle$.
+    Because \texttt{nhdmrg\_one\_sweep}'s two-site solve is hand-rolled
+    directly against \texttt{arnoldi\_smallest\_real}/manual ITensor
+    contractions rather than a call into ITensor v3's own
+    \texttt{dmrg()}, it does \emph{not} need
+    \texttt{gs\_energy\_generalized}'s own short-chain guard (confirmed
+    directly, a 2-site chain runs it without aborting) --- a real
+    asymmetry between the two \texttt{mpscpp3}-specific bullets in this
+    section, not an oversight. Pyitensor gained the identical algorithm
+    first (\texttt{nhdmrg.py::nhdmrg\_generalized}); \texttt{mpscpp2}
+    still has no analogous session method for either backend's
+    non-Hermitian generalized solver.
 \end{itemize}
 
 \subsection{The pure-Python backend (\texttt{pyitensor/})}
@@ -508,6 +562,58 @@ It exists so DMRG/TDVP work with zero compiler/pybind11 dependency, at
 the cost of being slower than compiled ITensor by default (no
 block-sparsity, no JIT) --- see Section~\ref{sec:perf} for how much
 slower in practice, and how \texttt{numba}/\texttt{jax} narrow that gap.
+
+One partial exception to that shared-surface rule:
+\texttt{dmrg.py::dmrg\_generalized} (exposed as
+\texttt{Chain.gs\_energy\_generalized}/
+\texttt{Many\_Body\_Chain.gs\_energy\_generalized}) solves the generalized
+eigenproblem $H|\psi\rangle=\lambda A|\psi\rangle$ for a Hermitian
+positive-definite metric MPO $A$ --- a self-consistent Lagrange-multiplier
+iteration built directly on top of \texttt{dmrg()}'s own per-sweep
+machinery (factored into a shared \texttt{\_dmrg\_one\_sweep} helper):
+each outer iteration rebuilds the MPO $H-\lambda A$ from the current
+$\lambda$ estimate, sweeps it with the ordinary two-site solver, then
+updates $\lambda$ to the swept state's generalized Rayleigh quotient
+$\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$. \texttt{mpscpp3}
+has since gained a line-for-line port of this same algorithm against
+real ITensor v3 calls (\S4.4's own \texttt{mpscpp3}-specific bullet), so
+\texttt{itensor\_version} 3 supports it too now --- only
+\texttt{mpscpp2} (\texttt{itensor\_version=2}) and
+\texttt{"julia\_live"} still raise \texttt{NotImplementedError}, not
+having an analogous session method yet.
+
+\texttt{nhdmrg.py::nhdmrg\_generalized} is the non-Hermitian counterpart,
+generalizing NH-DMRG (\S4.4's own bullet above, and pyitensor's own port
+of it) exactly the way \texttt{dmrg\_generalized} generalizes plain
+\texttt{dmrg()}: \texttt{groundstate.gs\_energy\_generalized} checks
+\texttt{self.hamiltonian} for Hermiticity and transparently dispatches a
+non-Hermitian one here instead of raising. Since $A$ is Hermitian,
+$(\lambda A)^\dagger=\bar\lambda A$, so the same trick carries over with
+a \emph{complex} $\lambda$ and \emph{biorthogonal} (not plain)
+expectation values: each outer iteration shifts both $H$ and its
+precomputed adjoint $H^\dagger$ by $\lambda A$/$\bar\lambda A$
+respectively, runs one ordinary NH-DMRG sweep
+(\texttt{\_nhdmrg\_one\_sweep}, factored out of \texttt{nhdmrg()}'s own
+loop body the same way \texttt{\_dmrg\_one\_sweep} was) against the
+shifted pair, then updates $\lambda$ to
+$\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|A|\psi_R\rangle$.
+\texttt{mpscpp3} has since gained a line-for-line port of this algorithm
+too (\S4.4's own second \texttt{mpscpp3}-specific bullet), so
+\texttt{itensor\_version} 3 supports a non-Hermitian
+\texttt{self.hamiltonian} here just like the Hermitian case above ---
+\texttt{mpscpp2} is still the only backend without an analogous session
+method for either. See
+\texttt{examples/non\_hermitian/nhdmrg\_generalized\_benchmark}, which
+cross-checks both implementations against \texttt{mpsiram\_generalized}
+(ARPACK mode 2 needs no adaptation at all for a non-Hermitian primary
+operator, only its own $M$ positive-definite precondition was ever
+required) on a non-Hermitian test problem: the same accuracy/speed
+pattern as the Hermitian benchmark holds against ARPACK, but unlike the
+Hermitian case v3 isn't consistently faster than pyitensor here ---
+NH-DMRG's per-bond cost already pays for \emph{two} Arnoldi solves (right
+block and its adjoint) regardless of backend, narrowing the
+compiled-vs-pure-Python gap relative to plain ground-state DMRG's single
+local diagonalization per bond.
 
 \subsection{The Julia backend (\texttt{mpsjulialive/})}
 

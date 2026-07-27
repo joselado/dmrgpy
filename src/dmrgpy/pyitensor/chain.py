@@ -18,7 +18,7 @@ from functools import lru_cache
 import numpy as np
 
 from .autompo import AutoMPO
-from .dmrg import dmrg, dmrg_excited
+from .dmrg import dmrg, dmrg_excited, dmrg_generalized
 from .mpobuilder import to_mpo
 from .mpsalgebra import applyMPO, inner, nmultMPO
 from .mpsalgebra import sum as mps_sum
@@ -128,6 +128,29 @@ class Chain:
     def set_wavefunction(self, wf):
         self.wf0 = wf
         self._wf0_energy = None  # energy no longer matches wf0
+
+    def gs_energy_generalized(self, terms_a, lam0=None):
+        """Smallest generalized eigenvalue lambda solving
+        H|psi>=lambda*A|psi> for this chain's own Hamiltonian H (already
+        built via set_hamiltonian()) and a metric operator A given by
+        terms_a. A must be Hermitian positive definite for the
+        self-consistent Lagrange-multiplier iteration in
+        dmrg_generalized() (dmrg.py) to converge to the smallest
+        generalized eigenvalue -- not checked here, same convention as
+        set_hamiltonian() not checking H is Hermitian either. Mutates
+        and stores self.wf0 like gs_energy(), but doesn't share its
+        plain-<H> energy cache (skip_dmrg=True on a later gs_energy()
+        call would otherwise return this generalized run's lambda,
+        which is not <psi|H|psi>) -- invalidated below instead."""
+        if not self.have_H:
+            raise RuntimeError("Chain.gs_energy_generalized called before set_hamiltonian")
+        A = to_mpo(AutoMPO.from_terms(self.sites, terms_a), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        if self.wf0 is None:
+            self.wf0 = self._default_mps()
+        sweeps = self._make_sweeps()
+        lam = dmrg_generalized(self.wf0, self.H, A, sweeps, quiet=not self.verbose, lam0=lam0)
+        self._wf0_energy = None  # stale: no longer <wf0|H|wf0>, see docstring
+        return lam
 
     def excited_states(self, n, scale_lagrange=1.0, do_gram_schmidt=False):
         if not self.have_H:
@@ -239,6 +262,36 @@ class Chain:
         sweeps = self._make_sweeps()
         return _nhdmrg(H, HA, psi0, sweeps, krylovdim=krylovdim,
                        restarts=restarts, quiet=not self.verbose)
+
+    def nhdmrg_generalized(self, terms_h, terms_hadj, terms_a,
+            krylovdim=20, restarts=2, lam0=None):
+        """Non-Hermitian generalized-eigenvalue NH-DMRG: solves
+        H|psi_R>=lambda*A|psi_R> for a possibly non-Hermitian operator
+        (terms_h, with terms_hadj its adjoint -- same
+        MultiOperator.get_dagger() convention as nhdmrg() above) and a
+        Hermitian positive-definite metric operator A (terms_a). See
+        nhdmrg.py's nhdmrg_generalized() for the self-consistent
+        Lagrange-multiplier algorithm (the non-Hermitian counterpart of
+        gs_energy_generalized()'s own, generalized to a complex lambda
+        and biorthogonal expectation values). Returns
+        (lambda, psil, psir) with <psil|psir> = 1, same convention as
+        nhdmrg()."""
+        from .nhdmrg import nhdmrg_generalized as _nhdmrg_generalized
+        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h),
+                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        HA = to_mpo(AutoMPO.from_terms(self.sites, terms_hadj),
+                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = to_mpo(AutoMPO.from_terms(self.sites, terms_a),
+                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        # fresh random start every run (never wf0), same rationale as
+        # nhdmrg() above: the non-Hermitian "energy" is not a variational
+        # bound, so a stalled run can only be detected/cured by the
+        # caller's eigen-residual check and a redraw.
+        psi0 = self._default_mps()
+        sweeps = self._make_sweeps()
+        return _nhdmrg_generalized(H, HA, A, psi0, sweeps,
+                krylovdim=krylovdim, restarts=restarts,
+                quiet=not self.verbose, lam0=lam0)
 
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)

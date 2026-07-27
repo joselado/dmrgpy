@@ -82,6 +82,134 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
     return energy,psil,psir
 
 
+def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
+        ntries=5,lam0=None):
+    """Non-Hermitian generalized-eigenvalue NH-DMRG: solves
+    H|psi_R>=lambda*A|psi_R> for a possibly non-Hermitian H (defaults to
+    self.hamiltonian) and a Hermitian positive-definite metric operator A
+    (a MultiOperator, same calling convention as vev()/
+    gs_energy_generalized()). Returns (lambda,psil,psir), the complex
+    generalized eigenvalue of smallest real part and the biorthogonal
+    left/right eigenvector MPS (<psil|psir>=1) -- same return convention
+    as nhdmrg() above, generalizing it exactly the way
+    gs_energy_generalized() generalizes gs_energy() (see
+    pyitensor/nhdmrg.py's nhdmrg_generalized() for the self-consistent
+    Lagrange-multiplier algorithm, now with a complex lambda and
+    biorthogonal expectation values).
+
+    Implemented for itensor_version="python" (pyitensor/nhdmrg.py's
+    nhdmrg_generalized()) and itensor_version=3 (mpscpp3/chain_session.h's
+    Chain::nhdmrg_generalized, a line-for-line port of the same algorithm
+    against this file's own nhdmrg_one_sweep instead of the hand-rolled
+    Python one) -- mpscpp2 has no analogous session method yet.
+
+    - krylovdim/restarts: per-bond local Arnoldi effort (same as nhdmrg())
+    - tol/ntries: eigen-residual certificate, same rationale as nhdmrg():
+      the non-Hermitian generalized "eigenvalue" is not a variational
+      bound, so both residuals ||H|psi_R>-lambda*A|psi_R>|| and
+      ||H^dagger|psi_L>-conj(lambda)*A|psi_L>|| are checked (the right
+      residual alone would accept a run whose anchored adjoint solve
+      locked psi_L onto a *different* eigenstate, since
+      <psi_L|H|psi_R>/<psi_L|A|psi_R> equals lambda identically whenever
+      psi_R alone is a genuine eigenvector). Each attempt starts from its
+      own fresh random MPS (same rationale as nhdmrg()); the best of up
+      to ntries attempts is returned regardless of whether tol was met.
+    - lam0: starting lambda estimate passed through unchanged to every
+      attempt (defaults to a data-driven guess seeded from each attempt's
+      own fresh random state -- see pyitensor/nhdmrg.py's own default).
+    """
+    if self.itensor_version not in (3,"python"):
+        raise NotImplementedError(
+            "nhdmrg_generalized is only implemented for "
+            "itensor_version=3 or 'python' so far -- call "
+            "chain.setup_cpp(version=3) or chain.setup_python() first")
+    if self._session is None:
+        # same "itensor_version==3 but no compiled extension" gap
+        # gs_energy_generalized() guards against -- see its own comment.
+        raise RuntimeError(
+            "nhdmrg_generalized needs a compiled ITensor v3 extension "
+            "(itensor_version=3) but none is available for this chain -- "
+            "run `python install.py --itensor-version=3`, or call "
+            "chain.setup_python() to use the pure-Python backend instead")
+    if H is None: H = self.hamiltonian
+    if H is None:
+        raise RuntimeError("nhdmrg_generalized called before set_hamiltonian")
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,
+            self.noise)
+    self._session.set_verbose(self.verbose)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    from . import multioperator
+    A = multioperator.obj2MO(A)
+    Hd = H.get_dagger()
+    terms = H.to_terms()
+    terms_dag = Hd.to_terms()
+    terms_a = A.to_terms()
+    if self.itensor_version=="python": # pyitensor accepts lam0=None directly
+        session_lam0 = lam0
+    else: # the compiled v3 binding takes a plain complex, NaN meaning "unset"
+        session_lam0 = complex(float('nan'),0.0) if lam0 is None else lam0
+    best = None
+    for i in range(max(1,int(ntries))):
+        # Each attempt's fresh random start (see docstring) can, on rare
+        # unlucky draws, drive the biorthogonal pair into the metric A's
+        # near-null-space -- nhdmrg_generalized()'s own guard against that
+        # (both backends) raises RuntimeError rather than returning a
+        # meaningless lambda. Treated the same as an ordinary
+        # resid>=tol failure below (redraw and retry) rather than letting
+        # it abort every remaining attempt -- exactly the class of "bad
+        # random draw" ntries>1 exists to route around in the first
+        # place; found via code review.
+        try:
+            lam,hl,hr = self._session.nhdmrg_generalized(terms,terms_dag,
+                    terms_a,int(krylovdim),int(restarts),lam0=session_lam0)
+        except RuntimeError as e:
+            if self.verbose>0:
+                print("nhdmrg_generalized attempt",i,"raised",repr(e),
+                      "-- retrying with a fresh random start")
+            continue
+        psil = mps.MPS(self,cpp_handle=hl).copy()
+        psir = mps.MPS(self,cpp_handle=hr).copy()
+        r = H*psir - lam*(A*psir)
+        l = Hd*psil - lam.conjugate()*(A*psil)
+        resid = max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(1.0+abs(lam))
+        if best is None or resid<best[0]:
+            best = (resid,lam,psil,psir)
+        if resid<tol: break
+        if self.verbose>0:
+            print("nhdmrg_generalized attempt",i,"did not converge, residual",resid)
+    if best is None:
+        raise RuntimeError(
+            "nhdmrg_generalized: every attempt (of "+str(ntries)+") hit "
+            "the near-null-space guard -- A is likely not positive "
+            "definite for this problem")
+    resid,lam,psil,psir = best
+    if resid>=tol:
+        print("Warning: nhdmrg_generalized did not reach the residual "
+              "tolerance after",ntries,"tries (best residual "+str(resid)+
+              "); consider raising nsweeps, maxm or krylovdim")
+    return lam,psil,psir
+
+
+def gs_energy_generalized_nhdmrg(self,A,**kwargs):
+    """gs_energy_generalized-style entry point for a non-Hermitian
+    self.hamiltonian: run nhdmrg_generalized() and store the right
+    eigenvector as the chain's ground state wavefunction, mirroring
+    gs_energy_nhdmrg()'s own wf0/nh_left_wf handling (including its unit
+    normalization of wf0 -- nhdmrg_generalized()'s own psir carries
+    <psil|psir>=1 biorthogonal normalization instead)."""
+    lam,psil,psir = nhdmrg_generalized(self,A,**kwargs)
+    self.e0 = lam
+    wf0 = psir.normalize()
+    if wf0 is None: wf0 = psir.copy()
+    self.nh_left_wf = psil.copy() # left eigenvector, for biorthogonal use
+    self.set_initial_wf(wf0) # sets self.wf0 (one copy) and resets
+                              # computed_gs=False, so...
+    self.computed_gs = True  # ...this must come after, not before (see
+                              # gs_energy_generalized's own fix for
+                              # exactly this ordering bug)
+    return lam
+
+
 def gs_energy_nhdmrg(self,**kwargs):
     """gs_energy-style entry point: run NH-DMRG and store the right
     eigenvector as the chain's ground state wavefunction (the state

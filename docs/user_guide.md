@@ -365,6 +365,120 @@ plain `mpsiram`, just built with the $M$-inner product. Verified against
 `scipy.linalg.eigh`'s generalized Hermitian-definite eigensolver in both
 ED and DMRG mode.
 
+**Generalized-eigenvalue DMRG.** For the same problem
+$H|\psi\rangle=\lambda A|\psi\rangle$ ($A$ Hermitian positive definite),
+`gs_energy_generalized(A)` solves it with a genuine DMRG sweep instead of
+a Krylov method, needing no approximate operator inverse at all (unlike
+`mpsiram_generalized` above, which must invert $M$ iteratively since
+dmrgpy has no exact MPO inverse):
+
+```python
+lam = fc.gs_energy_generalized(a_metric_operator)   # smallest lambda
+```
+
+The trick is a self-consistent Lagrange multiplier: minimizing
+$\langle\psi|H|\psi\rangle$ subject to the metric normalization
+$\langle\psi|A|\psi\rangle=1$ has stationarity condition
+$(H-\lambda A)|\psi\rangle=\mu|\psi\rangle$ for multiplier $\lambda$ --
+the *ordinary* ($\mu$,$\psi$) eigenproblem of the plain-normalized shifted
+operator $H-\lambda A$, exactly what a standard two-site DMRG sweep
+already finds. At $\mu=0$ this is precisely
+$H|\psi\rangle=\lambda A|\psi\rangle$, so each outer iteration (i) builds
+the MPO $H-\lambda A$ from the current $\lambda$ estimate, (ii) runs one
+ordinary DMRG sweep against it, then (iii) updates $\lambda$ to the
+freshly-swept state's generalized Rayleigh quotient
+$\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$ -- one outer
+iteration per `Sweeps` schedule entry, so bond dimension ramps exactly as
+an ordinary `gs_energy()` run's own schedule does. $A=\mathrm{Id}$
+reduces this exactly to plain ground-state DMRG.
+
+Implemented on the pure-Python (pyitensor) backend
+(`itensor_version="python"`, i.e. after `chain.setup_python()`) --
+`dmrgpy.pyitensor.dmrg.dmrg_generalized` is the underlying routine -- and
+on compiled ITensor v3 (`itensor_version=3`, i.e. after
+`chain.setup_cpp(version=3)`), where `Chain::gs_energy_generalized`
+(`mpscpp3/chain_session.h`) runs the identical algorithm against ITensor
+v3's own `dmrg()`/`Sweeps`/`sum()` instead of pyitensor's hand-rolled
+two-site sweep. `itensor_version=2` (mpscpp2) and `julia_live` don't have
+this session method yet and raise `NotImplementedError`. See
+`examples/groundstate/dmrg_generalized_benchmark`, which heads all three
+solvers up against each other on the same interacting-fermion-chain test
+problem: needing no approximate inverse, both DMRG routes are far more
+accurate than ARPACK mode 2 (whose own correction-vector solve also gets
+more expensive, and less accurate, as the chain grows -- two orders of
+magnitude slower and $10^{9}$ times less accurate on an 8-site chain),
+and v3 is itself consistently ~2-4x faster than pyitensor at these sizes.
+
+**Non-Hermitian generalized-eigenvalue DMRG.** `gs_energy_generalized`
+also accepts a non-Hermitian $H$: `self.hamiltonian` is checked for
+Hermiticity, and a non-Hermitian one is transparently dispatched to a
+dedicated solver (nhdmrg.py's `nhdmrg_generalized`) instead of raising --
+same calling convention, same "smallest real part" convention as
+non-Hermitian `gs_energy()`/NH-DMRG (§4) above:
+
+```python
+lam = fc.gs_energy_generalized(a_metric_operator)   # complex lambda, smallest Re
+```
+
+The metric $A$ must still be Hermitian positive definite (mirroring
+`mpsiram_generalized`'s own $M$ precondition -- and, following ARPACK's
+own convention there, the *primary* operator needs no Hermiticity
+assumption at all, only the metric does). The self-consistent
+Lagrange-multiplier trick generalizes directly: since $A$ is Hermitian,
+$(\lambda A)^\dagger=\bar\lambda A$, so minimizing (in the NH-DMRG sense
+-- smallest real part, not a variational bound) subject to the metric
+*biorthogonal* normalization $\langle\psi_L|A|\psi_R\rangle=1$ gives
+stationarity condition
+$(H-\lambda A)|\psi_R\rangle=\mu|\psi_R\rangle$,
+$(H-\lambda A)^\dagger|\psi_L\rangle=\bar\mu|\psi_L\rangle$ -- the
+*ordinary* ($\langle\psi_L|\psi_R\rangle=1$-normalized) NH-DMRG
+eigenproblem of the shifted pair $(H-\lambda A,\,H^\dagger-\bar\lambda A)$,
+exactly what one ordinary NH-DMRG sweep already finds. At $\mu=0$ this is
+precisely $H|\psi_R\rangle=\lambda A|\psi_R\rangle$, so each outer
+iteration (i) builds $H-\lambda A$ and $H^\dagger-\bar\lambda A$ from the
+current (complex) $\lambda$ estimate, (ii) runs one ordinary NH-DMRG
+sweep against them, then (iii) updates $\lambda$ to the freshly-swept
+pair's generalized *biorthogonal* Rayleigh quotient
+$\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|A|\psi_R\rangle$ in place of
+the Hermitian case's plain one. $A=\mathrm{Id}$ reduces this exactly to
+plain NH-DMRG.
+
+Implemented on both the pure-Python (pyitensor) backend
+(`dmrgpy.pyitensor.nhdmrg.nhdmrg_generalized`) and compiled ITensor v3
+(`Chain::nhdmrg_generalized`, `mpscpp3/chain_session.h`, a line-for-line
+port against this file's own hand-rolled two-site sweep) -- `mpscpp2`
+(`itensor_version=2`) still raises `NotImplementedError` for a
+non-Hermitian $H$, no analogous session method there. Since
+`nhdmrg_generalized`'s two-site sweep never calls ITensor v3's own
+`dmrg()` (it is hand-rolled directly against a restarted Arnoldi solve
+and manual ITensor contractions, unlike the Hermitian path above), it
+does *not* need the Hermitian path's short-chain guard: chains shorter
+than 3 sites work fine here on `itensor_version=3`. See
+`examples/non_hermitian/nhdmrg_generalized_benchmark`, which heads all
+three routes up against each other on a non-Hermitian
+interacting-fermion-chain test problem (a staggered imaginary on-site
+potential): ARPACK mode 2 needs no adaptation at all for a non-Hermitian
+primary operator (its $M$-positive-definite precondition was always the
+only one), so this is a fair like-for-like comparison, and the same
+pattern as the Hermitian benchmark holds -- needing no approximate
+inverse, both DMRG routes are far more accurate and (as the chain grows)
+up to two orders of magnitude faster than ARPACK mode 2. Unlike the
+Hermitian case, v3 isn't consistently faster than pyitensor here (roughly
+on par at the sizes benchmarked) -- NH-DMRG's per-bond cost already pays
+for *two* Arnoldi solves (right block and its adjoint) regardless of
+backend, narrowing the compiled-vs-pure-Python gap relative to plain
+ground-state DMRG's single local diagonalization per bond.
+
+**Caveat (both Hermitian and non-Hermitian `gs_energy_generalized`).**
+Afterward, `fc.wf0`/`fc.e0` hold the eigenstate/eigenvalue of the
+*generalized* problem, not a plain eigenstate of `fc.hamiltonian` alone --
+every other method that reads `fc.wf0` as an ordinary ground state
+(`get_excited_states()`, any dynamical/KPM correlator, ...) has no way to
+tell the difference and will silently build on the wrong reference state
+if called afterward. Call `gs_energy_generalized()` as the last step of a
+calculation, or recompute a genuine ground state (`gs_energy()`/`nhdmrg()`)
+first if you need one of those other methods too.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain

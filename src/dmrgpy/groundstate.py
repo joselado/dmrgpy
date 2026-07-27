@@ -145,6 +145,135 @@ def gs_energy(self,**kwargs):
 
 
 
+def gs_energy_generalized(self,A,lam0=None):
+    """Smallest generalized eigenvalue lambda solving H|psi>=lambda*A|psi>
+    for this chain's own Hamiltonian (self.hamiltonian, already set via
+    set_hamiltonian()) and a Hermitian positive-definite metric operator
+    A (a MultiOperator, same calling convention as vev()). Stores the
+    resulting wavefunction as this chain's ground state, mirroring
+    gs_energy_single()'s own wf0 handling.
+
+    Implemented for itensor_version="python" (pyitensor/dmrg.py's
+    dmrg_generalized()) and itensor_version=3 (mpscpp3/chain_session.h's
+    Chain::gs_energy_generalized, a line-for-line port of the same
+    self-consistent Lagrange-multiplier algorithm against ITensor v3's
+    own dmrg()/Sweeps/sum()) -- see either docstring for the derivation.
+    mpscpp2 (itensor_version=2) and julia_live don't have this session
+    method yet. There is also no ED implementation of this method at all
+    (unlike vev()/gs_energy()/..., which all honor self.mode="ED" for
+    cross-validation) -- self.mode="ED" is rejected explicitly below
+    rather than silently ignored.
+
+    Non-Hermitian self.hamiltonian is dispatched to a separate solver,
+    nhdmrg.py's nhdmrg_generalized() (the non-Hermitian, complex-lambda,
+    biorthogonal-quotient generalization of NH-DMRG, mirroring how this
+    function itself generalizes plain gs_energy()) -- implemented on the
+    same itensor_version="python"/3 pair as the Hermitian path above (no
+    mpscpp2 support either way).
+
+    CAVEAT (found via code review, not fixed -- see this codebase's usual
+    "document the quirk" convention rather than adding a state-tracking
+    flag threaded through every consumer): self.wf0/self.e0/computed_gs
+    afterward hold the eigenvector/eigenvalue of the *shifted* problem
+    H-lambda*A (or its biorthogonal NH counterpart), not a plain
+    eigenstate of self.hamiltonian alone. Every other method that treats
+    self.wf0 as an ordinary ground state -- get_excited_states() (its
+    overlap-penalty anchor), any dynamical/KPM correlator, NH-KPM
+    (nonhermitian/kpm.py) -- has no way to detect this and will silently
+    build on the wrong reference state if called afterward without first
+    recomputing a genuine ground state (gs_energy()/nhdmrg(), which reset
+    wf0 to a real eigenstate of self.hamiltonian). Call
+    gs_energy_generalized() as the last step of a calculation, or
+    explicitly recompute the plain ground state before using any other
+    method that reads self.wf0."""
+    if self.mode=="ED":
+        raise NotImplementedError(
+            "gs_energy_generalized has no ED implementation -- unset "
+            "self.mode (or set it to \"DMRG\") to use the DMRG solver")
+    if self.itensor_version not in (3,"python"):
+        raise NotImplementedError(
+            "gs_energy_generalized is only implemented for "
+            "itensor_version=3 or 'python' so far -- call "
+            "chain.setup_cpp(version=3) or chain.setup_python() first")
+    if self._session is None:
+        # itensor_version==3 but no compiled extension for it (sites.py's
+        # initialize() leaves self._session as None in that case, the
+        # same "extension not compiled" state mode.py's own get_mode()
+        # falls back to ED for elsewhere) -- there is no ED fallback for
+        # this method, so fail with an actionable message instead of an
+        # AttributeError on the calls below.
+        raise RuntimeError(
+            "gs_energy_generalized needs a compiled ITensor v3 extension "
+            "(itensor_version=3) but none is available for this chain -- "
+            "run `python install.py --itensor-version=3`, or call "
+            "chain.setup_python() to use the pure-Python backend instead")
+    if self.hamiltonian is None:
+        raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
+    if not self.is_hermitian(self.hamiltonian):
+        # Non-Hermitian H: dispatch to the NH-DMRG generalized solver
+        # (nhdmrg.py's nhdmrg_generalized()/gs_energy_generalized_nhdmrg())
+        # -- mirrors gs_energy()'s own non-Hermitian dispatch to NH-DMRG.
+        # Without this branch, the local two-site solver in both backends
+        # would silently Hermitize its effective-Hamiltonian matrix before
+        # diagonalizing, producing a well-defined but physically
+        # meaningless "eigenvalue" with no warning at all.
+        #
+        # Deliberately checked *before* the itensor_version==3-and-ns<3
+        # guard below: that guard exists only because the Hermitian path
+        # calls real ITensor v3 dmrg() (whose two-site sweep aborts the
+        # whole process for short chains), but nhdmrg_generalized()'s own
+        # two-site sweep is hand-rolled directly against
+        # arnoldi_smallest_real/manual ITensor contractions and never
+        # calls dmrg() at all -- confirmed directly, a 2-site chain runs
+        # it without aborting -- so the non-Hermitian path must not be
+        # rejected for a short chain it can actually handle fine.
+        from .nhdmrg import gs_energy_generalized_nhdmrg
+        return gs_energy_generalized_nhdmrg(self,A,lam0=lam0)
+    if self.itensor_version==3 and self.ns<3:
+        # ITensor v3's two-site dmrg() aborts the whole process (SIGABRT,
+        # "LocalOp is default constructed") for chains shorter than 3
+        # sites -- see mode.py's own itensor_version==3 guard, which
+        # exists specifically to route every *other* DMRG entry point
+        # around this by falling back to ED. There is no ED fallback
+        # here, so this must be rejected explicitly (mirrored again,
+        # defense in depth, by Chain::gs_energy_generalized itself on
+        # the C++ side) rather than silently crashing the interpreter.
+        # Hermitian-path-only (see the non-Hermitian branch above for why
+        # NH-DMRG doesn't need this guard).
+        raise RuntimeError(
+            "gs_energy_generalized: ITensor v3's two-site DMRG can't "
+            "handle a chain this short (n=%d < 3 sites) -- use "
+            "itensor_version=\"python\" instead"%self.ns)
+    from . import multioperator
+    A = multioperator.obj2MO(A)
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    self._session.set_hamiltonian(self.hamiltonian.to_terms())
+    if self.itensor_version=="python": # pyitensor accepts lam0=None directly
+        session_lam0 = lam0
+    else: # the compiled v3 binding takes a plain float, NaN meaning "unset"
+        session_lam0 = float('nan') if lam0 is None else lam0
+    lam = self._session.gs_energy_generalized(A.to_terms(),lam0=session_lam0)
+    self.e0 = lam
+    wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
+    self.set_initial_wf(wf0) # set the initial wavefunction (resets computed_gs)
+    self.computed_gs = True # ...so this must come after set_initial_wf, not
+                             # before -- mirrors gs_energy_single's own
+                             # ordering (its trailing re-assertion after the
+                             # same set_initial_wf() reset), which an earlier
+                             # version of this function got backwards: setting
+                             # computed_gs=True *before* set_initial_wf() left
+                             # it silently False on return, so the next
+                             # ordinary gs_energy()/get_gs() call would see
+                             # computed_gs==False and quietly re-run a plain
+                             # ground-state DMRG solve (warm-started from this
+                             # method's own wf0), overwriting self.wf0/self.e0
+                             # with a different quantity than the caller asked
+                             # for -- confirmed directly via execution.
+    return lam
+
+
 def gs_energy_cpp(self,policy="single",**kwargs):
     """Compute ground state with C++ DMRG"""
     if policy=="single":

@@ -6,6 +6,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/complex.h>
 #include <pybind11/numpy.h>
+#include <limits> // std::numeric_limits<double>::quiet_NaN() (gs_energy_generalized's lam0 default)
 #include "itensor/all.h"
 #include "extra/all.h" // dmrgpy's own extra site types (spin-3/2, Z4, Boson-4, ...)
 
@@ -111,6 +112,17 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("gs_wavefunction",&Chain::gs_wavefunction,
              py::return_value_policy::copy)
         .def("set_wavefunction",&Chain::set_wavefunction,py::arg("wf"))
+        .def("gs_energy_generalized",[](Chain& self, std::vector<PyTerm> const& terms_a,
+                                         double lam0) {
+                return self.gs_energy_generalized(terms_from_python(terms_a),lam0);
+            }, py::arg("terms_a"),
+               py::arg("lam0")=std::numeric_limits<double>::quiet_NaN(),
+               "Generalized-eigenvalue DMRG: solves H|psi>=lambda*A|psi> for "
+               "a Hermitian positive-definite metric operator A (terms_a), "
+               "self-consistently updating the Lagrange multiplier lambda "
+               "between DMRG sweeps -- see Chain::gs_energy_generalized's "
+               "own comment for the algorithm. Returns lambda; A=identity "
+               "reduces this exactly to plain gs_energy().")
         .def("excited_states",[](Chain& self, int n, double scale_lagrange,
                                   bool gram_schmidt) {
                 auto out = self.excited_states(n,scale_lagrange,gram_schmidt);
@@ -134,6 +146,25 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "eigenvalue with smallest real part; terms_hadj must be the "
                "adjoint operator's terms (MultiOperator.get_dagger() on the "
                "Python side). Returns (energy, psil, psir)")
+        .def("nhdmrg_generalized",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_hadj,
+                          std::vector<PyTerm> const& terms_a,
+                          int krylovdim, int restarts, Cplx lam0) {
+                auto out = self.nhdmrg_generalized(terms_from_python(terms_h),
+                    terms_from_python(terms_hadj),terms_from_python(terms_a),
+                    krylovdim,restarts,lam0);
+                return py::make_tuple(out.energy,out.psil,out.psir);
+            }, py::arg("terms_h"),py::arg("terms_hadj"),py::arg("terms_a"),
+               py::arg("krylovdim")=20,py::arg("restarts")=2,
+               py::arg("lam0")=Cplx(std::numeric_limits<double>::quiet_NaN(),0.0),
+               "Non-Hermitian generalized-eigenvalue NH-DMRG: solves "
+               "H|psi_R>=lambda*A|psi_R> for a possibly non-Hermitian "
+               "operator (terms_h, with terms_hadj its adjoint -- same "
+               "MultiOperator.get_dagger() convention as nhdmrg() above) "
+               "and a Hermitian positive-definite metric operator A "
+               "(terms_a) -- see Chain::nhdmrg_generalized's own comment "
+               "for the algorithm. Returns (lambda, psil, psir) with "
+               "<psil|psir>=1, same convention as nhdmrg().")
         .def("vev",[](Chain& self, std::vector<PyTerm> const& terms,
                        MPS const& wf, int npow) {
                 return self.vev(terms_from_python(terms),wf,npow);

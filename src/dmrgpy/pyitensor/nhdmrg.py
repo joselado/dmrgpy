@@ -34,14 +34,26 @@ non-Hermitian "energy" is not a variational bound, so a stalled run can
 only be detected by the caller's eigen-residual certificate and cured by
 re-running (see dmrgpy's nhdmrg.py retry loop, shared by all three
 backends).
+
+nhdmrg_generalized() below solves the *generalized* eigenproblem
+H|psi_R>=lambda*A|psi_R> (A Hermitian positive definite, H possibly
+non-Hermitian) by reusing the same per-sweep machinery
+(_nhdmrg_one_sweep, factored out of nhdmrg()'s own loop body) against a
+complex-shifted pair (H-lambda*A, HA-conj(lambda)*A), self-consistently
+updating lambda between sweeps via the biorthogonal generalized Rayleigh
+quotient -- see its own docstring for the derivation. The non-Hermitian
+counterpart of dmrg.py's dmrg_generalized(), and (like
+mpsiram_generalized in algebra/arpacktk.py, ARPACK mode 2) needs no
+Hermiticity assumption on H itself, only on the metric A.
 """
 
 import numpy as np
 
 from .dmrg import (_all_right_environments, _extend_left, _extend_right,
-                   two_site_heff)
+                   lam0_is_unset, two_site_heff)
 from .index import Index
 from .mpsalgebra import inner
+from .mpsalgebra import sum as mps_sum
 from .svd import eigh_truncate
 from .tensor import ITensor
 
@@ -116,6 +128,151 @@ def _arnoldi_smallest_real(matvec, x0, krylovdim, restarts,
     return lam, x0
 
 
+def _nhdmrg_one_sweep(psil, psir, H, HA, maxdim, cutoff, noise,
+                      krylovdim, restarts, energy_hint, have_energy_hint):
+    """One full forward-then-backward NH-DMRG sweep against a fixed
+    (H, HA=H^dagger) pair, mutating psil/psir in place. Builds its own
+    left/right environments from scratch (self-contained, like dmrg.py's
+    _dmrg_one_sweep) rather than assuming any carried over from a
+    previous sweep -- needed by nhdmrg_generalized() below, whose H/HA
+    change every outer iteration, so stale environments from a previous
+    (H,HA) pair would be wrong. Returns the final bond's local eigenvalue
+    (nhdmrg()'s own within-sweep tie-break anchor; see _select_ritz),
+    starting the SRTieBreak anchor from (energy_hint, have_energy_hint)
+    instead of always (0, False) so a caller can continue anchoring
+    across sweeps that share the same (H, HA) -- nhdmrg() itself does,
+    nhdmrg_generalized() below deliberately does not (see its own
+    docstring)."""
+    n = psir.length()
+    energy = energy_hint
+    have_energy = have_energy_hint
+    # (env tensor, dangling bra link) per boundary, one family per
+    # projected problem: H sandwiched between <psil| and |psir>, and
+    # Hdag sandwiched between <psir| and |psil>. Built once per sweep and
+    # then maintained incrementally as the sweep itself progresses (each
+    # backward half-sweep refreshes every right entry, each forward
+    # half-sweep every left entry), like the C++ ports -- a per-bond
+    # rebuild would be redundant work.
+    right_h = _all_right_environments(H, psir, bra=psil)
+    right_a = _all_right_environments(HA, psil, bra=psir)
+    left_h = {0: (None, None)}
+    left_a = {0: (None, None)}
+
+    for ha in (1, 2):
+        bonds = range(1, n) if ha == 1 else range(n - 1, 0, -1)
+        for b in bonds:
+            Lh, Lbra_h = left_h[b - 1]
+            Rh, Rbra_h = right_h[b + 2]
+            La, Lbra_a = left_a[b - 1]
+            Ra, Rbra_a = right_a[b + 2]
+            mv_r, order_in, shape, x0r = two_site_heff(
+                Lh, Lbra_h, H, psir, b, Rh, Rbra_h)
+            mv_l, _, _, x0l = two_site_heff(
+                La, Lbra_a, HA, psil, b, Ra, Rbra_a)
+            er, thr = _arnoldi_smallest_real(
+                mv_r, x0r, krylovdim, restarts,
+                sel="SRTieBreak" if have_energy else "SR", target=energy)
+            # only the eigenvector is needed from the adjoint solve
+            # (its eigenvalue is conj(er) by construction)
+            _, thl = _arnoldi_smallest_real(
+                mv_l, x0l, krylovdim, restarts,
+                sel="closest", target=np.conj(er))
+            energy = er
+            have_energy = True
+
+            thl = thl / np.linalg.norm(thl)
+            thr = thr / np.linalg.norm(thr)
+            # rescale so <thl|thr> = 1, split between the two states
+            # (separate real branch: see chain_session.h's note on
+            # sqrt's branch cut for real negative overlaps)
+            ov = np.vdot(thl, thr)
+            if abs(ov) > 1e-12:
+                if abs(ov.imag) < 1e-14 * abs(ov):
+                    sq = np.sqrt(abs(ov.real))
+                    thl = thl / sq
+                    thr = thr / (-sq if ov.real < 0 else sq)
+                else:
+                    thl = thl / np.sqrt(np.conj(ov))
+                    thr = thr / np.sqrt(ov)
+
+            # fidelity truncation: keep-indices are a contiguous slice
+            # of order_in ((left_link?, s_b) for ha==1, (s_{b+1},
+            # right_link?) for ha==2 -- the boundary link is present
+            # exactly when the boundary element of order_in is not a
+            # Site index), so a transpose+reshape turns each theta
+            # into a (kept x rest) matrix
+            if ha == 1:
+                nk = 1 if order_in[0].hastags("Site") else 2
+                keep_inds = list(order_in[:nk])
+                perm = list(range(len(order_in)))
+            else:
+                nk = 1 if order_in[-1].hastags("Site") else 2
+                keep_inds = list(order_in[-nk:])
+                perm = (list(range(len(order_in) - nk, len(order_in))) +
+                        list(range(len(order_in) - nk)))
+            rest_inds = [ind for ind in order_in if ind not in keep_inds]
+            kd = int(np.prod([ind.dim for ind in keep_inds], dtype=int))
+            Ml = thl.reshape(shape).transpose(perm).reshape(kd, -1)
+            Mr = thr.reshape(shape).transpose(perm).reshape(kd, -1)
+            rho = 0.5 * (Ml @ Ml.conj().T + Mr @ Mr.conj().T)
+            if noise > 0:
+                # reference's noiseterm() (cross term between the left
+                # and right solutions through the half-contracted MPO),
+                # hermitized before the hermitian eigensolver -- the
+                # same construction as the C++ ports, done on matrices
+                if ha == 1:
+                    X = H.A(b) if Lh is None else Lh * H.A(b)
+                else:
+                    X = H.A(b + 1) if Rh is None else H.A(b + 1) * Rh
+                thl_t = ITensor(tuple(order_in), thl.reshape(shape))
+                thr_t = ITensor(tuple(order_in), thr.reshape(shape))
+                # kept-side output legs of X, in the same order as
+                # keep_inds' basis: (Lbra?, s_b') / (s_{b+1}', Rbra?)
+                if ha == 1:
+                    keep_out = ([Lbra_h] if Lbra_h is not None else []) \
+                        + [keep_inds[-1].prime(1)]
+                else:
+                    keep_out = [keep_inds[0].prime(1)] \
+                        + ([Rbra_h] if Rbra_h is not None else [])
+                Xl = X * thl_t
+                Xr = X * thr_t
+                rest_out = [ind for ind in Xl.inds
+                            if ind not in keep_out]
+                Al = Xl.transpose_to(keep_out + rest_out).reshape(kd, -1)
+                Ar = Xr.transpose_to(keep_out + rest_out).reshape(kd, -1)
+                nt = Al @ Ar.conj().T
+                rho = rho + (noise / 2.0) * (nt + nt.conj().T)
+            Uk, keep = eigh_truncate(rho, cutoff, maxdim, mindim=1)
+
+            link = Index(keep, tags="Link")
+            keep_shape = tuple(ind.dim for ind in keep_inds)
+            site_T = ITensor(tuple(keep_inds) + (link,),
+                             Uk.reshape(keep_shape + (keep,)))
+            rest_shape = tuple(ind.dim for ind in rest_inds)
+            Cl = (Uk.conj().T @ Ml).reshape((keep,) + rest_shape)
+            Cr = (Uk.conj().T @ Mr).reshape((keep,) + rest_shape)
+            center_l = ITensor((link,) + tuple(rest_inds), Cl)
+            center_r = ITensor((link,) + tuple(rest_inds), Cr)
+            if ha == 1:
+                psil.set_A(b, site_T)
+                psir.set_A(b, site_T)
+                psil.set_A(b + 1, center_l)
+                psir.set_A(b + 1, center_r)
+                psil.center = psir.center = b + 1
+                left_h[b] = _extend_left(Lh, Lbra_h, H, psir, b, bra=psil)
+                left_a[b] = _extend_left(La, Lbra_a, HA, psil, b, bra=psir)
+            else:
+                psil.set_A(b + 1, site_T)
+                psir.set_A(b + 1, site_T)
+                psil.set_A(b, center_l)
+                psir.set_A(b, center_r)
+                psil.center = psir.center = b
+                right_h[b + 1] = _extend_right(Rh, Rbra_h, H, psir, b + 1, bra=psil)
+                right_a[b + 1] = _extend_right(Ra, Rbra_a, HA, psil, b + 1, bra=psir)
+
+    return energy
+
+
 def nhdmrg(H, HA, psi0, sweeps, krylovdim=20, restarts=2, quiet=True):
     """Run NH-DMRG for the non-Hermitian MPO H (HA must be its adjoint,
     built from MultiOperator.get_dagger()'s terms). psi0 seeds both the
@@ -125,139 +282,103 @@ def nhdmrg(H, HA, psi0, sweeps, krylovdim=20, restarts=2, quiet=True):
     psir.position(1)
     psir.normalize()
     psil = psir.copy()
-    n = psir.length()
 
     energy = 0.0 + 0.0j
     have_energy = False
-    # (env tensor, dangling bra link) per boundary, one family per
-    # projected problem: H sandwiched between <psil| and |psir>, and
-    # Hdag sandwiched between <psir| and |psil>. Built once and then
-    # maintained incrementally by the sweeps themselves (each backward
-    # half-sweep refreshes every right entry, each forward half-sweep
-    # every left entry), like the C++ ports -- a per-sweep rebuild would
-    # be redundant work.
-    right_h = _all_right_environments(H, psir, bra=psil)
-    right_a = _all_right_environments(HA, psil, bra=psir)
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, _niter = sweeps.at(sweep_i)
-        left_h = {0: (None, None)}
-        left_a = {0: (None, None)}
-
-        for ha in (1, 2):
-            bonds = range(1, n) if ha == 1 else range(n - 1, 0, -1)
-            for b in bonds:
-                Lh, Lbra_h = left_h[b - 1]
-                Rh, Rbra_h = right_h[b + 2]
-                La, Lbra_a = left_a[b - 1]
-                Ra, Rbra_a = right_a[b + 2]
-                mv_r, order_in, shape, x0r = two_site_heff(
-                    Lh, Lbra_h, H, psir, b, Rh, Rbra_h)
-                mv_l, _, _, x0l = two_site_heff(
-                    La, Lbra_a, HA, psil, b, Ra, Rbra_a)
-                er, thr = _arnoldi_smallest_real(
-                    mv_r, x0r, krylovdim, restarts,
-                    sel="SRTieBreak" if have_energy else "SR", target=energy)
-                # only the eigenvector is needed from the adjoint solve
-                # (its eigenvalue is conj(er) by construction)
-                _, thl = _arnoldi_smallest_real(
-                    mv_l, x0l, krylovdim, restarts,
-                    sel="closest", target=np.conj(er))
-                energy = er
-                have_energy = True
-
-                thl = thl / np.linalg.norm(thl)
-                thr = thr / np.linalg.norm(thr)
-                # rescale so <thl|thr> = 1, split between the two states
-                # (separate real branch: see chain_session.h's note on
-                # sqrt's branch cut for real negative overlaps)
-                ov = np.vdot(thl, thr)
-                if abs(ov) > 1e-12:
-                    if abs(ov.imag) < 1e-14 * abs(ov):
-                        sq = np.sqrt(abs(ov.real))
-                        thl = thl / sq
-                        thr = thr / (-sq if ov.real < 0 else sq)
-                    else:
-                        thl = thl / np.sqrt(np.conj(ov))
-                        thr = thr / np.sqrt(ov)
-
-                # fidelity truncation: keep-indices are a contiguous slice
-                # of order_in ((left_link?, s_b) for ha==1, (s_{b+1},
-                # right_link?) for ha==2 -- the boundary link is present
-                # exactly when the boundary element of order_in is not a
-                # Site index), so a transpose+reshape turns each theta
-                # into a (kept x rest) matrix
-                if ha == 1:
-                    nk = 1 if order_in[0].hastags("Site") else 2
-                    keep_inds = list(order_in[:nk])
-                    perm = list(range(len(order_in)))
-                else:
-                    nk = 1 if order_in[-1].hastags("Site") else 2
-                    keep_inds = list(order_in[-nk:])
-                    perm = (list(range(len(order_in) - nk, len(order_in))) +
-                            list(range(len(order_in) - nk)))
-                rest_inds = [ind for ind in order_in if ind not in keep_inds]
-                kd = int(np.prod([ind.dim for ind in keep_inds], dtype=int))
-                Ml = thl.reshape(shape).transpose(perm).reshape(kd, -1)
-                Mr = thr.reshape(shape).transpose(perm).reshape(kd, -1)
-                rho = 0.5 * (Ml @ Ml.conj().T + Mr @ Mr.conj().T)
-                if noise > 0:
-                    # reference's noiseterm() (cross term between the left
-                    # and right solutions through the half-contracted MPO),
-                    # hermitized before the hermitian eigensolver -- the
-                    # same construction as the C++ ports, done on matrices
-                    if ha == 1:
-                        X = H.A(b) if Lh is None else Lh * H.A(b)
-                    else:
-                        X = H.A(b + 1) if Rh is None else H.A(b + 1) * Rh
-                    thl_t = ITensor(tuple(order_in), thl.reshape(shape))
-                    thr_t = ITensor(tuple(order_in), thr.reshape(shape))
-                    # kept-side output legs of X, in the same order as
-                    # keep_inds' basis: (Lbra?, s_b') / (s_{b+1}', Rbra?)
-                    if ha == 1:
-                        keep_out = ([Lbra_h] if Lbra_h is not None else []) \
-                            + [keep_inds[-1].prime(1)]
-                    else:
-                        keep_out = [keep_inds[0].prime(1)] \
-                            + ([Rbra_h] if Rbra_h is not None else [])
-                    Xl = X * thl_t
-                    Xr = X * thr_t
-                    rest_out = [ind for ind in Xl.inds
-                                if ind not in keep_out]
-                    Al = Xl.transpose_to(keep_out + rest_out).reshape(kd, -1)
-                    Ar = Xr.transpose_to(keep_out + rest_out).reshape(kd, -1)
-                    nt = Al @ Ar.conj().T
-                    rho = rho + (noise / 2.0) * (nt + nt.conj().T)
-                Uk, keep = eigh_truncate(rho, cutoff, maxdim, mindim=1)
-
-                link = Index(keep, tags="Link")
-                keep_shape = tuple(ind.dim for ind in keep_inds)
-                site_T = ITensor(tuple(keep_inds) + (link,),
-                                 Uk.reshape(keep_shape + (keep,)))
-                rest_shape = tuple(ind.dim for ind in rest_inds)
-                Cl = (Uk.conj().T @ Ml).reshape((keep,) + rest_shape)
-                Cr = (Uk.conj().T @ Mr).reshape((keep,) + rest_shape)
-                center_l = ITensor((link,) + tuple(rest_inds), Cl)
-                center_r = ITensor((link,) + tuple(rest_inds), Cr)
-                if ha == 1:
-                    psil.set_A(b, site_T)
-                    psir.set_A(b, site_T)
-                    psil.set_A(b + 1, center_l)
-                    psir.set_A(b + 1, center_r)
-                    psil.center = psir.center = b + 1
-                    left_h[b] = _extend_left(Lh, Lbra_h, H, psir, b, bra=psil)
-                    left_a[b] = _extend_left(La, Lbra_a, HA, psil, b, bra=psir)
-                else:
-                    psil.set_A(b + 1, site_T)
-                    psir.set_A(b + 1, site_T)
-                    psil.set_A(b, center_l)
-                    psir.set_A(b, center_r)
-                    psil.center = psir.center = b
-                    right_h[b + 1] = _extend_right(Rh, Rbra_h, H, psir, b + 1, bra=psil)
-                    right_a[b + 1] = _extend_right(Ra, Rbra_a, HA, psil, b + 1, bra=psir)
-
+        energy = _nhdmrg_one_sweep(psil, psir, H, HA, maxdim, cutoff, noise,
+                krylovdim, restarts, energy, have_energy)
+        have_energy = True
         if not quiet:
             print("NH-DMRG sweep {}: energy = {}".format(sweep_i, energy))
 
     # definitive energy: the biorthogonal Rayleigh quotient of the final pair
     energy = inner(psil, H, psir) / inner(psil, psir)
     return energy, psil, psir
+
+
+def nhdmrg_generalized(H, HA, A, psi0, sweeps, krylovdim=20, restarts=2,
+                       quiet=True, lam0=None):
+    """Non-Hermitian generalized-eigenvalue NH-DMRG: finds the smallest-
+    real-part lambda solving H|psi_R>=lambda*A|psi_R> (equivalently
+    H^dagger|psi_L>=conj(lambda)*A|psi_L>, since A is Hermitian) for a
+    possibly non-Hermitian H and a Hermitian positive-definite metric MPO
+    A. Same self-consistent Lagrange-multiplier trick as dmrg.py's
+    dmrg_generalized(), generalized to a complex lambda and biorthogonal
+    (rather than plain) expectation values: minimizing (in the NH-DMRG
+    sense -- smallest real part, not a variational bound) subject to the
+    metric biorthogonal normalization <psi_L|A|psi_R>=1 gives stationarity
+    condition (H-lambda*A)|psi_R>=mu|psi_R>,
+    (H-lambda*A)^dagger|psi_L>=conj(mu)|psi_L> -- the *ordinary*
+    (<psi_L|psi_R>=1-normalized) NH-DMRG eigenproblem of the shifted pair
+    (H-lambda*A, HA-conj(lambda)*A), exactly what one ordinary NH-DMRG
+    sweep already finds (note the adjoint shift uses conj(lambda), not
+    lambda: (lambda*A)^dagger=conj(lambda)*A^dagger=conj(lambda)*A since A
+    is Hermitian). At mu=0 this is precisely H|psi_R>=lambda*A|psi_R>, so
+    each outer iteration here (i) builds Heff=H-lambda*A and
+    HAeff=HA-conj(lambda)*A from the current lambda estimate, (ii) runs
+    one ordinary NH-DMRG sweep (_nhdmrg_one_sweep, unmodified) against
+    them, then (iii) updates lambda to the freshly-swept pair's
+    generalized biorthogonal Rayleigh quotient
+    <psi_L|H|psi_R>/<psi_L|A|psi_R>. A=identity reduces this exactly to
+    plain nhdmrg().
+
+    Each outer sweep's own within-sweep SRTieBreak anchor
+    (_nhdmrg_one_sweep's energy_hint/have_energy_hint) restarts fresh
+    (target 0, no anchor) rather than carrying over from the previous
+    outer iteration: (H,HA) changes every outer iteration (unlike
+    nhdmrg()'s own sweep loop, which reuses the same fixed H/HA
+    throughout and so *does* carry the anchor across sweeps), so an
+    anchor built for a different lambda's shifted spectrum has no
+    particular reason to still be meaningful for the next one.
+
+    lam0 (optional): starting lambda estimate; None or a NaN real part
+    both mean "unset" (see this function's own note on why NaN is
+    accepted too), defaulting to the seed state's own (plain, since
+    psi_L=psi_R=psi0 initially) generalized Rayleigh quotient
+    <psi0|H|psi0>/<psi0|A|psi0>.
+    """
+    psir = psi0
+    psir.position(1)
+    psir.normalize()
+    psil = psir.copy()
+
+    # None or NaN (real part) both mean "unset" -- NaN accepted too since
+    # Chain::nhdmrg_generalized's own C++/pybind11 binding has no None
+    # equivalent and uses a NaN real part as its own "unset" sentinel.
+    # lam0_is_unset() (dmrg.py) coerces via complex(lam0) rather than
+    # gating on isinstance(lam0, complex): a caller passing a bare float
+    # NaN here (a reasonable thing to do given this docstring's own "None
+    # or a NaN real part" wording) would otherwise silently skip this
+    # fallback and feed a live NaN into the first outer iteration instead
+    # -- confirmed directly, found via code review.
+    lam = lam0
+    if lam0_is_unset(lam):
+        a0 = inner(psil, A, psir)
+        h0 = inner(psil, H, psir)
+        lam = h0 / a0 if abs(a0) > 1e-14 else 0.0 + 0.0j
+    lam = complex(lam)
+
+    for sweep_i in range(sweeps.nsweep):
+        maxdim, cutoff, noise, _niter = sweeps.at(sweep_i)
+        Heff = mps_sum(H, A * (-lam))
+        HAeff = mps_sum(HA, A * (-np.conj(lam)))
+        _nhdmrg_one_sweep(psil, psir, Heff, HAeff, maxdim, cutoff, noise,
+                krylovdim, restarts, 0.0 + 0.0j, False)
+        a_psi = inner(psil, A, psir)
+        if not (abs(a_psi) > 1e-14):
+            # "not (> tol)", not "< tol": see dmrg.py's identical guard
+            # for why the negated form is needed to also catch NaN.
+            raise RuntimeError(
+                "nhdmrg_generalized: <psi_L|A|psi_R> collapsed to ~0 (or "
+                "NaN) mid-iteration (A may not be positive definite, or "
+                "the sweep drove the biorthogonal pair toward A's near-"
+                "null-space) -- cannot form a meaningful generalized "
+                "Rayleigh quotient")
+        h_psi = inner(psil, H, psir)
+        lam = h_psi / a_psi
+        if not quiet:
+            print("sweep {}: lambda = {}".format(sweep_i, lam))
+
+    return lam, psil, psir
