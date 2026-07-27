@@ -152,3 +152,73 @@ def test_gs_energy_generalized_requires_hamiltonian(itensor_version):
         fc.setup_cpp(version=itensor_version)
     with pytest.raises(RuntimeError):
         fc.gs_energy_generalized(mo_identity())
+
+
+@pytest.mark.parametrize("itensor_version", ITENSOR_VERSIONS)
+def test_gs_energy_generalized_leaves_computed_gs_true(itensor_version):
+    """Regression test for a real ordering bug found by code review:
+    gs_energy_generalized() used to set self.computed_gs=True *before*
+    calling self.set_initial_wf(wf0), but set_initial_wf() unconditionally
+    resets computed_gs=False as its own first statement (mirroring
+    gs_energy_single()'s identical pattern, which re-asserts
+    computed_gs=True *after* its own set_initial_wf() call for exactly
+    this reason) -- so computed_gs silently ended up False on return.
+    That in turn meant any subsequent plain gs_energy() call would see
+    computed_gs==False and quietly re-run a full ground-state DMRG solve
+    (warm-started from the generalized-eigenproblem wavefunction),
+    overwriting self.e0/self.wf0 with the *plain* ground-state energy
+    instead of returning the cached generalized eigenvalue -- verified
+    directly against both assertions below before the fix."""
+    fc, a, m = _generalized_fermion_problem(n=4, seed=2)
+    _setup(fc, itensor_version)
+    lam = fc.gs_energy_generalized(m)
+    assert fc.computed_gs is True
+    # gs_energy()'s own DMRG branch returns self.e0 immediately without
+    # resolving anything when computed_gs is already True (manybodychain.py)
+    assert fc.gs_energy() == lam
+
+
+@pytest.mark.parametrize("itensor_version", ITENSOR_VERSIONS)
+def test_gs_energy_generalized_rejects_non_hermitian_hamiltonian(itensor_version):
+    """A non-Hermitian self.hamiltonian must be rejected rather than
+    silently Hermitized by the local two-site solver (both backends'
+    local eigensolver projects its effective-Hamiltonian matrix onto its
+    Hermitian part before diagonalizing, with no warning)."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    h = 0
+    for i in range(n - 1):
+        h = h + 1j * fc.Cdag[i] * fc.C[i + 1]  # non-Hermitian: no h.c. term
+    fc.set_hamiltonian(h)
+    _setup(fc, itensor_version)
+    with pytest.raises(ValueError):
+        fc.gs_energy_generalized(mo_identity())
+
+
+@pytest.mark.parametrize("itensor_version", ITENSOR_VERSIONS)
+def test_gs_energy_generalized_rejects_ed_mode(itensor_version):
+    """self.mode="ED" must be rejected explicitly (there is no ED
+    implementation of this method, unlike vev()/gs_energy()/... which all
+    honor self.mode="ED" for cross-validation) rather than silently
+    running DMRG anyway as if self.mode had never been set."""
+    fc, a, m = _generalized_fermion_problem(n=4, seed=2)
+    _setup(fc, itensor_version)
+    fc.mode = "ED"
+    with pytest.raises(NotImplementedError):
+        fc.gs_energy_generalized(m)
+
+
+def test_gs_energy_generalized_v3_short_chain_raises_not_crashes():
+    """ITensor v3's two-site dmrg() aborts the whole process (SIGABRT,
+    uncatchable) for chains shorter than 3 sites -- mode.py's own
+    itensor_version==3 guard exists specifically to route every *other*
+    DMRG entry point around this via an ED fallback, but there is no ED
+    fallback for gs_energy_generalized, so this must be rejected with an
+    ordinary, catchable RuntimeError instead of crashing the
+    interpreter."""
+    if not cppext.available(3):
+        pytest.skip("ITensor v3 extension not compiled")
+    fc, a, m = _generalized_fermion_problem(n=2, seed=2)
+    fc.setup_cpp(version=3)
+    with pytest.raises(RuntimeError):
+        fc.gs_energy_generalized(m)

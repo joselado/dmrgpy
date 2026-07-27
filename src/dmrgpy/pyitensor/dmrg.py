@@ -380,7 +380,21 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
     lambda solving $H|\\psi\\rangle=\\lambda A|\\psi\\rangle$ for a Hermitian
     positive-definite metric MPO A (A = the identity MPO reduces this
     exactly to plain dmrg()). Mutates psi in place and returns the final
-    lambda.
+    lambda. H itself is assumed Hermitian too (same precondition plain
+    dmrg() already has -- unlike gs_energy(), which dispatches non-
+    Hermitian H to NH-DMRG, nothing at this level checks this, and the
+    local two-site solver silently Hermitizes its effective-Hamiltonian
+    matrix before diagonalizing regardless; groundstate.py's Python-level
+    wrapper is where this actually gets validated for real callers).
+
+    Unlike Chain::gs_energy_generalized's ITensor v3 C++ port
+    (mpscpp3/chain_session.h), this pure-Python engine never implements
+    DMRG's noise term at all (see this module's own docstring) -- so for
+    a Hamiltonian/metric pair whose self-consistent iteration has a
+    symmetric local minimum, the two backends are not guaranteed to
+    converge to the same lambda beyond ordinary numerical tolerance
+    (the v3 port can use noise to escape such a minimum; this one
+    cannot).
 
     The trick: minimizing $\\langle\\psi|H|\\psi\\rangle$ subject to the
     *metric* normalization $\\langle\\psi|A|\\psi\\rangle=1$ has stationarity
@@ -406,30 +420,44 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
     modest-bond-dimension Hamiltonian-like MPOs, so an exact sum costs
     little and avoids silently truncating the shift term).
 
-    lam0 (optional): starting lambda estimate; defaults to psi's own
-    current generalized Rayleigh quotient $\\langle\\psi|H|\\psi\\rangle/
+    lam0 (optional): starting lambda estimate; None or NaN both mean
+    "unset" (NaN accepted too since Chain::gs_energy_generalized's own
+    C++/pybind11 binding has no None equivalent and uses NaN as its own
+    "unset" sentinel -- accepting both here keeps the two session-level
+    APIs interchangeable). Unset defaults to psi's own current
+    generalized Rayleigh quotient $\\langle\\psi|H|\\psi\\rangle/
     \\langle\\psi|A|\\psi\\rangle$, which costs two cheap inner()s and gives
     the first outer sweep a head start over starting from lambda=0.
+
+    Raises RuntimeError if <psi|A|psi> ever collapses to ~0 mid-iteration
+    (only expected if A isn't actually positive definite, or a sweep
+    drives psi toward A's near-null-space) -- dividing through such a
+    value would otherwise silently poison every later outer iteration
+    with inf/NaN instead of failing loudly.
     """
     lam = lam0
-    if lam is None:
+    if lam is None or (isinstance(lam, float) and np.isnan(lam)):
         a0 = inner(psi, A, psi).real
         h0 = inner(psi, H, psi).real
         lam = h0 / a0 if abs(a0) > 1e-14 else 0.0
 
-    energy = lam
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
         Heff = mps_sum(H, A * (-lam))
         _dmrg_one_sweep(psi, Heff, maxdim, cutoff, niter)
         a_psi = inner(psi, A, psi).real
+        if abs(a_psi) < 1e-14:
+            raise RuntimeError(
+                "dmrg_generalized: <psi|A|psi> collapsed to ~0 mid-iteration "
+                "(A may not be positive definite, or the sweep drove psi "
+                "toward A's near-null-space) -- cannot form a meaningful "
+                "generalized Rayleigh quotient")
         h_psi = inner(psi, H, psi).real
         lam = h_psi / a_psi
-        energy = lam
         if not quiet:
-            print("sweep {}: lambda = {}".format(sweep_i, energy))
+            print("sweep {}: lambda = {}".format(sweep_i, lam))
 
-    return energy
+    return lam
 
 
 # -- excited states: overlap-penalty method --------------------------------

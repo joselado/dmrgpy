@@ -191,14 +191,48 @@ class Chain
     // H-lambda*A is rebuilt from the *original* H_, A each outer
     // iteration (never accumulated), so its own bond dimension never
     // grows across outer iterations -- always at most
-    // bondDim(H_)+bondDim(A). lam0 (optional, NaN meaning "unset"):
-    // starting lambda estimate; NaN (the default) instead seeds it from
-    // wf0_'s own current generalized Rayleigh quotient.
+    // bondDim(H_)+bondDim(A), summed with this file's usual
+    // "MaxDim",mpomaxm_,"Cutoff",cutoff_ convention for MPO+MPO sums
+    // (scaled_hamiltonian()'s shift_mpo sum, sum_mpo(), ...). Measured
+    // directly: forcing an exact (Cutoff=0) sum here instead -- closer
+    // to pyitensor/dmrg.py's own mps_sum(H,A*(-lam)), which does default
+    // to a lossless sum -- costs a *lot* more than it buys: on an 8-site
+    // benchmark case this made every outer sweep run against a
+    // meaningfully higher-bond-dimension Heff (AutoMPO's own term-built
+    // H_ is not bond-dimension-minimal, so cutoff_'s ordinary truncation
+    // is doing real compression here, not just absorbing floating-point
+    // noise) for a ~30x slowdown (0.13s -> 4.2s) and *no* accuracy
+    // improvement (the exact-sum run's error against the ED ground truth
+    // was not smaller). cutoff_ defaults tiny (1e-12) and mpomaxm_ large,
+    // so this convention already agrees with pyitensor to near machine
+    // precision in practice -- see
+    // examples/groundstate/dmrg_generalized_benchmark. lam0 (optional,
+    // NaN meaning "unset"): starting lambda estimate; NaN (the default)
+    // instead seeds it from wf0_'s own current generalized Rayleigh
+    // quotient.
+    //
+    // H_ is assumed Hermitian (checked by groundstate.py's Python-level
+    // wrapper before this is ever called, not here); A is assumed
+    // Hermitian positive definite (not checked at all, same
+    // documented-but-unenforced precondition arpacktk.py's
+    // mpsiram_generalized has for its own M).
+    // ITensor v3's dmrg() aborts the whole process (SIGABRT, "LocalOp is
+    // default constructed") rather than raising a catchable exception
+    // for chains with fewer than 3 sites (see mode.py's own get_mode(),
+    // which exists specifically to route gs_energy()/every other DMRG
+    // entry point around this by falling back to ED) -- there is no ED
+    // fallback for this method, so that case is rejected explicitly
+    // below instead of silently crashing the interpreter.
     double
     gs_energy_generalized(std::vector<MOTerm> const& terms_a,
                            double lam0=std::numeric_limits<double>::quiet_NaN())
         {
         if (!have_H_) Error("Chain::gs_energy_generalized called before set_hamiltonian");
+        if (sites_.length()<3)
+            Error("Chain::gs_energy_generalized: ITensor v3's two-site dmrg() "
+                  "aborts the whole process for chains shorter than 3 sites "
+                  "(see mode.py's own itensor_version==3 guard) -- use "
+                  "itensor_version=\"python\" for short chains instead");
         auto A = build_mpo(sites_,terms_a,mpomaxm_);
         if (!have_wf0_)
             {
@@ -221,6 +255,11 @@ class Chain
             sweeps1.noise() = (sw<=nsweeps_/2) ? noise_ : 0.0;
             dmrg(wf0_,Heff,sweeps1,dmrg_args());
             double a_psi = innerC(wf0_,A,wf0_).real();
+            if (std::abs(a_psi)<1e-14)
+                Error("Chain::gs_energy_generalized: <psi|A|psi> collapsed to "
+                      "~0 mid-iteration (A may not be positive definite, or "
+                      "the sweep drove psi toward A's near-null-space) -- "
+                      "cannot form a meaningful generalized Rayleigh quotient");
             double h_psi = innerC(wf0_,H_,wf0_).real();
             lam = h_psi/a_psi;
             }

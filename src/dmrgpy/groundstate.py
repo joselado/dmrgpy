@@ -159,7 +159,14 @@ def gs_energy_generalized(self,A,lam0=None):
     self-consistent Lagrange-multiplier algorithm against ITensor v3's
     own dmrg()/Sweeps/sum()) -- see either docstring for the derivation.
     mpscpp2 (itensor_version=2) and julia_live don't have this session
-    method yet."""
+    method yet. There is also no ED implementation of this method at all
+    (unlike vev()/gs_energy()/..., which all honor self.mode="ED" for
+    cross-validation) -- self.mode="ED" is rejected explicitly below
+    rather than silently ignored."""
+    if self.mode=="ED":
+        raise NotImplementedError(
+            "gs_energy_generalized has no ED implementation -- unset "
+            "self.mode (or set it to \"DMRG\") to use the DMRG solver")
     if self.itensor_version not in (3,"python"):
         raise NotImplementedError(
             "gs_energy_generalized is only implemented for "
@@ -177,8 +184,32 @@ def gs_energy_generalized(self,A,lam0=None):
             "(itensor_version=3) but none is available for this chain -- "
             "run `python install.py --itensor-version=3`, or call "
             "chain.setup_python() to use the pure-Python backend instead")
+    if self.itensor_version==3 and self.ns<3:
+        # ITensor v3's two-site dmrg() aborts the whole process (SIGABRT,
+        # "LocalOp is default constructed") for chains shorter than 3
+        # sites -- see mode.py's own itensor_version==3 guard, which
+        # exists specifically to route every *other* DMRG entry point
+        # around this by falling back to ED. There is no ED fallback
+        # here, so this must be rejected explicitly (mirrored again,
+        # defense in depth, by Chain::gs_energy_generalized itself on
+        # the C++ side) rather than silently crashing the interpreter.
+        raise RuntimeError(
+            "gs_energy_generalized: ITensor v3's two-site DMRG can't "
+            "handle a chain this short (n=%d < 3 sites) -- use "
+            "itensor_version=\"python\" instead"%self.ns)
     if self.hamiltonian is None:
         raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
+    if not self.is_hermitian(self.hamiltonian):
+        # gs_energy()'s own non-Hermitian branch dispatches to NH-DMRG;
+        # this method has no such dispatch, and the local two-site solver
+        # in both backends silently Hermitizes its effective-Hamiltonian
+        # matrix before diagonalizing -- so a non-Hermitian H would
+        # otherwise produce a well-defined but physically meaningless
+        # "eigenvalue" with no warning at all.
+        raise ValueError(
+            "gs_energy_generalized: self.hamiltonian is not Hermitian -- "
+            "only Hermitian H is supported (A must additionally be "
+            "Hermitian positive definite, not checked here)")
     from . import multioperator
     A = multioperator.obj2MO(A)
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
@@ -191,9 +222,21 @@ def gs_energy_generalized(self,A,lam0=None):
         session_lam0 = float('nan') if lam0 is None else lam0
     lam = self._session.gs_energy_generalized(A.to_terms(),lam0=session_lam0)
     self.e0 = lam
-    self.computed_gs = True
     wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
-    self.set_initial_wf(wf0) # set the initial wavefunction
+    self.set_initial_wf(wf0) # set the initial wavefunction (resets computed_gs)
+    self.computed_gs = True # ...so this must come after set_initial_wf, not
+                             # before -- mirrors gs_energy_single's own
+                             # ordering (its trailing re-assertion after the
+                             # same set_initial_wf() reset), which an earlier
+                             # version of this function got backwards: setting
+                             # computed_gs=True *before* set_initial_wf() left
+                             # it silently False on return, so the next
+                             # ordinary gs_energy()/get_gs() call would see
+                             # computed_gs==False and quietly re-run a plain
+                             # ground-state DMRG solve (warm-started from this
+                             # method's own wf0), overwriting self.wf0/self.e0
+                             # with a different quantity than the caller asked
+                             # for -- confirmed directly via execution.
     return lam
 
 
