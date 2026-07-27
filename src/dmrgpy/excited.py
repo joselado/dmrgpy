@@ -109,24 +109,31 @@ from .algebra.arnolditk import gram_smith
 
 
 def excited_states_non_hermitian(self,n=3,recursive=True,
-        maxit=40,nkry_min =3,nkry_max =10,
+        maxit=40,ncv=None,
      **kwargs):
     # recursive=True (one state at a time, each deflated against the
     # previous ones) is the default rather than a single simultaneous
-    # (n>1) Arnoldi search: a shared Krylov subspace across several
+    # (n>1) IRAM search: a shared Krylov subspace across several
     # requested eigenvalues can fail to resolve a (near-)degenerate pair
     # -- confirmed on a non-Hermitian chain with a 2-fold-degenerate
     # excited state, where the simultaneous search converged to two
     # spurious values instead. The one-at-a-time search is slower but
     # reliable, since each state gets its own warm start explicitly
-    # deflated against the others.
-    from . import mpsalgebra
-    (es,wf) = mpsalgebra.mpsarnoldi(self,self.hamiltonian,mode="GS",
+    # deflated against the others. Default solver is now the Implicitly
+    # Restarted Arnoldi Method (algebra/arpacktk.py, ported from ARPACK)
+    # rather than arnolditk's explicit-restart Arnoldi: IRAM reuses its
+    # compressed Krylov subspace across restarts instead of rebuilding it
+    # from scratch, needing fewer H|psi> applications on most spectra --
+    # see examples/non_hermitian/arnoldi_vs_iram_benchmark. arnolditk
+    # remains available directly (mpsalgebra.mpsarnoldi) for comparison
+    # or for the ShiftInv/projected-operator modes IRAM does not support.
+    from .algebra import arpacktk
+    (es,wf) = arpacktk.excited_states(self,self.hamiltonian,
                 nwf=n, # number of wavefunctions
-                recursive_arnoldi=recursive, # recursive?
-                maxit = maxit, # max number of Arnoldi iterations
-                nkry_min = nkry_min, # minimum number of Krylov vectors
-                nkry_max = nkry_max, # maximum number of Krylov vectors
+                which="SR", # smallest real part = "ground state" convention
+                recursive=recursive, # recursive?
+                maxiter = maxit, # max number of IRAM restart cycles
+                ncv = ncv, # Krylov subspace size (None -> IRAM default)
                 **kwargs)
     from .algebra.algebra import sorteigen
     es,wf = sorteigen(es,wf)

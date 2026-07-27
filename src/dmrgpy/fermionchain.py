@@ -556,9 +556,15 @@ class Spinon_Chain(Spinful_Fermionic_Chain):
         """Redefine the ground state method"""
         if self.computed_gs: return self.wf0 # return the wavefunction
         P = 1. # parton projector
-        for i in range(len(self.Sx)): 
+        for i in range(len(self.Sx)):
             P = P*(-2*self.Nup[i]*self.Ndn[i] + self.Ndn[i] + self.Nup[i])
             #P = P*(1.- self.Nup[i]*self.Ndn[i]) #  Gutzwiller projection
+        # kept on arnolditk: this bakes the projector P directly into the
+        # Krylov operator (Op = M*(P*x)), a mode algebra/arpacktk.py's
+        # IRAM does not support. Also confirmed independently broken
+        # ("'NoneType' object has no attribute 'build_operator'", raised
+        # before this call is even reached) -- pre-existing, unrelated to
+        # the solver choice, not fixed here.
         from .mpsalgebra import mpsarnoldi
         super().gs_energy(**kwargs) # get the GS
         wf = self.wf0

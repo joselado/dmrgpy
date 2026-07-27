@@ -42,6 +42,12 @@ def gs_degeneracy_simple(self,dmode="real",delta=1e-2,n=1,**kwargs):
 def eigenvalue_degeneracy(self,A,e,n=3,emode="real",delta=1e-2):
     """Given an operator and a certain eigenvalue, estimate
     what is the degeneracy"""
+    # mode="ShiftInv" needs an operator that is only an *approximate*
+    # inverse of (A-e) (self.applyinverse, an iterative correction-vector
+    # solve) -- algebra/arpacktk.py only implements ARPACK's mode-1
+    # (standard eigenproblem, Op=A) IRAM, not the shift-invert modes
+    # (ARPACK modes 2-4), so this stays on arnolditk's own op_is_affine=
+    # False path, which already handles a non-affine Op correctly.
     from .algebra.arnolditk import mpsarnoldi
     while True: # this is mostly a DMRG implementation
         es,ws = mpsarnoldi(self,A,e=e,delta=delta,mode="ShiftInv",

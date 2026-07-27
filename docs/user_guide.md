@@ -305,24 +305,30 @@ is also what feeds the non-Hermitian dynamical correlator,
 
 Two independent MPS Arnoldi implementations are available, both
 matrix-free (they only ever apply $H$ to a wavefunction, never build a
-matrix) and both usable in ED mode or DMRG mode on any backend:
+matrix) and both usable in ED mode or DMRG mode on any backend.
+`dmrgpy.mpsalgebra.lowest_energy_non_hermitian_iram` (`algebra/
+arpacktk.py`) is an Implicitly Restarted Arnoldi Method (IRAM), adapted
+from [ARPACK](https://bitbucket.org/chaoyang2013/arpack)'s
+`znaupd`/`znaup2`/`znaitr`/`znapps` — the same exact-shift
+polynomial-filter restart ARPACK's own `eigs`-style solvers use,
+re-derived here for dmrgpy's own MPS/ED wavefunction objects instead of
+flat arrays (no BLAS/LAPACK Fortran dependency). It is the **default**
+MPS Arnoldi solver (`dmrgpy.mpsalgebra.lowest_energy_non_hermitian`, and
+the route `get_excited_states` uses for non-Hermitian $H$ with $n\ge2$,
+`excited_states_non_hermitian` in `excited.py`), since it compresses and
+reuses its existing Krylov subspace instead of rebuilding it from
+scratch on every restart, needing noticeably fewer $H\,|\psi\rangle$
+applications to reach the same tolerance on most spectra.
 `dmrgpy.mpsalgebra.lowest_energy_non_hermitian_arnoldi` (`algebra/
-arnolditk.py`) is a restarted Arnoldi method with explicit
-(Rayleigh-Ritz reseeded) restarts; `dmrgpy.mpsalgebra.
-lowest_energy_non_hermitian_iram` (`algebra/arpacktk.py`) is an
-Implicitly Restarted Arnoldi Method (IRAM), adapted from
-[ARPACK](https://bitbucket.org/chaoyang2013/arpack)'s
-`znaupd`/`znaup2`/`znaitr`/`znapps` — same exact-shift polynomial-filter
-restart ARPACK's own `eigs`-style solvers use, re-derived here for
-dmrgpy's own MPS/ED wavefunction objects instead of flat arrays (no
-BLAS/LAPACK Fortran dependency). Because IRAM compresses and reuses its
-existing Krylov subspace instead of rebuilding it from scratch on every
-restart, it typically needs noticeably fewer $H\,|\psi\rangle$
-applications to reach the same tolerance, though the two can trade
-places on hard (near-degenerate) spectra — see
+arnolditk.py`, a restarted Arnoldi method with explicit Rayleigh-Ritz
+reseeded restarts) remains available directly for comparison — the two
+can trade places on hard (near-degenerate) spectra, see
 `examples/non_hermitian/arnoldi_vs_iram_benchmark`, which benchmarks
 both head to head (Op-count, wall time, accuracy) in both ED and DMRG
-mode.
+mode — and is still used internally wherever IRAM's mode-1
+(standard-eigenproblem) formulation doesn't apply: shift-invert searches
+(`degeneracy.py`'s `eigenvalue_degeneracy`) and Krylov operators with a
+projector baked in (`fermionchain.py`'s `Spinon_Chain.get_gs`).
 
 ## 5. Entanglement and quantum information
 

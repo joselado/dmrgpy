@@ -272,6 +272,31 @@ def mpsiram(self, H, which="SR", nev=1, ncv=None, tol=1e-8, maxiter=200,
     return es[::-1], wfs[::-1]
 
 
+def excited_states(self, H, nwf=1, which="SR", recursive=True,
+        wfskip=None, **kwargs):
+    """Find nwf eigenpairs of H, either recursively -- one at a time,
+    each deflated against the previously found ones via wfskip -- or as
+    a single simultaneous block IRAM search (nev=nwf in one call).
+    Mirrors arnolditk's own recursive_arnoldi toggle: recursive is safer
+    on (near-)degenerate spectra, since each state gets its own
+    independently-seeded restart cycle rather than sharing one Krylov
+    subspace across all nwf targets, at the cost of nwf independent
+    restarts instead of one."""
+    if wfskip is None: wfskip = []
+    else: wfskip = list(wfskip)
+    if nwf == 1:
+        return mpsiram(self, H, which=which, nev=1, wfskip=wfskip, **kwargs)
+    if not recursive:
+        return mpsiram(self, H, which=which, nev=nwf, wfskip=wfskip, **kwargs)
+    eout, wfout = [], []
+    for i in range(nwf):
+        es, wfs = mpsiram(self, H, which=which, nev=1, wfskip=wfskip, **kwargs)
+        eout.append(es[0])
+        wfout.append(wfs[0])
+        wfskip.append(wfs[0])
+    return np.array(eout), wfout
+
+
 def lowest_energy_non_hermitian(self, H, n=1, **kwargs):
     """Smallest-real-part eigenpairs of a (possibly non-Hermitian) H via
     IRAM -- drop-in comparison point for

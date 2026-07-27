@@ -179,6 +179,17 @@ from .algebra.arnolditk import gram_smith_single
 from .algebra.arpacktk import mpsiram
 from .algebra.arpacktk import lowest_energy as lowest_energy_iram
 from .algebra.arpacktk import lowest_energy_non_hermitian as lowest_energy_non_hermitian_iram
+from .algebra.arpacktk import excited_states as mps_excited_states
+
+# IRAM (algebra/arpacktk.py, ported from ARPACK) is the default MPS
+# Arnoldi solver: it reuses its compressed Krylov subspace across
+# restarts instead of rebuilding it from scratch, needing fewer H|psi>
+# applications than arnolditk's explicit-restart Arnoldi on most spectra
+# -- see examples/non_hermitian/arnoldi_vs_iram_benchmark. The _arnoldi
+# and _iram suffixed names above stay available for explicit selection or
+# head-to-head comparison; these bare names are the new default.
+lowest_energy = lowest_energy_iram
+lowest_energy_non_hermitian = lowest_energy_non_hermitian_iram
 
 
 def toMPO(self,H,mode="DMRG"):
