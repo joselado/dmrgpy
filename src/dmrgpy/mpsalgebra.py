@@ -176,6 +176,10 @@ from .algebra.arnolditk import lowest_energy as lowest_energy_arnoldi
 from .algebra.arnolditk import lowest_energy_non_hermitian as lowest_energy_non_hermitian_arnoldi
 from .algebra.arnolditk import gram_smith_single
 
+from .algebra.arpacktk import mpsiram
+from .algebra.arpacktk import lowest_energy as lowest_energy_iram
+from .algebra.arpacktk import lowest_energy_non_hermitian as lowest_energy_non_hermitian_iram
+
 
 def toMPO(self,H,mode="DMRG"):
     """Transport an operator into a matrix-product operator"""

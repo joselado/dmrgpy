@@ -303,6 +303,27 @@ imaginary potential. The biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
 is also what feeds the non-Hermitian dynamical correlator,
 `get_dynamical_correlator(submode="KPM")` for $H\neq H^\dagger$ — see §6.
 
+Two independent MPS Arnoldi implementations are available, both
+matrix-free (they only ever apply $H$ to a wavefunction, never build a
+matrix) and both usable in ED mode or DMRG mode on any backend:
+`dmrgpy.mpsalgebra.lowest_energy_non_hermitian_arnoldi` (`algebra/
+arnolditk.py`) is a restarted Arnoldi method with explicit
+(Rayleigh-Ritz reseeded) restarts; `dmrgpy.mpsalgebra.
+lowest_energy_non_hermitian_iram` (`algebra/arpacktk.py`) is an
+Implicitly Restarted Arnoldi Method (IRAM), adapted from
+[ARPACK](https://bitbucket.org/chaoyang2013/arpack)'s
+`znaupd`/`znaup2`/`znaitr`/`znapps` — same exact-shift polynomial-filter
+restart ARPACK's own `eigs`-style solvers use, re-derived here for
+dmrgpy's own MPS/ED wavefunction objects instead of flat arrays (no
+BLAS/LAPACK Fortran dependency). Because IRAM compresses and reuses its
+existing Krylov subspace instead of rebuilding it from scratch on every
+restart, it typically needs noticeably fewer $H\,|\psi\rangle$
+applications to reach the same tolerance, though the two can trade
+places on hard (near-degenerate) spectra — see
+`examples/non_hermitian/arnoldi_vs_iram_benchmark`, which benchmarks
+both head to head (Op-count, wall time, accuracy) in both ED and DMRG
+mode.
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain
