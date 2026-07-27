@@ -1512,18 +1512,26 @@ submodes share it).
 \label{sec:perf}
 
 The pure-Python backend (\texttt{itensor\_version="python"}) trades raw
-speed for zero build dependencies. Numbers below were measured directly
-on one machine, with \texttt{numba} installed \emph{and} explicitly
-opted in (\texttt{pyitensor.kernels.USE\_NUMBA = True}) for its
-accelerated matvec/effective-Hamiltonian kernel (see
-\texttt{pyitensor/kernels.py}). This kernel is \textbf{not} used
-automatically just by having \texttt{numba} installed --- \texttt{USE\_NUMBA}
-defaults to \texttt{False}, because the one-time JIT compile cost is a
-net regression for this library's typical one-shot-script usage pattern
-(see \texttt{kernels.py}'s own docstring for measured numbers). Set
-\texttt{kernels.USE\_NUMBA = True} yourself before running DMRG if you
-want this path. Absolute times will vary by machine and load, but the
-qualitative trends should hold.
+speed for zero build dependencies. The tables below were originally
+measured with \texttt{numba} explicitly opted in
+(\texttt{pyitensor.kernels.USE\_NUMBA = True}); the \emph{default} path
+(\texttt{USE\_NUMBA = False}) has since been rewritten to precompute its
+own contraction plan once per bond/Lanczos-or-Krylov loop rather than
+re-deriving it on every matvec call (see \texttt{pyitensor/kernels.py}'s
+module docstring, ``plain path'' section), so it now performs comparably
+to these numba-opted-in numbers for ground-state DMRG (spot-checked
+directly: within $\sim$10\% of the table below at $n=8$--$20$) without
+any opt-in at all. \texttt{USE\_NUMBA} is not just unnecessary now but
+frequently counter-productive: re-measured directly, an independent-chain
+workload (each chain starting from its own random MPS, e.g.\ a parameter
+sweep) never reaches a stable steady state with numba on, because each
+chain's own random start produces a different bond-growth trajectory and
+hence different contraction shapes to compile every time --- see
+\texttt{kernels.py}'s own docstring for the full, current measurements
+and guidance (numba is now only ever worth opting into for a single
+long-running TDVP/METTS-like session, and even there the win is modest,
+$\sim$10\%, not a large one). Absolute times below will vary by machine
+and load, but the qualitative trends should hold.
 
 \subsection{Ground state energy (Heisenberg spin-1/2 chain)}
 
@@ -1584,17 +1592,22 @@ backend to take on the order of minutes or more.
 Calculation & v3 & python & ratio \\
 \midrule
 Excited-state gap (TFIM, $n=8$) & 0.41s & 2.35s & 5.7$\times$ \\
-TDVP quench evolution ($n=6$, 30 steps) & 0.11s & 0.97s & 8.9$\times$ \\
 Hubbard ground state (3 sites) & 0.04s & 0.11s & 3.1$\times$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-These single-run numbers include a one-time numba JIT compilation cost
-($\sim$0.1--0.4s) for each distinct kernel the first time it runs in a
-process --- a script that repeats the same calculation type many times
-(e.g.\ a parameter sweep) amortizes this and approaches the steady-state
-ratios shown above, not these first-call numbers.
+TDVP-based workloads (real-time evolution, and METTS finite-temperature
+sampling in particular) are a materially different, larger gap than the
+ground-state/KPM numbers above, because they call the same effective-
+Hamiltonian matvec thousands of times more per run (many time steps
+$\times$ many Lanczos/Krylov iterations $\times$ many METTS samples, vs.\
+a handful of DMRG sweeps) --- see
+\texttt{examples/finite\_temperature/backend\_timing\_metts\_dynamical\_correlator/main.py},
+which measures this directly (dynamical METTS, $n=10$: v3 $\sim$9s vs.\
+python $\sim$51--59s for \texttt{nsamples}=10--40, a 5--6$\times$ gap
+after the matvec-planning and Lanczos-bookkeeping fixes referenced above
+--- it was $\sim$13$\times$ before them).
 
 \subsection{Practical guidance}
 
@@ -1602,22 +1615,25 @@ ratios shown above, not these first-call numbers.
   \item Use \texttt{itensor\_version="python"} for quick prototyping,
     CI/environments without a C++ toolchain, or small systems ($n
     \lesssim 20$) where the 1.3--2$\times$ overhead doesn't matter.
-  \item \texttt{numba} is already installed (it's a core dependency, see
-    Section~\ref{sec:install}); also install \texttt{jax} and set
-    \texttt{pyitensor.kernels.USE\_NUMBA = True} (off by default, see the
-    note above) if you want the accelerated matvec kernel --- without
-    that opt-in, \texttt{pyitensor} falls back to plain NumPy loops and
-    is substantially slower than the numbers above (see
-    \texttt{pyitensor/\_\_init\_\_.py}'s own docstring).
-  \item For production-size chains, dynamical correlators, or anything
-    performance-sensitive, compile the C++ extension
-    (\texttt{python install.py}) and use \texttt{itensor\_version=2} or
-    \texttt{3}.
+  \item \texttt{USE\_NUMBA}/\texttt{USE\_JAX} (both off by default, see
+    the note above) are no longer needed to get the numbers above ---
+    the default path already precomputes its own contraction plan.
+    Opting into \texttt{USE\_NUMBA} is only ever worth it for a single
+    long-running TDVP/METTS-like session (same matvec shapes recurring
+    many times within one run), and even there the win is modest
+    ($\sim$10\%); it's actively counter-productive for independent-chain
+    workloads like parameter sweeps (see \texttt{kernels.py}'s own
+    docstring for the measurements behind both claims).
+  \item For production-size chains, dynamical correlators, TDVP/METTS
+    workloads, or anything performance-sensitive, compile the C++
+    extension (\texttt{python install.py}) and use
+    \texttt{itensor\_version=2} or \texttt{3}.
   \item \texttt{examples/groundstate/backend\_timing\_gs\_energy/main.py} reproduces
     the $n=8..20$ rows of the ground-state table directly against the
     current codebase and current machine ($n=24..32$ aren't included, to
-    keep the example fast to run) --- re-run it rather than trusting
-    these numbers verbatim on a different setup.
+    keep the example fast to run); \texttt{examples/finite\_temperature/backend\_timing\_metts\_dynamical\_correlator/main.py}
+    does the same for the TDVP/METTS gap discussed above --- re-run both
+    rather than trusting these numbers verbatim on a different setup.
 \end{itemize}
 
 \section{Directory reference}

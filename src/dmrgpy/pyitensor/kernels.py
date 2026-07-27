@@ -19,6 +19,10 @@ itself reports a non-CPU device (see _detect_default_use_jax() below) --
 UNTESTED on real GPU/TPU hardware (none was available while writing this),
 so treat that heuristic as a reasonable guess, not a verified claim; on a
 CPU-only install this now behaves exactly as if the module didn't exist.
+Re-confirmed after the plain-path fix below (see its own section): on a
+dynamical-METTS run JAX was still ~4x slower than the new plain default
+(210s vs. 52s at n=10, nsamples=40, nt=10) -- the conclusion above holds
+against the faster baseline too, not just the old one.
 
 If JAX *is* enabled, the mechanism is: express the whole contraction as
 one fused jax.numpy.einsum call (XLA fuses the operands itself, unlike
@@ -38,12 +42,32 @@ deterministically (first-occurrence order, operands always listed the
 same way) so structurally identical bonds produce byte-identical
 subscript strings and hit the same cache entry.
 
-Without JAX or numba (see below), dmrg.py's two_site_heff()/one_site_heff()
-get the exact pairwise ITensor.__mul__ chain (`t = t*L; t = t*H_i; ...`)
-that existed before this module did -- never routed through numpy.einsum,
-per the BLAS-dispatch gap above.
+== plain path (always on, the default when JAX/numba are unavailable or
+disabled) ==
 
-== numba path (default ON when importable) ==
+Without JAX or numba, dmrg.py's two_site_heff()/one_site_heff()/
+zero_site_heff() get _make_matvec_planned() (below): the same precomputed
+transpose+reshape+matmul plan the numba path uses (_plan_contraction_chain,
+shared by both), just executed directly in NumPy instead of through a
+compiled closure. This package originally used a bare pairwise
+ITensor.__mul__ chain here (`t = t*L; t = t*H_i; ...`), which re-derives
+that same plan (mul_plan()'s Index-matching, from tensor.py) from scratch
+on *every* matvec call -- cheap enough per call to be invisible for DMRG's
+ground-state sweep (a handful of calls per bond), but the dominant cost for
+TDVP/METTS, which call the same matvec build thousands of times more per
+run (many time steps x many Lanczos/Krylov iterations x many METTS
+samples): confirmed via cProfile on a dynamical-METTS run, 57% of
+cumulative time was in ITensor.__mul__ and its mul_plan()/Index-matching
+machinery before this fix. Precomputing the plan once per bond/loop instead
+of once per call closes most of that gap with no new dependency and no
+compile tax: confirmed directly, 1.4x-2x end-to-end wall-time win on real
+dynamical METTS runs (9.15s->6.68s at n=8; 152.0s->74.6s at n=10,
+nsamples=40, nt=10), bit-identical results (this reorders *when* the plan
+is computed, not *which* pairs get contracted first, so unlike tensor.py's
+contract_many() fix elsewhere in this package it does not perturb
+floating-point summation order).
+
+== numba path (opt-in; see below for why it isn't the default) ==
 
 Unlike JAX, a numba-compiled kernel operates directly on the same numpy
 arrays already in memory -- no host<->device array conversion, no
@@ -71,61 +95,59 @@ instead of a closure constant was consistently *slower* than tensordot,
 not faster, apparently because numba's optimizer can't treat a
 runtime-typed tuple argument's transpose as constant-foldable the way it
 does for a captured closure value known to be fixed at compile time. So
-_get_numba_contractor() below compiles and caches one specialized
+_get_numba_contractor() below compiles and caches (in-process only, see
+its own docstring for why not also on-disk via cache=True -- a real,
+confirmed crash risk, not just a theoretical one) one specialized
 function per distinct (permutation, reshape) pattern -- mirroring
 compile_contraction()/_einsum_jax's per-pattern JIT-cache-reuse strategy
 for the JAX path, for the same underlying reason (a bond's contraction
 *shape* recurs every sweep once maxdim saturates, so the compile cost is
-paid once and amortized over the whole run). Confirmed safe across
-process restarts that a numba cache=True disk cache correctly
-distinguishes different closures sharing the same source text by their
-different captured constants, rather than colliding on the first compiled
-variant seen (a real risk this pattern could otherwise hit silently).
+paid once and amortized over the whole run, within one process).
 
-USE_NUMBA nonetheless defaults to False. The per-contraction win above is
-real but so is numba's own compile-time cost, and it is NOT amortized
-away by cache=True the way the docstring above might suggest -- confirmed
-directly: a first-ever @njit call in a fresh process pays a large
-one-time LLVM/typing-system warm-up cost (~3s measured in isolation for
-one specific closure) *on top of* per-signature compilation; cache=True
-eliminates the *recompilation* of a previously-seen signature on a later
-process (~3s -> ~0.2s measured), but not that first process-wide warm-up
-tax, and DMRG naturally exercises several *distinct* contraction shapes
-within a single run (edge bonds have smaller bond dimension than
-saturated bulk bonds) each needing their own cache entry. Measured
-end-to-end on this package's own regression suite -- exactly the
-one-shot-script usage pattern CLAUDE.md describes as this library's real
-verification workflow (`cd examples/... && python <script>.py`), not a
-long-lived multi-calculation session -- selftest_dmrg.py (a handful of
-small DMRG runs) took 1.83s with USE_NUMBA defaulted on vs 1.15s with it
-off: a ~60% *regression*, not a win, because the fixed compile tax
-dominates a script this short. A sustained, multi-call session (repeated
-gs_energy() calls reusing the same shapes) does recover the steady-state
-win measured above -- confirmed directly, a 14-site/maxdim=60 Heisenberg
-chain's second and later gs_energy() calls in the same process ran at
-~0.78-0.80s, at or slightly below the compiled ITensor v3 backend's own
-~0.81s, after the first call's ~0.997s paid the compile tax -- so this is
-a genuine case where "on by default" is the wrong call despite the
-underlying kernel being a real, verified improvement, exactly the same
-shape of finding as the JAX CPU regression above. Opt in explicitly
-(`kernels.USE_NUMBA = True`, set once at the start of a script) for
-workloads that call gs_energy()/tevol_method()/etc. repeatedly in one
-process at small-to-moderate bond dimension -- parameter sweeps, or
-anything long-running enough to amortize the fixed compile cost.
+USE_NUMBA nonetheless defaults to False, and is worth even less now than
+when this section was first written, because the baseline it has to beat
+(the plain path above) is no longer the naive per-call ITensor.__mul__
+chain -- it's the same precomputed-plan technique numba itself uses,
+just without JIT. Re-measured directly against *that* baseline (not the
+old naive one):
 
-"Small-to-moderate bond dimension" matters: the ~1.7x-2x per-contraction
-win itself is specific to tensors small enough that numpy's own
-Python-level dispatch overhead is a meaningful fraction of the call cost.
-Measured directly at a genuinely large scale (n=24, maxdim=300 -- closer
-to where this library's real workloads live than the maxdim=60 benchmark
-above) numba showed *no* win even with compile cost fully excluded from
-the comparison: 105.7s without numba vs 108.1s with, a wash/slight loss,
-not an improvement -- at that size the actual BLAS matmul FLOPs dominate
-the per-call cost, leaving little Python-overhead fraction left for a
-compiled kernel to shave off. So opting in is only worth it for small-
-bond-dimension, sustained (many-call) sessions specifically -- it
-recovers rough parity with (not a clear win over) the compiled ITensor v3
-backend there, not a general-purpose speedup at any scale.
+- Ground-state DMRG, independent chains (e.g. a parameter sweep: a fresh
+  Spin_Chain per point, each starting from its own random MPS -- see
+  mpscpp3's own randomMPS()-based default_mps(), which pyitensor's DMRG
+  mirrors): the "steady state" this section used to describe *does not
+  reliably occur*. Confirmed directly at n=14/maxdim=60: the in-process
+  numba contractor cache kept growing across 4 independent gs_energy()
+  calls (106 -> 144 -> 194 -> 210 entries, never leveling off) because
+  each fresh random starting MPS produces its own bond-dimension growth
+  trajectory through the sweeps before saturating at maxdim, so the exact
+  edge-bond shapes hit differ call to call -- there is no fixed set of
+  shapes to amortize a compile over. All 4 calls took 6.5s-42.6s each,
+  vs. the plain path's steady ~0.7-0.8s; at n=24/maxdim=300 a single
+  fresh-chain call took 133.5s with numba vs. 25.2s plain (5.3x slower,
+  not the previously-reported "wash" -- that comparison was against the
+  slower naive baseline).
+- TDVP/METTS (a single long run that reuses the same matvec shapes many
+  times once bond dimension saturates -- the one scenario where numba's
+  in-process cache *does* stabilize): confirmed directly on a dynamical
+  METTS run (n=10, nsamples=40, nt=10), numba's own compile tax is now a
+  much larger fraction of a much smaller total: 328.8s cold vs. 51.8s
+  plain (6.3x worse) on the very first process, and even fully warmed up
+  (repeated in the same process after compilation) numba was still only
+  ~11% faster than plain (46.1s vs 51.8s) -- a real but marginal edge,
+  down from the 2x this section used to claim, because the plain path no
+  longer leaves that much of numba's old advantage on the table.
+
+So: still off by default, and now only worth opting into
+(`kernels.USE_NUMBA = True`, set once at the start of a script) for a
+narrower case than before -- a single long-running TDVP/METTS-like
+session at small-to-moderate bond dimension where the same shapes recur
+many times *within one run*, and even there the win is modest (~10%),
+not the roughly-2x this section previously reported (that number was
+real for numba-vs-naive-ITensor.__mul__, just no longer the comparison
+that matters after the plain-path fix above). Independent-chain workloads
+(parameter sweeps, or anything that builds a fresh random-start MPS each
+time) should not enable it at all -- the per-call compile tax is paid
+over and over with no steady state to amortize into.
 
 Never a hard dependency either way: everything in this package works with
 only NumPy/SciPy installed.
@@ -235,15 +257,35 @@ def _get_numba_contractor(perm_a, shape_a2, perm_b, shape_b2):
     (B transposed+reshaped to shape_b2)`, specialized (permutation/shape
     baked in as closure constants, not arguments -- see this module's
     docstring for why that distinction is what makes this faster than
-    tensordot rather than slower) and cached per distinct pattern so a
-    matvec chain that calls the same pairwise contraction shape on every
-    Lanczos iteration only pays the compile cost once."""
+    tensordot rather than slower) and cached (in-process, via
+    _numba_contractor_cache) per distinct pattern so a matvec chain that
+    calls the same pairwise contraction shape on every Lanczos/Krylov
+    iteration only pays the compile cost once per process.
+
+    Deliberately NOT `cache=True` (numba's own on-disk cache) -- confirmed
+    directly this is unsafe for this specific pattern: `_contract` is a
+    distinct closure (same source text, different perm/shape constants
+    baked in) every time this function compiles a new one, and numba's
+    per-source-location on-disk overload index has no eviction, so it
+    accumulates one entry per distinct closure *forever* across every
+    process that ever ran this code (908 stale `.nbc` files were found
+    for this one closure in a worktree used across several days of
+    sessions). Past some accumulation, loading the disk cache started
+    returning a corrupt overload and crashing with `RuntimeError: In
+    'NRT_adapt_ndarray_to_python', 'descr' is NULL` deep inside a real
+    dynamical-METTS TDVP run -- reproduced reliably in the affected
+    worktree, and confirmed fixed both by deleting the accumulated cache
+    files and by dropping `cache=True` entirely. The in-process dict cache
+    above is what actually matters for this module's own "sustained
+    multi-call session" use case (see the module docstring) -- cache=True
+    only ever aimed to avoid recompilation on a *later, separate* process,
+    a narrower benefit not worth this failure mode."""
     key = (perm_a, shape_a2, perm_b, shape_b2)
     f = _numba_contractor_cache.get(key)
     if f is not None:
         return f
 
-    @numba.njit(cache=True, fastmath=True)
+    @numba.njit(fastmath=True)
     def _contract(A, B):
         At = np.transpose(A, perm_a).copy().reshape(shape_a2)
         Bt = np.transpose(B, perm_b).copy().reshape(shape_b2)
@@ -253,13 +295,20 @@ def _get_numba_contractor(perm_a, shape_a2, perm_b, shape_b2):
     return _contract
 
 
-def _plan_numba_chain(pieces, order_in, order_out):
+def _plan_contraction_chain(pieces, order_in, order_out):
     """Precompute the fixed sequence of pairwise transpose+reshape+matmul
     steps for v(order_in) * pieces[0] * pieces[1] * ... , using mul_plan()
     (tensor.py) on index *structure* alone -- called once per matvec build
-    (once per bond), not once per Lanczos iteration. Returns (steps,
-    final_perm, out_shape) where steps is a list of (contractor,
-    out_shape_2factors, piece_array) and final_perm/out_shape reorder the
+    (once per bond/Lanczos-or-Krylov loop), not once per iteration, since
+    pieces/order_in/order_out are fixed for the lifetime of one such loop
+    and only the numeric contents of the vector being multiplied change
+    from call to call. Shared by both the numba path (_make_matvec_numba)
+    and the plain-NumPy path (_make_matvec_planned) below -- the only
+    difference between them is whether the per-step transpose+reshape+
+    matmul is executed via a numba-compiled closure or directly in NumPy.
+
+    Returns (steps, final_perm) where steps is a list of (perm_a, shape_a2,
+    perm_b, shape_b2, out_shape, piece_array) and final_perm reorders the
     chain's natural trailing free-index order into order_out."""
     from .tensor import mul_plan
 
@@ -275,10 +324,10 @@ def _plan_numba_chain(pieces, order_in, order_out):
         b_free_size = int(np.prod(b_free_dims)) if b_free_dims else 1
         perm_a = tuple(a_free + a_axes)
         perm_b = tuple(b_axes + b_free)
-        contractor = _get_numba_contractor(
-            perm_a, (a_free_size, a_axes_size), perm_b, (a_axes_size, b_free_size))
         out_shape = a_free_dims + b_free_dims
-        steps.append((contractor, out_shape, p.array))
+        steps.append((perm_a, (a_free_size, a_axes_size),
+                      perm_b, (a_axes_size, b_free_size),
+                      out_shape, p.array))
         cur_inds = tuple(cur_inds[i] for i in a_free) + tuple(p.inds[j] for j in b_free)
 
     final_perm = tuple(cur_inds.index(ind) for ind in order_out)
@@ -286,13 +335,54 @@ def _plan_numba_chain(pieces, order_in, order_out):
 
 
 def _make_matvec_numba(pieces, order_in, shape_in, order_out):
-    steps, final_perm = _plan_numba_chain(pieces, order_in, order_out)
+    steps, final_perm = _plan_contraction_chain(pieces, order_in, order_out)
+    out_shape = tuple(ind.dim for ind in order_out)
+    contractors = [
+        (_get_numba_contractor(perm_a, shape_a2, perm_b, shape_b2), step_shape, piece_arr)
+        for perm_a, shape_a2, perm_b, shape_b2, step_shape, piece_arr in steps]
+
+    def matvec(v_flat):
+        cur = v_flat.reshape(shape_in)
+        for contractor, step_shape, piece_arr in contractors:
+            cur = contractor(cur, piece_arr).reshape(step_shape)
+        return np.transpose(cur, final_perm).reshape(out_shape).reshape(-1)
+
+    return matvec
+
+
+def _make_matvec_planned(pieces, order_in, shape_in, order_out):
+    """Same precomputed transpose+reshape+matmul plan as _make_matvec_numba
+    (_plan_contraction_chain), executed directly in NumPy instead of through
+    a numba-compiled closure -- no JIT compile tax, no host<->device
+    transfer, always available. This is make_matvec()'s default fallback
+    (see its docstring): it replaces what used to be a bare ITensor.__mul__
+    chain that re-derived this same structural plan (mul_plan()'s Index
+    matching, from tensor.py) from scratch on *every* call. That cost is
+    negligible for DMRG's ground-state sweep (a handful of matvec calls per
+    bond) but dominates for TDVP/METTS, which call the same matvec build
+    thousands of times more per run (many time steps x many Lanczos/Krylov
+    iterations x many METTS samples) -- confirmed directly via cProfile on a
+    dynamical-METTS run: 57% of cumulative time was in ITensor.__mul__ and
+    its mul_plan()/Index-matching machinery before this change.
+
+    Confirmed directly: 1.4x-2x end-to-end wall-time win on real dynamical
+    METTS runs (9.15s->6.68s at n=8; 152.0s->74.6s at n=10, nsamples=40,
+    nt=10), bit-identical results against the ED cross-check in
+    examples/finite_temperature/dynamical_metts_VS_ED. Unlike tensor.py's
+    contract_many() fix elsewhere in this package, this does not change
+    floating-point summation order (same tensordot-equivalent transpose/
+    reshape/matmul per step, in the same left-to-right order as before) --
+    it only removes redundant replanning, so it carries none of that
+    change's excited-state-convergence-margin risk."""
+    steps, final_perm = _plan_contraction_chain(pieces, order_in, order_out)
     out_shape = tuple(ind.dim for ind in order_out)
 
     def matvec(v_flat):
         cur = v_flat.reshape(shape_in)
-        for contractor, step_shape, piece_arr in steps:
-            cur = contractor(cur, piece_arr).reshape(step_shape)
+        for perm_a, shape_a2, perm_b, shape_b2, step_shape, piece_arr in steps:
+            At = np.transpose(cur, perm_a).reshape(shape_a2)
+            Bt = np.transpose(piece_arr, perm_b).reshape(shape_b2)
+            cur = (At @ Bt).reshape(step_shape)
         return np.transpose(cur, final_perm).reshape(out_shape).reshape(-1)
 
     return matvec
@@ -311,9 +401,10 @@ def make_matvec(pieces, order_in, shape_in, order_out):
     chain (_make_matvec_numba) if numba is available (checked first --
     see this module's docstring, numba wins on CPU where JAX regresses
     since it has no array-transfer overhead), else a single fused, JIT-
-    compiled jax.numpy.einsum call if JAX is available and enabled,
-    else the same pairwise ITensor.__mul__ chain this package always
-    used."""
+    compiled jax.numpy.einsum call if JAX is available and enabled, else
+    the plain-NumPy precomputed-plan chain (_make_matvec_planned) -- always
+    available, no opt-in required, see its own docstring for why this is
+    make_matvec()'s default rather than a bare ITensor.__mul__ chain."""
     if available_numba():
         return _make_matvec_numba(pieces, order_in, shape_in, order_out)
 
@@ -329,12 +420,4 @@ def make_matvec(pieces, order_in, shape_in, order_out):
 
         return matvec
 
-    from .tensor import ITensor
-
-    def matvec(v_flat):
-        t = ITensor(tuple(order_in), v_flat.reshape(shape_in))
-        for p in pieces:
-            t = t * p
-        return t.transpose_to(order_out).reshape(-1)
-
-    return matvec
+    return _make_matvec_planned(pieces, order_in, shape_in, order_out)
