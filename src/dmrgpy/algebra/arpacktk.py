@@ -69,7 +69,6 @@ from . import arnolditk
 from .krylov import krylov_matrix_representation
 from .krylov import diagonalize as krylov_diagonalize
 from .krylov import select_states as krylov_select_states
-from .krylov import unitary_transformation as krylov_unitary_transformation
 
 
 def _goodness(which, ritz):
@@ -164,6 +163,29 @@ def hessenberg_ritz(H, rnorm):
     return ritz, bounds, Y
 
 
+def sort_ritz(which, ritz, bounds):
+    """Sort (ritz,bounds) ascending by _goodness(which,ritz) -- the
+    wanted entries (per `which`) end up last, per zngets.f/zsortc.f's
+    convention (see _goodness's own docstring)."""
+    order = np.argsort(_goodness(which, ritz))
+    return ritz[order], bounds[order]
+
+
+def select_shifts(ritz, bounds, np_apply):
+    """Port of zngets.f: given an already which-sorted (ritz,bounds)
+    pair (see sort_ritz), the first np_apply entries are the unwanted
+    directions to use as implicit-restart shifts. Returns them reordered
+    so the most-uncertain one (largest Ritz estimate) is applied first,
+    limiting the forward instability of the shift sweep -- used
+    identically by both mpsiram (which="LM"/"SM"/.../the caller's own
+    criterion) and mpsiram_shift_invert (always which="LM" on OP's own
+    Hessenberg matrix, see its docstring)."""
+    shifts = ritz[:np_apply]
+    shift_bounds = bounds[:np_apply]
+    order = np.argsort(-np.abs(shift_bounds))
+    return shifts[order]
+
+
 def apply_shifts(V, H, resid, shifts, kev):
     """Port of znapps (see module docstring for why dense QR replaces the
     bulge chase): compress a length len(V) Arnoldi factorization down to
@@ -228,8 +250,7 @@ def mpsiram(self, H, which="SR", nev=1, ncv=None, tol=1e-8, maxiter=200,
                     rnorm, kev, npcur, wfskip=wfskip, verbose=verbose)
 
         ritz, bounds, Y = hessenberg_ritz(Hm, rnorm)
-        order = np.argsort(_goodness(which, ritz))
-        ritz, bounds = ritz[order], bounds[order]
+        ritz, bounds = sort_ritz(which, ritz, bounds)
 
         np_apply = ncv - kev
         wanted_ritz = ritz[np_apply:]
@@ -254,13 +275,7 @@ def mpsiram(self, H, which="SR", nev=1, ncv=None, tol=1e-8, maxiter=200,
                 kev = min(kev + bump, ncv - 2)
 
         np_apply = ncv - kev
-        shifts = ritz[:np_apply]
-        shift_bounds = bounds[:np_apply]
-        # apply the most-uncertain (largest Ritz estimate) shifts first,
-        # as zngets does, to limit forward instability of the sweep
-        shift_order = np.argsort(-np.abs(shift_bounds))
-        shifts = shifts[shift_order]
-
+        shifts = select_shifts(ritz, bounds, np_apply)
         V, Hm, resid, rnorm = apply_shifts(V, Hm, resid, shifts, kev)
 
     ritz, bounds, Y = hessenberg_ritz(Hm, rnorm)
@@ -294,30 +309,43 @@ def mpsiram_shift_invert(self, H, e=0.0, nev=1, ncv=None, delta=1e-3,
     1/(lambda-sigma), so it can cheaply select/report Ritz pairs from
     OP's own (free) Hessenberg matrix and untransform at the end. That
     assumption breaks once OP is only approximate, so -- exactly like
-    arnolditk -- convergence and the reported eigenpairs are instead
-    recomputed every outer iteration from H's own exact (still cheap,
-    O(ncv^2)) representation on the Krylov basis OP builds
-    (``krylov_matrix_representation``/``diagonalize``/``select_states``/
-    ``unitary_transformation``, reused directly from ``krylov.py`` rather
-    than re-derived, since that machinery -- including its Ritz-value
-    conjugation convention for non-Hermitian H -- is already exercised by
-    arnolditk's own ShiftInv path). Only the *restart direction* (which
-    unwanted Krylov directions IRAM's implicit shifts filter away) still
-    uses OP's own cheap Hessenberg matrix with which="LM": largest
-    |OP-eigenvalue| corresponds to the H-eigenvalue closest to `e`,
-    exactly the criterion a shift-invert operator is built to sharpen --
-    that part of the algorithm only cares about OP's own Krylov
-    factorization, regardless of what physical operator OP approximates.
+    arnolditk -- the reported eigenpairs are instead recomputed every
+    outer iteration from H's own exact (still cheap, O(ncv^2))
+    representation on the Krylov basis OP builds
+    (``krylov_matrix_representation``/``diagonalize``/``select_states``,
+    reused directly from ``krylov.py`` rather than re-derived, since that
+    machinery -- including its Ritz-value conjugation convention for
+    non-Hermitian H -- is already exercised by arnolditk's own ShiftInv
+    path). Only the *restart direction* (which unwanted Krylov
+    directions IRAM's implicit shifts filter away) uses OP's own cheap
+    Hessenberg matrix with which="LM": largest |OP-eigenvalue|
+    corresponds to the H-eigenvalue closest to `e`, exactly the
+    criterion a shift-invert operator is built to sharpen -- that part
+    of the algorithm only cares about OP's own Krylov factorization,
+    regardless of what physical operator OP approximates.
 
-    The residual/Ritz-estimate bound is a heuristic proxy, not a
-    rigorous one (there is no genuine Arnoldi relation tying H itself to
-    this basis): OP's own trailing residual norm times the candidate
-    H-eigenvector's last Krylov-basis component -- again the same proxy
-    arnolditk's ShiftInv path already relies on. Convergence is judged
-    against this bound directly (``delta``, an absolute threshold, not a
-    tolerance relative to the eigenvalue's own magnitude as in
-    ``mpsiram``), matching arnolditk's own ShiftInv convention, since
-    `e` may be numerically close to zero.
+    Convergence is certified with a genuine residual
+    ``||H*wf - theta*wf||`` against the *original* H directly (one extra
+    H-application per candidate per outer iteration -- cheap next to the
+    several correction-vector solves, each itself an iterative multi-step
+    matvec loop, already spent building/extending the Krylov chain this
+    iteration), not the cheaper ``rnorm*|last Krylov component|`` proxy
+    ``mpsiram`` uses for its own (non-shift-invert, Op-is-exact)
+    Hessenberg residual. That proxy measures how well *Op's* Krylov
+    chain has converged, not whether a candidate is a genuine H
+    eigenvector -- confirmed directly to matter here: OP's chain can
+    report a vanishing residual (e.g. after ``arnoldi_extend`` gives up
+    re-orthogonalizing and hard-zeros its own residual, or once the
+    Krylov basis V has numerically drifted from orthonormality after
+    several restarts) for a candidate that is nowhere near an actual
+    eigenvector of H, which silently corrupted ~20% of trials in testing
+    (e.g. a 4-site non-Hermitian degeneracy count landing on 1 instead of
+    the true 2) before this genuine-residual check was added. Also
+    guards against a reconstruction with collapsed (numerically zero)
+    norm directly (rather than letting the ``wf.normalize()`` inside
+    ``krylov.unitary_transformation`` return ``None`` and crash on the
+    next ``.copy()``): treated as unconverged during the loop, and raised
+    as a clear error if it persists at the very end.
     """
     if wfskip is None: wfskip = []
     else: wfskip = list(wfskip)
@@ -325,10 +353,33 @@ def mpsiram_shift_invert(self, H, e=0.0, nev=1, ncv=None, delta=1e-3,
     ncv = max(ncv, nev + 2)
     Mi = H - e
     Op = lambda x: self.applyinverse(Mi, x, delta=delta, maxn=maxn)
+    MH = self.toMPO(H, mode=arnolditk.arnoldimode)
 
     def fe_target(es):
         es = np.abs(es - e)
         return np.where(es == np.min(es))[0][0]
+
+    def candidates(V):
+        Htrue = krylov_matrix_representation(H, V)
+        ritz_true, vs_true = krylov_diagonalize(Htrue)
+        nsel = min(nev, len(V))
+        estore, vstore = krylov_select_states(ritz_true, vs_true.T,
+                fe_target, ne=nsel)
+        wfs, errs = [], []
+        for theta, y in zip(estore, vstore):
+            wf = np.conjugate(y[0]) * V[0]
+            for i in range(1, len(V)):
+                wf = wf + np.conjugate(y[i]) * V[i]
+            nrm = np.sqrt(abs(wf.dot(wf)))
+            if nrm < 1e-8: # collapsed reconstruction: certainly not converged
+                wfs.append(None)
+                errs.append(np.inf)
+                continue
+            wf = wf * (1. / nrm)
+            r = MH * wf - theta * wf
+            errs.append(np.sqrt(abs(r.dot(r))))
+            wfs.append(wf)
+        return np.array(estore), wfs, np.array(errs)
 
     kev = nev
     resid = random_state(self, orthogonal=wfskip if wfskip else None)
@@ -337,47 +388,90 @@ def mpsiram_shift_invert(self, H, e=0.0, nev=1, ncv=None, delta=1e-3,
     V, Hm, resid, rnorm = arnoldi_extend(self, Op, V, Hm, resid, rnorm,
             0, kev, wfskip=wfskip, verbose=verbose)
 
+    estore = wfs_cand = errs = None
     for it in range(maxiter):
         npcur = ncv - kev
         if npcur > 0:
             V, Hm, resid, rnorm = arnoldi_extend(self, Op, V, Hm, resid,
                     rnorm, kev, npcur, wfskip=wfskip, verbose=verbose)
 
-        Htrue = krylov_matrix_representation(H, V)
-        ritz_true, vs_true = krylov_diagonalize(Htrue)
-        nsel = min(nev, len(V))
-        estore, vstore = krylov_select_states(ritz_true, vs_true.T,
-                fe_target, ne=nsel)
-        error = np.array([np.abs(rnorm * v0[-1]) for v0 in vstore])
-        nconv = int(np.sum(error <= delta))
+        estore, wfs_cand, errs = candidates(V)
+        nconv = int(np.sum(errs <= delta))
 
         if verbose > 0:
             print("ShiftInv IRAM iter", it, "kev", kev, "nconv", nconv,
-                    "ritz", np.round(estore, 6), "error", np.round(error, 6))
+                    "ritz", np.round(estore, 6), "error", np.round(errs, 6))
 
         np_apply = ncv - kev
         if nconv >= nev or np_apply == 0:
             break
 
-        ritz_op, bounds_op, _ = hessenberg_ritz(Hm, rnorm)
-        order_op = np.argsort(_goodness("LM", ritz_op))
-        ritz_op, bounds_op = ritz_op[order_op], bounds_op[order_op]
+        # stagnation-avoidance: temporarily grow kev, mirroring mpsiram's
+        # own heuristic, since the same repeatedly-shifted-away
+        # near-converged directions can stall this loop too
+        if nconv > 0:
+            bump = min(nconv, np_apply // 2)
+            if bump > 0:
+                kev = min(kev + bump, ncv - 2)
+        np_apply = ncv - kev
 
-        shifts = ritz_op[:np_apply]
-        shift_bounds = bounds_op[:np_apply]
-        shift_order = np.argsort(-np.abs(shift_bounds))
-        shifts = shifts[shift_order]
+        ritz_op, bounds_op, _ = hessenberg_ritz(Hm, rnorm)
+        ritz_op, bounds_op = sort_ritz("LM", ritz_op, bounds_op)
+        shifts = select_shifts(ritz_op, bounds_op, np_apply)
 
         V, Hm, resid, rnorm = apply_shifts(V, Hm, resid, shifts, kev)
+        estore = wfs_cand = errs = None # V changed: last candidates() is stale
 
-    Htrue = krylov_matrix_representation(H, V)
-    ritz_true, vs_true = krylov_diagonalize(Htrue)
-    nsel = min(nev, len(V))
-    estore, vstore = krylov_select_states(ritz_true, vs_true.T,
-            fe_target, ne=nsel)
-    wfs = krylov_unitary_transformation(vstore, V)
-    es = np.array([wf.aMb(H, wf) for wf in wfs])
-    return es, wfs
+    if estore is None: # loop ran out of maxiter right after a restart
+        estore, wfs_cand, errs = candidates(V)
+    if any(wf is None for wf in wfs_cand):
+        raise RuntimeError(
+            "mpsiram_shift_invert: a requested eigenvector reconstruction "
+            "collapsed to numerically zero norm (the Krylov basis lost "
+            "orthonormality after too many restarts) -- retry with a "
+            "larger ncv, fewer nev, or a tighter maxn/delta for the "
+            "correction-vector solve")
+    return estore, wfs_cand
+
+
+def shift_invert_excited_states(self, H, e=0.0, nwf=1, wfskip=None, **kwargs):
+    """Find nwf eigenvalues closest to `e`, one at a time, each deflated
+    against the previously found ones via wfskip -- generally more
+    reliable than a single simultaneous multi-target search (nev=nwf in
+    one mpsiram_shift_invert call), exactly like excited_states' own
+    recursive=True default for the non-shift-invert search (see its
+    docstring): a shared Krylov subspace across several targets can fail
+    to resolve near-degenerate clusters.
+
+    Caveat specific to deflation for non-Hermitian H: the wfskip
+    mechanism removes a candidate's overlap with already-found states
+    using the plain Hermitian inner product (``.dot()``), the same
+    mechanism arnolditk's own wfskip uses. That is only a rigorous
+    orthogonal projection when the eigenvectors involved are mutually
+    orthogonal -- true for a Hermitian H, *not* guaranteed for a
+    non-Hermitian one, whose right eigenvectors for distinct eigenvalues
+    need not be orthogonal under the standard inner product (only
+    biorthogonal with the *left* eigenvectors are, which this deflation
+    does not use). Confirmed directly: for an exact complex-conjugate
+    degenerate ground-state pair, |<v1|v2>| ~= 0.40, and recursive
+    deflation still would not reliably resolve the exact partner of an
+    already-found member (it reliably lands on *some* other genuine
+    eigenvalue, just not necessarily that specific one) -- a structural
+    limitation of this (and arnolditk's) deflation approach for
+    non-orthogonal clusters, not something one-at-a-time search alone
+    fixes. Genuinely reliable resolution of such pairs would need
+    biorthogonal deflation (using left eigenvectors too, as NH-DMRG
+    does) -- out of scope here."""
+    if wfskip is None: wfskip = []
+    else: wfskip = list(wfskip)
+    eout, wfout = [], []
+    for i in range(nwf):
+        es, wfs = mpsiram_shift_invert(self, H, e=e, nev=1, wfskip=wfskip,
+                **kwargs)
+        eout.append(es[0])
+        wfout.append(wfs[0])
+        wfskip.append(wfs[0])
+    return np.array(eout), wfout
 
 
 def excited_states(self, H, nwf=1, which="SR", recursive=True,

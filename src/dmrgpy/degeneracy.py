@@ -41,13 +41,25 @@ def gs_degeneracy_simple(self,dmode="real",delta=1e-2,n=1,**kwargs):
 
 def eigenvalue_degeneracy(self,A,e,n=3,emode="real",delta=1e-2):
     """Given an operator and a certain eigenvalue, estimate
-    what is the degeneracy"""
+    what is the degeneracy.
+
+    For a non-Hermitian A, an exactly-degenerate cluster whose right
+    eigenvectors are not mutually orthogonal (e.g. a complex-conjugate
+    pair -- confirmed possible with substantial overlap, |<v1|v2>| of
+    order 0.4, not merely a small numerical artifact) can be undercounted:
+    the underlying deflation is only a heuristic there, not a rigorous
+    orthogonal projection -- see shift_invert_excited_states's docstring.
+    """
     # shift-invert IRAM (ARPACK mode 3, adapted for dmrgpy's only
     # approximate applyinverse -- see arpacktk.mpsiram_shift_invert's
-    # docstring)
-    from .algebra.arpacktk import mpsiram_shift_invert
+    # docstring), one eigenvalue at a time with deflation
+    # (shift_invert_excited_states): this routine's whole purpose is
+    # resolving (near-)degenerate clusters near e, which a single
+    # simultaneous multi-target search can fail to do (see
+    # shift_invert_excited_states's own docstring).
+    from .algebra.arpacktk import shift_invert_excited_states
     while True: # this is mostly a DMRG implementation
-        es,ws = mpsiram_shift_invert(self,A,e=e,delta=delta,nev=n+2,
+        es,ws = shift_invert_excited_states(self,A,e=e,delta=delta,nwf=n+2,
             maxiter=20,verbose=1)
         if emode=="real":
             emin = np.min(es.real) # ground state energy

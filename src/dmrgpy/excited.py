@@ -109,7 +109,7 @@ from .algebra.arnolditk import gram_smith
 
 
 def excited_states_non_hermitian(self,n=3,recursive=True,
-        maxit=40,ncv=None,
+        maxit=40,ncv=10,
      **kwargs):
     # recursive=True (one state at a time, each deflated against the
     # previous ones) is the default rather than a single simultaneous
@@ -127,13 +127,20 @@ def excited_states_non_hermitian(self,n=3,recursive=True,
     # see examples/non_hermitian/arnoldi_vs_iram_benchmark. arnolditk
     # remains available directly (mpsalgebra.mpsarnoldi) for comparison
     # or for the ShiftInv/projected-operator modes IRAM does not support.
+    # ncv=10 restores the same Krylov-subspace margin the old
+    # arnolditk-based call explicitly used (nkry_max=10, wider than
+    # arnolditk's own generic default of ne+4=6 for the recursive ne=1
+    # search) -- IRAM's own generic default (2*nev+4) would silently
+    # shrink this back down to 6 for the common recursive n=1-per-call
+    # case, right where the near-degenerate-safe extra margin matters
+    # most.
     from .algebra import arpacktk
     (es,wf) = arpacktk.excited_states(self,self.hamiltonian,
                 nwf=n, # number of wavefunctions
                 which="SR", # smallest real part = "ground state" convention
                 recursive=recursive, # recursive?
                 maxiter = maxit, # max number of IRAM restart cycles
-                ncv = ncv, # Krylov subspace size (None -> IRAM default)
+                ncv = ncv, # Krylov subspace size
                 **kwargs)
     from .algebra.algebra import sorteigen
     es,wf = sorteigen(es,wf)
