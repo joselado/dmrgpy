@@ -182,11 +182,10 @@ def test_gs_energy_generalized_leaves_computed_gs_true(itensor_version):
 def test_gs_energy_generalized_dispatches_non_hermitian_by_backend(itensor_version):
     """A non-Hermitian self.hamiltonian is no longer rejected outright --
     it dispatches to a dedicated non-Hermitian solver (nhdmrg.py's
-    nhdmrg_generalized(), see tests/test_nhdmrg_generalized.py for its
-    own correctness coverage), available on itensor_version="python" but
-    not yet on itensor_version=3 (no Chain::nhdmrg_generalized there).
-    This only checks the dispatch itself succeeds/fails on the right
-    backend, not the returned value's correctness. Uses a genuinely
+    nhdmrg_generalized(), now implemented on both itensor_version="python"
+    and 3 -- see tests/test_nhdmrg_generalized.py for its own correctness
+    coverage). This only checks the dispatch itself succeeds on both
+    backends, not the returned value's correctness. Uses a genuinely
     diagonalizable non-Hermitian H (hopping + h.c. + a staggered
     imaginary potential, same construction as test_nh_dmrg.py's
     nh_fermion_chain) rather than a single bare directional hopping term
@@ -203,11 +202,7 @@ def test_gs_energy_generalized_dispatches_non_hermitian_by_backend(itensor_versi
         h = h + 1j * (-1) ** i * 0.3 * fc.N[i]
     fc.set_hamiltonian(h)
     _setup(fc, itensor_version, nsweeps=4)  # dispatch check only, keep it cheap
-    if itensor_version == "python":
-        fc.gs_energy_generalized(mo_identity())  # must not raise
-    else:
-        with pytest.raises(NotImplementedError):
-            fc.gs_energy_generalized(mo_identity())
+    fc.gs_energy_generalized(mo_identity())  # must not raise
 
 
 @pytest.mark.parametrize("itensor_version", ITENSOR_VERSIONS)

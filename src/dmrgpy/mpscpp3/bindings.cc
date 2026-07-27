@@ -146,6 +146,25 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "eigenvalue with smallest real part; terms_hadj must be the "
                "adjoint operator's terms (MultiOperator.get_dagger() on the "
                "Python side). Returns (energy, psil, psir)")
+        .def("nhdmrg_generalized",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_hadj,
+                          std::vector<PyTerm> const& terms_a,
+                          int krylovdim, int restarts, Cplx lam0) {
+                auto out = self.nhdmrg_generalized(terms_from_python(terms_h),
+                    terms_from_python(terms_hadj),terms_from_python(terms_a),
+                    krylovdim,restarts,lam0);
+                return py::make_tuple(out.energy,out.psil,out.psir);
+            }, py::arg("terms_h"),py::arg("terms_hadj"),py::arg("terms_a"),
+               py::arg("krylovdim")=20,py::arg("restarts")=2,
+               py::arg("lam0")=Cplx(std::numeric_limits<double>::quiet_NaN(),0.0),
+               "Non-Hermitian generalized-eigenvalue NH-DMRG: solves "
+               "H|psi_R>=lambda*A|psi_R> for a possibly non-Hermitian "
+               "operator (terms_h, with terms_hadj its adjoint -- same "
+               "MultiOperator.get_dagger() convention as nhdmrg() above) "
+               "and a Hermitian positive-definite metric operator A "
+               "(terms_a) -- see Chain::nhdmrg_generalized's own comment "
+               "for the algorithm. Returns (lambda, psil, psir) with "
+               "<psil|psir>=1, same convention as nhdmrg().")
         .def("vev",[](Chain& self, std::vector<PyTerm> const& terms,
                        MPS const& wf, int npow) {
                 return self.vev(terms_from_python(terms),wf,npow);

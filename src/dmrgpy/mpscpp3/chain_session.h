@@ -326,23 +326,35 @@ class Chain
     // trivially biorthonormal (<psil|psir>=1 exactly), replacing the
     // reference's initial biorthogonalize! pass (a no-op for identical
     // inputs); the two states then diverge from the first bond update on.
-    NHDMRGResult
-    nhdmrg(std::vector<MOTerm> const& terms_h,
-           std::vector<MOTerm> const& terms_hadj,
-           int krylovdim=20, int restarts=2)
+    // One full forward-then-backward NH-DMRG sweep against a fixed
+    // (H, HA=H^dagger) pair, mutating psil/psir in place. Builds its own
+    // two-sided environments from scratch every call (self-contained,
+    // like dmrg.py's own _dmrg_one_sweep/pyitensor's
+    // nhdmrg.py::_nhdmrg_one_sweep) rather than assuming any carried over
+    // from a previous call -- needed by nhdmrg_generalized() below, whose
+    // (H,HA) change every outer iteration, so environments from a
+    // previous pair would be wrong. For nhdmrg()'s own multi-sweep loop
+    // (same H,HA throughout), rebuilding every sweep instead of reusing
+    // the previous sweep's own end-of-sweep environments is numerically
+    // equivalent (both are the same deterministic function of the
+    // current psil/psir, which don't change between sweep calls) at the
+    // cost of one redundant O(N) environment build per sweep -- cheap
+    // next to the O(N) per-bond Arnoldi solves each sweep already pays.
+    // Returns the final bond's local eigenvalue (nhdmrg()'s own
+    // within-sweep tie-break anchor; see Sel::SRTieBreak), starting the
+    // anchor from (energy_hint, have_energy_hint) instead of always
+    // (0, false) so a caller can continue anchoring across sweeps that
+    // share the same (H, HA) -- nhdmrg() itself does,
+    // nhdmrg_generalized() below deliberately does not (see its own
+    // comment).
+    Cplx
+    nhdmrg_one_sweep(MPS& psil, MPS& psir, MPO const& H, MPO const& HA,
+                      int krylovdim, int restarts, double noise,
+                      Cplx energy_hint, bool have_energy_hint)
         {
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
-        auto HA = build_mpo(sites_,terms_hadj,mpomaxm_);
         int N = sites_.length();
-        // always a fresh random start (never wf0_): the non-Hermitian
-        // energy is not a variational bound, so a rare stalled run can
-        // only be detected by the caller's eigen-residual check and cured
-        // by re-running -- which requires every run to draw its own
-        // random initial state (see nhdmrg.py's retry loop)
-        MPS psir = default_mps();
-        psir.position(1);
-        psir.normalize();
-        MPS psil = psir;
+        Cplx energy = energy_hint;
+        bool have_energy = have_energy_hint;
         // Two-sided environments (bra psil', ket psir for H; roles swapped
         // for the adjoint problem), one tensor per site; a
         // default-constructed ITensor stands for the scalar 1 past the
@@ -375,108 +387,130 @@ class Chain
             v.noPrime();
             return v;
             };
+        for (int ha=1;ha<=2;++ha)
+        for (int bi=0;bi<N-1;++bi)
+            {
+            int b = (ha==1) ? 1+bi : N-1-bi;
+            auto thl = psil.A(b)*psil.A(b+1);
+            auto thr = psir.A(b)*psir.A(b+1);
+            // smallest real part, with Re-degenerate candidates
+            // tie-broken toward the previous bond's eigenvalue (see
+            // arnoldi_smallest_real's Sel comment)
+            auto er_thr = arnoldi_smallest_real(
+                [&](ITensor const& v) { return apply_proj(H,Lh,Rh,b,v); },
+                thr,krylovdim,restarts,
+                have_energy ? Sel::SRTieBreak : Sel::SR,energy);
+            // anchor the adjoint solve to the right solve's eigenvalue
+            auto el_thl = arnoldi_smallest_real(
+                [&](ITensor const& v) { return apply_proj(HA,La,Ra,b,v); },
+                thl,krylovdim,restarts,
+                Sel::Closest,std::conj(er_thr.first));
+            energy = er_thr.first;
+            have_energy = true;
+            thr = er_thr.second;
+            thl = el_thl.second;
+            thl /= norm(thl);
+            thr /= norm(thr);
+            // rescale so <thl|thr> = 1 (split between the two states,
+            // with the reference's separate real branch: for a real
+            // negative overlap the complex branch's sqrt(conj(z))
+            // lands on the wrong side of std::sqrt's branch cut and
+            // would leave the overlap at -1 instead of +1)
+            auto ov = eltC(dag(thl)*thr);
+            if (std::abs(ov)>1e-12)
+                {
+                if (std::abs(ov.imag())<1e-14*std::abs(ov))
+                    {
+                    double sq = std::sqrt(std::abs(ov.real()));
+                    thl /= sq;
+                    thr /= (ov.real()<0 ? -sq : sq);
+                    }
+                else
+                    {
+                    thl /= std::sqrt(std::conj(ov));
+                    thr /= std::sqrt(ov);
+                    }
+                }
+            // fidelity truncation: hermitian average of the left and
+            // right reduced density matrices over the indices kept on
+            // the orthogonality-moving side of the bond
+            auto keep = (ha==1) ? commonInds(psil.A(b),thl)
+                                : commonInds(psil.A(b+1),thl);
+            auto rl = thl;
+            auto rr = thr;
+            for (auto const& I : keep) { rl = prime(rl,I); rr = prime(rr,I); }
+            rl *= dag(thl);
+            rr *= dag(thr);
+            auto rho = 0.5*(rl+rr);
+            if (noise>0)
+                {
+                // reference's noiseterm(): cross term between the left
+                // and right blocks, hermitized here since rho feeds a
+                // hermitian eigensolver (the Julia fidelity path adds
+                // it unhermitized and relies on eigen(ishermitian=true)
+                // only reading one triangle)
+                ITensor X = (ha==1) ? H.A(b) : H.A(b+1);
+                if (ha==1 && Lh[b-1]) X = Lh[b-1]*X;
+                if (ha==2 && Rh[b+2]) X = X*Rh[b+2];
+                auto nt = (X*thl)*dag(noPrime(X*thr));
+                rho += (noise/2.0)*(nt+dag(swapPrime(nt,0,1)));
+                }
+            ITensor U,D;
+            diagPosSemiDef(rho,U,D,{"MaxDim",maxm_,"Cutoff",cutoff_,
+                                    "Tags","Link,NH"});
+            if (ha==1)
+                {
+                psil.ref(b) = U;
+                psil.ref(b+1) = dag(U)*thl;
+                psir.ref(b) = U;
+                psir.ref(b+1) = dag(U)*thr;
+                if (b<N-1)
+                    {
+                    make_env(Lh,H,psir,psil,b,b-1);
+                    make_env(La,HA,psil,psir,b,b-1);
+                    }
+                }
+            else
+                {
+                psil.ref(b+1) = U;
+                psil.ref(b) = thl*dag(U);
+                psir.ref(b+1) = U;
+                psir.ref(b) = thr*dag(U);
+                if (b>1)
+                    {
+                    make_env(Rh,H,psir,psil,b+1,b+2);
+                    make_env(Ra,HA,psil,psir,b+1,b+2);
+                    }
+                }
+            }
+        return energy;
+        }
+
+    NHDMRGResult
+    nhdmrg(std::vector<MOTerm> const& terms_h,
+           std::vector<MOTerm> const& terms_hadj,
+           int krylovdim=20, int restarts=2)
+        {
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto HA = build_mpo(sites_,terms_hadj,mpomaxm_);
+        // always a fresh random start (never wf0_): the non-Hermitian
+        // energy is not a variational bound, so a rare stalled run can
+        // only be detected by the caller's eigen-residual check and cured
+        // by re-running -- which requires every run to draw its own
+        // random initial state (see nhdmrg.py's retry loop)
+        MPS psir = default_mps();
+        psir.position(1);
+        psir.normalize();
+        MPS psil = psir;
         Cplx energy = 0;
         bool have_energy = false;
         for (int sw=1;sw<=nsweeps_;++sw)
             {
             // mirrors make_sweeps(): noise only in the first half-schedule
             double noise = (sw<=nsweeps_/2) ? noise_ : 0.0;
-            for (int ha=1;ha<=2;++ha)
-            for (int bi=0;bi<N-1;++bi)
-                {
-                int b = (ha==1) ? 1+bi : N-1-bi;
-                auto thl = psil.A(b)*psil.A(b+1);
-                auto thr = psir.A(b)*psir.A(b+1);
-                // smallest real part, with Re-degenerate candidates
-                // tie-broken toward the previous bond's eigenvalue (see
-                // arnoldi_smallest_real's Sel comment)
-                auto er_thr = arnoldi_smallest_real(
-                    [&](ITensor const& v) { return apply_proj(H,Lh,Rh,b,v); },
-                    thr,krylovdim,restarts,
-                    have_energy ? Sel::SRTieBreak : Sel::SR,energy);
-                // anchor the adjoint solve to the right solve's eigenvalue
-                auto el_thl = arnoldi_smallest_real(
-                    [&](ITensor const& v) { return apply_proj(HA,La,Ra,b,v); },
-                    thl,krylovdim,restarts,
-                    Sel::Closest,std::conj(er_thr.first));
-                energy = er_thr.first;
-                have_energy = true;
-                thr = er_thr.second;
-                thl = el_thl.second;
-                thl /= norm(thl);
-                thr /= norm(thr);
-                // rescale so <thl|thr> = 1 (split between the two states,
-                // with the reference's separate real branch: for a real
-                // negative overlap the complex branch's sqrt(conj(z))
-                // lands on the wrong side of std::sqrt's branch cut and
-                // would leave the overlap at -1 instead of +1)
-                auto ov = eltC(dag(thl)*thr);
-                if (std::abs(ov)>1e-12)
-                    {
-                    if (std::abs(ov.imag())<1e-14*std::abs(ov))
-                        {
-                        double sq = std::sqrt(std::abs(ov.real()));
-                        thl /= sq;
-                        thr /= (ov.real()<0 ? -sq : sq);
-                        }
-                    else
-                        {
-                        thl /= std::sqrt(std::conj(ov));
-                        thr /= std::sqrt(ov);
-                        }
-                    }
-                // fidelity truncation: hermitian average of the left and
-                // right reduced density matrices over the indices kept on
-                // the orthogonality-moving side of the bond
-                auto keep = (ha==1) ? commonInds(psil.A(b),thl)
-                                    : commonInds(psil.A(b+1),thl);
-                auto rl = thl;
-                auto rr = thr;
-                for (auto const& I : keep) { rl = prime(rl,I); rr = prime(rr,I); }
-                rl *= dag(thl);
-                rr *= dag(thr);
-                auto rho = 0.5*(rl+rr);
-                if (noise>0)
-                    {
-                    // reference's noiseterm(): cross term between the left
-                    // and right blocks, hermitized here since rho feeds a
-                    // hermitian eigensolver (the Julia fidelity path adds
-                    // it unhermitized and relies on eigen(ishermitian=true)
-                    // only reading one triangle)
-                    ITensor X = (ha==1) ? H.A(b) : H.A(b+1);
-                    if (ha==1 && Lh[b-1]) X = Lh[b-1]*X;
-                    if (ha==2 && Rh[b+2]) X = X*Rh[b+2];
-                    auto nt = (X*thl)*dag(noPrime(X*thr));
-                    rho += (noise/2.0)*(nt+dag(swapPrime(nt,0,1)));
-                    }
-                ITensor U,D;
-                diagPosSemiDef(rho,U,D,{"MaxDim",maxm_,"Cutoff",cutoff_,
-                                        "Tags","Link,NH"});
-                if (ha==1)
-                    {
-                    psil.ref(b) = U;
-                    psil.ref(b+1) = dag(U)*thl;
-                    psir.ref(b) = U;
-                    psir.ref(b+1) = dag(U)*thr;
-                    if (b<N-1)
-                        {
-                        make_env(Lh,H,psir,psil,b,b-1);
-                        make_env(La,HA,psil,psir,b,b-1);
-                        }
-                    }
-                else
-                    {
-                    psil.ref(b+1) = U;
-                    psil.ref(b) = thl*dag(U);
-                    psir.ref(b+1) = U;
-                    psir.ref(b) = thr*dag(U);
-                    if (b>1)
-                        {
-                        make_env(Rh,H,psir,psil,b+1,b+2);
-                        make_env(Ra,HA,psil,psir,b+1,b+2);
-                        }
-                    }
-                }
+            energy = nhdmrg_one_sweep(psil,psir,H,HA,krylovdim,restarts,
+                    noise,energy,have_energy);
+            have_energy = true;
             if (verbose_)
                 printfln("NH-DMRG sweep %d energy = %.12f + %.12f i",
                          sw,energy.real(),energy.imag());
@@ -489,6 +523,107 @@ class Chain
         // final pair (the last local eigenvalue tracks it but lags half a
         // bond update behind)
         out.energy = innerC(psil,H,psir)/innerC(psil,psir);
+        out.psil = psil;
+        out.psir = psir;
+        return out;
+        }
+
+    // Non-Hermitian generalized-eigenvalue NH-DMRG: finds the smallest-
+    // real-part lambda solving H|psi_R>=lambda*A|psi_R> (equivalently
+    // H^dagger|psi_L>=conj(lambda)*A|psi_L>, since A is Hermitian) for a
+    // possibly non-Hermitian H and a Hermitian positive-definite metric A
+    // -- the non-Hermitian counterpart of gs_energy_generalized() above,
+    // and a line-for-line port of pyitensor/nhdmrg.py's
+    // nhdmrg_generalized() against this file's own nhdmrg_one_sweep
+    // instead of the hand-rolled Python one. Same self-consistent
+    // Lagrange-multiplier trick as gs_energy_generalized(), generalized
+    // to a complex lambda and biorthogonal (rather than plain)
+    // expectation values: minimizing (in the NH-DMRG sense -- smallest
+    // real part, not a variational bound) subject to the metric
+    // biorthogonal normalization <psi_L|A|psi_R>=1 gives stationarity
+    // condition (H-lambda*A)|psi_R>=mu|psi_R>,
+    // (H-lambda*A)^dagger|psi_L>=conj(mu)|psi_L> -- the *ordinary*
+    // (<psi_L|psi_R>=1-normalized) NH-DMRG eigenproblem of the shifted
+    // pair (H-lambda*A, HA-conj(lambda)*A) (note the adjoint shift uses
+    // conj(lambda), not lambda: (lambda*A)^dagger=conj(lambda)*A^dagger=
+    // conj(lambda)*A since A is Hermitian) -- exactly what one ordinary
+    // NH-DMRG sweep already finds. At mu=0 this is precisely
+    // H|psi_R>=lambda*A|psi_R>, so each outer iteration here (i) builds
+    // Heff=H-lambda*A and HAeff=HA-conj(lambda)*A from the current lambda
+    // estimate, (ii) runs one ordinary NH-DMRG sweep (nhdmrg_one_sweep,
+    // unmodified) against them, then (iii) updates lambda to the
+    // freshly-swept pair's generalized biorthogonal Rayleigh quotient
+    // <psi_L|H|psi_R>/<psi_L|A|psi_R>. A=identity reduces this exactly to
+    // plain nhdmrg().
+    //
+    // Each outer sweep's own within-sweep SRTieBreak anchor
+    // (nhdmrg_one_sweep's energy_hint/have_energy_hint) restarts fresh
+    // (target 0, no anchor) rather than carrying over from the previous
+    // outer iteration -- same rationale as the Python port: (H,HA)
+    // changes every outer iteration (unlike nhdmrg()'s own sweep loop,
+    // which reuses the same fixed H/HA throughout and so *does* carry the
+    // anchor across sweeps), so an anchor built for a different lambda's
+    // shifted spectrum has no particular reason to still be meaningful
+    // for the next one.
+    //
+    // No ITensor v3 dmrg() call is made anywhere in nhdmrg_one_sweep (the
+    // two-site sweep is hand-rolled directly against arnoldi_smallest_real
+    // and manual ITensor contractions, unlike gs_energy_generalized()'s
+    // dmrg() call), so the short-chain SIGABRT crash gs_energy_generalized
+    // guards against does not apply here -- confirmed directly, a 2-site
+    // chain runs this method without aborting.
+    //
+    // lam0 (optional, NaN real part meaning "unset"): starting lambda
+    // estimate; NaN (the default) instead seeds it from the fresh random
+    // start's own generalized biorthogonal Rayleigh quotient.
+    NHDMRGResult
+    nhdmrg_generalized(std::vector<MOTerm> const& terms_h,
+                        std::vector<MOTerm> const& terms_hadj,
+                        std::vector<MOTerm> const& terms_a,
+                        int krylovdim=20, int restarts=2,
+                        Cplx lam0=Cplx(std::numeric_limits<double>::quiet_NaN(),0.0))
+        {
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto HA = build_mpo(sites_,terms_hadj,mpomaxm_);
+        auto A = build_mpo(sites_,terms_a,mpomaxm_);
+        MPS psir = default_mps();
+        psir.position(1);
+        psir.normalize();
+        MPS psil = psir;
+
+        Cplx lam = lam0;
+        if (std::isnan(lam.real()))
+            {
+            Cplx a0 = innerC(psil,A,psir);
+            Cplx h0 = innerC(psil,H,psir);
+            lam = (std::abs(a0)>1e-14) ? h0/a0 : Cplx(0,0);
+            }
+
+        for (int sw=1;sw<=nsweeps_;++sw)
+            {
+            double noise = (sw<=nsweeps_/2) ? noise_ : 0.0;
+            auto Heff = sum(H,(-lam)*A,{"MaxDim",mpomaxm_,"Cutoff",cutoff_});
+            auto HAeff = sum(HA,(-std::conj(lam))*A,
+                              {"MaxDim",mpomaxm_,"Cutoff",cutoff_});
+            nhdmrg_one_sweep(psil,psir,Heff,HAeff,krylovdim,restarts,noise,
+                              Cplx(0,0),false);
+            Cplx a_psi = innerC(psil,A,psir);
+            if (std::abs(a_psi)<1e-14)
+                Error("Chain::nhdmrg_generalized: <psi_L|A|psi_R> collapsed "
+                      "to ~0 mid-iteration (A may not be positive definite, "
+                      "or the sweep drove the biorthogonal pair toward A's "
+                      "near-null-space) -- cannot form a meaningful "
+                      "generalized Rayleigh quotient");
+            Cplx h_psi = innerC(psil,H,psir);
+            lam = h_psi/a_psi;
+            if (verbose_)
+                printfln("NH-DMRG-generalized sweep %d lambda = %.12f + %.12f i",
+                         sw,lam.real(),lam.imag());
+            }
+        psil.leftLim(0); psil.rightLim(2);
+        psir.leftLim(0); psir.rightLim(2);
+        NHDMRGResult out;
+        out.energy = lam;
         out.psil = psil;
         out.psir = psir;
         return out;

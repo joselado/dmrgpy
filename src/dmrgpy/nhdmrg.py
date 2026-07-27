@@ -97,11 +97,11 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
     Lagrange-multiplier algorithm, now with a complex lambda and
     biorthogonal expectation values).
 
-    Only implemented for itensor_version="python" (pyitensor) so far --
-    mpscpp2/mpscpp3 have no analogous session method yet (CLAUDE.md's
-    "Implement in pyitensor first" scoping, same as
-    gs_energy_generalized()'s own original scoping before it gained a v3
-    port).
+    Implemented for itensor_version="python" (pyitensor/nhdmrg.py's
+    nhdmrg_generalized()) and itensor_version=3 (mpscpp3/chain_session.h's
+    Chain::nhdmrg_generalized, a line-for-line port of the same algorithm
+    against this file's own nhdmrg_one_sweep instead of the hand-rolled
+    Python one) -- mpscpp2 has no analogous session method yet.
 
     - krylovdim/restarts: per-bond local Arnoldi effort (same as nhdmrg())
     - tol/ntries: eigen-residual certificate, same rationale as nhdmrg():
@@ -118,10 +118,19 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
       attempt (defaults to a data-driven guess seeded from each attempt's
       own fresh random state -- see pyitensor/nhdmrg.py's own default).
     """
-    if self.itensor_version!="python":
+    if self.itensor_version not in (3,"python"):
         raise NotImplementedError(
             "nhdmrg_generalized is only implemented for "
-            "itensor_version='python' so far -- call chain.setup_python() first")
+            "itensor_version=3 or 'python' so far -- call "
+            "chain.setup_cpp(version=3) or chain.setup_python() first")
+    if self._session is None:
+        # same "itensor_version==3 but no compiled extension" gap
+        # gs_energy_generalized() guards against -- see its own comment.
+        raise RuntimeError(
+            "nhdmrg_generalized needs a compiled ITensor v3 extension "
+            "(itensor_version=3) but none is available for this chain -- "
+            "run `python install.py --itensor-version=3`, or call "
+            "chain.setup_python() to use the pure-Python backend instead")
     if H is None: H = self.hamiltonian
     if H is None:
         raise RuntimeError("nhdmrg_generalized called before set_hamiltonian")
@@ -135,10 +144,14 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
     terms = H.to_terms()
     terms_dag = Hd.to_terms()
     terms_a = A.to_terms()
+    if self.itensor_version=="python": # pyitensor accepts lam0=None directly
+        session_lam0 = lam0
+    else: # the compiled v3 binding takes a plain complex, NaN meaning "unset"
+        session_lam0 = complex(float('nan'),0.0) if lam0 is None else lam0
     best = None
     for i in range(max(1,int(ntries))):
         lam,hl,hr = self._session.nhdmrg_generalized(terms,terms_dag,terms_a,
-                int(krylovdim),int(restarts),lam0=lam0)
+                int(krylovdim),int(restarts),lam0=session_lam0)
         psil = mps.MPS(self,cpp_handle=hl).copy()
         psir = mps.MPS(self,cpp_handle=hr).copy()
         r = H*psir - lam*(A*psir)

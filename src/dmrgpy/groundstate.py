@@ -167,9 +167,9 @@ def gs_energy_generalized(self,A,lam0=None):
     Non-Hermitian self.hamiltonian is dispatched to a separate solver,
     nhdmrg.py's nhdmrg_generalized() (the non-Hermitian, complex-lambda,
     biorthogonal-quotient generalization of NH-DMRG, mirroring how this
-    function itself generalizes plain gs_energy()) -- itensor_version=
-    "python" only for that path so far, stricter than the Hermitian
-    path's "3 or python" above."""
+    function itself generalizes plain gs_energy()) -- implemented on the
+    same itensor_version="python"/3 pair as the Hermitian path above (no
+    mpscpp2 support either way)."""
     if self.mode=="ED":
         raise NotImplementedError(
             "gs_energy_generalized has no ED implementation -- unset "
@@ -191,19 +191,6 @@ def gs_energy_generalized(self,A,lam0=None):
             "(itensor_version=3) but none is available for this chain -- "
             "run `python install.py --itensor-version=3`, or call "
             "chain.setup_python() to use the pure-Python backend instead")
-    if self.itensor_version==3 and self.ns<3:
-        # ITensor v3's two-site dmrg() aborts the whole process (SIGABRT,
-        # "LocalOp is default constructed") for chains shorter than 3
-        # sites -- see mode.py's own itensor_version==3 guard, which
-        # exists specifically to route every *other* DMRG entry point
-        # around this by falling back to ED. There is no ED fallback
-        # here, so this must be rejected explicitly (mirrored again,
-        # defense in depth, by Chain::gs_energy_generalized itself on
-        # the C++ side) rather than silently crashing the interpreter.
-        raise RuntimeError(
-            "gs_energy_generalized: ITensor v3's two-site DMRG can't "
-            "handle a chain this short (n=%d < 3 sites) -- use "
-            "itensor_version=\"python\" instead"%self.ns)
     if self.hamiltonian is None:
         raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
     if not self.is_hermitian(self.hamiltonian):
@@ -213,17 +200,34 @@ def gs_energy_generalized(self,A,lam0=None):
         # Without this branch, the local two-site solver in both backends
         # would silently Hermitize its effective-Hamiltonian matrix before
         # diagonalizing, producing a well-defined but physically
-        # meaningless "eigenvalue" with no warning at all. Only
-        # implemented for itensor_version="python" so far (stricter than
-        # the Hermitian path's "3 or python" above -- v3 has no
-        # Chain::nhdmrg_generalized yet).
-        if self.itensor_version!="python":
-            raise NotImplementedError(
-                "gs_energy_generalized for a non-Hermitian Hamiltonian is "
-                "only implemented for itensor_version='python' so far -- "
-                "call chain.setup_python() first")
+        # meaningless "eigenvalue" with no warning at all.
+        #
+        # Deliberately checked *before* the itensor_version==3-and-ns<3
+        # guard below: that guard exists only because the Hermitian path
+        # calls real ITensor v3 dmrg() (whose two-site sweep aborts the
+        # whole process for short chains), but nhdmrg_generalized()'s own
+        # two-site sweep is hand-rolled directly against
+        # arnoldi_smallest_real/manual ITensor contractions and never
+        # calls dmrg() at all -- confirmed directly, a 2-site chain runs
+        # it without aborting -- so the non-Hermitian path must not be
+        # rejected for a short chain it can actually handle fine.
         from .nhdmrg import gs_energy_generalized_nhdmrg
         return gs_energy_generalized_nhdmrg(self,A,lam0=lam0)
+    if self.itensor_version==3 and self.ns<3:
+        # ITensor v3's two-site dmrg() aborts the whole process (SIGABRT,
+        # "LocalOp is default constructed") for chains shorter than 3
+        # sites -- see mode.py's own itensor_version==3 guard, which
+        # exists specifically to route every *other* DMRG entry point
+        # around this by falling back to ED. There is no ED fallback
+        # here, so this must be rejected explicitly (mirrored again,
+        # defense in depth, by Chain::gs_energy_generalized itself on
+        # the C++ side) rather than silently crashing the interpreter.
+        # Hermitian-path-only (see the non-Hermitian branch above for why
+        # NH-DMRG doesn't need this guard).
+        raise RuntimeError(
+            "gs_energy_generalized: ITensor v3's two-site DMRG can't "
+            "handle a chain this short (n=%d < 3 sites) -- use "
+            "itensor_version=\"python\" instead"%self.ns)
     from . import multioperator
     A = multioperator.obj2MO(A)
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)

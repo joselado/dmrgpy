@@ -333,17 +333,23 @@ def nhdmrg_generalized(H, HA, A, psi0, sweeps, krylovdim=20, restarts=2,
     anchor built for a different lambda's shifted spectrum has no
     particular reason to still be meaningful for the next one.
 
-    lam0 (optional): starting lambda estimate; defaults to the seed
-    state's own (plain, since psi_L=psi_R=psi0 initially) generalized
-    Rayleigh quotient <psi0|H|psi0>/<psi0|A|psi0>.
+    lam0 (optional): starting lambda estimate; None or a NaN real part
+    both mean "unset" (see this function's own note on why NaN is
+    accepted too), defaulting to the seed state's own (plain, since
+    psi_L=psi_R=psi0 initially) generalized Rayleigh quotient
+    <psi0|H|psi0>/<psi0|A|psi0>.
     """
     psir = psi0
     psir.position(1)
     psir.normalize()
     psil = psir.copy()
 
+    # None or NaN (real part) both mean "unset" -- NaN accepted too since
+    # Chain::nhdmrg_generalized's own C++/pybind11 binding has no None
+    # equivalent and uses a NaN real part as its own "unset" sentinel (see
+    # dmrg.py's dmrg_generalized() for the same accommodation).
     lam = lam0
-    if lam is None:
+    if lam is None or (isinstance(lam, complex) and np.isnan(lam.real)):
         a0 = inner(psil, A, psir)
         h0 = inner(psil, H, psir)
         lam = h0 / a0 if abs(a0) > 1e-14 else 0.0 + 0.0j

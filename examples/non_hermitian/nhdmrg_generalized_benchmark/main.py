@@ -1,10 +1,12 @@
 """Head-to-head benchmark: the non-Hermitian generalized-eigenvalue
 NH-DMRG solver (Many_Body_Chain.gs_energy_generalized() dispatching to
-pyitensor/nhdmrg.py's nhdmrg_generalized() for a non-Hermitian H) against
-the pre-existing ARPACK-mode-2 route (dmrgpy.algebra.arpacktk.
+nhdmrg_generalized() for a non-Hermitian H) across its two
+implementations -- pyitensor (pyitensor/nhdmrg.py) and its ITensor v3 C++
+port (Chain::nhdmrg_generalized, mpscpp3/chain_session.h) -- against the
+pre-existing ARPACK-mode-2 route (dmrgpy.algebra.arpacktk.
 mpsiram_generalized, OP=inv(M)*A via the approximate correction-vector
-self.applyinverse) -- both solving H|psi_R>=lambda*A|psi_R> for a
-possibly non-Hermitian H and a Hermitian positive-definite metric A.
+self.applyinverse), all solving H|psi_R>=lambda*A|psi_R> for a possibly
+non-Hermitian H and a Hermitian positive-definite metric A.
 
 Unlike the Hermitian generalized-eigenvalue benchmark
 (examples/groundstate/dmrg_generalized_benchmark), ARPACK mode 2 here
@@ -26,9 +28,9 @@ Ground truth is scipy.linalg.eig's general (non-symmetric) generalized
 eigensolver, built from the ED sparse matrices of H and A (same
 convention as tests/test_nhdmrg_generalized.py).
 
-Only the pyitensor backend is available for the DMRG side so far (see
-CLAUDE.md's "Implement in pyitensor first" scoping -- no v3 port yet,
-unlike the Hermitian case).
+The v3 rows are skipped automatically if the compiled extension isn't
+available (see cppext.available(3)) -- run `python install.py
+--itensor-version=3` first to include them.
 
 Usage: python main.py [--json out.json]
 """
@@ -39,7 +41,7 @@ sys.path.append(os.getcwd() + '/../../../src')
 import numpy as np
 import scipy.linalg as sla
 
-from dmrgpy import fermionchain
+from dmrgpy import cppext, fermionchain
 from dmrgpy.algebra import arnolditk, arpacktk
 
 
@@ -80,9 +82,12 @@ def ground_truth(fc, h, m):
 # Runners
 # ---------------------------------------------------------------------
 
-def run_nhdmrg_generalized(n, seed, maxm, nsweeps, cutoff=1e-12):
+def run_nhdmrg_generalized(n, seed, maxm, nsweeps, itensor_version, cutoff=1e-12):
     fc, h, m = nh_generalized_fermion_problem(n, seed)
-    fc.setup_python()
+    if itensor_version == "python":
+        fc.setup_python()
+    else:
+        fc.setup_cpp(version=itensor_version)
     fc.maxm, fc.nsweeps, fc.cutoff = maxm, nsweeps, cutoff
     t0 = time.time()
     try:
@@ -115,13 +120,18 @@ CASES = [
     dict(name="nh_fermion_n8", n=8, seed=3, maxm=80, nsweeps=18),
 ]
 
-ALGOS = ["nhdmrg_generalized", "arpack_mode2"]
+V3_AVAILABLE = cppext.available(3)
+ALGOS = ["nhdmrg_generalized_python"] + (["nhdmrg_generalized_v3"] if V3_AVAILABLE else []) \
+        + ["arpack_mode2"]
 
 
 def run_algo(algo, case, tol):
-    if algo == "nhdmrg_generalized":
+    if algo == "nhdmrg_generalized_python":
         return run_nhdmrg_generalized(case["n"], case["seed"], case["maxm"],
-                case["nsweeps"])
+                case["nsweeps"], "python")
+    if algo == "nhdmrg_generalized_v3":
+        return run_nhdmrg_generalized(case["n"], case["seed"], case["maxm"],
+                case["nsweeps"], 3)
     if algo == "arpack_mode2":
         return run_arpack_mode2(case["n"], case["seed"], tol=tol)
     raise ValueError(algo)
@@ -133,6 +143,11 @@ def main():
     ap.add_argument("--tol", type=float, default=1e-8,
             help="ARPACK mode-2 convergence tolerance")
     args = ap.parse_args()
+
+    if not V3_AVAILABLE:
+        print("(ITensor v3 extension not compiled -- skipping "
+              "nhdmrg_generalized_v3 rows; run `python install.py "
+              "--itensor-version=3` to include them)\n")
 
     results = []
     for case in CASES:
@@ -153,19 +168,21 @@ def main():
             else:
                 e_str = res["err"]
             err_str = f"{err:.2e}" if err is not None else "n/a"
-            print(f"  algo={algo:20s} ok={res['ok']!s:5s} "
+            print(f"  algo={algo:26s} ok={res['ok']!s:5s} "
                   f"time={res['time']:7.3f}s  error={err_str:>10s}  energy={e_str}")
 
-    print("\n=== Summary: wall time and accuracy, nhdmrg_generalized vs arpack_mode2 ===")
+    print("\n=== Summary: wall time relative to nhdmrg_generalized_python ===")
     for case in CASES:
         rows = {r["algo"]: r for r in results if r["name"] == case["name"]}
-        a, b = rows["nhdmrg_generalized"], rows["arpack_mode2"]
-        if a["ok"] and b["ok"]:
-            ratio = b["time"] / a["time"] if a["time"] > 0 else float("inf")
-            faster = "nhdmrg_generalized" if ratio >= 1 else "arpack_mode2"
-            print(f"  {case['name']:14s} nhdmrg_generalized: {a['time']:7.3f}s (err {a['error']:.2e})"
-                  f"   arpack_mode2: {b['time']:7.3f}s (err {b['error']:.2e})"
-                  f"   -> {faster} is {max(ratio, 1/ratio):.2f}x faster")
+        base = rows["nhdmrg_generalized_python"]
+        print(f"  {case['name']}:")
+        for algo in ALGOS:
+            r = rows[algo]
+            if not (r["ok"] and base["ok"]):
+                continue
+            ratio = r["time"] / base["time"] if base["time"] > 0 else float("inf")
+            print(f"    {algo:26s} {r['time']:7.3f}s (err {r['error']:.2e})"
+                  f"   -> {ratio:.2f}x the pure-Python nhdmrg_generalized time")
 
     if args.json:
         with open(args.json, "w") as f:

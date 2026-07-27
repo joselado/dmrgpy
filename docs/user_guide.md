@@ -443,20 +443,31 @@ $\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|A|\psi_R\rangle$ in place of
 the Hermitian case's plain one. $A=\mathrm{Id}$ reduces this exactly to
 plain NH-DMRG.
 
-Only implemented on the pure-Python (pyitensor) backend so far --
-`dmrgpy.pyitensor.nhdmrg.nhdmrg_generalized` is the underlying routine;
-no ITensor v3 port yet (unlike the Hermitian case above), so
-`itensor_version=3` raises `NotImplementedError` for a non-Hermitian $H$
-specifically. See
-`examples/non_hermitian/nhdmrg_generalized_benchmark`, which heads it up
-against `mpsiram_generalized` on a non-Hermitian interacting-fermion-chain
-test problem (a staggered imaginary on-site potential): ARPACK mode 2
-needs no adaptation at all for a non-Hermitian primary operator (its
-$M$-positive-definite precondition was always the only one), so this is a
-fair like-for-like comparison, and the same pattern as the Hermitian
-benchmark holds -- needing no approximate inverse, `nhdmrg_generalized` is
-both far more accurate and (as the chain grows) up to two orders of
-magnitude faster.
+Implemented on both the pure-Python (pyitensor) backend
+(`dmrgpy.pyitensor.nhdmrg.nhdmrg_generalized`) and compiled ITensor v3
+(`Chain::nhdmrg_generalized`, `mpscpp3/chain_session.h`, a line-for-line
+port against this file's own hand-rolled two-site sweep) -- `mpscpp2`
+(`itensor_version=2`) still raises `NotImplementedError` for a
+non-Hermitian $H$, no analogous session method there. Since
+`nhdmrg_generalized`'s two-site sweep never calls ITensor v3's own
+`dmrg()` (it is hand-rolled directly against a restarted Arnoldi solve
+and manual ITensor contractions, unlike the Hermitian path above), it
+does *not* need the Hermitian path's short-chain guard: chains shorter
+than 3 sites work fine here on `itensor_version=3`. See
+`examples/non_hermitian/nhdmrg_generalized_benchmark`, which heads all
+three routes up against each other on a non-Hermitian
+interacting-fermion-chain test problem (a staggered imaginary on-site
+potential): ARPACK mode 2 needs no adaptation at all for a non-Hermitian
+primary operator (its $M$-positive-definite precondition was always the
+only one), so this is a fair like-for-like comparison, and the same
+pattern as the Hermitian benchmark holds -- needing no approximate
+inverse, both DMRG routes are far more accurate and (as the chain grows)
+up to two orders of magnitude faster than ARPACK mode 2. Unlike the
+Hermitian case, v3 isn't consistently faster than pyitensor here (roughly
+on par at the sizes benchmarked) -- NH-DMRG's per-bond cost already pays
+for *two* Arnoldi solves (right block and its adjoint) regardless of
+backend, narrowing the compiled-vs-pure-Python gap relative to plain
+ground-state DMRG's single local diagonalization per bond.
 
 ## 5. Entanglement and quantum information
 
