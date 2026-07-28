@@ -25,6 +25,9 @@ import pytest
 from dmrgpy import cppext
 from dmrgpy import infinitechain
 from dmrgpy import spinchain
+from dmrgpy.pyitensor import idmrg
+from dmrgpy.pyitensor.index import Index
+from dmrgpy.pyitensor.tensor import ITensor
 
 EXACT_HEISENBERG_DENSITY = 0.25 - np.log(2)
 
@@ -251,3 +254,145 @@ def test_l_and_r_in_same_term_rejected():
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
     with pytest.raises(ValueError):
         ic.set_hamiltonian(ic.SxL[0] * ic.SxR[0])
+
+
+# -- idmrg.apply_mpo: applying a periodic (bounded) MPO to the converged
+# iMPS -- see idmrg.py's own "Applying a (bounded) MPO to the converged
+# iMPS" section docstring for the algorithm and its scope restriction
+# (bounded/local operators only, not idmrg.py's own extensive Hamiltonian
+# automaton). These go through pyitensor.idmrg directly (not
+# infinitechain.py, which has no public wrapper for this yet) --
+# tests/test_metts_vev.py and others already establish that reaching into
+# dmrgpy.pyitensor submodules directly from a test is a normal pattern
+# here, not a workaround.
+
+def _identity_mpo(sites_uc, n_uc):
+    """chi_W=1 automaton: Id at every site, sharing sites_uc's own physical
+    Indices (required, see grow_by_mpo's docstring)."""
+    W = []
+    for p in range(n_uc):
+        d = sites_uc.dim(p + 1)
+        s = sites_uc.si(p + 1)
+        link_l = Index(1, tags="Link")
+        link_r = Index(1, tags="Link")
+        arr = np.eye(d, dtype=complex).reshape(1, d, d, 1)
+        W.append(ITensor((link_l, s, s.prime(1), link_r), arr))
+    # wraparound: every site's own fresh links are fine independently
+    # (chi_W=1 throughout, so there is nothing to actually connect).
+    return W
+
+
+def _single_site_operator_mpo(sites_uc, n_uc, opname, p_active):
+    """chi_W=1 automaton: `opname`'s matrix at sublattice p_active, Id
+    everywhere else -- the simplest genuinely non-trivial bounded MPO."""
+    W = []
+    for p in range(n_uc):
+        d = sites_uc.dim(p + 1)
+        s = sites_uc.si(p + 1)
+        mat = sites_uc.site_type(p + 1).matrix(opname) if p == p_active else np.eye(d, dtype=complex)
+        link_l = Index(1, tags="Link")
+        link_r = Index(1, tags="Link")
+        W.append(ITensor((link_l, s, s.prime(1), link_r), mat.reshape(1, d, d, 1)))
+    return W
+
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_apply_mpo_identity_is_noop(n_uc):
+    """Applying the identity MPO must reproduce every existing observable
+    to numerical precision -- isolates the canonicalization machinery
+    (grow_by_mpo + _canonicalize_periodic) from any MPO-construction
+    question, since chi_W=1 Id trivially can't grow the bond dimension."""
+    ic, _ = _converged_uniform_chain(n_uc, maxm=20)
+    W = _identity_mpo(ic._result.sites_uc, n_uc)
+    new_result = idmrg.apply_mpo(ic._result, W, cutoff=1e-12, maxdim=None)
+    assert new_result.eta == pytest.approx(1.0, abs=1e-8)
+    for p in range(n_uc):
+        orig = idmrg.onsite_expectation(ic._result, "Sz", p)
+        new = idmrg.onsite_expectation(new_result, "Sz", p)
+        assert new == pytest.approx(orig, abs=1e-8)
+        for r in range(3):
+            orig_c = idmrg.two_point_correlator(ic._result, "Sz", p, "Sz", r)
+            new_c = idmrg.two_point_correlator(new_result, "Sz", p, "Sz", r)
+            assert new_c == pytest.approx(orig_c, abs=1e-8)
+
+
+def test_apply_mpo_pauli_x_flips_sz():
+    """Pauli-X (2*Sx for spin-1/2) at every site is unitary and chi_W=1 --
+    applying it must flip <Sz> -> -<Sz> exactly and leave <Sz(0)Sz(r)>
+    unchanged exactly (two flipped operators multiply back to the
+    original sign), a strong, closed-form check unrelated to any
+    numerical oracle."""
+    ic, _ = _converged_uniform_chain(1, maxm=20)
+    sites_uc = ic._result.sites_uc
+    d = sites_uc.dim(1)
+    pauli_x = 2 * sites_uc.site_type(1).matrix("Sx")
+    assert np.allclose(pauli_x @ pauli_x.conj().T, np.eye(d), atol=1e-10)
+    link_l, link_r = Index(1, tags="Link"), Index(1, tags="Link")
+    s = sites_uc.si(1)
+    W = [ITensor((link_l, s, s.prime(1), link_r), pauli_x.reshape(1, d, d, 1))]
+
+    new_result = idmrg.apply_mpo(ic._result, W, cutoff=1e-12, maxdim=None)
+    assert new_result.eta == pytest.approx(1.0, abs=1e-8)
+
+    orig_sz = idmrg.onsite_expectation(ic._result, "Sz", 0)
+    new_sz = idmrg.onsite_expectation(new_result, "Sz", 0)
+    assert new_sz == pytest.approx(-orig_sz, abs=1e-8)
+    for r in range(1, 3):
+        orig_c = idmrg.two_point_correlator(ic._result, "Sz", 0, "Sz", r)
+        new_c = idmrg.two_point_correlator(new_result, "Sz", 0, "Sz", r)
+        assert new_c == pytest.approx(orig_c, abs=1e-8)
+
+
+def test_apply_mpo_two_site_gate_preserves_norm():
+    """A genuinely bond-dimension>1 local gate (an SVD-split 2-site
+    unitary rotation, tiled once per unit cell on the intra-cell bond
+    only -- identity on the inter-cell bond, so this is a bounded/local
+    operator, not idmrg.py's own extensive Hamiltonian automaton) --
+    exercises the actual bond-growth path (grow_by_mpo produces a raw,
+    non-canonical bond) unlike the chi_W=1 tests above, which barely
+    touch _canonicalize_periodic's fixed-point machinery. Being unitary,
+    it must preserve the norm (apply_mpo's own `eta` diagnostic ~1);
+    _canonicalize_periodic's internal left-canonicality check (raises
+    RuntimeError if it fails) is the other half of this test, implicitly
+    exercised by apply_mpo not raising."""
+    from scipy.linalg import expm
+
+    n_uc = 2
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
+         + 0.4 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
+    ic.maxm = 4
+    ic.maxiter = 100
+    ic.etol = 1e-12
+    ic.set_hamiltonian(h)
+    ic.gs_energy()
+
+    sites_uc = ic._result.sites_uc
+    d = sites_uc.dim(1)
+    Sx = sites_uc.site_type(1).matrix("Sx")
+    Sy = sites_uc.site_type(1).matrix("Sy")
+    Sz = sites_uc.site_type(1).matrix("Sz")
+    H2 = (np.kron(Sx, Sx) + np.kron(Sy, Sy) + np.kron(Sz, Sz)).real
+    gate = expm(-1j * 0.37 * H2)  # d^2 x d^2 unitary 2-site rotation
+    gate4 = np.transpose(gate.reshape(d, d, d, d), (2, 0, 3, 1))  # (s0,s0',s1,s1')
+    U, S, Vh = np.linalg.svd(gate4.reshape(d * d, d * d), full_matrices=False)
+    keep = int(np.sum(S > 1e-12))
+    U, S, Vh = U[:, :keep], S[:keep], Vh[:keep, :]
+    a_half = (U * S[None, :] ** 0.5).reshape(d, d, keep)
+    b_half = (S[:, None] ** 0.5 * Vh).reshape(keep, d, d)
+
+    s0, s1 = sites_uc.si(1), sites_uc.si(2)
+    left_dummy, mid, right_dummy = (Index(1, tags="Link"), Index(keep, tags="Link"),
+                                     Index(1, tags="Link"))
+    W0 = ITensor((left_dummy, s0, s0.prime(1), mid), a_half.reshape(1, d, d, keep))
+    W1 = ITensor((mid, s1, s1.prime(1), right_dummy), b_half.reshape(keep, d, d, 1))
+
+    new_result = idmrg.apply_mpo(ic._result, [W0, W1], cutoff=1e-10, maxdim=None)
+    assert new_result.eta == pytest.approx(1.0, abs=1e-6)
+
+
+def test_grow_by_mpo_rejects_mismatched_length():
+    ic, _ = _converged_uniform_chain(2, maxm=8)
+    W = _identity_mpo(ic._result.sites_uc, 2)
+    with pytest.raises(ValueError):
+        idmrg.grow_by_mpo(W[:1], ic._result.U_list, 2)

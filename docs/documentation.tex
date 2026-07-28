@@ -437,6 +437,57 @@ cryptic \texttt{reshape} crash; a smaller \texttt{maxm} that actually
 binds (forcing both bonds to the same truncated dimension) avoids it,
 see \texttt{tests/test\_infinite\_chain.py}'s own comment on this.
 
+\textbf{Applying an MPO to the converged iMPS}: \texttt{idmrg.py} also
+implements \texttt{apply\_mpo(result, W\_bulk, cutoff, maxdim)} -- the
+infinite-chain analogue of \texttt{mpsalgebra.applyMPO}, and the
+primitive a future iTEBD-style real/imaginary-time evolution feature
+would build on. \texttt{grow\_by\_mpo} Kronecker-merges \texttt{W\_bulk}'s
+own per-site bonds with \texttt{U\_list}'s (mirroring
+\texttt{mpsalgebra.\_apply\_chain}'s per-site body, generalized to a
+periodic index range including the wraparound cut), giving raw,
+non-canonical tensors at bond dimension \texttt{chi\_A*chi\_W};
+\texttt{\_canonicalize\_periodic} then re-canonicalizes/truncates them
+back down via the standard two-sided fixed-point infinite-MPS procedure
+(Or\'us \& Vidal, PRB 78, 155117 (2008)): factor the dominant left/right
+transfer-matrix fixed points at every cut into square-root factors
+\texttt{X\_p}/\texttt{Y\_p} (\texttt{\_psd\_sqrt\_factor}), SVD
+\texttt{M\_p=X\_p@Y\_p} and truncate (reusing \texttt{svd.py}'s own
+\texttt{\_truncate}), then build an \emph{asymmetric} gauge
+(\texttt{G\_left[p]=U\_p\^{}H X\_p}, no \texttt{S} factor at all;
+\texttt{G\_right[p]=Y\_p V\_p\^{}H S\_p\^{}\{-1\}}, the \emph{full}
+inverse) -- asymmetric, rather than a textbook symmetric
+\texttt{S\^{}\{-1/2\}} split on both sides, specifically so the result
+comes out plain left-canonical (matching \texttt{IDMRGResult.U\_list}'s
+own convention) with no separate bond-weight layer to thread through,
+confirmed numerically before committing to the formula (a first,
+symmetric-split derivation looked plausible by analogy to Vidal's
+canonical form but reproduced Identity only to $\sim$1, not a small
+residual). \texttt{\_all\_left\_fixed\_points} (the new, symmetric
+counterpart to the existing \texttt{\_all\_right\_fixed\_points}) needed
+one more fix beyond the obvious transpose-the-eigenproblem mirroring:
+its own per-cut renormalization (needed to avoid blow-up across repeated
+propagation, exactly like the existing right-fixed-point code) discards
+the \emph{relative} scale between different cuts that
+\texttt{\_canonicalize\_periodic}'s left-gauge construction turns out to
+depend on (unlike the right-gauge one, which is provably
+scale-invariant) -- tracked via an explicit accumulated-scale return
+value and undone before use. A second, independent bug (an index-order/
+transpose mismatch between \texttt{\_apply\_transfer\_from\_left}'s own
+(ket,bra) convention and the (bra,ket) convention the isometry
+derivation needs) was only found by deriving the exact identity the
+gauge must satisfy by hand and checking it numerically term-by-term --
+a genuine case where tests alone (which caught that \emph{something}
+was wrong, via a hand-crafted internal left-canonicality check) weren't
+enough to \emph{localize} the bug, only real algebra was. \textbf{Scope
+restriction}: \texttt{W\_bulk} must be a \emph{bounded} (non-extensive)
+periodic operator -- the Hamiltonian's own
+\texttt{\_build\_periodic\_mpo}-built automaton is deliberately the
+\emph{other} kind (an unconditional accumulator self-loop that needs a
+genuine chain boundary to mean ``sum'', not ``product'') and is not a
+valid \texttt{apply\_mpo} input; see \texttt{idmrg.py}'s own ``Applying
+a (bounded) MPO to the converged iMPS'' section docstring for the
+specific failure mode this would hit.
+
 \subsection{Operator representation: \texttt{MultiOperator}}
 
 Hamiltonians and observables are built as \texttt{MultiOperator} objects

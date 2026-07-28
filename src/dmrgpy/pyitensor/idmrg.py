@@ -134,8 +134,9 @@ from .dmrg import _lanczos_ground_state
 from .index import Index
 from .sites import SiteX
 from .sites.base import is_fermionic
-from .svd import svd
+from .svd import _truncate, svd
 from .tensor import ITensor, contract_many, dag
+from .tensor import noPrime as _t_noPrime
 from .tensor import prime as _t_prime
 
 
@@ -275,6 +276,17 @@ def _onsite_matrix(onsite_by_p, p, d):
 
 
 def _build_automaton(h_intra_op, h_inter_op, site_types, n_uc):
+    """sites_uc = SiteX(site_types), then _build_periodic_mpo(...) against
+    it -- split out so apply_mpo's own callers can build a *different*
+    (bounded, non-Hamiltonian) automaton sharing an *existing* IDMRGResult's
+    own sites_uc (required for the physical Indices to match by identity,
+    see _build_periodic_mpo's own docstring), rather than always minting a
+    fresh SiteX the way a Hamiltonian build always wants to."""
+    sites_uc = SiteX(list(site_types))
+    return sites_uc, _build_periodic_mpo(h_intra_op, h_inter_op, sites_uc, n_uc)
+
+
+def _build_periodic_mpo(h_intra_op, h_inter_op, sites_uc, n_uc):
     """Build the periodic per-sublattice MPO tensors W_bulk[0..n_uc-1]
     directly, as a genuine finite-state automaton -- see this module's
     docstring for why this, not an extraction from any fixed finite
@@ -325,16 +337,22 @@ def _build_automaton(h_intra_op, h_inter_op, site_types, n_uc):
     terms), F persists (self-loop with onsite pickup, receives
     completions) -- but *only* S may start a new pending channel.
 
-    Returns (sites_uc, W_bulk): sites_uc is the n_uc-site SiteX the
-    physical legs belong to (also used later to look up named-operator
-    matrices for static correlators); W_bulk[p] (rank 4: left-bond,
-    right-bond, phys, phys') is sublattice p's tensor, with W_bulk[p]'s
-    right bond and W_bulk[(p+1)%n_uc]'s left bond always the *same*
-    canonical Index object -- valid by construction here (both are
-    indexed by the identical, explicitly-enumerated channel list; there is
-    no independent gauge choice anywhere in this construction to make them
-    inconsistent, unlike extracting from an SVD-compressed reference)."""
-    sites_uc = SiteX(list(site_types))
+    `sites_uc` (an already-built SiteX -- see `_build_automaton`, the
+    Hamiltonian-facing wrapper that mints a fresh one; apply_mpo's own
+    bounded-operator callers instead pass an *existing* IDMRGResult's own
+    sites_uc, required so the physical Indices below match, by identity,
+    the converged U_list's own physical legs -- see idmrg.py's
+    apply_mpo/grow_by_mpo docstrings) is where physical-leg Indices and
+    per-site dimensions are looked up from, and h_intra_op/h_inter_op are
+    resolved against its own named-operator matrices.
+
+    Returns W_bulk: W_bulk[p] (rank 4: left-bond, right-bond, phys, phys')
+    is sublattice p's tensor, with W_bulk[p]'s right bond and
+    W_bulk[(p+1)%n_uc]'s left bond always the *same* canonical Index
+    object -- valid by construction here (both are indexed by the
+    identical, explicitly-enumerated channel list; there is no independent
+    gauge choice anywhere in this construction to make them inconsistent,
+    unlike extracting from an SVD-compressed reference)."""
     onsite, bonds = _classify_terms(h_intra_op, h_inter_op, sites_uc, n_uc)
     onsite_by_p = {}
     for rel, coef, mat in onsite:
@@ -394,7 +412,7 @@ def _build_automaton(h_intra_op, h_inter_op, site_types, n_uc):
         T = ITensor((left_idx, s, s.prime(1), right_idx),
                      np.transpose(arr, (0, 2, 3, 1)))
         W_bulk.append(T)
-    return sites_uc, W_bulk
+    return W_bulk
 
 
 def _project_channel(T, side, idx):
@@ -736,13 +754,16 @@ def _to_array_lpr(U):
     return U.array.reshape((1,) + U.array.shape)
 
 
-def _transfer_matrices(result):
+def _transfer_matrices(U_list, n_uc):
     """[E_p] for p=0..n_uc-1, each a (chi_l,chi_l,chi_r,chi_r) array: the
-    doubled ket-times-conj(ket) transfer tensor for the converged
-    left-canonical tensor at sublattice p."""
+    doubled ket-times-conj(ket) transfer tensor for the (left-canonical, or
+    -- for apply_mpo's use -- raw not-yet-canonical) tensor at sublattice p.
+    Takes a plain tensor list rather than an IDMRGResult so apply_mpo's own
+    canonicalization can reuse it on its own intermediate (not-yet-converged
+    IDMRGResult) tensors too."""
     Es = []
-    for p in range(result.n_uc):
-        A = _to_array_lpr(result.U_list[p])
+    for p in range(n_uc):
+        A = _to_array_lpr(U_list[p])
         Es.append(np.einsum('lpr,LpR->lLrR', A, np.conj(A)))
     return Es
 
@@ -821,7 +842,7 @@ def _op_transfer(sites_uc, U_list, p, opname):
 def onsite_expectation(result, opname, p):
     """<opname> at sublattice p (0..n_uc-1) of the converged infinite
     chain."""
-    Es = _transfer_matrices(result)
+    Es = _transfer_matrices(result.U_list, result.n_uc)
     rho_after, _eta = _all_right_fixed_points(Es, result.n_uc)
     E_op = _op_transfer(result.sites_uc, result.U_list, p, opname)
     val = _apply_transfer(E_op, rho_after[p])
@@ -839,7 +860,7 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     if r < 0:
         raise ValueError("two_point_correlator: r must be >= 0")
     n_uc = result.n_uc
-    Es = _transfer_matrices(result)
+    Es = _transfer_matrices(result.U_list, n_uc)
     rho_after, _eta = _all_right_fixed_points(Es, n_uc)
 
     if r == 0:
@@ -860,3 +881,388 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
         result.sites_uc, result.U_list, p_j, opname_j))
     val = _apply_transfer(running, rho_after[p_j])
     return complex(np.trace(val))
+
+
+# == Applying a (bounded) MPO to the converged iMPS ================
+#
+# apply_mpo(result, W_bulk) is the infinite-chain analogue of
+# mpsalgebra.applyMPO(): contract a periodic MPO onto the converged unit
+# cell (grow_by_mpo), then re-canonicalize/truncate the grown bond
+# dimension back down (_canonicalize_periodic) via the standard two-sided
+# fixed-point procedure (Orus & Vidal, "Infinite time-evolving block
+# decimation algorithm beyond unitary evolution", PRB 78, 155117 (2008)) --
+# the same construction iTEBD uses after every non-unitary gate
+# application, generalized here from a single-site unit cell to n_uc sites.
+#
+# SCOPE: W_bulk must represent a *bounded* (non-extensive) periodic
+# operator -- the same tensor reused at every unit cell, with no
+# unconditional "keep accumulating forever" self-loop. `_build_periodic_mpo`
+# (the Hamiltonian's own automaton builder, used by idmrg_ground_state
+# above) is deliberately the *other* kind: its "F" channel has an
+# unconditional identity self-loop specifically so a *finite,
+# boundary-terminated* growing chain can sum an unbounded number of
+# repeats (see _build_periodic_mpo's own docstring). Feeding that
+# Hamiltonian automaton directly into apply_mpo below -- a boundary-less
+# periodic contraction -- does NOT compute "H|psi>": traced around a ring
+# with no boundary projection, the accumulator channel *multiplies* itself
+# every unit cell instead of *summing* (worked through by hand on a
+# trivial onsite-only automaton with no bond terms: going around N times
+# literally computes (Id+onsite)^N, not sum_i onsite_i). apply_mpo is
+# therefore scoped to genuinely bounded/local periodic operators --
+# single-site products, gates tiled once per unit cell, symmetry
+# operators, and the like -- built directly (see the docstrings below) or
+# via `_build_periodic_mpo` fed a Hamiltonian-shaped term list that is
+# genuinely finite-range *and* has no term wrapping past one adjacent
+# cell's own automaton reach; using the Hamiltonian's own full automaton
+# is out of scope for this function.
+
+
+def _primed_site_index(W):
+    """The primed ("out") Site-tagged Index of an MPO tensor W -- mirrors
+    idmrg_ground_state's own `_unprimed_site_index`, used by grow_by_mpo to
+    label the still-primed physical leg of a freshly MPO-grown tensor
+    before apply_mpo noPrime()s it back to a plain ket leg."""
+    return next(ind for ind in W.inds if ind.hastags("Site") and ind.plev == 1)
+
+
+def _local_grow(W_p, A_p):
+    """W_p applied to A_p at one unit-cell site: contract the shared
+    physical leg and Kronecker-merge (left(W),left(A)) and
+    (right(W),right(A)) into the two output bond axes -- done via plain
+    positional NumPy array manipulation (W_p's own axis order is always
+    (left,phys-in,phys-out,right), A_p's is always (left,phys,right), by
+    construction, see _build_periodic_mpo/_to_array_lpr) rather than
+    ITensor.__mul__'s Index-identity-based matching.
+
+    Index-identity matching would silently misbehave here whenever W_p's
+    own left and right legs happen to be the *same* Index object --
+    guaranteed for n_uc=1 (see _build_periodic_mpo's own docstring on its
+    boundary_idx pool having only n_uc distinct Index objects, reused
+    verbatim for a repeating channel type) -- exactly the same collision
+    idmrg_ground_state's own `_project_channel`/`_relabel_pos` already
+    have to sidestep positionally for identical reasons.
+
+    Returns a plain (chi_W_left*chi_A_left, d, chi_W_right*chi_A_right)
+    NumPy array -- the physical leg is W_p's own "out" (still primed)
+    convention, grow_by_mpo noPrime()s it once the full periodic chain is
+    assembled."""
+    w_arr = W_p.array
+    a_arr = _to_array_lpr(A_p)
+    Lw, d, _d2, Rw = w_arr.shape
+    La, _d3, Ra = a_arr.shape
+    prod = np.einsum('lsor,msn->lmorn', w_arr, a_arr)
+    return prod.reshape((Lw * La, d, Rw * Ra))
+
+
+def grow_by_mpo(W_bulk, U_list, n_uc):
+    """Contract MPO tensor W_bulk[p] against ket tensor U_list[p] at every
+    unit-cell site (via `_local_grow`), Kronecker-merging each of the
+    n_uc *cuts* (including the wraparound one, between site n_uc-1 and
+    site 0) into one freshly-minted combined Link Index -- the same
+    per-site "zip together, don't compress yet" construction
+    mpsalgebra.py's `_apply_chain` uses for a finite chain
+    (mpsalgebra.py:206-251), just over a periodic index range instead of a
+    chain with two open ends.
+
+    W_bulk[p]'s physical (unprimed) Index must be the *same* object as
+    U_list[p]'s own physical Index, so `_local_grow`'s contraction lands on
+    exactly that leg -- true whenever W_bulk was built by
+    `_build_periodic_mpo` against the *same* sites_uc U_list's own physical
+    legs came from (see apply_mpo's own docstring).
+
+    Returns B[0..n_uc-1]: rank-3 ITensors (left Link, phys -- still primed,
+    W's own "out" convention, see apply_mpo which noPrime()s it -- right
+    Link), *not yet* canonicalized/truncated (see `_canonicalize_periodic`)."""
+    if len(W_bulk) != n_uc or len(U_list) != n_uc:
+        raise ValueError(
+            "grow_by_mpo: expected {} unit-cell sites, got W_bulk={}, "
+            "U_list={}".format(n_uc, len(W_bulk), len(U_list)))
+    raw = [_local_grow(W_bulk[p], U_list[p]) for p in range(n_uc)]
+    combined_links = [Index(raw[p].shape[0], tags="Link") for p in range(n_uc)]
+    for p in range(n_uc):
+        right_dim = raw[p].shape[-1]
+        expected = combined_links[(p + 1) % n_uc].dim
+        if right_dim != expected:
+            raise RuntimeError(
+                "grow_by_mpo: cut dimension mismatch at site {} (right "
+                "dim {}, next site's left dim {}) -- W_bulk and U_list "
+                "must both be periodic with period n_uc={}".format(
+                    p, right_dim, expected, n_uc))
+    B = []
+    for p in range(n_uc):
+        phys_out = _primed_site_index(W_bulk[p])
+        left, right = combined_links[p], combined_links[(p + 1) % n_uc]
+        B.append(ITensor((left, phys_out, right), raw[p]))
+    return B
+
+
+def _apply_transfer_from_left(E4, rho):
+    """Mirror of `_apply_transfer`: contracts rho against E4's *left*
+    (l,L) legs instead of its right (r,R) ones -- used to propagate a
+    dominant *left* fixed point forward through a site, the mirror image
+    of how `_apply_transfer` propagates a right fixed point backward."""
+    return np.einsum('lL,lLrR->rR', rho, E4)
+
+
+def _dominant_left_fixed_point(Es):
+    """The dominant LEFT eigenvector of the full unit-cell transfer matrix
+    T=E_0...E_{n_uc-1} -- i.e. a vector rho_L with rho_L . T = eta * rho_L
+    (equivalently, the right eigenvector of T's own transpose) -- at the
+    *same* cut `_dominant_right_fixed_point` itself resolves (the
+    wraparound bond, "before site 0"/"after site n_uc-1"). Mirrors
+    `_dominant_right_fixed_point`'s own construction and
+    shape-consistency check exactly, with one added transpose."""
+    T4 = Es[0]
+    for E in Es[1:]:
+        T4 = _compose(T4, E)
+    chi = T4.shape[0]
+    if T4.shape != (chi, chi, chi, chi):
+        raise RuntimeError(
+            "idmrg apply_mpo: the periodic unit cell's wraparound bond "
+            "dimension is inconsistent (transfer tensor shape {}) -- same "
+            "failure mode _dominant_right_fixed_point already guards "
+            "against, see its own comment".format(T4.shape))
+    Tmat = T4.reshape(chi * chi, chi * chi)
+    w, v = np.linalg.eig(Tmat.T)
+    idx = np.argmax(np.abs(w))
+    eta = w[idx]
+    rho = v[:, idx].reshape(chi, chi)
+    rho = rho / np.trace(rho)
+    return rho, eta
+
+
+def _all_left_fixed_points(Es, n_uc):
+    """rho_before[p] = the fixed-point "everything strictly before site p,
+    wrapping back around" density matrix, for every sublattice position --
+    mirrors `_all_right_fixed_points`, propagating *forward* (rho_before[0]
+    is the dominant left fixed point itself; rho_before[p] for p>0 comes
+    from pushing it through sites 0..p-1) instead of backward.
+
+    Also returns `scales`: `_all_right_fixed_points`' own per-step
+    `cur = cur / np.trace(cur)` renormalization (needed there, and copied
+    here, purely to avoid numerical blow-up/decay across many propagation
+    steps) is harmless for `_all_right_fixed_points`' own callers -- the
+    correlator code only ever uses one rho_after[p] at a time, and
+    `_canonicalize_periodic`'s G_right[p] construction is provably
+    invariant to rho_R_before[p]'s own overall scale (the S_p factor it
+    divides by scales the same way, see `_canonicalize_periodic`'s own
+    comment). G_left[p], by contrast, is *linear* in rho_L_before[p]'s own
+    scale (no compensating S factor) -- so silently renormalizing away the
+    *relative* scale between different cuts' rho_before here would corrupt
+    `_canonicalize_periodic`'s left-canonicality by exactly that dropped
+    per-cut ratio. Confirmed directly: for n_uc=2, this was the actual bug
+    behind a 0.875/(1/0.875) Gram-matrix deviation at the two sites (their
+    product is exactly 1, i.e. a real, non-unitary rescale, not numerical
+    noise) that survived an unrelated (and, it turned out, inert -- see
+    that function's own comment) rho_R normalization fix; n_uc=1 has no
+    propagation step at all (scales=[1]) which is why it was never
+    affected. `scales[p]` is the accumulated product of exactly the trace
+    factors divided out through step p -- multiplying `rho_before[p]` by
+    `scales[p]` undoes the renormalization exactly (by linearity of the
+    transfer map, verified algebraically: if cur_normalized[p] =
+    cur_natural[p]/scales[p], propagating one more (linear) step and
+    renormalizing again preserves that relationship with
+    scales[p+1]=scales[p]*this step's own divided-out trace)."""
+    rho_full, eta = _dominant_left_fixed_point(Es)
+    rho_before = [None] * n_uc
+    rho_before[0] = rho_full
+    scales = [1.0] * n_uc
+    cur = rho_full
+    scale = 1.0
+    for p in range(0, n_uc - 1):
+        cur = _apply_transfer_from_left(Es[p], cur)
+        step_trace = np.trace(cur)
+        cur = cur / step_trace
+        scale = scale * step_trace
+        scales[p + 1] = scale
+        rho_before[p + 1] = cur
+    return rho_before, eta, scales
+
+
+def _psd_sqrt_factor(rho, rel_floor=1e-12):
+    """X (k x N, k <= N) such that rho ~= X^H X (Hermitized square root
+    via eigh, dropping eigenvalues at or below `rel_floor` times the
+    largest one -- this covers both clipping small-negative numerical
+    noise, since 0 <= rel_floor*max, and dropping small-but-positive ones)
+    -- factors the dominant left/right transfer-matrix fixed points ahead
+    of `_canonicalize_periodic`'s SVD-based truncation/regauging step. Not
+    `svd.py`'s `eigh_truncate`: that also truncates to a caller-chosen
+    cutoff/maxdim (the *final* truncation `_canonicalize_periodic` must
+    only apply once, jointly, from the SVD of X @ Y, not here) and only
+    returns eigenvectors, not a full sqrt factor.
+
+    Dropping near-zero eigenvalues here (not just clipping negative ones)
+    is required, not cosmetic: a raw environment fixed point can be
+    enormously ill-conditioned (confirmed directly on a genuinely
+    bond-growing apply_mpo case -- eigenvalues spanning ~1e-11 to ~1,
+    condition number ~1e10) whenever the *raw* grown bond dimension (an
+    artifact of grow_by_mpo's Kronecker product, before any truncation)
+    vastly exceeds the state's actual entanglement at that cut. Keeping
+    those near-singular directions in a *square*, full-rank X/Y produces
+    an M_p = X_p @ Y_p whose own SVD is numerically garbage in exactly
+    those directions -- confirmed directly: without this floor, a genuine
+    (non-uniform-bond-dimension) grow-then-truncate case left one site's
+    Gram matrix off from Identity by O(100), not a small residual, while
+    the same run's *other* site (whose own environment was well-
+    conditioned) was fine -- narrowing the cause to exactly this."""
+    herm = (rho + rho.conj().T) / 2
+    evals, evecs = np.linalg.eigh(herm)
+    floor = rel_floor * evals[-1] if evals.size and evals[-1] > 0 else 0.0
+    keep = evals > max(floor, 0.0)
+    return np.sqrt(evals[keep])[:, None] * evecs[:, keep].conj().T
+
+
+def _canonicalize_periodic(B_list, n_uc, cutoff, maxdim):
+    """The standard two-sided fixed-point infinite-MPS canonicalization/
+    compression procedure (see this module's "Applying a (bounded) MPO"
+    section docstring above for the reference). B_list: raw (generally
+    non-canonical) periodic tensors, already noPrime()d, one per
+    unit-cell site, n_uc cuts total (including the wraparound).
+
+    At each cut p, factor the dominant left/right fixed points
+    rho_L_before[p] = X_p^H X_p, rho_R_before[p] = Y_p Y_p^H
+    (`_psd_sqrt_factor`), SVD M_p = X_p @ Y_p = U_p S_p V_p^H, truncate
+    (`svd.py`'s `_truncate`), and build the *asymmetric* gauge
+    G_left[p] = U_p^H X_p (no S factor at all), G_right[p] =
+    Y_p V_p^H S_p^-1 (the *full* inverse, not a square root) -- inserting
+    G_right[p] @ G_left[p] at cut p still resolves (up to the truncation
+    just performed) the identity there (S cancels: U^H X Y V^H S^-1 =
+    U^H (U S V^H) V^H S^-1 = S S^-1 = Identity_keep on the kept subspace,
+    same argument as a symmetric S^-1/2 split, just redistributed), but
+    -- unlike a symmetric S^-1/2 split, which produces Vidal Gamma tensors
+    still needing a separate bond-weight Lambda=S layer threaded between
+    them -- putting the *entire* S^-1 on one side directly produces the
+    plain left-canonical form this module's IDMRGResult.U_list already
+    uses (each tensor alone isometric, no separate bond-weight layer),
+    with no further Lambda-absorption step needed. (Confirmed numerically
+    on the identity-MPO round-trip case before committing to this
+    formula: the symmetric-S^-1/2-plus-separate-Lambda-absorption
+    construction a first derivation produced looked plausible by analogy
+    to Vidal's canonical form but was measurably wrong -- gram matrix
+    deviation from Identity ~1, not a small residual; this asymmetric
+    form reproduces Identity to ~1e-14.)
+
+    Returns (U_list_new, eta): U_list_new is left-canonical (verified
+    internally, raising if it isn't within tolerance -- a real bug would
+    otherwise silently corrupt every downstream correlator computation on
+    the result); eta is the new state's own self-overlap transfer
+    eigenvalue (a norm diagnostic -- apply_mpo does not renormalize, so
+    this is not necessarily close to 1)."""
+    Es = _transfer_matrices(B_list, n_uc)
+    rho_after, eta_R = _all_right_fixed_points(Es, n_uc)
+    rho_R_before = [rho_after[(p - 1) % n_uc] for p in range(n_uc)]
+    rho_L_before, eta_L, scales = _all_left_fixed_points(Es, n_uc)
+
+    if abs(eta_L - eta_R) > 1e-6 * max(1.0, abs(eta_R)):
+        raise RuntimeError(
+            "idmrg apply_mpo: dominant left/right transfer eigenvalues "
+            "disagree (eta_L={}, eta_R={}) -- same transfer matrix, only "
+            "the eigenvector side differs, so a mismatch signals a "
+            "genuine inconsistency (e.g. a near-degenerate transfer "
+            "spectrum) rather than benign numerical noise".format(eta_L, eta_R))
+
+    # Undo _all_left_fixed_points' own per-cut renormalization -- see that
+    # function's own comment for why G_left[p] (unlike G_right[p]) is not
+    # invariant to it, and why this is the fix (not, as an earlier,
+    # confirmed-inert attempt assumed, a mismatch between rho_L and rho_R).
+    #
+    # Also transpose: _apply_transfer_from_left(E4, rho)[r,R] pairs its
+    # *first* input index with E4's 'l' leg (the *unconjugated*/ket copy)
+    # and its second with 'L' (the conjugated/bra copy) -- see
+    # _transfer_matrices' own E4 = einsum('lpr,LpR->lLrR', A, conj(A)).
+    # That makes _all_left_fixed_points' own rho_before a (ket,bra)-ordered
+    # matrix, the *transpose* of the usual (bra,ket) density-matrix
+    # convention the isometry identity below needs (the same convention
+    # rho_R_before/rho_after already use, consumed correctly as-is).
+    # Confirmed directly, the hard way: an isometry-target identity derived
+    # by hand (G_right[p]^H @ rho_L_before[p] @ G_right[p] == Identity_keep,
+    # with rho_L_before[p] appearing via
+    # sum_{b,b'} rho_L_before[0][b,b'] conj(B[b,..]) B[b',..] == rho_L_before[1])
+    # checked out in the identity/algebra but the *numeric* Gram matrix of
+    # the resulting tensor was still off by O(10-1000) (not the earlier
+    # bugs' signatures, and unaffected by cutoff/maxdim/psd-factor-rank
+    # choices) until this transpose was added -- isolated by computing
+    # that same bracketed sum directly and finding it equal to
+    # conj(rho_L_before[1]) (== rho_L_before[1].T for a Hermitian matrix),
+    # not rho_L_before[1] itself.
+    rho_L_before = [(rho_L_before[p] * scales[p]).T for p in range(n_uc)]
+
+    G_left, G_right = [None] * n_uc, [None] * n_uc
+    for p in range(n_uc):
+        X_p = _psd_sqrt_factor(rho_L_before[p])
+        Y_p = _psd_sqrt_factor(rho_R_before[p]).conj().T
+        M_p = X_p @ Y_p
+        U_p, S_p, Vh_p = np.linalg.svd(M_p, full_matrices=False)
+        keep, _discarded = _truncate(S_p, cutoff, maxdim, mindim=1)
+        U_p, S_p, Vh_p = U_p[:, :keep], S_p[:keep], Vh_p[:keep, :]
+        G_left[p] = U_p.conj().T @ X_p
+        G_right[p] = (Y_p @ Vh_p.conj().T) * (1.0 / S_p)[None, :]
+
+    U_list_new = []
+    for p in range(n_uc):
+        arr = np.einsum('ab,bpc,cd->apd', G_left[p], B_list[p].array,
+                         G_right[(p + 1) % n_uc])
+        left = Index(arr.shape[0], tags="Link")
+        right = Index(arr.shape[2], tags="Link")
+        phys = next(ind for ind in B_list[p].inds if ind.hastags("Site"))
+        U_list_new.append(ITensor((left, phys, right), arr))
+
+    for p in range(n_uc):
+        arr = U_list_new[p].array
+        gram = np.einsum('apc,apd->cd', arr.conj(), arr)
+        ident = np.eye(gram.shape[0])
+        # 1e-4, not machine precision: X_p/Y_p's own conditioning degrades
+        # with how far the *raw* grown bond dimension (chi_A*chi_W, before
+        # any truncation) exceeds the state's real entanglement at that
+        # cut -- confirmed directly on a deliberately extreme stress case
+        # (an already near-maxdim-saturated 16-dim bond grown by a
+        # bond-4 gate with maxdim=None, so almost nothing is discarded):
+        # a genuine, essentially unavoidable ~1e-10 condition number left
+        # a ~1e-5 to 1e-3 residual depending on cutoff/maxdim, even though
+        # the exact same construction reproduces Identity to ~1e-13 on
+        # every less pathological case tried (n_uc in (1,2), identity and
+        # unitary chi_W=1 MPOs, and this same gate at a smaller starting
+        # bond dimension). 1e-4 is loose enough to absorb that, while
+        # still being orders of magnitude below every *actual* bug this
+        # check caught during development (deviations of 1, 50-1000s, or
+        # more -- see this function's own docstring history).
+        if not np.allclose(gram, ident, atol=1e-4):
+            raise RuntimeError(
+                "idmrg apply_mpo: canonicalization produced a non-left-"
+                "canonical tensor at sublattice {} (max deviation from "
+                "Identity: {}) -- indicates a bug in the gauge-fixing "
+                "construction, not a benign numerical issue".format(
+                    p, np.max(np.abs(gram - ident))))
+
+    return U_list_new, eta_R
+
+
+class PeriodicMPS:
+    """A periodic iMPS with no ground-state-specific bookkeeping -- same
+    shape as IDMRGResult (sites_uc, n_uc, U_list) minus e0/converged/
+    niter_done, which have no meaning for apply_mpo's output.
+    onsite_expectation/two_point_correlator only ever read
+    .sites_uc/.n_uc/.U_list off their `result` argument, so they accept a
+    PeriodicMPS directly, no changes needed there. `eta` is apply_mpo's own
+    diagnostic (see `_canonicalize_periodic`'s docstring)."""
+
+    def __init__(self, sites_uc, n_uc, U_list, eta):
+        self.sites_uc = sites_uc
+        self.n_uc = n_uc
+        self.U_list = U_list
+        self.eta = eta
+
+
+def apply_mpo(result, W_bulk, cutoff=1e-12, maxdim=None):
+    """Apply a periodic MPO to the converged iMPS `result` (an IDMRGResult
+    or PeriodicMPS), returning a new PeriodicMPS representing W|psi> up to
+    (cutoff, maxdim) truncation -- the infinite-chain analogue of
+    `mpsalgebra.applyMPO`. See this module's "Applying a (bounded) MPO to
+    the converged iMPS" section docstring above for the *scope*
+    restriction on W_bulk (bounded/local periodic operators only -- not
+    the Hamiltonian's own unbounded automaton) and the algorithm
+    (`grow_by_mpo` + `_canonicalize_periodic`)."""
+    B = grow_by_mpo(W_bulk, result.U_list, result.n_uc)
+    B = [_t_noPrime(b, "Site") for b in B]
+    U_list_new, eta = _canonicalize_periodic(B, result.n_uc, cutoff, maxdim)
+    return PeriodicMPS(result.sites_uc, result.n_uc, U_list_new, eta)

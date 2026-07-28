@@ -342,6 +342,50 @@ happens instead of a cryptic `reshape` crash; a smaller `maxm` that
 actually binds (forcing both bonds to the same truncated dimension)
 avoids it, see `tests/test_infinite_chain.py`'s own comment on this.
 
+**Applying an MPO to the converged iMPS**: `idmrg.py` also implements
+`apply_mpo(result, W_bulk, cutoff, maxdim)` — the infinite-chain analogue
+of `mpsalgebra.applyMPO`, and the primitive a future iTEBD-style
+real/imaginary-time evolution feature would build on. `grow_by_mpo`
+Kronecker-merges `W_bulk`'s own per-site bonds with `U_list`'s (mirroring
+`mpsalgebra._apply_chain`'s per-site body, generalized to a periodic
+index range including the wraparound cut), giving raw, non-canonical
+tensors at bond dimension `chi_A*chi_W`; `_canonicalize_periodic` then
+re-canonicalizes/truncates them back down via the standard two-sided
+fixed-point infinite-MPS procedure (Orús & Vidal, PRB 78, 155117 (2008)):
+factor the dominant left/right transfer-matrix fixed points at every cut
+into square-root factors `X_p`/`Y_p` (`_psd_sqrt_factor`), SVD
+`M_p=X_p@Y_p` and truncate (reusing `svd.py`'s own `_truncate`), then
+build an *asymmetric* gauge (`G_left[p]=U_p^H X_p`, no `S` factor at all;
+`G_right[p]=Y_p V_p^H S_p^{-1}`, the *full* inverse) — asymmetric, rather
+than a textbook symmetric `S^{-1/2}` split on both sides, specifically so
+the result comes out plain left-canonical (matching `IDMRGResult.U_list`'s
+own convention) with no separate bond-weight layer to thread through,
+confirmed numerically before committing to the formula (a first,
+symmetric-split derivation looked plausible by analogy to Vidal's
+canonical form but reproduced Identity only to ~1, not a small residual).
+`_all_left_fixed_points` (the new, symmetric counterpart to the existing
+`_all_right_fixed_points`) needed one more fix beyond the obvious
+transpose-the-eigenproblem mirroring: its own per-cut renormalization
+(needed to avoid blow-up across repeated propagation, exactly like the
+existing right-fixed-point code) discards the *relative* scale between
+different cuts that `_canonicalize_periodic`'s left-gauge construction
+turns out to depend on (unlike the right-gauge one, which is provably
+scale-invariant) — tracked via an explicit accumulated-scale return value
+and undone before use. A second, independent bug (an index-order/
+transpose mismatch between `_apply_transfer_from_left`'s own (ket,bra)
+convention and the (bra,ket) convention the isometry derivation needs)
+was only found by deriving the exact identity the gauge must satisfy by
+hand and checking it numerically term-by-term — a genuine case where
+tests alone (which caught that *something* was wrong, via a hand-crafted
+internal left-canonicality check) weren't enough to *localize* the bug,
+only real algebra was. **Scope restriction**: `W_bulk` must be a
+*bounded* (non-extensive) periodic operator — the Hamiltonian's own
+`_build_periodic_mpo`-built automaton is deliberately the *other* kind
+(an unconditional accumulator self-loop that needs a genuine chain
+boundary to mean "sum", not "product") and is not a valid `apply_mpo`
+input; see `idmrg.py`'s own "Applying a (bounded) MPO to the converged
+iMPS" section docstring for the specific failure mode this would hit.
+
 ### 4.2 Operator representation: `MultiOperator`
 
 Hamiltonians and observables are built as `MultiOperator` objects
