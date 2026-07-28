@@ -385,6 +385,42 @@ per-sublattice left-canonical tensors via the standard infinite-MPS
 transfer-matrix formalism (dominant left/right fixed points of the
 per-unit-cell transfer operator).
 
+\textbf{A confirmed, fixed reliability bug affecting static correlators}:
+each micro-step's local 2-site Lanczos solve used to always start from a
+fresh random vector, on the (mistaken) reasoning that every micro-step
+inserts brand-new physical sites so there is no previous local tensor to
+warm-start from. That's true of the \emph{sites}, but once bond dimension
+saturates at \texttt{maxm} the \emph{shape} of the local eigenproblem at a
+given unit-cell position repeats macro-iteration to macro-iteration -- so
+for a gapless/SU(2)-symmetric model (routinely a (near-)degenerate local
+ground manifold), a fresh random restart let Lanczos land on an arbitrary
+member of that manifold every macro-iteration: the reported \emph{energy}
+still converged fine (variational, degeneracy-robust) but \texttt{U\_list}
+kept jumping between different members instead of settling into one
+self-consistent unit cell, corrupting every downstream static correlator
+(confirmed directly via the model-agnostic
+$\langle H_{uc}\rangle$-equals-\texttt{n\_uc*density} self-consistency
+identity: 0.4--0.6 gaps for a uniform \texttt{n\_uc=1} chain, not shrinking
+with \texttt{maxiter}, and not fixed by best-of-6 independent-seed
+reruns). Fixed by threading each macro-iteration's own local ground vector
+back in as the \emph{next} macro-iteration's Lanczos warm start
+(\texttt{\_local\_two\_site\_solve}'s \texttt{x0\_warm} parameter) -- this
+closes the gap by roughly an order of magnitude for \texttt{n\_uc=2}
+(0.34--0.40 down to $\le$0.05 across 7 independent trials, several
+essentially exact) but, confirmed directly, does \textbf{not} fix
+\texttt{n\_uc=1} (still 0.4--1.8, \texttt{IDMRGResult.state\_overlap}
+plateauing around 0.5--0.65 rather than approaching 1 even after 80
+macro-iterations) -- isolated to \texttt{n\_uc=1}'s own structurally
+unique micro-step, where \texttt{p\_L==p\_R} always (every
+macro-iteration's two active sites are literally the same sublattice, via
+\texttt{\_fresh\_physical\_copy}), unlike \texttt{n\_uc=2} where this
+never happens. \texttt{IDMRGResult.state\_overlap} (the normalized overlap
+between consecutive macro-iterations' local ground vectors,
+\texttt{None} if unavailable) is a new, cheap diagnostic exposing this
+directly, independent of the $\langle H_{uc}\rangle$ self-consistency
+check. See \texttt{docs/user\_guide.tex}'s iDMRG section for the
+user-facing version of this caveat.
+
 \textbf{Currently limited to \texttt{n\_uc<=2}} (enforced at
 \texttt{Infinite\_Many\_Body\_Chain} construction) -- the micro-step
 loop's sublattice pairing (\texttt{p\_L=mstep},
