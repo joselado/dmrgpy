@@ -218,13 +218,40 @@ a deliberately **independent** object, not a `Many_Body_Chain` subclass:
 `Many_Body_Chain`'s whole design (mode dispatch between DMRG/ED, a fixed
 `self.ns`-length site list, KPM/dynamics/entanglement/excited-states
 machinery) assumes a *finite* chain throughout, and none of that has any
-meaning for a translationally-invariant, infinite unit-cell chain. Only
-`itensor_version="python"` is supported (constructing anything else
-raises `NotImplementedError`) — infinite DMRG (iDMRG) has no C++/Julia
-backend yet. The public surface is deliberately narrow: `set_hamiltonian`,
+meaning for a translationally-invariant, infinite unit-cell chain.
+`itensor_version="python"` (default) or `3` are supported (constructing
+anything else raises `NotImplementedError`) — `2` and `"julia_live"` have
+no iDMRG port. The public surface is deliberately narrow: `set_hamiltonian`,
 `gs_energy` (energy *per site*, the physically meaningful quantity for an
 infinite system), and static `vev`/`correlator` — no excited states, no
 dynamics, no entanglement/entropy in v1.
+
+**Backend dispatch, unlike the finite-chain `mode.py`, is explicit rather
+than automatic**: `gs_energy` branches directly on `self.itensor_version`
+rather than falling back silently (there's no ED oracle for an infinite
+system to fall back *to*). `itensor_version="python"` runs
+`pyitensor/idmrg.py`'s own growing algorithm (see below) and keeps the
+resulting `IDMRGResult` in `self._result` for `vev`/`correlator` to reuse.
+`itensor_version=3` instead calls the compiled `mpscpp3` backend's
+`Chain::idmrg_ground_state` directly — a line-by-line C++ port of the same
+algorithm (built from the start with fresh Index objects on every
+automaton tensor to sidestep the duplicate-Index bug class described
+below, rather than needing the same retrofit) — for the energy density
+only; it has no static-correlator support, so `self._result` is left
+`None` on that path and `vev`/`correlator` raise `NotImplementedError`
+regardless of whether `gs_energy` itself already ran successfully.
+Benchmarked (S=1/2 uniform Heisenberg chain, `maxm=30`, `maxiter=60`,
+`etol=1e-9`): v3 is ~2.5-3x slower than `"python"` at both `n_uc=1` and
+`n_uc=2`, with energy-density agreement between the two backends to
+~1e-8. `Chain::idmrg_ground_state` is reached by constructing a `Chain`
+directly from the unit cell's own `site_types` (`cppext.get_backend(3).
+Chain(self.site_types)`), the same low-level pattern `nhdmrg.py` uses for
+its own compiled-backend calls (`H.to_terms()` fed straight into
+`self._session.<method>(...)`) — terms are shifted from `infinitechain.py`'s
+own 0-based `h_intra`/`h_inter` site convention to the codebase's usual
+1-based one via the same `MultiOperator.to_terms()` every other compiled
+backend call already uses (no separate Jordan-Wigner transform, since
+iDMRG doesn't support fermionic terms yet on either backend).
 
 The Hamiltonian is built from `SxL[i]`/`SxC[i]`/`SxR[i]`-suffixed
 operators (previous/central/next unit cell, `i=0..n_uc-1`) rather than
@@ -1543,7 +1570,7 @@ bookkeeping fixes referenced above -- it was ~13x before them).
 |---|---|
 | `src/dmrgpy/` | the Python library |
 | `src/dmrgpy/manybodychain.py` | `Many_Body_Chain`, the shared base class |
-| `src/dmrgpy/infinitechain.py`, `pyitensor/idmrg.py` | `Infinite_Many_Body_Chain` and infinite DMRG (iDMRG), pyitensor-only |
+| `src/dmrgpy/infinitechain.py`, `pyitensor/idmrg.py`, `mpscpp3/chain_session.h` | `Infinite_Many_Body_Chain` and infinite DMRG (iDMRG), pyitensor + ITensor v3 (energy density only on v3) |
 | `src/dmrgpy/multioperator.py`, `multioperatortk/` | backend-agnostic operator representation |
 | `src/dmrgpy/mode.py`, `cppext.py` | DMRG/ED and backend dispatch |
 | `src/dmrgpy/mpscpp2/`, `mpscpp3/` | vendored ITensor C++ (v2, v3) + pybind11 bindings |

@@ -1,14 +1,19 @@
 """Infinite_Many_Body_Chain: a translationally-invariant chain defined by a
 single n_uc-site unit cell (rather than a fixed total length), solved via
-infinite DMRG (iDMRG, see pyitensor/idmrg.py for the algorithm). This is a
-deliberately independent object, NOT a Many_Body_Chain subclass --
-Many_Body_Chain's whole design (mode dispatch between DMRG/ED, a fixed
-`self.ns`-length site list, KPM/dynamics/entanglement/excited-states
-machinery, ...) assumes a *finite* chain throughout, and none of the finite
-notions (an ED cross-check, a fixed number of sites) have any meaning for
-an infinite system. Only `itensor_version="python"` is supported (iDMRG has
-no C++/Julia backend yet) -- passing anything else raises NotImplementedError
-rather than silently doing something else.
+infinite DMRG (iDMRG, see pyitensor/idmrg.py for the algorithm, or
+mpscpp3/chain_session.h's Chain::idmrg_ground_state for the ITensor v3 C++
+port of the same algorithm). This is a deliberately independent object, NOT
+a Many_Body_Chain subclass -- Many_Body_Chain's whole design (mode dispatch
+between DMRG/ED, a fixed `self.ns`-length site list, KPM/dynamics/
+entanglement/excited-states machinery, ...) assumes a *finite* chain
+throughout, and none of the finite notions (an ED cross-check, a fixed
+number of sites) have any meaning for an infinite system.
+`itensor_version="python"` (default) or `3` are supported -- passing
+anything else raises NotImplementedError rather than silently doing
+something else. The v3 C++ backend computes the energy density only (no
+static-correlator support yet, see Infinite_Many_Body_Chain.gs_energy's own
+comment); `vev`/`correlator` still require `itensor_version="python"`
+regardless of which backend `gs_energy` itself used.
 
 == Hamiltonian specification: L/C/R-suffixed operators ==
 
@@ -117,13 +122,23 @@ class Infinite_Many_Body_Chain:
     """iDMRG-only counterpart of Many_Body_Chain (manybodychain.py) -- see
     this module's docstring. Exposes only the narrow subset of modes v1
     supports: `set_hamiltonian`, `gs_energy` (converged energy *per site*),
-    and static one-/two-point expectation values (`vev`/`correlator`)."""
+    and static one-/two-point expectation values (`vev`/`correlator`).
+
+    `itensor_version="python"` (default) or `3` -- the ITensor v3 C++
+    backend (`mpscpp3/chain_session.h`'s `Chain::idmrg_ground_state`)
+    computes the energy density only; it has no static-correlator support
+    yet (see `gs_energy`'s own comment), so `vev`/`correlator` still
+    require `itensor_version="python"` regardless of what backend
+    `gs_energy` itself was run with. `itensor_version=2` and
+    `"julia_live"`/`"julia"` have no iDMRG port at all and raise
+    `NotImplementedError`."""
 
     def __init__(self, site_types, itensor_version="python"):
-        if itensor_version != "python":
+        if itensor_version not in ("python", 3):
             raise NotImplementedError(
-                "Infinite_Many_Body_Chain: only itensor_version=\"python\" "
-                "is implemented (iDMRG has no C++/Julia backend yet)")
+                "Infinite_Many_Body_Chain: itensor_version={!r} is not "
+                "implemented -- only \"python\" and 3 (the ITensor v3 C++ "
+                "backend) support iDMRG".format(itensor_version))
         self.itensor_version = itensor_version
         self.site_types = list(site_types)
         self.n_uc = len(self.site_types)
@@ -150,18 +165,31 @@ class Infinite_Many_Body_Chain:
         self.cutoff = 1e-12     # SVD truncation
         self.maxiter = 200      # iDMRG macro-iterations (growth steps)
         self.etol = 1e-10       # energy-density convergence tolerance
-        self.niter = 30         # per-micro-step Lanczos iteration count --
-                                 # note idmrg.py's _local_two_site_solve
-                                 # always runs at least 200 (a validated,
+        self.niter = 30         # itensor_version="python": per-micro-step
+                                 # Lanczos iteration count -- note
+                                 # idmrg.py's _local_two_site_solve always
+                                 # runs at least 200 (a validated,
                                  # load-bearing floor, see its own comment),
                                  # so any value <=200 here has no effect;
-                                 # only raising it above 200 does anything
+                                 # only raising it above 200 does anything.
+                                 # itensor_version=3: reused as the local
+                                 # 2-site solve's Arnoldi Krylov dimension
+                                 # (Chain::idmrg_ground_state's krylovdim
+                                 # argument).
+        self.restarts = 2       # itensor_version=3 only: Arnoldi restart
+                                 # count for the local 2-site solve
+                                 # (Chain::idmrg_ground_state's restarts
+                                 # argument) -- no equivalent knob on the
+                                 # "python" backend's Lanczos solve.
         self.verbose = False
 
         self.hamiltonian = None  # user-facing MultiOperator (L/C/R indices)
         self._h_intra = None
         self._h_inter = None
         self._result = None      # pyitensor.idmrg.IDMRGResult once converged
+                                  # (itensor_version="python" only -- the v3
+                                  # backend has no correlator machinery, see
+                                  # gs_energy/vev/correlator)
         self.e0 = None           # converged ground-state energy per site
         self.converged = None
 
@@ -211,24 +239,65 @@ class Infinite_Many_Body_Chain:
         """Run iDMRG to convergence (or self.maxiter macro-iterations) and
         return the ground-state energy *per site* -- the physically
         meaningful observable for an infinite system (a total energy would
-        be unboundedly large)."""
+        be unboundedly large).
+
+        itensor_version="python" runs pyitensor/idmrg.py's own growing
+        algorithm and keeps the resulting IDMRGResult in self._result for
+        vev/correlator to reuse (see those methods). itensor_version=3
+        instead calls the compiled mpscpp3 backend's
+        Chain::idmrg_ground_state directly (energy density only -- no
+        correlator support there yet, see this module's own docstring),
+        so self._result is left None on that path; vev/correlator raise
+        NotImplementedError rather than silently misusing a stale/absent
+        result."""
         if self._h_intra is None:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.gs_energy called before set_hamiltonian")
-        from .pyitensor import idmrg
-        self._result = idmrg.idmrg_ground_state(
-            self.site_types, self._h_intra.op, self._h_inter.op, self.n_uc,
-            maxm=self.maxm, cutoff=self.cutoff, maxiter=self.maxiter,
-            etol=self.etol, niter=self.niter, verbose=self.verbose)
-        self.e0 = self._result.e0
-        self.converged = self._result.converged
+        if self.itensor_version == "python":
+            from .pyitensor import idmrg
+            self._result = idmrg.idmrg_ground_state(
+                self.site_types, self._h_intra.op, self._h_inter.op, self.n_uc,
+                maxm=self.maxm, cutoff=self.cutoff, maxiter=self.maxiter,
+                etol=self.etol, niter=self.niter, verbose=self.verbose)
+            self.e0 = self._result.e0
+            self.converged = self._result.converged
+        else:  # itensor_version == 3
+            from . import cppext
+            backend = cppext.get_backend(3)
+            if backend is None:
+                raise RuntimeError(
+                    "Infinite_Many_Body_Chain.gs_energy: itensor_version=3 "
+                    "requested but the mpscpp3 (ITensor v3) extension is "
+                    "not compiled -- run install.py --itensor-version=3 "
+                    "first, or use itensor_version=\"python\" instead")
+            chain = backend.Chain(self.site_types)
+            chain.set_verbose(self.verbose)
+            terms_intra = self._h_intra.to_terms()
+            terms_inter = self._h_inter.to_terms()
+            density, converged, _niter_done = chain.idmrg_ground_state(
+                terms_intra, terms_inter, self.maxm, self.cutoff,
+                self.maxiter, self.etol, self.niter, self.restarts)
+            self._result = None
+            self.e0 = density
+            self.converged = converged
         return self.e0
 
     def vev(self, opname, p, group="C"):
         """<opname> at site p (0..n_uc-1) of cell-group `group` -- by
         translational invariance this is identical for every group, `group`
         is accepted purely so callers can write whichever reads most
-        naturally (SxL/SxC/SxR all describe the same infinite chain)."""
+        naturally (SxL/SxC/SxR all describe the same infinite chain).
+
+        Only supported for itensor_version="python" -- the ITensor v3 C++
+        backend has no static-correlator machinery yet (see gs_energy's
+        own comment)."""
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.vev: only itensor_version="
+                "\"python\" supports static correlators -- run a separate "
+                "itensor_version=\"python\" chain for vev/correlator, or "
+                "reuse pyitensor.idmrg's correlator functions directly "
+                "against a \"python\"-backend IDMRGResult")
         if group not in ("L", "C", "R"):
             raise ValueError("vev: group must be 'L', 'C' or 'R', got {!r}".format(group))
         if not (0 <= p < self.n_uc):
@@ -242,7 +311,17 @@ class Infinite_Many_Body_Chain:
     def correlator(self, opname_i, p_i, opname_j, r):
         """<opname_i(site p_i) opname_j(site p_i + r)>, r measured in
         physical sites (r>=0) -- see pyitensor.idmrg.two_point_correlator
-        for the r=0 (same-site) convention."""
+        for the r=0 (same-site) convention.
+
+        Only supported for itensor_version="python" -- see vev's own
+        comment."""
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.correlator: only itensor_version="
+                "\"python\" supports static correlators -- run a separate "
+                "itensor_version=\"python\" chain for vev/correlator, or "
+                "reuse pyitensor.idmrg's correlator functions directly "
+                "against a \"python\"-backend IDMRGResult")
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))

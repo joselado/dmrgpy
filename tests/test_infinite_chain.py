@@ -1,6 +1,11 @@
 """Coverage for Infinite_Many_Body_Chain / Infinite_Spin_Chain (iDMRG,
-pyitensor/idmrg.py) -- see infinitechain.py's own docstring for the
-L/C/R-suffixed Hamiltonian convention this exercises.
+pyitensor/idmrg.py, or mpscpp3/chain_session.h's Chain::idmrg_ground_state
+for itensor_version=3) -- see infinitechain.py's own docstring for the
+L/C/R-suffixed Hamiltonian convention this exercises. Most tests below run
+only the default itensor_version="python" backend; the
+test_itensor_version3_* tests near the end of this file are the only ones
+exercising the ITensor v3 C++ backend, skipped automatically if mpscpp3
+isn't compiled.
 
 There is no ED oracle for a genuinely infinite system, so these tests
 cross-check via: the exact Bethe-ansatz Heisenberg energy density
@@ -17,15 +22,16 @@ module docstring for why), so only n_uc in {1, 2} is exercised here.
 import numpy as np
 import pytest
 
+from dmrgpy import cppext
 from dmrgpy import infinitechain
 from dmrgpy import spinchain
 
 EXACT_HEISENBERG_DENSITY = 0.25 - np.log(2)
 
 
-def _converged_uniform_chain(n_uc, maxm=40, maxiter=200, etol=1e-9):
+def _converged_uniform_chain(n_uc, maxm=40, maxiter=200, etol=1e-9, itensor_version="python"):
     spins = ["1/2"] * n_uc
-    ic = infinitechain.Infinite_Spin_Chain(spins)
+    ic = infinitechain.Infinite_Spin_Chain(spins, itensor_version=itensor_version)
     terms = []
     for i in range(n_uc - 1):
         terms.append(ic.SxC[i] * ic.SxC[i + 1] + ic.SyC[i] * ic.SyC[i + 1]
@@ -183,9 +189,62 @@ def test_n_uc_above_2_not_implemented():
         infinitechain.Infinite_Spin_Chain(["1/2", "1/2", "1/2"])
 
 
-def test_itensor_version_other_than_python_not_implemented():
+def test_itensor_version_other_than_python_or_3_not_implemented():
+    """itensor_version=3 (the ITensor v3 C++ backend) is implemented -- see
+    the itensor_version3_* tests below; 2 (no mpscpp2 iDMRG port) and
+    "julia_live" (no mpsjulialive iDMRG port either) are not."""
     with pytest.raises(NotImplementedError):
-        infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+        infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=2)
+    with pytest.raises(NotImplementedError):
+        infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="julia_live")
+
+
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="requires the compiled mpscpp3 (ITensor v3) extension")
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_itensor_version3_energy_density_matches_bethe_ansatz(n_uc):
+    """Lighter-weight than the itensor_version="python" versions of this
+    check above (maxm=30, maxiter=60 rather than maxm=40, maxiter=200):
+    the v3 C++ backend is ~2.5-3x slower than pyitensor at matched
+    parameters (confirmed independently), so this uses a smaller
+    configuration, cross-checked directly against pyitensor at the same
+    parameters in test_itensor_version3_matches_python_backend below."""
+    ic, _ = _converged_uniform_chain(n_uc, maxm=30, maxiter=60, etol=1e-9,
+                                      itensor_version=3)
+    assert ic.e0 == pytest.approx(EXACT_HEISENBERG_DENSITY, abs=1e-3)
+
+
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="requires the compiled mpscpp3 (ITensor v3) extension")
+def test_itensor_version3_matches_python_backend():
+    """Cross-backend agreement at identical (maxm, maxiter, etol, niter):
+    mpscpp3/chain_session.h's Chain::idmrg_ground_state is a line-by-line
+    port of pyitensor/idmrg.py's own idmrg_ground_state, so the two should
+    land on the same truncated-bond-dimension energy density, not just
+    agree in the maxm->infinity limit. Confirmed directly to agree to
+    ~1e-8 (well inside the 1e-6 tolerance here) and to be stable run over
+    run to ~1e-8 despite iDMRG's unseeded random starting MPS."""
+    ic_py, _ = _converged_uniform_chain(2, maxm=30, maxiter=60, etol=1e-9,
+                                         itensor_version="python")
+    ic_v3, _ = _converged_uniform_chain(2, maxm=30, maxiter=60, etol=1e-9,
+                                         itensor_version=3)
+    assert ic_v3.e0 == pytest.approx(ic_py.e0, abs=1e-6)
+
+
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="requires the compiled mpscpp3 (ITensor v3) extension")
+def test_itensor_version3_vev_and_correlator_not_implemented():
+    """The v3 C++ backend has no static-correlator machinery yet (see
+    Infinite_Many_Body_Chain.gs_energy's own comment) -- vev/correlator
+    must raise a clear NotImplementedError rather than silently misusing
+    a stale/absent self._result."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
+    ic.set_hamiltonian(h)
+    with pytest.raises(NotImplementedError):
+        ic.vev("Sz", 0)
+    with pytest.raises(NotImplementedError):
+        ic.correlator("Sz", 0, "Sz", 1)
 
 
 def test_l_and_r_in_same_term_rejected():
