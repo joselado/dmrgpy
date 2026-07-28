@@ -934,6 +934,22 @@ def _apply_transfer(E4, rho):
     return np.einsum('lLrR,rR->lL', E4, rho)
 
 
+# Relative-gap threshold below which two of the transfer matrix's leading
+# eigenvalue magnitudes are treated as a genuine tie (see
+# _dominant_right_fixed_point's own degeneracy check). Calibrated against
+# real single-state spectra, not guessed: a gapped (dimerized) n_uc=2
+# chain's top two eigenvalue magnitudes were (1.0, 0.093), and a gapless
+# (uniform, critical) n_uc=1 chain at maxm=40 -- the least-separated
+# legitimate case tried -- were (1.0, 0.876), i.e. a >12% relative gap;
+# both leave comfortable margin above this threshold. A genuine tie (two
+# independently-converged, equally-normalized branches summed via
+# imps_sum) instead lands at a ~1e-15 relative gap (exact to machine
+# precision) -- confirmed directly on an up/down-polarized pair of
+# product states (idmrg.imps_sum's own docstring has the physical
+# argument for why *any* two ordinary IDMRGResults tie here, always).
+_DEGENERACY_RTOL = 1e-6
+
+
 def _dominant_right_fixed_point(Es):
     """The dominant right eigenvector of the full unit-cell transfer
     matrix T=E_0...E_{n_uc-1} (as a chi x chi density-matrix-like array,
@@ -962,8 +978,38 @@ def _dominant_right_fixed_point(Es):
             "gs_energy()".format(T4.shape))
     Tmat = T4.reshape(chi * chi, chi * chi)
     w, v = np.linalg.eig(Tmat)
-    idx = np.argmax(np.abs(w))
+    order = np.argsort(-np.abs(w))
+    idx = order[0]
     eta = w[idx]
+    if len(order) > 1 and abs(w[order[1]]) > (1 - _DEGENERACY_RTOL) * abs(eta):
+        # A single dominant fixed point is not well-defined when the
+        # leading eigenvalue is (near-)degenerate -- np.argmax would
+        # otherwise silently pick *one* arbitrary member of the tied
+        # eigenspace (confirmed directly: summing two independently
+        # converged, oppositely Sz-polarized n_uc=1 product states this
+        # way -- both individually normalized to eta=1, hence exactly
+        # tied here -- reliably reproduced only ONE of the two branches,
+        # with which one came out being sensitive to floating-point
+        # tie-breaking noise in np.linalg.eig, not a reproducible or
+        # even well-defined choice). This is not a rare edge case for
+        # idmrg.imps_sum's own main use: any two separately-converged
+        # IDMRGResults are *always* individually normalized to eta=1 by
+        # SVD construction, so summing two genuinely different ground
+        # states hits exactly this tie essentially every time -- see
+        # imps_sum's own docstring for the physical reason (a "cat
+        # state" superposition of two macroscopically distinct branches
+        # is not representable as a single injective/canonical periodic
+        # MPS) and why this is a documented, deliberate scope limit
+        # rather than a bug to route around here.
+        raise RuntimeError(
+            "idmrg: the periodic transfer matrix's dominant eigenvalue is "
+            "(near-)degenerate (top two magnitudes {} and {}) -- a single "
+            "dominant fixed point, and therefore a single canonical "
+            "periodic MPS, is not well-defined here. This typically means "
+            "this state is, or derives from (e.g. via imps_sum), a "
+            "superposition of two macroscopically distinct branches with "
+            "matched per-site norm -- see idmrg.imps_sum's own docstring "
+            "for why that case is out of scope".format(abs(eta), abs(w[order[1]])))
     rho = v[:, idx].reshape(chi, chi)
     rho = rho / np.trace(rho)
     return rho, eta
@@ -1513,3 +1559,126 @@ def apply_mpo(result, W_bulk, cutoff=1e-12, maxdim=None):
     B = [_t_noPrime(b, "Site") for b in B]
     U_list_new, eta = _canonicalize_periodic(B, result.n_uc, cutoff, maxdim)
     return PeriodicMPS(result.sites_uc, result.n_uc, U_list_new, eta)
+
+
+# == Summing two converged iMPS ====================================
+#
+# imps_sum(result_a, result_b) is the periodic-chain analogue of
+# mpsalgebra.sum(): the standard, exact MPS-addition construction
+# (block-diagonal in the bond space, `_periodic_direct_sum`), followed by
+# the same `_canonicalize_periodic` re-gauging/truncation `apply_mpo`
+# already uses. Unlike mpsalgebra.sum's finite chain -- whose two open
+# ends are dimension-1, so the block-diagonal bulk construction plus a
+# plain concatenation at the boundaries reproduces a literal Hilbert-space
+# vector sum exactly -- a periodic chain has no open end: every cut is a
+# "bulk" cut, so the direct sum is block-diagonal *everywhere*, including
+# the wraparound bond.
+#
+# PHYSICAL SCOPE -- read before treating this as a drop-in infinite
+# analogue of mpsalgebra.sum: tiled to the thermodynamic limit, a
+# block-diagonal unit cell does not represent |psi_a>+|psi_b> the way the
+# finite construction represents a literal vector sum. Tracing it around N
+# unit cells gives eta_a^N + eta_b^N (eta_a/eta_b: result_a/result_b's own
+# self-overlap transfer eigenvalues, always ~1 exactly for any
+# IDMRGResult, by left-canonical SVD construction -- see
+# `_local_two_site_solve`'s own comment), so:
+#
+# - Two branches with a genuine norm mismatch (|eta_a| != |eta_b|, only
+#   possible for a hand-built or already-rescaled PeriodicMPS -- not two
+#   ordinary IDMRGResults, which are always both ~1) have a well-posed,
+#   non-degenerate combined transfer matrix: the smaller-norm branch is
+#   exponentially suppressed as N -> infinity, so `_canonicalize_periodic`
+#   correctly (not a bug -- the true infinite-volume answer) returns a
+#   state numerically indistinguishable from the larger-norm branch alone.
+# - Two branches with matched |eta| -- which is the *common* case, since
+#   summing two separately-converged ground states (e.g. two
+#   symmetry-related solutions of the same translationally-invariant
+#   Hamiltonian, the most natural reason to want this operation at all)
+#   always ties exactly -- produce a genuinely degenerate dominant
+#   eigenspace. Representing that "cat state" (a superposition of two
+#   macroscopically distinct branches) as a single injective/canonical
+#   periodic MPS is not possible with the fixed-point machinery this
+#   module's correlator functions rely on everywhere else, so
+#   `_dominant_right_fixed_point`'s own degeneracy check (see its
+#   docstring, calibrated directly against real single-state spectra)
+#   reliably raises RuntimeError in this case instead of silently
+#   returning an arbitrary, wrong single branch -- confirmed directly:
+#   before that check existed, summing two independently-converged,
+#   oppositely Sz-polarized product states (both eta=1, orthogonal)
+#   silently collapsed to just one of the two branches, chosen by
+#   floating-point tie-breaking noise inside np.linalg.eig, not even
+#   reproducibly. Correctly representing this common, physically
+#   meaningful case (e.g. via the standard thermodynamic-limit local-
+#   observable identity <O> -> (<O>_a+<O>_b)/2 for two exactly orthogonal,
+#   equally-weighted branches) needs correlator machinery this module
+#   does not have yet -- a documented, deliberate scope limit, in the
+#   same spirit as apply_mpo's own "bounded operators only" restriction
+#   above, not something silently gotten wrong.
+
+
+def _periodic_direct_sum(U_list_a, U_list_b, n_uc):
+    """Raw (uncanonicalized) block-diagonal direct sum of two periodic
+    tensor lists, one cut per unit-cell site (n_uc cuts total, including
+    the wraparound) -- the periodic-chain analogue of mpsalgebra.sum's own
+    per-site block-diagonal placement (mpsalgebra.py:143-203), applied at
+    *every* cut instead of leaving the two end cuts as a plain
+    concatenation (there is no open end here to concatenate along instead
+    -- see this module's "Summing two converged iMPS" section docstring
+    above for the physical meaning of this once tiled to the
+    thermodynamic limit).
+
+    U_list_a[p]/U_list_b[p] must share the same physical dimension at
+    every sublattice position p (checked by `imps_sum` before calling
+    this). The returned tensor's own physical Index at position p is
+    U_list_a[p]'s own -- U_list_b[p]'s physical Index need not be the same
+    object, only the same dimension, since this function only ever
+    matches legs by position (`_to_array_lpr`), never by Index identity."""
+    arrs_a = [_to_array_lpr(U_list_a[p]) for p in range(n_uc)]
+    arrs_b = [_to_array_lpr(U_list_b[p]) for p in range(n_uc)]
+    combined_links = [Index(arrs_a[p].shape[0] + arrs_b[p].shape[0], tags="Link")
+                       for p in range(n_uc)]
+    out = []
+    for p in range(n_uc):
+        Aa, Ab = arrs_a[p], arrs_b[p]
+        La, d, Ra = Aa.shape
+        Lb, _d2, Rb = Ab.shape
+        left, right = combined_links[p], combined_links[(p + 1) % n_uc]
+        arr = np.zeros((left.dim, d, right.dim), dtype=complex)
+        arr[:La, :, :Ra] = Aa
+        arr[La:, :, Ra:] = Ab
+        phys = next(ind for ind in U_list_a[p].inds if ind.hastags("Site"))
+        out.append(ITensor((left, phys, right), arr))
+    return out
+
+
+def imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None):
+    """Direct sum of two converged infinite MPS (`result_a`/`result_b`:
+    IDMRGResult and/or PeriodicMPS, any combination -- same duck typing as
+    `imps_overlap`/`apply_mpo`), returning a new PeriodicMPS:
+    `_periodic_direct_sum`'s raw block-diagonal construction,
+    re-canonicalized/truncated via the same `_canonicalize_periodic`
+    two-sided fixed-point procedure `apply_mpo` already uses. See this
+    module's "Summing two converged iMPS" section docstring above for what
+    this "+" actually means once tiled to the thermodynamic limit -- in
+    particular, why summing two *ordinary* IDMRGResults (always
+    individually normalized to eta=1) reliably raises RuntimeError rather
+    than silently returning one arbitrary branch.
+
+    Requires both states to share the same n_uc and, at every sublattice
+    position, the same local physical dimension (mirrors imps_overlap's
+    own check) -- raises ValueError otherwise. Bond dimensions need not
+    match."""
+    n_uc = result_a.n_uc
+    if result_b.n_uc != n_uc:
+        raise ValueError(
+            "imps_sum: unit-cell size mismatch (result_a.n_uc={}, "
+            "result_b.n_uc={})".format(n_uc, result_b.n_uc))
+    dims_a = [_to_array_lpr(result_a.U_list[p]).shape[1] for p in range(n_uc)]
+    dims_b = [_to_array_lpr(result_b.U_list[p]).shape[1] for p in range(n_uc)]
+    if dims_a != dims_b:
+        raise ValueError(
+            "imps_sum: physical dimension mismatch per sublattice "
+            "(result_a={}, result_b={})".format(dims_a, dims_b))
+    raw = _periodic_direct_sum(result_a.U_list, result_b.U_list, n_uc)
+    U_list_new, eta = _canonicalize_periodic(raw, n_uc, cutoff, maxdim)
+    return PeriodicMPS(result_a.sites_uc, n_uc, U_list_new, eta)

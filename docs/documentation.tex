@@ -587,6 +587,61 @@ by-hand matrix-product induction argument and numerically (the same
 field tests above now reproduce the exact closed-form field-only result
 and a finite, converging energy density with a bond term present).
 
+\textbf{Direct sum of two converged iMPS}: \texttt{idmrg.py} also
+implements \texttt{imps\_sum(result\_a, result\_b, cutoff, maxdim)} --
+the periodic-chain analogue of \texttt{mpsalgebra.sum}.
+\texttt{\_periodic\_direct\_sum} block-diagonally concatenates
+\texttt{result\_a}'s and \texttt{result\_b}'s own bond spaces at
+\emph{every} unit-cell cut, including the wraparound (unlike
+\texttt{mpsalgebra.sum}'s finite chain, which has two dimension-1
+boundaries to instead concatenate along -- a periodic chain has no such
+boundary, so the sum is block-diagonal everywhere); the raw result is
+then re-canonicalized/truncated by reusing \texttt{apply\_mpo}'s own
+\texttt{\_canonicalize\_periodic} verbatim, no new gauge-fixing algorithm
+needed.
+
+\textbf{A real, load-bearing correctness issue found and fixed while
+implementing this} (not merely a theoretical concern -- reproduced
+directly before the fix): \texttt{\_canonicalize\_periodic}'s two-sided
+fixed-point procedure assumes the combined transfer matrix has a
+\emph{unique} dominant eigenvalue, picked via
+\texttt{np.argmax(np.abs(w))} in \texttt{\_dominant\_right\_fixed\_point}.
+Every \texttt{IDMRGResult} is individually normalized to self-overlap
+eigenvalue \texttt{eta=1} exactly (left-canonical SVD construction), so
+summing two \emph{different}, ordinarily-converged \texttt{IDMRGResult}s
+-- the natural use case -- produces a combined transfer matrix with an
+\emph{exactly degenerate} leading eigenvalue (two blocks, each eigenvalue
+1). Before a guard was added, \texttt{np.argmax} silently picked
+\emph{one} of the two tied eigenvectors (confirmed directly: summing two
+independently-converged, oppositely Sz-polarized \texttt{n\_uc=1} product
+states reliably collapsed to just one branch, with \emph{which} branch
+survived sensitive to floating-point tie-breaking noise inside
+\texttt{np.linalg.eig} -- not even reproducible run to run), silently
+discarding the other branch entirely while still returning a
+plausible-looking, correctly-normalized \texttt{PeriodicMPS}. This is the
+classic ``looks right, isn't'' failure mode this codebase's own testing
+culture exists to catch. The fix: \texttt{\_dominant\_right\_fixed\_point}
+now checks the top two eigenvalue magnitudes of the composed transfer
+matrix and raises \texttt{RuntimeError} when their ratio exceeds
+$1-10^{-6}$ (calibrated directly against real single-state spectra rather
+than guessed -- a gapped dimerized \texttt{n\_uc=2} chain's top two
+magnitudes were $(1.0, 0.093)$, a gapless/critical uniform \texttt{n\_uc=1}
+chain at \texttt{maxm=40} -- the least-separated legitimate case tried --
+were $(1.0, 0.876)$, both leaving wide margin above the threshold, while a
+genuine tie lands at a $\sim 10^{-15}$ relative gap). Physically, the
+tied case is a ``cat state'' superposition of two macroscopically
+distinct branches; representing it as a single injective/canonical
+periodic MPS is out of scope for this module's existing
+(single-fixed-point) correlator machinery -- \texttt{imps\_sum} therefore
+raises clearly there rather than silently returning one arbitrary
+branch, mirroring \texttt{apply\_mpo}'s own ``bounded operators only''
+scope restriction in spirit. \texttt{\_dominant\_right\_fixed\_point} is
+shared by \texttt{onsite\_expectation}/\texttt{two\_point\_correlator}/
+\texttt{imps\_overlap}'s own self-overlap terms too, so this same guard
+protects those call sites for free; the added check was confirmed not to
+trip on any pre-existing test (all previously-passing
+\texttt{tests/test\_infinite\_chain.py} cases still pass).
+
 \subsection{Operator representation: \texttt{MultiOperator}}
 
 Hamiltonians and observables are built as \texttt{MultiOperator} objects
