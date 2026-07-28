@@ -502,25 +502,38 @@ sensitive to floating-point tie-breaking noise inside `np.linalg.eig` —
 not even reproducible run to run), silently discarding the other branch
 entirely while still returning a plausible-looking, correctly-normalized
 `PeriodicMPS`. This is the classic "looks right, isn't" failure mode this
-codebase's own testing culture exists to catch. The fix:
-`_dominant_right_fixed_point` now checks the top two eigenvalue
+codebase's own testing culture exists to catch. The fix: a shared helper,
+`_check_dominant_eigenvalue_nondegenerate`, checks the top two eigenvalue
 magnitudes of the composed transfer matrix and raises `RuntimeError` when
-their ratio exceeds `1 - 1e-6` (calibrated directly against real
-single-state spectra rather than guessed — a gapped dimerized `n_uc=2`
-chain's top two magnitudes were `(1.0, 0.093)`, a gapless/critical
-uniform `n_uc=1` chain at `maxm=40` — the least-separated legitimate case
-tried — were `(1.0, 0.876)`, both leaving wide margin above the
-threshold, while a genuine tie lands at a `~1e-15` relative gap).
-Physically, the tied case is a "cat state" superposition of two
-macroscopically distinct branches; representing it as a single
-injective/canonical periodic MPS is out of scope for this module's
-existing (single-fixed-point) correlator machinery — `imps_sum` therefore
-raises clearly there rather than silently returning one arbitrary branch,
-mirroring `apply_mpo`'s own "bounded operators only" scope restriction in
-spirit. `_dominant_right_fixed_point` is shared by
-`onsite_expectation`/`two_point_correlator`/`imps_overlap`'s own
-self-overlap terms too, so this same guard protects those call sites for
-free; the added check was confirmed not to trip on any pre-existing test
+their ratio exceeds `1 - 1e-9`. This threshold is set far tighter than
+the loosest value that would have passed every legitimate case tried —
+the genuine tie this check exists to catch lands at a `~1e-15` relative
+gap (exact to machine precision), so `1e-9` still rejects it with 6
+orders of magnitude to spare, while leaving a wide safety margin below:
+a gapped dimerized `n_uc=2` chain's top two magnitudes were `(1.0,
+0.093)`; a gapless/critical uniform `n_uc=1` chain showed a clear
+maxm-dependent narrowing (top-two gap `0.376` at `maxm=40`, `0.116` at
+`maxm=60`, `0.160` at `maxm=80` — not perfectly monotonic, since `n_uc=1`
+has its own known convergence limitation, see above, but never close to
+tight) — a threshold merely "loose enough for today's test suite" would
+risk a *future* false positive on an ordinary, non-degenerate correlator
+call at a larger `maxm` a user might reasonably pick for better accuracy
+near criticality, so `1e-9` was chosen deliberately over a looser value
+like the originally-tried `1e-6`. Physically, the tied case is a "cat
+state" superposition of two macroscopically distinct branches;
+representing it as a single injective/canonical periodic MPS is out of
+scope for this module's existing (single-fixed-point) correlator
+machinery — `imps_sum` therefore raises clearly there rather than
+silently returning one arbitrary branch, mirroring `apply_mpo`'s own
+"bounded operators only" scope restriction in spirit. The shared helper
+is used by `_dominant_right_fixed_point`, `_dominant_left_fixed_point`,
+and `_dominant_eigenvalue_mixed` (the mixed-transfer-matrix eigenvalue
+`imps_overlap`'s own cross term uses) alike — all three previously used
+an unguarded `np.argmax`, the identical latent bug, just not yet exercised
+by an existing caller for the left/mixed cases — so this same guard now
+protects `onsite_expectation`/`two_point_correlator`/`imps_overlap` for
+free too; confirmed not to trip on any pre-existing test or on
+`imps_overlap`'s own realistic (orthogonal and gauge-comparison) cases
 (all previously-passing `tests/test_infinite_chain.py` cases still pass).
 
 ### 4.2 Operator representation: `MultiOperator`
