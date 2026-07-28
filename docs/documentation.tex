@@ -282,6 +282,103 @@ cross-backend agreement. ED (\texttt{pyboson/boson.py::BosonChain})
 always builds the exact requested per-site dimension regardless of
 backend.
 
+\subsection{Infinite chains (\texttt{infinitechain.py}, \texttt{pyitensor/idmrg.py})}
+
+\texttt{Infinite\_Many\_Body\_Chain}/\texttt{Infinite\_Spin\_Chain}
+(\texttt{infinitechain.py}) are a deliberately \textbf{independent}
+object, not a \texttt{Many\_Body\_Chain} subclass:
+\texttt{Many\_Body\_Chain}'s whole design (mode dispatch between
+DMRG/ED, a fixed \texttt{self.ns}-length site list,
+KPM/dynamics/entanglement/excited-states machinery) assumes a
+\emph{finite} chain throughout, and none of that has any meaning for a
+translationally-invariant, infinite unit-cell chain. Only
+\texttt{itensor\_version="python"} is supported (constructing anything
+else raises \texttt{NotImplementedError}) -- infinite DMRG (iDMRG) has
+no C++/Julia backend yet. The public surface is deliberately narrow:
+\texttt{set\_hamiltonian}, \texttt{gs\_energy} (energy \emph{per site},
+the physically meaningful quantity for an infinite system), and static
+\texttt{vev}/\texttt{correlator} -- no excited states, no dynamics, no
+entanglement/entropy in v1.
+
+The Hamiltonian is built from
+\texttt{SxL[i]}/\texttt{SxC[i]}/\texttt{SxR[i]}-suffixed operators
+(previous/central/next unit cell, \texttt{i=0..n\_uc-1}) rather than
+absolute site indices; \texttt{\_canonicalize\_hamiltonian} validates
+every term touches at most two adjacent cells and shifts away the
+\texttt{L} suffix (\texttt{L}$\to$\texttt{C}, \texttt{C}$\to$\texttt{R})
+before storing, so the stored Hamiltonian is uniformly "intra-cell
+\texttt{C} terms" + "\texttt{C}-to-\texttt{R} inter-cell terms", each
+physical bond attributed to exactly one cell.
+
+\texttt{pyitensor/idmrg.py} implements the actual growing/infinite-size
+algorithm (White 1992, generalized to an \texttt{n\_uc}-site unit cell
+per McCulloch 2008): \texttt{\_build\_automaton} builds the periodic
+per-sublattice MPO tensor directly as a hand-rolled finite-state
+automaton (not extracted from a compressed finite reference system -- an
+earlier design that was tried and abandoned, see the module's own
+docstring for the two independent bugs that approach hit), then
+\texttt{idmrg\_ground\_state} grows two environments \texttt{HL}/\texttt{HR}
+from \texttt{HL=HR=None}, one unit cell at a time, reusing
+\texttt{dmrg.py}'s own \texttt{\_lanczos\_ground\_state} and
+\texttt{kernels.make\_matvec} for each micro-step's local 2-site solve
+(no separate Lanczos implementation). Static correlators are
+reconstructed after convergence from the last macro-iteration's own
+per-sublattice left-canonical tensors via the standard infinite-MPS
+transfer-matrix formalism (dominant left/right fixed points of the
+per-unit-cell transfer operator).
+
+\textbf{Currently limited to \texttt{n\_uc<=2}} (enforced at
+\texttt{Infinite\_Many\_Body\_Chain} construction) -- the micro-step
+loop's sublattice pairing (\texttt{p\_L=mstep},
+\texttt{p\_R=n\_uc-1-mstep}) only produces two genuinely \emph{adjacent}
+active sites for \texttt{n\_uc} in $\{1, 2\}$; for \texttt{n\_uc>=3} an
+intermediate micro-step's two active sites are several real,
+not-yet-inserted sites apart, and \texttt{\_build\_automaton}'s own
+per-sublattice pending-channel content differs between them (not just
+its count), so there is no way to even wire them together correctly
+without a genuine redesign of the growth scheme -- flagged as a known
+follow-up rather than attempted.
+
+\textbf{A confirmed, fixed bug worth knowing about if this module is
+touched again}: \texttt{idmrg\_ground\_state} re-mints a fresh mpo-axis
+Index for \texttt{HL}'s and \texttt{HR}'s own environment tensor at the
+end of \emph{every} micro-step, rather than reusing whatever Index
+\texttt{\_build\_automaton} happened to label that channel space with.
+This is required because \texttt{\_build\_automaton}'s
+\texttt{boundary\_idx} pool has only \texttt{n\_uc} distinct Index
+objects total, reused verbatim every time a given sublattice position
+comes up again (every macro-iteration past the first) -- left
+un-broken, \texttt{HL}'s and \texttt{HR}'s own mpo axes can end up being
+the \emph{same} Index object (guaranteed for \texttt{n\_uc=1}, where a
+single sublattice's left and right automaton legs are literally
+identical), corrupting the effective Hamiltonian from the second
+macro-iteration onward once both environments are non-trivial and used
+together in the same local 2-site solve. Confirmed directly by
+extracting the dense effective Hamiltonian at macro-iteration 2 of a
+uniform \texttt{n\_uc=1} Heisenberg chain and finding its full
+eigenvalue spectrum did not match exact 6-site ED at all, while
+macro-iteration 1's spectrum matched to machine precision -- the same
+self-referencing-Index hazard already seen once in this module
+(\texttt{\_project\_channel}'s own docstring), here manifesting across
+the growth loop's iterations rather than within a single tensor.
+\texttt{idmrg.py}'s module docstring and the inline comments in
+\texttt{idmrg\_ground\_state}/\texttt{\_relabel\_pos} have the full
+derivation.
+
+A separate, milder issue in the same neighborhood:
+\texttt{U\_list[0]}'s own left bond and \texttt{U\_list[n\_uc-1]}'s own
+right bond are, in a truly periodic MPS, the \emph{same} wraparound
+bond, but each is independently truncated by its own micro-step's SVD --
+nothing guarantees they come out numerically equal, and two independent
+SVDs occasionally round a borderline singular value across the
+\texttt{cutoff} threshold differently for what is conceptually one bond.
+\texttt{\_dominant\_right\_fixed\_point} (used by both
+\texttt{onsite\_expectation} and \texttt{two\_point\_correlator}) now
+raises a clear \texttt{RuntimeError} when this happens instead of a
+cryptic \texttt{reshape} crash; a smaller \texttt{maxm} that actually
+binds (forcing both bonds to the same truncated dimension) avoids it,
+see \texttt{tests/test\_infinite\_chain.py}'s own comment on this.
+
 \subsection{Operator representation: \texttt{MultiOperator}}
 
 Hamiltonians and observables are built as \texttt{MultiOperator} objects
@@ -1757,6 +1854,7 @@ Path & Contents \\
 \endhead
 \texttt{src/dmrgpy/} & the Python library \\
 \texttt{src/dmrgpy/manybodychain.py} & \texttt{Many\_Body\_Chain}, the shared base class \\
+\texttt{src/dmrgpy/infinitechain.py}, \texttt{pyitensor/idmrg.py} & \texttt{Infinite\_Many\_Body\_Chain} and infinite DMRG (iDMRG), pyitensor-only \\
 \texttt{src/dmrgpy/multioperator.py}, \texttt{multioperatortk/} & backend-agnostic operator representation \\
 \texttt{src/dmrgpy/mode.py}, \texttt{cppext.py} & DMRG/ED and backend dispatch \\
 \texttt{src/dmrgpy/mpscpp2/}, \texttt{mpscpp3/} & vendored ITensor C++ (v2, v3) + pybind11 bindings \\

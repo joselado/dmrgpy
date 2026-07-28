@@ -1749,4 +1749,99 @@ too, agreeing to within a few tens of percent at thresholds, consistent
 with the expected $\delta$-broadening/moment-truncation error on top of
 what the ED path already has.
 
+\section{Infinite chains (iDMRG)}
+
+Every method above works on a \emph{finite} chain of \texttt{n} sites.
+\texttt{Infinite\_Many\_Body\_Chain}/\texttt{Infinite\_Spin\_Chain}
+(\texttt{infinitechain.py}) instead describe a translationally-invariant
+chain that repeats a fixed-size \textbf{unit cell} forever in both
+directions, and solve it with infinite DMRG (iDMRG, White's growing
+algorithm generalized to a multi-site unit cell) rather than sweeping a
+fixed-length system. Currently limited to a 1- or 2-site unit cell
+(\texttt{n\_uc<=2}) and the pure-Python \texttt{pyitensor} backend -- a
+$>$2-site unit cell raises \texttt{NotImplementedError} at construction,
+see \texttt{pyitensor/idmrg.py}'s module docstring for why.
+
+\textbf{Building the Hamiltonian: \texttt{L}/\texttt{C}/\texttt{R}-suffixed
+operators.} Instead of one operator list per absolute site index, an
+infinite chain exposes each operator three times per unit-cell site
+\texttt{i} (\texttt{i=0..n\_uc-1}): \texttt{SxC[i]} (site \texttt{i} of
+the \emph{central} cell -- ordinary intra-cell use), \texttt{SxR[i]}
+(site \texttt{i} of the \emph{next} cell), and \texttt{SxL[i]} (site
+\texttt{i} of the \emph{previous} cell, provided purely so a coupling can
+be phrased in whichever direction reads most naturally). A term may
+touch at most two \emph{adjacent} unit cells (any subset of
+\texttt{\{L,C\}} or of \texttt{\{C,R\}}, never both \texttt{L} and
+\texttt{R} at once) -- \texttt{set\_hamiltonian} raises
+\texttt{ValueError} otherwise:
+
+\begin{lstlisting}
+from dmrgpy import infinitechain
+ic = infinitechain.Infinite_Spin_Chain(["1/2"])       # n_uc=1, uniform chain
+h = ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0] + ic.SzC[0]*ic.SzR[0]  # NN Heisenberg
+ic.set_hamiltonian(h)
+\end{lstlisting}
+
+A two-site unit cell can express a dimerized (alternating-bond) chain,
+and a coupling can skip over an intermediate site by reaching straight
+from \texttt{C} to \texttt{R}:
+
+\begin{lstlisting}
+ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+h = (1.0*(ic.SxC[0]*ic.SxC[1] + ic.SyC[0]*ic.SyC[1] + ic.SzC[0]*ic.SzC[1])   # strong intra-cell bond
+     + 0.4*(ic.SxC[1]*ic.SxR[0] + ic.SyC[1]*ic.SyR[0] + ic.SzC[1]*ic.SzR[0]))  # weak inter-cell bond
+ic.set_hamiltonian(h)
+\end{lstlisting}
+
+\textbf{Ground-state energy density.} Since the chain is infinite, the
+physically meaningful quantity is the energy \emph{per site}, not a
+total:
+
+\begin{lstlisting}
+density = ic.gs_energy()   # converged energy density (or the best value reached after ic.maxiter)
+ic.converged                # True iff the density stabilized below ic.etol
+\end{lstlisting}
+
+\texttt{ic.maxm}/\texttt{ic.cutoff} cap the bond dimension/SVD truncation
+exactly like a finite chain's \texttt{maxm}/\texttt{cutoff};
+\texttt{ic.maxiter}/\texttt{ic.etol} are iDMRG-specific: \texttt{maxiter}
+macro-iterations (each adds one full unit cell to each side) are run,
+stopping early once the energy-density finite difference between
+consecutive macro-iterations drops below \texttt{etol}. For a
+\emph{gapless} model (e.g.\ the uniform Heisenberg chain above) this
+finite-difference convergence is only power-law in the number of
+iterations at any fixed \texttt{maxm}, not exponential, so it may not
+trip \texttt{etol} within a practical \texttt{maxiter} even though the
+energy density itself is already accurate to several digits -- check the
+returned value directly rather than relying solely on
+\texttt{ic.converged}. A \emph{gapped} model (e.g.\ the dimerized chain
+above, or any chain with \texttt{j\_weak} bonds well below the uniform
+point) has a finite correlation length and converges both faster and
+more reliably.
+
+\textbf{Static correlators.} After \texttt{gs\_energy()} (called
+automatically by \texttt{vev}/\texttt{correlator} if not already run),
+one- and two-point expectation values of the converged infinite chain are
+available via the standard infinite-MPS transfer-matrix formalism:
+
+\begin{lstlisting}
+ic.vev("Sz", 0)                    # <Sz> at site 0 of the unit cell
+ic.correlator("Sz", 0, "Sz", r)    # <Sz(0) Sz(0+r)>, r measured in physical sites, r>=0
+\end{lstlisting}
+
+Because these are reconstructed \emph{after} convergence from the last
+macro-iteration's own tensors (a good, but not exact, stand-in for a
+truly periodic MPS unit cell -- the growing algorithm never explicitly
+re-canonicalizes into one), correlators converge more slowly than the
+energy density itself as a function of \texttt{maxiter} at fixed
+\texttt{maxm} -- a model-agnostic self-consistency check that always
+holds exactly for a truly periodic unit cell, $\langle H_{uc}\rangle$
+(the sum of every bond's correlator inside one unit cell) equals
+\texttt{n\_uc * density}, is a useful way to judge whether
+\texttt{maxiter} is large enough for a given calculation.
+
+Excited states, dynamics, and entanglement/entropy are not implemented
+for infinite chains yet -- only ground-state energy density and static
+correlators.
+
 \end{document}

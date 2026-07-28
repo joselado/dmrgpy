@@ -211,6 +211,88 @@ default) or `"python"` for cross-backend agreement. ED
 (`pyboson/boson.py::BosonChain`) always builds the exact requested
 per-site dimension regardless of backend.
 
+### 4.1b Infinite chains (`infinitechain.py`, `pyitensor/idmrg.py`)
+
+`Infinite_Many_Body_Chain`/`Infinite_Spin_Chain` (`infinitechain.py`) are
+a deliberately **independent** object, not a `Many_Body_Chain` subclass:
+`Many_Body_Chain`'s whole design (mode dispatch between DMRG/ED, a fixed
+`self.ns`-length site list, KPM/dynamics/entanglement/excited-states
+machinery) assumes a *finite* chain throughout, and none of that has any
+meaning for a translationally-invariant, infinite unit-cell chain. Only
+`itensor_version="python"` is supported (constructing anything else
+raises `NotImplementedError`) — infinite DMRG (iDMRG) has no C++/Julia
+backend yet. The public surface is deliberately narrow: `set_hamiltonian`,
+`gs_energy` (energy *per site*, the physically meaningful quantity for an
+infinite system), and static `vev`/`correlator` — no excited states, no
+dynamics, no entanglement/entropy in v1.
+
+The Hamiltonian is built from `SxL[i]`/`SxC[i]`/`SxR[i]`-suffixed
+operators (previous/central/next unit cell, `i=0..n_uc-1`) rather than
+absolute site indices; `_canonicalize_hamiltonian` validates every term
+touches at most two adjacent cells and shifts away the `L` suffix (`L→C`,
+`C→R`) before storing, so the stored Hamiltonian is uniformly "intra-cell
+`C` terms" + "`C`-to-`R` inter-cell terms", each physical bond attributed
+to exactly one cell.
+
+`pyitensor/idmrg.py` implements the actual growing/infinite-size
+algorithm (White 1992, generalized to an `n_uc`-site unit cell per
+McCulloch 2008): `_build_automaton` builds the periodic per-sublattice
+MPO tensor directly as a hand-rolled finite-state automaton (not
+extracted from a compressed finite reference system — an earlier design
+that was tried and abandoned, see the module's own docstring for the two
+independent bugs that approach hit), then `idmrg_ground_state` grows two
+environments `HL`/`HR` from `HL=HR=None`, one unit cell at a time,
+reusing `dmrg.py`'s own `_lanczos_ground_state` and `kernels.make_matvec`
+for each micro-step's local 2-site solve (no separate Lanczos
+implementation). Static correlators are reconstructed after convergence
+from the last macro-iteration's own per-sublattice left-canonical
+tensors via the standard infinite-MPS transfer-matrix formalism (dominant
+left/right fixed points of the per-unit-cell transfer operator).
+
+**Currently limited to `n_uc<=2`** (enforced at `Infinite_Many_Body_Chain`
+construction) — the micro-step loop's sublattice pairing
+(`p_L=mstep`, `p_R=n_uc-1-mstep`) only produces two genuinely *adjacent*
+active sites for `n_uc` in `{1, 2}`; for `n_uc>=3` an intermediate
+micro-step's two active sites are several real, not-yet-inserted sites
+apart, and `_build_automaton`'s own per-sublattice pending-channel
+content differs between them (not just its count), so there is no way to
+even wire them together correctly without a genuine redesign of the
+growth scheme — flagged as a known follow-up rather than attempted.
+
+**A confirmed, fixed bug worth knowing about if this module is touched
+again**: `idmrg_ground_state` re-mints a fresh mpo-axis Index for `HL`'s
+and `HR`'s own environment tensor at the end of *every* micro-step,
+rather than reusing whatever Index `_build_automaton` happened to label
+that channel space with. This is required because `_build_automaton`'s
+`boundary_idx` pool has only `n_uc` distinct Index objects total, reused
+verbatim every time a given sublattice position comes up again (every
+macro-iteration past the first) — left un-broken, `HL`'s and `HR`'s own
+mpo axes can end up being the *same* Index object (guaranteed for
+`n_uc=1`, where a single sublattice's left and right automaton legs are
+literally identical), corrupting the effective Hamiltonian from the
+second macro-iteration onward once both environments are non-trivial and
+used together in the same local 2-site solve. Confirmed directly by
+extracting the dense effective Hamiltonian at macro-iteration 2 of a
+uniform `n_uc=1` Heisenberg chain and finding its full eigenvalue
+spectrum did not match exact 6-site ED at all, while macro-iteration 1's
+spectrum matched to machine precision — the same self-referencing-Index
+hazard already seen once in this module (`_project_channel`'s own
+docstring), here manifesting across the growth loop's iterations rather
+than within a single tensor. `idmrg.py`'s module docstring and the inline
+comments in `idmrg_ground_state`/`_relabel_pos` have the full derivation.
+
+A separate, milder issue in the same neighborhood: `U_list[0]`'s own left
+bond and `U_list[n_uc-1]`'s own right bond are, in a truly periodic MPS,
+the *same* wraparound bond, but each is independently truncated by its
+own micro-step's SVD — nothing guarantees they come out numerically
+equal, and two independent SVDs occasionally round a borderline singular
+value across the `cutoff` threshold differently for what is conceptually
+one bond. `_dominant_right_fixed_point` (used by both `onsite_expectation`
+and `two_point_correlator`) now raises a clear `RuntimeError` when this
+happens instead of a cryptic `reshape` crash; a smaller `maxm` that
+actually binds (forcing both bonds to the same truncated dimension)
+avoids it, see `tests/test_infinite_chain.py`'s own comment on this.
+
 ### 4.2 Operator representation: `MultiOperator`
 
 Hamiltonians and observables are built as `MultiOperator` objects
@@ -1461,6 +1543,7 @@ bookkeeping fixes referenced above -- it was ~13x before them).
 |---|---|
 | `src/dmrgpy/` | the Python library |
 | `src/dmrgpy/manybodychain.py` | `Many_Body_Chain`, the shared base class |
+| `src/dmrgpy/infinitechain.py`, `pyitensor/idmrg.py` | `Infinite_Many_Body_Chain` and infinite DMRG (iDMRG), pyitensor-only |
 | `src/dmrgpy/multioperator.py`, `multioperatortk/` | backend-agnostic operator representation |
 | `src/dmrgpy/mode.py`, `cppext.py` | DMRG/ED and backend dispatch |
 | `src/dmrgpy/mpscpp2/`, `mpscpp3/` | vendored ITensor C++ (v2, v3) + pybind11 bindings |
