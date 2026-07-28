@@ -90,6 +90,66 @@ struct NHDMRGResult
     MPS psil, psir;
     };
 
+// C++ port of pyitensor/idmrg.py's IDMRGResult -- see
+// Chain::idmrg_ground_state's own doc comment for the algorithm and the
+// scope this port covers (ground-state energy density only for now,
+// static correlators not yet ported).
+struct IdmrgResult
+    {
+    double density = 0.0; // converged (or best-so-far) energy per site
+    bool converged = false;
+    int niter_done = 0; // macro-iterations actually run
+    };
+
+// A finite-state-automaton "channel" at one sublattice position, in the
+// exact sense idmrg.py's own _build_automaton docstring documents: "S"
+// (start, kind=0) self-loops via Id and is the only channel a new 2-site
+// term may start from; "F" (accumulator, kind=1) self-loops via Id
+// (picking up onsite terms) and receives completed pending channels;
+// kind=2 is a "pending" channel for a still-open 2-site term, identified
+// by (bond_index, r) exactly as in the Python port.
+struct IdmrgChan
+    {
+    int kind; // 0=S, 1=F, 2=pending
+    int bond_index; // valid iff kind==2
+    int r; // valid iff kind==2
+    };
+
+// A classified 2-site term (idmrg.py's "bonds" dict) -- mat_a/mat_b are
+// dense, row-major (d*d)-sized operator matrices in the same (in,out)
+// convention as ITensor's own SiteSet::op() (see idmrg_op_dense).
+// Fermionic terms (carry_ferm) are not supported by this C++ port yet
+// (always false here) -- see Chain::idmrg_ground_state's own comment.
+struct IdmrgBond
+    {
+    int rel_a, rel_b;
+    std::vector<Cplx> mat_a, mat_b;
+    bool carry_ferm;
+    Cplx coef;
+    };
+
+// A classified 1-site (onsite) term (idmrg.py's "onsite" list entries).
+struct IdmrgOnsite
+    {
+    int rel;
+    Cplx coef;
+    std::vector<Cplx> mat;
+    };
+
+// The precomputed, dense transition-matrix content for one sublattice
+// position p's automaton tensor -- idmrg.py's own W_bulk[p], but kept as
+// plain data (never a persistent ITensor, see idmrg_ground_state's own
+// comment for why) so a fresh ITensor with fresh Index objects can be
+// built from it on demand. flat[(li*right_n+ri)*d*d + s_in*d + s_out] is
+// the (s_in,s_out) matrix element of the li->ri channel transition (all
+// zero, i.e. absent from the automaton, unless idmrg_build_row's own
+// transition rules set it).
+struct IdmrgAutomatonRow
+    {
+    int p, d, left_n, right_n;
+    std::vector<Cplx> flat;
+    };
+
 class Chain
     {
     public:
@@ -1866,6 +1926,211 @@ class Chain
         return mu;
         }
 
+    // Infinite DMRG (iDMRG): C++ port of pyitensor/idmrg.py's growing/
+    // infinite-size algorithm (White 1992, generalized to an n_uc-site
+    // unit cell per McCulloch 2008) -- see that module's own docstring
+    // for the full derivation and bug history; this is a line-for-line
+    // translation of its logic (automaton construction, growth loop,
+    // local 2-site solve, HL/HR extension), not an independent
+    // re-derivation, specifically to avoid reintroducing bugs that were
+    // already found and fixed there over an extensive debugging session.
+    //
+    // This Chain instance must be constructed with site_types = the
+    // *n_uc-site unit cell* (not a full chain) -- infinitechain.py's
+    // itensor_version=3 path does exactly this
+    // (cppext.get_backend(3).Chain(self.site_types)), so sites_ here
+    // directly serves as the unit cell's own SiteSet (sites_.si(p+1),
+    // sites_.op(name,p+1) for p=0..n_uc-1), matching pyitensor's own
+    // sites_uc = SiteX(site_types). n_uc = sites_.length().
+    //
+    // Scope, matching infinitechain.py's v1: Hermitian only (no
+    // Hermiticity check here, same documented-but-unenforced precondition
+    // gs_energy_generalized has for its own A), n_uc<=2 only (rejected
+    // explicitly below -- see idmrg.py's own module docstring for why
+    // n_uc>=3 needs a genuine redesign of the growth loop's sublattice
+    // pairing), and fermionic (Jordan-Wigner-threaded) terms not
+    // supported yet (idmrg_classify_terms always sets carry_ferm=false;
+    // fine for spin/boson-type models, silently wrong for a fermionic
+    // one -- no detection/guard for that case yet). Ground-state energy
+    // density only -- static correlators (onsite_expectation/
+    // two_point_correlator) are not ported to C++ yet; run gs_energy()
+    // via this method for the energy, then reuse pyitensor's own
+    // idmrg.py correlator functions against a separately-run
+    // itensor_version="python" IDMRGResult if correlators are needed.
+    //
+    // terms_intra/terms_inter: 1-based-site MOTerm lists in exactly
+    // infinitechain.py's own h_intra/h_inter split (see
+    // _canonicalize_hamiltonian), but shifted from that module's 0-based
+    // MultiOperator.op site convention to this codebase's usual 1-based
+    // AutoMPO/HTerm convention -- the Python-side caller does this shift
+    // (a trivial +1 per site, no Jordan-Wigner transform, since idmrg.py
+    // never uses MultiOperator's own global JW machinery -- it threads
+    // fermionic strings itself per bond, not implemented here yet, see
+    // above), mirroring MultiOperator.to_terms()'s own site-shift
+    // convention (used by every *other* method in this file) without its
+    // JW transform.
+    //
+    // Real ITensor v3 is *stricter* than pyitensor's own array-backed
+    // ITensor reimplementation about Index identity: IndexSet::checkIndexSet()
+    // throws ITError("Duplicate indices in index set") the instant a
+    // tensor would carry the same Index object on two different axes --
+    // exactly the construction idmrg.py's own W_bulk[p] persistent-tensor
+    // design relies on for n_uc=1 (a single sublattice's left and right
+    // automaton legs are literally the same Index there), and exactly
+    // the root cause of that module's own worst bug (HL's and HR's own
+    // mpo axes colliding across macro-iterations, see idmrg.py's
+    // idmrg_ground_state comment). This port sidesteps the whole bug
+    // class from the start rather than retrofitting a fix: it never
+    // builds a persistent, reusable W_bulk[p] ITensor at all. Instead
+    // idmrg_build_row precomputes each sublattice's channel-transition
+    // content as a plain dense array (IdmrgAutomatonRow), and a fresh
+    // ITensor is minted from that data -- with fresh Index objects on
+    // every leg that needs independence -- every single time it's used,
+    // both for the local-solve W_pL/W_pR and for the HL/HR extension
+    // step's own re-minted mpo axis (idmrg_make_W/idmrg_make_W_start/
+    // idmrg_make_W_end below), i.e. this port is built from the start
+    // with the exact fix idmrg.py's own idmrg_ground_state() had to
+    // retrofit after finding that collision, not a naive first attempt
+    // at the naive (persistent-tensor) design.
+    IdmrgResult
+    idmrg_ground_state(std::vector<MOTerm> const& terms_intra,
+                        std::vector<MOTerm> const& terms_inter,
+                        int maxm, double cutoff, int maxiter, double etol,
+                        int krylovdim, int restarts)
+        {
+        int n_uc = sites_.length();
+        if (n_uc>2)
+            Error("Chain::idmrg_ground_state: n_uc>2 is not supported yet "
+                  "(see this method's own comment)");
+        if (maxiter<2)
+            Error("Chain::idmrg_ground_state: maxiter must be >= 2 (energy "
+                  "density is a finite difference between two "
+                  "macro-iterations)");
+
+        std::vector<IdmrgOnsite> onsite;
+        std::vector<IdmrgBond> bonds;
+        idmrg_classify_terms(terms_intra,terms_inter,n_uc,onsite,bonds);
+
+        std::vector<std::vector<IdmrgChan>> chans(n_uc);
+        for (int p=0;p<n_uc;++p) chans[p] = idmrg_channels_at(bonds,n_uc,p);
+
+        std::vector<IdmrgAutomatonRow> rows;
+        rows.reserve(n_uc);
+        for (int p=0;p<n_uc;++p)
+            rows.push_back(idmrg_build_row(p,n_uc,bonds,onsite,
+                                            chans[p],chans[(p+1)%n_uc]));
+
+        ITensor HL, HR; // default-constructed = "None" (see this file's
+                        // own porting-notes comment on ITensor's explicit
+                        // operator bool())
+        Index HL_bra, HL_ket, HR_bra, HR_ket, HL_mpo, HR_mpo;
+        bool have_HL_ket=false, have_HR_ket=false;
+
+        double energy = 0.0;
+        bool have_prev_energy=false, have_prev_density=false;
+        double prev_energy=0.0, prev_density=0.0;
+        bool converged=false;
+        int macro_iter=0;
+
+        for (macro_iter=0; macro_iter<maxiter; ++macro_iter)
+            {
+            for (int mstep=0; mstep<n_uc; ++mstep)
+                {
+                int p_L = mstep;
+                int p_R = n_uc-1-mstep;
+                bool first_step = (macro_iter==0 && mstep==0);
+                bool same_phys = (p_L==p_R);
+
+                Index phys_L_in = sites_.si(p_L+1);
+                Index phys_L_out = prime(phys_L_in);
+                Index phys_R_in = same_phys ? sim(sites_.si(p_R+1)) : sites_.si(p_R+1);
+                Index phys_R_out = prime(phys_R_in);
+
+                // Crossing bond between W_pL and W_pR within *this*
+                // micro-step's own local solve -- guaranteed the same
+                // dimension on both sides since n_uc<=2 keeps
+                // (p_L+1)%n_uc == p_R (see this method's own comment on
+                // why n_uc>=3 breaks this pairing).
+                Index cross_idx = Index(rows[p_L].right_n,"Link");
+
+                ITensor W_pL, W_pR;
+                if (first_step)
+                    {
+                    W_pL = idmrg_make_W_start(rows[p_L],cross_idx,phys_L_in,phys_L_out);
+                    W_pR = idmrg_make_W_end(rows[p_R],cross_idx,phys_R_in,phys_R_out);
+                    }
+                else
+                    {
+                    W_pL = idmrg_make_W(rows[p_L],HL_mpo,cross_idx,phys_L_in,phys_L_out);
+                    W_pR = idmrg_make_W(rows[p_R],cross_idx,HR_mpo,phys_R_in,phys_R_out);
+                    }
+
+                auto [energy_here,U,V,new_bond_u,new_bond_v] = idmrg_local_solve(
+                    HL,W_pL,phys_L_in,W_pR,phys_R_in,HR,
+                    HL_bra,HL_ket,have_HL_ket,HR_bra,HR_ket,have_HR_ket,
+                    cutoff,maxm,krylovdim,restarts);
+                energy = energy_here;
+
+                Index left_ket_old = HL_ket; bool have_left_ket_old = have_HL_ket;
+                Index right_ket_old = HR_ket; bool have_right_ket_old = have_HR_ket;
+
+                // Fresh, independently-minted mpo-axis identities for the
+                // *extend* step only (not used in the solve above, so
+                // this doesn't disturb the W_pL/W_pR crossing bond the
+                // solve just relied on) -- guarantees the new HL's and
+                // HR's own mpo axes can never collide with each other or
+                // with a future reuse of rows[p], regardless of how
+                // small n_uc is (see this method's own top comment).
+                Index new_HL_mpo = sim(cross_idx);
+                ITensor W_pL_ext = replaceInds(W_pL,{cross_idx},{new_HL_mpo});
+                Index new_HR_mpo = sim(cross_idx);
+                ITensor W_pR_ext = replaceInds(W_pR,{cross_idx},{new_HR_mpo});
+
+                bool have_HL = bool(HL), have_HR = bool(HR);
+                auto [newHL,newHL_bra] = idmrg_extend_HL(
+                    HL,HL_bra,have_HL,W_pL_ext,U,
+                    left_ket_old,have_left_ket_old,new_bond_u);
+                HL = newHL; HL_bra = newHL_bra;
+                HL_ket = new_bond_u; have_HL_ket = true;
+
+                auto [newHR,newHR_bra] = idmrg_extend_HR(
+                    HR,HR_bra,have_HR,W_pR_ext,V,
+                    right_ket_old,have_right_ket_old,new_bond_v);
+                HR = newHR; HR_bra = newHR_bra;
+                HR_ket = new_bond_v; have_HR_ket = true;
+
+                HL_mpo = new_HL_mpo;
+                HR_mpo = new_HR_mpo;
+                }
+
+            bool have_density = have_prev_energy;
+            double density = have_density ? (energy-prev_energy)/(2.0*n_uc) : 0.0;
+            if (verbose_)
+                println("idmrg macro-iter ",macro_iter,": E=",energy,
+                        " density=",(have_density?density:0.0));
+            if (have_density && have_prev_density &&
+                std::abs(density-prev_density)<etol)
+                converged = true;
+            prev_energy = energy; have_prev_energy = true;
+            if (have_density) { prev_density = density; have_prev_density = true; }
+            if (converged) break;
+            }
+
+        IdmrgResult out;
+        out.density = prev_density;
+        out.converged = converged;
+        // C++'s own for-loop increments macro_iter to maxiter itself (not
+        // maxiter-1) before the loop condition fails and exits, unlike
+        // Python's "for macro_iter in range(maxiter)" whose loop variable
+        // retains its *last-assigned* value (maxiter-1) when not broken
+        // out of early -- min() here reconciles the two conventions so
+        // niter_done matches Python's own idmrg_ground_state exactly in
+        // both the converged (break, macro_iter<maxiter) and
+        // ran-to-completion (macro_iter==maxiter) cases.
+        out.niter_done = std::min(macro_iter+1,maxiter);
+        return out;
+        }
+
     private:
     // v2's plain "MPS(sites_)" (no InitState) doesn't carry over as a bare
     // MPS(SiteSet)/InitState-based product state: with sites_ built
@@ -2215,6 +2480,433 @@ class Chain
             if (resid_est<1e-10*(1.0+std::abs(ebest))) break;
             }
         return {lambda,x0};
+        }
+
+    // -- iDMRG private helpers (Chain::idmrg_ground_state, public, above) --
+    // A direct C++ translation of pyitensor/idmrg.py's _term_site_matrices/
+    // _classify_terms/_active_channels_at/_onsite_matrix/_build_automaton --
+    // see that module's own docstrings for the algorithm; comments here
+    // only note where the C++ port genuinely differs (dense-array-only
+    // automaton storage, 1-based sites, no fermionic support yet).
+
+    // Dense (row-major, (in,out)-convention) matrix for a named single-site
+    // operator at 0-based sublattice position p0based -- the C++ analogue
+    // of pyitensor's SiteType.matrix(name), read directly off
+    // SiteSet::op() (unprimed leg "In", primed leg "Out", same convention
+    // _term_site_matrices's own docstring cross-references).
+    std::vector<Cplx>
+    idmrg_op_dense(int p0based, std::string const& name) const
+        {
+        int site1 = p0based+1;
+        int d = dim(sites_.si(site1));
+        auto Op = sites_.op(name,site1);
+        auto s = sites_.si(site1);
+        auto sp = prime(s);
+        std::vector<Cplx> M(d*d,Cplx(0,0));
+        for (int i=1;i<=d;++i)
+        for (int j=1;j<=d;++j)
+            M[(i-1)*d+(j-1)] = eltC(Op,s(i),sp(j));
+        return M;
+        }
+
+    static std::vector<Cplx>
+    idmrg_matmul(std::vector<Cplx> const& A, std::vector<Cplx> const& B, int d)
+        {
+        std::vector<Cplx> C(d*d,Cplx(0,0));
+        for (int i=0;i<d;++i)
+        for (int j=0;j<d;++j)
+            {
+            Cplx acc(0,0);
+            for (int k=0;k<d;++k) acc += A[i*d+k]*B[k*d+j];
+            C[i*d+j] = acc;
+            }
+        return C;
+        }
+
+    // Classifies every term (terms_intra ++ terms_inter, MOTerm's own
+    // 1-based sites converted to 0-based here to match idmrg.py's own
+    // arithmetic exactly) into 1-site (onsite) and 2-site (bonds) pieces,
+    // composing multiple same-site operator factors via reversed matrix
+    // product exactly like _term_site_matrices does (mats[-1] first,
+    // then left-multiplied by each earlier factor in reverse -- i.e. for
+    // factors written [A,B,C] at one site, the composed matrix is C@B@A).
+    void
+    idmrg_classify_terms(std::vector<MOTerm> const& terms_intra,
+                          std::vector<MOTerm> const& terms_inter, int n_uc,
+                          std::vector<IdmrgOnsite>& onsite,
+                          std::vector<IdmrgBond>& bonds) const
+        {
+        std::vector<MOTerm> all_terms = terms_intra;
+        all_terms.insert(all_terms.end(),terms_inter.begin(),terms_inter.end());
+        for (auto const& term : all_terms)
+            {
+            std::map<int,std::vector<std::string>> by_site;
+            for (auto const& f : term.factors) by_site[f.site-1].push_back(f.name);
+            std::vector<int> rel_sites;
+            for (auto const& kv : by_site) rel_sites.push_back(kv.first);
+            std::sort(rel_sites.begin(),rel_sites.end());
+            if (rel_sites.size()>2)
+                Error("Chain::idmrg_ground_state: a term touches more than "
+                      "2 distinct sites -- only 1- and 2-site terms are "
+                      "supported");
+            std::vector<std::vector<Cplx>> mats;
+            for (int rel : rel_sites)
+                {
+                int p = ((rel % n_uc)+n_uc) % n_uc;
+                auto const& names = by_site[rel];
+                int d = dim(sites_.si(p+1));
+                auto combined = idmrg_op_dense(p,names.back());
+                for (int k=(int)names.size()-2;k>=0;--k)
+                    combined = idmrg_matmul(combined,idmrg_op_dense(p,names[k]),d);
+                mats.push_back(std::move(combined));
+                }
+            if (rel_sites.size()==1)
+                onsite.push_back(IdmrgOnsite{rel_sites[0],term.coef,mats[0]});
+            else if (rel_sites.size()==2)
+                {
+                int a = rel_sites[0], b = rel_sites[1];
+                if (a>=n_uc)
+                    Error("Chain::idmrg_ground_state: internal error -- "
+                          "inter-cell term does not touch the central cell");
+                bonds.push_back(IdmrgBond{a,b,mats[0],mats[1],false,term.coef});
+                }
+            }
+        }
+
+    // [(bond_index,r), ...] for every 2-site term with a "pending"
+    // instance active just before absorbing sublattice p -- exactly
+    // idmrg.py's own _active_channels_at, same formula/derivation (see
+    // that function's own docstring for why "+1").
+    std::vector<std::pair<int,int>>
+    idmrg_active_channels_at(std::vector<IdmrgBond> const& bonds, int n_uc, int p) const
+        {
+        std::vector<std::pair<int,int>> out;
+        for (int bi=0;bi<(int)bonds.size();++bi)
+            {
+            int reach = bonds[bi].rel_b - bonds[bi].rel_a;
+            for (int r=1;r<=reach;++r)
+                {
+                int m = ((bonds[bi].rel_b - r + 1) % n_uc + n_uc) % n_uc;
+                if (m==p) out.push_back({bi,r});
+                }
+            }
+        return out;
+        }
+
+    std::vector<IdmrgChan>
+    idmrg_channels_at(std::vector<IdmrgBond> const& bonds, int n_uc, int p) const
+        {
+        std::vector<IdmrgChan> chans;
+        chans.push_back(IdmrgChan{0,-1,-1}); // S
+        chans.push_back(IdmrgChan{1,-1,-1}); // F
+        for (auto const& br : idmrg_active_channels_at(bonds,n_uc,p))
+            chans.push_back(IdmrgChan{2,br.first,br.second});
+        return chans;
+        }
+
+    // Sum of coef*mat over every onsite term attributed to sublattice p --
+    // an empty vector (not a zero matrix) means "no onsite term here",
+    // exactly like idmrg.py's own _onsite_matrix returning None.
+    std::vector<Cplx>
+    idmrg_onsite_matrix(std::vector<IdmrgOnsite> const& onsite, int p, int d) const
+        {
+        std::vector<Cplx> mat;
+        for (auto const& o : onsite)
+            {
+            if (o.rel != p) continue;
+            if (mat.empty())
+                {
+                mat.resize(d*d);
+                for (int k=0;k<d*d;++k) mat[k] = o.coef*o.mat[k];
+                }
+            else
+                for (int k=0;k<d*d;++k) mat[k] += o.coef*o.mat[k];
+            }
+        return mat;
+        }
+
+    // The dense transition-matrix content for sublattice p, given its own
+    // left/right channel lists -- a direct translation of
+    // _build_automaton's own big if/elif transition-rule chain (see that
+    // function's docstring for the derivation of each case). Fermionic
+    // strings are not supported yet (the last branch always uses Id,
+    // never sites_.op("F",...); idmrg_classify_terms always sets
+    // carry_ferm=false so this is never exercised differently).
+    IdmrgAutomatonRow
+    idmrg_build_row(int p, int n_uc, std::vector<IdmrgBond> const& bonds,
+                     std::vector<IdmrgOnsite> const& onsite,
+                     std::vector<IdmrgChan> const& left,
+                     std::vector<IdmrgChan> const& right) const
+        {
+        int d = dim(sites_.si(p+1));
+        auto onsite_mat = idmrg_onsite_matrix(onsite,p,d);
+        IdmrgAutomatonRow row;
+        row.p=p; row.d=d; row.left_n=(int)left.size(); row.right_n=(int)right.size();
+        row.flat.assign((size_t)row.left_n*row.right_n*d*d,Cplx(0,0));
+        auto setmat = [&](int li,int ri,std::vector<Cplx> const& mat)
+            {
+            size_t base = ((size_t)li*row.right_n+ri)*d*d;
+            for (int k=0;k<d*d;++k) row.flat[base+k] = mat[k];
+            };
+        auto eye = [&]()
+            {
+            std::vector<Cplx> I(d*d,Cplx(0,0));
+            for (int i=0;i<d;++i) I[i*d+i] = Cplx(1,0);
+            return I;
+            };
+        for (int li=0;li<row.left_n;++li)
+        for (int ri=0;ri<row.right_n;++ri)
+            {
+            auto const& lch = left[li];
+            auto const& rch = right[ri];
+            bool l_triv = (lch.kind==0 || lch.kind==1);
+            bool r_triv = (rch.kind==0 || rch.kind==1);
+            if (lch.kind==0 && rch.kind==0)
+                {
+                setmat(li,ri,eye());
+                }
+            else if (lch.kind==1 && rch.kind==1)
+                {
+                auto mat = eye();
+                if (!onsite_mat.empty())
+                    for (int k=0;k<d*d;++k) mat[k] += onsite_mat[k];
+                setmat(li,ri,mat);
+                }
+            else if (lch.kind==0 && !r_triv)
+                {
+                auto const& b = bonds[rch.bond_index];
+                if (rch.r==b.rel_b-b.rel_a && b.rel_a==p)
+                    {
+                    std::vector<Cplx> mat(d*d);
+                    for (int k=0;k<d*d;++k) mat[k] = b.coef*b.mat_a[k];
+                    setmat(li,ri,mat);
+                    }
+                }
+            else if (rch.kind==1 && !l_triv)
+                {
+                auto const& b = bonds[lch.bond_index];
+                if (lch.r==1) setmat(li,ri,b.mat_b);
+                }
+            else if (!l_triv && !r_triv)
+                {
+                if (lch.bond_index==rch.bond_index && rch.r==lch.r-1)
+                    setmat(li,ri,eye()); // carry_ferm always false in this port
+                }
+            }
+        return row;
+        }
+
+    // Fresh ITensor from row's dense data (bulk case: rank 4). left_idx's
+    // dim must equal row.left_n, right_idx's row.right_n, phys_in/out's
+    // row.d -- the caller is responsible for supplying Index objects of
+    // the right dimension (idmrg_ground_state always does, by
+    // construction: cross_idx/HL_mpo/HR_mpo are minted or tracked with
+    // exactly these dimensions).
+    ITensor
+    idmrg_make_W(IdmrgAutomatonRow const& row, Index left_idx, Index right_idx,
+                 Index phys_in, Index phys_out) const
+        {
+        ITensor T(left_idx,phys_in,phys_out,right_idx);
+        for (int li=0;li<row.left_n;++li)
+        for (int ri=0;ri<row.right_n;++ri)
+        for (int si=0;si<row.d;++si)
+        for (int so=0;so<row.d;++so)
+            {
+            Cplx v = row.flat[((size_t)li*row.right_n+ri)*row.d*row.d + si*row.d+so];
+            if (v != Cplx(0,0))
+                T.set({left_idx(li+1),phys_in(si+1),phys_out(so+1),right_idx(ri+1)},v);
+            }
+        return T;
+        }
+
+    // Boundary tensor for the very first-ever micro-step's left side:
+    // row's "S" row only (li=0) -- the C++ analogue of idmrg.py's
+    // _project_channel(W_bulk[0],"left",0), but built directly from dense
+    // data instead of projecting an existing persistent ITensor (this
+    // port never builds one, see idmrg_ground_state's own top comment).
+    ITensor
+    idmrg_make_W_start(IdmrgAutomatonRow const& row, Index right_idx,
+                        Index phys_in, Index phys_out) const
+        {
+        ITensor T(phys_in,phys_out,right_idx);
+        int li = 0; // S
+        for (int ri=0;ri<row.right_n;++ri)
+        for (int si=0;si<row.d;++si)
+        for (int so=0;so<row.d;++so)
+            {
+            Cplx v = row.flat[((size_t)li*row.right_n+ri)*row.d*row.d + si*row.d+so];
+            if (v != Cplx(0,0))
+                T.set({phys_in(si+1),phys_out(so+1),right_idx(ri+1)},v);
+            }
+        return T;
+        }
+
+    // Boundary tensor for the very first-ever micro-step's right side:
+    // row's "F" column only (ri=1) -- analogue of
+    // _project_channel(W_bulk[n_uc-1],"right",1).
+    ITensor
+    idmrg_make_W_end(IdmrgAutomatonRow const& row, Index left_idx,
+                      Index phys_in, Index phys_out) const
+        {
+        ITensor T(left_idx,phys_in,phys_out);
+        int ri = 1; // F
+        for (int li=0;li<row.left_n;++li)
+        for (int si=0;si<row.d;++si)
+        for (int so=0;so<row.d;++so)
+            {
+            Cplx v = row.flat[((size_t)li*row.right_n+ri)*row.d*row.d + si*row.d+so];
+            if (v != Cplx(0,0))
+                T.set({left_idx(li+1),phys_in(si+1),phys_out(so+1)},v);
+            }
+        return T;
+        }
+
+    // One micro-step's local ground-state solve: the effective 2-site
+    // Hamiltonian sandwiched by (HL, W_pL, W_pR, HR), diagonalized via
+    // arnoldi_smallest_real(..., Sel::SR) (the smallest-real-part Ritz
+    // value of a Hermitian operator *is* its ground state, so the
+    // existing non-Hermitian-capable Arnoldi engine already used by
+    // nhdmrg_one_sweep above is reused directly rather than writing a
+    // second, Hermitian-only Krylov solver) -- matches idmrg.py's own
+    // _local_two_site_solve (kernels.make_matvec + dmrg._lanczos_ground_state),
+    // but ITensor's own operator* already does all the index-matching
+    // contraction that Python's kernels.py has to hand-roll. No
+    // pre-existing ket tensor to seed the local guess from (every
+    // micro-step inserts brand-new sites), so the Arnoldi start vector is
+    // always a fresh random one (randomITensorC), matching
+    // idmrg.py's own rationale (see that function's own docstring on why
+    // mpscpp3/pyitensor never seed DMRG from a product state). U and V
+    // are returned *without* S (the singular values are discarded): HL/HR
+    // are block operators built by a similarity transform through U (or
+    // V) alone, exactly idmrg.py's own convention -- see that function's
+    // own extensive comment on why absorbing sqrt(S) into both sides
+    // instead is wrong (confirmed there against independent ED).
+    //
+    // A dedicated Hermitian Lanczos solver with early-exit convergence
+    // checking (mirroring pyitensor's own _lanczos_ground_state) was
+    // tried here to cut the remaining Krylov-solve cost further, but was
+    // reverted after it produced measurably wrong ground-state energies
+    // once bond dimension grew large (traced to some accumulated-error or
+    // logic issue in that from-scratch routine that this port's own
+    // regression tests didn't catch quickly enough to trust shipping it)
+    // -- arnoldi_smallest_real's own double-reorthogonalization,
+    // proven-correct machinery is kept here instead. See this codebase's
+    // iDMRG optimization history for the (much larger) fix that *is* kept:
+    // idmrg_extend_HL/HR's contraction-order reordering below.
+    std::tuple<double,ITensor,ITensor,Index,Index>
+    idmrg_local_solve(ITensor const& HL, ITensor const& W_pL, Index phys_L,
+                       ITensor const& W_pR, Index phys_R, ITensor const& HR,
+                       Index HL_bra, Index HL_ket, bool have_HL_ket,
+                       Index HR_bra, Index HR_ket, bool have_HR_ket,
+                       double cutoff, int maxdim, int krylovdim, int restarts) const
+        {
+        std::vector<Index> order_in;
+        if (have_HL_ket) order_in.push_back(HL_ket);
+        order_in.push_back(phys_L);
+        order_in.push_back(phys_R);
+        if (have_HR_ket) order_in.push_back(HR_ket);
+        auto x0 = randomITensorC(IndexSet(order_in));
+
+        // matvec must be an endomorphism on v's own index space (same
+        // indices in and out) for arnoldi_smallest_real's own inner
+        // products (dag(V.at(i))*w) to reduce to a scalar -- true for
+        // nhdmrg_one_sweep's own apply_proj only because its psil/psir
+        // *share* link-index identities by construction (bra vs ket
+        // there is a *temporary* prime distinction within one
+        // computation, undone by noPrime()); HL's/HR's own bra Index
+        // (minted via sim(), not prime(), in idmrg_extend_HL/HR below)
+        // is a *permanently* distinct object from their own ket Index,
+        // so noPrime() alone does not reconcile the physical-leg
+        // "out"->"in" relabeling with the link-leg "bra"->"ket" one --
+        // do the latter explicitly.
+        auto matvec = [&](ITensor v) -> ITensor
+            {
+            if (HL) v *= HL;
+            v *= W_pL;
+            v *= W_pR;
+            if (HR) v *= HR;
+            v.noPrime();
+            if (have_HL_ket) v = replaceInds(v,{HL_bra},{HL_ket});
+            if (have_HR_ket) v = replaceInds(v,{HR_bra},{HR_ket});
+            return v;
+            };
+
+        auto result = arnoldi_smallest_real(matvec,x0,krylovdim,restarts,Sel::SR,Cplx(0,0));
+        double energy = result.first.real();
+        ITensor theta = result.second;
+
+        std::vector<Index> left_inds;
+        if (have_HL_ket) left_inds.push_back(HL_ket);
+        left_inds.push_back(phys_L);
+        auto [U,S,V] = svd(theta,IndexSet(left_inds),{"Cutoff",cutoff,"MaxDim",maxdim});
+        Index new_bond_u = commonIndex(U,S);
+        Index new_bond_v = commonIndex(S,V);
+        return {energy,U,V,new_bond_u,new_bond_v};
+        }
+
+    // Absorb the newly-solved left-canonical site tensor U into HL, using
+    // MPO tensor W_p for the sublattice just absorbed -- the C++ analogue
+    // of idmrg.py's _extend_HL, but using ITensor's own operator*
+    // (automatic index-matching contraction) instead of Python's
+    // contract_many()+manual bra-Index substitution. left_ket_old is U's
+    // own link toward the *existing* HL (only used if have_left_ket_old);
+    // right_ket_new is U's own freshly-minted link away from HL (always
+    // present). Returns (new_HL, new_HL_bra) where new_HL_bra is
+    // right_ket_new's own bra-side counterpart, to be threaded into the
+    // *next* call.
+    std::pair<ITensor,Index>
+    idmrg_extend_HL(ITensor const& HL, Index HL_bra, bool have_HL,
+                     ITensor const& W_p, ITensor const& U,
+                     Index left_ket_old, bool have_left_ket_old,
+                     Index right_ket_new) const
+        {
+        Index right_bra_new = sim(right_ket_new);
+        ITensor bra_piece = dag(prime(U,TagSet("Site")));
+        if (have_left_ket_old)
+            bra_piece = replaceInds(bra_piece,{left_ket_old},{HL_bra});
+        bra_piece = replaceInds(bra_piece,{right_ket_new},{right_bra_new});
+        // Contraction order matters here even though the result doesn't:
+        // U (and, before the replaceInds calls above, bra_piece) still
+        // carries its own un-renamed copies of left_ket_old/right_ket_new,
+        // which only cancel once HL itself is multiplied in (HL is the
+        // only piece sharing HL_bra/HL_mpo/left_ket_old all at once). The
+        // naive left-to-right "bra_piece*W_p*U" order defers that
+        // cancellation to the very last step, so the (bra_piece*W_p)*U
+        // contraction shares only the physical index (dim d) and produces
+        // a huge near-outer-product intermediate carrying every one of
+        // HL_bra/HL_ket_old/right_bra_new/right_ket_new's own maxdim-sized
+        // legs at once (maxdim^4 elements) before immediately collapsing
+        // back down to a small rank-3 result -- confirmed by profiling:
+        // this was >90% of the C++ port's total iDMRG runtime before this
+        // fix. Contracting HL in first keeps every intermediate rank<=4
+        // and small throughout, matching the same, correct answer.
+        ITensor new_HL;
+        if (have_HL) new_HL = (HL * bra_piece) * W_p * U;
+        else new_HL = bra_piece * W_p * U;
+        return {new_HL,right_bra_new};
+        }
+
+    // Mirror of idmrg_extend_HL: V (the newly-solved right-canonical site
+    // tensor) is absorbed into HR by prepending it on HR's left.
+    std::pair<ITensor,Index>
+    idmrg_extend_HR(ITensor const& HR, Index HR_bra, bool have_HR,
+                     ITensor const& W_p, ITensor const& V,
+                     Index right_ket_old, bool have_right_ket_old,
+                     Index left_ket_new) const
+        {
+        Index left_bra_new = sim(left_ket_new);
+        ITensor bra_piece = dag(prime(V,TagSet("Site")));
+        if (have_right_ket_old)
+            bra_piece = replaceInds(bra_piece,{right_ket_old},{HR_bra});
+        bra_piece = replaceInds(bra_piece,{left_ket_new},{left_bra_new});
+        // Same contraction-order fix as idmrg_extend_HL above (see its own
+        // comment for the full derivation): contract HR in first so every
+        // intermediate stays small instead of forming a maxdim^4-sized
+        // near-outer-product that only collapses on the last multiply.
+        ITensor new_HR;
+        if (have_HR) new_HR = (HR * bra_piece) * W_p * V;
+        else new_HR = bra_piece * W_p * V;
+        return {new_HR,left_bra_new};
         }
 
     Args

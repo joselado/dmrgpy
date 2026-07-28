@@ -165,6 +165,24 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "(terms_a) -- see Chain::nhdmrg_generalized's own comment "
                "for the algorithm. Returns (lambda, psil, psir) with "
                "<psil|psir>=1, same convention as nhdmrg().")
+        .def("idmrg_ground_state",[](Chain& self, std::vector<PyTerm> const& terms_intra,
+                                      std::vector<PyTerm> const& terms_inter,
+                                      int maxm, double cutoff, int maxiter, double etol,
+                                      int krylovdim, int restarts) {
+                auto out = self.idmrg_ground_state(terms_from_python(terms_intra),
+                    terms_from_python(terms_inter),maxm,cutoff,maxiter,etol,
+                    krylovdim,restarts);
+                return py::make_tuple(out.density,out.converged,out.niter_done);
+            }, py::arg("terms_intra"),py::arg("terms_inter"),
+               py::arg("maxm"),py::arg("cutoff"),py::arg("maxiter"),py::arg("etol"),
+               py::arg("krylovdim")=30,py::arg("restarts")=2,
+               "Infinite DMRG (iDMRG) ground-state energy density -- this "
+               "Chain must have been constructed with site_types = the "
+               "n_uc-site unit cell (not a full chain), see "
+               "Chain::idmrg_ground_state's own comment for the algorithm "
+               "and scope (Hermitian, n_uc<=2, no fermionic terms, no "
+               "static correlators yet). Returns (density, converged, "
+               "niter_done).")
         .def("vev",[](Chain& self, std::vector<PyTerm> const& terms,
                        MPS const& wf, int npow) {
                 return self.vev(terms_from_python(terms),wf,npow);
