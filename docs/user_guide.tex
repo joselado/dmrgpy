@@ -1769,12 +1769,16 @@ and \texttt{"julia\_live"} have no iDMRG port and also raise
 \texttt{NotImplementedError}. The v3 C++ backend
 (\texttt{mpscpp3/chain\_session.h}'s \texttt{Chain::idmrg\_ground\_state},
 a line-by-line port of \texttt{pyitensor/idmrg.py}'s own growing
-algorithm) computes the energy density only, $\sim$2.5--3x slower than
-the \texttt{"python"} backend at matched parameters;
+algorithm) computes the energy density only;
 \texttt{vev}/\texttt{correlator} still require
 \texttt{itensor\_version="python"} regardless of which backend
 \texttt{gs\_energy} itself was run with, since v3 has no
-static-correlator machinery yet.
+static-correlator machinery yet. Relative speed depends on the model:
+v3 is $\sim$2.6--2.7x slower than \texttt{"python"} for a gapless
+(critical) chain (the local 2-site solve needs close to its full
+Krylov dimension every macro-iteration), but can be \emph{faster} for
+a gapped model, where that same solve converges quickly -- see
+\texttt{docs/documentation.tex}'s iDMRG section for benchmark numbers.
 
 \textbf{Building the Hamiltonian: \texttt{L}/\texttt{C}/\texttt{R}-suffixed
 operators.} Instead of one operator list per absolute site index, an

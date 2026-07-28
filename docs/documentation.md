@@ -241,9 +241,31 @@ only; it has no static-correlator support, so `self._result` is left
 `None` on that path and `vev`/`correlator` raise `NotImplementedError`
 regardless of whether `gs_energy` itself already ran successfully.
 Benchmarked (S=1/2 uniform Heisenberg chain, `maxm=30`, `maxiter=60`,
-`etol=1e-9`): v3 is ~2.5-3x slower than `"python"` at both `n_uc=1` and
+`etol=1e-9`): v3 is ~2.6-2.7x slower than `"python"` at both `n_uc=1` and
 `n_uc=2`, with energy-density agreement between the two backends to
-~1e-8. `Chain::idmrg_ground_state` is reached by constructing a `Chain`
+~1e-8. This is the *gapless* (critical) case, the hardest for any
+Krylov-based local solve since the correlation length diverges and the
+local 2-site Arnoldi solve genuinely needs close to its full
+`krylovdim` to converge at every macro-iteration (confirmed by direct
+instrumentation) — for a *gapped* model the same local solve typically
+converges in far fewer Krylov vectors, and v3 can end up *faster* than
+`"python"` (confirmed directly on a dimerized `n_uc=2` chain: v3 0.08s
+vs `"python"` 0.23s at `maxm=30`, `maxiter=60`). This asymmetry is
+`arnoldi_smallest_real`'s own `early_tol` early-exit at work (see its
+own doc comment): every pre-existing caller of that shared Arnoldi
+routine (`nhdmrg_one_sweep`) opts out (`early_tol<0`, the default) and
+is completely unaffected; only `idmrg_local_solve`'s own call opts in,
+checking the same residual-tolerance criterion the between-restart
+check already trusted, just checked incrementally (every 3rd
+Krylov-vector addition, from `m>=8` on) instead of only once a full
+`krylovdim`-size subspace has been built — mathematically the same
+"stop once already converged" logic the pre-existing "happy breakdown"
+branch already relied on (an exactly-zero residual), just generalized
+to a tolerance. `TagSet` string-tag parsing (`"Site"`/`"Link"`/`"a"`)
+was also confirmed by profiling to be a real, multi-percent cost on its
+own (repeated on every Krylov iteration and every micro-step) and is
+now cached in function-local statics instead of re-parsed per call.
+`Chain::idmrg_ground_state` is reached by constructing a `Chain`
 directly from the unit cell's own `site_types` (`cppext.get_backend(3).
 Chain(self.site_types)`), the same low-level pattern `nhdmrg.py` uses for
 its own compiled-backend calls (`H.to_terms()` fed straight into

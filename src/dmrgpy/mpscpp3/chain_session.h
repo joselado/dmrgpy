@@ -2050,8 +2050,12 @@ class Chain
                 // micro-step's own local solve -- guaranteed the same
                 // dimension on both sides since n_uc<=2 keeps
                 // (p_L+1)%n_uc == p_R (see this method's own comment on
-                // why n_uc>=3 breaks this pairing).
-                Index cross_idx = Index(rows[p_L].right_n,"Link");
+                // why n_uc>=3 breaks this pairing). link_tag is a
+                // function-local static (see arnoldi_smallest_real's own
+                // comment on why): avoids re-parsing "Link" into a
+                // TagSet on every micro-step.
+                static const TagSet link_tag("Link");
+                Index cross_idx = Index(rows[p_L].right_n,link_tag);
 
                 ITensor W_pL, W_pR;
                 if (first_step)
@@ -2384,11 +2388,85 @@ class Chain
     //    silently diverging the backends on exactly the spectra the
     //    tie-break exists for).
     enum class Sel { SR, Closest, SRTieBreak };
+
+    // Ritz-value selection given a Krylov-subspace-size-m eigenvalue list;
+    // factored out of arnoldi_smallest_real so its early-exit convergence
+    // check (see that method's own early_tol comment) can reuse *exactly*
+    // the same selection logic as the final post-loop selection, rather
+    // than risking the two silently drifting apart. Pure post-processing
+    // of an already-computed eigenvalue list, no ITensor calls -- the
+    // global-min-then-candidates SRTieBreak formulation is deliberately
+    // identical to pyitensor/nhdmrg.py's _select_ritz (an earlier greedy
+    // running-best variant here could settle on a different member of a
+    // degenerate cluster than the Python port, silently diverging the
+    // backends on exactly the spectra the tie-break exists for).
+    static int
+    arnoldi_select_kbest(std::vector<Cplx> const& ev, Sel sel, Cplx target)
+        {
+        int m = (int)ev.size();
+        int kbest = 1;
+        if (sel==Sel::Closest)
+            {
+            for (int k=2;k<=m;++k)
+                if (std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
+                    kbest = k;
+            }
+        else
+            {
+            double remin = ev[0].real();
+            for (int k=2;k<=m;++k) remin = std::min(remin,ev[k-1].real());
+            if (sel==Sel::SRTieBreak)
+                {
+                double degtol = 1e-6*(1.0+std::abs(remin));
+                kbest = 0;
+                for (int k=1;k<=m;++k)
+                    if (ev[k-1].real()<remin+degtol)
+                        if (kbest==0 ||
+                            std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
+                            kbest = k;
+                }
+            else
+                {
+                for (int k=2;k<=m;++k)
+                    if (ev[k-1].real()<ev[kbest-1].real()) kbest = k;
+                }
+            }
+        return kbest;
+        }
+
+    // early_tol<0 (default): disabled, matching this method's original
+    // behavior exactly -- every pre-existing caller (nhdmrg_one_sweep's
+    // two calls above) always builds the *full* krylovdim-size Krylov
+    // subspace before checking convergence, same as before this parameter
+    // existed. early_tol>=0 (idmrg_local_solve's own call, below) checks
+    // the *same* Arnoldi residual bound this method's between-restart
+    // check already trusts to declare "good enough, skip further
+    // restarts" -- but after every Krylov-vector addition instead of only
+    // once the full krylovdim has been built, so a local solve that's
+    // already converged (the common case away from a near-degenerate
+    // spectrum) stops paying for further matvecs it doesn't need. This
+    // isn't new solver math: the "happy breakdown" branch just above
+    // already proves an early-terminated (m<krylovdim) Krylov subspace is
+    // handled correctly by the existing post-loop selection/build code
+    // (whatever final m is, that code already runs on it) -- early_tol
+    // just generalizes that same trigger from "residual is exactly zero"
+    // to "residual is below tolerance", reusing arnoldi_select_kbest so
+    // the *decision* of which Ritz pair is "best" can never disagree
+    // between the early check and the eventual real answer.
     template <typename Fn>
     std::pair<Cplx,ITensor>
     arnoldi_smallest_real(Fn&& A, ITensor x0, int krylovdim, int restarts,
-                          Sel sel=Sel::SR, Cplx target=0) const
+                          Sel sel=Sel::SR, Cplx target=0,
+                          double early_tol=-1.0) const
         {
+        // TagSet("a") parses its string argument every call (confirmed
+        // via profiling to be a real, measurable cost: TagSet parsing +
+        // its own strtol calls showed up at several percent of total
+        // iDMRG runtime) -- a function-local static parses it exactly
+        // once and every subsequent call just copies the already-parsed
+        // TagSet. idmrg_extend_HL/HR below apply the same fix to their
+        // own TagSet("Site").
+        static const TagSet a_tag("a");
         Cplx lambda = 0;
         for (int r=0;r<restarts;++r)
             {
@@ -2419,9 +2497,43 @@ class Chain
                 double nw = norm(w);
                 h.at(j+1).at(j) = nw;
                 if (nw<1e-13) break; // happy breakdown: invariant subspace
+                // Early-exit convergence check (see early_tol's own
+                // comment above). Skipped below m=8 (a residual bound
+                // from a tiny subspace is not a reliable signal) and only
+                // run every 3rd iteration above that: measured directly
+                // (S=1/2 Heisenberg iDMRG) that most local solves in the
+                // later, expensive macro-iterations (largest bond
+                // dimension) do NOT converge before the full krylovdim,
+                // so checking every single iteration mostly just pays for
+                // an extra small eigen() + Index/TagSet construction with
+                // no payoff in the cases that dominate wall time --
+                // checking less often keeps that wasted cost small while
+                // still catching genuine early convergence (common in the
+                // cheap, small-bond-dimension early macro-iterations)
+                // within at most 2 extra Krylov vectors of when it
+                // actually happens. Always skipped when early_tol<0
+                // (every pre-existing caller), so this adds zero cost to
+                // nhdmrg_one_sweep's own two arnoldi_smallest_real calls.
+                if (early_tol>=0 && m>=8 && m%3==0)
+                    {
+                    auto a_chk = Index(m,a_tag);
+                    auto Hm_chk = ITensor(prime(a_chk),a_chk);
+                    for (int ii=0;ii<m;++ii)
+                    for (int jj=0;jj<m;++jj)
+                        if (ii<=jj+1) Hm_chk.set(prime(a_chk)(ii+1),a_chk(jj+1),h.at(ii).at(jj));
+                    ITensor Wchk,Dchk;
+                    eigen(Hm_chk,Wchk,Dchk);
+                    auto cchk = commonIndex(Wchk,Dchk);
+                    std::vector<Cplx> ev_chk(m);
+                    for (int k=1;k<=m;++k) ev_chk[k-1] = eltC(Dchk,cchk(k),prime(cchk)(k));
+                    int kbest_chk = arnoldi_select_kbest(ev_chk,sel,target);
+                    Cplx ebest_chk = ev_chk[kbest_chk-1];
+                    double resid_chk = nw*std::abs(eltC(Wchk,a_chk(m),cchk(kbest_chk)));
+                    if (resid_chk<early_tol*(1.0+std::abs(ebest_chk))) break;
+                    }
                 if (j+1<krylovdim) V.push_back(w/nw);
                 }
-            auto a = Index(m,"a");
+            auto a = Index(m,a_tag);
             auto Hm = ITensor(prime(a),a);
             for (int i=0;i<m;++i)
             for (int j=0;j<m;++j)
@@ -2431,36 +2543,7 @@ class Chain
             auto c = commonIndex(W,D);
             std::vector<Cplx> ev(m);
             for (int k=1;k<=m;++k) ev[k-1] = eltC(D,c(k),prime(c)(k));
-            // Ritz-value selection; the global-min-then-candidates
-            // SRTieBreak formulation is deliberately identical to
-            // pyitensor/nhdmrg.py's _select_ritz
-            int kbest = 1;
-            if (sel==Sel::Closest)
-                {
-                for (int k=2;k<=m;++k)
-                    if (std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
-                        kbest = k;
-                }
-            else
-                {
-                double remin = ev[0].real();
-                for (int k=2;k<=m;++k) remin = std::min(remin,ev[k-1].real());
-                if (sel==Sel::SRTieBreak)
-                    {
-                    double degtol = 1e-6*(1.0+std::abs(remin));
-                    kbest = 0;
-                    for (int k=1;k<=m;++k)
-                        if (ev[k-1].real()<remin+degtol)
-                            if (kbest==0 ||
-                                std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
-                                kbest = k;
-                    }
-                else
-                    {
-                    for (int k=2;k<=m;++k)
-                        if (ev[k-1].real()<ev[kbest-1].real()) kbest = k;
-                    }
-                }
+            int kbest = arnoldi_select_kbest(ev,sel,target);
             Cplx ebest = ev[kbest-1];
             ITensor xnew;
             for (int i=0;i<m;++i)
@@ -2831,7 +2914,14 @@ class Chain
             return v;
             };
 
-        auto result = arnoldi_smallest_real(matvec,x0,krylovdim,restarts,Sel::SR,Cplx(0,0));
+        // early_tol=1e-10 matches arnoldi_smallest_real's own hardcoded
+        // between-restart residual tolerance exactly (see its early_tol
+        // parameter comment) -- this doesn't loosen the convergence this
+        // local solve accepts, it just detects that same criterion as
+        // soon as it's met instead of only after paying for a full
+        // krylovdim-size Krylov subspace every time.
+        auto result = arnoldi_smallest_real(matvec,x0,krylovdim,restarts,
+                                             Sel::SR,Cplx(0,0),1e-10);
         double energy = result.first.real();
         ITensor theta = result.second;
 
@@ -2860,8 +2950,10 @@ class Chain
                      Index left_ket_old, bool have_left_ket_old,
                      Index right_ket_new) const
         {
+        // See arnoldi_smallest_real's own comment on this static.
+        static const TagSet site_tag("Site");
         Index right_bra_new = sim(right_ket_new);
-        ITensor bra_piece = dag(prime(U,TagSet("Site")));
+        ITensor bra_piece = dag(prime(U,site_tag));
         if (have_left_ket_old)
             bra_piece = replaceInds(bra_piece,{left_ket_old},{HL_bra});
         bra_piece = replaceInds(bra_piece,{right_ket_new},{right_bra_new});
@@ -2894,8 +2986,10 @@ class Chain
                      Index right_ket_old, bool have_right_ket_old,
                      Index left_ket_new) const
         {
+        // See idmrg_extend_HL's own comment on this static.
+        static const TagSet site_tag("Site");
         Index left_bra_new = sim(left_ket_new);
-        ITensor bra_piece = dag(prime(V,TagSet("Site")));
+        ITensor bra_piece = dag(prime(V,site_tag));
         if (have_right_ket_old)
             bra_piece = replaceInds(bra_piece,{right_ket_old},{HR_bra});
         bra_piece = replaceInds(bra_piece,{left_ket_new},{left_bra_new});
