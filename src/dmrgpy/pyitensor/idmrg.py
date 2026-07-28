@@ -593,6 +593,31 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     for how a user-facing L/C/R-suffixed Hamiltonian is turned into this
     shape). Returns an IDMRGResult; `.e0` is the converged ground-state
     energy *per site* (not a total -- see this module's docstring)."""
+    if n_uc > 2:
+        # infinitechain.py's constructor already rejects n_uc>2 before
+        # this function is ever reached through the public API -- this is
+        # defense in depth for a direct caller of this module (bypassing
+        # the wrapper): without it, n_uc=3 fails several micro-steps in
+        # with an opaque "ValueError: axes don't match array" three stack
+        # frames deep inside kernels.py's matvec, confirmed directly --
+        # exactly the confusing-failure-mode this check exists to avoid.
+        # See this module's own docstring / infinitechain.py's
+        # __init__ for why n_uc>2 isn't supported yet.
+        raise NotImplementedError(
+            "idmrg_ground_state: n_uc>2 (got {}) is not supported yet -- "
+            "see this module's docstring".format(n_uc))
+    if maxiter < 2:
+        # The energy *density* is a finite difference between two
+        # consecutive macro-iterations' local ground-state eigenvalues
+        # (see the loop below), so it is structurally undefined before a
+        # second macro-iteration has run -- confirmed directly: maxiter=0
+        # left IDMRGResult.e0=None with niter_done=1 (misreporting that an
+        # iteration ran), and maxiter=1 likewise returned e0=None with no
+        # error, only surfacing later as a confusing AttributeError deep
+        # inside a subsequent vev()/correlator() call.
+        raise ValueError(
+            "idmrg_ground_state: maxiter must be >= 2 (energy density is "
+            "a finite difference between two macro-iterations), got {}".format(maxiter))
     sites_uc, W_bulk = _build_automaton(h_intra_op, h_inter_op, site_types, n_uc)
     W_start0 = _project_channel(W_bulk[0], "left", 0)          # 0 = "S"
     W_endlast = _project_channel(W_bulk[n_uc - 1], "right", 1)  # 1 = "F"

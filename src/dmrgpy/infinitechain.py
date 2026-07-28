@@ -78,6 +78,12 @@ def _canonicalize_hamiltonian(h, n_uc):
     < n_uc) never has to special-case it."""
     intra_terms, inter_terms = [], []
     for term in h.op:
+        distinct_sites = {site for _name, site in term[1:]}
+        if len(distinct_sites) > 2:
+            raise ValueError(
+                "Infinite_Many_Body_Chain.set_hamiltonian: a term touches "
+                "more than 2 distinct sites ({}) -- only 1- and 2-site "
+                "terms are supported".format(term))
         groups = _term_groups(term, n_uc)
         if "L" in groups and "R" in groups:
             raise ValueError(
@@ -86,8 +92,17 @@ def _canonicalize_hamiltonian(h, n_uc):
                 "({}) -- only couplings between at most two adjacent unit "
                 "cells are supported".format(term))
         if "L" in groups:
+            # groups is a subset of {L,C} here (L+R together already
+            # raised above) -- shifting every site by +n_uc moves an
+            # L-range site (-n_uc<=site<0) into the C range and a
+            # C-range site (0<=site<n_uc) into the R range, so *both*
+            # labels advance one step, not just L. Leaving an original
+            # "C" labeled "C" post-shift mis-filed e.g. SxL[0]*SxC[0]
+            # (n_uc=2) under h_intra as ['Sx',0],['Sx',2] -- a term that
+            # actually touches the next cell (site 2 >= n_uc) -- instead
+            # of h_inter, violating this function's own documented split.
             term = [term[0]] + [[name, site + n_uc] for name, site in term[1:]]
-            groups = {("C" if g == "L" else g) for g in groups}
+            groups = {{"L": "C", "C": "R"}[g] for g in groups}
         if groups == {"R"}:
             term = [term[0]] + [[name, site - n_uc] for name, site in term[1:]]
             groups = {"C"}
@@ -135,7 +150,12 @@ class Infinite_Many_Body_Chain:
         self.cutoff = 1e-12     # SVD truncation
         self.maxiter = 200      # iDMRG macro-iterations (growth steps)
         self.etol = 1e-10       # energy-density convergence tolerance
-        self.niter = 30         # per-micro-step Lanczos iteration count
+        self.niter = 30         # per-micro-step Lanczos iteration count --
+                                 # note idmrg.py's _local_two_site_solve
+                                 # always runs at least 200 (a validated,
+                                 # load-bearing floor, see its own comment),
+                                 # so any value <=200 here has no effect;
+                                 # only raising it above 200 does anything
         self.verbose = False
 
         self.hamiltonian = None  # user-facing MultiOperator (L/C/R indices)
@@ -164,6 +184,22 @@ class Infinite_Many_Body_Chain:
         """h: a MultiOperator built from this chain's SxL/SxC/SxR-style
         (or get_operator(...,group=...)-built) operators -- see this
         module's docstring for the validity/canonicalization rules."""
+        # NOTE: v1 is Hermitian-only (see this module's docstring) and
+        # idmrg_ground_state has no Hermiticity check of its own, unlike
+        # the finite-chain path (groundstate.py), which gates on
+        # MultiOperator.is_hermitian() and routes a non-Hermitian
+        # Hamiltonian to a dedicated NH-DMRG solver instead -- a real gap
+        # for this module. A symbolic is_hermitian() check was tried here
+        # and reverted: confirmed directly (also on an ordinary *finite*
+        # Spin_Chain, so this is a pre-existing, general limitation, not
+        # specific to this module) that is_hermitian()'s simplify() step
+        # does not recognize that reversing a product of operators on
+        # *different* sites (as get_dagger() does) gives an equivalent
+        # term to the un-reversed original, so it false-rejects an
+        # ordinary Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j] Heisenberg term --
+        # the single most common Hamiltonian shape this module exists to
+        # support. Left as a known, documented gap rather than shipping
+        # that regression.
         h = multioperator.obj2MO(h)
         self._h_intra, self._h_inter = _canonicalize_hamiltonian(h, self.n_uc)
         self.hamiltonian = h
@@ -193,10 +229,13 @@ class Infinite_Many_Body_Chain:
         translational invariance this is identical for every group, `group`
         is accepted purely so callers can write whichever reads most
         naturally (SxL/SxC/SxR all describe the same infinite chain)."""
-        if self._result is None:
-            self.gs_energy()
         if group not in ("L", "C", "R"):
             raise ValueError("vev: group must be 'L', 'C' or 'R', got {!r}".format(group))
+        if not (0 <= p < self.n_uc):
+            raise ValueError("vev: p must be in 0..{} (n_uc-1), got {!r}".format(
+                self.n_uc - 1, p))
+        if self._result is None:
+            self.gs_energy()
         from .pyitensor import idmrg
         return idmrg.onsite_expectation(self._result, opname, p)
 
@@ -204,6 +243,9 @@ class Infinite_Many_Body_Chain:
         """<opname_i(site p_i) opname_j(site p_i + r)>, r measured in
         physical sites (r>=0) -- see pyitensor.idmrg.two_point_correlator
         for the r=0 (same-site) convention."""
+        if not (0 <= p_i < self.n_uc):
+            raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
+                self.n_uc - 1, p_i))
         if self._result is None:
             self.gs_energy()
         from .pyitensor import idmrg
