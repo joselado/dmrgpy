@@ -25,6 +25,9 @@ import pytest
 from dmrgpy import cppext
 from dmrgpy import infinitechain
 from dmrgpy import spinchain
+from dmrgpy.pyitensor import idmrg
+from dmrgpy.pyitensor.index import Index
+from dmrgpy.pyitensor.tensor import ITensor
 
 EXACT_HEISENBERG_DENSITY = 0.25 - np.log(2)
 
@@ -296,3 +299,283 @@ def test_l_and_r_in_same_term_rejected():
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
     with pytest.raises(ValueError):
         ic.set_hamiltonian(ic.SxL[0] * ic.SxR[0])
+
+
+# -- idmrg.apply_mpo: applying a periodic (bounded) MPO to the converged
+# iMPS -- see idmrg.py's own "Applying a (bounded) MPO to the converged
+# iMPS" section docstring for the algorithm and its scope restriction
+# (bounded/local operators only, not idmrg.py's own extensive Hamiltonian
+# automaton). These go through pyitensor.idmrg directly (not
+# infinitechain.py, which has no public wrapper for this yet) --
+# tests/test_metts_vev.py and others already establish that reaching into
+# dmrgpy.pyitensor submodules directly from a test is a normal pattern
+# here, not a workaround.
+
+def _identity_mpo(sites_uc, n_uc):
+    """chi_W=1 automaton: Id at every site, sharing sites_uc's own physical
+    Indices (required, see grow_by_mpo's docstring)."""
+    W = []
+    for p in range(n_uc):
+        d = sites_uc.dim(p + 1)
+        s = sites_uc.si(p + 1)
+        link_l = Index(1, tags="Link")
+        link_r = Index(1, tags="Link")
+        arr = np.eye(d, dtype=complex).reshape(1, d, d, 1)
+        W.append(ITensor((link_l, s, s.prime(1), link_r), arr))
+    # wraparound: every site's own fresh links are fine independently
+    # (chi_W=1 throughout, so there is nothing to actually connect).
+    return W
+
+
+def _single_site_operator_mpo(sites_uc, n_uc, opname, p_active):
+    """chi_W=1 automaton: `opname`'s matrix at sublattice p_active, Id
+    everywhere else -- the simplest genuinely non-trivial bounded MPO."""
+    W = []
+    for p in range(n_uc):
+        d = sites_uc.dim(p + 1)
+        s = sites_uc.si(p + 1)
+        mat = sites_uc.site_type(p + 1).matrix(opname) if p == p_active else np.eye(d, dtype=complex)
+        link_l = Index(1, tags="Link")
+        link_r = Index(1, tags="Link")
+        W.append(ITensor((link_l, s, s.prime(1), link_r), mat.reshape(1, d, d, 1)))
+    return W
+
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_apply_mpo_identity_is_noop(n_uc):
+    """Applying the identity MPO must reproduce every existing observable
+    to numerical precision -- isolates the canonicalization machinery
+    (grow_by_mpo + _canonicalize_periodic) from any MPO-construction
+    question, since chi_W=1 Id trivially can't grow the bond dimension."""
+    ic, _ = _converged_uniform_chain(n_uc, maxm=20)
+    W = _identity_mpo(ic._result.sites_uc, n_uc)
+    new_result = idmrg.apply_mpo(ic._result, W, cutoff=1e-12, maxdim=None)
+    assert new_result.eta == pytest.approx(1.0, abs=1e-8)
+    for p in range(n_uc):
+        orig = idmrg.onsite_expectation(ic._result, "Sz", p)
+        new = idmrg.onsite_expectation(new_result, "Sz", p)
+        assert new == pytest.approx(orig, abs=1e-8)
+        for r in range(3):
+            orig_c = idmrg.two_point_correlator(ic._result, "Sz", p, "Sz", r)
+            new_c = idmrg.two_point_correlator(new_result, "Sz", p, "Sz", r)
+            assert new_c == pytest.approx(orig_c, abs=1e-8)
+
+
+def test_apply_mpo_pauli_x_flips_sz():
+    """Pauli-X (2*Sx for spin-1/2) at every site is unitary and chi_W=1 --
+    applying it must flip <Sz> -> -<Sz> exactly and leave <Sz(0)Sz(r)>
+    unchanged exactly (two flipped operators multiply back to the
+    original sign), a strong, closed-form check unrelated to any
+    numerical oracle."""
+    ic, _ = _converged_uniform_chain(1, maxm=20)
+    sites_uc = ic._result.sites_uc
+    d = sites_uc.dim(1)
+    pauli_x = 2 * sites_uc.site_type(1).matrix("Sx")
+    assert np.allclose(pauli_x @ pauli_x.conj().T, np.eye(d), atol=1e-10)
+    link_l, link_r = Index(1, tags="Link"), Index(1, tags="Link")
+    s = sites_uc.si(1)
+    W = [ITensor((link_l, s, s.prime(1), link_r), pauli_x.reshape(1, d, d, 1))]
+
+    new_result = idmrg.apply_mpo(ic._result, W, cutoff=1e-12, maxdim=None)
+    assert new_result.eta == pytest.approx(1.0, abs=1e-8)
+
+    orig_sz = idmrg.onsite_expectation(ic._result, "Sz", 0)
+    new_sz = idmrg.onsite_expectation(new_result, "Sz", 0)
+    assert new_sz == pytest.approx(-orig_sz, abs=1e-8)
+    for r in range(1, 3):
+        orig_c = idmrg.two_point_correlator(ic._result, "Sz", 0, "Sz", r)
+        new_c = idmrg.two_point_correlator(new_result, "Sz", 0, "Sz", r)
+        assert new_c == pytest.approx(orig_c, abs=1e-8)
+
+
+def test_apply_mpo_two_site_gate_preserves_norm():
+    """A genuinely bond-dimension>1 local gate (an SVD-split 2-site
+    unitary rotation, tiled once per unit cell on the intra-cell bond
+    only -- identity on the inter-cell bond, so this is a bounded/local
+    operator, not idmrg.py's own extensive Hamiltonian automaton) --
+    exercises the actual bond-growth path (grow_by_mpo produces a raw,
+    non-canonical bond) unlike the chi_W=1 tests above, which barely
+    touch _canonicalize_periodic's fixed-point machinery. Being unitary,
+    it must preserve the norm (apply_mpo's own `eta` diagnostic ~1);
+    _canonicalize_periodic's internal left-canonicality check (raises
+    RuntimeError if it fails) is the other half of this test, implicitly
+    exercised by apply_mpo not raising."""
+    from scipy.linalg import expm
+
+    n_uc = 2
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
+         + 0.4 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
+    ic.maxm = 4
+    ic.maxiter = 100
+    ic.etol = 1e-12
+    ic.set_hamiltonian(h)
+    ic.gs_energy()
+
+    sites_uc = ic._result.sites_uc
+    d = sites_uc.dim(1)
+    Sx = sites_uc.site_type(1).matrix("Sx")
+    Sy = sites_uc.site_type(1).matrix("Sy")
+    Sz = sites_uc.site_type(1).matrix("Sz")
+    H2 = (np.kron(Sx, Sx) + np.kron(Sy, Sy) + np.kron(Sz, Sz)).real
+    gate = expm(-1j * 0.37 * H2)  # d^2 x d^2 unitary 2-site rotation
+    gate4 = np.transpose(gate.reshape(d, d, d, d), (2, 0, 3, 1))  # (s0,s0',s1,s1')
+    U, S, Vh = np.linalg.svd(gate4.reshape(d * d, d * d), full_matrices=False)
+    keep = int(np.sum(S > 1e-12))
+    U, S, Vh = U[:, :keep], S[:keep], Vh[:keep, :]
+    a_half = (U * S[None, :] ** 0.5).reshape(d, d, keep)
+    b_half = (S[:, None] ** 0.5 * Vh).reshape(keep, d, d)
+
+    s0, s1 = sites_uc.si(1), sites_uc.si(2)
+    left_dummy, mid, right_dummy = (Index(1, tags="Link"), Index(keep, tags="Link"),
+                                     Index(1, tags="Link"))
+    W0 = ITensor((left_dummy, s0, s0.prime(1), mid), a_half.reshape(1, d, d, keep))
+    W1 = ITensor((mid, s1, s1.prime(1), right_dummy), b_half.reshape(keep, d, d, 1))
+
+    new_result = idmrg.apply_mpo(ic._result, [W0, W1], cutoff=1e-10, maxdim=None)
+    assert new_result.eta == pytest.approx(1.0, abs=1e-6)
+
+
+def test_grow_by_mpo_rejects_mismatched_length():
+    ic, _ = _converged_uniform_chain(2, maxm=8)
+    W = _identity_mpo(ic._result.sites_uc, 2)
+    with pytest.raises(ValueError):
+        idmrg.grow_by_mpo(W[:1], ic._result.U_list, 2)
+
+
+# -- idmrg.imps_overlap: per-site overlap/fidelity between two converged
+# infinite MPS -- see idmrg.py's own docstring for the mixed-transfer-matrix
+# construction and the physical meaning of the normalized (per-site
+# fidelity) vs raw (normalize=False) return value.
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_imps_overlap_self_is_one(n_uc):
+    """<psi|psi> per site must be exactly 1 (up to numerical precision),
+    both normalized (the default) and raw (normalize=False, since a
+    converged IDMRGResult.U_list is already left-canonical, so its own
+    self-overlap transfer eigenvalue is already 1 without needing the
+    normalization division)."""
+    ic, _ = _converged_uniform_chain(n_uc, maxm=20)
+    ov = idmrg.imps_overlap(ic._result, ic._result)
+    assert ov == pytest.approx(1.0, abs=1e-8)
+    ov_raw = idmrg.imps_overlap(ic._result, ic._result, normalize=False)
+    assert ov_raw == pytest.approx(1.0, abs=1e-8)
+
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_imps_overlap_identity_mpo_preserves_state(n_uc):
+    """Applying the identity MPO must reproduce the same physical state up
+    to gauge -- |imps_overlap| between the original and the identity-MPO'd
+    copy must be exactly 1, a gauge-independent cross-check complementing
+    test_apply_mpo_identity_is_noop's own per-observable comparison."""
+    ic, _ = _converged_uniform_chain(n_uc, maxm=20)
+    W = _identity_mpo(ic._result.sites_uc, n_uc)
+    new_result = idmrg.apply_mpo(ic._result, W, cutoff=1e-12, maxdim=None)
+    ov = idmrg.imps_overlap(ic._result, new_result)
+    assert abs(ov) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_imps_overlap_orthogonal_polarized_states_near_zero():
+    """Two independently-converged n_uc=1 chains with a strong onsite field
+    pinned to opposite Sz polarization converge to (near-exact) product
+    states |up> and |down>, which are exactly orthogonal -- |imps_overlap|
+    must be ~0, regardless of the fact that the two chains were never
+    built or grown together. This exercises the same onsite-field
+    machinery whose real bug (see _build_periodic_mpo's own docstring) was
+    found and fixed while writing this test."""
+    ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
+    ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
+    ic_up.gs_energy()
+
+    ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
+    ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
+    ic_down.gs_energy()
+
+    ov = idmrg.imps_overlap(ic_up._result, ic_down._result)
+    assert abs(ov) == pytest.approx(0.0, abs=1e-8)
+
+
+def test_imps_overlap_rejects_n_uc_mismatch():
+    ic1, _ = _converged_uniform_chain(1, maxm=8)
+    ic2, _ = _converged_uniform_chain(2, maxm=8)
+    with pytest.raises(ValueError):
+        idmrg.imps_overlap(ic1._result, ic2._result)
+
+
+def test_imps_overlap_rejects_dimension_mismatch():
+    """Different local Hilbert-space dimensions per sublattice (spin-1/2
+    vs spin-1) is a meaningless overlap -- must raise, not silently
+    contract mismatched-size physical legs."""
+    ic_half = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_half.maxm, ic_half.maxiter, ic_half.etol = 4, 20, 1e-8
+    ic_half.set_hamiltonian(ic_half.SxC[0] * ic_half.SxR[0]
+                             + ic_half.SyC[0] * ic_half.SyR[0]
+                             + ic_half.SzC[0] * ic_half.SzR[0])
+    ic_half.gs_energy()
+
+    ic_one = infinitechain.Infinite_Spin_Chain(["1"])
+    ic_one.maxm, ic_one.maxiter, ic_one.etol = 4, 20, 1e-8
+    ic_one.set_hamiltonian(ic_one.SxC[0] * ic_one.SxR[0]
+                            + ic_one.SyC[0] * ic_one.SyR[0]
+                            + ic_one.SzC[0] * ic_one.SzR[0])
+    ic_one.gs_energy()
+
+    with pytest.raises(ValueError):
+        idmrg.imps_overlap(ic_half._result, ic_one._result)
+
+
+# -- Regression tests for a real bug found while writing the imps_overlap
+# tests above: _build_periodic_mpo wired a Hamiltonian's onsite terms onto
+# the automaton's F,F self-loop instead of a direct S,F transition -- see
+# that function's own docstring for the full derivation. This silently
+# dropped onsite terms entirely for any bond-less Hamiltonian, and caused
+# an exponential energy blow-up once at least one bond term was also
+# present (both confirmed directly before the fix).
+
+def test_onsite_field_matches_exact_solution():
+    """A pure onsite (Zeeman-field) Hamiltonian with no bond term at all is
+    exactly solvable (a decoupled product state at every site): the ground
+    state aligns <Sz> with sign(B) (to minimize H=-B*Sz), so e0 must be
+    -|B|/2 and <Sz> must be sign(B)*0.5 exactly, for either field
+    direction. Before the fix, e0 stayed exactly 0 and <Sz> ~ 0 for every
+    field strength tried, since W stayed block-diagonal between S and F
+    with no bond term ever able to activate F -- confirmed directly."""
+    for B in (5.0, -5.0, 2.0):
+        ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+        ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
+        ic.set_hamiltonian(-B * ic.SzC[0])
+        e0 = ic.gs_energy()
+        assert e0 == pytest.approx(-abs(B) / 2, abs=1e-6)
+        sz = ic.vev("Sz", 0)
+        assert sz.real == pytest.approx(0.5 if B > 0 else -0.5, abs=1e-6)
+
+
+def test_onsite_field_with_bonds_does_not_diverge():
+    """A small field added to an otherwise-normal (bond-coupled,
+    dimerized) n_uc=2 chain must converge to a finite energy density --
+    before the fix, once the bond term activated the automaton's F
+    channel, every further absorbed site re-added the field content on top
+    of the already-accumulated total (multiplicative, not additive):
+    confirmed directly, energy density reached -1e23 at B=0.3 and -1e69 at
+    B=1.0, with `.converged` staying False throughout. This dimerized
+    model is gapped, so a field well below its gap should leave the energy
+    density unchanged from B=0 (confirmed reproducible to ~1e-13 run over
+    run at this exact configuration) -- a much stronger check than merely
+    "finite"."""
+    def density_at(B):
+        ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+        h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
+             + 0.5 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
+             - B * (ic.SzC[0] + ic.SzC[1]))
+        ic.maxm, ic.maxiter, ic.etol = 20, 100, 1e-11
+        ic.set_hamiltonian(h)
+        e0 = ic.gs_energy()
+        assert ic.converged
+        return e0
+
+    d0 = density_at(0.0)
+    d1 = density_at(0.2)
+    assert np.isfinite(d1) and abs(d1) < 10  # rules out the 1e23-scale blow-up
+    assert d1 == pytest.approx(d0, abs=1e-6)
