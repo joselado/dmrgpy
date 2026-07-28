@@ -291,14 +291,72 @@ object, not a \texttt{Many\_Body\_Chain} subclass:
 DMRG/ED, a fixed \texttt{self.ns}-length site list,
 KPM/dynamics/entanglement/excited-states machinery) assumes a
 \emph{finite} chain throughout, and none of that has any meaning for a
-translationally-invariant, infinite unit-cell chain. Only
-\texttt{itensor\_version="python"} is supported (constructing anything
-else raises \texttt{NotImplementedError}) -- infinite DMRG (iDMRG) has
-no C++/Julia backend yet. The public surface is deliberately narrow:
-\texttt{set\_hamiltonian}, \texttt{gs\_energy} (energy \emph{per site},
-the physically meaningful quantity for an infinite system), and static
-\texttt{vev}/\texttt{correlator} -- no excited states, no dynamics, no
-entanglement/entropy in v1.
+translationally-invariant, infinite unit-cell chain.
+\texttt{itensor\_version="python"} (default) or \texttt{3} are supported
+(constructing anything else raises \texttt{NotImplementedError}) --
+\texttt{2} and \texttt{"julia\_live"} have no iDMRG port. The public
+surface is deliberately narrow: \texttt{set\_hamiltonian},
+\texttt{gs\_energy} (energy \emph{per site}, the physically meaningful
+quantity for an infinite system), and static \texttt{vev}/\texttt{correlator}
+-- no excited states, no dynamics, no entanglement/entropy in v1.
+
+\textbf{Backend dispatch, unlike the finite-chain \texttt{mode.py}, is
+explicit rather than automatic}: \texttt{gs\_energy} branches directly on
+\texttt{self.itensor\_version} rather than falling back silently (there's
+no ED oracle for an infinite system to fall back \emph{to}).
+\texttt{itensor\_version="python"} runs \texttt{pyitensor/idmrg.py}'s own
+growing algorithm (see below) and keeps the resulting
+\texttt{IDMRGResult} in \texttt{self.\_result} for
+\texttt{vev}/\texttt{correlator} to reuse. \texttt{itensor\_version=3}
+instead calls the compiled \texttt{mpscpp3} backend's
+\texttt{Chain::idmrg\_ground\_state} directly -- a line-by-line C++ port
+of the same algorithm (built from the start with fresh Index objects on
+every automaton tensor to sidestep the duplicate-Index bug class
+described below, rather than needing the same retrofit) -- for the
+energy density only; it has no static-correlator support, so
+\texttt{self.\_result} is left \texttt{None} on that path and
+\texttt{vev}/\texttt{correlator} raise \texttt{NotImplementedError}
+regardless of whether \texttt{gs\_energy} itself already ran
+successfully. Benchmarked (S=1/2 uniform Heisenberg chain,
+\texttt{maxm=30}, \texttt{maxiter=60}, \texttt{etol=1e-9}): v3 is
+$\sim$2.6--2.7x slower than \texttt{"python"} at both \texttt{n\_uc=1}
+and \texttt{n\_uc=2}, with energy-density agreement between the two
+backends to $\sim$1e-8. This is the \emph{gapless} (critical) case, the
+hardest for any Krylov-based local solve since the correlation length
+diverges and the local 2-site Arnoldi solve genuinely needs close to
+its full \texttt{krylovdim} to converge at every macro-iteration
+(confirmed by direct instrumentation) -- for a \emph{gapped} model the
+same local solve typically converges in far fewer Krylov vectors, and
+v3 can end up \emph{faster} than \texttt{"python"} (confirmed directly
+on a dimerized \texttt{n\_uc=2} chain: v3 0.08s vs \texttt{"python"}
+0.23s at \texttt{maxm=30}, \texttt{maxiter=60}). This asymmetry is
+\texttt{arnoldi\_smallest\_real}'s own \texttt{early\_tol} early-exit at
+work (see its own doc comment): every pre-existing caller of that
+shared Arnoldi routine (\texttt{nhdmrg\_one\_sweep}) opts out
+(\texttt{early\_tol<0}, the default) and is completely unaffected; only
+\texttt{idmrg\_local\_solve}'s own call opts in, checking the same
+residual-tolerance criterion the between-restart check already
+trusted, just checked incrementally (every 3rd Krylov-vector addition,
+from \texttt{m>=8} on) instead of only once a full
+\texttt{krylovdim}-size subspace has been built -- mathematically the
+same "stop once already converged" logic the pre-existing "happy
+breakdown" branch already relied on (an exactly-zero residual), just
+generalized to a tolerance. \texttt{TagSet} string-tag parsing
+(\texttt{"Site"}/\texttt{"Link"}/\texttt{"a"}) was also confirmed by
+profiling to be a real, multi-percent cost on its own (repeated on
+every Krylov iteration and every micro-step) and is now cached in
+function-local statics instead of re-parsed per call.
+\texttt{Chain::idmrg\_ground\_state} is reached by constructing a
+\texttt{Chain} directly from the unit cell's own
+\texttt{site\_types} (\texttt{cppext.get\_backend(3).Chain(self.site\_types)}),
+the same low-level pattern \texttt{nhdmrg.py} uses for its own
+compiled-backend calls (\texttt{H.to\_terms()} fed straight into
+\texttt{self.\_session.<method>(...)}) -- terms are shifted from
+\texttt{infinitechain.py}'s own 0-based \texttt{h\_intra}/\texttt{h\_inter}
+site convention to the codebase's usual 1-based one via the same
+\texttt{MultiOperator.to\_terms()} every other compiled backend call
+already uses (no separate Jordan-Wigner transform, since iDMRG doesn't
+support fermionic terms yet on either backend).
 
 The Hamiltonian is built from
 \texttt{SxL[i]}/\texttt{SxC[i]}/\texttt{SxR[i]}-suffixed operators
@@ -1655,7 +1713,7 @@ the second-order term above, needing no excited-state enumeration
 either, and no new DMRG-side primitive. Verified (\texttt{mode="ED"},
 \texttt{submode="ED"}) against the excited-state-sum
 \texttt{conductance.third\_order\_potential\_dIdV} to $\sim0.07\%$
-relative error (\texttt{tests/test\_kondo\_spectrum\_potentialdc.py}); a
+relative error (\texttt{tests/test\_kondo\_spectrum\allowbreak\_potentialdc.py}); a
 real \texttt{mode="DMRG"}, \texttt{submode="KPM"} run through the full
 public API was tried directly but found impractically expensive for a
 routine test -- a single KPM dynamical-correlator call took $\sim40$s on
@@ -1664,7 +1722,7 @@ confirmed directly -- so the
 \texttt{Spin\_Chain.\_get\_kondo\_spectrum\_dmrg} wiring that combines
 this term with the other two is instead checked with the three
 underlying (expensive) calls monkeypatched out
-(\texttt{tests/test\_kondo\_spectrum.py::test\_get\_kondo\_spectrum\_dmrg\_combines\_terms\_correctly}).
+(\texttt{tests/test\_kondo\_spectrum.py::\allowbreak test\_get\_kondo\_spectrum\_dmrg\allowbreak\_combines\_terms\_correctly}).
 
 \subsection{TDZ / complex-time-evolution dynamical correlator}
 
@@ -1854,7 +1912,7 @@ Path & Contents \\
 \endhead
 \texttt{src/dmrgpy/} & the Python library \\
 \texttt{src/dmrgpy/manybodychain.py} & \texttt{Many\_Body\_Chain}, the shared base class \\
-\texttt{src/dmrgpy/infinitechain.py}, \texttt{pyitensor/idmrg.py} & \texttt{Infinite\_Many\_Body\_Chain} and infinite DMRG (iDMRG), pyitensor-only \\
+\texttt{src/dmrgpy/infinitechain.py}, \texttt{pyitensor/idmrg.py}, \texttt{mpscpp3/chain\_session.h} & \texttt{Infinite\_Many\_Body\_Chain} and infinite DMRG (iDMRG), pyitensor + ITensor v3 (energy density only on v3) \\
 \texttt{src/dmrgpy/multioperator.py}, \texttt{multioperatortk/} & backend-agnostic operator representation \\
 \texttt{src/dmrgpy/mode.py}, \texttt{cppext.py} & DMRG/ED and backend dispatch \\
 \texttt{src/dmrgpy/mpscpp2/}, \texttt{mpscpp3/} & vendored ITensor C++ (v2, v3) + pybind11 bindings \\

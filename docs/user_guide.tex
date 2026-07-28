@@ -1758,9 +1758,27 @@ chain that repeats a fixed-size \textbf{unit cell} forever in both
 directions, and solve it with infinite DMRG (iDMRG, White's growing
 algorithm generalized to a multi-site unit cell) rather than sweeping a
 fixed-length system. Currently limited to a 1- or 2-site unit cell
-(\texttt{n\_uc<=2}) and the pure-Python \texttt{pyitensor} backend -- a
-$>$2-site unit cell raises \texttt{NotImplementedError} at construction,
-see \texttt{pyitensor/idmrg.py}'s module docstring for why.
+(\texttt{n\_uc<=2}) -- a $>$2-site unit cell raises
+\texttt{NotImplementedError} at construction, see
+\texttt{pyitensor/idmrg.py}'s module docstring for why.
+
+\texttt{itensor\_version="python"} (default) or \texttt{3} are both
+supported (pass it as a constructor keyword, e.g.\
+\texttt{Infinite\_Spin\_Chain(["1/2"], itensor\_version=3)}) -- \texttt{2}
+and \texttt{"julia\_live"} have no iDMRG port and also raise
+\texttt{NotImplementedError}. The v3 C++ backend
+(\texttt{mpscpp3/chain\_session.h}'s \texttt{Chain::idmrg\_ground\_state},
+a line-by-line port of \texttt{pyitensor/idmrg.py}'s own growing
+algorithm) computes the energy density only;
+\texttt{vev}/\texttt{correlator} still require
+\texttt{itensor\_version="python"} regardless of which backend
+\texttt{gs\_energy} itself was run with, since v3 has no
+static-correlator machinery yet. Relative speed depends on the model:
+v3 is $\sim$2.6--2.7x slower than \texttt{"python"} for a gapless
+(critical) chain (the local 2-site solve needs close to its full
+Krylov dimension every macro-iteration), but can be \emph{faster} for
+a gapped model, where that same solve converges quickly -- see
+\texttt{docs/documentation.tex}'s iDMRG section for benchmark numbers.
 
 \textbf{Building the Hamiltonian: \texttt{L}/\texttt{C}/\texttt{R}-suffixed
 operators.} Instead of one operator list per absolute site index, an
@@ -1822,7 +1840,12 @@ more reliably.
 \textbf{Static correlators.} After \texttt{gs\_energy()} (called
 automatically by \texttt{vev}/\texttt{correlator} if not already run),
 one- and two-point expectation values of the converged infinite chain are
-available via the standard infinite-MPS transfer-matrix formalism:
+available via the standard infinite-MPS transfer-matrix formalism. Only
+\texttt{itensor\_version="python"} supports this -- calling
+\texttt{vev}/\texttt{correlator} on an \texttt{itensor\_version=3} chain
+raises \texttt{NotImplementedError} (even after a successful
+\texttt{gs\_energy()}), since the v3 backend has no correlator machinery
+yet:
 
 \begin{lstlisting}
 ic.vev("Sz", 0)                    # <Sz> at site 0 of the unit cell
