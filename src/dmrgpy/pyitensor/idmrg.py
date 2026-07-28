@@ -114,7 +114,15 @@ loop can sum an unbounded number of repeats at fixed bond dimension.
    local ground-state eigenvalue between consecutive macro-iterations,
    divided by 2*n_uc (exactly the number of new physical sites per
    macro-iteration), is compared against `etol` -- the standard infinite-
-   algorithm energy-density diagnostic.
+   algorithm energy-density diagnostic. This is an *energy* criterion only:
+   see `_local_two_site_solve`'s and `IDMRGResult.state_overlap`'s own
+   docstrings for why energy-density convergence alone does not guarantee
+   `U_list` itself has settled into a self-consistent, translationally-
+   invariant unit cell (a real, previously-unfixed bug for gapless/
+   SU(2)-symmetric models -- fixed by warm-starting each macro-iteration's
+   local solve from the previous one's own local ground vector, see point
+   3's own solve step and `state_overlap` for the diagnostic that confirms
+   it).
 
 == Static correlators ==
 
@@ -499,18 +507,40 @@ def _extend_HR(HR, HR_bra, W_p, V, right_ket_old, left_ket_new):
 
 def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
                            W_pR, phys_R, HR, HR_bra, HR_ket,
-                           cutoff, maxdim, niter):
+                           cutoff, maxdim, niter, x0_warm=None):
     """One micro-step's local ground-state solve: the effective 2-site
     Hamiltonian sandwiched by (HL, W_pL, W_pR, HR), diagonalized via the
     same matvec+Lanczos machinery as dmrg.py's own two_site_heff/
-    _local_ground_state (see this module's docstring) -- but with no
-    pre-existing ket tensor to seed the local guess from (there is no
-    "previous sweep" here, every micro-step inserts brand-new sites), so
-    the Lanczos start vector is always a fresh random one, matching how
-    randomMPS() itself starts finite DMRG from a generic point rather than
-    a product state (see CLAUDE.md's note on why mpscpp3/pyitensor never
-    seed DMRG from a product state). Returns (energy, U, S, V) -- the SVD
-    split of the local ground state, truncated to (cutoff, maxdim)."""
+    _local_ground_state (see this module's docstring). Unlike finite DMRG's
+    ket-tensor warm start (`two_site_heff`'s own `x0`), there is no
+    persistent ket object here to read a warm start off directly -- every
+    micro-step inserts brand-new *physical sites*, so there is no "this
+    exact tensor, one sweep ago" to reuse. But the *shape* of the local
+    eigenproblem at a given unit-cell position is identical macro-iteration
+    to macro-iteration once bond dimension saturates at `maxdim`, so the
+    caller (`idmrg_ground_state`) instead threads through the previous
+    macro-iteration's own flattened ground vector at this same position as
+    `x0_warm`, reused here as the Lanczos start whenever its size matches
+    the current local dimension (falling back to a fresh random vector
+    otherwise, e.g. before bond dimension has saturated). This is not
+    cosmetic: an earlier, always-fresh-random version of this function let
+    Lanczos land on an arbitrary member of a (near-)degenerate local ground
+    manifold every macro-iteration (routine for gapless/SU(2)-symmetric
+    models) -- the reported *energy* still converged fine (a degenerate
+    manifold shares one eigenvalue) but `U_list` kept jumping between
+    different members of that manifold instead of settling into one
+    self-consistent, translationally-invariant state, corrupting every
+    downstream static correlator (confirmed directly: the <H_uc>
+    self-consistency identity, which any genuinely converged unit cell must
+    satisfy exactly, was off by 0.4-0.6 -- not shrinking with `maxiter`, and
+    not fixed by best-of-6 independent random-seed reruns, ruling out
+    ordinary seed noise as the explanation). Warm-starting instead biases
+    each macro-iteration's solve toward continuity with the previous one,
+    letting the sequence of local ground states converge to a fixed member
+    of the manifold. Returns (energy, U, S, V, evec0) -- the SVD split of
+    the local ground state (truncated to (cutoff, maxdim)) plus the raw,
+    un-truncated flattened ground vector for the *next* macro-iteration's
+    own warm start."""
     order_in = ([HL_ket] if HL_ket is not None else []) + [phys_L, phys_R] + \
                ([HR_ket] if HR_ket is not None else [])
     shape = tuple(ind.dim for ind in order_in)
@@ -529,13 +559,25 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
         w, v = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
         eval0, evec0 = w[0], v[:, 0]
     else:
-        rng = np.random.default_rng()
-        v0 = rng.standard_normal(dim) + 1j * rng.standard_normal(dim)
+        # x0_warm is a flat array positionally aligned with `order_in`
+        # (see idmrg_ground_state's own comment) -- its size, not the
+        # identity of the Index objects behind `shape`, is what matters
+        # here (the same positional-reuse convention this module's
+        # _project_channel/_relabel_pos already rely on for other reasons).
+        if x0_warm is not None and x0_warm.size == dim:
+            norm = np.linalg.norm(x0_warm)
+            v0 = x0_warm / norm if norm > 0 else None
+        else:
+            v0 = None
+        if v0 is None:
+            rng = np.random.default_rng()
+            v0 = rng.standard_normal(dim) + 1j * rng.standard_normal(dim)
         # Same niter floor as dmrg.py's _local_ground_state -- flagged there
         # as load-bearing (dropping it caused real, measured convergence
-        # regressions), and there is even less "warm start from a nearly-
-        # converged sweep" margin here than in finite DMRG, since every
-        # micro-step's local problem starts from a fresh random vector.
+        # regressions); still applied here even with a warm start, since a
+        # warm start only biases *which* near-degenerate solution Lanczos
+        # converges to, not how many iterations that convergence itself
+        # needs.
         eval0, evec0 = _lanczos_ground_state(matvec, v0, niter=max(niter, 200))
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
@@ -560,7 +602,7 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
     # of a simple test case, and using plain U/V (this function's current
     # form) restores both exact agreement with independent ED at small
     # sizes and strict monotonicity at every iteration checked.
-    return float(eval0.real), U, S, V
+    return float(eval0.real), U, S, V, evec0
 
 
 class IDMRGResult:
@@ -570,15 +612,29 @@ class IDMRGResult:
     (U_list[p], p=0..n_uc-1) -- a good approximation to the converged
     infinite chain's own canonical unit-cell MPS tensors, since by the
     last macro-iteration HL/HR are themselves converged to (near-)
-    translational invariance."""
+    translational invariance.
 
-    def __init__(self, sites_uc, n_uc, U_list, e0, converged, niter_done):
+    `state_overlap` is a diagnostic, not used by `.converged` (which
+    remains a pure energy-density criterion, unchanged): the smallest
+    (worst) per-sublattice normalized overlap
+    `abs(<evec0_prev|evec0_new>)` between the final macro-iteration's own
+    warm-started local ground vector (see `_local_two_site_solve`) and the
+    one it was warm-started from, across all n_uc unit-cell positions.
+    Close to 1 means the local ground states have actually stopped
+    changing (a genuinely self-consistent, translationally-invariant unit
+    cell -- the condition static correlators need), not just that the
+    energy density has. `None` if unavailable (e.g. `niter_done` too
+    small for every position to have been warm-started at least once)."""
+
+    def __init__(self, sites_uc, n_uc, U_list, e0, converged, niter_done,
+                 state_overlap=None):
         self.sites_uc = sites_uc
         self.n_uc = n_uc
         self.U_list = U_list
         self.e0 = e0
         self.converged = converged
         self.niter_done = niter_done
+        self.state_overlap = state_overlap
 
 
 def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
@@ -635,8 +691,18 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     U_list = [None] * n_uc
     converged = False
     macro_iter = 0
+    # prev_local[mstep]: the flattened local ground vector produced at this
+    # unit-cell position by the *previous* macro-iteration, threaded back in
+    # as the next macro-iteration's own Lanczos warm start -- see
+    # _local_two_site_solve's own docstring for why. state_overlap tracks
+    # how much the warm-started solve actually changed relative to what it
+    # started from, refreshed every macro-iteration so the value returned
+    # at the end always reflects the last macro-iteration actually run.
+    prev_local = [None] * n_uc
+    state_overlap = None
 
     for macro_iter in range(maxiter):
+        overlaps_this_iter = []
         for mstep in range(n_uc):
             p_L = mstep
             p_R = n_uc - 1 - mstep
@@ -675,10 +741,17 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
             phys_L = _unprimed_site_index(W_pL)
             phys_R = _unprimed_site_index(W_pR)
 
-            energy, U, S, V = _local_two_site_solve(
+            energy, U, S, V, evec0 = _local_two_site_solve(
                 HL, HL_bra, HL_ket, W_pL, phys_L,
                 W_pR, phys_R, HR, HR_bra, HR_ket,
-                cutoff=cutoff, maxdim=maxm, niter=niter)
+                cutoff=cutoff, maxdim=maxm, niter=niter,
+                x0_warm=prev_local[mstep])
+            if prev_local[mstep] is not None and prev_local[mstep].size == evec0.size:
+                denom = np.linalg.norm(prev_local[mstep]) * np.linalg.norm(evec0)
+                if denom > 0:
+                    overlaps_this_iter.append(
+                        abs(np.vdot(prev_local[mstep], evec0)) / denom)
+            prev_local[mstep] = evec0
 
             left_ket_old, right_ket_old = HL_ket, HR_ket
             new_bond_u, new_bond_v = U.inds[-1], V.inds[0]
@@ -702,11 +775,12 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
 
             U_list[p_L] = U
 
+        state_overlap = min(overlaps_this_iter) if overlaps_this_iter else None
         density = ((energy - prev_energy) / (2 * n_uc)
                    if prev_energy is not None else None)
         if verbose:
-            print("idmrg macro-iter {}: E={} density={}".format(
-                macro_iter, energy, density))
+            print("idmrg macro-iter {}: E={} density={} state_overlap={}".format(
+                macro_iter, energy, density, state_overlap))
         if (density is not None and prev_density is not None
                 and abs(density - prev_density) < etol):
             prev_energy, prev_density = energy, density
@@ -718,7 +792,8 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
         print("idmrg_ground_state: reached maxiter={} without converging "
               "to etol={} (last density change available)".format(maxiter, etol))
 
-    return IDMRGResult(sites_uc, n_uc, U_list, prev_density, converged, macro_iter + 1)
+    return IDMRGResult(sites_uc, n_uc, U_list, prev_density, converged,
+                        macro_iter + 1, state_overlap=state_overlap)
 
 
 # -- static correlators, via the standard infinite-MPS transfer-matrix

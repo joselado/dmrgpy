@@ -88,13 +88,18 @@ def test_unit_cell_expectation_self_consistency():
     correlator formulas themselves are exact (both intra-cell and
     inter-cell/wraparound correlators matched -0.75 and 0 to machine
     precision there), ruling out a correlator-formula bug as the cause of
-    the gap this test tolerates. DMRG never seeds Lanczos from a product
-    state here (see CLAUDE.md), so the *size* of that gap varies
-    noticeably run to run at fixed (maxm, maxiter) -- observed anywhere
-    from ~3e-3 to ~2e-2 across different random seeds at this exact
-    configuration -- hence the generous tolerance below; it still
-    confirms the identity holds in the right ballpark and with the right
-    sign, which a genuine correlator bug would not survive.
+    the gap this test tolerates. `idmrg_ground_state`'s local 2-site solve
+    is now warm-started from the previous macro-iteration's own local
+    ground vector at the same unit-cell position (see
+    `_local_two_site_solve`'s own docstring) specifically to damp this kind
+    of run-to-run drift, but this *dimerized* (gapped) model was never the
+    badly-broken case that fix targets -- confirmed directly, post-fix gaps
+    here (3 trials: 0.004, 0.004, 0.008) land squarely inside the same
+    ~3e-3 to ~2e-2 range observed before the fix, not dramatically tighter
+    -- so the tolerance below is left as-is rather than over-tightened on
+    thin evidence. The *uniform* (undimerized) n_uc=2 chain is where the
+    fix's effect is large and reproducible, see
+    `test_n_uc2_uniform_expectation_self_consistency` below.
 
     maxm=8 (well below this model's natural, cutoff-set bond dimension of
     ~11-12) is deliberately small: it makes truncation land exactly on
@@ -127,6 +132,46 @@ def test_unit_cell_expectation_self_consistency():
         for name in ("Sx", "Sy", "Sz"):
             total += ic.correlator(name, i, name, 1).real
     assert total == pytest.approx(n_uc * ic.e0, abs=5e-2)
+
+
+def test_n_uc2_uniform_expectation_self_consistency():
+    """Same <H_uc> self-consistency identity as
+    test_unit_cell_expectation_self_consistency, but for the *uniform*
+    (undimerized) n_uc=2 Heisenberg chain -- the regime where
+    `idmrg_ground_state`'s warm-started local solve (see
+    `_local_two_site_solve`'s own docstring) makes a large, reproducible
+    difference. Before that fix, this exact configuration gave gaps of
+    0.338-0.398 across independent runs (uniformly bad, not noise around a
+    correct value -- confirmed by a best-of-6-seeds experiment that still
+    landed 0.38-0.60 every time). After the fix, 7 independent trials all
+    landed at <=0.0511 (several essentially exact, ~2e-6), a qualitative
+    change, not just a quantitative improvement -- `abs=0.1` below sits
+    comfortably above every trial observed post-fix while remaining well
+    below the pre-fix range, so this test would fail on the old,
+    always-fresh-random-restart behavior.
+
+    Unlike the dimerized test above, `n_uc=1` is deliberately *not* also
+    covered here: the same warm-start fix does not resolve n_uc=1's own
+    analogous gap (confirmed directly: it stays in the 0.4-1.8 range, and
+    IDMRGResult.state_overlap plateaus around 0.5-0.65 rather than trending
+    toward 1 even after 80 macro-iterations) -- a distinct, still-open
+    limitation isolated to n_uc=1's structurally unique micro-step (p_L
+    always equals p_R there, unlike n_uc=2 where they never coincide; see
+    idmrg.py's own `_fresh_physical_copy`)."""
+    n_uc = 2
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
+         + ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
+    ic.maxm = 30
+    ic.maxiter = 100
+    ic.etol = 1e-14  # forces the full 100 iterations
+    ic.set_hamiltonian(h)
+    ic.gs_energy()
+    total = 0.0
+    for i in range(n_uc):
+        for name in ("Sx", "Sy", "Sz"):
+            total += ic.correlator(name, i, name, 1).real
+    assert total == pytest.approx(n_uc * ic.e0, abs=0.1)
 
 
 def test_n_uc2_dimerized_chain_matches_finite_size_extrapolation():
