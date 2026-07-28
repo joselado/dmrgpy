@@ -1541,6 +1541,8 @@ h = ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0] + ic.SzC[0]*ic.SzR[0]  # NN Heisen
 ic.set_hamiltonian(h)
 ```
 
+A bare, single-site operator (e.g. `ic.SzC[0]`, no product) is also a valid term — a Zeeman-field-style onsite Hamiltonian, either on its own or added alongside bond terms.
+
 A two-site unit cell can express a dimerized (alternating-bond) chain, and a coupling can skip over an intermediate site by reaching straight from `C` to `R`:
 
 ```python
@@ -1591,3 +1593,15 @@ idmrg.onsite_expectation(new_state, "Sz", 0)               # <Sz> of the new sta
 **Scope restriction — bounded operators only.** `W_bulk` must represent a *bounded* (non-extensive) periodic operator: the same tensor reused at every unit cell, with no unconditional "keep accumulating forever" self-loop — single-site products (as above), gates tiled once per unit cell (an SVD-split 2-site gate embedded with identity everywhere else), symmetry operators, and the like. `pyitensor/idmrg.py`'s own Hamiltonian automaton (built internally by `_build_periodic_mpo` for `gs_energy()`) is deliberately the *other* kind — its accumulator channel needs a genuine chain boundary to correctly represent an extensive sum, so feeding it into `apply_mpo`'s boundary-less periodic contraction does not compute "H|psi>" (see `pyitensor/idmrg.py`'s own "Applying a (bounded) MPO to the converged iMPS" section docstring for the specific failure mode). This makes `apply_mpo` the natural building block for e.g. an iTEBD-style real/imaginary-time evolution step (repeatedly apply a local Trotter gate + truncate) — not yet implemented as a public feature, but `apply_mpo` is exactly the primitive it would use.
 
 `W_bulk`'s physical Indices must be the *same objects* as `result.sites_uc`'s own (`sites_uc.si(i+1)`), so a custom operator automaton must be built against `result.sites_uc` directly (as in the example above), not a freshly constructed `SiteX`. The truncation/regauging step's own numerical conditioning degrades the further the *raw* grown bond dimension (`chi_A * chi_W`, before any truncation) exceeds the state's real entanglement at that cut — keep `maxm`/`maxdim` modest relative to `chi_W` for the best-conditioned result.
+
+**Overlap/fidelity between two converged infinite MPS (advanced).** `pyitensor.idmrg.imps_overlap(result_a, result_b, normalize=True)` computes the per-unit-cell overlap between two `IDMRGResult`/`PeriodicMPS` objects — the infinite-chain notion of a finite MPS inner product `<phi|psi>`. A literal `<phi|psi>` over an infinite chain is not, in general, a finite number (it scales as `eta**N` over `N` unit cells, `N -> infinity`, where `eta` is the dominant eigenvalue of the mixed transfer matrix built from the two states' own tensors), so by default `imps_overlap` returns the always-finite *per-site fidelity* instead — magnitude 1 iff the two iMPS represent the same physical state (any gauge or normalization convention on the raw tensors), magnitude `<1` otherwise:
+
+```python
+from dmrgpy.pyitensor import idmrg
+
+idmrg.imps_overlap(ic._result, ic._result)          # 1 -- same state
+idmrg.imps_overlap(ic._result, new_state)            # cross-check apply_mpo didn't change the physical state
+idmrg.imps_overlap(ic._result, some_other_result)    # < 1 in magnitude for a genuinely different state
+```
+
+`result_a`/`result_b` must share the same `n_uc` and, at every sublattice position, the same local physical dimension — `imps_overlap` raises `ValueError` otherwise. The two states' bond dimensions need *not* match (e.g. comparing a ground state against an `apply_mpo` output truncated to a different `maxdim`). Pass `normalize=False` for the raw, un-normalized mixed-transfer eigenvalue instead — mainly a diagnostic, analogous to `apply_mpo`'s own returned `.eta`.

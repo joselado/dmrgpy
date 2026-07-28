@@ -386,6 +386,61 @@ boundary to mean "sum", not "product") and is not a valid `apply_mpo`
 input; see `idmrg.py`'s own "Applying a (bounded) MPO to the converged
 iMPS" section docstring for the specific failure mode this would hit.
 
+**Overlap between two converged iMPS**: `idmrg.py` also implements
+`imps_overlap(result_a, result_b, normalize=True)` — the thermodynamic-
+limit analogue of a finite MPS inner product. Since a literal
+`<phi|psi>` over an infinite chain scales as `eta**N` over `N` unit
+cells (not a finite number unless `|eta|==1` exactly), the default
+return value is instead the *per-site fidelity*
+`eta_ab/sqrt(eta_aa*eta_bb)`, where `eta_ab` is the dominant eigenvalue
+of the *mixed* transfer matrix built from the two states' own tensors
+(`_transfer_matrices` generalized with a new optional `bra_list`
+parameter, defaulting to the self-overlap case every existing caller
+still uses) and `eta_aa`/`eta_bb` are each state's own self-overlap
+(via the existing `_dominant_right_fixed_point`, reused verbatim — valid
+since a self-overlap transfer tensor is always square). The mixed case
+needed a dedicated eigen-solve, `_dominant_eigenvalue_mixed`, rather
+than reusing `_dominant_right_fixed_point` directly: two independently
+converged/truncated iMPS need not share a bond dimension, so the
+composed mixed transfer tensor is `(chi_a,chi_b,chi_a,chi_b)`, square
+only in the `chi_a==chi_b` self-overlap special case
+`_dominant_right_fixed_point` itself assumes.
+
+**A second, real bug found while implementing `imps_overlap`** (needed a
+Hamiltonian with an onsite/field term to exercise a meaningfully
+non-trivial "orthogonal states" test case, which surfaced two bugs in
+`_build_periodic_mpo`'s onsite-term handling, both pre-dating and
+unrelated to `imps_overlap` itself): `_onsite_matrix`'s own unpacking
+loop expected 3-tuples (`rel_site, coef, mat`) but `_build_periodic_mpo`
+had already consumed `rel_site` as its `onsite_by_p` dict key, storing
+only `(coef, mat)` pairs — a `ValueError: not enough values to unpack`
+for *any* Hamiltonian with an onsite term (dead code before this, since
+every existing test used bond-only Hamiltonians). Fixing just that
+crash would have been unsafe: the underlying automaton wiring was also
+wrong. Onsite content was added on the accumulator's own `F,F`
+self-loop (`Id + onsite_mat`) rather than a direct `S,F` transition — no
+existing branch ever populates `S,F` at all, so (1) for a bond-less
+Hamiltonian, `W` stays block-diagonal between `{S}` and `{F,...}`
+forever, and the boundary-extracted `<S|W^N|F>` (exactly what
+`_project_channel`'s boundary tensors compute) is identically 0 for
+every `N` — confirmed directly: a pure-field `n_uc=1` chain converged to
+energy density 0 and `<Sz>~0` regardless of field strength, instead of
+the exact, closed-form `-|B|/2`/`sign(B)*0.5`; and (2) once a bond term
+*did* activate `F`, every further site absorbed while `F` was already
+hot re-added the onsite content on top of an already-summed running
+total (an exponential, multiplicative blow-up, not the intended linear
+sum) — confirmed directly: energy density reached `-1e23` by `B=0.3` and
+`-1e69` by `B=1.0` on an otherwise-normal dimerized `n_uc=2` chain, with
+`.converged` staying `False` throughout instead of a modest,
+field-dependent shift. The fix moves the onsite content onto the direct
+`S,F` transition (leaving `F,F` as plain `Id`) — the standard textbook
+automaton-MPO construction for summing an onsite term into a running
+total (the same upper-triangular-in-channel-index structure any
+finite-range Hamiltonian MPO derivation uses), verified both by a
+by-hand matrix-product induction argument and numerically (the same
+field tests above now reproduce the exact closed-form field-only result
+and a finite, converging energy density with a bond term present).
+
 ### 4.2 Operator representation: `MultiOperator`
 
 Hamiltonians and observables are built as `MultiOperator` objects

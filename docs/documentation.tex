@@ -488,6 +488,69 @@ valid \texttt{apply\_mpo} input; see \texttt{idmrg.py}'s own ``Applying
 a (bounded) MPO to the converged iMPS'' section docstring for the
 specific failure mode this would hit.
 
+\textbf{Overlap between two converged iMPS}: \texttt{idmrg.py} also
+implements \texttt{imps\_overlap(result\_a, result\_b, normalize=True)}
+-- the thermodynamic-limit analogue of a finite MPS inner product. Since
+a literal $\langle\phi|\psi\rangle$ over an infinite chain scales as
+$\eta^N$ over $N$ unit cells (not a finite number unless $|\eta|=1$
+exactly), the default return value is instead the \emph{per-site
+fidelity} \texttt{eta\_ab/sqrt(eta\_aa*eta\_bb)}, where \texttt{eta\_ab}
+is the dominant eigenvalue of the \emph{mixed} transfer matrix built
+from the two states' own tensors (\texttt{\_transfer\_matrices}
+generalized with a new optional \texttt{bra\_list} parameter, defaulting
+to the self-overlap case every existing caller still uses) and
+\texttt{eta\_aa}/\texttt{eta\_bb} are each state's own self-overlap (via
+the existing \texttt{\_dominant\_right\_fixed\_point}, reused verbatim
+-- valid since a self-overlap transfer tensor is always square). The
+mixed case needed a dedicated eigen-solve,
+\texttt{\_dominant\_eigenvalue\_mixed}, rather than reusing
+\texttt{\_dominant\_right\_fixed\_point} directly: two independently
+converged/truncated iMPS need not share a bond dimension, so the
+composed mixed transfer tensor is
+\texttt{(chi\_a,chi\_b,chi\_a,chi\_b)}, square only in the
+\texttt{chi\_a==chi\_b} self-overlap special case
+\texttt{\_dominant\_right\_fixed\_point} itself assumes.
+
+\textbf{A second, real bug found while implementing \texttt{imps\_overlap}}
+(needed a Hamiltonian with an onsite/field term to exercise a
+meaningfully non-trivial ``orthogonal states'' test case, which
+surfaced two bugs in \texttt{\_build\_periodic\_mpo}'s onsite-term
+handling, both pre-dating and unrelated to \texttt{imps\_overlap}
+itself): \texttt{\_onsite\_matrix}'s own unpacking loop expected
+3-tuples (\texttt{rel\_site, coef, mat}) but \texttt{\_build\_periodic\_mpo}
+had already consumed \texttt{rel\_site} as its \texttt{onsite\_by\_p}
+dict key, storing only \texttt{(coef, mat)} pairs -- a
+\texttt{ValueError: not enough values to unpack} for \emph{any}
+Hamiltonian with an onsite term (dead code before this, since every
+existing test used bond-only Hamiltonians). Fixing just that crash
+would have been unsafe: the underlying automaton wiring was also wrong.
+Onsite content was added on the accumulator's own \texttt{F,F}
+self-loop (\texttt{Id + onsite\_mat}) rather than a direct
+\texttt{S,F} transition -- no existing branch ever populates
+\texttt{S,F} at all, so (1) for a bond-less Hamiltonian, \texttt{W}
+stays block-diagonal between $\{S\}$ and $\{F,\ldots\}$ forever, and the
+boundary-extracted $\langle S|W^N|F\rangle$ (exactly what
+\texttt{\_project\_channel}'s boundary tensors compute) is identically
+0 for every $N$ -- confirmed directly: a pure-field \texttt{n\_uc=1}
+chain converged to energy density 0 and $\langle S_z\rangle\sim0$
+regardless of field strength, instead of the exact, closed-form
+$-|B|/2$/$\mathrm{sign}(B)\cdot0.5$; and (2) once a bond term \emph{did}
+activate \texttt{F}, every further site absorbed while \texttt{F} was
+already hot re-added the onsite content on top of an already-summed
+running total (an exponential, multiplicative blow-up, not the intended
+linear sum) -- confirmed directly: energy density reached $-10^{23}$ by
+$B=0.3$ and $-10^{69}$ by $B=1.0$ on an otherwise-normal dimerized
+\texttt{n\_uc=2} chain, with \texttt{.converged} staying \texttt{False}
+throughout instead of a modest, field-dependent shift. The fix moves
+the onsite content onto the direct \texttt{S,F} transition (leaving
+\texttt{F,F} as plain \texttt{Id}) -- the standard textbook
+automaton-MPO construction for summing an onsite term into a running
+total (the same upper-triangular-in-channel-index structure any
+finite-range Hamiltonian MPO derivation uses), verified both by a
+by-hand matrix-product induction argument and numerically (the same
+field tests above now reproduce the exact closed-form field-only result
+and a finite, converging energy density with a bond term present).
+
 \subsection{Operator representation: \texttt{MultiOperator}}
 
 Hamiltonians and observables are built as \texttt{MultiOperator} objects

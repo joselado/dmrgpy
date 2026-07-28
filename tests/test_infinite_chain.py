@@ -396,3 +396,141 @@ def test_grow_by_mpo_rejects_mismatched_length():
     W = _identity_mpo(ic._result.sites_uc, 2)
     with pytest.raises(ValueError):
         idmrg.grow_by_mpo(W[:1], ic._result.U_list, 2)
+
+
+# -- idmrg.imps_overlap: per-site overlap/fidelity between two converged
+# infinite MPS -- see idmrg.py's own docstring for the mixed-transfer-matrix
+# construction and the physical meaning of the normalized (per-site
+# fidelity) vs raw (normalize=False) return value.
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_imps_overlap_self_is_one(n_uc):
+    """<psi|psi> per site must be exactly 1 (up to numerical precision),
+    both normalized (the default) and raw (normalize=False, since a
+    converged IDMRGResult.U_list is already left-canonical, so its own
+    self-overlap transfer eigenvalue is already 1 without needing the
+    normalization division)."""
+    ic, _ = _converged_uniform_chain(n_uc, maxm=20)
+    ov = idmrg.imps_overlap(ic._result, ic._result)
+    assert ov == pytest.approx(1.0, abs=1e-8)
+    ov_raw = idmrg.imps_overlap(ic._result, ic._result, normalize=False)
+    assert ov_raw == pytest.approx(1.0, abs=1e-8)
+
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_imps_overlap_identity_mpo_preserves_state(n_uc):
+    """Applying the identity MPO must reproduce the same physical state up
+    to gauge -- |imps_overlap| between the original and the identity-MPO'd
+    copy must be exactly 1, a gauge-independent cross-check complementing
+    test_apply_mpo_identity_is_noop's own per-observable comparison."""
+    ic, _ = _converged_uniform_chain(n_uc, maxm=20)
+    W = _identity_mpo(ic._result.sites_uc, n_uc)
+    new_result = idmrg.apply_mpo(ic._result, W, cutoff=1e-12, maxdim=None)
+    ov = idmrg.imps_overlap(ic._result, new_result)
+    assert abs(ov) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_imps_overlap_orthogonal_polarized_states_near_zero():
+    """Two independently-converged n_uc=1 chains with a strong onsite field
+    pinned to opposite Sz polarization converge to (near-exact) product
+    states |up> and |down>, which are exactly orthogonal -- |imps_overlap|
+    must be ~0, regardless of the fact that the two chains were never
+    built or grown together. This exercises the same onsite-field
+    machinery whose real bug (see _build_periodic_mpo's own docstring) was
+    found and fixed while writing this test."""
+    ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
+    ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
+    ic_up.gs_energy()
+
+    ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
+    ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
+    ic_down.gs_energy()
+
+    ov = idmrg.imps_overlap(ic_up._result, ic_down._result)
+    assert abs(ov) == pytest.approx(0.0, abs=1e-8)
+
+
+def test_imps_overlap_rejects_n_uc_mismatch():
+    ic1, _ = _converged_uniform_chain(1, maxm=8)
+    ic2, _ = _converged_uniform_chain(2, maxm=8)
+    with pytest.raises(ValueError):
+        idmrg.imps_overlap(ic1._result, ic2._result)
+
+
+def test_imps_overlap_rejects_dimension_mismatch():
+    """Different local Hilbert-space dimensions per sublattice (spin-1/2
+    vs spin-1) is a meaningless overlap -- must raise, not silently
+    contract mismatched-size physical legs."""
+    ic_half = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_half.maxm, ic_half.maxiter, ic_half.etol = 4, 20, 1e-8
+    ic_half.set_hamiltonian(ic_half.SxC[0] * ic_half.SxR[0]
+                             + ic_half.SyC[0] * ic_half.SyR[0]
+                             + ic_half.SzC[0] * ic_half.SzR[0])
+    ic_half.gs_energy()
+
+    ic_one = infinitechain.Infinite_Spin_Chain(["1"])
+    ic_one.maxm, ic_one.maxiter, ic_one.etol = 4, 20, 1e-8
+    ic_one.set_hamiltonian(ic_one.SxC[0] * ic_one.SxR[0]
+                            + ic_one.SyC[0] * ic_one.SyR[0]
+                            + ic_one.SzC[0] * ic_one.SzR[0])
+    ic_one.gs_energy()
+
+    with pytest.raises(ValueError):
+        idmrg.imps_overlap(ic_half._result, ic_one._result)
+
+
+# -- Regression tests for a real bug found while writing the imps_overlap
+# tests above: _build_periodic_mpo wired a Hamiltonian's onsite terms onto
+# the automaton's F,F self-loop instead of a direct S,F transition -- see
+# that function's own docstring for the full derivation. This silently
+# dropped onsite terms entirely for any bond-less Hamiltonian, and caused
+# an exponential energy blow-up once at least one bond term was also
+# present (both confirmed directly before the fix).
+
+def test_onsite_field_matches_exact_solution():
+    """A pure onsite (Zeeman-field) Hamiltonian with no bond term at all is
+    exactly solvable (a decoupled product state at every site): the ground
+    state aligns <Sz> with sign(B) (to minimize H=-B*Sz), so e0 must be
+    -|B|/2 and <Sz> must be sign(B)*0.5 exactly, for either field
+    direction. Before the fix, e0 stayed exactly 0 and <Sz> ~ 0 for every
+    field strength tried, since W stayed block-diagonal between S and F
+    with no bond term ever able to activate F -- confirmed directly."""
+    for B in (5.0, -5.0, 2.0):
+        ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+        ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
+        ic.set_hamiltonian(-B * ic.SzC[0])
+        e0 = ic.gs_energy()
+        assert e0 == pytest.approx(-abs(B) / 2, abs=1e-6)
+        sz = ic.vev("Sz", 0)
+        assert sz.real == pytest.approx(0.5 if B > 0 else -0.5, abs=1e-6)
+
+
+def test_onsite_field_with_bonds_does_not_diverge():
+    """A small field added to an otherwise-normal (bond-coupled,
+    dimerized) n_uc=2 chain must converge to a finite energy density --
+    before the fix, once the bond term activated the automaton's F
+    channel, every further absorbed site re-added the field content on top
+    of the already-accumulated total (multiplicative, not additive):
+    confirmed directly, energy density reached -1e23 at B=0.3 and -1e69 at
+    B=1.0, with `.converged` staying False throughout. This dimerized
+    model is gapped, so a field well below its gap should leave the energy
+    density unchanged from B=0 (confirmed reproducible to ~1e-13 run over
+    run at this exact configuration) -- a much stronger check than merely
+    "finite"."""
+    def density_at(B):
+        ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+        h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
+             + 0.5 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
+             - B * (ic.SzC[0] + ic.SzC[1]))
+        ic.maxm, ic.maxiter, ic.etol = 20, 100, 1e-11
+        ic.set_hamiltonian(h)
+        e0 = ic.gs_energy()
+        assert ic.converged
+        return e0
+
+    d0 = density_at(0.0)
+    d1 = density_at(0.2)
+    assert np.isfinite(d1) and abs(d1) < 10  # rules out the 1e23-scale blow-up
+    assert d1 == pytest.approx(d0, abs=1e-6)

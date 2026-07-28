@@ -268,9 +268,19 @@ def _onsite_matrix(onsite_by_p, p, d):
     None if there is none (kept separate from np.zeros so callers can
     tell "no onsite term here" from "an onsite term that happens to be
     the zero matrix", and so the "F->F" self-loop's mandatory Id doesn't
-    need a redundant +0)."""
+    need a redundant +0).
+
+    `onsite_by_p[p]` holds (coef, mat) pairs -- `rel_site` (`_classify_terms`'
+    own 3rd list entry) is already consumed as this dict's own key by
+    `_build_periodic_mpo`, not carried into each stored tuple. A previous
+    version of this loop unpacked 3 values here (`for _rel, coef, m in ...`)
+    -- a leftover from `_classify_terms`' own (rel_site, coef, mat) shape
+    that was never updated to match -- which raised `ValueError: not enough
+    values to unpack` for *any* Hamiltonian containing an onsite term (bond-
+    only Hamiltonians never populate onsite_by_p, so every existing test
+    happened to avoid this path); confirmed directly and fixed here."""
     mat = None
-    for _rel, coef, m in onsite_by_p.get(p, []):
+    for coef, m in onsite_by_p.get(p, []):
         mat = coef * m if mat is None else mat + coef * m
     return mat
 
@@ -299,10 +309,63 @@ def _build_periodic_mpo(h_intra_op, h_inter_op, sites_uc, n_uc):
     - "S" (index 0): self-loops via Id, and is the *only* channel a new
       2-site term may start from. Nothing ever transitions into S from
       anywhere else, so it always carries pure, unweighted Id content --
-      never contaminated by whatever has already been accumulated.
-    - "F" (index 1, the accumulator): self-loops via Id (picking up any
-      onsite term along the way), and receives completed pending
-      channels. Deliberately *cannot* start a new term itself.
+      never contaminated by whatever has already been accumulated. Also
+      the *only* channel a site's own onsite term may start from, via a
+      direct S->F transition (see the "S,F" case below) -- an onsite term
+      is, in automaton terms, a "bond" that starts and completes on the
+      very same site.
+    - "F" (index 1, the accumulator): self-loops via plain Id (nothing
+      added -- see below for why), and receives completed pending
+      channels *and* direct onsite completions from S. Deliberately
+      *cannot* start a new term itself.
+
+    A site's own onsite term must live on the direct "S,F" transition, NOT
+    added onto "F,F"'s own self-loop (an earlier, wrong version of this
+    function did exactly that -- `mat = Id; if onsite_mat is not None: mat
+    += onsite_mat` on the F,F entry). Two independent things go wrong with
+    putting it there instead of on S,F:
+
+    1. No branch below ever actually sets the "S,F" entry (every existing
+       branch requires `rch`/`lch` to be a pending-channel tuple, never
+       bare "S" or "F"), so with F,F holding the onsite content, W stays
+       *block-diagonal* between {S} and {F,pending...} for any Hamiltonian
+       with no bond terms at all (confirmed directly: S,F and F,S both
+       stay exactly 0 in that case) -- and a matrix power/product of a
+       block-diagonal matrix stays block-diagonal forever, so <S|W^N|F>
+       (exactly what the growing algorithm's boundary projections extract,
+       see `_project_channel`) is identically 0 for every N, silently
+       dropping every onsite term entirely. Confirmed directly: a bare
+       field Hamiltonian (`-B*SzC[0]`, n_uc=1, no bond term) converged to
+       energy density 0 and <Sz>~0 regardless of B, instead of the exact
+       B/2 (fully polarized, since a field-only Hamiltonian is exactly
+       solvable).
+    2. Once at least one bond term *does* eventually activate F (a
+       completed pending channel), every *further* site absorbed while F
+       is already hot picks up "Id+onsite_mat" again on top of whatever HL
+       already represents -- but HL's own recursive `_extend_HL` already
+       carries the *entire* accumulated-so-far MPO-chain product as a live
+       tensor leg (not a collapsed scalar), so this re-adds that site's
+       onsite content into an already-summed F channel instead of summing
+       it in exactly once via its own site's S->F transition -- an
+       exponential (multiplicative-in-effect) blow-up, not a linear
+       (additive) one. Confirmed directly: an n_uc=2 XXZ chain with a
+       small field (`-0.1*(SzC[0]+SzC[1])` added to an otherwise-normal
+       bond Hamiltonian) reported energy densities of -1.3e7, then -1.4e23
+       at B=0.3, -3.6e37 at B=0.5, -1.3e69 at B=1.0 -- diverging, not
+       converging, with `.converged` staying False throughout -- instead
+       of a finite, B-dependent shift of the B=0 energy density. The fix
+       (S,F direct transition carrying onsite_mat, plain Id with no
+       addition on F,F) is exactly the standard textbook automaton-MPO
+       construction for summing an onsite term into a running total (the
+       same upper-triangular-in-channel-index structure any finite-range
+       Hamiltonian MPO derivation uses, e.g. the familiar bond-dimension-5
+       NN Heisenberg-plus-field MPO's own field entry) -- verified by hand
+       for the matrix-product identity this construction relies on
+       (an upper-triangular [[Id,h],[0,Id]]-per-site chain product's own
+       top-right entry sums exactly sum_i h_i, by induction on chain
+       length) and confirmed numerically: the same field test above now
+       reproduces the field=0 energy density plus the expected
+       field-induced shift, converging cleanly for every B tried.
 
     Two earlier, both wrong, designs were tried and are worth recording
     here since the failure modes were not obvious in advance:
@@ -384,8 +447,13 @@ def _build_periodic_mpo(h_intra_op, h_inter_op, sites_uc, n_uc):
                     mat = np.eye(d, dtype=complex)
                 elif lch == F and rch == F:
                     mat = np.eye(d, dtype=complex)
+                elif lch == S and rch == F:
+                    # this site's own onsite term: starts and completes in
+                    # one step, direct from S into the accumulator (see
+                    # this function's own docstring for why this, not
+                    # adding onsite_mat onto the F,F self-loop, is correct).
                     if onsite_mat is not None:
-                        mat = mat + onsite_mat
+                        mat = onsite_mat
                 elif lch == S and rch not in (S, F):
                     # a new pending channel starts here -- from S only
                     # (never from F, see this function's own docstring)
@@ -754,17 +822,30 @@ def _to_array_lpr(U):
     return U.array.reshape((1,) + U.array.shape)
 
 
-def _transfer_matrices(U_list, n_uc):
-    """[E_p] for p=0..n_uc-1, each a (chi_l,chi_l,chi_r,chi_r) array: the
-    doubled ket-times-conj(ket) transfer tensor for the (left-canonical, or
-    -- for apply_mpo's use -- raw not-yet-canonical) tensor at sublattice p.
-    Takes a plain tensor list rather than an IDMRGResult so apply_mpo's own
-    canonicalization can reuse it on its own intermediate (not-yet-converged
-    IDMRGResult) tensors too."""
+def _transfer_matrices(U_list, n_uc, bra_list=None):
+    """[E_p] for p=0..n_uc-1, each a (chi_l,chi_l,chi_r,chi_r) array (or
+    (chi_l_ket,chi_l_bra,chi_r_ket,chi_r_bra) when `bra_list` differs from
+    `U_list` -- see below): the doubled ket-times-conj(bra) transfer tensor
+    for the tensor at sublattice p. Takes a plain tensor list rather than an
+    IDMRGResult so apply_mpo's own canonicalization can reuse it on its own
+    intermediate (not-yet-converged IDMRGResult) tensors too.
+
+    `bra_list=None` (the default, used by every caller except
+    `imps_overlap`) means the ordinary *self*-overlap transfer tensor,
+    ket-times-conj(same tensor) -- what onsite_expectation/
+    two_point_correlator/_canonicalize_periodic all need. Passing a
+    *different* periodic tensor list computes the *mixed* transfer tensor
+    between two distinct states instead -- what `imps_overlap` needs to
+    compute <bra|ket> between two independently converged iMPS, which may
+    not even share a bond dimension (hence the four-way (l_ket,l_bra,r_ket,
+    r_bra) shape above, only square in the self-overlap case)."""
+    if bra_list is None:
+        bra_list = U_list
     Es = []
     for p in range(n_uc):
         A = _to_array_lpr(U_list[p])
-        Es.append(np.einsum('lpr,LpR->lLrR', A, np.conj(A)))
+        Bc = _to_array_lpr(bra_list[p])
+        Es.append(np.einsum('lpr,LpR->lLrR', A, np.conj(Bc)))
     return Es
 
 
@@ -881,6 +962,97 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
         result.sites_uc, result.U_list, p_j, opname_j))
     val = _apply_transfer(running, rho_after[p_j])
     return complex(np.trace(val))
+
+
+def _dominant_eigenvalue_mixed(Es):
+    """Dominant eigenvalue of the full unit-cell *mixed* transfer matrix
+    T=E_0...E_{n_uc-1}, generalizing `_dominant_right_fixed_point`'s own
+    eigen-solve to the case where the ket and bra tensor lists don't share
+    a single common bond dimension -- exactly the case `imps_overlap` needs
+    (the two states being overlapped may have been converged/truncated to
+    different maxm). Unlike `_dominant_right_fixed_point`, this does not
+    require T4's four legs to all share one size, only that the *ket*'s own
+    wraparound bond (legs 0 and 2) and the *bra*'s own wraparound bond (legs
+    1 and 3) are each individually self-consistent -- the two need not
+    match each other. Returns only the eigenvalue: `imps_overlap` has no
+    use for the fixed-point vector itself, unlike the correlator machinery
+    that consumes `_dominant_right_fixed_point`'s own rho."""
+    T4 = Es[0]
+    for E in Es[1:]:
+        T4 = _compose(T4, E)
+    chi_ket, chi_bra = T4.shape[0], T4.shape[1]
+    if T4.shape != (chi_ket, chi_bra, chi_ket, chi_bra):
+        raise RuntimeError(
+            "idmrg imps_overlap: a state's own wraparound bond dimension "
+            "is inconsistent (mixed transfer tensor shape {}) -- same "
+            "failure mode _dominant_right_fixed_point already guards "
+            "against for a single state, see its own comment".format(T4.shape))
+    Tmat = T4.reshape(chi_ket * chi_bra, chi_ket * chi_bra)
+    w = np.linalg.eigvals(Tmat)
+    return w[np.argmax(np.abs(w))]
+
+
+def imps_overlap(result_a, result_b, normalize=True):
+    """Per-unit-cell overlap <result_b|result_a> between two converged
+    infinite MPS (`result_a`/`result_b`: IDMRGResult and/or PeriodicMPS, any
+    combination -- both are accepted anywhere that only reads
+    .sites_uc/.n_uc/.U_list, matching onsite_expectation/
+    two_point_correlator's own duck typing).
+
+    A literal <psi_b|psi_a> over an infinite chain is not, in general, a
+    finite number: it factorizes into one power of the dominant *mixed*
+    transfer-matrix eigenvalue eta_ab (see `_dominant_eigenvalue_mixed`)
+    per unit cell, so <psi_b|psi_a> ~ eta_ab^N is 0 or infinite as N (the
+    number of unit cells) -> infinity, unless |eta_ab|==1 exactly. The
+    physically meaningful, always-finite quantity is instead the *per-site
+    fidelity*
+
+        eta_ab / sqrt(eta_aa * eta_bb)
+
+    where eta_aa/eta_bb are `result_a`/`result_b`'s own self-overlap
+    eigenvalues (exactly 1 for a properly left-canonical U_list -- which is
+    what both idmrg_ground_state and apply_mpo always return -- but
+    computed here rather than assumed, so this also works on a hand-built
+    or un-normalized PeriodicMPS). This per-site fidelity has magnitude 1
+    iff `result_a` and `result_b` represent the same physical state (any
+    gauge, any normalization convention on the raw tensors), and magnitude
+    < 1 otherwise -- a transfer-matrix Cauchy-Schwarz bound that holds
+    because every U_list tensor produced by this module is isometric/
+    left-canonical. This is the standard iMPS notion of state overlap
+    (e.g. used for fidelity susceptibility across a phase transition, or to
+    check that `apply_mpo` with an identity-equivalent operator reproduced
+    the original state up to gauge -- see test_imps_overlap_* in
+    tests/test_infinite_chain.py). Pass normalize=False for the raw,
+    un-normalized eta_ab instead -- mainly a diagnostic, analogous to
+    apply_mpo's own returned `eta` (which is exactly this function's
+    would-be eta_aa, applied to apply_mpo's output against itself).
+
+    Requires both states to share the same n_uc and, at every sublattice
+    position, the same local physical dimension (same Hilbert space) --
+    raises ValueError otherwise. Bond dimensions need not match between the
+    two states (this is exactly why the mixed-transfer eigen-solve below
+    uses `_dominant_eigenvalue_mixed`, not `_dominant_right_fixed_point`,
+    which assumes a single self-consistent chi)."""
+    n_uc = result_a.n_uc
+    if result_b.n_uc != n_uc:
+        raise ValueError(
+            "imps_overlap: unit-cell size mismatch (result_a.n_uc={}, "
+            "result_b.n_uc={})".format(n_uc, result_b.n_uc))
+    dims_a = [_to_array_lpr(result_a.U_list[p]).shape[1] for p in range(n_uc)]
+    dims_b = [_to_array_lpr(result_b.U_list[p]).shape[1] for p in range(n_uc)]
+    if dims_a != dims_b:
+        raise ValueError(
+            "imps_overlap: physical dimension mismatch per sublattice "
+            "(result_a={}, result_b={})".format(dims_a, dims_b))
+
+    Es_ab = _transfer_matrices(result_a.U_list, n_uc, bra_list=result_b.U_list)
+    eta_ab = _dominant_eigenvalue_mixed(Es_ab)
+    if not normalize:
+        return complex(eta_ab)
+
+    _, eta_aa = _dominant_right_fixed_point(_transfer_matrices(result_a.U_list, n_uc))
+    _, eta_bb = _dominant_right_fixed_point(_transfer_matrices(result_b.U_list, n_uc))
+    return complex(eta_ab) / np.sqrt(complex(eta_aa) * complex(eta_bb))
 
 
 # == Applying a (bounded) MPO to the converged iMPS ================

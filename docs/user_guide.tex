@@ -1800,6 +1800,10 @@ h = ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0] + ic.SzC[0]*ic.SzR[0]  # NN Heisen
 ic.set_hamiltonian(h)
 \end{lstlisting}
 
+A bare, single-site operator (e.g.\ \texttt{ic.SzC[0]}, no product) is
+also a valid term -- a Zeeman-field-style onsite Hamiltonian, either on
+its own or added alongside bond terms.
+
 A two-site unit cell can express a dimerized (alternating-bond) chain,
 and a coupling can skip over an intermediate site by reaching straight
 from \texttt{C} to \texttt{R}:
@@ -1926,5 +1930,37 @@ conditioning degrades the further the \emph{raw} grown bond dimension
 (\texttt{chi\_A * chi\_W}, before any truncation) exceeds the state's
 real entanglement at that cut -- keep \texttt{maxm}/\texttt{maxdim}
 modest relative to \texttt{chi\_W} for the best-conditioned result.
+
+\textbf{Overlap/fidelity between two converged infinite MPS (advanced).}
+\texttt{pyitensor.idmrg.imps\_overlap(result\_a, result\_b,
+normalize=True)} computes the per-unit-cell overlap between two
+\texttt{IDMRGResult}/\texttt{PeriodicMPS} objects -- the infinite-chain
+notion of a finite MPS inner product $\langle\phi|\psi\rangle$. A literal
+$\langle\phi|\psi\rangle$ over an infinite chain is not, in general, a
+finite number (it scales as $\eta^N$ over $N$ unit cells, $N \to \infty$,
+where $\eta$ is the dominant eigenvalue of the mixed transfer matrix
+built from the two states' own tensors), so by default
+\texttt{imps\_overlap} returns the always-finite \emph{per-site fidelity}
+instead -- magnitude 1 iff the two iMPS represent the same physical state
+(any gauge or normalization convention on the raw tensors), magnitude
+$<1$ otherwise:
+
+\begin{lstlisting}
+from dmrgpy.pyitensor import idmrg
+
+idmrg.imps_overlap(ic._result, ic._result)          # 1 -- same state
+idmrg.imps_overlap(ic._result, new_state)            # cross-check apply_mpo didn't change the physical state
+idmrg.imps_overlap(ic._result, some_other_result)    # < 1 in magnitude for a genuinely different state
+\end{lstlisting}
+
+\texttt{result\_a}/\texttt{result\_b} must share the same
+\texttt{n\_uc} and, at every sublattice position, the same local
+physical dimension -- \texttt{imps\_overlap} raises \texttt{ValueError}
+otherwise. The two states' bond dimensions need \emph{not} match (e.g.\
+comparing a ground state against an \texttt{apply\_mpo} output truncated
+to a different \texttt{maxdim}). Pass \texttt{normalize=False} for the
+raw, un-normalized mixed-transfer eigenvalue instead -- mainly a
+diagnostic, analogous to \texttt{apply\_mpo}'s own returned
+\texttt{.eta}.
 
 \end{document}
