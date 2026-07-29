@@ -22,6 +22,12 @@ from dmrgpy import spinchain      # finite chain, for the ED cross-check
 # chain -- a genuinely entangled (D>1) ground state, exactly the case
 # excitation_gap cannot handle yet -- and cross-checks the result against a
 # large finite open chain's own exact-diagonalization gap.
+#
+# The second half of this script demonstrates the window= refinement
+# (local_excitation_gap_windowed): growing the local diagonalization block
+# with extra real, free physical sites systematically tightens this
+# estimate -- see that section below for a transverse-field Ising example
+# (window= only supports n_uc=1 chains).
 
 j_strong, j_weak = 1.0, 0.4
 ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
@@ -49,6 +55,55 @@ for n_sites in (12, 14, 16):
     for i in range(n_sites - 1):
         j = j_strong if i % 2 == 0 else j_weak
         h = h + j*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
+    sc.set_hamiltonian(h)
+    gap = sc.get_gap(mode="ED")
+    print("  n_sites={}  ED gap={:.6f}".format(n_sites, gap))
+
+###########################################################################
+### Tightening it further: window= (idmrg.local_excitation_gap_windowed) ##
+###########################################################################
+# local_excitation_gap(window=w) grows the local diagonalization block by
+# w extra *free* physical sites on each side of the original 2, re-solving
+# both the ground state and the deflated first excited state fresh within
+# this larger block, instead of only ever using the frozen 2-site block
+# above. Only n_uc=1 is supported (see
+# pyitensor.idmrg.local_excitation_gap_windowed's own docstring for why),
+# so this uses a transverse-field Ising chain instead of the dimerized
+# model above -- also genuinely entangled (D>1), also gapped, but with a
+# single-site unit cell.
+print()
+print("=" * 70)
+print("window=: transverse-field Ising chain (n_uc=1, D>1, gapped)")
+print("H = -4*J*Sx_i*Sx_{i+1} - 2*h*Sz_i  (Pauli convention, sigma=2S)")
+print("=" * 70)
+
+J, h_field = 1.0, 2.0
+ic2 = infinitechain.Infinite_Spin_Chain(["1/2"])
+H2 = -4*J*ic2.SxC[0]*ic2.SxR[0] - 2*h_field*ic2.SzC[0]
+ic2.set_hamiltonian(H2)
+ic2.maxm = 12
+ic2.maxiter = 200
+ic2.etol = 1e-10
+ic2.gs_energy()
+print("iDMRG converged:", ic2.converged)
+print()
+
+print("local_excitation_gap(window=w) as w grows:")
+for w in (0, 1, 2, 3):
+    g = ic2.local_excitation_gap(window=w)
+    print("  window={}  gap={:.6f}".format(w, g))
+print()
+
+print("cross-check: finite open TFIM chains, ED gap (get_gap(mode=\"ED\")),")
+print("at growing size -- the windowed estimate above converges toward")
+print("this at least as fast as growing the finite chain itself does:")
+for n_sites in (12, 14, 16, 18):
+    sc = spinchain.Spin_Chain(["1/2"]*n_sites)
+    h = 0
+    for i in range(n_sites - 1):
+        h = h + (-4*J)*sc.Sx[i]*sc.Sx[i+1]
+    for i in range(n_sites):
+        h = h + (-2*h_field)*sc.Sz[i]
     sc.set_hamiltonian(h)
     gap = sc.get_gap(mode="ED")
     print("  n_sites={}  ED gap={:.6f}".format(n_sites, gap))

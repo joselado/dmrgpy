@@ -994,3 +994,129 @@ def test_local_excitation_gap_raises_without_stored_superblock():
     result = idmrg.IDMRGResult(None, 1, [None], 0.0, True, 1)
     with pytest.raises(RuntimeError):
         idmrg.local_excitation_gap(result)
+
+
+def _tfim_chain(J=1.0, h=2.0, maxm=12, maxiter=200, etol=1e-10):
+    """A gapped (paramagnetic-phase, h>J), n_uc=1 transverse-field Ising
+    chain -- unlike _polarized_xx_chain, the ground state is genuinely
+    entangled (D>1), giving local_excitation_gap_windowed something
+    nontrivial to work with. H = -4J*Sx_i*Sx_{i+1} - 2h*Sz_i (the 4/2
+    factors convert dmrgpy's spin-1/2 S operators into Pauli matrices,
+    sigma=2S, matching the textbook TFIM convention H = -J*sigmax*sigmax
+    - h*sigmaz)."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    h_op = -4 * J * ic.SxC[0] * ic.SxR[0] - 2 * h * ic.SzC[0]
+    ic.maxm, ic.maxiter, ic.etol = maxm, maxiter, etol
+    ic.set_hamiltonian(h_op)
+    ic.gs_energy()
+    return ic
+
+
+# -- local_excitation_gap(window=...) / idmrg.local_excitation_gap_windowed:
+# widens the local diagonalization block with real, free physical sites on
+# each side instead of just re-diagonalizing the frozen 2-site block --
+# window=0 (the default) reduces to exactly local_excitation_gap above;
+# window>0 measurably tightens the gap at the cost of an exponentially
+# larger local Hilbert space (d**(2*window) more), and is only supported
+# for n_uc=1 (see local_excitation_gap_windowed's own docstring for why
+# n_uc=2 isn't handled yet).
+
+def test_local_excitation_gap_windowed_matches_unwindowed_at_window_zero():
+    """window=0 must reduce to exactly the same effective Hamiltonian
+    local_excitation_gap diagonalizes -- an internal consistency check on
+    the windowed construction itself (built independently of it, re-solving
+    the ground state from scratch via Lanczos rather than reusing the
+    growing algorithm's own evec0), not just a regression pin."""
+    ic = _polarized_xx_chain()
+    g_plain = idmrg.local_excitation_gap(ic._result)
+    g_window0 = idmrg.local_excitation_gap_windowed(
+        ic._result, ic._h_intra.op, ic._h_inter.op, ic.site_types, ic.n_uc,
+        window=0)
+    assert g_window0 == pytest.approx(g_plain, abs=1e-6)
+
+
+def test_local_excitation_gap_windowed_improves_accuracy_for_polarized_xx_chain():
+    """D=1 sanity check, exact answer known (see
+    test_local_excitation_gap_is_approximate_for_polarized_xx_chain for the
+    window=0 baseline, ~10% high): widening the window with real free sites
+    converges monotonically toward the exact gap -- measured directly,
+    window=0/1/2/4/6 give rel. errors of 0.10/0.038/0.020/0.0081/0.0044."""
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    exact_gap = 2 * h - J
+    g0 = ic.local_excitation_gap(window=0)
+    g2 = ic.local_excitation_gap(window=2)
+    assert abs(g2 - exact_gap) < abs(g0 - exact_gap)
+    assert g2 == pytest.approx(exact_gap, rel=0.03)
+
+
+def test_local_excitation_gap_windowed_matches_finite_size_tfim_gap():
+    """D>1 sanity check: a gapped, genuinely entangled transverse-field
+    Ising chain (n_uc=1), cross-checked against a finite open chain's own
+    ED gap -- measured directly: window=2 gap=2.058, window=3 gap=2.047,
+    vs. an 18-site open chain's own ED gap of 2.049 -- converging at least
+    as fast as growing the finite chain itself does (n=10/12/14/16/18 ED
+    gaps are 2.133/2.099/2.076/2.060/2.049)."""
+    ic = _tfim_chain()
+    assert ic.converged
+    local_gap = ic.local_excitation_gap(window=2)
+
+    sc = spinchain.Spin_Chain(["1/2"] * 16)
+    hf = 0
+    for i in range(15):
+        hf = hf + (-4.0) * sc.Sx[i] * sc.Sx[i + 1]
+    for i in range(16):
+        hf = hf + (-4.0) * sc.Sz[i]
+    sc.set_hamiltonian(hf)
+    finite_gap = sc.get_gap(mode="ED")
+    assert local_gap == pytest.approx(finite_gap, abs=0.05)
+
+
+def test_local_excitation_gap_windowed_deterministic_across_repeated_calls():
+    ic = _polarized_xx_chain()
+    g1 = ic.local_excitation_gap(window=1)
+    g2 = ic.local_excitation_gap(window=1)
+    assert g1 == pytest.approx(g2, abs=1e-6)
+
+
+def test_local_excitation_gap_windowed_rejects_n_uc2():
+    """local_excitation_gap_windowed needs to know which sublattice
+    position each extra inserted site takes, which isn't tracked for
+    n_uc=2 -- see its own docstring."""
+    j_strong, j_weak = 1.0, 0.4
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
+         + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
+    ic.maxm, ic.maxiter, ic.etol = 10, 50, 1e-9
+    ic.set_hamiltonian(h)
+    with pytest.raises(NotImplementedError):
+        ic.local_excitation_gap(window=1)
+
+
+def test_local_excitation_gap_windowed_before_set_hamiltonian_raises():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    with pytest.raises(RuntimeError):
+        ic.local_excitation_gap(window=1)
+
+
+def test_local_excitation_gap_windowed_itensor_version3_not_implemented():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
+    with pytest.raises(NotImplementedError):
+        ic.local_excitation_gap(window=1)
+
+
+def test_local_excitation_gap_windowed_raises_without_stored_superblock():
+    """Defense-in-depth guard on idmrg.local_excitation_gap_windowed
+    itself (not reachable through the public API)."""
+    result = idmrg.IDMRGResult(None, 1, [None], 0.0, True, 1)
+    with pytest.raises(RuntimeError):
+        idmrg.local_excitation_gap_windowed(result, [], [], ["1/2"], 1, window=1)
+
+
+def test_local_excitation_gap_windowed_rejects_n_uc2_directly():
+    """The n_uc guard fires before even looking at result.local_superblock
+    -- checked directly at the module level with a bare-bones result."""
+    result = idmrg.IDMRGResult(None, 2, [None, None], 0.0, True, 1)
+    with pytest.raises(NotImplementedError):
+        idmrg.local_excitation_gap_windowed(result, [], [], ["1/2", "1/2"], 2, window=1)

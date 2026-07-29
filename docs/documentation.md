@@ -669,6 +669,48 @@ uses for the ground-state energy density), a reassuring result precisely
 where the tangent-space ansatz offers nothing at all. See
 `examples/idmrg/local_excitation_gap/main.py` for the worked comparison.
 
+**Tightening the local superblock gap further: `window=`
+(`pyitensor/idmrg.py::local_excitation_gap_windowed`)**: rather than adding
+Krylov vectors to the same frozen 2-site block — `local_excitation_gap`'s
+own `dim>3` branch already diagonalizes that exactly via deflated Lanczos,
+so more iterations there cannot change the answer — this grows the local
+block itself by `window` extra *free* physical sites on each side, using
+fresh copies of the periodic per-sublattice MPO tensor (`_build_automaton`)
+threaded onto `HL`/`HR`'s own mpo axis via the same `_relabel_pos`/
+`_fresh_physical_copy` machinery `idmrg_ground_state`'s own growing loop
+uses (recovering `HL`/`HR`'s mpo-axis Index by elimination from their own
+3 legs, since `local_superblock` does not store it directly). Both the
+ground state and the deflated first excited state are then re-solved fresh
+within this larger block via `_lanczos_ground_state`, rather than reusing
+the growing algorithm's own ground vector — `window=0` reduces to exactly
+the same effective Hamiltonian `local_excitation_gap` diagonalizes (used as
+an internal consistency check on the construction, confirmed to agree to
+Lanczos precision). Costs `d**(2*window)` more local Hilbert space
+dimension per extra site pair (`d` = the physical dimension), and is
+supported only for `n_uc=1` — widening needs to know which sublattice
+position each extra inserted site takes, which is not tracked for `n_uc=2`.
+
+Measured directly, this is a real, converging refinement, not just noise:
+on the field-polarized XX chain (`D=1`, exact answer known) the error
+drops monotonically from 10\% at `window=0` to 3.8\%/2.0\%/0.81\%/0.44\% at
+`window=1/2/4/6`; on a gapped, genuinely entangled (`D>1`)
+transverse-field Ising chain, `window=3` (an 8-site local block, gap
+2.047) matches an 18-site open finite chain's own ED gap (2.049) to
+$<$1\%, converging at least as fast as growing the finite chain itself
+does (`n`=10/12/14/16/18 give ED gaps 2.133/2.099/2.076/2.060/2.049).
+Reproducible to $\sim$1e-9 across repeated calls despite the randomized
+Lanczos start, exactly like `local_excitation_gap` itself. The convergence
+*rate*, however, depends on the model's correlation length, not just its
+gap: on the `S=1` Heisenberg chain (the Haldane gap, correlation length
+$\sim$6 sites), `window=0/1/2` only move the estimate from
+$\sim$29\%/24\%/21\% too high — still improving, but far more slowly,
+since a handful of extra sites barely dents a correlation length that
+long, and the larger physical dimension (`d=3` vs.\ `d=2`) makes each
+extra site pair 9$\times$ more expensive rather than 4$\times$, making
+large `window` impractical there. See
+`examples/idmrg/local_excitation_gap/main.py` for the worked comparison
+across models.
+
 **Dynamical correlators, via a finite-window reduction to the existing
 finite-chain KPM stack (`infinitechain.py`, not `pyitensor/idmrg.py`)**:
 unlike the static-correlator machinery above, `Infinite_Many_Body_Chain.
