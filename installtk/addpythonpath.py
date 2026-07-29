@@ -31,7 +31,7 @@ def addpath():
             if os.path.islink(target) or os.path.exists(target):
                 os.remove(target)
             os.symlink(source, target)
-        except PermissionError:
+        except (PermissionError, OSError):
             print("No permission to write to "+sp+".")
             print("Add this to your PYTHONPATH manually instead:")
             print("  "+mpath+"/../src")
