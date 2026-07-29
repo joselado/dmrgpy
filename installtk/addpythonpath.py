@@ -31,8 +31,8 @@ def addpath():
             if os.path.islink(target) or os.path.exists(target):
                 os.remove(target)
             os.symlink(source, target)
-        except PermissionError:
-            print("No permission to write to "+sp+".")
+        except OSError as e:
+            print("Could not link dmrgpy into "+sp+": "+str(e))
             print("Add this to your PYTHONPATH manually instead:")
             print("  "+mpath+"/../src")
             return
