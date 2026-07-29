@@ -1895,8 +1895,50 @@ needed, prefer expressing the same physical model as an
 couplings) instead, and use the self-consistency check either way
 before trusting a result.
 
-Excited states and entanglement/entropy are not implemented for
-infinite chains yet.
+Entanglement/entropy are not implemented for infinite chains yet.
+
+\textbf{Excited states: the tangent-space/quasiparticle excitation
+ansatz.} Unlike a finite chain, an infinite chain's excitations form a
+momentum-resolved band $E(k)$, not a single discrete state, so ``the
+first excited state'' here means the standard single-mode/quasiparticle
+ansatz (Haegeman et al.): a tangent-space vector with one excitation
+tensor $B$ (a function of a free matrix $X$) inserted at every
+unit-cell position, weighted by momentum $k$.
+\texttt{ic.excitation\_energies(k, n=1)} returns the lowest \texttt{n}
+excitation energies (above the ground state) at momentum \texttt{k}
+(radians, per unit cell); \texttt{ic.excitation\_gap(ks=None)} scans
+\texttt{k} (default \texttt{numpy.linspace(-pi, pi, 41)}) and returns
+the minimum -- the scalar ``gap'', mirroring the finite-chain
+\texttt{get\_gap()} naming (\S4):
+
+\begin{verbatim}
+ic.excitation_energies(0.0, n=1)   # lowest excitation energy at k=0
+ic.excitation_gap()                # min_k E(k), the scalar gap
+\end{verbatim}
+
+\textbf{Scope restriction -- read before use.} Only
+\texttt{itensor\_version="python"} is supported
+(\texttt{NotImplementedError} otherwise), and -- more importantly --
+only a \textbf{product-state-like ground state (bond dimension
+\texttt{D=1})} is currently supported; a genuinely entangled ground
+state (\texttt{D>1}, e.g.\ the transverse-field Ising or a dimerized
+Heisenberg chain) raises \texttt{NotImplementedError}. This is a known,
+deliberate limit, not an oversight: for \texttt{D=1} the computed
+dispersion has been checked to match the exact free-fermion
+single-magnon dispersion of a field-polarized XX chain to $\sim$14
+digits across the whole Brillouin zone (see
+\texttt{examples/idmrg/excitation\_gap\_xx/main.py}), and every
+individual term of the underlying calculation independently matches a
+from-scratch finite-ring tensor-network contraction to $\sim$1e-13 --
+but for \texttt{D>1}, the resulting dispersion comes out anomalously
+flat compared to the expected answer, and this was not root-caused
+despite extensive investigation (three real, confirmed bugs were found
+and fixed along the way; see \texttt{pyitensor/idmrg\_excitations.py}'s
+own module docstring, ``KNOWN LIMITATION'' section, for the full
+account). A deliberately constructed longer-range term (spanning more
+than 2 adjacent unit cells after \texttt{n\_uc}-grouping) is separately
+rejected with \texttt{NotImplementedError} too, mirroring
+\texttt{n\_uc>2}'s own guard elsewhere in this module.
 
 \textbf{Dynamical correlators (finite-window KPM).}
 \texttt{ic.kpm\_finite(opname\_i, p\_i, opname\_j, r,

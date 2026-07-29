@@ -812,3 +812,97 @@ def test_kpm_finite_rejects_window_too_small_for_r():
     ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
     with pytest.raises(ValueError):
         ic.kpm_finite("Sz", 0, "Sz", 10, n_window=3)
+
+
+# -- excitation_energies/excitation_gap: the tangent-space/quasiparticle
+# excitation ansatz (pyitensor/idmrg_excitations.py) -- see that module's
+# own docstring for the algorithm and, importantly, its "KNOWN LIMITATION"
+# section: only a product-state-like (bond dimension D=1) converged ground
+# state is currently supported. A genuinely entangled ground state (D>1,
+# e.g. the uniform/dimerized Heisenberg chains used elsewhere in this file)
+# was found, during development, to give a dispersion that comes out
+# anomalously flat compared to the expected answer despite every individual
+# diagram independently checking out against a from-scratch finite-ring
+# tensor-network contraction -- not yet root-caused, so D>1 is rejected
+# with NotImplementedError rather than silently returning a questionable
+# number. The tests below therefore validate the D=1 case exactly (a
+# field-polarized XX chain, exactly solvable via free fermions) and treat
+# D>1/other scope violations as guard-rail tests only.
+
+def _polarized_xx_chain(J=1.0, h=3.0, maxm=4, maxiter=50, etol=1e-12):
+    """A field-polarized n_uc=1 XX chain (h > J, the XX chain's own
+    saturation field) -- the ground state is the exact fully-polarized
+    product state, so iDMRG converges to a bond dimension D=1 unit cell,
+    matching idmrg_excitations.py's own supported scope. Exact single-
+    magnon dispersion (free fermions via Jordan-Wigner):
+    E(k) = 2*h - J*cos(k)."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    h_op = -J * (ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0]) - 2 * h * ic.SzC[0]
+    ic.maxm, ic.maxiter, ic.etol = maxm, maxiter, etol
+    ic.set_hamiltonian(h_op)
+    ic.gs_energy()
+    return ic
+
+
+def test_excitation_energies_matches_exact_xx_dispersion():
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    for k in np.linspace(0, 2 * np.pi, 9, endpoint=False):
+        exact = 2 * h - J * np.cos(k)
+        got = ic.excitation_energies(k, n=1)[0]
+        assert got == pytest.approx(exact, abs=1e-8)
+
+
+def test_excitation_gap_matches_exact_minimum():
+    """min_k (2h - J*cos(k)) = 2h - J, attained at k=0."""
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    assert ic.excitation_gap() == pytest.approx(2 * h - J, abs=1e-8)
+
+
+def test_excitation_environment_is_cached_across_calls():
+    """A second excitation_energies call (different k) must reuse
+    self._excitation_env (identity, not just an equal rebuild) -- it is
+    expensive to build (a null-space computation plus dense linear
+    solves)."""
+    ic = _polarized_xx_chain()
+    ic.excitation_energies(0.0)
+    env = ic._excitation_env
+    assert env is not None
+    ic.excitation_energies(1.0)
+    assert ic._excitation_env is env
+
+
+def test_excitation_gap_before_set_hamiltonian_raises():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    with pytest.raises(RuntimeError):
+        ic.excitation_gap()
+
+
+def test_excitation_energies_rejects_entangled_ground_state():
+    """D>1 (a genuinely entangled ground state) is a known, deliberate
+    scope limit -- see idmrg_excitations.py's own "KNOWN LIMITATION"
+    section, and this file's own module-level comment above."""
+    ic, _ = _converged_uniform_chain(2, maxm=20, maxiter=100, etol=1e-11)
+    with pytest.raises(NotImplementedError):
+        ic.excitation_gap()
+
+
+def test_excitation_energies_itensor_version3_not_implemented():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
+    with pytest.raises(NotImplementedError):
+        ic.excitation_gap()
+
+
+def test_excitation_energies_rejects_reach_greater_than_one():
+    """A deliberately constructed longer-range term
+    (get_operator(..., group="R") with i>=n_uc) spans 2 supersites after
+    grouping -- rejected by idmrg_excitations._check_reach_one."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    far = ic.get_operator("Sx", 1, group="R")  # site n_uc+1 = 2, reach=2
+    h = ic.SxC[0] * far - 2.0 * ic.SzC[0]
+    ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
+    ic.set_hamiltonian(h)
+    with pytest.raises(NotImplementedError):
+        ic.excitation_gap()

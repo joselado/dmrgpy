@@ -537,6 +537,90 @@ free too; confirmed not to trip on any pre-existing test or on
 `imps_overlap`'s own realistic (orthogonal and gauge-comparison) cases
 (all previously-passing `tests/test_infinite_chain.py` cases still pass).
 
+**Excited states: the tangent-space/quasiparticle excitation ansatz
+(`pyitensor/idmrg_excitations.py`, a new module)**: an infinite chain's
+excitations form a momentum-resolved band `E(k)`, not a single discrete
+state a finite chain has, so `Infinite_Many_Body_Chain.excitation_energies
+(k, n=1)`/`excitation_gap(ks=None)` implement the standard single-mode/
+quasiparticle ansatz (Haegeman et al.) instead of anything reusing the
+growing algorithm's own truncated environments: a tangent-space vector
+`|Phi_k(X)> = sum_n e^{ikn} |...A A B_n A A...>` with one excitation
+tensor `B(X)` inserted at every unit-cell position, weighted by momentum
+`k`. Multi-site unit cells are handled by first grouping the `n_uc` site/
+automaton tensors into one effective supersite (`_group_unit_cell`), so
+the rest of the module only ever deals with a uniform, single-supersite
+chain; every 2-site bond term must have reach exactly 1 after grouping
+(checked directly on the grouped automaton's own channel structure,
+`_check_reach_one`, rather than by re-inspecting the original Hamiltonian
+term lists). The construction: a null-space gauge-fixing tensor `V_L`
+(`B(X) = reshape(V_L @ X)`, `V_L^dagger @ A = 0`, ensuring `B` is
+orthogonal to the ground state itself); `l=I` exactly (left-canonical
+`A`) and `r` = the ordinary dominant right fixed point already computed
+elsewhere in `idmrg.py`; two regularized ("energy density subtracted
+off") environments `Lh`/`Rh` solved as dense linear systems; and a
+momentum-dependent effective Hamiltonian `H_eff(k)` built from a
+*finite* list of diagrams — no genuine infinite/geometric momentum sum
+is needed, since the gauge condition makes any diagram where the ket
+differs from the bra by more than one adjacent unit cell vanish
+identically (confirmed directly, not just assumed, on a finite-ring
+tensor-network contraction), so only unit-cell separations `0, +-1`
+ever contribute for this module's reach-1 Hamiltonians.
+
+**Real, load-bearing bugs found and fixed while implementing this** (via
+extensive cross-checking against a from-scratch finite-ring tensor-
+network contraction, bypassing this module's own machinery entirely —
+not just internal self-consistency checks, which turned out to be
+insufficient to catch these): (1) the energy density used to regularize
+`Lh` (`Source_L`'s own trace) needs an `r`-weighted trace
+(`tr(r @ Source_L)`), not the plain trace `Source_R`'s own regularization
+correctly uses — confirmed directly by comparing a single-site
+`apply_transfer_from_left` step against `idmrg.onsite_expectation`'s
+already-validated formula, off by a measurable, non-numerical-noise
+amount with the plain trace. (2) Three of the effective Hamiltonian's
+seven diagrams (the ones ending in a `_cap_left` step, threading an
+environment into the excitation tensor from the left) were each missing
+a further `_cap_right(..., r)` closure on the *other* side — easy to
+miss because omitting the analogous closure is harmless whenever it
+would be capped by `l` (=Identity, a no-op), which is exactly the case
+for the other four diagrams, but not harmless for `r` (not the identity
+in general) — found by comparing individual diagrams against the
+finite-ring reference and finding an exact, large (not roundoff-scale)
+mismatch, fixed, and re-verified to match to $\sim$1e-13. (3) The
+tangent-space norm's own metric (the fixed point `r`) is, in general, a
+severely ill-conditioned matrix — its eigenvalues are exactly the
+ground state's own entanglement spectrum, and any weakly-entangled
+(e.g.\ deep-paramagnetic) ground state has a steeply decaying one
+(confirmed directly: `[0, 0, 0, 0.0073, 0.9927]`, condition number
+$\sim$1e10, for a transverse-field-Ising ground state at bond dimension
+5) — solving the naive generalized eigenproblem `H_eff(k)[X] = E*(X@r)`
+directly against this metric gave numerically garbage results; the fix
+(`_reduce_metric`) substitutes `X = X_tilde @ diag(1/sqrt(eig)) @
+V^dagger` restricted to `r`'s own well-conditioned eigenspace (the
+dropped directions have exactly zero physical norm, not merely small,
+so nothing physical is discarded), turning the problem into an ordinary,
+well-conditioned Hermitian eigenproblem.
+
+**A known, currently unresolved limitation, not silently papered over**:
+after all three fixes above, the ansatz matches the exact free-fermion
+single-magnon dispersion of a field-polarized XX chain (bond dimension
+`D=1`, an uncorrelated/product-state ground state) to $\sim$14 digits
+across the entire Brillouin zone — but for a genuinely entangled ground
+state (`D>1`), the resulting dispersion comes out anomalously flat
+compared to the expected answer, despite every individual diagram still
+independently matching the same finite-ring reference to $\sim$1e-13 and
+`H_eff(k)` remaining exactly Hermitian at every momentum tried. This was
+not root-caused despite extensive investigation (ruled out: metric
+conditioning, per (3) above; `Lh`/`Rh`'s own internal consistency,
+verified both via the linear solve's own residual and via independent
+direct iteration of their defining recursion; iDMRG's own convergence
+quality, which did not help even at `state_overlap~0.9999`).
+`build_excitation_environment` therefore explicitly rejects `D>1` with
+`NotImplementedError` rather than silently returning a dispersion known,
+in at least some cases, to be wrong — see
+`pyitensor/idmrg_excitations.py`'s own module docstring ("KNOWN
+LIMITATION" section) for the full account, and
+`examples/idmrg/excitation_gap_xx/main.py` for the validated `D=1` case.
+
 **Dynamical correlators, via a finite-window reduction to the existing
 finite-chain KPM stack (`infinitechain.py`, not `pyitensor/idmrg.py`)**:
 unlike the static-correlator machinery above, `Infinite_Many_Body_Chain.
