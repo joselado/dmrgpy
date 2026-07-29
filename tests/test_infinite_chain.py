@@ -579,3 +579,144 @@ def test_onsite_field_with_bonds_does_not_diverge():
     d1 = density_at(0.2)
     assert np.isfinite(d1) and abs(d1) < 10  # rules out the 1e23-scale blow-up
     assert d1 == pytest.approx(d0, abs=1e-6)
+
+
+# -- idmrg.imps_sum: direct sum of two converged infinite MPS -- see
+# idmrg.py's own "Summing two converged iMPS" section docstring for the
+# construction (periodic-chain analogue of mpsalgebra.sum, generalized
+# from a finite chain's dimension-1 boundaries to a fully block-diagonal
+# per-cut construction) and its physical scope: tiled to the
+# thermodynamic limit, this only has a well-posed single-branch
+# reduction when the two summands' own self-overlap eigenvalues (eta)
+# differ -- summing two *ordinary* IDMRGResults (always eta=1 each, by
+# left-canonical SVD construction) hits a genuine tie every time, which
+# idmrg._dominant_right_fixed_point's own degeneracy check must catch
+# and raise on, not silently resolve to one arbitrary branch.
+
+def test_imps_sum_tied_norm_raises():
+    """The common case: summing two separately-converged, ordinary
+    IDMRGResults. Both are individually normalized to eta=1 exactly (SVD
+    construction), so the combined transfer matrix's dominant eigenvalue
+    is exactly degenerate -- idmrg._dominant_right_fixed_point's
+    degeneracy check must raise RuntimeError here rather than silently
+    collapsing to one of the two (physically distinct, oppositely
+    Sz-polarized) branches."""
+    ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
+    ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
+    ic_up.gs_energy()
+
+    ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
+    ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
+    ic_down.gs_energy()
+
+    with pytest.raises(RuntimeError):
+        idmrg.imps_sum(ic_up._result, ic_down._result)
+
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_imps_sum_dominant_branch_survives(n_uc):
+    """A well-posed (non-degenerate) case: sum a converged state with a
+    deliberately norm-rescaled copy of a *different* converged state
+    (amplitude x0.9, i.e. self-overlap eta=0.81 rather than the ordinary
+    1) -- an artificial construction (ordinary IDMRGResults never carry
+    eta!=1 on their own), but the only way to exercise the "well-posed"
+    branch of imps_sum's own scope at all, since two literal IDMRGResults
+    always tie (see test_imps_sum_tied_norm_raises above). The
+    smaller-norm branch must be exponentially suppressed: every static
+    observable of the summed-and-truncated result must reproduce the
+    larger-norm (unscaled) branch's own value exactly, and the surviving
+    bond dimension must collapse back down to that branch's own (i.e. the
+    rescaled branch is fully discarded, not merely down-weighted)."""
+    ic_dom, _ = _converged_uniform_chain(n_uc, maxm=20, maxiter=100, etol=1e-11)
+
+    spins = ["1/2"] * n_uc
+    ic_other = infinitechain.Infinite_Spin_Chain(spins)
+    # A different (XXZ-anisotropic, Delta=0.3) Hamiltonian so the two
+    # states are genuinely distinct, not just re-derived copies of the
+    # same ic_dom (isotropic Heisenberg) state -- works identically for
+    # n_uc=1 and n_uc=2, unlike a dimerization (which needs n_uc>=2).
+    terms = []
+    for i in range(n_uc - 1):
+        terms.append(ic_other.SxC[i] * ic_other.SxC[i + 1] + ic_other.SyC[i] * ic_other.SyC[i + 1]
+                     + 0.3 * ic_other.SzC[i] * ic_other.SzC[i + 1])
+    terms.append(ic_other.SxC[n_uc - 1] * ic_other.SxR[0] + ic_other.SyC[n_uc - 1] * ic_other.SyR[0]
+                 + 0.3 * ic_other.SzC[n_uc - 1] * ic_other.SzR[0])
+    h_other = terms[0]
+    for t in terms[1:]:
+        h_other = h_other + t
+    ic_other.maxm, ic_other.maxiter, ic_other.etol = 20, 100, 1e-11
+    ic_other.set_hamiltonian(h_other)
+    ic_other.gs_energy()
+
+    scaled_other = idmrg.PeriodicMPS(
+        ic_other._result.sites_uc, n_uc,
+        [ITensor(T.inds, T.array * 0.9) for T in ic_other._result.U_list],
+        eta=0.81)
+
+    result = idmrg.imps_sum(ic_dom._result, scaled_other, cutoff=1e-12, maxdim=None)
+    assert result.eta == pytest.approx(1.0, abs=1e-6)
+    for p in range(n_uc):
+        orig = idmrg.onsite_expectation(ic_dom._result, "Sz", p)
+        new = idmrg.onsite_expectation(result, "Sz", p)
+        assert new == pytest.approx(orig, abs=1e-6)
+        chi_dom = idmrg._to_array_lpr(ic_dom._result.U_list[p]).shape[0]
+        chi_new = idmrg._to_array_lpr(result.U_list[p]).shape[0]
+        assert chi_new == chi_dom
+
+
+def test_imps_sum_rejects_n_uc_mismatch():
+    ic1, _ = _converged_uniform_chain(1, maxm=8)
+    ic2, _ = _converged_uniform_chain(2, maxm=8)
+    with pytest.raises(ValueError):
+        idmrg.imps_sum(ic1._result, ic2._result)
+
+
+def test_imps_sum_rejects_dimension_mismatch():
+    """Mirrors imps_overlap's own dimension-mismatch check: different
+    local Hilbert-space dimensions per sublattice (spin-1/2 vs spin-1) is
+    a meaningless sum -- must raise, not silently place mismatched-size
+    physical legs into the same combined tensor."""
+    ic_half = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_half.maxm, ic_half.maxiter, ic_half.etol = 4, 20, 1e-8
+    ic_half.set_hamiltonian(ic_half.SxC[0] * ic_half.SxR[0]
+                             + ic_half.SyC[0] * ic_half.SyR[0]
+                             + ic_half.SzC[0] * ic_half.SzR[0])
+    ic_half.gs_energy()
+
+    ic_one = infinitechain.Infinite_Spin_Chain(["1"])
+    ic_one.maxm, ic_one.maxiter, ic_one.etol = 4, 20, 1e-8
+    ic_one.set_hamiltonian(ic_one.SxC[0] * ic_one.SxR[0]
+                            + ic_one.SyC[0] * ic_one.SyR[0]
+                            + ic_one.SzC[0] * ic_one.SzR[0])
+    ic_one.gs_energy()
+
+    with pytest.raises(ValueError):
+        idmrg.imps_sum(ic_half._result, ic_one._result)
+
+
+def test_periodic_direct_sum_bond_dimension():
+    """idmrg._periodic_direct_sum's own raw (pre-canonicalization) output:
+    an exact, block-diagonal construction -- the combined bond dimension
+    at every cut (including the wraparound) must be exactly the sum of
+    the two inputs' own bond dimensions there, with each input's own
+    block placed at the expected array offset (not just the right shape
+    by coincidence)."""
+    ic_up, _ = _converged_uniform_chain(1, maxm=4, maxiter=50, etol=1e-12)
+    ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
+    ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
+    ic_down.gs_energy()
+
+    raw = idmrg._periodic_direct_sum(ic_up._result.U_list, ic_down._result.U_list, 1)
+    arr = raw[0].array
+    chi_up = idmrg._to_array_lpr(ic_up._result.U_list[0]).shape[0]
+    chi_down = idmrg._to_array_lpr(ic_down._result.U_list[0]).shape[0]
+    assert arr.shape == (chi_up + chi_down, 2, chi_up + chi_down)
+    a_up = idmrg._to_array_lpr(ic_up._result.U_list[0])
+    a_down = idmrg._to_array_lpr(ic_down._result.U_list[0])
+    assert np.allclose(arr[:chi_up, :, :chi_up], a_up)
+    assert np.allclose(arr[chi_up:, :, chi_up:], a_down)
+    assert np.allclose(arr[:chi_up, :, chi_up:], 0)
+    assert np.allclose(arr[chi_up:, :, :chi_up], 0)

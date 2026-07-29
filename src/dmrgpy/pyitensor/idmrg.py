@@ -934,6 +934,80 @@ def _apply_transfer(E4, rho):
     return np.einsum('lLrR,rR->lL', E4, rho)
 
 
+# Relative-gap threshold below which two of the transfer matrix's leading
+# eigenvalue magnitudes are treated as a genuine tie (see
+# _dominant_right_fixed_point's own degeneracy check). The genuine tie
+# this check exists to catch (two independently-converged, equally-
+# normalized branches summed via imps_sum) lands at a ~1e-15 relative gap
+# (exact to machine precision, confirmed directly on an up/down-polarized
+# pair of product states -- idmrg.imps_sum's own docstring has the
+# physical argument for why *any* two ordinary IDMRGResults tie here,
+# always), so this threshold is set far tighter (1e-9) than that -- a
+# huge margin, deliberately, rather than the loosest value that still
+# passed known-legitimate cases: a *gapless/critical* single (non-summed)
+# state's own top-two eigenvalue gap shrinks with growing maxm (finite-
+# entanglement scaling -- confirmed directly on the uniform n_uc=1
+# Heisenberg chain: gap 0.376 at maxm=40, 0.116 at maxm=60, a clear
+# maxm-dependent trend, not noise), so a threshold merely "loose enough
+# for the maxm values this repo's own tests happen to use today" would
+# risk a *future* false positive on an ordinary, non-degenerate
+# correlator call at a larger maxm a user might reasonably choose for
+# better accuracy near criticality. 1e-9 keeps ~9 orders of magnitude of
+# headroom below every legitimate gap measured so far while still
+# rejecting the real tie (~1e-15) by 6 more orders of magnitude than
+# needed -- a gapped (dimerized) n_uc=2 chain's top two eigenvalue
+# magnitudes were (1.0, 0.093) and the gapless case above never dropped
+# below a 0.116 gap up to maxm=60, both leaving comfortable margin above
+# this threshold.
+_DEGENERACY_RTOL = 1e-9
+
+
+def _check_dominant_eigenvalue_nondegenerate(w, caller):
+    """Raise RuntimeError if the two largest-magnitude entries of `w` are
+    within `_DEGENERACY_RTOL` of each other, otherwise return `w`'s own
+    descending-|.|  sort order -- shared by every "pick a single dominant
+    eigenvalue/eigenvector" consumer in this module
+    (`_dominant_right_fixed_point`, `_dominant_left_fixed_point`,
+    `_dominant_eigenvalue_mixed`): a single dominant fixed point is not
+    well-defined when the leading eigenvalue is (near-)degenerate --
+    `np.argmax` would otherwise silently pick *one* arbitrary member of
+    the tied eigenspace (confirmed directly: summing two independently
+    converged, oppositely Sz-polarized `n_uc=1` product states via
+    `idmrg.imps_sum` -- both individually normalized to eta=1, hence
+    exactly tied here -- reliably reproduced only ONE of the two
+    branches, with which one came out being sensitive to floating-point
+    tie-breaking noise in `np.linalg.eig`, not a reproducible or even
+    well-defined choice). This is not a rare edge case for
+    `idmrg.imps_sum`'s own main use: any two separately-converged
+    IDMRGResults are *always* individually normalized to eta=1 by SVD
+    construction, so summing two genuinely different ground states hits
+    exactly this tie essentially every time -- see `imps_sum`'s own
+    docstring for the physical reason (a "cat state" superposition of two
+    macroscopically distinct branches is not representable as a single
+    injective/canonical periodic MPS) and why this is a documented,
+    deliberate scope limit rather than a bug to route around here. `caller`
+    is folded into the error message purely so it's attributable to
+    whichever of this function's several callers actually raised, since
+    `imps_sum` is only one of them (`apply_mpo`/`_canonicalize_periodic`,
+    `onsite_expectation`, `two_point_correlator`, and `imps_overlap`'s own
+    self-overlap terms all reach `_dominant_right_fixed_point` too, and a
+    degenerate spectrum there need not have anything to do with
+    `imps_sum` at all)."""
+    order = np.argsort(-np.abs(w))
+    if len(order) > 1 and abs(w[order[1]]) > (1 - _DEGENERACY_RTOL) * abs(w[order[0]]):
+        raise RuntimeError(
+            "idmrg ({}): the transfer matrix's dominant eigenvalue is "
+            "(near-)degenerate (top two magnitudes {} and {}) -- a single "
+            "dominant eigenvector is not well-defined here. This is most "
+            "often seen when a state is, or derives from (e.g. via "
+            "idmrg.imps_sum), a superposition of two macroscopically "
+            "distinct branches with matched per-site norm -- see "
+            "idmrg.imps_sum's own docstring for why that case is out of "
+            "scope for this module's correlator machinery".format(
+                caller, abs(w[order[0]]), abs(w[order[1]])))
+    return order
+
+
 def _dominant_right_fixed_point(Es):
     """The dominant right eigenvector of the full unit-cell transfer
     matrix T=E_0...E_{n_uc-1} (as a chi x chi density-matrix-like array,
@@ -962,7 +1036,8 @@ def _dominant_right_fixed_point(Es):
             "gs_energy()".format(T4.shape))
     Tmat = T4.reshape(chi * chi, chi * chi)
     w, v = np.linalg.eig(Tmat)
-    idx = np.argmax(np.abs(w))
+    order = _check_dominant_eigenvalue_nondegenerate(w, "_dominant_right_fixed_point")
+    idx = order[0]
     eta = w[idx]
     rho = v[:, idx].reshape(chi, chi)
     rho = rho / np.trace(rho)
@@ -1051,7 +1126,21 @@ def _dominant_eigenvalue_mixed(Es):
     1 and 3) are each individually self-consistent -- the two need not
     match each other. Returns only the eigenvalue: `imps_overlap` has no
     use for the fixed-point vector itself, unlike the correlator machinery
-    that consumes `_dominant_right_fixed_point`'s own rho."""
+    that consumes `_dominant_right_fixed_point`'s own rho. Also runs the
+    same degeneracy check as `_dominant_right_fixed_point`/
+    `_dominant_left_fixed_point` (see
+    `_check_dominant_eigenvalue_nondegenerate`'s own docstring) -- a tied
+    top eigenvalue here means "which branch dominates" is not well-defined
+    for the cross term either, the same underlying issue, just on the
+    mixed rather than self-overlap transfer matrix. Confirmed this does
+    not spuriously trip on realistic `imps_overlap` inputs: two
+    independently-converged ordinary ground states' own mixed transfer
+    spectra (both a genuinely orthogonal case, where the mixed matrix
+    reduces to a single trivial eigenvalue with nothing to tie against,
+    and a genuinely overlapping case) leave a wide margin, and
+    `imps_overlap(result, apply_mpo(result, W_identity))`'s own
+    gauge-comparison case (a non-trivial bond dimension, unlike the
+    orthogonal case above) does too."""
     T4 = Es[0]
     for E in Es[1:]:
         T4 = _compose(T4, E)
@@ -1064,7 +1153,8 @@ def _dominant_eigenvalue_mixed(Es):
             "against for a single state, see its own comment".format(T4.shape))
     Tmat = T4.reshape(chi_ket * chi_bra, chi_ket * chi_bra)
     w = np.linalg.eigvals(Tmat)
-    return w[np.argmax(np.abs(w))]
+    order = _check_dominant_eigenvalue_nondegenerate(w, "_dominant_eigenvalue_mixed")
+    return w[order[0]]
 
 
 def imps_overlap(result_a, result_b, normalize=True):
@@ -1271,7 +1361,15 @@ def _dominant_left_fixed_point(Es):
             "against, see its own comment".format(T4.shape))
     Tmat = T4.reshape(chi * chi, chi * chi)
     w, v = np.linalg.eig(Tmat.T)
-    idx = np.argmax(np.abs(w))
+    # Degeneracy check included here too (not just relying on
+    # _canonicalize_periodic always calling _dominant_right_fixed_point
+    # first, see _check_dominant_eigenvalue_nondegenerate's own
+    # docstring) -- Tmat.T has the same eigenvalues as Tmat, so this is
+    # the same tie condition, just independently guarded here in case a
+    # future caller reaches this function without going through the
+    # right-fixed-point check first.
+    order = _check_dominant_eigenvalue_nondegenerate(w, "_dominant_left_fixed_point")
+    idx = order[0]
     eta = w[idx]
     rho = v[:, idx].reshape(chi, chi)
     rho = rho / np.trace(rho)
@@ -1513,3 +1611,159 @@ def apply_mpo(result, W_bulk, cutoff=1e-12, maxdim=None):
     B = [_t_noPrime(b, "Site") for b in B]
     U_list_new, eta = _canonicalize_periodic(B, result.n_uc, cutoff, maxdim)
     return PeriodicMPS(result.sites_uc, result.n_uc, U_list_new, eta)
+
+
+# == Summing two converged iMPS ====================================
+#
+# imps_sum(result_a, result_b) is the periodic-chain analogue of
+# mpsalgebra.sum(): the standard, exact MPS-addition construction
+# (block-diagonal in the bond space, `_periodic_direct_sum`), followed by
+# the same `_canonicalize_periodic` re-gauging/truncation `apply_mpo`
+# already uses. Unlike mpsalgebra.sum's finite chain -- whose two open
+# ends are dimension-1, so the block-diagonal bulk construction plus a
+# plain concatenation at the boundaries reproduces a literal Hilbert-space
+# vector sum exactly -- a periodic chain has no open end: every cut is a
+# "bulk" cut, so the direct sum is block-diagonal *everywhere*, including
+# the wraparound bond.
+#
+# PHYSICAL SCOPE -- read before treating this as a drop-in infinite
+# analogue of mpsalgebra.sum: tiled to the thermodynamic limit, a
+# block-diagonal unit cell does not represent |psi_a>+|psi_b> the way the
+# finite construction represents a literal vector sum. Tracing it around N
+# unit cells gives eta_a^N + eta_b^N (eta_a/eta_b: result_a/result_b's own
+# self-overlap transfer eigenvalues, always ~1 exactly for any
+# IDMRGResult, by left-canonical SVD construction -- see
+# `_local_two_site_solve`'s own comment), so:
+#
+# - Two branches with a genuine norm mismatch (|eta_a| != |eta_b|, only
+#   possible for a hand-built or already-rescaled PeriodicMPS -- not two
+#   ordinary IDMRGResults, which are always both ~1) have a well-posed,
+#   non-degenerate combined transfer matrix: the smaller-norm branch is
+#   exponentially suppressed as N -> infinity, so `_canonicalize_periodic`
+#   correctly (not a bug -- the true infinite-volume answer) returns a
+#   state numerically indistinguishable from the larger-norm branch alone.
+# - Two branches with matched |eta| -- which is the *common* case, since
+#   summing two separately-converged ground states (e.g. two
+#   symmetry-related solutions of the same translationally-invariant
+#   Hamiltonian, the most natural reason to want this operation at all)
+#   always ties exactly -- produce a genuinely degenerate dominant
+#   eigenspace. Representing that "cat state" (a superposition of two
+#   macroscopically distinct branches) as a single injective/canonical
+#   periodic MPS is not possible with the fixed-point machinery this
+#   module's correlator functions rely on everywhere else, so
+#   `_dominant_right_fixed_point`'s own degeneracy check (see its
+#   docstring, calibrated directly against real single-state spectra)
+#   reliably raises RuntimeError in this case instead of silently
+#   returning an arbitrary, wrong single branch -- confirmed directly:
+#   before that check existed, summing two independently-converged,
+#   oppositely Sz-polarized product states (both eta=1, orthogonal)
+#   silently collapsed to just one of the two branches, chosen by
+#   floating-point tie-breaking noise inside np.linalg.eig, not even
+#   reproducibly. Correctly representing this common, physically
+#   meaningful case (e.g. via the standard thermodynamic-limit local-
+#   observable identity <O> -> (<O>_a+<O>_b)/2 for two exactly orthogonal,
+#   equally-weighted branches) needs correlator machinery this module
+#   does not have yet -- a documented, deliberate scope limit, in the
+#   same spirit as apply_mpo's own "bounded operators only" restriction
+#   above, not something silently gotten wrong.
+
+
+def _periodic_direct_sum(U_list_a, U_list_b, n_uc):
+    """Raw (uncanonicalized) block-diagonal direct sum of two periodic
+    tensor lists, one cut per unit-cell site (n_uc cuts total, including
+    the wraparound) -- the periodic-chain analogue of mpsalgebra.sum's own
+    per-site block-diagonal placement (mpsalgebra.py:143-203), applied at
+    *every* cut instead of leaving the two end cuts as a plain
+    concatenation (there is no open end here to concatenate along instead
+    -- see this module's "Summing two converged iMPS" section docstring
+    above for the physical meaning of this once tiled to the
+    thermodynamic limit).
+
+    U_list_a[p]/U_list_b[p] must share the same physical dimension at
+    every sublattice position p (checked explicitly below, redundantly
+    with `imps_sum`'s own pre-check, since this function is also called
+    directly in tests/other internal code -- a mismatched physical
+    dimension would otherwise silently broadcast the smaller physical
+    leg across the larger one instead of raising, confirmed directly by
+    hand-checking the equivalent NumPy assignment pattern). The returned
+    tensor's own physical Index at position p is U_list_a[p]'s own --
+    U_list_b[p]'s physical Index need not be the same object, only the
+    same dimension, since this function only ever matches legs by
+    position (`_to_array_lpr`), never by Index identity.
+
+    Also requires U_list_a and U_list_b to each independently be
+    consistent periodic chains (site p's own right bond dimension must
+    equal site (p+1)%n_uc's own left bond dimension, within each list
+    separately) -- mirrors `grow_by_mpo`'s own analogous cut-dimension
+    check (this function's closest sibling in this module) rather than
+    letting a mismatch surface as an opaque NumPy broadcast error deep in
+    the array-assignment loop below."""
+    arrs_a = [_to_array_lpr(U_list_a[p]) for p in range(n_uc)]
+    arrs_b = [_to_array_lpr(U_list_b[p]) for p in range(n_uc)]
+    for p in range(n_uc):
+        if arrs_a[p].shape[1] != arrs_b[p].shape[1]:
+            raise ValueError(
+                "_periodic_direct_sum: physical dimension mismatch at "
+                "sublattice {} (U_list_a={}, U_list_b={})".format(
+                    p, arrs_a[p].shape[1], arrs_b[p].shape[1]))
+        next_p = (p + 1) % n_uc
+        if arrs_a[p].shape[2] != arrs_a[next_p].shape[0]:
+            raise RuntimeError(
+                "_periodic_direct_sum: U_list_a's own bond dimension is "
+                "inconsistent at cut {} (site {}'s right dim {}, site "
+                "{}'s left dim {}) -- U_list_a must itself be a "
+                "consistent periodic chain".format(
+                    p, p, arrs_a[p].shape[2], next_p, arrs_a[next_p].shape[0]))
+        if arrs_b[p].shape[2] != arrs_b[next_p].shape[0]:
+            raise RuntimeError(
+                "_periodic_direct_sum: U_list_b's own bond dimension is "
+                "inconsistent at cut {} (site {}'s right dim {}, site "
+                "{}'s left dim {}) -- U_list_b must itself be a "
+                "consistent periodic chain".format(
+                    p, p, arrs_b[p].shape[2], next_p, arrs_b[next_p].shape[0]))
+    combined_links = [Index(arrs_a[p].shape[0] + arrs_b[p].shape[0], tags="Link")
+                       for p in range(n_uc)]
+    out = []
+    for p in range(n_uc):
+        Aa, Ab = arrs_a[p], arrs_b[p]
+        La, d, Ra = Aa.shape
+        left, right = combined_links[p], combined_links[(p + 1) % n_uc]
+        arr = np.zeros((left.dim, d, right.dim), dtype=complex)
+        arr[:La, :, :Ra] = Aa
+        arr[La:, :, Ra:] = Ab
+        phys = next(ind for ind in U_list_a[p].inds if ind.hastags("Site"))
+        out.append(ITensor((left, phys, right), arr))
+    return out
+
+
+def imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None):
+    """Direct sum of two converged infinite MPS (`result_a`/`result_b`:
+    IDMRGResult and/or PeriodicMPS, any combination -- same duck typing as
+    `imps_overlap`/`apply_mpo`), returning a new PeriodicMPS:
+    `_periodic_direct_sum`'s raw block-diagonal construction,
+    re-canonicalized/truncated via the same `_canonicalize_periodic`
+    two-sided fixed-point procedure `apply_mpo` already uses. See this
+    module's "Summing two converged iMPS" section docstring above for what
+    this "+" actually means once tiled to the thermodynamic limit -- in
+    particular, why summing two *ordinary* IDMRGResults (always
+    individually normalized to eta=1) reliably raises RuntimeError rather
+    than silently returning one arbitrary branch.
+
+    Requires both states to share the same n_uc and, at every sublattice
+    position, the same local physical dimension (mirrors imps_overlap's
+    own check) -- raises ValueError otherwise. Bond dimensions need not
+    match."""
+    n_uc = result_a.n_uc
+    if result_b.n_uc != n_uc:
+        raise ValueError(
+            "imps_sum: unit-cell size mismatch (result_a.n_uc={}, "
+            "result_b.n_uc={})".format(n_uc, result_b.n_uc))
+    dims_a = [_to_array_lpr(result_a.U_list[p]).shape[1] for p in range(n_uc)]
+    dims_b = [_to_array_lpr(result_b.U_list[p]).shape[1] for p in range(n_uc)]
+    if dims_a != dims_b:
+        raise ValueError(
+            "imps_sum: physical dimension mismatch per sublattice "
+            "(result_a={}, result_b={})".format(dims_a, dims_b))
+    raw = _periodic_direct_sum(result_a.U_list, result_b.U_list, n_uc)
+    U_list_new, eta = _canonicalize_periodic(raw, n_uc, cutoff, maxdim)
+    return PeriodicMPS(result_a.sites_uc, n_uc, U_list_new, eta)

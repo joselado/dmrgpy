@@ -1991,4 +1991,47 @@ raw, un-normalized mixed-transfer eigenvalue instead -- mainly a
 diagnostic, analogous to \texttt{apply\_mpo}'s own returned
 \texttt{.eta}.
 
+\textbf{Direct sum of two converged infinite MPS (advanced).}
+\texttt{pyitensor.idmrg.imps\_sum(result\_a, result\_b, cutoff=...,
+maxdim=...)} is the periodic-chain analogue of the finite backends'
+\texttt{mpsalgebra.sum}: a block-diagonal-in-the-bond-space direct sum at
+every unit-cell cut (there is no open boundary to instead concatenate
+along the way a finite chain's two ends do), re-canonicalized/truncated
+via the same \texttt{apply\_mpo}-style two-sided fixed-point procedure,
+returning a new \texttt{PeriodicMPS}:
+
+\begin{lstlisting}
+from dmrgpy.pyitensor import idmrg
+
+result = idmrg.imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None)
+\end{lstlisting}
+
+\textbf{Scope restriction -- read before use.} Tiled to the
+thermodynamic limit, this ``+'' does \emph{not} represent a literal
+Hilbert-space vector sum the way the finite-chain construction does. It
+is only well-posed (a single dominant branch surviving -- the
+mathematically correct infinite-volume answer, not a truncation
+artifact) when \texttt{result\_a}/\texttt{result\_b} have a genuine
+per-site norm mismatch, i.e.\ different self-overlap transfer eigenvalues
+(\texttt{eta}, in the sense of \texttt{imps\_overlap}'s own
+\texttt{eta\_aa}/\texttt{eta\_bb}). This mismatch never happens between
+two \emph{ordinary} \texttt{IDMRGResult}s -- every one is individually
+normalized to \texttt{eta=1} exactly by left-canonical SVD construction
+-- so summing two separately-converged ground states (the most natural
+reason to want this operation, e.g.\ to combine two symmetry-related
+solutions of the same Hamiltonian) hits a genuine tie every time. That
+tied case is a ``cat state'' superposition of two macroscopically
+distinct branches, which this module's single-fixed-point machinery
+cannot represent as one canonical periodic MPS -- \texttt{imps\_sum}
+raises \texttt{RuntimeError} there (via \texttt{pyitensor.idmrg}'s
+internal degeneracy check on the combined transfer matrix's dominant
+eigenvalue) rather than silently collapsing to one arbitrary branch.
+Correctly evaluating observables on that common, physically meaningful
+case (e.g.\ via the thermodynamic-limit local-observable identity for
+two orthogonal, equally-weighted branches) needs correlator machinery
+this module does not have yet -- a documented, deliberate scope limit,
+not something silently gotten wrong. See \texttt{pyitensor/idmrg.py}'s
+own ``Summing two converged iMPS'' section docstring for the full
+derivation and empirical confirmation.
+
 \end{document}
