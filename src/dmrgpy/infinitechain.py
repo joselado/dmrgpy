@@ -133,9 +133,9 @@ def _window_hamiltonian(h_intra, h_inter, n_uc, n_window):
     h_inter once per *adjacent pair* of cells (0..n_window-2 -- one fewer
     bond than a periodic ring, since there is no cell n_window to couple
     the last cell's own h_inter to). See
-    Infinite_Many_Body_Chain.get_dynamical_correlator's own docstring for
-    why this finite tiling is used (and its approximation to the true
-    infinite chain) rather than an exact infinite-size construction."""
+    Infinite_Many_Body_Chain.kpm_finite's own docstring for why this
+    finite tiling is used (and its approximation to the true infinite
+    chain) rather than an exact infinite-size construction."""
     terms = []
     for c in range(n_window):
         terms += _shift_terms(h_intra.op, c * n_uc)
@@ -356,14 +356,19 @@ class Infinite_Many_Body_Chain:
         from .pyitensor import idmrg
         return idmrg.two_point_correlator(self._result, opname_i, p_i, opname_j, r)
 
-    def get_dynamical_correlator(self, opname_i, p_i, opname_j, r, n_window,
-                                  window_chain_kwargs=None, **kwargs):
+    def kpm_finite(self, opname_i, p_i, opname_j, r, n_window,
+                   window_chain_kwargs=None, **kwargs):
         """Dynamical correlator <opname_i(site p_i) opname_j(site p_i+r)>
         (omega) of the infinite chain, computed with the KPM method --
         reusing the existing finite-chain KPM implementation
         (kpmdmrg.get_dynamical_correlator, pyitensor/chain.py's
         Chain.kpm_dynamical_correlator) verbatim, not a new Chebyshev-
-        recursion implementation.
+        recursion implementation. Named `kpm_finite` (rather than
+        `get_dynamical_correlator`, the finite-chain method it wraps) to
+        flag up front that this is the finite-window *approximation*
+        described below, not an exact infinite-size calculation -- see
+        "A genuinely infinite-chain KPM (not implemented here)" at the end
+        of this docstring for what an exact version would need.
 
         == Method: finite window, open boundary conditions ==
 
@@ -406,10 +411,10 @@ class Infinite_Many_Body_Chain:
         reflections contaminate the result regardless of how large
         `n_window` is -- there is no way around this for a fixed `delta`
         short of an actual infinite-boundary-condition (IBC) window
-        method, out of scope here. Prefer a coarser `delta`, or check that
-        the correlator has visibly converged with growing `n_window`, for
-        quantitative work (especially near a gapless point, where a fine
-        `delta` is most tempting).
+        method, out of scope here (see below). Prefer a coarser `delta`,
+        or check that the correlator has visibly converged with growing
+        `n_window`, for quantitative work (especially near a gapless
+        point, where a fine `delta` is most tempting).
 
         opname_i/opname_j: named single-site operators, at sublattice
         position p_i (0..n_uc-1) of the window's central cell and p_i+r of
@@ -437,25 +442,67 @@ class Infinite_Many_Body_Chain:
         dependency on a previously converged IDMRGResult, or even on
         self.itensor_version -- it only needs the Hamiltonian specification
         from set_hamiltonian), so it works regardless of which backend
-        gs_energy() itself used."""
+        gs_energy() itself used.
+
+        == A genuinely infinite-chain KPM (not implemented here) ==
+
+        A KPM calculation that is exact in the thermodynamic limit (not
+        just "checked to have converged in n_window") is possible in
+        principle, via infinite boundary conditions (IBC, Phien/McCulloch/
+        Vidal, PRB 86, 245107 (2012)) -- but is a substantially larger
+        feature than this method, and is not implemented here:
+
+        1. Cap the window's two ends with the *converged environment*
+           (the HL/HR accumulated Hamiltonian blocks idmrg_ground_state
+           already builds during growth, or an equivalent construction
+           from the fixed-point machinery apply_mpo/imps_overlap already
+           use) instead of plain open boundaries. This removes a real
+           error source this method's open-boundary window has that
+           `n_window` alone cannot fix no matter how large: an open
+           chain's own ground state carries boundary artifacts (e.g.
+           Friedel-oscillation-like features) that contaminate even the
+           *central* region, not just the two edges, because the window's
+           own DMRG ground-state search has no way to know it should
+           match the true infinite bulk rather than terminate at a
+           physical edge.
+        2. Independently, removing the `n_window`-vs-moment-count
+           constraint entirely (rather than just picking `n_window`
+           comfortably larger than the expected moment count, as this
+           method requires) needs the *active* window to grow by roughly
+           one site per Chebyshev moment as the recursion proceeds
+           (reusing the converged unit-cell tensors to extend the state
+           on demand, similar in spirit to a "growing window" real-time
+           TEBD/TDVP simulation on an infinite chain), rather than fixing
+           a static `n_window` up front. Done this way, the calculation's
+           cost is bounded only by the usual bond-dimension/computational
+           budget of any DMRG calculation, not by a fixed geometric
+           window guessed in advance.
+
+        Both pieces reuse machinery this module already has (the HL/HR
+        environment construction from idmrg_ground_state, and the
+        fixed-point/transfer-matrix code apply_mpo/imps_overlap build
+        on), but assembling them into a working IBC-window KPM
+        implementation is a new, nontrivial feature in its own right, not
+        a small patch on top of kpm_finite -- flagged as a known,
+        deliberate follow-up rather than attempted here."""
         if self._h_intra is None:
             raise RuntimeError(
-                "Infinite_Many_Body_Chain.get_dynamical_correlator called "
+                "Infinite_Many_Body_Chain.kpm_finite called "
                 "before set_hamiltonian")
         if not (0 <= p_i < self.n_uc):
-            raise ValueError("get_dynamical_correlator: p_i must be in 0..{} "
+            raise ValueError("kpm_finite: p_i must be in 0..{} "
                               "(n_uc-1), got {!r}".format(self.n_uc - 1, p_i))
         if r < 0:
-            raise ValueError("get_dynamical_correlator: r must be >= 0")
+            raise ValueError("kpm_finite: r must be >= 0")
         if n_window < 1:
-            raise ValueError("get_dynamical_correlator: n_window must be >= 1")
+            raise ValueError("kpm_finite: n_window must be >= 1")
         n_sites = n_window * self.n_uc
         center = n_window // 2
         s_i = center * self.n_uc + p_i
         s_j = s_i + r
         if s_j >= n_sites:
             raise ValueError(
-                "get_dynamical_correlator: n_window={} is too small to fit "
+                "kpm_finite: n_window={} is too small to fit "
                 "opname_j at window site {} (p_i={}, r={}, central cell {}) "
                 "-- increase n_window".format(n_window, s_j, p_i, r, center))
         from .manybodychain import Many_Body_Chain

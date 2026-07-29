@@ -1899,17 +1899,20 @@ Excited states and entanglement/entropy are not implemented for
 infinite chains yet.
 
 \textbf{Dynamical correlators (finite-window KPM).}
-\texttt{ic.get\_dynamical\_correlator(opname\_i, p\_i, opname\_j, r,
+\texttt{ic.kpm\_finite(opname\_i, p\_i, opname\_j, r,
 n\_window, window\_chain\_kwargs=None, **kwargs)} computes
 $\langle \text{opname\_i}(\text{site } p_i)\,
 \text{opname\_j}(\text{site } p_i+r)\rangle(\omega)$ of the infinite
 chain, reusing the existing finite-chain KPM machinery
 (\texttt{kpmdmrg.get\_dynamical\_correlator}) unmodified rather than a
-new Chebyshev-recursion implementation. There is no infinite-chain
-analogue of \texttt{vev}/\texttt{correlator}'s transfer-matrix formalism
-for a \emph{dynamical} quantity -- the Hamiltonian is
-extensive/unbounded in the thermodynamic limit, so a literal Chebyshev
-expansion of the full $H$ has no meaning (unlike
+new Chebyshev-recursion implementation. Named \texttt{kpm\_finite} (not
+\texttt{get\_dynamical\_correlator}, the finite-chain method it wraps)
+to flag up front that it is the finite-window \emph{approximation}
+described below, not an exact infinite-size calculation. There is no
+infinite-chain analogue of \texttt{vev}/\texttt{correlator}'s
+transfer-matrix formalism for a \emph{dynamical} quantity -- the
+Hamiltonian is extensive/unbounded in the thermodynamic limit, so a
+literal Chebyshev expansion of the full $H$ has no meaning (unlike
 \texttt{apply\_mpo}/\texttt{imps\_sum}'s bounded-operator scope above).
 Instead, this method builds an ordinary finite, open-boundary chain of
 \texttt{n\_window} repeats of the unit cell (Hamiltonian =
@@ -1921,7 +1924,7 @@ delegates directly to the same KPM code path an ordinary finite
 \texttt{Spin\_Chain}/\texttt{Fermionic\_Chain} uses:
 
 \begin{lstlisting}
-es, ys = ic.get_dynamical_correlator("Sz", 0, "Sz", 0, n_window=16,
+es, ys = ic.kpm_finite("Sz", 0, "Sz", 0, n_window=16,
         window_chain_kwargs=dict(maxm=30, nsweeps=15, kpmmaxm=60),
         delta=0.3, es=np.linspace(-1, 5, 200))
 \end{lstlisting}
@@ -1960,6 +1963,29 @@ on \texttt{ic.itensor\_version}), so it works regardless of which
 backend \texttt{gs\_energy()} itself used. See
 \texttt{examples/idmrg/dynamical\_correlator\_finite\_window/main.py}
 for a worked example sweeping \texttt{n\_window}.
+
+\textbf{A genuinely infinite-chain KPM is possible in principle, but not
+implemented here.} Two separate ingredients would be needed, both
+reusing machinery this module already has: (1) cap the window's two
+ends with the \emph{converged environment} (the \texttt{HL}/\texttt{HR}
+accumulated Hamiltonian blocks \texttt{idmrg\_ground\_state} already
+builds during growth, or an equivalent construction from the
+fixed-point machinery \texttt{apply\_mpo}/\texttt{imps\_overlap} already
+use) instead of plain open boundaries -- infinite boundary conditions
+(IBC, Phien/McCulloch/Vidal, PRB 86, 245107 (2012)) -- which removes a
+real error source \texttt{n\_window} alone cannot fix: an open chain's
+own ground state carries boundary artifacts that contaminate even the
+\emph{central} region, not just the two edges; (2) independently, let
+the \emph{active} window grow by roughly one site per Chebyshev moment
+as the recursion proceeds (reusing the converged unit-cell tensors to
+extend the state on demand) rather than fixing a static
+\texttt{n\_window} up front, removing the
+\texttt{n\_window}-vs-moment-count constraint entirely and bounding
+cost only by the usual bond-dimension budget of any DMRG calculation.
+Assembling these into a working implementation is a substantially
+larger feature than \texttt{kpm\_finite} -- flagged as a known,
+deliberate follow-up (see \texttt{kpm\_finite}'s own docstring for the
+same note in more detail).
 
 \textbf{Applying an operator/gate to the converged chain (advanced).}
 \texttt{pyitensor.idmrg.apply\_mpo(result, W\_bulk, cutoff=..., maxdim=...)}
