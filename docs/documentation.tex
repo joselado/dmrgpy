@@ -297,8 +297,10 @@ translationally-invariant, infinite unit-cell chain.
 \texttt{2} and \texttt{"julia\_live"} have no iDMRG port. The public
 surface is deliberately narrow: \texttt{set\_hamiltonian},
 \texttt{gs\_energy} (energy \emph{per site}, the physically meaningful
-quantity for an infinite system), and static \texttt{vev}/\texttt{correlator}
--- no excited states, no dynamics, no entanglement/entropy in v1.
+quantity for an infinite system), static \texttt{vev}/\texttt{correlator},
+and (via a finite-window reduction to the existing finite-chain KPM
+stack, see below) \texttt{kpm\_finite} -- no excited
+states, no entanglement/entropy in v1.
 
 \textbf{Backend dispatch, unlike the finite-chain \texttt{mode.py}, is
 explicit rather than automatic}: \texttt{gs\_energy} branches directly on
@@ -658,6 +660,107 @@ left/mixed cases -- so this same guard now protects
 pre-existing test or on \texttt{imps\_overlap}'s own realistic (orthogonal
 and gauge-comparison) cases (all previously-passing
 \texttt{tests/test\_infinite\_chain.py} cases still pass).
+
+\textbf{Dynamical correlators, via a finite-window reduction to the
+existing finite-chain KPM stack (\texttt{infinitechain.py}, not
+\texttt{pyitensor/idmrg.py})}: unlike the static-correlator machinery
+above, \texttt{Infinite\_Many\_Body\_Chain.kpm\_finite} deliberately
+does \textbf{not} add any new Chebyshev-recursion code to
+\texttt{idmrg.py}. Named \texttt{kpm\_finite} (not
+\texttt{get\_dynamical\_correlator}, the finite-chain method it wraps)
+so the name itself flags that this is a finite-window approximation,
+not the exact infinite-size method described further below. $H$ is
+extensive/unbounded in the thermodynamic limit, so there is no
+infinite-chain analogue of the transfer-matrix formalism
+\texttt{vev}/\texttt{correlator} use -- a literal KPM expansion of the
+full infinite $H$ has no meaning (the same reason \texttt{apply\_mpo}
+restricts \texttt{W\_bulk} to \emph{bounded} periodic operators, see
+above). Instead, \texttt{kpm\_finite} builds an ordinary finite,
+open-boundary \texttt{Many\_Body\_Chain}
+(\texttt{itensor\_version="python"}, \texttt{n\_window} repeats of the
+unit cell) with a Hamiltonian tiled from \texttt{self.\_h\_intra}/
+\texttt{self.\_h\_inter} (\texttt{\_window\_hamiltonian}/
+\texttt{\_shift\_terms}, new module-level helpers in
+\texttt{infinitechain.py} -- pure term-list arithmetic, reusing the
+same \texttt{MultiOperator.op} 0-based-site-index format
+\texttt{\_canonicalize\_hamiltonian} already produces, just
+concatenated across cells with an increasing site-index shift), places
+the two operators at the window's central cell, and calls
+\texttt{kpmdmrg.get\_dynamical\_correlator} on that temporary chain
+directly -- the exact same code path (and, transitively,
+\texttt{pyitensor/chain.py}'s \texttt{Chain.kpm\_dynamical\_correlator}/
+\texttt{\_kpm\_moments\_full}/\texttt{\_scaled\_hamiltonian}) an
+ordinary finite \texttt{Spin\_Chain}/\texttt{Fermionic\_Chain} already
+uses, completely unmodified. \texttt{kpmdmrg.get\_dynamical\_correlator}
+is called directly rather than through the usual public
+\texttt{Many\_Body\_Chain.get\_dynamical\_correlator}/\texttt{dynamics.
+get\_dynamical\_correlator} dispatch, to sidestep \texttt{dynamics.py}'s
+own \texttt{is\_hermitian()} gate -- confirmed (this is
+\texttt{set\_hamiltonian}'s own already-documented gap, not a new
+finding) that \texttt{is\_hermitian()}'s \texttt{simplify()} step
+false-rejects an ordinary cross-site
+\texttt{Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j]}-style term as
+non-Hermitian, which would otherwise misroute a perfectly ordinary
+Heisenberg-type window Hamiltonian to the non-Hermitian KPM/dynamics
+path.
+
+Correctness of the term-tiling itself (as opposed to the pre-existing,
+independently-tested KPM math it feeds into) is checked in
+\texttt{tests/test\_infinite\_chain.py} by an \emph{exact} ED
+ground-state-energy comparison between \texttt{\_window\_hamiltonian}'s
+output and an independently, by-hand-built equivalent finite chain --
+the same finite-size-extrapolation pattern
+\texttt{test\_n\_uc2\_dimerized\_chain\_matches\_finite\_size\_extrapolation}
+already uses for \texttt{gs\_energy}, just applied to the Hamiltonian
+construction directly instead of to iDMRG's own converged energy
+density.
+
+This is a genuine finite-size \textbf{approximation}, not an exact
+infinite-size dynamical-correlator method -- see
+\texttt{kpm\_finite}'s own docstring (and
+\texttt{docs/user\_guide.tex}'s corresponding section) for the
+light-cone/moment-count argument for why a fixed \texttt{delta} needs
+\texttt{n\_window} chosen large enough (and, past a point,
+\texttt{delta} itself coarsened) to avoid open-boundary reflections
+contaminating the result, and
+\texttt{examples/idmrg/dynamical\_correlator\_finite\_window/main.py}
+for a worked \texttt{n\_window}-convergence sweep.
+
+\textbf{A genuinely infinite-chain KPM is possible in principle, but
+not implemented here.} Two separate ingredients would be needed, both
+reusing machinery this module already has, not a small patch on top of
+\texttt{kpm\_finite}:
+
+\begin{enumerate}
+\item Cap the window's two ends with the \emph{converged environment}
+-- the \texttt{HL}/\texttt{HR} accumulated Hamiltonian blocks
+\texttt{idmrg\_ground\_state} already builds during growth, or an
+equivalent construction from the fixed-point machinery
+\texttt{apply\_mpo}/\texttt{imps\_overlap} already use -- instead of
+plain open boundaries: infinite boundary conditions (IBC,
+Phien/McCulloch/Vidal, PRB 86, 245107 (2012)). This removes a real
+error source \texttt{n\_window} alone cannot fix no matter how large:
+an open chain's own ground state carries boundary artifacts (e.g.
+Friedel-oscillation-like features) that contaminate even the
+\emph{central} region, not just the two edges, because the window's
+own DMRG ground-state search has no way to know it should match the
+true infinite bulk rather than terminate at a physical edge.
+\item Independently, let the \emph{active} window grow by roughly one
+site per Chebyshev moment as the recursion proceeds (reusing the
+converged unit-cell tensors to extend the state on demand, similar in
+spirit to a ``growing window'' real-time TEBD/TDVP simulation on an
+infinite chain), rather than fixing a static \texttt{n\_window} up
+front. This removes the \texttt{n\_window}-vs-moment-count constraint
+entirely, bounding cost only by the usual bond-dimension/computational
+budget of any DMRG calculation, not by a fixed geometric window
+guessed in advance.
+\end{enumerate}
+
+Assembling these into a working IBC-window KPM implementation is a
+new, nontrivial feature in its own right -- flagged as a known,
+deliberate follow-up rather than attempted here (see
+\texttt{kpm\_finite}'s own docstring for the same note, addressed to a
+caller rather than a maintainer).
 
 \subsection{Operator representation: \texttt{MultiOperator}}
 
