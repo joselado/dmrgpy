@@ -118,6 +118,32 @@ def _canonicalize_hamiltonian(h, n_uc):
     return _wrap_terms(intra_terms, "h_intra"), _wrap_terms(inter_terms, "h_inter")
 
 
+def _shift_terms(op_terms, shift):
+    """A copy of a MultiOperator.op-format term list with every site index
+    increased by `shift` -- used by _window_hamiltonian to tile h_intra/
+    h_inter (already canonicalized to a single unit cell, 0-based site
+    indices) across a finite window's unit-cell repeats."""
+    return [[term[0]] + [[name, site + shift] for name, site in term[1:]]
+            for term in op_terms]
+
+
+def _window_hamiltonian(h_intra, h_inter, n_uc, n_window):
+    """A finite, open-boundary MultiOperator over n_window*n_uc sites (0-
+    based), built by tiling h_intra once per cell (0..n_window-1) and
+    h_inter once per *adjacent pair* of cells (0..n_window-2 -- one fewer
+    bond than a periodic ring, since there is no cell n_window to couple
+    the last cell's own h_inter to). See
+    Infinite_Many_Body_Chain.get_dynamical_correlator's own docstring for
+    why this finite tiling is used (and its approximation to the true
+    infinite chain) rather than an exact infinite-size construction."""
+    terms = []
+    for c in range(n_window):
+        terms += _shift_terms(h_intra.op, c * n_uc)
+    for c in range(n_window - 1):
+        terms += _shift_terms(h_inter.op, c * n_uc)
+    return _wrap_terms(terms, "h_window")
+
+
 class Infinite_Many_Body_Chain:
     """iDMRG-only counterpart of Many_Body_Chain (manybodychain.py) -- see
     this module's docstring. Exposes only the narrow subset of modes v1
@@ -329,6 +355,120 @@ class Infinite_Many_Body_Chain:
             self.gs_energy()
         from .pyitensor import idmrg
         return idmrg.two_point_correlator(self._result, opname_i, p_i, opname_j, r)
+
+    def get_dynamical_correlator(self, opname_i, p_i, opname_j, r, n_window,
+                                  window_chain_kwargs=None, **kwargs):
+        """Dynamical correlator <opname_i(site p_i) opname_j(site p_i+r)>
+        (omega) of the infinite chain, computed with the KPM method --
+        reusing the existing finite-chain KPM implementation
+        (kpmdmrg.get_dynamical_correlator, pyitensor/chain.py's
+        Chain.kpm_dynamical_correlator) verbatim, not a new Chebyshev-
+        recursion implementation.
+
+        == Method: finite window, open boundary conditions ==
+
+        vev/correlator work directly with the converged, exactly
+        translationally-invariant unit cell (IDMRGResult.U_list) via the
+        transfer-matrix formalism -- but there is no analogous *dynamical*
+        formalism here: H is extensive/unbounded in the thermodynamic
+        limit, so a literal Chebyshev expansion of the full infinite H has
+        no meaning (unlike apply_mpo/imps_sum's *bounded*-operator scope).
+        Instead, this method builds an ordinary finite, open-boundary chain
+        of `n_window` repeats of this chain's own unit cell
+        (n_window*n_uc physical sites total, Hamiltonian = h_intra tiled
+        onto every cell plus h_inter tiled onto every adjacent pair of
+        cells -- see _window_hamiltonian), places opname_i/opname_j at
+        sites p_i/p_i+r of the window's *central* unit cell (as far as
+        possible from both open ends), and delegates directly to
+        kpmdmrg.get_dynamical_correlator on that ordinary finite
+        Many_Body_Chain (itensor_version="python") -- the exact same KPM
+        code path an ordinary finite Spin_Chain/Fermionic_Chain uses
+        today. (kpmdmrg.get_dynamical_correlator is called directly,
+        bypassing dynamics.py's own is_hermitian() gate -- see
+        set_hamiltonian's own comment for why that check is known to
+        false-reject an ordinary cross-site Heisenberg-style term.)
+
+        This is a genuine approximation to the (only ill-defined via KPM
+        anyway) infinite-chain dynamical correlator, not an exact
+        infinite-size method: results carry finite-size/open-boundary
+        corrections that must be checked by convergence in `n_window`,
+        exactly as a static vev/correlator caller would check maxm/etol
+        convergence of the original iDMRG ground state. In particular: one
+        Chebyshev moment corresponds to one application of the (nearest-
+        neighbor) window Hamiltonian, so it can only move information by
+        ~1 site per moment (a Lieb-Robinson-style bound) -- but KPM's own
+        moment count `n` (see kpmdmrg.get_dynamical_correlator /
+        Chain._scaled_hamiltonian) scales with the *window's own extensive
+        bandwidth* divided by the requested `delta` (an ordinary finite
+        chain's KPM already has this property -- nothing new here), so a
+        genuinely fine `delta` can require a moment count comparable to
+        (or larger than) `n_window` itself, at which point boundary
+        reflections contaminate the result regardless of how large
+        `n_window` is -- there is no way around this for a fixed `delta`
+        short of an actual infinite-boundary-condition (IBC) window
+        method, out of scope here. Prefer a coarser `delta`, or check that
+        the correlator has visibly converged with growing `n_window`, for
+        quantitative work (especially near a gapless point, where a fine
+        `delta` is most tempting).
+
+        opname_i/opname_j: named single-site operators, at sublattice
+        position p_i (0..n_uc-1) of the window's central cell and p_i+r of
+        whichever cell that lands in (r>=0 physical sites, see
+        two_point_correlator's own r convention).
+
+        n_window: number of unit-cell repeats in the finite window -- no
+        default (see the convergence caveat above); must at least be able
+        to fit p_i and p_i+r (checked below), but should be chosen much
+        larger than that in practice.
+
+        window_chain_kwargs: optional dict of attribute overrides applied
+        to the temporary finite Many_Body_Chain before set_hamiltonian
+        (e.g. dict(maxm=60, nsweeps=20, kpmmaxm=80, kpm_scale=0.5)) -- the
+        same attributes an ordinary finite chain exposes
+        (manybodychain.py's Many_Body_Chain.__init__), independent of this
+        iDMRG chain's own self.maxm/etc.
+
+        Remaining **kwargs (delta, kernel, es, deconvolve, ...) are
+        forwarded to kpmdmrg.get_dynamical_correlator unchanged. Returns
+        (es, correlator), exactly like a finite chain's own
+        get_dynamical_correlator.
+
+        Unlike vev/correlator, this does not need self._result (no
+        dependency on a previously converged IDMRGResult, or even on
+        self.itensor_version -- it only needs the Hamiltonian specification
+        from set_hamiltonian), so it works regardless of which backend
+        gs_energy() itself used."""
+        if self._h_intra is None:
+            raise RuntimeError(
+                "Infinite_Many_Body_Chain.get_dynamical_correlator called "
+                "before set_hamiltonian")
+        if not (0 <= p_i < self.n_uc):
+            raise ValueError("get_dynamical_correlator: p_i must be in 0..{} "
+                              "(n_uc-1), got {!r}".format(self.n_uc - 1, p_i))
+        if r < 0:
+            raise ValueError("get_dynamical_correlator: r must be >= 0")
+        if n_window < 1:
+            raise ValueError("get_dynamical_correlator: n_window must be >= 1")
+        n_sites = n_window * self.n_uc
+        center = n_window // 2
+        s_i = center * self.n_uc + p_i
+        s_j = s_i + r
+        if s_j >= n_sites:
+            raise ValueError(
+                "get_dynamical_correlator: n_window={} is too small to fit "
+                "opname_j at window site {} (p_i={}, r={}, central cell {}) "
+                "-- increase n_window".format(n_window, s_j, p_i, r, center))
+        from .manybodychain import Many_Body_Chain
+        from . import kpmdmrg
+        window_sites = self.site_types * n_window
+        wc = Many_Body_Chain(window_sites, itensor_version="python")
+        for k, v in (window_chain_kwargs or {}).items():
+            setattr(wc, k, v)
+        h_window = _window_hamiltonian(self._h_intra, self._h_inter, self.n_uc, n_window)
+        wc.set_hamiltonian(h_window)
+        op_i = wc.get_operator(opname_i, s_i)
+        op_j = wc.get_operator(opname_j, s_j)
+        return kpmdmrg.get_dynamical_correlator(wc, name=(op_i, op_j), **kwargs)
 
 
 class Infinite_Spin_Chain(Infinite_Many_Body_Chain):

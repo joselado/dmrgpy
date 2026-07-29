@@ -720,3 +720,95 @@ def test_periodic_direct_sum_bond_dimension():
     assert np.allclose(arr[chi_up:, :, chi_up:], a_down)
     assert np.allclose(arr[:chi_up, :, chi_up:], 0)
     assert np.allclose(arr[chi_up:, :, :chi_up], 0)
+
+
+# -- get_dynamical_correlator: finite-window KPM dynamical correlator --
+# (infinitechain.py's _window_hamiltonian + Infinite_Many_Body_Chain.
+# get_dynamical_correlator, reusing kpmdmrg.get_dynamical_correlator /
+# pyitensor/chain.py's KPM machinery verbatim on a temporary finite,
+# open-boundary Many_Body_Chain -- see get_dynamical_correlator's own
+# docstring for why this is a finite-window *approximation*, not an
+# exact infinite-size method).
+
+def test_window_hamiltonian_matches_hand_built_finite_chain():
+    """_window_hamiltonian's own construction (tiling h_intra/h_inter
+    across n_window unit cells) must reproduce *exactly* the same
+    Hamiltonian as hand-building the equivalent finite open chain term by
+    term (the same pattern test_n_uc2_dimerized_chain_matches_finite_size_
+    extrapolation already cross-checks iDMRG's own energy density
+    against) -- checked via exact ED ground-state energy agreement, which
+    only holds if every term (site indices, coefficients) matches
+    exactly, not just approximately."""
+    j_strong, j_weak = 1.0, 0.4
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
+         + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
+    ic.set_hamiltonian(h)
+
+    n_window = 4  # 8 sites
+    n_sites = n_window * ic.n_uc
+    h_window = infinitechain._window_hamiltonian(ic._h_intra, ic._h_inter, ic.n_uc, n_window)
+
+    sc_hand = spinchain.Spin_Chain(["1/2"] * n_sites)
+    hf = 0
+    for i in range(n_sites - 1):
+        j = j_strong if i % 2 == 0 else j_weak
+        hf = hf + j * (sc_hand.Sx[i] * sc_hand.Sx[i + 1] + sc_hand.Sy[i] * sc_hand.Sy[i + 1]
+                       + sc_hand.Sz[i] * sc_hand.Sz[i + 1])
+    sc_hand.set_hamiltonian(hf)
+    e_hand = sc_hand.gs_energy(mode="ED")
+
+    sc_window = spinchain.Spin_Chain(["1/2"] * n_sites)
+    sc_window.set_hamiltonian(h_window)
+    e_window = sc_window.gs_energy(mode="ED")
+
+    assert e_window == pytest.approx(e_hand, abs=1e-10)
+
+
+def test_get_dynamical_correlator_runs_and_is_finite():
+    """Smoke test: a uniform n_uc=1 Heisenberg chain's local (r=0, same
+    operator) dynamical correlator on a modest finite window runs without
+    error and returns a finite, non-trivial (not identically zero)
+    profile -- mirrors test_n_uc2_skip_site_coupling_via_R_suffix's own
+    smoke-test style (no simple closed form to check against for this
+    combination of window size/DMRG/KPM parameters, just that the whole
+    finite-window-then-KPM pipeline produces sane output)."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
+    ic.set_hamiltonian(h)
+
+    es, ys = ic.get_dynamical_correlator(
+        "Sz", 0, "Sz", 0, n_window=10,
+        window_chain_kwargs=dict(maxm=20, nsweeps=8),
+        delta=0.3, es=np.linspace(-1, 5, 60))
+
+    assert es.shape == ys.shape == (60,)
+    assert np.all(np.isfinite(ys))
+    assert np.max(np.abs(ys)) > 1e-6  # not identically zero
+
+
+def test_get_dynamical_correlator_before_set_hamiltonian_raises():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    with pytest.raises(RuntimeError):
+        ic.get_dynamical_correlator("Sz", 0, "Sz", 0, n_window=5)
+
+
+def test_get_dynamical_correlator_rejects_p_i_out_of_range():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
+    with pytest.raises(ValueError):
+        ic.get_dynamical_correlator("Sz", 5, "Sz", 0, n_window=5)
+
+
+def test_get_dynamical_correlator_rejects_negative_r():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
+    with pytest.raises(ValueError):
+        ic.get_dynamical_correlator("Sz", 0, "Sz", -1, n_window=5)
+
+
+def test_get_dynamical_correlator_rejects_window_too_small_for_r():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
+    with pytest.raises(ValueError):
+        ic.get_dynamical_correlator("Sz", 0, "Sz", 10, n_window=3)

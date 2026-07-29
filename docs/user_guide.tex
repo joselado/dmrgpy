@@ -1895,9 +1895,71 @@ needed, prefer expressing the same physical model as an
 couplings) instead, and use the self-consistency check either way
 before trusting a result.
 
-Excited states, dynamics, and entanglement/entropy are not implemented
-for infinite chains yet -- only ground-state energy density and static
-correlators.
+Excited states and entanglement/entropy are not implemented for
+infinite chains yet.
+
+\textbf{Dynamical correlators (finite-window KPM).}
+\texttt{ic.get\_dynamical\_correlator(opname\_i, p\_i, opname\_j, r,
+n\_window, window\_chain\_kwargs=None, **kwargs)} computes
+$\langle \text{opname\_i}(\text{site } p_i)\,
+\text{opname\_j}(\text{site } p_i+r)\rangle(\omega)$ of the infinite
+chain, reusing the existing finite-chain KPM machinery
+(\texttt{kpmdmrg.get\_dynamical\_correlator}) unmodified rather than a
+new Chebyshev-recursion implementation. There is no infinite-chain
+analogue of \texttt{vev}/\texttt{correlator}'s transfer-matrix formalism
+for a \emph{dynamical} quantity -- the Hamiltonian is
+extensive/unbounded in the thermodynamic limit, so a literal Chebyshev
+expansion of the full $H$ has no meaning (unlike
+\texttt{apply\_mpo}/\texttt{imps\_sum}'s bounded-operator scope above).
+Instead, this method builds an ordinary finite, open-boundary chain of
+\texttt{n\_window} repeats of the unit cell (Hamiltonian =
+\texttt{h\_intra} tiled onto every cell plus \texttt{h\_inter} tiled
+onto every adjacent pair of cells -- one bond fewer than a periodic ring
+at the two open ends), places the two operators at the window's
+\emph{central} unit cell (as far as possible from both ends), and
+delegates directly to the same KPM code path an ordinary finite
+\texttt{Spin\_Chain}/\texttt{Fermionic\_Chain} uses:
+
+\begin{lstlisting}
+es, ys = ic.get_dynamical_correlator("Sz", 0, "Sz", 0, n_window=16,
+        window_chain_kwargs=dict(maxm=30, nsweeps=15, kpmmaxm=60),
+        delta=0.3, es=np.linspace(-1, 5, 200))
+\end{lstlisting}
+
+\texttt{n\_window} has no default -- see the convergence caveat below.
+\texttt{window\_chain\_kwargs} is an optional dict of attribute
+overrides applied to the temporary finite \texttt{Many\_Body\_Chain}
+(\texttt{maxm}, \texttt{nsweeps}, \texttt{kpmmaxm}, \texttt{kpm\_scale},
+...), independent of \texttt{ic}'s own \texttt{maxm}/etc.; remaining
+\texttt{**kwargs} (\texttt{delta}, \texttt{kernel}, \texttt{es},
+\texttt{deconvolve}, ...) are forwarded to
+\texttt{kpmdmrg.get\_dynamical\_correlator} unchanged.
+
+\textbf{Scope restriction -- a finite-window approximation, read before
+use.} This is \emph{not} an exact infinite-size method: results carry
+finite-size/open-boundary corrections that must be checked by
+convergence in \texttt{n\_window}, exactly as a static
+\texttt{vev}/\texttt{correlator} caller would check
+\texttt{maxm}/\texttt{etol} convergence of the original iDMRG ground
+state. One Chebyshev moment corresponds to one application of the
+(nearest-neighbor) window Hamiltonian, so it can only move information
+by $\sim$1 site per moment (a Lieb-Robinson-style bound) -- but KPM's
+own moment count scales with the \emph{window's own extensive
+bandwidth} divided by the requested \texttt{delta} (an ordinary finite
+chain's KPM already has this property, nothing new here), so a
+genuinely fine \texttt{delta} can require a moment count comparable to
+(or larger than) \texttt{n\_window} itself, at which point
+open-boundary reflections contaminate the result regardless of how
+large \texttt{n\_window} is. Prefer a coarser \texttt{delta}, or check
+that the correlator has visibly converged with growing
+\texttt{n\_window}, for quantitative work (especially near a gapless
+point, where a fine \texttt{delta} is most tempting). Unlike
+\texttt{vev}/\texttt{correlator}, this does not need \texttt{ic.\_result}
+(no dependency on a previously converged \texttt{IDMRGResult}, or even
+on \texttt{ic.itensor\_version}), so it works regardless of which
+backend \texttt{gs\_energy()} itself used. See
+\texttt{examples/idmrg/dynamical\_correlator\_finite\_window/main.py}
+for a worked example sweeping \texttt{n\_window}.
 
 \textbf{Applying an operator/gate to the converged chain (advanced).}
 \texttt{pyitensor.idmrg.apply\_mpo(result, W\_bulk, cutoff=..., maxdim=...)}
