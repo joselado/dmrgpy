@@ -2317,19 +2317,31 @@ class Chain
     // this class hands back or feeds into sum()/bicstab() has an unprimed
     // physical index" -- always holds, not just in the call sites that
     // happened to get exercised so far.
+    //
+    // TagSet("Site") re-parses its string argument every call (same cost
+    // already profiled and fixed for TagSet("a") in arnoldi_smallest_real
+    // below -- see that function's own comment); apply_mpo() is the
+    // single most-invoked helper in this file (every MPO application:
+    // KPM's Chebyshev recursion, time evolution, the generalized-
+    // eigenproblem solver, bicstab/CVM, custom_exp/evoloperator, ...), so
+    // a function-local static avoids re-parsing it on every one of those
+    // calls instead of just the iDMRG-specific functions the earlier pass
+    // covered.
     MPS
     apply_mpo(MPO const& K, MPS const& x, Args const& args) const
         {
+        static const TagSet site_tag("Site");
         auto out = applyMPO(K,x,args);
-        out.noPrime(TagSet("Site"));
+        out.noPrime(site_tag);
         return out;
         }
 
     MPS
     apply_mpo(MPO const& K, MPS const& x, MPS const& x0, Args const& args) const
         {
+        static const TagSet site_tag("Site");
         auto out = applyMPO(K,x,x0,args);
-        out.noPrime(TagSet("Site"));
+        out.noPrime(site_tag);
         return out;
         }
 
