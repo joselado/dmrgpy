@@ -710,10 +710,18 @@ class IDMRGResult:
     changing (a genuinely self-consistent, translationally-invariant unit
     cell -- the condition static correlators need), not just that the
     energy density has. `None` if unavailable (e.g. `niter_done` too
-    small for every position to have been warm-started at least once)."""
+    small for every position to have been warm-started at least once).
+
+    `local_superblock` is the raw ingredients of the very last micro-step's
+    2-site local eigenproblem actually solved (HL/HR environments, the two
+    MPO tensors, the two physical Indices, and the converged local ground
+    vector+energy) -- kept around so `local_excitation_gap` can re-diagonalize
+    that *same* effective Hamiltonian for its second-lowest eigenpair without
+    having to rerun the growing algorithm. Not meant to be used directly by
+    callers outside this module."""
 
     def __init__(self, sites_uc, n_uc, U_list, e0, converged, niter_done,
-                 state_overlap=None):
+                 state_overlap=None, local_superblock=None):
         self.sites_uc = sites_uc
         self.n_uc = n_uc
         self.U_list = U_list
@@ -721,6 +729,7 @@ class IDMRGResult:
         self.converged = converged
         self.niter_done = niter_done
         self.state_overlap = state_overlap
+        self.local_superblock = local_superblock
 
 
 def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
@@ -786,6 +795,15 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     # at the end always reflects the last macro-iteration actually run.
     prev_local = [None] * n_uc
     state_overlap = None
+    # The very last micro-step's own local-solve ingredients (HL/HR
+    # environments, MPO tensors, physical Indices, converged local ground
+    # vector+energy) -- overwritten every micro-step, so it always holds the
+    # *final* one actually run once the loop below exits (whether by
+    # convergence or by exhausting maxiter). Kept so local_excitation_gap can
+    # re-diagonalize this exact effective Hamiltonian for a second eigenpair
+    # without rerunning the growing algorithm -- see IDMRGResult's own
+    # docstring.
+    last_superblock = None
 
     for macro_iter in range(maxiter):
         overlaps_this_iter = []
@@ -832,6 +850,12 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
                 W_pR, phys_R, HR, HR_bra, HR_ket,
                 cutoff=cutoff, maxdim=maxm, niter=niter,
                 x0_warm=prev_local[mstep])
+            last_superblock = dict(
+                HL=HL, HL_bra=HL_bra, HL_ket=HL_ket,
+                W_pL=W_pL, phys_L=phys_L,
+                W_pR=W_pR, phys_R=phys_R,
+                HR=HR, HR_bra=HR_bra, HR_ket=HR_ket,
+                evec0=evec0, energy=energy)
             if prev_local[mstep] is not None and prev_local[mstep].size == evec0.size:
                 denom = np.linalg.norm(prev_local[mstep]) * np.linalg.norm(evec0)
                 if denom > 0:
@@ -879,7 +903,256 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
               "to etol={} (last density change available)".format(maxiter, etol))
 
     return IDMRGResult(sites_uc, n_uc, U_list, prev_density, converged,
-                        macro_iter + 1, state_overlap=state_overlap)
+                        macro_iter + 1, state_overlap=state_overlap,
+                        local_superblock=last_superblock)
+
+
+def local_excitation_gap(result, niter=200):
+    """A cheap, cruder alternative to idmrg_excitations.excitation_energies/
+    excitation_gap: the "local superblock gap" -- re-diagonalize the *same*
+    2-site effective Hamiltonian the growing algorithm already solved for
+    its ground state at the very last micro-step (result.local_superblock),
+    but for its second-lowest eigenvalue instead, and return the difference.
+
+    This is the direct infinite-chain analogue of a well-known finite-DMRG
+    trick: at the last sweep, instead of only ever asking Lanczos for the
+    lowest Ritz pair, ask the same local effective Hamiltonian for its two
+    lowest and report their gap. Finite DMRG's own dedicated excited-state
+    method (dmrg.py's overlap-penalty dmrg_excited/Chain.excited_states) is
+    usually phrased as a Lagrange-multiplier/penalty problem -- minimize
+    <psi|H|psi> subject to <psi|psi>=1 and <psi|psi_0>=0 -- because it
+    re-sweeps the *whole chain* with psi_0 held fixed as an external MPS,
+    and enforcing "orthogonal to a whole separate MPS at every local step"
+    genuinely needs a penalty term threaded through the sweep. Here there is
+    no separate sweep: the "psi_0" to stay orthogonal to is just the local
+    ground vector already found, in the very same local Hilbert space, by
+    the very same 2-site solve -- so the constraint can be enforced
+    *exactly*, as a hard projector (deflation: P = I - |psi0><psi0|, the
+    same orthogonal-complement idea idmrg_excitations.py's null-space gauge
+    fixing V_L already uses, just against a single vector here instead of a
+    whole tangent-space direction), rather than approximately via a finite
+    penalty weight -- a Hermitian eigenproblem's constrained stationary
+    points are exactly its *other* eigenvectors, so this is what a
+    Lagrange-multiplier penalty converges to anyway as its weight -> inf,
+    just obtained directly with nothing to tune.
+
+    IMPORTANT CAVEAT -- this is a fundamentally cruder notion of "gap" than
+    idmrg_excitations.excitation_energies/excitation_gap (the tangent-space
+    quasiparticle ansatz): it has no momentum label at all (no e^{ikn}
+    superposition over unit cells), so it reports a single number, not a
+    dispersion, and it reuses HL/HR exactly as they converged for the
+    *ground* state -- they are never allowed to relax/reoptimize for
+    whatever the second eigenstate actually is. It is best understood as
+    "the lowest-energy state the current, ground-state-optimized local
+    ansatz has left over once the ground state itself is projected out",
+    not a variationally-optimal excited state of the infinite chain. Use
+    idmrg_excitations for a physically principled dispersion/gap when D=1
+    applies; use this as a cheap, order-of-magnitude cross-check, or for
+    the D>1 cases the tangent-space ansatz does not support yet.
+
+    Returns a single float: the second-lowest local eigenvalue minus the
+    ground-state eigenvalue (both real by Hermiticity of the local
+    effective Hamiltonian)."""
+    sb = result.local_superblock
+    if sb is None:
+        raise RuntimeError(
+            "local_excitation_gap: this IDMRGResult has no stored local "
+            "superblock (idmrg_ground_state must run at least one "
+            "micro-step)")
+    HL, HL_bra, HL_ket = sb["HL"], sb["HL_bra"], sb["HL_ket"]
+    W_pL, phys_L = sb["W_pL"], sb["phys_L"]
+    W_pR, phys_R = sb["W_pR"], sb["phys_R"]
+    HR, HR_bra, HR_ket = sb["HR"], sb["HR_bra"], sb["HR_ket"]
+    evec0, e0 = sb["evec0"], sb["energy"]
+
+    order_in = ([HL_ket] if HL_ket is not None else []) + [phys_L, phys_R] + \
+               ([HR_ket] if HR_ket is not None else [])
+    shape = tuple(ind.dim for ind in order_in)
+    s_L_out, s_R_out = phys_L.prime(1), phys_R.prime(1)
+    order_out = ([HL_bra] if HL_bra is not None else []) + [s_L_out, s_R_out] + \
+                ([HR_bra] if HR_bra is not None else [])
+    pieces = [p for p in (HL, W_pL, W_pR, HR) if p is not None]
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
+
+    dim = int(np.prod(shape))
+    if dim < 2:
+        raise RuntimeError(
+            "local_excitation_gap: local Hilbert space has dimension {} -- "
+            "too small to hold a state orthogonal to the ground "
+            "state".format(dim))
+    psi0 = evec0 / np.linalg.norm(evec0)
+
+    def _deflate(v):
+        return v - psi0 * np.vdot(psi0, v)
+
+    if dim <= 3:
+        # Same small-dim fallback as _local_two_site_solve: too small a
+        # space for Lanczos to be meaningful, diagonalize directly.
+        basis = np.eye(dim, dtype=complex)
+        Hmat = np.column_stack([matvec(basis[:, k]) for k in range(dim)])
+        w, _ = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
+        e1 = w[1]
+    else:
+        def deflated_matvec(v):
+            # P H P, P = I - |psi0><psi0| -- Hermitian since both P and the
+            # underlying local Hamiltonian are (see this function's own
+            # docstring), so _lanczos_ground_state's own Hermiticity
+            # assumption still holds restricted to psi0's orthogonal
+            # complement.
+            return _deflate(matvec(_deflate(v)))
+        rng = np.random.default_rng()
+        v0 = _deflate(rng.standard_normal(dim) + 1j * rng.standard_normal(dim))
+        e1_c, _ = _lanczos_ground_state(deflated_matvec, v0, niter=max(niter, 200))
+        e1 = e1_c.real
+    return float(e1 - e0)
+
+
+def local_excitation_gap_windowed(result, h_intra_op, h_inter_op, site_types,
+                                   n_uc, window=1, niter=300):
+    """PROTOTYPE, not part of the stable public API yet -- exploring whether
+    `local_excitation_gap`'s "frozen HL/HR" approximation is actually the
+    dominant source of its error, by growing the local diagonalization block
+    to `window` extra *free* physical sites on each side of the original 2
+    (rather than adding Krylov vectors to the same frozen 2-site block, which
+    `local_excitation_gap`'s own dim>3 branch already does via deflated
+    Lanczos -- more Krylov vectors there cannot change the answer, since it's
+    already an exact diagonalization of that specific effective Hamiltonian).
+    `window=0` reduces to exactly the same effective Hamiltonian
+    `local_excitation_gap` diagonalizes (used as an internal consistency
+    check -- see below), just re-solving for its own ground state via Lanczos
+    from scratch instead of reusing the growing algorithm's already-known
+    `evec0` -- the two must agree to Lanczos precision, or something is wrong
+    with the construction below.
+
+    Only `n_uc=1` is supported: widening requires inserting extra copies of
+    the periodic per-sublattice MPO tensor between HL/HR and the original 2
+    sites, and for `n_uc=1` there is only one sublattice type, so every
+    inserted copy is identical (`W_bulk[0]`) -- no bookkeeping needed for
+    *which* sublattice position each extra site takes. `n_uc=2` would need
+    that bookkeeping (alternating sublattice, and knowing which of the two
+    the original phys_L/phys_R sit at) which result.local_superblock does not
+    record and this prototype does not attempt.
+
+    Construction: HL/HR (raw, unregularized, exactly as stored on
+    result.local_superblock) are extended outward by `window` fresh copies of
+    W_bulk[0] each (via `_fresh_physical_copy`, so every inserted site gets
+    its own distinct physical Index -- colliding two sites onto the same
+    Index is exactly the bug `_fresh_physical_copy`'s own docstring warns
+    about) with freshly-minted Link Indices threading HL_mpo -> extra site 0
+    -> extra site 1 -> ... -> (relabeled) W_pL's own left leg, mirroring
+    exactly how `idmrg_ground_state`'s own loop threads W_pL/W_pR onto
+    HL_mpo/HR_mpo via `_relabel_pos`. The extra sites' own physical legs are
+    genuinely free (not contracted against any ground-state tensor) -- they
+    become additional entries in the local eigenproblem's own `order_in`/
+    `order_out`, exactly like phys_L/phys_R already are, so both the ground
+    state AND its orthogonal-complement deflated first excited state are
+    re-solved fresh within this larger space (unlike `local_excitation_gap`,
+    which reuses the growing algorithm's already-known ground vector).
+
+    IMPORTANT CAVEAT (measure, don't assume): HL/HR themselves are still
+    exactly the growing algorithm's own converged, but *raw/unregularized*
+    (not energy-density-subtracted) accumulator matrices -- widening the
+    window does not relax them, it only lets the excitation spread across
+    more *real* physical sites before hitting that frozen boundary. Whether
+    this actually converges the gap toward the true answer as `window`
+    grows, or by how much, is exactly the empirical question this prototype
+    exists to answer -- not asserted here."""
+    if n_uc != 1:
+        raise NotImplementedError(
+            "local_excitation_gap_windowed: only n_uc=1 is supported "
+            "(got n_uc={}) -- see this function's own docstring".format(n_uc))
+    sb = result.local_superblock
+    if sb is None:
+        raise RuntimeError(
+            "local_excitation_gap_windowed: this IDMRGResult has no stored "
+            "local superblock (idmrg_ground_state must run at least one "
+            "micro-step)")
+    HL, HL_bra, HL_ket = sb["HL"], sb["HL_bra"], sb["HL_ket"]
+    W_pL, phys_L = sb["W_pL"], sb["phys_L"]
+    W_pR, phys_R = sb["W_pR"], sb["phys_R"]
+    HR, HR_bra, HR_ket = sb["HR"], sb["HR_bra"], sb["HR_ket"]
+    if HL is None or HR is None:
+        raise RuntimeError(
+            "local_excitation_gap_windowed: cannot widen the window -- the "
+            "stored superblock has an open (None) boundary on at least one "
+            "side (run more iDMRG macro-iterations first)")
+
+    def _mpo_axis(H, H_bra, H_ket):
+        cands = [ind for ind in H.inds if ind != H_bra and ind != H_ket]
+        if len(cands) != 1:
+            raise RuntimeError(
+                "local_excitation_gap_windowed: internal error -- expected "
+                "exactly one non-bra/ket leg on the stored environment, "
+                "found {}".format(len(cands)))
+        return cands[0]
+
+    HL_mpo = _mpo_axis(HL, HL_bra, HL_ket)
+    HR_mpo = _mpo_axis(HR, HR_bra, HR_ket)
+
+    _, W_bulk_fresh = _build_automaton(h_intra_op, h_inter_op, site_types, n_uc)
+    W0 = W_bulk_fresh[0]
+
+    extra_L = []
+    bond = HL_mpo
+    for _ in range(window):
+        w = _relabel_pos(_fresh_physical_copy(W0), 0, bond)
+        new_bond = Index(w.inds[-1].dim, tags="Link")
+        w = _relabel_pos(w, -1, new_bond)
+        extra_L.append(w)
+        bond = new_bond
+    W_pL_shifted = _relabel_pos(W_pL, 0, bond)
+
+    extra_R = []
+    bond = HR_mpo
+    for _ in range(window):
+        w = _relabel_pos(_fresh_physical_copy(W0), -1, bond)
+        new_bond = Index(w.inds[0].dim, tags="Link")
+        w = _relabel_pos(w, 0, new_bond)
+        extra_R.append(w)
+        bond = new_bond
+    W_pR_shifted = _relabel_pos(W_pR, -1, bond)
+    extra_R = list(reversed(extra_R))  # innermost (closest to phys_R) first
+
+    phys_extra_L = [_unprimed_site_index(w) for w in extra_L]
+    phys_extra_R = [_unprimed_site_index(w) for w in extra_R]
+    bra_extra_L = [ind.prime(1) for ind in phys_extra_L]
+    bra_extra_R = [ind.prime(1) for ind in phys_extra_R]
+
+    order_in = ([HL_ket] if HL_ket is not None else []) + phys_extra_L + \
+               [phys_L, phys_R] + phys_extra_R + \
+               ([HR_ket] if HR_ket is not None else [])
+    shape = tuple(ind.dim for ind in order_in)
+    s_L_out, s_R_out = phys_L.prime(1), phys_R.prime(1)
+    order_out = ([HL_bra] if HL_bra is not None else []) + bra_extra_L + \
+                [s_L_out, s_R_out] + bra_extra_R + \
+                ([HR_bra] if HR_bra is not None else [])
+    pieces = [p for p in ([HL] + extra_L + [W_pL_shifted, W_pR_shifted] +
+                           extra_R + [HR]) if p is not None]
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
+
+    dim = int(np.prod(shape))
+    if dim < 2:
+        raise RuntimeError(
+            "local_excitation_gap_windowed: local Hilbert space has "
+            "dimension {} -- too small to hold a state orthogonal to the "
+            "ground state".format(dim))
+
+    rng = np.random.default_rng()
+    v0 = rng.standard_normal(dim) + 1j * rng.standard_normal(dim)
+    e0_c, psi0_c = _lanczos_ground_state(matvec, v0, niter=max(niter, 200))
+    psi0 = psi0_c / np.linalg.norm(psi0_c)
+    e0 = e0_c.real
+
+    def _deflate(v):
+        return v - psi0 * np.vdot(psi0, v)
+
+    def deflated_matvec(v):
+        return _deflate(matvec(_deflate(v)))
+
+    v1 = _deflate(rng.standard_normal(dim) + 1j * rng.standard_normal(dim))
+    e1_c, _ = _lanczos_ground_state(deflated_matvec, v1, niter=max(niter, 200))
+    e1 = e1_c.real
+    return float(e1 - e0)
 
 
 # -- static correlators, via the standard infinite-MPS transfer-matrix

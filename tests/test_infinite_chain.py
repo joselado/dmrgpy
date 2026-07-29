@@ -812,3 +812,311 @@ def test_kpm_finite_rejects_window_too_small_for_r():
     ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
     with pytest.raises(ValueError):
         ic.kpm_finite("Sz", 0, "Sz", 10, n_window=3)
+
+
+# -- excitation_energies/excitation_gap: the tangent-space/quasiparticle
+# excitation ansatz (pyitensor/idmrg_excitations.py) -- see that module's
+# own docstring for the algorithm and, importantly, its "KNOWN LIMITATION"
+# section: only a product-state-like (bond dimension D=1) converged ground
+# state is currently supported. A genuinely entangled ground state (D>1,
+# e.g. the uniform/dimerized Heisenberg chains used elsewhere in this file)
+# was found, during development, to give a dispersion that comes out
+# anomalously flat compared to the expected answer despite every individual
+# diagram independently checking out against a from-scratch finite-ring
+# tensor-network contraction -- not yet root-caused, so D>1 is rejected
+# with NotImplementedError rather than silently returning a questionable
+# number. The tests below therefore validate the D=1 case exactly (a
+# field-polarized XX chain, exactly solvable via free fermions) and treat
+# D>1/other scope violations as guard-rail tests only.
+
+def _polarized_xx_chain(J=1.0, h=3.0, maxm=4, maxiter=50, etol=1e-12):
+    """A field-polarized n_uc=1 XX chain (h > J, the XX chain's own
+    saturation field) -- the ground state is the exact fully-polarized
+    product state, so iDMRG converges to a bond dimension D=1 unit cell,
+    matching idmrg_excitations.py's own supported scope. Exact single-
+    magnon dispersion (free fermions via Jordan-Wigner):
+    E(k) = 2*h - J*cos(k)."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    h_op = -J * (ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0]) - 2 * h * ic.SzC[0]
+    ic.maxm, ic.maxiter, ic.etol = maxm, maxiter, etol
+    ic.set_hamiltonian(h_op)
+    ic.gs_energy()
+    return ic
+
+
+def test_excitation_energies_matches_exact_xx_dispersion():
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    for k in np.linspace(0, 2 * np.pi, 9, endpoint=False):
+        exact = 2 * h - J * np.cos(k)
+        got = ic.excitation_energies(k, n=1)[0]
+        assert got == pytest.approx(exact, abs=1e-8)
+
+
+def test_excitation_gap_matches_exact_minimum():
+    """min_k (2h - J*cos(k)) = 2h - J, attained at k=0."""
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    assert ic.excitation_gap() == pytest.approx(2 * h - J, abs=1e-8)
+
+
+def test_excitation_environment_is_cached_across_calls():
+    """A second excitation_energies call (different k) must reuse
+    self._excitation_env (identity, not just an equal rebuild) -- it is
+    expensive to build (a null-space computation plus dense linear
+    solves)."""
+    ic = _polarized_xx_chain()
+    ic.excitation_energies(0.0)
+    env = ic._excitation_env
+    assert env is not None
+    ic.excitation_energies(1.0)
+    assert ic._excitation_env is env
+
+
+def test_excitation_gap_before_set_hamiltonian_raises():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    with pytest.raises(RuntimeError):
+        ic.excitation_gap()
+
+
+def test_excitation_energies_rejects_entangled_ground_state():
+    """D>1 (a genuinely entangled ground state) is a known, deliberate
+    scope limit -- see idmrg_excitations.py's own "KNOWN LIMITATION"
+    section, and this file's own module-level comment above."""
+    ic, _ = _converged_uniform_chain(2, maxm=20, maxiter=100, etol=1e-11)
+    with pytest.raises(NotImplementedError):
+        ic.excitation_gap()
+
+
+def test_excitation_energies_itensor_version3_not_implemented():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
+    with pytest.raises(NotImplementedError):
+        ic.excitation_gap()
+
+
+def test_excitation_energies_rejects_reach_greater_than_one():
+    """A deliberately constructed longer-range term
+    (get_operator(..., group="R") with i>=n_uc) spans 2 supersites after
+    grouping -- rejected by idmrg_excitations._check_reach_one."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    far = ic.get_operator("Sx", 1, group="R")  # site n_uc+1 = 2, reach=2
+    h = ic.SxC[0] * far - 2.0 * ic.SzC[0]
+    ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
+    ic.set_hamiltonian(h)
+    with pytest.raises(NotImplementedError):
+        ic.excitation_gap()
+
+
+# -- local_excitation_gap: the "local superblock gap" (pyitensor/idmrg.py's
+# local_excitation_gap) -- a cheap, cruder alternative to excitation_gap
+# above: re-diagonalizes the growing algorithm's own final 2-site effective
+# Hamiltonian for its second-lowest eigenvalue instead of only its ground
+# state. Unlike excitation_gap, it has no momentum label and does not
+# require D=1 -- but is correspondingly less accurate (confirmed below: an
+# exact ~10% overestimate on the one case an exact answer is available for).
+
+def test_local_excitation_gap_is_approximate_for_polarized_xx_chain():
+    """D=1 sanity check: unlike excitation_gap (exact here, see
+    test_excitation_gap_matches_exact_minimum), local_excitation_gap is a
+    genuinely cruder approximation -- lands in the right ballpark (~10%
+    high, measured directly) but should NOT be expected to match the exact
+    answer to the same precision excitation_gap does."""
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    exact_gap = 2 * h - J
+    local_gap = ic.local_excitation_gap()
+    assert local_gap == pytest.approx(exact_gap, rel=0.2)
+    assert abs(local_gap - exact_gap) > 1e-6  # genuinely approximate, not exact
+
+
+def test_local_excitation_gap_is_deterministic_across_repeated_calls():
+    """local_excitation_gap uses a randomized Lanczos start internally (no
+    warm start persisted the way the growing algorithm's own solve has,
+    since this is a one-off post-hoc diagonalization) -- confirm the
+    deflated eigenproblem still converges to the same value every call,
+    not call-to-call noise."""
+    ic = _polarized_xx_chain()
+    g1 = ic.local_excitation_gap()
+    g2 = ic.local_excitation_gap()
+    assert g1 == pytest.approx(g2, abs=1e-8)
+
+
+def test_local_excitation_gap_matches_finite_size_dimerized_gap():
+    """A genuinely entangled (D>1) ground state -- exactly the case
+    excitation_gap cannot handle yet -- cross-checked against a large
+    finite open chain's own ED gap (get_gap(mode="ED")), reusing the same
+    dimerized model test_n_uc2_dimerized_chain_matches_finite_size_
+    extrapolation already validates its own (energy-density) number
+    against. Measured directly: local_excitation_gap=0.7631 vs. a finite
+    open chain's own ED gap of 0.7591 (n=16 sites) -- well within the
+    generous absolute tolerance below, which allows for the finite-size
+    drift of the ED reference itself (0.7704 at n=12, 0.7591 at n=16)."""
+    j_strong, j_weak = 1.0, 0.4
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
+         + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
+    ic.maxm, ic.maxiter, ic.etol = 40, 200, 1e-9
+    ic.set_hamiltonian(h)
+    ic.gs_energy()
+    assert ic.converged
+    local_gap = ic.local_excitation_gap()
+
+    sc = spinchain.Spin_Chain(["1/2"] * 16)
+    hf = 0
+    for i in range(15):
+        j = j_strong if i % 2 == 0 else j_weak
+        hf = hf + j * (sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+                       + sc.Sz[i] * sc.Sz[i + 1])
+    sc.set_hamiltonian(hf)
+    finite_gap = sc.get_gap(mode="ED")
+
+    assert local_gap == pytest.approx(finite_gap, abs=0.05)
+
+
+def test_local_excitation_gap_before_set_hamiltonian_raises():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    with pytest.raises(RuntimeError):
+        ic.local_excitation_gap()
+
+
+def test_local_excitation_gap_itensor_version3_not_implemented():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
+    with pytest.raises(NotImplementedError):
+        ic.local_excitation_gap()
+
+
+def test_local_excitation_gap_raises_without_stored_superblock():
+    """Defense-in-depth guard on idmrg.local_excitation_gap itself (not
+    reachable through the public API, which always builds a real
+    IDMRGResult via a completed idmrg_ground_state run)."""
+    result = idmrg.IDMRGResult(None, 1, [None], 0.0, True, 1)
+    with pytest.raises(RuntimeError):
+        idmrg.local_excitation_gap(result)
+
+
+def _tfim_chain(J=1.0, h=2.0, maxm=12, maxiter=200, etol=1e-10):
+    """A gapped (paramagnetic-phase, h>J), n_uc=1 transverse-field Ising
+    chain -- unlike _polarized_xx_chain, the ground state is genuinely
+    entangled (D>1), giving local_excitation_gap_windowed something
+    nontrivial to work with. H = -4J*Sx_i*Sx_{i+1} - 2h*Sz_i (the 4/2
+    factors convert dmrgpy's spin-1/2 S operators into Pauli matrices,
+    sigma=2S, matching the textbook TFIM convention H = -J*sigmax*sigmax
+    - h*sigmaz)."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    h_op = -4 * J * ic.SxC[0] * ic.SxR[0] - 2 * h * ic.SzC[0]
+    ic.maxm, ic.maxiter, ic.etol = maxm, maxiter, etol
+    ic.set_hamiltonian(h_op)
+    ic.gs_energy()
+    return ic
+
+
+# -- local_excitation_gap(window=...) / idmrg.local_excitation_gap_windowed:
+# widens the local diagonalization block with real, free physical sites on
+# each side instead of just re-diagonalizing the frozen 2-site block --
+# window=0 (the default) reduces to exactly local_excitation_gap above;
+# window>0 measurably tightens the gap at the cost of an exponentially
+# larger local Hilbert space (d**(2*window) more), and is only supported
+# for n_uc=1 (see local_excitation_gap_windowed's own docstring for why
+# n_uc=2 isn't handled yet).
+
+def test_local_excitation_gap_windowed_matches_unwindowed_at_window_zero():
+    """window=0 must reduce to exactly the same effective Hamiltonian
+    local_excitation_gap diagonalizes -- an internal consistency check on
+    the windowed construction itself (built independently of it, re-solving
+    the ground state from scratch via Lanczos rather than reusing the
+    growing algorithm's own evec0), not just a regression pin."""
+    ic = _polarized_xx_chain()
+    g_plain = idmrg.local_excitation_gap(ic._result)
+    g_window0 = idmrg.local_excitation_gap_windowed(
+        ic._result, ic._h_intra.op, ic._h_inter.op, ic.site_types, ic.n_uc,
+        window=0)
+    assert g_window0 == pytest.approx(g_plain, abs=1e-6)
+
+
+def test_local_excitation_gap_windowed_improves_accuracy_for_polarized_xx_chain():
+    """D=1 sanity check, exact answer known (see
+    test_local_excitation_gap_is_approximate_for_polarized_xx_chain for the
+    window=0 baseline, ~10% high): widening the window with real free sites
+    converges monotonically toward the exact gap -- measured directly,
+    window=0/1/2/4/6 give rel. errors of 0.10/0.038/0.020/0.0081/0.0044."""
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    exact_gap = 2 * h - J
+    g0 = ic.local_excitation_gap(window=0)
+    g2 = ic.local_excitation_gap(window=2)
+    assert abs(g2 - exact_gap) < abs(g0 - exact_gap)
+    assert g2 == pytest.approx(exact_gap, rel=0.03)
+
+
+def test_local_excitation_gap_windowed_matches_finite_size_tfim_gap():
+    """D>1 sanity check: a gapped, genuinely entangled transverse-field
+    Ising chain (n_uc=1), cross-checked against a finite open chain's own
+    ED gap -- measured directly: window=2 gap=2.058, window=3 gap=2.047,
+    vs. an 18-site open chain's own ED gap of 2.049 -- converging at least
+    as fast as growing the finite chain itself does (n=10/12/14/16/18 ED
+    gaps are 2.133/2.099/2.076/2.060/2.049)."""
+    ic = _tfim_chain()
+    assert ic.converged
+    local_gap = ic.local_excitation_gap(window=2)
+
+    sc = spinchain.Spin_Chain(["1/2"] * 16)
+    hf = 0
+    for i in range(15):
+        hf = hf + (-4.0) * sc.Sx[i] * sc.Sx[i + 1]
+    for i in range(16):
+        hf = hf + (-4.0) * sc.Sz[i]
+    sc.set_hamiltonian(hf)
+    finite_gap = sc.get_gap(mode="ED")
+    assert local_gap == pytest.approx(finite_gap, abs=0.05)
+
+
+def test_local_excitation_gap_windowed_deterministic_across_repeated_calls():
+    ic = _polarized_xx_chain()
+    g1 = ic.local_excitation_gap(window=1)
+    g2 = ic.local_excitation_gap(window=1)
+    assert g1 == pytest.approx(g2, abs=1e-6)
+
+
+def test_local_excitation_gap_windowed_rejects_n_uc2():
+    """local_excitation_gap_windowed needs to know which sublattice
+    position each extra inserted site takes, which isn't tracked for
+    n_uc=2 -- see its own docstring."""
+    j_strong, j_weak = 1.0, 0.4
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
+         + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
+    ic.maxm, ic.maxiter, ic.etol = 10, 50, 1e-9
+    ic.set_hamiltonian(h)
+    with pytest.raises(NotImplementedError):
+        ic.local_excitation_gap(window=1)
+
+
+def test_local_excitation_gap_windowed_before_set_hamiltonian_raises():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    with pytest.raises(RuntimeError):
+        ic.local_excitation_gap(window=1)
+
+
+def test_local_excitation_gap_windowed_itensor_version3_not_implemented():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
+    with pytest.raises(NotImplementedError):
+        ic.local_excitation_gap(window=1)
+
+
+def test_local_excitation_gap_windowed_raises_without_stored_superblock():
+    """Defense-in-depth guard on idmrg.local_excitation_gap_windowed
+    itself (not reachable through the public API)."""
+    result = idmrg.IDMRGResult(None, 1, [None], 0.0, True, 1)
+    with pytest.raises(RuntimeError):
+        idmrg.local_excitation_gap_windowed(result, [], [], ["1/2"], 1, window=1)
+
+
+def test_local_excitation_gap_windowed_rejects_n_uc2_directly():
+    """The n_uc guard fires before even looking at result.local_superblock
+    -- checked directly at the module level with a bare-bones result."""
+    result = idmrg.IDMRGResult(None, 2, [None, None], 0.0, True, 1)
+    with pytest.raises(NotImplementedError):
+        idmrg.local_excitation_gap_windowed(result, [], [], ["1/2", "1/2"], 2, window=1)

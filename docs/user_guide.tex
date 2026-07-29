@@ -1895,8 +1895,120 @@ needed, prefer expressing the same physical model as an
 couplings) instead, and use the self-consistency check either way
 before trusting a result.
 
-Excited states and entanglement/entropy are not implemented for
-infinite chains yet.
+Entanglement/entropy are not implemented for infinite chains yet.
+
+\textbf{Excited states: the tangent-space/quasiparticle excitation
+ansatz.} Unlike a finite chain, an infinite chain's excitations form a
+momentum-resolved band $E(k)$, not a single discrete state, so ``the
+first excited state'' here means the standard single-mode/quasiparticle
+ansatz (Haegeman et al.): a tangent-space vector with one excitation
+tensor $B$ (a function of a free matrix $X$) inserted at every
+unit-cell position, weighted by momentum $k$.
+\texttt{ic.excitation\_energies(k, n=1)} returns the lowest \texttt{n}
+excitation energies (above the ground state) at momentum \texttt{k}
+(radians, per unit cell); \texttt{ic.excitation\_gap(ks=None)} scans
+\texttt{k} (default \texttt{numpy.linspace(-pi, pi, 41)}) and returns
+the minimum -- the scalar ``gap'', mirroring the finite-chain
+\texttt{get\_gap()} naming (\S4):
+
+\begin{verbatim}
+ic.excitation_energies(0.0, n=1)   # lowest excitation energy at k=0
+ic.excitation_gap()                # min_k E(k), the scalar gap
+\end{verbatim}
+
+\textbf{Scope restriction -- read before use.} Only
+\texttt{itensor\_version="python"} is supported
+(\texttt{NotImplementedError} otherwise), and -- more importantly --
+only a \textbf{product-state-like ground state (bond dimension
+\texttt{D=1})} is currently supported; a genuinely entangled ground
+state (\texttt{D>1}, e.g.\ the transverse-field Ising or a dimerized
+Heisenberg chain) raises \texttt{NotImplementedError}. This is a known,
+deliberate limit, not an oversight: for \texttt{D=1} the computed
+dispersion has been checked to match the exact free-fermion
+single-magnon dispersion of a field-polarized XX chain to $\sim$14
+digits across the whole Brillouin zone (see
+\texttt{examples/idmrg/excitation\_gap\_xx/main.py}), and every
+individual term of the underlying calculation independently matches a
+from-scratch finite-ring tensor-network contraction to $\sim$1e-13 --
+but for \texttt{D>1}, the resulting dispersion comes out anomalously
+flat compared to the expected answer, and this was not root-caused
+despite extensive investigation (three real, confirmed bugs were found
+and fixed along the way; see \texttt{pyitensor/idmrg\_excitations.py}'s
+own module docstring, ``KNOWN LIMITATION'' section, for the full
+account). A deliberately constructed longer-range term (spanning more
+than 2 adjacent unit cells after \texttt{n\_uc}-grouping) is separately
+rejected with \texttt{NotImplementedError} too, mirroring
+\texttt{n\_uc>2}'s own guard elsewhere in this module.
+
+\textbf{A cheaper, cruder alternative: the local superblock gap.}
+\texttt{ic.local\_excitation\_gap(niter=200)} re-diagonalizes the growing
+algorithm's own final, converged 2-site effective Hamiltonian -- already
+solved once for the ground state -- for its \emph{second}-lowest
+eigenvalue instead, and returns the difference. This is the direct
+infinite-chain analogue of a well-known finite-DMRG trick: at the last
+sweep, ask the same local effective Hamiltonian for its two lowest Ritz
+pairs rather than just the ground state. It is also the natural place a
+Lagrange-multiplier/orthogonality-penalty idea (as used by finite DMRG's
+own dedicated excited-state method, \texttt{get\_excited}/\texttt{get\_gap},
+\S4) would show up here -- except no penalty weight is needed: since there
+is no separate re-sweep (the ``state to stay orthogonal to'' is just the
+local ground vector already found, in the very same local Hilbert space),
+the constraint is enforced exactly via deflation (projecting out the
+ground vector), which is what a penalty method converges to anyway as its
+weight $\to\infty$. Unlike \texttt{excitation\_gap}, this requires no
+\texttt{D=1} restriction and carries no momentum label -- it is a single
+number, not a dispersion:
+
+\begin{verbatim}
+ic.local_excitation_gap()   # a single scalar, no k dependence
+\end{verbatim}
+
+\textbf{Accuracy caveat.} This is a genuinely cruder notion of ``gap'':
+it reuses the ground state's own \texttt{HL}/\texttt{HR} environments
+unmodified (never letting them relax for whatever the second local
+eigenstate actually represents), so it is \emph{not} guaranteed to match
+the true minimum-momentum gap the tangent-space ansatz targets. Measured
+directly on the two cases \texttt{excitation\_gap} and this method were
+both cross-checked against: for the exactly-solvable field-polarized XX
+chain (\texttt{D=1}), it comes out $\sim$10\% too high (5.5 vs.\ the exact
+5.0); for a genuinely entangled (\texttt{D>1}) dimerized Heisenberg chain
+-- exactly the case \texttt{excitation\_gap} cannot handle yet -- it lands
+within $\sim$0.5\% of a large finite open chain's own extrapolated ED gap
+(see \texttt{examples/idmrg/local\_excitation\_gap/main.py}). Use
+\texttt{excitation\_gap} for a physically principled answer whenever its
+\texttt{D=1} scope applies; use \texttt{local\_excitation\_gap} as a
+cheap, order-of-magnitude cross-check, or for \texttt{D>1} chains where
+\texttt{excitation\_gap} is not available at all.
+
+\textbf{Tightening it further: \texttt{window=}.}
+\texttt{ic.local\_excitation\_gap(window=w, niter=200)} (default
+\texttt{w=0}, exactly the behavior above) grows the local diagonalization
+block by \texttt{w} extra \emph{free} physical sites on each side of the
+original 2, re-solving both the ground state and the deflated first
+excited state fresh within this larger block (rather than reusing the
+growing algorithm's own ground vector) -- i.e.\ it lets the excitation
+spread across more of the chain instead of only ever living on the same
+frozen 2 sites, at the cost of an exponentially larger local Hilbert space
+(\texttt{d**(2*w)} more, \texttt{d} = the physical dimension). This is
+\emph{not} the same thing as throwing more Krylov vectors at the original
+2-site problem -- \texttt{local\_excitation\_gap} already solves that one
+exactly via deflated Lanczos, so more iterations there cannot change the
+answer. Measured directly: on the field-polarized XX chain the error drops
+from 10\% at \texttt{w=0} to 3.8\%/2.0\%/0.81\%/0.44\% at
+\texttt{w=1/2/4/6}; on a gapped, genuinely entangled (\texttt{D>1})
+transverse-field Ising chain, \texttt{w=3} (an 8-site local block) matches
+an 18-site open finite chain's own ED gap to $<$1\%, converging at least
+as fast as growing the finite chain itself does. The improvement is not
+free, and its \emph{rate} depends on the model's correlation length: on
+the \texttt{S=1} Heisenberg chain (the Haldane gap, correlation length
+$\sim$6 sites), \texttt{w=0/1/2} only move the estimate from
+$\sim$29\%/24\%/21\% too high -- still improving, but far more slowly,
+since a handful of extra sites barely dents a correlation length that
+long, and the physical dimension \texttt{d=3} makes each extra site pair
+9$\times$ more expensive rather than XX/TFIM's 4$\times$. Only
+\texttt{n\_uc=1} is supported for \texttt{w>0} -- widening needs to know
+which sublattice position each extra site takes, which is not tracked for
+\texttt{n\_uc=2} yet (raises \texttt{NotImplementedError}).
 
 \textbf{Dynamical correlators (finite-window KPM).}
 \texttt{ic.kpm\_finite(opname\_i, p\_i, opname\_j, r,

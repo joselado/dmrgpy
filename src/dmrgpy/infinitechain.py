@@ -38,6 +38,8 @@ expected not to redundantly write both `Sx[i]*Sx[i+1]` and `Sx[i+1]*Sx[i]`
 for one bond in existing finite-chain code today.
 """
 
+import numpy as np
+
 from . import multioperator
 from .multioperator import MultiOperator
 
@@ -218,6 +220,13 @@ class Infinite_Many_Body_Chain:
                                   # gs_energy/vev/correlator)
         self.e0 = None           # converged ground-state energy per site
         self.converged = None
+        self._excitation_env = None  # pyitensor.idmrg_excitations.
+                                      # ExcitationEnvironment, lazily built by
+                                      # excitation_energies/excitation_gap and
+                                      # cached across repeated calls (e.g. a
+                                      # dispersion/gap k-scan) -- invalidated
+                                      # in set_hamiltonian exactly like
+                                      # self._result already is.
 
     def get_operator(self, name, i, group="C"):
         """A bare, symbolic 1-site MultiOperator for `name` at site `i`
@@ -260,6 +269,7 @@ class Infinite_Many_Body_Chain:
         self._result = None
         self.e0 = None
         self.converged = None
+        self._excitation_env = None
 
     def gs_energy(self):
         """Run iDMRG to convergence (or self.maxiter macro-iterations) and
@@ -279,6 +289,7 @@ class Infinite_Many_Body_Chain:
         if self._h_intra is None:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.gs_energy called before set_hamiltonian")
+        self._excitation_env = None  # about to rebuild self._result; see __init__'s own comment
         if self.itensor_version == "python":
             from .pyitensor import idmrg
             self._result = idmrg.idmrg_ground_state(
@@ -355,6 +366,109 @@ class Infinite_Many_Body_Chain:
             self.gs_energy()
         from .pyitensor import idmrg
         return idmrg.two_point_correlator(self._result, opname_i, p_i, opname_j, r)
+
+    def _get_excitation_environment(self):
+        """Lazily build (or reuse) the pyitensor.idmrg_excitations.
+        ExcitationEnvironment for the converged ground state -- expensive
+        (a null-space computation plus two dense linear solves), so it is
+        cached on self._excitation_env across repeated excitation_energies/
+        excitation_gap calls (e.g. a k-scan), and invalidated whenever
+        set_hamiltonian/gs_energy reruns (see __init__'s own comment)."""
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.excitation_energies/excitation_gap: "
+                "only itensor_version=\"python\" is supported -- see "
+                "pyitensor.idmrg_excitations' own module docstring")
+        if self._result is None:
+            self.gs_energy()
+        if self._excitation_env is None:
+            from .pyitensor import idmrg_excitations
+            self._excitation_env = idmrg_excitations.build_excitation_environment(
+                self._result, self._h_intra.op, self._h_inter.op, self.n_uc,
+                self.site_types)
+        return self._excitation_env
+
+    def excitation_energies(self, k, n=1):
+        """The lowest `n` excitation energies (above the ground state) at
+        momentum `k` (radians, per unit cell) of the tangent-space/
+        quasiparticle excitation ansatz -- see
+        pyitensor.idmrg_excitations' own module docstring for the algorithm,
+        and its "KNOWN LIMITATION" section for an important scope
+        restriction: only a product-state-like (bond dimension D=1)
+        converged ground state is currently supported (raises
+        NotImplementedError otherwise) -- a genuinely entangled ground state
+        was found, during development, to give a dispersion that is
+        anomalously flat compared to the expected answer, not yet
+        root-caused."""
+        env = self._get_excitation_environment()
+        from .pyitensor import idmrg_excitations
+        return idmrg_excitations.excitation_energies(env, k, n=n)
+
+    def excitation_gap(self, ks=None):
+        """The scalar "first excited state" gap: min_k
+        excitation_energies(k, n=1) over a momentum scan (default
+        `ks=numpy.linspace(-pi, pi, 41)`) -- mirrors the finite-chain
+        `get_gap()` naming (docs/user_guide.md Sec.4), which returns
+        `get_excited(n=2)[1]-get_excited(n=2)[0]`; here there is no
+        discrete second state, only a momentum-resolved band, so the gap
+        is defined as the band's own minimum. See excitation_energies'
+        own docstring for the scope restriction (D=1 ground states only,
+        for now)."""
+        if ks is None:
+            ks = np.linspace(-np.pi, np.pi, 41)
+        return min(self.excitation_energies(k, n=1)[0] for k in ks)
+
+    def local_excitation_gap(self, window=0, niter=200):
+        """A cheap, cruder alternative to excitation_gap: re-diagonalizes
+        the growing algorithm's own final 2-site effective Hamiltonian
+        (already solved once for the ground state) for its second-lowest
+        eigenvalue, and returns the difference -- the "local superblock
+        gap". Unlike excitation_gap (the tangent-space/quasiparticle
+        ansatz), this has no momentum label, does not require D=1, and
+        reuses the ground state's own HL/HR environments unmodified rather
+        than letting them relax for the excited sector -- see
+        pyitensor.idmrg.local_excitation_gap's own docstring for the full
+        rationale (including why this, not a soft penalty weight, is the
+        exact analogue of finite-chain DMRG's Lagrange-multiplier excited-
+        state trick here) and for an important accuracy caveat: it is not
+        guaranteed to match the true minimum-momentum gap the way
+        excitation_gap does.
+
+        `window` (default 0, the original behavior above) grows the local
+        diagonalization block by `window` extra *free* physical sites on
+        each side of the original 2 (both the ground state and the deflated
+        first excited state are then re-solved fresh within this larger
+        block, rather than reusing the growing algorithm's own ground
+        vector) -- see pyitensor.idmrg.local_excitation_gap_windowed's own
+        docstring for the construction. This measurably tightens the gap:
+        on a D=1 field-polarized XX chain (exact answer known) the error
+        drops from 10% at window=0 to <1% by window=4-6; on a genuinely
+        entangled (D>1) transverse-field Ising chain the window=3 estimate
+        matches an 18-site open finite chain's own ED gap to <1%, converging
+        at least as fast as growing the finite chain itself does. Costs
+        d**(2*window) more in local Hilbert space dimension per extra site
+        pair (d = the physical dimension), so window>2-3 gets expensive
+        quickly for d>2 (e.g. S=1). Only `n_uc=1` is supported for
+        `window>0` (raises NotImplementedError otherwise -- see
+        pyitensor.idmrg.local_excitation_gap_windowed's own docstring for
+        why n_uc=2 needs sublattice-position bookkeeping not implemented
+        yet).
+
+        Only supported for itensor_version="python" -- see vev's own
+        comment."""
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.local_excitation_gap: only "
+                "itensor_version=\"python\" is supported -- see "
+                "pyitensor.idmrg.local_excitation_gap's own docstring")
+        if self._result is None:
+            self.gs_energy()
+        from .pyitensor import idmrg
+        if window == 0:
+            return idmrg.local_excitation_gap(self._result, niter=niter)
+        return idmrg.local_excitation_gap_windowed(
+            self._result, self._h_intra.op, self._h_inter.op, self.site_types,
+            self.n_uc, window=window, niter=niter)
 
     def kpm_finite(self, opname_i, p_i, opname_j, r, n_window,
                    window_chain_kwargs=None, **kwargs):
