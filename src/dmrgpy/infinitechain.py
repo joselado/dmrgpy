@@ -418,6 +418,34 @@ class Infinite_Many_Body_Chain:
             ks = np.linspace(-np.pi, np.pi, 41)
         return min(self.excitation_energies(k, n=1)[0] for k in ks)
 
+    def local_excitation_gap(self, niter=200):
+        """A cheap, cruder alternative to excitation_gap: re-diagonalizes
+        the growing algorithm's own final 2-site effective Hamiltonian
+        (already solved once for the ground state) for its second-lowest
+        eigenvalue, and returns the difference -- the "local superblock
+        gap". Unlike excitation_gap (the tangent-space/quasiparticle
+        ansatz), this has no momentum label, does not require D=1, and
+        reuses the ground state's own HL/HR environments unmodified rather
+        than letting them relax for the excited sector -- see
+        pyitensor.idmrg.local_excitation_gap's own docstring for the full
+        rationale (including why this, not a soft penalty weight, is the
+        exact analogue of finite-chain DMRG's Lagrange-multiplier excited-
+        state trick here) and for an important accuracy caveat: it is not
+        guaranteed to match the true minimum-momentum gap the way
+        excitation_gap does.
+
+        Only supported for itensor_version="python" -- see vev's own
+        comment."""
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.local_excitation_gap: only "
+                "itensor_version=\"python\" is supported -- see "
+                "pyitensor.idmrg.local_excitation_gap's own docstring")
+        if self._result is None:
+            self.gs_energy()
+        from .pyitensor import idmrg
+        return idmrg.local_excitation_gap(self._result, niter=niter)
+
     def kpm_finite(self, opname_i, p_i, opname_j, r, n_window,
                    window_chain_kwargs=None, **kwargs):
         """Dynamical correlator <opname_i(site p_i) opname_j(site p_i+r)>

@@ -1940,6 +1940,46 @@ than 2 adjacent unit cells after \texttt{n\_uc}-grouping) is separately
 rejected with \texttt{NotImplementedError} too, mirroring
 \texttt{n\_uc>2}'s own guard elsewhere in this module.
 
+\textbf{A cheaper, cruder alternative: the local superblock gap.}
+\texttt{ic.local\_excitation\_gap(niter=200)} re-diagonalizes the growing
+algorithm's own final, converged 2-site effective Hamiltonian -- already
+solved once for the ground state -- for its \emph{second}-lowest
+eigenvalue instead, and returns the difference. This is the direct
+infinite-chain analogue of a well-known finite-DMRG trick: at the last
+sweep, ask the same local effective Hamiltonian for its two lowest Ritz
+pairs rather than just the ground state. It is also the natural place a
+Lagrange-multiplier/orthogonality-penalty idea (as used by finite DMRG's
+own dedicated excited-state method, \texttt{get\_excited}/\texttt{get\_gap},
+\S4) would show up here -- except no penalty weight is needed: since there
+is no separate re-sweep (the ``state to stay orthogonal to'' is just the
+local ground vector already found, in the very same local Hilbert space),
+the constraint is enforced exactly via deflation (projecting out the
+ground vector), which is what a penalty method converges to anyway as its
+weight $\to\infty$. Unlike \texttt{excitation\_gap}, this requires no
+\texttt{D=1} restriction and carries no momentum label -- it is a single
+number, not a dispersion:
+
+\begin{verbatim}
+ic.local_excitation_gap()   # a single scalar, no k dependence
+\end{verbatim}
+
+\textbf{Accuracy caveat.} This is a genuinely cruder notion of ``gap'':
+it reuses the ground state's own \texttt{HL}/\texttt{HR} environments
+unmodified (never letting them relax for whatever the second local
+eigenstate actually represents), so it is \emph{not} guaranteed to match
+the true minimum-momentum gap the tangent-space ansatz targets. Measured
+directly on the two cases \texttt{excitation\_gap} and this method were
+both cross-checked against: for the exactly-solvable field-polarized XX
+chain (\texttt{D=1}), it comes out $\sim$10\% too high (5.5 vs.\ the exact
+5.0); for a genuinely entangled (\texttt{D>1}) dimerized Heisenberg chain
+-- exactly the case \texttt{excitation\_gap} cannot handle yet -- it lands
+within $\sim$0.5\% of a large finite open chain's own extrapolated ED gap
+(see \texttt{examples/idmrg/local\_excitation\_gap/main.py}). Use
+\texttt{excitation\_gap} for a physically principled answer whenever its
+\texttt{D=1} scope applies; use \texttt{local\_excitation\_gap} as a
+cheap, order-of-magnitude cross-check, or for \texttt{D>1} chains where
+\texttt{excitation\_gap} is not available at all.
+
 \textbf{Dynamical correlators (finite-window KPM).}
 \texttt{ic.kpm\_finite(opname\_i, p\_i, opname\_j, r,
 n\_window, window\_chain\_kwargs=None, **kwargs)} computes

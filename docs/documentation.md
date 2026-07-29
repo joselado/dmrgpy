@@ -621,6 +621,54 @@ in at least some cases, to be wrong — see
 LIMITATION" section) for the full account, and
 `examples/idmrg/excitation_gap_xx/main.py` for the validated `D=1` case.
 
+**A cheaper, cruder alternative: the local superblock gap
+(`pyitensor/idmrg.py::local_excitation_gap`)**: rather than a fresh
+tangent-space construction, this reuses the growing algorithm's own final
+micro-step exactly as it already runs — `idmrg_ground_state` now stashes
+the last micro-step's local-solve ingredients (`HL`/`HR` environments, the
+two MPO tensors, the two physical Indices, the converged local ground
+vector/energy) on `IDMRGResult.local_superblock` — and re-diagonalizes
+that *same* 2-site effective Hamiltonian (rebuilding its matvec via
+`kernels.make_matvec` on the stored pieces) for its second-lowest
+eigenvalue instead of only its ground state, returning the difference.
+Framed explicitly as the infinite-chain analogue of finite DMRG's own
+Lagrange-multiplier/overlap-penalty excited-state method (`dmrg.py`'s
+`dmrg_excited`/`Chain.excited_states`): that method needs a penalty term
+threaded through a whole re-sweep because it enforces orthogonality
+against a *separate*, externally-held ground-state MPS one local update at
+a time; here the "state to stay orthogonal to" is just the local ground
+vector already found, in the very same local Hilbert space, by the very
+same solve, so the constraint is enforced *exactly* via deflation
+(`P = I - |psi0><psi0|`; `deflated_matvec(v) = P(matvec(P(v)))`, Hermitian
+since both `P` and the underlying local Hamiltonian are) rather than
+approximately via a finite penalty weight — mathematically, a Hermitian
+operator's constrained stationary points (extremize `<psi|H|psi>` subject
+to `<psi|psi>=1`, `<psi|psi_0>=0`) are exactly its *other* eigenvectors, so
+this is what a penalty method converges to anyway as its weight -> infinity,
+obtained directly with nothing to tune. Implementation mirrors
+`_local_two_site_solve`'s own small-dimension fallback (dense `eigh` for
+`dim<=3`) and otherwise reuses `dmrg._lanczos_ground_state` (imported
+already) on the deflated matvec, rather than introducing a second Lanczos
+implementation or a new `scipy.sparse.linalg.eigsh` dependency.
+
+Deliberately positioned as a *cruder, opt-in* alternative, not a
+replacement: it has no momentum label at all (a single scalar, not a
+dispersion), does not require `D=1`, and — critically — never lets `HL`/
+`HR` relax for whatever the second local eigenstate actually represents,
+since they are exactly the ground state's own converged environments.
+Measured directly against the two cases the tangent-space ansatz was
+itself validated against: for the field-polarized XX chain (`D=1`, exact
+answer known), it comes out $\sim$10% too high (5.5 vs.\ the exact 5.0)
+— confirming it is a genuinely cruder approximation, not a bug; for a
+genuinely entangled (`D>1`) dimerized Heisenberg chain — exactly the case
+`excitation_gap` cannot handle — it lands within $\sim$0.5% of a large
+finite open chain's own ED gap (`Spin_Chain.get_gap(mode="ED")` at
+`n_sites=12,14,16`, the same finite-size-extrapolation cross-check style
+`test_n_uc2_dimerized_chain_matches_finite_size_extrapolation` already
+uses for the ground-state energy density), a reassuring result precisely
+where the tangent-space ansatz offers nothing at all. See
+`examples/idmrg/local_excitation_gap/main.py` for the worked comparison.
+
 **Dynamical correlators, via a finite-window reduction to the existing
 finite-chain KPM stack (`infinitechain.py`, not `pyitensor/idmrg.py`)**:
 unlike the static-correlator machinery above, `Infinite_Many_Body_Chain.

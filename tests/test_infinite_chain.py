@@ -906,3 +906,91 @@ def test_excitation_energies_rejects_reach_greater_than_one():
     ic.set_hamiltonian(h)
     with pytest.raises(NotImplementedError):
         ic.excitation_gap()
+
+
+# -- local_excitation_gap: the "local superblock gap" (pyitensor/idmrg.py's
+# local_excitation_gap) -- a cheap, cruder alternative to excitation_gap
+# above: re-diagonalizes the growing algorithm's own final 2-site effective
+# Hamiltonian for its second-lowest eigenvalue instead of only its ground
+# state. Unlike excitation_gap, it has no momentum label and does not
+# require D=1 -- but is correspondingly less accurate (confirmed below: an
+# exact ~10% overestimate on the one case an exact answer is available for).
+
+def test_local_excitation_gap_is_approximate_for_polarized_xx_chain():
+    """D=1 sanity check: unlike excitation_gap (exact here, see
+    test_excitation_gap_matches_exact_minimum), local_excitation_gap is a
+    genuinely cruder approximation -- lands in the right ballpark (~10%
+    high, measured directly) but should NOT be expected to match the exact
+    answer to the same precision excitation_gap does."""
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h)
+    exact_gap = 2 * h - J
+    local_gap = ic.local_excitation_gap()
+    assert local_gap == pytest.approx(exact_gap, rel=0.2)
+    assert abs(local_gap - exact_gap) > 1e-6  # genuinely approximate, not exact
+
+
+def test_local_excitation_gap_is_deterministic_across_repeated_calls():
+    """local_excitation_gap uses a randomized Lanczos start internally (no
+    warm start persisted the way the growing algorithm's own solve has,
+    since this is a one-off post-hoc diagonalization) -- confirm the
+    deflated eigenproblem still converges to the same value every call,
+    not call-to-call noise."""
+    ic = _polarized_xx_chain()
+    g1 = ic.local_excitation_gap()
+    g2 = ic.local_excitation_gap()
+    assert g1 == pytest.approx(g2, abs=1e-8)
+
+
+def test_local_excitation_gap_matches_finite_size_dimerized_gap():
+    """A genuinely entangled (D>1) ground state -- exactly the case
+    excitation_gap cannot handle yet -- cross-checked against a large
+    finite open chain's own ED gap (get_gap(mode="ED")), reusing the same
+    dimerized model test_n_uc2_dimerized_chain_matches_finite_size_
+    extrapolation already validates its own (energy-density) number
+    against. Measured directly: local_excitation_gap=0.7631 vs. a finite
+    open chain's own ED gap of 0.7591 (n=16 sites) -- well within the
+    generous absolute tolerance below, which allows for the finite-size
+    drift of the ED reference itself (0.7704 at n=12, 0.7591 at n=16)."""
+    j_strong, j_weak = 1.0, 0.4
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
+         + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
+    ic.maxm, ic.maxiter, ic.etol = 40, 200, 1e-9
+    ic.set_hamiltonian(h)
+    ic.gs_energy()
+    assert ic.converged
+    local_gap = ic.local_excitation_gap()
+
+    sc = spinchain.Spin_Chain(["1/2"] * 16)
+    hf = 0
+    for i in range(15):
+        j = j_strong if i % 2 == 0 else j_weak
+        hf = hf + j * (sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+                       + sc.Sz[i] * sc.Sz[i + 1])
+    sc.set_hamiltonian(hf)
+    finite_gap = sc.get_gap(mode="ED")
+
+    assert local_gap == pytest.approx(finite_gap, abs=0.05)
+
+
+def test_local_excitation_gap_before_set_hamiltonian_raises():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    with pytest.raises(RuntimeError):
+        ic.local_excitation_gap()
+
+
+def test_local_excitation_gap_itensor_version3_not_implemented():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
+    with pytest.raises(NotImplementedError):
+        ic.local_excitation_gap()
+
+
+def test_local_excitation_gap_raises_without_stored_superblock():
+    """Defense-in-depth guard on idmrg.local_excitation_gap itself (not
+    reachable through the public API, which always builds a real
+    IDMRGResult via a completed idmrg_ground_state run)."""
+    result = idmrg.IDMRGResult(None, 1, [None], 0.0, True, 1)
+    with pytest.raises(RuntimeError):
+        idmrg.local_excitation_gap(result)
