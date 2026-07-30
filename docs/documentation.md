@@ -795,6 +795,92 @@ nontrivial feature in its own right — flagged as a known, deliberate
 follow-up rather than attempted here (see `kpm_finite`'s own docstring
 for the same note, addressed to a caller rather than a maintainer).
 
+**Infinite-boundary-condition (IBC) window construction, first step
+toward a real-time dynamical correlator (`pyitensor/idmrg_window.py`)**:
+following Milsted/Vanderstraeten et al., "Infinite boundary conditions
+for response functions and limit cycles in iDMRG" (arXiv:1804.09163),
+Sec. V.1 — the item-1 ingredient flagged just above as unimplemented
+future work. The paper's method time-evolves a finite window of tensors
+around a local perturbation, with everything outside the window frozen
+at the uniform ground state and capped by "the Hamiltonian terms outside
+the window, projected onto the reduced D-dimensional Hilbert space of the
+left/right block" — which turns out to be *exactly* what
+`idmrg_ground_state`'s own growth loop already computes as `HL`/`HR`,
+just discarded once converged. `idmrg.py` was extended (`IDMRGResult`'s
+own `env_HL`/`env_HL_bra`/`env_HL_ket`/`env_HL_mpo` and mirrored `env_HR_*`
+fields, plus `W_bulk`) to snapshot these — specifically, `HL`/`HR` as
+they stood *entering* the last executed macro-iteration (captured via a
+per-macro-iteration `env_window_boundary` snapshot, overwritten every
+iteration so whatever remains at loop exit is the one consistent with
+the *returned* `U_list`'s own edge bonds: `U_list[0]`'s left bond is
+exactly that snapshot's `HL_ket`, `U_list[n_uc-1]`'s right bond exactly
+its `HR_ket`, by construction of how `svd()` splits the local 2-site
+solve) — no new environment solve needed, only exposing what already
+exists.
+
+`idmrg_window.py`'s `build_window(result, n_window)` tiles `n_window`
+periodic repeats of `U_list` (the window's MPS) and `W_bulk` (its MPO)
+into an ordinary `mpscontainer.MPS`/`MPO` pair (`_tile_periodic`, fresh
+Link Indices at every copy boundary to avoid the identity-collision
+hazard `_relabel_pos`/`_project_channel` already warn about elsewhere in
+this module), with the very first/last tensors' outer legs left as `env_
+HL_ket`/`env_HL_mpo`/`env_HR_ket`/`env_HR_mpo` so they attach directly to
+the environment caps. Environment extension *through* the window
+deliberately reuses `idmrg.py`'s own explicit-Index `_extend_HL`/
+`_extend_HR` (`_extend_through_left`/`_extend_through_right`), not
+`dmrg.py`'s generic `_Chain`/`_link_at`-based `_extend_left`/
+`_extend_right`: the latter infers a site's left/right Link purely by
+looking for a same-Index neighbor *within the chain itself*, correct for
+an ordinary finite chain (whose boundary sites truly have no further leg,
+see `mpscontainer.py`'s own docstring) but wrong here, since the window's
+own edge sites *do* carry one more leg each (connecting to `env_HL`/
+`env_HR`, tensors living outside the `_Chain` object entirely) that
+`_link_at` cannot see — confirmed directly: using the generic functions
+silently mis-contracted the bra/ket legs at the window's own edge sites
+(auto-contracting them together instead of leaving them properly
+dangling for a fresh bra-side mint), since `_link_at`'s neighbor lookup
+returns "no such leg" for a boundary site regardless of whether the
+tensor itself actually has one.
+
+**A confirmed, non-obvious normalization finding**: `window_total_energy`
+(the capped window's total energy, via `_extend_through_left` then
+closing against `env_HR`) is *not* simply `e0 * (site count)` — plugging
+in the converged `U_list` tensors with both `env_HL_ket` and `env_HR_ket`
+left as free/dangling legs (rather than contracted against a specific
+boundary vector) gives `<window|window> = dim(env_HR_ket)`, not 1 (an
+isometry-chain argument: each site's own left-canonical `U` collapses the
+sum over every index except the very last dangling one, leaving that
+dimension as the Frobenius norm-squared — confirmed numerically against
+an independent Lanczos-Rayleigh-quotient computation using the identical
+`env_HL`/`env_HR`/`W_pL`/`W_pR`, to machine precision) — `window_total_
+energy` divides by it. Even normalized, the *absolute* total still
+carries a large, `n_window`-independent baseline from whatever
+`env_HL`/`env_HR` themselves represent (every macro-iteration already
+absorbed before the snapshot) — so `window_energy_density(result,
+n_window)`, a finite difference between window sizes `n_window` and
+`n_window+1` divided by `n_uc` (mirroring `idmrg_ground_state`'s own
+`density = (energy-prev_energy)/(2*n_uc)` diagnostic), is the well-posed
+sanity check this module validates against, not `window_total_energy`
+directly. **A second, real bug this same finite-difference check caught**:
+an earlier version compared window sizes `n_window` and `n_window+n_uc`
+(not `n_window+1`) while still dividing by `n_uc` — `n_window` counts
+*unit-cell copies*, so `+n_uc` copies adds `n_uc*n_uc` physical sites,
+not `n_uc` — invisible for `n_uc=1` (where `n_uc*n_uc==n_uc`), but
+confirmed directly to inflate every `n_uc=2` result by *exactly* a factor
+of 2 for an easy, cleanly-converged test model (an exact ratio, not
+convergence noise, which is what exposed it as a real off-by-`n_uc` bug
+rather than an iDMRG convergence limitation).
+
+**What this covers, and what doesn't yet**: this is Phase 0-1 of the
+paper's method only — build and validate the IBC-capped window itself
+(`tests/test_idmrg_window.py`). Perturbing the window (`Â†_0`/`B̂_0` at
+its center), time-evolving both branches (reusing `pyitensor/tdvp.py`'s
+existing Krylov machinery, seeded with these same environment caps rather
+than `tdvp.py`'s own `(None,None)` open-boundary seed), reading off
+`S(x,t)` for every distance `x` from a single pair of shifted overlaps
+(Eq. 7 of the paper), and Fourier-transforming to `S(k,ω)` are follow-up
+work, not implemented here.
+
 ### 4.2 Operator representation: `MultiOperator`
 
 Hamiltonians and observables are built as `MultiOperator` objects
