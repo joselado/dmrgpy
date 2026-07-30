@@ -62,6 +62,7 @@ def test_energy_truncate_noop_when_window_is_wide():
     """With Ws~W (today's safe default kpm_scale), every site's local
     Krylov spectrum should already sit inside the [-1,1] threshold, so
     truncation must leave the state numerically unchanged."""
+    np.random.seed(0)
     sc = _heisenberg_chain(6)
     session = sc._session
     scaled_H, emin, emax, scale = session._scaled_hamiltonian(kpm_scale=0.7)
