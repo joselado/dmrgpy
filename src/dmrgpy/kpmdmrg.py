@@ -14,11 +14,15 @@ from .algebra.kpm import generate_profile
 def _sync_kpm_energy_truncation(self):
     """Push kpm_energy_truncate*'s current values onto self._session, if
     it understands them. Only pyitensor.chain.Chain does (see its
-    set_kpm_energy_truncation()) -- itensor_version 2/3's compiled
-    sessions have no such method, since energy truncation (Holzner et
-    al., PRB 83, 195115 (2011), Sec. III-B) is implemented for the
-    pyitensor backend only, not ported to mpscpp2/mpscpp3's
-    chain_session.h."""
+    set_kpm_energy_truncation()): the pyitensor backend wires energy
+    truncation (Holzner et al., PRB 83, 195115 (2011), Sec. III-B) into
+    its *existing* kpm_dynamical_correlator() via this setter + an
+    internal branch. itensor_version=3 has its own, independent native
+    port instead (mpscpp3/chain_session.h's kpm_dynamical_correlator_
+    truncated(), a wholly separate method from kpm_dynamical_correlator
+    -- see get_dynamical_correlator()'s own dispatch below, which calls
+    it directly rather than through this setter). itensor_version=2 has
+    neither."""
     if self.itensor_version != "python":
         return
     self._session.set_kpm_energy_truncation(
@@ -61,11 +65,20 @@ def get_dynamical_correlator(self,n=1000,
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    _sync_kpm_energy_truncation(self)
-    moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator(
-            mi.to_terms(),mj.to_terms(),
-            self.kpmmaxm,self.kpm_scale,self.kpm_accelerate,
-            self.kpm_n_scale,delta,self.kpmcutoff)
+    if self.kpm_energy_truncate and self.itensor_version==3:
+        # v3's own independent method (see _sync_kpm_energy_truncation's
+        # docstring) -- not the setter+branch pattern used for "python".
+        moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator_truncated(
+                mi.to_terms(),mj.to_terms(),
+                self.kpmmaxm,self.kpm_scale,self.kpm_accelerate,
+                self.kpm_n_scale,delta,self.kpmcutoff,
+                self.kpm_truncate_dK,self.kpm_truncate_nsweeps,self.kpm_truncate_threshold)
+    else:
+        _sync_kpm_energy_truncation(self)
+        moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator(
+                mi.to_terms(),mj.to_terms(),
+                self.kpmmaxm,self.kpm_scale,self.kpm_accelerate,
+                self.kpm_n_scale,delta,self.kpmcutoff)
     mus = np.array(moments)
     if self.kpm_extrapolate:
         mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,

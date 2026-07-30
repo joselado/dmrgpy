@@ -126,8 +126,11 @@ class Many_Body_Chain():
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
       # KPM energy truncation (Holzner et al., PRB 83, 195115 (2011),
-      # Sec. III-B) -- itensor_version="python" only, see
-      # pyitensor/kpm_energy_truncation.py and kpmdmrg.py's own gating.
+      # Sec. III-B) -- itensor_version "python" or 3 only (mpscpp2/v2 has
+      # no port), see pyitensor/kpm_energy_truncation.py +
+      # mpscpp3/chain_session.h's kpm_dynamical_correlator_truncated()
+      # (an independent method from kpm_dynamical_correlator, not a
+      # branch inside it) and kpmdmrg.py's own dispatch between the two.
       # Off by default (existing kpm_scale behavior is unaffected);
       # enables kpm_scale to be pushed below its current safe floor
       # (~0.5 in this codebase's bandwidth-midpoint-centered rescaling

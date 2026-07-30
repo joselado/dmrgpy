@@ -71,6 +71,15 @@ struct KPMResult
     int num_polynomials;
     };
 
+// Diagnostics from Chain::kpm_energy_truncate() -- see that method's own
+// comment for what each field means (Eqs. 40-41 of the paper cited
+// there).
+struct KPMTruncStats
+    {
+    double avg_truncated_weight;
+    double state_change_norm;
+    };
+
 struct ExcitedResult
     {
     std::vector<double> energies;
@@ -1926,6 +1935,54 @@ class Chain
         return mu;
         }
 
+    // KPM energy truncation (Holzner, Weichselbaum, McCulloch & von Delft,
+    // "Chebyshev matrix product state approach for spectral functions",
+    // PRB 83, 195115 (2011), Sec. III-B) -- native ITensor v3 port of
+    // pyitensor/kpm_energy_truncation.py's energy_truncate(), wired in as
+    // a wholly independent method from kpm_dynamical_correlator()/
+    // kpm_moments_full()/kpm_moments_accelerated()/scaled_hamiltonian()
+    // above: none of those are read or modified by any of what follows,
+    // so the existing (always window~full-bandwidth-safe) KPM path is
+    // completely unaffected.
+    //
+    // Why this exists: the KPM window Ws can be chosen much smaller than
+    // the true many-body bandwidth W (Ws only needs to cover the
+    // correlator's own, usually much narrower, spectral width), which is
+    // what buys spectral resolution. But shrinking Ws makes it easy for
+    // the rescaled Hamiltonian H' to have eigenstates with
+    // |eigenvalue| > 1 -- outside the domain where Chebyshev polynomials
+    // are bounded. Since the recursion is carried out via MPS
+    // compression, not in H's eigenbasis, numerical noise alone is
+    // enough to leak a little high-energy weight into a Chebyshev
+    // vector, and since Chebyshev polynomials grow without bound outside
+    // [-1,1], that weight blows up exponentially over subsequent
+    // recursion steps -- check_kpm_moment() above only *detects* this
+    // (aborts once moments diverge); the machinery below is the actual
+    // fix, applied once per Chebyshev vector before it is used for a
+    // moment or fed into the next recursion step.
+    KPMResult
+    kpm_dynamical_correlator_truncated(std::vector<MOTerm> const& terms_i,
+                             std::vector<MOTerm> const& terms_j,
+                             int kpmmaxm, double kpm_scale, bool kpm_accelerate,
+                             int kpm_n_scale, double delta, double kpm_cutoff,
+                             int trunc_dK, int trunc_nsweeps, double trunc_threshold)
+        {
+        if (!have_H_) Error("Chain::kpm_dynamical_correlator_truncated called before set_hamiltonian");
+        if (!have_wf0_) gs_energy(); // ensure a ground state is available
+        auto hs = scaled_hamiltonian_gs_anchored(kpm_scale);
+        int n = int(std::round((hs.emax-hs.emin)/delta))*kpm_n_scale;
+        auto m1 = build_mpo(sites_,terms_i,mpomaxm_);
+        auto m2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto psi1 = apply_mpo(m1,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
+        auto psi2 = apply_mpo(m2,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
+        KPMResult out;
+        out.moments = kpm_moments_truncated(hs.scaled_H,psi1,psi2,n,kpmmaxm,kpm_cutoff,
+                                             kpm_accelerate,trunc_dK,trunc_nsweeps,trunc_threshold);
+        out.emin = hs.emin; out.emax = hs.emax; out.scale = hs.scale;
+        out.num_polynomials = n;
+        return out;
+        }
+
     // Infinite DMRG (iDMRG): C++ port of pyitensor/idmrg.py's growing/
     // infinite-size algorithm (White 1992, generalized to an n_uc-site
     // unit cell per McCulloch 2008) -- see that module's own docstring
@@ -3298,6 +3355,291 @@ class Chain
             return kpm_moments_accelerated(m,vi,n,kpmmaxm,kpmcutoff);
         return kpm_moments_full(m,vi,vj,n,kpmmaxm,kpmcutoff);
         }
+
+    // -- KPM energy truncation (Sec. III-B of the paper cited at
+    // kpm_dynamical_correlator_truncated() above) -- everything below is
+    // new, independent machinery; nothing in the KPM section above this
+    // point (scaled_hamiltonian/kpm_moments_full/kpm_moments_accelerated/
+    // check_kpm_moment/kpm_moments) is read or modified by it. Public
+    // (scaled_hamiltonian_gs_anchored()/kpm_energy_truncate() are exposed
+    // to Python -- see bindings.cc -- so this method's own algorithm can
+    // be tested directly, independent of the Chebyshev recursion it
+    // plugs into, mirroring pyitensor/kpm_energy_truncation.py's own
+    // standalone-testable design).
+    public:
+
+    // Ground-state-anchored rescaling (paper's own Eq. 21b): places the
+    // ground state energy E0 at -(1-safety/2) and E0+Ws at +(1-safety/2),
+    // where Ws=(emax-emin)*kpm_scale is the *same* window-width formula
+    // scaled_hamiltonian() uses (so kpm_scale keeps the same meaning/
+    // units in both) -- but anchored at E0 rather than centered on the
+    // full many-body bandwidth's midpoint. Used by
+    // kpm_dynamical_correlator_truncated() instead of scaled_hamiltonian():
+    // shrinking kpm_scale only delivers a resolution gain if the narrowed
+    // window also sits where a typical correlator's spectral weight
+    // actually lives -- just above the ground state, since its Chebyshev
+    // vectors are built by acting operators on |0>, not around the
+    // geometric middle of the entire many-body spectrum (confirmed
+    // directly while building pyitensor's own version of this: with
+    // scaled_hamiltonian()'s bandwidth-midpoint centering, any kpm_scale
+    // below the safe floor clips the ground state itself out of the
+    // window before ever reaching a genuinely useful, narrower regime,
+    // since the ground state sits at the spectrum's own edge, not its
+    // middle).
+    //
+    // Returns (m,emin,emax,scale) with the *same* meaning downstream
+    // (kpm_dynamical_correlator_truncated()'s own moment-count, and the
+    // Python energy-axis reconstruction it feeds, kpmdmrg.py) as
+    // scaled_hamiltonian()'s own return value, even though emin/emax are
+    // no longer literally the true many-body band edges: emin=E0 (still
+    // correct -- the energy axis kpmdmrg.py reconstructs is "excitation
+    // energy above the ground state", i.e. E_phys-E0, unchanged), and
+    // emax=E0+Ws (the actual retained window's top, which is what should
+    // set the polynomial order N, not the full, unused many-body
+    // bandwidth).
+    HamiltonianScale
+    scaled_hamiltonian_gs_anchored(double kpm_scale, double safety=0.025)
+        {
+        double e0 = minimum_energy();
+        double w = bandwidth();
+        double ws = w*kpm_scale;
+        double wp = 1.0-safety/2.0;
+        double a = ws/(2.0*wp);
+        double scale = 1.0/a;
+        double shift = -e0-wp*a;
+        auto ampo = AutoMPO(sites_);
+        ampo += shift,"Id",1;
+        auto shift_mpo = toMPO(ampo);
+        auto m = sum(H_,shift_mpo,{"MaxDim",mpomaxm_,"Cutoff",cutoff_});
+        m = m*scale;
+        HamiltonianScale out; out.scaled_H = m; out.emin = e0; out.emax = e0+ws; out.scale = scale;
+        return out;
+        }
+
+    // One site's worth of Eqs. (36)-(39): build an orthonormal Krylov
+    // basis of dimension <= dK for the local effective Hamiltonian `PH`
+    // (already positioned at this site by the caller), starting from this
+    // site's current tensor `phi0`, diagonalize the dense projected
+    // matrix, and return phi0 with any component whose Krylov-subspace
+    // energy has |eigenvalue| >= threshold projected out, plus the
+    // squared norm of the removed part (one site's contribution to
+    // Eq. 40). Two deliberate departures from the paper's literal
+    // Eqs. (36)-(41), matching pyitensor/kpm_energy_truncation.py's own
+    // (see that module's docstring for the full rationale):
+    //  - Krylov vectors are built via interleaved (modified) Gram-Schmidt
+    //    -- same style as arnoldi_smallest_real() above -- rather than
+    //    the paper's "compute all dK powers of H' first, then batch
+    //    orthogonalize"; both build the same subspace mathematically, but
+    //    interleaving is far better conditioned once vectors start
+    //    converging toward H's locally dominant eigendirection.
+    //  - Unlike arnoldi_smallest_real()'s Hessenberg-only bookkeeping
+    //    (sufficient there since only one Ritz pair is ever extracted),
+    //    every Krylov component below threshold must survive here, so
+    //    the *full* dense Hermitian projected matrix is built (one extra
+    //    matvec pass over the already-orthonormalized basis) rather than
+    //    reusing only the entries encountered during Gram-Schmidt.
+    //  - The projector keeps |eps_alpha| < threshold (both signs), not
+    //    just eps_alpha < threshold as in Eq. (38): scaled_hamiltonian_
+    //    gs_anchored() pins the ground state near -1 by construction, so
+    //    in practice only the upper cut ever fires for a correlator's own
+    //    Chebyshev vectors, but the symmetric form is used regardless
+    //    since nothing here assumes which rescaling produced `PH`.
+    std::pair<ITensor,double>
+    kpm_local_krylov_projection(LocalMPO& PH, ITensor const& phi0, int dK, double threshold) const
+        {
+        double nrm = norm(phi0);
+        if (nrm<1E-14) return {phi0,0.0};
+        std::vector<ITensor> V;
+        V.push_back(phi0/nrm);
+        for (int j=0;j<dK-1;++j)
+            {
+            ITensor w; PH.product(V.at(j),w);
+            for (int pass=0;pass<2;++pass)
+                for (auto const& Vi : V)
+                    w -= eltC(dag(Vi)*w)*Vi;
+            double nw = norm(w);
+            if (nw<1E-12) break; // invariant subspace found; fewer than dK vectors is fine
+            V.push_back(w/nw);
+            }
+        int k = (int)V.size();
+        auto a = Index(k,TagSet("KPMEnergyTrunc,a"));
+        auto Hk = ITensor(prime(a),a);
+        for (int j=0;j<k;++j)
+            {
+            ITensor w; PH.product(V.at(j),w);
+            for (int i=0;i<k;++i)
+                Hk.set(prime(a)(i+1),a(j+1),eltC(dag(V.at(i))*w));
+            }
+        Hk = 0.5*(Hk + dag(swapPrime(Hk,0,1))); // Hermitize away floating-point asymmetry
+        ITensor U,D;
+        diagHermitian(Hk,U,D);
+        auto eig = uniqueIndex(U,Hk);
+        ITensor cv(a);
+        cv.set(a(1),nrm); // phi0 == nrm*V[0] == nrm*a(1) by construction
+        auto ce = dag(U)*cv;
+        double truncated_weight_sq = 0.0;
+        for (int alpha=1;alpha<=k;++alpha)
+            {
+            double e = eltC(D,eig(alpha),prime(eig)(alpha)).real();
+            if (std::abs(e)>=threshold)
+                {
+                truncated_weight_sq += std::norm(eltC(ce,eig(alpha)));
+                ce.set(eig(alpha),0.0);
+                }
+            }
+        auto new_cv = U*ce;
+        ITensor new_phi;
+        for (int i=0;i<k;++i)
+            {
+            auto coef = eltC(new_cv,a(i+1));
+            if (i==0) new_phi = coef*V.at(0);
+            else new_phi += coef*V.at(i);
+            }
+        return {new_phi,truncated_weight_sq};
+        }
+
+    // One directional pass over every site of psi (mutated in place),
+    // projecting each site's local tensor via kpm_local_krylov_projection
+    // and moving the orthogonality center between sites via plain
+    // MPS::position() -- whose default (no MaxDim/Cutoff args, i.e. the
+    // orthMPS/QR-based branch, not the DoSVDBond one) is already a
+    // lossless gauge transformation, not an SVD-with-truncation one -- so
+    // this sweep's own site-to-site moves never counteract the energy
+    // truncation it just did. `PH` is shared across every half-sweep of
+    // the whole kpm_energy_truncate() call (constructed once there),
+    // exactly as ITensor's own two-site dmrg() reuses a single LocalMPO
+    // across every half-sweep of a multi-sweep run: position() only
+    // needs to *extend* its cached environment by the one site the bond
+    // moved past, in whichever direction, not rebuild it from scratch.
+    // Returns this pass's average truncated weight per site, Eq. (40).
+    double
+    kpm_truncate_half_sweep(MPS& psi, LocalMPO& PH, int dK, double threshold, bool forward) const
+        {
+        int N = psi.length();
+        double total_truncated_sq = 0.0;
+        int first = forward ? 1 : N;
+        int last = forward ? N : 1;
+        int step = forward ? 1 : -1;
+        for (int b=first; ; b+=step)
+            {
+            PH.position(b,psi);
+            auto res = kpm_local_krylov_projection(PH,psi.A(b),dK,threshold);
+            total_truncated_sq += res.second;
+            psi.set(b,res.first);
+            if (b==last) break;
+            psi.position(b+step);
+            }
+        return std::sqrt(total_truncated_sq/N);
+        }
+
+    // Project high-rescaled-energy components out of a Chebyshev vector
+    // `psi` (a local copy; the projected result is returned, `psi` itself
+    // is untouched at the call site). `H` must be the same rescaled/
+    // shifted Hamiltonian MPO used to build psi's own Chebyshev recursion
+    // (H' in the paper's notation) -- NOT the bare, unscaled Hamiltonian.
+    // Runs n_sweeps directional passes over the chain, alternating
+    // direction each pass (matching every other sweep-based algorithm in
+    // this file, e.g. ITensor's own two-site dmrg()) so the orthogonality
+    // center never needs an extra, wasted end-to-end reset between
+    // passes. This is a line-for-line port of pyitensor/kpm_energy_
+    // truncation.py's energy_truncate() algorithm, using ITensor's own
+    // LocalMPO/diagHermitian instead of that module's hand-rolled
+    // NumPy-array tensor primitives; see its docstring for the returned
+    // diagnostics' meaning (Eqs. 40-41).
+    std::pair<MPS,KPMTruncStats>
+    kpm_energy_truncate(MPS psi, MPO const& H, int dK, int n_sweeps, double threshold) const
+        {
+        auto psi_before = psi;
+        psi.position(1);
+        LocalMPO PH(H,{"NumCenter",1});
+        double avg_truncated_weight = 0.0;
+        bool forward = true;
+        for (int s=0;s<n_sweeps;++s)
+            {
+            avg_truncated_weight = kpm_truncate_half_sweep(psi,PH,dK,threshold,forward);
+            forward = !forward;
+            }
+        double dchange = innerC(psi_before,psi_before).real()
+                        + innerC(psi,psi).real()
+                        - 2.0*innerC(psi_before,psi).real();
+        KPMTruncStats stats; stats.avg_truncated_weight = avg_truncated_weight;
+        stats.state_change_norm = std::max(dchange,0.0);
+        return {psi,stats};
+        }
+
+    // Independent (not shared with kpm_moments_full/kpm_moments_accelerated
+    // above) Chebyshev recursion with an energy-truncation call inserted
+    // after every new vector is formed, before it is used for a moment or
+    // fed into the next recursion step (mirrors the paper's own recursion
+    // ordering, and pyitensor/chain.py's _kpm_moments_full/
+    // _kpm_moments_accelerated wiring of the same call).
+    std::vector<std::complex<double>>
+    kpm_moments_truncated_full(MPO const& m, MPS const& vi, MPS const& vj, int n,
+                      int kpmmaxm, double kpmcutoff, int dK, int n_sweeps, double threshold) const
+        {
+        std::vector<std::complex<double>> out;
+        out.reserve(n+2);
+        auto v = 1.0*vi;
+        auto am = 1.0*vi;
+        auto a = apply_mpo(m,v,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+        auto ap = 1.0*a;
+        double bound = std::sqrt(innerC(vi,vi).real()*innerC(vj,vj).real());
+        out.push_back(innerC(vj,v));
+        out.push_back(innerC(vj,a));
+        for (int i=0;i<n;i++)
+            {
+            ap = apply_mpo(m,a,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            ap = sum(2.0*ap,-1.0*am,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            ap = kpm_energy_truncate(ap,m,dK,n_sweeps,threshold).first;
+            out.push_back(innerC(vj,ap));
+            check_kpm_moment(out,bound);
+            am = 1.0*a;
+            a = 1.0*ap;
+            }
+        return out;
+        }
+
+    std::vector<std::complex<double>>
+    kpm_moments_truncated_accelerated(MPO const& m, MPS const& vi, int n,
+                            int kpmmaxm, double kpmcutoff, int dK, int n_sweeps, double threshold) const
+        {
+        std::vector<std::complex<double>> out;
+        out.reserve(n+2);
+        auto a = apply_mpo(m,vi,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+        auto am = 1.0*vi;
+        auto ap = 1.0*a;
+        Cplx mu0 = innerC(vi,vi);
+        Cplx mu1 = innerC(vi,a);
+        double bound = std::abs(mu0);
+        out.push_back(mu0);
+        out.push_back(mu1);
+        for (int i=0;i<n/2;i++)
+            {
+            ap = apply_mpo(m,a,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            ap = sum(2.0*ap,-1.0*am,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
+            ap = kpm_energy_truncate(ap,m,dK,n_sweeps,threshold).first;
+            Cplx bk = 2.0*innerC(a,a) - mu0;
+            Cplx bk1 = 2.0*innerC(a,ap) - mu1;
+            out.push_back(bk);
+            out.push_back(bk1);
+            check_kpm_moment(out,bound);
+            am = 1.0*a;
+            a = 1.0*ap;
+            }
+        return out;
+        }
+
+    std::vector<std::complex<double>>
+    kpm_moments_truncated(MPO const& m, MPS const& vi, MPS const& vj, int n,
+                int kpmmaxm, double kpmcutoff, bool accelerate,
+                int dK, int n_sweeps, double threshold) const
+        {
+        if (accelerate && same_mps(vi,vj,maxm_,cutoff_))
+            return kpm_moments_truncated_accelerated(m,vi,n,kpmmaxm,kpmcutoff,dK,n_sweeps,threshold);
+        return kpm_moments_truncated_full(m,vi,vj,n,kpmmaxm,kpmcutoff,dK,n_sweeps,threshold);
+        }
+
+    private:
 
     SiteSet sites_;
     MPO H_; bool have_H_ = false;
