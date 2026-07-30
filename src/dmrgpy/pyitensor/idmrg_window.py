@@ -42,24 +42,58 @@ consistent, since the window's MPS/MPO tensors are themselves built (via
 `_tile_periodic`) with the exact same per-site tensor shape idmrg.py's own
 growth loop already uses.
 
-Follow-up work (perturb the window, TDVP-evolve it, read off shifted
-overlaps, Fourier transform -- Sec. V.1 steps 3-5 of the paper) will need
-an analogous window-aware two-site sweep (mirroring tdvp.py's own
-structure but built on these same explicit-Index extend primitives rather
-than tdvp.py's own `_link_at`-based half-sweeps) -- out of scope here. This
-module's own `window_energy_density` is the sanity check that validates
-the construction so far: the window's own marginal energy density (a
-finite difference between two window sizes -- see its own docstring for
-why not the absolute total directly), computed via idmrg.py's independent
+`window_energy_density` is the sanity check that validates the static
+construction: the window's own marginal energy density (a finite
+difference between two window sizes -- see its own docstring for why not
+the absolute total directly), computed via idmrg.py's independent
 `_extend_HL`/`_extend_HR` code (not `idmrg_ground_state`'s own internal
 accumulation this snapshot was taken from), must reproduce `result.e0`,
 and must do so *without* the boundary contamination an ordinary
 open-boundary window (`infinitechain.py`'s
 `kpm_finite`/`_window_hamiltonian`) suffers from regardless of how large
-`n_window` is."""
+`n_window` is.
+
+== Real-time evolution of the window (Sec. V.1 steps 3-4 of the paper) ==
+
+`window_tdvp_step` two-site-TDVP-evolves a window in place, exactly
+mirroring `tdvp.py`'s own `tdvp_step` (a left-to-right half-sweep by dt/2,
+then a right-to-left half-sweep by another dt/2) -- but `tdvp.py`'s own
+sweep functions cannot be reused directly: they build each bond's local
+effective Hamiltonian (`dmrg.py`'s `two_site_heff`/`one_site_heff`) and
+environments (`_all_left_environments`/`_all_right_environments`,
+`_extend_left`/`_extend_right`) via `mpsalgebra.py`'s `_link_at`, which
+finds a site's left/right Link purely by looking for a same-Index
+*neighbor in the chain itself* -- correct for an ordinary finite chain
+(whose two boundary sites truly have no further leg, see
+`mpscontainer.py`'s own docstring) but wrong for a window, whose edge
+sites *do* carry one more leg each (connecting to `env_HL`/`env_HR`,
+tensors outside the `_Chain` object entirely) that `_link_at` cannot see.
+Confirmed directly: passing a window straight through `tdvp.py`'s own
+sweep functions silently mis-contracts the bra/ket legs at the window's
+own edge sites instead of raising.
+
+The fix is not just a different environment seed (as `window_total_energy`
+already needed): a window's own edge sites, unlike an ordinary chain's,
+*always* have both a left and a right Link (`env_HL_ket`/`env_HR_ket` are
+real Indices, never absent) -- so this module's own
+`_window_two_site_heff`/`_window_one_site_heff` read a site's left/right
+Link directly off its own tensor (`ket.A(i).inds[0]`/`.inds[-1]`, always
+present, no `None`-guard needed) instead of via `_link_at`, and
+`_all_left_environments_window`/`_all_right_environments_window` build
+environments via idmrg.py's own explicit-Index `_extend_HL`/`_extend_HR`
+(seeded from `window.env_HL`/`window.env_HR` at the two ends) rather than
+`dmrg.py`'s `_link_at`-based ones. `tdvp.py`'s own `_lanczos_expm_multiply`
+(a pure Krylov-propagator numerical primitive, chain-structure-agnostic)
+and `svd.py`'s `svd` are reused unchanged; only the chain-structure-aware
+pieces are window-specific."""
+
+import numpy as np
 
 from . import idmrg as _idmrg_mod
+from . import kernels
 from .mpscontainer import MPO, MPS
+from .svd import svd
+from .tdvp import _lanczos_expm_multiply
 from .tensor import ITensor
 
 
@@ -101,6 +135,45 @@ def _tile_periodic(tensors_uc, boundary_left, boundary_right, n_window):
             out.append(ITensor(new_inds, T.array))
         left_bound = right_bound
     return out
+
+
+def _refresh_physical_legs(ket_tensors, mpo_tensors):
+    """Mint a fresh, distinct physical Index for every window position,
+    relabeling `ket_tensors[i]`'s single Site leg and `mpo_tensors[i]`'s
+    matching unprimed/primed pair together (so ket and MPO still agree,
+    site by site).
+
+    `_tile_periodic` deliberately reuses the *same* physical Index across
+    every copy of a given sublattice position (matching idmrg.py's own
+    convention, e.g. `grow_by_mpo`'s own requirement that `W_bulk[p]`'s
+    physical Index literally *be* `U_list[p]`'s own) -- safe there because
+    nothing in idmrg.py's own machinery ever multiplies two same-position
+    tensors together directly (each site's physical leg only ever meets
+    its own W tensor at that same site, one site at a time via
+    `_extend_HL`/`_extend_HR`). This module's own window TDVP machinery
+    does not have that luxury: `_window_two_site_heff`'s `Ti * Tj` directly
+    multiplies two *adjacent* window sites together -- for `n_uc=1` (every
+    window site shares the identical physical Index, since there is only
+    one sublattice position), this silently auto-contracts what should be
+    two independent sites' physical legs into one, instead of keeping them
+    as the two separate legs a genuine 2-site tensor needs. Confirmed
+    directly: an n_uc=1 window's very first two-site TDVP step raised
+    `transpose_to: ... is not a permutation of ...` before this fix --
+    exactly the collision idmrg.py's own `_fresh_physical_copy` exists to
+    avoid for its analogous p_L==p_R micro-step."""
+    new_ket, new_mpo = [], []
+    for U, W in zip(ket_tensors, mpo_tensors):
+        old_phys = next(ind for ind in U.inds if ind.hastags("Site") and ind.plev == 0)
+        new_phys = old_phys.sim()
+        new_phys_p = new_phys.prime(1)
+        U_inds = tuple(new_phys if ind == old_phys else ind for ind in U.inds)
+        W_inds = tuple(
+            new_phys if (ind.hastags("Site") and ind.plev == 0) else
+            (new_phys_p if (ind.hastags("Site") and ind.plev == 1) else ind)
+            for ind in W.inds)
+        new_ket.append(ITensor(U_inds, U.array))
+        new_mpo.append(ITensor(W_inds, W.array))
+    return new_ket, new_mpo
 
 
 class IBCWindow:
@@ -185,6 +258,7 @@ def build_window(result, n_window):
                                   result.env_HR_ket, n_window)
     mpo_tensors = _tile_periodic(result.W_bulk, result.env_HL_mpo,
                                   result.env_HR_mpo, n_window)
+    ket_tensors, mpo_tensors = _refresh_physical_legs(ket_tensors, mpo_tensors)
     mps = MPS(ket_tensors)
     mps.center = None  # not canonical relative to any single center yet
     mpo = MPO(mpo_tensors)
@@ -333,3 +407,296 @@ def window_energy_density(result, n_window):
     e_a = window_total_energy(win_a)
     e_b = window_total_energy(win_b)
     return (e_b - e_a) / n_uc
+
+
+# -- real-time TDVP evolution of the window (Sec. V.1 steps 3-4) ----------
+
+def _window_link_left(chain, i):
+    """The Link Index at the left of `chain.A(i)` -- always present for a
+    window's own tensors (unlike an ordinary open chain, whose site 1 has
+    none, see mpscontainer.py's own docstring): a window's edge sites
+    always carry env_HL_ket/env_HR_ket as a genuine leg. Read directly off
+    the tensor rather than via mpsalgebra.py's `_link_at` (a same-Index
+    neighbor lookup that would incorrectly return None at the window's own
+    edges, see this module's own docstring)."""
+    return chain.A(i).inds[0]
+
+
+def _window_link_right(chain, i):
+    """Mirror of `_window_link_left`."""
+    return chain.A(i).inds[-1]
+
+
+def _window_two_site_heff(L, Lbra, H, ket, i, R, Rbra):
+    """Window analogue of dmrg.py's `two_site_heff`: the 2-site effective
+    Hamiltonian at bond (i,i+1), built via the same shared
+    `kernels.make_matvec` -- except the outer bond legs are always
+    included (never `None`-guarded), since a window's own edge sites
+    always carry a real Link (see this module's own docstring)."""
+    Ti, Tj = ket.A(i), ket.A(i + 1)
+    left_link = _window_link_left(ket, i)
+    right_link = _window_link_right(ket, i + 1)
+    s_i = next(ind for ind in Ti.inds if ind.hastags("Site"))
+    s_j = next(ind for ind in Tj.inds if ind.hastags("Site"))
+
+    order_in = [left_link, s_i, s_j, right_link]
+    shape = tuple(ind.dim for ind in order_in)
+    x0 = (Ti * Tj).transpose_to(order_in).reshape(-1)
+
+    s_i_out, s_j_out = s_i.prime(1), s_j.prime(1)
+    order_out = [Lbra, s_i_out, s_j_out, Rbra]
+    H_i, H_j = H.A(i), H.A(i + 1)
+    pieces = [p for p in (L, H_i, H_j, R) if p is not None]
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
+
+    return matvec, order_in, shape, x0
+
+
+def _window_one_site_heff(L, Lbra, H, ket, i, R, Rbra):
+    """Window analogue of dmrg.py's `one_site_heff` -- the "backward
+    evolution" piece of two-site TDVP (see tdvp.py's own module docstring
+    for why it's needed), see `_window_two_site_heff`'s own docstring for
+    why the bond legs are never `None`-guarded here."""
+    T = ket.A(i)
+    left_link = _window_link_left(ket, i)
+    right_link = _window_link_right(ket, i)
+    s_i = next(ind for ind in T.inds if ind.hastags("Site"))
+
+    order_in = [left_link, s_i, right_link]
+    shape = tuple(ind.dim for ind in order_in)
+    x0 = T.transpose_to(order_in).reshape(-1)
+
+    s_i_out = s_i.prime(1)
+    order_out = [Lbra, s_i_out, Rbra]
+    H_i = H.A(i)
+    pieces = [p for p in (L, H_i, R) if p is not None]
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
+
+    return matvec, order_in, shape, x0
+
+
+def _all_left_environments_window(window):
+    """{i: (L,Lbra)} for i=0..n-1 -- mirrors dmrg.py's own
+    `_all_left_environments`'s indexing convention (env[i] = environment
+    through site i, env[0] = the seed before any window site is absorbed)
+    but built via idmrg.py's own explicit-Index `_extend_HL` (see this
+    module's own docstring for why, not `_link_at`-based `_extend_left`),
+    seeded from `window.env_HL`/`window.env_HL_bra` instead of the
+    ordinary open-chain `(None, None)`. Used as the "before this
+    half-sweep" static reference by `_half_sweep_rl_window` -- mirrors
+    tdvp.py's own `_half_sweep_rl`, which likewise only ever needs the
+    *other* side's environment precomputed, building its own side
+    incrementally as the sweep progresses."""
+    ket, H = window.mps, window.mpo
+    n = ket.length()
+    env = {0: (window.env_HL, window.env_HL_bra)}
+    left_ket_old = ket.A(1).inds[0]
+    for i in range(1, n):
+        L_prev, Lbra_prev = env[i - 1]
+        U, W_p = ket.A(i), H.A(i)
+        right_ket_new = U.inds[-1]
+        env[i] = _idmrg_mod._extend_HL(L_prev, Lbra_prev, W_p, U, left_ket_old, right_ket_new)
+        left_ket_old = right_ket_new
+    return env
+
+
+def _all_right_environments_window(window):
+    """Mirror of `_all_left_environments_window`: {i: (R,Rbra)} for
+    i=n+1..2, seeded from `window.env_HR`/`window.env_HR_bra`. Used as the
+    "before this half-sweep" static reference by `_half_sweep_lr_window`."""
+    ket, H = window.mps, window.mpo
+    n = ket.length()
+    env = {n + 1: (window.env_HR, window.env_HR_bra)}
+    right_ket_old = ket.A(n).inds[-1]
+    for i in range(n, 1, -1):
+        R_next, Rbra_next = env[i + 1]
+        V, W_p = ket.A(i), H.A(i)
+        left_ket_new = V.inds[0]
+        env[i] = _idmrg_mod._extend_HR(R_next, Rbra_next, W_p, V, right_ket_old, left_ket_new)
+        right_ket_old = left_ket_new
+    return env
+
+
+def _evolve_two_site_window(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+    """Forward (-i*tau) two-site evolution -- window analogue of tdvp.py's
+    own `_evolve_two_site`, reusing its `_lanczos_expm_multiply` Krylov
+    propagator unchanged (a pure numerical primitive, chain-structure-
+    agnostic) against this module's own `_window_two_site_heff`."""
+    matvec, order_in, shape, x0 = _window_two_site_heff(L, Lbra, H, ket, i, R, Rbra)
+    evolved = _lanczos_expm_multiply(matvec, x0, -1j * tau, niter=niter)
+    return ITensor(tuple(order_in), evolved.reshape(shape))
+
+
+def _evolve_one_site_window(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+    """Backward (+i*tau) one-site evolution -- window analogue of tdvp.py's
+    own `_evolve_one_site`, see `_evolve_two_site_window`'s own docstring."""
+    matvec, order_in, shape, x0 = _window_one_site_heff(L, Lbra, H, ket, i, R, Rbra)
+    evolved = _lanczos_expm_multiply(matvec, x0, 1j * tau, niter=niter)
+    return ITensor(tuple(order_in), evolved.reshape(shape))
+
+
+def _half_sweep_lr_window(window, tau, cutoff, maxdim, niter):
+    """Window analogue of tdvp.py's own `_half_sweep_lr` -- identical
+    algorithmic structure (forward-evolve each bond, SVD-split, backward-
+    evolve the freshly-cut bond tensor before the next bond), built on
+    this module's own window-aware environment/heff functions instead of
+    tdvp.py's `_link_at`-based ones (see this module's own docstring for
+    why those cannot be reused directly). One simplification unique to the
+    explicit-Index approach: tdvp.py's own version must write a
+    not-yet-evolved placeholder to site i+1 *before* calling `_extend_left`
+    (which infers site i's own right leg via `_link_at`, needing site i+1
+    to already carry a matching Link) -- `_extend_HL` here takes that leg
+    as an explicit argument instead, so no placeholder write is needed.
+    Mutates window.mps in place."""
+    ket, H = window.mps, window.mpo
+    n = ket.length()
+    right_env = _all_right_environments_window(window)  # sites i+1..n+1, ket BEFORE this half-sweep
+    left_env = {0: (window.env_HL, window.env_HL_bra)}
+    left_ket_old = ket.A(1).inds[0]
+    for i in range(1, n):
+        L, Lbra = left_env[i - 1]
+        R2, R2bra = right_env[i + 2]
+        theta = _evolve_two_site_window(L, Lbra, H, ket, i, R2, R2bra, tau, niter)
+
+        left_link = _window_link_left(ket, i)
+        s_i = next(ind for ind in ket.A(i).inds if ind.hastags("Site"))
+        U, S, V, spec = svd(theta, [left_link, s_i], cutoff=cutoff, maxdim=maxdim)
+        ket.set_A(i, U)
+        C = S * V
+        ket.set_A(i + 1, C)
+
+        right_ket_new = U.inds[-1]
+        left_env[i] = _idmrg_mod._extend_HL(L, Lbra, H.A(i), U, left_ket_old, right_ket_new)
+        left_ket_old = right_ket_new
+
+        if i < n - 1:
+            Lnew, Lnewbra = left_env[i]
+            R2next, R2nextbra = right_env[i + 2]
+            C_evolved = _evolve_one_site_window(Lnew, Lnewbra, H, ket, i + 1, R2next, R2nextbra, tau, niter)
+            ket.set_A(i + 1, C_evolved)
+    ket.center = n
+
+
+def _half_sweep_rl_window(window, tau, cutoff, maxdim, niter):
+    """Mirror of `_half_sweep_lr_window`, sweeping right to left -- window
+    analogue of tdvp.py's own `_half_sweep_rl`."""
+    ket, H = window.mps, window.mpo
+    n = ket.length()
+    left_env = _all_left_environments_window(window)  # sites 1..i-1, ket BEFORE this half-sweep
+    right_env = {n + 1: (window.env_HR, window.env_HR_bra)}
+    right_ket_old = ket.A(n).inds[-1]
+    for i in range(n - 1, 0, -1):
+        L2, L2bra = left_env[i - 1]
+        R, Rbra = right_env[i + 2]
+        theta = _evolve_two_site_window(L2, L2bra, H, ket, i, R, Rbra, tau, niter)
+
+        right_link = _window_link_right(ket, i + 1)
+        s_j = next(ind for ind in ket.A(i + 1).inds if ind.hastags("Site"))
+        right_of_bond = [s_j, right_link]
+        left_of_bond = [ind for ind in theta.inds if ind not in right_of_bond]
+        U, S, V, spec = svd(theta, left_of_bond, cutoff=cutoff, maxdim=maxdim)
+        ket.set_A(i + 1, V)
+        C = U * S
+        ket.set_A(i, C)
+
+        left_ket_new = V.inds[0]
+        right_env[i + 1] = _idmrg_mod._extend_HR(R, Rbra, H.A(i + 1), V, right_ket_old, left_ket_new)
+        right_ket_old = left_ket_new
+
+        if i > 1:
+            L2prev, L2prevbra = left_env[i - 1]
+            Rnew, Rnewbra = right_env[i + 1]
+            C_evolved = _evolve_one_site_window(L2prev, L2prevbra, H, ket, i, Rnew, Rnewbra, tau, niter)
+            ket.set_A(i, C_evolved)
+    ket.center = 1
+
+
+def window_tdvp_step(window, dt, cutoff, maxdim, niter=50):
+    """One real-time step exp(-i*dt*H) on a capped window via two-site
+    TDVP -- mirrors tdvp.py's own `tdvp_step` (a left-to-right half-sweep
+    evolving by dt/2, then a right-to-left half-sweep by another dt/2),
+    built on this module's own window-aware environment/heff functions
+    (see this module's own docstring for why tdvp.py's own sweep functions
+    cannot be reused directly on a window). Mutates window.mps in place."""
+    tau = dt / 2.0
+    _half_sweep_lr_window(window, tau, cutoff, maxdim, niter)
+    _half_sweep_rl_window(window, tau, cutoff, maxdim, niter)
+    return window
+
+
+def apply_local_operator(window, result, site, opname):
+    """Apply the named single-site operator (`result.sites_uc`'s own
+    per-sublattice-type matrix convention, e.g. "Sz"/"Sx"/"Cdag" -- the
+    same names `idmrg.py`'s own `_term_site_matrices` resolves via
+    `site_type.matrix(name)`) to window site `site` (1-based), in place --
+    Sec. V.1 step 3 of the paper (`A^dagger_0|psi>`/`B_0|psi>`).
+
+    `mat` is applied to the ket's own physical axis with the same
+    `M[in,out]` contraction convention idmrg.py's own `_op_transfer` uses
+    (`Aop[l,o,r] = sum_i M[i,o] A[l,i,r]`) -- matching it matters for any
+    non-symmetric operator (e.g. Cdag/C/Sp/Sm); it happens to be
+    invisible for the symmetric ones (Sz, Sx, ...) this module's own
+    tests exercise so far."""
+    n_uc = result.n_uc
+    p = (site - 1) % n_uc
+    mat = result.sites_uc.site_type(p + 1).matrix(opname)
+    T = window.mps.A(site)
+    new_array = np.einsum('io,lir->lor', mat, T.array)
+    window.mps.set_A(site, ITensor(T.inds, new_array))
+
+
+def local_expectation(window, result, site, opname):
+    """`<window|Op_site|window> / <window|window>`.
+
+    *Not* a bare trace over both dangling boundary legs (env_HL_ket,
+    env_HR_ket), unlike `window_total_energy`'s own energy-density
+    convention: an earlier version of this function used exactly that
+    (mirroring `inner(ket,ket)`'s own auto-contraction of the window's
+    dangling legs, which -- since both operands share the *same* Index
+    object there -- amounts to summing over *every* boundary basis state
+    with equal weight) and it produced a visibly *non-uniform* profile
+    even with no perturbation applied at all (confirmed directly: -0.484
+    in the window's own interior, drifting to -0.10 near the right edge
+    for a converged, translation-invariant ground state that should read
+    exactly uniform everywhere). The bare trace is only correct on the
+    *left*: idmrg.py's own `onsite_expectation`/`two_point_correlator`
+    only ever close their own right side with the dominant right
+    transfer-matrix fixed point (`_all_right_fixed_points`), *never* an
+    analogous left one, precisely because `U_list` is left-canonical --
+    the left-canonicality condition `sum_{l,s} conj(U[l,s,r']) U[l,s,r])
+    = delta(r,r')` *is* the statement that the left fixed point is
+    trivially the identity, needing no separate weighting. The window's
+    own left boundary (env_HL_ket) inherits that same property (the
+    window's tensors are literally `U_list`, away from any perturbation),
+    but the *right* boundary does not -- it needs the same `rho_after`
+    weighting `onsite_expectation` uses, evaluated at the window's own
+    last sublattice position (always `n_uc-1`, since window site n has
+    position `(n-1)%n_uc` for any n_window). Mirrors
+    `_transfer_matrices`/`_apply_transfer`'s own plain-NumPy style
+    directly (not idmrg.py's own functions verbatim, since those assume a
+    *uniform* `U_list`, whereas the window's own tensors are generally
+    non-uniform after a perturbation/time evolution)."""
+    ket = window.mps
+    n = ket.length()
+    n_uc = result.n_uc
+    p_last = (n - 1) % n_uc
+    Es = _idmrg_mod._transfer_matrices(result.U_list, n_uc)
+    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_uc)
+    rho_R = rho_after[p_last]
+
+    p = (site - 1) % n_uc
+    mat = result.sites_uc.site_type(p + 1).matrix(opname)
+
+    def _closed(op_site=None, op_mat=None):
+        E = None
+        for i in range(1, n + 1):
+            A = ket.A(i).array
+            Aop = np.einsum('io,lir->lor', op_mat, A) if i == op_site else A
+            step = np.einsum('lir,LiR->lLrR', Aop, np.conj(A))
+            E = step if E is None else np.einsum('lLrR,rRsS->lLsS', E, step)
+        left_traced = np.einsum('llrR->rR', E)
+        return np.einsum('rR,rR->', left_traced, rho_R)
+
+    norm = _closed().real
+    val = _closed(site, mat).real
+    return val / norm

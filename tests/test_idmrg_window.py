@@ -146,3 +146,80 @@ def test_window_total_energy_respects_variational_bound():
         cutoff=1e-12, maxdim=20, niter=200)
 
     assert trial_energy >= ground_energy - 1e-8
+
+
+# -- Phase 2: TDVP evolution of the window -----------------------------
+
+def test_local_expectation_is_uniform_before_perturbation():
+    """A converged, translation-invariant ground state must read exactly
+    uniform everywhere on the window -- the check that caught a real bug:
+    an earlier version of local_expectation used a bare trace on *both*
+    boundary legs (mirroring inner(ket,ket)'s own auto-contraction), which
+    is only correct on the left (env_HL_ket, since U_list is
+    left-canonical) -- the right boundary needs the dominant right
+    transfer-matrix fixed point instead, exactly like idmrg.py's own
+    onsite_expectation/two_point_correlator. The bare-trace version
+    produced a visibly non-uniform profile (-0.484 in the interior,
+    drifting to -0.10 near the right edge) for this same test model."""
+    result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
+                  h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
+    win = idmrg_window.build_window(result, 8)
+    sz = [idmrg_window.local_expectation(win, result, i, "Sz") for i in range(1, 9)]
+    for v in sz:
+        assert v == pytest.approx(sz[0], abs=1e-6)
+
+
+def test_window_tdvp_step_conserves_energy_and_norm_at_the_ground_state():
+    """Evolving the (unperturbed) ground-state window under TDVP must
+    leave it stationary: window_total_energy and the window's own norm
+    (dim(env_HR_ket), see window_total_energy's own docstring) should
+    barely drift (only Krylov/SVD-truncation-level numerical error, not a
+    systematic change) over several real-time steps."""
+    result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
+                  h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
+    win = idmrg_window.build_window(result, 6)
+    e_before = idmrg_window.window_total_energy(win)
+    norm_before = win.mps.A(win.mps.length()).inds[-1].dim
+
+    from dmrgpy.pyitensor.mpsalgebra import inner
+    norm_actual_before = inner(win.mps, win.mps).real
+    assert norm_actual_before == pytest.approx(norm_before, abs=1e-8)
+
+    for _ in range(6):
+        idmrg_window.window_tdvp_step(win, dt=0.05, cutoff=1e-10, maxdim=40, niter=50)
+
+    e_after = idmrg_window.window_total_energy(win)
+    norm_after = inner(win.mps, win.mps).real
+    assert e_after == pytest.approx(e_before, abs=1e-5)
+    assert norm_after == pytest.approx(norm_actual_before, abs=1e-5)
+
+
+def test_perturbation_spreads_causally_and_symmetrically():
+    """Applying a local operator at the window's center and time-evolving
+    should produce a large change at the perturbed site and a roughly
+    symmetric, decaying disturbance moving away from it (a
+    Lieb-Robinson-style causal spread) -- not a uniform or asymmetric
+    change, which would indicate the environment caps/window construction
+    are doing something unphysical."""
+    result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
+                  h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
+    n_window = 10
+    win = idmrg_window.build_window(result, n_window)
+    center = n_window // 2 + 1  # roughly central, 1-based
+
+    sz_before = np.array([idmrg_window.local_expectation(win, result, i, "Sz")
+                           for i in range(1, n_window + 1)])
+    idmrg_window.apply_local_operator(win, result, center, "Sx")
+    for _ in range(10):
+        idmrg_window.window_tdvp_step(win, dt=0.05, cutoff=1e-10, maxdim=60, niter=50)
+    sz_after = np.array([idmrg_window.local_expectation(win, result, i, "Sz")
+                          for i in range(1, n_window + 1)])
+    diff = np.abs(sz_after - sz_before)
+
+    assert diff[center - 1] > 0.5  # 0-based index of the perturbed site: large change
+    # roughly symmetric decay away from the perturbation (loose tolerance:
+    # iDMRG's own convergence noise plus the window's own finite size mean
+    # exact left/right symmetry isn't expected to machine precision)
+    assert diff[center - 2] == pytest.approx(diff[center], rel=0.5)
+    assert diff[center - 1] > diff[center - 3]
+    assert diff[center - 1] > diff[center + 1]
