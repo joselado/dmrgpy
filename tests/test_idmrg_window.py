@@ -223,3 +223,56 @@ def test_perturbation_spreads_causally_and_symmetrically():
     assert diff[center - 2] == pytest.approx(diff[center], rel=0.5)
     assert diff[center - 1] > diff[center - 3]
     assert diff[center - 1] > diff[center + 1]
+
+
+# -- Phase 3: shifted overlaps -> S(x,t) --------------------------------
+
+def test_dynamical_correlator_td_matches_exact_static_correlator_at_t0():
+    """S(x, t=0) = <psi|A_x B_0|psi> with no time evolution applied yet
+    must exactly reproduce idmrg.py's own already-validated, exact static
+    `two_point_correlator` -- the tightest possible check of the whole
+    shifted-overlap/padding machinery (snapshot_correlator, _padded_arrays,
+    _close_array_chain), since it has an exact, independent reference
+    (unlike the dynamical, t>0 values, which have no closed form to check
+    against here -- see test_perturbation_spreads_causally_and_symmetrically
+    for the qualitative dynamical check, and the module's own docstring
+    for the planned Phase 6 ED cross-check)."""
+    result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
+                  h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
+    ts, xs, S = idmrg_window.dynamical_correlator_td(
+        result, n_window=12, opname_A="Sz", opname_B="Sz", dt=0.05, nt=2,
+        cutoff=1e-10, maxdim=40, niter=50, x_values=range(-4, 5))
+    assert ts[0] == 0.0
+    for x in xs:
+        exact = idmrg.two_point_correlator(result, "Sz", 0, "Sz", abs(int(x)))
+        got = S[0][list(xs).index(x)]
+        assert got.real == pytest.approx(exact.real, abs=1e-9)
+        assert got.imag == pytest.approx(0.0, abs=1e-9)
+
+
+def test_dynamical_correlator_td_stays_symmetric_and_bounded_over_time():
+    """S(x,t) for a parity-symmetric Hamiltonian (this test model has no
+    handedness-breaking term) must stay symmetric in x at every t, and
+    must not blow up (a real, physically meaningful correlator built from
+    a norm-conserving TDVP evolution is bounded)."""
+    result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
+                  h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
+    ts, xs, S = idmrg_window.dynamical_correlator_td(
+        result, n_window=12, opname_A="Sz", opname_B="Sz", dt=0.05, nt=6,
+        cutoff=1e-10, maxdim=50, niter=50, x_values=range(-4, 5))
+    xs = list(xs)
+    for it in range(len(ts)):
+        for x in xs:
+            if x == 0:
+                continue
+            got = S[it][xs.index(x)]
+            mirrored = S[it][xs.index(-x)]
+            # loose tolerance: TDVP's own two-site sweep (LR then RL) is
+            # not perfectly symmetric at finite truncation between sweep
+            # directions, and iDMRG's own unseeded convergence quality
+            # varies run to run (confirmed directly: asymmetry shrinks to
+            # ~1e-4 with a better-converged ground state and tighter
+            # Krylov/truncation settings) -- this check is for a gross
+            # sign/construction bug, not a tight symmetry bound.
+            assert got.real == pytest.approx(mirrored.real, abs=0.08)
+    assert np.all(np.abs(S) < 2.0)

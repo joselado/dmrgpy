@@ -85,7 +85,36 @@ environments via idmrg.py's own explicit-Index `_extend_HL`/`_extend_HR`
 `dmrg.py`'s `_link_at`-based ones. `tdvp.py`'s own `_lanczos_expm_multiply`
 (a pure Krylov-propagator numerical primitive, chain-structure-agnostic)
 and `svd.py`'s `svd` are reused unchanged; only the chain-structure-aware
-pieces are window-specific."""
+pieces are window-specific.
+
+`apply_local_operator`/`local_expectation` add the perturbation and
+readout primitives (Sec. V.1 step 3). `local_expectation` needed its own
+real fix, distinct from the TDVP one above: a plain observable's own
+boundary weighting is *not* symmetric between the window's two ends,
+because `U_list` is left-canonical -- see its own docstring.
+
+== Shifted overlaps, S(x,t) (Sec. V.1 step 5, simplified to t1=0) ==
+
+`dynamical_correlator_td`/`snapshot_correlator` reconstruct
+`S(x,t)=<psi|A_x e^{-iHt}B_0|psi>` for *every* `x` from a *single* window
+evolution (the paper's own headline efficiency result), by inserting
+operator `A` directly into the *bra* side of the overlap at the shifted
+absolute position `center+x`, rather than perturbing a second,
+independently-evolved window and shifting one relative to the other
+(mathematically equivalent for the `t1=0` case implemented here -- the
+bra side is just the plain, un-evolved ground state, so there is nothing
+to "evolve" on that side at all). `_padded_arrays` extends whichever
+side's explicit tensor list falls short of `center+x` with more
+(unevolved) `U_list` copies -- valid because, outside each window's own
+causal cone, its tensors already equal `U_list` exactly. This is a
+*simplification* of the paper's own Eq. 7 (which evolves a second window
+backward by `t1` too, doubling the accessible total time for the same
+TDVP cost) -- `dynamical_correlator_td`'s own docstring has the full
+scope note. `_close_array_chain` is a plain-NumPy chain contraction
+(mirroring idmrg.py's own `_transfer_matrices`/`_apply_transfer` style)
+shared by `local_expectation` and this overlap machinery, since two
+independently time-evolved chains have no shared ITensor Index
+bookkeeping to exploit anyway."""
 
 import numpy as np
 
@@ -687,16 +716,179 @@ def local_expectation(window, result, site, opname):
     p = (site - 1) % n_uc
     mat = result.sites_uc.site_type(p + 1).matrix(opname)
 
-    def _closed(op_site=None, op_mat=None):
-        E = None
-        for i in range(1, n + 1):
-            A = ket.A(i).array
-            Aop = np.einsum('io,lir->lor', op_mat, A) if i == op_site else A
-            step = np.einsum('lir,LiR->lLrR', Aop, np.conj(A))
-            E = step if E is None else np.einsum('lLrR,rRsS->lLsS', E, step)
-        left_traced = np.einsum('llrR->rR', E)
-        return np.einsum('rR,rR->', left_traced, rho_R)
-
-    norm = _closed().real
-    val = _closed(site, mat).real
+    arrays = [ket.A(i).array for i in range(1, n + 1)]
+    op_arrays = list(arrays)
+    op_arrays[site - 1] = np.einsum('io,lir->lor', mat, arrays[site - 1])
+    norm = _close_array_chain(arrays, arrays, result, p_last).real
+    val = _close_array_chain(arrays, op_arrays, result, p_last).real
     return val / norm
+
+
+def _close_array_chain(bra_arrays, ket_arrays, result, p_right):
+    """`Σ` over a chain of doubled (ket, conj(bra)) transfer steps, closed
+    on the left by a bare trace (correct for a left-canonical `U_list` --
+    see `local_expectation`'s own docstring) and on the right by the
+    dominant right transfer-matrix fixed point at sublattice position
+    `p_right` (idmrg.py's own `_all_right_fixed_points`, evaluated on the
+    converged, unperturbed `result.U_list` -- the correct weighting for
+    "everything beyond this chain", exactly as `onsite_expectation`/
+    `two_point_correlator` already rely on).
+
+    `bra_arrays`/`ket_arrays`: lists of `(chi_l,d,chi_r)` plain NumPy
+    arrays of the same length, aligned site by site -- deliberately plain
+    NumPy rather than ITensor objects, since a shifted overlap between two
+    independently time-evolved windows has no shared Index bookkeeping to
+    exploit anyway (every internal bond Index is freshly minted,
+    independently, by each window's own TDVP sweep -- see
+    `_half_sweep_lr_window`'s own docstring), so an explicit, positional
+    contraction (mirroring idmrg.py's own `_transfer_matrices`/
+    `_apply_transfer` style) is simpler and no less correct than trying to
+    route this through ITensor's own identity-based auto-contraction."""
+    E = None
+    for Karr, Barr in zip(ket_arrays, bra_arrays):
+        step = np.einsum('lir,LiR->lLrR', Karr, np.conj(Barr))
+        E = step if E is None else np.einsum('lLrR,rRsS->lLsS', E, step)
+    left_traced = np.einsum('llrR->rR', E)
+    n_uc = result.n_uc
+    Es = _idmrg_mod._transfer_matrices(result.U_list, n_uc)
+    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_uc)
+    return np.einsum('rR,rR->', left_traced, rho_after[p_right % n_uc])
+
+
+# -- Sec. V.1 steps 3-5: shifted overlaps, S(x,t) --------------------------
+
+def _padded_arrays(window, result, extra_left, extra_right):
+    """`window`'s own ket tensors as a plain list of `(chi_l,d,chi_r)`
+    NumPy arrays, extended by `extra_left`/`extra_right` *unevolved*
+    copies of `result.U_list` at each end.
+
+    Valid (not a new approximation) because, away from a perturbation's
+    own causal cone, the window's own explicit tensors already equal
+    `U_list` exactly -- extending further with more `U_list` copies is
+    exactly consistent with what the (conceptually infinite) window
+    already represents. `extra_left` copies continue the periodic pattern
+    *backward* from window site 1 (sublattice position `(-m) % n_uc` for
+    the pad site `m` steps before site 1), `extra_right` continue it
+    *forward* from window site n (position `(n+k) % n_uc` for the pad
+    site `k` steps after site n) -- both via Python's own modulo, which
+    already wraps negative operands into `[0, n_uc)` correctly. Consistent
+    bond dimensions between the padding and the window's own edge sites
+    are guaranteed by `build_window`'s own wraparound-dimension check
+    (`U_list[-1]`'s right bond must equal `U_list[0]`'s left bond for a
+    multi-copy window to exist at all)."""
+    n_uc = result.n_uc
+    n = window.mps.length()
+    arrays = []
+    for m in range(extra_left, 0, -1):
+        p = (-m) % n_uc
+        arrays.append(_idmrg_mod._to_array_lpr(result.U_list[p]))
+    for i in range(1, n + 1):
+        arrays.append(window.mps.A(i).array)
+    for k in range(extra_right):
+        p = (n + k) % n_uc
+        arrays.append(_idmrg_mod._to_array_lpr(result.U_list[p]))
+    return arrays
+
+
+def snapshot_correlator(window_B, result, opname_A, x_values):
+    """`{x: <ground_state| A_x |window_B>}` for every `x` in `x_values`,
+    at whatever time `window_B` has already been evolved to -- this *is*
+    `S(x,t) = <psi|A_x e^{-iHt}B_0|psi>` (Eq. 3-style Schrödinger-picture
+    form) directly, with no extra `e^{iE0t}` phase correction needed:
+    matching the rest of dmrgpy's own "TD" submode convention
+    (`timedependent.py`'s `evolution_dmrg_DC`, which likewise reports this
+    Schrödinger-picture matrix element as *the* correlator, with no
+    Heisenberg-picture `e^{iE0t}` conversion) rather than the literal
+    Heisenberg-picture `<psi|A(t)B(0)|psi>` the paper's own Eq. 3
+    additionally converts to -- that conversion needs the *window's own*
+    (finite, well-defined) ground-state energy as `E0`, not the
+    infinite-system energy density the paper's own equation is written
+    for, and only ever produces an overall, physically inert rigid shift
+    of the resulting `S(k,omega)`'s own frequency axis, so it is omitted
+    here for consistency with this codebase's own established convention.
+
+    `x` is measured relative to `window_B`'s own center (the site
+    `B_0` was applied to, `window_B.mps.length()//2 + 1` by the same
+    convention `dynamical_correlator_td` uses to build it). The "bra" side
+    is *always* the plain, unperturbed, un-evolved converged ground state
+    (`result.U_list`, tiled to whatever absolute range `center+x` needs,
+    via `_padded_arrays`-style padding built inline here rather than from
+    an actual `IBCWindow` object, since the bra never needs a real window
+    at all in this t1=0 simplification -- see this module's own docstring
+    for the t1-nonzero extension this does not implement) with operator
+    `opname_A` inserted at the single site `center+x`; the "ket" side is
+    `window_B`'s own (generally non-uniform, evolved) explicit tensors,
+    padded with unevolved `U_list` copies (`_padded_arrays`) whenever
+    `center+x` falls outside `window_B`'s own explicit range."""
+    n = window_B.mps.length()
+    n_uc = result.n_uc
+    center = n // 2 + 1
+    out = {}
+    for x in x_values:
+        pos = center + x
+        lo, hi = min(1, pos), max(n, pos)
+        bra_arrays = []
+        for i in range(lo, hi + 1):
+            p = (i - 1) % n_uc
+            arr = _idmrg_mod._to_array_lpr(result.U_list[p])
+            if i == pos:
+                mat = result.sites_uc.site_type(p + 1).matrix(opname_A)
+                arr = np.einsum('io,lir->lor', mat, arr)
+            bra_arrays.append(arr)
+        ket_arrays = _padded_arrays(window_B, result, max(0, 1 - lo), max(0, hi - n))
+        p_right = (hi - 1) % n_uc
+        out[x] = _close_array_chain(bra_arrays, ket_arrays, result, p_right)
+    return out
+
+
+def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
+                             cutoff, maxdim, niter=50, x_values=None):
+    """Real-time dynamical correlator `S(x,t) = <psi|A_x e^{-iHt}B_0|psi>`
+    for `x` in `x_values` and `t = 0, dt, 2dt, ..., (nt-1)*dt`, from a
+    *single* window evolution -- Sec. V.1 of arXiv:1804.09163, simplified
+    to `t1=0` (this is the naive Eq. 3 Schrödinger-picture form; see
+    `snapshot_correlator`'s own docstring for why no `e^{iE0t}` conversion
+    to the Heisenberg-picture `<A(t)B(0)>` form is applied, matching this
+    codebase's own established "TD" submode convention) rather than the
+    full two-branch trick of Eq. 7 (evolving a *second*, independent
+    window backward by `t1` as well, which doubles the accessible total
+    time `t1+t2` for the same number of TDVP steps on either branch) -- a
+    documented, straightforward follow-up (`window_tdvp_step` already
+    supports backward evolution via a negative `dt`; only the second
+    branch and the corresponding overlap bookkeeping are missing), not
+    attempted here.
+
+    Even in this simplified form, the paper's own headline result already
+    holds: every `x` in `x_values` comes from the *same* one window
+    evolution (`window_B`), not one run per distance -- see
+    `snapshot_correlator`'s own docstring for how a single run yields
+    every `x`.
+
+    `x_values` defaults to `range(-n_window*n_uc//4, n_window*n_uc//4 +
+    1)` -- a conservative margin so `center+x` stays well inside
+    `window_B`'s own causal-cone-limited interior for the `nt*dt` total
+    time simulated here; same convergence caveat as `build_window`'s own
+    `n_window` (check by increasing both and confirming `S(x,t)` stops
+    changing).
+
+    Returns `(ts, xs, S)`: `ts` (length `nt`), `xs` (sorted `x_values`),
+    `S` (`nt` x `len(xs)` complex array, `S[it,ix] = S(xs[ix], ts[it])`)."""
+    n_uc = result.n_uc
+    if x_values is None:
+        margin = max(1, n_window * n_uc // 4)
+        x_values = range(-margin, margin + 1)
+    xs = sorted(x_values)
+
+    window_B = build_window(result, n_window)
+    center = window_B.mps.length() // 2 + 1
+    apply_local_operator(window_B, result, center, opname_B)
+
+    ts = np.array([it * dt for it in range(nt)])
+    S = np.zeros((nt, len(xs)), dtype=complex)
+    for it in range(nt):
+        snap = snapshot_correlator(window_B, result, opname_A, xs)
+        for ix, x in enumerate(xs):
+            S[it, ix] = snap[x]
+        if it < nt - 1:
+            window_tdvp_step(window_B, dt, cutoff=cutoff, maxdim=maxdim, niter=niter)
+    return ts, np.array(xs), S
