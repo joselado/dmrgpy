@@ -1261,14 +1261,30 @@ class Chain
     // chosen kpm_scale) and every subsequent moment is garbage, so fail
     // loudly instead of returning a silently wrong correlator. The +1.0
     // keeps the threshold meaningful when both norms are tiny. Mirrors
-    // mpscpp3's check_kpm_moment.
+    // mpscpp3's check_kpm_moment, including its `throw ITError(...)`
+    // (not the `Error(...)` macro used elsewhere in this file for
+    // genuine internal invariant violations): ITensor's own
+    // itensor::error() (itensor/util/error.h, vendored) prints the
+    // message and unconditionally calls abort(), it never actually
+    // throws, despite ITError being a real (std::runtime_error-derived)
+    // exception type -- confirmed directly (on the v3 side, where the
+    // fix was first made and tested) that an uncaught abort() gives a
+    // Python caller a hard interpreter-killing SIGABRT instead of a
+    // catchable RuntimeError. This is a genuine recoverable-by-the-
+    // caller condition (the pyitensor backend's own equivalent check,
+    // chain.py's _check_kpm_moment, already just `raise`s a plain
+    // RuntimeError), so only this one Error(...) call site is changed,
+    // not the many others in this file that really do indicate a broken
+    // precondition/internal bug. ITError derives from
+    // std::runtime_error, which pybind11 auto-translates to Python's
+    // RuntimeError, matching pyitensor's own exception type/message.
     static void
     check_kpm_moment(std::vector<std::complex<double>> const& out, double bound)
         {
         if (std::abs(out.back()) > 1e3*(bound+1.0))
-            Error("KPM moments diverging: scaled spectrum outside [-1,1] "
-                  "(band-edge estimate too tight; increasing kpm_scale "
-                  "widens the safety margin)");
+            throw ITError("KPM moments diverging: scaled spectrum outside [-1,1] "
+                          "(band-edge estimate too tight; increasing kpm_scale "
+                          "widens the safety margin)");
         }
 
     // Dispatcher, mirroring kpmmoments.h's moments_vi_vj(): picks the

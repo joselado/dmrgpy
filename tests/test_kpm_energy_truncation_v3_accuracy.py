@@ -7,19 +7,19 @@ coverage. See test_kpm_energy_truncation_v3.py for coverage of the
 lower-level scaled_hamiltonian_gs_anchored()/kpm_energy_truncate()
 primitives themselves.
 
-Deliberately does NOT test "a narrow kpm_scale without truncation
-raises" the way the pyitensor accuracy test does: confirmed directly
-that mpscpp3's check_kpm_moment() (unchanged, pre-existing code -- the
-same divergence guard kpm_dynamical_correlator() has always had) calls
-ITensor's Error(), which is not translated into a catchable Python
-exception across the pybind11 boundary here -- it aborts the whole
-process (SIGABRT), not just raises. This is a pre-existing
-characteristic of the v2/v3 C++ backends' error handling in general
-(nothing about it is specific to energy truncation, and nothing here
-attempts to fix it -- out of scope for this feature), but it does mean
-no pytest file may deliberately trigger check_kpm_moment's divergence
-path on itensor_version 2 or 3, since doing so would crash the whole
-test run rather than fail one test.
+test_narrow_kpm_scale_without_truncation_raises below exercises
+mpscpp3's check_kpm_moment() divergence guard directly -- this used to
+hard-abort the whole process (SIGABRT) instead of raising a catchable
+Python exception (ITensor's Error() macro prints and calls abort()
+unconditionally, never actually throwing, despite ITError being a real
+std::runtime_error-derived type), a real, pre-existing bug found while
+building this test file, fixed by changing check_kpm_moment to
+`throw ITError(...)` directly (see chain_session.h's own comment on that
+one call site, and test_kpm_divergence_guard_catchable.py for a focused
+regression test of the fix across all three backends). Confirmed the
+same bug existed in mpscpp2 too and was fixed there identically -- both
+backends' check_kpm_moment() are otherwise unrelated to energy
+truncation itself.
 
 Same 4-site Heisenberg chain and exact gap as
 test_dynamical_correlator.py's KPM/CVM/EX peak tests (golden value
@@ -55,6 +55,27 @@ def _heisenberg_chain(n=4):
         h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
     sc.set_hamiltonian(h)
     return sc
+
+
+def test_narrow_kpm_scale_without_truncation_raises():
+    """Baseline: today's guard rail. Enabling kpm_energy_truncate alone
+    switches to the ground-state-anchored rescaling convention (see
+    module docstring) but this test forces the truncation sweeps
+    themselves off (kpm_truncate_nsweeps=0), isolating that the
+    convention switch by itself does not avoid the leakage --
+    chain_session.h's check_kpm_moment must still catch it with a
+    catchable RuntimeError (see module docstring for the fix that made
+    this safe to test at all) -- this is the failure real energy
+    truncation (the next test) exists to fix, not a new behavior being
+    introduced here."""
+    sc = _heisenberg_chain()
+    sc.kpm_scale = _NARROW_KPM_SCALE
+    sc.kpm_energy_truncate = True
+    sc.kpm_truncate_nsweeps = 0
+    name = (sc.Sz[0], sc.Sz[0])
+    with pytest.raises(RuntimeError, match="KPM moments diverging"):
+        sc.get_dynamical_correlator(mode="DMRG", submode="KPM", name=name,
+                                     es=_PEAK_ES, delta=DELTA)
 
 
 def test_narrow_kpm_scale_with_truncation_matches_exact_gap():

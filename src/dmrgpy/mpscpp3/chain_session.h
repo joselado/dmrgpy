@@ -3338,13 +3338,36 @@ class Chain
     // chosen kpm_scale) and every subsequent moment is garbage, so fail
     // loudly instead of returning a silently wrong correlator. The +1.0
     // keeps the threshold meaningful when both norms are tiny.
+    //
+    // Deliberately `throw ITError(...)` here, NOT the `Error(...)` macro
+    // used everywhere else in this file for genuine internal invariant
+    // violations: ITensor's own itensor::error() (itensor/util/error.h,
+    // vendored -- not this file) prints the message and calls abort()
+    // unconditionally, it never actually throws, despite ITError being a
+    // real (std::runtime_error-derived) exception type. Confirmed
+    // directly: an uncaught abort()'d process can't be told apart from a
+    // real crash, and pybind11 has no chance to translate it into a
+    // Python exception, so a user hitting this from Python (e.g. too
+    // narrow a kpm_scale) gets a hard interpreter-killing SIGABRT instead
+    // of a catchable RuntimeError -- confirmed to already affect the
+    // pre-existing, untouched kpm_dynamical_correlator() path too, not
+    // just kpm_dynamical_correlator_truncated() above. This is a genuine
+    // recoverable-by-the-caller condition (the pyitensor backend's own
+    // equivalent check, chain.py's _check_kpm_moment, already just
+    // `raise`s a plain RuntimeError), unlike the many other Error(...)
+    // call sites in this file that really do indicate a broken
+    // precondition/internal bug -- so only this one is changed. ITError
+    // derives from std::runtime_error, which pybind11 auto-translates to
+    // Python's RuntimeError, matching pyitensor's own exception type and
+    // message exactly (see test_kpm_energy_truncation_accuracy.py's
+    // pytest.raises(RuntimeError, match="KPM moments diverging")).
     static void
     check_kpm_moment(std::vector<std::complex<double>> const& out, double bound)
         {
         if (std::abs(out.back()) > 1e3*(bound+1.0))
-            Error("KPM moments diverging: scaled spectrum outside [-1,1] "
-                  "(band-edge estimate too tight; increasing kpm_scale "
-                  "widens the safety margin)");
+            throw ITError("KPM moments diverging: scaled spectrum outside [-1,1] "
+                          "(band-edge estimate too tight; increasing kpm_scale "
+                          "widens the safety margin)");
         }
 
     std::vector<std::complex<double>>
