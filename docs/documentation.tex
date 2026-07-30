@@ -954,6 +954,183 @@ deliberate follow-up rather than attempted here (see
 \texttt{kpm\_finite}'s own docstring for the same note, addressed to a
 caller rather than a maintainer).
 
+\textbf{Infinite-boundary-condition (IBC) window construction and
+real-time dynamical correlator
+(\texttt{pyitensor/idmrg\_window.py})}: following Milsted/Vanderstraeten
+et al., ``Infinite boundary conditions for response functions and limit
+cycles in iDMRG'' (arXiv:1804.09163), Sec.~V.1 -- the item-1 ingredient
+flagged just above as unimplemented future work. The paper's method
+time-evolves a finite window of tensors around a local perturbation,
+with everything outside the window frozen at the uniform ground state
+and capped by ``the Hamiltonian terms outside the window, projected
+onto the reduced $D$-dimensional Hilbert space of the left/right
+block'' -- which turns out to be \emph{exactly} what
+\texttt{idmrg\_ground\_state}'s own growth loop already computes as
+\texttt{HL}/\texttt{HR}, just discarded once converged.
+\texttt{idmrg.py} was extended (\texttt{IDMRGResult}'s own
+\texttt{env\_HL}/\texttt{env\_HL\_bra}/\texttt{env\_HL\_ket}/
+\texttt{env\_HL\_mpo} and mirrored \texttt{env\_HR\_*} fields, plus
+\texttt{W\_bulk}) to snapshot these -- specifically, \texttt{HL}/
+\texttt{HR} as they stood \emph{entering} the last executed
+macro-iteration (captured via a per-macro-iteration
+\texttt{env\_window\_boundary} snapshot, overwritten every iteration so
+whatever remains at loop exit is the one consistent with the
+\emph{returned} \texttt{U\_list}'s own edge bonds: \texttt{U\_list[0]}'s
+left bond is exactly that snapshot's \texttt{HL\_ket},
+\texttt{U\_list[n\_uc-1]}'s right bond exactly its \texttt{HR\_ket}, by
+construction of how \texttt{svd()} splits the local 2-site solve) -- no
+new environment solve needed, only exposing what already exists.
+
+\texttt{idmrg\_window.py}'s \texttt{build\_window(result, n\_window)}
+tiles \texttt{n\_window} periodic repeats of \texttt{U\_list} (the
+window's MPS) and \texttt{W\_bulk} (its MPO) into an ordinary
+\texttt{mpscontainer.MPS}/\texttt{MPO} pair (\texttt{\_tile\_periodic},
+fresh Link Indices at every copy boundary to avoid the
+identity-collision hazard \texttt{\_relabel\_pos}/\texttt{\_project\_
+channel} already warn about elsewhere in this module), with the very
+first/last tensors' outer legs left as \texttt{env\_HL\_ket}/
+\texttt{env\_HL\_mpo}/\texttt{env\_HR\_ket}/\texttt{env\_HR\_mpo} so
+they attach directly to the environment caps. Environment extension
+\emph{through} the window deliberately reuses \texttt{idmrg.py}'s own
+explicit-Index \texttt{\_extend\_HL}/\texttt{\_extend\_HR}
+(\texttt{\_extend\_through\_left}/\texttt{\_extend\_through\_right}),
+not \texttt{dmrg.py}'s generic \texttt{\_Chain}/\texttt{\_link\_at}-
+based \texttt{\_extend\_left}/\texttt{\_extend\_right}: the latter
+infers a site's left/right Link purely by looking for a same-Index
+neighbor \emph{within the chain itself}, correct for an ordinary
+finite chain (whose boundary sites truly have no further leg, see
+\texttt{mpscontainer.py}'s own docstring) but wrong here, since the
+window's own edge sites \emph{do} carry one more leg each (connecting
+to \texttt{env\_HL}/\texttt{env\_HR}, tensors living outside the
+\texttt{\_Chain} object entirely) that \texttt{\_link\_at} cannot see --
+confirmed directly: using the generic functions silently
+mis-contracted the bra/ket legs at the window's own edge sites, since
+\texttt{\_link\_at}'s neighbor lookup returns ``no such leg'' for a
+boundary site regardless of whether the tensor itself actually has one.
+
+\textbf{A confirmed, non-obvious normalization finding}:
+\texttt{window\_total\_energy} (the capped window's total energy, via
+\texttt{\_extend\_through\_left} then closing against
+\texttt{env\_HR}) is \emph{not} simply \texttt{e0 * (site count)} --
+plugging in the converged \texttt{U\_list} tensors with both
+\texttt{env\_HL\_ket} and \texttt{env\_HR\_ket} left as free/dangling
+legs (rather than contracted against a specific boundary vector) gives
+$\langle\text{window}|\text{window}\rangle = \dim(\texttt{env\_HR\_ket})$,
+not $1$ (an isometry-chain argument: each site's own left-canonical
+$U$ collapses the sum over every index except the very last dangling
+one, leaving that dimension as the Frobenius norm-squared -- confirmed
+numerically against an independent Lanczos-Rayleigh-quotient
+computation using the identical \texttt{env\_HL}/\texttt{env\_HR}/
+\texttt{W\_pL}/\texttt{W\_pR}, to machine precision) --
+\texttt{window\_total\_energy} divides by it. Even normalized, the
+\emph{absolute} total still carries a large, \texttt{n\_window}-
+independent baseline from whatever \texttt{env\_HL}/\texttt{env\_HR}
+themselves represent (every macro-iteration already absorbed before
+the snapshot) -- so \texttt{window\_energy\_density(result,
+n\_window)}, a finite difference between window sizes
+\texttt{n\_window} and \texttt{n\_window+1} divided by \texttt{n\_uc}
+(mirroring \texttt{idmrg\_ground\_state}'s own
+\texttt{density = (energy-prev\_energy)/(2*n\_uc)} diagnostic), is the
+well-posed sanity check this module validates against, not
+\texttt{window\_total\_energy} directly. \textbf{A second, real bug
+this same finite-difference check caught}: an earlier version compared
+window sizes \texttt{n\_window} and \texttt{n\_window+n\_uc} (not
+\texttt{n\_window+1}) while still dividing by \texttt{n\_uc} --
+\texttt{n\_window} counts \emph{unit-cell copies}, so \texttt{+n\_uc}
+copies adds \texttt{n\_uc*n\_uc} physical sites, not \texttt{n\_uc} --
+invisible for \texttt{n\_uc=1} (where \texttt{n\_uc*n\_uc==n\_uc}), but
+confirmed directly to inflate every \texttt{n\_uc=2} result by
+\emph{exactly} a factor of 2 for an easy, cleanly-converged test
+model (an exact ratio, not convergence noise, which is what exposed it
+as a real off-by-\texttt{n\_uc} bug rather than an iDMRG convergence
+limitation).
+
+\textbf{Real-time evolution, shifted overlaps, and $S(k,\omega)$}:
+\texttt{window\_tdvp\_step} two-site-TDVP-evolves a capped window in
+place (mirroring \texttt{tdvp.py}'s own \texttt{tdvp\_step}), but
+\texttt{tdvp.py}'s own sweep functions cannot be reused directly --
+they build each bond's local effective Hamiltonian and environments via
+\texttt{mpsalgebra.py}'s \texttt{\_link\_at}, which finds a site's
+left/right Link purely by looking for a same-Index \emph{neighbor in
+the chain itself}; correct for an ordinary finite chain (whose boundary
+sites truly have no further leg) but wrong for a window, whose edge
+sites \emph{do} carry one more leg each (connecting to
+\texttt{env\_HL}/\texttt{env\_HR}, tensors outside the chain object
+entirely) that \texttt{\_link\_at} cannot see -- confirmed directly,
+passing a window straight through \texttt{tdvp.py}'s own sweep
+functions silently mis-contracts the bra/ket legs at the window's own
+edge sites. \texttt{idmrg\_window.py}'s own
+\texttt{\_window\_two\_site\_heff}/\texttt{\_window\_one\_site\_heff}
+read a site's left/right Link directly off its own tensor instead
+(always present for a window, unlike an ordinary chain's boundary), and
+\texttt{\_all\_left\_environments\_window}/
+\texttt{\_all\_right\_environments\_window} build environments via
+idmrg.py's own explicit-Index \texttt{\_extend\_HL}/\texttt{\_extend\_HR}.
+\texttt{apply\_local\_operator}/\texttt{local\_expectation} add the
+perturbation and readout primitives; \texttt{local\_expectation} needed
+its own real fix, distinct from the TDVP one: a plain observable's own
+boundary weighting is \emph{not} symmetric between the window's two
+ends, because \texttt{U\_list} is left-canonical (its own
+left-canonicality condition \emph{is} the statement that the left
+transfer-matrix fixed point is trivially the identity, needing no
+weighting) -- the \emph{right} boundary needs the dominant right fixed
+point (\texttt{\_all\_right\_fixed\_points}), exactly like
+\texttt{onsite\_expectation}/\texttt{two\_point\_correlator} already
+rely on; an earlier version used a bare trace on both ends and produced
+a visibly non-uniform profile for a converged, translation-invariant
+ground state that should read exactly uniform everywhere.
+
+\texttt{dynamical\_correlator\_td}/\texttt{snapshot\_correlator}
+reconstruct $S(x,t)=\langle\psi|A_x e^{-iHt}B_0|\psi\rangle$ for
+\emph{every} $x$ from a \emph{single} window evolution (the paper's own
+headline efficiency result), by inserting operator $A$ directly into
+the \emph{bra} side of the overlap at the shifted absolute position,
+padding whichever side's explicit tensor list falls short with
+unevolved \texttt{U\_list} copies (\texttt{\_padded\_arrays}) -- valid
+because, outside each window's own causal cone, its tensors already
+equal \texttt{U\_list} exactly. This is a simplification of the paper's
+own Eq.~7 to $t_1=0$ (the naive Eq.~3 form) rather than the full
+two-branch trick (evolving a \emph{second} window backward by $t_1$
+too, doubling the accessible total time for the same TDVP cost) --
+\texttt{window\_tdvp\_step} already supports backward evolution via a
+negative \texttt{dt}, so only the second branch and its overlap
+bookkeeping are missing, a documented follow-up. \texttt{connected=True}
+(the default) subtracts the disconnected background $\langle A\rangle
+\langle B\rangle$ (\texttt{onsite\_expectation}) -- confirmed directly
+to matter: the \emph{raw} correlator approaches $\langle A\rangle
+\langle B\rangle$ (not $0$) at large $|x|$, and summing that
+non-decaying background over $x$ with $e^{-ikx}$ produces a spurious,
+dominant $k=0$ contribution with no discernible dispersion.
+\texttt{dynamical\_correlator\_komega} does the spatial DFT
+($S(k,t)=\sum_x e^{-ikx}S(x,t)$) then reuses \texttt{timedependent.py}'s
+own \texttt{\_fourier\_transform\_correlator} unchanged (it was
+explicitly factored out for other time-domain submodes to reuse, see
+\texttt{tdz.py}'s own use of it), so \texttt{delta} means the same
+Lorentzian-broadening thing here as in every other dynamical-correlator
+submode in this codebase.
+
+Validated: $S(x,t{=}0)$ matches idmrg.py's own exact static
+\texttt{two\_point\_correlator} to machine precision ($10^{-16}$) for
+every $x$ tested (\texttt{tests/test\_idmrg\_window.py}); $S(k,\omega)$
+(with \texttt{connected=True}) shows a clear, $k$-dependent peak
+instead of a featureless background; cross-checked against
+\texttt{kpm\_finite} (an independent approximation scheme --
+open-boundary window + KPM, vs.\ this method's IBC window + TDVP) for
+the same physical correlator -- an exact match isn't expected, but both
+agree on where the dominant spectral weight sits
+(\texttt{tests/test\_infinite\_chain.py},
+\texttt{examples/idmrg/td\_dynamical\_correlator/main.py}).
+
+\texttt{Infinite\_Many\_Body\_Chain.td\_dynamical\_correlator}
+(\texttt{infinitechain.py}) wires this up as the public API, mirroring
+\texttt{kpm\_finite}'s own docstring conventions (\texttt{p\_i}
+sublattice position, an \texttt{n\_window} convergence caveat) --
+\texttt{itensor\_version="python"} only (raises
+\texttt{NotImplementedError} otherwise), calls \texttt{gs\_energy()}
+automatically like \texttt{vev}/\texttt{correlator}. See
+\texttt{docs/user\_guide.tex}'s own iDMRG section for the user-facing
+version.
+
 \subsection{Operator representation: \texttt{MultiOperator}}
 
 Hamiltonians and observables are built as \texttt{MultiOperator} objects

@@ -814,6 +814,111 @@ def test_kpm_finite_rejects_window_too_small_for_r():
         ic.kpm_finite("Sz", 0, "Sz", 10, n_window=3)
 
 
+# -- td_dynamical_correlator: the actual infinite-boundary-condition
+# (IBC), real-time-TDVP dynamical correlator (arXiv:1804.09163 Sec. V.1)
+# -- see pyitensor/idmrg_window.py's own module docstring and
+# tests/test_idmrg_window.py for the underlying construction's own
+# (extensively validated) coverage; the tests here only exercise the
+# public infinitechain.py wrapper itself (argument validation, gs_energy()
+# auto-call, itensor_version gating), not re-derive that validation.
+
+def test_td_dynamical_correlator_runs_and_is_finite():
+    """Smoke test: a gapped n_uc=1 transverse-field-like model's S(k,omega)
+    runs without error and returns a finite, non-trivial profile -- mirrors
+    test_kpm_finite_runs_and_is_finite's own smoke-test style."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    h = 1.4 * ic.SzC[0] + ic.SxC[0] * ic.SxR[0]
+    ic.maxm = 20
+    ic.maxiter = 300
+    ic.etol = 1e-12
+    ic.niter = 150
+    ic.set_hamiltonian(h)
+
+    ks, es, Skw = ic.td_dynamical_correlator(
+        "Sz", 0, "Sz", n_window=10, dt=0.05, nt=20,
+        maxdim=40, cutoff=1e-10, niter=50, x_values=range(-4, 5),
+        ks=np.linspace(-np.pi, np.pi, 9), delta=0.15, window=[-1, 5])
+
+    assert ks.shape == (9,)
+    assert Skw.shape == (9, es.shape[0])
+    assert np.all(np.isfinite(Skw))
+    assert np.max(np.abs(Skw)) > 1e-6  # not identically zero
+
+
+def test_td_dynamical_correlator_calls_gs_energy_automatically():
+    """Unlike kpm_finite (no dependency on a converged IDMRGResult),
+    td_dynamical_correlator needs env_HL/env_HR -- it should call
+    gs_energy() itself if the caller hasn't already, exactly like
+    vev/correlator do."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.maxm = 20
+    ic.maxiter = 300
+    ic.etol = 1e-12
+    ic.niter = 150
+    ic.set_hamiltonian(1.4 * ic.SzC[0] + ic.SxC[0] * ic.SxR[0])
+    assert ic._result is None
+    ic.td_dynamical_correlator("Sz", 0, "Sz", n_window=8, dt=0.05, nt=4,
+                                maxdim=30, cutoff=1e-10, niter=50,
+                                x_values=range(-2, 3),
+                                ks=np.linspace(-np.pi, np.pi, 5))
+    assert ic._result is not None
+
+
+def test_td_dynamical_correlator_rejects_p_i_out_of_range():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
+    with pytest.raises(ValueError):
+        ic.td_dynamical_correlator("Sz", 5, "Sz", n_window=5)
+
+
+def test_td_dynamical_correlator_rejects_non_python_backend():
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
+    with pytest.raises(NotImplementedError):
+        ic.td_dynamical_correlator("Sz", 0, "Sz", n_window=5)
+
+
+def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
+    """Cross-check the two independent dynamical-correlator approximations
+    against each other: kpm_finite (open-boundary window + KPM/Chebyshev)
+    and td_dynamical_correlator (IBC window + real-time TDVP) are
+    different approximation schemes with different systematic errors, so
+    an *exact* match isn't expected (the same way plotting both submodes
+    for an ordinary *finite* chain, see
+    examples/dynamical_correlator/dynamical_correlator_time_evolution/
+    main.py, only ever compares them visually, never asserts numerical
+    agreement) -- but both should agree on *where* the dominant spectral
+    weight sits. This mirrors that same example's own convention of
+    comparing KPM's real part against the TD submode's own magnitude
+    (`np.abs`), not its real part -- confirmed directly that using
+    `.real` for the TD side here gives a spurious sign/scale mismatch
+    that `np.abs` does not."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
+    ic.maxm = 20
+    ic.maxiter = 300
+    ic.etol = 1e-12
+    ic.niter = 150
+    ic.set_hamiltonian(1.4 * ic.SzC[0] + ic.SxC[0] * ic.SxR[0])
+    ic.gs_energy()
+
+    es = np.linspace(-1, 6, 100)
+    es_kpm, y_kpm = ic.kpm_finite("Sz", 0, "Sz", 1, n_window=20,
+                                    window_chain_kwargs=dict(maxm=30, nsweeps=10),
+                                    delta=0.3, es=es)
+
+    from dmrgpy.pyitensor import idmrg_window
+    from dmrgpy.timedependent import _fourier_transform_correlator
+    ts, xs, S = idmrg_window.dynamical_correlator_td(
+        ic._result, n_window=16, opname_A="Sz", opname_B="Sz", dt=0.05,
+        nt=60, cutoff=1e-10, maxdim=60, niter=50, x_values=[1])
+    es_td, g_td = _fourier_transform_correlator(ts, S[:, 0], 0.05, es=es,
+                                                  delta=0.3, window=[-1, 6])
+
+    peak_kpm = es[np.argmax(np.abs(y_kpm))]
+    peak_td = es_td[np.argmax(np.abs(g_td))]
+    assert abs(peak_kpm - peak_td) < 1.5  # same low-frequency feature, loosely
+
+
 # -- excitation_energies/excitation_gap: the tangent-space/quasiparticle
 # excitation ansatz (pyitensor/idmrg_excitations.py) -- see that module's
 # own docstring for the algorithm and, importantly, its "KNOWN LIMITATION"

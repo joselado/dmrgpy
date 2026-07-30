@@ -718,10 +718,28 @@ class IDMRGResult:
     vector+energy) -- kept around so `local_excitation_gap` can re-diagonalize
     that *same* effective Hamiltonian for its second-lowest eigenpair without
     having to rerun the growing algorithm. Not meant to be used directly by
-    callers outside this module."""
+    callers outside this module.
+
+    `W_bulk`/`window_boundary` expose the converged *environment Hamiltonian*
+    blocks -- the growth loop's own HL/HR as they stood entering the last
+    executed macro-iteration (see idmrg_ground_state's own
+    `env_window_boundary` comment for why exactly this snapshot, not the
+    final post-loop HL/HR, is the one consistent with U_list's own edge
+    bonds), plus the per-sublattice automaton MPO tensors themselves.
+    Together these are literally the paper's "Hamiltonian terms outside the
+    window, projected onto the reduced D-dimensional Hilbert space of the
+    left/right block" (arXiv:1804.09163, Sec. V.1) -- an ordinary iDMRG
+    growth environment already *is* that projection, nothing new needs to
+    be solved for it. `window_boundary` is the 8-tuple
+    `(HL, HL_bra, HL_ket, HL_mpo, HR, HR_bra, HR_ket, HR_mpo)`; `None`
+    entries throughout mean no macro-iteration ever completed (e.g.
+    maxiter's minimum of 2 was barely met). Consumed by
+    `idmrg_window.py`'s heterogeneous-window builder, not meant to be used
+    directly by ordinary callers."""
 
     def __init__(self, sites_uc, n_uc, U_list, e0, converged, niter_done,
-                 state_overlap=None, local_superblock=None):
+                 state_overlap=None, local_superblock=None,
+                 W_bulk=None, window_boundary=None):
         self.sites_uc = sites_uc
         self.n_uc = n_uc
         self.U_list = U_list
@@ -730,6 +748,10 @@ class IDMRGResult:
         self.niter_done = niter_done
         self.state_overlap = state_overlap
         self.local_superblock = local_superblock
+        self.W_bulk = W_bulk
+        (self.env_HL, self.env_HL_bra, self.env_HL_ket, self.env_HL_mpo,
+         self.env_HR, self.env_HR_bra, self.env_HR_ket, self.env_HR_mpo) = (
+            window_boundary if window_boundary is not None else (None,) * 8)
 
 
 def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
@@ -804,8 +826,25 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     # without rerunning the growing algorithm -- see IDMRGResult's own
     # docstring.
     last_superblock = None
+    # Snapshot of (HL, HL_bra, HL_ket, HL_mpo, HR, HR_bra, HR_ket, HR_mpo) as
+    # they stand *before* each macro-iteration's own mstep loop mutates them
+    # -- overwritten every macro-iteration, so whatever it holds once the
+    # loop exits (break on convergence, or maxiter exhaustion) is exactly
+    # the environment entering the *last executed* macro-iteration. This is
+    # deliberately not "the very latest HL/HR" (those are one mstep-loop
+    # *ahead* -- they already absorbed the final macro-iteration's own
+    # sites) -- it is instead consistent, by construction, with the
+    # *returned* U_list's own edge bonds: U_list[0]'s own left bond is
+    # exactly this snapshot's HL_ket (svd()'s left_inds always starts with
+    # HL_ket, see _local_two_site_solve), and U_list[n_uc-1]'s own right
+    # bond is exactly this snapshot's HR_ket, for the same reason on the
+    # right. Used to cap a finite window with infinite boundary conditions
+    # for real-time dynamical correlators (arXiv:1804.09163) -- see
+    # IDMRGResult's own docstring.
+    env_window_boundary = (None,) * 8
 
     for macro_iter in range(maxiter):
+        env_window_boundary = (HL, HL_bra, HL_ket, HL_mpo, HR, HR_bra, HR_ket, HR_mpo)
         overlaps_this_iter = []
         for mstep in range(n_uc):
             p_L = mstep
@@ -904,7 +943,8 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
 
     return IDMRGResult(sites_uc, n_uc, U_list, prev_density, converged,
                         macro_iter + 1, state_overlap=state_overlap,
-                        local_superblock=last_superblock)
+                        local_superblock=last_superblock,
+                        W_bulk=W_bulk, window_boundary=env_window_boundary)
 
 
 def local_excitation_gap(result, niter=200):
