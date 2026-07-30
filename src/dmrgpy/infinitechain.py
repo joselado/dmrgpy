@@ -762,22 +762,9 @@ class Infinite_Many_Body_Chain:
         if kwargs:
             raise TypeError("td_dynamical_correlator: unexpected kwargs {!r} "
                              "for itensor_version=3".format(list(kwargs)))
-        from .timedependent import _fourier_transform_correlator
-        if ks is None:
-            ks = np.linspace(-np.pi, np.pi, 200)
-        ks = np.asarray(ks)
-        Skw = None
-        es_out = es
-        for ik, k in enumerate(ks):
-            phase = np.exp(-1j * k * xs)
-            Skt = S @ phase
-            es_k, gk = _fourier_transform_correlator(
-                ts, Skt, dt, es=es_out, window=window, delta=delta, factor=factor)
-            if Skw is None:
-                es_out = es_k
-                Skw = np.zeros((len(ks), len(es_k)), dtype=complex)
-            Skw[ik] = gk
-        return ks, es_out, Skw
+        from .timedependent import sxt_to_skomega
+        return sxt_to_skomega(ts, xs, S, dt, ks=ks, es=es, window=window,
+                               delta=delta, factor=factor)
 
 
 class Infinite_Spin_Chain(Infinite_Many_Body_Chain):

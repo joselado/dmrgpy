@@ -177,7 +177,7 @@ class Chain
     {
     public:
     explicit Chain(std::vector<int> const& site_types)
-        : sites_(SpinX(site_types)), site_types_(site_types)
+        : sites_(SpinX(site_types))
         { }
 
     int
@@ -2366,6 +2366,20 @@ class Chain
         ITensor LH = idmrg_relabel_bra_to_prime_ket(idmrg_HL_,idmrg_HL_bra_,idmrg_HL_ket_);
         ITensor RH = idmrg_relabel_bra_to_prime_ket(idmrg_HR_,idmrg_HR_bra_,idmrg_HR_ket_);
 
+        // The converged unit cell's own dominant right transfer-matrix
+        // fixed point (idmrg_window_snapshot_correlator's own right-edge
+        // closing weight) depends only on the static, unperturbed ground
+        // state -- never on win's own (TDVP-evolving) state -- so it is
+        // computed once here, outside the per-time-step loop below,
+        // rather than by every one of that loop's own nt calls (each of
+        // which would otherwise redo the same power iteration, capped at
+        // 2000 steps).
+        int p_right = (win.n-1)%n_uc;
+        auto rho_after = idmrg_all_right_fixed_points();
+        Index rl = idmrg_U_right_[p_right];
+        auto rho_flat = idmrg_matrix_to_array(rho_after[p_right],rl,prime(rl));
+        int chi_right = dim(rl);
+
         auto sweeps = Sweeps(1);
         sweeps.maxdim() = maxdim;
         sweeps.cutoff() = cutoff;
@@ -2381,7 +2395,8 @@ class Chain
         for (int it=0; it<nt; ++it)
             {
             out.ts[it] = it*dt;
-            auto snap = idmrg_window_snapshot_correlator(win,opname_A,x_values,center);
+            auto snap = idmrg_window_snapshot_correlator(win,opname_A,x_values,center,
+                                                           rho_flat,chi_right);
             for (size_t ix=0; ix<x_values.size(); ++ix)
                 {
                 Cplx val = snap[ix];
@@ -3759,9 +3774,20 @@ class Chain
     // (never touched by evolution), with opname_A inserted at position
     // center+x -- see idmrg_close_array_chain's own comment for why these
     // two sides deliberately don't share any ITensor Index identity.
+    //
+    // rho_flat/chi_right: idmrg_all_right_fixed_points()'s own
+    // rho_after[p_right], already flattened by the caller (see
+    // td_dynamical_correlator_window, which computes this once before its
+    // own per-time-step loop) -- this depends only on the static,
+    // unperturbed converged ground state, never on win's own (evolving)
+    // state, so recomputing it on every one of this method's own nt calls
+    // would just redo the same power iteration (capped at 2000 steps)
+    // needlessly; confirmed directly via code review to be a real,
+    // avoidable cost, not a correctness requirement.
     std::vector<Cplx>
     idmrg_window_snapshot_correlator(IdmrgWindow const& win, std::string const& opname_A,
-                                      std::vector<int> const& x_values, int center) const
+                                      std::vector<int> const& x_values, int center,
+                                      std::vector<Cplx> const& rho_flat, int chi_right) const
         {
         int n = win.n;
         int n_uc = idmrg_n_uc_;
@@ -3793,12 +3819,6 @@ class Chain
             bra_l[i-1] = dim(idmrg_U_left_[p]);
             bra_r[i-1] = dim(idmrg_U_right_[p]);
             }
-
-        int p_right = (n-1)%n_uc;
-        auto rho_after = idmrg_all_right_fixed_points();
-        Index rl = idmrg_U_right_[p_right];
-        auto rho_flat = idmrg_matrix_to_array(rho_after[p_right],rl,prime(rl));
-        int chi_right = dim(rl);
 
         std::vector<Cplx> out(x_values.size());
         for (size_t ix=0; ix<x_values.size(); ++ix)
@@ -4469,7 +4489,6 @@ class Chain
     private:
 
     SiteSet sites_;
-    std::vector<int> site_types_; // the n_uc-site unit cell this Chain was built with (idmrg_ground_state's own site_types) -- needed to rebuild a longer window SiteSet in td_dynamical_correlator_window()
     MPO H_; bool have_H_ = false;
     MPS wf0_; bool have_wf0_ = false;
     double wf0_energy_ = 0.0; bool have_wf0_energy_ = false;

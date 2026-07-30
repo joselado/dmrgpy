@@ -978,25 +978,10 @@ def dynamical_correlator_komega(result, n_window, opname_A, opname_B, dt, nt,
     dominant k=0 contribution that swamps the genuine dispersion, see
     `dynamical_correlator_td`'s own docstring). Returns `(ks, es, Skw)`
     with `Skw` shaped `(len(ks), len(es))`."""
-    from ..timedependent import _fourier_transform_correlator
+    from ..timedependent import sxt_to_skomega
     ts, xs, S = dynamical_correlator_td(result, n_window, opname_A, opname_B,
                                          dt, nt, cutoff, maxdim, niter=niter,
                                          x_values=x_values, connected=connected,
                                          p_i=p_i)
-    if ks is None:
-        ks = np.linspace(-np.pi, np.pi, 200)
-    ks = np.asarray(ks)
-
-    Skw = None
-    es_out = es
-    for ik, k in enumerate(ks):
-        phase = np.exp(-1j * k * xs)
-        Skt = S @ phase
-        es_k, gk = _fourier_transform_correlator(ts, Skt, dt, es=es_out,
-                                                  window=window, delta=delta,
-                                                  factor=factor)
-        if Skw is None:
-            es_out = es_k
-            Skw = np.zeros((len(ks), len(es_k)), dtype=complex)
-        Skw[ik] = gk
-    return ks, es_out, Skw
+    return sxt_to_skomega(ts, xs, S, dt, ks=ks, es=es, window=window,
+                           delta=delta, factor=factor)
