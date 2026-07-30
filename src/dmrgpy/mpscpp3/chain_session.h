@@ -3470,9 +3470,12 @@ class Chain
     //  - Unlike arnoldi_smallest_real()'s Hessenberg-only bookkeeping
     //    (sufficient there since only one Ritz pair is ever extracted),
     //    every Krylov component below threshold must survive here, so
-    //    the *full* dense Hermitian projected matrix is built (one extra
-    //    matvec pass over the already-orthonormalized basis) rather than
-    //    reusing only the entries encountered during Gram-Schmidt.
+    //    the *full* dense Hermitian projected matrix is built -- but
+    //    reusing the entries already computed while orthogonalizing
+    //    below (see the comment on Hk_col), rather than a second,
+    //    separate PH.product() pass over the whole basis: PH.product()
+    //    (a full local-effective-Hamiltonian contraction) dominates this
+    //    method's cost, so avoiding a redundant pass roughly halves it.
     //  - The projector keeps |eps_alpha| < threshold (both signs), not
     //    just eps_alpha < threshold as in Eq. (38): scaled_hamiltonian_
     //    gs_anchored() pins the ground state near -1 by construction, so
@@ -3486,12 +3489,33 @@ class Chain
         if (nrm<1E-14) return {phi0,0.0};
         std::vector<ITensor> V;
         V.push_back(phi0/nrm);
+        // Hk_col[j][i] = Hk(i,j) = <V_i|H|V_j> for i<=j: while extending
+        // from V_j, w starts out as H*V_j, and each orthogonalization
+        // pass below subtracts eltC(dag(Vi)*w)*Vi from it -- the *sum* of
+        // those coefficients across both passes already equals
+        // <V_i|H*V_j> to working precision (w's own residual component
+        // along V_i is at machine-epsilon level after two passes), so
+        // capturing them here needs no extra matvec. This only ever
+        // yields entries for i<=j (V_j's own extension only ever
+        // orthogonalizes against vectors already present, i.e. i<=j);
+        // the missing i>j half is filled by Hermitian symmetry below,
+        // and the one column this loop can never produce -- j=k-1, since
+        // the loop stops one short of extending past the last accepted
+        // vector -- gets exactly one extra PH.product() call instead of
+        // the k calls the original full second pass used.
+        std::vector<std::vector<Cplx>> Hk_col;
         for (int j=0;j<dK-1;++j)
             {
             ITensor w; PH.product(V.at(j),w);
+            std::vector<Cplx> col(V.size(),0.0);
             for (int pass=0;pass<2;++pass)
-                for (auto const& Vi : V)
-                    w -= eltC(dag(Vi)*w)*Vi;
+                for (size_t i=0;i<V.size();++i)
+                    {
+                    Cplx c = eltC(dag(V.at(i))*w);
+                    col[i] += c;
+                    w -= c*V.at(i);
+                    }
+            Hk_col.push_back(col); // column j, entries i=0..j
             double nw = norm(w);
             if (nw<1E-12) break; // invariant subspace found; fewer than dK vectors is fine
             V.push_back(w/nw);
@@ -3499,11 +3523,17 @@ class Chain
         int k = (int)V.size();
         auto a = Index(k,TagSet("KPMEnergyTrunc,a"));
         auto Hk = ITensor(prime(a),a);
-        for (int j=0;j<k;++j)
+        for (int j=0;j<(int)Hk_col.size();++j)
+            for (int i=0;i<(int)Hk_col[j].size();++i)
+                {
+                Hk.set(prime(a)(i+1),a(j+1),Hk_col[j][i]);
+                if (i!=j) Hk.set(prime(a)(j+1),a(i+1),std::conj(Hk_col[j][i]));
+                }
+        if ((int)Hk_col.size()<k) // ran the full dK-1 extensions: last vector's own column was never formed above
             {
-            ITensor w; PH.product(V.at(j),w);
+            ITensor w; PH.product(V.at(k-1),w);
             for (int i=0;i<k;++i)
-                Hk.set(prime(a)(i+1),a(j+1),eltC(dag(V.at(i))*w));
+                Hk.set(prime(a)(i+1),a(k),eltC(dag(V.at(i))*w));
             }
         Hk = 0.5*(Hk + dag(swapPrime(Hk,0,1))); // Hermitize away floating-point asymmetry
         ITensor U,D;
