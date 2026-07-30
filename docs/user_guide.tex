@@ -2185,9 +2185,11 @@ plain open boundaries -- infinite boundary conditions (IBC), following
 Milsted/Vanderstraeten et al., ``Infinite boundary conditions for
 response functions and limit cycles in iDMRG'' (arXiv:1804.09163) --
 and evolves the perturbed window in real time via two-site TDVP rather
-than expanding in Chebyshev moments. Requires
-\texttt{itensor\_version="python"} (calls \texttt{gs\_energy()}
-automatically if needed, like \texttt{vev}/\texttt{correlator}):
+than expanding in Chebyshev moments. Supports both
+\texttt{itensor\_version="python"} and \texttt{itensor\_version=3}
+(calls \texttt{gs\_energy()} automatically if needed, like
+\texttt{vev}/\texttt{correlator}, though \texttt{vev}/\texttt{correlator}
+themselves still require \texttt{itensor\_version="python"} regardless):
 
 \begin{lstlisting}
 ks, es, Skw = ic.td_dynamical_correlator(
@@ -2195,6 +2197,27 @@ ks, es, Skw = ic.td_dynamical_correlator(
         maxdim=60, cutoff=1e-10, x_values=range(-6, 7),
         ks=np.linspace(-np.pi, np.pi, 41), delta=0.1, window=[-1, 6])
 \end{lstlisting}
+
+The native ITensor v3 backend (\texttt{Chain::td\_dynamical\_correlator\_window},
+\texttt{mpscpp3/chain\_session.h}) reuses the vendored ITensorTDVP
+library's own boundary-tensor \texttt{tdvp(psi,H,t,LH,RH,sweeps,args)}
+overload directly against a tiled window MPS/MPO -- unlike the
+\texttt{"python"} backend, which has to hand-roll its own window-aware
+TDVP sweep (pyitensor's generic TDVP infers a site's Link via a
+same-Index chain-neighbor lookup that cannot see a window's extra
+boundary legs). Two scope differences versus \texttt{"python"}: (1)
+\texttt{x\_values} may not extend beyond the window's own explicit range
+(\texttt{center+x} must stay within the window, i.e. increase
+\texttt{n\_window} instead of relying on padding) -- the
+\texttt{"python"} backend pads beyond the window with extra unevolved
+unit-cell copies, not ported here; (2) as of this writing,
+\texttt{itensor\_version=3}'s own \texttt{idmrg\_ground\_state} has a
+known, pre-existing convergence bug for Hamiltonians with an onsite
+(``field'') term (energy diverging every macro-iteration) -- unrelated
+to \texttt{td\_dynamical\_correlator} itself, but it means a v3
+\texttt{td\_dynamical\_correlator} call inherits that limitation for
+such models; a purely bond-coupled Hamiltonian (e.g. plain Heisenberg)
+is unaffected.
 
 \texttt{opname\_j} is applied at sublattice position \texttt{p\_i} and
 evolved forward in time; \texttt{opname\_i} is inserted at the shifted

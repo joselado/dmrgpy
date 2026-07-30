@@ -183,6 +183,31 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "and scope (Hermitian, n_uc<=2, no fermionic terms, no "
                "static correlators yet). Returns (density, converged, "
                "niter_done).")
+        .def("td_dynamical_correlator_window",
+             [](Chain& self, int n_window, std::string const& opname_A,
+                std::string const& opname_B, double dt, int nt,
+                std::vector<int> const& x_values, int maxdim, double cutoff,
+                int niter, bool connected, int p_i) {
+                auto out = self.td_dynamical_correlator_window(
+                    n_window,opname_A,opname_B,dt,nt,x_values,maxdim,cutoff,
+                    niter,connected,p_i);
+                py::array_t<double> ts_arr(out.ts.size());
+                std::copy(out.ts.begin(),out.ts.end(),ts_arr.mutable_data());
+                py::array_t<int> xs_arr(out.xs.size());
+                std::copy(out.xs.begin(),out.xs.end(),xs_arr.mutable_data());
+                py::array_t<std::complex<double>> S_arr({(int)out.ts.size(),(int)out.xs.size()});
+                std::copy(out.S.begin(),out.S.end(),S_arr.mutable_data());
+                return py::make_tuple(ts_arr,xs_arr,S_arr);
+            }, py::arg("n_window"),py::arg("opname_A"),py::arg("opname_B"),
+               py::arg("dt"),py::arg("nt"),py::arg("x_values"),
+               py::arg("maxdim"),py::arg("cutoff"),py::arg("niter"),
+               py::arg("connected")=true,py::arg("p_i")=0,
+               "Real-time IBC-window dynamical correlator S(x,t) (Milsted/"
+               "Vanderstraeten, arXiv:1804.09163, Sec. V.1) -- requires "
+               "idmrg_ground_state to have been called first on this same "
+               "Chain (uses its own converged environment snapshot, see "
+               "Chain::td_dynamical_correlator_window's own comment). "
+               "Returns (ts, xs, S), S shaped (len(ts),len(xs)) complex.")
         .def("vev",[](Chain& self, std::vector<PyTerm> const& terms,
                        MPS const& wf, int npow) {
                 return self.vev(terms_from_python(terms),wf,npow);

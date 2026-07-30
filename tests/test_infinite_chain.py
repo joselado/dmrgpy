@@ -871,11 +871,34 @@ def test_td_dynamical_correlator_rejects_p_i_out_of_range():
         ic.td_dynamical_correlator("Sz", 5, "Sz", n_window=5)
 
 
-def test_td_dynamical_correlator_rejects_non_python_backend():
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="ITensor v3 extension not compiled")
+def test_td_dynamical_correlator_works_on_v3_backend():
+    """itensor_version=3 is a supported backend for td_dynamical_correlator
+    (Chain::td_dynamical_correlator_window, mpscpp3/chain_session.h) --
+    superseded what used to be
+    test_td_dynamical_correlator_rejects_non_python_backend before that
+    port landed; see tests/test_idmrg_window_v3.py for the dedicated,
+    physics-accuracy-focused v3 coverage (cross-checked against the
+    "python" backend) this smoke test doesn't attempt to duplicate."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
-    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0])
-    with pytest.raises(NotImplementedError):
-        ic.td_dynamical_correlator("Sz", 0, "Sz", n_window=5)
+    ic.maxm, ic.maxiter, ic.etol, ic.niter = 8, 30, 1e-6, 30
+    # A plain single-coupling XX term leaves the transfer matrix's
+    # dominant eigenvalue (near-)degenerate at this loose convergence
+    # (confirmed directly: RuntimeError from
+    # idmrg_dominant_right_fixed_point's own power iteration) -- the full
+    # XXX Heisenberg coupling (matching
+    # examples/idmrg/heisenberg_infinite_python_VS_v3/main.py and
+    # tests/test_idmrg_window_v3.py's own model) doesn't have this
+    # problem.
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0]
+                        + ic.SzC[0] * ic.SzR[0])
+    ks, es, Skw = ic.td_dynamical_correlator(
+        "Sz", 0, "Sz", n_window=4, dt=0.05, nt=3, maxdim=20, cutoff=1e-10,
+        niter=30, x_values=[-1, 0, 1], ks=np.linspace(-np.pi, np.pi, 3))
+    assert Skw.shape == (len(ks), len(es))
+    assert np.all(np.isfinite(Skw))
+    assert ic._session3 is not None
 
 
 def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():

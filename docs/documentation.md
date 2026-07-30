@@ -939,9 +939,52 @@ dominant spectral weight sits (`tests/test_infinite_chain.py`,
 `Infinite_Many_Body_Chain.td_dynamical_correlator` (`infinitechain.py`)
 wires this up as the public API, mirroring `kpm_finite`'s own docstring
 conventions (`p_i` sublattice position, an `n_window` convergence
-caveat) — `itensor_version="python"` only (raises `NotImplementedError`
-otherwise), calls `gs_energy()` automatically like `vev`/`correlator`.
-See `docs/user_guide.md`'s own iDMRG section for the user-facing version.
+caveat), calling `gs_energy()` automatically like `vev`/`correlator`.
+
+**Native ITensor v3 port (`Chain::td_dynamical_correlator_window`,
+`mpscpp3/chain_session.h`)**: `itensor_version=3` is also supported now,
+via a genuinely different (and simpler) implementation than the
+pyitensor path above, made possible by a real ITensor v3 capability
+pyitensor's own from-scratch tensor engine has no equivalent of: the
+vendored ITensorTDVP library (`mpscpp3/TDVP/tdvp.h`) already ships an
+overload taking explicit left/right boundary tensors —
+`tdvp(psi,H,t,LH,RH,sweeps,args)`, backed by `LocalMPO(H,LH,RH,args)` —
+so the C++ port needs no window-aware sweep/environment machinery of its
+own at all: it tiles the converged unit cell's own per-sublattice ket
+tensors and automaton MPO rows into an ordinary window MPS/MPO, then
+hands `idmrg_ground_state`'s own converged `HL`/`HR` straight to that
+existing overload as `LH`/`RH`. `idmrg_ground_state` was extended to
+snapshot `HL`/`HR` (and the per-sublattice ket tensors) as private
+`Chain` state — mirroring pyitensor's own `IDMRGResult` snapshot, but
+kept off the public `idmrg_ground_state()` pybind11 binding so its
+existing 3-value return stays unchanged; `td_dynamical_correlator_window`
+requires `idmrg_ground_state` to have been run first on the same `Chain`
+(`infinitechain.py` keeps that `Chain` instance alive across calls in
+`self._session3` for exactly this reason). One genuine bookkeeping
+adaptation was needed: `idmrg_extend_HL`/`HR`'s own "bra" leg convention
+(minted via `sim()`, an independent Index unrelated to the "ket" leg) is
+not what `LocalMPO::makeL`/`makeR`'s own `dag(prime(psi))` convention
+expects (a boundary tensor's bra leg being literally `prime()` of its own
+ket leg) — a one-time `replaceInds` relabeling reconciles the two.
+The window's own static overlap/measurement machinery (`S(x,t)` itself,
+closed via a bare trace on the left plus the converged unit cell's own
+dominant transfer-matrix right fixed point, mirroring
+`idmrg_window.py`'s own `_close_array_chain`/`_all_right_fixed_points`)
+is, by contrast, implemented with plain dense arrays extracted from
+ITensor tensors rather than ITensor's own Index-based auto-contraction —
+for the same reason pyitensor's own version is: the window's
+TDVP-evolved ket tensors have their own, freely SVD-re-minted internal
+bond Indices with no shared identity to the statically-tiled bra tensors
+used for measurement, so only their *dimensions* (not Index identity)
+are guaranteed to align.
+
+Scope differences versus the `"python"` backend: `x_values` may not
+extend beyond the window's own explicit range (no beyond-window padding
+is implemented — increase `n_window` instead); and, independently,
+`itensor_version=3`'s own `idmrg_ground_state` has a known,
+pre-existing divergence bug for Hamiltonians carrying an onsite ("field")
+term, unrelated to this feature but inherited by it. See
+`docs/user_guide.md`'s own iDMRG section for the user-facing version.
 
 ### 4.2 Operator representation: `MultiOperator`
 
