@@ -842,7 +842,8 @@ def snapshot_correlator(window_B, result, opname_A, x_values):
 
 
 def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
-                             cutoff, maxdim, niter=50, x_values=None):
+                             cutoff, maxdim, niter=50, x_values=None,
+                             connected=True):
     """Real-time dynamical correlator `S(x,t) = <psi|A_x e^{-iHt}B_0|psi>`
     for `x` in `x_values` and `t = 0, dt, 2dt, ..., (nt-1)*dt`, from a
     *single* window evolution -- Sec. V.1 of arXiv:1804.09163, simplified
@@ -864,6 +865,24 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     `snapshot_correlator`'s own docstring for how a single run yields
     every `x`.
 
+    `connected=True` (default) subtracts the disconnected background
+    `<A><B>` (idmrg.py's own exact `onsite_expectation`, at the
+    appropriate sublattice position for each `x`/for `B`'s own site) from
+    every `S(x,t)` -- confirmed directly to matter in practice, not just a
+    textbook nicety: for a field-polarized-ish test model, the *raw*
+    `S(x,t=0)` at large `|x|` approaches `<A><B>` (~0.234 for a Sz-Sz
+    correlator with `<Sz>~-0.484`) rather than decaying toward 0, and
+    summing that non-decaying background over many `x` with `e^{-ikx}`
+    (`dynamical_correlator_komega`'s own spatial DFT) produces a spurious
+    contribution concentrated at `k=0` that swamps the genuine, physically
+    meaningful dispersion -- confirmed directly, the raw (uncorrected)
+    `S(k,omega)` showed no discernible peak structure at all, just a
+    small, featureless, monotonically-rising-with-omega background.
+    `connected=False` returns the raw, uncorrected value instead (e.g. for
+    comparing directly against `snapshot_correlator`'s own t=0 value
+    against `two_point_correlator`, which is *not* itself
+    background-subtracted).
+
     `x_values` defaults to `range(-n_window*n_uc//4, n_window*n_uc//4 +
     1)` -- a conservative margin so `center+x` stays well inside
     `window_B`'s own causal-cone-limited interior for the `nt*dt` total
@@ -883,12 +902,64 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     center = window_B.mps.length() // 2 + 1
     apply_local_operator(window_B, result, center, opname_B)
 
+    if connected:
+        p_B = (center - 1) % n_uc
+        mean_B = _idmrg_mod.onsite_expectation(result, opname_B, p_B)
+        background = {}
+        for x in xs:
+            p_A = (center + x - 1) % n_uc
+            mean_A = _idmrg_mod.onsite_expectation(result, opname_A, p_A)
+            background[x] = mean_A * mean_B
+
     ts = np.array([it * dt for it in range(nt)])
     S = np.zeros((nt, len(xs)), dtype=complex)
     for it in range(nt):
         snap = snapshot_correlator(window_B, result, opname_A, xs)
         for ix, x in enumerate(xs):
-            S[it, ix] = snap[x]
+            S[it, ix] = snap[x] - background[x] if connected else snap[x]
         if it < nt - 1:
             window_tdvp_step(window_B, dt, cutoff=cutoff, maxdim=maxdim, niter=niter)
     return ts, np.array(xs), S
+
+
+def dynamical_correlator_komega(result, n_window, opname_A, opname_B, dt, nt,
+                                 cutoff, maxdim, niter=50, x_values=None,
+                                 ks=None, es=None, delta=5e-2, window=[-1, 10],
+                                 factor=1):
+    """`S(k,omega)` from `dynamical_correlator_td`'s own `S(x,t)`: a
+    spatial DFT (`S(k,t) = sum_x e^{-ikx} S(x,t)`) followed by the *same*
+    time-domain damping+FFT convention `timedependent.py`'s own
+    `_fourier_transform_correlator` already uses for the finite-chain "TD"
+    submode (exponential-decay windowing -> Lorentzian broadening
+    `delta`, Riemann-sum-normalized FFT) -- reused directly (that function
+    was explicitly factored out for other time-domain submodes to reuse
+    unchanged, see its own docstring and `tdz.py`'s own use of it), not
+    reimplemented, so `delta` means the same thing here as in every other
+    dynamical-correlator submode in this codebase.
+
+    `ks` defaults to 200 points in `[-pi,pi]` (the first Brillouin zone,
+    since `x` is measured in physical sites); `es`/`delta`/`window`/
+    `factor` are passed straight through to `_fourier_transform_correlator`
+    -- see its own docstring. Returns `(ks, es, Skw)` with `Skw` shaped
+    `(len(ks), len(es))`."""
+    from ..timedependent import _fourier_transform_correlator
+    ts, xs, S = dynamical_correlator_td(result, n_window, opname_A, opname_B,
+                                         dt, nt, cutoff, maxdim, niter=niter,
+                                         x_values=x_values)
+    if ks is None:
+        ks = np.linspace(-np.pi, np.pi, 200)
+    ks = np.asarray(ks)
+
+    Skw = None
+    es_out = es
+    for ik, k in enumerate(ks):
+        phase = np.exp(-1j * k * xs)
+        Skt = S @ phase
+        es_k, gk = _fourier_transform_correlator(ts, Skt, dt, es=es_out,
+                                                  window=window, delta=delta,
+                                                  factor=factor)
+        if Skw is None:
+            es_out = es_k
+            Skw = np.zeros((len(ks), len(es_k)), dtype=complex)
+        Skw[ik] = gk
+    return ks, es_out, Skw

@@ -236,18 +236,44 @@ def test_dynamical_correlator_td_matches_exact_static_correlator_at_t0():
     (unlike the dynamical, t>0 values, which have no closed form to check
     against here -- see test_perturbation_spreads_causally_and_symmetrically
     for the qualitative dynamical check, and the module's own docstring
-    for the planned Phase 6 ED cross-check)."""
+    for the planned Phase 6 ED cross-check). Uses connected=False:
+    two_point_correlator itself is the *raw* correlator, not
+    background-subtracted."""
     result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
                   h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
     ts, xs, S = idmrg_window.dynamical_correlator_td(
         result, n_window=12, opname_A="Sz", opname_B="Sz", dt=0.05, nt=2,
-        cutoff=1e-10, maxdim=40, niter=50, x_values=range(-4, 5))
+        cutoff=1e-10, maxdim=40, niter=50, x_values=range(-4, 5),
+        connected=False)
     assert ts[0] == 0.0
     for x in xs:
         exact = idmrg.two_point_correlator(result, "Sz", 0, "Sz", abs(int(x)))
         got = S[0][list(xs).index(x)]
         assert got.real == pytest.approx(exact.real, abs=1e-9)
         assert got.imag == pytest.approx(0.0, abs=1e-9)
+
+
+def test_dynamical_correlator_td_connected_decays_with_x():
+    """connected=True (the default) subtracts the disconnected background
+    <A><B> -- confirmed directly to matter: the *raw* S(x,t=0) approaches
+    <Sz>^2 (~0.234, not 0) at large |x| for this field-polarized-ish test
+    model instead of decaying, which (before this fix) swamped
+    dynamical_correlator_komega's own spatial DFT with a spurious,
+    dominant k=0 contribution and no discernible dispersion structure.
+    The connected correlator should be visibly smaller in magnitude at
+    large |x| than the raw one."""
+    result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
+                  h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
+    ts, xs, S_raw = idmrg_window.dynamical_correlator_td(
+        result, n_window=12, opname_A="Sz", opname_B="Sz", dt=0.05, nt=1,
+        cutoff=1e-10, maxdim=40, niter=50, x_values=range(-5, 6),
+        connected=False)
+    _, _, S_conn = idmrg_window.dynamical_correlator_td(
+        result, n_window=12, opname_A="Sz", opname_B="Sz", dt=0.05, nt=1,
+        cutoff=1e-10, maxdim=40, niter=50, x_values=range(-5, 6),
+        connected=True)
+    ix_far = list(xs).index(5)
+    assert abs(S_conn[0][ix_far]) < 0.1 * abs(S_raw[0][ix_far])
 
 
 def test_dynamical_correlator_td_stays_symmetric_and_bounded_over_time():
@@ -276,3 +302,29 @@ def test_dynamical_correlator_td_stays_symmetric_and_bounded_over_time():
             # sign/construction bug, not a tight symmetry bound.
             assert got.real == pytest.approx(mirrored.real, abs=0.08)
     assert np.all(np.abs(S) < 2.0)
+
+
+# -- Phase 4: Fourier transform -> S(k,omega) ----------------------------
+
+def test_dynamical_correlator_komega_is_finite_and_symmetric_in_k():
+    """S(k,omega) must be finite everywhere (no NaN/Inf -- this caught a
+    real bug: without connected=True's background subtraction, the raw
+    correlator's own non-decaying-in-x disconnected piece produced a
+    spurious, featureless spectrum with no discernible peak at all,
+    confirmed directly by comparing raw vs connected spectra for this
+    same test model) and, for k -> -k (a parity-symmetric Hamiltonian, no
+    handedness-breaking term here), the two spectra should closely
+    match."""
+    result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
+                  h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
+    ks = np.linspace(-np.pi, np.pi, 9)
+    ks_out, es, Skw = idmrg_window.dynamical_correlator_komega(
+        result, n_window=14, opname_A="Sz", opname_B="Sz", dt=0.05, nt=20,
+        cutoff=1e-10, maxdim=50, niter=50, x_values=range(-6, 7),
+        ks=ks, delta=0.15, window=[-2, 4])
+    assert not np.any(np.isnan(Skw))
+    assert not np.any(np.isinf(Skw))
+    for ik in range(len(ks) // 2):
+        row = np.abs(Skw[ik])
+        mirrored = np.abs(Skw[-1 - ik])
+        assert np.max(np.abs(row - mirrored)) < 0.3 * (np.max(row) + 1e-6)
