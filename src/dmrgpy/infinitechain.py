@@ -232,6 +232,18 @@ class Infinite_Many_Body_Chain:
                                       # dispersion/gap k-scan) -- invalidated
                                       # in set_hamiltonian exactly like
                                       # self._result already is.
+        self._session3 = None    # itensor_version=3 only: the mpscpp3
+                                  # Chain instance gs_energy() last ran
+                                  # idmrg_ground_state on, kept alive so
+                                  # td_dynamical_correlator can reuse its
+                                  # private converged-environment snapshot
+                                  # (Chain::idmrg_ground_state's own
+                                  # env_window_boundary-equivalent state,
+                                  # never exposed to Python directly -- see
+                                  # chain_session.h's own comment) -- a
+                                  # *fresh* Chain() has no such snapshot,
+                                  # so re-running gs_energy() on a new
+                                  # instance would silently lose it.
 
     def get_operator(self, name, i, group="C"):
         """A bare, symbolic 1-site MultiOperator for `name` at site `i`
@@ -275,6 +287,7 @@ class Infinite_Many_Body_Chain:
         self.e0 = None
         self.converged = None
         self._excitation_env = None
+        self._session3 = None
 
     def gs_energy(self):
         """Run iDMRG to convergence (or self.maxiter macro-iterations) and
@@ -319,6 +332,7 @@ class Infinite_Many_Body_Chain:
             density, converged, _niter_done = chain.idmrg_ground_state(
                 terms_intra, terms_inter, self.maxm, self.cutoff,
                 self.maxiter, self.etol, self.niter, self.restarts)
+            self._session3 = chain  # kept alive for td_dynamical_correlator -- see __init__'s own comment
             self._result = None
             self.e0 = density
             self.converged = converged
@@ -662,10 +676,19 @@ class Infinite_Many_Body_Chain:
         window's own central region) to grow away from in the first
         place, unlike `kpm_finite`'s own open-boundary window.
 
-        Requires `itensor_version="python"` (needs `pyitensor.idmrg`'s own
-        `IDMRGResult.env_HL`/`env_HR` snapshot, not available on the
-        compiled backends). Calls `gs_energy()` first if `self._result`
-        isn't already set.
+        `itensor_version="python"` (needs `pyitensor.idmrg`'s own
+        `IDMRGResult.env_HL`/`env_HR` snapshot) and `itensor_version=3`
+        (native `mpscpp3.Chain::td_dynamical_correlator_window`, reusing
+        ITensorTDVP's own boundary-tensor `tdvp()` overload directly rather
+        than pyitensor's hand-rolled window-aware sweep -- see that
+        method's own comment) are both supported; any other backend raises
+        NotImplementedError. Calls `gs_energy()` first if not already run
+        (`self._result`/`self._session3` unset, per backend). The v3 path's
+        own `x_values` may not extend beyond the window's own explicit
+        range (`center+x` must stay within `[1, n_window*n_uc]`) -- unlike
+        the "python" backend, it does not pad beyond the window with extra
+        unevolved unit-cell copies, so increase `n_window` instead if a
+        wider `x_values` is needed.
 
         `opname_j` is applied at sublattice position `p_i` (0..n_uc-1) and
         evolved forward in time; `opname_i` is inserted at the shifted
@@ -706,20 +729,42 @@ class Infinite_Many_Body_Chain:
         if not (0 <= p_i < self.n_uc):
             raise ValueError("td_dynamical_correlator: p_i must be in 0..{} "
                               "(n_uc-1), got {!r}".format(self.n_uc - 1, p_i))
-        if self.itensor_version != "python":
+        if self.itensor_version == "python":
+            if self._result is None:
+                self.gs_energy()
+            from .pyitensor import idmrg_window
+            return idmrg_window.dynamical_correlator_komega(
+                self._result, n_window, opname_i, opname_j, dt, nt,
+                cutoff=cutoff, maxdim=maxdim, niter=niter, x_values=x_values,
+                connected=connected, p_i=p_i, **kwargs)
+        if self.itensor_version != 3:
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.td_dynamical_correlator: only "
-                "itensor_version=\"python\" is supported -- it needs "
-                "pyitensor.idmrg's own IDMRGResult.env_HL/env_HR "
-                "environment snapshot, not available on the compiled "
-                "backends")
-        if self._result is None:
+                "itensor_version=\"python\" or itensor_version=3 are "
+                "supported")
+        if self._session3 is None:
             self.gs_energy()
-        from .pyitensor import idmrg_window
-        return idmrg_window.dynamical_correlator_komega(
-            self._result, n_window, opname_i, opname_j, dt, nt,
-            cutoff=cutoff, maxdim=maxdim, niter=niter, x_values=x_values,
-            connected=connected, p_i=p_i, **kwargs)
+        # Same default margin idmrg_window.py's own dynamical_correlator_td
+        # uses -- computed here since the v3 binding needs a concrete list
+        # (no Python-side IDMRGResult to read n_uc off of on this path).
+        if x_values is None:
+            margin = max(1, n_window * self.n_uc // 4)
+            x_values = range(-margin, margin + 1)
+        xs_in = sorted(x_values)
+        ts, xs, S = self._session3.td_dynamical_correlator_window(
+            n_window, opname_i, opname_j, dt, nt, xs_in, maxdim, cutoff,
+            niter, connected, p_i)
+        ks = kwargs.pop("ks", None)
+        es = kwargs.pop("es", None)
+        delta = kwargs.pop("delta", 5e-2)
+        window = kwargs.pop("window", [-1, 10])
+        factor = kwargs.pop("factor", 1)
+        if kwargs:
+            raise TypeError("td_dynamical_correlator: unexpected kwargs {!r} "
+                             "for itensor_version=3".format(list(kwargs)))
+        from .timedependent import sxt_to_skomega
+        return sxt_to_skomega(ts, xs, S, dt, ks=ks, es=es, window=window,
+                               delta=delta, factor=factor)
 
 
 class Infinite_Spin_Chain(Infinite_Many_Body_Chain):

@@ -1124,12 +1124,58 @@ agree on where the dominant spectral weight sits
 \texttt{Infinite\_Many\_Body\_Chain.td\_dynamical\_correlator}
 (\texttt{infinitechain.py}) wires this up as the public API, mirroring
 \texttt{kpm\_finite}'s own docstring conventions (\texttt{p\_i}
-sublattice position, an \texttt{n\_window} convergence caveat) --
-\texttt{itensor\_version="python"} only (raises
-\texttt{NotImplementedError} otherwise), calls \texttt{gs\_energy()}
-automatically like \texttt{vev}/\texttt{correlator}. See
-\texttt{docs/user\_guide.tex}'s own iDMRG section for the user-facing
-version.
+sublattice position, an \texttt{n\_window} convergence caveat), calling
+\texttt{gs\_energy()} automatically like \texttt{vev}/\texttt{correlator}.
+
+\textbf{Native ITensor v3 port} (\texttt{Chain::td\_dynamical\_correlator\_window},
+\texttt{mpscpp3/chain\_session.h}): \texttt{itensor\_version=3} is also
+supported now, via a genuinely different (and simpler) implementation
+than the pyitensor path above, made possible by a real ITensor v3
+capability pyitensor's own from-scratch tensor engine has no equivalent
+of: the vendored ITensorTDVP library (\texttt{mpscpp3/TDVP/tdvp.h})
+already ships an overload taking explicit left/right boundary tensors --
+\texttt{tdvp(psi,H,t,LH,RH,sweeps,args)}, backed by
+\texttt{LocalMPO(H,LH,RH,args)} -- so the C++ port needs no window-aware
+sweep/environment machinery of its own at all: it tiles the converged
+unit cell's own per-sublattice ket tensors and automaton MPO rows into an
+ordinary window MPS/MPO, then hands \texttt{idmrg\_ground\_state}'s own
+converged \texttt{HL}/\texttt{HR} straight to that existing overload as
+\texttt{LH}/\texttt{RH}. \texttt{idmrg\_ground\_state} was extended to
+snapshot \texttt{HL}/\texttt{HR} (and the per-sublattice ket tensors) as
+private \texttt{Chain} state -- mirroring pyitensor's own
+\texttt{IDMRGResult} snapshot, but kept off the public
+\texttt{idmrg\_ground\_state()} pybind11 binding so its existing 3-value
+return stays unchanged; \texttt{td\_dynamical\_correlator\_window}
+requires \texttt{idmrg\_ground\_state} to have been run first on the same
+\texttt{Chain} (\texttt{infinitechain.py} keeps that \texttt{Chain}
+instance alive across calls in \texttt{self.\_session3} for exactly this
+reason). One genuine bookkeeping adaptation was needed:
+\texttt{idmrg\_extend\_HL}/\texttt{HR}'s own ``bra'' leg convention
+(minted via \texttt{sim()}, an independent Index unrelated to the
+``ket'' leg) is not what \texttt{LocalMPO::makeL}/\texttt{makeR}'s own
+\texttt{dag(prime(psi))} convention expects (a boundary tensor's bra leg
+being literally \texttt{prime()} of its own ket leg) -- a one-time
+\texttt{replaceInds} relabeling reconciles the two. The window's own
+static overlap/measurement machinery (\texttt{S(x,t)} itself, closed via
+a bare trace on the left plus the converged unit cell's own dominant
+transfer-matrix right fixed point, mirroring \texttt{idmrg\_window.py}'s
+own \texttt{\_close\_array\_chain}/\texttt{\_all\_right\_fixed\_points})
+is, by contrast, implemented with plain dense arrays extracted from
+ITensor tensors rather than ITensor's own Index-based auto-contraction --
+for the same reason pyitensor's own version is: the window's
+TDVP-evolved ket tensors have their own, freely SVD-re-minted internal
+bond Indices with no shared identity to the statically-tiled bra tensors
+used for measurement, so only their \emph{dimensions} (not Index
+identity) are guaranteed to align.
+
+Scope differences versus the \texttt{"python"} backend:
+\texttt{x\_values} may not extend beyond the window's own explicit range
+(no beyond-window padding is implemented -- increase \texttt{n\_window}
+instead); and, independently, \texttt{itensor\_version=3}'s own
+\texttt{idmrg\_ground\_state} has a known, pre-existing divergence bug
+for Hamiltonians carrying an onsite (``field'') term, unrelated to this
+feature but inherited by it. See \texttt{docs/user\_guide.tex}'s own
+iDMRG section for the user-facing version.
 
 \subsection{Operator representation: \texttt{MultiOperator}}
 

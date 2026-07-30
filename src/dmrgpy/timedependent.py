@@ -227,6 +227,45 @@ def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
     return (es,gr)
 
 
+def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
+        delta=5e-2,factor=1):
+    """S(k,omega) from a real-space/real-time correlator S(x,t) (`S`
+    shaped `(len(ts),len(xs))`): a spatial DFT
+    (`S(k,t)=sum_x e^{-ikx}S(x,t)`) followed by `_fourier_transform_correlator`
+    -- factored out so every real-time-evolution-based dynamical-correlator
+    submode that produces an `S(x,t)` array reduces it to `S(k,omega)` the
+    same way, instead of duplicating this loop per submode/backend (this
+    was previously inlined separately in both
+    `pyitensor.idmrg_window.dynamical_correlator_komega` and
+    `infinitechain.py`'s own `itensor_version=3` dispatch for
+    `td_dynamical_correlator` -- confirmed via code review to be exact
+    duplicates, now unified here so a future fix to this reduction can't
+    silently apply to only one of them).
+
+    `ks` defaults to 200 points in `[-pi,pi]` (the first Brillouin zone,
+    since `x` is measured in physical sites); `es`/`window`/`delta`/
+    `factor` are passed straight through to `_fourier_transform_correlator`
+    -- see its own docstring. Returns `(ks, es, Skw)`, `Skw` shaped
+    `(len(ks), len(es))`."""
+    if ks is None:
+        ks = np.linspace(-np.pi,np.pi,200)
+    ks = np.asarray(ks)
+    xs = np.asarray(xs)
+
+    Skw = None
+    es_out = es
+    for ik,k in enumerate(ks):
+        phase = np.exp(-1j*k*xs)
+        Skt = S@phase
+        es_k,gk = _fourier_transform_correlator(ts,Skt,dt,es=es_out,
+                                                  window=window,delta=delta,
+                                                  factor=factor)
+        if Skw is None:
+            es_out = es_k
+            Skw = np.zeros((len(ks),len(es_k)),dtype=complex)
+        Skw[ik] = gk
+    return ks,es_out,Skw
+
 
 
 def generic_evolution(H,wf,normalize=True,dt=1e-2,nt=100,A=None):

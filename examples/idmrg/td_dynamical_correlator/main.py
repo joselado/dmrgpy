@@ -35,6 +35,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import infinitechain
 
 ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
@@ -68,6 +69,29 @@ for n_window in (10, 14, 18):
     peaks.append(peak)
     print("n_window={:3d}  max|S(k,omega)|={:.4f}".format(n_window, peak))
 assert max(peaks) / min(peaks) < 1.5  # should stabilize as n_window grows
+
+print()
+print("=== plotting S(k,omega) heatmap (most-converged n_window from above) ===")
+# Reuse ks/es/Skw as left over from the loop's last (most-converged, n_window=18)
+# iteration above -- no extra DMRG work needed. Skw is complex and shaped
+# (len(ks), len(es)); plot np.abs(Skw), matching this same script's own
+# convergence check above (np.max(np.abs(Skw))) and the established
+# convention for the TD/TDVP-family dynamical correlator elsewhere in this
+# codebase (examples/dynamical_correlator/dynamical_correlator_time_evolution/
+# main.py plots its own "TD" submode with np.abs(...), while the separate KPM
+# submode there uses .real instead -- the two submodes are not interchangeable
+# conventions, they reflect what's actually real/physical for each method).
+plt.figure(figsize=(6, 5))
+plt.pcolormesh(ks, es, np.abs(Skw).T, shading="auto", cmap="viridis")
+plt.colorbar(label=r"|S(k,$\omega$)|")
+plt.xlabel("k")
+plt.ylabel(r"$\omega$")
+plt.title("iDMRG IBC-window TDVP dynamical correlator\n"
+          "S(k,$\\omega$) = <Sz(0,t) Sz(x,0)> ($n_\\mathrm{window}$=%d)" % n_window)
+plt.tight_layout()
+plt.savefig("td_dynamical_correlator_Skw.png", dpi=150)
+print("Plot saved to td_dynamical_correlator_Skw.png")
+plt.show()
 
 print()
 print("=== cross-check vs kpm_finite (independent approximation) at r=1 ===")
