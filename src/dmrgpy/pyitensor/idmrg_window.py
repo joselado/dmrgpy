@@ -905,7 +905,16 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     `window_B`'s own causal-cone-limited interior for the `nt*dt` total
     time simulated here; same convergence caveat as `build_window`'s own
     `n_window` (check by increasing both and confirming `S(x,t)` stops
-    changing).
+    changing). Note this is a *separate* convergence question from
+    `n_window` itself: confirmed directly, growing `x_values` in step with
+    `n_window` (rather than holding it fixed while only `n_window` grows)
+    can keep changing `dynamical_correlator_komega`'s own summed
+    `S(k,omega)`, since a genuine (if exponentially decaying) connected
+    correlator tail keeps adding non-negligible contributions as the
+    x-range widens -- check convergence in `n_window` at *fixed*
+    `x_values`, and separately in `x_values` itself, not both at once
+    (see `examples/idmrg/td_dynamical_correlator/main.py` for a worked
+    example of the former).
 
     `p_i` (0..n_uc-1, default 0) is the sublattice position `B_0` is
     applied to (`_default_center` picks the window site nearest the

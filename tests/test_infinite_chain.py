@@ -878,6 +878,47 @@ def test_td_dynamical_correlator_rejects_non_python_backend():
         ic.td_dynamical_correlator("Sz", 0, "Sz", n_window=5)
 
 
+def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
+    """Cross-check the two independent dynamical-correlator approximations
+    against each other: kpm_finite (open-boundary window + KPM/Chebyshev)
+    and td_dynamical_correlator (IBC window + real-time TDVP) are
+    different approximation schemes with different systematic errors, so
+    an *exact* match isn't expected (the same way plotting both submodes
+    for an ordinary *finite* chain, see
+    examples/dynamical_correlator/dynamical_correlator_time_evolution/
+    main.py, only ever compares them visually, never asserts numerical
+    agreement) -- but both should agree on *where* the dominant spectral
+    weight sits. This mirrors that same example's own convention of
+    comparing KPM's real part against the TD submode's own magnitude
+    (`np.abs`), not its real part -- confirmed directly that using
+    `.real` for the TD side here gives a spurious sign/scale mismatch
+    that `np.abs` does not."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
+    ic.maxm = 20
+    ic.maxiter = 300
+    ic.etol = 1e-12
+    ic.niter = 150
+    ic.set_hamiltonian(1.4 * ic.SzC[0] + ic.SxC[0] * ic.SxR[0])
+    ic.gs_energy()
+
+    es = np.linspace(-1, 6, 100)
+    es_kpm, y_kpm = ic.kpm_finite("Sz", 0, "Sz", 1, n_window=20,
+                                    window_chain_kwargs=dict(maxm=30, nsweeps=10),
+                                    delta=0.3, es=es)
+
+    from dmrgpy.pyitensor import idmrg_window
+    from dmrgpy.timedependent import _fourier_transform_correlator
+    ts, xs, S = idmrg_window.dynamical_correlator_td(
+        ic._result, n_window=16, opname_A="Sz", opname_B="Sz", dt=0.05,
+        nt=60, cutoff=1e-10, maxdim=60, niter=50, x_values=[1])
+    es_td, g_td = _fourier_transform_correlator(ts, S[:, 0], 0.05, es=es,
+                                                  delta=0.3, window=[-1, 6])
+
+    peak_kpm = es[np.argmax(np.abs(y_kpm))]
+    peak_td = es_td[np.argmax(np.abs(g_td))]
+    assert abs(peak_kpm - peak_td) < 1.5  # same low-frequency feature, loosely
+
+
 # -- excitation_energies/excitation_gap: the tangent-space/quasiparticle
 # excitation ansatz (pyitensor/idmrg_excitations.py) -- see that module's
 # own docstring for the algorithm and, importantly, its "KNOWN LIMITATION"
