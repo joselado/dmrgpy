@@ -267,6 +267,49 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "Non-Hermitian KPM biorthogonal Chebyshev moments; "
                "terms_hs/terms_hs_dag are the z-shifted, rescaled operator "
                "(z*Id-H)/E_max and its dagger, see nonhermitian/kpm.py")
+        .def("kpm_dynamical_correlator_truncated",
+            [](Chain& self, std::vector<PyTerm> const& terms_i,
+               std::vector<PyTerm> const& terms_j, int kpmmaxm,
+               double kpm_scale, bool kpm_accelerate, int kpm_n_scale,
+               double delta, double kpm_cutoff, int trunc_dK,
+               int trunc_nsweeps, double trunc_threshold) {
+                auto out = self.kpm_dynamical_correlator_truncated(
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    kpmmaxm,kpm_scale,kpm_accelerate,kpm_n_scale,delta,kpm_cutoff,
+                    trunc_dK,trunc_nsweeps,trunc_threshold);
+                return py::make_tuple(out.moments,out.emin,out.emax,
+                                      out.scale,out.num_polynomials);
+            }, py::arg("terms_i"),py::arg("terms_j"),py::arg("kpmmaxm"),
+               py::arg("kpm_scale"),py::arg("kpm_accelerate"),
+               py::arg("kpm_n_scale"),py::arg("delta"),py::arg("kpm_cutoff"),
+               py::arg("trunc_dK"),py::arg("trunc_nsweeps"),py::arg("trunc_threshold"),
+               "Energy-truncated KPM dynamical correlator (Holzner et al. "
+               "PRB 83, 195115 (2011), Sec. III-B), a wholly independent "
+               "method from kpm_dynamical_correlator -- see chain_session.h. "
+               "Returns (moments, emin, emax, scale, num_polynomials)")
+        .def("scaled_hamiltonian_gs_anchored",
+            [](Chain& self, double kpm_scale, double safety) {
+                auto out = self.scaled_hamiltonian_gs_anchored(kpm_scale,safety);
+                return py::make_tuple(out.scaled_H,out.emin,out.emax,out.scale);
+            }, py::arg("kpm_scale"),py::arg("safety")=0.025,
+               "Ground-state-anchored KPM rescaling (Eq. 21b) -- exposed "
+               "mainly for direct testing of kpm_energy_truncate(); see "
+               "chain_session.h for the full derivation. Returns "
+               "(scaled_H, emin, emax, scale)")
+        .def("kpm_energy_truncate",
+            [](Chain& self, MPS const& psi, MPO const& H, int dK,
+               int n_sweeps, double threshold) {
+                auto out = self.kpm_energy_truncate(psi,H,dK,n_sweeps,threshold);
+                return py::make_tuple(out.first,out.second.avg_truncated_weight,
+                                      out.second.state_change_norm);
+            }, py::arg("psi"),py::arg("H"),py::arg("dK"),py::arg("n_sweeps"),
+               py::arg("threshold"),
+               "Project high-rescaled-energy components out of a Chebyshev "
+               "vector (Holzner et al. PRB 83, 195115 (2011), Sec. III-B); "
+               "see chain_session.h's own comment for the algorithm. `H` "
+               "must be the same rescaled Hamiltonian used to build `psi`'s "
+               "own Chebyshev recursion. Returns (new_psi, "
+               "avg_truncated_weight, state_change_norm)")
         .def("reduced_dm",[](Chain& self, MPS const& wf, int site) {
                 auto flat = self.reduced_dm(wf,site);
                 int dim = self.site_dim(site);

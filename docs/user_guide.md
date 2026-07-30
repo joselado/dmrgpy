@@ -629,6 +629,93 @@ too tight for the chosen `kpm_scale`, the moment recursion detects the
 resulting exponential divergence and aborts with an explicit error
 rather than returning a silently wrong spectrum.
 
+**Energy truncation (pyitensor backend only) — narrowing the KPM window
+below the full bandwidth.** The default `kpm_scale` rescales $H$ so its
+*entire* many-body spectrum fits in $[-1,1]$, which is always safe but
+wastes resolution: a local operator's correlator usually has real
+spectral weight only over a width $W_A$ much smaller than the full
+bandwidth $W$, so most of the Chebyshev expansion's $N$ moments are
+"spent" on frequency regions the correlator never visits. Choosing a
+narrower window (smaller `kpm_scale`) concentrates the same $N$ onto the
+physically relevant region instead — but without a safeguard, the
+moment recursion's own numerical noise lets a little high-energy weight
+leak in, and since Chebyshev polynomials are unbounded outside $[-1,1]$,
+that leakage grows exponentially over the recursion (exactly the failure
+the `kpm_scale`-too-tight error above is detecting, just deliberately
+triggered by choosing a small window on purpose rather than by an
+inaccurate band-edge estimate). *Energy truncation* (Holzner,
+Weichselbaum, McCulloch & von Delft, "Chebyshev matrix product state
+approach for spectral functions", [PRB 83, 195115
+(2011)](https://doi.org/10.1103/PhysRevB.83.195115), Sec. III-B) is the
+fix: after every Chebyshev vector is formed, it is swept site by site,
+and at each site a small ($\le$ `kpm_truncate_dK`) Krylov subspace of
+that site's local effective Hamiltonian is diagonalized and any
+component with rescaled energy $|\varepsilon|\ge$ `kpm_truncate_threshold`
+is projected out, before the vector is used for a moment or fed into the
+next recursion step. This is a *precautionary* measure, not an exact
+projector (a finite Krylov dimension only approximates the local
+spectrum), so a small residual above threshold is expected and does not
+vanish with more `kpm_truncate_nsweeps` — matching the original paper's
+own characterization of it (its Sec. V.C).
+
+```python
+sc.kpm_scale = 0.3            # narrower than the safe ~0.5 floor
+sc.kpm_energy_truncate = True # enable energy truncation (default: False)
+sc.kpm_truncate_dK = 30       # per-site Krylov subspace dimension
+sc.kpm_truncate_nsweeps = 10  # number of truncation sweeps per vector
+sc.kpm_truncate_threshold = 1.0  # rescaled-energy cutoff (paper's eps_P)
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="KPM", name=(sc.Sz[0], sc.Sz[0]))
+```
+
+Enabling `kpm_energy_truncate` also switches the rescaling convention
+itself: instead of centering the window on the full bandwidth's
+*midpoint*, it anchors it at the ground state $E_0$ (the paper's own Eq.
+21b), placing $E_0$ at one edge of the window and $E_0+W_s$
+($W_s=(E_{\max}-E_{\min})\cdot$ `kpm_scale`) at the other. This matters
+because a dynamical correlator's Chebyshev vectors are built by acting
+$A$/$B$ on the ground state, so the physically relevant region sits just
+above $E_0$, not around the spectrum's geometric middle — the
+midpoint-centered window would otherwise clip the ground state itself out
+of the window before ever reaching a genuinely useful, narrower regime.
+Available for `itensor_version="python"` and `itensor_version=3`; there
+is no `itensor_version=2` port (mpscpp2 has no equivalent machinery to
+build a per-site local effective Hamiltonian from, unlike mpscpp3's
+`LocalMPO`/`diagHermitian`). Requesting it on `itensor_version=2` is
+silently a no-op (the existing, always-safe rescaling is used instead).
+The v3 port (`mpscpp3/chain_session.h`'s
+`kpm_dynamical_correlator_truncated()`) is a wholly independent method
+from `kpm_dynamical_correlator()` — a deliberate design choice so the
+existing, always-safe v3 KPM path is never touched by this feature — not
+a branch inside the same function the way the pyitensor port is; both
+implement the identical algorithm and agree on the same physical answer
+(see `test_kpm_energy_truncation_v3_accuracy.py`'s cross-backend check).
+Available only for the `(A, B)`-operator dynamical correlator, not the
+lower-level "arbitrary operator" KPM (`general_kpm`/`kpm_wfa_wfb`), which
+has no ground-state reference to anchor to. See
+`examples/dynamical_correlator/dynamical_correlator_kpm_energy_truncation`
+for a worked example (including the divergence this fixes, reproduced on
+purpose), `src/dmrgpy/pyitensor/kpm_energy_truncation.py` for the
+pyitensor implementation, and `mpscpp3/chain_session.h`'s own
+`kpm_dynamical_correlator_truncated`/`kpm_energy_truncate` comments for
+the v3 one.
+
+Performance note: energy truncation is a controlled *slowdown*, not a
+speedup — it buys resolution/feasibility (a window that would otherwise
+diverge), not raw speed. Measured directly (a 4-site chain, `kpm_scale`
+narrowed from the safe 0.7 to 0.65): the pyitensor backend costs
+~5.5–12.5x more per Chebyshev moment (`kpm_truncate_dK`/`nsweeps` of
+10/3 vs. the paper's own recommended 30/10, respectively) than the
+untruncated path, and v3's native port ~15–32x more per moment for the
+same settings on this small system — the per-site Krylov-subspace cost
+scales with bond dimension, so this overhead grows quickly with system
+size (measured directly at 8 sites: ~245x per moment at
+`kpm_truncate_dK=30`/`nsweeps=10`). Narrowing the window does reduce the
+moment count needed for a given frequency resolution, but that reduction
+only outweighs the per-moment cost once the correlator's own spectral
+width is genuinely much smaller than the full bandwidth (the paper's own
+premise for large, extensive systems) — for a small test system the two
+effects roughly cancel or net out to a slowdown, not a speedup.
+
 **`submode="CVM"` — correction-vector method.** Instead of a global
 polynomial expansion, this solves directly for the correction vector at
 one frequency $\omega$ at a time, via the positive-definite linear system
