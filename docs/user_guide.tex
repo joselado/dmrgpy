@@ -2076,28 +2076,67 @@ backend \texttt{gs\_energy()} itself used. See
 \texttt{examples/idmrg/dynamical\_correlator\_finite\_window/main.py}
 for a worked example sweeping \texttt{n\_window}.
 
-\textbf{A genuinely infinite-chain KPM is possible in principle, but not
-implemented here.} Two separate ingredients would be needed, both
-reusing machinery this module already has: (1) cap the window's two
-ends with the \emph{converged environment} (the \texttt{HL}/\texttt{HR}
-accumulated Hamiltonian blocks \texttt{idmrg\_ground\_state} already
-builds during growth, or an equivalent construction from the
-fixed-point machinery \texttt{apply\_mpo}/\texttt{imps\_overlap} already
-use) instead of plain open boundaries -- infinite boundary conditions
-(IBC, Phien/McCulloch/Vidal, PRB 86, 245107 (2012)) -- which removes a
-real error source \texttt{n\_window} alone cannot fix: an open chain's
-own ground state carries boundary artifacts that contaminate even the
-\emph{central} region, not just the two edges; (2) independently, let
-the \emph{active} window grow by roughly one site per Chebyshev moment
-as the recursion proceeds (reusing the converged unit-cell tensors to
-extend the state on demand) rather than fixing a static
-\texttt{n\_window} up front, removing the
-\texttt{n\_window}-vs-moment-count constraint entirely and bounding
-cost only by the usual bond-dimension budget of any DMRG calculation.
-Assembling these into a working implementation is a substantially
-larger feature than \texttt{kpm\_finite} -- flagged as a known,
-deliberate follow-up (see \texttt{kpm\_finite}'s own docstring for the
-same note in more detail).
+\textbf{A genuinely infinite-chain dynamical correlator, via real-time
+TDVP (\texttt{td\_dynamical\_correlator}).} \texttt{kpm\_finite}'s own
+open-boundary window has a real error source no amount of
+\texttt{n\_window} alone can fix: an open chain's own ground state
+carries boundary artifacts (e.g. Friedel-oscillation-like features)
+that contaminate even the \emph{central} region, not just the two
+edges. \texttt{ic.td\_dynamical\_correlator(opname\_i, p\_i, opname\_j,
+n\_window, dt=0.1, nt=200, x\_values=None, maxdim=60, cutoff=1e-10,
+niter=50, connected=True, **kwargs)} fixes this by capping the window's
+two ends with the \emph{converged} iDMRG growth environment
+(\texttt{idmrg\_ground\_state}'s own \texttt{HL}/\texttt{HR}, already
+computed during growth and exposed on \texttt{IDMRGResult}) instead of
+plain open boundaries -- infinite boundary conditions (IBC), following
+Milsted/Vanderstraeten et al., ``Infinite boundary conditions for
+response functions and limit cycles in iDMRG'' (arXiv:1804.09163) --
+and evolves the perturbed window in real time via two-site TDVP rather
+than expanding in Chebyshev moments. Requires
+\texttt{itensor\_version="python"} (calls \texttt{gs\_energy()}
+automatically if needed, like \texttt{vev}/\texttt{correlator}):
+
+\begin{lstlisting}
+ks, es, Skw = ic.td_dynamical_correlator(
+        "Sz", 0, "Sz", n_window=14, dt=0.05, nt=200,
+        maxdim=60, cutoff=1e-10, x_values=range(-6, 7),
+        ks=np.linspace(-np.pi, np.pi, 41), delta=0.1, window=[-1, 6])
+\end{lstlisting}
+
+\texttt{opname\_j} is applied at sublattice position \texttt{p\_i} and
+evolved forward in time; \texttt{opname\_i} is inserted at the shifted
+position (bra side, not itself evolved) -- this is the paper's own
+headline efficiency result: every \texttt{x} (and, via the spatial
+Fourier transform below, every \texttt{k}) comes from this \emph{one}
+window evolution, not one run per distance the way a naive real-time
+approach (or \texttt{kpm\_finite}'s own one-run-per-\texttt{r} KPM
+calls) would need. \texttt{connected=True} (default) subtracts the
+disconnected background \texttt{<opname\_i><opname\_j>} before the
+spatial Fourier transform -- turning it off produces a spurious,
+dominant $k=0$ contribution with no discernible dispersion (the raw
+correlator approaches \texttt{<opname\_i><opname\_j>}, not $0$, at
+large separation). \texttt{Skw} (shape \texttt{(len(ks), len(es))}) is
+obtained via a spatial DFT ($S(k,t)=\sum_x e^{-ikx}S(x,t)$) followed by
+the \emph{same} damping/FFT convention (\texttt{delta} ->
+Lorentzian broadening) every other dynamical-correlator submode in this
+codebase already uses.
+
+\textbf{Scope}: this simplifies the paper's own Eq.~7 to $t_1=0$ (the
+ground state is perturbed by \texttt{opname\_j} and evolved forward
+only; \texttt{opname\_i} is never itself time-evolved) rather than the
+full two-branch trick (evolving a \emph{second}, independent window
+backward in time too, which doubles the accessible total time for the
+same TDVP cost) -- a documented, straightforward follow-up.
+\texttt{n\_window} and \texttt{x\_values} are two \emph{separate}
+convergence axes to check (not one): \texttt{n\_window} controls how
+much environment margin surrounds the perturbation, \texttt{x\_values}
+how far the spatial sum/Fourier transform reaches -- growing
+\texttt{x\_values} together with \texttt{n\_window} can keep changing
+results (a slowly decaying connected-correlator tail keeps contributing
+as the range widens), so converge each independently. See
+\texttt{examples/idmrg/td\_dynamical\_correlator/main.py} for a worked
+\texttt{n\_window}-convergence sweep and a cross-check against
+\texttt{kpm\_finite}.
 
 \textbf{Applying an operator/gate to the converged chain (advanced).}
 \texttt{pyitensor.idmrg.apply\_mpo(result, W\_bulk, cutoff=..., maxdim=...)}

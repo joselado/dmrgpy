@@ -795,12 +795,12 @@ nontrivial feature in its own right — flagged as a known, deliberate
 follow-up rather than attempted here (see `kpm_finite`'s own docstring
 for the same note, addressed to a caller rather than a maintainer).
 
-**Infinite-boundary-condition (IBC) window construction, first step
-toward a real-time dynamical correlator (`pyitensor/idmrg_window.py`)**:
-following Milsted/Vanderstraeten et al., "Infinite boundary conditions
-for response functions and limit cycles in iDMRG" (arXiv:1804.09163),
-Sec. V.1 — the item-1 ingredient flagged just above as unimplemented
-future work. The paper's method time-evolves a finite window of tensors
+**Infinite-boundary-condition (IBC) window construction and real-time
+dynamical correlator (`pyitensor/idmrg_window.py`)**: following
+Milsted/Vanderstraeten et al., "Infinite boundary conditions for response
+functions and limit cycles in iDMRG" (arXiv:1804.09163), Sec. V.1 — the
+item-1 ingredient flagged just above as unimplemented future work. The
+paper's method time-evolves a finite window of tensors
 around a local perturbation, with everything outside the window frozen
 at the uniform ground state and capped by "the Hamiltonian terms outside
 the window, projected onto the reduced D-dimensional Hilbert space of the
@@ -871,15 +871,77 @@ of 2 for an easy, cleanly-converged test model (an exact ratio, not
 convergence noise, which is what exposed it as a real off-by-`n_uc` bug
 rather than an iDMRG convergence limitation).
 
-**What this covers, and what doesn't yet**: this is Phase 0-1 of the
-paper's method only — build and validate the IBC-capped window itself
-(`tests/test_idmrg_window.py`). Perturbing the window (`Â†_0`/`B̂_0` at
-its center), time-evolving both branches (reusing `pyitensor/tdvp.py`'s
-existing Krylov machinery, seeded with these same environment caps rather
-than `tdvp.py`'s own `(None,None)` open-boundary seed), reading off
-`S(x,t)` for every distance `x` from a single pair of shifted overlaps
-(Eq. 7 of the paper), and Fourier-transforming to `S(k,ω)` are follow-up
-work, not implemented here.
+**Real-time evolution, shifted overlaps, and `S(k,ω)`**: `window_tdvp_step`
+two-site-TDVP-evolves a capped window in place (mirroring `tdvp.py`'s own
+`tdvp_step`), but `tdvp.py`'s own sweep functions cannot be reused
+directly — they build each bond's local effective Hamiltonian and
+environments via `mpsalgebra.py`'s `_link_at`, which finds a site's
+left/right Link purely by looking for a same-Index *neighbor in the chain
+itself*; correct for an ordinary finite chain (whose boundary sites truly
+have no further leg) but wrong for a window, whose edge sites *do* carry
+one more leg each (connecting to `env_HL`/`env_HR`, tensors outside the
+chain object entirely) that `_link_at` cannot see — confirmed directly,
+passing a window straight through `tdvp.py`'s own sweep functions
+silently mis-contracts the bra/ket legs at the window's own edge sites.
+`idmrg_window.py`'s own `_window_two_site_heff`/`_window_one_site_heff`
+read a site's left/right Link directly off its own tensor instead (always
+present for a window, unlike an ordinary chain's boundary), and
+`_all_left_environments_window`/`_all_right_environments_window` build
+environments via idmrg.py's own explicit-Index `_extend_HL`/`_extend_HR`.
+`apply_local_operator`/`local_expectation` add the perturbation and
+readout primitives; `local_expectation` needed its own real fix, distinct
+from the TDVP one: a plain observable's own boundary weighting is *not*
+symmetric between the window's two ends, because `U_list` is
+left-canonical (its own left-canonicality condition *is* the statement
+that the left transfer-matrix fixed point is trivially the identity,
+needing no weighting) — the *right* boundary needs the dominant right
+fixed point (`_all_right_fixed_points`), exactly like `onsite_expectation`/
+`two_point_correlator` already rely on; an earlier version used a bare
+trace on both ends and produced a visibly non-uniform profile for a
+converged, translation-invariant ground state that should read exactly
+uniform everywhere.
+
+`dynamical_correlator_td`/`snapshot_correlator` reconstruct
+`S(x,t)=<ψ|A_x e^{-iHt}B_0|ψ>` for *every* `x` from a *single* window
+evolution (the paper's own headline efficiency result), by inserting
+operator `A` directly into the *bra* side of the overlap at the shifted
+absolute position, padding whichever side's explicit tensor list falls
+short with unevolved `U_list` copies (`_padded_arrays`) — valid because,
+outside each window's own causal cone, its tensors already equal
+`U_list` exactly. This is a simplification of the paper's own Eq. 7 to
+`t1=0` (the naive Eq. 3 form) rather than the full two-branch trick
+(evolving a *second* window backward by `t1` too, doubling the accessible
+total time for the same TDVP cost) — `window_tdvp_step` already supports
+backward evolution via a negative `dt`, so only the second branch and its
+overlap bookkeeping are missing, a documented follow-up. `connected=True`
+(the default) subtracts the disconnected background `<A><B>`
+(`onsite_expectation`) — confirmed directly to matter: the *raw*
+correlator approaches `<A><B>` (not 0) at large `|x|`, and summing that
+non-decaying background over `x` with `e^{-ikx}` produces a spurious,
+dominant `k=0` contribution with no discernible dispersion.
+`dynamical_correlator_komega` does the spatial DFT
+(`S(k,t)=Σ_x e^{-ikx}S(x,t)`) then reuses `timedependent.py`'s own
+`_fourier_transform_correlator` unchanged (it was explicitly factored out
+for other time-domain submodes to reuse, see `tdz.py`'s own use of it),
+so `delta` means the same Lorentzian-broadening thing here as in every
+other dynamical-correlator submode in this codebase.
+
+Validated: `S(x,t=0)` matches idmrg.py's own exact static
+`two_point_correlator` to machine precision (1e-16) for every `x` tested
+(`tests/test_idmrg_window.py`); `S(k,ω)` (with `connected=True`) shows a
+clear, k-dependent peak instead of a featureless background; cross-checked
+against `kpm_finite` (an independent approximation scheme — open-boundary
+window + KPM, vs. this method's IBC window + TDVP) for the same physical
+correlator — an exact match isn't expected, but both agree on where the
+dominant spectral weight sits (`tests/test_infinite_chain.py`,
+`examples/idmrg/td_dynamical_correlator/main.py`).
+
+`Infinite_Many_Body_Chain.td_dynamical_correlator` (`infinitechain.py`)
+wires this up as the public API, mirroring `kpm_finite`'s own docstring
+conventions (`p_i` sublattice position, an `n_window` convergence
+caveat) — `itensor_version="python"` only (raises `NotImplementedError`
+otherwise), calls `gs_energy()` automatically like `vev`/`correlator`.
+See `docs/user_guide.md`'s own iDMRG section for the user-facing version.
 
 ### 4.2 Operator representation: `MultiOperator`
 
