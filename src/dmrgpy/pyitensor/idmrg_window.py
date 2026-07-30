@@ -790,7 +790,26 @@ def _padded_arrays(window, result, extra_left, extra_right):
     return arrays
 
 
-def snapshot_correlator(window_B, result, opname_A, x_values):
+def _default_center(n_window, n_uc, p_i=0):
+    """A 1-based window site index near the geometric middle whose own
+    sublattice position (`(site-1)%n_uc`) equals `p_i` -- lets a caller
+    (e.g. `infinitechain.py`'s public wrapper) request a specific
+    sublattice position for operator `B`, mirroring `kpm_finite`'s own
+    `p_i` parameter, without needing the window's own geometric middle to
+    happen to land on that position by coincidence. Searches at most
+    `n_uc` sites forward from the exact middle -- always finds a match,
+    since sublattice position cycles with period `n_uc`."""
+    n = n_window * n_uc
+    mid = n // 2 + 1
+    for offset in range(n_uc):
+        site = mid + offset
+        if 1 <= site <= n and (site - 1) % n_uc == p_i:
+            return site
+    raise RuntimeError("_default_center: no site found matching p_i={} -- "
+                        "this should be unreachable".format(p_i))
+
+
+def snapshot_correlator(window_B, result, opname_A, x_values, center):
     """`{x: <ground_state| A_x |window_B>}` for every `x` in `x_values`,
     at whatever time `window_B` has already been evolved to -- this *is*
     `S(x,t) = <psi|A_x e^{-iHt}B_0|psi>` (Eq. 3-style Schrödinger-picture
@@ -807,10 +826,9 @@ def snapshot_correlator(window_B, result, opname_A, x_values):
     of the resulting `S(k,omega)`'s own frequency axis, so it is omitted
     here for consistency with this codebase's own established convention.
 
-    `x` is measured relative to `window_B`'s own center (the site
-    `B_0` was applied to, `window_B.mps.length()//2 + 1` by the same
-    convention `dynamical_correlator_td` uses to build it). The "bra" side
-    is *always* the plain, unperturbed, un-evolved converged ground state
+    `x` is measured relative to `center` (the 1-based window site `B_0`
+    was applied to -- see `_default_center`). The "bra" side is *always*
+    the plain, unperturbed, un-evolved converged ground state
     (`result.U_list`, tiled to whatever absolute range `center+x` needs,
     via `_padded_arrays`-style padding built inline here rather than from
     an actual `IBCWindow` object, since the bra never needs a real window
@@ -822,7 +840,6 @@ def snapshot_correlator(window_B, result, opname_A, x_values):
     `center+x` falls outside `window_B`'s own explicit range."""
     n = window_B.mps.length()
     n_uc = result.n_uc
-    center = n // 2 + 1
     out = {}
     for x in x_values:
         pos = center + x
@@ -843,7 +860,7 @@ def snapshot_correlator(window_B, result, opname_A, x_values):
 
 def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
                              cutoff, maxdim, niter=50, x_values=None,
-                             connected=True):
+                             connected=True, p_i=0):
     """Real-time dynamical correlator `S(x,t) = <psi|A_x e^{-iHt}B_0|psi>`
     for `x` in `x_values` and `t = 0, dt, 2dt, ..., (nt-1)*dt`, from a
     *single* window evolution -- Sec. V.1 of arXiv:1804.09163, simplified
@@ -890,6 +907,11 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     `n_window` (check by increasing both and confirming `S(x,t)` stops
     changing).
 
+    `p_i` (0..n_uc-1, default 0) is the sublattice position `B_0` is
+    applied to (`_default_center` picks the window site nearest the
+    geometric middle with that position) -- mirrors `kpm_finite`'s own
+    `p_i` parameter.
+
     Returns `(ts, xs, S)`: `ts` (length `nt`), `xs` (sorted `x_values`),
     `S` (`nt` x `len(xs)` complex array, `S[it,ix] = S(xs[ix], ts[it])`)."""
     n_uc = result.n_uc
@@ -899,7 +921,7 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     xs = sorted(x_values)
 
     window_B = build_window(result, n_window)
-    center = window_B.mps.length() // 2 + 1
+    center = _default_center(n_window, n_uc, p_i)
     apply_local_operator(window_B, result, center, opname_B)
 
     if connected:
@@ -914,7 +936,7 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     ts = np.array([it * dt for it in range(nt)])
     S = np.zeros((nt, len(xs)), dtype=complex)
     for it in range(nt):
-        snap = snapshot_correlator(window_B, result, opname_A, xs)
+        snap = snapshot_correlator(window_B, result, opname_A, xs, center)
         for ix, x in enumerate(xs):
             S[it, ix] = snap[x] - background[x] if connected else snap[x]
         if it < nt - 1:
@@ -925,7 +947,7 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
 def dynamical_correlator_komega(result, n_window, opname_A, opname_B, dt, nt,
                                  cutoff, maxdim, niter=50, x_values=None,
                                  ks=None, es=None, delta=5e-2, window=[-1, 10],
-                                 factor=1):
+                                 factor=1, connected=True, p_i=0):
     """`S(k,omega)` from `dynamical_correlator_td`'s own `S(x,t)`: a
     spatial DFT (`S(k,t) = sum_x e^{-ikx} S(x,t)`) followed by the *same*
     time-domain damping+FFT convention `timedependent.py`'s own
@@ -940,12 +962,18 @@ def dynamical_correlator_komega(result, n_window, opname_A, opname_B, dt, nt,
     `ks` defaults to 200 points in `[-pi,pi]` (the first Brillouin zone,
     since `x` is measured in physical sites); `es`/`delta`/`window`/
     `factor` are passed straight through to `_fourier_transform_correlator`
-    -- see its own docstring. Returns `(ks, es, Skw)` with `Skw` shaped
-    `(len(ks), len(es))`."""
+    -- see its own docstring. `connected`/`p_i` are passed straight
+    through to `dynamical_correlator_td` -- see its own docstring
+    (`connected=True`, the default, is not optional in practice: the raw,
+    disconnected-background-included correlator produces a spurious,
+    dominant k=0 contribution that swamps the genuine dispersion, see
+    `dynamical_correlator_td`'s own docstring). Returns `(ks, es, Skw)`
+    with `Skw` shaped `(len(ks), len(es))`."""
     from ..timedependent import _fourier_transform_correlator
     ts, xs, S = dynamical_correlator_td(result, n_window, opname_A, opname_B,
                                          dt, nt, cutoff, maxdim, niter=niter,
-                                         x_values=x_values)
+                                         x_values=x_values, connected=connected,
+                                         p_i=p_i)
     if ks is None:
         ks = np.linspace(-np.pi, np.pi, 200)
     ks = np.asarray(ks)

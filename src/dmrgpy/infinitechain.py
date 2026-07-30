@@ -148,9 +148,14 @@ def _window_hamiltonian(h_intra, h_inter, n_uc, n_window):
 
 class Infinite_Many_Body_Chain:
     """iDMRG-only counterpart of Many_Body_Chain (manybodychain.py) -- see
-    this module's docstring. Exposes only the narrow subset of modes v1
-    supports: `set_hamiltonian`, `gs_energy` (converged energy *per site*),
-    and static one-/two-point expectation values (`vev`/`correlator`).
+    this module's docstring. Exposes only a narrow subset of modes:
+    `set_hamiltonian`, `gs_energy` (converged energy *per site*), static
+    one-/two-point expectation values (`vev`/`correlator`), an
+    open-boundary-window approximation to dynamical correlators
+    (`kpm_finite`), and an infinite-boundary-condition, real-time-TDVP
+    dynamical correlator (`td_dynamical_correlator`, itensor_version=
+    "python" only -- see its own docstring for how it differs from
+    `kpm_finite`). No excited states, no entanglement/entropy yet.
 
     `itensor_version="python"` (default) or `3` -- the ITensor v3 C++
     backend (`mpscpp3/chain_session.h`'s `Chain::idmrg_ground_state`)
@@ -630,6 +635,91 @@ class Infinite_Many_Body_Chain:
         op_i = wc.get_operator(opname_i, s_i)
         op_j = wc.get_operator(opname_j, s_j)
         return kpmdmrg.get_dynamical_correlator(wc, name=(op_i, op_j), **kwargs)
+
+    def td_dynamical_correlator(self, opname_i, p_i, opname_j, n_window,
+                                 dt=0.1, nt=200, x_values=None,
+                                 maxdim=60, cutoff=1e-10, niter=50,
+                                 connected=True, **kwargs):
+        """Real-time dynamical correlator `S(k,omega)` of the infinite
+        chain, via infinite-boundary-condition (IBC) window time evolution
+        (Milsted/Vanderstraeten et al., "Infinite boundary conditions for
+        response functions and limit cycles in iDMRG", arXiv:1804.09163,
+        Sec. V.1) -- computed for *every* k and every distance x from a
+        *single* window TDVP evolution (`pyitensor.idmrg_window`'s own
+        `dynamical_correlator_komega`), unlike `kpm_finite` (one run per
+        `(opname_i, opname_j, r)` triple).
+
+        This is the actual infinite-boundary-condition method
+        `kpm_finite`'s own docstring flags as "not implemented here" (its
+        own "A genuinely infinite-chain KPM" section, item 1: cap the
+        window's two ends with the converged environment instead of plain
+        open boundaries) -- built on real-time TDVP rather than
+        KPM/Chebyshev, so item 2 of that same section ("growing window",
+        needed there to remove a moment-count-vs-`n_window` constraint) is
+        naturally moot here too: the window is IBC-capped with the *true*
+        converged environment from the start, so there is no open-boundary
+        artifact (e.g. Friedel-oscillation-like contamination of the
+        window's own central region) to grow away from in the first
+        place, unlike `kpm_finite`'s own open-boundary window.
+
+        Requires `itensor_version="python"` (needs `pyitensor.idmrg`'s own
+        `IDMRGResult.env_HL`/`env_HR` snapshot, not available on the
+        compiled backends). Calls `gs_energy()` first if `self._result`
+        isn't already set.
+
+        `opname_j` is applied at sublattice position `p_i` (0..n_uc-1) and
+        evolved forward in time; `opname_i` is inserted at the shifted
+        position `p_i`'s own site `+x` (bra side, *not* time-evolved) --
+        see `pyitensor.idmrg_window.dynamical_correlator_td`'s own
+        docstring for the precise (Schrödinger-picture, background-
+        subtracted) convention this follows, and why no `e^{iE0t}`
+        Heisenberg-picture conversion is applied (matching this codebase's
+        own established "TD" submode convention).
+
+        `n_window`: number of unit-cell repeats in the window -- same
+        convergence caveat as `kpm_finite`'s own `n_window` (check by
+        increasing it and confirming results stop changing), except here
+        the two ends are physically correct (IBC-capped) rather than
+        open-boundary artifacts, so a much smaller margin should suffice
+        in practice. `dt`/`nt`: TDVP time step and step count (total
+        simulated time `nt*dt`); `maxdim`/`cutoff`/`niter`: TDVP
+        truncation/Krylov-dimension controls (see
+        `pyitensor.idmrg_window.window_tdvp_step`). `x_values`: distances
+        (physical sites, relative to `opname_j`'s own site) to reconstruct
+        `S(x,t)` for before Fourier transforming -- defaults to a
+        conservative margin based on `n_window` (see
+        `dynamical_correlator_td`'s own docstring); must stay within the
+        causal cone for `nt*dt`, same spirit as `n_window` itself.
+        `connected=True` (default) subtracts the disconnected background
+        `<opname_i><opname_j>` -- confirmed directly to matter (see
+        `dynamical_correlator_td`'s own docstring): without it, the
+        spatial Fourier transform is dominated by a spurious k=0
+        contribution with no discernible dispersion structure.
+
+        Remaining `**kwargs` (`ks`, `es`, `delta`, `window`, `factor`) are
+        forwarded to `pyitensor.idmrg_window.dynamical_correlator_komega`
+        unchanged -- `delta` means the same Lorentzian-broadening thing
+        here as in every other dynamical-correlator submode in this
+        codebase (it reuses `timedependent.py`'s own
+        `_fourier_transform_correlator` directly). Returns `(ks, es,
+        Skw)`, `Skw` shaped `(len(ks), len(es))`."""
+        if not (0 <= p_i < self.n_uc):
+            raise ValueError("td_dynamical_correlator: p_i must be in 0..{} "
+                              "(n_uc-1), got {!r}".format(self.n_uc - 1, p_i))
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.td_dynamical_correlator: only "
+                "itensor_version=\"python\" is supported -- it needs "
+                "pyitensor.idmrg's own IDMRGResult.env_HL/env_HR "
+                "environment snapshot, not available on the compiled "
+                "backends")
+        if self._result is None:
+            self.gs_energy()
+        from .pyitensor import idmrg_window
+        return idmrg_window.dynamical_correlator_komega(
+            self._result, n_window, opname_i, opname_j, dt, nt,
+            cutoff=cutoff, maxdim=maxdim, niter=niter, x_values=x_values,
+            connected=connected, p_i=p_i, **kwargs)
 
 
 class Infinite_Spin_Chain(Infinite_Many_Body_Chain):
