@@ -26,13 +26,19 @@ j = np.random.randint(n)
 j = i
 t1 = time.time()
 sc = getsc(2)
-(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
+name = (sc.Sz[i],sc.Sz[j]) # name= takes a pair of MultiOperators, not a
+                            # bare "ZZ" string -- see kpmdmrg.py's
+                            # get_dynamical_correlator and
+                            # tests/test_dynamical_correlator.py for the
+                            # same convention
+(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name)
 t2 = time.time()
 print("Time with ITensor2",t2-t1)
 
 
 sc = getsc(3)
-(x3,y3) = sc.get_dynamical_correlator(mode="DMRG",i=i,j=j,name="ZZ")
+name = (sc.Sz[i],sc.Sz[j])
+(x3,y3) = sc.get_dynamical_correlator(mode="DMRG",name=name)
 t3 = time.time()
 print("Time with ITensor3",t3-t2)
 
