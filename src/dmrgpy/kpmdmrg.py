@@ -11,6 +11,21 @@ from .algebra import kpm
 from .algebra.kpm import generate_profile
 
 
+def _sync_kpm_energy_truncation(self):
+    """Push kpm_energy_truncate*'s current values onto self._session, if
+    it understands them. Only pyitensor.chain.Chain does (see its
+    set_kpm_energy_truncation()) -- itensor_version 2/3's compiled
+    sessions have no such method, since energy truncation (Holzner et
+    al., PRB 83, 195115 (2011), Sec. III-B) is implemented for the
+    pyitensor backend only, not ported to mpscpp2/mpscpp3's
+    chain_session.h."""
+    if self.itensor_version != "python":
+        return
+    self._session.set_kpm_energy_truncation(
+        self.kpm_energy_truncate, self.kpm_truncate_dK,
+        self.kpm_truncate_nsweeps, self.kpm_truncate_threshold)
+
+
 def restrict_interval(x,y,window):
   """Restrict the result to a certain energy window"""
   if window is None: return (x,y)
@@ -46,6 +61,7 @@ def get_dynamical_correlator(self,n=1000,
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    _sync_kpm_energy_truncation(self)
     moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator(
             mi.to_terms(),mj.to_terms(),
             self.kpmmaxm,self.kpm_scale,self.kpm_accelerate,
@@ -109,6 +125,7 @@ def general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,accelerate):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    _sync_kpm_energy_truncation(self)
     mus = self._session.general_kpm(X.to_terms(),wfa.cpp_handle,wfb.cpp_handle,
             self.maxm,accelerate,int(num_p),self.cutoff)
     return np.array(mus)

@@ -31,6 +31,7 @@ from .svd import svd
 from .sweeps import Sweeps
 from .tdvp import tdvp_step as _tdvp_step_fn
 from .gse import global_subspace_expand as _global_subspace_expand_fn
+from .kpm_energy_truncation import energy_truncate as _kpm_energy_truncate
 from .tensor import commonIndex, contract_many, dag, delta, noPrime, prime, swapPrime
 
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
@@ -79,6 +80,15 @@ class Chain:
         self.mpomaxm = 5000
         self.verbose = False
 
+        # KPM energy truncation (Holzner et al. PRB 83, 195115 (2011),
+        # Sec. III-B), see kpm_energy_truncation.py -- off by default, so
+        # kpm_scale/kpm_dynamical_correlator()'s existing behavior is
+        # unaffected unless a caller opts in via set_kpm_energy_truncation.
+        self.kpm_energy_truncate = False
+        self.kpm_truncate_dK = 10
+        self.kpm_truncate_nsweeps = 3
+        self.kpm_truncate_threshold = 1.0
+
     def num_sites(self):
         return self.sites.length()
 
@@ -99,6 +109,18 @@ class Chain:
 
     def set_verbose(self, verbose):
         self.verbose = verbose
+
+    def set_kpm_energy_truncation(self, enabled, dK, n_sweeps, threshold):
+        """Python-only KPM control knob (no C++ v2/v3 counterpart -- see
+        kpmdmrg.py, which only calls this when itensor_version=="python").
+        See kpm_energy_truncation.energy_truncate() for what dK/n_sweeps/
+        threshold mean; enabled=False (the default) reproduces this
+        class's original kpm_dynamical_correlator()/general_kpm()
+        behavior exactly."""
+        self.kpm_energy_truncate = enabled
+        self.kpm_truncate_dK = dK
+        self.kpm_truncate_nsweeps = n_sweeps
+        self.kpm_truncate_threshold = threshold
 
     def set_hamiltonian(self, terms):
         ampo = AutoMPO.from_terms(self.sites, terms)
@@ -686,7 +708,10 @@ class Chain:
             raise RuntimeError("Chain.kpm_dynamical_correlator called before set_hamiltonian")
         if self.wf0 is None:
             self.gs_energy()
-        scaled_H, emin, emax, scale = self._scaled_hamiltonian(kpm_scale)
+        if self.kpm_energy_truncate:
+            scaled_H, emin, emax, scale = self._scaled_hamiltonian_gs_anchored(kpm_scale)
+        else:
+            scaled_H, emin, emax, scale = self._scaled_hamiltonian(kpm_scale)
         n = int(round((emax - emin) / delta)) * kpm_n_scale
         m1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         m2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
@@ -897,6 +922,55 @@ class Chain:
         m = m * scale
         return m, emin, emax, scale
 
+    def _scaled_hamiltonian_gs_anchored(self, kpm_scale, safety=0.025):
+        """Ground-state-anchored rescaling (Holzner et al., PRB 83,
+        195115 (2011), Eqs. (20)-(21b)): places the ground state energy
+        E0 at -(1-safety/2) and E0+Ws at +(1-safety/2), where
+        Ws=(emax-emin)*kpm_scale is the *same* window-width formula
+        _scaled_hamiltonian() uses (so kpm_scale keeps the same meaning/
+        units in both) -- but anchored at E0 rather than centered on the
+        full many-body bandwidth's midpoint.
+
+        Used by kpm_dynamical_correlator() instead of
+        _scaled_hamiltonian() whenever kpm_energy_truncate is enabled:
+        shrinking kpm_scale only delivers Sec. III-B's promised
+        resolution gain if the narrowed window also sits where a typical
+        correlator's spectral weight actually lives -- just above the
+        ground state, since its Chebyshev vectors are built by acting
+        operators on |0>, not around the geometric middle of the entire
+        many-body spectrum. Confirmed directly: with
+        _scaled_hamiltonian()'s own bandwidth-midpoint centering, any
+        kpm_scale below the safe ~0.5 floor clips the ground state
+        itself out of the window first (before ever reaching a genuinely
+        useful, narrower-but-still-correlator-covering regime), since
+        the ground state already sits at the spectrum's own lower edge,
+        not near its middle.
+
+        Returns (m, emin, emax, scale) with the *same* meaning
+        downstream (kpm_dynamical_correlator()/kpmdmrg.py's moment-count
+        and energy-axis reconstruction) as _scaled_hamiltonian()'s own
+        return value, even though emin/emax are no longer literally the
+        true many-body band edges: emin=E0 (still correct -- the energy
+        axis kpmdmrg.py reconstructs is "excitation energy above the
+        ground state", i.e. E_phys-E0, unchanged), and
+        emax=E0+Ws (the actual retained window's top, which is what
+        should set the polynomial order N via kpmdmrg.py's
+        n=(emax-emin)/delta, not the full, unused many-body bandwidth).
+        """
+        e0 = self._minimum_energy()
+        w = self._bandwidth()
+        ws = w * kpm_scale
+        wp = 1.0 - safety / 2.0
+        a = ws / (2.0 * wp)
+        scale = 1.0 / a
+        shift = -e0 - wp * a
+        ampo = AutoMPO(self.sites)
+        ampo.add(shift, "Id", 1)
+        shift_mpo = to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        m = mps_sum(self.H, shift_mpo, cutoff=self.cutoff, maxdim=self.mpomaxm)
+        m = m * scale
+        return m, e0, e0 + ws, scale
+
     def _same_mps(self, vi, vj, maxm, cutoff):
         d = mps_sum(vi * 1.0, vj * (-1.0), cutoff=cutoff, maxdim=maxm)
         dd = np.sqrt(inner(d, d).real)
@@ -966,6 +1040,19 @@ class Chain:
         ampo.add(1.0, "Id", 1)
         return to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
 
+    def _maybe_energy_truncate(self, psi, m):
+        """Opt-in post-processing of a freshly-formed Chebyshev vector
+        `psi` (mutated in place), per set_kpm_energy_truncation() /
+        kpm_energy_truncation.py -- a no-op unless explicitly enabled, so
+        existing kpm_scale callers see no behavior change. `m` must be
+        the same rescaled/shifted Hamiltonian MPO used to build `psi`'s
+        own recursion."""
+        if not self.kpm_energy_truncate:
+            return
+        _kpm_energy_truncate(psi, m, dK=self.kpm_truncate_dK,
+                              n_sweeps=self.kpm_truncate_nsweeps,
+                              threshold=self.kpm_truncate_threshold)
+
     def _kpm_moments_full(self, m, vi, vj, n, kpmmaxm, kpmcutoff):
         out = []
         v = vi * 1.0
@@ -980,6 +1067,7 @@ class Chain:
         for _ in range(n):
             ap = self._apply_mpo_with(m, a, kpmcutoff, kpmmaxm)
             ap = mps_sum(ap * 2.0, am * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
+            self._maybe_energy_truncate(ap, m)
             out.append(inner(vj, ap))
             self._check_kpm_moment(out, bound)
             am = a * 1.0
@@ -999,6 +1087,7 @@ class Chain:
         for _ in range(n // 2):
             ap = self._apply_mpo_with(m, a, kpmcutoff, kpmmaxm)
             ap = mps_sum(ap * 2.0, am * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
+            self._maybe_energy_truncate(ap, m)
             bk = 2.0 * inner(a, a) - mu0
             bk1 = 2.0 * inner(a, ap) - mu1
             out.append(bk)

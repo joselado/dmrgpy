@@ -125,6 +125,18 @@ class Many_Body_Chain():
       self.kpm_extrapolate = False # use extrapolation
       self.kpm_extrapolate_factor = 2.0 # factor for the extrapolation
       self.kpm_extrapolate_mode = "plain" # mode of the extrapolation
+      # KPM energy truncation (Holzner et al., PRB 83, 195115 (2011),
+      # Sec. III-B) -- itensor_version="python" only, see
+      # pyitensor/kpm_energy_truncation.py and kpmdmrg.py's own gating.
+      # Off by default (existing kpm_scale behavior is unaffected);
+      # enables kpm_scale to be pushed below its current safe floor
+      # (~0.5 in this codebase's bandwidth-midpoint-centered rescaling
+      # convention) for higher KPM spectral resolution, at the cost of
+      # the extra truncation-sweep work per Chebyshev vector.
+      self.kpm_energy_truncate = False # enable energy truncation
+      self.kpm_truncate_dK = 10 # per-site Krylov subspace dimension
+      self.kpm_truncate_nsweeps = 3 # number of truncation sweeps
+      self.kpm_truncate_threshold = 1.0 # energy threshold (rescaled units)
       # in-process session (mpscpp2/mpscpp3's pybind11 bindings.cc for
       # itensor_version 2/3, or pyitensor.chain.Chain -- a plain Python
       # object, no pybind11 involved -- for itensor_version="python"),
