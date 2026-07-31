@@ -409,9 +409,9 @@ def dm_ij_energy(m_in,i=0,j=0,scale=10.,npol=None,ne=500,x=None):
     pass
   if x is None: xs = np.linspace(-1.0,1.0,ne,endpoint=True)*0.99 # energies
   else: xs = x/scale # use from input
-  ysr = generate_profile(mus.real,xs,kernel="jackson",use_fortran=use_fortran)/scale*np.pi # so it is the Green function
-  ysi = generate_profile(mus.imag,xs,kernel="jackson",use_fortran=use_fortran)/scale*np.pi # so it is the Green function
-  ys = ysr - 1j*ysi
+  ysr,ysi = generate_profile_pair(mus.real,mus.imag,xs,kernel="jackson",
+          use_fortran=use_fortran) # so it is the Green function
+  ys = (ysr - 1j*ysi)/scale*np.pi
   return (scale*xs,ys)
 
 
@@ -423,18 +423,33 @@ def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
   if np.sum(np.abs(mus.imag))>0.001:
 #    print("WARNING, off diagonal has nonzero imaginary elements",np.sum(np.abs(mus.imag)))
     pass
-  xs = np.linspace(-1.0,1.0,npol*10,endpoint=True)*0.95 # energies
-  ysr = generate_profile(mus.real,xs,kernel="jackson",use_fortran=use_fortran)/scale*np.pi # so it is the Green function
-  ysi = generate_profile(mus.imag,xs,kernel="jackson",use_fortran=use_fortran)/scale*np.pi # so it is the Green function
-  ys = ysr - 1j*ysi
-  xs = scale*xs # reescale
-  ys = ys/scale # reescale
-  if x is None: return xs,ys
-  else: 
-      from scipy.interpolate import interp1d
-      yout = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)(x)
-      yout=yout+1j*interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)(x)
-      return x,yout
+  if x is None:
+    xs = np.linspace(-1.0,1.0,npol*10,endpoint=True)*0.95 # energies
+    ysr,ysi = generate_profile_pair(mus.real,mus.imag,xs,kernel="jackson",
+            use_fortran=use_fortran) # so it is the Green function
+    ys = (ysr - 1j*ysi)/scale*np.pi
+    xs = scale*xs # reescale
+    ys = ys/scale # reescale
+    return xs,ys
+  else:
+    # Evaluate the Chebyshev reconstruction directly at the caller's
+    # requested frequencies instead of building a dense npol*10-point
+    # grid (spanning the full [-0.95,0.95]*scale domain, regardless of
+    # how few/localized the requested points are) and interpolating
+    # down to `x` afterwards -- for the common case (x has a few
+    # hundred/thousand points, npol in the thousands) this used to be
+    # the dominant cost of the whole KPM dynamical correlator. Points
+    # outside the KPM-valid domain [-0.95,0.95]*scale are set to 0,
+    # matching the previous interp1d(...,fill_value=0.0) behavior.
+    x = np.asarray(x,dtype=float)
+    xr = x/scale
+    valid = np.abs(xr)<=0.95
+    yout = np.zeros(x.shape,dtype=np.complex128)
+    if np.any(valid):
+      ysr,ysi = generate_profile_pair(mus.real,mus.imag,xr[valid],
+              kernel="jackson",use_fortran=use_fortran)
+      yout[valid] = (ysr - 1j*ysi)/scale*np.pi/scale
+    return x,yout
 
 
 
@@ -469,6 +484,39 @@ def generate_profile(mus,xs,kernel="jackson",use_fortran=use_fortran):
     return ys
 
 
+
+def generate_profile_pair(mus_r,mus_i,xs,kernel="jackson",use_fortran=use_fortran):
+    """Evaluate generate_profile for two real moment arrays (mus_r, mus_i)
+    against the same xs grid in one pass. generate_profile's Chebyshev
+    recursion (tp = 2*xs*t - tm) depends only on xs, not on the moments,
+    so the callers that need mus.real and mus.imag reconstructed
+    separately (dm_ij_energy/dm_vivj_energy -- kept apart rather than
+    summed, since the final result combines them as ysr - 1j*ysi, not
+    generate_profile(mus_r+1j*mus_i)) used to redo that recursion twice;
+    this shares it across both instead."""
+    if kernel=="jackson": mus_r = jackson_kernel(mus_r); mus_i = jackson_kernel(mus_i)
+    elif kernel=="lorentz": mus_r = lorentz_kernel(mus_r); mus_i = lorentz_kernel(mus_i)
+    elif kernel=="plain": pass # do nothing
+    elif kernel is None: pass
+    else: raise
+    if use_fortran: # call the fortran routine (no fused variant available)
+      ysr = kpmf90.generate_profile(mus_r,xs)
+      ysi = kpmf90.generate_profile(mus_i,xs)
+    else: # do a python loop, sharing the Chebyshev recursion
+      ysr = np.zeros(xs.shape,dtype=np.complex128) + mus_r[0] # first term
+      ysi = np.zeros(xs.shape,dtype=np.complex128) + mus_i[0] # first term
+      tm = np.zeros(xs.shape) +1.
+      t = xs.copy()
+      for i in range(1,len(mus_r)):
+        ysr += 2.*mus_r[i]*t # add contribution
+        ysi += 2.*mus_i[i]*t # add contribution
+        tp = 2.*xs*t - tm # chebychev recursion relation
+        tm = t + 0.
+        t = 0. + tp # next iteration
+      denom = np.sqrt(1.-xs*xs) # prefactor
+      ysr = ysr/denom
+      ysi = ysi/denom
+    return ysr/np.pi,ysi/np.pi
 
 
 def generate_green_profile(mus,xs,kernel="jackson",use_fortran=use_fortran):
