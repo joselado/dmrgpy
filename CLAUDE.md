@@ -455,11 +455,17 @@ overfull-hbox warnings) after editing it.
 
 ## Git workflow
 
-New work (a new branch, a new PR) should start from `master`, not from
-another feature/staging branch, unless explicitly told otherwise. This
-repo previously reused a long-lived branch (`mpo-algebra-tdvp-gse`) as a
-staging area for several stacked PRs; once `master` and the staging
-branch diverged (each gained commits the other lacked), a PR built on
-the staging branch picked up unrelated content and produced conflicting/
-misleading diffs against `master`. Branching from `master` (`git fetch
-origin master && git checkout -b <branch> origin/master`) avoids this.
+Working directly on `master` is fine at all times, unless the user says
+otherwise for a given task or the change is a really major one with real
+potential to conflict with other concurrent development (in which case
+use a feature branch/PR instead).
+
+When a feature branch is warranted, new work (a new branch, a new PR)
+should start from `master`, not from another feature/staging branch,
+unless explicitly told otherwise. This repo previously reused a
+long-lived branch (`mpo-algebra-tdvp-gse`) as a staging area for several
+stacked PRs; once `master` and the staging branch diverged (each gained
+commits the other lacked), a PR built on the staging branch picked up
+unrelated content and produced conflicting/misleading diffs against
+`master`. Branching from `master` (`git fetch origin master && git
+checkout -b <branch> origin/master`) avoids this.
