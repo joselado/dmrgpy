@@ -40,6 +40,7 @@ def get_T(orbs):
 
 
 from .. import fermionchain
+from .. import multioperator
 
 
 def generate_atom(orbs=None, # orbitals
@@ -111,19 +112,24 @@ def generate_atom(orbs=None, # orbitals
     def one2many(ml=None,ms=None):
         """Return the many body representation of the single particle
         operators ml in orbital basis and ms in spin basis"""
-        o = 0 # output
+        # Collect the individual contributions and sum them all at once
+        # with multioperator.msum() instead of "o = o + term" per
+        # iteration: each "+" on a MultiOperator copies/concatenates its
+        # whole term list, which turns this loop (up to n*n*4 iterations)
+        # into an accidental O(m^2) (see msum()'s own docstring).
+        terms = [] # individual contributions
         if ml is None: ml = np.identity(n) # identity matrix
         if ms is None: ms = np.identity(2) # identity matrix
         for io in range(n): # loop over spinful orbitals
+            cas = [fc.Cdagup[io],fc.Cdagdn[io]] # first operator, depends only on io
             for jo in range(n): # loop over spinful orbitals
-                cas = [fc.Cdagup[io],fc.Cdagdn[io]] # first operator
                 cbs = [fc.Cup[jo],fc.Cdn[jo]] # second operator
                 for si in range(2): # loop over spin
                     for sj in range(2): # loop over spin
                         coeff = ml[io,jo]*ms[si,sj] # orbital times spin
                         if abs(coeff)>1e-6: # if non-zero
-                            o = o + coeff*cas[si]*cbs[sj] # add this contribution
-        return o # return
+                            terms.append(coeff*cas[si]*cbs[sj]) # this contribution
+        return multioperator.msum(terms) # return
 
     # initialize Hamiltonian
     h = 0
