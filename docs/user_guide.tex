@@ -1031,7 +1031,7 @@ given simulated time.
 
 \textbf{\texttt{submode="EX"} --- exact diagonalization in a truncated
 DMRG subspace.} Builds $A$, $B$, $H$ explicitly in the subspace spanned
-by the lowest \texttt{nex} (orthogonalized) DMRG excited states, then
+by the lowest \texttt{nex} DMRG excited states, then
 evaluates the exact Lehmann sum in that subspace,
 
 \begin{equation}
@@ -1041,7 +1041,11 @@ G_{AB}(\omega)=\sum_{n=1}^{n_{ex}}\frac{\langle\mathrm{GS}|A|n\rangle\langle n|B
 i.e.\ a small, explicit sum over poles at the computed excited-state
 energies $E_n$, each with residue given by the transition matrix
 elements. Cheap and exact \emph{within} the truncated subspace; only as
-good as how many/which excited states were computed.
+good as how many/which excited states were computed. The \texttt{nex}
+excited-state MPS are not assumed to be orthonormal (\texttt{dcex.py}
+builds their own overlap matrix and solves a generalized eigenvalue
+problem $Hc=eSc$ rather than assuming $S=1$), which matters in practice
+since Gram-Schmidt over bond-truncated MPS is itself only approximate.
 
 \textbf{\texttt{submode="maxent"} --- maximum-entropy reconstruction.}
 Reconstructs a positive-definite spectral function from a finite set of

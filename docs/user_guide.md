@@ -892,15 +892,19 @@ now reachable at a lower bond-dimension cost for a given simulated time.
 
 **`submode="EX"` — exact diagonalization in a truncated DMRG subspace.**
 Builds $A$, $B$, $H$ explicitly in the subspace spanned by the lowest
-`nex` (orthogonalized) DMRG excited states, then evaluates the exact
-Lehmann sum in that subspace,
+`nex` DMRG excited states, then evaluates the exact Lehmann sum in that
+subspace,
 
 $$G_{AB}(\omega)=\sum_{n=1}^{n_{ex}}\frac{\langle\mathrm{GS}|A|n\rangle\langle n|B|\mathrm{GS}\rangle}{\omega-E_n+i\delta}$$
 
 i.e.\ a small, explicit sum over poles at the computed excited-state
 energies $E_n$, each with residue given by the transition matrix
 elements. Cheap and exact *within* the truncated subspace; only as good
-as how many/which excited states were computed.
+as how many/which excited states were computed. The `nex` excited-state
+MPS are not assumed to be orthonormal (`dcex.py` builds their own overlap
+matrix and solves a generalized eigenvalue problem $Hc=eSc$ rather than
+assuming $S=1$), which is important in practice since Gram-Schmidt over
+bond-truncated MPS is itself only approximate.
 
 **`submode="maxent"` — maximum-entropy reconstruction.** Reconstructs a
 positive-definite spectral function from a finite set of moments

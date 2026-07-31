@@ -55,20 +55,29 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
     # scale= finally take effect.
     esex,wsex = get_cached_excited_states(self,n=nex,scale=scale,**kwargs)
     A,B = name[0].get_dagger(),name[1] # operators
-    wf0 = wsex[0] # ground state
-    from .algebra.arnolditk import gram_smith
-    wsex = gram_smith(wsex) # orthogonalize
-    Aop = [[wfi.dot(A*wfj) for wfj in wsex] for wfi in wsex] # representation
-    Bop = [[wfi.dot(B*wfj) for wfj in wsex] for wfi in wsex] # representation
     h = self.hamiltonian # Hamiltonian
-    Hop = [[wfi.dot(h*wfj) for wfj in wsex] for wfi in wsex] # representation
-    # transform to arrays
-    Aop = np.array(Aop)
-    Bop = np.array(Bop)
-    Hop = np.array(Hop)
-    # now get eigenvalues and eigenvectors
+    n = len(wsex) # number of states
+    # Matrix representations in the raw nex-state basis returned by the
+    # excited-state search, WITHOUT assuming it is orthonormal: DMRG
+    # excited states are only approximately orthogonal even after
+    # Gram-Schmidt (each MPS is separately bond-truncated), so instead of
+    # forcing orthogonality first and then diagonalizing H as if S=1, the
+    # basis's own overlap (Gram) matrix Sop is built explicitly and fed
+    # into a generalized eigenvalue problem below -- exact for any degree
+    # of non-orthogonality, and reduces to the old S=1 assumption when the
+    # states genuinely are orthonormal. wfi.aMb(Op,wfj) (a direct
+    # <i|Op|j> sandwich contraction) replaces the old wfi.dot(Op*wfj):
+    # the latter first applies Op to wfj as an intermediate MPS, requiring
+    # a variational compression/fit at bond dimension maxm for every one
+    # of the nex^2 matrix elements -- aMb needs no such intermediate MPS
+    # (and thus no compression error) for any of Sop/Aop/Bop/Hop.
+    Sop = np.array([[wsex[a].dot(wsex[b]) for b in range(n)] for a in range(n)])
+    Aop = np.array([[wsex[a].aMb(A,wsex[b]) for b in range(n)] for a in range(n)])
+    Bop = np.array([[wsex[a].aMb(B,wsex[b]) for b in range(n)] for a in range(n)])
+    Hop = np.array([[wsex[a].aMb(h,wsex[b]) for b in range(n)] for a in range(n)])
+    # generalized eigenvalue problem H c = e S c
     from scipy.linalg import eigh
-    (esex,wsex) = eigh(Hop) ; wsex = wsex.T # transpose 
+    (esex,wsex) = eigh(Hop,b=Sop) ; wsex = wsex.T # transpose
     # from now on we operate with numpy arrays
     wf0 = wsex[0]
     wfa = Aop@wf0 # A times ground state
