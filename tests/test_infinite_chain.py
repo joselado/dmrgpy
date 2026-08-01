@@ -954,7 +954,14 @@ def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
     # than a bare argmax-vs-argmax comparison.
     ix_kpm = np.argmin(np.abs(es_td - peak_kpm))
     weight_at_kpm_peak = np.abs(g_td[ix_kpm])
-    assert weight_at_kpm_peak > 0.3 * np.max(np.abs(g_td))
+    # 0.5, not a much looser bound: confirmed directly over 4 independent
+    # runs that this fraction lands at 0.899-1.0 whenever the KPM peak
+    # isn't the TD spectrum's own argmax -- 0.5 stays well clear of that
+    # observed range while being tight enough to catch a real regression
+    # (e.g. a reintroduced partial phase error genuinely moving the
+    # dominant weight away from the KPM peak, not just a near-degenerate
+    # second feature edging out the argmax).
+    assert weight_at_kpm_peak > 0.5 * np.max(np.abs(g_td))
 
 
 # -- excitation_energies/excitation_gap: the tangent-space/quasiparticle

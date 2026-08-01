@@ -370,12 +370,19 @@ def window_total_energy(window):
        matches an independent Lanczos-Rayleigh-quotient computation using
        the exact same env_HL/env_HR/W_pL/W_pR to machine precision).
     2. Even after that fix, the *absolute* total still includes whatever
-       (large, `n_window`-independent, and not independently exposed)
-       energy env_HL/env_HR themselves represent from every macro-iteration
-       already absorbed before the snapshot -- so this total is only
-       meaningful as a *difference* between two window sizes (see
-       `window_energy_density`), not compared directly against `e0` on its
-       own."""
+       (large, `n_window`-independent) energy env_HL/env_HR themselves
+       represent from every macro-iteration already absorbed before the
+       snapshot -- so comparing this total directly against `e0` on its
+       own needs a difference between two window sizes (see
+       `window_energy_density`). That said, the *absolute* value returned
+       here is still directly useful on its own as a fixed-`n_window`
+       baseline: `window_tdvp_step`'s own `eshift` fix (see its own
+       docstring) uses `window_total_energy(window_B)` exactly this way,
+       measured once at a single, fixed `n_window` and held constant for
+       the whole subsequent evolution -- what's not meaningful is
+       comparing this absolute value *across different `n_window`* (or
+       against `e0`) without first differencing, not using it as-is at a
+       single, fixed window."""
     n = window.mps.length()
     L, Lbra = _extend_through_left(window, n)
     # L's three dangling legs are (Lbra [a fresh bra-side mint from this

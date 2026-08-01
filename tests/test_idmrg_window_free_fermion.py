@@ -55,7 +55,7 @@ import numpy as np
 import pytest
 
 from dmrgpy import spinchain, timedependent
-from dmrgpy.pyitensor import idmrg, idmrg_window
+from dmrgpy.pyitensor import idmrg, idmrg_window, kernels
 from dmrgpy.pyitensor.mpsalgebra import inner
 
 from _free_fermion_reference import FreeFermionXX
@@ -96,16 +96,47 @@ def test_free_fermion_reference_matches_ed():
     assert max_err < 1e-9
 
 
+def _full_window_order(win):
+    """(order_in, shape) for the *entire* window's own explicit tensors,
+    as a single flat vector -- [left_link, s_1, ..., s_n, right_link].
+    Rebuilt fresh on demand since site Index identities are freshly
+    re-minted by every `window_tdvp_step` call (see this module's own
+    per-step rebuilding elsewhere)."""
+    n = win.mps.length()
+    site_inds = [next(ind for ind in win.mps.A(i).inds if ind.hastags("Site"))
+                 for i in range(1, n + 1)]
+    order = [win.mps.A(1).inds[0]] + site_inds + [win.mps.A(n).inds[-1]]
+    shape = tuple(ind.dim for ind in order)
+    return order, shape
+
+
+def _full_window_vector(win):
+    order, _shape = _full_window_order(win)
+    theta = win.mps.A(1)
+    for i in range(2, win.mps.length() + 1):
+        theta = theta * win.mps.A(i)
+    return theta.transpose_to(order).reshape(-1)
+
+
 def test_window_tdvp_step_eshift_matches_exact_dense_evolution():
-    """The decisive check for the `eshift` fix itself: a 2-site window's
-    own (env_HL, window, env_HR) system is small enough to diagonalize
-    exactly (dense `np.linalg.eigh`), giving a literal, closed-form
-    e^{-i(H-EGS)t} to compare `window_tdvp_step` against directly -- no
-    free-fermion mapping, no iDMRG-convergence-quality confound. If this
-    passes tightly, the fix is numerically exact for whatever env_HL/
-    env_HR/window state it is given (any *remaining* discrepancy in a
-    free-fermion comparison downstream must come from iDMRG's own
-    ground-state convergence quality, not this module's own TDVP code)."""
+    """The decisive check for the `eshift` fix itself: an n_window=3
+    window's own (env_HL, window, env_HR) system is small enough to
+    diagonalize exactly (dense `np.linalg.eigh` over the *whole* window,
+    not just one two-site bond), giving a literal, closed-form
+    e^{-i(H-EGS)t} to compare `window_tdvp_step`'s own full multi-step
+    sweep against directly -- no free-fermion mapping, no iDMRG-
+    convergence-quality confound. Deliberately n_window=3 (not 2): a
+    2-site window has only one bond, whose own L/R *are* env_HL/env_HR
+    directly with no `_extend_HL`/`_extend_HR` chaining at all -- it
+    would silently miss a bug specific to the interior-environment
+    extension `_all_left_environments_window`/`_all_right_environments_
+    window` build and `window_tdvp_step`'s own multi-bond sweep actually
+    exercises (confirmed as a real test-coverage gap, not hypothetical,
+    by code review). If this passes tightly, the fix is numerically exact
+    for whatever env_HL/env_HR/window state it is given (any *remaining*
+    discrepancy in a free-fermion comparison downstream must come from
+    iDMRG's own ground-state convergence quality, not this module's own
+    TDVP code)."""
     field = 1.4
     best = None
     for seed in range(30):
@@ -123,12 +154,21 @@ def test_window_tdvp_step_eshift_matches_exact_dense_evolution():
             break
     assert best is not None and best.converged
 
-    n_window = 2  # smallest possible two-site window (n_uc=1)
+    n_window = 3  # n_uc=1: 3 physical sites, 2 bonds -- exercises the
+    # interior-environment extension path (see this test's own docstring)
     win = idmrg_window.build_window(best, n_window)
 
-    # Build the exact dense two-site effective Hamiltonian.
-    matvec, order_in, shape, _x0 = idmrg_window._window_two_site_heff(
-        win.env_HL, win.env_HL_bra, win.mpo, win.mps, 1, win.env_HR, win.env_HR_bra)
+    # Build the exact dense n_window-site effective Hamiltonian: env_HL
+    # contracted through every site's own MPO tensor, closed by env_HR --
+    # kernels.make_matvec is a generic tensor-network contraction, not
+    # hardcoded to a fixed piece count, so this generalizes
+    # _window_two_site_heff's own 2-piece pattern to n_window pieces.
+    order_in, shape = _full_window_order(win)
+    site_inds_out = [ind.prime(1) for ind in order_in[1:-1]]
+    order_out = [win.env_HL_bra] + site_inds_out + [win.env_HR_bra]
+    pieces = [win.env_HL] + [win.mpo.A(i) for i in range(1, n_window + 1)] + [win.env_HR]
+    matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
+
     dim = int(np.prod(shape))
     Hdense = np.zeros((dim, dim), dtype=complex)
     basis = np.eye(dim, dtype=complex)
@@ -140,13 +180,10 @@ def test_window_tdvp_step_eshift_matches_exact_dense_evolution():
     Hshift = Hdense - eshift * np.eye(dim)
     evals, evecs = np.linalg.eigh(Hshift)
 
-    # Perturb (Sz at the only real site position) and read off psi0.
-    idmrg_window.apply_local_operator(win, best, 1, "Sz")
-    T1, T2 = win.mps.A(1), win.mps.A(2)
-    s_i = next(ind for ind in T1.inds if ind.hastags("Site"))
-    s_j = next(ind for ind in T2.inds if ind.hastags("Site"))
-    order0 = [T1.inds[0], s_i, s_j, T2.inds[-1]]
-    psi0 = (T1 * T2).transpose_to(order0).reshape(-1).astype(complex)
+    # Perturb the center site and read off psi0.
+    center = 2
+    idmrg_window.apply_local_operator(win, best, center, "Sz")
+    psi0 = _full_window_vector(win).astype(complex)
 
     dt, nt = 0.05, 6
     ts = [it * dt for it in range(nt)]
@@ -157,11 +194,7 @@ def test_window_tdvp_step_eshift_matches_exact_dense_evolution():
 
     psi_tdvp = []
     for it in range(nt):
-        T1, T2 = win.mps.A(1), win.mps.A(2)
-        s_i = next(ind for ind in T1.inds if ind.hastags("Site"))
-        s_j = next(ind for ind in T2.inds if ind.hastags("Site"))
-        order_now = [T1.inds[0], s_i, s_j, T2.inds[-1]]
-        psi_tdvp.append((T1 * T2).transpose_to(order_now).reshape(-1))
+        psi_tdvp.append(_full_window_vector(win))
         if it < nt - 1:
             idmrg_window.window_tdvp_step(win, dt, cutoff=1e-12, maxdim=40, niter=100, eshift=eshift)
 
@@ -267,4 +300,10 @@ def test_dynamical_correlator_td_matches_dimerized_free_fermion():
         for ix, x in enumerate(xs):
             ff_val = ff.sz_sz_connected(x0 + int(x), x0, t)
             max_err = max(max_err, abs(S[it, ix] - ff_val))
-    assert max_err < 0.3
+    # 0.12, not a much looser bound: confirmed directly over several
+    # independent runs (varying state_overlap 0.95-0.998) that max_err
+    # consistently lands around 0.069-0.070 at these parameters -- 0.12
+    # gives headroom for run-to-run convergence variance without being so
+    # loose it would miss a real regression (e.g. a reintroduced partial
+    # phase error) roughly doubling the true residual.
+    assert max_err < 0.12
