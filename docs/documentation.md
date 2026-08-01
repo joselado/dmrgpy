@@ -901,8 +901,47 @@ trace on both ends and produced a visibly non-uniform profile for a
 converged, translation-invariant ground state that should read exactly
 uniform everywhere.
 
+**A real, previously-undiscovered bug and its fix (`eshift`)**:
+`window.env_HL`/`env_HR` are, like `window_total_energy`'s own docstring
+documents, *not* energy-baseline-subtracted — they carry a large,
+`n_window`-independent additive constant left over from every
+macro-iteration `idmrg_ground_state` already absorbed before the
+environment snapshot was taken, which varies run to run with iDMRG's own
+unseeded convergence path even for the *same*, equally-converged physical
+ground state. Since this constant multiplies the identity on the window's
+own local Hilbert space at every bond (a standard property of a
+canonically consistent DMRG/TDVP environment — `<θ|Heff|θ>` reproduces
+the *total* energy of the whole capped window+environment system
+regardless of which bond `θ` sits at), TDVP-evolving under the unshifted
+Heff produced a *global*, unphysical, run-dependent phase
+`exp(-i*const*t)` — confirmed directly: for the identical physical model,
+`window_total_energy` differing between -33 and -96 across otherwise-
+equivalent iDMRG runs left the resulting `S(x,t)` trajectory essentially
+uncorrelated between runs. The fix (`window_tdvp_step`'s `eshift`
+parameter, subtracted from every local effective Hamiltonian before
+exponentiating) is not a novel design choice — it restores consistency
+with the rest of this codebase's own established real-time correlator
+convention: an ordinary finite chain's `mpscpp3::quench_tdvp` already
+computes `EGS=<wf0|H|wf0>` and evolves under `Hshift=H-EGS*Id` (never raw
+`H`), and `edtk/timedependent.py::evolution_DC` (the ED reference) does
+the same. `dynamical_correlator_td` passes `eshift=window_total_energy
+(window_B)` (measured once, on the unperturbed ground window, before any
+perturbation) into every `window_tdvp_step` call. Verified two ways: (1)
+a dense-matrix exact cross-check — a 2-site window's own (env_HL, window,
+env_HR) system is small enough to diagonalize directly, giving a literal
+`exp(-i(H-EGS)t)` to compare `window_tdvp_step`'s own result against, no
+approximation involved — matches to ~1e-6 (Krylov/SVD-truncation-limited,
+not a real discrepancy); (2) two independent, well-converged iDMRG solves
+of the same physical model now give closely-agreeing `S(x,t)`, not just a
+coincidentally-agreeing `e0` (`tests/test_idmrg_window_free_fermion.py`).
+The native ITensor v3 port (below) had the identical bug, fixed the same
+way (a post-hoc `exp(+i*eshift*t)` correction — equally exact, since the
+baseline provably factors as a uniform additive-to-identity scalar — used
+there instead of "fix at the source" since ITensorTDVP's own `tdvp()` is
+a vendored black box that cannot be wrapped like pyitensor's own matvec).
+
 `dynamical_correlator_td`/`snapshot_correlator` reconstruct
-`S(x,t)=<ψ|A_x e^{-iHt}B_0|ψ>` for *every* `x` from a *single* window
+`S(x,t)=<ψ|A_x e^{-i(H-EGS)t}B_0|ψ>` for *every* `x` from a *single* window
 evolution (the paper's own headline efficiency result), by inserting
 operator `A` directly into the *bra* side of the overlap at the shifted
 absolute position, padding whichever side's explicit tensor list falls
@@ -934,7 +973,19 @@ against `kpm_finite` (an independent approximation scheme — open-boundary
 window + KPM, vs. this method's IBC window + TDVP) for the same physical
 correlator — an exact match isn't expected, but both agree on where the
 dominant spectral weight sits (`tests/test_infinite_chain.py`,
-`examples/idmrg/td_dynamical_correlator/main.py`).
+`examples/idmrg/td_dynamical_correlator/main.py`). Also cross-checked at
+`t>0` against an *exact* non-interacting reference: the XX spin chain
+(`H=J*Σ(Sx_iSx_{i+1}+Sy_iSy_{i+1})`) maps exactly to free fermions under
+Jordan-Wigner (`tests/_free_fermion_reference.py`), whose connected Sz-Sz
+correlator has a closed form computable via one N×N diagonalization —
+polynomial cost, so exact for N far beyond many-body ED's exponential
+reach (`tests/test_idmrg_window_free_fermion.py`). The reference itself
+is validated against exact ED to ~1e-12; a *dimerized* (SSH-like, still
+exactly free-fermion) variant is used for the quantitative iDMRG
+comparison since it opens a gap and converges far better than the
+gapless uniform chain (state_overlap ~0.98-0.999 vs ~0.87-0.96 at the
+same bond dimension) — this is the check that found the `eshift` bug
+above.
 
 `Infinite_Many_Body_Chain.td_dynamical_correlator` (`infinitechain.py`)
 wires this up as the public API, mirroring `kpm_finite`'s own docstring

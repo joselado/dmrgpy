@@ -130,6 +130,81 @@ def test_td_dynamical_correlator_v3_matches_python_at_small_t():
     assert np.all(np.isfinite(S_v))
 
 
+def test_td_dynamical_correlator_v3_eshift_insensitive_to_evolution_maxdim():
+    """Basic sanity/consistency coverage for a real (now fixed) issue
+    found by code review in the `eshift` fix itself (not the original
+    pre-fix bug): the throwaway t=0 `tdvp()` call that measures `eshift`
+    (`Chain::td_dynamical_correlator_window`, `mpscpp3/chain_session.h`)
+    originally reused the *caller's* own `maxdim`/`cutoff` for its own
+    measurement sweep -- but TDVPWorker's per-bond SVD split still runs
+    (and truncates) even at `t=0` (`exp(0*Heff)=Id` makes the *local
+    update* a no-op, not the split), so a caller-chosen `maxdim` smaller
+    than the window's own already-converged bond dimension would silently
+    truncate the throwaway copy *before* its energy is read off, biasing
+    `eshift`. Fixed by measuring `eshift` with a fixed, generous
+    `maxdim`/`cutoff=0` regardless of the caller's own evolution settings
+    (mirroring pyitensor's own `window_total_energy`, which contracts
+    exactly with no truncation at all).
+
+    NOT a strong regression test for this specific fix: confirmed
+    directly (temporarily reintroducing the bug and rebuilding) that at
+    `_build_fast`'s own modest `maxm=8`, the resulting eshift bias is too
+    small relative to ordinary evolution-truncation noise at `maxdim=4`
+    to reliably fail a loose tolerance here -- isolating it cleanly would
+    need a larger `maxm` and a more extreme `maxdim` mismatch, adding
+    real runtime to an already-slow test module (see this module's own
+    docstring), judged disproportionate for now. What this test does
+    check: `td_dynamical_correlator_window` stays finite and reasonably
+    self-consistent across different evolution `maxdim` choices on the
+    same converged chain -- a real, if modest, sanity check."""
+    n_window, dt, nt = 4, 0.1, 3
+    cv = _build_fast(3)  # maxm=8
+
+    ts_lo, xs_lo, S_lo = cv._session3.td_dynamical_correlator_window(
+        n_window, "Sz", "Sz", dt, nt, [0, 1], 4, 1e-10, 50, True, 0)
+    ts_hi, xs_hi, S_hi = cv._session3.td_dynamical_correlator_window(
+        n_window, "Sz", "Sz", dt, nt, [0, 1], 30, 1e-10, 50, True, 0)
+    S_lo, S_hi = np.array(S_lo), np.array(S_hi)
+
+    assert np.all(np.isfinite(S_lo)) and np.all(np.isfinite(S_hi))
+    assert np.max(np.abs(S_lo - S_hi)) < 0.1
+
+
+def test_td_dynamical_correlator_v3_reproducible_across_convergence():
+    """`Chain::td_dynamical_correlator_window`'s own `idmrg_HL_`/`idmrg_HR_`
+    are, like their pyitensor counterparts, not energy-baseline-subtracted
+    -- pre-fix, TDVP-evolving the (perturbed) window under them directly
+    carried a spurious, run-dependent global phase (see
+    tests/test_idmrg_window_free_fermion.py's own module docstring for the
+    full derivation/pyitensor-side confirmation of this same bug). Fixed
+    here with a post-hoc `exp(+i*eshift*t)` correction (`eshift` measured
+    via a throwaway t=0 `tdvp()` call, see td_dynamical_correlator_window's
+    own comment in chain_session.h) rather than pyitensor's "fix at the
+    source" `eshift`-in-matvec approach, since ITensorTDVP's own boundary-
+    tensor `tdvp()` overload is a vendored black box that cannot be
+    wrapped the same way -- both are mathematically exact (the baseline
+    provably factors as a uniform additive-to-identity scalar), verified
+    independently on the pyitensor side by a dense-matrix exact-evolution
+    cross-check. Two independent (unseeded) `_build_fast(3)` runs of the
+    *same* physical model should now give closely-agreeing S(x,t), not
+    just a coincidentally-agreeing e0."""
+    n_window, dt, nt = 4, 0.1, 5
+    cv_a = _build_fast(3)
+    cv_b = _build_fast(3)
+    assert cv_a.e0 == pytest.approx(cv_b.e0, abs=0.05)
+
+    ts_a, xs_a, S_a = cv_a._session3.td_dynamical_correlator_window(
+        n_window, "Sz", "Sz", dt, nt, [0, 1], 30, 1e-10, 50, True, 0)
+    ts_b, xs_b, S_b = cv_b._session3.td_dynamical_correlator_window(
+        n_window, "Sz", "Sz", dt, nt, [0, 1], 30, 1e-10, 50, True, 0)
+    S_a, S_b = np.array(S_a), np.array(S_b)
+    # Loose tolerance (independent ground states/gauges, loosely converged
+    # -- see _build_fast's own docstring): the point is that these are now
+    # close at all, not exact agreement. Pre-fix, this max|diff| was
+    # order-1 (comparable to S itself) for the analogous pyitensor check.
+    assert np.max(np.abs(S_a - S_b)) < 0.3
+
+
 def test_td_dynamical_correlator_public_api_dispatches_to_v3():
     """Infinite_Many_Body_Chain.td_dynamical_correlator(itensor_version=3)
     (the public, documented entry point) returns finite S(k,omega) with

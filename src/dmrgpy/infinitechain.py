@@ -695,9 +695,9 @@ class Infinite_Many_Body_Chain:
         position `p_i`'s own site `+x` (bra side, *not* time-evolved) --
         see `pyitensor.idmrg_window.dynamical_correlator_td`'s own
         docstring for the precise (Schrödinger-picture, background-
-        subtracted) convention this follows, and why no `e^{iE0t}`
-        Heisenberg-picture conversion is applied (matching this codebase's
-        own established "TD" submode convention).
+        subtracted, ground-state-energy-shifted) convention this follows,
+        matching the rest of this codebase's own established "TD" submode
+        convention (`mpscpp3::quench_tdvp`'s `Hshift = H - EGS*Id`).
 
         `n_window`: number of unit-cell repeats in the window -- same
         convergence caveat as `kpm_finite`'s own `n_window` (check by

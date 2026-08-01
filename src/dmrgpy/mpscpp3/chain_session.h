@@ -2336,6 +2336,85 @@ class Chain
         int n = win.n;
         int center = idmrg_window_center(n_window,n_uc,p_i);
 
+        // ITensor's own environment-propagation convention (see this
+        // method's own top comment) -- convert once, outside the time
+        // loop. Computed *before* perturbing win.psi below, since eshift
+        // (just underneath) needs it evaluated on the unperturbed ground
+        // window too.
+        ITensor LH = idmrg_relabel_bra_to_prime_ket(idmrg_HL_,idmrg_HL_bra_,idmrg_HL_ket_);
+        ITensor RH = idmrg_relabel_bra_to_prime_ket(idmrg_HR_,idmrg_HR_bra_,idmrg_HR_ket_);
+
+        // eshift: the window's own total energy (baseline + genuine
+        // window physics), measured on the *unperturbed* ground window --
+        // mirrors pyitensor/idmrg_window.py's own window_tdvp_step
+        // `eshift` fix exactly (see that function's own docstring for the
+        // full derivation/justification, and window_total_energy's own
+        // docstring point 2). idmrg_HL_/idmrg_HR_ are, just like their
+        // pyitensor counterparts, not energy-baseline-subtracted -- they
+        // carry a large, macro-iteration-count-dependent additive
+        // constant left over from idmrg_ground_state's own growth, so
+        // TDVP evolution of the (perturbed) window under the unshifted
+        // LH/RH picks up a spurious global phase exp(-i*const*t) that
+        // varies run to run for the *same* physical, equally-converged
+        // ground state -- confirmed directly on the pyitensor side (see
+        // window_tdvp_step's own docstring); this v3 path shares the
+        // identical unshifted-LH/RH construction, so it has the same bug.
+        // Measured via a throwaway copy of win.psi and a null (t=0) tdvp()
+        // step purely to read off its own returned Rayleigh-quotient
+        // energy (TDVPWorker's own per-bond expectation value, which
+        // already correctly includes the LH/RH boundary caps) -- avoids
+        // hand-rolling a fresh LH*mpo*RH sandwich contraction. The
+        // *actual* win.psi below is left untouched by this measurement.
+        //
+        // Deliberately does NOT reuse the caller's own maxdim/cutoff here
+        // (unlike the real evolution sweep below): TDVPWorker's per-bond
+        // step still runs an SVD split (with the requested truncation)
+        // even at t=0 -- exp(0*Heff)=Id makes the *local update* a no-op,
+        // but the split itself is not skipped, so reusing a caller-chosen
+        // maxdim smaller than the window's own already-converged bond
+        // dimension would silently truncate this throwaway copy *before*
+        // its energy is read off, biasing eshift (and therefore every
+        // reported S(x,t), via the post-hoc exp(+i*eshift*t) correction
+        // below) by exactly the discarded weight -- confirmed as a real
+        // risk, not hypothetical, for any caller passing a smaller
+        // maxdim to td_dynamical_correlator_window than the window's own
+        // natural bond dimension (a common pattern: a cheaper maxdim for
+        // the time-evolution sweep than the ground-state solve used).
+        // cutoff=0 and a generous maxdim make this split lossless (up to
+        // floating point), matching pyitensor's own window_total_energy,
+        // which contracts exactly with no truncation at all.
+        double eshift;
+        {
+        MPS psi_for_energy = win.psi;
+        psi_for_energy.position(1);
+        auto sweeps_e = Sweeps(1);
+        sweeps_e.maxdim() = 100000;
+        sweeps_e.cutoff() = 0.0;
+        sweeps_e.niter() = niter;
+        Args args_e("Quiet",true,"Silent",true,"NumCenter",2,"Truncate",true,"DoNormalize",true);
+        eshift = tdvp(psi_for_energy,win.mpo,Cplx(0,0),LH,RH,sweeps_e,args_e);
+        }
+        // Documented-not-fixed (code review): this path has no dense-
+        // matrix exact cross-check analogous to pyitensor's own
+        // test_window_tdvp_step_eshift_matches_exact_dense_evolution
+        // (tests/test_idmrg_window_free_fermion.py) -- building one here
+        // would need exposing this window's own tensors to Python (or a
+        // C++-side dense comparison) that doesn't exist yet. The fix
+        // above (untruncated eshift measurement) is verified only by
+        // tests/test_idmrg_window_v3.py's own loose reproducibility/
+        // consistency checks, not by a strong regression test: manually
+        // reintroducing the truncation-coupling bug this block fixes
+        // (reusing the caller's own maxdim/cutoff here instead) did NOT
+        // reliably fail those checks at the test module's own modest
+        // maxm=8 -- the resulting eshift bias was too small there to
+        // separate cleanly from ordinary evolution-truncation noise at
+        // low maxdim. Isolating it would need a larger maxm and a more
+        // extreme maxdim mismatch than currently used, adding real
+        // runtime to an already-slow test module; judged disproportionate
+        // for now given the fix itself is unambiguously more correct by
+        // construction (exact vs. truncated measurement) regardless of
+        // whether a dramatic before/after test currently demonstrates it.
+
         // Sec. V.1 step 3: perturb (B_0|psi>), in place.
         idmrg_window_apply_local_op(win,center,opname_B);
         // Establish a genuine orthogonality center now (via ITensor's own
@@ -2359,12 +2438,6 @@ class Chain
                 background[x] = mean_B*idmrg_onsite_expectation(p_A,opname_A);
                 }
             }
-
-        // ITensor's own environment-propagation convention (see this
-        // method's own top comment) -- convert once, outside the time
-        // loop.
-        ITensor LH = idmrg_relabel_bra_to_prime_ket(idmrg_HL_,idmrg_HL_bra_,idmrg_HL_ket_);
-        ITensor RH = idmrg_relabel_bra_to_prime_ket(idmrg_HR_,idmrg_HR_bra_,idmrg_HR_ket_);
 
         // The converged unit cell's own dominant right transfer-matrix
         // fixed point (idmrg_window_snapshot_correlator's own right-edge
@@ -2397,9 +2470,16 @@ class Chain
             out.ts[it] = it*dt;
             auto snap = idmrg_window_snapshot_correlator(win,opname_A,x_values,center,
                                                            rho_flat,chi_right);
+            // Undo the spurious global phase exp(-i*eshift*t) win.psi has
+            // picked up from evolving under unshifted LH/RH (see eshift's
+            // own comment above) -- applied to the *raw* snapshot value,
+            // before background subtraction, since `background` is
+            // computed from the static, un-evolved ground state and never
+            // carries this phase to begin with.
+            Cplx phase = std::exp(Cplx(0.0,1.0)*eshift*out.ts[it]);
             for (size_t ix=0; ix<x_values.size(); ++ix)
                 {
-                Cplx val = snap[ix];
+                Cplx val = snap[ix]*phase;
                 if (connected) val -= background[x_values[ix]];
                 out.S[(size_t)it*x_values.size()+ix] = val;
                 }

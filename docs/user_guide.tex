@@ -2224,13 +2224,21 @@ such models; a purely bond-coupled Hamiltonian (e.g. plain Heisenberg)
 is unaffected.
 
 \texttt{opname\_j} is applied at sublattice position \texttt{p\_i} and
-evolved forward in time; \texttt{opname\_i} is inserted at the shifted
+evolved forward in time under the window's own ground-state-energy-
+shifted Hamiltonian ($e^{-i(H-E_{\rm GS})t}$, matching this codebase's
+own established real-time correlator convention, e.g.\
+\texttt{mpscpp3::quench\_tdvp}'s $H_{\rm shift}=H-E_{\rm GS}\cdot
+\text{Id}$); \texttt{opname\_i} is inserted at the shifted
 position (bra side, not itself evolved) -- this is the paper's own
 headline efficiency result: every \texttt{x} (and, via the spatial
 Fourier transform below, every \texttt{k}) comes from this \emph{one}
 window evolution, not one run per distance the way a naive real-time
 approach (or \texttt{kpm\_finite}'s own one-run-per-\texttt{r} KPM
-calls) would need. \texttt{connected=True} (default) subtracts the
+calls) would need. Cross-checked against an exact non-interacting
+(free-fermion) reference for the XX chain, on systems far larger than
+many-body ED could reach -- see \texttt{docs/documentation.tex}'s own
+architecture-level notes on this method for the full derivation and
+what that check found. \texttt{connected=True} (default) subtracts the
 disconnected background \texttt{<opname\_i><opname\_j>} before the
 spatial Fourier transform -- turning it off produces a spurious,
 dominant $k=0$ contribution with no discernible dispersion (the raw
