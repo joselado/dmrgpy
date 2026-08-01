@@ -75,10 +75,15 @@ class Many_Body_Chain():
           # mpscpp3/chain_session.h's or pyitensor's quench_tdvp()/
           # evolve_and_measure_tdvp()), "TDVP_GSE" (one-site TDVP with
           # Krylov global subspace expansion, arXiv:2005.06104 -- same
-          # itensor_version support as "TDVP"; see tdvp_gse_* below), or
-          # "MPO" (the legacy 2nd-order Taylor-expanded evoloperator()
-          # backup, the only option for itensor_version=2, since neither
-          # TDVP flavor exists there -- a v2-API port was attempted but
+          # itensor_version support as "TDVP"; see tdvp_gse_* below),
+          # "TEBD" (2nd-order-Trotter TEBD, pyitensor/tebd.py --
+          # itensor_version="python" only, and only for a strictly
+          # nearest-neighbor Hamiltonian; gates are built once from the
+          # bare bond Hamiltonians and reused every step, so it's cheaper
+          # per step than TDVP whenever it applies), or "MPO" (the legacy
+          # 2nd-order Taylor-expanded evoloperator() backup, the only
+          # option for itensor_version=2, since none of TDVP/TDVP_GSE/TEBD
+          # exist there -- a v2-API port of TDVP was attempted but
           # reverted after a severe, unresolved performance regression at
           # n>~10 sites, see git history around mpscpp2/TDVP/ if picking
           # this up again). See timedependent.py's evolution_dmrg_DC()/

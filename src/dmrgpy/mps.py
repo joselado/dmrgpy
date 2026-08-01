@@ -47,15 +47,37 @@ class MPS():
         """Copy this wavefunction"""
         if name is None:
           name = id_generator()+".mps" # create a new name
-        # A shallow copy is enough, and deliberately used instead of a deep
-        # one: the opaque cpp_handle is never mutated in place (every Chain
-        # method takes wf by const reference and returns a brand-new MPS,
-        # see chain_session.h), and self.MBO should stay shared -- there is
-        # no reason to duplicate the whole chain object just to copy one
-        # wavefunction. A real deepcopy would also choke on cpp_handle,
-        # which has no pickle/deepcopy support.
+        # A shallow copy of self is enough for the C++ backends (itensor_
+        # version 2/3): the opaque cpp_handle is never mutated in place
+        # there (every Chain method takes wf by const reference and
+        # returns a brand-new MPS, see chain_session.h), and self.MBO
+        # should stay shared -- there is no reason to duplicate the whole
+        # chain object just to copy one wavefunction. A real deepcopy
+        # would also choke on that cpp_handle, which has no pickle/
+        # deepcopy support.
+        #
+        # itensor_version="python" is different: its cpp_handle is a
+        # mutable pyitensor.mpscontainer.MPS whose tensor list TDVP/TEBD
+        # mutate in place via set_A() (tdvp.py's sweep helpers, tebd.py's
+        # _apply_bond_gate) rather than returning a fresh object -- so
+        # merely sharing that handle reference (what the shallow copy
+        # below does on its own) leaves the "copy" aliased to the
+        # original: evolving one silently evolves the other too.
+        # Confirmed to actually bite in practice (not just in theory): a
+        # two-Hamiltonian quench benchmark comparing TDVP against TEBD
+        # from a shared initial state, and evolve_and_measure_dmrg's own
+        # documented forward+backward round-trip fidelity pattern, both
+        # produced silently wrong results through exactly this aliasing
+        # before this fix. pyitensor's own MPS.copy() (mpscontainer.py)
+        # duplicates the tensor list correctly, so use it explicitly
+        # whenever the handle actually exposes one -- the C++ handles are
+        # genuine opaque pybind11 objects with no Python-visible methods
+        # at all (see mpscpp2/mpscpp3's bindings.cc), so hasattr() here
+        # reliably tells the two cases apart.
         out = _shallow_copy(self)
         out.name = name
+        if self.cpp_handle is not None and hasattr(self.cpp_handle,"copy"):
+            out.cpp_handle = self.cpp_handle.copy()
         return out
     def __deepcopy__(self,memo):
         """Defer to copy(): see the note there for why a shallow copy is

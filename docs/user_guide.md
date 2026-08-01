@@ -838,7 +838,13 @@ Frequency resolution is set by $T$ (via the usual $\Delta\omega\sim
 1/T$ time-frequency uncertainty), so this method is best when you want
 fine resolution over a *narrow* frequency window, at the cost of a real
 dynamical simulation (bond dimension grows with entanglement generated
-during the evolution).
+during the evolution). The propagator used for this evolution is the
+same `sc.tevol_method` selector described in §7, including
+`tevol_method="TEBD"` — cheaper per step than TDVP whenever the
+Hamiltonian is strictly nearest-neighbor, e.g.\ a
+`Spinful_Fermionic_Chain_Native` Hubbard chain (the standard interleaved
+`Spinful_Fermionic_Chain` is *not* nearest-neighbor after Jordan-Wigner
+threading, so TEBD raises `NotImplementedError` there).
 
 **`submode="TDZ"` — complex-time evolution (Cao, Lu, Stoudenmire &
 Parcollet, arXiv:2311.10909).** Real-time evolution (`"TD"` above) grows
@@ -993,7 +999,7 @@ flip a spin, or add a particle) before evolving and measuring $B(t)$.
 directly, $\langle\psi_0|e^{iHt}|\psi_0\rangle$, without a separate
 measurement operator.
 
-**Choosing the propagator: `sc.tevol_method`.** Three options:
+**Choosing the propagator: `sc.tevol_method`.** Four options:
 
 - `"TDVP"` (the default) — two-site TDVP, which grows the MPS bond
   dimension via SVD the same way ground-state DMRG does. Used whenever
@@ -1011,10 +1017,29 @@ measurement operator.
   dimension is small (e.g.\ a product-state quench) and one-site TDVP
   alone (which conserves bond dimension exactly) wouldn't be able to grow
   into the entanglement the subsequent evolution generates.
+- `"TEBD"` (`itensor_version="python"` only, and only for a strictly
+  nearest-neighbor Hamiltonian — any term touching 3 or more distinct
+  sites raises `NotImplementedError`) — the standard 2nd-order-Trotter,
+  even/odd-bond ("brick-wall") algorithm: $e^{-iH\,dt}\approx
+  e^{-iH_{\rm odd}\,dt/2}\,e^{-iH_{\rm even}\,dt}\,e^{-iH_{\rm odd}\,dt/2}$,
+  where $H_{\rm odd}$/$H_{\rm even}$ sum the bond Hamiltonians on
+  odd-/even-indexed bonds (each internally commuting, since every bond in
+  one group acts on disjoint sites). Onsite terms are split half-and-half
+  onto each site's neighboring bond(s) (full weight at a chain boundary).
+  Unlike the TDVP variants, every bond's evolution gate
+  $e^{-i\tau h_{\rm bond}}$ is the exact exponential of the *bare* local
+  2-site Hamiltonian, built once up front and reused unchanged for every
+  time step — no per-step Krylov/Lanczos work at all — so `"TEBD"` is
+  typically cheaper per step than TDVP whenever the Hamiltonian qualifies.
 - `"MPO"` — a hand-rolled 2nd-order Taylor expansion of $e^{-iH\,dt}$
   applied as an MPO each step; the only option on `itensor_version=2`
-  (which has no TDVP at all), and available (if slower/less accurate for
-  a given bond dimension) everywhere else too.
+  (which has no TDVP or TEBD at all), and available (if slower/less
+  accurate for a given bond dimension) everywhere else too.
+
+```python
+sc.setup_python()          # TEBD only exists on the pure-Python backend
+sc.tevol_method = "TEBD"
+```
 
 ```python
 sc.tevol_method = "TDVP_GSE"
