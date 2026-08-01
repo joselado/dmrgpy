@@ -118,6 +118,142 @@ def test_tebd_matches_ed_fermion_chain():
     assert np.array(y1) == pytest.approx(np.array(y), abs=1e-4)
 
 
+def test_tebd_v3_matches_ed_spin_chain():
+    """C++ (itensor_version=3) counterpart of test_tebd_matches_ed_spin_chain
+    above, exercising mpscpp3/tebd.h's Chain::evolve_and_measure_tebd()
+    instead of pyitensor/tebd.py's TEBDEvolver -- same setup, same
+    tolerance. Falls back to ED transparently (mode.py) if the v3
+    extension isn't compiled in this checkout, same as any other
+    itensor_version=3 test here."""
+    n = 4
+    spins = [2 for _ in range(n)]  # S=1/2
+    sc = spinchain.Spin_Chain(spins)
+    sc.setup_cpp(version=3)
+    sc.tevol_method = "TEBD"
+
+    h0 = 0
+    for i in range(n):
+        h0 = h0 + (-1) ** i * sc.Sz[i]
+    h1 = 0
+    for i in range(n - 1):
+        h1 = h1 + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
+
+    sc.set_hamiltonian(h0)
+    wf = sc.get_gs()
+    wfED = sc.get_gs(mode="ED")
+    sc.set_hamiltonian(h1)
+
+    nt, dt = 50, 0.05
+    (_ts, sz) = timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=nt, dt=dt, wf=wf)
+    (_tsED, szED) = timedependent.evolve_and_measure(
+            sc, operator=sc.Sz[0], nt=nt, dt=dt, wf=wfED, mode="ED")
+
+    assert np.array(sz).real == pytest.approx(np.array(szED).real, abs=1e-4)
+
+
+def test_tebd_v3_matches_python_fermion_chain():
+    """Cross-backend check for mpscpp3/tebd.h's bond_hamiltonians(): a
+    from-scratch C++ port of pyitensor/autompo.py's HTerm.resolve() (same
+    carried-parity Jordan-Wigner threading, composed via ITensor's own
+    multSiteOps() instead of dense matrix multiplication), so this
+    compares itensor_version=3 directly against itensor_version="python"
+    on a hopping+staggered-onsite Hamiltonian (exercising both the
+    2-site-bond and the onsite-split code paths together) rather than
+    against ED, which is already covered by test_tebd_matches_ed_fermion_chain.
+    Both backends should agree far tighter than the ED tolerance used
+    elsewhere in this file (confirmed ~1e-14 during development)."""
+    n = 5
+
+    def build(fc):
+        h0 = 0
+        h1 = 0
+        for i in range(n):
+            h0 = h0 + (-1) ** i * fc.N[i]
+        for i in range(n - 1):
+            h1 = h1 + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+        h1 = h1 + 0.3 * sum(fc.N[i] for i in range(n))
+        return h0, h1
+
+    nt, dt = 40, 0.05
+
+    fc3 = fermionchain.Fermionic_Chain(n)
+    fc3.setup_cpp(version=3)
+    fc3.tevol_method = "TEBD"
+    h0_3, h1_3 = build(fc3)
+    fc3.set_hamiltonian(h0_3)
+    wf3 = fc3.get_gs()
+    fc3.set_hamiltonian(h1_3)
+    (_ts3, n2_v3) = timedependent.evolve_and_measure(fc3, operator=fc3.N[2], nt=nt, dt=dt, wf=wf3)
+
+    fcp = fermionchain.Fermionic_Chain(n)
+    fcp.setup_python()
+    fcp.tevol_method = "TEBD"
+    h0_p, h1_p = build(fcp)
+    fcp.set_hamiltonian(h0_p)
+    wfp = fcp.get_gs()
+    fcp.set_hamiltonian(h1_p)
+    (_tsp, n2_py) = timedependent.evolve_and_measure(fcp, operator=fcp.N[2], nt=nt, dt=dt, wf=wfp)
+
+    assert np.array(n2_v3).real == pytest.approx(np.array(n2_py).real, abs=1e-8)
+
+
+def test_tebd_v3_rejects_non_nearest_neighbor_hamiltonian():
+    """C++ counterpart of test_tebd_rejects_non_nearest_neighbor_hamiltonian:
+    mpscpp3/tebd.h's bond_hamiltonians() must raise a catchable RuntimeError
+    (an ITError translated by pybind11, not a process-killing abort() --
+    see chain_session.h's own extensive comment on why every recoverable
+    failure there uses `throw ITError(...)`, never `Error(...)`) for a
+    term spanning 3+ sites, exactly like the Python backend's
+    NotImplementedError."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_cpp(version=3)
+    fc.tevol_method = "TEBD"
+
+    h = fc.Cdag[0] * fc.C[2]
+    h = h + h.get_dagger()
+    fc.set_hamiltonian(h)
+
+    with pytest.raises(RuntimeError):
+        timedependent.evolution_ABA(fc, nt=5, dt=0.05, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+
+
+def test_tebd_v3_dynamical_correlator_matches_python_spin_chain():
+    """C++ counterpart of test_tebd_dynamical_correlator_matches_ed_spin_chain,
+    exercising Chain::quench_tebd() (the ground-state-energy-shift +
+    two-state-overlap path, distinct from evolve_and_measure_tebd() above)
+    -- compared against itensor_version="python" directly, matching
+    test_tebd_v3_matches_python_fermion_chain's rationale."""
+    n = 4
+    spins = [2 for _ in range(n)]
+
+    sc3 = spinchain.Spin_Chain(spins)
+    sc3.setup_cpp(version=3)
+    sc3.tevol_method = "TEBD"
+    h = 0
+    for i in range(n - 1):
+        h = h + sc3.Sx[i]*sc3.Sx[i+1] + sc3.Sy[i]*sc3.Sy[i+1] + sc3.Sz[i]*sc3.Sz[i+1]
+    sc3.set_hamiltonian(h)
+
+    scp = spinchain.Spin_Chain(spins)
+    scp.setup_python()
+    scp.tevol_method = "TEBD"
+    hp = 0
+    for i in range(n - 1):
+        hp = hp + scp.Sx[i]*scp.Sx[i+1] + scp.Sy[i]*scp.Sy[i+1] + scp.Sz[i]*scp.Sz[i+1]
+    scp.set_hamiltonian(hp)
+
+    nt, dt = 60, 0.05
+    sc3.get_gs()
+    scp.get_gs()
+    name3 = (sc3.Sz[0], sc3.Sz[0])
+    namep = (scp.Sz[0], scp.Sz[0])
+    (_ts3, cs3) = timedependent.evolution_DC(sc3, mode="DMRG", name=name3, nt=nt, dt=dt)
+    (_tsp, csp) = timedependent.evolution_DC(scp, mode="DMRG", name=namep, nt=nt, dt=dt)
+
+    assert np.array(cs3) == pytest.approx(np.array(csp), abs=1e-8)
+
+
 def test_tebd_rejects_non_nearest_neighbor_hamiltonian():
     """bond_hamiltonians() must fail loudly, not silently drop the
     long-range piece, when the Hamiltonian isn't strictly nearest-

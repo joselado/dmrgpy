@@ -1173,22 +1173,28 @@ options:
     dimension is small (e.g.\ a product-state quench) and one-site TDVP
     alone (which conserves bond dimension exactly) wouldn't be able to
     grow into the entanglement the subsequent evolution generates.
-  \item \texttt{"TEBD"} (\texttt{itensor\_version="python"} only, and
-    only for a strictly nearest-neighbor Hamiltonian --- any term
-    touching 3 or more distinct sites raises \texttt{NotImplementedError})
-    --- the standard 2nd-order-Trotter, even/odd-bond (``brick-wall'')
-    algorithm: $e^{-iH\,dt}\approx e^{-iH_{\rm odd}\,dt/2}\,
-    e^{-iH_{\rm even}\,dt}\,e^{-iH_{\rm odd}\,dt/2}$, where $H_{\rm odd}$/
-    $H_{\rm even}$ sum the bond Hamiltonians on odd-/even-indexed bonds
-    (each internally commuting, since every bond in one group acts on
-    disjoint sites). Onsite terms are split half-and-half onto each
-    site's neighboring bond(s) (full weight at a chain boundary). Unlike
-    the TDVP variants, every bond's evolution gate
-    $e^{-i\tau h_{\rm bond}}$ is the exact exponential of the \emph{bare}
-    local 2-site Hamiltonian, built once up front and reused unchanged
-    for every time step --- no per-step Krylov/Lanczos work at all --- so
-    \texttt{"TEBD"} is typically cheaper per step than TDVP whenever the
-    Hamiltonian qualifies.
+  \item \texttt{"TEBD"} (\texttt{itensor\_version} \texttt{3} or
+    \texttt{"python"}, and only for a strictly nearest-neighbor
+    Hamiltonian --- any term touching 3 or more distinct sites raises
+    \texttt{NotImplementedError} (\texttt{"python"}) or a catchable
+    \texttt{RuntimeError} (\texttt{3})) --- the standard 2nd-order-Trotter,
+    even/odd-bond (``brick-wall'') algorithm: $e^{-iH\,dt}\approx
+    e^{-iH_{\rm odd}\,dt/2}\, e^{-iH_{\rm even}\,dt}\,e^{-iH_{\rm
+    odd}\,dt/2}$, where $H_{\rm odd}$/ $H_{\rm even}$ sum the bond
+    Hamiltonians on odd-/even-indexed bonds (each internally commuting,
+    since every bond in one group acts on disjoint sites). Onsite terms
+    are split half-and-half onto each site's neighboring bond(s) (full
+    weight at a chain boundary). Unlike the TDVP variants, every bond's
+    evolution gate $e^{-i\tau h_{\rm bond}}$ is the exact exponential of
+    the \emph{bare} local 2-site Hamiltonian, built once up front and
+    reused unchanged for every time step --- no per-step Krylov/Lanczos
+    work at all --- so \texttt{"TEBD"} is typically cheaper per step than
+    TDVP whenever the Hamiltonian qualifies. \texttt{itensor\_version=3}
+    builds the gate via ITensor's own \texttt{BondGate} primitive
+    (\texttt{mpscpp3/tebd.h}); \texttt{"python"} exponentiates the bare
+    2-site matrix directly (\texttt{pyitensor/tebd.py}'s
+    \texttt{TEBDEvolver}) --- both backends agree with each other to
+    machine precision on a fermionic hopping+onsite benchmark.
   \item \texttt{"MPO"} --- a hand-rolled 2nd-order Taylor expansion of
     $e^{-iH\,dt}$ applied as an MPO each step; the only option on
     \texttt{itensor\_version=2} (which has no TDVP or TEBD at all), and
@@ -1204,7 +1210,7 @@ sc.tdvp_gse_cutoff = 1e-8
 \end{lstlisting}
 
 \begin{lstlisting}
-sc.setup_python()          # TEBD only exists on the pure-Python backend
+sc.setup_cpp(version=3)    # or sc.setup_python()
 sc.tevol_method = "TEBD"
 \end{lstlisting}
 

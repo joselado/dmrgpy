@@ -36,13 +36,17 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     minutes at n=12, versus under a second for the same computation on
     v3/"python") that couldn't be root-caused in the time available.
 
-    self.tevol_method="TEBD" instead runs 2nd-order-Trotter TEBD
-    (pyitensor/tebd.py's TEBDEvolver -- gates built once from the bare
-    nearest-neighbor bond Hamiltonians, reused unchanged every step, no
-    per-step Krylov/Lanczos at all) -- itensor_version="python" only (no
-    C++-backend port exists), and only for a strictly nearest-neighbor
-    self.hamiltonian (TEBDEvolver raises NotImplementedError otherwise;
-    fall back to "TDVP" for longer-range models).
+    self.tevol_method="TEBD" instead runs 2nd-order-Trotter TEBD (gates
+    built once from the bare nearest-neighbor bond Hamiltonians, reused
+    unchanged every step, no per-step Krylov/Lanczos at all) --
+    itensor_version=3 or "python" only (itensor_version="python" via
+    pyitensor/tebd.py's TEBDEvolver, itensor_version=3 via
+    mpscpp3/tebd.h's bond_hamiltonians()/build_tebd_gates()/tebd_step(),
+    a C++ port onto ITensor's own BondGate primitive), and only for a
+    strictly nearest-neighbor self.hamiltonian (both backends raise --
+    NotImplementedError in Python, ITError in C++ -- for any term
+    spanning 3+ distinct sites; fall back to "TDVP" for longer-range
+    models).
 
     fit_td is hardcoded False in the MPO fallback, not read from
     self.fit_td: the removed file-based backend wrote it to tasks.in under
@@ -68,7 +72,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
         correlator,_wf = self._session.quench_tdvp(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                 int(nt),dt)
-    elif self.itensor_version=="python" and self.tevol_method=="TEBD":
+    elif self.itensor_version in (3,"python") and self.tevol_method=="TEBD":
         correlator,_wf = self._session.quench_tebd(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                 int(nt),dt)
@@ -137,7 +141,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         correlator,_wf = self._session.evolve_and_measure_tdvp(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,
                 int(nt),dt)
-    elif self.itensor_version=="python" and self.tevol_method=="TEBD":
+    elif self.itensor_version in (3,"python") and self.tevol_method=="TEBD":
         correlator,_wf = self._session.evolve_and_measure_tebd(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,
                 int(nt),dt)

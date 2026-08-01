@@ -1165,30 +1165,51 @@ Notable, deliberate implementation details (not bugs to "fix"):
   under a second for the same computation on `itensor_version=3`) that
   couldn't be root-caused in the time available — see git history around
   `mpscpp2/TDVP/` if picking this up again.
-- `tevol_method="TEBD"` (`pyitensor/tebd.py`'s `TEBDEvolver`,
-  `itensor_version="python"` only — no C++-backend port exists) runs the
-  standard 2nd-order-Trotter, even/odd-bond algorithm instead of TDVP:
-  every bond's evolution gate `exp(-i*tau*h_bond)` is the exact
-  exponential of the *bare* local 2-site Hamiltonian (`scipy.linalg.expm`
-  on a small dense matrix), built once from `bond_hamiltonians()` and
-  reused unchanged for every subsequent time step — no per-step
-  Krylov/Lanczos work at all, unlike TDVP's per-bond, per-step
-  environment-projected exponentiation. Only valid for a strictly
-  nearest-neighbor Hamiltonian (`bond_hamiltonians()` raises
-  `NotImplementedError` for any term spanning 3+ distinct sites; span is
-  computed from each term's *resolved* per-site matrices against the
-  identity, not from raw op-name lists, since both `MultiOperator`
-  placeholder-site bookkeeping and native-spinful-site Jordan-Wigner
-  string pairs can otherwise look like spurious long-range support — see
-  `tebd.py`'s `_true_span()`). `Chain.quench_tebd()`/
-  `evolve_and_measure_tebd()` mirror the TDVP counterparts one-for-one,
-  so `get_dynamical_correlator(submode="TD")` (a `quench_tebd()` call
-  under `timedependent.py`'s `evolution_dmrg_DC()`) and
-  `evolve_and_measure_dmrg()` both support `"TEBD"` the same way they
-  support `"TDVP"`. Individually validated against exact diagonalization
-  (both agree to ~3e-4) on small nearest-neighbor systems, including a
-  native-Hubbard chain, in `tests/test_time_evolution.py`; TEBD's cost
-  advantage there scales up dramatically since TDVP's per-step cost
+- `tevol_method="TEBD"` (`itensor_version="python"` via
+  `pyitensor/tebd.py`'s `TEBDEvolver`, or `itensor_version=3` via
+  `mpscpp3/tebd.h` -- a from-scratch C++ port, not a shared code path)
+  runs the standard 2nd-order-Trotter, even/odd-bond algorithm instead of
+  TDVP: every bond's evolution gate `exp(-i*tau*h_bond)` is the exact
+  exponential of the *bare* local 2-site Hamiltonian, built once from a
+  `bond_hamiltonians()` function and reused unchanged for every subsequent
+  time step — no per-step Krylov/Lanczos work at all, unlike TDVP's
+  per-bond, per-step environment-projected exponentiation. `"python"`
+  exponentiates a small dense matrix directly (`scipy.linalg.expm`);
+  `itensor_version=3` instead builds the gate as an `ITensor` via
+  ITensor's own `BondGate` primitive (`itensor/mps/bondgate.h`, its own
+  Taylor-series `exp`, order 100 -- no `expm()` port needed). Only valid
+  for a strictly nearest-neighbor Hamiltonian (`bond_hamiltonians()`
+  raises `NotImplementedError` in `"python"`, a catchable `ITError` in
+  `3`, for any term spanning 3+ distinct sites; span is computed from each
+  term's *resolved* per-site operator against the identity, not from raw
+  op-name lists, since both `MultiOperator` placeholder-site bookkeeping
+  and native-spinful-site Jordan-Wigner string pairs can otherwise look
+  like spurious long-range support — see `tebd.py`'s `_true_span()`).
+  `mpscpp3/tebd.h`'s own `bond_hamiltonians()` reimplements the identical
+  algorithm as `pyitensor/autompo.py`'s `HTerm.resolve()` (same
+  carried-parity Jordan-Wigner threading, same per-site factor composition
+  order) directly against ITensor v3's own site operators, composing
+  same-site factors via ITensor's `multSiteOps()` primitive rather than
+  going through `AutoMPO`/`toMPO()`: a probe against real ITensor v3
+  confirmed a single, unsummed `HTerm` does *not* compile to a
+  bond-dimension-1 MPO (a bare one-site term already comes out with
+  uniform bond dimension 2 on every link), so there is no cheap way to
+  "slice" a term's own local operator out of its compiled MPO the way
+  other bond-dimension-1-only extraction tricks in this file work.
+  `Chain::quench_tebd()`/`evolve_and_measure_tebd()` mirror the TDVP
+  counterparts one-for-one (down to the ground-state-energy-shift
+  convention `quench_tebd()`/`quench_tdvp()` share), so
+  `get_dynamical_correlator(submode="TD")` (a `quench_tebd()` call under
+  `timedependent.py`'s `evolution_dmrg_DC()`) and
+  `evolve_and_measure_dmrg()` both support `"TEBD"` on `itensor_version`
+  `3` or `"python"` the same way they support `"TDVP"`. Individually
+  validated against exact diagonalization (both agree to ~1e-4) on small
+  nearest-neighbor systems, including a native-Hubbard chain, in
+  `tests/test_time_evolution.py`; the two `"TEBD"` backends additionally
+  agree with *each other* to machine precision (~1e-14) on a fermionic
+  hopping+onsite cross-check, confirming the C++ port's Jordan-Wigner
+  threading and onsite-splitting match the Python reference exactly.
+  TEBD's cost advantage scales up dramatically since TDVP's per-step cost
   scales with the local Hilbert-space dimension squared (16 for a
   dimension-4 Hubbard site) while TEBD's gates are built once and reused
   every step — see
