@@ -30,6 +30,7 @@ from .sites import SiteX
 from .svd import svd
 from .sweeps import Sweeps
 from .tdvp import tdvp_step as _tdvp_step_fn
+from .tebd import TEBDEvolver as _TEBDEvolver
 from .gse import global_subspace_expand as _global_subspace_expand_fn
 from .kpm_energy_truncation import energy_truncate as _kpm_energy_truncate
 from .tensor import commonIndex, contract_many, dag, delta, noPrime, prime, swapPrime
@@ -509,6 +510,48 @@ class Chain:
                 psi = self.global_subspace_expand(H, psi, krylov_order, gse_cutoff)
             psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm,
                     niter=50, num_center=1)
+            correlator.append(inner(psi, A, psi))
+        return correlator, psi
+
+    def quench_tebd(self, terms_h, terms_i, terms_j, nt, dt):
+        """TEBD counterpart of quench_tdvp() above: identical setup/
+        measurement, but each per-step evolution is a 2nd-order Trotter
+        TEBD step (tebd.py's TEBDEvolver, gates built once up front) in
+        place of TDVP's per-step Krylov exponentiation -- only valid for
+        a strictly nearest-neighbor terms_h (TEBDEvolver/
+        bond_hamiltonians() raise NotImplementedError otherwise). Folds
+        the same ground-energy shift into the Hamiltonian passed to
+        TEBDEvolver as quench_tdvp() applies to Hshift, for the same
+        reason (removing the state's own e^{-i*EGS*t} global phase)."""
+        if self.wf0 is None:
+            self.gs_energy()
+        ampo_h = AutoMPO.from_terms(self.sites, terms_h)
+        H = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        EGS = inner(self.wf0, H, self.wf0).real / inner(self.wf0, self.wf0).real
+        terms_shifted = list(terms_h) + [(-EGS, [("Id", 1)])]
+        evolver = _TEBDEvolver(self.sites, terms_shifted, dt, cutoff=self.cutoff, maxdim=self.maxm)
+        A1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        psi1 = self._apply_mpo(A1, self.wf0)
+        psi2 = self._apply_mpo(A2, self.wf0)
+        norm0 = np.sqrt(inner(psi1, psi1))
+        correlator = []
+        for _ in range(nt):
+            psi1 = evolver.step(psi1)
+            psi1.normalize()
+            psi1 = psi1 * norm0
+            correlator.append(inner(psi2, psi1))
+        return correlator, psi1
+
+    def evolve_and_measure_tebd(self, terms_h, terms_op, wf, nt, dt):
+        """TEBD counterpart of evolve_and_measure_tdvp() above -- see
+        quench_tebd()'s docstring."""
+        evolver = _TEBDEvolver(self.sites, terms_h, dt, cutoff=self.cutoff, maxdim=self.maxm)
+        A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        psi = wf
+        correlator = []
+        for _ in range(nt):
+            psi = evolver.step(psi)
             correlator.append(inner(psi, A, psi))
         return correlator, psi
 
