@@ -55,20 +55,49 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
     # scale= finally take effect.
     esex,wsex = get_cached_excited_states(self,n=nex,scale=scale,**kwargs)
     A,B = name[0].get_dagger(),name[1] # operators
-    wf0 = wsex[0] # ground state
-    from .algebra.arnolditk import gram_smith
-    wsex = gram_smith(wsex) # orthogonalize
-    Aop = [[wfi.dot(A*wfj) for wfj in wsex] for wfi in wsex] # representation
-    Bop = [[wfi.dot(B*wfj) for wfj in wsex] for wfi in wsex] # representation
     h = self.hamiltonian # Hamiltonian
-    Hop = [[wfi.dot(h*wfj) for wfj in wsex] for wfi in wsex] # representation
-    # transform to arrays
-    Aop = np.array(Aop)
-    Bop = np.array(Bop)
-    Hop = np.array(Hop)
-    # now get eigenvalues and eigenvectors
+    n = len(wsex) # number of states
+    # Matrix representations in the raw nex-state basis returned by the
+    # excited-state search, WITHOUT assuming it is orthonormal: DMRG
+    # excited states are only approximately orthogonal even after
+    # Gram-Schmidt (each MPS is separately bond-truncated). wfi.aMb(Op,wfj)
+    # (a direct <i|Op|j> sandwich contraction) replaces what used to be
+    # wfi.dot(Op*wfj): the latter first applies Op to wfj as an
+    # intermediate MPS, requiring a variational compression/fit at bond
+    # dimension maxm for every one of the nex^2 matrix elements -- aMb
+    # needs no such intermediate MPS (and thus no compression error) for
+    # any of Sop/Aop/Bop/Hop.
+    Sop = np.array([[wsex[a].dot(wsex[b]) for b in range(n)] for a in range(n)])
+    Aop = np.array([[wsex[a].aMb(A,wsex[b]) for b in range(n)] for a in range(n)])
+    Bop = np.array([[wsex[a].aMb(B,wsex[b]) for b in range(n)] for a in range(n)])
+    Hop = np.array([[wsex[a].aMb(h,wsex[b]) for b in range(n)] for a in range(n)])
+    # H is diagonalized in this (possibly non-orthogonal) basis via the
+    # generalized eigenvalue problem Hc=eSc, solved by canonical (Loewdin)
+    # orthogonalization rather than scipy.linalg.eigh(Hop,b=Sop) directly:
+    # that call needs a Cholesky factorization of Sop and either raises
+    # LinAlgError ("leading minor ... not positive definite") or silently
+    # returns a spurious huge-magnitude eigenvalue when Sop is
+    # (near-)singular -- confirmed directly, e.g. a 2-state basis with
+    # overlap 0.999999999 already produces a spurious eigenvalue of
+    # ~1.3e9. Near-linear-dependence among the nex excited states is
+    # expected in practice (nex requested past what the bond dimension can
+    # resolve as distinct, or a genuine physical degeneracy), so this isn't
+    # a hypothetical edge case: it's exactly the situation the old
+    # gram_smith()+remove_none() combination used to guard against, by
+    # dropping near-zero-norm directions during orthogonalization.
+    # Diagonalizing Sop and keeping only directions above a relative
+    # tolerance reproduces that same protection: U's columns are an
+    # explicitly S-orthonormal (U^H Sop U = 1) basis for the
+    # well-conditioned part of the original nex-dim space, so Hop
+    # transforms into a smaller, genuinely orthonormal basis where a plain
+    # (non-generalized) eigh is exact and numerically safe.
     from scipy.linalg import eigh
-    (esex,wsex) = eigh(Hop) ; wsex = wsex.T # transpose 
+    sval,svec = eigh(Sop)
+    keep = sval>1e-8*np.max(sval)
+    U = svec[:,keep]/np.sqrt(sval[keep])
+    Hred = np.conjugate(U.T)@Hop@U
+    esex,vs = eigh(Hred) # well-conditioned, ordinary eigenvalue problem
+    wsex = (U@vs).T # coefficients back in the original nex-state basis
     # from now on we operate with numpy arrays
     wf0 = wsex[0]
     wfa = Aop@wf0 # A times ground state
