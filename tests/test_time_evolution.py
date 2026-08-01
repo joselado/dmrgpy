@@ -133,3 +133,47 @@ def test_tebd_rejects_non_nearest_neighbor_hamiltonian():
 
     with pytest.raises(NotImplementedError):
         timedependent.evolution_ABA(fc, nt=5, dt=0.05, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+
+
+def test_mps_copy_is_independent_under_python_backend():
+    """mps.MPS.copy() must return a wavefunction whose subsequent
+    evolution doesn't affect the original. itensor_version="python"'s
+    cpp_handle is a mutable pyitensor.mpscontainer.MPS that TDVP/TEBD
+    mutate in place via set_A() (unlike the C++ backends' handles, which
+    are immutable by convention -- every Chain method there takes wf by
+    const reference and returns a brand-new MPS) -- so a naive shallow
+    copy of the outer MPS wrapper aliases the same underlying tensor
+    list, and evolving the "copy" silently corrupts the original too.
+    This is a regression test for that exact bug, found while
+    benchmarking TEBD against TDVP: comparing the two methods starting
+    from the same wf, or using evolve_and_measure_dmrg's own documented
+    forward+backward round-trip pattern, both silently produced wrong
+    results before mps.py's copy() was fixed to special-case this."""
+    from dmrgpy.pyitensor.autompo import AutoMPO
+    from dmrgpy.pyitensor.mpobuilder import to_mpo
+    from dmrgpy.pyitensor.mpsalgebra import inner
+
+    n = 4
+    sc = spinchain.Spin_Chain([2 for _ in range(n)])
+    sc.setup_python()
+
+    h0 = 0
+    for i in range(n):
+        h0 = h0 + (-1) ** i * sc.Sz[i]
+    sc.set_hamiltonian(h0)
+    wf = sc.get_gs()
+
+    h1 = 0
+    for i in range(n - 1):
+        h1 = h1 + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
+    sc.set_hamiltonian(h1)
+
+    op = sc.Sz[0]
+    Aop = to_mpo(AutoMPO.from_terms(sc._session.sites, op.to_terms()))
+    val_before = inner(wf.cpp_handle, Aop, wf.cpp_handle)
+
+    sc.tevol_method = "TEBD"
+    timedependent.evolve_and_measure(sc, operator=op, nt=10, dt=0.05, wf=wf.copy())
+
+    val_after = inner(wf.cpp_handle, Aop, wf.cpp_handle)
+    assert val_after == pytest.approx(val_before, abs=1e-10)

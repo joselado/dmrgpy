@@ -45,11 +45,38 @@ from .svd import svd
 from .tensor import ITensor, noPrime
 
 
-def _term_span(term):
-    sites = [site for _, site in term.ops]
-    if not sites:
+def _true_span(mats, dims):
+    """The 1-based (lo, hi) site range where `mats` (one full-chain matrix
+    per site, from HTerm.resolve()) differs from the local identity --
+    i.e. the sites this term actually, non-trivially acts on.
+
+    Determining this from the *resolved* matrices rather than the raw
+    op-name list is necessary, not just more convenient: two independent
+    sources produce op-name entries that look like they reach a far-away
+    site but algebraically compose to a no-op there. (1)
+    MultiOperator.identity() (multioperator.py) hardcodes its bare "Id"
+    factor at a fixed placeholder site regardless of context, so e.g.
+    `N[i]-0.5` (a common particle-hole-symmetric-offset pattern used
+    throughout dmrgpy's own Hubbard/UV-chain examples) expands to terms
+    like [('N',i),('Id',<placeholder>)]. (2) jordanwigner_spinful.py's
+    explicit Jordan-Wigner threading for native spinful (Hubbard/Electron)
+    sites can insert paired F-string factors at a site that multiply out
+    to the identity (F @ F = Id) rather than cancelling them away
+    algebraically first -- confirmed directly: a plain nearest-neighbor
+    hopping term on a Spinful_Fermionic_Chain_Native chain carries extra
+    ('F', site) factors reaching back to site 1 in its raw op list, even
+    though the resolved matrix at site 1 is exactly the identity. Treating
+    either of these as "real" span in a naive op-name scan would flag
+    strictly local physics as spurious long-range terms. This also
+    subsumes the previous separate fermion-parity-conservation check
+    (an unresolved JW carry manifests as a non-identity matrix at every
+    site through the end of the chain, so it is caught by the same
+    hi-lo>1 test below, just without a special-cased second pass).
+    """
+    touched = [i for i, m in enumerate(mats) if not np.allclose(m, np.eye(dims[i], dtype=complex))]
+    if not touched:
         return None
-    return min(sites), max(sites)
+    return touched[0] + 1, touched[-1] + 1
 
 
 def bond_hamiltonians(sites, terms):
@@ -66,7 +93,8 @@ def bond_hamiltonians(sites, terms):
          for b in range(1, n)}
 
     for term in ampo.terms:
-        span = _term_span(term)
+        mats = term.resolve(sites)  # standard (out,in) per-site matrices
+        span = _true_span(mats, dims)
         if span is None:
             H[1] += term.coef * np.eye(dims[0] * dims[1], dtype=complex)
             continue
@@ -74,17 +102,7 @@ def bond_hamiltonians(sites, terms):
         if hi - lo > 1:
             raise NotImplementedError(
                 "TEBD requires a nearest-neighbor Hamiltonian; found a term "
-                "spanning sites {}..{}".format(lo, hi))
-        mats = term.resolve(sites)  # standard (out,in) per-site matrices
-        if hi < n:
-            beyond = mats[hi]  # site hi+1 (0-based index hi), just past the span
-            ident = np.eye(dims[hi], dtype=complex)
-            if not np.allclose(beyond, ident):
-                raise NotImplementedError(
-                    "TEBD requires fermion-parity-conserving terms (a "
-                    "non-parity-conserving term needs a Jordan-Wigner "
-                    "string reaching past sites {}..{}, incompatible with "
-                    "a local bond gate)".format(lo, hi))
+                "with non-trivial support spanning sites {}..{}".format(lo, hi))
         if hi == lo:
             local = term.coef * mats[lo - 1]
             targets = []
