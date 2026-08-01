@@ -164,10 +164,13 @@ class TEBDEvolver:
         self.cutoff = cutoff
         self.maxdim = maxdim
         h_bonds = bond_hamiltonians(sites, terms)
-        self._gates_half = {b: _bond_gate(sites, b, h, dt / 2.0) for b, h in h_bonds.items()}
-        self._gates_full = {b: _bond_gate(sites, b, h, dt) for b, h in h_bonds.items()}
         self._odd = list(range(1, self.n, 2))
         self._even = list(range(2, self.n, 2))
+        # step() only ever applies the half-dt gate on odd bonds and the
+        # full-dt gate on even bonds -- build only those, not both gates
+        # for every bond.
+        self._gates_half = {b: _bond_gate(sites, b, h_bonds[b], dt / 2.0) for b in self._odd}
+        self._gates_full = {b: _bond_gate(sites, b, h_bonds[b], dt) for b in self._even}
 
     def step(self, psi):
         """One full time step of size dt. Mutates psi in place, returns it."""

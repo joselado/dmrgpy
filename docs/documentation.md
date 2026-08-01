@@ -1165,6 +1165,54 @@ Notable, deliberate implementation details (not bugs to "fix"):
   under a second for the same computation on `itensor_version=3`) that
   couldn't be root-caused in the time available — see git history around
   `mpscpp2/TDVP/` if picking this up again.
+- `tevol_method="TEBD"` (`pyitensor/tebd.py`'s `TEBDEvolver`,
+  `itensor_version="python"` only — no C++-backend port exists) runs the
+  standard 2nd-order-Trotter, even/odd-bond algorithm instead of TDVP:
+  every bond's evolution gate `exp(-i*tau*h_bond)` is the exact
+  exponential of the *bare* local 2-site Hamiltonian (`scipy.linalg.expm`
+  on a small dense matrix), built once from `bond_hamiltonians()` and
+  reused unchanged for every subsequent time step — no per-step
+  Krylov/Lanczos work at all, unlike TDVP's per-bond, per-step
+  environment-projected exponentiation. Only valid for a strictly
+  nearest-neighbor Hamiltonian (`bond_hamiltonians()` raises
+  `NotImplementedError` for any term spanning 3+ distinct sites; span is
+  computed from each term's *resolved* per-site matrices against the
+  identity, not from raw op-name lists, since both `MultiOperator`
+  placeholder-site bookkeeping and native-spinful-site Jordan-Wigner
+  string pairs can otherwise look like spurious long-range support — see
+  `tebd.py`'s `_true_span()`). `Chain.quench_tebd()`/
+  `evolve_and_measure_tebd()` mirror the TDVP counterparts one-for-one,
+  so `get_dynamical_correlator(submode="TD")` (a `quench_tebd()` call
+  under `timedependent.py`'s `evolution_dmrg_DC()`) and
+  `evolve_and_measure_dmrg()` both support `"TEBD"` the same way they
+  support `"TDVP"`. Individually validated against exact diagonalization
+  (both agree to ~3e-4) on small nearest-neighbor systems, including a
+  native-Hubbard chain, in `tests/test_time_evolution.py`; TEBD's cost
+  advantage there scales up dramatically since TDVP's per-step cost
+  scales with the local Hilbert-space dimension squared (16 for a
+  dimension-4 Hubbard site) while TEBD's gates are built once and reused
+  every step — see
+  `examples/dynamical_correlator/dynamical_correlator_tebd_VS_tdvp_hubbard_20site`
+  for a 20-orbital native-Hubbard timing (TEBD ~2s/step vs TDVP
+  ~200s/step there, a >100x per-step speedup). At that system size and
+  `maxm`, though, TEBD and TDVP no longer agree tightly with *each
+  other* (found directly while building that benchmark: essentially the
+  whole bulk of the chain is already truncated at the `maxm` cap from
+  the first step, and TDVP's per-bond Krylov-approximated update vs
+  TEBD's per-bond exact-exponential update are then two genuinely
+  different approximations whose errors compound differently across
+  ~16 saturated bonds) — a real characteristic of running two different
+  truncated real-time propagators at a saturated bond dimension on a
+  strongly-interacting model, not a correctness bug in either (ruled out
+  by the small-system ED cross-checks above); see that example's module
+  docstring for the full diagnosis. `evolve_and_measure_tdvp[_gse]`/
+  `evolve_and_measure_tebd` all copy their input `wf` before evolving
+  (`wf.copy()`) rather than evolving it in place — both TDVP's
+  `_tdvp_step_fn` and `TEBDEvolver.step()` mutate their input MPS's
+  tensor list via `set_A()`, so without the copy, evolving the default
+  `wf=self.wf0` (the common case, see `timedependent.py`'s
+  `evolve_and_measure_dmrg()`) would silently corrupt the cached ground
+  state itself.
 - All three session backends implement a real non-Hermitian DMRG
   (`Chain::nhdmrg`, driven by `nhdmrg.py`, exposed as
   `Many_Body_Chain.nhdmrg()`): a port of ITensorNHDMRG.jl's

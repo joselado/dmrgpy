@@ -125,9 +125,24 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12):
         w = w - Qprev @ (Qprev.conj().T @ w)
         k += 1
 
-    evals, evecs = eigh_tridiagonal(np.array(alphas), np.array(betas))
+    evals, evecs = _eigh_tridiagonal_robust(np.array(alphas), np.array(betas))
     exp_col0 = evecs @ (np.exp(coeff * evals) * evecs[0, :])
     return beta0 * (Q[:, :k] @ exp_col0)
+
+
+def _eigh_tridiagonal_robust(alphas, betas):
+    """eigh_tridiagonal's default lapack_driver='stemr' can raise
+    LinAlgError("stemr ... did not converge") on some tridiagonal
+    matrices with (near-)degenerate eigenvalues -- confirmed directly on
+    a real-time TDVP quench (20-orbital native-Hubbard chain, niter=50):
+    reproducible at a fixed Lanczos step, not transient/load-dependent.
+    'stebz' (bisection + inverse iteration) is slower but does not share
+    this failure mode, so it's used as a fallback rather than letting a
+    single degenerate Krylov step abort an entire quench."""
+    try:
+        return eigh_tridiagonal(alphas, betas)
+    except np.linalg.LinAlgError:
+        return eigh_tridiagonal(alphas, betas, lapack_driver="stebz")
 
 
 def _evolve_two_site(L, Lbra, H, ket, i, R, Rbra, tau, niter):

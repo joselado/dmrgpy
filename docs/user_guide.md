@@ -838,7 +838,13 @@ Frequency resolution is set by $T$ (via the usual $\Delta\omega\sim
 1/T$ time-frequency uncertainty), so this method is best when you want
 fine resolution over a *narrow* frequency window, at the cost of a real
 dynamical simulation (bond dimension grows with entanglement generated
-during the evolution).
+during the evolution). The propagator used for this evolution is the
+same `sc.tevol_method` selector described in §7, including
+`tevol_method="TEBD"` — cheaper per step than TDVP whenever the
+Hamiltonian is strictly nearest-neighbor, e.g.\ a
+`Spinful_Fermionic_Chain_Native` Hubbard chain (the standard interleaved
+`Spinful_Fermionic_Chain` is *not* nearest-neighbor after Jordan-Wigner
+threading, so TEBD raises `NotImplementedError` there).
 
 **`submode="TDZ"` — complex-time evolution (Cao, Lu, Stoudenmire &
 Parcollet, arXiv:2311.10909).** Real-time evolution (`"TD"` above) grows

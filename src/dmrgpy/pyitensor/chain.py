@@ -458,9 +458,18 @@ class Chain:
         return correlator, psi1
 
     def evolve_and_measure_tdvp(self, terms_h, terms_op, wf, nt, dt):
+        """`wf` is copied before evolving: _tdvp_step_fn mutates its input
+        MPS's tensor list in place (via set_A()), so evolving it directly
+        would silently corrupt the caller's own wavefunction object --
+        including self.wf0 itself on the common wf=None default path in
+        timedependent.py's evolve_and_measure_dmrg(). Confirmed directly:
+        without this copy, a call with the default wf changes what
+        self.get_gs() already computed, so a second, unrelated
+        measurement on "the same" ground state silently sees a partially
+        time-evolved state instead."""
         H = to_mpo(AutoMPO.from_terms(self.sites, terms_h), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        psi = wf
+        psi = wf.copy()
         correlator = []
         for _ in range(nt):
             psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
@@ -500,10 +509,11 @@ class Chain:
     def evolve_and_measure_tdvp_gse(self, terms_h, terms_op, wf, nt, dt, gse_sweeps,
             krylov_order, gse_cutoff):
         """GSE counterpart of evolve_and_measure_tdvp() above -- see
-        quench_tdvp_gse()'s docstring."""
+        quench_tdvp_gse()'s docstring and evolve_and_measure_tdvp()'s own
+        docstring for why `wf` is copied here too."""
         H = to_mpo(AutoMPO.from_terms(self.sites, terms_h), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        psi = wf
+        psi = wf.copy()
         correlator = []
         for it in range(nt):
             if it < gse_sweeps:
@@ -545,10 +555,12 @@ class Chain:
 
     def evolve_and_measure_tebd(self, terms_h, terms_op, wf, nt, dt):
         """TEBD counterpart of evolve_and_measure_tdvp() above -- see
-        quench_tebd()'s docstring."""
+        quench_tebd()'s docstring and evolve_and_measure_tdvp()'s own
+        docstring for why `wf` is copied here too (TEBDEvolver.step()
+        mutates its input in place, same as _tdvp_step_fn)."""
         evolver = _TEBDEvolver(self.sites, terms_h, dt, cutoff=self.cutoff, maxdim=self.maxm)
         A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        psi = wf
+        psi = wf.copy()
         correlator = []
         for _ in range(nt):
             psi = evolver.step(psi)

@@ -135,6 +135,106 @@ def test_tebd_rejects_non_nearest_neighbor_hamiltonian():
         timedependent.evolution_ABA(fc, nt=5, dt=0.05, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
 
 
+def test_tebd_dynamical_correlator_matches_ed_spin_chain():
+    """timedependent.evolution_DC (the raw time-domain quench correlator
+    C(t)=<GS|A(t)B(0)|GS> behind get_dynamical_correlator(submode="TD"),
+    dispatching to Chain.quench_tebd() when tevol_method="TEBD") must
+    match exact diagonalization on a small nearest-neighbor system. This
+    exercises quench_tebd() specifically -- unlike
+    test_tebd_matches_ed_spin_chain above, which only covers
+    evolve_and_measure_tebd() (a single operator measured along one
+    evolved state, no ground-state-energy-shift/two-state-overlap logic).
+    Compared directly in the time domain, not after the submode="TD"
+    Fourier transform, since ED's own get_dynamical_correlator() uses an
+    unrelated (KPM-moment-based) construction with a different
+    normalization convention -- comparing post-FFT spectra would conflate
+    that pre-existing convention mismatch (present identically for
+    tevol_method="TDVP") with a genuine TEBD correctness check."""
+    n = 4
+    spins = [2 for _ in range(n)]
+    sc = spinchain.Spin_Chain(spins)
+    sc.setup_python()
+    sc.tevol_method = "TEBD"
+
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+    sc.set_hamiltonian(h)
+
+    name = (sc.Sz[0], sc.Sz[0])
+    nt, dt = 60, 0.05
+    sc.get_gs()
+    (_ts_ed, cs_ed) = timedependent.evolution_DC(sc, mode="ED", name=name, nt=nt, dt=dt)
+    (_ts_tebd, cs_tebd) = timedependent.evolution_DC(sc, mode="DMRG", name=name, nt=nt, dt=dt)
+
+    assert np.array(cs_tebd) == pytest.approx(np.array(cs_ed), abs=1e-4)
+
+
+def test_tebd_dynamical_correlator_matches_ed_fermion_chain():
+    """Same cross-check as test_tebd_dynamical_correlator_matches_ed_spin_chain,
+    but for spinless-fermion nearest-neighbor hopping, to exercise
+    quench_tebd()'s Jordan-Wigner handling on the two-operator (A,B)
+    quench correlator rather than the single-operator evolve_and_measure
+    path already covered by test_tebd_matches_ed_fermion_chain."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_python()
+    fc.tevol_method = "TEBD"
+
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdag[i] * fc.C[i + 1]
+    h = h + h.get_dagger()
+    fc.set_hamiltonian(h)
+
+    name = (fc.Cdag[0], fc.C[0])
+    nt, dt = 40, 0.05
+    fc.get_gs()
+    (_ts_ed, cs_ed) = timedependent.evolution_DC(fc, mode="ED", name=name, nt=nt, dt=dt)
+    (_ts_tebd, cs_tebd) = timedependent.evolution_DC(fc, mode="DMRG", name=name, nt=nt, dt=dt)
+
+    assert np.array(cs_tebd) == pytest.approx(np.array(cs_ed), abs=1e-4)
+
+
+def test_tdvp_lanczos_falls_back_when_stemr_fails_to_converge():
+    """pyitensor/tdvp.py's _eigh_tridiagonal_robust() must fall back to
+    lapack_driver="stebz" and still return a correct eigendecomposition
+    when the default "stemr" driver raises LinAlgError -- a real failure
+    mode hit while benchmarking TDVP's dynamical correlator on a
+    20-orbital native-Hubbard chain (Chain.quench_tdvp's per-step Lanczos
+    expm-multiply, niter=50): scipy's eigh_tridiagonal("stemr") does not
+    converge for some tridiagonal matrices with (near-)degenerate
+    eigenvalues, aborting the whole quench with an uncaught
+    numpy.linalg.LinAlgError. Simulated here by monkeypatching
+    eigh_tridiagonal to always raise on the default driver, so the test
+    doesn't depend on reproducing the exact degenerate matrix that
+    triggered this originally."""
+    from scipy.linalg import eigh_tridiagonal as real_eigh_tridiagonal
+    from dmrgpy.pyitensor import tdvp as tdvp_mod
+
+    rng = np.random.default_rng(0)
+    n = 6
+    alphas = rng.normal(size=n)
+    betas = np.abs(rng.normal(size=n - 1)) + 0.1
+
+    def flaky_eigh_tridiagonal(a, b, lapack_driver="stemr"):
+        if lapack_driver == "stemr":
+            raise np.linalg.LinAlgError("stemr (eigh_tridiagonal) did not converge")
+        return real_eigh_tridiagonal(a, b, lapack_driver=lapack_driver)
+
+    original = tdvp_mod.eigh_tridiagonal
+    tdvp_mod.eigh_tridiagonal = flaky_eigh_tridiagonal
+    try:
+        evals, evecs = tdvp_mod._eigh_tridiagonal_robust(alphas, betas)
+    finally:
+        tdvp_mod.eigh_tridiagonal = original
+
+    expected_evals, expected_evecs = real_eigh_tridiagonal(alphas, betas, lapack_driver="stebz")
+    assert evals == pytest.approx(expected_evals, abs=1e-10)
+    dense = np.diag(alphas) + np.diag(betas, 1) + np.diag(betas, -1)
+    assert dense @ evecs == pytest.approx(evecs @ np.diag(evals), abs=1e-8)
+
+
 def test_mps_copy_is_independent_under_python_backend():
     """mps.MPS.copy() must return a wavefunction whose subsequent
     evolution doesn't affect the original. itensor_version="python"'s
