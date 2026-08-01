@@ -546,25 +546,38 @@ def _all_right_environments_window(window):
     return env
 
 
-def _evolve_two_site_window(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+def _evolve_two_site_window(L, Lbra, H, ket, i, R, Rbra, tau, niter, eshift=0.0):
     """Forward (-i*tau) two-site evolution -- window analogue of tdvp.py's
     own `_evolve_two_site`, reusing its `_lanczos_expm_multiply` Krylov
     propagator unchanged (a pure numerical primitive, chain-structure-
-    agnostic) against this module's own `_window_two_site_heff`."""
+    agnostic) against this module's own `_window_two_site_heff`.
+
+    `eshift` subtracts a uniform constant from every local effective
+    Hamiltonian before exponentiating -- see `window_tdvp_step`'s own
+    docstring for why this is needed at all (window.env_HL/env_HR are not
+    energy-baseline-subtracted, so Heff otherwise carries an arbitrary,
+    macro-iteration-count-dependent additive constant)."""
     matvec, order_in, shape, x0 = _window_two_site_heff(L, Lbra, H, ket, i, R, Rbra)
+    if eshift != 0.0:
+        raw_matvec = matvec
+        matvec = lambda v: raw_matvec(v) - eshift * v
     evolved = _lanczos_expm_multiply(matvec, x0, -1j * tau, niter=niter)
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
-def _evolve_one_site_window(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+def _evolve_one_site_window(L, Lbra, H, ket, i, R, Rbra, tau, niter, eshift=0.0):
     """Backward (+i*tau) one-site evolution -- window analogue of tdvp.py's
-    own `_evolve_one_site`, see `_evolve_two_site_window`'s own docstring."""
+    own `_evolve_one_site`, see `_evolve_two_site_window`'s own docstring
+    (including for `eshift`)."""
     matvec, order_in, shape, x0 = _window_one_site_heff(L, Lbra, H, ket, i, R, Rbra)
+    if eshift != 0.0:
+        raw_matvec = matvec
+        matvec = lambda v: raw_matvec(v) - eshift * v
     evolved = _lanczos_expm_multiply(matvec, x0, 1j * tau, niter=niter)
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
-def _half_sweep_lr_window(window, tau, cutoff, maxdim, niter):
+def _half_sweep_lr_window(window, tau, cutoff, maxdim, niter, eshift=0.0):
     """Window analogue of tdvp.py's own `_half_sweep_lr` -- identical
     algorithmic structure (forward-evolve each bond, SVD-split, backward-
     evolve the freshly-cut bond tensor before the next bond), built on
@@ -585,7 +598,7 @@ def _half_sweep_lr_window(window, tau, cutoff, maxdim, niter):
     for i in range(1, n):
         L, Lbra = left_env[i - 1]
         R2, R2bra = right_env[i + 2]
-        theta = _evolve_two_site_window(L, Lbra, H, ket, i, R2, R2bra, tau, niter)
+        theta = _evolve_two_site_window(L, Lbra, H, ket, i, R2, R2bra, tau, niter, eshift=eshift)
 
         left_link = _window_link_left(ket, i)
         s_i = next(ind for ind in ket.A(i).inds if ind.hastags("Site"))
@@ -601,12 +614,12 @@ def _half_sweep_lr_window(window, tau, cutoff, maxdim, niter):
         if i < n - 1:
             Lnew, Lnewbra = left_env[i]
             R2next, R2nextbra = right_env[i + 2]
-            C_evolved = _evolve_one_site_window(Lnew, Lnewbra, H, ket, i + 1, R2next, R2nextbra, tau, niter)
+            C_evolved = _evolve_one_site_window(Lnew, Lnewbra, H, ket, i + 1, R2next, R2nextbra, tau, niter, eshift=eshift)
             ket.set_A(i + 1, C_evolved)
     ket.center = n
 
 
-def _half_sweep_rl_window(window, tau, cutoff, maxdim, niter):
+def _half_sweep_rl_window(window, tau, cutoff, maxdim, niter, eshift=0.0):
     """Mirror of `_half_sweep_lr_window`, sweeping right to left -- window
     analogue of tdvp.py's own `_half_sweep_rl`."""
     ket, H = window.mps, window.mpo
@@ -617,7 +630,7 @@ def _half_sweep_rl_window(window, tau, cutoff, maxdim, niter):
     for i in range(n - 1, 0, -1):
         L2, L2bra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
-        theta = _evolve_two_site_window(L2, L2bra, H, ket, i, R, Rbra, tau, niter)
+        theta = _evolve_two_site_window(L2, L2bra, H, ket, i, R, Rbra, tau, niter, eshift=eshift)
 
         right_link = _window_link_right(ket, i + 1)
         s_j = next(ind for ind in ket.A(i + 1).inds if ind.hastags("Site"))
@@ -635,21 +648,63 @@ def _half_sweep_rl_window(window, tau, cutoff, maxdim, niter):
         if i > 1:
             L2prev, L2prevbra = left_env[i - 1]
             Rnew, Rnewbra = right_env[i + 1]
-            C_evolved = _evolve_one_site_window(L2prev, L2prevbra, H, ket, i, Rnew, Rnewbra, tau, niter)
+            C_evolved = _evolve_one_site_window(L2prev, L2prevbra, H, ket, i, Rnew, Rnewbra, tau, niter, eshift=eshift)
             ket.set_A(i, C_evolved)
     ket.center = 1
 
 
-def window_tdvp_step(window, dt, cutoff, maxdim, niter=50):
+def window_tdvp_step(window, dt, cutoff, maxdim, niter=50, eshift=0.0):
     """One real-time step exp(-i*dt*H) on a capped window via two-site
     TDVP -- mirrors tdvp.py's own `tdvp_step` (a left-to-right half-sweep
     evolving by dt/2, then a right-to-left half-sweep by another dt/2),
     built on this module's own window-aware environment/heff functions
     (see this module's own docstring for why tdvp.py's own sweep functions
-    cannot be reused directly on a window). Mutates window.mps in place."""
+    cannot be reused directly on a window). Mutates window.mps in place.
+
+    `eshift`: a constant subtracted from every local effective Hamiltonian
+    before exponentiating (default 0.0, i.e. no shift, preserving prior
+    behavior for direct callers). This isn't a novel choice -- it restores
+    consistency with the rest of the codebase's own established real-time
+    correlator convention: an ordinary finite chain's
+    `mpscpp3/chain_session.h::quench_tdvp` explicitly computes `EGS =
+    <wf0|H|wf0>` and evolves under `Hshift = H - EGS*Id` (never raw `H`),
+    and `edtk/timedependent.py::evolution_DC` (the ED reference) does the
+    same (`ht = Hop + e0[0]*Id` after finding `e0[0] = -E_ground` via
+    `eigsh(-Hop,...)`) -- both because a finite Hamiltonian's own `EGS` is
+    itself a fixed, reproducible number, so this shift is *usually*
+    inconsequential to omit (see `snapshot_correlator`'s own docstring for
+    that point). This module never had an analogous shift at all,
+    silently relying on `window.env_HL`/`env_HR`'s own accumulated
+    baseline standing in for it (see `window_total_energy`'s own
+    docstring, point 2: they carry a large, `n_window`-independent
+    constant left over from every macro-iteration already absorbed before
+    the environment snapshot was taken, which varies run to run with
+    iDMRG's own unseeded convergence path -- e.g. `maxiter`/`niter_done`
+    -- even for the *same* physical, equally-converged ground state).
+    Since this constant multiplies the identity on the window's own local
+    Hilbert space at every bond (a standard property of a canonically
+    consistent DMRG/TDVP environment: `<theta|Heff|theta>` reproduces the
+    *total* energy of the whole capped window+environment system
+    regardless of which bond `theta` sits at, so a fixed, bond-independent
+    piece of that total simply rides along), TDVP evolution under the
+    unshifted Heff produces a *global*, unphysical, run-dependent phase
+    `exp(-i*const*t)` applied only to the evolved (perturbed) branch of
+    `dynamical_correlator_td`'s own overlap -- confirmed directly: for the
+    identical physical model (transverse-field Ising, field=1.4) with
+    `window_total_energy` differing between -33 and -96 across three
+    otherwise-equivalent iDMRG runs (same converged `e0` to 6 digits), the
+    resulting `S(x=0,t)` trajectory came out essentially uncorrelated
+    between runs (magnitude preserved at ~0.25, matching a pure-phase
+    corruption), while multiplying by `exp(+i*window_total_energy*t)`
+    post-hoc brought the two into agreement to ~2e-3 -- well within
+    iDMRG's own convergence noise. `dynamical_correlator_td` passes
+    `eshift=window_total_energy(window_B)` (measured once, on the
+    unperturbed ground window, before `apply_local_operator`) to fix this
+    at the source instead of relying on a post-hoc correction, which would
+    accumulate its own numerical error over many time steps."""
     tau = dt / 2.0
-    _half_sweep_lr_window(window, tau, cutoff, maxdim, niter)
-    _half_sweep_rl_window(window, tau, cutoff, maxdim, niter)
+    _half_sweep_lr_window(window, tau, cutoff, maxdim, niter, eshift=eshift)
+    _half_sweep_rl_window(window, tau, cutoff, maxdim, niter, eshift=eshift)
     return window
 
 
@@ -812,19 +867,31 @@ def _default_center(n_window, n_uc, p_i=0):
 def snapshot_correlator(window_B, result, opname_A, x_values, center):
     """`{x: <ground_state| A_x |window_B>}` for every `x` in `x_values`,
     at whatever time `window_B` has already been evolved to -- this *is*
-    `S(x,t) = <psi|A_x e^{-iHt}B_0|psi>` (Eq. 3-style Schrödinger-picture
-    form) directly, with no extra `e^{iE0t}` phase correction needed:
+    `S(x,t) = <psi|A_x e^{-i(H-E0)t}B_0|psi>` (Eq. 3-style Schrödinger-
+    picture form, `H` implicitly ground-state-energy-shifted) directly,
     matching the rest of dmrgpy's own "TD" submode convention
-    (`timedependent.py`'s `evolution_dmrg_DC`, which likewise reports this
-    Schrödinger-picture matrix element as *the* correlator, with no
-    Heisenberg-picture `e^{iE0t}` conversion) rather than the literal
+    (`timedependent.py`'s `evolution_dmrg_DC` -> `mpscpp3::quench_tdvp`,
+    which likewise evolves under `Hshift = H - EGS*Id`, never raw `H` --
+    see `window_tdvp_step`'s own docstring) rather than the literal
     Heisenberg-picture `<psi|A(t)B(0)|psi>` the paper's own Eq. 3
-    additionally converts to -- that conversion needs the *window's own*
-    (finite, well-defined) ground-state energy as `E0`, not the
-    infinite-system energy density the paper's own equation is written
-    for, and only ever produces an overall, physically inert rigid shift
-    of the resulting `S(k,omega)`'s own frequency axis, so it is omitted
-    here for consistency with this codebase's own established convention.
+    additionally converts to.
+
+    Unlike an ordinary finite chain (where `H`'s own `EGS` is a single,
+    reproducible number computed fresh from `H` itself, so this shift is
+    easy to get right by construction), the *window*'s own effective `H`
+    is built directly from `env_HL`/`env_HR`, which are **not**
+    energy-baseline-subtracted (see `window_total_energy`'s own
+    docstring) -- so `window_B`'s own evolution already needs, and gets,
+    an equivalent shift applied at the source: `dynamical_correlator_td`
+    passes `eshift=window_total_energy(window_B)` (the window's own
+    finite, well-defined ground-state energy, measured once before any
+    perturbation) into every `window_tdvp_step` call that produced
+    `window_B`'s current state (see `window_tdvp_step`'s own docstring for
+    why this specific fix was needed -- confirmed directly: without it,
+    `S(x,t)` came out essentially uncorrelated between two otherwise-
+    equivalent iDMRG runs of the identical physical model). This function
+    itself does no further correction -- it just reads out whatever state
+    `window_B` already carries.
 
     `x` is measured relative to `center` (the 1-based window site `B_0`
     was applied to -- see `_default_center`). The "bra" side is *always*
@@ -865,9 +932,11 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     for `x` in `x_values` and `t = 0, dt, 2dt, ..., (nt-1)*dt`, from a
     *single* window evolution -- Sec. V.1 of arXiv:1804.09163, simplified
     to `t1=0` (this is the naive Eq. 3 Schrödinger-picture form; see
-    `snapshot_correlator`'s own docstring for why no `e^{iE0t}` conversion
-    to the Heisenberg-picture `<A(t)B(0)>` form is applied, matching this
-    codebase's own established "TD" submode convention) rather than the
+    `snapshot_correlator`'s own docstring for how the window's own
+    finite, well-defined ground-state energy is subtracted at the source
+    via `window_tdvp_step`'s `eshift` -- needed here, unlike an ordinary
+    finite chain, because `env_HL`/`env_HR` are not energy-baseline-
+    subtracted) rather than the
     full two-branch trick of Eq. 7 (evolving a *second*, independent
     window backward by `t1` as well, which doubles the accessible total
     time `t1+t2` for the same number of TDVP steps on either branch) -- a
@@ -930,6 +999,10 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     xs = sorted(x_values)
 
     window_B = build_window(result, n_window)
+    eshift = window_total_energy(window_B)  # see window_tdvp_step's own
+    # docstring: env_HL/env_HR are not energy-baseline-subtracted, so this
+    # must be measured on the *unperturbed* ground window, before
+    # apply_local_operator, and held fixed for the whole evolution.
     center = _default_center(n_window, n_uc, p_i)
     apply_local_operator(window_B, result, center, opname_B)
 
@@ -949,7 +1022,7 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
         for ix, x in enumerate(xs):
             S[it, ix] = snap[x] - background[x] if connected else snap[x]
         if it < nt - 1:
-            window_tdvp_step(window_B, dt, cutoff=cutoff, maxdim=maxdim, niter=niter)
+            window_tdvp_step(window_B, dt, cutoff=cutoff, maxdim=maxdim, niter=niter, eshift=eshift)
     return ts, np.array(xs), S
 
 

@@ -130,6 +130,41 @@ def test_td_dynamical_correlator_v3_matches_python_at_small_t():
     assert np.all(np.isfinite(S_v))
 
 
+def test_td_dynamical_correlator_v3_reproducible_across_convergence():
+    """`Chain::td_dynamical_correlator_window`'s own `idmrg_HL_`/`idmrg_HR_`
+    are, like their pyitensor counterparts, not energy-baseline-subtracted
+    -- pre-fix, TDVP-evolving the (perturbed) window under them directly
+    carried a spurious, run-dependent global phase (see
+    tests/test_idmrg_window_free_fermion.py's own module docstring for the
+    full derivation/pyitensor-side confirmation of this same bug). Fixed
+    here with a post-hoc `exp(+i*eshift*t)` correction (`eshift` measured
+    via a throwaway t=0 `tdvp()` call, see td_dynamical_correlator_window's
+    own comment in chain_session.h) rather than pyitensor's "fix at the
+    source" `eshift`-in-matvec approach, since ITensorTDVP's own boundary-
+    tensor `tdvp()` overload is a vendored black box that cannot be
+    wrapped the same way -- both are mathematically exact (the baseline
+    provably factors as a uniform additive-to-identity scalar), verified
+    independently on the pyitensor side by a dense-matrix exact-evolution
+    cross-check. Two independent (unseeded) `_build_fast(3)` runs of the
+    *same* physical model should now give closely-agreeing S(x,t), not
+    just a coincidentally-agreeing e0."""
+    n_window, dt, nt = 4, 0.1, 5
+    cv_a = _build_fast(3)
+    cv_b = _build_fast(3)
+    assert cv_a.e0 == pytest.approx(cv_b.e0, abs=0.05)
+
+    ts_a, xs_a, S_a = cv_a._session3.td_dynamical_correlator_window(
+        n_window, "Sz", "Sz", dt, nt, [0, 1], 30, 1e-10, 50, True, 0)
+    ts_b, xs_b, S_b = cv_b._session3.td_dynamical_correlator_window(
+        n_window, "Sz", "Sz", dt, nt, [0, 1], 30, 1e-10, 50, True, 0)
+    S_a, S_b = np.array(S_a), np.array(S_b)
+    # Loose tolerance (independent ground states/gauges, loosely converged
+    # -- see _build_fast's own docstring): the point is that these are now
+    # close at all, not exact agreement. Pre-fix, this max|diff| was
+    # order-1 (comparable to S itself) for the analogous pyitensor check.
+    assert np.max(np.abs(S_a - S_b)) < 0.3
+
+
 def test_td_dynamical_correlator_public_api_dispatches_to_v3():
     """Infinite_Many_Body_Chain.td_dynamical_correlator(itensor_version=3)
     (the public, documented entry point) returns finite S(k,omega) with
