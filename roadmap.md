@@ -3,3 +3,4 @@
 - Finite-temperature, METTS
 - Entropy density
 - Work folder to tmp
+- Hybrid dynamical-correlator method (coarse KPM/TD locate, CVM/INV/EX refine) -- see docs/hybrid_dynamical_correlator_plan.md
