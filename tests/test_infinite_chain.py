@@ -581,6 +581,48 @@ def test_onsite_field_with_bonds_does_not_diverge():
     assert d1 == pytest.approx(d0, abs=1e-6)
 
 
+def test_two_point_correlator_same_site_composition_order():
+    """two_point_correlator's r=0 branch must compose opname_i/opname_j in
+    the same order idmrg.py's own onsite-term automaton builder
+    (_classify_terms/_term_site_matrices, and through it, checked directly
+    against HTerm.resolve()/MultiOperator.multiply_MO() -- see
+    _term_site_matrices' own docstring) uses for an equivalent
+    "opname_i[p]*opname_j[p]" term elsewhere in dmrgpy. An earlier version
+    of this branch composed the opposite order (M_i @ M_j instead of
+    M_j @ M_i, both in the stored (in,out) convention) -- invisible to
+    every other test in this file, which all pass the *same* operator name
+    twice (e.g. "Sz","Sz"), unable to distinguish the two orders for a
+    commuting pair.
+
+    Ground state: a strong field along Y gives an exact, known
+    |Sy=+1/2> product state (same trick as
+    test_onsite_field_matches_exact_solution) -- for this state <Sx*Sz>
+    and <Sz*Sx> differ (their difference is the commutator expectation
+    <[Sx,Sz]> = -i<Sy> != 0), so this is a genuine, order-sensitive check,
+    with the expected value computed independently via
+    idmrg._term_site_matrices (not via two_point_correlator itself)."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
+    ic.set_hamiltonian(-5.0 * ic.SyC[0])
+    ic.gs_energy()
+    result = ic._result
+
+    op_term = [1.0, ["Sx", 0], ["Sz", 0]]
+    _, _, mats, _ = idmrg._term_site_matrices(op_term, result.sites_uc, 1)
+    M = mats[0]
+    Es = idmrg._transfer_matrices(result.U_list, 1)
+    rho_after, _ = idmrg._all_right_fixed_points(Es, 1)
+    A = idmrg._to_array_lpr(result.U_list[0])
+    Aop = np.einsum('io,lir->lor', M, A)
+    E4 = np.einsum('lpr,LpR->lLrR', Aop, np.conj(A))
+    expected = complex(np.trace(idmrg._apply_transfer(E4, rho_after[0])))
+
+    got = idmrg.two_point_correlator(result, "Sx", 0, "Sz", 0)
+    assert got == pytest.approx(expected, abs=1e-8)
+    swapped = idmrg.two_point_correlator(result, "Sz", 0, "Sx", 0)
+    assert abs(got - swapped) > 1e-3  # confirms this case is order-sensitive
+
+
 # -- idmrg.imps_sum: direct sum of two converged infinite MPS -- see
 # idmrg.py's own "Summing two converged iMPS" section docstring for the
 # construction (periodic-chain analogue of mpsalgebra.sum, generalized

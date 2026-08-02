@@ -1397,10 +1397,20 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     """<opname_i(site p_i) opname_j(site p_i + r)> of the converged
     infinite chain, r measured in physical sites (r=0: both operators at
     the same site, composed as opname_i then opname_j, i.e. matrix product
-    M_i @ M_j in the (in,out) convention of sites/base.py -- matching how
-    `SxC[i]*SxC[i]`-style same-site products read left to right elsewhere
-    in dmrgpy). r must be >= 0; use r and swap the operator order for the
-    mirror separation if r<0 is needed."""
+    M_j @ M_i in the (in,out) convention of sites/base.py -- matching how
+    `_term_site_matrices`/`_classify_terms` (and, through them,
+    `HTerm.resolve()`/`MultiOperator.multiply_MO()`) compose an onsite term
+    built as `SxC[i]*SzC[i]`-style same-site products elsewhere in dmrgpy:
+    the *last*-written factor ends up as the *left* matrix factor, since
+    matrix-vector multiplication applies the rightmost/first-written factor
+    to the ket first. An earlier version of this branch computed the
+    opposite order (M_i @ M_j) -- silently correct only when opname_i and
+    opname_j commute (every existing test only ever passed the same name
+    twice, e.g. "Sz","Sz", which can't distinguish the two orders);
+    confirmed wrong by direct comparison against `_term_site_matrices`'
+    output for the equivalent onsite term ("Sx","Sz") on a spin-1/2 site.
+    r must be >= 0; use r and swap the operator order for the mirror
+    separation if r<0 is needed."""
     if r < 0:
         raise ValueError("two_point_correlator: r must be >= 0")
     n_uc = result.n_uc
@@ -1408,8 +1418,8 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     rho_after, _eta = _all_right_fixed_points(Es, n_uc)
 
     if r == 0:
-        M = (result.sites_uc.site_type(p_i + 1).matrix(opname_i)
-             @ result.sites_uc.site_type(p_i + 1).matrix(opname_j))
+        M = (result.sites_uc.site_type(p_i + 1).matrix(opname_j)
+             @ result.sites_uc.site_type(p_i + 1).matrix(opname_i))
         A = _to_array_lpr(result.U_list[p_i])
         Aop = np.einsum('io,lir->lor', M, A)
         E4 = np.einsum('lpr,LpR->lLrR', Aop, np.conj(A))

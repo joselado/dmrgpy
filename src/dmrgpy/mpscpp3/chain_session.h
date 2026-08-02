@@ -2210,6 +2210,15 @@ class Chain
         Index snap_HR_bra, snap_HR_ket, snap_HR_mpo;
         bool snap_have_HL=false, snap_have_HR=false;
 
+        // prev_local[mstep]: the flattened local ground vector produced at
+        // this unit-cell position by the *previous* macro-iteration,
+        // threaded back in as the next macro-iteration's own Arnoldi warm
+        // start -- direct C++ port of pyitensor/idmrg.py's own prev_local
+        // (see idmrg_local_solve's own comment for why this is not
+        // cosmetic). Persists across macro-iterations (declared outside
+        // the loop below), starts empty (no warm start available yet).
+        std::vector<std::vector<Cplx>> prev_local(n_uc);
+
         for (macro_iter=0; macro_iter<maxiter; ++macro_iter)
             {
             snap_HL=HL; snap_HL_bra=HL_bra; snap_HL_ket=HL_ket; snap_HL_mpo=HL_mpo;
@@ -2250,11 +2259,12 @@ class Chain
                     W_pR = idmrg_make_W(rows[p_R],cross_idx,HR_mpo,phys_R_in,phys_R_out);
                     }
 
-                auto [energy_here,U,V,new_bond_u,new_bond_v] = idmrg_local_solve(
+                auto [energy_here,U,V,new_bond_u,new_bond_v,theta_flat] = idmrg_local_solve(
                     HL,W_pL,phys_L_in,W_pR,phys_R_in,HR,
                     HL_bra,HL_ket,have_HL_ket,HR_bra,HR_ket,have_HR_ket,
-                    cutoff,maxm,krylovdim,restarts);
+                    cutoff,maxm,krylovdim,restarts,prev_local[mstep]);
                 energy = energy_here;
+                if (!theta_flat.empty()) prev_local[mstep] = std::move(theta_flat);
 
                 Index left_ket_old = HL_ket; bool have_left_ket_old = have_HL_ket;
                 Index right_ket_old = HR_ket; bool have_right_ket_old = have_HR_ket;
@@ -3308,6 +3318,57 @@ class Chain
         return T;
         }
 
+    // Flat, order-preserving (de)serialization of a rank-4 ITensor over
+    // (i0,i1,i2,i3) -- used solely to warm-start idmrg_local_solve's
+    // Arnoldi search from the *previous* macro-iteration's own converged
+    // local ground vector at the same mstep position, mirroring
+    // pyitensor's own idmrg.py _local_two_site_solve x0_warm mechanism
+    // (see idmrg_local_solve's own comment for why this is not cosmetic).
+    // Real ITensor v3 Index objects have no cross-macro-iteration identity
+    // to reuse directly (HL_ket/HR_ket are freshly minted every
+    // micro-step, see this method's own new_bond_u/new_bond_v), so --
+    // exactly like pyitensor's own flat NumPy array, reused there purely
+    // by size, not Index/object identity -- the warm-start vector is
+    // threaded through as a plain std::vector<Cplx>, positionally aligned
+    // to (i0,i1,i2,i3)'s own dims, and re-attached to whatever fresh
+    // Index objects the *next* macro-iteration mints. eltC/. set() (not
+    // raw storage access) are used deliberately, since an ITensor's
+    // internal dense-array layout is not guaranteed to already match the
+    // (i0,i1,i2,i3) order requested here (e.g. after the noPrime()/
+    // replaceInds() calls in idmrg_local_solve's own matvec).
+    static std::vector<Cplx>
+    idmrg_tensor_to_flat4(ITensor const& T, Index const& i0, Index const& i1,
+                           Index const& i2, Index const& i3)
+        {
+        int d0=dim(i0), d1=dim(i1), d2=dim(i2), d3=dim(i3);
+        std::vector<Cplx> out((size_t)d0*d1*d2*d3);
+        size_t idx=0;
+        for (int a=1;a<=d0;++a)
+        for (int b=1;b<=d1;++b)
+        for (int c=1;c<=d2;++c)
+        for (int e=1;e<=d3;++e)
+            out[idx++] = eltC(T,i0(a),i1(b),i2(c),i3(e));
+        return out;
+        }
+
+    static ITensor
+    idmrg_flat4_to_tensor(std::vector<Cplx> const& flat, Index const& i0,
+                           Index const& i1, Index const& i2, Index const& i3)
+        {
+        ITensor T(i0,i1,i2,i3);
+        int d0=dim(i0), d1=dim(i1), d2=dim(i2), d3=dim(i3);
+        size_t idx=0;
+        for (int a=1;a<=d0;++a)
+        for (int b=1;b<=d1;++b)
+        for (int c=1;c<=d2;++c)
+        for (int e=1;e<=d3;++e)
+            {
+            Cplx v = flat[idx++];
+            if (v != Cplx(0,0)) T.set({i0(a),i1(b),i2(c),i3(e)},v);
+            }
+        return T;
+        }
+
     // One micro-step's local ground-state solve: the effective 2-site
     // Hamiltonian sandwiched by (HL, W_pL, W_pR, HR), diagonalized via
     // arnoldi_smallest_real(..., Sel::SR) (the smallest-real-part Ritz
@@ -3317,42 +3378,59 @@ class Chain
     // second, Hermitian-only Krylov solver) -- matches idmrg.py's own
     // _local_two_site_solve (kernels.make_matvec + dmrg._lanczos_ground_state),
     // but ITensor's own operator* already does all the index-matching
-    // contraction that Python's kernels.py has to hand-roll. No
-    // pre-existing ket tensor to seed the local guess from (every
-    // micro-step inserts brand-new sites), so the Arnoldi start vector is
-    // always a fresh random one (randomITensorC), matching
-    // idmrg.py's own rationale (see that function's own docstring on why
-    // mpscpp3/pyitensor never seed DMRG from a product state). U and V
+    // contraction that Python's kernels.py has to hand-roll. U and V
     // are returned *without* S (the singular values are discarded): HL/HR
     // are block operators built by a similarity transform through U (or
     // V) alone, exactly idmrg.py's own convention -- see that function's
     // own extensive comment on why absorbing sqrt(S) into both sides
     // instead is wrong (confirmed there against independent ED).
     //
-    // A dedicated Hermitian Lanczos solver with early-exit convergence
-    // checking (mirroring pyitensor's own _lanczos_ground_state) was
-    // tried here to cut the remaining Krylov-solve cost further, but was
-    // reverted after it produced measurably wrong ground-state energies
-    // once bond dimension grew large (traced to some accumulated-error or
-    // logic issue in that from-scratch routine that this port's own
-    // regression tests didn't catch quickly enough to trust shipping it)
-    // -- arnoldi_smallest_real's own double-reorthogonalization,
-    // proven-correct machinery is kept here instead. See this codebase's
-    // iDMRG optimization history for the (much larger) fix that *is* kept:
-    // idmrg_extend_HL/HR's contraction-order reordering below.
-    std::tuple<double,ITensor,ITensor,Index,Index>
+    // `warm`: the previous macro-iteration's own converged local ground
+    // vector at this same mstep position (idmrg_tensor_to_flat4's own
+    // output, positionally aligned to (HL_ket,phys_L,phys_R,HR_ket)), or
+    // empty for "no warm start available yet" (the very first-ever
+    // micro-step, before bond dimension has saturated, or any macro-
+    // iteration whose local Hilbert space dimension changed since the
+    // stored vector was produced -- checked via a plain size comparison
+    // below). Used as the Arnoldi start vector whenever both HL_ket/
+    // HR_ket are present and the size matches; a fresh random vector
+    // (randomITensorC) otherwise. This was, until now, ALWAYS a fresh
+    // random vector regardless of `warm` -- a real, confirmed-elsewhere
+    // gap relative to pyitensor/idmrg.py's own x0_warm mechanism (see that
+    // function's own docstring): an always-random local solve lets
+    // Arnoldi land on an arbitrary member of a (near-)degenerate local
+    // ground manifold every macro-iteration (routine for gapless/
+    // SU(2)-symmetric models) -- the reported *energy* still converges
+    // fine (a degenerate manifold shares one eigenvalue), but the
+    // converged idmrg_U_/idmrg_HL_/idmrg_HR_ snapshot this Chain stores
+    // (consumed by td_dynamical_correlator_window's own IBC window
+    // construction) keeps jumping between different members of that
+    // manifold instead of settling into one self-consistent,
+    // translationally-invariant state -- exactly the bug idmrg.py's own
+    // x0_warm fix was written to avoid, not yet ported to this backend
+    // despite this method's own surrounding comments describing this file
+    // as "a line-for-line translation ... specifically to avoid
+    // reintroducing bugs that were already found and fixed" in idmrg.py.
+    std::tuple<double,ITensor,ITensor,Index,Index,std::vector<Cplx>>
     idmrg_local_solve(ITensor const& HL, ITensor const& W_pL, Index phys_L,
                        ITensor const& W_pR, Index phys_R, ITensor const& HR,
                        Index HL_bra, Index HL_ket, bool have_HL_ket,
                        Index HR_bra, Index HR_ket, bool have_HR_ket,
-                       double cutoff, int maxdim, int krylovdim, int restarts) const
+                       double cutoff, int maxdim, int krylovdim, int restarts,
+                       std::vector<Cplx> const& warm) const
         {
         std::vector<Index> order_in;
         if (have_HL_ket) order_in.push_back(HL_ket);
         order_in.push_back(phys_L);
         order_in.push_back(phys_R);
         if (have_HR_ket) order_in.push_back(HR_ket);
-        auto x0 = randomITensorC(IndexSet(order_in));
+        size_t dim_in = 1;
+        for (auto const& ind : order_in) dim_in *= (size_t)dim(ind);
+        ITensor x0;
+        if (have_HL_ket && have_HR_ket && warm.size()==dim_in)
+            x0 = idmrg_flat4_to_tensor(warm,HL_ket,phys_L,phys_R,HR_ket);
+        else
+            x0 = randomITensorC(IndexSet(order_in));
 
         // matvec must be an endomorphism on v's own index space (same
         // indices in and out) for arnoldi_smallest_real's own inner
@@ -3389,13 +3467,17 @@ class Chain
         double energy = result.first.real();
         ITensor theta = result.second;
 
+        std::vector<Cplx> theta_flat;
+        if (have_HL_ket && have_HR_ket)
+            theta_flat = idmrg_tensor_to_flat4(theta,HL_ket,phys_L,phys_R,HR_ket);
+
         std::vector<Index> left_inds;
         if (have_HL_ket) left_inds.push_back(HL_ket);
         left_inds.push_back(phys_L);
         auto [U,S,V] = svd(theta,IndexSet(left_inds),{"Cutoff",cutoff,"MaxDim",maxdim});
         Index new_bond_u = commonIndex(U,S);
         Index new_bond_v = commonIndex(S,V);
-        return {energy,U,V,new_bond_u,new_bond_v};
+        return {energy,U,V,new_bond_u,new_bond_v,theta_flat};
         }
 
     // Absorb the newly-solved left-canonical site tensor U into HL, using
