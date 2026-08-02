@@ -40,6 +40,10 @@ print("<Sz_0>(t) sample (ITensor v3)  :",sz3[:5].real)
 print("<Sz_0>(t) sample (pure Python) :",szpy[:5].real)
 print("Max abs difference v3 vs pure Python (both TDVP) =",np.max(np.abs(sz3-szpy)))
 
+import matplotlib.pyplot as plt
+plt.plot(ts3,sz3.real,label="ITensor v3 (TDVP)",c="blue")
+plt.scatter(tspy,szpy.real,label="pure Python (TDVP)",c="green",marker="x")
+
 # v2's ED fallback (when the mpscpp2 extension isn't compiled -- see
 # mode.py) doesn't support evolve_and_measure() at all (self._session is
 # None in ED mode, since real-time evolution was never wired up on that
@@ -49,6 +53,11 @@ try:
     ts2,sz2 = evolve(2)
     print("<Sz_0>(t) sample (ITensor v2)  :",sz2[:5].real)
     print("Max abs difference v2 vs v3          =",np.max(np.abs(sz2-sz3)))
+    plt.plot(ts2,sz2.real,label="ITensor v2 (MPO-Taylor)",c="red",linestyle="--")
 except AttributeError as e:
     print("ITensor v2 comparison skipped ({}) -- likely v2's ED fallback, "
           "see mode.py".format(e))
+
+plt.xlabel("time") ; plt.ylabel(r"$\langle S_0^z\rangle(t)$")
+plt.legend()
+plt.show()

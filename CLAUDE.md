@@ -155,6 +155,26 @@ systems) — the fastest way to check a `mpscpp3` change didn't diverge from
 removes generated working directories (`.mpsfolder`, `.pychainfolder`,
 `.dmrgfolder`) and stray `ERROR`/`*.OUT` files from the tree.
 
+**Examples should plot, not just print/assert.** What sets `examples/`
+apart from `tests/` is that a human is expected to actually look at the
+result, so every `examples/*/*/main.py` should end with a `matplotlib`
+plot of whatever it computed (a quantity vs. time/site/parameter, a
+backend-vs-backend overlay, a timing/error scaling curve, ...) whenever
+the script produces a sequence of values that can meaningfully be
+visualized — not just `print()`ed. This applies even to the scripts noted
+above that *also* carry a real `assert` for regression purposes (e.g.
+`time_evolution/tdvp_VS_ED_time_evolution`,
+`time_evolution/tebd_VS_ED_time_evolution`,
+`time_evolution/tdvp_gse_VS_ED_time_evolution`): the assert stays as the
+pass/fail regression guard, but the script should still plot the two
+trajectories being compared afterwards, so the same script is useful both
+as an automated check and as a visual sanity check when run by hand. A
+script whose entire output is a single scalar (e.g. one ground-state
+energy, one overlap) is the one legitimate exception — there, sweep the
+relevant parameter (system size, time, coupling strength, ...) instead of
+computing just one point, if a sweep is cheap enough to be worth adding;
+otherwise printing is fine.
+
 **Worktree/symlink pitfall**: `~/.local/lib/python3.13/site-packages/dmrgpy`
 is typically a symlink into *one specific* checkout's `src/dmrgpy/` (often
 the primary working directory, not whichever worktree you're in). Since

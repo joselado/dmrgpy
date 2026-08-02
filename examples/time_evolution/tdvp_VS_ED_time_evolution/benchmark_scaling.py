@@ -116,3 +116,25 @@ if __name__=="__main__":
         assert err<tol, "TDVP error %.3e too large at n=%d (tol=%.1e)"%(err,n,tol)
 
     print("TEST PASSED")
+
+    # visualize the timing/accuracy tradeoff summarized above
+    import matplotlib.pyplot as plt
+    ns = list(results.keys())
+    t_tdvp = [results[n]["TDVP"]["t_forward"] for n in ns]
+    t_mpo = [results[n]["MPO"]["t_forward"] for n in ns]
+    e_tdvp = [results[n]["TDVP"]["error"] for n in ns]
+    e_mpo = [results[n]["MPO"]["error"] for n in ns]
+
+    fig,axes = plt.subplots(1,2,figsize=(10,4))
+    axes[0].plot(ns,t_tdvp,marker="o",label="TDVP")
+    axes[0].plot(ns,t_mpo,marker="o",label="MPO-Taylor")
+    axes[0].set_xlabel("Number of sites") ; axes[0].set_ylabel("Forward time (s)")
+    axes[0].set_yscale("log") ; axes[0].legend()
+
+    axes[1].plot(ns,e_tdvp,marker="o",label="TDVP")
+    axes[1].plot(ns,e_mpo,marker="o",label="MPO-Taylor")
+    axes[1].set_xlabel("Number of sites") ; axes[1].set_ylabel("Error")
+    axes[1].set_yscale("log") ; axes[1].legend()
+
+    plt.tight_layout()
+    plt.show()
