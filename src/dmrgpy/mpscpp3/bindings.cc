@@ -16,6 +16,7 @@ using namespace std;
 #include "check_task.h" // get_bool/get_str/get_int_value/... (get_sites.h needs these)
 #include "get_sites.h" // SpinX, incl. the in-memory std::vector<int> constructor
 #include "mo_terms.h" // OpFactor/MOTerm + build_ampo/build_mpo
+#include "tebd.h" // bond_hamiltonians/build_tebd_gates/tebd_step (Chain::quench_tebd/evolve_and_measure_tebd)
 #include "chain_session.h" // Chain: the session/handle model
 
 namespace py = pybind11;
@@ -426,6 +427,32 @@ PYBIND11_MODULE(_dmrgcpp, m)
                py::arg("krylov_order"),py::arg("gse_cutoff"),
                "One-site-TDVP-with-global-subspace-expansion counterpart of "
                "evolve_and_measure_tdvp(). Returns (correlator, final_wf)")
+        .def("quench_tebd",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_i,
+                          std::vector<PyTerm> const& terms_j,
+                          int nt, double dt) {
+                auto out = self.quench_tebd(terms_from_python(terms_h),
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    nt,dt);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_i"),py::arg("terms_j"),
+               py::arg("nt"),py::arg("dt"),
+               "2nd-order-Trotter TEBD counterpart of quench()/quench_tdvp(). "
+               "Only valid for a strictly nearest-neighbor terms_h (raises "
+               "for any term spanning 3+ distinct sites). "
+               "Returns (correlator, final_wf)")
+        .def("evolve_and_measure_tebd",
+            [](Chain& self, std::vector<PyTerm> const& terms_h,
+               std::vector<PyTerm> const& terms_op, MPS const& wf,
+               int nt, double dt) {
+                auto out = self.evolve_and_measure_tebd(terms_from_python(terms_h),
+                    terms_from_python(terms_op),wf,nt,dt);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
+               py::arg("nt"),py::arg("dt"),
+               "TEBD counterpart of evolve_and_measure()/evolve_and_measure_tdvp(). "
+               "Only valid for a strictly nearest-neighbor terms_h. "
+               "Returns (correlator, final_wf)")
         .def("tdvp_step",&Chain::tdvp_step,
              py::arg("H"),py::arg("wf"),py::arg("dt"),py::arg("num_center")=2,
              py::arg("niter")=50,

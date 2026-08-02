@@ -1082,6 +1082,75 @@ class Chain
         return out;
         }
 
+    // TEBD counterparts of quench()/quench_tdvp() above: same physics and
+    // EGS-shift convention as quench_tdvp() (so results are directly
+    // comparable to it and to the MPO-Taylor backup), but each per-step
+    // evolution is a 2nd-order-Trotter TEBD step (tebd.h's
+    // build_tebd_gates()/tebd_step(), gates built once up front from the
+    // bare bond Hamiltonians and reused unchanged every step) instead of
+    // TDVP's per-step Krylov exponentiation of an effective Hamiltonian --
+    // only valid for a strictly nearest-neighbor terms_h
+    // (bond_hamiltonians() throws ITError otherwise; see tebd.h's own
+    // comment). Mirrors pyitensor/chain.py's Chain.quench_tebd() (the
+    // pure-Python backend's own TEBD, which this file's terms_h/dt
+    // conventions match exactly) -- kept as a near-duplicate of
+    // quench_tdvp() rather than sharing a driver loop with it, for the
+    // same reason quench_tdvp()/quench() themselves aren't unified: each
+    // per-step evolution primitive has its own setup (tdvp_step() takes
+    // an MPO, tebd_step() takes precomputed BondGates).
+    TimeEvolutionResult
+    quench_tebd(std::vector<MOTerm> const& terms_h,
+                std::vector<MOTerm> const& terms_i,
+                std::vector<MOTerm> const& terms_j,
+                int nt, double dt)
+        {
+        if (!have_wf0_) gs_energy();
+        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
+        double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
+        auto terms_shifted = terms_h;
+        MOTerm shift_term;
+        shift_term.coef = Cplx(-EGS,0.0);
+        shift_term.factors = {{"Id",1}};
+        terms_shifted.push_back(shift_term);
+        auto h_bonds = bond_hamiltonians(sites_,terms_shifted);
+        auto gates = build_tebd_gates(sites_,h_bonds,dt);
+        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
+        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto psi1 = apply_mpo(A1,wf0_,args);
+        auto psi2 = apply_mpo(A2,wf0_,args);
+        Cplx norm0 = std::sqrt(innerC(psi1,psi1));
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            tebd_step(psi1,gates,cutoff_,maxm_);
+            psi1.normalize();
+            psi1 *= norm0;
+            out.correlator.push_back(innerC(psi2,psi1));
+            }
+        out.final_wf = psi1;
+        return out;
+        }
+
+    TimeEvolutionResult
+    evolve_and_measure_tebd(std::vector<MOTerm> const& terms_h,
+                             std::vector<MOTerm> const& terms_op,
+                             MPS const& wf, int nt, double dt)
+        {
+        auto h_bonds = bond_hamiltonians(sites_,terms_h);
+        auto gates = build_tebd_gates(sites_,h_bonds,dt);
+        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto psi = wf;
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            tebd_step(psi,gates,cutoff_,maxm_);
+            out.correlator.push_back(innerC(psi,A,psi));
+            }
+        out.final_wf = psi;
+        return out;
+        }
+
     // One step exp(dt*H) of two-site TDVP (TDVP/tdvp.h), given an
     // already-built MPO H (e.g. from build_operator()) and MPS psi --
     // exposed publicly (moved here from a private helper of the same

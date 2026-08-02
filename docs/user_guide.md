@@ -1017,10 +1017,11 @@ measurement operator.
   dimension is small (e.g.\ a product-state quench) and one-site TDVP
   alone (which conserves bond dimension exactly) wouldn't be able to grow
   into the entanglement the subsequent evolution generates.
-- `"TEBD"` (`itensor_version="python"` only, and only for a strictly
+- `"TEBD"` (`itensor_version` `3` or `"python"`, and only for a strictly
   nearest-neighbor Hamiltonian — any term touching 3 or more distinct
-  sites raises `NotImplementedError`) — the standard 2nd-order-Trotter,
-  even/odd-bond ("brick-wall") algorithm: $e^{-iH\,dt}\approx
+  sites raises `NotImplementedError` (`"python"`) or a catchable
+  `RuntimeError` (`3`)) — the standard 2nd-order-Trotter, even/odd-bond
+  ("brick-wall") algorithm: $e^{-iH\,dt}\approx
   e^{-iH_{\rm odd}\,dt/2}\,e^{-iH_{\rm even}\,dt}\,e^{-iH_{\rm odd}\,dt/2}$,
   where $H_{\rm odd}$/$H_{\rm even}$ sum the bond Hamiltonians on
   odd-/even-indexed bonds (each internally commuting, since every bond in
@@ -1031,13 +1032,18 @@ measurement operator.
   2-site Hamiltonian, built once up front and reused unchanged for every
   time step — no per-step Krylov/Lanczos work at all — so `"TEBD"` is
   typically cheaper per step than TDVP whenever the Hamiltonian qualifies.
+  `itensor_version=3` builds the gate via ITensor's own `BondGate`
+  primitive (`mpscpp3/tebd.h`); `"python"` exponentiates the bare 2-site
+  matrix directly (`pyitensor/tebd.py`'s `TEBDEvolver`) — both backends
+  agree with each other to machine precision on a fermionic
+  hopping+onsite benchmark.
 - `"MPO"` — a hand-rolled 2nd-order Taylor expansion of $e^{-iH\,dt}$
   applied as an MPO each step; the only option on `itensor_version=2`
   (which has no TDVP or TEBD at all), and available (if slower/less
   accurate for a given bond dimension) everywhere else too.
 
 ```python
-sc.setup_python()          # TEBD only exists on the pure-Python backend
+sc.setup_cpp(version=3)    # or sc.setup_python()
 sc.tevol_method = "TEBD"
 ```
 

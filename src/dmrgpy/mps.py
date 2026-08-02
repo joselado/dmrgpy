@@ -74,15 +74,34 @@ class MPS():
         # genuine opaque pybind11 objects with no Python-visible methods
         # at all (see mpscpp2/mpscpp3's bindings.cc), so hasattr() here
         # reliably tells the two cases apart.
+        #
+        # This unconditionally pays that cpp_handle.copy() on every call
+        # for itensor_version="python", not just from TDVP/TEBD -- but
+        # that copy is `list(self._tensors)` (mpscontainer.py's own
+        # _Chain.copy()), a shallow list of N Python object references
+        # (N = site count), not a deep duplication of any ITensor's
+        # actual (bond-dimension-scaled) data: every operation in that
+        # engine returns a *new* ITensor rather than mutating one in
+        # place (tensor.py's own convention), so sharing the individual
+        # tensor objects across the old and new tensor lists is exactly
+        # as safe as it is for MPO's identical copy() -- and O(N) is
+        # negligible next to any DMRG/TDVP/TEBD sweep's own O(bond_dim^3)
+        # cost. No call site needs auditing for performance on that
+        # basis; only for the correctness question above (does the
+        # handle need to stay independent of whatever produced it).
         out = _shallow_copy(self)
         out.name = name
         if self.cpp_handle is not None and hasattr(self.cpp_handle,"copy"):
             out.cpp_handle = self.cpp_handle.copy()
         return out
     def __deepcopy__(self,memo):
-        """Defer to copy(): see the note there for why a shallow copy is
-        already correct and a real deep copy would fail on cpp_handle (or
-        recurse needlessly into self.MBO)."""
+        """Defer to copy(): see the note there for why copy() itself
+        already does exactly the right thing per backend (a shallow copy
+        of self plus, for itensor_version="python" only, an explicit
+        cpp_handle.copy() to break tensor-list aliasing) -- a real
+        recursive deepcopy would also choke on the C++ backends'
+        cpp_handle (no pickle/deepcopy support) and recurse needlessly
+        into self.MBO."""
         return self.copy()
     def write(self,name=None,path=None):
         """No-op: the wavefunction already lives in self.cpp_handle,
