@@ -56,3 +56,11 @@ tol = 1e-4
 assert diff<tol, "TDVP_GSE (python) time evolution disagrees with ED by %g (tol=%g)"%(diff,tol)
 
 print("TEST PASSED")
+
+# visualize the comparison behind the assert above
+import matplotlib.pyplot as plt
+plt.plot(ts,sz.real,label="DMRG (TDVP_GSE, python)",c="blue")
+plt.scatter(tsED,szED.real,label="ED",c="red")
+plt.xlabel("time") ; plt.ylabel(r"$\langle S_0^z\rangle(t)$")
+plt.legend()
+plt.show()
