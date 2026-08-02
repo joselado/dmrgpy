@@ -86,11 +86,19 @@ bond_hamiltonians(SiteSet const& sites, std::vector<MOTerm> const& terms)
         // is what makes it immune to both of _true_span()'s documented
         // false-positive sources: MultiOperator.identity()'s placeholder
         // "Id" factor, and paired F-string factors that algebraically
-        // cancel to Id).
+        // cancel to Id). The threshold is matched to _true_span()'s own
+        // np.allclose(m,eye) default (atol=1e-8,rtol=1e-5, i.e. an
+        // effective tolerance of ~1e-8 to ~1e-5 depending on entry
+        // magnitude) rather than a tighter one: this is a Frobenius norm
+        // over the whole small (out,in) operator, not an element-wise
+        // check, but staying below Python's own loosest bound keeps a
+        // term that's borderline-touched from being classified
+        // differently (nearest-neighbor vs "reject as long-range")
+        // between the two backends.
         int lo=-1, hi=-1;
         for (int i=1; i<=n; ++i)
             {
-            if (norm(mats[i]-sites.op("Id",i)) > 1E-10)
+            if (norm(mats[i]-sites.op("Id",i)) > 1E-8)
                 {
                 if (lo==-1) lo = i;
                 hi = i;
