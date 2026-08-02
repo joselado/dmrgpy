@@ -5,7 +5,8 @@
 This is a Python library to compute quasi-one-dimensional
 spin chains and fermionic systems using matrix product states
 with the density matrix renormalization group as implemented in ITensor
-(C++ and Julia versions). Most
+(C++ v2/v3, Julia, or a pure-Python/NumPy reimplementation that needs
+no compiler -- see "Choosing a backend" below). Most
 of the computations can be performed both with DMRG and exact
 diagonalization for small systems, which allows to benchmark the
 results.
@@ -125,7 +126,7 @@ You can find several tutorials [here](https://github.com/joselado/Advanced_Compu
 - Excitation energies
 - Excited wavefunctions
 - Arbitrary expectation values, including static correlation functions
-- Time evolution of arbitrary states
+- Time evolution of arbitrary states, with TDVP, TEBD or a Taylor-expanded evolution operator
 - MPS algebra: sum of MPS, application of operators, exponential and inverse
 - MPO algebra: sums, products, trace, trace of inverse for generic operators
 - Dynamical correlation functions computed with the Kernel polynomial method
@@ -505,19 +506,48 @@ print("GS energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 ```
 
 
-# Choosing between the C++ and Julia backend #
-The library uses ITensor in the background. Currently dmrgpy allows to 
-choose between
-ITensor2 (C++), or ITensors (Julia). The default version executed is
-the the C++ v2 version, if you want to instead use the Julia version
-execute the method ".setup_julia()", for example
+# Choosing a backend #
+The library uses ITensor in the background, and exposes the same
+public API regardless of which backend actually runs the calculation.
+Available backends are
+
+- **ITensor v3 (C++)**, the default, compiled by `python install.py`.
+  An in-process pybind11 extension. Real-time evolution defaults to
+  TDVP (`tevol_method="TDVP"`), with TEBD (`tevol_method="TEBD"`) also
+  available.
+- **ITensor v2 (C++)**, compiled with `python install.py
+  --itensor-version=2` (or `--itensor-version=both` to build v2 and v3
+  together). Real-time evolution uses a Taylor-expanded
+  evolution-operator MPO instead (no TDVP/TEBD support).
+- **Pure Python** (`pyitensor`), a from-scratch NumPy/SciPy
+  reimplementation of the ITensor v3 API subset dmrgpy needs --
+  ground/excited-state DMRG, TDVP and TEBD time evolution, KPM dynamical
+  correlators, METTS, and more. Needs no C++ compiler or compiled
+  extension at all, at the cost of being slower than the compiled
+  backends.
+- **Julia (ITensors.jl)**, a live in-process Julia session, set up with
+  `python install_julia.py` instead of `install.py`.
+- **Exact diagonalization (ED)**, a pure Python/NumPy/SciPy fallback.
+  Used automatically for small systems, and automatically in place of
+  any C++/Julia backend that isn't available (e.g. its extension
+  wasn't compiled), so a script keeps running -- just slower -- even
+  without a full build.
+
+The default backend is ITensor v3 (C++). Switch an existing chain to
+another one with `.setup_cpp(version=2)`, `.setup_python()` or
+`.setup_julia()`, for example
 
 ```python
 from dmrgpy import spinchain
 spins = ["S=1/2" for i in range(30)] # spins in each site
 sc = spinchain.Spin_Chain(spins) # create spin chain object
-sc.setup_julia()
+sc.setup_cpp(version=2) # switch to ITensor v2 (C++)
+# sc.setup_python()     # or: pure Python, no compiler needed
+# sc.setup_julia()      # or: ITensors.jl (Julia)
 ```
 
-and all the subsequent computations will be performed with Julia.
+and all subsequent computations on `sc` will be performed with that
+backend. Most methods also accept a `mode="DMRG"|"ED"` kwarg to
+cross-check a single call against ED without switching the chain's
+backend, for example `sc.gs_energy(mode="ED")`.
 
