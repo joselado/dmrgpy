@@ -41,7 +41,7 @@ every build requirement -- OS, `make`, a C++ compiler, LAPACK/BLAS,
 checking a version string), and only once everything checks out does
 `installtk/install2.py` compile the vendored ITensor static library and
 the `pybind` Makefile target for whichever backend(s) `--itensor-version`
-selects (`2` = mpscpp2/ITensor v2, the default; `3` = mpscpp3/ITensor v3;
+selects (`2` = mpscpp2/ITensor v2; `3` = mpscpp3/ITensor v3, the default;
 `both` builds both, one after the other).`install2.py` picks the right
 `mpscppN` directory and C++ language standard per version (v2 needs only
 C++14; v3 needs C++17 with the concepts TS extension, `-fconcepts`, see
@@ -224,12 +224,17 @@ public methods on `Many_Body_Chain` accept a `mode="DMRG"|"ED"` kwarg so
 results can be cross-validated between solvers (see the
 bilinear-biquadratic example in `README.md`).
 
-- **DMRG, C++ (`itensor_version=2` (the default) or `itensor_version=3`)**:
+- **DMRG, C++ (`itensor_version=2` or `itensor_version=3` (the default))**:
   entirely in-process, see "In-process pybind11 extension" below. Both
   versions expose the identical `Chain` session API and public
   `Many_Body_Chain` surface — `itensor_version` only picks which compiled
   extension (`mpscpp2._dmrgcpp` vs `mpscpp3._dmrgcpp`, via
   `cppext.get_backend(version)`) backs `self._session`.
+  `cppext.DEFAULT_ITENSOR_VERSION` (currently `3`) is the single source of
+  truth for the default, threaded through `Many_Body_Chain.__init__`,
+  `setup_cpp()`, `get_backend()`/`available()`, and `install.py`'s own
+  `--itensor-version` default (`installtk/__init__.py`'s matching
+  constant) — change it there, not per call site.
   `Many_Body_Chain.setup_cpp(version=2)` switches an existing chain
   between them. There is no file-based/subprocess fallback for either —
   if the requested extension isn't compiled, `mode.py` routes to ED
