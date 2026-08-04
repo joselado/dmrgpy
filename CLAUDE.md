@@ -24,8 +24,11 @@ to read or modify here.
 
 ## Install / build
 
-There is no `setup.py`/`pyproject.toml`; the project is used from `src/`
-via a path added to `PYTHONPATH` (or a symlink into `site-packages`).
+There is a `pyproject.toml`, but it is *only* for building the PyPI
+distribution (see "Packaging / PyPI" below) -- it is not how this repo is
+developed. For development the project is used from `src/` via a path
+added to `PYTHONPATH` (or a symlink into `site-packages`), which is what
+`install.py` sets up; there is no `setup.py` and no editable install.
 
 ```bash
 python install.py                    # compiles ITensor v2 (mpscpp2) + its pybind11 extension
@@ -91,6 +94,68 @@ assuming a fixed default. Finally, `install.py` adds the repo's `src` to
 the Python path and to the user's shell rc file
 (`installtk/addpythonpath.py`, `installtk/addsystem.py`, both idempotent
 across reruns). There is no separate lint or CI config in this repo.
+
+## Packaging / PyPI
+
+`pyproject.toml` builds a **pure-Python** distribution: a `py3-none-any`
+wheel (~450KB) containing the ED backend, the `itensor_version="python"`
+pyitensor DMRG/TDVP backend, and the Julia bridge. It deliberately ships
+no C++ at all. `[tool.setuptools.packages.find]` excludes `dmrgpy.mpscpp2`
+and `dmrgpy.mpscpp3` — those are ~400MB of vendored ITensor plus a build
+that needs a compiler, LAPACK/BLAS and pybind11, none of which belongs in
+a pip install. Users who want the compiled backends clone the repo and
+run `install.py`; without them everything still works via `"python"`/ED
+(`mode.py`), so the wheel is fully usable as installed.
+
+```bash
+python -m build                  # -> dist/*.whl + dist/*.tar.gz
+python -m twine check dist/*     # metadata/README validation
+python -m twine upload --repository testpypi dist/*   # dry run on TestPyPI first
+python -m twine upload dist/*    # the real thing
+```
+
+Things in here that are load-bearing and easy to break:
+
+- **`numba` is a core dependency, not an extra.** `algebra/kpmextrapolate.py`
+  imports it at module level and sits on the unconditional
+  `manybodychain -> dynamics -> kpmdmrg -> algebra.kpm` import path, so
+  without it even `import dmrgpy.spinchain` raises `ModuleNotFoundError`.
+  This is unrelated to pyitensor's *own* opt-in numba/JAX matvec kernel
+  (`pyitensor/kernels.py`), which is properly `try/except`-guarded and
+  genuinely optional.
+- **`requires-python = ">=3.10"` is set by numba**, which declares
+  `>=3.10`. Claiming a lower floor doesn't make dmrgpy work on 3.9 — pip
+  just backtracks onto an ancient, untested numba/numpy pair.
+- **`setuptools>=77` in `[build-system]`**, not the more common 61: the
+  `[project]` table uses PEP 639 licensing (bare SPDX `license` string plus
+  `license-files`), which older setuptools rejects outright.
+- **The `julia` extra is `juliacall`, not `julia`.** The live backend
+  migrated from PyJulia to juliacall/PythonCall.jl. The only surviving
+  `import julia` is `juliarun.py`, part of the legacy subprocess path that
+  isn't reachable from the public API, so PyJulia is intentionally not
+  pulled in.
+- **`src/dmrgpy/juliapkg.json` must stay in `package-data`.** juliacall/
+  juliapkg reads it at import time to resolve and precompile ITensors,
+  ITensorMPS and ITensorNHDMRG; if it's missing from the wheel,
+  `pip install dmrgpy[julia]` yields a Julia backend with no ITensors.jl.
+  (`.gitignore`'s unanchored `julia*` pattern would also swallow it —
+  hence the explicit `!src/dmrgpy/juliapkg.json` un-ignore. Don't remove
+  either one.)
+- **The classifiers say POSIX/MacOS, not `OS Independent`**, even though
+  everything shipped is pure Python: `sites.py::initialize()` shells out
+  to `mkdir -p` via `subprocess`, so chain construction fails on Windows.
+- Every module in the wheel must at least byte-compile, or pip prints a
+  `SyntaxError` on install; `python -m compileall` over the installed
+  package is the cheap check.
+
+Verify a release candidate by installing the built wheel into a clean
+virtualenv (not from `src/`, so import bugs and missing package-data
+actually surface) and cross-checking the two shipped backends against each
+other — `itensor_version="python"` DMRG vs `mode="ED"` on a small chain
+should agree to ~1e-15. `dist/`/`build/` are gitignored; build artifacts
+are not committed. Note that a given version can never be re-uploaded to
+PyPI (or TestPyPI) once published — bump the version rather than trying to
+replace a release.
 
 ## Running / verifying changes
 
@@ -280,7 +345,7 @@ bilinear-biquadratic example in `README.md`).
   compression algorithm) and why each one doesn't affect dmrgpy's own
   results, only internal performance/bond-dimension efficiency.
 - **DMRG, Julia (`itensor_version="julia_live"`)**: a live, in-process
-  Julia session (`mpsjulialive/`, via `pyjulia`/`juliasession.py`) with its
+  Julia session (`mpsjulialive/`, via `juliacall`/`juliasession.py`) with its
   own parallel set of modules (`mpsjulialive/groundstate.py`,
   `vev.py`, `mps.py`, `mpo.py`, ...) mirroring the top-level ones but
   talking to Julia's ITensors.jl instead of the C++ pybind11 extension.
@@ -455,7 +520,7 @@ full spectrum is infeasible for large chains.
 The two DMRG backends are independent implementations, not a shared
 protocol: the C++ path runs in-process through the pybind11 extension (see
 above), while `itensor_version="julia_live"` (`mpsjulialive/`) drives a
-live Julia/ITensors.jl session via `pyjulia` with its own mirrored set of
+live Julia/ITensors.jl session via `juliacall` with its own mirrored set of
 modules. A feature missing on one side simply isn't implemented there yet
 (check the relevant `mpsjulialive/*.py` file, or lack thereof) rather than
 falling back automatically — the only automatic fallback is DMRG → ED when
