@@ -1,15 +1,18 @@
 """Regression coverage for the generalized-eigenvalue DMRG solver
 H|psi>=lambda*A|psi> (A Hermitian positive definite): pyitensor's
 dmrg_generalized() (src/dmrgpy/pyitensor/dmrg.py) and its ITensor v3
-C++ port (Chain::gs_energy_generalized, mpscpp3/chain_session.h) -- see
-either docstring for the self-consistent Lagrange-multiplier algorithm.
-Both are exposed identically as Many_Body_Chain.gs_energy_generalized(),
-so every accuracy test below is parametrized over itensor_version in
-("python", 3) and runs against both implementations; the v3 case is
-skipped automatically when the compiled extension isn't available
-(mirrors how the rest of this suite handles a missing compiler -- see
-_helpers.py's own versions= kwarg for the same idea applied to plain
-gs_energy()).
+C++ port (Chain::gs_energy_generalized, mpscpp3/chain_session.h), and the
+live Julia one (mpsjulialive/generalized.jl's get_gs_generalized, the same
+algorithm against ITensorMPS.jl's own dmrg()/Sweeps/add()) -- see any of
+those docstrings for the self-consistent Lagrange-multiplier algorithm.
+All three are
+exposed identically as Many_Body_Chain.gs_energy_generalized(), so every
+accuracy test below is parametrized over itensor_version in ("python", 3,
+"julia_live") and runs against all of them; the v3 and julia_live cases
+are skipped automatically when the compiled extension resp. a Julia
+toolchain isn't available (mirrors how the rest of this suite handles a
+missing compiler -- see _helpers.py's own versions= kwarg for the same
+idea applied to plain gs_energy()).
 
 Same test problem/ground-truth convention as test_arpacktk_iram.py's
 mode-2 (ARPACK generalized eigenproblem) tests, so all three solvers are
@@ -24,10 +27,13 @@ import scipy.linalg as sla
 from dmrgpy import cppext, fermionchain
 from dmrgpy.multioperator import identity as mo_identity
 
+from _helpers import julia_live_param, setup_backend
+
 ITENSOR_VERSIONS = [
     "python",
     pytest.param(3, marks=pytest.mark.skipif(
         not cppext.available(3), reason="ITensor v3 extension not compiled")),
+    julia_live_param(),
 ]
 
 
@@ -58,10 +64,7 @@ def _generalized_ground_truth(fc, a, m):
 
 
 def _setup(fc, itensor_version, maxm=40, nsweeps=12, cutoff=1e-12):
-    if itensor_version == "python":
-        fc.setup_python()
-    else:
-        fc.setup_cpp(version=itensor_version)
+    setup_backend(fc, itensor_version)
     fc.maxm = maxm
     fc.nsweeps = nsweeps
     fc.cutoff = cutoff
@@ -183,11 +186,11 @@ def test_gs_energy_generalized_near_singular_metric_raises_not_nan(itensor_versi
 
 
 def test_gs_energy_generalized_requires_supported_backend():
-    """The generalized solver only exists on itensor_version 'python' and
-    3 so far (implemented in pyitensor first, later ported to v3) --
-    mpscpp2 (itensor_version=2) and julia_live don't have this session
-    method yet, so this must fail loudly rather than silently doing the
-    wrong thing on those backends."""
+    """The generalized solver only exists on itensor_version 'python', 3
+    and 'julia_live' so far (implemented in pyitensor first, later ported
+    to v3 and to the live Julia session) -- mpscpp2 (itensor_version=2)
+    has no such path, so this must fail loudly rather than silently doing
+    the wrong thing there."""
     fc, a, m = _generalized_fermion_problem(n=4, seed=2)
     fc.setup_cpp(version=2)
     with pytest.raises(NotImplementedError):

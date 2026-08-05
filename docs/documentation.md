@@ -1971,6 +1971,159 @@ if `juliacall`/Julia isn't available, the same way `tests/` already skips
 itensor_version 2/3 when the corresponding compiled extension isn't
 present.
 
+#### Generalized-eigenvalue and non-Hermitian DMRG on `julia_live`
+
+`mpsjulialive/generalized.jl` and `mpsjulialive/nhdmrg.jl` close what
+`ROADMAP.md` listed as the single biggest structural gap in this backend:
+the generalized eigenproblem $H|\psi\rangle=\lambda A|\psi\rangle$ and
+non-Hermitian DMRG, both of which previously existed only on
+`itensor_version` `3`/`"python"` and raised `NotImplementedError` here.
+
+Both follow the same "reuse the backend-agnostic algebra, write a Julia
+primitive only for the piece that genuinely needs it" pattern as CVM and
+TDZ above:
+
+- `generalized.jl::get_gs_generalized` is the Hermitian solver — the same
+  self-consistent Lagrange-multiplier iteration as
+  `pyitensor/dmrg.py::dmrg_generalized` and
+  `Chain::gs_energy_generalized`, i.e. rebuild `Heff = H - lambda*A`
+  exactly (`add(...; cutoff=0.0)`), run one ordinary `dmrg()` sweep
+  against it, reset `lambda` to the swept state's generalized Rayleigh
+  quotient, repeat. The whole loop runs in one Julia call (same design as
+  `kpm.jl`/`tdvp.jl`), so no MPO/MPS marshalling per outer sweep;
+  `groundstate.gs_energy_generalized` gained a `julia_live` branch, and
+  its pre-existing `self._session is None` guard was narrowed to exclude
+  this backend, which legitimately has no session object at all.
+  Cross-checked against `scipy.linalg.eigh`'s exact generalized
+  eigensolver and against pyitensor: agreement to ~1e-15
+  (`tests/test_dmrg_generalized.py`, now parametrized over `julia_live`
+  too).
+- `nhdmrg.jl::get_nhdmrg_pair` and
+  `generalized.jl::get_gs_generalized_nhdmrg` are the non-Hermitian plain
+  and generalized solvers. Unlike the other three backends, the local
+  sweep here is *not* a dmrgpy port of ITensorNHDMRG.jl — it is
+  ITensorNHDMRG.jl (already a declared dependency in `juliapkg.json`, and
+  already used by `get_gs.jl::get_gs_nhdmrg` for plain non-Hermitian
+  ground-state *energies*, which discards the left vector). The retry
+  loop and two-sided eigen-residual certificate in `nhdmrg.py` are built
+  purely on generic `MultiOperator`×MPS algebra, so they are shared
+  unchanged; `mpsjulialive/nhdmrg.py` supplies only a per-attempt
+  function, and `nhdmrg.py`'s `nhdmrg()`/`nhdmrg_generalized()` were
+  refactored to call an `attempt()` closure instead of `self._session`
+  directly.
+
+Two ITensorNHDMRG-specific corrections were needed, both documented in
+full in `nhdmrg.jl`'s header, and both **invisible on a
+complex-*symmetric* Hamiltonian** — which is what every non-Hermitian
+model previously in `tests/`/`examples/` happens to be, since their
+hoppings are symmetric and every non-Hermitian piece is diagonal. Pinning
+them down needed a genuinely non-symmetric model, hence
+`tests/test_nh_dmrg.py::nh_asymmetric_hopping_chain` and
+`examples/non_hermitian/nhdmrg_julia_asymmetric_VS_ED` (Hatano-Nelson
+asymmetric hopping + staggered imaginary potential):
+
+1. **Left-vector convention.** ITensorNHDMRG's `ProjNHMPO` builds its
+   "adjoint" projector from `dag(swapprime(conj(H), 0 => 1))`; since
+   these sites carry no QNs (`sites.jl` uses plain `Index(...)`), `dag()`
+   is just a conjugation, the two conjugations cancel, and what it
+   actually sweeps against is `swapprime(H, 0 => 1)` = $H^{T}$. So its
+   returned `wfl` solves the *transpose* eigenvalue equation
+   $H^{T}|wfl\rangle=\lambda|wfl\rangle$, whereas dmrgpy's convention
+   throughout (`nhdmrg.py`, and what its residual certificate checks) is
+   the adjoint one $H^{\dagger}|\psi_L\rangle=\bar\lambda|\psi_L\rangle$.
+   The two differ by exactly a complex conjugation, so
+   `nh_biorthogonal_pair` returns `conj(wfl)`, renormalized (`inner()`
+   conjugates its first argument, so ITensorNHDMRG's own
+   `inner(wfl,wfr)=1` does not survive the conjugation, and the correct
+   rescaling factor is `1/conj(s)`, not `1/s`). Confirmed directly:
+   without it the left residual sits at ~2 while the right one is ~1e-15.
+2. **Unanchored left solve on a real-part-degenerate spectrum.** dmrgpy
+   targets the eigenvalue of smallest *real* part; when a
+   complex-conjugate pair ties for it — the generic PT-symmetric /
+   Hatano-Nelson situation — nothing in ITensorNHDMRG ties its left solve
+   to whichever member its right solve picked, so the two can converge to
+   *different* eigenvalues (observed deterministically, on every attempt
+   from every random start: `conj(wfl)` came back satisfying the equation
+   for `lambda` rather than `conj(lambda)`, and its overlap with `wfr`
+   was exactly 0). dmrgpy's own ports anchor against precisely this
+   (`arnoldi_smallest_real`'s `Sel` comment in
+   `mpscpp3/chain_session.h`), but that isn't reachable from outside the
+   package. `nhdmrg_solve` breaks the tie instead: it re-solves against
+   `exp(i*theta)*H` for a small `theta`, which leaves every
+   eigen*vector* untouched and maps every eigen*value* to
+   `exp(i*theta)*lambda`, so
+   `Re(exp(i*theta)*(a±ib)) = a*cos(theta) ∓ b*sin(theta)` is no longer
+   degenerate; the eigenvalue is mapped back exactly by dividing by the
+   same phase. For a spectrum whose smallest real part is already unique
+   and gapped, a `theta` this small cannot change which eigenvalue is
+   selected, so this is a pure tie-break rather than a change of target —
+   confirmed on the model above, where the returned eigenvalue is
+   bit-for-bit what the untied solve returned and only the left vector
+   changes (left residual ~2 → ~1e-15). It is applied only when the
+   bilinear overlap actually collapses, so the normal path costs one
+   extra `inner()`.
+
+A related robustness fix landed in the shared driver: `nhdmrg()` now
+treats an attempt that *raises* the same way `nhdmrg_generalized()`
+already did — as a bad random draw, redrawn — and only raises when every
+attempt fails. Before this, a single unlucky/degenerate draw aborted the
+whole call even when the very next draw would have converged to ~1e-15.
+`mpsjulialive/generalized.py::metric_guard` translates the `.jl` layer's
+own collapse guards into the `RuntimeError` the other backends raise for
+the same condition, matching on the guard's message rather than blanket-
+translating every `JuliaError` (so a genuine bug in the `.jl` code — an
+`UndefVarError`, a dispatch failure — keeps propagating as itself instead
+of being silently swallowed `ntries` times by that retry loop).
+
+#### TDVP_GSE on `julia_live`
+
+`self.tevol_method` used to be ignored entirely on this backend --
+`timedependent.py` routed every `julia_live` call to
+`mpsjulialive/timedependent.py`, which only ever ran plain two-site TDVP.
+It is now honored: `"TDVP"` and `"TDVP_GSE"` both work, and anything else
+(`"TEBD"`, the legacy `"MPO"` path) raises `NotImplementedError` instead
+of silently running a different integrator than the caller asked for --
+the failure mode that would make a backend-comparison script quietly
+compare the wrong things.
+
+`"TDVP_GSE"` needed no algorithm port at all, unlike v3
+(`mpscpp3/TDVP/basisextension.h`) and pyitensor (`pyitensor/gse.py`, a
+from-scratch reimplementation of the same scheme): ITensorMPS.jl already
+ships the Yang-White global subspace expansion as
+`expand(psi, H; alg="global_krylov")` (its own docstring cites
+arXiv:2005.06104) and its `tdvp` accepts `nsite=1`. So
+`mpsjulialive/tdvp.jl`'s `gse_expand`/`tdvp_step_onesite` and the
+`quench_tdvp_gse`/`evolve_and_measure_tdvp_gse` loops around them are
+only the wiring, in the same "expand for the first `gse_sweeps` steps,
+then one-site step" structure `pyitensor/chain.py` uses, with the same
+measurement/renormalization bookkeeping as the existing plain-TDVP loops
+in that file.
+
+One genuine difference, deliberately not papered over: v3 and pyitensor
+hard-cap the *enlarged* bond dimension at `maxm`
+(`bond_maxdim=self.maxm` / `"MaxDim",maxm_`), whereas ITensorMPS's
+`expand` takes no such argument -- what bounds growth there is the bond
+dimension of the Krylov vectors themselves, via `apply_kwargs`, so that
+is what `gse_expand` caps at `maxm`. A `truncate!` after the fact would
+be actively wrong: the whole point of the expansion is that its newly
+added directions carry exactly zero weight in the current state, so they
+are precisely what any truncation would discard first.
+
+Validated against ED on a quench *from a genuine product state* (bond
+dimension 1), which is the configuration that separates "the expansion
+ran" from "the call fell through to the two-site path": one-site TDVP
+conserves bond dimension exactly, so with the expansion switched off
+(`tdvp_gse_sweeps=0`) the same integrator is structurally unable to
+follow the quench. Measured on a 6-site chain: two-site TDVP 3.1e-7 from
+ED, one-site+GSE 9.4e-9, one-site with GSE off 4.9e-1. Both directions
+are asserted, in `tests/test_julia_live.py` and in
+`examples/time_evolution/tdvp_gse_julia_VS_ED_time_evolution`. Note this
+same product-state start is where `itensor_version=3` has a known,
+isolated failure (see that example's own comment and
+`examples/time_evolution/tdvp_gse_VS_ED_time_evolution`, which has to mix
+in an XX+YY coupling to avoid it) -- the Julia route needs no such
+workaround.
+
 ### 4.7 Supporting `*tk` packages
 
 Functionality is generally split into a top-level module (the public

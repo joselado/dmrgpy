@@ -114,3 +114,91 @@ function quench_tdvp(Hshiftmpo,A1mpo,A2mpo,wf0,nt,dt,cutoff,maxdim)
 	end
 	return correlator,psi1
 end
+
+# ---------------------------------------------------------------------
+# One-site TDVP with Krylov global subspace expansion
+# (tevol_method="TDVP_GSE", arXiv:2005.06104), the julia_live counterpart
+# of mpscpp3/TDVP/basisextension.h's addBasis() + one-site tdvp and of
+# pyitensor/gse.py's from-scratch port of the same scheme.
+#
+# Nothing here is a port: ITensorMPS.jl already ships the algorithm as
+# `expand(psi, H; alg="global_krylov")` (its own docstring cites the same
+# Yang-White paper), and its `tdvp` takes `nsite=1` directly. So this is
+# only the wiring -- the same "one expansion per step for the first
+# gse_sweeps steps, then plain one-site TDVP" structure the other two
+# backends use (see pyitensor/chain.py's quench_tdvp_gse), with the same
+# measurement/renormalization bookkeeping as quench_tdvp/
+# evolve_and_measure_tdvp above.
+#
+# One genuine difference from the other backends, deliberately not
+# papered over: they hard-cap the *enlarged* bond dimension at maxm
+# (`bond_maxdim=self.maxm` / `"MaxDim",maxm_`), whereas ITensorMPS's
+# `expand` has no such argument -- what bounds it there is the bond
+# dimension of the Krylov vectors themselves, through `apply_kwargs`.
+# Capping those at maxm (below) is the closest equivalent, and is what
+# keeps a long gse_sweeps run from growing the state without bound; a
+# `truncate!` after the fact would be wrong, since the whole point of the
+# expansion is that the newly added directions carry exactly zero weight
+# in the current state and would therefore be the first thing any
+# truncation discarded.
+
+function gse_expand(H, psi, krylov_order, gse_cutoff, maxdim)
+	# Same input sanitization as tdvp_step (see its own comment): psi may
+	# arrive with a stale Link prime from an MPO application, which the
+	# environment bookkeeping inside expand()/apply() can't handle either.
+	psi = noprime(copy(psi), "Link")
+	orthogonalize!(psi, 1)
+	return expand(psi, H; alg = "global_krylov", krylovdim = krylov_order,
+		cutoff = gse_cutoff,
+		apply_kwargs = (; maxdim = min(maxlinkdim(psi) + 1, maxdim)))
+end
+
+
+function tdvp_step_onesite(H, psi, dt, cutoff, maxdim)
+	psi = noprime(copy(psi), "Link")
+	orthogonalize!(psi, 1)
+	# nsite=1: one-site TDVP conserves the bond dimension exactly, which
+	# is precisely why it needs the expansion above to grow at all.
+	return tdvp(H, -im * dt, psi; time_step = -im * dt, cutoff = cutoff,
+		maxdim = maxdim, normalize = false, outputlevel = 0, nsite = 1)
+end
+
+
+function evolve_and_measure_tdvp_gse(Hmpo, Aop, wf, nt, dt, cutoff, maxdim,
+		gse_sweeps, krylov_order, gse_cutoff)
+	# No per-step renormalization here, matching
+	# pyitensor/chain.py's evolve_and_measure_tdvp_gse (unlike
+	# evolve_and_measure_tdvp above, whose renormalization exists to undo
+	# two-site truncation drift -- one-site TDVP does no truncation).
+	psi = wf
+	correlator = ComplexF64[]
+	for it = 1:nt
+		if it <= gse_sweeps
+			psi = gse_expand(Hmpo, psi, krylov_order, gse_cutoff, maxdim)
+		end
+		psi = tdvp_step_onesite(Hmpo, psi, dt, cutoff, maxdim)
+		push!(correlator, inner(psi, Aop, psi))
+	end
+	return correlator, psi
+end
+
+
+function quench_tdvp_gse(Hshiftmpo, A1mpo, A2mpo, wf0, nt, dt, cutoff, maxdim,
+		gse_sweeps, krylov_order, gse_cutoff)
+	psi1 = apply_clean(A1mpo, wf0, maxdim, cutoff)
+	psi2 = apply_clean(A2mpo, wf0, maxdim, cutoff)
+	norm0 = sqrt(abs(inner(psi1, psi1)))
+	correlator = ComplexF64[]
+	for it = 1:nt
+		if it <= gse_sweeps
+			psi1 = gse_expand(Hshiftmpo, psi1, krylov_order, gse_cutoff, maxdim)
+		end
+		psi1 = tdvp_step_onesite(Hshiftmpo, psi1, dt, cutoff, maxdim)
+		# quench_tdvp_gse *does* renormalize, matching pyitensor's own
+		# (its psi1 carries A1's physical scale through the trajectory,
+		# see quench_tdvp above).
+		psi1 = psi1 * (norm0 / norm(psi1))
+		push!(correlator, inner(psi2, psi1))
+	end
+	return correlator, psi1
+end

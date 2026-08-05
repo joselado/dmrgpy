@@ -6,10 +6,13 @@ counterpart of tests/test_dmrg_generalized.py, generalizing NH-DMRG
 generalizes plain gs_energy(). See pyitensor/nhdmrg.py's
 nhdmrg_generalized() and mpscpp3/chain_session.h's
 Chain::nhdmrg_generalized for the self-consistent Lagrange-multiplier
-algorithm (complex lambda, biorthogonal Rayleigh quotient) -- the same
-algorithm on both backends, so every accuracy test below is parametrized
-over itensor_version in ("python", 3); the v3 case is skipped
-automatically when the compiled extension isn't available. mpscpp2
+algorithm (complex lambda, biorthogonal Rayleigh quotient), and
+mpsjulialive/generalized.jl's get_gs_generalized_nhdmrg for the live
+Julia one (the same outer loop wrapped around real ITensorNHDMRG.jl
+sweeps) -- the same algorithm on all three backends, so every accuracy
+test below is parametrized over itensor_version in ("python", 3,
+"julia_live"); the v3 and julia_live cases are skipped automatically when
+the compiled extension resp. a Julia toolchain isn't available. mpscpp2
 (itensor_version=2) has no analogous session method yet.
 
 Ground truth is scipy.linalg.eig's general (non-symmetric) generalized
@@ -27,10 +30,13 @@ from dmrgpy import cppext, fermionchain
 from dmrgpy.multioperator import identity as mo_identity
 from dmrgpy.nhdmrg import nhdmrg_generalized as _nhdmrg_generalized_toplevel
 
+from _helpers import julia_live_param, setup_backend
+
 ITENSOR_VERSIONS = [
     "python",
     pytest.param(3, marks=pytest.mark.skipif(
         not cppext.available(3), reason="ITensor v3 extension not compiled")),
+    julia_live_param(),
 ]
 
 
@@ -65,10 +71,7 @@ def _nh_generalized_ground_truth(fc, h, m):
 
 
 def _setup(fc, itensor_version, maxm=40, nsweeps=14, cutoff=1e-12):
-    if itensor_version == "python":
-        fc.setup_python()
-    else:
-        fc.setup_cpp(version=itensor_version)
+    setup_backend(fc, itensor_version)
     fc.maxm = maxm
     fc.nsweeps = nsweeps
     fc.cutoff = cutoff
@@ -160,8 +163,9 @@ def test_gs_energy_generalized_nonhermitian_leaves_computed_gs_true(itensor_vers
 
 def test_gs_energy_generalized_nonhermitian_requires_supported_backend():
     """The non-Hermitian generalized solver exists on itensor_version
-    "python" and 3 (like the Hermitian path) but not mpscpp2
-    (itensor_version=2), which has no Chain.nhdmrg_generalized yet."""
+    "python", 3 and "julia_live" (like the Hermitian path) but not
+    mpscpp2 (itensor_version=2), which has no Chain.nhdmrg_generalized
+    yet."""
     fc, h, m = _nh_generalized_fermion_problem(n=4, seed=2)
     fc.setup_cpp(version=2)
     with pytest.raises(NotImplementedError):

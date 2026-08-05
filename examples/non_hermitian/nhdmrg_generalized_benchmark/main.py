@@ -1,8 +1,11 @@
 """Head-to-head benchmark: the non-Hermitian generalized-eigenvalue
 NH-DMRG solver (Many_Body_Chain.gs_energy_generalized() dispatching to
-nhdmrg_generalized() for a non-Hermitian H) across its two
-implementations -- pyitensor (pyitensor/nhdmrg.py) and its ITensor v3 C++
-port (Chain::nhdmrg_generalized, mpscpp3/chain_session.h) -- against the
+nhdmrg_generalized() for a non-Hermitian H) across its three
+implementations -- pyitensor (pyitensor/nhdmrg.py), its ITensor v3 C++
+port (Chain::nhdmrg_generalized, mpscpp3/chain_session.h) and the live
+Julia one (mpsjulialive/generalized.jl's get_gs_generalized_nhdmrg,
+whose inner sweep is the real ITensorNHDMRG.jl package rather than a
+port of it) -- against the
 pre-existing ARPACK-mode-2 route (dmrgpy.algebra.arpacktk.
 mpsiram_generalized, OP=inv(M)*A via the approximate correction-vector
 self.applyinverse), all solving H|psi_R>=lambda*A|psi_R> for a possibly
@@ -30,7 +33,13 @@ convention as tests/test_nhdmrg_generalized.py).
 
 The v3 rows are skipped automatically if the compiled extension isn't
 available (see cppext.available(3)) -- run `python install.py
---itensor-version=3` first to include them.
+--itensor-version=3` first to include them; likewise the julia rows need
+a Julia toolchain (`python install_julia.py`).
+
+Ends with a two-panel plot (wall time and accuracy vs chain length) over
+every available solver. Note that Julia JIT-compiles on first call, so
+the first julia row's wall time is compilation, not solver cost -- compare
+the later, warm rows (see the Hermitian benchmark's own note).
 
 Usage: python main.py [--json out.json]
 """
@@ -40,6 +49,7 @@ sys.path.append(os.getcwd() + '/../../../src')
 
 import numpy as np
 import scipy.linalg as sla
+import matplotlib.pyplot as plt
 
 from dmrgpy import cppext, fermionchain
 from dmrgpy.algebra import arnolditk, arpacktk
@@ -86,6 +96,8 @@ def run_nhdmrg_generalized(n, seed, maxm, nsweeps, itensor_version, cutoff=1e-12
     fc, h, m = nh_generalized_fermion_problem(n, seed)
     if itensor_version == "python":
         fc.setup_python()
+    elif itensor_version == "julia_live":
+        fc.setup_julia()
     else:
         fc.setup_cpp(version=itensor_version)
     fc.maxm, fc.nsweeps, fc.cutoff = maxm, nsweeps, cutoff
@@ -120,8 +132,22 @@ CASES = [
     dict(name="nh_fermion_n8", n=8, seed=3, maxm=80, nsweeps=18),
 ]
 
+def julia_available():
+    """Whether the live Julia backend can actually be used here (the
+    import is what boots the Julia session), mirroring
+    cppext.available(3) for the compiled C++ one."""
+    try:
+        from dmrgpy.mpsjulialive import juliasession  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 V3_AVAILABLE = cppext.available(3)
-ALGOS = ["nhdmrg_generalized_python"] + (["nhdmrg_generalized_v3"] if V3_AVAILABLE else []) \
+JULIA_AVAILABLE = julia_available()
+ALGOS = ["nhdmrg_generalized_python"] \
+        + (["nhdmrg_generalized_v3"] if V3_AVAILABLE else []) \
+        + (["nhdmrg_generalized_julia"] if JULIA_AVAILABLE else []) \
         + ["arpack_mode2"]
 
 
@@ -132,9 +158,39 @@ def run_algo(algo, case, tol):
     if algo == "nhdmrg_generalized_v3":
         return run_nhdmrg_generalized(case["n"], case["seed"], case["maxm"],
                 case["nsweeps"], 3)
+    if algo == "nhdmrg_generalized_julia":
+        return run_nhdmrg_generalized(case["n"], case["seed"], case["maxm"],
+                case["nsweeps"], "julia_live")
     if algo == "arpack_mode2":
         return run_arpack_mode2(case["n"], case["seed"], tol=tol)
     raise ValueError(algo)
+
+
+def plot(results):
+    """Wall time and accuracy vs chain length, one line per solver."""
+    fig, (ax_t, ax_e) = plt.subplots(1, 2, figsize=(11, 4.2))
+    for algo in ALGOS:
+        rows = [r for r in results if r["algo"] == algo and r["ok"]]
+        if not rows:
+            continue
+        ns = [r["n"] for r in rows]
+        ax_t.plot(ns, [r["time"] for r in rows], "o-", label=algo)
+        # errors can hit exactly 0 at machine precision; floor them so the
+        # log axis still shows the point
+        ax_e.plot(ns, [max(r["error"], 1e-16) for r in rows], "o-", label=algo)
+    ax_t.set_xlabel("chain length n")
+    ax_t.set_ylabel("wall time [s]")
+    ax_t.set_yscale("log")
+    ax_t.set_title("NH generalized eigenproblem: wall time")
+    ax_e.set_xlabel("chain length n")
+    ax_e.set_ylabel(r"$|\lambda-\lambda_\mathrm{exact}|$")
+    ax_e.set_yscale("log")
+    ax_e.set_title("Accuracy vs scipy.linalg.eig")
+    for ax in (ax_t, ax_e):
+        ax.legend(fontsize=8)
+        ax.grid(alpha=0.3)
+    fig.tight_layout()
+    plt.show()
 
 
 def main():
@@ -148,6 +204,9 @@ def main():
         print("(ITensor v3 extension not compiled -- skipping "
               "nhdmrg_generalized_v3 rows; run `python install.py "
               "--itensor-version=3` to include them)\n")
+    if not JULIA_AVAILABLE:
+        print("(no Julia toolchain -- skipping nhdmrg_generalized_julia "
+              "rows; run `python install_julia.py` to include them)\n")
 
     results = []
     for case in CASES:
@@ -188,6 +247,8 @@ def main():
         with open(args.json, "w") as f:
             json.dump(results, f, indent=2)
         print(f"\nWrote {args.json}")
+
+    plot(results)
 
 
 if __name__ == "__main__":

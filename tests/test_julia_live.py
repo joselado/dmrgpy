@@ -138,3 +138,70 @@ def test_kpm_peak_matches_exact_gap():
     x, y = np.array(x), np.array(y).real
     peak = x[np.argmax(y)]
     assert peak == pytest.approx(HEISENBERG_4_GAP, abs=0.05)
+
+
+def _quench_from_product_state(tevol_method, gse_sweeps, n=6):
+    """Spin-1/2 chain whose starting state is the exact *product* ground
+    state of a pure staggered field (bond dimension 1), then quenched to
+    Heisenberg. The product-state start is the point: one-site TDVP
+    conserves bond dimension exactly, so without the global subspace
+    expansion it structurally cannot follow this quench -- see
+    examples/time_evolution/tdvp_gse_julia_VS_ED_time_evolution."""
+    sc = spinchain.Spin_Chain([2 for _ in range(n)])
+    sc.setup_julia()
+    sc.tevol_method = tevol_method
+    sc.tdvp_gse_sweeps = gse_sweeps
+    sc.tdvp_gse_krylov_order = 3
+    sc.tdvp_gse_cutoff = 1e-10
+    h0, h1 = 0, 0
+    for i in range(n):
+        h0 = h0 + (-1)**i * sc.Sz[i]
+    for i in range(n - 1):
+        h1 = h1 + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] \
+                + sc.Sz[i] * sc.Sz[i + 1]
+    sc.set_hamiltonian(h0)
+    wf = sc.get_gs()
+    wf_ed = sc.get_gs(mode="ED")
+    sc.set_hamiltonian(h1)
+    return sc, wf, wf_ed
+
+
+def _max_diff_vs_ed(sc, wf, wf_ed, nt=40, dt=0.05):
+    op = sc.Sz[0]
+    _ts, sz = timedependent.evolve_and_measure(sc, operator=op, nt=nt,
+            dt=dt, wf=wf)
+    _ts_ed, sz_ed = timedependent.evolve_and_measure(sc, operator=op, nt=nt,
+            dt=dt, wf=wf_ed, mode="ED")
+    return np.max(np.abs(sz - sz_ed))
+
+
+def test_tdvp_gse_matches_ed():
+    """tevol_method="TDVP_GSE" on julia_live (mpsjulialive/tdvp.jl's
+    evolve_and_measure_tdvp_gse: ITensorMPS.jl's own
+    expand(...; alg="global_krylov") + nsite=1 tdvp) must track exact
+    diagonalization, same as the plain two-site TDVP path."""
+    sc, wf, wf_ed = _quench_from_product_state("TDVP_GSE", gse_sweeps=40)
+    assert _max_diff_vs_ed(sc, wf, wf_ed) < 1e-4
+
+
+def test_tdvp_gse_expansion_is_what_makes_it_work():
+    """The companion negative control for the test above, and the only
+    thing that proves the expansion actually ran rather than the call
+    silently falling through to the two-site path: the *same* one-site
+    integrator with tdvp_gse_sweeps=0 must fail badly on this quench,
+    since one-site TDVP alone cannot grow a bond-dimension-1 state."""
+    sc, wf, wf_ed = _quench_from_product_state("TDVP_GSE", gse_sweeps=0)
+    assert _max_diff_vs_ed(sc, wf, wf_ed) > 1e-2
+
+
+def test_unsupported_tevol_method_raises():
+    """julia_live implements tevol_method "TDVP"/"TDVP_GSE" only. A
+    request for "TEBD" (or the legacy "MPO" path) must raise rather than
+    silently running plain TDVP instead -- a silent fallback would make a
+    backend-comparison script compare the wrong integrators without
+    saying so."""
+    sc = _heisenberg_chain()
+    sc.tevol_method = "TEBD"
+    with pytest.raises(NotImplementedError):
+        timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=3,
+                dt=0.05, wf=sc.get_gs())

@@ -41,6 +41,14 @@ def initialize():
     files += ["tdvp.jl"] # real-time TDVP evolution; also calls
                           # mpsalgebra.jl's apply_op, must load after it
     files += ["excited.jl"] # orthogonality-penalty excited-state dmrg()
+    files += ["nhdmrg.jl"] # biorthogonal non-Hermitian DMRG pair; uses
+                            # get_gs.jl's make_sweeps/run_quiet, so must
+                            # load after it
+    files += ["generalized.jl"] # generalized-eigenvalue (Hermitian and
+                                 # non-Hermitian) DMRG; uses get_gs.jl's
+                                 # make_sweeps/run_quiet and nhdmrg.jl's
+                                 # nh_biorthogonal_pair, so must load
+                                 # after both
     files += ["densitymatrix.jl"] # single-site reduced density matrix
     files += ["entropy.jl"] # SVD-based bond entanglement entropy
     for name in files: # loop over files

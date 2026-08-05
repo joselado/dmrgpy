@@ -357,9 +357,32 @@ now used for non-Hermitian \emph{excited} states, $n\ge 2$) remains
 available on every backend, but is typically several orders of magnitude
 less accurate than NH-DMRG at comparable cost --- see
 \texttt{examples/non\_hermitian/nhdmrg\_VS\_ED\_VS\_arnoldi}, which
-cross-checks NH-DMRG on all three backends against exact diagonalization
-and the Arnoldi route on an interacting fermionic chain with a staggered
-imaginary potential. The biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
+cross-checks NH-DMRG on all three ported backends against exact
+diagonalization and the Arnoldi route on an interacting fermionic chain
+with a staggered imaginary potential.
+
+\lstinline|itensor_version="julia_live"| also implements
+\lstinline|nhdmrg()|, but is not a port: it calls the real
+ITensorNHDMRG.jl package, with two adaptations applied in
+\texttt{mpsjulialive/nhdmrg.jl} (see its header for the full derivation
+of each). First, that package's ``adjoint'' sweep is against $H^{T}$
+rather than $H^\dagger$, so its left vector solves the transpose
+eigenvalue equation and is complex-conjugated here to match dmrgpy's
+convention. Second, it does not tie its left solve to whichever
+eigenvalue its right solve picked, so a spectrum with a complex-conjugate
+pair tied for the smallest real part (the generic
+PT-symmetric/Hatano-Nelson situation) could return a left and a right
+vector belonging to \emph{different} eigenvalues; this is broken by
+re-solving against $e^{i\theta}H$ for a small $\theta$, which leaves
+every eigenvector untouched and rotates the spectrum just enough to
+separate the pair's real parts. Neither adaptation is observable on a
+complex-\emph{symmetric} $H$, which is what most textbook non-Hermitian
+models (and every other non-Hermitian example in this repository) happen
+to be --- see
+\texttt{examples/non\_hermitian/nhdmrg\_julia\_asymmetric\_VS\_ED} for a
+chain with asymmetric hopping, where both are.
+
+The biorthogonal pair $|\psi_R\rangle,|\psi_L\rangle$
 is also what feeds the non-Hermitian dynamical correlator,
 \lstinline|get_dynamical_correlator(submode="KPM")| for $H\neq H^\dagger$
 --- see Section~\ref{sec:dynamical}.
@@ -463,14 +486,19 @@ Implemented on the pure-Python (pyitensor) backend
 (\lstinline|itensor_version="python"|, i.e. after
 \lstinline|chain.setup_python()|) ---
 \lstinline|dmrgpy.pyitensor.dmrg.dmrg_generalized| is the underlying
-routine --- and on compiled ITensor v3 (\lstinline|itensor_version=3|,
+routine ---, on compiled ITensor v3 (\lstinline|itensor_version=3|,
 i.e. after \lstinline|chain.setup_cpp(version=3)|), where
 \lstinline|Chain::gs_energy_generalized|
 (\texttt{mpscpp3/chain\_session.h}) runs the identical algorithm against
 ITensor v3's own \lstinline|dmrg()|/\lstinline|Sweeps|/\lstinline|sum()|
-instead of pyitensor's hand-rolled two-site sweep.
-\lstinline|itensor_version=2| (mpscpp2) and \lstinline|julia_live| don't
-have this session method yet and raise \lstinline|NotImplementedError|.
+instead of pyitensor's hand-rolled two-site sweep, and on the live Julia
+backend (\lstinline|itensor_version="julia_live"|, i.e. after
+\lstinline|chain.setup_julia()|), where \lstinline|get_gs_generalized|
+(\texttt{mpsjulialive/generalized.jl}) runs it once more against
+ITensorMPS.jl's own
+\lstinline|dmrg()|/\lstinline|Sweeps|/\lstinline|add()|.
+\lstinline|itensor_version=2| (mpscpp2) doesn't
+have this session method yet and raises \lstinline|NotImplementedError|.
 See \texttt{examples/groundstate/dmrg\_generalized\_benchmark}, which
 heads all three solvers up against each other on the same
 interacting-fermion-chain test problem: needing no approximate inverse,
@@ -479,6 +507,12 @@ correction-vector solve also gets more expensive, and less accurate, as
 the chain grows --- two orders of magnitude slower and $10^{9}$ times
 less accurate on an 8-site chain), and v3 is itself consistently
 $\sim2$--$4\times$ faster than pyitensor at these sizes.
+\lstinline|julia_live| matches both DMRG routes to machine precision and,
+once warm, lands between them: at $n=8$, v3 0.16\,s,
+\lstinline|julia_live| 0.20\,s, pyitensor 0.50\,s. Its \emph{first} call
+in a session is dominated by Julia's JIT compilation ($\sim46$\,s), so a
+single-point timing of this backend measures compilation, not the solver
+--- read its second and later rows.
 
 \textbf{Non-Hermitian generalized-eigenvalue DMRG.}
 \lstinline|gs_energy_generalized| also accepts a non-Hermitian $H$:
@@ -516,11 +550,14 @@ $\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|A|\psi_R\rangle$ in place of
 the Hermitian case's plain one. $A=\mathrm{Id}$ reduces this exactly to
 plain NH-DMRG.
 
-Implemented on both the pure-Python (pyitensor) backend
-(\lstinline|dmrgpy.pyitensor.nhdmrg.nhdmrg_generalized|) and compiled
+Implemented on the pure-Python (pyitensor) backend
+(\lstinline|dmrgpy.pyitensor.nhdmrg.nhdmrg_generalized|), on compiled
 ITensor v3 (\lstinline|Chain::nhdmrg_generalized|,
 \texttt{mpscpp3/chain\_session.h}, a line-for-line port against this
-file's own hand-rolled two-site sweep) --- \texttt{mpscpp2}
+file's own hand-rolled two-site sweep) and on the live Julia backend
+(\lstinline|get_gs_generalized_nhdmrg|,
+\texttt{mpsjulialive/generalized.jl}, the same outer loop wrapped around
+real ITensorNHDMRG.jl sweeps) --- \texttt{mpscpp2}
 (\lstinline|itensor_version=2|) still raises
 \lstinline|NotImplementedError| for a non-Hermitian $H$, no analogous
 session method there. Since \lstinline|nhdmrg_generalized|'s two-site
@@ -537,7 +574,10 @@ primary operator (its $M$-positive-definite precondition was always the
 only one), so this is a fair like-for-like comparison, and the same
 pattern as the Hermitian benchmark holds --- needing no approximate
 inverse, both DMRG routes are far more accurate and (as the chain grows)
-up to two orders of magnitude faster than ARPACK mode 2. Unlike the
+up to two orders of magnitude faster than ARPACK mode 2. \lstinline|julia_live| also matches to machine precision here, sitting
+just ahead of pyitensor once warm ($n=8$: v3 1.16\,s,
+\lstinline|julia_live| 2.26\,s, pyitensor 2.42\,s) with the same
+first-call JIT caveat as the Hermitian benchmark. Unlike the
 Hermitian case, v3 isn't consistently faster than pyitensor here (roughly
 on par at the sizes benchmarked) --- NH-DMRG's per-bond cost already pays
 for \emph{two} Arnoldi solves (right block and its adjoint) regardless of
@@ -1155,11 +1195,13 @@ options:
 \begin{itemize}
   \item \texttt{"TDVP"} (the default) --- two-site TDVP, which grows the
     MPS bond dimension via SVD the same way ground-state DMRG does. Used
-    whenever \texttt{itensor\_version} is \texttt{3} or \texttt{"python"};
+    whenever \texttt{itensor\_version} is \texttt{3}, \texttt{"python"} or
+    \texttt{"julia\_live"};
     \texttt{itensor\_version=2} falls back to \texttt{"MPO"} (below) even
     with this default.
-  \item \texttt{"TDVP\_GSE"} (\texttt{itensor\_version} 3 or
-    \texttt{"python"} only, same support as plain \texttt{"TDVP"} above)
+  \item \texttt{"TDVP\_GSE"} (\texttt{itensor\_version} 3,
+    \texttt{"python"} or \texttt{"julia\_live"}, same support as plain
+    \texttt{"TDVP"} above)
     --- one-site TDVP preceded, for the first
     \texttt{sc.tdvp\_gse\_sweeps} steps (default 3), by a \emph{global
     subspace expansion} step: a Krylov subspace
@@ -1172,7 +1214,16 @@ options:
     B 102, 094315 (2020). Most useful when the starting state's bond
     dimension is small (e.g.\ a product-state quench) and one-site TDVP
     alone (which conserves bond dimension exactly) wouldn't be able to
-    grow into the entanglement the subsequent evolution generates.
+    grow into the entanglement the subsequent evolution generates. On
+    \texttt{"julia\_live"} neither half is a dmrgpy port ---
+    ITensorMPS.jl ships the expansion itself as
+    \lstinline|expand(psi,H; alg="global_krylov")| (citing the same
+    paper) and its \lstinline|tdvp| takes \lstinline|nsite=1| directly,
+    so \texttt{mpsjulialive/tdvp.jl} only wires the two together; that
+    route also handles a bond-dimension-1 (product-state) start fine,
+    unlike \texttt{itensor\_version=3} (see
+    \texttt{examples/time\_evolution/tdvp\_gse\_VS\_ED\_time\_evolution}'s
+    own note on that edge case).
   \item \texttt{"TEBD"} (\texttt{itensor\_version} \texttt{3} or
     \texttt{"python"}, and only for a strictly nearest-neighbor
     Hamiltonian --- any term touching 3 or more distinct sites raises
@@ -1201,6 +1252,12 @@ options:
     available (if slower/less accurate for a given bond dimension)
     everywhere else too.
 \end{itemize}
+
+\texttt{"julia\_live"} implements exactly \texttt{"TDVP"} and
+\texttt{"TDVP\_GSE"}; \texttt{"TEBD"} and \texttt{"MPO"} raise
+\lstinline|NotImplementedError| there rather than silently running plain
+TDVP instead, so a backend-comparison script can't quietly end up
+comparing different integrators.
 
 \begin{lstlisting}
 sc.tevol_method = "TDVP_GSE"

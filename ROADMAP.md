@@ -47,9 +47,9 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Ground-state energy/wavefunction (`gs_energy`/`get_gs`) | ✅ | ✅ | ✅ | All three run real two-site DMRG. v3 aborts (`SIGABRT`) for chains with <3 sites — worked around by falling back to ED automatically (`mode.py`), not a v3-native fix. |
 | Excited states, overlap-penalty method | ✅ | ✅ | ✅ | Julia has its own implementation (`mpsjulialive/excited.py`), not a shared code path. |
 | Excited states, non-Hermitian (Arnoldi/IRAM, `arpacktk`) | ✅ | ✅ | ✅ | Backend-agnostic — built only on generic `MultiOperator * MPS` application, so it rides on whichever backend supplies that. |
-| Generalized eigenvalue DMRG (Lagrange-multiplier trick, Hermitian) | ✅ | ✅ | ❌ | `groundstate.gs_energy_generalized` raises for anything outside `(3,"python")`. No ED fallback either (there is no ED implementation of this method at all). |
-| Non-Hermitian DMRG (biorthogonal, complex energies) | ✅ | ✅ | ❌ | `nhdmrg.py` explicitly restricts to `(2,3,"python")`. |
-| Non-Hermitian generalized eigenproblem | ✅ | ✅ | ❌ | Same restriction as above, one level up (`gs_energy_generalized_nhdmrg`, restricted to `(3,"python")` — v2 excluded here too). |
+| Generalized eigenvalue DMRG (Lagrange-multiplier trick, Hermitian) | ✅ | ✅ | ✅ | Julia via `mpsjulialive/generalized.jl`'s `get_gs_generalized` (same algorithm against ITensorMPS.jl's own `dmrg()`/`Sweeps`/`add()`). `groundstate.gs_energy_generalized` still raises for `itensor_version=2`. No ED fallback either (there is no ED implementation of this method at all). |
+| Non-Hermitian DMRG (biorthogonal, complex energies) | ✅ | ✅ | ✅ | Julia is the one backend that isn't a port of ITensorNHDMRG.jl — it calls the real package (`mpsjulialive/nhdmrg.jl`), with two corrections on top: its left vector solves the *transpose* equation (needs a conjugation), and its left solve isn't anchored to the right solve's eigenvalue, so a conjugate pair tied for the smallest real part needs an `exp(i*theta)*H` tie-break. Both are invisible on a complex-*symmetric* H — see `tests/test_nh_dmrg.py::nh_asymmetric_hopping_chain`. |
+| Non-Hermitian generalized eigenproblem | ✅ | ✅ | ✅ | Same story as above, one level up (`gs_energy_generalized_nhdmrg`; `mpsjulialive/generalized.jl`'s `get_gs_generalized_nhdmrg` wraps the same outer loop around real ITensorNHDMRG.jl sweeps). v2 still excluded. |
 | iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. |
 | iDMRG vev / two-point correlator | ❌ | ✅ | ❌ | pyitensor only — v3's iDMRG session has no equivalent to `two_point_correlator`/`onsite_expectation` yet. |
 | iDMRG excitation ansatz (quasiparticle, tangent-space) | ❌ | 🟡 | ❌ | pyitensor only, and only `D=1` bond dimension (`D>1` gives an unresolved anomalous dispersion — deliberately descoped, see `NotImplementedError` for `D>1`). |
@@ -75,9 +75,9 @@ or is simply absent) · — not meaningful for this backend/method combo.
 
 | Capability | v3 | pyitensor | Julia | Notes |
 |---|---|---|---|---|
-| Real-time evolution, TDVP (two-site) | ✅ | ✅ | 🟡 | Julia always takes its own plain two-site TDVP path (`mpsjulialive/timedependent.py`) regardless of `self.tevol_method` — there's no method *selection* on this backend, just the one option. |
-| Real-time evolution, TDVP + global subspace expansion (`tevol_method="TDVP_GSE"`) | ✅ | ✅ | ❌ | Restricted to `itensor_version in (3,"python")`. |
-| Real-time evolution, TEBD (2nd-order Trotter gates) | ✅ | ✅ | ❌ | Same restriction; v2 has no TDVP module at all so was never a candidate either. |
+| Real-time evolution, TDVP (two-site) | ✅ | ✅ | ✅ | Julia has its own implementation (`mpsjulialive/timedependent.py` + `tdvp.jl`), and now honors `self.tevol_method` rather than ignoring it — see the TDVP_GSE row; anything outside `("TDVP","TDVP_GSE")` raises there instead of silently running plain TDVP. |
+| Real-time evolution, TDVP + global subspace expansion (`tevol_method="TDVP_GSE"`) | ✅ | ✅ | ✅ | Julia needs no port: ITensorMPS.jl ships both pieces (`expand(psi,H; alg="global_krylov")`, citing the same Yang-White paper, and `tdvp(...; nsite=1)`), so `mpsjulialive/tdvp.jl` only wires them into the same expand-then-step structure. Unlike v3 it handles a bond-dimension-1 (product-state) start fine — see `examples/time_evolution/tdvp_gse_julia_VS_ED_time_evolution`. |
+| Real-time evolution, TEBD (2nd-order Trotter gates) | ✅ | ✅ | ❌ | Restricted to `itensor_version in (3,"python")`; v2 has no TDVP module at all so was never a candidate either. Julia would need a Trotter-gate primitive (bond Hamiltonians built from the term list, with explicit fermionic-sign handling that AutoMPO does for free elsewhere) — the one piece of this group still missing there. |
 | Real-time evolution, MPO-Taylor (`tevol_method="MPO"`, the pre-TDVP legacy path) | ✅ | — | — | The only option for v2; still selectable on v3 by explicitly setting `tevol_method="MPO"`. |
 | Complex-time evolution / TDZ damping (arXiv:2311.10909) | ✅ | ✅ | ✅ | Julia needed exactly one new primitive (`advance_complex_time_step`); the rest of `tdz.py` is backend-agnostic MPS/MPO algebra. |
 
@@ -120,32 +120,30 @@ model-specific exception:
 
 ## What's missing, roughly ranked by how load-bearing it'd be
 
-1. **Julia: generalized eigenproblem + non-Hermitian DMRG.** The biggest
-   structural gap — an entire class of calculations (constrained ground
-   states, PT-symmetric/open-system physics) has zero Julia path. Would
-   need `mpsjulialive`-side ports of `groundstate.gs_energy_generalized`
-   and `nhdmrg.py`'s sweep, mirroring what already exists for v3/pyitensor.
-2. **Julia: iDMRG.** No port at all (`infinitechain.py` rejects
+1. **Julia: iDMRG.** No port at all (`infinitechain.py` rejects
    `itensor_version="julia_live"` outright). Given how much iDMRG
    machinery (excitation ansatz, window dynamics, warm-start correlators)
    has landed on pyitensor+v3 recently, a from-scratch Julia port is a
    large undertaking, not a quick win — likely not worth it unless a
    concrete use case needs Julia specifically for infinite systems.
-3. **Julia: TEBD / TDVP_GSE / METTS.** All three need either a Trotter-gate
-   evolution primitive or imaginary-time TDVP wired into
-   `mpsjulialive/timedependent.py` — plain TDVP already exists there, so
-   these are incremental rather than architectural gaps.
-4. **v3/pyitensor: four-point `ctmode="sweep"` for native-spinful sites.**
+2. **Julia: TEBD and METTS.** TEBD needs a Trotter-gate evolution
+   primitive (and, for fermionic models, the explicit Jordan-Wigner sign
+   handling inside a two-site gate that ITensor's AutoMPO does for free
+   on the MPO path); METTS needs an imaginary-time sampler on top of the
+   imaginary-time TDVP step `advance_complex_time_step` already provides.
+   Both are incremental rather than architectural gaps — TDVP_GSE, the
+   third member of this group, is done.
+3. **v3/pyitensor: four-point `ctmode="sweep"` for native-spinful sites.**
    The fast environment-reuse algorithm has no flavor-resolved
    counterpart yet; `ctmode="full"` remains the practical choice for
    `Spinful_Fermionic_Chain_Native`.
-5. **iDMRG excitation ansatz beyond `D=1`.** Known to be broken (anomalous
+4. **iDMRG excitation ansatz beyond `D=1`.** Known to be broken (anomalous
    flat dispersion), not just unimplemented — needs real debugging, not
    just porting effort, before `D>1` can be un-blocked.
-6. **iDMRG cat-state superpositions.** No backend supports summing two
+5. **iDMRG cat-state superpositions.** No backend supports summing two
    *physically distinct* symmetry-broken iDMRG ground states; needs new
    correlator machinery from scratch.
-7. **v2 (legacy) parity.** Deliberately not being chased — v2 predates
+6. **v2 (legacy) parity.** Deliberately not being chased — v2 predates
    `TDVP/` entirely and is kept mainly as the historical QN-conserving
    reference implementation, not a target for new features.
 
@@ -166,7 +164,14 @@ model-specific exception:
   backend-agnostic MPS/MPO algebra wherever possible, write a Julia
   primitive only for the one piece that genuinely needs it"), then add
   an `itensor_version=="julia_live"` branch at the relevant top-level
-  dispatch point.
+  dispatch point. A `.jl` file holding the actual algorithm goes next to
+  it and gets appended to `juliasession.py`'s `initialize()` file list
+  (order only matters up to first *use*, since Julia resolves globals at
+  call time). `generalized.jl`+`generalized.py` / `nhdmrg.jl`+`nhdmrg.py`
+  are the most recent worked example of the whole shape, including the
+  case where the Julia ecosystem already has the algorithm and the work
+  is reconciling *its* conventions with dmrgpy's rather than porting
+  anything.
 
 After adding a capability to a backend, update this file's matrix and,
 if it's a new physics-facing method, `docs/user_guide.md`/`.tex` per

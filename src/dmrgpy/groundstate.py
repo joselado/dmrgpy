@@ -154,21 +154,23 @@ def gs_energy_generalized(self,A,lam0=None):
     gs_energy_single()'s own wf0 handling.
 
     Implemented for itensor_version="python" (pyitensor/dmrg.py's
-    dmrg_generalized()) and itensor_version=3 (mpscpp3/chain_session.h's
+    dmrg_generalized()), itensor_version=3 (mpscpp3/chain_session.h's
     Chain::gs_energy_generalized, a line-for-line port of the same
     self-consistent Lagrange-multiplier algorithm against ITensor v3's
-    own dmrg()/Sweeps/sum()) -- see either docstring for the derivation.
-    mpscpp2 (itensor_version=2) and julia_live don't have this session
-    method yet. There is also no ED implementation of this method at all
-    (unlike vev()/gs_energy()/..., which all honor self.mode="ED" for
-    cross-validation) -- self.mode="ED" is rejected explicitly below
-    rather than silently ignored.
+    own dmrg()/Sweeps/sum()) and itensor_version="julia_live"
+    (mpsjulialive/generalized.jl's get_gs_generalized, the same algorithm
+    once more against ITensorMPS.jl's dmrg()/Sweeps/add()) -- see any of
+    those docstrings for the derivation. mpscpp2 (itensor_version=2)
+    doesn't have this session method yet. There is also no ED
+    implementation of this method at all (unlike vev()/gs_energy()/...,
+    which all honor self.mode="ED" for cross-validation) -- self.mode="ED"
+    is rejected explicitly below rather than silently ignored.
 
     Non-Hermitian self.hamiltonian is dispatched to a separate solver,
     nhdmrg.py's nhdmrg_generalized() (the non-Hermitian, complex-lambda,
     biorthogonal-quotient generalization of NH-DMRG, mirroring how this
     function itself generalizes plain gs_energy()) -- implemented on the
-    same itensor_version="python"/3 pair as the Hermitian path above (no
+    same "python"/3/"julia_live" set as the Hermitian path above (no
     mpscpp2 support either way).
 
     CAVEAT (found via code review, not fixed -- see this codebase's usual
@@ -190,12 +192,13 @@ def gs_energy_generalized(self,A,lam0=None):
         raise NotImplementedError(
             "gs_energy_generalized has no ED implementation -- unset "
             "self.mode (or set it to \"DMRG\") to use the DMRG solver")
-    if self.itensor_version not in (3,"python"):
+    if self.itensor_version not in (3,"python","julia_live"):
         raise NotImplementedError(
             "gs_energy_generalized is only implemented for "
-            "itensor_version=3 or 'python' so far -- call "
-            "chain.setup_cpp(version=3) or chain.setup_python() first")
-    if self._session is None:
+            "itensor_version=3, 'python' or 'julia_live' so far -- call "
+            "chain.setup_cpp(version=3), chain.setup_python() or "
+            "chain.setup_julia() first")
+    if self._session is None and self.itensor_version!="julia_live":
         # itensor_version==3 but no compiled extension for it (sites.py's
         # initialize() leaves self._session as None in that case, the
         # same "extension not compiled" state mode.py's own get_mode()
@@ -246,6 +249,18 @@ def gs_energy_generalized(self,A,lam0=None):
             "itensor_version=\"python\" instead"%self.ns)
     from . import multioperator
     A = multioperator.obj2MO(A)
+    if self.itensor_version=="julia_live":
+        # This backend has no self._session at all (its state lives in the
+        # live Julia session instead), so the whole Lagrange-multiplier
+        # iteration runs in one Julia call -- see
+        # mpsjulialive/generalized.jl. Everything after it is the same
+        # bookkeeping as the session backends below.
+        from .mpsjulialive.generalized import gs_energy_generalized as gsg_jl
+        lam,wf0 = gsg_jl(self,A,lam0=lam0)
+        self.e0 = lam
+        self.set_initial_wf(wf0) # resets computed_gs, hence the order below
+        self.computed_gs = True
+        return lam
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
