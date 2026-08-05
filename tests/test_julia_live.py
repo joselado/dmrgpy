@@ -15,7 +15,7 @@ in test_nh_dmrg.py etc.)."""
 import numpy as np
 import pytest
 
-from dmrgpy import spinchain, timedependent
+from dmrgpy import fermionchain, spinchain, timedependent
 
 try:
     from dmrgpy.mpsjulialive import juliasession as _juliasession  # noqa: F401
@@ -205,3 +205,50 @@ def test_unsupported_tevol_method_raises():
     with pytest.raises(NotImplementedError):
         timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=3,
                 dt=0.05, wf=sc.get_gs())
+
+
+def test_nhdmrg_works_with_mode_ed_set():
+    """chain.nhdmrg() must not care that self.mode=="ED" is set.
+
+    The julia_live attempt functions build their own random start, and
+    routing that through the chain-level Many_Body_Chain.random_state()
+    made it honor self.mode and hand back an edtk State (no .jlmps),
+    which blew up several frames later as an opaque AttributeError inside
+    the juliacall call. The session backends build their random start
+    inside their own session and are unaffected, so julia_live was the
+    only backend where setting mode="ED" turned nhdmrg() into a crash
+    rather than just running the DMRG solver (NH-DMRG has no ED
+    implementation for mode= to select)."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_julia()
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdag[i] * fc.C[i + 1] + 0.6 * fc.Cdag[i + 1] * fc.C[i]
+    for i in range(n):
+        h = h + 1j * 0.7 * (-1)**i * fc.Cdag[i] * fc.C[i]
+    fc.set_hamiltonian(h)
+    fc.mode = "ED"
+    e, psil, psir = fc.nhdmrg()   # must not raise AttributeError
+    assert abs(psil.dot(psir) - 1.0) < 1e-6
+
+
+def test_tdz_honors_tevol_method():
+    """tdz.py's julia_live branch used to return before any
+    tevol_method inspection, so submode="TDZ" silently ran plain two-site
+    TDVP while the real-time entry points raised for the very same
+    setting -- two calls on one chain disagreeing about which integrator
+    "TEBD" or "TDVP_GSE" means. It now goes through the same
+    _check_tevol_method guard."""
+    from dmrgpy.tdz import _advance_complex_time_step
+    sc = _heisenberg_chain()
+    wf = sc.get_gs()
+    Hop = sc.toMPO(sc.hamiltonian)
+    sc.tevol_method = "TEBD"
+    with pytest.raises(NotImplementedError):
+        _advance_complex_time_step(sc, Hop, wf, 0.05 - 0.01j)
+    # ...and the two implemented methods both work through the same path
+    for method in ("TDVP", "TDVP_GSE"):
+        sc.tevol_method = method
+        out = _advance_complex_time_step(sc, Hop, wf, 0.05 - 0.01j, do_gse=True)
+        assert out.dot(out).real > 0.0

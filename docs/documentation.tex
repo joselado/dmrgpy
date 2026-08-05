@@ -2432,20 +2432,60 @@ model, hence
   anchor against precisely this (\lstinline|arnoldi_smallest_real|'s
   \lstinline|Sel| comment in \texttt{mpscpp3/chain\_session.h}), but that
   isn't reachable from outside the package. \lstinline|nhdmrg_solve|
-  breaks the tie instead: it re-solves against $e^{i\theta}H$ for a small
-  $\theta$, which leaves every eigen\emph{vector} untouched and maps every
+  breaks the tie instead: it re-solves against $e^{i\theta}H$, which
+  leaves every eigen\emph{vector} untouched and maps every
   eigen\emph{value} to $e^{i\theta}\lambda$, so
   $\mathrm{Re}(e^{i\theta}(a\pm ib))=a\cos\theta\mp b\sin\theta$ is no
   longer degenerate; the eigenvalue is mapped back exactly by dividing by
-  the same phase. For a spectrum whose smallest real part is already
-  unique and gapped, a $\theta$ this small cannot change which eigenvalue
-  is selected, so this is a pure tie-break rather than a change of target
-  --- confirmed on the model above, where the returned eigenvalue is
-  bit-for-bit what the untied solve returned and only the left vector
-  changes (left residual $\sim2\to\sim10^{-15}$). It is applied only when
-  the bilinear overlap actually collapses, so the normal path costs one
-  extra \lstinline|inner()|.
+  the same phase.
+
+  The rotation is \textbf{not} harmless on its own, and an earlier version
+  of this section wrongly claimed it was. It shifts every eigenvalue's
+  real part by $-\mathrm{Im}(\lambda)\sin\theta$, which grows with
+  $|\mathrm{Im}\,\lambda|$ and therefore with system size and coupling
+  strength: $\sim5\times10^{-3}$ at $n=4$ with $\gamma=0.7$, but
+  $\sim0.07$ at $n=20$ --- comparable to a real low-lying gap. A large
+  enough $\theta$ can make ITensorNHDMRG converge on a genuinely different
+  eigenvalue, which maps back to a perfectly valid eigenpair of $H$ that
+  simply isn't the smallest-real-part one, and \emph{neither} residual in
+  \texttt{nhdmrg.py}'s certificate can catch that (both sit at
+  $\sim10^{-15}$ for any true eigenpair). Two things make it safe. First,
+  the untied solve's own eigenvalue is kept as an \textbf{anchor}: only
+  its left vector is suspect, so a tie-break result is accepted only if it
+  reproduces that eigenvalue (\lstinline|same_eigenvalue|, a $10^{-3}$
+  relative separator --- two runs finding the same eigenvalue have
+  differed by up to $\sim10^{-5}$ in measurement, two different ones by
+  $O(0.1\text{--}1)$); otherwise it is rejected,
+  \lstinline|nh_biorthogonal_pair| raises, and \texttt{nhdmrg.py} treats
+  it as a failed attempt. Refusing to answer is the right outcome there:
+  the alternative is a wrong eigenvalue with a clean bill of health.
+  Second, $\theta$ runs over a ladder, \textbf{largest first}
+  (\lstinline|TIEBREAK_ANGLES|) --- an order established by measurement,
+  since the induced split has to be large enough for the solver to
+  resolve, and starting at $10^{-4}$ reproducibly returned the right
+  eigenvalue with a $\sim3\times10^{-2}$ residual on a chain where
+  $10^{-2}$ gives $\sim10^{-15}$. The two failure modes point in opposite,
+  safely asymmetric directions: too small a $\theta$ gives a
+  poorly-converged pair that the residual certificate catches and retries,
+  too large gives a well-converged pair for the wrong eigenvalue that only
+  the anchor check catches. The mechanism runs only when the bilinear
+  overlap actually collapses, so the normal path costs one extra
+  \lstinline|inner()|.
 \end{enumerate}
+
+One deliberate backend difference is documented rather than forced:
+\lstinline|get_gs_generalized| forwards \lstinline|self.noise| (DMRG's
+density-matrix noise term, default $10^{-1}$) into its
+\lstinline|Sweeps| exactly as the session backends do through
+\lstinline|set_sweep_params|, since without it this backend would
+silently run a noise-free variant of an algorithm whose whole point is
+escaping local minima. The ITensorNHDMRG-backed paths deliberately do
+\textbf{not}: noise is defined against a Hermitian density matrix, and
+the ``fidelity'' algorithm's biorthogonal $\rho=(\rho_l+\rho_r)/2$
+isometry is not that. Feeding a noisy \lstinline|Sweeps| through it was
+tried and measurably broke previously-converged runs --- the tie-break's
+anchor check began rejecting every angle on a chain that had converged to
+$\sim10^{-15}$ without it.
 
 A related robustness fix landed in the shared driver:
 \lstinline|nhdmrg()| now treats an attempt that \emph{raises} the same way

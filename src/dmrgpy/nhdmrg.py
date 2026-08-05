@@ -64,6 +64,20 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
                 "\"python\" or \"julia_live\" (got "
                 +str(self.itensor_version)+"); use the Arnoldi route "
                 "(get_excited_states) for the other backends")
+    if self._session is None and self.itensor_version!="julia_live":
+        # itensor_version 2/3 requested but the matching extension was
+        # never compiled (sites.py's initialize() leaves _session None).
+        # The two sibling entry points in this file and
+        # groundstate.gs_energy_generalized all raise here; without this,
+        # nhdmrg() alone died with an AttributeError on the
+        # set_sweep_params call below. (julia_live legitimately has no
+        # _session -- its state lives in the live Julia session.)
+        raise RuntimeError(
+            "nhdmrg needs a compiled ITensor extension for "
+            "itensor_version="+str(self.itensor_version)+" but none is "
+            "available for this chain -- run `python install.py "
+            "--itensor-version=3`, or call chain.setup_python() / "
+            "chain.setup_julia() to use a backend that needs no compiler")
     if H is None: H = self.hamiltonian
     Hd = H.get_dagger()
     if self.itensor_version=="julia_live":
@@ -83,6 +97,7 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
             return (energy,mps.MPS(self,cpp_handle=hl).copy(),
                     mps.MPS(self,cpp_handle=hr).copy())
     best = None
+    last_error = None
     for i in range(max(1,int(ntries))):
         # A failed attempt is treated as a bad random draw and redrawn,
         # the same way nhdmrg_generalized()'s own loop below does (see its
@@ -97,6 +112,7 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
         try:
             energy,psil,psir = attempt()
         except RuntimeError as e:
+            last_error = e
             if self.verbose>0:
                 print("nhdmrg attempt",i,"raised",repr(e),
                       "-- retrying with a fresh random start")
@@ -110,11 +126,20 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
         if self.verbose>0:
             print("nhdmrg attempt",i,"did not converge, residual",resid)
     if best is None:
+        # Carry the last attempt's own message and traceback through
+        # (`from last_error`). Every backend raises RuntimeError for its
+        # own reasons -- an ITensor Error() surfaces as one through
+        # pybind11, pyitensor raises one for its guards -- so a
+        # deterministic, non-retryable failure also lands here after
+        # ntries identical tries. Stating only this driver's guess at the
+        # cause would send the user tuning nsweeps/maxm/krylovdim for a
+        # problem none of them affect.
         raise RuntimeError(
-            "nhdmrg: every attempt (of "+str(ntries)+") failed outright "
-            "(most likely a left/right pair that never became "
-            "biorthogonalizable) -- consider raising nsweeps, maxm or "
-            "krylovdim, or set verbose>0 to see each attempt's own error")
+            "nhdmrg: every attempt (of "+str(ntries)+") failed. If the "
+            "error below is a left/right pair that never became "
+            "biorthogonalizable, raising nsweeps, maxm or krylovdim may "
+            "help; otherwise it is not a convergence problem. Last "
+            "attempt's error: "+repr(last_error)) from last_error
     resid,energy,psil,psir = best
     if resid>=tol:
         print("Warning: nhdmrg did not reach the residual tolerance "
@@ -207,6 +232,7 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
             return (lam,mps.MPS(self,cpp_handle=hl).copy(),
                     mps.MPS(self,cpp_handle=hr).copy())
     best = None
+    last_error = None
     for i in range(max(1,int(ntries))):
         # Each attempt's fresh random start (see docstring) can, on rare
         # unlucky draws, drive the biorthogonal pair into the metric A's
@@ -220,6 +246,7 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
         try:
             lam,psil,psir = attempt()
         except RuntimeError as e:
+            last_error = e
             if self.verbose>0:
                 print("nhdmrg_generalized attempt",i,"raised",repr(e),
                       "-- retrying with a fresh random start")
@@ -233,10 +260,20 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
         if self.verbose>0:
             print("nhdmrg_generalized attempt",i,"did not converge, residual",resid)
     if best is None:
+        # Same reasoning as nhdmrg()'s own all-attempts-failed message:
+        # report the last attempt's actual error rather than asserting a
+        # cause. The near-null-space guard (A not positive definite) is
+        # only one of the ways an attempt can fail -- on julia_live the
+        # left/right pair failing to biorthogonalize raises here too, and
+        # has nothing to do with A -- so naming A unconditionally sent
+        # users off to debug a perfectly good metric operator.
         raise RuntimeError(
-            "nhdmrg_generalized: every attempt (of "+str(ntries)+") hit "
-            "the near-null-space guard -- A is likely not positive "
-            "definite for this problem")
+            "nhdmrg_generalized: every attempt (of "+str(ntries)+") "
+            "failed. If the error below is the near-null-space guard, A "
+            "is likely not positive definite for this problem; if it is "
+            "a left/right pair that never became biorthogonalizable, the "
+            "metric is not the issue. Last attempt's error: "
+            +repr(last_error)) from last_error
     resid,lam,psil,psir = best
     if resid>=tol:
         print("Warning: nhdmrg_generalized did not reach the residual "

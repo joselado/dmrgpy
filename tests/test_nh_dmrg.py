@@ -140,6 +140,41 @@ def test_nhdmrg_asymmetric_hopping_left_right_eigenpair(version):
     assert abs(l.dot(l))**0.5 == pytest.approx(0.0, abs=1e-3)
 
 
+def test_nhdmrg_requires_a_usable_session():
+    """itensor_version 2/3 with no compiled extension (self._session left
+    as None by sites.py's initialize()) must raise a clear RuntimeError,
+    not an AttributeError from calling into a None session -- the same
+    guard gs_energy_generalized() and nhdmrg_generalized() already had,
+    which nhdmrg() was missing."""
+    fc = fermionchain.Fermionic_Chain(4)
+    h = fc.Cdag[0] * fc.C[1] + fc.Cdag[1] * fc.C[0] + 1j * fc.N[0]
+    fc.set_hamiltonian(h)
+    fc.setup_cpp(version=3)
+    fc._session = None  # simulate "extension not compiled" regardless of env
+    with pytest.raises(RuntimeError):
+        fc.nhdmrg()
+
+
+def test_nhdmrg_all_attempts_failing_reports_the_underlying_error(monkeypatch):
+    """nhdmrg()'s retry loop swallows RuntimeError to redraw a bad random
+    start, so a *deterministic* failure gets retried ntries times and then
+    reported by the loop itself. That report must carry the attempt's own
+    message (and __cause__) through: every backend raises RuntimeError for
+    its own reasons -- an ITensor Error() surfaces as one through pybind11
+    -- and stating only this driver's guess would send the user tuning
+    nsweeps/maxm/krylovdim for a problem none of them affect."""
+    fc, h = nh_fermion_chain(4, "python")
+
+    def always_fails(*args, **kwargs):
+        raise RuntimeError("simulated deterministic backend failure")
+
+    monkeypatch.setattr(fc._session, "nhdmrg", always_fails)
+    with pytest.raises(RuntimeError) as excinfo:
+        fc.nhdmrg(ntries=2)
+    assert "simulated deterministic backend failure" in str(excinfo.value)
+    assert excinfo.value.__cause__ is not None
+
+
 @pytest.mark.parametrize("version", VERSIONS)
 def test_nhdmrg_matches_ed_fermionic_chain(version):
     fc, h = nh_fermion_chain(4, version)

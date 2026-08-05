@@ -94,12 +94,26 @@ def julia_available():
     the module-level try/except tests/test_julia_live.py already uses;
     factored out here so the several multi-backend test files that
     parametrize over julia_live share one probe instead of each paying
-    for (and hand-rolling) their own."""
+    for (and hand-rolling) their own.
+
+    Only ImportError counts as "unavailable". That import also runs
+    juliasession.initialize(), which sevals every mpsjulialive/*.jl file,
+    so a syntax error or an undefined name in one of them raises here
+    too -- as a juliacall.JuliaError, not an ImportError. Catching
+    everything (as an earlier version did) reported that as "no Julia
+    toolchain" and skipped every julia_live test, so a completely broken
+    backend produced a green run. Reporting it as *available* instead
+    lets the tests proceed and fail against the real error, which is the
+    outcome that a broken .jl file deserves."""
     try:
         from dmrgpy.mpsjulialive import juliasession  # noqa: F401
-        return True, ""
-    except Exception as e:  # pragma: no cover - environment dependent
+    except ImportError as e:  # pragma: no cover - environment dependent
+        # juliacall (or the Julia install it provisions) genuinely absent
         return False, str(e)
+    except Exception:  # pragma: no cover - environment dependent
+        # Julia is there but its sources are broken -- do not mask it
+        return True, ""
+    return True, ""
 
 
 def julia_live_param():

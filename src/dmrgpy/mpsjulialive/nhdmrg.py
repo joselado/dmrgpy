@@ -19,8 +19,26 @@ not map one-to-one: see nhdmrg_attempt's own note.
 from .generalized import metric_guard
 from .juliasession import Main as Mainjl
 from .mpo import MPO
-from .mps import MPS
+from .mps import MPS, random_mps
 from .groundstate import NH_alg, NH_biorthoalg
+
+
+def julia_random_mps(self):
+    """A fresh random MPS living in the Julia session.
+
+    Deliberately mpsjulialive.mps.random_mps rather than the chain-level
+    Many_Body_Chain.random_state(): that one honors self.mode, so on a
+    chain with mode="ED" it returns an edtk State, which has no .jlmps
+    and blows up with an opaque AttributeError several frames later
+    inside the juliacall call below. The session backends never hit this
+    because they build their random start inside their own C++/Python
+    session rather than through the chain-level helper -- so routing
+    through random_state() here would have made julia_live the only
+    backend where mode="ED" turns nhdmrg() into an AttributeError instead
+    of just running the DMRG solver, which is what every backend does
+    (NH-DMRG has no ED implementation for mode= to select).
+    """
+    return random_mps(self)
 
 
 def nhdmrg_attempt(self, H, krylovdim=20, restarts=2):
@@ -42,7 +60,7 @@ def nhdmrg_attempt(self, H, krylovdim=20, restarts=2):
     backend anyway, which is why nhdmrg.py keeps both knobs small.
     """
     Hop = MPO(H, MBO=self)
-    psi0 = self.random_state()
+    psi0 = julia_random_mps(self)
     with metric_guard(): # nh_biorthogonal_pair's own collapse guard
         e, psil, psir = Mainjl.get_nhdmrg_pair(Hop.jlmpo, psi0.jlmps,
                 nsweeps=self.nsweeps, cutoff=self.cutoff, maxm=self.maxm,
@@ -65,13 +83,13 @@ def nhdmrg_generalized_attempt(self, H, A, krylovdim=20, restarts=2,
     """
     Hop = MPO(H, MBO=self)
     Aop = MPO(A, MBO=self)
-    psi0 = self.random_state()
+    psi0 = julia_random_mps(self)
     jl_lam0 = complex(float("nan"), 0.0) if lam0 is None else complex(lam0)
     with metric_guard(): # near-null-space guard -> RuntimeError, which
                           # nhdmrg.py's retry loop treats as a bad draw
         lam, wfl, wfr = Mainjl.get_gs_generalized_nhdmrg(Hop.jlmpo,
                 Aop.jlmpo, psi0.jlmps, nsweeps=self.nsweeps,
-                cutoff=self.cutoff, maxm=self.maxm, lam0=jl_lam0,
-                alg=NH_alg, biorthoalg=NH_biorthoalg,
+                cutoff=self.cutoff, maxm=self.maxm,
+                lam0=jl_lam0, alg=NH_alg, biorthoalg=NH_biorthoalg,
                 eigsolve_krylovdim=int(krylovdim))
     return complex(lam), MPS(wfl, MBO=self), MPS(wfr, MBO=self)

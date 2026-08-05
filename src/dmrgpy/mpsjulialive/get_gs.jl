@@ -13,10 +13,20 @@ using ITensorNHDMRG
 # call time, not at the calling function's definition time, so load
 # order only needs to put this before the point of first *use*, which is
 # well after every mpsjulialive/*.jl file has finished loading.
-function make_sweeps(nsweeps,maxm,cutoff)
+function make_sweeps(nsweeps,maxm,cutoff; noise=0.0)
   sweeps = Sweeps(nsweeps)
   maxdim!(sweeps, maxm)
   cutoff!(sweeps, cutoff)
+  # DMRG's density-matrix noise term (Many_Body_Chain.noise, default 1e-1)
+  # -- what lets a sweep escape a local minimum. Every other backend
+  # forwards it (mpscpp3/pyitensor both take it through their own
+  # set_sweep_params), so a julia_live caller who leaves self.noise at its
+  # default must get the same algorithm here, not a silently
+  # noise-free one. Applied only when nonzero so the callers that don't
+  # pass it keep their exact previous behaviour.
+  if noise != 0.0
+    noise!(sweeps, noise)
+  end
   return sweeps
 end
 
@@ -40,24 +50,27 @@ end
 
 
 
+# Delegates to nhdmrg.jl's nhdmrg_raw rather than calling ITensorNHDMRG
+# directly: the two used to be verbatim copies of the same invocation in
+# two files, so any upstream keyword/default change would have been
+# applied to one and silently missed by the other, leaving
+# chain.gs_energy() and chain.nhdmrg() running differently-configured
+# solvers on the same chain. nhdmrg.jl loads *after* this file, which is
+# fine -- Julia resolves a global function call at call time, and every
+# .jl file has finished loading well before the first call (see
+# make_sweeps' own note above).
+#
+# No tie-break here, deliberately: this entry point returns only the right
+# eigenvector (groundstate.py's plain non-Hermitian gs_energy() path
+# discards wfl0), and the tie-break exists solely to fix the LEFT vector.
+# Running it would cost an extra solve to correct something this caller
+# throws away.
 function get_gs_nhdmrg(H,psi0; nsweeps = 10,cutoff=1e-8,maxm=80,
         alg="onesided",biorthoalg = "biorthoblock",
 	eigsolve_krylovdim=30,eigsolve_maxite=3)
   sweeps = make_sweeps(nsweeps,maxm,cutoff)
-  run_quiet() do
-    e, wfl0, wfr0 = nhdmrg(
-        H,
-        psi0,
-        psi0,
-        sweeps;
-        alg=alg,
-        biorthoalg=biorthoalg,
-        outputlevel=1,
-        eigsolve_krylovdim=eigsolve_krylovdim,
-        eigsolve_maxiter=eigsolve_maxite,
-    )
-    e,wfl0,wfr0
-  end
+  return nhdmrg_raw(H,psi0,psi0,sweeps; alg=alg,biorthoalg=biorthoalg,
+      eigsolve_krylovdim=eigsolve_krylovdim,eigsolve_maxite=eigsolve_maxite)
 end
 
 

@@ -313,9 +313,12 @@ eigenvalue its right solve picked, so a spectrum with a
 complex-conjugate pair tied for the smallest real part (the generic
 PT-symmetric/Hatano-Nelson situation) could return a left and a right
 vector belonging to *different* eigenvalues; this is broken by re-solving
-against $e^{i\theta}H$ for a small $\theta$, which leaves every
-eigenvector untouched and rotates the spectrum just enough to separate
-the pair's real parts. Neither adaptation is observable on a complex-
+against $e^{i\theta}H$, which leaves every eigenvector untouched and
+rotates the spectrum just enough to separate the pair's real parts. The
+rotation can itself re-target a different eigenvalue when
+$|\mathrm{Im}\,\lambda|$ is large, so the untied run's eigenvalue is kept
+as an anchor and a tie-break result is accepted only if it reproduces it;
+otherwise the attempt is failed rather than answered. Neither adaptation is observable on a complex-
 *symmetric* $H$, which is what most textbook non-Hermitian models (and
 every other non-Hermitian example in this repository) happen to be --
 see `examples/non_hermitian/nhdmrg_julia_asymmetric_VS_ED` for a chain

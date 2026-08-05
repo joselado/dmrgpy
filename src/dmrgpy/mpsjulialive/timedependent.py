@@ -86,15 +86,35 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     return ts,cs.real-1j*cs.imag
 
 
-def advance_complex_time_step(self,Hop,wf,dz):
+def advance_complex_time_step(self,Hop,wf,dz,do_gse=False):
     """One complex-time TDVP step exp(-i*dz*Hop) on the Julia backend --
     used by tdz.py's submode="TDZ" (arXiv:2311.10909). Reuses
     tdvp.jl's tdvp_step completely unchanged: -im*dz is already the
     correct generalization for a complex dz (real dt, used by
     evolve_and_measure_tdvp/quench_tdvp above, is just the dz.imag==0
     special case) -- Julia's `-im*dz` doesn't care whether dz is real or
-    complex."""
+    complex.
+
+    Honors self.tevol_method exactly as the two real-time entry points
+    above do, via the same _check_tevol_method: "TDVP_GSE" runs one-site
+    TDVP with (when do_gse) a preceding global subspace expansion,
+    mirroring tdz.py's own generic TDVP_GSE branch, and "TEBD"/"MPO"
+    raise. Before this, tdz.py's julia_live branch returned here
+    unconditionally and silently ran two-site TDVP whatever
+    self.tevol_method said -- so on one and the same chain
+    submode="TDZ" and evolve_and_measure() disagreed about which
+    integrator "TDVP_GSE" meant, and "TEBD" raised for one and quietly
+    ran TDVP for the other."""
+    _check_tevol_method(self)
     from .juliasession import Main as Mainjl
     from .mps import MPS
-    psi = Mainjl.tdvp_step(Hop.jlmpo,wf.jlmps,dz,self.cutoff,self.maxm)
+    if self.tevol_method=="TDVP_GSE":
+        psi = wf.jlmps
+        if do_gse:
+            psi = Mainjl.gse_expand(Hop.jlmpo,psi,
+                    int(self.tdvp_gse_krylov_order),self.tdvp_gse_cutoff,
+                    self.maxm)
+        psi = Mainjl.tdvp_step_onesite(Hop.jlmpo,psi,dz,self.cutoff,self.maxm)
+    else:
+        psi = Mainjl.tdvp_step(Hop.jlmpo,wf.jlmps,dz,self.cutoff,self.maxm)
     return MPS(psi,MBO=self)

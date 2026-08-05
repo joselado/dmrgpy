@@ -24,9 +24,13 @@
 # solve to whichever member the right solve picked, so the two used to
 # converge to different eigenvalues (deterministically, on every attempt
 # from every random start -- their overlap came out exactly 0).
-# nhdmrg_solve() breaks the tie by re-solving against exp(i*theta)*H for
-# a small theta, which leaves every eigenvector untouched and rotates the
-# spectrum just enough to separate the pair's real parts.
+# nhdmrg_solve() breaks the tie by re-solving against exp(i*theta)*H,
+# which leaves every eigenvector untouched and rotates the spectrum just
+# enough to separate the pair's real parts. The rotation shifts real
+# parts by -Im(lambda)*sin(theta), so on a chain with large imaginary
+# parts it could re-target a different eigenvalue entirely -- which is
+# why the untied run's eigenvalue is kept as an anchor and a tie-break
+# result is only accepted if it reproduces it.
 #
 # Sweeps the hopping asymmetry t_left (t_right fixed at 1), and plots the
 # targeted eigenvalue (smallest real part, dmrgpy's non-Hermitian

@@ -2049,19 +2049,57 @@ asymmetric hopping + staggered imaginary potential):
    (`arnoldi_smallest_real`'s `Sel` comment in
    `mpscpp3/chain_session.h`), but that isn't reachable from outside the
    package. `nhdmrg_solve` breaks the tie instead: it re-solves against
-   `exp(i*theta)*H` for a small `theta`, which leaves every
-   eigen*vector* untouched and maps every eigen*value* to
-   `exp(i*theta)*lambda`, so
+   `exp(i*theta)*H`, which leaves every eigen*vector* untouched and maps
+   every eigen*value* to `exp(i*theta)*lambda`, so
    `Re(exp(i*theta)*(a±ib)) = a*cos(theta) ∓ b*sin(theta)` is no longer
    degenerate; the eigenvalue is mapped back exactly by dividing by the
-   same phase. For a spectrum whose smallest real part is already unique
-   and gapped, a `theta` this small cannot change which eigenvalue is
-   selected, so this is a pure tie-break rather than a change of target —
-   confirmed on the model above, where the returned eigenvalue is
-   bit-for-bit what the untied solve returned and only the left vector
-   changes (left residual ~2 → ~1e-15). It is applied only when the
-   bilinear overlap actually collapses, so the normal path costs one
-   extra `inner()`.
+   same phase.
+
+   The rotation is **not** harmless on its own, and an earlier version of
+   this section wrongly claimed it was. It shifts every eigenvalue's real
+   part by `-Im(lambda)*sin(theta)`, which grows with `|Im lambda|` and
+   therefore with system size and coupling strength: ~5e-3 at n=4 with
+   gamma=0.7, but ~0.07 at n=20 — comparable to a real low-lying gap. A
+   large enough `theta` can make ITensorNHDMRG converge on a genuinely
+   different eigenvalue, which maps back to a perfectly valid eigenpair
+   of H that simply isn't the smallest-real-part one, and *neither*
+   residual in `nhdmrg.py`'s certificate can catch that (both sit at
+   ~1e-15 for any true eigenpair). Two things make it safe:
+
+   - The untied solve's own eigenvalue is kept as an **anchor**. Only its
+     left vector is suspect — its right vector and eigenvalue are a
+     converged eigenpair — so a tie-break result is accepted only if it
+     reproduces that eigenvalue (`same_eigenvalue`, a 1e-3 relative
+     separator: two runs finding the same eigenvalue have differed by up
+     to ~1e-5 in measurement, two different ones by O(0.1–1)). Otherwise
+     it is rejected, `nh_biorthogonal_pair` raises, and `nhdmrg.py`
+     treats it as a failed attempt. Refusing to answer is the right
+     outcome: the alternative is a wrong eigenvalue with a clean bill of
+     health.
+   - `theta` runs over a ladder, **largest first** (`TIEBREAK_ANGLES`).
+     That order is measured, not obvious: the induced split has to be
+     large enough for the solver to resolve, and starting at 1e-4
+     reproducibly returned the right eigenvalue with a ~3e-2 residual on
+     a chain where 1e-2 gives ~1e-15. The two failure modes point in
+     opposite, safely asymmetric directions — too small a `theta` gives a
+     poorly-converged pair that the residual certificate catches and
+     retries, too large gives a well-converged pair for the wrong
+     eigenvalue that only the anchor check catches.
+
+   The mechanism runs only when the bilinear overlap actually collapses,
+   so the normal path costs one extra `inner()`.
+
+One deliberate backend difference is documented rather than forced:
+`get_gs_generalized` forwards `self.noise` (DMRG's density-matrix noise
+term, default 1e-1) into its `Sweeps` exactly as the session backends do
+through `set_sweep_params`, since without it this backend would silently
+run a noise-free variant of an algorithm whose whole point is escaping
+local minima. The ITensorNHDMRG-backed paths deliberately do **not**:
+noise is defined against a Hermitian density matrix, and the "fidelity"
+algorithm's biorthogonal `rho=(rho_l+rho_r)/2` isometry is not that.
+Feeding a noisy `Sweeps` through it was tried and measurably broke
+previously-converged runs — the tie-break's anchor check began rejecting
+every angle on a chain that had converged to ~1e-15 without it.
 
 A related robustness fix landed in the shared driver: `nhdmrg()` now
 treats an attempt that *raises* the same way `nhdmrg_generalized()`

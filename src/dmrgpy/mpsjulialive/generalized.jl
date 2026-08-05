@@ -77,7 +77,7 @@ with `Chain::gs_energy_generalized`'s own pybind11 binding, which has no
 `None` equivalent either.
 """
 function get_gs_generalized(H, A, psi0; nsweeps = 10, cutoff = 1e-8,
-		maxm = 80, lam0 = NaN)
+		maxm = 80, noise = 0.0, lam0 = NaN)
 	psi = psi0
 	lam = lam0
 	if isnan(lam)
@@ -88,6 +88,20 @@ function get_gs_generalized(H, A, psi0; nsweeps = 10, cutoff = 1e-8,
 	# One outer iteration == one ordinary DMRG sweep, so the schedule is
 	# a fresh single-sweep Sweeps rebuilt against each new Heff rather
 	# than one nsweeps-long Sweeps handed to a single dmrg() call.
+	# `noise` is Many_Body_Chain.noise, forwarded exactly as the session
+	# backends forward it through set_sweep_params -- without it this
+	# backend would silently run a noise-free variant of an algorithm
+	# whose whole point is escaping local minima.
+# Deliberately NOT given self.noise, unlike the Hermitian
+# get_gs_generalized: DMRG's density-matrix noise term is defined against
+# a Hermitian density matrix, and ITensorNHDMRG's biorthogonal truncation
+# (the "fidelity" algorithm's rho=(rho_l+rho_r)/2 isometry) is not that.
+# Feeding a noisy Sweeps through it was tried and measurably broke
+# previously-converged runs -- the tie-break's own anchor check started
+# rejecting every angle on a chain that had converged to ~1e-15 without
+# it. The session backends do pass self.noise down their NH-DMRG path,
+# so this is a real backend difference; it is documented rather than
+# forced, because forcing it makes this backend worse, not more faithful.
 	sweeps = make_sweeps(1, maxm, cutoff)
 	for i = 1:nsweeps
 		Heff = shifted_mpo(H, A, lam)
@@ -156,6 +170,16 @@ function get_gs_generalized_nhdmrg(H, A, psi0; nsweeps = 10, cutoff = 1e-8,
 		h0 = nh_expect(wfl, H, wfr)
 		lam = abs(a0) > 1e-14 ? h0 / a0 : 0.0 + 0.0im
 	end
+# Deliberately NOT given self.noise, unlike the Hermitian
+# get_gs_generalized: DMRG's density-matrix noise term is defined against
+# a Hermitian density matrix, and ITensorNHDMRG's biorthogonal truncation
+# (the "fidelity" algorithm's rho=(rho_l+rho_r)/2 isometry) is not that.
+# Feeding a noisy Sweeps through it was tried and measurably broke
+# previously-converged runs -- the tie-break's own anchor check started
+# rejecting every angle on a chain that had converged to ~1e-15 without
+# it. The session backends do pass self.noise down their NH-DMRG path,
+# so this is a real backend difference; it is documented rather than
+# forced, because forcing it makes this backend worse, not more faithful.
 	sweeps = make_sweeps(1, maxm, cutoff)
 	for i = 1:nsweeps
 		Heff = shifted_mpo(H, A, lam)

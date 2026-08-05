@@ -61,13 +61,52 @@
 # eigenVECTOR untouched and maps every eigenVALUE to
 # exp(i*theta)*lambda, so Re(exp(i*theta)*(a±ib)) = a*cos(theta) -+
 # b*sin(theta) is no longer degenerate, and the eigenvalue is mapped back
-# exactly by multiplying by exp(-i*theta). For a spectrum whose smallest
-# real part is already unique and separated by a gap, a theta this small
-# cannot change which eigenvalue is selected, so this is a pure tie-break
-# rather than a change of target -- confirmed on the model above, where
-# the returned eigenvalue is bit-for-bit what the untied solve returned
-# and only the left vector changes (to the correct partner, left residual
-# ~2 -> ~1e-15).
+# exactly by dividing by the same phase.
+#
+# The rotation is NOT harmless on its own, and an earlier version of this
+# file wrongly claimed it was ("a theta this small cannot change which
+# eigenvalue is selected"). It shifts every eigenvalue's real part by
+# -Im(lambda)*sin(theta), which grows with |Im lambda| and therefore with
+# system size and non-Hermitian coupling strength: at n=4 with gamma=0.7
+# the imaginary parts are ~0.5 and the shift is ~5e-3, but at n=20 they
+# reach ~7 and the shift is ~0.07 -- comparable to a real low-lying
+# real-part gap. A large enough theta can therefore make ITensorNHDMRG
+# converge on a genuinely DIFFERENT eigenvalue, which then maps back to a
+# perfectly valid eigenpair of H that is simply not the smallest-real-part
+# one. Neither residual in nhdmrg.py's certificate can catch that (both
+# sit at ~1e-15 for any true eigenpair), so it would be a silently wrong
+# ground-state energy.
+#
+# Two things make the tie-break safe regardless of theta:
+#
+#   - the untied solve's own eigenvalue e0 is kept as the anchor. Only its
+#     LEFT vector is suspect -- its right vector and eigenvalue are a
+#     converged eigenpair (verified downstream at ~1e-15) -- so a
+#     tie-break result is accepted only if it reproduces e0. Anything else
+#     means the rotation moved the target, and is rejected rather than
+#     returned.
+#   - theta is tried LARGEST-first, which is not the obvious order and was
+#     established by measurement. Breaking the tie needs only theta>0 in
+#     exact arithmetic, but numerically the induced real-part split has to
+#     be large enough for the solver to actually resolve, and below that
+#     the run comes back nearly-degenerate and badly converged rather than
+#     wrong: starting the ladder at 1e-4 reproducibly returned a pair with
+#     the right eigenvalue but a ~3e-2 residual on a chain where 1e-2 gives
+#     ~1e-15. So 1e-2 leads, and the smaller angles are fallbacks for the
+#     case the anchor check rejects it (large |Im lambda|, where a big
+#     rotation is what risks re-targeting in the first place).
+#
+# The two conditions fail in opposite, and safe, directions: too small a
+# theta gives a poorly-converged pair, which nhdmrg.py's residual
+# certificate catches and retries; too large a theta gives a
+# well-converged pair for the wrong eigenvalue, which only the anchor
+# check can catch. That asymmetry is why the anchor check is mandatory and
+# the angle choice is merely tuning.
+#
+# If no angle satisfies both conditions, this gives up and lets
+# nh_biorthogonal_pair raise, which nhdmrg.py treats as a failed attempt.
+# Refusing to answer is the right outcome there: the alternative is
+# returning the wrong eigenvalue with a clean bill of health.
 
 using ITensors
 using ITensorMPS
@@ -84,6 +123,13 @@ function nh_pair_overlap(wfl, wfr)
 end
 
 
+# The single point of contact with ITensorNHDMRG's own solver, shared by
+# get_gs.jl's get_gs_nhdmrg (plain non-Hermitian ground-state energies)
+# and by nhdmrg_solve below -- so its call signature and defaults exist in
+# exactly one place. Two independent copies used to drift apart silently
+# whenever ITensorNHDMRG changed a keyword or a default, leaving
+# chain.gs_energy() and chain.nhdmrg() running differently-configured
+# solvers on the same chain.
 function nhdmrg_raw(H, psil0, psir0, sweeps; alg = "onesided",
 		biorthoalg = "biorthoblock", eigsolve_krylovdim = 30,
 		eigsolve_maxite = 3)
@@ -103,6 +149,25 @@ function nhdmrg_raw(H, psil0, psir0, sweeps; alg = "onesided",
 end
 
 
+# Rotation angles tried by the tie-break, largest first (see the header --
+# the order is measured, not obvious).
+const TIEBREAK_ANGLES = [1.0e-2, 1.0e-3, 1.0e-4]
+
+# 1e-8, not ~1e-14: the collapse is total when it happens (measured at
+# ~1e-15 against a healthy value of ~0.5), so anything in between is
+# comfortably a threshold rather than a tuned constant.
+const PAIR_OVERLAP_TOL = 1.0e-8
+
+# How far a tie-break run's eigenvalue may sit from the untied run's and
+# still count as "the same eigenvalue". Has to straddle a wide gap: two
+# runs that genuinely found the same eigenvalue have differed by up to
+# ~1e-5 here (ordinary DMRG re-convergence noise, measured), while two
+# *different* eigenvalues of these models differ by O(0.1-1). 1e-3
+# relative sits comfortably between the two, so it is a separator rather
+# than a tuned constant.
+same_eigenvalue(e, e0) = abs(e - e0) <= max(1.0e-6, 1.0e-3 * (1 + abs(e0)))
+
+
 """
     nhdmrg_solve(H, psil0, psir0, sweeps; tiebreak, ...)
 
@@ -110,20 +175,30 @@ One ITensorNHDMRG sweep schedule, returning its raw `(lambda,wfl,wfr)` in
 ITensorNHDMRG's own convention, but with the real-part-degeneracy
 tie-break of this file's header applied when needed: if the left and
 right vectors come back belonging to different eigenvalues (bilinear
-overlap ~0), the solve is repeated once against `exp(i*tiebreak)*H` and
-the eigenvalue mapped back. `tiebreak = 0.0` disables it.
+overlap ~0), the solve is retried against `exp(i*theta)*H` over
+`TIEBREAK_ANGLES`, and the first result that both fixes the overlap AND
+reproduces the untied run's eigenvalue is returned.
+
+If no angle achieves both, the untied result is returned unchanged, whose
+collapsed overlap makes `nh_biorthogonal_pair` raise -- deliberately, see
+the header: returning a tie-break result that landed on a different
+eigenvalue would be a silently wrong answer, and no downstream check
+could catch it. `tiebreak = false` disables the whole mechanism.
 """
-function nhdmrg_solve(H, psil0, psir0, sweeps; tiebreak = 1e-2, kwargs...)
-	e, wfl, wfr = nhdmrg_raw(H, psil0, psir0, sweeps; kwargs...)
-	# 1e-8, not ~1e-14: the collapse is total when it happens (measured
-	# at ~1e-15 against a healthy value of ~0.5), so anything in between
-	# is comfortably a threshold rather than a tuned constant.
-	if tiebreak == 0.0 || abs(nh_pair_overlap(wfl, wfr)) > 1e-8
-		return e, wfl, wfr
+function nhdmrg_solve(H, psil0, psir0, sweeps; tiebreak = true, kwargs...)
+	e0, wfl, wfr = nhdmrg_raw(H, psil0, psir0, sweeps; kwargs...)
+	if !tiebreak || abs(nh_pair_overlap(wfl, wfr)) > PAIR_OVERLAP_TOL
+		return e0, wfl, wfr
 	end
-	phase = exp(im * tiebreak)
-	e, wfl, wfr = nhdmrg_raw(phase * H, psil0, psir0, sweeps; kwargs...)
-	return e / phase, wfl, wfr
+	for theta in TIEBREAK_ANGLES
+		phase = exp(im * theta)
+		e, l, r = nhdmrg_raw(phase * H, psil0, psir0, sweeps; kwargs...)
+		e = e / phase # exact: the rotation scales every eigenvalue by phase
+		if abs(nh_pair_overlap(l, r)) > PAIR_OVERLAP_TOL && same_eigenvalue(e, e0)
+			return e, l, r
+		end
+	end
+	return e0, wfl, wfr
 end
 
 
@@ -161,9 +236,19 @@ get_gs.jl's `get_gs_nhdmrg`, which stays as it is -- it feeds
 groundstate.py's plain non-Hermitian `gs_energy()` path, which only ever
 wanted the right eigenvector.
 """
+# Deliberately NOT given self.noise, unlike the Hermitian
+# get_gs_generalized: DMRG's density-matrix noise term is defined against
+# a Hermitian density matrix, and ITensorNHDMRG's biorthogonal truncation
+# (the "fidelity" algorithm's rho=(rho_l+rho_r)/2 isometry) is not that.
+# Feeding a noisy Sweeps through it was tried and measurably broke
+# previously-converged runs -- the tie-break's own anchor check started
+# rejecting every angle on a chain that had converged to ~1e-15 without
+# it. The session backends do pass self.noise down their NH-DMRG path,
+# so this is a real backend difference; it is documented rather than
+# forced, because forcing it makes this backend worse, not more faithful.
 function get_nhdmrg_pair(H, psi0; nsweeps = 10, cutoff = 1e-8, maxm = 80,
 		alg = "onesided", biorthoalg = "biorthoblock",
-		eigsolve_krylovdim = 30, eigsolve_maxite = 3, tiebreak = 1e-2)
+		eigsolve_krylovdim = 30, eigsolve_maxite = 3, tiebreak = true)
 	sweeps = make_sweeps(nsweeps, maxm, cutoff)
 	e, wfl, wfr = nhdmrg_solve(H, psi0, psi0, sweeps; tiebreak = tiebreak,
 		alg = alg, biorthoalg = biorthoalg,

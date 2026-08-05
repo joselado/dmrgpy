@@ -244,5 +244,13 @@ def test_nhdmrg_generalized_all_attempts_failing_raises_clear_error(monkeypatch)
         raise RuntimeError("simulated near-null-space collapse")
 
     monkeypatch.setattr(fc._session, "nhdmrg_generalized", always_fails)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as excinfo:
         _nhdmrg_generalized_toplevel(fc, m, H=h, ntries=3)
+    # ...and it must carry the failing attempt's own error through rather
+    # than asserting a cause of its own. An earlier version stated flatly
+    # that "A is likely not positive definite", which is only one of the
+    # ways an attempt can fail (on julia_live the left/right pair failing
+    # to biorthogonalize raises here too, and has nothing to do with A),
+    # so a user with a perfectly good metric was sent to debug it.
+    assert "simulated near-null-space collapse" in str(excinfo.value)
+    assert excinfo.value.__cause__ is not None
