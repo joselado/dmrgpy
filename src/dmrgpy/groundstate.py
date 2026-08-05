@@ -18,37 +18,6 @@ def best_gs(sc,n=1):
             emin = e0
     sc.set_initial_wf(wf0) # set the wavefunction
 
-def gs_energy_bestof(self,**kwargs):
-    maxm = self.maxm
-    maxm2 = maxm
-    self.maxm = maxm2
-    gs_energy_many(self,**kwargs)
-    self.maxm = maxm
-    return gs_energy_single(self,reconverge=True)
-
-def gs_energy_many(self,n=20,**kwargs):
-    """Compute many ground states, and retain only the best one"""
-    wfs = [] # list with GS
-    es = [] # list with energies
-    emin = 1e8 # grund state energy
-    wf0 = None
-    for i in range(n): # loop
-        self.computed_gs = False # initialize
-        self.gs_from_file = False
-        self.skip_dmrg_gs = False
-        self._session_ham_cache = None # force a fresh session solve (see best_gs)
-        e0 = gs_energy_single(self,reconverge=False,
-                **kwargs) # ground state energy
-        if e0<emin: 
-            wf0 = self.wf0.copy() # copy wavefunction
-            emin = e0
-        else: self.wf0.clean() # remove wavefunction
-        print("Best of",n,i,e0,emin)
-    wf0.rename("psi_GS.mps")
-    self.set_initial_wf(wf0) # set the wavefunction
-    print("Final energy",self.vev(self.hamiltonian).real)
-    return emin
-
 def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy via the in-process pybind11 extension
@@ -118,7 +87,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
 def gs_energy(self,**kwargs):
     if self.is_hermitian(self.hamiltonian): # put a check for Hermitian
         if self.itensor_version in (2,3,"python"): # C++ or pure-Python version
-            return gs_energy_cpp(self,**kwargs)
+            return gs_energy_single(self,**kwargs)
         elif self.itensor_version=="julia_live":
             from .mpsjulialive.groundstate import get_gs_dmrg
             e0,wf0 = get_gs_dmrg(self,**kwargs)
@@ -288,31 +257,6 @@ def gs_energy_generalized(self,A,lam0=None):
                              # for -- confirmed directly via execution.
     return lam
 
-
-def gs_energy_cpp(self,policy="single",**kwargs):
-    """Compute ground state with C++ DMRG"""
-    if policy=="single":
-        return gs_energy_single(self,**kwargs)
-    if policy=="many":
-        return gs_energy_many(self,**kwargs)
-    else: raise
-
-
-
-
-
-
-def lowest_energy(self,h):
-    """Return the lowest energy of the Hamiltonian"""
-    raise # not finished yet
-    self.execute(lambda: h.write("hamiltonian.in")) # write Hamiltonian
-    task = {"GS":"true",
-            }
-    self.task = task
-    self.write_task()
-    self.run() # perform the calculation
-    out = self.execute(lambda: np.genfromtxt("GS_ENERGY.OUT"))
-    return out
 
 
 

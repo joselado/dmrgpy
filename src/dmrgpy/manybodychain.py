@@ -234,10 +234,6 @@ class Many_Body_Chain():
       chain, see mode.py"""
       from .mode import get_mode
       return get_mode(self,**kwargs)
-  def to_folder(self):
-      """Go to a certain folder"""
-#      self.inipath = os.getcwd() # record the folder
-      os.chdir(self.path) # go to calculation folder
   def copy(self):
       """Return a copy of the chain (alias for clone())"""
       return self.clone() # clone and create a new one
@@ -245,16 +241,12 @@ class Many_Body_Chain():
       return deepcopy(self)
   def clone(self):
       """
-      Clone the object and create a temporal folder
+      Clone the object
       """
       from copy import deepcopy
       name = "dmrgpy_clone_"+str(np.random.randint(10000))
-      subprocess.run(["rm","-rf","/tmp/"+name]) # clean the new directory
-      out = deepcopy(self) # full copy of the object 
-      out.path = "/tmp/"+name # new path
-      out.inipath = os.getcwd() # initial path
-#      print("New path",out.path)
-      subprocess.run(["cp","-r",self.path,out.path]) # copy to the new path
+      out = deepcopy(self) # full copy of the object
+      out.path = "/tmp/"+name # new path (label only, see sites.py::initialize)
       return out # return new object
   def set_hamiltonian(self,MO,restart=True): 
       """Set the Hamiltonian"""
@@ -277,11 +269,6 @@ class Many_Body_Chain():
       mbc = self.clone() # clone the object
       mbc.set_hamiltonian(X) 
       return mbc.gs_energy(**kwargs)
-  def to_origin(self):
-      """Go back to the original folder, raising if the calculation
-      left an ERROR file behind"""
-      if os.path.isfile(self.path+"/ERROR"): raise # something wrong
-      os.chdir(self.inipath) # go to original folder
   def restart(self):
       """Restart the calculation"""
       self.computed_gs = False
@@ -595,19 +582,6 @@ class Many_Body_Chain():
           ops = [self.Cdag[i]*self.C[j] for (i,j) in pairs]
       else: raise
       return np.array([self.vev(o,**kwargs) for o in ops])
-  def get_file(self,name):
-      """Return the electronic density"""
-      if not self.computed_gs: self.get_gs() # compute gs
-      self.to_folder() # go to folder
-      m = np.genfromtxt(name) # read file
-      self.to_origin() # go back
-      return m
-  def execute(self,f):
-      """Execute function in the folder"""
-      self.to_folder() # go to folder
-      out = f()
-      self.to_origin() # go back
-      return out # return result
   def evolution(self,**kwargs):
       """
       Perform time dependent DMRG

@@ -132,14 +132,6 @@ class Fermionic_Chain(Many_Body_Chain):
             self.ED_obj = MBf # store the object
             self.has_ED_obj = True # set to True
             return self.ED_obj # return the object
-    def execute(self,f):
-        """
-        This is a temporal fix to use the C operators in Julia ITensor
-        """
-        if self.itensor_version=="julia": # use the fermionic representation
-            from . import multioperator
-            multioperator.use_jordan_wigner = False
-        return Many_Body_Chain.execute(self,f)
 
 
 

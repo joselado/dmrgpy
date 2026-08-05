@@ -4,7 +4,6 @@ import os
 import numpy as np
 from . import entropy
 from . import multioperator
-import subprocess
 
 class MPS():
     """Object for an MPS, backed by an opaque in-process extension handle
@@ -147,17 +146,6 @@ class MPS():
         if self.MBO is not None: 
             return self.MBO.get_mutual_information(self,i,j)
         else: raise # not implemented
-    def rename(self,name):
-        self.execute(lambda: subprocess.run(["mv",self.name,name]))
-        self.name = name
-    def execute(self,f):
-        pwd = os.getcwd() # path
-        os.chdir(self.path) # go
-        f()
-        os.chdir(pwd) # go back
-    def clean(self):
-        self.execute(lambda: subprocess.run(["rm",self.name]))
-        del self
     def norm(self):
         return np.sqrt(self.dot(self).real) # norm
     def get_conjugate(self):

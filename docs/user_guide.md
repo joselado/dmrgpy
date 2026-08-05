@@ -1111,14 +1111,12 @@ sc.tdvp_gse_cutoff = 1e-8
 
 $$\rho(E)=\sum_n\delta(E-E_n)$$
 
-(sum over *all* eigenstates of $H$, not resolved by any operator) is
-obtained via the same KPM machinery as §6 applied directly to $H$
-itself:
-
-```python
-from dmrgpy import dos
-es, rho = dos.get_dos(sc)
-```
+(sum over *all* eigenstates of $H$, not resolved by any operator) has no
+ready-made helper -- the closest available tool is
+`get_distribution`/`kpmdmrg.general_kpm` (§6), but that computes a
+ground-state expectation value $\langle\mathrm{gs}|B\,\delta(X)\,A|\mathrm{gs}\rangle$,
+not a full-spectrum trace, so it is not a drop-in replacement for this
+quantity.
 
 **Single-particle local density of states.** For fermionic chains, the
 physically distinct quantity usually meant by "DOS" (e.g.\ as measured

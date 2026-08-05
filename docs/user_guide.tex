@@ -1284,13 +1284,12 @@ density
 \end{equation}
 
 (sum over \emph{all} eigenstates of $H$, not resolved by any operator)
-is obtained via the same KPM machinery as Section~\ref{sec:dynamical}
-applied directly to $H$ itself:
-
-\begin{lstlisting}
-from dmrgpy import dos
-es, rho = dos.get_dos(sc)
-\end{lstlisting}
+has no ready-made helper --- the closest available tool is
+\texttt{get\_distribution}/\texttt{kpmdmrg.general\_kpm}
+(Section~\ref{sec:dynamical}), but that computes a ground-state
+expectation value $\langle\mathrm{gs}|B\,\delta(X)\,A|\mathrm{gs}\rangle$,
+not a full-spectrum trace, so it is not a drop-in replacement for this
+quantity.
 
 \textbf{Single-particle local density of states.} For fermionic chains,
 the physically distinct quantity usually meant by ``DOS'' (e.g.\ as
