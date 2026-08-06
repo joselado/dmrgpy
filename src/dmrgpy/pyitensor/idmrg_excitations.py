@@ -83,6 +83,72 @@ this is a real, worthwhile follow-up, but needs a fresh, careful
 re-derivation (or a from-scratch cross-check against an independent
 tangent-space implementation) rather than further ad hoc debugging.
 
+A second investigation pass found a much tighter, analytically-controlled
+reproducer than the TFIM/dimerized-chain checks above, and used it to
+narrow (not yet close) the search space:
+
+- A fully-dimerized n_uc=2 Heisenberg chain (J_weak=0, i.e. decoupled
+  singlet dimers) has an EXACT single-triplon excitation: dispersionless,
+  E(k)=J_strong for every k (promoting one isolated dimer's singlet to a
+  triplet costs exactly J_strong, independent of which dimer). This
+  converges to D=1 after grouping (the inter-cell bond is exactly a
+  product cut, zero Schmidt rank above 1), so it exercises this module's
+  n_uc=2 grouping path while remaining inside the already-supported D=1
+  scope -- and the code matches it to ~1e-16, confirming grouping itself
+  is not the problem.
+- Turning on a SMALL J_weak (perturbing away from that exactly solvable
+  point) is exactly solvable too, to first order in degenerate
+  perturbation theory: the triplon acquires nearest-dimer hopping
+  amplitude -J_weak/4 (derived by hand from the explicit 4-spin matrix
+  element of S_{b_n}.S_{a_{n+1}} between |t_n>|s_{n+1}> and
+  |s_n>|t_{n+1}>), giving E(k) = J_strong - (J_weak/2)*cos(k). The
+  *moment* J_weak becomes nonzero (D jumps straight from 1 to 4, not 1 to
+  2 -- plausibly an SU(2)-multiplet effect, the leading correction mixing
+  in a full triplet's worth of virtual admixture), the code's own k-
+  dependence collapses to a few times 1e-4-1e-6 in absolute spread versus
+  the ~J_weak (e.g. 0.02) spread this formula predicts -- a 2-4 order-of-
+  magnitude suppression that reproduces even at J_weak=0.02, far inside
+  where 1st-order perturbation theory should be essentially exact. Reran
+  independently 3x (iDMRG's starting MPS is unseeded) and got the same
+  eigenvalues/energies to 5-6 significant figures each time, ruling out
+  "insufficiently converged/noisy U_list" as the explanation -- whatever
+  is happening is a deterministic function of the (well-converged)
+  environment, not iDMRG randomness.
+- Splitting `_h_eff_action`'s diagram sum into the k-independent piece
+  (diagrams 1/4/5) versus the momentum-carrying piece (6a/6b) on a random
+  tangent vector shows the ratio between them collapsing by ~2 orders of
+  magnitude between the D=1 XX case (comparable magnitude, ~0.18 vs 0.55)
+  and any D>1 case tried (6a/6b suppressed to ~1% of the static piece or
+  less) -- diagrams 2/3 (the *other* bond-touching-B terms, also k-
+  independent) stayed comparably-sized to 6a/6b's *expected* scale in the
+  dimer case, which if anything sharpens the puzzle: 2/3 and 6a/6b share
+  the same mat_a/mat_b content and same order in J_weak, yet only the
+  k-carrying pair collapses.
+- Two new, so-far-unexplained numerical clues from the dimer case worth
+  chasing first in any future session: (1) the dominant right fixed point
+  r's eigenvalue spectrum comes out extremely skewed even at tiny J_weak
+  (e.g. [6.3e-6, 6.3e-6, 6.3e-6, 0.9998] at J_weak=0.02) with the small
+  eigenvalues sitting only ~6x above `_reduce_metric`'s default
+  `rel_floor=1e-6` pruning threshold -- a numerically marginal regime the
+  earlier TFIM check (eigenvalues either O(1) or exactly 0) never
+  exercised; (2) Lh and Rh come out wildly asymmetric in norm (~1.7 vs
+  ~2e-5 at J_weak=0.02) despite passing their own internal fixed-point
+  residual check individually -- consistent with the *defining equation*
+  itself being incomplete/asymmetric rather than a solve-time bug (the
+  residual check can only catch the latter). The most promising concrete
+  next step identified but not yet attempted: `IDMRGResult.env_HL`/
+  `env_HR` (the growing algorithm's own converged MPO-environment
+  tensors, already reused verbatim by `idmrg_window.py` -- see
+  `IDMRGResult`'s own docstring) are an independent, already-correct (the
+  energies/window dynamics built on them match ED) construction of
+  exactly the same "background Hamiltonian environment" this module
+  builds from scratch via `_regularized_environments` -- cross-checking
+  Rh/Lh's F-channel content against theirs (after extracting the right
+  automaton-channel slice and subtracting the same energy-density
+  regularization) would show directly whether `_regularized_environments`
+  is missing/misweighting a term, without having to re-derive the
+  tangent-space formalism from scratch.
+
 == Algorithm summary ==
 
 1. Group the unit cell into one supersite (A, W) -- plain NumPy arrays, W
