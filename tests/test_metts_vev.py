@@ -29,13 +29,14 @@ from dmrgpy import cppext, spinchain
 from dmrgpy.pyitensor.index import reseed_id_counter_past
 from dmrgpy.pyitensor.metts import _run_chain_worker
 
-from _helpers import setup_backend
+from _helpers import julia_available, julia_live_param, setup_backend
 
 VERSIONS = [
     "python",
     pytest.param(3, marks=pytest.mark.skipif(
         not cppext.available(3),
         reason="requires the compiled mpscpp3 (ITensor v3) extension")),
+    julia_live_param(),
 ]
 
 
@@ -270,6 +271,20 @@ def test_metts_vev_njobs_rejects_v3():
     ignoring the request or crashing deep inside a forked/pickled C++
     handle."""
     sc, h = _heisenberg_field_chain(3, 3)
+    with pytest.raises(NotImplementedError):
+        sc.metts_vev(sc.Sz[0], 1.0, nsamples=4, nwarmup=1, njobs=2)
+
+
+def test_metts_vev_njobs_rejects_julia_live():
+    """Same reasoning as test_metts_vev_njobs_rejects_v3 above:
+    mpsjulialive's live Julia session is a single in-process session too
+    (its state lives in the live Julia process, no per-worker copy a
+    multiprocessing pool could hand out) -- njobs>1 must raise here as
+    well rather than silently ignoring the request."""
+    ok, reason = julia_available()
+    if not ok:
+        pytest.skip("requires a working juliacall/Julia toolchain: %s" % reason)
+    sc, h = _heisenberg_field_chain(3, "julia_live")
     with pytest.raises(NotImplementedError):
         sc.metts_vev(sc.Sz[0], 1.0, nsamples=4, nwarmup=1, njobs=2)
 

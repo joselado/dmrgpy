@@ -1599,6 +1599,47 @@ same golden test `tests/test_dynamical_correlator.py` uses for the other
 backends: peak within `0.03` of the exact 4-site Heisenberg gap
 (`0.658919`) — landed at `0.68`.
 
+METTS (`metts_vev`, finite-temperature sampling, arXiv:1002.1305) needed
+no new evolution primitive either — its imaginary-time half-beta
+propagation is exactly `tdvp_step` again, with a purely imaginary rather
+than purely real/complex effective step, the same generalization TDZ's
+paragraph above already relies on. What it does need, unlike CVM/TDZ, is
+genuinely new machinery: the sequential-sampling collapse of an MPS onto a
+new classical product state (`mpsjulialive/metts.jl`'s
+`metts_collapse_to_cps`), since nothing already backend-agnostic performs
+that. Rather than deriving it as a fresh ITensor-level tensor primitive
+(the route `mpscpp3/chain_session.h`'s C++ port took, via `diagHermitian`/
+`setElt`), `metts.jl` is a value-level port of `pyitensor/metts.py`'s
+already-validated NumPy implementation: at each site, extract the local
+MPS tensor as a plain Julia array (`Array(T, s, right_link)`), rotate into
+the eigenbasis of the requested single-site operator via a plain matrix
+product, sample from the resulting marginal, and rebuild a bond-dimension-1
+product state from the sampled eigenvectors by hand (mirroring
+`build_product_state()`/`product_state()` on the other two backends).
+`LinearAlgebra.eigen(Hermitian(...))` replaces `np.linalg.eigh`/
+ITensor's `diagHermitian` for the per-site eigendecomposition (cached once
+per `(opname, site)` pair, same as both other backends, since it never
+changes across a sampling run), and a hand-rolled inverse-CDF categorical
+sampler replaces `np.random.Generator.choice`/`std::discrete_distribution`
+(no `Distributions.jl` dependency declared in `juliapkg.json`, and this is
+the only place one would be needed). The whole `nwarmup+nsamples` Markov
+chain runs inside one Julia call, same design as `kpm.jl`'s moment
+recursion and `tdvp.jl`'s `quench_tdvp`. Passing the list of observable
+MPOs to sample together across that one call needed no explicit
+Python→Julia list conversion (unlike `sites.jl`'s `get_sites`/
+`read_operator.jl`'s `toMPO`, which both need `to_julia_strvec` because
+their signatures declare a strict `Vector{String}` parameter): confirmed
+directly that `juliacall`'s default `PyList{Any}` wrapping already
+transparently unwraps each element back to its real underlying Julia
+object on indexing, for any Julia function that doesn't itself declare a
+stricter parameter type. Validated against exact ED thermal averages the
+same way `tests/test_metts_vev.py` already does for the other two
+backends (several seeds, energy and local magnetization, generous
+Markov-correlated-error tolerance) — no systematic bias, deviations
+consistent with the reported (correlated, so likely optimistic) standard
+error. `metts_dynamical_correlator` (the real-time finite-temperature
+generalization, arXiv:2405.18484) is not ported yet — see ROADMAP.md.
+
 The last two dynamical-correlator submodes needed no new Julia code at
 all, only dispatch routing: `dcex.py` (submode `"EX"`, correlator via
 exact diagonalization in the excited-state subspace) only calls

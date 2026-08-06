@@ -102,8 +102,8 @@ or is simply absent) · — not meaningful for this backend/method combo.
 |---|---|---|---|---|
 | Ancilla purification + imaginary-time annealing (`thermal.py`) | ✅ | ✅ | ✅ | Backend-agnostic — just wraps a doubled-site `Spin_Chain` and calls its generic `get_gs`/evolve methods. |
 | Exact Boltzmann sum over ED excited states (`thermalvev.py`) | — | — | — | ED-only by construction (needs the full spectrum); not a DMRG-backend feature. |
-| METTS thermal average (`metts_vev`) | ✅ | ✅ | ❌ | Needs imaginary-time TDVP, so v2 (no `TDVP/`) and Julia (no port) are both excluded. `njobs>1` multiprocess pooling is pyitensor-only (no equivalent lever for a single live v3/Julia session). |
-| METTS dynamical correlator (finite-T real-time correlator) | ✅ | ✅ | ❌ | Same restriction as `metts_vev`. |
+| METTS thermal average (`metts_vev`) | ✅ | ✅ | ✅ | Needs imaginary-time TDVP, so v2 (no `TDVP/`) is excluded. Julia's `mpsjulialive/metts.jl` is a value-level port of pyitensor/metts.py's algorithm (per-site eigendecomposition + sequential-sampling collapse, both via plain Julia arrays rather than ITensor-level primitives) that reuses `tdvp.jl`'s `tdvp_step` unchanged for the imaginary-time evolution -- no new evolution primitive needed, only the sampling/collapse driver. `njobs>1` multiprocess pooling is pyitensor-only (no equivalent lever for a single live v3/Julia session -- `julia_live` raises for `njobs>1`, same as v3). |
+| METTS dynamical correlator (finite-T real-time correlator) | ✅ | ✅ | ❌ | Not yet ported to Julia -- would reuse the same METTS Markov chain `metts.jl` now provides, generalized to the two-time correlator the way `pyitensor/metts.py`'s `metts_dynamical_correlator`/`mpscpp3`'s `Chain::metts_dynamical_correlator` already are (arXiv:2405.18484). |
 
 ## 6. Physical models (Hilbert-space coverage)
 
@@ -126,13 +126,16 @@ model-specific exception:
    has landed on pyitensor+v3 recently, a from-scratch Julia port is a
    large undertaking, not a quick win — likely not worth it unless a
    concrete use case needs Julia specifically for infinite systems.
-2. **Julia: TEBD and METTS.** TEBD needs a Trotter-gate evolution
-   primitive (and, for fermionic models, the explicit Jordan-Wigner sign
-   handling inside a two-site gate that ITensor's AutoMPO does for free
-   on the MPO path); METTS needs an imaginary-time sampler on top of the
-   imaginary-time TDVP step `advance_complex_time_step` already provides.
-   Both are incremental rather than architectural gaps — TDVP_GSE, the
-   third member of this group, is done.
+2. **Julia: TEBD, and the METTS dynamical correlator.** TEBD needs a
+   Trotter-gate evolution primitive (and, for fermionic models, the
+   explicit Jordan-Wigner sign handling inside a two-site gate that
+   ITensor's AutoMPO does for free on the MPO path) — still unported, the
+   one piece of the real-time-evolution group (Sec. 3 above) Julia lacks.
+   METTS's static thermal average (`metts_vev`) is now implemented (see
+   Sec. 5's table and `mpsjulialive/metts.jl`); its real-time dynamical-
+   correlator generalization (`metts_dynamical_correlator`, Sec. 5) is the
+   remaining incremental step there, reusing the same Markov chain
+   `metts.jl` already samples.
 3. **v3/pyitensor: four-point `ctmode="sweep"` for native-spinful sites.**
    The fast environment-reuse algorithm has no flavor-resolved
    counterpart yet; `ctmode="full"` remains the practical choice for

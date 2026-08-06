@@ -1194,15 +1194,18 @@ in that case.
 method: METTS (Minimally Entangled Typical Thermal States, E.M.
 Stoudenmire and S.R. White, *New J. Phys.* **12**, 055026 (2010),
 arXiv:1002.1305), implemented for `itensor_version="python"`
-(`pyitensor/metts.py`) and `itensor_version=3`
+(`pyitensor/metts.py`), `itensor_version=3`
 (`mpscpp3/chain_session.h`'s `Chain::metts_vev`, a direct port of the
 same algorithm onto real ITensor v3, not an independent
-reimplementation) — not for `itensor_version=2` (mpscpp2 has no TDVP
-module at all, and METTS needs imaginary-time TDVP). On `itensor_version
-=3`, a chain shorter than 3 sites raises `NotImplementedError` rather
-than crashing: ITensor v3's two-site TDVP hits the same "LocalOp is
-default constructed" abort as its two-site `dmrg()` for such short
-chains (see §Architecture's note on that `mpscpp3` bug). Rather than
+reimplementation), and `itensor_version="julia_live"`
+(`mpsjulialive/metts.jl`'s `metts_vev`, a value-level port of the same
+algorithm reusing `tdvp.jl`'s `tdvp_step` unchanged for the imaginary-time
+evolution) — not for `itensor_version=2` (mpscpp2 has no TDVP module at
+all, and METTS needs imaginary-time TDVP). On `itensor_version=3`, a
+chain shorter than 3 sites raises `NotImplementedError` rather than
+crashing: ITensor v3's two-site TDVP hits the same "LocalOp is default
+constructed" abort as its two-site `dmrg()` for such short chains (see
+§Architecture's note on that `mpscpp3` bug). Rather than
 purification's single, growing-entanglement wavefunction or ED's exact
 sum over eigenstates, METTS samples a Markov chain of *unentangled*
 classical product states (CPS) $|i\rangle$: each is imaginary-time
@@ -1279,9 +1282,10 @@ for METTS specifically — each sample restarts from a fresh
 bond-dimension-1 product state, so a run exercises many distinct
 contraction shapes rather than reusing one, and the fixed per-shape
 compile tax never amortizes). `njobs` is not available for
-`itensor_version=3`: its session is a single live in-process C++ object
-with no per-worker copy a process pool could hand out; requesting
-`njobs>1` there raises rather than silently falling back to `njobs=1`.
+`itensor_version=3` or `"julia_live"`: each is a single live in-process
+session (a C++ object, or a live Julia process) with no per-worker copy a
+process pool could hand out; requesting `njobs>1` on either raises rather
+than silently falling back to `njobs=1`.
 
 **`metts_dynamical_correlator(name, T, ...)`** extends METTS from static
 expectation values to real-time finite-temperature *dynamical*
@@ -1290,8 +1294,9 @@ $\mathcal{C}_{AB}(t)=\langle A(t)B\rangle_T=\langle e^{iHt}Ae^{-iHt}B\rangle_T$
 (Z. Wang, P. McClarty, D. Dankova, A. Honecker and A. Wietek,
 "Spectroscopy and complex-time correlations using minimally entangled
 typical thermal states", arXiv:2405.18484, Sec. II, "Dynamical METTS
-algorithm"), implemented for the same two backends as `metts_vev`
-(`itensor_version="python"` and `3`, not `2`). For every METTS sample
+algorithm"), implemented for `itensor_version="python"` and `3` only —
+unlike `metts_vev` above, not yet ported to `"julia_live"` (see
+ROADMAP.md's "what's missing" section). For every METTS sample
 $|\psi_i\rangle$ produced by the exact same Markov chain `metts_vev`
 already samples (imaginary-time evolution + sequential-sampling
 collapse), define $|v_i(0)\rangle=B|\psi_i\rangle$,

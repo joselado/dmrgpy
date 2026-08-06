@@ -40,6 +40,9 @@ def initialize():
                          # apply_op/summps, so must load after it
     files += ["tdvp.jl"] # real-time TDVP evolution; also calls
                           # mpsalgebra.jl's apply_op, must load after it
+    files += ["metts.jl"] # METTS finite-temperature sampling; reuses
+                           # tdvp.jl's tdvp_step for imaginary-time
+                           # evolution, must load after it
     files += ["excited.jl"] # orthogonality-penalty excited-state dmrg()
     files += ["nhdmrg.jl"] # biorthogonal non-Hermitian DMRG pair; uses
                             # get_gs.jl's make_sweeps/run_quiet, so must
