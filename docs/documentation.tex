@@ -1948,8 +1948,25 @@ two backends (several seeds, energy and local magnetization, generous
 Markov-correlated-error tolerance) --- no systematic bias, deviations
 consistent with the reported (correlated, so likely optimistic) standard
 error. \texttt{metts\_dynamical\_correlator} (the real-time
-finite-temperature generalization, arXiv:2405.18484) is not ported yet
---- see ROADMAP.md.
+finite-temperature generalization, arXiv:2405.18484) is now ported too,
+in the same \texttt{metts.jl} file: for each retained METTS sample,
+\texttt{apply\_op} (\texttt{mpsalgebra.jl}, the same primitive KPM/TDVP
+already share) applies the $B$ operator once to build
+$v(0)=B|\psi\rangle$, then \texttt{tdvp\_step} --- the exact same
+real-time-evolution primitive \texttt{evolve\_and\_measure\_tdvp}/
+\texttt{quench\_tdvp} already use, just with a purely real rather than
+purely imaginary \texttt{dt} --- advances $v(t)$/$w(t)=\psi(t)$
+independently under $H$. No manual norm-restoration step is needed the
+way \texttt{mpscpp3/chain\_session.h}'s C++ port requires for the
+deliberately non-unit-norm $v(t)$ (see that file's own comment): this
+backend's \texttt{tdvp\_step} already passes \texttt{normalize=false} to
+ITensorMPS's \texttt{tdvp()} for every caller (unlike ITensorTDVP's
+hardcoded \texttt{DoNormalize=true} the C++ port has to work around), so
+$v$'s norm simply falls out of the (truncated but otherwise unitary)
+evolution itself. \texttt{tdvp\_cutoff}/\texttt{tdvp\_maxdim} are wired
+through as ordinary per-call arguments to Julia's
+\texttt{tdvp\_step}/\texttt{apply\_op}, unlike v3's hardcoded restriction
+to this chain's own \texttt{cutoff}/\texttt{maxm}.
 
 The last two dynamical-correlator submodes needed no new Julia code at
 all, only dispatch routing: \texttt{dcex.py} (submode \texttt{"EX"},

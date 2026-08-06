@@ -1294,9 +1294,12 @@ $\mathcal{C}_{AB}(t)=\langle A(t)B\rangle_T=\langle e^{iHt}Ae^{-iHt}B\rangle_T$
 (Z. Wang, P. McClarty, D. Dankova, A. Honecker and A. Wietek,
 "Spectroscopy and complex-time correlations using minimally entangled
 typical thermal states", arXiv:2405.18484, Sec. II, "Dynamical METTS
-algorithm"), implemented for `itensor_version="python"` and `3` only —
-unlike `metts_vev` above, not yet ported to `"julia_live"` (see
-ROADMAP.md's "what's missing" section). For every METTS sample
+algorithm"), implemented for `itensor_version="python"`, `3`, and
+`"julia_live"` (`mpsjulialive/metts.jl`'s `metts_dynamical_correlator`, a
+value-level port reusing the same `tdvp_step` `metts_vev` already uses,
+now with a purely real time step for the real-time evolution of
+$|v_i(t)\rangle$/$|w_i(t)\rangle$ instead of the purely imaginary one used
+for sampling). For every METTS sample
 $|\psi_i\rangle$ produced by the exact same Markov chain `metts_vev`
 already samples (imaginary-time evolution + sequential-sampling
 collapse), define $|v_i(0)\rangle=B|\psi_i\rangle$,
@@ -1331,7 +1334,11 @@ what they mean for `metts_vev` (same shared Markov chain, same caveats on
 sampling step (default 30) — the two generally warrant different
 settings since $|v_i(t)\rangle$/$|w_i(t)\rangle$ typically become more
 entangled over the course of real-time evolution than the METTS samples
-$|\psi_i\rangle$ themselves ever do. No Fourier transform/windowing is
+$|\psi_i\rangle$ themselves ever do (for `itensor_version="julia_live"`,
+`niter`/`tdvp_niter` are accepted for signature parity but silently
+ignored, same as `metts_vev`'s own `niter` — ITensorMPS.jl's `tdvp()`
+manages its own internal Krylov dimension with no exposed per-step
+iteration-count knob). No Fourier transform/windowing is
 performed internally: `metts_dynamical_correlator` returns the raw
 time-domain samples/statistics, matching `evolution_DC`'s own `(ts,cs)`
 convention — apply a window (e.g. a Hann window, as the reference paper
@@ -1348,10 +1355,11 @@ near-degenerate-ground-state sum to every eigenstate weighted by its
 exact Boltzmann factor (exact, since it starts from a full dense
 diagonalization, unlike `thermal_vev_ex`'s own partial-diagonalization
 truncation-safety check, which this doesn't need). See
-`examples/finite_temperature/dynamical_metts_VS_ED` for a cross-check of
-`metts_dynamical_correlator` (both backends) against this exact ED
-reference, evaluated directly in the time domain, on a small Heisenberg
-chain.
+`examples/finite_temperature/dynamical_metts_VS_ED` (`itensor_version` in
+`("python", 3)`) and `examples/finite_temperature/dynamical_metts_julia_VS_ED`
+(`itensor_version="julia_live"`) for a cross-check of
+`metts_dynamical_correlator` against this exact ED reference, evaluated
+directly in the time domain, on a small Heisenberg chain.
 
 ## 10. Topological invariants
 

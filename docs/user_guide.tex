@@ -1490,9 +1490,13 @@ $\mathcal{C}_{AB}(t)=\langle A(t)B\rangle_T=\langle e^{iHt}Ae^{-iHt}B\rangle_T$
 (Z. Wang, P. McClarty, D. Dankova, A. Honecker and A. Wietek,
 ``Spectroscopy and complex-time correlations using minimally entangled
 typical thermal states'', arXiv:2405.18484, Sec.~II, ``Dynamical METTS
-algorithm''), implemented for \texttt{itensor\_version="python"} and
-\texttt{3} only --- unlike \texttt{metts\_vev} above, not yet ported to
-\texttt{"julia\_live"} (see ROADMAP.md's ``what's missing'' section). For
+algorithm''), implemented for \texttt{itensor\_version="python"},
+\texttt{3}, and \texttt{"julia\_live"}
+(\texttt{mpsjulialive/metts.jl}'s \texttt{metts\_dynamical\_correlator}, a
+value-level port reusing the same \texttt{tdvp\_step}
+\texttt{metts\_vev} already uses, now with a purely real time step for
+the real-time evolution of $|v_i(t)\rangle$/$|w_i(t)\rangle$ instead of
+the purely imaginary one used for sampling). For
 every METTS sample $|\psi_i\rangle$ produced by the
 exact same Markov chain \texttt{metts\_vev} already samples
 (imaginary-time evolution + sequential-sampling collapse), define
@@ -1531,7 +1535,11 @@ of \texttt{niter}'s bound on the imaginary-time sampling step (default
 30) --- the two generally warrant different settings since
 $|v_i(t)\rangle$/$|w_i(t)\rangle$ typically become more entangled over
 the course of real-time evolution than the METTS samples
-$|\psi_i\rangle$ themselves ever do. No Fourier transform/windowing is
+$|\psi_i\rangle$ themselves ever do (for \texttt{itensor\_version="julia\_live"},
+\texttt{niter}/\texttt{tdvp\_niter} are accepted for signature parity but
+silently ignored, same as \texttt{metts\_vev}'s own \texttt{niter} ---
+ITensorMPS.jl's \texttt{tdvp()} manages its own internal Krylov dimension
+with no exposed per-step iteration-count knob). No Fourier transform/windowing is
 performed internally: \texttt{metts\_dynamical\_correlator} returns the
 raw time-domain samples/statistics, matching \texttt{evolution\_DC}'s own
 \texttt{(ts,cs)} convention --- apply a window (e.g.\ a Hann window, as
@@ -1552,8 +1560,11 @@ eigenstate weighted by its exact Boltzmann factor (exact, since it
 starts from a full dense diagonalization, unlike
 \texttt{thermal\_vev\_ex}'s own partial-diagonalization
 truncation-safety check, which this doesn't need). See
-\texttt{examples/finite\_temperature/dynamical\_metts\_VS\_ED} for a
-cross-check of \texttt{metts\_dynamical\_correlator} (both backends)
+\texttt{examples/finite\_temperature/dynamical\_metts\_VS\_ED}
+(\texttt{itensor\_version} in \texttt{("python", 3)}) and
+\texttt{examples/finite\_temperature/dynamical\_metts\_julia\_VS\_ED}
+(\texttt{itensor\_version="julia\_live"}) for a
+cross-check of \texttt{metts\_dynamical\_correlator}
 against this exact ED reference, evaluated directly in the time domain,
 on a small Heisenberg chain.
 

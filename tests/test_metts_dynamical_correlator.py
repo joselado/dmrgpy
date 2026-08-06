@@ -22,13 +22,14 @@ import pytest
 from dmrgpy import cppext, spinchain
 from dmrgpy.edtk.edchain import EDOperator
 
-from _helpers import setup_backend
+from _helpers import julia_available, julia_live_param, setup_backend
 
 VERSIONS = [
     "python",
     pytest.param(3, marks=pytest.mark.skipif(
         not cppext.available(3),
         reason="requires the compiled mpscpp3 (ITensor v3) extension")),
+    julia_live_param(),
 ]
 
 
@@ -171,6 +172,41 @@ def test_metts_dynamical_correlator_njobs_rejects_v3():
     with pytest.raises(NotImplementedError):
         sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), 1.0, nt=2, dt=0.1,
                                        nsamples=4, nwarmup=1, njobs=2)
+
+
+def test_metts_dynamical_correlator_njobs_rejects_julia_live():
+    """Same reasoning as test_metts_dynamical_correlator_njobs_rejects_v3
+    above: mpsjulialive's live Julia session is a single in-process session
+    too (its state lives in the live Julia process, no per-worker copy a
+    multiprocessing pool could hand out) -- njobs>1 must raise here as
+    well rather than silently ignoring the request."""
+    ok, reason = julia_available()
+    if not ok:
+        pytest.skip("requires a working juliacall/Julia toolchain: %s" % reason)
+    sc, h = _heisenberg_field_chain(3, "julia_live")
+    with pytest.raises(NotImplementedError):
+        sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), 1.0, nt=2, dt=0.1,
+                                       nsamples=4, nwarmup=1, njobs=2)
+
+
+def test_metts_dynamical_correlator_tdvp_cutoff_maxdim_reach_julia_backend():
+    """tdvp_cutoff/tdvp_maxdim are wired through for itensor_version=
+    "julia_live" too (mpsjulialive/tdvp.jl's tdvp_step takes cutoff/maxdim
+    per call, unlike v3's hardcoded restriction -- see
+    vevtk/mettsdynamicalcorrelator.py's own docstring), so this must
+    actually reach mpsjulialive.metts.metts_dynamical_correlator rather
+    than raising or being silently dropped -- same intent as the
+    python-backend counterpart of this test, exercised with
+    tdvp_maxdim=1 (well below what a real evolution would need) so the
+    call path is genuinely exercised."""
+    ok, reason = julia_available()
+    if not ok:
+        pytest.skip("requires a working juliacall/Julia toolchain: %s" % reason)
+    sc, h = _heisenberg_field_chain(3, "julia_live", B=0.4)
+    ts, means, stderrs = sc.metts_dynamical_correlator(
+        (sc.Sz[0], sc.Sz[0]), 1.0, nt=3, dt=0.1, nsamples=3, nwarmup=1,
+        seed=1, tdvp_cutoff=1e-6, tdvp_maxdim=1)
+    assert len(ts) == len(means) == len(stderrs) == 3
 
 
 def test_metts_dynamical_correlator_tdvp_cutoff_maxdim_reach_python_backend():

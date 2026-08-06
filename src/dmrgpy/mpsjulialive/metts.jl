@@ -257,3 +257,79 @@ function metts_vev(H, sites, opmpos, T, nsamples, nwarmup, dbeta_half_step,
 	end
 	return means, stderrs
 end
+
+
+# -- Dynamical METTS (real-time finite-T correlators), arXiv:2405.18484 --
+#
+# Wang, McClarty, Dankova, Honecker & Wietek, "Spectroscopy and complex-time
+# correlations using minimally entangled typical thermal states" (2024),
+# Sec. II / Algorithm 1 -- the julia_live counterpart of
+# pyitensor/metts.py's metts_dynamical_correlator()/mpscpp3's
+# Chain::metts_dynamical_correlator, generalizing metts_vev() just above
+# from <A>_T to the two-time correlator C_AB(t)=<A(t)B>_T=
+# <e^{iHt}Ae^{-iHt}B>_T, following the exact same Markov chain
+# (metts_imaginary_time_evolve + metts_collapse_to_cps): for each retained
+# sample |phi>, set |v(0)>=Bop|phi>, |w(0)>=|phi>, real-time-evolve both
+# under H via tdvp_step (this time with a purely real dt -- the same
+# -im*dt convention that gives decay for imaginary dt above gives genuine
+# rotation here), and measure C(t)=<w(t)|Aop|v(t)>. A plain average over
+# samples converges to C_AB(t), for the same reason metts_vev's plain
+# average of <phi|Op|phi> converges to <Op>_T.
+#
+# Unlike mpscpp3's own port, no manual norm restoration is needed after
+# each real-time tdvp_step on the deliberately non-unit-norm |v(t)>: this
+# file's tdvp_step (tdvp.jl) already passes normalize=false to
+# ITensorMPS's tdvp(), unlike ITensorTDVP's hardcoded "DoNormalize",true
+# that the C++ port has to work around (see chain_session.h's own
+# comment) -- so v's norm just falls out of the (truncated, but
+# unitary-in-the-untruncated-limit) evolution itself, matching
+# pyitensor's own tdvp_step (which never forces a renormalization
+# either).
+#
+# No Fourier transform/windowing here -- returns raw time-domain
+# samples/statistics, same convention as metts_vev() above and
+# timedependent.py's evolve_and_measure_tdvp.
+function metts_dynamical_correlator(H, sites, Aop, Bop, T, nt, dt, nsamples,
+		nwarmup, dbeta_half_step, basis_ops, seed, cutoff, maxdim,
+		tdvp_cutoff, tdvp_maxdim)
+	beta_half = 1.0 / (2.0 * T)
+	nsteps = max(1, Int(ceil(beta_half / dbeta_half_step)))
+	rng = MersenneTwister(seed)
+	nbasis = length(basis_ops)
+	eigcache = metts_build_eigcache(sites, basis_ops)
+	cps = metts_random_cps(sites, basis_ops[1], eigcache, rng)
+
+	samples = [ComplexF64[] for _ in 1:nt]
+	total_iters = nwarmup + nsamples
+	for it in 1:total_iters
+		phi = metts_imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim)
+		if it > nwarmup
+			v = apply_op(Bop, phi, tdvp_maxdim, tdvp_cutoff)
+			w = phi
+			for k in 1:nt
+				push!(samples[k], inner(w, Aop, v))
+				if k < nt
+					v = tdvp_step(H, v, dt, tdvp_cutoff, tdvp_maxdim)
+					w = tdvp_step(H, w, dt, tdvp_cutoff, tdvp_maxdim)
+				end
+			end
+		end
+		basis = basis_ops[((it - 1) % nbasis) + 1]
+		cps = metts_collapse_to_cps(phi, sites, basis, eigcache, rng)
+	end
+
+	means = ComplexF64[]
+	stderrs = Float64[]
+	for k in 1:nt
+		vals = samples[k]
+		m = sum(vals) / length(vals)
+		push!(means, m)
+		if length(vals) > 1
+			var = sum(abs2.(vals .- m)) / (length(vals) - 1)
+			push!(stderrs, sqrt(var / length(vals)))
+		else
+			push!(stderrs, 0.0)
+		end
+	end
+	return means, stderrs
+end

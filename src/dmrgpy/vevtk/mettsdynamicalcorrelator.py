@@ -2,7 +2,8 @@
 Many_Body_Chain-facing wrapper around Chain.metts_dynamical_correlator()
 (pyitensor.chain.Chain for itensor_version="python", mpscpp3's
 Chain::metts_dynamical_correlator in-process pybind11 method for
-itensor_version=3).
+itensor_version=3, mpsjulialive.metts.metts_dynamical_correlator ->
+metts.jl's metts_dynamical_correlator for itensor_version="julia_live").
 
 Reference: Z. Wang, P. McClarty, D. Dankova, A. Honecker, A. Wietek,
 "Spectroscopy and complex-time correlations using minimally entangled
@@ -18,9 +19,9 @@ importance reweighting needed, for exactly the same reason the static
 algorithm's plain sample average already converges to the thermal
 average (see metts.py's module docstring).
 
-Only itensor_version in ("python", 3) are wired up, same restriction as
-metts_vev (itensor_version=2/mpscpp2 has no TDVP module at all, so no
-route to real- or imaginary-time evolution).
+Only itensor_version in ("python", 3, "julia_live") are wired up, same
+restriction as metts_vev (itensor_version=2/mpscpp2 has no TDVP module at
+all, so no route to real- or imaginary-time evolution).
 """
 
 import random
@@ -38,8 +39,9 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     """Real-time dynamical correlator C_AB(t) = <A(t)B>_T at temperature T
     via dynamical METTS sampling (arXiv:2405.18484, Sec. II).
 
-    MB: a Many_Body_Chain with itensor_version in ("python", 3) and a
-        Hamiltonian already set via MB.set_hamiltonian(...).
+    MB: a Many_Body_Chain with itensor_version in ("python", 3,
+        "julia_live") and a Hamiltonian already set via
+        MB.set_hamiltonian(...).
     name: the (A,B) operator pair, in the same format
         operatornames.str2MO() accepts elsewhere in this codebase -- a
         string like "ZZ" (site indices given via i=/j= kwargs), or an
@@ -64,17 +66,23 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
         sampling step) -- default None, meaning "same as this chain's own
         cutoff/maxm" (see pyitensor.metts.metts_dynamical_correlator's own
         docstring on why real-time evolution generally wants a looser
-        cutoff/larger bond dimension). itensor_version="python" only --
-        v3's Chain::metts_dynamical_correlator has no such knob (always
-        uses this chain's own cutoff/maxm for both imaginary- and
-        real-time evolution, like every other v3 TDVP method); passing
-        either on itensor_version=3 raises rather than silently ignoring
-        it.
+        cutoff/larger bond dimension). itensor_version in ("python",
+        "julia_live") only -- v3's Chain::metts_dynamical_correlator has
+        no such knob (always uses this chain's own cutoff/maxm for both
+        imaginary- and real-time evolution, like every other v3 TDVP
+        method); passing either on itensor_version=3 raises rather than
+        silently ignoring it. Julia's tdvp_step (mpsjulialive/tdvp.jl)
+        takes cutoff/maxdim per call like pyitensor's does, so this is
+        wired through there too rather than restricted the way v3 is.
     tdvp_niter: Krylov-iteration bound for the *real-time* TDVP evolution
         of |v_i(t)>/|w_i(t)> specifically (separate from `niter`, which
         only controls the imaginary-time sampling step) -- see
         pyitensor.metts.metts_dynamical_correlator's own docstring on why
         real- and imaginary-time evolution get independent controls here.
+        Accepted but silently ignored for itensor_version="julia_live",
+        same reason MB.metts_vev()'s own `niter` is: ITensorMPS.jl's
+        tdvp() manages its own internal Krylov dimension with no exposed
+        per-step iteration-count knob.
     njobs: run njobs independent METTS Markov chains in parallel worker
         processes and pool their statistics -- itensor_version="python"
         only, same mechanism/caveats as MB.metts_vev(njobs=...).
@@ -85,11 +93,11 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     see MB.metts_vev()'s own docstring for the same Markov-correlation
     caveat on what that stderr does and doesn't capture.
     """
-    if MB.itensor_version not in ("python", 3):
+    if MB.itensor_version not in ("python", 3, "julia_live"):
         raise NotImplementedError(
             "metts_dynamical_correlator is only implemented for "
-            "itensor_version='python' or 3 so far (got itensor_version=%r)"
-            % (MB.itensor_version,))
+            "itensor_version='python', 3 or 'julia_live' so far (got "
+            "itensor_version=%r)" % (MB.itensor_version,))
     if MB.itensor_version == 3 and MB.ns < 3:
         # Same underlying vendored-ITensor limitation as metts_vev's own
         # guard (see vevtk/mettsvev.py) -- two-site TDVP SIGABRTs for
@@ -120,26 +128,38 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
             "metts_dynamical_correlator: njobs>1 (parallel independent "
             "Markov chains) is only implemented for itensor_version="
             "'python' so far (got itensor_version=%r)" % (MB.itensor_version,))
-    if MB.itensor_version != "python" and (tdvp_cutoff is not None or tdvp_maxdim is not None):
+    if MB.itensor_version not in ("python", "julia_live") and (tdvp_cutoff is not None or tdvp_maxdim is not None):
         # v3's Chain::metts_dynamical_correlator has no separate real-time
         # cutoff/maxdim knob at all -- raise rather than silently ignoring
         # a value the caller explicitly asked for.
         raise NotImplementedError(
             "metts_dynamical_correlator: tdvp_cutoff/tdvp_maxdim are only "
-            "implemented for itensor_version='python' so far (got "
-            "itensor_version=%r)" % (MB.itensor_version,))
+            "implemented for itensor_version='python' or 'julia_live' so "
+            "far (got itensor_version=%r)" % (MB.itensor_version,))
 
     resolved = operatornames.str2MO(MB, name)
     A, B = resolved[0], resolved[1]
+
+    # Both backends' metts_dynamical_correlator want a concrete integer
+    # seed, same as metts_vev -- draw one here when the caller didn't pin
+    # one, rather than silently becoming deterministic.
+    seed_arg = seed if seed is not None else random.getrandbits(63)
+
+    if MB.itensor_version == "julia_live":
+        # This backend has no MB._session at all (its state lives in the
+        # live Julia session instead, via MB.hamiltonian/MB.jlsites) --
+        # mirrors mettsvev.py's own julia_live branch.
+        from ..mpsjulialive.metts import metts_dynamical_correlator as metts_dc_jl
+        means, stderrs = metts_dc_jl(MB, A, B, T, nt, dt, nsamples, nwarmup,
+                dbeta_half_step, basis_ops, seed_arg, niter,
+                tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+        ts = np.array([dt * k for k in range(nt)])
+        return ts, np.array(means), np.array(stderrs)
 
     MB._session.set_sweep_params(MB.maxm, MB.nsweeps, MB.cutoff, MB.noise)
     MB._session.set_verbose(MB.verbose)
     MB._session.set_mpomaxm(max(MB.maxm, MB.mpomaxm))
     MB._session.set_hamiltonian(MB.hamiltonian.to_terms())
-    # Both backends' metts_dynamical_correlator want a concrete integer
-    # seed, same as metts_vev -- draw one here when the caller didn't pin
-    # one, rather than silently becoming deterministic.
-    seed_arg = seed if seed is not None else random.getrandbits(63)
     terms_a, terms_b = A.to_terms(), B.to_terms()
     if MB.itensor_version == "python":
         means, stderrs = MB._session.metts_dynamical_correlator(
