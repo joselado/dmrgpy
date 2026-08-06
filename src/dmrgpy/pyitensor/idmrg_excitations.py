@@ -149,6 +149,91 @@ narrow (not yet close) the search space:
   is missing/misweighting a term, without having to re-derive the
   tangent-space formalism from scratch.
 
+A third investigation pass carried out exactly that cross-check, and it
+splits cleanly in two: `Lh` is now independently confirmed correct; `Rh`
+is not yet, and is the sharper suspect going forward.
+
+- `IDMRGResult.env_HL`/`env_HR` are rank-3 (ket, bra, mpo-channel) tensors
+  -- see `IDMRGResult`'s own docstring and `idmrg.py`'s `_extend_HL`/
+  `_extend_HR`. `env_HL`'s own channel axis is a plain, unreversed
+  automaton read (new sites are absorbed by right-multiplying the running
+  channel-space product, i.e. appended in the *same* left-to-right order
+  the S/F channel labels were defined for -- `_S_IDX`=identity/pass-
+  through content, `_F_IDX`=the fully-summed accumulator, exactly as in
+  any bulk `W` tensor). Concretely: `env_HL`'s `_F_IDX` channel, minus
+  `e_cell * (result.niter_done - 1)` (the *unit-cell* count absorbed by
+  the snapshot `env_window_boundary` captures -- note `e_cell` here is
+  per unit cell, i.e. exactly `2*result.e0` for n_uc=2, *not* per physical
+  site, an easy off-by-factor-of-n_uc mistake), reproduces `Lh` directly:
+  exact to ~1e-16 at the exactly-solvable J_weak=0 dimer point (D=1), and
+  to ~2e-4 relative at J_weak=0.02 (D=4) at niter_done=3, tightening
+  further with more macro-iterations -- ordinary geometric convergence,
+  nothing surprising. This is a genuine, independent confirmation that
+  `Lh` (and so `_regularized_environments`'s left-side construction,
+  `Source_L`/`left_action`) is correct -- not something the original
+  internal residual check (also in `_regularized_environments`) could
+  show, since that check only catches a solve-time bug, not a wrong
+  defining equation.
+- `env_HR` is built by *prepending* each newly-absorbed site (it grows
+  outward from the cut in the opposite direction from `env_HL`), which
+  swaps its own channel-axis reading: the newly-absorbed site's *right*
+  leg attaches to the old `env_HR`, and its *left* leg becomes the new
+  boundary -- the reverse of `env_HL`'s pattern. Worked out by hand (not
+  just pattern-matched) what this does to the S/F labels: reading the
+  resulting channel matrix product spatially (starting at the cut and
+  reading outward) is still a perfectly standard, non-reversed automaton
+  read -- but the *open* boundary axis is now a row (not column) index,
+  so its `_S_IDX` entry (not `_F_IDX`) is the one meaning "enter this
+  segment completely fresh", i.e. the fully-summed accumulator. Confirmed
+  exactly at the D=1, J_weak=0 point, where the whole comparison reduces
+  to scalars: raw `env_HR` channel `_S_IDX` equals `e_cell * (niter_done
+  - 1)` to machine precision (matching `env_HL`'s own `_F_IDX` role,
+  channel-swapped as derived), and channel `_F_IDX` equals 1 (the
+  identity/pass-through content, matching `env_HL`'s own `_S_IDX`).
+- This channel-swapped extraction does *not* reproduce `Rh` at D>1,
+  though: at J_weak=0.02, `env_HR`'s own *pending* (bond-carrying, i.e.
+  neither `_S_IDX` nor `_F_IDX`) channels come out with entries of size
+  ~0.3-0.5 -- two to three orders of magnitude larger than `env_HL`'s own
+  analogous pending-channel residuals (~0.01, shrinking to ~0.001 by
+  niter_done=30, the expected dangling-half-a-J_weak-bond residual that
+  ordinary geometric convergence in macro-iteration count should leave
+  behind). Checked from niter_done=3 up through niter_done=30 (forced via
+  etol=0 so the run doesn't stop early): `env_HL`'s pending-channel
+  residuals shrink steadily with more macro-iterations as expected, but
+  `env_HR`'s stay pinned at that same ~0.3-0.5 scale throughout -- so this
+  is not simply "`env_HR` needs more macro-iterations to converge", it is
+  a persistent, non-decaying discrepancy. It's concentrated exactly in
+  the near-degenerate small-eigenvalue subspace of `r` (the 3 indices
+  with eigenvalue ~6.3e-6 in the skewed-spectrum clue above, as opposed
+  to the 1 dominant ~0.9998 index) -- plausibly (not confirmed) reflecting
+  DMRG's own gauge freedom to rotate within that near-degenerate subspace
+  rather than a genuinely missing term, but this was not disentangled
+  before time ran out on this pass.
+- Net effect on the overall investigation: `Lh` is now the *better-
+  supported* of the two regularized environments (independently
+  cross-checked against a completely different, already-validated
+  construction), so suspicion should concentrate on `Rh`/`right_action`/
+  `Source_R` (or on whatever makes diagrams 4/5/6a in `_h_eff_action`
+  behave differently on the right side than diagrams 1/3/5/6b do on the
+  left) rather than treating both sides as equally likely culprits, as
+  the previous investigation pass's "wildly asymmetric in norm" clue
+  alone was consistent with either side being the broken one.
+- Two concrete next steps for whoever picks this up: (1) work out the
+  proper "closing" formula for `env_HR`'s own dangling pending-channel
+  content -- mirroring `Source_R`'s own `T_mat_a[T_mat_b[r]]` construction
+  but through the row/column-reversed reading derived here -- so the
+  cross-check above can actually complete on the `Rh` side instead of
+  stalling on the pending channels; (2) cheaper first move: this
+  investigation's own D=1 test case (the dimer, J_weak=0) has *no* bond
+  content crossing the cut at all, so it never stress-tested the pending-
+  channel-closing formula in the first place -- a D=1 case that *does*
+  have a small nonzero dangling bond (e.g. a field-polarized XX chain
+  detuned slightly below full saturation) would isolate exactly that
+  formula in a setting simple enough to derive fully by hand, before
+  returning to the genuinely D>1 dimer case where the pending-channel
+  content is large and the near-degeneracy in `r` complicates things
+  further.
+
 == Algorithm summary ==
 
 1. Group the unit cell into one supersite (A, W) -- plain NumPy arrays, W
