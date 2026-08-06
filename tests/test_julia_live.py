@@ -195,13 +195,14 @@ def test_tdvp_gse_expansion_is_what_makes_it_work():
 
 
 def test_unsupported_tevol_method_raises():
-    """julia_live implements tevol_method "TDVP"/"TDVP_GSE" only. A
-    request for "TEBD" (or the legacy "MPO" path) must raise rather than
-    silently running plain TDVP instead -- a silent fallback would make a
-    backend-comparison script compare the wrong integrators without
-    saying so."""
+    """julia_live implements tevol_method "TDVP"/"TDVP_GSE"/"TEBD" for
+    real-time evolution. A request for the legacy "MPO" path (v2's only
+    option, still selectable explicitly on v3/"python") must still raise
+    rather than silently running plain TDVP instead -- a silent fallback
+    would make a backend-comparison script compare the wrong integrators
+    without saying so."""
     sc = _heisenberg_chain()
-    sc.tevol_method = "TEBD"
+    sc.tevol_method = "MPO"
     with pytest.raises(NotImplementedError):
         timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=3,
                 dt=0.05, wf=sc.get_gs())
@@ -252,3 +253,160 @@ def test_tdz_honors_tevol_method():
         sc.tevol_method = method
         out = _advance_complex_time_step(sc, Hop, wf, 0.05 - 0.01j, do_gse=True)
         assert out.dot(out).real > 0.0
+
+
+def test_tebd_matches_ed_spin_chain():
+    """mpsjulialive/tebd.jl's TEBDGates/tebd_step! (self.tevol_method=
+    "TEBD", itensor_version="julia_live") against exact diagonalization:
+    prepare the GS of a Neel-favoring staggered field, quench to the
+    (strictly nearest-neighbor) Heisenberg Hamiltonian, and require
+    <Sz_0>(t) to match ED closely -- the julia_live counterpart of
+    tests/test_time_evolution.py::test_tebd_matches_ed_spin_chain."""
+    n = 4
+    sc = spinchain.Spin_Chain([2 for _ in range(n)])  # S=1/2
+    sc.setup_julia()
+    sc.tevol_method = "TEBD"
+
+    h0 = 0
+    for i in range(n):
+        h0 = h0 + (-1) ** i * sc.Sz[i]
+    h1 = 0
+    for i in range(n - 1):
+        h1 = h1 + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
+
+    sc.set_hamiltonian(h0)
+    wf = sc.get_gs()
+    wfED = sc.get_gs(mode="ED")
+    sc.set_hamiltonian(h1)
+
+    nt, dt = 50, 0.05
+    (_ts, sz) = timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=nt, dt=dt, wf=wf)
+    (_tsED, szED) = timedependent.evolve_and_measure(
+            sc, operator=sc.Sz[0], nt=nt, dt=dt, wf=wfED, mode="ED")
+
+    assert np.array(sz).real == pytest.approx(np.array(szED).real, abs=1e-4)
+
+
+def test_tebd_matches_ed_fermion_chain():
+    """Same cross-check as test_tebd_matches_ed_spin_chain, but for a
+    spinless-fermion hopping+staggered-onsite Hamiltonian, to exercise
+    tebd.jl's Jordan-Wigner handling (bond_hamiltonians()/resolve_term()
+    thread the JW string from scratch off raw "C"/"Cdag" names -- see
+    tebd.jl's own header comment for why real ITensors.jl needs those raw
+    names rather than dmrgpy's own pre-dressed "A"/"Adag"/"F" form).
+
+    Deliberately measures N[2] (parity-even) rather than following
+    tests/test_time_evolution.py::test_tebd_matches_ed_fermion_chain's
+    evolution_ABA(A=Cdag[0],...) pattern: confirmed directly that
+    julia_live's evolution_ABA already fails independently of TEBD --
+    Cdag[0] alone is fermion-parity-odd, and ITensorMPS.jl's own
+    OpSum-to-MPO conversion ("sorteachterm") explicitly does not support
+    building an MPO from a parity-odd operator sum yet (same failure with
+    tevol_method="TDVP"), so it's a pre-existing julia_live/ITensorMPS.jl
+    gap unrelated to this port, not a regression to route around here.
+    Modeled instead on
+    tests/test_time_evolution.py::test_tebd_v3_matches_python_fermion_chain's
+    staggered-N-field-to-hopping quench, which only ever builds MPOs from
+    parity-even operators (H itself, and the N[2] measurement)."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_julia()
+    fc.tevol_method = "TEBD"
+
+    h0 = 0
+    for i in range(n):
+        h0 = h0 + (-1) ** i * fc.N[i]
+    h1 = 0
+    for i in range(n - 1):
+        h1 = h1 + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+    h1 = h1 + 0.3 * sum(fc.N[i] for i in range(n))
+
+    fc.set_hamiltonian(h0)
+    wf = fc.get_gs()
+    wfED = fc.get_gs(mode="ED")
+    fc.set_hamiltonian(h1)
+
+    # Finer dt than test_tebd_matches_ed_spin_chain's: confirmed directly
+    # that dt=0.05 (that test's own step size) accumulates just over 1e-4
+    # of 2nd-order Trotter error by t=2.0 for this Hamiltonian's larger
+    # coupling scale (hopping=1 across 3 bonds plus a 0.3 onsite term,
+    # versus the spin test's O(1) single-coupling Heisenberg chain) --
+    # halving dt (same total evolved time t=nt*dt=2.0) brings the
+    # TEBD-vs-ED mismatch down to ~2.5e-5, comfortably inside tolerance.
+    nt, dt = 100, 0.02
+    (_ts, n2) = timedependent.evolve_and_measure(fc, operator=fc.N[2], nt=nt, dt=dt, wf=wf)
+    # edtk/timedependent.py::evolution_ABC unwraps a wf= State via an exact
+    # `type(wf)==State` check, which a Fermionic_State (edchain.State's own
+    # subclass for fermion chains, unlike the spin case above) fails --
+    # a pre-existing, unrelated ED-backend bug (confirmed: hit identically
+    # with any tevol_method, not just "TEBD"). Passing the raw vector
+    # directly sidesteps it the same way a passing type(wf)==State check
+    # would have.
+    (_tsED, n2ED) = timedependent.evolve_and_measure(
+            fc, operator=fc.N[2], nt=nt, dt=dt, wf=wfED.v, mode="ED")
+
+    assert np.array(n2).real == pytest.approx(np.array(n2ED).real, abs=1e-4)
+
+
+def test_tebd_rejects_non_nearest_neighbor_hamiltonian():
+    """tebd.jl's bond_hamiltonians() must fail loudly (a Julia error(),
+    surfacing to Python as a juliacall.JuliaError -- the same mechanism
+    mpsjulialive/generalized.py already relies on), not silently drop the
+    long-range piece, when the Hamiltonian isn't strictly nearest-
+    neighbor -- the julia_live counterpart of tests/test_time_evolution.py
+    ::test_tebd_rejects_non_nearest_neighbor_hamiltonian.
+
+    Uses evolve_and_measure (not evolution_ABA(A=Cdag[0],...), unlike the
+    v3/python version) for the same reason test_tebd_matches_ed_fermion_chain
+    above does: a bare single fermionic operator can't be applied via MPO
+    on julia_live at all yet (an independent, pre-existing ITensorMPS.jl
+    gap), and mixing that failure mode in here would make this test pass
+    for the wrong reason."""
+    from juliacall import JuliaError
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_julia()
+    fc.tevol_method = "TEBD"
+
+    h_nn = 0
+    for i in range(n - 1):
+        h_nn = h_nn + fc.Cdag[i] * fc.C[i + 1]
+    h_nn = h_nn + h_nn.get_dagger()
+    fc.set_hamiltonian(h_nn)
+    wf = fc.get_gs()
+
+    h_long = fc.Cdag[0] * fc.C[2]
+    h_long = h_long + h_long.get_dagger()
+    fc.set_hamiltonian(h_long)
+
+    with pytest.raises(JuliaError):
+        timedependent.evolve_and_measure(fc, operator=fc.N[0], nt=5, dt=0.05, wf=wf)
+
+
+def test_tebd_dynamical_correlator_matches_ed_spin_chain():
+    """timedependent.evolution_DC (the raw time-domain quench correlator
+    C(t)=<GS|A(t)B(0)|GS>, dispatching to mpsjulialive/tebd.jl's
+    quench_tebd() when tevol_method="TEBD") must match exact
+    diagonalization on a small nearest-neighbor system -- the julia_live
+    counterpart of tests/test_time_evolution.py
+    ::test_tebd_dynamical_correlator_matches_ed_spin_chain, exercising
+    quench_tebd() specifically (ground-state-energy shift + two-state
+    overlap), unlike test_tebd_matches_ed_spin_chain above (which only
+    covers evolve_and_measure_tebd())."""
+    n = 4
+    sc = spinchain.Spin_Chain([2 for _ in range(n)])
+    sc.setup_julia()
+    sc.tevol_method = "TEBD"
+
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+    sc.set_hamiltonian(h)
+
+    name = (sc.Sz[0], sc.Sz[0])
+    nt, dt = 60, 0.05
+    sc.get_gs()
+    (_tsED, csED) = timedependent.evolution_DC(sc, mode="ED", name=name, nt=nt, dt=dt)
+    (_ts, cs) = timedependent.evolution_DC(sc, mode="DMRG", name=name, nt=nt, dt=dt)
+
+    assert np.array(cs) == pytest.approx(np.array(csED), abs=1e-4)

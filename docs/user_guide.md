@@ -1063,10 +1063,11 @@ measurement operator.
   `itensor_version=3` (see
   `examples/time_evolution/tdvp_gse_VS_ED_time_evolution`'s own note on
   that edge case).
-- `"TEBD"` (`itensor_version` `3` or `"python"`, and only for a strictly
-  nearest-neighbor Hamiltonian — any term touching 3 or more distinct
-  sites raises `NotImplementedError` (`"python"`) or a catchable
-  `RuntimeError` (`3`)) — the standard 2nd-order-Trotter, even/odd-bond
+- `"TEBD"` (`itensor_version` `3`, `"python"`, or `"julia_live"`, and only
+  for a strictly nearest-neighbor Hamiltonian — any term touching 3 or
+  more distinct sites raises `NotImplementedError` (`"python"`), a
+  catchable `RuntimeError` (`3`), or a `juliacall.JuliaError`
+  (`"julia_live"`)) — the standard 2nd-order-Trotter, even/odd-bond
   ("brick-wall") algorithm: $e^{-iH\,dt}\approx
   e^{-iH_{\rm odd}\,dt/2}\,e^{-iH_{\rm even}\,dt}\,e^{-iH_{\rm odd}\,dt/2}$,
   where $H_{\rm odd}$/$H_{\rm even}$ sum the bond Hamiltonians on
@@ -1080,21 +1081,31 @@ measurement operator.
   typically cheaper per step than TDVP whenever the Hamiltonian qualifies.
   `itensor_version=3` builds the gate via ITensor's own `BondGate`
   primitive (`mpscpp3/tebd.h`); `"python"` exponentiates the bare 2-site
-  matrix directly (`pyitensor/tebd.py`'s `TEBDEvolver`) — both backends
-  agree with each other to machine precision on a fermionic
-  hopping+onsite benchmark.
+  matrix directly (`pyitensor/tebd.py`'s `TEBDEvolver`); `"julia_live"`
+  builds the gate as an ITensor outer product of per-site operators and
+  exponentiates via ITensors.jl's own tensor `exp()`
+  (`mpsjulialive/tebd.jl`) — all three agree with each other (and with
+  exact diagonalization) on a fermionic hopping+onsite benchmark. Unlike
+  the other two backends, the Julia port resolves the Jordan-Wigner
+  string itself, from scratch, off the *raw* `"C"/"Cdag"` term list
+  (the same one the MPO-based methods there already serialize), rather
+  than `MultiOperator.to_terms()`'s Jordan-Wigner-*predressed*
+  `"A"/"Adag"/"F"` form the other two backends consume — real
+  ITensors.jl's builtin `"Fermion"` site type only defines
+  `op("C",..)`/`op("Cdag",..)`/`op("F",..)`, not dmrgpy's own `"A"/"Adag"`
+  names.
 - `"MPO"` — a hand-rolled 2nd-order Taylor expansion of $e^{-iH\,dt}$
   applied as an MPO each step; the only option on `itensor_version=2`
   (which has no TDVP or TEBD at all), and available (if slower/less
   accurate for a given bond dimension) everywhere else too.
 
-`"julia_live"` implements exactly `"TDVP"` and `"TDVP_GSE"`; `"TEBD"` and
-`"MPO"` raise `NotImplementedError` there rather than silently running
-plain TDVP instead, so a backend-comparison script can't quietly end up
-comparing different integrators.
+`"julia_live"` implements `"TDVP"`, `"TDVP_GSE"`, and `"TEBD"`; the legacy
+`"MPO"` path raises `NotImplementedError` there rather than silently
+running plain TDVP instead, so a backend-comparison script can't quietly
+end up comparing different integrators.
 
 ```python
-sc.setup_cpp(version=3)    # or sc.setup_python()
+sc.setup_cpp(version=3)    # or sc.setup_python(), or sc.setup_julia()
 sc.tevol_method = "TEBD"
 ```
 

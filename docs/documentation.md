@@ -1191,8 +1191,10 @@ Notable, deliberate implementation details (not bugs to "fix"):
   couldn't be root-caused in the time available — see git history around
   `mpscpp2/TDVP/` if picking this up again.
 - `tevol_method="TEBD"` (`itensor_version="python"` via
-  `pyitensor/tebd.py`'s `TEBDEvolver`, or `itensor_version=3` via
-  `mpscpp3/tebd.h` -- a from-scratch C++ port, not a shared code path)
+  `pyitensor/tebd.py`'s `TEBDEvolver`, `itensor_version=3` via
+  `mpscpp3/tebd.h` -- a from-scratch C++ port, not a shared code path --
+  or `itensor_version="julia_live"` via `mpsjulialive/tebd.jl`, a third
+  independent from-scratch port -- see "TEBD on `julia_live`" below)
   runs the standard 2nd-order-Trotter, even/odd-bond algorithm instead of
   TDVP: every bond's evolution gate `exp(-i*tau*h_bond)` is the exact
   exponential of the *bare* local 2-site Hamiltonian, built once from a
@@ -2199,11 +2201,11 @@ of being silently swallowed `ntries` times by that retry loop).
 `self.tevol_method` used to be ignored entirely on this backend --
 `timedependent.py` routed every `julia_live` call to
 `mpsjulialive/timedependent.py`, which only ever ran plain two-site TDVP.
-It is now honored: `"TDVP"` and `"TDVP_GSE"` both work, and anything else
-(`"TEBD"`, the legacy `"MPO"` path) raises `NotImplementedError` instead
-of silently running a different integrator than the caller asked for --
-the failure mode that would make a backend-comparison script quietly
-compare the wrong things.
+It is now honored: `"TDVP"`, `"TDVP_GSE"`, and `"TEBD"` (see below) all
+work, and anything else (the legacy `"MPO"` path) raises
+`NotImplementedError` instead of silently running a different integrator
+than the caller asked for -- the failure mode that would make a
+backend-comparison script quietly compare the wrong things.
 
 `"TDVP_GSE"` needed no algorithm port at all, unlike v3
 (`mpscpp3/TDVP/basisextension.h`) and pyitensor (`pyitensor/gse.py`, a
@@ -2242,6 +2244,88 @@ isolated failure (see that example's own comment and
 `examples/time_evolution/tdvp_gse_VS_ED_time_evolution`, which has to mix
 in an XX+YY coupling to avoid it) -- the Julia route needs no such
 workaround.
+
+#### TEBD on `julia_live`
+
+`mpsjulialive/tebd.jl` is a third, independent from-scratch port of the
+same 2nd-order-Trotter algorithm `pyitensor/tebd.py`/`mpscpp3/tebd.h`
+already implement (see the main TEBD bullet above) -- not a value-level
+transcription of either, since real ITensors.jl gives it different
+native primitives to build on:
+
+- **Gate construction is entirely ITensor-native, not dense-matrix-based.**
+  Each per-site factor of a Hamiltonian term becomes an `ITensor` directly
+  via `op(name,s)`; composing several factors at the same site uses plain
+  dense-matrix multiplication on the `(dim,dim)` arrays extracted via
+  `Array(op(name,s),s',s)` (the same convention `metts.jl`'s
+  `metts_site_operator_matrix` already established), but *placing* a
+  local or 2-site operator onto a bond uses ITensor outer products
+  (`op("Id",s) * local_tensor`, `tA * tB`) rather than `np.kron`/
+  `scipy.linalg.expm`-style dense reshaping -- there is no row/column
+  storage-order convention to get wrong, since ITensor tracks index
+  identity rather than positional array layout. The gate itself is then
+  built via ITensors.jl's own tensor exponential, `exp(-im*tau*Hbond)`
+  (`exp(::ITensor)`, which auto-splits primed/unprimed indices into
+  "output"/"input"), the same ITensor-native mechanism `mpscpp3/tebd.h`'s
+  `BondGate` uses in C++ -- unlike `pyitensor/tebd.py`, which has no
+  ITensor-level `exp()` of its own and falls back to a manual
+  `scipy.linalg.expm` on the dense `(D,D)` bond matrix.
+- **Jordan-Wigner threading is genuinely exercised here, not a
+  pass-through.** `mpsjulialive/tebd.jl`'s `term_add!`/`resolve_term` are
+  a direct port of `pyitensor/autompo.py`'s `HTerm.add()`/
+  `HTerm.resolve()` -- but fed the *raw* `"C"/"Cdag"` term list
+  (`mpo.py`'s `text_mpo()`/`MO2list()`, the same serialization the
+  existing MPO path already uses to talk to Julia), not
+  `MultiOperator.to_terms()`'s Jordan-Wigner-*predressed* `"A"/"Adag"/"F"`
+  form the other two backends' TEBD consume. This is a deliberate,
+  confirmed-necessary choice, not a stylistic one: real ITensors.jl's
+  builtin `"Fermion"` site type
+  (`ITensors/src/lib/SiteTypes/src/sitetypes/fermion.jl`) only defines
+  `op("C",..)`/`op("Cdag",..)`/`op("F",..)` -- there is no `"A"/"Adag"`
+  operator registered for it at all, unlike dmrgpy's own hand-rolled
+  pyitensor/C++ site tables, which do define `"A"/"Adag"` as their own
+  name for the bare, string-free annihilation/creation operator (exactly
+  what ITensors.jl's `"C"`/`"Cdag"` already are -- the Jordan-Wigner
+  string is inserted separately, by the automaton or, here, by
+  `term_add!`/`resolve_term`'s own carry tracking, never baked into the
+  operator itself on either side). So on this backend, unlike the other
+  two (where the equivalent carry-tracking pass is mostly an inert
+  no-op over already-dressed input, see the main TEBD bullet's
+  `_true_span()` discussion), the Jordan-Wigner carry logic does the
+  actual string threading.
+- **The observable/quench-operator path is untouched.** Only the
+  Hamiltonian goes through `bond_hamiltonians()`'s from-scratch term
+  resolution; `A`/`B` operators (`evolution_ABA`, `quench_tebd`'s
+  two-state overlap) are still built as ordinary MPOs via the ITensors.jl
+  `AutoMPO` automaton and applied via `tdvp.jl`'s existing `apply_clean`,
+  unchanged from the TDVP path. One consequence, confirmed directly and
+  not a TEBD-specific bug: applying a single *bare*, fermion-parity-odd
+  operator (e.g. `Cdag[0]` alone, as `tests/test_time_evolution.py`'s own
+  `evolution_ABA`-based TEBD tests do for `itensor_version` `3`/
+  `"python"`) fails on `julia_live` independent of `tevol_method`, since
+  ITensorMPS.jl's own `OpSum`-to-`MPO` conversion does not yet support a
+  parity-odd operator sum ("Parity-odd fermionic terms not yet supported
+  by OpSum to MPO conversion") -- `tests/test_julia_live.py`'s TEBD
+  fermion test measures `N[2]` (parity-even) against a hopping+staggered
+  quench instead, mirroring
+  `test_tebd_v3_matches_python_fermion_chain`'s setup rather than
+  `test_tebd_matches_ed_fermion_chain`'s.
+- `psi[i] = U` / `psi[i+1] = S*V` (`apply_bond_gate!`'s SVD-truncation
+  step) relies on `ITensorMPS.jl`'s own `setindex!(::MPS,::ITensor,n)`
+  to keep the MPS's orthogonality-center bookkeeping (`leftlim`/
+  `rightlim`) consistent automatically -- unlike `mpscpp3/tebd.h`'s
+  `apply_bond_gate`, which has to set `psi.leftLim(b)`/`psi.rightLim(b+2)`
+  by hand after `psi.set()`, since ITensor C++'s `MPS::set()` primitive
+  does no such bookkeeping on its own.
+
+Validated against ED on both a spin (Neel-favoring field to Heisenberg)
+and a fermion (staggered field to hopping+staggered) quench, and against
+a direct rejection check for a term spanning 3+ sites (`bond_hamiltonians`
+raises a plain Julia `error(...)`, surfacing to Python as a
+`juliacall.JuliaError` -- the same propagation mechanism
+`mpsjulialive/generalized.py` already relies on for its own retry-loop
+guard) -- see `tests/test_julia_live.py` and
+`examples/time_evolution/tebd_julia_VS_ED_time_evolution`.
 
 ### 4.7 Supporting `*tk` packages
 

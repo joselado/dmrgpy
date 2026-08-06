@@ -77,7 +77,7 @@ or is simply absent) · — not meaningful for this backend/method combo.
 |---|---|---|---|---|
 | Real-time evolution, TDVP (two-site) | ✅ | ✅ | ✅ | Julia has its own implementation (`mpsjulialive/timedependent.py` + `tdvp.jl`), and now honors `self.tevol_method` rather than ignoring it — see the TDVP_GSE row; anything outside `("TDVP","TDVP_GSE")` raises there instead of silently running plain TDVP. |
 | Real-time evolution, TDVP + global subspace expansion (`tevol_method="TDVP_GSE"`) | ✅ | ✅ | ✅ | Julia needs no port: ITensorMPS.jl ships both pieces (`expand(psi,H; alg="global_krylov")`, citing the same Yang-White paper, and `tdvp(...; nsite=1)`), so `mpsjulialive/tdvp.jl` only wires them into the same expand-then-step structure. Unlike v3 it handles a bond-dimension-1 (product-state) start fine — see `examples/time_evolution/tdvp_gse_julia_VS_ED_time_evolution`. |
-| Real-time evolution, TEBD (2nd-order Trotter gates) | ✅ | ✅ | ❌ | Restricted to `itensor_version in (3,"python")`; v2 has no TDVP module at all so was never a candidate either. Julia would need a Trotter-gate primitive (bond Hamiltonians built from the term list, with explicit fermionic-sign handling that AutoMPO does for free elsewhere) — the one piece of this group still missing there. |
+| Real-time evolution, TEBD (2nd-order Trotter gates) | ✅ | ✅ | ✅ | v2 has no TDVP module at all so was never a candidate. Julia's `mpsjulialive/tebd.jl` builds each bond's gate from ITensor outer products (`op(name,s)`, no dense-matrix kron/reshape) and exponentiates via ITensors.jl's own tensor `exp()` (the same ITensor-native mechanism as `mpscpp3/tebd.h`'s `BondGate`, unlike pyitensor's manual `scipy.linalg.expm`). Unlike the other two backends, it resolves Jordan-Wigner from scratch off the *raw* `"C"/"Cdag"` term list (`mpo.py`'s `text_mpo()`), not `MultiOperator.to_terms()`'s pre-dressed `"A"/"Adag"/"F"` form — real ITensors.jl's builtin `"Fermion"` site type only defines `op("C",..)`/`op("Cdag",..)`/`op("F",..)`, not dmrgpy's own `"A"/"Adag"` names. |
 | Real-time evolution, MPO-Taylor (`tevol_method="MPO"`, the pre-TDVP legacy path) | ✅ | — | — | The only option for v2; still selectable on v3 by explicitly setting `tevol_method="MPO"`. |
 | Complex-time evolution / TDZ damping (arXiv:2311.10909) | ✅ | ✅ | ✅ | Julia needed exactly one new primitive (`advance_complex_time_step`); the rest of `tdz.py` is backend-agnostic MPS/MPO algebra. |
 
@@ -126,14 +126,15 @@ model-specific exception:
    has landed on pyitensor+v3 recently, a from-scratch Julia port is a
    large undertaking, not a quick win — likely not worth it unless a
    concrete use case needs Julia specifically for infinite systems.
-2. **Julia: TEBD.** Needs a Trotter-gate evolution primitive (and, for
-   fermionic models, the explicit Jordan-Wigner sign handling inside a
-   two-site gate that ITensor's AutoMPO does for free on the MPO path) —
-   still unported, the one piece of the real-time-evolution group
-   (Sec. 3 above) Julia lacks. METTS (both the static thermal average
-   `metts_vev` and its real-time dynamical-correlator generalization
-   `metts_dynamical_correlator`, Sec. 5) is now fully implemented — see
-   `mpsjulialive/metts.jl`.
+2. **Julia: TEBD.** Now implemented — see `mpsjulialive/tebd.jl` (from-
+   scratch Jordan-Wigner threading off the raw `"C"/"Cdag"` term list,
+   ITensor-native gate exponentiation via ITensors.jl's own `exp()`). The
+   real-time-evolution group (Sec. 3 above) is now fully covered on all
+   three backends except TEBD on v2 (never a candidate — v2 has no TDVP
+   module at all). METTS (both the static thermal average `metts_vev` and
+   its real-time dynamical-correlator generalization
+   `metts_dynamical_correlator`, Sec. 5) is likewise fully implemented —
+   see `mpsjulialive/metts.jl`.
 3. **v3/pyitensor: four-point `ctmode="sweep"` for native-spinful sites.**
    The fast environment-reuse algorithm has no flavor-resolved
    counterpart yet; `ctmode="full"` remains the practical choice for

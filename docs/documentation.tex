@@ -1423,9 +1423,12 @@ Notable, deliberate implementation details (not bugs to ``fix''):
     available --- see git history around \texttt{mpscpp2/TDVP/} if
     picking this up again.
   \item \texttt{tevol\_method="TEBD"} (\texttt{itensor\_version="python"}
-    via \texttt{pyitensor/tebd.py}'s \texttt{TEBDEvolver}, or
+    via \texttt{pyitensor/tebd.py}'s \texttt{TEBDEvolver},
     \texttt{itensor\_version=3} via \texttt{mpscpp3/tebd.h} --- a
-    from-scratch C++ port, not a shared code path) runs the standard
+    from-scratch C++ port, not a shared code path --- or
+    \texttt{itensor\_version="julia\_live"} via
+    \texttt{mpsjulialive/tebd.jl}, a third independent from-scratch port,
+    see ``TEBD on \texttt{julia\_live}'' below) runs the standard
     2nd-order-Trotter, even/odd-bond algorithm instead of TDVP: every
     bond's evolution gate $\exp(-i\,\tau\,h_{\rm bond})$ is the exact
     exponential of the \emph{bare} local 2-site Hamiltonian, built once
@@ -2599,11 +2602,11 @@ that retry loop).
 backend --- \texttt{timedependent.py} routed every
 \lstinline|julia_live| call to \texttt{mpsjulialive/timedependent.py},
 which only ever ran plain two-site TDVP. It is now honored:
-\lstinline|"TDVP"| and \lstinline|"TDVP_GSE"| both work, and anything
-else (\lstinline|"TEBD"|, the legacy \lstinline|"MPO"| path) raises
-\lstinline|NotImplementedError| instead of silently running a different
-integrator than the caller asked for --- the failure mode that would make
-a backend-comparison script quietly compare the wrong things.
+\lstinline|"TDVP"|, \lstinline|"TDVP_GSE"|, and \lstinline|"TEBD"| (see
+below) all work, and anything else (the legacy \lstinline|"MPO"| path)
+raises \lstinline|NotImplementedError| instead of silently running a
+different integrator than the caller asked for --- the failure mode that
+would make a backend-comparison script quietly compare the wrong things.
 
 \lstinline|"TDVP_GSE"| needed no algorithm port at all, unlike v3
 (\texttt{mpscpp3/TDVP/basisextension.h}) and pyitensor
@@ -2647,6 +2650,97 @@ example's own comment and
 \texttt{examples/time\_evolution/tdvp\_gse\_VS\_ED\_time\_evolution},
 which has to mix in an XX+YY coupling to avoid it) --- the Julia route
 needs no such workaround.
+
+\textbf{TEBD on \lstinline|julia_live|.} \texttt{mpsjulialive/tebd.jl} is
+a third, independent from-scratch port of the same 2nd-order-Trotter
+algorithm \texttt{pyitensor/tebd.py}/\texttt{mpscpp3/tebd.h} already
+implement (see the main TEBD bullet in the previous chapter) --- not a
+value-level transcription of either, since real ITensors.jl gives it
+different native primitives to build on:
+
+\begin{itemize}
+  \item \textbf{Gate construction is entirely ITensor-native, not
+    dense-matrix-based.} Each per-site factor of a Hamiltonian term
+    becomes an \lstinline|ITensor| directly via \lstinline|op(name,s)|;
+    composing several factors at the same site uses plain dense-matrix
+    multiplication on the \lstinline|(dim,dim)| arrays extracted via
+    \lstinline|Array(op(name,s),s',s)| (the same convention
+    \texttt{metts.jl}'s \lstinline|metts_site_operator_matrix| already
+    established), but \emph{placing} a local or 2-site operator onto a
+    bond uses ITensor outer products (\lstinline|op("Id",s) * local_tensor|,
+    \lstinline|tA * tB|) rather than \lstinline|np.kron|/
+    \lstinline|scipy.linalg.expm|-style dense reshaping --- there is no
+    row/column storage-order convention to get wrong, since ITensor
+    tracks index identity rather than positional array layout. The gate
+    itself is then built via ITensors.jl's own tensor exponential,
+    \lstinline|exp(-im*tau*Hbond)| (\lstinline|exp(::ITensor)|, which
+    auto-splits primed/unprimed indices into ``output''/``input''), the
+    same ITensor-native mechanism \texttt{mpscpp3/tebd.h}'s
+    \lstinline|BondGate| uses in C++ --- unlike \texttt{pyitensor/tebd.py},
+    which has no ITensor-level \lstinline|exp()| of its own and falls
+    back to a manual \lstinline|scipy.linalg.expm| on the dense
+    \lstinline|(D,D)| bond matrix.
+  \item \textbf{Jordan-Wigner threading is genuinely exercised here, not
+    a pass-through.} \texttt{mpsjulialive/tebd.jl}'s
+    \lstinline|term_add!|/\lstinline|resolve_term| are a direct port of
+    \texttt{pyitensor/autompo.py}'s \lstinline|HTerm.add()|/
+    \lstinline|HTerm.resolve()| --- but fed the \emph{raw}
+    \texttt{"C"/"Cdag"} term list (\texttt{mpo.py}'s
+    \lstinline|text_mpo()|/\lstinline|MO2list()|, the same serialization
+    the existing MPO path already uses to talk to Julia), not
+    \lstinline|MultiOperator.to_terms()|'s Jordan-Wigner-\emph{predressed}
+    \texttt{"A"/"Adag"/"F"} form the other two backends' TEBD consume.
+    This is a deliberate, confirmed-necessary choice, not a stylistic
+    one: real ITensors.jl's builtin \texttt{"Fermion"} site type
+    (\texttt{ITensors/src/lib/SiteTypes/src/sitetypes/fermion.jl}) only
+    defines \lstinline|op("C",..)|/\lstinline|op("Cdag",..)|/
+    \lstinline|op("F",..)| --- there is no \texttt{"A"/"Adag"} operator
+    registered for it at all, unlike dmrgpy's own hand-rolled
+    pyitensor/C++ site tables, which do define \texttt{"A"/"Adag"} as
+    their own name for the bare, string-free annihilation/creation
+    operator (exactly what ITensors.jl's \texttt{"C"}/\texttt{"Cdag"}
+    already are --- the Jordan-Wigner string is inserted separately, by
+    the automaton or, here, by \lstinline|term_add!|/\lstinline|resolve_term|'s
+    own carry tracking, never baked into the operator itself on either
+    side). So on this backend, unlike the other two (where the
+    equivalent carry-tracking pass is mostly an inert no-op over
+    already-dressed input), the Jordan-Wigner carry logic does the
+    actual string threading.
+  \item \textbf{The observable/quench-operator path is untouched.} Only
+    the Hamiltonian goes through \lstinline|bond_hamiltonians()|'s
+    from-scratch term resolution; $A$/$B$ operators
+    (\lstinline|evolution_ABA|, \lstinline|quench_tebd|'s two-state
+    overlap) are still built as ordinary MPOs via the ITensors.jl
+    \lstinline|AutoMPO| automaton and applied via \texttt{tdvp.jl}'s
+    existing \lstinline|apply_clean|, unchanged from the TDVP path. One
+    consequence, confirmed directly and not a TEBD-specific bug:
+    applying a single \emph{bare}, fermion-parity-odd operator (e.g.\
+    \lstinline|Cdag[0]| alone) fails on \lstinline|julia_live|
+    independent of \lstinline|tevol_method|, since ITensorMPS.jl's own
+    \lstinline|OpSum|-to-\lstinline|MPO| conversion does not yet support
+    a parity-odd operator sum --- \texttt{tests/test\_julia\_live.py}'s
+    TEBD fermion test measures \lstinline|N[2]| (parity-even) against a
+    hopping+staggered quench instead.
+  \item \lstinline|psi[i] = U| / \lstinline|psi[i+1] = S*V|
+    (\lstinline|apply_bond_gate!|'s SVD-truncation step) relies on
+    ITensorMPS.jl's own \lstinline|setindex!(::MPS,::ITensor,n)| to keep
+    the MPS's orthogonality-center bookkeeping (\lstinline|leftlim|/
+    \lstinline|rightlim|) consistent automatically --- unlike
+    \texttt{mpscpp3/tebd.h}'s \lstinline|apply_bond_gate|, which has to
+    set \lstinline|psi.leftLim(b)|/\lstinline|psi.rightLim(b+2)| by hand
+    after \lstinline|psi.set()|, since ITensor C++'s \lstinline|MPS::set()|
+    primitive does no such bookkeeping on its own.
+\end{itemize}
+
+Validated against ED on both a spin (Neel-favoring field to Heisenberg)
+and a fermion (staggered field to hopping+staggered) quench, and against
+a direct rejection check for a term spanning 3+ sites
+(\lstinline|bond_hamiltonians| raises a plain Julia \lstinline|error(...)|,
+surfacing to Python as a \lstinline|juliacall.JuliaError| --- the same
+propagation mechanism \texttt{mpsjulialive/generalized.py} already relies
+on for its own retry-loop guard) --- see \texttt{tests/test\_julia\_live.py}
+and
+\texttt{examples/time\_evolution/tebd\_julia\_VS\_ED\_time\_evolution}.
 
 \subsection{Supporting \texttt{*tk} packages}
 

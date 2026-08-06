@@ -43,6 +43,9 @@ def initialize():
     files += ["metts.jl"] # METTS finite-temperature sampling; reuses
                            # tdvp.jl's tdvp_step for imaginary-time
                            # evolution, must load after it
+    files += ["tebd.jl"] # real-time TEBD (Trotter-gate) evolution; reuses
+                          # tdvp.jl's apply_clean for observable
+                          # application, must load after it
     files += ["excited.jl"] # orthogonality-penalty excited-state dmrg()
     files += ["nhdmrg.jl"] # biorthogonal non-Hermitian DMRG pair; uses
                             # get_gs.jl's make_sweeps/run_quiet, so must
