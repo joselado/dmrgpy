@@ -540,6 +540,158 @@ even though the overall dispersion is still wrong.
   for: any tail seeded by bra=A_L at a negative far position) rather than
   continuing to find them one at a time by trial.
 
+A seventh investigation pass picked up exactly the "brute-force W-sweep
+cross-check" next step pass six left unfinished -- but replaced it with
+something more useful: a from-scratch, dense-operator (no automaton, no
+W tensor, no idmrg.py primitives at all) reproduction of the D=1 XX+field
+matrix element <B'|H|Phi_p(B)> position-by-position (positions -3..+3
+enumerated explicitly with raw Sx/Sy/Sz matrices, ket_at(n) swapped in by
+hand), which pins down the *exact* target value pass six's own brute-force
+attempt was trying to reach but never got working. This tool -- call it
+the "position-explicit reproducer" -- is what let this pass finally
+distinguish a genuinely correct diagram from a self-consistent-but-wrong
+one (see below), which the previous six passes' own cross-checks (each
+validated only against the *final* dispersion/Hermiticity, or against
+another piece of this same module's own machinery) could not do.
+
+- This pass first re-attempted pass five/six's own mixed-gauge diagram
+  translation, but organized differently: instead of hand-transcribing
+  Eq. (193)-(198) of Vanderstraeten/Haegeman/Verstraete (arXiv:1810.07006)
+  from their own rendered *diagrams* (image-only, as pass four already
+  found unreliable), this pass downloaded the actual PDF and read the
+  diagrams directly at high zoom, AND cross-referenced MPSKit.jl's actual
+  source (github.com/QuantumKitHub/MPSKit.jl,
+  src/environments/qp_envs.jl's `left_excitation_transfer_system`/
+  `right_excitation_transfer_system` and the `GBL`/`GBR` recursions
+  feeding them) -- the same reference pass five used, but this time
+  fetched to look at the *recursion*, not just the final 3-term formula.
+  This resolved a real ambiguity pass four/five never pinned down: the
+  paper's own `E_L^L`/`E_R^R`/`E_L^R`/`E_R^L` notation (Eq. 184-196) is
+  "E_{bra-tensor}^{ket-tensor}" (subscript = which tensor type sits in
+  the bra, superscript = which sits in the ket) -- confirmed by matching
+  MPSKit's `TransferMatrix(right_gs.AR, O, left_gs.AL)`-style calls
+  against the paper's own diagram connectivity at matching points, not
+  guessed. Under this reading, `E_L^R` (used in the paper's own `L_1`/
+  `L_B`, the "B already passed, propagate rightward" objects) is exactly
+  this module's own (A_R-ket, A_L-bra) mixed transfer, and `E_R^L`
+  (`R_1`/`R_B`) is the (A_L-ket, A_R-bra) one -- matching pass six's own
+  fixed-point identities (C^dagger/C^T for the former, C/conj(C) for the
+  latter) exactly, a genuine independent confirmation of that pass's own
+  algebra.
+- Attempting a *literal* implementation of the paper's own channel-
+  resolved GBL/GBR recursion (mirroring MPSKit's `lBs`/`rBs`, i.e.
+  building the FULL automaton-channel-resolved environment -- not just
+  its already-regularized F-channel slice `vumps.GL`/`GR` -- and
+  resumming it against a momentum phase via a dense pseudo-inverse
+  (`numpy.linalg.lstsq`, chosen specifically to avoid hand-building a
+  separate r-outer-l-style projector for each of the four mixed
+  transfers, a real source of sign/index bugs in every previous pass)
+  produced a construction that was internally self-consistent -- its own
+  fixed-point equation checked out against an explicit truncated-geometric-
+  series unrolling to ~1e-16, TWICE (once for the left-growing GBL, once
+  for the right-growing GBR) -- but which the position-explicit reproducer
+  showed was simply computing the WRONG quantity for the right-growing
+  (GBR) half: internally consistent with its own (subtly wrong) recursion,
+  not with the actual physics. Concretely: at D=1 (XX+field, same
+  reproducer model as passes two-four), GBL's contribution matched the
+  reproducer's own "B strictly left of the differentiated position"
+  sector exactly (-0.4777+0.1478j vs the reproducer's -0.4777+0.1478j),
+  but GBR's matched contribution came out identically zero against a
+  target of -0.4777-0.1478j (the *complex conjugate* of GBL's own value --
+  an evocative, unexplained near-symmetry of this specific reproducer
+  model, not fully understood, but a strong hint the "correct" GBR
+  should have been the same order of magnitude as GBL, not zero). No
+  combination of swapping `apply_transfer`/`apply_transfer_from_left` or
+  the summation-vs-target index in the recursion (4 combinations tried
+  explicitly) fixed this without breaking GBL instead -- and removing the
+  vumps-GL/GR content from the channel-resolved environments' own F-slice
+  (a live hypothesis at the time, "double-counting the regularized
+  background") changed nothing numerically (GL/GR were already ~0 for
+  this trivial D=1 product-state test case, so this specific hypothesis
+  was never actually exercised, and remains untested for a genuinely
+  D=1-but-GL/GR-nonzero case). This construction (and the specific bug in
+  it) was NOT resolved and was abandoned in favor of the approach below,
+  rather than merged -- recorded here so a future pass does not re-spend
+  the same effort re-discovering that the "obvious" GBR mirror of a
+  working GBL is not simply obtained by swapping A_L<->A_R and
+  apply_transfer<->apply_transfer_from_left throughout.
+- Falling back to a direct, minimal port of THIS module's own already-
+  validated (D=1-exact) diagram 6a/6b -- rather than the channel-resolved
+  GBL/GBR abstraction -- worked immediately: diagram 6a's mixed-gauge
+  translation is (per pending channel) `cap_right(apply_op_ket(mat_a,
+  A_L), phase*cap_bB + phase**2*tail)` with `cap_bB = apply_transfer(
+  op_transfer_matrix(B, A_R, mat_b), I)` (the n=1 term, closed with plain
+  identity -- NOT `Rh`/`GR`, a real and easy mistake, see below), `tail =
+  apply_transfer(op_transfer_matrix(A_L, A_R, mat_b), resolvent(seed))`,
+  `seed = apply_transfer(op_transfer_matrix(B, A_R, None), I)`, and
+  `resolvent` the (I - e^{ip} T)^{-1} pseudo-inverse of the (A_L-ket,
+  A_R-bra) mixed transfer (regularized via plain `lstsq`, no explicit
+  projector needed). Diagram 6b mirrors this with A_L/A_R swapped,
+  `apply_transfer_from_left`, and phase e^{-ip}, closed via an explicit
+  trailing `cap_right(..., I)` (matching this module's own existing D=1
+  diagrams' documented "diagrams 3/5/6b need an explicit right-side
+  closure" rule). This reproduces the position-explicit reproducer's own
+  n=+-1-only values exactly (both components, not just one), and the
+  resulting D=1 XX+field dispersion is exact to machine precision
+  (~1e-15) AND exactly Hermitian (~1e-16) at every momentum tested --
+  matching this module's own existing D=1 diagrams' accuracy, from a
+  completely independent (VUMPS-based, mixed-gauge) code path. This is a
+  genuine, useful confirmation that VUMPS's {A_L,A_R,C} plus this simpler
+  6a/6b-style construction (not the channel-resolved one above) is
+  internally sound at D=1 -- but D=1 alone cannot distinguish this from
+  the FIVE previous passes' own D=1-exact-but-D>1-wrong attempts, since
+  D=1 makes every tail/resolvent trivially vanish regardless of whether
+  the underlying construction generalizes correctly.
+- At D=2 (TFIM, J=1, h=2.5, the same reproducer passes two/six used),
+  this minimal 6a/6b port alone is NOT Hermitian (~0.1-0.2 relative) and
+  the dispersion is wrong by O(1) -- the same failure signature every
+  prior pass hit. Adding pass six's own two extra diagrams (i) (an onsite
+  h1 tail: `cap_right(apply_op_ket(h1, A_L), phase*resolvent(seed))`,
+  i.e. exactly diagram 6a's own tail machinery with the mat_a/mat_b
+  pending-channel step dropped since h1 has none) and (ii) (the OTHER
+  reach-1 bond touching position 0: `cap_right(cap_left(Lvec_a,
+  apply_op_ket(mat_b, A_L)), phase*resolvent(seed))`, reusing
+  `vumps._precompute_bond_environments`'s own `Lvec_a` verbatim)
+  reproduces pass six's own qualitative finding exactly, now from an
+  independently-written implementation: (i) alone changes the dispersion
+  (real, nonzero effect) but WORSENS Hermiticity (~0.1 -> ~1-2); adding
+  (ii) on top narrows the dispersion error further (diff shrinks from
+  O(1) to ~0.1-0.4 across the Brillouin zone) but worsens Hermiticity
+  again (~1-2 -> ~2-3.5). Negating (i) alone, (ii) alone (holding the
+  other fixed), and both together (four sign combinations in total, a
+  strict superset of pass six's own "try (ii)'s negation" suggestion)
+  were all tried explicitly here -- none improves on the untouched
+  (i)+(ii), both positive, combination, and none comes close to
+  Hermitian. This is an independent confirmation (different code, same
+  physical conclusion) that (i) and (ii) are real, necessary corrections
+  -- not artifacts of pass six's own particular implementation -- but
+  that at least one more diagram (or a genuine error in how (i)/(ii)
+  interact with each other or with 6a/6b's own tail) remains missing,
+  ruling out "it's just a sign" as the explanation pass six's own next-
+  steps list had flagged as the cheapest thing to try first.
+- Net effect: no closer to a working D>1 ansatz than pass six, but two
+  concrete, reusable assets for whoever picks this up next: (1) the
+  position-explicit reproducer itself (enumerate ket_at(n) by hand with
+  raw Sx/Sy/Sz matrices, no automaton) is a fast, unambiguous way to get
+  the *exact* target value for any individual diagram's own n=+-1
+  contribution at D=1, and should be built out to D=2 (TFIM) next --
+  computationally harder (D=2 breaks the "everything is a scalar" shortcut
+  D=1 enjoys, needing a genuine small-D finite-window MPO contraction) but
+  the only way to pin down which of 6a/6b/(i)/(ii)/"something else" is
+  wrong AT D>1 specifically, rather than only checking self-consistency
+  (as this pass's abandoned GBL/GBR attempt shows can pass even when the
+  underlying construction is wrong) or the final dispersion/Hermiticity
+  (which identifies THAT something is wrong but, as six diagram-counting
+  passes now confirm, not efficiently WHICH diagram); (2) the E_L^R/E_R^L
+  notation key above (bra-subscript, ket-superscript), independently
+  re-derived and cross-checked against MPSKit's own source rather than
+  guessed from the paper's images alone, removes one previously-open
+  translation ambiguity for any future attempt at the paper's own full
+  Eq. (195)-(197) (this pass's own channel-resolved attempt shows that
+  formula's structural shape is NOT simply "correct diagrams, wrong
+  sign" -- something more fundamental about the GBR/rightward half's own
+  recursion was wrong, and remains unidentified).
+
 == Algorithm summary ==
 
 1. Group the unit cell into one supersite (A, W) -- plain NumPy arrays, W

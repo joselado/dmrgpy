@@ -29,11 +29,12 @@ iteration -- there is no separate reconstruction step left to get wrong. This
 module implements VUMPS as a ground-state solver in its own right (tested
 against exact/Bethe-ansatz references directly below); wiring its {AL,AR,C}
 output into a corrected mixed-gauge excitation ansatz was attempted in
-idmrg_excitations.py's own "sixth investigation pass" (see that module's
-docstring) -- real progress (two previously-missing diagrams found, the
-tangent-space metric's conditioning problem structurally resolved) but the
-resulting H_eff(p) is still not correct/Hermitian at D>1, so no such method
-is exposed from this module yet.
+idmrg_excitations.py's own "sixth" and "seventh investigation pass"es (see
+that module's docstring) -- real progress (two previously-missing diagrams
+found, the tangent-space metric's conditioning problem structurally
+resolved, D=1 reproduced exactly and Hermitian from an independent code
+path) but the resulting H_eff(p) is still not correct/Hermitian at D>1, so
+no such method is exposed from this module yet.
 
 A second, independent advantage over idmrg.py's growing algorithm: VUMPS
 solves directly at a fixed target bond dimension D in the thermodynamic

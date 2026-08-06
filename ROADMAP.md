@@ -147,7 +147,20 @@ model-specific exception:
    VUMPS ground state, found and fixed two previously-missing diagrams,
    and structurally resolved the tangent-space metric's conditioning
    problem — real progress, but the resulting H_eff(p) is still not
-   Hermitian at D>1, so this remains unimplemented/unexposed.
+   Hermitian at D>1, so this remains unimplemented/unexposed. A seventh
+   pass independently re-derived the same construction from the actual
+   published equations (arXiv:1810.07006 Eq. 176-198, cross-checked
+   against MPSKit.jl's source) and got D=1 exact-and-Hermitian from a
+   cleaner code path, plus confirmed the sixth pass's own two extra
+   diagrams are real and necessary (reproducing "improves accuracy,
+   worsens Hermiticity" independently) but still not sufficient — a
+   channel-resolved (MPSKit-style GBL/GBR) alternative construction was
+   also tried and abandoned after a from-scratch D=1 brute-force
+   reproducer (built this pass, dense Sx/Sy/Sz matrices, no automaton)
+   showed it was internally self-consistent but computing the wrong
+   quantity on its rightward half. D>1 still unimplemented; see the
+   module docstring's own "Net effect" for the two concrete assets left
+   for the next attempt.
 5. **iDMRG cat-state superpositions.** No backend supports summing two
    *physically distinct* symmetry-broken iDMRG ground states; needs new
    correlator machinery from scratch.
