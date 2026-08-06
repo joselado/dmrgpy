@@ -1,5 +1,10 @@
+# setuptools>=77 (not 61) is required because the [project] table below uses
+# PEP 639 licensing: `license` as a bare SPDX expression plus `license-files`.
+# setuptools only learned both in 77.0 -- with anything older, `license` is
+# parsed as the legacy free-text/table form and `license-files` is rejected
+# outright, so the build fails rather than silently mislabelling the license.
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,7 +15,12 @@ readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE.md"]
 authors = [{name = "Jose Lado", email = "jose.lado@aalto.fi"}]
-requires-python = ">=3.9"
+# 3.10, not 3.9: numba is a hard runtime dependency (see the comment above
+# [project.optional-dependencies]) and current numba declares Requires-Python
+# >=3.10. Claiming >=3.9 doesn't make dmrgpy work on 3.9 -- it just makes pip
+# backtrack to whatever ancient numba/numpy pair still supports it, which is
+# an untested combination. Fail the resolution honestly instead.
+requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "scipy",
@@ -22,6 +32,14 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Physics",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    # Deliberately NOT "Operating System :: OS Independent", even though
+    # everything shipped here is pure Python: sites.py::initialize() shells
+    # out to `mkdir -p` via subprocess, which has no Windows equivalent, so
+    # every chain construction would fail there.
     "Operating System :: POSIX",
     "Operating System :: MacOS",
 ]
@@ -38,7 +56,13 @@ Issues = "https://github.com/joselado/dmrgpy/issues"
 # -> kpmdmrg -> algebra.kpm -> algebra.kpmextrapolate, so it's a core
 # dependency in practice, not an optional one.)
 [project.optional-dependencies]
-julia = ["julia"]          # juliarun.py, mpsjulialive/juliasession.py (itensor_version="julia"/"julia_live")
+# juliacall, not the "julia" (PyJulia) distribution: the live Julia backend
+# was migrated from PyJulia to juliacall/PythonCall.jl (mpsjulialive/
+# juliasession.py imports juliacall at module level). The only remaining
+# `import julia` is juliarun.py, which belongs to the legacy subprocess
+# path that isn't reachable through the public API (see CLAUDE.md), so
+# PyJulia is deliberately not pulled in.
+julia = ["juliacall"]       # mpsjulialive/juliasession.py (itensor_version="julia_live")
 jax = ["jax"]               # pyitensor/kernels.py
 stats = ["statsmodels"]     # algebra/kpmextrapolate.py (function-local import)
 parallel = ["multiprocess", "dill"]  # parallel.py, algebra/parallel.py, parallelslurm.py
@@ -60,6 +84,11 @@ include = ["dmrgpy*"]
 exclude = ["dmrgpy.mpscpp2", "dmrgpy.mpscpp2.*", "dmrgpy.mpscpp3", "dmrgpy.mpscpp3.*"]
 
 [tool.setuptools.package-data]
-dmrgpy = ["mpsjulia/*.jl", "mpsjulia/compiler/*.jl"]
+# juliapkg.json is not documentation -- juliacall/juliapkg reads it at
+# import time to resolve and precompile the Julia side (ITensors,
+# ITensorMPS, ITensorNHDMRG) into its managed project. Without it in the
+# wheel, `pip install dmrgpy[julia]` installs a julia_live backend that
+# finds no ITensors.jl at all.
+dmrgpy = ["juliapkg.json", "mpsjulia/*.jl", "mpsjulia/compiler/*.jl"]
 "dmrgpy.mpsjulialive" = ["*.jl"]
 "dmrgpy.algebra" = ["fortran/algebra/*.f90"]

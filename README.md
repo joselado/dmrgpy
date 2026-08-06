@@ -19,7 +19,28 @@ This library is still under heavy development.
 
 # How to install #
 
-## Linux and Mac ##
+## With pip ##
+
+```bash
+pip install dmrgpy
+```
+
+This installs the pure-Python part of the library, which needs no compiler
+and no C++ toolchain. Both the exact-diagonalization backend and the
+pure-Python DMRG/TDVP backend work out of the box; select the latter with
+
+```python
+sc = spinchain.Spin_Chain(["S=1/2"]*n, itensor_version="python")
+```
+
+The compiled ITensor (C++) backends are deliberately *not* shipped on PyPI
+-- they are built against a large vendored copy of ITensor and are compiled
+in place from a clone of this repository, as described below. Optional
+extras are available for the non-default backends and tools:
+`pip install "dmrgpy[julia]"` (Julia/ITensors.jl backend), `[jax]`,
+`[stats]`, `[parallel]`, or `[full]` for all of them.
+
+## Linux and Mac (compiled C++ backend) ##
 
 Execute the script 
 
