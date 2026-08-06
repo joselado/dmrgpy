@@ -2116,6 +2116,59 @@ needed, prefer expressing the same physical model as an
 couplings) instead, and use the self-consistency check either way
 before trusting a result.
 
+\textbf{An alternative ground-state solver: VUMPS.}
+\texttt{ic.gs\_method = "vumps"} (default \texttt{"idmrg"},
+\texttt{itensor\_version="python"} only) switches \texttt{gs\_energy()}
+from the growing algorithm above to VUMPS (Variational Uniform Matrix
+Product States, Zauner-Stauber et al., arXiv:1701.07035; see
+\texttt{pyitensor/vumps.py}'s own module docstring for the algorithm)
+-- instead of growing a finite window and truncating it down to
+\texttt{maxm} at every step, VUMPS solves directly, in the
+thermodynamic limit, for the actual \texttt{maxm}-dimensional
+variational optimum (\texttt{ic.maxm} sets VUMPS's own target bond
+dimension $D$ here too):
+
+\begin{lstlisting}
+ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic.gs_method = "vumps"
+ic.maxm = 4        # VUMPS's own target bond dimension D
+ic.maxiter = 800   # VUMPS outer-iteration cap per bond dimension in its own D-ramp
+ic.vumps_nrestarts = 6   # independent random-restart attempts per bond dimension
+h = ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0] + ic.SzC[0]*ic.SzR[0]
+ic.set_hamiltonian(h)
+density = ic.gs_energy()
+\end{lstlisting}
+
+Like \texttt{itensor\_version=3}, \texttt{gs\_method="vumps"} supports
+\texttt{gs\_energy()} only -- \texttt{vev}/\texttt{correlator}/
+\texttt{excitation\_energies}/\texttt{excitation\_gap}/
+\texttt{local\_excitation\_gap} all raise \texttt{NotImplementedError}
+(VUMPS's own converged state is a grouped-supersite representation with
+no per-sublattice \texttt{U\_list}, see
+\texttt{pyitensor.vumps.VUMPSResult}'s own docstring).
+
+\textbf{A real, scoped reliability caveat.} \texttt{D=1} converges
+reliably and exactly for every exactly-solvable (product-state-like)
+model tried (a pure field, a fully-decoupled Heisenberg dimer). Already
+at \texttt{D>1}, though -- confirmed directly on the transverse-field
+Ising model, a simple gapped model with no special critical/symmetry
+complications -- independent calls at the same \texttt{D} can land on
+noticeably different converged energies (most within a percent or two
+of the exact answer, but occasionally further off), even with
+\texttt{vumps\_ground\_state}'s own built-in $D$-ramp, multi-restart,
+and variational-principle safety-net machinery (see
+\texttt{pyitensor/vumps.py}'s own ``Convergence robustness'' docstring
+section for the full, numerically-confirmed account). A caller needing
+a reliable \texttt{D>1} result should call \texttt{gs\_energy()} a few
+times independently (e.g.\ on freshly-constructed chains) and keep the
+lowest reported density, the same ``rerun and take the best''
+discipline \texttt{idmrg\_ground\_state}'s own unseeded-random-MPS
+initialization already recommends elsewhere in this section. See
+\texttt{examples/idmrg/vumps\_TFIM/main.py} for a worked example
+sweeping \texttt{D} and comparing VUMPS against both
+\texttt{gs\_method="idmrg"} and the transverse-field Ising model's own
+exact (free-fermion) energy density.
+
 Entanglement/entropy are not implemented for infinite chains yet.
 
 \textbf{Excited states: the tangent-space/quasiparticle excitation

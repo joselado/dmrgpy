@@ -301,6 +301,60 @@ own 0-based `h_intra`/`h_inter` site convention to the codebase's usual
 backend call already uses (no separate Jordan-Wigner transform, since
 iDMRG doesn't support fermionic terms yet on either backend).
 
+**A third `gs_energy` dispatch option: VUMPS.** `pyitensor/vumps.py`
+implements Variational Uniform Matrix Product States (Zauner-Stauber,
+Vanderstraeten, Fishman, Verstraete, Haegeman, arXiv:1701.07035) as a
+completely independent ground-state solver, reached via
+`self.gs_method="vumps"` (`itensor_version="python"` only — checked
+*before* the `itensor_version`/`gs_method` combination is dispatched in
+`gs_energy`, alongside the existing `itensor_version` check) rather than
+`pyitensor/idmrg.py`'s growing algorithm. Unlike that growing algorithm
+— which extends a finite window indefinitely and truncates it back down
+to `maxm` at every micro-step, so its own converged `U_list` is only an
+approximation to the true `maxm`-dimensional optimum — VUMPS solves
+directly, in the thermodynamic limit, for the mixed-gauge `{AL, AR, C}`
+fixed point at a FIXED target bond dimension (`self.maxm` doubles as
+VUMPS's own `D`). `vumps.py` reuses `idmrg.py`'s automaton builder
+(`_build_automaton`) and low-level transfer-matrix primitives
+(`_apply_transfer`/`_apply_transfer_from_left`/
+`_dominant_right_fixed_point`/`_dominant_left_fixed_point`/
+`_canonicalize_periodic`) and `idmrg_excitations.py`'s own dense-
+regularized-environment machinery (`_op_transfer_matrix`/`_cap_left`/
+`_cap_right`/`_apply_op_ket`/`_dense_linear_map`/`_pending_channels`/
+`_onsite_matrix`) rather than re-deriving any of that — the only
+genuinely new derivations are the one-sided (`GL` from `AL` alone, `GR`
+from `AR` alone) regularized-environment solves and the `H_AC`/`H_C`
+effective-Hamiltonian actions themselves (see `vumps.py`'s own module
+docstring for the full algorithm and diagram list). `self._vumps_result`
+(a `pyitensor.vumps.VUMPSResult`, distinct from `self._result`'s
+`IDMRGResult`) holds the converged state; since it is a grouped-supersite
+representation with no per-sublattice tensor list, `vev`/`correlator`/
+`excitation_energies`/`excitation_gap`/`local_excitation_gap` all remain
+`gs_method="idmrg"`-only, mirroring the precedent `itensor_version=3`
+already sets for the same methods.
+
+**A confirmed, documented convergence-robustness gap, not fully closed.**
+Plain single-attempt VUMPS from a random initial tensor was confirmed
+directly, during development, to reliably land on self-consistent
+(gauge-mismatch-converged) fixed points at an energy *worse* than the
+same model's own smaller-`D` result — impossible for the true variational
+optimum, so a genuine failure to find it, not merely slow convergence.
+`vumps_ground_state` mitigates this with (1) a `D`-ramp (warm-start each
+bond dimension from the previous, smaller one's own best solution,
+`_grow_initial_state`) plus multiple restarts at every step, and (2) an
+explicit variational-principle safety net that spends a bounded extra
+attempt budget, warm-started from the same known-good smaller-`D`
+solution, whenever a given `D`'s own search still lands worse than that
+reference. Both measurably help (eliminating the worst, qualitatively
+wrong failures observed with (1) alone, e.g. a `D=4` transverse-field
+Ising run landing at a *positive* energy) but do not fully close the gap:
+repeated calls on the same simple, gapped model at `D=4` were still
+confirmed to occasionally (roughly 1 in 10 calls) land noticeably further
+from the exact answer than the typical run. See `pyitensor/vumps.py`'s
+own "Convergence robustness" module-docstring section for the full,
+numerically-confirmed account, and `docs/user_guide.md`'s own iDMRG
+section for the user-facing version of this caveat.
+
 The Hamiltonian is built from `SxL[i]`/`SxC[i]`/`SxR[i]`-suffixed
 operators (previous/central/next unit cell, `i=0..n_uc-1`) rather than
 absolute site indices; `_canonicalize_hamiltonian` validates every term

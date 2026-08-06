@@ -388,6 +388,69 @@ site convention to the codebase's usual 1-based one via the same
 already uses (no separate Jordan-Wigner transform, since iDMRG doesn't
 support fermionic terms yet on either backend).
 
+\textbf{A third \texttt{gs\_energy} dispatch option: VUMPS.}
+\texttt{pyitensor/vumps.py} implements Variational Uniform Matrix
+Product States (Zauner-Stauber, Vanderstraeten, Fishman, Verstraete,
+Haegeman, arXiv:1701.07035) as a completely independent ground-state
+solver, reached via \texttt{self.gs\_method="vumps"}
+(\texttt{itensor\_version="python"} only -- checked \emph{before} the
+\texttt{itensor\_version}/\texttt{gs\_method} combination is dispatched
+in \texttt{gs\_energy}, alongside the existing \texttt{itensor\_version}
+check) rather than \texttt{pyitensor/idmrg.py}'s growing algorithm.
+Unlike that growing algorithm -- which extends a finite window
+indefinitely and truncates it back down to \texttt{maxm} at every
+micro-step, so its own converged \texttt{U\_list} is only an
+approximation to the true \texttt{maxm}-dimensional optimum -- VUMPS
+solves directly, in the thermodynamic limit, for the mixed-gauge
+\texttt{\{AL, AR, C\}} fixed point at a FIXED target bond dimension
+(\texttt{self.maxm} doubles as VUMPS's own $D$). \texttt{vumps.py}
+reuses \texttt{idmrg.py}'s automaton builder (\texttt{\_build\_automaton})
+and low-level transfer-matrix primitives
+(\texttt{\_apply\_transfer}/\texttt{\_apply\_transfer\_from\_left}/
+\texttt{\_dominant\_right\_fixed\_point}/\texttt{\_dominant\_left\_fixed\_point}/
+\texttt{\_canonicalize\_periodic}) and \texttt{idmrg\_excitations.py}'s
+own dense-regularized-environment machinery
+(\texttt{\_op\_transfer\_matrix}/\texttt{\_cap\_left}/\texttt{\_cap\_right}/
+\texttt{\_apply\_op\_ket}/\texttt{\_dense\_linear\_map}/
+\texttt{\_pending\_channels}/\texttt{\_onsite\_matrix}) rather than
+re-deriving any of that -- the only genuinely new derivations are the
+one-sided (\texttt{GL} from \texttt{AL} alone, \texttt{GR} from
+\texttt{AR} alone) regularized-environment solves and the
+\texttt{H\_AC}/\texttt{H\_C} effective-Hamiltonian actions themselves
+(see \texttt{vumps.py}'s own module docstring for the full algorithm and
+diagram list). \texttt{self.\_vumps\_result} (a
+\texttt{pyitensor.vumps.VUMPSResult}, distinct from \texttt{self.\_result}'s
+\texttt{IDMRGResult}) holds the converged state; since it is a
+grouped-supersite representation with no per-sublattice tensor list,
+\texttt{vev}/\texttt{correlator}/\texttt{excitation\_energies}/
+\texttt{excitation\_gap}/\texttt{local\_excitation\_gap} all remain
+\texttt{gs\_method="idmrg"}-only, mirroring the precedent
+\texttt{itensor\_version=3} already sets for the same methods.
+
+\textbf{A confirmed, documented convergence-robustness gap, not fully
+closed.} Plain single-attempt VUMPS from a random initial tensor was
+confirmed directly, during development, to reliably land on
+self-consistent (gauge-mismatch-converged) fixed points at an energy
+\emph{worse} than the same model's own smaller-$D$ result -- impossible
+for the true variational optimum, so a genuine failure to find it, not
+merely slow convergence. \texttt{vumps\_ground\_state} mitigates this
+with (1) a $D$-ramp (warm-start each bond dimension from the previous,
+smaller one's own best solution, \texttt{\_grow\_initial\_state}) plus
+multiple restarts at every step, and (2) an explicit
+variational-principle safety net that spends a bounded extra attempt
+budget, warm-started from the same known-good smaller-$D$ solution,
+whenever a given $D$'s own search still lands worse than that
+reference. Both measurably help (eliminating the worst, qualitatively
+wrong failures observed with (1) alone, e.g.\ a $D=4$ transverse-field
+Ising run landing at a \emph{positive} energy) but do not fully close
+the gap: repeated calls on the same simple, gapped model at $D=4$ were
+still confirmed to occasionally (roughly 1 in 10 calls) land noticeably
+further from the exact answer than the typical run. See
+\texttt{pyitensor/vumps.py}'s own ``Convergence robustness''
+module-docstring section for the full, numerically-confirmed account,
+and \texttt{docs/user\_guide.tex}'s own iDMRG section for the
+user-facing version of this caveat.
+
 The Hamiltonian is built from
 \texttt{SxL[i]}/\texttt{SxC[i]}/\texttt{SxR[i]}-suffixed operators
 (previous/central/next unit cell, \texttt{i=0..n\_uc-1}) rather than

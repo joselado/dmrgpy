@@ -164,7 +164,17 @@ class Infinite_Many_Body_Chain:
     require `itensor_version="python"` regardless of what backend
     `gs_energy` itself was run with. `itensor_version=2` and
     `"julia_live"`/`"julia"` have no iDMRG port at all and raise
-    `NotImplementedError`."""
+    `NotImplementedError`.
+
+    `self.gs_method` (`itensor_version="python"` only): `"idmrg"` (default,
+    `pyitensor/idmrg.py`'s growing/infinite-size algorithm) or `"vumps"`
+    (`pyitensor/vumps.py`'s direct fixed-bond-dimension solver -- see its
+    own module docstring for the algorithm and how it differs). Like
+    `itensor_version=3`, `gs_method="vumps"` supports `gs_energy` only;
+    `vev`/`correlator`/`excitation_energies`/`excitation_gap`/
+    `local_excitation_gap` all require `gs_method="idmrg"` (VUMPS's own
+    result has no per-sublattice representation those need -- see
+    `pyitensor.vumps.VUMPSResult`'s own docstring)."""
 
     def __init__(self, site_types, itensor_version="python"):
         if itensor_version not in ("python", 3):
@@ -194,10 +204,33 @@ class Infinite_Many_Body_Chain:
                 "patch -- flagged as a known follow-up rather than "
                 "attempted here.".format(self.n_uc))
 
+        self.gs_method = "idmrg"  # itensor_version="python" only: "idmrg"
+                                  # (pyitensor.idmrg's growing/infinite-size
+                                  # algorithm, the default) or "vumps"
+                                  # (pyitensor.vumps's direct fixed-bond-
+                                  # dimension solver) -- see gs_energy's own
+                                  # comment. Mirrors manybodychain.py's
+                                  # Many_Body_Chain.tevol_method pattern
+                                  # (a plain attribute picking between two
+                                  # algorithms for the same public method).
         self.maxm = 30          # wavefunction bond dimension cap
         self.cutoff = 1e-12     # SVD truncation
-        self.maxiter = 200      # iDMRG macro-iterations (growth steps)
-        self.etol = 1e-10       # energy-density convergence tolerance
+        self.maxiter = 200      # iDMRG macro-iterations (growth steps);
+                                 # gs_method="vumps": VUMPS outer-iteration
+                                 # cap per bond dimension in its own D-ramp
+                                 # (pyitensor.vumps.vumps_ground_state's own
+                                 # `maxiter`)
+        self.etol = 1e-10       # energy-density convergence tolerance;
+                                 # gs_method="vumps": VUMPS's own
+                                 # gauge-mismatch convergence tolerance
+                                 # (`tol`)
+        self.vumps_nrestarts = 4  # gs_method="vumps" only: independent
+                                   # random-restart attempts per bond
+                                   # dimension in VUMPS's own D-ramp -- see
+                                   # pyitensor.vumps.vumps_ground_state's
+                                   # own docstring for why this matters
+                                   # (single-attempt VUMPS from a random
+                                   # start is not reliable for D>1)
         self.niter = 30         # itensor_version="python": per-micro-step
                                  # Lanczos iteration count -- note
                                  # idmrg.py's _local_two_site_solve always
@@ -220,9 +253,12 @@ class Infinite_Many_Body_Chain:
         self._h_intra = None
         self._h_inter = None
         self._result = None      # pyitensor.idmrg.IDMRGResult once converged
-                                  # (itensor_version="python" only -- the v3
-                                  # backend has no correlator machinery, see
-                                  # gs_energy/vev/correlator)
+                                  # (itensor_version="python", gs_method=
+                                  # "idmrg" only -- the v3 backend and
+                                  # gs_method="vumps" have no correlator
+                                  # machinery, see gs_energy/vev/correlator)
+        self._vumps_result = None  # pyitensor.vumps.VUMPSResult once
+                                    # converged (gs_method="vumps" only)
         self.e0 = None           # converged ground-state energy per site
         self.converged = None
         self._excitation_env = None  # pyitensor.idmrg_excitations.
@@ -284,38 +320,65 @@ class Infinite_Many_Body_Chain:
         self._h_intra, self._h_inter = _canonicalize_hamiltonian(h, self.n_uc)
         self.hamiltonian = h
         self._result = None
+        self._vumps_result = None
         self.e0 = None
         self.converged = None
         self._excitation_env = None
         self._session3 = None
 
     def gs_energy(self):
-        """Run iDMRG to convergence (or self.maxiter macro-iterations) and
-        return the ground-state energy *per site* -- the physically
-        meaningful observable for an infinite system (a total energy would
-        be unboundedly large).
+        """Run the ground-state solver (self.maxiter iterations/macro-
+        iterations at most) and return the ground-state energy *per site*
+        -- the physically meaningful observable for an infinite system (a
+        total energy would be unboundedly large).
 
-        itensor_version="python" runs pyitensor/idmrg.py's own growing
+        itensor_version="python" dispatches on `self.gs_method`:
+        "idmrg" (the default) runs pyitensor/idmrg.py's own growing
         algorithm and keeps the resulting IDMRGResult in self._result for
-        vev/correlator to reuse (see those methods). itensor_version=3
-        instead calls the compiled mpscpp3 backend's
-        Chain::idmrg_ground_state directly (energy density only -- no
-        correlator support there yet, see this module's own docstring),
-        so self._result is left None on that path; vev/correlator raise
-        NotImplementedError rather than silently misusing a stale/absent
-        result."""
+        vev/correlator to reuse (see those methods); "vumps" instead runs
+        pyitensor/vumps.py's direct fixed-bond-dimension solver (see its
+        own module docstring for how it differs -- in particular, its
+        `.converged` diagnostic and general robustness at larger D are
+        both less battle-tested than idmrg_ground_state's), keeping the
+        resulting VUMPSResult in self._vumps_result; since that result has
+        no per-sublattice U_list (only a grouped-supersite representation,
+        see VUMPSResult's own docstring), vev/correlator raise
+        NotImplementedError for gs_method="vumps", mirroring the precedent
+        itensor_version=3 already sets below. itensor_version=3 instead
+        calls the compiled mpscpp3 backend's Chain::idmrg_ground_state
+        directly (energy density only -- no correlator support there yet,
+        see this module's own docstring, and no gs_method dispatch: VUMPS
+        is a "python"-engine-only feature), so self._result is left None
+        on that path; vev/correlator raise NotImplementedError rather than
+        silently misusing a stale/absent result."""
         if self._h_intra is None:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.gs_energy called before set_hamiltonian")
         self._excitation_env = None  # about to rebuild self._result; see __init__'s own comment
-        if self.itensor_version == "python":
+        if self.itensor_version == "python" and self.gs_method == "idmrg":
             from .pyitensor import idmrg
             self._result = idmrg.idmrg_ground_state(
                 self.site_types, self._h_intra.op, self._h_inter.op, self.n_uc,
                 maxm=self.maxm, cutoff=self.cutoff, maxiter=self.maxiter,
                 etol=self.etol, niter=self.niter, verbose=self.verbose)
+            self._vumps_result = None
             self.e0 = self._result.e0
             self.converged = self._result.converged
+        elif self.itensor_version == "python" and self.gs_method == "vumps":
+            from .pyitensor import vumps
+            self._vumps_result = vumps.vumps_ground_state(
+                self.site_types, self._h_intra.op, self._h_inter.op, self.n_uc,
+                D=self.maxm, tol=self.etol, maxiter=self.maxiter,
+                niter_lanczos=self.niter, nrestarts=self.vumps_nrestarts,
+                verbose=self.verbose)
+            self._result = None
+            self.e0 = self._vumps_result.e0
+            self.converged = self._vumps_result.converged
+        elif self.itensor_version == "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.gs_energy: gs_method={!r} is not "
+                "implemented -- only \"idmrg\" and \"vumps\" are supported "
+                "for itensor_version=\"python\"".format(self.gs_method))
         else:  # itensor_version == 3
             from . import cppext
             backend = cppext.get_backend(3)
@@ -334,6 +397,7 @@ class Infinite_Many_Body_Chain:
                 self.maxiter, self.etol, self.niter, self.restarts)
             self._session3 = chain  # kept alive for td_dynamical_correlator -- see __init__'s own comment
             self._result = None
+            self._vumps_result = None
             self.e0 = density
             self.converged = converged
         return self.e0
@@ -344,16 +408,19 @@ class Infinite_Many_Body_Chain:
         is accepted purely so callers can write whichever reads most
         naturally (SxL/SxC/SxR all describe the same infinite chain).
 
-        Only supported for itensor_version="python" -- the ITensor v3 C++
-        backend has no static-correlator machinery yet (see gs_energy's
-        own comment)."""
-        if self.itensor_version != "python":
+        Only supported for itensor_version="python", gs_method="idmrg" --
+        the ITensor v3 C++ backend has no static-correlator machinery yet
+        (see gs_energy's own comment), and neither does gs_method="vumps"
+        (its VUMPSResult has no per-sublattice U_list, only a grouped-
+        supersite representation -- see pyitensor.vumps.VUMPSResult's own
+        docstring)."""
+        if self.itensor_version != "python" or self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.vev: only itensor_version="
-                "\"python\" supports static correlators -- run a separate "
-                "itensor_version=\"python\" chain for vev/correlator, or "
-                "reuse pyitensor.idmrg's correlator functions directly "
-                "against a \"python\"-backend IDMRGResult")
+                "\"python\" with gs_method=\"idmrg\" supports static "
+                "correlators -- run a separate such chain for vev/"
+                "correlator, or reuse pyitensor.idmrg's correlator "
+                "functions directly against a \"python\"-backend IDMRGResult")
         if group not in ("L", "C", "R"):
             raise ValueError("vev: group must be 'L', 'C' or 'R', got {!r}".format(group))
         if not (0 <= p < self.n_uc):
@@ -369,15 +436,15 @@ class Infinite_Many_Body_Chain:
         physical sites (r>=0) -- see pyitensor.idmrg.two_point_correlator
         for the r=0 (same-site) convention.
 
-        Only supported for itensor_version="python" -- see vev's own
-        comment."""
-        if self.itensor_version != "python":
+        Only supported for itensor_version="python" with gs_method="idmrg"
+        -- see vev's own comment."""
+        if self.itensor_version != "python" or self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.correlator: only itensor_version="
-                "\"python\" supports static correlators -- run a separate "
-                "itensor_version=\"python\" chain for vev/correlator, or "
-                "reuse pyitensor.idmrg's correlator functions directly "
-                "against a \"python\"-backend IDMRGResult")
+                "\"python\" with gs_method=\"idmrg\" supports static "
+                "correlators -- run a separate such chain for vev/"
+                "correlator, or reuse pyitensor.idmrg's correlator "
+                "functions directly against a \"python\"-backend IDMRGResult")
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))
@@ -393,11 +460,12 @@ class Infinite_Many_Body_Chain:
         cached on self._excitation_env across repeated excitation_energies/
         excitation_gap calls (e.g. a k-scan), and invalidated whenever
         set_hamiltonian/gs_energy reruns (see __init__'s own comment)."""
-        if self.itensor_version != "python":
+        if self.itensor_version != "python" or self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.excitation_energies/excitation_gap: "
-                "only itensor_version=\"python\" is supported -- see "
-                "pyitensor.idmrg_excitations' own module docstring")
+                "only itensor_version=\"python\" with gs_method=\"idmrg\" is "
+                "supported -- see pyitensor.idmrg_excitations' own module "
+                "docstring")
         if self._result is None:
             self.gs_energy()
         if self._excitation_env is None:
@@ -473,13 +541,14 @@ class Infinite_Many_Body_Chain:
         why n_uc=2 needs sublattice-position bookkeeping not implemented
         yet).
 
-        Only supported for itensor_version="python" -- see vev's own
-        comment."""
-        if self.itensor_version != "python":
+        Only supported for itensor_version="python" with gs_method="idmrg"
+        -- see vev's own comment."""
+        if self.itensor_version != "python" or self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.local_excitation_gap: only "
-                "itensor_version=\"python\" is supported -- see "
-                "pyitensor.idmrg.local_excitation_gap's own docstring")
+                "itensor_version=\"python\" with gs_method=\"idmrg\" is "
+                "supported -- see pyitensor.idmrg.local_excitation_gap's "
+                "own docstring")
         if self._result is None:
             self.gs_energy()
         from .pyitensor import idmrg

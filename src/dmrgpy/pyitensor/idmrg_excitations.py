@@ -234,6 +234,185 @@ is not yet, and is the sharper suspect going forward.
   content is large and the near-degeneracy in `r` complicates things
   further.
 
+A fourth investigation pass consulted the standard tangent-space excitation
+literature directly (Haegeman, Pirvu, Weir, Cirac, Osborne, Verschelde,
+Verstraete, "Variational matrix product ansatz for dispersion relations",
+arXiv:1103.2286 -- the original single-tensor/"uniform gauge" derivation,
+matching this module's own single-A construction; and Vanderstraeten,
+Haegeman, Verstraete, "Tangent-space methods for uniform matrix product
+states", arXiv:1810.07006, whose Sec. 6.3/Eq. (193)-(197) spell out the
+mixed-gauge {A_L,A_R,C} version of the same construction with fully
+explicit diagrams) to check `_h_eff_action`'s own diagram list against the
+literature's. This found one genuine, provable gap -- now fixed -- but it
+turned out to be insufficient to explain the D>1 anomaly on its own.
+
+- Both references' full H_eff(k)/H_eff(p) formulas contain terms with a
+  nested pseudo-inverse/geometric-series structure ((1-e^{ip}E)^{-1}
+  sandwiched between two other environments -- Haegeman 2012's terms
+  involving `(1-e^{+-ik}E)^{-1}`; the review's `L1`/`R1`, Eq. (186)/(187)
+  and Eq. (195)/(196)) that this module's old diagrams 6a/6b did *not*
+  have -- they were single terms (unit-cell separation exactly +-1), not a
+  resummed sum over all separations n=+-1,+-2,....
+- Re-deriving this module's own diagram 6a from scratch (in its own
+  (ket,bra)/M[i,o] conventions, not by force-translating the mixed-gauge
+  formula) confirms this gap is real: for ket-B at cell n>=2 (bond at
+  cell (0,1), mat_a at 0 contributing to the output, mat_b at 1 applied to
+  a *plain* A since B is further out), positions 2..n-1 carry the plain
+  transfer map T_A with no operator at all -- a genuine geometric series
+  in n, resummed via `_right_momentum_resolvent`'s (I - e^{ik}T_A)^{-1}
+  (the same r-outer-l pseudo-inverse regularization `_regularized_
+  environments` already uses at k=0, needed since T_A's own dominant
+  eigenvalue 1 sits exactly at k=0). The fix (implemented, see
+  `_h_eff_action`'s own "Diagram 6a's |n|>=2 tail" section) was verified
+  two ways: (i) the closed-form resolvent solve reproduces an explicit
+  truncated sum over n up to 400 to ~1e-17; (ii) it is the identity for
+  D=1 (confirmed both numerically and by hand -- the tail's own "seed" is
+  provably zero there, see the derivation in `_h_eff_action`), so every
+  existing D=1 test (exact to ~1e-8-1e-14) is completely unaffected.
+- Diagram 6b's own analogous tail (ket-B at cell n<=-2) was *also*
+  re-derived from scratch and found to vanish identically for every D, not
+  just D=1 -- its own "seed" contracts the exact (l,L)-pair-with-identity
+  combination the left-gauge condition already forces to zero (see
+  `_h_eff_action`'s docstring) -- so no analogous correction was needed or
+  added there.
+- However, this fix, despite being independently verified as internally
+  consistent and mathematically real, does *not* resolve the D>1 anomaly:
+  a controlled before/after comparison on the *same* converged n_uc=2
+  dimerized-Heisenberg ground state (D=4, J_weak=0.02, the same reproducer
+  as the third pass) shows the fix changes the lowest three (near-
+  degenerate, S=1-triplet-like) eigenvalues by only ~1e-5 across the full
+  Brillouin zone, versus the ~1e-2 (J_weak/2) amplitude the first-order
+  degenerate-perturbation-theory formula predicts -- i.e. it adds real,
+  nonzero, previously-entirely-missing k-dependence, but at 2-3 orders of
+  magnitude too small a scale to be the (sole) explanation. Repeated at
+  J_weak=0.1/0.3/0.5 (where D grows to 7/16/19 -- these larger-J_weak runs
+  were not pushed to tight maxm/etol convergence, so are only a rough
+  cross-check): the same qualitative pattern holds -- weak but nonzero,
+  monotonically-increasing-from-k=0-to-k=pi k-dependence (the *correct*
+  qualitative shape/sign of -cos(k)), but suppressed by roughly two orders
+  of magnitude versus the naive J_weak-scale expectation.
+- Net effect on the overall investigation: diagram 6a's resummation was a
+  real, independent bug (now fixed, and left in -- it is strictly more
+  correct than before and provably inert at D=1), but it is not *the*
+  D>1 bug, or at least not the only one. Given that even the literature's
+  own richer mixed-gauge H_eff(p) (Eq. 197) has roughly twice as many
+  distinct diagram *types* as this module's 7 (onsite/1, diagrams 2/3,
+  Lh/Rh/4/5, and 6a/6b) -- including combinations like `L1`/`R1` fed
+  *into* a further `h`-touching term, which this module's single-A
+  reformulation has no obvious analogue for -- the most promising
+  remaining path is no longer "patch one more diagram in the existing
+  single-tensor (uniform-gauge) derivation", which has now had two
+  independently-confirmed real bugs fixed without closing the gap, but a
+  from-scratch port to the mixed-gauge {A_L,A_R,C} formalism Sec. 6 of
+  arXiv:1810.07006 actually uses (A_L to the left of B, A_R to the right,
+  built from this module's own already-computed `A`/`r` via `C =
+  cholesky(r)` or an eigendecomposition-based square root, A_R = C^-1 A_L
+  C -- see the review's Algorithm 2/Eq. 15) and its Eq. (193)-(197)
+  H_eff(p) verbatim -- a materially larger rewrite than any single-diagram
+  patch tried so far, but one that reuses a fully worked-out, already-
+  published diagram list end to end instead of re-deriving pieces of it by
+  hand one investigation pass at a time.
+
+A fifth investigation pass started exactly that mixed-gauge port -- and,
+before writing any of this module's own code, cross-checked the review's
+Eq. (193)-(197) directly against MPSKit.jl (github.com/QuantumKitHub/
+MPSKit.jl, src/algorithms/excitation/{quasiparticleexcitation,exci_
+transfer_system}.jl and src/environments/qp_envs.jl), the reference
+open-source implementation by the same authors, since transcribing the
+review's own tensor-network *diagrams* (image-only, no equation source
+available) by eye had already once produced a plausible-looking but
+ultimately unverifiable result (see the fourth pass). This paid off
+immediately: MPSKit's own code confirmed the mixed-gauge H_eff, expressed
+against a finite-state-automaton MPO (exactly this module's own W, S/F/
+pending-channel structure -- not a raw dense two-site h), reduces (for a
+single-site unit cell, matching this module's own already-grouped
+supersite) to just 3 physical terms -- "B in center" (h touching B
+directly, closed by the *full* automaton-channel-resolved left/right
+environments GL/GR), "B to the left"/"B to the right" (h touching an
+*adjacent* site, closed by a separately precomputed, resummed "B-
+environment" GBL/GBR) -- plus an energy-density shift. This is a much more
+tractable, unambiguous starting point than hand-parsing Eq. (197)'s own
+12-term diagram list.
+
+- Translating GL/GR/GBL/GBR into this module's own automaton channels
+  confirmed the *structure* of the third pass's strongest suspicion
+  exactly: `GL` (built from A_L, closed against A_L's own dominant right
+  fixed point `r`) is genuinely different in kind from `GR` (must be built
+  from A_R -- the *right*-canonical gauge tensor, C^-1 A_L C for
+  C C^dagger = r -- closed against A_R's own dominant right fixed point,
+  which is the *identity*, not `r`). This module's existing `Rh` (and the
+  right-side closures inside diagrams 1/2/4) instead reuse A_L and `r`
+  throughout (the *uniform*-gauge convention, internally consistent on its
+  own terms -- see Haegeman 2012 and the "Algorithm summary" below, this
+  is not a bug in that formulation) -- but is a *materially different*
+  quantity from the mixed-gauge `Rh` a from-scratch port needs.
+- This distinction is invisible at D=1 for a clean, checkable reason:
+  `_dominant_right_fixed_point` normalizes `r` to trace 1 always (see its
+  own docstring), and for D=1 a trace-1 1x1 matrix *is* the identity
+  ([1]) -- so "close with r" and "close with the identity" are the exact
+  same number whenever D=1, regardless of which formulation's closure
+  convention is "correct" there. For D>1 they are provably different (e.g.
+  `r`'s own diagonal in the J_weak=0.02 dimer reproducer is
+  [0.9998,6e-6,6e-6,6e-6], nothing like the identity's [1,1,1,1] diagonal)
+  -- confirmed directly: building the mixed-gauge A_R/C machinery (via an
+  eigendecomposition square root of `r`) and verifying, to ~1e-15, that
+  (i) A_R is genuinely right-canonical (sum_s A_R^s (A_R^s)^dagger = I),
+  (ii) A_L C = C A_R holds, (iii) the *mixed* (A_L-ket, A_R-bra) transfer
+  map's own dominant right fixed point is exactly C, and (iv) rebuilding
+  `Rh` from A_R (closed against the identity instead of `r`, with the
+  matching C^dagger-C-based projector regularization) changes its norm by
+  five orders of magnitude (~2e-5 to ~1.7) relative to the existing A_L/r
+  based one at J_weak=0.02, D=4 -- which is *exactly* the "Lh and Rh come
+  out wildly asymmetric in norm (~1.7 vs ~2e-5)" clue the second
+  investigation pass already flagged as suspicious but did not explain.
+  This is a genuine, verified, quantitatively-confirmed finding, not
+  speculation.
+- However, a first full attempt at porting every diagram to this
+  mixed-gauge convention (Lh via A_L/r unchanged; Rh via A_R/identity;
+  diagrams 2/6a's right-side closures switched from A_L/r to A_R/identity;
+  diagrams 3/6b symmetrically re-examined for which positions fall in the
+  A_L-region vs the A_R-region relative to a *movable* excitation --
+  concretely: for diagram 6b with the ket's B at cell n<=-2, the site
+  between B and the output position 0 is *not* pure A_L-A_L as the fourth
+  pass's tail derivation assumed, since positions right of B's own cell
+  but left of 0 are a genuinely *mixed* (A_R-ket, A_L-bra) transfer segment
+  -- so the fourth pass's "diagram 6b's tail is exactly zero" conclusion
+  does not carry over unmodified to the mixed-gauge setting and was
+  reworked using a second mixed fixed point, the (A_R-ket,A_L-bra)
+  transfer's own dominant right fixed point, which the same C-based
+  derivation shows equals C^dagger) did *not* reproduce the expected
+  dispersion either -- the resulting H_eff(k) is not even Hermitian to
+  better than ~1e-5 (versus ~1e-13 for this module's existing, shipped
+  uniform-gauge diagrams), a clear, concrete sign that at least one more
+  sign/conjugate/gauge-region error remains in the diagram 2/3/6a/6b
+  mixed-gauge translation attempted here -- most likely in exactly the
+  kind of place the fourth pass's own tail derivation shows is easy to get
+  wrong (which of A_L/A_R/B sits at which position, for a diagram whose
+  "far" position moves with n). This attempt was intentionally *not*
+  merged into this module -- it is a strictly different (not strictly
+  better) partial implementation than what is shipped, and merging an
+  unverified, non-Hermitian H_eff would be worse than the current,
+  honestly-scoped D>1 restriction.
+- Net effect: the mixed-gauge Rh/A_R finding above is solid and worth
+  reusing directly (it independently explains a specific, previously
+  unexplained clue), but a *complete, correct* mixed-gauge H_eff still
+  needs the same diagram-by-diagram individual validation (each diagram
+  checked against a from-scratch finite-ring tensor-network contraction,
+  the way the very first investigation pass validated this module's
+  original uniform-gauge diagrams one at a time) rather than a single
+  end-to-end dispersion comparison, which only tells you *that* something
+  is still wrong, not *which* diagram. Concrete next step for whoever
+  picks this up: build the same from-scratch finite-ring cross-check this
+  module's own diagrams 1-6b were originally validated against (see this
+  module's own git history / the design-plan references in the first
+  investigation pass), but with A_L/A_R/C substituted in throughout, and
+  check diagrams 2, 3, 6a, 6b one at a time (in that order -- 2 and 6a are
+  the most-modified since they now use A_R/identity instead of A_L/r; 3
+  and 6b are the most likely to have a subtle A_L-vs-A_R region error
+  given diagram 6b's tail already needed correcting once above) rather
+  than only checking the final assembled H_eff(k)'s Hermiticity/dispersion
+  as this pass did.
+
 == Algorithm summary ==
 
 1. Group the unit cell into one supersite (A, W) -- plain NumPy arrays, W
@@ -250,12 +429,15 @@ is not yet, and is the sharper suspect going forward.
    energy density subtracted off so the sum is finite") -- solved as dense
    (D^2,D^2) linear systems, see `_regularized_environments`.
 5. The momentum-dependent effective Hamiltonian H_eff(k)[X] -- built from a
-   FINITE list of diagrams (no infinite geometric/momentum sum is actually
-   needed here: the gauge condition V_L^dagger @ A = 0 makes every diagram
-   where the ket differs from the bra by more than one adjacent unit cell
-   vanish identically, since this module's Hamiltonians only have reach-1
-   bonds -- see `_h_eff_action`'s own comment for the diagram list and the
-   derivation of why only n_uc-separations 0 and +-1 ever contribute).
+   finite list of diagram *types* (see `_h_eff_action`'s own docstring),
+   most of which genuinely only connect unit-cell separations 0 and +-1
+   directly (the gauge condition V_L^dagger @ A = 0 kills anything
+   further, given this module's Hamiltonians only have reach-1 bonds) --
+   except diagram 6a, whose own tail (separations n>=2) is a genuine
+   geometric series, resummed via `_right_momentum_resolvent`'s
+   (I - e^{ik}T_A)^{-1} pseudo-inverse (diagram 6b's analogous tail
+   vanishes identically instead, see `_h_eff_action`'s own docstring for
+   why the two sides differ).
 6. Generalized eigenproblem H_eff(k)[X] = E(k)*(X @ r) -- solved as a dense
    generalized eigenproblem at the (small) scale D*(d_g-1) x D.
 
@@ -707,7 +889,48 @@ def build_excitation_environment(result, h_intra_op, h_inter_op, n_uc, site_type
     return ExcitationEnvironment(A, W, D, d_g, V_L, l, r, Lh, Rh, e_cell)
 
 
-def _h_eff_action(k, X, env):
+def _right_momentum_resolvent(k, env):
+    """Solve operator for (I - e^{ik} T_A)[Y] = source, T_A[X] =
+    idmrg._apply_transfer(E_id, X) -- the geometric-series resummation
+    diagram 6a's "tail" (unit-cell separations |n|>=2, see `_h_eff_action`'s
+    own docstring for the derivation of why this tail is generically
+    nonzero for D>1) requires. Built once per k (not once per B/X, since
+    the operator itself is k-dependent but B-independent) and reused across
+    every basis vector `_build_H_eff_dense` feeds through `_h_eff_action`.
+
+    At k=0 exactly, T_A's dominant eigenvalue 1 (along r) makes (I-T_A)
+    singular, so this adds the same r-outer-l projector regularization
+    `_regularized_environments`'s own `right_action` uses -- valid here
+    too since the actual source fed in (see `_h_eff_action`'s diagram 6a)
+    is guaranteed traceless against l by the very same left-gauge identity
+    that makes diagram 6b's analogous tail vanish outright (see below) --
+    confirmed directly: trace(l @ apply_transfer(op_transfer_matrix(B,A,
+    None), r)) collapses to trace(r-weighted) of a quantity that is
+    identically zero for *every* (row,col) entry by construction of
+    `_null_space_left` (V_L^dagger @ A_mat = 0 kills the plain trace of
+    _op_transfer_matrix(B,A,None) over its own (l,L) pair, for any closure
+    on its (r,R) pair -- including the r-weighted one used here)."""
+    D = env.D
+    A, r, l = env.A, env.r, env.l
+    E_id = _op_transfer_matrix(A, A, None)
+    phase = np.exp(1j * k)
+    at_zero = abs(phase - 1.0) < 1e-10
+
+    def action(X):
+        out = X - phase * idmrg._apply_transfer(E_id, X)
+        if at_zero:
+            out = out + r * np.trace(l @ X)
+        return out
+
+    Mat = _dense_linear_map(D, action)
+
+    def solve(source):
+        return np.linalg.solve(Mat, source.reshape(-1)).reshape(D, D)
+
+    return solve
+
+
+def _h_eff_action(k, X, env, resolvent):
     """H_eff(k)[X] -- the momentum-dependent effective Hamiltonian acting on
     a tangent-space parameter X ((D*(d_g-1), D) matrix), returned in the
     same shape.
@@ -720,13 +943,16 @@ def _h_eff_action(k, X, env):
        ground-state tensor A at the adjacent cell (+1 or -1) -- the bond's
        "other half" is capped by one application of idmrg._apply_transfer(
        _from_left) against r/l, since beyond that single adjacent site
-       everything is the plain converged background again.
+       everything is the plain converged background again. B's own
+       position never moves in this diagram, so there is no momentum sum
+       to resum here -- k does not enter.
     4/5. Background Hamiltonian content strictly to the right/left of B,
        with B itself untouched -- exactly Rh/Lh (built once, k-independent).
     6a/6b. The momentum-summed piece: a reach-1 bond connecting the bra's
-       excitation at cell 0 to the SAME B (weighted e^{+-ik}) sitting on the
-       KET side at cell +-1 instead, with an ordinary A at cell 0 on the ket
-       side. This is the only place k enters.
+       excitation (fixed at cell 0 by the projection V_L^dagger applied at
+       the very end) to the SAME B, weighted e^{+-ikn}, sitting on the KET
+       side at cell n=+-1,+-2,... instead, with an ordinary A at every cell
+       strictly between 0 and n. This is the only place k enters.
 
     Every diagram's own "local, touched" part must be closed on BOTH sides
     -- the left with l, the right with r -- even where nothing acts, since
@@ -749,17 +975,36 @@ def _h_eff_action(k, X, env):
     the design plan for the debugging trail; not something derivable from
     the diagrams' own shape alone.
 
-    No genuine infinite/geometric momentum sum is needed for cell
-    separations |n|>=2: this module's Hamiltonians have reach<=1 (checked by
-    `_check_reach_one`), and the excitation tensor's own gauge condition
-    (V_L^dagger @ A = 0) makes any diagram where the bra has B at cell 0 but
-    the ket has a *plain* A there (no operator acting at cell 0 at all)
-    vanish identically, regardless of what happens further away -- so a
-    Hamiltonian term can only connect the bra's fixed excitation (cell 0) to
-    a ket excitation at cell n!=0 by directly touching cell 0 itself, which
-    (reach<=1) is only possible for n in {-1,0,+1}. This was confirmed by
-    hand (not just assumed) before implementing -- see the design plan for
-    the derivation."""
+    == Diagram 6a's |n|>=2 tail (the fix for the D>1 dispersion bug) ==
+
+    For |n|>=2, the site(s) strictly between B's own two positions (0 in
+    the bra, n in the ket) carry an *unperturbed* background on both bra
+    and ket -- i.e. plain repeated application of the ordinary transfer
+    map T_A (no operator, no B) -- so summing over all n>=2 is a genuine
+    geometric series, resummed here via `_right_momentum_resolvent`'s
+    (I - e^{ik} T_A)^{-1} rather than truncated at the single n=1 term a
+    prior version of this function stopped at (see git history). Crucially
+    this tail is *not* generically zero for D>1: the "seed" it resums,
+    apply_transfer(_op_transfer_matrix(B,A,None), r), leaves the (l,L)
+    pair of _op_transfer_matrix(B,A,None) *open* (closed only against the
+    metric r on its (r,R) pair), and the left-gauge condition
+    (`_null_space_left`'s V_L^dagger @ A_mat = 0) only forces the *trace*
+    (l=L, closed with plain identity) of that same tensor to vanish, not
+    its off-diagonal (l!=L) entries -- so for D=1 (where (l,L) can only
+    ever take their single, necessarily-diagonal value) the tail vanishes
+    identically and this reduces exactly to the old, single-term diagram,
+    but for D>1 it generically does not, which is exactly the observed
+    failure signature (this module's own "KNOWN LIMITATION" section):
+    exact to ~14 digits at D=1, anomalously flat/wrong at D>1.
+
+    Diagram 6b's own analogous tail (ket-B at cell n<=-2) is, by contrast,
+    provably zero for *every* D, not merely small -- no resummation is
+    needed there. Its "seed" is apply_transfer_from_left(
+    _op_transfer_matrix(B,A,None), l), which contracts l against exactly
+    the (l,L) pair the left-gauge condition already forces to zero (l=I
+    here, so this contraction *is*, verbatim, the plain (l=L) trace the
+    gauge condition kills) -- so diagram 6b's single existing term is
+    already exact, and no `resolvent`-based correction is added for it."""
     D, d_g = env.D, env.d_g
     A, r, l = env.A, env.r, env.l
     Lh, Rh, h1 = env.Lh, env.Rh, env.h1
@@ -778,8 +1023,11 @@ def _h_eff_action(k, X, env):
         cap_a_l = idmrg._apply_transfer_from_left(_op_transfer_matrix(A, A, mat_a), l)
         Y = Y + _cap_right(_cap_left(cap_a_l, _apply_op_ket(mat_b, B)), r)   # diagram 3
 
-        cap_bB_r = idmrg._apply_transfer(_op_transfer_matrix(B, A, mat_b), r)
-        Y = Y + phase_p * _cap_right(_apply_op_ket(mat_a, A), cap_bB_r)   # diagram 6a
+        cap_bB_r = idmrg._apply_transfer(_op_transfer_matrix(B, A, mat_b), r)  # n=1
+        seed = idmrg._apply_transfer(_op_transfer_matrix(B, A, None), r)      # n>=2 seed
+        tail = idmrg._apply_transfer(_op_transfer_matrix(A, A, mat_b), resolvent(seed))
+        Y = Y + _cap_right(_apply_op_ket(mat_a, A),
+                            phase_p * cap_bB_r + phase_p**2 * tail)         # diagram 6a
 
         cap_aB_l = idmrg._apply_transfer_from_left(_op_transfer_matrix(B, A, mat_a), l)
         Y = Y + phase_m * _cap_right(
@@ -802,18 +1050,26 @@ def _build_H_eff_dense(k, env):
     validated `_h_eff_action(k, X, env)` unchanged, then project the
     result back down the same way: Y_tilde = Y @ r_V @ diag(r_isqrt) --
     exactly the substitution `_reduce_metric` derives, applied to H_eff
-    itself rather than just the norm."""
+    itself rather than just the norm.
+
+    `_right_momentum_resolvent(k, env)` is built once here (it only
+    depends on k, not on the trial vector X) and reused across all n
+    basis-vector evaluations of `_h_eff_action`, rather than rebuilt (and
+    re-factorized as a dense (D^2,D^2) linear solve) on every single call
+    -- an O(D^6)-per-call cost that would otherwise dominate this
+    function's own O(D^6) total cost by a factor of n."""
     D, d_g = env.D, env.d_g
     Dx = D * (d_g - 1)
     V, isqrt = env.r_V, env.r_isqrt
     kdim = V.shape[1]
     n = Dx * kdim
+    resolvent = _right_momentum_resolvent(k, env)
     H = np.zeros((n, n), dtype=complex)
     Xt = np.zeros((Dx, kdim), dtype=complex)
     for j in range(n):
         Xt.flat[j] = 1.0
         X = Xt @ (isqrt[:, None] * V.conj().T)
-        Y = _h_eff_action(k, X, env)
+        Y = _h_eff_action(k, X, env, resolvent)
         Yt = Y @ V @ np.diag(isqrt)
         H[:, j] = Yt.reshape(-1)
         Xt.flat[j] = 0.0
