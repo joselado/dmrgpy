@@ -80,6 +80,31 @@ is reached unconditionally from `manybodychain.py` via
 opt-in JAX/numba-accelerated matvec kernel, which *is* genuinely optional
 and off by default, see §5.4). `jax` is optional either way.
 
+### 2.1 Releasing a new version to PyPI (maintainers)
+
+`release_pypi.py`, run from the repo root, automates cutting a release of
+the pure-Python distribution described above:
+
+```bash
+python release_pypi.py                     # build + validate + upload to TestPyPI
+python release_pypi.py --repository pypi    # the real thing
+python release_pypi.py --no-upload          # build + validate only, upload nothing
+python release_pypi.py --skip-tests         # skip `pytest tests` (faster iteration)
+```
+
+It runs the full `pytest tests` suite, rebuilds `dist/*.whl`/`dist/*.tar.gz`
+from a clean `dist/`/`build/`, runs `twine check` on both artifacts, then
+installs the built wheel into a throwaway virtualenv (not from `src/`, so
+missing package-data or import bugs actually surface) and cross-checks the
+pure-Python DMRG backend against ED on a small Heisenberg chain before
+asking for interactive confirmation (`--yes` skips the prompt) and
+uploading. See CLAUDE.md's "Packaging / PyPI" section for the specific
+`pyproject.toml` pitfalls this guards against (the `numba`-driven
+`requires-python` floor, the `juliapkg.json` package-data entry, etc.). A
+given version can never be re-uploaded to (Test)PyPI once published — bump
+`pyproject.toml`'s `[project].version` for the next attempt, then tag it:
+`git tag vX.Y.Z && git push origin vX.Y.Z`.
+
 ## 3. Quick start
 
 ```python
