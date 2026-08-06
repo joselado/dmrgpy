@@ -413,6 +413,133 @@ tractable, unambiguous starting point than hand-parsing Eq. (197)'s own
   than only checking the final assembled H_eff(k)'s Hermiticity/dispersion
   as this pass did.
 
+A sixth investigation pass picked up exactly where the fifth left off --
+`vumps.py`'s own module docstring flags "wiring its {AL,AR,C} output into a
+corrected mixed-gauge excitation ansatz" as the natural next step -- and
+made concrete progress, but did NOT close the gap either; D>1 is still
+correctly rejected by `build_excitation_environment` below. Recorded here in
+the same spirit as passes 1-5: real, verified sub-findings, not speculation,
+even though the overall dispersion is still wrong.
+
+- Two mixed-transfer fixed-point identities needed for a from-scratch
+  mixed-gauge port were derived by hand AND confirmed numerically to
+  machine precision on a converged `vumps.VUMPSResult` (D=2 TFIM):
+  the (A_L-ket, A_R-bra) transfer map T[X] = sum_s A_L^s X (A_R^s)^dagger
+  has C as its dominant (eigenvalue-1) RIGHT fixed point (immediate from
+  A_L C = C A_R contracted against A_L's own left-isometry sum_s
+  (A_L^s)^dagger A_L^s = I) and conj(C) as its dominant LEFT fixed point
+  (same identity, conjugated) -- confirmed to ~1e-14 by direct
+  diagonalization of the dense (D^2,D^2) transfer matrix, not merely
+  algebra. The mirror pair, for the (A_R-ket, A_L-bra) map, is C^dagger
+  (right) and C^T (left) -- derived the same way, via A_R's own
+  right-isometry sum_s A_R^s(A_R^s)^dagger = I. These let a
+  `_right_momentum_resolvent`-style (I - e^{ip}T)^{-1} regularized
+  resolvent be built for the mixed transfer exactly the way the D=1-only
+  diagrams above already do for the uniform transfer -- implemented as a
+  `_mixed_momentum_resolvent(p, AL, AR, C)` prototype and independently
+  verified (not just internally self-consistent) against an explicit
+  truncated sum over n up to 150 unit cells, agreeing to ~1e-16 (mirroring
+  how diagram 6a's own resummation was validated in pass 4).
+- With VUMPS supplying AL, AR, C, GL, GR directly (GL/GR already the
+  correctly regularized mixed-gauge background environments, reused
+  verbatim from `vumps.py`'s own `_h_ac_action`/`_precompute_bond_
+  environments` -- these are independently validated already, since VUMPS
+  ground-state energies match known references), the mixed-gauge tangent-
+  space norm collapses to the *trivial* Euclidean metric
+  tr(X'^dagger X) -- unlike the uniform-gauge norm (`_reduce_metric`,
+  weighted by the generally ill-conditioned r), because gauge is split
+  exactly at the excitation for both bra and ket in the n=0 ("B in
+  center") sector, and the norm's n!=0 cross terms vanish identically by
+  the same null-space argument that kills diagram 6b's tail (confirmed
+  by hand). This removes the whole `_reduce_metric` conditioning problem
+  for a mixed-gauge port -- a genuine structural simplification, not just
+  an implementation convenience.
+- A prototype H_eff(p) assembled from exactly 3 pieces -- vumps.py's own
+  `_h_ac_action(B, GL, GR, bond_envs, h1)` for the n=0 ("B in center")
+  sector unchanged, plus two momentum-summed tails (mirroring diagrams
+  6a/6b above, built from the same mixed resolvent) -- reproduces the
+  D=1 dispersion exactly (both tails provably/numerically vanish at D=1,
+  confirmed to ~1e-15 against the same XX-chain reference `excitation_
+  energies` already matches), a necessary but not sufficient consistency
+  check.
+- At D>1 this prototype is measurably WRONG in the same qualitative way
+  passes 2-5 already found (anomalously suppressed k-dependence, and
+  H_eff(p) not Hermitian to better than ~1e-1 relative, worse than the
+  ~1e-13 the D=1 diagrams achieve) -- but two SPECIFIC, previously
+  unidentified missing diagrams were found and fixed along the way, each
+  independently improving the numerical agreement with the exact D>1 TFIM
+  free-fermion dispersion (eps(k) = 2*sqrt(J^2+h^2-2*J*h*cos k), checked
+  directly against a D=2 VUMPS ground state at J=1, h=2.5):
+  (i) an onsite h1 term at the bra's own excitation position also has a
+  nonzero momentum-summed tail connecting it to a ket-B further to the
+  RIGHT (n>=1) -- structurally identical to diagram 6a's tail (same seed,
+  same resolvent) but with no mat_b/pending-channel step, since h1 has
+  none; its own tail to the LEFT (n<=-1) is provably zero by the exact
+  same argument that kills diagram 6b's tail (the seed is built with
+  bra=A_L at the far position, forcing the same null-space contraction to
+  vanish). Adding this alone (before finding (ii)) reduced the D=2 TFIM
+  dispersion error at p=pi/4 from ~0.42 to ~0.07 (still wrong, but a
+  measurable, real improvement, not noise).
+  (ii) the OTHER reach-1 bond touching the bra's excitation position (the
+  one straddling cells -1,0, whose mat_a sits at -1 -- background, and
+  mat_b at 0) analogously has a nonzero tail connecting to a ket-B to the
+  right, built from the SAME `Lvec_a` `vumps.py`'s own `_precompute_bond_
+  environments` already computes (mat_a's own background content is
+  n-independent, only mat_b's site-0 attachment needs to thread through
+  the resolvent). Adding this on top of (i) changed the dispersion shape
+  further (differences dropped to the ~0.2-0.5 range at J=1,h=2.5 rather
+  than ~1 without either fix) but made the Hermiticity violation WORSE
+  (~1e-1 relative versus ~1e-2 with only fix (i)) -- i.e. it is not simply
+  "the missing piece", either an overall sign/normalization on it is
+  wrong, or a further, still-unidentified counterpart diagram is needed
+  before the two partially-cancel correctly. This was not resolved.
+- An attempt at an independent, from-scratch brute-force cross-check
+  (sweeping the actual automaton W tensor explicitly across a window,
+  analogous to how `dynamics.py`'s KPM machinery or `idmrg.py`'s own
+  HL/HR growth works) repeatedly tripped on a subtle, genuinely confusing
+  point worth recording so a future attempt does not repeat it: a
+  left-to-right MPO sweep (`apply_transfer_from_left`, one site at a
+  time) through a UNIFORM A_L-A_L region does NOT preserve the trace of
+  an arbitrary accumulated environment matrix from one step to the next
+  (confirmed both by direct hand derivation and numerically) -- even
+  though the trivial S-channel seed (identity) genuinely IS an exact
+  fixed point of that same sweep (also confirmed, via A_L's own
+  left-isometry). Trace-preservation under repeated identity-channel
+  pass-through specifically needs the RIGHT-canonical property (which
+  only A_R has), while the S-channel-stays-exactly-identity property
+  needs the LEFT-canonical property (which only A_L has) -- these are two
+  logically separate facts, easy to conflate, and a naive uniform
+  automaton sweep silently gives a plausible-looking but wrong answer
+  (confirmed directly: exactly 2x too large a per-site energy density on
+  a D=2 TFIM background, NOT an obvious red flag at first glance) by
+  implicitly assuming both hold simultaneously for whichever tensor sits
+  in the window. Reusing `vumps.py`'s own already-validated GL/GR as
+  the sweep's boundary conditions (rather than iterating a raw automaton
+  sweep for many sites and hoping it converges) avoids this specific trap
+  but was not itself successfully debugged to agreement with the diagram-
+  based H_eff before time ran out on this pass -- a working, independent
+  brute-force validator (matching the standard this module's D=1 diagrams
+  were originally held to) is still the single most valuable next step,
+  since Hermiticity/dispersion checks alone identify THAT something is
+  still missing but not precisely WHICH diagram.
+- Net effect: the mixed-gauge/VUMPS approach remains the right direction
+  (D=1 exact, two genuine missing diagrams found and fixed, the metric
+  problem structurally resolved, the needed fixed-point identities now
+  proven rather than guessed) but is not yet complete -- D>1 stays
+  unimplemented here. Concrete next steps for whoever picks this up:
+  (1) get the brute-force W-sweep cross-check (using GL/GR as boundary
+  conditions, not a raw many-site iteration) working and agreeing with
+  the n=0 sector first (a pure consistency check against `_h_ac_action`,
+  no new physics), THEN use it to test each of (i)/(ii) above and any
+  further candidate diagrams one at a time, the same diagram-by-diagram
+  discipline pass 1 established; (2) revisit whether (ii)'s sign/
+  normalization is simply wrong (try its negation) before assuming a
+  whole new diagram is missing; (3) systematically enumerate every
+  remaining "attachment point to position 0" x "tail direction"
+  combination against the null-space zero-tail argument (proven so far
+  for: any tail seeded by bra=A_L at a negative far position) rather than
+  continuing to find them one at a time by trial.
+
 == Algorithm summary ==
 
 1. Group the unit cell into one supersite (A, W) -- plain NumPy arrays, W

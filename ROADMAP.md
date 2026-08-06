@@ -141,7 +141,13 @@ model-specific exception:
    `Spinful_Fermionic_Chain_Native`.
 4. **iDMRG excitation ansatz beyond `D=1`.** Known to be broken (anomalous
    flat dispersion), not just unimplemented — needs real debugging, not
-   just porting effort, before `D>1` can be un-blocked.
+   just porting effort, before `D>1` can be un-blocked. A sixth
+   investigation pass (see `pyitensor/idmrg_excitations.py`'s own
+   docstring) built a mixed-gauge {A_L,A_R,C} port on top of `vumps.py`'s
+   VUMPS ground state, found and fixed two previously-missing diagrams,
+   and structurally resolved the tangent-space metric's conditioning
+   problem — real progress, but the resulting H_eff(p) is still not
+   Hermitian at D>1, so this remains unimplemented/unexposed.
 5. **iDMRG cat-state superpositions.** No backend supports summing two
    *physically distinct* symmetry-broken iDMRG ground states; needs new
    correlator machinery from scratch.
