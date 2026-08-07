@@ -194,6 +194,29 @@ DMRG/ED agreement (not a golden regression value), prefer
 `pytest.approx(..., abs=1e-6)`-style tolerances over exact equality, since
 DMRG is iterative.
 
+**`itensor_version="julia_live"` tests only need to run when a change
+touches Julia code** (`mpsjulialive/`, any `*.jl` file, or a shared entry
+point like `manybodychain.py`/`infinitechain.py` that dispatches into
+that backend). These tests carry a large, mostly *fixed* cost unrelated
+to what they're actually testing: `juliacall`'s JIT compiles each
+distinct Julia function signature the first time it's called in a
+process, and this compile cost dominates wall time regardless of how
+small the test's own parameters are — confirmed directly by isolating a
+`julia_live` `metts_dynamical_correlator` call down to `nsamples=1`,
+`nwarmup=1`, `nt=1`: it still took ~73s, almost entirely JIT, versus ~27s
+of genuine algorithmic work for the same call at its normal (nsamples=40)
+parameters once the function was already warm. Reducing test parameters
+further cannot buy back that fixed cost, and it's paid independently by
+*every* distinct Julia function signature exercised across the whole
+suite (`tests -k julia_live` alone still pays it many times over), which
+is why the full suite's slowest handful of tests are almost all
+`[julia_live]`-parametrized. For a change that doesn't touch Julia code
+at all, skip them locally with `pytest tests -k "not julia_live"` (the
+parametrize id `julia_live` appears in every such test's node id) rather
+than paying this tax on every iteration; run the full suite including
+`julia_live` before finishing work that *does* touch Julia code, or
+before a release.
+
 The `examples/` directory (100+ self-contained scripts, one per physical
 model or feature, organized into thematic subfolders — `groundstate/`,
 `staticcorrelators/`, `dynamical_correlator/`, `spin_models/`,

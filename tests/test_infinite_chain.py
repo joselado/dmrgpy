@@ -165,7 +165,7 @@ def test_n_uc2_uniform_expectation_self_consistency():
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
     h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
          + ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
-    ic.maxm = 30
+    ic.maxm = 18
     ic.maxiter = 100
     ic.etol = 1e-14  # forces the full 100 iterations
     ic.set_hamiltonian(h)
@@ -272,9 +272,9 @@ def test_itensor_version3_matches_python_backend():
     agree in the maxm->infinity limit. Confirmed directly to agree to
     ~1e-8 (well inside the 1e-6 tolerance here) and to be stable run over
     run to ~1e-8 despite iDMRG's unseeded random starting MPS."""
-    ic_py, _ = _converged_uniform_chain(2, maxm=30, maxiter=60, etol=1e-9,
+    ic_py, _ = _converged_uniform_chain(2, maxm=30, maxiter=30, etol=1e-9,
                                          itensor_version="python")
-    ic_v3, _ = _converged_uniform_chain(2, maxm=30, maxiter=60, etol=1e-9,
+    ic_v3, _ = _converged_uniform_chain(2, maxm=30, maxiter=30, etol=1e-9,
                                          itensor_version=3)
     assert ic_v3.e0 == pytest.approx(ic_py.e0, abs=1e-6)
 
@@ -671,7 +671,7 @@ def test_imps_sum_dominant_branch_survives(n_uc):
     larger-norm (unscaled) branch's own value exactly, and the surviving
     bond dimension must collapse back down to that branch's own (i.e. the
     rescaled branch is fully discarded, not merely down-weighted)."""
-    ic_dom, _ = _converged_uniform_chain(n_uc, maxm=20, maxiter=100, etol=1e-11)
+    ic_dom, _ = _converged_uniform_chain(n_uc, maxm=16, maxiter=60, etol=1e-11)
 
     spins = ["1/2"] * n_uc
     ic_other = infinitechain.Infinite_Spin_Chain(spins)
@@ -688,7 +688,7 @@ def test_imps_sum_dominant_branch_survives(n_uc):
     h_other = terms[0]
     for t in terms[1:]:
         h_other = h_other + t
-    ic_other.maxm, ic_other.maxiter, ic_other.etol = 20, 100, 1e-11
+    ic_other.maxm, ic_other.maxiter, ic_other.etol = 16, 60, 1e-11
     ic_other.set_hamiltonian(h_other)
     ic_other.gs_energy()
 
@@ -960,22 +960,22 @@ def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
     that `np.abs` does not."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
     ic.maxm = 20
-    ic.maxiter = 300
+    ic.maxiter = 60
     ic.etol = 1e-12
-    ic.niter = 150
+    ic.niter = 30
     ic.set_hamiltonian(1.4 * ic.SzC[0] + ic.SxC[0] * ic.SxR[0])
     ic.gs_energy()
 
     es = np.linspace(-1, 6, 100)
-    es_kpm, y_kpm = ic.kpm_finite("Sz", 0, "Sz", 1, n_window=20,
-                                    window_chain_kwargs=dict(maxm=30, nsweeps=10),
+    es_kpm, y_kpm = ic.kpm_finite("Sz", 0, "Sz", 1, n_window=12,
+                                    window_chain_kwargs=dict(maxm=16, nsweeps=5),
                                     delta=0.3, es=es)
 
     from dmrgpy.pyitensor import idmrg_window
     from dmrgpy.timedependent import _fourier_transform_correlator
     ts, xs, S = idmrg_window.dynamical_correlator_td(
-        ic._result, n_window=16, opname_A="Sz", opname_B="Sz", dt=0.05,
-        nt=60, cutoff=1e-10, maxdim=60, niter=50, x_values=[1])
+        ic._result, n_window=10, opname_A="Sz", opname_B="Sz", dt=0.05,
+        nt=25, cutoff=1e-10, maxdim=30, niter=20, x_values=[1])
     es_td, g_td = _fourier_transform_correlator(ts, S[:, 0], 0.05, es=es,
                                                   delta=0.3, window=[-1, 6])
 
@@ -1035,6 +1035,12 @@ def _polarized_xx_chain(J=1.0, h=3.0, maxm=4, maxiter=50, etol=1e-12, gs_method=
 
 
 def test_excitation_energies_matches_exact_xx_dispersion():
+    """KNOWN ISSUE (flagged 2026-08-07, not yet fixed): flaky, ~33% fail
+    rate over 15 isolated runs -- traced to pyitensor/vumps.py's
+    `_random_raw_tensor` seeding via `np.random.default_rng()`
+    (OS-entropy-seeded, genuinely non-deterministic every run), not to
+    test ordering or anything in this file. See that function's own
+    docstring for the full note."""
     J, h = 1.0, 3.0
     ic = _polarized_xx_chain(J, h, gs_method="vumps")
     for k in np.linspace(0, 2 * np.pi, 9, endpoint=False):

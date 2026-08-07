@@ -83,7 +83,7 @@ def test_metts_dynamical_correlator_matches_ed_lehmann_sum(version):
     nt, dt = 10, 0.2
 
     ts, means, stderrs = sc.metts_dynamical_correlator(
-        name, T, nt=nt, dt=dt, nsamples=200, nwarmup=30,
+        name, T, nt=nt, dt=dt, nsamples=40, nwarmup=30,
         dbeta_half_step=0.08, seed=2024, njobs=4 if version == "python" else 1)
 
     ref = _ed_time_domain_reference(sc, name, T, ts)

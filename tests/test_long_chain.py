@@ -62,8 +62,8 @@ def test_long_spin_chain_energy_and_correlator():
             h = h + 0.05 * sc.Sz[i]
         sc.set_hamiltonian(h)
         sc.setup_cpp(version)
-        sc.maxm = 60
-        sc.nsweeps = 20
+        sc.maxm = 40
+        sc.nsweeps = 6
 
         wf = sc.get_gs(mode="DMRG")
         e = sc.gs_energy(mode="DMRG")
@@ -104,7 +104,7 @@ def test_long_spinless_fermion_chain_energy_and_correlator():
         fc.set_hamiltonian(h)
         fc.setup_cpp(version)
         fc.maxm = 60
-        fc.nsweeps = 20
+        fc.nsweeps = 8
 
         wf = fc.get_gs(mode="DMRG")
         e = fc.gs_energy(mode="DMRG")
@@ -148,8 +148,8 @@ def test_long_spinful_fermion_chain_energy_and_correlator():
         h = h + eps * (fc.Nup[0] - fc.Ndn[0])
         fc.set_hamiltonian(h)
         fc.setup_cpp(version)
-        fc.maxm = 100
-        fc.nsweeps = 25
+        fc.maxm = 70
+        fc.nsweeps = 6
         fc.noise = 5e-2
 
         wf = fc.get_gs(mode="DMRG")

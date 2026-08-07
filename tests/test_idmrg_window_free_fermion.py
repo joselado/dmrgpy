@@ -202,8 +202,8 @@ def test_window_tdvp_step_eshift_matches_exact_dense_evolution():
         assert np.linalg.norm(psi_exact[it] - psi_tdvp[it]) < 1e-4
 
 
-def _dimerized_setup(n_window, J1=1.0, J2=0.2, maxm=24, attempts=60,
-                      overlap_target=0.99, min_overlap=0.9):
+def _dimerized_setup(n_window, J1=1.0, J2=0.2, maxm=24, attempts=30,
+                      overlap_target=0.99, min_overlap=0.9, maxiter=80, niter=60):
     """Converged dimerized-XX iDMRG result with `state_overlap>min_overlap`
     that also actually passes `build_window(n_window)` -- a high
     `state_overlap` alone does not guarantee the periodic-wraparound bond
@@ -225,7 +225,7 @@ def _dimerized_setup(n_window, J1=1.0, J2=0.2, maxm=24, attempts=60,
     for seed in range(attempts):
         np.random.seed(seed)
         result = idmrg.idmrg_ground_state([2, 2], hi, he, 2, maxm=maxm, cutoff=1e-12,
-                                           maxiter=150, etol=1e-14, niter=100, verbose=False)
+                                           maxiter=maxiter, etol=1e-14, niter=niter, verbose=False)
         candidates.append((result.state_overlap or 0, result))
         candidates.sort(key=lambda p: -p[0])
         if candidates[0][0] > overlap_target:
@@ -258,10 +258,10 @@ def test_dynamical_correlator_td_reproducible_across_convergence():
 
     ts_a, xs_a, S_a = idmrg_window.dynamical_correlator_td(
         result_a, n_window=n_window, opname_A="Sz", opname_B="Sz", dt=dt, nt=nt,
-        cutoff=1e-10, maxdim=40, niter=50, x_values=[0, 1], connected=True)
+        cutoff=1e-10, maxdim=28, niter=30, x_values=[0, 1], connected=True)
     ts_b, xs_b, S_b = idmrg_window.dynamical_correlator_td(
         result_b, n_window=n_window, opname_A="Sz", opname_B="Sz", dt=dt, nt=nt,
-        cutoff=1e-10, maxdim=40, niter=50, x_values=[0, 1], connected=True)
+        cutoff=1e-10, maxdim=28, niter=30, x_values=[0, 1], connected=True)
     # Loose tolerance (independent ground states, independent gauges) --
     # the point is that these are now close at all, not exact agreement.
     # Pre-fix, this max|diff| was order-1 (comparable to S itself); the

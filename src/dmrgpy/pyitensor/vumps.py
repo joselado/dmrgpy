@@ -238,7 +238,19 @@ def _random_raw_tensor(D, d_g, seed_AL=None, noise=0.05):
     dimension's new directions aren't started exactly at zero, which would
     leave them exactly decoupled/unreachable by the D_old block's own
     already-converged content under a linear map like the transfer
-    matrix)."""
+    matrix).
+
+    KNOWN ISSUE (flagged 2026-08-07, not yet fixed): `np.random.default_rng()`
+    here is OS-entropy-seeded, so genuinely non-deterministic run to run,
+    independent of any `np.random.seed(n)` a caller/test sets. Confirmed
+    this makes `tests/test_infinite_chain.py::
+    test_excitation_energies_matches_exact_xx_dispersion` flaky (~33% fail
+    rate over 15 isolated runs) even on the trivial fully-polarized D=1
+    case that test builds, which both iDMRG and VUMPS should converge to
+    exactly. Needs either a noise-floor/retry safeguard (mirroring
+    idmrg.py's own unseeded-restart-loop pattern elsewhere in this
+    codebase) or a closer look at why the noisy init occasionally fails to
+    settle back to the exact D=1 solution for this case specifically."""
     rng = np.random.default_rng()
     A0 = noise * (rng.standard_normal((D, d_g, D)) + 1j * rng.standard_normal((D, d_g, D)))
     if seed_AL is not None:
