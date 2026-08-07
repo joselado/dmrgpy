@@ -136,6 +136,7 @@ You can find several tutorials [here](https://github.com/joselado/Advanced_Compu
 
 # Capabilities #
 - Possible models include spinless fermions, spinful fermions, spins, parafermions and bosons
+- Interchangeable backends for the same API: compiled ITensor C++ (v2 and v3), a live Julia/ITensors.jl session, a pure-Python/NumPy reimplementation needing no compiler, and exact diagonalization -- results can be cross-checked between any of them
 - Ground state energy
 - Ground state wavefunction
 - Excitation energies
@@ -149,17 +150,17 @@ You can find several tutorials [here](https://github.com/joselado/Advanced_Compu
 - Generic operator distributions computed with the Kernel polynomial method
 - Iterative MPS Hermitian and non-Hermitian diagonalization solvers 
 - Hermitian and non-Hermitian degeneracy detection
+- Infinite chains with iDMRG/VUMPS: ground states, excitation gaps and dynamical correlators directly in the thermodynamic limit
+- Finite-temperature calculations via METTS and thermal purification
+- Entanglement entropy, reduced density matrices, mutual information and CFT central charge extraction
+- Topological diagnostics: parity/symmetry sectors, edge/zero modes and Zak phase
+- Non-Hermitian systems: DMRG ground and excited states, dynamical correlators, and skin-effect/degeneracy analysis
 
 # Examples
 
 The snippets below are mirrored as self-contained scripts under
 `examples/readme_examples/`; the full `examples/` directory has 100+
-further scripts, one per physical model or feature. When adding a new
-one there, it's good practice to make it produce a plot (with
-matplotlib) in addition to any printed/asserted checks -- a plot is
-often the fastest way to sanity-check a result by eye, and makes the
-example far more useful as a demonstration for others browsing the
-directory.
+further scripts, one per physical model or feature.
 
 ## Ground state energy of an S=1/2 spin chain
 ```python
