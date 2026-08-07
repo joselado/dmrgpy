@@ -2139,13 +2139,17 @@ ic.set_hamiltonian(h)
 density = ic.gs_energy()
 \end{lstlisting}
 
-Like \texttt{itensor\_version=3}, \texttt{gs\_method="vumps"} supports
-\texttt{gs\_energy()} only -- \texttt{vev}/\texttt{correlator}/
-\texttt{excitation\_energies}/\texttt{excitation\_gap}/
-\texttt{local\_excitation\_gap} all raise \texttt{NotImplementedError}
-(VUMPS's own converged state is a grouped-supersite representation with
-no per-sublattice \texttt{U\_list}, see
-\texttt{pyitensor.vumps.VUMPSResult}'s own docstring).
+\texttt{vev}/\texttt{correlator}/\texttt{local\_excitation\_gap} all raise
+\texttt{NotImplementedError} under \texttt{gs\_method="vumps"} (VUMPS's
+own converged state is a grouped-supersite representation with no
+per-sublattice \texttt{U\_list}, see
+\texttt{pyitensor.vumps.VUMPSResult}'s own docstring) -- but
+\texttt{excitation\_energies}/\texttt{excitation\_gap} (below)
+\emph{require} \texttt{gs\_method="vumps"} specifically, the reverse
+restriction: they need \texttt{VUMPSResult}'s own mixed-gauge
+\texttt{\{AL,AR,C,GL,GR\}}, which the growing algorithm's
+\texttt{IDMRGResult} (\texttt{gs\_method="idmrg"}, the default) has no
+equivalent of.
 
 \textbf{A real, scoped reliability caveat.} \texttt{D=1} converges
 reliably and exactly for every exactly-solvable (product-state-like)
@@ -2175,44 +2179,47 @@ Entanglement/entropy are not implemented for infinite chains yet.
 ansatz.} Unlike a finite chain, an infinite chain's excitations form a
 momentum-resolved band $E(k)$, not a single discrete state, so ``the
 first excited state'' here means the standard single-mode/quasiparticle
-ansatz (Haegeman et al.): a tangent-space vector with one excitation
-tensor $B$ (a function of a free matrix $X$) inserted at every
-unit-cell position, weighted by momentum $k$.
-\texttt{ic.excitation\_energies(k, n=1)} returns the lowest \texttt{n}
-excitation energies (above the ground state) at momentum \texttt{k}
-(radians, per unit cell); \texttt{ic.excitation\_gap(ks=None)} scans
-\texttt{k} (default \texttt{numpy.linspace(-pi, pi, 41)}) and returns
-the minimum -- the scalar ``gap'', mirroring the finite-chain
-\texttt{get\_gap()} naming (\S4):
+ansatz (Haegeman et al.), built on top of a \textbf{VUMPS} ground
+state's own mixed-gauge \texttt{\{AL,AR,C\}} representation
+(\texttt{ic.gs\_method = "vumps"} -- required, see above): a
+tangent-space vector with one excitation tensor $B$ (a function of a
+free matrix $X$) inserted at every unit-cell position, weighted by
+momentum $k$. \texttt{ic.excitation\_energies(k, n=1)} returns the
+lowest \texttt{n} excitation energies (above the ground state) at
+momentum \texttt{k} (radians, per unit cell);
+\texttt{ic.excitation\_gap(ks=None)} scans \texttt{k} (default
+\texttt{numpy.linspace(-pi, pi, 41)}) and returns the minimum -- the
+scalar ``gap'', mirroring the finite-chain \texttt{get\_gap()} naming
+(\S4):
 
 \begin{verbatim}
+ic.gs_method = "vumps"             # required for excitation_energies
 ic.excitation_energies(0.0, n=1)   # lowest excitation energy at k=0
 ic.excitation_gap()                # min_k E(k), the scalar gap
 \end{verbatim}
 
-\textbf{Scope restriction -- read before use.} Only
-\texttt{itensor\_version="python"} is supported
-(\texttt{NotImplementedError} otherwise), and -- more importantly --
-only a \textbf{product-state-like ground state (bond dimension
-\texttt{D=1})} is currently supported; a genuinely entangled ground
+\textbf{Scope.} Only \texttt{itensor\_version="python"} is supported
+(\texttt{NotImplementedError} otherwise). Any converged bond dimension
+\texttt{D>=1} is supported -- including a genuinely entangled ground
 state (\texttt{D>1}, e.g.\ the transverse-field Ising or a dimerized
-Heisenberg chain) raises \texttt{NotImplementedError}. This is a known,
-deliberate limit, not an oversight: for \texttt{D=1} the computed
-dispersion has been checked to match the exact free-fermion
-single-magnon dispersion of a field-polarized XX chain to $\sim$14
-digits across the whole Brillouin zone (see
-\texttt{examples/idmrg/excitation\_gap\_xx/main.py}), and every
-individual term of the underlying calculation independently matches a
-from-scratch finite-ring tensor-network contraction to $\sim$1e-13 --
-but for \texttt{D>1}, the resulting dispersion comes out anomalously
-flat compared to the expected answer, and this was not root-caused
-despite extensive investigation (three real, confirmed bugs were found
-and fixed along the way; see \texttt{pyitensor/idmrg\_excitations.py}'s
-own module docstring, ``KNOWN LIMITATION'' section, for the full
-account). A deliberately constructed longer-range term (spanning more
-than 2 adjacent unit cells after \texttt{n\_uc}-grouping) is separately
-rejected with \texttt{NotImplementedError} too, mirroring
-\texttt{n\_uc>2}'s own guard elsewhere in this module.
+Heisenberg chain), which used to be an explicit, rejected scope limit
+here (see \texttt{pyitensor/idmrg\_excitations.py}'s own module
+docstring, ``History'' section, for the eight-pass investigation that
+limit came from and how it was eventually resolved by rewriting the
+ansatz from scratch on top of VUMPS's own mixed-gauge state, mirroring
+MPSKit.jl's own architecture). For \texttt{D=1} the computed dispersion
+matches the exact free-fermion single-magnon dispersion of a
+field-polarized XX chain to $\sim$14 digits across the whole Brillouin
+zone (\texttt{examples/idmrg/excitation\_gap\_xx/main.py}); for
+\texttt{D=2} it matches an independently-converged MPSKit.jl
+transverse-field Ising result to 6 significant figures
+(\texttt{examples/idmrg/excitation\_gap\_tfim/main.py}), and
+$H_{\mathrm{eff}}(k)$ is Hermitian to machine precision at every
+\texttt{D} tried. A deliberately constructed longer-range term (spanning
+more than 2 adjacent unit cells after \texttt{n\_uc}-grouping) is
+rejected with \texttt{NotImplementedError}, raised from
+\texttt{gs\_energy()} itself (\texttt{vumps\_ground\_state}'s own
+reach-1 check) rather than from the excitation machinery.
 
 \textbf{A cheaper, cruder alternative: the local superblock gap.}
 \texttt{ic.local\_excitation\_gap(niter=200)} re-diagonalizes the growing
@@ -2229,9 +2236,9 @@ is no separate re-sweep (the ``state to stay orthogonal to'' is just the
 local ground vector already found, in the very same local Hilbert space),
 the constraint is enforced exactly via deflation (projecting out the
 ground vector), which is what a penalty method converges to anyway as its
-weight $\to\infty$. Unlike \texttt{excitation\_gap}, this requires no
-\texttt{D=1} restriction and carries no momentum label -- it is a single
-number, not a dispersion:
+weight $\to\infty$. Unlike \texttt{excitation\_gap}, this requires
+\texttt{gs\_method="idmrg"} (not \texttt{"vumps"}) and carries no
+momentum label -- it is a single number, not a dispersion:
 
 \begin{verbatim}
 ic.local_excitation_gap()   # a single scalar, no k dependence
@@ -2245,14 +2252,15 @@ the true minimum-momentum gap the tangent-space ansatz targets. Measured
 directly on the two cases \texttt{excitation\_gap} and this method were
 both cross-checked against: for the exactly-solvable field-polarized XX
 chain (\texttt{D=1}), it comes out $\sim$10\% too high (5.5 vs.\ the exact
-5.0); for a genuinely entangled (\texttt{D>1}) dimerized Heisenberg chain
--- exactly the case \texttt{excitation\_gap} cannot handle yet -- it lands
-within $\sim$0.5\% of a large finite open chain's own extrapolated ED gap
-(see \texttt{examples/idmrg/local\_excitation\_gap/main.py}). Use
-\texttt{excitation\_gap} for a physically principled answer whenever its
-\texttt{D=1} scope applies; use \texttt{local\_excitation\_gap} as a
-cheap, order-of-magnitude cross-check, or for \texttt{D>1} chains where
-\texttt{excitation\_gap} is not available at all.
+5.0); for a genuinely entangled (\texttt{D>1}) dimerized Heisenberg chain,
+it lands within $\sim$0.5\% of a large finite open chain's own
+extrapolated ED gap (see
+\texttt{examples/idmrg/local\_excitation\_gap/main.py}). Prefer
+\texttt{excitation\_gap} for a physically principled answer (it now
+handles any \texttt{D}, see above); \texttt{local\_excitation\_gap}
+remains useful as a cheap, order-of-magnitude cross-check, or when
+\texttt{gs\_method="idmrg"} is what's already been run for other reasons
+(\texttt{vev}/\texttt{correlator}).
 
 \textbf{Tightening it further: \texttt{window=}.}
 \texttt{ic.local\_excitation\_gap(window=w, niter=200)} (default

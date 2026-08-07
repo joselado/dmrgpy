@@ -329,9 +329,12 @@ docstring for the full algorithm and diagram list). `self._vumps_result`
 (a `pyitensor.vumps.VUMPSResult`, distinct from `self._result`'s
 `IDMRGResult`) holds the converged state; since it is a grouped-supersite
 representation with no per-sublattice tensor list, `vev`/`correlator`/
-`excitation_energies`/`excitation_gap`/`local_excitation_gap` all remain
-`gs_method="idmrg"`-only, mirroring the precedent `itensor_version=3`
-already sets for the same methods.
+`local_excitation_gap` all remain `gs_method="idmrg"`-only, mirroring the
+precedent `itensor_version=3` already sets for the same methods —
+`excitation_energies`/`excitation_gap` are the opposite: they require
+`gs_method="vumps"` (see below), since the tangent-space excitation
+ansatz needs exactly the mixed-gauge `{AL,AR,C,GL,GR}` `VUMPSResult`
+carries, which `IDMRGResult` has no equivalent of.
 
 **A confirmed, documented convergence-robustness gap, not fully closed.**
 Plain single-attempt VUMPS from a random initial tensor was confirmed
@@ -617,88 +620,72 @@ free too; confirmed not to trip on any pre-existing test or on
 (all previously-passing `tests/test_infinite_chain.py` cases still pass).
 
 **Excited states: the tangent-space/quasiparticle excitation ansatz
-(`pyitensor/idmrg_excitations.py`, a new module)**: an infinite chain's
-excitations form a momentum-resolved band `E(k)`, not a single discrete
-state a finite chain has, so `Infinite_Many_Body_Chain.excitation_energies
+(`pyitensor/idmrg_excitations.py`)**: an infinite chain's excitations
+form a momentum-resolved band `E(k)`, not a single discrete state a
+finite chain has, so `Infinite_Many_Body_Chain.excitation_energies
 (k, n=1)`/`excitation_gap(ks=None)` implement the standard single-mode/
-quasiparticle ansatz (Haegeman et al.) instead of anything reusing the
-growing algorithm's own truncated environments: a tangent-space vector
-`|Phi_k(X)> = sum_n e^{ikn} |...A A B_n A A...>` with one excitation
-tensor `B(X)` inserted at every unit-cell position, weighted by momentum
-`k`. Multi-site unit cells are handled by first grouping the `n_uc` site/
-automaton tensors into one effective supersite (`_group_unit_cell`), so
-the rest of the module only ever deals with a uniform, single-supersite
-chain; every 2-site bond term must have reach exactly 1 after grouping
-(checked directly on the grouped automaton's own channel structure,
-`_check_reach_one`, rather than by re-inspecting the original Hamiltonian
-term lists). The construction: a null-space gauge-fixing tensor `V_L`
-(`B(X) = reshape(V_L @ X)`, `V_L^dagger @ A = 0`, ensuring `B` is
-orthogonal to the ground state itself); `l=I` exactly (left-canonical
-`A`) and `r` = the ordinary dominant right fixed point already computed
-elsewhere in `idmrg.py`; two regularized ("energy density subtracted
-off") environments `Lh`/`Rh` solved as dense linear systems; and a
-momentum-dependent effective Hamiltonian `H_eff(k)` built from a
-*finite* list of diagrams — no genuine infinite/geometric momentum sum
-is needed, since the gauge condition makes any diagram where the ket
-differs from the bra by more than one adjacent unit cell vanish
-identically (confirmed directly, not just assumed, on a finite-ring
-tensor-network contraction), so only unit-cell separations `0, +-1`
-ever contribute for this module's reach-1 Hamiltonians.
+quasiparticle ansatz (Haegeman et al.), built on top of a **VUMPS**
+ground state's own mixed-gauge `{AL, AR, C, GL, GR}` (requires
+`gs_method="vumps"`, the opposite requirement from `vev`/`correlator`/
+`local_excitation_gap` — see above): a tangent-space vector
+`|Phi_k(X)> = sum_n e^{ikn} |...A_L A_L B_n(X) A_R A_R...>` with one
+excitation tensor `B(X)` inserted at every unit-cell position, weighted
+by momentum `k`. Multi-site unit cells are handled entirely inside
+`vumps.py` (which groups the `n_uc` sites into one effective supersite
+before ever building `AL`/`AR`/`C`), so this module only ever sees an
+already-grouped, single-supersite `VUMPSResult`; every bond term must
+have reach exactly 1 after grouping (checked once, inside
+`vumps.vumps_ground_state` itself, `idmrg_excitations._check_reach_one`).
+This mirrors MPSKit.jl's own architecture (`QuasiparticleAnsatz`,
+`src/algorithms/excitation/quasiparticleexcitation.jl` /
+`src/environments/qp_envs.jl`), not just its published equations: a
+null-space gauge-fixing tensor `V_L` (`B(X) = reshape(V_L @ X)`,
+`V_L^dagger @ AL = 0`); the ordinary, momentum-independent
+channel-resolved background environments `GL_full`/`GR_full` (built from
+VUMPS's own `GL`/`GR` plus the one-more-site bond content
+`vumps._precompute_bond_environments` already computes); the
+momentum-dependent, channel-resolved `GBL(k)`/`GBR(k)` ("the excitation
+has already happened somewhere to the left/right", MPSKit's own
+`lBs`/`rBs`) — each solved as a single self-consistent linear fixed-point
+system per momentum (`_build_GBL`/`_build_GBR`), rather than a
+hand-summed geometric series; and a 3-term `H_eff(k)` (`_h_eff_action`)
+built by reusing one generic contraction helper
+(`_full_channel_contraction`) with three different environment triples.
+No metric reduction is needed for the resulting eigenproblem (unlike an
+earlier, uniform-gauge version of this module, see below) — the
+mixed-gauge tangent-space norm is already the trivial Euclidean one.
 
-**Real, load-bearing bugs found and fixed while implementing this** (via
-extensive cross-checking against a from-scratch finite-ring tensor-
-network contraction, bypassing this module's own machinery entirely —
-not just internal self-consistency checks, which turned out to be
-insufficient to catch these): (1) the energy density used to regularize
-`Lh` (`Source_L`'s own trace) needs an `r`-weighted trace
-(`tr(r @ Source_L)`), not the plain trace `Source_R`'s own regularization
-correctly uses — confirmed directly by comparing a single-site
-`apply_transfer_from_left` step against `idmrg.onsite_expectation`'s
-already-validated formula, off by a measurable, non-numerical-noise
-amount with the plain trace. (2) Three of the effective Hamiltonian's
-seven diagrams (the ones ending in a `_cap_left` step, threading an
-environment into the excitation tensor from the left) were each missing
-a further `_cap_right(..., r)` closure on the *other* side — easy to
-miss because omitting the analogous closure is harmless whenever it
-would be capped by `l` (=Identity, a no-op), which is exactly the case
-for the other four diagrams, but not harmless for `r` (not the identity
-in general) — found by comparing individual diagrams against the
-finite-ring reference and finding an exact, large (not roundoff-scale)
-mismatch, fixed, and re-verified to match to $\sim$1e-13. (3) The
-tangent-space norm's own metric (the fixed point `r`) is, in general, a
-severely ill-conditioned matrix — its eigenvalues are exactly the
-ground state's own entanglement spectrum, and any weakly-entangled
-(e.g.\ deep-paramagnetic) ground state has a steeply decaying one
-(confirmed directly: `[0, 0, 0, 0.0073, 0.9927]`, condition number
-$\sim$1e10, for a transverse-field-Ising ground state at bond dimension
-5) — solving the naive generalized eigenproblem `H_eff(k)[X] = E*(X@r)`
-directly against this metric gave numerically garbage results; the fix
-(`_reduce_metric`) substitutes `X = X_tilde @ diag(1/sqrt(eig)) @
-V^dagger` restricted to `r`'s own well-conditioned eigenspace (the
-dropped directions have exactly zero physical norm, not merely small,
-so nothing physical is discarded), turning the problem into an ordinary,
-well-conditioned Hermitian eigenproblem.
-
-**A known, currently unresolved limitation, not silently papered over**:
-after all three fixes above, the ansatz matches the exact free-fermion
-single-magnon dispersion of a field-polarized XX chain (bond dimension
-`D=1`, an uncorrelated/product-state ground state) to $\sim$14 digits
-across the entire Brillouin zone — but for a genuinely entangled ground
-state (`D>1`), the resulting dispersion comes out anomalously flat
-compared to the expected answer, despite every individual diagram still
-independently matching the same finite-ring reference to $\sim$1e-13 and
-`H_eff(k)` remaining exactly Hermitian at every momentum tried. This was
-not root-caused despite extensive investigation (ruled out: metric
-conditioning, per (3) above; `Lh`/`Rh`'s own internal consistency,
-verified both via the linear solve's own residual and via independent
-direct iteration of their defining recursion; iDMRG's own convergence
-quality, which did not help even at `state_overlap~0.9999`).
-`build_excitation_environment` therefore explicitly rejects `D>1` with
-`NotImplementedError` rather than silently returning a dispersion known,
-in at least some cases, to be wrong — see
-`pyitensor/idmrg_excitations.py`'s own module docstring ("KNOWN
-LIMITATION" section) for the full account, and
-`examples/idmrg/excitation_gap_xx/main.py` for the validated `D=1` case.
+**History.** An earlier version of this module built the ansatz on top
+of a single uniform-gauge tensor from `idmrg.py`'s growing algorithm
+instead, with a hand-derived, closed-form-resummed diagram list; it
+matched the exact free-fermion dispersion of a field-polarized XX chain
+(`D=1`) to $\sim$14 digits, but was wrong (anomalously flat) for a
+genuinely entangled (`D>1`) ground state despite eight independent
+investigation passes (three real bugs found and fixed along the way,
+none of which closed the gap; see `git log` on this file and
+`docs/idmrg_excitation_mpskit_port_plan.md` for the full account). That
+investigation's own conclusion — rewrite from scratch mirroring
+MPSKit.jl's actual architecture on top of a genuine mixed-gauge
+`{AL,AR,C}` ground state (VUMPS), rather than patching the diagram list
+further — is what the current version implements. Getting it working at
+`D>1` additionally required fixing a real, pre-existing sign bug in
+`vumps.py` itself (`_solve_left_environment`/`_solve_right_environment`/
+`_energy_density_and_source_from_left`/`_right` were all missing a
+conjugate on the dominant fixed point used to close an
+`apply_transfer_from_left`/`apply_transfer` output — invisible at `D=1`,
+where that fixed point is always real; see `vumps.py`'s own docstrings)
+and a subtler point specific to the excitation ansatz itself: the
+constant subtracted from `H_eff(k)`'s raw eigenvalues must be `H_AC`'s
+own Rayleigh quotient on the converged `AC=AL@C` (`lambda_AC`), not the
+ground state's physical energy density `e_cell` (`=lambda_AC-lambda_C`,
+the difference of `H_AC`'s and `H_C`'s own eigenvalues — the standard
+VUMPS energy-density identity) — see `ExcitationEnvironment`'s own
+docstring. With both fixes, the `D=2` transverse-field Ising dispersion
+matches an independently-converged MPSKit.jl result to 6 significant
+figures at every momentum tested, and `H_eff(k)` is Hermitian to machine
+precision at `D=1`, `2` and `3`. See
+`examples/idmrg/excitation_gap_xx/main.py` (`D=1`) and
+`examples/idmrg/excitation_gap_tfim/main.py` (`D=2`).
 
 **A cheaper, cruder alternative: the local superblock gap
 (`pyitensor/idmrg.py::local_excitation_gap`)**: rather than a fresh

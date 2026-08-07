@@ -1008,27 +1008,25 @@ def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
 
 # -- excitation_energies/excitation_gap: the tangent-space/quasiparticle
 # excitation ansatz (pyitensor/idmrg_excitations.py) -- see that module's
-# own docstring for the algorithm and, importantly, its "KNOWN LIMITATION"
-# section: only a product-state-like (bond dimension D=1) converged ground
-# state is currently supported. A genuinely entangled ground state (D>1,
-# e.g. the uniform/dimerized Heisenberg chains used elsewhere in this file)
-# was found, during development, to give a dispersion that comes out
-# anomalously flat compared to the expected answer despite every individual
-# diagram independently checking out against a from-scratch finite-ring
-# tensor-network contraction -- not yet root-caused, so D>1 is rejected
-# with NotImplementedError rather than silently returning a questionable
-# number. The tests below therefore validate the D=1 case exactly (a
-# field-polarized XX chain, exactly solvable via free fermions) and treat
-# D>1/other scope violations as guard-rail tests only.
+# own docstring for the algorithm. Requires gs_method="vumps" (not the
+# default "idmrg", see infinitechain.py's own class docstring): any
+# converged bond dimension D>=1 is supported, including a genuinely
+# entangled (D>1) ground state -- see idmrg_excitations.py's own "History"
+# section for the investigation that used to make D>1 an explicit,
+# rejected scope limit here.
 
-def _polarized_xx_chain(J=1.0, h=3.0, maxm=4, maxiter=50, etol=1e-12):
+def _polarized_xx_chain(J=1.0, h=3.0, maxm=4, maxiter=50, etol=1e-12, gs_method="idmrg"):
     """A field-polarized n_uc=1 XX chain (h > J, the XX chain's own
     saturation field) -- the ground state is the exact fully-polarized
-    product state, so iDMRG converges to a bond dimension D=1 unit cell,
-    matching idmrg_excitations.py's own supported scope. Exact single-
-    magnon dispersion (free fermions via Jordan-Wigner):
-    E(k) = 2*h - J*cos(k)."""
+    product state, so both iDMRG and VUMPS converge to a bond dimension
+    D=1 unit cell. Exact single-magnon dispersion (free fermions via
+    Jordan-Wigner): E(k) = 2*h - J*cos(k). `gs_method` defaults to
+    "idmrg" (what local_excitation_gap's own tests below need);
+    excitation_energies/excitation_gap's own tests pass "vumps" explicitly
+    (see infinitechain.py's own class docstring for why the two features
+    need different gs_method values)."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = gs_method
     h_op = -J * (ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0]) - 2 * h * ic.SzC[0]
     ic.maxm, ic.maxiter, ic.etol = maxm, maxiter, etol
     ic.set_hamiltonian(h_op)
@@ -1038,7 +1036,7 @@ def _polarized_xx_chain(J=1.0, h=3.0, maxm=4, maxiter=50, etol=1e-12):
 
 def test_excitation_energies_matches_exact_xx_dispersion():
     J, h = 1.0, 3.0
-    ic = _polarized_xx_chain(J, h)
+    ic = _polarized_xx_chain(J, h, gs_method="vumps")
     for k in np.linspace(0, 2 * np.pi, 9, endpoint=False):
         exact = 2 * h - J * np.cos(k)
         got = ic.excitation_energies(k, n=1)[0]
@@ -1048,7 +1046,7 @@ def test_excitation_energies_matches_exact_xx_dispersion():
 def test_excitation_gap_matches_exact_minimum():
     """min_k (2h - J*cos(k)) = 2h - J, attained at k=0."""
     J, h = 1.0, 3.0
-    ic = _polarized_xx_chain(J, h)
+    ic = _polarized_xx_chain(J, h, gs_method="vumps")
     assert ic.excitation_gap() == pytest.approx(2 * h - J, abs=1e-8)
 
 
@@ -1057,7 +1055,7 @@ def test_excitation_environment_is_cached_across_calls():
     self._excitation_env (identity, not just an equal rebuild) -- it is
     expensive to build (a null-space computation plus dense linear
     solves)."""
-    ic = _polarized_xx_chain()
+    ic = _polarized_xx_chain(gs_method="vumps")
     ic.excitation_energies(0.0)
     env = ic._excitation_env
     assert env is not None
@@ -1067,15 +1065,43 @@ def test_excitation_environment_is_cached_across_calls():
 
 def test_excitation_gap_before_set_hamiltonian_raises():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "vumps"
     with pytest.raises(RuntimeError):
         ic.excitation_gap()
 
 
-def test_excitation_energies_rejects_entangled_ground_state():
-    """D>1 (a genuinely entangled ground state) is a known, deliberate
-    scope limit -- see idmrg_excitations.py's own "KNOWN LIMITATION"
-    section, and this file's own module-level comment above."""
-    ic, _ = _converged_uniform_chain(2, maxm=20, maxiter=100, etol=1e-11)
+def test_excitation_energies_matches_exact_tfim_dispersion_d2():
+    """A genuinely entangled (D=2) ground state -- the transverse-field
+    Ising chain (J=1, g=2.5, gapped paramagnetic phase), same convention
+    as test_vumps.py's own `_tfim_chain` (H = -4*SxC*SxR - 2*g*SzC =
+    -sigma^x sigma^x - g*sigma^z) -- reproduces the exact free-fermion
+    single-magnon dispersion eps(k) = 2*sqrt(J^2+g^2-2*J*g*cos(k)) to
+    within VUMPS's own D=2 convergence, cross-checked independently
+    against MPSKit.jl's own D=2 result to 6 significant figures (see
+    idmrg_excitations.py's own "History" section and
+    docs/idmrg_excitation_mpskit_port_plan.md)."""
+    J, g = 1.0, 2.5
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "vumps"
+    ic.maxm = 2
+    ic.etol = 1e-12
+    ic.vumps_nrestarts = 6
+    ic.set_hamiltonian(-4.0 * J * ic.SxC[0] * ic.SxR[0] - 2.0 * g * ic.SzC[0])
+    ic.gs_energy()
+    assert ic.converged
+    for k in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]:
+        exact = 2 * np.sqrt(J ** 2 + g ** 2 - 2 * J * g * np.cos(k))
+        got = ic.excitation_energies(k, n=1)[0]
+        assert got.real == pytest.approx(exact, abs=2e-3)
+
+
+def test_excitation_energies_gs_method_idmrg_not_implemented():
+    """excitation_energies/excitation_gap need VUMPSResult's own mixed-
+    gauge {AL,AR,C,GL,GR} -- the default gs_method="idmrg" (the growing
+    algorithm) has no equivalent, so it is rejected explicitly rather than
+    silently misused."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
     with pytest.raises(NotImplementedError):
         ic.excitation_gap()
 
@@ -1090,8 +1116,12 @@ def test_excitation_energies_itensor_version3_not_implemented():
 def test_excitation_energies_rejects_reach_greater_than_one():
     """A deliberately constructed longer-range term
     (get_operator(..., group="R") with i>=n_uc) spans 2 supersites after
-    grouping -- rejected by idmrg_excitations._check_reach_one."""
+    grouping -- rejected by idmrg_excitations._check_reach_one, called
+    from within vumps.vumps_ground_state itself (i.e. by the implicit
+    gs_energy() call inside excitation_gap(), not by the excitation
+    machinery directly)."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "vumps"
     far = ic.get_operator("Sx", 1, group="R")  # site n_uc+1 = 2, reach=2
     h = ic.SxC[0] * far - 2.0 * ic.SzC[0]
     ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12

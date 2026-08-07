@@ -195,13 +195,17 @@ def test_gs_method_vumps_correlator_not_implemented():
         ic.correlator("Sz", 0, "Sz", 1)
 
 
-def test_gs_method_vumps_excitation_gap_not_implemented():
-    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
+def test_gs_method_vumps_excitation_gap_works():
+    """excitation_energies/excitation_gap require gs_method="vumps" (the
+    reverse of vev/correlator, which require gs_method="idmrg") -- see
+    pyitensor.idmrg_excitations' own module docstring for the algorithm.
+    D=1 field-polarized case: E(k)=B for every k (a single spin flip costs
+    exactly the field energy, independent of momentum, since there is no
+    bond term to disperse it)."""
+    ic = _field_chain(2.0)
     ic.gs_method = "vumps"
     ic.maxm = 1
-    ic.set_hamiltonian(-0.5 * ic.SzC[0])
-    with pytest.raises(NotImplementedError):
-        ic.excitation_gap()
+    assert ic.excitation_gap() == pytest.approx(2.0, abs=1e-8)
 
 
 def test_gs_method_unknown_raises():

@@ -52,7 +52,7 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Non-Hermitian generalized eigenproblem | ✅ | ✅ | ✅ | Same story as above, one level up (`gs_energy_generalized_nhdmrg`; `mpsjulialive/generalized.jl`'s `get_gs_generalized_nhdmrg` wraps the same outer loop around real ITensorNHDMRG.jl sweeps). v2 still excluded. |
 | iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. |
 | iDMRG vev / two-point correlator | ❌ | ✅ | ❌ | pyitensor only — v3's iDMRG session has no equivalent to `two_point_correlator`/`onsite_expectation` yet. |
-| iDMRG excitation ansatz (quasiparticle, tangent-space) | ❌ | 🟡 | ❌ | pyitensor only, and only `D=1` bond dimension (`D>1` gives an unresolved anomalous dispersion — deliberately descoped, see `NotImplementedError` for `D>1`). |
+| iDMRG excitation ansatz (quasiparticle, tangent-space) | ❌ | ✅ | ❌ | pyitensor only, requires `gs_method="vumps"`; any bond dimension `D>=1` is supported now (see item 4 below). |
 | iDMRG local excitation gap (deflation-based, `D`-capable) | ❌ | ✅ | ❌ | pyitensor only (`idmrg.py::local_excitation_gap`/`local_excitation_gap_windowed`). |
 | iDMRG dynamical correlator (finite-window KPM reduction) | ❌ | ✅ | ❌ | `infinitechain.py::kpm_finite` is gated to `itensor_version="python"` only. |
 | iDMRG real-time window dynamics (IBC-style TDVP, `td_dynamical_correlator`) | ✅ | ✅ | ❌ | Both wired (`idmrg_window.py` for pyitensor, `mpscpp3/chain_session.h`'s `td_dynamical_correlator_window` for v3); Phase 2+ generic sweep machinery beyond the current window construction is still pyitensor-only groundwork (`idmrg_window.py`'s own Phase 0-1 notes). |
@@ -139,59 +139,30 @@ model-specific exception:
    The fast environment-reuse algorithm has no flavor-resolved
    counterpart yet; `ctmode="full"` remains the practical choice for
    `Spinful_Fermionic_Chain_Native`.
-4. **iDMRG excitation ansatz beyond `D=1`.** Known to be broken (anomalous
-   flat dispersion), not just unimplemented — needs real debugging, not
-   just porting effort, before `D>1` can be un-blocked. A sixth
-   investigation pass (see `pyitensor/idmrg_excitations.py`'s own
-   docstring) built a mixed-gauge {A_L,A_R,C} port on top of `vumps.py`'s
-   VUMPS ground state, found and fixed two previously-missing diagrams,
-   and structurally resolved the tangent-space metric's conditioning
-   problem — real progress, but the resulting H_eff(p) is still not
-   Hermitian at D>1, so this remains unimplemented/unexposed. A seventh
-   pass independently re-derived the same construction from the actual
-   published equations (arXiv:1810.07006 Eq. 176-198, cross-checked
-   against MPSKit.jl's source) and got D=1 exact-and-Hermitian from a
-   cleaner code path, plus confirmed the sixth pass's own two extra
-   diagrams are real and necessary (reproducing "improves accuracy,
-   worsens Hermiticity" independently) but still not sufficient — a
-   channel-resolved (MPSKit-style GBL/GBR) alternative construction was
-   also tried and abandoned after a from-scratch D=1 brute-force
-   reproducer (built this pass, dense Sx/Sy/Sz matrices, no automaton)
-   showed it was internally self-consistent but computing the wrong
-   quantity on its rightward half. An eighth pass consulted an
-   independent model for strategy first, then (1) showed the third
-   pass's own unexplained `env_HR` residual is NOT the root cause (passes
-   six/seven's mixed-gauge H_eff already bypasses it entirely via VUMPS's
-   independently energy-validated GL/GR and still fails the same way),
-   (2) definitively ruled out — checked in isolation, not just via the
-   final dispersion — two natural "leftward mirror" completions of the
-   sixth pass's own (i)/(ii) diagrams (both vanish identically, exactly,
-   at D=2, not just approximately), and (3) found that diagrams 6a/6b
-   ALONE (i.e. without (i)/(ii)) reproduce the classic flat/wrong
-   dispersion with a comparatively SMALL Hermiticity defect, while adding
-   (i)/(ii) fixes the flatness (real, correct-shaped k-dependence) at the
-   cost of a much LARGER Hermiticity defect — a genuine trade-off,
-   pointing at a structurally new, doubly-nested diagram type (mirroring
-   the published Eq. 197's own "resolvent feeding into a further h-touching
-   term", which no diagram in any of the eight passes so far has an
-   analogue of) as the most concrete remaining lead, rather than further
-   sign/mirror recombination of what's already been tried. D>1 still
-   unimplemented; see the module docstring's own "Net effect" (eighth
-   pass) for the full writeup. **Decision after the eighth pass: stop
-   patching this module's own diagram-list construction and instead build
-   a whole new implementation mirroring MPSKit.jl's actual algorithm
-   architecture** (its real source, now available locally on this
-   machine — not just its published equations). This also surfaced a
-   concrete new lead the diagram-list approach never had: MPSKit's own
-   ground-truth mixed-transfer fixed points disagree with the sixth
-   pass's own hand-derived ones in a specific, checkable way (`C^dagger`
-   where that pass used `conj(C)`), and an independent oracle run
-   (MPSKit's own D=2 TFIM dispersion) confirms the ansatz genuinely works
-   at D>1 in a correct implementation, matching the exact free-fermion
-   band to 5-6 digits. Full technical handoff — environment setup, the
-   oracle numbers, the relevant MPSKit source read directly, and a
-   recommended shape for the new module — is in
-   `docs/idmrg_excitation_mpskit_port_plan.md`.
+4. **iDMRG excitation ansatz beyond `D=1`.** Now implemented — see
+   `pyitensor/idmrg_excitations.py`'s own module docstring ("History"
+   section) for the full account of what it took: after eight
+   investigation passes patching the old, single-uniform-gauge-tensor
+   diagram list (documented in that module's own git history and
+   `docs/idmrg_excitation_mpskit_port_plan.md`) failed to fix `D>1`, the
+   ansatz was rewritten from scratch on top of a VUMPS ground state's own
+   mixed-gauge `{AL,AR,C,GL,GR}`, mirroring MPSKit.jl's actual
+   architecture (channel-resolved `GBL(k)`/`GBR(k)`, a 3-term `H_eff(k)`)
+   rather than its published equations alone. This also surfaced and
+   fixed two further, previously-undiscovered bugs: a real, pre-existing
+   missing-conjugate sign bug in `vumps.py` itself (`_solve_left_
+   environment`/`_solve_right_environment`/`_energy_density_and_source_
+   from_left`/`_right`, invisible at `D=1` where the relevant fixed point
+   is always real — this also measurably improves `gs_method="vumps"`'s
+   own `D>1` ground-state convergence reliability, previously documented
+   as a known, unresolved robustness gap in `vumps.py`'s own "Convergence
+   robustness" section), and the correct excitation-energy renormalization
+   constant (`H_AC`'s own eigenvalue `lambda_AC`, not the ground state's
+   physical energy density `e_cell`). The `D=2` transverse-field Ising
+   dispersion now matches an independently-converged MPSKit.jl result to
+   6 significant figures, and `H_eff(k)` is Hermitian to machine precision
+   at `D=1`, `2` and `3` — see `examples/idmrg/excitation_gap_tfim/
+   main.py`.
 5. **iDMRG cat-state superpositions.** No backend supports summing two
    *physically distinct* symmetry-broken iDMRG ground states; needs new
    correlator machinery from scratch.

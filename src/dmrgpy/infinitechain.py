@@ -169,12 +169,16 @@ class Infinite_Many_Body_Chain:
     `self.gs_method` (`itensor_version="python"` only): `"idmrg"` (default,
     `pyitensor/idmrg.py`'s growing/infinite-size algorithm) or `"vumps"`
     (`pyitensor/vumps.py`'s direct fixed-bond-dimension solver -- see its
-    own module docstring for the algorithm and how it differs). Like
-    `itensor_version=3`, `gs_method="vumps"` supports `gs_energy` only;
-    `vev`/`correlator`/`excitation_energies`/`excitation_gap`/
-    `local_excitation_gap` all require `gs_method="idmrg"` (VUMPS's own
-    result has no per-sublattice representation those need -- see
-    `pyitensor.vumps.VUMPSResult`'s own docstring)."""
+    own module docstring for the algorithm and how it differs). `vev`/
+    `correlator`/`local_excitation_gap` require `gs_method="idmrg"` (they
+    need `IDMRGResult`'s own per-sublattice `U_list`, which `VUMPSResult`
+    has no equivalent of -- see `pyitensor.vumps.VUMPSResult`'s own
+    docstring); conversely `excitation_energies`/`excitation_gap` (the
+    tangent-space/quasiparticle excitation ansatz) require
+    `gs_method="vumps"` -- they need `VUMPSResult`'s own mixed-gauge
+    {AL,AR,C,GL,GR}, which the growing algorithm's `IDMRGResult` has no
+    equivalent of (see `pyitensor.idmrg_excitations`' own module
+    docstring)."""
 
     def __init__(self, site_types, itensor_version="python"):
         if itensor_version not in ("python", 3):
@@ -456,37 +460,43 @@ class Infinite_Many_Body_Chain:
     def _get_excitation_environment(self):
         """Lazily build (or reuse) the pyitensor.idmrg_excitations.
         ExcitationEnvironment for the converged ground state -- expensive
-        (a null-space computation plus two dense linear solves), so it is
-        cached on self._excitation_env across repeated excitation_energies/
-        excitation_gap calls (e.g. a k-scan), and invalidated whenever
-        set_hamiltonian/gs_energy reruns (see __init__'s own comment)."""
-        if self.itensor_version != "python" or self.gs_method != "idmrg":
+        (a null-space computation plus several dense linear solves per
+        momentum), so it is cached on self._excitation_env across repeated
+        excitation_energies/excitation_gap calls (e.g. a k-scan), and
+        invalidated whenever set_hamiltonian/gs_energy reruns (see
+        __init__'s own comment).
+
+        Requires gs_method="vumps" (not the default "idmrg"): the
+        tangent-space excitation ansatz needs the mixed-gauge {AL,AR,C,
+        GL,GR} representation only vumps.vumps_ground_state produces (see
+        pyitensor.idmrg_excitations' own module docstring) -- the growing
+        algorithm's IDMRGResult has no such representation. Set
+        `self.gs_method = "vumps"` before calling gs_energy()/
+        excitation_energies() (or let this method call gs_energy() itself,
+        which will then also use gs_method="vumps")."""
+        if self.itensor_version != "python" or self.gs_method != "vumps":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.excitation_energies/excitation_gap: "
-                "only itensor_version=\"python\" with gs_method=\"idmrg\" is "
-                "supported -- see pyitensor.idmrg_excitations' own module "
-                "docstring")
-        if self._result is None:
+                "only itensor_version=\"python\" with gs_method=\"vumps\" is "
+                "supported -- set self.gs_method = \"vumps\" before calling "
+                "gs_energy()/excitation_energies() -- see "
+                "pyitensor.idmrg_excitations' own module docstring")
+        if self._vumps_result is None:
             self.gs_energy()
         if self._excitation_env is None:
             from .pyitensor import idmrg_excitations
             self._excitation_env = idmrg_excitations.build_excitation_environment(
-                self._result, self._h_intra.op, self._h_inter.op, self.n_uc,
-                self.site_types)
+                self._vumps_result)
         return self._excitation_env
 
     def excitation_energies(self, k, n=1):
         """The lowest `n` excitation energies (above the ground state) at
         momentum `k` (radians, per unit cell) of the tangent-space/
         quasiparticle excitation ansatz -- see
-        pyitensor.idmrg_excitations' own module docstring for the algorithm,
-        and its "KNOWN LIMITATION" section for an important scope
-        restriction: only a product-state-like (bond dimension D=1)
-        converged ground state is currently supported (raises
-        NotImplementedError otherwise) -- a genuinely entangled ground state
-        was found, during development, to give a dispersion that is
-        anomalously flat compared to the expected answer, not yet
-        root-caused."""
+        pyitensor.idmrg_excitations' own module docstring for the
+        algorithm. Any converged bond dimension D>=1 is supported (requires
+        gs_method="vumps", see `_get_excitation_environment`'s own
+        docstring)."""
         env = self._get_excitation_environment()
         from .pyitensor import idmrg_excitations
         return idmrg_excitations.excitation_energies(env, k, n=n)
@@ -499,8 +509,7 @@ class Infinite_Many_Body_Chain:
         `get_excited(n=2)[1]-get_excited(n=2)[0]`; here there is no
         discrete second state, only a momentum-resolved band, so the gap
         is defined as the band's own minimum. See excitation_energies'
-        own docstring for the scope restriction (D=1 ground states only,
-        for now)."""
+        own docstring for the gs_method="vumps" requirement."""
         if ks is None:
             ks = np.linspace(-np.pi, np.pi, 41)
         return min(self.excitation_energies(k, n=1)[0] for k in ks)
