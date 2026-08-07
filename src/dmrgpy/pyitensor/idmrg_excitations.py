@@ -804,6 +804,22 @@ transfer projector, and C all trivialize to scalars/identity at D=1.
   recombination of the diagrams already tried across all eight passes so
   far.
 
+DECISION (following the eighth pass): rather than a ninth patch attempt on
+this module's own diagram-list construction, the plan going forward is a
+whole new implementation that mirrors MPSKit.jl's actual algorithm
+architecture (its real source, now available locally -- not just its
+published equations, which is all passes four/five/seven ever had). This
+also turned up a genuinely new, concrete lead the diagram-list approach
+never surfaced: MPSKit's own ground-truth mixed-transfer fixed points
+disagree with the sixth pass's own hand-derived ones in a specific,
+checkable way (`C^dagger` where that pass used `conj(C)`). See
+`docs/idmrg_excitation_mpskit_port_plan.md` for the full technical
+handoff -- environment setup (Julia is already installed on this machine,
+no download needed), an oracle run confirming the method genuinely works
+at D=2 (matches the exact TFIM free-fermion dispersion to 5-6 digits),
+the relevant MPSKit source files/functions read directly (not
+reconstructed from images), and a recommended shape for the new module.
+
 == Algorithm summary ==
 
 1. Group the unit cell into one supersite (A, W) -- plain NumPy arrays, W

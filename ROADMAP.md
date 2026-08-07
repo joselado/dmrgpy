@@ -177,7 +177,21 @@ model-specific exception:
    analogue of) as the most concrete remaining lead, rather than further
    sign/mirror recombination of what's already been tried. D>1 still
    unimplemented; see the module docstring's own "Net effect" (eighth
-   pass) for the full writeup.
+   pass) for the full writeup. **Decision after the eighth pass: stop
+   patching this module's own diagram-list construction and instead build
+   a whole new implementation mirroring MPSKit.jl's actual algorithm
+   architecture** (its real source, now available locally on this
+   machine — not just its published equations). This also surfaced a
+   concrete new lead the diagram-list approach never had: MPSKit's own
+   ground-truth mixed-transfer fixed points disagree with the sixth
+   pass's own hand-derived ones in a specific, checkable way (`C^dagger`
+   where that pass used `conj(C)`), and an independent oracle run
+   (MPSKit's own D=2 TFIM dispersion) confirms the ansatz genuinely works
+   at D>1 in a correct implementation, matching the exact free-fermion
+   band to 5-6 digits. Full technical handoff — environment setup, the
+   oracle numbers, the relevant MPSKit source read directly, and a
+   recommended shape for the new module — is in
+   `docs/idmrg_excitation_mpskit_port_plan.md`.
 5. **iDMRG cat-state superpositions.** No backend supports summing two
    *physically distinct* symmetry-broken iDMRG ground states; needs new
    correlator machinery from scratch.
