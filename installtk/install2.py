@@ -66,7 +66,17 @@ def compile(config, version=DEFAULT_ITENSOR_VERSION):
     print("### Compiling ITensor v"+str(version)+
           " (this is the slow step, several minutes) ###")
     _run(["make", "clean"], itensor_dir)
-    _run(["make"], itensor_dir) # CCCOM already correct via options.mk
+    # ITensor/Makefile's own "itensor" target runs a bare, targetless
+    # "cd itensor && $(MAKE)" -- which defaults to itensor/Makefile's own
+    # first target, "install: build debug", compiling a second, unused
+    # libitensor-g.a debug library alongside the real one
+    # (ITENSOR_LIBNAMES=itensor, never itensor-g, so nothing here ever
+    # links against it). Run "configure" (writes this_dir.mk/config.h,
+    # same as the "itensor" target's prerequisite) ourselves, then invoke
+    # itensor/Makefile directly with an explicit "build" goal to skip that
+    # duplicate compile. CCCOM already correct via options.mk.
+    _run(["make", "configure"], itensor_dir)
+    _run(["make", "build"], itensor_dir+"/itensor")
 
     print("### Compiling the in-process pybind11 extension (v"+
           str(version)+") ###")
