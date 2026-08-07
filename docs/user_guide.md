@@ -863,11 +863,12 @@ correlator directly in the time domain,
 
 $$C(t)=\langle\mathrm{GS}|A(t)B(0)|\mathrm{GS}\rangle=e^{iE_0t}\langle\mathrm{GS}|A\,e^{-iHt}\,B|\mathrm{GS}\rangle$$
 
-which is then windowed with an exponential damping factor
-$e^{-\delta t}$ (equivalent to a Lorentzian broadening of width $\delta$
-in frequency) and Fourier transformed,
+which is then windowed with a damping/taper factor $w_\delta(t)$ (see
+`damping` below; the default is an exponential
+$w_\delta(t)=e^{-\delta t}$, equivalent to a Lorentzian broadening of
+width $\delta$ in frequency) and Fourier transformed,
 
-$$S_{AB}(\omega)=\frac1\pi\,\mathrm{Re}\!\int_0^{T}\!dt\;e^{i\omega t}\,C(t)\,e^{-\delta t}$$
+$$S_{AB}(\omega)=\frac1\pi\,\mathrm{Re}\!\int_0^{T}\!dt\;e^{i\omega t}\,C(t)\,w_\delta(t)$$
 
 The total simulated time $T$ (`damping_periods`/$\delta$) must be long
 enough that the damping has suppressed truncation ringing by $t=T$.
@@ -882,6 +883,69 @@ Hamiltonian is strictly nearest-neighbor, e.g.\ a
 `Spinful_Fermionic_Chain_Native` Hubbard chain (the standard interleaved
 `Spinful_Fermionic_Chain` is *not* nearest-neighbor after Jordan-Wigner
 threading, so TEBD raises `NotImplementedError` there).
+
+*Sharpening `"TD"`'s lineshape (`damping`, `predict`).* An exponential
+window gives $S_{AB}(\omega)$ an exact Lorentzian lineshape, whose
+$1/(\omega-\omega_0)^2$ tail is much heavier away from a peak than
+`"KPM"`'s default Jackson-kernel reconstruction (see `docs/
+td_dynamical_correlator_sharpening_plan.md` for the full design,
+literature, and the empirical comparison behind the default below). Two
+independent, composable knobs address this:
+
+```python
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="TD",
+        name=(sc.Sz[0], sc.Sz[0]), delta=0.05,
+        damping="exp",                # default; "gaussian"/"parzen" also available
+        predict=True, lp_order=None, lp_extend_factor=10)  # predict=True is the default
+```
+
+- `damping` selects $w_\delta(t)$: `"exp"` (default), the exponential
+  above; `"gaussian"`, $w_\delta(t)=e^{-(\delta t)^2/2}$, whose Fourier
+  transform decays as $e^{-\omega^2}$ (far faster than the Lorentzian's
+  algebraic tail), at the cost of a slightly wider FWHM at the same
+  $\delta$ ($2\sqrt{2\ln2}\,\delta\approx2.35\delta$ vs the Lorentzian's
+  $2\delta$); `"parzen"`, a taper with compact support that vanishes
+  (with zero derivative) exactly at $t=T$, which instead targets the
+  Gibbs ringing from truncating $C(t)$ at a finite $T$, independent of
+  the peak-broadening tradeoff above.
+- `predict` (default `True`) extrapolates the raw, undamped $C(t)$ via
+  linear prediction (`dynamicstk.linearprediction.linear_predict_extend`,
+  following White & Affleck and Barthel, White & Schollwöck,
+  [arXiv:0901.2342](https://arxiv.org/abs/0901.2342)) before any
+  windowing: an autoregressive model of order `lp_order` (default
+  `None`, auto-picked as $\min(20,\max(4,\lfloor n_t/10\rfloor))$ so it
+  stays safe even for a short simulation) is fit to the tail of $C(t)$
+  and used to synthesize `lp_extend_factor` times as many additional
+  samples, so the same real TDVP/TEBD simulation yields a sharper
+  spectral function than windowing alone — the standard fix in the
+  DMRG-dynamics literature for finite-simulated-time resolution loss,
+  since it needs no additional entanglement growth. Pass `predict=False`
+  to recover the exact pre-existing behavior. `lp_fit_start_fraction`
+  (default 0.5) skips the corresponding leading fraction of $C(t)$ before
+  fitting, and `lp_max_pole_radius` (default 1.0) reflects any fitted
+  pole outside the unit circle back onto it, since the physical
+  correlator only has weight for poles on or inside it and a slightly
+  unstable fit would otherwise diverge under extrapolation.
+
+`damping="exp"` paired with `predict=True` is the default combination
+because it empirically gave the narrowest, best-centered peak among
+every combination tried on a test system with a known exact gap:
+pairing `predict=True` with `"gaussian"` instead came out *worse* (its
+larger intrinsic FWHM at fixed $\delta$ partly cancels prediction's own
+narrowing), and pairing it with `"parzen"` came out statistically tied
+with plain `"exp"`, not better (`docs/td_dynamical_correlator_sharpening_plan.md`
+has the numbers). Note that neither knob changes the *asymptotic*
+algebraic decay of the tail far from any resonance — `"KPM"`'s far tail
+still decays much faster, since its Jackson-kernel-damped Chebyshev
+reconstruction has no Lorentzian/algebraic tail to begin with; these
+knobs sharpen `"TD"`'s peaks and suppress its near-tail ringing, not
+close that specific gap.
+
+Both `damping` and `predict`/`lp_*` are also accepted by `submode="TDZ"`
+and by the internal `S(k,\omega)` reduction (`sxt_to_skomega`), since all
+three share the same windowing/FFT tail -- but their own defaults are
+unchanged (`damping="exp"`, `predict=False`), since the empirical
+comparison above was only run for `"TD"`.
 
 **`submode="TDZ"` — complex-time evolution (Cao, Lu, Stoudenmire &
 Parcollet, arXiv:2311.10909).** Real-time evolution (`"TD"` above) grows

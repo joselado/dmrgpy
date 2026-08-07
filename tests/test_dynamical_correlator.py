@@ -193,6 +193,66 @@ def test_tdz_dynamical_correlator_peak_matches_exact_gap(itensor_version):
     assert peak == pytest.approx(HEISENBERG_4_GAP, abs=0.03)
 
 
+@pytest.mark.parametrize("damping", ["exp", "gaussian", "parzen"])
+def test_td_window_options_preserve_peak_position(damping):
+    """submode="TD" (timedependent.py::dynamical_correlator) windows the
+    raw time-domain correlator before the FFT via a selectable `damping`
+    taper (see timedependent.py::_damping_window and
+    docs/td_dynamical_correlator_sharpening_plan.md): "exp" (the
+    pre-existing default, an exact Lorentzian broadening), "gaussian"
+    (faster-decaying tail), and "parzen" (compact-support taper,
+    suppresses truncation ringing). All three only change the *shape* of
+    the peak, not its location -- each should still land on the exact
+    gap to within the same tolerance the TDZ test above uses (it shares
+    this same FFT tail via _fourier_transform_correlator)."""
+    sc = _heisenberg_chain()
+    sc.setup_python()  # cheap, always-available backend for this check
+    name = (sc.Sz[0], sc.Sz[0])
+    x, y = sc.get_dynamical_correlator(mode="DMRG", submode="TD", name=name,
+                                        es=_PEAK_ES, delta=DELTA,
+                                        damping=damping)
+    x, y = np.array(x), np.array(y).real
+    peak = x[np.argmax(y)]
+    assert peak == pytest.approx(HEISENBERG_4_GAP, abs=0.03)
+
+
+def test_td_linear_prediction_sharpens_peak():
+    """Linear-prediction extrapolation (dynamicstk/linearprediction.py,
+    enabled via dynamical_correlator's predict=True) extends the raw C(t)
+    before windowing, so the same real TDVP simulation should yield a
+    narrower resonance than the plain windowed FFT -- the entire point of
+    the technique (see docs/td_dynamical_correlator_sharpening_plan.md).
+    Checked on the same 4-site Heisenberg gap used throughout this file:
+    both the plain and linear-prediction spectra must still peak at the
+    exact gap, but the linear-prediction one must have a strictly
+    narrower full width at half max."""
+    sc = _heisenberg_chain()
+    sc.setup_python()
+    name = (sc.Sz[0], sc.Sz[0])
+    es = np.linspace(0.3, 1.0, 281)  # finer grid to resolve FWHM reliably
+    delta = DELTA
+
+    x0, y0 = sc.get_dynamical_correlator(mode="DMRG", submode="TD", name=name,
+                                          es=es, delta=delta, predict=False)
+    x1, y1 = sc.get_dynamical_correlator(mode="DMRG", submode="TD", name=name,
+                                          es=es, delta=delta, predict=True,
+                                          lp_order=15, lp_extend_factor=8)
+    x0, y0 = np.array(x0), np.abs(y0)
+    x1, y1 = np.array(x1), np.abs(y1)
+
+    peak0, peak1 = x0[np.argmax(y0)], x1[np.argmax(y1)]
+    assert peak0 == pytest.approx(HEISENBERG_4_GAP, abs=0.03)
+    assert peak1 == pytest.approx(HEISENBERG_4_GAP, abs=0.03)
+
+    def fwhm(x, y):
+        i0 = np.argmax(y)
+        half = y[i0]/2
+        above = x[y >= half]
+        return above.max() - above.min()
+
+    assert fwhm(x1, y1) < fwhm(x0, y0)
+
+
 def test_finite_T_dynamical_correlator_independent_of_es_window():
     """get_dynamical_correlator(mode="ED", submode="ED", T=...) (the
     finite-temperature Lehmann sum, edtk/dynamics.py's

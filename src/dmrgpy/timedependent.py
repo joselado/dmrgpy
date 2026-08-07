@@ -182,13 +182,18 @@ def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
 
 
 def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
-        nt=None,factor=1,delta=5e-2,damping_periods=6,**kwargs):
+        nt=None,factor=1,delta=5e-2,damping_periods=6,damping="exp",
+        predict=True,lp_order=None,lp_extend_factor=10,
+        lp_fit_start_fraction=0.5,lp_max_pole_radius=1.0,
+        **kwargs):
     """
     Compute a dynamical correlator from real-time evolution + Fourier
     transform (submode="TD", TDVP-backed for itensor_version=3).
 
-    The raw finite-time correlator C(t) is windowed with an exponential
-    decay exp(-delta*t) before the FFT. This is what actually turns
+    The raw finite-time correlator C(t) is windowed before the FFT
+    (`damping`, see `_fourier_transform_correlator`'s docstring for the
+    available choices and the tradeoff between them). The default,
+    `damping="exp"`, applies exp(-delta*t); this is what actually turns
     `delta` into a Lorentzian broadening of width `delta` in the resulting
     spectral function -- matching what `delta` means in the KPM/CVM
     submodes -- and lets the required total evolution time follow directly
@@ -204,27 +209,128 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     match the analytic Fourier-transform convention of the other submodes,
     replacing the previous ad hoc 1/sqrt(nt) scaling that was tied to the
     old undamped/long-time convention.
+
+    predict=True (the default) additionally extrapolates C(t) via linear
+    prediction before windowing (see `_fourier_transform_correlator`'s
+    `predict=` kwarg and dynamicstk/linearprediction.py) -- confirmed
+    empirically (see docs/td_dynamical_correlator_sharpening_plan.md) to
+    give a measurably narrower, better-centered peak than plain `"exp"`
+    damping alone, at no extra real-TDVP cost, which is why it is the
+    default rather than opt-in; pass predict=False to recover the old
+    behavior exactly. `damping="exp"` (unchanged) stays the default taper
+    -- pairing prediction with "gaussian" was checked too and came out
+    *worse* (its wider intrinsic FWHM at fixed delta partly cancels
+    prediction's own narrowing), so it is offered but not defaulted to.
+    lp_order=None (default) auto-picks a safe AR order
+    (`min(20, max(4, nt//10))`) so this stays robust even if `nt` ends up
+    small (e.g. from an unusually large `delta` or an explicit small
+    `nt`), rather than risking linear_predict_extend's own order-vs-length
+    ValueError at the previous fixed default of 20.
     """
     self.get_gs() # get the ground state
     if nt is None: nt=int(damping_periods/delta/dt)
+    if lp_order is None: lp_order=min(20,max(4,nt//10))
     (ts,cs) = evolution_DC(self,dt=dt,nt=nt,**kwargs) # get correlator
     return _fourier_transform_correlator(ts,cs,dt,es=es,window=window,
-            delta=delta,factor=factor)
+            delta=delta,factor=factor,damping=damping,predict=predict,
+            lp_order=lp_order,lp_extend_factor=lp_extend_factor,
+            lp_fit_start_fraction=lp_fit_start_fraction,
+            lp_max_pole_radius=lp_max_pole_radius)
+
+
+def _damping_window(ts,delta,damping="exp"):
+    """
+    Time-domain taper applied to C(t) before the FFT, selecting the
+    lineshape/tail behavior of the resulting spectral function -- the
+    time-domain analogue of `algebra/kpm.py`'s
+    `kernel="jackson"/"lorentz"/"plain"` choice for the KPM submode.
+
+    `delta` keeps the same "characteristic broadening width" meaning
+    across all choices (matching KPM/CVM's own `delta`), but the shape of
+    the resulting line differs:
+
+    - "exp" (default, unchanged behavior): exp(-delta*t), the previous
+      hardcoded choice. Exact Lorentzian broadening in frequency space,
+      i.e. a `1/(omega-omega0)**2` algebraic tail -- this is the "long
+      tail" reported for submode="TD" vs KPM's default Jackson-kernel
+      reconstruction, which decays much faster away from a peak (see
+      Weisse, Wellein, Alvermann & Fehske, Rev. Mod. Phys. 78, 275 (2006),
+      and `algebra/kpm.py::jackson_kernel`).
+    - "gaussian": exp(-(delta*t)**2/2), a Gaussian taper. Its Fourier
+      transform is itself a Gaussian, decaying as exp(-omega**2) --
+      dramatically faster far from the peak than the Lorentzian's
+      algebraic 1/omega**2 tail -- at the cost of the usual Lorentzian-
+      vs-Gaussian lineshape tradeoff: at the same `delta`, the Gaussian's
+      FWHM (2*sqrt(2*ln(2))*delta ~ 2.35*delta) is actually slightly
+      *wider* than the Lorentzian's (2*delta), i.e. the peak itself looks
+      marginally broader/shorter even as the far tail is suppressed by
+      orders of magnitude. Standard NMR/spectroscopy apodization choice;
+      also offered by TeNPy's SpectralSimulation
+      ("gaussian windowing", GPL-3.0, same license as this project;
+      https://tenpy.readthedocs.io/en/v1.0.2/reference/tenpy.simulations.time_evolution.SpectralSimulation.html).
+    - "parzen": the Parzen window, a smooth taper that goes to zero (with
+      vanishing derivative) exactly at the truncation time `Tmax=max(ts)`,
+      independent of `delta`'s decay rate. This targets a different
+      artifact than the peak-broadening tradeoff above: the Gibbs ringing
+      from abruptly truncating C(t) at a finite Tmax (the implicit
+      rectangular window every choice here still has, since the FFT only
+      ever sees `ts` up to Tmax) -- a taper that is exactly zero at both
+      ends removes that discontinuity. Reported in the windowed-FT
+      literature for real-time tensor-network correlators as the
+      standard fix for that specific artifact, independent of the choice
+      above (see docs/td_dynamical_correlator_sharpening_plan.md for the
+      literature pointers). Still combined multiplicatively with "exp"'s
+      exp(-delta*t) so `delta` keeps controlling the overall resolution.
+    """
+    if damping=="exp":
+        return np.exp(-delta*ts)
+    elif damping=="gaussian":
+        return np.exp(-0.5*(delta*ts)**2)
+    elif damping=="parzen":
+        tmax = np.max(ts)
+        if tmax<=0: return np.ones_like(ts)
+        x = ts/tmax # in [0,1]
+        w = np.where(x<=0.5,
+                1.-6.*x**2*(1.-x),
+                2.*(1.-x)**3)
+        return w*np.exp(-delta*ts)
+    else:
+        raise ValueError("Unknown damping: "+str(damping))
 
 
 def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
-        delta=5e-2,factor=1):
+        delta=5e-2,factor=1,damping="exp",predict=False,lp_order=20,
+        lp_extend_factor=10,lp_fit_start_fraction=0.5,
+        lp_max_pole_radius=1.0):
     """
-    Shared time-domain -> frequency-domain tail: exponential-decay
-    windowing (turns `delta` into a Lorentzian broadening, see
-    dynamical_correlator's docstring), interpolation onto a uniform
-    (optionally oversampled by `factor`) grid, a Riemann-sum-normalized
-    FFT, and interpolation onto the requested frequencies `es`. Factored
-    out of dynamical_correlator (submode "TD") so other time-domain
-    submodes (e.g. "TDZ", see tdz.py) can reuse it unchanged instead of
-    duplicating the FFT/windowing convention.
+    Shared time-domain -> frequency-domain tail: optional linear-
+    prediction extrapolation (`predict`), a damping/window taper (see
+    `_damping_window`'s docstring for the available choices and the
+    tradeoff between them), interpolation onto a uniform (optionally
+    oversampled by `factor`) grid, a Riemann-sum-normalized FFT, and
+    interpolation onto the requested frequencies `es`. Factored out of
+    dynamical_correlator (submode "TD") so other time-domain submodes
+    (e.g. "TDZ", see tdz.py) and `sxt_to_skomega` (per k-point) can reuse
+    it unchanged instead of duplicating the FFT/windowing/extrapolation
+    convention.
+
+    predict=True runs `dynamicstk.linearprediction.linear_predict_extend`
+    on the raw `(ts,cs)` first, extending the effective simulated time
+    well beyond what was actually evolved -- done here, before damping,
+    so the (now much longer) extrapolated series is what the damping
+    window and FFT actually see (see
+    docs/td_dynamical_correlator_sharpening_plan.md). `lp_order`/
+    `lp_extend_factor`/`lp_fit_start_fraction`/`lp_max_pole_radius` are
+    passed straight through to `linear_predict_extend` -- see its own
+    docstring.
     """
-    cs = cs*np.exp(-delta*ts) # damping window -> Lorentzian broadening "delta"
+    if predict:
+        from .dynamicstk.linearprediction import linear_predict_extend
+        ts,cs = linear_predict_extend(ts,cs,order=lp_order,
+                extend_factor=lp_extend_factor,
+                fit_start_fraction=lp_fit_start_fraction,
+                max_pole_radius=lp_max_pole_radius)
+    cs = cs*_damping_window(ts,delta,damping=damping) # damping/window taper
     # interpolate the time evolution
     ftr = interp1d(ts,cs.real,fill_value=0.0,bounds_error=False)
     fti = interp1d(ts,cs.imag,fill_value=0.0,bounds_error=False)
@@ -248,7 +354,9 @@ def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
 
 
 def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
-        delta=5e-2,factor=1):
+        delta=5e-2,factor=1,damping="exp",predict=False,lp_order=20,
+        lp_extend_factor=10,lp_fit_start_fraction=0.5,
+        lp_max_pole_radius=1.0):
     """S(k,omega) from a real-space/real-time correlator S(x,t) (`S`
     shaped `(len(ts),len(xs))`): a spatial DFT
     (`S(k,t)=sum_x e^{-ikx}S(x,t)`) followed by `_fourier_transform_correlator`
@@ -264,7 +372,8 @@ def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
 
     `ks` defaults to 200 points in `[-pi,pi]` (the first Brillouin zone,
     since `x` is measured in physical sites); `es`/`window`/`delta`/
-    `factor` are passed straight through to `_fourier_transform_correlator`
+    `factor`/`damping`/`predict`/`lp_*` are passed straight through to
+    `_fourier_transform_correlator` (applied independently per k-point)
     -- see its own docstring. Returns `(ks, es, Skw)`, `Skw` shaped
     `(len(ks), len(es))`."""
     if ks is None:
@@ -279,7 +388,11 @@ def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
         Skt = S@phase
         es_k,gk = _fourier_transform_correlator(ts,Skt,dt,es=es_out,
                                                   window=window,delta=delta,
-                                                  factor=factor)
+                                                  factor=factor,damping=damping,
+                                                  predict=predict,lp_order=lp_order,
+                                                  lp_extend_factor=lp_extend_factor,
+                                                  lp_fit_start_fraction=lp_fit_start_fraction,
+                                                  lp_max_pole_radius=lp_max_pole_radius)
         if Skw is None:
             es_out = es_k
             Skw = np.zeros((len(ks),len(es_k)),dtype=complex)

@@ -203,7 +203,9 @@ def _complex_time_correlator(self, A, B, alpha0, n_max, dt, nt, omega0):
 
 def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
         dt=0.1, tmax=None, nt=None, delta=5e-2, damping_periods=6,
-        window=[-1, 10], factor=1, **kwargs):
+        window=[-1, 10], factor=1, damping="exp", predict=False,
+        lp_order=20, lp_extend_factor=10, lp_fit_start_fraction=0.5,
+        lp_max_pole_radius=1.0, **kwargs):
     """
     Dynamical correlator via complex-time evolution + perturbative
     real-axis reconstruction (submode "TDZ"; Cao, Lu, Stoudenmire &
@@ -222,13 +224,18 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
         contour is layered on top of it, not a replacement for it); nt
         defaults from damping_periods/delta/dt exactly as "TD" does, if
         tmax is not given either.
-    es,delta,damping_periods,window,factor: passed straight through to
-        the same windowing/FFT tail "TD" uses
+    es,delta,damping_periods,window,factor,damping,predict,lp_*: passed
+        straight through to the same windowing/FFT tail "TD" uses
         (timedependent._fourier_transform_correlator) -- delta here is
-        the *final* Lorentzian broadening applied to the reconstructed
-        real-time correlator before the FFT, a separate knob from alpha0
-        (which only controls entanglement growth during the simulation
-        itself, not the output broadening).
+        the *final* broadening applied to the reconstructed real-time
+        correlator before the FFT, a separate knob from alpha0 (which
+        only controls entanglement growth during the simulation itself,
+        not the output broadening). `damping` selects the taper shape
+        ("exp"/"gaussian"/"parzen"), see
+        `timedependent._damping_window`'s docstring; `predict`/`lp_*`
+        enable/configure linear-prediction extrapolation of the
+        reconstructed real-time correlator before that taper is applied,
+        see `dynamicstk.linearprediction.linear_predict_extend`.
 
     Note (current scope): only the "greater" branch
     G>_{O1,O2}(t) ~ <B GS|exp(-iHt)A GS> is computed (A=O1^dagger, B=O2,
@@ -254,4 +261,7 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
     ts, cs = _complex_time_correlator(self, A, B, alpha0, n_max, dt, nt, omega0)
     cs = cs.real - 1j*cs.imag  # match evolution_DC's own conjugation convention
     return _fourier_transform_correlator(ts, cs, dt, es=es, window=window,
-            delta=delta, factor=factor)
+            delta=delta, factor=factor, damping=damping, predict=predict,
+            lp_order=lp_order, lp_extend_factor=lp_extend_factor,
+            lp_fit_start_fraction=lp_fit_start_fraction,
+            lp_max_pole_radius=lp_max_pole_radius)
