@@ -73,11 +73,13 @@ assert len(peaks_ed) >= 2, "expected at least 2 resolvable peaks in this window"
 
 # --- TDZ on all three DMRG backends ---
 tol_peak = 0.15  # generous: TDZ's default dt=0.1 time-discretization + n_max=4 truncation
+tdz_spectra = {}
 for v in [2, 3, "python"]:
     sc = make_chain(v)
     name = (sc.Sz[0], sc.Sz[0])
     x_tdz, y_tdz = sc.get_dynamical_correlator(mode="DMRG", submode="TDZ", name=name,
             es=es, alpha0=0.1, n_max=4, dt=0.05, delta=delta)
+    tdz_spectra[v] = (x_tdz, np.array(y_tdz))
     peaks_tdz = peak_energies(x_tdz, y_tdz)
     print("TDZ(v%s) peak energies =" % v, peaks_tdz)
     assert len(peaks_tdz) >= len(peaks_ed), \
@@ -121,3 +123,30 @@ for k in range(1, len(diffs)):
 assert diffs[-1] < 1e-6, "n_max=4 reconstruction should match the real-time reference very closely at alpha0=0.2, got %.3e" % diffs[-1]
 
 print("TEST PASSED")
+
+# --- plot: (left) ED vs TDZ spectra for all three backends; (right)
+# alpha0-Taylor reconstruction error vs n_max, showing monotonic
+# convergence to the real-time reference ---
+import matplotlib.pyplot as plt
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+fig.subplots_adjust(wspace=0.3, bottom=0.15)
+
+ax1.plot(x_ed, y_ed, c="black", lw=2, label="ED")
+colors = {2: "red", 3: "blue", "python": "green"}
+for v in [2, 3, "python"]:
+    x_tdz, y_tdz = tdz_spectra[v]
+    ax1.plot(x_tdz, y_tdz.real, c=colors[v], ls="--", label="TDZ v%s" % v)
+ax1.set_xlabel("frequency [J]")
+ax1.set_ylabel("Dynamical correlator")
+ax1.set_title("TDZ vs ED spectra")
+ax1.legend(fontsize=8)
+
+ax2.semilogy(range(len(diffs)), diffs, marker="o")
+ax2.set_xlabel("n_max")
+ax2.set_ylabel("max|TDZ - TD| (time-aligned)")
+ax2.set_title("alpha0-Taylor reconstruction convergence")
+
+plt.savefig("tdz_vs_ed.png", dpi=150)
+print("Plot saved to tdz_vs_ed.png")
+plt.show()

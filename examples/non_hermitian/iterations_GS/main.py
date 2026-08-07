@@ -2,6 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 n = 12
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
@@ -21,13 +22,22 @@ e0 = sc.gs_energy(mode="ED") # get the ground state energy
 # now compute the GS energy with MPS using different numbers of iterations 
 ites = [1,4,10,40] # the default is 40, make it bigger for better accuracy
 
+des = [] # store the error for each number of iterations
 for ite in ites: # loop over number of iterations
     sc.set_hamiltonian(h) # initialize the system
     # the parameter maxit controls the number of iterations of the
     # MPS arnoldi algorithm, the bigger the more precise
     e = sc.gs_energy(mode="DMRG",maxit=ite) # get the ground state energy
     de = np.abs(e0-e) # difference with respect to the true GS energy
+    des.append(de)
     print("# iterations = ",ite,", error = ",de)
+
+# plot the convergence of the ground state energy error VS iterations
+plt.plot(ites,des,marker="o")
+plt.xlabel("Number of Arnoldi iterations")
+plt.ylabel("Energy error $|E_0-E|$")
+plt.yscale("log")
+plt.show()
 
 
 

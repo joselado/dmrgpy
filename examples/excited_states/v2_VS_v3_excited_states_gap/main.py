@@ -44,3 +44,11 @@ print("Gap (ITensor v3)     =",gap3)
 print("Gap (pure Python)    =",gappy)
 print("Difference v2 vs v3          =",abs(gap2-gap3))
 print("Difference v3 vs pure Python =",abs(gap3-gappy))
+
+import matplotlib.pyplot as plt
+labels = ["ITensor v2","ITensor v3","pure Python"]
+gaps = [gap2,gap3,gappy]
+plt.bar(labels,gaps)
+plt.ylabel("Excited-state gap")
+plt.title("Transverse-field Ising gap: backend comparison")
+plt.show()

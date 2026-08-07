@@ -31,6 +31,15 @@ print("\n")
 print("Relative error",np.sum(np.abs(es1-es2)))
 #sc.clean() # remove temporal files
 
+import matplotlib.pyplot as plt
+xs = np.arange(len(es1))
+plt.plot(xs,es1,marker="o",label="DMRG")
+plt.plot(xs,es2,marker="x",label="ED")
+plt.xlabel("Excited-state index")
+plt.ylabel("Energy")
+plt.legend()
+plt.show()
+
 
 
 

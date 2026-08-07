@@ -23,6 +23,7 @@ from dmrgpy.pyitensor import idmrg
 from dmrgpy.pyitensor.index import Index
 from dmrgpy.pyitensor.tensor import ITensor
 import numpy as np
+import matplotlib.pyplot as plt
 
 ################################################################
 ### (1) self-overlap and gauge-invariance under apply_mpo(Id) ###
@@ -73,3 +74,18 @@ assert abs(ov_orth) < 1e-6
 
 print()
 print("imps_overlap example PASSED")
+
+labels = ["self-overlap\n(same state)", "gauge-invariance\n(apply_mpo(Id))",
+          "orthogonality\n(opposite-polarized)"]
+values = [abs(ov_self), abs(ov_gauge), abs(ov_orth)]
+fig, ax = plt.subplots(figsize=(6.5, 4.5))
+bars = ax.bar(labels, values, color=["tab:blue", "tab:green", "tab:red"])
+ax.axhline(1.0, color="gray", lw=0.8, ls=":")
+ax.set_ylabel("per-site fidelity |imps_overlap|")
+ax.set_title("imps_overlap: self / gauge-invariance / orthogonality checks")
+for bar, v in zip(bars, values):
+    ax.text(bar.get_x() + bar.get_width()/2, v, "{:.3f}".format(v),
+            ha="center", va="bottom")
+fig.tight_layout()
+fig.savefig("imps_overlap.png", dpi=150)
+print("saved plot to imps_overlap.png")

@@ -22,6 +22,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # from Fig. F(b)), and the assembled spectrum against the qualitative
 # shapes described in the text and shown in Figs. 2 and 3.
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 from dmrgpy.kondospectrumtk.stepfunctions import F
 
@@ -113,3 +114,52 @@ excited_state_sum_term = tokd(ksC, eVs6, -0.05, T0=1.0, omega0=omega0_tt,
 assert np.max(np.abs(twotime_term - excited_state_sum_term)) < 0.02
 
 print("All T=0 / two-time-correlator checks passed.")
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 8.5))
+
+axes[0, 0].plot(eV, dIdV2, color="tab:blue")
+axes[0, 0].axvline(zeeman, color="gray", ls=":")
+axes[0, 0].axvline(-zeeman, color="gray", ls=":")
+axes[0, 0].set_xlabel("eV")
+axes[0, 0].set_ylabel("dI/dV (2nd order)")
+axes[0, 0].set_title("Zeeman step (Fig. 2)")
+
+axes[0, 1].plot(eVs3, d2_only, label="2nd order only")
+axes[0, 1].plot(eVs3, d3_total, label="2nd+3rd order")
+axes[0, 1].set_xlabel("eV")
+axes[0, 1].set_ylabel("dI/dV")
+axes[0, 1].set_title("zero-bias Kondo resonance (Fig. 3a/b)")
+axes[0, 1].legend(fontsize=8)
+
+axes[0, 2].plot(eVs4, dU_only, color="tab:red")
+axes[0, 2].axhline(0, color="gray", lw=0.8, ls=":")
+axes[0, 2].set_xlabel("eV")
+axes[0, 2].set_ylabel("dI/dV (potential-interference term)")
+axes[0, 2].set_title("bias asymmetry (Fig. 3c/d)")
+
+axes[1, 0].plot(eVs5, dIdV_T0, "o-", label="T=0 (exact)")
+axes[1, 0].plot(eVs5, dIdV_smallT, "x--", label="T=1e-3 (finite)")
+axes[1, 0].set_xlabel("eV")
+axes[1, 0].set_ylabel("dI/dV (3rd order)")
+axes[1, 0].set_title("T=0 exact vs small-T limit")
+axes[1, 0].legend(fontsize=8)
+
+axes[1, 1].plot(eVs6, twotime_term, "o-", label="two-time (T=0, TDVP-style)")
+axes[1, 1].plot(eVs6, excited_state_sum_term, "x--", label="excited-state sum")
+axes[1, 1].set_xlabel("eV")
+axes[1, 1].set_ylabel("3rd-order Kondo term")
+axes[1, 1].set_title("two-time vs excited-state-sum cross-check")
+axes[1, 1].legend(fontsize=8)
+
+eps_grid = np.linspace(-10e-3, 10e-3, 200)
+axes[1, 2].plot(eps_grid*1e3, F(eps_grid, T=1.0, omega0=0.2, Gamma0=5e-6), color="tab:purple")
+axes[1, 2].plot([0, 10], [7.5, 3.1], "o", color="black", label="Fig. F(b) reference points")
+axes[1, 2].set_xlabel("eV-eps_m (meV)")
+axes[1, 2].set_ylabel("F(eps,T)")
+axes[1, 2].set_title("temperature-broadened Kondo log F (Fig. F(b))")
+axes[1, 2].legend(fontsize=8)
+
+fig.suptitle("get_kondo_spectrum vs Ternes, New J. Phys. 17 063016 (2015)")
+fig.tight_layout()
+fig.savefig("kondo_spectrum_VS_paper.png", dpi=150)
+print("saved plot to kondo_spectrum_VS_paper.png")

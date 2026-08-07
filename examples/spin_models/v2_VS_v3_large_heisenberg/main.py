@@ -12,6 +12,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # noise from differing internal sweep paths, not a regression) -- this
 # test locks in that same v2-vs-v3 agreement going forward.
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
 sizes = [16, 24, 32]
@@ -27,11 +28,29 @@ def get_energy(itensor_version, n):
 
 tol = 1e-3 # generous: only meant to catch a real divergence, not to pin
            # down DMRG's sweep-to-sweep numerical noise
+e2s,e3s,diffs = [],[],[]
 for n in sizes:
     e2 = get_energy(2, n)
     e3 = get_energy(3, n)
     diff = abs(e2-e3)
     print("n=%d  v2=%.10f  v3=%.10f  diff=%.2e"%(n, e2, e3, diff))
     assert diff<tol, "v2 vs v3 disagree by %g at n=%d (tol=%g)"%(diff, n, tol)
+    e2s.append(e2) ; e3s.append(e3) ; diffs.append(diff)
 
 print("TEST PASSED")
+
+# overlay the v2 vs v3 ground state energies, and separately show how
+# small the cross-backend disagreement stays as the chain grows
+fig,(ax1,ax2) = plt.subplots(1,2,figsize=(10,4))
+ax1.plot(sizes,e2s,marker="o",label="ITensor v2")
+ax1.plot(sizes,e3s,marker="s",label="ITensor v3")
+ax1.set_xlabel("Chain length")
+ax1.set_ylabel("Ground state energy")
+ax1.legend()
+
+ax2.plot(sizes,diffs,marker="o",color="tab:red")
+ax2.set_yscale("log")
+ax2.set_xlabel("Chain length")
+ax2.set_ylabel("|E(v2) - E(v3)|")
+fig.tight_layout()
+plt.show()

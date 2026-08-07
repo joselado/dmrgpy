@@ -36,6 +36,7 @@ def compare(n):
 
 
 ns = [4,8,10,20]
+dt0s,dt1s = [],[]
 f = open("TIMES.OUT","w")
 for n in ns:
     dt0,dt1 = compare(n)
@@ -46,7 +47,18 @@ for n in ns:
     print("Time with C++",dt0)
     print("Time with Julia",dt1)
     print()
+    dt0s.append(dt0) ; dt1s.append(dt1)
 f.close()
+
+import matplotlib.pyplot as plt
+
+plt.plot(ns,dt0s,marker="o",label="C++")
+plt.plot(ns,dt1s,marker="o",label="Julia")
+plt.xlabel("number of sites")
+plt.ylabel("wall time [s]")
+plt.title("Dynamical correlator: C++ vs Julia backend timing")
+plt.legend()
+plt.show()
 
 
 

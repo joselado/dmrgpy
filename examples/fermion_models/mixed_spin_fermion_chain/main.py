@@ -4,7 +4,7 @@
 # physics-critical part of the cross-check.
 import os ; import sys
 sys.path.append(os.getcwd()+'/../../../src')
-sys.path.append(os.getcwd()+'/../../tests')
+sys.path.append(os.getcwd()+'/../../../tests')
 
 # Regression test / demo for mixedchain.Mixed_Spin_Fermion_Chain: a chain
 # mixing a genuine spin-1/2 site and spinful-fermion locations (paired
@@ -84,3 +84,41 @@ assert abs(e_dmrg-e_ref) < 1e-5
 assert abs(sz_spin_dmrg-sz_ref) < 1e-4
 assert abs(ntot_fermA_dmrg-ntot_ref) < 1e-4
 print("OK")
+
+# --- sweep the longitudinal field hf, cross-checking DMRG against the
+# dense Jordan-Wigner reference at each point, and plot the agreement ---
+hfs = np.linspace(0.0, 0.4, 5)
+e_dmrg_sweep, e_ref_sweep = [], []
+sz_dmrg_sweep, sz_ref_sweep = [], []
+for hfi in hfs:
+    hi = K1*mc.SS(0, 1) + K2*mc.SS(1, 2) + muA*mc.Ntot[0] + muB*mc.Ntot[2]
+    hopi = t*(mc.Cdagup[0]*mc.Cup[2] + mc.Cdagdn[0]*mc.Cdn[2])
+    hi = hi + hopi + hopi.get_dagger()
+    hi = hi + hfi*(mc.Sz[0] + mc.Sz[1] + mc.Sz[2])
+    mc.set_hamiltonian(hi)
+    e_dmrg_sweep.append(mc.gs_energy(mode="DMRG"))
+    sz_dmrg_sweep.append(mc.vev(mc.Sz[1]).real)
+
+    Hi = (K1*(sxA@Sx_s + syA@Sy_s + szA@Sz_s)
+          + K2*(Sx_s@sxB + Sy_s@syB + Sz_s@szB)
+          + muA*ntotA + muB*ntotB + hfi*(szA + Sz_s + szB))
+    Hi = Hi + hopref + hopref.conj().T
+    esi, vsi = np.linalg.eigh(Hi)
+    e_ref_sweep.append(esi[0])
+    gsi = vsi[:, 0]
+    sz_ref_sweep.append(np.vdot(gsi, Sz_s@gsi).real)
+
+import matplotlib.pyplot as plt
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+ax1.plot(hfs, e_dmrg_sweep, marker="o", label="DMRG")
+ax1.plot(hfs, e_ref_sweep, marker="x", linestyle="--", label="Dense JW reference")
+ax1.set_xlabel("hf")
+ax1.set_ylabel("Ground-state energy")
+ax1.legend()
+ax2.plot(hfs, sz_dmrg_sweep, marker="o", label="DMRG")
+ax2.plot(hfs, sz_ref_sweep, marker="x", linestyle="--", label="Dense JW reference")
+ax2.set_xlabel("hf")
+ax2.set_ylabel("<Sz> at the spin location")
+ax2.legend()
+plt.tight_layout()
+plt.show()

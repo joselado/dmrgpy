@@ -20,6 +20,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import time
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import infinitechain
 
 MAXM, CUTOFF, MAXITER, ETOL, NITER = 30, 1e-12, 60, 1e-9, 30
@@ -64,3 +65,30 @@ assert abs(d_n1 - d_n2) < 1e-4, "n_uc=1 and n_uc=2 energy densities disagree"
 
 print()
 print("iDMRG python-VS-v3 backend regression test PASSED")
+
+n_ucs = (1, 2)
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5))
+
+for version, marker, label in (("python", "o-", "python"), (3, "s--", "v3")):
+    dens = [results[(n_uc, version)][0] for n_uc in n_ucs]
+    ax1.plot(n_ucs, dens, marker, label=label)
+ax1.axhline(EXACT, color="k", ls=":", label="exact (Bethe ansatz)")
+ax1.set_xlabel("unit-cell size $n_{uc}$")
+ax1.set_ylabel("ground-state energy density")
+ax1.set_xticks(n_ucs)
+ax1.set_title("energy density")
+ax1.legend()
+
+for version, marker, label in (("python", "o-", "python"), (3, "s--", "v3")):
+    times = [results[(n_uc, version)][1] for n_uc in n_ucs]
+    ax2.plot(n_ucs, times, marker, label=label)
+ax2.set_xlabel("unit-cell size $n_{uc}$")
+ax2.set_ylabel("wall time (s)")
+ax2.set_xticks(n_ucs)
+ax2.set_title("wall time")
+ax2.legend()
+
+fig.suptitle("iDMRG: python (pyitensor) vs ITensor v3 (mpscpp3)")
+fig.tight_layout()
+fig.savefig("heisenberg_infinite_python_VS_v3.png", dpi=150)
+print("saved plot to heisenberg_infinite_python_VS_v3.png")

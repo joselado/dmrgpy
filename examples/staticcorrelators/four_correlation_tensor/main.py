@@ -59,3 +59,20 @@ print("Difference full MPS and explicit MPS",diff(m1,m2))
 print("Difference full MPS and ED",diff(m2,med))
 print("Difference accelerated MPS and non-accelerated MPS",diff(m2,m3))
 
+# the tensor is 4-index (i,j,k,l): visualize a 2D (i,j) slice at fixed
+# (k,l) for each method, so the four independent computations of
+# <Cdag_i C_j Cdag_k C_l> can be compared by eye
+k0,l0 = 0,1
+import matplotlib.pyplot as plt
+fig,axes = plt.subplots(1,4,figsize=(15,4))
+for ax,m,title in zip(axes,[m1,m2,m3,med],
+        ["explicit","full (non-acc.)","full (acc.)","ED"]):
+    im = ax.imshow(np.abs(m[:,:,k0,l0]),aspect="auto",origin="lower")
+    ax.set_title(title)
+    ax.set_xlabel("j")
+    ax.set_ylabel("i")
+    fig.colorbar(im,ax=ax)
+fig.suptitle("|<Cdag_i C_j Cdag_%d C_%d>|"%(k0,l0))
+plt.tight_layout()
+plt.show()
+

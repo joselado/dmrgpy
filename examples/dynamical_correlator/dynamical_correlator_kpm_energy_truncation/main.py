@@ -96,3 +96,22 @@ assert abs(peak_tr - gap) < 0.05
 
 print("OK: energy truncation lets a narrower KPM window compute safely "
       "and still locate the exact excitation gap.")
+
+# --- plot: ED ground truth vs default-window KPM vs narrow-window KPM
+# with energy truncation, overlaid on the same frequency axis ---
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+plt.plot(x_ed, y_ed, c="black", lw=2, label="ED (exact)")
+plt.plot(x_def, y_def, c="blue", ls="--",
+         label="KPM, default window (kpm_scale=%.2f)" % sc_default.kpm_scale)
+plt.plot(x_tr, y_tr, c="red", ls="-.",
+         label="KPM, narrow window + energy truncation (kpm_scale=%.2f)" % kpm_scale)
+plt.axvline(gap, c="gray", ls=":", label="exact gap")
+plt.xlabel("frequency [J]")
+plt.ylabel("Dynamical correlator")
+plt.legend(fontsize=8)
+plt.title("KPM energy truncation: narrow-window accuracy vs ED")
+plt.savefig("kpm_energy_truncation.png", dpi=150)
+print("\nPlot saved to kpm_energy_truncation.png")
+plt.show()

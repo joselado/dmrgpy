@@ -34,13 +34,15 @@ for i in range(n-1):
 sc.set_hamiltonian(h)
 spin_pairop = lambda i,j: sc.Sz[i]*sc.Sz[j]
 
-cm_ed = correlation_matrix(sc, spin_pairop, n, mode="ED")
+cm_spin_ed = cm_ed = correlation_matrix(sc, spin_pairop, n, mode="ED")
+cm_spin_dmrg = dict() # DMRG correlation matrix per backend, for plotting
 for v in [2,3,"python"]:
     sc.set_hamiltonian(h) # re-set: switching backend invalidates the
                            # cached ground state (see restart(), called
                            # by set_hamiltonian) so each backend gets a
                            # fresh DMRG run
     cm_dmrg = correlation_matrix(sc, spin_pairop, n, mode="DMRG", itensor_version=v)
+    cm_spin_dmrg[v] = cm_dmrg
     diff = np.max(np.abs(cm_dmrg-cm_ed))
     print("Spin <Sz_i Sz_j>: max |DMRG(v%s) - ED| = %.2e"%(v,diff))
     assert diff<tol, "v%s spin correlator disagrees with ED by %g (tol=%g)"%(v,diff,tol)
@@ -54,12 +56,31 @@ for i in range(nf-1):
 fc.set_hamiltonian(hf)
 fermion_pairop = lambda i,j: fc.Cdag[i]*fc.C[j]
 
-cm_ed = correlation_matrix(fc, fermion_pairop, nf, mode="ED")
+cm_fermion_ed = cm_ed = correlation_matrix(fc, fermion_pairop, nf, mode="ED")
+cm_fermion_dmrg = dict() # DMRG correlation matrix per backend, for plotting
 for v in [2,3,"python"]:
     fc.set_hamiltonian(hf)
     cm_dmrg = correlation_matrix(fc, fermion_pairop, nf, mode="DMRG", itensor_version=v)
+    cm_fermion_dmrg[v] = cm_dmrg
     diff = np.max(np.abs(cm_dmrg-cm_ed))
     print("Fermion <Cdag_i C_j>: max |DMRG(v%s) - ED| = %.2e"%(v,diff))
     assert diff<tol, "v%s fermion correlator disagrees with ED by %g (tol=%g)"%(v,diff,tol)
 
 print("TEST PASSED")
+
+# heatmap comparison DMRG (itensor_version=3) vs ED vs their difference,
+# for both the spin and the fermionic correlator
+import matplotlib.pyplot as plt
+fig,axes = plt.subplots(2,3,figsize=(12,8))
+rows = [("Spin <Sz_i Sz_j>", cm_spin_ed, cm_spin_dmrg[3]),
+        ("Fermion <Cdag_i C_j>", cm_fermion_ed, cm_fermion_dmrg[3])]
+for row,(label,ced,cdmrg) in zip(axes,rows):
+    for ax,m,title in zip(row,[ced,cdmrg,np.abs(cdmrg-ced)],
+            ["ED","DMRG (v3)","|DMRG(v3) - ED|"]):
+        im = ax.imshow(np.abs(m),aspect="auto",origin="lower")
+        ax.set_title(label+"\n"+title)
+        ax.set_xlabel("j")
+        ax.set_ylabel("i")
+        fig.colorbar(im,ax=ax)
+plt.tight_layout()
+plt.show()

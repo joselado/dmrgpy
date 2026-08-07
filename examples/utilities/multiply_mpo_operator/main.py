@@ -29,10 +29,25 @@ Op = sc.toMPO(h) # transforms into an MPO (that can be multiplied)
 
 N = 4 # compute some products
 Opk = Op.copy() # make a copy
+traces = [] # store the traces for each power
 for i in range(N):
     out = Sz[0]*Opk*Sz[1] # compute the product
     Opk = Opk*Op # compute the next power
-    print("Trace of S^z_0 H^"+str(i)+" S^z_N",out.trace())
+    tr = out.trace()
+    print("Trace of S^z_0 H^"+str(i)+" S^z_N",tr)
+    traces.append(tr)
+
+import matplotlib.pyplot as plt
+
+traces = np.array(traces)
+powers = np.arange(N)
+
+plt.plot(powers,traces.real,marker="o",label="Real part")
+plt.plot(powers,traces.imag,marker="o",label="Imaginary part")
+plt.xlabel("Power of the Hamiltonian MPO")
+plt.ylabel(r"Trace of $S^z_0 H^i S^z_N$")
+plt.legend()
+plt.show()
 
 
 

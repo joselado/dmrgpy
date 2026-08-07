@@ -24,6 +24,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 
 n = 4
@@ -75,3 +76,11 @@ for e,yed,yv3 in zip(es,ys_ed,ys_v3):
 print("max relative difference:",reldiff)
 assert reldiff<1e-6, "ED and v3 NH-KPM dynamical correlators disagree"
 print("NH-KPM (ED vs v3) regression test PASSED")
+
+# plot the dynamical correlator VS frequency for both backends
+plt.plot(es,ys_ed.real,marker="o",label="ED (Re)")
+plt.scatter(es,ys_v3.real,marker="x",c="red",label="itensor_version=3 (Re)")
+plt.xlabel("frequency e")
+plt.ylabel(r"Re $\langle N_0(z) N_0(0)\rangle$")
+plt.legend()
+plt.show()

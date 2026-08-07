@@ -1,6 +1,7 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+import matplotlib.pyplot as plt
 from dmrgpy import infinitechain  # infinite-DMRG (iDMRG) chain object
 from dmrgpy import spinchain      # finite chain, for the ED cross-check
 
@@ -49,7 +50,9 @@ print()
 
 print("cross-check: finite open chains of the same dimerized model, ED gap")
 print("(get_gap(mode=\"ED\")), at growing size:")
-for n_sites in (12, 14, 16):
+dimer_n_sites = (12, 14, 16)
+dimer_ed_gaps = []
+for n_sites in dimer_n_sites:
     sc = spinchain.Spin_Chain(["1/2"]*n_sites)
     h = 0
     for i in range(n_sites - 1):
@@ -57,6 +60,7 @@ for n_sites in (12, 14, 16):
         h = h + j*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
     sc.set_hamiltonian(h)
     gap = sc.get_gap(mode="ED")
+    dimer_ed_gaps.append(gap)
     print("  n_sites={}  ED gap={:.6f}".format(n_sites, gap))
 
 ###########################################################################
@@ -89,15 +93,20 @@ print("iDMRG converged:", ic2.converged)
 print()
 
 print("local_excitation_gap(window=w) as w grows:")
-for w in (0, 1, 2, 3):
+windows = (0, 1, 2, 3)
+windowed_gaps = []
+for w in windows:
     g = ic2.local_excitation_gap(window=w)
+    windowed_gaps.append(g)
     print("  window={}  gap={:.6f}".format(w, g))
 print()
 
 print("cross-check: finite open TFIM chains, ED gap (get_gap(mode=\"ED\")),")
 print("at growing size -- the windowed estimate above converges toward")
 print("this at least as fast as growing the finite chain itself does:")
-for n_sites in (12, 14, 16, 18):
+tfim_n_sites = (12, 14, 16, 18)
+tfim_ed_gaps = []
+for n_sites in tfim_n_sites:
     sc = spinchain.Spin_Chain(["1/2"]*n_sites)
     h = 0
     for i in range(n_sites - 1):
@@ -106,4 +115,32 @@ for n_sites in (12, 14, 16, 18):
         h = h + (-2*h_field)*sc.Sz[i]
     sc.set_hamiltonian(h)
     gap = sc.get_gap(mode="ED")
+    tfim_ed_gaps.append(gap)
     print("  n_sites={}  ED gap={:.6f}".format(n_sites, gap))
+
+fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
+
+axes[0].plot(dimer_n_sites, dimer_ed_gaps, "o-", color="tab:blue", label="ED gap (finite chain)")
+axes[0].axhline(local_gap, color="tab:red", ls="--", label="local_excitation_gap (iDMRG)")
+axes[0].set_xlabel("$n_{sites}$")
+axes[0].set_ylabel("gap")
+axes[0].set_title("dimerized Heisenberg chain")
+axes[0].legend()
+
+axes[1].plot(windows, windowed_gaps, "o-", color="tab:green")
+axes[1].set_xlabel("window $w$")
+axes[1].set_ylabel("local_excitation_gap(window=w)")
+axes[1].set_title("TFIM: windowed refinement")
+
+axes[2].plot(tfim_n_sites, tfim_ed_gaps, "o-", color="tab:blue", label="ED gap (finite chain)")
+axes[2].axhline(windowed_gaps[-1], color="tab:red", ls="--",
+                 label="local_excitation_gap(window={})".format(windows[-1]))
+axes[2].set_xlabel("$n_{sites}$")
+axes[2].set_ylabel("gap")
+axes[2].set_title("TFIM: ED convergence")
+axes[2].legend()
+
+fig.suptitle("local_excitation_gap: cheap 2-site estimate vs finite-chain ED gap")
+fig.tight_layout()
+fig.savefig("local_excitation_gap.png", dpi=150)
+print("\nsaved plot to local_excitation_gap.png")

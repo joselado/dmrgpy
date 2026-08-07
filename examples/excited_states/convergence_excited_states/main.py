@@ -17,13 +17,23 @@ for i in range(n-1):
 sc.set_hamiltonian(h)
 es0 = sc.get_excited(n=6,mode="ED") # compute excited states with ED
 
-for n in [4,6,8,10,20,30]: 
+nsweeps_list = [4,6,8,10,20,30]
+errors = [] # store the DMRG-vs-ED error for each sweep count
+for n in nsweeps_list:
     sc.set_hamiltonian(h)
     sc.nsweeps = n
     scale = 10 # this is the lagrange multiplier, default is 10
     es = sc.get_excited(n=6,scale=scale) # compute excited states with DMRG
     error = np.mean(np.abs(np.array(es0) - np.array(es))) # error
     print(n,error)
+    errors.append(error)
+
+import matplotlib.pyplot as plt
+plt.plot(nsweeps_list,errors,marker="o")
+plt.xlabel("Number of sweeps")
+plt.ylabel("Mean error in excited-state energies (DMRG vs ED)")
+plt.yscale("log")
+plt.show()
 
 
 

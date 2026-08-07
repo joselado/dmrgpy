@@ -41,11 +41,12 @@ for i in range(n-1): # loop over NN links
 Psi4 = H*Psi2 # apply operator to the state
 
 # if you wish to define a method to do this, you can do it in the following way
+# (MultiOperator uses __slots__, so a bound method cannot be attached
+# directly to an instance; a closure achieves the same result)
 Hp = H.copy()
-import types
-dot = lambda self,v: self*v # apply operator to vector
-Hp.dot = types.MethodType(dot, Hp) # add method to the object
-Psi4p = Hp.dot(Psi2) # matrix times vector with a method
+def make_dot(op):
+    return lambda v: op*v # apply operator to vector
+Psi4p = make_dot(Hp)(Psi2) # matrix times vector with a method-like closure
 
 
 # states can be summed as if it were conventional vector |5> = |2> + |4>
@@ -56,6 +57,45 @@ Psi5 = Psi2 + Psi4 # sum two states
 # return a complex number
 
 O24 = Psi2.dot(Psi4)
+print("Overlap <2|4>",O24)
+
+# the two ways of applying the operator to |2> (Psi4 and Psi4p) should
+# agree exactly; sweep the chain size to check this identity holds
+# regardless of system size, and see how <2|H|2> grows with n
+
+def sweep(n):
+    """Build a random state and Hamiltonian for a chain of size n and
+    return the operator identity error together with <2|H|2>"""
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+    psi2 = sc.random_state(mode="MPS")
+    h = 0
+    for i in range(n-1):
+        h = h + sc.Sx[i]*sc.Sx[i+1]
+        h = h + sc.Sy[i]*sc.Sy[i+1]
+        h = h + sc.Sz[i]*sc.Sz[i+1]
+    psi4 = h*psi2
+    hp = h.copy()
+    psi4p = make_dot(hp)(psi2)
+    error = abs(psi2.dot(psi4) - psi2.dot(psi4p))
+    return error,psi2.dot(psi4).real
+
+ns = range(4,13,2)
+out = np.array([sweep(n) for n in ns])
+
+import matplotlib.pyplot as plt
+
+plt.subplot(1,2,1)
+plt.plot(ns,out[:,0],marker="o")
+plt.xlabel("Chain size n")
+plt.ylabel("|<2|H|2> - <2|Hp.dot|2>|")
+
+plt.subplot(1,2,2)
+plt.plot(ns,out[:,1],marker="o",c="red")
+plt.xlabel("Chain size n")
+plt.ylabel("<2|H|2>")
+
+plt.tight_layout()
+plt.show()
 
 
 

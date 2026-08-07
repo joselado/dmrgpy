@@ -13,7 +13,7 @@ from dmrgpy import fermionchain
 ns = 3 # physical sites (2*ns fermionic sites total)
 U = 4.0
 
-def get_energy(itensor_version):
+def get_energy(itensor_version,U):
     n = ns*2
     fc = fermionchain.Fermionic_Chain(n,itensor_version=itensor_version)
     C = fc.C ; Cdag = fc.Cdag ; N = fc.N
@@ -27,12 +27,30 @@ def get_energy(itensor_version):
     fc.set_hamiltonian(h)
     return fc.gs_energy()
 
-e2 = get_energy(2)
-e3 = get_energy(3)
-epy = get_energy("python")
+e2 = get_energy(2,U)
+e3 = get_energy(3,U)
+epy = get_energy("python",U)
 
 print("Ground state energy (ITensor v2)     =",e2)
 print("Ground state energy (ITensor v3)     =",e3)
 print("Ground state energy (pure Python)    =",epy)
 print("Difference v2 vs v3                  =",abs(e2-e3))
 print("Difference v3 vs pure Python         =",abs(e3-epy))
+
+# sweep the Hubbard U (cheap for this small ns=3 chain), comparing all
+# three backends across the interaction strength
+Us = [0.0,1.0,2.0,4.0,8.0]
+e2s = [get_energy(2,Ui) for Ui in Us]
+e3s = [get_energy(3,Ui) for Ui in Us]
+epys = [get_energy("python",Ui) for Ui in Us]
+for Ui,e2i,e3i,epyi in zip(Us,e2s,e3s,epys):
+    print("U =",Ui,"v2 =",e2i,"v3 =",e3i,"python =",epyi)
+
+import matplotlib.pyplot as plt
+plt.plot(Us,e2s,marker="o",label="ITensor v2")
+plt.plot(Us,e3s,marker="x",linestyle="--",label="ITensor v3")
+plt.plot(Us,epys,marker="s",linestyle=":",label="pure Python")
+plt.xlabel("U")
+plt.ylabel("Ground-state energy")
+plt.legend()
+plt.show()

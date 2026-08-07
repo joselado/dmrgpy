@@ -26,6 +26,13 @@ ii = 0#n//2
 
 np.savetxt("DOS.OUT",np.array([es,ds.real]).T)
 
+import matplotlib.pyplot as plt
+plt.plot(es,ds.real,label="Site "+str(ii))
+plt.xlabel("Energy")
+plt.ylabel("DOS")
+plt.legend()
+plt.show()
+
 
 
 

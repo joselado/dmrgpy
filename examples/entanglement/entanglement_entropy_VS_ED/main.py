@@ -59,7 +59,9 @@ s_mutual_ed = sc.get_mutual_information(wf_ed,0,2)
 print("ED: site(0)=%.6f  pair(0,1)=%.6f  mutual(0,2)=%.6f"%(s_site_ed,s_pair_ed,s_mutual_ed))
 
 tol = 1e-3
-for v in [2,3,"python"]:
+backends = [2,3,"python"]
+s_site_l,s_pair_l,s_mutual_l = [],[],[]
+for v in backends:
     sc.set_hamiltonian(h) # re-set: switching backend invalidates the
                            # cached ground state (see restart(), called
                            # by set_hamiltonian) so each backend gets a
@@ -71,6 +73,7 @@ for v in [2,3,"python"]:
     s_pair = sc.get_pair_entropy(wf,0,1)
     s_mutual = sc.get_mutual_information(wf,0,2)
     print("v%s: site(0)=%.6f  pair(0,1)=%.6f  mutual(0,2)=%.6f"%(v,s_site,s_pair,s_mutual))
+    s_site_l.append(s_site) ; s_pair_l.append(s_pair) ; s_mutual_l.append(s_mutual)
 
     d_site = abs(s_site-s_site_ed)
     d_pair = abs(s_pair-s_pair_ed)
@@ -80,3 +83,24 @@ for v in [2,3,"python"]:
     assert d_mutual<tol, "v%s mutual information disagrees with ED by %g (tol=%g)"%(v,d_mutual,tol)
 
 print("TEST PASSED")
+
+# --- plot: DMRG (per backend) vs ED, for each entanglement quantity ---
+import matplotlib.pyplot as plt
+
+labels = ["site(0)","pair(0,1)","mutual(0,2)"]
+ed_vals = [s_site_ed,s_pair_ed,s_mutual_ed]
+x = np.arange(len(labels))
+width = 0.2
+
+fig,ax = plt.subplots()
+ax.bar(x - 1.5*width,ed_vals,width,label="ED")
+for k,v in enumerate(backends):
+    vals = [s_site_l[k],s_pair_l[k],s_mutual_l[k]]
+    ax.bar(x + (k-0.5)*width,vals,width,label="DMRG v%s"%v)
+ax.set_xticks(x)
+ax.set_xticklabels(labels)
+ax.set_ylabel("Entanglement entropy / mutual information")
+ax.set_title("Entanglement quantities: DMRG backends vs ED")
+ax.legend()
+plt.tight_layout()
+plt.show()

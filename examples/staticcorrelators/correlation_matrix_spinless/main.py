@@ -29,9 +29,14 @@ for i in range(len(out)):
 
 f.close()
 
-
-
-
+# out[i][j] is the weight of orbital i on site j: a natural heatmap of
+# the correlated-orbital decomposition of the ground state
+import matplotlib.pyplot as plt
+plt.imshow(np.array(out),aspect="auto",origin="lower")
+plt.colorbar(label="Orbital weight")
+plt.xlabel("Site j")
+plt.ylabel("Orbital i")
+plt.show()
 
 
 

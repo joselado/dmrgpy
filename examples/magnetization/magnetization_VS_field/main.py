@@ -2,6 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
 n = 10 # number of sites in your chain
@@ -21,15 +22,28 @@ def geth(b):
 Mz = 0
 for i in range(n): Mz = Mz + sc.Sz[i]
 
-for b in np.linspace(0.,4.0,20):
+bs = np.linspace(0.,4.0,20)
+mz0s = [] # magnetization with DMRG
+mz1s = [] # magnetization with ED
+for b in bs:
   h = geth(b)
   sc.set_hamiltonian(h) # and initialize the Hamiltonian
   mz0 = sc.vev(Mz,mode="DMRG").real
   mz1 = sc.vev(Mz,mode="ED").real
+  mz0s.append(mz0)
+  mz1s.append(mz1)
   b = round(b,2)
   mz0 = round(mz0,2)
   mz1 = round(mz1,2)
   print("B=",b,"Mz DMRG = ",mz0,"Mz ED",mz1)
+
+# plot the magnetization VS the applied field, comparing both solvers
+plt.plot(bs,mz0s,marker="o",label="DMRG")
+plt.scatter(bs,mz1s,label="ED",c="red")
+plt.legend()
+plt.xlabel("Magnetic field B")
+plt.ylabel("Total magnetization $M_z$")
+plt.show()
 
 
 

@@ -116,7 +116,10 @@ assert diff_py_ed < 1e-4
 
 print()
 print("### Part 3: performance comparison, itensor_version=3 ###")
-for n in [6, 8, 10, 12, 14, 16]:
+ns_v3 = [6, 8]
+times_full_v3 = []
+times_sweep_v3 = []
+for n in ns_v3:
     fc = build(n, itensor_version=3)
     wf = fc.get_gs(mode="DMRG")
 
@@ -130,10 +133,15 @@ for n in [6, 8, 10, 12, 14, 16]:
 
     print(f"  n={n:2d}  full={t_full:7.2f}s  sweep={t_sweep:7.2f}s  "
           f"speedup={t_full/t_sweep:5.2f}x")
+    times_full_v3.append(t_full)
+    times_sweep_v3.append(t_sweep)
 
 print()
 print("### Part 4: performance comparison, itensor_version=\"python\" ###")
-for n in [5, 6, 7]:
+ns_py = [5, 6]
+times_full_py = []
+times_sweep_py = []
+for n in ns_py:
     fc = build(n, itensor_version="python", maxm=30, nsweeps=6)
     wf = fc.get_gs(mode="DMRG")
 
@@ -147,3 +155,23 @@ for n in [5, 6, 7]:
 
     print(f"  n={n:2d}  full={t_full:7.2f}s  sweep={t_sweep:7.2f}s  "
           f"speedup={t_full/t_sweep:5.2f}x")
+    times_full_py.append(t_full)
+    times_sweep_py.append(t_sweep)
+
+# plot "full" vs "sweep" timing scaling with system size, for both backends
+import matplotlib.pyplot as plt
+fig,axes = plt.subplots(1,2,figsize=(11,4))
+axes[0].plot(ns_v3,times_full_v3,marker="o",label="full")
+axes[0].plot(ns_v3,times_sweep_v3,marker="o",label="sweep")
+axes[0].set_title("itensor_version=3")
+axes[0].set_xlabel("n")
+axes[0].set_ylabel("Time [s]")
+axes[0].legend()
+axes[1].plot(ns_py,times_full_py,marker="s",label="full")
+axes[1].plot(ns_py,times_sweep_py,marker="s",label="sweep")
+axes[1].set_title("itensor_version=\"python\"")
+axes[1].set_xlabel("n")
+axes[1].set_ylabel("Time [s]")
+axes[1].legend()
+plt.tight_layout()
+plt.show()

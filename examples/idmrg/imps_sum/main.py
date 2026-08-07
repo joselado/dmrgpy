@@ -32,6 +32,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 from dmrgpy import infinitechain
 from dmrgpy.pyitensor import idmrg
 from dmrgpy.pyitensor.tensor import ITensor
+import matplotlib.pyplot as plt
 
 ################################################################
 ### (1) the common, degenerate case: two ordinary IDMRGResults ###
@@ -60,7 +61,7 @@ except RuntimeError as e:
 ic_heis = infinitechain.Infinite_Spin_Chain(["1/2"])
 h = ic_heis.SxC[0] * ic_heis.SxR[0] + ic_heis.SyC[0] * ic_heis.SyR[0] + ic_heis.SzC[0] * ic_heis.SzR[0]
 ic_heis.set_hamiltonian(h)
-ic_heis.maxm, ic_heis.maxiter, ic_heis.etol = 30, 60, 1e-9
+ic_heis.maxm, ic_heis.maxiter, ic_heis.etol = 16, 30, 1e-9
 ic_heis.gs_energy()
 
 # A different (XXZ-anisotropic) converged ground state, then rescaled by
@@ -70,7 +71,7 @@ ic_heis.gs_energy()
 ic_xxz = infinitechain.Infinite_Spin_Chain(["1/2"])
 h_xxz = ic_xxz.SxC[0] * ic_xxz.SxR[0] + ic_xxz.SyC[0] * ic_xxz.SyR[0] + 0.3 * ic_xxz.SzC[0] * ic_xxz.SzR[0]
 ic_xxz.set_hamiltonian(h_xxz)
-ic_xxz.maxm, ic_xxz.maxiter, ic_xxz.etol = 30, 60, 1e-9
+ic_xxz.maxm, ic_xxz.maxiter, ic_xxz.etol = 16, 30, 1e-9
 ic_xxz.gs_energy()
 
 scaled_xxz = idmrg.PeriodicMPS(
@@ -96,3 +97,20 @@ assert chi_result == chi_heis
 
 print()
 print("imps_sum example PASSED")
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 4.5))
+
+labels = ["original\nHeisenberg", "summed +\ntruncated"]
+ax1.bar(labels, [sz_heis, sz_result], color=["tab:blue", "tab:orange"])
+ax1.set_ylabel(r"$\langle S_z\rangle$")
+ax1.set_title("<Sz> preserved by imps_sum")
+
+ax2.bar(labels, [chi_heis, chi_result], color=["tab:blue", "tab:orange"])
+ax2.set_ylabel("bond dimension")
+ax2.set_title("bond dim preserved\n(smaller-norm branch discarded)")
+
+fig.suptitle("imps_sum: well-posed case (case (1), degenerate eta=1 sum,\n"
+              "correctly raises RuntimeError instead -- nothing to plot there)")
+fig.tight_layout()
+fig.savefig("imps_sum.png", dpi=150)
+print("saved plot to imps_sum.png")

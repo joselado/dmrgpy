@@ -2,6 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
 
@@ -34,6 +35,12 @@ ms = parallelslurm.pcall(getm,bs,time=1) # compute all the magnetic fields
 #ms = [getm(bi) for bi in bs] # the previous call is the parallelization of this
 
 np.savetxt("M_VS_B.OUT",np.array([bs,ms]).T) # save in a file
+
+# plot the magnetization VS the applied field
+plt.plot(bs,ms,marker="o")
+plt.xlabel("Magnetic field B")
+plt.ylabel("Total magnetization $M_z$")
+plt.show()
 
 
 

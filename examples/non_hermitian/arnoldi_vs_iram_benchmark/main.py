@@ -19,6 +19,7 @@ import sys, os, time, json, argparse
 sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from dmrgpy.multioperatortk.staticoperator import StaticOperator
 from dmrgpy.edtk.edchain import EDOperator, State
@@ -164,6 +165,43 @@ add_small_case("nonhermitian_fermion_n4", make_fermion_chain, 4, nwf=1, seed=3)
 add_small_case("hermitian_spin_n4", make_spin_chain, 4, nwf=1, seed=1)
 
 
+def plot(results, modes):
+    """Op(x) call count and accuracy vs chain length, arnolditk vs iram,
+    one line per (mode, algo) combination."""
+    fig, (ax_n, ax_e) = plt.subplots(1, 2, figsize=(11, 4.2))
+    colors = {"ED": "tab:blue", "DMRG": "tab:orange"}
+    markers = {"arnolditk": "o", "iram": "s"}
+    for mode in modes:
+        for algo in ("arnolditk", "iram"):
+            rows = [r for r in results if r["mode"] == mode and r["algo"] == algo
+                    and r["ok"]]
+            if not rows:
+                continue
+            rows = sorted(rows, key=lambda r: r["n"])
+            ns = [r["n"] for r in rows]
+            nops = [r["nops"] for r in rows]
+            # errors can be exactly 0 at machine precision; floor for log axis
+            errs = [max(r["max_energy_error"], 1e-16) for r in rows]
+            label = f"{mode}-{algo}"
+            ax_n.plot(ns, nops, marker=markers[algo],
+                      color=colors.get(mode, "black"), label=label)
+            ax_e.plot(ns, errs, marker=markers[algo],
+                      color=colors.get(mode, "black"), label=label)
+    ax_n.set_xlabel("chain length n")
+    ax_n.set_ylabel("Op(x) calls")
+    ax_n.set_yscale("log")
+    ax_n.set_title("Matvec cost: arnolditk vs iram")
+    ax_e.set_xlabel("chain length n")
+    ax_e.set_ylabel("max energy error vs ED ground truth")
+    ax_e.set_yscale("log")
+    ax_e.set_title("Accuracy: arnolditk vs iram")
+    for ax in (ax_n, ax_e):
+        ax.legend(fontsize=8)
+        ax.grid(alpha=0.3)
+    fig.tight_layout()
+    plt.show()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", default=None)
@@ -214,6 +252,8 @@ def main():
         with open(args.json, "w") as f:
             json.dump(results, f, indent=2)
         print(f"\nWrote {args.json}")
+
+    plot(results, modes)
 
 if __name__ == "__main__":
     main()

@@ -16,6 +16,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 
 n = 6
@@ -40,10 +41,13 @@ fc,h = build_chain(3)
 es_ed = fc.get_excited(mode="ED",n=6)
 print("ED spectrum (lowest real parts):",es_ed[:3])
 
-for version in [3,2,"python"]:
+nhdmrg_versions = [3,2,"python"]
+nhdmrg_energies = [] # collected for the complex-plane plot below
+for version in nhdmrg_versions:
     fc,h = build_chain(version)
     # NH-DMRG: (energy, left eigenvector, right eigenvector)
     e,psil,psir = fc.nhdmrg()
+    nhdmrg_energies.append(e)
     print("NH-DMRG (itensor_version="+str(version)+") energy:",e)
     # NH-DMRG reproduces the smallest real part, and lands on an actual
     # eigenvalue (either member of a conjugate pair is acceptable)
@@ -66,3 +70,18 @@ print("Arnoldi energy:",ea[0])
 assert abs(ea[0].real-es_ed[0].real)<5e-2
 
 print("All checks passed")
+
+# complex-plane plot: full ED spectrum, the NH-DMRG ground-state energy
+# from every backend, and the Arnoldi ground-state energy, all as
+# eigenvalues of the same non-Hermitian Hamiltonian
+es_ed_arr = np.array(es_ed)
+nhdmrg_arr = np.array(nhdmrg_energies)
+plt.scatter(es_ed_arr.real,es_ed_arr.imag,c="gray",label="ED spectrum")
+plt.scatter(nhdmrg_arr.real,nhdmrg_arr.imag,c="red",marker="x",s=80,
+        label="NH-DMRG (v3,v2,python)")
+plt.scatter([ea[0].real],[ea[0].imag],c="blue",marker="+",s=120,
+        label="Arnoldi")
+plt.xlabel("Re(E)")
+plt.ylabel("Im(E)")
+plt.legend()
+plt.show()

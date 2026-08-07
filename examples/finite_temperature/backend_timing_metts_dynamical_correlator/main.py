@@ -26,6 +26,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # + random-MPS-start tradeoff -- see documentation.md -- costs it less
 # than it does for reaching a converged ground state from scratch).
 import time
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain, cppext
 
 
@@ -59,13 +60,16 @@ if have_v3:
     header += f"{'python/v3':>12}"
 print(header)
 
+times3, timespy = [], []
 for nsamples in sizes_nsamples:
     tpy = metts_dynamical_correlator_timed("python", n, nsamples, nt)
     row = f"{nsamples:10d}"
     if have_v3:
         t3 = metts_dynamical_correlator_timed(3, n, nsamples, nt)
         row += f"{t3:10.2f}"
+        times3.append(t3)
     row += f"{tpy:12.2f}"
+    timespy.append(tpy)
     if have_v3:
         row += f"{tpy/t3:12.2f}"
     print(row)
@@ -74,3 +78,16 @@ if not have_v3:
     print("\n(ITensor v3 not compiled in this environment -- only the "
           "python backend's own timing is shown; run `python install.py "
           "--itensor-version=3` to compile it and see the v3 comparison.)")
+
+plt.figure(figsize=(6, 4.5))
+plt.plot(sizes_nsamples, timespy, "o-", label="python")
+if have_v3:
+    plt.plot(sizes_nsamples, times3, "s-", label="v3 (mpscpp3)")
+plt.xlabel("nsamples")
+plt.ylabel("wall time [s]")
+plt.yscale("log")
+plt.title(f"METTS dynamical correlator timing (n={n}, nt={nt})")
+plt.legend()
+plt.grid(alpha=0.3, which="both")
+plt.tight_layout()
+plt.show()

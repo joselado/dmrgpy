@@ -30,6 +30,15 @@ de1 = np.sqrt(np.array(de1))
 print("Average fluctuation with GM",np.mean(de0))
 print("Average fluctuation without GM",np.mean(de1))
 
+import matplotlib.pyplot as plt
+xs = np.arange(nex)
+plt.plot(xs,de0,marker="o",label="With Gram-Schmidt")
+plt.plot(xs,de1,marker="o",label="Without Gram-Schmidt")
+plt.xlabel("Excited-state index")
+plt.ylabel("Energy fluctuation $\\sqrt{\\langle H^2\\rangle-\\langle H\\rangle^2}$")
+plt.legend()
+plt.show()
+
 
 
 

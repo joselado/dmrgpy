@@ -18,11 +18,24 @@ for i in range(n-1): h = h + (fc.N[i]-0.5)*(fc.N[i+1]-0.5)
 from dmrgpy import mpsalgebra
 # the GS mode targets the state with minimum Re(E)
 
-fc.set_hamiltonian(h) 
-print("ED energies",fc.get_excited(mode="ED",n=3)) 
+fc.set_hamiltonian(h)
+esed = fc.get_excited(mode="ED",n=3)
+print("ED energies",esed)
 e,wf = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,n=3)
 
 print("MPS Energies",e)
+
+# plot the excited-state energies in the complex plane, comparing
+# the exact-diagonalization and MPS (non-Hermitian Arnoldi) results
+import matplotlib.pyplot as plt
+esed = np.array(esed)
+e = np.array(e)
+plt.scatter(e.real,e.imag,c="blue",s=80,label="MPS")
+plt.scatter(esed.real,esed.imag,c="red",s=40,label="ED")
+plt.xlabel("Re(E)")
+plt.ylabel("Im(E)")
+plt.legend()
+plt.show()
 
 
 

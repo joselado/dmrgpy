@@ -13,11 +13,12 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # near-zero-coefficient terms in MO2matrix, matching what to_terms()
 # already does for the DMRG path -- this test locks that fix in.
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import parafermionchain
 
 n = 6
 
-def get_energy(itensor_version, mode="DMRG"):
+def get_energy(itensor_version, n, mode="DMRG"):
     pc = parafermionchain.Parafermionic_Chain(n)
     # Switch backend *before* seeding: constructing the pure-Python backend
     # (setup_python()) consumes draws from numpy's global RNG as a side
@@ -42,10 +43,10 @@ def get_energy(itensor_version, mode="DMRG"):
     pc.set_hamiltonian(h)
     return pc.gs_energy(mode=mode)
 
-e2 = get_energy(2)
-e3 = get_energy(3)
-eed = get_energy(2, mode="ED") # was: KeyError('Id', 1) before the fix
-epy = get_energy("python") # n=6 < 10, python backend is in scope
+e2 = get_energy(2, n)
+e3 = get_energy(3, n)
+eed = get_energy(2, n, mode="ED") # was: KeyError('Id', 1) before the fix
+epy = get_energy("python", n) # n=6 < 10, python backend is in scope
 
 print("Ground state energy (ITensor v2)  =",e2)
 print("Ground state energy (ITensor v3)  =",e3)
@@ -59,3 +60,20 @@ for name,e in [("v3",e3),("ED",eed),("python",epy)]:
     assert diff<tol, "v2 vs %s disagree by %g (tol=%g)"%(name,diff,tol)
 
 print("TEST PASSED")
+
+# sweep the chain length and overlay all four solvers -- they should all
+# agree at every size
+ns = [3,4,5,6]
+e2s = [get_energy(2, ni) for ni in ns]
+e3s = [get_energy(3, ni) for ni in ns]
+eeds = [get_energy(2, ni, mode="ED") for ni in ns]
+epys = [get_energy("python", ni) for ni in ns]
+
+plt.plot(ns,e2s,marker="o",label="ITensor v2")
+plt.plot(ns,e3s,marker="s",label="ITensor v3")
+plt.plot(ns,eeds,marker="^",label="ED")
+plt.plot(ns,epys,marker="x",label="pure Python")
+plt.xlabel("Chain length")
+plt.ylabel("Ground state energy")
+plt.legend()
+plt.show()

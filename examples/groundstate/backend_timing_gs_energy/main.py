@@ -28,6 +28,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # and a random-MPS start (see CLAUDE.md/documentation.md), sacrificing the
 # QN block-sparsity that would otherwise help it at scale.
 import time
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
 
@@ -66,3 +67,15 @@ print("Total time across all sizes above:")
 print(f"  ITensor v2  : {sum(times2):.3f} s")
 print(f"  ITensor v3  : {sum(times3):.3f} s")
 print(f"  pure Python : {sum(timespy):.3f} s")
+
+plt.plot(sizes, times2, "o-", label="ITensor v2 (mpscpp2)")
+plt.plot(sizes, times3, "s-", label="ITensor v3 (mpscpp3)")
+plt.plot(sizes, timespy, "^-", label="pure Python")
+plt.xlabel("chain length n")
+plt.ylabel("wall time [s]")
+plt.yscale("log")
+plt.title("Ground state energy: DMRG backend timing vs system size")
+plt.legend()
+plt.grid(alpha=0.3, which="both")
+plt.tight_layout()
+plt.show()

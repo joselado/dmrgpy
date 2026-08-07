@@ -29,14 +29,32 @@ h = h + h.get_dagger()
 bc.set_hamiltonian(h)
 e = bc.gs_energy() # compute the ground state energy
 print("Energy",e)
+navg,n0,n1,n2,n3 = [],[],[],[],[]
 for i in range(ns,ns+nb):
     print()
     print("Site #",i)
-    print("Average occupation",np.round(bc.vev(bc.N[i]).real,2))
-    print("No occupation",np.round(bc.vev(bc.D0[i]).real,2))
-    print("Single occupation",np.round(bc.vev(bc.D1[i]).real,2))
-    print("Double occupation",np.round(bc.vev(bc.D2[i]).real,2))
-    print("Triple occupation",np.round(bc.vev(bc.D3[i]).real,2))
+    navg.append(bc.vev(bc.N[i]).real)
+    n0.append(bc.vev(bc.D0[i]).real)
+    n1.append(bc.vev(bc.D1[i]).real)
+    n2.append(bc.vev(bc.D2[i]).real)
+    n3.append(bc.vev(bc.D3[i]).real)
+    print("Average occupation",np.round(navg[-1],2))
+    print("No occupation",np.round(n0[-1],2))
+    print("Single occupation",np.round(n1[-1],2))
+    print("Double occupation",np.round(n2[-1],2))
+    print("Triple occupation",np.round(n3[-1],2))
+
+import matplotlib.pyplot as plt
+bsites = list(range(ns,ns+nb))
+plt.plot(bsites,navg,marker="o",label="<N>")
+plt.plot(bsites,n0,marker="s",label="P(n=0)")
+plt.plot(bsites,n1,marker="^",label="P(n=1)")
+plt.plot(bsites,n2,marker="v",label="P(n=2)")
+plt.plot(bsites,n3,marker="d",label="P(n=3)")
+plt.xlabel("Bosonic site")
+plt.ylabel("Occupation / probability")
+plt.legend()
+plt.show()
 
 
 

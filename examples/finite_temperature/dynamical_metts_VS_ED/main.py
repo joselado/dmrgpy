@@ -23,6 +23,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # round-trip for this comparison), for a small Heisenberg chain + field
 # where the full spectrum is cheap to diagonalize directly.
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain, cppext
 from dmrgpy.edtk.edchain import EDOperator
 
@@ -58,6 +59,7 @@ def ed_time_domain_reference(sc, name, T, ts):
     return out
 
 
+results = {}
 for version in versions:
     sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
     if version == "python":
@@ -89,4 +91,23 @@ for version in versions:
         "dynamical METTS disagrees with the exact ED reference beyond " \
         "the expected statistical tolerance (itensor_version=%s)" % (version,)
 
+    results[version] = (ts, means, stderrs, ref)
+
 print("\nTEST PASSED")
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5))
+plotted_ref = False
+for version, (ts, means, stderrs, ref) in results.items():
+    if not plotted_ref:
+        ax1.plot(ts, ref.real, "k-o", label="ED")
+        ax2.plot(ts, ref.imag, "k-o", label="ED")
+        plotted_ref = True
+    ax1.errorbar(ts, means.real, yerr=stderrs, fmt="s", capsize=3,
+                 label="METTS (%s)" % (version,))
+    ax2.errorbar(ts, means.imag, yerr=stderrs, fmt="s", capsize=3,
+                 label="METTS (%s)" % (version,))
+ax1.set_xlabel("t") ; ax1.set_ylabel(r"Re $C_{S_0^zS_0^z}(t)$") ; ax1.legend() ; ax1.grid(alpha=0.3)
+ax2.set_xlabel("t") ; ax2.set_ylabel(r"Im $C_{S_0^zS_0^z}(t)$") ; ax2.legend() ; ax2.grid(alpha=0.3)
+fig.suptitle("Dynamical METTS vs exact ED, n=%d Heisenberg+field chain, T=%g" % (n, T))
+fig.tight_layout()
+plt.show()

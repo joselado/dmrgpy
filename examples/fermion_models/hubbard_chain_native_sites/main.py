@@ -58,9 +58,21 @@ es = np.linspace(-4, 4, 60)
 assert np.max(np.abs(y_native - y_double)) < 5e-3
 print("KPM dynamical correlator matches between the two site conventions")
 
+import matplotlib.pyplot as plt
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+
+ax1.plot(es, y_native, label="Native (dim-4 sites)")
+ax1.plot(es, y_double, label="Doubled (dim-2 sites)", linestyle="--")
+ax1.set_xlabel("Energy")
+ax1.set_ylabel("KPM dynamical correlator")
+ax1.set_title("Part 1: correctness cross-check")
+ax1.legend()
+
 print()
 print("### Part 2: performance comparison (fixed maxm, growing n) ###")
-for n_size in [6, 10, 14]:
+n_sizes = [6, 10, 14]
+walltimes = {"native (n sites, dim 4)": [], "doubled (2n sites, dim 2)": []}
+for n_size in n_sizes:
     n = n_size
     for chain_cls, label in [(fermionchain.Spinful_Fermionic_Chain_Native, "native (n sites, dim 4)"),
                               (fermionchain.Spinful_Fermionic_Chain, "doubled (2n sites, dim 2)")]:
@@ -69,3 +81,14 @@ for n_size in [6, 10, 14]:
         e0 = fc.gs_energy(mode="DMRG")
         dt = time.time() - t0
         print(f"  n={n_size:2d}  {label:26s}  n_sites={fc.ns:2d}  E0={e0:.6f}  wall={dt:.2f}s")
+        walltimes[label].append(dt)
+
+for label, dts in walltimes.items():
+    ax2.plot(n_sizes, dts, marker="o", label=label)
+ax2.set_xlabel("n (chain length)")
+ax2.set_ylabel("Wall time (s)")
+ax2.set_title("Part 2: performance comparison")
+ax2.legend()
+
+plt.tight_layout()
+plt.show()

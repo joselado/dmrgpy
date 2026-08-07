@@ -113,3 +113,18 @@ print(f"{'KPM':>8}{results['KPM']:12.2f}   one Chebyshev-moment run, full spectr
 print(f"{'CVM':>8}{results['CVM']:12.2f}   one linear solve per point x {len(es)} points ({results['CVM']/len(es):.2f} s/point)")
 print(f"{'TD':>8}{results['TD']:12.2f}   one real-time evolution run, full spectrum (FFT)")
 print(f"{'TDZ':>8}{results['TDZ']:12.2f}   one complex-time evolution run, full spectrum (FFT)")
+
+# --- plot: wall-clock cost per dynamical-correlator submode (reuses the
+# timings already measured above, no extra computation) ---
+import matplotlib.pyplot as plt
+
+fig,ax = plt.subplots()
+submodes = list(results.keys())
+times = [results[k] for k in submodes]
+ax.bar(submodes,times,color=["blue","orange","green","red"])
+ax.set_ylabel("wall time [s]")
+ax.set_title("Dynamical correlator submode timing (n=%d spin chain, v3)"%n)
+for i,t in enumerate(times):
+    ax.text(i,t,f"{t:.1f}s",ha="center",va="bottom",fontsize=8)
+plt.tight_layout()
+plt.show()

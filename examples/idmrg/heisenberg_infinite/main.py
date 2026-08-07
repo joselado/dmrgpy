@@ -2,6 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np  # conventional numpy library
+import matplotlib.pyplot as plt  # plotting
 from dmrgpy import infinitechain  # infinite-DMRG (iDMRG) chain object
 
 #################################################
@@ -34,6 +35,19 @@ print("absolute error:            ", abs(density - exact))
 # formalism, see idmrg.py's onsite_expectation/two_point_correlator).
 print()
 print("<Sz> (expect ~0 by symmetry):", ic.vev("Sz", 0))
-for r in range(1, 4):
+rs = range(1, 8)
+correlators = []
+for r in rs:
     c = ic.correlator("Sz", 0, "Sz", r)
+    correlators.append(c)
     print("<Sz(0)Sz({})> =".format(r), c)
+
+fig, ax = plt.subplots(figsize=(6, 4.5))
+ax.plot(list(rs), correlators, "o-", color="tab:blue")
+ax.axhline(0, color="gray", lw=0.8, ls=":")
+ax.set_xlabel("distance $r$")
+ax.set_ylabel(r"$\langle S_z(0)S_z(r)\rangle$")
+ax.set_title("Uniform Heisenberg chain (iDMRG): static Sz-Sz correlator")
+fig.tight_layout()
+fig.savefig("heisenberg_infinite_correlator.png", dpi=150)
+print("\nsaved plot to heisenberg_infinite_correlator.png")

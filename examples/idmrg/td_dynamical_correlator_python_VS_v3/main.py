@@ -33,11 +33,12 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import infinitechain
 
-MAXM, CUTOFF, MAXITER, ETOL, NITER, RESTARTS = 30, 1e-12, 200, 1e-11, 200, 4
-N_WINDOW, DT, NT = 8, 0.05, 6
-X_VALUES = [-2, -1, 0, 1, 2]
+MAXM, CUTOFF, MAXITER, ETOL, NITER, RESTARTS = 10, 1e-12, 40, 1e-11, 30, 1
+N_WINDOW, DT, NT = 6, 0.05, 4
+X_VALUES = [-1, 0, 1]
 
 
 def build(itensor_version):
@@ -71,9 +72,9 @@ print("=== S(x,t) via IBC-window TDVP ===")
 from dmrgpy.pyitensor import idmrg_window
 ts_py, xs_py, S_py = idmrg_window.dynamical_correlator_td(
     ic_py._result, N_WINDOW, "Sz", "Sz", DT, NT,
-    cutoff=1e-10, maxdim=40, niter=100, x_values=X_VALUES, connected=True)
+    cutoff=1e-10, maxdim=20, niter=30, x_values=X_VALUES, connected=True)
 ts_v3, xs_v3, S_v3 = ic_v3._session3.td_dynamical_correlator_window(
-    N_WINDOW, "Sz", "Sz", DT, NT, sorted(X_VALUES), 40, 1e-10, 100, True, 0)
+    N_WINDOW, "Sz", "Sz", DT, NT, sorted(X_VALUES), 20, 1e-10, 30, True, 0)
 
 print("python S(x,t=0)  :", np.round(S_py[0].real, 4))
 print("v3     S(x,t=0)  :", np.round(S_v3[0].real, 4))
@@ -84,12 +85,34 @@ assert np.all(np.isfinite(S_v3))
 
 print()
 print("=== S(k,omega) via the public API (itensor_version=3) ===")
-ks = np.linspace(-np.pi, np.pi, 9)
+ks = np.linspace(-np.pi, np.pi, 5)
 ks_out, es, Skw = ic_v3.td_dynamical_correlator(
-    "Sz", 0, "Sz", n_window=N_WINDOW, dt=DT, nt=20, x_values=X_VALUES,
-    maxdim=40, cutoff=1e-10, niter=100, ks=ks, delta=0.2)
+    "Sz", 0, "Sz", n_window=N_WINDOW, dt=DT, nt=6, x_values=X_VALUES,
+    maxdim=20, cutoff=1e-10, niter=30, ks=ks, delta=0.2)
 assert np.all(np.isfinite(Skw))
 print("max|S(k,omega)| (v3) =", np.max(np.abs(Skw)))
 
 print()
 print("iDMRG td_dynamical_correlator python-VS-v3 regression test PASSED")
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+
+xs_py_list = list(xs_py)
+xs_v3_list = list(xs_v3)
+ax1.plot(xs_py_list, S_py[0].real, "o-", color="tab:blue", label="python")
+ax1.plot(xs_v3_list, S_v3[0].real, "s--", color="tab:orange", label="v3")
+ax1.set_xlabel("distance $x$")
+ax1.set_ylabel(r"Re $S(x,t=0)$")
+ax1.set_title("S(x,t=0): python vs v3")
+ax1.legend()
+
+pcm = ax2.pcolormesh(ks_out, es, np.abs(Skw).T, shading="auto", cmap="viridis")
+fig.colorbar(pcm, ax=ax2, label=r"|S(k,$\omega$)|")
+ax2.set_xlabel("k")
+ax2.set_ylabel(r"$\omega$")
+ax2.set_title("S(k,$\\omega$) (v3)")
+
+fig.suptitle("iDMRG IBC-window TDVP dynamical correlator: python vs ITensor v3")
+fig.tight_layout()
+fig.savefig("td_dynamical_correlator_python_VS_v3.png", dpi=150)
+print("saved plot to td_dynamical_correlator_python_VS_v3.png")

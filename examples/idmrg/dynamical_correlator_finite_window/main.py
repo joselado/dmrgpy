@@ -26,6 +26,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import infinitechain
 
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
@@ -44,12 +45,15 @@ delta = 0.35  # kept coarse on purpose -- see this example's header and
 
 print()
 print("=== <Sz(0,t)Sz(0,0)> local dynamical correlator, convergence in n_window ===")
+n_windows = (8, 12, 16)
 heights = []
-for n_window in (8, 12, 16):
+spectra = []
+for n_window in n_windows:
     _, ys = ic.kpm_finite(
         "Sz", 0, "Sz", 0, n_window=n_window,
         window_chain_kwargs=dict(maxm=24, nsweeps=10),
         delta=delta, es=es)
+    spectra.append(ys)
     peak_w = es[np.argmax(ys.real)]
     height = np.max(np.abs(ys))
     heights.append(height)
@@ -67,3 +71,14 @@ assert max(heights) / min(heights) < 2.0
 
 print()
 print("dynamical_correlator_finite_window example PASSED")
+
+fig, ax = plt.subplots(figsize=(6, 4.5))
+for n_window, ys in zip(n_windows, spectra):
+    ax.plot(es, np.abs(ys), label="n_window={}".format(n_window))
+ax.set_xlabel(r"$\omega$")
+ax.set_ylabel(r"$|S(\omega)|$")
+ax.set_title(r"$\langle S_z(0,t)S_z(0,0)\rangle$: kpm_finite convergence in n_window")
+ax.legend()
+fig.tight_layout()
+fig.savefig("dynamical_correlator_finite_window.png", dpi=150)
+print("saved plot to dynamical_correlator_finite_window.png")

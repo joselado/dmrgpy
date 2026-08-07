@@ -38,6 +38,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 sys.path.append(os.getcwd()+'/../../../tests')  # for _free_fermion_reference
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy.pyitensor import idmrg, idmrg_window
 from _free_fermion_reference import FreeFermionXX
 
@@ -95,9 +96,26 @@ x0 = 1000  # reference site, far from the free-fermion chain's own open edges
 xs = list(xs)
 print("connected Sz-Sz correlator S(x,t): iDMRG (window TDVP) vs exact free fermion")
 print(f"{'t':>6} {'x':>3}  {'iDMRG':>20}  {'exact':>20}  {'|diff|':>8}")
+exact_arr = np.zeros_like(S)
 for it, t in enumerate(ts):
     for ix, x in enumerate(xs):
         exact = ff.sz_sz_connected(x0 + int(x), x0, t)
         got = S[it, ix]
+        exact_arr[it, ix] = exact
         print(f"{t:6.3f} {x:+3d}  {got.real:+.6f}{got.imag:+.6f}j  "
               f"{exact.real:+.6f}{exact.imag:+.6f}j  {abs(got - exact):.4f}")
+
+fig, ax = plt.subplots(figsize=(7, 5))
+colors = plt.cm.viridis(np.linspace(0, 1, len(xs)))
+for ix, x in enumerate(xs):
+    ax.plot(ts, S[:, ix].real, "o-", color=colors[ix], label="x={:+d} (iDMRG)".format(int(x)))
+    ax.plot(ts, exact_arr[:, ix].real, "--", color=colors[ix], alpha=0.7,
+            label="x={:+d} (exact)".format(int(x)))
+ax.set_xlabel("time $t$")
+ax.set_ylabel(r"Re $\langle S_z(x,t)S_z(0,0)\rangle_c$")
+ax.set_title("iDMRG IBC-window TDVP vs exact free-fermion reference\n"
+             "(dimerized XX chain, connected Sz-Sz correlator)")
+ax.legend(fontsize=7, ncol=2)
+fig.tight_layout()
+fig.savefig("td_dynamical_correlator_free_fermion.png", dpi=150)
+print("\nsaved plot to td_dynamical_correlator_free_fermion.png")

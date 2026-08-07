@@ -247,7 +247,15 @@ script whose entire output is a single scalar (e.g. one ground-state
 energy, one overlap) is the one legitimate exception — there, sweep the
 relevant parameter (system size, time, coupling strength, ...) instead of
 computing just one point, if a sweep is cheap enough to be worth adding;
-otherwise printing is fine.
+otherwise printing is fine. Treat that exception as a last resort, not a
+default: an audit of the whole `examples/` tree found 105 scripts that had
+quietly settled for print/assert-only even though an obvious cheap axis
+was sitting right there (chain length, a coupling/field, time/frequency,
+site/bond index, backend or `itensor_version` comparison, ED vs DMRG) —
+usually because the script already computed an array or a comparison and
+simply never plotted it. When adding a new example or touching an old
+one, check first whether it already has such an axis before reaching for
+the single-scalar exception.
 
 **Worktree/symlink pitfall**: `~/.local/lib/python3.13/site-packages/dmrgpy`
 is typically a symlink into *one specific* checkout's `src/dmrgpy/` (often

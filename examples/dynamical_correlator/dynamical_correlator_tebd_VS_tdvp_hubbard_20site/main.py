@@ -119,3 +119,28 @@ print("(large at this maxm/system size due to bond-dimension-saturation "
 print(f"TEBD speedup over TDVP, per step: {t_tdvp_per_step/(t_tebd/NT_TEBD):.1f}x")
 print(f"Extrapolated TDVP wall for {NT_TEBD} steps: {t_tdvp_per_step*NT_TEBD:.0f} s "
       f"(~{t_tdvp_per_step*NT_TEBD/60:.0f} min), vs TEBD's measured {t_tebd:.1f} s")
+
+# --- plot: real-time trajectory C(t) = <Cup_0(t) Cdagup_0(0)> from the
+# full TEBD run vs the shorter TDVP run, over the steps they share ---
+import matplotlib.pyplot as plt
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+fig.subplots_adjust(wspace=0.3, bottom=0.15)
+
+ax1.plot(ts_tebd, cs_tebd.real, c="blue", label="TEBD (real)")
+ax1.plot(ts_tebd, cs_tebd.imag, c="blue", ls="--", label="TEBD (imag)")
+ax1.plot(ts_tdvp, cs_tdvp.real, c="red", marker="o", ls="none", label="TDVP (real)")
+ax1.plot(ts_tdvp, cs_tdvp.imag, c="red", marker="x", ls="none", label="TDVP (imag)")
+ax1.set_xlabel("time")
+ax1.set_ylabel(r"$C(t)=\langle C_{0\uparrow}(t) C^\dagger_{0\uparrow}(0)\rangle$")
+ax1.set_title("TEBD (full run) vs TDVP (shared steps)")
+ax1.legend(fontsize=7)
+
+ax2.bar(["TEBD\n(per step)", "TDVP\n(per step)"],
+        [t_tebd/NT_TEBD, t_tdvp_per_step], color=["blue", "red"])
+ax2.set_ylabel("wall time / step [s]")
+ax2.set_title("Per-step cost (n=%d Hubbard orbitals)" % n)
+
+plt.savefig("tebd_vs_tdvp_hubbard20.png", dpi=150)
+print("Plot saved to tebd_vs_tdvp_hubbard20.png")
+plt.show()

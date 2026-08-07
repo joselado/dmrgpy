@@ -90,7 +90,12 @@ assert diff_ed < 1e-4
 
 print()
 print("### Part 2: performance comparison ###")
-for n_size in [3, 4, 5, 6]:
+n_sizes = [3, 4]
+times_native_full = []
+times_native_explicit = []
+times_double_full = []
+times_double_explicit = []
+for n_size in n_sizes:
     n = n_size
     fc_native = build(fermionchain.Spinful_Fermionic_Chain_Native)
     wf_native = fc_native.get_gs(mode="DMRG")
@@ -115,3 +120,18 @@ for n_size in [3, 4, 5, 6]:
           f"native(explicit)={t_native_explicit:.2f}s  "
           f"doubled(full)={t_double_full:.2f}s  "
           f"doubled(explicit)={t_double_explicit:.2f}s")
+    times_native_full.append(t_native_full)
+    times_native_explicit.append(t_native_explicit)
+    times_double_full.append(t_double_full)
+    times_double_explicit.append(t_double_explicit)
+
+# timing vs system size for every (site type) x (ctmode) combination
+import matplotlib.pyplot as plt
+plt.plot(n_sizes,times_native_full,marker="o",label="native, full")
+plt.plot(n_sizes,times_native_explicit,marker="o",label="native, explicit")
+plt.plot(n_sizes,times_double_full,marker="s",label="doubled, full")
+plt.plot(n_sizes,times_double_explicit,marker="s",label="doubled, explicit")
+plt.xlabel("n (number of native sites / 2n flat modes)")
+plt.ylabel("Time [s]")
+plt.legend()
+plt.show()

@@ -2,6 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 n = 4
 spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
@@ -19,8 +20,20 @@ for j2 in j2s:
     wf = sc.get_gs(mode="DMRG") # get ground state
     wfs.append(wf) # store
 
+overlaps = []
 for i in range(1,len(j2s)):
-    print(np.abs(wfs[i-1].dot(wfs[i])))
+    ov = np.abs(wfs[i-1].dot(wfs[i]))
+    print(ov)
+    overlaps.append(ov)
+
+# plot the overlap between consecutive ground states as J2 (the diagonal
+# frustrating coupling) is swept, which drops near a level crossing/phase
+# transition of the frustrated square plaquette
+j2mid = (j2s[1:]+j2s[:-1])/2.
+plt.plot(j2mid,overlaps,marker="o")
+plt.xlabel("J2")
+plt.ylabel("|<GS(J2_i)|GS(J2_i+1)>|")
+plt.show()
 
 
 

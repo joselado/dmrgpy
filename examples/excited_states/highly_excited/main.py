@@ -18,6 +18,24 @@ from dmrgpy import mpsalgebra
 e,wf = mpsalgebra.mpsarnoldi(sc,h,e=.4,mode="ShiftInv")
 print("Energy",e)
 
+# sweep the shift-invert target energy to see which excited state is
+# recovered for different targets (cheap, same small n=4 chain)
+targets = [0.1,0.2,0.3,0.4,0.5,0.6]
+found = []
+for et in targets:
+    ei,wfi = mpsalgebra.mpsarnoldi(sc,h,e=et,mode="ShiftInv")
+    ei = np.array(ei).flatten()[0]
+    found.append(ei)
+    print("Target",et,"-> recovered energy",ei)
+
+import matplotlib.pyplot as plt
+plt.plot(targets,found,marker="o",label="Recovered energy")
+plt.plot(targets,targets,linestyle="--",color="gray",label="Target energy")
+plt.xlabel("Target energy (shift-invert)")
+plt.ylabel("Recovered eigenenergy")
+plt.legend()
+plt.show()
+
 
 
 

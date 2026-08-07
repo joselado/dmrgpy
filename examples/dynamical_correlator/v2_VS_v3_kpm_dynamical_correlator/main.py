@@ -41,3 +41,15 @@ if len(y2) == len(y3):
 else:
     print("Max abs difference v2 vs v3          = N/A (different grid sizes: "
           "{} vs {} points -- likely v2's ED fallback, see mode.py)".format(len(y2),len(y3)))
+
+# --- plot: overlay of the KPM dynamical correlator from all three backends ---
+import matplotlib.pyplot as plt
+
+plt.plot(x2,y2.real,c="red",label="ITensor v2")
+plt.plot(x3,y3.real,c="blue",ls="--",label="ITensor v3")
+plt.plot(xpy,ypy.real,c="green",ls=":",label="pure Python")
+plt.xlabel("frequency [J]")
+plt.ylabel("Dynamical correlator")
+plt.title("KPM dynamical correlator: backend comparison (n=%d)"%n)
+plt.legend()
+plt.show()

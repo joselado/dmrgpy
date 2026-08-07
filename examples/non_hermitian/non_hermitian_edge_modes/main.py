@@ -14,7 +14,7 @@ def get(V=0.0,c=1.0):
     c is the coupling between first and last sites"""
     n = 2 # number of tetramers
     ns = 4*n # total number of sites
-    mh = np.zeros((ns,ns),dtype=np.complex) # TB matrix
+    mh = np.zeros((ns,ns),dtype=complex) # TB matrix
     for i in range(ns-1):
         mh[i,i+1] = 1.0
         mh[i+1,i] = 1.0
@@ -53,15 +53,33 @@ def get(V=0.0,c=1.0):
 f = open("EIGS.OUT","w")
 
 # compute for different interactions
-for V in np.linspace(0.0,1.0,20):
+Vs = np.linspace(0.0,1.0,20)
+allV = [] ; allRe = [] ; allIm = [] ; allIdx = []
+for V in Vs:
     esed = get(c=0.0,V=V)
     print("Computing ",V)
-    for e in esed:
+    for i,e in enumerate(esed):
         f.write(str(e.real)+"  ")
         f.write(str(e.imag)+"  ")
         f.write(str(V)+"\n")
+        allV.append(V) ; allRe.append(e.real) ; allIm.append(e.imag)
+        allIdx.append(i)
     f.flush()
 f.close()
+
+# plot the real and imaginary parts of the (shifted) excitation
+# energies as a function of the interaction strength V
+import matplotlib.pyplot as plt
+allV = np.array(allV) ; allRe = np.array(allRe)
+allIm = np.array(allIm) ; allIdx = np.array(allIdx)
+plt.subplot(1,2,1)
+plt.scatter(allV,allRe,c=allIdx,cmap="rainbow")
+plt.xlabel("V") ; plt.ylabel("Re(E-E0)")
+plt.subplot(1,2,2)
+plt.scatter(allV,allIm,c=allIdx,cmap="rainbow")
+plt.xlabel("V") ; plt.ylabel("Im(E-E0)")
+plt.tight_layout()
+plt.show()
 
 
 

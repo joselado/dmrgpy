@@ -9,9 +9,20 @@ sc = spinchain.Spin_Chain(spins) # create the spin chain
 
 from dmrgpy import mps
 
+ss = []
 for i in range(10):
     wf = (mps.random_mps(sc) + mps.random_mps(sc)).normalize()
-    print(wf.get_site_entropy(0))
+    s = wf.get_site_entropy(0)
+    print(s)
+    ss.append(s)
+
+import matplotlib.pyplot as plt
+
+plt.plot(range(len(ss)),ss,marker="o")
+plt.xlabel("random trial")
+plt.ylabel("Site(0) entanglement entropy")
+plt.title("Entanglement entropy of random 2-site MPS superpositions")
+plt.show()
 
 
 

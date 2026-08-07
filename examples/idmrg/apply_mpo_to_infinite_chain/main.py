@@ -24,6 +24,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.linalg import expm
 from dmrgpy import infinitechain
 from dmrgpy.pyitensor import idmrg
@@ -53,9 +54,13 @@ print("norm diagnostic eta (unitary -> should be ~1):", flipped.eta)
 sz0 = idmrg.onsite_expectation(ic._result, "Sz", 0)
 sz0_flipped = idmrg.onsite_expectation(flipped, "Sz", 0)
 print("<Sz> before:", sz0, " after:", sz0_flipped, " (expect after = -before)")
-for r in range(1, 3):
+rs = range(1, 6)
+c0_list, c1_list = [], []
+for r in rs:
     c0 = idmrg.two_point_correlator(ic._result, "Sz", 0, "Sz", r)
     c1 = idmrg.two_point_correlator(flipped, "Sz", 0, "Sz", r)
+    c0_list.append(c0)
+    c1_list.append(c1)
     print("<Sz(0)Sz({})> before: {}  after: {}  (expect unchanged)".format(r, c0, c1))
     assert abs(c1 - c0) < 1e-6
 
@@ -106,3 +111,29 @@ assert abs(gated.eta - 1.0) < 1e-4
 
 print()
 print("apply_mpo example PASSED")
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5))
+
+ax1.plot(list(rs), c0_list, "o-", color="black", label="before Pauli-X")
+ax1.plot(list(rs), c1_list, "x--", color="tab:red", label="after Pauli-X")
+ax1.set_xlabel("distance $r$")
+ax1.set_ylabel(r"$\langle S_z(0)S_z(r)\rangle$")
+ax1.set_title("(1) chi_W=1: Pauli-X on every site")
+ax1.legend()
+
+orig_dims = [u.array.shape[-1] for u in ic2._result.U_list]
+gated_dims = [u.array.shape[-1] for u in gated.U_list]
+bond_idx = np.arange(len(orig_dims))
+width = 0.35
+ax2.bar(bond_idx - width/2, orig_dims, width, label="original")
+ax2.bar(bond_idx + width/2, gated_dims, width, label="gated")
+ax2.set_xlabel("bond index (per unit-cell site)")
+ax2.set_ylabel("bond dimension")
+ax2.set_xticks(bond_idx)
+ax2.set_title("(2) chi_W>1: 2-site unitary gate")
+ax2.legend()
+
+fig.suptitle("apply_mpo: bounded-MPO application to a converged iMPS")
+fig.tight_layout()
+fig.savefig("apply_mpo_to_infinite_chain.png", dpi=150)
+print("saved plot to apply_mpo_to_infinite_chain.png")

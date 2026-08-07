@@ -4,6 +4,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 import numpy as np
 from dmrgpy import spinchain
 n = 6
+e0s,e1s = [],[]
 for i in range(5):
 #  spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
   spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
@@ -26,7 +27,18 @@ for i in range(5):
   print("\n")
   de = np.abs(e1-e0)
   if de>0.1: raise
+  e0s.append(e0)
+  e1s.append(e1)
 print("Test passed")
+
+import matplotlib.pyplot as plt
+lims = [min(e0s+e1s),max(e0s+e1s)]
+plt.plot(lims,lims,color="gray",linestyle="--",label="ED = DMRG")
+plt.scatter(e1s,e0s,marker="o")
+plt.xlabel("Energy with ED")
+plt.ylabel("Energy with DMRG")
+plt.legend()
+plt.show()
 
 
 

@@ -84,11 +84,13 @@ assert len(peaks_ed)>=2, "expected at least 2 resolvable peaks in this window, f
 # system, while the current CG-based solver matches to ~1e-13..1e-14; a
 # looser tolerance like 1e-3 would silently miss that regression.
 tol_cvm = 1e-6
+cvm_spectra = {}
 for v in [2,3,"python"]:
     sc = make_chain(v)
     name = (sc.Sz[0],sc.Sz[0])
     x_cvm,y_cvm = sc.get_dynamical_correlator(mode="DMRG",submode="CVM",name=name,es=es,delta=delta)
     y_cvm = np.array(y_cvm)
+    cvm_spectra[v] = (x_cvm,y_cvm)
     diff = np.max(np.abs(y_cvm-y_ed))
     print("CVM(v%s) vs ED max|diff| = %.2e"%(v,diff))
     assert diff<tol_cvm, "v%s CVM disagrees with ED by %g (tol=%g)"%(v,diff,tol_cvm)
@@ -97,10 +99,12 @@ for v in [2,3,"python"]:
 # energies) are expected to match, not the pointwise lineshape ---
 tol_peak = 0.1 # generous relative to the frequency spacing (es step
                 # ~0.023) and delta=0.15 broadening used above
+kpm_spectra = {}
 for v in [2,3,"python"]:
     sc = make_chain(v)
     name = (sc.Sz[0],sc.Sz[0])
     x_kpm,y_kpm = sc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,es=es,delta=delta)
+    kpm_spectra[v] = (x_kpm,np.array(y_kpm))
     peaks_kpm = peak_energies(x_kpm,y_kpm)
     print("KPM(v%s) peak energies ="%v,peaks_kpm)
     assert len(peaks_kpm)>=len(peaks_ed), \
@@ -113,3 +117,33 @@ for v in [2,3,"python"]:
         assert diff<tol_peak, "v%s KPM has no peak within %g of the ED peak at %.4f (closest: %.4f)"%(v,tol_peak,e_ed,closest)
 
 print("TEST PASSED")
+
+# --- plot: (left) ED vs CVM spectra per backend, pointwise-exact; (right)
+# ED vs KPM spectra per backend, peak positions only ---
+import matplotlib.pyplot as plt
+
+fig,(ax1,ax2) = plt.subplots(1,2,figsize=(11,4))
+fig.subplots_adjust(wspace=0.3,bottom=0.15)
+
+colors = {2:"red",3:"blue","python":"green"}
+
+ax1.plot(x_ed,y_ed,c="black",lw=2,label="ED")
+for v in [2,3,"python"]:
+    x_cvm,y_cvm = cvm_spectra[v]
+    ax1.plot(x_cvm,y_cvm.real,c=colors[v],ls="--",label="CVM v%s"%v)
+ax1.set_xlabel("frequency [J]")
+ax1.set_ylabel("Dynamical correlator")
+ax1.set_title("CVM vs ED (pointwise)")
+ax1.legend(fontsize=8)
+
+ax2.plot(x_ed,y_ed,c="black",lw=2,label="ED")
+for v in [2,3,"python"]:
+    x_kpm,y_kpm = kpm_spectra[v]
+    ax2.plot(x_kpm,y_kpm.real,c=colors[v],ls="--",label="KPM v%s"%v)
+ax2.set_xlabel("frequency [J]")
+ax2.set_title("KPM vs ED (peak positions)")
+ax2.legend(fontsize=8)
+
+plt.savefig("dynamical_correlator_vs_ed.png",dpi=150)
+print("Plot saved to dynamical_correlator_vs_ed.png")
+plt.show()

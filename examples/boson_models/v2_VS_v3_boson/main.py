@@ -15,7 +15,7 @@ from dmrgpy import bosonchain
 
 n = 6
 
-def get_energy(itensor_version, mode="DMRG"):
+def get_energy(itensor_version, U, mode="DMRG"):
     bc = bosonchain.Bosonic_Chain(n)
     # Switch backend *before* seeding random couplings: constructing the
     # pure-Python backend consumes draws from numpy's global RNG as a side
@@ -31,14 +31,15 @@ def get_energy(itensor_version, mode="DMRG"):
         h = h + np.random.random()*(bc.Adag[i]*bc.A[i+1] + bc.Adag[i+1]*bc.A[i])
     for i in range(n):
         den = bc.Adag[i]*bc.A[i]
-        h = h + 0.3*den*den
+        h = h + U*den*den
     bc.set_hamiltonian(h)
     return bc.gs_energy(mode=mode)
 
-e2 = get_energy(2)
-e3 = get_energy(3)
-eed = get_energy(2, mode="ED")
-epy = get_energy("python") # n=8 < 10, python backend is in scope
+U0 = 0.3 # onsite interaction strength used in the original example
+e2 = get_energy(2,U0)
+e3 = get_energy(3,U0)
+eed = get_energy(2,U0,mode="ED")
+epy = get_energy("python",U0) # n=8 < 10, python backend is in scope
 
 print("Ground state energy (ITensor v2)  =",e2)
 print("Ground state energy (ITensor v3)  =",e3)
@@ -52,3 +53,29 @@ for name,e in [("v3",e3),("ED",eed),("python",epy)]:
     assert diff<tol, "v2 vs %s disagree by %g (tol=%g)"%(name,diff,tol)
 
 print("TEST PASSED")
+
+# sweep the onsite interaction strength U -- a cheap parameter already
+# present in get_energy() -- and check all backends keep agreeing across
+# it, not just at the single U=0.3 point above
+Us = [0.1,0.2,0.3,0.4,0.5]
+e2s,e3s,eeds,epys = [],[],[],[]
+for U in Us:
+    e2U = get_energy(2,U)
+    e3U = get_energy(3,U)
+    eedU = get_energy(2,U,mode="ED")
+    epyU = get_energy("python",U)
+    print("U =",U,"  v2 =",e2U,"  v3 =",e3U,"  ED =",eedU,"  python =",epyU)
+    for name,e in [("v3",e3U),("ED",eedU),("python",epyU)]:
+        diff = abs(e2U-e)
+        assert diff<tol, "U=%g: v2 vs %s disagree by %g (tol=%g)"%(U,name,diff,tol)
+    e2s.append(e2U); e3s.append(e3U); eeds.append(eedU); epys.append(epyU)
+
+import matplotlib.pyplot as plt
+plt.plot(Us,e2s,marker="o",label="ITensor v2")
+plt.plot(Us,e3s,marker="s",linestyle="--",label="ITensor v3")
+plt.plot(Us,eeds,marker="^",linestyle=":",label="ED")
+plt.plot(Us,epys,marker="d",linestyle="-.",label="pure Python")
+plt.xlabel("Onsite interaction U")
+plt.ylabel("Ground state energy")
+plt.legend()
+plt.show()

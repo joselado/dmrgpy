@@ -112,10 +112,9 @@ class MPS():
         return get_fermionic_parity(self,**kwargs) # parity of the state
     def get_entropy(self,b=None):
         """Compute entanglement entropy in a bond"""
-        if b is None: # compute all 
-            return np.mean([self.get_entropy(i) for i in range(1,self.MBO.ns)])
-        if self.MBO is not None: return self.MBO.get_entropy(self,b=b)
-        else: raise
+        if b is None: # compute all
+            return np.mean([self.get_entropy(i) for i in range(0,self.MBO.ns-1)])
+        return self.get_bond_entropy(b)
     def get_site_entropy(self,i):
         if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
         else: raise # not implemented

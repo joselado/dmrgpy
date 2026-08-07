@@ -22,6 +22,8 @@ julia*
 # the tree whose name happens to start with "julia" -- un-ignore those
 !src/dmrgpy/juliapkg.json
 !src/dmrgpy/mpsjulialive/juliasession.py
+!examples/non_hermitian/julia_cpp_ED_ground_state/
+!examples/non_hermitian/julia_cpp_ED_ground_state/main.py
 .mpsfolder
 ERROR
 maxenttk

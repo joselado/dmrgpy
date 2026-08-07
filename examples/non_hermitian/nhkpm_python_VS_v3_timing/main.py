@@ -19,6 +19,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import time
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 
 n = 6
@@ -92,3 +93,18 @@ print()
 print("max relative difference (v3 vs python):",reldiff)
 assert reldiff<1e-6, "v3 and python NH-KPM dynamical correlators disagree"
 print("NH-KPM (v3 vs python) regression test PASSED")
+
+# plot the dynamical correlator (both backends should overlap) and the
+# wall-time comparison between backends
+fig,(ax_c,ax_t) = plt.subplots(1,2,figsize=(11,4.2))
+ax_c.plot(es,ys3.real,marker="o",label="v3 (Re)")
+ax_c.scatter(es,yspy.real,marker="x",c="red",label="python (Re)")
+ax_c.set_xlabel("frequency e")
+ax_c.set_ylabel(r"Re $\langle N_0(z) N_0(0)\rangle$")
+ax_c.legend()
+ax_t.bar(["itensor_version=3","itensor_version=\"python\""],[t_v3,t_py],
+        color=["tab:blue","tab:red"])
+ax_t.set_ylabel("wall time [s]")
+ax_t.set_title(f"python is {t_py/t_v3:.1f}x slower than v3")
+fig.tight_layout()
+plt.show()

@@ -2,6 +2,7 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 n = 200
 spins = ["S=1/2"]+["S=1" for i in range(n)]+["S=1/2"] # spin 1/2 heisenberg chain
@@ -33,6 +34,12 @@ xs = np.linspace(0.,.6,30)
 ys = [get(d) for d in xs]
 
 np.savetxt("SWEEP.OUT",np.array([xs,ys]).T)
+
+# plot the entanglement entropy as a function of the single-ion anisotropy D
+plt.plot(xs,ys,marker="o")
+plt.xlabel("Single-ion anisotropy D")
+plt.ylabel("Entanglement entropy")
+plt.show()
 
 
 

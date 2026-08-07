@@ -36,3 +36,17 @@ print("C++ mode",t2-t1)
 
 print("Difference",np.mean(np.abs(m1-m2)))
 
+# compare the "fast" (Python) and "full" (C++) correlation matrices, and
+# their difference, as heatmaps
+import matplotlib.pyplot as plt
+fig,axes = plt.subplots(1,3,figsize=(12,4))
+for ax,m,title in zip(axes,[m1,m2,np.abs(m1-m2)],
+        ["Python (fast)","C++ (full)","|Python - C++|"]):
+    im = ax.imshow(np.abs(m),aspect="auto",origin="lower")
+    ax.set_title(title)
+    ax.set_xlabel("Site j")
+    ax.set_ylabel("Site i")
+    fig.colorbar(im,ax=ax)
+plt.tight_layout()
+plt.show()
+

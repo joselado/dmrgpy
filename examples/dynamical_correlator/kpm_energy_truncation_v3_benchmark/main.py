@@ -73,7 +73,9 @@ def run_truncated(n):
 
 print(f"{'n':>3} {'untrunc [s]':>12} {'trunc [s]':>10} {'slowdown':>9} "
       f"{'peak untrunc':>13} {'peak trunc':>11}")
-for n in (4, 6):
+ns = (4, 6)
+dt_us, dt_ts, spectra = [], [], {}
+for n in ns:
     dt_u, peak_u, y_u = run_untruncated(n)
     dt_t, peak_t, y_t = run_truncated(n)
     slowdown = dt_t / dt_u
@@ -87,4 +89,34 @@ for n in (4, 6):
     assert abs(peak_u - peak_t) <= 2 * (ES[1] - ES[0]), \
         f"n={n}: truncated/untruncated peaks disagree ({peak_t} vs {peak_u})"
 
+    dt_us.append(dt_u) ; dt_ts.append(dt_t)
+    spectra[n] = (y_u, y_t)
+
 print("OK: truncated and untruncated v3 KPM agree on the resonance location.")
+
+# --- plot: (left) wall time vs n, untruncated vs truncated; (right)
+# spectra at the largest n, confirming the resonance lines up ---
+import matplotlib.pyplot as plt
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+fig.subplots_adjust(wspace=0.3, bottom=0.15)
+
+ax1.plot(ns, dt_us, marker="o", label="untruncated")
+ax1.plot(ns, dt_ts, marker="o", label="truncated")
+ax1.set_xlabel("n (sites)")
+ax1.set_ylabel("wall time [s]")
+ax1.set_title("KPM v3 timing: energy truncation is a net slowdown here")
+ax1.legend()
+
+n_last = ns[-1]
+y_u, y_t = spectra[n_last]
+ax2.plot(ES, y_u, c="blue", label="untruncated")
+ax2.plot(ES, y_t, c="red", ls="--", label="truncated")
+ax2.set_xlabel("frequency [J]")
+ax2.set_ylabel("Dynamical correlator")
+ax2.set_title("Spectrum at n=%d" % n_last)
+ax2.legend()
+
+plt.savefig("kpm_energy_truncation_v3_benchmark.png", dpi=150)
+print("Plot saved to kpm_energy_truncation_v3_benchmark.png")
+plt.show()

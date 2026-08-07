@@ -16,6 +16,7 @@ import sys, os, time, json, argparse
 sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from dmrgpy.multioperatortk.staticoperator import StaticOperator
 from dmrgpy.edtk.edchain import EDOperator, State
@@ -188,6 +189,33 @@ def main():
         with open(args.json, "w") as f:
             json.dump(results, f, indent=2)
         print(f"\nWrote {args.json}")
+
+    plot_results(results, modes)
+
+
+def plot_results(results, modes):
+    """Wall time and Op(x) call count per case, one series per mode
+    (ED/DMRG) -- the two expensive-primitive-count/timing columns already
+    printed above, visualized instead of just printed."""
+    names = [c["name"] for c in CASES]
+    xpos = np.arange(len(names))
+    fig, (ax_t, ax_n) = plt.subplots(1, 2, figsize=(12, 4.5))
+    for mode in modes:
+        rows = [next(r for r in results if r["name"] == n and r["mode"] == mode)
+                for n in names]
+        times = [r["time"] if r["ok"] else np.nan for r in rows]
+        nops = [r["nops"] if r["ok"] else np.nan for r in rows]
+        ax_t.plot(xpos, times, "o-", label=mode)
+        ax_n.plot(xpos, nops, "o-", label=mode)
+    ax_t.set_xticks(xpos) ; ax_t.set_xticklabels(names, rotation=45, ha="right")
+    ax_t.set_ylabel("wall time [s]") ; ax_t.set_yscale("log")
+    ax_t.set_title("Arnoldi wall time per case") ; ax_t.legend() ; ax_t.grid(alpha=0.3)
+    ax_n.set_xticks(xpos) ; ax_n.set_xticklabels(names, rotation=45, ha="right")
+    ax_n.set_ylabel("Op(x) calls") ; ax_n.set_yscale("log")
+    ax_n.set_title("Arnoldi Op(x) call count per case") ; ax_n.legend() ; ax_n.grid(alpha=0.3)
+    fig.tight_layout()
+    plt.show()
+
 
 if __name__ == "__main__":
     main()

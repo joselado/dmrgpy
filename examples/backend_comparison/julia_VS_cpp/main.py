@@ -35,8 +35,20 @@ def time_ratio(n):
   return (t1-t0)/(t2-t1)
 
 
-for n in range(14,40):
-    print("Length",n,"C++/Julia",time_ratio(n))
+ns = list(range(14,40))
+ratios = []
+for n in ns:
+    ratio = time_ratio(n)
+    print("Length",n,"C++/Julia",ratio)
+    ratios.append(ratio)
+
+import matplotlib.pyplot as plt
+plt.plot(ns,ratios,marker="o")
+plt.axhline(1.0,color="gray",linestyle="--",label="equal speed")
+plt.xlabel("Chain length n")
+plt.ylabel("C++ / Julia time ratio")
+plt.legend()
+plt.show()
 
 
 
