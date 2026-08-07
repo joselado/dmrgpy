@@ -17,7 +17,6 @@ from . import excited
 from . import effectivehamiltonian
 from . import multioperator
 from .cppext import DEFAULT_ITENSOR_VERSION
-import subprocess
 
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path to this package
 
@@ -262,7 +261,6 @@ class Many_Body_Chain():
       mbc = self.clone() # clone the object
       mbc.set_hamiltonian(h) ; e0 = mbc.gs_energy(**kwargs)
       mbc.set_hamiltonian(-h) ; e1 = mbc.gs_energy(**kwargs)
-      mbc.clean() # remove
       return -e0 -e1
   def lowest_eigenvalue(self,X,**kwargs):
       """Given an operator X, return its smallest eigenvalue"""
@@ -287,11 +285,6 @@ class Many_Body_Chain():
       """Check if an operator is Hermitian"""
       from .mpsalgebra import is_hermitian
       return is_hermitian(self,H)
-  def clean(self): 
-      """
-      Remove the temporal folder
-      """
-      subprocess.run(["rm","-rf",self.path]) # clean temporal folder
   def vev_MB(self,MO,**kwargs):
       """
       Compute a vacuum expectation value

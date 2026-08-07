@@ -73,14 +73,29 @@ actually running the several-minutes-long ITensor build, use
 python install.py --doctor
 ```
 
+Alternatively, in case you just want to use the Julia version,
+execute the script
+
+```bash
+python install_julia.py
+```
+
+Either installation script also adds dmrgpy to the PYTHONPATH of the
+python interpreter you used to execute it. Afterwards you can import the
+dmrgpy sublibrary that you want, for example
+
+```python
+from dmrgpy import spinchain
+```
+
 ### HPC clusters with environment modules (e.g. Aalto's Triton) ###
 
 On clusters using Lmod/environment modules, no C++ compiler may be on
-PATH at all until a module is loaded, e.g. on Triton:
+PATH at all until a module is loaded. On Triton, for example:
 
 ```bash
-module load <stack> gcc/<version>   # e.g. triton/2024.1-gcc gcc/12.3.0
-python install.py
+module load scicomp-python-env gcc
+python3 install.py
 ```
 
 If you're using a module-provided Python distribution (e.g. Triton's
@@ -93,43 +108,22 @@ time, must be loaded/activated again in every later session (including
 job scripts) that imports `dmrgpy` -- the compiled extension depends on
 them.
 
-Alternatively, in case you just want to use the Julia version,
-execute the script 
-
-```bash
-python install_julia.py
-```
-
-The installation script will
-also add dmrgpy to the PYTHONPATH of the python interpreter you used
-to execute it.
-
-Afterwards you can import the dmrgpy sublibrary that you want, for example
-
-```python
-from dmrgpy import spinchain
-```
-
-If you are running it in Triton cluster, load the modules
-
-```bash
-module load scicomp-python-env
-module load gcc
-```
-
-and then compile it as 
-
-```bash
-python3 install.py 
-```
+If you don't need the compiled C++ backend on the cluster, `pip install
+dmrgpy` (see above) works directly in your Triton Python environment
+without loading any modules at all, using the pure-Python/ED backends
+instead.
 
 ## Windows ##
 
-For using this program in Windows, the easiest solution is to create a virtual
-machine using [Virtual Box](https://www.virtualbox.org/), installing
-a version of [Ubuntu](https://releases.ubuntu.com/20.04/)
-in that virtual machine, and following the previous
-instructions.
+`pip install dmrgpy` (see above) works out of the box on Windows: the
+package is pure Python, and the ED and pure-Python (`itensor_version=
+"python"`) DMRG/TDVP backends need no compiler.
+
+The compiled C++ backends (`install.py`) are POSIX-only and not supported
+on Windows. If you need one of them, the easiest solution is to create a
+virtual machine using [Virtual Box](https://www.virtualbox.org/),
+installing a version of [Ubuntu](https://releases.ubuntu.com/20.04/) in
+that virtual machine, and following the Linux instructions above.
 
 # Tutorials #
 You can find several tutorials [here](https://github.com/joselado/Advanced_Computational_Methods_Physics_2024), in particular organized around the following topics

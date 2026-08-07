@@ -141,9 +141,18 @@ Things in here that are load-bearing and easy to break:
   (`.gitignore`'s unanchored `julia*` pattern would also swallow it —
   hence the explicit `!src/dmrgpy/juliapkg.json` un-ignore. Don't remove
   either one.)
-- **The classifiers say POSIX/MacOS, not `OS Independent`**, even though
-  everything shipped is pure Python: `sites.py::initialize()` shells out
-  to `mkdir -p` via `subprocess`, so chain construction fails on Windows.
+- **The classifiers say `OS Independent`**: the pip-installed package
+  (ED and `itensor_version="python"` backends) works on Windows.
+  `sites.py::initialize()` used to shell out to `mkdir -p` via
+  `subprocess` and break there, but that call was removed in `1f7b7a9`
+  ("Stop creating .mpsfolder; remove dead file-based-backend
+  leftovers"), which also means `self.path`/`.mpsfolder` is never
+  created on disk any more -- `Many_Body_Chain.clean()`, whose only job
+  was `rm -rf`-ing that folder (and whose only caller, `bandwidth()`,
+  just deleted nothing every time), was removed outright rather than
+  ported to `shutil.rmtree`, since there was nothing left for it to do.
+  The compiled C++ backends (`install.py`) remain POSIX-only and are
+  not part of the wheel regardless.
 - Every module in the wheel must at least byte-compile, or pip prints a
   `SyntaxError` on install; `python -m compileall` over the installed
   package is the cheap check.

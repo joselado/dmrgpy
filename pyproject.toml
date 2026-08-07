@@ -36,12 +36,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    # Deliberately NOT "Operating System :: OS Independent", even though
-    # everything shipped here is pure Python: sites.py::initialize() shells
-    # out to `mkdir -p` via subprocess, which has no Windows equivalent, so
-    # every chain construction would fail there.
-    "Operating System :: POSIX",
-    "Operating System :: MacOS",
+    "Operating System :: OS Independent",
 ]
 
 [project.urls]
