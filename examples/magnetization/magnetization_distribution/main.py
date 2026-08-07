@@ -43,8 +43,8 @@ x1,y1 = sc.get_distribution(X=M,delta=2e-2,kernel="jackson") # compute a distrib
 #x1,y1 = sc.get_distribution(X=M,delta=1e-1,mode="ED") # compute a distribution
 
 # plot the result and save it in a file
-print("Integral DMRG=",np.trapz(y.real,dx=x[1]-x[0]))
-#print("Integral ED=",np.trapz(y1.real,dx=x1[1]-x1[0]))
+print("Integral DMRG=",np.trapezoid(y.real,dx=x[1]-x[0]))
+#print("Integral ED=",np.trapezoid(y1.real,dx=x1[1]-x1[0]))
 import matplotlib.pyplot as plt
 np.savetxt("DISTRIBUTION.OUT",np.array([x,y.real]).T)
 plt.plot(x,y.real,marker="o",label="DMRG Lorentz") # correlator using DMRG

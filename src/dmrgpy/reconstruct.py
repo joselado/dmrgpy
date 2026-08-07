@@ -33,17 +33,17 @@ def reconstruct_distribution_restricted(x0,y0,n=6):
     # center the distribution in x=0
     y = y.real
     dx = x[1]-x[0] # interval
-    scale0 = np.trapz(y,dx=dx) # scale for y axis
+    scale0 = np.trapezoid(y,dx=dx) # scale for y axis
     y = y/scale0 # renormalize
-    xmean = np.trapz(x*y,dx=dx) # average value
+    xmean = np.trapezoid(x*y,dx=dx) # average value
     x = x - xmean # shift the mean to zero
     # now compute the moments
     xscale = np.max(np.abs(x))
-    xscale = np.sqrt(np.trapz(x**2*y,dx=dx)) # average value
+    xscale = np.sqrt(np.trapezoid(x**2*y,dx=dx)) # average value
 #    print("x-scale",xscale)
     #xscale = np.max(np.abs(x[y/np.max(y)>1e-2])) # to interval 0,1
     x = x/xscale
-    mu = [np.trapz(y*x**i,dx=dx) for i in range(n)] # compute all the moments
+    mu = [np.trapezoid(y*x**i,dx=dx) for i in range(n)] # compute all the moments
     scale = mu[0]
     mu = mu/scale # resscale
     bnds = [min(x)-dx,max(x)+dx]
@@ -52,7 +52,7 @@ def reconstruct_distribution_restricted(x0,y0,n=6):
     xo = xo[xo<bnds[1]]
     xout = xo*xscale+xmean # output x
     yout = sol(xo) # output y
-    yout *= np.trapz(y0.real,dx=x0[1]-x0[0])/np.trapz(yout,dx=xout[1]-xout[0])
+    yout *= np.trapezoid(y0.real,dx=x0[1]-x0[0])/np.trapezoid(yout,dx=xout[1]-xout[0])
     return xout,yout
 
 

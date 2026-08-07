@@ -49,9 +49,9 @@ x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
 x2,y2 = fc.get_dynamical_correlator(mode="ED",submode="INV",name=name,
         es=es,delta=delta)
 
-print("ED",np.trapz(y0,x=x0))
-print("DMRG",np.trapz(y1,x=x1))
-print("ED",np.trapz(y2,x=x2))
+print("ED",np.trapezoid(y0,x=x0))
+print("DMRG",np.trapezoid(y1,x=x1))
+print("ED",np.trapezoid(y2,x=x2))
 
 ### Plot the result ###
 

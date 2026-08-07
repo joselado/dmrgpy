@@ -21,11 +21,15 @@ authors = [{name = "Jose Lado", email = "jose.lado@aalto.fi"}]
 # backtrack to whatever ancient numba/numpy pair still supports it, which is
 # an untested combination. Fail the resolution honestly instead.
 requires-python = ">=3.10"
+# numpy>=2.0: reconstruct.py/algebra/kpm.py use np.trapezoid, which replaced
+# np.trapz in numpy 2.0 (np.trapz is fully removed there, not just deprecated).
+# scipy>=1.13.0 and numba>=0.60.0 are the first releases of each that
+# support numpy 2.0; sympy>=1.12 is the version current at the same time.
 dependencies = [
-    "numpy",
-    "scipy",
-    "sympy",
-    "numba",
+    "numpy>=2.0",
+    "scipy>=1.13.0",
+    "sympy>=1.12",
+    "numba>=0.60.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

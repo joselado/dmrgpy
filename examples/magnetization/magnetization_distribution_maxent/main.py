@@ -39,8 +39,8 @@ print("Time max ent",t2-t1)
 #x1,y1 = sc.get_distribution(X=M,delta=1e-1,mode="ED") # compute a distribution
 
 # plot the result and save it in a file
-print("Integral KPM=",np.trapz(y.real,dx=x[1]-x[0]))
-print("Integral Max ent=",np.trapz(y1.real,dx=x1[1]-x1[0]))
+print("Integral KPM=",np.trapezoid(y.real,dx=x[1]-x[0]))
+print("Integral Max ent=",np.trapezoid(y1.real,dx=x1[1]-x1[0]))
 import matplotlib.pyplot as plt
 np.savetxt("DISTRIBUTION.OUT",np.array([x,y.real]).T)
 plt.plot(x,y.real,marker="o",label="KPM") # correlator using DMRG
