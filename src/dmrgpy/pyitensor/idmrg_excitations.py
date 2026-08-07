@@ -692,6 +692,118 @@ another piece of this same module's own machinery) could not do.
   sign" -- something more fundamental about the GBR/rightward half's own
   recursion was wrong, and remains unidentified).
 
+An eighth investigation pass began by consulting an independent model
+(Fable) for a second opinion on strategy before touching any code again,
+given seven passes' worth of "internally self-consistent but wrong"
+results. Its recommendation, borne out below: stop patching diagrams and
+first check whether the bug is in shared/background infrastructure that
+is numerically DEGENERATE (and therefore invisible) at D=1 -- every
+validation this module has ever used (D=1 exactness, D=1 finite-ring
+contractions, pass seven's own D=1 position-explicit reproducer) is
+structurally blind to exactly that class of bug, since T, the mixed-
+transfer projector, and C all trivialize to scalars/identity at D=1.
+
+- A cheap, decisive cross-check the Fable consultation prompted (not run
+  before, despite being implied by data already in hand): pass six/seven's
+  own mixed-gauge attempts already run on VUMPS's GL/GR -- which are
+  independently validated via ground-state ENERGY agreement with known
+  references (see vumps.py's own test suite), a completely different code
+  path from idmrg.py's growing-algorithm env_HL/env_HR that the THIRD
+  pass's own investigation flagged as having an unexplained, non-decaying
+  env_HR residual. Since passes six/seven's mixed-gauge H_eff(p) is built
+  entirely from VUMPS's own (AL,AR,C,GL,GR), NOT from idmrg.py's env_HL/
+  env_HR at all, and still fails the exact same way (suppressed
+  dispersion, non-Hermitian H_eff), this is strong evidence the third
+  pass's env_HR anomaly -- while real, and still unexplained -- is NOT the
+  root cause of the excitation bug: the bug survives switching to a
+  completely independent, already-validated ground-state environment
+  construction. This deprioritizes (does not close) that investigation
+  thread and refocuses suspicion on the excitation-diagram/mixed-transfer
+  machinery specifically, which both approaches DO share.
+- This pass then rebuilt pass seven's own mixed-gauge H_eff(p)
+  construction from scratch, directly from that pass's own prose
+  description (6a/6b mixed-gauge port plus the sixth pass's (i)/(ii)
+  extra diagrams), reusing vumps.py's already-validated `_h_ac_action`/
+  GL/GR/bond_envs verbatim for the momentum-independent (n=0, "B in
+  center") sector rather than re-deriving it. Re-validated against the
+  SHIPPED, already-D=1-exact uniform-gauge `excitation_energies` (a
+  different, independent D=1 ground state -- idmrg.py's growing
+  algorithm, not VUMPS) on the same XX+field Hamiltonian: agrees to
+  ~1e-16 and is exactly Hermitian (~1e-17-1e-25) at every momentum tested
+  -- confirming this reconstruction faithfully reproduces what pass seven
+  itself reported, before trusting anything it says about D>1.
+- Two new candidate diagrams were then tried and DEFINITIVELY RULED OUT,
+  closing off a real, previously-untested hypothesis rather than merely
+  re-trying sign flips of existing pieces (which is all pass seven itself
+  had time for): a leftward mirror of the sixth pass's onsite-h1 tail
+  (already known to vanish, per pass six's own null-space argument -- kept
+  here purely as an implementation sanity check) AND, new this pass, a
+  leftward mirror of the sixth pass's own "(ii)" diagram (the OTHER
+  reach-1-bond-touching-position-0 correction) -- structurally the
+  natural leftward analogue nothing in passes six/seven records having
+  actually tried. Checked in ISOLATION (not just "adding it changes
+  nothing in the final dispersion", which could also mean a
+  bug silently no-ops it) at D=2 TFIM (J=1, h=2.5, nonzero h1): both
+  mirrors evaluate to a norm of ~1e-16-1e-17 on a random tangent vector,
+  i.e. exactly zero, not merely small. This extends pass six's own
+  null-space argument (proven so far only for "any tail seeded by
+  bra=A_L at a negative far position") to cover this second diagram
+  family too, and rules out "a missing mirror diagram" as the explanation
+  for the remaining gap -- a genuine negative result, not merely another
+  attempt that didn't help.
+- A new, more granular data point (not reported by passes six/seven,
+  which only ever checked the FULL i+ii-included construction's
+  Hermiticity): at D=2 TFIM, diagrams 6a+6b ALONE (i.e. the mixed-gauge
+  port of this module's own original, D=1-exact diagram list, with
+  neither of the sixth pass's extra corrections) reproduce the classic,
+  ORIGINAL failure signature first seen in the very first investigation
+  pass almost exactly -- an anomalously FLAT dispersion (E(p) ranging only
+  4.86-4.97 across the full Brillouin zone at J=1,h=2.5, versus the exact
+  free-fermion band's own 3.00-6.99 range) -- with a comparatively SMALL
+  Hermiticity defect (~2e-3 to 2e-2 relative, depending on momentum).
+  Adding the sixth pass's (i)+(ii) corrections on top genuinely fixes the
+  flatness -- E(p) now spans 2.5-6.5, the correct order of magnitude and
+  qualitative shape (low near p=0, peaking near p~1.5-2, matching the
+  exact band's own shape) -- but at the cost of a much LARGER Hermiticity
+  defect (~0.15-0.31 relative), confirming passes six/seven's own
+  qualitative finding (dispersion improves, Hermiticity worsens) with a
+  cleaner, isolated before/after comparison than either pass's own
+  end-to-end-only checks. This is a genuine, load-bearing new
+  observation: it means (i)/(ii) supply real, necessary k-dependence (not
+  spurious content an alternative sign would remove -- consistent with
+  pass seven's own four-sign-combination sweep finding no improvement
+  over the "both positive" combination), but are evidently missing a
+  Hermitian-restoring partner of some kind that is NOT simply their own
+  mirror image (now ruled out above) and NOT simply a sign flip (already
+  ruled out by pass seven).
+- Given this, the most likely remaining gap is structural rather than a
+  further sign/mirror search: pass four's own literature comparison
+  already flagged, and never followed up on, that the full published
+  mixed-gauge H_eff(p) (Vanderstraeten/Haegeman/Verstraete arXiv:
+  1810.07006 Eq. 197) has roughly twice as many distinct diagram TYPES as
+  this module's simpler list, including terms where a resolvent-summed
+  "L1"/"R1"-style object feeds INTO a further, separate Hamiltonian-
+  touching term (a genuinely doubly-nested construction), which this
+  module's diagrams 1-6b/(i)/(ii) have no analogue of at all -- every
+  diagram implemented so far (in any of the eight passes) has exactly one
+  H-term insertion. A term of that doubly-nested shape is a structurally
+  different, larger addition than anything tried in passes five through
+  eight (which only ever varied WHICH existing single-insertion diagrams
+  were included, and with what sign), and is the most concrete lead this
+  investigation currently has.
+- Net effect: no closer to a working D>1 ansatz than pass seven (D>1
+  remains correctly rejected by `build_excitation_environment` below),
+  but two real, reusable results for whoever picks this up next: (1) the
+  third pass's env_HR anomaly is now known NOT to be the root cause (via
+  the VUMPS-bypass argument above), so it no longer needs chasing before
+  further excitation-diagram work; (2) both natural "mirror" completions
+  of the sixth pass's (i)/(ii) diagrams are now definitively, numerically
+  ruled out (not merely untried), narrowing the search specifically
+  toward a genuinely new, doubly-nested diagram type mirroring the
+  published Eq. 197's own L1/R1-fed-into-h structure, rather than further
+  recombination of the diagrams already tried across all eight passes so
+  far.
+
 == Algorithm summary ==
 
 1. Group the unit cell into one supersite (A, W) -- plain NumPy arrays, W

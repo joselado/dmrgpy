@@ -158,9 +158,26 @@ model-specific exception:
    also tried and abandoned after a from-scratch D=1 brute-force
    reproducer (built this pass, dense Sx/Sy/Sz matrices, no automaton)
    showed it was internally self-consistent but computing the wrong
-   quantity on its rightward half. D>1 still unimplemented; see the
-   module docstring's own "Net effect" for the two concrete assets left
-   for the next attempt.
+   quantity on its rightward half. An eighth pass consulted an
+   independent model for strategy first, then (1) showed the third
+   pass's own unexplained `env_HR` residual is NOT the root cause (passes
+   six/seven's mixed-gauge H_eff already bypasses it entirely via VUMPS's
+   independently energy-validated GL/GR and still fails the same way),
+   (2) definitively ruled out — checked in isolation, not just via the
+   final dispersion — two natural "leftward mirror" completions of the
+   sixth pass's own (i)/(ii) diagrams (both vanish identically, exactly,
+   at D=2, not just approximately), and (3) found that diagrams 6a/6b
+   ALONE (i.e. without (i)/(ii)) reproduce the classic flat/wrong
+   dispersion with a comparatively SMALL Hermiticity defect, while adding
+   (i)/(ii) fixes the flatness (real, correct-shaped k-dependence) at the
+   cost of a much LARGER Hermiticity defect — a genuine trade-off,
+   pointing at a structurally new, doubly-nested diagram type (mirroring
+   the published Eq. 197's own "resolvent feeding into a further h-touching
+   term", which no diagram in any of the eight passes so far has an
+   analogue of) as the most concrete remaining lead, rather than further
+   sign/mirror recombination of what's already been tried. D>1 still
+   unimplemented; see the module docstring's own "Net effect" (eighth
+   pass) for the full writeup.
 5. **iDMRG cat-state superpositions.** No backend supports summing two
    *physically distinct* symmetry-broken iDMRG ground states; needs new
    correlator machinery from scratch.
