@@ -882,7 +882,11 @@ same `sc.tevol_method` selector described in §7, including
 Hamiltonian is strictly nearest-neighbor, e.g.\ a
 `Spinful_Fermionic_Chain_Native` Hubbard chain (the standard interleaved
 `Spinful_Fermionic_Chain` is *not* nearest-neighbor after Jordan-Wigner
-threading, so TEBD raises `NotImplementedError` there).
+threading, so TEBD raises `NotImplementedError` there). A script that
+wants the `"TEBD"` speedup on whichever of the two representations turns
+out nearest-neighbor, without hardcoding that choice per model, can use
+`tevol_method="AUTO"` instead (§7) to fall back to `"TDVP"` automatically
+on the interleaved representation rather than raising.
 
 *Sharpening `"TD"`'s lineshape (`damping`, `predict`).* An exponential
 window gives $S_{AB}(\omega)$ an exact Lorentzian lineshape, whose
@@ -987,11 +991,14 @@ dimension needed further, but requires a larger `n_max` to reconstruct
 the real axis accurately); `n_max` (≤4) is the reconstruction order;
 `dt`/`tmax`/`nt` set the underlying time step/duration exactly as in
 `"TD"`. Uses two-site TDVP when available (`itensor_version` 3 or
-`"python"`, `tevol_method="TDVP"`, the paper's own setup), one-site TDVP
-with global subspace expansion (`tevol_method="TDVP_GSE"`, see §7 — same
-`itensor_version` support as `"TDVP"`), or falls back to the MPO-Taylor
-propagator otherwise (`tevol_method="MPO"`, or `itensor_version=2`, which
-has no TDVP) — the same TDVP-vs-Taylor choice `"TD"` already makes. Current
+`"python"`, `tevol_method="TDVP"` or `"AUTO"` — `"AUTO"` reduces to plain
+`"TDVP"` here rather than trying `"TEBD"` first, since a complex/imaginary
+time step has no TEBD counterpart on any backend to try, see §7's own
+note — the paper's own setup), one-site TDVP with global subspace
+expansion (`tevol_method="TDVP_GSE"`, see §7 — same `itensor_version`
+support as `"TDVP"`), or falls back to the MPO-Taylor propagator otherwise
+(`tevol_method="MPO"` or `"TEBD"`, or `itensor_version=2`, which has no
+TDVP) — the same TDVP-vs-Taylor choice `"TD"` already makes. Current
 scope: only the "greater" branch of the correlator is computed (the same
 simplification `"TD"` itself already makes), so this is best used the
 same way as `"TD"`: high-resolution work in a narrow frequency window,
@@ -1100,7 +1107,7 @@ flip a spin, or add a particle) before evolving and measuring $B(t)$.
 directly, $\langle\psi_0|e^{iHt}|\psi_0\rangle$, without a separate
 measurement operator.
 
-**Choosing the propagator: `sc.tevol_method`.** Four options:
+**Choosing the propagator: `sc.tevol_method`.** Five options:
 
 - `"TDVP"` (the default) — two-site TDVP, which grows the MPS bond
   dimension via SVD the same way ground-state DMRG does. Used whenever
@@ -1162,11 +1169,37 @@ measurement operator.
   applied as an MPO each step; the only option on `itensor_version=2`
   (which has no TDVP or TEBD at all), and available (if slower/less
   accurate for a given bond dimension) everywhere else too.
+- `"AUTO"` (`itensor_version` `3`, `"python"`, or `"julia_live"`, same
+  support as `"TEBD"`) — tries `"TEBD"` first and transparently retries
+  as plain `"TDVP"` if the Hamiltonian turns out not to be strictly
+  nearest-neighbor, instead of raising. This exists because "is my
+  Hamiltonian nearest-neighbor" is often a property of *which terms a
+  caller adds*, not something pinned down once at chain-construction
+  time — a script that starts nearest-neighbor and later grows a
+  longer-range term (or is reused across several models) would otherwise
+  need its own `tevol_method` bookkeeping to keep getting the cheaper
+  `"TEBD"` path whenever it still applies. `"TEBD"` itself deliberately
+  stays a hard opt-in that raises rather than silently falling back
+  (see the note at the end of this list) — `"AUTO"` is the explicit way
+  to ask for the fallback instead, so a caller who really meant `"TEBD"`
+  and got a surprising long-range term still finds out. The check costs
+  at most one discarded MPO build on the fallback path: both
+  `bond_hamiltonians()` implementations (`pyitensor/tebd.py`,
+  `mpscpp3/tebd.h`, `mpsjulialive/tebd.jl`) reject a non-nearest-neighbor
+  term before touching the wavefunction at all, so retrying with
+  `"TDVP"` never discards a partial time evolution. Not the default,
+  precisely because it isn't a free win: whether TEBD applies becomes
+  something you find out from behavior (a quietly different integrator,
+  and thus different truncation-error characteristics) rather than from
+  reading `sc.tevol_method` — worth it once a script's Hamiltonian shape
+  is genuinely dynamic, not worth it as a blanket default for scripts
+  that already know their Hamiltonian is nearest-neighbor and can just
+  say `"TEBD"`.
 
-`"julia_live"` implements `"TDVP"`, `"TDVP_GSE"`, and `"TEBD"`; the legacy
-`"MPO"` path raises `NotImplementedError` there rather than silently
-running plain TDVP instead, so a backend-comparison script can't quietly
-end up comparing different integrators.
+`"julia_live"` implements `"TDVP"`, `"TDVP_GSE"`, `"TEBD"`, and `"AUTO"`;
+the legacy `"MPO"` path raises `NotImplementedError` there rather than
+silently running plain TDVP instead, so a backend-comparison script can't
+quietly end up comparing different integrators.
 
 ```python
 sc.setup_cpp(version=3)    # or sc.setup_python(), or sc.setup_julia()

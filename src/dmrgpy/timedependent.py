@@ -7,6 +7,40 @@ from .edtk import timedependent as tded
 
 
 
+# The exact substring both bond_hamiltonians() implementations raise on a
+# term spanning 3+ sites (pyitensor/tebd.py's NotImplementedError,
+# mpscpp3/tebd.h's ITError -- surfaced to Python as a RuntimeError since
+# ITError derives from std::runtime_error and pybind11 translates that
+# automatically). tevol_method="AUTO" matches on this specific text so it
+# only swallows the "not nearest-neighbor" condition it exists to handle,
+# not an unrelated bug that happens to also raise NotImplementedError/
+# RuntimeError from somewhere inside the TEBD call.
+_TEBD_NN_ERROR_MARKER = "nearest-neighbor"
+
+
+def _is_tebd_nn_error(exc):
+    """True if `exc` is TEBD's own rejection of a non-nearest-neighbor
+    Hamiltonian, as opposed to some other failure raised while attempting
+    it."""
+    return _TEBD_NN_ERROR_MARKER in str(exc)
+
+
+def _tebd_or_tdvp(tebd_call,tdvp_call):
+    """Backs tevol_method="AUTO": try `tebd_call` (cheaper -- no per-step
+    Krylov/Lanczos, see tevol_method's docstring in manybodychain.py) and
+    transparently fall back to `tdvp_call` if the Hamiltonian turns out
+    not to be strictly nearest-neighbor. Both backends already do this
+    check once, up front, before touching the wavefunction (see
+    bond_hamiltonians() in pyitensor/tebd.py / mpscpp3/tebd.h), so retrying
+    with TDVP here costs at most one discarded MPO build, not a discarded
+    partial time evolution."""
+    try:
+        return tebd_call()
+    except (NotImplementedError,RuntimeError) as exc:
+        if not _is_tebd_nn_error(exc): raise
+        return tdvp_call()
+
+
 def evolution_DC(self,mode="DMRG",**kwargs):
     if mode=="DMRG":  return evolution_dmrg_DC(self,**kwargs)
     if mode=="ED": 
@@ -46,7 +80,12 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     strictly nearest-neighbor self.hamiltonian (both backends raise --
     NotImplementedError in Python, ITError in C++ -- for any term
     spanning 3+ distinct sites; fall back to "TDVP" for longer-range
-    models).
+    models). self.tevol_method="AUTO" makes that fallback automatic
+    (see _tebd_or_tdvp() above): try "TEBD" first, and transparently
+    retry as "TDVP" if it turns out self.hamiltonian isn't nearest-
+    neighbor -- "TEBD" itself stays a hard opt-in (it still raises) so a
+    caller who explicitly asked for it is told when its assumption
+    doesn't hold, rather than silently getting a different integrator.
 
     fit_td is hardcoded False in the MPO fallback, not read from
     self.fit_td: the removed file-based backend wrote it to tasks.in under
@@ -76,6 +115,14 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
         correlator,_wf = self._session.quench_tebd(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                 int(nt),dt)
+    elif self.itensor_version in (3,"python") and self.tevol_method=="AUTO":
+        correlator,_wf = _tebd_or_tdvp(
+                lambda: self._session.quench_tebd(
+                    self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
+                    int(nt),dt),
+                lambda: self._session.quench_tdvp(
+                    self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
+                    int(nt),dt))
     elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_GSE":
         correlator,_wf = self._session.quench_tdvp_gse(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
@@ -115,6 +162,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     instead runs one-site TDVP with Krylov global subspace expansion
     (Chain::evolve_and_measure_tdvp_gse(), arXiv:2005.06104) for the first
     self.tdvp_gse_sweeps steps -- see evolution_dmrg_DC's docstring.
+    self.tevol_method="TEBD"/"AUTO" behave exactly as documented there too.
 
     fit_td is hardcoded False in the MPO fallback, for the same reason as
     evolution_dmrg_DC (see its docstring): the "tevol_fit"/"tevol_fit_td"
@@ -145,6 +193,14 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         correlator,_wf = self._session.evolve_and_measure_tebd(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,
                 int(nt),dt)
+    elif self.itensor_version in (3,"python") and self.tevol_method=="AUTO":
+        correlator,_wf = _tebd_or_tdvp(
+                lambda: self._session.evolve_and_measure_tebd(
+                    h.to_terms(),operator.to_terms(),wf.cpp_handle,
+                    int(nt),dt),
+                lambda: self._session.evolve_and_measure_tdvp(
+                    h.to_terms(),operator.to_terms(),wf.cpp_handle,
+                    int(nt),dt))
     elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_GSE":
         correlator,_wf = self._session.evolve_and_measure_tdvp_gse(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,

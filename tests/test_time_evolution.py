@@ -332,6 +332,84 @@ def test_tebd_dynamical_correlator_matches_ed_fermion_chain():
     assert np.array(cs_tebd) == pytest.approx(np.array(cs_ed), abs=1e-4)
 
 
+def test_auto_matches_tebd_for_nearest_neighbor_hamiltonian():
+    """tevol_method="AUTO" (timedependent._tebd_or_tdvp()) must take the
+    "TEBD" branch directly -- no fallback needed -- for a strictly
+    nearest-neighbor Hamiltonian, and reproduce the exact same trajectory
+    as tevol_method="TEBD" itself (both end up calling the identical
+    Chain.evolve_and_measure_tebd())."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_python()
+
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdag[i] * fc.C[i + 1]
+    h = h + h.get_dagger()
+    fc.set_hamiltonian(h)
+
+    nt, dt = 40, 0.05
+    fc.tevol_method = "TEBD"
+    (_ts_tebd, cs_tebd) = timedependent.evolution_ABA(
+            fc, nt=nt, dt=dt, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+    fc.tevol_method = "AUTO"
+    (_ts_auto, cs_auto) = timedependent.evolution_ABA(
+            fc, nt=nt, dt=dt, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+
+    assert np.array(cs_auto) == pytest.approx(np.array(cs_tebd), abs=1e-10)
+
+
+def test_auto_falls_back_to_tdvp_for_long_range_hamiltonian_python():
+    """tevol_method="AUTO" must transparently retry as "TDVP" (rather
+    than propagating TEBD's NotImplementedError) once bond_hamiltonians()
+    rejects a Hamiltonian with a term spanning 3+ sites, and the resulting
+    trajectory must match tevol_method="TDVP" run directly on the same
+    Hamiltonian/state -- itensor_version="python" side of the fallback
+    (pyitensor/tebd.py's NotImplementedError)."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_python()
+
+    h = fc.Cdag[0] * fc.C[2]
+    h = h + h.get_dagger()
+    fc.set_hamiltonian(h)
+
+    nt, dt = 5, 0.05
+    fc.tevol_method = "TDVP"
+    (_ts_tdvp, cs_tdvp) = timedependent.evolution_ABA(
+            fc, nt=nt, dt=dt, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+    fc.tevol_method = "AUTO"
+    (_ts_auto, cs_auto) = timedependent.evolution_ABA(
+            fc, nt=nt, dt=dt, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+
+    assert np.array(cs_auto) == pytest.approx(np.array(cs_tdvp), abs=1e-10)
+
+
+def test_auto_falls_back_to_tdvp_for_long_range_hamiltonian_v3():
+    """C++ (itensor_version=3) counterpart of
+    test_auto_falls_back_to_tdvp_for_long_range_hamiltonian_python:
+    the fallback must also work when TEBD's rejection crosses the
+    pybind11 boundary as a RuntimeError (mpscpp3/tebd.h's ITError) rather
+    than pyitensor's native NotImplementedError."""
+    n = 4
+    fc = fermionchain.Fermionic_Chain(n)
+    fc.setup_cpp(version=3)
+
+    h = fc.Cdag[0] * fc.C[2]
+    h = h + h.get_dagger()
+    fc.set_hamiltonian(h)
+
+    nt, dt = 5, 0.05
+    fc.tevol_method = "TDVP"
+    (_ts_tdvp, cs_tdvp) = timedependent.evolution_ABA(
+            fc, nt=nt, dt=dt, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+    fc.tevol_method = "AUTO"
+    (_ts_auto, cs_auto) = timedependent.evolution_ABA(
+            fc, nt=nt, dt=dt, mode="DMRG", A=fc.Cdag[0], B=fc.N[0])
+
+    assert np.array(cs_auto) == pytest.approx(np.array(cs_tdvp), abs=1e-10)
+
+
 def test_tdvp_lanczos_falls_back_when_stemr_fails_to_converge():
     """pyitensor/tdvp.py's _eigh_tridiagonal_robust() must fall back to
     lapack_driver="stebz" and still return a correct eigendecomposition

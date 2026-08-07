@@ -131,8 +131,16 @@ def _advance_complex_time_step(self, Hop, wf, dz, do_gse=False):
     as plain "TDVP" (3 or "python" only) -- see evolution_dmrg_DC's
     docstring for why a v2 port isn't available here.
 
+    self.tevol_method="AUTO" behaves exactly like "TDVP" here: TEBD has no
+    complex-time counterpart on any backend at all (there is no bond-gate
+    analogue of an imaginary/complex time step), so "AUTO" has nothing to
+    try-and-fall-back-from for this submode -- it just reduces to "TDVP"
+    directly rather than falling through to the "else" MPO-Taylor branch
+    the way an unrecognized/inapplicable tevol_method otherwise would.
+
     julia_live honors self.tevol_method too, through its own branch below
-    ("TDVP"/"TDVP_GSE" implemented, "TEBD"/"MPO" rejected -- see
+    ("TDVP"/"TDVP_GSE"/"AUTO" implemented, the last as an alias for
+    "TDVP" for the same reason as above; "TEBD"/"MPO" rejected -- see
     mpsjulialive/timedependent.py's advance_complex_time_step and
     _check_tevol_method). It is routed through the same do_gse gating as
     the session backends, so this function's choice of integrator no
@@ -141,7 +149,7 @@ def _advance_complex_time_step(self, Hop, wf, dz, do_gse=False):
     if self.itensor_version=="julia_live":
         from .mpsjulialive.timedependent import advance_complex_time_step
         return advance_complex_time_step(self,Hop,wf,dz,do_gse=do_gse)
-    if self.itensor_version in (3, "python") and self.tevol_method == "TDVP":
+    if self.itensor_version in (3, "python") and self.tevol_method in ("TDVP","AUTO"):
         handle = self._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, dz)
     elif self.itensor_version in (3, "python") and self.tevol_method == "TDVP_GSE":
         wf_handle = wf.cpp_handle

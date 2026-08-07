@@ -1021,7 +1021,11 @@ nearest-neighbor, e.g.\ a \texttt{Spinful\_Fermionic\_Chain\_Native}
 Hubbard chain (the standard interleaved
 \texttt{Spinful\_Fermionic\_Chain} is \emph{not} nearest-neighbor after
 Jordan-Wigner threading, so TEBD raises \texttt{NotImplementedError}
-there).
+there). A script that wants the \texttt{"TEBD"} speedup on whichever of
+the two representations turns out nearest-neighbor, without hardcoding
+that choice per model, can use \texttt{tevol\_method="AUTO"} instead
+(\S\ref{sec:quenches}) to fall back to \texttt{"TDVP"} automatically on
+the interleaved representation rather than raising.
 
 \emph{Sharpening \texttt{"TD"}'s lineshape (\texttt{damping},
 \texttt{predict}).} An exponential window gives $S_{AB}(\omega)$ an
@@ -1140,14 +1144,18 @@ reconstruct the real axis accurately); \texttt{n\_max} ($\le4$) is the
 reconstruction order; \texttt{dt}/\texttt{tmax}/\texttt{nt} set the
 underlying time step/duration exactly as in \texttt{"TD"}. Uses
 two-site TDVP when available (\texttt{itensor\_version} 3 or
-\texttt{"python"}, \texttt{tevol\_method="TDVP"}, the paper's own setup),
-one-site TDVP with global subspace expansion
+\texttt{"python"}, \texttt{tevol\_method="TDVP"} or \texttt{"AUTO"} ---
+\texttt{"AUTO"} reduces to plain \texttt{"TDVP"} here rather than trying
+\texttt{"TEBD"} first, since a complex/imaginary time step has no TEBD
+counterpart on any backend to try, see \S\ref{sec:quenches}'s own note
+--- the paper's own setup), one-site TDVP with global subspace expansion
 (\texttt{tevol\_method="TDVP\_GSE"}, see \S\ref{sec:quenches} --- same
 \texttt{itensor\_version} support as \texttt{"TDVP"}), or falls back to
-the MPO-Taylor propagator otherwise (\texttt{tevol\_method="MPO"}, or
-\texttt{itensor\_version=2}, which has no TDVP) --- the same
-TDVP-vs-Taylor choice \texttt{"TD"} already makes. Current scope: only
-the ``greater'' branch of the correlator is computed (the same
+the MPO-Taylor propagator otherwise (\texttt{tevol\_method="MPO"} or
+\texttt{"TEBD"}, or \texttt{itensor\_version=2}, which has no TDVP) ---
+the same TDVP-vs-Taylor choice \texttt{"TD"} already makes. Current
+scope: only the ``greater'' branch of the correlator is computed (the
+same
 simplification \texttt{"TD"} itself already makes), so this is best
 used the same way as \texttt{"TD"}: high-resolution work in a narrow
 frequency window, now reachable at a lower bond-dimension cost for a
@@ -1265,7 +1273,7 @@ measuring $B(t)$. \texttt{timeevolution.imaginary\_exponential} computes
 autocorrelation functions directly, $\langle\psi_0|e^{iHt}|\psi_0
 \rangle$, without a separate measurement operator.
 
-\textbf{Choosing the propagator: \texttt{sc.tevol\_method}.} Four
+\textbf{Choosing the propagator: \texttt{sc.tevol\_method}.} Five
 options:
 
 \begin{itemize}
@@ -1340,12 +1348,41 @@ options:
     \texttt{itensor\_version=2} (which has no TDVP or TEBD at all), and
     available (if slower/less accurate for a given bond dimension)
     everywhere else too.
+  \item \texttt{"AUTO"} (\texttt{itensor\_version} \texttt{3},
+    \texttt{"python"}, or \texttt{"julia\_live"}, same support as
+    \texttt{"TEBD"}) --- tries \texttt{"TEBD"} first and transparently
+    retries as plain \texttt{"TDVP"} if the Hamiltonian turns out not to
+    be strictly nearest-neighbor, instead of raising. This exists because
+    ``is my Hamiltonian nearest-neighbor'' is often a property of
+    \emph{which terms a caller adds}, not something pinned down once at
+    chain-construction time --- a script that starts nearest-neighbor and
+    later grows a longer-range term (or is reused across several models)
+    would otherwise need its own \texttt{tevol\_method} bookkeeping to
+    keep getting the cheaper \texttt{"TEBD"} path whenever it still
+    applies. \texttt{"TEBD"} itself deliberately stays a hard opt-in that
+    raises rather than silently falling back (see the note below) ---
+    \texttt{"AUTO"} is the explicit way to ask for the fallback instead,
+    so a caller who really meant \texttt{"TEBD"} and got a surprising
+    long-range term still finds out. The check costs at most one
+    discarded MPO build on the fallback path: both
+    \texttt{bond\_hamiltonians()} implementations
+    (\texttt{pyitensor/tebd.py}, \texttt{mpscpp3/tebd.h},
+    \texttt{mpsjulialive/tebd.jl}) reject a non-nearest-neighbor term
+    before touching the wavefunction at all, so retrying with
+    \texttt{"TDVP"} never discards a partial time evolution. Not the
+    default, precisely because it isn't a free win: whether TEBD applies
+    becomes something you find out from behavior (a quietly different
+    integrator, and thus different truncation-error characteristics)
+    rather than from reading \texttt{sc.tevol\_method} --- worth it once a
+    script's Hamiltonian shape is genuinely dynamic, not worth it as a
+    blanket default for scripts that already know their Hamiltonian is
+    nearest-neighbor and can just say \texttt{"TEBD"}.
 \end{itemize}
 
 \texttt{"julia\_live"} implements \texttt{"TDVP"}, \texttt{"TDVP\_GSE"},
-and \texttt{"TEBD"}; the legacy \texttt{"MPO"} path raises
-\lstinline|NotImplementedError| there rather than silently running plain
-TDVP instead, so a backend-comparison script can't quietly end up
+\texttt{"TEBD"}, and \texttt{"AUTO"}; the legacy \texttt{"MPO"} path
+raises \lstinline|NotImplementedError| there rather than silently running
+plain TDVP instead, so a backend-comparison script can't quietly end up
 comparing different integrators.
 
 \begin{lstlisting}

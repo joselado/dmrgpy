@@ -79,7 +79,12 @@ class Many_Body_Chain():
           # mpscpp3/tebd.h -- itensor_version in (3,"python"), and only
           # for a strictly nearest-neighbor Hamiltonian; gates are built
           # once from the bare bond Hamiltonians and reused every step,
-          # so it's cheaper per step than TDVP whenever it applies), or
+          # so it's cheaper per step than TDVP whenever it applies),
+          # "AUTO" (tries "TEBD" first and transparently falls back to
+          # "TDVP" if self.hamiltonian turns out not to be strictly
+          # nearest-neighbor -- same itensor_version support as "TEBD";
+          # see timedependent.py's _tebd_or_tdvp() for the actual
+          # try/fallback and why this isn't the default), or
           # "MPO" (the legacy 2nd-order Taylor-expanded evoloperator()
           # backup, the only option for itensor_version=2, since none of
           # TDVP/TDVP_GSE/TEBD exist there -- a v2-API port of TDVP was

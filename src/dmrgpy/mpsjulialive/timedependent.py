@@ -2,7 +2,27 @@ import numpy as np
 
 from .. import operatornames
 from .. import multioperator
+from .. timedependent import _is_tebd_nn_error
 from .mpo import MPO, text_mpo
+
+
+def _tebd_or_tdvp(tebd_call,tdvp_call):
+    """Julia-backend counterpart of timedependent.py's own
+    _tebd_or_tdvp(): backs tevol_method="AUTO" by trying `tebd_call`
+    first and transparently retrying as `tdvp_call` if tebd.jl's
+    bond_hamiltonians() rejects self.hamiltonian for not being strictly
+    nearest-neighbor. juliacall surfaces every Julia-side `error(...)` as
+    a JuliaError regardless of which Julia function raised it, so this
+    reuses the same message-text check (_is_tebd_nn_error) as the
+    C++/pure-Python backends to avoid swallowing an unrelated Julia
+    failure (a real ITensorMPS/KrylovKit bug, say) as if it meant "not
+    nearest-neighbor"."""
+    from juliacall import JuliaError
+    try:
+        return tebd_call()
+    except JuliaError as exc:
+        if not _is_tebd_nn_error(exc): raise
+        return tdvp_call()
 
 
 def _check_tevol_method(self,methods=("TDVP","TDVP_GSE")):
@@ -29,11 +49,14 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
     trajectory runs in one Julia call, same design as kpm.jl), its one-site
     + global-subspace-expansion variant (quench_tdvp_gse) when
     self.tevol_method=="TDVP_GSE", or 2nd-order-Trotter TEBD
-    (mpsjulialive/tebd.jl's quench_tebd) when self.tevol_method=="TEBD".
-    Mirrors timedependent.py::evolution_dmrg_DC's TDVP/TDVP_GSE/TEBD
+    (mpsjulialive/tebd.jl's quench_tebd) when self.tevol_method=="TEBD"
+    (self.tevol_method=="AUTO" tries this first and falls back to plain
+    "TDVP" -- via _tebd_or_tdvp() above -- if tebd.jl rejects
+    self.hamiltonian for not being nearest-neighbor). Mirrors
+    timedependent.py::evolution_dmrg_DC's TDVP/TDVP_GSE/TEBD/AUTO
     branches (itensor_version=3/"python"); the legacy MPO-Taylor path has
     no julia_live implementation at all."""
-    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD"))
+    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD","AUTO"))
     name = operatornames.str2MO(self,name,**kwargs)
     name[0] = name[0].get_dagger()
     A,B = name[0],name[1]
@@ -55,6 +78,13 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
         hlines = to_julia_strvec(text_mpo(Hshift_MO))
         correlator,_wf = Mainjl.quench_tebd(hlines,self.jlsites,
                 A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm)
+    elif self.tevol_method=="AUTO":
+        hlines = to_julia_strvec(text_mpo(Hshift_MO))
+        correlator,_wf = _tebd_or_tdvp(
+                lambda: Mainjl.quench_tebd(hlines,self.jlsites,
+                    A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm),
+                lambda: Mainjl.quench_tdvp(MPO(Hshift_MO,MBO=self).jlmpo,
+                    A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm))
     else:
         Hshift = MPO(Hshift_MO,MBO=self)
         if self.tevol_method=="TDVP_GSE":
@@ -77,10 +107,12 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     + global-subspace-expansion variant (evolve_and_measure_tdvp_gse) when
     self.tevol_method=="TDVP_GSE", or 2nd-order-Trotter TEBD
     (mpsjulialive/tebd.jl's evolve_and_measure_tebd) when
-    self.tevol_method=="TEBD". Mirrors
-    timedependent.py::evolve_and_measure_dmrg's TDVP/TDVP_GSE/TEBD
+    self.tevol_method=="TEBD" (self.tevol_method=="AUTO" tries this first
+    and falls back to plain "TDVP" -- via _tebd_or_tdvp() above -- if
+    tebd.jl rejects `h` for not being nearest-neighbor). Mirrors
+    timedependent.py::evolve_and_measure_dmrg's TDVP/TDVP_GSE/TEBD/AUTO
     branches."""
-    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD"))
+    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD","AUTO"))
     if h is None: h = self.hamiltonian # Hamiltonian
     if wf is None: wf = self.wf0 # get ground state
     Aop = MPO(operator,MBO=self)
@@ -90,6 +122,14 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         correlator,wf_final_jl = Mainjl.evolve_and_measure_tebd(hlines,
                 self.jlsites,Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,
                 self.maxm)
+    elif self.tevol_method=="AUTO":
+        hlines = to_julia_strvec(text_mpo(h))
+        correlator,wf_final_jl = _tebd_or_tdvp(
+                lambda: Mainjl.evolve_and_measure_tebd(hlines,
+                    self.jlsites,Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,
+                    self.maxm),
+                lambda: Mainjl.evolve_and_measure_tdvp(MPO(h,MBO=self).jlmpo,
+                    Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,self.maxm))
     else:
         Hop = MPO(h,MBO=self)
         if self.tevol_method=="TDVP_GSE":
@@ -127,8 +167,11 @@ def advance_complex_time_step(self,Hop,wf,dz,do_gse=False):
     self.tevol_method said -- so on one and the same chain
     submode="TDZ" and evolve_and_measure() disagreed about which
     integrator "TDVP_GSE" meant, and "TEBD" raised for one and quietly
-    ran TDVP for the other."""
-    _check_tevol_method(self)
+    ran TDVP for the other. self.tevol_method="AUTO" is accepted here too
+    and reduces to plain "TDVP" (the else branch below already treats
+    anything other than "TDVP_GSE" that way) -- TDZ has no TEBD
+    counterpart to try first, see tdz.py's own docstring for why."""
+    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","AUTO"))
     from .juliasession import Main as Mainjl
     from .mps import MPS
     if self.tevol_method=="TDVP_GSE":
