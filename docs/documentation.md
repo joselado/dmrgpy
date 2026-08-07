@@ -358,6 +358,99 @@ own "Convergence robustness" module-docstring section for the full,
 numerically-confirmed account, and `docs/user_guide.md`'s own iDMRG
 section for the user-facing version of this caveat.
 
+**VUMPS and the tangent-space excitation ansatz, ported to
+`itensor_version=3`.** `mpscpp3/chain_session.h`'s `Chain::
+vumps_ground_state`/`Chain::vumps_excitation_energies` are C++ ports of
+`pyitensor/vumps.py`'s `vumps_ground_state` and
+`pyitensor/idmrg_excitations.py`'s `excitation_energies`, reached the
+same way `idmrg_ground_state` already is (`infinitechain.py`'s
+`gs_energy`/`excitation_energies` branch on `self.gs_method` for
+`itensor_version=3` too now, not just `"python"`). Architecturally these
+two new methods are a deliberate departure from every other `Chain`
+method in this file: `idmrg_ground_state` (and everything else in
+`chain_session.h`) is built from genuine ITensor `Index`/`ITensor`
+tensor-network objects, but `vumps_ground_state`/
+`vumps_excitation_energies` instead work entirely with plain dense
+row-major `std::vector<Cplx>` arrays, closed over four LAPACK routines
+already vendored with ITensor v3's own build (`itensor::zgeev_wrapper`
+for the transfer-matrix dominant-fixed-point eigenproblem,
+`zheev_wrapper` for the `H_AC`/`H_C` ground-state eigenproblem in place
+of pyitensor's own truncated Lanczos, `zgesv_wrapper` for the
+regularized `GL`/`GR`/`GBL(k)`/`GBR(k)` environment linear solves, and
+`zgesvd_wrapper` for both the `AL`/`AR` orthogonal-Procrustes update and
+the null-space isometry `V_L` the excitation ansatz needs) rather than
+ITensor's own tensor contraction/decomposition machinery. This is a
+deliberate simplification, not a shortcut taken for lack of a better
+option: `D` and `d_g` (the grouped supersite's own physical dimension)
+are always small in this feature's scope (`n_uc<=2`, reach-1 bonds
+only, the same scope `idmrg_ground_state` itself has), so exact,
+dense-matrix linear algebra is both simpler to get right and
+dramatically lower-risk than re-deriving VUMPS's and the excitation
+ansatz's own already extremely subtle fixed-point/gauge bookkeeping
+(the eight independent investigation passes documented in
+`pyitensor/idmrg_excitations.py`'s own "History" section, and the
+missing-conjugate sign bug found along the way — see above) a second
+time against ITensor v3's stricter `Index`/`IndexSet` API. Concretely,
+this means the C++ port is close to a direct, line-for-line translation
+of the numpy-array-based Python algorithm (same `(D,d_g,D)`/`(D,D)`
+shape conventions, same automaton channel layout) rather than an
+independent re-derivation in tensor-network form — the translation risk
+this trades away is "did I copy the formula correctly", not "did I
+re-derive VUMPS/the excitation ansatz correctly", which is exactly the
+risk category the eight-pass investigation showed to be the dangerous
+one. One initialization detail is intentionally NOT ported faithfully:
+pyitensor's own `_random_initial_state`/`_grow_initial_state` canonicalize
+a raw random tensor via `idmrg.py`'s fixed-point-based
+`_canonicalize_periodic` (needed there because that function is also
+used for genuine bond truncation elsewhere in `idmrg.py`); the C++ port
+instead uses plain Gram-Schmidt orthonormalization of a random matrix's
+columns (`vx_gram_schmidt_columns`) to build an exactly isometric
+starting `AL0`/`AR0` directly — mathematically equally valid for VUMPS
+initialization purposes (any exactly isometric starting tensor is a
+legitimate starting point; VUMPS's own iteration, not the initialization
+method, is what drives the state to a self-consistent, Hamiltonian-
+optimal fixed point), and considerably simpler since the C++ port never
+needs `_canonicalize_periodic`'s own bond-truncation machinery at all.
+The D-ramp/multi-restart robustness strategy (`vumps_ground_state`'s own
+outer loop) IS ported; the "spend a bounded extra attempt budget to beat
+an already-known smaller-`D` energy" safety net documented above is not
+(see `Chain::vumps_ground_state`'s own comment) — a caller doing
+quantitative work at a larger `D` should still call it several times
+independently and keep the lowest reported `e0`, the same discipline
+pyitensor's own docstring already recommends.
+
+Validated directly against `itensor_version="python"`'s own VUMPS
+(cross-checked, not just internally self-consistent): ground-state
+energy density matches to ~1e-10 or tighter at `D=1,2,3` on the
+transverse-field Ising model (`n_uc=1`) and the uniform Heisenberg chain
+(`n_uc=2`, exercising `vumps_group_automaton`'s two-sublattice grouping
+branch); the excitation dispersion matches across a full momentum scan
+to the same tolerance on the gapped TFIM case, and to ~1e-4..1e-7 on the
+gapless/critical Heisenberg case (attributed to the two backends'
+independent, non-convex VUMPS restart searches landing on slightly
+different local optima there, not a discrepancy in the ported algorithm
+itself — see `tests/test_vumps_v3.py`/`tests/test_vumps_excitations_v3.py`).
+
+**A real, previously-undetected bug this same audit found and fixed in
+the already-shipped `idmrg_build_row`** (shared by `idmrg_ground_state`
+and the new `vumps_ground_state`, since both build their automaton from
+it): a site's own onsite/field-operator term was being added onto the
+automaton's `F,F` self-loop transition instead of the direct `S,F`
+transition — exactly the bug `pyitensor/idmrg.py`'s own
+`_build_periodic_mpo` docstring documents finding and fixing on the
+Python side (putting it on `F,F` instead of `S,F` either silently drops
+every onsite term for a bond-term-free Hamiltonian, since `W` then stays
+block-diagonal between `{S}` and `{F,pending...}`, or causes an
+exponential-in-macro-iteration blow-up once at least one bond term
+activates `F`, since every further-absorbed site re-adds the onsite
+content on top of an already-summed total). Never caught by the existing
+test suite because no `itensor_version=3` `idmrg_ground_state` test
+exercises an onsite/field term (every `tests/test_infinite_chain.py` v3
+case is a pure bond-only Heisenberg/XXX-style Hamiltonian) — found while
+building this feature's own VUMPS test cases, since a TFIM Hamiltonian
+(which has a field term) is the natural first thing to validate a new
+VUMPS port against.
+
 The Hamiltonian is built from `SxL[i]`/`SxC[i]`/`SxR[i]`-suffixed
 operators (previous/central/next unit cell, `i=0..n_uc-1`) rather than
 absolute site indices; `_canonicalize_hamiltonian` validates every term

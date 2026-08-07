@@ -284,6 +284,21 @@ class Infinite_Many_Body_Chain:
                                   # *fresh* Chain() has no such snapshot,
                                   # so re-running gs_energy() on a new
                                   # instance would silently lose it.
+        self._session3_has_vumps = False  # itensor_version=3 only: whether
+                                           # self._session3 last ran
+                                           # vumps_ground_state (True) or
+                                           # idmrg_ground_state (False) --
+                                           # excitation_energies' own v3
+                                           # branch needs this (not just
+                                           # "is self._session3 None") to
+                                           # correctly rerun gs_energy() if
+                                           # gs_method was switched to
+                                           # "vumps" after an earlier
+                                           # gs_method="idmrg" run already
+                                           # populated self._session3 --
+                                           # mirrors self._vumps_result's
+                                           # own None-sentinel role for the
+                                           # "python" backend above.
 
     def get_operator(self, name, i, group="C"):
         """A bare, symbolic 1-site MultiOperator for `name` at site `i`
@@ -329,6 +344,7 @@ class Infinite_Many_Body_Chain:
         self.converged = None
         self._excitation_env = None
         self._session3 = None
+        self._session3_has_vumps = False
 
     def gs_energy(self):
         """Run the ground-state solver (self.maxiter iterations/macro-
@@ -348,13 +364,23 @@ class Infinite_Many_Body_Chain:
         no per-sublattice U_list (only a grouped-supersite representation,
         see VUMPSResult's own docstring), vev/correlator raise
         NotImplementedError for gs_method="vumps", mirroring the precedent
-        itensor_version=3 already sets below. itensor_version=3 instead
-        calls the compiled mpscpp3 backend's Chain::idmrg_ground_state
-        directly (energy density only -- no correlator support there yet,
-        see this module's own docstring, and no gs_method dispatch: VUMPS
-        is a "python"-engine-only feature), so self._result is left None
-        on that path; vev/correlator raise NotImplementedError rather than
-        silently misusing a stale/absent result."""
+        itensor_version=3's own gs_method="vumps" branch below now sets
+        too. itensor_version=3 now ALSO dispatches on `self.gs_method`,
+        mirroring the "python" backend: "idmrg" (default) calls the
+        compiled mpscpp3 backend's Chain::idmrg_ground_state; "vumps"
+        calls its Chain::vumps_ground_state instead (C++ port of
+        pyitensor/vumps.py -- see mpscpp3/chain_session.h's own doc
+        comment at that method for the algorithm/scope, including the one
+        simplification it takes relative to pyitensor's own driver). Either
+        way only the energy density is available on this backend (no
+        correlator support yet, see this module's own docstring), so
+        self._result/self._vumps_result are both left None on this path;
+        vev/correlator raise NotImplementedError rather than silently
+        misusing a stale/absent result. self._session3 is kept alive
+        either way -- td_dynamical_correlator needs it after
+        gs_method="idmrg", excitation_energies/excitation_gap need it
+        after gs_method="vumps" (see _get_excitation_environment's own
+        docstring)."""
         if self._h_intra is None:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.gs_energy called before set_hamiltonian")
@@ -383,28 +409,54 @@ class Infinite_Many_Body_Chain:
                 "Infinite_Many_Body_Chain.gs_energy: gs_method={!r} is not "
                 "implemented -- only \"idmrg\" and \"vumps\" are supported "
                 "for itensor_version=\"python\"".format(self.gs_method))
-        else:  # itensor_version == 3
-            from . import cppext
-            backend = cppext.get_backend(3)
-            if backend is None:
-                raise RuntimeError(
-                    "Infinite_Many_Body_Chain.gs_energy: itensor_version=3 "
-                    "requested but the mpscpp3 (ITensor v3) extension is "
-                    "not compiled -- run install.py --itensor-version=3 "
-                    "first, or use itensor_version=\"python\" instead")
-            chain = backend.Chain(self.site_types)
-            chain.set_verbose(self.verbose)
+        elif self.itensor_version == 3 and self.gs_method == "idmrg":
+            chain = self._make_cpp_chain()
             terms_intra = self._h_intra.to_terms()
             terms_inter = self._h_inter.to_terms()
             density, converged, _niter_done = chain.idmrg_ground_state(
                 terms_intra, terms_inter, self.maxm, self.cutoff,
                 self.maxiter, self.etol, self.niter, self.restarts)
             self._session3 = chain  # kept alive for td_dynamical_correlator -- see __init__'s own comment
+            self._session3_has_vumps = False
             self._result = None
             self._vumps_result = None
             self.e0 = density
             self.converged = converged
+        elif self.itensor_version == 3 and self.gs_method == "vumps":
+            chain = self._make_cpp_chain()
+            terms_intra = self._h_intra.to_terms()
+            terms_inter = self._h_inter.to_terms()
+            e0, converged, _niter_done, _gauge_mismatch = chain.vumps_ground_state(
+                terms_intra, terms_inter, self.maxm, self.etol, self.maxiter,
+                self.vumps_nrestarts)
+            self._session3 = chain  # kept alive for excitation_energies/excitation_gap
+            self._session3_has_vumps = True
+            self._result = None
+            self._vumps_result = None
+            self.e0 = e0
+            self.converged = converged
+        else:  # itensor_version == 3, unknown gs_method
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.gs_energy: gs_method={!r} is not "
+                "implemented -- only \"idmrg\" and \"vumps\" are supported "
+                "for itensor_version=3".format(self.gs_method))
         return self.e0
+
+    def _make_cpp_chain(self):
+        """A fresh mpscpp3 Chain for this unit cell -- shared setup
+        (backend-availability check + verbosity) for gs_energy's own
+        itensor_version=3 branches (gs_method="idmrg"/"vumps")."""
+        from . import cppext
+        backend = cppext.get_backend(3)
+        if backend is None:
+            raise RuntimeError(
+                "Infinite_Many_Body_Chain.gs_energy: itensor_version=3 "
+                "requested but the mpscpp3 (ITensor v3) extension is "
+                "not compiled -- run install.py --itensor-version=3 "
+                "first, or use itensor_version=\"python\" instead")
+        chain = backend.Chain(self.site_types)
+        chain.set_verbose(self.verbose)
+        return chain
 
     def vev(self, opname, p, group="C"):
         """<opname> at site p (0..n_uc-1) of cell-group `group` -- by
@@ -466,21 +518,30 @@ class Infinite_Many_Body_Chain:
         invalidated whenever set_hamiltonian/gs_energy reruns (see
         __init__'s own comment).
 
-        Requires gs_method="vumps" (not the default "idmrg"): the
-        tangent-space excitation ansatz needs the mixed-gauge {AL,AR,C,
-        GL,GR} representation only vumps.vumps_ground_state produces (see
-        pyitensor.idmrg_excitations' own module docstring) -- the growing
-        algorithm's IDMRGResult has no such representation. Set
-        `self.gs_method = "vumps"` before calling gs_energy()/
-        excitation_energies() (or let this method call gs_energy() itself,
-        which will then also use gs_method="vumps")."""
+        Requires itensor_version="python" with gs_method="vumps" (not the
+        default "idmrg"): the tangent-space excitation ansatz needs the
+        mixed-gauge {AL,AR,C,GL,GR} representation only
+        vumps.vumps_ground_state produces (see pyitensor.idmrg_excitations'
+        own module docstring) -- the growing algorithm's IDMRGResult has no
+        such representation. Set `self.gs_method = "vumps"` before calling
+        gs_energy()/excitation_energies() (or let this method call
+        gs_energy() itself, which will then also use gs_method="vumps").
+        itensor_version=3 does NOT go through this method at all --
+        excitation_energies/excitation_gap call the compiled mpscpp3
+        backend's own Chain::vumps_excitation_energies directly instead
+        (that backend keeps its own excitation-environment cache
+        internally, mirroring this method's own caching one level down,
+        see chain_session.h's own comment at
+        vumps_build_excitation_environment)."""
         if self.itensor_version != "python" or self.gs_method != "vumps":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.excitation_energies/excitation_gap: "
                 "only itensor_version=\"python\" with gs_method=\"vumps\" is "
-                "supported -- set self.gs_method = \"vumps\" before calling "
-                "gs_energy()/excitation_energies() -- see "
-                "pyitensor.idmrg_excitations' own module docstring")
+                "supported here -- set self.gs_method = \"vumps\" before "
+                "calling gs_energy()/excitation_energies() -- see "
+                "pyitensor.idmrg_excitations' own module docstring "
+                "(itensor_version=3 is handled separately, directly inside "
+                "excitation_energies/excitation_gap)")
         if self._vumps_result is None:
             self.gs_energy()
         if self._excitation_env is None:
@@ -492,14 +553,36 @@ class Infinite_Many_Body_Chain:
     def excitation_energies(self, k, n=1):
         """The lowest `n` excitation energies (above the ground state) at
         momentum `k` (radians, per unit cell) of the tangent-space/
-        quasiparticle excitation ansatz -- see
-        pyitensor.idmrg_excitations' own module docstring for the
-        algorithm. Any converged bond dimension D>=1 is supported (requires
-        gs_method="vumps", see `_get_excitation_environment`'s own
-        docstring)."""
-        env = self._get_excitation_environment()
-        from .pyitensor import idmrg_excitations
-        return idmrg_excitations.excitation_energies(env, k, n=n)
+        quasiparticle excitation ansatz.
+
+        itensor_version="python": see pyitensor.idmrg_excitations' own
+        module docstring for the algorithm (requires gs_method="vumps",
+        see `_get_excitation_environment`'s own docstring).
+
+        itensor_version=3: C++ port of the same algorithm
+        (mpscpp3/chain_session.h's Chain::vumps_excitation_energies) --
+        also requires gs_method="vumps"; calls gs_energy() itself if not
+        already run with that gs_method. See that C++ method's own doc
+        comment for validation status (cross-checked directly against this
+        same "python" path across a momentum scan on TFIM/Heisenberg
+        models at D=1..3, matching to ~1e-10 or tighter -- see
+        tests/test_vumps_excitations_v3.py).
+
+        Any converged bond dimension D>=1 is supported on both backends."""
+        if self.itensor_version == "python":
+            env = self._get_excitation_environment()
+            from .pyitensor import idmrg_excitations
+            return idmrg_excitations.excitation_energies(env, k, n=n)
+        if self.itensor_version != 3 or self.gs_method != "vumps":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.excitation_energies/excitation_gap: "
+                "only itensor_version=\"python\" or itensor_version=3, both "
+                "with gs_method=\"vumps\", are supported -- set "
+                "self.gs_method = \"vumps\" before calling "
+                "gs_energy()/excitation_energies()")
+        if self._session3 is None or not self._session3_has_vumps:
+            self.gs_energy()
+        return np.array(self._session3.vumps_excitation_energies(k, n))
 
     def excitation_gap(self, ks=None):
         """The scalar "first excited state" gap: min_k

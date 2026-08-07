@@ -4,6 +4,7 @@
 #include <random> // std::mt19937_64/std::discrete_distribution (Chain::metts_vev)
 #include <cmath> // std::isnan (Chain::gs_energy_generalized's lam0 sentinel)
 #include <limits> // std::numeric_limits<double>::quiet_NaN() (ditto)
+#include <functional> // std::function (Chain::vx_build_linear_map's own action callback)
 
 // TDVP/tdvp.h and TDVP/basisextension.h are quoted includes, so they
 // resolve relative to this file's own directory (mpscpp3/) with no
@@ -108,6 +109,94 @@ struct IdmrgResult
     double density = 0.0; // converged (or best-so-far) energy per site
     bool converged = false;
     int niter_done = 0; // macro-iterations actually run
+    };
+
+// C++ port of pyitensor/vumps.py's VUMPSResult -- the converged (or
+// best-effort) mixed-gauge ground state at a fixed bond dimension D, in
+// the thermodynamic limit. See Chain::vumps_ground_state's own doc
+// comment (and this file's own "-- VUMPS / excitation ansatz private
+// helpers --" section, near idmrg_make_W_end) for why this whole
+// feature -- unlike idmrg_ground_state above -- is implemented as plain
+// dense row-major arrays closed over LAPACK (itensor::zgeev_wrapper/
+// zheev_wrapper/zgesv_wrapper/zgesvd_wrapper) rather than ITensor
+// tensor-network objects: d_g (the grouped supersite's own physical
+// dimension) and D are always small enough here (n_uc<=2, reach<=1
+// bonds -- see vumps_check_reach_one) that this is both simpler and
+// far less risky than re-deriving VUMPS's already extremely subtle
+// fixed-point/gauge bookkeeping (see pyitensor/vumps.py's and
+// pyitensor/idmrg_excitations.py's own module docstrings -- eight
+// independent investigation passes were needed to get the tangent-space
+// excitation ansatz right against ITensor-style Index-based tensors the
+// first time) against ITensor v3's Index/IndexSet machinery a second
+// time. Only the ground-state energy density is exposed here -- no
+// vev/correlator (VUMPSResult has no per-sublattice U_list, same
+// documented limitation pyitensor.vumps.VUMPSResult already carries).
+struct VumpsResult
+    {
+    double e0 = 0.0; // converged (or best-so-far) energy per PHYSICAL site
+    bool converged = false;
+    int niter_done = 0; // VUMPS outer iterations actually run, at the FINAL bond dimension
+    double gauge_mismatch = 0.0; // final ||AC-AL@C||+||AC-C@AR||, normalized -- see vumps_gauge_mismatch
+    };
+
+// -- Internal (never exposed to Python) VUMPS/excitation-ansatz plumbing
+// structs -- see Chain's own "-- VUMPS / excitation ansatz private
+// helpers --" section (near idmrg_make_W_end) for how each is used; kept
+// as plain top-level structs, exactly like IdmrgChan/IdmrgBond/IdmrgOnsite/
+// IdmrgAutomatonRow above, rather than nested classes.
+
+// One reach-1 bond's own automaton content after grouping: mat_a (the
+// S->pending transition, applied at the bond's "earlier" site) and mat_b
+// (pending->F, "later" site), both (d_g,d_g) row-major, M[i,o] convention
+// -- C++ analogue of pyitensor idmrg_excitations._pending_channels' own
+// per-channel tuple.
+struct PendingChan
+    {
+    std::vector<Cplx> mat_a, mat_b;
+    };
+
+// A PendingChan plus its own precomputed one-more-site bond content
+// (Lvec_a/Rvec_b, each (D,D)) -- C++ analogue of pyitensor/vumps.py's own
+// _precompute_bond_environments per-channel tuple.
+struct PendingBondEnv
+    {
+    std::vector<Cplx> mat_a, mat_b, Lvec_a, Rvec_b;
+    };
+
+// A VUMPS starting point (AL,AR: (D,d_g,D); C: (D,D)) -- see
+// Chain::vumps_random_init/vumps_grow_init.
+struct VumpsInit
+    {
+    std::vector<Cplx> AL, AR, C;
+    };
+
+// One full vumps_single_run() attempt's own result.
+struct VumpsRunResult
+    {
+    std::vector<Cplx> AL, AR, C, GL, GR;
+    double e_cell = 0.0;
+    bool converged = false;
+    int niter = 0;
+    double mismatch = 0.0;
+    };
+
+// One outer-iteration's own environment build (Chain::vumps_build_environments).
+struct VumpsEnv
+    {
+    std::vector<Cplx> GL, GR;
+    double e_cell = 0.0;
+    std::vector<PendingBondEnv> bond_envs;
+    };
+
+// A channel-resolved (D,D)-per-channel map {S,F,pending[0],pending[1],...}
+// -- C++ analogue of pyitensor idmrg_excitations._build_GBL/_build_GBR's
+// own dict return value, kept as an explicit struct here (no dict
+// container needed: only ever S/F/pending, exactly the channel layout
+// vumps_pending_channels already enumerates).
+struct VumpsChannelMap
+    {
+    std::vector<Cplx> S, F;
+    std::vector<std::vector<Cplx>> pending;
     };
 
 // Chain::td_dynamical_correlator_window's own return value: S(x,t) =
@@ -2341,6 +2430,219 @@ class Chain
         return out;
         }
 
+    // VUMPS ground state (Zauner-Stauber et al., arXiv:1701.07035;
+    // Vanderstraeten/Haegeman/Verstraete, arXiv:1810.07006, Algorithm 4)
+    // -- C++ port of pyitensor/vumps.py's vumps_ground_state, itself an
+    // alternative to idmrg_ground_state's growing/infinite-size algorithm:
+    // solves directly, at a FIXED target bond dimension D and in the
+    // thermodynamic limit, for the mixed-gauge {AL,AR,C} fixed point of a
+    // single (grouped) supersite's transfer/Hamiltonian environment. See
+    // pyitensor/vumps.py's own module docstring for the full algorithm
+    // derivation (regularized GL/GR environment solves, H_AC/H_C
+    // eigenproblems, the orthogonal-Procrustes AL/AR update) and for the
+    // documented D>1 convergence-robustness caveats this port shares
+    // (single-attempt VUMPS from a random start is not reliable for D>1;
+    // mitigated the same way, a D-ramp with multiple restarts per step --
+    // see vumps_ground_state's own private helper below for the one
+    // simplification this port takes relative to pyitensor's own driver:
+    // no "beat a known-good smaller-D energy" safety-net budget, see that
+    // helper's own comment).
+    //
+    // Same scope as idmrg_ground_state: n_uc<=2 (this Chain's own
+    // site_types), Hermitian only, and -- specific to VUMPS/the
+    // excitation ansatz -- every 2-site term must have "reach" (grouped-
+    // supersite separation) exactly 1 (checked below, throws ITError
+    // otherwise; TFIM/Heisenberg/XX-style nearest-neighbor models satisfy
+    // this trivially once grouped into a <=2-site supersite).
+    //
+    // Unlike idmrg_ground_state (which works entirely with genuine
+    // ITensor tensor-network objects), this method and its private
+    // helpers (see "-- VUMPS / excitation ansatz private helpers --"
+    // below, near idmrg_make_W_end) build a dense (Dw,Dw,d_g,d_g)
+    // finite-state automaton array directly from idmrg_classify_terms/
+    // idmrg_channels_at/idmrg_build_row's own already-validated dense
+    // per-sublattice output (reused verbatim, not re-derived), then group
+    // adjacent sublattices' automaton rows into one supersite exactly
+    // mirroring pyitensor/vumps.py's own _group_automaton -- see
+    // vumps_group_automaton's own comment.
+    //
+    // On return, this Chain's own private snapshot (vumps_AL_/vumps_AR_/
+    // vumps_C_/vumps_GL_/vumps_GR_/vumps_W_) is set so
+    // vumps_excitation_energies() can be called afterward on the same
+    // Chain instance -- mirrors idmrg_ground_state's own
+    // have_idmrg_snapshot_ pattern.
+    VumpsResult
+    vumps_ground_state(std::vector<MOTerm> const& terms_intra,
+                        std::vector<MOTerm> const& terms_inter,
+                        int D, double tol, int maxiter, int nrestarts)
+        {
+        int n_uc = sites_.length();
+        // User-facing, recoverable input validation -- throw ITError (a
+        // catchable C++ exception pybind11 turns into a Python exception),
+        // NOT the Error(...) macro (which aborts the whole process, no
+        // exception to catch -- confirmed directly: an earlier version of
+        // this guard used Error(...) here and a plain invalid D=0 call
+        // took down the entire Python interpreter instead of raising).
+        // n_uc>2 is left as idmrg_ground_state's own Error(...) precedent
+        // (that branch is never reachable through the public API in
+        // practice -- infinitechain.py's constructor already rejects
+        // n_uc>2 before any Chain is ever built).
+        if (n_uc>2)
+            Error("Chain::vumps_ground_state: n_uc>2 is not supported yet "
+                  "(see idmrg_ground_state's own comment for the same "
+                  "restriction and its rationale)");
+        if (D<1)
+            throw ITError("Chain::vumps_ground_state: D must be >= 1");
+        if (nrestarts<1)
+            throw ITError("Chain::vumps_ground_state: nrestarts must be >= 1");
+
+        std::vector<IdmrgOnsite> onsite;
+        std::vector<IdmrgBond> bonds;
+        idmrg_classify_terms(terms_intra,terms_inter,n_uc,onsite,bonds);
+        std::vector<std::vector<IdmrgChan>> chans(n_uc);
+        for (int p=0;p<n_uc;++p) chans[p] = idmrg_channels_at(bonds,n_uc,p);
+        std::vector<IdmrgAutomatonRow> rows;
+        rows.reserve(n_uc);
+        for (int p=0;p<n_uc;++p)
+            rows.push_back(idmrg_build_row(p,n_uc,bonds,onsite,
+                                            chans[p],chans[(p+1)%n_uc]));
+
+        int Dw=0, d_g=0;
+        std::vector<Cplx> W;
+        vumps_group_automaton(rows,n_uc,Dw,d_g,W);
+        vumps_check_reach_one(W,Dw,d_g);
+
+        auto h1 = vumps_onsite_matrix(W,Dw,d_g);
+        auto pending = vumps_pending_channels(W,Dw,d_g);
+
+        std::mt19937_64 rng(std::random_device{}());
+
+        auto better = [](VumpsRunResult const& a, VumpsRunResult const& b)
+            {
+            if (a.converged != b.converged) return a.converged;
+            return a.e_cell < b.e_cell;
+            };
+
+        VumpsRunResult best; bool have_best=false;
+        std::vector<Cplx> prev_AL, prev_AR; int prev_D=0; bool have_prev=false;
+        for (int D_cur=1; D_cur<=D; ++D_cur)
+            {
+            int n_here = (D_cur==D) ? nrestarts : std::min(nrestarts,3);
+            VumpsRunResult local_best; bool have_local=false;
+            for (int attempt=0; attempt<n_here; ++attempt)
+                {
+                VumpsInit init; bool has_init=false;
+                if (attempt==0 && have_prev)
+                    {
+                    init = vumps_grow_init(D_cur,d_g,prev_D,prev_AL,prev_AR,rng);
+                    has_init=true;
+                    }
+                try
+                    {
+                    auto r = vumps_single_run(D_cur,d_g,h1,pending,tol,maxiter,
+                                               has_init?&init:nullptr,rng);
+                    if (verbose_)
+                        println("vumps D=",D_cur," attempt=",attempt,": e0=",
+                                r.e_cell/n_uc," converged=",r.converged);
+                    if (!have_local || better(r,local_best)) { local_best=r; have_local=true; }
+                    }
+                catch (ITError const& e)
+                    {
+                    // A degenerate/near-degenerate transfer-matrix spectrum
+                    // (vx_dominant_*_fixed_point's own guard, mirroring
+                    // pyitensor's _check_dominant_eigenvalue_nondegenerate)
+                    // or a singular regularized environment solve -- both
+                    // recoverable by simply retrying with a different
+                    // random start, exactly like pyitensor's own
+                    // vumps_ground_state driver (its own "one_attempt"
+                    // catches RuntimeError the same way).
+                    if (verbose_)
+                        println("vumps D=",D_cur," attempt=",attempt,": failed (",e.what(),")");
+                    }
+                }
+            if (!have_local)
+                throw ITError("Chain::vumps_ground_state: every attempt at D="+
+                              std::to_string(D_cur)+" failed (degenerate transfer-matrix "
+                              "spectrum, or a singular regularized environment solve) -- "
+                              "try increasing nrestarts");
+            prev_AL = local_best.AL; prev_AR = local_best.AR; prev_D = D_cur; have_prev = true;
+            best = local_best; have_best = true;
+            }
+        (void)have_best; // always true here: the D_cur loop runs at least once (D>=1 checked above)
+
+        VumpsResult out;
+        out.e0 = best.e_cell / n_uc;
+        out.converged = best.converged;
+        out.niter_done = best.niter;
+        out.gauge_mismatch = best.mismatch;
+
+        vumps_D_ = D; vumps_dg_ = d_g; vumps_Dw_ = Dw;
+        vumps_AL_ = best.AL; vumps_AR_ = best.AR; vumps_C_ = best.C;
+        vumps_GL_ = best.GL; vumps_GR_ = best.GR; vumps_W_ = W;
+        have_vumps_snapshot_ = true;
+        have_vumps_exc_env_ = false; // stale -- rebuilt lazily by vumps_excitation_energies
+        return out;
+        }
+
+    // Tangent-space/quasiparticle excitation ansatz (Haegeman et al.;
+    // Vanderstraeten/Haegeman/Verstraete, arXiv:1810.07006, Sec.6) on top
+    // of a converged vumps_ground_state() -- C++ port of
+    // pyitensor/idmrg_excitations.py's excitation_energies, mirroring
+    // MPSKit.jl's own channel-resolved GBL(k)/GBR(k) construction and
+    // 3-term H_eff(k) exactly as that module's own module docstring
+    // documents (its "History" section records the eight independent
+    // investigation passes needed to get this right on the Python side
+    // first -- this port follows that already-validated algorithm
+    // line-for-line, in dense arrays, rather than re-deriving anything).
+    //
+    // Requires vumps_ground_state() to have been called first on this
+    // same Chain. The excitation environment (V_L, the channel-resolved
+    // background GL_full/GR_full, the mixed AL/AR transfer fixed points,
+    // and H_AC's own Rayleigh quotient lam_AC -- see
+    // vumps_build_excitation_environment's own comment) is built once,
+    // lazily, on the first call, and cached until the next
+    // vumps_ground_state() call -- exactly mirroring
+    // pyitensor.infinitechain.Infinite_Many_Body_Chain's own
+    // _excitation_env caching.
+    //
+    // Returns the lowest `n` excitation energies (above the ground state)
+    // at momentum `k` (radians per unit cell) -- an ordinary (not
+    // generalized) Hermitian eigenproblem of size Dx*D (Dx=D*(d_g-1)),
+    // solved directly via itensor::zheev_wrapper.
+    std::vector<double>
+    vumps_excitation_energies(double k, int n)
+        {
+        if (!have_vumps_snapshot_)
+            throw ITError("Chain::vumps_excitation_energies: called before "
+                           "vumps_ground_state (no converged VUMPS snapshot)");
+        int D = vumps_D_, d_g = vumps_dg_;
+        int Dx = D*(d_g-1);
+        if (Dx<=0)
+            throw ITError("Chain::vumps_excitation_energies: d_g<=1 (trivial "
+                           "physical dimension after grouping) -- no nontrivial "
+                           "tangent-space excitation exists");
+        if (n<1)
+            throw ITError("Chain::vumps_excitation_energies: n must be >= 1");
+        if (!have_vumps_exc_env_) vumps_build_excitation_environment();
+
+        auto Hmat = vumps_build_h_eff_dense(k);
+        int nH = Dx*D;
+        // Hermitize (H_eff(k) is Hermitian by construction -- this only
+        // cleans up numerical noise, same convention idmrg_excitations.py's
+        // own excitation_energies uses).
+        for (int i=0;i<nH;++i)
+        for (int j=0;j<nH;++j)
+            {
+            Cplx v = (Hmat[i*nH+j] + std::conj(Hmat[j*nH+i]))/2.0;
+            Hmat[i*nH+j] = v;
+            }
+        auto evals = vx_hermitian_eigvals(Hmat,nH); // ascending
+        int take = std::min(n,(int)evals.size());
+        std::vector<double> out(take);
+        for (int i=0;i<take;++i) out[i] = evals[i] - vumps_lam_AC_;
+        return out;
+        }
+
     // Real-time IBC-window dynamical correlator S(x,t) =
     // <psi0|A_x exp(-iHt)B_0|psi0> of the infinite chain (Milsted/
     // Vanderstraeten, arXiv:1804.09163, Sec. V.1) -- native ITensor v3
@@ -3224,10 +3526,31 @@ class Chain
                 }
             else if (lch.kind==1 && rch.kind==1)
                 {
-                auto mat = eye();
-                if (!onsite_mat.empty())
-                    for (int k=0;k<d*d;++k) mat[k] += onsite_mat[k];
-                setmat(li,ri,mat);
+                setmat(li,ri,eye());
+                }
+            else if (lch.kind==0 && rch.kind==1)
+                {
+                // This site's own onsite term: starts and completes in one
+                // step, direct from S into the accumulator F -- NOT added
+                // onto F,F's own self-loop. This is a real, confirmed drift
+                // bug fix (found auditing this port against the current
+                // pyitensor/idmrg.py, whose own _build_periodic_mpo
+                // docstring documents finding and fixing exactly this
+                // mistake: "an earlier, wrong version of this function did
+                // exactly that -- mat = Id; if onsite_mat is not None: mat
+                // += onsite_mat on the F,F entry", which silently drops
+                // every onsite term for a chain with no bond terms at all
+                // (W stays block-diagonal between {S} and {F,pending...},
+                // so <S|W^N|F> is identically 0 for every N), and produces
+                // an exponential-in-iteration blow-up once at least one
+                // bond term does activate F (each further absorbed site
+                // re-adds the onsite content into an already-summed F
+                // channel instead of summing it in exactly once) -- see
+                // that docstring's own two confirmed reproducers. Putting
+                // it here (S,F) instead is the standard upper-triangular-
+                // in-channel-index automaton-MPO construction for summing
+                // an onsite term into a running total exactly once per site.
+                if (!onsite_mat.empty()) setmat(li,ri,onsite_mat);
                 }
             else if (lch.kind==0 && !r_triv)
                 {
@@ -3316,6 +3639,1313 @@ class Chain
                 T.set({left_idx(li+1),phys_in(si+1),phys_out(so+1)},v);
             }
         return T;
+        }
+
+    // -- VUMPS / excitation ansatz private helpers (Chain::vumps_ground_state
+    // and Chain::vumps_excitation_energies, public, above) --
+    //
+    // Dense, row-major complex linear algebra throughout (never ITensor
+    // tensor-network objects) -- see VumpsResult's own comment for why.
+    // Shape conventions (matching pyitensor/vumps.py's and
+    // pyitensor/idmrg_excitations.py's own numpy array conventions
+    // exactly, so this is a line-for-line port, not a fresh derivation):
+    //   AL/AR/AC/B: (D,d_g,D), flattened row-major as (l*d_g+p)*D+r.
+    //   C, and every "environment"/"fixed point" (GL,GR,r,l,...): (D,D),
+    //   flattened row-major as i*D+j.
+    //   A transfer tensor E: (D,D,D,D) axes (l,L,r,R) -- l/r the ket legs,
+    //   L/R the bra legs -- flattened row-major as ((l*D+L)*D+r)*D+R.
+    //   A grouped automaton W: (Dw,Dw,d_g,d_g) axes (chan_l,chan_r,
+    //   phys_in,phys_out), flattened row-major as ((l*Dw+r)*d_g+si)*d_g+so
+    //   -- channel 0="S" (start), channel 1="F" (accumulator), channels
+    //   2.. "pending" (one per reach-1 bond), same convention
+    //   idmrg_channels_at/idmrg_build_row already use.
+    // An (D,D,D,D) transfer tensor E, reshaped (D*D,D*D) with row=(l,L),
+    // col=(r,R), is exactly the row-major flattening above -- i.e. E
+    // itself, reinterpreted with n=D*D, already IS that matrix, needing
+    // no data movement (used directly by vx_apply_transfer/
+    // vx_dominant_right_fixed_point below).
+
+    static std::vector<Cplx>
+    vx_eye(int n)
+        {
+        std::vector<Cplx> I((size_t)n*n,Cplx(0,0));
+        for (int i=0;i<n;++i) I[i*n+i] = Cplx(1,0);
+        return I;
+        }
+
+    static std::vector<Cplx>
+    vx_dagger(std::vector<Cplx> const& A, int m, int n) // A:(m,n) row-major -> (n,m) row-major
+        {
+        std::vector<Cplx> B((size_t)n*m);
+        for (int i=0;i<m;++i)
+        for (int j=0;j<n;++j)
+            B[j*m+i] = std::conj(A[i*n+j]);
+        return B;
+        }
+
+    static std::vector<Cplx>
+    vx_hermitize(std::vector<Cplx> const& A, int n)
+        {
+        std::vector<Cplx> H((size_t)n*n);
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            H[i*n+j] = (A[i*n+j] + std::conj(A[j*n+i]))/2.0;
+        return H;
+        }
+
+    static std::vector<Cplx>
+    vx_matmul(std::vector<Cplx> const& A, int am, int ak,
+              std::vector<Cplx> const& B, int bk, int bn)
+        {
+        if (ak!=bk) Error("Chain::vumps: vx_matmul inner dimension mismatch");
+        std::vector<Cplx> C((size_t)am*bn,Cplx(0,0));
+        for (int i=0;i<am;++i)
+        for (int j=0;j<bn;++j)
+            {
+            Cplx acc(0,0);
+            for (int k=0;k<ak;++k) acc += A[i*ak+k]*B[k*bn+j];
+            C[i*bn+j] = acc;
+            }
+        return C;
+        }
+
+    // T4 (D,D,D,D) reinterpreted as an (n,n) matrix (n=D*D, row=(l,L),
+    // col=(r,R)) applied to a flat length-n vector -- see this section's
+    // own top comment for why no reshaping/data-movement is needed.
+    static std::vector<Cplx>
+    vx_matvec_row(std::vector<Cplx> const& M, int n, std::vector<Cplx> const& v)
+        {
+        std::vector<Cplx> y(n,Cplx(0,0));
+        for (int i=0;i<n;++i)
+            {
+            Cplx acc(0,0);
+            for (int j=0;j<n;++j) acc += M[i*n+j]*v[j];
+            y[i] = acc;
+            }
+        return y;
+        }
+
+    // v^T @ M (v a flat length-n row vector) -- mirror of vx_matvec_row,
+    // contracting M's own FIRST (row) index against v instead.
+    static std::vector<Cplx>
+    vx_vecmat_row(std::vector<Cplx> const& v, std::vector<Cplx> const& M, int n)
+        {
+        std::vector<Cplx> y(n,Cplx(0,0));
+        for (int j=0;j<n;++j)
+            {
+            Cplx acc(0,0);
+            for (int i=0;i<n;++i) acc += v[i]*M[i*n+j];
+            y[j] = acc;
+            }
+        return y;
+        }
+
+    // pyitensor idmrg._apply_transfer(E4,rho) = einsum('lLrR,rR->lL',E4,rho)
+    // -- E's own row-major (l,L,r,R) flattening is exactly the (D*D,D*D)
+    // matrix this contraction needs (row=(l,L), col=(r,R)), so this is a
+    // plain matrix-vector product.
+    static std::vector<Cplx>
+    vx_apply_transfer(std::vector<Cplx> const& E, int D, std::vector<Cplx> const& rho)
+        { return vx_matvec_row(E,D*D,rho); }
+
+    // pyitensor idmrg._apply_transfer_from_left(E4,rho) = einsum('lL,lLrR->rR',rho,E4)
+    // -- the mirror contraction (rho against E's row index instead of column).
+    static std::vector<Cplx>
+    vx_apply_transfer_from_left(std::vector<Cplx> const& E, int D, std::vector<Cplx> const& rho)
+        { return vx_vecmat_row(rho,E,D*D); }
+
+    // T (D,d_g,D) with operator M (M[i,o] convention: M applied to T's
+    // physical leg, M's row=input/T's own physical index, M's col=output)
+    // -- pyitensor idmrg_excitations._apply_op_ket's einsum('io,aic->aoc',M,T).
+    static std::vector<Cplx>
+    vx_apply_op_ket(std::vector<Cplx> const& M, std::vector<Cplx> const& T, int D, int d_g)
+        {
+        std::vector<Cplx> Y((size_t)D*d_g*D,Cplx(0,0));
+        for (int l=0;l<D;++l)
+        for (int o=0;o<d_g;++o)
+        for (int r=0;r<D;++r)
+            {
+            Cplx acc(0,0);
+            for (int i=0;i<d_g;++i) acc += M[i*d_g+o]*T[(l*d_g+i)*D+r];
+            Y[(l*d_g+o)*D+r] = acc;
+            }
+        return Y;
+        }
+
+    // T (D,d_g,D) with its right bond contracted against R (D,D), R's
+    // FIRST index matching T's right bond -- pyitensor idmrg_excitations.
+    // _cap_right's einsum('aoc,cb->aob',T,R).
+    static std::vector<Cplx>
+    vx_cap_right(std::vector<Cplx> const& T, int D, int d_g, std::vector<Cplx> const& R)
+        {
+        std::vector<Cplx> Y((size_t)D*d_g*D,Cplx(0,0));
+        for (int l=0;l<D;++l)
+        for (int o=0;o<d_g;++o)
+        for (int r2=0;r2<D;++r2)
+            {
+            Cplx acc(0,0);
+            for (int r=0;r<D;++r) acc += T[(l*d_g+o)*D+r]*R[r*D+r2];
+            Y[(l*d_g+o)*D+r2] = acc;
+            }
+        return Y;
+        }
+
+    // T's left bond contracted against L (D,D), L's FIRST index matching
+    // T's left bond, L's SECOND index becoming the new left index (NOT
+    // symmetric with vx_cap_right -- see pyitensor idmrg_excitations.
+    // _cap_left's own comment) -- einsum('ba,boc->aoc',L,T).
+    static std::vector<Cplx>
+    vx_cap_left(std::vector<Cplx> const& L, std::vector<Cplx> const& T, int D, int d_g)
+        {
+        std::vector<Cplx> Y((size_t)D*d_g*D,Cplx(0,0));
+        for (int a=0;a<D;++a)
+        for (int o=0;o<d_g;++o)
+        for (int c=0;c<D;++c)
+            {
+            Cplx acc(0,0);
+            for (int b=0;b<D;++b) acc += L[b*D+a]*T[(b*d_g+o)*D+c];
+            Y[(a*d_g+o)*D+c] = acc;
+            }
+        return Y;
+        }
+
+    // E4[l,L,r,R] for an explicit ket/bra pair (D,d_g,D each, not
+    // necessarily the same tensor), with an operator M optionally applied
+    // to the ket's physical leg first -- pyitensor idmrg_excitations.
+    // _op_transfer_matrix: einsum('lpr,LpR->lLrR', ket', conj(bra)).
+    static std::vector<Cplx>
+    vx_op_transfer_matrix(std::vector<Cplx> const& ket, int D, int d_g,
+                           std::vector<Cplx> const& bra,
+                           bool hasM, std::vector<Cplx> const& M)
+        {
+        std::vector<Cplx> ket2 = hasM ? vx_apply_op_ket(M,ket,D,d_g) : ket;
+        std::vector<Cplx> E((size_t)D*D*D*D,Cplx(0,0));
+        for (int l=0;l<D;++l)
+        for (int Lb=0;Lb<D;++Lb)
+        for (int r=0;r<D;++r)
+        for (int R=0;R<D;++R)
+            {
+            Cplx acc(0,0);
+            for (int p=0;p<d_g;++p)
+                acc += ket2[(l*d_g+p)*D+r]*std::conj(bra[(Lb*d_g+p)*D+R]);
+            E[((l*D+Lb)*D+r)*D+R] = acc;
+            }
+        return E;
+        }
+
+    // A (D,D,D,D) tensor of all zeros -- transposed(2,3)->(0,1) NOT needed
+    // anywhere; only used as a convenience for "no operator" transfer
+    // tensors, kept for symmetry with vx_op_transfer_matrix's own hasM=false
+    // path (which never allocates a dummy M at all -- see its own callers).
+
+    // Solve A@x=b (A: n x n row-major, b: length n) via itensor::
+    // zgesv_wrapper (column-major internally -- converts on entry, LAPACK
+    // solves/overwrites b in place with x).
+    static std::vector<Cplx>
+    vx_solve(std::vector<Cplx> const& A_row, int n, std::vector<Cplx> b)
+        {
+        std::vector<Cplx> Acol((size_t)n*n);
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+j*n] = A_row[i*n+j];
+        auto info = zgesv_wrapper(n,1,Acol.data(),b.data());
+        if (info!=0)
+            throw ITError("Chain::vumps: zgesv_wrapper failed (info="+std::to_string(info)+
+                           ") -- the regularized environment linear system is singular "
+                           "(a near-critical/gapless transfer spectrum?)");
+        return b;
+        }
+
+    // Dense (n,n) matrix (n=D*D) representing a linear map action: (D,D)
+    // flat -> (D,D) flat, built one standard basis matrix at a time --
+    // same style pyitensor's own _dense_linear_map uses.
+    static std::vector<Cplx>
+    vx_build_linear_map(int D, std::function<std::vector<Cplx>(std::vector<Cplx> const&)> const& action)
+        {
+        int n = D*D;
+        std::vector<Cplx> Mat((size_t)n*n,Cplx(0,0));
+        std::vector<Cplx> e(n,Cplx(0,0));
+        for (int j=0;j<n;++j)
+            {
+            e[j] = Cplx(1,0);
+            auto col = action(e);
+            for (int i=0;i<n;++i) Mat[i*n+j] = col[i];
+            e[j] = Cplx(0,0);
+            }
+        return Mat;
+        }
+
+    // trace(conj(A) @ X) = sum_{i,k} conj(A[i,k])*X[k,i] -- NOTE: conj(A)
+    // is A's ELEMENTWISE conjugate, not its conjugate transpose (matches
+    // numpy's own `A.conj()` used throughout pyitensor/vumps.py and
+    // pyitensor/idmrg_excitations.py at exactly these call sites).
+    static Cplx
+    vx_trace_conjA_X(std::vector<Cplx> const& A, std::vector<Cplx> const& X, int D)
+        {
+        Cplx s(0,0);
+        for (int i=0;i<D;++i)
+        for (int k=0;k<D;++k)
+            s += std::conj(A[i*D+k])*X[k*D+i];
+        return s;
+        }
+
+    // The regularized (I - phase*T + [projector]) linear solve shared by
+    // pyitensor's own _solve_left_environment/_solve_right_environment
+    // (VUMPS's own GL/GR) AND idmrg_excitations._channel_resolvent
+    // (excitation ansatz's own GBL(k)/GBR(k)) -- see vumps.py's and
+    // idmrg_excitations.py's own docstrings at those functions for the
+    // full derivation of why the projector term is needed exactly when
+    // phase==1 (T's own dominant eigenvalue sits exactly at 1 there) and
+    // must be omitted otherwise (adding it when not needed would corrupt
+    // an otherwise-nonsingular system). from_left selects
+    // apply_transfer_from_left (true) or apply_transfer (false); T here
+    // is always E's own "identity/no-operator" transfer tensor (E_id for
+    // VUMPS's own GL/GR, E_RL/E_LR for the excitation ansatz's GBL/GBR).
+    std::vector<Cplx>
+    vx_regularized_solve(int D, Cplx phase, std::vector<Cplx> const& E, bool from_left,
+                          std::vector<Cplx> const& proj_out, std::vector<Cplx> const& proj_in,
+                          std::vector<Cplx> const& rhs) const
+        {
+        bool add_projector = std::abs(phase-Cplx(1.0,0.0)) < 1e-10;
+        auto action = [&](std::vector<Cplx> const& x)->std::vector<Cplx>
+            {
+            auto Tx = from_left ? vx_apply_transfer_from_left(E,D,x) : vx_apply_transfer(E,D,x);
+            std::vector<Cplx> out((size_t)D*D);
+            for (int k=0;k<D*D;++k) out[k] = x[k] - phase*Tx[k];
+            if (add_projector)
+                {
+                Cplx s = vx_trace_conjA_X(proj_in,x,D);
+                for (int k=0;k<D*D;++k) out[k] += proj_out[k]*s;
+                }
+            return out;
+            };
+        auto Mat = vx_build_linear_map(D,action);
+        return vx_solve(Mat,D*D,rhs);
+        }
+
+    // Eigenvalues/right-eigenvectors of a general (non-Hermitian) complex
+    // n x n matrix via itensor::zgeev_wrapper, returning the dominant
+    // (largest-|eigenvalue|) pair -- C++ analogue of pyitensor idmrg.py's
+    // own eig()+argsort dominant-eigenvalue selection, including the same
+    // near-degeneracy guard (_DEGENERACY_RTOL=1e-9, see
+    // _check_dominant_eigenvalue_nondegenerate's own extensive docstring
+    // for why this threshold, not a looser one, was chosen).
+    static std::pair<Cplx,std::vector<Cplx>>
+    vx_dominant_eig(std::vector<Cplx> const& T_row, int n)
+        {
+        std::vector<Cplx> Acol((size_t)n*n);
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+j*n] = T_row[i*n+j];
+        std::vector<Cplx> evals(n), vl(1,Cplx(0,0)), vr((size_t)n*n,Cplx(0,0));
+        auto info = zgeev_wrapper('N','V',n,Acol.data(),evals.data(),vl.data(),vr.data());
+        if (info!=0)
+            throw ITError("Chain::vumps: zgeev_wrapper failed (info="+std::to_string(info)+")");
+        std::vector<int> order(n);
+        for (int i=0;i<n;++i) order[i]=i;
+        std::sort(order.begin(),order.end(),
+                  [&](int a,int b){ return std::abs(evals[a]) > std::abs(evals[b]); });
+        if (n>1 && std::abs(evals[order[1]]) > (1.0-1e-9)*std::abs(evals[order[0]]))
+            throw ITError("Chain::vumps: the transfer matrix's dominant eigenvalue is "
+                           "(near-)degenerate -- a single dominant fixed point is not "
+                           "well-defined here (see pyitensor/idmrg.py's own "
+                           "_check_dominant_eigenvalue_nondegenerate for the physical "
+                           "reason this can happen, e.g. a gapless/critical chain)");
+        int idx = order[0];
+        std::vector<Cplx> vec(n);
+        for (int i=0;i<n;++i) vec[i] = vr[i + (size_t)idx*n];
+        return {evals[idx], vec};
+        }
+
+    // Dominant RIGHT fixed point rho of transfer tensor E (apply_transfer(E,rho)=eta*rho),
+    // normalized to trace(rho)=1 -- C++ analogue of pyitensor idmrg.py's
+    // _dominant_right_fixed_point. E's own row-major (l,L,r,R) flattening
+    // already IS the (D*D,D*D) matrix vx_dominant_eig needs (see this
+    // section's own top comment) -- no reshaping.
+    static std::pair<std::vector<Cplx>,Cplx>
+    vx_dominant_right_fixed_point(std::vector<Cplx> const& E, int D)
+        {
+        auto [eta,vec] = vx_dominant_eig(E,D*D);
+        Cplx tr(0,0);
+        for (int i=0;i<D;++i) tr += vec[i*D+i];
+        if (std::abs(tr) < 1e-13)
+            throw ITError("Chain::vumps: dominant right fixed point has ~zero trace -- "
+                           "degenerate/ill-defined normalization");
+        for (auto & v : vec) v /= tr;
+        return {vec,eta};
+        }
+
+    // Dominant LEFT fixed point (the right eigenvector of E's own
+    // transpose, as an (n,n) matrix) -- C++ analogue of pyitensor idmrg.py's
+    // _dominant_left_fixed_point.
+    static std::pair<std::vector<Cplx>,Cplx>
+    vx_dominant_left_fixed_point(std::vector<Cplx> const& E, int D)
+        {
+        int n = D*D;
+        std::vector<Cplx> Et((size_t)n*n);
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            Et[i*n+j] = E[j*n+i];
+        auto [eta,vec] = vx_dominant_eig(Et,n);
+        Cplx tr(0,0);
+        for (int i=0;i<D;++i) tr += vec[i*D+i];
+        if (std::abs(tr) < 1e-13)
+            throw ITError("Chain::vumps: dominant left fixed point has ~zero trace -- "
+                           "degenerate/ill-defined normalization");
+        for (auto & v : vec) v /= tr;
+        return {vec,eta};
+        }
+
+    // Mixed-transfer fixed points (r,l), normalized so trace(l@r)=1 --
+    // C++ analogue of pyitensor idmrg_excitations._mixed_fixed_points,
+    // including its own |eta|~=1 convergence sanity check.
+    static std::pair<std::vector<Cplx>,std::vector<Cplx>>
+    vx_mixed_fixed_points(std::vector<Cplx> const& E, int D)
+        {
+        auto [r,eta_r] = vx_dominant_right_fixed_point(E,D);
+        auto [l,eta_l] = vx_dominant_left_fixed_point(E,D);
+        for (Cplx eta : {eta_r,eta_l})
+            if (std::abs(std::abs(eta)-1.0) > 1e-6)
+                throw ITError("Chain::vumps: the mixed transfer tensor's dominant "
+                               "eigenvalue magnitude is not close to 1 -- the VUMPS "
+                               "ground state this excitation environment was built "
+                               "from is not well converged");
+        Cplx norm(0,0);
+        for (int i=0;i<D;++i)
+        for (int k=0;k<D;++k)
+            norm += l[i*D+k]*r[k*D+i]; // trace(l@r)
+        std::vector<Cplx> l2 = l;
+        for (auto & v : l2) v /= norm;
+        return {r,l2};
+        }
+
+    // Economy ("thin") SVD A=U*diag(s)*Vt (A: m x n row-major, k=min(m,n),
+    // U: m x k, Vt: k x n, both row-major on return) via itensor::
+    // zgesvd_wrapper('S',...).
+    static std::pair<std::vector<Cplx>,std::vector<Cplx>>
+    vx_economy_svd(std::vector<Cplx> const& A_row, int m, int n)
+        {
+        int k = std::min(m,n);
+        std::vector<Cplx> Acol((size_t)m*n);
+        for (int i=0;i<m;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+j*m] = A_row[i*n+j];
+        std::vector<LAPACK_REAL> s(k);
+        std::vector<Cplx> Ucol((size_t)m*k), Vtcol((size_t)k*n);
+        char jobz = 'S';
+        LAPACK_INT mm=m, nn=n, info=0;
+        zgesvd_wrapper(&jobz,&mm,&nn,Acol.data(),s.data(),Ucol.data(),Vtcol.data(),&info);
+        if (info!=0)
+            throw ITError("Chain::vumps: zgesvd_wrapper failed (info="+std::to_string(info)+")");
+        std::vector<Cplx> U_row((size_t)m*k), Vt_row((size_t)k*n);
+        for (int i=0;i<m;++i) for (int j=0;j<k;++j) U_row[i*k+j] = Ucol[i+(size_t)j*m];
+        for (int i=0;i<k;++i) for (int j=0;j<n;++j) Vt_row[i*n+j] = Vtcol[i+(size_t)j*k];
+        return {U_row,Vt_row};
+        }
+
+    // Full SVD's U factor only (m x m, row-major) via itensor::
+    // zgesvd_wrapper('A',...) -- requires m>=n (only ever called on a
+    // (D*d_g,D) matrix with d_g>=1, so this always holds); used only to
+    // extract a null-space isometry (vumps_null_space_left below) from
+    // U's own columns beyond the first n.
+    static std::vector<Cplx>
+    vx_full_svd_U(std::vector<Cplx> const& A_row, int m, int n)
+        {
+        if (m<n) Error("Chain::vumps: vx_full_svd_U requires m>=n (internal precondition)");
+        std::vector<Cplx> Acol((size_t)m*n);
+        for (int i=0;i<m;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+j*m] = A_row[i*n+j];
+        int l = std::min(m,n);
+        std::vector<LAPACK_REAL> s(l);
+        std::vector<Cplx> Ucol((size_t)m*m), Vtcol((size_t)l*n);
+        char jobz = 'A';
+        LAPACK_INT mm=m, nn=n, info=0;
+        zgesvd_wrapper(&jobz,&mm,&nn,Acol.data(),s.data(),Ucol.data(),Vtcol.data(),&info);
+        if (info!=0)
+            throw ITError("Chain::vumps: zgesvd_wrapper (full U) failed (info="+
+                           std::to_string(info)+")");
+        std::vector<Cplx> U_row((size_t)m*m);
+        for (int i=0;i<m;++i) for (int j=0;j<m;++j) U_row[i*m+j] = Ucol[i+(size_t)j*m];
+        return U_row;
+        }
+
+    // Lowest eigenpair of a Hermitian n x n matrix (row-major) via
+    // itensor::zheev_wrapper -- used in place of pyitensor's own Lanczos
+    // (dmrg._lanczos_ground_state) for VUMPS's own H_AC/H_C solves: D and
+    // d_g are always small enough here (n_uc<=2, reach<=1 bonds) that
+    // exact dense diagonalization every outer iteration is both simpler
+    // and at least as robust as a truncated Krylov solve (no separate
+    // Krylov-dimension knob to tune), at the cost of O(n^3) instead of
+    // O(n^2) per outer iteration -- negligible at the bond dimensions
+    // this port targets.
+    static std::pair<double,std::vector<Cplx>>
+    vx_hermitian_ground_state(std::vector<Cplx> const& H_row, int n)
+        {
+        std::vector<Cplx> Acol((size_t)n*n);
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+j*n] = H_row[i*n+j];
+        std::vector<LAPACK_REAL> d(n);
+        auto info = zheev_wrapper(n,Acol.data(),d.data());
+        if (info!=0)
+            throw ITError("Chain::vumps: zheev_wrapper failed (info="+std::to_string(info)+")");
+        std::vector<Cplx> evec(n);
+        for (int i=0;i<n;++i) evec[i] = Acol[i]; // column 0 (ascending eigenvalues)
+        return {d[0], evec};
+        }
+
+    // All eigenvalues (ascending) of a Hermitian n x n matrix.
+    static std::vector<double>
+    vx_hermitian_eigvals(std::vector<Cplx> const& H_row, int n)
+        {
+        std::vector<Cplx> Acol((size_t)n*n);
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+j*n] = H_row[i*n+j];
+        std::vector<LAPACK_REAL> d(n);
+        auto info = zheev_wrapper(n,Acol.data(),d.data());
+        if (info!=0)
+            throw ITError("Chain::vumps: zheev_wrapper failed (info="+std::to_string(info)+")");
+        return d;
+        }
+
+    // Modified Gram-Schmidt orthonormalization of A's own columns (A: m x
+    // n row-major, m>=n, assumed full column rank) -- used only to build
+    // an exactly isometric VUMPS initial guess. This is a DELIBERATE
+    // simplification relative to pyitensor/vumps.py's own
+    // _random_initial_state/_grow_initial_state (which reuse idmrg.py's
+    // fixed-point-based _canonicalize_periodic): any exactly isometric
+    // starting AL0/AR0 is an equally valid VUMPS starting point -- the
+    // VUMPS iteration itself (not the initialization method) is what
+    // drives (AL,AR,C) to a self-consistent, Hamiltonian-optimal fixed
+    // point (see pyitensor/vumps.py's own module docstring, step 5, and
+    // its "crude, mutually-INconsistent starting point" comment on
+    // _random_initial_state itself) -- so this port does not need to
+    // reproduce _canonicalize_periodic's own considerably more involved
+    // two-sided fixed-point/PSD-square-root/SVD-truncation machinery
+    // (whose only role, for VUMPS init, would be to ALSO produce an
+    // isometric tensor -- ordinary Gram-Schmidt already guarantees that,
+    // exactly, without needing any of the transfer-matrix fixed-point
+    // machinery _canonicalize_periodic uses for a different purpose --
+    // general-n_uc apply_mpo/imps_sum bond truncation, not relevant here
+    // since VUMPS builds AL/AR from scratch at the target D directly).
+    static std::vector<Cplx>
+    vx_gram_schmidt_columns(std::vector<Cplx> A, int m, int n)
+        {
+        for (int j=0;j<n;++j)
+            {
+            for (int p=0;p<j;++p)
+                {
+                Cplx dot(0,0);
+                for (int i=0;i<m;++i) dot += std::conj(A[i*n+p])*A[i*n+j];
+                for (int i=0;i<m;++i) A[i*n+j] -= dot*A[i*n+p];
+                }
+            double nrm=0.0;
+            for (int i=0;i<m;++i) nrm += std::norm(A[i*n+j]);
+            nrm = std::sqrt(nrm);
+            if (nrm < 1e-12)
+                throw ITError("Chain::vumps: a random initial tensor's column became "
+                               "~0 under Gram-Schmidt (extremely unlikely for a genuine "
+                               "random start) -- retry");
+            for (int i=0;i<m;++i) A[i*n+j] /= nrm;
+            }
+        return A;
+        }
+
+    // (D,d_g,D) with its (left,right) bond legs swapped -- pyitensor's
+    // own transpose(A,(2,1,0)) trick (see _random_initial_state's own
+    // comment for why this turns a left-canonicalization into a
+    // right-canonical tensor once swapped back).
+    static std::vector<Cplx>
+    vx_transpose_lr(std::vector<Cplx> const& A, int D, int d_g)
+        {
+        std::vector<Cplx> Y((size_t)D*d_g*D);
+        for (int l=0;l<D;++l)
+        for (int p=0;p<d_g;++p)
+        for (int r=0;r<D;++r)
+            Y[(r*d_g+p)*D+l] = A[(l*d_g+p)*D+r];
+        return Y;
+        }
+
+    // A raw (D,d_g,D) random tensor, optionally seeded by embedding a
+    // smaller (D_old,d_g,D_old) already-good tensor into its top-left
+    // block plus small noise everywhere (including the embedded block) --
+    // pyitensor's own _random_raw_tensor.
+    static std::vector<Cplx>
+    vx_random_raw_tensor(int D, int d_g, std::mt19937_64& rng,
+                          std::vector<Cplx> const* seed=nullptr, int D_old=0,
+                          double noise=0.05)
+        {
+        std::normal_distribution<double> nd(0.0,1.0);
+        std::vector<Cplx> A0((size_t)D*d_g*D);
+        for (auto & v : A0) v = noise*Cplx(nd(rng),nd(rng));
+        if (seed)
+            for (int l=0;l<D_old;++l)
+            for (int p=0;p<d_g;++p)
+            for (int r=0;r<D_old;++r)
+                A0[(l*d_g+p)*D+r] += (*seed)[(l*d_g+p)*D_old+r];
+        return A0;
+        }
+
+    // Fresh (AL0,AR0,C0=I) from pure random noise -- pyitensor's own
+    // _random_initial_state.
+    static VumpsInit
+    vumps_random_init(int D, int d_g, std::mt19937_64& rng)
+        {
+        auto A0 = vx_random_raw_tensor(D,d_g,rng);
+        auto AL0 = vx_gram_schmidt_columns(A0,D*d_g,D);
+        auto A0_rev = vx_transpose_lr(A0,D,d_g);
+        auto AL0_rev = vx_gram_schmidt_columns(A0_rev,D*d_g,D);
+        auto AR0 = vx_transpose_lr(AL0_rev,D,d_g);
+        VumpsInit out; out.AL=AL0; out.AR=AR0; out.C=vx_eye(D);
+        return out;
+        }
+
+    // (AL0,AR0,C0=I) at bond dimension D, warm-started by embedding a
+    // smaller, already-converged D_old<D solution -- pyitensor's own
+    // _grow_initial_state. See vumps_ground_state's own docstring for why
+    // this D-ramp warm start matters (single-shot VUMPS from a purely
+    // random D>1 start is documented, in pyitensor/vumps.py, to reliably
+    // land at a worse-than-smaller-D energy).
+    static VumpsInit
+    vumps_grow_init(int D, int d_g, int D_old,
+                     std::vector<Cplx> const& AL_old, std::vector<Cplx> const& AR_old,
+                     std::mt19937_64& rng)
+        {
+        auto A0 = vx_random_raw_tensor(D,d_g,rng,&AL_old,D_old);
+        auto AL0 = vx_gram_schmidt_columns(A0,D*d_g,D);
+        auto AR_old_rev = vx_transpose_lr(AR_old,D_old,d_g);
+        auto A0rev = vx_random_raw_tensor(D,d_g,rng,&AR_old_rev,D_old);
+        auto AL0_rev = vx_gram_schmidt_columns(A0rev,D*d_g,D);
+        auto AR0 = vx_transpose_lr(AL0_rev,D,d_g);
+        VumpsInit out; out.AL=AL0; out.AR=AR0; out.C=vx_eye(D);
+        return out;
+        }
+
+    // AC = AL@C -- einsum('lpm,mr->lpr',AL,C).
+    static std::vector<Cplx>
+    vumps_compose_AL_C(std::vector<Cplx> const& AL, std::vector<Cplx> const& C, int D, int d_g)
+        {
+        std::vector<Cplx> AC((size_t)D*d_g*D,Cplx(0,0));
+        for (int l=0;l<D;++l)
+        for (int p=0;p<d_g;++p)
+        for (int r=0;r<D;++r)
+            {
+            Cplx acc(0,0);
+            for (int m=0;m<D;++m) acc += AL[(l*d_g+p)*D+m]*C[m*D+r];
+            AC[(l*d_g+p)*D+r] = acc;
+            }
+        return AC;
+        }
+
+    // Groups n_uc<=2 per-sublattice dense automaton rows (idmrg_build_row's
+    // own IdmrgAutomatonRow, S=0/F=1/pending=2.. channel convention) into
+    // one single-supersite dense automaton W (Dw,Dw,d_g,d_g) -- C++
+    // analogue of pyitensor/vumps.py's own _group_automaton
+    // (np.einsum('Labm,mcdR->LacbdR',W,Wp) then reshape merging (a,c) and
+    // (b,d)). row[p].flat's own (left,right,phys_in,phys_out) layout
+    // differs from W's own (chan_l,chan_r,phys_in,phys_out) layout used
+    // here -- both are internal-only conventions, chosen independently
+    // for convenience; only W's own layout (defined by this function) is
+    // used by every other vumps_*/vx_* helper below.
+    void
+    vumps_group_automaton(std::vector<IdmrgAutomatonRow> const& rows, int n_uc,
+                           int& Dw, int& d_g, std::vector<Cplx>& W) const
+        {
+        if (n_uc==1)
+            {
+            Dw = rows[0].left_n; d_g = rows[0].d;
+            if (rows[0].right_n != Dw)
+                Error("Chain::vumps_ground_state: internal error -- n_uc=1 automaton's "
+                      "own left/right channel counts differ");
+            W.assign((size_t)Dw*Dw*d_g*d_g,Cplx(0,0));
+            for (int l=0;l<Dw;++l)
+            for (int r=0;r<Dw;++r)
+            for (int si=0;si<d_g;++si)
+            for (int so=0;so<d_g;++so)
+                W[((l*Dw+r)*d_g+si)*d_g+so] =
+                    rows[0].flat[((size_t)l*rows[0].right_n+r)*d_g*d_g + si*d_g+so];
+            return;
+            }
+        // n_uc==2
+        int Dleft = rows[0].left_n, Dmid = rows[0].right_n, Dright = rows[1].right_n;
+        if (rows[1].left_n != Dmid || Dleft != Dright)
+            Error("Chain::vumps_ground_state: internal error -- grouped automaton's "
+                  "wraparound channel counts are inconsistent");
+        Dw = Dleft;
+        int d0 = rows[0].d, d1 = rows[1].d;
+        d_g = d0*d1;
+        W.assign((size_t)Dw*Dw*d_g*d_g,Cplx(0,0));
+        for (int l=0;l<Dw;++l)
+        for (int r=0;r<Dw;++r)
+        for (int si0=0;si0<d0;++si0)
+        for (int so0=0;so0<d0;++so0)
+        for (int si1=0;si1<d1;++si1)
+        for (int so1=0;so1<d1;++so1)
+            {
+            Cplx acc(0,0);
+            for (int m=0;m<Dmid;++m)
+                acc += rows[0].flat[((size_t)l*Dmid+m)*d0*d0+si0*d0+so0]
+                     * rows[1].flat[((size_t)m*Dw+r)*d1*d1+si1*d1+so1];
+            int pi = si0*d1+si1, po = so0*d1+so1;
+            W[((l*Dw+r)*d_g+pi)*d_g+po] = acc;
+            }
+        }
+
+    // Raises ITError if a grouped automaton has any nonzero transition
+    // directly connecting two distinct pending channels -- the signature
+    // of a bond with reach>1 supersite -- C++ analogue of pyitensor
+    // idmrg_excitations._check_reach_one.
+    static void
+    vumps_check_reach_one(std::vector<Cplx> const& W, int Dw, int d_g)
+        {
+        for (int p=2;p<Dw;++p)
+        for (int q=2;q<Dw;++q)
+            for (int si=0;si<d_g;++si)
+            for (int so=0;so<d_g;++so)
+                if (std::abs(W[((p*Dw+q)*d_g+si)*d_g+so]) > 1e-12)
+                    throw ITError("Chain::vumps_ground_state: a Hamiltonian term with "
+                                   "reach>1 unit cell (a bond spanning more than 2 adjacent "
+                                   "supersites) was detected -- VUMPS/the tangent-space "
+                                   "excitation ansatz implemented here only support "
+                                   "nearest-adjacent-unit-cell (reach<=1) couplings");
+        }
+
+    // W[S,:,:,F] -- the direct onsite Hamiltonian content, all-zero if
+    // there is none -- C++ analogue of pyitensor idmrg_excitations._onsite_matrix.
+    static std::vector<Cplx>
+    vumps_onsite_matrix(std::vector<Cplx> const& W, int Dw, int d_g)
+        {
+        std::vector<Cplx> h1((size_t)d_g*d_g);
+        for (int si=0;si<d_g;++si)
+        for (int so=0;so<d_g;++so)
+            h1[si*d_g+so] = W[((0*Dw+1)*d_g+si)*d_g+so];
+        return h1;
+        }
+
+    // [(mat_a=W[S,:,:,p], mat_b=W[p,:,:,F])] for every pending channel p
+    // -- C++ analogue of pyitensor idmrg_excitations._pending_channels.
+    static std::vector<PendingChan>
+    vumps_pending_channels(std::vector<Cplx> const& W, int Dw, int d_g)
+        {
+        std::vector<PendingChan> out;
+        for (int p=2;p<Dw;++p)
+            {
+            PendingChan pc;
+            pc.mat_a.assign((size_t)d_g*d_g,Cplx(0,0));
+            pc.mat_b.assign((size_t)d_g*d_g,Cplx(0,0));
+            for (int si=0;si<d_g;++si)
+            for (int so=0;so<d_g;++so)
+                {
+                pc.mat_a[si*d_g+so] = W[((0*Dw+p)*d_g+si)*d_g+so];
+                pc.mat_b[si*d_g+so] = W[((p*Dw+1)*d_g+si)*d_g+so];
+                }
+            out.push_back(std::move(pc));
+            }
+        return out;
+        }
+
+    // (e, source_l) -- C++ analogue of pyitensor/vumps.py's own
+    // _energy_density_and_source_from_left, including the required
+    // conj(r_AL) closing convention that function's own extensive
+    // docstring derives and documents as load-bearing, not optional (see
+    // that docstring for the full derivation and the D>1 bug it fixed).
+    double
+    vumps_energy_source_from_left(std::vector<Cplx> const& AL, int D, int d_g,
+                                   std::vector<Cplx> const& h1,
+                                   std::vector<PendingChan> const& pending,
+                                   std::vector<Cplx> const& r_AL,
+                                   std::vector<Cplx>& source_l) const
+        {
+        std::vector<Cplx> I = vx_eye(D);
+        auto E_op = [&](std::vector<Cplx> const& M)
+            { return vx_op_transfer_matrix(AL,D,d_g,AL,true,M); };
+        source_l = vx_apply_transfer_from_left(E_op(h1),D,I);
+        for (auto const& pc : pending)
+            {
+            auto inner = vx_apply_transfer_from_left(E_op(pc.mat_a),D,I);
+            auto term = vx_apply_transfer_from_left(E_op(pc.mat_b),D,inner);
+            for (int k=0;k<D*D;++k) source_l[k] += term[k];
+            }
+        return vx_trace_conjA_X(r_AL,source_l,D).real();
+        }
+
+    // Mirror of vumps_energy_source_from_left -- C++ analogue of
+    // pyitensor/vumps.py's own _energy_density_and_source_from_right
+    // (note the mat_a/mat_b order swap relative to the left version,
+    // exactly matching that function's own term order).
+    double
+    vumps_energy_source_from_right(std::vector<Cplx> const& AR, int D, int d_g,
+                                    std::vector<Cplx> const& h1,
+                                    std::vector<PendingChan> const& pending,
+                                    std::vector<Cplx> const& l_AR,
+                                    std::vector<Cplx>& source_r) const
+        {
+        std::vector<Cplx> I = vx_eye(D);
+        auto E_op = [&](std::vector<Cplx> const& M)
+            { return vx_op_transfer_matrix(AR,D,d_g,AR,true,M); };
+        source_r = vx_apply_transfer(E_op(h1),D,I);
+        for (auto const& pc : pending)
+            {
+            auto inner = vx_apply_transfer(E_op(pc.mat_b),D,I);
+            auto term = vx_apply_transfer(E_op(pc.mat_a),D,inner);
+            for (int k=0;k<D*D;++k) source_r[k] += term[k];
+            }
+        return vx_trace_conjA_X(l_AR,source_r,D).real();
+        }
+
+    // GL -- C++ analogue of pyitensor/vumps.py's own _solve_left_environment.
+    std::vector<Cplx>
+    vumps_solve_left_environment(std::vector<Cplx> const& AL, int D, int d_g,
+                                  std::vector<Cplx> const& r_AL,
+                                  std::vector<Cplx> const& source_l, double e) const
+        {
+        auto E_id = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
+        std::vector<Cplx> I = vx_eye(D);
+        std::vector<Cplx> rhs((size_t)D*D);
+        for (int k=0;k<D*D;++k) rhs[k] = source_l[k] - e*I[k];
+        return vx_regularized_solve(D,Cplx(1.0,0.0),E_id,/*from_left=*/true,I,r_AL,rhs);
+        }
+
+    // GR -- mirror of vumps_solve_left_environment, C++ analogue of
+    // pyitensor/vumps.py's own _solve_right_environment.
+    std::vector<Cplx>
+    vumps_solve_right_environment(std::vector<Cplx> const& AR, int D, int d_g,
+                                   std::vector<Cplx> const& l_AR,
+                                   std::vector<Cplx> const& source_r, double e) const
+        {
+        auto E_id = vx_op_transfer_matrix(AR,D,d_g,AR,false,{});
+        std::vector<Cplx> I = vx_eye(D);
+        std::vector<Cplx> rhs((size_t)D*D);
+        for (int k=0;k<D*D;++k) rhs[k] = source_r[k] - e*I[k];
+        return vx_regularized_solve(D,Cplx(1.0,0.0),E_id,/*from_left=*/false,I,l_AR,rhs);
+        }
+
+    // [(mat_a,mat_b,Lvec_a,Rvec_b)] -- one per pending channel, built once
+    // per outer VUMPS iteration and reused across every H_AC/H_C matvec --
+    // C++ analogue of pyitensor/vumps.py's own _precompute_bond_environments.
+    std::vector<PendingBondEnv>
+    vumps_precompute_bond_environments(std::vector<Cplx> const& AL, std::vector<Cplx> const& AR,
+                                        int D, int d_g,
+                                        std::vector<PendingChan> const& pending) const
+        {
+        std::vector<Cplx> I = vx_eye(D);
+        std::vector<PendingBondEnv> out;
+        out.reserve(pending.size());
+        for (auto const& pc : pending)
+            {
+            PendingBondEnv be;
+            be.mat_a = pc.mat_a; be.mat_b = pc.mat_b;
+            be.Lvec_a = vx_apply_transfer_from_left(
+                vx_op_transfer_matrix(AL,D,d_g,AL,true,pc.mat_a),D,I);
+            be.Rvec_b = vx_apply_transfer(
+                vx_op_transfer_matrix(AR,D,d_g,AR,true,pc.mat_b),D,I);
+            out.push_back(std::move(be));
+            }
+        return out;
+        }
+
+    // H_AC[X] -- C++ analogue of pyitensor/vumps.py's own _h_ac_action.
+    std::vector<Cplx>
+    vumps_h_ac_action(std::vector<Cplx> const& X, int D, int d_g,
+                       std::vector<Cplx> const& GL, std::vector<Cplx> const& GR,
+                       std::vector<PendingBondEnv> const& bond_envs,
+                       std::vector<Cplx> const& h1) const
+        {
+        auto Y = vx_apply_op_ket(h1,X,D,d_g);
+        auto t1 = vx_cap_right(X,D,d_g,GR);
+        for (size_t i=0;i<Y.size();++i) Y[i]+=t1[i];
+        auto t2 = vx_cap_left(GL,X,D,d_g);
+        for (size_t i=0;i<Y.size();++i) Y[i]+=t2[i];
+        for (auto const& be : bond_envs)
+            {
+            auto t3 = vx_cap_right(vx_apply_op_ket(be.mat_a,X,D,d_g),D,d_g,be.Rvec_b);
+            for (size_t i=0;i<Y.size();++i) Y[i]+=t3[i];
+            auto t4 = vx_cap_left(be.Lvec_a,vx_apply_op_ket(be.mat_b,X,D,d_g),D,d_g);
+            for (size_t i=0;i<Y.size();++i) Y[i]+=t4[i];
+            }
+        return Y;
+        }
+
+    // H_C[C] -- C++ analogue of pyitensor/vumps.py's own _h_c_action (C
+    // treated as a (D,1,D) tensor, i.e. vx_cap_right/vx_cap_left called
+    // with d_g=1 -- C's own flat (D,D) row-major layout already matches
+    // that shape exactly, no reshaping needed).
+    std::vector<Cplx>
+    vumps_h_c_action(std::vector<Cplx> const& C, int D,
+                      std::vector<Cplx> const& GL, std::vector<Cplx> const& GR,
+                      std::vector<PendingBondEnv> const& bond_envs) const
+        {
+        auto Y = vx_cap_right(C,D,1,GR);
+        auto t1 = vx_cap_left(GL,C,D,1);
+        for (size_t i=0;i<Y.size();++i) Y[i]+=t1[i];
+        for (auto const& be : bond_envs)
+            {
+            auto t2 = vx_cap_right(vx_cap_left(be.Lvec_a,C,D,1),D,1,be.Rvec_b);
+            for (size_t i=0;i<Y.size();++i) Y[i]+=t2[i];
+            }
+        return Y;
+        }
+
+    // Dense (D*d_g*D)x(D*d_g*D) matrix representing H_AC, built one basis
+    // vector at a time.
+    std::vector<Cplx>
+    vumps_build_h_ac_dense(int D, int d_g, std::vector<Cplx> const& GL, std::vector<Cplx> const& GR,
+                            std::vector<PendingBondEnv> const& bond_envs,
+                            std::vector<Cplx> const& h1) const
+        {
+        int n = D*d_g*D;
+        std::vector<Cplx> H((size_t)n*n,Cplx(0,0));
+        std::vector<Cplx> e(n,Cplx(0,0));
+        for (int j=0;j<n;++j)
+            {
+            e[j]=Cplx(1,0);
+            auto col = vumps_h_ac_action(e,D,d_g,GL,GR,bond_envs,h1);
+            for (int i=0;i<n;++i) H[i*n+j]=col[i];
+            e[j]=Cplx(0,0);
+            }
+        return H;
+        }
+
+    // Dense (D*D)x(D*D) matrix representing H_C.
+    std::vector<Cplx>
+    vumps_build_h_c_dense(int D, std::vector<Cplx> const& GL, std::vector<Cplx> const& GR,
+                           std::vector<PendingBondEnv> const& bond_envs) const
+        {
+        int n = D*D;
+        std::vector<Cplx> H((size_t)n*n,Cplx(0,0));
+        std::vector<Cplx> e(n,Cplx(0,0));
+        for (int j=0;j<n;++j)
+            {
+            e[j]=Cplx(1,0);
+            auto col = vumps_h_c_action(e,D,GL,GR,bond_envs);
+            for (int i=0;i<n;++i) H[i*n+j]=col[i];
+            e[j]=Cplx(0,0);
+            }
+        return H;
+        }
+
+    // New (AL,AR) from the just-solved (AC,C) via the orthogonal-
+    // Procrustes least-squares update -- C++ analogue of pyitensor/
+    // vumps.py's own _update_AL_AR. Uses the identity that, in ECONOMY
+    // SVD form (A=U*diag(s)*Vt, k=min(m,n)), the nearest isometry to A
+    // (in either the "left" or "right" scipy.linalg.polar sense) is
+    // always U@Vt -- derived directly (see this file's own development
+    // notes): scipy's polar(A,side) factors A=W*P ('right', W: m x n
+    // isometry columns when m>=n) or A=P*W ('left', W: m x n isometry
+    // rows when m<=n); in both cases W=U_econ@Vt_econ, only P differs
+    // (V*diag(s)*Vt vs U*diag(s)*Ut) -- and _update_AL_AR only ever needs
+    // W, never P, so both calls reduce to the same "economy SVD then
+    // U@Vt" recipe regardless of which `side` pyitensor's own call used.
+    static std::pair<std::vector<Cplx>,std::vector<Cplx>>
+    vumps_update_AL_AR(std::vector<Cplx> const& AC, int D, int d_g, std::vector<Cplx> const& C)
+        {
+        // AC's own (l*d_g+p)*D+r row-major flat layout already IS AC
+        // reshaped (D*d_g,D) row-major (row=(l,p), col=r) -- no data
+        // movement needed for this first reshape.
+        auto [U1,Vt1] = vx_economy_svd(AC,D*d_g,D);
+        auto U_l = vx_matmul(U1,D*d_g,D,Vt1,D,D); // (D*d_g,D)
+        auto [Uc,Vtc] = vx_economy_svd(C,D,D);
+        auto U_c = vx_matmul(Uc,D,D,Vtc,D,D); // (D,D)
+        auto U_c_dag = vx_dagger(U_c,D,D);
+        auto AL_new = vx_matmul(U_l,D*d_g,D,U_c_dag,D,D); // (D*d_g,D) == (D,d_g,D) flat
+
+        // AC's own flat layout, reinterpreted with row=l, col=(p*D+r), IS
+        // exactly AC reshaped (D,d_g*D) row-major -- again no data movement.
+        auto [U2,Vt2] = vx_economy_svd(AC,D,d_g*D);
+        auto U_r = vx_matmul(U2,D,D,Vt2,D,d_g*D); // (D,d_g*D)
+        auto AR_new = vx_matmul(U_c_dag,D,D,U_r,D,d_g*D); // (D,d_g*D) == (D,d_g,D) flat
+        return {AL_new,AR_new};
+        }
+
+    // ||AC-AL@C||+||AC-C@AR||, normalized by ||AC|| -- C++ analogue of
+    // pyitensor/vumps.py's own _gauge_mismatch (called with the SAME
+    // (AL,AR) that were held fixed while solving for this AC/C -- see
+    // that function's own docstring for why, not the freshly-refit
+    // vumps_update_AL_AR(AC,C) output).
+    static double
+    vumps_gauge_mismatch(std::vector<Cplx> const& AC, std::vector<Cplx> const& C,
+                          std::vector<Cplx> const& AL, std::vector<Cplx> const& AR,
+                          int D, int d_g)
+        {
+        auto lhs1 = vumps_compose_AL_C(AL,C,D,d_g);
+        std::vector<Cplx> lhs2((size_t)D*d_g*D,Cplx(0,0));
+        for (int l=0;l<D;++l)
+        for (int p=0;p<d_g;++p)
+        for (int r=0;r<D;++r)
+            {
+            Cplx acc(0,0);
+            for (int m=0;m<D;++m) acc += C[l*D+m]*AR[(m*d_g+p)*D+r];
+            lhs2[(l*d_g+p)*D+r] = acc;
+            }
+        double norm_ac=0.0;
+        for (auto const& v : AC) norm_ac += std::norm(v);
+        norm_ac = std::sqrt(norm_ac);
+        if (norm_ac==0.0) return 0.0;
+        double d1=0.0, d2=0.0;
+        for (size_t i=0;i<AC.size();++i)
+            {
+            d1 += std::norm(AC[i]-lhs1[i]);
+            d2 += std::norm(AC[i]-lhs2[i]);
+            }
+        return (std::sqrt(d1)+std::sqrt(d2))/norm_ac;
+        }
+
+    // GL/GR/e_cell/bond_envs from the current (AL,AR) -- one full
+    // per-iteration environment build -- C++ analogue of pyitensor/
+    // vumps.py's own _environments.
+    VumpsEnv
+    vumps_build_environments(std::vector<Cplx> const& AL, std::vector<Cplx> const& AR,
+                              int D, int d_g, std::vector<Cplx> const& h1,
+                              std::vector<PendingChan> const& pending) const
+        {
+        auto E_AL = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
+        auto [r_AL_raw,eta_r] = vx_dominant_right_fixed_point(E_AL,D);
+        (void)eta_r;
+        auto r_AL = vx_hermitize(r_AL_raw,D);
+
+        auto E_AR = vx_op_transfer_matrix(AR,D,d_g,AR,false,{});
+        auto [l_AR_raw,eta_l] = vx_dominant_left_fixed_point(E_AR,D);
+        (void)eta_l;
+        auto l_AR = vx_hermitize(l_AR_raw,D);
+
+        std::vector<Cplx> source_l, source_r;
+        double e_L = vumps_energy_source_from_left(AL,D,d_g,h1,pending,r_AL,source_l);
+        double e_R = vumps_energy_source_from_right(AR,D,d_g,h1,pending,l_AR,source_r);
+
+        VumpsEnv env;
+        env.GL = vumps_solve_left_environment(AL,D,d_g,r_AL,source_l,e_L);
+        env.GR = vumps_solve_right_environment(AR,D,d_g,l_AR,source_r,e_R);
+        env.bond_envs = vumps_precompute_bond_environments(AL,AR,D,d_g,pending);
+        env.e_cell = 0.5*(e_L+e_R);
+        return env;
+        }
+
+    // One full VUMPS attempt (random or warm-started start) run to
+    // convergence or maxiter -- C++ analogue of pyitensor/vumps.py's own
+    // _vumps_single_run.
+    VumpsRunResult
+    vumps_single_run(int D, int d_g, std::vector<Cplx> const& h1,
+                      std::vector<PendingChan> const& pending,
+                      double tol, int maxiter, VumpsInit const* init,
+                      std::mt19937_64& rng) const
+        {
+        VumpsInit start = init ? *init : vumps_random_init(D,d_g,rng);
+        auto AL = start.AL, AR = start.AR, C = start.C;
+        auto AC = vumps_compose_AL_C(AL,C,D,d_g);
+
+        bool converged=false; double mismatch=0.0; int it=0;
+        VumpsEnv env;
+        for (it=0; it<maxiter; ++it)
+            {
+            env = vumps_build_environments(AL,AR,D,d_g,h1,pending);
+
+            auto HAC = vumps_build_h_ac_dense(D,d_g,env.GL,env.GR,env.bond_envs,h1);
+            auto [eAC,AC_new] = vx_hermitian_ground_state(HAC,D*d_g*D);
+            (void)eAC;
+            auto HC = vumps_build_h_c_dense(D,env.GL,env.GR,env.bond_envs);
+            auto [eC,C_new] = vx_hermitian_ground_state(HC,D*D);
+            (void)eC;
+
+            mismatch = vumps_gauge_mismatch(AC_new,C_new,AL,AR,D,d_g);
+
+            AC = AC_new; C = C_new;
+            auto [AL_new,AR_new] = vumps_update_AL_AR(AC,D,d_g,C);
+            AL = AL_new; AR = AR_new;
+            if (mismatch < tol) { converged=true; break; }
+            }
+
+        // GL/GR/e_cell above are one step stale (built from this
+        // iteration's own INPUT AL/AR) -- refresh once more against the
+        // FINAL AL/AR before returning, exactly like pyitensor's own
+        // _vumps_single_run does at its own return point.
+        env = vumps_build_environments(AL,AR,D,d_g,h1,pending);
+
+        VumpsRunResult out;
+        out.AL=AL; out.AR=AR; out.C=C; out.GL=env.GL; out.GR=env.GR;
+        out.e_cell=env.e_cell; out.converged=converged;
+        out.niter=std::min(it+1,maxiter); out.mismatch=mismatch;
+        return out;
+        }
+
+    // Everything the excitation ansatz needs that does not depend on
+    // momentum k -- built once per converged vumps_ground_state() and
+    // cached (have_vumps_exc_env_) until the next one -- C++ analogue of
+    // pyitensor/idmrg_excitations.py's own build_excitation_environment/
+    // ExcitationEnvironment.
+    void
+    vumps_build_excitation_environment()
+        {
+        int D=vumps_D_, d_g=vumps_dg_, Dw=vumps_Dw_;
+        auto const& AL=vumps_AL_; auto const& AR=vumps_AR_; auto const& C=vumps_C_;
+        auto const& GL=vumps_GL_; auto const& GR=vumps_GR_; auto const& W=vumps_W_;
+        auto h1 = vumps_onsite_matrix(W,Dw,d_g);
+        auto pending = vumps_pending_channels(W,Dw,d_g);
+        auto bond_envs = vumps_precompute_bond_environments(AL,AR,D,d_g,pending);
+        std::vector<Cplx> I = vx_eye(D);
+
+        vumps_GLfull_S_ = I; vumps_GLfull_F_ = GL;
+        vumps_GRfull_F_ = I; vumps_GRfull_S_ = GR;
+        vumps_GLfull_pending_.clear(); vumps_GRfull_pending_.clear();
+        for (auto const& be : bond_envs)
+            {
+            vumps_GLfull_pending_.push_back(be.Lvec_a);
+            vumps_GRfull_pending_.push_back(be.Rvec_b);
+            }
+
+        vumps_E_RL_ = vx_op_transfer_matrix(AR,D,d_g,AL,false,{}); // ket=AR,bra=AL
+        vumps_E_LR_ = vx_op_transfer_matrix(AL,D,d_g,AR,false,{}); // ket=AL,bra=AR
+        std::tie(vumps_r_RL_,vumps_l_RL_) = vx_mixed_fixed_points(vumps_E_RL_,D);
+        std::tie(vumps_r_LR_,vumps_l_LR_) = vx_mixed_fixed_points(vumps_E_LR_,D);
+
+        vumps_VL_ = vumps_null_space_left(AL,D,d_g);
+
+        auto AC = vumps_compose_AL_C(AL,C,D,d_g);
+        auto HAC_action = vumps_h_ac_action(AC,D,d_g,GL,GR,bond_envs,h1);
+        Cplx num(0,0), den(0,0);
+        for (size_t i=0;i<AC.size();++i)
+            {
+            num += std::conj(AC[i])*HAC_action[i];
+            den += std::conj(AC[i])*AC[i];
+            }
+        vumps_lam_AC_ = (num/den).real();
+
+        have_vumps_exc_env_ = true;
+        }
+
+    // V_L: (D*d_g, Dx) isometry spanning the null space of AL's own
+    // (reshaped D*d_g x D) adjoint -- C++ analogue of pyitensor
+    // idmrg_excitations._null_space_left, obtained here from the FULL
+    // SVD's own U factor (columns D..D*d_g-1) rather than scipy's
+    // dedicated null_space() -- mathematically identical (both are the
+    // orthogonal complement of AL_mat's own column space, computed via
+    // the same underlying SVD).
+    static std::vector<Cplx>
+    vumps_null_space_left(std::vector<Cplx> const& AL, int D, int d_g)
+        {
+        auto Ufull = vx_full_svd_U(AL,D*d_g,D); // (D*d_g,D*d_g) row-major
+        int Dgd = D*d_g;
+        int Dx = Dgd - D;
+        std::vector<Cplx> V_L((size_t)Dgd*std::max(Dx,0));
+        for (int i=0;i<Dgd;++i)
+        for (int j=0;j<Dx;++j)
+            V_L[i*Dx+j] = Ufull[i*Dgd + (D+j)];
+        return V_L;
+        }
+
+    // The generic "left-channel-environment * ket * H[site] *
+    // right-channel-environment" contraction H_eff(k) is built from three
+    // times -- C++ analogue of pyitensor idmrg_excitations.
+    // _full_channel_contraction.
+    std::vector<Cplx>
+    vumps_full_channel_contraction(std::vector<Cplx> const& left_S, std::vector<Cplx> const& left_F,
+                                    std::vector<std::vector<Cplx>> const& left_pending,
+                                    std::vector<Cplx> const& ket, int D, int d_g,
+                                    std::vector<Cplx> const& right_S, std::vector<Cplx> const& right_F,
+                                    std::vector<std::vector<Cplx>> const& right_pending,
+                                    std::vector<Cplx> const& h1,
+                                    std::vector<PendingChan> const& pending) const
+        {
+        auto Y = vx_cap_left(left_S, vx_cap_right(vx_apply_op_ket(h1,ket,D,d_g),D,d_g,right_F), D,d_g);
+        auto t2 = vx_cap_left(left_F, vx_cap_right(ket,D,d_g,right_F), D,d_g);
+        for (size_t i=0;i<Y.size();++i) Y[i]+=t2[i];
+        auto t3 = vx_cap_left(left_S, vx_cap_right(ket,D,d_g,right_S), D,d_g);
+        for (size_t i=0;i<Y.size();++i) Y[i]+=t3[i];
+        for (size_t idx=0; idx<pending.size(); ++idx)
+            {
+            auto tA = vx_cap_left(left_S,
+                vx_cap_right(vx_apply_op_ket(pending[idx].mat_a,ket,D,d_g),D,d_g,right_pending[idx]), D,d_g);
+            for (size_t i=0;i<Y.size();++i) Y[i]+=tA[i];
+            auto tB = vx_cap_left(left_pending[idx],
+                vx_cap_right(vx_apply_op_ket(pending[idx].mat_b,ket,D,d_g),D,d_g,right_F), D,d_g);
+            for (size_t i=0;i<Y.size();++i) Y[i]+=tB[i];
+            }
+        return Y;
+        }
+
+    // GBL(k) -- the channel-resolved "the excitation has already happened
+    // somewhere to the left" environment (MPSKit's own lBs) -- C++
+    // analogue of pyitensor idmrg_excitations._build_GBL. See that
+    // function's own extensive docstring for the recursion derivation and
+    // the two subtle points it documents (the momentum-phase direction,
+    // and why channel F's own source needs a B inserted directly into its
+    // identity self-loop, closed against GL_full[F] -- confirmed there to
+    // be load-bearing for D>1 Hermiticity, not optional).
+    VumpsChannelMap
+    vumps_build_GBL(double k, std::vector<Cplx> const& B) const
+        {
+        int D=vumps_D_, d_g=vumps_dg_;
+        auto const& AL=vumps_AL_; auto const& AR=vumps_AR_;
+        auto h1 = vumps_onsite_matrix(vumps_W_,vumps_Dw_,d_g);
+        auto pending = vumps_pending_channels(vumps_W_,vumps_Dw_,d_g);
+        Cplx phase = std::exp(Cplx(0.0,1.0)*k);
+        auto E_RL_id = vx_op_transfer_matrix(AR,D,d_g,AL,false,{});
+        auto const& proj_out = vumps_l_RL_;
+        auto const& proj_in = vumps_r_RL_;
+        auto E_RL = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(AR,D,d_g,AL,true,M); };
+        auto E_B  = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(B,D,d_g,AL,true,M); };
+        auto E_B_none = vx_op_transfer_matrix(B,D,d_g,AL,false,{});
+
+        auto src_S = vx_apply_transfer_from_left(E_B_none,D,vumps_GLfull_S_);
+        std::vector<Cplx> src_S_scaled((size_t)D*D);
+        for (int i=0;i<D*D;++i) src_S_scaled[i] = src_S[i]/phase;
+        auto G_S = vx_regularized_solve(D,1.0/phase,E_RL_id,/*from_left=*/true,proj_out,proj_in,src_S_scaled);
+
+        std::vector<std::vector<Cplx>> G_pending(pending.size());
+        for (size_t idx=0; idx<pending.size(); ++idx)
+            {
+            auto term_bg = vx_apply_transfer_from_left(E_RL(pending[idx].mat_a),D,G_S);
+            auto term_src = vx_apply_transfer_from_left(E_B(pending[idx].mat_a),D,vumps_GLfull_S_);
+            std::vector<Cplx> sum((size_t)D*D);
+            for (int i=0;i<D*D;++i) sum[i] = (term_bg[i]+term_src[i])/phase;
+            G_pending[idx] = sum;
+            }
+
+        auto rhs_F1 = vx_apply_transfer_from_left(E_RL(h1),D,G_S);
+        auto rhs_F2 = vx_apply_transfer_from_left(E_B(h1),D,vumps_GLfull_S_);
+        auto rhs_F3 = vx_apply_transfer_from_left(E_B_none,D,vumps_GLfull_F_);
+        std::vector<Cplx> rhs_F((size_t)D*D);
+        for (int i=0;i<D*D;++i) rhs_F[i] = rhs_F1[i]+rhs_F2[i]+rhs_F3[i];
+        for (size_t idx=0; idx<pending.size(); ++idx)
+            {
+            auto t1 = vx_apply_transfer_from_left(E_RL(pending[idx].mat_b),D,G_pending[idx]);
+            auto t2 = vx_apply_transfer_from_left(E_B(pending[idx].mat_b),D,vumps_GLfull_pending_[idx]);
+            for (int i=0;i<D*D;++i) rhs_F[i] += t1[i]+t2[i];
+            }
+        std::vector<Cplx> rhs_F_scaled((size_t)D*D);
+        for (int i=0;i<D*D;++i) rhs_F_scaled[i] = rhs_F[i]/phase;
+        auto G_F = vx_regularized_solve(D,1.0/phase,E_RL_id,/*from_left=*/true,proj_out,proj_in,rhs_F_scaled);
+
+        VumpsChannelMap out; out.S=G_S; out.F=G_F; out.pending=G_pending;
+        return out;
+        }
+
+    // GBR(k) -- mirror of vumps_build_GBL (MPSKit's own rBs) -- C++
+    // analogue of pyitensor idmrg_excitations._build_GBR (note the
+    // recursion MULTIPLIES by phase here, where GBL's own DIVIDES --
+    // confirmed against MPSKit's own source not to be a typo, see that
+    // function's own docstring).
+    VumpsChannelMap
+    vumps_build_GBR(double k, std::vector<Cplx> const& B) const
+        {
+        int D=vumps_D_, d_g=vumps_dg_;
+        auto const& AL=vumps_AL_; auto const& AR=vumps_AR_;
+        auto h1 = vumps_onsite_matrix(vumps_W_,vumps_Dw_,d_g);
+        auto pending = vumps_pending_channels(vumps_W_,vumps_Dw_,d_g);
+        Cplx phase = std::exp(Cplx(0.0,1.0)*k);
+        auto E_LR_id = vx_op_transfer_matrix(AL,D,d_g,AR,false,{});
+        auto const& proj_out = vumps_l_LR_;
+        auto const& proj_in = vumps_r_LR_;
+        auto E_LR = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(AL,D,d_g,AR,true,M); };
+        auto E_B  = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(B,D,d_g,AR,true,M); };
+        auto E_B_none = vx_op_transfer_matrix(B,D,d_g,AR,false,{});
+
+        auto src_F = vx_apply_transfer(E_B_none,D,vumps_GRfull_F_);
+        std::vector<Cplx> src_F_scaled((size_t)D*D);
+        for (int i=0;i<D*D;++i) src_F_scaled[i] = src_F[i]*phase;
+        auto G_F = vx_regularized_solve(D,phase,E_LR_id,/*from_left=*/false,proj_out,proj_in,src_F_scaled);
+
+        std::vector<std::vector<Cplx>> G_pending(pending.size());
+        for (size_t idx=0; idx<pending.size(); ++idx)
+            {
+            auto term_bg = vx_apply_transfer(E_LR(pending[idx].mat_b),D,G_F);
+            auto term_src = vx_apply_transfer(E_B(pending[idx].mat_b),D,vumps_GRfull_F_);
+            std::vector<Cplx> sum((size_t)D*D);
+            for (int i=0;i<D*D;++i) sum[i] = (term_bg[i]+term_src[i])*phase;
+            G_pending[idx] = sum;
+            }
+
+        auto rhs_S1 = vx_apply_transfer(E_LR(h1),D,G_F);
+        auto rhs_S2 = vx_apply_transfer(E_B(h1),D,vumps_GRfull_F_);
+        auto rhs_S3 = vx_apply_transfer(E_B_none,D,vumps_GRfull_S_);
+        std::vector<Cplx> rhs_S((size_t)D*D);
+        for (int i=0;i<D*D;++i) rhs_S[i] = rhs_S1[i]+rhs_S2[i]+rhs_S3[i];
+        for (size_t idx=0; idx<pending.size(); ++idx)
+            {
+            auto t1 = vx_apply_transfer(E_LR(pending[idx].mat_a),D,G_pending[idx]);
+            auto t2 = vx_apply_transfer(E_B(pending[idx].mat_a),D,vumps_GRfull_pending_[idx]);
+            for (int i=0;i<D*D;++i) rhs_S[i] += t1[i]+t2[i];
+            }
+        std::vector<Cplx> rhs_S_scaled((size_t)D*D);
+        for (int i=0;i<D*D;++i) rhs_S_scaled[i] = rhs_S[i]*phase;
+        auto G_S = vx_regularized_solve(D,phase,E_LR_id,/*from_left=*/false,proj_out,proj_in,rhs_S_scaled);
+
+        VumpsChannelMap out; out.F=G_F; out.S=G_S; out.pending=G_pending;
+        return out;
+        }
+
+    // H_eff(k)[X] -- the momentum-dependent effective Hamiltonian acting
+    // on a tangent-space parameter X ((Dx,D) flat, Dx=D*(d_g-1)) -- C++
+    // analogue of pyitensor idmrg_excitations._h_eff_action (exactly the
+    // 3 terms that function's own docstring/this file's own
+    // vumps_excitation_energies doc comment describe).
+    std::vector<Cplx>
+    vumps_h_eff_action(double k, std::vector<Cplx> const& X) const
+        {
+        int D=vumps_D_, d_g=vumps_dg_;
+        int Dgd = D*d_g, Dx = Dgd-D;
+        std::vector<Cplx> B((size_t)Dgd*D,Cplx(0,0));
+        for (int i=0;i<Dgd;++i)
+        for (int r=0;r<D;++r)
+            {
+            Cplx acc(0,0);
+            for (int j=0;j<Dx;++j) acc += vumps_VL_[i*Dx+j]*X[j*D+r];
+            B[i*D+r] = acc;
+            }
+
+        auto h1 = vumps_onsite_matrix(vumps_W_,vumps_Dw_,d_g);
+        auto pending = vumps_pending_channels(vumps_W_,vumps_Dw_,d_g);
+
+        auto Y = vumps_full_channel_contraction(
+            vumps_GLfull_S_,vumps_GLfull_F_,vumps_GLfull_pending_, B,D,d_g,
+            vumps_GRfull_S_,vumps_GRfull_F_,vumps_GRfull_pending_, h1,pending);
+
+        auto GBL = vumps_build_GBL(k,B);
+        auto t2 = vumps_full_channel_contraction(
+            GBL.S,GBL.F,GBL.pending, AR_ref(),D,d_g,
+            vumps_GRfull_S_,vumps_GRfull_F_,vumps_GRfull_pending_, h1,pending);
+        for (size_t i=0;i<Y.size();++i) Y[i]+=t2[i];
+
+        auto GBR = vumps_build_GBR(k,B);
+        auto t3 = vumps_full_channel_contraction(
+            vumps_GLfull_S_,vumps_GLfull_F_,vumps_GLfull_pending_, AL_ref(),D,d_g,
+            GBR.S,GBR.F,GBR.pending, h1,pending);
+        for (size_t i=0;i<Y.size();++i) Y[i]+=t3[i];
+
+        // Y is (D,d_g,D) flat, already == (D*d_g,D) row-major -- project
+        // via V_L^dagger @ Y.
+        std::vector<Cplx> out((size_t)Dx*D,Cplx(0,0));
+        for (int j=0;j<Dx;++j)
+        for (int r=0;r<D;++r)
+            {
+            Cplx acc(0,0);
+            for (int i=0;i<Dgd;++i) acc += std::conj(vumps_VL_[i*Dx+j])*Y[i*D+r];
+            out[j*D+r] = acc;
+            }
+        return out;
+        }
+
+    std::vector<Cplx> const& AL_ref() const { return vumps_AL_; }
+    std::vector<Cplx> const& AR_ref() const { return vumps_AR_; }
+
+    // Dense (Dx*D)x(Dx*D) matrix representing H_eff(k).
+    std::vector<Cplx>
+    vumps_build_h_eff_dense(double k) const
+        {
+        int D=vumps_D_, d_g=vumps_dg_;
+        int Dx = D*(d_g-1);
+        int n = Dx*D;
+        std::vector<Cplx> H((size_t)n*n,Cplx(0,0));
+        std::vector<Cplx> e(n,Cplx(0,0));
+        for (int j=0;j<n;++j)
+            {
+            e[j]=Cplx(1,0);
+            auto col = vumps_h_eff_action(k,e);
+            for (int i=0;i<n;++i) H[i*n+j]=col[i];
+            e[j]=Cplx(0,0);
+            }
+        return H;
         }
 
     // Flat, order-preserving (de)serialization of a rank-4 ITensor over
@@ -4753,4 +6383,28 @@ class Chain
     Index idmrg_HL_bra_, idmrg_HL_ket_, idmrg_HL_mpo_;
     Index idmrg_HR_bra_, idmrg_HR_ket_, idmrg_HR_mpo_;
     bool idmrg_have_HL_ = false, idmrg_have_HR_ = false; // false only if idmrg_ground_state's own maxiter<2 guard were ever bypassed -- see that method's own comment
+
+    // -- VUMPS ground state + tangent-space excitation ansatz snapshot
+    // (Chain::vumps_ground_state/vumps_excitation_energies, public,
+    // above) -- mirrors the idmrg_* snapshot fields immediately above,
+    // but for the mixed-gauge {AL,AR,C,GL,GR} representation VUMPS
+    // produces instead of idmrg_ground_state's own per-sublattice U_list.
+    bool have_vumps_snapshot_ = false;
+    int vumps_D_ = 0, vumps_dg_ = 0, vumps_Dw_ = 0;
+    std::vector<Cplx> vumps_AL_, vumps_AR_, vumps_C_; // (D,d_g,D)/(D,d_g,D)/(D,D), row-major
+    std::vector<Cplx> vumps_GL_, vumps_GR_;           // (D,D) row-major
+    std::vector<Cplx> vumps_W_;                       // (Dw,Dw,d_g,d_g) row-major, see vumps_group_automaton
+
+    // Excitation environment -- built lazily on the first
+    // vumps_excitation_energies() call (have_vumps_exc_env_ false until
+    // then), cached until the next vumps_ground_state() call invalidates
+    // it. See Chain::vumps_build_excitation_environment.
+    bool have_vumps_exc_env_ = false;
+    std::vector<Cplx> vumps_VL_; // (D*d_g, Dx) isometry, Dx=D*(d_g-1)
+    std::vector<Cplx> vumps_GLfull_S_, vumps_GLfull_F_; // (D,D) each
+    std::vector<Cplx> vumps_GRfull_S_, vumps_GRfull_F_;
+    std::vector<std::vector<Cplx>> vumps_GLfull_pending_, vumps_GRfull_pending_; // one (D,D) per pending channel
+    std::vector<Cplx> vumps_E_RL_, vumps_E_LR_;       // (D,D,D,D) mixed transfer tensors (kept for reference; not reused after vx_mixed_fixed_points)
+    std::vector<Cplx> vumps_r_RL_, vumps_l_RL_, vumps_r_LR_, vumps_l_LR_; // (D,D)
+    double vumps_lam_AC_ = 0.0; // H_AC's own Rayleigh quotient on converged AC -- see vumps_build_excitation_environment's own comment
     };

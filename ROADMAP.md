@@ -50,9 +50,9 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Generalized eigenvalue DMRG (Lagrange-multiplier trick, Hermitian) | ✅ | ✅ | ✅ | Julia via `mpsjulialive/generalized.jl`'s `get_gs_generalized` (same algorithm against ITensorMPS.jl's own `dmrg()`/`Sweeps`/`add()`). `groundstate.gs_energy_generalized` still raises for `itensor_version=2`. No ED fallback either (there is no ED implementation of this method at all). |
 | Non-Hermitian DMRG (biorthogonal, complex energies) | ✅ | ✅ | ✅ | Julia is the one backend that isn't a port of ITensorNHDMRG.jl — it calls the real package (`mpsjulialive/nhdmrg.jl`), with two corrections on top: its left vector solves the *transpose* equation (needs a conjugation), and its left solve isn't anchored to the right solve's eigenvalue, so a conjugate pair tied for the smallest real part needs an `exp(i*theta)*H` tie-break (anchored on the untied run's own eigenvalue, since the rotation can otherwise re-target a different one). Both are invisible on a complex-*symmetric* H — see `tests/test_nh_dmrg.py::nh_asymmetric_hopping_chain`. |
 | Non-Hermitian generalized eigenproblem | ✅ | ✅ | ✅ | Same story as above, one level up (`gs_energy_generalized_nhdmrg`; `mpsjulialive/generalized.jl`'s `get_gs_generalized_nhdmrg` wraps the same outer loop around real ITensorNHDMRG.jl sweeps). v2 still excluded. |
-| iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. |
-| iDMRG vev / two-point correlator | ❌ | ✅ | ❌ | pyitensor only — v3's iDMRG session has no equivalent to `two_point_correlator`/`onsite_expectation` yet. |
-| iDMRG excitation ansatz (quasiparticle, tangent-space) | ❌ | ✅ | ❌ | pyitensor only, requires `gs_method="vumps"`; any bond dimension `D>=1` is supported now (see item 4 below). |
+| iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. Both `gs_method` values are now on v3 too: `"idmrg"` (`Chain::idmrg_ground_state`, the default) and `"vumps"` (`Chain::vumps_ground_state`, C++ port of `pyitensor/vumps.py` — dense LAPACK-based linear algebra, not ITensor tensor-network objects, see that method's own doc comment for why). Cross-checked directly against `itensor_version="python"`'s own VUMPS at `D=1,2,3` on TFIM and Heisenberg (n_uc=1 and 2), matching to ~1e-10 or tighter — see `tests/test_vumps_v3.py`. |
+| iDMRG vev / two-point correlator | ❌ | ✅ | ❌ | pyitensor only — v3's iDMRG session has no equivalent to `two_point_correlator`/`onsite_expectation` yet (neither `gs_method`). |
+| iDMRG excitation ansatz (quasiparticle, tangent-space) | ✅ | ✅ | ❌ | `Chain::vumps_excitation_energies` (C++ port of `pyitensor/idmrg_excitations.py`, same dense-array approach as `vumps_ground_state`) — requires `gs_method="vumps"` on both backends. Cross-checked directly against `itensor_version="python"` across a full momentum scan at `D=1,2,3` on TFIM (n_uc=1) and Heisenberg (n_uc=2), matching to ~1e-10 (TFIM, gapped) or ~1e-4..1e-7 (Heisenberg, gapless/critical — both backends land on slightly different local optima of the same non-convex restart search, not a discrepancy in the algorithm itself) — see `tests/test_vumps_excitations_v3.py`. Any `D>=1` is supported, matching pyitensor. |
 | iDMRG local excitation gap (deflation-based, `D`-capable) | ❌ | ✅ | ❌ | pyitensor only (`idmrg.py::local_excitation_gap`/`local_excitation_gap_windowed`). |
 | iDMRG dynamical correlator (finite-window KPM reduction) | ❌ | ✅ | ❌ | `infinitechain.py::kpm_finite` is gated to `itensor_version="python"` only. |
 | iDMRG real-time window dynamics (IBC-style TDVP, `td_dynamical_correlator`) | ✅ | ✅ | ❌ | Both wired (`idmrg_window.py` for pyitensor, `mpscpp3/chain_session.h`'s `td_dynamical_correlator_window` for v3); Phase 2+ generic sweep machinery beyond the current window construction is still pyitensor-only groundwork (`idmrg_window.py`'s own Phase 0-1 notes). |
@@ -162,13 +162,79 @@ model-specific exception:
    dispersion now matches an independently-converged MPSKit.jl result to
    6 significant figures, and `H_eff(k)` is Hermitian to machine precision
    at `D=1`, `2` and `3` — see `examples/idmrg/excitation_gap_tfim/
-   main.py`.
+   main.py`. **Update:** both `vumps_ground_state` and this excitation
+   ansatz are now also ported to `itensor_version=3` (`Chain::
+   vumps_ground_state`/`Chain::vumps_excitation_energies`,
+   `mpscpp3/chain_session.h`) — see item 7 below.
 5. **iDMRG cat-state superpositions.** No backend supports summing two
    *physically distinct* symmetry-broken iDMRG ground states; needs new
    correlator machinery from scratch.
 6. **v2 (legacy) parity.** Deliberately not being chased — v2 predates
    `TDVP/` entirely and is kept mainly as the historical QN-conserving
    reference implementation, not a target for new features.
+7. **iDMRG VUMPS ground state + excitation ansatz, ported to
+   `itensor_version=3`.** `Chain::vumps_ground_state`/
+   `Chain::vumps_excitation_energies` (`mpscpp3/chain_session.h`) close
+   the gap items 1 and 4's own table rows used to flag (v3 previously had
+   neither `gs_method="vumps"` nor the tangent-space excitation ansatz at
+   all). Unlike `Chain::idmrg_ground_state` (built from genuine ITensor
+   tensor-network objects, mirroring pyitensor's own `IDMRGResult`
+   line-for-line), this port is deliberately built from plain dense
+   row-major `std::vector<Cplx>` arrays closed over LAPACK
+   (`itensor::zgeev_wrapper`/`zheev_wrapper`/`zgesv_wrapper`/
+   `zgesvd_wrapper`) rather than ITensor `Index`/`ITensor` objects — see
+   `chain_session.h`'s own comment on `VumpsResult` for why: `D` and
+   `d_g` (the grouped supersite's own physical dimension) are always
+   small in this feature's scope (`n_uc<=2`, reach<=1 bonds), so exact
+   dense linear algebra is both simpler and far less risky than
+   re-deriving VUMPS's/the excitation ansatz's already extremely subtle
+   fixed-point and gauge bookkeeping (see item 4 above — eight
+   independent investigation passes were needed to get this right in
+   pure Python the first time) against ITensor v3's `Index`/`IndexSet`
+   machinery a second time. One deliberate simplification relative to
+   pyitensor's own `vumps_ground_state` driver: the D-ramp/multi-restart
+   strategy is ported, but not the "spend extra attempts to beat an
+   already-known smaller-D energy" safety-net budget (see
+   `Chain::vumps_ground_state`'s own comment) — a caller doing
+   quantitative work at a harder/larger `D` should still call it several
+   times independently and keep the lowest reported `e0`, exactly as
+   pyitensor's own docstring already recommends.
+
+   Validated directly against `itensor_version="python"`'s own
+   already-MPSKit.jl-validated implementation (not just internal
+   self-consistency, per this project's own literature-check standing
+   feedback): ground-state energy density matches to ~1e-10 or tighter at
+   `D=1,2,3` on TFIM (`n_uc=1`) and the uniform Heisenberg chain
+   (`n_uc=2`); the excitation dispersion matches across a full momentum
+   scan to the same tolerance on the gapped TFIM case, and to ~1e-4..1e-7
+   on the gapless/critical Heisenberg case (both backends' non-convex
+   restart searches can land on slightly different local optima there —
+   not a discrepancy in the ported algorithm itself). See
+   `tests/test_vumps_v3.py`/`tests/test_vumps_excitations_v3.py` and
+   `examples/idmrg/vumps_excitation_v3_VS_python/main.py`.
+
+   **A genuine, previously-undetected bug this audit also found and
+   fixed in the ALREADY-SHIPPED `Chain::idmrg_ground_state`** (not new
+   code this item added): `idmrg_build_row` was putting a site's own
+   onsite/field-operator term on the automaton's `F,F` self-loop transition
+   instead of the direct `S,F` transition — exactly the bug
+   `pyitensor/idmrg.py`'s own `_build_periodic_mpo` docstring documents
+   finding and fixing on the Python side (see that docstring's own two
+   confirmed reproducers: a bare-field Hamiltonian with no bond terms
+   silently drops the field entirely, since `W` stays block-diagonal
+   between `{S}` and `{F,pending...}`; a Hamiltonian with both bond and
+   field terms instead diverges exponentially in the number of macro-
+   iterations, since every further-absorbed site while `F` is already hot
+   re-adds the onsite content on top of an already-summed total). This
+   was never caught by the existing test suite because no
+   `itensor_version=3` `idmrg_ground_state` test exercises an onsite/field
+   term (every `tests/test_infinite_chain.py` v3 case is a pure
+   Heisenberg/XXX-style bond-only Hamiltonian) — confirmed directly while
+   building this item's own VUMPS test cases (a TFIM Hamiltonian, which
+   does have a field term, is the very first thing this port was
+   validated against). Fixed at the shared root cause (`idmrg_build_row`,
+   used by both `idmrg_ground_state` and the new `vumps_ground_state`),
+   not patched per call site.
 
 ## Pointers for extending a backend
 

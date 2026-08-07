@@ -184,6 +184,28 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "and scope (Hermitian, n_uc<=2, no fermionic terms, no "
                "static correlators yet). Returns (density, converged, "
                "niter_done).")
+        .def("vumps_ground_state",[](Chain& self, std::vector<PyTerm> const& terms_intra,
+                                      std::vector<PyTerm> const& terms_inter,
+                                      int D, double tol, int maxiter, int nrestarts) {
+                auto out = self.vumps_ground_state(terms_from_python(terms_intra),
+                    terms_from_python(terms_inter),D,tol,maxiter,nrestarts);
+                return py::make_tuple(out.e0,out.converged,out.niter_done,out.gauge_mismatch);
+            }, py::arg("terms_intra"),py::arg("terms_inter"),
+               py::arg("D"),py::arg("tol"),py::arg("maxiter"),py::arg("nrestarts")=4,
+               "VUMPS ground state (fixed bond dimension D, thermodynamic "
+               "limit) -- this Chain must have been constructed with "
+               "site_types = the n_uc-site unit cell, see "
+               "Chain::vumps_ground_state's own comment for the algorithm "
+               "and scope (Hermitian, n_uc<=2, reach<=1 bonds only). "
+               "Returns (e0, converged, niter_done, gauge_mismatch).")
+        .def("vumps_excitation_energies",[](Chain& self, double k, int n) {
+                return self.vumps_excitation_energies(k,n);
+            }, py::arg("k"),py::arg("n")=1,
+               "Lowest n tangent-space/quasiparticle excitation energies "
+               "(above the ground state) at momentum k (radians per unit "
+               "cell) -- requires vumps_ground_state to have been called "
+               "first on this same Chain, see "
+               "Chain::vumps_excitation_energies's own comment.")
         .def("td_dynamical_correlator_window",
              [](Chain& self, int n_window, std::string const& opname_A,
                 std::string const& opname_B, double dt, int nt,

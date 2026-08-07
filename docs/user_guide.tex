@@ -2190,16 +2190,24 @@ couplings) instead, and use the self-consistency check either way
 before trusting a result.
 
 \textbf{An alternative ground-state solver: VUMPS.}
-\texttt{ic.gs\_method = "vumps"} (default \texttt{"idmrg"},
-\texttt{itensor\_version="python"} only) switches \texttt{gs\_energy()}
-from the growing algorithm above to VUMPS (Variational Uniform Matrix
-Product States, Zauner-Stauber et al., arXiv:1701.07035; see
-\texttt{pyitensor/vumps.py}'s own module docstring for the algorithm)
--- instead of growing a finite window and truncating it down to
-\texttt{maxm} at every step, VUMPS solves directly, in the
-thermodynamic limit, for the actual \texttt{maxm}-dimensional
-variational optimum (\texttt{ic.maxm} sets VUMPS's own target bond
-dimension $D$ here too):
+\texttt{ic.gs\_method = "vumps"} (default \texttt{"idmrg"}) switches
+\texttt{gs\_energy()} from the growing algorithm above to VUMPS
+(Variational Uniform Matrix Product States, Zauner-Stauber et al.,
+arXiv:1701.07035; see \texttt{pyitensor/vumps.py}'s own module
+docstring for the algorithm) -- instead of growing a finite window and
+truncating it down to \texttt{maxm} at every step, VUMPS solves
+directly, in the thermodynamic limit, for the actual
+\texttt{maxm}-dimensional variational optimum (\texttt{ic.maxm} sets
+VUMPS's own target bond dimension $D$ here too). Both
+\texttt{itensor\_version="python"} (\texttt{pyitensor/vumps.py}) and
+\texttt{itensor\_version=3} (\texttt{mpscpp3/chain\_session.h}'s
+\texttt{Chain::vumps\_ground\_state}, a C++ port of the same algorithm
+-- built from plain dense arrays closed over LAPACK rather than ITensor
+tensor-network objects, since the bond/physical dimensions this feature
+targets are always small; see that method's own doc comment) support
+\texttt{gs\_method="vumps"}; the two are cross-checked directly against
+each other to $\sim$$10^{-10}$ or tighter on TFIM/Heisenberg at
+$D=1,2,3$ (\texttt{tests/test\_vumps\_v3.py}):
 
 \begin{lstlisting}
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
@@ -2271,28 +2279,42 @@ ic.excitation_energies(0.0, n=1)   # lowest excitation energy at k=0
 ic.excitation_gap()                # min_k E(k), the scalar gap
 \end{verbatim}
 
-\textbf{Scope.} Only \texttt{itensor\_version="python"} is supported
-(\texttt{NotImplementedError} otherwise). Any converged bond dimension
-\texttt{D>=1} is supported -- including a genuinely entangled ground
-state (\texttt{D>1}, e.g.\ the transverse-field Ising or a dimerized
-Heisenberg chain), which used to be an explicit, rejected scope limit
-here (see \texttt{pyitensor/idmrg\_excitations.py}'s own module
-docstring, ``History'' section, for the eight-pass investigation that
-limit came from and how it was eventually resolved by rewriting the
-ansatz from scratch on top of VUMPS's own mixed-gauge state, mirroring
-MPSKit.jl's own architecture). For \texttt{D=1} the computed dispersion
-matches the exact free-fermion single-magnon dispersion of a
+\textbf{Scope.} Both \texttt{itensor\_version="python"}
+(\texttt{pyitensor/idmrg\_excitations.py}) and
+\texttt{itensor\_version=3} (\texttt{mpscpp3/chain\_session.h}'s
+\texttt{Chain::vumps\_excitation\_energies}, a C++ port of the same
+algorithm, same dense-array/LAPACK approach as
+\texttt{vumps\_ground\_state} above) are supported -- both require
+\texttt{gs\_method="vumps"} (\texttt{NotImplementedError} otherwise, or
+if a different \texttt{itensor\_version} is used). Any converged bond
+dimension \texttt{D>=1} is supported -- including a genuinely entangled
+ground state (\texttt{D>1}, e.g.\ the transverse-field Ising or a
+dimerized Heisenberg chain), which used to be an explicit, rejected
+scope limit here (see \texttt{pyitensor/idmrg\_excitations.py}'s own
+module docstring, ``History'' section, for the eight-pass investigation
+that limit came from and how it was eventually resolved by rewriting
+the ansatz from scratch on top of VUMPS's own mixed-gauge state,
+mirroring MPSKit.jl's own architecture). For \texttt{D=1} the computed
+dispersion matches the exact free-fermion single-magnon dispersion of a
 field-polarized XX chain to $\sim$14 digits across the whole Brillouin
 zone (\texttt{examples/idmrg/excitation\_gap\_xx/main.py}); for
 \texttt{D=2} it matches an independently-converged MPSKit.jl
 transverse-field Ising result to 6 significant figures
 (\texttt{examples/idmrg/excitation\_gap\_tfim/main.py}), and
 $H_{\mathrm{eff}}(k)$ is Hermitian to machine precision at every
-\texttt{D} tried. A deliberately constructed longer-range term (spanning
-more than 2 adjacent unit cells after \texttt{n\_uc}-grouping) is
-rejected with \texttt{NotImplementedError}, raised from
-\texttt{gs\_energy()} itself (\texttt{vumps\_ground\_state}'s own
-reach-1 check) rather than from the excitation machinery.
+\texttt{D} tried. \texttt{itensor\_version=3} is cross-checked directly
+against \texttt{itensor\_version="python"} across a full momentum scan,
+matching to $\sim$$10^{-10}$ or tighter on the gapped TFIM case and to a
+looser $\sim$$10^{-4}$--$10^{-7}$ on the gapless/critical Heisenberg
+case (both backends' own non-convex VUMPS restart search can land on
+slightly different local optima there, not a discrepancy in the ported
+algorithm itself) -- see \texttt{tests/test\_vumps\_excitations\_v3.py}
+and \texttt{examples/idmrg/vumps\_excitation\_v3\_VS\_python/main.py}. A
+deliberately constructed longer-range term (spanning more than 2
+adjacent unit cells after \texttt{n\_uc}-grouping) is rejected with
+\texttt{NotImplementedError}, raised from \texttt{gs\_energy()} itself
+(\texttt{vumps\_ground\_state}'s own reach-1 check) rather than from the
+excitation machinery.
 
 \textbf{A cheaper, cruder alternative: the local superblock gap.}
 \texttt{ic.local\_excitation\_gap(niter=200)} re-diagonalizes the growing
