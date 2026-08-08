@@ -46,6 +46,10 @@ def _build(itensor_version):
     compare physics between the two backends and need run-to-run gauge/
     seed variation to stay small (see this module's own docstring)."""
     c = Infinite_Spin_Chain(["1/2"], itensor_version=itensor_version)
+    c.gs_method = "idmrg"  # td_dynamical_correlator needs the growing
+                           # algorithm's own converged-environment
+                           # snapshot -- not built by gs_method="vumps"
+                           # (the default since 2026-08-08)
     c.maxm, c.cutoff, c.maxiter = MAXM, CUTOFF, MAXITER
     c.etol, c.niter, c.restarts = ETOL, NITER, RESTARTS
     h = c.SxC[0] * c.SxR[0] + c.SyC[0] * c.SyR[0] + c.SzC[0] * c.SzR[0]
@@ -59,6 +63,7 @@ def _build_fast(itensor_version):
     converged environment snapshot to exercise plumbing (error handling,
     dispatch/shape), not physical accuracy."""
     c = Infinite_Spin_Chain(["1/2"], itensor_version=itensor_version)
+    c.gs_method = "idmrg"  # see _build's own comment
     c.maxm, c.cutoff, c.maxiter = 8, 1e-10, 30
     c.etol, c.niter, c.restarts = 1e-6, 30, 1
     h = c.SxC[0] * c.SxR[0] + c.SyC[0] * c.SyR[0] + c.SzC[0] * c.SzR[0]

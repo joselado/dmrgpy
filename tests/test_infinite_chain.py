@@ -35,6 +35,7 @@ EXACT_HEISENBERG_DENSITY = 0.25 - np.log(2)
 def _converged_uniform_chain(n_uc, maxm=40, maxiter=200, etol=1e-9, itensor_version="python"):
     spins = ["1/2"] * n_uc
     ic = infinitechain.Infinite_Spin_Chain(spins, itensor_version=itensor_version)
+    ic.gs_method = "idmrg"
     terms = []
     for i in range(n_uc - 1):
         terms.append(ic.SxC[i] * ic.SxC[i + 1] + ic.SyC[i] * ic.SyC[i + 1]
@@ -119,6 +120,7 @@ def test_unit_cell_expectation_self_consistency():
     something this test should also have to handle."""
     n_uc = 2
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    ic.gs_method = "idmrg"
     j_strong, j_weak = 1.0, 0.2
     h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
          + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
@@ -163,6 +165,7 @@ def test_n_uc2_uniform_expectation_self_consistency():
     idmrg.py's own `_fresh_physical_copy`)."""
     n_uc = 2
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    ic.gs_method = "idmrg"
     h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
          + ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
     ic.maxm = 18
@@ -186,6 +189,7 @@ def test_n_uc2_dimerized_chain_matches_finite_size_extrapolation():
     j_strong, j_weak = 1.0, 0.4
 
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    ic.gs_method = "idmrg"
     h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
          + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
     ic.maxm = 40
@@ -221,6 +225,7 @@ def test_n_uc2_skip_site_coupling_via_R_suffix():
     validation and automaton-construction path, not a numerical oracle
     check."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    ic.gs_method = "idmrg"
     h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
          + 0.5 * (ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]))
     ic.maxm = 30
@@ -287,6 +292,7 @@ def test_itensor_version3_vev_and_correlator_not_implemented():
     must raise a clear NotImplementedError rather than silently misusing
     a stale/absent self._result."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.gs_method = "idmrg"
     h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
     ic.set_hamiltonian(h)
     with pytest.raises(NotImplementedError):
@@ -404,6 +410,7 @@ def test_apply_mpo_two_site_gate_preserves_norm():
 
     n_uc = 2
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    ic.gs_method = "idmrg"
     h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
          + 0.4 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
     ic.maxm = 4
@@ -484,11 +491,13 @@ def test_imps_overlap_orthogonal_polarized_states_near_zero():
     machinery whose real bug (see _build_periodic_mpo's own docstring) was
     found and fixed while writing this test."""
     ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_up.gs_method = "idmrg"
     ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
     ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
     ic_up.gs_energy()
 
     ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_down.gs_method = "idmrg"
     ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
     ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
     ic_down.gs_energy()
@@ -509,6 +518,7 @@ def test_imps_overlap_rejects_dimension_mismatch():
     vs spin-1) is a meaningless overlap -- must raise, not silently
     contract mismatched-size physical legs."""
     ic_half = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_half.gs_method = "idmrg"
     ic_half.maxm, ic_half.maxiter, ic_half.etol = 4, 20, 1e-8
     ic_half.set_hamiltonian(ic_half.SxC[0] * ic_half.SxR[0]
                              + ic_half.SyC[0] * ic_half.SyR[0]
@@ -516,6 +526,7 @@ def test_imps_overlap_rejects_dimension_mismatch():
     ic_half.gs_energy()
 
     ic_one = infinitechain.Infinite_Spin_Chain(["1"])
+    ic_one.gs_method = "idmrg"
     ic_one.maxm, ic_one.maxiter, ic_one.etol = 4, 20, 1e-8
     ic_one.set_hamiltonian(ic_one.SxC[0] * ic_one.SxR[0]
                             + ic_one.SyC[0] * ic_one.SyR[0]
@@ -544,6 +555,7 @@ def test_onsite_field_matches_exact_solution():
     with no bond term ever able to activate F -- confirmed directly."""
     for B in (5.0, -5.0, 2.0):
         ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+        ic.gs_method = "idmrg"
         ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
         ic.set_hamiltonian(-B * ic.SzC[0])
         e0 = ic.gs_energy()
@@ -566,6 +578,7 @@ def test_onsite_field_with_bonds_does_not_diverge():
     "finite"."""
     def density_at(B):
         ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+        ic.gs_method = "idmrg"
         h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
              + 0.5 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
              - B * (ic.SzC[0] + ic.SzC[1]))
@@ -602,6 +615,7 @@ def test_two_point_correlator_same_site_composition_order():
     with the expected value computed independently via
     idmrg._term_site_matrices (not via two_point_correlator itself)."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
     ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
     ic.set_hamiltonian(-5.0 * ic.SyC[0])
     ic.gs_energy()
@@ -644,11 +658,13 @@ def test_imps_sum_tied_norm_raises():
     collapsing to one of the two (physically distinct, oppositely
     Sz-polarized) branches."""
     ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_up.gs_method = "idmrg"
     ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
     ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
     ic_up.gs_energy()
 
     ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_down.gs_method = "idmrg"
     ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
     ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
     ic_down.gs_energy()
@@ -675,6 +691,7 @@ def test_imps_sum_dominant_branch_survives(n_uc):
 
     spins = ["1/2"] * n_uc
     ic_other = infinitechain.Infinite_Spin_Chain(spins)
+    ic_other.gs_method = "idmrg"
     # A different (XXZ-anisotropic, Delta=0.3) Hamiltonian so the two
     # states are genuinely distinct, not just re-derived copies of the
     # same ic_dom (isotropic Heisenberg) state -- works identically for
@@ -721,6 +738,7 @@ def test_imps_sum_rejects_dimension_mismatch():
     a meaningless sum -- must raise, not silently place mismatched-size
     physical legs into the same combined tensor."""
     ic_half = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_half.gs_method = "idmrg"
     ic_half.maxm, ic_half.maxiter, ic_half.etol = 4, 20, 1e-8
     ic_half.set_hamiltonian(ic_half.SxC[0] * ic_half.SxR[0]
                              + ic_half.SyC[0] * ic_half.SyR[0]
@@ -728,6 +746,7 @@ def test_imps_sum_rejects_dimension_mismatch():
     ic_half.gs_energy()
 
     ic_one = infinitechain.Infinite_Spin_Chain(["1"])
+    ic_one.gs_method = "idmrg"
     ic_one.maxm, ic_one.maxiter, ic_one.etol = 4, 20, 1e-8
     ic_one.set_hamiltonian(ic_one.SxC[0] * ic_one.SxR[0]
                             + ic_one.SyC[0] * ic_one.SyR[0]
@@ -747,6 +766,7 @@ def test_periodic_direct_sum_bond_dimension():
     by coincidence)."""
     ic_up, _ = _converged_uniform_chain(1, maxm=4, maxiter=50, etol=1e-12)
     ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic_down.gs_method = "idmrg"
     ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
     ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
     ic_down.gs_energy()
@@ -869,6 +889,7 @@ def test_td_dynamical_correlator_runs_and_is_finite():
     runs without error and returns a finite, non-trivial profile -- mirrors
     test_kpm_finite_runs_and_is_finite's own smoke-test style."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
     h = 1.4 * ic.SzC[0] + ic.SxC[0] * ic.SxR[0]
     ic.maxm = 20
     ic.maxiter = 300
@@ -893,6 +914,7 @@ def test_td_dynamical_correlator_calls_gs_energy_automatically():
     gs_energy() itself if the caller hasn't already, exactly like
     vev/correlator do."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
     ic.maxm = 20
     ic.maxiter = 300
     ic.etol = 1e-12
@@ -924,6 +946,7 @@ def test_td_dynamical_correlator_works_on_v3_backend():
     physics-accuracy-focused v3 coverage (cross-checked against the
     "python" backend) this smoke test doesn't attempt to duplicate."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.gs_method = "idmrg"
     ic.maxm, ic.maxiter, ic.etol, ic.niter = 8, 30, 1e-6, 30
     # A plain single-coupling XX term leaves the transfer matrix's
     # dominant eigenvalue (near-)degenerate at this loose convergence
@@ -959,6 +982,7 @@ def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
     `.real` for the TD side here gives a spurious sign/scale mismatch
     that `np.abs` does not."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
+    ic.gs_method = "idmrg"
     ic.maxm = 20
     ic.maxiter = 60
     ic.etol = 1e-12
@@ -1107,6 +1131,7 @@ def test_excitation_energies_gs_method_idmrg_not_implemented():
     algorithm) has no equivalent, so it is rejected explicitly rather than
     silently misused."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
     ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
     with pytest.raises(NotImplementedError):
         ic.excitation_gap()
@@ -1114,6 +1139,7 @@ def test_excitation_energies_gs_method_idmrg_not_implemented():
 
 def test_excitation_energies_itensor_version3_not_implemented():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.gs_method = "idmrg"
     ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
     with pytest.raises(NotImplementedError):
         ic.excitation_gap()
@@ -1182,6 +1208,7 @@ def test_local_excitation_gap_matches_finite_size_dimerized_gap():
     drift of the ED reference itself (0.7704 at n=12, 0.7591 at n=16)."""
     j_strong, j_weak = 1.0, 0.4
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    ic.gs_method = "idmrg"
     h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
          + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
     ic.maxm, ic.maxiter, ic.etol = 40, 200, 1e-9
@@ -1204,6 +1231,7 @@ def test_local_excitation_gap_matches_finite_size_dimerized_gap():
 
 def test_local_excitation_gap_before_set_hamiltonian_raises():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
     with pytest.raises(RuntimeError):
         ic.local_excitation_gap()
 
@@ -1233,6 +1261,7 @@ def _tfim_chain(J=1.0, h=2.0, maxm=12, maxiter=200, etol=1e-10):
     sigma=2S, matching the textbook TFIM convention H = -J*sigmax*sigmax
     - h*sigmaz)."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
     h_op = -4 * J * ic.SxC[0] * ic.SxR[0] - 2 * h * ic.SzC[0]
     ic.maxm, ic.maxiter, ic.etol = maxm, maxiter, etol
     ic.set_hamiltonian(h_op)
@@ -1313,6 +1342,7 @@ def test_local_excitation_gap_windowed_rejects_n_uc2():
     n_uc=2 -- see its own docstring."""
     j_strong, j_weak = 1.0, 0.4
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    ic.gs_method = "idmrg"
     h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
          + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0]))
     ic.maxm, ic.maxiter, ic.etol = 10, 50, 1e-9
@@ -1323,6 +1353,7 @@ def test_local_excitation_gap_windowed_rejects_n_uc2():
 
 def test_local_excitation_gap_windowed_before_set_hamiltonian_raises():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
     with pytest.raises(RuntimeError):
         ic.local_excitation_gap(window=1)
 

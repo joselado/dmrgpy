@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 ### (1) self-overlap and gauge-invariance under apply_mpo(Id) ###
 ################################################################
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic.gs_method = "idmrg"
 h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
 ic.set_hamiltonian(h)
 ic.maxm, ic.maxiter, ic.etol = 30, 60, 1e-9
@@ -56,11 +57,13 @@ assert abs(abs(ov_gauge) - 1.0) < 1e-6
 ### (2) two independently-converged, oppositely-polarized product states ###
 ########################################################################
 ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic_up.gs_method = "idmrg"
 ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
 ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
 ic_up.gs_energy()
 
 ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic_down.gs_method = "idmrg"
 ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
 ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
 ic_down.gs_energy()

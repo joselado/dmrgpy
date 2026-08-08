@@ -50,9 +50,14 @@ engine only. Static correlators (`onsite_expectation`/`two_point_correlator`
 below) ARE implemented directly on a VUMPSResult, computed from the mixed-
 gauge {AC, AR} rather than idmrg.py's dominant-right-fixed-point
 eigenproblem -- see those functions' own docstrings, and
-Infinite_Many_Body_Chain.vev/correlator for the itensor_version="python"
-gs_method="vumps" public dispatch (itensor_version=3's own vumps path still
-has no correlator support, so that precedent still stands there).
+Infinite_Many_Body_Chain.vev/correlator for the public dispatch (also
+ported to itensor_version=3's own gs_method="vumps" path,
+mpscpp3/chain_session.h's Chain::vumps_onsite_expectation/
+vumps_two_point_correlator -- a line-for-line C++ port of this module's
+own formula, see that header's own doc comment). `imps_sum` (see this
+module's own "Summing two converged VUMPS iMPS" section docstring further
+below) is the VUMPS-mixed-gauge analogue of idmrg.py's own `imps_sum` --
+pyitensor only, same physical scope limit.
 
 == Convergence robustness (honest scope note) ==
 
@@ -940,3 +945,185 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     X = idmrg._apply_transfer_from_left(E_AR_op, X)
 
     return complex(np.trace(X))
+
+
+# == Summing two converged VUMPS iMPS ========================================
+#
+# imps_sum(result_a, result_b) is the VUMPS/mixed-gauge analogue of
+# idmrg.imps_sum -- see that function's own module-level docstring in
+# idmrg.py ("Summing two converged iMPS" section) for the full physical
+# derivation, which applies here unchanged. The construction:
+#
+# 1. Block-diagonal direct sum of result_a.AL and result_b.AL (grouped-
+#    supersite tensors, bond dimension D_a+D_b) -- both are already
+#    individually left-canonical (isometric) by construction of any
+#    converged VUMPSResult, so this raw direct sum is ALREADY exactly
+#    left-canonical too (a block-diagonal direct sum of two isometries is
+#    itself an isometry: sum_p AL_sum_p^dagger AL_sum_p = block_diag(sum_p
+#    AL_a_p^dagger AL_a_p, sum_p AL_b_p^dagger AL_b_p) = block_diag(I,I) =
+#    I) -- unlike idmrg._periodic_direct_sum's own per-sublattice list
+#    construction, no per-position loop is needed here: VUMPS already
+#    works at the single grouped-supersite level (n_uc sites folded into
+#    one d_g-dimensional site via `_group_automaton`), so there is only
+#    ever one cut to sum across.
+# 2. Re-canonicalize/truncate via `idmrg._canonicalize_periodic` (the same
+#    two-sided fixed-point procedure idmrg.py's own apply_mpo/imps_sum
+#    already use), called here on a trivial n_uc=1 "periodic chain" --
+#    reused rather than skipped even though step 1's raw tensor is already
+#    left-canonical, because this is also what applies the caller's
+#    requested (cutoff, maxdim) truncation via a genuine two-sided
+#    fixed-point SVD (not a naive per-block truncation), and, crucially,
+#    is where the SAME degeneracy check idmrg.imps_sum relies on
+#    (`idmrg._dominant_right_fixed_point`, called internally) fires for
+#    the "two ordinary/tied-norm branches" case -- see below.
+# 3. Complete the resulting left-canonical AL to the full mixed gauge
+#    {AL, AR, C, AC} via `_complete_mixed_gauge` -- the standard "bringing
+#    a uniform MPS to canonical form" construction (Vanderstraeten,
+#    Haegeman, Verstraete, "Tangent-space methods for uniform matrix
+#    product states", arXiv:1810.07006, Sec. 2.1, Eq. (9)-(17), specialized
+#    to an already-left-canonical input): factor AL's own dominant right
+#    transfer-matrix fixed point r = C C^dagger, then AR := C^-1 AL C and
+#    AC := AL C (== C AR algebraically, by construction of AR -- not merely
+#    approximately). This is NOT a further VUMPS energy-minimization step
+#    (imps_sum's output is generally not an eigenstate of anything) --
+#    purely bookkeeping to re-derive a valid, self-consistent mixed gauge
+#    for whatever tensor step 2 produced, exactly as `_random_initial_
+#    state`'s own two-direction canonicalization trick does for a fresh
+#    random tensor (see that function's own docstring), except here C is
+#    solved for properly (via the fixed-point equation) rather than left at
+#    the identity, since there is no follow-up VUMPS iteration here to fix
+#    up an inconsistent C the way there is for a fresh VUMPS run.
+#
+# PHYSICAL SCOPE -- identical to idmrg.imps_sum's own scope note (see
+# idmrg.py's "Summing two converged iMPS" section docstring for the full
+# derivation). Every converged VUMPSResult has AL exactly left-canonical
+# AND AR exactly right-canonical by construction of the mixed gauge, so
+# BOTH its left and right transfer eigenvalues are exactly 1 (not merely
+# close) -- summing two ordinary VUMPSResults therefore produces a
+# combined transfer matrix with a genuinely 2-fold degenerate dominant
+# eigenvalue (block (a,a) and block (b,b) each contribute eigenvalue 1;
+# see idmrg.py's `_dominant_eigenvalue_mixed`/`imps_overlap` machinery for
+# why the cross (a,b) block generically has magnitude <1 instead, short of
+# a genuine gauge-equivalence between the two states), and
+# `idmrg._dominant_right_fixed_point`'s own degeneracy check (reused here
+# unmodified, inside step 2's `_canonicalize_periodic` call) reliably
+# raises RuntimeError there rather than silently collapsing to one
+# arbitrary branch -- confirmed directly (see this module's test suite):
+# the same "orthogonality catastrophe" arXiv:1810.07006 Eq.(22)-(24) and
+# its own Sec. 2.1 remark on non-injective/"cat state" MPS describe in the
+# uniform-MPS language directly. Only two states with a genuine per-site
+# norm mismatch (e.g. one deliberately rescaled -- ordinary VUMPSResults
+# never carry this on their own) have a well-posed sum, exactly mirroring
+# idmrg.imps_sum's own worked example.
+
+
+def _complete_mixed_gauge(AL):
+    """(AR, C, AC): completes a left-canonical grouped-supersite tensor AL
+    (D,d_g,D) to the full VUMPS mixed gauge -- the standard "bring a
+    uniform MPS to canonical form" construction (Vanderstraeten, Haegeman,
+    Verstraete, arXiv:1810.07006, Eq. (9)-(17)), specialized to an
+    already-left-canonical input (that reference's own transform "L",
+    which maps a general raw tensor to left-canonical form, is already the
+    identity here): factor AL's own dominant right transfer-matrix fixed
+    point r = C C^dagger (Hermitian PSD square root via `eigh`, mirroring
+    `idmrg._psd_sqrt_factor`'s own reasoning for Hermitizing before the
+    square root -- r is guaranteed Hermitian PSD in theory, but
+    `idmrg._dominant_right_fixed_point`'s general (non-symmetric)
+    eigensolver only returns it Hermitian up to numerical noise), then
+    AR := C^-1 @ AL @ C and AC := AL @ C -- AC == C @ AR is then an exact
+    algebraic identity (not merely approximate), since AR is defined in
+    terms of C in the first place: C @ AR = C @ C^-1 @ AL @ C = AL @ C.
+
+    AL's dominant right eigenvalue is guaranteed to equal exactly 1 (up to
+    numerical noise), not merely close to it: AL is left-canonical by
+    construction (sum_p AL_p^dagger AL_p = I exactly), which is precisely
+    the statement that I is the transfer matrix's own LEFT fixed point
+    with eigenvalue exactly 1 -- and a matrix's spectrum is identical
+    whether obtained via its left or right eigenvectors (same operator, T
+    and T^T share eigenvalues), so this is not an extra assumption, just
+    that fact reused. `idmrg._dominant_right_fixed_point` raises
+    RuntimeError if AL's own dominant eigenvalue is (near-)degenerate --
+    see this module's own "Summing two converged VUMPS iMPS" section
+    docstring above for why that is the expected, correct outcome when AL
+    is itself already a block-diagonal direct sum of two equally-
+    normalized branches, not a bug to route around here."""
+    D, d_g, _ = AL.shape
+    left, right, phys = (Index(D, tags="Link"), Index(D, tags="Link"),
+                          Index(d_g, tags="Site"))
+    Es = idmrg._transfer_matrices([ITensor((left, phys, right), AL)], 1)
+    r, _eta = idmrg._dominant_right_fixed_point(Es)
+    herm = (r + r.conj().T) / 2
+    evals, evecs = np.linalg.eigh(herm)
+    evals = np.clip(evals.real, 0.0, None)
+    C = (evecs * np.sqrt(evals)[None, :]) @ evecs.conj().T
+    Cinv = np.linalg.pinv(C)
+    AR = np.einsum('ab,bpc,cd->apd', Cinv, AL, C)
+    AC = np.einsum('apb,bc->apc', AL, C)
+    return AR, C, AC
+
+
+class UniformMPS:
+    """A converged/summed VUMPS-mixed-gauge uniform iMPS with no
+    ground-state-specific bookkeeping -- same shape as VUMPSResult
+    (sites_uc, n_uc, D, d_g, AL, AR, C, AC) minus e0/GL/GR/W/converged/
+    niter_done/gauge_mismatch, which have no meaning for imps_sum's output
+    (not a Hamiltonian eigenstate, and not built from any particular
+    automaton). onsite_expectation/two_point_correlator only ever read
+    .sites_uc/.n_uc/.AC/.AR off their `result` argument, so they accept a
+    UniformMPS directly, no changes needed there. `eta` is imps_sum's own
+    norm diagnostic (mirrors idmrg.PeriodicMPS.eta)."""
+
+    def __init__(self, sites_uc, n_uc, D, d_g, AL, AR, C, AC, eta):
+        self.sites_uc = sites_uc
+        self.n_uc = n_uc
+        self.D = D
+        self.d_g = d_g
+        self.AL = AL
+        self.AR = AR
+        self.C = C
+        self.AC = AC
+        self.eta = eta
+
+
+def imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None):
+    """Direct sum of two converged infinite MPS in VUMPS mixed gauge
+    (`result_a`/`result_b`: VUMPSResult and/or UniformMPS, any combination
+    -- same duck typing as idmrg.imps_sum), returning a new UniformMPS --
+    the VUMPS analogue of idmrg.imps_sum. See this module's own "Summing
+    two converged VUMPS iMPS" section docstring above for the construction
+    and the physical scope limit (in particular, why summing two
+    *ordinary* VUMPSResults, always individually normalized so eta=1 on
+    both the left and right transfer eigenvalue, reliably raises
+    RuntimeError rather than silently returning one arbitrary branch).
+
+    Requires both states to share the same n_uc and grouped physical
+    dimension d_g (mirrors idmrg.imps_sum's own per-sublattice physical-
+    dimension check, specialized to VUMPS's single-grouped-supersite
+    representation) -- raises ValueError otherwise. Bond dimensions need
+    not match."""
+    n_uc = result_a.n_uc
+    if result_b.n_uc != n_uc:
+        raise ValueError(
+            "vumps.imps_sum: unit-cell size mismatch (result_a.n_uc={}, "
+            "result_b.n_uc={})".format(n_uc, result_b.n_uc))
+    if result_a.d_g != result_b.d_g:
+        raise ValueError(
+            "vumps.imps_sum: grouped physical dimension mismatch "
+            "(result_a.d_g={}, result_b.d_g={})".format(
+                result_a.d_g, result_b.d_g))
+    d_g = result_a.d_g
+    Da, Db = result_a.AL.shape[0], result_b.AL.shape[0]
+    D = Da + Db
+    raw = np.zeros((D, d_g, D), dtype=complex)
+    raw[:Da, :, :Da] = result_a.AL
+    raw[Da:, :, Da:] = result_b.AL
+
+    left, right, phys = (Index(D, tags="Link"), Index(D, tags="Link"),
+                          Index(d_g, tags="Site"))
+    B = ITensor((left, phys, right), raw)
+    AL_list, eta = idmrg._canonicalize_periodic([B], 1, cutoff, maxdim)
+    AL_new = idmrg._to_array_lpr(AL_list[0])
+    AR_new, C_new, AC_new = _complete_mixed_gauge(AL_new)
+    D_new = AL_new.shape[0]
+    return UniformMPS(result_a.sites_uc, n_uc, D_new, d_g,
+                       AL_new, AR_new, C_new, AC_new, eta)

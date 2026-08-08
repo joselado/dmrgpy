@@ -2097,18 +2097,20 @@ fixed-length system. Currently limited to a 1- or 2-site unit cell
 supported (pass it as a constructor keyword, e.g.\
 \texttt{Infinite\_Spin\_Chain(["1/2"], itensor\_version=3)}) -- \texttt{2}
 and \texttt{"julia\_live"} have no iDMRG port and also raise
-\texttt{NotImplementedError}. The v3 C++ backend
+\texttt{NotImplementedError}. \texttt{ic.gs\_method} (\texttt{"vumps"} by
+default, on EITHER backend since 2026-08-08 -- see below) picks the
+ground-state solver: the v3 C++ backend's \texttt{gs\_method="idmrg"}
 (\texttt{mpscpp3/chain\_session.h}'s \texttt{Chain::idmrg\_ground\_state},
 a line-by-line port of \texttt{pyitensor/idmrg.py}'s own growing
-algorithm) computes the energy density only;
-\texttt{vev}/\texttt{correlator} still require
-\texttt{itensor\_version="python"} regardless of which backend
-\texttt{gs\_energy} itself was run with, since v3 has no
-static-correlator machinery yet. Relative speed depends on the model:
-v3 is $\sim$2.6--2.7x slower than \texttt{"python"} for a gapless
-(critical) chain (the local 2-site solve needs close to its full
-Krylov dimension every macro-iteration), but can be \emph{faster} for
-a gapped model, where that same solve converges quickly -- see
+algorithm) computes the energy density only -- \texttt{vev}/
+\texttt{correlator} there raise \texttt{NotImplementedError};
+\texttt{gs\_method="vumps"} supports \texttt{vev}/\texttt{correlator} on
+BOTH backends (see "Static correlators" below). Relative speed depends
+on the model: v3's own \texttt{idmrg\_ground\_state} is $\sim$2.6--2.7x
+slower than \texttt{"python"}'s for a gapless (critical) chain (the
+local 2-site solve needs close to its full Krylov dimension every
+macro-iteration), but can be \emph{faster} for a gapped model, where
+that same solve converges quickly -- see
 \texttt{docs/documentation.tex}'s iDMRG section for benchmark numbers.
 
 \textbf{Building the Hamiltonian: \texttt{L}/\texttt{C}/\texttt{R}-suffixed
@@ -2175,14 +2177,16 @@ more reliably.
 \textbf{Static correlators.} After \texttt{gs\_energy()} (called
 automatically by \texttt{vev}/\texttt{correlator} if not already run),
 one- and two-point expectation values of the converged infinite chain are
-available via the standard infinite-MPS transfer-matrix formalism. Only
-\texttt{itensor\_version="python"} supports this -- calling
-\texttt{vev}/\texttt{correlator} on an \texttt{itensor\_version=3} chain
+available via the standard infinite-MPS transfer-matrix formalism.
+\texttt{itensor\_version="python"} supports this under both
+\texttt{gs\_method="vumps"} (the default, see below) and
+\texttt{gs\_method="idmrg"} (described in this paragraph);
+\texttt{itensor\_version=3} supports it under \texttt{gs\_method="vumps"}
+only -- calling \texttt{vev}/\texttt{correlator} on an
+\texttt{itensor\_version=3} chain with \texttt{gs\_method="idmrg"} still
 raises \texttt{NotImplementedError} (even after a successful
-\texttt{gs\_energy()}), since the v3 backend has no correlator machinery
-yet. Both \texttt{gs\_method="idmrg"} (the default, described in this
-paragraph) and \texttt{gs\_method="vumps"} (see below) support
-\texttt{vev}/\texttt{correlator}:
+\texttt{gs\_energy()}), since that solver's result keeps no
+per-sublattice tensor list to build a correlator from:
 
 \begin{lstlisting}
 ic.vev("Sz", 0)                    # <Sz> at site 0 of the unit cell
@@ -2228,13 +2232,14 @@ needed, prefer expressing the same physical model as an
 couplings) instead, and use the self-consistency check either way
 before trusting a result.
 
-\textbf{An alternative ground-state solver: VUMPS.}
-\texttt{ic.gs\_method = "vumps"} (default \texttt{"idmrg"}) switches
+\textbf{The default ground-state solver: VUMPS.}
+\texttt{ic.gs\_method = "vumps"} (the default since 2026-08-08) switches
 \texttt{gs\_energy()} from the growing algorithm above to VUMPS
 (Variational Uniform Matrix Product States, Zauner-Stauber et al.,
 arXiv:1701.07035; see \texttt{pyitensor/vumps.py}'s own module
 docstring for the algorithm) -- instead of growing a finite window and
-truncating it down to \texttt{maxm} at every step, VUMPS solves
+truncating it down to \texttt{maxm} at every step (the
+\texttt{gs\_method="idmrg"} growing algorithm above), VUMPS solves
 directly, in the thermodynamic limit, for the actual
 \texttt{maxm}-dimensional variational optimum (\texttt{ic.maxm} sets
 VUMPS's own target bond dimension $D$ here too). Both
@@ -2246,7 +2251,12 @@ tensor-network objects, since the bond/physical dimensions this feature
 targets are always small; see that method's own doc comment) support
 \texttt{gs\_method="vumps"}; the two are cross-checked directly against
 each other to $\sim$$10^{-10}$ or tighter on TFIM/Heisenberg at
-$D=1,2,3$ (\texttt{tests/test\_vumps\_v3.py}):
+$D=1,2,3$ (\texttt{tests/test\_vumps\_v3.py}). Explicitly set
+\texttt{ic.gs\_method = "idmrg"} instead for
+\texttt{local\_excitation\_gap}/\texttt{td\_dynamical\_correlator} (no
+VUMPS equivalent, see their own sections below) or for VUMPS's
+documented $D>1$ convergence-robustness gap (see below) if the growing
+algorithm's own more battle-tested behavior is preferred:
 
 \begin{lstlisting}
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
@@ -2260,32 +2270,41 @@ density = ic.gs_energy()
 \end{lstlisting}
 
 \texttt{vev}/\texttt{correlator} also work under
-\texttt{gs\_method="vumps"} (\texttt{pyitensor.vumps.onsite\_expectation}/
-\texttt{two\_point\_correlator}), computed directly from the converged
-mixed-gauge \texttt{\{AC, AR\}} rather than \texttt{pyitensor.idmrg}'s
-dominant-right-fixed-point eigenproblem: \texttt{AC} is already the
-exactly-normalized single-(super)site reduced state by construction of
-the mixed canonical gauge (Vanderstraeten, Haegeman, Verstraete,
-``Tangent-space methods for uniform matrix product states'',
-arXiv:1810.07006, Eq.(34)), and \texttt{AR}'s exact right-orthonormality
-lets a two-point correlator spanning multiple unit cells close by a
-direct trace with no eigenproblem either (the mixed-gauge analogue of
-that same review's Eq.(37)--(39)). Unlike the growing-algorithm's own
-reconstructed-from-the-last-macro-iteration correlators above, these
-carry no \texttt{maxiter}/$\langle H_{uc}\rangle$-self-consistency
-caveat -- VUMPS solves directly at the target bond dimension in the
-thermodynamic limit, so once \texttt{.converged} is \texttt{True} the
-correlator is exact for that converged \texttt{\{AL,AR,C\}}, only
-limited by the bond dimension $D$ itself (same caveat as the energy
-density, see below). \texttt{local\_excitation\_gap} is the one method
-that still requires \texttt{gs\_method="idmrg"} specifically (it
-re-diagonalizes the growing algorithm's own final 2-site effective
-Hamiltonian, which has no VUMPS equivalent); conversely
+\texttt{gs\_method="vumps"}, on BOTH backends:
+\texttt{pyitensor.vumps.onsite\_expectation}/\texttt{two\_point\_correlator}
+for \texttt{itensor\_version="python"}, and
+\texttt{Chain::vumps\_onsite\_expectation}/\texttt{vumps\_two\_point\_correlator}
+(a line-for-line C++ port of the same formula) for
+\texttt{itensor\_version=3} -- cross-checked directly against each other
+to $\sim10^{-14}$ or tighter on TFIM at $D=2,3$
+(\texttt{tests/test\_vumps\_correlator\_v3.py}). Both are computed
+directly from the converged mixed-gauge \texttt{\{AC, AR\}} rather than
+\texttt{pyitensor.idmrg}'s dominant-right-fixed-point eigenproblem:
+\texttt{AC} is already the exactly-normalized single-(super)site reduced
+state by construction of the mixed canonical gauge (Vanderstraeten,
+Haegeman, Verstraete, ``Tangent-space methods for uniform matrix product
+states'', arXiv:1810.07006, Eq.(34)), and \texttt{AR}'s exact
+right-orthonormality lets a two-point correlator spanning multiple unit
+cells close by a direct trace with no eigenproblem either (the
+mixed-gauge analogue of that same review's Eq.(37)--(39)). Unlike the
+growing-algorithm's own reconstructed-from-the-last-macro-iteration
+correlators above, these carry no \texttt{maxiter}/$\langle
+H_{uc}\rangle$-self-consistency caveat -- VUMPS solves directly at the
+target bond dimension in the thermodynamic limit, so once
+\texttt{.converged} is \texttt{True} the correlator is exact for that
+converged \texttt{\{AL,AR,C\}}, only limited by the bond dimension $D$
+itself (same caveat as the energy density, see below).
+\texttt{local\_excitation\_gap} is the one method that still requires
+\texttt{gs\_method="idmrg"} specifically (it re-diagonalizes the growing
+algorithm's own final 2-site effective Hamiltonian, which has no VUMPS
+equivalent), and only on \texttt{itensor\_version="python"} at that
+(\texttt{itensor\_version=3} has no correlator machinery under
+\texttt{gs\_method="idmrg"} at all, see above); conversely
 \texttt{excitation\_energies}/\texttt{excitation\_gap} (below)
-\emph{require} \texttt{gs\_method="vumps"} -- they need
+\emph{require} \texttt{gs\_method="vumps"} (the default) -- they need
 \texttt{VUMPSResult}'s own mixed-gauge \texttt{\{AL,AR,C,GL,GR\}}, which
 the growing algorithm's \texttt{IDMRGResult}
-(\texttt{gs\_method="idmrg"}, the default) has no equivalent of.
+(\texttt{gs\_method="idmrg"}) has no equivalent of.
 
 \begin{lstlisting}
 ic.gs_method = "vumps"
@@ -2393,8 +2412,8 @@ local ground vector already found, in the very same local Hilbert space),
 the constraint is enforced exactly via deflation (projecting out the
 ground vector), which is what a penalty method converges to anyway as its
 weight $\to\infty$. Unlike \texttt{excitation\_gap}, this requires
-\texttt{gs\_method="idmrg"} (not \texttt{"vumps"}) and carries no
-momentum label -- it is a single number, not a dispersion:
+\texttt{gs\_method="idmrg"} (not \texttt{"vumps"}, the default) and
+carries no momentum label -- it is a single number, not a dispersion:
 
 \begin{verbatim}
 ic.local_excitation_gap()   # a single scalar, no k dependence
@@ -2741,5 +2760,51 @@ this module does not have yet -- a documented, deliberate scope limit,
 not something silently gotten wrong. See \texttt{pyitensor/idmrg.py}'s
 own ``Summing two converged iMPS'' section docstring for the full
 derivation and empirical confirmation.
+
+\textbf{Direct sum of two converged VUMPS iMPS (advanced).}
+\texttt{pyitensor.vumps.imps\_sum(result\_a, result\_b, cutoff=...,
+maxdim=...)} is the VUMPS-mixed-gauge analogue of \texttt{idmrg.imps\_sum}
+immediately above -- same construction in spirit (block-diagonal direct
+sum, re-canonicalized/truncated via \texttt{idmrg.\_canonicalize\_periodic}),
+but working on \texttt{VUMPSResult}'s own grouped-supersite \texttt{AL}
+tensor (bond dimension \texttt{D\_a+D\_b}) rather than
+\texttt{idmrg.py}'s per-sublattice periodic \texttt{U\_list}, and
+returning a new \texttt{pyitensor.vumps.UniformMPS} (accepted directly by
+\texttt{vumps.onsite\_expectation}/\texttt{two\_point\_correlator}, same
+duck typing as \texttt{idmrg.PeriodicMPS}) whose full mixed gauge
+$\{A_L,A_R,C,A_C\}$ is then reconstructed via
+\texttt{vumps.\_complete\_mixed\_gauge} -- the standard ``bringing a
+uniform MPS to canonical form'' procedure (Vanderstraeten, Haegeman,
+Verstraete, ``Tangent-space methods for uniform matrix product states'',
+arXiv:1810.07006, Eq.(9)-(17): factor the truncated $A_L$'s own dominant
+right transfer-matrix fixed point $r=CC^\dagger$, then
+$A_R := C^{-1}A_L C$ and $A_C := A_L C$):
+
+\begin{lstlisting}
+from dmrgpy.pyitensor import vumps
+
+result = vumps.imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None)
+\end{lstlisting}
+
+Same physical scope restriction as \texttt{idmrg.imps\_sum} above, for the
+same reason: every converged \texttt{VUMPSResult} has $A_L$ exactly
+left-canonical \emph{and} $A_R$ exactly right-canonical by construction of
+the mixed gauge, so both its left and right self-overlap transfer
+eigenvalues are exactly \texttt{eta=1} -- summing two ordinary
+\texttt{VUMPSResult}s therefore always hits the same
+degenerate-dominant-eigenvalue tie \texttt{idmrg.imps\_sum} does, and
+\texttt{imps\_sum} raises \texttt{RuntimeError} there rather than silently
+returning one arbitrary branch (arXiv:1810.07006's own Sec.~2.1
+independently makes the same point: non-injective/``cat state'' MPS
+tensors are exactly the ones with a degenerate dominant transfer-matrix
+eigenvalue). Only two states with a genuine per-site norm mismatch (e.g.\
+one deliberately rescaled, exactly mirroring \texttt{idmrg.imps\_sum}'s
+own worked example) have a well-posed sum -- see
+\texttt{pyitensor/vumps.py}'s own ``Summing two converged VUMPS iMPS''
+section docstring for the full derivation, and
+\texttt{examples/idmrg/vumps\_imps\_sum/main.py} for a worked example of
+both cases plus a cross-check of the surviving branch's
+\texttt{onsite\_expectation}/\texttt{two\_point\_correlator} at genuinely
+entangled $D>1$.
 
 \end{document}

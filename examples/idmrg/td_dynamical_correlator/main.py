@@ -39,6 +39,7 @@ import matplotlib.pyplot as plt
 from dmrgpy import infinitechain
 
 ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
+ic.gs_method = "idmrg"
 h = 1.4*ic.SzC[0] + ic.SxC[0]*ic.SxR[0]  # gapped, transverse-field-like model
 ic.set_hamiltonian(h)
 ic.maxm, ic.maxiter, ic.etol, ic.niter = 20, 300, 1e-12, 150

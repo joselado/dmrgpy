@@ -305,10 +305,10 @@ iDMRG doesn't support fermionic terms yet on either backend).
 implements Variational Uniform Matrix Product States (Zauner-Stauber,
 Vanderstraeten, Fishman, Verstraete, Haegeman, arXiv:1701.07035) as a
 completely independent ground-state solver, reached via
-`self.gs_method="vumps"` (`itensor_version="python"` only — checked
-*before* the `itensor_version`/`gs_method` combination is dispatched in
-`gs_energy`, alongside the existing `itensor_version` check) rather than
-`pyitensor/idmrg.py`'s growing algorithm. Unlike that growing algorithm
+`self.gs_method="vumps"` (the default since 2026-08-08, on EITHER
+`itensor_version` -- `itensor_version=3` calls `Chain::vumps_ground_state`
+instead, see below) rather than `pyitensor/idmrg.py`'s growing algorithm
+(`self.gs_method="idmrg"`). Unlike that growing algorithm
 — which extends a finite window indefinitely and truncates it back down
 to `maxm` at every micro-step, so its own converged `U_list` is only an
 approximation to the true `maxm`-dimensional optimum — VUMPS solves
@@ -348,13 +348,15 @@ closure. `Infinite_Many_Body_Chain.vev`/`correlator` dispatch on
 `self.gs_method` to call either `idmrg.py`'s or `vumps.py`'s version
 directly. `local_excitation_gap` remains `gs_method="idmrg"`-only (it
 re-diagonalizes the growing algorithm's own final 2-site effective
-Hamiltonian, which has no VUMPS equivalent), mirroring the precedent
-`itensor_version=3` already sets (no correlator support there yet, for
-either `gs_method`) — `excitation_energies`/`excitation_gap` are the
-opposite: they require `gs_method="vumps"` (see below), since the
-tangent-space excitation ansatz needs exactly the mixed-gauge
-`{AL,AR,C,GL,GR}` `VUMPSResult` carries, which `IDMRGResult` has no
-equivalent of.
+Hamiltonian, which has no VUMPS equivalent). `itensor_version=3` now
+mirrors this too for `gs_method="vumps"` (see below) — `gs_method="idmrg"`
+there still has no correlator support at all (`IdmrgResult` keeps no
+per-sublattice `U_list`, the same gap `idmrg_ground_state`'s own doc
+comment already documents) — `excitation_energies`/`excitation_gap` are
+the opposite of `vev`/`correlator`: they require `gs_method="vumps"` (see
+below), since the tangent-space excitation ansatz needs exactly the
+mixed-gauge `{AL,AR,C,GL,GR}` `VUMPSResult` carries, which `IDMRGResult`
+has no equivalent of.
 
 **A confirmed, documented convergence-robustness gap, not fully closed.**
 Plain single-attempt VUMPS from a random initial tensor was confirmed
@@ -450,6 +452,33 @@ gapless/critical Heisenberg case (attributed to the two backends'
 independent, non-convex VUMPS restart searches landing on slightly
 different local optima there, not a discrepancy in the ported algorithm
 itself — see `tests/test_vumps_v3.py`/`tests/test_vumps_excitations_v3.py`).
+
+**Static correlators, ported to `itensor_version=3` too.**
+`Chain::vumps_onsite_expectation`/`Chain::vumps_two_point_correlator` are
+the same kind of line-for-line dense-array C++ port as `vumps_ground_state`/
+`vumps_excitation_energies` above, this time of `pyitensor/vumps.py`'s own
+`onsite_expectation`/`two_point_correlator` (see this section's own earlier
+paragraph for that algorithm — `AC`'s exact normalization and `AR`'s exact
+right-orthonormality, both direct consequences of the converged mixed
+gauge, mean no eigensolve is needed at either the left or the right
+closure). `Chain::vumps_embed_group_operator` (a new private helper) is the
+C++ analogue of `_embed_group_operator`'s `np.kron`-based embedding, built
+from the SAME per-sublattice dense operator matrices `idmrg_op_dense`
+already reads off `SiteSet::op()` for `idmrg_ground_state`'s own automaton
+construction, combined in the identical sequential (site 0 slowest, site
+`n_uc-1` fastest) order `vumps_group_automaton` itself uses for the grouped
+physical index — no separate re-derivation of that ordering convention.
+`Infinite_Many_Body_Chain.vev`/`correlator` route to it whenever
+`itensor_version=3` and `self.gs_method=="vumps"`, calling `gs_energy()`
+first (or re-running it, via the same `self._session3_has_vumps`
+bookkeeping `excitation_energies` already relies on) if the cached session
+does not already hold a converged VUMPS snapshot. Validated directly
+against `itensor_version="python"`'s own VUMPS correlators (not just the
+same exact-D=1 closed-form cases both backends already had — a
+field-polarized product state and a decoupled Heisenberg singlet dimer):
+matches to ~1e-14 or tighter across the ground-state energy, `vev`, and a
+multi-`r` correlator scan at `D=2,3` on the transverse-field Ising model —
+see `tests/test_vumps_correlator_v3.py`.
 
 **A real, previously-undetected bug this same audit found and fixed in
 the already-shipped `idmrg_build_row`** (shared by `idmrg_ground_state`
@@ -732,6 +761,57 @@ free too; confirmed not to trip on any pre-existing test or on
 `imps_overlap`'s own realistic (orthogonal and gauge-comparison) cases
 (all previously-passing `tests/test_infinite_chain.py` cases still pass).
 
+**Direct sum of two converged VUMPS iMPS (`pyitensor/vumps.py`'s
+`imps_sum`)**: the VUMPS-mixed-gauge port of `idmrg.py`'s own `imps_sum`
+above, following the same literature check this project's own standing
+practice requires before new physics work (arXiv:1810.07006, "Tangent-space
+methods for uniform matrix product states", Sec. 2.1's Eq.(9)-(17)
+"Algorithm for finding canonical forms", plus its own remark that
+non-injective/"cat state" MPS tensors — exactly what a degenerate dominant
+transfer-matrix eigenvalue signals, per that section's own footnote 4 —
+appear with "measure zero" and are excluded throughout that reference too,
+independently confirming the same scope limit `idmrg.imps_sum` already
+documents). Since VUMPS already works at a single grouped-supersite level
+(`n_uc` sites folded into one `d_g`-dimensional site via
+`_group_automaton`), there is only ever one cut to sum across — no
+per-sublattice list construction like `idmrg._periodic_direct_sum` is
+needed, just a single block-diagonal `(D_a+D_b, d_g, D_a+D_b)` tensor built
+from `result_a.AL`/`result_b.AL` directly. Both are already individually
+left-canonical (isometric) by construction of any converged `VUMPSResult`,
+so this raw direct sum is *already* exactly left-canonical too — a
+block-diagonal direct sum of two isometries is itself an isometry
+(confirmed algebraically: `sum_p AL_sum_p^dagger AL_sum_p =
+block_diag(sum_p AL_a_p^dagger AL_a_p, sum_p AL_b_p^dagger AL_b_p) =
+block_diag(I,I) = I`). `idmrg._canonicalize_periodic` is still reused on
+this raw tensor (as a trivial `n_uc=1` "periodic chain") rather than
+skipped, for two reasons: it applies the caller's requested
+`(cutoff, maxdim)` truncation via a genuine two-sided fixed-point SVD (not
+a naive per-block truncation), and — crucially — it is where the exact
+same `idmrg._dominant_right_fixed_point` degeneracy check `idmrg.imps_sum`
+relies on fires automatically for the "two ordinary/tied-eta branches"
+case, with no new degeneracy-detection code needed. A new helper,
+`_complete_mixed_gauge`, then completes the resulting truncated
+left-canonical `AL` to the full mixed gauge `{AL,AR,C,AC}`: factor `AL`'s
+own dominant right transfer-matrix fixed point `r = C C^dagger` (Hermitian
+PSD square root via `eigh`, mirroring `idmrg._psd_sqrt_factor`'s own
+Hermitizing-before-square-root reasoning), then `AR := C^-1 AL C` and
+`AC := AL C` (`== C @ AR` as an exact algebraic identity, not merely
+approximate, since `AR` is defined in terms of `C` in the first place).
+This is deliberately *not* a further VUMPS energy-minimization step
+(`imps_sum`'s output is generally not an eigenstate of anything) — purely
+gauge bookkeeping, unlike `_random_initial_state`'s own two-direction
+canonicalization trick (which leaves `C` at the identity, relying on a
+follow-up VUMPS iteration to fix it up; `imps_sum` has no such follow-up,
+so `C` is solved for properly here instead). The result is a new
+lightweight `UniformMPS` class (mirrors `idmrg.PeriodicMPS`'s relationship
+to `IDMRGResult`), accepted directly by `onsite_expectation`/
+`two_point_correlator` with no changes to either (both only ever read
+`.sites_uc`/`.n_uc`/`.AC`/`.AR`). Verified end-to-end against the
+untouched dominant branch's own `onsite_expectation`/`two_point_correlator`
+at genuinely entangled `D=2,3` (TFIM, gapped) to ~1e-6, not just the
+trivial `D=1` scalar case — see `tests/test_vumps_imps_sum.py` and
+`examples/idmrg/vumps_imps_sum/main.py`.
+
 **Excited states: the tangent-space/quasiparticle excitation ansatz
 (`pyitensor/idmrg_excitations.py`)**: an infinite chain's excitations
 form a momentum-resolved band `E(k)`, not a single discrete state a
@@ -739,8 +819,10 @@ finite chain has, so `Infinite_Many_Body_Chain.excitation_energies
 (k, n=1)`/`excitation_gap(ks=None)` implement the standard single-mode/
 quasiparticle ansatz (Haegeman et al.), built on top of a **VUMPS**
 ground state's own mixed-gauge `{AL, AR, C, GL, GR}` (requires
-`gs_method="vumps"`, the opposite requirement from `vev`/`correlator`/
-`local_excitation_gap` — see above): a tangent-space vector
+`gs_method="vumps"`, the default -- the opposite requirement from
+`local_excitation_gap`/`td_dynamical_correlator`, which need
+`gs_method="idmrg"` specifically; `vev`/`correlator` work under either
+— see above): a tangent-space vector
 `|Phi_k(X)> = sum_n e^{ikn} |...A_L A_L B_n(X) A_R A_R...>` with one
 excitation tensor `B(X)` inserted at every unit-cell position, weighted
 by momentum `k`. Multi-site unit cells are handled entirely inside

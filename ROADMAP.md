@@ -50,13 +50,13 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Generalized eigenvalue DMRG (Lagrange-multiplier trick, Hermitian) | ✅ | ✅ | ✅ | Julia via `mpsjulialive/generalized.jl`'s `get_gs_generalized` (same algorithm against ITensorMPS.jl's own `dmrg()`/`Sweeps`/`add()`). `groundstate.gs_energy_generalized` still raises for `itensor_version=2`. No ED fallback either (there is no ED implementation of this method at all). |
 | Non-Hermitian DMRG (biorthogonal, complex energies) | ✅ | ✅ | ✅ | Julia is the one backend that isn't a port of ITensorNHDMRG.jl — it calls the real package (`mpsjulialive/nhdmrg.jl`), with two corrections on top: its left vector solves the *transpose* equation (needs a conjugation), and its left solve isn't anchored to the right solve's eigenvalue, so a conjugate pair tied for the smallest real part needs an `exp(i*theta)*H` tie-break (anchored on the untied run's own eigenvalue, since the rotation can otherwise re-target a different one). Both are invisible on a complex-*symmetric* H — see `tests/test_nh_dmrg.py::nh_asymmetric_hopping_chain`. |
 | Non-Hermitian generalized eigenproblem | ✅ | ✅ | ✅ | Same story as above, one level up (`gs_energy_generalized_nhdmrg`; `mpsjulialive/generalized.jl`'s `get_gs_generalized_nhdmrg` wraps the same outer loop around real ITensorNHDMRG.jl sweeps). v2 still excluded. |
-| iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. Both `gs_method` values are now on v3 too: `"idmrg"` (`Chain::idmrg_ground_state`, the default) and `"vumps"` (`Chain::vumps_ground_state`, C++ port of `pyitensor/vumps.py` — dense LAPACK-based linear algebra, not ITensor tensor-network objects, see that method's own doc comment for why). Cross-checked directly against `itensor_version="python"`'s own VUMPS at `D=1,2,3` on TFIM and Heisenberg (n_uc=1 and 2), matching to ~1e-10 or tighter — see `tests/test_vumps_v3.py`. |
-| iDMRG vev / two-point correlator | ❌ | ✅ | ❌ | pyitensor only — v3's iDMRG session has no equivalent to `two_point_correlator`/`onsite_expectation` yet (neither `gs_method`). Within pyitensor, both `gs_method`s are covered: `"idmrg"` (`idmrg.py`, dominant-right-fixed-point eigenproblem on `IDMRGResult.U_list`) and `"vumps"` (`vumps.py`, exact contraction on `VUMPSResult`'s mixed-gauge `{AC, AR}` — no eigenproblem needed, since `AL`/`AR` are already canonical by construction; see `vumps.py`'s own "Static correlators" section, following arXiv:1810.07006 Eq.(34)/(37)-(39)). Cross-checked against `idmrg.py`'s independently-derived correlators on TFIM at `D=2,3` (`tests/test_vumps_correlator.py`). |
+| iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. Both `gs_method` values are now on v3 too: `"idmrg"` (`Chain::idmrg_ground_state`) and `"vumps"` (`Chain::vumps_ground_state`, C++ port of `pyitensor/vumps.py` — dense LAPACK-based linear algebra, not ITensor tensor-network objects, see that method's own doc comment for why; the default on BOTH backends since 2026-08-08). Cross-checked directly against `itensor_version="python"`'s own VUMPS at `D=1,2,3` on TFIM and Heisenberg (n_uc=1 and 2), matching to ~1e-10 or tighter — see `tests/test_vumps_v3.py`. |
+| iDMRG vev / two-point correlator | 🟡 | ✅ | ❌ | pyitensor covers both `gs_method`s: `"idmrg"` (`idmrg.py`, dominant-right-fixed-point eigenproblem on `IDMRGResult.U_list`) and `"vumps"` (`vumps.py`, exact contraction on `VUMPSResult`'s mixed-gauge `{AC, AR}` — no eigenproblem needed, since `AL`/`AR` are already canonical by construction; see `vumps.py`'s own "Static correlators" section, following arXiv:1810.07006 Eq.(34)/(37)-(39)). v3 covers `gs_method="vumps"` only (`Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`, a line-for-line C++ port of the same AC/AR formula, same dense-LAPACK-array approach as `vumps_ground_state`/`vumps_excitation_energies`) — `gs_method="idmrg"` still has no correlator machinery on v3 at all (`IdmrgResult` keeps no per-sublattice `U_list`, same gap `idmrg_ground_state`'s own doc comment already documents). Cross-checked directly against `itensor_version="python"`'s own VUMPS correlators on TFIM at `D=2,3`, matching to ~1e-14 or tighter, plus the same exact D=1 closed-form cases (field-polarized product state, decoupled singlet dimer) both backends already had — see `tests/test_vumps_correlator_v3.py`. |
 | iDMRG excitation ansatz (quasiparticle, tangent-space) | ✅ | ✅ | ❌ | `Chain::vumps_excitation_energies` (C++ port of `pyitensor/idmrg_excitations.py`, same dense-array approach as `vumps_ground_state`) — requires `gs_method="vumps"` on both backends. Cross-checked directly against `itensor_version="python"` across a full momentum scan at `D=1,2,3` on TFIM (n_uc=1) and Heisenberg (n_uc=2), matching to ~1e-10 (TFIM, gapped) or ~1e-4..1e-7 (Heisenberg, gapless/critical — both backends land on slightly different local optima of the same non-convex restart search, not a discrepancy in the algorithm itself) — see `tests/test_vumps_excitations_v3.py`. Any `D>=1` is supported, matching pyitensor. |
 | iDMRG local excitation gap (deflation-based, `D`-capable) | ❌ | ✅ | ❌ | pyitensor only (`idmrg.py::local_excitation_gap`/`local_excitation_gap_windowed`). |
 | iDMRG dynamical correlator (finite-window KPM reduction) | ❌ | ✅ | ❌ | `infinitechain.py::kpm_finite` is gated to `itensor_version="python"` only. |
 | iDMRG real-time window dynamics (IBC-style TDVP, `td_dynamical_correlator`) | ✅ | ✅ | ❌ | Both wired (`idmrg_window.py` for pyitensor, `mpscpp3/chain_session.h`'s `td_dynamical_correlator_window` for v3); Phase 2+ generic sweep machinery beyond the current window construction is still pyitensor-only groundwork (`idmrg_window.py`'s own Phase 0-1 notes). |
-| iDMRG cat-state superposition (`imps_sum` across distinct branches) | ❌ | ❌ | ❌ | Two *identical* branches sum fine (`imps_sum`); a true superposition of two physically distinct symmetry-broken ground states needs new correlator machinery not yet written for any backend. |
+| iDMRG cat-state superposition (`imps_sum` across distinct branches) | ❌ | ❌ | ❌ | Two branches with a genuine per-site norm mismatch sum fine, on both of pyitensor's ground-state representations (`idmrg.imps_sum` on `IDMRGResult`'s periodic `U_list`, and, since 2026-08-08, `vumps.imps_sum` on `VUMPSResult`'s mixed gauge `{AL,AR,C,AC}` — same construction and physical scope, ported per arXiv:1810.07006 Eq.(9)-(17)'s canonical-form algorithm, see `tests/test_vumps_imps_sum.py`/`examples/idmrg/vumps_imps_sum/main.py`); a true cat-state superposition of two physically distinct, EQUALLY-normalized symmetry-broken ground states (the degenerate-eta case both `imps_sum`s reliably raise `RuntimeError` on) needs new correlator machinery not yet written for any backend. |
 
 ## 2. Expectation values, static correlators, entanglement
 
@@ -167,8 +167,12 @@ model-specific exception:
    vumps_ground_state`/`Chain::vumps_excitation_energies`,
    `mpscpp3/chain_session.h`) — see item 7 below.
 5. **iDMRG cat-state superpositions.** No backend supports summing two
-   *physically distinct* symmetry-broken iDMRG ground states; needs new
-   correlator machinery from scratch.
+   *physically distinct, equally-normalized* symmetry-broken iDMRG ground
+   states; needs new correlator machinery from scratch. (Summing two
+   states with a genuine per-site norm mismatch is supported, on both
+   pyitensor ground-state representations — `idmrg.imps_sum` and, since
+   2026-08-08, `vumps.imps_sum` — see item 7's own row in the matrix
+   above.)
 6. **v2 (legacy) parity.** Deliberately not being chased — v2 predates
    `TDVP/` entirely and is kept mainly as the historical QN-conserving
    reference implementation, not a target for new features.
@@ -235,6 +239,33 @@ model-specific exception:
    validated against). Fixed at the shared root cause (`idmrg_build_row`,
    used by both `idmrg_ground_state` and the new `vumps_ground_state`),
    not patched per call site.
+
+8. **iDMRG VUMPS static correlators, ported to `itensor_version=3`.**
+   `Chain::vumps_onsite_expectation`/`Chain::vumps_two_point_correlator`
+   (`mpscpp3/chain_session.h`) close the correlator half of the gap item
+   7 above left open (that item ported the ground-state solver and the
+   excitation ansatz, but explicitly not `vev`/`correlator` — `v3`'s
+   `IdmrgResult` keeps no per-sublattice `U_list`, so `gs_method="idmrg"`
+   still has no correlator support at all on this backend, and did not
+   before this item either). Same deliberate architecture as item 7's own
+   port: a line-for-line dense-array translation of `pyitensor/vumps.py`'s
+   `onsite_expectation`/`two_point_correlator` (`AC`'s exact normalization
+   and `AR`'s exact right-orthonormality mean neither the left nor the
+   right closure needs an eigensolve), plus one new private helper,
+   `Chain::vumps_embed_group_operator` (the C++ analogue of
+   `_embed_group_operator`'s `np.kron`-based embedding, reusing the same
+   per-sublattice dense operator matrices `idmrg_op_dense` already
+   provides for `idmrg_ground_state`'s own automaton construction).
+   `Infinite_Many_Body_Chain.vev`/`correlator` now route to it whenever
+   `itensor_version=3` and `self.gs_method=="vumps"`. Validated directly
+   against `itensor_version="python"`'s own VUMPS correlators: the same
+   exact `D=1` closed-form cases both backends already had (a
+   field-polarized product state, a decoupled Heisenberg singlet dimer),
+   plus a direct cross-check against `itensor_version="python"` on TFIM
+   at `D=2,3`, matching to ~1e-14 or tighter across the ground-state
+   energy, `vev`, and a multi-`r` correlator scan — see
+   `tests/test_vumps_correlator_v3.py` and
+   `examples/idmrg/vumps_correlator_v3_VS_python/main.py`.
 
 ## Pointers for extending a backend
 

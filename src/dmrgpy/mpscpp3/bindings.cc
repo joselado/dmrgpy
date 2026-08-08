@@ -206,6 +206,22 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "cell) -- requires vumps_ground_state to have been called "
                "first on this same Chain, see "
                "Chain::vumps_excitation_energies's own comment.")
+        .def("vumps_onsite_expectation",[](Chain& self, std::string const& opname, int p) {
+                return self.vumps_onsite_expectation(opname,p);
+            }, py::arg("opname"),py::arg("p"),
+               "<opname> at sub-site p (0..n_uc-1) of a converged "
+               "vumps_ground_state() -- requires vumps_ground_state to have "
+               "been called first on this same Chain, see "
+               "Chain::vumps_onsite_expectation's own comment.")
+        .def("vumps_two_point_correlator",[](Chain& self, std::string const& opname_i, int p_i,
+                                              std::string const& opname_j, int r) {
+                return self.vumps_two_point_correlator(opname_i,p_i,opname_j,r);
+            }, py::arg("opname_i"),py::arg("p_i"),py::arg("opname_j"),py::arg("r"),
+               "<opname_i(site p_i) opname_j(site p_i + r)> of a converged "
+               "vumps_ground_state()'s infinite chain, r measured in "
+               "physical sites (r>=0) -- requires vumps_ground_state to "
+               "have been called first on this same Chain, see "
+               "Chain::vumps_two_point_correlator's own comment.")
         .def("td_dynamical_correlator_window",
              [](Chain& self, int n_window, std::string const& opname_A,
                 std::string const& opname_B, double dt, int nt,

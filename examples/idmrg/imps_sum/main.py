@@ -38,11 +38,13 @@ import matplotlib.pyplot as plt
 ### (1) the common, degenerate case: two ordinary IDMRGResults ###
 ################################################################
 ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic_up.gs_method = "idmrg"
 ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
 ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
 ic_up.gs_energy()
 
 ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic_down.gs_method = "idmrg"
 ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
 ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
 ic_down.gs_energy()
@@ -59,6 +61,7 @@ except RuntimeError as e:
 ### (2) the well-posed case: sum against a deliberately norm-rescaled state ###
 ##########################################################################
 ic_heis = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic_heis.gs_method = "idmrg"
 h = ic_heis.SxC[0] * ic_heis.SxR[0] + ic_heis.SyC[0] * ic_heis.SyR[0] + ic_heis.SzC[0] * ic_heis.SzR[0]
 ic_heis.set_hamiltonian(h)
 ic_heis.maxm, ic_heis.maxiter, ic_heis.etol = 16, 30, 1e-9
@@ -69,6 +72,7 @@ ic_heis.gs_energy()
 # carry eta!=1 on their own, this is purely to exercise imps_sum's
 # well-posed branch explicitly.
 ic_xxz = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic_xxz.gs_method = "idmrg"
 h_xxz = ic_xxz.SxC[0] * ic_xxz.SxR[0] + ic_xxz.SyC[0] * ic_xxz.SyR[0] + 0.3 * ic_xxz.SzC[0] * ic_xxz.SzR[0]
 ic_xxz.set_hamiltonian(h_xxz)
 ic_xxz.maxm, ic_xxz.maxiter, ic_xxz.etol = 16, 30, 1e-9

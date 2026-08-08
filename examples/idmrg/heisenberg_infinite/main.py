@@ -13,6 +13,7 @@ from dmrgpy import infinitechain  # infinite-DMRG (iDMRG) chain object
 # are written with the SxC/SxR (central-cell/next-cell) operator
 # convention, see infinitechain.py's own docstring.
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic.gs_method = "idmrg"
 
 h = (ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0] + ic.SzC[0]*ic.SzR[0])
 ic.set_hamiltonian(h)

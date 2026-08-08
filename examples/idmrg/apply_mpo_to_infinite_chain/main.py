@@ -35,6 +35,7 @@ from dmrgpy.pyitensor.tensor import ITensor
 ### (1) chi_W=1 unitary single-site operator: Pauli-X at every site ###
 ################################################################
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic.gs_method = "idmrg"
 h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
 ic.set_hamiltonian(h)
 ic.maxm, ic.maxiter, ic.etol = 30, 60, 1e-9
@@ -71,6 +72,7 @@ assert abs(flipped.eta - 1.0) < 1e-6
 ### (2) chi_W>1 local gate: a 2-site unitary rotation, one per unit cell ###
 ########################################################################
 ic2 = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+ic2.gs_method = "idmrg"
 h2 = (ic2.SxC[0] * ic2.SxC[1] + ic2.SyC[0] * ic2.SyC[1] + ic2.SzC[0] * ic2.SzC[1]
       + 0.4 * (ic2.SxC[1] * ic2.SxR[0] + ic2.SyC[1] * ic2.SyR[0] + ic2.SzC[1] * ic2.SzR[0]))
 ic2.set_hamiltonian(h2)

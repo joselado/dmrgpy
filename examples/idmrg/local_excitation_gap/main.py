@@ -32,6 +32,7 @@ from dmrgpy import spinchain      # finite chain, for the ED cross-check
 
 j_strong, j_weak = 1.0, 0.4
 ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+ic.gs_method = "idmrg"
 H = (j_strong*(ic.SxC[0]*ic.SxC[1] + ic.SyC[0]*ic.SyC[1] + ic.SzC[0]*ic.SzC[1])
      + j_weak*(ic.SxC[1]*ic.SxR[0] + ic.SyC[1]*ic.SyR[0] + ic.SzC[1]*ic.SzR[0]))
 ic.set_hamiltonian(H)
@@ -83,6 +84,7 @@ print("=" * 70)
 
 J, h_field = 1.0, 2.0
 ic2 = infinitechain.Infinite_Spin_Chain(["1/2"])
+ic2.gs_method = "idmrg"
 H2 = -4*J*ic2.SxC[0]*ic2.SxR[0] - 2*h_field*ic2.SzC[0]
 ic2.set_hamiltonian(H2)
 ic2.maxm = 12

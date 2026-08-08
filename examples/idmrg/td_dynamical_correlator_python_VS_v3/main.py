@@ -43,6 +43,10 @@ X_VALUES = [-1, 0, 1]
 
 def build(itensor_version):
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=itensor_version)
+    ic.gs_method = "idmrg"  # td_dynamical_correlator needs the growing
+                            # algorithm's own converged-environment
+                            # snapshot -- not built by gs_method="vumps"
+                            # (the default since 2026-08-08)
     ic.maxm, ic.cutoff, ic.maxiter = MAXM, CUTOFF, MAXITER
     ic.etol, ic.niter, ic.restarts = ETOL, NITER, RESTARTS
     h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]

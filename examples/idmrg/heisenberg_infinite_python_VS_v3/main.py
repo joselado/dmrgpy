@@ -29,6 +29,7 @@ EXACT = 0.25 - np.log(2)  # Bethe-ansatz Heisenberg S=1/2 energy density
 
 def build_chain(n_uc, itensor_version):
     ic = infinitechain.Infinite_Spin_Chain(["1/2"] * n_uc, itensor_version=itensor_version)
+    ic.gs_method = "idmrg"
     if n_uc == 1:
         h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
     else:  # n_uc == 2

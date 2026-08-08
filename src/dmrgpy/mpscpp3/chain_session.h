@@ -2643,6 +2643,109 @@ class Chain
         return out;
         }
 
+    // <opname> at sub-site p (0..n_uc-1) of a converged vumps_ground_state()
+    // -- C++ port of pyitensor/vumps.py's onsite_expectation, computed
+    // directly from AC (Vanderstraeten, Haegeman, Verstraete,
+    // arXiv:1810.07006, Eq.(34)): AC already IS the correctly normalized
+    // single-(super)site reduced state by construction of the mixed
+    // canonical gauge, so no eigenproblem is needed here at all (unlike
+    // idmrg_ground_state's own would-be dominant-right-fixed-point
+    // machinery, which this backend does not implement -- see this file's
+    // module-level comment at IdmrgResult).
+    Cplx
+    vumps_onsite_expectation(std::string const& opname, int p)
+        {
+        if (!have_vumps_snapshot_)
+            throw ITError("Chain::vumps_onsite_expectation: called before "
+                           "vumps_ground_state (no converged VUMPS snapshot)");
+        int n_uc = sites_.length();
+        if (p<0 || p>=n_uc)
+            throw ITError("Chain::vumps_onsite_expectation: p must be in 0.."+
+                           std::to_string(n_uc-1)+" (n_uc-1), got "+std::to_string(p));
+        int D = vumps_D_, d_g = vumps_dg_;
+        auto AC = vumps_compose_AL_C(vumps_AL_,vumps_C_,D,d_g);
+        auto M = vumps_embed_group_operator({{p, idmrg_op_dense(p,opname)}});
+        auto AC_op = vx_apply_op_ket(M,AC,D,d_g);
+        Cplx val = vx_dot_conj(AC,AC_op);
+        double norm = vx_dot_conj(AC,AC).real();
+        return val/norm;
+        }
+
+    // <opname_i(site p_i) opname_j(site p_i + r)> of a converged
+    // vumps_ground_state()'s infinite chain, r measured in physical sites
+    // (r>=0) -- C++ port of pyitensor/vumps.py's two_point_correlator; same
+    // r=0 same-site convention (Mj@Mi, via idmrg_matmul) and n_uc-
+    // periodicity, built from the mixed-gauge {AC,AR} exactly as that
+    // function's own docstring derives (AC placed at the unit cell
+    // containing p_i, AR -- exactly right-orthonormal by construction --
+    // at every cell strictly to its right, so the right closure needs no
+    // eigenproblem, only a direct trace after zero or more plain-AR
+    // transfer-tensor applications).
+    Cplx
+    vumps_two_point_correlator(std::string const& opname_i, int p_i,
+                                std::string const& opname_j, int r)
+        {
+        if (!have_vumps_snapshot_)
+            throw ITError("Chain::vumps_two_point_correlator: called before "
+                           "vumps_ground_state (no converged VUMPS snapshot)");
+        if (r<0)
+            throw ITError("Chain::vumps_two_point_correlator: r must be >= 0");
+        int n_uc = sites_.length();
+        if (p_i<0 || p_i>=n_uc)
+            throw ITError("Chain::vumps_two_point_correlator: p_i must be in 0.."+
+                           std::to_string(n_uc-1)+" (n_uc-1), got "+std::to_string(p_i));
+        int D = vumps_D_, d_g = vumps_dg_;
+        auto AC = vumps_compose_AL_C(vumps_AL_,vumps_C_,D,d_g);
+        double norm = vx_dot_conj(AC,AC).real();
+
+        int cell_offset = (p_i + r)/n_uc;
+        int p_j = (p_i + r)%n_uc;
+
+        if (cell_offset==0)
+            {
+            std::vector<Cplx> M;
+            if (p_j==p_i)
+                {
+                int d = dim(sites_.si(p_i+1));
+                auto Mi = idmrg_op_dense(p_i,opname_i);
+                auto Mj = idmrg_op_dense(p_i,opname_j);
+                M = vumps_embed_group_operator({{p_i, idmrg_matmul(Mj,Mi,d)}});
+                }
+            else
+                {
+                M = vumps_embed_group_operator({{p_i, idmrg_op_dense(p_i,opname_i)},
+                                                 {p_j, idmrg_op_dense(p_j,opname_j)}});
+                }
+            auto AC_op = vx_apply_op_ket(M,AC,D,d_g);
+            return vx_dot_conj(AC,AC_op)/norm;
+            }
+
+        auto Mi_embed = vumps_embed_group_operator({{p_i, idmrg_op_dense(p_i,opname_i)}});
+        auto AC_op = vx_apply_op_ket(Mi_embed,AC,D,d_g);
+        // Open right-bond object: bra/ket both AC, operator on the ket side
+        // only -- this already IS the full left closure (AC's own left leg
+        // is summed away here), leaving just the (ket-bond, bra-bond) legs
+        // open.
+        auto X = vx_left_close(AC_op,AC,D,d_g);
+        for (auto& x : X) x /= norm;
+
+        if (cell_offset>1)
+            {
+            auto E_AR = vx_op_transfer_matrix(vumps_AR_,D,d_g,vumps_AR_,false,{});
+            for (int i=0;i<cell_offset-1;++i)
+                X = vx_apply_transfer_from_left(E_AR,D,X);
+            }
+
+        auto Mj_embed = vumps_embed_group_operator({{p_j, idmrg_op_dense(p_j,opname_j)}});
+        auto AR_op = vx_apply_op_ket(Mj_embed,vumps_AR_,D,d_g);
+        auto E_AR_op = vx_op_transfer_matrix(AR_op,D,d_g,vumps_AR_,false,{});
+        X = vx_apply_transfer_from_left(E_AR_op,D,X);
+
+        Cplx tr(0,0);
+        for (int i=0;i<D;++i) tr += X[i*D+i];
+        return tr;
+        }
+
     // Real-time IBC-window dynamical correlator S(x,t) =
     // <psi0|A_x exp(-iHt)B_0|psi0> of the infinite chain (Milsted/
     // Vanderstraeten, arXiv:1804.09163, Sec. V.1) -- native ITensor v3
@@ -3889,6 +3992,42 @@ class Chain
         return s;
         }
 
+    // sum_i conj(A[i])*B[i] over two equal-length flat arrays, treated as
+    // plain vectors regardless of their own logical shape -- C++ analogue
+    // of numpy's `np.einsum('...,...->', np.conj(A), B)` reduction used
+    // throughout pyitensor/vumps.py's own static-correlator section
+    // (`onsite_expectation`/`two_point_correlator`'s norm/val computations).
+    static Cplx
+    vx_dot_conj(std::vector<Cplx> const& A, std::vector<Cplx> const& B)
+        {
+        Cplx s(0,0);
+        for (size_t i=0;i<A.size();++i) s += std::conj(A[i])*B[i];
+        return s;
+        }
+
+    // ket/bra (D,d_g,D) closed over their LEFT bond and physical legs
+    // together, leaving the (right-ket, right-bra) pair open: result[r,R] =
+    // sum_{l,p} ket[l,p,r]*conj(bra[l,p,R]) -- C++ analogue of pyitensor/
+    // vumps.py's own `np.einsum('lor,loR->rR', ket, np.conj(bra))` (used
+    // there with `bra` already `np.conj`-applied by the caller; this helper
+    // conjugates `bra` itself instead, so callers pass the UN-conjugated
+    // tensor, matching every other vx_* helper's convention).
+    static std::vector<Cplx>
+    vx_left_close(std::vector<Cplx> const& ket, std::vector<Cplx> const& bra, int D, int d_g)
+        {
+        std::vector<Cplx> X((size_t)D*D,Cplx(0,0));
+        for (int r=0;r<D;++r)
+        for (int R=0;R<D;++R)
+            {
+            Cplx acc(0,0);
+            for (int l=0;l<D;++l)
+            for (int p=0;p<d_g;++p)
+                acc += ket[(l*d_g+p)*D+r]*std::conj(bra[(l*d_g+p)*D+R]);
+            X[r*D+R] = acc;
+            }
+        return X;
+        }
+
     // The regularized (I - phase*T + [projector]) linear solve shared by
     // pyitensor's own _solve_left_environment/_solve_right_environment
     // (VUMPS's own GL/GR) AND idmrg_excitations._channel_resolvent
@@ -4237,6 +4376,44 @@ class Chain
             AC[(l*d_g+p)*D+r] = acc;
             }
         return AC;
+        }
+
+    // The d_g x d_g grouped-supersite operator matrix (M[i,o] convention,
+    // same as idmrg_op_dense/vumps_onsite_matrix) obtained by placing each
+    // ops_by_pos[p] (a dense d_p x d_p M[i,o] matrix) at sub-site p of the
+    // n_uc-site unit cell and identity everywhere else, combined via a
+    // Kronecker product in the SAME sequential (site 0 slowest-varying,
+    // site n_uc-1 fastest-varying) order vumps_group_automaton itself uses
+    // to build the grouped physical index (its own `pi = si0*d1+si1`) --
+    // C++ analogue of pyitensor/vumps.py's own `_embed_group_operator`
+    // (there built via `np.kron`, which produces exactly this row-major
+    // layout for a chain of per-site (in,out) matrices). ops_by_pos may
+    // name a given position at most once -- composing two operators at one
+    // physical site (e.g. two_point_correlator's own r=0 same-site case)
+    // is the caller's job (an ordinary d_p x d_p matrix product via
+    // idmrg_matmul before calling this), not something this function does.
+    std::vector<Cplx>
+    vumps_embed_group_operator(std::map<int,std::vector<Cplx>> const& ops_by_pos) const
+        {
+        int n_uc = sites_.length();
+        std::vector<Cplx> M;
+        int dm = 1;
+        for (int p=0;p<n_uc;++p)
+            {
+            int dn = dim(sites_.si(p+1));
+            auto it = ops_by_pos.find(p);
+            std::vector<Cplx> mat = (it != ops_by_pos.end()) ? it->second : vx_eye(dn);
+            if (p==0) { M = std::move(mat); dm = dn; continue; }
+            std::vector<Cplx> Mnew((size_t)dm*dn*dm*dn,Cplx(0,0));
+            for (int i0=0;i0<dm;++i0)
+            for (int j0=0;j0<dm;++j0)
+            for (int i1=0;i1<dn;++i1)
+            for (int j1=0;j1<dn;++j1)
+                Mnew[(i0*dn+i1)*(dm*dn)+(j0*dn+j1)] = M[i0*dm+j0]*mat[i1*dn+j1];
+            M = std::move(Mnew);
+            dm = dm*dn;
+            }
+        return M;
         }
 
     // Groups n_uc<=2 per-sublattice dense automaton rows (idmrg_build_row's

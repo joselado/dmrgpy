@@ -131,14 +131,14 @@ def test_n_uc2_heisenberg_dispersion_matches_python_backend():
 def test_excitation_energies_requires_gs_method_vumps():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
     ic.set_hamiltonian(2.0 * ic.SzC[0])
-    assert ic.gs_method == "idmrg"
+    ic.gs_method = "idmrg"  # "vumps" (the default since 2026-08-08) DOES work -- see above
     with pytest.raises(NotImplementedError):
         ic.excitation_energies(0.0)
 
 
 def test_switching_gs_method_after_idmrg_run_still_works():
     """Regression check for the _session3_has_vumps bookkeeping: running
-    gs_energy() once with the default gs_method="idmrg" (populating
+    gs_energy() once with gs_method="idmrg" explicitly (populating
     self._session3 with an idmrg-only snapshot), then switching to
     gs_method="vumps" and calling excitation_energies directly, must
     transparently rerun gs_energy() with the new gs_method rather than
@@ -148,6 +148,7 @@ def test_switching_gs_method_after_idmrg_run_still_works():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
     ic.set_hamiltonian(2.0 * ic.SzC[0])
     ic.maxm = 1
-    ic.gs_energy()  # gs_method="idmrg" (default)
+    ic.gs_method = "idmrg"
+    ic.gs_energy()
     ic.gs_method = "vumps"
     assert ic.excitation_energies(0.0, n=1)[0] == pytest.approx(2.0, abs=1e-6)

@@ -154,32 +154,35 @@ def test_n_uc_above_2_not_implemented():
         infinitechain.Infinite_Spin_Chain(["1/2", "1/2", "1/2"], itensor_version=3)
 
 
-def test_gs_method_vumps_vev_not_implemented():
+def test_gs_method_vumps_vev_and_correlator_work():
+    """vev/correlator DO work under itensor_version=3, gs_method="vumps"
+    (Chain::vumps_onsite_expectation/vumps_two_point_correlator, a C++
+    port of pyitensor/vumps.py's own AC/AR-based formula) -- only
+    gs_method="idmrg" still raises NotImplementedError on this backend
+    (IdmrgResult keeps no per-sublattice U_list). See
+    tests/test_vumps_correlator_v3.py for the full correlator coverage
+    (exact D=1 closed-form cases, cross-backend agreement at D=2,3, and
+    the gs_method="idmrg" NotImplementedError paths) -- this is just a
+    non-regression smoke check for the field-polarized D=1 exact case."""
     ic = _field_chain(0.5, 3)
     ic.gs_method = "vumps"
     ic.maxm = 1
-    with pytest.raises(NotImplementedError):
-        ic.vev("Sz", 0)
-
-
-def test_gs_method_vumps_correlator_not_implemented():
-    ic = _field_chain(0.5, 3)
-    ic.gs_method = "vumps"
-    ic.maxm = 1
-    with pytest.raises(NotImplementedError):
-        ic.correlator("Sz", 0, "Sz", 1)
+    ic.gs_energy()
+    assert ic.vev("Sz", 0) == pytest.approx(0.5, abs=1e-8)
+    assert ic.correlator("Sz", 0, "Sz", 1) == pytest.approx(0.25, abs=1e-8)
 
 
 def test_gs_method_idmrg_still_works_on_v3():
     """Non-regression: itensor_version=3's own gs_method dispatch must not
-    have broken the pre-existing (default) gs_method="idmrg" path --
+    have broken the pre-existing gs_method="idmrg" path (no longer the
+    default since 2026-08-08 -- "vumps" is -- so set explicitly here) --
     Chain::idmrg_ground_state is a distinct method from
     Chain::vumps_ground_state, only sharing idmrg_build_row's own
     per-sublattice automaton construction (see that method's own
     onsite/field-term bugfix, cross-checked directly here since none of
     test_infinite_chain.py's own v3 cases use a field term)."""
     ic = _field_chain(0.7, 3)
-    assert ic.gs_method == "idmrg"
+    ic.gs_method = "idmrg"
     ic.maxm = 4
     ic.maxiter = 60
     ic.etol = 1e-9
@@ -202,6 +205,7 @@ def test_idmrg_ground_state_v3_onsite_field_matches_exact_solution():
     activate F)."""
     for B in (5.0, -5.0, 2.0):
         ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+        ic.gs_method = "idmrg"
         ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
         ic.set_hamiltonian(-B * ic.SzC[0])
         e0 = ic.gs_energy()
@@ -219,6 +223,7 @@ def test_idmrg_ground_state_v3_onsite_field_with_bonds_does_not_diverge():
     diverging to ~1e69 rather than merely being wrong)."""
     def density_at(B):
         ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"], itensor_version=3)
+        ic.gs_method = "idmrg"
         h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
              + 0.5 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
              - B * (ic.SzC[0] + ic.SzC[1]))
