@@ -36,22 +36,36 @@ def _truncate(s, cutoff, maxdim, mindim):
     truncation rule: drop the smallest singular values first, stopping as
     soon as either mindim is reached, or dropping the next one would exceed
     `cutoff` of discarded weight -- except maxdim is a hard cap that's
-    enforced regardless of cutoff."""
+    enforced regardless of cutoff.
+
+    Vectorized: the cutoff floor is equivalent to keeping the smallest
+    prefix of the ascending cumulative tail sum that stays <= cutoff (ties
+    broken like the old one-at-a-time loop, which drops p[keep-1] only when
+    the running total including it does *not* exceed cutoff), then clamped
+    to [mindim, maxdim or n]."""
     n = len(s)
     p = s.astype(float) ** 2
     total = p.sum()
     if total <= 0:
         return max(1, mindim), 0.0
     p = p / total
-    keep = n
-    discarded = 0.0
-    while keep > mindim:
-        over_maxdim = maxdim is not None and keep > maxdim
-        if not over_maxdim and discarded + p[keep - 1] > cutoff:
-            break
-        discarded += p[keep - 1]
-        keep -= 1
-    return keep, discarded
+    hi = min(maxdim, n) if maxdim is not None else n  # max keep allowed (maxdim cap)
+    j_upper = max(0, n - mindim)  # can never drop past mindim, even to satisfy maxdim
+    j_forced = min(max(0, n - hi), j_upper)  # maxdim-mandated drops, still capped by mindim
+    if j_upper <= j_forced:
+        j = j_forced
+    else:
+        # tail[k] = sum of the k smallest values beyond the forced drops
+        # (p is descending, so the smallest are its last entries);
+        # monotonically increasing in k, so the largest cutoff-satisfying
+        # k is a simple prefix scan.
+        p_asc = p[::-1]
+        forced = float(p_asc[:j_forced].sum())
+        tail = forced + np.concatenate(([0.0], np.cumsum(p_asc[j_forced:j_upper])))
+        window = tail <= cutoff
+        j = j_forced + (int(np.nonzero(window)[0].max()) if window.any() else 0)
+    keep = n - j
+    return keep, float(p[keep:].sum())
 
 
 def eigh_truncate(rho, cutoff, maxdim, mindim=1):
@@ -116,3 +130,52 @@ def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
     Stensor = ITensor((bond_u, bond_v), np.diag(S[:keep].astype(complex)))
     spectrum = Spectrum(S[:keep], probs, discarded)
     return Utensor, Stensor, Vtensor, spectrum
+
+
+def qr_split(T, left_inds, tags="Link", orthonormal="left"):
+    """Lossless split T = A * B via QR, for the specific case svd() is
+    otherwise called with cutoff=0, maxdim=None -- i.e. no truncation is
+    wanted, only an orthogonal basis for one side of the bond. QR gets
+    there in about half the FLOPs of a full SVD (LAPACK's geqrf/orgqr vs
+    gesdd) since it never computes the singular values or bothers
+    resolving degenerate subspaces, exactly what one-site TDVP's per-site
+    forward split needs (tdvp.py's _half_sweep_lr_onesite/
+    _half_sweep_rl_onesite). Not a general svd() replacement: unlike SVD,
+    plain QR isn't rank-revealing, so callers relying on exact-zero
+    singular values being dropped (gse.py, mpsalgebra.py's randomMPS,
+    kpm_energy_truncation.py) must keep using svd(cutoff=0, maxdim=None)
+    instead.
+
+    orthonormal='left' (QR): groups `left_inds` onto A with orthonormal
+    columns (A^H A = I, like svd()'s U), returns (A, B) with B carrying
+    every other index of T. orthonormal='right' (LQ, via QR on T^H):
+    groups every index *other than* `left_inds` onto B with orthonormal
+    rows (B B^H = I, like svd()'s V), returns (A, B) with A carrying
+    `left_inds`. Either way A*B reconstructs T exactly, and the two
+    tensors share one freshly minted bond Index (tagged `tags`) -- unlike
+    svd(), which mints one for each side."""
+    left_inds = list(left_inds)
+    for ind in left_inds:
+        if not T.hasindex(ind):
+            raise ValueError("qr_split: {} is not an index of {}".format(ind, T))
+    right_inds = [ind for ind in T.inds if _find(left_inds, ind) is None]
+
+    order = left_inds + right_inds
+    arr = T.transpose_to(order)
+    ldim = int(np.prod([ind.dim for ind in left_inds], dtype=int)) if left_inds else 1
+    rdim = int(np.prod([ind.dim for ind in right_inds], dtype=int)) if right_inds else 1
+    mat = arr.reshape(ldim, rdim)
+
+    if orthonormal == "left":
+        Amat, Bmat = np.linalg.qr(mat, mode="reduced")
+    elif orthonormal == "right":
+        Q, R = np.linalg.qr(mat.conj().T, mode="reduced")
+        Amat, Bmat = R.conj().T, Q.conj().T
+    else:
+        raise ValueError("qr_split: orthonormal must be 'left' or 'right', got {}".format(orthonormal))
+
+    k = Amat.shape[1]
+    bond = Index(k, tags=tags)
+    Atensor = ITensor(tuple(left_inds) + (bond,), Amat.reshape(tuple(ind.dim for ind in left_inds) + (k,)))
+    Btensor = ITensor((bond,) + tuple(right_inds), Bmat.reshape((k,) + tuple(ind.dim for ind in right_inds)))
+    return Atensor, Btensor, bond

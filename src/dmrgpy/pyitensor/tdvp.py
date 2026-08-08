@@ -67,8 +67,8 @@ from .dmrg import (_all_left_environments, _all_right_environments,
                     _extend_left, _extend_right, one_site_heff, two_site_heff,
                     zero_site_heff)
 from .mpsalgebra import _link_at
-from .svd import svd
-from .tensor import ITensor, commonIndex
+from .svd import qr_split, svd
+from .tensor import ITensor
 
 
 def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12):
@@ -234,10 +234,11 @@ def _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter):
 def _half_sweep_lr_onesite(psi, H, tau, niter):
     """One-site analogue of _half_sweep_lr() above: at each site i,
     forward-evolve psi.A(i) alone (one_site_heff, not two_site_heff -- no
-    SVD truncation, since one-site TDVP must conserve bond dimension
-    exactly), split it *losslessly* (QR-equivalent: svd with cutoff=0,
-    maxdim=None) into a left-orthogonal Q kept at site i and a bond
-    tensor C, then backward-evolve C (zero_site_heff, dmrg.py) and absorb
+    truncation, since one-site TDVP must conserve bond dimension exactly),
+    split it *losslessly* via QR (svd.py's qr_split -- cheaper than a full
+    SVD since no truncation/singular values are needed here) into a
+    left-orthogonal Q kept at site i and a bond tensor C, then
+    backward-evolve C (zero_site_heff, dmrg.py) and absorb
     it into site i+1 before that site's own forward step. Mirrors
     TDVP/tdvp.h's NumCenter=1 sweep. Pair with global_subspace_expand()
     (gse.py) beforehand -- this alone never grows bond dimension."""
@@ -254,11 +255,9 @@ def _half_sweep_lr_onesite(psi, H, tau, niter):
             psi.set_A(i, A_new)
             continue
         s_i = next(ind for ind in A_new.inds if ind.hastags("Site"))
-        Q, S, V, _spec = svd(A_new, ([left_link] if left_link else []) + [s_i],
-                              cutoff=0.0, maxdim=None)
+        Q, C, new_link = qr_split(A_new, ([left_link] if left_link else []) + [s_i],
+                                   orthonormal="left")
         psi.set_A(i, Q)
-        new_link = commonIndex(Q, S)
-        C = S * V
         orig_next = psi.A(i + 1)
         # Write a consistent (if not yet backward-evolved) placeholder to
         # site i+1 *before* extending the environment past site i: Q's own
@@ -293,10 +292,8 @@ def _half_sweep_rl_onesite(psi, H, tau, niter):
         s_i = next(ind for ind in A_new.inds if ind.hastags("Site"))
         right_of_bond = [s_i] + ([right_link] if right_link else [])
         left_of_bond = [ind for ind in A_new.inds if ind not in right_of_bond]
-        U, S, V, _spec = svd(A_new, left_of_bond, cutoff=0.0, maxdim=None)
+        C, V, new_link = qr_split(A_new, left_of_bond, orthonormal="right")
         psi.set_A(i, V)
-        new_link = commonIndex(S, V)
-        C = U * S
         orig_prev = psi.A(i - 1)
         # Placeholder write before extending past site i -- see
         # _half_sweep_lr_onesite's matching comment.
