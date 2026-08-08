@@ -222,6 +222,77 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "physical sites (r>=0) -- requires vumps_ground_state to "
                "have been called first on this same Chain, see "
                "Chain::vumps_two_point_correlator's own comment.")
+        .def("vumps_apply_mpo",[](Chain& self, std::vector<std::vector<Cplx>> const& W_bulk_flat,
+                                   std::vector<int> const& Dw_left, std::vector<int> const& Dw_right,
+                                   double cutoff, int maxdim) {
+                auto out = self.vumps_apply_mpo(W_bulk_flat,Dw_left,Dw_right,cutoff,maxdim);
+                py::array_t<std::complex<double>> AL({out.D,out.d_g,out.D});
+                py::array_t<std::complex<double>> AR({out.D,out.d_g,out.D});
+                py::array_t<std::complex<double>> C({out.D,out.D});
+                py::array_t<std::complex<double>> AC({out.D,out.d_g,out.D});
+                std::copy(out.AL.begin(),out.AL.end(),AL.mutable_data());
+                std::copy(out.AR.begin(),out.AR.end(),AR.mutable_data());
+                std::copy(out.C.begin(),out.C.end(),C.mutable_data());
+                std::copy(out.AC.begin(),out.AC.end(),AC.mutable_data());
+                return py::make_tuple(out.D,out.d_g,AL,AR,C,AC,out.eta);
+            }, py::arg("W_bulk_flat"),py::arg("Dw_left"),py::arg("Dw_right"),
+               py::arg("cutoff"),py::arg("maxdim")=0,
+               "Apply a periodic (bounded) MPO to this Chain's own converged "
+               "VUMPS snapshot -- requires vumps_ground_state/"
+               "vumps_load_uniform_state to have been called first on this "
+               "same Chain, see Chain::vumps_apply_mpo's own comment for the "
+               "W_bulk_flat convention and the bounded-operator scope "
+               "restriction. maxdim<=0 means no cap. Returns "
+               "(D,d_g,AL,AR,C,AC,eta), the new mixed-gauge uniform iMPS -- "
+               "feed to vumps_load_uniform_state to make onsite_expectation/"
+               "two_point_correlator see it.")
+        .def("vumps_imps_sum",[](Chain& self, int D_b, std::vector<Cplx> const& AL_b,
+                                  double cutoff, int maxdim) {
+                auto out = self.vumps_imps_sum(D_b,AL_b,cutoff,maxdim);
+                py::array_t<std::complex<double>> AL({out.D,out.d_g,out.D});
+                py::array_t<std::complex<double>> AR({out.D,out.d_g,out.D});
+                py::array_t<std::complex<double>> C({out.D,out.D});
+                py::array_t<std::complex<double>> AC({out.D,out.d_g,out.D});
+                std::copy(out.AL.begin(),out.AL.end(),AL.mutable_data());
+                std::copy(out.AR.begin(),out.AR.end(),AR.mutable_data());
+                std::copy(out.C.begin(),out.C.end(),C.mutable_data());
+                std::copy(out.AC.begin(),out.AC.end(),AC.mutable_data());
+                return py::make_tuple(out.D,out.d_g,AL,AR,C,AC,out.eta);
+            }, py::arg("D_b"),py::arg("AL_b"),py::arg("cutoff"),py::arg("maxdim")=0,
+               "Direct sum of this Chain's own converged VUMPS snapshot with "
+               "a second, externally-supplied converged state (D_b,AL_b, "
+               "flat row-major (D_b,d_g,D_b)) -- requires vumps_ground_state/"
+               "vumps_load_uniform_state to have been called first on this "
+               "same Chain, see Chain::vumps_imps_sum's own comment for the "
+               "physical scope restriction (raises for two ordinary, "
+               "equally-normalized VUMPS ground states). maxdim<=0 means no "
+               "cap. Returns (D,d_g,AL,AR,C,AC,eta), same convention as "
+               "vumps_apply_mpo.")
+        .def("vumps_load_uniform_state",[](Chain& self, int D, int d_g,
+                                            std::vector<Cplx> const& AL,
+                                            std::vector<Cplx> const& AR,
+                                            std::vector<Cplx> const& C) {
+                self.vumps_load_uniform_state(D,d_g,AL,AR,C);
+            }, py::arg("D"),py::arg("d_g"),py::arg("AL"),py::arg("AR"),py::arg("C"),
+               "Loads an externally-computed mixed-gauge uniform iMPS (e.g. "
+               "vumps_apply_mpo/vumps_imps_sum's own AL/AR/C output) into "
+               "this Chain's own VUMPS snapshot, so vumps_onsite_expectation/"
+               "vumps_two_point_correlator/a further apply_mpo/imps_sum call "
+               "see it -- see Chain::vumps_load_uniform_state's own comment.")
+        .def("vumps_get_snapshot",[](Chain& self) {
+                int D=0, d_g=0; std::vector<Cplx> AL, AR, C;
+                self.vumps_get_snapshot(D,d_g,AL,AR,C);
+                py::array_t<std::complex<double>> AL_arr({D,d_g,D});
+                py::array_t<std::complex<double>> AR_arr({D,d_g,D});
+                py::array_t<std::complex<double>> C_arr({D,D});
+                std::copy(AL.begin(),AL.end(),AL_arr.mutable_data());
+                std::copy(AR.begin(),AR.end(),AR_arr.mutable_data());
+                std::copy(C.begin(),C.end(),C_arr.mutable_data());
+                return py::make_tuple(D,d_g,AL_arr,AR_arr,C_arr);
+            }, "Reads back this Chain's own current VUMPS snapshot AL/AR/C "
+               "-- requires vumps_ground_state/vumps_load_uniform_state to "
+               "have been called first, see Chain::vumps_get_snapshot's own "
+               "comment. Returns (D,d_g,AL,AR,C).")
         .def("td_dynamical_correlator_window",
              [](Chain& self, int n_window, std::string const& opname_A,
                 std::string const& opname_B, double dt, int nt,

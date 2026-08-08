@@ -1990,6 +1990,16 @@ result = vumps.imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None)
 
 Same physical scope restriction as `idmrg.imps_sum` above, for the same reason: every converged `VUMPSResult` has `AL` exactly left-canonical *and* `AR` exactly right-canonical by construction of the mixed gauge, so both its left and right self-overlap transfer eigenvalues are exactly `eta=1` — summing two ordinary `VUMPSResult`s therefore always hits the same degenerate-dominant-eigenvalue tie `idmrg.imps_sum` does, and `imps_sum` raises `RuntimeError` there rather than silently returning one arbitrary branch (`arXiv:1810.07006`'s own Sec. 2.1 independently makes the same point: non-injective/"cat state" MPS tensors are exactly the ones with a degenerate dominant transfer-matrix eigenvalue). Only two states with a genuine per-site norm mismatch (e.g. one deliberately rescaled, exactly mirroring `idmrg.imps_sum`'s own worked example) have a well-posed sum — see `pyitensor/vumps.py`'s own "Summing two converged VUMPS iMPS" section docstring for the full derivation, and `examples/idmrg/vumps_imps_sum/main.py` for a worked example of both cases plus a cross-check of the surviving branch's `onsite_expectation`/`two_point_correlator` at genuinely entangled `D>1`.
 
+Also ported to `itensor_version=3` (`Chain::vumps_imps_sum`, `mpscpp3/chain_session.h`), a dense-array translation reusing the same `vx_canonicalize_n1`/`vumps_complete_mixed_gauge` machinery `apply_mpo` below shares — same scope restriction and degeneracy behavior as the pyitensor version above. There is no `Infinite_Many_Body_Chain`-level wrapper on this backend either (matching pyitensor's own scope), so it is reached directly against a Chain's own converged VUMPS snapshot:
+
+```python
+D, d_g, AL, AR, C, AC, eta = ic._session3.vumps_imps_sum(D_b, AL_b, cutoff=1e-12, maxdim=0)
+ic._session3.vumps_load_uniform_state(D, d_g, AL.flatten().tolist(),
+                                       AR.flatten().tolist(), C.flatten().tolist())
+```
+
+`AL_b` is the second state's own flat `(D_b,d_g,D_b)` `AL` array (row-major) — e.g. obtained from another Chain's own snapshot via `Chain::vumps_get_snapshot()` (which returns `(D,d_g,AL,AR,C)` for `this` Chain's own current state); `maxdim<=0` means no cap (Python's `maxdim=None`). `vumps_load_uniform_state` writes the result back into a Chain's own snapshot so `vumps_onsite_expectation`/`vumps_two_point_correlator` (and, since `ic._session3_has_vumps` is untouched by any of this, `ic.vev`/`ic.correlator` too) see it. See `tests/test_vumps_imps_sum_v3.py` for the full cross-check against `itensor_version="python"`.
+
 **Applying an operator/gate to a converged VUMPS iMPS (advanced).** `pyitensor.vumps.apply_mpo(result, W_bulk, cutoff=..., maxdim=...)` is the VUMPS-mixed-gauge analogue of `idmrg.apply_mpo` above: it groups `W_bulk` into a single grouped-supersite MPO tensor (the same `_group_automaton` routine that groups VUMPS's own Hamiltonian automaton), grows the converged `AL` by it via `idmrg.grow_by_mpo`, re-canonicalizes/truncates via `idmrg._canonicalize_periodic` (the identical two-sided fixed-point procedure `idmrg.apply_mpo` uses), and completes the resulting truncated left-canonical tensor to the full mixed gauge `{AL,AR,C,AC}` via `vumps._complete_mixed_gauge` (the same completion `imps_sum` immediately above uses). `W_bulk` takes *exactly* `idmrg.apply_mpo`'s own convention — a list of `n_uc` rank-4 `(Left, in, out, Right)` ITensors, one per unit-cell sublattice site — so the identical `W_bulk` list built for one backend can be fed to the other's own `apply_mpo` to cross-check both against each other on the same operator:
 
 ```python
@@ -1999,3 +2009,15 @@ new_state = vumps.apply_mpo(result, W, cutoff=1e-12, maxdim=None)
 ```
 
 Returns a new `pyitensor.vumps.UniformMPS`, accepted directly by `vumps.onsite_expectation`/`two_point_correlator` exactly like a `VUMPSResult`. Same scope restriction as `idmrg.apply_mpo` above — `W_bulk` must represent a *bounded* (non-extensive) periodic operator; the Hamiltonian's own automaton (built internally by `vumps_ground_state` for `gs_energy()`) is out of scope, for the identical reason described there. There is no `Infinite_Many_Body_Chain`-level wrapper yet either, so `pyitensor.vumps.apply_mpo` is reached directly, working against `ic._vumps_result` (only meaningful for `itensor_version="python"` with `gs_method="vumps"`). See `examples/idmrg/vumps_apply_mpo/main.py` for a worked example: a `chi_W=1` unitary single-site flip cross-checked exactly against `idmrg.apply_mpo` at the exact `D=1` field-polarized point, the same flip's `<Sz>`/`<Sz(0)Sz(r)>`/`eta` invariants checked at a genuinely entangled `D>1` TFIM ground state, and a genuinely bond-growing `chi_W>1` two-site gate tiled once per an `n_uc=2` unit cell.
+
+Also ported to `itensor_version=3` (`Chain::vumps_apply_mpo`, `mpscpp3/chain_session.h`): grows a Chain's own converged `AL` by a caller-supplied `W_bulk` (grouped via `vumps_group_automaton`, reused unmodified from the Hamiltonian-automaton path since the grouping contraction itself doesn't care what it's grouping), then shares `vumps_imps_sum`'s own `vx_canonicalize_n1`/`vumps_complete_mixed_gauge` machinery. Same bounded-operator scope restriction, and the same "no `Infinite_Many_Body_Chain`-level wrapper" caveat as `vumps_imps_sum` above — reached directly against a Chain's own converged VUMPS snapshot:
+
+```python
+W_bulk_flat = [W0.flatten().tolist(), W1.flatten().tolist()]  # one per unit-cell site
+D, d_g, AL, AR, C, AC, eta = ic._session3.vumps_apply_mpo(
+    W_bulk_flat, Dw_left, Dw_right, cutoff=1e-12, maxdim=0)
+ic._session3.vumps_load_uniform_state(D, d_g, AL.flatten().tolist(),
+                                       AR.flatten().tolist(), C.flatten().tolist())
+```
+
+`W_bulk_flat[p]` is a dense, row-major `(Left,in,out,Right)` array (size `Dw_left[p]*d_p*d_p*Dw_right[p]`) — the same convention as `idmrg.apply_mpo`'s own ITensor list, just flattened. See `tests/test_vumps_apply_mpo_v3.py` and `examples/idmrg/vumps_apply_mpo_v3_VS_python/main.py` for the full cross-check against `itensor_version="python"`, including the same three cases (`D=1` exact, `D>1` unitary invariants, `chi_W>1` bond growth at `n_uc=2`).

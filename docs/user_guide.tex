@@ -2807,6 +2807,34 @@ both cases plus a cross-check of the surviving branch's
 \texttt{onsite\_expectation}/\texttt{two\_point\_correlator} at genuinely
 entangled $D>1$.
 
+Also ported to \texttt{itensor\_version=3} (\texttt{Chain::vumps\_imps\_sum},
+\texttt{mpscpp3/chain\_session.h}), a dense-array translation reusing the
+same \texttt{vx\_canonicalize\_n1}/\texttt{vumps\_complete\_mixed\_gauge}
+machinery \texttt{apply\_mpo} below shares -- same scope restriction and
+degeneracy behavior as the pyitensor version above. There is no
+\texttt{Infinite\_Many\_Body\_Chain}-level wrapper on this backend either
+(matching pyitensor's own scope), so it is reached directly against a
+Chain's own converged VUMPS snapshot:
+
+\begin{lstlisting}
+D, d_g, AL, AR, C, AC, eta = ic._session3.vumps_imps_sum(D_b, AL_b, cutoff=1e-12, maxdim=0)
+ic._session3.vumps_load_uniform_state(D, d_g, AL.flatten().tolist(),
+                                       AR.flatten().tolist(), C.flatten().tolist())
+\end{lstlisting}
+
+\texttt{AL\_b} is the second state's own flat $(D_b,d_g,D_b)$ $A_L$ array
+(row-major) -- e.g.\ obtained from another Chain's own snapshot via
+\texttt{Chain::vumps\_get\_snapshot()} (which returns
+$(D,d_g,A_L,A_R,C)$ for \texttt{this} Chain's own current state);
+\texttt{maxdim<=0} means no cap (Python's \texttt{maxdim=None}).
+\texttt{vumps\_load\_uniform\_state} writes the result back into a
+Chain's own snapshot so \texttt{vumps\_onsite\_expectation}/
+\texttt{vumps\_two\_point\_correlator} (and, since
+\texttt{ic.\_session3\_has\_vumps} is untouched by any of this,
+\texttt{ic.vev}/\texttt{ic.correlator} too) see it. See
+\texttt{tests/test\_vumps\_imps\_sum\_v3.py} for the full cross-check
+against \texttt{itensor\_version="python"}.
+
 \textbf{Applying an operator/gate to a converged VUMPS iMPS (advanced).}
 \texttt{pyitensor.vumps.apply\_mpo(result, W\_bulk, cutoff=...,
 maxdim=...)} is the VUMPS-mixed-gauge analogue of \texttt{idmrg.apply\_mpo}
@@ -2849,5 +2877,34 @@ same flip's $\langle S_z\rangle$/$\langle S_z(0)S_z(r)\rangle$/\texttt{eta}
 invariants checked at a genuinely entangled $D>1$ TFIM ground state, and a
 genuinely bond-growing \texttt{chi\_W>1} two-site gate tiled once per an
 \texttt{n\_uc=2} unit cell.
+
+Also ported to \texttt{itensor\_version=3} (\texttt{Chain::vumps\_apply\_mpo},
+\texttt{mpscpp3/chain\_session.h}): grows a Chain's own converged $A_L$ by
+a caller-supplied \texttt{W\_bulk} (grouped via
+\texttt{vumps\_group\_automaton}, reused unmodified from the
+Hamiltonian-automaton path since the grouping contraction itself doesn't
+care what it's grouping), then shares \texttt{vumps\_imps\_sum}'s own
+\texttt{vx\_canonicalize\_n1}/\texttt{vumps\_complete\_mixed\_gauge}
+machinery. Same bounded-operator scope restriction, and the same ``no
+\texttt{Infinite\_Many\_Body\_Chain}-level wrapper'' caveat as
+\texttt{vumps\_imps\_sum} above -- reached directly against a Chain's own
+converged VUMPS snapshot:
+
+\begin{lstlisting}
+W_bulk_flat = [W0.flatten().tolist(), W1.flatten().tolist()]  # one per unit-cell site
+D, d_g, AL, AR, C, AC, eta = ic._session3.vumps_apply_mpo(
+    W_bulk_flat, Dw_left, Dw_right, cutoff=1e-12, maxdim=0)
+ic._session3.vumps_load_uniform_state(D, d_g, AL.flatten().tolist(),
+                                       AR.flatten().tolist(), C.flatten().tolist())
+\end{lstlisting}
+
+\texttt{W\_bulk\_flat[p]} is a dense, row-major (Left, in, out, Right)
+array (size $\text{Dw\_left}[p] \cdot d_p \cdot d_p \cdot \text{Dw\_right}[p]$)
+-- the same convention as \texttt{idmrg.apply\_mpo}'s own ITensor list,
+just flattened. See \texttt{tests/test\_vumps\_apply\_mpo\_v3.py} and
+\texttt{examples/idmrg/vumps\_apply\_mpo\_v3\_VS\_python/main.py} for the
+full cross-check against \texttt{itensor\_version="python"}, including the
+same three cases ($D=1$ exact, $D>1$ unitary invariants, \texttt{chi\_W>1}
+bond growth at \texttt{n\_uc=2}).
 
 \end{document}

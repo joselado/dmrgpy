@@ -139,6 +139,19 @@ struct VumpsResult
     double gauge_mismatch = 0.0; // final ||AC-AL@C||+||AC-C@AR||, normalized -- see vumps_gauge_mismatch
     };
 
+// A converged/summed VUMPS-mixed-gauge uniform iMPS with no ground-state-
+// specific bookkeeping -- C++ analogue of pyitensor/vumps.py's own
+// UniformMPS, returned by Chain::vumps_apply_mpo/vumps_imps_sum. Load into
+// a Chain's own snapshot via Chain::vumps_load_uniform_state to make
+// vumps_onsite_expectation/vumps_two_point_correlator (or a further
+// apply_mpo/imps_sum call) see it -- see those methods' own comments.
+struct VumpsUniformResult
+    {
+    int D = 0, d_g = 0;
+    std::vector<Cplx> AL, AR, C, AC; // (D,d_g,D)/(D,d_g,D)/(D,D)/(D,d_g,D), row-major
+    Cplx eta = Cplx(0,0); // norm diagnostic, see vx_canonicalize_n1's own comment
+    };
+
 // -- Internal (never exposed to Python) VUMPS/excitation-ansatz plumbing
 // structs -- see Chain's own "-- VUMPS / excitation ansatz private
 // helpers --" section (near idmrg_make_W_end) for how each is used; kept
@@ -2746,6 +2759,160 @@ class Chain
         return tr;
         }
 
+    // Apply a periodic (bounded) MPO to `this` Chain's own converged VUMPS
+    // snapshot (vumps_AL_ etc, set by a prior vumps_ground_state() or
+    // vumps_load_uniform_state() call), returning a NEW mixed-gauge
+    // uniform iMPS -- C++ port of pyitensor/vumps.py's own apply_mpo (see
+    // this file's own "-- apply_mpo / imps_sum private helpers --" section
+    // for the algorithm: vx_grow_by_mpo_n1, then vx_canonicalize_n1, then
+    // vumps_complete_mixed_gauge). `this` Chain's own snapshot is left
+    // untouched (matches Python's own pure-function semantics) -- call
+    // vumps_load_uniform_state() on the result (on this Chain or any other
+    // sharing the same site_types) to make vumps_onsite_expectation/
+    // vumps_two_point_correlator/a further apply_mpo/imps_sum call see it.
+    //
+    // W_bulk_flat[p] (p=0..n_uc-1): a dense, row-major (Left,in,out,Right)
+    // rank-4 operator tensor at unit-cell sublattice p, size
+    // Dw_left[p]*d_p*d_p*Dw_right[p] where d_p=site_dim(p+1) -- the SAME
+    // convention pyitensor/vumps.py's own apply_mpo takes (a list of n_uc
+    // rank-4 ITensors), just as plain flat arrays instead of ITensor
+    // objects. W_bulk_flat must represent a genuinely BOUNDED (non-
+    // extensive) periodic operator -- the Hamiltonian's own accumulator
+    // automaton is explicitly out of scope, see pyitensor/idmrg.py's own
+    // "Applying a (bounded) MPO to the converged iMPS" section docstring
+    // for the specific failure mode of feeding it in anyway. maxdim<=0
+    // means "no cap" (Python's maxdim=None).
+    VumpsUniformResult
+    vumps_apply_mpo(std::vector<std::vector<Cplx>> const& W_bulk_flat,
+                     std::vector<int> const& Dw_left, std::vector<int> const& Dw_right,
+                     double cutoff, int maxdim)
+        {
+        if (!have_vumps_snapshot_)
+            throw ITError("Chain::vumps_apply_mpo: called before vumps_ground_state/"
+                           "vumps_load_uniform_state (no converged VUMPS snapshot)");
+        int n_uc = sites_.length();
+        if ((int)W_bulk_flat.size()!=n_uc || (int)Dw_left.size()!=n_uc || (int)Dw_right.size()!=n_uc)
+            throw ITError("Chain::vumps_apply_mpo: expected "+std::to_string(n_uc)+
+                           " unit-cell sites in W_bulk_flat/Dw_left/Dw_right");
+        std::vector<IdmrgAutomatonRow> rows(n_uc);
+        for (int p=0;p<n_uc;++p)
+            {
+            int d = dim(sites_.si(p+1));
+            int left_n=Dw_left[p], right_n=Dw_right[p];
+            if ((size_t)left_n*d*d*right_n != W_bulk_flat[p].size())
+                throw ITError("Chain::vumps_apply_mpo: W_bulk_flat["+std::to_string(p)+
+                               "] size does not match Dw_left*d*d*Dw_right");
+            std::vector<Cplx> flat((size_t)left_n*right_n*d*d,Cplx(0,0));
+            for (int l=0;l<left_n;++l)
+            for (int si=0;si<d;++si)
+            for (int so=0;so<d;++so)
+            for (int r=0;r<right_n;++r)
+                flat[((size_t)l*right_n+r)*d*d+si*d+so] =
+                    W_bulk_flat[p][((size_t)l*d+si)*d*right_n + (size_t)so*right_n + r];
+            rows[p] = IdmrgAutomatonRow{p,d,left_n,right_n,std::move(flat)};
+            }
+        int Dw, d_g; std::vector<Cplx> W;
+        vumps_group_automaton(rows,n_uc,Dw,d_g,W);
+        if (d_g != vumps_dg_)
+            throw ITError("Chain::vumps_apply_mpo: W_bulk's own grouped physical "
+                           "dimension ("+std::to_string(d_g)+") does not match this "
+                           "Chain's own vumps snapshot d_g ("+std::to_string(vumps_dg_)+")");
+
+        int D = vumps_D_;
+        auto B = vx_grow_by_mpo_n1(W,Dw,d_g,vumps_AL_,D);
+        auto canon = vx_canonicalize_n1(B,Dw*D,d_g,cutoff,maxdim);
+        auto mg = vumps_complete_mixed_gauge(canon.AL,canon.D,d_g);
+
+        VumpsUniformResult out;
+        out.D = canon.D; out.d_g = d_g; out.AL = canon.AL;
+        out.AR = mg.AR; out.C = mg.C; out.AC = mg.AC; out.eta = canon.eta;
+        return out;
+        }
+
+    // Direct sum of `this` Chain's own converged VUMPS snapshot (state
+    // "a") with a second, externally-supplied converged state "b" (AL_b,
+    // bond dimension D_b, sharing this Chain's own d_g/n_uc -- state "b"
+    // need not have come from a vumps_ground_state() run on this SAME
+    // Chain instance; the main intended use is two independently-converged
+    // Chains, e.g. two symmetry-related ground states) -- C++ port of
+    // pyitensor/vumps.py's own imps_sum. Reliably throws ITError for two
+    // *ordinary* VUMPSResults (both individually normalized to eta=1 on
+    // both the left AND right transfer eigenvalues by mixed-gauge
+    // construction, hence a genuinely degenerate combined dominant
+    // eigenvalue -- caught by vx_canonicalize_n1's own vx_dominant_*_
+    // fixed_point calls) -- see pyitensor/vumps.py's own "Summing two
+    // converged VUMPS iMPS" section docstring for the physical derivation;
+    // only two states with a genuine per-site norm mismatch (e.g. one
+    // deliberately rescaled) have a well-posed sum. `this` Chain's own
+    // snapshot is left untouched.
+    VumpsUniformResult
+    vumps_imps_sum(int D_b, std::vector<Cplx> const& AL_b, double cutoff, int maxdim)
+        {
+        if (!have_vumps_snapshot_)
+            throw ITError("Chain::vumps_imps_sum: called before vumps_ground_state/"
+                           "vumps_load_uniform_state (no converged VUMPS snapshot)");
+        int d_g = vumps_dg_;
+        if ((size_t)D_b*d_g*D_b != AL_b.size())
+            throw ITError("Chain::vumps_imps_sum: AL_b's size does not match D_b*d_g*D_b "
+                           "(this Chain's own vumps snapshot d_g="+std::to_string(d_g)+")");
+        int Da = vumps_D_, D = Da+D_b;
+        std::vector<Cplx> raw((size_t)D*d_g*D,Cplx(0,0));
+        for (int p=0;p<d_g;++p)
+            {
+            for (int i=0;i<Da;++i) for (int j=0;j<Da;++j)
+                raw[(size_t)(i*d_g+p)*D+j] = vumps_AL_[(i*d_g+p)*Da+j];
+            for (int i=0;i<D_b;++i) for (int j=0;j<D_b;++j)
+                raw[(size_t)((Da+i)*d_g+p)*D+(Da+j)] = AL_b[(i*d_g+p)*D_b+j];
+            }
+        auto canon = vx_canonicalize_n1(raw,D,d_g,cutoff,maxdim);
+        auto mg = vumps_complete_mixed_gauge(canon.AL,canon.D,d_g);
+
+        VumpsUniformResult out;
+        out.D = canon.D; out.d_g = d_g; out.AL = canon.AL;
+        out.AR = mg.AR; out.C = mg.C; out.AC = mg.AC; out.eta = canon.eta;
+        return out;
+        }
+
+    // Loads an externally-computed mixed-gauge uniform iMPS (e.g. the
+    // return value of vumps_apply_mpo/vumps_imps_sum, from this OR another
+    // Chain sharing the same site_types) into `this` Chain's own VUMPS
+    // snapshot, so vumps_onsite_expectation/vumps_two_point_correlator
+    // (and further vumps_apply_mpo/vumps_imps_sum calls) see it -- C++
+    // analogue of pyitensor/vumps.py's own duck typing (VUMPSResult and
+    // UniformMPS are interchangeable there since onsite_expectation/
+    // two_point_correlator only ever read .sites_uc/.n_uc/.AC/.AR).
+    // GL/GR/W/e0/converged/niter_done/gauge_mismatch are NOT restored (no
+    // meaning for a summed/MPO-applied state, matching pyitensor's own
+    // UniformMPS, which drops them too) -- vumps_excitation_energies is
+    // therefore not meaningful after this call without a fresh
+    // vumps_ground_state().
+    void
+    vumps_load_uniform_state(int D, int d_g, std::vector<Cplx> const& AL,
+                              std::vector<Cplx> const& AR, std::vector<Cplx> const& C)
+        {
+        if ((size_t)D*d_g*D != AL.size() || (size_t)D*d_g*D != AR.size() || (size_t)D*D != C.size())
+            throw ITError("Chain::vumps_load_uniform_state: AL/AR/C sizes inconsistent with D,d_g");
+        vumps_D_ = D; vumps_dg_ = d_g;
+        vumps_AL_ = AL; vumps_AR_ = AR; vumps_C_ = C;
+        have_vumps_snapshot_ = true;
+        have_vumps_exc_env_ = false;
+        }
+
+    // Read back `this` Chain's own current VUMPS snapshot AL/AR/C -- e.g.
+    // to rescale/feed a state into vumps_imps_sum's own AL_b argument on a
+    // DIFFERENT Chain, or to inspect a vumps_load_uniform_state()-loaded
+    // state -- requires vumps_ground_state/vumps_load_uniform_state to
+    // have been called first on this same Chain.
+    void
+    vumps_get_snapshot(int& D, int& d_g, std::vector<Cplx>& AL,
+                        std::vector<Cplx>& AR, std::vector<Cplx>& C) const
+        {
+        if (!have_vumps_snapshot_)
+            throw ITError("Chain::vumps_get_snapshot: called before vumps_ground_state/"
+                           "vumps_load_uniform_state (no converged VUMPS snapshot)");
+        D = vumps_D_; d_g = vumps_dg_; AL = vumps_AL_; AR = vumps_AR_; C = vumps_C_;
+        }
+
     // Real-time IBC-window dynamical correlator S(x,t) =
     // <psi0|A_x exp(-iHt)B_0|psi0> of the infinite chain (Milsted/
     // Vanderstraeten, arXiv:1804.09163, Sec. V.1) -- native ITensor v3
@@ -4521,6 +4688,306 @@ class Chain
             out.push_back(std::move(pc));
             }
         return out;
+        }
+
+    // == apply_mpo / imps_sum private helpers (Chain::vumps_apply_mpo,
+    // Chain::vumps_imps_sum, Chain::vumps_load_uniform_state, all public,
+    // further below) -- C++ analogues of pyitensor/idmrg.py's own
+    // _psd_sqrt_factor/_canonicalize_periodic and pyitensor/vumps.py's own
+    // _complete_mixed_gauge/apply_mpo/imps_sum. _canonicalize_periodic is
+    // specialized here to the trivial n_uc=1 periodic chain (no
+    // per-sublattice propagation step needed) -- VUMPS's own apply_mpo/
+    // imps_sum always reduce to exactly this n_uc=1 case even when the
+    // ORIGINAL n_uc is 2, since VUMPS groups everything into one
+    // grouped supersite up front (see pyitensor/vumps.py's own apply_mpo/
+    // imps_sum module comments, and vumps_group_automaton's own doc
+    // comment above, for why).
+
+    // (D,D) transpose -- pyitensor's own A.T.
+    static std::vector<Cplx>
+    vx_transpose_square(std::vector<Cplx> const& A, int D)
+        {
+        std::vector<Cplx> B((size_t)D*D);
+        for (int i=0;i<D;++i)
+        for (int j=0;j<D;++j)
+            B[j*D+i] = A[i*D+j];
+        return B;
+        }
+
+    // Economy SVD that also returns the singular values (descending, as
+    // LAPACK's zgesvd already produces them) -- vx_economy_svd's own
+    // existing callers never needed `s`; the canonicalization below does,
+    // to truncate.
+    static void
+    vx_economy_svd_full(std::vector<Cplx> const& A_row, int m, int n,
+                         std::vector<Cplx>& U_row, std::vector<double>& s,
+                         std::vector<Cplx>& Vt_row)
+        {
+        int k = std::min(m,n);
+        std::vector<Cplx> Acol((size_t)m*n);
+        for (int i=0;i<m;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+(size_t)j*m] = A_row[i*n+j];
+        std::vector<LAPACK_REAL> sv(k);
+        std::vector<Cplx> Ucol((size_t)m*k), Vtcol((size_t)k*n);
+        char jobz = 'S';
+        LAPACK_INT mm=m, nn=n, info=0;
+        zgesvd_wrapper(&jobz,&mm,&nn,Acol.data(),sv.data(),Ucol.data(),Vtcol.data(),&info);
+        if (info!=0)
+            throw ITError("Chain::vumps: zgesvd_wrapper failed (info="+std::to_string(info)+")");
+        U_row.assign((size_t)m*k,Cplx(0,0));
+        Vt_row.assign((size_t)k*n,Cplx(0,0));
+        for (int i=0;i<m;++i) for (int j=0;j<k;++j) U_row[i*k+j] = Ucol[i+(size_t)j*m];
+        for (int i=0;i<k;++i) for (int j=0;j<n;++j) Vt_row[i*n+j] = Vtcol[i+(size_t)j*k];
+        s.assign(sv.begin(),sv.end());
+        }
+
+    // Mirrors pyitensor/svd.py's own _truncate: s descending, normalized
+    // weights p=s^2/sum(s^2), drop the smallest first, stopping once
+    // either mindim is reached or dropping the next would exceed `cutoff`
+    // of discarded weight -- except maxdim (if >0) is a hard cap enforced
+    // regardless of cutoff. maxdim<=0 means "no cap" (Python's maxdim=None).
+    static int
+    vx_truncate(std::vector<double> const& s, double cutoff, int maxdim, int mindim=1)
+        {
+        int n = (int)s.size();
+        std::vector<double> p(n);
+        double total = 0.0;
+        for (int i=0;i<n;++i) { p[i] = s[i]*s[i]; total += p[i]; }
+        if (total <= 0.0) return std::max(1,mindim);
+        for (auto & v : p) v /= total;
+        int keep = n;
+        double discarded = 0.0;
+        while (keep > mindim)
+            {
+            bool over_maxdim = maxdim>0 && keep>maxdim;
+            if (!over_maxdim && discarded + p[keep-1] > cutoff) break;
+            discarded += p[keep-1];
+            keep -= 1;
+            }
+        return keep;
+        }
+
+    // Hermitian eigendecomposition, ALL eigenpairs (ascending eigenvalues;
+    // eigenvectors as columns of `evecs_col`, itself kept COLUMN-major --
+    // i.e. evecs_col[i+k*n] is the i-th component of the k-th eigenvector,
+    // matching zheev_wrapper's own raw LAPACK output layout directly, no
+    // transpose needed) -- generalizes vx_hermitian_ground_state (which
+    // only keeps the lowest eigenpair) for the psd-sqrt-factor/
+    // complete-mixed-gauge helpers below, both of which need the FULL
+    // spectrum.
+    static void
+    vx_hermitian_eig_full(std::vector<Cplx> const& H_row, int n,
+                           std::vector<double>& evals, std::vector<Cplx>& evecs_col)
+        {
+        evecs_col.assign((size_t)n*n,Cplx(0,0));
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            evecs_col[i+(size_t)j*n] = H_row[i*n+j];
+        std::vector<LAPACK_REAL> d(n);
+        auto info = zheev_wrapper(n,evecs_col.data(),d.data());
+        if (info!=0)
+            throw ITError("Chain::vumps: zheev_wrapper failed (info="+std::to_string(info)+")");
+        evals.assign(d.begin(),d.end());
+        }
+
+    // X (keep x D row-major) such that rho ~= X^H X -- Hermitized square
+    // root via full eigh, dropping eigenvalues at or below `rel_floor`
+    // times the largest one (covers both clipping small-negative noise and
+    // dropping small-but-positive/ill-conditioned directions) -- C++
+    // analogue of pyitensor/idmrg.py's own _psd_sqrt_factor. `keep` (X's
+    // own row count) is returned via the out-param.
+    static std::vector<Cplx>
+    vx_psd_sqrt_factor(std::vector<Cplx> const& rho, int D, int& keep, double rel_floor=1e-12)
+        {
+        auto herm = vx_hermitize(rho,D);
+        std::vector<double> evals; std::vector<Cplx> evecs_col;
+        vx_hermitian_eig_full(herm,D,evals,evecs_col);
+        double top = evals.empty() ? 0.0 : evals.back();
+        double floor = top > 0.0 ? rel_floor*top : 0.0;
+        int start = 0;
+        while (start<D && evals[start] <= std::max(floor,0.0)) ++start;
+        keep = D - start;
+        std::vector<Cplx> X((size_t)keep*D,Cplx(0,0));
+        for (int k=0;k<keep;++k)
+            {
+            int idx = start+k;
+            double sroot = std::sqrt(std::max(evals[idx],0.0));
+            for (int i=0;i<D;++i)
+                X[k*D+i] = sroot*std::conj(evecs_col[i+(size_t)idx*D]);
+            }
+        return X;
+        }
+
+    // Result of vx_canonicalize_n1 -- the n_uc=1-specialized C++ analogue
+    // of pyitensor/idmrg.py's own _canonicalize_periodic (see this
+    // section's own top comment for why n_uc=1 is the only case VUMPS's
+    // own apply_mpo/imps_sum ever need).
+    struct CanonResult { std::vector<Cplx> AL; int D; Cplx eta; };
+
+    // B: raw (generally non-canonical) (D_in,d_g,D_in) periodic tensor
+    // (already noPrime()d/physical-leg-resolved by the caller) -- the
+    // trivial n_uc=1 case of pyitensor idmrg._canonicalize_periodic: factor
+    // the dominant left/right transfer-matrix fixed points
+    // rho_L_before=X^H X, rho_R_before=Y Y^H (vx_psd_sqrt_factor), SVD
+    // M=X@Y=U S Vh, truncate (vx_truncate), and build the asymmetric gauge
+    // G_left=U^H X (no S factor), G_right=Y Vh^H S^-1 (the full inverse) --
+    // see pyitensor/idmrg.py's own _canonicalize_periodic docstring for the
+    // full derivation of why this asymmetric split, rather than a symmetric
+    // S^-1/2 one, is what reproduces a plain left-canonical tensor (no
+    // separate bond-weight layer) directly.
+    static CanonResult
+    vx_canonicalize_n1(std::vector<Cplx> const& B, int D_in, int d_g,
+                        double cutoff, int maxdim)
+        {
+        auto E = vx_op_transfer_matrix(B,D_in,d_g,B,false,{});
+        auto [rho_R, eta_R] = vx_dominant_right_fixed_point(E,D_in);
+        auto [rho_L, eta_L] = vx_dominant_left_fixed_point(E,D_in);
+        if (std::abs(eta_L-eta_R) > 1e-6*std::max(1.0,std::abs(eta_R)))
+            throw ITError("Chain::vumps: apply_mpo/imps_sum canonicalization -- dominant "
+                           "left/right transfer eigenvalues disagree -- indicates a "
+                           "near-degenerate transfer spectrum (e.g. summing two "
+                           "ordinary, equally-normalized VUMPS ground states -- see "
+                           "pyitensor/vumps.py's own imps_sum docstring)");
+        // n_uc=1: pyitensor's own _all_left_fixed_points per-cut
+        // renormalization is the identity here (scales=[1]), so its own
+        // rho_L_before=(rho_L*scales[0]).T reduces to a plain transpose.
+        auto rho_L_before = vx_transpose_square(rho_L,D_in);
+
+        int kx=0, ky=0;
+        auto X = vx_psd_sqrt_factor(rho_L_before,D_in,kx);       // (kx,D_in)
+        auto Ydag = vx_psd_sqrt_factor(rho_R,D_in,ky);           // (ky,D_in) == Y^H
+        auto Y = vx_dagger(Ydag,ky,D_in);                        // (D_in,ky)
+
+        auto M = vx_matmul(X,kx,D_in,Y,D_in,ky);                 // (kx,ky)
+        std::vector<Cplx> Usvd, Vt; std::vector<double> s;
+        vx_economy_svd_full(M,kx,ky,Usvd,s,Vt);
+        int r = (int)s.size();
+        int keep = vx_truncate(s,cutoff,maxdim,1);
+
+        std::vector<Cplx> Uk((size_t)kx*keep), Vtk((size_t)keep*ky);
+        for (int i=0;i<kx;++i) for (int j=0;j<keep;++j) Uk[i*keep+j] = Usvd[i*r+j];
+        for (int i=0;i<keep;++i) for (int j=0;j<ky;++j) Vtk[i*ky+j] = Vt[i*ky+j];
+
+        auto Udag = vx_dagger(Uk,kx,keep);                       // (keep,kx)
+        auto G_left = vx_matmul(Udag,keep,kx,X,kx,D_in);         // (keep,D_in)
+
+        auto Vtkdag = vx_dagger(Vtk,keep,ky);                    // (ky,keep)
+        auto YV = vx_matmul(Y,D_in,ky,Vtkdag,ky,keep);           // (D_in,keep)
+        std::vector<Cplx> G_right((size_t)D_in*keep);
+        for (int i=0;i<D_in;++i)
+        for (int j=0;j<keep;++j)
+            G_right[i*keep+j] = YV[i*keep+j]/s[j];
+
+        // new_arr[a,p,d] = sum_{b,c} G_left[a,b]*B[b,p,c]*G_right[c,d]
+        std::vector<Cplx> AL_new((size_t)keep*d_g*keep,Cplx(0,0));
+        for (int a=0;a<keep;++a)
+        for (int p=0;p<d_g;++p)
+        for (int d=0;d<keep;++d)
+            {
+            Cplx acc(0,0);
+            for (int b=0;b<D_in;++b)
+                {
+                Cplx inner(0,0);
+                for (int c=0;c<D_in;++c) inner += B[(b*d_g+p)*D_in+c]*G_right[c*keep+d];
+                acc += G_left[a*D_in+b]*inner;
+                }
+            AL_new[(a*d_g+p)*keep+d] = acc;
+            }
+
+        CanonResult out; out.AL = std::move(AL_new); out.D = keep; out.eta = eta_R;
+        return out;
+        }
+
+    struct MixedGaugeResult { std::vector<Cplx> AR, C, AC; };
+
+    // (AR,C,AC): completes a left-canonical grouped-supersite tensor AL
+    // (D,d_g,D) to the full VUMPS mixed gauge -- C++ analogue of
+    // pyitensor/vumps.py's own _complete_mixed_gauge (Vanderstraeten,
+    // Haegeman, Verstraete, arXiv:1810.07006, Eq.(9)-(17), specialized to
+    // an already-left-canonical input): factor AL's own dominant right
+    // transfer-matrix fixed point r=C C^dagger (Hermitian PSD square
+    // root), then AR:=C^-1 AL C, AC:=AL C. C's own pseudo-inverse is
+    // obtained directly from the SAME eigendecomposition used to build C
+    // (C is Hermitian PSD by construction: C = V diag(sqrt(evals)) V^H
+    // implies pinv(C) = V diag(1/sqrt(evals) where >floor else 0) V^H),
+    // rather than a separate general pinv routine.
+    MixedGaugeResult
+    vumps_complete_mixed_gauge(std::vector<Cplx> const& AL, int D, int d_g) const
+        {
+        auto E = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
+        auto [r,eta] = vx_dominant_right_fixed_point(E,D);
+        auto herm = vx_hermitize(r,D);
+        std::vector<double> evals; std::vector<Cplx> evecs_col;
+        vx_hermitian_eig_full(herm,D,evals,evecs_col);
+
+        double top=0.0; for (double e : evals) top = std::max(top,e);
+        double floor = top>0.0 ? 1e-12*top : 0.0;
+
+        std::vector<Cplx> C((size_t)D*D,Cplx(0,0)), Cinv((size_t)D*D,Cplx(0,0));
+        for (int i=0;i<D;++i)
+        for (int j=0;j<D;++j)
+            {
+            Cplx accC(0,0), accCinv(0,0);
+            for (int k=0;k<D;++k)
+                {
+                double ev = std::max(evals[k],0.0);
+                double sroot = std::sqrt(ev);
+                Cplx term = evecs_col[i+(size_t)k*D]*std::conj(evecs_col[j+(size_t)k*D]);
+                accC += sroot*term;
+                if (ev > floor) accCinv += (1.0/sroot)*term;
+                }
+            C[i*D+j] = accC;
+            Cinv[i*D+j] = accCinv;
+            }
+
+        std::vector<Cplx> AR((size_t)D*d_g*D,Cplx(0,0));
+        for (int a=0;a<D;++a)
+        for (int p=0;p<d_g;++p)
+        for (int d=0;d<D;++d)
+            {
+            Cplx acc(0,0);
+            for (int b=0;b<D;++b)
+                {
+                Cplx inner(0,0);
+                for (int c=0;c<D;++c) inner += AL[(b*d_g+p)*D+c]*C[c*D+d];
+                acc += Cinv[a*D+b]*inner;
+                }
+            AR[(a*d_g+p)*D+d] = acc;
+            }
+        auto AC = vumps_compose_AL_C(AL,C,D,d_g);
+
+        MixedGaugeResult out; out.AR=std::move(AR); out.C=std::move(C); out.AC=std::move(AC);
+        return out;
+        }
+
+    // Contract a grouped-supersite MPO W (Dw,Dw,d_g,d_g, vumps_group_
+    // automaton's own axis convention) against AL (D,d_g,D) sharing their
+    // physical leg, Kronecker-merging (left_W,left_A) and (right_W,
+    // right_A) into the grown tensor's own combined bond -- the n_uc=1
+    // specialization of pyitensor idmrg.grow_by_mpo/_local_grow (VUMPS
+    // always grows at the single-grouped-supersite level, see this
+    // section's own top comment). Not yet canonicalized/truncated (see
+    // vx_canonicalize_n1).
+    static std::vector<Cplx>
+    vx_grow_by_mpo_n1(std::vector<Cplx> const& W, int Dw, int d_g,
+                       std::vector<Cplx> const& AL, int D)
+        {
+        int Dg = Dw*D;
+        std::vector<Cplx> B((size_t)Dg*d_g*Dg,Cplx(0,0));
+        for (int lw=0;lw<Dw;++lw)
+        for (int la=0;la<D;++la)
+        for (int so=0;so<d_g;++so)
+        for (int rw=0;rw<Dw;++rw)
+        for (int ra=0;ra<D;++ra)
+            {
+            Cplx acc(0,0);
+            for (int si=0;si<d_g;++si)
+                acc += W[((lw*Dw+rw)*d_g+si)*d_g+so]*AL[(la*d_g+si)*D+ra];
+            int l = lw*D+la, rr = rw*D+ra;
+            B[(size_t)(l*d_g+so)*Dg+rr] = acc;
+            }
+        return B;
         }
 
     // (e, source_l) -- C++ analogue of pyitensor/vumps.py's own
