@@ -2807,4 +2807,47 @@ both cases plus a cross-check of the surviving branch's
 \texttt{onsite\_expectation}/\texttt{two\_point\_correlator} at genuinely
 entangled $D>1$.
 
+\textbf{Applying an operator/gate to a converged VUMPS iMPS (advanced).}
+\texttt{pyitensor.vumps.apply\_mpo(result, W\_bulk, cutoff=...,
+maxdim=...)} is the VUMPS-mixed-gauge analogue of \texttt{idmrg.apply\_mpo}
+above: it groups \texttt{W\_bulk} into a single grouped-supersite MPO
+tensor (the same \texttt{\_group\_automaton} routine that groups VUMPS's
+own Hamiltonian automaton), grows the converged $A_L$ by it via
+\texttt{idmrg.grow\_by\_mpo}, re-canonicalizes/truncates via
+\texttt{idmrg.\_canonicalize\_periodic} (the identical two-sided
+fixed-point procedure \texttt{idmrg.apply\_mpo} uses), and completes the
+resulting truncated left-canonical tensor to the full mixed gauge
+$\{A_L,A_R,C,A_C\}$ via \texttt{vumps.\_complete\_mixed\_gauge} (the same
+completion \texttt{imps\_sum} immediately above uses). \texttt{W\_bulk}
+takes \emph{exactly} \texttt{idmrg.apply\_mpo}'s own convention -- a list
+of \texttt{n\_uc} rank-4 (Left, in, out, Right) ITensors, one per
+unit-cell sublattice site -- so the identical \texttt{W\_bulk} list built
+for one backend can be fed to the other's own \texttt{apply\_mpo} to
+cross-check both against each other on the same operator:
+
+\begin{lstlisting}
+from dmrgpy.pyitensor import vumps
+
+new_state = vumps.apply_mpo(result, W, cutoff=1e-12, maxdim=None)
+\end{lstlisting}
+
+Returns a new \texttt{pyitensor.vumps.UniformMPS}, accepted directly by
+\texttt{vumps.onsite\_expectation}/\texttt{two\_point\_correlator} exactly
+like a \texttt{VUMPSResult}. Same scope restriction as
+\texttt{idmrg.apply\_mpo} above -- \texttt{W\_bulk} must represent a
+\emph{bounded} (non-extensive) periodic operator; the Hamiltonian's own
+automaton (built internally by \texttt{vumps\_ground\_state} for
+\texttt{gs\_energy()}) is out of scope, for the identical reason described
+there. There is no \texttt{Infinite\_Many\_Body\_Chain}-level wrapper yet
+either, so \texttt{pyitensor.vumps.apply\_mpo} is reached directly,
+working against \texttt{ic.\_vumps\_result} (only meaningful for
+\texttt{itensor\_version="python"} with \texttt{gs\_method="vumps"}). See
+\texttt{examples/idmrg/vumps\_apply\_mpo/main.py} for a worked example: a
+\texttt{chi\_W=1} unitary single-site flip cross-checked exactly against
+\texttt{idmrg.apply\_mpo} at the exact $D=1$ field-polarized point, the
+same flip's $\langle S_z\rangle$/$\langle S_z(0)S_z(r)\rangle$/\texttt{eta}
+invariants checked at a genuinely entangled $D>1$ TFIM ground state, and a
+genuinely bond-growing \texttt{chi\_W>1} two-site gate tiled once per an
+\texttt{n\_uc=2} unit cell.
+
 \end{document}

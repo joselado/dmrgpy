@@ -940,6 +940,50 @@ entangled $D=2,3$ (TFIM, gapped) to $\sim10^{-6}$, not just the trivial
 $D=1$ scalar case -- see \texttt{tests/test\_vumps\_imps\_sum.py} and
 \texttt{examples/idmrg/vumps\_imps\_sum/main.py}.
 
+\textbf{Applying an MPO to a converged VUMPS iMPS
+(\texttt{pyitensor/vumps.py}'s \texttt{apply\_mpo})}: the VUMPS-mixed-gauge
+port of \texttt{idmrg.py}'s own \texttt{apply\_mpo} above, reusing that
+function's construction and literature reference (Orus \& Vidal, PRB 78,
+155117 (2008)) unmodified rather than re-deriving it -- no new physics
+beyond what \texttt{idmrg.apply\_mpo} and \texttt{vumps.imps\_sum}
+(immediately above) already establish independently. \texttt{W\_bulk}
+takes \emph{exactly} \texttt{idmrg.apply\_mpo}'s own convention (a list of
+\texttt{n\_uc} rank-4 (Left, in, out, Right) ITensors, one per unit-cell
+sublattice site), so the identical \texttt{W\_bulk} list can be fed to
+either function -- reused directly in
+\texttt{tests/test\_vumps\_apply\_mpo.py}/
+\texttt{examples/idmrg/vumps\_apply\_mpo/main.py} to cross-check both
+backends' results against each other on the same operator at the exact
+$D=1$ field-polarized point. \texttt{W\_bulk} is first grouped into a
+single $D_w \times D_w \times d_g \times d_g$ grouped-supersite MPO tensor
+via \texttt{\_group\_automaton} (the same routine
+\texttt{vumps\_ground\_state} already uses to group the Hamiltonian
+automaton -- grouping site-local MPO tensors into one is a purely
+structural contraction, independent of whether the result feeds a
+Hamiltonian or an arbitrary bounded operator), then
+\texttt{idmrg.grow\_by\_mpo} grows $A_L$ by it on the trivial
+\texttt{n\_uc=1} ``periodic chain'' VUMPS already works at (the same
+reduction \texttt{imps\_sum} uses for its own
+\texttt{idmrg.\_canonicalize\_periodic} call), which
+re-canonicalizes/truncates the grown tensor exactly as
+\texttt{apply\_mpo}/\texttt{imps\_sum} already do. The resulting truncated
+left-canonical tensor is completed to the full mixed gauge via
+\texttt{\_complete\_mixed\_gauge} -- the identical bookkeeping step
+\texttt{imps\_sum}'s own construction needs, for the identical reason:
+neither operation is itself a VUMPS ground-state solve, so there is no
+outer iteration left to fix up an inconsistent gauge the way
+\texttt{vumps\_ground\_state}'s own iteration does. Returns a
+\texttt{UniformMPS}, same as \texttt{imps\_sum}. Scope restriction is
+identical to \texttt{idmrg.apply\_mpo}'s own (bounded/periodic operators
+only, the Hamiltonian's own unbounded automaton is out of scope) -- see
+that function's own docstring. Verified against exact $D=1$ closed-form
+cases, a genuinely entangled $D=2,3$ TFIM ground state (a unitary
+single-site flip must preserve \texttt{eta}, flip $\langle S_z\rangle$,
+and leave $\langle S_z(0)S_z(r)\rangle$ unchanged), and a genuinely
+bond-growing \texttt{chi\_W>1} two-site gate tiled once per an
+\texttt{n\_uc=2} unit cell -- see \texttt{tests/test\_vumps\_apply\_mpo.py}
+and \texttt{examples/idmrg/vumps\_apply\_mpo/main.py}.
+
 \textbf{Excited states: the tangent-space/quasiparticle excitation
 ansatz (\texttt{pyitensor/idmrg\_excitations.py})}: an infinite chain's
 excitations form a momentum-resolved band $E(k)$, not a single discrete

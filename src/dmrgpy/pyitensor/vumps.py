@@ -169,6 +169,7 @@ from . import idmrg_excitations as idmrg_exc
 from .dmrg import _lanczos_ground_state
 from .index import Index
 from .tensor import ITensor
+from .tensor import noPrime as _t_noPrime
 
 
 def _group_automaton(W_bulk, n_uc):
@@ -1126,4 +1127,87 @@ def imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None):
     AR_new, C_new, AC_new = _complete_mixed_gauge(AL_new)
     D_new = AL_new.shape[0]
     return UniformMPS(result_a.sites_uc, n_uc, D_new, d_g,
+                       AL_new, AR_new, C_new, AC_new, eta)
+
+
+# == Applying a (bounded) MPO to a converged VUMPS iMPS ======================
+#
+# apply_mpo(result, W_bulk, cutoff=1e-12, maxdim=None) is the VUMPS-mixed-
+# gauge analogue of idmrg.apply_mpo -- see that function's own "Applying a
+# (bounded) MPO to the converged iMPS" section docstring in idmrg.py for the
+# full derivation (Orus & Vidal, "Infinite time-evolving block decimation
+# algorithm beyond unitary evolution", PRB 78, 155117 (2008): grow the
+# converged unit cell by the MPO, then re-canonicalize/truncate the grown
+# bond dimension back down via the standard two-sided fixed-point
+# procedure) and the SAME scope restriction -- W_bulk must represent a
+# genuinely *bounded* (non-extensive) periodic operator, the same tensor
+# tiled once per unit-cell site with no unconditional "keep accumulating
+# forever" self-loop; idmrg.py's own Hamiltonian automaton
+# (`_build_periodic_mpo`) is explicitly out of scope here for the identical
+# reason it is for idmrg.apply_mpo (see that module's own comment).
+#
+# `W_bulk` uses EXACTLY the same convention idmrg.apply_mpo itself takes: a
+# list of n_uc ITensors, one per unit-cell sublattice position (0..n_uc-1),
+# each rank-4 (Left, in, out, Right) with `in` a d_p x d_p physical Index
+# matching sites_uc.si(p+1) -- so the identical W_bulk list built for one
+# converged ground state can be fed to either idmrg.apply_mpo or this
+# function to apply the same operator to the other backend's own converged
+# state (e.g. to cross-check both against each other on the same physical
+# operation, see examples/idmrg/vumps_apply_mpo/main.py).
+#
+# Construction: group W_bulk into a single Dw x Dw x d_g x d_g grouped-
+# supersite MPO tensor via `_group_automaton` (already used, unmodified, to
+# build VUMPS's own grouped Hamiltonian automaton -- grouping n_uc
+# site-local MPO tensors into one is a purely structural contraction,
+# independent of whether the result is a Hamiltonian automaton or an
+# arbitrary bounded operator), then grow AL by it exactly the way
+# idmrg.apply_mpo grows U_list (`idmrg.grow_by_mpo`, called on the trivial
+# n_uc=1 "periodic chain" VUMPS already works at -- the same reduction
+# `imps_sum` above uses for its own `_canonicalize_periodic` call),
+# re-canonicalize/truncate (`idmrg._canonicalize_periodic`), and complete
+# the resulting truncated left-canonical tensor to the full mixed gauge
+# (`_complete_mixed_gauge`, this module's own "Summing two converged VUMPS
+# iMPS" section machinery, reused verbatim) -- growing-then-truncating a
+# single left-canonical tensor and re-deriving {AR,C,AC} from it afterwards
+# is exactly the same bookkeeping step `imps_sum`'s own construction needs,
+# for the same reason: neither operation is itself a VUMPS ground-state
+# solve, so there is no outer iteration left to fix up an inconsistent
+# gauge the way `vumps_ground_state`'s own iteration does.
+
+
+def apply_mpo(result, W_bulk, cutoff=1e-12, maxdim=None):
+    """Apply a periodic (bounded) MPO to the converged VUMPS iMPS `result`
+    (a VUMPSResult or UniformMPS), returning a new UniformMPS representing
+    W|psi> up to (cutoff, maxdim) truncation -- the VUMPS-mixed-gauge
+    analogue of idmrg.apply_mpo. See this module's own "Applying a (bounded)
+    MPO to a converged VUMPS iMPS" section docstring above for the
+    construction, the W_bulk convention (identical to idmrg.apply_mpo's
+    own), and the scope restriction (bounded/local periodic operators
+    only)."""
+    n_uc = result.n_uc
+    d_g = result.d_g
+    D = result.AL.shape[0]
+
+    W_arr = _group_automaton(W_bulk, n_uc)
+    Dw_l, d_in, d_out, Dw_r = W_arr.shape
+    if d_in != d_g or d_out != d_g:
+        raise ValueError(
+            "vumps.apply_mpo: W_bulk's own grouped physical dimension "
+            "({}, {}) does not match result's own d_g={}".format(
+                d_in, d_out, d_g))
+
+    left, right = Index(D, tags="Link"), Index(D, tags="Link")
+    phys = Index(d_g, tags="Site")
+    AL_tensor = ITensor((left, phys, right), result.AL)
+
+    w_left, w_right = Index(Dw_l, tags="Link"), Index(Dw_r, tags="Link")
+    W_tensor = ITensor((w_left, phys, phys.prime(1), w_right), W_arr)
+
+    B = idmrg.grow_by_mpo([W_tensor], [AL_tensor], 1)
+    B = [_t_noPrime(b, "Site") for b in B]
+    AL_list_new, eta = idmrg._canonicalize_periodic(B, 1, cutoff, maxdim)
+    AL_new = idmrg._to_array_lpr(AL_list_new[0])
+    AR_new, C_new, AC_new = _complete_mixed_gauge(AL_new)
+    D_new = AL_new.shape[0]
+    return UniformMPS(result.sites_uc, n_uc, D_new, d_g,
                        AL_new, AR_new, C_new, AC_new, eta)
