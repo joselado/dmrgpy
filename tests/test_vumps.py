@@ -1,5 +1,7 @@
 """Coverage for pyitensor/vumps.py (VUMPS ground-state solver) and its
 Infinite_Many_Body_Chain wiring (`gs_method="vumps"`, infinitechain.py).
+See tests/test_vumps_correlator.py for dedicated coverage of vumps.py's
+own static-correlator machinery (onsite_expectation/two_point_correlator).
 
 Cross-checks used, in order of how rigorous they are: (1) exactly solvable
 D=1 cases (a pure field, and a fully-decoupled Heisenberg dimer -- both
@@ -177,28 +179,32 @@ def test_gs_method_vumps_matches_exact_field_solution():
     assert e0 == pytest.approx(-0.3, abs=1e-8)
 
 
-def test_gs_method_vumps_vev_not_implemented():
+def test_gs_method_vumps_vev_matches_exact_field_polarization():
+    """vev/correlator under gs_method="vumps" are implemented directly on
+    VUMPSResult's mixed-gauge {AC, AR} (see pyitensor/vumps.py's own
+    "Static correlators" section) -- see tests/test_vumps_correlator.py
+    for the full cross-checked coverage; this is a light smoke test that
+    Infinite_Many_Body_Chain's own dispatch reaches it at all."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
     ic.gs_method = "vumps"
     ic.maxm = 1
     ic.set_hamiltonian(-0.5 * ic.SzC[0])
-    with pytest.raises(NotImplementedError):
-        ic.vev("Sz", 0)
+    assert ic.vev("Sz", 0) == pytest.approx(0.5, abs=1e-8)
 
 
-def test_gs_method_vumps_correlator_not_implemented():
+def test_gs_method_vumps_correlator_matches_exact_field_polarization():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
     ic.gs_method = "vumps"
     ic.maxm = 1
     ic.set_hamiltonian(-0.5 * ic.SzC[0])
-    with pytest.raises(NotImplementedError):
-        ic.correlator("Sz", 0, "Sz", 1)
+    assert ic.correlator("Sz", 0, "Sz", 1) == pytest.approx(0.25, abs=1e-8)
 
 
 def test_gs_method_vumps_excitation_gap_works():
-    """excitation_energies/excitation_gap require gs_method="vumps" (the
-    reverse of vev/correlator, which require gs_method="idmrg") -- see
-    pyitensor.idmrg_excitations' own module docstring for the algorithm.
+    """excitation_energies/excitation_gap require gs_method="vumps"
+    specifically (unlike vev/correlator, which work under either
+    gs_method) -- see pyitensor.idmrg_excitations' own module docstring
+    for the algorithm.
     D=1 field-polarized case: E(k)=B for every k (a single spin flip costs
     exactly the field energy, independent of momentum, since there is no
     bond term to disperse it)."""

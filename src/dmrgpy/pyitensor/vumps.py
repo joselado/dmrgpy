@@ -46,11 +46,13 @@ Same as idmrg_excitations.py: n_uc in {1,2} (grouped into one effective
 supersite via `_group_automaton` -- there is no existing per-sublattice
 ket tensor list to group here, VUMPS builds AL/AR from scratch), reach-1
 bonds after grouping (idmrg_excitations._check_reach_one), pyitensor
-engine only. Static
-correlators (onsite_expectation/two_point_correlator-style) are not
-implemented for a VUMPSResult -- only the converged energy density -- mirroring
-the precedent Infinite_Many_Body_Chain already sets for itensor_version=3
-(gs_energy works, vev/correlator raise NotImplementedError).
+engine only. Static correlators (`onsite_expectation`/`two_point_correlator`
+below) ARE implemented directly on a VUMPSResult, computed from the mixed-
+gauge {AC, AR} rather than idmrg.py's dominant-right-fixed-point
+eigenproblem -- see those functions' own docstrings, and
+Infinite_Many_Body_Chain.vev/correlator for the itensor_version="python"
+gs_method="vumps" public dispatch (itensor_version=3's own vumps path still
+has no correlator support, so that precedent still stands there).
 
 == Convergence robustness (honest scope note) ==
 
@@ -796,3 +798,145 @@ def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
 
     return VUMPSResult(sites_uc, n_uc, D, d_g, AL, AR, C, AC, GL, GR, W,
                         e_cell, converged, it + 1, mismatch)
+
+
+# == Static correlators ======================================================
+#
+# Computed directly from the converged mixed-gauge {AC, AR} rather than
+# idmrg.py's dominant-right-fixed-point eigenproblem -- AC is EXACTLY the
+# correctly normalized single-(super)site reduced state by construction of
+# the mixed canonical gauge (Vanderstraeten, Haegeman, Verstraete,
+# arXiv:1810.07006, Eq.(34): "locating the center site where the operator is
+# acting ... everything to the left and right is contracted to the
+# identity"), and AR is exactly right-orthonormal (sum_p AR_p AR_p^dagger =
+# I), so both the left closure (via AC) and the right closure (via AR, for
+# any operator strictly to the right of AC's own cell) are algebraically
+# exact rather than needing a numerical eigen-solve the way idmrg.py's
+# one-sided-isometric U_list does -- see `two_point_correlator`'s own
+# docstring for the derivation (mirroring arXiv:1810.07006 Eq.(37)-(39)'s
+# "uniform gauge" correlator formula, specialized to the mixed gauge).
+
+
+def _embed_group_operator(sites_uc, n_uc, ops_by_pos):
+    """The d_g x d_g grouped-supersite operator matrix (M[i,o] convention,
+    same as idmrg._op_transfer/_onsite_matrix) obtained by placing each
+    `ops_by_pos[p]` (a dense d_p x d_p M[i,o] matrix) at sub-site p of the
+    n_uc-site unit cell and identity everywhere else, combined via
+    `np.kron` in the SAME sequential (site 0 slowest-varying, site n_uc-1
+    fastest-varying) order `_group_automaton` itself uses to build the
+    grouped physical index -- confirmed directly against
+    `_group_automaton`'s own `np.einsum('Labm,mcdR->LacbdR', ...)` +
+    reshape construction, which is exactly what `np.kron`'s row-major
+    flattening produces for a chain of per-site (in,out) matrices.
+    `ops_by_pos` may name the SAME position at most once -- composing two
+    operators at one physical site (e.g. `two_point_correlator`'s own r=0
+    case) is the caller's job (an ordinary d_p x d_p matrix product
+    before calling this), not something this function does."""
+    mats = []
+    for p in range(n_uc):
+        if p in ops_by_pos:
+            mats.append(ops_by_pos[p])
+        else:
+            d = sites_uc.dim(p + 1)
+            mats.append(np.eye(d, dtype=complex))
+    M = mats[0]
+    for m in mats[1:]:
+        M = np.kron(M, m)
+    return M
+
+
+def onsite_expectation(result, opname, p):
+    """<opname> at sub-site p (0..n_uc-1) of the converged VUMPSResult's
+    unit cell -- mirrors idmrg.onsite_expectation's own public signature
+    and semantics, but computed directly from AC (arXiv:1810.07006 Eq.(34))
+    rather than idmrg.py's dominant-right-fixed-point eigenproblem: AC
+    already IS the correctly normalized single-(super)site reduced state
+    by construction of the mixed canonical gauge, so no eigenproblem is
+    needed here at all."""
+    if not (0 <= p < result.n_uc):
+        raise ValueError("onsite_expectation: p must be in 0..{} (n_uc-1), "
+                          "got {!r}".format(result.n_uc - 1, p))
+    M = _embed_group_operator(
+        result.sites_uc, result.n_uc,
+        {p: result.sites_uc.site_type(p + 1).matrix(opname)})
+    AC = result.AC
+    AC_op = np.einsum('io,lir->lor', M, AC)
+    val = np.einsum('lor,lor->', np.conj(AC), AC_op)
+    norm = np.einsum('lir,lir->', np.conj(AC), AC).real
+    return complex(val / norm)
+
+
+def two_point_correlator(result, opname_i, p_i, opname_j, r):
+    """<opname_i(site p_i) opname_j(site p_i + r)> of the converged
+    VUMPSResult's infinite chain, r measured in physical sites (r>=0) --
+    mirrors idmrg.two_point_correlator's own signature, r=0 same-site
+    convention (M_j @ M_i, see that function's own docstring for why this
+    order, not the reverse, and that this is only well-defined when
+    opname_i/opname_j don't commute), and n_uc-periodicity, but built from
+    the mixed-gauge {AC, AR} instead of idmrg.py's growing-algorithm
+    dominant-fixed-point machinery.
+
+    Places AC (the correctly normalized center) at the unit cell containing
+    p_i and AR (right-orthonormal, `sum_p AR_p AR_p^dagger = I`) at every
+    cell strictly to its right -- a valid mixed-canonical-gauge choice at
+    ANY cut position, since AL@C=C@AR=AC (this module's own docstring).
+    When both operators land in that same AC cell (r spans less than one
+    unit cell), this reduces to onsite_expectation's own full-AC-
+    contraction formula (Eq.(34)); otherwise AC's own right bond is left
+    open, propagated through zero or more plain AR transfer tensors, has
+    the second operator inserted via one more AR transfer tensor, and is
+    closed by a direct trace -- exploiting AR's exact right-orthonormality
+    to skip the dominant-right-fixed-point eigenproblem idmrg.
+    two_point_correlator needs (confirmed algebraically: closing any number
+    of further plain-AR transfer tensors after the last operator leaves the
+    trace exactly invariant, since `sum_r E4_AR[l,L,r,r] = delta[l,L]` IS
+    AR's own right-orthonormality condition -- the mixed-gauge analogue of
+    arXiv:1810.07006 Eq.(37)-(39)'s "uniform gauge" correlator formula,
+    which instead needs an explicit right fixed point `r` because a single
+    uniform-gauge tensor A is not already right-canonical)."""
+    if r < 0:
+        raise ValueError("two_point_correlator: r must be >= 0")
+    n_uc = result.n_uc
+    if not (0 <= p_i < n_uc):
+        raise ValueError("two_point_correlator: p_i must be in 0..{} "
+                          "(n_uc-1), got {!r}".format(n_uc - 1, p_i))
+    sites_uc = result.sites_uc
+    AC = result.AC
+    AR = result.AR
+    norm = np.einsum('lir,lir->', np.conj(AC), AC).real
+
+    cell_offset, p_j = divmod(p_i + r, n_uc)
+
+    if cell_offset == 0:
+        if p_j == p_i:
+            Mi = sites_uc.site_type(p_i + 1).matrix(opname_i)
+            Mj = sites_uc.site_type(p_i + 1).matrix(opname_j)
+            M = _embed_group_operator(sites_uc, n_uc, {p_i: Mj @ Mi})
+        else:
+            Mi = sites_uc.site_type(p_i + 1).matrix(opname_i)
+            Mj = sites_uc.site_type(p_j + 1).matrix(opname_j)
+            M = _embed_group_operator(sites_uc, n_uc, {p_i: Mi, p_j: Mj})
+        AC_op = np.einsum('io,lir->lor', M, AC)
+        val = np.einsum('lor,lor->', np.conj(AC), AC_op)
+        return complex(val / norm)
+
+    Mi = sites_uc.site_type(p_i + 1).matrix(opname_i)
+    Mi_embed = _embed_group_operator(sites_uc, n_uc, {p_i: Mi})
+    AC_op = np.einsum('io,lir->lor', Mi_embed, AC)
+    # Open right-bond object: bra/ket both AC, operator on the ket side
+    # only -- this already IS the full left closure (AC's own left leg is
+    # summed away here), leaving just the (ket-bond, bra-bond) legs open.
+    X = np.einsum('lor,loR->rR', AC_op, np.conj(AC)) / norm
+
+    if cell_offset > 1:
+        E_AR = np.einsum('lpr,LpR->lLrR', AR, np.conj(AR))
+        for _ in range(cell_offset - 1):
+            X = idmrg._apply_transfer_from_left(E_AR, X)
+
+    Mj = sites_uc.site_type(p_j + 1).matrix(opname_j)
+    Mj_embed = _embed_group_operator(sites_uc, n_uc, {p_j: Mj})
+    AR_op = np.einsum('io,lir->lor', Mj_embed, AR)
+    E_AR_op = np.einsum('lpr,LpR->lLrR', AR_op, np.conj(AR))
+    X = idmrg._apply_transfer_from_left(E_AR_op, X)
+
+    return complex(np.trace(X))

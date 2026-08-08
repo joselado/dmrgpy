@@ -327,14 +327,34 @@ from `AR` alone) regularized-environment solves and the `H_AC`/`H_C`
 effective-Hamiltonian actions themselves (see `vumps.py`'s own module
 docstring for the full algorithm and diagram list). `self._vumps_result`
 (a `pyitensor.vumps.VUMPSResult`, distinct from `self._result`'s
-`IDMRGResult`) holds the converged state; since it is a grouped-supersite
-representation with no per-sublattice tensor list, `vev`/`correlator`/
-`local_excitation_gap` all remain `gs_method="idmrg"`-only, mirroring the
-precedent `itensor_version=3` already sets for the same methods —
-`excitation_energies`/`excitation_gap` are the opposite: they require
-`gs_method="vumps"` (see below), since the tangent-space excitation
-ansatz needs exactly the mixed-gauge `{AL,AR,C,GL,GR}` `VUMPSResult`
-carries, which `IDMRGResult` has no equivalent of.
+`IDMRGResult`) holds the converged state. Despite being a grouped-
+supersite representation with no per-sublattice tensor list, `vumps.py`
+itself now also implements `onsite_expectation`/`two_point_correlator`
+directly on a `VUMPSResult` (mirroring `idmrg.py`'s own same-named
+functions' public signature): unlike `idmrg.py`, which needs a dominant-
+right-fixed-point eigenproblem because its `U_list` is only one-sided
+(left-)isometric, VUMPS's converged `AC` is already the exactly-
+normalized single-(super)site reduced state (Vanderstraeten, Haegeman,
+Verstraete, arXiv:1810.07006, Eq.(34)) and `AR` is exactly right-
+orthonormal, so both the left closure (via `AC`) and the right closure
+(via `AR`, for a correlator spanning multiple unit cells) are exact
+contractions with no eigensolve at all — a physical sub-site operator is
+embedded into the grouped `d_g x d_g` space via `_embed_group_operator`
+(`np.kron` in the same sequential order `_group_automaton` itself groups
+physical indices in), and multi-cell separations propagate the open
+right-bond object through plain `AR` transfer tensors
+(`idmrg._apply_transfer_from_left`, reused as-is) before a final trace
+closure. `Infinite_Many_Body_Chain.vev`/`correlator` dispatch on
+`self.gs_method` to call either `idmrg.py`'s or `vumps.py`'s version
+directly. `local_excitation_gap` remains `gs_method="idmrg"`-only (it
+re-diagonalizes the growing algorithm's own final 2-site effective
+Hamiltonian, which has no VUMPS equivalent), mirroring the precedent
+`itensor_version=3` already sets (no correlator support there yet, for
+either `gs_method`) — `excitation_energies`/`excitation_gap` are the
+opposite: they require `gs_method="vumps"` (see below), since the
+tangent-space excitation ansatz needs exactly the mixed-gauge
+`{AL,AR,C,GL,GR}` `VUMPSResult` carries, which `IDMRGResult` has no
+equivalent of.
 
 **A confirmed, documented convergence-robustness gap, not fully closed.**
 Plain single-attempt VUMPS from a random initial tensor was confirmed

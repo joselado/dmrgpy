@@ -2180,7 +2180,9 @@ available via the standard infinite-MPS transfer-matrix formalism. Only
 \texttt{vev}/\texttt{correlator} on an \texttt{itensor\_version=3} chain
 raises \texttt{NotImplementedError} (even after a successful
 \texttt{gs\_energy()}), since the v3 backend has no correlator machinery
-yet:
+yet. Both \texttt{gs\_method="idmrg"} (the default, described in this
+paragraph) and \texttt{gs\_method="vumps"} (see below) support
+\texttt{vev}/\texttt{correlator}:
 
 \begin{lstlisting}
 ic.vev("Sz", 0)                    # <Sz> at site 0 of the unit cell
@@ -2257,17 +2259,39 @@ ic.set_hamiltonian(h)
 density = ic.gs_energy()
 \end{lstlisting}
 
-\texttt{vev}/\texttt{correlator}/\texttt{local\_excitation\_gap} all raise
-\texttt{NotImplementedError} under \texttt{gs\_method="vumps"} (VUMPS's
-own converged state is a grouped-supersite representation with no
-per-sublattice \texttt{U\_list}, see
-\texttt{pyitensor.vumps.VUMPSResult}'s own docstring) -- but
+\texttt{vev}/\texttt{correlator} also work under
+\texttt{gs\_method="vumps"} (\texttt{pyitensor.vumps.onsite\_expectation}/
+\texttt{two\_point\_correlator}), computed directly from the converged
+mixed-gauge \texttt{\{AC, AR\}} rather than \texttt{pyitensor.idmrg}'s
+dominant-right-fixed-point eigenproblem: \texttt{AC} is already the
+exactly-normalized single-(super)site reduced state by construction of
+the mixed canonical gauge (Vanderstraeten, Haegeman, Verstraete,
+``Tangent-space methods for uniform matrix product states'',
+arXiv:1810.07006, Eq.(34)), and \texttt{AR}'s exact right-orthonormality
+lets a two-point correlator spanning multiple unit cells close by a
+direct trace with no eigenproblem either (the mixed-gauge analogue of
+that same review's Eq.(37)--(39)). Unlike the growing-algorithm's own
+reconstructed-from-the-last-macro-iteration correlators above, these
+carry no \texttt{maxiter}/$\langle H_{uc}\rangle$-self-consistency
+caveat -- VUMPS solves directly at the target bond dimension in the
+thermodynamic limit, so once \texttt{.converged} is \texttt{True} the
+correlator is exact for that converged \texttt{\{AL,AR,C\}}, only
+limited by the bond dimension $D$ itself (same caveat as the energy
+density, see below). \texttt{local\_excitation\_gap} is the one method
+that still requires \texttt{gs\_method="idmrg"} specifically (it
+re-diagonalizes the growing algorithm's own final 2-site effective
+Hamiltonian, which has no VUMPS equivalent); conversely
 \texttt{excitation\_energies}/\texttt{excitation\_gap} (below)
-\emph{require} \texttt{gs\_method="vumps"} specifically, the reverse
-restriction: they need \texttt{VUMPSResult}'s own mixed-gauge
-\texttt{\{AL,AR,C,GL,GR\}}, which the growing algorithm's
-\texttt{IDMRGResult} (\texttt{gs\_method="idmrg"}, the default) has no
-equivalent of.
+\emph{require} \texttt{gs\_method="vumps"} -- they need
+\texttt{VUMPSResult}'s own mixed-gauge \texttt{\{AL,AR,C,GL,GR\}}, which
+the growing algorithm's \texttt{IDMRGResult}
+(\texttt{gs\_method="idmrg"}, the default) has no equivalent of.
+
+\begin{lstlisting}
+ic.gs_method = "vumps"
+ic.vev("Sz", 0)                    # <Sz> at site 0, from the converged VUMPSResult
+ic.correlator("Sz", 0, "Sz", r)    # <Sz(0) Sz(0+r)>, same signature as gs_method="idmrg"
+\end{lstlisting}
 
 \textbf{A real, scoped reliability caveat.} \texttt{D=1} converges
 reliably and exactly for every exactly-solvable (product-state-like)

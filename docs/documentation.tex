@@ -420,11 +420,34 @@ one-sided (\texttt{GL} from \texttt{AL} alone, \texttt{GR} from
 (see \texttt{vumps.py}'s own module docstring for the full algorithm and
 diagram list). \texttt{self.\_vumps\_result} (a
 \texttt{pyitensor.vumps.VUMPSResult}, distinct from \texttt{self.\_result}'s
-\texttt{IDMRGResult}) holds the converged state; since it is a
+\texttt{IDMRGResult}) holds the converged state. Despite being a
 grouped-supersite representation with no per-sublattice tensor list,
-\texttt{vev}/\texttt{correlator}/\texttt{local\_excitation\_gap} all
-remain \texttt{gs\_method="idmrg"}-only, mirroring the precedent
-\texttt{itensor\_version=3} already sets for the same methods --
+\texttt{vumps.py} itself now also implements
+\texttt{onsite\_expectation}/\texttt{two\_point\_correlator} directly on
+a \texttt{VUMPSResult} (mirroring \texttt{idmrg.py}'s own same-named
+functions' public signature): unlike \texttt{idmrg.py}, which needs a
+dominant-right-fixed-point eigenproblem because its \texttt{U\_list} is
+only one-sided (left-)isometric, VUMPS's converged \texttt{AC} is
+already the exactly-normalized single-(super)site reduced state
+(Vanderstraeten, Haegeman, Verstraete, arXiv:1810.07006, Eq.(34)) and
+\texttt{AR} is exactly right-orthonormal, so both the left closure (via
+\texttt{AC}) and the right closure (via \texttt{AR}, for a correlator
+spanning multiple unit cells) are exact contractions with no eigensolve
+at all -- a physical sub-site operator is embedded into the grouped
+$d_g \times d_g$ space via \texttt{\_embed\_group\_operator}
+(\texttt{np.kron} in the same sequential order
+\texttt{\_group\_automaton} itself groups physical indices in), and
+multi-cell separations propagate the open right-bond object through
+plain \texttt{AR} transfer tensors
+(\texttt{idmrg.\_apply\_transfer\_from\_left}, reused as-is) before a
+final trace closure. \texttt{Infinite\_Many\_Body\_Chain.vev}/
+\texttt{correlator} dispatch on \texttt{self.gs\_method} to call either
+\texttt{idmrg.py}'s or \texttt{vumps.py}'s version directly.
+\texttt{local\_excitation\_gap} remains \texttt{gs\_method="idmrg"}-only
+(it re-diagonalizes the growing algorithm's own final 2-site effective
+Hamiltonian, which has no VUMPS equivalent), mirroring the precedent
+\texttt{itensor\_version=3} already sets (no correlator support there
+yet, for either \texttt{gs\_method}) --
 \texttt{excitation\_energies}/\texttt{excitation\_gap} are the opposite:
 they require \texttt{gs\_method="vumps"} (see below), since the
 tangent-space excitation ansatz needs exactly the mixed-gauge

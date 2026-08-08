@@ -170,15 +170,20 @@ class Infinite_Many_Body_Chain:
     `pyitensor/idmrg.py`'s growing/infinite-size algorithm) or `"vumps"`
     (`pyitensor/vumps.py`'s direct fixed-bond-dimension solver -- see its
     own module docstring for the algorithm and how it differs). `vev`/
-    `correlator`/`local_excitation_gap` require `gs_method="idmrg"` (they
-    need `IDMRGResult`'s own per-sublattice `U_list`, which `VUMPSResult`
-    has no equivalent of -- see `pyitensor.vumps.VUMPSResult`'s own
-    docstring); conversely `excitation_energies`/`excitation_gap` (the
-    tangent-space/quasiparticle excitation ansatz) require
-    `gs_method="vumps"` -- they need `VUMPSResult`'s own mixed-gauge
-    {AL,AR,C,GL,GR}, which the growing algorithm's `IDMRGResult` has no
-    equivalent of (see `pyitensor.idmrg_excitations`' own module
-    docstring)."""
+    `correlator` work under EITHER `gs_method` -- `"idmrg"` dispatches to
+    `pyitensor.idmrg.onsite_expectation`/`two_point_correlator` (via
+    `IDMRGResult`'s own per-sublattice `U_list` and a dominant-right-fixed-
+    point eigenproblem), `"vumps"` to `pyitensor.vumps`'s own same-named
+    functions (via `VUMPSResult`'s mixed-gauge `{AC, AR}` directly, no
+    eigenproblem needed -- see those functions' own docstrings).
+    `local_excitation_gap` still requires `gs_method="idmrg"` specifically
+    (it re-diagonalizes the growing algorithm's own final 2-site effective
+    Hamiltonian, which has no VUMPS equivalent); conversely
+    `excitation_energies`/`excitation_gap` (the tangent-space/quasiparticle
+    excitation ansatz) require `gs_method="vumps"` -- they need
+    `VUMPSResult`'s own mixed-gauge {AL,AR,C,GL,GR}, which the growing
+    algorithm's `IDMRGResult` has no equivalent of (see
+    `pyitensor.idmrg_excitations`' own module docstring)."""
 
     def __init__(self, site_types, itensor_version="python"):
         if itensor_version not in ("python", 3):
@@ -464,50 +469,63 @@ class Infinite_Many_Body_Chain:
         is accepted purely so callers can write whichever reads most
         naturally (SxL/SxC/SxR all describe the same infinite chain).
 
-        Only supported for itensor_version="python", gs_method="idmrg" --
-        the ITensor v3 C++ backend has no static-correlator machinery yet
-        (see gs_energy's own comment), and neither does gs_method="vumps"
-        (its VUMPSResult has no per-sublattice U_list, only a grouped-
-        supersite representation -- see pyitensor.vumps.VUMPSResult's own
-        docstring)."""
-        if self.itensor_version != "python" or self.gs_method != "idmrg":
+        Only supported for itensor_version="python" -- the ITensor v3 C++
+        backend has no static-correlator machinery yet (see gs_energy's own
+        comment). Both gs_method="idmrg" (pyitensor.idmrg.onsite_expectation,
+        via IDMRGResult's per-sublattice U_list) and gs_method="vumps"
+        (pyitensor.vumps.onsite_expectation, via VUMPSResult's mixed-gauge
+        AC directly -- see that function's own docstring) are supported."""
+        if self.itensor_version != "python" or self.gs_method not in ("idmrg", "vumps"):
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.vev: only itensor_version="
-                "\"python\" with gs_method=\"idmrg\" supports static "
-                "correlators -- run a separate such chain for vev/"
-                "correlator, or reuse pyitensor.idmrg's correlator "
-                "functions directly against a \"python\"-backend IDMRGResult")
+                "\"python\" with gs_method \"idmrg\" or \"vumps\" supports "
+                "static correlators -- run a separate such chain for vev/"
+                "correlator, or reuse pyitensor.idmrg's/pyitensor.vumps' "
+                "correlator functions directly against a \"python\"-backend "
+                "IDMRGResult/VUMPSResult")
         if group not in ("L", "C", "R"):
             raise ValueError("vev: group must be 'L', 'C' or 'R', got {!r}".format(group))
         if not (0 <= p < self.n_uc):
             raise ValueError("vev: p must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p))
-        if self._result is None:
+        if self.gs_method == "idmrg":
+            if self._result is None:
+                self.gs_energy()
+            from .pyitensor import idmrg
+            return idmrg.onsite_expectation(self._result, opname, p)
+        if self._vumps_result is None:
             self.gs_energy()
-        from .pyitensor import idmrg
-        return idmrg.onsite_expectation(self._result, opname, p)
+        from .pyitensor import vumps
+        return vumps.onsite_expectation(self._vumps_result, opname, p)
 
     def correlator(self, opname_i, p_i, opname_j, r):
         """<opname_i(site p_i) opname_j(site p_i + r)>, r measured in
-        physical sites (r>=0) -- see pyitensor.idmrg.two_point_correlator
-        for the r=0 (same-site) convention.
+        physical sites (r>=0) -- see pyitensor.idmrg.two_point_correlator/
+        pyitensor.vumps.two_point_correlator for the r=0 (same-site)
+        convention.
 
-        Only supported for itensor_version="python" with gs_method="idmrg"
-        -- see vev's own comment."""
-        if self.itensor_version != "python" or self.gs_method != "idmrg":
+        Only supported for itensor_version="python" -- see vev's own
+        comment (both gs_method="idmrg" and gs_method="vumps" work)."""
+        if self.itensor_version != "python" or self.gs_method not in ("idmrg", "vumps"):
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.correlator: only itensor_version="
-                "\"python\" with gs_method=\"idmrg\" supports static "
-                "correlators -- run a separate such chain for vev/"
-                "correlator, or reuse pyitensor.idmrg's correlator "
-                "functions directly against a \"python\"-backend IDMRGResult")
+                "\"python\" with gs_method \"idmrg\" or \"vumps\" supports "
+                "static correlators -- run a separate such chain for vev/"
+                "correlator, or reuse pyitensor.idmrg's/pyitensor.vumps' "
+                "correlator functions directly against a \"python\"-backend "
+                "IDMRGResult/VUMPSResult")
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))
-        if self._result is None:
+        if self.gs_method == "idmrg":
+            if self._result is None:
+                self.gs_energy()
+            from .pyitensor import idmrg
+            return idmrg.two_point_correlator(self._result, opname_i, p_i, opname_j, r)
+        if self._vumps_result is None:
             self.gs_energy()
-        from .pyitensor import idmrg
-        return idmrg.two_point_correlator(self._result, opname_i, p_i, opname_j, r)
+        from .pyitensor import vumps
+        return vumps.two_point_correlator(self._vumps_result, opname_i, p_i, opname_j, r)
 
     def _get_excitation_environment(self):
         """Lazily build (or reuse) the pyitensor.idmrg_excitations.
