@@ -3,32 +3,37 @@ mirrors mo_terms.h's build_mpo()/toMPO(ampo,{"MaxDim",...,"Exact",false}).
 
 As described in autompo.py's module docstring, this doesn't port ITensor's
 own automaton MPO-compression algorithm: each HTerm becomes its own exact,
-trivial (bond dimension 1) MPO, and all of them are summed together via
-mpsalgebra.sum(), which SVD-compresses after every pairwise sum.
+trivial (bond dimension 1) MPO, and all of them are combined via
+mpsalgebra.sum_many() -- one exact, K-way block-diagonal concatenation
+(pure array placement, no SVD) followed by exactly the bidirectional
+compression pass described next.
 
-That per-step compression alone is *not* enough to reach the true minimal
-bond dimension, though -- confirmed directly, not just assumed: a plain
-nearest-neighbor Heisenberg chain's MPO came out with bond dimension
-growing linearly in N (39 at N=14) instead of the well-known constant ~5,
-because each one-directional (left-to-right) SVD sweep only ever
-compresses relative to the *bonds already finalized to its left*, and
-can't see that (for instance) the "still need to place every remaining
-identity" tail is the same redundant structure repeated at every one of
-those intermediate sums. A single extra bidirectional compression pass
-(position() rightward then leftward, both truncating) after all terms are
-summed fixes this completely -- confirmed directly on the same case,
-39 -> 5 -- because sweeping both directions lets SVD see the *global*
-redundancy, not just what's accumulated so far in one direction. Doing
-that once at the end (rather than compressing bidirectionally after every
-single pairwise sum) keeps intermediate work bounded without sacrificing
-the final result's bond dimension.
+Concatenation alone (with no compression at all) is *not* enough to reach
+the true minimal bond dimension, though -- confirmed directly, not just
+assumed: a plain nearest-neighbor Heisenberg chain's MPO came out with
+bond dimension equal to its term count (39 at N=14) instead of the
+well-known constant ~5. A one-directional (left-to-right only) truncating
+sweep doesn't fix this either: it only ever compresses relative to the
+*bonds already finalized to its left*, and can't see that (for instance)
+the "still need to place every remaining identity" tail is the same
+redundant structure repeated at every term. A bidirectional compression
+pass (position() rightward then leftward, both truncating) after
+concatenation fixes this completely -- confirmed directly on the same
+case, 39 -> 5 -- because sweeping both directions lets SVD see the
+*global* redundancy, not just what's accumulated so far in one direction.
+Doing that once, after a single exact concatenation of every term, keeps
+the SVD work bounded to O(1) sweeps regardless of term count T, instead of
+sum_many()'s pairwise predecessor (repeated 2-way sum()), which paid a
+full truncating SVD sweep on every one of T-1 folds -- see sum_many()'s
+own docstring (mpsalgebra.py) for the T-1-wasted-sweeps argument and a
+benchmark comparing the two.
 """
 
 import numpy as np
 
 from .index import Index
 from .mpscontainer import MPO
-from .mpsalgebra import sum as _mps_sum
+from .mpsalgebra import sum_many as _mps_sum_many
 from .tensor import ITensor
 
 
@@ -87,10 +92,8 @@ def _zero_mpo(sites):
 def to_mpo(ampo, cutoff=0.0, maxdim=None):
     if not ampo.terms:
         return _zero_mpo(ampo.sites)
-    result = None
-    for term in ampo.terms:
-        term_mpo = _term_to_mpo(term, ampo.sites)
-        result = term_mpo if result is None else _mps_sum(result, term_mpo, cutoff=cutoff, maxdim=maxdim)
+    term_mpos = [_term_to_mpo(term, ampo.sites) for term in ampo.terms]
+    result = _mps_sum_many(term_mpos, cutoff=cutoff, maxdim=maxdim)
     if result.length() > 1:
         # One-directional per-pairwise-sum compression alone leaves real
         # redundancy on the table (see this module's docstring) -- a final

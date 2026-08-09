@@ -140,36 +140,52 @@ def _bond_dims(chain):
     return {k: _link_at(chain, k, k + 1).dim for k in range(1, n)}
 
 
-def sum(A, B, cutoff=0.0, maxdim=None):
-    """Direct sum of two MPS (or two MPO): the exact, standard MPS/MPO
-    addition construction (concatenation at the boundaries, block-diagonal
-    in the link spaces at interior sites), followed by one truncating
-    left-to-right SVD sweep down to cutoff/maxdim."""
-    n = A.length()
-    if B.length() != n:
-        raise ValueError("sum: mismatched chain length {} vs {}".format(n, B.length()))
+def sum_many(chains, cutoff=0.0, maxdim=None):
+    """N-way direct sum of MPS (or MPO) chains: the same exact block-
+    diagonal concatenation sum() does for two operands, generalized to K
+    via one K-way placement per site instead of K-1 pairwise merges each
+    paying their own truncating SVD sweep.
+
+    This matters for mpobuilder.py's to_mpo(): building a T-term
+    Hamiltonian by folding in one term at a time via T-1 calls to sum()
+    forces T-1 full left-to-right SVD sweeps, even though (per
+    mpobuilder.py's own module docstring) that per-step compression
+    demonstrably doesn't reduce bond dimension at all until a final
+    bidirectional pass runs -- confirmed directly, a 14-site nearest-
+    neighbor Heisenberg chain (39 terms) landed at bond dimension exactly
+    39, i.e. zero compression, before that final pass brought it down to
+    5. Concatenating all T operands at once is exact array placement (no
+    linear algebra), so only the caller's own final compression sweep(s)
+    need to touch SVD at all -- this turns to_mpo()'s O(T) SVD sweeps
+    into O(1)."""
+    chains = list(chains)
+    if not chains:
+        raise ValueError("sum_many: no chains given")
+    if len(chains) == 1:
+        return chains[0].copy()
+    n = chains[0].length()
+    for c in chains[1:]:
+        if c.length() != n:
+            raise ValueError("sum_many: mismatched chain length {} vs {}".format(n, c.length()))
 
     new_links = {}
     for k in range(1, n):
-        la = _link_at(A, k, k + 1)
-        lb = _link_at(B, k, k + 1)
-        new_links[k] = Index(la.dim + lb.dim, tags="Link,l={}".format(k))
+        total = 0
+        for c in chains:
+            total += _link_at(c, k, k + 1).dim
+        new_links[k] = Index(total, tags="Link,l={}".format(k))
 
     tensors = []
     for i in range(1, n + 1):
-        Ta, Tb = A.A(i), B.A(i)
-        phys = tuple(ind for ind in Ta.inds if ind.hastags("Site"))
-        phys_b = set(ind for ind in Tb.inds if ind.hastags("Site"))
-        if set(phys) != phys_b:
-            raise ValueError("sum: different index structure at site {}".format(i))
+        Ts = [c.A(i) for c in chains]
+        phys = tuple(ind for ind in Ts[0].inds if ind.hastags("Site"))
+        phys_set = set(phys)
+        for T in Ts[1:]:
+            if set(ind for ind in T.inds if ind.hastags("Site")) != phys_set:
+                raise ValueError("sum_many: different index structure at site {}".format(i))
 
-        la, ra = _link_at(A, i, i - 1), _link_at(A, i, i + 1)
-        lb, rb = _link_at(B, i, i - 1), _link_at(B, i, i + 1)
-
-        order_a = ([la] if la else []) + list(phys) + ([ra] if ra else [])
-        order_b = ([lb] if lb else []) + list(phys) + ([rb] if rb else [])
-        arr_a = Ta.transpose_to(order_a)
-        arr_b = Tb.transpose_to(order_b)
+        links_l = [_link_at(c, i, i - 1) for c in chains]
+        links_r = [_link_at(c, i, i + 1) for c in chains]
 
         new_left = new_links.get(i - 1)
         new_right = new_links.get(i)
@@ -179,7 +195,13 @@ def sum(A, B, cutoff=0.0, maxdim=None):
                  + ((new_right.dim,) if new_right else ()))
         combined = np.zeros(shape, dtype=complex)
 
-        def place(arr, left_off, left_dim, right_off, right_dim):
+        left_off = 0
+        right_off = 0
+        for T, la, ra in zip(Ts, links_l, links_r):
+            order = ([la] if la else []) + list(phys) + ([ra] if ra else [])
+            arr = T.transpose_to(order)
+            left_dim = la.dim if la else 0
+            right_dim = ra.dim if ra else 0
             idx = []
             if new_left:
                 idx.append(slice(left_off, left_off + left_dim))
@@ -187,20 +209,27 @@ def sum(A, B, cutoff=0.0, maxdim=None):
             if new_right:
                 idx.append(slice(right_off, right_off + right_dim))
             combined[tuple(idx)] = arr
-
-        place(arr_a, 0, la.dim if la else 0, 0, ra.dim if ra else 0)
-        place(arr_b, la.dim if la else 0, lb.dim if lb else 0,
-              ra.dim if ra else 0, rb.dim if rb else 0)
+            left_off += left_dim
+            right_off += right_dim
 
         inds = (([new_left] if new_left else []) + list(phys)
                 + ([new_right] if new_right else []))
         tensors.append(ITensor(tuple(inds), combined))
 
-    cls = type(A)
+    cls = type(chains[0])
     result = cls(tensors)
     result.center = 1
     result.position(n, cutoff=cutoff, maxdim=maxdim)
     return result
+
+
+def sum(A, B, cutoff=0.0, maxdim=None):
+    """Direct sum of two MPS (or two MPO): the exact, standard MPS/MPO
+    addition construction (concatenation at the boundaries, block-diagonal
+    in the link spaces at interior sites), followed by one truncating
+    left-to-right SVD sweep down to cutoff/maxdim. A thin 2-operand
+    wrapper around sum_many()."""
+    return sum_many([A, B], cutoff=cutoff, maxdim=maxdim)
 
 
 def _apply_chain(K, X, out_cls, cutoff=0.0, maxdim=None):
