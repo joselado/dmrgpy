@@ -308,6 +308,32 @@ older tests under `tests/` predate that fix and still manually exclude v3 for
 — those exclusions are now redundant defense-in-depth rather than required
 to avoid a crash, not something to "fix" by removing.
 
+### Cross-backend performance benchmarking
+
+`benchmarks/run_benchmarks.py` answers a different question than
+`tests/`/`examples/`: not "is this backend correct" but "which backend is
+fastest, and by how much, for each kind of calculation" — the thing to
+check before deciding which mode is worth optimizing next. It sweeps a
+uniform S=1/2 Heisenberg chain over a range of chain lengths, timing
+ground-state energy, a static correlator, and a KPM dynamical correlator
+on every backend available in the current environment (`v2`, `v3`,
+`"python"`, `"julia_live"`, auto-detected via `cppext.available()` and a
+live Julia import, same pattern as
+`examples/groundstate/dmrg_generalized_benchmark`), and cross-checks
+accuracy against ED at every size. It writes `benchmarks/output/report.tex`
+(tables + matplotlib plots + an auto-generated "which backend is worth
+optimizing" paragraph) and compiles it to `report.pdf` with `pdflatex` if
+available; `benchmarks/output/` is gitignored, so nothing under it is
+checked in. Run `python run_benchmarks.py --help` from `benchmarks/` for
+the full option list (sizes, backend selection, DMRG/KPM parameters,
+repeats-per-timing); `--from-json results.json` regenerates the report
+from a previous run's raw data without rerunning the sweep. Because
+juliacall JIT-compiles each Julia method the first time it's called in a
+process (see the `julia_live` testing note above), the script always runs
+one untimed warm-up call on the Julia backend before the timed sweep, so
+its reported numbers are steady-state rather than dominated by one-time
+compilation cost.
+
 ## Architecture
 
 ### Entry point classes

@@ -34,3 +34,4 @@ pipupdate.sh
 dist/
 build/
 .parallel/
+benchmarks/output/
