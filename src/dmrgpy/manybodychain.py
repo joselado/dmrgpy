@@ -287,9 +287,28 @@ class Many_Body_Chain():
           # even when the terms are unchanged -- restart() promises a
           # genuinely cold recalculation
   def is_hermitian(self,H):
-      """Check if an operator is Hermitian"""
+      """Check if an operator is Hermitian.
+
+      Cached by H's own identity (not by value -- MultiOperator terms are
+      never mutated in place, see multioperator.py's copy() docstring, so
+      identity is a safe proxy for "unchanged"): gs_energy() calls this
+      unconditionally on every invocation, so a parameter sweep or
+      best_gs()'s repeated gs_energy() calls against the same
+      self.hamiltonian would otherwise re-pay the (still nontrivial even
+      after mpsalgebra.is_hermitian's own bond-dimension fix) witness
+      check on every single call. Only the most recently checked H is
+      cached -- callers here always check either self.hamiltonian
+      (unchanged across such repeated calls) or a fresh clone's H
+      (bandwidth(), lowest_eigenvalue(), each a different object with no
+      repeat to benefit from anyway), so a one-entry cache captures the
+      case that matters without the bookkeeping of an unbounded one."""
+      cache = getattr(self,'_is_hermitian_cache',None)
+      if cache is not None and cache[0] is H:
+          return cache[1]
       from .mpsalgebra import is_hermitian
-      return is_hermitian(self,H)
+      out = is_hermitian(self,H)
+      self._is_hermitian_cache = (H,out)
+      return out
   def vev_MB(self,MO,**kwargs):
       """
       Compute a vacuum expectation value
