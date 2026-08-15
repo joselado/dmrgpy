@@ -716,6 +716,19 @@ don't expect the usual $\sim2\times$ win \texttt{accelerate} gives
 (\texttt{mpscpp3/chain\_session.h}) and \texttt{pyitensor/chain.py}'s port
 for the algorithm.
 
+\texttt{ctmode="fold"} (\texttt{itensor\_version="python"} only) evaluates
+every tuple as a \emph{local} operator fold -- no MPO is built for any of
+them. It is flavour-agnostic: it reads each mode's (operator name, site) off
+the chain's own \texttt{C}/\texttt{Cdag}, so it covers spinless chains and
+\texttt{Spinful\_Fermionic\_Chain\_Native} alike. That matters because native
+spinful sites previously had only \texttt{ctmode="explicit"} under
+\texttt{"python"}, which builds an MPO and sweeps the whole chain per tuple;
+\texttt{fold} is exact against it to machine precision and 8--12$\times$
+faster (5 sites / 10 modes: 9.8\,s $\to$ 0.9\,s), and is now the default
+there. It does not reuse environments \emph{across} tuples the way
+\texttt{ctmode="sweep"} does, so for a plain spinless chain prefer
+\texttt{"sweep"}.
+
 \texttt{ctmode=None} (the default) auto-selects the fastest method
 actually available for the wavefunction's backend/chain type:
 \texttt{"sweep"} whenever it applies, else \texttt{"full"} whenever it

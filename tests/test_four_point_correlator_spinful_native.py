@@ -189,3 +189,82 @@ def test_four_correlation_tensor_matches_interleaved_chain(native_ctmode):
             ctmode="full", accelerate=True)
 
     assert np.max(np.abs(ct_native - ct_double)) == pytest.approx(0.0, abs=DMRG_TOL)
+
+
+# -- ctmode="fold": local operator folds for native spinful sites.
+# Before this, native spinful had only ctmode="explicit" under
+# itensor_version="python" -- a per-tuple MPO build plus a full-chain sweep,
+# profiled at 55% to_mpo / 38% inner, i.e. 93% of the time doing work a
+# 4-operator local product does not need. "fold" is now the default for this
+# class; "explicit" remains the exact oracle these tests check against.
+
+def _native_chain_for_fold(n, maxm=20):
+    from dmrgpy import fermionchain
+    fc = fermionchain.Spinful_Fermionic_Chain_Native(n, itensor_version="python")
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdag[2 * i] * fc.C[2 * (i + 1)] + fc.Cdag[2 * (i + 1)] * fc.C[2 * i]
+        h = h + (fc.Cdag[2 * i + 1] * fc.C[2 * (i + 1) + 1]
+                 + fc.Cdag[2 * (i + 1) + 1] * fc.C[2 * i + 1])
+    for i in range(n):
+        h = h + 2.0 * (fc.Cdag[2 * i] * fc.C[2 * i]) * (fc.Cdag[2 * i + 1] * fc.C[2 * i + 1])
+    h = h + 0.3 * (fc.Cdag[0] * fc.C[0])   # break particle-hole symmetry
+    fc.set_hamiltonian(h)
+    fc.maxm = maxm
+    fc.gs_energy()
+    return fc
+
+
+def test_fold_matches_explicit_on_native_spinful():
+    """Elementwise against the exact per-tuple oracle. Covers same-site
+    opposite-flavour pairs (Cup and Cdn on one ElectronSite), which is where
+    a fold could get the intra-site ordering or the Jordan-Wigner carry
+    wrong without any other symptom."""
+    import numpy as np
+    for n in (2, 3):
+        wf = _native_chain_for_fold(n).get_gs()
+        fold = wf.get_four_correlation_tensor(ctmode="fold")
+        explicit = wf.get_four_correlation_tensor(ctmode="explicit")
+        assert np.abs(fold - explicit).max() < 1e-12, n
+
+
+def test_fold_is_the_default_for_native_spinful_python():
+    """The auto-selected ctmode must be "fold" here -- otherwise the
+    speedup silently doesn't apply to anyone who doesn't pass ctmode."""
+    from dmrgpy.entropytk.correlationentropy import (
+        _four_correlation_tensor_default_ctmode)
+    wf = _native_chain_for_fold(2).get_gs()
+    assert _four_correlation_tensor_default_ctmode(wf) == "fold"
+
+
+def test_fold_agrees_with_sweep_on_a_spinless_chain():
+    """`fold` is flavour-agnostic -- it reads (name, site) off the chain's
+    own C/Cdag -- so it must also reproduce the spinless chain's independently
+    implemented sweep."""
+    import numpy as np
+    from dmrgpy import fermionchain
+    n = 6
+    fc = fermionchain.Fermionic_Chain(n, itensor_version="python")
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+    for i in range(n - 1):
+        h = h + 0.4 * fc.N[i] * fc.N[i + 1]
+    h = h + 0.23 * fc.N[0]
+    fc.set_hamiltonian(h)
+    fc.maxm = 20
+    fc.gs_energy()
+    wf = fc.get_gs()
+    assert np.abs(wf.get_four_correlation_tensor(ctmode="fold")
+                  - wf.get_four_correlation_tensor(ctmode="sweep")).max() < 1e-12
+
+
+def test_fold_respects_accelerate_flag():
+    """accelerate=False must evaluate every tuple independently and land on
+    the same tensor -- a check that the conjugate-pair shortcut is a real
+    symmetry here and not papering over an asymmetry."""
+    import numpy as np
+    wf = _native_chain_for_fold(2).get_gs()
+    a = wf.get_four_correlation_tensor(ctmode="fold", accelerate=True)
+    b = wf.get_four_correlation_tensor(ctmode="fold", accelerate=False)
+    assert np.abs(a - b).max() < 1e-12

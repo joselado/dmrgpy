@@ -915,6 +915,94 @@ class Chain:
                 if (i, j, k, l) != (l, k, j, i) or not accelerate:
                     out[l, k, j, i] = np.conj(val)
 
+    def four_correlation_tensor_fold(self, wf, cdag_ops, c_ops, accelerate=True):
+        """<Cdag_i C_j Cdag_k C_l> for flat fermionic *modes*, by local
+        operator folds -- no MPO is built for any tuple.
+
+        `cdag_ops`/`c_ops` are one `(operator_name, site_1based)` pair per
+        mode, so this covers both a spinless chain (mode == site, names
+        "Cdag"/"C") and a native spinful one (two modes per site, names
+        "Cdagup"/"Cup"/"Cdagdn"/"Cdn" on an ElectronSite). Nothing here is
+        flavor-aware beyond those names: Jordan-Wigner threading and
+        same-site composition come from the site type's own operator
+        matrices and "F", exactly as `autompo.HTerm.resolve()` derives them,
+        and the cross-site reordering sign from
+        `_four_pt_site_sort_sign` (which `resolve()` does not supply --
+        see its docstring).
+
+        This exists because the only tensor available for native spinful
+        sites was `ctmode="explicit"`, which builds an MPO and sweeps the
+        whole chain per tuple; profiled at 4 sites, 55% of its time was in
+        `to_mpo` and 38% in `inner`, i.e. 93% doing work a local operator
+        does not need. Unlike `four_correlation_tensor_sweep` this does not
+        reuse environments *across* tuples, so it is O(n_modes^4 * n_sites)
+        rather than O(n_modes^4); it is a large constant-factor win over
+        building an MPO per tuple, not an asymptotic one."""
+        from .sites.base import is_fermionic
+        nm = len(c_ops)
+        if len(cdag_ops) != nm:
+            raise ValueError("four_correlation_tensor_fold: cdag_ops and "
+                              "c_ops must describe the same modes")
+        out = np.zeros((nm, nm, nm, nm), dtype=complex)
+        n = self.sites.length()
+        psi = wf.copy()
+        mats = {}
+
+        def site_matrix(site, name):
+            key = (site, name)
+            if key not in mats:
+                mats[key] = self.sites.site_type(site).matrix(name)
+            return mats[key]
+
+        by_min = {}
+        for i in range(nm):
+            for j in range(nm):
+                for k in range(nm):
+                    for l in range(nm):
+                        if accelerate and (i, j, k, l) > (l, k, j, i):
+                            continue
+                        sites4 = (cdag_ops[i][1], c_ops[j][1],
+                                  cdag_ops[k][1], c_ops[l][1])
+                        by_min.setdefault(min(sites4), []).append((i, j, k, l))
+
+        for mn in sorted(by_min):
+            psi.position(mn)
+            arrays = _mps_arrays_lpr(psi)
+            for (i, j, k, l) in by_min[mn]:
+                factors = [cdag_ops[i], c_ops[j], cdag_ops[k], c_ops[l]]
+                site_list = [f[1] for f in factors]
+                mx = max(site_list)
+                by_site = {}
+                for name, site in factors:
+                    by_site.setdefault(site, []).append(name)
+                E = np.eye(arrays[mn - 1].shape[0], dtype=complex)
+                carry = False
+                for site in range(mn, mx + 1):
+                    names = by_site.get(site)
+                    if names is None:
+                        mat = site_matrix(site, "F") if carry else None
+                    else:
+                        odd = sum(1 for x in names if is_fermionic(x)) % 2 == 1
+                        mat = site_matrix(site, names[0])
+                        for x in names[1:]:
+                            mat = site_matrix(site, x) @ mat
+                        if carry != odd:
+                            mat = site_matrix(site, "F") @ mat
+                        carry = carry != odd
+                    A = arrays[site - 1]
+                    if mat is not None:
+                        A_op = np.tensordot(A, mat, axes=([1], [0]))
+                        A_op = np.ascontiguousarray(A_op.transpose(0, 2, 1))
+                    else:
+                        A_op = A
+                    X = np.tensordot(E, A_op, axes=([0], [0]))
+                    E = np.tensordot(X, np.conj(A), axes=([0, 1], [0, 1]))
+                val = _four_pt_site_sort_sign(tuple(site_list)) * complex(np.trace(E))
+                out[i, j, k, l] = val
+                if (i, j, k, l) != (l, k, j, i) or not accelerate:
+                    out[l, k, j, i] = np.conj(val)
+        return out
+
     def kpm_dynamical_correlator(self, terms_i, terms_j, kpmmaxm, kpm_scale, kpm_accelerate,
                                   kpm_n_scale, delta, kpm_cutoff):
         if not self.have_H:
