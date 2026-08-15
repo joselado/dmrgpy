@@ -1,8 +1,38 @@
 """Infinite DMRG (iDMRG): the standard 2-site growing/infinite-size
-algorithm (White, PRL 69, 2863 (1992)), generalized to an n_uc-site unit
-cell per McCulloch's "Infinite size density matrix renormalization group,
-revisited" (arXiv:0804.2509) -- following the shape of the reference
-implementation at github.com/ITensor/iDMRG.
+algorithm (White, PRL 69, 2863 (1992)), with the Hamiltonian expressed as a
+periodic n_uc-site-unit-cell MPO automaton so that a repeating unit cell
+larger than one site can be treated.
+
+== What this is NOT (read before trusting `U_list`) ==
+
+This is *not* McCulloch's algorithm ("Infinite size density matrix
+renormalization group, revisited", arXiv:0804.2509), and it is not a port
+of the reference implementation at github.com/ITensor/iDMRG (vendored in
+this repo at `mpscpp2/ITensor/itensor/mps/idmrg.h`) -- an earlier version
+of this docstring claimed both, and that claim was wrong on exactly the
+ingredient that matters. Three things that reference does, this module
+does not:
+
+1. **The wavefunction transformation.** `idmrg.h` carries the state across
+   iterations as `lambda_new * lambda_old^{-1}` (`lastV = dag(D)` put
+   through `PseudoInvert(inverse_cut)`, then multiplied back into the MPS)
+   -- McCulloch's actual contribution. What this module has instead
+   (`_local_two_site_solve`'s `x0_warm`) is a *raw flat NumPy vector*
+   reused whenever its `.size` happens to match: a Lanczos warm start that
+   biases successive solves toward continuity, carrying no basis
+   information at all. It is a convergence heuristic, not a gauge fix.
+2. **`swapUnitCells`** on both psi and H between iterations.
+3. **A gauge-consistent final extraction** (convert A's to B's, multiply
+   by `lastV`, keep the center matrix D).
+
+The practical consequence is documented at `IDMRGResult`: the *energy* is
+correct (verified against exact free-fermion TFIM to ~1e-12), but the
+returned `U_list` is only a valid periodic MPS up to an unfixed gauge on
+its wraparound bond, so every static correlator built from it
+(`onsite_expectation`, `two_point_correlator`) is unreliable -- badly so
+for n_uc=1. Fixing this properly means implementing point 1 above; until
+then, prefer `vumps.py` (which `infinitechain.py` already defaults to) for
+anything other than the energy density.
 
 This module is self-contained within the pyitensor engine: it reuses
 tensor.py/svd.py/kernels.py directly and imports only `_lanczos_ground_state`
@@ -192,21 +222,56 @@ def _term_site_matrices(op_term, sites_uc, n_uc):
     whether the "still open" channel between two touched sites of a 2-site
     term must propagate a Jordan-Wigner "F" string or a plain identity
     (mirrors HTerm.resolve()'s own `is_site_fermionic`-triggered carry
-    flag, which only ever depends on the *first* touched site of a term)."""
+    flag).
+
+    A touched site whose own parity differs from the parity carried in from
+    its left picks up an *extra* F factor of its own, exactly like
+    HTerm.resolve()'s `need_F` (autompo.py) -- `combined_stored = F @ M_k @
+    ... @ M_1`, the transpose of resolve()'s own std-convention
+    `M_1^T ... M_k^T F^T`. This is NOT the same thing as the string carried
+    on the *intervening* sites (that one is `_classify_terms`' `carry_ferm`);
+    it lives on the endpoints themselves. An earlier version of this
+    function omitted it, which was invisible for a Cdag-leading term
+    (`Cdag @ F == Cdag` identically, since F only flips the sign of the
+    occupied state Cdag annihilates) but flipped the *sign* of the first
+    site's matrix for a C-leading one (`F @ C == -C`) -- so an ordinary
+    Hermitian hopping written the usual way, `Cdag[i]*C[j] + C[i]*Cdag[j]`,
+    silently got one of its two directions with the wrong sign, i.e. a
+    non-Hermitian Hamiltonian with no error raised. Confirmed directly
+    against HTerm.resolve() for both orderings; see
+    tests/test_infinite_chain.py's
+    test_term_site_matrices_matches_autompo_resolve."""
     coef = op_term[0]
     by_site = {}
     for name, site in op_term[1:]:
         by_site.setdefault(site, []).append(name)
     rel_sites = sorted(by_site)
     mats, ferm = [], []
+    carry = False  # fermion parity carried in from the touched sites to the left
     for site in rel_sites:
         names = by_site[site]
         st = sites_uc.site_type((site % n_uc) + 1)
         combined = st.matrix(names[-1])
         for nm in reversed(names[:-1]):
             combined = combined @ st.matrix(nm)
+        is_site_fermionic = sum(1 for nm in names if is_fermionic(nm)) % 2 == 1
+        if carry != is_site_fermionic:
+            combined = st.matrix("F") @ combined
+        carry = carry != is_site_fermionic
         mats.append(combined)
-        ferm.append(sum(1 for nm in names if is_fermionic(nm)) % 2 == 1)
+        ferm.append(is_site_fermionic)
+    if carry:
+        # Odd total fermion parity: the Jordan-Wigner string opened by this
+        # term is never closed, so it would have to run to infinity in both
+        # tiling directions -- unrepresentable by this module's finite
+        # per-term pending channels (`_build_periodic_mpo` terminates every
+        # string at the term's own last touched site). Such a term is not
+        # parity-conserving and so cannot appear in a physical Hamiltonian
+        # anyway; reject it explicitly rather than silently building an MPO
+        # with a truncated string.
+        raise ValueError(
+            "idmrg: term {} has odd total fermion parity -- its Jordan-Wigner "
+            "string cannot be closed within the unit cell".format(op_term))
     return rel_sites, complex(coef), mats, ferm
 
 
@@ -623,7 +688,20 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
     ordinary seed noise as the explanation). Warm-starting instead biases
     each macro-iteration's solve toward continuity with the previous one,
     letting the sequence of local ground states converge to a fixed member
-    of the manifold. Returns (energy, U, S, V, evec0) -- the SVD split of
+    of the manifold.
+
+    That near-degeneracy story is real but it is NOT the whole explanation
+    for the correlator error, and this warm start does not fix that error.
+    `x0_warm` is a raw flat vector reused on a `.size` match; it carries no
+    basis information, so it cannot reconcile two macro-iterations' bond
+    bases -- which is what actually corrupts `U_list` (see `IDMRGResult`'s
+    docstring, and the module docstring for the McCulloch
+    `lambda_new*lambda_old^{-1}` transformation that would). Confirmed
+    directly: the same `<H_uc> != n_uc*e0` failure persists at 4.5e-2 on a
+    *gapped, non-degenerate* TFIM whose energy is exact to 1e-12, where
+    there is no degenerate manifold for Lanczos to wander in.
+
+    Returns (energy, U, S, V, evec0) -- the SVD split of
     the local ground state (truncated to (cutoff, maxdim)) plus the raw,
     un-truncated flattened ground vector for the *next* macro-iteration's
     own warm start."""
@@ -692,13 +770,47 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
 
 
 class IDMRGResult:
-    """Converged iDMRG state, as needed for static correlators: the
-    reference SiteX (for named-operator matrix lookups) and the last
-    macro-iteration's own per-sublattice left-canonical site tensors
-    (U_list[p], p=0..n_uc-1) -- a good approximation to the converged
-    infinite chain's own canonical unit-cell MPS tensors, since by the
-    last macro-iteration HL/HR are themselves converged to (near-)
-    translational invariance.
+    """Converged iDMRG state: the reference SiteX (for named-operator matrix
+    lookups) and the last macro-iteration's own per-sublattice
+    left-canonical site tensors (U_list[p], p=0..n_uc-1).
+
+    `.e0` (the energy density) is reliable. `U_list` -- and therefore every
+    static correlator built from it -- is NOT, for a structural reason:
+    U_list[0]'s own left bond is the bond the *previous* macro-iteration
+    ended on, while U_list[n_uc-1]'s right bond is the *current* one's.
+    Tiling U_list to the thermodynamic limit silently identifies those two
+    bonds, which is legitimate only after McCulloch's
+    `lambda_new*lambda_old^{-1}` transformation has reconciled the two
+    iterations' bases -- and this module does not implement it (see the
+    module docstring). They agree in dimension only once truncation has
+    saturated, and in *basis* essentially never.
+
+    Measured consequences (pure-Python backend, cross-checked against exact
+    results; the *energy* was correct to 1e-12 or to truncation error in
+    every one of these):
+
+    - Gapped TFIM (`g*Sz + Sx*Sx`, g=2, unique ground state), n_uc=1,
+      maxm=10: `<H_uc> - n_uc*e0 = 4.5e-2`, where that identity is exact for
+      any translationally invariant state. So the state being *measured* is
+      not the state whose energy is being *reported*, and this is not a
+      near-degenerate-manifold effect -- the model is gapped and
+      non-degenerate.
+    - XX chain (exactly solvable), n_uc=1: `<Sz(0)Sz(1)> = +0.028` against
+      the exact `-0.101` -- the wrong *sign* -- and `<Sz>` up to -0.13
+      against an exact 0, while `e0` was right to 5e-5.
+    - The error is not monotone in maxm/maxiter (TFIM g=1, n_uc=1: 4.3e-5 at
+      maxiter=60 but 1.2e-1 at maxiter=240), the signature of an unfixed
+      gauge rather than of an unconverged one.
+    - n_uc=2 is roughly two orders of magnitude better than n_uc=1 (one
+      mismatched bond per two sites rather than per site, and p_L != p_R at
+      every micro-step), but still ~3e-3 where the energy is ~5e-5.
+
+    `_dominant_right_fixed_point`'s "wraparound bond dimension is
+    inconsistent" RuntimeError is the same root cause surfacing as a hard
+    failure instead of a wrong number; it fired in 10 of 20 (n_uc, maxm,
+    maxiter) combinations tried on a *gapped* model, including every long
+    run, so it is the common case rather than the edge case its own comment
+    describes.
 
     `state_overlap` is a diagnostic, not used by `.converged` (which
     remains a pure energy-density criterion, unchanged): the smallest

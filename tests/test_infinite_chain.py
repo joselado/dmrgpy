@@ -1379,3 +1379,86 @@ def test_local_excitation_gap_windowed_rejects_n_uc2_directly():
     result = idmrg.IDMRGResult(None, 2, [None, None], 0.0, True, 1)
     with pytest.raises(NotImplementedError):
         idmrg.local_excitation_gap_windowed(result, [], [], ["1/2", "1/2"], 2, window=1)
+
+
+# -- Jordan-Wigner threading in idmrg._term_site_matrices --
+# Regression tests for a real bug: the function omitted the extra trailing F
+# that autompo.HTerm.resolve() applies to a touched site whose own fermion
+# parity differs from the parity carried in from its left (`need_F`). The
+# omission is invisible for a Cdag-leading term (Cdag @ F == Cdag) but flips
+# the sign of the first site's matrix for a C-leading one (F @ C == -C), so
+# an ordinary Hermitian hopping `Cdag[i]*C[j] + C[i]*Cdag[j]` silently came
+# out non-Hermitian. Not reachable through Infinite_Spin_Chain (spin sites
+# are never fermionic), but Infinite_Many_Body_Chain accepts fermionic site
+# codes and get_operator() accepts any operator name, so this is a latent
+# public-API bug, not dead code. HTerm.resolve() is the oracle here: it is
+# this codebase's own, independently tested transcription of ITensor's
+# autompo.cc rewriteFermionic().
+
+_FERMION_SITE_CODE = 0  # spinless fermion site (C/Cdag/F/N)
+
+
+@pytest.mark.parametrize("ops", [
+    [["C", 0], ["Cdag", 1]],        # C-leading, nearest neighbour
+    [["C", 0], ["Cdag", 2]],        # C-leading, one site skipped (real JW string)
+    [["Cdag", 0], ["C", 1]],        # Cdag-leading (the case that always passed)
+    [["Cdag", 0], ["C", 2]],
+    [["N", 0], ["N", 1]],           # bosonic-parity pair: no F anywhere
+])
+def test_term_site_matrices_matches_autompo_resolve(ops):
+    """_term_site_matrices' per-site matrices (stored (in,out) convention)
+    must equal HTerm.resolve()'s own (standard convention, hence the .T)
+    for every touched site, for both operator orderings."""
+    from dmrgpy.pyitensor.autompo import HTerm
+    from dmrgpy.pyitensor.sites import SiteX
+
+    n_uc = 2
+    sites_uc = SiteX([_FERMION_SITE_CODE] * n_uc)
+    sites_ref = SiteX([_FERMION_SITE_CODE] * 4)
+
+    rel_sites, _coef, mats, _ferm = idmrg._term_site_matrices(
+        [1.0] + ops, sites_uc, n_uc)
+
+    ht = HTerm(1.0)
+    for name, site in ops:
+        ht.add(name, site + 1)  # resolve() is 1-based
+    reference = ht.resolve(sites_ref)
+
+    for k, site in enumerate(rel_sites):
+        assert np.allclose(mats[k].T, reference[site]), (
+            "site {} disagrees with HTerm.resolve()".format(site))
+
+
+def test_term_site_matrices_c_leading_picks_up_the_extra_F():
+    """The specific regression: F @ C == -C, so the first site's matrix for a
+    C-leading term is the *negative* of the naive composition. Checked
+    against the explicit F-multiplied form rather than only against
+    resolve(), so this test still fails loudly if resolve() itself were ever
+    changed in the same wrong direction."""
+    from dmrgpy.pyitensor.sites import SiteX
+
+    sites_uc = SiteX([_FERMION_SITE_CODE, _FERMION_SITE_CODE])
+    st = sites_uc.site_type(1)
+    _rel, _coef, mats, _ferm = idmrg._term_site_matrices(
+        [1.0, ["C", 0], ["Cdag", 1]], sites_uc, 2)
+    assert np.allclose(mats[0], st.matrix("F") @ st.matrix("C"))
+    assert np.allclose(mats[0], -st.matrix("C"))
+    # the closing site's parity matches the carry, so it gets no extra F
+    assert np.allclose(mats[1], st.matrix("Cdag"))
+
+
+def test_term_site_matrices_rejects_odd_total_fermion_parity():
+    """A term with odd total fermion parity (here a bare single C) opens a
+    Jordan-Wigner string that is never closed -- it would have to run to
+    infinity, which _build_periodic_mpo's finite per-term pending channels
+    cannot represent (they terminate every string at the term's own last
+    touched site). Such a term is not parity-conserving and cannot appear in
+    a physical Hamiltonian; it must raise rather than silently build an MPO
+    with a truncated string."""
+    from dmrgpy.pyitensor.sites import SiteX
+
+    sites_uc = SiteX([_FERMION_SITE_CODE, _FERMION_SITE_CODE])
+    with pytest.raises(ValueError):
+        idmrg._term_site_matrices([1.0, ["C", 0]], sites_uc, 2)
+    with pytest.raises(ValueError):
+        idmrg._term_site_matrices([1.0, ["Cdag", 0], ["N", 1]], sites_uc, 2)

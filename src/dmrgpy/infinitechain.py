@@ -260,7 +260,25 @@ class Infinite_Many_Body_Chain:
         self.etol = 1e-10       # energy-density convergence tolerance;
                                  # gs_method="vumps": VUMPS's own
                                  # gauge-mismatch convergence tolerance
-                                 # (`tol`)
+                                 # (`tol`).
+                                 # gs_method="idmrg": do NOT expect this to
+                                 # buy accuracy much below ~1e-9. The growth
+                                 # loop's superblock eigenvalue is extensive
+                                 # (idmrg.py never subtracts an energy
+                                 # baseline the way its ITensor reference's
+                                 # `HL += -energy*IL` does), while
+                                 # dmrg.py's _lanczos_ground_state stops on a
+                                 # *relative* 1e-12 criterion -- so the
+                                 # absolute noise in the finite-difference
+                                 # density grows linearly with the iteration
+                                 # count. Measured on a gapped n_uc=2 chain:
+                                 # |E|=603 after 400 macro-iterations, with
+                                 # the density jittering over ~9e-11 well
+                                 # after it had physically converged. At the
+                                 # maxiter=200 default that noise floor is
+                                 # ~9e-11, i.e. right at this etol -- so
+                                 # `.converged` can trip on jitter at a
+                                 # run-dependent iteration.
         self.vumps_nrestarts = 4  # gs_method="vumps" only: independent
                                    # random-restart attempts per bond
                                    # dimension in VUMPS's own D-ramp -- see
@@ -517,7 +535,17 @@ class Infinite_Many_Body_Chain:
         port of the same AC-based formula, Chain::vumps_onsite_expectation)
         -- gs_method="idmrg" on this backend has no correlator machinery at
         all (IdmrgResult keeps no per-sublattice U_list, see gs_energy's own
-        comment), and raises NotImplementedError."""
+        comment), and raises NotImplementedError.
+
+        IMPORTANT: prefer gs_method="vumps" (the default) for this and for
+        `correlator`. gs_method="idmrg"'s static observables are built from
+        IDMRGResult.U_list, which is only a valid periodic MPS up to an
+        unfixed gauge on its wraparound bond -- the iDMRG *energy* is right,
+        the state is not. Measured on an exactly solvable XX chain at n_uc=1:
+        <Sz> came out at -0.13 against an exact 0, and <Sz(0)Sz(1)> at +0.028
+        against an exact -0.101 (the wrong sign), while e0 was correct to
+        5e-5. See pyitensor/idmrg.py's IDMRGResult docstring for the full
+        measurements and the root cause."""
         if group not in ("L", "C", "R"):
             raise ValueError("vev: group must be 'L', 'C' or 'R', got {!r}".format(group))
         if not (0 <= p < self.n_uc):
@@ -554,7 +582,9 @@ class Infinite_Many_Body_Chain:
         Same backend/gs_method support matrix as vev's own docstring
         (itensor_version="python" with gs_method "idmrg" or "vumps";
         itensor_version=3 with gs_method="vumps" only, via
-        Chain::vumps_two_point_correlator)."""
+        Chain::vumps_two_point_correlator), including its IMPORTANT note on
+        why gs_method="idmrg" static observables are unreliable and
+        gs_method="vumps" (the default) should be preferred."""
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))
