@@ -271,12 +271,23 @@ def test_itensor_version3_energy_density_matches_bethe_ansatz(n_uc):
                      reason="requires the compiled mpscpp3 (ITensor v3) extension")
 def test_itensor_version3_matches_python_backend():
     """Cross-backend agreement at identical (maxm, maxiter, etol, niter):
-    mpscpp3/chain_session.h's Chain::idmrg_ground_state is a line-by-line
-    port of pyitensor/idmrg.py's own idmrg_ground_state, so the two should
-    land on the same truncated-bond-dimension energy density, not just
-    agree in the maxm->infinity limit. Confirmed directly to agree to
-    ~1e-8 (well inside the 1e-6 tolerance here) and to be stable run over
-    run to ~1e-8 despite iDMRG's unseeded random starting MPS."""
+    both solvers should land on the same truncated-bond-dimension energy
+    density, not just agree in the maxm->infinity limit. Confirmed directly
+    to agree to ~1e-8 (well inside the 1e-6 tolerance here) and to be stable
+    run over run to ~1e-8 despite iDMRG's unseeded random starting MPS.
+
+    This asserts ONE scalar, and deliberately does not claim more than that.
+    mpscpp3/chain_session.h's Chain::idmrg_ground_state started as a
+    line-by-line port of pyitensor/idmrg.py's idmrg_ground_state but is no
+    longer equivalent: the Python side has since gained McCulloch's
+    wavefunction prediction, the theta-cell unit-cell extraction, and the
+    per-site energy baseline, and none of the three is ported. None of them
+    can move this assertion either -- the first two are state/gauge quality
+    and leave the converged energy density alone, and the third is exactly
+    compensated on the Python side (the drift it prevents was ~9e-11 after
+    400 macro-iterations, versus maxiter=30 here). So this test does NOT
+    guard the divergence, and nothing else does: v3 exposes no iDMRG
+    correlator to compare states with. See CLAUDE.md's mpscpp3 section."""
     ic_py, _ = _converged_uniform_chain(2, maxm=30, maxiter=30, etol=1e-9,
                                          itensor_version="python")
     ic_v3, _ = _converged_uniform_chain(2, maxm=30, maxiter=30, etol=1e-9,

@@ -2101,8 +2101,12 @@ and \texttt{"julia\_live"} have no iDMRG port and also raise
 default, on EITHER backend since 2026-08-08 -- see below) picks the
 ground-state solver: the v3 C++ backend's \texttt{gs\_method="idmrg"}
 (\texttt{mpscpp3/chain\_session.h}'s \texttt{Chain::idmrg\_ground\_state},
-a line-by-line port of \texttt{pyitensor/idmrg.py}'s own growing
-algorithm) computes the energy density only -- \texttt{vev}/
+originally a line-by-line port of
+\texttt{pyitensor/idmrg.py}'s own growing algorithm, though the two have
+since diverged -- the Python side gained the wavefunction prediction and
+the gauge-consistent unit-cell extraction described below, and the C++
+port has neither, so treat it as energy-density-only) computes the energy
+density only -- \texttt{vev}/
 \texttt{correlator} there raise \texttt{NotImplementedError};
 \texttt{gs\_method="vumps"} supports \texttt{vev}/\texttt{correlator} on
 BOTH backends (see "Static correlators" below). Relative speed depends
@@ -2193,44 +2197,35 @@ ic.vev("Sz", 0)                    # <Sz> at site 0 of the unit cell
 ic.correlator("Sz", 0, "Sz", r)    # <Sz(0) Sz(0+r)>, r measured in physical sites, r>=0
 \end{lstlisting}
 
-Because these are reconstructed \emph{after} convergence from the last
-macro-iteration's own tensors (a good, but not exact, stand-in for a
-truly periodic MPS unit cell -- the growing algorithm never explicitly
-re-canonicalizes into one), correlators converge more slowly than the
-energy density itself as a function of \texttt{maxiter} at fixed
-\texttt{maxm} -- a model-agnostic self-consistency check that always
-holds exactly for a truly periodic unit cell, $\langle H_{uc}\rangle$
-(the sum of every bond's correlator inside one unit cell) equals
-\texttt{n\_uc * density}, is a useful way to judge whether
-\texttt{maxiter} is large enough for a given calculation.
-\texttt{ic.\_result.state\_overlap} (the raw
-\texttt{pyitensor.idmrg.IDMRGResult}) is a second, cheaper diagnostic:
-the per-unit-cell overlap between the final macro-iteration's own local
-ground state and the one before it, close to 1 once the unit cell has
-genuinely stopped changing.
+These are reconstructed \emph{after} convergence, from the
+gauge-consistent unit cell the growing algorithm extracts from a single
+micro-step's own two-site wavefunction (\texttt{pyitensor/idmrg.py}'s
+\texttt{\_theta\_cell}). Two cheap diagnostics are worth knowing about.
+$\langle H_{uc}\rangle$ -- the sum of every bond's correlator inside one
+unit cell -- must equal \texttt{n\_uc * density} exactly for any
+translationally invariant state, so it is a model-agnostic check on
+whether a given \texttt{maxm}/\texttt{maxiter} is enough, needing no
+reference value. \texttt{ic.\_result.state\_overlap} (on the raw
+\texttt{pyitensor.idmrg.IDMRGResult}) is the second: the overlap between
+each macro-iteration's converged local state and the prediction it
+started from, which approaches 1 once the state has genuinely stopped
+changing.
 
-\textbf{A real, scoped reliability caveat for \texttt{n\_uc=1}.} For a
-1-site unit cell specifically, both diagnostics above ($\langle
-H_{uc}\rangle$ self-consistency and \texttt{state\_overlap}) typically
-do \emph{not} reach a tight value for a uniform/gapless/SU(2)-symmetric
-chain (e.g.\ the plain Heisenberg chain), even at large
-\texttt{maxiter} -- confirmed directly: \texttt{state\_overlap} plateaus
-around 0.5--0.65 rather than approaching 1, even after 80
-macro-iterations, and the corresponding correlator values are
-unreliable (wrong sign, order-of-magnitude off, compared against
-independent exact-diagonalization/finite-chain references). This is
-isolated to \texttt{n\_uc=1}'s own structurally unique micro-step,
-where the two sites being solved for at every step are literally the
-\emph{same} sublattice (\texttt{p\_L==p\_R}, see
-\texttt{pyitensor/idmrg.py}'s \texttt{\_fresh\_physical\_copy}) --
-\texttt{n\_uc=2}, where this never happens, does not show the same
-failure (confirmed: the identical uniform-Heisenberg self-consistency
-check lands within $\sim$0.05 for \texttt{n\_uc=2} vs. 0.4--1.8 for
-\texttt{n\_uc=1}). If a 1-site unit cell's static correlators are
-needed, prefer expressing the same physical model as an
-\texttt{n\_uc=2} unit cell (two copies of the same site, uniform
-couplings) instead, and use the self-consistency check either way
-before trusting a result.
+Both were, until recently, routinely far from their ideal values, and
+correlators built on \texttt{n\_uc=1} in particular could come out with
+the wrong \emph{sign}. That is fixed: the growing algorithm now carries
+the state across iterations with McCulloch's wavefunction prediction, and
+extracts the unit cell in a single, self-consistent gauge. Measured
+against exactly solvable references,
+$\langle H_{uc}\rangle - \texttt{n\_uc}\cdot\text{density}$ now lands at
+$10^{-15}$--$10^{-9}$ (it previously missed by up to $0.12$),
+\texttt{state\_overlap} reaches $1-10^{-13}$ (it previously plateaued
+around 0.5--0.65 for \texttt{n\_uc=1}), and the XX chain's
+$\langle S^z\rangle$ comes out at $10^{-13}$ against an exact 0.
+Correlators still converge more slowly in \texttt{maxm} than the energy
+density does -- that is ordinary finite-bond-dimension physics, most
+visible for a gapless model -- so the $\langle H_{uc}\rangle$ check
+remains the right thing to run before trusting a number.
 
 \textbf{The default ground-state solver: VUMPS.}
 \texttt{ic.gs\_method = "vumps"} (the default since 2026-08-08) switches

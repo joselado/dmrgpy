@@ -339,11 +339,18 @@ growing algorithm (see below) and keeps the resulting
 \texttt{IDMRGResult} in \texttt{self.\_result} for
 \texttt{vev}/\texttt{correlator} to reuse. \texttt{itensor\_version=3}
 instead calls the compiled \texttt{mpscpp3} backend's
-\texttt{Chain::idmrg\_ground\_state} directly -- a line-by-line C++ port
-of the same algorithm (built from the start with fresh Index objects on
-every automaton tensor to sidestep the duplicate-Index bug class
-described below, rather than needing the same retrofit) -- for the
-energy density only; it has no static-correlator support, so
+\texttt{Chain::idmrg\_ground\_state} directly -- originally a
+line-by-line C++ port of the same algorithm (built from the start with
+fresh Index objects on every automaton tensor to sidestep the
+duplicate-Index bug class described below, rather than needing the same
+retrofit), but \textbf{no longer equivalent}: the Python side has since
+gained the wavefunction prediction, the theta-cell extraction and the
+energy baseline described below, and none of the three has been ported.
+The cross-backend test
+(\texttt{test\_itensor\_version3\_matches\_python\_backend}) compares
+only the energy density, which was never the part that differed, so it
+does not guard this -- see \texttt{CLAUDE.md} for the standing note. It is
+used for the energy density only; it has no static-correlator support, so
 \texttt{self.\_result} is left \texttt{None} on that path and
 \texttt{vev}/\texttt{correlator} raise \texttt{NotImplementedError}
 regardless of whether \texttt{gs\_energy} itself already ran
@@ -399,7 +406,7 @@ below) rather than \texttt{pyitensor/idmrg.py}'s growing algorithm
 (\texttt{self.gs\_method="idmrg"}).
 Unlike that growing algorithm -- which extends a finite window
 indefinitely and truncates it back down to \texttt{maxm} at every
-micro-step, so its own converged \texttt{U\_list} is only an
+micro-step, so its own converged unit cell is only an
 approximation to the true \texttt{maxm}-dimensional optimum -- VUMPS
 solves directly, in the thermodynamic limit, for the mixed-gauge
 \texttt{\{AL, AR, C\}} fixed point at a FIXED target bond dimension
@@ -425,9 +432,9 @@ grouped-supersite representation with no per-sublattice tensor list,
 \texttt{vumps.py} itself now also implements
 \texttt{onsite\_expectation}/\texttt{two\_point\_correlator} directly on
 a \texttt{VUMPSResult} (mirroring \texttt{idmrg.py}'s own same-named
-functions' public signature): unlike \texttt{idmrg.py}, which needs a
-dominant-right-fixed-point eigenproblem because its \texttt{U\_list} is
-only one-sided (left-)isometric, VUMPS's converged \texttt{AC} is
+functions' public signature): unlike \texttt{idmrg.py}, which needs
+left- and right-fixed-point eigenproblems because its own converged cell
+is only approximately (left-)isometric, VUMPS's converged \texttt{AC} is
 already the exactly-normalized single-(super)site reduced state
 (Vanderstraeten, Haegeman, Verstraete, arXiv:1810.07006, Eq.(34)) and
 \texttt{AR} is exactly right-orthonormal, so both the left closure (via
@@ -448,7 +455,7 @@ final trace closure. \texttt{Infinite\_Many\_Body\_Chain.vev}/
 Hamiltonian, which has no VUMPS equivalent). \texttt{itensor\_version=3}
 now mirrors this too for \texttt{gs\_method="vumps"} (see below) --
 \texttt{gs\_method="idmrg"} there still has no correlator support at all
-(\texttt{IdmrgResult} keeps no per-sublattice \texttt{U\_list}) --
+(\texttt{IdmrgResult} keeps no per-sublattice unit cell) --
 \texttt{excitation\_energies}/\texttt{excitation\_gap} are the opposite of
 \texttt{vev}/\texttt{correlator}: they require \texttt{gs\_method="vumps"}
 (see below), since the tangent-space excitation ansatz needs exactly the
@@ -602,8 +609,8 @@ before storing, so the stored Hamiltonian is uniformly "intra-cell
 physical bond attributed to exactly one cell.
 
 \texttt{pyitensor/idmrg.py} implements the actual growing/infinite-size
-algorithm (White 1992, generalized to an \texttt{n\_uc}-site unit cell
-per McCulloch 2008): \texttt{\_build\_automaton} builds the periodic
+algorithm (White 1992, with an \texttt{n\_uc}-site unit cell):
+\texttt{\_build\_automaton} builds the periodic
 per-sublattice MPO tensor directly as a hand-rolled finite-state
 automaton (not extracted from a compressed finite reference system -- an
 earlier design that was tried and abandoned, see the module's own
@@ -612,47 +619,117 @@ docstring for the two independent bugs that approach hit), then
 from \texttt{HL=HR=None}, one unit cell at a time, reusing
 \texttt{dmrg.py}'s own \texttt{\_lanczos\_ground\_state} and
 \texttt{kernels.make\_matvec} for each micro-step's local 2-site solve
-(no separate Lanczos implementation). Static correlators are
-reconstructed after convergence from the last macro-iteration's own
-per-sublattice left-canonical tensors via the standard infinite-MPS
-transfer-matrix formalism (dominant left/right fixed points of the
-per-unit-cell transfer operator).
+(no separate Lanczos implementation).
 
-\textbf{A confirmed, fixed reliability bug affecting static correlators}:
-each micro-step's local 2-site Lanczos solve used to always start from a
-fresh random vector, on the (mistaken) reasoning that every micro-step
-inserts brand-new physical sites so there is no previous local tensor to
-warm-start from. That's true of the \emph{sites}, but once bond dimension
-saturates at \texttt{maxm} the \emph{shape} of the local eigenproblem at a
-given unit-cell position repeats macro-iteration to macro-iteration -- so
-for a gapless/SU(2)-symmetric model (routinely a (near-)degenerate local
-ground manifold), a fresh random restart let Lanczos land on an arbitrary
-member of that manifold every macro-iteration: the reported \emph{energy}
-still converged fine (variational, degeneracy-robust) but \texttt{U\_list}
-kept jumping between different members instead of settling into one
-self-consistent unit cell, corrupting every downstream static correlator
-(confirmed directly via the model-agnostic
-$\langle H_{uc}\rangle$-equals-\texttt{n\_uc*density} self-consistency
-identity: 0.4--0.6 gaps for a uniform \texttt{n\_uc=1} chain, not shrinking
-with \texttt{maxiter}, and not fixed by best-of-6 independent-seed
-reruns). Fixed by threading each macro-iteration's own local ground vector
-back in as the \emph{next} macro-iteration's Lanczos warm start
-(\texttt{\_local\_two\_site\_solve}'s \texttt{x0\_warm} parameter) -- this
-closes the gap by roughly an order of magnitude for \texttt{n\_uc=2}
-(0.34--0.40 down to $\le$0.05 across 7 independent trials, several
-essentially exact) but, confirmed directly, does \textbf{not} fix
-\texttt{n\_uc=1} (still 0.4--1.8, \texttt{IDMRGResult.state\_overlap}
-plateauing around 0.5--0.65 rather than approaching 1 even after 80
-macro-iterations) -- isolated to \texttt{n\_uc=1}'s own structurally
-unique micro-step, where \texttt{p\_L==p\_R} always (every
-macro-iteration's two active sites are literally the same sublattice, via
-\texttt{\_fresh\_physical\_copy}), unlike \texttt{n\_uc=2} where this
-never happens. \texttt{IDMRGResult.state\_overlap} (the normalized overlap
-between consecutive macro-iterations' local ground vectors,
-\texttt{None} if unavailable) is a new, cheap diagnostic exposing this
-directly, independent of the $\langle H_{uc}\rangle$ self-consistency
-check. See \texttt{docs/user\_guide.tex}'s iDMRG section for the
-user-facing version of this caveat.
+Three ingredients beyond the plain growth loop are what make the
+\emph{state} usable, not just the energy. All three were missing
+originally, and the failure was silent -- the energy was correct
+throughout -- so the history is worth keeping:
+
+\begin{itemize}
+\item \textbf{The wavefunction prediction}
+  (\texttt{\_wavefunction\_prediction}, McCulloch 2008 and the reference
+  implementation vendored at
+  \texttt{mpscpp2/ITensor/itensor/mps/idmrg.h}). Each micro-step's
+  Lanczos starts from the previous step's converged state translated into
+  the new bond bases,
+  $\theta = \lambda_k B_k \lambda_{k-1}^{-1} A_k \lambda_k$ --
+  \texttt{idmrg.h}'s \texttt{lastV = PseudoInvert(dag(D))} together with
+  its \texttt{swapUnitCells}. Substituting the canonical forms collapses
+  it to $\lambda\Gamma\lambda\Gamma\lambda$, i.e. it is not a heuristic
+  warm start but the exact translation of the converged state into the
+  enlarged bases. Note the swap (the previous step's right-canonical
+  \texttt{V} supplies the new \emph{left} physical slot): that is what
+  makes the sublattice labels line up, and it only does so for
+  \texttt{n\_uc<=2}, one more reason \texttt{n\_uc>=3} is rejected.
+\item \textbf{A gauge-consistent extraction} (\texttt{\_theta\_cell}).
+  The prediction fixes the trajectory but not the readout. Chaining one
+  left-canonical factor per micro-step, as \texttt{U\_list} does, still
+  compares bond bases minted by \emph{different} micro-steps, so tiling it
+  inserts a spurious unitary at every unit-cell boundary. The converged
+  cell is instead taken from a single micro-step's own $\theta$, whose two
+  outer legs are the same bond by construction, then re-gauged
+  (\texttt{\_canonical\_theta\_cell}, reusing
+  \texttt{\_canonicalize\_periodic}) and normalized to a transfer
+  eigenvalue of exactly 1. This is \texttt{IDMRGResult.cell\_list}, and it
+  is what \texttt{\_correlator\_cell} hands to every static observable,
+  \texttt{apply\_mpo}, \texttt{imps\_overlap} and \texttt{imps\_sum}.
+  \texttt{IDMRGResult.cell\_raw} is the same cell \emph{before} re-gauging
+  -- needed by \texttt{pyitensor/idmrg\_window.py}, since only there are
+  the outer bonds still literally in the
+  \texttt{env\_HL\_ket}/\texttt{env\_HR\_ket} bases its environment caps
+  are expressed in. \texttt{U\_list} is retained but is not a valid
+  periodic MPS on its own; nothing should tile it.
+\item \textbf{An energy baseline}
+  (\texttt{\_subtract\_energy\_baseline}, the equivalent of
+  \texttt{idmrg.h}'s \texttt{HL += -energy*IL}). No separate identity
+  environment has to be accumulated for it: the automaton's channel space
+  already carries one, since \texttt{chans[p]} is
+  \texttt{[S, F] + pending} and a growing environment's \texttt{S} and
+  \texttt{F} components \emph{are} its identity and energy accumulations.
+  The whole operation is therefore a slice update --
+  \texttt{HL[F] -= e*HL[S]} on the left and the mirrored
+  \texttt{HR[S] -= e*HR[F]} on the right. Without it the superblock
+  eigenvalue grew extensively while \texttt{\_lanczos\_ground\_state}
+  stopped on a \emph{relative} criterion, so the absolute noise in the
+  finite-difference density grew linearly with the iteration count:
+  measured on a gapped \texttt{n\_uc=2} chain, $|E| = 603$ after 400
+  macro-iterations with the density jittering over
+  ${\sim}9\times10^{-11}$ long after it had physically converged, against
+  a default \texttt{etol} of $10^{-10}$. It is now $|E| = 3.8$ and
+  ${\sim}4\times10^{-15}$, so \texttt{etol} is meaningful down to machine
+  precision.
+\end{itemize}
+
+Static correlators are reconstructed after convergence from
+\texttt{cell\_list} via the standard infinite-MPS transfer-matrix
+formalism. \texttt{\_expectation} closes the operator string against the
+transfer operator's own left fixed point \emph{at the string's own
+starting cell position} and divides by the same contraction with the
+operators dropped, rather than assuming the left fixed point is the
+identity. That assumption holds only for exactly left-canonical tensors;
+using the cell's position-0 fixed point instead left
+$\langle S^z(0)S^z(0)\rangle$ at 0.2499994784 rather than the
+exactly-0.25 it must be for spin-1/2.
+
+\textbf{How the static correlators got fixed, and how they were
+diagnosed.} Before the prediction and the theta-cell extraction above, the
+reported \emph{energy} was correct while the extracted \emph{state} was
+not -- a failure mode worth recognizing, since every energy-based check
+passes straight through it. The diagnostic that exposes it is the
+model-agnostic $\langle H_{uc}\rangle$-equals-\texttt{n\_uc*density}
+identity: exact for any translationally invariant state, and checkable
+with the module's own correlator machinery without needing \texttt{e0} in
+closed form.
+
+An intermediate fix threaded each macro-iteration's own local ground
+vector back in as the next one's Lanczos warm start, reasoning that a
+gapless/SU(2)-symmetric model has a (near-)degenerate local ground
+manifold and that a fresh random restart lets Lanczos land on an arbitrary
+member of it each time. That story is real, but it was not the cause: the
+same failure persisted at $4.5\times10^{-2}$ on a \emph{gapped,
+non-degenerate} TFIM whose energy was exact to $10^{-12}$, where there is
+no degenerate manifold to wander in. The raw flat vector being reused
+carried no basis information, so it could not reconcile two
+macro-iterations' bond bases -- which is what actually corrupted
+\texttt{U\_list}. The prediction subsumes the continuity argument and is
+additionally a genuine basis change; the extraction fixes the readout.
+
+Measured across gapped TFIM and the exactly solvable XX chain, with the
+energy correct to ${\sim}10^{-14}$ throughout:
+$\langle H_{uc}\rangle - \texttt{n\_uc}\,e_0$ went from missing by up to
+$1.2\times10^{-1}$ to $10^{-15}$--$10^{-9}$. On the XX chain at
+\texttt{n\_uc=1}, $\langle S^z(0)S^z(1)\rangle$ went from $+0.028$ against
+an exact $-0.101$ -- the wrong \emph{sign} -- to reproducing it within the
+bond dimension's own truncation error, and $\langle S^z\rangle$ from
+$-0.13$ to $10^{-13}$ against an exact 0. The error was also not monotone
+in \texttt{maxm}/\texttt{maxiter} beforehand ($4.3\times10^{-5}$ at
+\texttt{maxiter=60} versus $1.2\times10^{-1}$ at 240), the signature of an
+unfixed gauge rather than an unconverged one.
+\texttt{IDMRGResult.state\_overlap} -- now the overlap between the solve's
+result and the prediction it started from, i.e. the direct analogue of
+\texttt{idmrg.h}'s own ``Overlap of initial and final psi'' -- reaches
+$1-10^{-13}$ instead of plateauing around 0.5--0.65.
 
 \textbf{Currently limited to \texttt{n\_uc<=2}} (enforced at
 \texttt{Infinite\_Many\_Body\_Chain} construction) -- the micro-step
@@ -692,26 +769,28 @@ the growth loop's iterations rather than within a single tensor.
 \texttt{idmrg\_ground\_state}/\texttt{\_relabel\_pos} have the full
 derivation.
 
-A separate, milder issue in the same neighborhood:
-\texttt{U\_list[0]}'s own left bond and \texttt{U\_list[n\_uc-1]}'s own
-right bond are, in a truly periodic MPS, the \emph{same} wraparound
-bond, but each is independently truncated by its own micro-step's SVD --
-nothing guarantees they come out numerically equal, and two independent
-SVDs occasionally round a borderline singular value across the
-\texttt{cutoff} threshold differently for what is conceptually one bond.
-\texttt{\_dominant\_right\_fixed\_point} (used by both
-\texttt{onsite\_expectation} and \texttt{two\_point\_correlator}) now
-raises a clear \texttt{RuntimeError} when this happens instead of a
-cryptic \texttt{reshape} crash; a smaller \texttt{maxm} that actually
-binds (forcing both bonds to the same truncated dimension) avoids it,
-see \texttt{tests/test\_infinite\_chain.py}'s own comment on this.
+A related symptom, now gone: \texttt{U\_list[0]}'s own left bond and
+\texttt{U\_list[n\_uc-1]}'s own right bond are, in a truly periodic MPS,
+the \emph{same} wraparound bond, but each was independently truncated by
+its own micro-step's SVD, so nothing guaranteed they even came out the
+same \emph{dimension}. \texttt{\_dominant\_right\_fixed\_point} raises a
+clear \texttt{RuntimeError} rather than a cryptic \texttt{reshape} crash
+when that happens, and its comment once described the case as
+intermittent -- measured, it fired in 10 of 20
+\texttt{(n\_uc, maxm, maxiter)} combinations on a \emph{gapped} model,
+i.e. it was the common case, and it is the same root cause surfacing as a
+hard failure instead of a wrong number. Since the static path tiles
+\texttt{cell\_list}, whose two ends are one bond by construction, none of
+those 20 raise any more. The check is kept as defense in depth for
+anything that still hands \texttt{\_transfer\_matrices} a raw
+\texttt{U\_list}.
 
 \textbf{Applying an MPO to the converged iMPS}: \texttt{idmrg.py} also
 implements \texttt{apply\_mpo(result, W\_bulk, cutoff, maxdim)} -- the
 infinite-chain analogue of \texttt{mpsalgebra.applyMPO}, and the
 primitive a future iTEBD-style real/imaginary-time evolution feature
 would build on. \texttt{grow\_by\_mpo} Kronecker-merges \texttt{W\_bulk}'s
-own per-site bonds with \texttt{U\_list}'s (mirroring
+own per-site bonds with the converged cell's (mirroring
 \texttt{mpsalgebra.\_apply\_chain}'s per-site body, generalized to a
 periodic index range including the wraparound cut), giving raw,
 non-canonical tensors at bond dimension \texttt{chi\_A*chi\_W};
@@ -726,8 +805,8 @@ transfer-matrix fixed points at every cut into square-root factors
 \texttt{G\_right[p]=Y\_p V\_p\^{}H S\_p\^{}\{-1\}}, the \emph{full}
 inverse) -- asymmetric, rather than a textbook symmetric
 \texttt{S\^{}\{-1/2\}} split on both sides, specifically so the result
-comes out plain left-canonical (matching \texttt{IDMRGResult.U\_list}'s
-own convention) with no separate bond-weight layer to thread through,
+comes out plain left-canonical (matching
+\texttt{IDMRGResult.cell\_list}'s own convention) with no separate bond-weight layer to thread through,
 confirmed numerically before committing to the formula (a first,
 symmetric-split derivation looked plausible by analogy to Vidal's
 canonical form but reproduced Identity only to $\sim$1, not a small
@@ -1283,14 +1362,14 @@ block'' -- which turns out to be \emph{exactly} what
 macro-iteration (captured via a per-macro-iteration
 \texttt{env\_window\_boundary} snapshot, overwritten every iteration so
 whatever remains at loop exit is the one consistent with the
-\emph{returned} \texttt{U\_list}'s own edge bonds: \texttt{U\_list[0]}'s
-left bond is exactly that snapshot's \texttt{HL\_ket},
-\texttt{U\_list[n\_uc-1]}'s right bond exactly its \texttt{HR\_ket}, by
-construction of how \texttt{svd()} splits the local 2-site solve) -- no
-new environment solve needed, only exposing what already exists.
+cell the window tiles: the snapshot is taken \emph{entering} the very
+micro-step whose $\theta$ \texttt{\_theta\_cell} is built from, so that
+$\theta$'s own two outer legs literally are this snapshot's
+\texttt{HL\_ket} and \texttt{HR\_ket}) -- no new environment solve
+needed, only exposing what already exists.
 
 \texttt{idmrg\_window.py}'s \texttt{build\_window(result, n\_window)}
-tiles \texttt{n\_window} periodic repeats of \texttt{U\_list} (the
+tiles periodic repeats of \texttt{IDMRGResult.cell\_raw} (the
 window's MPS) and \texttt{W\_bulk} (its MPO) into an ordinary
 \texttt{mpscontainer.MPS}/\texttt{MPO} pair (\texttt{\_tile\_periodic},
 fresh Link Indices at every copy boundary to avoid the
@@ -1320,13 +1399,10 @@ boundary site regardless of whether the tensor itself actually has one.
 \texttt{window\_total\_energy} (the capped window's total energy, via
 \texttt{\_extend\_through\_left} then closing against
 \texttt{env\_HR}) is \emph{not} simply \texttt{e0 * (site count)} --
-plugging in the converged \texttt{U\_list} tensors with both
+with both
 \texttt{env\_HL\_ket} and \texttt{env\_HR\_ket} left as free/dangling
-legs (rather than contracted against a specific boundary vector) gives
-$\langle\text{window}|\text{window}\rangle = \dim(\texttt{env\_HR\_ket})$,
-not $1$ (an isometry-chain argument: each site's own left-canonical
-$U$ collapses the sum over every index except the very last dangling
-one, leaving that dimension as the Frobenius norm-squared -- confirmed
+legs (rather than contracted against a specific boundary vector),
+$\langle\text{window}|\text{window}\rangle$ is not $1$ (confirmed
 numerically against an independent Lanczos-Rayleigh-quotient
 computation using the identical \texttt{env\_HL}/\texttt{env\_HR}/
 \texttt{W\_pL}/\texttt{W\_pR}, to machine precision) --
@@ -1336,11 +1412,55 @@ independent baseline from whatever \texttt{env\_HL}/\texttt{env\_HR}
 themselves represent (every macro-iteration already absorbed before
 the snapshot) -- so \texttt{window\_energy\_density(result,
 n\_window)}, a finite difference between window sizes
-\texttt{n\_window} and \texttt{n\_window+1} divided by \texttt{n\_uc}
+\texttt{n\_window} and \texttt{n\_window+1} divided by the number of
+physical sites actually added
 (mirroring \texttt{idmrg\_ground\_state}'s own
 \texttt{density = (energy-prev\_energy)/(2*n\_uc)} diagnostic), is the
 well-posed sanity check this module validates against, not
-\texttt{window\_total\_energy} directly. \textbf{A second, real bug
+\texttt{window\_total\_energy} directly.
+
+\textbf{Three assumptions of exact left-canonicality, and why the window
+stopped tiling \texttt{U\_list}.} \texttt{window\_total\_energy} used to
+shortcut $\langle\text{window}|\text{window}\rangle$ to
+$\dim(\texttt{env\_HR\_ket})$, which is what the chain collapses to when
+\emph{every} tiled tensor is an exact isometry. That held for
+\texttt{U\_list} (\texttt{svd()}'s own \texttt{U} factors) but not for
+\texttt{cell\_raw}, whose second tensor $S V \lambda_o^{-1}$ is an
+isometry only to ${\sim}10^{-3}$ -- and it failed informatively,
+reporting an energy density \emph{below} the true $e_0$, which is
+variationally impossible and is what identified the normalization rather
+than the state as the culprit. \texttt{window\_norm\_squared} now
+contracts the overlap in one pass, reproducing the shortcut to machine
+precision wherever the shortcut was valid.
+
+Two more places made the same assumption.
+\texttt{\_close\_array\_chain} closed on the left with a bare trace;
+$S(x=0,t=0)$, which must equal $\langle S^z S^z\rangle = 0.25$ for
+spin-1/2, came out at $-0.078$. It now closes with the transfer
+operator's own left fixed point at the chain's starting cell position and
+calibrates against the same contraction with no operator inserted, so a
+bare chain returns exactly 1. And
+\texttt{snapshot\_correlator}/\texttt{\_padded\_arrays} indexed bulk
+tensors by \emph{sublattice} (\texttt{position \% n\_uc}); they now index
+by \emph{cell} position (\texttt{\% n\_cell}), while operator matrices are
+still looked up by sublattice.
+
+With all three fixed, \texttt{window\_energy\_density} reproduces $e_0$ to
+$10^{-14}$--$10^{-9}$ tiling \texttt{cell\_raw}, against
+$2.2\times10^{-4}$--$9.5\times10^{-3}$ tiling \texttt{U\_list} -- and the
+\texttt{U\_list} error saturated in \texttt{n\_window}, i.e. it was a
+genuine gauge error rather than a window-size effect. One consequence: a
+window's tiling unit is the \emph{cell}, which is two unit cells when
+\texttt{n\_uc=1}, so \texttt{n\_window} is rounded up to a whole number of
+cells and the realized size is reported back as
+\texttt{IBCWindow.n\_window} (\texttt{dynamical\_correlator\_td} takes its
+centre from that, or the perturbation would sit off-centre). For
+\texttt{n\_uc=2} nothing changes. \texttt{build\_window}'s old
+wraparound-dimension precondition is gone: it existed because tiling
+\texttt{U\_list} needed its two ends to agree, and the cell's ends agree
+by construction.
+
+\textbf{A second, real bug
 this same finite-difference check caught}: an earlier version compared
 window sizes \texttt{n\_window} and \texttt{n\_window+n\_uc} (not
 \texttt{n\_window+1}) while still dividing by \texttt{n\_uc} --
@@ -1378,10 +1498,7 @@ idmrg.py's own explicit-Index \texttt{\_extend\_HL}/\texttt{\_extend\_HR}.
 perturbation and readout primitives; \texttt{local\_expectation} needed
 its own real fix, distinct from the TDVP one: a plain observable's own
 boundary weighting is \emph{not} symmetric between the window's two
-ends, because \texttt{U\_list} is left-canonical (its own
-left-canonicality condition \emph{is} the statement that the left
-transfer-matrix fixed point is trivially the identity, needing no
-weighting) -- the \emph{right} boundary needs the dominant right fixed
+ends -- the \emph{right} boundary needs the dominant right fixed
 point (\texttt{\_all\_right\_fixed\_points}), exactly like
 \texttt{onsite\_expectation}/\texttt{two\_point\_correlator} already
 rely on; an earlier version used a bare trace on both ends and produced
@@ -1439,9 +1556,9 @@ reconstruct $S(x,t)=\langle\psi|A_x e^{-i(H-E_{\rm GS})t}B_0|\psi\rangle$ for
 headline efficiency result), by inserting operator $A$ directly into
 the \emph{bra} side of the overlap at the shifted absolute position,
 padding whichever side's explicit tensor list falls short with
-unevolved \texttt{U\_list} copies (\texttt{\_padded\_arrays}) -- valid
+unevolved \texttt{cell\_raw} copies (\texttt{\_padded\_arrays}) -- valid
 because, outside each window's own causal cone, its tensors already
-equal \texttt{U\_list} exactly. This is a simplification of the paper's
+equal the converged cell exactly. This is a simplification of the paper's
 own Eq.~7 to $t_1=0$ (the naive Eq.~3 form) rather than the full
 two-branch trick (evolving a \emph{second} window backward by $t_1$
 too, doubling the accessible total time for the same TDVP cost) --

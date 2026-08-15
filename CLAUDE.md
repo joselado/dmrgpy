@@ -543,6 +543,39 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   expansion machinery in `TDVP/basisextension.h` (mainly useful for
   one-site TDVP or long-range Hamiltonians) is not wired in, since
   two-site TDVP already grows bond dimension via SVD like two-site DMRG.
+- **`mpscpp3`-specific: `Chain::idmrg_ground_state` is NOT equivalent to
+  `pyitensor/idmrg.py` any more**, despite its own header comment (and
+  `docs/documentation.md`) still calling it "a line-for-line/line-by-line
+  port". The Python side has since gained three things the C++ port never
+  got: (1) McCulloch's wavefunction prediction
+  (`_wavefunction_prediction`, `theta = lambda_k . B_k .
+  lambda_{k-1}^{-1} . A_k . lambda_k`) as each micro-step's Lanczos start
+  — C++ still uses the *old* heuristic Python replaced, a raw flat vector
+  reused whenever its size matches (`idmrg_local_solve`'s
+  `warm.size()==dim_in`); (2) extraction of the converged unit cell from a
+  single micro-step's theta (`_theta_cell`/`_canonical_theta_cell`,
+  `IDMRGResult.cell_list`/`cell_raw`) instead of chaining per-micro-step
+  factors — C++ only snapshots the per-sublattice `idmrg_U_` (the `U_list`
+  equivalent); (3) the per-site energy baseline subtracted from both
+  growing environments each micro-step (`_subtract_energy_baseline`, the
+  reference `idmrg.h`'s `HL += -energy*IL`, with the density adding the
+  shift back) — C++'s density is a plain
+  `(energy-prev_energy)/(2.0*n_uc)` with no shift anywhere. (1) and (2)
+  are state/gauge quality, not energy: v3's `IdmrgResult` carries only
+  `density`/`converged`/`niter_done`, and `bindings.cc` exposes no iDMRG
+  correlator at all (only `vumps_onsite_expectation`/
+  `vumps_two_point_correlator`), so `gs_method="idmrg"` on
+  `itensor_version=3` raises `NotImplementedError` for `vev`/`correlator`
+  — the C++ `idmrg_onsite_expectation`/`idmrg_transfer_at` helpers are
+  private and serve only `td_dynamical_correlator_window`'s IBC window.
+  Nothing guards this divergence: the one cross-backend test
+  (`tests/test_infinite_chain.py::test_itensor_version3_matches_python_backend`)
+  asserts only `ic_v3.e0 == approx(ic_py.e0, abs=1e-6)`, which none of the
+  three can move — (1)/(2) leave the converged energy density alone, and
+  (3) is exactly compensated on the Python side (the drift it prevents was
+  measured at ~9e-11 after 400 macro-iterations, versus the test's
+  `maxiter=30`). Treat the C++ path as energy-density-only and use
+  `itensor_version="python"` for anything that consumes the iDMRG *state*.
 - **Both backends can be loaded in the same process** (needed for anything
   that directly compares `itensor_version=2` vs `=3` results, e.g. the
   `v2_VS_v3_*`-named examples in each theme folder, or `examples/

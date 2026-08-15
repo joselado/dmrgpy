@@ -2169,13 +2169,32 @@ class Chain
         }
 
     // Infinite DMRG (iDMRG): C++ port of pyitensor/idmrg.py's growing/
-    // infinite-size algorithm (White 1992, generalized to an n_uc-site
-    // unit cell per McCulloch 2008) -- see that module's own docstring
-    // for the full derivation and bug history; this is a line-for-line
-    // translation of its logic (automaton construction, growth loop,
-    // local 2-site solve, HL/HR extension), not an independent
-    // re-derivation, specifically to avoid reintroducing bugs that were
-    // already found and fixed there over an extensive debugging session.
+    // infinite-size algorithm (White 1992, with an n_uc-site unit cell)
+    // -- see that module's own docstring for the full derivation and bug
+    // history. It began as a line-for-line translation of its logic
+    // (automaton construction, growth loop, local 2-site solve, HL/HR
+    // extension), not an independent re-derivation, specifically to avoid
+    // reintroducing bugs already found and fixed there.
+    //
+    // IT IS NO LONGER EQUIVALENT. pyitensor/idmrg.py has since gained
+    // three things this port never got: McCulloch's wavefunction
+    // prediction (_wavefunction_prediction) as each micro-step's Krylov
+    // start -- the code below still uses the older heuristic Python
+    // replaced, a flat vector reused whenever its size matches, see
+    // idmrg_local_solve; extraction of the converged unit cell from a
+    // single micro-step's theta (_theta_cell, IDMRGResult.cell_list/
+    // cell_raw) rather than chaining the per-micro-step factors this port
+    // snapshots as idmrg_U_; and a per-site energy baseline subtracted
+    // from both growing environments (_subtract_energy_baseline, the
+    // reference idmrg.h's HL += -energy*IL), with the density adding the
+    // shift back -- the density below is a plain finite difference. The
+    // first two are state/gauge quality rather than energy, and this
+    // backend exposes only an energy density anyway (IdmrgResult carries
+    // no unit cell, and bindings.cc binds no iDMRG correlator), so the
+    // divergence does not affect what v3 currently returns. Treat this
+    // path as energy-density-only; use itensor_version="python" for
+    // anything that consumes the iDMRG *state*. See CLAUDE.md's mpscpp3
+    // section.
     //
     // This Chain instance must be constructed with site_types = the
     // *n_uc-site unit cell* (not a full chain) -- infinitechain.py's
