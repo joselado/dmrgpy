@@ -64,13 +64,21 @@ def test_build_window_boundary_legs_match_environment_snapshot():
     """A window's own edge tensors must attach directly to the
     IDMRGResult's own env_HL/env_HR ket and mpo axes (see build_window's
     and _tile_periodic's own docstrings) -- a structural check independent
-    of any energy computation."""
+    of any energy computation.
+
+    A window tiles whole *cells* (idmrg_window._window_cell), which are two
+    unit cells long when n_uc=1, so `n_window` is rounded up to a whole
+    number of cells and the realized size is reported back as
+    `win.n_window`. That is what the length assertions below use; for n_uc=2
+    (one cell == one unit cell) it is always exactly the requested
+    `n_window`."""
     result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
                   h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
     for n_window in (1, 2, 3):
         win = idmrg_window.build_window(result, n_window)
-        assert win.mps.length() == n_window * result.n_uc
-        assert win.mpo.length() == n_window * result.n_uc
+        assert win.n_window >= n_window
+        assert win.mps.length() == win.n_window * result.n_uc
+        assert win.mpo.length() == win.n_window * result.n_uc
         assert win.mps.A(1).inds[0] == result.env_HL_ket
         assert win.mps.A(win.mps.length()).inds[-1] == result.env_HR_ket
         assert win.mpo.A(1).inds[0] == result.env_HL_mpo
@@ -172,14 +180,14 @@ def test_local_expectation_is_uniform_before_perturbation():
 def test_window_tdvp_step_conserves_energy_and_norm_at_the_ground_state():
     """Evolving the (unperturbed) ground-state window under TDVP must
     leave it stationary: window_total_energy and the window's own norm
-    (dim(env_HR_ket), see window_total_energy's own docstring) should
+    (window_norm_squared, see its own docstring) should
     barely drift (only Krylov/SVD-truncation-level numerical error, not a
     systematic change) over several real-time steps."""
     result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
                   h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
     win = idmrg_window.build_window(result, 6)
     e_before = idmrg_window.window_total_energy(win)
-    norm_before = win.mps.A(win.mps.length()).inds[-1].dim
+    norm_before = idmrg_window.window_norm_squared(win)
 
     from dmrgpy.pyitensor.mpsalgebra import inner
     norm_actual_before = inner(win.mps, win.mps).real
@@ -239,26 +247,13 @@ def test_dynamical_correlator_td_matches_exact_static_correlator_at_t0():
     ED cross-check). Uses connected=False: two_point_correlator itself is
     the *raw* correlator, not background-subtracted.
 
-    The reference is deliberately `two_point_correlator` evaluated on the
-    *same tensors this module tiles* (`result.U_list`, wrapped in a
-    PeriodicMPS so it is tiled verbatim), not on `result` itself. Those are
-    no longer the same state: a converged IDMRGResult's own static
-    observables tile `cell_list`, the gauge-consistent cell extracted from a
-    single theta (idmrg.py's `_theta_cell`), whereas `build_window` pairs
-    `U_list`'s exact per-micro-step factors with the matching
-    `env_HL`/`env_HR` snapshot and so must tile those. For n_window>1 that
-    re-identifies `U_list`'s two ends, which live in bond bases minted by
-    different micro-steps, leaving the window a residual gauge error the
-    static path no longer has -- measured at 1e-7..1e-4 here, varying run to
-    run with iDMRG's unseeded start.
-
-    Comparing like with like keeps this a tight (1e-9) test of what it is
-    actually for -- the shifted-overlap/padding machinery -- instead of
-    turning it into a loose test of two different state extractions. The
-    separate question of the window's own gauge error is real and tracked as
-    follow-up in idmrg.py's module docstring; the static side is the
-    accurate one (it satisfies the exact `<H_uc> = n_uc*e0` identity to
-    1e-11..1e-9, where tiling `U_list` missed it by up to 1.2e-1)."""
+    Both sides now tile the same gauge-consistent cell -- `build_window`
+    tiles `IDMRGResult.cell_raw` and `two_point_correlator` tiles
+    `cell_list`, which are the same state in two gauges (cross-checked
+    directly: equal energy density to 1e-10..1e-15 at equal bond
+    dimension). While this module still tiled `U_list`, the two disagreed by
+    1e-7..1e-4 and this comparison had to be loosened; it does not any
+    more."""
     result = _run([2], 1, h_intra=[[_FIELD, ["Sz", 0]]],
                   h_inter=[[1.0, ["Sx", 0], ["Sx", 1]]])
     ts, xs, S = idmrg_window.dynamical_correlator_td(
@@ -266,13 +261,10 @@ def test_dynamical_correlator_td_matches_exact_static_correlator_at_t0():
         cutoff=1e-10, maxdim=40, niter=50, x_values=range(-4, 5),
         connected=False)
     assert ts[0] == 0.0
-    # the same tensors build_window tiles, tiled verbatim (see docstring)
-    as_tiled = idmrg.PeriodicMPS(result.sites_uc, result.n_uc,
-                                  result.U_list, eta=1.0)
     for x in xs:
-        exact = idmrg.two_point_correlator(as_tiled, "Sz", 0, "Sz", abs(int(x)))
+        exact = idmrg.two_point_correlator(result, "Sz", 0, "Sz", abs(int(x)))
         got = S[0][list(xs).index(x)]
-        assert got.real == pytest.approx(exact.real, abs=1e-5)
+        assert got.real == pytest.approx(exact.real, abs=1e-7)
         assert got.imag == pytest.approx(0.0, abs=1e-9)
 
 

@@ -154,9 +154,14 @@ def test_window_tdvp_step_eshift_matches_exact_dense_evolution():
             break
     assert best is not None and best.converged
 
-    n_window = 3  # n_uc=1: 3 physical sites, 2 bonds -- exercises the
-    # interior-environment extension path (see this test's own docstring)
+    n_window = 3  # n_uc=1: build_window rounds this up to a whole number of
+    # tiling cells (2 unit cells each when n_uc=1, see
+    # idmrg_window._window_cell), so the realized window is 4 sites / 3 bonds
+    # -- still the interior-environment extension path this test is for (see
+    # its own docstring), just one site wider than the 3 originally asked
+    # for. Everything below reads the site count off the window itself.
     win = idmrg_window.build_window(best, n_window)
+    n_sites = win.mps.length()
 
     # Build the exact dense n_window-site effective Hamiltonian: env_HL
     # contracted through every site's own MPO tensor, closed by env_HR --
@@ -166,7 +171,7 @@ def test_window_tdvp_step_eshift_matches_exact_dense_evolution():
     order_in, shape = _full_window_order(win)
     site_inds_out = [ind.prime(1) for ind in order_in[1:-1]]
     order_out = [win.env_HL_bra] + site_inds_out + [win.env_HR_bra]
-    pieces = [win.env_HL] + [win.mpo.A(i) for i in range(1, n_window + 1)] + [win.env_HR]
+    pieces = [win.env_HL] + [win.mpo.A(i) for i in range(1, n_sites + 1)] + [win.env_HR]
     matvec = kernels.make_matvec(pieces, order_in, shape, order_out)
 
     dim = int(np.prod(shape))

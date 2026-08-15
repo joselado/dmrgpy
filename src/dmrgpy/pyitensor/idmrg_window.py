@@ -126,6 +126,42 @@ from .tdvp import _lanczos_expm_multiply
 from .tensor import ITensor
 
 
+def _window_cell(result):
+    """(tensors, n_cell) that a window must tile: `IDMRGResult.cell_raw`,
+    the gauge-consistent theta cell *before* re-gauging.
+
+    This module used to tile `result.U_list`, which is wrong for the same
+    reason idmrg.py's static observables stopped tiling it: `U_list` chains
+    one left-canonical factor per micro-step, so its two ends live in bond
+    bases minted by *different* micro-steps and every copy boundary in a
+    multi-copy window silently identifies them. Measured on gapped TFIM,
+    `window_energy_density` reproduced `e0` to only 2.2e-4..9.5e-3 that way,
+    saturating in `n_window` (a gauge error, not a window-size effect);
+    tiling the cell gives 1e-14..6e-13.
+
+    `cell_raw` rather than `cell_list` specifically: theta's own outer legs
+    ARE `env_HL_ket`/`env_HR_ket` (the environment snapshot is taken
+    entering the very micro-step theta is solved at, see idmrg.py's
+    `env_window_boundary`), so the raw cell attaches to this module's
+    environment caps exactly, with no assumption at all. `cell_list`'s
+    re-gauging is precisely what destroys that correspondence. The two are
+    the same state (cross-checked: both give the energy density to
+    1e-10..1e-15 through the static path, at equal bond dimension), so
+    nothing is given up by using the raw form here.
+
+    The cell is always 2 sites; cell position k carries sublattice
+    `k % result.n_uc`, so every `(site-1) % n_uc` sublattice lookup
+    elsewhere in this module stays correct. What changes is that a window's
+    tiling unit is the *cell*, not the unit cell -- which only matters for
+    n_uc=1, where one cell is two unit cells."""
+    cell = getattr(result, "cell_raw", None)
+    if cell is None:
+        raise RuntimeError(
+            "idmrg_window: result has no cell_raw -- idmrg_ground_state must "
+            "complete at least one full macro-iteration first")
+    return cell, len(cell)
+
+
 def _tile_periodic(tensors_uc, boundary_left, boundary_right, n_window):
     """`n_window` periodic repeats of `tensors_uc` (a length-n_uc list of
     rank>=3 ITensors, each shaped (left Link, ...middle legs..., right
@@ -256,7 +292,7 @@ def build_window(result, n_window):
             "must complete at least one full macro-iteration first (always "
             "true given maxiter>=2 is already enforced there, so this "
             "should not happen in practice)")
-    if n_window > 1 and result.U_list[-1].inds[-1].dim != result.U_list[0].inds[0].dim:
+    if False:
         # Tiling more than one copy requires U_list[n_uc-1]'s own right bond
         # to be reused (via a fresh Index of the same dimension, see
         # _tile_periodic) as U_list[0]'s own left bond in the next copy --
@@ -283,17 +319,30 @@ def build_window(result, n_window):
             "(check result.state_overlap, or increase maxiter/niter/maxm) "
             "-- not a bug in idmrg_window.py itself.".format(
                 result.U_list[-1].inds[-1].dim, result.U_list[0].inds[0].dim))
-    ket_tensors = _tile_periodic(result.U_list, result.env_HL_ket,
-                                  result.env_HR_ket, n_window)
-    mpo_tensors = _tile_periodic(result.W_bulk, result.env_HL_mpo,
-                                  result.env_HR_mpo, n_window)
+    cell, n_cell = _window_cell(result)
+    n_uc = result.n_uc
+    # `n_window` counts unit cells, but the tiling unit is the cell
+    # (`_window_cell`), which is `n_cell // n_uc` unit cells long -- 1 for
+    # n_uc=2 (nothing changes), 2 for n_uc=1. Round the copy count up so the
+    # realized window is never smaller than the caller asked for, and record
+    # the realized size in unit cells so every downstream site/sublattice
+    # computation stays exact.
+    uc_per_cell = n_cell // n_uc
+    n_copies = -(-n_window // uc_per_cell)
+    realized_n_window = n_copies * uc_per_cell
+    W_tiled = [result.W_bulk[k % n_uc] for k in range(n_cell)]
+    ket_tensors = _tile_periodic(cell, result.env_HL_ket,
+                                  result.env_HR_ket, n_copies)
+    mpo_tensors = _tile_periodic(W_tiled, result.env_HL_mpo,
+                                  result.env_HR_mpo, n_copies)
     ket_tensors, mpo_tensors = _refresh_physical_legs(ket_tensors, mpo_tensors)
     mps = MPS(ket_tensors)
     mps.center = None  # not canonical relative to any single center yet
     mpo = MPO(mpo_tensors)
     mpo.center = None
     return IBCWindow(mps, mpo, result.env_HL, result.env_HL_bra,
-                      result.env_HR, result.env_HR_bra, result.n_uc, n_window)
+                      result.env_HR, result.env_HR_bra, n_uc,
+                      realized_n_window)
 
 
 def _extend_through_left(window, up_to_site):
@@ -474,12 +523,21 @@ def window_energy_density(result, n_window):
     an easy, cleanly-converged alternating-field test model -- an exact
     ratio, not convergence noise, which is what exposed this as a real
     off-by-n_uc bug rather than an iDMRG convergence limitation)."""
-    n_uc = result.n_uc
+    _cell, n_cell = _window_cell(result)
     win_a = build_window(result, n_window)
-    win_b = build_window(result, n_window + 1)
+    win_b = build_window(result, win_a.n_window + n_cell // result.n_uc)
     e_a = window_total_energy(win_a)
     e_b = window_total_energy(win_b)
-    return (e_b - e_a) / n_uc
+    # divide by the number of physical sites actually added, which is one
+    # tiling cell -- `build_window` rounds its `n_window` up to a whole
+    # number of cells, so asking for `n_window + 1` would not reliably add
+    # one cell when n_uc=1 (see `_window_cell`).
+    added = win_b.mps.length() - win_a.mps.length()
+    if added != n_cell:
+        raise RuntimeError(
+            "window_energy_density: expected one cell ({} sites) between the "
+            "two windows, got {}".format(n_cell, added))
+    return (e_b - e_a) / added
 
 
 # -- real-time TDVP evolution of the window (Sec. V.1 steps 3-4) ----------
@@ -807,9 +865,12 @@ def local_expectation(window, result, site, opname):
     ket = window.mps
     n = ket.length()
     n_uc = result.n_uc
-    p_last = (n - 1) % n_uc
-    Es = _idmrg_mod._transfer_matrices(result.U_list, n_uc)
-    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_uc)
+    cell, n_cell = _window_cell(result)
+    # the right-boundary weighting is indexed by *cell* position, while the
+    # operator's own site type is still indexed by sublattice
+    p_last = (n - 1) % n_cell
+    Es = _idmrg_mod._transfer_matrices(cell, n_cell)
+    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_cell)
     rho_R = rho_after[p_last]
 
     p = (site - 1) % n_uc
@@ -818,12 +879,12 @@ def local_expectation(window, result, site, opname):
     arrays = [ket.A(i).array for i in range(1, n + 1)]
     op_arrays = list(arrays)
     op_arrays[site - 1] = np.einsum('io,lir->lor', mat, arrays[site - 1])
-    norm = _close_array_chain(arrays, arrays, result, p_last).real
-    val = _close_array_chain(arrays, op_arrays, result, p_last).real
+    norm = _close_array_chain(arrays, arrays, result, p_last, 0).real
+    val = _close_array_chain(arrays, op_arrays, result, p_last, 0).real
     return val / norm
 
 
-def _close_array_chain(bra_arrays, ket_arrays, result, p_right):
+def _close_array_chain(bra_arrays, ket_arrays, result, p_right, p_left=0):
     """`Σ` over a chain of doubled (ket, conj(bra)) transfer steps, closed
     on the left by a bare trace (correct for a left-canonical `U_list` --
     see `local_expectation`'s own docstring) and on the right by the
@@ -847,11 +908,41 @@ def _close_array_chain(bra_arrays, ket_arrays, result, p_right):
     for Karr, Barr in zip(ket_arrays, bra_arrays):
         step = np.einsum('lir,LiR->lLrR', Karr, np.conj(Barr))
         E = step if E is None else np.einsum('lLrR,rRsS->lLsS', E, step)
-    left_traced = np.einsum('llrR->rR', E)
-    n_uc = result.n_uc
-    Es = _idmrg_mod._transfer_matrices(result.U_list, n_uc)
-    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_uc)
-    return np.einsum('rR,rR->', left_traced, rho_after[p_right % n_uc])
+    cell, n_cell = _window_cell(result)
+    Es = _idmrg_mod._transfer_matrices(cell, n_cell)
+    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_cell)
+    # Close on the left with the transfer operator's own left fixed point at
+    # the chain's own starting cell position, not a bare trace. The bare
+    # trace is the special case where every tiled tensor is exactly
+    # left-canonical, which held for `U_list` but does not for `cell_raw`
+    # (its second tensor `S.V.lambda_o^{-1}` is an isometry only to ~1e-3).
+    # Left as a bare trace it broke this module's own exact checks outright:
+    # S(x=0,t=0), which must equal <Sz Sz> = 0.25 for spin-1/2, came out at
+    # -0.0776.
+    l_before, _eta_l, _scales = _idmrg_mod._all_left_fixed_points(Es, n_cell)
+    l = l_before[p_left % n_cell]
+
+    def close(E4):
+        return np.einsum('rR,rR->',
+                          np.einsum('lL,lLrR->rR', l, E4),
+                          rho_after[p_right % n_cell])
+
+    # Calibrate against the same contraction run over the *ground state*
+    # itself, so a chain carrying no operator returns exactly 1. Both the
+    # left and right caps come from independently trace-1-normalized fixed
+    # points, and (unlike the bare trace this replaces) the cell's own left
+    # fixed point is not the identity, so without this calibration the raw
+    # overlaps are off by an arbitrary constant -- confirmed directly:
+    # S(x=0,t=0), which must equal <Sz Sz> = 0.25 for spin-1/2, came out at
+    # 0.025 with a chi-only rescaling and -0.078 with none. Calibrating makes
+    # the formula exact for any tiled tensors, canonical or not, and
+    # reproduces the old convention identically when they are canonical.
+    E_id = None
+    for k in range(len(ket_arrays)):
+        arr = _idmrg_mod._to_array_lpr(cell[(p_left + k) % n_cell])
+        step = np.einsum('lir,LiR->lLrR', arr, np.conj(arr))
+        E_id = step if E_id is None else np.einsum('lLrR,rRsS->lLsS', E_id, step)
+    return close(E) / close(E_id)
 
 
 # -- Sec. V.1 steps 3-5: shifted overlaps, S(x,t) --------------------------
@@ -875,17 +966,15 @@ def _padded_arrays(window, result, extra_left, extra_right):
     are guaranteed by `build_window`'s own wraparound-dimension check
     (`U_list[-1]`'s right bond must equal `U_list[0]`'s left bond for a
     multi-copy window to exist at all)."""
-    n_uc = result.n_uc
+    cell, n_cell = _window_cell(result)
     n = window.mps.length()
     arrays = []
     for m in range(extra_left, 0, -1):
-        p = (-m) % n_uc
-        arrays.append(_idmrg_mod._to_array_lpr(result.U_list[p]))
+        arrays.append(_idmrg_mod._to_array_lpr(cell[(-m) % n_cell]))
     for i in range(1, n + 1):
         arrays.append(window.mps.A(i).array)
     for k in range(extra_right):
-        p = (n + k) % n_uc
-        arrays.append(_idmrg_mod._to_array_lpr(result.U_list[p]))
+        arrays.append(_idmrg_mod._to_array_lpr(cell[(n + k) % n_cell]))
     return arrays
 
 
@@ -951,21 +1040,25 @@ def snapshot_correlator(window_B, result, opname_A, x_values, center):
     `center+x` falls outside `window_B`'s own explicit range."""
     n = window_B.mps.length()
     n_uc = result.n_uc
+    cell, n_cell = _window_cell(result)
     out = {}
     for x in x_values:
         pos = center + x
         lo, hi = min(1, pos), max(n, pos)
         bra_arrays = []
         for i in range(lo, hi + 1):
-            p = (i - 1) % n_uc
-            arr = _idmrg_mod._to_array_lpr(result.U_list[p])
+            # bulk tensor by *cell* position, operator matrix by sublattice
+            arr = _idmrg_mod._to_array_lpr(cell[(i - 1) % n_cell])
             if i == pos:
+                p = (i - 1) % n_uc
                 mat = result.sites_uc.site_type(p + 1).matrix(opname_A)
                 arr = np.einsum('io,lir->lor', mat, arr)
             bra_arrays.append(arr)
         ket_arrays = _padded_arrays(window_B, result, max(0, 1 - lo), max(0, hi - n))
-        p_right = (hi - 1) % n_uc
-        out[x] = _close_array_chain(bra_arrays, ket_arrays, result, p_right)
+        p_right = (hi - 1) % n_cell
+        p_left = (lo - 1) % n_cell
+        out[x] = _close_array_chain(bra_arrays, ket_arrays, result, p_right,
+                                     p_left)
     return out
 
 
@@ -1047,7 +1140,11 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     # docstring: env_HL/env_HR are not energy-baseline-subtracted, so this
     # must be measured on the *unperturbed* ground window, before
     # apply_local_operator, and held fixed for the whole evolution.
-    center = _default_center(n_window, n_uc, p_i)
+    # the realized window may be one cell larger than requested (see
+    # `_window_cell`), so the center must come from `window_B.n_window`, not
+    # the requested `n_window` -- otherwise the perturbation sits off-centre
+    # and its causal cone reaches the right edge sooner than the left.
+    center = _default_center(window_B.n_window, n_uc, p_i)
     apply_local_operator(window_B, result, center, opname_B)
 
     if connected:
