@@ -45,7 +45,15 @@ checking a version string), and only once everything checks out does
 `installtk/install2.py` compile the vendored ITensor static library and
 the `pybind` Makefile target for whichever backend(s) `--itensor-version`
 selects (`2` = mpscpp2/ITensor v2; `3` = mpscpp3/ITensor v3, the default;
-`both` builds both, one after the other).`install2.py` picks the right
+`both` builds both, one after the other).
+
+Both `mpscppN/Makefile`s list `$(wildcard *.h)` among the extension's
+prerequisites: without that, editing `chain_session.h` — where the actual
+DMRG implementation lives — leaves `make pybind` reporting "Nothing to be
+done" while the `.so` keeps the old code, which is a confusing way to test a
+change that was never compiled.
+
+`install2.py` picks the right
 `mpscppN` directory and C++ language standard per version (v2 needs only
 C++14; v3 needs C++17 with the concepts TS extension, `-fconcepts`, see
 `mpscpp3/ITensor/options.mk.sample`'s own `CCCOM` line) but otherwise runs
@@ -309,6 +317,24 @@ older tests under `tests/` predate that fix and still manually exclude v3 for
 to avoid a crash, not something to "fix" by removing.
 
 ### Cross-backend performance benchmarking
+
+**Before benchmarking anything, check BLAS thread counts.** DMRG is a great
+many *small* dense linear-algebra calls (a two-site tensor at `maxm=30` on
+spin-1/2 sites is 60x60), and at that size more BLAS threads is slower, not
+faster: measured 1 thread vs 2, `svd` 1.6x and `eigh` 2.3x slower. End to end
+that alone is minor (~1.13x for `"python"`, nothing for v3), but under
+*oversubscription* — a shared cluster node, or several dmrgpy runs in
+parallel, where every process's BLAS thinks it owns the machine — it
+dominates every other effect in this file: on a 14-core host with another job
+holding 10 cores, MKL's default thread count turned a 9.4s `"python"` solve
+into 28.2s and a 1.6s v3 solve into 26.7s. Pin threads before importing numpy
+(`MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 ...`) when timing anything, or
+timings across runs are not comparable. `src/dmrgpy/blasthreads.py` has the
+full measurements and an opt-in `limit()` context manager (needs
+`threadpoolctl`; the env-var route is more effective, since some BLAS
+libraries fix threading on first use). dmrgpy never changes thread counts on
+its own.
+
 
 `benchmarks/run_benchmarks.py` answers a different question than
 `tests/`/`examples/`: not "is this backend correct" but "which backend is
