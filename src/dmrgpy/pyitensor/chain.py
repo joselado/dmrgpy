@@ -38,6 +38,31 @@ from .tensor import ITensor, commonIndex, contract_many, dag, delta, noPrime, pr
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
 
 
+def _mps_arrays_lpr(psi):
+    """Every site tensor of `psi` as a plain (chi_left, d, chi_right) NumPy
+    array, with length-1 axes inserted at the two open ends.
+
+    Index order on an MPS tensor is not guaranteed, so each is transposed
+    explicitly against its own (left link, Site, right link) rather than
+    assumed -- `transpose_to` raises rather than silently mis-ordering if the
+    tensor is not what this expects."""
+    n = psi.length()
+    out = []
+    for i in range(1, n + 1):
+        T = psi.A(i)
+        phys = next(ind for ind in T.inds if ind.hastags("Site"))
+        left = commonIndex(psi.A(i - 1), T) if i > 1 else None
+        right = commonIndex(T, psi.A(i + 1)) if i < n else None
+        order = [ind for ind in (left, phys, right) if ind is not None]
+        arr = T.transpose_to(order)
+        if left is None:
+            arr = arr.reshape((1,) + arr.shape)
+        if right is None:
+            arr = arr.reshape(arr.shape + (1,))
+        out.append(np.ascontiguousarray(arr))
+    return out
+
+
 def _four_pt_site_sort_sign(site_list):
     """(-1)**(number of inversions) of `site_list` -- the fermionic sign
     picked up by reordering a product of operators at those sites into
@@ -819,7 +844,18 @@ class Chain:
           case the earlier normalization bug was found with.
 
         Work is grouped by the tuple's minimum site so one `position()` call
-        (and one bra copy) serves every tuple starting there."""
+        serves every tuple starting there.
+
+        The fold runs on plain NumPy arrays rather than ITensor objects.
+        That is not premature: with the operator content resolved, every
+        shape and axis order here is already known, so routing each step
+        through `ITensor.__mul__` only pays for Index matching that answers a
+        question we have the answer to. Profiled at n=12, the ITensor form
+        spent ~80% of its time in `mul_plan`/`_pairwise_result_size`/
+        `Index.__hash__` rather than in arithmetic. It also drops the
+        `_fresh_link_copy` bra entirely -- a self-overlap's bra is just
+        `conj()` of the same array, and the Link-identity collision that copy
+        exists to avoid cannot arise when the contraction is positional."""
         from .sites.base import is_fermionic
         by_min = {}
         for (i, j, k, l) in _four_pt_repeated_tuples(n):
@@ -827,47 +863,54 @@ class Chain:
                 continue
             by_min.setdefault(min(i, j, k, l), []).append((i, j, k, l))
 
+        # per-site operator matrices are fixed for the whole run
+        mats = {}
+
+        def site_matrix(site, name):
+            key = (site, name)
+            if key not in mats:
+                mats[key] = self.sites.site_type(site).matrix(name)
+            return mats[key]
+
         for mn0 in sorted(by_min):
             mn = mn0 + 1  # 1-based
             psi.position(mn)
-            bra_tensors = _fresh_link_copy(psi)
+            arrays = _mps_arrays_lpr(psi)   # (chi_l, d, chi_r) per site
             for (i, j, k, l) in by_min[mn0]:
                 mx = max(i, j, k, l) + 1
-                factors = [("Cdag", i + 1), ("C", j + 1),
-                           ("Cdag", k + 1), ("C", l + 1)]
                 by_site = {}
-                for nm, site in factors:
+                for nm, site in (("Cdag", i + 1), ("C", j + 1),
+                                  ("Cdag", k + 1), ("C", l + 1)):
                     by_site.setdefault(site, []).append(nm)
-                E = None
-                if mn > 1:
-                    ket_link = commonIndex(psi.A(mn - 1), psi.A(mn))
-                    bra_link = commonIndex(bra_tensors[mn - 2], bra_tensors[mn - 1])
-                    E = delta(ket_link, bra_link)
+                E = np.eye(arrays[mn - 1].shape[0], dtype=complex)
                 carry = False
                 for site in range(mn, mx + 1):
-                    st = self.sites.site_type(site)
                     names = by_site.get(site)
-                    T = psi.A(site)
                     if names is None:
-                        mat = st.matrix("F") if carry else None
+                        mat = site_matrix(site, "F") if carry else None
                     else:
                         odd = sum(1 for nm in names if is_fermionic(nm)) % 2 == 1
-                        mat = st.matrix(names[0])
+                        mat = site_matrix(site, names[0])
                         for nm in names[1:]:
-                            mat = st.matrix(nm) @ mat
+                            mat = site_matrix(site, nm) @ mat
                         if carry != odd:
-                            mat = st.matrix("F") @ mat
+                            mat = site_matrix(site, "F") @ mat
                         carry = carry != odd
+                    A = arrays[site - 1]
+                    # tensordot, not einsum: at these sizes np.einsum's
+                    # `optimize=True` re-derives a contraction path on every
+                    # call and costs more than the contraction itself (it
+                    # made this loop measurably slower than the ITensor form
+                    # it replaced), while `optimize=False` falls back to a
+                    # slow C loop for 3-operand contractions.
                     if mat is not None:
-                        s_i = next(ind for ind in T.inds if ind.hastags("Site"))
-                        T = noPrime(T * ITensor((s_i, s_i.prime(1)), mat), "Site")
-                    piece = dag(bra_tensors[site - 1])
-                    E = contract_many([p for p in (E, T, piece) if p is not None])
-                if mx < n:
-                    ket_link = commonIndex(psi.A(mx), psi.A(mx + 1))
-                    bra_link = commonIndex(bra_tensors[mx - 1], bra_tensors[mx])
-                    E = E * delta(ket_link, bra_link)
-                val = _four_pt_site_sort_sign((i, j, k, l)) * E.scalar()
+                        A_op = np.tensordot(A, mat, axes=([1], [0]))   # (l,r,o)
+                        A_op = np.ascontiguousarray(A_op.transpose(0, 2, 1))
+                    else:
+                        A_op = A
+                    X = np.tensordot(E, A_op, axes=([0], [0]))         # (L,p,r)
+                    E = np.tensordot(X, np.conj(A), axes=([0, 1], [0, 1]))  # (r,R)
+                val = _four_pt_site_sort_sign((i, j, k, l)) * complex(np.trace(E))
                 out[i, j, k, l] = val
                 if (i, j, k, l) != (l, k, j, i) or not accelerate:
                     out[l, k, j, i] = np.conj(val)

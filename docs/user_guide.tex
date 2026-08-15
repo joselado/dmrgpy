@@ -690,10 +690,10 @@ rather than rebuilding a fresh MPO for every tuple, it reuses partial
 tensor-network contractions across the whole $(N,N,N,N)$ tensor. Agrees
 with \texttt{ctmode="full"} and ED to machine precision / solver
 tolerance on both backends, and is substantially faster: at $n=12$,
-9.3\,s $\to$ 1.7\,s under \texttt{itensor\_version=3} and 37.7\,s $\to$
-5.1\,s under \texttt{"python"}, against \texttt{ctmode="full"} at
-5.8--8.1$\times$ slower on the sizes the
-\texttt{four\_correlation\_tensor\_sweep\_VS\_full} example measures.
+9.3\,s $\to$ 1.2\,s under \texttt{itensor\_version=3} and 37.7\,s $\to$
+2.0\,s under \texttt{"python"} (measured single-threaded; see the
+BLAS-threads section), i.e.\ roughly $8\times$ and $19\times$, against a
+\texttt{ctmode="full"} that is slower still.
 
 Those numbers reflect a fix worth knowing about if you read the older
 docstrings. The tensor splits into pairwise-distinct-index entries (handled

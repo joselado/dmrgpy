@@ -593,10 +593,10 @@ environment-reuse implementation following the algorithmic idea of
 rather than rebuilding a fresh MPO for every tuple, it reuses partial
 tensor-network contractions across the whole $(N,N,N,N)$ tensor. Agrees
 with `ctmode="full"` and ED to machine precision / solver tolerance on
-both backends, and is substantially faster: at $n=12$, 9.3s → 1.7s under
-`itensor_version=3` and 37.7s → 5.1s under `"python"`, against
-`ctmode="full"` at 5.8x–8.1x slower on the sizes the
-`four_correlation_tensor_sweep_VS_full` example measures.
+both backends, and is substantially faster: at $n=12$, 9.3s → 1.2s under
+`itensor_version=3` and 37.7s → 2.0s under `"python"` (measured
+single-threaded — see §19 on BLAS threads), i.e. roughly 8x and 19x,
+against a `ctmode="full"` that is slower still.
 
 Those numbers reflect a fix worth knowing about if you read the older
 docstrings. The tensor splits into pairwise-distinct-index entries (handled
