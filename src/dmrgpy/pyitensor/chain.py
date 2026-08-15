@@ -33,9 +33,50 @@ from .tdvp import tdvp_step as _tdvp_step_fn
 from .tebd import TEBDEvolver as _TEBDEvolver
 from .gse import global_subspace_expand as _global_subspace_expand_fn
 from .kpm_energy_truncation import energy_truncate as _kpm_energy_truncate
-from .tensor import commonIndex, contract_many, dag, delta, noPrime, prime, swapPrime
+from .tensor import ITensor, commonIndex, contract_many, dag, delta, noPrime, prime, swapPrime
 
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
+
+
+def _four_pt_site_sort_sign(site_list):
+    """(-1)**(number of inversions) of `site_list` -- the fermionic sign
+    picked up by reordering a product of operators at those sites into
+    site-sorted order.
+
+    `autompo.HTerm.resolve()` buckets a term's factors `by_site` and walks
+    the chain left to right, so it composes same-site factors in their
+    original order but silently *drops* the sign that reordering across
+    different sites must produce. Every pair of fermionic operators at
+    distinct sites anticommutes, so the correction is the parity of the
+    sorting permutation, counting only pairs whose sites actually differ
+    (same-site pairs keep their relative order and contribute nothing).
+    Verified against the AutoMPO+to_mpo+inner pipeline this replaces on 67
+    tuples (7 hand-picked plus 60 random) -- without it, tuples such as
+    Cdag_1 C_1 Cdag_3 C_2 come out with a flipped sign."""
+    inv = 0
+    for x in range(len(site_list)):
+        for y in range(x + 1, len(site_list)):
+            if site_list[x] > site_list[y]:
+                inv += 1
+    return -1 if inv % 2 else 1
+
+
+def _four_pt_repeated_tuples(n):
+    """Every (i,j,k,l) in [0,n)^4 whose four indices are NOT pairwise
+    distinct, enumerated directly rather than by scanning all n^4 and
+    discarding the distinct ones.
+
+    Scanning is O(n^4) pure-Python iterations just to *find* an O(n^3) set;
+    at n=40 that is 2.5M wasted loop steps. Enumerating instead by (choice
+    of the m<=3 distinct sites) x (surjective assignment of the four
+    positions onto them) touches exactly the tuples that are yielded:
+    n + 14*C(n,2) + 36*C(n,3)."""
+    for m in (1, 2, 3):
+        for combo in itertools.combinations(range(n), m):
+            for assign in itertools.product(range(m), repeat=4):
+                if len(set(assign)) != m:
+                    continue  # must actually use all m sites
+                yield tuple(combo[a] for a in assign)
 
 
 @lru_cache(maxsize=1)
@@ -628,9 +669,13 @@ class Chain:
         independent per-tuple AutoMPO builds that itensor_version=3 does.
 
         Only the pairwise-distinct-index entries go through the fast
-        sweep; the remaining (subdominant) repeated-index entries fall
-        back to four_correlation_tensor()'s own per-tuple AutoMPO method,
-        same as the C++ version.
+        sweep. The remaining repeated-index entries -- there are O(n^3) of
+        them, but each is a *local* operator on at most 3 distinct sites --
+        are folded directly by `_four_pt_fill_repeated`. They used to fall
+        back to four_correlation_tensor()'s per-tuple AutoMPO method, as
+        the C++ version still does; that was measured at 96% of this
+        method's total runtime at n=12, so "subdominant" (as this docstring
+        used to call it) was exactly backwards.
 
         The "prime the bra's Link tags" trick chain_session.h uses to keep
         a self-overlap's bra and ket legs from colliding doesn't apply
@@ -642,8 +687,8 @@ class Chain:
         from the *ket*'s own (unrelabeled) links and one from this fresh
         bra copy's links.
 
-        `accelerate` only gates the (subdominant) repeated-index fallback
-        loop below, unlike four_correlation_tensor()'s own accelerate,
+        `accelerate` only gates the repeated-index entries, unlike
+        four_correlation_tensor()'s own accelerate,
         which skips ~half of the *dominant* per-tuple AutoMPO builds via
         conjugate-pair symmetry. The pairwise-distinct fast-sweep body's
         dominant cost (the shared environment sweep, and the six
@@ -737,25 +782,95 @@ class Chain:
                                             i, j, k, l = pos[ir], pos[jr], pos[kr], pos[lr]
                                             out[i, j, k, l] = sign * val
 
-        # Repeated-index entries (subdominant, not covered above): same
-        # per-tuple AutoMPO method as four_correlation_tensor().
-        for i in range(n):
-            for j in range(n):
-                for k in range(n):
-                    for l in range(n):
-                        if len({i, j, k, l}) == 4:
-                            continue
-                        current, conj_idx = (i, j, k, l), (l, k, j, i)
-                        if accelerate and current > conj_idx:
-                            continue
-                        ampo = AutoMPO(self.sites)
-                        ampo.add(1.0, "Cdag", i + 1, "C", j + 1, "Cdag", k + 1, "C", l + 1)
-                        op_ = to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-                        corr_val = inner(wf, op_, wf)
-                        out[i, j, k, l] = corr_val
-                        if current != conj_idx or not accelerate:
-                            out[l, k, j, i] = np.conj(corr_val)
+        # Repeated-index entries (not covered by the sweep above). These
+        # used to go through the same per-tuple AutoMPO+to_mpo+inner method
+        # as four_correlation_tensor(), described as "subdominant" because
+        # there are O(n^3) of them against the sweep's O(n^4). Measured,
+        # that reasoning was exactly backwards: fewer tuples times a far
+        # more expensive per-tuple cost dominated everything. At n=12 the
+        # fallback was 96% of the total runtime (24.2s of 25.3s: 4500
+        # to_mpo builds at 15.9s plus 4500 full-chain inner products at
+        # 8.4s), against 1.1s for the actual sweep.
+        #
+        # Each of these operators is a product of four Cdag/C factors on at
+        # most 3 distinct sites, i.e. a *local* operator -- there is no need
+        # to compile an MPO over the whole chain and sweep it. Resolve it to
+        # per-site matrices once (Jordan-Wigner threading included) and fold
+        # it directly, over [mn,mx] only, with the same mixed-canonical
+        # shortcut the sweep body uses at its two ends.
+        self._four_pt_fill_repeated(out, psi, n, accelerate)
         return out
+
+    def _four_pt_fill_repeated(self, out, psi, n, accelerate):
+        """Fill `out`'s repeated-index entries by local operator folds.
+
+        Two subtleties, both load-bearing:
+
+        * `HTerm.resolve()` supplies the per-site matrices *and* the JW F
+          strings, but drops the fermionic sign for reordering operators
+          across different sites -- see `_four_pt_site_sort_sign`, which
+          supplies it. Getting this wrong flips the sign of entries like
+          (i,j,k,l)=(0,0,2,1) with no other symptom.
+        * The fold must stay the *raw* <wf|Op|wf>, matching the sweep half
+          of this same tensor (see the "deliberately NOT renormalized"
+          comment above). `position()` is a gauge transformation and
+          preserves it, so folding against the already-positioned `psi` is
+          consistent -- verified on a deliberately non-unit-norm wf, the
+          case the earlier normalization bug was found with.
+
+        Work is grouped by the tuple's minimum site so one `position()` call
+        (and one bra copy) serves every tuple starting there."""
+        from .sites.base import is_fermionic
+        by_min = {}
+        for (i, j, k, l) in _four_pt_repeated_tuples(n):
+            if accelerate and (i, j, k, l) > (l, k, j, i):
+                continue
+            by_min.setdefault(min(i, j, k, l), []).append((i, j, k, l))
+
+        for mn0 in sorted(by_min):
+            mn = mn0 + 1  # 1-based
+            psi.position(mn)
+            bra_tensors = _fresh_link_copy(psi)
+            for (i, j, k, l) in by_min[mn0]:
+                mx = max(i, j, k, l) + 1
+                factors = [("Cdag", i + 1), ("C", j + 1),
+                           ("Cdag", k + 1), ("C", l + 1)]
+                by_site = {}
+                for nm, site in factors:
+                    by_site.setdefault(site, []).append(nm)
+                E = None
+                if mn > 1:
+                    ket_link = commonIndex(psi.A(mn - 1), psi.A(mn))
+                    bra_link = commonIndex(bra_tensors[mn - 2], bra_tensors[mn - 1])
+                    E = delta(ket_link, bra_link)
+                carry = False
+                for site in range(mn, mx + 1):
+                    st = self.sites.site_type(site)
+                    names = by_site.get(site)
+                    T = psi.A(site)
+                    if names is None:
+                        mat = st.matrix("F") if carry else None
+                    else:
+                        odd = sum(1 for nm in names if is_fermionic(nm)) % 2 == 1
+                        mat = st.matrix(names[0])
+                        for nm in names[1:]:
+                            mat = st.matrix(nm) @ mat
+                        if carry != odd:
+                            mat = st.matrix("F") @ mat
+                        carry = carry != odd
+                    if mat is not None:
+                        s_i = next(ind for ind in T.inds if ind.hastags("Site"))
+                        T = noPrime(T * ITensor((s_i, s_i.prime(1)), mat), "Site")
+                    piece = dag(bra_tensors[site - 1])
+                    E = contract_many([p for p in (E, T, piece) if p is not None])
+                if mx < n:
+                    ket_link = commonIndex(psi.A(mx), psi.A(mx + 1))
+                    bra_link = commonIndex(bra_tensors[mx - 1], bra_tensors[mx])
+                    E = E * delta(ket_link, bra_link)
+                val = _four_pt_site_sort_sign((i, j, k, l)) * E.scalar()
+                out[i, j, k, l] = val
+                if (i, j, k, l) != (l, k, j, i) or not accelerate:
+                    out[l, k, j, i] = np.conj(val)
 
     def kpm_dynamical_correlator(self, terms_i, terms_j, kpmmaxm, kpm_scale, kpm_accelerate,
                                   kpm_n_scale, delta, kpm_cutoff):

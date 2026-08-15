@@ -315,7 +315,7 @@ def get_four_correlation_tensor_sweep(wf,accelerate=True,**kwargs):
     it's available (see get_four_correlation_tensor()'s ctmode=None
     handling).
 
-    accelerate only gates the (subdominant) repeated-index fallback here,
+    accelerate only gates the repeated-index entries here,
     unlike get_four_correlation_tensor_cpp()'s own accelerate, which
     skips ~half of the *dominant* per-tuple AutoMPO builds via conjugate-
     pair symmetry -- there's no equivalent saving available in this

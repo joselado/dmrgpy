@@ -135,3 +135,92 @@ def test_four_correlation_tensor_ctmode_and_accelerate_agree(version):
 
     assert np.max(np.abs(ct_full_accel - ct_full_noaccel)) == pytest.approx(0.0, abs=1e-8)
     assert np.max(np.abs(ct_full_accel - ct_explicit)) == pytest.approx(0.0, abs=1e-8)
+
+
+# -- Regression coverage for the local-fold repeated-index path
+# (pyitensor/chain.py's _four_pt_fill_repeated). Those entries used to go
+# through a per-tuple AutoMPO+to_mpo+inner build, which measured at 96% of
+# four_correlation_tensor_sweep's total runtime at n=12 despite its comment
+# calling it "subdominant". They are now folded locally, which needs a
+# fermionic sign HTerm.resolve() does not supply -- see
+# _four_pt_site_sort_sign. These tests pin both the sign and the scale.
+
+def _fermion_chain_for_fold(n, maxm=20):
+    from dmrgpy import fermionchain
+    fc = fermionchain.Fermionic_Chain(n, itensor_version="python")
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+    for i in range(n - 1):
+        h = h + 0.4 * fc.N[i] * fc.N[i + 1]
+    h = h + 0.23 * fc.N[0]  # break particle-hole symmetry
+    fc.set_hamiltonian(h)
+    fc.maxm = maxm
+    fc.gs_energy()
+    return fc
+
+
+def test_sweep_repeated_index_entries_match_the_slow_paths():
+    """Every entry of the fast tensor must equal the always-correct 'full'
+    and 'explicit' per-tuple builds. Those two are far too slow to use in
+    anger but are exact oracles, and they cover the repeated-index entries
+    the local fold now produces."""
+    import numpy as np
+    wf = _fermion_chain_for_fold(6).get_gs()
+    fast = wf.get_four_correlation_tensor(ctmode="sweep")
+    full = wf.get_four_correlation_tensor(ctmode="full")
+    explicit = wf.get_four_correlation_tensor(ctmode="explicit")
+    assert np.abs(fast - full).max() < 1e-12
+    assert np.abs(fast - explicit).max() < 1e-12
+    # and specifically the repeated-index entries, so this cannot pass by
+    # the pairwise-distinct sweep alone being right
+    n = 6
+    rep = [(i, j, k, l)
+           for i in range(n) for j in range(n) for k in range(n) for l in range(n)
+           if len({i, j, k, l}) < 4]
+    assert len(rep) == n**4 - n * (n - 1) * (n - 2) * (n - 3)
+    worst = max(abs(fast[t] - full[t]) for t in rep)
+    assert worst < 1e-12
+
+
+def test_sweep_repeated_index_sign_is_not_dropped():
+    """A tuple whose sites need an ODD reordering permutation to reach site
+    order, e.g. (i,j,k,l)=(0,0,2,1). HTerm.resolve() composes same-site
+    factors but drops the cross-site fermionic sign, so a fold that forgets
+    _four_pt_site_sort_sign returns exactly the negative here -- checked
+    against the independent 'full' oracle rather than a pinned number."""
+    import numpy as np
+    from dmrgpy.pyitensor.chain import _four_pt_site_sort_sign
+    assert _four_pt_site_sort_sign((0, 0, 2, 1)) == -1
+    assert _four_pt_site_sort_sign((0, 0, 1, 2)) == 1
+    wf = _fermion_chain_for_fold(5).get_gs()
+    fast = wf.get_four_correlation_tensor(ctmode="sweep")
+    full = wf.get_four_correlation_tensor(ctmode="full")
+    t = (0, 0, 2, 1)
+    assert abs(fast[t] - full[t]) < 1e-12
+    assert abs(fast[t]) > 1e-6          # non-trivial, so the sign is testable
+    assert abs(fast[t] + full[t]) > 1e-6  # would vanish if the sign flipped
+
+
+def test_sweep_is_raw_not_normalized():
+    """Both halves of the tensor must be the raw <wf|Op|wf>. A wf scaled by
+    c must scale every entry by |c|^2*... -- concretely by c^2 for real c,
+    uniformly across distinct- and repeated-index entries alike. An earlier
+    version of the sweep normalized one half only."""
+    import numpy as np
+    wf = _fermion_chain_for_fold(6).get_gs()
+    base = wf.get_four_correlation_tensor(ctmode="sweep")
+    scaled = (wf * 2.5).get_four_correlation_tensor(ctmode="sweep")
+    assert np.abs(scaled - 6.25 * base).max() < 1e-10
+
+
+def test_repeated_tuple_enumeration_is_exact():
+    """_four_pt_repeated_tuples must yield each non-pairwise-distinct tuple
+    exactly once -- it replaced an O(n^4) scan-and-skip, so an enumeration
+    bug would silently leave entries at zero."""
+    from dmrgpy.pyitensor.chain import _four_pt_repeated_tuples
+    for n in (4, 6, 9):
+        got = list(_four_pt_repeated_tuples(n))
+        assert len(got) == len(set(got))
+        assert len(got) == n**4 - n * (n - 1) * (n - 2) * (n - 3)
+        assert all(len(set(t)) < 4 for t in got)
