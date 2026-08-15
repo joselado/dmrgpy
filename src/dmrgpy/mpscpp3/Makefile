@@ -52,6 +52,13 @@ endif
 
 pybind: $(EXT_MODULE)
 
-$(EXT_MODULE): bindings.cc $(ITENSOR_LIBS)
+# Local headers are listed explicitly: bindings.cc #includes chain_session.h
+# (and the handful of headers it in turn pulls in), so without them here a
+# change to the actual DMRG implementation does NOT relink the extension and
+# `make pybind` reports "Nothing to be done" while the .so keeps the old code
+# -- a genuinely confusing way to test a change that was never compiled.
+LOCAL_HEADERS=$(wildcard *.h)
+
+$(EXT_MODULE): bindings.cc $(LOCAL_HEADERS) $(ITENSOR_LIBS)
 	$(PYBIND_CCCOM) -shared $(CCFLAGS) $(PYBIND_INCLUDES) bindings.cc -o $(EXT_MODULE) $(PYBIND_LIBFLAGS)
 

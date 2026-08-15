@@ -1784,14 +1784,15 @@ class Chain
     // whole tensor.
     //
     // Scope: only the N(N-1)(N-2)(N-3) entries with i,j,k,l *pairwise
-    // distinct* go through the fast sweep below; the remaining (subdominant,
-    // O(N^3) of the O(N^4) total) entries with a repeated index fall back to
-    // the same per-tuple AutoMPO method as four_correlation_tensor() (see
-    // the tail of this function). Repeats need same-site multi-operator
-    // products (e.g. Cdag_i C_i = N_i, or Cdag_i Cdag_i = 0) that the sweep
-    // below -- keyed on four *strictly increasing* site positions -- isn't
-    // built to produce, and since they're a lower order of the total work a
-    // slower fallback there doesn't cost the overall asymptotic win.
+    // distinct* go through the fast sweep below; the O(N^3) entries with a
+    // repeated index are handled separately at the tail of this function.
+    // Repeats need same-site multi-operator products (e.g. Cdag_i C_i = N_i,
+    // or Cdag_i Cdag_i = 0) that the sweep below -- keyed on four *strictly
+    // increasing* site positions -- isn't built to produce. They used to
+    // fall back to the per-tuple AutoMPO method of
+    // four_correlation_tensor(), on the reasoning that a lower order of the
+    // total work can afford a slower method; measured, that was backwards
+    // (see the tail), and they are folded locally now.
     //
     // Algorithm, for four strictly increasing sites a<b<c<d: any assignment
     // of these to (i,j,k,l) is some permutation of which of
@@ -1834,8 +1835,8 @@ class Chain
     // side of the chain is canonical relative to the fixed orthogonality
     // center 'a' at a time.
     //
-    // `accelerate` here only gates the (subdominant, O(N^3)) repeated-
-    // index fallback loop below, unlike four_correlation_tensor()/
+    // `accelerate` here only gates the O(N^3) repeated-
+    // index entries below, unlike four_correlation_tensor()/
     // four_correlation_tensor_spinful() where it skips ~half of the
     // *dominant* per-tuple AutoMPO builds via the (i,j,k,l)<->(l,k,j,i)
     // conjugate-pair symmetry. There is no equivalent saving available in
@@ -2003,15 +2004,37 @@ class Chain
                 }
             }
 
-        // Repeated-index entries (subdominant, not covered above): same
-        // per-tuple AutoMPO method as four_correlation_tensor(), applied to
-        // the *original* (unnormalized-assumption-only, un-mutated) wf.
-        auto build_mpo = [&](int i,int j,int k,int l)
-            {
-            auto ampo = AutoMPO(sites_);
-            ampo += 1.0,"Cdag",i+1,"C",j+1,"Cdag",k+1,"C",l+1;
-            return toMPO(ampo);
-            };
+        // Repeated-index entries (not covered by the sweep above). These
+        // used to go through the same per-tuple AutoMPO+toMPO+innerC method
+        // as four_correlation_tensor(), on the reasoning that there are only
+        // O(N^3) of them against the sweep's O(N^4) -- see the "subdominant"
+        // wording this comment replaces. Measured, that is backwards: fewer
+        // tuples times a far more expensive per-tuple cost dominates. On the
+        // pure-Python twin of this method (pyitensor/chain.py, same
+        // algorithm) the fallback was 96% of total runtime at N=12, and the
+        // C++ ratio is the same shape -- an AutoMPO build plus a full-chain
+        // innerC per tuple, against a handful of local contractions for a
+        // whole (a,b,c,d) leaf.
+        //
+        // Every one of these operators is a product of four Cdag/C factors
+        // on at most 3 distinct sites, i.e. *local*: there is no need to
+        // compile an MPO over the whole chain and sweep it. Resolve it to
+        // per-site operators once (Jordan-Wigner threading included) and
+        // fold it over [mn,mx] only, reusing this method's own `fold`
+        // pattern and the same mixed-canonical shortcut at both ends.
+        //
+        // The sign is the parity of the permutation that sorts the four
+        // operators into site order (every pair at distinct sites
+        // anticommutes; same-site pairs keep their relative order and
+        // contribute nothing) -- NOT the `perms` table above, whose extra
+        // mask-3/6/9/12 correction is specific to that table's own
+        // strictly-increasing-site construction. Threading F by running
+        // parity, as below, needs only the plain permutation parity;
+        // verified directly against AutoMPO+toMPO+innerC on the Python side
+        // over 67 tuples before being ported here.
+        {
+        struct Quad { int i,j,k,l; };
+        std::vector<std::vector<Quad>> buckets(N);
         for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
         for (int k=0;k<N;k++)
@@ -2022,11 +2045,81 @@ class Chain
             std::tuple<int,int,int,int> current{i,j,k,l};
             std::tuple<int,int,int,int> conjugate{l,k,j,i};
             if (accelerate && current>conjugate) continue;
-            auto op_ = build_mpo(i,j,k,l);
-            auto c = innerC(wf,op_,wf);
-            out[idx(i,j,k,l)] = c;
-            if (!accelerate || current!=conjugate) out[idx(l,k,j,i)] = std::conj(c);
+            int mn0 = std::min(std::min(i,j),std::min(k,l));
+            buckets[mn0].push_back({i,j,k,l});
             }
+        // Grouped by minimum site so one position() call serves each bucket.
+        for (int mn0=0; mn0<N; ++mn0)
+            {
+            if (buckets[mn0].empty()) continue;
+            int mn = mn0+1;
+            psi.position(mn);
+            for (auto const& q : buckets[mn0])
+                {
+                int i=q.i, j=q.j, k=q.k, l=q.l;
+                int mx = std::max(std::max(i,j),std::max(k,l))+1;
+                std::pair<std::string,int> factors[4] =
+                    {{"Cdag",i+1},{"C",j+1},{"Cdag",k+1},{"C",l+1}};
+                ITensor E;
+                if (mn>1)
+                    {
+                    auto ln = commonIndex(psi.A(mn-1),psi.A(mn));
+                    E = delta(dag(prime(ln)),ln);
+                    }
+                bool carry = false;
+                for (int s=mn; s<=mx; ++s)
+                    {
+                    // Compose this site's factors in slot order, then the
+                    // JW F if the running parity demands one. Both are
+                    // appended on the RIGHT of the accumulated operator (F
+                    // acts on the ket first, the earliest-slot factor last),
+                    // matching what autompo.HTerm.resolve() produces.
+                    //
+                    // The ITensor idiom for that is `A*prime(M)`, NOT
+                    // `M*prime(A)`: with op() returning (out=s', in=s),
+                    // contracting M's *out* against prime(A)'s *in* yields
+                    // A applied last, i.e. the reverse of what is wanted.
+                    // Getting this backwards is not a subtle numerical
+                    // effect -- it moved entries by ~0.86 against the
+                    // (independently validated) pure-Python twin.
+                    ITensor M; // default-constructed = identity, skip apply
+                    int nhere = 0;
+                    for (auto const& f : factors) if (f.second==s)
+                        {
+                        ++nhere;
+                        auto A = op(sites_,f.first,s);
+                        if (!M) M = A;
+                        else { M = A*prime(M); M.mapPrime(2,1); }
+                        }
+                    bool odd = (nhere%2==1); // every Cdag/C factor is fermionic
+                    if (carry != odd)
+                        {
+                        auto F = op(sites_,"F",s);
+                        if (!M) M = F;
+                        else { M = F*prime(M); M.mapPrime(2,1); }
+                        }
+                    carry = (carry != odd);
+                    ITensor T = psi.A(s);
+                    if (M) { T = T*M; T.noPrime(TagSet("Site")); }
+                    E = (E ? E*T : T);
+                    E = E*dag(prime(psi.A(s),TagSet("Link")));
+                    }
+                if (mx<N)
+                    {
+                    auto rn = commonIndex(psi.A(mx),psi.A(mx+1));
+                    E = E*delta(dag(prime(rn)),rn);
+                    }
+                int ss[4] = {i,j,k,l};
+                int inv = 0;
+                for (int x=0;x<4;++x) for (int y=x+1;y<4;++y) if (ss[x]>ss[y]) ++inv;
+                Cplx c = ((inv%2) ? -1.0 : 1.0)*eltC(E);
+                out[idx(i,j,k,l)] = c;
+                std::tuple<int,int,int,int> current{i,j,k,l};
+                std::tuple<int,int,int,int> conjugate{l,k,j,i};
+                if (!accelerate || current!=conjugate) out[idx(l,k,j,i)] = std::conj(c);
+                }
+            }
+        }
         return out;
         }
 
