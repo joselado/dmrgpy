@@ -375,15 +375,37 @@ def _make_matvec_planned(pieces, order_in, shape_in, order_out):
     it only removes redundant replanning, so it carries none of that
     change's excited-state-convergence-margin risk."""
     steps, final_perm = _plan_contraction_chain(pieces, order_in, order_out)
-    out_shape = tuple(ind.dim for ind in order_out)
+
+    # Hoist the *operand* side of every step out of the closure. `Bt`
+    # depends only on `piece_arr` and `perm_b`, both fixed for the lifetime
+    # of this matvec, yet it used to be recomputed on every call -- and
+    # since a transposed array is generally not contiguous, that `.reshape`
+    # forces a full copy of the operator tensor each time, not a view. For
+    # an ordinary DMRG ground-state solve that is thousands of redundant
+    # copies of the (largest) environment tensors: cProfile on a 30-site
+    # fermionic chain at maxm=30 showed 5777 matvec calls carrying 4.37s of
+    # self time and 122k reshape calls.
+    #
+    # Precomputing is exact, not an approximation: same arrays, same
+    # left-to-right order, same matmuls, so results stay bit-identical --
+    # this carries none of the summation-order risk a re-association would.
+    prepared = []
+    for perm_a, shape_a2, perm_b, shape_b2, step_shape, piece_arr in steps:
+        Bt = np.transpose(piece_arr, perm_b).reshape(shape_b2)
+        # skip a no-op transpose on the vector side too (common when the
+        # planned axis order already matches)
+        ident_a = (perm_a == tuple(range(len(perm_a))))
+        prepared.append((perm_a, ident_a, shape_a2, Bt, step_shape))
+    trivial_final = (final_perm == tuple(range(len(final_perm))))
 
     def matvec(v_flat):
         cur = v_flat.reshape(shape_in)
-        for perm_a, shape_a2, perm_b, shape_b2, step_shape, piece_arr in steps:
-            At = np.transpose(cur, perm_a).reshape(shape_a2)
-            Bt = np.transpose(piece_arr, perm_b).reshape(shape_b2)
-            cur = (At @ Bt).reshape(step_shape)
-        return np.transpose(cur, final_perm).reshape(out_shape).reshape(-1)
+        for perm_a, ident_a, shape_a2, Bt, step_shape in prepared:
+            At = cur if ident_a else np.transpose(cur, perm_a)
+            cur = (At.reshape(shape_a2) @ Bt).reshape(step_shape)
+        if not trivial_final:
+            cur = np.transpose(cur, final_perm)
+        return cur.reshape(-1)
 
     return matvec
 
