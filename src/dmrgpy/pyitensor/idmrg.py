@@ -812,6 +812,18 @@ def _theta_cell(sites_uc, n_uc, U, S_vals, V, lam_outer):
     for k, arr in enumerate((a1, a2)):
         s = sites_uc.si((k % n_uc) + 1)
         cell.append(ITensor((link[k], s, link[(k + 1) % 2]), arr))
+    return cell
+
+
+def _canonical_theta_cell(raw_cell):
+    """`_theta_cell`'s output re-gauged into left-canonical form and
+    normalized -- what the transfer-matrix machinery needs, and what
+    `IDMRGResult.cell_list` holds. `idmrg_window.py` wants the *raw* cell
+    instead (`IDMRGResult.cell_raw`), because only there are the two outer
+    bonds still literally in the `env_HL_ket`/`env_HR_ket` bases its
+    environment caps are expressed in; re-gauging is exactly what breaks
+    that correspondence."""
+    cell = list(raw_cell)
     # Re-gauge into exact left-canonical form. `A_1` is already an exact
     # isometry (it is svd()'s own U), but `A_2 = S.V.lambda_o^{-1}` is only
     # approximately one: it inherits however far the growth loop's own outer
@@ -1025,7 +1037,8 @@ class IDMRGResult:
 
     def __init__(self, sites_uc, n_uc, U_list, e0, converged, niter_done,
                  state_overlap=None, local_superblock=None,
-                 W_bulk=None, window_boundary=None, cell_list=None):
+                 W_bulk=None, window_boundary=None, cell_list=None,
+                 cell_raw=None):
         self.sites_uc = sites_uc
         self.n_uc = n_uc
         self.U_list = U_list
@@ -1036,6 +1049,7 @@ class IDMRGResult:
         self.local_superblock = local_superblock
         self.W_bulk = W_bulk
         self.cell_list = cell_list
+        self.cell_raw = cell_raw
         (self.env_HL, self.env_HL_bra, self.env_HL_ket, self.env_HL_mpo,
          self.env_HR, self.env_HR_bra, self.env_HR_ket, self.env_HR_mpo) = (
             window_boundary if window_boundary is not None else (None,) * 8)
@@ -1281,8 +1295,9 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
             break
         prev_energy, prev_density = energy, density
 
-    cell_list = (_theta_cell(sites_uc, n_uc, *cell_seed)
-                 if cell_seed is not None else None)
+    cell_raw = (_theta_cell(sites_uc, n_uc, *cell_seed)
+                if cell_seed is not None else None)
+    cell_list = _canonical_theta_cell(cell_raw) if cell_raw is not None else None
 
     if not converged and verbose:
         print("idmrg_ground_state: reached maxiter={} without converging "
@@ -1292,7 +1307,7 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
                         macro_iter + 1, state_overlap=state_overlap,
                         local_superblock=last_superblock,
                         W_bulk=W_bulk, window_boundary=env_window_boundary,
-                        cell_list=cell_list)
+                        cell_list=cell_list, cell_raw=cell_raw)
 
 
 def local_excitation_gap(result, niter=200):

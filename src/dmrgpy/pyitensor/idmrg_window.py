@@ -343,6 +343,42 @@ def _relabel_index(T, old_ind, new_ind):
     return ITensor(new_inds, T.array)
 
 
+def window_norm_squared(window):
+    """`<window|window>` with both boundary bonds left free, i.e. capped
+    with the identity on `env_HL_ket`/`env_HR_ket` -- the correct
+    denominator for `window_total_energy`'s Rayleigh quotient.
+
+    This used to be shortcut to `dim(env_HR_ket)`, which is what the chain
+    collapses to when *every* window tensor is exactly left-canonical (each
+    site's isometry property contracts away in turn, leaving only the last
+    dangling bond's dimension). That is true of `IDMRGResult.U_list`, which
+    is built from svd()'s own U factors, but it is not true in general --
+    notably not of `IDMRGResult.cell_raw`, whose second tensor
+    `S.V.lambda_o^{-1}` is only approximately an isometry. Feeding such a
+    window through the shortcut silently normalizes by the wrong number and
+    reports an energy density *below* the true `e0` (measured at -2.5e-3
+    against an `e0` the same state reproduces to 1e-10 through the static
+    transfer-matrix path -- a variational impossibility, which is what
+    identified the normalization rather than the state as the culprit).
+
+    Computing the contraction costs one pass over the window and reproduces
+    the old shortcut to machine precision whenever the shortcut was
+    valid."""
+    n = window.mps.length()
+    l = None
+    for i in range(1, n + 1):
+        T = window.mps.A(i)
+        if len(T.inds) != 3:
+            raise RuntimeError(
+                "window_norm_squared: window site {} has {} legs, expected "
+                "3 (left Link, Site, right Link)".format(i, len(T.inds)))
+        arr = T.array
+        if l is None:
+            l = np.eye(arr.shape[0], dtype=complex)
+        l = np.einsum('lL,lpr,LpR->rR', l, arr, np.conj(arr), optimize=True)
+    return float(np.trace(l).real)
+
+
 def window_total_energy(window):
     """Total (unnormalized-by-site-count) energy of the capped window,
     computed via idmrg.py's own independent `_extend_HL` code (called fresh
@@ -357,18 +393,16 @@ def window_total_energy(window):
     Heisenberg test case -- e.g. -1014 instead of an expected ~-8.4 for a
     19-site configuration):
 
-    1. `<window|window>` (using env_HL/env_HR and the window's own
-       left-canonical tensors exactly as built, with *both* env_HL_ket and
-       env_HR_ket left as free/dangling legs rather than contracted against
-       any specific boundary vector) is *not* 1 -- it equals
-       `dim(env_HR_ket)` exactly, by the isometry property of left-canonical
-       tensors chained together (each site's own U being an isometry from
-       (its left leg, physical leg) to its right leg collapses the sum over
-       every index except the very last dangling one, leaving that
-       dimension as the Frobenius norm-squared) -- this function divides by
-       it, matching a Rayleigh-quotient convention (confirmed numerically:
-       matches an independent Lanczos-Rayleigh-quotient computation using
-       the exact same env_HL/env_HR/W_pL/W_pR to machine precision).
+    1. `<window|window>` (using env_HL/env_HR and the window's own tensors
+       exactly as built, with *both* env_HL_ket and env_HR_ket left as
+       free/dangling legs rather than contracted against any specific
+       boundary vector) is *not* 1 -- this function divides by it, matching
+       a Rayleigh-quotient convention (confirmed numerically: matches an
+       independent Lanczos-Rayleigh-quotient computation using the exact
+       same env_HL/env_HR/W_pL/W_pR to machine precision). It is computed
+       by `window_norm_squared`; it used to be shortcut to
+       `dim(env_HR_ket)`, which is only correct for an exactly
+       left-canonical window -- see that function's own docstring.
     2. Even after that fix, the *absolute* total still includes whatever
        (large, `n_window`-independent) energy env_HL/env_HR themselves
        represent from every macro-iteration already absorbed before the
@@ -393,8 +427,11 @@ def window_total_energy(window):
     # before the two can be multiplied down to a bare scalar.
     env_HR_relabeled = _relabel_index(window.env_HR, window.env_HR_bra, Lbra)
     closed = L * env_HR_relabeled
-    norm = window.mps.A(n).inds[-1].dim  # == dim(env_HR_ket), see docstring
-    return closed.scalar().real / norm
+    # <window|window>, computed rather than assumed -- see
+    # window_norm_squared's own docstring for why the old
+    # `dim(env_HR_ket)` shortcut is only valid for an exactly
+    # left-canonical window.
+    return closed.scalar().real / window_norm_squared(window)
 
 
 def window_energy_density(result, n_window):
