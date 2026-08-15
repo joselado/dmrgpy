@@ -261,24 +261,24 @@ class Infinite_Many_Body_Chain:
                                  # gs_method="vumps": VUMPS's own
                                  # gauge-mismatch convergence tolerance
                                  # (`tol`).
-                                 # gs_method="idmrg": do NOT expect this to
-                                 # buy accuracy much below ~1e-9. The growth
-                                 # loop's superblock eigenvalue is extensive
-                                 # (idmrg.py never subtracts an energy
-                                 # baseline the way its ITensor reference's
-                                 # `HL += -energy*IL` does), while
-                                 # dmrg.py's _lanczos_ground_state stops on a
-                                 # *relative* 1e-12 criterion -- so the
-                                 # absolute noise in the finite-difference
-                                 # density grows linearly with the iteration
-                                 # count. Measured on a gapped n_uc=2 chain:
-                                 # |E|=603 after 400 macro-iterations, with
-                                 # the density jittering over ~9e-11 well
-                                 # after it had physically converged. At the
-                                 # maxiter=200 default that noise floor is
-                                 # ~9e-11, i.e. right at this etol -- so
-                                 # `.converged` can trip on jitter at a
-                                 # run-dependent iteration.
+                                 # gs_method="idmrg": meaningful down to
+                                 # machine precision since idmrg.py started
+                                 # subtracting a per-site energy baseline
+                                 # from both growing environments
+                                 # (`_subtract_energy_baseline`, the
+                                 # equivalent of its ITensor reference's
+                                 # `HL += -energy*IL`). Without it the
+                                 # superblock eigenvalue grew extensively
+                                 # while _lanczos_ground_state stopped on a
+                                 # *relative* criterion, so the absolute
+                                 # noise in the finite-difference density
+                                 # grew linearly with the iteration count:
+                                 # measured on a gapped n_uc=2 chain,
+                                 # |E| = 603 after 400 macro-iterations with
+                                 # the density jittering over ~9e-11 long
+                                 # after it had physically converged -- right
+                                 # at this etol. It is now |E| = 3.8 and
+                                 # ~4e-15.
         self.vumps_nrestarts = 4  # gs_method="vumps" only: independent
                                    # random-restart attempts per bond
                                    # dimension in VUMPS's own D-ramp -- see

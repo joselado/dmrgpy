@@ -860,6 +860,38 @@ def _canonical_theta_cell(raw_cell):
     return [ITensor(T.inds, T.array * scale) for T in cell]
 
 
+def _subtract_energy_baseline(env, mpo_idx, dst_chan, src_chan, shift):
+    """`env[dst_chan] -= shift * env[src_chan]` along `env`'s own mpo axis --
+    this module's equivalent of the reference implementation's
+    `HL += -energy*IL` (mpscpp2/ITensor/itensor/mps/idmrg.h).
+
+    No separate identity environment has to be accumulated for it. The
+    automaton's channel space already carries one: `chans[p]` is
+    `[S, F] + pending`, and a growing environment's S/F components *are* the
+    identity and energy accumulations respectively. For the left environment,
+    entering on S means nothing has been started, so `HL[S]` is the plain
+    norm and `HL[F]` the energy accumulated so far -- hence
+    `HL[F] -= e*HL[S]`. The right environment's roles are mirrored (entering
+    on S means the right block still has to account for everything, entering
+    on F means it is already done), hence `HR[S] -= e*HR[F]`.
+
+    Subtracting a per-site baseline keeps the superblock eigenvalue bounded
+    instead of growing like `2*n_uc*k*e0`. That matters because
+    `_lanczos_ground_state` stops on a *relative* criterion, so the absolute
+    error in the eigenvalue -- and so in the finite-difference energy density
+    -- otherwise grows linearly with the iteration count: measured at
+    |E| = 603 after 400 macro-iterations, with the density jittering over
+    ~9e-11 long after it had physically converged, against a default
+    `etol` of 1e-10."""
+    axis = next(k for k, ind in enumerate(env.inds) if ind == mpo_idx)
+    arr = env.array.copy()
+    dst = [slice(None)] * arr.ndim
+    src = [slice(None)] * arr.ndim
+    dst[axis], src[axis] = dst_chan, src_chan
+    arr[tuple(dst)] -= shift * arr[tuple(src)]
+    return ITensor(env.inds, arr)
+
+
 def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
                            W_pR, phys_R, HR, HR_bra, HR_ket,
                            cutoff, maxdim, niter, x0_warm=None):
@@ -1105,6 +1137,10 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     HL_mpo = HR_mpo = None
     energy = None
     prev_energy = None
+    # Per-site energy baseline subtracted from both growing environments (see
+    # `_subtract_energy_baseline`); latched once, below, from the first
+    # density estimate available.
+    eshift = 0.0
     prev_density = None
     U_list = [None] * n_uc
     converged = False
@@ -1279,11 +1315,22 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
             HR, HR_bra = _extend_HR(HR, HR_bra, W_pR_ext, V, right_ket_old, new_bond_v)
             HR_ket = new_bond_v
             HL_mpo, HR_mpo = new_HL_mpo, new_HR_mpo
+            if eshift:
+                # channel 0 is "S", channel 1 is "F" in every chans[p] (see
+                # _build_periodic_mpo) -- so these indices are the same for
+                # both environments, only their roles swap.
+                HL = _subtract_energy_baseline(HL, HL_mpo, 1, 0, eshift)
+                HR = _subtract_energy_baseline(HR, HR_mpo, 0, 1, eshift)
 
             U_list[p_L] = U
 
         state_overlap = min(overlaps_this_iter) if overlaps_this_iter else None
-        density = ((energy - prev_energy) / (2 * n_uc)
+        # Each micro-step subtracted `eshift` from both environments, i.e.
+        # `2*n_uc*eshift` per macro-iteration, so add it back to recover the
+        # true density. Exact as long as `eshift` was constant across the two
+        # macro-iterations being differenced, which is why it is set once and
+        # never revised (see below).
+        density = ((energy - prev_energy) / (2 * n_uc) + eshift
                    if prev_energy is not None else None)
         if verbose:
             print("idmrg macro-iter {}: E={} density={} state_overlap={}".format(
@@ -1294,6 +1341,14 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
             converged = True
             break
         prev_energy, prev_density = energy, density
+        if eshift == 0.0 and density is not None:
+            # Latch the baseline once, as soon as there is an estimate to use.
+            # `prev_energy` is dropped in the same breath: it was measured
+            # against un-shifted environments, so differencing the next
+            # iteration's energy against it would report the transient rather
+            # than a density. One macro-iteration is given up doing so.
+            eshift = density
+            prev_energy, prev_density = None, None
 
     cell_raw = (_theta_cell(sites_uc, n_uc, *cell_seed)
                 if cell_seed is not None else None)
