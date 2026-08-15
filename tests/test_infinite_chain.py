@@ -1075,14 +1075,31 @@ def _polarized_xx_chain(J=1.0, h=3.0, maxm=4, maxiter=50, etol=1e-12, gs_method=
 
 
 def test_excitation_energies_matches_exact_xx_dispersion():
-    """KNOWN ISSUE (flagged 2026-08-07, not yet fixed): flaky, ~33% fail
-    rate over 15 isolated runs -- traced to pyitensor/vumps.py's
-    `_random_raw_tensor` seeding via `np.random.default_rng()`
-    (OS-entropy-seeded, genuinely non-deterministic every run), not to
-    test ordering or anything in this file. See that function's own
-    docstring for the full note."""
+    """The exact ground state here is a product state, so it is represented
+    exactly at bond dimension D=1 -- which is what `maxm=1` asks for, and
+    what makes this test deterministic.
+
+    It used to run at the helper's default `maxm=4` and was flaky, ~33% of
+    runs missing the 1e-8 tolerance; that was blamed on `vumps.py`'s
+    unseeded `_random_raw_tensor`. Seeding is why the failures move around
+    run to run, but it is not the cause. Measured over 40 independent runs
+    at maxm=4, the ground-state energy was always excellent (|e0 error| <=
+    1.8e-9) while the excitation error ranged over six orders of magnitude,
+    up to 1.6e-3 -- an amplification of ~1e6. Sweeping the bond dimension
+    isolates it cleanly (12 runs each): maxm=1 and 2 never failed (worst
+    error 1.8e-15 and 1.8e-10), maxm=4 failed 2/12, maxm=8 failed 10/12,
+    with e0 staying <= 8e-10 throughout. Padding an exactly-D=1 state out to
+    larger D leaves near-null directions in the bond space, and the
+    excitation ansatz's (1-E)-type inverses are ill-conditioned there.
+
+    So this asks for the bond dimension the state actually needs, which is
+    both deterministic (30/30 runs within 1.8e-15) and a fair test of what
+    it claims to test -- the magnon dispersion formula, not VUMPS's
+    behaviour when over-parameterized. That behaviour is a real limitation
+    and is pinned separately by
+    test_excitation_accuracy_degrades_with_redundant_bond_dimension."""
     J, h = 1.0, 3.0
-    ic = _polarized_xx_chain(J, h, gs_method="vumps")
+    ic = _polarized_xx_chain(J, h, maxm=1, gs_method="vumps")
     for k in np.linspace(0, 2 * np.pi, 9, endpoint=False):
         exact = 2 * h - J * np.cos(k)
         got = ic.excitation_energies(k, n=1)[0]
@@ -1090,10 +1107,45 @@ def test_excitation_energies_matches_exact_xx_dispersion():
 
 
 def test_excitation_gap_matches_exact_minimum():
-    """min_k (2h - J*cos(k)) = 2h - J, attained at k=0."""
+    """min_k (2h - J*cos(k)) = 2h - J, attained at k=0. `maxm=1` for the
+    same reason as test_excitation_energies_matches_exact_xx_dispersion --
+    see its docstring."""
     J, h = 1.0, 3.0
-    ic = _polarized_xx_chain(J, h, gs_method="vumps")
+    ic = _polarized_xx_chain(J, h, maxm=1, gs_method="vumps")
     assert ic.excitation_gap() == pytest.approx(2 * h - J, abs=1e-8)
+
+
+def test_excitation_accuracy_degrades_with_redundant_bond_dimension():
+    """Pins the real cause of what used to be a ~33% flake in the two
+    exact-dispersion tests above: representing an exactly-D=1 state at a
+    larger bond dimension costs excitation accuracy, badly, while leaving
+    the ground-state energy essentially untouched.
+
+    The mechanism is conditioning, not convergence -- padding the state out
+    leaves near-null directions in the bond space and the excitation
+    ansatz's (1-E)-type inverses amplify them. Measured over 12 runs at each
+    bond dimension: worst excitation error 1.8e-15 (maxm=1), 1.8e-10
+    (maxm=2), 1.7e-7 (maxm=4), 3.5e-3 (maxm=8), with |e0 error| <= 8e-10
+    throughout.
+
+    Asserted loosely and one-sidedly, because the run-to-run spread at large
+    maxm is itself large (that is the phenomenon): only that maxm=1 is
+    essentially exact and that maxm=8 is at least a thousand times worse.
+    Uses a fixed comparison within a single run rather than pinned numbers,
+    so it cannot go stale against a future conditioning fix -- if someone
+    fixes the conditioning, this test fails and should be updated to say
+    so."""
+    J, h = 1.0, 3.0
+
+    def worst_error(maxm):
+        ic = _polarized_xx_chain(J, h, maxm=maxm, gs_method="vumps")
+        return max(abs(ic.excitation_energies(k, n=1)[0] - (2 * h - J * np.cos(k)))
+                   for k in np.linspace(0, 2 * np.pi, 5, endpoint=False))
+
+    exact_D = worst_error(1)
+    padded = max(worst_error(8) for _ in range(3))  # spread is large; take the worst
+    assert exact_D < 1e-12, exact_D
+    assert padded > 1000 * max(exact_D, 1e-15), (exact_D, padded)
 
 
 def test_excitation_environment_is_cached_across_calls():
@@ -1101,7 +1153,7 @@ def test_excitation_environment_is_cached_across_calls():
     self._excitation_env (identity, not just an equal rebuild) -- it is
     expensive to build (a null-space computation plus dense linear
     solves)."""
-    ic = _polarized_xx_chain(gs_method="vumps")
+    ic = _polarized_xx_chain(maxm=1, gs_method="vumps")
     ic.excitation_energies(0.0)
     env = ic._excitation_env
     assert env is not None

@@ -248,17 +248,36 @@ def _random_raw_tensor(D, d_g, seed_AL=None, noise=0.05):
     already-converged content under a linear map like the transfer
     matrix).
 
-    KNOWN ISSUE (flagged 2026-08-07, not yet fixed): `np.random.default_rng()`
-    here is OS-entropy-seeded, so genuinely non-deterministic run to run,
-    independent of any `np.random.seed(n)` a caller/test sets. Confirmed
-    this makes `tests/test_infinite_chain.py::
-    test_excitation_energies_matches_exact_xx_dispersion` flaky (~33% fail
-    rate over 15 isolated runs) even on the trivial fully-polarized D=1
-    case that test builds, which both iDMRG and VUMPS should converge to
-    exactly. Needs either a noise-floor/retry safeguard (mirroring
-    idmrg.py's own unseeded-restart-loop pattern elsewhere in this
-    codebase) or a closer look at why the noisy init occasionally fails to
-    settle back to the exact D=1 solution for this case specifically."""
+    `np.random.default_rng()` here is OS-entropy-seeded, so genuinely
+    non-deterministic run to run, independent of any `np.random.seed(n)` a
+    caller/test sets. That was long suspected (flagged 2026-08-07) of being
+    the cause of a ~33% flake in
+    `tests/test_infinite_chain.py::test_excitation_energies_matches_exact_xx_dispersion`,
+    on the trivial fully-polarized D=1 case. Measured 2026-08-16, it is not:
+    seeding is only why the failures land in different places run to run.
+
+    The cause is conditioning in the *excitation* solver when the state is
+    represented at a larger bond dimension than it needs. Over 40
+    independent runs of that test's configuration (maxm=4 for a state whose
+    exact representation is D=1), the ground-state energy was always
+    excellent -- |e0 error| <= 1.8e-9 -- while the excitation error ranged
+    from 8e-13 to 1.6e-3, an amplification of ~1e6. A bond-dimension sweep
+    isolates it (12 runs each): maxm=1 and 2 never failed (worst 1.8e-15 and
+    1.8e-10), maxm=4 failed 2/12, maxm=8 failed 10/12, with |e0 error| <=
+    8e-10 at every maxm. Padding an exactly-D=1 state out to larger D leaves
+    near-null directions in the bond space, and `idmrg_excitations`'
+    (1-E)-type inverses (`_channel_resolvent` and the `GL`/`GR` builds) are
+    ill-conditioned there.
+
+    So a seeding fix would make the failures reproducible, not make them go
+    away, and the ground-state solver is not the thing to change. The tests
+    now ask for the bond dimension their state actually needs, which is
+    deterministic to 1.8e-15 over 30 runs, and the degradation itself is
+    pinned by
+    `test_excitation_accuracy_degrades_with_redundant_bond_dimension`. The
+    real fix, if this matters for a physical (non-product-state) case, is to
+    project the redundant directions out of the excitation ansatz's linear
+    solves rather than to reseed anything here."""
     rng = np.random.default_rng()
     A0 = noise * (rng.standard_normal((D, d_g, D)) + 1j * rng.standard_normal((D, d_g, D)))
     if seed_AL is not None:
