@@ -537,15 +537,14 @@ class Infinite_Many_Body_Chain:
         all (IdmrgResult keeps no per-sublattice U_list, see gs_energy's own
         comment), and raises NotImplementedError.
 
-        IMPORTANT: prefer gs_method="vumps" (the default) for this and for
-        `correlator`. gs_method="idmrg"'s static observables are built from
-        IDMRGResult.U_list, which is only a valid periodic MPS up to an
-        unfixed gauge on its wraparound bond -- the iDMRG *energy* is right,
-        the state is not. Measured on an exactly solvable XX chain at n_uc=1:
-        <Sz> came out at -0.13 against an exact 0, and <Sz(0)Sz(1)> at +0.028
-        against an exact -0.101 (the wrong sign), while e0 was correct to
-        5e-5. See pyitensor/idmrg.py's IDMRGResult docstring for the full
-        measurements and the root cause."""
+        gs_method="idmrg"'s static observables tile IDMRGResult.cell_list,
+        the gauge-consistent unit cell extracted from a single micro-step's
+        theta (pyitensor/idmrg.py's `_theta_cell`), NOT the raw per-
+        micro-step `U_list`. Tiling `U_list` -- which is what this did
+        before that extraction existed -- put <Sz> at -0.13 against an exact
+        0 and <Sz(0)Sz(1)> at +0.028 against an exact -0.101 (the wrong
+        sign) on the XX chain; it now reproduces both to the bond
+        dimension's own truncation error."""
         if group not in ("L", "C", "R"):
             raise ValueError("vev: group must be 'L', 'C' or 'R', got {!r}".format(group))
         if not (0 <= p < self.n_uc):
@@ -582,9 +581,8 @@ class Infinite_Many_Body_Chain:
         Same backend/gs_method support matrix as vev's own docstring
         (itensor_version="python" with gs_method "idmrg" or "vumps";
         itensor_version=3 with gs_method="vumps" only, via
-        Chain::vumps_two_point_correlator), including its IMPORTANT note on
-        why gs_method="idmrg" static observables are unreliable and
-        gs_method="vumps" (the default) should be preferred."""
+        Chain::vumps_two_point_correlator), including its note on which
+        tensors gs_method="idmrg" actually tiles."""
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))

@@ -447,7 +447,7 @@ def test_grow_by_mpo_rejects_mismatched_length():
     ic, _ = _converged_uniform_chain(2, maxm=8)
     W = _identity_mpo(ic._result.sites_uc, 2)
     with pytest.raises(ValueError):
-        idmrg.grow_by_mpo(W[:1], ic._result.U_list, 2)
+        idmrg.grow_by_mpo(W[:1], ic._result.cell_list, 2)
 
 
 # -- idmrg.imps_overlap: per-site overlap/fidelity between two converged
@@ -624,12 +624,13 @@ def test_two_point_correlator_same_site_composition_order():
     op_term = [1.0, ["Sx", 0], ["Sz", 0]]
     _, _, mats, _ = idmrg._term_site_matrices(op_term, result.sites_uc, 1)
     M = mats[0]
-    Es = idmrg._transfer_matrices(result.U_list, 1)
-    rho_after, _ = idmrg._all_right_fixed_points(Es, 1)
-    A = idmrg._to_array_lpr(result.U_list[0])
+    cell, n_cell = idmrg._correlator_cell(result)
+    Es = idmrg._transfer_matrices(cell, n_cell)
+    rho_after, _ = idmrg._all_right_fixed_points(Es, n_cell)
+    A = idmrg._to_array_lpr(cell[0])
     Aop = np.einsum('io,lir->lor', M, A)
     E4 = np.einsum('lpr,LpR->lLrR', Aop, np.conj(A))
-    expected = complex(np.trace(idmrg._apply_transfer(E4, rho_after[0])))
+    expected = idmrg._expectation(Es, E4, Es[0], rho_after[0], 0, n_cell)
 
     got = idmrg.two_point_correlator(result, "Sx", 0, "Sz", 0)
     assert got == pytest.approx(expected, abs=1e-8)
@@ -709,9 +710,12 @@ def test_imps_sum_dominant_branch_survives(n_uc):
     ic_other.set_hamiltonian(h_other)
     ic_other.gs_energy()
 
+    # Built from `cell_list`, not `U_list`: the raw per-micro-step U_list is
+    # not a gauge-consistent periodic MPS (see idmrg.py's IDMRGResult
+    # docstring), and every consumer here tiles the cell instead.
     scaled_other = idmrg.PeriodicMPS(
         ic_other._result.sites_uc, n_uc,
-        [ITensor(T.inds, T.array * 0.9) for T in ic_other._result.U_list],
+        [ITensor(T.inds, T.array * 0.9) for T in ic_other._result.cell_list],
         eta=0.81)
 
     result = idmrg.imps_sum(ic_dom._result, scaled_other, cutoff=1e-12, maxdim=None)
@@ -720,7 +724,7 @@ def test_imps_sum_dominant_branch_survives(n_uc):
         orig = idmrg.onsite_expectation(ic_dom._result, "Sz", p)
         new = idmrg.onsite_expectation(result, "Sz", p)
         assert new == pytest.approx(orig, abs=1e-6)
-        chi_dom = idmrg._to_array_lpr(ic_dom._result.U_list[p]).shape[0]
+        chi_dom = idmrg._to_array_lpr(ic_dom._result.cell_list[p]).shape[0]
         chi_new = idmrg._to_array_lpr(result.U_list[p]).shape[0]
         assert chi_new == chi_dom
 
@@ -771,13 +775,14 @@ def test_periodic_direct_sum_bond_dimension():
     ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
     ic_down.gs_energy()
 
-    raw = idmrg._periodic_direct_sum(ic_up._result.U_list, ic_down._result.U_list, 1)
+    raw = idmrg._periodic_direct_sum(ic_up._result.cell_list,
+                                      ic_down._result.cell_list, 2)
     arr = raw[0].array
-    chi_up = idmrg._to_array_lpr(ic_up._result.U_list[0]).shape[0]
-    chi_down = idmrg._to_array_lpr(ic_down._result.U_list[0]).shape[0]
+    chi_up = idmrg._to_array_lpr(ic_up._result.cell_list[0]).shape[0]
+    chi_down = idmrg._to_array_lpr(ic_down._result.cell_list[0]).shape[0]
     assert arr.shape == (chi_up + chi_down, 2, chi_up + chi_down)
-    a_up = idmrg._to_array_lpr(ic_up._result.U_list[0])
-    a_down = idmrg._to_array_lpr(ic_down._result.U_list[0])
+    a_up = idmrg._to_array_lpr(ic_up._result.cell_list[0])
+    a_down = idmrg._to_array_lpr(ic_down._result.cell_list[0])
     assert np.allclose(arr[:chi_up, :, :chi_up], a_up)
     assert np.allclose(arr[chi_up:, :, chi_up:], a_down)
     assert np.allclose(arr[:chi_up, :, chi_up:], 0)

@@ -3,36 +3,49 @@ algorithm (White, PRL 69, 2863 (1992)), with the Hamiltonian expressed as a
 periodic n_uc-site-unit-cell MPO automaton so that a repeating unit cell
 larger than one site can be treated.
 
-== What this is NOT (read before trusting `U_list`) ==
+== Gauge consistency: the prediction and the extraction ==
 
-This is *not* McCulloch's algorithm ("Infinite size density matrix
-renormalization group, revisited", arXiv:0804.2509), and it is not a port
-of the reference implementation at github.com/ITensor/iDMRG (vendored in
-this repo at `mpscpp2/ITensor/itensor/mps/idmrg.h`) -- an earlier version
-of this docstring claimed both, and that claim was wrong on exactly the
-ingredient that matters. Three things that reference does, this module
-does not:
+The growth loop is White's, but two ingredients from McCulloch's "Infinite
+size DMRG, revisited" (arXiv:0804.2509) and its reference implementation
+(github.com/ITensor/iDMRG, vendored here at
+`mpscpp2/ITensor/itensor/mps/idmrg.h`) are what make its *state*, not just
+its energy, usable. Both were missing from this module until they were
+added together; the history is kept because the failure was silent.
 
-1. **The wavefunction transformation.** `idmrg.h` carries the state across
-   iterations as `lambda_new * lambda_old^{-1}` (`lastV = dag(D)` put
-   through `PseudoInvert(inverse_cut)`, then multiplied back into the MPS)
-   -- McCulloch's actual contribution. What this module has instead
-   (`_local_two_site_solve`'s `x0_warm`) is a *raw flat NumPy vector*
-   reused whenever its `.size` happens to match: a Lanczos warm start that
-   biases successive solves toward continuity, carrying no basis
-   information at all. It is a convergence heuristic, not a gauge fix.
-2. **`swapUnitCells`** on both psi and H between iterations.
-3. **A gauge-consistent final extraction** (convert A's to B's, multiply
-   by `lastV`, keep the center matrix D).
+1. **The wavefunction prediction** (`_wavefunction_prediction`). Each
+   micro-step's Lanczos starts from the previous step's converged state
+   translated into the new bond bases,
+   `theta = lambda_k . B_k . lambda_{k-1}^{-1} . A_k . lambda_k`, which is
+   `idmrg.h`'s `lastV = PseudoInvert(dag(D))` combined with its
+   `swapUnitCells`. What stood here before was a raw flat NumPy vector
+   reused whenever its `.size` matched -- a heuristic carrying no basis
+   information. With the prediction in place `state_overlap` reaches
+   1-1e-13 instead of plateauing around 0.5-0.65, and the wraparound bond
+   dimension stops being inconsistent (`_dominant_right_fixed_point`'s
+   RuntimeError went from firing in 10 of 20 gapped-TFIM configurations to
+   none).
+2. **A gauge-consistent extraction** (`_theta_cell`). The prediction alone
+   does not fix the *output*: chaining one left-canonical factor per
+   micro-step, as `U_list` does, still compares bond bases minted by
+   different micro-steps. The converged unit cell is therefore taken from a
+   single micro-step's own theta, whose two outer legs are the same bond by
+   construction. This is what `onsite_expectation`/`two_point_correlator`
+   and everything downstream of them tile (see `_correlator_cell`);
+   `U_list` is retained only for `idmrg_window.py`, which pairs it with the
+   matching `env_HL`/`env_HR` snapshot and so needs those exact factors.
+   KNOWN FOLLOW-UP: because `idmrg_window.build_window` tiles `U_list`
+   `n_window` times, it re-identifies those two ends and so still carries
+   the residual gauge error the static path no longer does -- measured at
+   ~6e-7 on `S(x,t=0)` versus `two_point_correlator`
+   (tests/test_idmrg_window.py's own
+   test_dynamical_correlator_td_matches_exact_static_correlator_at_t0
+   documents this). Fixing it means growing environments that match the
+   gauge-consistent cell rather than `U_list`, which is a change to the
+   window construction, not to this module.
 
-The practical consequence is documented at `IDMRGResult`: the *energy* is
-correct (verified against exact free-fermion TFIM to ~1e-12), but the
-returned `U_list` is only a valid periodic MPS up to an unfixed gauge on
-its wraparound bond, so every static correlator built from it
-(`onsite_expectation`, `two_point_correlator`) is unreliable -- badly so
-for n_uc=1. Fixing this properly means implementing point 1 above; until
-then, prefer `vumps.py` (which `infinitechain.py` already defaults to) for
-anything other than the energy density.
+With both in place the energy is exact to ~1e-14 against free-fermion TFIM
+and the `<H_uc> = n_uc*e0` identity -- which the extracted state has to
+satisfy and previously missed by up to 1.2e-1 -- closes to 1e-11..1e-9.
 
 This module is self-contained within the pyitensor engine: it reuses
 tensor.py/svd.py/kernels.py directly and imports only `_lanczos_ground_state`
@@ -656,6 +669,185 @@ def _extend_HR(HR, HR_bra, W_p, V, right_ket_old, left_ket_new):
     return new_HR, left_bra_new
 
 
+def _svd_singular_values(S):
+    """The singular values of `svd()`'s own middle factor, as a real 1-D
+    array. `S` is the (bond_u, bond_v) diagonal ITensor svd() returns."""
+    return np.diag(S.array).real.astype(float)
+
+
+def _u_array_lpr(U, has_left):
+    """`svd()`'s U factor as (chi_left, d, chi_right). U's own Index order is
+    `left_inds + (bond,)` = `[HL_ket,] phys_L, bond`, so this is a reshape
+    that only has to insert a length-1 left axis when the growth loop had no
+    left environment yet (the very first micro-steps)."""
+    return U.array if has_left else U.array.reshape((1,) + U.array.shape)
+
+
+def _v_array_lpr(V, has_right):
+    """`svd()`'s V factor as (chi_left, d, chi_right). V's own Index order is
+    `(bond,) + right_inds` = `bond, phys_R[, HR_ket]`, so the length-1 axis
+    goes on the right here, mirroring `_u_array_lpr`."""
+    return V.array if has_right else V.array.reshape(V.array.shape + (1,))
+
+
+# Relative floor below which a previous step's singular value is treated as
+# zero (its inverse set to 0) when building the wavefunction prediction --
+# the direct analogue of ITensor's own iDMRG `InverseCut` argument
+# (`detail::PseudoInvert`, default 1e-8, applied to the pseudo-inverted
+# center matrix in mpscpp2/ITensor/itensor/mps/idmrg.h). Taken relative to
+# the largest singular value rather than absolute, since svd() here returns
+# raw (un-normalized) singular values.
+_PREDICTION_INVERSE_CUT = 1e-8
+
+
+def _wavefunction_prediction(s_last, V_last, s_prev, U_last, shape):
+    """McCulloch's iDMRG wavefunction prediction: the trial two-site tensor
+    for the *next* micro-step, built from the previous micro-step's own SVD
+    factors, in that step's own bond bases.
+
+    This is the ingredient that makes the growing algorithm's successive
+    iterations gauge-compatible, and the thing this module used to be
+    missing entirely (see the module docstring's own history). The formula
+    is the two-site wavefunction written in Vidal's Gamma/lambda form,
+
+        theta = lambda_k . B_k^{s_L} . lambda_{k-1}^{-1} . A_k^{s_R} . lambda_k
+
+    with `A_k = U`, `B_k = V` and `lambda_k = S` from micro-step k's own SVD.
+    Substituting the canonical forms `A = lambda.Gamma`, `B = Gamma.lambda`
+    collapses it to `lambda.Gamma^{s_L}.lambda.Gamma^{s_R}.lambda`, which is
+    exactly the exact two-site center tensor of a uniform iMPS -- i.e. this
+    is not a heuristic warm start, it is the *correct* translation of the
+    converged state into the new step's enlarged bases. `lambda_{k-1}^{-1}`
+    is what undoes the previous bond's weighting so the two halves are
+    stitched together in a common gauge; the pseudo-inverse floor
+    `_PREDICTION_INVERSE_CUT` keeps a numerically-zero Schmidt value from
+    blowing up.
+
+    Note the *swap*: the previous step's right-canonical V supplies the new
+    LEFT physical slot and its left-canonical U the new RIGHT one. That is
+    the direct analogue of the reference implementation's own
+    `swapUnitCells` (idmrg.h), and it is what makes the sublattice labels
+    line up: at micro-step t the slots need sublattices (p_L, p_R), and step
+    t-1's V/U carry exactly (p_R^{t-1}, p_L^{t-1}) -- which equals
+    (p_L^t, p_R^t) for n_uc=1 (everything is sublattice 0) and for n_uc=2
+    (consecutive micro-steps alternate (0,1) and (1,0)). It would NOT line
+    up for n_uc>=3, one more reason that case is rejected outright.
+
+    Since `S` is diagonal, both `lambda_k` factors reduce to scaling the two
+    bond axes, and `lambda_{k-1}^{-1}` to scaling the contracted index.
+    Returns a flat array positionally aligned with `order_in`
+    (HL_ket, phys_L, phys_R, HR_ket), or None if the previous step's shapes
+    don't line up with the current local problem (which happens while the
+    bond dimension is still growing, and at the very first micro-steps)."""
+    if V_last.shape[2] != s_prev.size or U_last.shape[0] != s_prev.size:
+        return None
+    if V_last.shape[0] != s_last.size or U_last.shape[2] != s_last.size:
+        return None
+    predicted = (s_last.size, V_last.shape[1], U_last.shape[1], s_last.size)
+    if predicted != tuple(shape):
+        return None
+    floor = _PREDICTION_INVERSE_CUT * (s_prev.max() if s_prev.size else 0.0)
+    s_inv = np.where(s_prev > floor, 1.0 / np.where(s_prev > floor, s_prev, 1.0), 0.0)
+    theta = np.einsum('i,isb,b,brj,j->isrj',
+                      s_last, V_last, s_inv, U_last, s_last, optimize=True)
+    norm = np.linalg.norm(theta)
+    if not np.isfinite(norm) or norm == 0.0:
+        return None
+    return (theta / norm).ravel()
+
+
+def _theta_cell(sites_uc, n_uc, U, S_vals, V, lam_outer):
+    """The gauge-consistent two-site unit cell, extracted from ONE
+    micro-step's own solved theta.
+
+    This is what `U_list` cannot be. `U_list` chains one left-canonical
+    factor per micro-step, so its two ends live in bond bases minted by
+    *different* micro-steps (`U_list[0]`'s left bond is the previous
+    macro-iteration's, `U_list[n_uc-1]`'s right bond is this one's). Tiling
+    it therefore silently identifies two bases that agree in dimension but
+    differ by a unitary -- and tiling `A` when the truth is `A` sandwiched
+    between two different bases inserts that unitary at *every* bond,
+    which is a genuinely different physical state. McCulloch's prediction
+    (`_wavefunction_prediction`) makes the growth loop converge, but it
+    cannot repair an extraction that compares two bases in the first place.
+
+    A single theta has no such problem: both of its outer legs are the same
+    bond (the environment bond it was solved against), so splitting it
+    yields a cell whose left and right ends are, by construction, in one
+    basis. Writing theta in Vidal form,
+
+        theta = lambda_o . Gamma_L . lambda_c . Gamma_R . lambda_o
+
+    its SVD gives `U = lambda_o.Gamma_L` and `S.V = lambda_c.Gamma_R.lambda_o`,
+    so the two left-canonical (`lambda.Gamma`) site tensors are
+
+        A_1 = U                    A_2 = S . V . lambda_o^{-1}
+
+    with `lambda_o` (`lam_outer`) the Schmidt values on theta's own outer
+    bond -- i.e. the *previous* micro-step's center matrix, the same one
+    `_wavefunction_prediction` inverts. `A_2`'s right bond is then back in
+    `A_1`'s left basis, so the cell tiles exactly.
+
+    The cell is always 2 sites: for n_uc=1 that is two repeats of the
+    one-site cell, for n_uc=2 exactly one unit cell (theta's own two sites
+    are sublattices p_L=0 and p_R=1 at micro-step 0). Either way cell
+    position k carries sublattice k % n_uc, which is what
+    `_correlator_cell` hands to the correlator machinery.
+
+    Measured against the tiled `U_list` on gapped TFIM across 16
+    (n_uc, maxm, maxiter) combinations: `<H_uc> - n_uc*e0` came out at
+    1e-11..2e-10 for this cell versus 1e-5..5e-2 for `U_list`, with the
+    energy itself correct to 1e-14 throughout -- i.e. this closes the whole
+    residual, and it closes it uniformly rather than on average."""
+    floor = _PREDICTION_INVERSE_CUT * (lam_outer.max() if lam_outer.size else 0.0)
+    lam_inv = np.where(lam_outer > floor,
+                        1.0 / np.where(lam_outer > floor, lam_outer, 1.0), 0.0)
+    a1 = _u_array_lpr(U, len(U.inds) == 3)
+    sv = _v_array_lpr(V, len(V.inds) == 3) * S_vals[:, None, None]
+    if sv.shape[2] != lam_inv.size or sv.shape[2] != a1.shape[0]:
+        return None
+    a2 = sv * lam_inv[None, None, :]
+    link = [Index(a1.shape[0], tags="Link"), Index(a1.shape[2], tags="Link")]
+    cell = []
+    for k, arr in enumerate((a1, a2)):
+        s = sites_uc.si((k % n_uc) + 1)
+        cell.append(ITensor((link[k], s, link[(k + 1) % 2]), arr))
+    # Re-gauge into exact left-canonical form. `A_1` is already an exact
+    # isometry (it is svd()'s own U), but `A_2 = S.V.lambda_o^{-1}` is only
+    # approximately one: it inherits however far the growth loop's own outer
+    # environment bond still is from being a true Schmidt basis of the
+    # converged state, plus whatever the pseudo-inverse floor discards
+    # (measured at ~5e-3 in practice). Left un-fixed that shows up as a
+    # transfer eigenvalue of 1.00001 rather than 1 -- harmless for
+    # expectation values, which `_expectation` normalizes anyway, but it
+    # makes `eta`/`imps_overlap` report a norm that is visibly not 1. This
+    # is exactly the raw-periodic-list-to-canonical-form job
+    # `_canonicalize_periodic` already does for apply_mpo/imps_sum, so reuse
+    # it rather than hand-rolling a second gauge fix.
+    try:
+        cell, eta = _canonicalize_periodic(cell, 2, cutoff=0.0, maxdim=None)
+    except RuntimeError:
+        # A degenerate transfer spectrum (see
+        # `_check_dominant_eigenvalue_nondegenerate`) leaves the cell
+        # un-regauged rather than failing the whole ground-state run --
+        # expectation values still come out right via `_expectation`, only
+        # the norm diagnostic is then slightly off.
+        return cell
+    # ...and normalize to a per-cell transfer eigenvalue of exactly 1.
+    # Re-gauging alone does not get there: `_canonicalize_periodic` accepts
+    # left-canonicality to atol=1e-4 and does not rescale, so the residual
+    # `A_2` error above survives as eta = 1.00001 -- which every `eta`-based
+    # norm diagnostic downstream (apply_mpo's own return value,
+    # imps_overlap's raw self-overlap, imps_sum) then reports as a state
+    # whose norm is visibly not 1. Scaling each of the n_cell tensors by
+    # eta^(-1/(2*n_cell)) makes the transfer eigenvalue exactly 1 (each
+    # tensor enters its own transfer factor twice, once per bra/ket side).
+    # This is a pure normalization: it cannot change an expectation value,
+    # since `_expectation` divides by the same fixed-point contraction.
+    scale = float(np.real(eta)) ** (-1.0 / (2 * len(cell))) if abs(eta) > 0 else 1.0
+    return [ITensor(T.inds, T.array * scale) for T in cell]
+
+
 def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
                            W_pR, phys_R, HR, HR_bra, HR_ket,
                            cutoff, maxdim, niter, x0_warm=None):
@@ -690,16 +882,16 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
     letting the sequence of local ground states converge to a fixed member
     of the manifold.
 
-    That near-degeneracy story is real but it is NOT the whole explanation
-    for the correlator error, and this warm start does not fix that error.
-    `x0_warm` is a raw flat vector reused on a `.size` match; it carries no
-    basis information, so it cannot reconcile two macro-iterations' bond
-    bases -- which is what actually corrupts `U_list` (see `IDMRGResult`'s
-    docstring, and the module docstring for the McCulloch
-    `lambda_new*lambda_old^{-1}` transformation that would). Confirmed
-    directly: the same `<H_uc> != n_uc*e0` failure persists at 4.5e-2 on a
-    *gapped, non-degenerate* TFIM whose energy is exact to 1e-12, where
-    there is no degenerate manifold for Lanczos to wander in.
+    That near-degeneracy story is real, but the plain same-position reuse it
+    describes is no longer what `x0_warm` normally carries: the caller now
+    passes McCulloch's wavefunction prediction (`_wavefunction_prediction`)
+    -- the previous micro-step's converged state expressed in *this* step's
+    bases -- and falls back to the same-position vector only for the early
+    micro-steps where the prediction's shapes don't line up yet. The
+    prediction subsumes the continuity argument above and is additionally a
+    genuine basis change rather than a positional reuse. It does not, on its
+    own, fix the extracted state; that took `_theta_cell` as well, since a
+    correct trajectory can still be read out in an inconsistent gauge.
 
     Returns (energy, U, S, V, evec0) -- the SVD split of
     the local ground state (truncated to (cutoff, maxdim)) plus the raw,
@@ -774,43 +966,25 @@ class IDMRGResult:
     lookups) and the last macro-iteration's own per-sublattice
     left-canonical site tensors (U_list[p], p=0..n_uc-1).
 
-    `.e0` (the energy density) is reliable. `U_list` -- and therefore every
-    static correlator built from it -- is NOT, for a structural reason:
-    U_list[0]'s own left bond is the bond the *previous* macro-iteration
-    ended on, while U_list[n_uc-1]'s right bond is the *current* one's.
-    Tiling U_list to the thermodynamic limit silently identifies those two
-    bonds, which is legitimate only after McCulloch's
-    `lambda_new*lambda_old^{-1}` transformation has reconciled the two
-    iterations' bases -- and this module does not implement it (see the
-    module docstring). They agree in dimension only once truncation has
-    saturated, and in *basis* essentially never.
+    `cell_list` is the state to use: the gauge-consistent 2-site unit cell
+    (`_theta_cell`), which is what `_correlator_cell` hands to every static
+    observable. `U_list` is the raw per-micro-step chain and is NOT a valid
+    periodic MPS on its own -- its two ends live in bond bases minted by
+    different micro-steps, so tiling it inserts a spurious unitary at every
+    unit-cell boundary. It is kept because `idmrg_window.py` needs exactly
+    those factors, paired with the `env_HL`/`env_HR` snapshot below whose
+    bonds match them; nothing else should tile it.
 
-    Measured consequences (pure-Python backend, cross-checked against exact
-    results; the *energy* was correct to 1e-12 or to truncation error in
-    every one of these):
-
-    - Gapped TFIM (`g*Sz + Sx*Sx`, g=2, unique ground state), n_uc=1,
-      maxm=10: `<H_uc> - n_uc*e0 = 4.5e-2`, where that identity is exact for
-      any translationally invariant state. So the state being *measured* is
-      not the state whose energy is being *reported*, and this is not a
-      near-degenerate-manifold effect -- the model is gapped and
-      non-degenerate.
-    - XX chain (exactly solvable), n_uc=1: `<Sz(0)Sz(1)> = +0.028` against
-      the exact `-0.101` -- the wrong *sign* -- and `<Sz>` up to -0.13
-      against an exact 0, while `e0` was right to 5e-5.
-    - The error is not monotone in maxm/maxiter (TFIM g=1, n_uc=1: 4.3e-5 at
-      maxiter=60 but 1.2e-1 at maxiter=240), the signature of an unfixed
-      gauge rather than of an unconverged one.
-    - n_uc=2 is roughly two orders of magnitude better than n_uc=1 (one
-      mismatched bond per two sites rather than per site, and p_L != p_R at
-      every micro-step), but still ~3e-3 where the energy is ~5e-5.
-
-    `_dominant_right_fixed_point`'s "wraparound bond dimension is
-    inconsistent" RuntimeError is the same root cause surfacing as a hard
-    failure instead of a wrong number; it fired in 10 of 20 (n_uc, maxm,
-    maxiter) combinations tried on a *gapped* model, including every long
-    run, so it is the common case rather than the edge case its own comment
-    describes.
+    That distinction is not academic. Before `cell_list` existed, tiling
+    `U_list` gave (energy correct to 1e-12 or to truncation error in every
+    case): `<H_uc> - n_uc*e0` up to 1.2e-1 on a *gapped, non-degenerate*
+    TFIM, where that identity is exact for any translationally invariant
+    state; `<Sz(0)Sz(1)> = +0.028` against an exact `-0.101` on the XX chain
+    -- the wrong sign -- with `<Sz>` at -0.13 against an exact 0; and error
+    that was not monotone in maxm/maxiter (4.3e-5 at maxiter=60 vs 1.2e-1 at
+    maxiter=240), the signature of an unfixed gauge rather than an
+    unconverged one. With `cell_list` the same identity lands at
+    1e-11..1e-9 and `<Sz>` at 1e-13.
 
     `state_overlap` is a diagnostic, not used by `.converged` (which
     remains a pure energy-density criterion, unchanged): the smallest
@@ -851,7 +1025,7 @@ class IDMRGResult:
 
     def __init__(self, sites_uc, n_uc, U_list, e0, converged, niter_done,
                  state_overlap=None, local_superblock=None,
-                 W_bulk=None, window_boundary=None):
+                 W_bulk=None, window_boundary=None, cell_list=None):
         self.sites_uc = sites_uc
         self.n_uc = n_uc
         self.U_list = U_list
@@ -861,6 +1035,7 @@ class IDMRGResult:
         self.state_overlap = state_overlap
         self.local_superblock = local_superblock
         self.W_bulk = W_bulk
+        self.cell_list = cell_list
         (self.env_HL, self.env_HL_bra, self.env_HL_ket, self.env_HL_mpo,
          self.env_HR, self.env_HR_bra, self.env_HR_ket, self.env_HR_mpo) = (
             window_boundary if window_boundary is not None else (None,) * 8)
@@ -928,6 +1103,17 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     # started from, refreshed every macro-iteration so the value returned
     # at the end always reflects the last macro-iteration actually run.
     prev_local = [None] * n_uc
+    # The previous micro-step's own SVD factors, the raw material for
+    # McCulloch's wavefunction prediction (see `_wavefunction_prediction`).
+    # Unlike `prev_local` (indexed per unit-cell position, one macro-iteration
+    # back) these are strictly the *immediately preceding* micro-step's --
+    # that is the step whose bond bases the current local problem actually
+    # lives in, so nothing here is indexed by `mstep`.
+    last_U = last_V = last_S = prev_S = None
+    # (U, S, V, lambda_outer) of the last executed macro-iteration's own
+    # first micro-step -- turned into the gauge-consistent 2-site unit cell
+    # (`_theta_cell`) once, after the loop.
+    cell_seed = None
     state_overlap = None
     # The very last micro-step's own local-solve ingredients (HL/HR
     # environments, MPO tensors, physical Indices, converged local ground
@@ -996,26 +1182,72 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
             phys_L = _unprimed_site_index(W_pL)
             phys_R = _unprimed_site_index(W_pR)
 
+            # McCulloch's wavefunction prediction: the previous micro-step's
+            # converged state, translated into *this* step's enlarged bond
+            # bases (see `_wavefunction_prediction`). Falls back to
+            # `prev_local[mstep]` -- the plain same-position reuse this
+            # module used before the prediction existed -- and then to a
+            # random vector, for the early micro-steps where the previous
+            # step's shapes don't line up yet.
+            local_shape = tuple(
+                ind.dim for ind in
+                (([HL_ket] if HL_ket is not None else []) + [phys_L, phys_R]
+                 + ([HR_ket] if HR_ket is not None else [])))
+            x0 = None
+            if last_U is not None and prev_S is not None:
+                x0 = _wavefunction_prediction(last_S, last_V, prev_S, last_U,
+                                               local_shape)
+            if x0 is None:
+                x0 = prev_local[mstep]
+
             energy, U, S, V, evec0 = _local_two_site_solve(
                 HL, HL_bra, HL_ket, W_pL, phys_L,
                 W_pR, phys_R, HR, HR_bra, HR_ket,
                 cutoff=cutoff, maxdim=maxm, niter=niter,
-                x0_warm=prev_local[mstep])
+                x0_warm=x0)
             last_superblock = dict(
                 HL=HL, HL_bra=HL_bra, HL_ket=HL_ket,
                 W_pL=W_pL, phys_L=phys_L,
                 W_pR=W_pR, phys_R=phys_R,
                 HR=HR, HR_bra=HR_bra, HR_ket=HR_ket,
                 evec0=evec0, energy=energy)
-            if prev_local[mstep] is not None and prev_local[mstep].size == evec0.size:
-                denom = np.linalg.norm(prev_local[mstep]) * np.linalg.norm(evec0)
+            # state_overlap compares the solve's own result against the
+            # vector it started from. With the prediction in place that
+            # starting vector is the previous step's converged state
+            # *expressed in this step's bases*, so this is now the direct
+            # analogue of the reference implementation's own "Overlap of
+            # initial and final psi" diagnostic (idmrg.h's `show_overlap`):
+            # ~1 means the growing state has genuinely stopped changing, not
+            # merely that its energy has.
+            if x0 is not None and x0.size == evec0.size:
+                denom = np.linalg.norm(x0) * np.linalg.norm(evec0)
                 if denom > 0:
-                    overlaps_this_iter.append(
-                        abs(np.vdot(prev_local[mstep], evec0)) / denom)
+                    overlaps_this_iter.append(abs(np.vdot(x0, evec0)) / denom)
             prev_local[mstep] = evec0
 
             left_ket_old, right_ket_old = HL_ket, HR_ket
             new_bond_u, new_bond_v = U.inds[-1], V.inds[0]
+            # Carry this step's SVD factors forward for the next step's
+            # prediction; `prev_S` lags one further behind, since it is the
+            # bond matrix the prediction has to *invert*.
+            if mstep == 0 and last_S is not None:
+                # Raw ingredients for the gauge-consistent unit cell, taken
+                # from this macro-iteration's own first micro-step. Only
+                # *stashed* here -- `_theta_cell` itself runs once, after the
+                # loop, because its re-gauging step is an eigendecomposition
+                # of a chi^2 x chi^2 transfer matrix and paying that every
+                # macro-iteration dominated the whole solve (confirmed
+                # directly: the test suite went from ~5 to >20 minutes).
+                # Overwritten every macro-iteration, so what survives the loop
+                # belongs to the last one executed -- the same convention
+                # `env_window_boundary` above already uses. `last_S` is still
+                # the *previous* micro-step's center matrix at this point,
+                # which is exactly the `lambda_o` on this theta's outer bond.
+                cell_seed = (U, _svd_singular_values(S), V, last_S)
+            prev_S = last_S
+            last_S = _svd_singular_values(S)
+            last_U = _u_array_lpr(U, HL_ket is not None)
+            last_V = _v_array_lpr(V, HR_ket is not None)
 
             # Fresh, independently-minted mpo-axis identities for the
             # *extend* step only (not used in the solve above, so this
@@ -1049,6 +1281,9 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
             break
         prev_energy, prev_density = energy, density
 
+    cell_list = (_theta_cell(sites_uc, n_uc, *cell_seed)
+                 if cell_seed is not None else None)
+
     if not converged and verbose:
         print("idmrg_ground_state: reached maxiter={} without converging "
               "to etol={} (last density change available)".format(maxiter, etol))
@@ -1056,7 +1291,8 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     return IDMRGResult(sites_uc, n_uc, U_list, prev_density, converged,
                         macro_iter + 1, state_overlap=state_overlap,
                         local_superblock=last_superblock,
-                        W_bulk=W_bulk, window_boundary=env_window_boundary)
+                        W_bulk=W_bulk, window_boundary=env_window_boundary,
+                        cell_list=cell_list)
 
 
 def local_excitation_gap(result, niter=200):
@@ -1433,6 +1669,56 @@ def _check_dominant_eigenvalue_nondegenerate(w, caller):
     return order
 
 
+def _correlator_cell(result):
+    """(tensors, n_cell) the static-correlator machinery should tile for
+    `result`, plus the sublattice each cell position carries.
+
+    A converged `IDMRGResult` carries `cell_list` -- the gauge-consistent
+    2-site cell extracted from a single theta (see `_theta_cell`) -- and that
+    is what must be tiled; its raw `U_list` chains factors from different
+    micro-steps and is not a valid periodic MPS (see `IDMRGResult`'s own
+    docstring). Everything else that reaches these functions (`PeriodicMPS`
+    from `apply_mpo`/`imps_sum`, whose tensors come out of
+    `_canonicalize_periodic` already gauge-fixed as one object) has no
+    `cell_list` and is tiled from `U_list` as before.
+
+    Cell position k always carries sublattice `k % result.n_uc`: for the
+    2-site cell that is [0,0] at n_uc=1 and [0,1] at n_uc=2, and for a
+    plain n_uc-length `U_list` it is the identity."""
+    cell = getattr(result, "cell_list", None)
+    if cell is not None:
+        return cell, len(cell)
+    return result.U_list, result.n_uc
+
+
+def _expectation(Es, running, running_id, rho_after_j, k_start, n_cell):
+    """<...> for an operator string already composed into `running`, closed
+    against the left fixed point *at the string's own starting position*
+    rather than an implicit identity.
+
+    The previous version of this machinery assumed the left fixed point was
+    exactly the identity (it just took `np.trace` of the final contraction),
+    which holds only when every tiled tensor is *exactly* left-canonical.
+    That is true of `U_list` by SVD construction, but only approximately of
+    `_theta_cell`'s second tensor: `A_2 = S.V.lambda_o^{-1}` inherits
+    however far the growth loop's own environment bond still is from a true
+    Schmidt basis, plus whatever the pseudo-inverse floor discards.
+
+    Two details are load-bearing. The left fixed point must be the one for
+    "everything strictly before `k_start`" (`_all_left_fixed_points`), not
+    the cell's own position-0 fixed point -- using the latter left
+    `<Sz(0)Sz(0)>` at 0.2499994784 instead of the exactly-0.25 it must be
+    for spin-1/2, since the numerator and denominator then no longer share a
+    boundary. And the denominator has to be the *same* contraction with the
+    operators dropped (`running_id`), so any residual normalization error
+    cancels between the two rather than only mostly cancelling."""
+    l_before, _eta, _scales = _all_left_fixed_points(Es, n_cell)
+    l = l_before[k_start % n_cell]
+    num = np.einsum('lL,lL->', l, _apply_transfer(running, rho_after_j))
+    den = np.einsum('lL,lL->', l, _apply_transfer(running_id, rho_after_j))
+    return complex(num / den)
+
+
 def _dominant_right_fixed_point(Es):
     """The dominant right eigenvector of the full unit-cell transfer
     matrix T=E_0...E_{n_uc-1} (as a chi x chi density-matrix-like array,
@@ -1486,11 +1772,14 @@ def _all_right_fixed_points(Es, n_uc):
     return rho_after, eta
 
 
-def _op_transfer(sites_uc, U_list, p, opname):
-    """Transfer tensor for sublattice p with operator `opname` inserted
-    (applied to the ket side only, as <bra|opname|ket> per site)."""
-    M = sites_uc.site_type(p + 1).matrix(opname)
-    A = _to_array_lpr(U_list[p])
+def _op_transfer(sites_uc, cell, k, opname, n_uc):
+    """Transfer tensor for cell position k with operator `opname` inserted
+    (applied to the ket side only, as <bra|opname|ket> per site). The site
+    type is looked up by k's own *sublattice*, `k % n_uc` -- these differ
+    once the tiled cell is longer than the unit cell, which is exactly the
+    n_uc=1 case of `_theta_cell`'s 2-site output."""
+    M = sites_uc.site_type((k % n_uc) + 1).matrix(opname)
+    A = _to_array_lpr(cell[k])
     Aop = np.einsum('io,lir->lor', M, A)
     return np.einsum('lpr,LpR->lLrR', Aop, np.conj(A))
 
@@ -1498,11 +1787,11 @@ def _op_transfer(sites_uc, U_list, p, opname):
 def onsite_expectation(result, opname, p):
     """<opname> at sublattice p (0..n_uc-1) of the converged infinite
     chain."""
-    Es = _transfer_matrices(result.U_list, result.n_uc)
-    rho_after, _eta = _all_right_fixed_points(Es, result.n_uc)
-    E_op = _op_transfer(result.sites_uc, result.U_list, p, opname)
-    val = _apply_transfer(E_op, rho_after[p])
-    return complex(np.trace(val))
+    cell, n_cell = _correlator_cell(result)
+    Es = _transfer_matrices(cell, n_cell)
+    rho_after, _eta = _all_right_fixed_points(Es, n_cell)
+    E_op = _op_transfer(result.sites_uc, cell, p, opname, result.n_uc)
+    return _expectation(Es, E_op, Es[p], rho_after[p], p, n_cell)
 
 
 def two_point_correlator(result, opname_i, p_i, opname_j, r):
@@ -1526,27 +1815,33 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     if r < 0:
         raise ValueError("two_point_correlator: r must be >= 0")
     n_uc = result.n_uc
-    Es = _transfer_matrices(result.U_list, n_uc)
-    rho_after, _eta = _all_right_fixed_points(Es, n_uc)
+    cell, n_cell = _correlator_cell(result)
+    Es = _transfer_matrices(cell, n_cell)
+    rho_after, _eta = _all_right_fixed_points(Es, n_cell)
 
     if r == 0:
-        M = (result.sites_uc.site_type(p_i + 1).matrix(opname_j)
-             @ result.sites_uc.site_type(p_i + 1).matrix(opname_i))
-        A = _to_array_lpr(result.U_list[p_i])
+        st = result.sites_uc.site_type((p_i % n_uc) + 1)
+        M = st.matrix(opname_j) @ st.matrix(opname_i)
+        A = _to_array_lpr(cell[p_i])
         Aop = np.einsum('io,lir->lor', M, A)
         E4 = np.einsum('lpr,LpR->lLrR', Aop, np.conj(A))
-        val = _apply_transfer(E4, rho_after[p_i])
-        return complex(np.trace(val))
+        return _expectation(Es, E4, Es[p_i], rho_after[p_i], p_i, n_cell)
 
-    p_j = (p_i + r) % n_uc
-    running = _op_transfer(result.sites_uc, result.U_list, p_i, opname_i)
-    for k in range(1, r):
-        p = (p_i + k) % n_uc
-        running = _compose(running, Es[p])
+    # Positions advance through the *tiled cell* (length n_cell), while the
+    # site type at each position is set by its sublattice (position % n_uc)
+    # -- the two coincide unless the cell is longer than the unit cell,
+    # which is exactly `_theta_cell`'s n_uc=1 case.
+    k_j = (p_i + r) % n_cell
+    running = _op_transfer(result.sites_uc, cell, p_i, opname_i, n_uc)
+    running_id = Es[p_i]
+    for step in range(1, r):
+        E_step = Es[(p_i + step) % n_cell]
+        running = _compose(running, E_step)
+        running_id = _compose(running_id, E_step)
     running = _compose(running, _op_transfer(
-        result.sites_uc, result.U_list, p_j, opname_j))
-    val = _apply_transfer(running, rho_after[p_j])
-    return complex(np.trace(val))
+        result.sites_uc, cell, k_j, opname_j, n_uc))
+    running_id = _compose(running_id, Es[k_j])
+    return _expectation(Es, running, running_id, rho_after[k_j], p_i, n_cell)
 
 
 def _dominant_eigenvalue_mixed(Es):
@@ -1638,20 +1933,27 @@ def imps_overlap(result_a, result_b, normalize=True):
         raise ValueError(
             "imps_overlap: unit-cell size mismatch (result_a.n_uc={}, "
             "result_b.n_uc={})".format(n_uc, result_b.n_uc))
-    dims_a = [_to_array_lpr(result_a.U_list[p]).shape[1] for p in range(n_uc)]
-    dims_b = [_to_array_lpr(result_b.U_list[p]).shape[1] for p in range(n_uc)]
+    cell_a, n_cell_a = _correlator_cell(result_a)
+    cell_b, n_cell_b = _correlator_cell(result_b)
+    if n_cell_a != n_cell_b:
+        raise ValueError(
+            "imps_overlap: the two states tile cells of different lengths "
+            "({} vs {})".format(n_cell_a, n_cell_b))
+    n_cell = n_cell_a
+    dims_a = [_to_array_lpr(cell_a[k]).shape[1] for k in range(n_cell)]
+    dims_b = [_to_array_lpr(cell_b[k]).shape[1] for k in range(n_cell)]
     if dims_a != dims_b:
         raise ValueError(
             "imps_overlap: physical dimension mismatch per sublattice "
             "(result_a={}, result_b={})".format(dims_a, dims_b))
 
-    Es_ab = _transfer_matrices(result_a.U_list, n_uc, bra_list=result_b.U_list)
+    Es_ab = _transfer_matrices(cell_a, n_cell, bra_list=cell_b)
     eta_ab = _dominant_eigenvalue_mixed(Es_ab)
     if not normalize:
         return complex(eta_ab)
 
-    _, eta_aa = _dominant_right_fixed_point(_transfer_matrices(result_a.U_list, n_uc))
-    _, eta_bb = _dominant_right_fixed_point(_transfer_matrices(result_b.U_list, n_uc))
+    _, eta_aa = _dominant_right_fixed_point(_transfer_matrices(cell_a, n_cell))
+    _, eta_bb = _dominant_right_fixed_point(_transfer_matrices(cell_b, n_cell))
     return complex(eta_ab) / np.sqrt(complex(eta_aa) * complex(eta_bb))
 
 
@@ -2021,15 +2323,20 @@ class PeriodicMPS:
     """A periodic iMPS with no ground-state-specific bookkeeping -- same
     shape as IDMRGResult (sites_uc, n_uc, U_list) minus e0/converged/
     niter_done, which have no meaning for apply_mpo's output.
-    onsite_expectation/two_point_correlator only ever read
-    .sites_uc/.n_uc/.U_list off their `result` argument, so they accept a
-    PeriodicMPS directly, no changes needed there. `eta` is apply_mpo's own
-    diagnostic (see `_canonicalize_periodic`'s docstring)."""
+    `U_list` here may be longer than `n_uc`: everything downstream of a
+    converged IDMRGResult tiles that result's own gauge-consistent 2-site
+    cell (`_theta_cell`), which is two unit cells' worth when n_uc=1. It is
+    exposed as `cell_list` as well, so `_correlator_cell` picks it up
+    directly -- a PeriodicMPS's tensors always come out of
+    `_canonicalize_periodic` as one self-consistent object, so unlike an
+    IDMRGResult's raw `U_list` they need no separate treatment. `eta` is
+    apply_mpo's own diagnostic (see `_canonicalize_periodic`'s docstring)."""
 
     def __init__(self, sites_uc, n_uc, U_list, eta):
         self.sites_uc = sites_uc
         self.n_uc = n_uc
         self.U_list = U_list
+        self.cell_list = U_list
         self.eta = eta
 
 
@@ -2042,9 +2349,18 @@ def apply_mpo(result, W_bulk, cutoff=1e-12, maxdim=None):
     restriction on W_bulk (bounded/local periodic operators only -- not
     the Hamiltonian's own unbounded automaton) and the algorithm
     (`grow_by_mpo` + `_canonicalize_periodic`)."""
-    B = grow_by_mpo(W_bulk, result.U_list, result.n_uc)
+    cell, n_cell = _correlator_cell(result)
+    if len(W_bulk) != result.n_uc:
+        raise ValueError(
+            "apply_mpo: W_bulk must have one tensor per unit-cell site "
+            "(n_uc={}), got {}".format(result.n_uc, len(W_bulk)))
+    # W_bulk has period n_uc; the state's cell is a whole number of unit
+    # cells long (2 when n_uc=1, see `_theta_cell`), so tile the operator to
+    # match rather than making the caller know the cell length.
+    W_tiled = [W_bulk[k % result.n_uc] for k in range(n_cell)]
+    B = grow_by_mpo(W_tiled, cell, n_cell)
     B = [_t_noPrime(b, "Site") for b in B]
-    U_list_new, eta = _canonicalize_periodic(B, result.n_uc, cutoff, maxdim)
+    U_list_new, eta = _canonicalize_periodic(B, n_cell, cutoff, maxdim)
     return PeriodicMPS(result.sites_uc, result.n_uc, U_list_new, eta)
 
 
@@ -2193,12 +2509,19 @@ def imps_sum(result_a, result_b, cutoff=1e-12, maxdim=None):
         raise ValueError(
             "imps_sum: unit-cell size mismatch (result_a.n_uc={}, "
             "result_b.n_uc={})".format(n_uc, result_b.n_uc))
-    dims_a = [_to_array_lpr(result_a.U_list[p]).shape[1] for p in range(n_uc)]
-    dims_b = [_to_array_lpr(result_b.U_list[p]).shape[1] for p in range(n_uc)]
+    cell_a, n_cell_a = _correlator_cell(result_a)
+    cell_b, n_cell_b = _correlator_cell(result_b)
+    if n_cell_a != n_cell_b:
+        raise ValueError(
+            "imps_sum: the two states tile cells of different lengths "
+            "({} vs {})".format(n_cell_a, n_cell_b))
+    n_cell = n_cell_a
+    dims_a = [_to_array_lpr(cell_a[k]).shape[1] for k in range(n_cell)]
+    dims_b = [_to_array_lpr(cell_b[k]).shape[1] for k in range(n_cell)]
     if dims_a != dims_b:
         raise ValueError(
             "imps_sum: physical dimension mismatch per sublattice "
             "(result_a={}, result_b={})".format(dims_a, dims_b))
-    raw = _periodic_direct_sum(result_a.U_list, result_b.U_list, n_uc)
-    U_list_new, eta = _canonicalize_periodic(raw, n_uc, cutoff, maxdim)
+    raw = _periodic_direct_sum(cell_a, cell_b, n_cell)
+    U_list_new, eta = _canonicalize_periodic(raw, n_cell, cutoff, maxdim)
     return PeriodicMPS(result_a.sites_uc, n_uc, U_list_new, eta)
