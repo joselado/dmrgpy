@@ -689,23 +689,32 @@ environment-reuse implementation following the algorithmic idea of
 rather than rebuilding a fresh MPO for every tuple, it reuses partial
 tensor-network contractions across the whole $(N,N,N,N)$ tensor. Agrees
 with \texttt{ctmode="full"} and ED to machine precision / solver
-tolerance on both backends, and is measurably faster than
-\texttt{ctmode="full"} at every size tried on both, by a margin that
-grows with $n$ (roughly 1.2x at $n=6$ up to over 2x at $n=12$--$14$ under
-\texttt{itensor\_version=3}; a smaller but still real margin under
-\texttt{"python"}, whose per-step cost is dominated by Python-level
-overhead rather than the underlying linear algebra) -- see
+tolerance on both backends, and is substantially faster: at $n=12$,
+9.3\,s $\to$ 1.7\,s under \texttt{itensor\_version=3} and 37.7\,s $\to$
+5.1\,s under \texttt{"python"}, against \texttt{ctmode="full"} at
+5.8--8.1$\times$ slower on the sizes the
+\texttt{four\_correlation\_tensor\_sweep\_VS\_full} example measures.
+
+Those numbers reflect a fix worth knowing about if you read the older
+docstrings. The tensor splits into pairwise-distinct-index entries (handled
+by the sweep) and repeated-index entries, and the latter used to fall back
+to the same per-tuple AutoMPO build \texttt{ctmode="full"} uses. There are
+only $O(n^3)$ of those against the sweep's $O(n^4)$, which is why they were
+described as subdominant -- but a smaller count times a far more expensive
+per-tuple cost still dominates, and measured, that fallback was 96\% of the
+whole runtime at $n=12$. Every one of those operators is a product of four
+$C^\dagger/C$ factors on at most 3 distinct sites, i.e.\ \emph{local}, so
+both backends now fold them directly instead of compiling an MPO over the
+whole chain. \texttt{accelerate} (default \texttt{True}, accepted on every
+\texttt{ctmode}) still only affects the repeated-index entries for
+\texttt{ctmode="sweep"} --- the pairwise-distinct sweep has no equivalent
+conjugate-pair saving to skip (see either backend's own docstring) -- so
+don't expect the usual $\sim2\times$ win \texttt{accelerate} gives
+\texttt{ctmode="full"}. See
 \texttt{examples/staticcorrelators/four\_correlation\_tensor\_sweep\_VS\_full},
-\texttt{Chain::four\_correlation\_tensor\_sweep}'s own docstring
-(\texttt{mpscpp3/chain\_session.h}), and \texttt{pyitensor/chain.py}'s
-port of the same method, for the full algorithm and the measured
-numbers. \texttt{accelerate} (default \texttt{True}, accepted on every
-\texttt{ctmode}) only speeds up the subdominant repeated-index entries
-for \texttt{ctmode="sweep"} --- unlike \texttt{ctmode="full"}, its
-dominant pairwise-distinct-index sweep has no equivalent conjugate-pair
-saving to skip (see either backend's own docstring for why), so don't
-expect the usual $\sim2\times$ win \texttt{accelerate} gives
-\texttt{ctmode="full"}.
+\texttt{Chain::four\_correlation\_tensor\_sweep}
+(\texttt{mpscpp3/chain\_session.h}) and \texttt{pyitensor/chain.py}'s port
+for the algorithm.
 
 \texttt{ctmode=None} (the default) auto-selects the fastest method
 actually available for the wavefunction's backend/chain type:
@@ -2901,5 +2910,48 @@ just flattened. See \texttt{tests/test\_vumps\_apply\_mpo\_v3.py} and
 full cross-check against \texttt{itensor\_version="python"}, including the
 same three cases ($D=1$ exact, $D>1$ unitary invariants, \texttt{chi\_W>1}
 bond growth at \texttt{n\_uc=2}).
+
+\section{Performance: BLAS threads}
+
+DMRG spends its time in a great many \emph{small} dense linear-algebra
+calls rather than a few large ones -- a two-site tensor at \texttt{maxm=30}
+on spin-1/2 sites is a $60\times60$ matrix, and that is what hits
+\texttt{svd}/\texttt{eigh}/\texttt{matmul} tens of thousands of times in one
+ground-state solve. At that size a multithreaded BLAS can lose more to
+thread barriers than it gains: measured with MKL, going from one thread to
+two made a $60\times60$ complex \texttt{svd} 1.6x slower and \texttt{eigh}
+2.3x slower.
+
+End to end that alone is minor ($\sim$1.13x for
+\texttt{itensor\_version="python"}, nothing measurable for \texttt{3}). It
+matters when the machine is \textbf{oversubscribed} -- a shared cluster
+node, or several dmrgpy runs launched in parallel -- because each process's
+BLAS assumes it owns every core. On a 14-core host with another job holding
+10 of them, letting MKL use its default thread count turned a 9.4\,s
+\texttt{"python"} solve into 28.2\,s, and a 1.6\,s
+\texttt{itensor\_version=3} solve into 26.7\,s.
+
+The most reliable fix is to pin threads before numpy is imported:
+
+\begin{lstlisting}[language=bash]
+MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python3 myscript.py
+\end{lstlisting}
+
+For finer control there is an opt-in context manager (needs
+\texttt{threadpoolctl}, which is not a declared dependency):
+
+\begin{lstlisting}[language=Python]
+from dmrgpy import blasthreads
+
+print(blasthreads.current_hint())     # how threads are configured now
+with blasthreads.limit(1):
+    e0 = sc.gs_energy()               # restored on exit, including on error
+\end{lstlisting}
+
+dmrgpy never changes thread counts on its own: threading does pay off once
+the tensors get large enough, and a script may have chosen its setting
+deliberately. Treat the numbers above as indicative -- they come from a busy
+shared host -- and measure on your own machine before tuning around them.
+See \texttt{dmrgpy/blasthreads.py} for the full measurements.
 
 \end{document}
