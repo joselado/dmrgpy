@@ -91,5 +91,7 @@ def second_order_dIdV_dc(chain, site, eVs, T0=1.0, U=0.0, mode="DMRG",
                                           delta, es, **kwargs)
 
     spin_term = 0.5*weight(Sminus) + 0.5*weight(Splus) + weight(Sz)
-    U_term = (U**2)*np.ones_like(eVs)
+    # 4*|U|^2, not the bare |U|^2 of eq. "Matrix1sq" -- see the "SA factor"
+    # note in conductance.py's module docstring
+    U_term = 4*(U**2)*np.ones_like(eVs)
     return 2*np.pi*T0**2*(spin_term + U_term)

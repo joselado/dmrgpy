@@ -94,31 +94,79 @@ def test_second_order_symmetric_and_positive():
     assert np.allclose(dIdV, dIdV[::-1], atol=1e-8)
 
 
-def test_third_order_kondo_zero_field_has_a_zero_bias_feature():
-    """Fig. 3a/b: at zero field the third-order Kondo term produces a
-    zero-bias resonance. This term is d(I^{t->s})/dV only (see
-    third_order_kondo_dIdV's docstring), so unlike the full, bidirectional
-    Fig. 3b curve it is not itself symmetric in eV -- Theta(eV-eps_if) is
-    a one-sided step -- so the peak sits strictly inside the swept window
-    rather than exactly at eV=0, but should be far above both the Jrho_s=0
-    baseline (zero) and the window edges."""
+def test_third_order_kondo_zero_field_is_a_symmetric_zero_bias_peak():
+    """Fig. 3a/b: at zero field the third-order Kondo term is a resonance
+    centered exactly at eV=0 and symmetric in bias. Both tunneling
+    directions contribute with the same sign (eq. "sym_z"), which is what
+    makes it even -- every per-process curve of Fig. 3a is drawn symmetric
+    about zero bias, which d(I^{t->s})/dV alone (a one-sided Theta step)
+    cannot be. Regression test for a real bug: the s->t direction used to
+    be omitted, leaving a one-sided half-peak whose maximum sat at the
+    first positive bias point instead of at eV=0."""
     ks = _single_spin_half(B=0.0, T=1.0)
     span = 3e-3
-    eVs = np.linspace(-span, span, 41)
+    eVs = np.linspace(-span, span, 41) # odd count -> eVs[20] is exactly 0
     d3 = third_order_kondo_dIdV(ks, eVs, Jrho_s=-0.05, T0=1.0)
     assert np.all(third_order_kondo_dIdV(ks, eVs, Jrho_s=0., T0=1.0) == 0.)
-    imax = np.argmax(d3)
-    assert 0 < imax < len(eVs) - 1 # peak strictly inside the window
-    assert d3[imax] > d3[0] and d3[imax] > d3[-1]
+    assert np.allclose(d3, d3[::-1], atol=1e-12) # even in eV
+    assert np.argmax(d3) == len(eVs)//2 # peak exactly at eV=0
+    assert d3[len(eVs)//2] > 2*d3[0] # a real peak, not a flat background
 
 
-def test_third_order_potential_vanishes_at_U0_and_is_asymmetric():
+def test_third_order_potential_vanishes_at_U0_and_is_odd_in_bias():
+    """Fig. 3c: the potential-interference term's two tunneling directions
+    enter with opposite signs (eq. "asym_U"), so the term is odd in eV --
+    the "sum" curve of Fig. 3c is antisymmetric about zero bias and
+    crosses through it. Regression test for the same omitted-s->t bug as
+    above: this term used to be one-sided (identically zero at negative
+    bias for T=0, and finite at eV=0), which is not merely asymmetric but
+    the wrong shape entirely."""
     ks = _single_spin_half(B=10.0, T=1.0)
-    eVs = np.linspace(-2e-3, 2e-3, 21)
+    eVs = np.linspace(-2e-3, 2e-3, 21) # odd count -> eVs[10] is exactly 0
     dU0 = third_order_potential_dIdV(ks, eVs, Jrho_s=-0.05, U=0.0, T0=1.0)
     assert np.allclose(dU0, 0.)
     dU = third_order_potential_dIdV(ks, eVs, Jrho_s=-0.05, U=0.25, T0=1.0)
     assert not np.allclose(dU, dU[::-1], atol=1e-8) # bias asymmetric
+    assert np.allclose(dU, -dU[::-1], atol=1e-12) # and specifically odd
+    assert dU[len(eVs)//2] == pytest.approx(0., abs=1e-14)
+    assert np.max(np.abs(dU)) > 1e-3 # not trivially zero everywhere
+
+
+def test_third_order_matches_paper_figure_3b_and_3d_peak_values():
+    """Absolute cross-check of every prefactor in the third-order spectrum
+    against the paper's own Figs. 3b/3d, which are plotted in absolute
+    units (e^2 T0^2/h) for a single S=1/2 at B=0, T=1K, Jrho_s=-0.05 and
+    the paper-default omega0=20meV. This function's own return convention
+    is 2*pi times those figure units (its second-order plateau is 2*pi*0.75
+    where Fig. 3b's dashed curve reads 0.75).
+
+    Reading the zero-bias peaks off the published figures gives 1.13
+    (Fig. 3b, U=0) and 1.39 (Fig. 3d, U=0.25). These pin down three
+    separate normalizations that no other test here constrains: the
+    Levi-Civita coefficient Im[X]/2 (an Im[X]/4 reading of eq.
+    "3rd-normal" misses a factor 2), the sum over both tunneling
+    directions, and the elastic potential channel's 4*|U|^2 (eq.
+    "Matrix1sq"'s bare |U|^2 misses a factor 4 -- Fig. 3d minus Fig. 3b
+    for the dashed second-order curves is 0.25 = 4*0.25^2). The
+    potential-interference term contributes exactly 0 at eV=0 (it is odd),
+    so 3d - 3b at zero bias is the elastic term alone."""
+    ks = _single_spin_half(B=0.0, T=1.0)
+    omega0 = 20e-3 # "If not otherwise noted we use omega0=20 meV"
+    z = np.array([0.0])
+    Jrho_s, U, tp = -0.05, 0.25, 2*np.pi
+
+    kondo = third_order_kondo_dIdV(ks, z, Jrho_s, T0=1.0, omega0=omega0)[0]
+    pot = third_order_potential_dIdV(ks, z, Jrho_s, U, T0=1.0, omega0=omega0)[0]
+    fig3b = (second_order_dIdV(ks, z, T0=1.0, U=0.0)[0] + kondo)/tp
+    fig3d = (second_order_dIdV(ks, z, T0=1.0, U=U)[0] + kondo + pot)/tp
+
+    assert fig3b == pytest.approx(1.13, abs=0.02)
+    assert fig3d == pytest.approx(1.39, abs=0.02)
+    # the elastic potential channel alone, Fig. 3d - Fig. 3b (dashed)
+    elastic = (second_order_dIdV(ks, z, T0=1.0, U=U)[0]
+               - second_order_dIdV(ks, z, T0=1.0, U=0.0)[0])/tp
+    assert elastic == pytest.approx(4*U**2, abs=1e-12)
+    assert elastic == pytest.approx(0.25, abs=1e-12)
 
 
 def test_get_kondo_spectrum_order2_matches_second_order_dIdV():
@@ -161,22 +209,25 @@ def test_third_order_kondo_eps_if_sign_on_asymmetric_spectrum():
         eps3[a, b, c] = 1.
     for a, b, c in [(0, 2, 1), (2, 1, 0), (1, 0, 2)]:
         eps3[a, b, c] = -1.
-    coeff = np.imag(np.einsum('jkl,ifl,fmk,mij->ifm', eps3, Xi, Xi, Xi))/4.
+    coeff = np.imag(np.einsum('jkl,ifl,fmk,mij->ifm', eps3, Xi, Xi, Xi))/2.
     kT = ks.kB*ks.T
     from dmrgpy.kondospectrumtk.stepfunctions import FBuilder
     Fb = FBuilder(ks.T) # build once, reuse (F() alone would be far too slow here)
     ref = np.zeros(len(eVs))
     for e_idx, eV in enumerate(eVs):
         acc = 0.
-        for i in range(ks.dim):
-            for f in range(ks.dim):
-                eps_if_ref = ks.e[f] - ks.e[i] # unambiguous by construction
-                th = Theta(np.array([(eV - eps_if_ref)/kT]))[0]
-                for m in range(ks.dim):
-                    eps_im_ref = ks.e[m] - ks.e[i]
-                    fsum = (Fb(np.array([eV - eps_im_ref]))[0]
-                            + Fb(np.array([eV + eps_im_ref]))[0])
-                    acc += ks.p[i]*coeff[i, f, m]*th*fsum
+        # both tunneling directions: v=+eV is t->s, v=-eV is s->t, added
+        # with the same sign for the Kondo term (eq. "sym_z")
+        for v in (eV, -eV):
+            for i in range(ks.dim):
+                for f in range(ks.dim):
+                    eps_if_ref = ks.e[f] - ks.e[i] # unambiguous by construction
+                    th = Theta(np.array([(v - eps_if_ref)/kT]))[0]
+                    for m in range(ks.dim):
+                        eps_im_ref = ks.e[m] - ks.e[i]
+                        fsum = (Fb(np.array([v - eps_im_ref]))[0]
+                                + Fb(np.array([v + eps_im_ref]))[0])
+                        acc += ks.p[i]*coeff[i, f, m]*th*fsum
         ref[e_idx] = 4*np.pi*1.0**2*Jrho_s*acc
     assert np.allclose(got, ref, atol=1e-8)
 

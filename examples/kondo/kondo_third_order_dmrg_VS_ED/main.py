@@ -68,25 +68,33 @@ n_t2_half, n_tau_half = 20, 20
 dt2, dtau = 150.0, 150.0
 
 print("Computing the third-order Kondo spectrum via mode=\"ED\" ...")
+# omega0/Gamma0 must be passed to BOTH calls: they were set above
+# specifically so this example's small t2/tau grid is actually converged,
+# and letting either call silently fall back to kondospectrumtk's default
+# Gamma0=5e-6 puts the DMRG side back in the wildly-under-resolved regime
+# the module docstring above describes (that is exactly what happened
+# here until it was caught by the tightened tolerance).
 _, dIdV_ed = sc.get_kondo_spectrum(eVs, site=0, Jrho_s=Jrho_s, U=0.0, T=0.0,
-                                    order=3, mode="ED")
+                                    order=3, mode="ED", omega0=omega0,
+                                    Gamma0=Gamma0)
 
 print("Computing the third-order Kondo spectrum via mode=\"DMRG\" "
       "(real TDVP time evolution) ...")
 _, dIdV_dmrg = sc.get_kondo_spectrum(
         eVs, site=0, Jrho_s=Jrho_s, U=0.0, T=0.0, order=3, mode="DMRG",
+        omega0=omega0, Gamma0=Gamma0,
         submode="KPM", delta=2e-5, es=es, dt2=dt2, n_t2_half=n_t2_half,
         dtau=dtau, n_tau_half=n_tau_half)
 
 diff = np.max(np.abs(dIdV_dmrg-dIdV_ed))
 print("max |DMRG - ED| = %.3f (max |ED| = %.3f)"%(diff, np.max(np.abs(dIdV_ed))))
-# a handful of percent, not machine precision: the DMRG path carries KPM
-# delta-broadening error (second-order term) and t2/tau-grid
-# discretization error (third-order Kondo term) on top of what the ED
-# path has -- but with a properly-converged grid (see above) this should
-# be a genuinely tight, meaningful check, not a coincidence of a loose
-# tolerance
-assert diff < 0.15*np.max(np.abs(dIdV_ed))
+# ~10%, not machine precision: the DMRG path carries KPM delta-broadening
+# error and t2/tau-grid discretization error on top of what the ED path
+# has. At these settings the residual is dominated by the *second-order*
+# term's KPM broadening (~10% at the step thresholds, measured directly);
+# the third-order Kondo term's own two-time grid error is ~15% of a term
+# that is itself ~50x smaller here, i.e. a negligible part of the total.
+assert diff < 0.12*np.max(np.abs(dIdV_ed))
 
 import matplotlib.pyplot as plt
 

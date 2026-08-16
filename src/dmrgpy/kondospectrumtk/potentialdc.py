@@ -5,10 +5,14 @@ from .stepfunctions import F0, Theta0
 # third_order_potential_dIdV) via the dynamical correlator, the DMRG-side
 # counterpart of secondorder_dc.py's second_order_dIdV_dc -- same idea,
 # different kernel. conductance.third_order_potential_dIdV's T=0 limit
-# (ks.p one-hot on the ground state) collapses its i,m sum to
-#   Theta0(eV) * sum_m sum_k |<m|Sk|GS>|^2 [F0(eV-eps_m0)+F0(eV+eps_m0)]
-# (k running over Sx,Sy,Sz, matching that function's Xi[a,b,alpha] stack)
-# and sum_m |<m|Sk|GS>|^2 delta(w-eps_m0) is exactly the T=0 dynamical
+# (ks.p one-hot on the ground state) collapses its i,m sum, per tunneling
+# direction, to
+#   h(eV) = Theta0(eV) * sum_m sum_k |<m|Sk|GS>|^2 [F0(eV-eps_m0)+F0(eV+eps_m0)]
+# (k running over Sx,Sy,Sz, matching that function's Xi[a,b,alpha] stack),
+# with the measured term the odd combination h(eV)-h(-eV) over the two
+# tunneling directions (eq. "asym_U"; see conductance.py's module
+# docstring).
+# sum_m |<m|Sk|GS>|^2 delta(w-eps_m0) is exactly the T=0 dynamical
 # structure factor S_kk(w) that get_dynamical_correlator already computes
 # -- so the m-sum becomes an F0-weighted convolution of S_kk against the
 # es frequency grid, in the same spirit as second_order_dIdV_dc's
@@ -42,10 +46,10 @@ def third_order_potential_dIdV_dc(chain, site, eVs, Jrho_s, U, T0=1.0,
     """T=0 third-order potential-interference dI/dV (eq. "U-M"), computed
     via the dynamical correlator instead of the explicit excited-state
     sum conductance.third_order_potential_dIdV uses -- see module
-    docstring. Matches that function's return convention and carries the
-    same LOWER CONFIDENCE caveat (general-S extrapolation from the
-    paper's worked S=1/2 example -- see third_order_potential_dIdV's own
-    docstring) on top of the usual delta/es-resolution error already
+    docstring. Matches that function's return convention (both tunneling
+    directions included, so the result is odd in eV) and carries the same
+    general-S extrapolation caveat -- see third_order_potential_dIdV's own
+    docstring -- on top of the usual delta/es-resolution error already
     present in second_order_dIdV_dc.
 
     delta/es: see second_order_dIdV_dc's docstring -- es is required for
@@ -62,8 +66,15 @@ def third_order_potential_dIdV_dc(chain, site, eVs, Jrho_s, U, T0=1.0,
             "eigenstate transition energy relevant to this system, which "
             "the eVs sweep range alone does not determine")
     ops = (chain.Sx[site], chain.Sy[site], chain.Sz[site])
-    weighted = sum(_convolved_F0_weight(chain, op, eVs, omega0, Gamma0,
+    # both tunneling directions, as h(eV)-h(-eV) (eq. "asym_U", see
+    # conductance.third_order_potential_dIdV). Sweeping [eVs, -eVs] in one
+    # array keeps this to a single dynamical-correlator call per operator
+    # -- S(w) does not depend on eV, only the F0 kernel does.
+    nev = len(eVs)
+    both = np.concatenate([eVs, -eVs])
+    weighted = sum(_convolved_F0_weight(chain, op, both, omega0, Gamma0,
                                          mode, submode, delta, es, **kwargs)
                    for op in ops)
-    total = weighted*Theta0(eVs)
+    h = weighted*Theta0(both)
+    total = h[:nev] - h[nev:]
     return 4*np.pi*T0**2*Jrho_s*U*total

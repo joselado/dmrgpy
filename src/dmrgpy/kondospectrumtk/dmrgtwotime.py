@@ -186,9 +186,17 @@ def two_time_kondo_term_dmrg(chain, site, eVs, omega0=20e-3, Gamma0=5e-6,
     dt2/n_t2_half and dtau/n_tau_half set the (uniform) time grids in
     each leg and have no default (all four required): see twotime.py's
     module docstring for the resolution/range requirements (K_W needs t2
-    spacing finer than 1/omega0 and a range wider than several/Gamma0;
-    the Hilbert-transform-based Theta0 filter is comparatively forgiving
-    about dtau/n_tau_half). There is no numeric default that is both
+    spacing finer than 1/omega0 and a range wider than several/Gamma0).
+    The Hilbert-transform-based Theta0 filter is NOT as forgiving about
+    dtau/n_tau_half as this docstring used to claim: measured directly on
+    a pure exponential, its error near a threshold (eV ~ eps_f, where the
+    step it is reproducing is discontinuous) is O(0.2-0.7) on a unit step
+    for the small grids these examples use, and it is *non-monotone* in
+    the tau window width -- widening the window while keeping the point
+    count fixed can make it substantially worse. Treat any coarse-grid
+    result as indicative only, and converge dtau/n_tau_half explicitly
+    against edtwotimeref.py before trusting numbers near a threshold.
+    There is no numeric default that is both
     correct and practical to pick automatically: a grid fine/wide enough
     to actually resolve the default omega0/Gamma0 (e.g. dt2 ~ 1/omega0,
     t2 range ~ 25/Gamma0) needs order 10^5-10^6 t2 checkpoints, each its

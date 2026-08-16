@@ -2942,10 +2942,11 @@ stepfunctions.py` re-derives both from the paper's own unambiguous
 defining integrals instead, each independently verified against
 digitized values from the paper's own figures. See that module's
 docstring and `docs/user_guide.md`'s §17 for the full derivation notes
-and the feature's other scope limitations (single tip-coupled site,
-third-order terms are single-direction only, the potential-scattering
-interference term's general-spin form is an extrapolation from the
-paper's own worked example).
+and the feature's other scope limitations (single tip-coupled site, the
+potential-scattering interference term's general-spin form is an
+extrapolation from the paper's own worked example) -- as well as the
+normalization conventions, which every term's prefactor is checked
+against via the paper's absolutely scaled Figs. 3b/3d.
 
 **`mode="DMRG"`** (`T=0` only) is a second, independent route through
 this same feature that *does* stay within `itensor_version=3`, never

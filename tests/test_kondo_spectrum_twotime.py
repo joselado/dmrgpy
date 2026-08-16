@@ -92,5 +92,5 @@ def test_two_time_kondo_term_matches_eigenstate_sum():
         tau_width=2*np.pi/2e-5, tau_npts=1_000)
     ref = third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0)
 
-    assert np.max(np.abs(mine-ref)) < 0.02
-    assert np.max(np.abs(mine-ref)) < 0.05*np.max(np.abs(ref)) # also a relative check
+    assert np.max(np.abs(mine-ref)) < 0.01
+    assert np.max(np.abs(mine-ref)) < 0.01*np.max(np.abs(ref)) # also a relative check

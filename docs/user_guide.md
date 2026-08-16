@@ -1712,7 +1712,7 @@ eV, dIdV = sc.get_kondo_spectrum(eV_grid, site=0, Jrho_s=-0.05, U=0.25,
 **Second order** (`order=2`) is the plain spin-flip/potential-scattering
 Fermi golden rule result,
 
-$$\frac{\partial I}{\partial V}(eV)\propto\sum_{i,f}p_i\Big[\tfrac12|\langle f|S_-|i\rangle|^2+\tfrac12|\langle f|S_+|i\rangle|^2+|\langle f|S_z|i\rangle|^2\Big]\,\Theta(eV-\epsilon_{if})+U^2$$
+$$\frac{\partial I}{\partial V}(eV)\propto\sum_{i,f}p_i\Big[\tfrac12|\langle f|S_-|i\rangle|^2+\tfrac12|\langle f|S_+|i\rangle|^2+|\langle f|S_z|i\rangle|^2\Big]\,\Theta(eV-\epsilon_{if})+4U^2$$
 
 summed over both tunneling directions, with $p_i$ the Boltzmann
 occupation of eigenstate $i$ at temperature $T$ and $\Theta$ a
@@ -1731,20 +1731,28 @@ into two peaks under a Zeeman field), and — when `U!=0` — a
 potential-scattering interference term responsible for a bias-asymmetric
 lineshape.
 
+**Both tunneling directions** are summed at every order, since the
+measured $dI/dV$ is for the net current $I=I^{t\to s}-I^{s\to t}$. For
+unpolarized tip and sample the matrix elements are direction independent,
+so writing $g(eV)$ for the $t\to s$ expression the measured terms are
+
+$$\frac{\partial I}{\partial V}\Big|_{\rm 2nd,\,Kondo}=g(eV)+g(-eV),\qquad\frac{\partial I}{\partial V}\Big|_{U\text{-}M}=g(eV)-g(-eV).$$
+
+The relative sign is fixed by the paper's own worked $S=1/2$ example: the
+purely Kondo-like processes contribute with the *same* sign in both
+directions, while the potential-scattering ones change sign when the
+tunneling direction is inverted. So the second-order and third-order
+Kondo terms are **even** in bias (the zero-field Kondo resonance sits
+exactly at $eV=0$), and the potential-interference term is **odd** (zero
+at $eV=0$) — that term is the sole source of bias asymmetry in the
+spectrum.
+
 **Scope and known limitations**, worth reading before trusting specific
 numbers:
 
 - Only a single chain site couples to the tip (`site=`); the paper's own
   model allows several sites with independent tip couplings, not
   implemented here.
-- The third-order terms (`order=3`) are $\partial I^{t\to s}/\partial V$
-  only, not the full bidirectional net-current derivative that
-  `order=2` provides. The paper never gives a general $t\leftrightarrow
-  s$ formula for them — its own worked $S=1/2$ example shows the two
-  directions are related by more than a plain $eV\to-eV$ mirror, so no
-  such generalization is attempted here. This mainly affects the
-  *symmetry* of the returned third-order spectrum, not its second-order
-  part.
 - The paper's own closed-form equations for two numerical building
   blocks — the temperature-broadened step $\Theta(x)$ and the
   temperature-broadened Kondo log function $F(\epsilon,T)$ — do not
@@ -1758,8 +1766,23 @@ numbers:
 - The potential-interference term's general-spin closed form (`U!=0` in
   `order=3`) is an extrapolation from the paper's own worked $S=1/2$
   example (only that special case is spelled out in closed form in the
-  paper) and carries lower confidence than the other terms; treat it as
-  provisional.
+  paper). Its overall normalization is nonetheless pinned down, together
+  with every other prefactor in the spectrum, by the paper's absolutely
+  scaled Figs. 3b/3d — see below.
+- **Normalization is checked against absolute figure values.** Figs. 3b
+  and 3d of the paper are plotted in absolute units ($e^2T_0^2/h$), so
+  their zero-bias peak heights (1.13 at $U=0$, 1.39 at $U=0.25$, for a
+  single $S=1/2$ at $B=0$, $T=1\,$K, $J\rho_s=-0.05$, $\omega_0=20\,$meV)
+  fix every prefactor at once. `examples/kondo/kondo_spectrum_VS_paper/`
+  and `tests/test_kondo_spectrum.py` assert on them directly. In
+  particular they fix the spin-average normalization ("SA factor"): the
+  paper's spin-averaged transition matrix element (its own
+  eq. for $|M_{if}|^2$) is twice the plain electron-spin trace, so the
+  third-order Levi-Civita coefficient is $\mathrm{Im}[X]/2$ and the
+  elastic potential channel is $4|U|^2$ rather than the bare $|U|^2$ of
+  the printed $|\mathcal{M}^{(1)}|^2$ equation — see
+  `kondospectrumtk/conductance.py`'s module docstring for the full
+  bookkeeping.
 
 **T=0 and the DMRG backend** (`mode="DMRG"`). At $T=0$ only the ground
 state is thermally populated, which simplifies both terms enough to
@@ -1801,7 +1824,11 @@ cannot enumerate excited states the way `mode="ED"` does:
   above, needing no excited-state enumeration either
   (`kondospectrumtk/potentialdc.py`). Carries the same general-spin
   extrapolation caveat as `conductance.third_order_potential_dIdV` (see
-  that function's docstring).
+  that function's docstring). All three DMRG-side routines sum over both
+  tunneling directions exactly as their `mode="ED"` counterparts do —
+  only the closed-form kernels depend on $eV$, so the $s\to t$ direction
+  costs nothing beyond evaluating them a second time at $-eV$ (the
+  expensive dynamical correlator / $G(t_2,\tau)$ is still built once).
 
 Further `mode="DMRG"` limitations beyond the general ones above: the
 second-order term's `es`

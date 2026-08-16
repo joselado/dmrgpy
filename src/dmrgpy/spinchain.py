@@ -172,11 +172,12 @@ class Spin_Chain(Many_Body_Chain):
               third-order Kondo function F(eps,T)
           order: 2 for the second-order (Fermi golden rule) term alone, 3
               to add the third-order Kondo and (if U!=0) potential-
-              interference terms. The third-order terms are d(I^{t->s})/dV
-              only -- see third_order_kondo_dIdV's docstring for why (the
-              paper never gives a general t<->s formula for them); the
-              second-order term is the full, bidirectional net-current
-              derivative.
+              interference terms. Every term is the full, bidirectional
+              net-current derivative: the two tunneling directions add for
+              the second-order and third-order Kondo terms (both even in
+              eV) and subtract for the potential-interference term (odd in
+              eV, the origin of the bias asymmetry) -- see
+              kondospectrumtk/conductance.py's module docstring.
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via

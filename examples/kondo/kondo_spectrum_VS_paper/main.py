@@ -21,6 +21,13 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # quantitatively against the paper's own plotted values (digitized by eye
 # from Fig. F(b)), and the assembled spectrum against the qualitative
 # shapes described in the text and shown in Figs. 2 and 3.
+#
+# Figs. 3b/3d are plotted in ABSOLUTE units (e^2 T0^2/h), which makes them
+# a much stronger check than the shapes alone: their zero-bias peak values
+# (1.13 at U=0, 1.39 at U=0.25) simultaneously pin down every prefactor in
+# the third-order spectrum. Asserting on them here caught three real
+# normalization/structure bugs at once -- see kondospectrumtk/
+# conductance.py's module docstring for what they were.
 import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import spinchain
@@ -61,17 +68,20 @@ eVs3 = np.linspace(-span, span, 61)
 _, d2_only = sc0.get_kondo_spectrum(eVs3, site=0, T=1.0, order=2)
 _, d3_total = sc0.get_kondo_spectrum(eVs3, site=0, Jrho_s=-0.05, T=1.0, order=3)
 # with U=0 second order is exactly flat at B=0 (fully degenerate levels);
-# the third-order Kondo term must add real structure (a zero-bias feature)
+# the third-order Kondo term must add a resonance centered exactly at
+# eV=0 and symmetric in bias -- both tunneling directions contribute with
+# the same sign (eq. "sym_z"), and every per-process curve of Fig. 3a is
+# drawn symmetric about zero bias
 assert np.allclose(d2_only, d2_only[0])
 assert np.max(np.abs(d3_total - d2_only)) > 0.05*d2_only[0]
+assert np.allclose(d3_total, d3_total[::-1], atol=1e-10) # even in eV
+assert np.argmax(d3_total) == len(eVs3)//2 # peak exactly at zero bias
 
 # --- third order potential-interference term: bias asymmetry (Fig. 3c/d) --
-# Isolate eq. "U-M"'s own contribution (d_U - d_noU): the third-order
-# Kondo term alone (d_noU) is t->s current only (see
-# third_order_kondo_dIdV's docstring) and so is not itself perfectly
-# symmetric in eV either, which would confound a direct d_noU-vs-d_U
-# comparison -- the potential-interference term specifically is what eq.
-# "U-M" says should be bias-asymmetric.
+# Isolate eq. "U-M"'s own contribution: its two tunneling directions enter
+# with opposite signs (eq. "asym_U"), so unlike every other term in the
+# spectrum it is ODD in eV -- which is exactly the antisymmetric "sum"
+# curve of Fig. 3c, and the sole source of bias asymmetry in Fig. 3d.
 from dmrgpy.kondospectrumtk.conductance import third_order_potential_dIdV
 from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 scB = make_chain(10.0)
@@ -80,6 +90,26 @@ ksB = KondoSpectrum(scB, site=0, T=1.0)
 dU_only = third_order_potential_dIdV(ksB, eVs4, Jrho_s=-0.05, U=0.25, T0=1.0)
 assert np.allclose(third_order_potential_dIdV(ksB, eVs4, Jrho_s=-0.05, U=0.0, T0=1.0), 0.)
 assert not np.allclose(dU_only, dU_only[::-1], atol=1e-8) # bias-asymmetric
+assert np.allclose(dU_only, -dU_only[::-1], atol=1e-10) # specifically odd
+
+# --- absolute amplitudes vs Figs. 3b/3d ------------------------------------
+# Figs. 3b/3d are plotted in absolute units (e^2 T0^2/h) for a single
+# S=1/2 at B=0, T=1K, Jrho_s=-0.05, U=0 resp. 0.25 and the paper-default
+# omega0=20meV; get_kondo_spectrum returns 2*pi times those units (its
+# second-order plateau is 2*pi*0.75 where Fig. 3b's dashed curve reads
+# 0.75). Reading the zero-bias peaks off the published figures gives 1.13
+# and 1.39. These pin down the three prefactors nothing else here
+# constrains: the Levi-Civita coefficient Im[X]/2, the sum over both
+# tunneling directions, and the elastic potential channel's 4*|U|^2.
+zero = np.array([0.0])
+_, pk_b = sc0.get_kondo_spectrum(zero, site=0, Jrho_s=-0.05, U=0.0, T=1.0,
+                                  order=3, omega0=20e-3)
+_, pk_d = sc0.get_kondo_spectrum(zero, site=0, Jrho_s=-0.05, U=0.25, T=1.0,
+                                  order=3, omega0=20e-3)
+print("Fig. 3b zero-bias peak: %.3f (paper: 1.13)"%(pk_b[0]/(2*np.pi)))
+print("Fig. 3d zero-bias peak: %.3f (paper: 1.39)"%(pk_d[0]/(2*np.pi)))
+assert abs(pk_b[0]/(2*np.pi) - 1.13) < 0.02
+assert abs(pk_d[0]/(2*np.pi) - 1.39) < 0.02
 
 print("All Kondo-spectrum checks against the paper's Figs. F/2/3 passed.")
 
@@ -124,12 +154,20 @@ axes[0, 0].set_xlabel("eV")
 axes[0, 0].set_ylabel("dI/dV (2nd order)")
 axes[0, 0].set_title("Zeeman step (Fig. 2)")
 
-axes[0, 1].plot(eVs3, d2_only, label="2nd order only")
-axes[0, 1].plot(eVs3, d3_total, label="2nd+3rd order")
-axes[0, 1].set_xlabel("eV")
-axes[0, 1].set_ylabel("dI/dV")
-axes[0, 1].set_title("zero-bias Kondo resonance (Fig. 3a/b)")
-axes[0, 1].legend(fontsize=8)
+# Fig. 3b itself: the zero-field Kondo peak splitting with magnetic field
+eVs_fig3 = np.linspace(-4e-3, 4e-3, 161)
+for Bfield in [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]:
+    _, dfig = make_chain(Bfield).get_kondo_spectrum(
+            eVs_fig3, site=0, Jrho_s=-0.05, U=0.0, T=1.0, order=3, omega0=20e-3)
+    axes[0, 1].plot(eVs_fig3*1e3, dfig/(2*np.pi), label="B=%g T"%Bfield)
+_, dfig2 = make_chain(10.0).get_kondo_spectrum(eVs_fig3, site=0, T=1.0, order=2)
+axes[0, 1].plot(eVs_fig3*1e3, dfig2/(2*np.pi), "k--", lw=1,
+                 label="2nd order, B=10 T")
+axes[0, 1].axhline(1.13, color="gray", lw=0.8, ls=":")
+axes[0, 1].set_xlabel("eV (meV)")
+axes[0, 1].set_ylabel(r"dI/dV ($e^2T_0^2/h$)")
+axes[0, 1].set_title("Kondo peak splitting (Fig. 3b);\ndotted: paper's B=0 peak 1.13")
+axes[0, 1].legend(fontsize=6)
 
 axes[0, 2].plot(eVs4, dU_only, color="tab:red")
 axes[0, 2].axhline(0, color="gray", lw=0.8, ls=":")
@@ -137,16 +175,16 @@ axes[0, 2].set_xlabel("eV")
 axes[0, 2].set_ylabel("dI/dV (potential-interference term)")
 axes[0, 2].set_title("bias asymmetry (Fig. 3c/d)")
 
-axes[1, 0].plot(eVs5, dIdV_T0, "o-", label="T=0 (exact)")
-axes[1, 0].plot(eVs5, dIdV_smallT, "x--", label="T=1e-3 (finite)")
-axes[1, 0].set_xlabel("eV")
+axes[1, 0].plot(eVs5*1e3, dIdV_T0, "o-", label="T=0 (exact)")
+axes[1, 0].plot(eVs5*1e3, dIdV_smallT, "x--", label="T=1e-3 (finite)")
+axes[1, 0].set_xlabel("eV (meV)")
 axes[1, 0].set_ylabel("dI/dV (3rd order)")
 axes[1, 0].set_title("T=0 exact vs small-T limit")
 axes[1, 0].legend(fontsize=8)
 
-axes[1, 1].plot(eVs6, twotime_term, "o-", label="two-time (T=0, TDVP-style)")
-axes[1, 1].plot(eVs6, excited_state_sum_term, "x--", label="excited-state sum")
-axes[1, 1].set_xlabel("eV")
+axes[1, 1].plot(eVs6*1e3, twotime_term, "o-", label="two-time (T=0, TDVP-style)")
+axes[1, 1].plot(eVs6*1e3, excited_state_sum_term, "x--", label="excited-state sum")
+axes[1, 1].set_xlabel("eV (meV)")
 axes[1, 1].set_ylabel("3rd-order Kondo term")
 axes[1, 1].set_title("two-time vs excited-state-sum cross-check")
 axes[1, 1].legend(fontsize=8)

@@ -12,8 +12,12 @@ import numpy as np
 #   G(t2,tau) = <GS|Sl(t2+tau) Sk(t2) Sj(0)|GS>
 #             = sum_{f,m} <GS|Sl|f><f|Sk|m><m|Sj|GS> * exp(-i*eps_f0*tau) * exp(-i*eps_m0*t2)
 # so that
-#   Term(eV) = sum_{f,m} [...] * Theta0(eV-eps_f0) * (F0(eV-eps_m0)+F0(eV+eps_m0))
-#            = integral dtau dt2  K_theta(tau;eV) * K_W(t2;eV) * G(t2,tau)
+#   g(eV) = sum_{f,m} [...] * Theta0(eV-eps_f0) * (F0(eV-eps_m0)+F0(eV+eps_m0))
+#         = integral dtau dt2  K_theta(tau;eV) * K_W(t2;eV) * G(t2,tau)
+# with the measured term summed over both tunneling directions,
+#   Term(eV) = g(eV) + g(-eV)
+# (see conductance.py's module docstring for why the Kondo term's two
+# directions add rather than cancel, and for the Im[...]/2 normalization)
 # for two closed-form time-domain kernels K_theta, K_W derived below by
 # inverse-Fourier-transforming Theta0(eV-.) and F0(eV-.)+F0(eV+.) --
 # avoiding ever having to evaluate a discontinuous step or the F0 log
@@ -108,21 +112,34 @@ def kondo_term_from_two_time(t2_grid, tau_grid, G_batches, eVs, omega0, Gamma0):
     needs at least two points to have any width to integrate over.
 
     Returns an array of real-valued Term(eV), one per eVs entry (already
-    includes the Im[...]/4 from Re[X/(4i)]=Im[X]/4, matching eq.
-    "3rd-normal"'s prefactor convention in conductance.py -- multiply by
-    4*pi*T0^2*Jrho_s for the full third-order Kondo dI/dV contribution,
-    exactly as conductance.third_order_kondo_dIdV does for its own
-    (excited-state-sum-based) construction)."""
+    includes the Im[...]/2 spin-average normalization and the sum over
+    both tunneling directions, matching conductance.py's own conventions
+    exactly -- multiply by 4*pi*T0^2*Jrho_s for the full third-order
+    Kondo dI/dV contribution, as
+    conductance.third_order_kondo_dIdV does for its own
+    (excited-state-sum-based) construction).
+
+    Both tunneling directions are handled here rather than by the callers
+    so that edtwotimeref.py, dmrgtwotime.py and Spin_Chain's mode="DMRG"
+    path all inherit them from one place. Only the two closed-form
+    kernels depend on eV, so the s->t direction is obtained by evaluating
+    them at -eV as well (eq. "sym_z": the Kondo term's two directions add,
+    giving a result even in eV) -- G(t2,tau), the expensive part, is still
+    built in a single pass over G_batches regardless of how many eV
+    points are swept."""
     eVs = np.atleast_1d(np.asarray(eVs, dtype=float))
-    totals = np.zeros(len(eVs), dtype=complex)
+    nev = len(eVs)
+    both = np.concatenate([eVs, -eVs]) # t->s, then s->t
+    totals = np.zeros(len(both), dtype=complex)
     dt2 = t2_grid[1] - t2_grid[0]
     t2_first, t2_last = t2_grid[0], t2_grid[-1]
     for t2_chunk, G_chunk in G_batches:
         weights = np.full(len(t2_chunk), dt2)
         weights[np.isclose(t2_chunk, t2_first)] *= 0.5
         weights[np.isclose(t2_chunk, t2_last)] *= 0.5
-        for i, eV in enumerate(eVs):
+        for i, eV in enumerate(both):
             h_t2 = theta0_filter(tau_grid, G_chunk, eV)
             kw = K_W(t2_chunk, eV, omega0, Gamma0)
             totals[i] += np.sum(kw*h_t2*weights)
-    return np.imag(totals)/4.
+    out = np.imag(totals)/2. # SA factor 2 -- see conductance.py's docstring
+    return out[:nev] + out[nev:]
