@@ -255,8 +255,29 @@ def _term_site_matrices(op_term, sites_uc, n_uc):
     tests/test_infinite_chain.py's
     test_term_site_matrices_matches_autompo_resolve."""
     coef = op_term[0]
+    factors = [(name, site) for name, site in op_term[1:]]
+    # Reordering the factors into site order is a *fermionic* reordering:
+    # every pair of fermionic operators swapped past each other contributes
+    # a sign. `autompo.HTerm.add()` applies exactly this while
+    # insertion-sorting, which is why `HTerm.resolve()` (working on
+    # already-sorted factors) never has to; this function sorts by site
+    # itself, so it has to supply the sign itself too.
+    #
+    # Omitting it made `Cdag_1 C_0` and `C_0 Cdag_1` come out identical,
+    # when they differ by exactly -1 -- checked against HTerm.add's own
+    # coefficient. Not reachable through today's public API (the only
+    # infinite chain class is Infinite_Spin_Chain, and spin operators are
+    # not fermionic), but it is the same latent class as the endpoint-F
+    # omission fixed alongside it, and the two halves are easy to fix apart
+    # and leave broken together.
+    for x in range(len(factors)):
+        for y in range(x + 1, len(factors)):
+            if (factors[x][1] > factors[y][1]
+                    and is_fermionic(factors[x][0])
+                    and is_fermionic(factors[y][0])):
+                coef = -coef
     by_site = {}
-    for name, site in op_term[1:]:
+    for name, site in factors:
         by_site.setdefault(site, []).append(name)
     rel_sites = sorted(by_site)
     mats, ferm = [], []

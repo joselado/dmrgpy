@@ -68,16 +68,25 @@ def _four_pt_site_sort_sign(site_list):
     picked up by reordering a product of operators at those sites into
     site-sorted order.
 
-    `autompo.HTerm.resolve()` buckets a term's factors `by_site` and walks
-    the chain left to right, so it composes same-site factors in their
-    original order but silently *drops* the sign that reordering across
-    different sites must produce. Every pair of fermionic operators at
-    distinct sites anticommutes, so the correction is the parity of the
-    sorting permutation, counting only pairs whose sites actually differ
-    (same-site pairs keep their relative order and contribute nothing).
-    Verified against the AutoMPO+to_mpo+inner pipeline this replaces on 67
-    tuples (7 hand-picked plus 60 random) -- without it, tuples such as
-    Cdag_1 C_1 Cdag_3 C_2 come out with a flipped sign."""
+    `autompo.HTerm.resolve()` does not supply this, because by the time it
+    runs the factors are already site-sorted: `HTerm.add()` inserts each
+    factor in site order and applies the anticommutation sign incrementally
+    as it goes. Callers that bypass `HTerm` -- like the local folds here,
+    which resolve per-site matrices directly -- have to supply it
+    themselves, and this is that sign.
+
+    It is deliberately the *simple* form of `HTerm.add()`'s rule, valid
+    because every factor in a four-point <Cdag C Cdag C> string is
+    fermionic: then the correction is just the parity of the sorting
+    permutation, counting pairs whose sites differ (same-site pairs keep
+    their relative order and contribute nothing). `HTerm.add()` is the
+    general version, which also has to check *which* of the operators it
+    passes are fermionic. `test_four_pt_sign_agrees_with_hterm` pins the two
+    against each other so this cannot drift.
+
+    Verified against the AutoMPO+to_mpo+inner pipeline these folds replace
+    on 67 tuples (7 hand-picked plus 60 random) -- without it, tuples such
+    as Cdag_1 C_1 Cdag_3 C_2 come out with a flipped sign."""
     inv = 0
     for x in range(len(site_list)):
         for y in range(x + 1, len(site_list)):

@@ -224,3 +224,27 @@ def test_repeated_tuple_enumeration_is_exact():
         assert len(got) == len(set(got))
         assert len(got) == n**4 - n * (n - 1) * (n - 2) * (n - 3)
         assert all(len(set(t)) < 4 for t in got)
+
+
+def test_four_pt_sign_agrees_with_hterm():
+    """`_four_pt_site_sort_sign` is a second implementation of the
+    anticommutation sign `autompo.HTerm.add()` already applies while
+    insertion-sorting a term's factors. Pin them against each other over
+    every site pattern a four-point tuple can have, so the simplified form
+    (valid because all four factors are fermionic) cannot drift from the
+    general one."""
+    import itertools
+    from dmrgpy.pyitensor.autompo import HTerm
+    from dmrgpy.pyitensor.chain import _four_pt_site_sort_sign
+
+    n = 4
+    for i, j, k, l in itertools.product(range(n), repeat=4):
+        ht = HTerm(1.0)
+        for name, site in (("Cdag", i + 1), ("C", j + 1),
+                           ("Cdag", k + 1), ("C", l + 1)):
+            ht.add(name, site)
+        # HTerm folds the sign into its coefficient while sorting
+        assert ht.coef.real == _four_pt_site_sort_sign((i, j, k, l)), (i, j, k, l)
+        assert abs(ht.coef.imag) < 1e-15
+        # and the sorted factor order is what resolve() then consumes
+        assert [s for _nm, s in ht.ops] == sorted([i + 1, j + 1, k + 1, l + 1])

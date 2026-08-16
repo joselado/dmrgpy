@@ -1530,3 +1530,43 @@ def test_term_site_matrices_rejects_odd_total_fermion_parity():
         idmrg._term_site_matrices([1.0, ["C", 0]], sites_uc, 2)
     with pytest.raises(ValueError):
         idmrg._term_site_matrices([1.0, ["Cdag", 0], ["N", 1]], sites_uc, 2)
+
+def test_term_site_matrices_applies_the_cross_site_reordering_sign():
+    """`_term_site_matrices` sorts a term's factors by site itself, so it
+    must supply the fermionic anticommutation sign that sorting implies --
+    `autompo.HTerm.resolve()` never has to, because `HTerm.add()` already
+    applied it while insertion-sorting.
+
+    Without it `Cdag_1 C_0` and `C_0 Cdag_1` come out identical when they
+    differ by exactly -1. Pinned against `HTerm.add`'s own coefficient, which
+    is the authoritative implementation of the rule, over every 2-factor
+    fermionic ordering plus random even-parity terms."""
+    import random
+    from dmrgpy.pyitensor.autompo import HTerm
+    from dmrgpy.pyitensor.sites import SiteX
+
+    sites_uc = SiteX([_FERMION_SITE_CODE, _FERMION_SITE_CODE])
+
+    def coef_of(ops):
+        _rel, coef, _mats, _ferm = idmrg._term_site_matrices([1.0] + ops, sites_uc, 2)
+        ht = HTerm(1.0)
+        for nm, st in ops:
+            ht.add(nm, st + 1)
+        return coef, ht.coef
+
+    # the specific pair that motivated this
+    a, b = coef_of([["Cdag", 1], ["C", 0]])
+    assert a == b == -1
+    a, b = coef_of([["C", 0], ["Cdag", 1]])
+    assert a == b == 1
+
+    random.seed(11)
+    for _ in range(200):
+        ops = []
+        for _ in range(random.choice([1, 2])):
+            ops.append([random.choice(["C", "Cdag"]), random.randint(0, 1)])
+            ops.append([random.choice(["C", "Cdag"]), random.randint(0, 1)])
+        if random.random() < 0.3:
+            ops.insert(random.randint(0, len(ops)), ["N", random.randint(0, 1)])
+        got, expected = coef_of(ops)
+        assert abs(got - expected) < 1e-12, (ops, got, expected)
