@@ -68,10 +68,16 @@ def test_free_fermion_reference_matches_ed():
     strongest possible check of the reference's own sign/timing
     conventions, since ED is exact regardless of system size for a chain
     this small. See `_free_fermion_reference.py`'s own docstring for why
-    a `+dt` time shift and a complex conjugate are needed here (the ED
-    backend's own "evolve-then-measure" `ts`/`cs` off-by-one and its own
-    sign convention for `evolve()` -- both internal to
-    edtk/timedependent.py, unrelated to idmrg_window.py)."""
+    a complex conjugate is needed here (a sign convention internal to
+    edtk/tdtk.py's `evolve()`, unrelated to idmrg_window.py).
+
+    This used to additionally shift `ts_ed` by `+dt` to compensate for the
+    ED backend's own "evolve-then-measure" off-by-one -- `cs[0]` was the
+    value at `t=dt` while `ts[0]` said `t=0`. That was fixed at the source
+    (every backend now measures before evolving, see timedependent.py's
+    evolution_dmrg_DC docstring), so the shift is gone and `ts_ed` is used
+    as-is; this test would fail by ~6e-3 if either the fix or this
+    compensating shift were reverted on its own."""
     n, J = 8, 1.0
     sc = spinchain.Spin_Chain([2 for _ in range(n)])
     h = 0
@@ -90,8 +96,7 @@ def test_free_fermion_reference_matches_ed():
         mean_x = sc.vev(sc.Sz[x], mode="ED").real
         conn_ed = np.array(cs_ed) - mean_x * mean_y0
 
-        ts_shifted = np.array(ts_ed) + dt
-        conn_ff = np.conj(np.array([ff.sz_sz_connected(x, y0, t) for t in ts_shifted]))
+        conn_ff = np.conj(np.array([ff.sz_sz_connected(x, y0, t) for t in np.array(ts_ed)]))
         max_err = max(max_err, np.max(np.abs(conn_ed - conn_ff)))
     assert max_err < 1e-9
 

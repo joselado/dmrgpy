@@ -13,6 +13,7 @@ cover the feature.
 import numpy as np
 import pytest
 
+from dmrgpy import cppext
 from dmrgpy import fermionchain
 from dmrgpy import spinchain
 from dmrgpy import timedependent
@@ -491,3 +492,83 @@ def test_mps_copy_is_independent_under_python_backend():
 
     val_after = inner(wf.cpp_handle, Aop, wf.cpp_handle)
     assert val_after == pytest.approx(val_before, abs=1e-10)
+
+
+def test_correlator_starts_at_t0_on_every_backend():
+    """Every real-time evolution loop measures *before* evolving, so
+    `correlator[k]` is the value at `t = k*dt` and lines up with the
+    `ts = [0, dt, ...]` grid returned alongside it (see
+    timedependent.py's evolution_dmrg_DC docstring, and
+    docs/documentation.md 4.8a-bis).
+
+    Regression test for a real bug: the loops used to evolve first and
+    measure after, making `correlator[k]` the value at `(k+1)*dt` while
+    still labelling it `k*dt`. Pinned here by the one value that is known
+    in closed form with no time evolution at all -- C(0) = <A B> -- which
+    the old convention missed by O(dt) (0.2409/0.2477/0.2494 for
+    dt=0.2/0.1/0.05 against an exact 0.25).
+    """
+    n = 8
+    sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
+    sc.set_hamiltonian(h)
+    i = n // 2
+    A, B = sc.Sz[i].get_dagger(), sc.Sz[i]
+    # evolution_DC conjugates its output, so compare against conj(<A B>)
+    c0 = np.conjugate(sc.vev(A * B, mode="ED"))
+    # evolution_DC() called directly (rather than through
+    # get_dynamical_correlator, which does this itself) needs the session
+    # to already hold a ground state -- set_hamiltonian only stores the
+    # MultiOperator on the Python object, it doesn't push it to _session.
+    sc.gs_energy()
+
+    ts, cs = timedependent.evolution_DC(sc, name=(A, B), nt=10, dt=0.1, mode="ED")
+    assert ts[0] == 0.0
+    assert cs[0] == pytest.approx(c0, abs=1e-8)
+
+    for version in (2, 3):
+        if not cppext.available(version):
+            continue
+        scv = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
+        scv.setup_cpp(version=version)
+        scv.set_hamiltonian(h)
+        scv.gs_energy()  # see the comment above
+        tsv, csv = timedependent.evolution_DC(
+                scv, name=(scv.Sz[i].get_dagger(), scv.Sz[i]), nt=10, dt=0.1)
+        assert tsv[0] == 0.0
+        assert csv[0] == pytest.approx(c0, abs=1e-6)
+
+
+def test_td_dynamical_correlator_is_dt_independent():
+    """submode="TD" must give the same spectrum for the same total
+    evolution time regardless of the step size used to reach it -- the
+    Fourier transform approximates a dt-independent integral.
+
+    Regression test for the same bug as above, from the other end: by
+    dropping C(0) (the largest sample) from the Riemann sum, the old
+    evolve-then-measure convention left an O(dt*C(0)) error that did not
+    vanish as nt grew at fixed total time. The spectral weight moved 75%
+    across dt=0.1/0.05/0.025 for a C(t) that is itself dt-independent to
+    5e-5; it now converges instead. predict=False so this measures the
+    transform, not linear prediction's own dt sensitivity.
+    """
+    n = 8
+    sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
+    sc.set_hamiltonian(h)
+    i = n // 2
+    name = (sc.Sz[i], sc.Sz[i])
+    es = np.linspace(-1.0, 6.0, 200)
+
+    weights = []
+    for dt in (0.1, 0.05):
+        _e, y = sc.get_dynamical_correlator(name=name, submode="TD", es=es,
+                                             delta=0.2, dt=dt, predict=False)
+        weights.append(np.trapezoid(y.imag, es))
+    # halving dt must not move the answer more than the O(dt^2) residual
+    # of the Riemann sum -- it used to move it by ~50%
+    assert weights[1] == pytest.approx(weights[0], rel=0.05)

@@ -494,10 +494,13 @@ class Chain:
         norm0 = np.sqrt(inner(psi1, psi1))
         correlator = []
         for _ in range(nt):
+            # Measure before evolving, so correlator[k] is C(k*dt),
+            # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            # pairs it with -- see evolution_dmrg_DC()'s own comment there.
+            correlator.append(inner(psi2, psi1))
             psi1 = self._apply_mpo(expH, psi1, x0=psi1) if fit_td else self._apply_mpo(expH, psi1)
             psi1.normalize()
             psi1 = psi1 * norm0
-            correlator.append(inner(psi2, psi1))
         return correlator, psi1
 
     def evolve_and_measure(self, terms_h, terms_op, wf, nt, dt, fit_td=True):
@@ -507,8 +510,11 @@ class Chain:
         psi = wf
         correlator = []
         for _ in range(nt):
-            psi = self._apply_mpo(expH, psi, x0=psi) if fit_td else self._apply_mpo(expH, psi)
+            # Measure before evolving, so correlator[k] is C(k*dt),
+            # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            # pairs it with -- see evolution_dmrg_DC()'s own comment there.
             correlator.append(inner(psi, A, psi))
+            psi = self._apply_mpo(expH, psi, x0=psi) if fit_td else self._apply_mpo(expH, psi)
         return correlator, psi
 
     def quench_tdvp(self, terms_h, terms_i, terms_j, nt, dt):
@@ -526,10 +532,13 @@ class Chain:
         norm0 = np.sqrt(inner(psi1, psi1))
         correlator = []
         for _ in range(nt):
+            # Measure before evolving, so correlator[k] is C(k*dt),
+            # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            # pairs it with -- see evolution_dmrg_DC()'s own comment there.
+            correlator.append(inner(psi2, psi1))
             psi1 = _tdvp_step_fn(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
             psi1.normalize()
             psi1 = psi1 * norm0
-            correlator.append(inner(psi2, psi1))
         return correlator, psi1
 
     def evolve_and_measure_tdvp(self, terms_h, terms_op, wf, nt, dt):
@@ -547,8 +556,11 @@ class Chain:
         psi = wf.copy()
         correlator = []
         for _ in range(nt):
-            psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
+            # Measure before evolving, so correlator[k] is C(k*dt),
+            # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            # pairs it with -- see evolution_dmrg_DC()'s own comment there.
             correlator.append(inner(psi, A, psi))
+            psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
         return correlator, psi
 
     def quench_tdvp_gse(self, terms_h, terms_i, terms_j, nt, dt, gse_sweeps,
@@ -572,13 +584,16 @@ class Chain:
         norm0 = np.sqrt(inner(psi1, psi1))
         correlator = []
         for it in range(nt):
+            # Measure before evolving, so correlator[k] is C(k*dt),
+            # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            # pairs it with -- see evolution_dmrg_DC()'s own comment there.
+            correlator.append(inner(psi2, psi1))
             if it < gse_sweeps:
                 psi1 = self.global_subspace_expand(Hshift, psi1, krylov_order, gse_cutoff)
             psi1 = _tdvp_step_fn(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm,
                     niter=50, num_center=1)
             psi1.normalize()
             psi1 = psi1 * norm0
-            correlator.append(inner(psi2, psi1))
         return correlator, psi1
 
     def evolve_and_measure_tdvp_gse(self, terms_h, terms_op, wf, nt, dt, gse_sweeps,
@@ -591,11 +606,14 @@ class Chain:
         psi = wf.copy()
         correlator = []
         for it in range(nt):
+            # Measure before evolving, so correlator[k] is C(k*dt),
+            # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            # pairs it with -- see evolution_dmrg_DC()'s own comment there.
+            correlator.append(inner(psi, A, psi))
             if it < gse_sweeps:
                 psi = self.global_subspace_expand(H, psi, krylov_order, gse_cutoff)
             psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm,
                     niter=50, num_center=1)
-            correlator.append(inner(psi, A, psi))
         return correlator, psi
 
     def quench_tebd(self, terms_h, terms_i, terms_j, nt, dt):
@@ -622,10 +640,11 @@ class Chain:
         norm0 = np.sqrt(inner(psi1, psi1))
         correlator = []
         for _ in range(nt):
+            # Measure before evolving -- see quench()'s own comment.
+            correlator.append(inner(psi2, psi1))
             psi1 = evolver.step(psi1)
             psi1.normalize()
             psi1 = psi1 * norm0
-            correlator.append(inner(psi2, psi1))
         return correlator, psi1
 
     def evolve_and_measure_tebd(self, terms_h, terms_op, wf, nt, dt):
@@ -638,8 +657,9 @@ class Chain:
         psi = wf.copy()
         correlator = []
         for _ in range(nt):
-            psi = evolver.step(psi)
+            # Measure before evolving -- see quench()'s own comment.
             correlator.append(inner(psi, A, psi))
+            psi = evolver.step(psi)
         return correlator, psi
 
     def cvm_dynamical_correlator(self, terms_i, terms_j, omega, eta, energy, tol, max_it):

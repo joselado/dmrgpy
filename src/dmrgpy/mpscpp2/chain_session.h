@@ -614,11 +614,16 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure *before* evolving, so correlator[k] is C(k*dt),
+            // matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            // pairs it with -- see the "measure before evolving" comment
+            // on evolution_dmrg_DC() there. Same fix as mpscpp3/
+            // chain_session.h's copies of these two loops.
+            out.correlator.push_back(overlapC(psi2,psi1));
             if (fit_td) fitApplyMPO(psi1,expH,psi1,args);
             else psi1 = exactApplyMPO(expH,psi1,args);
             normalize(psi1);
             psi1 *= norm0;
-            out.correlator.push_back(overlapC(psi2,psi1));
             }
         out.final_wf = psi1;
         return out;
@@ -642,9 +647,14 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure *before* evolving, so correlator[k] is C(k*dt),
+            // matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            // pairs it with -- see the "measure before evolving" comment
+            // on evolution_dmrg_DC() there. Same fix as mpscpp3/
+            // chain_session.h's copies of these two loops.
+            out.correlator.push_back(overlapC(psi,A,psi));
             if (fit_td) fitApplyMPO(psi,expH,psi,args);
             else psi = exactApplyMPO(expH,psi,args);
-            out.correlator.push_back(overlapC(psi,A,psi));
             }
         out.final_wf = psi;
         return out;

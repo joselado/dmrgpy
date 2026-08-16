@@ -1016,11 +1016,16 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure *before* evolving, so correlator[k] is C(k*dt),
+            // matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            // pairs it with -- see the "measure before evolving" comment
+            // on evolution_dmrg_DC() there for why the old
+            // evolve-then-measure order was a real (not cosmetic) bug.
+            out.correlator.push_back(innerC(psi2,psi1));
             if (fit_td) psi1 = apply_mpo(expH,psi1,psi1,args);
             else psi1 = apply_mpo(expH,psi1,args);
             psi1.normalize();
             psi1 *= norm0;
-            out.correlator.push_back(innerC(psi2,psi1));
             }
         out.final_wf = psi1;
         return out;
@@ -1039,9 +1044,14 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure *before* evolving, so correlator[k] is C(k*dt),
+            // matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            // pairs it with -- see the "measure before evolving" comment
+            // on evolution_dmrg_DC() there for why the old
+            // evolve-then-measure order was a real (not cosmetic) bug.
+            out.correlator.push_back(innerC(psi,A,psi));
             if (fit_td) psi = apply_mpo(expH,psi,psi,args);
             else psi = apply_mpo(expH,psi,args);
-            out.correlator.push_back(innerC(psi,A,psi));
             }
         out.final_wf = psi;
         return out;
@@ -1093,10 +1103,15 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure *before* evolving, so correlator[k] is C(k*dt),
+            // matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            // pairs it with -- see the "measure before evolving" comment
+            // on evolution_dmrg_DC() there for why the old
+            // evolve-then-measure order was a real (not cosmetic) bug.
+            out.correlator.push_back(innerC(psi2,psi1));
             psi1 = tdvp_step(Hshift,psi1,dt);
             psi1.normalize();
             psi1 *= norm0;
-            out.correlator.push_back(innerC(psi2,psi1));
             }
         out.final_wf = psi1;
         return out;
@@ -1113,8 +1128,13 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
-            psi = tdvp_step(H,psi,dt);
+            // Measure *before* evolving, so correlator[k] is C(k*dt),
+            // matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
+            // pairs it with -- see the "measure before evolving" comment
+            // on evolution_dmrg_DC() there for why the old
+            // evolve-then-measure order was a real (not cosmetic) bug.
             out.correlator.push_back(innerC(psi,A,psi));
+            psi = tdvp_step(H,psi,dt);
             }
         out.final_wf = psi;
         return out;
@@ -1151,12 +1171,14 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure before evolving -- see the matching comment in
+            // quench() above.
+            out.correlator.push_back(innerC(psi2,psi1));
             if (it<gse_sweeps)
                 psi1 = global_subspace_expand(Hshift,psi1,krylov_order,gse_cutoff,0);
             psi1 = tdvp_step(Hshift,psi1,dt,1);
             psi1.normalize();
             psi1 *= norm0;
-            out.correlator.push_back(innerC(psi2,psi1));
             }
         out.final_wf = psi1;
         return out;
@@ -1175,10 +1197,12 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure before evolving -- see the matching comment in
+            // quench() above.
+            out.correlator.push_back(innerC(psi,A,psi));
             if (it<gse_sweeps)
                 psi = global_subspace_expand(H,psi,krylov_order,gse_cutoff,0);
             psi = tdvp_step(H,psi,dt,1);
-            out.correlator.push_back(innerC(psi,A,psi));
             }
         out.final_wf = psi;
         return out;
@@ -1225,10 +1249,12 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
+            // Measure before evolving -- see the matching comment in
+            // quench() above.
+            out.correlator.push_back(innerC(psi2,psi1));
             tebd_step(psi1,gates,cutoff_,maxm_);
             psi1.normalize();
             psi1 *= norm0;
-            out.correlator.push_back(innerC(psi2,psi1));
             }
         out.final_wf = psi1;
         return out;
@@ -1246,8 +1272,10 @@ class Chain
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
-            tebd_step(psi,gates,cutoff_,maxm_);
+            // Measure before evolving -- see the matching comment in
+            // quench() above.
             out.correlator.push_back(innerC(psi,A,psi));
+            tebd_step(psi,gates,cutoff_,maxm_);
             }
         out.final_wf = psi;
         return out;

@@ -54,6 +54,34 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     Real-time quench dynamical correlator via the in-process pybind11
     extension.
 
+    **Measure before evolving.** Every backend's evolution loop
+    (Chain::quench*/evolve_and_measure* in mpscpp2/mpscpp3, the same
+    methods in pyitensor/chain.py, mpsjulialive/{tdvp,tebd}.jl, and
+    edtk/timedependent.py) records its observable at the *top* of the
+    step loop, so `correlator[k]` is the value at `t = k*dt` and lines up
+    with the `ts = [0, dt, ..., (nt-1)*dt]` grid returned just below.
+
+    This used to be the other way round -- evolve first, measure after --
+    which made `correlator[k]` the value at `(k+1)*dt` while still
+    labelling it `k*dt`. That was not cosmetic. It put a spurious
+    `exp(i*omega*dt)` phase on the Fourier transform, and, worse, it
+    dropped `C(0)` -- the single largest sample -- from the Riemann sum in
+    `_fourier_transform_correlator` entirely, leaving an O(dt*C(0)) error
+    in every submode="TD" spectrum that did *not* vanish as `nt` grew at
+    fixed total time. Confirmed directly on an L=10 Heisenberg chain:
+    `correlator[0]` came back as 0.2409/0.2477/0.2494 for dt=0.2/0.1/0.05
+    against an exact C(0)=<A B>=0.25 (the imaginary part halving exactly
+    with dt), and the resulting spectral weight moved 75% across
+    dt=0.1/0.05/0.025 (-0.105/-0.159/-0.184) for a C(t) that is itself
+    dt-independent to 5e-5. With the measurement moved to the top of the
+    loop the same sweep gives -0.2047/-0.2061/-0.2065, i.e. converging
+    rather than drifting, and `correlator[0]` reproduces C(0) to 1e-13 on
+    all of itensor_version 2, 3, "python" and mode="ED".
+
+    Because the ED path uses the identical convention, every
+    DMRG-vs-ED cross-check in tests/ and examples/ compares like with
+    like; the fix changes both sides together.
+
     Defaults to TDVP (mpscpp3/chain_session.h's Chain::quench_tdvp(), see
     TDVP/ and self.tevol_method) for itensor_version=3 or "python" (the
     pure-Python backend has its own TDVP, see pyitensor/tdvp.py); falls

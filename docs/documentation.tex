@@ -3251,6 +3251,47 @@ opportunity: $\exp(-iHt)$ makes the evolved state genuinely complex
 whatever the MPO's type, so only the $H$-side of each contraction gets
 cheaper there.
 
+\subsubsection{Time-grid convention: measure before evolving}
+
+Every real-time evolution loop in the library ---
+\texttt{Chain::quench*} / \texttt{Chain::evolve\_and\_measure*} in
+\texttt{mpscpp2/} and \texttt{mpscpp3/}, their counterparts in
+\texttt{pyitensor/chain.py}, \texttt{mpsjulialive/\{tdvp,tebd\}.jl}, and
+\texttt{edtk/timedependent.py}'s \texttt{evolution\_ABC}/
+\texttt{evolution\_DC} --- records its observable at the \textbf{top} of
+the step loop. \texttt{correlator[k]} is therefore the value at
+$t=k\,dt$, matching the \texttt{ts = [0, dt, ..., (nt-1)*dt]} grid
+\texttt{timedependent.py} returns alongside it.
+
+This was previously the other way round (evolve, then measure), which
+made \texttt{correlator[k]} the value at $(k+1)dt$ while still labelling
+it $k\,dt$. The consequences were real, not cosmetic:
+
+\begin{itemize}
+\item a spurious $e^{i\omega\,dt}$ phase on the Fourier transform, and
+\item more seriously, $C(0)$ --- the largest sample --- was omitted from
+the Riemann sum in \texttt{\_fourier\_transform\_correlator} altogether,
+leaving an $O(dt\cdot C(0))$ error in every \texttt{submode="TD"}
+spectrum that did \textbf{not} vanish as \texttt{nt} grew at fixed total
+time.
+\end{itemize}
+
+Confirmed on an $L=10$ Heisenberg chain: \texttt{correlator[0]} came back
+as 0.2409 / 0.2477 / 0.2494 for $dt=$ 0.2 / 0.1 / 0.05 against an exact
+$C(0)=\langle AB\rangle=0.25$, its imaginary part halving exactly with
+$dt$; and the \texttt{submode="TD"} spectral weight moved 75\% across
+$dt=$ 0.1 / 0.05 / 0.025 ($-0.105$ / $-0.159$ / $-0.184$) for a $C(t)$
+that is itself $dt$-independent to 5e-5. After the fix the same sweep
+gives $-0.2047$ / $-0.2061$ / $-0.2065$ --- converging rather than
+drifting --- and \texttt{correlator[0]} reproduces $C(0)$ to $10^{-13}$
+on \texttt{itensor\_version} 2, 3, \texttt{"python"} and
+\texttt{mode="ED"} alike.
+
+All backends were changed together, ED included, so every DMRG-vs-ED
+cross-check in \texttt{tests/} and \texttt{examples/} still compares like
+with like. \texttt{submode="TD"} results from before this change are not
+comparable with results from after it.
+
 \subsection{Non-Hermitian KPM (NH-KPM)}
 
 For a non-Hermitian Hamiltonian, \texttt{dynamics.py}/

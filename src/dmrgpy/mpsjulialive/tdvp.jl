@@ -64,6 +64,11 @@ function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim)
 	psi = wf
 	correlator = ComplexF64[]
 	for it=1:nt
+		# Measure before evolving, so correlator[k] is C((k-1)*dt) and
+		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
+		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
+		# the C++/pyitensor/ED copies of this loop.
+		push!(correlator,inner(psi,Aop,psi))
 		psi = tdvp_step(Hmpo,psi,dt,cutoff,maxdim)
 		# norm(), not inner(psi,psi): tdvp_step's own orthogonalize!(psi,1)
 		# leaves psi with a well-defined orthogonality center, so norm()
@@ -72,7 +77,6 @@ function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim)
 		# own norm(::AbstractMPS) source and a live benchmark (~4ms vs
 		# ~1.18s on a N=40,D=60 state).
 		psi = psi*(norm0/norm(psi))
-		push!(correlator,inner(psi,Aop,psi))
 	end
 	return correlator,psi
 end
@@ -105,12 +109,16 @@ function quench_tdvp(Hshiftmpo,A1mpo,A2mpo,wf0,nt,dt,cutoff,maxdim)
 	norm0 = sqrt(abs(inner(psi1,psi1)))
 	correlator = ComplexF64[]
 	for it=1:nt
+		# Measure before evolving, so correlator[k] is C((k-1)*dt) and
+		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
+		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
+		# the C++/pyitensor/ED copies of this loop.
+		push!(correlator,inner(psi2,psi1))
 		psi1 = tdvp_step(Hshiftmpo,psi1,dt,cutoff,maxdim)
 		# norm(), not inner(psi1,psi1) -- see evolve_and_measure_tdvp's
 		# comment above: tdvp_step's own orthogonalize!(psi,1) guarantees
 		# this short-circuits to the cheap O(D^2) path.
 		psi1 = psi1*(norm0/norm(psi1))
-		push!(correlator,inner(psi2,psi1))
 	end
 	return correlator,psi1
 end
@@ -173,11 +181,15 @@ function evolve_and_measure_tdvp_gse(Hmpo, Aop, wf, nt, dt, cutoff, maxdim,
 	psi = wf
 	correlator = ComplexF64[]
 	for it = 1:nt
+		# Measure before evolving, so correlator[k] is C((k-1)*dt) and
+		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
+		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
+		# the C++/pyitensor/ED copies of this loop.
+		push!(correlator, inner(psi, Aop, psi))
 		if it <= gse_sweeps
 			psi = gse_expand(Hmpo, psi, krylov_order, gse_cutoff, maxdim)
 		end
 		psi = tdvp_step_onesite(Hmpo, psi, dt, cutoff, maxdim)
-		push!(correlator, inner(psi, Aop, psi))
 	end
 	return correlator, psi
 end
@@ -190,6 +202,11 @@ function quench_tdvp_gse(Hshiftmpo, A1mpo, A2mpo, wf0, nt, dt, cutoff, maxdim,
 	norm0 = sqrt(abs(inner(psi1, psi1)))
 	correlator = ComplexF64[]
 	for it = 1:nt
+		# Measure before evolving, so correlator[k] is C((k-1)*dt) and
+		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
+		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
+		# the C++/pyitensor/ED copies of this loop.
+		push!(correlator, inner(psi2, psi1))
 		if it <= gse_sweeps
 			psi1 = gse_expand(Hshiftmpo, psi1, krylov_order, gse_cutoff, maxdim)
 		end
@@ -198,7 +215,6 @@ function quench_tdvp_gse(Hshiftmpo, A1mpo, A2mpo, wf0, nt, dt, cutoff, maxdim,
 		# (its psi1 carries A1's physical scale through the trajectory,
 		# see quench_tdvp above).
 		psi1 = psi1 * (norm0 / norm(psi1))
-		push!(correlator, inner(psi2, psi1))
 	end
 	return correlator, psi1
 end

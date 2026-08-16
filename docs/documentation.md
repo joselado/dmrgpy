@@ -2792,6 +2792,41 @@ The modest C++ `TD` figure is expected rather than a missed opportunity:
 `exp(-iHt)` makes the evolved state genuinely complex whatever the MPO's
 type, so only the H-side of each contraction gets cheaper there.
 
+#### 4.8a-bis Time-grid convention: measure before evolving
+
+Every real-time evolution loop in the library — `Chain::quench*` /
+`Chain::evolve_and_measure*` in `mpscpp2/` and `mpscpp3/`, their
+counterparts in `pyitensor/chain.py`, `mpsjulialive/{tdvp,tebd}.jl`, and
+`edtk/timedependent.py`'s `evolution_ABC`/`evolution_DC` — records its
+observable at the **top** of the step loop. `correlator[k]` is therefore
+the value at `t = k*dt`, matching the `ts = [0, dt, ..., (nt-1)*dt]` grid
+`timedependent.py` returns alongside it.
+
+This was previously the other way round (evolve, then measure), which
+made `correlator[k]` the value at `(k+1)*dt` while still labelling it
+`k*dt`. The consequences were real, not cosmetic:
+
+- a spurious `exp(i*omega*dt)` phase on the Fourier transform, and
+- more seriously, `C(0)` — the largest sample — was omitted from the
+  Riemann sum in `_fourier_transform_correlator` altogether, leaving an
+  `O(dt*C(0))` error in every `submode="TD"` spectrum that did **not**
+  vanish as `nt` grew at fixed total time.
+
+Confirmed on an L=10 Heisenberg chain: `correlator[0]` came back as
+0.2409 / 0.2477 / 0.2494 for `dt` = 0.2 / 0.1 / 0.05 against an exact
+`C(0) = <A B> = 0.25`, its imaginary part halving exactly with `dt`; and
+the `submode="TD"` spectral weight moved 75% across `dt` = 0.1 / 0.05 /
+0.025 (−0.105 / −0.159 / −0.184) for a `C(t)` that is itself
+`dt`-independent to 5e-5. After the fix the same sweep gives −0.2047 /
+−0.2061 / −0.2065 — converging rather than drifting — and
+`correlator[0]` reproduces `C(0)` to 1e-13 on `itensor_version` 2, 3,
+`"python"` and `mode="ED"` alike.
+
+All backends were changed together, ED included, so every DMRG-vs-ED
+cross-check in `tests/` and `examples/` still compares like with like.
+`submode="TD"` results from before this change are not comparable with
+results from after it.
+
 ### 4.8b Non-Hermitian KPM (NH-KPM)
 
 For a non-Hermitian Hamiltonian, `dynamics.py`/`edtk/dynamics.py`'s

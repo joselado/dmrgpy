@@ -304,9 +304,13 @@ function quench_tebd(ls, sites, A1mpo, A2mpo, wf0, nt, dt, cutoff, maxdim)
 	norm0 = sqrt(abs(inner(psi1, psi1)))
 	correlator = ComplexF64[]
 	for it = 1:nt
+		# Measure before evolving, so correlator[k] is C((k-1)*dt) and
+		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
+		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
+		# the C++/pyitensor/ED copies of this loop.
+		push!(correlator, inner(psi2, psi1))
 		psi1 = tebd_step!(psi1, gates, cutoff, maxdim)
 		psi1 = psi1 * (norm0 / norm(psi1))
-		push!(correlator, inner(psi2, psi1))
 	end
 	return correlator, psi1
 end
@@ -325,9 +329,13 @@ function evolve_and_measure_tebd(ls, sites, Aop, wf, nt, dt, cutoff, maxdim)
 	norm0 = sqrt(abs(inner(psi, psi)))
 	correlator = ComplexF64[]
 	for it = 1:nt
+		# Measure before evolving, so correlator[k] is C((k-1)*dt) and
+		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
+		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
+		# the C++/pyitensor/ED copies of this loop.
+		push!(correlator, inner(psi, Aop, psi))
 		psi = tebd_step!(psi, gates, cutoff, maxdim)
 		psi = psi * (norm0 / norm(psi))
-		push!(correlator, inner(psi, Aop, psi))
 	end
 	return correlator, psi
 end

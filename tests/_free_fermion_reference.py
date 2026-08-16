@@ -44,19 +44,20 @@ evolution_DC(mode="ED")`) on an 8-site open chain: matches to ~1e-12
 independent, pre-existing conventions in the ED/C++ backends that this
 class's own formula does not need:
 
-  1. `edtk/timedependent.py::evolution_DC` (and identically
-     `mpscpp3::quench_tdvp`/`quench`) evolve *before* measuring on every
+  1. (RESOLVED -- kept here because it explains this class's own history.)
+     `edtk/timedependent.py::evolution_DC` and the DMRG backends'
+     `quench`/`quench_tdvp`/... used to evolve *before* measuring on every
      loop iteration (`wf = evolve(wf,ht,dt); ...; cs.append(...)`), so
-     `cs[0]` is actually the value at `t=dt`, not `t=0`, despite `ts =
-     dt*arange(nt)` labeling it `t=0` -- a genuine, separate, pre-existing
-     off-by-one in that convention's own `ts`/`cs` correspondence
-     (confirmed directly: this class's own `t=0` value exactly matches
-     `cs[0]` only after shifting by `+dt`). `idmrg_window.py`'s own
-     `dynamical_correlator_td` does not have this bug (it measures
-     *before* evolving each step -- confirmed by its own
-     `test_dynamical_correlator_td_matches_exact_static_correlator_at_t0`)
-     -- this class's `t=0` matches *that* convention's `ts[0]` directly,
-     with no shift needed.
+     `cs[0]` was actually the value at `t=dt`, not `t=0`, despite `ts =
+     dt*arange(nt)` labeling it `t=0` -- a genuine off-by-one in that
+     convention's own `ts`/`cs` correspondence, which this class's own
+     `t=0` value exposed (it matched `cs[0]` only after shifting by
+     `+dt`). That has since been fixed at the source on every backend --
+     they all measure before evolving now, see timedependent.py's
+     `evolution_dmrg_DC` docstring -- so no shift is needed any more.
+     `idmrg_window.py`'s own `dynamical_correlator_td` never had the bug
+     (confirmed by its own
+     `test_dynamical_correlator_td_matches_exact_static_correlator_at_t0`).
   2. The ED backend's own `S(x,t)` comes out as the *complex conjugate*
      of this class's own convention (a sign convention internal to
      `edtk/tdtk.py`'s `evolve()`, unrelated to the off-by-one above).

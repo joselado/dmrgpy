@@ -23,10 +23,18 @@ def evolution_ABC(self,h,A=None,B=None,C=None,wf=None,nt=100,dt=0.01):
     wfC = Cop@wf # apply operator
     cs = [] # empty list
     for it in range(nt): # loop
-        wfA = evolve(wfA,Hop,t=dt,dt=dt) # evolve wavefunction
-        wfC = evolve(wfC,Hop,t=dt,dt=dt) # evolve wavefunction
+        # Measure *before* evolving, so cs[k] is the t=k*dt value and lines
+        # up with the ts grid built above -- same fix, and same reason, as
+        # evolution_DC() below and the DMRG backends' own copies of this
+        # loop (see timedependent.py's evolution_dmrg_DC()). This function
+        # backs evolve_and_measure()/evolution_ABA() on the ED side, which
+        # tests/test_time_evolution.py compares directly against the DMRG
+        # backends step by step -- so it has to use the identical
+        # convention or every such comparison is off by one step.
         c = np.conjugate(wfC)@Bop@wfA # compute braket
         cs.append(c) # store value
+        wfA = evolve(wfA,Hop,t=dt,dt=dt) # evolve wavefunction
+        wfC = evolve(wfC,Hop,t=dt,dt=dt) # evolve wavefunction
     cs = np.array(cs) # to array
     return ts,cs # return
 
@@ -57,10 +65,18 @@ def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,**kwargs):
     cs = [] # empty list
     ht = Hop + e0[0]*identity(Hop.shape[0],dtype=np.complex128)
     for it in range(nt): # loop
-        wf = evolve(wf,ht,t=dt,dt=dt) # evolve wavefunction
-        wf = wf.reshape((wf.shape[0]))
+        # Measure *before* evolving, so cs[k] is C(k*dt) and lines up with
+        # the ts=[0,dt,...,(nt-1)*dt] grid built above -- see the
+        # "measure before evolving" comment on timedependent.py's
+        # evolution_dmrg_DC() for why the old evolve-then-measure order was
+        # a real bug (it dropped C(0), the largest sample, from the Fourier
+        # sum, leaving an O(dt) error in every submode="TD" spectrum). Kept
+        # in lockstep with the DMRG backends' own copies of this loop so
+        # ED stays a valid cross-check of them.
         c = wfc@Bop@wf # store
         cs.append(c) # store value
+        wf = evolve(wf,ht,t=dt,dt=dt) # evolve wavefunction
+        wf = wf.reshape((wf.shape[0]))
     cs = np.array(cs) # to array
     return ts,cs # return
 
