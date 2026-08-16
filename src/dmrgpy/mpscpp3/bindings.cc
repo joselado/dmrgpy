@@ -77,6 +77,18 @@ PYBIND11_MODULE(_dmrgcpp, m)
           "Build a tiny spin-1/2 chain via the vendored ITensor library and "
           "return a trace, confirming the extension actually links against "
           "and executes ITensor code (not just imports).");
+    m.def("set_realify_spin_terms",
+          [](bool enabled) { realify_spin_terms_enabled() = enabled; },
+          py::arg("enabled"),
+          "Enable/disable (default: enabled) the Sy -> (S+ - S-)/(2i) "
+          "rewrite every AutoMPO build goes through -- see mo_terms.h. It is "
+          "an exact representation change whose only effect is that a real "
+          "Hamiltonian written with Sy yields a real-valued MPO (and hence "
+          "real DMRG/KPM/TDVP arithmetic) instead of a complex one; process-"
+          "global, exposed so a test can check both paths agree numerically.");
+    m.def("get_realify_spin_terms",
+          []() { return realify_spin_terms_enabled(); },
+          "Whether the Sy-elimination rewrite is currently enabled.");
 
     // module_local(): without it, pybind11 registers "MPS"/"MPO"/"Chain" in
     // a process-wide type registry keyed by typeid() -- and since

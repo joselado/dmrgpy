@@ -71,7 +71,16 @@ from .svd import qr_split, svd
 from .tensor import ITensor
 
 
-def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12):
+# Convergence target for the Krylov exponentiation below, matching the
+# compiled backend's own hard-wired value: ITensor's applyExp()
+# (iterativesolvers.h) defaults its "ErrGoal" to 1e-10, and
+# mpscpp3/chain_session.h's tdvp_step() never overrides it. Not exposed as
+# a knob for the same reason `niter` isn't on that side.
+_KRYLOV_ERRGOAL = 1e-10
+
+
+def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
+                            errgoal=_KRYLOV_ERRGOAL):
     """expm(coeff * A) @ v0 for a Hermitian linear operator A (given as a
     matvec function) via a Krylov (Lanczos) subspace of dimension up to
     `niter`: build an orthonormal basis {v0, A v0, A^2 v0, ...} via the
@@ -82,6 +91,26 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12):
     Krylov-propagator technique for real-time quantum dynamics; this is
     what tdvp_step()'s "niter=50 bounds the Lanczos iterations" comment in
     mpscpp3/chain_session.h refers to on the compiled-backend side.
+
+    `niter` is an upper *bound*, not the iteration count: the recursion
+    stops as soon as the Krylov approximation has converged, measured by
+    Saad's a posteriori residual estimate (Y. Saad, SIAM J. Numer. Anal.
+    29, 209 (1992), Sec. 5.1)
+
+        err_k ~ ||v0|| * beta_k * |e_k^T exp(coeff T_k) e_1|,
+
+    i.e. the size of the coupling from the last basis vector actually kept
+    into the one the recursion would build next -- the same quantity the
+    compiled backend's applyExp() (ITensor's iterativesolvers.h) tests via
+    its Expokit-style extended-T-matrix correction. `c` (the first column of
+    exp(coeff*T_k)) is needed to assemble the result anyway, so this test
+    costs one extra eigh_tridiagonal of the k x k projected matrix per
+    iteration -- O(k^2), against an O(D^3) MPS-level matvec -- and nothing
+    else. Without it this function ran the full `niter` matvecs on *every*
+    local update of *every* bond of *every* TDVP step, whether or not the
+    subspace had converged 40 iterations earlier: with the callers' niter=50,
+    a submode="TD" dynamical correlator on an L=30 Heisenberg chain spent
+    1082 s where ~9 matvecs per call suffice.
 
     Reorthogonalization is done as two BLAS matrix-vector products against
     the (preallocated, incrementally filled) basis built so far, not a
@@ -106,28 +135,41 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12):
     alphas = []
     betas = []
 
-    w = matvec(Q[:, 0])
-    alpha = np.vdot(Q[:, 0], w).real
-    alphas.append(alpha)
-    w = w - alpha * Q[:, 0]
-    k = 1
-    while k < m:
-        beta = np.linalg.norm(w)
-        if beta < tol:
-            break
-        betas.append(beta)
-        Qprev = Q[:, :k]  # every vector built so far, *excluding* the new one
-        Q[:, k] = w / beta
-        w = matvec(Q[:, k])
-        alpha = np.vdot(Q[:, k], w).real
-        alphas.append(alpha)
-        w = w - alpha * Q[:, k] - beta * Qprev[:, -1]
-        w = w - Qprev @ (Qprev.conj().T @ w)
-        k += 1
+    def exp_first_column(k):
+        """First column of exp(coeff * T_k), T_k the k x k projected
+        (real, symmetric tridiagonal) matrix built so far."""
+        if k == 1:
+            return np.array([np.exp(coeff * alphas[0])], dtype=complex)
+        evals, evecs = _eigh_tridiagonal_robust(np.array(alphas[:k]),
+                                                 np.array(betas[:k - 1]))
+        return evecs @ (np.exp(coeff * evals) * evecs[0, :])
 
-    evals, evecs = _eigh_tridiagonal_robust(np.array(alphas), np.array(betas))
-    exp_col0 = evecs @ (np.exp(coeff * evals) * evecs[0, :])
-    return beta0 * (Q[:, :k] @ exp_col0)
+    beta = 0.0
+    for it in range(m):
+        w = matvec(Q[:, it])
+        alpha = np.vdot(Q[:, it], w).real
+        alphas.append(alpha)
+        w = w - alpha * Q[:, it]
+        if it > 0:
+            w = w - beta * Q[:, it - 1]
+        Qk = Q[:, :it + 1]  # every basis vector built so far
+        w = w - Qk @ (Qk.conj().T @ w)
+        beta = np.linalg.norm(w)
+
+        k = it + 1
+        exp_col0 = exp_first_column(k)
+        # beta < tol is Lanczos-sequence exhaustion (the Krylov space is
+        # A-invariant and the approximation is exact); it == m-1 exhausts
+        # the caller's iteration budget; otherwise stop once Saad's
+        # residual estimate is below errgoal.
+        if (beta < tol or it == m - 1
+                or beta0 * beta * abs(exp_col0[-1]) < errgoal):
+            return beta0 * (Qk @ exp_col0)
+
+        betas.append(beta)
+        Q[:, it + 1] = w / beta
+
+    raise AssertionError("unreachable: the it == m-1 branch always returns")
 
 
 def _eigh_tridiagonal_robust(alphas, betas):

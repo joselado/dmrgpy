@@ -3159,6 +3159,98 @@ in \texttt{chain\_session.h} on the C++ side;
 rather than by direct spectral decomposition, since exact
 diagonalization of the full spectrum is infeasible for large chains.
 
+\subsubsection{Cost of the dynamical-correlator submodes, and what makes
+them fast}
+
+Both \texttt{submode="KPM"} and \texttt{submode="TD"} are dominated by one
+inner loop repeated hundreds of times --- the Chebyshev recursion
+$a_{k+1}=2Ha_k-a_{k-1}$ for KPM, the TDVP step for TD --- so their wall
+time is set almost entirely by the cost of a single MPO application /
+local Krylov solve. Three backend-internal choices dominate that cost;
+each is invisible at the API level (every number reported is unchanged),
+but each is worth knowing about when reading or extending these paths.
+Reference point throughout: an $L=30$ $S=1/2$ Heisenberg chain,
+\texttt{delta=0.2}, default \texttt{maxm=30}/\texttt{kpmmaxm=50}, one BLAS
+thread (see the backend-performance section and
+\texttt{src/dmrgpy/blasthreads.py} on why thread pinning comes first).
+
+\paragraph{Real- vs complex-valued MPOs (\texttt{mpscpp3/mo\_terms.h}).}
+ITensor decides whether an MPO's tensors are real or complex from the
+AutoMPO \emph{coefficients} only; the per-site operator matrices go in
+unexamined. \texttt{Sy} is purely imaginary (\texttt{spinhalf.h} sets
+$\pm 0.5i$), so the textbook dmrgpy Heisenberg Hamiltonian
+$S^x\!\cdot\!S^x + S^y\!\cdot\!S^y + S^z\!\cdot\!S^z$ --- all coefficients
+real --- still produces a \emph{complex} MPO, even though the operator it
+represents is real in the $S^z$ basis. DMRG's ground state then comes out
+complex too, and every subsequent \texttt{applyMPO}/\texttt{sum}/
+\texttt{inner} runs in complex arithmetic. Since
+$S^y=(S^+-S^-)/(2i)$ exactly (any spin $S$) and a real Hamiltonian
+contains \texttt{Sy} an even number of times per term,
+\texttt{build\_ampo()} expands \texttt{Sy} --- and $S^x=(S^++S^-)/2$
+alongside it, which is what lets AutoMPO see the exact
+$S^x\!\cdot\!S^x+S^y\!\cdot\!S^y=(S^+\!\cdot\!S^-+S^-\!\cdot\!S^+)/2$
+cancellation rather than growing the MPO bond dimension --- into products
+of the \emph{real} ladder operators, with a real overall coefficient.
+Measured at bond dimension 50: \texttt{applyMPO} 4.4x,
+\texttt{sum(MPS,MPS)} 3.0x, \texttt{inner} 3.2x. The rewrite is gated
+(real coefficients, even \texttt{Sy} count per term, at most four
+\texttt{Sx}/\texttt{Sy} factors, and the sites must actually define
+\texttt{S+}/\texttt{S-}, which keeps it away from Z3/Z4 clock operators
+whose complexity is genuine) and can be turned off process-wide with
+\texttt{mpscpp3.\_dmrgcpp.set\_realify\_spin\_terms(False)} --- used by
+\texttt{tests/test\_dynamical\_correlator.py} to check both paths agree.
+It is \texttt{mpscpp3}-only: \texttt{mpscpp2} is untouched, and
+\texttt{pyitensor} stores every tensor as \texttt{complex128} by design
+(\texttt{pyitensor/tensor.py}), so there is nothing for it to win there.
+
+\paragraph{Krylov convergence in the pure-Python TDVP
+(\texttt{pyitensor/tdvp.py}).} \texttt{\_lanczos\_expm\_multiply} builds a
+Krylov subspace up to \texttt{niter} (its callers pass 50, matching the
+compiled backend's \texttt{MaxIter}) and exponentiates the projected
+tridiagonal matrix. \texttt{niter} is an upper \emph{bound}, not the
+iteration count: the recursion stops as soon as Saad's a posteriori
+residual estimate $\|v\|\,\beta_k\,|e_k^T \exp(c\,T_k)e_1|$ falls below
+$10^{-10}$ --- the same convergence target ITensor's own
+\texttt{applyExp()} (\texttt{iterativesolvers.h}) uses via its
+Expokit-style extended-$T$-matrix correction. The first column of
+$\exp(c\,T_k)$ is needed to assemble the result anyway, so the test costs
+one extra \texttt{eigh\_tridiagonal} of a $k\times k$ matrix per iteration
+against an $O(D^3)$ MPS-level matvec. Typical convergence is under ten
+iterations, so running the full 50 unconditionally was the single largest
+cost in the pure-Python \texttt{submode="TD"} path.
+
+\paragraph{Truncation via the smaller Gram matrix
+(\texttt{pyitensor/svd.py}).} Every truncation in the pure-Python engine
+is ``reshape across an index partition, factorize, keep the largest
+singular values''. Those matrices are strongly rectangular --- MPS bond
+dimension $\times$ physical dimension on one side, MPS bond dimension
+$\times$ MPO bond dimension on the other --- and at most \texttt{maxdim}
+vectors are ever kept. \texttt{\_svd\_truncated()} therefore
+eigendecomposes the smaller of $MM^\dagger$ / $M^\dagger M$ and recovers
+the kept factor on the other side with one matmul, the same trick
+ITensor's own \texttt{densityMatrixApplyMPOImpl} uses. It falls back to
+the exact SVD whenever the smallest \emph{kept} singular value drops below
+$10^{-7}$ of the largest, where the squared spectrum stops resolving it
+--- so this is a speedup, never a silent accuracy trade.
+
+Net effect at the reference point (before $\to$ after):
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+backend & KPM & TD \\
+\hline
+\texttt{itensor\_version=3} & 67.4 s $\to$ 19.6 s (3.4x) & 128.5 s $\to$ 110.2 s (1.17x) \\
+\texttt{itensor\_version="python"} & 57.4 s $\to$ 37.4 s (1.5x) & 1081.7 s $\to$ 156.0 s (6.9x) \\
+\hline
+\end{tabular}
+\end{center}
+
+The modest C++ \texttt{TD} figure is expected rather than a missed
+opportunity: $\exp(-iHt)$ makes the evolved state genuinely complex
+whatever the MPO's type, so only the $H$-side of each contraction gets
+cheaper there.
+
 \subsection{Non-Hermitian KPM (NH-KPM)}
 
 For a non-Hermitian Hamiltonian, \texttt{dynamics.py}/

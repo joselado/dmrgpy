@@ -291,3 +291,81 @@ def test_finite_T_dynamical_correlator_independent_of_es_window():
     y2_on_x1 = np.interp(x1, x2, y2.real)
 
     assert y1.real == pytest.approx(y2_on_x1, abs=1e-6)
+
+
+def test_realify_spin_terms_matches_verbatim_ampo():
+    """The Sy -> (S+ - S-)/(2i) rewrite every mpscpp3 AutoMPO build goes
+    through (mo_terms.h's build_ampo(), see docs/documentation.md 4.8a) is a
+    pure representation change: it exists so a real Hamiltonian written the
+    textbook dmrgpy way -- Sx.Sx + Sy.Sy + Sz.Sz -- yields a *real*-valued
+    MPO instead of a complex one (ITensor picks the MPO's element type from
+    the AutoMPO coefficients alone, and never notices that the `Sy` site
+    matrix itself is purely imaginary), which makes every downstream
+    applyMPO/sum/inner run in real rather than complex arithmetic -- ~3.4x
+    on the L=30 KPM dynamical correlator.
+
+    So it must not move any number. This pins that on the two dynamical-
+    correlator submodes it was written for, plus the ground state and a
+    genuinely-complex observable, by running each one twice with the
+    rewrite enabled and disabled (the process-global
+    set_realify_spin_terms() escape hatch) and comparing:
+
+    * <Sy_i> alone has an *odd* number of Sy factors -- a genuinely
+      imaginary operator -- so should_realify() must decline to rewrite it
+      at all, and it must stay imaginary rather than silently becoming
+      real;
+    * <Sy_i Sy_j> is even, so it *is* rewritten, and must agree with ED.
+    """
+    cppext = pytest.importorskip("dmrgpy.cppext")
+    if not cppext.available(3):
+        pytest.skip("mpscpp3 extension not compiled")
+    from dmrgpy.mpscpp3 import _dmrgcpp
+
+    n = 6
+    es = np.linspace(-1.0, 6.0, 80)
+
+    def run():
+        sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)])
+        h = 0
+        for i in range(n - 1):
+            h = h + (sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+                     + 0.7 * sc.Sz[i] * sc.Sz[i + 1])
+        for i in range(n):
+            h = h + 0.3 * sc.Sx[i] + 0.11 * sc.Sz[i]
+        sc.set_hamiltonian(h)
+        name = (sc.Sz[2], sc.Sz[2])
+        return dict(
+            e0=sc.gs_energy(),
+            e0_ed=sc.gs_energy(mode="ED"),
+            syy=sc.vev(sc.Sy[2] * sc.Sy[3]),
+            syy_ed=sc.vev(sc.Sy[2] * sc.Sy[3], mode="ED"),
+            sy=sc.vev(sc.Sy[2]),
+            kpm=sc.get_dynamical_correlator(name=name, submode="KPM",
+                                             es=es, delta=0.3)[1],
+            td=sc.get_dynamical_correlator(name=name, submode="TD",
+                                            es=es, delta=0.3)[1],
+        )
+
+    try:
+        _dmrgcpp.set_realify_spin_terms(True)
+        assert _dmrgcpp.get_realify_spin_terms()
+        on = run()
+        _dmrgcpp.set_realify_spin_terms(False)
+        off = run()
+    finally:
+        _dmrgcpp.set_realify_spin_terms(True)  # restore the default
+
+    # the rewritten path is still exactly the same physics as ED
+    assert on["e0"] == pytest.approx(on["e0_ed"], abs=1e-8)
+    assert on["syy"].real == pytest.approx(on["syy_ed"].real, abs=1e-6)
+
+    # ...and identical to what the verbatim (complex-MPO) build produces
+    assert on["e0"] == pytest.approx(off["e0"], abs=1e-8)
+    assert on["syy"] == pytest.approx(off["syy"], abs=1e-6)
+    assert on["kpm"] == pytest.approx(off["kpm"], abs=1e-6)
+    assert on["td"] == pytest.approx(off["td"], abs=1e-6)
+
+    # an odd Sy count is left alone: <Sy> stays a (vanishing here, but
+    # genuinely imaginary-typed) quantity on both paths
+    assert abs(on["sy"].real) < 1e-8 and abs(off["sy"].real) < 1e-8
+    assert on["sy"] == pytest.approx(off["sy"], abs=1e-6)
