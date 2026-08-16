@@ -37,6 +37,7 @@ phenomenon this reproduces.
 import numpy as np
 import pytest
 
+from dmrgpy import cppext
 from dmrgpy import fermionchain
 
 DMRG_TOL = 1e-5
@@ -268,3 +269,47 @@ def test_fold_respects_accelerate_flag():
     a = wf.get_four_correlation_tensor(ctmode="fold", accelerate=True)
     b = wf.get_four_correlation_tensor(ctmode="fold", accelerate=False)
     assert np.abs(a - b).max() < 1e-12
+
+
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="requires the compiled mpscpp3 (ITensor v3) extension")
+def test_fold_matches_explicit_on_native_spinful_v3():
+    """The C++ port of the fold (Chain::four_correlation_tensor_fold) against
+    the same exact per-tuple oracle. v3 native spinful previously had only
+    ctmode="full", a per-tuple AutoMPO build that measured *slower* than the
+    pure-Python fold; "fold" is now the default on both backends."""
+    import numpy as np
+    from dmrgpy import fermionchain
+    for n in (3, 4):
+        fc = fermionchain.Spinful_Fermionic_Chain_Native(n, itensor_version=3)
+        h = 0
+        for i in range(n - 1):
+            for f in (0, 1):
+                a, b = 2 * i + f, 2 * (i + 1) + f
+                h = h + fc.Cdag[a] * fc.C[b] + fc.Cdag[b] * fc.C[a]
+        for i in range(n):
+            h = h + 2.0 * (fc.Cdag[2*i] * fc.C[2*i]) * (fc.Cdag[2*i+1] * fc.C[2*i+1])
+        h = h + 0.3 * (fc.Cdag[0] * fc.C[0])
+        fc.set_hamiltonian(h)
+        fc.maxm = 20
+        fc.gs_energy()
+        wf = fc.get_gs()
+        assert np.abs(wf.get_four_correlation_tensor(ctmode="fold")
+                      - wf.get_four_correlation_tensor(ctmode="explicit")).max() < 1e-12
+
+
+def test_ed_backend_rejects_a_non_explicit_ctmode_clearly():
+    """An ED-backed wavefunction has no MPS to sweep or fold. Naming any
+    ctmode at all used to raise `TypeError: got multiple values for keyword
+    argument 'ctmode'` from edchain.py's hardcoded keyword; it now accepts
+    "explicit" and rejects anything else with a message that says why."""
+    from dmrgpy import fermionchain
+    fc = fermionchain.Fermionic_Chain(4)
+    h = 0
+    for i in range(3):
+        h = h + fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+    fc.set_hamiltonian(h)
+    wf = fc.get_gs(mode="ED")
+    wf.get_four_correlation_tensor(ctmode="explicit")   # must not raise
+    with pytest.raises(ValueError):
+        wf.get_four_correlation_tensor(ctmode="sweep")

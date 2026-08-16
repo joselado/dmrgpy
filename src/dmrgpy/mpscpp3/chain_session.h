@@ -2123,6 +2123,120 @@ class Chain
         return out;
         }
 
+    // <Cdag_i C_j Cdag_k C_l> over flat fermionic *modes*, by local operator
+    // folds -- no AutoMPO/MPO is built for any tuple.
+    //
+    // `cdag_names[m]`/`cdag_sites[m]` (and the C pair) give the operator
+    // name and 1-based site of mode m, so this covers a spinless chain
+    // (mode == site, "Cdag"/"C") and a native spinful one (two modes per
+    // ElectronSite, "Cdagup"/"Cup"/"Cdagdn"/"Cdn") with no flavor-aware
+    // logic here: Jordan-Wigner threading comes from the site's own "F" and
+    // running parity, exactly as AutoMPO's rewriteFermionic derives it.
+    //
+    // This is the port of pyitensor/chain.py's four_correlation_tensor_fold,
+    // added because for native spinful sites the compiled backend only had
+    // four_correlation_tensor_spinful -- a per-tuple AutoMPO build -- and
+    // was measured 3.3x SLOWER than the pure-Python fold (5 sites: 2.56s vs
+    // 0.77s). Algorithm, not language.
+    //
+    // The sign is the parity of the permutation sorting the four operators
+    // into site order (see four_correlation_tensor_sweep's own note on why
+    // that is the right rule here and its `perms` table is not).
+    std::vector<std::complex<double>>
+    four_correlation_tensor_fold(MPS const& wf,
+                                 std::vector<std::string> const& cdag_names,
+                                 std::vector<int> const& cdag_sites,
+                                 std::vector<std::string> const& c_names,
+                                 std::vector<int> const& c_sites,
+                                 bool accelerate=true) const
+        {
+        int nm = int(c_names.size());
+        if (int(cdag_names.size())!=nm || int(cdag_sites.size())!=nm
+            || int(c_sites.size())!=nm)
+            Error("four_correlation_tensor_fold: mode lists have different lengths");
+        int N = sites_.length();
+        std::vector<std::complex<double>> out(size_t(nm)*nm*nm*nm, 0.0);
+        auto idx = [nm](int i,int j,int k,int l) { return ((size_t(i)*nm+j)*nm+k)*nm+l; };
+
+        auto psi = wf;
+        struct Quad { int i,j,k,l; };
+        std::vector<std::vector<Quad>> buckets(N+1);
+        for (int i=0;i<nm;i++)
+        for (int j=0;j<nm;j++)
+        for (int k=0;k<nm;k++)
+        for (int l=0;l<nm;l++)
+            {
+            std::tuple<int,int,int,int> current{i,j,k,l}, conjugate{l,k,j,i};
+            if (accelerate && current>conjugate) continue;
+            int mn = std::min(std::min(cdag_sites[i],c_sites[j]),
+                              std::min(cdag_sites[k],c_sites[l]));
+            buckets[mn].push_back({i,j,k,l});
+            }
+
+        for (int mn=1; mn<=N; ++mn)
+            {
+            if (buckets[mn].empty()) continue;
+            psi.position(mn);
+            for (auto const& q : buckets[mn])
+                {
+                int i=q.i, j=q.j, k=q.k, l=q.l;
+                std::pair<std::string,int> factors[4] = {
+                    {cdag_names[i], cdag_sites[i]}, {c_names[j], c_sites[j]},
+                    {cdag_names[k], cdag_sites[k]}, {c_names[l], c_sites[l]}};
+                int mx = std::max(std::max(factors[0].second,factors[1].second),
+                                  std::max(factors[2].second,factors[3].second));
+                ITensor E;
+                if (mn>1)
+                    {
+                    auto ln = commonIndex(psi.A(mn-1),psi.A(mn));
+                    E = delta(dag(prime(ln)),ln);
+                    }
+                bool carry = false;
+                for (int s=mn; s<=mx; ++s)
+                    {
+                    ITensor M;
+                    int nhere = 0;
+                    for (auto const& f : factors) if (f.second==s)
+                        {
+                        ++nhere;
+                        auto A = op(sites_,f.first,s);
+                        // append on the RIGHT: A*prime(M), see this file's
+                        // four_correlation_tensor_sweep tail for why the
+                        // opposite order silently applies them backwards
+                        if (!M) M = A;
+                        else { M = A*prime(M); M.mapPrime(2,1); }
+                        }
+                    bool odd = (nhere%2==1);
+                    if (carry != odd)
+                        {
+                        auto F = op(sites_,"F",s);
+                        if (!M) M = F;
+                        else { M = F*prime(M); M.mapPrime(2,1); }
+                        }
+                    carry = (carry != odd);
+                    ITensor T = psi.A(s);
+                    if (M) { T = T*M; T.noPrime(TagSet("Site")); }
+                    E = (E ? E*T : T);
+                    E = E*dag(prime(psi.A(s),TagSet("Link")));
+                    }
+                if (mx<N)
+                    {
+                    auto rn = commonIndex(psi.A(mx),psi.A(mx+1));
+                    E = E*delta(dag(prime(rn)),rn);
+                    }
+                int ss[4] = {factors[0].second,factors[1].second,
+                             factors[2].second,factors[3].second};
+                int inv=0;
+                for (int x=0;x<4;++x) for (int y=x+1;y<4;++y) if (ss[x]>ss[y]) ++inv;
+                Cplx c = ((inv%2)?-1.0:1.0)*eltC(E);
+                out[idx(i,j,k,l)] = c;
+                std::tuple<int,int,int,int> current{i,j,k,l}, conjugate{l,k,j,i};
+                if (!accelerate || current!=conjugate) out[idx(l,k,j,i)] = std::conj(c);
+                }
+            }
+        return out;
+        }
+
     KPMResult
     kpm_dynamical_correlator(std::vector<MOTerm> const& terms_i,
                              std::vector<MOTerm> const& terms_j,

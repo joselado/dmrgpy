@@ -368,6 +368,24 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "ITensorCorrelators.jl): returns the same <Cdag_i C_j Cdag_k "
                "C_l> (N,N,N,N) array, computed without rebuilding a fresh "
                "AutoMPO per (i,j,k,l) tuple")
+        .def("four_correlation_tensor_fold",
+            [](Chain& self, MPS const& wf,
+               std::vector<std::string> const& cdag_names,
+               std::vector<int> const& cdag_sites,
+               std::vector<std::string> const& c_names,
+               std::vector<int> const& c_sites, bool accelerate) {
+                int nm = int(c_names.size());
+                auto flat = self.four_correlation_tensor_fold(
+                    wf,cdag_names,cdag_sites,c_names,c_sites,accelerate);
+                py::array_t<std::complex<double>> arr({nm,nm,nm,nm});
+                std::copy(flat.begin(),flat.end(),arr.mutable_data());
+                return arr;
+            }, py::arg("wf"), py::arg("cdag_names"), py::arg("cdag_sites"),
+               py::arg("c_names"), py::arg("c_sites"),
+               py::arg("accelerate")=true,
+               "<Cdag_i C_j Cdag_k C_l> over flat fermionic modes by local "
+               "operator folds -- no MPO per tuple. Covers spinless and "
+               "native spinful (Electron) sites alike; see chain_session.h")
         .def("kpm_dynamical_correlator",
             [](Chain& self, std::vector<PyTerm> const& terms_i,
                std::vector<PyTerm> const& terms_j, int kpmmaxm,

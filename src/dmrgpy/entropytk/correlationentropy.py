@@ -283,14 +283,24 @@ def get_four_correlation_tensor_fold(wf, accelerate=True, **kwargs):
     tuple, unlike `ctmode="explicit"`, which is otherwise the only option
     for native spinful sites."""
     MBO = wf.MBO
-    if getattr(MBO, "itensor_version", None) != "python":
-        raise ValueError("ctmode='fold' needs itensor_version='python'")
+    version = getattr(MBO, "itensor_version", None)
+    if version not in ("python", 3):
+        raise ValueError("ctmode='fold' needs itensor_version='python' or 3")
     cdag_ops = _single_factor_modes(MBO.Cdag)
     c_ops = _single_factor_modes(MBO.C)
     if cdag_ops is None or c_ops is None:
         raise ValueError("ctmode='fold': this chain's C/Cdag are not "
                           "single-site single-operator MultiOperators")
-    return MBO._session.four_correlation_tensor_fold(
+    session = MBO._session
+    if version == 3:
+        # the C++ binding takes parallel name/site vectors rather than a
+        # list of pairs, which pybind11 converts without a custom caster
+        return session.four_correlation_tensor_fold(
+            wf.cpp_handle,
+            [nm for nm, _s in cdag_ops], [s for _nm, s in cdag_ops],
+            [nm for nm, _s in c_ops], [s for _nm, s in c_ops],
+            accelerate)
+    return session.four_correlation_tensor_fold(
         wf.cpp_handle, cdag_ops, c_ops, accelerate)
 
 
@@ -420,7 +430,8 @@ def _four_correlation_tensor_default_ctmode(wf):
         # an MPO and sweeps the whole chain per tuple (profiled at 4 sites:
         # 55% to_mpo, 38% inner). Local folds are exact to machine precision
         # against it and measured 8-12x faster.
-        if itensor_version=="python" and hasattr(session,"four_correlation_tensor_fold"):
+        if itensor_version in ("python", 3) \
+                and hasattr(session,"four_correlation_tensor_fold"):
             return "fold"
         if itensor_version==3 and hasattr(session,"four_correlation_tensor_spinful"):
             return "full"

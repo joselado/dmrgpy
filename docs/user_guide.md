@@ -617,7 +617,7 @@ pairwise-distinct sweep has no equivalent conjugate-pair saving to skip
 `Chain::four_correlation_tensor_sweep` (`mpscpp3/chain_session.h`) and
 `pyitensor/chain.py`'s port for the algorithm.
 
-`ctmode="fold"` (`itensor_version="python"` only) evaluates every tuple as
+`ctmode="fold"` (`itensor_version="python"` or `3`) evaluates every tuple as
 a *local* operator fold — no MPO is built for any of them. It is
 flavour-agnostic: it reads each mode's `(operator name, site)` off the
 chain's own `C`/`Cdag`, so it covers spinless chains and
@@ -625,7 +625,9 @@ chain's own `C`/`Cdag`, so it covers spinless chains and
 sites previously had only `ctmode="explicit"` under `"python"`, which builds
 an MPO and sweeps the whole chain per tuple; `fold` is exact against it to
 machine precision and 8–12x faster (5 sites / 10 modes: 9.8s → 0.9s), and is
-now the default there. It does not reuse environments *across* tuples the way
+now the default there. The C++ backend has the same port, where it replaces a
+`ctmode="full"` that was itself *slower* than the pure-Python fold: 2.8s → 0.7s
+at 5 sites, a 4x win and an algorithm-beats-language result worth remembering. It does not reuse environments *across* tuples the way
 `ctmode="sweep"` does, so for a plain spinless chain prefer `"sweep"`.
 
 `ctmode=None` (the default) auto-selects the fastest method actually

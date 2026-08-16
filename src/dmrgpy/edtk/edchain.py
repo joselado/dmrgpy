@@ -202,7 +202,19 @@ class State():
         from .. import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,**kwargs)
     def get_four_correlation_tensor(self,**kwargs):
+        """ED has no MPS to sweep or fold, so only ctmode="explicit"
+        applies. It is forced rather than defaulted -- but via kwargs, so a
+        caller who passes ctmode explicitly gets a clear error (or, for
+        "explicit", just works) instead of TypeError: got multiple values
+        for keyword argument 'ctmode', which is what a hardcoded keyword
+        used to raise for any caller that named the mode at all."""
         from .. import entanglement
+        ctmode = kwargs.pop("ctmode", "explicit")
+        if ctmode not in (None, "explicit"):
+            raise ValueError(
+                "get_four_correlation_tensor: ctmode={!r} is not available "
+                "for an ED-backed wavefunction; only \"explicit\" is".format(
+                    ctmode))
         return entanglement.get_four_correlation_tensor(self,
                                     ctmode="explicit",**kwargs)
     def applyinverse(self,a,**kwargs):
