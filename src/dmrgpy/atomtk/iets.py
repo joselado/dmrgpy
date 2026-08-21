@@ -1,6 +1,20 @@
 import numpy as np
 
 
+def check_iorb(iorb,norb):
+    """Check that a requested orbital index is in range.
+
+    Both entry points below used to overwrite their caller's `iorb` with
+    a hardcoded 0 immediately after unpacking it, so every call silently
+    computed orbital 0 no matter what was asked for -- a factor ~2 in
+    spectral weight and a completely different peak position for a d-shell
+    atom, with no warning. Those two lines are gone; this check exists so
+    that an out-of-range `iorb` raises instead of turning into a fresh
+    variant of the same silently-wrong behaviour."""
+    if not (0<=iorb<norb):
+        raise ValueError("iorb must be in [0,%d), got %d"%(norb,iorb))
+
+
 def get_orbital_cotunneling(fc,es=[0.],mode="ED",
                             submode="ED",delta=1e-3,
                             iorb=0,
@@ -19,8 +33,9 @@ def get_orbital_cotunneling(fc,es=[0.],mode="ED",
 
     y_neg, y_pos = 0.,0. # initialize
 
-    iorb = 0 # input orbital
-    for iorbj in range(5): # loop over output orbitals
+    norb = len(Cup) # number of orbitals actually present in this chain
+    check_iorb(iorb,norb) # sanity check on the requested input orbital
+    for iorbj in range(norb): # loop over output orbitals
         if iorb==iorbj: continue # skip this iteration
         for Op1 in [Cdagup[iorb],Cdagdn[iorb]]: # loop over input orbital
             for Op2 in [Cup[iorbj],Cdn[iorbj]]: # loop over output orbital
@@ -57,7 +72,7 @@ def get_spinflip(fc,es=[0.],mode="ED",submode="ED",delta=1e-3,
     es = np.array(es) ; es = es[es>0.] # only positive energies
     ne=len(es) # number of energies
  
-    iorb = 0 # input orbital
+    check_iorb(iorb,len(fc.Sx)) # sanity check on the requested orbital
     Sis = [fc.Sx[iorb],fc.Sy[iorb],fc.Sz[iorb]] # spin operators in the input orbital
     y_sum = 0. # initialize
     for Si in Sis: # loop over spin operators

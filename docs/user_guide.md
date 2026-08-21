@@ -1091,6 +1091,37 @@ roughly 2x slower than v3 for this workload, since NH-KPM's
 per-frequency moment recursion is far more matvec-heavy than the
 Hermitian KPM path).
 
+**The `dex` cutoff — which states count as "the" ground state
+(`mode="ED", submode="ED"`).** The $T=0$ ED sum above starts from the
+ground state, but a degenerate ground manifold has no single one. The ED
+path therefore takes every eigenstate whose excitation energy lies below
+a tolerance `dex` (default $10^{-5}$) as the initial manifold and averages
+the correlator over it with **equal weights** $1/n_{\rm ex}$. That is the
+right thing to do for a genuinely degenerate manifold, and only for that
+case: `dex` is a hard step, so a level at $0.99\,\texttt{dex}$ contributes
+in full while one at $1.01\,\texttt{dex}$ contributes nothing at all.
+
+Consequently `dex` must be chosen relative to the *splittings being
+resolved*, not to the broadening $\delta$ or the frequency grid. The
+pathological case is a parameter sweep — e.g.\ a Zeeman field whose
+splitting grows through `dex` — where the result jumps discontinuously as
+each level crosses the threshold, and the sweep partially averages over
+the very splitting it was meant to resolve. No single `dex` works at both
+ends of such a sweep: it must be large enough to keep the whole manifold
+at zero field and small enough to exclude the split states at finite
+field. DMRGPY emits a `RuntimeWarning` whenever an eigenvalue lies within
+a factor of three of `dex` on either side, i.e.\ exactly when the answer
+depends on where the cutoff was placed.
+
+The clean way out of that regime is to stop using a cutoff at all and
+weight the manifold physically instead: pass a small `T` (see §9), which
+switches to the Boltzmann-weighted Lehmann sum. It reproduces the
+equal-weight degenerate average smoothly as $T\to0$ — at exact degeneracy
+the two agree to machine precision — while varying continuously, not in
+steps, once the manifold splits. Use `dex` for a one-off spectrum at a
+fixed parameter, and `T` for anything swept.
+See `examples/kondo/atom_iets_orbital_resolved`.
+
 **Choosing a method:** KPM (default) for a first look at the full
 spectrum; CVM or TD when you need high resolution in a specific,
 narrow frequency window; TDZ instead of TD when that window also needs
@@ -1866,6 +1897,39 @@ produces, silently zeroing the entire term). The second-order term
 percent at thresholds, consistent with the expected
 $\delta$-broadening/moment-truncation error on top of what the ED path
 already has.
+
+### Orbital-resolved IETS of a magnetic atom
+
+`dmrgpy.atom` describes a *single* multi-orbital magnetic atom rather
+than a chain: `generate_atom(orbs, tij, U, J, soc, B, Js, Ne)` builds a
+`Spinful_Fermionic_Chain` whose "sites" are the atom's five $d$ orbitals,
+with a crystal field `tij`, spin-orbit coupling `soc`, Hund's coupling
+`J`, an $-U S^2-J L^2$ interaction, an external field `B` acting as
+$2\mathbf{S}+\mathbf{L}$, and the electron count `Ne` fixed by a Lagrange
+multiplier. Two inelastic-tunneling (IETS) observables are then available:
+
+- `get_spinflip(fc, es=..., iorb=...)` — the spin-flip contribution,
+  $\sum_{a=x,y,z} S_{aa}(\omega)$ built from the fluctuation operators
+  $S^a_{i}-\langle S^a_{i}\rangle$ on orbital `iorb`, returned over both
+  bias polarities.
+- `get_orbital_cotunneling(fc, es=..., iorb=...)` — the orbital
+  cotunneling contribution, summing correlators of
+  $c^\dagger_{\texttt{iorb}\sigma}c_{j\sigma'}$ over every *other*
+  orbital $j$ and both spin channels, again for both bias polarities.
+
+`iorb` selects the orbital the STM tip couples to (e.g.\ $d_{z^2}$ for a
+tip directly above the atom), and it matters: with a crystal field on,
+different orbitals give different spectral weights *and* different peak
+positions. An out-of-range `iorb` raises `ValueError`. Both routines run
+in ED by default (`mode="ED"`, `submode="ED"`), so the `dex`/`T` caveat of
+§6 applies directly to them — the low-lying multiplet of a magnetic atom
+is precisely the near-degenerate manifold that discussion is about. See
+`examples/kondo/atom_iets_orbital_resolved`.
+
+> **Note (behaviour change).** Before 2026-08-21 both entry points
+> accepted `iorb` and then silently overwrote it with `0`, so every call
+> returned orbital 0's spectrum regardless of what was requested. Results
+> obtained with `iorb!=0` on an earlier version need regenerating.
 
 ## 18. Infinite chains (iDMRG)
 

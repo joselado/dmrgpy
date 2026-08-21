@@ -137,14 +137,63 @@ def dynamical_correlator_rootn(h,e0,wf0,A,B,delta=1e-1,
     return es,np.array(out)
 
 
+def check_dex_sensitivity(ex,dex,factor=3.):
+    """Warn when the equal-weight `dex` cutoff of dynamical_correlator_ED
+    is placed inside a cluster of levels rather than in a clean gap.
+
+    The cutoff is a step function of the excitation energy, so the answer
+    only depends on its exact value when some eigenvalue sits close to it.
+    "Close" here is within `factor` on either side, i.e. in
+    [dex/factor, dex*factor]: a level just below is included with full
+    weight and one just above is dropped entirely, and an infinitesimal
+    change of the swept parameter can move one across. `ex` is the array
+    of excitation energies (ascending, already relative to the ground
+    state)."""
+    near = ex[(ex>=dex/factor) & (ex<=dex*factor)] # levels straddling it
+    if len(near)==0: return # cutoff sits in a gap, result is robust
+    import warnings
+    warnings.warn(
+        "dynamical_correlator_ED: %d eigenvalue(s) lie within a factor "
+        "%g of the dex=%g cutoff (lowest such level at %g), so the equally-weighted "
+        "initial manifold (nex=%d) depends on exactly where dex was "
+        "placed and can jump discontinuously as a swept parameter moves a "
+        "level across it. Choose dex relative to the splittings being "
+        "resolved, or pass a small T to get_dynamical_correlator for the "
+        "Boltzmann-weighted finite-temperature sum instead."
+        %(len(near),factor,dex,near[0],len(ex[ex<dex])),
+        RuntimeWarning,stacklevel=3)
+
+
 def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
         emu=None,vs = None,
         dex = 1e-5, # this is a tolerancy to consider something a GS
         es=np.linspace(-1.0,10.0,600)):
-    """Compute a dynamical correlator"""
+    """Compute a zero-temperature dynamical correlator.
+
+    `dex` is a *hard, equal-weight* cutoff: every eigenstate with an
+    excitation energy below it is taken as part of the initial manifold
+    and given the same weight 1/nex (see dynamical_sum below). That is
+    only physical when the manifold is genuinely degenerate. When it is
+    split by an amount comparable to `dex` -- e.g. a Zeeman-field sweep
+    whose splitting grows through the cutoff -- the result jumps
+    discontinuously as states cross the threshold: a state at 0.99*dex
+    counts fully, one at 1.01*dex not at all, and the sweep partially
+    averages over the very splitting it is meant to resolve. `dex` has to
+    be chosen relative to the splittings being resolved, and no single
+    value works for both ends of such a sweep.
+
+    For that regime use the finite-temperature route instead: pass a
+    small `T` to get_dynamical_correlator, which dispatches to
+    dynamical_correlator_finite_T and populates the manifold with exact
+    Boltzmann weights, reproducing this function's degenerate-manifold
+    average smoothly as T->0 rather than through a step. The equal-weight
+    cutoff is kept as the T=0 default so existing callers' results are
+    unchanged; check_dex_sensitivity below warns when the answer actually
+    depends on where the cutoff was placed."""
     if emu is None or vs is None: # if not provided
         emu,vs = algebra.eigh(h) # compute them
     ex = emu-np.min(emu) # excitations
+    check_dex_sensitivity(ex,dex) # warn if the cutoff is doing real work
 
     # crop to the needed states
     emax = np.max(es) # maximum energy

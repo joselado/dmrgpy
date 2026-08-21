@@ -1259,6 +1259,41 @@ machine-precision agreement --- the pure-Python backend runs roughly 2x
 slower than v3 for this workload, since NH-KPM's per-frequency moment
 recursion is far more matvec-heavy than the Hermitian KPM path).
 
+\textbf{The \lstinline|dex| cutoff --- which states count as ``the''
+ground state (\lstinline|mode="ED", submode="ED"|).} The $T=0$ ED sum
+above starts from the ground state, but a degenerate ground manifold has
+no single one. The ED path therefore takes every eigenstate whose
+excitation energy lies below a tolerance \lstinline|dex| (default
+$10^{-5}$) as the initial manifold and averages the correlator over it
+with \emph{equal weights} $1/n_{\rm ex}$. That is the right thing to do
+for a genuinely degenerate manifold, and only for that case:
+\lstinline|dex| is a hard step, so a level at $0.99\,\texttt{dex}$
+contributes in full while one at $1.01\,\texttt{dex}$ contributes nothing
+at all.
+
+Consequently \lstinline|dex| must be chosen relative to the
+\emph{splittings being resolved}, not to the broadening $\delta$ or the
+frequency grid. The pathological case is a parameter sweep --- e.g.\ a
+Zeeman field whose splitting grows through \lstinline|dex| --- where the
+result jumps discontinuously as each level crosses the threshold, and the
+sweep partially averages over the very splitting it was meant to resolve.
+No single \lstinline|dex| works at both ends of such a sweep: it must be
+large enough to keep the whole manifold at zero field and small enough to
+exclude the split states at finite field. DMRGPY emits a
+\lstinline|RuntimeWarning| whenever an eigenvalue lies within a factor of
+three of \lstinline|dex| on either side, i.e.\ exactly when the answer
+depends on where the cutoff was placed.
+
+The clean way out of that regime is to stop using a cutoff at all and
+weight the manifold physically instead: pass a small \lstinline|T| (see
+the finite-temperature section), which switches to the
+Boltzmann-weighted Lehmann sum. It reproduces the equal-weight degenerate
+average smoothly as $T\to0$ --- at exact degeneracy the two agree to
+machine precision --- while varying continuously, not in steps, once the
+manifold splits. Use \lstinline|dex| for a one-off spectrum at a fixed
+parameter, and \lstinline|T| for anything swept. See
+\texttt{examples/kondo/atom\_iets\_orbital\_resolved}.
+
 \textbf{Choosing a method:} KPM (default) for a first look at the full
 spectrum; CVM or TD when you need high resolution in a specific,
 narrow frequency window; TDZ instead of TD when that window also needs
@@ -2136,6 +2171,46 @@ term). The second-order term (\texttt{submode="KPM"}) was spot-checked
 too, agreeing to within a few tens of percent at thresholds, consistent
 with the expected $\delta$-broadening/moment-truncation error on top of
 what the ED path already has.
+
+\subsection{Orbital-resolved IETS of a magnetic atom}
+
+\lstinline|dmrgpy.atom| describes a \emph{single} multi-orbital magnetic
+atom rather than a chain: \lstinline|generate_atom(orbs, tij, U, J, soc, B, Js, Ne)|
+builds a \lstinline|Spinful_Fermionic_Chain| whose ``sites'' are the
+atom's five $d$ orbitals, with a crystal field \lstinline|tij|,
+spin-orbit coupling \lstinline|soc|, Hund's coupling \lstinline|J|, an
+$-U S^2-J L^2$ interaction, an external field \lstinline|B| acting as
+$2\mathbf{S}+\mathbf{L}$, and the electron count \lstinline|Ne| fixed by
+a Lagrange multiplier. Two inelastic-tunneling (IETS) observables are
+then available:
+
+\begin{itemize}
+\item \lstinline|get_spinflip(fc, es=..., iorb=...)| --- the spin-flip
+  contribution, $\sum_{a=x,y,z} S_{aa}(\omega)$ built from the
+  fluctuation operators $S^a_{i}-\langle S^a_{i}\rangle$ on orbital
+  \lstinline|iorb|, returned over both bias polarities.
+\item \lstinline|get_orbital_cotunneling(fc, es=..., iorb=...)| --- the
+  orbital cotunneling contribution, summing correlators of
+  $c^\dagger_{\texttt{iorb}\sigma}c_{j\sigma'}$ over every \emph{other}
+  orbital $j$ and both spin channels, again for both bias polarities.
+\end{itemize}
+
+\lstinline|iorb| selects the orbital the STM tip couples to (e.g.\ $d_{z^2}$
+for a tip directly above the atom), and it matters: with a crystal field
+on, different orbitals give different spectral weights \emph{and}
+different peak positions. An out-of-range \lstinline|iorb| raises
+\lstinline|ValueError|. Both routines run in ED by default
+(\lstinline|mode="ED"|, \lstinline|submode="ED"|), so the
+\lstinline|dex|/\lstinline|T| caveat of the dynamical-correlator section
+applies directly to them --- the low-lying multiplet of a magnetic atom
+is precisely the near-degenerate manifold that discussion is about. See
+\texttt{examples/kondo/atom\_iets\_orbital\_resolved}.
+
+\textbf{Note (behaviour change).} Before 2026-08-21 both entry points
+accepted \lstinline|iorb| and then silently overwrote it with \lstinline|0|,
+so every call returned orbital 0's spectrum regardless of what was
+requested. Results obtained with \lstinline|iorb!=0| on an earlier
+version need regenerating.
 
 \section{Infinite chains (iDMRG)}
 
