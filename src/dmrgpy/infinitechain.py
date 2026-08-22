@@ -614,30 +614,17 @@ class Infinite_Many_Body_Chain:
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))
-        if r > 0 and (is_fermionic(opname_i) or is_fermionic(opname_j)):
-            # A cross-site correlator of fermionic operators needs a
-            # Jordan-Wigner string on every site strictly between the two,
-            # and NO correlator backend threads one: pyitensor.idmrg's and
-            # pyitensor.vumps' two_point_correlator, and
-            # Chain::vumps_two_point_correlator, all insert the bare
-            # operator into an otherwise-identity transfer matrix. That is
-            # the same omission Hamiltonian terms used to have (see
-            # _canonicalize_hamiltonian above and MultiOperator.to_terms'
-            # docstring), one layer up -- but a Hamiltonian built the same
-            # way now threads it, so silently returning a stringless
-            # number here would be the one remaining place where a
-            # fermionic infinite chain is quietly wrong. Refuse instead.
-            # r=0 (both operators on the same site) needs no string and is
-            # allowed, as are parity-even operators ("N", "Sz", "Nup", ...)
-            # at any r.
-            raise NotImplementedError(
-                "Infinite_Many_Body_Chain.correlator: cross-site (r>0) "
-                "correlators of fermionic operators ({!r}, {!r}) are not "
-                "supported -- no backend threads the Jordan-Wigner string "
-                "between the two sites, so the result would silently omit "
-                "it. Same-site (r=0) fermionic correlators and any-r "
-                "correlators of parity-even operators (N, Sz, Nup, ...) "
-                "are supported.".format(opname_i, opname_j))
+        if (is_fermionic(opname_i) != is_fermionic(opname_j)):
+            # Odd total fermion parity: the Jordan-Wigner string opened by
+            # this pair is never closed, so it would have to run to infinity.
+            # Such a correlator vanishes identically in any parity-conserving
+            # state anyway; the backends reject it themselves (v3 via an
+            # ITensor Error() that would abort the process), so catch it here.
+            raise ValueError(
+                "Infinite_Many_Body_Chain.correlator: the operator pair "
+                "({!r}, {!r}) has odd total fermion parity -- its "
+                "Jordan-Wigner string cannot be closed".format(
+                    opname_i, opname_j))
         if self.itensor_version == "python" and self.gs_method == "idmrg":
             if self._result is None:
                 self.gs_energy()

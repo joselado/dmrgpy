@@ -1788,18 +1788,6 @@ def test_odd_fermion_parity_term_is_rejected_before_the_backend_sees_it():
         ic.set_hamiltonian(C + ic.get_operator("Cdag", 0, "C"))
 
 
-def test_cross_site_fermionic_correlator_is_refused():
-    """No correlator backend threads the Jordan-Wigner string between the
-    two operators, so a cross-site fermionic correlator must refuse rather
-    than return a stringless (silently wrong) number. Parity-even operators
-    and the same-site (r=0) case stay allowed."""
-    ic = _free_fermion_chain(1.0, 0.4, 0.1, "python", "idmrg", maxm=6)
-    with pytest.raises(NotImplementedError, match="Jordan-Wigner"):
-        ic.correlator("Cdag", 0, "C", 1)
-    assert np.isfinite(abs(ic.correlator("N", 0, "N", 1)))
-    assert np.isfinite(abs(ic.correlator("Cdag", 0, "C", 0)))
-
-
 def test_raw_and_jordan_wigner_terms_agree_for_spin_operators():
     """infinitechain.py now hands the v3 backend
     to_terms(jordan_wigner_transform=False). For a spin Hamiltonian the
@@ -1887,3 +1875,141 @@ def test_d_ramp_doubles_and_ends_at_the_target():
         assert all(b > a for a, b in zip(ramp, ramp[1:]))
         assert len(ramp) <= D
     assert _d_ramp(30) == [1, 2, 4, 8, 16, 30]
+
+
+# ---------------------------------------------------------------------------
+# Fermionic two-point correlators (the Jordan-Wigner string on the sites
+# BETWEEN the two operators).
+#
+# These used to be refused outright: every correlator path inserted the bare
+# operator into an otherwise-identity transfer matrix, which is the right
+# thing for a spin/boson operator and silently wrong for a fermionic one --
+# a stringless <Cdag_i C_j> is not merely imprecise, it is a different
+# quantity, and one whose error grows with separation (so it corrupts a
+# decay rate, which is usually what such a correlator is measured for).
+#
+# All three paths now thread the string, and all three take their endpoint
+# matrices and their "is a string open at all" flag from the SAME helper
+# that builds the Hamiltonian's own 2-site terms (idmrg._term_site_matrices
+# / the C++ vumps_correlator_endpoints port of it), so a correlator and a
+# Hamiltonian term written with the same operator names cannot drift apart.
+#
+# Oracle: a free-fermion one-body density matrix, exact by construction.
+
+
+def _exact_one_body_density_matrix(t1, t2, t3, L=200):
+    """P[i,j] = <c^dag_i c_j> for the periodic dimerized spinless ring of L
+    cells (2 sites per cell, site index 2*cell+sublattice), all negative
+    single-particle levels filled. Gapped, so the bulk of a large ring is
+    the infinite-chain answer to far better than the tolerances below."""
+    N = 2 * L
+    H = np.zeros((N, N))
+    for n in range(L):
+        a, b, a2 = 2 * n, 2 * n + 1, (2 * n + 2) % N
+        H[a, b] += t1; H[b, a] += t1
+        H[b, a2] += t2; H[a2, b] += t2
+        H[a, a2] += t3; H[a2, a] += t3
+    w, v = np.linalg.eigh(H)
+    occ = v[:, w < 0]
+    return (occ.conj() @ occ.T).real
+
+
+@pytest.mark.parametrize("itensor_version,gs_method,maxm,tol", [
+    ("python", "idmrg", 20, 1e-6),
+    ("python", "vumps", 12, 1e-5),
+    pytest.param(3, "vumps", 12, 1e-5, marks=pytest.mark.skipif(
+        not cppext.available(3), reason="mpscpp3 extension not compiled")),
+])
+def test_fermionic_correlator_matches_free_fermion_exact(itensor_version,
+                                                          gs_method, maxm, tol):
+    """<Cdag_0 C_r> across a range of separations, against the exact
+    free-fermion one-body density matrix. r=2 and beyond have at least one
+    site strictly between the two operators, so they are the ones that need
+    the string; without it these come out as different numbers entirely
+    (dropping the string was measured to move the r=0..8 values by up to
+    ~0.5), not as slightly-less-converged ones."""
+    t1, t2, t3 = 1.0, 0.4, 0.1
+    P = _exact_one_body_density_matrix(t1, t2, t3)
+    i0 = 2 * (P.shape[0] // 4)          # a bulk A site
+    ic = _free_fermion_chain(t1, t2, t3, itensor_version, gs_method, maxm=maxm)
+    for r in range(7):
+        assert complex(ic.correlator("Cdag", 0, "C", r)).real == \
+            pytest.approx(P[i0, i0 + r], abs=tol), "separation r={}".format(r)
+
+
+@pytest.mark.parametrize("itensor_version,gs_method", [
+    ("python", "idmrg"),
+    ("python", "vumps"),
+    pytest.param(3, "vumps", marks=pytest.mark.skipif(
+        not cppext.available(3), reason="mpscpp3 extension not compiled")),
+])
+def test_fermionic_correlator_n_uc_1_crosses_whole_cells(itensor_version,
+                                                          gs_method):
+    """With n_uc=1 every separation r>1 puts one or more COMPLETE unit cells
+    between the two operators, which is a distinct code path from a string
+    that stays inside one cell (in the VUMPS backends it is the branch that
+    applies F to every sub-site of each fully-crossed cell's transfer
+    tensor). The uniform half-filled chain has <Cdag_0 C_r> = 0 for every
+    even r>0 by particle-hole symmetry -- a sharp, tolerance-free signature
+    that survives even though this model is gapless and so converges only
+    slowly in maxm. Without the string those entries are NOT small."""
+    ic = infinitechain.Infinite_Many_Body_Chain(
+        [_FERMION_SITE_CODE], itensor_version=itensor_version)
+    ic.gs_method = gs_method
+    ic.maxm = 16
+    ic.maxiter = 60
+    # This chain is gapless, which is VUMPS's documented weak spot (see
+    # pyitensor/vumps.py's "Convergence robustness" section) -- its default
+    # restart budget intermittently fails to find any fixed point here at
+    # all. The extra restarts are about reaching a converged state to
+    # measure, not about the correlator being delicate.
+    ic.vumps_nrestarts = 10
+    Cd = ic.get_operator("Cdag", 0, "C")
+    C = ic.get_operator("C", 0, "C")
+    CdR = ic.get_operator("Cdag", 0, "R")
+    CR = ic.get_operator("C", 0, "R")
+    ic.set_hamiltonian(Cd * CR + CdR * C)
+    ic.gs_energy()
+    for r in (2, 4):
+        assert abs(complex(ic.correlator("Cdag", 0, "C", r)).real) < 5e-3
+    # ...while the odd separations are large and alternate in sign
+    assert complex(ic.correlator("Cdag", 0, "C", 1)).real < -0.2
+    assert complex(ic.correlator("Cdag", 0, "C", 3)).real > 0.05
+
+
+def test_stringless_fermionic_correlator_would_be_a_different_number():
+    """Guards the guard: confirms the string is actually load-bearing here,
+    so the tests above would fail if it were dropped rather than passing for
+    some unrelated reason. Recomputes r=2..6 with the string suppressed and
+    requires the result to differ far beyond the tolerances used above."""
+    from dmrgpy.pyitensor import idmrg as _idmrg
+
+    t1, t2, t3 = 1.0, 0.4, 0.1
+    ic = _free_fermion_chain(t1, t2, t3, "python", "idmrg", maxm=20)
+    ic.gs_energy()
+    strung = [complex(ic.correlator("Cdag", 0, "C", r)).real for r in range(2, 7)]
+
+    original = _idmrg._term_site_matrices
+
+    def no_string(op_term, sites_uc, n_uc):
+        rel, coef, mats, ferm = original(op_term, sites_uc, n_uc)
+        return rel, coef, mats, [False] * len(ferm)
+
+    _idmrg._term_site_matrices = no_string
+    try:
+        bare = [complex(ic.correlator("Cdag", 0, "C", r)).real for r in range(2, 7)]
+    finally:
+        _idmrg._term_site_matrices = original
+
+    assert max(abs(a - b) for a, b in zip(strung, bare)) > 1e-3
+
+
+def test_odd_total_parity_correlator_is_rejected():
+    """A pair whose total fermion parity is odd (one fermionic operator and
+    one parity-even one) opens a string that never closes. It vanishes
+    identically in any parity-conserving state, and the v3 backend rejects
+    it with an ITensor Error() that would abort the process, so it is caught
+    in infinitechain.py before any backend sees it."""
+    ic = _free_fermion_chain(1.0, 0.4, 0.1, "python", "idmrg", maxm=6)
+    with pytest.raises(ValueError, match="odd total fermion parity"):
+        ic.correlator("Cdag", 0, "N", 1)

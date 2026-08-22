@@ -423,9 +423,25 @@ both \texttt{gs\_method}s. Odd-parity terms are additionally caught in
 \texttt{infinitechain.py}'s own \texttt{\_canonicalize\_hamiltonian}, on
 the raw terms every backend shares, because the C++ rejection is an
 ITensor \texttt{Error()} that aborts the process rather than raising into
-Python. Cross-site correlators of fermionic operators are a separate,
-still-unthreaded code path and are refused outright --- see
-\texttt{Infinite\_Many\_Body\_Chain.correlator}'s own guard.
+Python.
+
+The \textbf{correlator} paths thread the same string, from the same source
+of truth: \texttt{idmrg.two\_point\_correlator} and
+\texttt{vumps.two\_point\_correlator} both call
+\texttt{\_term\_site\_matrices} for their endpoint matrices, the ordering
+sign and the ``is a string open'' flag, and
+\texttt{Chain::vumps\_two\_point\_correlator} calls
+\texttt{vumps\_correlator\_endpoints}, a C++ port of that same two-factor
+case. So a correlator and a Hamiltonian term written with the same
+operator names cannot drift apart on the convention (which endpoint
+carries the extra \texttt{F}, and whether the sites between carry one).
+The string is inserted as \texttt{F} on each intervening site's transfer
+tensor (\texttt{idmrg}), or embedded into the grouped supersite operators
+plus an all-sites-\texttt{F} transfer for each fully-crossed cell (both
+VUMPS backends). A pair with odd total fermion parity is rejected in
+\texttt{Infinite\_Many\_Body\_Chain.correlator} before any backend sees
+it, since the v3 rejection is an ITensor \texttt{Error()} that aborts the
+process.
 
 \textbf{A third \texttt{gs\_energy} dispatch option: VUMPS.}
 \texttt{pyitensor/vumps.py} implements Variational Uniform Matrix

@@ -102,8 +102,56 @@ spinful = np.array([dmrg_density(t3, "python", "idmrg", spinful=True)
 print("{:16s} max |error| vs 2x exact = {:.2e}".format(
     "spinful", np.abs(spinful - 2 * exact).max()))
 
-fig, (ax, axerr) = plt.subplots(2, 1, figsize=(7, 7), sharex=True,
-                                 gridspec_kw=dict(height_ratios=[2, 1]))
+# The same string machinery, seen in an observable instead of an energy:
+# <Cdag_0 C_r> needs a Jordan-Wigner F on every site strictly between the
+# two operators. Without it the result is not "slightly off" -- it is a
+# different quantity, and the discrepancy GROWS with r, which is exactly
+# what corrupts a measured decay rate. The exact answer for a quadratic
+# Hamiltonian is the one-body density matrix of the filled negative levels.
+def exact_correlator(t3, L=200):
+    N = 2 * L
+    Hm = np.zeros((N, N))
+    for n in range(L):
+        a, b, a2 = 2 * n, 2 * n + 1, (2 * n + 2) % N
+        Hm[a, b] += t1; Hm[b, a] += t1
+        Hm[b, a2] += t2; Hm[a2, b] += t2
+        Hm[a, a2] += t3; Hm[a2, a] += t3
+    w, v = np.linalg.eigh(Hm)
+    occ = v[:, w < 0]
+    P = (occ.conj() @ occ.T).real
+    i0 = 2 * (L // 2)
+    return np.array([P[i0, i0 + r] for r in range(RMAX)])
+
+
+RMAX = 9
+t3_corr = 0.1
+corr_exact = exact_correlator(t3_corr)
+corr = {}
+# itensor_version=3 with gs_method="idmrg" is the one combination with no
+# correlator machinery at all (that solver's result keeps no per-sublattice
+# tensor list to build one from) -- see gs_energy's own docstring. Every
+# other combination supports correlators, fermionic ones included.
+corr_runs = [(v, m) for v, m in runs if not (v == 3 and m == "idmrg")]
+for version, method in corr_runs:
+    label = "{} / {}".format(version, method)
+    ic = infinitechain.Infinite_Many_Body_Chain([SPINLESS, SPINLESS],
+                                                 itensor_version=version)
+    ic.gs_method = method; ic.maxm = MAXM; ic.maxiter = 40
+    C = [ic.get_operator("C", i, "C") for i in range(2)]
+    Cd = [ic.get_operator("Cdag", i, "C") for i in range(2)]
+    CR = [ic.get_operator("C", i, "R") for i in range(2)]
+    CdR = [ic.get_operator("Cdag", i, "R") for i in range(2)]
+    ic.set_hamiltonian(t1*(Cd[0]*C[1] + Cd[1]*C[0])
+                        + t2*(Cd[1]*CR[0] + CdR[0]*C[1])
+                        + t3_corr*(Cd[0]*CR[0] + CdR[0]*C[0]))
+    ic.gs_energy()
+    corr[label] = np.array([complex(ic.correlator("Cdag", 0, "C", r)).real
+                             for r in range(RMAX)])
+    print("{:16s} max |correlator error| = {:.2e}".format(
+        label, np.abs(corr[label] - corr_exact).max()))
+
+fig, (ax, axerr, axcorr) = plt.subplots(3, 1, figsize=(7, 10),
+                                         gridspec_kw=dict(height_ratios=[2, 1, 2]))
 ax.plot(t3s, exact, "k-", lw=2, label="exact (band integral)")
 for label, e in results.items():
     ax.plot(t3s, e, "o--", ms=5, label=label)
@@ -119,5 +167,17 @@ axerr.semilogy(t3s, np.abs(spinful - 2 * exact) + 1e-16, "s--", ms=5,
 axerr.set_xlabel("$t_3$ (next-cell hopping -- the term needing a JW string)")
 axerr.set_ylabel("|error|")
 axerr.legend(fontsize=8)
+
+rs = np.arange(RMAX)
+axcorr.plot(rs, corr_exact, "k-", lw=2, label="exact (one-body density matrix)")
+for label, c in corr.items():
+    axcorr.plot(rs, c, "o--", ms=5, label=label)
+axcorr.axhline(0.0, color="0.8", lw=0.8, zorder=0)
+axcorr.set_xlabel("separation $r$ (sites)")
+axcorr.set_ylabel(r"$\langle C^\dagger_0 C_r \rangle$")
+axcorr.set_title("Fermionic correlator ($t_3$={}): the Jordan-Wigner string\n"
+                  "is threaded across every site between the two operators".format(t3_corr))
+axcorr.legend(fontsize=8)
+
 plt.tight_layout()
 plt.show()

@@ -2350,17 +2350,33 @@ string to start at. Two consequences for what a Hamiltonian may contain:
       cannot appear in a physical Hamiltonian anyway.
 \end{itemize}
 
-The one gap is on the \emph{observable} side: \texttt{correlator} refuses
-a \textbf{cross-site (\texttt{r>0}) correlator of fermionic operators}
-with \texttt{NotImplementedError}, on every backend, because no
-correlator path threads the string between the two operators and a
-stringless answer would be silently wrong. Same-site (\texttt{r=0})
-fermionic correlators, and any-\texttt{r} correlators of parity-even
-operators (\texttt{N}, \texttt{Nup}, \texttt{Sz}, \ldots), are supported.
+\textbf{Fermionic correlators} work the same way:
+\texttt{ic.correlator("Cdag", 0, "C", r)} returns the physical fermionic
+correlator, i.e.\ $\langle C^\dagger_0 (\prod_{0<k<r} F_k) C_r\rangle$
+with the Jordan-Wigner string threaded across every site strictly between
+the two operators --- not the stringless product of two bare matrices,
+which is a different quantity whose error \emph{grows with separation}
+(so it corrupts exactly the decay rate such a correlator is usually
+measured for). Supported on all three paths:
+\texttt{itensor\_version="python"} with \texttt{gs\_method="idmrg"} or
+\texttt{"vumps"}, and \texttt{itensor\_version=3} with
+\texttt{gs\_method="vumps"}. The endpoint matrices and the decision of
+whether a string is open at all come from the same helper that builds the
+Hamiltonian's own 2-site terms, so a correlator and a Hamiltonian term
+written with the same operator names cannot disagree about the
+convention. Parity-even operators (\texttt{N}, \texttt{Nup},
+\texttt{Sz}, \ldots) get no string, exactly as before.
+
+A pair with \textbf{odd total fermion parity} (e.g.\
+\texttt{("Cdag", "N")}) raises \texttt{ValueError}: its string can never
+close on an infinite chain, and the quantity vanishes identically in any
+parity-conserving state anyway.
+
 See \texttt{examples/idmrg/fermionic\_infinite\_chain/main.py}, which
-checks a dimerized spinless chain (including a hopping that skips a site,
-so a real string is involved) against the exact free-fermion band
-integral on every backend/solver combination.
+checks both the energy density (against the exact free-fermion band
+integral) and $\langle C^\dagger_0 C_r\rangle$ (against the exact
+one-body density matrix) on every backend/solver combination, for a chain
+including a hopping that skips a site so a real string is involved.
 
 \textbf{Static correlators.} After \texttt{gs\_energy()} (called
 automatically by \texttt{vev}/\texttt{correlator} if not already run),

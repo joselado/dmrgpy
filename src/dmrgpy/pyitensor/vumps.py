@@ -965,21 +965,41 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
 
     cell_offset, p_j = divmod(p_i + r, n_uc)
 
+    # Endpoint matrices, ordering sign, and whether a Jordan-Wigner string
+    # is open between the two operators -- from the same helper that builds
+    # the Hamiltonian's own 2-site terms, so the two cannot disagree about
+    # the convention. Parity-even operators come back stringless and with
+    # no endpoint factor, reproducing this function's pre-string behaviour
+    # exactly. See idmrg.two_point_correlator's docstring.
+    term = [1.0, [opname_i, p_i], [opname_j, p_i + r]]
+    _rel, coef, mats, ferm = idmrg._term_site_matrices(term, sites_uc, n_uc)
+    strung = ferm[0] if r > 0 else False
+
+    def _F(p):
+        return sites_uc.site_type(p + 1).matrix("F")
+
+    def _string_ops(lo, hi):
+        """{p: F} for every sub-site p with lo <= p < hi (empty if not
+        strung) -- the part of the string living inside one unit cell."""
+        return {p: _F(p) for p in range(lo, hi)} if strung else {}
+
     if cell_offset == 0:
         if p_j == p_i:
-            Mi = sites_uc.site_type(p_i + 1).matrix(opname_i)
-            Mj = sites_uc.site_type(p_i + 1).matrix(opname_j)
-            M = _embed_group_operator(sites_uc, n_uc, {p_i: Mj @ Mi})
+            M = _embed_group_operator(sites_uc, n_uc, {p_i: mats[0]})
         else:
-            Mi = sites_uc.site_type(p_i + 1).matrix(opname_i)
-            Mj = sites_uc.site_type(p_j + 1).matrix(opname_j)
-            M = _embed_group_operator(sites_uc, n_uc, {p_i: Mi, p_j: Mj})
+            ops = {p_i: mats[0], p_j: mats[1]}
+            ops.update(_string_ops(p_i + 1, p_j))   # string strictly between
+            M = _embed_group_operator(sites_uc, n_uc, ops)
         AC_op = np.einsum('io,lir->lor', M, AC)
         val = np.einsum('lor,lor->', np.conj(AC), AC_op)
-        return complex(val / norm)
+        return complex(coef * val / norm)
 
-    Mi = sites_uc.site_type(p_i + 1).matrix(opname_i)
-    Mi_embed = _embed_group_operator(sites_uc, n_uc, {p_i: Mi})
+    # The string, when open, runs from just right of p_i to the end of the
+    # AC cell, across every fully-crossed intermediate cell, and from the
+    # start of the final cell up to just left of p_j.
+    ops_i = {p_i: mats[0]}
+    ops_i.update(_string_ops(p_i + 1, n_uc))
+    Mi_embed = _embed_group_operator(sites_uc, n_uc, ops_i)
     AC_op = np.einsum('io,lir->lor', Mi_embed, AC)
     # Open right-bond object: bra/ket both AC, operator on the ket side
     # only -- this already IS the full left closure (AC's own left leg is
@@ -987,17 +1007,23 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     X = np.einsum('lor,loR->rR', AC_op, np.conj(AC)) / norm
 
     if cell_offset > 1:
-        E_AR = np.einsum('lpr,LpR->lLrR', AR, np.conj(AR))
+        # Every fully-crossed cell carries F on ALL of its sub-sites when
+        # the string is open, and the plain transfer tensor otherwise.
+        M_cross = (_embed_group_operator(sites_uc, n_uc, _string_ops(0, n_uc))
+                   if strung else None)
+        AR_cross = AR if M_cross is None else np.einsum('io,lir->lor', M_cross, AR)
+        E_AR = np.einsum('lpr,LpR->lLrR', AR_cross, np.conj(AR))
         for _ in range(cell_offset - 1):
             X = idmrg._apply_transfer_from_left(E_AR, X)
 
-    Mj = sites_uc.site_type(p_j + 1).matrix(opname_j)
-    Mj_embed = _embed_group_operator(sites_uc, n_uc, {p_j: Mj})
+    ops_j = {p_j: mats[1]}
+    ops_j.update(_string_ops(0, p_j))               # string up to p_j
+    Mj_embed = _embed_group_operator(sites_uc, n_uc, ops_j)
     AR_op = np.einsum('io,lir->lor', Mj_embed, AR)
     E_AR_op = np.einsum('lpr,LpR->lLrR', AR_op, np.conj(AR))
     X = idmrg._apply_transfer_from_left(E_AR_op, X)
 
-    return complex(np.trace(X))
+    return complex(coef * np.trace(X))
 
 
 # == Summing two converged VUMPS iMPS ========================================

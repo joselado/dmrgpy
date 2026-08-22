@@ -2954,6 +2954,56 @@ class Chain
         return val/norm;
         }
 
+    // Endpoint operator matrices, ordering coefficient, and "is a
+    // Jordan-Wigner string open between them" for a two-point correlator
+    // <opname_i(p_i) opname_j(p_j)>, p_i <= p_j -- the two-factor case of
+    // pyitensor/idmrg.py's _term_site_matrices, and deliberately the same
+    // rules idmrg_classify_terms applies to a Hamiltonian's own 2-site
+    // terms, so a correlator and a Hamiltonian term written with the same
+    // operator names cannot disagree about the convention (which endpoint
+    // carries the extra F, and whether the sites in between carry one).
+    // Throws for a pair of odd total fermion parity: its string can never
+    // close, so the correlator is not a well-defined object here.
+    // p_i/p_j are SUBLATTICE indices (0..n_uc-1, what idmrg_op_dense and
+    // sites_.si expect); `same_site` says whether the two operators are on
+    // one and the same physical site (p_i==p_j AND no whole cells between
+    // them), which sublattice indices alone cannot express.
+    void
+    vumps_correlator_endpoints(std::string const& opname_i, int p_i,
+                                std::string const& opname_j, int p_j,
+                                bool same_site,
+                                std::vector<Cplx>& mat_i,
+                                std::vector<Cplx>& mat_j,
+                                bool& strung) const
+        {
+        bool fi = idmrg_is_fermionic(opname_i), fj = idmrg_is_fermionic(opname_j);
+        if (same_site)
+            {
+            int d = dim(sites_.si(p_i+1));
+            mat_i = idmrg_matmul(idmrg_op_dense(p_i,opname_j),
+                                  idmrg_op_dense(p_i,opname_i),d);
+            bool site_ferm = (fi != fj);   // odd number of fermionic factors
+            if (site_ferm)
+                Error("Chain::vumps_two_point_correlator: the operator pair has "
+                      "odd total fermion parity -- its Jordan-Wigner string "
+                      "cannot be closed");
+            mat_j.clear();
+            strung = false;
+            return;
+            }
+        if (fi != fj)
+            Error("Chain::vumps_two_point_correlator: the operator pair has "
+                  "odd total fermion parity -- its Jordan-Wigner string "
+                  "cannot be closed");
+        int di = dim(sites_.si(p_i+1));
+        mat_i = idmrg_op_dense(p_i,opname_i);
+        mat_j = idmrg_op_dense(p_j,opname_j);
+        if (fi) // carry enters false, so a fermionic first endpoint picks up F
+            mat_i = idmrg_matmul(idmrg_op_dense(p_i,"F"),mat_i,di);
+        // the second endpoint's own parity matches the carry, so it gets none
+        strung = fi;
+        }
+
     // <opname_i(site p_i) opname_j(site p_i + r)> of a converged
     // vumps_ground_state()'s infinite chain, r measured in physical sites
     // (r>=0) -- C++ port of pyitensor/vumps.py's two_point_correlator; same
@@ -2984,26 +3034,44 @@ class Chain
         int cell_offset = (p_i + r)/n_uc;
         int p_j = (p_i + r)%n_uc;
 
+        std::vector<Cplx> mat_i, mat_j;
+        bool strung = false;
+        vumps_correlator_endpoints(opname_i,p_i,opname_j,p_j,
+                                    (cell_offset==0 && p_j==p_i),
+                                    mat_i,mat_j,strung);
+        // {p: F} for lo <= p < hi -- the piece of the string inside one cell
+        auto string_ops = [&](int lo, int hi)
+            {
+            std::map<int,std::vector<Cplx>> out;
+            if (strung)
+                for (int p=lo;p<hi;++p) out[p] = idmrg_op_dense(p,"F");
+            return out;
+            };
+
         if (cell_offset==0)
             {
             std::vector<Cplx> M;
             if (p_j==p_i)
                 {
-                int d = dim(sites_.si(p_i+1));
-                auto Mi = idmrg_op_dense(p_i,opname_i);
-                auto Mj = idmrg_op_dense(p_i,opname_j);
-                M = vumps_embed_group_operator({{p_i, idmrg_matmul(Mj,Mi,d)}});
+                M = vumps_embed_group_operator({{p_i, mat_i}});
                 }
             else
                 {
-                M = vumps_embed_group_operator({{p_i, idmrg_op_dense(p_i,opname_i)},
-                                                 {p_j, idmrg_op_dense(p_j,opname_j)}});
+                auto ops = string_ops(p_i+1,p_j);   // string strictly between
+                ops[p_i] = mat_i;
+                ops[p_j] = mat_j;
+                M = vumps_embed_group_operator(ops);
                 }
             auto AC_op = vx_apply_op_ket(M,AC,D,d_g);
             return vx_dot_conj(AC,AC_op)/norm;
             }
 
-        auto Mi_embed = vumps_embed_group_operator({{p_i, idmrg_op_dense(p_i,opname_i)}});
+        // The string, when open, runs from just right of p_i to the end of
+        // the AC cell, across every fully-crossed cell, and from the start
+        // of the final cell up to just left of p_j.
+        auto ops_i = string_ops(p_i+1,n_uc);
+        ops_i[p_i] = mat_i;
+        auto Mi_embed = vumps_embed_group_operator(ops_i);
         auto AC_op = vx_apply_op_ket(Mi_embed,AC,D,d_g);
         // Open right-bond object: bra/ket both AC, operator on the ket side
         // only -- this already IS the full left closure (AC's own left leg
@@ -3014,12 +3082,20 @@ class Chain
 
         if (cell_offset>1)
             {
-            auto E_AR = vx_op_transfer_matrix(vumps_AR_,D,d_g,vumps_AR_,false,{});
+            // A fully-crossed cell carries F on ALL of its sub-sites when
+            // the string is open, and the plain transfer otherwise.
+            auto AR_cross = vumps_AR_;
+            if (strung)
+                AR_cross = vx_apply_op_ket(
+                    vumps_embed_group_operator(string_ops(0,n_uc)),vumps_AR_,D,d_g);
+            auto E_AR = vx_op_transfer_matrix(AR_cross,D,d_g,vumps_AR_,false,{});
             for (int i=0;i<cell_offset-1;++i)
                 X = vx_apply_transfer_from_left(E_AR,D,X);
             }
 
-        auto Mj_embed = vumps_embed_group_operator({{p_j, idmrg_op_dense(p_j,opname_j)}});
+        auto ops_j = string_ops(0,p_j);              // string up to p_j
+        ops_j[p_j] = mat_j;
+        auto Mj_embed = vumps_embed_group_operator(ops_j);
         auto AR_op = vx_apply_op_ket(Mj_embed,vumps_AR_,D,d_g);
         auto E_AR_op = vx_op_transfer_matrix(AR_op,D,d_g,vumps_AR_,false,{});
         X = vx_apply_transfer_from_left(E_AR_op,D,X);

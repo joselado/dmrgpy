@@ -1956,9 +1956,18 @@ def _op_transfer(sites_uc, cell, k, opname, n_uc):
     once the tiled cell is longer than the unit cell, which is exactly the
     n_uc=1 case of `_theta_cell`'s 2-site output."""
     M = sites_uc.site_type((k % n_uc) + 1).matrix(opname)
+    return _op_transfer_mat(cell, k, M)
+
+
+def _op_transfer_mat(cell, k, M):
+    """`_op_transfer` with the per-site operator matrix supplied directly
+    rather than looked up by name -- needed by `two_point_correlator`,
+    whose endpoint matrices carry an extra Jordan-Wigner F factor that no
+    single site-operator name corresponds to (an F-threaded endpoint, or
+    the bare F of an intervening string site)."""
     A = _to_array_lpr(cell[k])
-    Aop = np.einsum('io,lir->lor', M, A)
-    return np.einsum('lpr,LpR->lLrR', Aop, np.conj(A))
+    Aop = A if M is None else M.T @ A          # 'io,lir->lor'
+    return np.tensordot(Aop, np.conj(A), axes=([1], [1])).transpose(0, 2, 1, 3)
 
 
 def onsite_expectation(result, opname, p):
@@ -1988,7 +1997,26 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     confirmed wrong by direct comparison against `_term_site_matrices`'
     output for the equivalent onsite term ("Sx","Sz") on a spin-1/2 site.
     r must be >= 0; use r and swap the operator order for the mirror
-    separation if r<0 is needed."""
+    separation if r<0 is needed.
+
+    **Fermionic operators.** When either operator is fermionic, the object
+    computed is the physical fermionic correlator, i.e. the Jordan-Wigner
+    string is threaded across every site strictly between the two: an
+    ordinary <Cdag_i C_j> here means <Cdag_i (prod_{i<k<j} F_k) C_j>, not
+    the stringless product of two bare matrices. Both the endpoint matrices
+    and the decision of whether a string is open at all come from
+    `_term_site_matrices` -- the very same helper `_classify_terms` uses to
+    build the Hamiltonian's own 2-site terms -- so a correlator and a
+    Hamiltonian term written with the same operator names cannot disagree
+    about the convention (endpoint F, ordering sign, and which of the two
+    sites carries the extra factor). For parity-even operators ("N", "Sz",
+    "Nup", ...) that helper returns no string and no endpoint factor, and
+    this reduces exactly to the plain transfer-matrix product it was before.
+
+    A pair with odd *total* fermion parity (e.g. two Cdag's, or a single
+    fermionic operator against an even one) raises from
+    `_term_site_matrices`: its string can never close, so the correlator is
+    not a well-defined object on an infinite chain."""
     if r < 0:
         raise ValueError("two_point_correlator: r must be >= 0")
     n_uc = result.n_uc
@@ -1996,29 +2024,36 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     Es = _transfer_matrices(cell, n_cell)
     rho_after, _eta = _all_right_fixed_points(Es, n_cell)
 
+    # Endpoint matrices (F-threaded where needed), the ordering sign, and
+    # whether a string is open between them -- exactly as a Hamiltonian
+    # term with these two factors would be built.
+    term = [1.0, [opname_i, p_i], [opname_j, p_i + r]]
+    _rel, coef, mats, ferm = _term_site_matrices(term, result.sites_uc, n_uc)
+
     if r == 0:
-        st = result.sites_uc.site_type((p_i % n_uc) + 1)
-        M = st.matrix(opname_j) @ st.matrix(opname_i)
-        A = _to_array_lpr(cell[p_i])
-        Aop = np.einsum('io,lir->lor', M, A)
-        E4 = np.einsum('lpr,LpR->lLrR', Aop, np.conj(A))
-        return _expectation(Es, E4, Es[p_i], rho_after[p_i], p_i, n_cell)
+        E4 = _op_transfer_mat(cell, p_i, mats[0])
+        return coef * _expectation(Es, E4, Es[p_i], rho_after[p_i], p_i, n_cell)
 
     # Positions advance through the *tiled cell* (length n_cell), while the
     # site type at each position is set by its sublattice (position % n_uc)
     # -- the two coincide unless the cell is longer than the unit cell,
     # which is exactly `_theta_cell`'s n_uc=1 case.
     k_j = (p_i + r) % n_cell
-    running = _op_transfer(result.sites_uc, cell, p_i, opname_i, n_uc)
+    running = _op_transfer_mat(cell, p_i, mats[0])
     running_id = Es[p_i]
     for step in range(1, r):
-        E_step = Es[(p_i + step) % n_cell]
+        k = (p_i + step) % n_cell
+        # An open Jordan-Wigner string puts F on this intervening site; the
+        # denominator (running_id) stays the plain transfer either way --
+        # it is the norm, and carries no operator content at all.
+        E_step = (_op_transfer_mat(
+                      cell, k, result.sites_uc.site_type((k % n_uc) + 1).matrix("F"))
+                  if ferm[0] else Es[k])
         running = _compose(running, E_step)
-        running_id = _compose(running_id, E_step)
-    running = _compose(running, _op_transfer(
-        result.sites_uc, cell, k_j, opname_j, n_uc))
+        running_id = _compose(running_id, Es[k])
+    running = _compose(running, _op_transfer_mat(cell, k_j, mats[1]))
     running_id = _compose(running_id, Es[k_j])
-    return _expectation(Es, running, running_id, rho_after[k_j], p_i, n_cell)
+    return coef * _expectation(Es, running, running_id, rho_after[k_j], p_i, n_cell)
 
 
 def _dominant_eigenvalue_mixed(Es):
