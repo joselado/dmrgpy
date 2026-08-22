@@ -392,8 +392,40 @@ compiled-backend calls (\texttt{H.to\_terms()} fed straight into
 \texttt{infinitechain.py}'s own 0-based \texttt{h\_intra}/\texttt{h\_inter}
 site convention to the codebase's usual 1-based one via the same
 \texttt{MultiOperator.to\_terms()} every other compiled backend call
-already uses (no separate Jordan-Wigner transform, since iDMRG doesn't
-support fermionic terms yet on either backend).
+already uses --- but, uniquely among this codebase's compiled backend
+calls, with \textbf{\texttt{jordan\_wigner\_transform=False}}: the
+infinite path hands the C++ side the raw, untransformed operator names.
+
+That is not an optimization but a correctness requirement, and getting it
+wrong is what left \texttt{itensor\_version=3} unable to run a fermionic
+infinite chain at all until 2026-08-22.
+\texttt{multioperator.jordan\_wigner()} is the \emph{finite}-chain
+transform: it makes every fermionic operator at site \texttt{s} carry an
+explicit \texttt{F} on sites \texttt{1..s-1}, a string anchored at site 1
+of the chain. An infinite chain has no site 1, and the strings also break
+the documented ``at most 2 distinct sites per term'' contract, since each
+\texttt{F} factor lands on a site of its own --- so
+\texttt{Chain::idmrg\_ground\_state} rejected any term whose endpoints
+were not adjacent (the adjacent case happens to survive, because the
+global string then collapses to exactly the correct endpoint-\texttt{F}
+composition with nothing in between, which is why the spin-only test
+suite never noticed). Both backends now thread the string themselves,
+locally and translation-invariantly between each term's own two
+endpoints: \texttt{pyitensor/idmrg.py}'s \texttt{\_term\_site\_matrices}
+(which always did) and \texttt{mpscpp3/chain\_session.h}'s
+\texttt{idmrg\_classify\_terms}, a port of it --- fermionic reordering
+sign, the endpoint \texttt{F} factor, \texttt{IdmrgBond::carry\_ferm}
+(consumed by \texttt{idmrg\_build\_row}, which propagates \texttt{F}
+rather than \texttt{Id} along that bond's pending channel), and rejection
+of odd total fermion parity. \texttt{idmrg\_classify\_terms} serves
+\texttt{Chain::vumps\_ground\_state} too, so one implementation covers
+both \texttt{gs\_method}s. Odd-parity terms are additionally caught in
+\texttt{infinitechain.py}'s own \texttt{\_canonicalize\_hamiltonian}, on
+the raw terms every backend shares, because the C++ rejection is an
+ITensor \texttt{Error()} that aborts the process rather than raising into
+Python. Cross-site correlators of fermionic operators are a separate,
+still-unthreaded code path and are refused outright --- see
+\texttt{Infinite\_Many\_Body\_Chain.correlator}'s own guard.
 
 \textbf{A third \texttt{gs\_energy} dispatch option: VUMPS.}
 \texttt{pyitensor/vumps.py} implements Variational Uniform Matrix
@@ -485,6 +517,42 @@ further from the exact answer than the typical run. See
 module-docstring section for the full, numerically-confirmed account,
 and \texttt{docs/user\_guide.tex}'s own iDMRG section for the
 user-facing version of this caveat.
+
+\textbf{How the \texttt{D}-ramp is walked, and where the two VUMPS
+backends now diverge in cost.} The ramp visits
+\texttt{1, 2, 4, 8, \ldots, D} (doubling, always ending exactly at
+\texttt{D}: \texttt{vumps.py}'s \texttt{\_d\_ramp}, mirrored in
+\texttt{chain\_session.h}'s own \texttt{d\_ramp} vector). It used to step
+one integer at a time, which made the \emph{ramp}, not the solve at the
+target bond dimension, dominate the whole driver: every step is a full
+multi-restart VUMPS solve costing roughly \texttt{O(D\^{}3)}, so a unit
+ramp is \texttt{O(D\^{}4)} overall and needs $\sim$100 complete solves to
+reach \texttt{D=30} where doubling needs 6. Warm-starting is unaffected
+--- \texttt{\_grow\_initial\_state}/\texttt{vumps\_grow\_init} embed the
+previous solution in the new tensors' leading block plus noise and assume
+nothing about the size of the jump.
+
+The remaining \texttt{O(D\^{}6)} costs inside a single solve have been
+removed on the \texttt{"python"} side only, and this is a real divergence
+between the two ports rather than a difference of style.
+\texttt{pyitensor} computes the transfer matrix's dominant fixed point
+with ARPACK on a matvec that applies each site's own transfer tensor in
+turn (\texttt{idmrg.py}'s \texttt{\_dominant\_fixed\_point}), and solves
+the two environment systems with GMRES on the same kind of matvec
+(\texttt{idmrg\_excitations.py}'s \texttt{\_solve\_linear\_map}), instead
+of composing/materializing a \texttt{chi\^{}2 x chi\^{}2} matrix and
+calling \texttt{np.linalg.eig}/\texttt{np.linalg.solve} on it. Both keep
+the dense route as an exact fallback below a size threshold
+(\texttt{\_DENSE\_EIG\_MAX}, \texttt{\_DENSE\_SOLVE\_MAX}) and on
+non-convergence, so neither is less robust than what it replaced;
+\texttt{tests/test\_infinite\_chain.py} pins the thresholds to force each
+route and checks they agree. \texttt{Chain::vumps\_ground\_state} still
+uses the dense \texttt{zgeev} fixed point (no ARPACK is available there,
+and a hand-rolled Arnoldi is not worth the risk), so \textbf{the C++
+VUMPS scales worse in \texttt{D} than the Python one} even though both
+share the geometric ramp. Prefer \texttt{itensor\_version="python"} with
+\texttt{gs\_method="vumps"}, or \texttt{itensor\_version=3} with
+\texttt{gs\_method="idmrg"}, for a large-\texttt{D} infinite chain.
 
 \textbf{VUMPS and the tangent-space excitation ansatz, ported to
 \texttt{itensor\_version=3}.} \texttt{mpscpp3/chain\_session.h}'s

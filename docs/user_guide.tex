@@ -2310,6 +2310,58 @@ above, or any chain with \texttt{j\_weak} bonds well below the uniform
 point) has a finite correlation length and converges both faster and
 more reliably.
 
+\textbf{Fermionic infinite chains.}
+\texttt{Infinite\_Many\_Body\_Chain}'s first argument is a list of
+site-type codes, so an infinite chain can be fermionic as well as a spin
+chain: \texttt{0} is a spinless fermion site
+(\texttt{C}/\texttt{Cdag}/\texttt{N}/\texttt{F}), \texttt{1} a native
+spinful (Electron/Hubbard) site carrying both flavours at once
+(\texttt{Cup}/\texttt{Cdagup}/\texttt{Cdn}/\texttt{Cdagdn}/\texttt{Nup}/\texttt{Ndn},
+local dimension 4). The native spinful code is what makes a two-orbital
+model fit the \texttt{n\_uc<=2} limit --- a
+\texttt{Spinful\_Fermionic\_Chain}-style representation would need two
+tensor-network sites per orbital, i.e.\ four for a two-orbital cell:
+
+\begin{lstlisting}
+ic = infinitechain.Infinite_Many_Body_Chain([1, 1])   # two native spinful sites per cell
+Cup  = [ic.get_operator("Cup", i, "C") for i in range(2)]
+Cdup = [ic.get_operator("Cdagup", i, "C") for i in range(2)]
+CupR = [ic.get_operator("Cup", i, "R") for i in range(2)]
+ic.set_hamiltonian(Cdup[0]*CupR[0] + ...)
+\end{lstlisting}
+
+Both backends thread the Jordan-Wigner string themselves, \emph{locally}
+between each term's own two endpoints, rather than from some absolute
+origin --- an infinite chain has no site 1 for a finite-chain-style
+string to start at. Two consequences for what a Hamiltonian may contain:
+
+\begin{itemize}
+\item The ``at most 2 distinct sites per term'' rule is counted in
+      \emph{sites}, not operator factors: a three-operator product like
+      \texttt{(N\_f - 1/2) * (Cdag\_f * C\_c)} touches two sites and is
+      fine. A term whose two endpoints have sites strictly between them
+      (e.g.\ \texttt{Cdag} at cell site 0 and \texttt{C} at site 0 of the
+      \emph{next} cell, for \texttt{n\_uc=2}) is also fine --- the string
+      across the intervening sites is inserted automatically.
+\item A term with \textbf{odd total fermion parity} (e.g.\ a bare
+      \texttt{Cdag}) is rejected with \texttt{ValueError} from
+      \texttt{set\_hamiltonian}: its string would have to run to infinity
+      in both directions. Such a term is not parity-conserving, so it
+      cannot appear in a physical Hamiltonian anyway.
+\end{itemize}
+
+The one gap is on the \emph{observable} side: \texttt{correlator} refuses
+a \textbf{cross-site (\texttt{r>0}) correlator of fermionic operators}
+with \texttt{NotImplementedError}, on every backend, because no
+correlator path threads the string between the two operators and a
+stringless answer would be silently wrong. Same-site (\texttt{r=0})
+fermionic correlators, and any-\texttt{r} correlators of parity-even
+operators (\texttt{N}, \texttt{Nup}, \texttt{Sz}, \ldots), are supported.
+See \texttt{examples/idmrg/fermionic\_infinite\_chain/main.py}, which
+checks a dimerized spinless chain (including a hopping that skips a site,
+so a real string is involved) against the exact free-fermion band
+integral on every backend/solver combination.
+
 \textbf{Static correlators.} After \texttt{gs\_energy()} (called
 automatically by \texttt{vev}/\texttt{correlator} if not already run),
 one- and two-point expectation values of the converged infinite chain are

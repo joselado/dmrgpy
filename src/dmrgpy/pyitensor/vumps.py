@@ -433,9 +433,7 @@ def _solve_left_environment(AL, W, r_AL, source_l, e):
     def left_action(X):
         return X - idmrg._apply_transfer_from_left(E_id, X) + I * np.trace(r_AL.conj() @ X)
 
-    rhs = (source_l - e * I).reshape(-1)
-    Mat = idmrg_exc._dense_linear_map(D, left_action)
-    return np.linalg.solve(Mat, rhs).reshape(D, D)
+    return idmrg_exc._solve_linear_map(D, left_action, source_l - e * I)
 
 
 def _solve_right_environment(AR, W, l_AR, source_r, e):
@@ -450,9 +448,7 @@ def _solve_right_environment(AR, W, l_AR, source_r, e):
     def right_action(X):
         return X - idmrg._apply_transfer(E_id, X) + I * np.trace(l_AR.conj() @ X)
 
-    rhs = (source_r - e * I).reshape(-1)
-    Mat = idmrg_exc._dense_linear_map(D, right_action)
-    return np.linalg.solve(Mat, rhs).reshape(D, D)
+    return idmrg_exc._solve_linear_map(D, right_action, source_r - e * I)
 
 
 def _precompute_bond_environments(AL, AR, pending):
@@ -464,15 +460,26 @@ def _precompute_bond_environments(AL, AR, pending):
     Lvec_a = apply_transfer_from_left(op_transfer_matrix(AL,AL,mat_a), I) --
     "AL with mat_a applied, closed from the left with AL's own exact left
     fixed point I" -- lives on the bond immediately to the left of AC/C.
-    Rvec_b mirrors this on the right, via AR/apply_transfer/I."""
-    D = AL.shape[0]
-    I = np.eye(D, dtype=complex)
+    Rvec_b mirrors this on the right, via AR/apply_transfer/I.
+
+    Both closures are done *without* ever materializing the (D,D,D,D)
+    transfer matrix the formulas above name: closing E4 against the
+    identity is just a trace over one of its index pairs, i.e. a direct
+    contraction of the two rank-3 tensors over two legs
+    (O(D^2 d D) work and O(D^2) memory, versus O(D^4) for both if E4 is
+    built first). This runs once per bond channel per macro-iteration,
+    and at D=30 the intermediate it avoids is 810k complex entries per
+    bond."""
     out = []
     for mat_a, mat_b in pending:
-        Lvec_a = idmrg._apply_transfer_from_left(
-            idmrg_exc._op_transfer_matrix(AL, AL, mat_a), I)
-        Rvec_b = idmrg._apply_transfer(
-            idmrg_exc._op_transfer_matrix(AR, AR, mat_b), I)
+        # apply_transfer_from_left(op_transfer_matrix(AL,AL,mat_a), I)
+        #   = sum_l E4[l,l,r,R] = sum_{l,p} (mat_a AL)[l,p,r] conj(AL)[l,p,R]
+        AL_op = idmrg_exc._apply_op_ket(mat_a, AL)
+        Lvec_a = np.tensordot(AL_op, np.conj(AL), axes=([0, 1], [0, 1]))
+        # apply_transfer(op_transfer_matrix(AR,AR,mat_b), I)
+        #   = sum_r E4[l,L,r,r] = sum_{p,r} (mat_b AR)[l,p,r] conj(AR)[L,p,r]
+        AR_op = idmrg_exc._apply_op_ket(mat_b, AR)
+        Rvec_b = np.tensordot(AR_op, np.conj(AR), axes=([1, 2], [1, 2]))
         out.append((mat_a, mat_b, Lvec_a, Rvec_b))
     return out
 
@@ -714,7 +721,7 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
     best = None
     prev_AL = prev_AR = None
     best_e0_so_far = None
-    for D_cur in range(1, D + 1):
+    for D_cur in _d_ramp(D):
         n_here = nrestarts if D_cur == D else min(nrestarts, 3)
         local_best = None
         for attempt_i in range(n_here):
@@ -757,6 +764,32 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
                            else min(best_e0_so_far, local_best.e0))
         best = local_best
     return best
+
+
+def _d_ramp(D):
+    """The bond dimensions the driver above actually solves at on its way
+    to D: 1, 2, 4, 8, ... , D (doubling, always ending exactly at D).
+
+    Every step of this ramp is a full multi-restart VUMPS solve, and one
+    solve costs roughly O(D^3), so ramping one integer at a time (as this
+    function's predecessor did) makes the whole driver O(D^4) -- the ramp
+    itself, not the solve at the target D, then dominates: 32 complete
+    solves to reach D=8, and ~100 to reach D=30. Doubling reaches D=30 in
+    6 steps whose combined cost is a small multiple of the last one's.
+
+    What the ramp is *for* is unchanged (see this module's "Convergence
+    robustness" docstring section): a pure random start at large D lands
+    in a bad basin often enough to matter, so each step is warm-started
+    from the previous one via `_grow_initial_state`, which embeds the old
+    solution in the new tensor's top-left block plus noise and assumes
+    nothing about how big the jump is."""
+    ramp = []
+    d = 1
+    while d < D:
+        ramp.append(d)
+        d *= 2
+    ramp.append(D)
+    return ramp
 
 
 def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,

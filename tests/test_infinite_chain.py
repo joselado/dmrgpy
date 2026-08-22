@@ -1570,3 +1570,298 @@ def test_term_site_matrices_applies_the_cross_site_reordering_sign():
             ops.insert(random.randint(0, len(ops)), ["N", random.randint(0, 1)])
         got, expected = coef_of(ops)
         assert abs(got - expected) < 1e-12, (ops, got, expected)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end fermionic infinite chains (both backends).
+#
+# Everything above this point tests fermionic *term handling* in isolation
+# (_term_site_matrices vs HTerm.resolve()); every test that actually runs
+# gs_energy() is a spin chain. That gap is why itensor_version=3 shipped
+# unable to run a fermionic infinite chain at all: infinitechain.py used to
+# hand the C++ backend MultiOperator.to_terms(), i.e. the *finite*-chain
+# Jordan-Wigner form whose strings start at site 1 of the chain, which both
+# violates the documented "at most 2 distinct sites per term" contract (each
+# explicit F factor lands on its own site) and hardcodes a string anchored
+# at a site an infinite chain does not have. It happened to work whenever
+# every fermionic term connected *adjacent* sites -- the global string then
+# collapses to exactly the right endpoint-F composition with nothing left
+# over -- which is the only case a spin-only test suite could ever have
+# exercised. Both backends now take the raw, untransformed terms and thread
+# the string locally themselves (pyitensor/idmrg.py's _term_site_matrices,
+# mpscpp3/chain_session.h's idmrg_classify_terms + idmrg_build_row).
+#
+# The oracle is a free-fermion band integral: for a quadratic Hamiltonian
+# the ground state fills every negative-energy single-particle level, so
+# the exact energy density is an integral over the occupied bands of the
+# Bloch matrix -- backend-independent, and exact to machine precision
+# rather than a golden value pinned to some past commit.
+
+_SPINFUL_SITE_CODE = 1  # native spinful (Electron/Hubbard) site, dim 4
+
+
+def _free_fermion_energy_density(t1, t2, t3, nk=20001):
+    """Exact ground-state energy per SITE of the periodic spinless chain
+    with hoppings t1 (A_n-B_n), t2 (B_n-A_{n+1}) and t3 (A_n-A_{n+1}),
+    two sites (A,B) per unit cell:
+
+        H(k) = [[2 t3 cos k, t1 + t2 e^{-ik}], [t1 + t2 e^{ik}, 0]]
+
+    t2 != t1 dimerizes the chain (opening a gap), and t3 is what makes this
+    a genuine test of the Jordan-Wigner string: it couples the two A sites
+    of adjacent cells, i.e. a term whose two endpoints have a site strictly
+    between them, so its bond carries carry_ferm=True."""
+    k = np.linspace(-np.pi, np.pi, nk, endpoint=False)
+    H = np.zeros((len(k), 2, 2), dtype=complex)
+    H[:, 0, 0] = 2 * t3 * np.cos(k)
+    H[:, 0, 1] = t1 + t2 * np.exp(-1j * k)
+    H[:, 1, 0] = np.conj(H[:, 0, 1])
+    w = np.linalg.eigvalsh(H)
+    return np.where(w < 0, w, 0.0).sum(axis=1).mean() / 2
+
+
+def _free_fermion_chain(t1, t2, t3, itensor_version, gs_method, maxm=8,
+                         spinful=False):
+    site = _SPINFUL_SITE_CODE if spinful else _FERMION_SITE_CODE
+    ic = infinitechain.Infinite_Many_Body_Chain(
+        [site, site], itensor_version=itensor_version)
+    ic.gs_method = gs_method
+    ic.maxm = maxm
+    ic.maxiter = 40
+    H = 0
+    # A native spinful site carries both flavours, so the same hoppings are
+    # written once per flavour and the two decouple exactly.
+    for suffix in (["up", "dn"] if spinful else [""]):
+        C = [ic.get_operator("C" + suffix, i, "C") for i in range(2)]
+        Cd = [ic.get_operator("Cdag" + suffix, i, "C") for i in range(2)]
+        CR = [ic.get_operator("C" + suffix, i, "R") for i in range(2)]
+        CdR = [ic.get_operator("Cdag" + suffix, i, "R") for i in range(2)]
+        H = H + t1 * (Cd[0] * C[1] + Cd[1] * C[0])
+        H = H + t2 * (Cd[1] * CR[0] + CdR[0] * C[1])
+        H = H + t3 * (Cd[0] * CR[0] + CdR[0] * C[0])
+    ic.set_hamiltonian(H)
+    return ic
+
+
+@pytest.mark.parametrize("itensor_version,gs_method", [
+    ("python", "idmrg"),
+    ("python", "vumps"),
+    pytest.param(3, "idmrg", marks=pytest.mark.skipif(
+        not cppext.available(3), reason="mpscpp3 extension not compiled")),
+    pytest.param(3, "vumps", marks=pytest.mark.skipif(
+        not cppext.available(3), reason="mpscpp3 extension not compiled")),
+])
+def test_free_fermion_energy_density_matches_band_integral(itensor_version,
+                                                            gs_method):
+    """A gapped, dimerized spinless chain including a next-cell A-A hopping
+    (the term that needs a Jordan-Wigner string on the site between its two
+    endpoints) must reproduce the exact band-integral energy density on
+    every backend. Without the string this lands at a visibly different
+    number, not a slightly less converged one; before the fix
+    itensor_version=3 aborted outright on this Hamiltonian."""
+    t1, t2, t3 = 1.0, 0.4, 0.1
+    exact = _free_fermion_energy_density(t1, t2, t3)
+    ic = _free_fermion_chain(t1, t2, t3, itensor_version, gs_method)
+    assert ic.gs_energy() == pytest.approx(exact, abs=1e-6)
+
+
+@pytest.mark.parametrize("itensor_version", [
+    "python",
+    pytest.param(3, marks=pytest.mark.skipif(
+        not cppext.available(3), reason="mpscpp3 extension not compiled")),
+])
+def test_native_spinful_free_chain_is_twice_the_spinless_one(itensor_version):
+    """The same free chain on native spinful (site_type=1) sites: two
+    decoupled flavours, so the exact energy density is exactly 2x the
+    spinless one. This is the only test of ElectronSite's own on-site spin
+    convention (electron.h defines Cdn = Fup.Adn, an intra-site string no
+    spinless site type has) -- do not fold it into the spinless test above.
+
+    The tolerance is loose because the tolerance is not the point: a
+    dim-4 site at maxm=8 is genuinely under-converged (each flavour gets
+    the entanglement budget the spinless test spends on one), while a
+    missing/incorrect Jordan-Wigner string moves this by O(1). The tight
+    check is the backend-vs-backend one in
+    test_native_spinful_backends_agree."""
+    t1, t2, t3 = 1.0, 0.4, 0.1
+    exact = 2 * _free_fermion_energy_density(t1, t2, t3)
+    ic = _free_fermion_chain(t1, t2, t3, itensor_version, "idmrg", spinful=True)
+    assert ic.gs_energy() == pytest.approx(exact, abs=2e-3)
+
+
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="mpscpp3 extension not compiled")
+def test_native_spinful_backends_agree():
+    """itensor_version=3 and itensor_version="python" must agree on a
+    native-spinful chain far more tightly than either agrees with the
+    under-converged exact value -- they run the same algorithm at the same
+    bond dimension, so any disagreement here is a porting bug in one of the
+    two Jordan-Wigner implementations, not a convergence difference."""
+    t1, t2, t3 = 1.0, 0.4, 0.1
+    e_py = _free_fermion_chain(t1, t2, t3, "python", "idmrg", spinful=True).gs_energy()
+    e_v3 = _free_fermion_chain(t1, t2, t3, 3, "idmrg", spinful=True).gs_energy()
+    assert e_v3 == pytest.approx(e_py, abs=1e-6)
+
+
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="mpscpp3 extension not compiled")
+def test_interacting_spinful_cell_backends_agree():
+    """A genuinely interacting native-spinful unit cell -- one itinerant
+    ("c") and one correlated ("f") orbital, with a Hubbard U on f, a Kondo
+    exchange, and a hybridization written as a three-operator product
+    confined to two sites. That last shape is what originally motivated
+    this: it is a perfectly legal 2-site term, but the finite-chain
+    Jordan-Wigner form of its inter-cell partners spilled onto extra sites
+    and the C++ classifier rejected the whole Hamiltonian.
+
+    There is no closed form here, so the check is that the two independent
+    implementations agree."""
+    U1, tc, J = 0.5, 0.2, 0.2
+
+    def build(itensor_version):
+        ic = infinitechain.Infinite_Many_Body_Chain(
+            [_SPINFUL_SITE_CODE] * 2, itensor_version=itensor_version)
+        ic.gs_method = "idmrg"
+        ic.maxm = 8
+        ic.maxiter = 30
+        g = ic.get_operator
+        Cup = [g("Cup", i, "C") for i in range(2)]
+        Cdup = [g("Cdagup", i, "C") for i in range(2)]
+        Cdn = [g("Cdn", i, "C") for i in range(2)]
+        Cddn = [g("Cdagdn", i, "C") for i in range(2)]
+        Nup = [g("Nup", i, "C") for i in range(2)]
+        Ndn = [g("Ndn", i, "C") for i in range(2)]
+        Sx = [0.5 * Cdup[i] * Cdn[i] + 0.5 * Cddn[i] * Cup[i] for i in range(2)]
+        Sy = [-0.5j * Cdup[i] * Cdn[i] + 0.5j * Cddn[i] * Cup[i] for i in range(2)]
+        Sz = [0.5 * Nup[i] - 0.5 * Ndn[i] for i in range(2)]
+        H = 0
+        for suffix in ["up", "dn"]:
+            Cd = [g("Cdag" + suffix, i, "C") for i in range(2)]
+            C = [g("C" + suffix, i, "C") for i in range(2)]
+            CdR = [g("Cdag" + suffix, i, "R") for i in range(2)]
+            CR = [g("C" + suffix, i, "R") for i in range(2)]
+            H = H + 1.0 * (Cd[0] * CR[0] + CdR[0] * C[0])   # c-orbital hopping
+            H = H + 0.3 * (Cd[1] * CR[1] + CdR[1] * C[1])   # f-orbital hopping
+        c, f = 0, 1
+        Tup = -1j * (Cdup[f] * Cup[c] - Cdup[c] * Cup[f])
+        H = H + U1 / 2 * (Nup[f] - 0.5) * (Ndn[f] - 0.5)
+        H = H + tc / 2 * (Ndn[f] - 0.5) * Tup               # 3 factors, 2 sites
+        H = H + J * (Sx[f] * Sx[c] + Sy[f] * Sy[c] + Sz[f] * Sz[c])
+        ic.set_hamiltonian(H)
+        return ic
+
+    assert build(3).gs_energy() == pytest.approx(build("python").gs_energy(),
+                                                  abs=1e-6)
+
+
+def test_odd_fermion_parity_term_is_rejected_before_the_backend_sees_it():
+    """A term with odd total fermion parity opens a Jordan-Wigner string
+    that can never close on an infinite chain. Both backends reject it, but
+    the v3 one does so with an ITensor Error() that aborts the process, so
+    set_hamiltonian has to catch it first -- on the raw terms, before any
+    backend is chosen."""
+    ic = infinitechain.Infinite_Many_Body_Chain([_FERMION_SITE_CODE] * 2)
+    C = ic.get_operator("C", 0, "C")
+    with pytest.raises(ValueError, match="odd total fermion parity"):
+        ic.set_hamiltonian(C + ic.get_operator("Cdag", 0, "C"))
+
+
+def test_cross_site_fermionic_correlator_is_refused():
+    """No correlator backend threads the Jordan-Wigner string between the
+    two operators, so a cross-site fermionic correlator must refuse rather
+    than return a stringless (silently wrong) number. Parity-even operators
+    and the same-site (r=0) case stay allowed."""
+    ic = _free_fermion_chain(1.0, 0.4, 0.1, "python", "idmrg", maxm=6)
+    with pytest.raises(NotImplementedError, match="Jordan-Wigner"):
+        ic.correlator("Cdag", 0, "C", 1)
+    assert np.isfinite(abs(ic.correlator("N", 0, "N", 1)))
+    assert np.isfinite(abs(ic.correlator("Cdag", 0, "C", 0)))
+
+
+def test_raw_and_jordan_wigner_terms_agree_for_spin_operators():
+    """infinitechain.py now hands the v3 backend
+    to_terms(jordan_wigner_transform=False). For a spin Hamiltonian the
+    Jordan-Wigner transform is the identity, so the two forms must be
+    literally the same term list -- which is what makes the whole existing
+    spin-chain v3 test suite above a regression net for that plumbing
+    change."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
+    Sx = [ic.get_operator("Sx", i, "C") for i in range(2)]
+    SxR = [ic.get_operator("Sx", i, "R") for i in range(2)]
+    Sz = [ic.get_operator("Sz", i, "C") for i in range(2)]
+    ic.set_hamiltonian(Sx[0] * Sx[1] + Sx[1] * SxR[0] + 0.3 * Sz[0])
+    for mo in (ic._h_intra, ic._h_inter):
+        assert mo.to_terms() == mo.to_terms(jordan_wigner_transform=False)
+
+
+# ---------------------------------------------------------------------------
+# Dense vs iterative linear algebra.
+#
+# The transfer-matrix eigenproblem and the environment solves both used to
+# be done densely on chi^2 x chi^2 matrices, which is O(chi^6) twice over
+# and is what made VUMPS impractical at any useful bond dimension (a
+# profile of one chi=12 run spent 14.7s of ~20s inside np.linalg.eig
+# alone). Both now switch to a Krylov method above a size threshold, with
+# the dense route kept as an exact fallback. The thresholds are set low
+# enough to be crossed in practice, and these tests pin them to 0/infinity
+# to check the two routes actually agree.
+
+
+def _random_transfer_tensors(chi, d, n_uc, seed):
+    from dmrgpy.pyitensor import idmrg_excitations as idmrg_exc
+
+    rng = np.random.default_rng(seed)
+    Es = []
+    for _ in range(n_uc):
+        A = rng.normal(size=(chi, d, chi)) + 1j * rng.normal(size=(chi, d, chi))
+        Es.append(idmrg_exc._op_transfer_matrix(A, A))
+    return Es
+
+
+@pytest.mark.parametrize("n_uc", [1, 2])
+def test_iterative_dominant_fixed_point_matches_dense(n_uc, monkeypatch):
+    """The ARPACK route must return the same dominant eigenpair as the
+    dense np.linalg.eig route, for both the left and the right problem."""
+    Es = _random_transfer_tensors(5, 3, n_uc, seed=4)
+    for fixed_point in (idmrg._dominant_right_fixed_point,
+                         idmrg._dominant_left_fixed_point):
+        monkeypatch.setattr(idmrg, "_DENSE_EIG_MAX", 10 ** 9)
+        rho_dense, eta_dense = fixed_point(Es)
+        monkeypatch.setattr(idmrg, "_DENSE_EIG_MAX", 0)
+        rho_iter, eta_iter = fixed_point(Es)
+        assert eta_iter == pytest.approx(eta_dense, rel=1e-10)
+        assert np.allclose(rho_iter, rho_dense, atol=1e-8)
+
+
+def test_iterative_linear_solve_matches_dense(monkeypatch):
+    """_solve_linear_map's GMRES route must reproduce the dense LU route."""
+    from dmrgpy.pyitensor import idmrg_excitations as idmrg_exc
+
+    D = 5
+    rng = np.random.default_rng(9)
+    M = (rng.normal(size=(D * D, D * D)) + 1j * rng.normal(size=(D * D, D * D))
+         + 3 * np.eye(D * D))
+    rhs = rng.normal(size=(D, D)) + 1j * rng.normal(size=(D, D))
+
+    def action(X):
+        return (M @ X.reshape(-1)).reshape(D, D)
+
+    monkeypatch.setattr(idmrg_exc, "_DENSE_SOLVE_MAX", 10 ** 9)
+    dense = idmrg_exc._solve_linear_map(D, action, rhs)
+    monkeypatch.setattr(idmrg_exc, "_DENSE_SOLVE_MAX", 0)
+    iterative = idmrg_exc._solve_linear_map(D, action, rhs)
+    assert np.allclose(iterative, dense, atol=1e-10)
+
+
+def test_d_ramp_doubles_and_ends_at_the_target():
+    """The VUMPS driver solves at every bond dimension the ramp lists, so
+    its length is a direct multiplier on the whole run's cost."""
+    from dmrgpy.pyitensor.vumps import _d_ramp
+
+    for D in range(1, 65):
+        ramp = _d_ramp(D)
+        assert ramp[-1] == D
+        assert ramp[0] == 1
+        assert all(b > a for a, b in zip(ramp, ramp[1:]))
+        assert len(ramp) <= D
+    assert _d_ramp(30) == [1, 2, 4, 8, 16, 30]

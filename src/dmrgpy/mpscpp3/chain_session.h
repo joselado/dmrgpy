@@ -243,8 +243,8 @@ struct IdmrgChan
 // A classified 2-site term (idmrg.py's "bonds" dict) -- mat_a/mat_b are
 // dense, row-major (d*d)-sized operator matrices in the same (in,out)
 // convention as ITensor's own SiteSet::op() (see idmrg_op_dense).
-// Fermionic terms (carry_ferm) are not supported by this C++ port yet
-// (always false here) -- see Chain::idmrg_ground_state's own comment.
+// carry_ferm: whether a Jordan-Wigner string is open between rel_a and
+// rel_b (set by idmrg_classify_terms, consumed by idmrg_build_row).
 struct IdmrgBond
     {
     int rel_a, rel_b;
@@ -2444,10 +2444,13 @@ class Chain
     // gs_energy_generalized has for its own A), n_uc<=2 only (rejected
     // explicitly below -- see idmrg.py's own module docstring for why
     // n_uc>=3 needs a genuine redesign of the growth loop's sublattice
-    // pairing), and fermionic (Jordan-Wigner-threaded) terms not
-    // supported yet (idmrg_classify_terms always sets carry_ferm=false;
-    // fine for spin/boson-type models, silently wrong for a fermionic
-    // one -- no detection/guard for that case yet). Ground-state energy
+    // pairing). Fermionic terms ARE supported: idmrg_classify_terms
+    // threads the Jordan-Wigner string itself (locally, between each
+    // term's own two endpoints -- the terms arrive untransformed, see that
+    // function's own comment), and idmrg_build_row propagates it along the
+    // pending channel; a term with odd total fermion parity, whose string
+    // could never close within the unit cell, is rejected there.
+    // Ground-state energy
     // density only -- static correlators (onsite_expectation/
     // two_point_correlator) are not ported to C++ yet; run gs_energy()
     // via this method for the energy, then reuse pyitensor's own
@@ -2792,7 +2795,20 @@ class Chain
 
         VumpsRunResult best; bool have_best=false;
         std::vector<Cplx> prev_AL, prev_AR; int prev_D=0; bool have_prev=false;
-        for (int D_cur=1; D_cur<=D; ++D_cur)
+        // The bond dimensions actually solved at on the way to D: 1,2,4,
+        // 8,...,D (doubling, always ending exactly at D) -- pyitensor/
+        // vumps.py's own _d_ramp, same sequence. Every step is a full
+        // multi-restart VUMPS solve costing ~O(D^3), so ramping one
+        // integer at a time makes the driver O(D^4) and the ramp, not the
+        // solve at the target D, dominates (~100 complete solves to reach
+        // D=30, versus 6 here). What the ramp is for is unchanged: each
+        // step warm-starts from the previous one via vumps_grow_init,
+        // which embeds the old solution in the new tensors' leading block
+        // plus noise and assumes nothing about how big the jump is.
+        std::vector<int> d_ramp;
+        for (int d_cur=1; d_cur<D; d_cur*=2) d_ramp.push_back(d_cur);
+        d_ramp.push_back(D);
+        for (int D_cur : d_ramp)
             {
             int n_here = (D_cur==D) ? nrestarts : std::min(nrestarts,3);
             VumpsRunResult local_best; bool have_local=false;
@@ -3906,6 +3922,14 @@ class Chain
         return C;
         }
 
+    // Name-based fermion classification, mirroring ITensor's own
+    // isFermionic() (ITensor/itensor/mps/autompo.cc) and pyitensor's
+    // sites/base.py::is_fermionic: any operator name starting with 'C' is
+    // fermionic for Jordan-Wigner purposes, on every site type.
+    static bool
+    idmrg_is_fermionic(std::string const& name)
+        { return !name.empty() && name[0]=='C'; }
+
     // Classifies every term (terms_intra ++ terms_inter, MOTerm's own
     // 1-based sites converted to 0-based here to match idmrg.py's own
     // arithmetic exactly) into 1-site (onsite) and 2-site (bonds) pieces,
@@ -3913,6 +3937,29 @@ class Chain
     // product exactly like _term_site_matrices does (mats[-1] first,
     // then left-multiplied by each earlier factor in reverse -- i.e. for
     // factors written [A,B,C] at one site, the composed matrix is C@B@A).
+    //
+    // The terms arrive *without* any Jordan-Wigner transform applied
+    // (infinitechain.py passes to_terms(jordan_wigner_transform=False) --
+    // the finite-chain transform's strings run from site 1 of the chain,
+    // which an infinite chain does not have). This function threads the
+    // string itself, locally and translation-invariantly, exactly like
+    // pyitensor/idmrg.py's _term_site_matrices:
+    //   * fermionic reordering sign when sorting factors into site order
+    //     (by_site below does that sorting, so the sign has to be supplied
+    //     here -- autompo.cc's HTerm::add() applies the same sign while
+    //     insertion-sorting its own factors);
+    //   * an endpoint F factor on any touched site whose own parity differs
+    //     from the parity carried in from its left (HTerm::resolve()'s own
+    //     need_F);
+    //   * carry_ferm on the resulting 2-site bond, so idmrg_build_row
+    //     propagates F rather than Id along the pending channel spanning
+    //     the term's two endpoints;
+    //   * rejection of odd total fermion parity, whose string could never
+    //     be closed within the unit cell.
+    // See _term_site_matrices' own (much longer) docstring for the
+    // derivation of each of these and for what silently breaks without
+    // them (in particular F@C == -C flips the sign of a C-leading hopping
+    // term, i.e. a silently non-Hermitian Hamiltonian).
     void
     idmrg_classify_terms(std::vector<MOTerm> const& terms_intra,
                           std::vector<MOTerm> const& terms_inter, int n_uc,
@@ -3923,6 +3970,16 @@ class Chain
         all_terms.insert(all_terms.end(),terms_inter.begin(),terms_inter.end());
         for (auto const& term : all_terms)
             {
+            Cplx coef = term.coef;
+            // Sorting the factors into site order is a *fermionic*
+            // reordering: every pair of fermionic factors swapped past each
+            // other contributes a -1.
+            for (size_t x=0;x<term.factors.size();++x)
+            for (size_t y=x+1;y<term.factors.size();++y)
+                if (term.factors[x].site > term.factors[y].site
+                        && idmrg_is_fermionic(term.factors[x].name)
+                        && idmrg_is_fermionic(term.factors[y].name))
+                    coef = -coef;
             std::map<int,std::vector<std::string>> by_site;
             for (auto const& f : term.factors) by_site[f.site-1].push_back(f.name);
             std::vector<int> rel_sites;
@@ -3933,6 +3990,8 @@ class Chain
                       "2 distinct sites -- only 1- and 2-site terms are "
                       "supported");
             std::vector<std::vector<Cplx>> mats;
+            std::vector<bool> ferm;
+            bool carry = false; // parity carried in from the touched sites to the left
             for (int rel : rel_sites)
                 {
                 int p = ((rel % n_uc)+n_uc) % n_uc;
@@ -3941,17 +4000,30 @@ class Chain
                 auto combined = idmrg_op_dense(p,names.back());
                 for (int k=(int)names.size()-2;k>=0;--k)
                     combined = idmrg_matmul(combined,idmrg_op_dense(p,names[k]),d);
+                int nferm = 0;
+                for (auto const& nm : names) if (idmrg_is_fermionic(nm)) ++nferm;
+                bool site_ferm = (nferm%2)==1;
+                if (carry != site_ferm)
+                    combined = idmrg_matmul(idmrg_op_dense(p,"F"),combined,d);
+                carry = (carry != site_ferm);
                 mats.push_back(std::move(combined));
+                ferm.push_back(site_ferm);
                 }
+            if (carry)
+                Error("Chain::idmrg_ground_state: a term has odd total "
+                      "fermion parity -- its Jordan-Wigner string cannot be "
+                      "closed within the unit cell");
             if (rel_sites.size()==1)
-                onsite.push_back(IdmrgOnsite{rel_sites[0],term.coef,mats[0]});
+                onsite.push_back(IdmrgOnsite{rel_sites[0],coef,mats[0]});
             else if (rel_sites.size()==2)
                 {
                 int a = rel_sites[0], b = rel_sites[1];
                 if (a>=n_uc)
                     Error("Chain::idmrg_ground_state: internal error -- "
                           "inter-cell term does not touch the central cell");
-                bonds.push_back(IdmrgBond{a,b,mats[0],mats[1],false,term.coef});
+                // carry_ferm: the string is open between the two endpoints
+                // exactly when the first one has odd parity of its own.
+                bonds.push_back(IdmrgBond{a,b,mats[0],mats[1],ferm[0],coef});
                 }
             }
         }
@@ -4011,10 +4083,10 @@ class Chain
     // The dense transition-matrix content for sublattice p, given its own
     // left/right channel lists -- a direct translation of
     // _build_automaton's own big if/elif transition-rule chain (see that
-    // function's docstring for the derivation of each case). Fermionic
-    // strings are not supported yet (the last branch always uses Id,
-    // never sites_.op("F",...); idmrg_classify_terms always sets
-    // carry_ferm=false so this is never exercised differently).
+    // function's docstring for the derivation of each case), including its
+    // Jordan-Wigner string handling: the last branch (a pending channel
+    // propagating one more site) carries this site's own "F" whenever the
+    // bond it belongs to has carry_ferm set, and plain Id otherwise.
     IdmrgAutomatonRow
     idmrg_build_row(int p, int n_uc, std::vector<IdmrgBond> const& bonds,
                      std::vector<IdmrgOnsite> const& onsite,
@@ -4094,7 +4166,8 @@ class Chain
             else if (!l_triv && !r_triv)
                 {
                 if (lch.bond_index==rch.bond_index && rch.r==lch.r-1)
-                    setmat(li,ri,eye()); // carry_ferm always false in this port
+                    setmat(li,ri,bonds[lch.bond_index].carry_ferm
+                                    ? idmrg_op_dense(p,"F") : eye());
                 }
             }
         return row;

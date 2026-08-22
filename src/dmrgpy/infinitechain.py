@@ -50,6 +50,7 @@ import numpy as np
 
 from . import multioperator
 from .multioperator import MultiOperator
+from .pyitensor.sites.base import is_fermionic
 
 
 def _term_groups(term, n_uc):
@@ -93,6 +94,23 @@ def _canonicalize_hamiltonian(h, n_uc):
     < n_uc) never has to special-case it."""
     intra_terms, inter_terms = [], []
     for term in h.op:
+        # Odd total fermion parity: the term's Jordan-Wigner string opens
+        # and never closes, so it would have to run to infinity in both
+        # tiling directions -- unrepresentable by either backend's
+        # per-term string threading (pyitensor/idmrg.py's
+        # _term_site_matrices, mpscpp3/chain_session.h's
+        # idmrg_classify_terms), and not a physical (parity-conserving)
+        # Hamiltonian term anyway. Both backends reject it themselves, but
+        # only after set_hamiltonian has returned: the v3 one does it with
+        # an ITensor Error(), which aborts the whole process rather than
+        # raising into Python. Checking it here, on the raw terms every
+        # backend shares, turns that into an ordinary ValueError at the
+        # point where the offending term is still in front of the user.
+        if sum(1 for name, _site in term[1:] if is_fermionic(name)) % 2:
+            raise ValueError(
+                "Infinite_Many_Body_Chain.set_hamiltonian: a term has odd "
+                "total fermion parity ({}) -- its Jordan-Wigner string "
+                "cannot be closed within the unit cell".format(term))
         distinct_sites = {site for _name, site in term[1:]}
         if len(distinct_sites) > 2:
             raise ValueError(
@@ -474,8 +492,15 @@ class Infinite_Many_Body_Chain:
                 "for itensor_version=\"python\"".format(self.gs_method))
         elif self.itensor_version == 3 and self.gs_method == "idmrg":
             chain = self._make_cpp_chain()
-            terms_intra = self._h_intra.to_terms()
-            terms_inter = self._h_inter.to_terms()
+            # jordan_wigner_transform=False: the C++ backend threads the
+            # Jordan-Wigner string itself (Chain::idmrg_classify_terms, a
+            # port of pyitensor/idmrg.py's _term_site_matrices), locally
+            # between each term's own two endpoints, exactly like the
+            # itensor_version="python" branches above -- see
+            # MultiOperator.to_terms' own docstring for why the finite-chain
+            # transform is wrong here.
+            terms_intra = self._h_intra.to_terms(jordan_wigner_transform=False)
+            terms_inter = self._h_inter.to_terms(jordan_wigner_transform=False)
             density, converged, _niter_done = chain.idmrg_ground_state(
                 terms_intra, terms_inter, self.maxm, self.cutoff,
                 self.maxiter, self.etol, self.niter, self.restarts)
@@ -487,8 +512,11 @@ class Infinite_Many_Body_Chain:
             self.converged = converged
         elif self.itensor_version == 3 and self.gs_method == "vumps":
             chain = self._make_cpp_chain()
-            terms_intra = self._h_intra.to_terms()
-            terms_inter = self._h_inter.to_terms()
+            # jordan_wigner_transform=False -- see the "idmrg" branch above
+            # (vumps_ground_state classifies its terms with the very same
+            # Chain::idmrg_classify_terms).
+            terms_intra = self._h_intra.to_terms(jordan_wigner_transform=False)
+            terms_inter = self._h_inter.to_terms(jordan_wigner_transform=False)
             e0, converged, _niter_done, _gauge_mismatch = chain.vumps_ground_state(
                 terms_intra, terms_inter, self.maxm, self.etol, self.maxiter,
                 self.vumps_nrestarts)
@@ -586,6 +614,30 @@ class Infinite_Many_Body_Chain:
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))
+        if r > 0 and (is_fermionic(opname_i) or is_fermionic(opname_j)):
+            # A cross-site correlator of fermionic operators needs a
+            # Jordan-Wigner string on every site strictly between the two,
+            # and NO correlator backend threads one: pyitensor.idmrg's and
+            # pyitensor.vumps' two_point_correlator, and
+            # Chain::vumps_two_point_correlator, all insert the bare
+            # operator into an otherwise-identity transfer matrix. That is
+            # the same omission Hamiltonian terms used to have (see
+            # _canonicalize_hamiltonian above and MultiOperator.to_terms'
+            # docstring), one layer up -- but a Hamiltonian built the same
+            # way now threads it, so silently returning a stringless
+            # number here would be the one remaining place where a
+            # fermionic infinite chain is quietly wrong. Refuse instead.
+            # r=0 (both operators on the same site) needs no string and is
+            # allowed, as are parity-even operators ("N", "Sz", "Nup", ...)
+            # at any r.
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.correlator: cross-site (r>0) "
+                "correlators of fermionic operators ({!r}, {!r}) are not "
+                "supported -- no backend threads the Jordan-Wigner string "
+                "between the two sites, so the result would silently omit "
+                "it. Same-site (r=0) fermionic correlators and any-r "
+                "correlators of parity-even operators (N, Sz, Nup, ...) "
+                "are supported.".format(opname_i, opname_j))
         if self.itensor_version == "python" and self.gs_method == "idmrg":
             if self._result is None:
                 self.gs_energy()

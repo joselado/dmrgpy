@@ -155,15 +155,31 @@ class MultiOperator():
         if use_jordan_wigner: m = jordan_wigner(self)
         else: m = self
         write(m,name)
-    def to_terms(self):
+    def to_terms(self,jordan_wigner_transform=True):
         """
         Return this operator as [(coeff, [(name,1-based-site),...]), ...],
         for the in-process pybind11 extension (mpscpp2/bindings.cc). This is
         exactly what write()/get_dict() already compute (Jordan-Wigner
         transform, 1-based site indices), just returned as Python objects
         instead of being written to a file/tasks.in dict.
+
+        `jordan_wigner_transform=False` skips the Jordan-Wigner step (the
+        1-based shift and the small-coefficient filtering still happen),
+        returning the operator names exactly as the caller built them
+        ("Cdagup", "Cup", ...) instead of their JW-transformed
+        ("Adagup", "F", "Aup", ...) form. Needed by infinitechain.py: the
+        `jordan_wigner()` used here is the *finite*-chain transform, whose
+        strings run from site 1 of the chain, and an infinite chain has no
+        site 1 -- its backends (pyitensor/idmrg.py's _term_site_matrices and
+        mpscpp3/chain_session.h's idmrg_classify_terms) thread a *local*,
+        translation-invariant string between a term's own two endpoints
+        instead, and so need the untransformed names. Passing the
+        finite-chain form there both breaks the documented "at most 2
+        distinct sites per term" contract (each explicit F factor lands on
+        its own site) and hardcodes a string anchored at a site that does
+        not exist.
         """
-        if use_jordan_wigner: m = jordan_wigner(self)
+        if use_jordan_wigner and jordan_wigner_transform: m = jordan_wigner(self)
         else: m = self
         return [(complex(term[0]),[(name,i+1) for (name,i) in term[1:]])
                 for term in _filter_small(m.op)]

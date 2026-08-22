@@ -210,6 +210,20 @@ def _null_space_left(A):
     return V_L
 
 
+# Every contraction in this section is written with np.tensordot/@ rather
+# than np.einsum. These four helpers are the innermost loops of *every*
+# infinite-chain code path (idmrg.py's growth loop, vumps.py's H_AC/H_C
+# Lanczos matvecs, this module's own excitation ansatz), and np.einsum
+# without optimize= runs numpy's own c_einsum kernel, which never dispatches
+# to BLAS: profiling a single VUMPS macro-iteration on a 2-site native-
+# spinful chain (D=8, d_g=16) spent 7.2s of its 12.0s total inside c_einsum
+# across ~102k calls. Measured per-call, on those exact shapes: _apply_op_ket
+# 142us -> 37us, _cap_right 75us -> 14us, _op_transfer_matrix 563us -> 98us,
+# and the gap *grows* with D (at D=30 _apply_op_ket is 1647us -> 164us, 10x).
+# The tensordot forms below are index-for-index the same contractions -- the
+# einsum subscripts they replace are kept in each docstring.
+
+
 def _op_transfer_matrix(ket, bra, M=None):
     """E4[l,L,r,R] for an explicit ket/bra pair (D,d,D arrays, not
     necessarily the same tensor), with an explicit dense operator matrix M
@@ -220,8 +234,10 @@ def _op_transfer_matrix(ket, bra, M=None):
     downstream contraction here feed straight into
     idmrg._apply_transfer/_apply_transfer_from_left unchanged."""
     if M is not None:
-        ket = np.einsum('io,aic->aoc', M, ket)
-    return np.einsum('lpr,LpR->lLrR', ket, np.conj(bra))
+        ket = _apply_op_ket(M, ket)
+    # einsum('lpr,LpR->lLrR', ket, conj(bra)): contract only over the
+    # physical leg p, then reorder the four open legs into (l,L,r,R).
+    return np.tensordot(ket, np.conj(bra), axes=([1], [1])).transpose(0, 2, 1, 3)
 
 
 def _apply_op_ket(M, T):
@@ -229,7 +245,13 @@ def _apply_op_ket(M, T):
     physical leg -- M=None returns T unchanged."""
     if M is None:
         return T
-    return np.einsum('io,aic->aoc', M, T)
+    # einsum('io,aic->aoc', M, T): T's physical leg against M's *in* leg,
+    # M's *out* leg then moved back into the physical slot. Written as a
+    # broadcasting matmul over T's leading (bond) axis rather than
+    # np.tensordot: at these sizes np.tensordot's own Python-level shape
+    # bookkeeping costs more than the arithmetic (measured 52us vs 26us per
+    # call at D=8, d_g=16 -- and this is the single most-called helper here).
+    return M.T @ T
 
 
 def _cap_right(T, R):
@@ -237,7 +259,8 @@ def _cap_right(T, R):
     (ket-type contraction, i.e. R's *first* index matches T's right bond)
     -- used to close T's right bond against a fixed point/environment while
     keeping T's own (left, phys) legs open."""
-    return np.einsum('aoc,cb->aob', T, R)
+    # einsum('aoc,cb->aob', T, R): a plain matrix product on T's last leg.
+    return (T.reshape(-1, T.shape[2]) @ R).reshape(T.shape[0], T.shape[1], -1)
 
 
 def _cap_left(L, T):
@@ -247,7 +270,55 @@ def _cap_left(L, T):
     structurally different roles here (confirmed by direct derivation
     against idmrg.onsite_expectation's own one-site formula; see git
     history for the transpose bug this once caught)."""
-    return np.einsum('ba,boc->aoc', L, T)
+    # einsum('ba,boc->aoc', L, T): contract L's *first* index against T's
+    # left leg (see the docstring -- deliberately not the mirror of
+    # _cap_right), leaving L's second index as the new left leg. One gemm
+    # on T flattened to (left, phys*right), for the same reason
+    # _apply_op_ket avoids np.tensordot (42us -> 17us at D=8, d_g=16).
+    return (L.T @ T.reshape(T.shape[0], -1)).reshape(T.shape)
+
+
+# (D*D)-sized linear systems below this size are solved by building the
+# map densely and calling np.linalg.solve; above it, iteratively (GMRES on
+# the same matvec). The dense build costs D*D applications of the action
+# plus an O(D^6) solve, which is what made VUMPS impractical at the bond
+# dimensions this module's own docstrings assume: profiling a D=12 run
+# spent 5.6s of ~20s inside _dense_linear_map alone, and the cost grows
+# like D^6. The threshold is deliberately low rather than "large enough to
+# never trigger" -- a test monkeypatches it to 0 to check the two paths
+# agree (see tests/test_infinite_chain.py).
+_DENSE_SOLVE_MAX = 64
+
+# Relative residual demanded of the iterative solve. This has to be far
+# tighter than a typical GMRES default: the environments it computes feed
+# straight into the reported energy density, which the infinite-chain tests
+# compare at 1e-8..1e-10.
+_ITERATIVE_SOLVE_RTOL = 1e-13
+
+
+def _solve_linear_map(D, action, rhs):
+    """Solve `action(X) = rhs` for a (D,D) complex X, where `action` is a
+    linear (D,D)->(D,D) map given as a Python callable.
+
+    Small systems are solved exactly (dense build + LU); larger ones with
+    GMRES on the same callable, falling back to the dense path if GMRES
+    does not converge -- so this is never *less* robust than the dense
+    solve it replaces, only faster when it works."""
+    n = D * D
+    if n > _DENSE_SOLVE_MAX:
+        from scipy.sparse.linalg import LinearOperator, gmres
+        op = LinearOperator((n, n), dtype=complex,
+                             matvec=lambda x: action(x.reshape(D, D)).reshape(-1))
+        try:
+            x, info = gmres(op, rhs.reshape(-1), rtol=_ITERATIVE_SOLVE_RTOL,
+                             atol=0.0, restart=min(n, 100), maxiter=200)
+        except TypeError:  # scipy < 1.12 spells rtol "tol"
+            x, info = gmres(op, rhs.reshape(-1), tol=_ITERATIVE_SOLVE_RTOL,
+                             atol=0.0, restart=min(n, 100), maxiter=200)
+        if info == 0:
+            return x.reshape(D, D)
+    Mat = _dense_linear_map(D, action)
+    return np.linalg.solve(Mat, rhs.reshape(-1)).reshape(D, D)
 
 
 def _dense_linear_map(D, action):

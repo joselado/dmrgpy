@@ -1683,7 +1683,12 @@ def _compose(E_a, E_b):
 
 
 def _apply_transfer(E4, rho):
-    return np.einsum('lLrR,rR->lL', E4, rho)
+    # einsum('lLrR,rR->lL', E4, rho) as a matrix-vector product (see
+    # idmrg_excitations.py's own note above _op_transfer_matrix for why
+    # every contraction on this path avoids np.einsum).
+    D = rho.shape[0]
+    return (E4.reshape(E4.shape[0] * E4.shape[1], D * D)
+            @ rho.reshape(-1)).reshape(E4.shape[0], E4.shape[1])
 
 
 # Relative-gap threshold below which two of the transfer matrix's leading
@@ -1810,40 +1815,121 @@ def _expectation(Es, running, running_id, rho_after_j, k_start, n_cell):
     return complex(num / den)
 
 
+# Transfer-matrix eigenproblems (chi^2 x chi^2) at or below this size are
+# solved densely -- the unit-cell transfer matrix is composed with _compose
+# and handed to np.linalg.eig, which returns the whole spectrum. Above it,
+# only the two dominant eigenpairs are computed, iteratively (ARPACK on a
+# matvec that applies each site's own transfer tensor in turn), because
+# both halves of the dense route cost O(chi^6): profiling a VUMPS run at
+# chi=12 spent 14.7s of ~20s inside np.linalg.eig alone, and at chi=30 a
+# single such eig is ~250x more work again. The iterative matvec is
+# O(n_uc*chi^4) and only the dominant pair is ever used (plus the
+# runner-up, for _check_dominant_eigenvalue_nondegenerate's tie check).
+# Deliberately low rather than "large enough to never trigger" -- a test
+# monkeypatches it to 0 to check the two paths agree.
+_DENSE_EIG_MAX = 64
+
+
+def _transfer_chain_dim(Es, message):
+    """The common bond dimension chi of a list of per-site transfer
+    tensors that compose into a *periodic* unit cell, or RuntimeError
+    (with `message`) if the chain does not close on itself.
+
+    A truly periodic MPS has U_list[0]'s left bond and U_list[-1]'s right
+    bond as one and the same wraparound bond, but each is independently
+    truncated by its own micro-step's SVD, so the growing algorithm's raw
+    U_list offers no guarantee they come out equal -- this is the same
+    condition the dense route detected as a non-(chi,chi,chi,chi) composed
+    tensor, checked here without composing anything."""
+    chi = Es[0].shape[0]
+    ok = all(E.shape == (E.shape[0], E.shape[0], E.shape[2], E.shape[2])
+             for E in Es)
+    ok = ok and all(Es[i].shape[2] == Es[i + 1].shape[0]
+                    for i in range(len(Es) - 1))
+    ok = ok and Es[-1].shape[2] == chi and Es[0].shape[1] == chi
+    if not ok:
+        raise RuntimeError(message.format([E.shape for E in Es]))
+    return chi
+
+
+def _dominant_fixed_point(Es, side, caller, message):
+    """(rho, eta): the dominant right (side="right") or left (side="left")
+    eigenvector of the unit-cell transfer matrix T=E_0...E_{n_uc-1}, as a
+    (chi,chi) array normalized to trace 1, and its eigenvalue.
+
+    "right" solves T.rho = eta*rho (rho propagates backward through the
+    chain, applied E_{n-1} first); "left" solves rho.T = eta*rho (forward,
+    E_0 first). Both go through _check_dominant_eigenvalue_nondegenerate,
+    since a single dominant fixed point is not well defined when the
+    leading eigenvalue is (near-)degenerate -- see that function."""
+    chi = _transfer_chain_dim(Es, message)
+    n = chi * chi
+    if side == "right":
+        order = list(reversed(Es))
+        step = _apply_transfer
+    else:
+        order = list(Es)
+        step = _apply_transfer_from_left
+
+    def matvec(x):
+        X = x.reshape(chi, chi)
+        for E in order:
+            X = step(E, X)
+        return X.reshape(-1)
+
+    w = v = None
+    if n > _DENSE_EIG_MAX:
+        from scipy.sparse.linalg import ArpackError, LinearOperator, eigs
+        op = LinearOperator((n, n), dtype=complex, matvec=matvec)
+        try:
+            # k=2: the dominant pair, plus the runner-up the degeneracy
+            # check below needs. tol=0 asks ARPACK for machine precision --
+            # eta feeds normalization diagnostics compared at ~1e-10.
+            # v0 fixed (not ARPACK's own random default): the dense route
+            # this replaces was deterministic, and a random start would
+            # make every downstream energy/normalization diagnostic vary
+            # run to run. The identity is also close to the fixed point of
+            # an (approximately) canonical cell, so it starts nearer the
+            # answer than a random vector would.
+            v0 = np.eye(chi, dtype=complex).reshape(-1) / np.sqrt(chi)
+            w, v = eigs(op, k=2, which="LM", tol=0, maxiter=10000, v0=v0)
+        except (ArpackError, ValueError):
+            # Non-convergence/too-small-for-k: fall through to the dense
+            # route rather than failing the caller's whole calculation.
+            w = v = None
+    if w is None:
+        T4 = Es[0]
+        for E in Es[1:]:
+            T4 = _compose(T4, E)
+        Tmat = T4.reshape(n, n)
+        w, v = np.linalg.eig(Tmat if side == "right" else Tmat.T)
+    idx = _check_dominant_eigenvalue_nondegenerate(w, caller)[0]
+    rho = v[:, idx].reshape(chi, chi)
+    return rho / np.trace(rho), w[idx]
+
+
 def _dominant_right_fixed_point(Es):
     """The dominant right eigenvector of the full unit-cell transfer
     matrix T=E_0...E_{n_uc-1} (as a chi x chi density-matrix-like array,
     normalized to trace 1) and its eigenvalue -- should be close to 1 for
     a properly converged, correctly normalized (each U_list[p] isometric
     by SVD construction) infinite chain."""
-    T4 = Es[0]
-    for E in Es[1:]:
-        T4 = _compose(T4, E)
-    chi = T4.shape[0]
-    if T4.shape != (chi, chi, chi, chi):
-        # U_list[0]'s own left bond and U_list[n_uc-1]'s own right bond
-        # are, in a truly periodic MPS, the *same* wraparound bond -- but
-        # each is independently truncated by its own micro-step's SVD (up
-        # to maxm, based on that cut's own entanglement spectrum), so the
-        # growing algorithm's raw IDMRGResult.U_list offers no guarantee
-        # they come out numerically equal, even at good convergence.
-        # Confirmed directly: happens intermittently for some (maxm,
-        # maxiter) combinations, not universally -- raise clearly here
-        # instead of letting a generic reshape error surface deep inside.
-        raise RuntimeError(
-            "idmrg static correlators: the converged unit cell's wraparound "
-            "bond dimension is inconsistent (U_list[0]'s left bond and "
-            "U_list[-1]'s right bond differ, transfer tensor shape {}) -- "
-            "try a different maxm/maxiter/etol combination for "
-            "gs_energy()".format(T4.shape))
-    Tmat = T4.reshape(chi * chi, chi * chi)
-    w, v = np.linalg.eig(Tmat)
-    order = _check_dominant_eigenvalue_nondegenerate(w, "_dominant_right_fixed_point")
-    idx = order[0]
-    eta = w[idx]
-    rho = v[:, idx].reshape(chi, chi)
-    rho = rho / np.trace(rho)
-    return rho, eta
+    # The wraparound-bond consistency the message below reports: U_list[0]'s
+    # own left bond and U_list[n_uc-1]'s own right bond are, in a truly
+    # periodic MPS, the *same* bond -- but each is independently truncated
+    # by its own micro-step's SVD (up to maxm, based on that cut's own
+    # entanglement spectrum), so the growing algorithm's raw
+    # IDMRGResult.U_list offers no guarantee they come out numerically
+    # equal, even at good convergence. Confirmed directly: happens
+    # intermittently for some (maxm, maxiter) combinations, not universally
+    # -- raise clearly instead of letting a generic reshape error surface
+    # deep inside.
+    return _dominant_fixed_point(
+        Es, "right", "_dominant_right_fixed_point",
+        "idmrg static correlators: the converged unit cell's wraparound "
+        "bond dimension is inconsistent (U_list[0]'s left bond and "
+        "U_list[-1]'s right bond differ, transfer tensor shapes {}) -- "
+        "try a different maxm/maxiter/etol combination for gs_energy()")
 
 
 def _all_right_fixed_points(Es, n_uc):
@@ -2166,7 +2252,10 @@ def _apply_transfer_from_left(E4, rho):
     (l,L) legs instead of its right (r,R) ones -- used to propagate a
     dominant *left* fixed point forward through a site, the mirror image
     of how `_apply_transfer` propagates a right fixed point backward."""
-    return np.einsum('lL,lLrR->rR', rho, E4)
+    # einsum('lL,lLrR->rR', rho, E4) as a vector-matrix product.
+    return (rho.reshape(-1)
+            @ E4.reshape(rho.shape[0] * rho.shape[1], -1)).reshape(
+                E4.shape[2], E4.shape[3])
 
 
 def _dominant_left_fixed_point(Es):
@@ -2176,32 +2265,21 @@ def _dominant_left_fixed_point(Es):
     *same* cut `_dominant_right_fixed_point` itself resolves (the
     wraparound bond, "before site 0"/"after site n_uc-1"). Mirrors
     `_dominant_right_fixed_point`'s own construction and
-    shape-consistency check exactly, with one added transpose."""
-    T4 = Es[0]
-    for E in Es[1:]:
-        T4 = _compose(T4, E)
-    chi = T4.shape[0]
-    if T4.shape != (chi, chi, chi, chi):
-        raise RuntimeError(
-            "idmrg apply_mpo: the periodic unit cell's wraparound bond "
-            "dimension is inconsistent (transfer tensor shape {}) -- same "
-            "failure mode _dominant_right_fixed_point already guards "
-            "against, see its own comment".format(T4.shape))
-    Tmat = T4.reshape(chi * chi, chi * chi)
-    w, v = np.linalg.eig(Tmat.T)
-    # Degeneracy check included here too (not just relying on
-    # _canonicalize_periodic always calling _dominant_right_fixed_point
-    # first, see _check_dominant_eigenvalue_nondegenerate's own
-    # docstring) -- Tmat.T has the same eigenvalues as Tmat, so this is
-    # the same tie condition, just independently guarded here in case a
-    # future caller reaches this function without going through the
-    # right-fixed-point check first.
-    order = _check_dominant_eigenvalue_nondegenerate(w, "_dominant_left_fixed_point")
-    idx = order[0]
-    eta = w[idx]
-    rho = v[:, idx].reshape(chi, chi)
-    rho = rho / np.trace(rho)
-    return rho, eta
+    shape-consistency check exactly, with one added transpose.
+
+    The degeneracy check inside `_dominant_fixed_point` applies here too
+    (not just relying on `_canonicalize_periodic` always calling
+    `_dominant_right_fixed_point` first, see
+    `_check_dominant_eigenvalue_nondegenerate`'s own docstring) -- the
+    left and right problems share a spectrum, so this is the same tie
+    condition, independently guarded in case a future caller reaches this
+    function without going through the right-fixed-point check first."""
+    return _dominant_fixed_point(
+        Es, "left", "_dominant_left_fixed_point",
+        "idmrg apply_mpo: the periodic unit cell's wraparound bond "
+        "dimension is inconsistent (transfer tensor shapes {}) -- same "
+        "failure mode _dominant_right_fixed_point already guards "
+        "against, see its own comment")
 
 
 def _all_left_fixed_points(Es, n_uc):

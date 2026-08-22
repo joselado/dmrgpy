@@ -1966,6 +1966,23 @@ ic.converged                # True iff the density stabilized below ic.etol
 
 `ic.maxm`/`ic.cutoff` cap the bond dimension/SVD truncation exactly like a finite chain's `maxm`/`cutoff`; `ic.maxiter`/`ic.etol` are iDMRG-specific: `maxiter` macro-iterations (each adds one full unit cell to each side) are run, stopping early once the energy-density finite difference between consecutive macro-iterations drops below `etol`. For a *gapless* model (e.g. the uniform Heisenberg chain above) this finite-difference convergence is only power-law in the number of iterations at any fixed `maxm`, not exponential, so it may not trip `etol` within a practical `maxiter` even though the energy density itself is already accurate to several digits — check the returned value directly rather than relying solely on `ic.converged`. A *gapped* model (e.g. the dimerized chain above, or any chain with `j_weak` bonds well below the uniform point) has a finite correlation length and converges both faster and more reliably.
 
+**Fermionic infinite chains.** `Infinite_Many_Body_Chain`'s first argument is a list of site-type codes, so an infinite chain can be fermionic as well as a spin chain: `0` is a spinless fermion site (`C`/`Cdag`/`N`/`F`), `1` a native spinful (Electron/Hubbard) site carrying both flavours at once (`Cup`/`Cdagup`/`Cdn`/`Cdagdn`/`Nup`/`Ndn`, local dimension 4). The native spinful code is what makes a two-orbital model fit the `n_uc<=2` limit — a `Spinful_Fermionic_Chain`-style representation would need two tensor-network sites per orbital, i.e. four for a two-orbital cell:
+
+```python
+ic = infinitechain.Infinite_Many_Body_Chain([1, 1])   # two native spinful sites per cell
+Cup  = [ic.get_operator("Cup", i, "C") for i in range(2)]
+Cdup = [ic.get_operator("Cdagup", i, "C") for i in range(2)]
+CupR = [ic.get_operator("Cup", i, "R") for i in range(2)]
+ic.set_hamiltonian(Cdup[0]*CupR[0] + ...)
+```
+
+Both backends thread the Jordan-Wigner string themselves, *locally* between each term's own two endpoints, rather than from some absolute origin — an infinite chain has no site 1 for a finite-chain-style string to start at. Two consequences for what a Hamiltonian may contain:
+
+- The "at most 2 distinct sites per term" rule is counted in *sites*, not operator factors: a three-operator product like `(N_f - 1/2) * (Cdag_f * C_c)` touches two sites and is fine. A term whose two endpoints have sites strictly between them (e.g. `Cdag` at cell site 0 and `C` at site 0 of the *next* cell, for `n_uc=2`) is also fine — the string across the intervening sites is inserted automatically.
+- A term with **odd total fermion parity** (e.g. a bare `Cdag`) is rejected with `ValueError` from `set_hamiltonian`: its string would have to run to infinity in both directions. Such a term is not parity-conserving, so it cannot appear in a physical Hamiltonian anyway.
+
+The one gap is on the *observable* side: `correlator` refuses a **cross-site (`r>0`) correlator of fermionic operators** with `NotImplementedError`, on every backend, because no correlator path threads the string between the two operators and a stringless answer would be silently wrong. Same-site (`r=0`) fermionic correlators, and any-`r` correlators of parity-even operators (`N`, `Nup`, `Sz`, ...), are supported. See `examples/idmrg/fermionic_infinite_chain/main.py`, which checks a dimerized spinless chain (including a hopping that skips a site, so a real string is involved) against the exact free-fermion band integral on every backend/solver combination.
+
 **Static correlators.** After `gs_energy()` (called automatically by `vev`/`correlator` if not already run), one- and two-point expectation values of the converged infinite chain are available via the standard infinite-MPS transfer-matrix formalism. `itensor_version="python"` supports this under both `gs_method="vumps"` (the default, see below) and `gs_method="idmrg"` (described in this paragraph); `itensor_version=3` supports it under `gs_method="vumps"` only — calling `vev`/`correlator` on an `itensor_version=3` chain with `gs_method="idmrg"` still raises `NotImplementedError` (even after a successful `gs_energy()`), since that solver's result keeps no per-sublattice tensor list to build a correlator from:
 
 ```python
