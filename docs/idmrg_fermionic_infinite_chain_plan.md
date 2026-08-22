@@ -2,11 +2,17 @@
 
 **Status: implemented on 2026-08-22** (steps 1-6; Step 5.2's geometric ramp landed on both
 backends, and an extra Krylov pass beyond the plan removed the `O(chi^6)` dense fixed
-point/environment solves on the `"python"` side). See
-`docs/known_issue_infinite_native_spinful_sites.md`'s own header for the outcome and the
-before/after numbers.
+point/environment solves on the `"python"` side, and cross-site fermionic correlators were
+threaded afterwards too). The outcome and the before/after numbers are in the commit
+messages on `idmrg-fermionic-infinite`; the user-facing result is in
+`docs/user_guide.md`'s iDMRG section and `docs/documentation.md`'s backend-dispatch
+section. Kept only as a record of the investigation -- the bug report it was written
+against has been removed now that it is fixed.
 
-Addresses `docs/known_issue_infinite_native_spinful_sites.md`. That report has two
+Addresses an external bug report (since removed, now that it is fixed) about
+`Infinite_Many_Body_Chain` with native spinful (`site_type=1`) sites being unusable: it
+failed instantly on `itensor_version=3` and did not finish on `itensor_version="python"`.
+That report had two
 independent halves — an immediate hard error on `itensor_version=3`, and impractical
 wall-clock on `itensor_version="python"` — plus a test-coverage gap. All three were
 re-confirmed in this checkout before writing this plan; the diagnosis below replaces the
@@ -198,8 +204,9 @@ tens of minutes.
 - New `examples/idmrg/fermionic_infinite_chain/main.py`: sweep `t₂` (or the dimerization),
   **plot** energy density from v3, `"python"`, and the analytic band integral on one axis
   (CLAUDE.md: examples plot, they do not merely print/assert).
-- Update `docs/known_issue_infinite_native_spinful_sites.md` — mark resolved, replace its
-  two cause-guesses with the confirmed diagnosis above, keep the repro.
+- Retire the originating bug report once it is fixed (its two cause-guesses were both
+  wrong; the confirmed diagnosis is in §A/§B above and its reproduction case survives as
+  `tests/test_infinite_chain.py::test_interacting_spinful_cell_backends_agree`).
 - Update `docs/user_guide.{md,tex}` (fermionic infinite chains are now supported; state the
   ≤2-distinct-sites and even-parity contracts) and `docs/documentation.{md,tex}` (the v3
   infinite path consumes raw, non-JW terms and threads JW itself, unlike every finite v3
