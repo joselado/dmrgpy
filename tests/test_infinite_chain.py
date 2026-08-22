@@ -1895,6 +1895,21 @@ def test_d_ramp_doubles_and_ends_at_the_target():
 # Hamiltonian term written with the same operator names cannot drift apart.
 #
 # Oracle: a free-fermion one-body density matrix, exact by construction.
+#
+# Coverage note: every test here uses spinless (site_type=0) sites, because
+# a native spinful (site_type=1, dim 4) chain is too slow to belong in a
+# routine suite -- one v3/VUMPS correlator check at maxm=8 takes ~255s. It
+# was verified by hand instead, on the same dimerized model, and the
+# ElectronSite-specific part of the convention (electron.h defines
+# Cdn = Fup.Adn, an intra-site string no spinless site type has) is
+# exercised there: <Cdagup_0 Cup_r> for r=0..3 came out
+# [0.511161, -0.478454, -0.029260, 0.089760] against an exact
+# [0.510503, -0.477696, -0.027524, 0.092718], i.e. max error 3.0e-03 at
+# maxm=8 and 4.5e-04 at maxm=10 -- ordinary under-convergence for dim-4
+# sites at that bond dimension, with the sign structure exact, whereas a
+# mis-threaded string moves these by O(0.1). The Hamiltonian side of the
+# same ElectronSite convention IS covered automatically, by
+# test_native_spinful_free_chain_is_twice_the_spinless_one above.
 
 
 def _exact_one_body_density_matrix(t1, t2, t3, L=200):

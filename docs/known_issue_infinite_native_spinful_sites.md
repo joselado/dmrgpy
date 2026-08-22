@@ -77,10 +77,17 @@ golden values, plus the `site_type=1` case and this report's own interacting cel
   in slightly different places at moderate `maxm`. That is a property of this Kondo-lattice-like
   model, not of the fixed machinery -- but it means the workaround adopted below (finite
   chains) remains a reasonable choice for quantitative work on it.
-- Still not fixed, and now refused rather than silently wrong: **cross-site correlators of
-  fermionic operators** (`<C^dag_i C_j>`, `j != i`). No correlator path on any backend
-  threads the Jordan-Wigner string between the two operators, so
-  `Infinite_Many_Body_Chain.correlator` raises `NotImplementedError` for them.
+- **Cross-site fermionic correlators now work too** (fixed immediately after the above, same
+  day). `<C^dag_i C_j>` with `j != i` needs the Jordan-Wigner string on every site strictly
+  between the two operators; no correlator path had one, which was the same failure class as
+  the Hamiltonian bug, one layer up and in a separate code path. All three paths
+  (`"python"`+idmrg, `"python"`+vumps, v3+vumps) now thread it, taking their endpoint
+  matrices and their "is a string open" flag from the same helper that builds the
+  Hamiltonian's own 2-site terms. Verified against the exact free-fermion one-body density
+  matrix over r=0..8 including the alternating sign structure: 4.8e-08 (python/idmrg),
+  1.5e-06 (python/vumps), 1.9e-06 (v3/vumps). A pair of *odd total fermion parity* (e.g.
+  `Cdag` with `N`) still raises -- its string can never close, and the quantity vanishes
+  identically in any parity-conserving state.
 
 ---
 
