@@ -2032,10 +2032,22 @@ def test_fermionic_correlator_n_uc_1_crosses_whole_cells(itensor_version,
     ic.maxm = 16
     ic.maxiter = 60
     # This chain is gapless, which is VUMPS's documented weak spot (see
-    # pyitensor/vumps.py's "Convergence robustness" section) -- its default
-    # restart budget intermittently fails to find any fixed point here at
-    # all. The extra restarts are about reaching a converged state to
-    # measure, not about the correlator being delicate.
+    # pyitensor/vumps.py's "Convergence robustness" section). The extra
+    # restarts are about reaching a converged state to measure, not about
+    # the correlator being delicate.
+    #
+    # They used to be covering for something else as well. Being
+    # half-filled, this chain is critical with 2k_F = pi, so its transfer
+    # matrix carries a peripheral eigenvalue at phase pi whose magnitude
+    # approaches the leading one -- and idmrg's dominant-fixed-point guard
+    # compared MAGNITUDES, so it rejected that perfectly well-posed state
+    # as "(near-)degenerate". Measured at D=16: ~42% of individual VUMPS
+    # attempts and ~16% of whole solves died there, i.e. this test failed
+    # intermittently even at nrestarts=10. Fixed in
+    # idmrg._check_dominant_eigenvalue_nondegenerate (a repeated
+    # EIGENVALUE is degenerate; +rho and -rho are not) and pinned by
+    # tests/test_transfer_degeneracy_guard.py, so the restarts below are
+    # back to covering only what they say they cover.
     ic.vumps_nrestarts = 10
     Cd = ic.get_operator("Cdag", 0, "C")
     C = ic.get_operator("C", 0, "C")

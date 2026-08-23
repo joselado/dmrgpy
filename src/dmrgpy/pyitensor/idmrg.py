@@ -2051,15 +2051,55 @@ def _apply_transfer(E4, rho):
 # this threshold.
 _DEGENERACY_RTOL = 1e-9
 
+# How close in MAGNITUDE two peripheral eigenvalues must be before the
+# Perron tie-break (pick the largest real part) is applied instead of
+# numpy's arbitrary argsort order. Deliberately WIDER than
+# _DEGENERACY_RTOL, because it answers a different question: the
+# degeneracy test asks "is this state ill-posed", while this asks "are
+# these two close enough that argsort's choice between them is rounding
+# noise rather than a decision". Reusing _DEGENERACY_RTOL would leave the
+# selection resolved by rounding in exactly the observed case -- the
+# half-filled free-fermion chain's period-2 pair sits at
+# |lambda_2|/|lambda_1| = 1 - 1e-9, on that constant's own boundary.
+_PERRON_TIE_RTOL = 1e-6
 
-def _check_dominant_eigenvalue_nondegenerate(w, caller):
-    """Raise RuntimeError if the two largest-magnitude entries of `w` are
-    within `_DEGENERACY_RTOL` of each other, otherwise return `w`'s own
-    descending-|.|  sort order -- shared by every "pick a single dominant
-    eigenvalue/eigenvector" consumer in this module
-    (`_dominant_right_fixed_point`, `_dominant_left_fixed_point`,
-    `_dominant_eigenvalue_mixed`): a single dominant fixed point is not
-    well-defined when the leading eigenvalue is (near-)degenerate --
+
+def _check_dominant_eigenvalue_nondegenerate(w, caller, perron=False):
+    """Raise RuntimeError if `w`'s two leading entries are degenerate,
+    otherwise return the order the caller should pick from -- shared by
+    every "pick a single dominant eigenvalue/eigenvector" consumer in this
+    module.
+
+    `perron` selects which of two genuinely different questions is being
+    asked, and they need different tests:
+
+    * `perron=False` (the default, used by `_dominant_eigenvalue_mixed`):
+      degenerate means the top two MAGNITUDES are within
+      `_DEGENERACY_RTOL`. That is the right test there because the quantity
+      being extracted is a per-unit-cell factor `|eta|^N`, which oscillates
+      rather than converging when two eigenvalues share a magnitude.
+    * `perron=True` (used by `_dominant_fixed_point`): degenerate means the
+      top two EIGENVALUES are within `_DEGENERACY_RTOL` *as complex
+      numbers*, and magnitude ties among the peripheral spectrum are broken
+      in favour of the largest real part. A transfer matrix's peripheral
+      spectrum is `rho * e^(2 pi i k / p)` for a period-p state; those are
+      distinct eigenvalues with distinct eigenvectors, and only `k=0`
+      carries the positive eigenvector that is the density matrix. So a
+      magnitude tie there is well-posed, not ambiguous -- it just has to be
+      resolved rather than argsorted arbitrarily.
+
+    Getting that distinction wrong is not academic. A half-filled
+    free-fermion chain is critical with `2k_F = pi`, so it carries a
+    transfer eigenvalue at phase pi whose magnitude approaches 1 as the
+    correlation length diverges. Under the old magnitude-only test, every
+    observed firing on that model at D=16 had the signature
+    `|lambda| = (1, 0.999999999)`, `arg = (0, +-pi)` -- the guard was
+    aborting on the physics, taking out ~42% of individual VUMPS attempts
+    and ~16% of whole ground-state solves.
+
+    The case it exists for is unaffected, because there the tie is between
+    two copies of the SAME eigenvalue: a single dominant fixed point is not
+    well-defined when the leading eigenvalue is genuinely degenerate --
     `np.argmax` would otherwise silently pick *one* arbitrary member of
     the tied eigenspace (confirmed directly: summing two independently
     converged, oppositely Sz-polarized `n_uc=1` product states via
@@ -2084,17 +2124,54 @@ def _check_dominant_eigenvalue_nondegenerate(w, caller):
     degenerate spectrum there need not have anything to do with
     `imps_sum` at all)."""
     order = np.argsort(-np.abs(w))
-    if len(order) > 1 and abs(w[order[1]]) > (1 - _DEGENERACY_RTOL) * abs(w[order[0]]):
-        raise RuntimeError(
-            "idmrg ({}): the transfer matrix's dominant eigenvalue is "
-            "(near-)degenerate (top two magnitudes {} and {}) -- a single "
-            "dominant eigenvector is not well-defined here. This is most "
-            "often seen when a state is, or derives from (e.g. via "
-            "idmrg.imps_sum), a superposition of two macroscopically "
-            "distinct branches with matched per-site norm -- see "
-            "idmrg.imps_sum's own docstring for why that case is out of "
-            "scope for this module's correlator machinery".format(
-                caller, abs(w[order[0]]), abs(w[order[1]])))
+    if perron and len(order) > 1:
+        # Among everything tied in MAGNITUDE with the leader, the fixed
+        # point is the Perron root -- the one with the largest real part.
+        # A transfer matrix is a non-negative-type operator, so its
+        # peripheral spectrum is {rho * e^(2 pi i k / p)} for a period-p
+        # state; only the k=0 member has the positive(-semidefinite)
+        # eigenvector that is the density matrix every caller wants. Which
+        # member np.argsort returns among magnitude-tied entries is
+        # arbitrary, so without this a period-2 state can hand back the
+        # eigenvector of -rho as a "density matrix" (not positive, and its
+        # trace -- which the caller divides by -- near zero).
+        top = np.abs(w[order[0]])
+        tied = [i for i in order
+                if np.abs(w[i]) >= (1 - _PERRON_TIE_RTOL) * top]
+        if len(tied) > 1:
+            tied.sort(key=lambda i: -np.real(w[i]))
+            tied_set = set(tied)
+            order = np.array(tied + [i for i in order if i not in tied_set])
+    if len(order) > 1:
+        a, b = w[order[0]], w[order[1]]
+        if perron:
+            # Degenerate means the same EIGENVALUE twice, not merely the
+            # same magnitude. +rho and -rho are distinct eigenvalues with
+            # distinct eigenvectors, and the Perron selection above picks
+            # between them unambiguously -- a magnitude-only test rejects
+            # that perfectly well-posed case. It is not hypothetical: a
+            # half-filled free-fermion chain is critical with 2k_F = pi, so
+            # its transfer matrix carries an eigenvalue at phase pi whose
+            # magnitude -> 1 as the correlation length diverges. Measured on
+            # exactly that model at D=16, every single firing of the old
+            # magnitude test had the signature |lambda| = (1, 0.999999999)
+            # with arg = (0, +-pi) -- i.e. it was aborting on the physics,
+            # not on an ill-posed state, killing ~42% of all VUMPS attempts
+            # and ~16% of whole solves.
+            degenerate = abs(b - a) <= _DEGENERACY_RTOL * abs(a)
+        else:
+            degenerate = abs(b) > (1 - _DEGENERACY_RTOL) * abs(a)
+        if degenerate:
+            raise RuntimeError(
+                "idmrg ({}): the transfer matrix's dominant eigenvalue is "
+                "(near-)degenerate (top two eigenvalues {} and {}) -- a "
+                "single dominant eigenvector is not well-defined here. This "
+                "is most often seen when a state is, or derives from (e.g. "
+                "via idmrg.imps_sum), a superposition of two macroscopically "
+                "distinct branches with matched per-site norm -- see "
+                "idmrg.imps_sum's own docstring for why that case is out of "
+                "scope for this module's correlator machinery".format(
+                    caller, a, b))
     return order
 
 
@@ -2332,7 +2409,14 @@ def _dominant_fixed_point(Es, side, caller, message):
             T4 = _compose(T4, E)
         Tmat = T4.reshape(n, n)
         w, v = np.linalg.eig(Tmat if side == "right" else Tmat.T)
-    idx = _check_dominant_eigenvalue_nondegenerate(w, caller)[0]
+    # perron=True: this is a genuine fixed point, so the peripheral
+    # spectrum of a period-p state is resolvable rather than ambiguous
+    # (see the guard's own docstring). _dominant_eigenvalue_mixed, the
+    # other caller, deliberately keeps the magnitude-only test: there
+    # the per-cell factor really is |eta|^N, so two eigenvalues of
+    # equal magnitude make that limit oscillate rather than converge.
+    idx = _check_dominant_eigenvalue_nondegenerate(w, caller,
+                                                   perron=True)[0]
     rho = v[:, idx].reshape(chi, chi)
     return rho / np.trace(rho), w[idx]
 

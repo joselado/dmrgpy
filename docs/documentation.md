@@ -908,6 +908,61 @@ free too; confirmed not to trip on any pre-existing test or on
 `imps_overlap`'s own realistic (orthogonal and gauge-comparison) cases
 (all previously-passing `tests/test_infinite_chain.py` cases still pass).
 
+**Correction: that "wide safety margin" did not hold, and the guard was
+rejecting physics.** The margin argument above was measured on Heisenberg
+chains, where the top-two magnitude gap stayed at `0.376`/`0.116`/`0.160`.
+It does not generalize. A *half-filled free-fermion* chain is critical with
+`2k_F = pi`, so its transfer matrix carries a peripheral eigenvalue at
+phase `pi` whose magnitude approaches the leading one as the correlation
+length diverges. Measured on exactly that model at `D=16` (the `n_uc=1`
+fermionic case in `tests/test_infinite_chain.py`), *every* observed firing
+had the identical signature
+
+```
+|lambda| = (1.0, 0.999999999)      arg = (0, +-pi)
+```
+
+— a `1e-9` gap, i.e. sitting precisely on the threshold this section
+argued was 6 orders of magnitude clear of any legitimate case. The cost was
+not subtle: **~42% of all individual VUMPS attempts and ~16% of whole
+ground-state solves** on that model died here, surfacing as an
+intermittent `RuntimeError: vumps_ground_state: every attempt at D=16
+failed (degenerate transfer-matrix spectrum)`. The test had already been
+given `vumps_nrestarts = 10` to paper over it.
+
+The error was conceptual rather than a bad constant. `+rho` and `-rho` are
+**distinct eigenvalues with distinct eigenvectors** — nothing is
+ill-defined about them. A transfer matrix's peripheral spectrum is
+`rho * exp(2 pi i k / p)` for a period-`p` state, and only the `k=0`
+member carries the positive(-semidefinite) eigenvector that is the density
+matrix every caller wants. So a magnitude tie there is *well-posed and
+must be resolved*, not rejected; only a repeated **eigenvalue** (the cat
+state, where both copies sit at `+1`) is genuinely ambiguous. Worse, since
+`np.argsort` orders magnitude-tied entries arbitrarily, the old code could
+also have returned the `-rho` eigenvector as a "density matrix" — not
+positive, and with a trace near zero that callers divide by.
+
+`_check_dominant_eigenvalue_nondegenerate` therefore now takes a `perron`
+flag selecting between two genuinely different questions:
+
+- `perron=True` (`_dominant_fixed_point`): degenerate means the top two
+  entries are close **as complex numbers**, and magnitude ties within
+  `_PERRON_TIE_RTOL` (`1e-6`, deliberately wider than `_DEGENERACY_RTOL`
+  so the selection is not decided by rounding at the observed `1e-9`) are
+  broken toward the largest real part — the Perron root.
+- `perron=False` (`_dominant_eigenvalue_mixed`): unchanged magnitude test.
+  `imps_overlap` extracts a per-unit-cell factor `|eta|^N`, which
+  oscillates rather than converging when two eigenvalues share a
+  magnitude, so there a magnitude tie really is ambiguous.
+
+The cat-state case the guard exists for is unaffected
+(`tests/test_vumps_imps_sum.py` still passes unchanged), and
+`tests/test_transfer_degeneracy_guard.py` now pins both halves directly:
+period-2 and period-3 peripheral spectra accepted with the Perron root
+selected, genuine repeated eigenvalues still rejected, the mixed caller
+still rejecting magnitude ties, and the returned fixed point verified
+positive semidefinite.
+
 **Direct sum of two converged VUMPS iMPS (`pyitensor/vumps.py`'s
 `imps_sum`)**: the VUMPS-mixed-gauge port of `idmrg.py`'s own `imps_sum`
 above, following the same literature check this project's own standing
