@@ -64,7 +64,40 @@ class Many_Body_Chain():
       self.maxm = 30 # bond dimension in wavefunctions
       self.mpomaxm = 5000 # bond dimension for operators
       self.nsweeps = 15 # number of sweeps
-      self.noise = 1e-1 # noise for dmrg
+      # White density-matrix noise for the DMRG sweeps, applied at full
+      # amplitude for the FIRST HALF of the sweeps and exactly zero for the
+      # second (mpscpp3/chain_session.h: `sw <= nsweeps_/2 ? noise_ : 0.0`),
+      # so it is an escape-from-a-local-minimum aid that anneals away rather
+      # than a permanent perturbation.
+      #
+      # 1e-7 follows ITensor's own convention: its Sweeps constructor
+      # defaults noise to 0, and its canonical DMRG samples lead with
+      # 1E-7 and decay (ITensor/sample/dmrg.cc and mixedspin.cc use
+      # `sweeps.noise() = 1E-7,1E-8,0.0`; the hubbard_2d samples use
+      # 1e-6..1e-8).
+      #
+      # This default used to be 1e-1 -- six orders larger, and three to four
+      # above anything in ITensor's own examples. Measured on a spinful
+      # two-orbital open chain (16 spin-orbitals) against an exact
+      # diagonalization, at matched maxm/nsweeps/penalties with noise as the
+      # only variable: 1e-1 cost +1.29 meV of accuracy and 1.4x runtime at
+      # maxm=40. The mechanism is the annealing schedule -- at 1e-1 the
+      # second, noise-free half of the sweeps does not fully recover from
+      # what the first half did.
+      #
+      # Among SMALL values the same model mildly prefers no noise at all
+      # (maxm=60, error/time): 0 -> 0.043 meV/141s, 1e-8 -> 0.052 meV/170s,
+      # 1e-6 -> 0.052 meV/174s, 1e-4 -> 0.082 meV/174s. So 1e-7 is not
+      # chosen because it beats 0 here; it costs ~0.01 meV and ~20% runtime
+      # against 0 on this model. It is kept because noise is an escape-from-
+      # a-local-minimum mechanism and a default of exactly 0 removes it for
+      # every caller, including the models that need it -- a trap that no
+      # amount of extra sweeps or bond dimension escapes is a real failure
+      # mode in this codebase (see docs/known_issue_idmrg_product_state_
+      # collapse.md for the iDMRG analogue, which needed noise added, not
+      # removed). A caller who has checked their model can still set 0, and
+      # groundstate.py's own reconvergence retry already does exactly that.
+      self.noise = 1e-7 # noise for dmrg (ITensor's own sample value)
       self.verbose = False # print the C++ DMRG per-sweep progress output
       self.kpmcutoff = 1e-12 # cutoff in KPM
       self.cutoff = 1e-12 # cutoff in ground state
