@@ -286,7 +286,29 @@ class Many_Body_Chain():
       out.path = "/tmp/"+name # new path (label only, see sites.py::initialize)
       return out # return new object
   def set_hamiltonian(self,MO,restart=True): 
-      """Set the Hamiltonian"""
+      """Set the Hamiltonian.
+
+      `MO` is normally a MultiOperator (a symbolic sum of products of named
+      site operators). It may instead be an already-built MPO -- a
+      StaticOperator, as returned by `toMPO()` and closed under the MPO
+      algebra that class exposes (`*` for MPO products, `+` for compressed
+      MPO sums, scalar scaling). That route exists for operators that are
+      cheap as an MPO and expensive as a term list: a total-spin penalty
+      g*S^2_total is O(n^2) symbolic terms but only three squares of
+      extensive one-body operators as MPOs, so
+
+          Sx = sum(self.Sx) ; Sy = sum(self.Sy) ; Sz = sum(self.Sz)
+          S2 = self.toMPO(Sx)*self.toMPO(Sx) + self.toMPO(Sy)*self.toMPO(Sy) \
+               + self.toMPO(Sz)*self.toMPO(Sz)
+          self.set_hamiltonian(self.toMPO(H) + g*S2)
+
+      stays compact at any system size. Only itensor_version=3 implements
+      it (Chain::set_hamiltonian_mpo); other backends raise. Note it is a
+      structural convenience rather than automatically a speedup --
+      ITensor's toMPO already compresses a term list well (measured: 6.7x
+      the terms cost 1.4x the sweep time on a spinful chain), so reach for
+      it when the term list is awkward or quadratic, not on the assumption
+      that term count drives the solve."""
       if restart: self.restart() # restar the calculation
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian

@@ -44,13 +44,33 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     # the session's energy cache survives a skipped re-send, so a user
     # bumping any of these between bare gs_energy() calls must get a
     # fresh solve, not the cached energy computed under the old params.
-    terms = self.hamiltonian.to_terms()
-    key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-           max(self.maxm,self.mpomaxm),terms)
-    cache = getattr(self,'_session_ham_cache',None)
-    if cache is None or cache[0] is not self._session or cache[1]!=key:
-        self._session.set_hamiltonian(terms)
-        self._session_ham_cache = (self._session,key)
+    # A Hamiltonian that is already an MPO (a StaticOperator, e.g. from
+    # toMPO() and MPO algebra) is handed to the session directly -- it has
+    # no symbolic term list to key a cache on, and building one would
+    # defeat the point of having assembled it as an MPO. Identity of the
+    # handle plus the solver parameters is the cache key instead.
+    from .multioperatortk.staticoperator import StaticOperator
+    if isinstance(self.hamiltonian,StaticOperator):
+        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
+               max(self.maxm,self.mpomaxm),id(self.hamiltonian.cpp_handle))
+        cache = getattr(self,'_session_ham_cache',None)
+        if cache is None or cache[0] is not self._session or cache[1]!=key:
+            if not hasattr(self._session,"set_hamiltonian_mpo"):
+                raise NotImplementedError(
+                    "set_hamiltonian was given an already-built MPO "
+                    "(StaticOperator), which this backend cannot accept -- "
+                    "only itensor_version=3 implements set_hamiltonian_mpo. "
+                    "Pass a MultiOperator instead, or switch backend.")
+            self._session.set_hamiltonian_mpo(self.hamiltonian.cpp_handle)
+            self._session_ham_cache = (self._session,key)
+    else:
+        terms = self.hamiltonian.to_terms()
+        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
+               max(self.maxm,self.mpomaxm),terms)
+        cache = getattr(self,'_session_ham_cache',None)
+        if cache is None or cache[0] is not self._session or cache[1]!=key:
+            self._session.set_hamiltonian(terms)
+            self._session_ham_cache = (self._session,key)
     if wf0 is not None:
         self._session.set_wavefunction(wf0.cpp_handle)
     if reconverge is not None: # overwrite skip_dmrg_gs

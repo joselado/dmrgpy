@@ -315,7 +315,36 @@ class Chain
     void
     set_hamiltonian(std::vector<MOTerm> const& terms)
         {
-        H_ = build_mpo(sites_,terms,mpomaxm_);
+        set_hamiltonian_mpo(build_mpo(sites_,terms,mpomaxm_));
+        }
+
+    // Set the Hamiltonian from an ALREADY-BUILT MPO, bypassing the symbolic
+    // term list entirely -- the counterpart of set_hamiltonian(terms) for an
+    // operator that was assembled with MPO algebra (build_operator +
+    // multiply_operators/sum_operators/scale_operator, i.e. Python's
+    // toMPO()/StaticOperator).
+    //
+    // Why this exists: some operators are cheap as an MPO and expensive as a
+    // term list. The standing example is a total-spin penalty
+    // g*S^2_total = g*((sum_i Sx_i)^2 + (sum_i Sy_i)^2 + (sum_i Sz_i)^2),
+    // used to project onto a spin sector in a ground-state-only solver. As
+    // symbols it is O(n^2) terms (measured: 2030 terms at 12 orbitals against
+    // 302 for the Hamiltonian itself); as MPOs it is three squares of
+    // extensive one-body operators, each of small bond dimension, so building
+    // it as (Sx*Sx + Sy*Sy + Sz*Sz) is exact and stays compact regardless of
+    // system size.
+    //
+    // Note this is a convenience-and-structure route, not automatically a
+    // speed one: ITensor's own toMPO already SVD-compresses the term list,
+    // and on that same measurement 6.7x the terms cost only 1.4x the sweep
+    // time, so the term-count blow-up largely does NOT propagate into the
+    // solve. What this buys is the ability to express an operator the way it
+    // is naturally structured, and to avoid materializing a term list that
+    // grows quadratically when the operator itself does not.
+    void
+    set_hamiltonian_mpo(MPO const& H)
+        {
+        H_ = H;
         have_H_ = true;
         have_wf0_energy_ = false; // any cached energy is now stale
         have_bandwidth_min_ = false; // ...and so is any cached bandwidth

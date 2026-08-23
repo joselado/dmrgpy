@@ -546,6 +546,12 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return self.exponential_apply(terms_from_python(terms),wf,tau,nsteps);
             }, py::arg("terms"),py::arg("wf"),py::arg("tau"),py::arg("nsteps"),
                "Applies exp(tau*H) to wf via nsteps repeated 2nd-order Taylor steps")
+        .def("set_hamiltonian_mpo",&Chain::set_hamiltonian_mpo,py::arg("H"),
+               "Set the Hamiltonian from an ALREADY-BUILT MPO (build_operator's "
+               "own return value, or anything multiply_operators/sum_operators/"
+               "scale_operator produced from one) instead of from a symbolic "
+               "term list -- see Chain::set_hamiltonian_mpo's own comment for "
+               "when that is worth doing.")
         .def("build_operator",[](Chain& self, std::vector<PyTerm> const& terms) {
                 return self.build_operator(terms_from_python(terms));
             }, py::arg("terms"))

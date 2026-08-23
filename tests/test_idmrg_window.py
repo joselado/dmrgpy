@@ -148,7 +148,9 @@ def test_window_total_energy_respects_variational_bound():
     W_pR = idmrg._fresh_physical_copy(W_pR)
     phys_L = idmrg._unprimed_site_index(W_pL)
     phys_R = idmrg._unprimed_site_index(W_pR)
-    ground_energy, _U, _S, _V, _evec0 = idmrg._local_two_site_solve(
+    # _local_two_site_solve also returns the reduced state's purity, which
+    # the growth loop's noise schedule keys on (see pyitensor/idmrg.py).
+    ground_energy, _U, _S, _V, _evec0, _purity = idmrg._local_two_site_solve(
         result.env_HL, result.env_HL_bra, result.env_HL_ket, W_pL, phys_L,
         W_pR, phys_R, result.env_HR, result.env_HR_bra, result.env_HR_ket,
         cutoff=1e-12, maxdim=20, niter=200)
