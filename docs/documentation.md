@@ -963,6 +963,66 @@ selected, genuine repeated eigenvalues still rejected, the mixed caller
 still rejecting magnitude ties, and the returned fixed point verified
 positive semidefinite.
 
+**The same bug existed in `mpscpp3`, where it was worse.** `chain_session.h`
+carried the identical magnitude-only test at three sites (`vx_dominant_eig`,
+`ic_dominant_fixed_point`, `vms_environments`). There it did not merely
+flake: the grouped (`n_uc<=2`) v3 VUMPS path could not complete a `D=8`
+Heisenberg ground state at all, failing with *"every attempt at D=4 failed
+(degenerate transfer-matrix spectrum)"*, and `n_uc=1` failed at every bond
+dimension tried. All three now share `vx_perron_reorder` /
+`vx_check_perron_nondegenerate`, the C++ counterparts of the Python fix.
+
+One extra step is needed in the matrix-free path that the dense one does not
+require. `ic_arnoldi_dominant` reconstructs and returns exactly ONE
+eigenvector, so a caller handed the magnitude-dominant Ritz pair cannot
+recover the Perron one if `-rho` edges ahead — the selection has to happen
+inside. Selecting on the Ritz *eigenvalue* alone is also not enough, because
+Ritz values are Krylov approximations and which of a `+rho`/`-rho` pair comes
+out larger in magnitude is partly numerical accident: measured on a critical
+chain at `D=16`, it returned the `-rho` branch and the caller then died on
+*"dominant left fixed point has ~zero trace"*. So the peripheral candidates
+are separated by the property the caller actually needs — a period-2 state's
+`-rho` eigenvector carries opposite signs on the two sublattices and its
+trace cancels to ~0, while the Perron one is positive with an O(1) trace, and
+every caller of this function divides by that trace. `ic_arnoldi_tie_rtol_`
+(`1e-3`) is correspondingly much looser than `_PERRON_TIE_RTOL`, since it is
+applied to approximate Ritz magnitudes rather than exact eigenvalues.
+
+That intermediate state — Perron reorder in place but selection still driven
+by the eigenvalue — was caught by `test_idmrg_correlator_v3.py`'s
+`test_local_gap_survives_a_positive_stored_superblock_energy`, which flipped
+the sign of its starved run's stored superblock energy. The test was right;
+it went green again once the selection used the trace.
+
+**Performance, which is what the guard fix unblocked.** With the path usable
+again, the grouped `n_uc<=2` route was still far slower than the pure-Python
+one it ports, for the reason the multi-site (`vms_*`) path had already fixed:
+a dense `zgeev` on the whole `(D^2,D^2)` transfer matrix (O(D^6), run twice
+per iteration, once per side), and a `vx_build_linear_map` + dense LU in
+`vx_regularized_solve` — that helper applies the action `D^2` times purely to
+MATERIALIZE a matrix which then gets another O(D^6) factorization. Both now
+have matrix-free branches above their thresholds (`vx_dominant_pair` using
+the same `ic_arnoldi_dominant`, and `vx_bicgstab` respectively), reusing the
+multi-site path's own helpers rather than adding second implementations, and
+both keep the dense route below threshold so the small cases every v3 VUMPS
+test was validated against stay on the path they were validated on.
+
+Measured on a uniform Heisenberg chain, `nrestarts=2`, against the
+pure-Python backend as reference:
+
+| case | pyitensor | v3 before | v3 after |
+|---|---|---|---|
+| `n_uc=1`, D=8/16/24 | 6.8 / 36.2 / 171.5 s | *failed at every D* | 3.3 / 16.5 / 83.2 s |
+| `n_uc=2`, D=8 | 5.3 s | 4.3 s | 4.0 s (dense, unchanged) |
+| `n_uc=2`, D=16 | 22.9 s | 133.7 s | 29.3 s |
+| `n_uc=2`, D=24 | 116.8 s | 1483.4 s | 45.8 s |
+
+i.e. `n_uc=2` at D=24 went from 12.3x SLOWER than pure Python to faster than
+it, and the `n_uc=1` path from unusable to working, with `e0` agreeing with
+pyitensor to all printed digits at D=24 (-0.443136013 on both). Note the
+pure-Python column is itself noisy run to run (random restarts), so treat the
+ratios as order-of-magnitude.
+
 **Direct sum of two converged VUMPS iMPS (`pyitensor/vumps.py`'s
 `imps_sum`)**: the VUMPS-mixed-gauge port of `idmrg.py`'s own `imps_sum`
 above, following the same literature check this project's own standing

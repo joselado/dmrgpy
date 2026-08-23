@@ -1132,6 +1132,75 @@ Perron root selected, genuine repeated eigenvalues still rejected, the
 mixed caller still rejecting magnitude ties, and the returned fixed point
 verified positive semidefinite.
 
+\textbf{The same bug existed in \texttt{mpscpp3}, where it was worse.}
+\texttt{chain\_session.h} carried the identical magnitude-only test at three
+sites (\texttt{vx\_dominant\_eig}, \texttt{ic\_dominant\_fixed\_point},
+\texttt{vms\_environments}). There it did not merely flake: the grouped
+(\texttt{n\_uc}$\le 2$) v3 VUMPS path could not complete a $D=8$ Heisenberg
+ground state at all, failing with ``every attempt at D=4 failed (degenerate
+transfer-matrix spectrum)'', and \texttt{n\_uc=1} failed at every bond
+dimension tried. All three now share \texttt{vx\_perron\_reorder} /
+\texttt{vx\_check\_perron\_nondegenerate}.
+
+One extra step is needed in the matrix-free path.
+\texttt{ic\_arnoldi\_dominant} reconstructs and returns exactly ONE
+eigenvector, so a caller handed the magnitude-dominant Ritz pair cannot
+recover the Perron one if $-\rho$ edges ahead --- the selection has to happen
+inside. Selecting on the Ritz \emph{eigenvalue} alone is also not enough,
+because Ritz values are Krylov approximations and which of a $\pm\rho$ pair
+comes out larger in magnitude is partly numerical accident: measured on a
+critical chain at $D=16$, it returned the $-\rho$ branch and the caller then
+died on ``dominant left fixed point has \textasciitilde zero trace''. The
+peripheral candidates are therefore separated by the property the caller
+actually needs --- a period-2 state's $-\rho$ eigenvector carries opposite
+signs on the two sublattices so its trace cancels to ${\sim}0$, while the
+Perron one is positive with an $O(1)$ trace, and every caller divides by that
+trace. \texttt{ic\_arnoldi\_tie\_rtol\_} ($10^{-3}$) is correspondingly much
+looser than \texttt{\_PERRON\_TIE\_RTOL}, being applied to approximate Ritz
+magnitudes rather than exact eigenvalues.
+
+That intermediate state --- Perron reorder in place but selection still
+driven by the eigenvalue --- was caught by
+\texttt{test\_idmrg\_correlator\_v3.py}'s
+\texttt{test\_local\_gap\_survives\_a\_positive\_stored\_superblock\_energy},
+which flipped the sign of its starved run's stored superblock energy. The
+test was right; it went green again once the selection used the trace.
+
+\textbf{Performance, which is what the guard fix unblocked.} The grouped
+route was still far slower than the pure-Python one it ports, for the reason
+the multi-site (\texttt{vms\_*}) path had already fixed: a dense
+\texttt{zgeev} on the whole $(D^2,D^2)$ transfer matrix ($O(D^6)$, twice per
+iteration), and a \texttt{vx\_build\_linear\_map} + dense LU in
+\texttt{vx\_regularized\_solve} --- that helper applies the action $D^2$
+times purely to materialize a matrix which then gets another $O(D^6)$
+factorization. Both now have matrix-free branches above their thresholds
+(\texttt{vx\_dominant\_pair} and \texttt{vx\_bicgstab}), reusing the
+multi-site path's own helpers, and both keep the dense route below threshold
+so the small cases every v3 VUMPS test was validated against stay on the path
+they were validated on.
+
+Measured on a uniform Heisenberg chain, \texttt{nrestarts=2}, against the
+pure-Python backend:
+
+\begin{center}
+\begin{tabular}{llll}
+\hline
+case & pyitensor & v3 before & v3 after \\
+\hline
+\texttt{n\_uc=1}, $D=8/16/24$ & 6.8 / 36.2 / 171.5 s & \emph{failed at every $D$} & 3.3 / 16.5 / 83.2 s \\
+\texttt{n\_uc=2}, $D=8$ & 5.3 s & 4.3 s & 4.0 s (dense, unchanged) \\
+\texttt{n\_uc=2}, $D=16$ & 22.9 s & 133.7 s & 29.3 s \\
+\texttt{n\_uc=2}, $D=24$ & 116.8 s & 1483.4 s & 45.8 s \\
+\hline
+\end{tabular}
+\end{center}
+
+i.e. \texttt{n\_uc=2} at $D=24$ went from $12.3\times$ \emph{slower} than
+pure Python to faster than it, and the \texttt{n\_uc=1} path from unusable to
+working, with $e_0$ agreeing with pyitensor to all printed digits at $D=24$
+($-0.443136013$ on both). The pure-Python column is itself noisy run to run
+(random restarts), so treat the ratios as order-of-magnitude.
+
 \textbf{Direct sum of two converged VUMPS iMPS
 (\texttt{pyitensor/vumps.py}'s \texttt{imps\_sum})}: the VUMPS-mixed-gauge
 port of \texttt{idmrg.py}'s own \texttt{imps\_sum} above, following the

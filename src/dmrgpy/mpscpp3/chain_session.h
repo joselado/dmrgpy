@@ -5323,8 +5323,88 @@ class Chain
                 }
             return out;
             };
+        // vx_build_linear_map applies `action` D*D times purely to
+        // MATERIALIZE the matrix, then vx_solve is another O(D^6) LU on it
+        // -- the single largest cost in the grouped VUMPS iteration. Above
+        // the threshold, solve the same operator matrix-free instead,
+        // exactly as the multi-site path's own solve_reg already does.
+        if (D*D > vms_dense_solve_max_)
+            {
+            bool ok=false;
+            auto sol = vx_bicgstab(action,rhs,D*D,1e-12,20*D*D,ok);
+            // Fall through to the dense path rather than trust a
+            // non-converged iterate -- never less robust than before.
+            if (ok) return sol;
+            }
         auto Mat = vx_build_linear_map(D,action);
         return vx_solve(Mat,D*D,rhs);
+        }
+
+    // Relative tolerances for the transfer-matrix dominant-eigenvalue
+    // selection, mirroring pyitensor/idmrg.py's _DEGENERACY_RTOL and
+    // _PERRON_TIE_RTOL. See _check_dominant_eigenvalue_nondegenerate's own
+    // docstring there for the full reasoning. The short version:
+    //
+    // A magnitude-only test rejects legitimate period-p physics. A
+    // transfer matrix's peripheral spectrum is rho*exp(2 pi i k / p) for a
+    // period-p state, so a period-2 state (any half-filled/2k_F=pi chain,
+    // and a gapless Heisenberg chain along some trajectories) carries an
+    // eigenvalue at -rho whose magnitude approaches the leader's as the
+    // correlation length diverges. Those are DISTINCT eigenvalues with
+    // distinct eigenvectors -- nothing about them is ill-posed. Only a
+    // repeated EIGENVALUE (the "cat state", both copies at +rho) is
+    // genuinely ambiguous.
+    //
+    // Measured before this fix: the grouped VUMPS path here could not
+    // complete a D=8 Heisenberg ground state at all ("every attempt at
+    // D=4 failed (degenerate...)"), and on the pyitensor side the same
+    // magnitude test killed ~42% of individual VUMPS attempts and ~16% of
+    // whole solves on a half-filled free-fermion chain at D=16, where
+    // every firing had the signature |lambda|=(1,0.999999999),
+    // arg=(0,+-pi).
+    static constexpr double vx_degeneracy_rtol_ = 1e-9;
+    // Wider than vx_degeneracy_rtol_ on purpose: the observed tie sits at
+    // exactly 1e-9, i.e. on that constant's own boundary, so reusing it
+    // would leave the Perron selection decided by rounding.
+    static constexpr double vx_perron_tie_rtol_ = 1e-6;
+
+    // Reorder `order` (already sorted by descending |evals|) so that among
+    // the entries tied in MAGNITUDE with the leader, the one with the
+    // largest real part comes first -- the Perron root, the only member of
+    // a peripheral spectrum whose eigenvector is the positive
+    // (semidefinite) matrix every fixed-point caller treats as a density
+    // matrix and divides by the trace of. Without this, which member comes
+    // back is whatever the sort happened to do with a tie, so a period-2
+    // state can hand out the -rho eigenvector as a "density matrix".
+    static void
+    vx_perron_reorder(std::vector<int>& order, std::vector<Cplx> const& evals)
+        {
+        if (order.size() < 2) return;
+        double top = std::abs(evals[order[0]]);
+        if (!(top > 0.0)) return;
+        size_t ntied = 0;
+        while (ntied < order.size()
+               && std::abs(evals[order[ntied]]) >= (1.0-vx_perron_tie_rtol_)*top)
+            ++ntied;
+        if (ntied < 2) return;
+        std::stable_sort(order.begin(), order.begin()+ntied,
+                          [&](int a,int b)
+                          { return evals[a].real() > evals[b].real(); });
+        }
+
+    // Degenerate means the same EIGENVALUE twice, not merely the same
+    // magnitude -- see vx_degeneracy_rtol_ above.
+    static void
+    vx_check_perron_nondegenerate(Cplx a, Cplx b, std::string const& where)
+        {
+        if (std::abs(b-a) <= vx_degeneracy_rtol_*std::abs(a))
+            throw ITError(where+": the transfer matrix's dominant eigenvalue is "
+                           "genuinely degenerate (two copies of the same eigenvalue) "
+                           "-- a single dominant fixed point is not well-defined here. "
+                           "See pyitensor/idmrg.py's own "
+                           "_check_dominant_eigenvalue_nondegenerate for the physical "
+                           "reason (a \"cat state\" superposition of two branches with "
+                           "matched per-site norm)");
         }
 
     // Eigenvalues/right-eigenvectors of a general (non-Hermitian) complex
@@ -5349,16 +5429,57 @@ class Chain
         for (int i=0;i<n;++i) order[i]=i;
         std::sort(order.begin(),order.end(),
                   [&](int a,int b){ return std::abs(evals[a]) > std::abs(evals[b]); });
-        if (n>1 && std::abs(evals[order[1]]) > (1.0-1e-9)*std::abs(evals[order[0]]))
-            throw ITError("Chain::vumps: the transfer matrix's dominant eigenvalue is "
-                           "(near-)degenerate -- a single dominant fixed point is not "
-                           "well-defined here (see pyitensor/idmrg.py's own "
-                           "_check_dominant_eigenvalue_nondegenerate for the physical "
-                           "reason this can happen, e.g. a gapless/critical chain)");
+        vx_perron_reorder(order,evals);
+        if (n>1) vx_check_perron_nondegenerate(evals[order[0]],evals[order[1]],
+                                                "Chain::vumps");
         int idx = order[0];
         std::vector<Cplx> vec(n);
         for (int i=0;i<n;++i) vec[i] = vr[i + (size_t)idx*n];
         return {evals[idx], vec};
+        }
+
+    // (eta, v): the dominant eigenpair of the transfer tensor E acting
+    // either from the right (from_left=false, apply_transfer) or from the
+    // left (from_left=true, apply_transfer_from_left), dense below
+    // vx_dense_eig_max_ and matrix-free restarted Arnoldi above it.
+    //
+    // The dense route is O(D^6) -- zgeev on the whole (D^2,D^2) matrix --
+    // and it runs TWICE per VUMPS iteration (once per side), which is what
+    // made the grouped n_uc<=2 path far slower than the pure-Python one it
+    // ports. The multi-site (vms_*) path already went matrix-free for
+    // exactly this reason; this brings the grouped path in line, reusing
+    // the same ic_arnoldi_dominant rather than a second implementation.
+    //
+    // The left case uses the from-left ACTION rather than materializing
+    // E's transpose: transposing is itself O(D^4) storage and defeats the
+    // point of never forming the matrix.
+    //
+    // Below the threshold nothing changes -- the small cases every v3
+    // VUMPS test was validated against stay bit-identical to the dense
+    // path they were validated on.
+    static std::pair<Cplx,std::vector<Cplx>>
+    vx_dominant_pair(std::vector<Cplx> const& E, int D, bool from_left)
+        {
+        int n = D*D;
+        if (n <= vx_dense_eig_max_)
+            {
+            if (!from_left) return vx_dominant_eig(E,n);
+            std::vector<Cplx> Et((size_t)n*n);
+            for (int i=0;i<n;++i)
+            for (int j=0;j<n;++j)
+                Et[(size_t)i*n+j] = E[(size_t)j*n+i];
+            return vx_dominant_eig(Et,n);
+            }
+        auto act = [&](std::vector<Cplx> const& x)
+            {
+            return from_left ? vx_apply_transfer_from_left(E,D,x)
+                             : vx_apply_transfer(E,D,x);
+            };
+        Cplx eta(0,0), eta1(0,0);
+        std::vector<Cplx> vec;
+        ic_arnoldi_dominant(act,n,eta,eta1,vec);
+        vx_check_perron_nondegenerate(eta,eta1,"Chain::vumps");
+        return {eta,vec};
         }
 
     // Dominant RIGHT fixed point rho of transfer tensor E (apply_transfer(E,rho)=eta*rho),
@@ -5369,7 +5490,7 @@ class Chain
     static std::pair<std::vector<Cplx>,Cplx>
     vx_dominant_right_fixed_point(std::vector<Cplx> const& E, int D)
         {
-        auto [eta,vec] = vx_dominant_eig(E,D*D);
+        auto [eta,vec] = vx_dominant_pair(E,D,false);
         Cplx tr(0,0);
         for (int i=0;i<D;++i) tr += vec[i*D+i];
         if (std::abs(tr) < 1e-13)
@@ -5385,12 +5506,7 @@ class Chain
     static std::pair<std::vector<Cplx>,Cplx>
     vx_dominant_left_fixed_point(std::vector<Cplx> const& E, int D)
         {
-        int n = D*D;
-        std::vector<Cplx> Et((size_t)n*n);
-        for (int i=0;i<n;++i)
-        for (int j=0;j<n;++j)
-            Et[i*n+j] = E[j*n+i];
-        auto [eta,vec] = vx_dominant_eig(Et,n);
+        auto [eta,vec] = vx_dominant_pair(E,D,true);
         Cplx tr(0,0);
         for (int i=0;i<D;++i) tr += vec[i*D+i];
         if (std::abs(tr) < 1e-13)
@@ -6084,10 +6200,7 @@ class Chain
                 };
             Cplx e0c(0,0), e1c(0,0);
             ic_arnoldi_dominant(act,n,e0c,e1c,vec);
-            if (std::abs(e1c) > (1.0-1e-9)*std::abs(e0c))
-                throw ITError("Chain::vms_environments: the cell transfer matrix's "
-                               "dominant eigenvalue is (near-)degenerate -- a single "
-                               "dominant fixed point is not well-defined here");
+            vx_check_perron_nondegenerate(e0c,e1c,"Chain::vms_environments");
             Cplx tr(0,0);
             for (int i=0;i<D;++i) tr += vec[i*D+i];
             if (std::abs(tr) < 1e-13)
@@ -8463,6 +8576,13 @@ class Chain
     static constexpr int ic_dense_eig_max_ = 64;
     static constexpr int ic_arnoldi_krylov_ = 40;
     static constexpr int ic_arnoldi_restarts_ = 20;
+    // Magnitude window within which two of Arnoldi's RITZ values count as
+    // peripheral-tied. Much looser than vx_perron_tie_rtol_ on purpose:
+    // that constant is applied to exact zgeev eigenvalues, these are
+    // Krylov approximations, and a subdominant branch's Ritz magnitude is
+    // routinely off by far more than 1e-6 while still being the same
+    // peripheral eigenvalue physically.
+    static constexpr double ic_arnoldi_tie_rtol_ = 1e-3;
 
     // The two largest-|lambda| eigenvalues, plus the dominant eigenvector,
     // of a linear map given only by its action on a flat length-n complex
@@ -8543,6 +8663,57 @@ class Chain
             for (int i=0;i<mused;++i) order[i]=i;
             std::sort(order.begin(),order.end(),
                        [&](int a,int b){ return std::abs(evals[a]) > std::abs(evals[b]); });
+            // Perron selection happens HERE, not at the call site: only one
+            // eigenvector is reconstructed and returned, so a caller handed
+            // the magnitude-dominant Ritz pair has no way to recover the
+            // +rho one if -rho edged ahead. See vx_perron_reorder.
+            vx_perron_reorder(order,evals);
+            // Among the peripheral (magnitude-tied) candidates, take the one
+            // whose eigenvector actually is a FIXED POINT. Every caller of
+            // this function wants a transfer-map fixed point and divides by
+            // its trace, and that is exactly what separates the branches: a
+            // period-2 state's -rho eigenvector carries opposite signs on
+            // the two sublattices, so its trace cancels to ~0, while the
+            // +rho (Perron) one is a positive matrix with an O(1) trace.
+            //
+            // Selecting on the eigenVALUE alone is not enough here. Ritz
+            // values are approximate, so which of a +rho/-rho pair comes
+            // out with the larger magnitude is partly numerical accident --
+            // measured directly: on a half-filled/critical chain at D=16
+            // this returned the -rho branch and the caller then died on
+            // "dominant left fixed point has ~zero trace". The trace test
+            // asks the question the caller actually cares about instead of
+            // inferring it from an approximate eigenvalue.
+            int chi_sq = (chi*chi == n) ? chi : 0;
+            if (chi_sq > 0 && mused > 1)
+                {
+                double top = std::abs(evals[order[0]]);
+                int ntied = 0;
+                while (ntied < mused
+                       && std::abs(evals[order[ntied]]) >= (1.0-ic_arnoldi_tie_rtol_)*top)
+                    ++ntied;
+                if (ntied > 1)
+                    {
+                    int pick = 0; double best = -1.0;
+                    for (int c=0;c<ntied;++c)
+                        {
+                        std::vector<Cplx> xc((size_t)n,Cplx(0,0));
+                        for (int i=0;i<mused;++i)
+                            {
+                            Cplx y = evecs_col[(size_t)i+(size_t)order[c]*mused];
+                            for (int k=0;k<n;++k) xc[k] += y*V[i][k];
+                            }
+                        double nrm2 = 0.0;
+                        for (auto const& e : xc) nrm2 += std::norm(e);
+                        if (!(nrm2 > 0.0)) continue;
+                        Cplx tr(0,0);
+                        for (int i=0;i<chi_sq;++i) tr += xc[(size_t)i*chi_sq+i];
+                        double score = std::abs(tr)/std::sqrt(nrm2);
+                        if (score > best) { best = score; pick = c; }
+                        }
+                    if (pick != 0) std::swap(order[0],order[pick]);
+                    }
+                }
             eval0 = evals[order[0]];
             eval1 = mused>1 ? evals[order[1]] : Cplx(0,0);
 
@@ -8588,12 +8759,7 @@ class Chain
         Cplx eta(0,0), eta1(0,0);
         std::vector<Cplx> vec;
         ic_arnoldi_dominant(act,n,eta,eta1,vec);
-        if (std::abs(eta1) > (1.0-1e-9)*std::abs(eta))
-            throw ITError("Chain::idmrg static correlators: the transfer matrix's "
-                           "dominant eigenvalue is (near-)degenerate -- a single "
-                           "dominant fixed point is not well-defined here (see "
-                           "pyitensor/idmrg.py's own "
-                           "_check_dominant_eigenvalue_nondegenerate)");
+        vx_check_perron_nondegenerate(eta,eta1,"Chain::idmrg static correlators");
         Cplx tr = ic_trace(vec,chi);
         if (std::abs(tr) < 1e-13)
             throw ITError("Chain::idmrg static correlators: dominant fixed point has "
