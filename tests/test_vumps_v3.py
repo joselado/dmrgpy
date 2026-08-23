@@ -149,9 +149,31 @@ def test_d_less_than_1_rejected():
         ic.gs_energy()
 
 
-def test_n_uc_above_2_not_implemented():
-    with pytest.raises(NotImplementedError):
-        infinitechain.Infinite_Spin_Chain(["1/2", "1/2", "1/2"], itensor_version=3)
+def test_n_uc_above_2_uses_the_sequential_multisite_algorithm():
+    """n_uc>2 used to be rejected at construction. The v3 backend now runs
+    the sequential multi-site algorithm there (Chain::vms_ground_state), so
+    a 3-site cell must solve, and its observables must come from the
+    per-site snapshot rather than the grouped one. The physics checks live
+    in tests/test_vumps_multisite.py, which covers both backends; this one
+    pins that the v3 route exists and produces a sane state."""
+    g = 1.5
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"] * 3, itensor_version=3)
+    ic.gs_method = "vumps"
+    ic.maxm, ic.maxiter, ic.etol = 4, 100, 1e-11
+    ic.vumps_nrestarts = 2
+    # The TFIM rather than a pure field: a field-only model's ground state
+    # is a product state, whose transfer matrix is massively degenerate at
+    # D>1, and BOTH VUMPS paths refuse a non-unique dominant fixed point
+    # there (which is why this file's own field-only test uses maxm=1).
+    h = 0
+    for i in range(3):
+        nxt = ic.SxC[i + 1] if i + 1 < 3 else ic.SxR[0]
+        h = h + (-4.0) * ic.SxC[i] * nxt + (-2.0 * g) * ic.SzC[i]
+    ic.set_hamiltonian(h)
+    e0 = ic.gs_energy()
+    assert e0 == pytest.approx(_tfim_exact_energy_density(g), abs=1e-3)
+    sz = [float(np.real(ic.vev("Sz", p))) for p in range(3)]
+    assert max(sz) - min(sz) < 1e-8       # uniform chain, uniform observable
 
 
 def test_gs_method_vumps_vev_and_correlator_work():

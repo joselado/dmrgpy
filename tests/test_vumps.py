@@ -148,9 +148,17 @@ def test_al_left_canonical_ar_right_canonical():
     assert np.allclose(gram_r, np.eye(D), atol=1e-8)
 
 
-def test_n_uc_above_2_not_implemented():
-    with pytest.raises(NotImplementedError):
-        vumps.vumps_ground_state([1, 1, 1], [], [], 3, D=1)
+def test_n_uc_above_2_uses_the_sequential_multisite_algorithm():
+    """n_uc>2 used to be rejected outright (grouping the cell into one
+    d^n_uc supersite is exponential, so it was capped at 2). It now routes
+    to pyitensor/vumps_ms.py's sequential algorithm instead, which costs
+    linearly in the cell size -- see tests/test_vumps_multisite.py for the
+    accuracy checks; this one only pins that the route exists and returns a
+    multi-site result rather than raising."""
+    res = vumps.vumps_ground_state([1, 1, 1], [], [], 3, D=1, maxiter=20)
+    assert getattr(res, "multisite", False)
+    assert res.n_uc == 3
+    assert len(res.AL) == 3
 
 
 def test_d_less_than_1_rejected():

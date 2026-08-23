@@ -48,11 +48,48 @@ expected not to redundantly write both `Sx[i]*Sx[i+1]` and `Sx[i+1]*Sx[i]`
 for one bond in existing finite-chain code today.
 """
 
+import warnings
+
 import numpy as np
 
 from . import multioperator
 from .multioperator import MultiOperator
 from .pyitensor.sites.base import is_fermionic
+
+
+def _warn_if_growth_missed_local_ground_state(e0_fresh, e0_stored):
+    """`local_excitation_gap` re-solves the stored 2-site effective
+    Hamiltonian for its own ground state rather than reusing the growing
+    algorithm's reported one (see
+    `pyitensor.idmrg._lowest_two_eigenvalues`'s docstring for why: that
+    loop's convergence test bounds the distance to *some* eigenvalue, not
+    to the lowest one, so its number and a strong random-started solve here
+    need not be eigenvalues of the same eigenpair). The two agree whenever
+    the growth loop did find that Hamiltonian's ground state, which is the
+    ordinary case.
+
+    When they do not, the returned gap is still a genuine spectral gap of
+    the stored operator, but it is no longer a gap measured above the state
+    whose observables `vev`/`correlator` report: the growth loop warm-starts
+    every micro-step from the previous one and so stays on the branch it
+    started on, while a random-started solve of the same operator is free to
+    leave it -- and with `ConserveQNs=false` (both backends) nothing confines
+    that search to the converged state's own particle-number sector, so what
+    it finds can be a charge-imbalanced state against the frozen environment.
+    Worth a warning rather than a silent number."""
+    if abs(e0_fresh - e0_stored) > 1e-6 * (1.0 + abs(e0_stored)):
+        warnings.warn(
+            "local_excitation_gap: the growing algorithm's own final local "
+            "ground eigenvalue ({:.10g}) is above this operator's actual "
+            "ground eigenvalue ({:.10g}), by {:.4g}. The returned gap is the "
+            "true spectral gap of that stored 2-site effective Hamiltonian, "
+            "but it is NOT a gap above the converged state vev()/correlator() "
+            "describe -- with ConserveQNs=false the local spectrum also holds "
+            "charge-imbalanced states against the frozen environment, which "
+            "the warm-started growth loop never visits. Treat this gap as "
+            "unreliable for this model.".format(
+                e0_stored, e0_fresh, e0_stored - e0_fresh),
+            RuntimeWarning, stacklevel=3)
 
 
 def _term_groups(term, n_uc):
@@ -238,21 +275,18 @@ class Infinite_Many_Body_Chain:
         if self.n_uc < 1:
             raise ValueError("Infinite_Many_Body_Chain: the unit cell needs "
                               "at least one site")
-        if self.n_uc > 2:
-            raise NotImplementedError(
-                "Infinite_Many_Body_Chain: unit cells with more than 2 "
-                "sites (n_uc={}) are not supported yet -- the growth loop's "
-                "micro-step sublattice pairing (pyitensor/idmrg.py's "
-                "p_L=mstep, p_R=n_uc-1-mstep) only produces genuinely "
-                "adjacent active sites for n_uc in {{1, 2}}; for n_uc>=3 it "
-                "pairs non-adjacent sublattice positions whose automaton "
-                "channels carry different, bond-specific pending content "
-                "(not just a matching channel count), so contracting them "
-                "together would silently mix unrelated bond content rather "
-                "than just fail to contract. Fixing this needs a genuine "
-                "redesign of the micro-step growth scheme, not a small "
-                "patch -- flagged as a known follow-up rather than "
-                "attempted here.".format(self.n_uc))
+        # n_uc > 2 is supported through gs_method="vumps" (the default),
+        # which uses the sequential multi-site algorithm -- see
+        # pyitensor/vumps_ms.py. It is NOT supported by gs_method="idmrg",
+        # whose growth loop pairs sublattice p_L=mstep with
+        # p_R=n_uc-1-mstep and so only produces genuinely adjacent active
+        # sites for n_uc in {1,2}; for n_uc>=3 it pairs non-adjacent
+        # positions whose automaton channels carry different, bond-specific
+        # pending content, which would silently mix unrelated bond content
+        # rather than fail to contract. That path rejects n_uc>2 itself
+        # (gs_energy below, and pyitensor/idmrg.py's own guard), so the
+        # restriction now lives with the algorithm that actually has it
+        # instead of blocking construction outright.
 
         self.gs_method = "vumps"  # "vumps" (the default -- pyitensor.vumps's/
                                   # Chain::vumps_ground_state's direct
@@ -323,6 +357,23 @@ class Infinite_Many_Body_Chain:
                                  # (Chain::idmrg_ground_state's restarts
                                  # argument) -- no equivalent knob on the
                                  # "python" backend's Lanczos solve.
+        self.noise = 1e-4       # gs_method="idmrg" only: White density-matrix
+                                 # noise, applied ONLY while the growing
+                                 # state is still a product state (plus a
+                                 # short tail), so an already-entangled model
+                                 # never sees it and is unaffected. Exists
+                                 # because a product state is an EXACT fixed
+                                 # point of the growth loop that no amount of
+                                 # solver refinement escapes -- see
+                                 # pyitensor.idmrg._noise_perturbed_split and
+                                 # docs/known_issue_idmrg_product_state_
+                                 # collapse.md. 0 disables it entirely (and
+                                 # restores the pre-fix numerics exactly).
+        self.noise_iters = 40   # cap on how many macro-iterations may carry
+                                 # noise, so a model whose ground state
+                                 # genuinely IS a product state (a polarized
+                                 # chain) stops re-arming it and still ends
+                                 # on a clean, unperturbed tail.
         self.verbose = False
 
         self.hamiltonian = None  # user-facing MultiOperator (L/C/R indices)
@@ -482,7 +533,8 @@ class Infinite_Many_Body_Chain:
             self._result = idmrg.idmrg_ground_state(
                 self.site_types, self._h_intra.op, self._h_inter.op, self.n_uc,
                 maxm=self.maxm, cutoff=self.cutoff, maxiter=self.maxiter,
-                etol=self.etol, niter=self.niter, verbose=self.verbose)
+                etol=self.etol, niter=self.niter, verbose=self.verbose,
+                noise=self.noise, noise_iters=self.noise_iters)
             self._vumps_result = None
             self.e0 = self._result.e0
             self.converged = self._result.converged
@@ -514,7 +566,8 @@ class Infinite_Many_Body_Chain:
             terms_inter = self._h_inter.to_terms(jordan_wigner_transform=False)
             density, converged, _niter_done = chain.idmrg_ground_state(
                 terms_intra, terms_inter, self.maxm, self.cutoff,
-                self.maxiter, self.etol, self.niter, self.restarts)
+                self.maxiter, self.etol, self.niter, self.restarts,
+                self.noise, self.noise_iters)
             self._session3 = chain  # kept alive for td_dynamical_correlator -- see __init__'s own comment
             self._session3_has_vumps = False
             self._result = None
@@ -528,9 +581,13 @@ class Infinite_Many_Body_Chain:
             # Chain::idmrg_classify_terms).
             terms_intra = self._h_intra.to_terms(jordan_wigner_transform=False)
             terms_inter = self._h_inter.to_terms(jordan_wigner_transform=False)
+            # self.niter feeds the H_AC/H_C Krylov solves here exactly as
+            # it does pyitensor.vumps.vumps_ground_state's own
+            # niter_lanczos; it only bites once those solves are big enough
+            # to go matrix-free (Chain::vx_dense_eig_max_).
             e0, converged, _niter_done, _gauge_mismatch = chain.vumps_ground_state(
                 terms_intra, terms_inter, self.maxm, self.etol, self.maxiter,
-                self.vumps_nrestarts)
+                self.vumps_nrestarts, max(self.niter, 2))
             self._session3 = chain  # kept alive for excitation_energies/excitation_gap
             self._session3_has_vumps = True
             self._result = None
@@ -601,6 +658,10 @@ class Infinite_Many_Body_Chain:
         if self.itensor_version == 3 and self.gs_method == "vumps":
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
+            # n_uc>2 keeps a per-site (multi-site) snapshot rather than the
+            # grouped one -- different representations, different reader.
+            if self.n_uc > 2:
+                return self._session3.vms_onsite_expectation(opname, p)
             return self._session3.vumps_onsite_expectation(opname, p)
         if self.itensor_version == 3 and self.gs_method == "idmrg":
             if self._session3 is None or self._session3_has_vumps:
@@ -666,6 +727,9 @@ class Infinite_Many_Body_Chain:
         if self.itensor_version == 3 and self.gs_method == "vumps":
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
+            if self.n_uc > 2:
+                return self._session3.vms_two_point_correlator(
+                    opname_i, p_i, opname_j, r)
             return self._session3.vumps_two_point_correlator(opname_i, p_i, opname_j, r)
         if self.itensor_version == 3 and self.gs_method == "idmrg":
             if self._session3 is None or self._session3_has_vumps:
@@ -705,6 +769,18 @@ class Infinite_Many_Body_Chain:
         internally, mirroring this method's own caching one level down,
         see chain_session.h's own comment at
         vumps_build_excitation_environment)."""
+        if self.n_uc > 2:
+            raise NotImplementedError(
+                "excitation_energies/excitation_gap: n_uc>2 (got {}) is not "
+                "supported. The ground state itself is -- gs_method=\"vumps\" "
+                "uses the sequential multi-site algorithm there "
+                "(pyitensor/vumps_ms.py) -- but the tangent-space excitation "
+                "ansatz built on top of it (pyitensor/idmrg_excitations.py) "
+                "still expects the GROUPED single-supersite mixed gauge, so "
+                "it would read a list of per-site tensors as one tensor. "
+                "Porting the ansatz to the multi-site form is follow-up work; "
+                "until then use local_excitation_gap (gs_method=\"idmrg\", "
+                "n_uc<=2) or a smaller cell.".format(self.n_uc))
         if self.itensor_version != "python" or self.gs_method != "vumps":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.excitation_energies/excitation_gap: "
@@ -829,7 +905,10 @@ class Infinite_Many_Body_Chain:
                     "ported to the v3 C++ backend")
             if self._session3 is None or self._session3_has_vumps:
                 self.gs_energy()
-            return self._session3.idmrg_local_excitation_gap(niter)
+            gap, e0_fresh, e0_stored = \
+                self._session3.idmrg_local_excitation_gap_detail(niter)
+            _warn_if_growth_missed_local_ground_state(e0_fresh, e0_stored)
+            return gap
         if self.itensor_version != "python":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.local_excitation_gap: only "
@@ -839,7 +918,10 @@ class Infinite_Many_Body_Chain:
             self.gs_energy()
         from .pyitensor import idmrg
         if window == 0:
-            return idmrg.local_excitation_gap(self._result, niter=niter)
+            gap, e0_fresh, e0_stored = idmrg.local_excitation_gap(
+                self._result, niter=niter, detail=True)
+            _warn_if_growth_missed_local_ground_state(e0_fresh, e0_stored)
+            return gap
         return idmrg.local_excitation_gap_windowed(
             self._result, self._h_intra.op, self._h_inter.op, self.site_types,
             self.n_uc, window=window, niter=niter)

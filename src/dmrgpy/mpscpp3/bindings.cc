@@ -181,14 +181,16 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("idmrg_ground_state",[](Chain& self, std::vector<PyTerm> const& terms_intra,
                                       std::vector<PyTerm> const& terms_inter,
                                       int maxm, double cutoff, int maxiter, double etol,
-                                      int krylovdim, int restarts) {
+                                      int krylovdim, int restarts, double noise,
+                                      int noise_iters) {
                 auto out = self.idmrg_ground_state(terms_from_python(terms_intra),
                     terms_from_python(terms_inter),maxm,cutoff,maxiter,etol,
-                    krylovdim,restarts);
+                    krylovdim,restarts,noise,noise_iters);
                 return py::make_tuple(out.density,out.converged,out.niter_done);
             }, py::arg("terms_intra"),py::arg("terms_inter"),
                py::arg("maxm"),py::arg("cutoff"),py::arg("maxiter"),py::arg("etol"),
                py::arg("krylovdim")=30,py::arg("restarts")=2,
+               py::arg("noise")=1e-4,py::arg("noise_iters")=40,
                "Infinite DMRG (iDMRG) ground-state energy density -- this "
                "Chain must have been constructed with site_types = the "
                "n_uc-site unit cell (not a full chain), see "
@@ -225,14 +227,39 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "Chain. A cheap, momentum-less cross-check, not a "
                "variationally optimal excited state; see "
                "Chain::idmrg_local_excitation_gap's own comment.")
+        .def("idmrg_local_excitation_gap_detail",[](Chain& self, int niter) {
+                auto out = self.idmrg_local_excitation_gap_detail(niter);
+                return py::make_tuple(out.gap,out.e0_fresh,out.e0_stored);
+            }, py::arg("niter")=200,
+               "(gap, e0_fresh, e0_stored) -- idmrg_local_excitation_gap "
+               "plus the ground eigenvalue it re-solved for and the one the "
+               "growing algorithm's own final micro-step reported. A large "
+               "disagreement between the two means the growth loop did not "
+               "find its own local effective Hamiltonian's ground state; see "
+               "Chain::idmrg_local_excitation_gap_detail's own comment.")
+        .def("vms_onsite_expectation",[](Chain& self, std::string const& opname, int p) {
+                return self.vms_onsite_expectation(opname,p);
+            }, py::arg("opname"),py::arg("p"),
+               "<opname> at site p of a converged SEQUENTIAL MULTI-SITE "
+               "(n_uc>2) vumps_ground_state -- see Chain::vms_onsite_"
+               "expectation. The grouped vumps_onsite_expectation covers "
+               "n_uc<=2; the two representations are deliberately separate.")
+        .def("vms_two_point_correlator",[](Chain& self, std::string const& opname_i,
+                                            int p_i, std::string const& opname_j, int r) {
+                return self.vms_two_point_correlator(opname_i,p_i,opname_j,r);
+            }, py::arg("opname_i"),py::arg("p_i"),py::arg("opname_j"),py::arg("r"),
+               "<opname_i(p_i) opname_j(p_i+r)> of a converged sequential "
+               "multi-site (n_uc>2) vumps_ground_state, r in physical sites.")
         .def("vumps_ground_state",[](Chain& self, std::vector<PyTerm> const& terms_intra,
                                       std::vector<PyTerm> const& terms_inter,
-                                      int D, double tol, int maxiter, int nrestarts) {
+                                      int D, double tol, int maxiter, int nrestarts,
+                                      int niter_lanczos) {
                 auto out = self.vumps_ground_state(terms_from_python(terms_intra),
-                    terms_from_python(terms_inter),D,tol,maxiter,nrestarts);
+                    terms_from_python(terms_inter),D,tol,maxiter,nrestarts,niter_lanczos);
                 return py::make_tuple(out.e0,out.converged,out.niter_done,out.gauge_mismatch);
             }, py::arg("terms_intra"),py::arg("terms_inter"),
                py::arg("D"),py::arg("tol"),py::arg("maxiter"),py::arg("nrestarts")=4,
+               py::arg("niter_lanczos")=60,
                "VUMPS ground state (fixed bond dimension D, thermodynamic "
                "limit) -- this Chain must have been constructed with "
                "site_types = the n_uc-site unit cell, see "

@@ -28,6 +28,8 @@ leaving the energy itself correct -- see `pyitensor/idmrg.py`'s own
 Skipped automatically if mpscpp3 isn't compiled, exactly like
 `test_vumps_correlator_v3.py`'s own tests.
 """
+import warnings
+
 import numpy as np
 import pytest
 
@@ -296,3 +298,61 @@ def test_switching_gs_method_after_vumps_run_still_works():
     ic.gs_energy()
     ic.gs_method = "idmrg"
     assert ic.vev("Sz", 0) == pytest.approx(0.5, abs=1e-6)
+
+
+
+# == local_excitation_gap: the deflated excited solve ========================
+#
+# The excited state is the lowest eigenvalue of the stored 2-site effective
+# Hamiltonian restricted to its ground state's orthogonal complement. Writing
+# that as the bare projector P = I - |psi0><psi0| and diagonalizing P H P is
+# wrong: P H P also carries psi0 itself at eigenvalue exactly zero, so once
+# the operator's own ground eigenvalue is POSITIVE, zero is P H P's smallest
+# eigenvalue and is what the solver returns -- reporting a gap of -e0 rather
+# than a gap. See tests/test_idmrg_local_gap_deflation.py, which pins the
+# arithmetic down on a dense matrix of known spectrum; these two cover the
+# same fix through the compiled v3 backend, where the sign of that stored
+# energy cannot be dialled directly. Starving the growing loop's own local
+# Krylov dimension (ic.niter) reliably drives it positive.
+
+def _ssh_chain_with_niter(niter, maxm=12, maxiter=40):
+    ic = infinitechain.Infinite_Many_Body_Chain([0, 0], itensor_version=3)
+    ic.gs_method = "idmrg"
+    ic.maxm, ic.maxiter, ic.etol = maxm, maxiter, 1e-11
+    ic.niter = niter          # the growth loop's own local Arnoldi krylovdim
+    cdag = lambda g, i: ic.get_operator("Cdag", i, group=g)
+    c = lambda g, i: ic.get_operator("C", i, group=g)
+    h = (1.0 * (cdag("C", 0) * c("C", 1) + cdag("C", 1) * c("C", 0))
+         + 0.4 * (cdag("C", 1) * c("R", 0) + cdag("R", 0) * c("C", 1)))
+    ic.set_hamiltonian(h)
+    ic.gs_energy()
+    return ic
+
+
+def test_local_gap_survives_a_positive_stored_superblock_energy():
+    """The regime the old bare-projector deflation got wrong: it returned
+    -e0_stored, which is -2 to -17 on this starved run. The gap must instead
+    stay non-negative and on the model's own energy scale (bandwidth ~2.8;
+    the properly-converged value is ~0.63, and the starved run's own
+    superblock has a genuinely different one, so this brackets rather than
+    matches it)."""
+    ic = _ssh_chain_with_niter(niter=2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        gap = ic.local_excitation_gap()
+    _, _, e0_stored = ic._session3.idmrg_local_excitation_gap_detail(200)
+    assert e0_stored > 0.0                 # the trigger; -e0_stored was the old answer
+    assert 0.0 <= gap <= 2.0
+
+
+def test_local_gap_detail_agrees_with_growth_loop_when_solved_properly():
+    """The ordinary case: at the default krylovdim the growing loop does
+    find its own local ground state, the re-solve confirms it to solver
+    precision, and no warning is raised."""
+    ic = _ssh_chain_with_niter(niter=30)
+    gap, e0_fresh, e0_stored = ic._session3.idmrg_local_excitation_gap_detail(200)
+    assert e0_fresh == pytest.approx(e0_stored, abs=1e-8)
+    assert gap > 0.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")     # no RuntimeWarning may fire here
+        assert ic.local_excitation_gap() == pytest.approx(gap, rel=1e-3)

@@ -2598,6 +2598,66 @@ adjacent unit cells after \texttt{n\_uc}-grouping) is rejected with
 (\texttt{vumps\_ground\_state}'s own reach-1 check) rather than from the
 excitation machinery.
 
+\textbf{Unit cells of more than 2 sites.}
+\texttt{Infinite\_Many\_Body\_Chain([...])} accepts a cell of any length,
+and \texttt{gs\_method="vumps"} (the default) then runs the
+\textbf{sequential multi-site} algorithm --- the state is a list of
+per-site tensors \texttt{AL[n]}/\texttt{AR[n]}/\texttt{C[n]}, and one
+iteration sweeps the cell solving a one-site eigenproblem
+\texttt{H\_AC[n]} at each site and a zero-site \texttt{H\_C[n]} at each
+bond (\texttt{pyitensor/vumps\_ms.py}). Nothing is grouped, so the cost is
+\textbf{linear} in the cell size.
+
+That distinction is the whole point. The older way to support a multi-site
+cell is to fold it into one supersite of dimension $\prod_p d_p$ and run
+the single-site algorithm --- exact, but exponential: a 4-site spinful cell
+is $d_g = 256$. Nietner, Vanhecke, Verstraete, Eisert and Vanderstraeten
+(arXiv:2003.01142) state it directly --- ``the cost of a naive application
+of the VUMPS algorithm would scale exponentially with the size of the unit
+cell'' --- and give as their key property ``a computational effort that
+scales linearly rather than exponentially in the size of the unit cell''.
+The sequential algorithm is the one production codes implement (TeNPy's
+\texttt{SingleSiteVUMPSEngine}/\texttt{TwoSiteVUMPSEngine} sweep over the
+MPS unit cell; MPSKit likewise), and it originates with the multi-site
+VUMPS of Zauner-Stauber, Vanderstraeten, Fishman, Verstraete and Haegeman
+(PRB 97, 045145 (2018), arXiv:1701.07035).
+
+\texttt{vev} and \texttt{correlator} work at any \texttt{n\_uc}. Two things
+do not, and say so rather than failing obscurely:
+\texttt{gs\_method="idmrg"} still requires \texttt{n\_uc <= 2} (its growth
+loop pairs sublattice $m$ with $n_{uc}-1-m$, which are only genuinely
+adjacent for \texttt{n\_uc <= 2}), and so do
+\texttt{excitation\_energies}/\texttt{excitation\_gap}, whose tangent-space
+ansatz is still written against the grouped single-supersite gauge.
+\texttt{n\_uc <= 2} keeps using the grouped VUMPS path, so its values are
+unchanged; the two agree to machine precision where both apply.
+
+\textbf{Product-state traps, and the noise that breaks them.} Every
+particle-number-conserving Hamiltonian has the vacuum (and the filled state)
+as an \emph{exact} eigenstate, and an exact eigenstate is an absorbing fixed
+point of the growing algorithm: the local solve warm-started there returns it
+immediately, its Schmidt rank is 1, so every subsequent truncation keeps a
+single singular value and nothing grows the bond dimension back. The run then
+reports a product state with \texttt{converged=True} in a fraction of a
+second --- a silently wrong ground state, not a visible failure. Both
+backends do this; it is a property of the algorithm, not of either port.
+
+\texttt{ic.noise} (default \texttt{1e-4}) applies White's density-matrix
+perturbation to break it, together with a matching random admixture on the
+local solve's start vector --- both halves are needed, since enlarging the
+basis alone leaves the solve pinned to an exact eigenvector it cannot leave.
+The schedule is \textbf{demand-driven}: noise arms only while the state
+genuinely is a product state (keyed on the purity of the noise-free reduced
+state) and runs a few iterations past that, so an already-entangled model
+never sees it and is bit-for-bit unaffected. \texttt{ic.noise\_iters}
+(default 40) caps the total, so a model whose ground state genuinely
+\emph{is} a product state --- a field-polarized chain --- stops re-arming it
+and still ends on a clean tail; such models come back exact. Convergence is
+never declared while noise is active. Set \texttt{ic.noise = 0} to disable
+the mechanism entirely and recover the previous numerics exactly. See
+\texttt{docs/known\_issue\_idmrg\_product\_state\_collapse.md} for the
+measured before/after against an exact band integral.
+
 \textbf{A cheaper, cruder alternative: the local superblock gap.}
 \texttt{ic.local\_excitation\_gap(niter=200)} re-diagonalizes the growing
 algorithm's own final, converged 2-site effective Hamiltonian -- already
@@ -2637,7 +2697,63 @@ extrapolated ED gap (see
 handles any \texttt{D}, see above); \texttt{local\_excitation\_gap}
 remains useful as a cheap, order-of-magnitude cross-check, or when
 \texttt{gs\_method="idmrg"} is what's already been run for other reasons
-(\texttt{vev}/\texttt{correlator}).
+(\texttt{vev}/\texttt{correlator}). \textbf{Both of those calibrations were
+measured on spin models}, where the charge channel described below does not
+exist at all; on a fermionic model with \texttt{ConserveQNs=false} there is
+no reason those error bars carry over, and the estimate should be
+cross-checked against a finite chain, the correlator decay, or an $n(\mu)$
+plateau before it is relied on.
+
+\textbf{Why the excited solve shifts rather than only projects.} The second
+eigenvalue is the lowest one of the \emph{same} stored operator restricted
+to its ground state's orthogonal complement. Writing that as the bare
+projector $P = I - |\psi_0\rangle\langle\psi_0|$ and diagonalizing $PHP$ is
+wrong, and used to make this method return large \textbf{negative} ``gaps'':
+$PHP$ agrees with $H$ on the complement, but it also carries $\psi_0$ itself
+as an eigenvector with eigenvalue \emph{exactly zero}. That is harmless only
+while the rest of the spectrum lies below zero --- the moment the stored
+operator's own ground eigenvalue is \textbf{positive}, zero becomes $PHP$'s
+smallest eigenvalue and is exactly what a smallest-eigenvalue solver is
+asked to find (deflation keeps $\psi_0$ out of the Krylov space in exact
+arithmetic only; rounding regrows the component and a restarted solver locks
+onto it). The reported gap is then $0 - e_0$, i.e.\ precisely minus the
+stored superblock energy --- reported from a spinful (c,f) Kondo chain at
+\texttt{maxm=16} as $-358.003$ meV against a stored energy of
+$+0.358002587681$, digit for digit. The sign of that stored energy is
+nobody's choice: the per-site energy baseline leaves it as a small residual
+boundary term of either sign, which is why the same model was right at
+\texttt{maxm=8} (energy $-1.05$, negative) and wrong at \texttt{maxm=16}.
+Both backends now use $PHP + \sigma|\psi_0\rangle\langle\psi_0|$ with
+$\sigma$ far above the bottom of the spectrum, so $\psi_0$'s own eigenvalue
+can never be the answer while the complement is untouched. Both eigenvalues
+are also re-solved from the stored superblock at the same solver strength
+rather than the ground one being read back from the growing algorithm, and
+if the re-solve lands \emph{below} the growing algorithm's own value a
+\texttt{RuntimeWarning} is raised --- the returned number is then still a
+genuine spectral gap of the stored operator, but no longer a gap measured
+above the state whose observables \texttt{vev}/\texttt{correlator} report.
+
+\textbf{Charge excitations, and why a uniform on-site shift moves this
+number.} Both backends build every site with \texttt{ConserveQNs=false}
+(\texttt{mpscpp3/get\_sites.h}; \texttt{pyitensor} likewise), so the local
+superblock spectrum contains particle-number-\emph{changing} excitations
+against the frozen environment, with nothing to confine the deflated solve
+to the ground state's own charge sector. On a fermionic model the gap can
+therefore be set by a charge excitation --- and adding a constant
+\texttt{mu} to every on-site energy, which in a gapped plateau leaves the
+converged state and all its correlators untouched, genuinely changes the
+answer. Measured exactly (by dense diagonalization of the stored
+superblock) on a gapped SSH spinless-fermion chain at \texttt{maxm=16}: the
+gap is 0.631321 at \texttt{mu=0} and 0.431325 / 0.431324 at
+\texttt{mu=$\pm$0.2}, i.e.\ exactly $|\mathtt{mu}|$ lower, because the two
+$\pm 1$-electron excitations that are degenerate at \texttt{mu=0} split;
+the stored ground vector is the exact ground state at every point (overlap
+1.0000), so no solver is at fault. This is a property of the estimator, not
+a defect to fix: ``the lowest state orthogonal to the ground state'' simply
+is not a fixed-charge quantity here. Read it as an order-of-magnitude
+cross-check, and cross-check a fermionic gap against a finite-chain
+calculation, the correlator decay, or an $n(\mu)$ plateau before relying on
+it.
 
 \textbf{Tightening it further: \texttt{window=}.}
 \texttt{ic.local\_excitation\_gap(window=w, niter=200)} (default
@@ -2650,9 +2766,10 @@ spread across more of the chain instead of only ever living on the same
 frozen 2 sites, at the cost of an exponentially larger local Hilbert space
 (\texttt{d**(2*w)} more, \texttt{d} = the physical dimension). This is
 \emph{not} the same thing as throwing more Krylov vectors at the original
-2-site problem -- \texttt{local\_excitation\_gap} already solves that one
-exactly via deflated Lanczos, so more iterations there cannot change the
-answer. Measured directly: on the field-polarized XX chain the error drops
+2-site problem -- \texttt{local\_excitation\_gap} solves that one to Krylov
+convergence already, so more iterations there do not change the answer
+(with the caveat above that the \emph{ground} eigenvalue it deflates
+against must be the right one, which is why both are re-solved together). Measured directly: on the field-polarized XX chain the error drops
 from 10\% at \texttt{w=0} to 3.8\%/2.0\%/0.81\%/0.44\% at
 \texttt{w=1/2/4/6}; on a gapped, genuinely entangled (\texttt{D>1})
 transverse-field Ising chain, \texttt{w=3} (an 8-site local block) matches

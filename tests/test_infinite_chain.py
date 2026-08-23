@@ -237,9 +237,19 @@ def test_n_uc2_skip_site_coupling_via_R_suffix():
     assert e0 < 0
 
 
-def test_n_uc_above_2_not_implemented():
+def test_n_uc_above_2_is_constructible_and_idmrg_still_rejects_it():
+    """Construction no longer rejects a big cell: gs_method="vumps" (the
+    default) handles any n_uc via the sequential multi-site algorithm. The
+    restriction now lives with the algorithm that actually has it -- the
+    growing algorithm's micro-step pairing, which is only adjacent for
+    n_uc<=2 -- so gs_method="idmrg" must still refuse."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2", "1/2"])
+    assert ic.n_uc == 3
+    ic.gs_method = "idmrg"
+    ic.set_hamiltonian(ic.SzC[0] * ic.SzC[1] + ic.SzC[1] * ic.SzC[2]
+                        + ic.SzC[2] * ic.SzR[0])
     with pytest.raises(NotImplementedError):
-        infinitechain.Infinite_Spin_Chain(["1/2", "1/2", "1/2"])
+        ic.gs_energy()
 
 
 def test_itensor_version_other_than_python_or_3_not_implemented():

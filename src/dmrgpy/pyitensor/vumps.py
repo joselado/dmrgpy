@@ -635,6 +635,35 @@ class VUMPSResult:
         self.gauge_mismatch = gauge_mismatch
 
 
+def _multisite_ground_state(sites_uc, W_bulk, n_uc, D, tol, maxiter,
+                             niter_lanczos, nrestarts, verbose):
+    """`vumps_ground_state` for a cell too big to group: run
+    `vumps_ms.ground_state` and wrap its result in the same `VUMPSResult`
+    the grouped path returns.
+
+    The grouped fields (`d_g`, the single `AL`/`AR`/`C`/`AC`, the grouped
+    `W`) have no single-tensor meaning here -- the state IS a list of
+    per-site tensors -- so they are filled with the per-site lists and
+    `d_g` reports the product it *would* have had. Consumers that need the
+    grouped form (`idmrg_excitations`' tangent-space ansatz, which builds
+    on a single supersite) therefore have to be taught the multi-site form
+    before they can be used at n_uc>2; `excitation_energies` raises for
+    that case rather than silently reading a list as a tensor."""
+    from . import vumps_ms
+    W_list = [W_bulk[p].array for p in range(n_uc)]
+    dims = [sites_uc.dim(p + 1) for p in range(n_uc)]
+    out = vumps_ms.ground_state(W_list, dims, D, tol=tol, maxiter=maxiter,
+                                 niter_lanczos=niter_lanczos,
+                                 nrestarts=nrestarts, verbose=verbose)
+    d_g = int(np.prod(dims))
+    res = VUMPSResult(sites_uc, n_uc, D, d_g, out["AL"], out["AR"], out["C"],
+                       out["AC"], out["GL"], out["GR"], W_list,
+                       out["e_cell"], out["converged"], out["niter"],
+                       out["mismatch"])
+    res.multisite = True
+    return res
+
+
 def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
                         tol=1e-10, maxiter=800, niter_lanczos=30,
                         nrestarts=4, verbose=False):
@@ -677,17 +706,26 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
     cross-check by increasing `nrestarts` and/or `D` and confirming the
     reported `e0` stops changing, the same convergence discipline
     idmrg_ground_state's own `maxm`/`etol` already require."""
-    if n_uc > 2:
-        raise NotImplementedError(
-            "vumps_ground_state: n_uc>2 (got {}) is not supported yet -- "
-            "see this module's own docstring / idmrg.py's module "
-            "docstring for the same n_uc<=2 restriction there".format(n_uc))
     if D < 1:
         raise ValueError("vumps_ground_state: D must be >= 1, got {}".format(D))
     if nrestarts < 1:
         raise ValueError("vumps_ground_state: nrestarts must be >= 1, got {}".format(nrestarts))
 
     sites_uc, W_bulk = idmrg._build_automaton(h_intra_op, h_inter_op, site_types, n_uc)
+
+    # n_uc > 2 goes to the sequential multi-site algorithm, which never
+    # groups the cell and so costs LINEARLY rather than exponentially in
+    # n_uc (see pyitensor/vumps_ms.py's own module docstring, and
+    # arXiv:2003.01142 for why the grouped route is the wrong one to scale
+    # up). n_uc <= 2 stays on the grouped path below purely so the values
+    # this module has been validated against do not move; the two agree to
+    # machine precision where both apply, which is what
+    # tests/test_vumps_multisite.py checks.
+    if n_uc > 2:
+        return _multisite_ground_state(
+            sites_uc, W_bulk, n_uc, D, tol, maxiter, niter_lanczos,
+            nrestarts, verbose)
+
     W = _group_automaton(W_bulk, n_uc)
     idmrg_exc._check_reach_one(W)
     d_g = int(np.prod([sites_uc.dim(p + 1) for p in range(n_uc)]))
@@ -914,6 +952,9 @@ def onsite_expectation(result, opname, p):
     if not (0 <= p < result.n_uc):
         raise ValueError("onsite_expectation: p must be in 0..{} (n_uc-1), "
                           "got {!r}".format(result.n_uc - 1, p))
+    if getattr(result, "multisite", False):
+        from . import vumps_ms
+        return vumps_ms.onsite_expectation(result.AC, result.sites_uc, opname, p)
     M = _embed_group_operator(
         result.sites_uc, result.n_uc,
         {p: result.sites_uc.site_type(p + 1).matrix(opname)})
@@ -958,6 +999,11 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     if not (0 <= p_i < n_uc):
         raise ValueError("two_point_correlator: p_i must be in 0..{} "
                           "(n_uc-1), got {!r}".format(n_uc - 1, p_i))
+    if getattr(result, "multisite", False):
+        from . import vumps_ms
+        return vumps_ms.two_point_correlator(
+            result.AC, result.AR, result.sites_uc, n_uc,
+            opname_i, p_i, opname_j, r)
     sites_uc = result.sites_uc
     AC = result.AC
     AR = result.AR

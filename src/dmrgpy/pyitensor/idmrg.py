@@ -185,7 +185,7 @@ from .dmrg import _lanczos_ground_state
 from .index import Index
 from .sites import SiteX
 from .sites.base import is_fermionic
-from .svd import _truncate, svd
+from .svd import _truncate, eigh_truncate, svd
 from .tensor import ITensor, contract_many, dag
 from .tensor import noPrime as _t_noPrime
 from .tensor import prime as _t_prime
@@ -913,9 +913,139 @@ def _subtract_energy_baseline(env, mpo_idx, dst_chan, src_chan, shift):
     return ITensor(env.inds, arr)
 
 
+def _replace_ind(T, old, new):
+    """T with Index `old` swapped for `new` (same dimension) -- the data is
+    untouched, only the label. pyitensor has no `replaceInds`, and the
+    growing environments genuinely need one: HL's bra leg is minted with
+    its own identity rather than as prime() of its ket leg (see
+    `idmrg_ground_state`), so unpriming alone never reconciles the two."""
+    return ITensor(tuple(new if ind == old else ind for ind in T.inds), T.array)
+
+
+def _noise_perturbed_split(theta, left_inds, right_inds, cutoff, maxdim,
+                            noise, HL, HL_bra, HL_ket, W_pL,
+                            HR, HR_bra, HR_ket, W_pR):
+    """White's density-matrix perturbation applied to this micro-step's own
+    two-site wavefunction: the drop-in replacement for `svd(theta, ...)`
+    whenever `noise > 0`.
+
+    WHY THIS EXISTS. Every particle-number-conserving Hamiltonian has the
+    vacuum (and the filled state) as an EXACT eigenstate, and an exact
+    eigenstate is an absorbing fixed point of this growth loop: the local
+    solve warm-started there returns it immediately (Lanczos hits happy
+    breakdown on an exact eigenvector), its Schmidt rank is 1, so every
+    subsequent SVD has a single nonzero singular value and nothing can grow
+    the bond dimension back. The loop then "converges" -- the energy-density
+    finite difference between consecutive macro-iterations is identically 0,
+    so `etol` trips at the first opportunity -- and reports a product state
+    with `converged=True`, in a fraction of a second. Confirmed on a
+    dimerized spinless-fermion chain at a uniform mu = +1.25 (`t1=1.0`,
+    `t2=0.4`), where the exact band integral gives `e/site = -0.01648450` at
+    `n/site = 0.166092` and BOTH backends instead returned exactly zero, 6
+    runs out of 6, in 0.0 s. Reported from a Kondo-chain calculation as a
+    silently wrong ground state at large |mu|; see
+    docs/known_issue_idmrg_product_state_collapse.md.
+
+    THE MECHANISM OF THE CURE. Note the trap survives more Lanczos
+    iterations, a tighter `etol`, and more macro-iterations, because the
+    state is an exact eigenvector rather than an unconverged one -- nothing
+    that refines the *solve* can help. What breaks it has to enlarge the
+    BASIS. White's noise term does exactly that, and crucially it does so
+    even at an exact eigenvector: it is built from the individual MPO
+    channel components `W^a|theta>`, not from `H|theta>`. `H|theta>` is
+    parallel to `|theta>` here and would open no new direction at all, but
+    the separate channels are not -- a channel that creates a particle takes
+    the vacuum to a one-particle state, a genuinely new basis direction. The
+    density matrix then has weight outside the old support, the bond
+    dimension grows, and the next micro-step is no longer sitting on an
+    exact eigenvector.
+
+    CONSTRUCTION. Mirrors ITensor's own `LocalOp::deltaRho`
+    (mpscpp3/ITensor/itensor/mps/localop.h), including its Hermitization and
+    trace normalization, but for BOTH directions rather than the one a
+    finite sweep needs: this loop extends `HL` and `HR` in the same
+    micro-step, so `U` and `V` come from two independently perturbed density
+    matrices,
+
+        rho_L = tr_R|theta><theta| + noise * (HL.theta.W_pL)(...)^dag
+        rho_R = tr_L|theta><theta| + noise * (HR.theta.W_pR)(...)^dag
+
+    with the MPO's own crossing index left OPEN in each noise term, so
+    contracting it is precisely White's sum over channels. `U` and `V` are
+    therefore no longer an SVD pair of `theta` -- but nothing here needs
+    them to be: `_extend_HL`/`_extend_HR` each transform through one factor
+    alone (see `_local_two_site_solve`'s own comment on why S is discarded),
+    and the two bonds have always been independent.
+
+    Returns `(U, S, V, purity)` -- the first three with the same shapes
+    `svd()` returns, `S` carrying
+    sqrt of the retained (trace-normalized) eigenvalues of `rho_L` -- these
+    are the exact Schmidt values in the `noise -> 0` limit, and are
+    deliberately NONZERO on the newly opened directions so that a later
+    wavefunction prediction cannot re-pin the state to the old subspace."""
+    ldim = int(np.prod([ind.dim for ind in left_inds], dtype=int))
+    rdim = int(np.prod([ind.dim for ind in right_inds], dtype=int))
+    mat = theta.transpose_to(list(left_inds) + list(right_inds)).reshape(ldim, rdim)
+
+    def _perturbation(env, env_bra, env_ket, W, group_inds, gdim):
+        """The trace-normalized noise density matrix for one side, or None
+        if that side has no environment yet (the very first micro-steps)."""
+        if W is None:
+            return None
+        t = theta
+        if env is not None:
+            t = t * env
+            t = _replace_ind(t, env_bra, env_ket)
+        t = _t_noPrime(t * W)
+        gset = set(group_inds)
+        rest = [ind for ind in t.inds if ind not in gset]
+        arr = t.transpose_to(list(group_inds) + rest).reshape(gdim, -1)
+        drho = arr @ arr.conj().T
+        drho = (drho + drho.conj().T) / 2.0        # Hermitize, as deltaRho does
+        tr = float(np.real(np.trace(drho)))
+        return drho / tr if tr > 1e-16 else None
+
+    def _side(group_inds, gdim, base, env, env_bra, env_ket, W):
+        rho = base / max(float(np.real(np.trace(base))), 1e-300)
+        drho = _perturbation(env, env_bra, env_ket, W, group_inds, gdim)
+        if drho is not None:
+            rho = rho + noise * drho
+        return eigh_truncate(rho, cutoff, maxdim)
+
+    rho_free = mat @ mat.conj().T
+    rho_free = rho_free / max(float(np.real(np.trace(rho_free))), 1e-300)
+    # Purity of the NOISE-FREE reduced state: 1 exactly for a product state,
+    # strictly less for any entangled one. This, not the enriched basis, is
+    # what the schedule keys on -- see `idmrg_ground_state`.
+    purity = float(np.real(np.trace(rho_free @ rho_free)))
+    Uk, keep_l = _side(left_inds, ldim, mat @ mat.conj().T,
+                        HL, HL_bra, HL_ket, W_pL)
+    Vk, keep_r = _side(right_inds, rdim, mat.conj().T @ mat,
+                        HR, HR_bra, HR_ket, W_pR)
+
+    bond_u = Index(keep_l, tags="Link")
+    bond_v = Index(keep_r, tags="Link")
+    U = ITensor(tuple(left_inds) + (bond_u,),
+                 Uk.reshape(tuple(ind.dim for ind in left_inds) + (keep_l,)))
+    V = ITensor((bond_v,) + tuple(right_inds),
+                 Vk.conj().T.reshape((keep_r,) + tuple(ind.dim for ind in right_inds)))
+    # The spectrum reported alongside: sqrt of rho_L's own retained
+    # eigenvalues (see this function's docstring). Recomputed rather than
+    # returned by eigh_truncate so the two stay independent.
+    rho_l = mat @ mat.conj().T
+    rho_l = rho_l / max(float(np.real(np.trace(rho_l))), 1e-300)
+    svals = np.sqrt(np.clip(np.real(np.diag(Uk.conj().T @ rho_l @ Uk)), 0.0, None))
+    n_s = min(keep_l, keep_r)
+    S = ITensor((bond_u, bond_v), np.diag(svals[:n_s].astype(complex))
+                if keep_l == keep_r else
+                np.pad(np.diag(svals[:n_s].astype(complex)),
+                       ((0, keep_l - n_s), (0, keep_r - n_s))))
+    return U, S, V, purity
+
+
 def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
                            W_pR, phys_R, HR, HR_bra, HR_ket,
-                           cutoff, maxdim, niter, x0_warm=None):
+                           cutoff, maxdim, niter, x0_warm=None, noise=0.0):
     """One micro-step's local ground-state solve: the effective 2-site
     Hamiltonian sandwiched by (HL, W_pL, W_pR, HR), diagonalized via the
     same matvec+Lanczos machinery as dmrg.py's own two_site_heff/
@@ -993,6 +1123,29 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
         if v0 is None:
             rng = np.random.default_rng()
             v0 = rng.standard_normal(dim) + 1j * rng.standard_normal(dim)
+        elif noise > 0.0:
+            # Perturbing the START VECTOR is the other half of the noise,
+            # and on this failure mode it is the half that actually does the
+            # work. Enlarging the basis (the density-matrix term in
+            # _noise_perturbed_split) is necessary but NOT sufficient: a
+            # product state like the vacuum is an exact eigenstate of the
+            # full Hamiltonian, so it stays an exact eigenvector of the
+            # local effective Hamiltonian in ANY basis, however enriched --
+            # and Lanczos started exactly on an eigenvector hits happy
+            # breakdown on its first step and hands the same vector back.
+            # Measured directly: with only the density-matrix term, chi does
+            # grow away from 1, and the state still never moves (energy
+            # identically 0 for all 30 macro-iterations on the trapped
+            # model). A small random admixture breaks the pinning, and the
+            # solve is then free to find the lower state the enriched basis
+            # has just made reachable. Scaled by sqrt(noise) so the
+            # perturbation's WEIGHT is O(noise), matching the density-matrix
+            # term's own convention.
+            rng = np.random.default_rng()
+            kick = rng.standard_normal(dim) + 1j * rng.standard_normal(dim)
+            kick /= np.linalg.norm(kick)
+            v0 = v0 + np.sqrt(noise) * kick
+            v0 /= np.linalg.norm(v0)
         # Same niter floor as dmrg.py's _local_ground_state -- flagged there
         # as load-bearing (dropping it caused real, measured convergence
         # regressions); still applied here even with a warm start, since a
@@ -1003,7 +1156,26 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     left_inds = ([HL_ket] if HL_ket is not None else []) + [phys_L]
-    U, S, V, spec = svd(theta, left_inds, cutoff=cutoff, maxdim=maxdim)
+    if noise > 0.0:
+        # White's density-matrix perturbation instead of a plain SVD -- the
+        # only thing that can enlarge the basis when theta is an exact
+        # eigenvector of the local effective Hamiltonian. See
+        # _noise_perturbed_split's own docstring for the failure it exists
+        # to break (a product state the growth loop cannot leave) and why
+        # refining the *solve* cannot break it. noise == 0.0 keeps the
+        # original svd() path untouched, bit for bit.
+        right_inds = [ind for ind in order_in if ind not in set(left_inds)]
+        U, S, V, purity = _noise_perturbed_split(
+            theta, left_inds, right_inds, cutoff, maxdim, noise,
+            HL, HL_bra, HL_ket, W_pL, HR, HR_bra, HR_ket, W_pR)
+    else:
+        U, S, V, spec = svd(theta, left_inds, cutoff=cutoff, maxdim=maxdim)
+        # Same purity the noisy branch reports, read off the Schmidt weights
+        # the SVD already produced (`Spectrum.eigs()`, normalized against the
+        # pre-truncation total): 1 exactly for a product state.
+        w = np.asarray(spec.eigs(), dtype=float)
+        tot = float(w.sum())
+        purity = float((w ** 2).sum() / tot ** 2) if tot > 0 else 1.0
     # U and V are used *without* S: HL/HR are block operators built by a
     # similarity transform through U (or V) alone -- <dag(U)|W_p|U>, in
     # _extend_HL/_extend_HR -- exactly mirroring White's original
@@ -1023,7 +1195,7 @@ def _local_two_site_solve(HL, HL_bra, HL_ket, W_pL, phys_L,
     # of a simple test case, and using plain U/V (this function's current
     # form) restores both exact agreement with independent ED at small
     # sizes and strict monotonicity at every iteration checked.
-    return float(eval0.real), U, S, V, evec0
+    return float(eval0.real), U, S, V, evec0, purity
 
 
 class IDMRGResult:
@@ -1108,9 +1280,34 @@ class IDMRGResult:
             window_boundary if window_boundary is not None else (None,) * 8)
 
 
+# White noise: how strong, and for how many macro-iterations. See
+# `_noise_perturbed_split`'s docstring for the failure this exists to break
+# and why nothing that refines the local *solve* can break it instead.
+#
+# The schedule matters as much as the noise. Noise must be OFF well before
+# the run ends, for two independent reasons: the returned unit cell and its
+# Schmidt values are re-seeded every macro-iteration, so a clean tail is
+# what keeps `<H_uc> = n_uc*e0` and the vev/correlator gauge exact; and a
+# perturbed state must never be what `etol` declares converged. Hence the
+# convergence test is suppressed entirely while noise is active -- which
+# also removes the "converged=True in 0 s" pathology by construction, since
+# no run can now finish in fewer than `_NOISE_ITERS + 2` macro-iterations.
+#
+# 1e-4 is the usual DMRG starting magnitude and is far above anything the
+# `cutoff` would discard, while being small enough that the perturbed
+# energies stay in the right basin; 8 iterations is enough for the bond
+# dimension to escape 1 and start growing on its own (measured: chi reaches
+# the maxdim cap within 3-4 iterations of noise on the trapped model), and
+# short enough to be a small fraction of a normal run's `maxiter`.
+_NOISE_DEFAULT = 1e-4
+_NOISE_ITERS = 40
+_NOISE_TAIL = 6
+
+
 def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
                         cutoff=1e-12, maxiter=200, etol=1e-10, niter=30,
-                        verbose=False):
+                        verbose=False, noise=_NOISE_DEFAULT,
+                        noise_iters=_NOISE_ITERS):
     """Run the growing/infinite-size DMRG algorithm to convergence (or
     `maxiter` macro-iterations) for a unit cell of `n_uc` sites (type codes
     `site_types`) and Hamiltonian given by `h_intra_op`/`h_inter_op` (plain
@@ -1212,8 +1409,18 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
     # IDMRGResult's own docstring.
     env_window_boundary = (None,) * 8
 
+    # Noise is capped well short of maxiter so a short run still gets a
+    # clean tail: a caller who asks for maxiter=10 must not spend 8 of them
+    # perturbed and then report whatever the last one happened to be.
+    noise_iters_eff = min(noise_iters, max(0, maxiter - 2))
+    noise_left, noise_spent = 0, 0
     for macro_iter in range(maxiter):
+        noise_now = (noise if (noise_left > 0 and noise_spent < noise_iters_eff)
+                     else 0.0)
+        if noise_now > 0.0:
+            noise_spent += 1
         env_window_boundary = (HL, HL_bra, HL_ket, HL_mpo, HR, HR_bra, HR_ket, HR_mpo)
+        product_this_iter = True
         overlaps_this_iter = []
         for mstep in range(n_uc):
             p_L = mstep
@@ -1271,11 +1478,11 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
             if x0 is None:
                 x0 = prev_local[mstep]
 
-            energy, U, S, V, evec0 = _local_two_site_solve(
+            energy, U, S, V, evec0, purity = _local_two_site_solve(
                 HL, HL_bra, HL_ket, W_pL, phys_L,
                 W_pR, phys_R, HR, HR_bra, HR_ket,
                 cutoff=cutoff, maxdim=maxm, niter=niter,
-                x0_warm=x0)
+                x0_warm=x0, noise=noise_now)
             last_superblock = dict(
                 HL=HL, HL_bra=HL_bra, HL_ket=HL_ket,
                 W_pL=W_pL, phys_L=phys_L,
@@ -1295,6 +1502,9 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
                 if denom > 0:
                     overlaps_this_iter.append(abs(np.vdot(x0, evec0)) / denom)
             prev_local[mstep] = evec0
+            # A product state at ANY micro-step is enough to keep the noise
+            # on: that is the trap (see _noise_perturbed_split).
+            product_this_iter = product_this_iter and purity > 1.0 - 1e-10
 
             left_ket_old, right_ket_old = HL_ket, HR_ket
             new_bond_u, new_bond_v = U.inds[-1], V.inds[0]
@@ -1356,7 +1566,17 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
         if verbose:
             print("idmrg macro-iter {}: E={} density={} state_overlap={}".format(
                 macro_iter, energy, density, state_overlap))
+        # Demand-driven schedule: arm the noise whenever the state is still
+        # a product state, and let it run for `_NOISE_TAIL` further
+        # macro-iterations after that clears, so it does not switch off the
+        # instant the basis opens and let the state fall straight back.
+        if product_this_iter:
+            noise_left = _NOISE_TAIL
+        elif noise_left > 0:
+            noise_left -= 1
+
         if (density is not None and prev_density is not None
+                and noise_now == 0.0
                 and abs(density - prev_density) < etol):
             prev_energy, prev_density = energy, density
             converged = True
@@ -1386,7 +1606,107 @@ def idmrg_ground_state(site_types, h_intra_op, h_inter_op, n_uc, maxm=30,
                         cell_list=cell_list, cell_raw=cell_raw)
 
 
-def local_excitation_gap(result, niter=200):
+def _lowest_two_eigenvalues(matvec, psi0_stored, dim, niter):
+    """The two lowest eigenvalues of one Hermitian operator, given as a
+    matvec plus a candidate ground vector -- the whole of what
+    `local_excitation_gap` needs, factored out so it can be unit-tested
+    against a dense matrix of known spectrum (see
+    `tests/test_idmrg_local_gap_deflation.py`).
+
+    BOTH eigenvalues are solved for here, at the same solver strength.
+    The ground one is deliberately NOT taken from the caller's stored value
+    even when there is one: the growing algorithm warm-starts every
+    micro-step from McCulloch's prediction and stops on a *relative*
+    Ritz-value criterion, which bounds the distance to *some* eigenvalue
+    rather than to the lowest one, so mixing its number with a strong
+    random-started solve here is not a difference of two eigenvalues of one
+    operator. (That is a separate matter from the deflation shift below,
+    which is what actually caused the reported negative gaps.) The warm
+    start is still tried (nearly free -- a Krylov space grown from a
+    near-exact eigenvector converges immediately) and kept only if it
+    wins.
+
+    The excited one is the lowest eigenvalue of the operator restricted to
+    the ground state's orthogonal complement. The obvious way to write that
+    -- the bare projector `P = I - |psi0><psi0|` and the operator `P H P`
+    -- is WRONG, and was the actual cause of the large negative gaps this
+    module used to return. `P H P` is Hermitian and does agree with `H` on
+    the complement, but it also carries `psi0` itself as an eigenvector
+    with eigenvalue exactly ZERO. That extra eigenvalue is harmless only
+    while the rest of the spectrum lies below it; the moment the operator's
+    own ground eigenvalue is POSITIVE, 0 becomes the smallest eigenvalue of
+    `P H P` and is exactly what a smallest-eigenvalue solver is asked to
+    find. Deflation keeps `psi0` out of the Krylov space in exact
+    arithmetic only -- rounding regrows the component every iteration, and
+    the solver then locks onto it, returning `0` with `|<psi0|v>|**2 = 1`.
+    The reported "gap" is then `0 - e0`, i.e. exactly minus the stored
+    superblock energy: confirmed on the ITensor v3 C++ port of this same
+    function, where a spinful Kondo chain at `maxm=16` returned
+    -358.003 meV against a stored energy of +0.358002587681, digit for
+    digit. Whether that energy is positive is nobody's choice --
+    `_subtract_energy_baseline` leaves it as a small residual boundary term
+    of either sign, which is why this struck one model at `maxm=16` and not
+    the same model at `maxm=8` (energy -1.05, negative, correct answer).
+
+    The fix is to SHIFT rather than merely project: send `psi0`'s own
+    eigenvalue to `sigma`, far above the bottom of the spectrum, so it can
+    never be the answer, while leaving the complement untouched.
+    `A = P H P + sigma |psi0><psi0|` is still Hermitian, still agrees with
+    `H` on the complement, and its smallest eigenvalue now IS the first
+    excited state.
+
+    Returns `(e0, e1)`, both real."""
+    rng = np.random.default_rng()
+    psi0 = psi0_stored / np.linalg.norm(psi0_stored)
+    e0_c, v_warm = _lanczos_ground_state(matvec, psi0, niter=niter)
+    e0 = float(np.real(e0_c))
+    e0_r, v_rand = _lanczos_ground_state(
+        matvec, rng.standard_normal(dim) + 1j * rng.standard_normal(dim),
+        niter=niter)
+    if float(np.real(e0_r)) < e0:
+        e0, v_warm = float(np.real(e0_r)), v_rand
+    psi0 = v_warm / np.linalg.norm(v_warm)
+    sigma = e0 + 10.0 * (1.0 + abs(e0))
+
+    def deflate(v):
+        return v - psi0 * np.vdot(psi0, v)
+
+    def deflated_matvec(v):
+        c = np.vdot(psi0, v)
+        return deflate(matvec(v - psi0 * c)) + (sigma * c) * psi0
+
+    # Two safety nets on top of the shift, both no-ops in the ordinary
+    # case. (1) If the solve still comes back sitting on psi0, sigma was
+    # not far enough above the spectrum -- push it up and retry. (2) If it
+    # comes back BELOW the ground eigenvalue accepted above, then that
+    # ground solve, not this one, was the one that missed: promote the
+    # lower state and re-deflate against it. Each promotion strictly lowers
+    # e0, so this terminates; the spurious psi0 mode can no longer be
+    # promoted, since the shift put its eigenvalue at sigma.
+    e1 = e0
+    for _round in range(4):
+        v0 = deflate(rng.standard_normal(dim) + 1j * rng.standard_normal(dim))
+        e1_c, v1 = _lanczos_ground_state(deflated_matvec, v0, niter=niter)
+        e1 = float(np.real(e1_c))
+        nv = np.linalg.norm(v1)
+        # A zero-norm eigenvector means the solver gave up without producing
+        # one; there is nothing to promote or test against, so keep the
+        # value it did return rather than deflating against a zero vector.
+        if nv <= 0.0:
+            break
+        v1 = v1 / nv
+        if abs(np.vdot(psi0, v1)) ** 2 > 0.5:
+            sigma = e0 + 100.0 * (sigma - e0)
+            continue
+        if e1 >= e0 - 1e-10 * (1.0 + abs(e0)):
+            break
+        e0 = e1
+        psi0 = v1
+        sigma = e0 + 10.0 * (1.0 + abs(e0))
+    return e0, e1
+
+
+def local_excitation_gap(result, niter=200, detail=False):
     """A cheap, cruder alternative to idmrg_excitations.excitation_energies/
     excitation_gap: the "local superblock gap" -- re-diagonalize the *same*
     2-site effective Hamiltonian the growing algorithm already solved for
@@ -1431,7 +1751,13 @@ def local_excitation_gap(result, niter=200):
 
     Returns a single float: the second-lowest local eigenvalue minus the
     ground-state eigenvalue (both real by Hermiticity of the local
-    effective Hamiltonian)."""
+    effective Hamiltonian). With `detail=True`, returns the triple
+    `(gap, e0_fresh, e0_stored)` instead -- `e0_fresh` is the ground
+    eigenvalue re-solved here and `e0_stored` the one the growing
+    algorithm's own final micro-step reported; infinitechain.py compares
+    them and warns when they disagree (see
+    `_warn_if_growth_missed_local_ground_state` there, and the comment on
+    the re-solve below)."""
     sb = result.local_superblock
     if sb is None:
         raise RuntimeError(
@@ -1442,7 +1768,8 @@ def local_excitation_gap(result, niter=200):
     W_pL, phys_L = sb["W_pL"], sb["phys_L"]
     W_pR, phys_R = sb["W_pR"], sb["phys_R"]
     HR, HR_bra, HR_ket = sb["HR"], sb["HR_bra"], sb["HR_ket"]
-    evec0, e0 = sb["evec0"], sb["energy"]
+    evec0, e0_stored = sb["evec0"], sb["energy"]
+    e0 = e0_stored
 
     order_in = ([HL_ket] if HL_ket is not None else []) + [phys_L, phys_R] + \
                ([HR_ket] if HR_ket is not None else [])
@@ -1461,29 +1788,35 @@ def local_excitation_gap(result, niter=200):
             "state".format(dim))
     psi0 = evec0 / np.linalg.norm(evec0)
 
-    def _deflate(v):
-        return v - psi0 * np.vdot(psi0, v)
-
     if dim <= 3:
         # Same small-dim fallback as _local_two_site_solve: too small a
-        # space for Lanczos to be meaningful, diagonalize directly.
+        # space for Lanczos to be meaningful, diagonalize directly. Both
+        # eigenvalues are read off this one dense spectrum -- subtracting
+        # the stored `e0` here instead would mix two different solves of
+        # the same operator, the same asymmetry the dim>3 branch below
+        # goes out of its way to avoid.
         basis = np.eye(dim, dtype=complex)
         Hmat = np.column_stack([matvec(basis[:, k]) for k in range(dim)])
         w, _ = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
-        e1 = w[1]
-    else:
-        def deflated_matvec(v):
-            # P H P, P = I - |psi0><psi0| -- Hermitian since both P and the
-            # underlying local Hamiltonian are (see this function's own
-            # docstring), so _lanczos_ground_state's own Hermiticity
-            # assumption still holds restricted to psi0's orthogonal
-            # complement.
-            return _deflate(matvec(_deflate(v)))
-        rng = np.random.default_rng()
-        v0 = _deflate(rng.standard_normal(dim) + 1j * rng.standard_normal(dim))
-        e1_c, _ = _lanczos_ground_state(deflated_matvec, v0, niter=max(niter, 200))
-        e1 = e1_c.real
-    return float(e1 - e0)
+        if detail:
+            return float(w[1] - w[0]), float(w[0]), float(e0)
+        return float(w[1] - w[0])
+
+    e0, e1 = _lowest_two_eigenvalues(matvec, psi0, dim, max(niter, 200))
+
+    # e1 and e0 are eigenvalues of the same Hermitian operator, the second
+    # one restricted to the first's orthogonal complement, so the difference
+    # is non-negative by construction -- but only up to the solver's own
+    # precision when the two are the same eigenvalue of a degenerate level.
+    # Flatten a rounding-level negative to exactly zero (same tolerance the
+    # promote-and-retry loop above uses to decide two values are the same
+    # eigenvalue); anything genuinely negative is left visible.
+    gap = e1 - e0
+    if -1e-10 * (1.0 + abs(e0)) < gap < 0.0:
+        gap = 0.0
+    if detail:
+        return float(gap), float(e0), float(e0_stored)
+    return float(gap)
 
 
 def local_excitation_gap_windowed(result, h_intra_op, h_inter_op, site_types,

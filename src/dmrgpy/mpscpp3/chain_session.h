@@ -2505,11 +2505,34 @@ class Chain
     // with the exact fix idmrg.py's own idmrg_ground_state() had to
     // retrofit after finding that collision, not a naive first attempt
     // at the naive (persistent-tensor) design.
+    // White noise: how strong, and for how many macro-iterations -- see
+    // idmrg_noisy_isometry and idmrg_local_solve's own start-vector
+    // perturbation for what the two halves do, and
+    // docs/known_issue_idmrg_product_state_collapse.md for the failure they
+    // exist to break (a product state the growth loop cannot leave, returned
+    // with converged=True in a fraction of a second).
+    //
+    // The schedule matters as much as the noise. Noise is OFF for the tail
+    // of the run, for two independent reasons: the returned unit cell and
+    // its Schmidt values are re-seeded every macro-iteration, so a clean
+    // tail is what keeps <H_uc> = n_uc*e0 and the vev/correlator gauge
+    // exact; and a perturbed state must never be what etol declares
+    // converged, so the convergence test is suppressed entirely while noise
+    // is active. That suppression also removes the "converged=True in 0 s"
+    // pathology by construction: no run can now finish in fewer than
+    // noise_iters+2 macro-iterations. Same values as pyitensor/idmrg.py's
+    // own _NOISE_DEFAULT/_NOISE_ITERS.
+    static constexpr double idmrg_noise_default_ = 1e-4;
+    static constexpr int idmrg_noise_iters_ = 40;
+    static constexpr int idmrg_noise_tail_ = 6;
+
     IdmrgResult
     idmrg_ground_state(std::vector<MOTerm> const& terms_intra,
                         std::vector<MOTerm> const& terms_inter,
                         int maxm, double cutoff, int maxiter, double etol,
-                        int krylovdim, int restarts)
+                        int krylovdim, int restarts,
+                        double noise = idmrg_noise_default_,
+                        int noise_iters = idmrg_noise_iters_)
         {
         int n_uc = sites_.length();
         if (n_uc>2)
@@ -2636,8 +2659,16 @@ class Chain
         // the loop below), starts empty (no warm start available yet).
         std::vector<std::vector<Cplx>> prev_local(n_uc);
 
+        // Capped well short of maxiter so a short run still gets a clean
+        // tail: a caller asking for maxiter=10 must not spend 8 of them
+        // perturbed and then report whatever the last one happened to be.
+        int noise_iters_eff = std::min(noise_iters,std::max(0,maxiter-2));
+        int noise_left = 0, noise_spent = 0;
         for (macro_iter=0; macro_iter<maxiter; ++macro_iter)
             {
+            double noise_now = (noise_left>0 && noise_spent<noise_iters_eff) ? noise : 0.0;
+            if (noise_now > 0.0) ++noise_spent;
+            bool product_this_iter = true;
             snap_HL=HL; snap_HL_bra=HL_bra; snap_HL_ket=HL_ket; snap_HL_mpo=HL_mpo;
             snap_HR=HR; snap_HR_bra=HR_bra; snap_HR_ket=HR_ket; snap_HR_mpo=HR_mpo;
             snap_have_HL=bool(HL); snap_have_HR=bool(HR);
@@ -2693,13 +2724,16 @@ class Chain
                         dim(phys_R_in), have_HR_ket ? dim(HR_ket) : 0);
                 if (x0_warm.empty()) x0_warm = prev_local[mstep];
 
-                auto [energy_here,U,V,new_bond_u,new_bond_v,theta_flat,svals,theta] =
+                auto [energy_here,U,V,new_bond_u,new_bond_v,theta_flat,svals,theta,purity] =
                     idmrg_local_solve(
                         HL,W_pL,phys_L_in,W_pR,phys_R_in,HR,
                         HL_bra,HL_ket,have_HL_ket,HR_bra,HR_ket,have_HR_ket,
-                        cutoff,maxm,krylovdim,restarts,x0_warm);
+                        cutoff,maxm,krylovdim,restarts,x0_warm,noise_now);
                 energy = energy_here;
                 if (!theta_flat.empty()) prev_local[mstep] = std::move(theta_flat);
+                // A product state at ANY micro-step is enough to keep the
+                // noise armed: that is the trap (see idmrg_noisy_isometry).
+                if (!(purity > 1.0-1e-10)) product_this_iter = false;
 
                 // The raw ingredients of *this* micro-step's own 2-site
                 // local eigenproblem, captured before the extend step
@@ -2798,7 +2832,16 @@ class Chain
             if (verbose_)
                 println("idmrg macro-iter ",macro_iter,": E=",energy,
                         " density=",(have_density?density:0.0));
-            if (have_density && have_prev_density &&
+            // Demand-driven schedule: arm the noise whenever the state is
+            // still a product state, and let it run for a few further
+            // macro-iterations after that clears, so it does not switch off
+            // the instant the basis opens and let the state fall straight
+            // back. A healthy (already entangled) model never arms it at
+            // all, and so is bit-for-bit unaffected.
+            if (product_this_iter) noise_left = idmrg_noise_tail_;
+            else if (noise_left>0) --noise_left;
+
+            if (have_density && have_prev_density && noise_now==0.0 &&
                 std::abs(density-prev_density)<etol)
                 converged = true;
             prev_energy = energy; have_prev_energy = true;
@@ -3011,8 +3054,31 @@ class Chain
     // per-site baseline shift, but this returns a *difference* of two
     // eigenvalues of the same shifted operator, so the shift cancels
     // exactly.
+    // (gap, e0 as re-solved here, e0 as the growth loop reported it) --
+    // see idmrg_local_excitation_gap_detail's own comment below for why
+    // the last two are worth handing back separately.
+    struct LocalGap { double gap, e0_fresh, e0_stored; };
+
     double
     idmrg_local_excitation_gap(int niter) const
+        { return idmrg_local_excitation_gap_detail(niter).gap; }
+
+    // Same calculation, also returning the ground eigenvalue this method
+    // re-solved for and the one idmrg_ground_state's own final micro-step
+    // reported. They agree whenever the growth loop actually found its own
+    // local effective Hamiltonian's ground state, which is the ordinary
+    // case; a large disagreement means it did not -- the growth loop
+    // warm-starts every micro-step from the previous one and so stays on
+    // whatever branch it started on, while this method also searches from
+    // a random start, and with ConserveQNs=false (mpscpp3/get_sites.h)
+    // nothing confines that search to the converged state's own particle-
+    // number sector. infinitechain.py surfaces the disagreement as a
+    // Python warning rather than swallowing it, since in that situation
+    // the returned gap is a genuine spectral gap of the stored operator
+    // but no longer a gap "above the state whose observables vev/
+    // correlator report".
+    LocalGap
+    idmrg_local_excitation_gap_detail(int niter) const
         {
         if (!have_idmrg_superblock_)
             throw ITError("Chain::idmrg_local_excitation_gap: called before "
@@ -3052,20 +3118,221 @@ class Chain
             throw ITError("Chain::idmrg_local_excitation_gap: stored local ground "
                            "vector has zero norm");
         psi0 /= n0;
-        // P H P with P = I - |psi0><psi0| -- Hermitian, since both P and
-        // the underlying local Hamiltonian are, so arnoldi_smallest_real's
-        // own Sel::SR ground-state selection still picks the lowest
-        // eigenvalue of H restricted to psi0's orthogonal complement.
+
+        int kd = std::max(niter,2);
+        kd = std::min<int>(kd,(int)std::min<size_t>(dim_in,200));
+
+        // BOTH eigenvalues below come from a fresh solve of this same
+        // stored operator, at the same solver strength -- the ground one
+        // is NOT taken from idmrg_sb_energy_ (the growth loop's own
+        // value), even though that value is by construction the Ritz value
+        // of idmrg_sb_theta_ under exactly this operator. The two need not
+        // be solved equally hard: the growth loop runs at
+        // krylovdim=Infinite_Many_Body_Chain.niter (30 by default) with 2
+        // restarts, warm-started from McCulloch's wavefunction prediction,
+        // while this method runs at krylovdim=niter (200 by default) with
+        // 4 restarts from a random start. Arnoldi's own convergence test
+        // bounds the distance to *some* eigenvalue, not to the lowest one,
+        // so the growth loop can stop on a low-lying excited eigenvalue
+        // that this method's stronger solve would step past -- and mixing
+        // the two is then not a difference of two eigenvalues of one
+        // operator at all. (This is a separate matter from the shifted
+        // deflation below, which is what actually caused the reported
+        // negative gaps; solving both here is what makes the returned
+        // number a well-defined function of the stored superblock alone,
+        // independent of how hard the growth loop happened to solve, and
+        // it is what idmrg_local_excitation_gap_detail reports back so
+        // infinitechain.py can warn when the two disagree.)
+        //
+        // The warm start is still tried (it is nearly free -- a Krylov
+        // space grown from a near-exact eigenvector hits happy breakdown
+        // almost immediately) and kept only if it wins, since it converges
+        // to full accuracy in the ordinary case where the growth loop did
+        // find the local ground state.
+        auto ground_solve = [&](ITensor const& start)
+            {
+            return arnoldi_smallest_real(matvec,start,kd,4,Sel::SR,Cplx(0,0),1e-10);
+            };
+        auto best = ground_solve(psi0);
+        auto from_random = ground_solve(randomITensorC(psi0.inds()));
+        if (from_random.first.real() < best.first.real()) best = from_random;
+        double e0 = best.first.real();
+        psi0 = best.second;
+        psi0 /= norm(psi0);
+
+        // The excited solve looks for the lowest eigenvalue of this same
+        // operator restricted to psi0's orthogonal complement. The obvious
+        // way to write that -- the bare projector P = I - |psi0><psi0| and
+        // the operator P H P -- is WRONG here, and was the actual cause of
+        // the large negative gaps this method used to return. P H P is
+        // Hermitian and does agree with H on the complement, but it also
+        // carries psi0 itself as an eigenvector with eigenvalue exactly
+        // ZERO. That extra eigenvalue is harmless only while the rest of
+        // the spectrum lies below it; the moment the operator's own ground
+        // eigenvalue is POSITIVE, 0 becomes the smallest eigenvalue of
+        // P H P and is exactly what a smallest-eigenvalue solver is asked
+        // to find. Deflation keeps psi0 out of the Krylov space in exact
+        // arithmetic only -- rounding regrows the component every
+        // iteration, and a restarted solver targeting the bottom of the
+        // spectrum then locks onto it. The returned "gap" is 0 - e0, i.e.
+        // exactly minus the stored superblock energy: confirmed on a
+        // spinful (c,f) Kondo chain at maxm=16, where this method returned
+        // -358.003 meV against a stored energy of +0.358002587681, digit
+        // for digit, and reproduced in isolation on a random Hermitian
+        // matrix shifted to a positive ground energy (the deflated solve
+        // returns 0.0 with |<psi0|v>|^2 = 1, i.e. psi0 itself).
+        //
+        // Whether the stored superblock energy is positive is not under
+        // anyone's control: idmrg_subtract_energy_baseline leaves it as a
+        // small residual boundary term of either sign, which is why this
+        // struck one model at maxm=16 and not the same model at maxm=8
+        // (energy -1.05, negative, correct answer).
+        //
+        // The fix is to SHIFT rather than merely project: send psi0's own
+        // eigenvalue to sigma, far above the bottom of the spectrum, so it
+        // can never be the answer, while leaving the complement untouched.
+        // A = P H P + sigma |psi0><psi0| is still Hermitian, still agrees
+        // with H on the complement, and its smallest eigenvalue now IS the
+        // first excited state.
+        double sigma = e0 + 10.0*(1.0+std::abs(e0));
         auto deflate = [&](ITensor v) -> ITensor
             { return v - psi0*eltC(dag(psi0)*v); };
         auto deflated = [&](ITensor v) -> ITensor
-            { return deflate(matvec(deflate(v))); };
+            {
+            Cplx c = eltC(dag(psi0)*v);
+            ITensor out = deflate(matvec(v - psi0*c));
+            return out + (sigma*c)*psi0;
+            };
 
-        ITensor v0 = deflate(randomITensorC(psi0.inds()));
-        int kd = std::max(niter,2);
-        kd = std::min<int>(kd,(int)std::min<size_t>(dim_in,200));
-        auto result = arnoldi_smallest_real(deflated,v0,kd,4,Sel::SR,Cplx(0,0),1e-10);
-        return result.first.real() - idmrg_sb_energy_;
+        // Two independent safety nets on top of the shift, both no-ops in
+        // the ordinary case. (1) If the solve still comes back sitting on
+        // psi0, sigma was not far enough above the spectrum -- push it up
+        // and retry. (2) If it comes back BELOW the ground eigenvalue
+        // accepted above, then that ground solve, not this one, was the
+        // one that missed: promote the lower state and re-deflate against
+        // it. Each promotion strictly lowers e0, so this terminates; the
+        // spurious psi0 mode can no longer be promoted, since the shift
+        // put its eigenvalue at sigma.
+        double e1 = 0.0;
+        for (int round=0; round<4; ++round)
+            {
+            auto result = arnoldi_smallest_real(deflated,
+                    deflate(randomITensorC(psi0.inds())),kd,4,Sel::SR,Cplx(0,0),1e-10);
+            e1 = result.first.real();
+            ITensor v1 = result.second;
+            double nv = norm(v1);
+            // A zero-norm eigenvector means the solver gave up without
+            // producing one; there is nothing to promote or test against,
+            // so keep the value it did return rather than deflating
+            // against a zero vector on the next round.
+            if (nv <= 0.0) break;
+            v1 /= nv;
+            if (std::norm(eltC(dag(psi0)*v1)) > 0.5)
+                { sigma = e0 + 100.0*(sigma-e0); continue; }
+            if (e1 >= e0 - 1e-10*(1.0+std::abs(e0))) break;
+            e0 = e1;
+            psi0 = v1;
+            sigma = e0 + 10.0*(1.0+std::abs(e0));
+            }
+        // e1 and e0 are eigenvalues of the same Hermitian operator, the
+        // second one restricted to the first's orthogonal complement, so
+        // the difference is non-negative by construction -- but only up to
+        // the solver's own precision when the two are the same eigenvalue
+        // of a degenerate level. Flatten a rounding-level negative to
+        // exactly zero; anything genuinely negative is left visible.
+        double gap = e1-e0;
+        if (gap<0.0 && gap>-1e-10*(1.0+std::abs(e0))) gap = 0.0;
+        return {gap,e0,idmrg_sb_energy_};
+        }
+
+    // <opname> at site p of a converged multi-site (n_uc>2) VUMPS state.
+    // AC[p] is already the exactly normalized single-site reduced state by
+    // construction of the mixed canonical gauge, so this is a plain
+    // contraction with no eigenproblem -- same formula the grouped
+    // vumps_onsite_expectation uses, with the relevant AC picked out of the
+    // cell instead of embedded into a supersite operator.
+    Cplx
+    vms_onsite_expectation(std::string const& opname, int p) const
+        {
+        if (!have_vms_snapshot_)
+            throw ITError("Chain::vms_onsite_expectation: called before a "
+                           "multi-site vumps_ground_state");
+        int n_uc = (int)vms_rows_.size();
+        if (p<0 || p>=n_uc)
+            throw ITError("Chain::vms_onsite_expectation: p out of range");
+        int D = vms_D_, d = vms_rows_[p].d;
+        auto M = idmrg_op_dense(p,opname);
+        auto const& AC = vms_AC_[p];
+        auto AC_op = vx_apply_op_ket(M,AC,D,d);
+        Cplx num(0,0), den(0,0);
+        for (size_t k=0;k<AC.size();++k)
+            {
+            num += std::conj(AC[k])*AC_op[k];
+            den += std::conj(AC[k])*AC[k];
+            }
+        return num/den;
+        }
+
+    // <opname_i(p_i) opname_j(p_i+r)> of a converged multi-site VUMPS
+    // state, r in physical sites. Puts the mixed-gauge centre at p_i (so
+    // AC[p_i] carries the exact normalization and everything to its left is
+    // already the identity), then walks right through AR, which is exactly
+    // right-orthonormal so the tail beyond the second operator closes to
+    // the identity with no eigenproblem either. Jordan-Wigner strings are
+    // threaded exactly as idmrg_two_point_correlator does.
+    Cplx
+    vms_two_point_correlator(std::string const& opname_i, int p_i,
+                              std::string const& opname_j, int r) const
+        {
+        if (!have_vms_snapshot_)
+            throw ITError("Chain::vms_two_point_correlator: called before a "
+                           "multi-site vumps_ground_state");
+        int n_uc = (int)vms_rows_.size();
+        if (p_i<0 || p_i>=n_uc)
+            throw ITError("Chain::vms_two_point_correlator: p_i out of range");
+        if (r<0)
+            throw ITError("Chain::vms_two_point_correlator: r must be >= 0");
+        int D = vms_D_;
+        bool strung=false;
+        std::vector<Cplx> mat_i, mat_j;
+        int p_j = (p_i+r) % n_uc;
+        idmrg_correlator_endpoints(opname_i,p_i,opname_j,p_j,/*same_site=*/r==0,
+                                    mat_i,mat_j,strung);
+        if (r==0)
+            {
+            // idmrg_correlator_endpoints already composed the two matrices
+            // into mat_i for the same-site case (its own r=0 convention).
+            auto M = mat_i;
+            int d = vms_rows_[p_i].d;
+            auto const& AC = vms_AC_[p_i];
+            auto AC_op = vx_apply_op_ket(M,AC,D,d);
+            Cplx num(0,0), den(0,0);
+            for (size_t k=0;k<AC.size();++k)
+                {
+                num += std::conj(AC[k])*AC_op[k];
+                den += std::conj(AC[k])*AC[k];
+                }
+            return num/den;
+            }
+        auto const& AC = vms_AC_[p_i];
+        int d_i = vms_rows_[p_i].d;
+        Cplx den(0,0);
+        for (size_t k=0;k<AC.size();++k) den += std::conj(AC[k])*AC[k];
+        auto X = vms_push_left(vx_eye(D),AC,D,d_i,mat_i,true);
+        for (int step=1; step<=r; ++step)
+            {
+            int pos = (p_i+step) % n_uc;
+            int d = vms_rows_[pos].d;
+            if (step==r)
+                X = vms_push_left(X,vms_AR_[pos],D,d,mat_j,true);
+            else if (strung)
+                X = vms_push_left(X,vms_AR_[pos],D,d,idmrg_op_dense(pos,"F"),true);
+            else
+                X = vms_push_left(X,vms_AR_[pos],D,d,{},false);
+            }
+        Cplx tr(0,0);
+        for (int i=0;i<D;++i) tr += X[i*D+i];
+        return tr/den;
         }
 
     // VUMPS ground state (Zauner-Stauber et al., arXiv:1701.07035;
@@ -3112,7 +3379,8 @@ class Chain
     VumpsResult
     vumps_ground_state(std::vector<MOTerm> const& terms_intra,
                         std::vector<MOTerm> const& terms_inter,
-                        int D, double tol, int maxiter, int nrestarts)
+                        int D, double tol, int maxiter, int nrestarts,
+                        int niter_lanczos = vx_lanczos_niter_)
         {
         int n_uc = sites_.length();
         // User-facing, recoverable input validation -- throw ITError (a
@@ -3125,10 +3393,6 @@ class Chain
         // (that branch is never reachable through the public API in
         // practice -- infinitechain.py's constructor already rejects
         // n_uc>2 before any Chain is ever built).
-        if (n_uc>2)
-            Error("Chain::vumps_ground_state: n_uc>2 is not supported yet "
-                  "(see idmrg_ground_state's own comment for the same "
-                  "restriction and its rationale)");
         if (D<1)
             throw ITError("Chain::vumps_ground_state: D must be >= 1");
         if (nrestarts<1)
@@ -3147,6 +3411,29 @@ class Chain
 
         int Dw=0, d_g=0;
         std::vector<Cplx> W;
+        // n_uc > 2 goes to the sequential multi-site algorithm, which never
+        // groups the cell and so costs linearly rather than exponentially
+        // in n_uc -- see the "Sequential multi-site VUMPS" block above and
+        // pyitensor/vumps_ms.py's own module docstring. n_uc <= 2 stays on
+        // the grouped path purely so its already-validated values do not
+        // move; the two agree to machine precision where both apply.
+        if (n_uc>2)
+            {
+            std::mt19937_64 rng_ms(std::random_device{}());
+            auto run = vms_ground_state(rows,D,tol,maxiter,niter_lanczos,
+                                         nrestarts,rng_ms);
+            vms_AL_ = run.AL; vms_AR_ = run.AR; vms_C_ = run.C; vms_AC_ = run.AC;
+            vms_rows_ = rows; vms_D_ = D;
+            have_vms_snapshot_ = true;
+            have_vumps_snapshot_ = false;   // the grouped consumers cannot read this
+            VumpsResult out_ms;
+            out_ms.e0 = run.e_cell / n_uc;
+            out_ms.converged = run.converged;
+            out_ms.niter_done = run.niter;
+            out_ms.gauge_mismatch = run.mismatch;
+            return out_ms;
+            }
+
         vumps_group_automaton(rows,n_uc,Dw,d_g,W);
         vumps_check_reach_one(W,Dw,d_g);
 
@@ -3191,7 +3478,7 @@ class Chain
                 try
                     {
                     auto r = vumps_single_run(D_cur,d_g,h1,pending,tol,maxiter,
-                                               has_init?&init:nullptr,rng);
+                                               niter_lanczos,has_init?&init:nullptr,rng);
                     if (verbose_)
                         println("vumps D=",D_cur," attempt=",attempt,": e0=",
                                 r.e_cell/n_uc," converged=",r.converged);
@@ -5365,6 +5652,757 @@ class Chain
         return M;
         }
 
+    // Above this, the multi-site environment's regularized solve goes
+    // matrix-free (vx_bicgstab); at or below it the dense build+LU is
+    // cheaper and is kept. Same shape of split, and the same reason, as
+    // ic_dense_eig_max_ and vx_dense_eig_max_ above -- and the same reason
+    // pyitensor's own _solve_linear_map switches to GMRES past
+    // _DENSE_SOLVE_MAX. vx_regularized_solve's dense route costs D^2
+    // applications of the action to BUILD the matrix plus an O(D^6) LU to
+    // solve it, twice per outer iteration, on every rung of the D-ramp:
+    // measured on a 3-site TFIM cell, D=24 took 64.7s against the
+    // pure-Python backend's 9.4s with everything else already fixed.
+    static constexpr int vms_dense_solve_max_ = 256;   // i.e. D <= 16
+
+    // Matrix-free BiCGSTAB for a general (non-Hermitian) linear map given
+    // only by its action on a flat length-n complex vector. Returns the
+    // solution and sets `ok` -- a caller that gets ok=false is expected to
+    // fall back to the dense path rather than trust the result, exactly as
+    // pyitensor's _solve_linear_map falls back when GMRES does not
+    // converge, so this is never LESS robust than the solve it replaces.
+    template <typename Fn>
+    static std::vector<Cplx>
+    vx_bicgstab(Fn&& A, std::vector<Cplx> const& b, int n, double tol,
+                 int maxit, bool& ok)
+        {
+        auto dot = [](std::vector<Cplx> const& x, std::vector<Cplx> const& y)
+            {
+            Cplx s(0,0);
+            for (size_t i=0;i<x.size();++i) s += std::conj(x[i])*y[i];
+            return s;
+            };
+        auto nrm = [&](std::vector<Cplx> const& x)
+            { return std::sqrt(std::abs(dot(x,x))); };
+
+        double bnorm = nrm(b);
+        ok = false;
+        std::vector<Cplx> x(n,Cplx(0,0));
+        if (bnorm <= 0.0) { ok = true; return x; }
+        std::vector<Cplx> r = b, rhat = b;
+        std::vector<Cplx> v(n,Cplx(0,0)), p(n,Cplx(0,0));
+        Cplx rho(1,0), alpha(1,0), omega(1,0);
+        for (int it=0; it<maxit; ++it)
+            {
+            Cplx rho_new = dot(rhat,r);
+            if (std::abs(rho_new) < 1e-300) return x;         // breakdown
+            if (it==0)
+                p = r;
+            else
+                {
+                Cplx beta = (rho_new/rho)*(alpha/omega);
+                for (int i=0;i<n;++i) p[i] = r[i] + beta*(p[i] - omega*v[i]);
+                }
+            v = A(p);
+            Cplx den = dot(rhat,v);
+            if (std::abs(den) < 1e-300) return x;             // breakdown
+            alpha = rho_new/den;
+            std::vector<Cplx> sv(n);
+            for (int i=0;i<n;++i) sv[i] = r[i] - alpha*v[i];
+            if (nrm(sv) < tol*bnorm)
+                {
+                for (int i=0;i<n;++i) x[i] += alpha*p[i];
+                ok = true;
+                return x;
+                }
+            auto t = A(sv);
+            Cplx tt = dot(t,t);
+            if (std::abs(tt) < 1e-300) return x;              // breakdown
+            omega = dot(t,sv)/tt;
+            for (int i=0;i<n;++i) x[i] += alpha*p[i] + omega*sv[i];
+            for (int i=0;i<n;++i) r[i] = sv[i] - omega*t[i];
+            if (nrm(r) < tol*bnorm) { ok = true; return x; }
+            if (std::abs(omega) < 1e-300) return x;           // breakdown
+            rho = rho_new;
+            }
+        return x;
+        }
+
+    static constexpr int _vms_S = 0;   // automaton channel indices,
+    static constexpr int _vms_F = 1;   // idmrg_build_row's convention
+
+    // ==== Sequential multi-site VUMPS (any n_uc) =========================
+    //
+    // C++ port of pyitensor/vumps_ms.py -- see that module's own docstring
+    // for the algorithm and the literature. In one line: the grouped route
+    // right below folds the whole cell into one supersite of dimension
+    // prod(d_p), which is exponential in the cell size and is why this
+    // backend capped n_uc at 2; the sequential algorithm instead keeps a
+    // LIST of per-site tensors and sweeps the cell, solving one H_AC[n] per
+    // site and one H_C[n] per bond, at a cost linear in n_uc.
+    //
+    // The environments are fully channel-resolved here (one (D,D) matrix
+    // per automaton channel, per bond) rather than the grouped path's
+    // reach-1 triple of {GL, GR, bond_envs}: that specialization is exactly
+    // what grouping bought (any coupling inside the cell is on-site once
+    // the cell is one supersite), and ungrouped it no longer holds.
+    //
+    // The per-site automaton is idmrg_build_row's own IdmrgAutomatonRow,
+    // used directly with no grouping step: row.flat[(l*right_n+r)*d*d +
+    // si*d + so], channels S=0/F=1/pending=2.., and left_n/right_n are the
+    // channel counts on this site's two bonds (they may differ, so every
+    // loop below takes them from the row rather than assuming one Dw).
+
+    // X[l*D+L] -> out[r*D+R], one site forward. Same conventions as
+    // vx_cap_left/vx_cap_right (ket index first, bra second).
+    static std::vector<Cplx>
+    vms_push_left(std::vector<Cplx> const& X, std::vector<Cplx> const& A,
+                   int D, int d, std::vector<Cplx> const& M, bool hasM)
+        {
+        std::vector<Cplx> B = hasM ? vx_apply_op_ket(M,A,D,d) : A;
+        // T[L,p,r] = sum_l X[l,L] B[l,p,r]
+        std::vector<Cplx> T((size_t)D*d*D,Cplx(0,0));
+        for (int Lb=0;Lb<D;++Lb)
+        for (int p=0;p<d;++p)
+        for (int r=0;r<D;++r)
+            {
+            Cplx acc(0,0);
+            for (int l=0;l<D;++l) acc += X[l*D+Lb]*B[(l*d+p)*D+r];
+            T[(Lb*d+p)*D+r] = acc;
+            }
+        // out[r,R] = sum_{L,p} T[L,p,r] conj(A[L,p,R])
+        std::vector<Cplx> out((size_t)D*D,Cplx(0,0));
+        for (int r=0;r<D;++r)
+        for (int R=0;R<D;++R)
+            {
+            Cplx acc(0,0);
+            for (int Lb=0;Lb<D;++Lb)
+            for (int p=0;p<d;++p)
+                acc += T[(Lb*d+p)*D+r]*std::conj(A[(Lb*d+p)*D+R]);
+            out[r*D+R] = acc;
+            }
+        return out;
+        }
+
+    // Y[r*D+R] -> out[l*D+L], one site backward.
+    static std::vector<Cplx>
+    vms_push_right(std::vector<Cplx> const& Y, std::vector<Cplx> const& A,
+                    int D, int d, std::vector<Cplx> const& M, bool hasM)
+        {
+        std::vector<Cplx> B = hasM ? vx_apply_op_ket(M,A,D,d) : A;
+        // T[l,p,R] = sum_r B[l,p,r] Y[r,R]
+        std::vector<Cplx> T((size_t)D*d*D,Cplx(0,0));
+        for (int l=0;l<D;++l)
+        for (int p=0;p<d;++p)
+        for (int R=0;R<D;++R)
+            {
+            Cplx acc(0,0);
+            for (int r=0;r<D;++r) acc += B[(l*d+p)*D+r]*Y[r*D+R];
+            T[(l*d+p)*D+R] = acc;
+            }
+        // out[l,L] = sum_{p,R} T[l,p,R] conj(A[L,p,R])
+        std::vector<Cplx> out((size_t)D*D,Cplx(0,0));
+        for (int l=0;l<D;++l)
+        for (int Lb=0;Lb<D;++Lb)
+            {
+            Cplx acc(0,0);
+            for (int p=0;p<d;++p)
+            for (int R=0;R<D;++R)
+                acc += T[(l*d+p)*D+R]*std::conj(A[(Lb*d+p)*D+R]);
+            out[l*D+Lb] = acc;
+            }
+        return out;
+        }
+
+    // One site forward for a channel-resolved left environment:
+    // G'[b] = sum_a push(G[a], W[a,:,:,b]). Zero automaton slabs are
+    // skipped -- the automaton is sparse, and skipping is what keeps the
+    // per-site cost proportional to the number of live channels.
+    static std::vector<std::vector<Cplx>>
+    vms_push_site_left(std::vector<std::vector<Cplx>> const& G,
+                        std::vector<Cplx> const& A,
+                        IdmrgAutomatonRow const& row, int D)
+        {
+        int nl = row.left_n, nr = row.right_n, d = row.d;
+        std::vector<std::vector<Cplx>> out(nr, std::vector<Cplx>((size_t)D*D,Cplx(0,0)));
+        std::vector<Cplx> slab((size_t)d*d);
+        for (int a=0;a<nl;++a)
+            {
+            bool any_a = false;
+            for (auto const& z : G[a]) if (z!=Cplx(0,0)) { any_a=true; break; }
+            if (!any_a) continue;
+            for (int b=0;b<nr;++b)
+                {
+                bool any_w = false;
+                for (int si=0;si<d;++si)
+                for (int so=0;so<d;++so)
+                    {
+                    slab[si*d+so] = row.flat[((size_t)a*nr+b)*d*d + si*d+so];
+                    if (slab[si*d+so]!=Cplx(0,0)) any_w = true;
+                    }
+                if (!any_w) continue;
+                auto piece = vms_push_left(G[a],A,D,d,slab,true);
+                for (size_t k=0;k<piece.size();++k) out[b][k] += piece[k];
+                }
+            }
+        return out;
+        }
+
+    // Mirror: one site backward, G'[a] = sum_b push(G[b], W[a,:,:,b]).
+    static std::vector<std::vector<Cplx>>
+    vms_push_site_right(std::vector<std::vector<Cplx>> const& G,
+                         std::vector<Cplx> const& A,
+                         IdmrgAutomatonRow const& row, int D)
+        {
+        int nl = row.left_n, nr = row.right_n, d = row.d;
+        std::vector<std::vector<Cplx>> out(nl, std::vector<Cplx>((size_t)D*D,Cplx(0,0)));
+        std::vector<Cplx> slab((size_t)d*d);
+        for (int b=0;b<nr;++b)
+            {
+            bool any_b = false;
+            for (auto const& z : G[b]) if (z!=Cplx(0,0)) { any_b=true; break; }
+            if (!any_b) continue;
+            for (int a=0;a<nl;++a)
+                {
+                bool any_w = false;
+                for (int si=0;si<d;++si)
+                for (int so=0;so<d;++so)
+                    {
+                    slab[si*d+so] = row.flat[((size_t)a*nr+b)*d*d + si*d+so];
+                    if (slab[si*d+so]!=Cplx(0,0)) any_w = true;
+                    }
+                if (!any_w) continue;
+                auto piece = vms_push_right(G[b],A,D,d,slab,true);
+                for (size_t k=0;k<piece.size();++k) out[a][k] += piece[k];
+                }
+            }
+        return out;
+        }
+
+    // The whole cell's plain (operator-free) transfer, as an explicit
+    // E4[l,L,r,R] -- built by pushing each of the D^2 basis matrices
+    // through the cell.
+    //
+    // Materializing it costs O(n_uc * D^5 * d) once per outer iteration,
+    // where the matrix-free form would be O(D^3) per application. That is
+    // a deliberate trade: it lets the two things built on it -- the
+    // dominant fixed point and the regularized environment solve -- reuse
+    // vx_dominant_*_fixed_point and vx_regularized_solve unchanged, which
+    // are the validated single-site routines this backend already trusts,
+    // rather than growing matrix-free variants of both. The grouped path
+    // already builds a single-site E4 at O(D^4 d) for exactly the same
+    // reason, so this stays within this backend's existing design point;
+    // if D ever grows past what that supports, both paths need the same
+    // matrix-free treatment, not just this one.
+    static std::vector<Cplx>
+    vms_cell_transfer(std::vector<std::vector<Cplx>> const& A_list,
+                       std::vector<IdmrgAutomatonRow> const& rows, int D,
+                       bool from_left)
+        {
+        int n_uc = (int)A_list.size();
+        std::vector<Cplx> E((size_t)D*D*D*D,Cplx(0,0));
+        std::vector<Cplx> X((size_t)D*D,Cplx(0,0));
+        for (int i=0;i<D;++i)
+        for (int j=0;j<D;++j)
+            {
+            std::fill(X.begin(),X.end(),Cplx(0,0));
+            X[i*D+j] = Cplx(1,0);
+            std::vector<Cplx> Y = X;
+            if (from_left)
+                for (int n=0;n<n_uc;++n)
+                    Y = vms_push_left(Y,A_list[n],D,rows[n].d,{},false);
+            else
+                for (int n=n_uc-1;n>=0;--n)
+                    Y = vms_push_right(Y,A_list[n],D,rows[n].d,{},false);
+            for (int r=0;r<D;++r)
+            for (int R=0;R<D;++R)
+                {
+                // from_left: Y[r,R] = sum_{l,L} X[l,L] E[l,L,r,R], so this
+                // basis element fills E[i,j,:,:]. from_right: the mirror,
+                // E[:,:,i,j] via vx_apply_transfer's own convention.
+                if (from_left) E[((i*D+j)*D+r)*D+R] = Y[r*D+R];
+                else           E[((r*D+R)*D+i)*D+j] = Y[r*D+R];
+                }
+            }
+        return E;
+        }
+
+    // (G, source): the channel-resolved left environment at the cell's left
+    // edge for every channel EXCEPT F, plus the F content one cell
+    // traversal produces from it.
+    //
+    // G[S]=I by definition; the pending block is nilpotent (a Hamiltonian
+    // term has finite reach, so a partially-applied term must close within
+    // a bounded number of sites), so plain iteration reaches it exactly
+    // rather than needing a solve. F alone needs the regularized solve --
+    // it is the one channel that feeds back into itself (W[F,:,:,F]=I), so
+    // summing it is a geometric series over the half-infinite chain.
+    static void
+    vms_nilpotent_left(std::vector<std::vector<Cplx>> const& AL,
+                        std::vector<IdmrgAutomatonRow> const& rows, int D,
+                        std::vector<std::vector<Cplx>>& G,
+                        std::vector<Cplx>& source)
+        {
+        int n_uc = (int)AL.size();
+        int n0 = rows[0].left_n;
+        G.assign(n0, std::vector<Cplx>((size_t)D*D,Cplx(0,0)));
+        G[_vms_S] = vx_eye(D);
+        auto push_cell = [&](std::vector<std::vector<Cplx>> const& Gin)
+            {
+            auto cur = Gin;
+            for (int n=0;n<n_uc;++n) cur = vms_push_site_left(cur,AL[n],rows[n],D);
+            return cur;
+            };
+        for (int sweep=0; sweep<n0+1; ++sweep)
+            {
+            auto next = push_cell(G);
+            next[_vms_S] = vx_eye(D);
+            if ((int)next.size() > _vms_F)
+                std::fill(next[_vms_F].begin(),next[_vms_F].end(),Cplx(0,0));
+            double diff = 0.0;
+            for (size_t a=0;a<next.size() && a<G.size();++a)
+            for (size_t k=0;k<next[a].size();++k)
+                diff = std::max(diff,std::abs(next[a][k]-G[a][k]));
+            G = next;
+            if (diff < 1e-14) break;
+            }
+        source = push_cell(G)[_vms_F];
+        }
+
+    // Mirror of vms_nilpotent_left, with S and F swapping roles: on the
+    // right it is F that means "nothing applied yet" (G[F]=I) and S that
+    // accumulates.
+    static void
+    vms_nilpotent_right(std::vector<std::vector<Cplx>> const& AR,
+                         std::vector<IdmrgAutomatonRow> const& rows, int D,
+                         std::vector<std::vector<Cplx>>& G,
+                         std::vector<Cplx>& source)
+        {
+        int n_uc = (int)AR.size();
+        int nlast = rows[n_uc-1].right_n;
+        G.assign(nlast, std::vector<Cplx>((size_t)D*D,Cplx(0,0)));
+        G[_vms_F] = vx_eye(D);
+        auto push_cell = [&](std::vector<std::vector<Cplx>> const& Gin)
+            {
+            auto cur = Gin;
+            for (int n=n_uc-1;n>=0;--n) cur = vms_push_site_right(cur,AR[n],rows[n],D);
+            return cur;
+            };
+        for (int sweep=0; sweep<nlast+1; ++sweep)
+            {
+            auto next = push_cell(G);
+            next[_vms_F] = vx_eye(D);
+            if ((int)next.size() > _vms_S)
+                std::fill(next[_vms_S].begin(),next[_vms_S].end(),Cplx(0,0));
+            double diff = 0.0;
+            for (size_t a=0;a<next.size() && a<G.size();++a)
+            for (size_t k=0;k<next[a].size();++k)
+                diff = std::max(diff,std::abs(next[a][k]-G[a][k]));
+            G = next;
+            if (diff < 1e-14) break;
+            }
+        source = push_cell(G)[_vms_S];
+        }
+
+    // Per-bond channel-resolved environments for the whole cell, and the
+    // energy density per unit cell. GL[n] sits immediately LEFT of site n,
+    // GR[n] immediately right. Built once at the cell edges and pushed
+    // across -- one traversal gives every site's environment, which is the
+    // point of the sequential formulation.
+    struct VmsEnv
+        {
+        std::vector<std::vector<std::vector<Cplx>>> GL, GR;
+        double e_cell = 0.0;
+        };
+
+    VmsEnv
+    vms_environments(std::vector<std::vector<Cplx>> const& AL,
+                      std::vector<std::vector<Cplx>> const& AR,
+                      std::vector<IdmrgAutomatonRow> const& rows, int D) const
+        {
+        int n_uc = (int)AL.size();
+        // The two dominant fixed points are found MATRIX-FREE above
+        // ic_dense_eig_max_, by the same restarted Arnoldi the iDMRG
+        // correlator path uses. The dense route (vx_dominant_eig) runs a
+        // full zgeev on the (D^2,D^2) transfer -- O(D^6), twice per outer
+        // iteration, across every rung of the D-ramp -- which is exactly
+        // the cost ic_dense_eig_max_'s own comment records as having
+        // "dominated an entire iDMRG solve" at chi=24. Measured here on a
+        // 3-site TFIM cell before this split: D=16 took 24.5s against the
+        // pure-Python backend's 2.0s, i.e. the C++ port was 12x SLOWER
+        // than the reference it was meant to accelerate.
+        auto dominant = [&](bool from_left, std::vector<std::vector<Cplx>> const& A)
+            {
+            int n = D*D;
+            std::vector<Cplx> vec;
+            if (n <= ic_dense_eig_max_)
+                {
+                auto E = vms_cell_transfer(A,rows,D,from_left);
+                auto [v,eta] = from_left ? vx_dominant_left_fixed_point(E,D)
+                                          : vx_dominant_right_fixed_point(E,D);
+                (void)eta;
+                return v;
+                }
+            auto act = [&](std::vector<Cplx> const& X)
+                {
+                auto Y = X;
+                if (from_left)
+                    for (int m=0;m<n_uc;++m)
+                        Y = vms_push_left(Y,A[m],D,rows[m].d,{},false);
+                else
+                    for (int m=n_uc-1;m>=0;--m)
+                        Y = vms_push_right(Y,A[m],D,rows[m].d,{},false);
+                return Y;
+                };
+            Cplx e0c(0,0), e1c(0,0);
+            ic_arnoldi_dominant(act,n,e0c,e1c,vec);
+            if (std::abs(e1c) > (1.0-1e-9)*std::abs(e0c))
+                throw ITError("Chain::vms_environments: the cell transfer matrix's "
+                               "dominant eigenvalue is (near-)degenerate -- a single "
+                               "dominant fixed point is not well-defined here");
+            Cplx tr(0,0);
+            for (int i=0;i<D;++i) tr += vec[i*D+i];
+            if (std::abs(tr) < 1e-13)
+                throw ITError("Chain::vms_environments: dominant fixed point has "
+                               "~zero trace -- degenerate/ill-defined normalization");
+            for (auto& z : vec) z /= tr;
+            return vec;
+            };
+        auto r_AL = vx_hermitize(dominant(false,AL),D);
+        auto l_AR = vx_hermitize(dominant(true,AR),D);
+        // The eigensolver leaves the scale free; these close a normalized
+        // state against the other side's exact (identity) fixed point, so
+        // their trace must be 1.
+        Cplx tr_r(0,0), tr_l(0,0);
+        for (int i=0;i<D;++i) { tr_r += r_AL[i*D+i]; tr_l += l_AR[i*D+i]; }
+        if (std::abs(tr_r)>1e-300) for (auto& z : r_AL) z /= tr_r;
+        if (std::abs(tr_l)>1e-300) for (auto& z : l_AR) z /= tr_l;
+
+        std::vector<std::vector<Cplx>> GL0, GRlast;
+        std::vector<Cplx> src_l, src_r;
+        vms_nilpotent_left(AL,rows,D,GL0,src_l);
+        vms_nilpotent_right(AR,rows,D,GRlast,src_r);
+
+        // trace(conj(r_AL) @ source_l), NOT an elementwise sum -- the
+        // transpose in the second factor is the whole difference between
+        // the two, and getting it wrong leaves the STATE correct (vev and
+        // correlators still match to 1e-9) while the reported energy is
+        // silently off, which is exactly how this was caught. Uses the
+        // same helper the grouped path does so the two cannot diverge.
+        double e_L = vx_trace_conjA_X(r_AL,src_l,D).real();
+        double e_R = vx_trace_conjA_X(l_AR,src_r,D).real();
+
+        // GL[F] / GR[S]: the same regularized (I - T_cell + P) solve the
+        // grouped path does, with the single-site transfer replaced by the
+        // whole cell's. Each side is regularized against ITS OWN energy --
+        // never a shared average, which vumps_solve_left_environment's own
+        // Python counterpart documents as a confirmed period-2 limit cycle.
+        std::vector<Cplx> I = vx_eye(D);
+        std::vector<Cplx> rhs_l((size_t)D*D), rhs_r((size_t)D*D);
+        for (int k=0;k<D*D;++k)
+            {
+            rhs_l[k] = src_l[k] - e_L*I[k];
+            rhs_r[k] = src_r[k] - e_R*I[k];
+            }
+        // (I - T_cell + P)[G] = source - e*I, with P[X] = I*trace(conj(fp)@X).
+        // Matrix-free above vms_dense_solve_max_: the action is a cell
+        // traversal (O(n_uc D^3 d)), where the dense route needs D^2 of
+        // those just to BUILD the matrix plus an O(D^6) LU on top.
+        auto make_reg = [&](std::vector<std::vector<Cplx>> const& A, bool from_left,
+                             std::vector<Cplx> const& fp)
+            {
+            return [&,from_left](std::vector<Cplx> const& x)
+                {
+                auto Tx = x;
+                if (from_left)
+                    for (int m=0;m<n_uc;++m)
+                        Tx = vms_push_left(Tx,A[m],D,rows[m].d,{},false);
+                else
+                    for (int m=n_uc-1;m>=0;--m)
+                        Tx = vms_push_right(Tx,A[m],D,rows[m].d,{},false);
+                std::vector<Cplx> out((size_t)D*D);
+                Cplx sc = vx_trace_conjA_X(fp,x,D);
+                for (int k=0;k<D*D;++k) out[k] = x[k] - Tx[k] + I[k]*sc;
+                return out;
+                };
+            };
+        auto solve_reg = [&](std::vector<std::vector<Cplx>> const& A, bool from_left,
+                              std::vector<Cplx> const& fp,
+                              std::vector<Cplx> const& rhs)
+            {
+            auto act = make_reg(A,from_left,fp);
+            if (D*D > vms_dense_solve_max_)
+                {
+                bool ok=false;
+                auto sol = vx_bicgstab(act,rhs,D*D,1e-12,20*D*D,ok);
+                if (ok) return sol;
+                // Fall through to the dense path rather than trust a
+                // non-converged iterate -- never less robust than before.
+                }
+            auto Mat = vx_build_linear_map(D,act);
+            return vx_solve(Mat,D*D,rhs);
+            };
+        GL0[_vms_F] = solve_reg(AL,true,r_AL,rhs_l);
+        GRlast[_vms_S] = solve_reg(AR,false,l_AR,rhs_r);
+
+        VmsEnv env;
+        env.GL.resize(n_uc);
+        env.GR.resize(n_uc);
+        env.GL[0] = GL0;
+        for (int n=0;n+1<n_uc;++n)
+            env.GL[n+1] = vms_push_site_left(env.GL[n],AL[n],rows[n],D);
+        env.GR[n_uc-1] = GRlast;
+        for (int n=n_uc-1;n>0;--n)
+            env.GR[n-1] = vms_push_site_right(env.GR[n],AR[n],rows[n],D);
+        env.e_cell = 0.5*(e_L+e_R);
+        return env;
+        }
+
+    // H_AC[n] applied to X (D,d,D):
+    //   Y[L,o,R] = sum GL[a][l,L] X[l,i,r] W[a,i,o,b] GR[b][r,R]
+    // -- every term (on-site, the two half-open bond terms, the
+    // accumulated background on either side) in one contraction, because
+    // the environments are channel-resolved.
+    static std::vector<Cplx>
+    vms_h_ac_action(std::vector<Cplx> const& X,
+                     std::vector<std::vector<Cplx>> const& GLn,
+                     std::vector<std::vector<Cplx>> const& GRn,
+                     IdmrgAutomatonRow const& row, int D)
+        {
+        int nl = row.left_n, nr = row.right_n, d = row.d;
+        std::vector<Cplx> Y((size_t)D*d*D,Cplx(0,0));
+        std::vector<Cplx> slab((size_t)d*d);
+        for (int a=0;a<nl;++a)
+            {
+            bool any_a = false;
+            for (auto const& z : GLn[a]) if (z!=Cplx(0,0)) { any_a=true; break; }
+            if (!any_a) continue;
+            // XL[L,(i,r)] = sum_l GL[a][l,L] X[l,(i,r)], i.e. GL[a]^T @ X
+            // with X read as a (D, d*D) matrix -- its own flat layout
+            // already IS that, so no data movement beyond the transpose.
+            std::vector<Cplx> GLt((size_t)D*D);
+            for (int l=0;l<D;++l)
+            for (int Lb=0;Lb<D;++Lb)
+                GLt[Lb*D+l] = GLn[a][l*D+Lb];
+            auto XL = vx_matmul(GLt,D,D,X,D,d*D);
+            for (int b=0;b<nr;++b)
+                {
+                bool any_b = false;
+                for (auto const& z : GRn[b]) if (z!=Cplx(0,0)) { any_b=true; break; }
+                if (!any_b) continue;
+                bool any_w = false;
+                for (int si=0;si<d;++si)
+                for (int so=0;so<d;++so)
+                    {
+                    slab[si*d+so] = row.flat[((size_t)a*nr+b)*d*d + si*d+so];
+                    if (slab[si*d+so]!=Cplx(0,0)) any_w = true;
+                    }
+                if (!any_w) continue;
+                auto XLW = vx_apply_op_ket(slab,XL,D,d);
+                auto term = vx_cap_right(XLW,D,d,GRn[b]);
+                for (size_t k=0;k<Y.size();++k) Y[k] += term[k];
+                }
+            }
+        return Y;
+        }
+
+    // H_C[n] applied to the bond matrix C (D,D):
+    //   Y[L,R] = sum_a GL[a][l,L] C[l,r] GR[a][r,R]
+    // -- the zero-site effective Hamiltonian, a plain sum of outer
+    // products because the same channel closes on both sides.
+    static std::vector<Cplx>
+    vms_h_c_action(std::vector<Cplx> const& C,
+                    std::vector<std::vector<Cplx>> const& GL_bond,
+                    std::vector<std::vector<Cplx>> const& GR_n, int D)
+        {
+        int nch = (int)std::min(GL_bond.size(),GR_n.size());
+        std::vector<Cplx> Y((size_t)D*D,Cplx(0,0));
+        for (int a=0;a<nch;++a)
+            {
+            bool any_l=false, any_r=false;
+            for (auto const& z : GL_bond[a]) if (z!=Cplx(0,0)) { any_l=true; break; }
+            if (!any_l) continue;
+            for (auto const& z : GR_n[a]) if (z!=Cplx(0,0)) { any_r=true; break; }
+            if (!any_r) continue;
+            // Y += GL[a]^T C GR[a], as TWO matrix products rather than one
+            // four-deep loop: the naive form is O(D^4) per channel and was
+            // measured to dominate the whole solve (D=16 took 24s against
+            // the pure-Python backend's 2s until this was staged).
+            std::vector<Cplx> GLt((size_t)D*D);
+            for (int l=0;l<D;++l)
+            for (int Lb=0;Lb<D;++Lb)
+                GLt[Lb*D+l] = GL_bond[a][l*D+Lb];
+            auto T = vx_matmul(GLt,D,D,C,D,D);
+            auto term = vx_matmul(T,D,D,GR_n[a],D,D);
+            for (size_t k=0;k<Y.size();++k) Y[k] += term[k];
+            }
+        return Y;
+        }
+
+    // New (AL,AR) for ONE site from its AC and the bond matrices on either
+    // side. Unlike the grouped single-site case -- where one C sits on both
+    // sides of the only site, so the same polar factor serves twice -- the
+    // two bonds are different matrices here, and reusing one for both
+    // silently gauges the state wrong.
+    static std::pair<std::vector<Cplx>,std::vector<Cplx>>
+    vms_update_AL_AR(std::vector<Cplx> const& AC, int D, int d,
+                      std::vector<Cplx> const& C_left,
+                      std::vector<Cplx> const& C_right)
+        {
+        auto [U1,Vt1] = vx_economy_svd(AC,D*d,D);
+        auto U_l = vx_matmul(U1,D*d,D,Vt1,D,D);
+        auto [Ucr,Vtcr] = vx_economy_svd(C_right,D,D);
+        auto U_cr = vx_matmul(Ucr,D,D,Vtcr,D,D);
+        auto AL_new = vx_matmul(U_l,D*d,D,vx_dagger(U_cr,D,D),D,D);
+
+        auto [U2,Vt2] = vx_economy_svd(AC,D,d*D);
+        auto U_r = vx_matmul(U2,D,D,Vt2,D,d*D);
+        auto [Ucl,Vtcl] = vx_economy_svd(C_left,D,D);
+        auto U_cl = vx_matmul(Ucl,D,D,Vtcl,D,D);
+        auto AR_new = vx_matmul(vx_dagger(U_cl,D,D),D,D,U_r,D,d*D);
+        return {AL_new,AR_new};
+        }
+
+    // One sequential multi-site VUMPS attempt: build the environments once
+    // for the whole cell, then sweep it solving H_AC[n] at every site and
+    // H_C[n] at every bond, updating (AL[n],AR[n]) from the results.
+    struct VmsRun
+        {
+        std::vector<std::vector<Cplx>> AL, AR, C, AC;
+        VmsEnv env;
+        double e_cell = 0.0, mismatch = 0.0;
+        bool converged = false;
+        int niter = 0;
+        };
+
+    VmsRun
+    vms_single_run(std::vector<IdmrgAutomatonRow> const& rows, int D,
+                    double tol, int maxiter, int niter_lanczos,
+                    VmsRun const* init, std::mt19937_64& rng) const
+        {
+        int n_uc = (int)rows.size();
+        std::vector<std::vector<Cplx>> AL(n_uc), AR(n_uc), C(n_uc), AC(n_uc);
+        if (init)
+            { AL = init->AL; AR = init->AR; C = init->C; }
+        else
+            for (int n=0;n<n_uc;++n)
+                {
+                auto st = vumps_random_init(D,rows[n].d,rng);
+                AL[n] = st.AL; AR[n] = st.AR; C[n] = st.C;
+                }
+        for (int n=0;n<n_uc;++n)
+            AC[n] = vumps_compose_AL_C(AL[n],C[n],D,rows[n].d);
+
+        bool converged = false;
+        double mismatch = 0.0;
+        int it = 0;
+        VmsEnv env;
+        for (it=0; it<maxiter; ++it)
+            {
+            env = vms_environments(AL,AR,rows,D);
+            std::vector<std::vector<Cplx>> AC_new(n_uc), C_new(n_uc);
+            for (int n=0;n<n_uc;++n)
+                {
+                int d = rows[n].d;
+                auto act_ac = [&](std::vector<Cplx> const& X)
+                    { return vms_h_ac_action(X,env.GL[n],env.GR[n],rows[n],D); };
+                AC_new[n] = vx_lanczos_ground_state(act_ac,AC[n],D*d*D,
+                                                     niter_lanczos).second;
+                // H_C[n] lives on the bond to the RIGHT of site n: its left
+                // environment is the one left of site n+1, its right one is
+                // GR[n].
+                auto GL_bond = (n+1<n_uc) ? env.GL[n+1]
+                    : vms_push_site_left(env.GL[n],AL[n],rows[n],D);
+                auto act_c = [&](std::vector<Cplx> const& X)
+                    { return vms_h_c_action(X,GL_bond,env.GR[n],D); };
+                C_new[n] = vx_lanczos_ground_state(act_c,C[n],D*D,
+                                                    niter_lanczos).second;
+                }
+            mismatch = 0.0;
+            for (int n=0;n<n_uc;++n)
+                mismatch = std::max(mismatch,
+                    vumps_gauge_mismatch(AC_new[n],C_new[n],AL[n],AR[n],D,rows[n].d));
+            AC = AC_new; C = C_new;
+            for (int n=0;n<n_uc;++n)
+                {
+                auto [alnew,arnew] = vms_update_AL_AR(
+                    AC[n],D,rows[n].d,C[(n-1+n_uc)%n_uc],C[n]);
+                AL[n] = alnew; AR[n] = arnew;
+                }
+            if (mismatch < tol) { converged = true; break; }
+            }
+
+        // Refresh against the FINAL AL/AR -- what was built above reflects
+        // this iteration's INPUT tensors, one update behind what is being
+        // returned. Same reason the grouped single run does this.
+        env = vms_environments(AL,AR,rows,D);
+        VmsRun out;
+        out.AL=AL; out.AR=AR; out.C=C; out.AC=AC; out.env=env;
+        out.e_cell=env.e_cell; out.mismatch=mismatch; out.converged=converged;
+        out.niter=std::min(it+1,maxiter);
+        return out;
+        }
+
+    // Sequential multi-site VUMPS with the same restart/D-ramp discipline
+    // the grouped driver uses, for the same measured reason (a pure random
+    // start at large D lands in a bad basin often enough to matter).
+    VmsRun
+    vms_ground_state(std::vector<IdmrgAutomatonRow> const& rows, int D,
+                      double tol, int maxiter, int niter_lanczos,
+                      int nrestarts, std::mt19937_64& rng) const
+        {
+        std::vector<int> ramp;
+        for (int d_cur=1; d_cur<D; d_cur*=2) ramp.push_back(d_cur);
+        ramp.push_back(D);
+
+        auto better = [](VmsRun const& a, VmsRun const& b)
+            {
+            if (a.converged != b.converged) return a.converged;
+            return a.e_cell < b.e_cell;
+            };
+        VmsRun best; bool have_best=false;
+        VmsRun prev; bool have_prev=false;
+        for (int D_cur : ramp)
+            {
+            int n_here = (D_cur==D) ? nrestarts : std::min(nrestarts,3);
+            VmsRun local; bool have_local=false;
+            for (int attempt=0; attempt<n_here; ++attempt)
+                {
+                try
+                    {
+                    // Warm-starting across the ramp needs the previous
+                    // rung's tensors re-embedded at the new D; only the
+                    // same-D case is reused directly here, and a fresh
+                    // random start is used otherwise -- the ramp still
+                    // helps through the "beat the smaller D" check below.
+                    bool reuse = (attempt==0 && have_prev
+                                   && (int)prev.AL.size()==(int)rows.size()
+                                   && prev.AL[0].size()==(size_t)D_cur*rows[0].d*D_cur);
+                    auto r = vms_single_run(rows,D_cur,tol,maxiter,niter_lanczos,
+                                             reuse ? &prev : nullptr, rng);
+                    if (verbose_)
+                        println("vumps_ms D=",D_cur," attempt=",attempt,": e_cell=",
+                                r.e_cell," converged=",r.converged);
+                    if (!have_local || better(r,local)) { local=r; have_local=true; }
+                    }
+                catch (ITError const& e)
+                    {
+                    if (verbose_)
+                        println("vumps_ms D=",D_cur," attempt=",attempt,
+                                ": failed (",e.what(),")");
+                    }
+                }
+            if (!have_local)
+                throw ITError("Chain::vms_ground_state: every attempt at D="+
+                               std::to_string(D_cur)+" failed -- try increasing "
+                               "nrestarts");
+            prev = local; have_prev = true;
+            best = local; have_best = true;
+            }
+        if (!have_best)
+            throw ITError("Chain::vms_ground_state: no attempt succeeded");
+        return best;
+        }
+
     // Groups n_uc<=2 per-sublattice dense automaton rows (idmrg_build_row's
     // own IdmrgAutomatonRow, S=0/F=1/pending=2.. channel convention) into
     // one single-supersite dense automaton W (Dw,Dw,d_g,d_g) -- C++
@@ -5914,6 +6952,137 @@ class Chain
         return Y;
         }
 
+    // Above this, VUMPS's own H_AC/H_C ground-state solves go matrix-free
+    // (vx_lanczos_ground_state); at or below it they are diagonalized
+    // densely, exactly as this port always did. Same shape of split, and
+    // the same reason for it, as ic_dense_eig_max_ above.
+    //
+    // The dense route costs O(n^3) for the zheev PLUS n calls to the
+    // action to build the matrix at all, with n = D*d_g*D for H_AC. That
+    // was written when this port's only validated models were TFIM/
+    // Heisenberg at D<=3 with a ONE-site unit cell (d_g = 2 or 4, so
+    // n <= 36 -- genuinely negligible, as vx_hermitian_ground_state's own
+    // comment says). It is not negligible for a two-site unit cell of
+    // native spinful sites: d_g = 4*4 = 16, so D=8 gives n = 1024 and
+    // D=16 gives n = 4096, per outer iteration, per attempt, at every
+    // step of the D-ramp. Measured on a (c,f) Kondo chain at D=8 in its
+    // free limit, this backend had not returned an energy density after
+    // 10 minutes at 100% CPU (the ramp had reached D=4), against 22.7 s
+    // for the identical model through pyitensor's own VUMPS -- which
+    // never forms these matrices, using _lanczos_ground_state on
+    // _h_ac_action/_h_c_action instead. See
+    // docs/known_issue_v3_vumps_no_return.md.
+    //
+    // Where to put the threshold follows from the two costs: dense is n
+    // calls to the action (to build the matrix) plus O(n^3) for zheev,
+    // while Lanczos is at most niter_lanczos calls plus an O(m^3) on a
+    // tridiagonal of size m <= niter_lanczos. Dense therefore only wins
+    // while n is of order niter_lanczos or below, which puts the natural
+    // crossover in the tens, not the hundreds.
+    //
+    // 64 also keeps every case this port was originally validated on
+    // (tests/test_vumps_v3.py, tests/test_vumps_correlator_v3.py) on the
+    // exact dense path they were validated against -- those are TFIM/
+    // Heisenberg with d_g = 2 or 4 at D <= 3, so n = D*d_g*D <= 36 -- and
+    // so this is a pure extension to the regime that did not work at all
+    // rather than a change to one that did.
+    static constexpr int vx_dense_eig_max_ = 64;
+    static constexpr int vx_lanczos_niter_ = 60;
+
+    // Lowest eigenpair of a Hermitian operator given ONLY by its action on
+    // a flat length-n complex vector -- a direct C++ port of pyitensor/
+    // dmrg.py's own _lanczos_ground_state (Lanczos with full
+    // reorthogonalization, stopping early once the lowest Ritz value
+    // stabilizes to `tol` relative), which is what pyitensor/vumps.py uses
+    // for exactly these two solves. The small tridiagonal eigenproblem is
+    // handed to the existing dense solver: it is niter x niter at most, so
+    // its own O(m^3) is irrelevant next to one call to the action.
+    template <typename Fn>
+    static std::pair<double,std::vector<Cplx>>
+    vx_lanczos_ground_state(Fn&& action, std::vector<Cplx> v0, int n,
+                             int niter, double tol=1e-12)
+        {
+        auto dot = [](std::vector<Cplx> const& a, std::vector<Cplx> const& b)
+            {
+            Cplx s(0,0);
+            for (size_t i=0;i<a.size();++i) s += std::conj(a[i])*b[i];
+            return s;
+            };
+        auto nrm = [&](std::vector<Cplx> const& a)
+            { return std::sqrt(std::abs(dot(a,a))); };
+
+        double beta0 = nrm(v0);
+        if (beta0 <= 0.0)
+            throw ITError("Chain::vx_lanczos_ground_state: zero start vector");
+        for (auto& z : v0) z /= beta0;
+
+        std::vector<std::vector<Cplx>> qs;
+        qs.push_back(v0);
+        std::vector<double> alphas, betas;
+
+        auto w = action(qs[0]);
+        double alpha = dot(qs[0],w).real();
+        alphas.push_back(alpha);
+        for (size_t i=0;i<w.size();++i) w[i] -= alpha*qs[0][i];
+
+        // Lowest eigenvalue (and, on the iteration that returns, the
+        // eigenvector) of the real symmetric tridiagonal built so far --
+        // pyitensor's _tridiag_ground_value/_tridiag_ground_ritz.
+        auto tridiag_ground = [&](bool want_vec, std::vector<Cplx>& vec)
+            {
+            int m = (int)alphas.size();
+            std::vector<Cplx> T((size_t)m*m,Cplx(0,0));
+            for (int i=0;i<m;++i) T[(size_t)i*m+i] = Cplx(alphas[i],0);
+            for (int i=0;i+1<m;++i)
+                {
+                T[(size_t)i*m+(i+1)] = Cplx(betas[i],0);
+                T[(size_t)(i+1)*m+i] = Cplx(betas[i],0);
+                }
+            auto [ev,evec] = vx_hermitian_ground_state(T,m);
+            if (want_vec) vec = evec;
+            return ev;
+            };
+
+        std::vector<Cplx> dummy;
+        double prev_eval = tridiag_ground(false,dummy);
+        int m = std::min(niter,n);
+        for (int step=1; step<m; ++step)
+            {
+            double beta = nrm(w);
+            if (beta < tol) break;
+            betas.push_back(beta);
+            std::vector<Cplx> q_new(w.size());
+            for (size_t i=0;i<w.size();++i) q_new[i] = w[i]/beta;
+            qs.push_back(q_new);
+            w = action(q_new);
+            alpha = dot(q_new,w).real();
+            alphas.push_back(alpha);
+            auto const& q_prev = qs[qs.size()-2];
+            for (size_t i=0;i<w.size();++i)
+                w[i] -= alpha*q_new[i] + beta*q_prev[i];
+            // Full reorthogonalization against every earlier Lanczos
+            // vector, exactly as the Python original does -- the short
+            // recurrence alone loses orthogonality fast enough to matter.
+            for (size_t k=0;k+1<qs.size();++k)
+                {
+                Cplx c = dot(qs[k],w);
+                for (size_t i=0;i<w.size();++i) w[i] -= c*qs[k][i];
+                }
+            double cur_eval = tridiag_ground(false,dummy);
+            if (std::abs(cur_eval-prev_eval) < tol*std::max(1.0,std::abs(cur_eval)))
+                break;
+            prev_eval = cur_eval;
+            }
+
+        std::vector<Cplx> yvec;
+        double eval = tridiag_ground(true,yvec);
+        std::vector<Cplx> out(n,Cplx(0,0));
+        for (size_t k=0;k<qs.size();++k)
+            for (int i=0;i<n;++i)
+                out[i] += yvec[k]*qs[k][i];
+        return {eval,out};
+        }
+
     // Dense (D*d_g*D)x(D*d_g*D) matrix representing H_AC, built one basis
     // vector at a time.
     std::vector<Cplx>
@@ -6054,8 +7223,8 @@ class Chain
     VumpsRunResult
     vumps_single_run(int D, int d_g, std::vector<Cplx> const& h1,
                       std::vector<PendingChan> const& pending,
-                      double tol, int maxiter, VumpsInit const* init,
-                      std::mt19937_64& rng) const
+                      double tol, int maxiter, int niter_lanczos,
+                      VumpsInit const* init, std::mt19937_64& rng) const
         {
         VumpsInit start = init ? *init : vumps_random_init(D,d_g,rng);
         auto AL = start.AL, AR = start.AR, C = start.C;
@@ -6067,12 +7236,39 @@ class Chain
             {
             env = vumps_build_environments(AL,AR,D,d_g,h1,pending);
 
-            auto HAC = vumps_build_h_ac_dense(D,d_g,env.GL,env.GR,env.bond_envs,h1);
-            auto [eAC,AC_new] = vx_hermitian_ground_state(HAC,D*d_g*D);
-            (void)eAC;
-            auto HC = vumps_build_h_c_dense(D,env.GL,env.GR,env.bond_envs);
-            auto [eC,C_new] = vx_hermitian_ground_state(HC,D*D);
-            (void)eC;
+            // Dense diagonalization below vx_dense_eig_max_, matrix-free
+            // Lanczos above it -- see that constant's own comment for why
+            // the split exists and why the threshold sits where it does.
+            // The Lanczos start vector is the CURRENT AC (resp. C), which
+            // is what pyitensor/vumps.py passes too: successive outer
+            // iterations move the solution only a little, so a warm start
+            // converges in a handful of Krylov vectors.
+            int n_ac = D*d_g*D;
+            std::vector<Cplx> AC_new;
+            if (n_ac <= vx_dense_eig_max_)
+                {
+                auto HAC = vumps_build_h_ac_dense(D,d_g,env.GL,env.GR,env.bond_envs,h1);
+                AC_new = vx_hermitian_ground_state(HAC,n_ac).second;
+                }
+            else
+                {
+                auto act = [&](std::vector<Cplx> const& X)
+                    { return vumps_h_ac_action(X,D,d_g,env.GL,env.GR,env.bond_envs,h1); };
+                AC_new = vx_lanczos_ground_state(act,AC,n_ac,niter_lanczos).second;
+                }
+            int n_c = D*D;
+            std::vector<Cplx> C_new;
+            if (n_c <= vx_dense_eig_max_)
+                {
+                auto HC = vumps_build_h_c_dense(D,env.GL,env.GR,env.bond_envs);
+                C_new = vx_hermitian_ground_state(HC,n_c).second;
+                }
+            else
+                {
+                auto act = [&](std::vector<Cplx> const& X)
+                    { return vumps_h_c_action(X,D,env.GL,env.GR,env.bond_envs); };
+                C_new = vx_lanczos_ground_state(act,C,n_c,niter_lanczos).second;
+                }
 
             mismatch = vumps_gauge_mismatch(AC_new,C_new,AL,AR,D,d_g);
 
@@ -6597,6 +7793,98 @@ class Chain
         return env - shift*(src*setElt(mpo_idx(dst_chan+1)));
         }
 
+    // White's density-matrix perturbation for one side of this micro-step's
+    // two-site wavefunction -- C++ port of pyitensor/idmrg.py's own
+    // _noise_perturbed_split, itself modelled on ITensor's LocalOp::deltaRho
+    // (mpscpp3/ITensor/itensor/mps/localop.h), including its Hermitization
+    // and trace normalization.
+    //
+    // Returns the eigenvectors of  rho + noise * drho  as an isometry from
+    // `group` onto a fresh bond Index, truncated by (cutoff, maxdim), where
+    //     rho  = tr_other |theta><theta|
+    //     drho = (env . theta . W)(env . theta . W)^dag
+    // with the MPO's own crossing index left OPEN in drho, so contracting it
+    // is precisely White's sum over channels. See _noise_perturbed_split's
+    // docstring for why this is needed at all (a product state is an exact
+    // fixed point of the growth loop that no amount of solver refinement can
+    // escape) and why the channels, not H itself, are what opens new
+    // directions.
+    struct NoisyIso { ITensor U; Index bond; std::vector<double> svals; double purity; };
+
+    NoisyIso
+    idmrg_noisy_isometry(ITensor const& theta, std::vector<Index> const& group,
+                          ITensor const& env, Index env_bra, Index env_ket,
+                          bool have_env, ITensor const& W,
+                          double noise, double cutoff, int maxdim) const
+        {
+        auto [cmb,ci] = combiner(IndexSet(group),{"Tags","cmb"});
+        ITensor thetac = cmb*theta;
+        ITensor rho = thetac*dag(prime(thetac,ci));
+        // Trace-normalize before adding, so `noise` is a pure relative weight
+        // regardless of theta's own normalization.
+        Cplx trc = eltC(rho*delta(dag(ci),prime(ci)));
+        if (std::abs(trc) > 1e-300) rho /= trc.real();
+        // Purity of the NOISE-FREE reduced state: exactly 1 for a product
+        // state, strictly less for any entangled one. This, not the enriched
+        // basis, is what the noise schedule keys on -- see
+        // idmrg_ground_state's own comment.
+        // tr(rho^2): swapPrime turns rho into its own transpose, so the
+        // product contracts BOTH legs at once and lands on the trace.
+        double purity = eltC(rho*swapPrime(rho,0,1)).real();
+        if (noise > 0.0 && W)
+            {
+            ITensor t = theta;
+            if (have_env && env)
+                {
+                t *= env;
+                t = replaceInds(t,{env_bra},{env_ket});
+                }
+            t *= W;
+            t.noPrime();
+            ITensor drho = cmb*t;
+            drho = drho*dag(prime(drho,ci));
+            // "Expedient to ensure drho is Hermitian", as ITensor's own
+            // deltaRho puts it.
+            drho = drho + dag(swapPrime(drho,0,1));
+            drho /= 2.0;
+            Cplx trd = eltC(drho*delta(dag(ci),prime(ci)));
+            if (std::abs(trd) > 1e-16) { drho /= trd.real(); rho += noise*drho; }
+            }
+        ITensor Uc,D;
+        diagHermitian(rho,Uc,D);
+        Index dc = commonIndex(Uc,D);
+        // diagHermitian does not truncate: sort descending and keep by the
+        // same (cutoff, maxdim) rule svd() would have applied, with the
+        // cutoff taken on the discarded WEIGHT so numerically-zero
+        // directions are never retained.
+        int n = dim(dc);
+        std::vector<std::pair<double,int>> ev;
+        for (int k=1;k<=n;++k) ev.push_back({eltC(D,dc(k),prime(dc)(k)).real(),k});
+        std::sort(ev.begin(),ev.end(),
+                   [](auto const& a, auto const& b){ return a.first > b.first; });
+        double total = 0.0;
+        for (auto const& e : ev) total += std::max(e.first,0.0);
+        int keep = 0; double discarded = 0.0;
+        for (int k=n-1;k>=0;--k)
+            {
+            double w = std::max(ev[k].first,0.0);
+            if (total > 0.0 && (discarded+w)/total > cutoff) { keep = k+1; break; }
+            discarded += w;
+            }
+        if (keep < 1) keep = 1;
+        if (maxdim > 0 && keep > maxdim) keep = maxdim;
+        Index nb(keep,TagSet("Link"));
+        ITensor Uk(ci,nb);
+        std::vector<double> svals(keep,0.0);
+        for (int k=0;k<keep;++k)
+            {
+            for (int i=1;i<=dim(ci);++i)
+                Uk.set(ci(i),nb(k+1),eltC(Uc,ci(i),dc(ev[k].second)));
+            svals[k] = std::sqrt(std::max(ev[k].first,0.0));
+            }
+        return {dag(cmb)*Uk,nb,svals,purity};
+        }
+
     // One micro-step's local ground-state solve: the effective 2-site
     // Hamiltonian sandwiched by (HL, W_pL, W_pR, HR), diagonalized via
     // arnoldi_smallest_real(..., Sel::SR) (the smallest-real-part Ritz
@@ -6640,13 +7928,13 @@ class Chain
     // as "a line-for-line translation ... specifically to avoid
     // reintroducing bugs that were already found and fixed" in idmrg.py.
     std::tuple<double,ITensor,ITensor,Index,Index,std::vector<Cplx>,
-                std::vector<double>,ITensor>
+                std::vector<double>,ITensor,double>
     idmrg_local_solve(ITensor const& HL, ITensor const& W_pL, Index phys_L,
                        ITensor const& W_pR, Index phys_R, ITensor const& HR,
                        Index HL_bra, Index HL_ket, bool have_HL_ket,
                        Index HR_bra, Index HR_ket, bool have_HR_ket,
                        double cutoff, int maxdim, int krylovdim, int restarts,
-                       std::vector<Cplx> const& warm) const
+                       std::vector<Cplx> const& warm, double noise) const
         {
         std::vector<Index> order_in;
         if (have_HL_ket) order_in.push_back(HL_ket);
@@ -6657,7 +7945,33 @@ class Chain
         for (auto const& ind : order_in) dim_in *= (size_t)dim(ind);
         ITensor x0;
         if (have_HL_ket && have_HR_ket && warm.size()==dim_in)
+            {
             x0 = idmrg_flat4_to_tensor(warm,HL_ket,phys_L,phys_R,HR_ket);
+            if (noise > 0.0)
+                {
+                // Perturbing the START VECTOR is the other half of the
+                // noise, and on the product-state trap it is the half that
+                // does the work. Enlarging the basis (the density-matrix
+                // term in idmrg_noisy_isometry) is necessary but NOT
+                // sufficient: a product state like the vacuum is an exact
+                // eigenstate of the FULL Hamiltonian, so it stays an exact
+                // eigenvector of the local effective Hamiltonian in any
+                // basis, however enriched -- and a Krylov solve started
+                // exactly on an eigenvector breaks down on its first step
+                // and hands the same vector straight back. Confirmed on the
+                // Python side, where the density-matrix term alone grew chi
+                // away from 1 and still left the energy identically 0 for
+                // every macro-iteration. sqrt(noise) so the perturbation's
+                // WEIGHT is O(noise), matching the density-matrix term.
+                double nx = norm(x0);
+                if (nx > 0.0)
+                    {
+                    ITensor kick = randomITensorC(IndexSet(order_in));
+                    double nk = norm(kick);
+                    if (nk > 0.0) x0 = x0/nx + (std::sqrt(noise)/nk)*kick;
+                    }
+                }
+            }
         else
             x0 = randomITensorC(IndexSet(order_in));
 
@@ -6703,19 +8017,64 @@ class Chain
         std::vector<Index> left_inds;
         if (have_HL_ket) left_inds.push_back(HL_ket);
         left_inds.push_back(phys_L);
-        auto [U,S,V] = svd(theta,IndexSet(left_inds),{"Cutoff",cutoff,"MaxDim",maxdim});
-        Index new_bond_u = commonIndex(U,S);
-        Index new_bond_v = commonIndex(S,V);
+        ITensor U,S,V;
+        Index new_bond_u, new_bond_v;
+        std::vector<double> noisy_svals;
+        double purity = 1.0;
+        if (noise > 0.0)
+            {
+            // White's density-matrix perturbation instead of a plain SVD --
+            // see idmrg_noisy_isometry's own comment. U and V come from two
+            // INDEPENDENTLY perturbed density matrices (this loop extends
+            // HL and HR in the same micro-step, unlike a finite sweep which
+            // only ever needs one direction), so they are no longer an SVD
+            // pair of theta -- which nothing here requires: extend_HL and
+            // extend_HR each transform through one factor alone, and the two
+            // bonds have always been independent.
+            std::vector<Index> right_inds;
+            right_inds.push_back(phys_R);
+            if (have_HR_ket) right_inds.push_back(HR_ket);
+            auto L = idmrg_noisy_isometry(theta,left_inds,HL,HL_bra,HL_ket,
+                                           have_HL_ket,W_pL,noise,cutoff,maxdim);
+            auto R = idmrg_noisy_isometry(theta,right_inds,HR,HR_bra,HR_ket,
+                                           have_HR_ket,W_pR,noise,cutoff,maxdim);
+            // V is the RIGHT-orthonormal factor, i.e. the conjugate of the
+            // isometry that maps the right group onto its own new bond.
+            U = L.U; new_bond_u = L.bond;
+            V = dag(R.U); new_bond_v = R.bond;
+            noisy_svals = L.svals;
+            purity = L.purity;
+            }
+        else
+            {
+            std::tie(U,S,V) = svd(theta,IndexSet(left_inds),{"Cutoff",cutoff,"MaxDim",maxdim});
+            new_bond_u = commonIndex(U,S);
+            new_bond_v = commonIndex(S,V);
+            }
         // The singular values themselves -- discarded by the growth loop's
         // own HL/HR extension (see this method's own comment above), but
         // needed verbatim by McCulloch's wavefunction prediction and by the
         // gauge-consistent unit-cell extraction (idmrg_wavefunction_prediction/
         // idmrg_theta_cell), both of which work in Vidal's Gamma/lambda form.
         // C++ analogue of pyitensor/idmrg.py's own _svd_singular_values.
-        std::vector<double> svals((size_t)dim(new_bond_u),0.0);
-        for (int k=1;k<=dim(new_bond_u);++k)
-            svals[k-1] = eltC(S,new_bond_u(k),new_bond_v(k)).real();
-        return {energy,U,V,new_bond_u,new_bond_v,theta_flat,svals,theta};
+        std::vector<double> svals;
+        if (noise > 0.0)
+            svals = noisy_svals;   // sqrt of rho's retained eigenvalues
+        else
+            {
+            svals.assign((size_t)dim(new_bond_u),0.0);
+            for (int k=1;k<=dim(new_bond_u);++k)
+                svals[k-1] = eltC(S,new_bond_u(k),new_bond_v(k)).real();
+            }
+        if (noise <= 0.0)
+            {
+            // Same purity the noisy branch reports, read off the Schmidt
+            // values the SVD already produced.
+            double tot=0.0, sq=0.0;
+            for (double sv : svals) { double w=sv*sv; tot+=w; sq+=w*w; }
+            purity = (tot>0.0) ? sq/(tot*tot) : 1.0;
+            }
+        return {energy,U,V,new_bond_u,new_bond_v,theta_flat,svals,theta,purity};
         }
 
     // Absorb the newly-solved left-canonical site tensor U into HL, using
@@ -8678,6 +10037,17 @@ class Chain
     // Hamiltonian for a second eigenpair -- C++ analogue of
     // pyitensor/idmrg.py's own IDMRGResult.local_superblock.
     bool have_idmrg_superblock_ = false;
+    // Sequential multi-site VUMPS snapshot (n_uc>2) -- the per-site
+    // tensors vms_onsite_expectation/vms_two_point_correlator read. Kept
+    // separate from the grouped vumps_* snapshot rather than overloading
+    // it: they are different representations, and a grouped consumer
+    // reading a per-site list as one tensor is exactly the failure this
+    // separation prevents.
+    std::vector<std::vector<Cplx>> vms_AL_, vms_AR_, vms_C_, vms_AC_;
+    std::vector<IdmrgAutomatonRow> vms_rows_;
+    int vms_D_ = 0;
+    bool have_vms_snapshot_ = false;
+
     ITensor idmrg_sb_HL_, idmrg_sb_HR_, idmrg_sb_W_pL_, idmrg_sb_W_pR_, idmrg_sb_theta_;
     Index idmrg_sb_HL_bra_, idmrg_sb_HL_ket_, idmrg_sb_HR_bra_, idmrg_sb_HR_ket_;
     Index idmrg_sb_phys_L_, idmrg_sb_phys_R_;

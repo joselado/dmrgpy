@@ -1114,11 +1114,132 @@ uses for the ground-state energy density), a reassuring result precisely
 where the tangent-space ansatz offers nothing at all. See
 `examples/idmrg/local_excitation_gap/main.py` for the worked comparison.
 
+**Sequential multi-site VUMPS** (`pyitensor/vumps_ms.py`). The unit cell may
+have any number of sites. `vumps.py`'s original support for a multi-site
+cell was `_group_automaton`: fold the `n_uc` sites into one supersite of
+dimension `prod(d_p)` and run the single-site algorithm, which is exact but
+exponential in the cell size and is why it rejected `n_uc > 2`. The
+literature names that as the trap rather than an implementation detail
+(arXiv:2003.01142: "the cost of a naive application of the VUMPS algorithm
+would scale exponentially with the size of the unit cell ... a computational
+effort that scales linearly rather than exponentially"), so `n_uc > 2` now
+routes to the sequential algorithm instead: per-site `AL[n]`/`AR[n]`/`C[n]`,
+one `H_AC[n]` eigenproblem per site and one `H_C[n]` per bond, swept across
+the cell.
+
+Two things generalize, not one. Beyond the site count, the environments
+become fully channel-resolved -- `GL[n]`, `GR[n]` are `(Dw, D, D)`, one
+matrix per MPO channel -- because `vumps.py`'s reach-1 specialization (one
+accumulated `GL`, one `GR`, a list of one-site-away bond channels, guarded
+by `_check_reach_one`) is exactly what grouping bought: any coupling inside
+the cell is on-site once the cell is one supersite, and ungrouped it is not.
+The channel-resolved form subsumes the reach-1 one; reading `vumps.py`'s own
+`_h_c_action` in that language shows its `_cap_right(C,GR)` is the `S`
+channel, `_cap_left(GL,C)` is `F`, and its bond terms are the pending
+channels.
+
+`n_uc <= 2` deliberately stays on the grouped path so its validated values
+do not move, and because `idmrg_excitations`' tangent-space ansatz consumes
+the grouped mixed gauge (`excitation_energies` raises for `n_uc > 2` rather
+than reading a list of per-site tensors as one tensor). Cross-checks in
+`tests/test_vumps_multisite.py`: machine-precision agreement with the
+grouped path at `n_uc = 1, 2`; exact TFIM energy and magnetization; a
+trimerized free-fermion chain against its own 3-band integral with genuinely
+non-uniform per-site occupations; and cell-size invariance, including the
+same 3-periodic chain written on a 6-site cell.
+
+**Product-state traps in the growing algorithm, and the noise that breaks
+them** (`pyitensor/idmrg.py::_noise_perturbed_split`,
+`Chain::idmrg_noisy_isometry`). A particle-number-conserving Hamiltonian has
+the vacuum as an exact eigenstate, hence an absorbing fixed point of the
+growth loop: rank-1 state, warm-started solve returns it unchanged, no
+mechanism to regrow `chi`, and `etol` trips immediately because consecutive
+densities are identically equal. Both backends collapsed identically on a
+dimerized spinless-fermion chain at uniform `mu=+1.25` (6 runs of 6),
+returning `e = n = 0` where the band integral gives `e/site = -0.01648450`
+at `n/site = 0.166092` — a shared algorithmic gap, not a porting bug.
+
+The cure has two halves and the second is the load-bearing one here: White's
+density-matrix perturbation built from the individual MPO *channels* (using
+`H|theta>` would be useless — it is parallel to `|theta>` at an eigenstate),
+plus a random admixture of weight `O(noise)` on the local solve's start
+vector, because a product state stays an exact eigenvector of the local
+effective Hamiltonian in any basis however enriched, and a Krylov solve
+started on an exact eigenvector breaks down immediately. Measured: the
+density-matrix term alone grew `chi` off 1 and left the energy identically 0
+for every macro-iteration.
+
+The schedule is demand-driven rather than a fixed iteration count, for two
+measured reasons: escape depends on duration not magnitude (`1e-4` over 12
+iterations escapes, `0.1` over 10 does not), and a fixed schedule perturbed
+healthy runs enough to regress a correlator test by 1.3e-6 against a 1e-6
+tolerance. Noise therefore arms only while the noise-free reduced state has
+purity 1 (i.e. is a product state), plus a short tail; an entangled model
+never arms it. `noise_iters` caps the total so a legitimately-product ground
+state stops re-arming, and `etol` is suppressed while noise is active so a
+perturbed state is never reported as converged.
+
+**The deflated excited solve must shift, not merely project**
+(`pyitensor/idmrg.py::_lowest_two_eigenvalues`, and its C++ port inside
+`Chain::idmrg_local_excitation_gap`). The obvious implementation — build
+`P = I - |psi0><psi0|` and hand `P H P` to a smallest-eigenvalue solver —
+is wrong. `P H P` agrees with `H` on `psi0`'s orthogonal complement, but it
+also carries `psi0` itself at eigenvalue *exactly zero*. That extra
+eigenvalue is invisible while the rest of the spectrum lies below zero, and
+fatal the moment the stored operator's own ground eigenvalue is positive:
+zero is then `P H P`'s smallest eigenvalue and precisely what the solver
+returns, so the reported gap is `0 - e0` — minus the stored superblock
+energy. Reported from an external Kondo-chain session at `maxm=16` as
+−358.003 meV against a stored energy of +0.358002587681, digit for digit,
+and reproduced in isolation on a random Hermitian matrix shifted to a
+positive ground energy (`tests/test_idmrg_local_gap_deflation.py`), where
+the deflated solve returns 0.0 with `|<psi0|v>|**2 = 1`, i.e. `psi0` itself.
+Deflation excludes `psi0` from the Krylov space in exact arithmetic only;
+rounding regrows the component every iteration and a restarted solver locks
+onto it. Which models this hits is not under anyone's control — the per-site
+baseline (`_subtract_energy_baseline`) leaves the stored energy as a small
+residual boundary term of either sign, so the same model was correct at
+`maxm=8` (energy −1.05) and wrong at `maxm=16` (+0.358). Both backends now
+diagonalize `P H P + sigma |psi0><psi0|` with `sigma` far above the bottom
+of the spectrum. Two safety nets sit on top, both no-ops normally: if the
+solve still returns something sitting on `psi0`, `sigma` is raised and the
+solve retried; if it returns something *below* the accepted ground
+eigenvalue, that lower state is promoted and the deflation redone.
+
+**Both eigenvalues come from the stored superblock, at the same solver
+strength.** The ground one is not read back from the growing algorithm even
+though its stored value is by construction the Ritz value of the stored
+local ground vector: that loop warm-starts every micro-step from McCulloch's
+prediction and stops on a *relative* Ritz-value criterion, which bounds the
+distance to *some* eigenvalue rather than to the lowest one, so mixing its
+number with a strong random-started solve is not a difference of two
+eigenvalues of one operator. The detail entry point
+(`Chain::idmrg_local_excitation_gap_detail`, `detail=True` on the Python
+side) hands back both ground eigenvalues so `infinitechain.py`'s
+`_warn_if_growth_missed_local_ground_state` can raise a `RuntimeWarning`
+when they disagree.
+
+**The local superblock gap is not a fixed-charge quantity.** Neither backend
+conserves QNs (`ConserveQNs=false` in `mpscpp3/get_sites.h`, and `pyitensor`
+likewise), so the 2-site local spectrum contains particle-number-changing
+excitations against the frozen environment. Measured exactly, by dense
+diagonalization of the stored superblock on a gapped SSH spinless-fermion
+chain at `maxm=16`: at `mu=0` the second and third eigenvalues are exactly
+degenerate (the ±1-electron pair) and the gap is 0.631321; adding `mu` to
+every on-site energy splits them and the gap becomes 0.431325 / 0.431324 at
+`mu=±0.2` — exactly `|mu|` lower — while the converged state, its energy
+density per the shift, and its correlators to 8 decimals are unchanged, and
+the stored ground vector remains the exact ground state (overlap 1.0000)
+throughout. So "add a constant to every on-site term and assert the gap is
+unchanged" is *not* a valid invariance test for this estimator, however
+reasonable it looks: a correct implementation fails it. It is a real
+limitation of the quantity, not of the code.
+
 **Tightening the local superblock gap further: `window=`
 (`pyitensor/idmrg.py::local_excitation_gap_windowed`)**: rather than adding
 Krylov vectors to the same frozen 2-site block — `local_excitation_gap`'s
-own `dim>3` branch already diagonalizes that exactly via deflated Lanczos,
-so more iterations there cannot change the answer — this grows the local
+own `dim>3` branch already diagonalizes that to Krylov convergence, so more
+iterations there do not change the answer — this grows the local
 block itself by `window` extra *free* physical sites on each side, using
 fresh copies of the periodic per-sublattice MPO tensor (`_build_automaton`)
 threaded onto `HL`/`HR`'s own mpo axis via the same `_relabel_pos`/
