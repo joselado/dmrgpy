@@ -339,22 +339,39 @@ growing algorithm (see below) and keeps the resulting
 \texttt{IDMRGResult} in \texttt{self.\_result} for
 \texttt{vev}/\texttt{correlator} to reuse. \texttt{itensor\_version=3}
 instead calls the compiled \texttt{mpscpp3} backend's
-\texttt{Chain::idmrg\_ground\_state} directly -- originally a
-line-by-line C++ port of the same algorithm (built from the start with
-fresh Index objects on every automaton tensor to sidestep the
-duplicate-Index bug class described below, rather than needing the same
-retrofit), but \textbf{no longer equivalent}: the Python side has since
-gained the wavefunction prediction, the theta-cell extraction and the
-energy baseline described below, and none of the three has been ported.
-The cross-backend test
-(\texttt{test\_itensor\_version3\_matches\_python\_backend}) compares
-only the energy density, which was never the part that differed, so it
-does not guard this -- see \texttt{CLAUDE.md} for the standing note. It is
-used for the energy density only; it has no static-correlator support, so
-\texttt{self.\_result} is left \texttt{None} on that path and
-\texttt{vev}/\texttt{correlator} raise \texttt{NotImplementedError}
-regardless of whether \texttt{gs\_energy} itself already ran
-successfully. Benchmarked (S=1/2 uniform Heisenberg chain,
+\texttt{Chain::idmrg\_ground\_state} directly -- a line-by-line C++ port
+of the same algorithm (built from the start with fresh Index objects on
+every automaton tensor to sidestep the duplicate-Index bug class
+described below, rather than needing the same retrofit). The two
+implementations had diverged for a while -- the Python side gained
+McCulloch's wavefunction prediction, the theta-cell extraction and the
+energy baseline described below, and none of the three was ported -- but
+\textbf{all three are ported now}
+(\texttt{idmrg\_wavefunction\_prediction}, \texttt{idmrg\_theta\_cell} +
+\texttt{ic\_canonicalize\_cell},
+\texttt{idmrg\_subtract\_energy\_baseline}), and with the unit cell in
+hand the static observables built on it follow:
+\texttt{Chain::idmrg\_onsite\_expectation},
+\texttt{Chain::idmrg\_two\_point\_correlator} and
+\texttt{Chain::idmrg\_local\_excitation\_gap}. So
+\texttt{vev}/\texttt{correlator} work under \texttt{gs\_method="idmrg"} on
+this backend too; \texttt{self.\_result} is still left \texttt{None} on
+the v3 path (it is a \texttt{"python"}-backend-only cache), because
+everything the v3 observables need lives inside the C++ \texttt{Chain} as
+private snapshots. \texttt{test\_itensor\_version3\_matches\_python\_backend}
+now compares the converged \emph{state} (\texttt{vev} plus a short
+\texttt{correlator} sweep) rather than only the energy density, which was
+never the part that differed, so the divergence is guarded rather than
+merely documented;
+\texttt{tests/test\_idmrg\_correlator\_v3.py} covers the new surface
+directly. What stays \texttt{"python"}-only:
+\texttt{local\_excitation\_gap}'s \texttt{window>0} variant (an explicit
+prototype rather than stable API) and the iMPS algebra over
+\texttt{IDMRGResult}
+(\texttt{imps\_overlap}/\texttt{apply\_mpo}/\texttt{imps\_sum}), which
+\texttt{infinitechain.py} does not expose for \texttt{gs\_method="idmrg"}
+anyway and which the VUMPS path already covers on this backend.
+Benchmarked (S=1/2 uniform Heisenberg chain,
 \texttt{maxm=30}, \texttt{maxiter=60}, \texttt{etol=1e-9}): v3 is
 $\sim$2.6--2.7x slower than \texttt{"python"} at both \texttt{n\_uc=1}
 and \texttt{n\_uc=2}, with energy-density agreement between the two
@@ -500,10 +517,16 @@ final trace closure. \texttt{Infinite\_Many\_Body\_Chain.vev}/
 \texttt{idmrg.py}'s or \texttt{vumps.py}'s version directly.
 \texttt{local\_excitation\_gap} remains \texttt{gs\_method="idmrg"}-only
 (it re-diagonalizes the growing algorithm's own final 2-site effective
-Hamiltonian, which has no VUMPS equivalent). \texttt{itensor\_version=3}
-now mirrors this too for \texttt{gs\_method="vumps"} (see below) --
-\texttt{gs\_method="idmrg"} there still has no correlator support at all
-(\texttt{IdmrgResult} keeps no per-sublattice unit cell) --
+Hamiltonian, which has no VUMPS equivalent; its \texttt{window>0}
+variant is additionally \texttt{itensor\_version="python"}-only, being an
+explicit prototype rather than stable API). \texttt{itensor\_version=3}
+mirrors all of this: both \texttt{gs\_method} values support
+\texttt{vev}/\texttt{correlator} there
+(\texttt{Chain::vumps\_onsite\_expectation}/\texttt{vumps\_two\_point\_correlator}
+and
+\texttt{Chain::idmrg\_onsite\_expectation}/\texttt{idmrg\_two\_point\_correlator}),
+and \texttt{local\_excitation\_gap} at \texttt{window=0} maps onto
+\texttt{Chain::idmrg\_local\_excitation\_gap}.
 \texttt{excitation\_energies}/\texttt{excitation\_gap} are the opposite of
 \texttt{vev}/\texttt{correlator}: they require \texttt{gs\_method="vumps"}
 (see below), since the tangent-space excitation ansatz needs exactly the
@@ -3808,7 +3831,7 @@ Path & Contents \\
 \endhead
 \texttt{src/dmrgpy/} & the Python library \\
 \texttt{src/dmrgpy/manybodychain.py} & \texttt{Many\_Body\_Chain}, the shared base class \\
-\texttt{src/dmrgpy/infinitechain.py}, \texttt{pyitensor/idmrg.py}, \texttt{mpscpp3/chain\_session.h} & \texttt{Infinite\_Many\_Body\_Chain} and infinite DMRG (iDMRG), pyitensor + ITensor v3 (energy density only on v3) \\
+\texttt{src/dmrgpy/infinitechain.py}, \texttt{pyitensor/idmrg.py}, \texttt{mpscpp3/chain\_session.h} & \texttt{Infinite\_Many\_Body\_Chain} and infinite DMRG (iDMRG), pyitensor + ITensor v3 (energy density, static correlators and local gap on both) \\
 \texttt{src/dmrgpy/multioperator.py}, \texttt{multioperatortk/} & backend-agnostic operator representation \\
 \texttt{src/dmrgpy/mode.py}, \texttt{cppext.py} & DMRG/ED and backend dispatch \\
 \texttt{src/dmrgpy/mpscpp2/}, \texttt{mpscpp3/} & vendored ITensor C++ (v2, v3) + pybind11 bindings \\

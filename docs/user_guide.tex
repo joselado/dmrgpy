@@ -2231,17 +2231,18 @@ supported (pass it as a constructor keyword, e.g.\
 and \texttt{"julia\_live"} have no iDMRG port and also raise
 \texttt{NotImplementedError}. \texttt{ic.gs\_method} (\texttt{"vumps"} by
 default, on EITHER backend since 2026-08-08 -- see below) picks the
-ground-state solver: the v3 C++ backend's \texttt{gs\_method="idmrg"}
-(\texttt{mpscpp3/chain\_session.h}'s \texttt{Chain::idmrg\_ground\_state},
-originally a line-by-line port of
-\texttt{pyitensor/idmrg.py}'s own growing algorithm, though the two have
-since diverged -- the Python side gained the wavefunction prediction and
-the gauge-consistent unit-cell extraction described below, and the C++
-port has neither, so treat it as energy-density-only) computes the energy
-density only -- \texttt{vev}/
-\texttt{correlator} there raise \texttt{NotImplementedError};
-\texttt{gs\_method="vumps"} supports \texttt{vev}/\texttt{correlator} on
-BOTH backends (see "Static correlators" below). Relative speed depends
+ground-state solver. Both solvers, on both backends, support
+\texttt{vev}/\texttt{correlator} (see "Static correlators" below): the v3
+C++ backend's \texttt{gs\_method="idmrg"}
+(\texttt{mpscpp3/chain\_session.h}'s \texttt{Chain::idmrg\_ground\_state})
+is a line-by-line port of \texttt{pyitensor/idmrg.py}'s own growing
+algorithm, and the three things the Python side had gained since that
+port -- McCulloch's wavefunction prediction, the gauge-consistent
+unit-cell extraction described below, and the per-site energy baseline --
+are ported too, along with the static observables built on them
+(\texttt{Chain::idmrg\_onsite\_expectation},
+\texttt{Chain::idmrg\_two\_point\_correlator} and
+\texttt{Chain::idmrg\_local\_excitation\_gap}). Relative speed depends
 on the model: v3's own \texttt{idmrg\_ground\_state} is $\sim$2.6--2.7x
 slower than \texttt{"python"}'s for a gapless (critical) chain (the
 local 2-site solve needs close to its full Krylov dimension every
@@ -2382,15 +2383,13 @@ including a hopping that skips a site so a real string is involved.
 automatically by \texttt{vev}/\texttt{correlator} if not already run),
 one- and two-point expectation values of the converged infinite chain are
 available via the standard infinite-MPS transfer-matrix formalism.
-\texttt{itensor\_version="python"} supports this under both
-\texttt{gs\_method="vumps"} (the default, see below) and
-\texttt{gs\_method="idmrg"} (described in this paragraph);
-\texttt{itensor\_version=3} supports it under \texttt{gs\_method="vumps"}
-only -- calling \texttt{vev}/\texttt{correlator} on an
-\texttt{itensor\_version=3} chain with \texttt{gs\_method="idmrg"} still
-raises \texttt{NotImplementedError} (even after a successful
-\texttt{gs\_energy()}), since that solver's result keeps no
-per-sublattice tensor list to build a correlator from:
+All four combinations work: \texttt{itensor\_version}
+\texttt{"python"} or \texttt{3}, each under \texttt{gs\_method="vumps"}
+(the default, see below) or \texttt{gs\_method="idmrg"} (described in this
+paragraph). The two backends are cross-checked directly against each
+other (\texttt{tests/test\_idmrg\_correlator\_v3.py},
+\texttt{examples/idmrg/idmrg\_correlator\_python\_VS\_v3}), agreeing to
+$\sim$1e-8 or tighter on a gapped chain:
 
 \begin{lstlisting}
 ic.vev("Sz", 0)                    # <Sz> at site 0 of the unit cell
@@ -2400,7 +2399,13 @@ ic.correlator("Sz", 0, "Sz", r)    # <Sz(0) Sz(0+r)>, r measured in physical sit
 These are reconstructed \emph{after} convergence, from the
 gauge-consistent unit cell the growing algorithm extracts from a single
 micro-step's own two-site wavefunction (\texttt{pyitensor/idmrg.py}'s
-\texttt{\_theta\_cell}). Two cheap diagnostics are worth knowing about.
+\texttt{\_theta\_cell}, \texttt{Chain::idmrg\_theta\_cell} on the C++
+side). Fermionic operators are handled: the Jordan-Wigner string is
+threaded across every site strictly between the two endpoints, so
+\texttt{ic.correlator("Cdag", 0, "C", r)} is the physical fermionic
+correlator, not a stringless product of two bare matrices (a pair of odd
+total fermion parity, whose string could never close, raises
+\texttt{ValueError}). Two cheap diagnostics are worth knowing about.
 $\langle H_{uc}\rangle$ -- the sum of every bond's correlator inside one
 unit cell -- must equal \texttt{n\_uc * density} exactly for any
 translationally invariant state, so it is a model-agnostic check on
@@ -2492,9 +2497,11 @@ itself (same caveat as the energy density, see below).
 \texttt{local\_excitation\_gap} is the one method that still requires
 \texttt{gs\_method="idmrg"} specifically (it re-diagonalizes the growing
 algorithm's own final 2-site effective Hamiltonian, which has no VUMPS
-equivalent), and only on \texttt{itensor\_version="python"} at that
-(\texttt{itensor\_version=3} has no correlator machinery under
-\texttt{gs\_method="idmrg"} at all, see above); conversely
+equivalent), on either backend at \texttt{window=0}
+(\texttt{Chain::idmrg\_local\_excitation\_gap} for
+\texttt{itensor\_version=3}); its \texttt{window>0} variant is
+\texttt{itensor\_version="python"}-only, being an explicit prototype
+rather than stable API; conversely
 \texttt{excitation\_energies}/\texttt{excitation\_gap} (below)
 \emph{require} \texttt{gs\_method="vumps"} (the default) -- they need
 \texttt{VUMPSResult}'s own mixed-gauge \texttt{\{AL,AR,C,GL,GR\}}, which
@@ -2661,6 +2668,9 @@ long, and the physical dimension \texttt{d=3} makes each extra site pair
 \texttt{n\_uc=1} is supported for \texttt{w>0} -- widening needs to know
 which sublattice position each extra site takes, which is not tracked for
 \texttt{n\_uc=2} yet (raises \texttt{NotImplementedError}).
+\texttt{w>0} is also \texttt{itensor\_version="python"}-only: it is a
+prototype rather than stable API, so it was deliberately left out of the
+v3 C++ port (which does cover \texttt{w=0}).
 
 \textbf{Dynamical correlators (finite-window KPM).}
 \texttt{ic.kpm\_finite(opname\_i, p\_i, opname\_j, r,

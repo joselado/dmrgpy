@@ -193,9 +193,38 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "Chain must have been constructed with site_types = the "
                "n_uc-site unit cell (not a full chain), see "
                "Chain::idmrg_ground_state's own comment for the algorithm "
-               "and scope (Hermitian, n_uc<=2, no fermionic terms, no "
-               "static correlators yet). Returns (density, converged, "
-               "niter_done).")
+               "and scope (Hermitian, n_uc<=2; fermionic terms ARE "
+               "supported). Returns (density, converged, niter_done). "
+               "Leaves a converged unit-cell snapshot on this Chain, so "
+               "idmrg_onsite_expectation/idmrg_two_point_correlator/"
+               "idmrg_local_excitation_gap can be called afterwards.")
+        .def("idmrg_onsite_expectation",[](Chain& self, std::string const& opname, int p) {
+                return self.idmrg_onsite_expectation(opname,p);
+            }, py::arg("opname"),py::arg("p"),
+               "<opname> at sublattice p (0..n_uc-1) of a converged "
+               "idmrg_ground_state()'s infinite chain -- requires "
+               "idmrg_ground_state to have been called first on this same "
+               "Chain. See Chain::idmrg_onsite_expectation's own comment.")
+        .def("idmrg_two_point_correlator",[](Chain& self, std::string const& opname_i,
+                                              int p_i, std::string const& opname_j, int r) {
+                return self.idmrg_two_point_correlator(opname_i,p_i,opname_j,r);
+            }, py::arg("opname_i"),py::arg("p_i"),py::arg("opname_j"),py::arg("r"),
+               "<opname_i(site p_i) opname_j(site p_i+r)> of a converged "
+               "idmrg_ground_state()'s infinite chain, r in physical sites "
+               "(r>=0) -- requires idmrg_ground_state to have been called "
+               "first on this same Chain. Jordan-Wigner strings are threaded "
+               "for fermionic operators; see "
+               "Chain::idmrg_two_point_correlator's own comment.")
+        .def("idmrg_local_excitation_gap",[](Chain& self, int niter) {
+                return self.idmrg_local_excitation_gap(niter);
+            }, py::arg("niter")=200,
+               "The \"local superblock gap\": the second-lowest eigenvalue of "
+               "the growing algorithm's own final 2-site effective "
+               "Hamiltonian, minus its ground-state eigenvalue -- requires "
+               "idmrg_ground_state to have been called first on this same "
+               "Chain. A cheap, momentum-less cross-check, not a "
+               "variationally optimal excited state; see "
+               "Chain::idmrg_local_excitation_gap's own comment.")
         .def("vumps_ground_state",[](Chain& self, std::vector<PyTerm> const& terms_intra,
                                       std::vector<PyTerm> const& terms_inter,
                                       int D, double tol, int maxiter, int nrestarts) {

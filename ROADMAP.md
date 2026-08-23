@@ -246,10 +246,9 @@ model-specific exception:
    `Chain::vumps_onsite_expectation`/`Chain::vumps_two_point_correlator`
    (`mpscpp3/chain_session.h`) close the correlator half of the gap item
    7 above left open (that item ported the ground-state solver and the
-   excitation ansatz, but explicitly not `vev`/`correlator` — `v3`'s
-   `IdmrgResult` keeps no per-sublattice `U_list`, so `gs_method="idmrg"`
-   still has no correlator support at all on this backend, and did not
-   before this item either). Same deliberate architecture as item 7's own
+   excitation ansatz, but explicitly not `vev`/`correlator`). At the time,
+   `gs_method="idmrg"` still had no correlator support at all on this
+   backend; item 9 below closes that half too. Same deliberate architecture as item 7's own
    port: a line-for-line dense-array translation of `pyitensor/vumps.py`'s
    `onsite_expectation`/`two_point_correlator` (`AC`'s exact normalization
    and `AR`'s exact right-orthonormality mean neither the left nor the
@@ -294,6 +293,44 @@ model-specific exception:
   case where the Julia ecosystem already has the algorithm and the work
   is reconciling *its* conventions with dmrgpy's rather than porting
   anything.
+
+9. **iDMRG growing-algorithm static correlators and local gap, ported to
+   `itensor_version=3`.** `Chain::idmrg_onsite_expectation`/
+   `Chain::idmrg_two_point_correlator`/`Chain::idmrg_local_excitation_gap`
+   (`mpscpp3/chain_session.h`) close the last piece item 8 above left
+   open, and with it the whole `gs_method="idmrg"` half of the v3 iDMRG
+   surface. They rest on three prerequisites from `pyitensor/idmrg.py`
+   that the original C++ port never got and that this item ported first:
+   McCulloch's wavefunction prediction as each micro-step's Krylov start
+   (`idmrg_wavefunction_prediction`), extraction of the gauge-consistent
+   unit cell from a single micro-step's theta (`idmrg_theta_cell` +
+   `ic_canonicalize_cell`), and the per-site energy baseline subtracted
+   from both growing environments (`idmrg_subtract_energy_baseline`) —
+   the unit cell in particular is a hard prerequisite, since tiling the
+   raw per-micro-step factors instead leaves the energy correct while
+   getting correlators wrong by orders of magnitude (and, on the XX
+   chain, by a sign). The observables themselves are a dense-array
+   translation of `idmrg.py`'s transfer-matrix machinery (`ic_*`, same
+   architecture as items 7/8's `vx_*`), with two performance departures
+   that do not change any returned number: the measurement-independent
+   fixed points are cached per ground-state run instead of resolved per
+   call, and an operator string is applied to the fixed point site by
+   site (O(chi^4)) instead of composed as transfer matrices (O(chi^6)).
+   `td_dynamical_correlator_window`'s own connected-background
+   subtraction was switched onto the same cell-based expectation value,
+   fixing a latent gauge bug there. Validated against exact closed-form
+   values (a field-polarized product state; the `<H_uc> = n_uc*e0`
+   translational-invariance identity, which is what actually guards the
+   gauge), against `itensor_version="python"` on gapped spin and
+   fermionic chains including Jordan-Wigner-strung correlators, and on
+   the local gap — see `tests/test_idmrg_correlator_v3.py`,
+   `tests/test_infinite_chain.py::test_itensor_version3_matches_python_backend`
+   (which now compares the converged *state*, not just `e0`), and
+   `examples/idmrg/idmrg_correlator_python_VS_v3/main.py`. Still
+   `"python"`-only: `local_excitation_gap(window>0)` (a prototype, not
+   stable API) and the iMPS algebra over `IDMRGResult`
+   (`imps_overlap`/`apply_mpo`/`imps_sum`), neither of which
+   `infinitechain.py` exposes for `gs_method="idmrg"`.
 
 After adding a capability to a backend, update this file's matrix and,
 if it's a new physics-facing method, `docs/user_guide.md`/`.tex` per

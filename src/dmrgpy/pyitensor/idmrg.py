@@ -1807,12 +1807,85 @@ def _expectation(Es, running, running_id, rho_after_j, k_start, n_cell):
     for spin-1/2, since the numerator and denominator then no longer share a
     boundary. And the denominator has to be the *same* contraction with the
     operators dropped (`running_id`), so any residual normalization error
-    cancels between the two rather than only mostly cancelling."""
+    cancels between the two rather than only mostly cancelling.
+
+    Kept for `_canonicalize_periodic`-style callers that hold only a raw
+    `Es`; the static observables themselves go through `_correlator_env`
+    (which caches `_all_left_fixed_points`, by far the expensive part here)
+    and close with `_close_expectation` directly."""
     l_before, _eta, _scales = _all_left_fixed_points(Es, n_cell)
-    l = l_before[k_start % n_cell]
-    num = np.einsum('lL,lL->', l, _apply_transfer(running, rho_after_j))
-    den = np.einsum('lL,lL->', l, _apply_transfer(running_id, rho_after_j))
+    return _close_expectation(l_before[k_start % n_cell],
+                              _apply_transfer(running, rho_after_j),
+                              _apply_transfer(running_id, rho_after_j))
+
+
+def _close_expectation(l, x_num, x_den):
+    """`_expectation`'s own final closure, given the left fixed point at the
+    string's starting position and the two already-propagated boundary
+    matrices -- split out so callers that propagate site by site (see
+    `_apply_site_transfer`) never have to build a composed transfer matrix
+    just to hand it to `_apply_transfer` once."""
+    num = np.einsum('lL,lL->', l, x_num)
+    den = np.einsum('lL,lL->', l, x_den)
     return complex(num / den)
+
+
+def _apply_site_transfer(A, M, rho):
+    """One site's transfer tensor applied to a boundary matrix, *without*
+    ever forming the (chi,chi,chi,chi) tensor itself:
+
+        out[l,L] = sum_{p,r,R} (M^T A)[l,p,r] rho[r,R] conj(A)[L,p,R]
+
+    `A` is the cell tensor as (chi_l, d, chi_r); `M` its operator matrix in
+    the (in,out) convention (`None` = the plain transfer tensor).
+
+    This is the same quantity `_apply_transfer(_op_transfer_mat(...), rho)`
+    computes, re-associated: building the transfer tensor costs O(chi^4 d)
+    and applying it another O(chi^4), whereas contracting rho in first makes
+    both halves O(chi^3 d). Exact, not approximate -- only the contraction
+    order changes."""
+    Aop = A if M is None else M.T @ A            # 'io,lir->lor'
+    tmp = np.tensordot(Aop, rho, axes=([2], [0]))                # (l, p, R)
+    return np.tensordot(tmp, np.conj(A), axes=([1, 2], [1, 2]))  # (l, L)
+
+
+class _CorrelatorEnv:
+    """Everything a static observable on a converged unit cell needs that
+    does NOT depend on which operator is being measured: the tiled cell, its
+    per-position transfer tensors, and both families of transfer-matrix
+    fixed points.
+
+    Cached on the result object (`_correlator_env`) because it is both
+    reusable and by far the dominant cost of a measurement -- the fixed
+    points are chi^2 x chi^2 eigenproblems (dense `eig` or ARPACK, see
+    `_DENSE_EIG_MAX`), and nothing about them changes between one
+    `onsite_expectation`/`two_point_correlator` call and the next. Rebuilding
+    them per call, which this module used to do (twice per call, in fact --
+    `_expectation` solved the left family again on its own), made a
+    seven-point correlator sweep cost seven-plus full eigensolves instead of
+    one."""
+
+    def __init__(self, result):
+        self.cell, self.n_cell = _correlator_cell(result)
+        self.Es = _transfer_matrices(self.cell, self.n_cell)
+        self.rho_after, self.eta = _all_right_fixed_points(self.Es, self.n_cell)
+        self.l_before, _eta_l, _scales = _all_left_fixed_points(self.Es, self.n_cell)
+
+
+def _correlator_env(result):
+    """`_CorrelatorEnv` for `result`, built once and memoized on it.
+
+    Invalidated by identity of the tiled cell rather than blindly trusted:
+    every ordinary producer of a result (`idmrg_ground_state`, `apply_mpo`,
+    `imps_sum`) builds a *fresh* object whose tensors are then never
+    mutated, so this only ever guards against a caller swapping a cell in
+    by hand."""
+    cell, _n_cell = _correlator_cell(result)
+    env = getattr(result, "_corr_env", None)
+    if env is None or env.cell is not cell:
+        env = _CorrelatorEnv(result)
+        result._corr_env = env
+    return env
 
 
 # Transfer-matrix eigenproblems (chi^2 x chi^2) at or below this size are
@@ -1828,6 +1901,12 @@ def _expectation(Es, running, running_id, rho_after_j, k_start, n_cell):
 # Deliberately low rather than "large enough to never trigger" -- a test
 # monkeypatches it to 0 to check the two paths agree.
 _DENSE_EIG_MAX = 64
+
+# ARPACK's Krylov subspace size for those iterative solves (see
+# `_dominant_fixed_point`, where the measurements behind this number are).
+# Matches the krylovdim mpscpp3/chain_session.h's own ic_arnoldi_dominant
+# uses for the same eigenproblem, so the two backends converge alike.
+_ARPACK_NCV = 40
 
 
 def _transfer_chain_dim(Es, message):
@@ -1891,8 +1970,25 @@ def _dominant_fixed_point(Es, side, caller, message):
             # run to run. The identity is also close to the fixed point of
             # an (approximately) canonical cell, so it starts nearer the
             # answer than a random vector would.
+            #
+            # ncv (the Krylov subspace ARPACK restarts from) is set
+            # explicitly rather than left at its default of
+            # max(2*k+1, 20) = 20. A transfer matrix's spectrum is exactly
+            # the clustered/near-degenerate case a 20-vector subspace
+            # handles worst -- the leading eigenvalue sits at ~1 with the
+            # rest crowding below it, and on a *critical* chain that
+            # crowding gets arbitrarily tight as the correlation length
+            # diverges. Measured on the critical Heisenberg chain, first
+            # observable call (both fixed-point families): 43.3s at the
+            # default versus 0.366s at ncv=40 for maxm=32, and 0.434s
+            # versus 0.068s for maxm=24, with every returned value
+            # unchanged to ~1e-16. Larger still (64, 96) buys nothing.
+            # This is a convergence-rate knob only: ARPACK returns the same
+            # eigenpairs to the same `tol` either way.
             v0 = np.eye(chi, dtype=complex).reshape(-1) / np.sqrt(chi)
-            w, v = eigs(op, k=2, which="LM", tol=0, maxiter=10000, v0=v0)
+            ncv = min(n, max(2 * 2 + 2, _ARPACK_NCV))
+            w, v = eigs(op, k=2, which="LM", tol=0, maxiter=10000, v0=v0,
+                        ncv=ncv)
         except (ArpackError, ValueError):
             # Non-convergence/too-small-for-k: fall through to the dense
             # route rather than failing the caller's whole calculation.
@@ -1973,11 +2069,13 @@ def _op_transfer_mat(cell, k, M):
 def onsite_expectation(result, opname, p):
     """<opname> at sublattice p (0..n_uc-1) of the converged infinite
     chain."""
-    cell, n_cell = _correlator_cell(result)
-    Es = _transfer_matrices(cell, n_cell)
-    rho_after, _eta = _all_right_fixed_points(Es, n_cell)
-    E_op = _op_transfer(result.sites_uc, cell, p, opname, result.n_uc)
-    return _expectation(Es, E_op, Es[p], rho_after[p], p, n_cell)
+    env = _correlator_env(result)
+    M = result.sites_uc.site_type((p % result.n_uc) + 1).matrix(opname)
+    A = _to_array_lpr(env.cell[p])
+    return _close_expectation(
+        env.l_before[p % env.n_cell],
+        _apply_site_transfer(A, M, env.rho_after[p]),
+        _apply_site_transfer(A, None, env.rho_after[p]))
 
 
 def two_point_correlator(result, opname_i, p_i, opname_j, r):
@@ -2020,9 +2118,8 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     if r < 0:
         raise ValueError("two_point_correlator: r must be >= 0")
     n_uc = result.n_uc
-    cell, n_cell = _correlator_cell(result)
-    Es = _transfer_matrices(cell, n_cell)
-    rho_after, _eta = _all_right_fixed_points(Es, n_cell)
+    env = _correlator_env(result)
+    cell, n_cell = env.cell, env.n_cell
 
     # Endpoint matrices (F-threaded where needed), the ordering sign, and
     # whether a string is open between them -- exactly as a Hamiltonian
@@ -2031,29 +2128,45 @@ def two_point_correlator(result, opname_i, p_i, opname_j, r):
     _rel, coef, mats, ferm = _term_site_matrices(term, result.sites_uc, n_uc)
 
     if r == 0:
-        E4 = _op_transfer_mat(cell, p_i, mats[0])
-        return coef * _expectation(Es, E4, Es[p_i], rho_after[p_i], p_i, n_cell)
+        A = _to_array_lpr(cell[p_i])
+        return coef * _close_expectation(
+            env.l_before[p_i % n_cell],
+            _apply_site_transfer(A, mats[0], env.rho_after[p_i]),
+            _apply_site_transfer(A, None, env.rho_after[p_i]))
 
     # Positions advance through the *tiled cell* (length n_cell), while the
     # site type at each position is set by its sublattice (position % n_uc)
     # -- the two coincide unless the cell is longer than the unit cell,
     # which is exactly `_theta_cell`'s n_uc=1 case.
+    #
+    # The operator string is applied to the right fixed point one site at a
+    # time, walking right to left, rather than composed into a single
+    # transfer matrix first. Composing costs O(chi^6) per intervening site
+    # (a chi^2-by-chi^2 matrix product) and then one application; this is
+    # O(chi^3 d) per site (see `_apply_site_transfer`). Pure re-association
+    # of the same matrix chain -- the returned number is unchanged -- but it
+    # is what stops a correlator sweep from being dominated by
+    # matrix-matrix products: measured on a critical Heisenberg chain at
+    # maxm=24, an r=1..7 sweep went from ~68s to well under a second.
     k_j = (p_i + r) % n_cell
-    running = _op_transfer_mat(cell, p_i, mats[0])
-    running_id = Es[p_i]
-    for step in range(1, r):
+    x_num = env.rho_after[k_j]
+    x_den = env.rho_after[k_j]
+    for step in range(r, -1, -1):
         k = (p_i + step) % n_cell
-        # An open Jordan-Wigner string puts F on this intervening site; the
-        # denominator (running_id) stays the plain transfer either way --
-        # it is the norm, and carries no operator content at all.
-        E_step = (_op_transfer_mat(
-                      cell, k, result.sites_uc.site_type((k % n_uc) + 1).matrix("F"))
-                  if ferm[0] else Es[k])
-        running = _compose(running, E_step)
-        running_id = _compose(running_id, Es[k])
-    running = _compose(running, _op_transfer_mat(cell, k_j, mats[1]))
-    running_id = _compose(running_id, Es[k_j])
-    return coef * _expectation(Es, running, running_id, rho_after[k_j], p_i, n_cell)
+        if step == r:
+            M = mats[1]
+        elif step == 0:
+            M = mats[0]
+        else:
+            # An open Jordan-Wigner string puts F on this intervening site;
+            # the denominator (x_den) stays the plain transfer either way --
+            # it is the norm, and carries no operator content at all.
+            M = (result.sites_uc.site_type((k % n_uc) + 1).matrix("F")
+                 if ferm[0] else None)
+        A = _to_array_lpr(cell[k])
+        x_num = _apply_site_transfer(A, M, x_num)
+        x_den = _apply_site_transfer(A, None, x_den)
+    return coef * _close_expectation(env.l_before[p_i % n_cell], x_num, x_den)
 
 
 def _dominant_eigenvalue_mixed(Es):

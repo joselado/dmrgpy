@@ -276,40 +276,75 @@ def test_itensor_version3_matches_python_backend():
     to agree to ~1e-8 (well inside the 1e-6 tolerance here) and to be stable
     run over run to ~1e-8 despite iDMRG's unseeded random starting MPS.
 
-    This asserts ONE scalar, and deliberately does not claim more than that.
-    mpscpp3/chain_session.h's Chain::idmrg_ground_state started as a
-    line-by-line port of pyitensor/idmrg.py's idmrg_ground_state but is no
-    longer equivalent: the Python side has since gained McCulloch's
-    wavefunction prediction, the theta-cell unit-cell extraction, and the
-    per-site energy baseline, and none of the three is ported. None of them
-    can move this assertion either -- the first two are state/gauge quality
-    and leave the converged energy density alone, and the third is exactly
-    compensated on the Python side (the drift it prevents was ~9e-11 after
-    400 macro-iterations, versus maxiter=30 here). So this test does NOT
-    guard the divergence, and nothing else does: v3 exposes no iDMRG
-    correlator to compare states with. See CLAUDE.md's mpscpp3 section."""
+    Unlike the energy-only version this test used to be, it now also
+    compares the converged *state* -- vev and a short correlator sweep --
+    which is what actually guards the three things the C++ port was long
+    missing relative to pyitensor/idmrg.py (McCulloch's wavefunction
+    prediction, the theta-cell unit-cell extraction, and the per-site
+    energy baseline; all three are ported now, see
+    Chain::idmrg_ground_state's own comment). The energy density alone
+    could not: the first two are state/gauge quality and leave it alone,
+    and the third is exactly compensated on both sides.
+
+    The state comparison uses a *dimerized* (gapped) chain rather than the
+    uniform critical one the energy check above uses. On a gapless chain
+    at finite maxm the growing algorithm settles onto a slightly,
+    arbitrarily symmetry-broken state whose residual depends on its own
+    unseeded random starting MPS -- measured at <Sz> ~ +4e-4 on one
+    backend against ~ -3e-4 on the other here, both legitimate
+    approximations to the exact 0, but not equal to each other. That is a
+    property of the model, not of either implementation; comparing two
+    backends' states needs a model whose state is unique. (The correlators
+    would in fact have squeaked through, since the residual enters them
+    quadratically -- which is exactly why the vev comparison is the one
+    worth having.)"""
     ic_py, _ = _converged_uniform_chain(2, maxm=30, maxiter=30, etol=1e-9,
                                          itensor_version="python")
     ic_v3, _ = _converged_uniform_chain(2, maxm=30, maxiter=30, etol=1e-9,
                                          itensor_version=3)
     assert ic_v3.e0 == pytest.approx(ic_py.e0, abs=1e-6)
 
+    dim_py = _dimerized_chain_for_state_check("python")
+    dim_v3 = _dimerized_chain_for_state_check(3)
+    assert dim_v3.e0 == pytest.approx(dim_py.e0, abs=1e-6)
+    for p in (0, 1):
+        assert dim_v3.vev("Sz", p) == pytest.approx(dim_py.vev("Sz", p), abs=1e-5)
+    for r in (0, 1, 2, 3):
+        assert (dim_v3.correlator("Sz", 0, "Sz", r)
+                == pytest.approx(dim_py.correlator("Sz", 0, "Sz", r), abs=1e-5))
+
+
+def _dimerized_chain_for_state_check(itensor_version, j_strong=1.0, j_weak=0.2):
+    """A gapped, moderately dimerized n_uc=2 Heisenberg chain -- the same
+    model test_unit_cell_expectation_self_consistency uses, including its
+    etol=1e-14 "run the full maxiter" trick (see that test's docstring)."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"],
+                                            itensor_version=itensor_version)
+    ic.gs_method = "idmrg"
+    h = (j_strong * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1]
+                     + ic.SzC[0] * ic.SzC[1])
+         + j_weak * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0]
+                     + ic.SzC[1] * ic.SzR[0]))
+    ic.maxm, ic.maxiter, ic.etol = 8, 150, 1e-14
+    ic.set_hamiltonian(h)
+    ic.gs_energy()
+    return ic
+
 
 @pytest.mark.skipif(not cppext.available(3),
                      reason="requires the compiled mpscpp3 (ITensor v3) extension")
-def test_itensor_version3_vev_and_correlator_not_implemented():
-    """The v3 C++ backend has no static-correlator machinery yet (see
-    Infinite_Many_Body_Chain.gs_energy's own comment) -- vev/correlator
-    must raise a clear NotImplementedError rather than silently misusing
-    a stale/absent self._result."""
+def test_itensor_version3_vev_and_correlator_rejects_bad_arguments():
+    """vev/correlator ARE implemented on the v3 backend under
+    gs_method="idmrg" now (see test_idmrg_correlator_v3.py for the value
+    checks) -- what must still be rejected is out-of-range input."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
     ic.gs_method = "idmrg"
     h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
     ic.set_hamiltonian(h)
-    with pytest.raises(NotImplementedError):
-        ic.vev("Sz", 0)
-    with pytest.raises(NotImplementedError):
-        ic.correlator("Sz", 0, "Sz", 1)
+    with pytest.raises(ValueError):
+        ic.vev("Sz", 1)
+    with pytest.raises(ValueError):
+        ic.correlator("Sz", 0, "Sz", -1)
 
 
 def test_l_and_r_in_same_term_rejected():
@@ -1304,8 +1339,15 @@ def test_local_excitation_gap_before_set_hamiltonian_raises():
         ic.local_excitation_gap()
 
 
-def test_local_excitation_gap_itensor_version3_not_implemented():
+def test_local_excitation_gap_itensor_version3_requires_gs_method_idmrg():
+    """window=0 IS implemented on the v3 C++ backend now
+    (Chain::idmrg_local_excitation_gap, see
+    test_idmrg_correlator_v3.py's own value check) -- but, exactly like
+    the pyitensor backend, only under gs_method="idmrg": the growing
+    algorithm's final local superblock is what gets re-diagonalized, and
+    VUMPS never produces one."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.gs_method = "vumps"
     ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
     with pytest.raises(NotImplementedError):
         ic.local_excitation_gap()
@@ -1427,7 +1469,13 @@ def test_local_excitation_gap_windowed_before_set_hamiltonian_raises():
 
 
 def test_local_excitation_gap_windowed_itensor_version3_not_implemented():
+    """window>0 is deliberately NOT ported to the v3 C++ backend --
+    idmrg.local_excitation_gap_windowed is an explicit prototype rather
+    than stable API (see its own docstring), so it stays
+    itensor_version="python"-only even though window=0 is now supported
+    on both backends."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.gs_method = "idmrg"
     ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] - 2.0 * ic.SzC[0])
     with pytest.raises(NotImplementedError):
         ic.local_excitation_gap(window=1)

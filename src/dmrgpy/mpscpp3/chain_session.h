@@ -102,8 +102,12 @@ struct NHDMRGResult
 
 // C++ port of pyitensor/idmrg.py's IDMRGResult -- see
 // Chain::idmrg_ground_state's own doc comment for the algorithm and the
-// scope this port covers (ground-state energy density only for now,
-// static correlators not yet ported).
+// scope this port covers. Deliberately carries only the scalar summary:
+// the converged *state* (unit cell, growth environments, final local
+// superblock) lives on the Chain itself as a private snapshot, exactly
+// like VumpsResult's, so idmrg_onsite_expectation/
+// idmrg_two_point_correlator/idmrg_local_excitation_gap read it from
+// there rather than through Python.
 struct IdmrgResult
     {
     double density = 0.0; // converged (or best-so-far) energy per site
@@ -2411,25 +2415,33 @@ class Chain
     // extension), not an independent re-derivation, specifically to avoid
     // reintroducing bugs already found and fixed there.
     //
-    // IT IS NO LONGER EQUIVALENT. pyitensor/idmrg.py has since gained
-    // three things this port never got: McCulloch's wavefunction
-    // prediction (_wavefunction_prediction) as each micro-step's Krylov
-    // start -- the code below still uses the older heuristic Python
-    // replaced, a flat vector reused whenever its size matches, see
-    // idmrg_local_solve; extraction of the converged unit cell from a
-    // single micro-step's theta (_theta_cell, IDMRGResult.cell_list/
-    // cell_raw) rather than chaining the per-micro-step factors this port
-    // snapshots as idmrg_U_; and a per-site energy baseline subtracted
-    // from both growing environments (_subtract_energy_baseline, the
-    // reference idmrg.h's HL += -energy*IL), with the density adding the
-    // shift back -- the density below is a plain finite difference. The
-    // first two are state/gauge quality rather than energy, and this
-    // backend exposes only an energy density anyway (IdmrgResult carries
-    // no unit cell, and bindings.cc binds no iDMRG correlator), so the
-    // divergence does not affect what v3 currently returns. Treat this
-    // path as energy-density-only; use itensor_version="python" for
-    // anything that consumes the iDMRG *state*. See CLAUDE.md's mpscpp3
-    // section.
+    // The port is kept deliberately in step with the Python side. Three
+    // things pyitensor/idmrg.py gained after the first translation --
+    // McCulloch's wavefunction prediction (_wavefunction_prediction) as
+    // each micro-step's Krylov start, extraction of the converged unit
+    // cell from a single micro-step's theta (_theta_cell/
+    // _canonical_theta_cell, IDMRGResult.cell_list) rather than chaining
+    // the per-micro-step factors this port snapshots as idmrg_U_, and a
+    // per-site energy baseline subtracted from both growing environments
+    // (_subtract_energy_baseline, the reference idmrg.h's
+    // HL += -energy*IL, with the density adding the shift back) -- were
+    // for a while absent here, which is why this comment used to declare
+    // the two implementations non-equivalent. All three are ported now:
+    // idmrg_wavefunction_prediction, idmrg_theta_cell +
+    // ic_canonicalize_cell (idmrg_cell_), and
+    // idmrg_subtract_energy_baseline respectively. With the unit cell in
+    // hand, the static observables built on it are ported too --
+    // idmrg_onsite_expectation/idmrg_two_point_correlator, plus
+    // idmrg_local_excitation_gap over the stored final superblock -- so
+    // this backend is no longer energy-density-only.
+    //
+    // What remains itensor_version="python"-only: local_excitation_gap's
+    // `window>0` variant (pyitensor's own local_excitation_gap_windowed is
+    // an explicit prototype rather than stable API) and the iMPS algebra
+    // built on IDMRGResult (imps_overlap/apply_mpo/imps_sum/grow_by_mpo),
+    // none of which infinitechain.py exposes for gs_method="idmrg"; the
+    // VUMPS path above already covers the latter on this backend
+    // (vumps_apply_mpo/vumps_imps_sum). See CLAUDE.md's mpscpp3 section.
     //
     // This Chain instance must be constructed with site_types = the
     // *n_uc-site unit cell* (not a full chain) -- infinitechain.py's
@@ -2450,12 +2462,14 @@ class Chain
     // function's own comment), and idmrg_build_row propagates it along the
     // pending channel; a term with odd total fermion parity, whose string
     // could never close within the unit cell, is rejected there.
-    // Ground-state energy
-    // density only -- static correlators (onsite_expectation/
-    // two_point_correlator) are not ported to C++ yet; run gs_energy()
-    // via this method for the energy, then reuse pyitensor's own
-    // idmrg.py correlator functions against a separately-run
-    // itensor_version="python" IDMRGResult if correlators are needed.
+    //
+    // On return, this Chain's own private snapshots are set: the growth
+    // environments (have_idmrg_snapshot_, consumed by
+    // td_dynamical_correlator_window's IBC window), the gauge-consistent
+    // unit cell (have_idmrg_cell_, consumed by idmrg_onsite_expectation/
+    // idmrg_two_point_correlator), and the final local superblock
+    // (have_idmrg_superblock_, consumed by idmrg_local_excitation_gap) --
+    // mirroring vumps_ground_state's own have_vumps_snapshot_ pattern.
     //
     // terms_intra/terms_inter: 1-based-site MOTerm lists in exactly
     // infinitechain.py's own h_intra/h_inter split (see
@@ -2530,6 +2544,50 @@ class Chain
         double prev_energy=0.0, prev_density=0.0;
         bool converged=false;
         int macro_iter=0;
+
+        // Per-site energy baseline subtracted from BOTH growing
+        // environments every micro-step (idmrg_subtract_energy_baseline),
+        // latched once as soon as a density estimate exists and never
+        // revised afterwards -- see the density computation at the bottom
+        // of the macro-iteration loop for why constancy matters, and
+        // idmrg_subtract_energy_baseline's own comment for why the
+        // baseline is needed at all. 0.0 means "not latched yet".
+        double eshift = 0.0;
+
+        // The last density actually computed, kept separately from
+        // prev_density (which the baseline latch below deliberately
+        // discards along with prev_energy, since both were measured
+        // against un-shifted environments). pyitensor/idmrg.py returns its
+        // own prev_density directly and therefore reports None in the one
+        // edge case where maxiter runs out on exactly the latching
+        // iteration; this port reports the best estimate it actually has
+        // instead, which agrees with Python in every other case.
+        double report_density = 0.0;
+        bool have_report_density = false;
+
+        // The *immediately preceding* micro-step's own SVD factors, as
+        // dense (chi_l,d,chi_r) arrays plus their singular values -- the
+        // raw material of McCulloch's wavefunction prediction (see
+        // idmrg_wavefunction_prediction). `s_prev` lags one step further
+        // behind still, since it is the bond matrix the prediction has to
+        // invert. Deliberately NOT indexed by mstep: the prediction reads
+        // the step whose bond bases the current local problem actually
+        // lives in, which is always the one just executed.
+        std::vector<Cplx> last_U, last_V;
+        int last_Ul=0, last_Ud=0, last_Ur=0, last_Vl=0, last_Vd=0, last_Vr=0;
+        std::vector<double> last_S, prev_S;
+        bool have_last_S=false, have_prev_S=false, have_last_UV=false;
+
+        // (U, S, V, lambda_outer) of the last executed macro-iteration's
+        // own FIRST micro-step, kept as dense arrays -- turned into the
+        // gauge-consistent 2-site unit cell (idmrg_theta_cell) once, after
+        // the loop, exactly as pyitensor/idmrg.py's own cell_seed is (its
+        // re-gauging step is an eigendecomposition of a chi^2 x chi^2
+        // transfer matrix, far too expensive to pay every macro-iteration).
+        std::vector<Cplx> seed_U, seed_V;
+        int seed_Ul=0, seed_Ud=0, seed_Ur=0, seed_Vl=0, seed_Vd=0, seed_Vr=0;
+        std::vector<double> seed_S, seed_lam_outer;
+        bool have_cell_seed=false;
 
         // Per-sublattice converged ket tensor (idmrg_U_[p_L]=U, set every
         // mstep -- overwritten every macro-iteration, so it holds the
@@ -2618,12 +2676,73 @@ class Chain
                     W_pR = idmrg_make_W(rows[p_R],cross_idx,HR_mpo,phys_R_in,phys_R_out);
                     }
 
-                auto [energy_here,U,V,new_bond_u,new_bond_v,theta_flat] = idmrg_local_solve(
-                    HL,W_pL,phys_L_in,W_pR,phys_R_in,HR,
-                    HL_bra,HL_ket,have_HL_ket,HR_bra,HR_ket,have_HR_ket,
-                    cutoff,maxm,krylovdim,restarts,prev_local[mstep]);
+                // McCulloch's wavefunction prediction: the previous
+                // micro-step's converged state translated into *this*
+                // step's enlarged bond bases (idmrg_wavefunction_
+                // prediction). Falls back to prev_local[mstep] -- the
+                // plain same-position reuse this port had before the
+                // prediction existed -- and, inside idmrg_local_solve,
+                // to a fresh random vector, for the early micro-steps
+                // where the previous step's shapes don't line up yet.
+                std::vector<Cplx> x0_warm;
+                if (have_last_UV && have_last_S && have_prev_S)
+                    x0_warm = idmrg_wavefunction_prediction(
+                        last_S,last_V,last_Vl,last_Vd,last_Vr,
+                        prev_S,last_U,last_Ul,last_Ud,last_Ur,
+                        have_HL_ket ? dim(HL_ket) : 0, dim(phys_L_in),
+                        dim(phys_R_in), have_HR_ket ? dim(HR_ket) : 0);
+                if (x0_warm.empty()) x0_warm = prev_local[mstep];
+
+                auto [energy_here,U,V,new_bond_u,new_bond_v,theta_flat,svals,theta] =
+                    idmrg_local_solve(
+                        HL,W_pL,phys_L_in,W_pR,phys_R_in,HR,
+                        HL_bra,HL_ket,have_HL_ket,HR_bra,HR_ket,have_HR_ket,
+                        cutoff,maxm,krylovdim,restarts,x0_warm);
                 energy = energy_here;
                 if (!theta_flat.empty()) prev_local[mstep] = std::move(theta_flat);
+
+                // The raw ingredients of *this* micro-step's own 2-site
+                // local eigenproblem, captured before the extend step
+                // below mutates HL/HR -- overwritten every micro-step, so
+                // what survives the loop is the final one actually run.
+                // Kept so idmrg_local_excitation_gap() can re-diagonalize
+                // that same effective Hamiltonian for its second-lowest
+                // eigenpair without rerunning the growing algorithm; C++
+                // analogue of pyitensor/idmrg.py's own last_superblock/
+                // IDMRGResult.local_superblock.
+                idmrg_sb_HL_ = HL; idmrg_sb_HL_bra_ = HL_bra; idmrg_sb_HL_ket_ = HL_ket;
+                idmrg_sb_have_HL_ket_ = have_HL_ket;
+                idmrg_sb_HR_ = HR; idmrg_sb_HR_bra_ = HR_bra; idmrg_sb_HR_ket_ = HR_ket;
+                idmrg_sb_have_HR_ket_ = have_HR_ket;
+                idmrg_sb_W_pL_ = W_pL; idmrg_sb_phys_L_ = phys_L_in;
+                idmrg_sb_W_pR_ = W_pR; idmrg_sb_phys_R_ = phys_R_in;
+                idmrg_sb_theta_ = theta; idmrg_sb_energy_ = energy_here;
+                have_idmrg_superblock_ = true;
+
+                // Carry this step's SVD factors forward for the next
+                // step's prediction, and -- at mstep 0 -- stash the raw
+                // ingredients of the gauge-consistent unit cell. `last_S`
+                // is still the *previous* micro-step's center matrix at
+                // this point, which is exactly the lambda_o on this
+                // theta's own outer bond (see idmrg_theta_cell).
+                auto U_lpr = idmrg_svd_factor_lpr(U,HL_ket,have_HL_ket,
+                                                   phys_L_in,new_bond_u,true);
+                auto V_lpr = idmrg_svd_factor_lpr(V,new_bond_v,true,
+                                                   phys_R_in,HR_ket,have_HR_ket);
+                int Ul = have_HL_ket ? dim(HL_ket) : 1, Ud = dim(phys_L_in), Ur = dim(new_bond_u);
+                int Vl = dim(new_bond_v), Vd = dim(phys_R_in), Vr = have_HR_ket ? dim(HR_ket) : 1;
+                if (mstep==0 && have_last_S)
+                    {
+                    seed_U = U_lpr; seed_Ul=Ul; seed_Ud=Ud; seed_Ur=Ur;
+                    seed_V = V_lpr; seed_Vl=Vl; seed_Vd=Vd; seed_Vr=Vr;
+                    seed_S = svals; seed_lam_outer = last_S;
+                    have_cell_seed = true;
+                    }
+                prev_S = last_S; have_prev_S = have_last_S;
+                last_S = svals; have_last_S = true;
+                last_U = std::move(U_lpr); last_Ul=Ul; last_Ud=Ud; last_Ur=Ur;
+                last_V = std::move(V_lpr); last_Vl=Vl; last_Vd=Vd; last_Vr=Vr;
+                have_last_UV = true;
 
                 Index left_ket_old = HL_ket; bool have_left_ket_old = have_HL_ket;
                 Index right_ket_old = HR_ket; bool have_right_ket_old = have_HR_ket;
@@ -2656,11 +2775,26 @@ class Chain
                 HL_mpo = new_HL_mpo;
                 HR_mpo = new_HR_mpo;
 
+                if (eshift != 0.0)
+                    {
+                    // Channel 0 is "S" and channel 1 is "F" in every
+                    // chans[p] (idmrg_channels_at builds them in that
+                    // order), so these indices are the same for both
+                    // environments -- only their roles swap.
+                    HL = idmrg_subtract_energy_baseline(HL,HL_mpo,1,0,eshift);
+                    HR = idmrg_subtract_energy_baseline(HR,HR_mpo,0,1,eshift);
+                    }
+
                 snap_U[p_L] = U; snap_U_left[p_L] = left_ket_old; snap_U_right[p_L] = new_bond_u;
                 }
 
+            // Each micro-step subtracted `eshift` from both environments,
+            // i.e. 2*n_uc*eshift per macro-iteration, so add it back to
+            // recover the true density. Exact as long as `eshift` was
+            // constant across the two macro-iterations being differenced,
+            // which is why it is latched once and never revised (below).
             bool have_density = have_prev_energy;
-            double density = have_density ? (energy-prev_energy)/(2.0*n_uc) : 0.0;
+            double density = have_density ? (energy-prev_energy)/(2.0*n_uc)+eshift : 0.0;
             if (verbose_)
                 println("idmrg macro-iter ",macro_iter,": E=",energy,
                         " density=",(have_density?density:0.0));
@@ -2668,12 +2802,28 @@ class Chain
                 std::abs(density-prev_density)<etol)
                 converged = true;
             prev_energy = energy; have_prev_energy = true;
-            if (have_density) { prev_density = density; have_prev_density = true; }
+            if (have_density)
+                {
+                prev_density = density; have_prev_density = true;
+                report_density = density; have_report_density = true;
+                }
             if (converged) break;
+            if (eshift == 0.0 && have_density)
+                {
+                // Latch the baseline once, as soon as there is an estimate
+                // to use. prev_energy is dropped in the same breath: it was
+                // measured against un-shifted environments, so differencing
+                // the next iteration's energy against it would report the
+                // transient rather than a density. One macro-iteration is
+                // given up doing so.
+                eshift = density;
+                have_prev_energy = false; have_prev_density = false;
+                prev_energy = 0.0; prev_density = 0.0;
+                }
             }
 
         IdmrgResult out;
-        out.density = prev_density;
+        out.density = have_report_density ? report_density : prev_density;
         out.converged = converged;
         // C++'s own for-loop increments macro_iter to maxiter itself (not
         // maxiter-1) before the loop condition fails and exits, unlike
@@ -2697,7 +2847,225 @@ class Chain
         idmrg_have_HL_ = snap_have_HL; idmrg_have_HR_ = snap_have_HR;
         have_idmrg_snapshot_ = true;
 
+        // The gauge-consistent 2-site unit cell every static observable on
+        // this backend tiles (idmrg_onsite_expectation/
+        // idmrg_two_point_correlator below, and
+        // td_dynamical_correlator_window's own connected background) --
+        // extracted once here, from the last executed macro-iteration's own
+        // first micro-step, exactly as pyitensor/idmrg.py does. The cell is
+        // always 2 sites: for n_uc=1 that is two repeats of the one-site
+        // cell, for n_uc=2 exactly one unit cell (theta's own two sites are
+        // sublattices p_L=0 and p_R=1 at micro-step 0). Either way cell
+        // position k carries sublattice k%n_uc.
+        have_idmrg_cell_ = false;
+        ic_cache_valid_ = false;
+        ic_Es_.clear(); ic_chis_.clear(); ic_rho_after_.clear(); ic_l_before_.clear();
+        idmrg_cell_.clear(); idmrg_cell_l_.clear();
+        idmrg_cell_d_.clear(); idmrg_cell_r_.clear();
+        if (have_cell_seed)
+            {
+            std::vector<Cplx> a1, a2;
+            if (idmrg_theta_cell(seed_U,seed_Ul,seed_Ud,seed_Ur,seed_S,
+                                  seed_V,seed_Vl,seed_Vd,seed_Vr,
+                                  seed_lam_outer,a1,a2))
+                {
+                idmrg_cell_ = {std::move(a1),std::move(a2)};
+                idmrg_cell_l_ = {seed_Ul,seed_Vl};
+                idmrg_cell_d_ = {seed_Ud,seed_Vd};
+                idmrg_cell_r_ = {seed_Ur,seed_Vr};
+                ic_canonicalize_cell(idmrg_cell_,idmrg_cell_l_,
+                                      idmrg_cell_d_,idmrg_cell_r_);
+                have_idmrg_cell_ = true;
+                }
+            }
+
         return out;
+        }
+
+    // <opname> at sublattice p (0..n_uc-1) of a converged
+    // idmrg_ground_state()'s infinite chain -- C++ port of
+    // pyitensor/idmrg.py's own onsite_expectation, tiling the
+    // gauge-consistent unit cell idmrg_theta_cell extracted (see that
+    // function's docstring for why the per-micro-step idmrg_U_ chain
+    // cannot be tiled instead: doing so put <Sz> at -0.13 against an exact
+    // 0 on the XX chain).
+    Cplx
+    idmrg_onsite_expectation(std::string const& opname, int p) const
+        {
+        ic_require_cell("idmrg_onsite_expectation");
+        int n_uc = idmrg_n_uc_;
+        if (p<0 || p>=n_uc)
+            throw ITError("Chain::idmrg_onsite_expectation: p must be in 0.."+
+                           std::to_string(n_uc-1)+" (n_uc-1), got "+std::to_string(p));
+        ic_build_cache();
+        auto const& chis = ic_chis_;
+        auto const& A = idmrg_cell_[p];
+        int cl = idmrg_cell_l_[p], cd = idmrg_cell_d_[p], cr = idmrg_cell_r_[p];
+        auto x_num = ic_apply_site_transfer(A,cl,cd,cr,
+                                             idmrg_op_dense(p%n_uc,opname),
+                                             ic_rho_after_[p]);
+        auto x_den = ic_apply_site_transfer(A,cl,cd,cr,{},ic_rho_after_[p]);
+        return ic_close_expectation(ic_l_before_[p%(int)ic_Es_.size()],
+                                     chis[p]*chis[p],x_num,x_den);
+        }
+
+    // <opname_i(site p_i) opname_j(site p_i + r)> of a converged
+    // idmrg_ground_state()'s infinite chain, r measured in physical sites
+    // (r>=0) -- C++ port of pyitensor/idmrg.py's own two_point_correlator,
+    // same r=0 same-site convention (M_j @ M_i, see
+    // idmrg_correlator_endpoints) and the same Jordan-Wigner treatment for
+    // fermionic operators (the string is threaded across every site
+    // strictly between the two endpoints; a pair of odd total fermion
+    // parity is rejected, since its string can never close).
+    //
+    // Positions advance through the *tiled 2-site cell*, while the site
+    // type at each position is set by its sublattice (position % n_uc) --
+    // the two coincide unless the cell is longer than the unit cell, which
+    // is exactly the n_uc=1 case.
+    //
+    // One deliberate departure from a literal transcription of
+    // pyitensor/idmrg.py: that version *composes* the per-site transfer
+    // matrices along the string into one (chi^2, chi^2) product and only
+    // then applies it to the right fixed point, which costs O(chi^6) per
+    // intervening site (a chi^2-by-chi^2 matrix product). Here the same
+    // chain is instead applied to the fixed point one site at a time,
+    // right to left -- O(chi^4) per site. This is a pure re-association of
+    // the same matrix chain, not a different formula, so it returns
+    // exactly the same number; it just stops the cost of a correlator
+    // sweep from being dominated by matrix-matrix products. Measured on a
+    // maxm=24 chain: ~4.1s for a single r=3 correlator before, ~0.01s
+    // after.
+    Cplx
+    idmrg_two_point_correlator(std::string const& opname_i, int p_i,
+                                std::string const& opname_j, int r) const
+        {
+        ic_require_cell("idmrg_two_point_correlator");
+        if (r<0)
+            throw ITError("Chain::idmrg_two_point_correlator: r must be >= 0");
+        int n_uc = idmrg_n_uc_;
+        if (p_i<0 || p_i>=n_uc)
+            throw ITError("Chain::idmrg_two_point_correlator: p_i must be in 0.."+
+                           std::to_string(n_uc-1)+" (n_uc-1), got "+std::to_string(p_i));
+        int n_cell = (int)idmrg_cell_.size();
+        ic_build_cache();
+        auto const& Es = ic_Es_;
+        auto const& chis = ic_chis_;
+        auto const& rho_after = ic_rho_after_;
+
+        std::vector<Cplx> mat_i, mat_j;
+        bool strung=false;
+        idmrg_correlator_endpoints(opname_i,p_i,opname_j,(p_i+r)%n_uc,r==0,
+                                    mat_i,mat_j,strung);
+
+        auto cell_transfer = [&](int k, std::vector<Cplx> const& M)
+            { return ic_transfer(idmrg_cell_[k],idmrg_cell_l_[k],idmrg_cell_d_[k],
+                                  idmrg_cell_r_[k],M); };
+
+        if (r==0)
+            {
+            auto const& A = idmrg_cell_[p_i];
+            auto x_num = ic_apply_site_transfer(A,idmrg_cell_l_[p_i],idmrg_cell_d_[p_i],
+                                                 idmrg_cell_r_[p_i],mat_i,rho_after[p_i]);
+            auto x_den = ic_apply_site_transfer(A,idmrg_cell_l_[p_i],idmrg_cell_d_[p_i],
+                                                 idmrg_cell_r_[p_i],{},rho_after[p_i]);
+            return ic_close_expectation(ic_l_before_[p_i%n_cell],
+                                         chis[p_i]*chis[p_i],x_num,x_den);
+            }
+
+        int k_j = (p_i+r)%n_cell;
+        std::vector<Cplx> x_num = rho_after[k_j], x_den = rho_after[k_j];
+        for (int step=r; step>=0; --step)
+            {
+            int k = (p_i+step)%n_cell;
+            std::vector<Cplx> M;
+            if (step==r)      M = mat_j;
+            else if (step==0) M = mat_i;
+            // An open Jordan-Wigner string puts F on each intervening
+            // site; the denominator (x_den) stays the plain transfer
+            // throughout either way -- it is the norm, and carries no
+            // operator content at all.
+            else if (strung)  M = idmrg_op_dense(k%n_uc,"F");
+            auto const& A = idmrg_cell_[k];
+            int cl = idmrg_cell_l_[k], cd = idmrg_cell_d_[k], cr = idmrg_cell_r_[k];
+            x_num = ic_apply_site_transfer(A,cl,cd,cr,M,x_num);
+            x_den = ic_apply_site_transfer(A,cl,cd,cr,{},x_den);
+            }
+        return ic_close_expectation(ic_l_before_[p_i % n_cell],
+                                     chis[p_i]*chis[p_i],x_num,x_den);
+        }
+
+    // The "local superblock gap": re-diagonalize the *same* 2-site
+    // effective Hamiltonian the growing algorithm already solved for its
+    // ground state at the very last micro-step, but for its second-lowest
+    // eigenvalue instead, and return the difference -- C++ port of
+    // pyitensor/idmrg.py's own local_excitation_gap. See that function's
+    // own docstring for the full rationale (in particular why the
+    // orthogonality constraint is enforced here as an exact projector
+    // P = I - |psi0><psi0| rather than via finite-DMRG's soft
+    // overlap-penalty weight) and for its accuracy caveat: this has no
+    // momentum label and reuses HL/HR exactly as they converged for the
+    // *ground* state, so it is a cheap cross-check, not a variationally
+    // optimal excited state.
+    //
+    // The stored superblock energy carries idmrg_ground_state's own
+    // per-site baseline shift, but this returns a *difference* of two
+    // eigenvalues of the same shifted operator, so the shift cancels
+    // exactly.
+    double
+    idmrg_local_excitation_gap(int niter) const
+        {
+        if (!have_idmrg_superblock_)
+            throw ITError("Chain::idmrg_local_excitation_gap: called before "
+                           "idmrg_ground_state (no stored local superblock)");
+        Index phys_L = idmrg_sb_phys_L_, phys_R = idmrg_sb_phys_R_;
+        Index HL_ket = idmrg_sb_HL_ket_, HR_ket = idmrg_sb_HR_ket_;
+        Index HL_bra = idmrg_sb_HL_bra_, HR_bra = idmrg_sb_HR_bra_;
+        bool have_HL_ket = idmrg_sb_have_HL_ket_, have_HR_ket = idmrg_sb_have_HR_ket_;
+        ITensor const& HL = idmrg_sb_HL_;
+        ITensor const& HR = idmrg_sb_HR_;
+
+        size_t dim_in = (size_t)dim(phys_L)*dim(phys_R);
+        if (have_HL_ket) dim_in *= (size_t)dim(HL_ket);
+        if (have_HR_ket) dim_in *= (size_t)dim(HR_ket);
+        if (dim_in < 2)
+            throw ITError("Chain::idmrg_local_excitation_gap: the local Hilbert space "
+                           "has dimension "+std::to_string(dim_in)+" -- too small to hold "
+                           "a state orthogonal to the ground state");
+
+        // Same effective Hamiltonian idmrg_local_solve built, rebuilt here
+        // verbatim from the stored pieces.
+        auto matvec = [&](ITensor v) -> ITensor
+            {
+            if (HL) v *= HL;
+            v *= idmrg_sb_W_pL_;
+            v *= idmrg_sb_W_pR_;
+            if (HR) v *= HR;
+            v.noPrime();
+            if (have_HL_ket) v = replaceInds(v,{HL_bra},{HL_ket});
+            if (have_HR_ket) v = replaceInds(v,{HR_bra},{HR_ket});
+            return v;
+            };
+
+        ITensor psi0 = idmrg_sb_theta_;
+        double n0 = norm(psi0);
+        if (n0 == 0.0)
+            throw ITError("Chain::idmrg_local_excitation_gap: stored local ground "
+                           "vector has zero norm");
+        psi0 /= n0;
+        // P H P with P = I - |psi0><psi0| -- Hermitian, since both P and
+        // the underlying local Hamiltonian are, so arnoldi_smallest_real's
+        // own Sel::SR ground-state selection still picks the lowest
+        // eigenvalue of H restricted to psi0's orthogonal complement.
+        auto deflate = [&](ITensor v) -> ITensor
+            { return v - psi0*eltC(dag(psi0)*v); };
+        auto deflated = [&](ITensor v) -> ITensor
+            { return deflate(matvec(deflate(v))); };
+
+        ITensor v0 = deflate(randomITensorC(psi0.inds()));
+        int kd = std::max(niter,2);
+        kd = std::min<int>(kd,(int)std::min<size_t>(dim_in,200));
+        auto result = arnoldi_smallest_real(deflated,v0,kd,4,Sel::SR,Cplx(0,0),1e-10);
+        return result.first.real() - idmrg_sb_energy_;
         }
 
     // VUMPS ground state (Zauner-Stauber et al., arXiv:1701.07035;
@@ -2969,7 +3337,7 @@ class Chain
     // one and the same physical site (p_i==p_j AND no whole cells between
     // them), which sublattice indices alone cannot express.
     void
-    vumps_correlator_endpoints(std::string const& opname_i, int p_i,
+    idmrg_correlator_endpoints(std::string const& opname_i, int p_i,
                                 std::string const& opname_j, int p_j,
                                 bool same_site,
                                 std::vector<Cplx>& mat_i,
@@ -2984,17 +3352,17 @@ class Chain
                                   idmrg_op_dense(p_i,opname_i),d);
             bool site_ferm = (fi != fj);   // odd number of fermionic factors
             if (site_ferm)
-                Error("Chain::vumps_two_point_correlator: the operator pair has "
-                      "odd total fermion parity -- its Jordan-Wigner string "
-                      "cannot be closed");
+                throw ITError("Chain: two_point_correlator: the operator pair has "
+                               "odd total fermion parity -- its Jordan-Wigner string "
+                               "cannot be closed");
             mat_j.clear();
             strung = false;
             return;
             }
         if (fi != fj)
-            Error("Chain::vumps_two_point_correlator: the operator pair has "
-                  "odd total fermion parity -- its Jordan-Wigner string "
-                  "cannot be closed");
+            throw ITError("Chain: two_point_correlator: the operator pair has "
+                           "odd total fermion parity -- its Jordan-Wigner string "
+                           "cannot be closed");
         int di = dim(sites_.si(p_i+1));
         mat_i = idmrg_op_dense(p_i,opname_i);
         mat_j = idmrg_op_dense(p_j,opname_j);
@@ -3036,7 +3404,7 @@ class Chain
 
         std::vector<Cplx> mat_i, mat_j;
         bool strung = false;
-        vumps_correlator_endpoints(opname_i,p_i,opname_j,p_j,
+        idmrg_correlator_endpoints(opname_i,p_i,opname_j,p_j,
                                     (cell_offset==0 && p_j==p_i),
                                     mat_i,mat_j,strung);
         // {p: F} for lo <= p < hi -- the piece of the string inside one cell
@@ -3423,16 +3791,27 @@ class Chain
         // that first call too (norm(MPS) requires isOrtho()).
         win.psi.position(1);
 
+        // The disconnected background <A><B>, from the same
+        // gauge-consistent unit cell every other static observable on this
+        // backend tiles -- this used to tile the raw per-micro-step
+        // idmrg_U_ chain instead, i.e. it carried exactly the gauge error
+        // idmrg_theta_cell exists to remove (see idmrg_onsite_expectation).
+        // One deliberate divergence from pyitensor/idmrg_window.py here:
+        // that side's _correlator_cell silently falls back to tiling
+        // U_list when no cell was extracted, whereas
+        // idmrg_onsite_expectation throws (ic_require_cell). Only a run so
+        // short that no macro-iteration ever produced a cell seed can
+        // reach it, and a clear error beats a silently gauge-wrong number.
         Cplx mean_B = Cplx(0,0);
         std::map<int,Cplx> background;
         if (connected)
             {
             int p_B = (center-1)%n_uc;
-            mean_B = idmrg_onsite_expectation(p_B,opname_B);
+            mean_B = idmrg_onsite_expectation(opname_B,p_B);
             for (int x : x_values)
                 {
                 int p_A = ((center+x-1)%n_uc+n_uc)%n_uc;
-                background[x] = mean_B*idmrg_onsite_expectation(p_A,opname_A);
+                background[x] = mean_B*idmrg_onsite_expectation(opname_A,p_A);
                 }
             }
 
@@ -6046,6 +6425,178 @@ class Chain
         return T;
         }
 
+    // (chi_l,d,chi_r) dense row-major array for one of svd()'s own factors,
+    // whose left (for U) or right (for V) bond may be absent entirely at
+    // the very first micro-steps -- a missing bond becomes a length-1 axis,
+    // exactly as pyitensor/idmrg.py's own _u_array_lpr/_v_array_lpr insert
+    // one by reshape. Kept separate from idmrg_tensor_to_lpr_array (which
+    // requires all three Index objects to exist) for that reason alone.
+    static std::vector<Cplx>
+    idmrg_svd_factor_lpr(ITensor const& T, Index const& left, bool have_left,
+                          Index const& phys, Index const& right, bool have_right)
+        {
+        int d = dim(phys);
+        int chi_l = have_left ? dim(left) : 1;
+        int chi_r = have_right ? dim(right) : 1;
+        std::vector<Cplx> out((size_t)chi_l*d*chi_r,Cplx(0,0));
+        for (int l=1;l<=chi_l;++l)
+        for (int s=1;s<=d;++s)
+        for (int r=1;r<=chi_r;++r)
+            {
+            Cplx v(0,0);
+            if (have_left && have_right) v = eltC(T,left(l),phys(s),right(r));
+            else if (have_left)          v = eltC(T,left(l),phys(s));
+            else if (have_right)         v = eltC(T,phys(s),right(r));
+            else                         v = eltC(T,phys(s));
+            out[((size_t)(l-1)*d+(s-1))*chi_r+(r-1)] = v;
+            }
+        return out;
+        }
+
+    // Relative floor below which a previous micro-step's singular value is
+    // treated as zero (its inverse set to 0) when building the wavefunction
+    // prediction or the theta unit cell -- the direct analogue of ITensor's
+    // own iDMRG `InverseCut` argument (detail::PseudoInvert, default 1e-8,
+    // applied to the pseudo-inverted center matrix in
+    // mpscpp2/ITensor/itensor/mps/idmrg.h), and the same constant
+    // pyitensor/idmrg.py carries as _PREDICTION_INVERSE_CUT. Taken relative
+    // to the largest singular value, since svd() here returns raw
+    // (un-normalized) singular values.
+    static constexpr double idmrg_inverse_cut_ = 1e-8;
+
+    // lam^-1 with everything at or below idmrg_inverse_cut_*max(lam) sent
+    // to 0 -- shared by idmrg_wavefunction_prediction and idmrg_theta_cell.
+    static std::vector<double>
+    idmrg_pseudo_inverse(std::vector<double> const& lam)
+        {
+        double top = 0.0;
+        for (double v : lam) top = std::max(top,v);
+        double floor = idmrg_inverse_cut_*top;
+        std::vector<double> out(lam.size(),0.0);
+        for (size_t i=0;i<lam.size();++i)
+            if (lam[i] > floor) out[i] = 1.0/lam[i];
+        return out;
+        }
+
+    // McCulloch's iDMRG wavefunction prediction: the trial two-site tensor
+    // for the *next* micro-step, built from the previous micro-step's own
+    // SVD factors, in that step's own bond bases -- C++ port of
+    // pyitensor/idmrg.py's _wavefunction_prediction, see that function's
+    // own docstring for the derivation:
+    //
+    //     theta = lambda_k . B_k . lambda_{k-1}^-1 . A_k . lambda_k
+    //
+    // with A_k=U, B_k=V, lambda_k=S from micro-step k's own SVD. This is
+    // not a heuristic warm start but the exact translation of the converged
+    // state into the new step's enlarged bases, and it is what makes
+    // successive macro-iterations gauge-compatible (the ingredient this
+    // port was missing entirely -- see idmrg_ground_state's own comment).
+    // Note the swap: the previous step's right-canonical V supplies the new
+    // LEFT physical slot and its left-canonical U the new RIGHT one (the
+    // reference implementation's own swapUnitCells, idmrg.h), which lines
+    // the sublattice labels up for n_uc<=2 and would not for n_uc>=3.
+    //
+    // Returns the flat vector positionally aligned to
+    // (HL_ket,phys_L,phys_R,HR_ket) -- idmrg_tensor_to_flat4's own layout,
+    // hence directly usable as idmrg_local_solve's `warm` argument -- or an
+    // empty vector when the previous step's shapes don't line up with the
+    // current local problem (the early micro-steps, and while the bond
+    // dimension is still growing).
+    static std::vector<Cplx>
+    idmrg_wavefunction_prediction(std::vector<double> const& s_last,
+                                   std::vector<Cplx> const& V_last, int Vl, int Vd, int Vr,
+                                   std::vector<double> const& s_prev,
+                                   std::vector<Cplx> const& U_last, int Ul, int Ud, int Ur,
+                                   int shape0, int shape1, int shape2, int shape3)
+        {
+        int ns_last = (int)s_last.size(), ns_prev = (int)s_prev.size();
+        if (Vr != ns_prev || Ul != ns_prev) return {};
+        if (Vl != ns_last || Ur != ns_last) return {};
+        if (shape0 != ns_last || shape1 != Vd || shape2 != Ud || shape3 != ns_last)
+            return {};
+        auto s_inv = idmrg_pseudo_inverse(s_prev);
+        std::vector<Cplx> theta((size_t)ns_last*Vd*Ud*ns_last,Cplx(0,0));
+        double norm2 = 0.0;
+        for (int i=0;i<ns_last;++i)
+        for (int s=0;s<Vd;++s)
+        for (int r=0;r<Ud;++r)
+        for (int j=0;j<ns_last;++j)
+            {
+            Cplx acc(0,0);
+            for (int b=0;b<ns_prev;++b)
+                acc += V_last[((size_t)i*Vd+s)*Vr+b]*s_inv[b]*U_last[((size_t)b*Ud+r)*Ur+j];
+            acc *= s_last[i]*s_last[j];
+            theta[(((size_t)i*Vd+s)*Ud+r)*ns_last+j] = acc;
+            norm2 += std::norm(acc);
+            }
+        double norm = std::sqrt(norm2);
+        if (!std::isfinite(norm) || norm == 0.0) return {};
+        for (auto & v : theta) v /= norm;
+        return theta;
+        }
+
+    // The gauge-consistent two-site unit cell, extracted from ONE
+    // micro-step's own solved theta -- C++ port of pyitensor/idmrg.py's
+    // _theta_cell. See that function's own docstring for why the
+    // per-micro-step idmrg_U_ chain (whose two ends live in bond bases
+    // minted by *different* micro-steps) cannot be tiled instead, and for
+    // the measured size of the error that mistake produces.
+    //
+    // Writing theta in Vidal form
+    // theta = lambda_o . Gamma_L . lambda_c . Gamma_R . lambda_o, its SVD
+    // gives U = lambda_o.Gamma_L and S.V = lambda_c.Gamma_R.lambda_o, so
+    // the two left-canonical site tensors are A_1 = U and
+    // A_2 = S . V . lambda_o^-1, with lambda_o (`lam_outer`) the Schmidt
+    // values on theta's own outer bond -- i.e. the *previous* micro-step's
+    // center matrix, the same one idmrg_wavefunction_prediction inverts.
+    // A_2's right bond is then back in A_1's left basis, so the cell tiles.
+    //
+    // Returns false (leaving a1/a2 untouched) if the shapes don't line up.
+    static bool
+    idmrg_theta_cell(std::vector<Cplx> const& U_lpr, int Ul, int Ud, int Ur,
+                      std::vector<double> const& svals,
+                      std::vector<Cplx> const& V_lpr, int Vl, int Vd, int Vr,
+                      std::vector<double> const& lam_outer,
+                      std::vector<Cplx>& a1, std::vector<Cplx>& a2)
+        {
+        if (Vr != (int)lam_outer.size() || Vr != Ul) return false;
+        if (Vl != (int)svals.size()) return false;
+        auto lam_inv = idmrg_pseudo_inverse(lam_outer);
+        a1 = U_lpr;
+        a2.assign((size_t)Vl*Vd*Vr,Cplx(0,0));
+        for (int l=0;l<Vl;++l)
+        for (int p=0;p<Vd;++p)
+        for (int r=0;r<Vr;++r)
+            a2[((size_t)l*Vd+p)*Vr+r] = V_lpr[((size_t)l*Vd+p)*Vr+r]*svals[l]*lam_inv[r];
+        (void)Ud; (void)Ur;
+        return true;
+        }
+
+    // env[dst_chan] -= shift * env[src_chan] along env's own mpo axis --
+    // C++ port of pyitensor/idmrg.py's _subtract_energy_baseline, itself
+    // this algorithm's equivalent of the reference implementation's
+    // HL += -energy*IL (mpscpp2/ITensor/itensor/mps/idmrg.h).
+    //
+    // No separate identity environment has to be accumulated for it: the
+    // automaton's channel space already carries one, since chans[p] is
+    // [S, F] + pending and a growing environment's S/F components *are* the
+    // identity and energy accumulations respectively (hence HL[F] -= e*HL[S]
+    // on the left, and the mirrored HR[S] -= e*HR[F] on the right). Channel
+    // indices here are 0-based, ITensor's own are 1-based, hence the +1.
+    //
+    // Subtracting a per-site baseline keeps the superblock eigenvalue
+    // bounded instead of growing like 2*n_uc*k*e0 -- which matters because
+    // the Arnoldi solve stops on a *relative* criterion, so the absolute
+    // error in the eigenvalue (and so in the finite-difference energy
+    // density) otherwise grows linearly with the macro-iteration count.
+    static ITensor
+    idmrg_subtract_energy_baseline(ITensor const& env, Index const& mpo_idx,
+                                    int dst_chan, int src_chan, double shift)
+        {
+        ITensor src = env*setElt(mpo_idx(src_chan+1)); // mpo axis projected onto src_chan
+        return env - shift*(src*setElt(mpo_idx(dst_chan+1)));
+        }
+
     // One micro-step's local ground-state solve: the effective 2-site
     // Hamiltonian sandwiched by (HL, W_pL, W_pR, HR), diagonalized via
     // arnoldi_smallest_real(..., Sel::SR) (the smallest-real-part Ritz
@@ -6088,7 +6639,8 @@ class Chain
     // despite this method's own surrounding comments describing this file
     // as "a line-for-line translation ... specifically to avoid
     // reintroducing bugs that were already found and fixed" in idmrg.py.
-    std::tuple<double,ITensor,ITensor,Index,Index,std::vector<Cplx>>
+    std::tuple<double,ITensor,ITensor,Index,Index,std::vector<Cplx>,
+                std::vector<double>,ITensor>
     idmrg_local_solve(ITensor const& HL, ITensor const& W_pL, Index phys_L,
                        ITensor const& W_pR, Index phys_R, ITensor const& HR,
                        Index HL_bra, Index HL_ket, bool have_HL_ket,
@@ -6154,7 +6706,16 @@ class Chain
         auto [U,S,V] = svd(theta,IndexSet(left_inds),{"Cutoff",cutoff,"MaxDim",maxdim});
         Index new_bond_u = commonIndex(U,S);
         Index new_bond_v = commonIndex(S,V);
-        return {energy,U,V,new_bond_u,new_bond_v,theta_flat};
+        // The singular values themselves -- discarded by the growth loop's
+        // own HL/HR extension (see this method's own comment above), but
+        // needed verbatim by McCulloch's wavefunction prediction and by the
+        // gauge-consistent unit-cell extraction (idmrg_wavefunction_prediction/
+        // idmrg_theta_cell), both of which work in Vidal's Gamma/lambda form.
+        // C++ analogue of pyitensor/idmrg.py's own _svd_singular_values.
+        std::vector<double> svals((size_t)dim(new_bond_u),0.0);
+        for (int k=1;k<=dim(new_bond_u);++k)
+            svals[k-1] = eltC(S,new_bond_u(k),new_bond_v(k)).real();
+        return {energy,U,V,new_bond_u,new_bond_v,theta_flat,svals,theta};
         }
 
     // Absorb the newly-solved left-canonical site tensor U into HL, using
@@ -6271,6 +6832,698 @@ class Chain
         return T;
         }
 
+    // -- iDMRG static-correlator private helpers (the "ic_" prefix) --
+    //
+    // Dense, LAPACK-backed port of pyitensor/idmrg.py's own transfer-matrix
+    // machinery (_transfer_matrices/_compose/_apply_transfer/
+    // _dominant_*_fixed_point/_all_*_fixed_points/_expectation), operating
+    // on the gauge-consistent 2-site unit cell idmrg_theta_cell extracts
+    // (idmrg_cell_ below) rather than on ITensor objects -- the same
+    // design choice, and for the same reasons, as the VUMPS "vx_" helpers
+    // above (see IdmrgResult/VumpsResult's own struct comments): the
+    // objects here are (chi,d,chi) arrays with chi at most maxm, every
+    // contraction is a plain dense matmul, and ITensor's Index identity
+    // machinery buys nothing while costing exactly the kind of duplicate-
+    // index bookkeeping idmrg_ground_state's own top comment describes.
+    //
+    // The one thing these cannot borrow from the vx_ helpers is squareness:
+    // VUMPS works at a single fixed bond dimension D throughout, whereas
+    // the theta cell's two bonds genuinely differ (the outer bond is the
+    // environment bond theta was solved against, chi_o; the inner one is
+    // its own SVD bond, chi_c = min(chi_o*d_L, d_R*chi_o, maxm)). Every
+    // helper below is therefore rectangular-aware, indexed by a `chis`
+    // array with chis[k] = cell position k's own LEFT bond dimension and
+    // chis[n_cell] = chis[0] (the cell wraps).
+    //
+    // A transfer tensor for cell position k is stored as the
+    // (chis[k]^2, chis[k+1]^2) row-major matrix E[(l,L),(r,R)] --
+    // idmrg.py's own einsum('lpr,LpR->lLrR', A, conj(A)) flattened
+    // exactly as vx_op_transfer_matrix already flattens its square case,
+    // so "compose two sites in a row" is an ordinary matrix product.
+
+    // E for cell tensor A (chi_l,d,chi_r), with operator matrix M
+    // ((d,d) row-major, (in,out) convention as idmrg_op_dense returns)
+    // optionally applied to the ket side first -- idmrg.py's
+    // _op_transfer_mat (M empty = the plain transfer tensor).
+    static std::vector<Cplx>
+    ic_transfer(std::vector<Cplx> const& A, int chi_l, int d, int chi_r,
+                 std::vector<Cplx> const& M)
+        {
+        std::vector<Cplx> ket = A;
+        if (!M.empty())
+            {
+            ket.assign((size_t)chi_l*d*chi_r,Cplx(0,0));
+            for (int l=0;l<chi_l;++l)
+            for (int o=0;o<d;++o)
+            for (int r=0;r<chi_r;++r)
+                {
+                Cplx acc(0,0);
+                for (int i=0;i<d;++i) acc += M[(size_t)i*d+o]*A[((size_t)l*d+i)*chi_r+r];
+                ket[((size_t)l*d+o)*chi_r+r] = acc;
+                }
+            }
+        std::vector<Cplx> E((size_t)chi_l*chi_l*chi_r*chi_r,Cplx(0,0));
+        for (int l=0;l<chi_l;++l)
+        for (int Lb=0;Lb<chi_l;++Lb)
+        for (int r=0;r<chi_r;++r)
+        for (int R=0;R<chi_r;++R)
+            {
+            Cplx acc(0,0);
+            for (int p=0;p<d;++p)
+                acc += ket[((size_t)l*d+p)*chi_r+r]*std::conj(A[((size_t)Lb*d+p)*chi_r+R]);
+            E[((size_t)l*chi_l+Lb)*((size_t)chi_r*chi_r)+((size_t)r*chi_r+R)] = acc;
+            }
+        return E;
+        }
+
+    // One site's transfer tensor applied to a boundary matrix, WITHOUT
+    // ever forming the (chi_l^2, chi_r^2) transfer matrix itself:
+    //
+    //   out[l,L] = sum_{p,r,R} (M^T A)[l,p,r] rho[r,R] conj(A)[L,p,R]
+    //
+    // A is the cell tensor (chi_l,d,chi_r) row-major; M its (d,d)
+    // (in,out)-convention operator matrix (empty = the plain transfer).
+    // rho is (chi_r,chi_r), the result (chi_l,chi_l), both row-major.
+    //
+    // Same quantity ic_matvec(ic_transfer(A,...,M), ..., rho) computes,
+    // re-associated: building the transfer tensor costs O(chi^4 d) and
+    // applying it another O(chi^4), whereas contracting rho in first makes
+    // both halves O(chi^3 d). Exact, not approximate -- only the
+    // contraction order changes. Mirrors pyitensor/idmrg.py's own
+    // _apply_site_transfer, which is where this was measured first: with
+    // the transfer matrix formed per site, this backend's r=1..7 sweep on
+    // a maxm=32 chain cost 0.19s against the Python side's 0.0022s, i.e.
+    // the "fast" backend was 85x slower at the one thing both had just
+    // been optimized for.
+    static std::vector<Cplx>
+    ic_apply_site_transfer(std::vector<Cplx> const& A, int chi_l, int d, int chi_r,
+                            std::vector<Cplx> const& M, std::vector<Cplx> const& rho)
+        {
+        // Aop[l,o,r] = sum_i M[i,o] A[l,i,r]   (M empty -> Aop = A)
+        std::vector<Cplx> Aop;
+        if (M.empty()) Aop = A;
+        else
+            {
+            Aop.assign((size_t)chi_l*d*chi_r,Cplx(0,0));
+            for (int l=0;l<chi_l;++l)
+            for (int o=0;o<d;++o)
+            for (int r=0;r<chi_r;++r)
+                {
+                Cplx acc(0,0);
+                for (int i=0;i<d;++i) acc += M[(size_t)i*d+o]*A[((size_t)l*d+i)*chi_r+r];
+                Aop[((size_t)l*d+o)*chi_r+r] = acc;
+                }
+            }
+        // tmp[l,p,R] = sum_r Aop[l,p,r] rho[r,R]
+        std::vector<Cplx> tmp((size_t)chi_l*d*chi_r,Cplx(0,0));
+        for (int l=0;l<chi_l;++l)
+        for (int p=0;p<d;++p)
+        for (int R=0;R<chi_r;++R)
+            {
+            Cplx acc(0,0);
+            for (int r=0;r<chi_r;++r)
+                acc += Aop[((size_t)l*d+p)*chi_r+r]*rho[(size_t)r*chi_r+R];
+            tmp[((size_t)l*d+p)*chi_r+R] = acc;
+            }
+        // out[l,L] = sum_{p,R} tmp[l,p,R] conj(A[L,p,R])
+        std::vector<Cplx> out((size_t)chi_l*chi_l,Cplx(0,0));
+        for (int l=0;l<chi_l;++l)
+        for (int Lb=0;Lb<chi_l;++Lb)
+            {
+            Cplx acc(0,0);
+            for (int p=0;p<d;++p)
+            for (int R=0;R<chi_r;++R)
+                acc += tmp[((size_t)l*d+p)*chi_r+R]
+                        *std::conj(A[((size_t)Lb*d+p)*chi_r+R]);
+            out[(size_t)l*chi_l+Lb] = acc;
+            }
+        return out;
+        }
+
+    // M (m,n) row-major times v (n) -- rectangular counterpart of
+    // vx_matvec_row, i.e. idmrg.py's own _apply_transfer.
+    static std::vector<Cplx>
+    ic_matvec(std::vector<Cplx> const& M, int m, int n, std::vector<Cplx> const& v)
+        {
+        std::vector<Cplx> out((size_t)m,Cplx(0,0));
+        for (int i=0;i<m;++i)
+            {
+            Cplx acc(0,0);
+            for (int j=0;j<n;++j) acc += M[(size_t)i*n+j]*v[j];
+            out[i] = acc;
+            }
+        return out;
+        }
+
+    // v (m) times M (m,n) row-major -- rectangular counterpart of
+    // vx_vecmat_row, i.e. idmrg.py's own _apply_transfer_from_left.
+    static std::vector<Cplx>
+    ic_vecmat(std::vector<Cplx> const& v, std::vector<Cplx> const& M, int m, int n)
+        {
+        std::vector<Cplx> out((size_t)n,Cplx(0,0));
+        for (int j=0;j<n;++j)
+            {
+            Cplx acc(0,0);
+            for (int i=0;i<m;++i) acc += v[i]*M[(size_t)i*n+j];
+            out[j] = acc;
+            }
+        return out;
+        }
+
+    // trace of a flattened (chi,chi) row-major matrix.
+    static Cplx
+    ic_trace(std::vector<Cplx> const& rho, int chi)
+        {
+        Cplx tr(0,0);
+        for (int i=0;i<chi;++i) tr += rho[(size_t)i*chi+i];
+        return tr;
+        }
+
+    // The full unit-cell transfer matrix T = E_0 @ E_1 @ ... @ E_{n-1},
+    // a (chis[0]^2, chis[0]^2) matrix since the cell wraps.
+    static std::vector<Cplx>
+    ic_full_transfer(std::vector<std::vector<Cplx>> const& Es,
+                      std::vector<int> const& chis)
+        {
+        int n = (int)Es.size();
+        std::vector<Cplx> T = Es[0];
+        int rows = chis[0]*chis[0], cols = chis[1]*chis[1];
+        for (int p=1;p<n;++p)
+            {
+            int next = chis[p+1]*chis[p+1];
+            T = vx_matmul(T,rows,cols,Es[p],cols,next);
+            cols = next;
+            }
+        return T;
+        }
+
+    // Apply the whole unit cell's transfer map to a flat (chis[0]^2)
+    // vector WITHOUT ever forming the (chis[0]^2, chis[0]^2) product --
+    // one ic_matvec/ic_vecmat per cell position instead, i.e. O(n*chi^4)
+    // rather than the O(chi^6) ic_full_transfer costs just to build T.
+    // `right`: the direction ic_dominant_fixed_point's own "right" case
+    // needs (E_{n-1} applied first, mirroring idmrg.py's own
+    // reversed(Es) + _apply_transfer); otherwise the left/forward one.
+    static std::vector<Cplx>
+    ic_apply_chain(std::vector<std::vector<Cplx>> const& Es,
+                    std::vector<int> const& chis, std::vector<Cplx> const& x,
+                    bool right)
+        {
+        int n = (int)Es.size();
+        std::vector<Cplx> out = x;
+        if (right)
+            for (int p=n-1;p>=0;--p)
+                out = ic_matvec(Es[p],chis[p]*chis[p],chis[p+1]*chis[p+1],out);
+        else
+            for (int p=0;p<n;++p)
+                out = ic_vecmat(out,Es[p],chis[p]*chis[p],chis[p+1]*chis[p+1]);
+        return out;
+        }
+
+    // All eigenvalues and right eigenvectors of a general (non-Hermitian)
+    // complex n x n row-major matrix, via itensor::zgeev_wrapper --
+    // vx_dominant_eig's own decomposition step, factored out because the
+    // small Hessenberg eigenproblem inside ic_arnoldi_dominant below needs
+    // the FULL spectrum (evecs_col stays column-major, matching LAPACK's
+    // own output directly).
+    static void
+    ic_geev_all(std::vector<Cplx> const& A_row, int n,
+                 std::vector<Cplx>& evals, std::vector<Cplx>& evecs_col)
+        {
+        std::vector<Cplx> Acol((size_t)n*n);
+        for (int i=0;i<n;++i)
+        for (int j=0;j<n;++j)
+            Acol[i+(size_t)j*n] = A_row[(size_t)i*n+j];
+        evals.assign(n,Cplx(0,0));
+        evecs_col.assign((size_t)n*n,Cplx(0,0));
+        std::vector<Cplx> vl(1,Cplx(0,0));
+        auto info = zgeev_wrapper('N','V',n,Acol.data(),evals.data(),
+                                   vl.data(),evecs_col.data());
+        if (info!=0)
+            throw ITError("Chain::idmrg static correlators: zgeev_wrapper failed (info="+
+                           std::to_string(info)+")");
+        }
+
+    // Transfer-matrix eigenproblems (chi^2 x chi^2) at or below this size
+    // are solved densely; above it, iteratively (ic_arnoldi_dominant).
+    // Same threshold, and the same reason for it, as pyitensor/idmrg.py's
+    // own _DENSE_EIG_MAX: the dense route costs O(chi^6) TWICE over
+    // (ic_full_transfer builds T at chi^6, then zgeev on it is another
+    // chi^6), which at chi=24 already dominated an entire iDMRG solve --
+    // measured directly, ~5s per vev()/correlator() call before this split
+    // existed, against ~0.4s at chi=16.
+    static constexpr int ic_dense_eig_max_ = 64;
+    static constexpr int ic_arnoldi_krylov_ = 40;
+    static constexpr int ic_arnoldi_restarts_ = 20;
+
+    // The two largest-|lambda| eigenvalues, plus the dominant eigenvector,
+    // of a linear map given only by its action on a flat length-n complex
+    // vector -- a restarted Arnoldi, the matrix-free counterpart of
+    // vx_dominant_eig (which forms and decomposes the whole matrix). The
+    // runner-up eigenvalue is returned because the caller's
+    // near-degeneracy guard needs it, exactly as pyitensor/idmrg.py asks
+    // ARPACK for k=2 rather than k=1 for the same reason.
+    //
+    // The start vector is the identity, not a random one -- deterministic
+    // (the dense route this replaces is, and every downstream
+    // normalization diagnostic would otherwise vary run to run), and close
+    // to the fixed point of an approximately-canonical cell anyway. Same
+    // choice pyitensor makes for its own ARPACK v0.
+    static void
+    ic_arnoldi_dominant(std::function<std::vector<Cplx>(std::vector<Cplx> const&)> const& act,
+                         int n, Cplx& eval0, Cplx& eval1, std::vector<Cplx>& vec0)
+        {
+        int m = std::min(ic_arnoldi_krylov_,n);
+        if (m < 2) m = std::min(2,n);
+        int chi = (int)std::lround(std::sqrt((double)n));
+        std::vector<Cplx> v((size_t)n,Cplx(0,0));
+        if (chi*chi == n) for (int i=0;i<chi;++i) v[(size_t)i*chi+i] = Cplx(1,0);
+        else v.assign((size_t)n,Cplx(1,0));
+        auto normalize = [](std::vector<Cplx>& x)
+            {
+            double s = 0.0;
+            for (auto const& e : x) s += std::norm(e);
+            s = std::sqrt(s);
+            if (s > 0.0) for (auto & e : x) e /= s;
+            return s;
+            };
+        normalize(v);
+        eval0 = eval1 = Cplx(0,0);
+
+        for (int rs=0; rs<=ic_arnoldi_restarts_; ++rs)
+            {
+            std::vector<std::vector<Cplx>> V;
+            V.reserve(m);
+            V.push_back(v);
+            std::vector<Cplx> H((size_t)m*m,Cplx(0,0)); // row-major
+            int mused = m;
+            for (int j=0;j<m;++j)
+                {
+                auto w = act(V[j]);
+                // Two Gram-Schmidt passes: one is not enough to keep the
+                // Krylov basis orthogonal for a transfer matrix, whose
+                // spectrum is strongly graded (the dominant eigenvalue sits
+                // at ~1 and the rest decay), exactly the regime classical
+                // Arnoldi loses orthogonality in.
+                for (int pass=0;pass<2;++pass)
+                for (int i=0;i<=j;++i)
+                    {
+                    Cplx c(0,0);
+                    for (int k=0;k<n;++k) c += std::conj(V[i][k])*w[k];
+                    H[(size_t)i*m+j] += c;
+                    for (int k=0;k<n;++k) w[k] -= c*V[i][k];
+                    }
+                double beta = 0.0;
+                for (auto const& e : w) beta += std::norm(e);
+                beta = std::sqrt(beta);
+                if (j+1 < m)
+                    {
+                    if (beta < 1e-13) { mused = j+1; break; } // invariant subspace
+                    H[(size_t)(j+1)*m+j] = Cplx(beta,0);
+                    for (auto & e : w) e /= beta;
+                    V.push_back(std::move(w));
+                    }
+                }
+
+            std::vector<Cplx> Hs((size_t)mused*mused);
+            for (int i=0;i<mused;++i)
+            for (int j=0;j<mused;++j)
+                Hs[(size_t)i*mused+j] = H[(size_t)i*m+j];
+            std::vector<Cplx> evals, evecs_col;
+            ic_geev_all(Hs,mused,evals,evecs_col);
+            std::vector<int> order(mused);
+            for (int i=0;i<mused;++i) order[i]=i;
+            std::sort(order.begin(),order.end(),
+                       [&](int a,int b){ return std::abs(evals[a]) > std::abs(evals[b]); });
+            eval0 = evals[order[0]];
+            eval1 = mused>1 ? evals[order[1]] : Cplx(0,0);
+
+            std::vector<Cplx> x((size_t)n,Cplx(0,0));
+            for (int i=0;i<mused;++i)
+                {
+                Cplx y = evecs_col[(size_t)i+(size_t)order[0]*mused];
+                for (int k=0;k<n;++k) x[k] += y*V[i][k];
+                }
+            if (normalize(x) == 0.0) break;
+            v = std::move(x);
+
+            auto Av = act(v);
+            double res = 0.0;
+            for (int k=0;k<n;++k) res += std::norm(Av[k]-eval0*v[k]);
+            res = std::sqrt(res);
+            if (res < 1e-11*std::max(1.0,std::abs(eval0))) break;
+            }
+        vec0 = std::move(v);
+        }
+
+    // (rho, eta): the dominant right (right=true) or left (right=false)
+    // fixed point of the unit-cell transfer map, as a (chis[0],chis[0])
+    // matrix normalized to trace 1 -- idmrg.py's own
+    // _dominant_fixed_point, including its near-degeneracy guard (a single
+    // dominant fixed point is not well defined when the leading eigenvalue
+    // is (near-)degenerate; see _check_dominant_eigenvalue_nondegenerate's
+    // own docstring for what that means physically). Dense below
+    // ic_dense_eig_max_, matrix-free Arnoldi above it.
+    static std::pair<std::vector<Cplx>,Cplx>
+    ic_dominant_fixed_point(std::vector<std::vector<Cplx>> const& Es,
+                             std::vector<int> const& chis, bool right)
+        {
+        int chi = chis[0], n = chi*chi;
+        if (n <= ic_dense_eig_max_)
+            {
+            auto T = ic_full_transfer(Es,chis);
+            return right ? vx_dominant_right_fixed_point(T,chi)
+                          : vx_dominant_left_fixed_point(T,chi);
+            }
+        auto act = [&](std::vector<Cplx> const& x)
+            { return ic_apply_chain(Es,chis,x,right); };
+        Cplx eta(0,0), eta1(0,0);
+        std::vector<Cplx> vec;
+        ic_arnoldi_dominant(act,n,eta,eta1,vec);
+        if (std::abs(eta1) > (1.0-1e-9)*std::abs(eta))
+            throw ITError("Chain::idmrg static correlators: the transfer matrix's "
+                           "dominant eigenvalue is (near-)degenerate -- a single "
+                           "dominant fixed point is not well-defined here (see "
+                           "pyitensor/idmrg.py's own "
+                           "_check_dominant_eigenvalue_nondegenerate)");
+        Cplx tr = ic_trace(vec,chi);
+        if (std::abs(tr) < 1e-13)
+            throw ITError("Chain::idmrg static correlators: dominant fixed point has "
+                           "~zero trace -- degenerate/ill-defined normalization");
+        for (auto & e : vec) e /= tr;
+        return {vec,eta};
+        }
+
+    // rho_after[p] = the fixed-point "everything strictly after cell
+    // position p, wrapping back around" density matrix ((chis[p+1],
+    // chis[p+1]), trace 1) -- idmrg.py's own _all_right_fixed_points.
+    static std::pair<std::vector<std::vector<Cplx>>,Cplx>
+    ic_all_right_fixed_points(std::vector<std::vector<Cplx>> const& Es,
+                               std::vector<int> const& chis)
+        {
+        int n = (int)Es.size();
+        auto [rho_full,eta] = ic_dominant_fixed_point(Es,chis,true);
+        std::vector<std::vector<Cplx>> rho_after(n);
+        rho_after[n-1] = rho_full;
+        auto cur = rho_full;
+        for (int p=n-1;p>0;--p)
+            {
+            cur = ic_matvec(Es[p],chis[p]*chis[p],chis[p+1]*chis[p+1],cur);
+            Cplx tr = ic_trace(cur,chis[p]);
+            if (std::abs(tr) < 1e-13)
+                throw ITError("Chain::idmrg static correlators: a right fixed-point "
+                               "propagation step produced a ~zero-trace density matrix");
+            for (auto & v : cur) v /= tr;
+            rho_after[p-1] = cur;
+            }
+        return {rho_after,eta};
+        }
+
+    // rho_before[p] = the fixed point for "everything strictly before cell
+    // position p, wrapping back around" ((chis[p],chis[p])), plus the
+    // accumulated per-step trace factors divided out along the way
+    // (`scales`, needed only by ic_canonicalize_cell -- see idmrg.py's own
+    // _all_left_fixed_points for why G_left, unlike G_right, is not
+    // invariant to that renormalization).
+    static std::tuple<std::vector<std::vector<Cplx>>,Cplx,std::vector<double>>
+    ic_all_left_fixed_points(std::vector<std::vector<Cplx>> const& Es,
+                              std::vector<int> const& chis)
+        {
+        int n = (int)Es.size();
+        auto [rho_full,eta] = ic_dominant_fixed_point(Es,chis,false);
+        std::vector<std::vector<Cplx>> rho_before(n);
+        std::vector<double> scales(n,1.0);
+        rho_before[0] = rho_full;
+        auto cur = rho_full;
+        double scale = 1.0;
+        for (int p=0;p<n-1;++p)
+            {
+            cur = ic_vecmat(cur,Es[p],chis[p]*chis[p],chis[p+1]*chis[p+1]);
+            Cplx tr = ic_trace(cur,chis[p+1]);
+            if (std::abs(tr) < 1e-13)
+                throw ITError("Chain::idmrg static correlators: a left fixed-point "
+                               "propagation step produced a ~zero-trace density matrix");
+            for (auto & v : cur) v /= tr;
+            scale *= tr.real();
+            scales[p+1] = scale;
+            rho_before[p+1] = cur;
+            }
+        return {rho_before,eta,scales};
+        }
+
+    // <...> for an operator string already composed into `running`, closed
+    // against the left fixed point *at the string's own starting position*
+    // rather than an implicit identity, and divided by the same
+    // contraction with the operators dropped (`running_id`) -- direct port
+    // of idmrg.py's own _expectation, including both of the details that
+    // function's docstring flags as load-bearing (which left fixed point,
+    // and that the denominator is the same contraction rather than a bare
+    // trace).
+    static Cplx
+    ic_expectation(std::vector<std::vector<Cplx>> const& l_before,
+                    int n_cell,
+                    std::vector<Cplx> const& running,
+                    std::vector<Cplx> const& running_id,
+                    int nl, int nr,
+                    std::vector<Cplx> const& rho_after_j, int k_start)
+        {
+        auto const& l = l_before[k_start % n_cell];
+        auto num_v = ic_matvec(running,nl,nr,rho_after_j);
+        auto den_v = ic_matvec(running_id,nl,nr,rho_after_j);
+        Cplx num(0,0), den(0,0);
+        for (int i=0;i<nl;++i) { num += l[i]*num_v[i]; den += l[i]*den_v[i]; }
+        if (std::abs(den) < 1e-300)
+            throw ITError("Chain::idmrg static correlators: zero normalization");
+        return num/den;
+        }
+
+    // ic_expectation's own final closure, given the left fixed point at the
+    // string's starting position and the two already-propagated boundary
+    // matrices -- split out so callers that propagate site by site
+    // (ic_apply_site_transfer) never build a composed transfer matrix just
+    // to apply it once. Mirrors pyitensor/idmrg.py's _close_expectation.
+    static Cplx
+    ic_close_expectation(std::vector<Cplx> const& l, int nl,
+                          std::vector<Cplx> const& x_num,
+                          std::vector<Cplx> const& x_den)
+        {
+        Cplx num(0,0), den(0,0);
+        for (int i=0;i<nl;++i) { num += l[i]*x_num[i]; den += l[i]*x_den[i]; }
+        if (std::abs(den) < 1e-300)
+            throw ITError("Chain::idmrg static correlators: zero normalization");
+        return num/den;
+        }
+
+    // Build (once) the converged cell's transfer tensors and both families
+    // of fixed points, and cache them on this Chain until the next
+    // idmrg_ground_state() run invalidates them.
+    //
+    // pyitensor/idmrg.py recomputes all of this inside every single
+    // onsite_expectation/two_point_correlator call (and _expectation
+    // recomputes the left family a second time within the same call). That
+    // is pure repetition -- none of it depends on which operator is being
+    // measured, and the converged cell never changes between measurements
+    // -- and it is not cheap: these are the transfer-matrix eigenproblems,
+    // by far the dominant cost of a measurement. Caching is why a full
+    // correlator sweep on this backend costs about one measurement's worth
+    // of eigensolve rather than one per r.
+    void
+    ic_build_cache() const
+        {
+        if (ic_cache_valid_) return;
+        int n = (int)idmrg_cell_.size();
+        ic_chis_.assign(n+1,0);
+        for (int k=0;k<n;++k) ic_chis_[k] = idmrg_cell_l_[k];
+        ic_chis_[n] = idmrg_cell_l_[0];
+        ic_Es_.resize(n);
+        for (int k=0;k<n;++k)
+            ic_Es_[k] = ic_transfer(idmrg_cell_[k],idmrg_cell_l_[k],
+                                     idmrg_cell_d_[k],idmrg_cell_r_[k],{});
+        auto rr = ic_all_right_fixed_points(ic_Es_,ic_chis_);
+        ic_rho_after_ = std::move(rr.first);
+        auto ll = ic_all_left_fixed_points(ic_Es_,ic_chis_);
+        ic_l_before_ = std::move(std::get<0>(ll));
+        ic_cache_valid_ = true;
+        }
+
+    void
+    ic_require_cell(const char* who) const
+        {
+        if (!have_idmrg_cell_)
+            throw ITError(std::string("Chain::")+who+": called before "
+                           "idmrg_ground_state, or the growing algorithm never "
+                           "produced a gauge-consistent unit cell (maxiter must be "
+                           "large enough for at least two macro-iterations)");
+        }
+
+    // The gauge-consistent unit cell re-gauged into left-canonical form and
+    // normalized to a per-cell transfer eigenvalue of exactly 1 -- C++ port
+    // of pyitensor/idmrg.py's _canonical_theta_cell + the two-position case
+    // of _canonicalize_periodic (vx_canonicalize_n1 above is the same
+    // construction specialized to VUMPS's single grouped supersite; this
+    // one has to stay rectangular, see this section's own top comment).
+    // A_1 is already an exact isometry (it is svd()'s own U), but
+    // A_2 = S.V.lambda_o^-1 is only approximately one, which shows up as a
+    // transfer eigenvalue of 1.00001 rather than 1 if left alone.
+    // Returns false (leaving the cell raw) when the transfer spectrum is
+    // (near-)degenerate -- expectation values still come out right via
+    // ic_expectation, which normalizes by its own denominator; only the
+    // norm diagnostic is then slightly off. Same fallback pyitensor takes.
+    bool
+    ic_canonicalize_cell(std::vector<std::vector<Cplx>>& cell,
+                          std::vector<int>& cl, std::vector<int> const& cd,
+                          std::vector<int>& cr) const
+        {
+        int n = (int)cell.size();
+        std::vector<std::vector<Cplx>> Es(n);
+        std::vector<int> chis(n+1);
+        for (int k=0;k<n;++k) chis[k] = cl[k];
+        chis[n] = cl[0];
+        for (int k=0;k<n;++k) Es[k] = ic_transfer(cell[k],cl[k],cd[k],cr[k],{});
+
+        std::vector<std::vector<Cplx>> rho_after, rho_L;
+        Cplx eta_R(0,0), eta_L(0,0);
+        std::vector<double> scales;
+        try
+            {
+            auto rr = ic_all_right_fixed_points(Es,chis);
+            rho_after = rr.first; eta_R = rr.second;
+            auto ll = ic_all_left_fixed_points(Es,chis);
+            rho_L = std::get<0>(ll); eta_L = std::get<1>(ll); scales = std::get<2>(ll);
+            }
+        catch (ITError const&)
+            {
+            return false; // degenerate transfer spectrum -- leave the cell raw
+            }
+        if (std::abs(eta_L-eta_R) > 1e-6*std::max(1.0,std::abs(eta_R)))
+            return false;
+
+        // rho_R_before[p] = "everything after position p-1" = rho_after[p-1].
+        std::vector<std::vector<Cplx>> rho_R_before(n);
+        for (int p=0;p<n;++p) rho_R_before[p] = rho_after[(p-1+n)%n];
+        // Undo ic_all_left_fixed_points' own per-cut renormalization, and
+        // transpose into the (bra,ket) convention the isometry identity
+        // below needs -- see idmrg.py's own _canonicalize_periodic for the
+        // full derivation of both steps (each was a separately-diagnosed
+        // bug there).
+        for (int p=0;p<n;++p)
+            {
+            int D = chis[p];
+            std::vector<Cplx> t((size_t)D*D);
+            for (int i=0;i<D;++i)
+            for (int j=0;j<D;++j)
+                t[(size_t)j*D+i] = rho_L[p][(size_t)i*D+j]*scales[p];
+            rho_L[p] = std::move(t);
+            }
+
+        std::vector<std::vector<Cplx>> G_left(n), G_right(n);
+        std::vector<int> keep_n(n,0);
+        for (int p=0;p<n;++p)
+            {
+            int D = chis[p];
+            int kx=0, ky=0;
+            auto X = vx_psd_sqrt_factor(rho_L[p],D,kx);        // (kx,D)
+            auto Ydag = vx_psd_sqrt_factor(rho_R_before[p],D,ky); // (ky,D) == Y^H
+            auto Y = vx_dagger(Ydag,ky,D);                     // (D,ky)
+            auto M = vx_matmul(X,kx,D,Y,D,ky);                 // (kx,ky)
+            std::vector<Cplx> Usvd, Vt; std::vector<double> s;
+            vx_economy_svd_full(M,kx,ky,Usvd,s,Vt);
+            int rk = (int)s.size();
+            int keep = vx_truncate(s,0.0,0,1);
+            keep_n[p] = keep;
+            std::vector<Cplx> Uk((size_t)kx*keep), Vtk((size_t)keep*ky);
+            for (int i=0;i<kx;++i) for (int j=0;j<keep;++j) Uk[(size_t)i*keep+j] = Usvd[(size_t)i*rk+j];
+            for (int i=0;i<keep;++i) for (int j=0;j<ky;++j) Vtk[(size_t)i*ky+j] = Vt[(size_t)i*ky+j];
+            auto Udag = vx_dagger(Uk,kx,keep);                 // (keep,kx)
+            G_left[p] = vx_matmul(Udag,keep,kx,X,kx,D);        // (keep,D)
+            auto Vtkdag = vx_dagger(Vtk,keep,ky);              // (ky,keep)
+            auto YV = vx_matmul(Y,D,ky,Vtkdag,ky,keep);        // (D,keep)
+            G_right[p].assign((size_t)D*keep,Cplx(0,0));
+            for (int i=0;i<D;++i)
+            for (int j=0;j<keep;++j)
+                G_right[p][(size_t)i*keep+j] = YV[(size_t)i*keep+j]/s[j];
+            }
+
+        std::vector<std::vector<Cplx>> new_cell(n);
+        for (int p=0;p<n;++p)
+            {
+            int a_n = keep_n[p], d = cd[p], b_n = chis[p], c_n = chis[p+1];
+            int e_n = keep_n[(p+1)%n];
+            std::vector<Cplx> arr((size_t)a_n*d*e_n,Cplx(0,0));
+            for (int a=0;a<a_n;++a)
+            for (int q=0;q<d;++q)
+            for (int e=0;e<e_n;++e)
+                {
+                Cplx acc(0,0);
+                for (int b=0;b<b_n;++b)
+                    {
+                    Cplx inner(0,0);
+                    for (int c=0;c<c_n;++c)
+                        inner += cell[p][((size_t)b*d+q)*c_n+c]*G_right[(p+1)%n][(size_t)c*e_n+e];
+                    acc += G_left[p][(size_t)a*b_n+b]*inner;
+                    }
+                arr[((size_t)a*d+q)*e_n+e] = acc;
+                }
+            new_cell[p] = std::move(arr);
+            }
+
+        // Left-canonicality check, at the same 1e-4 tolerance (and for the
+        // same conditioning reason) idmrg.py's own _canonicalize_periodic
+        // uses. Failing it abandons the re-gauging and keeps the raw cell,
+        // rather than failing the whole ground-state run -- exactly what
+        // pyitensor does, since _canonical_theta_cell wraps its
+        // _canonicalize_periodic call in `except RuntimeError: return
+        // cell` and that function raises RuntimeError for this very check.
+        // Not hypothetical: the critical (gapless) Heisenberg chain at
+        // maxm=30 lands at ~4e-4 here, because the growing algorithm's own
+        // outer environment bond is still visibly short of a true Schmidt
+        // basis of the converged state at that point. Expectation values
+        // survive it -- ic_expectation closes against the left fixed point
+        // and divides by the same contraction with the operators dropped,
+        // so a non-canonical cell is normalized away rather than
+        // mis-measured (that is precisely why _expectation stopped assuming
+        // an identity left fixed point, see its own docstring); only the
+        // eta-based norm diagnostic would be off, and nothing here consumes
+        // one.
+        for (int p=0;p<n;++p)
+            {
+            int a_n = keep_n[p], d = cd[p], e_n = keep_n[(p+1)%n];
+            double worst = 0.0;
+            for (int c=0;c<e_n;++c)
+            for (int e=0;e<e_n;++e)
+                {
+                Cplx acc(0,0);
+                for (int a=0;a<a_n;++a)
+                for (int q=0;q<d;++q)
+                    acc += std::conj(new_cell[p][((size_t)a*d+q)*e_n+c])
+                            *new_cell[p][((size_t)a*d+q)*e_n+e];
+                if (c==e) acc -= Cplx(1,0);
+                worst = std::max(worst,std::abs(acc));
+                }
+            if (worst > 1e-4)
+                {
+                if (verbose_)
+                    println("idmrg: unit-cell canonicalization left a ",worst,
+                            " deviation from left-canonical form -- keeping the raw cell");
+                return false;
+                }
+            }
+
+        // ...and normalize to a per-cell transfer eigenvalue of exactly 1
+        // (re-gauging alone does not get there -- see idmrg.py's own
+        // _canonical_theta_cell). A pure normalization: ic_expectation
+        // divides by the same fixed-point contraction, so it cannot change
+        // an expectation value.
+        double eta = eta_R.real();
+        double scale = std::abs(eta) > 0.0 ? std::pow(eta,-1.0/(2.0*n)) : 1.0;
+        for (int p=0;p<n;++p)
+            for (auto & v : new_cell[p]) v *= scale;
+
+        cell = std::move(new_cell);
+        for (int p=0;p<n;++p) { cl[p] = keep_n[p]; cr[p] = keep_n[(p+1)%n]; }
+        return true;
+        }
+
     // Doubled (ket (x) conj(bra)) transfer tensor for sublattice p, from
     // the converged, static idmrg_U_[p] -- C++ analogue of
     // pyitensor/idmrg.py's _transfer_matrices (one sublattice at a time).
@@ -6287,19 +7540,6 @@ class Chain
         Index l = idmrg_U_left_[p], r = idmrg_U_right_[p];
         ITensor bra = replaceInds(dag(U),{l,r},{prime(l),prime(r)});
         return U*bra; // shared (unprimed) Site leg contracts automatically
-        }
-
-    // Mirror of idmrg_transfer_at, with named operator `opname` applied to
-    // the ket side first (idmrg.py's own _op_transfer).
-    ITensor
-    idmrg_transfer_at_with_op(int p, std::string const& opname) const
-        {
-        Index phys = sites_.si(p+1);
-        ITensor OpT = idmrg_op_itensor(phys,p,opname);
-        ITensor Uop = idmrg_U_[p]*OpT; Uop.noPrime("Site");
-        Index l = idmrg_U_left_[p], r = idmrg_U_right_[p];
-        ITensor bra = replaceInds(dag(idmrg_U_[p]),{l,r},{prime(l),prime(r)});
-        return Uop*bra;
         }
 
     // Dominant right eigenvector of the full unit-cell transfer matrix
@@ -6384,20 +7624,6 @@ class Chain
             rho_after[p-1] = cur;
             }
         return rho_after;
-        }
-
-    // <opname> at sublattice p (0..n_uc-1) of the converged, unperturbed
-    // infinite chain -- C++ analogue of idmrg.py's own onsite_expectation,
-    // used here only for td_dynamical_correlator_window's own connected-
-    // background subtraction (<A><B>).
-    Cplx
-    idmrg_onsite_expectation(int p, std::string const& opname) const
-        {
-        auto rho_after = idmrg_all_right_fixed_points();
-        ITensor E_op = idmrg_transfer_at_with_op(p,opname);
-        ITensor val = E_op*rho_after[p]; // contracts (idmrg_U_right_[p],prime(...)), leaves (idmrg_U_left_[p],prime(...))
-        Index l = idmrg_U_left_[p], lp = prime(l);
-        return eltC(val*delta(l,lp));
         }
 
     // A 1-based window site index near the geometric middle whose own
@@ -7426,6 +8652,37 @@ class Chain
     std::vector<IdmrgAutomatonRow> idmrg_rows_; // per-sublattice automaton row, dense data (see idmrg_make_W's own comment on why never a persistent ITensor)
     std::vector<ITensor> idmrg_U_; // idmrg_U_[p]: sublattice p's converged left-canonical ket tensor (legs: idmrg_U_left_[p], Site, idmrg_U_right_[p])
     std::vector<Index> idmrg_U_left_, idmrg_U_right_; // idmrg_U_[p]'s own natural (left,right) Link Indices, as solved (see idmrg_ground_state's own capture comment for why these must be tracked explicitly rather than re-derived from tags)
+
+    // The gauge-consistent 2-site unit cell (idmrg_theta_cell, re-gauged by
+    // ic_canonicalize_cell) and its own per-position bond/physical
+    // dimensions -- what every static observable on this backend tiles.
+    // idmrg_cell_[k] is a (idmrg_cell_l_[k], idmrg_cell_d_[k],
+    // idmrg_cell_r_[k]) row-major array, with idmrg_cell_r_[k] ==
+    // idmrg_cell_l_[(k+1)%2] by construction (the cell wraps). Cell
+    // position k carries sublattice k%idmrg_n_uc_.
+    bool have_idmrg_cell_ = false;
+    std::vector<std::vector<Cplx>> idmrg_cell_;
+    std::vector<int> idmrg_cell_l_, idmrg_cell_d_, idmrg_cell_r_;
+
+    // Lazily-built, measurement-independent part of every static
+    // observable on that cell (ic_build_cache): the per-position transfer
+    // tensors and both families of fixed points. Mutable because the
+    // observables themselves are const and this is a pure memoization;
+    // invalidated at the top of every idmrg_ground_state() run.
+    mutable bool ic_cache_valid_ = false;
+    mutable std::vector<std::vector<Cplx>> ic_Es_, ic_rho_after_, ic_l_before_;
+    mutable std::vector<int> ic_chis_;
+
+    // The very last micro-step's own 2-site local eigenproblem, kept so
+    // idmrg_local_excitation_gap() can re-diagonalize that same effective
+    // Hamiltonian for a second eigenpair -- C++ analogue of
+    // pyitensor/idmrg.py's own IDMRGResult.local_superblock.
+    bool have_idmrg_superblock_ = false;
+    ITensor idmrg_sb_HL_, idmrg_sb_HR_, idmrg_sb_W_pL_, idmrg_sb_W_pR_, idmrg_sb_theta_;
+    Index idmrg_sb_HL_bra_, idmrg_sb_HL_ket_, idmrg_sb_HR_bra_, idmrg_sb_HR_ket_;
+    Index idmrg_sb_phys_L_, idmrg_sb_phys_R_;
+    bool idmrg_sb_have_HL_ket_ = false, idmrg_sb_have_HR_ket_ = false;
+    double idmrg_sb_energy_ = 0.0;
     ITensor idmrg_HL_, idmrg_HR_; // rank-3 (bra,mpo,ket) environment operators, entering the last executed macro-iteration
     Index idmrg_HL_bra_, idmrg_HL_ket_, idmrg_HL_mpo_;
     Index idmrg_HR_bra_, idmrg_HR_ket_, idmrg_HR_mpo_;

@@ -259,19 +259,31 @@ system to fall back *to*). `itensor_version="python"` runs
 `pyitensor/idmrg.py`'s own growing algorithm (see below) and keeps the
 resulting `IDMRGResult` in `self._result` for `vev`/`correlator` to reuse.
 `itensor_version=3` instead calls the compiled `mpscpp3` backend's
-`Chain::idmrg_ground_state` directly — originally a line-by-line C++ port
-of the same algorithm (built from the start with fresh Index objects on
-every automaton tensor to sidestep the duplicate-Index bug class described
-below, rather than needing the same retrofit), but **no longer equivalent**:
-the Python side has since gained the wavefunction prediction, the
-theta-cell extraction and the energy baseline described below, and none of
-the three has been ported. The cross-backend test
-(`test_itensor_version3_matches_python_backend`) compares only the energy
-density, which was never the part that differed, so it does not guard this
-— see `CLAUDE.md` for the standing note. v3 is used for the energy density
-only; it has no static-correlator support, so `self._result` is left
-`None` on that path and `vev`/`correlator` raise `NotImplementedError`
-regardless of whether `gs_energy` itself already ran successfully.
+`Chain::idmrg_ground_state` directly — a line-by-line C++ port of the same
+algorithm (built from the start with fresh Index objects on every
+automaton tensor to sidestep the duplicate-Index bug class described
+below, rather than needing the same retrofit). The two implementations had
+diverged for a while — the Python side gained McCulloch's wavefunction
+prediction, the theta-cell extraction and the energy baseline described
+below, and none of the three was ported — but **all three are ported
+now** (`idmrg_wavefunction_prediction`, `idmrg_theta_cell` +
+`ic_canonicalize_cell`, `idmrg_subtract_energy_baseline`), and with the
+unit cell in hand the static observables built on it follow:
+`Chain::idmrg_onsite_expectation`, `Chain::idmrg_two_point_correlator` and
+`Chain::idmrg_local_excitation_gap`. So `vev`/`correlator` work under
+`gs_method="idmrg"` on this backend too; `self._result` is still left
+`None` on the v3 path (it is a `"python"`-backend-only cache), because
+everything the v3 observables need lives inside the C++ `Chain` as private
+snapshots. `test_itensor_version3_matches_python_backend` now compares the
+converged *state* (`vev` plus a short `correlator` sweep) rather than only
+the energy density, which was never the part that differed, so the
+divergence is guarded rather than merely documented; `tests/
+test_idmrg_correlator_v3.py` covers the new surface directly. What stays
+`"python"`-only: `local_excitation_gap`'s `window>0` variant (an explicit
+prototype rather than stable API) and the iMPS algebra over `IDMRGResult`
+(`imps_overlap`/`apply_mpo`/`imps_sum`), which `infinitechain.py` does not
+expose for `gs_method="idmrg"` anyway and which the VUMPS path already
+covers on this backend.
 Benchmarked (S=1/2 uniform Heisenberg chain, `maxm=30`, `maxiter=60`,
 `etol=1e-9`): v3 is ~2.6-2.7x slower than `"python"` at both `n_uc=1` and
 `n_uc=2`, with energy-density agreement between the two backends to
@@ -384,11 +396,15 @@ closure. `Infinite_Many_Body_Chain.vev`/`correlator` dispatch on
 `self.gs_method` to call either `idmrg.py`'s or `vumps.py`'s version
 directly. `local_excitation_gap` remains `gs_method="idmrg"`-only (it
 re-diagonalizes the growing algorithm's own final 2-site effective
-Hamiltonian, which has no VUMPS equivalent). `itensor_version=3` now
-mirrors this too for `gs_method="vumps"` (see below) — `gs_method="idmrg"`
-there still has no correlator support at all (`IdmrgResult` keeps no
-per-sublattice unit cell, the same gap `idmrg_ground_state`'s own doc
-comment already documents) — `excitation_energies`/`excitation_gap` are
+Hamiltonian, which has no VUMPS equivalent; its `window>0` variant is
+additionally `itensor_version="python"`-only, being an explicit prototype
+rather than stable API). `itensor_version=3` mirrors all of this: both
+`gs_method` values support `vev`/`correlator` there
+(`Chain::vumps_onsite_expectation`/`vumps_two_point_correlator` and
+`Chain::idmrg_onsite_expectation`/`idmrg_two_point_correlator`), and
+`local_excitation_gap` at `window=0` maps onto
+`Chain::idmrg_local_excitation_gap`. `excitation_energies`/`excitation_gap`
+are
 the opposite of `vev`/`correlator`: they require `gs_method="vumps"` (see
 below), since the tangent-space excitation ansatz needs exactly the
 mixed-gauge `{AL,AR,C,GL,GR}` `VUMPSResult` carries, which `IDMRGResult`
@@ -3256,7 +3272,7 @@ bookkeeping fixes referenced above -- it was ~13x before them).
 |---|---|
 | `src/dmrgpy/` | the Python library |
 | `src/dmrgpy/manybodychain.py` | `Many_Body_Chain`, the shared base class |
-| `src/dmrgpy/infinitechain.py`, `pyitensor/idmrg.py`, `mpscpp3/chain_session.h` | `Infinite_Many_Body_Chain` and infinite DMRG (iDMRG), pyitensor + ITensor v3 (energy density only on v3) |
+| `src/dmrgpy/infinitechain.py`, `pyitensor/idmrg.py`, `mpscpp3/chain_session.h` | `Infinite_Many_Body_Chain` and infinite DMRG (iDMRG), pyitensor + ITensor v3 (energy density, static correlators and local gap on both) |
 | `src/dmrgpy/multioperator.py`, `multioperatortk/` | backend-agnostic operator representation |
 | `src/dmrgpy/mode.py`, `cppext.py` | DMRG/ED and backend dispatch |
 | `src/dmrgpy/mpscpp2/`, `mpscpp3/` | vendored ITensor C++ (v2, v3) + pybind11 bindings |

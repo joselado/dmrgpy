@@ -569,39 +569,61 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   expansion machinery in `TDVP/basisextension.h` (mainly useful for
   one-site TDVP or long-range Hamiltonians) is not wired in, since
   two-site TDVP already grows bond dimension via SVD like two-site DMRG.
-- **`mpscpp3`-specific: `Chain::idmrg_ground_state` is NOT equivalent to
-  `pyitensor/idmrg.py` any more**, despite its own header comment (and
-  `docs/documentation.md`) still calling it "a line-for-line/line-by-line
-  port". The Python side has since gained three things the C++ port never
-  got: (1) McCulloch's wavefunction prediction
-  (`_wavefunction_prediction`, `theta = lambda_k . B_k .
-  lambda_{k-1}^{-1} . A_k . lambda_k`) as each micro-step's Lanczos start
-  — C++ still uses the *old* heuristic Python replaced, a raw flat vector
-  reused whenever its size matches (`idmrg_local_solve`'s
-  `warm.size()==dim_in`); (2) extraction of the converged unit cell from a
-  single micro-step's theta (`_theta_cell`/`_canonical_theta_cell`,
-  `IDMRGResult.cell_list`/`cell_raw`) instead of chaining per-micro-step
-  factors — C++ only snapshots the per-sublattice `idmrg_U_` (the `U_list`
-  equivalent); (3) the per-site energy baseline subtracted from both
-  growing environments each micro-step (`_subtract_energy_baseline`, the
-  reference `idmrg.h`'s `HL += -energy*IL`, with the density adding the
-  shift back) — C++'s density is a plain
-  `(energy-prev_energy)/(2.0*n_uc)` with no shift anywhere. (1) and (2)
-  are state/gauge quality, not energy: v3's `IdmrgResult` carries only
-  `density`/`converged`/`niter_done`, and `bindings.cc` exposes no iDMRG
-  correlator at all (only `vumps_onsite_expectation`/
-  `vumps_two_point_correlator`), so `gs_method="idmrg"` on
-  `itensor_version=3` raises `NotImplementedError` for `vev`/`correlator`
-  — the C++ `idmrg_onsite_expectation`/`idmrg_transfer_at` helpers are
-  private and serve only `td_dynamical_correlator_window`'s IBC window.
-  Nothing guards this divergence: the one cross-backend test
-  (`tests/test_infinite_chain.py::test_itensor_version3_matches_python_backend`)
-  asserts only `ic_v3.e0 == approx(ic_py.e0, abs=1e-6)`, which none of the
-  three can move — (1)/(2) leave the converged energy density alone, and
-  (3) is exactly compensated on the Python side (the drift it prevents was
-  measured at ~9e-11 after 400 macro-iterations, versus the test's
-  `maxiter=30`). Treat the C++ path as energy-density-only and use
-  `itensor_version="python"` for anything that consumes the iDMRG *state*.
+- **`mpscpp3`-specific: `Chain::idmrg_ground_state` is a full port of
+  `pyitensor/idmrg.py`, static observables included.** It was for a long
+  time only *most* of one, and the three missing pieces are worth knowing
+  about because they are exactly the parts an energy-only test cannot
+  see: (1) McCulloch's wavefunction prediction (`theta = lambda_k . B_k .
+  lambda_{k-1}^{-1} . A_k . lambda_k`) as each micro-step's Krylov start,
+  now `idmrg_wavefunction_prediction` (the older heuristic it replaced —
+  reusing a raw flat vector whenever its size matches — survives as the
+  fallback when the previous step's shapes don't line up yet); (2)
+  extraction of the converged unit cell from a single micro-step's theta,
+  now `idmrg_theta_cell` + `ic_canonicalize_cell`, kept on the Chain as
+  `idmrg_cell_` — tiling the per-micro-step `idmrg_U_` chain instead
+  (whose two ends live in bond bases minted by *different* micro-steps)
+  leaves the energy correct while putting `<Sz>` at -0.13 against an exact
+  0 on the XX chain; (3) the per-site energy baseline subtracted from both
+  growing environments each micro-step (`idmrg_subtract_energy_baseline`,
+  the reference `idmrg.h`'s `HL += -energy*IL`), with the density adding
+  the shift back. On top of (2), `bindings.cc` now exposes
+  `idmrg_onsite_expectation`/`idmrg_two_point_correlator`/
+  `idmrg_local_excitation_gap`, so `gs_method="idmrg"` supports
+  `vev`/`correlator`/`local_excitation_gap` on `itensor_version=3`;
+  `td_dynamical_correlator_window`'s own connected-background subtraction
+  reads the same cell-based expectation value (it used to tile `idmrg_U_`,
+  i.e. it had the gauge bug (2) exists to fix).
+  `tests/test_infinite_chain.py::test_itensor_version3_matches_python_backend`
+  now compares `vev` and a `correlator` sweep as well as `e0`, so the
+  divergence is guarded rather than merely documented, and
+  `tests/test_idmrg_correlator_v3.py` covers the new surface directly.
+  Still `itensor_version="python"`-only: `local_excitation_gap(window>0)`
+  (`local_excitation_gap_windowed` is an explicit prototype, not stable
+  API) and the iMPS algebra over `IDMRGResult`
+  (`imps_overlap`/`apply_mpo`/`imps_sum`), which `infinitechain.py` never
+  exposed for `gs_method="idmrg"` and which the VUMPS path already covers
+  on this backend.
+- **`mpscpp3`-specific: the iDMRG static observables are dense arrays, not
+  ITensors** — the `ic_*` helpers in `chain_session.h`, the same design
+  (and for the same reasons) as the VUMPS `vx_*` ones next to them. Two
+  deliberate departures from a literal transcription of `idmrg.py`, both
+  pure performance and neither changing a returned number: the
+  measurement-independent part (transfer tensors + both families of
+  fixed points) is built once per ground-state run and cached
+  (`ic_build_cache`) rather than recomputed inside every `vev`/
+  `correlator` call the way `idmrg.py` does; and a two-point correlator
+  applies the operator string to the right fixed point one site at a time
+  (O(chi^4) per site) instead of composing transfer matrices (O(chi^6)
+  per site). Measured on a critical Heisenberg chain at `maxm=24`: a
+  single `r=3` correlator went from ~4.1s to ~0.01s. Above
+  `ic_dense_eig_max_` (=64, matching `idmrg.py`'s own `_DENSE_EIG_MAX`)
+  the transfer-matrix eigenproblems switch from a dense `zgeev` on the
+  whole `chi^2 x chi^2` matrix to a matrix-free restarted Arnoldi
+  (`ic_arnoldi_dominant`), the C++ counterpart of `idmrg.py`'s own ARPACK
+  branch. Net effect versus `itensor_version="python"` on that same
+  chain: the *growth loop* is no faster (v3 runs ~1.5-2x slower — it is
+  ITensor-object-bound, see the benchmark note in
+  `docs/documentation.md`), while the *observables* are 5-500x faster.
 - **Both backends can be loaded in the same process** (needed for anything
   that directly compares `itensor_version=2` vs `=3` results, e.g. the
   `v2_VS_v3_*`-named examples in each theme folder, or `examples/

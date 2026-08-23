@@ -168,18 +168,21 @@ def test_correlator_matches_python_backend_on_tfim(D):
 
 # == Error paths ==============================================================
 
-def test_vev_requires_gs_method_vumps_on_v3():
+def test_vev_rejects_unknown_gs_method_on_v3():
+    """Both "vumps" (this file) and "idmrg"
+    (tests/test_idmrg_correlator_v3.py) support vev/correlator on the v3
+    backend now; anything else must still raise."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
     ic.set_hamiltonian(2.0 * ic.SzC[0])
-    ic.gs_method = "idmrg"  # "vumps" (the default since 2026-08-08) DOES work -- see above
+    ic.gs_method = "nonsense"
     with pytest.raises(NotImplementedError):
         ic.vev("Sz", 0)
 
 
-def test_correlator_requires_gs_method_vumps_on_v3():
+def test_correlator_rejects_unknown_gs_method_on_v3():
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
     ic.set_hamiltonian(2.0 * ic.SzC[0])
-    ic.gs_method = "idmrg"  # "vumps" (the default since 2026-08-08) DOES work -- see above
+    ic.gs_method = "nonsense"
     with pytest.raises(NotImplementedError):
         ic.correlator("Sz", 0, "Sz", 1)
 

@@ -11,17 +11,19 @@ number of sites) have any meaning for an infinite system.
 `itensor_version="python"` (default) or `3` are supported -- passing
 anything else raises NotImplementedError rather than silently doing
 something else. `self.gs_method` (`"vumps"` by default, on EITHER
-backend -- see `Infinite_Many_Body_Chain`'s own class docstring) also
-controls what `vev`/`correlator` can do: `gs_method="vumps"` supports
-them on BOTH backends (`pyitensor.vumps.onsite_expectation`/
-`two_point_correlator` for `"python"`, `Chain::vumps_onsite_expectation`/
-`vumps_two_point_correlator` for `3` -- a C++ port of the same AC/AR-based
-formula); `gs_method="idmrg"` supports them on `"python"` only
-(`pyitensor.idmrg`'s own dominant-right-fixed-point-based versions) --
-the v3 C++ backend's `gs_method="idmrg"` (`Chain::idmrg_ground_state`,
-energy density only) has no correlator support at all (`IdmrgResult`
-keeps no per-sublattice U_list, see `gs_energy`'s own comment) -- see
-`vev`'s own docstring for the full backend/gs_method support matrix.
+backend -- see `Infinite_Many_Body_Chain`'s own class docstring) picks
+the ground-state algorithm; `vev`/`correlator` work for BOTH values on
+BOTH backends: `"vumps"` via `pyitensor.vumps.onsite_expectation`/
+`two_point_correlator` and `Chain::vumps_onsite_expectation`/
+`vumps_two_point_correlator` (the AC/AR-based formula), `"idmrg"` via
+`pyitensor.idmrg`'s and `Chain::idmrg_onsite_expectation`/
+`idmrg_two_point_correlator`'s own dominant-fixed-point-based versions
+over the gauge-consistent unit cell. `local_excitation_gap` needs
+`gs_method="idmrg"` and works on both backends at `window=0`
+(`window>0` stays `"python"`-only, see that method's own docstring);
+`excitation_energies`/`excitation_gap` need `gs_method="vumps"` and work
+on both backends. See `vev`'s own docstring for the full support
+matrix.
 
 == Hamiltonian specification: L/C/R-suffixed operators ==
 
@@ -186,11 +188,9 @@ class Infinite_Many_Body_Chain:
     `itensor_version="python"` (default) or `3` -- the ITensor v3 C++
     backend (`mpscpp3/chain_session.h`'s `Chain::idmrg_ground_state`/
     `Chain::vumps_ground_state`) computes the energy density under either
-    `gs_method`, and additionally supports `vev`/`correlator` under
-    `gs_method="vumps"` (`Chain::vumps_onsite_expectation`/
-    `vumps_two_point_correlator`) -- `gs_method="idmrg"` on this backend
-    still has no static-correlator support (`IdmrgResult` keeps no
-    per-sublattice `U_list`, see `gs_energy`'s own comment).
+    `gs_method`, and supports `vev`/`correlator` under either too
+    (`Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`, and
+    `Chain::idmrg_onsite_expectation`/`idmrg_two_point_correlator`).
     `itensor_version=2` and `"julia_live"`/`"julia"` have no iDMRG port at
     all and raise `NotImplementedError`.
 
@@ -201,16 +201,19 @@ class Infinite_Many_Body_Chain:
     infinite-size algorithm). `vev`/`correlator` work under EITHER
     `gs_method` on `itensor_version="python"` -- `"idmrg"` dispatches to
     `pyitensor.idmrg.onsite_expectation`/`two_point_correlator` (via
-    `IDMRGResult`'s own per-sublattice `U_list` and a dominant-right-fixed-
-    point eigenproblem), `"vumps"` to `pyitensor.vumps`'s own same-named
-    functions (via `VUMPSResult`'s mixed-gauge `{AC, AR}` directly, no
-    eigenproblem needed -- see those functions' own docstrings) -- but
-    only under `gs_method="vumps"` on `itensor_version=3` (see above).
-    `local_excitation_gap` AND `td_dynamical_correlator` both still
+    `IDMRGResult.cell_list`, the gauge-consistent unit cell, and a
+    dominant-fixed-point eigenproblem), `"vumps"` to
+    `pyitensor.vumps`'s own same-named functions (via `VUMPSResult`'s
+    mixed-gauge `{AC, AR}` directly, no eigenproblem needed -- see those
+    functions' own docstrings) -- and under EITHER `gs_method` on
+    `itensor_version=3` as well, via the C++ ports of those same two
+    families. `local_excitation_gap` AND `td_dynamical_correlator` both
     require `gs_method="idmrg"` specifically, on EITHER backend (the
     former re-diagonalizes the growing algorithm's own final 2-site
     effective Hamiltonian; the latter needs the growing algorithm's own
     converged environment snapshot -- neither has a VUMPS equivalent);
+    `local_excitation_gap`'s `window>0` variant is additionally
+    `itensor_version="python"`-only, see its own docstring;
     conversely `excitation_energies`/`excitation_gap` (the tangent-space/
     quasiparticle excitation ansatz) require `gs_method="vumps"` -- they
     need `VUMPSResult`'s own mixed-gauge {AL,AR,C,GL,GR}, which the
@@ -327,12 +330,11 @@ class Infinite_Many_Body_Chain:
         self._h_inter = None
         self._result = None      # pyitensor.idmrg.IDMRGResult once converged
                                   # (itensor_version="python", gs_method=
-                                  # "idmrg" only -- itensor_version=3's own
-                                  # gs_method="idmrg" has no correlator
-                                  # machinery at all, see gs_energy/vev/
-                                  # correlator; gs_method="vumps" DOES have
-                                  # correlator support on BOTH backends, see
-                                  # self._vumps_result/self._session3 below)
+                                  # "idmrg" only -- itensor_version=3 keeps
+                                  # the equivalent state inside its own C++
+                                  # Chain instead, see self._session3 below,
+                                  # and supports vev/correlator from it just
+                                  # the same)
         self._vumps_result = None  # pyitensor.vumps.VUMPSResult once
                                     # converged (itensor_version="python",
                                     # gs_method="vumps" only -- v3's own
@@ -348,17 +350,23 @@ class Infinite_Many_Body_Chain:
                                       # in set_hamiltonian exactly like
                                       # self._result already is.
         self._session3 = None    # itensor_version=3 only: the mpscpp3
-                                  # Chain instance gs_energy() last ran
-                                  # idmrg_ground_state on, kept alive so
-                                  # td_dynamical_correlator can reuse its
-                                  # private converged-environment snapshot
-                                  # (Chain::idmrg_ground_state's own
-                                  # env_window_boundary-equivalent state,
-                                  # never exposed to Python directly -- see
-                                  # chain_session.h's own comment) -- a
-                                  # *fresh* Chain() has no such snapshot,
-                                  # so re-running gs_energy() on a new
-                                  # instance would silently lose it.
+                                  # Chain instance gs_energy() last ran a
+                                  # ground-state method on, kept alive so
+                                  # every observable can reuse its private
+                                  # snapshots -- after idmrg_ground_state:
+                                  # the converged environments
+                                  # (td_dynamical_correlator), the
+                                  # gauge-consistent unit cell (vev/
+                                  # correlator) and the final local
+                                  # superblock (local_excitation_gap);
+                                  # after vumps_ground_state: the
+                                  # mixed-gauge state (vev/correlator/
+                                  # excitation_energies). None of these is
+                                  # exposed to Python directly -- see
+                                  # chain_session.h's own comments -- so a
+                                  # *fresh* Chain() has none of them, and
+                                  # re-running gs_energy() on a new
+                                  # instance would silently lose them.
         self._session3_has_vumps = False  # itensor_version=3 only: whether
                                            # self._session3 last ran
                                            # vumps_ground_state (True) or
@@ -448,20 +456,23 @@ class Infinite_Many_Body_Chain:
         (C++ port of pyitensor/vumps.py -- see mpscpp3/chain_session.h's
         own doc comment at that method for the algorithm/scope, including
         the one simplification it takes relative to pyitensor's own
-        driver); "idmrg" calls Chain::idmrg_ground_state instead. Unlike
-        "idmrg" on this backend, gs_method="vumps" here DOES support
-        vev/correlator too (Chain::vumps_onsite_expectation/
-        vumps_two_point_correlator, a C++ port of pyitensor/vumps.py's own
-        AC/AR-based formula) -- see vev's own docstring for the full
-        support matrix. self._result/
-        self._vumps_result are both left None on the itensor_version=3
-        path either way (they are "python"-backend-only caches); vev/
-        correlator raise NotImplementedError only for itensor_version=3,
-        gs_method="idmrg" (IdmrgResult has no correlator machinery at all).
-        self._session3 is kept alive either way -- td_dynamical_correlator
-        needs it after gs_method="idmrg", vev/correlator/
-        excitation_energies/excitation_gap need it after gs_method="vumps"
-        (see _get_excitation_environment's own docstring)."""
+        driver); "idmrg" calls Chain::idmrg_ground_state instead. Both
+        support vev/correlator on this backend -- "vumps" via
+        Chain::vumps_onsite_expectation/vumps_two_point_correlator (a C++
+        port of pyitensor/vumps.py's own AC/AR-based formula), "idmrg" via
+        Chain::idmrg_onsite_expectation/idmrg_two_point_correlator (a C++
+        port of pyitensor/idmrg.py's own transfer-matrix machinery over
+        the gauge-consistent unit cell) -- see vev's own docstring for the
+        full support matrix. self._result/self._vumps_result are both left
+        None on the itensor_version=3 path either way (they are
+        "python"-backend-only caches): everything the v3 backend's own
+        observables need lives inside the C++ Chain, as private snapshots
+        set by whichever ground-state method ran. self._session3 is
+        therefore kept alive either way -- td_dynamical_correlator and
+        local_excitation_gap need it after gs_method="idmrg",
+        excitation_energies/excitation_gap after gs_method="vumps", and
+        vev/correlator after either (see _get_excitation_environment's own
+        docstring)."""
         if self._h_intra is None:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.gs_energy called before set_hamiltonian")
@@ -555,24 +566,23 @@ class Infinite_Many_Body_Chain:
         is accepted purely so callers can write whichever reads most
         naturally (SxL/SxC/SxR all describe the same infinite chain).
 
-        itensor_version="python" supports both gs_method="idmrg"
-        (pyitensor.idmrg.onsite_expectation, via IDMRGResult's per-sublattice
-        U_list) and gs_method="vumps" (pyitensor.vumps.onsite_expectation,
-        via VUMPSResult's mixed-gauge AC directly -- see that function's own
-        docstring). itensor_version=3 supports gs_method="vumps" only (C++
-        port of the same AC-based formula, Chain::vumps_onsite_expectation)
-        -- gs_method="idmrg" on this backend has no correlator machinery at
-        all (IdmrgResult keeps no per-sublattice U_list, see gs_energy's own
-        comment), and raises NotImplementedError.
+        All four (backend, gs_method) combinations are supported:
+        gs_method="idmrg" dispatches to pyitensor.idmrg.onsite_expectation
+        for itensor_version="python" and to
+        Chain::idmrg_onsite_expectation for itensor_version=3;
+        gs_method="vumps" to pyitensor.vumps.onsite_expectation and
+        Chain::vumps_onsite_expectation respectively (via VUMPSResult's
+        mixed-gauge AC directly -- see those functions' own docstrings).
 
-        gs_method="idmrg"'s static observables tile IDMRGResult.cell_list,
-        the gauge-consistent unit cell extracted from a single micro-step's
-        theta (pyitensor/idmrg.py's `_theta_cell`), NOT the raw per-
-        micro-step `U_list`. Tiling `U_list` -- which is what this did
-        before that extraction existed -- put <Sz> at -0.13 against an exact
-        0 and <Sz(0)Sz(1)> at +0.028 against an exact -0.101 (the wrong
-        sign) on the XX chain; it now reproduces both to the bond
-        dimension's own truncation error."""
+        gs_method="idmrg"'s static observables tile the gauge-consistent
+        unit cell extracted from a single micro-step's theta
+        (pyitensor/idmrg.py's `_theta_cell` / IDMRGResult.cell_list, and
+        Chain::idmrg_theta_cell on the C++ side), NOT the raw per-
+        micro-step per-sublattice factors. Tiling those -- which is what
+        this did before that extraction existed -- put <Sz> at -0.13
+        against an exact 0 and <Sz(0)Sz(1)> at +0.028 against an exact
+        -0.101 (the wrong sign) on the XX chain; it now reproduces both to
+        the bond dimension's own truncation error."""
         if group not in ("L", "C", "R"):
             raise ValueError("vev: group must be 'L', 'C' or 'R', got {!r}".format(group))
         if not (0 <= p < self.n_uc):
@@ -592,13 +602,16 @@ class Infinite_Many_Body_Chain:
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
             return self._session3.vumps_onsite_expectation(opname, p)
+        if self.itensor_version == 3 and self.gs_method == "idmrg":
+            if self._session3 is None or self._session3_has_vumps:
+                self.gs_energy()
+            return self._session3.idmrg_onsite_expectation(opname, p)
         raise NotImplementedError(
             "Infinite_Many_Body_Chain.vev: only itensor_version=\"python\" "
-            "with gs_method \"idmrg\" or \"vumps\", or itensor_version=3 "
-            "with gs_method \"vumps\", support static correlators -- run a "
-            "separate such chain for vev/correlator, or reuse "
-            "pyitensor.idmrg's/pyitensor.vumps' correlator functions "
-            "directly against a \"python\"-backend IDMRGResult/VUMPSResult")
+            "and itensor_version=3, each with gs_method \"idmrg\" or "
+            "\"vumps\", support static correlators -- got "
+            "itensor_version={!r}, gs_method={!r}".format(
+                self.itensor_version, self.gs_method))
 
     def correlator(self, opname_i, p_i, opname_j, r):
         """<opname_i(site p_i) opname_j(site p_i + r)>, r measured in
@@ -607,19 +620,34 @@ class Infinite_Many_Body_Chain:
         convention.
 
         Same backend/gs_method support matrix as vev's own docstring
-        (itensor_version="python" with gs_method "idmrg" or "vumps";
-        itensor_version=3 with gs_method="vumps" only, via
-        Chain::vumps_two_point_correlator), including its note on which
-        tensors gs_method="idmrg" actually tiles."""
+        (all four combinations of itensor_version in ("python", 3) with
+        gs_method in ("idmrg", "vumps")), including its note on which
+        tensors gs_method="idmrg" actually tiles.
+
+        Fermionic operators: the Jordan-Wigner string is threaded across
+        every site strictly between the two endpoints on every backend, so
+        <Cdag_i C_j> here is the physical fermionic correlator, not a
+        stringless product of two bare matrices."""
         if not (0 <= p_i < self.n_uc):
             raise ValueError("correlator: p_i must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p_i))
+        if r < 0:
+            # Checked here, not only per backend: the pyitensor paths raise
+            # ValueError for this themselves, while the C++ ones raise an
+            # ITError that pybind11 surfaces as a bare RuntimeError -- so
+            # without this the same bad argument produced a different
+            # exception type depending on itensor_version.
+            raise ValueError(
+                "Infinite_Many_Body_Chain.correlator: r must be >= 0 (use r "
+                "and swap the operator order for the mirror separation), "
+                "got {!r}".format(r))
         if (is_fermionic(opname_i) != is_fermionic(opname_j)):
             # Odd total fermion parity: the Jordan-Wigner string opened by
             # this pair is never closed, so it would have to run to infinity.
             # Such a correlator vanishes identically in any parity-conserving
-            # state anyway; the backends reject it themselves (v3 via an
-            # ITensor Error() that would abort the process), so catch it here.
+            # state anyway; the backends reject it themselves (both C++
+            # paths via Chain::idmrg_correlator_endpoints' own ITError), so
+            # catch it here to give a clear ValueError on every backend.
             raise ValueError(
                 "Infinite_Many_Body_Chain.correlator: the operator pair "
                 "({!r}, {!r}) has odd total fermion parity -- its "
@@ -639,14 +667,17 @@ class Infinite_Many_Body_Chain:
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
             return self._session3.vumps_two_point_correlator(opname_i, p_i, opname_j, r)
+        if self.itensor_version == 3 and self.gs_method == "idmrg":
+            if self._session3 is None or self._session3_has_vumps:
+                self.gs_energy()
+            return self._session3.idmrg_two_point_correlator(
+                opname_i, p_i, opname_j, r)
         raise NotImplementedError(
             "Infinite_Many_Body_Chain.correlator: only itensor_version="
-            "\"python\" with gs_method \"idmrg\" or \"vumps\", or "
-            "itensor_version=3 with gs_method \"vumps\", support static "
-            "correlators -- run a separate such chain for vev/correlator, "
-            "or reuse pyitensor.idmrg's/pyitensor.vumps' correlator "
-            "functions directly against a \"python\"-backend "
-            "IDMRGResult/VUMPSResult")
+            "\"python\" and itensor_version=3, each with gs_method "
+            "\"idmrg\" or \"vumps\", support static correlators -- got "
+            "itensor_version={!r}, gs_method={!r}".format(
+                self.itensor_version, self.gs_method))
 
     def _get_excitation_environment(self):
         """Lazily build (or reuse) the pyitensor.idmrg_excitations.
@@ -774,14 +805,36 @@ class Infinite_Many_Body_Chain:
         why n_uc=2 needs sublattice-position bookkeeping not implemented
         yet).
 
-        Only supported for itensor_version="python" with gs_method="idmrg"
-        -- see vev's own comment."""
-        if self.itensor_version != "python" or self.gs_method != "idmrg":
+        Requires `gs_method="idmrg"` on either backend. `window=0` is
+        supported on both `itensor_version="python"` (pyitensor.idmrg.
+        local_excitation_gap) and `itensor_version=3` (its C++ port,
+        Chain::idmrg_local_excitation_gap). `window>0` is
+        `itensor_version="python"` only: pyitensor.idmrg.
+        local_excitation_gap_windowed is explicitly a prototype rather than
+        stable API (see its own docstring), so it was deliberately left out
+        of the v3 port rather than pinned down in C++ first."""
+        if self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.local_excitation_gap: only "
-                "itensor_version=\"python\" with gs_method=\"idmrg\" is "
-                "supported -- see pyitensor.idmrg.local_excitation_gap's "
-                "own docstring")
+                "gs_method=\"idmrg\" is supported -- see "
+                "pyitensor.idmrg.local_excitation_gap's own docstring")
+        if self.itensor_version == 3:
+            if window != 0:
+                raise NotImplementedError(
+                    "Infinite_Many_Body_Chain.local_excitation_gap: "
+                    "window>0 is supported only for "
+                    "itensor_version=\"python\" -- "
+                    "pyitensor.idmrg.local_excitation_gap_windowed is a "
+                    "prototype, not stable API, and was deliberately not "
+                    "ported to the v3 C++ backend")
+            if self._session3 is None or self._session3_has_vumps:
+                self.gs_energy()
+            return self._session3.idmrg_local_excitation_gap(niter)
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.local_excitation_gap: only "
+                "itensor_version=\"python\" and itensor_version=3 are "
+                "supported, got {!r}".format(self.itensor_version))
         if self._result is None:
             self.gs_energy()
         from .pyitensor import idmrg

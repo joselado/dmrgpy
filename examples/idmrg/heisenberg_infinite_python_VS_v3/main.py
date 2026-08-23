@@ -10,10 +10,10 @@
 # the model doesn't actually care how the unit cell is chosen).
 #
 # infinitechain.py's public API dispatches itensor_version=3 straight to
-# Chain::idmrg_ground_state (energy density only -- no static-correlator
-# support on that backend yet, see gs_energy's own docstring); vev()/
-# correlator() still require itensor_version="python" regardless of
-# which backend gs_energy() itself used.
+# Chain::idmrg_ground_state. Static observables on top of it (vev(),
+# correlator(), local_excitation_gap()) are supported on that backend too
+# -- see examples/idmrg/idmrg_correlator_python_VS_v3 for a cross-backend
+# check of those, and of what each costs.
 
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
