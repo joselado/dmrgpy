@@ -1688,6 +1688,23 @@ per-statistics many-body operator construction; `edtk/one2many.py`
 promotes single-site operators to the full Hilbert space), diagonalized
 with `scipy.sparse.linalg`.
 
+Above `algebra.maxsize` (2000) that diagonalization is iterative, and
+`algebra.lowest_states` does **not** hand the Hermitian case to a single
+`eigsh` call. A plain `eigsh(h,k=n)` silently loses members of a degenerate
+level — it stops once the Ritz pairs it holds have converged, which one copy
+of a degenerate eigenvalue already satisfies — so the ED path, the very one
+used to judge whether a DMRG result is right, returned 1 of 4, 3 of 8 and 4
+of 13 ground-level copies on a ferromagnetic spin-1/2 chain at dim 4096.
+`algebra._deflated_lowest_hermitian` instead collects levels one at a time,
+each round solving for the lowest eigenvalue of `P h P + sigma|V><V|` with
+`P = 1 - |V><V|` over the eigenvectors found so far, which makes any
+remaining copy the extremal eigenvalue rather than an already-converged one.
+No setting of `tol`/`ncv`/over-requesting substitutes for this; measured,
+each fixes some (N,n) and breaks others. The non-Hermitian branch (`eigs`)
+is *not* deflated — the projector needs orthogonal eigenvectors — and can
+still drop copies. See `docs/ed_vs_dmrg_degenerate_multiplets.md` and
+`tests/test_ed_degenerate_levels.py`.
+
 ### 4.4 The in-process C++ backend (ITensor v2 and v3)
 
 `mpscpp2/bindings.cc` and `mpscpp3/bindings.cc` each compile a pybind11

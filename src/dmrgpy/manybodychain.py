@@ -556,24 +556,24 @@ class Many_Body_Chain():
   def get_excited(self,mode="DMRG",**kwargs):
       """Return excitation energies.
 
-      IMPORTANT on a degenerate spectrum: the two modes return DIFFERENT
-      THINGS. `mode="ED"` returns distinct LEVELS (one entry per
-      eigenvalue); `mode="DMRG"` returns eigenSTATES, so a degenerate
-      multiplet appears once per member. Comparing them index by index --
-      the natural way to validate a DMRG result against ED -- therefore
-      makes DMRG look like it is duplicating states on any model with a
-      degeneracy, and `get_gap()` (which reads es[1]-es[0]) returns a level
-      spacing under ED and a degeneracy splitting, i.e. ~0, under DMRG.
-      This has already produced one wrong bug report.
+      Both modes return one entry per eigenSTATE, so a degenerate level
+      appears once per member and the two agree index by index (up to
+      DMRG convergence). `get_gap()` reads es[1]-es[0], which is therefore
+      ~0 -- correctly -- whenever the ground level is degenerate; ask for
+      enough levels that the multiplet AND the state you want both fit
+      (with a three-fold degenerate ground state, the first genuine
+      excitation is n=4).
 
-      Identify states by a quantum number rather than by position: on a
+      `mode="ED"` above `algebra.maxsize` used to drop members of
+      degenerate levels, which made ED look like it returned distinct
+      levels and made DMRG look like it duplicated states; that was an
+      ARPACK defect, fixed in algebra._deflated_lowest_hermitian. See
+      docs/ed_vs_dmrg_degenerate_multiplets.md.
+
+      To tell apart states whose energies are too close to separate,
+      identify them by a quantum number rather than by position: on a
       spin-rotation invariant model evaluate <S^2> per state (2 for a
-      triplet member, 0 for a singlet), which stays decisive even when the
-      energies do not -- degenerate members converge to slightly different
-      energies, and that spread can exceed the splitting being resolved.
-      Ask for enough levels that the multiplet AND the state you want both
-      fit (with a three-fold degenerate ground state, the first genuine
-      excitation is n=4). See docs/ed_vs_dmrg_degenerate_multiplets.md."""
+      triplet member, 0 for a singlet)."""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG":
           return excited.get_excited(self,**kwargs) # return excitation energies
@@ -585,8 +585,9 @@ class Many_Body_Chain():
   def get_excited_states(self,mode="DMRG",**kwargs):
       """Return the excited STATES themselves (not just their energies).
 
-      The same ED/DMRG asymmetry `get_excited` documents applies here --
-      see its docstring and docs/ed_vs_dmrg_degenerate_multiplets.md."""
+      Like `get_excited`, both modes return one entry per eigenstate, so a
+      degenerate level appears once per member -- see its docstring and
+      docs/ed_vs_dmrg_degenerate_multiplets.md."""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG":
           return excited.get_excited_states(self,**kwargs) # return es and waves

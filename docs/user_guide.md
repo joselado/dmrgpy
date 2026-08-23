@@ -215,6 +215,16 @@ es = sc.get_excited(n=4)          # [E0, E1, E2, E3]
 gap = sc.get_gap()                # E1 - E0
 ```
 
+Both `mode="DMRG"` and `mode="ED"` return one entry per eigen*state*, so a
+degenerate level appears once per member in both and the two agree index by
+index. `get_gap()` is therefore ~0, correctly, whenever the ground level is
+degenerate — ask for enough levels that the multiplet and the state you want
+both fit (with a three-fold degenerate ground state, the first genuine
+excitation is `n=4`). Degenerate members converge to slightly different
+energies under DMRG, so when that spread approaches the splitting you are
+after, identify states by a quantum number (e.g. $\langle S^2\rangle$)
+rather than by position in the list.
+
 `get_excited_states(n, purify=True)` additionally returns the
 wavefunctions; `purify=True` re-diagonalizes $H$ in the Gram-Schmidt
 orthogonalized subspace spanned by the raw excited-state MPS, correcting
