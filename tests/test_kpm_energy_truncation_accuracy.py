@@ -132,3 +132,42 @@ def test_energy_truncation_matches_ed_qualitative_shape():
     assert y_ed[1] > 10 * y_ed[2]
     assert y_kpm[1] > y_kpm[0]
     assert y_kpm[1] > y_kpm[2]
+
+
+def test_six_site_peak_survives_the_recommended_dK():
+    """Same check on a *6-site* chain, where each site's local effective
+    Hamiltonian is genuinely larger than the paper's recommended dK=30
+    (the 4-site chain above never reaches that regime -- its local spaces
+    are 16-dimensional, so dK=30 always spans them completely and the
+    Krylov basis cannot degrade).
+
+    Regression test for a real bug: with a single Gram-Schmidt pass in
+    kpm_energy_truncation.py's _local_krylov_projection, the Krylov basis
+    lost orthogonality outright at dK=30 and this peak came out at
+    ~1.06 J instead of ~0.48 J -- while dK<=20 on the same chain, and
+    itensor_version=3's own port (which always re-orthogonalized twice),
+    stayed correct. Both `accelerate` branches of the Chebyshev recursion
+    are covered, since they consume the truncated vectors differently
+    (the accelerated one feeds them into the doubling identities).
+    """
+    es = np.linspace(0.2, 1.0, 60)
+    sc_ed = _heisenberg_chain(6)
+    _, y_ed = sc_ed.get_dynamical_correlator(mode="ED", submode="INV",
+                                              name=(sc_ed.Sz[0], sc_ed.Sz[0]),
+                                              es=es, delta=DELTA)
+    peak_ed = es[np.argmax(np.array(y_ed).real)]
+
+    for accelerate in (True, False):
+        np.random.seed(0)
+        sc = _heisenberg_chain(6)
+        sc.kpm_accelerate = accelerate
+        sc.kpm_scale = _NARROW_KPM_SCALE
+        sc.kpm_energy_truncate = True
+        sc.kpm_truncate_dK = 30
+        sc.kpm_truncate_nsweeps = 2
+        x, y = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                            name=(sc.Sz[0], sc.Sz[0]),
+                                            es=es, delta=DELTA)
+        peak = np.array(x)[np.argmax(np.array(y).real)]
+        assert peak == pytest.approx(peak_ed, abs=0.06), \
+            "accelerate=%s peak %.3f, expected ~%.3f" % (accelerate, peak, peak_ed)

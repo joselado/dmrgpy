@@ -11,9 +11,13 @@ from .algebra import kpm
 from .algebra.kpm import generate_profile
 
 
-def _sync_kpm_energy_truncation(self):
+def _sync_kpm_energy_truncation(self, enabled=None):
     """Push kpm_energy_truncate*'s current values onto self._session, if
-    it understands them. Only pyitensor.chain.Chain does (see its
+    it understands them. `enabled` overrides self.kpm_energy_truncate for
+    this push (used to force the feature *off* on code paths where it is
+    not supported -- see general_kpm_moments_cpp_ext -- since the session
+    otherwise keeps whatever a previous get_dynamical_correlator() call
+    left enabled on it). Only pyitensor.chain.Chain does (see its
     set_kpm_energy_truncation()): the pyitensor backend wires energy
     truncation (Holzner et al., PRB 83, 195115 (2011), Sec. III-B) into
     its *existing* kpm_dynamical_correlator() via this setter + an
@@ -25,8 +29,10 @@ def _sync_kpm_energy_truncation(self):
     neither."""
     if self.itensor_version != "python":
         return
+    if enabled is None:
+        enabled = self.kpm_energy_truncate
     self._session.set_kpm_energy_truncation(
-        self.kpm_energy_truncate, self.kpm_truncate_dK,
+        enabled, self.kpm_truncate_dK,
         self.kpm_truncate_nsweeps, self.kpm_truncate_threshold)
 
 
@@ -138,7 +144,17 @@ def general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,accelerate):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    _sync_kpm_energy_truncation(self)
+    # Energy truncation is deliberately forced off here: it is defined
+    # only for the (A,B) dynamical correlator, whose Chebyshev recursion
+    # is driven by the ground-state-anchored rescaled *Hamiltonian*. This
+    # path expands an arbitrary operator X instead (already rescaled into
+    # [a,b] by scale_operator(), so it needs no such safeguard), and
+    # filtering against X's own local spectrum is a different operation
+    # that no other backend performs -- itensor_version=3's general_kpm
+    # has no truncation at all, so leaving it on here would silently make
+    # the two backends disagree. See the user guide's "Available only for
+    # the (A,B)-operator dynamical correlator" note.
+    _sync_kpm_energy_truncation(self, enabled=False)
     mus = self._session.general_kpm(X.to_terms(),wfa.cpp_handle,wfb.cpp_handle,
             self.maxm,accelerate,int(num_p),self.cutoff)
     return np.array(mus)

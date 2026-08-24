@@ -97,6 +97,57 @@ assert abs(peak_tr - gap) < 0.05
 print("OK: energy truncation lets a narrower KPM window compute safely "
       "and still locate the exact excitation gap.")
 
+# --- kpm_truncate_dK is a convergence knob: sweep it on a chain whose ---
+# --- local spaces are actually bigger than dK ---------------------------
+#
+# On the 4-site chain above every site's local effective Hamiltonian is at
+# most 16-dimensional, so dK=30 spans it completely and the truncation is
+# the exact spectral projector no matter how the Krylov basis was built.
+# A 6-site chain reaches 64-dimensional local spaces, where dK genuinely
+# bounds the subspace -- the regime the paper's own Table I (dK=30) is
+# about, and the one where the basis has to be properly orthonormal:
+# building it with a single Gram-Schmidt pass per vector used to lose
+# orthogonality outright by dK~30 and put this peak at ~1.06 J instead of
+# ~0.48 J (see src/dmrgpy/pyitensor/kpm_energy_truncation.py).
+np.random.seed(0)  # pyitensor's DMRG starts from a random MPS
+n6 = 6
+es6 = np.linspace(0.2, 1.6, 80)
+
+
+def make_chain6():
+    sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n6)])
+    sc.setup_python()
+    h = 0
+    for i in range(n6 - 1):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+    sc.set_hamiltonian(h)
+    return sc
+
+
+sc6_ed = make_chain6()
+x6_ed, y6_ed = sc6_ed.get_dynamical_correlator(mode="ED", submode="INV",
+                                                name=(sc6_ed.Sz[0], sc6_ed.Sz[0]),
+                                                es=es6, delta=delta)
+y6_ed = np.array(y6_ed).real
+peak6_ed = es6[np.argmax(y6_ed)]
+print("\n6-site chain, ED peak: %.3f" % peak6_ed)
+
+dKs = [5, 10, 20, 30]
+curves6 = []
+for dK in dKs:
+    s6 = make_chain6()
+    s6.kpm_scale = kpm_scale
+    s6.kpm_energy_truncate = True
+    s6.kpm_truncate_dK = dK
+    s6.kpm_truncate_nsweeps = 2
+    x6, y6 = s6.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                          name=(s6.Sz[0], s6.Sz[0]),
+                                          es=es6, delta=delta)
+    y6 = np.array(y6).real
+    curves6.append(y6)
+    print("  dK=%2d  peak: %.3f" % (dK, es6[np.argmax(y6)]))
+    assert abs(es6[np.argmax(y6)] - peak6_ed) < 0.06
+
 # --- plot: ED ground truth vs default-window KPM vs narrow-window KPM
 # with energy truncation, overlaid on the same frequency axis ---
 import matplotlib.pyplot as plt
@@ -113,5 +164,18 @@ plt.ylabel("Dynamical correlator")
 plt.legend(fontsize=8)
 plt.title("KPM energy truncation: narrow-window accuracy vs ED")
 plt.savefig("kpm_energy_truncation.png", dpi=150)
-print("\nPlot saved to kpm_energy_truncation.png")
+
+fig2 = plt.figure()
+plt.plot(es6, y6_ed, c="black", lw=2, label="ED (exact)")
+for dK, y6 in zip(dKs, curves6):
+    plt.plot(es6, y6, ls="--", label="kpm_truncate_dK=%d" % dK)
+plt.axvline(peak6_ed, c="gray", ls=":", label="ED peak")
+plt.xlabel("frequency [J]")
+plt.ylabel("Dynamical correlator")
+plt.legend(fontsize=8)
+plt.title("6 sites: convergence in the per-site Krylov dimension dK")
+plt.savefig("kpm_energy_truncation_dK_convergence.png", dpi=150)
+
+print("\nPlots saved to kpm_energy_truncation.png and "
+      "kpm_energy_truncation_dK_convergence.png")
 plt.show()

@@ -28,14 +28,21 @@ recursion step (mirrors the paper's own recursion ordering).
 Two deliberate departures from the paper's literal Eqs. (36)-(41), noted
 again at their point of use below:
 
-- Krylov vectors are built via interleaved Gram-Schmidt (matching this
-  package's own Lanczos style, dmrg.py's _lanczos_ground_state) rather
-  than the paper's "compute all d_K powers of H' first, then batch
-  orthogonalize". Both build the same Krylov subspace mathematically, but
-  interleaving is far better conditioned once vectors start converging
-  toward H's locally dominant eigendirection -- exactly the failure mode
-  classical (as opposed to modified/interleaved) Gram-Schmidt is known to
-  suffer from.
+- Krylov vectors are built by interleaved Gram-Schmidt with *full
+  re-orthogonalization* (each new vector is orthogonalized against every
+  accepted one twice, "twice is enough" in Kahan's sense) rather than the
+  paper's "compute all d_K powers of H' first, then batch orthogonalize".
+  Both build the same Krylov subspace mathematically, but interleaving is
+  far better conditioned once vectors start converging toward H's locally
+  dominant eigendirection. The second pass is not optional polish: with a
+  single pass, the basis loses orthogonality outright at the paper's own
+  recommended d_K=30 (measured |V^H V - I| ~ 0.9 on a 6-site chain, i.e.
+  basis vectors nearly parallel), which invalidates both the assumption
+  that x0's coordinate vector is (||x0||,0,...,0) and the reconstruction
+  V.(evecs.c_e) -- it silently mangled the projected vector and moved the
+  reconstructed spectrum's main peak by ~0.6J. mpscpp3/chain_session.h's
+  own port (kpm_local_krylov_projection) has always done two passes,
+  which is why only this backend was affected.
 - The projector keeps Krylov components with |eps_alpha| < threshold
   (both signs), not just eps_alpha < threshold as in Eq. (38). The paper
   can use a one-sided cut because its rescaling (Eq. 21b) shifts by the
@@ -71,10 +78,26 @@ def _local_krylov_projection(matvec, x0, dK, threshold):
     vs = [x0 / nrm]
     for _ in range(1, dK_eff):
         w = matvec(vs[-1])
-        for v in vs:
-            w = w - np.vdot(v, w) * v
+        w0 = np.linalg.norm(w)
+        # Two orthogonalization passes, not one -- see the module
+        # docstring: a single pass loses orthogonality completely by
+        # d_K~30 and corrupts the projection. Mirrors mpscpp3/
+        # chain_session.h's kpm_local_krylov_projection.
+        for _pass in range(2):
+            for v in vs:
+                w = w - np.vdot(v, w) * v
         wn = np.linalg.norm(w)
-        if wn < 1e-12:
+        # Absolute *and* relative breakdown test: after two passes a
+        # linearly dependent extension is left at round-off level
+        # relative to its own pre-orthogonalization norm, and
+        # normalizing that noise up to unit length would inject a
+        # garbage basis vector (with a meaningless Ritz value) instead
+        # of stopping. The relative half is this backend's own addition
+        # (mpscpp3 tests the absolute norm alone): with the rescaled H'
+        # this call is documented to take, ||H' v|| <= ~1 and the two
+        # tests coincide -- it only matters if a caller passes an
+        # unscaled Hamiltonian, where 1e-12 would be far too loose.
+        if wn < 1e-12 or wn < 1e-8 * w0:
             break  # invariant subspace found; fewer than dK vectors is fine
         vs.append(w / wn)
     k = len(vs)

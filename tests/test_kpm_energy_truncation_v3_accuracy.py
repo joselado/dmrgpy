@@ -160,3 +160,49 @@ def test_energy_truncation_matches_ed_qualitative_shape():
     assert y_ed[1] > 10 * y_ed[2]
     assert y_kpm[1] > y_kpm[0]
     assert y_kpm[1] > y_kpm[2]
+
+
+def test_six_site_truncated_spectra_agree_across_backends():
+    """The strongest form of the cross-backend check above, on a chain
+    big enough for the paper's recommended dK=30 to be smaller than the
+    local effective Hamiltonians it is applied to (a 4-site chain's local
+    spaces are only 16-dimensional, so dK=30 spans them completely and
+    both ports trivially agree there): compare the *whole* reconstructed
+    spectrum, not just its peak.
+
+    The two implementations run the identical algorithm on the identical
+    rescaled Hamiltonian, so they agree far beyond what this asserts
+    (measured 6e-12 relative L2 difference); the tolerance is loose only
+    to leave room for the two backends' independent DMRG ground states.
+
+    Regression test for a real bug: pyitensor's _local_krylov_projection
+    orthogonalized each new Krylov vector against the accepted ones only
+    once, so its basis lost orthogonality at dK=30 while mpscpp3's port
+    (two passes) stayed correct -- the two backends' spectra then
+    disagreed at the O(1) level, with the pyitensor peak landing at
+    ~1.06 J instead of ~0.48 J."""
+    es = np.linspace(0.2, 1.6, 80)
+    curves = {}
+    for version in ("python", 3):
+        np.random.seed(0)
+        sc = spinchain.Spin_Chain(["S=1/2" for _ in range(6)])
+        if version == "python":
+            sc.setup_python()
+        else:
+            sc.setup_cpp(version=3)
+        h = 0
+        for i in range(5):
+            h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+        sc.set_hamiltonian(h)
+        sc.kpm_scale = _NARROW_KPM_SCALE
+        sc.kpm_energy_truncate = True
+        sc.kpm_truncate_dK = 30
+        sc.kpm_truncate_nsweeps = 2
+        _, y = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                            name=(sc.Sz[0], sc.Sz[0]),
+                                            es=es, delta=DELTA)
+        curves[version] = np.array(y).real
+
+    ref = curves[3]
+    diff = np.linalg.norm(curves["python"] - ref) / np.linalg.norm(ref)
+    assert diff < 1e-3, "backends disagree by %.3e in relative L2" % diff

@@ -812,7 +812,7 @@ too tight for the chosen \texttt{kpm\_scale}, the moment recursion
 detects the resulting exponential divergence and aborts with an
 explicit error rather than returning a silently wrong spectrum.
 
-\textbf{Energy truncation (pyitensor backend only) --- narrowing the KPM
+\textbf{Energy truncation (\texttt{itensor\_version="python"} and \texttt{3}) --- narrowing the KPM
 window below the full bandwidth.} The default \texttt{kpm\_scale}
 rescales $H$ so its \emph{entire} many-body spectrum fits in $[-1,1]$,
 which is always safe but wastes resolution: a local operator's
@@ -851,6 +851,19 @@ sc.kpm_truncate_threshold = 1.0  # rescaled-energy cutoff (paper's eps_P)
 (x, y) = sc.get_dynamical_correlator(mode="DMRG", submode="KPM", name=(sc.Sz[0], sc.Sz[0]))
 \end{lstlisting}
 
+\texttt{kpm\_truncate\_dK} is a \emph{convergence} knob, not a tuning
+one: the projection it defines is exact once $d_K$ reaches the dimension
+of a site's local space, so raise it until the reconstructed spectrum
+stops moving and then stop (larger $d_K$ only costs time, since the
+per-site Krylov build is where energy truncation's whole overhead lives).
+The paper's own Table~I recommends $d_K=30$. Both backends build that
+subspace with full re-orthogonalization; a single Gram--Schmidt pass is
+not enough at $d_K\sim 30$, where the Krylov vectors converge toward the
+site's locally dominant eigendirection and a singly-orthogonalized basis
+silently ceases to be orthonormal (which used to corrupt pyitensor's
+projection and move a 6-site Heisenberg chain's spectral peak from
+$0.48\,J$ to $1.06\,J$).
+
 Enabling \texttt{kpm\_energy\_truncate} also switches the rescaling
 convention itself: instead of centering the window on the full
 bandwidth's \emph{midpoint}, it anchors it at the ground state $E_0$
@@ -878,7 +891,9 @@ physical answer (see \texttt{test\_kpm\_energy\_truncation\_v3\_accuracy.py}'s
 cross-backend check). Available only for the $(A,B)$-operator dynamical
 correlator, not the lower-level ``arbitrary operator'' KPM
 (\texttt{general\_kpm}/\texttt{kpm\_wfa\_wfb}), which has no ground-state
-reference to anchor to. See
+reference to anchor to --- setting the flag has no effect on those, on
+any backend (they expand an already-bounded operator rescaled into
+$[a,b]$ by \texttt{scale\_operator()}, which needs no safeguard). See
 \texttt{examples/dynamical\_correlator/dynamical\_correlator\_kpm\_energy\_truncation}
 for a worked example (including the divergence this fixes, reproduced on
 purpose), \texttt{src/dmrgpy/pyitensor/kpm\_energy\_truncation.py} for
