@@ -695,9 +695,6 @@ class Many_Body_Chain():
       self.wf0 (get_excited_states, dynamical/KPM correlators, ...) have
       no way to detect."""
       return groundstate.gs_energy_generalized(self,A,**kwargs)
-#  def get_correlator_MB(self,**kwargs):
-#      """Return a correlator"""
-#      return correlator.get_correlator(self,**kwargs)
   def get_correlator(self,pairs=[],**kwargs):
       """Return a correlator, default one"""
       print("Method get_correlator is deprecated, use vev instead")

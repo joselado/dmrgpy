@@ -1,7 +1,6 @@
 import numpy as np
 from .. import multioperator
 from .. import operatornames
-from . import mop
 
 
 def get_dynamical_correlator_spinless(self,name="densitydensity",
