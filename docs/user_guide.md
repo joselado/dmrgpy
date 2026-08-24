@@ -572,6 +572,60 @@ if called afterward. Call `gs_energy_generalized()` as the last step of a
 calculation, or recompute a genuine ground state (`gs_energy()`/`nhdmrg()`)
 first if you need one of those other methods too.
 
+**Effective low-energy Hamiltonians.** Given the $n$ lowest eigenstates
+$\{|\psi_k\rangle\}$ and the projector $P=\sum_k|\psi_k\rangle\langle\psi_k|$
+onto the manifold they span, the projected Hamiltonian $PHP$ can be fitted
+as a real linear combination of the same projections of a chosen set of
+operators $O_a$:
+
+$$PHP\simeq\sum_a J_a\,PO_aP,\qquad J_a=\arg\min_{J}\Big\|PHP-\sum_a J_aPO_aP\Big\|$$
+
+and the fitted $J_a$ are the effective couplings.
+
+```python
+# fit against an explicit list of operators -> one coefficient each
+J = fc.get_heff(operators=[fc.Sx[0]*fc.Sx[1], fc.Sy[0]*fc.Sy[1],
+                           fc.Sz[0]*fc.Sz[1]], n=4, mode="ED")
+
+# ...or against all pairwise products of the chain's own Sx/Sy/Sz
+from dmrgpy import effectivehamiltonian
+coef = effectivehamiltonian.get_effective_hamiltonian_couplings(fc, n=4)
+latex = sc.get_effective_hamiltonian(n=1)   # the same fit, as a latex string
+```
+
+`n` selects the manifold, `tol` is the magnitude below which a fitted
+coupling is dropped, and `operators` overrides the default basis
+(`get_projection_operators`, every $S^x/S^y/S^z$ of the chain).
+`method="single"` builds $PO_aPO_bP$ — the product of the two *projected*
+operators, one projection per operator — while `method="full"` builds
+$P(O_aO_b)P$, the projection of the product, at one projection per
+*pair*. These are the same operator only when the manifold is closed
+under $O_a$; they are not two implementations of one thing.
+
+Two ways this calculation can be meaningless, both of which are now
+refused rather than returned:
+
+- **`n` must not cut a degenerate multiplet.** The retained states are
+  then not a symmetry-invariant subspace and the fitted couplings are
+  physically meaningless (on a Hubbard dimer, whose low manifold is a
+  singlet plus a three-fold triplet, `n=3` gave couplings ~50x the
+  correct ones). A `ValueError` names the degeneracy and the values of
+  `n` that do cut cleanly.
+- **The operator basis must be linearly independent on that manifold.**
+  Otherwise the coefficients can be shifted by any null-space vector
+  without changing the fit, so no unique set of couplings exists; the
+  raw candidate set is typically very much overcomplete (37 candidates
+  spanning a rank-16 space on the dimer). A `ValueError` reports the
+  rank and the number of null directions.
+
+The fit itself is a linear least-squares solve, so it is exact and
+reproducible; the eigenstates are Löwdin-orthonormalized first when they
+need it, which DMRG's overlap-penalty excited states generally do. See
+`examples/groundstate/effective_hamiltonian`, which recovers the exact
+$J\cos2\phi$/$J\sin2\phi$ twist of a Hubbard dimer's exchange under a
+Peierls phase $\phi$.
+
+
 ## 5. Entanglement and quantum information
 
 **Entanglement entropy of a real-space bipartition.** Cutting the chain

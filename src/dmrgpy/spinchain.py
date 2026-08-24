@@ -129,8 +129,7 @@ class Spin_Chain(Many_Body_Chain):
         return spincorrelators.get_full_SS_correlator(self,**kwargs)
     def get_effective_hamiltonian(self,**kwargs):
         """Return the effective Hamiltonian"""
-        return effectivehamiltonian.get_effective_hamiltonian(self,
-                    name="XX",**kwargs)
+        return effectivehamiltonian.get_effective_hamiltonian(self,**kwargs)
     def get_hamiltonian(self):
         """Return Hamiltonian as a multioperator"""
         if self.hamiltonian is not None: return self.hamiltonian
