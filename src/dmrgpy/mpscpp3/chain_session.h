@@ -9640,8 +9640,10 @@ class Chain
         // half the schedule leaves 10 cheap sweeps costing a few percent
         // of a full one apiece. Measured end to end by
         // examples/groundstate/bond_dimension_ramp (BLAS pinned to one
-        // thread, two dedicated cores): 2.0x at maxdim=60 and 2.15x at
-        // maxdim=90, for the same energy to 3e-8 and 4e-9.
+        // thread, two dedicated cores): 2.15x at maxdim=90 and 1.7-2.0x
+        // at maxdim=60 across runs, for the same energy to ~1e-8. The
+        // speedup grows with maxdim, since that is what makes the ramped
+        // sweeps cheap relative to the full ones.
         int nr = (int)((double)ns*ramp_fraction_);
         if (nr<1) nr = 1;
         if (nr>ns-1) nr = ns-1; // always at least one sweep at full maxdim

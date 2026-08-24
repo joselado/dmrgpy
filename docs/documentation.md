@@ -1891,10 +1891,11 @@ The ramp's shape is deliberately a *fraction of the schedule* rather than
 measured: it minimizes the number of cheap sweeps, so on a 30-site
 inhomogeneous Heisenberg-Hubbard chain at `nsweeps=20` it leaves only 4 of
 20 sweeps below a `maxm` of 150 and buys almost nothing. Filling half the
-schedule instead measures **2.0x** at `maxm=60` and **2.15x** at
-`maxm=90` on that model, for the same energy to 3e-8 and 4e-9 (BLAS
-pinned to one thread on two dedicated cores, as any timing in this repo
-must be — see §19). Rerun it with
+schedule instead measures **2.15x** at `maxm=90` and 1.7–2.0x at
+`maxm=60` on that model, for the same energy to ~1e-8 (BLAS pinned to one
+thread on two dedicated cores, as any timing in this repo must be — see
+§19). The speedup grows with `maxm`, since that is what makes the ramped
+sweeps cheap relative to the full ones. Rerun it with
 `examples/groundstate/bond_dimension_ramp`.
 
 While rewriting that schedule, a real pre-existing off-by-one in the flat

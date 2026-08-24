@@ -51,7 +51,10 @@ class Fermionic_Chain(Many_Body_Chain):
     def get_density_fluctuation(self,**kwargs):
         """Return the electronic density fluctuations"""
         return staticcorrelator.get_density_fluctuation_spinless(self,**kwargs)
-    def get_pairing(self):
+    def get_correlator_spinless(self,**kwargs):
+        """Return a static correlator between single (spinless) sites"""
+        return staticcorrelator.get_correlator_spinless(self,**kwargs)
+    def get_pairing(self,**kwargs):
         """
         Return the superfluid density
         """

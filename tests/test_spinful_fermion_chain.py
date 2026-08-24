@@ -116,3 +116,75 @@ def test_long_range_hopping_correlator_matches_free_fermion_exact():
         got = complex(fc.vev(fc.Cdagup[i0] * fc.Cup[i0 + d]))
         assert got.real == pytest.approx(P[i0, i0 + d], abs=1e-5), \
             "separation d={} disagrees with the exact one-body density matrix".format(d)
+
+
+def _spinful_field_chain(n=4):
+    """A small Hubbard chain with a field that breaks spin symmetry in
+    all three directions, so mx, my and mz are each nonzero."""
+    fc = fermionchain.Spinful_Fermionic_Chain(n)
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdagup[i] * fc.Cup[i + 1]
+        h = h + fc.Cdagdn[i] * fc.Cdn[i + 1]
+    for i in range(n):
+        h = h + 2.0 * (fc.Nup[i] - .5) * (fc.Ndn[i] - .5)
+        h = h + 0.3 * fc.Sx[i] + 0.2 * fc.Sy[i] + 0.4 * (-1) ** i * fc.Sz[i]
+    h = h + h.get_dagger()
+    h = 0.5 * h  # undo the double counting from the h.c. above
+    fc.set_hamiltonian(h)
+    return fc
+
+
+def test_get_magnetization_matches_the_spin_operators():
+    """Spinful_Fermionic_Chain.get_magnetization() returns the
+    (mx, my, mz) of every orbital, and must agree with taking the vev of
+    the chain's own Sx/Sy/Sz MultiOperators.
+
+    This is a regression test: get_magnetization() used to raise
+    AttributeError unconditionally. It routes through
+    fermionchaintk/staticcorrelator.py's get_magnetization_spinful ->
+    get_correlator_spinless, whose DMRG branch called a
+    self.get_correlator_MB() that never existed (it is commented out in
+    manybodychain.py), and get_correlator_spinless itself was not even
+    bound as a method on Fermionic_Chain.
+    """
+    fc = _spinful_field_chain()
+    m = np.array(fc.get_magnetization()).real
+    assert m.shape == (fc.ns // 2, 3)
+
+    ref = np.array([[fc.vev(fc.Sx[i]).real, fc.vev(fc.Sy[i]).real,
+                     fc.vev(fc.Sz[i]).real] for i in range(fc.ns // 2)])
+    assert m == pytest.approx(ref, abs=1e-8)
+    # the field really did polarize all three components, so the test
+    # would notice a component silently coming back as zero
+    assert np.max(np.abs(m), axis=0) == pytest.approx(
+        np.max(np.abs(ref), axis=0), abs=1e-8)
+    assert all(np.max(np.abs(m[:, k])) > 1e-3 for k in range(3))
+
+
+def test_get_magnetization_dmrg_matches_ed():
+    """...and the same magnetization from ED."""
+    m_dmrg = np.array(_spinful_field_chain().get_magnetization()).real
+    m_ed = np.array(_spinful_field_chain().get_magnetization(mode="ED")).real
+    assert m_dmrg == pytest.approx(m_ed, abs=DMRG_TOL)
+
+
+def test_get_pairing_matches_the_bare_expectation_value():
+    """Fermionic_Chain.get_pairing() -- another casualty of the same dead
+    get_correlator_spinless path, and additionally referencing an
+    undefined **kwargs in its own signature."""
+    n = 4
+    sc = fermionchain.Fermionic_Chain(n)
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Cdag[i] * sc.C[i + 1]
+        h = h + 0.6 * sc.C[i] * sc.C[i + 1]
+    h = h + h.get_dagger()
+    h = 0.5 * h
+    sc.set_hamiltonian(h)
+
+    pairs = [(0, 1), (1, 2), (2, 3)]
+    got = np.array(sc.get_pairing(pairs=pairs))
+    ref = np.array([sc.vev(sc.C[i] * sc.C[j]) for (i, j) in pairs])
+    assert got == pytest.approx(ref, abs=1e-8)
+    assert np.max(np.abs(got)) > 1e-3  # pairing is genuinely nonzero here

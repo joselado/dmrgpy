@@ -1,13 +1,25 @@
 import numpy as np
 from . import mop # multioperator for spinful fermions
+from .. import correlator
 
 
 def get_correlator_spinless(self,name="cdc",mode="DMRG",**kwargs):
       """
       Wrapper for static correlator
+
+      The DMRG branch goes through correlator.get_correlator (which turns
+      the name into a pair of per-site MultiOperators and takes their
+      vev) rather than a self.get_correlator_MB method: that method has
+      never existed -- it sits commented out in manybodychain.py -- so
+      every DMRG-mode caller of this function raised AttributeError
+      instead of returning a correlator. That took the whole spinful
+      static-correlator path down with it (get_correlator_spinful,
+      get_magnetization_spinful, get_pairing_spinless all route through
+      here), which is how Spinful_Fermionic_Chain.get_magnetization()
+      came to be dead on arrival.
       """
       if mode=="DMRG": # using DMRG
-        return self.get_correlator_MB(name=name,**kwargs)
+        return correlator.get_correlator(self,name=name,**kwargs)
       elif mode=="ED": # using ED
         MBF = self.get_ED_obj() # get the object
         return MBF.get_correlator(name=name,**kwargs)
@@ -119,13 +131,25 @@ def get_density_spinful(self,**kwargs):
 
 
 def get_magnetization_spinful(self,**kwargs):
-    """Return magnetization"""
+    """Return the magnetization (mx,my,mz) of every orbital of a spinful
+    fermionic chain, as an array of shape (norbitals,3).
+
+    Orbital i occupies the two interleaved spinless sites 2i (up) and
+    2i+1 (down), so with z = <Cdag_{2i} C_{2i+1}> = <cdag_up c_dn>,
+
+        <Sx_i> = <(cdag_up c_dn + cdag_dn c_up)/2> = Re z
+        <Sy_i> = <(-i cdag_up c_dn + i cdag_dn c_up)/2> = Im z
+        <Sz_i> = (n_up - n_dn)/2
+
+    (<cdag_dn c_up> is the conjugate of z, the two operators being each
+    other's dagger.) This matches Spinful_Fermionic_Chain's own
+    Sx/Sy/Sz MultiOperators exactly.
+    """
     pairsxc = [(2*i,2*i+1) for i in range(self.ns//2)]
-    xc = self.get_correlator_spinless(pairs=pairsxc,
-            name="cdc",**kwargs)
+    xc = np.array(self.get_correlator_spinless(pairs=pairsxc,
+            name="cdc",**kwargs))
     mx = xc.real # get mx
     my = xc.imag # get my
-    pairs = [(i,i) for i in range(self.ns)]
     ds = self.get_density_spinless(**kwargs) # get density
     mz = (np.array([ds[2*i]-ds[2*i+1] for i in range(len(ds)//2)]))/2.
     return np.array([mx,my,mz]).T # return magnetization

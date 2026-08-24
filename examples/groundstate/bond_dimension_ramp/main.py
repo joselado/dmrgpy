@@ -87,12 +87,9 @@ for maxm in maxms:
 fc_flat, fc_ramp = chains[False], chains[True]
 d_flat = np.array(fc_flat.get_density()).real
 d_ramp = np.array(fc_ramp.get_density()).real
-# <S^z_i> site by site. Note this goes through vev() rather than the
-# chain's own get_magnetization(): that method is broken for spinful
-# fermionic chains independently of anything here (it calls a
-# get_correlator_spinless() that Spinful_Fermionic_Chain does not have).
-m_flat = np.array([fc_flat.vev(fc_flat.Sz[i]).real for i in range(n)])
-m_ramp = np.array([fc_ramp.vev(fc_ramp.Sz[i]).real for i in range(n)])
+# (mx, my, mz) of every orbital; column 2 is <S^z_i>.
+m_flat = np.array(fc_flat.get_magnetization()).real
+m_ramp = np.array(fc_ramp.get_magnetization()).real
 print("max |dn_i| =", np.max(np.abs(d_ramp - d_flat)))
 print("max |dm_i| =", np.max(np.abs(m_ramp - m_flat)))
 # Regression guards. The energy is variational, so it agrees far more
@@ -135,8 +132,8 @@ ax2[0].plot(range(n), d_flat, marker="o", label="flat")
 ax2[0].plot(range(n), d_ramp, marker="s", ls="--", label="ramp")
 ax2[0].set_xlabel("site") ; ax2[0].set_ylabel("density $n_i$")
 ax2[0].legend()
-ax2[1].plot(range(n), m_flat, marker="o", label="flat")
-ax2[1].plot(range(n), m_ramp, marker="s", ls="--", label="ramp")
+ax2[1].plot(range(n), m_flat[:, 2], marker="o", label="flat")
+ax2[1].plot(range(n), m_ramp[:, 2], marker="s", ls="--", label="ramp")
 ax2[1].set_xlabel("site") ; ax2[1].set_ylabel("magnetization $\\langle S^z_i\\rangle$")
 ax2[1].legend()
 plt.tight_layout()

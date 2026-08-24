@@ -2069,11 +2069,13 @@ than ``double until you reach \texttt{maxm}''. The latter was implemented
 first and measured: it minimizes the number of cheap sweeps, so on a
 30-site inhomogeneous Heisenberg--Hubbard chain at \texttt{nsweeps=20} it
 leaves only 4 of 20 sweeps below a \texttt{maxm} of 150 and buys almost
-nothing. Filling half the schedule instead measures \textbf{2.0x} at
-\texttt{maxm=60} and \textbf{2.15x} at \texttt{maxm=90} on that model, for
-the same energy to $3\times10^{-8}$ and $4\times10^{-9}$ (BLAS pinned to
-one thread on two dedicated cores, as any timing in this repo must be).
-Rerun it with \texttt{examples/groundstate/bond\_dimension\_ramp}.
+nothing. Filling half the schedule instead measures \textbf{2.15x} at
+\texttt{maxm=90} and 1.7--2.0x at \texttt{maxm=60} on that model, for the
+same energy to ${\sim}10^{-8}$ (BLAS pinned to one thread on two dedicated
+cores, as any timing in this repo must be). The speedup grows with
+\texttt{maxm}, since that is what makes the ramped sweeps cheap relative
+to the full ones. Rerun it with
+\texttt{examples/groundstate/bond\_dimension\_ramp}.
 
 While rewriting that schedule, a real pre-existing off-by-one in the flat
 \texttt{make\_sweeps()} was fixed in both C++ backends: \texttt{Sweeps}
