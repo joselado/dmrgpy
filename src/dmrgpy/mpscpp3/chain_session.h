@@ -9638,9 +9638,10 @@ class Chain
         // inhomogeneous Heisenberg-Hubbard chain at nsweeps=20 doubling
         // leaves only 4 of 20 sweeps below a maxdim of 150, where filling
         // half the schedule leaves 10 cheap sweeps costing a few percent
-        // of a full one apiece. Measured end to end at maxdim=60 (BLAS
-        // pinned to one thread, two dedicated cores): 50.5s flat vs 24.9s
-        // ramped, i.e. 2.0x, for the same energy to 8e-9.
+        // of a full one apiece. Measured end to end by
+        // examples/groundstate/bond_dimension_ramp (BLAS pinned to one
+        // thread, two dedicated cores): 2.0x at maxdim=60 and 2.15x at
+        // maxdim=90, for the same energy to 3e-8 and 4e-9.
         int nr = (int)((double)ns*ramp_fraction_);
         if (nr<1) nr = 1;
         if (nr>ns-1) nr = ns-1; // always at least one sweep at full maxdim

@@ -117,8 +117,9 @@ class Many_Body_Chain():
       # and so gives away nearly all of the speedup: on a 30-site
       # inhomogeneous Heisenberg-Hubbard chain at nsweeps=20, doubling
       # leaves only 4 of 20 sweeps below a maxm of 150. Filling half the
-      # schedule instead measured 2.0x on that model at maxm=60 (50.5s
-      # flat vs 24.9s ramped, same energy to 8e-9).
+      # schedule instead measures 2.0x at maxm=60 and 2.15x at maxm=90
+      # on that model, for the same energy to 3e-8 and 4e-9 -- rerun it
+      # with examples/groundstate/bond_dimension_ramp.
       # At the default 0.5 the second half of the schedule -- and hence
       # the returned energy -- always runs at the full self.maxm.
       self.bond_ramp = True # ramp the bond dimension across gs sweeps
