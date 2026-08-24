@@ -29,6 +29,7 @@ from .metts import metts_dynamical_correlator as _metts_dynamical_correlator
 from .sites import SiteX
 from .svd import svd
 from .sweeps import Sweeps
+from .mpscontainer import _link_at
 from .tdvp import tdvp_step as _tdvp_step_fn
 from .tebd import TEBDEvolver as _TEBDEvolver
 from .gse import global_subspace_expand as _global_subspace_expand_fn
@@ -139,6 +140,19 @@ def _four_pt_perm_table():
     return tuple(table)
 
 
+
+def _max_link_dim(psi):
+    """Largest bond dimension of an MPS, i.e. ITensor's own
+    maxLinkDim(psi). Used by Chain.gs_energy() to keep the bond-dimension
+    ramp from truncating a warm starting wavefunction."""
+    out = 0
+    for i in range(1, psi.length()):
+        link = _link_at(psi, i, i + 1)
+        if link is not None and link.dim > out:
+            out = link.dim
+    return out
+
+
 class Chain:
     def __init__(self, site_types):
         self.sites = SiteX(site_types)
@@ -155,6 +169,15 @@ class Chain:
         self.noise = 1e-1
         self.mpomaxm = 5000
         self.verbose = False
+
+        # Ground-state bond-dimension ramp, see set_bond_ramp()/
+        # _make_sweeps_ramped(). Defaults mirror both the C++ backends'
+        # and Many_Body_Chain's own (manybodychain.py), which is what
+        # actually drives them in practice.
+        self.bond_ramp = True
+        self.bond_ramp_start = 10
+        self.bond_ramp_fraction = 0.5
+        self.bond_ramp_noise_decay = 0.1
 
         # KPM energy truncation (Holzner et al. PRB 83, 195115 (2011),
         # Sec. III-B), see kpm_energy_truncation.py -- off by default, so
@@ -182,6 +205,16 @@ class Chain:
 
     def set_mpomaxm(self, mpomaxm):
         self.mpomaxm = mpomaxm
+
+    def set_bond_ramp(self, enabled, start, fraction, noise_decay):
+        """Ground-state bond-dimension ramp -- the counterpart of
+        mpscppN/chain_session.h's Chain::set_bond_ramp(). See
+        _make_sweeps_ramped() for what the schedule looks like;
+        enabled=False restores the original flat-maxm schedule exactly."""
+        self.bond_ramp = enabled
+        self.bond_ramp_start = start
+        self.bond_ramp_fraction = fraction
+        self.bond_ramp_noise_decay = noise_decay
 
     def set_verbose(self, verbose):
         self.verbose = verbose
@@ -211,9 +244,15 @@ class Chain:
             raise RuntimeError("Chain.gs_energy called before set_hamiltonian")
         if skip_dmrg and self.wf0 is not None and self._wf0_energy is not None:
             return self._wf0_energy
+        # A warm start (set_wavefunction, or simply the previous
+        # gs_energy() call's own solution) must not be truncated by the
+        # ramp's early low-maxdim sweeps -- pass its bond dimension as the
+        # ramp floor. A fresh start is built directly at the ramp's first
+        # maxdim rather than at the full maxm only to be truncated.
+        floor_dim = 0 if self.wf0 is None else _max_link_dim(self.wf0)
+        sweeps = self._make_sweeps_ramped(self.nsweeps, self.maxm, floor_dim)
         if self.wf0 is None:
-            self.wf0 = self._default_mps()
-        sweeps = self._make_sweeps()
+            self.wf0 = self._default_mps(sweeps.at(0)[0])
         energy = dmrg(self.wf0, self.H, sweeps, quiet=not self.verbose)
         self._wf0_energy = energy
         return energy
@@ -1172,8 +1211,13 @@ class Chain:
 
     # -- private helpers, mirroring chain_session.h's own private section --
 
-    def _default_mps(self):
-        return randomMPS(self.sites, self.maxm)
+    def _default_mps(self, maxm=None):
+        """Random starting MPS. maxm defaults to self.maxm; gs_energy()
+        passes the ramp's first sweep dimension instead (see
+        _make_sweeps_ramped())."""
+        if maxm is None:
+            maxm = self.maxm
+        return randomMPS(self.sites, max(1, int(maxm)))
 
     def _apply_mpo(self, K, x, x0=None):
         out = applyMPO(K, x, x0=x0, cutoff=self.cutoff, maxdim=self.maxm)
@@ -1196,6 +1240,59 @@ class Chain:
         sweeps.noise = self.noise
         for i in range(ns // 2, ns):
             sweeps.setnoise(i, 0.0)
+        return sweeps
+
+    def _make_sweeps_ramped(self, ns, maxdim, floor_dim):
+        """Sweep schedule with a bond-dimension ramp: spend the first
+        bond_ramp_fraction of the schedule growing the bond dimension
+        geometrically from bond_ramp_start up to the target maxdim, then
+        hold it there, instead of running every sweep at the full target.
+        The early sweeps are much cheaper (two-site DMRG is ~O(m^3)) while
+        still doing most of the work of finding the right variational
+        subspace, so the expensive full-maxdim sweeps start from an
+        already-good state -- the standard ITensor sweep-table idiom.
+
+        Growing as fast as possible instead (doubling every sweep until
+        maxdim is reached) minimizes the number of *cheap* sweeps and so
+        gives away almost all of the speedup -- see
+        mpscpp3/chain_session.h's make_sweeps_ramped(), of which this is
+        the exact counterpart, for the measurement.
+
+        floor_dim is the bond dimension of an already-present starting
+        wavefunction, or 0 when starting fresh: ramping down from a
+        converged warm state would truncate exactly the information the
+        caller wanted kept, so the ramp never starts below it.
+
+        Noise decays by bond_ramp_noise_decay per ramping sweep and is off
+        entirely once the schedule reaches full maxdim, so the final,
+        converged sweeps are noise-free. (Note the pure-Python DMRG in
+        dmrg.py has no noise term at all -- see its docstring -- so the
+        noise part of the schedule is carried for parity with the compiled
+        backends rather than acted on here.)
+        """
+        if not self.bond_ramp or ns < 2 or maxdim <= 1:
+            return self._make_sweeps(ns, maxdim)
+        start = self.bond_ramp_start if self.bond_ramp_start > 0 else 10
+        start = max(start, floor_dim)
+        if start >= maxdim:
+            return self._make_sweeps(ns, maxdim)
+        nr = int(ns * self.bond_ramp_fraction)
+        nr = min(max(nr, 1), ns - 1)  # always ends at full maxdim
+        sweeps = Sweeps(ns)
+        sweeps.cutoff = self.cutoff
+        for i in range(ns):
+            if i < nr:
+                # floor(x+0.5), matching C++'s std::llround exactly
+                # (Python's round() is banker's rounding, which differs
+                # by one on an exact .5)
+                m = int(np.floor(start * (maxdim / start) ** (i / nr) + 0.5))
+                m = min(max(m, 1), maxdim)
+                nz = self.noise * self.bond_ramp_noise_decay ** i
+            else:
+                m = maxdim
+                nz = 0.0
+            sweeps.setmaxdim(i, m)
+            sweeps.setnoise(i, nz)
         return sweeps
 
     def _minimum_energy(self):

@@ -1843,7 +1843,8 @@ edges, but `Chain::set_hamiltonian` unconditionally invalidates those
 caches — so the Python side (`groundstate.py::gs_energy_single`) only
 re-sends the Hamiltonian when its `to_terms()` output, any solver
 parameter a re-run would pick up (`maxm`, `nsweeps`, `cutoff`, `noise`,
-the effective MPO bond dimension), or the session object itself actually
+the effective MPO bond dimension, the bond-ramp settings below), or the
+session object itself actually
 changed since the last send (`_session_ham_cache`). Repeated calculations on an
 unchanged Hamiltonian (e.g. successive `get_dynamical_correlator` calls,
 each of which re-verifies the ground state) then hit the session's
@@ -1852,6 +1853,57 @@ paths that *want* a fresh solve of the same Hamiltonian either pass
 through `restart()`/`set_hamiltonian` (which force DMRG via
 `skip_dmrg_gs=False`) or clear `_session_ham_cache` explicitly (see
 `groundstate.py`'s best-of-`n` loops).
+
+**The ground-state sweep schedule is ramped, not flat**
+(`Chain::make_sweeps_ramped()` in both `chain_session.h`s,
+`pyitensor/chain.py::_make_sweeps_ramped()`; the public knobs are
+`Many_Body_Chain.bond_ramp`/`bond_ramp_start`/`bond_ramp_fraction`/
+`bond_ramp_noise_decay`, documented physics-side in `user_guide.md` §3).
+`Chain::gs_energy()` builds its `Sweeps` through this variant rather than
+the flat `make_sweeps()`: the first `floor(nsweeps*bond_ramp_fraction)`
+sweeps interpolate the bond dimension geometrically from
+`bond_ramp_start` up to `maxm`, the rest run at `maxm`, and the noise
+term decays by `bond_ramp_noise_decay` per ramping sweep and is off
+afterwards. Three things about it are load-bearing:
+
+- **It is plumbed as its own session setter** (`Chain::set_bond_ramp`,
+  bound in both `bindings.cc`), not as extra `set_sweep_params`
+  arguments, because `set_sweep_params` has ~15 call sites across
+  `vev.py`/`kpmdmrg.py`/`excited.py`/`nhdmrg.py`/`timedependent.py` that
+  have nothing to say about the ground-state ramp. Only
+  `groundstate.py::gs_energy_single` calls it (`hasattr`-guarded, so an
+  extension compiled before the method existed still loads).
+- **Only `Chain::gs_energy()` uses it.** `make_sweeps()` itself is
+  unchanged in shape and still backs `excited_states()`, the band-edge
+  solves, and `gs_energy_generalized()`'s per-outer-iteration schedules —
+  the last of which would restart the ramp from its floor on every
+  Lagrange-multiplier update.
+- **A warm start is floored, not truncated.** `gs_energy()` passes
+  `maxLinkDim(wf0_)` (v2: `maxM`) as the ramp's `floor_dim` whenever a
+  wavefunction is already present, so re-entering it with a converged
+  state (`set_wavefunction`, or `gs_energy_single`'s own `maxde`
+  reconvergence retry, which also disables the ramp outright) cannot
+  throw that state away. A fresh start instead builds its random MPS
+  directly at the ramp's first bond dimension.
+
+The ramp's shape is deliberately a *fraction of the schedule* rather than
+"double until you reach `maxm`". The latter was implemented first and
+measured: it minimizes the number of cheap sweeps, so on a 30-site
+inhomogeneous Heisenberg-Hubbard chain at `nsweeps=20` it leaves only 4 of
+20 sweeps below a `maxm` of 150 and buys almost nothing. Filling half the
+schedule instead measured **2.0x** on that model at `maxm=60` (50.5s flat
+vs 24.9s ramped, same energy to 8e-9; BLAS pinned to one thread on two
+dedicated cores, as any timing in this repo must be — see §19).
+
+While rewriting that schedule, a real pre-existing off-by-one in the flat
+`make_sweeps()` was fixed in both C++ backends: `Sweeps` is 1-based (its
+arrays are sized `nsweep+1`, and ITensor's `dmrg()` loops
+`for(sw=1; sw<=nsweeps; ++sw)`), but the "turn the noise off for the
+second half" loop was written 0-based (`for (i=ns/2;i<ns;i++)`), which
+left the *final* sweep running with the full noise term — i.e. every
+returned state and energy was the output of a noisy sweep.
+`pyitensor/chain.py`'s mirror of the same loop was already correct, so
+this also removes a silent C++/Python divergence.
 
 Notable, deliberate implementation details (not bugs to "fix"):
 

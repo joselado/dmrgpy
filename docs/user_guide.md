@@ -179,6 +179,50 @@ e0 = sc.gs_energy()          # E0
 wf = sc.get_gs()             # the |GS> wavefunction itself
 ```
 
+**The DMRG sweep schedule: bond-dimension ramp.** `sc.maxm` is the
+*target* bond dimension, not the one every sweep runs at. By default
+(`sc.bond_ramp = True`) the ground-state sweep schedule spends the first
+`sc.bond_ramp_fraction` of its `sc.nsweeps` sweeps growing the bond
+dimension geometrically from `sc.bond_ramp_start` up to `sc.maxm`, and
+holds it at `sc.maxm` for the rest:
+
+$$m_i=\Big\lceil m_\mathrm{start}\Big(\frac{m_\mathrm{max}}{m_\mathrm{start}}\Big)^{i/n_r}\Big\rfloor\ (i<n_r),\qquad m_i=m_\mathrm{max}\ (i\ge n_r),\qquad n_r=\lfloor n_\mathrm{sweeps}\,f_\mathrm{ramp}\rfloor$$
+
+Two-site DMRG costs $\mathcal O(m^3)$ per bond, while the early sweeps
+mostly just locate the right variational subspace and gain little from a
+large $m$ — so running them small makes them nearly free, and the
+expensive full-`maxm` sweeps then start from an already-good state. At
+the default `bond_ramp_fraction = 0.5` the second half of the schedule —
+and hence the returned energy — always runs at the full `sc.maxm`, so the
+ramp is a pure scheduling change: the same ground state, less time.
+
+```python
+sc.bond_ramp = True             # on by default
+sc.bond_ramp_start = 10         # bond dimension of the first sweep
+sc.bond_ramp_fraction = 0.5     # fraction of the sweeps spent ramping
+sc.bond_ramp_noise_decay = 0.1  # noise decay per ramping sweep
+sc.bond_ramp = False            # ...or restore a flat schedule at sc.maxm
+```
+
+The noise term (`sc.noise`, White's density-matrix perturbation, which
+keeps DMRG from stalling in a local minimum) is tied to the same
+schedule: it starts at `sc.noise`, decays by `sc.bond_ramp_noise_decay`
+per ramping sweep, and is switched off entirely once the schedule reaches
+`sc.maxm`, so the final, converged sweeps are noise-free. With
+`bond_ramp = False` the original schedule is used instead — full
+`sc.noise` for the first half of the sweeps, none for the second.
+
+A *warm* start is never truncated by the ramp: when `gs_energy()` is
+re-entered with a wavefunction already in hand (`set_initial_wf`, or
+simply a previous `gs_energy()` call's own solution), the ramp's starting
+bond dimension is floored at whatever that state already carries, so a
+re-run can only improve the energy. The ramp applies to the ground-state
+solve on all three DMRG backends (`itensor_version` 2, 3 and `"python"`);
+`"julia_live"` keeps its own schedule. See
+`examples/groundstate/bond_dimension_ramp` for a 30-site inhomogeneous
+Heisenberg--Hubbard chain timing ramp against flat.
+
+
 **Expectation values and moments.** For any operator $O$ built the same
 way as $H$,
 

@@ -18,6 +18,17 @@ def best_gs(sc,n=1):
             emin = e0
     sc.set_initial_wf(wf0) # set the wavefunction
 
+def ramp_key(self):
+    """The bond-ramp settings, as part of gs_energy_single()'s send-cache
+    key: the session caches its own energy across a skipped Hamiltonian
+    re-send, so a user changing the ramp between two bare gs_energy()
+    calls must get a fresh solve rather than the energy computed under the
+    old schedule -- exactly the same reasoning as for
+    maxm/nsweeps/cutoff/noise there."""
+    return (self.bond_ramp,self.bond_ramp_start,self.bond_ramp_fraction,
+            self.bond_ramp_noise_decay)
+
+
 def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy via the in-process pybind11 extension
@@ -27,6 +38,17 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    # Bond-dimension ramp for the ground-state sweep schedule, see
+    # Many_Body_Chain.__init__ (manybodychain.py) for what it does and
+    # Chain::make_sweeps_ramped() / pyitensor's _make_sweeps_ramped() for
+    # the schedule itself. hasattr-guarded so an out-of-date compiled
+    # extension (one built before this method existed) keeps working: it
+    # then simply uses the C++-side defaults, which are the same as the
+    # Python-side ones.
+    if hasattr(self._session,"set_bond_ramp"):
+        self._session.set_bond_ramp(self.bond_ramp,self.bond_ramp_start,
+                                    self.bond_ramp_fraction,
+                                    self.bond_ramp_noise_decay)
     # Only re-send the Hamiltonian when it (or the MPO bond dimension it
     # is built with) actually changed since the last send to this same
     # session: the session's set_hamiltonian() invalidates its energy
@@ -52,7 +74,8 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     from .multioperatortk.staticoperator import StaticOperator
     if isinstance(self.hamiltonian,StaticOperator):
         key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),id(self.hamiltonian.cpp_handle))
+               max(self.maxm,self.mpomaxm),ramp_key(self),
+               id(self.hamiltonian.cpp_handle))
         cache = getattr(self,'_session_ham_cache',None)
         if cache is None or cache[0] is not self._session or cache[1]!=key:
             if not hasattr(self._session,"set_hamiltonian_mpo"):
@@ -66,7 +89,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     else:
         terms = self.hamiltonian.to_terms()
         key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),terms)
+               max(self.maxm,self.mpomaxm),ramp_key(self),terms)
         cache = getattr(self,'_session_ham_cache',None)
         if cache is None or cache[0] is not self._session or cache[1]!=key:
             self._session.set_hamiltonian(terms)
@@ -91,15 +114,23 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
       if de>maxde and maxdepth>0: # if a maximum energy fluctuation
           maxm,nsweeps = self.maxm,self.nsweeps
           noise = self.noise
+          ramp = self.bond_ramp
           print("Energy fluctuation = ",de,maxm)
           self.maxm = maxm*2
           self.nsweeps = 2 # just two sweeps
           self.noise = 0.0
+          # No bond ramp here: this is a deliberate, already-warm
+          # refinement of a converged state at doubled maxm over just two
+          # sweeps, so there is no cheap-early-sweep phase to win and
+          # spending one of the two sweeps below the target bond dimension
+          # would simply halve what the retry does.
+          self.bond_ramp = False
           gs_energy_single(self,maxde=maxde,reconverge=True,
                   maxdepth=maxdepth-1) # execute again
           self.maxm = maxm
           self.nsweeps = nsweeps # restore
           self.noise = noise
+          self.bond_ramp = ramp
     self.computed_gs = True # ground state has been computed
     return out # return energy
 

@@ -97,6 +97,19 @@ class Chain
     void
     set_mpomaxm(int mpomaxm) { mpomaxm_ = mpomaxm; }
 
+    // Ground-state bond-dimension ramp (see make_sweeps_ramped()). Kept
+    // as its own setter rather than widening set_sweep_params(), which
+    // has ~15 call sites on the Python side. enabled=false reproduces the
+    // original flat-maxm schedule exactly.
+    void
+    set_bond_ramp(bool enabled, int start, double fraction, double noise_decay)
+        {
+        ramp_ = enabled;
+        ramp_start_ = start;
+        ramp_fraction_ = fraction;
+        ramp_noise_decay_ = noise_decay;
+        }
+
     // Controls whether ITensor's dmrg() prints its per-sweep/per-bond
     // progress (energy, truncation error, states kept, ...) to stdout.
     // Off by default -- the old file-based backend inherited this same
@@ -128,12 +141,17 @@ class Chain
         {
         if (!have_H_) Error("Chain::gs_energy called before set_hamiltonian");
         if (skip_dmrg && have_wf0_ && have_wf0_energy_) return wf0_energy_;
+        // A warm start (set_wavefunction, or the previous gs_energy()
+        // call's own solution) must not be truncated by the ramp's early
+        // low-maxm sweeps -- pass its bond dimension as the ramp floor.
+        int floor_dim = 0;
+        if (have_wf0_) floor_dim = maxM(wf0_);
         if (!have_wf0_)
             {
             wf0_ = MPS(sites_);
             have_wf0_ = true;
             }
-        auto sweeps = make_sweeps();
+        auto sweeps = make_sweeps_ramped(nsweeps_,maxm_,floor_dim);
         double energy = dmrg(wf0_,H_,sweeps,dmrg_args());
         wf0_energy_ = energy;
         have_wf0_energy_ = true;
@@ -959,13 +977,61 @@ class Chain
         sweeps.maxm() = maxm;
         sweeps.cutoff() = cutoff_;
         sweeps.noise() = noise_;
-        // noise only in the first half, mirrors get_sweeps.h
-        for (int i=ns/2;i<ns;i++) sweeps.setnoise(i,0.0);
+        // Noise only in the first half of the schedule (mirrors the old
+        // file-based backend's get_sweeps.h). Sweeps is 1-based -- its
+        // arrays are sized nsweep+1 and ITensor's dmrg() loops
+        // `for(sw=1; sw<=nsweeps; ++sw)` -- so the range that actually
+        // covers the second half is [ns/2+1, ns]. The obvious-looking
+        // 0-based `for (i=ns/2;i<ns;i++)` used here before silently left
+        // the *final* sweep running with the full noise term, i.e. the
+        // returned state and energy were always the output of a noisy
+        // sweep. That is a real off-by-one, not a reproduced-on-purpose
+        // quirk, and it is fixed here.
+        for (int i=ns/2+1;i<=ns;i++) sweeps.setnoise(i,0.0);
         return sweeps;
         }
 
     Sweeps
     make_sweeps() const { return make_sweeps(nsweeps_,maxm_); }
+
+    // Ground-state sweep schedule with a bond-dimension ramp -- the exact
+    // counterpart of mpscpp3/chain_session.h's make_sweeps_ramped(), see
+    // that one's comment for the full rationale (cheap early sweeps at
+    // small maxm to find the variational subspace, full maxm only once
+    // the state is already good; the ramp spans a fixed fraction of the
+    // schedule rather than growing as fast as it can; floor_dim keeps a
+    // warm starting wavefunction from being truncated by the early
+    // sweeps; the noise term decays across the ramp and is off entirely
+    // once the schedule reaches the full maxm).
+    Sweeps
+    make_sweeps_ramped(int ns, int maxm, int floor_dim) const
+        {
+        if (!ramp_ || ns<2 || maxm<=1) return make_sweeps(ns,maxm);
+        int start = ramp_start_>0 ? ramp_start_ : 10;
+        if (floor_dim>start) start = floor_dim;
+        if (start>=maxm) return make_sweeps(ns,maxm);
+        int nr = (int)((double)ns*ramp_fraction_);
+        if (nr<1) nr = 1;
+        if (nr>ns-1) nr = ns-1; // always at least one sweep at full maxm
+        auto sweeps = Sweeps(ns);
+        sweeps.cutoff() = cutoff_;
+        for (int i=0;i<ns;i++)
+            {
+            int m = maxm;
+            if (i<nr)
+                {
+                double x = std::pow((double)maxm/(double)start,
+                                    (double)i/(double)nr);
+                m = (int)std::llround((double)start*x);
+                if (m<1) m = 1;
+                if (m>maxm) m = maxm;
+                }
+            double nz = i<nr ? noise_*std::pow(ramp_noise_decay_,i) : 0.0;
+            sweeps.setmaxm(i+1,m); // Sweeps is 1-based, see make_sweeps()
+            sweeps.setnoise(i+1,nz);
+            }
+        return sweeps;
+        }
 
     // Ground/anti-ground energy of H_, used to set the KPM energy scale
     // (scaled_hamiltonian below). These replace bandwidth.h's
@@ -1323,4 +1389,10 @@ class Chain
     double noise_ = 1e-1;
     int mpomaxm_ = 5000;
     bool verbose_ = false;
+    // Bond-dimension ramp for the ground-state sweep schedule, see
+    // set_bond_ramp()/make_sweeps_ramped() (kept identical to mpscpp3's).
+    bool ramp_ = true;
+    int ramp_start_ = 10;
+    double ramp_fraction_ = 0.5;
+    double ramp_noise_decay_ = 0.1;
     };

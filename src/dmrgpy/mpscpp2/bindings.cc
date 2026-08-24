@@ -85,6 +85,15 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("set_sweep_params",&Chain::set_sweep_params,
              py::arg("maxm"),py::arg("nsweeps"),py::arg("cutoff"),py::arg("noise"))
         .def("set_mpomaxm",&Chain::set_mpomaxm,py::arg("mpomaxm"))
+        .def("set_bond_ramp",&Chain::set_bond_ramp,
+             py::arg("enabled"),py::arg("start"),py::arg("fraction"),
+             py::arg("noise_decay"),
+             "Ground-state bond-dimension ramp: spend the first `fraction` "
+             "of the sweep schedule growing the bond dimension "
+             "geometrically from `start` up to the target maxm, then hold "
+             "it there, with the noise term decaying by `noise_decay` per "
+             "ramping sweep and off entirely afterwards. enabled=false "
+             "restores a flat schedule.")
         .def("set_verbose",&Chain::set_verbose,py::arg("verbose"),
              "Enable/disable ITensor's per-sweep DMRG progress output "
              "(disabled by default)")

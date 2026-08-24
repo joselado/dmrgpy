@@ -2008,7 +2008,8 @@ those caches --- so the Python side
 (\texttt{groundstate.py::gs\_energy\_single}) only re-sends the
 Hamiltonian when its \texttt{to\_terms()} output, any solver parameter
 a re-run would pick up (\texttt{maxm}, \texttt{nsweeps},
-\texttt{cutoff}, \texttt{noise}, the effective MPO bond dimension), or
+\texttt{cutoff}, \texttt{noise}, the effective MPO bond dimension, the
+bond-ramp settings below), or
 the session object itself actually changed since the last send
 (\texttt{\_session\_ham\_cache}). Repeated calculations
 on an unchanged Hamiltonian (e.g.\ successive
@@ -2019,6 +2020,70 @@ fresh solve of the same Hamiltonian either pass through
 \texttt{restart()}/\texttt{set\_hamiltonian} (which force DMRG via
 \texttt{skip\_dmrg\_gs=False}) or clear \texttt{\_session\_ham\_cache}
 explicitly (see \texttt{groundstate.py}'s best-of-$n$ loops).
+
+\textbf{The ground-state sweep schedule is ramped, not flat}
+(\texttt{Chain::make\_sweeps\_ramped()} in both
+\texttt{chain\_session.h}s,
+\texttt{pyitensor/chain.py::\_make\_sweeps\_ramped()}; the public knobs
+are \texttt{Many\_Body\_Chain.bond\_ramp}/\texttt{bond\_ramp\_start}/
+\texttt{bond\_ramp\_fraction}/\texttt{bond\_ramp\_noise\_decay},
+documented physics-side in \texttt{user\_guide.md} \S3).
+\texttt{Chain::gs\_energy()} builds its \texttt{Sweeps} through this
+variant rather than the flat \texttt{make\_sweeps()}: the first
+$\lfloor$\texttt{nsweeps*bond\_ramp\_fraction}$\rfloor$ sweeps
+interpolate the bond dimension geometrically from
+\texttt{bond\_ramp\_start} up to \texttt{maxm}, the rest run at
+\texttt{maxm}, and the noise term decays by
+\texttt{bond\_ramp\_noise\_decay} per ramping sweep and is off
+afterwards. Three things about it are load-bearing:
+
+\begin{itemize}
+  \item \textbf{It is plumbed as its own session setter}
+    (\texttt{Chain::set\_bond\_ramp}, bound in both
+    \texttt{bindings.cc}), not as extra \texttt{set\_sweep\_params}
+    arguments, because \texttt{set\_sweep\_params} has ${\sim}15$ call
+    sites across \texttt{vev.py}/\texttt{kpmdmrg.py}/\texttt{excited.py}/
+    \texttt{nhdmrg.py}/\texttt{timedependent.py} that have nothing to say
+    about the ground-state ramp. Only
+    \texttt{groundstate.py::gs\_energy\_single} calls it
+    (\texttt{hasattr}-guarded, so an extension compiled before the method
+    existed still loads).
+  \item \textbf{Only \texttt{Chain::gs\_energy()} uses it.}
+    \texttt{make\_sweeps()} itself is unchanged in shape and still backs
+    \texttt{excited\_states()}, the band-edge solves, and
+    \texttt{gs\_energy\_generalized()}'s per-outer-iteration schedules ---
+    the last of which would restart the ramp from its floor on every
+    Lagrange-multiplier update.
+  \item \textbf{A warm start is floored, not truncated.}
+    \texttt{gs\_energy()} passes \texttt{maxLinkDim(wf0\_)} (v2:
+    \texttt{maxM}) as the ramp's \texttt{floor\_dim} whenever a
+    wavefunction is already present, so re-entering it with a converged
+    state (\texttt{set\_wavefunction}, or \texttt{gs\_energy\_single}'s
+    own \texttt{maxde} reconvergence retry, which also disables the ramp
+    outright) cannot throw that state away. A fresh start instead builds
+    its random MPS directly at the ramp's first bond dimension.
+\end{itemize}
+
+The ramp's shape is deliberately a \emph{fraction of the schedule} rather
+than ``double until you reach \texttt{maxm}''. The latter was implemented
+first and measured: it minimizes the number of cheap sweeps, so on a
+30-site inhomogeneous Heisenberg--Hubbard chain at \texttt{nsweeps=20} it
+leaves only 4 of 20 sweeps below a \texttt{maxm} of 150 and buys almost
+nothing. Filling half the schedule instead measured \textbf{2.0x} on that
+model at \texttt{maxm=60} (50.5\,s flat vs 24.9\,s ramped, same energy to
+$8\times10^{-9}$; BLAS pinned to one thread on two dedicated cores, as any
+timing in this repo must be).
+
+While rewriting that schedule, a real pre-existing off-by-one in the flat
+\texttt{make\_sweeps()} was fixed in both C++ backends: \texttt{Sweeps}
+is 1-based (its arrays are sized \texttt{nsweep+1}, and ITensor's
+\texttt{dmrg()} loops \texttt{for(sw=1; sw<=nsweeps; ++sw)}), but the
+``turn the noise off for the second half'' loop was written 0-based
+(\texttt{for (i=ns/2;i<ns;i++)}), which left the \emph{final} sweep
+running with the full noise term --- i.e.\ every returned state and
+energy was the output of a noisy sweep.
+\texttt{pyitensor/chain.py}'s mirror of the same loop was already
+correct, so this also removes a silent C++/Python divergence.
 
 Notable, deliberate implementation details (not bugs to ``fix''):
 

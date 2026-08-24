@@ -38,6 +38,10 @@ class Sweeps:
     niter = _prop("niter")
     del _prop
 
+    def setmaxdim(self, i, value):
+        """0-based sweep index, same convention as setnoise() below."""
+        self._maxdim[i] = value
+
     def setnoise(self, i, value):
         """0-based sweep index, matching chain_session.h's
         `for (int i=nsweeps_/2;i<nsweeps_;i++) sweeps.setnoise(i,0.0);`"""
