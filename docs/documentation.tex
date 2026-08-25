@@ -2165,6 +2165,36 @@ Notable, deliberate implementation details (not bugs to ``fix''):
     \texttt{mode.py} \emph{raise} instead of falling back to ED --- a
     fallback would silently return the global ground state instead of the
     sector's.
+  \item \textbf{Promotion out of a sector}
+    (\texttt{Chain::promote\_to\_dense}/\texttt{promote\_mps},
+    \texttt{Many\_Body\_Chain.promote\_to\_dense()}/
+    \texttt{promote\_mps(wf)}): leaves sector mode \emph{keeping} the
+    state computed inside it, which \texttt{set\_conserved\_sector()}
+    with no arguments cannot do (it drops everything built on the QN site
+    set). The conversion is ITensor's own \texttt{removeQNs}
+    (\texttt{mps.cc}) --- a block scatter into dense storage plus an
+    index-level QN strip, exact and truncation-free --- followed by
+    \texttt{replaceSiteInds} onto \texttt{dense\_sites\_}. The point is
+    that \texttt{sector\_terms}' conserving-operator rule, unavoidable
+    while the sector is set, forbids exactly the operators a fixed-$N$
+    state is usually wanted for (\texttt{C}, \texttt{Sx}, a pairing
+    term); afterwards they are ordinary again. \texttt{dense\_sites\_} is
+    therefore now the chain's \emph{own} site set, kept from construction
+    and never rebuilt --- clearing the sector puts it back into
+    \texttt{sites\_} too --- so that anything built before a sector was
+    set, and any two states promoted out of \emph{different} sectors,
+    live on the same indices and stay comparable (a photoemission weight
+    $|\langle gs_{N-1}|c_i|gs_N\rangle|^2$ needs exactly that). What
+    promotion does not keep is the Hamiltonian MPO and the
+    band-edge/iDMRG/VUMPS caches, all built against the QN indices; the
+    ground state and its energy survive, so \texttt{computed\_gs} stays
+    true and a bare \texttt{gs\_energy()} afterwards returns the sector's
+    energy rather than re-solving unconstrained. \texttt{promote\_mps}
+    exists because \texttt{self.wf0} is a \emph{separate} C++ MPS from
+    the session's own
+    (\texttt{groundstate.gs\_energy\_single} copies
+    \texttt{gs\_wavefunction()} out), as is any MPS the caller kept a
+    reference to.
   \item \texttt{mpscpp3}'s (and \texttt{pyitensor}'s) real-time MPS
     evolution defaults to a proper two-site TDVP integrator (vendored
     under \texttt{mpscpp3/TDVP/}; \texttt{pyitensor/tdvp.py} for the

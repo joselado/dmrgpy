@@ -287,7 +287,7 @@ class Chain
     {
     public:
     explicit Chain(std::vector<int> const& site_types)
-        : sites_(SpinX(site_types)), site_types_(site_types)
+        : sites_(SpinX(site_types)), site_types_(site_types), dense_sites_(sites_)
         { }
 
     int
@@ -371,7 +371,11 @@ class Chain
             }
         if (names.empty()) // sector mode off: back to plain dense sites
             {
-            sites_ = SpinX(site_types_);
+            // dense_sites_, not a freshly minted SpinX(site_types_): it is
+            // this chain's own original site set, so clearing the sector
+            // restores exactly the indices the chain had before it was set
+            // (and promote_to_dense() below can rebase a state onto them).
+            sites_ = dense_sites_;
             sector_.clear();
             has_sector_ = false;
             forget_everything_built_on_sites();
@@ -404,18 +408,15 @@ class Chain
         // later call would fail. (The check needs the new sites_/sector_ in
         // place, hence the try/catch rather than a pre-check.)
         auto old_sites = sites_;
-        auto old_dense = dense_sites_;
         auto old_sector = sector_;
         bool old_has = has_sector_;
         sites_ = SpinX(site_types_,names);
-        dense_sites_ = SpinX(site_types_);
         sector_ = qns;
         has_sector_ = true;
         try { sector_state_plan(); }
         catch (...)
             {
             sites_ = old_sites;
-            dense_sites_ = old_dense;
             sector_ = old_sector;
             has_sector_ = old_has;
             throw; // nothing was invalidated, so the old H/wf0 stay valid
@@ -426,6 +427,64 @@ class Chain
     // The currently requested sector, empty when sector mode is off.
     std::vector<std::pair<std::string,int>>
     conserved_sector() const { return sector_; }
+
+    // Leave sector mode *keeping* the state that was computed inside the
+    // sector -- the one thing set_conserved_sector() with no quantum
+    // numbers cannot do, since it drops everything built on the old sites.
+    //
+    // The point is the operations a sector forbids. While a sector is set,
+    // sector_terms() rejects any operator that does not conserve it (a bare
+    // C on an Nf-fixed chain, Sx on an Sz-fixed one, a pairing or transverse
+    // field), and it has to: AutoMPO aborts the whole process over a
+    // flux-violating term rather than raising anything catchable. After
+    // promoting, the very same wavefunction lives on ordinary dense sites
+    // and every one of those operators is legal again -- so the natural
+    // workflow "solve for the ground state at exactly N particles, then
+    // apply c_i to it / quench it with a pairing term / take a dynamical
+    // correlator of C" works, with the sector used for the part that
+    // benefits from it and dropped for the part that cannot tolerate it.
+    //
+    // The conversion is exact, not an approximation or a re-solve: a
+    // QN-conserving MPS is the same wavefunction as its dense counterpart,
+    // stored block-sparsely. ITensor's own removeQNs() (mps.cc) scatters
+    // every block back into a full dense tensor and strips the QN store
+    // from each index, and replaceSiteInds() rebases the physical legs onto
+    // dense_sites_ -- the indices every operator built afterwards carries.
+    // Nothing is truncated and no number changes; only the storage does,
+    // together with the block-sparsity speedup, which is gone from here on.
+    //
+    // What does NOT survive: the Hamiltonian MPO and the band-edge/iDMRG/
+    // VUMPS caches, all of which were built against the QN indices. Python
+    // re-sends the Hamiltonian on the next gs_energy() anyway, because the
+    // sector is part of groundstate.py's send-cache key.
+    void
+    promote_to_dense()
+        {
+        if (!has_sector_) return; // already dense: nothing to promote
+        MPS promoted;
+        bool had_wf0 = have_wf0_;
+        if (had_wf0) promoted = to_dense_mps(wf0_);
+        double energy = wf0_energy_;
+        bool had_energy = have_wf0_energy_;
+        sites_ = dense_sites_;
+        sector_.clear();
+        has_sector_ = false;
+        forget_everything_built_on_sites();
+        if (had_wf0) { wf0_ = promoted; have_wf0_ = true; }
+        wf0_energy_ = energy;
+        have_wf0_energy_ = had_energy;
+        }
+
+    // The same conversion applied to one MPS handle Python is already
+    // holding (a gs_wavefunction() result, an apply_operator() output, an
+    // excited state): those carry whichever site indices were current when
+    // they were produced, so promoting the session alone would leave them
+    // on stale QN indices and any later contraction against a freshly built
+    // operator would not find a matching index. Safe to call on an already
+    // dense MPS too -- removeQNs() returns it untouched and
+    // replaceSiteInds() is a no-op once the indices already match.
+    MPS
+    promote_mps(MPS const& wf) const { return to_dense_mps(wf); }
 
     void
     set_hamiltonian(std::vector<MOTerm> const& terms)
@@ -4356,6 +4415,34 @@ class Chain
     // Everything below is inert while sector mode is off (has_sector_ ==
     // false): the checks return immediately and mpo_from_terms()/
     // default_mps() take exactly the paths they always did.
+
+    // dense_sites_'s physical indices in site order: the target
+    // replaceSiteInds() rebases a de-QN'd MPS onto in to_dense_mps().
+    IndexSet
+    dense_site_inds() const
+        {
+        std::vector<Index> v;
+        v.reserve(site_types_.size());
+        for (size_t k=0;k<site_types_.size();++k) v.push_back(dense_sites_(int(k+1)));
+        return IndexSet(std::move(v));
+        }
+
+    // Block-sparse (QN) MPS -> the identical wavefunction stored densely on
+    // dense_sites_. See promote_to_dense() for why this is exact.
+    //
+    // The one assumption is that the QN-carrying and dense site indices
+    // enumerate their local basis states in the same order, so that basis
+    // state k means the same thing on both. That holds because both come
+    // from the same ITensor site header with only ConserveQNs flipped
+    // (spinhalf.h declares Up then Dn either way, electron.h Emp/Up/Dn/UpDn,
+    // ...), and op_charge() right below already depends on exactly this
+    // correspondence -- it labels dense_sites_'s matrix elements with
+    // sites_'s quantum numbers.
+    MPS
+    to_dense_mps(MPS const& wf) const
+        {
+        return replaceSiteInds(removeQNs(wf),dense_site_inds());
+        }
 
     // Drop every piece of session state that was built against the old
     // sites_ -- which, after a SiteSet swap, is all of it.
@@ -10797,11 +10884,13 @@ class Chain
     SiteSet sites_;
     // -- conserved sector (opt-in QN mode), see set_conserved_sector() --
     // site_types_ is what SpinX needs in order to rebuild sites_ either
-    // way. dense_sites_ is a permanently ConserveQNs=false copy of the same
-    // chain, used only to read an operator's matrix elements without ever
-    // building that operator on QN-carrying indices (see op_charge(), and
-    // why that matters). sector_ is the requested (QN name, value) list,
-    // empty whenever sector mode is off.
+    // way. dense_sites_ is the chain's own original ConserveQNs=false site
+    // set, kept from construction and never rebuilt: it is what an
+    // operator's matrix elements are read from without ever building that
+    // operator on QN-carrying indices (see op_charge(), and why that
+    // matters), what clearing the sector puts back into sites_, and what
+    // promote_to_dense() rebases a sector state onto. sector_ is the
+    // requested (QN name, value) list, empty whenever sector mode is off.
     std::vector<int> site_types_;
     SiteSet dense_sites_;
     std::vector<std::pair<std::string,int>> sector_;

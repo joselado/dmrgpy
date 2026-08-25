@@ -133,6 +133,20 @@ PYBIND11_MODULE(_dmrgcpp, m)
              "operator built while a sector is set must conserve it.")
         .def("conserved_sector",&Chain::conserved_sector,
              "The (name,value) sector this chain is confined to, empty if none")
+        .def("promote_to_dense",&Chain::promote_to_dense,
+             "Leave conserved-sector mode while KEEPING the ground state "
+             "computed inside the sector (set_conserved_sector([]) drops it). "
+             "The block-sparse state is converted exactly to its dense "
+             "equivalent on the chain's ordinary site indices, after which "
+             "sector-violating operators (a bare C, Sx, a pairing term) can "
+             "be applied to it again. The Hamiltonian and the band-edge/"
+             "iDMRG/VUMPS caches are still dropped. No-op if no sector is set.")
+        .def("promote_mps",&Chain::promote_mps,py::arg("wf"),
+             "Convert one MPS handle from the sector's QN-carrying site "
+             "indices to the chain's dense ones, exactly (see "
+             "promote_to_dense). Needed for any MPS Python already holds, "
+             "which promote_to_dense() cannot reach. A no-op on an MPS that "
+             "is already dense on those indices.")
         .def("set_verbose",&Chain::set_verbose,py::arg("verbose"),
              "Enable/disable ITensor's per-sweep DMRG progress output "
              "(disabled by default)")

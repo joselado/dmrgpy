@@ -1969,6 +1969,30 @@ Notable, deliberate implementation details (not bugs to "fix"):
   `groundstate.py`'s Hamiltonian-send cache key, and makes `mode.py`
   *raise* instead of falling back to ED — a fallback would silently
   return the global ground state instead of the sector's.
+- **Promotion out of a sector** (`Chain::promote_to_dense`/`promote_mps`,
+  `Many_Body_Chain.promote_to_dense()`/`promote_mps(wf)`): leaves sector
+  mode *keeping* the state computed inside it, which
+  `set_conserved_sector()` with no arguments cannot do (it drops
+  everything built on the QN site set). The conversion is ITensor's own
+  `removeQNs` (`mps.cc`) — a block scatter into dense storage plus an
+  index-level QN strip, exact and truncation-free — followed by
+  `replaceSiteInds` onto `dense_sites_`. The point is that
+  `sector_terms`' conserving-operator rule, unavoidable while the sector
+  is set, forbids exactly the operators a fixed-$N$ state is usually
+  wanted for (`C`, `Sx`, a pairing term); afterwards they are ordinary
+  again. `dense_sites_` is therefore now the chain's *own* site set, kept
+  from construction and never rebuilt — clearing the sector puts it back
+  into `sites_` too — so that anything built before a sector was set, and
+  any two states promoted out of *different* sectors, live on the same
+  indices and stay comparable (a photoemission weight
+  `|<gs_{N-1}|c_i|gs_N>|^2` needs exactly that). What promotion does not
+  keep is the Hamiltonian MPO and the band-edge/iDMRG/VUMPS caches, all
+  built against the QN indices; the ground state and its energy survive,
+  so `computed_gs` stays true and a bare `gs_energy()` afterwards returns
+  the sector's energy rather than re-solving unconstrained. `promote_mps`
+  exists because `self.wf0` is a *separate* C++ MPS from the session's own
+  (`groundstate.gs_energy_single` copies `gs_wavefunction()` out), as is
+  any MPS the caller kept a reference to.
 - `mpscpp3`'s (and `pyitensor`'s) real-time MPS evolution defaults to a
   proper two-site TDVP integrator (vendored under `mpscpp3/TDVP/`;
   `pyitensor/tdvp.py` for the pure-Python backend), selectable via

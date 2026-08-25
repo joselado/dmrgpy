@@ -357,6 +357,95 @@ class Many_Body_Chain():
           return
       qns = sorted((self.conserved_sector or {}).items())
       self._session.set_conserved_sector(qns)
+  def promote_to_dense(self):
+      """Leave conserved-sector mode while *keeping* the state computed in it.
+
+      `set_conserved_sector()` with no arguments also switches the sector
+      off, but it throws the ground state away along with everything else
+      built on the sector's site set. This keeps it, converted exactly to
+      its dense equivalent, so that the operations a sector forbids become
+      available on a state that was nevertheless obtained inside one:
+
+          fc.set_conserved_sector(Nf=6)   # solve at exactly 6 particles
+          fc.gs_energy()
+          fc.promote_to_dense()           # ... then leave the sector
+          wf = fc.applyoperator(fc.C[3],fc.wf0)   # legal only now
+
+      While a sector is set, every operator built on the chain must
+      conserve it -- a bare `C` changes Nf, `Sx` changes Sz -- and that is
+      enforced rather than merely discouraged, because ITensor's AutoMPO
+      aborts the whole process over a flux-violating term instead of
+      raising something catchable. After promoting, the same wavefunction
+      lives on ordinary dense indices and all of it is legal again:
+      applying `C`/`Cdag`, a pairing or transverse-field quench, a
+      dynamical correlator of a charge-changing operator.
+
+      The conversion is exact and involves no re-solve: a QN-conserving MPS
+      is the same state as its dense counterpart, only stored block-sparsely
+      (ITensor's own `removeQNs`, see `Chain::promote_to_dense` in
+      mpscpp3/chain_session.h). What it costs is the block-sparsity speedup,
+      which is gone from here on -- so promote after the expensive
+      sector-confined part of the calculation, not before it.
+
+      The Hamiltonian and the band-edge/iDMRG/VUMPS caches are dropped (they
+      were built on the QN indices) and re-sent on the next call that needs
+      them; the ground-state energy and wavefunction are kept, so a bare
+      `gs_energy()` afterwards returns the sector's energy rather than
+      re-solving unconstrained. Call `restart()` if an unconstrained
+      re-solve is what you want.
+
+      Nothing happens if no sector is set. itensor_version=3 only, like
+      `set_conserved_sector` itself.
+      """
+      if not self.conserved_sector: return # nothing to promote
+      if self.itensor_version!=3:
+          raise NotImplementedError(
+              "promote_to_dense is implemented for itensor_version=3 only "
+              "(this chain uses %s)."%repr(self.itensor_version))
+      if self._session is None:
+          # No live session to promote: the sector was only ever recorded
+          # on the Python object (_apply_conserved_sector is a no-op
+          # without one), so clearing it here is the whole job.
+          self.conserved_sector = None
+          return
+      if not hasattr(self._session,"promote_to_dense"):
+          raise NotImplementedError(
+              "this compiled mpscpp3 extension predates conserved-sector "
+              "promotion -- rebuild it with 'python install.py "
+              "--itensor-version=3'")
+      self._session.promote_to_dense()
+      self.conserved_sector = None
+      # The session dropped its Hamiltonian MPO along with the QN sites, so
+      # the send-cache must not claim it is still there. (sector_key() would
+      # already force a re-send on its own, since the sector changed -- this
+      # keeps it true independently of that.)
+      self._session_ham_cache = None
+      # self.wf0 is a *separate* C++ MPS from the session's own (see
+      # groundstate.gs_energy_single, which copies gs_wavefunction() out),
+      # so promoting the session does not reach it.
+      self.wf0 = self.promote_mps(self.wf0)
+  def promote_mps(self,wf):
+      """Convert one wavefunction from a conserved sector's QN-carrying site
+      indices to this chain's dense ones, exactly -- the per-wavefunction
+      counterpart of `promote_to_dense`, which only reaches the chain's own
+      ground state. Any `MPS` obtained while the sector was set (an excited
+      state, an `applyoperator` result, a state saved before promoting) needs
+      this before it can be contracted against an operator built afterwards.
+      Returns a new `MPS`; a no-op on one that is already dense."""
+      if wf is None: return None
+      if self.itensor_version!=3 or getattr(wf,"cpp_handle",None) is None:
+          return wf
+      if not hasattr(self._session,"promote_mps"):
+          # Returning wf unconverted would hand back a handle still on the
+          # sector's QN indices, whose next contraction aborts the process
+          # from inside ITensor rather than raising -- say so instead.
+          raise NotImplementedError(
+              "this compiled mpscpp3 extension predates conserved-sector "
+              "promotion -- rebuild it with 'python install.py "
+              "--itensor-version=3'")
+      out = wf.copy()
+      out.cpp_handle = self._session.promote_mps(wf.cpp_handle)
+      return out
   def setup_julia(self):
       """Setup the Julia mode"""
       self.itensor_version = "julia_live"

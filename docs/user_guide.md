@@ -302,6 +302,57 @@ wrong number. See
 `examples/groundstate/sector_targeted_groundstate` for the addition
 spectrum and charge gap of a $t$--$V$ chain, checked against ED.
 
+**Leaving a sector without losing the state.** The conserving-operator
+rule above rules out exactly the quantities one usually wants *from* a
+fixed-$N$ ground state: $c_i|\mathrm{GS}\rangle$, a one-body density
+matrix built from it, a photoemission weight, a pairing quench. Clearing
+the sector with `set_conserved_sector()` does not help on its own — it
+also throws the state away, so the next `gs_energy()` re-solves
+unconstrained and answers with the global ground state.
+`promote_to_dense()` is the other option: it leaves sector mode while
+*keeping* the state, converted exactly to its dense equivalent on the
+chain's ordinary site indices.
+
+```python
+fc.set_conserved_sector(Nf=6)          # sweeps confined to 6 particles
+fc.gs_energy()
+fc.applyoperator(fc.C[3], fc.wf0)      # ValueError: c changes Nf by -1
+fc.promote_to_dense()                  # same state, ordinary indices
+wf = fc.applyoperator(fc.C[3], fc.wf0) # now legal
+fc.vev(sum(fc.N), wf=wf)               # -> 5
+```
+
+Nothing is re-solved, truncated or approximated: a QN-conserving MPS is
+the same wavefunction as its dense counterpart, only stored
+block-sparsely, and promotion just scatters the blocks back into full
+tensors. What it costs is the block sparsity itself, so promote *after*
+the expensive sweeps, not before. The Hamiltonian and the band-edge
+caches are rebuilt on the next call that needs them, while the
+ground-state energy and wavefunction are kept — a bare `gs_energy()`
+afterwards therefore still returns the sector's energy rather than
+re-solving; call `restart()` if an unconstrained re-solve is what you
+want. A wavefunction Python is already holding is not reached by
+`promote_to_dense()` and needs `wf = fc.promote_mps(wf)` of its own.
+
+Promotion always rebases onto the chain's *own* site indices, kept from
+construction, so states promoted out of different sectors at different
+times remain comparable:
+
+```python
+fc.set_conserved_sector(Nf=n//2)   ; fc.gs_energy() ; fc.promote_to_dense()
+wf_N = fc.wf0.copy()
+fc.set_conserved_sector(Nf=n//2-1) ; fc.gs_energy() ; fc.promote_to_dense()
+wf_Nm = fc.wf0.copy()
+Z = abs(fc.overlap(wf_Nm, fc.applyoperator(fc.C[i], wf_N)))**2  # photoemission weight
+```
+
+`promote_to_dense()` is `itensor_version=3` only, like
+`set_conserved_sector` itself, and does nothing if no sector is set. See
+`examples/groundstate/sector_promotion_to_dense` for the $t$--$V$ chain's
+CDW profile, one-body density matrix and site-resolved photoemission
+weight $Z_i=|\langle \mathrm{GS}_{N-1}|c_i|\mathrm{GS}_N\rangle|^2$, all
+computed this way and checked against sector-restricted ED.
+
 
 **Expectation values and moments.** For any operator $O$ built the same
 way as $H$,
