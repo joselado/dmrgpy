@@ -224,6 +224,10 @@ class Many_Body_Chain():
       # backend left to fall back to. ("python" has no such precondition:
       # it's always available, see cppext.py.)
       self._session = None
+      # Conserved-sector (quantum-number) targeting, off by default -- see
+      # set_conserved_sector(). None means "no sector": DMRG searches the
+      # full Hilbert space, which is what every backend has always done.
+      self.conserved_sector = None
       self.initialize(**kwargs)
       # and initialize the sites
   def initialize(self,**kwargs):
@@ -264,6 +268,9 @@ class Many_Body_Chain():
       if self._session is not None:
           from . import cppext
           out._session = cppext.get_backend(self.itensor_version).Chain(out.sites)
+          # a fresh session starts sector-less; re-apply the clone's own
+          # sector so it searches the same Hilbert space the original did
+          if out.conserved_sector: out._apply_conserved_sector()
       return out
   def _reset_dmrg_state(self):
       """Invalidate any cached ground state computed under the previous
@@ -282,6 +289,74 @@ class Many_Body_Chain():
       self.gs_from_file = False
       self.skip_dmrg_gs = False
       self.wf0 = None
+  def set_conserved_sector(self,**qns):
+      """Confine every calculation on this chain to one quantum-number sector.
+
+      Called with no arguments, sector targeting is switched off again and
+      the chain goes back to searching the full Hilbert space (the default).
+      Otherwise each keyword is a conserved quantity and its target value:
+
+          fc.set_conserved_sector(Nf=6)        # exactly 6 particles
+          sc.set_conserved_sector(Sz=0)        # total Sz=0
+          hc.set_conserved_sector(Nf=8,Sz=0)   # Hubbard: both at once
+
+      Which quantities a chain offers follows from its site types: `Nf`
+      (particle number) for spinless and spinful fermions, `Sz` (total spin
+      projection, in ITensor's integer 2*Sz units -- Sz=1 is one spin-1/2's
+      worth) for every spin chain and for spinful fermions, `Nb` (boson
+      number) for boson chains. Parafermion chains have no sector support.
+      Asking for only some of what a site type offers is allowed and means
+      exactly what it says: a Hubbard chain with Nf alone conserves particle
+      number while leaving Sz free, so Sz-breaking terms remain legal.
+
+      Two things follow from turning this on, both enforced rather than left
+      to be discovered. Every operator built on the chain -- the Hamiltonian,
+      but also anything passed to vev()/correlators -- must itself conserve
+      the requested quantities, or a ValueError names the offending operator
+      (`Sx` on an Sz-conserving chain, a bare `C` on an Nf-conserving one);
+      a Hamiltonian written as Sx.Sx+Sy.Sy+Sz.Sz is fine, since that sum does
+      conserve Sz even though its individual terms do not. And the sector
+      invalidates the Hamiltonian/ground state already sent to the session,
+      so the next gs_energy() re-sends and re-solves.
+
+      itensor_version=3 only for now (the other backends have no quantum
+      numbers at all), and DMRG-only: mode="ED" has no sector support.
+      """
+      previous = self.conserved_sector # restored below if the request is rejected
+      if not qns: # switch sector targeting off
+          self.conserved_sector = None
+      else:
+          for k,v in qns.items():
+              if not isinstance(v,(int,np.integer)):
+                  raise ValueError("set_conserved_sector: %s must be an integer "
+                                   "(Sz is in 2*Sz units), got %s"%(k,repr(v)))
+          self.conserved_sector = {k:int(v) for k,v in qns.items()}
+      if self.itensor_version!=3:
+          raise NotImplementedError(
+              "set_conserved_sector is implemented for itensor_version=3 only "
+              "(this chain uses %s). Switch with setup_cpp(version=3)."
+              %repr(self.itensor_version))
+      try:
+          self._apply_conserved_sector()
+      except Exception: # unreachable target, wrong quantum number for these
+          self.conserved_sector = previous # sites, ...: leave the chain as it was
+          raise
+      self.restart() # the Hamiltonian/ground state were built on the old sites
+  def _apply_conserved_sector(self):
+      """Push self.conserved_sector down to the in-process session, which is
+      where the site set actually gets rebuilt (chain_session.h's
+      Chain::set_conserved_sector). hasattr-guarded so an extension compiled
+      before this existed still works as long as no sector is requested."""
+      if self._session is None: return
+      if not hasattr(self._session,"set_conserved_sector"):
+          if self.conserved_sector:
+              raise NotImplementedError(
+                  "this compiled mpscpp3 extension predates conserved-sector "
+                  "support -- rebuild it with 'python install.py "
+                  "--itensor-version=3'")
+          return
+      qns = sorted((self.conserved_sector or {}).items())
+      self._session.set_conserved_sector(qns)
   def setup_julia(self):
       """Setup the Julia mode"""
       self.itensor_version = "julia_live"

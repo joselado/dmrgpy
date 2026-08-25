@@ -508,8 +508,8 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   unreachable — both reproduced as hardcoded values rather than silently
   "fixed". If ITensor results look numerically "close but not exact" to a
   hand-derivation, check here before assuming a porting bug.
-- **`mpscpp3`-specific: every site is built with `ConserveQNs=false`**
-  (`mpscpp3/get_sites.h`), and `Chain`'s DMRG starting state is an actual
+- **`mpscpp3`-specific: every site is built with `ConserveQNs=false` by
+  default** (`mpscpp3/get_sites.h`), and `Chain`'s DMRG starting state is an actual
   `randomMPS(sites_,maxm_)`, not a plain product state
   (`chain_session.h`'s `default_mps()`). This isn't cosmetic: v2's own
   plain `MPS(sites_)` (no `InitState`) ends up, in practice, performing an
@@ -525,6 +525,54 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   starting from an actual random MPS reproduces v2's real behavior at the
   cost of the QN block-sparsity speedup for `itensor_version=3` — a
   genuine perf/memory tradeoff of this backend, not a bug to "fix" later.
+  Note the "permanently stuck" observation is specific to the
+  *all-first-basis-state* product start it was measured with: that state
+  (all spins up) is the unique state of its own Sz=N/2 sector, so no noise
+  term can move it and its energy is the correct answer for that sector.
+  It says nothing about QN mode from a *non-trivial* in-sector start,
+  which is what the opt-in sector mode below actually does.
+- **`mpscpp3`-specific: opt-in conserved-sector (QN) mode.**
+  `Many_Body_Chain.set_conserved_sector(Nf=6)` / `(Sz=0)` / `(Nf=8,Sz=0)`
+  (`itensor_version=3` only, off by default, no-args clears it) confines
+  the whole calculation to one quantum-number sector: `Chain::
+  set_conserved_sector` rebuilds `sites_` via `SpinX(site_types,conserved)`
+  with QN-carrying indices and drops everything built on the old site set.
+  It pays off with size, and only with size: measured through the Python
+  API on Heisenberg chains, sector vs dense is 0.6x (n=20, maxm=60), 2.0x
+  (n=40, maxm=100), 4.2x (n=60, maxm=200) — block sparsity scales, its
+  per-block bookkeeping doesn't. Don't quote a single speedup number. Three ITensor
+  behaviors shape the implementation, each confirmed directly and none of
+  them a clean failure:
+  - `randomMPS(SiteSet)` refuses to guess a sector under QNs and
+    `randomMPS(InitState,m>1)` does not exist here (`mps.cc`), so the
+    start state is a normalized `sum()` of random in-sector product
+    states (`sector_mps`), with the per-site assignment coming from an
+    exact DP over reachable partial charges (`sector_state_plan` — greedy
+    dead-ends on a Hubbard chain at fixed `Nf` *and* `Sz`).
+  - Building a non-QN-definite operator (`Sx` on Sz-conserving sites)
+    aborts the process inside `ITensor::set`, and AutoMPO aborts on a
+    flux-violating term *even when its coefficient cancels exactly*
+    ("Index does not contain given QN block") — which is why the textbook
+    `Sx*Sx+Sy*Sy+Sz*Sz` Heisenberg Hamiltonian needs `mo_terms.h`'s
+    `expand_xy_terms`+`combine_terms` normalization here rather than
+    being left to AutoMPO, and why `op_charge()` infers an operator's
+    charge from its *dense* matrix elements instead of building it on QN
+    indices. Every `terms → MPO` path routes through
+    `mpo_from_terms`/`ampo_from_terms` so the check covers `vev`/
+    correlators/KPM vertices too; both are pass-through when no sector is
+    set, keeping the default path byte-identical.
+  - ITensor's own `Error()` calls `abort()` (`util/error.h`), so nothing
+    it raises is catchable from Python — the sector code throws
+    `std::invalid_argument`/`std::runtime_error` instead.
+  Python side: the sector lives on the chain, is re-applied wherever a
+  session is rebuilt (`sites.py::initialize`, `__deepcopy__`), is part of
+  `groundstate.py`'s send-cache key, and makes `mode.py` raise rather than
+  fall back to ED (a fallback would silently answer with the *global*
+  ground state). `tests/test_sector_conservation.py` cross-checks every
+  sector against ED restricted to that sector — note the reference must
+  *restrict* (the charge operator is diagonal in the ED basis, so a sector
+  is a submatrix), not filter full-spectrum eigenvectors by ⟨N⟩: sector-
+  degenerate eigenvalues come back as arbitrary superpositions.
 - **`mpscpp3`-specific: `applyMPO()` doesn't restore the standard unprimed
   physical index** the way v2's `exactApplyMPO`/`fitApplyMPO` implicitly
   did — it just contracts whichever leg of the MPO happens to match the

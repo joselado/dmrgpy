@@ -20,7 +20,10 @@
 // same operator names/values dmrgpy's v2-only extra/spintwo.h had; the
 // IQIndex-based read() path uses Index/dim() instead of IQIndex/.m().
 //
-// Every site is built with ConserveQNs=false. This isn't a v2/v3 API
+// By default every site is built with ConserveQNs=false, and the opt-in
+// sector mode below (SpinX(site_types,conserved), reached from Python via
+// Many_Body_Chain.set_conserved_sector) is the only thing that changes
+// that. The default isn't a v2/v3 API
 // difference to paper over -- it reproduces a real v2 *behavior*: v2's
 // Chain::gs_energy() seeds dmrg() from a plain default-constructed
 // "MPS(sites_)" with no InitState, which in v2's IQIndex-based MPS ends up
@@ -40,6 +43,75 @@
 // chain_session.h's default_mps()) is what actually reproduces v2's
 // unconstrained-search behavior, at the cost of the QN block-sparsity
 // speedup -- a real perf/memory tradeoff of this backend, not a bug.
+//
+// Sector mode (opt-in) turns the QNs back on for a chain whose caller
+// *wants* the search confined -- "the ground state at exactly N=6
+// particles", "at total Sz=0". Note default_mps()'s own comment about
+// DMRG being "stuck at the product energy no matter how large a noise
+// term" is a statement about the *all-first-basis-state* start it was
+// measured with, NOT about QN mode: that state (all spins up) is the
+// unique state of its own Sz=N/2 sector, so of course no amount of noise
+// moves it, and its energy is the correct answer for that sector.
+// Measured directly on a 12-site Heisenberg chain: QN sites started from
+// a Neel state, or from a sum of random in-sector product states,
+// converge to -5.142090632836, the exact same energy the ordinary
+// dense/randomMPS path finds. Whether sector mode is also faster depends
+// on the size of the solve -- block sparsity scales, the per-block
+// bookkeeping that buys it does not. Measured through dmrgpy on
+// Heisenberg chains: 0.6x (i.e. slower) at n=20/maxdim=60, 2.0x at
+// n=40/maxdim=100, 4.2x at n=60/maxdim=200.
+
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+
+// The conserved quantities a given site-type code is able to carry, spelled
+// the way ITensor's own site headers name them (see
+// ITensor/itensor/mps/sites/{spinhalf,spinone,spintwo,fermion,electron}.h and
+// extra/{spinthreehalf,spinfivehalf,bosonfour}.h). An empty list means the
+// site type has no sector support here at all: the parafermion sites (Z3/Z4)
+// do carry a Z_n QN of their own upstream, but nothing in dmrgpy's Python
+// layer can express a target for it, so sector mode rejects them rather than
+// silently conserving something the caller never asked about.
+std::vector<std::string> inline
+site_qn_names(int type_code)
+    {
+    if(type_code==0) return {"Nf"}; // spinless fermion
+    if(type_code==1) return {"Nf","Sz"}; // Hubbard: independently selectable
+    if(type_code>=2 && type_code<=6) return {"Sz"}; // spin-1/2 .. spin-5/2
+    if(type_code>100 && type_code<200) return {"Nb"}; // boson, dim=code-100
+    return {}; // Z3/Z4
+    }
+
+
+// The Args that build one site of `type_code` conserving exactly those of
+// its own quantities that appear in `conserved`, and nothing else. Passing a
+// `conserved` that shares no name with site_qn_names(type_code) yields a
+// dense (ConserveQNs=false) site -- a SiteSet mixing dense and QN indices is
+// not something ITensor supports, so Chain::set_conserved_sector() rejects
+// that combination up front and this is only a backstop.
+//
+// The one non-obvious case is the Hubbard site with ConserveNf=false (i.e.
+// "Sz" requested alone): electron.h then keeps a fermion-parity QN ("Pf")
+// alongside Sz rather than dropping to Sz only. That is strictly more
+// conservation than was asked for, but it is conservation every legitimate
+// fermionic Hamiltonian already respects -- including the pairing terms that
+// break Nf, which is exactly when a caller would ask for Sz alone.
+Args inline
+site_qn_args(int type_code, std::set<std::string> const& conserved)
+    {
+    bool nf = conserved.count("Nf")>0;
+    bool sz = conserved.count("Sz")>0;
+    bool nb = conserved.count("Nb")>0;
+    if(type_code==0) return Args("ConserveQNs",nf,"ConserveNf",nf);
+    if(type_code==1) return Args("ConserveQNs",nf||sz,"ConserveNf",nf,"ConserveSz",sz);
+    if(type_code>=2 && type_code<=6) return Args("ConserveQNs",sz,"ConserveSz",sz);
+    if(type_code>100 && type_code<200) return Args("ConserveQNs",nb,"MaxOcc",type_code-101);
+    return Args("ConserveQNs",false);
+    }
+
 
 class SpinX : public SiteSet
     {
@@ -53,6 +125,12 @@ class SpinX : public SiteSet
     // below). This is what the in-process Chain session (chain_session.h)
     // uses instead of writing/reading sites.in + sites.sites.
     SpinX(std::vector<int> const& site_types);
+
+    // Same, but with quantum-number conservation turned on for the named
+    // quantities ("Nf", "Sz", "Nb" -- see site_qn_names() below for which
+    // site type offers which). Sector mode only; every other constructor
+    // builds dense (ConserveQNs=false) sites exactly as before.
+    SpinX(std::vector<int> const& site_types, std::set<std::string> const& conserved);
 
 
     void
@@ -153,6 +231,34 @@ SpinX(std::vector<int> const& site_types)
       else if (nm==(-2)) sites.set(i,Z3Site({"SiteNumber=",i,"ConserveQNs=",false})); // use Z3
       else if (nm==(-3)) sites.set(i,Z4Site(i,{"ConserveQNs",false})); // use Z4
       else Error(tinyformat::format("SpinX cannot read index of size "));
+    } ;
+
+    SiteSet::init(std::move(sites));
+    }
+
+
+// Sector mode: same site-type codes, but each site built conserving those of
+// its own quantum numbers named in `conserved` (see site_qn_args() above).
+inline SpinX::
+SpinX(std::vector<int> const& site_types, std::set<std::string> const& conserved)
+    {
+    int N = site_types.size();
+    auto sites = SiteStore(N); // get an empty list of sites
+    for (int i=1;i<=N;i++)  {
+      int nm = site_types.at(i-1); // type code of this site
+      auto args = site_qn_args(nm,conserved); // which QNs this site keeps
+      args.add("SiteNumber",i); // the stock ITensor sites read this out of Args;
+                               // the extra/ ones take it positionally below
+      if (nm==2) sites.set(i,SpinHalfSite(args)); // spin=1/2
+      else if (nm==0) sites.set(i,SpinlessSite(args)); // spinless fermions
+      else if (nm==1) sites.set(i,HubbardSite(args)); // spinful fermions
+      else if (nm==3) sites.set(i,SpinOneSite(args)); // spin=1
+      else if (nm==4) sites.set(i,SpinThreeHalfSite(i,args)); // spin=3/2
+      else if (nm==5) sites.set(i,SpinTwoSite(args)); // spin=2
+      else if (nm==6) sites.set(i,SpinFiveHalfSite(i,args)); // spin=5/2
+      else if (nm>100 && nm<200) sites.set(i,BosonFourSite(i,args)); // Boson, dim=nm-100
+      else throw std::invalid_argument(tinyformat::format("SpinX: site type %d has no conserved-sector "
+                                    "support (see site_qn_names())",nm));
     } ;
 
     SiteSet::init(std::move(sites));

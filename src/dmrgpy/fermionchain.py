@@ -64,6 +64,7 @@ class Fermionic_Chain(Many_Body_Chain):
         return self.vev(MO,**kwargs)
     def excited_vev_spinless(self,MO,mode="DMRG",**kwargs):
         """ Return a vaccum expectation value"""
+        self.get_mode(mode=mode) # refuses ED on a conserved-sector chain
         if mode=="DMRG": return self.excited_vev_MB(MO,**kwargs)
         elif mode=="ED": return self.get_ED_obj().excited_vev(MO,**kwargs) 
     def excited_vev(self,MO,**kwargs):
@@ -117,6 +118,12 @@ class Fermionic_Chain(Many_Body_Chain):
         return get_gr_free(self,**kwargs)
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
+        # This override answers mode="ED" directly instead of routing
+        # through mode.get_mode(), so ask it about the mode anyway: it is
+        # what refuses to answer a conserved-sector chain with a solver
+        # that has no quantum numbers (which would silently return the
+        # global ground state instead of the sector's).
+        self.get_mode(mode=mode)
         if mode=="DMRG": 
             return Many_Body_Chain.gs_energy(self,**kwargs)
         elif mode=="ED":

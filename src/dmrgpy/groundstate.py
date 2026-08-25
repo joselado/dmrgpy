@@ -29,6 +29,17 @@ def ramp_key(self):
             self.bond_ramp_noise_decay)
 
 
+def sector_key(self):
+    """The conserved sector, as part of gs_energy_single()'s send-cache key:
+    the session caches its own energy across a skipped Hamiltonian re-send,
+    so a user changing sector between two bare gs_energy() calls must get a
+    fresh solve rather than the previous sector's energy. Same reasoning as
+    ramp_key() above (set_conserved_sector() also calls restart(), which
+    clears the cache outright -- this keeps the key honest regardless)."""
+    sector = getattr(self,"conserved_sector",None)
+    return None if not sector else tuple(sorted(sector.items()))
+
+
 def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy via the in-process pybind11 extension
@@ -74,7 +85,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     from .multioperatortk.staticoperator import StaticOperator
     if isinstance(self.hamiltonian,StaticOperator):
         key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),ramp_key(self),
+               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),
                id(self.hamiltonian.cpp_handle))
         cache = getattr(self,'_session_ham_cache',None)
         if cache is None or cache[0] is not self._session or cache[1]!=key:
@@ -89,7 +100,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     else:
         terms = self.hamiltonian.to_terms()
         key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),ramp_key(self),terms)
+               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),terms)
         cache = getattr(self,'_session_ham_cache',None)
         if cache is None or cache[0] is not self._session or cache[1]!=key:
             self._session.set_hamiltonian(terms)

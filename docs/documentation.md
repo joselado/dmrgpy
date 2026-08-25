@@ -1910,11 +1910,65 @@ this also removes a silent C++/Python divergence.
 
 Notable, deliberate implementation details (not bugs to "fix"):
 
-- `mpscpp3` builds every site with `ConserveQNs=false` and starts DMRG
-  from an actual `randomMPS`, not a plain product state — matching v2's
-  real (unconstrained-search) behavior rather than ITensor v3's stricter,
-  QN-conserving-from-the-start convention, at the cost of losing the QN
-  block-sparsity speedup for `itensor_version=3`.
+- `mpscpp3` builds every site with `ConserveQNs=false` *by default*, and
+  starts DMRG from an actual `randomMPS`, not a plain product state —
+  matching v2's real (unconstrained-search) behavior rather than ITensor
+  v3's stricter, QN-conserving-from-the-start convention, at the cost of
+  losing the QN block-sparsity speedup for `itensor_version=3`.
+  `Many_Body_Chain.set_conserved_sector()` (`itensor_version=3` only) is
+  the opt-in that turns the quantum numbers back on for a chain whose
+  caller wants the search confined to one sector — see "Conserved-sector
+  mode" below, which also records why the "DMRG gets stuck at the product
+  state" observation behind the default does *not* generalize to sector
+  mode.
+- **Conserved-sector mode** (`Chain::set_conserved_sector`,
+  `mpscpp3/chain_session.h`): rebuilds `sites_` through
+  `SpinX(site_types,conserved)` (`get_sites.h`) with QN-carrying indices,
+  keeps a permanently dense `dense_sites_` alongside it, and drops every
+  piece of session state built on the old site set. Three parts are worth
+  knowing about, each forced by a hard ITensor behavior confirmed
+  directly:
+  - *The start state is a sum of random in-sector product states*
+    (`sector_mps`), not `randomMPS`: `randomMPS(SiteSet)` refuses to
+    guess a sector under QNs and `randomMPS(InitState,m>1)` does not
+    exist in this vendored copy (both hard `Error`s in `mps.cc`). The
+    per-site assignment comes from a small dynamic program over reachable
+    partial charges (`sector_state_plan`), exact rather than greedy
+    because a Hubbard chain at fixed `Nf` *and* `Sz` dead-ends a greedy
+    fill; arrangements are then shuffled within each site-type code,
+    which is charge-neutral by construction. The old `default_mps()`
+    comment about DMRG being "stuck at the product energy no matter how
+    large a noise term" is about the *all-first-basis-state* start it was
+    measured with — that state is the unique state of its own sector, so
+    nothing can move it. An in-sector start converges to the identical
+    energy as the dense path (−5.142090632836 on a 12-site Heisenberg
+    chain, twelve digits, from either a Néel or a sum-of-products start).
+  - *Terms are normalized and flux-checked before AutoMPO sees them*
+    (`sector_terms`, `mo_terms.h`'s `expand_xy_terms`/`combine_terms`).
+    A non-conserving operator does not fail cleanly in ITensor: building
+    `Sx` on Sz-conserving sites aborts the process inside `ITensor::set`,
+    and so does handing AutoMPO a flux-violating term *even when its
+    coefficient cancels exactly* ("Index does not contain given QN
+    block"). That last one is why the textbook Sx.Sx+Sy.Sy+Sz.Sz
+    Heisenberg Hamiltonian needs the Sx/Sy → S± expansion plus explicit
+    cancellation of identical strings here, rather than being left to
+    AutoMPO. An operator's charge is inferred from its *dense* matrix
+    elements against the QN labels of the local basis states
+    (`op_charge`), never by building it on QN indices. Since ITensor's
+    own `Error()` calls `abort()` (`util/error.h`), the sector code
+    throws `std::invalid_argument`/`std::runtime_error` instead, so the
+    failures reach Python as catchable exceptions.
+  - *Every `terms → MPO` path in the session goes through
+    `mpo_from_terms`/`ampo_from_terms`*, so the check covers `vev`,
+    correlators, KPM vertices and excited states, not just
+    `set_hamiltonian`. Both helpers are pass-through when no sector is
+    set, which is what keeps the default path byte-identical.
+  On the Python side the sector lives on the chain
+  (`Many_Body_Chain.conserved_sector`), is re-applied whenever a session
+  is rebuilt (`sites.py::initialize`, `__deepcopy__`/`clone`), is part of
+  `groundstate.py`'s Hamiltonian-send cache key, and makes `mode.py`
+  *raise* instead of falling back to ED — a fallback would silently
+  return the global ground state instead of the sector's.
 - `mpscpp3`'s (and `pyitensor`'s) real-time MPS evolution defaults to a
   proper two-site TDVP integrator (vendored under `mpscpp3/TDVP/`;
   `pyitensor/tdvp.py` for the pure-Python backend), selectable via

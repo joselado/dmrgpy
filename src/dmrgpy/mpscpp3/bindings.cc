@@ -123,6 +123,16 @@ PYBIND11_MODULE(_dmrgcpp, m)
              "it there, with the noise term decaying by `noise_decay` per "
              "ramping sweep and off entirely afterwards. enabled=false "
              "restores a flat schedule.")
+        .def("set_conserved_sector",&Chain::set_conserved_sector,py::arg("qns"),
+             "Confine every calculation on this chain to one quantum-number "
+             "sector, e.g. [(\"Nf\",6)] for exactly 6 particles, [(\"Sz\",0)] "
+             "for total Sz=0 (ITensor's integer 2*Sz units), or both on a "
+             "Hubbard chain. Rebuilds the site set with QN-carrying indices "
+             "and drops the Hamiltonian/ground state/caches built on the old "
+             "one; an empty list restores the default dense behavior. Every "
+             "operator built while a sector is set must conserve it.")
+        .def("conserved_sector",&Chain::conserved_sector,
+             "The (name,value) sector this chain is confined to, empty if none")
         .def("set_verbose",&Chain::set_verbose,py::arg("verbose"),
              "Enable/disable ITensor's per-sweep DMRG progress output "
              "(disabled by default)")

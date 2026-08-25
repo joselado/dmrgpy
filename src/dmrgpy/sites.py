@@ -22,6 +22,22 @@ def initialize(self,**kwargs):
         backend = cppext.get_backend(self.itensor_version)
         if backend is not None:
             self._session = backend.Chain(self.sites)
+            # A conserved sector is a property of the chain, but it lives in
+            # the session's site set (chain_session.h rebuilds sites_ with
+            # QN-carrying indices), so a session built or rebuilt here --
+            # setup_cpp()/setup_python() switching backend, clone() making a
+            # fresh one -- has to be told about it again. Switching to a
+            # backend that has no quantum numbers at all with a sector still
+            # set would silently answer with the global ground state instead
+            # of the requested sector's, so that is an error, not a fallback.
+            if getattr(self,"conserved_sector",None):
+                if self.itensor_version!=3:
+                    raise NotImplementedError(
+                        "this chain targets the conserved sector %s, which only "
+                        "itensor_version=3 implements -- clear it with "
+                        "set_conserved_sector() before switching to %s"
+                        %(self.conserved_sector,repr(self.itensor_version)))
+                self._apply_conserved_sector()
 
 
 

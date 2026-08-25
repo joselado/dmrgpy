@@ -185,9 +185,39 @@ def is_hermitian(self,op):
     op = op - op.get_dagger()
     old_maxm = self.maxm
     self.maxm = min(old_maxm, 8)
+    # ...and a bond dimension of 1 outright on a long chain: the witness is
+    # built as a sum of two random states truncated back to self.maxm, and
+    # every bond of that sum discards weight, so its surviving norm decays
+    # roughly geometrically with the number of sites until it falls under
+    # MPS.normalize()'s 1e-8 floor (which returns None -- see below). A
+    # bond-dimension-1 witness truncates nothing and is explicitly enough
+    # here, per this function's own docstring.
+    if self.ns > 24: self.maxm = 1
     try:
         wf = self.random_mps() # random wavefunction, small bond dimension
+        if wf is None:
+            # random_mps() builds its witness as a *sum* of two random
+            # states truncated to self.maxm, and MPS.normalize() returns
+            # None (with a warning) below its own 1e-8 norm floor. Each
+            # bond of that sum discards weight, so the surviving norm
+            # falls off roughly geometrically with chain length, and past
+            # ~40 sites it can land under the floor -- worst for a chain
+            # in conserved-sector mode, whose start state is deliberately
+            # a sum of near-orthogonal product states and so has no small
+            # low-rank approximation at all. Confirmed directly: a
+            # 40-site Heisenberg chain with set_conserved_sector(Sz=0)
+            # crashed here every time, the same chain without a sector
+            # only occasionally. A bond-dimension-1 witness is immune (no
+            # truncation happens at all) and is explicitly enough for
+            # this probe -- see this function's own docstring.
+            self.maxm = 1
+            wf = self.random_mps()
+            if wf is None: return True # no usable witness: treat as Hermitian
         wf = op*wf # apply the operator
+        # applyoperator() normalizes its result too, and a witness that
+        # op-op^dagger annihilates is exactly what a Hermitian op looks
+        # like here.
+        if wf is None: return True
         norm = (wf.dot(wf)).real
     finally:
         self.maxm = old_maxm

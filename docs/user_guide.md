@@ -222,6 +222,86 @@ solve on all three DMRG backends (`itensor_version` 2, 3 and `"python"`);
 `examples/groundstate/bond_dimension_ramp` for a 30-site inhomogeneous
 Heisenberg--Hubbard chain timing ramp against flat.
 
+**Targeting a quantum-number sector.** By default DMRG searches the whole
+Hilbert space and returns the global ground state, at whatever particle
+number or total magnetization that happens to have.
+`set_conserved_sector` instead confines the entire calculation --
+starting state, every sweep, the returned wavefunction -- to one sector
+of a conserved quantity:
+
+$$E_0(q)=\min_{|\psi\rangle\,:\,\hat Q|\psi\rangle=q|\psi\rangle}\frac{\langle\psi|H|\psi\rangle}{\langle\psi|\psi\rangle},\qquad [\hat Q,H]=0$$
+
+```python
+fc.set_conserved_sector(Nf=6)      # exactly 6 particles
+sc.set_conserved_sector(Sz=0)      # total Sz = 0
+hc.set_conserved_sector(Nf=8, Sz=0)  # native Hubbard chain: both at once
+fc.set_conserved_sector()          # no arguments -> back to the full space
+```
+
+Which quantities are available follows from the chain's site types:
+
+| chain | conserved quantities |
+|---|---|
+| `Fermionic_Chain`, `Spinful_Fermionic_Chain` (Jordan--Wigner) | `Nf` |
+| `Spinful_Fermionic_Chain_Native` (native Hubbard sites) | `Nf`, `Sz`, or both |
+| every spin chain (`Spin_Chain`, any $S$) | `Sz` |
+| `Bosonic_Chain` | `Nb` |
+| parafermion chains | none |
+
+`Sz` is in ITensor's integer $2S^z$ units, so `Sz=0` is $S^z_\mathrm{tot}=0$
+and `Sz=2` is $S^z_\mathrm{tot}=1$. Asking for only part of what a site
+type offers means exactly what it says: a native Hubbard chain with `Nf`
+alone fixes the particle number while leaving $S^z$ free, so spin-flip
+terms stay legal.
+
+This is the direct route to an addition spectrum $E_0(N)$, the charge gap
+$E_0(N{+}1)+E_0(N{-}1)-2E_0(N)$, or a magnetization curve — each point a
+genuine ground-state energy of its own sector, rather than something
+extracted by tuning a chemical potential or a field. Its cost relative to the
+unconstrained search depends on how big the solve is: the quantum numbers
+restore the block sparsity the default mode gives up, but they also add
+per-block bookkeeping, and only the former scales. Measured on Heisenberg
+chains (BLAS pinned to one thread), sector mode is **0.6x** — i.e. slower
+— at $n=20$, `maxm=60`; **2.0x** faster at $n=40$, `maxm=100`; and
+**4.2x** faster at $n=60$, `maxm=200`, always for the same energy. Expect
+a small penalty on toy systems and a real speedup on the ones that
+actually cost something.
+
+Two consequences to be aware of, both reported rather than left to be
+discovered. First, every operator built on the chain while a sector is
+set must itself conserve the requested quantities — a non-conserving one
+raises a `ValueError` naming it, whether it is in the Hamiltonian, in a
+`vev`, or a dynamical-correlator vertex:
+
+```python
+sc.set_conserved_sector(Sz=0)
+sc.vev(sc.Sz[0]*sc.Sz[1])   # fine
+sc.vev(sc.Sx[0])            # ValueError: ... changes ... by Sz=2 ...
+```
+
+A Hamiltonian written as $S^xS^x+S^yS^y+S^zS^z$ is fine even though no
+single term of it conserves $S^z$: that expansion is recognized and its
+$S^+S^+$/$S^-S^-$ strings cancel exactly. Second, the sector invalidates
+the Hamiltonian and ground state already held by the backend, so the next
+`gs_energy()` re-solves from scratch.
+
+Sector targeting requires `itensor_version=3` and DMRG. A sector-mode
+chain deliberately raises rather than falling back to ED (or to any other
+backend), since a solver without quantum numbers would silently answer
+with the *global* ground state instead.
+
+What works under a sector: ground state and excited states, expectation
+values and static correlators, entanglement entropies, real-time
+evolution and dynamical correlators via the default
+`tevol_method="TDVP"` (and `"TDVP_GSE"`) — all subject to the
+conserving-operator rule above. What does not, and says so: METTS
+(`metts_vev`, `metts_dynamical_correlator`), `tevol_method="TEBD"`, and
+the infinite-chain algorithms (iDMRG, VUMPS). Those assemble tensors by
+hand in a way that is dense-only, so they refuse rather than produce a
+wrong number. See
+`examples/groundstate/sector_targeted_groundstate` for the addition
+spectrum and charge gap of a $t$--$V$ chain, checked against ED.
+
 
 **Expectation values and moments.** For any operator $O$ built the same
 way as $H$,

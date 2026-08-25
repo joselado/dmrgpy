@@ -4,6 +4,10 @@
 #include <random> // std::mt19937_64/std::discrete_distribution (Chain::metts_vev)
 #include <cmath> // std::isnan (Chain::gs_energy_generalized's lam0 sentinel)
 #include <limits> // std::numeric_limits<double>::quiet_NaN() (ditto)
+#include <stdexcept> // std::invalid_argument/runtime_error: ITensor's own Error()
+                     // calls abort() (util/error.h), so the conserved-sector
+                     // validation below throws instead, to reach Python as a
+                     // catchable exception rather than killing the interpreter
 #include <functional> // std::function (Chain::vx_build_linear_map's own action callback)
 
 // TDVP/tdvp.h and TDVP/basisextension.h are quoted includes, so they
@@ -283,7 +287,7 @@ class Chain
     {
     public:
     explicit Chain(std::vector<int> const& site_types)
-        : sites_(SpinX(site_types))
+        : sites_(SpinX(site_types)), site_types_(site_types)
         { }
 
     int
@@ -326,10 +330,107 @@ class Chain
     void
     set_verbose(bool verbose) { verbose_ = verbose; }
 
+    // -- conserved sector: opt-in quantum-number conservation ----------
+    //
+    // `qns` is a list of (quantum-number name, target value) pairs -- e.g.
+    // {{"Nf",6}} for "the ground state at exactly 6 particles", {{"Sz",0}}
+    // for the total-Sz=0 sector (ITensor's own integer 2*Sz units, so a
+    // value of 1 means one spin-1/2's worth), {{"Nf",6},{"Sz",0}} on a
+    // Hubbard chain. An empty list turns sector mode back off, restoring
+    // this session's default dense behavior exactly.
+    //
+    // This rebuilds sites_ with QN-carrying indices (get_sites.h's
+    // SpinX(site_types,conserved)), which makes every MPS and MPO
+    // previously built against this session's old Index objects
+    // meaningless -- so the Hamiltonian, the stored ground state and every
+    // cached band edge/iDMRG/VUMPS snapshot are dropped here, exactly as
+    // if the chain had just been constructed. Python re-sends the
+    // Hamiltonian on the next gs_energy() because the sector is part of
+    // groundstate.py's send-cache key.
+    //
+    // Two consequences, both enforced rather than left to be discovered:
+    // every operator built on a sector-mode chain must itself conserve the
+    // sector's quantum numbers (sector_terms() rejects the ones that
+    // don't, naming them, instead of letting ITensor abort the process),
+    // and DMRG starts from a sum of random in-sector product states rather
+    // than randomMPS -- this ITensor has no randomMPS(InitState,m>1) at
+    // all (mps.cc's own Error), and randomMPS(SiteSet) refuses to guess a
+    // sector.
+    void
+    set_conserved_sector(std::vector<std::pair<std::string,int>> const& qns)
+        {
+        std::set<std::string> names;
+        for (auto const& q : qns)
+            {
+            if (q.first!="Nf" && q.first!="Sz" && q.first!="Nb")
+                throw std::invalid_argument(tinyformat::format("Chain::set_conserved_sector: unknown quantum "
+                      "number \"%s\" (known: Nf, Sz, Nb)",q.first));
+            if (!names.insert(q.first).second)
+                throw std::invalid_argument(tinyformat::format("Chain::set_conserved_sector: quantum number "
+                      "\"%s\" given twice",q.first));
+            }
+        if (names.empty()) // sector mode off: back to plain dense sites
+            {
+            sites_ = SpinX(site_types_);
+            sector_.clear();
+            has_sector_ = false;
+            forget_everything_built_on_sites();
+            return;
+            }
+        // Every site must conserve something: ITensor has no SiteSet
+        // mixing QN-carrying and dense indices, so a request that would
+        // leave some site dense is rejected here rather than failing deep
+        // inside a contraction later.
+        std::set<std::string> offered;
+        for (size_t k=0;k<site_types_.size();++k)
+            {
+            auto own = site_qn_names(site_types_.at(k));
+            bool any = false;
+            for (auto const& nm : own) if (names.count(nm)) { any = true; offered.insert(nm); }
+            if (!any)
+                throw std::invalid_argument(tinyformat::format("Chain::set_conserved_sector: site %d (type code "
+                      "%d) conserves none of the requested quantum numbers; it offers %s",
+                      int(k+1),site_types_.at(k),
+                      own.empty() ? std::string("none at all (no sector support for this "
+                                                "site type)") : join_strings(own)));
+            }
+        for (auto const& nm : names)
+            if (!offered.count(nm))
+                throw std::invalid_argument(tinyformat::format("Chain::set_conserved_sector: no site in this "
+                      "chain carries a quantum number named \"%s\"",nm));
+        // Switch, then check the target is actually reachable -- and roll
+        // back if it is not, so a rejected request leaves the chain exactly
+        // as it was rather than half-switched into a sector whose every
+        // later call would fail. (The check needs the new sites_/sector_ in
+        // place, hence the try/catch rather than a pre-check.)
+        auto old_sites = sites_;
+        auto old_dense = dense_sites_;
+        auto old_sector = sector_;
+        bool old_has = has_sector_;
+        sites_ = SpinX(site_types_,names);
+        dense_sites_ = SpinX(site_types_);
+        sector_ = qns;
+        has_sector_ = true;
+        try { sector_state_plan(); }
+        catch (...)
+            {
+            sites_ = old_sites;
+            dense_sites_ = old_dense;
+            sector_ = old_sector;
+            has_sector_ = old_has;
+            throw; // nothing was invalidated, so the old H/wf0 stay valid
+            }
+        forget_everything_built_on_sites();
+        }
+
+    // The currently requested sector, empty when sector mode is off.
+    std::vector<std::pair<std::string,int>>
+    conserved_sector() const { return sector_; }
+
     void
     set_hamiltonian(std::vector<MOTerm> const& terms)
         {
-        set_hamiltonian_mpo(build_mpo(sites_,terms,mpomaxm_));
+        set_hamiltonian_mpo(mpo_from_terms(terms));
         }
 
     // Set the Hamiltonian from an ALREADY-BUILT MPO, bypassing the symbolic
@@ -386,6 +487,7 @@ class Chain
             have_wf0_ = true;
             }
         double energy = dmrg(wf0_,H_,sweeps,dmrg_args());
+        check_sector(wf0_,"gs_energy"); // no-op unless sector mode is on
         wf0_energy_ = energy;
         have_wf0_energy_ = true;
         return energy;
@@ -401,6 +503,14 @@ class Chain
     void
     set_wavefunction(MPS const& wf)
         {
+        // An MPS built while a different sector setting was in force is
+        // not merely in the wrong sector, its indices belong to a
+        // different SiteSet entirely -- catch both here rather than in
+        // the middle of a contraction.
+        if (has_sector_ != hasQNs(wf(1)))
+            throw std::invalid_argument("Chain::set_wavefunction: this wavefunction was built with a different "
+                  "conserved-sector setting than the chain currently has");
+        check_sector(wf,"set_wavefunction");
         wf0_ = wf;
         have_wf0_ = true;
         have_wf0_energy_ = false; // energy no longer matches wf0_
@@ -474,7 +584,7 @@ class Chain
                   "aborts the whole process for chains shorter than 3 sites "
                   "(see mode.py's own itensor_version==3 guard) -- use "
                   "itensor_version=\"python\" for short chains instead");
-        auto A = build_mpo(sites_,terms_a,mpomaxm_);
+        auto A = mpo_from_terms(terms_a);
         if (!have_wf0_)
             {
             wf0_ = default_mps();
@@ -744,8 +854,8 @@ class Chain
            std::vector<MOTerm> const& terms_hadj,
            int krylovdim=20, int restarts=2)
         {
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
-        auto HA = build_mpo(sites_,terms_hadj,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
+        auto HA = mpo_from_terms(terms_hadj);
         // always a fresh random start (never wf0_): the non-Hermitian
         // energy is not a variational bound, so a rare stalled run can
         // only be detected by the caller's eigen-residual check and cured
@@ -836,9 +946,9 @@ class Chain
                         int krylovdim=20, int restarts=2,
                         Cplx lam0=Cplx(std::numeric_limits<double>::quiet_NaN(),0.0))
         {
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
-        auto HA = build_mpo(sites_,terms_hadj,mpomaxm_);
-        auto A = build_mpo(sites_,terms_a,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
+        auto HA = mpo_from_terms(terms_hadj);
+        auto A = mpo_from_terms(terms_a);
         MPS psir = default_mps();
         psir.position(1);
         psir.normalize();
@@ -888,7 +998,7 @@ class Chain
     std::complex<double>
     vev(std::vector<MOTerm> const& terms, MPS const& wf, int npow=1)
         {
-        auto A = build_mpo(sites_,terms,mpomaxm_);
+        auto A = mpo_from_terms(terms);
         auto psi = wf;
         psi /= sqrt(innerC(psi,psi).real()); // normalize
         Cplx c = 0;
@@ -906,7 +1016,7 @@ class Chain
     MPS
     apply_operator(std::vector<MOTerm> const& terms, MPS const& wf)
         {
-        auto A = build_mpo(sites_,terms,mpomaxm_);
+        auto A = mpo_from_terms(terms);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         return apply_mpo(A,wf,args);
         }
@@ -920,7 +1030,7 @@ class Chain
     std::complex<double>
     overlap_aMb(MPS const& wf1, std::vector<MOTerm> const& terms, MPS const& wf2) const
         {
-        auto A = build_mpo(sites_,terms,mpomaxm_);
+        auto A = mpo_from_terms(terms);
         return innerC(wf1,A,wf2);
         }
 
@@ -961,7 +1071,7 @@ class Chain
     exponential_apply(std::vector<MOTerm> const& terms, MPS const& wf,
                        std::complex<double> tau, int nsteps) const
         {
-        auto H = build_mpo(sites_,terms,mpomaxm_);
+        auto H = mpo_from_terms(terms);
         auto taui = tau/double(nsteps);
         auto expH = custom_exp(H,taui);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
@@ -973,7 +1083,7 @@ class Chain
     MPO
     build_operator(std::vector<MOTerm> const& terms) const
         {
-        return build_mpo(sites_,terms,mpomaxm_);
+        return mpo_from_terms(terms);
         }
 
     MPS
@@ -1058,14 +1168,14 @@ class Chain
            int nt, double dt, bool fit_td=true)
         {
         if (!have_wf0_) gs_energy();
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
-        auto ampo = build_ampo(sites_,terms_h);
+        auto ampo = ampo_from_terms(terms_h);
         ampo += -EGS,"Id",1;
         auto expH = evoloperator(toMPO(ampo),dt);
-        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
-        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto A1 = mpo_from_terms(terms_i);
+        auto A2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(A1,wf0_,args);
         auto psi2 = apply_mpo(A2,wf0_,args);
         Cplx norm0 = std::sqrt(innerC(psi1,psi1));
@@ -1093,9 +1203,9 @@ class Chain
                         MPS const& wf, int nt, double dt, bool fit_td=true)
         {
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
-        auto ampo = build_ampo(sites_,terms_h);
+        auto ampo = ampo_from_terms(terms_h);
         auto expH = evoloperator(toMPO(ampo),dt);
-        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto A = mpo_from_terms(terms_op);
         auto psi = wf;
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
@@ -1145,14 +1255,14 @@ class Chain
                 int nt, double dt)
         {
         if (!have_wf0_) gs_energy();
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
-        auto ampo = build_ampo(sites_,terms_h);
+        auto ampo = ampo_from_terms(terms_h);
         ampo += -EGS,"Id",1;
         auto Hshift = toMPO(ampo);
-        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
-        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto A1 = mpo_from_terms(terms_i);
+        auto A2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(A1,wf0_,args);
         auto psi2 = apply_mpo(A2,wf0_,args);
         Cplx norm0 = std::sqrt(innerC(psi1,psi1));
@@ -1178,8 +1288,8 @@ class Chain
                              std::vector<MOTerm> const& terms_op,
                              MPS const& wf, int nt, double dt)
         {
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
-        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
+        auto A = mpo_from_terms(terms_op);
         auto psi = wf;
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
@@ -1213,14 +1323,14 @@ class Chain
                      double gse_cutoff)
         {
         if (!have_wf0_) gs_energy();
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
-        auto ampo = build_ampo(sites_,terms_h);
+        auto ampo = ampo_from_terms(terms_h);
         ampo += -EGS,"Id",1;
         auto Hshift = toMPO(ampo);
-        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
-        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto A1 = mpo_from_terms(terms_i);
+        auto A2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(A1,wf0_,args);
         auto psi2 = apply_mpo(A2,wf0_,args);
         Cplx norm0 = std::sqrt(innerC(psi1,psi1));
@@ -1247,8 +1357,8 @@ class Chain
                                  int gse_sweeps, int krylov_order,
                                  double gse_cutoff)
         {
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
-        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
+        auto A = mpo_from_terms(terms_op);
         auto psi = wf;
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
@@ -1286,8 +1396,9 @@ class Chain
                 std::vector<MOTerm> const& terms_j,
                 int nt, double dt)
         {
+        reject_sector("quench_tebd"); // see tebd.h: its gate assembly is dense-only
         if (!have_wf0_) gs_energy();
-        auto H = build_mpo(sites_,terms_h,mpomaxm_);
+        auto H = mpo_from_terms(terms_h);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
         auto terms_shifted = terms_h;
@@ -1297,8 +1408,8 @@ class Chain
         terms_shifted.push_back(shift_term);
         auto h_bonds = bond_hamiltonians(sites_,terms_shifted);
         auto gates = build_tebd_gates(sites_,h_bonds,dt);
-        auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
-        auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto A1 = mpo_from_terms(terms_i);
+        auto A2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(A1,wf0_,args);
         auto psi2 = apply_mpo(A2,wf0_,args);
         Cplx norm0 = std::sqrt(innerC(psi1,psi1));
@@ -1321,9 +1432,10 @@ class Chain
                              std::vector<MOTerm> const& terms_op,
                              MPS const& wf, int nt, double dt)
         {
+        reject_sector("evolve_and_measure_tebd"); // see tebd.h: its gate assembly is dense-only
         auto h_bonds = bond_hamiltonians(sites_,terms_h);
         auto gates = build_tebd_gates(sites_,h_bonds,dt);
-        auto A = build_mpo(sites_,terms_op,mpomaxm_);
+        auto A = mpo_from_terms(terms_op);
         auto psi = wf;
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
@@ -1422,6 +1534,7 @@ class Chain
               std::vector<std::string> const& basis_ops,
               unsigned long seed, int niter=30) const
         {
+        reject_sector("metts_vev");
         if (!have_H_) Error("Chain::metts_vev called before set_hamiltonian");
         if (T<=0) Error("Chain::metts_vev: T must be > 0");
         if (basis_ops.empty()) Error("Chain::metts_vev: basis_ops must be non-empty");
@@ -1429,7 +1542,7 @@ class Chain
         if (terms_ops.empty()) Error("Chain::metts_vev: terms_ops must be non-empty");
         std::vector<MPO> ops;
         ops.reserve(terms_ops.size());
-        for (auto const& terms_op : terms_ops) ops.push_back(build_mpo(sites_,terms_op,mpomaxm_));
+        for (auto const& terms_op : terms_ops) ops.push_back(mpo_from_terms(terms_op));
         int nops = (int)ops.size();
         double beta_half = 1.0/(2.0*T);
         int nsteps = std::max(1,(int)std::ceil(beta_half/dbeta_half_step));
@@ -1520,14 +1633,15 @@ class Chain
               std::vector<std::string> const& basis_ops,
               unsigned long seed, int niter=30, int tdvp_niter=50) const
         {
+        reject_sector("metts_dynamical_correlator");
         if (!have_H_) Error("Chain::metts_dynamical_correlator called before set_hamiltonian");
         if (T<=0) Error("Chain::metts_dynamical_correlator: T must be > 0");
         if (basis_ops.empty()) Error("Chain::metts_dynamical_correlator: basis_ops must be non-empty");
         if (nsamples<1) Error("Chain::metts_dynamical_correlator: nsamples must be >= 1");
         if (nt<1) Error("Chain::metts_dynamical_correlator: nt must be >= 1");
 
-        auto A = build_mpo(sites_,terms_a,mpomaxm_);
-        auto B = build_mpo(sites_,terms_b,mpomaxm_);
+        auto A = mpo_from_terms(terms_a);
+        auto B = mpo_from_terms(terms_b);
         double beta_half = 1.0/(2.0*T);
         int nsteps = std::max(1,(int)std::ceil(beta_half/dbeta_half_step));
         Cplx dtau = Cplx(0.0,-1.0)*(beta_half/double(nsteps));
@@ -1698,8 +1812,8 @@ class Chain
                              double tol, int max_it) const
         {
         if (!have_wf0_) Error("Chain::cvm_dynamical_correlator called before gs_energy");
-        auto S1 = build_mpo(sites_,terms_i,mpomaxm_);
-        auto S2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto S1 = mpo_from_terms(terms_i);
+        auto S2 = mpo_from_terms(terms_j);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         const Cplx z(omega+energy,eta);
         auto ampo = AutoMPO(sites_);
@@ -1716,7 +1830,7 @@ class Chain
     apply_inverse(std::vector<MOTerm> const& terms, MPS const& wf,
                   double tol, int max_it) const
         {
-        auto A = build_mpo(sites_,terms,mpomaxm_);
+        auto A = mpo_from_terms(terms);
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         return bicstab(A,wf,tol,max_it,args);
         }
@@ -2331,8 +2445,8 @@ class Chain
         if (!have_wf0_) gs_energy(); // ensure a ground state is available
         auto hs = scaled_hamiltonian(kpm_scale);
         int n = int(std::round((hs.emax-hs.emin)/delta))*kpm_n_scale;
-        auto m1 = build_mpo(sites_,terms_i,mpomaxm_);
-        auto m2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto m1 = mpo_from_terms(terms_i);
+        auto m2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(m1,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
         auto psi2 = apply_mpo(m2,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
         KPMResult out;
@@ -2346,7 +2460,7 @@ class Chain
     general_kpm(std::vector<MOTerm> const& terms_x, MPS const& wfa, MPS const& wfb,
                 int kpmmaxm, bool kpm_accelerate, int num_polynomials, double kpm_cutoff)
         {
-        auto m = build_mpo(sites_,terms_x,mpomaxm_);
+        auto m = mpo_from_terms(terms_x);
         return kpm_moments(m,wfa,wfb,num_polynomials,kpmmaxm,kpm_cutoff,kpm_accelerate);
         }
 
@@ -2377,8 +2491,8 @@ class Chain
                   int n, int kpmmaxm, double kpmcutoff) const
         {
         if (n<1) Error("Chain::nhkpm_moments: n must be >= 1");
-        auto hs = build_mpo(sites_,terms_hs,mpomaxm_);
-        auto hsd = build_mpo(sites_,terms_hs_dag,mpomaxm_);
+        auto hs = mpo_from_terms(terms_hs);
+        auto hsd = mpo_from_terms(terms_hs_dag);
 
         auto v = 1.0*wfa;
         auto alpha_prev2 = apply_mpo(hsd,v,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff}); // alpha[1]
@@ -2447,8 +2561,8 @@ class Chain
         if (!have_wf0_) gs_energy(); // ensure a ground state is available
         auto hs = scaled_hamiltonian_gs_anchored(kpm_scale);
         int n = int(std::round((hs.emax-hs.emin)/delta))*kpm_n_scale;
-        auto m1 = build_mpo(sites_,terms_i,mpomaxm_);
-        auto m2 = build_mpo(sites_,terms_j,mpomaxm_);
+        auto m1 = mpo_from_terms(terms_i);
+        auto m2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(m1,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
         auto psi2 = apply_mpo(m2,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
         KPMResult out;
@@ -2586,6 +2700,7 @@ class Chain
                         double noise = idmrg_noise_default_,
                         int noise_iters = idmrg_noise_iters_)
         {
+        reject_sector("idmrg_ground_state"); // dense environments/unit cell below
         int n_uc = sites_.length();
         if (n_uc>2)
             Error("Chain::idmrg_ground_state: n_uc>2 is not supported yet "
@@ -3434,6 +3549,7 @@ class Chain
                         int D, double tol, int maxiter, int nrestarts,
                         int niter_lanczos = vx_lanczos_niter_)
         {
+        reject_sector("vumps_ground_state"); // dense uniform tensors below
         int n_uc = sites_.length();
         // User-facing, recoverable input validation -- throw ITError (a
         // catchable C++ exception pybind11 turns into a Python exception),
@@ -4234,6 +4350,389 @@ class Chain
         }
 
     private:
+
+    // -- conserved sector (QN mode) ------------------------------------
+    //
+    // Everything below is inert while sector mode is off (has_sector_ ==
+    // false): the checks return immediately and mpo_from_terms()/
+    // default_mps() take exactly the paths they always did.
+
+    // Drop every piece of session state that was built against the old
+    // sites_ -- which, after a SiteSet swap, is all of it.
+    void
+    forget_everything_built_on_sites()
+        {
+        have_H_ = false;
+        have_wf0_ = false;
+        have_wf0_energy_ = false;
+        have_bandwidth_min_ = false;
+        have_bandwidth_max_ = false;
+        have_idmrg_snapshot_ = false;
+        have_idmrg_cell_ = false;
+        ic_cache_valid_ = false;
+        have_idmrg_superblock_ = false;
+        have_vms_snapshot_ = false;
+        have_vumps_snapshot_ = false;
+        have_vumps_exc_env_ = false;
+        }
+
+    static std::string
+    join_strings(std::vector<std::string> const& v)
+        {
+        std::string out;
+        for (size_t k=0;k<v.size();++k) { if (k) out += ", "; out += v.at(k); }
+        return out;
+        }
+
+    // A QN as "Nf=3, Sz=0", listing only its active components.
+    static std::string
+    qn_string(QN const& q)
+        {
+        std::string out;
+        for (auto const& qv : q.store())
+            {
+            if (!isActive(qv)) continue;
+            if (!out.empty()) out += ", ";
+            out += tinyformat::format("%s=%d",std::string(qv.name().c_str()),qv.val());
+            }
+        return out.empty() ? std::string("(no charge)") : out;
+        }
+
+    std::string
+    sector_string() const
+        {
+        std::string out;
+        for (auto const& sq : sector_)
+            {
+            if (!out.empty()) out += ", ";
+            out += tinyformat::format("%s=%d",sq.first,sq.second);
+            }
+        return out.empty() ? std::string("(no sector)") : out;
+        }
+
+    static std::string
+    term_string(MOTerm const& t)
+        {
+        std::string out;
+        for (auto const& f : t.factors)
+            out += tinyformat::format("%s%s(%d)",out.empty()?"":"*",f.name,f.site);
+        return out.empty() ? std::string("(empty term)") : out;
+        }
+
+    // True if every active component of q is zero. Spelled out rather than
+    // compared against QN(), whose own operator== is not a "same charge"
+    // test between differently-populated QNs.
+    static bool
+    qn_is_zero(QN const& q)
+        {
+        for (auto const& qv : q.store()) if (isActive(qv) && qv.val()!=0) return false;
+        return true;
+        }
+
+    // The charge a named single-site operator carries, inferred from its
+    // matrix elements on the *dense* site set plus the QN labels the sector
+    // grading gives each local basis state. Returns false if the operator
+    // has no definite charge at all -- Sx on Sz-conserving spin sites is
+    // the standing example: its nonzero elements raise *and* lower.
+    //
+    // The reason this reads dense matrix elements instead of just calling
+    // flux(sites_.op(name,i)): for exactly those non-definite operators,
+    // building them on QN-carrying indices aborts the process from inside
+    // ITensor::set ("cannot set element with flux different from ITensor
+    // flux") rather than throwing anything catchable. Confirmed directly.
+    bool
+    op_charge(std::string const& name, int site, QN& out) const
+        {
+        auto O = dense_sites_.op(name,site);
+        auto sd = dense_sites_(site);
+        int d = dim(sd);
+        bool first = true;
+        QN f;
+        for (int a=1;a<=d;a++)
+        for (int b=1;b<=d;b++)
+            {
+            // Site operators are built as ITensor(dag(s),prime(s)), i.e.
+            // unprimed = in, primed = out (see sites/*.h), so element
+            // (a,b) maps basis state a to basis state b.
+            if (std::abs(eltC(O,sd(a),prime(sd)(b))) < 1e-12) continue;
+            QN delta = qn(sites_(site)(b)) - qn(sites_(site)(a));
+            if (first) { f = delta; first = false; }
+            else if (!qn_is_zero(delta-f)) return false;
+            }
+        out = f; // an identically-zero operator carries no charge at all
+        return true;
+        }
+
+    // Sector-mode normalization of a term list: expand Sx/Sy into ladder
+    // operators and cancel the strings that only conserve the sector as a
+    // sum (the textbook Sx.Sx+Sy.Sy Heisenberg case -- see mo_terms.h's
+    // own comment for why the cancellation has to happen here rather than
+    // being left to AutoMPO), then reject whatever is left that still does
+    // not conserve it, by name, before ITensor can abort over it.
+    std::vector<MOTerm>
+    sector_terms(std::vector<MOTerm> const& terms) const
+        {
+        auto out = combine_terms(expand_xy_terms(dense_sites_,terms));
+        for (auto const& t : out)
+            {
+            QN total;
+            for (auto const& f : t.factors)
+                {
+                QN q;
+                if (!op_charge(f.name,f.site,q))
+                    throw std::invalid_argument(tinyformat::format("Conserved-sector mode (%s): operator \"%s\" "
+                          "at site %d carries no definite charge, so no operator "
+                          "containing it can be built while a sector is set. Write the "
+                          "model with S+/S- (or Cdag/C) instead, or clear the sector.",
+                          sector_string(),f.name,f.site));
+                total = total + q;
+                }
+            if (!qn_is_zero(total))
+                throw std::invalid_argument(tinyformat::format("Conserved-sector mode (%s): the term %s changes "
+                      "the conserved quantum numbers by %s -- every operator built on a "
+                      "chain with a sector set must conserve them. (Terms are named after "
+                      "the exact Sx/Sy -> S+/S- expansion and the cancellation of strings "
+                      "that only conserve the sector as a sum, so this may not be spelled "
+                      "the way it was written.)",
+                      sector_string(),term_string(t),qn_string(total)));
+            }
+        return out;
+        }
+
+    MPO
+    mpo_from_terms(std::vector<MOTerm> const& terms) const
+        {
+        if (!has_sector_) return build_mpo(sites_,terms,mpomaxm_);
+        return build_mpo(sites_,sector_terms(terms),mpomaxm_);
+        }
+
+    AutoMPO
+    ampo_from_terms(std::vector<MOTerm> const& terms) const
+        {
+        if (!has_sector_) return build_ampo(sites_,terms);
+        return build_ampo(sites_,sector_terms(terms));
+        }
+
+    // The charge basis state `st` of site `i` carries, as a plain integer
+    // per conserved quantity (same order as sector_).
+    std::vector<int>
+    state_charge(int i, int st) const
+        {
+        auto q = qn(sites_(i)(st));
+        std::vector<int> out;
+        out.reserve(sector_.size());
+        for (auto const& sq : sector_) out.push_back(q.val(sq.first));
+        return out;
+        }
+
+    // One per-site basis-state assignment whose charges add up to exactly
+    // the requested sector: both the reachability check
+    // set_conserved_sector() runs (so an impossible target errors at
+    // request time rather than mid-sweep) and the arrangement sector_mps()
+    // starts DMRG from.
+    //
+    // A small dynamic program over reachable partial charges rather than a
+    // greedy fill, because with more than one conserved quantity -- a
+    // Hubbard chain at fixed Nf *and* Sz -- greedy choices dead-end. Each
+    // layer keeps one representative per distinct partial charge, so its
+    // size is bounded by the number of reachable charge tuples, not by the
+    // number of assignments.
+    std::vector<int>
+    sector_state_plan() const
+        {
+        int N = sites_.length();
+        int nq = int(sector_.size());
+        // per-site reachable charge range, used to prune partial sums that
+        // can no longer reach the target
+        std::vector<std::vector<int>> smin(N+2,std::vector<int>(nq,0)),
+                                      smax(N+2,std::vector<int>(nq,0));
+        for (int i=N;i>=1;--i)
+            {
+            std::vector<int> lo(nq,0), hi(nq,0);
+            for (int st=1;st<=dim(sites_(i));++st)
+                {
+                auto c = state_charge(i,st);
+                for (int k=0;k<nq;k++)
+                    {
+                    if (st==1) { lo[k] = hi[k] = c[k]; }
+                    else { lo[k] = std::min(lo[k],c[k]); hi[k] = std::max(hi[k],c[k]); }
+                    }
+                }
+            for (int k=0;k<nq;k++)
+                {
+                smin[i][k] = lo[k] + smin[i+1][k];
+                smax[i][k] = hi[k] + smax[i+1][k];
+                }
+            }
+        std::vector<int> target;
+        target.reserve(nq);
+        for (auto const& sq : sector_) target.push_back(sq.second);
+
+        struct Node { std::vector<int> charge; int prev; int state; };
+        std::vector<std::vector<Node>> layers(N+1);
+        layers[0].push_back(Node{std::vector<int>(nq,0),-1,0});
+        for (int i=1;i<=N;i++)
+            {
+            std::map<std::vector<int>,int> seen;
+            for (size_t pi=0;pi<layers[i-1].size();++pi)
+                {
+                auto const& node = layers[i-1].at(pi);
+                for (int st=1;st<=dim(sites_(i));++st)
+                    {
+                    auto c = state_charge(i,st);
+                    std::vector<int> partial(nq);
+                    bool ok = true;
+                    for (int k=0;k<nq;k++)
+                        {
+                        partial[k] = node.charge.at(k) + c.at(k);
+                        // can the remaining sites still close the gap?
+                        if (partial[k]+smin[i+1][k] > target[k]) { ok = false; break; }
+                        if (partial[k]+smax[i+1][k] < target[k]) { ok = false; break; }
+                        }
+                    if (!ok) continue;
+                    if (seen.count(partial)) continue; // one representative is enough
+                    seen.emplace(partial,int(layers[i].size()));
+                    layers[i].push_back(Node{partial,int(pi),st});
+                    }
+                }
+            if (layers[i].empty())
+                throw std::invalid_argument(tinyformat::format("Chain::set_conserved_sector: no state of this "
+                      "chain has %s -- the requested sector is empty",sector_string()));
+            }
+        // the final layer was pruned to exactly the target
+        std::vector<int> plan(N,1);
+        int at = 0;
+        for (int i=N;i>=1;--i)
+            {
+            auto const& node = layers[i].at(at);
+            plan[i-1] = node.state;
+            at = node.prev;
+            }
+        return plan;
+        }
+
+    // `k` in-sector product states: the same multiset of local basis
+    // states as sector_state_plan()'s, shuffled among the sites that can
+    // host them. Permuting within one site-type code keeps every state
+    // legal on the site it lands on, and any permutation is charge-neutral
+    // by construction, so all of these live in the requested sector.
+    std::vector<std::vector<int>>
+    sector_state_arrangements(int k) const
+        {
+        auto base = sector_state_plan();
+        int N = int(base.size());
+        std::map<int,std::vector<int>> positions; // type code -> site positions
+        for (int i=0;i<N;i++) positions[site_types_.at(i)].push_back(i);
+        std::mt19937 rng(1234u + unsigned(sector_draws_++));
+        std::vector<std::vector<int>> out;
+        out.push_back(base); // the deterministic plan is always one of them
+        for (int r=1;r<k;r++)
+            {
+            auto plan = base;
+            for (auto const& kv : positions)
+                {
+                auto pos = kv.second;
+                std::vector<int> vals;
+                for (auto i : pos) vals.push_back(base.at(i));
+                std::shuffle(vals.begin(),vals.end(),rng);
+                for (size_t j=0;j<pos.size();++j) plan[pos.at(j)] = vals.at(j);
+                }
+            out.push_back(plan);
+            }
+        return out;
+        }
+
+    // A bond-dimension-1 product MPS in the requested sector, from a
+    // per-site basis-state assignment. Mirrors ITensor's own
+    // init_tensors() (mps.cc, backing MPS(InitState)) -- the QN-carrying
+    // Link indices are the reason this cannot be assembled from plain
+    // dim-1 links the way build_product_state() does: an ITensor's indices
+    // are either all QN-carrying or all dense, never mixed. Taking the
+    // basis states as IndexVals rather than names (which is all InitState
+    // itself stores) avoids needing a per-site-type table of state names.
+    MPS
+    sector_product_mps(std::vector<int> const& states) const
+        {
+        int N = sites_.length();
+        auto a = std::vector<Index>(N+1);
+        auto qa = std::vector<QN>(N+1); // qa[i] = QN on the i-th bond
+        for (int i=1;i<=N;i++) qa[0] -= qn(sites_(i)(states.at(i-1)))*In;
+        for (int i=1;i<=N;i++) // zero total divergence, solve bond by bond
+            qa[i] = Out*(-qa[i-1]*In - qn(sites_(i)(states.at(i-1))));
+        for (int i=1;i<N;i++) a[i] = Index(qa[i],1,tinyformat::format("Link,l=%d",i));
+        MPS psi(N);
+        if (N==1) { psi.set(1,setElt(sites_(1)(states.at(0)))); }
+        else
+            {
+            psi.set(1,setElt(sites_(1)(states.at(0)),a[1](1)));
+            for (int i=2;i<N;i++)
+                psi.set(i,setElt(dag(a[i-1])(1),sites_(i)(states.at(i-1)),a[i](1)));
+            psi.set(N,setElt(dag(a[N-1])(1),sites_(N)(states.at(N-1))));
+            }
+        psi.leftLim(0); // MPS(InitState)'s own convention: OC at site 1
+        psi.rightLim(2);
+        return psi;
+        }
+
+    // The sector-mode counterpart of randomMPS(sites_,m): a normalized sum
+    // of random in-sector product states. Every summand has the same
+    // (correct) flux, so the sum does too; bond dimension is bounded by
+    // the number of summands, and two-site DMRG grows it from there the
+    // same way it does from a randomMPS start. Measured to reach the same
+    // energy as the dense/randomMPS path to twelve digits on a Heisenberg
+    // chain (see get_sites.h's comment).
+    MPS
+    sector_mps(int m) const
+        {
+        int k = std::max(1,std::min(m,16));
+        auto plans = sector_state_arrangements(k);
+        std::vector<MPS> parts;
+        parts.reserve(plans.size());
+        for (auto const& plan : plans) parts.push_back(sector_product_mps(plan));
+        MPS psi = (parts.size()==1) ? parts.front()
+                                    : sum(parts,{"Cutoff",1e-14,"MaxDim",std::max(1,m)});
+        psi.normalize();
+        return psi;
+        }
+
+    // Refuse a code path that assembles tensors by hand -- dense Link
+    // indices (METTS product states, iDMRG/VUMPS environments) or bond
+    // gates summed before their fluxes agree (TEBD). An ITensor's indices
+    // are either all QN-carrying or all dense, and tensors of different
+    // flux cannot be added, so such a path does not merely give a wrong
+    // answer under sector mode: it aborts the process inside ITensor
+    // (Error() -> abort(), nothing to catch). Better to say so.
+    //
+    // Not a general statement about time evolution or correlators -- both
+    // TDVP variants and every AutoMPO-based path work under a sector, as
+    // long as the operators involved conserve it.
+    void
+    reject_sector(char const* what) const
+        {
+        if (!has_sector_) return;
+        throw std::invalid_argument(tinyformat::format("Chain::%s does not support "
+              "conserved-sector mode (%s): this code path assembles tensors that are "
+              "dense or of mixed flux by construction. Clear the sector with "
+              "set_conserved_sector() first (or, for time evolution, use the default "
+              "tevol_method=\"TDVP\", which does support it).",
+              what,sector_string()));
+        }
+
+    // Check an MPS actually came out in the requested sector. Cheap (the
+    // flux is read off the tensors, not measured), and it is the one thing
+    // that would silently produce a wrong answer if any of the above were
+    // subtly wrong.
+    void
+    check_sector(MPS const& psi, char const* where) const
+        {
+        if (!has_sector_) return;
+        auto q = totalQN(psi);
+        for (auto const& sq : sector_)
+            if (q.val(sq.first) != sq.second)
+                throw std::runtime_error(tinyformat::format("Chain::%s: the state is in sector %s, not the "
+                      "requested %s",where,qn_string(q),sector_string()));
+        }
+
     // v2's plain "MPS(sites_)" (no InitState) doesn't carry over as a bare
     // MPS(SiteSet)/InitState-based product state: with sites_ built
     // ConserveQNs=false (see get_sites.h's comment for why), a *product*
@@ -4255,7 +4754,14 @@ class Chain
     // a ramped schedule builds its random starting state directly at the
     // ramp's first maxdim instead of at the full maxm_.
     MPS
-    default_mps(int m) const { return randomMPS(sites_,m<1?1:m); }
+    default_mps(int m) const
+        {
+        // Sector mode cannot use randomMPS at all: randomMPS(SiteSet)
+        // refuses to guess a sector under QNs, and this ITensor has no
+        // randomMPS(InitState,m>1) (both are hard Errors in mps.cc).
+        if (has_sector_) return sector_mps(m<1?1:m);
+        return randomMPS(sites_,m<1?1:m);
+        }
 
     // -- METTS helpers (Chain::metts_vev, public, above) --
 
@@ -4276,6 +4782,7 @@ class Chain
     MPS
     build_product_state(std::vector<ITensor> const& site_vectors) const
         {
+        reject_sector("build_product_state"); // dense links below (METTS)
         int N = sites_.length();
         MPS psi(N);
         std::vector<Index> links;
@@ -10288,6 +10795,18 @@ class Chain
     private:
 
     SiteSet sites_;
+    // -- conserved sector (opt-in QN mode), see set_conserved_sector() --
+    // site_types_ is what SpinX needs in order to rebuild sites_ either
+    // way. dense_sites_ is a permanently ConserveQNs=false copy of the same
+    // chain, used only to read an operator's matrix elements without ever
+    // building that operator on QN-carrying indices (see op_charge(), and
+    // why that matters). sector_ is the requested (QN name, value) list,
+    // empty whenever sector mode is off.
+    std::vector<int> site_types_;
+    SiteSet dense_sites_;
+    std::vector<std::pair<std::string,int>> sector_;
+    bool has_sector_ = false;
+    mutable int sector_draws_ = 0; // varies sector_mps()'s arrangement per call
     MPO H_; bool have_H_ = false;
     MPS wf0_; bool have_wf0_ = false;
     double wf0_energy_ = 0.0; bool have_wf0_energy_ = false;

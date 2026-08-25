@@ -14,6 +14,9 @@
 // indirectly through the "ampo += coef,name,site,..." accumulator syntax --
 // no 99-way-switch code generation is needed at all.
 
+#include <algorithm>
+#include <map>
+#include <stdexcept>
 #include <set>
 #include <string>
 #include <vector>
@@ -144,6 +147,108 @@ expansion_of(std::string const& name)
     }
 
 } // namespace motermsdetail
+
+// -- term-list normalization for conserved-sector (QN) mode --------------
+//
+// Both functions below exist for chain_session.h's set_conserved_sector():
+// with QN-carrying site indices, a term whose operator string does not
+// conserve the sector's quantum numbers is not merely wrong, it *aborts the
+// process* (either inside SiteSet::op() building something like "Sx", or
+// inside AutoMPO's own QN basis construction with "Index does not contain
+// given QN block") rather than raising anything catchable. So sector mode
+// has to normalize and inspect a term list before AutoMPO ever sees it.
+//
+// The textbook dmrgpy Heisenberg Hamiltonian is exactly why normalization,
+// not just inspection, is needed: written as Sx.Sx + Sy.Sy + Sz.Sz it
+// conserves Sz, but term by term it does not -- the S+S+ and S-S- strings
+// only disappear once the Sx and Sy expansions are added together. Confirmed
+// directly: handing AutoMPO both halves and letting them cancel numerically
+// still aborts, because the automaton basis is built before any cancellation
+// happens.
+
+// Expand every Sx/Sy factor into its two S+/S- pieces, term by term. This is
+// the same expansion build_ampo() performs inline below (and it is exact for
+// any spin S), materialized as a plain MOTerm list so sector mode can combine
+// and check the result first. Factors are replaced in place, so the surviving
+// factor order -- which matters for non-commuting same-site products -- is
+// untouched. Terms with no Sx/Sy factor, and factors on sites that define no
+// S+/S- at all (Z3/Z4 clock operators, where "Sy" is not a spin ladder
+// operator in the first place), pass through verbatim.
+std::vector<MOTerm> inline
+expand_xy_terms(SiteSet const& sites, std::vector<MOTerm> const& terms)
+    {
+    std::vector<MOTerm> out;
+    out.reserve(terms.size());
+    for (auto const& term : terms)
+        {
+        std::vector<int> xy_pos; // indices into term.factors
+        for (size_t k=0;k<term.factors.size();++k)
+            {
+            auto const& f = term.factors[k];
+            if ((f.name=="Sx" || f.name=="Sy")
+                && motermsdetail::site_has_ladder_ops(sites,f.site))
+                xy_pos.push_back(int(k));
+            }
+        int nxy = int(xy_pos.size());
+        if (nxy==0) { out.push_back(term); continue; }
+        if (nxy>motermsdetail::MAX_XY_FACTORS)
+            throw std::invalid_argument(tinyformat::format("Conserved-sector mode: a term carries %d Sx/Sy "
+                  "factors, more than the %d this expansion supports -- write it with "
+                  "S+/S- instead",nxy,motermsdetail::MAX_XY_FACTORS));
+        int ncomb = 1 << nxy;
+        for (int mask=0;mask<ncomb;++mask)
+            {
+            MOTerm t;
+            t.coef = term.coef;
+            t.factors = term.factors;
+            for (int b=0;b<nxy;++b)
+                {
+                auto pieces = motermsdetail::expansion_of(term.factors[xy_pos[b]].name);
+                auto const& piece = pieces.at((mask>>b)&1);
+                t.coef *= piece.coef;
+                t.factors[xy_pos[b]].name = piece.name;
+                }
+            if (t.coef == Cplx(0.0,0.0)) continue;
+            out.push_back(t);
+            }
+        }
+    return out;
+    }
+
+// Sum the coefficients of identical operator strings and drop the ones that
+// cancel, keeping first-appearance order otherwise. Two strings count as
+// identical only if their (name,site) factor *sequences* match exactly: no
+// reordering is attempted, since that would mean tracking fermionic
+// anticommutation signs, and every term list dmrgpy's MultiOperator produces
+// already comes out in ascending site order (so the Sx.Sx/Sy.Sy pair this
+// exists to cancel does line up).
+std::vector<MOTerm> inline
+combine_terms(std::vector<MOTerm> const& terms)
+    {
+    double maxabs = 0.0;
+    for (auto const& t : terms) maxabs = std::max(maxabs,std::abs(t.coef));
+    // relative to the largest coefficient present: an exact cancellation
+    // leaves rounding dust, a genuinely small term does not.
+    double tol = 1e-12*maxabs;
+    using Key = std::vector<std::pair<std::string,int>>;
+    std::map<Key,size_t> seen; // key -> index into out
+    std::vector<MOTerm> out;
+    out.reserve(terms.size());
+    for (auto const& t : terms)
+        {
+        Key key;
+        key.reserve(t.factors.size());
+        for (auto const& f : t.factors) key.emplace_back(f.name,f.site);
+        auto it = seen.find(key);
+        if (it==seen.end()) { seen.emplace(key,out.size()); out.push_back(t); }
+        else out[it->second].coef += t.coef;
+        }
+    std::vector<MOTerm> kept;
+    kept.reserve(out.size());
+    for (auto const& t : out) if (std::abs(t.coef) > tol) kept.push_back(t);
+    return kept;
+    }
+
 
 AutoMPO inline
 build_ampo(SiteSet const& sites, std::vector<MOTerm> const& terms)

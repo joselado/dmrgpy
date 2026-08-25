@@ -20,6 +20,31 @@ def run(self,automatic=False):
 
 def get_mode(self,mode="DMRG"):
     """Return the mode of the calculation"""
+    # A conserved sector (Many_Body_Chain.set_conserved_sector) is a DMRG-only
+    # feature of the mpscpp3 session: every fallback below would answer with
+    # the *global* ground state instead of the requested sector's, silently,
+    # so a chain with a sector set never falls back at all.
+    sector = getattr(self,"conserved_sector",None)
+    if sector:
+        if self.itensor_version!=3 or self.mode=="ED" or mode=="ED":
+            raise NotImplementedError(
+                "conserved sector %s: only DMRG with itensor_version=3 can "
+                "target a quantum-number sector (this call asked for "
+                "mode=%s, itensor_version=%s). Clear it with "
+                "set_conserved_sector()."%(sector,repr(mode),
+                                           repr(self.itensor_version)))
+        from . import cppext
+        if not cppext.available(3):
+            raise NotImplementedError(
+                "conserved sector %s: the mpscpp3 extension is not compiled, "
+                "and the ED fallback cannot target a sector -- build it with "
+                "'python install.py --itensor-version=3'"%(sector,))
+        if self.ns<3:
+            raise NotImplementedError(
+                "conserved sector %s: ITensor v3's two-site DMRG cannot handle "
+                "a chain this short (n=%d < 3 sites), and the ED fallback "
+                "cannot target a sector"%(sector,self.ns))
+        return "DMRG"
     # if the in-process C++ extension isn't available for a C++ chain,
     # fall back to ED (Julia chains are unaffected by this check). The
     # "python" backend always passes this check (cppext.available("python")

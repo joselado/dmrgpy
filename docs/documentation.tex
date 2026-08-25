@@ -2092,11 +2092,79 @@ Notable, deliberate implementation details (not bugs to ``fix''):
 
 \begin{itemize}
   \item \texttt{mpscpp3} builds every site with \texttt{ConserveQNs=false}
-    and starts DMRG from an actual \texttt{randomMPS}, not a plain
-    product state --- matching v2's real (unconstrained-search) behavior
-    rather than ITensor v3's stricter, QN-conserving-from-the-start
-    convention, at the cost of losing the QN block-sparsity speedup for
-    \texttt{itensor\_version=3}.
+    \emph{by default}, and starts DMRG from an actual
+    \texttt{randomMPS}, not a plain product state --- matching v2's real
+    (unconstrained-search) behavior rather than ITensor v3's stricter,
+    QN-conserving-from-the-start convention, at the cost of losing the QN
+    block-sparsity speedup for \texttt{itensor\_version=3}.
+    \texttt{Many\_Body\_Chain.set\_conserved\_sector()}
+    (\texttt{itensor\_version=3} only) is the opt-in that turns the
+    quantum numbers back on for a chain whose caller wants the search
+    confined to one sector --- see the next item, which also records why
+    the ``DMRG gets stuck at the product state'' observation behind the
+    default does \emph{not} generalize to sector mode.
+  \item \textbf{Conserved-sector mode}
+    (\texttt{Chain::set\_conserved\_sector},
+    \texttt{mpscpp3/chain\_session.h}): rebuilds \texttt{sites\_} through
+    \texttt{SpinX(site\_types,conserved)} (\texttt{get\_sites.h}) with
+    QN-carrying indices, keeps a permanently dense
+    \texttt{dense\_sites\_} alongside it, and drops every piece of
+    session state built on the old site set. Three parts are worth
+    knowing about, each forced by a hard ITensor behavior confirmed
+    directly:
+    \begin{itemize}
+      \item \emph{The start state is a sum of random in-sector product
+        states} (\texttt{sector\_mps}), not \texttt{randomMPS}:
+        \texttt{randomMPS(SiteSet)} refuses to guess a sector under QNs
+        and \texttt{randomMPS(InitState,m>1)} does not exist in this
+        vendored copy (both hard \texttt{Error}s in \texttt{mps.cc}).
+        The per-site assignment comes from a small dynamic program over
+        reachable partial charges (\texttt{sector\_state\_plan}), exact
+        rather than greedy because a Hubbard chain at fixed \texttt{Nf}
+        \emph{and} \texttt{Sz} dead-ends a greedy fill; arrangements are
+        then shuffled within each site-type code, which is charge-neutral
+        by construction. The old \texttt{default\_mps()} comment about
+        DMRG being ``stuck at the product energy no matter how large a
+        noise term'' is about the \emph{all-first-basis-state} start it
+        was measured with --- that state is the unique state of its own
+        sector, so nothing can move it. An in-sector start converges to
+        the identical energy as the dense path ($-5.142090632836$ on a
+        12-site Heisenberg chain, twelve digits, from either a N\'eel or
+        a sum-of-products start).
+      \item \emph{Terms are normalized and flux-checked before AutoMPO
+        sees them} (\texttt{sector\_terms},
+        \texttt{mo\_terms.h}'s \texttt{expand\_xy\_terms}/%
+        \texttt{combine\_terms}). A non-conserving operator does not fail
+        cleanly in ITensor: building \texttt{Sx} on Sz-conserving sites
+        aborts the process inside \texttt{ITensor::set}, and so does
+        handing AutoMPO a flux-violating term \emph{even when its
+        coefficient cancels exactly} (``Index does not contain given QN
+        block''). That last one is why the textbook
+        $S^xS^x+S^yS^y+S^zS^z$ Heisenberg Hamiltonian needs the
+        $S^x/S^y\to S^\pm$ expansion plus explicit cancellation of
+        identical strings here, rather than being left to AutoMPO. An
+        operator's charge is inferred from its \emph{dense} matrix
+        elements against the QN labels of the local basis states
+        (\texttt{op\_charge}), never by building it on QN indices. Since
+        ITensor's own \texttt{Error()} calls \texttt{abort()}
+        (\texttt{util/error.h}), the sector code throws
+        \texttt{std::invalid\_argument}/\texttt{std::runtime\_error}
+        instead, so the failures reach Python as catchable exceptions.
+      \item \emph{Every \texttt{terms $\to$ MPO} path in the session goes
+        through \texttt{mpo\_from\_terms}/\texttt{ampo\_from\_terms}}, so
+        the check covers \texttt{vev}, correlators, KPM vertices and
+        excited states, not just \texttt{set\_hamiltonian}. Both helpers
+        are pass-through when no sector is set, which is what keeps the
+        default path byte-identical.
+    \end{itemize}
+    On the Python side the sector lives on the chain
+    (\texttt{Many\_Body\_Chain.conserved\_sector}), is re-applied
+    whenever a session is rebuilt (\texttt{sites.py::initialize},
+    \texttt{\_\_deepcopy\_\_}/\texttt{clone}), is part of
+    \texttt{groundstate.py}'s Hamiltonian-send cache key, and makes
+    \texttt{mode.py} \emph{raise} instead of falling back to ED --- a
+    fallback would silently return the global ground state instead of the
+    sector's.
   \item \texttt{mpscpp3}'s (and \texttt{pyitensor}'s) real-time MPS
     evolution defaults to a proper two-site TDVP integrator (vendored
     under \texttt{mpscpp3/TDVP/}; \texttt{pyitensor/tdvp.py} for the
