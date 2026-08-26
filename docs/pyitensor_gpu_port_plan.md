@@ -1,9 +1,26 @@
 # Plan: porting `pyitensor` to GPU, and measuring what it buys
 
-Written 2026-08-25; the results sections were filled in as each phase
-was measured. Site-specific operating detail (how these jobs were
-submitted on one particular cluster) is deliberately kept in this
-checkout's untracked local notes rather than here.
+Written 2026-08-25 as a plan; **Phases 0-3 and 5 are now done and
+measured** (2026-08-26), so this file has become the design-and-history
+record. The results a *user* needs are in
+`docs/gpu_cpu_performance.md`; what remains to do, and what deliberately
+will not be done, is Sec. 9.
+
+Status at a glance:
+
+| | state |
+|---|---|
+| Phase 0, measure before porting | done -- gate passed at chi=64, Sec. 5b |
+| Phase 1, `backend.py` + `tensor.py` + `svd.py` | done |
+| Phase 2, device residency in DMRG | done, measured in Sec. 8 |
+| Phase 3, the KPM path (incl. energy truncation) | done, measured in Sec. 8 |
+| Phase 4, benchmark campaign | done (`benchmarks/gpu/`) |
+| Phase 5, docs / tests / example | done |
+| Phase 6, iDMRG/VUMPS/METTS/TDVP | **not done**, see Sec. 9 |
+
+Site-specific operating detail (how these jobs were submitted on one
+particular cluster) is deliberately kept in this checkout's untracked
+local notes rather than here.
 
 ## 1. Why `pyitensor` is the right target
 
@@ -44,6 +61,10 @@ matvec: the whole contraction chain expressed as one fused
 deterministically-labelled subscript string so structurally identical
 bonds share a compile-cache entry. `jax_enable_x64` is already set, so
 complex128 is preserved.
+
+**Both points below are now resolved** -- the auto-enable is gone and the
+fused kernel is superseded by the resident-array port (Sec. 8) -- but the
+reasoning is kept because it is why the port is shaped the way it is.
 
 Two things follow:
 
@@ -186,19 +207,27 @@ This is the phase that actually buys the speedup:
 * TDVP comes nearly free: `_lanczos_expm_multiply` uses the same matvec
   builders and the same Krylov structure.
 
-### 5.5 User-facing switch
+### 5.5 User-facing switch (as built)
 
-Process-wide and explicit, in the established style of this package
-(`kernels.USE_JAX`, `kernels.USE_NUMBA`):
+Process-wide and explicit, in the established style of this package:
 
 ```python
 from dmrgpy.pyitensor import backend
-backend.set_backend("cupy")      # or "jax"/"torch"; default stays "numpy"
+backend.set_backend("jax")        # default stays "numpy"
+backend.set_pad_bonds(240)        # optional, see Sec. 8
 ```
 
-plus an optional `Many_Body_Chain.setup_python(device="gpu")` convenience
-that calls it. No automatic device detection anywhere — a GPU must be
-asked for, never inferred (see the §2 hazard).
+No automatic device detection anywhere — a GPU must be asked for, never
+inferred (see the §2 hazard, which was exactly that mistake made once
+already). `set_backend` raises on an unknown name rather than falling back,
+because a GPU run that quietly became a CPU run is a benchmark that lies.
+
+Two departures from the plan as written. Only `"numpy"` and `"jax"` exist:
+CuPy was never installed anywhere this ran, and torch turned out not to be
+needed once the JAX dispatch floor was understood (Sec. 5b). And the
+`Many_Body_Chain.setup_python(device="gpu")` convenience was not added --
+the backend is process-wide state, so hanging it off a per-chain method
+would imply a per-chain scope that does not exist.
 
 ## 5b. Phase 0 results (2026-08-25) -- GATE PASSED
 
@@ -384,7 +413,9 @@ reconstructed spectral function.
 rule converging with kpmmaxm (2.7e-3 at kpmmaxm=10 down to 3.7e-6 at 80)
 next to the lineshape against ED.
 
-## 6. Phases
+## 6. Phases (as planned; see the status table at the top and Sec. 9 for
+where they actually landed)
+
 
 ### Phase 0 — measure before porting (one short GPU job, ≤30 min)
 
@@ -499,7 +530,99 @@ or not at all — this plan is not a 13k-line rewrite.
   `CLAUDE.md`. GPU utilization checked with the site's job-accounting
   tool, so a "GPU" number that never touched the device is caught.
 
-## 8. Running the benchmarks
+## 8. What the finished port measures (2026-08-26)
+
+Full tables, primitives and pitfalls: `docs/gpu_cpu_performance.md`. The
+short version, NVIDIA H200 against one Xeon Gold 6248 core, warm:
+
+| calculation | small chi | large chi |
+|---|---|---|
+| KPM correlator, n=30 | 0.13x at kpmmaxm=40 | **10.79x at kpmmaxm=240** |
+| ground state, 3-leg ladder n=30 | 0.41x at maxm=60 | **20.27x at maxm=480** |
+
+The result is **not** "correlators yes, ground states no" -- it is "large
+chi yes, small chi no", identically for both. GPU time is nearly flat
+across each sweep (365 -> 586 s; 25.1 -> 22.9 s) while CPU time explodes
+(49 -> 6325 s; 10 -> 465 s), so the device is still dispatch-bound at the
+top of both ranges and both figures are lower bounds. Crossover is
+chi ~ 120-160.
+
+Three findings that were not in the plan and that changed how this is
+used:
+
+* **Chain length hurts, bond dimension helps.** The KPM crossover moved
+  from kpmmaxm ~ 80 at n=16 to ~120 at n=30: more sites means more
+  operations, each paying the ~0.35 ms eager-dispatch floor, while more
+  bond dimension means more arithmetic per operation at constant call
+  count. This is the opposite of the intuition that bigger systems favour
+  a GPU.
+* **Cold versus warm is a factor of 10, not a detail.** XLA compiles a
+  kernel per (operation, shape) and DMRG mints a new shape whenever a bond
+  dimension changes: 44.9 s cold versus 1.72 s warm on one small
+  ground-state solve. `backend.set_pad_bonds(K)` freezes every bond at K
+  and collapses that (40676 -> 10407 compilations), which on the device is
+  worth 1.4-3.1x on a cold run for 6-31% on a warm one -- and on the host
+  is a pure ~2x loss. So: pad for one-shot jobs, not for sweeps. This knob
+  came from the user, not from this plan.
+* **The ground-state benchmark in Sec. 5b's own gate was on the wrong
+  model.** A uniform 1D Heisenberg chain converges at chi ~ 60 (E0
+  identical to 13 digits from maxm=120 to 480), so an early sweep on it
+  measured dispatch overhead only and reported "ground state: no speedup".
+  The same port gives 20.27x on a 3-leg ladder.
+  `benchmarks/gpu/port_speedup.py --model` now carries the working
+  benchmark and the negative controls, J2/J1=0.5's exact chi=2 dimer
+  product state included.
+
+Correctness at every measured point: ground-state energies agree with the
+host to <= 2.2e-11, KPM sum rules to <= 7.9e-07, every spectrum satisfies
+the exact 1/4 zeroth-moment sum rule on both backends, and the
+energy-truncation Krylov projection agrees to 1e-10 at the unit level.
+
+## 9. What is left, in the order worth doing it
+
+Ranked by measured payoff per unit of work, not by how much code each
+touches. The counts below are direct `np.` call sites, and
+"silent-transfer" counts `np.<free function>(array, ...)` patterns -- the
+ones that copy a device array to the host per call with no error (Sec. 5's
+first trap), i.e. the ones that make a port real work rather than a
+namespace swap.
+
+1. **Lower the dispatch floor: `jax.jit` on the hot kernels, now that
+   `set_pad_bonds` can stabilize their shapes.** Not a port at all, and
+   the highest-leverage item left. The floor is why nothing wins below
+   chi ~ 120, and a jitted kernel measured 0.072 ms against eager's
+   0.345 ms -- 5x. Lowering it does not speed up one calculation, it
+   widens the set of problems for which the device is worth using at all.
+   `jax.jit` was ruled out in Sec. 5.4 *because* it retraces per shape and
+   DMRG's growing bonds defeat it; padding removes exactly that
+   objection, so the two compose and neither is much use alone.
+2. **TDVP (`tdvp.py`, 10 np sites, 0 silent-transfer, 6 in-place).** The
+   best remaining physics target: real-time evolution grows entanglement
+   with time, so chi climbs into the hundreds *by construction*, unlike a
+   1D ground state. It already shares `kernels.py`'s ported matvec, so
+   this is the largest payoff per line changed of anything left.
+3. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
+   in the library -- samples x time steps x Krylov iterations -- and it
+   inherits TDVP's large chi. Do it after (2), which it sits on.
+4. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
+   No traps in either. `kpm_energy_truncation.py` is already done.
+
+Not worth doing now, with reasons rather than silence:
+
+* **`idmrg.py` (97 np sites, 14 silent-transfer, 17 in-place) and
+  `vumps.py` (54 / 18 / 4).** Those silent-transfer counts are the
+  pathology that made the pre-existing per-call JAX path 5-11x slower, so
+  this is a genuine porting job; and `mpscpp3`'s own iDMRG observables
+  are already 5-500x faster than the Python ones, so the incentive is
+  weak from both ends.
+* **`nhdmrg.py` (22 / 3 / 6)** -- niche, and carries traps.
+* **The ED path (`edtk/`)** -- small dense matrices by construction; it
+  is the small-system fallback, and a device can only lose there.
+* **More 1D ground-state work.** The physics caps it: an area law with
+  log corrections keeps chi small, so ground states only benefit for
+  ladder/2D-like geometries, which the current port already covers.
+
+## 10. Running the benchmarks
 
 `benchmarks/gpu/` holds the harness: `gpu_microbench.py` (primitives),
 `pyitensor_gpu_probe.py` (unmodified pyitensor on a device),
