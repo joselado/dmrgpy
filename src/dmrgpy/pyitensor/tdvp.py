@@ -63,8 +63,10 @@ TDVP/tdvp.h+TDVP/basisextension.h's own NumCenter=1 + addBasis() pairing.
 import numpy as np
 from scipy.linalg import eigh_tridiagonal
 
+from . import backend as bk
 from .dmrg import (_all_left_environments, _all_right_environments,
-                    _extend_left, _extend_right, one_site_heff, two_site_heff,
+                    _block_reorthogonalize, _extend_left, _extend_right,
+                    _lanczos_residual, one_site_heff, two_site_heff,
                     zero_site_heff)
 from .mpsalgebra import _link_at
 from .svd import qr_split, svd
@@ -124,14 +126,23 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
     both always real), so it's exponentiated via eigh_tridiagonal's direct
     eigendecomposition rather than a generic dense expm() Pade computation
     -- cheaper, and only the first column of the exponentiated matrix is
-    ever used, so the full matrix is never assembled."""
-    beta0 = np.linalg.norm(v0)
+    ever used, so the full matrix is never assembled.
+
+    The Krylov vectors live wherever `v0` does (on the device, for a
+    device backend -- see backend.py): each is chi^2 d^2 long and there are
+    up to `niter` of them, so moving them is the one thing this function
+    must never do. Exactly two numbers per iteration come back to the host,
+    alpha and beta, because the projected tridiagonal matrix, its
+    eigendecomposition and Saad's residual test are all k x k with k under
+    ~10 -- host work by design, the same split dmrg.py's
+    _lanczos_ground_state uses."""
+    _xp = bk.xp()
+    beta0 = float(bk.to_host(_xp.linalg.norm(v0)))
     if beta0 == 0:
         return v0.copy()
 
     m = min(niter, v0.size)
-    Q = np.empty((v0.size, m), dtype=complex)
-    Q[:, 0] = v0 / beta0
+    basis = _KrylovBasis(v0 / beta0, m)
     alphas = []
     betas = []
 
@@ -146,15 +157,17 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
 
     beta = 0.0
     for it in range(m):
-        w = matvec(Q[:, it])
-        alpha = np.vdot(Q[:, it], w).real
+        q = basis.column(it)
+        w = matvec(q)
+        alpha = float(bk.to_host(_xp.vdot(q, w).real))
         alphas.append(alpha)
-        w = w - alpha * Q[:, it]
         if it > 0:
-            w = w - beta * Q[:, it - 1]
-        Qk = Q[:, :it + 1]  # every basis vector built so far
-        w = w - Qk @ (Qk.conj().T @ w)
-        beta = np.linalg.norm(w)
+            w = _lanczos_residual(w, alpha, q, beta, basis.column(it - 1))
+        else:
+            w = w - alpha * q
+        Qk = basis.matrix()  # every basis vector built so far
+        w = _block_reorthogonalize(Qk, w)
+        beta = float(bk.to_host(_xp.linalg.norm(w)))
 
         k = it + 1
         exp_col0 = exp_first_column(k)
@@ -164,12 +177,67 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
         # residual estimate is below errgoal.
         if (beta < tol or it == m - 1
                 or beta0 * beta * abs(exp_col0[-1]) < errgoal):
-            return beta0 * (Qk @ exp_col0)
+            # exp_col0 is k numbers computed on the host; this is the only
+            # host->device move in the whole routine, and it is O(k).
+            return beta0 * (Qk @ bk.asarray(exp_col0))
 
         betas.append(beta)
-        Q[:, it + 1] = w / beta
+        basis.append(w / beta)
 
     raise AssertionError("unreachable: the it == m-1 branch always returns")
+
+
+class _KrylovBasis:
+    """The growing orthonormal Krylov basis of _lanczos_expm_multiply,
+    stored the way the active array backend wants it stored.
+
+    On the host it is one preallocated (n, m) buffer whose columns are
+    filled in place and handed out as views -- what this function has
+    always done, and what keeps the reorthogonalization two BLAS calls
+    against one contiguous block.
+
+    On a device that same buffer would be the worst available layout: JAX
+    arrays are immutable, so every column assignment would copy the entire
+    (n, m) block (n = chi^2 d^2, m up to 50 as the callers set it), i.e.
+    O(n m) of device traffic per iteration to write O(n) of new data.
+    Keeping the columns in a list and stacking the k built so far costs
+    O(n k) with k typically under 10, and -- the part that actually
+    matters on a device -- it is one dispatch rather than one per column.
+    The stack is cached between calls to matrix() and invalidated on
+    append(), so the two uses per iteration share it."""
+
+    __slots__ = ("_on_device", "_buf", "_cols", "_k", "_stacked")
+
+    def __init__(self, q0, m):
+        self._on_device = bk.is_device()
+        self._k = 1
+        self._stacked = None
+        if self._on_device:
+            self._cols = [q0]
+            self._buf = None
+        else:
+            self._cols = None
+            self._buf = np.empty((q0.size, m), dtype=complex)
+            self._buf[:, 0] = q0
+
+    def append(self, q):
+        if self._on_device:
+            self._cols.append(q)
+            self._stacked = None
+        else:
+            self._buf[:, self._k] = q
+        self._k += 1
+
+    def column(self, i):
+        return self._cols[i] if self._on_device else self._buf[:, i]
+
+    def matrix(self):
+        """The (n, k) basis built so far."""
+        if not self._on_device:
+            return self._buf[:, :self._k]
+        if self._stacked is None:
+            self._stacked = bk.xp().column_stack(self._cols)
+        return self._stacked
 
 
 def _eigh_tridiagonal_robust(alphas, betas):

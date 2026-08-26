@@ -30,20 +30,32 @@ O(chi) rather than O(chi^2):
   runs on the host;
 * measurement results on their way back to Python.
 
-What this deliberately does not do
-----------------------------------
-No `jax.jit`. Every operation here runs eagerly, which on GPU carries a
-per-call dispatch floor -- measured at ~0.35 ms for eager jnp on the H200,
-versus ~0.07 ms for the same kernel under jit. That floor is why the
-device cannot win at small bond dimension no matter what: a KPM run at
-kpmmaxm=40 issues ~20k operations, so ~7 s of pure dispatch against a
-5.8 s CPU baseline. It amortizes away as chi grows (at kpmmaxm=160 the
-same dispatch is ~7% of a 103 s CPU run), which is the same
-large-bond-dimension story the rest of the plan tells. Jitting the hot
-composites is a possible later step; it is not needed to answer whether
-the port pays off, and it interacts badly with DMRG's ever-changing bond
-shapes (jax.jit retraces per shape -- see kernels.py's numba section for
-the same trap with the same cause).
+The dispatch floor, and the two knobs that fight it
+--------------------------------------------------
+Eager array operations carry a per-call dispatch floor -- measured at
+~0.35 ms for eager jnp on the H200, versus ~0.07 ms for the same kernel
+under `jax.jit`. That floor is why the device cannot win at small bond
+dimension no matter how fast it is: a KPM run at kpmmaxm=40 issues ~20k
+operations, so ~7 s of pure dispatch against a 5.8 s CPU baseline. It
+amortizes away as chi grows (at kpmmaxm=160 the same dispatch is ~7% of a
+103 s CPU run), which is the large-bond-dimension story the rest of the
+port tells.
+
+Two knobs lower that floor, and they only work together:
+
+* `set_pad_bonds(K)` freezes every MPS bond at K, so the engine stops
+  minting a fresh array shape every time a bond dimension changes;
+* `set_jit()` + `jit()` fuse the hot composites -- a contraction's
+  transpose+reshape+matmul, svd()'s Gram+eigh, a Lanczos reorthogonal-
+  ization -- into a single XLA kernel each, so one dispatch replaces
+  three to thirty.
+
+`jax.jit` retraces per input shape (the same trap kernels.py's numba
+section describes with the same cause), which is exactly what padding
+removes; and padding on its own only reduces how many *eager* kernels get
+compiled, it does not reduce how many get *dispatched*. Hence the default
+`set_jit("auto")`: jit turns itself on precisely when `set_pad_bonds` has
+made it safe, and stays off otherwise. Either can be forced.
 
 Usage
 -----
@@ -69,6 +81,7 @@ def set_backend(name):
     (default) or "jax". Raises rather than falling back silently -- a
     GPU run that quietly became a CPU run is a benchmark that lies."""
     global _NAME, _XP, _JAX
+    _JIT_CACHE.clear()   # jitted wrappers are bound to one array library
     if name == "numpy":
         _NAME, _XP, _JAX = "numpy", np, None
         return _NAME
@@ -182,6 +195,98 @@ def set_pad_bonds(dim):
 
 def pad_bonds():
     return _PAD_BONDS
+
+
+_JIT_MODE = "auto"
+_JIT_CACHE = {}
+
+
+def set_jit(mode="auto"):
+    """Whether the hot composites registered through `jit()` below are
+    compiled with `jax.jit` (True), left eager (False), or decided by
+    `set_pad_bonds` ("auto", the default).
+
+    Why "auto" is tied to padding. Jitting a composite replaces three to
+    thirty eager dispatches with one, which is the single biggest lever on
+    the ~0.35 ms/call floor that keeps a device from winning below
+    chi ~ 120-160. But `jax.jit` traces once per distinct input *shape*,
+    and DMRG mints a new shape every time a bond dimension changes -- so
+    without `set_pad_bonds` the compile cost can exceed everything the
+    fusion saves (measured on CPU at n=6/maxm=20: 672 compilations, 18.4 s
+    of a 29.1 s run, already in eager mode). Padding collapses that shape
+    zoo to one entry per operation, which is exactly the precondition jit
+    needs; neither knob is worth much without the other.
+
+    Forcing it is legitimate in both directions: True for a long run at
+    fixed bond dimension that never padded (the shapes are stable anyway),
+    False to isolate a compile-time effect while benchmarking.
+
+    Never applies to the NumPy backend: `jit()` hands back the plain
+    Python function there, so the host path is unchanged and costs one
+    global comparison per call."""
+    global _JIT_MODE
+    if mode not in (True, False, "auto"):
+        raise ValueError("set_jit: mode must be True, False or \"auto\", got %r" % (mode,))
+    _JIT_MODE = mode
+    return _JIT_MODE
+
+
+def jit_mode():
+    return _JIT_MODE
+
+
+def jit_enabled():
+    """Whether `jit()`-registered composites are currently compiled."""
+    if _NAME != "jax":
+        return False
+    if _JIT_MODE == "auto":
+        return _PAD_BONDS is not None
+    return bool(_JIT_MODE)
+
+
+def jit(fn, static_argnums=()):
+    """Register `fn` as a hot composite: a wrapper that runs it under
+    `jax.jit` when jitting is enabled, and calls it directly otherwise.
+
+    The decision is made per call rather than at import, because the
+    backend, the padding and the jit mode are all process-wide state a
+    caller may change between two chains. That costs one string comparison
+    per call -- nothing against a contraction, and *nothing at all* on
+    NumPy, which is the path that must not regress.
+
+    `static_argnums` marks the arguments that are shapes/flags rather than
+    arrays, so XLA specializes on them instead of trying to trace them.
+    They must be hashable (tuples, not lists)."""
+    key = (fn, static_argnums)
+
+    def wrapper(*args):
+        if _NAME == "jax" and jit_enabled():
+            compiled = _JIT_CACHE.get(key)
+            if compiled is None:
+                compiled = _JAX.jit(fn, static_argnums=static_argnums)
+                _JIT_CACHE[key] = compiled
+            return compiled(*args)
+        return fn(*args)
+
+    wrapper.__name__ = getattr(fn, "__name__", "jitted")
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+def compilations():
+    """How many distinct (function, shape) kernels the jitted composites
+    have traced so far -- the number `set_pad_bonds` exists to collapse.
+    Returns None when jitting is off. Diagnostic only; benchmarks/gpu/
+    reads it to report compile pressure alongside wall time."""
+    if not jit_enabled():
+        return None
+    total = 0
+    for compiled in _JIT_CACHE.values():
+        try:
+            total += compiled._cache_size()
+        except Exception:      # private API, version-dependent
+            return None
+    return total
 
 
 def sync(a):

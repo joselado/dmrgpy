@@ -2458,12 +2458,29 @@ small tensors lose and few large ones win. Note this also means longer
 chains do not help by themselves (more operations, same size each) --
 bond dimension does.
 
-Two things to set when you use it:
+Ground states, static and KPM dynamical correlators, and **real-time
+evolution** (TDVP, `timedependent.evolve_and_measure` and the `submode=
+"TD"` correlators) all run on the device. Time evolution is the natural
+fit: entanglement grows with time, so bond dimension climbs into the
+paying range by construction, while a 1D ground state's does not (see the
+warning at the end of this section).
+
+Three things to set when you use it:
 
 * `backend.set_pad_bonds(K)` (with `K` your bond dimension) if the script
   does *one* calculation and exits: it makes every tensor shape identical
   so the GPU compiles each kernel once, worth 1.4-3.1x on such a run. Skip
   it for long sweeps inside one process, where it costs 6-31%.
+* `backend.set_jit(True)` fuses the engine's hot inner kernels into one
+  compiled kernel each, which is what lowers the ~0.35 ms-per-operation
+  floor. The default `"auto"` turns it on exactly when `set_pad_bonds` is
+  set, because compiling only pays off once the tensor shapes stop
+  changing -- and measured on an H200, the two together are worth
+  **6.4-12.1x on a cold run** (a script that starts, computes and exits),
+  where either alone is worth only 2.4-3.8x. Once everything is compiled
+  the trade reverses: padding then costs arithmetic on known-zero blocks,
+  so for a long sweep inside one process set `set_jit(True)` *without*
+  padding, which measured 1.3-1.6x warm.
 * for a KPM correlator, set `kpmmaxm` equal to `maxm`, so the ground-state
   solve and the moment recursion share one set of shapes.
 

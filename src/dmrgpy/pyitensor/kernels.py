@@ -158,6 +158,8 @@ import string
 
 import numpy as np
 
+from . import backend as bk
+
 try:
     import jax
     import jax.numpy as jnp
@@ -409,25 +411,56 @@ def _make_matvec_planned(pieces, order_in, shape_in, order_out):
     # never a numpy free function, so this path works unchanged whether the
     # arrays are numpy or JAX device arrays (backend.py). np.transpose() on a
     # device array would copy it to the host per call.
-    prepared = []
+    plan = []
+    operands = []
     for perm_a, shape_a2, perm_b, shape_b2, step_shape, piece_arr in steps:
-        Bt = piece_arr.transpose(perm_b).reshape(shape_b2)
+        operands.append(piece_arr.transpose(perm_b).reshape(shape_b2))
         # skip a no-op transpose on the vector side too (common when the
         # planned axis order already matches)
         ident_a = (perm_a == tuple(range(len(perm_a))))
-        prepared.append((perm_a, ident_a, shape_a2, Bt, step_shape))
+        plan.append((perm_a, ident_a, shape_a2, step_shape))
+    plan = tuple(plan)
+    operands = tuple(operands)
     trivial_final = (final_perm == tuple(range(len(final_perm))))
 
     def matvec(v_flat):
-        cur = v_flat.reshape(shape_in)
-        for perm_a, ident_a, shape_a2, Bt, step_shape in prepared:
-            At = cur if ident_a else cur.transpose(perm_a)
-            cur = (At.reshape(shape_a2) @ Bt).reshape(step_shape)
-        if not trivial_final:
-            cur = cur.transpose(final_perm)
-        return cur.reshape(-1)
+        return _matvec_chain(v_flat, operands, shape_in, plan,
+                             final_perm, trivial_final)
 
     return matvec
+
+
+def _matvec_chain_impl(v_flat, operands, shape_in, plan, final_perm,
+                       trivial_final):
+    """The planned contraction chain itself, with every shape and
+    permutation passed in as a static argument and only the arrays traced.
+
+    Split out of _make_matvec_planned's closure for one reason: this is the
+    hottest kernel in the engine -- one call per Lanczos/Krylov iteration
+    per bond per sweep -- and eagerly it issues three to four dispatches
+    per step, so eight to twelve per matvec. On a device each of those pays
+    the ~0.35 ms floor whatever its size. Under `backend.jit` (see
+    backend.set_jit) XLA fuses the whole chain into a single kernel, which
+    is the same shape as the fused-einsum path further down this module and
+    measured 0.072 ms against eager's 0.345 ms at chi=64 on an H200. On
+    NumPy `backend.jit` hands back this function unchanged, so the host
+    path executes exactly the operations it did before, in the same order,
+    bit-identically.
+
+    The operator tensors are *arguments*, not closure constants: closing
+    over them would make XLA bake each one into the compiled executable as
+    a literal, so every new environment tensor -- i.e. every bond, every
+    sweep -- would be a fresh trace."""
+    cur = v_flat.reshape(shape_in)
+    for (perm_a, ident_a, shape_a2, step_shape), Bt in zip(plan, operands):
+        At = cur if ident_a else cur.transpose(perm_a)
+        cur = (At.reshape(shape_a2) @ Bt).reshape(step_shape)
+    if not trivial_final:
+        cur = cur.transpose(final_perm)
+    return cur.reshape(-1)
+
+
+_matvec_chain = bk.jit(_matvec_chain_impl, static_argnums=(2, 3, 4, 5))
 
 
 def make_matvec(pieces, order_in, shape_in, order_out):
@@ -447,6 +480,16 @@ def make_matvec(pieces, order_in, shape_in, order_out):
     the plain-NumPy precomputed-plan chain (_make_matvec_planned) -- always
     available, no opt-in required, see its own docstring for why this is
     make_matvec()'s default rather than a bare ITensor.__mul__ chain."""
+    if bk.is_device():
+        # Both opt-in paths below convert per call -- the numba contractor
+        # takes host arrays, and the fused-einsum one ends in
+        # np.asarray(out) -- so on a device backend either would reinstate
+        # exactly the host<->device round trip per Lanczos iteration that
+        # made the pre-port JAX path 5-11x slower (see backend.py). The
+        # planned chain is method-only and stays resident, so it is the
+        # only correct choice here regardless of what the flags say.
+        return _make_matvec_planned(pieces, order_in, shape_in, order_out)
+
     if available_numba():
         return _make_matvec_numba(pieces, order_in, shape_in, order_out)
 

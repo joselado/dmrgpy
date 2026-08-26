@@ -3681,7 +3681,9 @@ per call loses however fast the device is. Consequently:
   (via `backend.asarray`), and everything built from a converted array
   stays put;
 * host round trips are confined to three O(1)/O(chi) places -- the
-  Lanczos alpha/beta coefficients (`dmrg.py`), the singular-value vector
+  Lanczos/Krylov alpha/beta coefficients (`dmrg.py`'s ground-state solver
+  and `tdvp.py`'s time propagator, whose k x k projected matrices and
+  convergence tests are host work by design), the singular-value vector
   `svd.py`'s truncation rule branches on, and measurement results;
 * almost everything else needed no namespace at all, because the
   operations this engine performs on tensor data are ndarray *methods*
@@ -3703,10 +3705,37 @@ Three places did need explicit work, and each is a trap worth knowing:
   that shape zoo; it appends zero singular values after truncation, so
   the represented state is unchanged.
 
-There is deliberately no `jax.jit` on the hot path: eager dispatch has a
-per-call floor (~0.35 ms on an H200) which is why the device cannot win
-below chi ~ 120, and `jax.jit` retraces per shape, which DMRG's growing
-bonds defeat -- the same trap `kernels.py` documents for numba.
+**The dispatch floor, and the two knobs against it.** Eager dispatch has
+a per-call floor (~0.35 ms on an H200, against ~0.07 ms for the same
+kernel under `jax.jit`), which is why the device cannot win below
+chi ~ 120 whatever the hardware. `backend.jit(fn, static_argnums)`
+registers a *hot composite* -- a function whose array arguments are
+traced and whose shapes are static -- and returns a wrapper that runs it
+under `jax.jit` when jitting is on and calls it directly otherwise, so
+the NumPy path is the plain Python function and does not change. Four
+composites are registered, covering everything the engine does per
+Lanczos iteration:
+
+| composite | eager dispatches | where |
+|---|---|---|
+| planned matvec chain | 3-4 per step, 8-12 per call | `kernels.py::_matvec_chain` |
+| contraction (transpose+reshape+matmul) | 5 | `tensor.py::_contract_matmul` |
+| Gram matrix + `eigh` + descending sort | 5 | `svd.py::_gram_spectrum` |
+| Lanczos recurrence / block reorthogonalization | 3 / 2 per basis vector | `dmrg.py` |
+
+`backend.set_jit()` decides whether they compile: `"auto"` (the default)
+turns jitting on exactly when `set_pad_bonds` is set, `True`/`False`
+force it. The tie to padding is not a convenience -- `jax.jit` traces
+once per input *shape*, and DMRG mints a new shape at every bond
+dimension (the same trap `kernels.py` documents for numba), so without
+padding the compile count can rise instead of falling. `backend.
+compilations()` reports how many kernels the registered composites have
+traced, which is the number padding exists to collapse.
+
+`make_matvec` additionally refuses its two opt-in host paths (the numba
+contractor, the fused-einsum one) whenever `backend.is_device()`: both
+convert per call, so either would reinstate exactly the round trip the
+port exists to remove.
 
 Measured speedups, the crossover, the primitive-by-primitive table and the
 benchmarking pitfalls are in `docs/gpu_cpu_performance.md`; the port's

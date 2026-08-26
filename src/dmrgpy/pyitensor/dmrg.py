@@ -94,6 +94,27 @@ def _tridiag_ground_ritz(alphas, betas):
     return w[0], v[:, 0]
 
 
+def _lanczos_residual_impl(w, alpha, q, beta, q_prev):
+    """The Lanczos three-term recurrence, w <- w - alpha q_k - beta q_{k-1},
+    as one function so it fuses into a single kernel under `backend.jit`
+    (three eager dispatches otherwise). alpha/beta stay traced values, not
+    static ones -- specializing on their *values* would retrace every
+    iteration."""
+    return w - alpha * q - beta * q_prev
+
+
+_lanczos_residual = bk.jit(_lanczos_residual_impl)
+
+
+def _block_reorthogonalize_impl(Q, w):
+    """w minus its projection onto the span of Q's columns, as two matmuls
+    (one kernel under jit) instead of one dispatch per basis vector."""
+    return w - Q @ (Q.conj().T @ w)
+
+
+_block_reorthogonalize = bk.jit(_block_reorthogonalize_impl)
+
+
 def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12):
     """Lowest eigenpair of a Hermitian linear operator (given as a matvec
     function) via Lanczos with full reorthogonalization, stopping early
@@ -107,6 +128,7 @@ def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12):
     # of vector that never moves. The tridiagonal eigenproblem itself is
     # at most 30x30 and runs on the host by design.
     _xp = bk.xp()
+    on_device = bk.is_device()
     beta0 = float(bk.to_host(_xp.linalg.norm(v0)))
     if beta0 == 0:
         v0 = bk.asarray(np.random.default_rng(0).standard_normal(v0.shape) + 0j)
@@ -132,12 +154,24 @@ def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12):
         w = matvec(q_new)
         alpha = float(bk.to_host(_xp.vdot(q_new, w).real))
         alphas.append(alpha)
-        w = w - alpha * q_new - beta * qs[-2]
-        for qk in qs[:-1]:
-            # the overlap stays on the device: it is immediately multiplied
-            # back into a device vector, so pulling it home would be a
-            # round trip for nothing
-            w = w - _xp.vdot(qk, w) * qk
+        w = _lanczos_residual(w, alpha, q_new, beta, qs[-2])
+        if on_device:
+            # One block projection instead of one dispatch per basis
+            # vector: at the subspace sizes Lanczos reaches here (k up to
+            # 30) the loop below issues 2k tiny kernels, each paying the
+            # ~0.35 ms device dispatch floor -- more, at small chi, than
+            # the matvec they orthogonalize against. The host keeps the
+            # loop: it is modified Gram-Schmidt, marginally more stable
+            # than this classical/block form, it costs nothing there, and
+            # the NumPy path of this port is meant to stay bit-identical
+            # to what it was before the port existed.
+            w = _block_reorthogonalize(_xp.column_stack(qs[:-1]), w)
+        else:
+            for qk in qs[:-1]:
+                # the overlap stays on the device: it is immediately
+                # multiplied back into a device vector, so pulling it home
+                # would be a round trip for nothing
+                w = w - _xp.vdot(qk, w) * qk
 
         # eigenvalue only for the convergence test; the eigenvector is
         # built once, on the iteration that actually returns

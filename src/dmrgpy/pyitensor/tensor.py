@@ -114,9 +114,31 @@ def contract_arrays(a, b, a_axes, b_axes):
     for j in b_free:
         cols *= b_shape[j]
     out_shape = tuple([a_shape[i] for i in a_free] + [b_shape[j] for j in b_free])
-    am = a.transpose(a_free + list(a_axes)).reshape(rows, inner)
-    bm = b.transpose(list(b_axes) + b_free).reshape(inner, cols)
+    return _contract_matmul(a, b,
+                            tuple(a_free) + tuple(a_axes),
+                            tuple(b_axes) + tuple(b_free),
+                            rows, inner, cols, out_shape)
+
+
+def _contract_matmul_impl(a, b, a_perm, b_perm, rows, inner, cols, out_shape):
+    """The data-touching half of contract_arrays: two transposes, two
+    reshapes and one matmul, with every shape passed in as a static
+    argument so the whole chain fuses into one kernel under jit.
+
+    Eagerly this is 5 dispatches per contraction; on a device that is 5
+    times the ~0.35 ms floor for what may be a 0.07 ms matmul, and
+    contraction is the single most frequent operation in the engine. Under
+    `backend.jit` (on when `set_pad_bonds` has frozen the shapes, see
+    backend.set_jit) XLA fuses the transposes into the matmul's own
+    operand layout and the count drops to one."""
+    am = a.transpose(a_perm).reshape(rows, inner)
+    bm = b.transpose(b_perm).reshape(inner, cols)
     return (am @ bm).reshape(out_shape)
+
+
+# static: everything but the two arrays -- they are shapes, not data.
+_contract_matmul = bk.jit(_contract_matmul_impl,
+                          static_argnums=(2, 3, 4, 5, 6, 7))
 
 
 class ITensor:

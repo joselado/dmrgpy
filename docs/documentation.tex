@@ -4154,9 +4154,11 @@ dimension (22.0\,ms vs 8.3\,ms at $\chi=1024$ on an H200), so any design
 that converts per call loses however fast the device is. Consequently
 there is exactly one conversion point in the engine,
 \texttt{ITensor.\_\_init\_\_} (via \texttt{backend.asarray}); host round
-trips are confined to three $O(1)$/$O(\chi)$ places (the Lanczos
-$\alpha/\beta$ coefficients, the singular-value vector \texttt{svd.py}'s
-truncation rule branches on, and measurement results); and almost
+trips are confined to three $O(1)$/$O(\chi)$ places (the Lanczos/Krylov
+$\alpha/\beta$ coefficients of \texttt{dmrg.py}'s ground-state solver and
+\texttt{tdvp.py}'s time propagator, the singular-value vector
+\texttt{svd.py}'s truncation rule branches on, and measurement results);
+and almost
 everything else needed no namespace at all, because the operations this
 engine performs on tensor data are ndarray \emph{methods}
 (\texttt{.transpose}, \texttt{.reshape}, \texttt{.conj}, \texttt{@}),
@@ -4183,11 +4185,45 @@ Three places did need explicit work, and each is a trap worth knowing:
     unchanged.
 \end{itemize}
 
-There is deliberately no \texttt{jax.jit} on the hot path: eager dispatch
-has a per-call floor ($\sim$0.35\,ms on an H200), which is why the device
-cannot win below $\chi \sim 120$, and \texttt{jax.jit} retraces per shape,
-which DMRG's growing bonds defeat --- the same trap \texttt{kernels.py}
-documents for numba.
+\paragraph{The dispatch floor, and the two knobs against it.} Eager
+dispatch has a per-call floor ($\sim$0.35\,ms on an H200, against
+$\sim$0.07\,ms for the same kernel under \texttt{jax.jit}), which is why
+the device cannot win below $\chi \sim 120$ whatever the hardware.
+\texttt{backend.jit(fn, static\_argnums)} registers a \emph{hot
+composite} --- a function whose array arguments are traced and whose
+shapes are static --- and returns a wrapper that runs it under
+\texttt{jax.jit} when jitting is on and calls it directly otherwise, so
+the NumPy path is the plain Python function and does not change. Four
+composites are registered, covering everything the engine does per
+Lanczos iteration:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+composite & eager dispatches & where \\
+\midrule
+planned matvec chain & 3--4 per step, 8--12 per call & \texttt{kernels.py} \\
+contraction (transpose+reshape+matmul) & 5 & \texttt{tensor.py} \\
+Gram matrix + \texttt{eigh} + sort & 5 & \texttt{svd.py} \\
+Lanczos recurrence / reorthogonalization & 3 / 2 per basis vector & \texttt{dmrg.py} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{backend.set\_jit()} decides whether they compile: \texttt{"auto"}
+(the default) turns jitting on exactly when \texttt{set\_pad\_bonds} is
+set, \texttt{True}/\texttt{False} force it. The tie to padding is not a
+convenience --- \texttt{jax.jit} traces once per input \emph{shape}, and
+DMRG mints a new shape at every bond dimension (the same trap
+\texttt{kernels.py} documents for numba), so without padding the compile
+count can rise instead of falling. \texttt{backend.compilations()}
+reports how many kernels the registered composites have traced, which is
+the number padding exists to collapse.
+
+\texttt{make\_matvec} additionally refuses its two opt-in host paths (the
+numba contractor, the fused-einsum one) whenever
+\texttt{backend.is\_device()}: both convert per call, so either would
+reinstate exactly the round trip the port exists to remove.
 
 Measured speedups, the crossover, the primitive-by-primitive table and the
 benchmarking pitfalls are in \texttt{docs/gpu\_cpu\_performance.md}; the

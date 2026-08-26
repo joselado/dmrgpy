@@ -1,8 +1,9 @@
 # Plan: porting `pyitensor` to GPU, and measuring what it buys
 
 Written 2026-08-25 as a plan; **Phases 0-3 and 5 are now done and
-measured** (2026-08-26), so this file has become the design-and-history
-record. The results a *user* needs are in
+measured** (2026-08-26), and the first two items of Phase 6's follow-up
+list -- the dispatch floor and TDVP -- landed the same day, so this file
+has become the design-and-history record. The results a *user* needs are in
 `docs/gpu_cpu_performance.md`; what remains to do, and what deliberately
 will not be done, is Sec. 9.
 
@@ -16,7 +17,7 @@ Status at a glance:
 | Phase 3, the KPM path (incl. energy truncation) | done, measured in Sec. 8 |
 | Phase 4, benchmark campaign | done (`benchmarks/gpu/`) |
 | Phase 5, docs / tests / example | done |
-| Phase 6, iDMRG/VUMPS/METTS/TDVP | **not done**, see Sec. 9 |
+| Phase 6, follow-ups | dispatch floor + TDVP **done**; METTS/tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
 
 Site-specific operating detail (how these jobs were submitted on one
 particular cluster) is deliberately kept in this checkout's untracked
@@ -587,23 +588,120 @@ ones that copy a device array to the host per call with no error (Sec. 5's
 first trap), i.e. the ones that make a port real work rather than a
 namespace swap.
 
-1. **Lower the dispatch floor: `jax.jit` on the hot kernels, now that
-   `set_pad_bonds` can stabilize their shapes.** Not a port at all, and
-   the highest-leverage item left. The floor is why nothing wins below
-   chi ~ 120, and a jitted kernel measured 0.072 ms against eager's
-   0.345 ms -- 5x. Lowering it does not speed up one calculation, it
-   widens the set of problems for which the device is worth using at all.
-   `jax.jit` was ruled out in Sec. 5.4 *because* it retraces per shape and
-   DMRG's growing bonds defeat it; padding removes exactly that
-   objection, so the two compose and neither is much use alone.
-2. **TDVP (`tdvp.py`, 10 np sites, 0 silent-transfer, 6 in-place).** The
-   best remaining physics target: real-time evolution grows entanglement
-   with time, so chi climbs into the hundreds *by construction*, unlike a
-   1D ground state. It already shares `kernels.py`'s ported matvec, so
-   this is the largest payoff per line changed of anything left.
+1. **[done 2026-08-26] Lower the dispatch floor: `jax.jit` on the hot
+   kernels, now that `set_pad_bonds` can stabilize their shapes.** Not a
+   port at all, and the highest-leverage item on this list. The floor is
+   why nothing wins below chi ~ 120, and a jitted kernel measured
+   0.072 ms against eager's 0.345 ms -- 5x. Lowering it does not speed up
+   one calculation, it widens the set of problems for which the device is
+   worth using at all. `jax.jit` was ruled out in Sec. 5.4 *because* it
+   retraces per shape and DMRG's growing bonds defeat it; padding removes
+   exactly that objection, so the two compose and neither is much use
+   alone.
+
+   *What landed.* `backend.jit(fn, static_argnums)` registers a hot
+   composite and returns a wrapper that compiles it when jitting is on and
+   calls the plain function otherwise -- so the NumPy path executes the
+   same operations in the same order as before, bit-identically, which is
+   the invariant Phase 1 set. `backend.set_jit()` decides: `"auto"` (the
+   default) is on exactly when `set_pad_bonds` is, `True`/`False` force
+   it. `backend.compilations()` reports the traced-kernel count, i.e. the
+   shape zoo padding exists to collapse. Four composites cover everything
+   the engine does per Lanczos iteration:
+
+   | composite | eager dispatches | where |
+   |---|---|---|
+   | planned matvec chain | 3-4 per step, 8-12 per call | `kernels.py::_matvec_chain` |
+   | contraction: transpose+reshape+matmul | 5 | `tensor.py::_contract_matmul` |
+   | Gram matrix + `eigh` + descending sort | 5 | `svd.py::_gram_spectrum` |
+   | Lanczos recurrence / reorthogonalization | 3 / 2 per basis vector | `dmrg.py` |
+
+   The last one is a change of algorithm on the device only: the host
+   keeps its modified-Gram-Schmidt loop (marginally more stable, free
+   there, and bit-identical to the pre-port code), while a device backend
+   projects against the whole basis at once, since the loop otherwise
+   issues 2k tiny kernels per iteration -- at small chi, more than the
+   matvec they orthogonalize. `make_matvec` also now refuses its two
+   opt-in host paths (numba contractor, fused einsum) whenever
+   `backend.is_device()`: both convert per call, so either would
+   reinstate the very round trip this port removed.
+
+   *Measured*, `benchmarks/gpu/jit_speedup.py`, n=6 Heisenberg, maxm=16,
+   JAX **on CPU**, pinned to one P-core. Ground state (4 sweeps) and a
+   TDVP quench (8 steps), every row returning the identical value:
+
+   | case | GS cold | GS warm | kernels | TDVP cold | TDVP warm | kernels |
+   |---|---|---|---|---|---|---|
+   | eager, unpadded (the port as shipped) | 34.8 s | 0.66 s | - | 59.9 s | 2.10 s | - |
+   | padded, eager | 22.2 s | 1.04 s | - | 31.4 s | 3.54 s | - |
+   | **padded + jit** | **7.7 s** | 0.80 s | 86 | **11.1 s** | 2.41 s | 93 |
+   | jit, unpadded | 12.6 s | 0.48 s | 266 | 31.3 s | 1.32 s | 432 |
+
+   Read those honestly. The cold column is the point: 4.5x and 5.4x. The
+   padded/unpadded jit rows show exactly the interaction the ranking
+   predicted -- unpadded, jit traces 3-4.6x the kernels (266 vs 86, 432 vs
+   93) and gives back most of the win, which is why `"auto"` ties the two
+   knobs together.
+   The warm column barely moves because on a *host* the eager dispatch
+   floor is microseconds, not 0.35 ms -- the floor this item attacks is a
+   device property, so the host numbers are a lower bound.
+
+   *Measured on the device* (H200, jobs 19951209/19951210, n=20, same
+   script; full table and caveats in `docs/gpu_cpu_performance.md`):
+   padded+jit is **6.4-12.1x cold** against eager/unpadded, roughly twice
+   the host effect, on both the ground state and a TDVP quench; padding
+   alone gives 2.4-3.8x and jit alone 2.4-2.7x, so both knobs are needed
+   (jit alone traces 897-1092 kernels against 114-192 padded). Warm it is
+   1.1-1.6x and the ranking *flips* -- padding does real arithmetic on
+   known-zero blocks, so once everything is compiled it is jit without
+   padding that wins. Hence the operational rule: pad+jit for a script
+   that runs once, jit alone for a long sweep in one process.
+
+   What it does **not** do is move the crossover. One CPU core runs those
+   same sizes in 0.79 s / 1.24 s warm, ~7x faster than the best device
+   configuration there. Lowering the floor makes the device much cheaper
+   to start; it does not make a small problem worth a device. The claim
+   at the top of this item -- that this "widens the set of problems for
+   which the device is worth using at all" -- is therefore *not*
+   supported at n=20: what widened is the range of *session shapes*
+   (one-shot scripts, cold runs) rather than the range of physics.
+2. **[done 2026-08-26] TDVP (`tdvp.py`).** The best remaining physics
+   target: real-time evolution grows entanglement with time, so chi climbs
+   into the hundreds *by construction*, unlike a 1D ground state. It
+   already shares `kernels.py`'s ported matvec, so this is the largest
+   payoff per line changed of anything left.
+
+   It turned out to be smaller than its 10-`np.`-site count suggested,
+   and the count was measuring the wrong thing. Everything underneath the
+   propagator was *already* resident -- `two_site_heff`/`one_site_heff`/
+   `zero_site_heff` come from `dmrg.py` and go through
+   `kernels.make_matvec`, the environments come from `dmrg.py`'s ported
+   builders, the truncations from `svd.py`. The single unported piece was
+   `_lanczos_expm_multiply`, the Krylov exponentiator, and it was
+   host-bound in the way that costs most: `np.linalg.norm`, `np.vdot` and
+   a preallocated `Q = np.empty((n, m))` buffer written column by column,
+   i.e. a device->host->device round trip *per Krylov iteration, per bond,
+   per time step*, silently -- it never raised, it just transferred.
+
+   Now the basis stays where `v0` lives and exactly two numbers per
+   iteration (alpha, beta) come home, the same split
+   `_lanczos_ground_state` uses; the k x k projected tridiagonal matrix,
+   its eigendecomposition and Saad's residual test stay on the host by
+   design. The two storage layouts are behind `_KrylovBasis`: the host
+   keeps its preallocated buffer and view-slices (immutable device arrays
+   would make each column write an O(n m) copy), a device keeps a list and
+   stacks the k built so far, O(n k), one dispatch. `tests/
+   test_pyitensor_gpu_backend.py` asserts the residency directly through
+   the returned array's *type*, because agreement alone cannot catch a
+   regression to transferring -- a round trip returns the same numbers,
+   only slower. Cross-backend trajectory agreement: 1.5e-14.
 3. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
    in the library -- samples x time steps x Krylov iterations -- and it
-   inherits TDVP's large chi. Do it after (2), which it sits on.
+   inherits TDVP's large chi, so it sits directly on (2), now done.
+   Smaller than its count suggests, in the other direction from TDVP:
+   most of those `np.` sites are RNG, pooled-variance statistics over
+   samples, and a d x d single-site `eigh` for the collapse basis, all of
+   which *should* stay on the host. Audit before porting.
 4. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
    No traps in either. `kpm_energy_truncation.py` is already done.
 
@@ -626,8 +724,10 @@ Not worth doing now, with reasons rather than silence:
 
 `benchmarks/gpu/` holds the harness: `gpu_microbench.py` (primitives),
 `pyitensor_gpu_probe.py` (unmodified pyitensor on a device),
-`kpm_gpu_probe.py` (the KPM cost split) and `port_speedup.py` (end-to-end
-GS + KPM speedup, `--model`/`--pad-bonds`/`--backends`). Each is a plain
+`kpm_gpu_probe.py` (the KPM cost split), `port_speedup.py` (end-to-end
+GS + KPM speedup, `--model`/`--pad-bonds`/`--backends`) and
+`jit_speedup.py` (the dispatch-floor knobs: eager/padded/jitted x ground
+state/TDVP, cold and warm, with the traced-kernel count). Each is a plain
 script with `--help`; none of them needs a scheduler, and the job scripts
 that submitted them on one particular cluster are intentionally not
 tracked here.

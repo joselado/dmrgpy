@@ -107,6 +107,25 @@ _GRAM_MIN_RELATIVE_SV = 1e-7
 _GRAM_MIN_DIM = 16
 
 
+def _gram_spectrum_impl(mat, left):
+    """The Gram route's data-touching half: form the smaller of M M^dag /
+    M^dag M, diagonalize it, and turn its (descending) eigenvalues into
+    singular values. Five eager dispatches -- matmul, eigh, two reversals,
+    sqrt-of-clip -- fused into one kernel under `backend.jit`, which
+    matters because every truncation in the engine goes through here.
+    `left` is static: it selects which of the two Gram matrices to build,
+    a branch XLA must resolve at trace time rather than per call."""
+    _xp = bk.xp()
+    gram = mat @ mat.conj().T if left else mat.conj().T @ mat
+    evals, evecs = _xp.linalg.eigh(gram)
+    evals = evals[::-1]
+    evecs = evecs[:, ::-1]
+    return _xp.sqrt(_xp.clip(evals, 0.0, None)), evecs
+
+
+_gram_spectrum = bk.jit(_gram_spectrum_impl, static_argnums=(1,))
+
+
 def _svd_truncated(mat, cutoff, maxdim, mindim):
     """(U_keep, S_all, Vh_keep, keep, discarded) for `mat`, i.e. a thin SVD
     already truncated by _truncate()'s Cutoff/MaxDim/mindim rule.
@@ -132,11 +151,7 @@ def _svd_truncated(mat, cutoff, maxdim, mindim):
     m, n = mat.shape
     if min(m, n) >= _GRAM_MIN_DIM:
         left = m <= n
-        gram = mat @ mat.conj().T if left else mat.conj().T @ mat
-        evals, evecs = bk.xp().linalg.eigh(gram)
-        evals = evals[::-1]
-        evecs = evecs[:, ::-1]
-        S = bk.xp().sqrt(bk.xp().clip(evals, 0.0, None))
+        S, evecs = _gram_spectrum(mat, left)
         # The truncation rule is a cumulative sum plus data-dependent
         # branching over O(chi) numbers -- worthless on a device, and a
         # device array cannot be compared with a Python float. So the

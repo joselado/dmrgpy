@@ -34,6 +34,7 @@ def numpy_backend_restored():
     yield
     bk.set_backend("numpy")
     bk.set_pad_bonds(None)
+    bk.set_jit("auto")
 
 
 def _heisenberg(n=6, maxm=20, kpmmaxm=20, nsweeps=4, seed=17):
@@ -177,3 +178,97 @@ def test_krylov_energy_projection_matches_across_backends(numpy_backend_restored
     # and the projection actually did something: some weight was removed,
     # so this is not a vacuous comparison of two identity operations
     assert w_np > 0.0
+
+
+def _quench_trajectory(n=6, nt=10, dt=0.05, maxm=20, seed=5):
+    """Real-time TDVP after a quench: prepare the ground state of a
+    staggered field, evolve under Heisenberg, measure <Sz_0>(t)."""
+    from dmrgpy import timedependent
+    np.random.seed(seed)
+    sc = spinchain.Spin_Chain(["S=1/2" for _ in range(n)],
+                              itensor_version="python")
+    h0 = 0
+    for i in range(n):
+        h0 = h0 + (-1) ** i * sc.Sz[i]
+    h1 = 0
+    for i in range(n - 1):
+        h1 = h1 + sc.Sx[i] * sc.Sx[i + 1]
+        h1 = h1 + sc.Sy[i] * sc.Sy[i + 1]
+        h1 = h1 + sc.Sz[i] * sc.Sz[i + 1]
+    sc.set_hamiltonian(h0)
+    sc.maxm = maxm
+    sc.nsweeps = 3
+    wf = sc.get_gs()
+    sc.set_hamiltonian(h1)
+    return timedependent.evolve_and_measure(sc, operator=sc.Sz[0],
+                                            nt=nt, dt=dt, wf=wf)
+
+
+def test_time_evolution_matches_numpy(numpy_backend_restored):
+    """TDVP on the device. Unlike the ground state, real-time evolution
+    grows entanglement with time, so this is the calculation whose chi
+    climbs into the range where a device wins by construction -- see
+    docs/pyitensor_gpu_port_plan.md Sec. 9.
+
+    A whole trajectory rather than one number: the Krylov propagator runs
+    once per bond per time step, so an error in its device/host split
+    would show up as drift, which comparing only the final point could
+    hide."""
+    _ts, sz_np = _quench_trajectory()
+    bk.set_backend("jax")
+    _ts, sz_jax = _quench_trajectory()
+    assert np.max(np.abs(sz_jax - sz_np)) < 1e-10
+
+
+def test_krylov_propagator_keeps_its_basis_on_the_device(numpy_backend_restored):
+    """The point of porting tdvp.py was residency, not agreement: the
+    Krylov basis is chi^2 d^2 per vector times up to `niter` vectors, and
+    before the port it lived in a preallocated NumPy buffer, so every
+    iteration pulled the propagated vector back to the host and pushed it
+    out again.
+
+    Agreement alone cannot catch a regression to that -- a host round trip
+    returns the same numbers, only slower. So this asserts on the array
+    *type* that comes out: a device array can only be produced by a basis
+    that stayed on the device."""
+    from dmrgpy.pyitensor import tdvp
+
+    bk.set_backend("jax")
+    rng = np.random.default_rng(11)
+    dim = 32
+    A = rng.standard_normal((dim, dim)) + 1j * rng.standard_normal((dim, dim))
+    A = A + A.conj().T
+    A_dev = bk.asarray(A)
+    v0 = bk.asarray(rng.standard_normal(dim) + 1j * rng.standard_normal(dim))
+
+    out = tdvp._lanczos_expm_multiply(lambda v: A_dev @ v, v0, -0.1j)
+    assert isinstance(out, jax.Array)
+
+    # ...and it is still the right answer: exp(-0.1i A) v0, done densely.
+    evals, evecs = np.linalg.eigh(A)
+    exact = evecs @ (np.exp(-0.1j * evals) * (evecs.conj().T @ np.asarray(bk.to_host(v0))))
+    assert np.max(np.abs(np.asarray(bk.to_host(out)) - exact)) < 1e-9
+
+
+def test_jit_is_tied_to_padding_and_changes_no_result(numpy_backend_restored):
+    """backend.set_jit's "auto" rule: fuse the hot composites exactly when
+    set_pad_bonds has frozen their shapes, since jax.jit traces per shape
+    and DMRG mints a new one at every bond dimension. Both knobs are pure
+    performance, so the energy must not move under any combination."""
+    assert not bk.jit_enabled()          # never on the NumPy backend
+    bk.set_backend("jax")
+    assert not bk.jit_enabled()          # auto, and nothing is padded yet
+    bk.set_pad_bonds(16)
+    assert bk.jit_enabled()              # auto + padding -> on
+    bk.set_jit(False)
+    assert not bk.jit_enabled()          # explicit override wins
+    e_eager = float(np.real(_heisenberg().gs_energy(mode="DMRG")))
+    bk.set_jit(True)
+    assert bk.jit_enabled()
+    e_jit = float(np.real(_heisenberg().gs_energy(mode="DMRG")))
+    assert e_jit == pytest.approx(e_eager, abs=1e-9)
+    comps = bk.compilations()            # None if JAX drops the private
+    assert comps is None or comps > 0    # cache-size API this reads
+    with pytest.raises(ValueError):
+        bk.set_jit("sometimes")
+    bk.set_jit("auto")
