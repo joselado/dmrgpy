@@ -198,11 +198,11 @@ def get_gr(self,delta=0.002,es=np.linspace(-10.0,10.0,800),i=0,j=0):
 
 
 class Majorana_Chain(Fermionic_Chain):
-    def __init__(self,n):
+    def __init__(self,n,**kwargs):
         """ Rewrite the init method to take twice as many sites"""
         nf = (n+1)//2 # number of conventional fermions
         nf = max([2,nf]) # fix
-        super().__init__(nf) # initialize the Hamiltonian
+        super().__init__(nf,**kwargs) # initialize the Hamiltonian
         # define the Majorana operators
         G = [0 for i in range(nf*2)] # empty list
         for jf in range(nf): # loop over fermions
@@ -222,11 +222,18 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
     Class to deal with fermionic Hamiltonians with
     spin degree of freedom
     """
-    def __init__(self,n):
+    def __init__(self,n,**kwargs):
         """ Rewrite the init method to take twice as many sites (n
         orbitals, each represented by two interleaved spinless-fermion
-        sites for the up/down flavors)"""
-        super().__init__(2*n) # initialize the Hamiltonian
+        sites for the up/down flavors)
+
+        **kwargs is forwarded to Fermionic_Chain/Many_Body_Chain, so
+        itensor_version (and anything else Many_Body_Chain accepts) can be
+        set at construction. Without that forwarding the only way to pick
+        a backend was to assign chain.itensor_version afterwards and call
+        initialize() a second time -- which works, but rebuilds the whole
+        session for nothing and is not discoverable."""
+        super().__init__(2*n,**kwargs) # initialize the Hamiltonian
         self.Sx = [0.5*self.Cdag[2*i]*self.C[2*i+1] +
                 0.5*self.Cdag[2*i+1]*self.C[2*i] for i in range(n)]
         self.Sy = [-0.5*1j*self.Cdag[2*i]*self.C[2*i+1] +
@@ -613,9 +620,9 @@ class Spinful_F_Fermionic_Chain(Fermionic_Chain):
     Class to deal with fermionic Hamiltonians with
     spin degree of freedom
     """
-    def __init__(self,n):
+    def __init__(self,n,**kwargs):
         """ Rewrite the init method to take twice as many sites"""
-        super().__init__(3*n) # initialize the Hamiltonian
+        super().__init__(3*n,**kwargs) # initialize the Hamiltonian
         self.Sx = [0.5*self.Cdag[3*i]*self.C[3*i+1] +
                 0.5*self.Cdag[3*i+1]*self.C[3*i] for i in range(n)]
         self.Sy = [-0.5*1j*self.Cdag[3*i]*self.C[3*i+1] +

@@ -68,3 +68,24 @@ def test_total_particle_number_conservation():
     assert n_ed.real == pytest.approx(2.0, abs=1e-6)
     assert n_v2.real == pytest.approx(2.0, abs=DMRG_TOL)
     assert n_v3.real == pytest.approx(2.0, abs=DMRG_TOL)
+
+
+def test_subclass_constructors_forward_kwargs():
+    """The fermionic subclasses rewrite __init__ to change the site count
+    (2n for spinful, 3n for spin+flavor, (n+1)//2 for Majorana), and three
+    of them used to declare `def __init__(self, n)` with no **kwargs. That
+    silently dropped everything Many_Body_Chain accepts -- most importantly
+    `itensor_version`, so a spinful chain could not be put on a chosen
+    backend at construction at all. The only workaround was to assign
+    chain.itensor_version afterwards and call initialize() again, which
+    rebuilds the whole session and is not discoverable.
+
+    Reported from a downstream project (a Kondo-chain KPM calculation on
+    the pure-Python backend) that hit exactly that wall.
+    """
+    for cls, n in [(fermionchain.Spinful_Fermionic_Chain, 3),
+                   (fermionchain.Majorana_Chain, 4),
+                   (fermionchain.Spinful_F_Fermionic_Chain, 2)]:
+        for version in ("python", 3):
+            fc = cls(n, itensor_version=version)
+            assert fc.itensor_version == version, (cls.__name__, version)
