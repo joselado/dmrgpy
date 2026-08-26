@@ -253,11 +253,32 @@ def test_tol_argument_is_honoured():
 def test_dmrg_and_ed_agree():
     """The DMRG path goes through excited states that are only
     approximately orthogonal, so it exercises the Lowdin orthonormalization
-    in a way the ED path does not."""
-    a = eh.get_effective_hamiltonian_couplings(hubbard_dimer(0.1),
-            method="single", mode="ED")
-    b = eh.get_effective_hamiltonian_couplings(hubbard_dimer(0.1),
-            method="single", mode="DMRG")
+    in a way the ED path does not.
+
+    nsweeps/maxm are raised above the chain defaults because this test was
+    intermittently failing: the DMRG side starts from a random MPS, so its
+    result depends on the global RNG state, which depends on which tests ran
+    before it -- it passed every time in isolation and failed roughly one
+    run in forty inside the full suite. Measured worst-case |ED-DMRG| over
+    many seeds, which shows it is under-convergence rather than a tolerance
+    that is merely unlucky:
+
+        chain defaults          8.5e-05   (vs the 1e-4 assertion below)
+        nsweeps=20              4.6e-05
+        nsweeps=40              3.3e-06
+        nsweeps=40, maxm=120    2.3e-07
+
+    So the fix is to converge the excited states rather than to loosen the
+    assertion (an earlier attempt raised the tolerance to 5e-4; a 60-seed
+    scan then found a 6.6e-4 outlier, i.e. tolerance-chasing was losing to
+    the tail). The dimer is two sites, so 40 sweeps costs almost nothing.
+    """
+    fc_ed, fc_dmrg = hubbard_dimer(0.1), hubbard_dimer(0.1)
+    for fc in (fc_ed, fc_dmrg):
+        fc.nsweeps = 40
+        fc.maxm = 120
+    a = eh.get_effective_hamiltonian_couplings(fc_ed, method="single", mode="ED")
+    b = eh.get_effective_hamiltonian_couplings(fc_dmrg, method="single", mode="DMRG")
     assert set(a) == set(b)
     for key in a:
         assert np.real(a[key]) == pytest.approx(np.real(b[key]), abs=1e-4)
