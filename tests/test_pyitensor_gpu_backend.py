@@ -134,3 +134,46 @@ def test_setblock_is_functional_for_immutable_arrays(numpy_backend_restored):
         out = bk.setblock(arr, (slice(0, 2), slice(0, 2)), block)
         assert complex(bk.to_host(out).sum()) == pytest.approx(4.0)
         assert bk.scalar(out[0, 0]) == pytest.approx(1.0)
+
+
+def test_krylov_energy_projection_matches_across_backends(numpy_backend_restored):
+    """pyitensor/kpm_energy_truncation.py's _local_krylov_projection is the
+    KPM energy-truncation kernel (Holzner et al., PRB 83, 195115, Sec.
+    III-B): build a Krylov basis, diagonalize the projected matrix, and
+    drop every component whose Ritz value exceeds a threshold.
+
+    Ported, it splits across the device boundary -- the O(dim) Krylov
+    vectors and the final reconstruction stay on the device, while the
+    k x k projected matrix, its eigendecomposition and the keep/drop mask
+    (k <= dK <= 30) run on the host. This tests that split directly with a
+    synthetic Hermitian matvec, rather than through a full KPM run: the
+    recursion applies this hundreds of times and truncates in between, so
+    an end-to-end comparison is dominated by truncation-trajectory
+    divergence (measured: two NumPy runs of the same narrow-window setup
+    differ by 1.8e-2 to 2.5e-2 pointwise, while NumPy vs JAX differ by
+    5.8e-3 -- i.e. the backends agree better than one backend agrees with
+    itself, so the end-to-end number cannot resolve a real error here).
+    """
+    from dmrgpy.pyitensor import kpm_energy_truncation as et
+
+    dim = 24
+    rng = np.random.default_rng(5)
+    A = rng.standard_normal((dim, dim)) + 1j * rng.standard_normal((dim, dim))
+    A = (A + A.conj().T) / (4 * dim)          # Hermitian, spectrum inside ~[-1,1]
+    x0_host = rng.standard_normal(dim) + 1j * rng.standard_normal(dim)
+
+    results = {}
+    for name in ("numpy", "jax"):
+        bk.set_backend(name)
+        A_dev, x0 = bk.asarray(A), bk.asarray(x0_host)
+        new_x0, dropped = et._local_krylov_projection(
+            lambda v: A_dev @ v, x0, 8, 0.02)
+        results[name] = (bk.to_host(new_x0), dropped)
+
+    v_np, w_np = results["numpy"]
+    v_jax, w_jax = results["jax"]
+    assert w_jax == pytest.approx(w_np, rel=1e-8)
+    assert np.max(np.abs(v_jax - v_np)) < 1e-10
+    # and the projection actually did something: some weight was removed,
+    # so this is not a vacuous comparison of two identity operations
+    assert w_np > 0.0

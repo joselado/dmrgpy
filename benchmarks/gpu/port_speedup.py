@@ -120,13 +120,27 @@ def time_groundstate(n, maxm, nsweeps, seed, reps, model):
     return out, energy
 
 
-def time_kpm(n, maxm, kpmmaxm, nsweeps, seed, reps, delta, model):
+def time_kpm(n, maxm, kpmmaxm, nsweeps, seed, reps, delta, model,
+             energy_truncation=None):
+    """energy_truncation: None (off) or a (kpm_scale, dK, n_sweeps,
+    threshold) tuple, which turns on the Holzner et al. energy truncation
+    (pyitensor/kpm_energy_truncation.py). That path is worth timing
+    separately because it adds its own Krylov projection per site per
+    sweep -- i.e. more small dense work per moment, on top of the
+    recursion's own applyMPO+truncate."""
     import numpy as np
     es = np.linspace(-8.0, 8.0, 1200)   # wide: the sum rule needs all the weight
     out = []
     weight = None
     for r in range(reps):
         sc = build_chain(n, maxm, kpmmaxm, nsweeps, seed, model)
+        if energy_truncation is not None:
+            scale, dK, ns, thr = energy_truncation
+            sc.kpm_scale = scale
+            sc.kpm_energy_truncate = True
+            sc.kpm_truncate_dK = dK
+            sc.kpm_truncate_nsweeps = ns
+            sc.kpm_truncate_threshold = thr
         sc.gs_energy(mode="DMRG")       # not timed here; timed separately above
         t0 = time.perf_counter()
         x, y = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
@@ -163,6 +177,13 @@ def main():
                          "ground-state GPU win at any maxm; ladder and j1j2 "
                          "genuinely need large bond dimension (see "
                          "build_chain's docstring)")
+    ap.add_argument("--kpm-energy-truncation", default=None,
+                    metavar="SCALE,DK,NSWEEPS,THRESHOLD",
+                    help="turn on KPM energy truncation with these settings, "
+                         "e.g. 1.4,10,2,1.0 . The narrow kpm_scale is the "
+                         "point of the feature: it buys spectral resolution "
+                         "at the cost of the rescaled spectrum leaking "
+                         "outside [-1,1], which this projection removes.")
     ap.add_argument("--pad-bonds", action="store_true",
                     help="freeze every MPS bond at the sweep's bond dimension "
                          "(backend.set_pad_bonds), so XLA compiles one kernel "
@@ -182,6 +203,7 @@ def main():
 
     results = {"meta": {"n": args.n, "kpm_n": args.kpm_n,
                         "model": args.model,
+                        "kpm_energy_truncation": args.kpm_energy_truncation,
                         "nsweeps": args.nsweeps, "delta": args.delta,
                         "reps": args.reps, "seed": args.seed,
                         "python": sys.version.split()[0]},
@@ -236,9 +258,14 @@ def main():
                 # ground-state sweep and the moment recursion have two
                 # separate shape families, so XLA compiles every kernel
                 # twice. One K for both halves is one family.
+                et = None
+                if args.kpm_energy_truncation:
+                    f = args.kpm_energy_truncation.split(",")
+                    et = (float(f[0]), int(f[1]), int(f[2]), float(f[3]))
                 times, weight = time_kpm(args.kpm_n, kpmmaxm, kpmmaxm,
                                          args.nsweeps, args.seed, args.reps,
-                                         args.delta, args.model)
+                                         args.delta, args.model,
+                                         energy_truncation=et)
             except Exception as exc:
                 print("  kpm  kpmmaxm=%-5d FAILED %s: %s"
                       % (kpmmaxm, type(exc).__name__, exc))

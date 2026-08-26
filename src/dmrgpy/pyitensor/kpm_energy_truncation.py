@@ -55,6 +55,8 @@ again at their point of use below:
 """
 import numpy as np
 
+from . import backend as bk
+
 from .dmrg import (_all_left_environments, _all_right_environments,
                     _extend_left, _extend_right, one_site_heff)
 from .mpsalgebra import inner
@@ -70,23 +72,33 @@ def _local_krylov_projection(matvec, x0, dK, threshold):
     projected out. Returns (new_x0, truncated_weight_sq) -- the latter is
     the squared norm of the removed part, i.e. one site's contribution to
     Eq. (40)."""
+    # Device/host split, mirroring dmrg.py's Lanczos: the Krylov vectors are
+    # O(dim) and stay wherever x0 lives, while the projected matrix Hk, its
+    # eigendecomposition and the coefficient vector are all k x k or k with
+    # k <= dK (<= 30), i.e. trivially small and full of data-dependent
+    # branching -- so they run on the host and only O(k) numbers ever cross
+    # the boundary.
+    _xp = bk.xp()
     dim = x0.size
-    nrm = np.linalg.norm(x0)
+    nrm = float(bk.to_host(_xp.linalg.norm(x0)))
     if nrm == 0.0:
         return x0, 0.0
     dK_eff = max(1, min(dK, dim))
     vs = [x0 / nrm]
     for _ in range(1, dK_eff):
         w = matvec(vs[-1])
-        w0 = np.linalg.norm(w)
+        w0 = float(bk.to_host(_xp.linalg.norm(w)))
         # Two orthogonalization passes, not one -- see the module
         # docstring: a single pass loses orthogonality completely by
         # d_K~30 and corrupts the projection. Mirrors mpscpp3/
         # chain_session.h's kpm_local_krylov_projection.
         for _pass in range(2):
             for v in vs:
-                w = w - np.vdot(v, w) * v
-        wn = np.linalg.norm(w)
+                # the overlap stays on the device: it is multiplied straight
+                # back into a device vector, so fetching it would be a round
+                # trip for nothing
+                w = w - _xp.vdot(v, w) * v
+        wn = float(bk.to_host(_xp.linalg.norm(w)))
         # Absolute *and* relative breakdown test: after two passes a
         # linearly dependent extension is left at round-off level
         # relative to its own pre-orthogonalization norm, and
@@ -101,10 +113,12 @@ def _local_krylov_projection(matvec, x0, dK, threshold):
             break  # invariant subspace found; fewer than dK vectors is fine
         vs.append(w / wn)
     k = len(vs)
-    V = np.column_stack(vs)
+    V = _xp.column_stack(vs)
     Hk = np.empty((k, k), dtype=complex)
     for j in range(k):
-        Hk[:, j] = V.conj().T @ matvec(vs[j])
+        # each column is k numbers (k <= 30), so this is the whole of the
+        # device -> host traffic in this routine
+        Hk[:, j] = bk.to_host(V.conj().T @ matvec(vs[j]))
     Hk = (Hk + Hk.conj().T) / 2  # Hermitize away floating-point asymmetry
     evals, evecs = np.linalg.eigh(Hk)
 
@@ -114,7 +128,9 @@ def _local_krylov_projection(matvec, x0, dK, threshold):
     keep = np.abs(evals) < threshold
     truncated_weight_sq = float(np.sum(np.abs(c_e[~keep]) ** 2))
     c_e = np.where(keep, c_e, 0.0)
-    new_x0 = V @ (evecs @ c_e)
+    # one small host -> device transfer of k coefficients, then the O(dim)
+    # reconstruction happens on the device
+    new_x0 = V @ bk.asarray(evecs @ c_e)
     return new_x0, truncated_weight_sq
 
 
