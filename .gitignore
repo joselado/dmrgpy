@@ -35,3 +35,8 @@ dist/
 build/
 .parallel/
 benchmarks/output/
+
+# Machine-local, deliberately untracked: cluster-specific operational detail
+# (login, scratch paths, Slurm partitions) that must not be published.
+*.local.md
+benchmarks/gpu/*.sbatch

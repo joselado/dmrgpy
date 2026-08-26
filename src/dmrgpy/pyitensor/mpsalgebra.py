@@ -23,6 +23,8 @@ exposed under both names purely so a later phase's transcription of
 
 import numpy as np
 
+from . import backend as bk
+
 from .index import Index
 from .mpscontainer import MPO, MPS, _link_at
 from .svd import svd
@@ -128,7 +130,7 @@ def traceC(mpo):
         ax_in = T.inds.index(in_ind)
         ax_out = T.inds.index(out_ind)
         remaining = [ind for ind in T.inds if ind != in_ind and ind != out_ind]
-        arr = np.trace(T.array, axis1=ax_in, axis2=ax_out)
+        arr = bk.xp().trace(T.array, axis1=ax_in, axis2=ax_out)
         piece = ITensor(tuple(remaining), arr)
         env = piece if env is None else env * piece
     return env.scalar()
@@ -193,7 +195,7 @@ def sum_many(chains, cutoff=0.0, maxdim=None):
         shape = (((new_left.dim,) if new_left else ())
                  + phys_shape
                  + ((new_right.dim,) if new_right else ()))
-        combined = np.zeros(shape, dtype=complex)
+        combined = bk.zeros(shape)
 
         left_off = 0
         right_off = 0
@@ -208,7 +210,9 @@ def sum_many(chains, cutoff=0.0, maxdim=None):
             idx += [slice(None)] * len(phys)
             if new_right:
                 idx.append(slice(right_off, right_off + right_dim))
-            combined[tuple(idx)] = arr
+            # setblock, not `combined[...] = arr`: JAX arrays are immutable,
+            # so this returns a new array rather than mutating in place.
+            combined = bk.setblock(combined, tuple(idx), arr)
             left_off += left_dim
             right_off += right_dim
 

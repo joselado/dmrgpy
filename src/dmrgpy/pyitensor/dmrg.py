@@ -50,6 +50,8 @@ lambda between sweeps -- see its own docstring for the derivation.
 
 import numpy as np
 
+from . import backend as bk
+
 from . import kernels
 from .mpsalgebra import _link_at, inner
 from .mpsalgebra import sum as mps_sum
@@ -99,47 +101,56 @@ def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12):
     module's docstring for why this replaces scipy.sparse.linalg.eigsh
     here. Returns (eigenvalue, eigenvector) with eigenvector normalized
     (v0 need not be)."""
-    beta0 = np.linalg.norm(v0)
+    # The Krylov vectors stay wherever v0 lives (on the device, for a
+    # device backend). Only the tridiagonal coefficients alpha/beta come
+    # back to the host -- two numbers per iteration, against O(chi^2 d^2)
+    # of vector that never moves. The tridiagonal eigenproblem itself is
+    # at most 30x30 and runs on the host by design.
+    _xp = bk.xp()
+    beta0 = float(bk.to_host(_xp.linalg.norm(v0)))
     if beta0 == 0:
-        v0 = np.random.default_rng(0).standard_normal(v0.shape) + 0j
-        beta0 = np.linalg.norm(v0)
+        v0 = bk.asarray(np.random.default_rng(0).standard_normal(v0.shape) + 0j)
+        beta0 = float(bk.to_host(_xp.linalg.norm(v0)))
     q = v0 / beta0
     qs = [q]
     alphas = []
     betas = []
     w = matvec(q)
-    alpha = np.vdot(q, w).real
+    alpha = float(bk.to_host(_xp.vdot(q, w).real))
     alphas.append(alpha)
     w = w - alpha * q
 
     prev_eval = _tridiag_ground_value(alphas, betas)
     m = min(niter, v0.size)
     for _ in range(1, m):
-        beta = np.linalg.norm(w)
+        beta = float(bk.to_host(_xp.linalg.norm(w)))
         if beta < tol:
             break
         betas.append(beta)
         q_new = w / beta
         qs.append(q_new)
         w = matvec(q_new)
-        alpha = np.vdot(q_new, w).real
+        alpha = float(bk.to_host(_xp.vdot(q_new, w).real))
         alphas.append(alpha)
         w = w - alpha * q_new - beta * qs[-2]
         for qk in qs[:-1]:
-            w = w - np.vdot(qk, w) * qk
+            # the overlap stays on the device: it is immediately multiplied
+            # back into a device vector, so pulling it home would be a
+            # round trip for nothing
+            w = w - _xp.vdot(qk, w) * qk
 
         # eigenvalue only for the convergence test; the eigenvector is
         # built once, on the iteration that actually returns
         cur_eval = _tridiag_ground_value(alphas, betas)
         if abs(cur_eval - prev_eval) < tol * max(1.0, abs(cur_eval)):
             cur_eval, cur_vec = _tridiag_ground_ritz(alphas, betas)
-            Q = np.column_stack(qs)
-            return cur_eval, Q @ cur_vec
+            Q = _xp.column_stack(qs)
+            return cur_eval, Q @ bk.asarray(cur_vec)
         prev_eval = cur_eval
 
     cur_eval, cur_vec = _tridiag_ground_ritz(alphas, betas)
-    Q = np.column_stack(qs)
-    return cur_eval, Q @ cur_vec
+    Q = _xp.column_stack(qs)
+    return cur_eval, Q @ bk.asarray(cur_vec)
 
 
 def _relabel_bra_local(T, chain, i, left_bra, right_bra):
@@ -307,9 +318,13 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
     dim = x0.size
     if dim <= 3:
         # too small a space for Lanczos to be meaningful; diagonalize directly.
-        basis = np.eye(dim, dtype=complex)
-        Hmat = np.column_stack([matvec(basis[:, k]) for k in range(dim)])
-        w, v = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
+        # dim <= 3, so this whole matrix is at most 3x3: build it with the
+        # active namespace (matvec returns device arrays for a device
+        # backend) and diagonalize it there rather than transferring.
+        _xp = bk.xp()
+        basis = bk.eye(dim)
+        Hmat = _xp.column_stack([matvec(basis[:, k]) for k in range(dim)])
+        w, v = _xp.linalg.eigh((Hmat + Hmat.conj().T) / 2)
         eval0, evec0 = w[0], v[:, 0]
     else:
         # The Sweeps schedule's own niter (e.g. ITensor's usual default of
@@ -568,14 +583,20 @@ def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, wei
     def matvec(v):
         out = matvec_H(v)
         for pf in proj_flats:
-            out = out + weight * np.vdot(pf, v) * pf
+            # overlap stays on the device: it is multiplied straight back
+            # into a device vector
+            out = out + weight * bk.xp().vdot(pf, v) * pf
         return out
 
     dim = x0.size
     if dim <= 3:
-        basis = np.eye(dim, dtype=complex)
-        Hmat = np.column_stack([matvec(basis[:, k]) for k in range(dim)])
-        w, v = np.linalg.eigh((Hmat + Hmat.conj().T) / 2)
+        # dim <= 3, so this whole matrix is at most 3x3: build it with the
+        # active namespace (matvec returns device arrays for a device
+        # backend) and diagonalize it there rather than transferring.
+        _xp = bk.xp()
+        basis = bk.eye(dim)
+        Hmat = _xp.column_stack([matvec(basis[:, k]) for k in range(dim)])
+        w, v = _xp.linalg.eigh((Hmat + Hmat.conj().T) / 2)
         eval0, evec0 = w[0], v[:, 0]
     else:
         # The Sweeps schedule's own niter (e.g. ITensor's usual default of

@@ -9,6 +9,7 @@ through this same function via mps.py/mpo.py in a later phase.
 
 import numpy as np
 
+from . import backend as bk
 from .index import Index
 from .tensor import ITensor, _find
 
@@ -79,10 +80,11 @@ def eigh_truncate(rho, cutoff, maxdim, mindim=1):
     Krylov-subspace basis enrichment and pyitensor/nhdmrg.py's fidelity
     truncation both reduce to exactly this step, once each has built its
     own (differently constructed) rho."""
-    evals, evecs = np.linalg.eigh(rho)
+    evals, evecs = bk.xp().linalg.eigh(rho)
     order = np.argsort(evals)[::-1]
     evals, evecs = evals[order], evecs[:, order]
-    svals = np.sqrt(np.clip(evals, 0.0, None))
+    svals = bk.to_host(evals)          # O(chi): the spectrum goes to the host
+    svals = np.sqrt(np.clip(svals, 0.0, None))
     keep, _discarded = _truncate(svals, cutoff, maxdim, mindim)
     return evecs[:, :keep], keep
 
@@ -131,12 +133,19 @@ def _svd_truncated(mat, cutoff, maxdim, mindim):
     if min(m, n) >= _GRAM_MIN_DIM:
         left = m <= n
         gram = mat @ mat.conj().T if left else mat.conj().T @ mat
-        evals, evecs = np.linalg.eigh(gram)
+        evals, evecs = bk.xp().linalg.eigh(gram)
         evals = evals[::-1]
         evecs = evecs[:, ::-1]
-        S = np.sqrt(np.clip(evals, 0.0, None))
-        keep, discarded = _truncate(S, cutoff, maxdim if maxdim else None, max(1, mindim))
-        if S[0] > 0.0 and S[keep - 1] >= _GRAM_MIN_RELATIVE_SV * S[0]:
+        S = bk.xp().sqrt(bk.xp().clip(evals, 0.0, None))
+        # The truncation rule is a cumulative sum plus data-dependent
+        # branching over O(chi) numbers -- worthless on a device, and a
+        # device array cannot be compared with a Python float. So the
+        # singular values (and only they) come back to the host; the
+        # eigenvectors, which are O(chi^2), never move.
+        S_host = bk.to_host(S) if bk.is_device() else S
+        keep, discarded = _truncate(S_host, cutoff, maxdim if maxdim else None,
+                                    max(1, mindim))
+        if S_host[0] > 0.0 and S_host[keep - 1] >= _GRAM_MIN_RELATIVE_SV * S_host[0]:
             W = evecs[:, :keep]
             if left:
                 U = W
@@ -146,8 +155,10 @@ def _svd_truncated(mat, cutoff, maxdim, mindim):
                 U = (mat @ W) / S[None, :keep]
             return U, S, Vh, keep, discarded
 
-    U, S, Vh = np.linalg.svd(mat, full_matrices=False)
-    keep, discarded = _truncate(S, cutoff, maxdim if maxdim else None, max(1, mindim))
+    U, S, Vh = bk.xp().linalg.svd(mat, full_matrices=False)
+    S_host = bk.to_host(S) if bk.is_device() else S
+    keep, discarded = _truncate(S_host, cutoff, maxdim if maxdim else None,
+                                max(1, mindim))
     return U[:, :keep], S, Vh[:keep, :], keep, discarded
 
 
@@ -179,9 +190,35 @@ def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
 
     U, S, Vh, keep, discarded = _svd_truncated(mat, cutoff, maxdim, mindim)
 
-    probs_full = (S.astype(float) ** 2)
+    keep_true = keep          # before any padding: what was actually kept
+    pad_to = bk.pad_bonds()
+    if pad_to and keep < pad_to:
+        # Freeze this bond at pad_to by appending zero singular values (see
+        # backend.set_pad_bonds). Exact: the appended columns/rows are zero,
+        # so they contribute nothing to any contraction -- they only keep
+        # the shape constant so XLA compiles each kernel once instead of
+        # once per bond dimension.
+        _xp = bk.xp()
+        npad = pad_to - keep
+        U = _xp.concatenate([U[:, :keep],
+                             _xp.zeros((U.shape[0], npad), dtype=U.dtype)], axis=1)
+        Vh = _xp.concatenate([Vh[:keep, :],
+                              _xp.zeros((npad, Vh.shape[1]), dtype=Vh.dtype)], axis=0)
+        S = _xp.concatenate([S[:keep], _xp.zeros(npad, dtype=S.dtype)])
+        keep = pad_to
+
+    # The spectrum is O(chi) and everything downstream of it (entanglement
+    # entropy, truncation weight, the diagonal S tensor) is host-side
+    # bookkeeping, so bring it back once here rather than per use. U and Vh
+    # -- the O(chi^2) parts -- stay wherever they were computed.
+    S_host = bk.to_host(S).real if bk.is_device() else S
+    probs_full = (S_host.astype(float) ** 2)
     total = probs_full.sum()
-    probs = probs_full[:keep] / total if total > 0 else probs_full[:keep]
+    # probs/Spectrum describe the *physical* spectrum, so they stop at
+    # keep_true: the padded entries are exact zeros, and feeding them to an
+    # entanglement entropy would evaluate 0*log(0). U/S/V keep their padded
+    # shape -- that is the whole point of the padding.
+    probs = probs_full[:keep_true] / total if total > 0 else probs_full[:keep_true]
 
     bond_u = Index(keep, tags=tags)
     bond_v = Index(keep, tags=tags)
@@ -190,8 +227,8 @@ def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
 
     Utensor = ITensor(tuple(left_inds) + (bond_u,), U.reshape(left_shape))
     Vtensor = ITensor((bond_v,) + tuple(right_inds), Vh.reshape(right_shape))
-    Stensor = ITensor((bond_u, bond_v), np.diag(S[:keep].astype(complex)))
-    spectrum = Spectrum(S[:keep], probs, discarded)
+    Stensor = ITensor((bond_u, bond_v), np.diag(S_host[:keep].astype(complex)))
+    spectrum = Spectrum(S_host[:keep_true], probs, discarded)
     return Utensor, Stensor, Vtensor, spectrum
 
 
@@ -230,9 +267,9 @@ def qr_split(T, left_inds, tags="Link", orthonormal="left"):
     mat = arr.reshape(ldim, rdim)
 
     if orthonormal == "left":
-        Amat, Bmat = np.linalg.qr(mat, mode="reduced")
+        Amat, Bmat = bk.xp().linalg.qr(mat, mode="reduced")
     elif orthonormal == "right":
-        Q, R = np.linalg.qr(mat.conj().T, mode="reduced")
+        Q, R = bk.xp().linalg.qr(mat.conj().T, mode="reduced")
         Amat, Bmat = R.conj().T, Q.conj().T
     else:
         raise ValueError("qr_split: orthonormal must be 'left' or 'right', got {}".format(orthonormal))

@@ -31,6 +31,8 @@ benchmark comparing the two.
 
 import numpy as np
 
+from . import backend as bk
+
 from .index import Index
 from .mpscontainer import MPO
 from .mpsalgebra import sum_many as _mps_sum_many
@@ -82,7 +84,7 @@ def _zero_mpo(sites):
         right_link = Index(1, tags="Link,l={}".format(i)) if i < n else None
         inds = ([left_link] if left_link else []) + [s, s.prime(1)] + ([right_link] if right_link else [])
         shape = tuple(ind.dim for ind in inds)
-        tensors.append(ITensor(tuple(inds), np.zeros(shape, dtype=complex)))
+        tensors.append(ITensor(tuple(inds), bk.zeros(shape)))
         prev_link = right_link
     mpo = MPO(tensors)
     mpo.center = 1

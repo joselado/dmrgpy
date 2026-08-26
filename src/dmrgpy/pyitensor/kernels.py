@@ -178,25 +178,41 @@ except ImportError:
 
 
 def _detect_default_use_jax():
-    """Best-effort default: only auto-enable JAX if it reports a non-CPU
-    device, where the per-call dispatch overhead responsible for the
-    measured CPU regression (see this module's docstring) may not apply.
-    UNTESTED on real GPU/TPU hardware -- if it turns out JAX is a net loss
-    there too, this heuristic should be replaced with an explicit opt-in
-    only (set USE_JAX = True yourself, never automatic)."""
-    if not _HAVE_JAX:
-        return False
-    try:
-        return any(d.platform != "cpu" for d in jax.devices())
-    except Exception:
-        return False
+    """Always False. This used to auto-enable JAX whenever jax.devices()
+    reported a non-CPU device, on the theory that a GPU's compute win might
+    outrun the per-call dispatch overhead responsible for the measured CPU
+    regression (see this module's docstring). That theory has now been
+    tested on real hardware and it is wrong, so the heuristic is gone --
+    following the instruction the docstring itself left for this outcome
+    ("replaced with an explicit opt-in only, never automatic").
+
+    Measured on an NVIDIA H200 (jax
+    0.7.1 with its CUDA plugin, benchmarks/gpu/pyitensor_gpu_probe.py):
+    ground-state DMRG on a Heisenberg chain was 5-11x *slower* on this
+    path than on the plain one -- 0.26s vs 2.91s (n=16, maxm=60), 0.48s
+    vs 2.25s (n=20, maxm=100), 0.53s vs 3.50s (n=24, maxm=200), same
+    energies to 8e-14. So the auto-enable was not a harmless guess: on a
+    GPU node it silently made every pyitensor run several times slower.
+
+    The reason is the conversion, not the device. The same job's primitive
+    microbenchmark (benchmarks/gpu/gpu_microbench.py) has the H200 doing
+    the two-site matvec 5.5x faster than one Xeon 6248 core at chi=64 and
+    688x faster at chi=1024 -- while a single host->device->host round trip
+    for one theta-sized array costs *more* than the matvec itself at every
+    chi above 64 (4.3ms vs 1.5ms at chi=512; 22.0ms vs 8.3ms at chi=1024).
+    This path converts per call, so it pays that round trip on every
+    Lanczos iteration and cannot win however fast the device is. Winning
+    requires arrays that stay resident on the device, which is a port and
+    not a flag -- see docs/pyitensor_gpu_port_plan.md.
+    """
+    return False
 
 
-# Runtime on/off switch, independent of whether jax is importable -- flip
-# to True to force JAX on (e.g. on GPU hardware this heuristic doesn't
-# recognize), or to False to force plain NumPy even where JAX would
-# otherwise auto-enable. available() reflects what will actually be used,
-# not just what's importable.
+# Runtime on/off switch, independent of whether jax is importable. Always
+# off by default now (see _detect_default_use_jax above: the automatic
+# version made GPU runs 5-11x slower, and CPU runs 1.5-2.5x slower). Set it
+# True yourself to measure this path; available() reflects what will
+# actually be used, not just what's importable.
 USE_JAX = _detect_default_use_jax()
 
 # Off by default despite the real ~1.7x-2x per-contraction win (see this
@@ -287,8 +303,8 @@ def _get_numba_contractor(perm_a, shape_a2, perm_b, shape_b2):
 
     @numba.njit(fastmath=True)
     def _contract(A, B):
-        At = np.transpose(A, perm_a).copy().reshape(shape_a2)
-        Bt = np.transpose(B, perm_b).copy().reshape(shape_b2)
+        At = A.transpose(perm_a).copy().reshape(shape_a2)
+        Bt = B.transpose(perm_b).copy().reshape(shape_b2)
         return At @ Bt
 
     _numba_contractor_cache[key] = _contract
@@ -345,7 +361,7 @@ def _make_matvec_numba(pieces, order_in, shape_in, order_out):
         cur = v_flat.reshape(shape_in)
         for contractor, step_shape, piece_arr in contractors:
             cur = contractor(cur, piece_arr).reshape(step_shape)
-        return np.transpose(cur, final_perm).reshape(out_shape).reshape(-1)
+        return cur.transpose(final_perm).reshape(out_shape).reshape(-1)
 
     return matvec
 
@@ -389,9 +405,13 @@ def _make_matvec_planned(pieces, order_in, shape_in, order_out):
     # Precomputing is exact, not an approximation: same arrays, same
     # left-to-right order, same matmuls, so results stay bit-identical --
     # this carries none of the summation-order risk a re-association would.
+    # NOTE: every array operation below is a *method* (.transpose/.reshape/@),
+    # never a numpy free function, so this path works unchanged whether the
+    # arrays are numpy or JAX device arrays (backend.py). np.transpose() on a
+    # device array would copy it to the host per call.
     prepared = []
     for perm_a, shape_a2, perm_b, shape_b2, step_shape, piece_arr in steps:
-        Bt = np.transpose(piece_arr, perm_b).reshape(shape_b2)
+        Bt = piece_arr.transpose(perm_b).reshape(shape_b2)
         # skip a no-op transpose on the vector side too (common when the
         # planned axis order already matches)
         ident_a = (perm_a == tuple(range(len(perm_a))))
@@ -401,10 +421,10 @@ def _make_matvec_planned(pieces, order_in, shape_in, order_out):
     def matvec(v_flat):
         cur = v_flat.reshape(shape_in)
         for perm_a, ident_a, shape_a2, Bt, step_shape in prepared:
-            At = cur if ident_a else np.transpose(cur, perm_a)
+            At = cur if ident_a else cur.transpose(perm_a)
             cur = (At.reshape(shape_a2) @ Bt).reshape(step_shape)
         if not trivial_final:
-            cur = np.transpose(cur, final_perm)
+            cur = cur.transpose(final_perm)
         return cur.reshape(-1)
 
     return matvec
