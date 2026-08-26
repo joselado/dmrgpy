@@ -3652,6 +3652,66 @@ bookkeeping fixes referenced above -- it was ~13x before them).
   the TDVP/METTS gap discussed in §5.3 — re-run both rather than trusting
   these numbers verbatim on a different setup.
 
+
+## GPU: the `pyitensor` array backend
+
+`itensor_version="python"` has a second, orthogonal axis: *which array
+library* its ITensors are made of. `pyitensor/backend.py` selects it
+process-wide.
+
+```python
+from dmrgpy.pyitensor import backend
+backend.set_backend("jax")     # or "numpy" (the default)
+print(backend.device_info())   # e.g. "jax: cuda:0"
+```
+
+This is a device axis, not a new backend: `set_backend` changes nothing
+about dispatch (`mode.py` still decides DMRG vs ED, `cppext` still decides
+which compiled extension backs `itensor_version in (2,3)`), only what
+`ITensor.array` is. The compiled C++ backends and the ED path are
+unaffected.
+
+The design rests on one measured constraint: **arrays must stay on the
+device**. A single host->device->host round trip for one two-site tensor
+costs *more* than the contraction it feeds above modest bond dimension
+(22.0 ms vs 8.3 ms at chi=1024 on an H200), so any design that converts
+per call loses however fast the device is. Consequently:
+
+* there is exactly one conversion point in the engine, `ITensor.__init__`
+  (via `backend.asarray`), and everything built from a converted array
+  stays put;
+* host round trips are confined to three O(1)/O(chi) places -- the
+  Lanczos alpha/beta coefficients (`dmrg.py`), the singular-value vector
+  `svd.py`'s truncation rule branches on, and measurement results;
+* almost everything else needed no namespace at all, because the
+  operations this engine performs on tensor data are ndarray *methods*
+  (`.transpose`, `.reshape`, `.conj`, `@`), identical on NumPy and JAX.
+
+Three places did need explicit work, and each is a trap worth knowing:
+
+* **`np.transpose(arr, perm)` and friends silently transfer.** JAX arrays
+  implement no `__array_function__`, so a NumPy free function falls back
+  to `__array__` and copies the whole tensor to the host -- per call, with
+  no error. `kernels.py`'s planned matvec used exactly this. Use methods.
+* **JAX arrays are immutable**, so `mpsalgebra.py`'s direct-sum block
+  write goes through `backend.setblock`, which mutates in place on NumPy
+  and returns a new array on JAX. Callers must use the return value.
+* **XLA compiles a kernel per (operation, shape)**, and DMRG mints a new
+  shape whenever a bond dimension changes, so a cold run pays a large
+  one-time compile tax (measured: 672 compilations, 18.4 s of a 29.1 s
+  run). `backend.set_pad_bonds(K)` freezes every bond at K to collapse
+  that shape zoo; it appends zero singular values after truncation, so
+  the represented state is unchanged.
+
+There is deliberately no `jax.jit` on the hot path: eager dispatch has a
+per-call floor (~0.35 ms on an H200) which is why the device cannot win
+below chi ~ 120, and `jax.jit` retraces per shape, which DMRG's growing
+bonds defeat -- the same trap `kernels.py` documents for numba.
+
+Measured speedups, the crossover, the primitive-by-primitive table and the
+benchmarking pitfalls are in `docs/gpu_cpu_performance.md`; the port's
+design history is in `docs/pyitensor_gpu_port_plan.md`.
+
 ## 6. Directory reference
 
 | Path | Contents |

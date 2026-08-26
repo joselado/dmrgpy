@@ -31,6 +31,7 @@ reference on small systems.
 17. [STM/Kondo tunneling spectra (third-order perturbation theory)](#17-stmkondo-tunneling-spectra-third-order-perturbation-theory)
 18. [Infinite chains (iDMRG)](#18-infinite-chains-idmrg)
 19. [Performance: BLAS threads](#19-performance-blas-threads)
+19b. [Running the pure-Python backend on a GPU](#19b-running-the-pure-python-backend-on-a-gpu)
 
 ## 1. Physical models and Hilbert spaces
 
@@ -2423,6 +2424,53 @@ ic._session3.vumps_load_uniform_state(D, d_g, AL.flatten().tolist(),
 ```
 
 `W_bulk_flat[p]` is a dense, row-major `(Left,in,out,Right)` array (size `Dw_left[p]*d_p*d_p*Dw_right[p]`) — the same convention as `idmrg.apply_mpo`'s own ITensor list, just flattened. See `tests/test_vumps_apply_mpo_v3.py` and `examples/idmrg/vumps_apply_mpo_v3_VS_python/main.py` for the full cross-check against `itensor_version="python"`, including the same three cases (`D=1` exact, `D>1` unitary invariants, `chi_W>1` bond growth at `n_uc=2`).
+
+## 19b. Running the pure-Python backend on a GPU
+
+`itensor_version="python"` can put its tensors on a GPU instead of in host
+memory. It is one process-wide switch, set before building a chain:
+
+```python
+from dmrgpy.pyitensor import backend
+backend.set_backend("jax")          # "numpy" (default) puts them back
+print(backend.device_info())        # "jax: cuda:0" if a device was found
+
+from dmrgpy import spinchain
+sc = spinchain.Spin_Chain(["S=1/2"]*30, itensor_version="python")
+...                                  # everything else is unchanged
+```
+
+It needs `jax` with its CUDA plugin installed; nothing else changes about
+your script, and results agree with the host run to ~1e-11 or better.
+
+**Whether it is worth using depends on one number: your bond dimension.**
+
+| bond dimension | what to expect |
+|---|---|
+| below ~120 | the GPU is *slower* (0.1-0.5x). Use `"numpy"`. |
+| ~120-160 | break-even |
+| 240 | ~5x (both ground states and KPM correlators) |
+| 480 | ~20x on a ground state that needs it |
+
+The reason is not the calculation type but the arithmetic-to-overhead
+ratio: each device operation costs ~0.35 ms no matter how small, so many
+small tensors lose and few large ones win. Note this also means longer
+chains do not help by themselves (more operations, same size each) --
+bond dimension does.
+
+Two things to set when you use it:
+
+* `backend.set_pad_bonds(K)` (with `K` your bond dimension) if the script
+  does *one* calculation and exits: it makes every tensor shape identical
+  so the GPU compiles each kernel once, worth 1.4-3.1x on such a run. Skip
+  it for long sweeps inside one process, where it costs 6-31%.
+* for a KPM correlator, set `kpmmaxm` equal to `maxm`, so the ground-state
+  solve and the moment recursion share one set of shapes.
+
+`docs/gpu_cpu_performance.md` has the full measured comparison, including
+which models are and are not meaningful GPU benchmarks -- a uniform
+Heisenberg chain's ground state converges at chi ~ 60 and cannot show a
+speedup at any `maxm`.
 
 ## 19. Performance: BLAS threads
 
