@@ -278,17 +278,40 @@ itself: `keep` is a cumulative sum with data-dependent branching over the
 spectrum, worthless on a device and not comparable against a Python float
 there, so O(chi) numbers come home per factorization by design.
 
-Measured numbers, n=30, are pending the benchmark job
+### Does TDZ actually reach a bond dimension a device cares about?
+
+Worth settling before reading any timing, because the answer was not what
+this section originally predicted. The paper's headline is that the
+complex-time contour keeps chi small -- it reports chi ~ 20-30 against
+500-700 for real-time evolution -- and this port's crossover is chi ~
+120-160, so the expectation written here first was that TDZ sits on the
+wrong side of the line by construction.
+
+Measured instead (n=30 Heisenberg, `alpha0=0.1`, `dt=0.1`, one core, the
+largest bond dimension anywhere in the MPS):
+
+| t | 0.1 | 1.1 | 2.1 | 3.1 | 4.1 | 5.1 | 6.1 | 6.6 |
+|---|---|---|---|---|---|---|---|---|
+| chi | 72 | 83 | 98 | 125 | 156 | 191 | 230 | **240 (cap)** |
+
+It starts at 72 -- the state is `Sz|GS>`, so it inherits the ground
+state's own bond dimension rather than starting at 1 -- crosses the
+120-160 crossover at t ~ 3-4, and saturates a `maxm=240` cap at t = 6.6,
+a third of the way through a `nt=100` run. So on this model, at this
+alpha0, TDZ is *not* a small-chi calculation: the contour slows
+entanglement growth, it does not prevent it.
+
+Two consequences. Every bond dimension in the sweep below is genuinely
+binding (at `maxm=30` and `60` the state is truncated from the very first
+step, since it begins at 72), so no row is measuring padding tax on bond
+dimension the state never reaches. And the paper's chi ~ 20-30 should be
+read as a statement about its own impurity model and contour angle, not a
+property of the method that transfers to every Hamiltonian -- a larger
+`alpha0` damps harder and would push these numbers down.
+
+Measured timings, n=30, are pending the benchmark job
 (`benchmarks/gpu/tdz_bench.py`, `tdz_gpu.sbatch` + `tdz_cpu.sbatch`); this
-section will be filled in with the table it produces. The honest
-expectation to hold while reading it: TDZ's entire selling point is that
-the complex-time contour damps high-energy content and so needs a *small*
-bond dimension (the paper reports chi ~ 20-30 against 500-700 for
-real-time evolution), while this port's crossover is chi ~ 120-160. At its
-natural operating point TDZ is therefore on the wrong side of that line,
-and the changes above widen the range of *session shapes* and bond
-dimensions for which a device is viable rather than making a small
-complex-time run worth a GPU.
+section will be filled in with the table it produces.
 
 The lever that would change that verdict is the one the four-point
 correlator found and TDZ has not used yet: a genuine batch axis. Computing
