@@ -168,12 +168,20 @@ class MPS():
             if type(A)==multioperator.MultiOperator: # MO type
                 return self.MBO.applyoperator(A,self) # apply the operator
             elif multioperator.isnumber(A):
-                return A*multioperator.identity()*self
+                # Scalar rescale: a single-tensor operation, NOT an
+                # operator application. This used to be written as
+                # A*identity()*self, i.e. a full truncating MPO sweep over
+                # the whole chain per scalar -- see mpsalgebra.scale_mps's
+                # docstring for the measured cost of that (a third of a CVM
+                # solve's wall time) and for the fallback it keeps for
+                # backends without the scale_mps binding.
+                return self.MBO.scale_mps(A,self)
             else: raise
         else: raise
     def __mul__(self,x):
         if multioperator.isnumber(x):
-            return x*multioperator.identity()*self
+            if self.MBO is not None: return self.MBO.scale_mps(x,self)
+            raise
         else: raise
     def get_dm(self,**kwargs):
         """COmpute the density matrix"""

@@ -339,6 +339,15 @@ class Chain:
     def sum_mps(self, wf1, wf2):
         return mps_sum(wf1, wf2, cutoff=self.cutoff, maxdim=self.maxm)
 
+    def scale_mps(self, wf, z):
+        """Rescale an MPS by a complex number, mirroring
+        mpscppN/chain_session.h's scale_mps(). mpscontainer.MPS.__mul__
+        already scales a single site tensor, so this is O(chi^2 d) with no
+        contraction and no truncation -- see the C++ comment for why
+        mps.py needs it (the alternative is a full identity-MPO sweep per
+        scalar multiplication)."""
+        return wf * complex(z)
+
     def conjugate(self, wf):
         out = wf.copy()
         for i in range(1, out.length() + 1):
@@ -715,6 +724,42 @@ class Chain:
         x = self._bicstab(A, b, tol, max_it)
         G = inner(self.wf0, S1, x)
         return -G.imag / np.pi
+
+    def ddmrg_correction_vector(self, terms_i, terms_j, omega, eta, energy,
+                                maxdim, nsweeps, x0=None):
+        """Correction-vector dynamical correlator by variational sweeping
+        (ddmrg.py) rather than by cvm.py's global conjugate gradient.
+
+        Returns (value, x), the spectral weight -W_min/(pi*eta) and the
+        converged correction vector -- the latter so a caller sweeping a
+        frequency window can seed the next point with it (see
+        ddmrg.correction_vector's note on why warm-starting is safe here
+        and is not for the global CG).
+
+        terms_i/terms_j are the two operators of <GS|A (z-H)^-1 B|GS>;
+        this solver requires A = B^dagger and cvm.py checks that before
+        calling, but both are taken so the signature matches
+        cvm_dynamical_correlator's and so B is built from terms_j exactly
+        as that path does."""
+        from . import ddmrg
+        if self.wf0 is None:
+            raise RuntimeError("Chain.ddmrg_correction_vector called before gs_energy")
+        S2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j),
+                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        # (H - E0 - omega) as an MPO, then M = that squared plus eta^2.
+        ampo = AutoMPO(self.sites)
+        ampo.add(-(energy + omega), "Id", 1)
+        shift = to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        Hsh = mps_sum(self.H, shift, cutoff=self.cutoff, maxdim=self.mpomaxm)
+        ampo2 = AutoMPO(self.sites)
+        ampo2.add(eta * eta, "Id", 1)
+        eta2 = to_mpo(ampo2, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        M = mps_sum(self._mult_mpo(Hsh, Hsh), eta2,
+                    cutoff=self.cutoff, maxdim=self.mpomaxm)
+        b = self._apply_mpo(S2, self.wf0) * (-eta)
+        x, W = ddmrg.correction_vector(M, b, maxdim, nsweeps, self.cutoff,
+                                        x0=x0)
+        return -W / (np.pi * eta), x
 
     def apply_inverse(self, terms, wf, tol, max_it):
         A = to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)

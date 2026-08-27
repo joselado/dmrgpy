@@ -21,6 +21,8 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     """
     AB = operatornames.str2MO(self,name,i=i,j=j) # resolve operators once
     A,B = AB[0],AB[1]
+    if _use_ddmrg(self,A,B): # variational solver (pyitensor only)
+        return dynamical_correlator_ddmrg(self,A,B,es=es,delta=delta)
     wf0 = self.get_gs() # computes or returns the cached GS; also sets self.e0
     # sweep parameters used both by B*wf0 below and by every CG solve
     with _cvm_sweep_params(self):
@@ -36,6 +38,51 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
 #    (es,out) = points2function(es,out)
     return (es,out) # return result
 
+
+
+
+def _use_ddmrg(self,A,B):
+    """Whether to route this correlator through the variational
+    (Jeckelmann DDMRG) solver instead of the global conjugate gradient.
+
+    Three conditions, all necessary:
+
+    * `self.cvm_solver == "variational"` -- opt-in, so the default path
+      stays byte-identical on every backend (see manybodychain.py).
+    * `itensor_version == "python"` -- pyitensor is where the two-site
+      environment machinery the solver reuses lives; the compiled
+      backends would need it written again in C++.
+    * A == B^dagger -- the variational principle needs a real quadratic
+      form bounded below, i.e. the same operator on both sides. A general
+      off-diagonal <GS|A (z-H)^-1 B|GS> has no such functional, so it
+      falls back to CG rather than silently minimizing the wrong thing.
+    """
+    if getattr(self,"cvm_solver","cg")!="variational": return False
+    if self.itensor_version!="python": return False
+    return self.is_zero_operator(A.get_dagger()-B)
+
+
+def dynamical_correlator_ddmrg(self,A,B,es=None,delta=1e-1):
+    """Frequency sweep using the variational correction vector.
+
+    Each point seeds its sweep with the previous point's converged
+    correction vector. That is the opposite of what the CG path does, and
+    deliberately so: warm-starting CG was measured to be actively harmful
+    (see dynamical_correlator's docstring), because a global CG inherits
+    the whole error history of whatever it starts from, while a
+    variational sweep is non-increasing in W from *any* start -- a closer
+    start can only reduce the number of sweeps needed.
+    """
+    self.get_gs() # ensure the ground state (and self.e0) exist
+    out,x = [],None
+    with _cvm_sweep_params(self):
+        for e in es:
+            o,x = self._session.ddmrg_correction_vector(
+                    A.to_terms(),B.to_terms(),e,delta,self.e0,
+                    int(self.cvm_maxm),int(self.cvm_nsweeps),x0=x)
+            print("DDMRG in E = ",e," value = ",o)
+            out.append(o)
+    return (es,np.array(out))
 
 @contextlib.contextmanager
 def _cvm_sweep_params(self):
@@ -178,9 +225,52 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
             if res<=tol: break
             p = r + (rs_new/rs_old)*p
             rs_old = rs_new
+        _warn_if_unconverged(self,omega,best_res,tol)
         x = 1j*best_xc + (Hshift*best_xc)*(1./eta) # full correction vector
         G = wf0.dot(A*x) # <GS|A|x>
         return -G.imag/np.pi, best_xc, niter, best_res
+
+
+_UNCONVERGED_WARNED = set()
+
+def _warn_if_unconverged(self,omega,best_res,tol,factor=100.):
+    """Say so, loudly, when the global CG stopped far short of `tol`.
+
+    This is not a cosmetic nicety. Whenever the MPS truncation actually
+    binds -- i.e. whenever `cvm_maxm` is below the exact bond dimension the
+    correction vector needs, which is every calculation big enough to
+    require DMRG in the first place -- the global conjugate gradient does
+    not converge slowly, it stops improving at all, and the returned
+    "best iterate" can still be the *initial guess*. Measured on a 14-site
+    Heisenberg chain against an exact ED correction vector, the returned
+    spectrum was wrong by 1.3e-1 (against peak values of ~1.5e-1) at
+    cvm_maxm = 10, 20 and 40 alike -- the values sat at eta*<Sz Sz>/pi, the
+    value of the b initial guess, at most frequencies. The same failure is
+    visible on itensor_version 2 and 3, not just "python": it is a property
+    of doing CG on lossily recompressed vectors, not of any one backend.
+    Before this warning existed, that came back looking like an ordinary
+    answer, with only the printed residual (which is not checked against
+    anything) hinting otherwise.
+
+    Warned once per (chain, tolerance) rather than per frequency, so a
+    300-point sweep does not print 300 identical paragraphs.
+    """
+    if not (best_res>factor*tol): return
+    key = (id(self),float(tol))
+    if key in _UNCONVERGED_WARNED: return
+    _UNCONVERGED_WARNED.add(key)
+    import warnings
+    warnings.warn(
+        "CVM: the conjugate-gradient correction vector did not converge "
+        "(residual %.3g at omega=%.4g, requested tolerance %.3g). This is "
+        "the MPS-truncation residual floor, not slow convergence: the "
+        "returned spectrum may be badly wrong (it can be the initial "
+        "guess). Raise cvm_maxm, or -- on itensor_version='python' with a "
+        "diagonal correlator -- set chain.cvm_solver='variational' to use "
+        "the variational (Jeckelmann DDMRG) solver instead, which "
+        "truncates inside the ansatz and does converge here. See "
+        "src/dmrgpy/pyitensor/ddmrg.py."%(best_res,omega,tol),
+        RuntimeWarning,stacklevel=3)
 
 
 

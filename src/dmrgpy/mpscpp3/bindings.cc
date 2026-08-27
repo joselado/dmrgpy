@@ -775,6 +775,8 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return self.overlap_aMb(wf1,terms_from_python(terms),wf2);
             }, py::arg("wf1"),py::arg("terms"),py::arg("wf2"))
         .def("sum_mps",&Chain::sum_mps,py::arg("wf1"),py::arg("wf2"))
+        .def("scale_mps",&Chain::scale_mps,py::arg("wf"),py::arg("z"),
+             "Rescale an MPS by a complex number (single-tensor, no truncation)")
         .def("conjugate",&Chain::conjugate,py::arg("wf"))
         .def("cvm_dynamical_correlator",
             [](Chain& self, std::vector<PyTerm> const& terms_i,

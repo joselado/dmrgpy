@@ -222,7 +222,20 @@ def sum_many(chains, cutoff=0.0, maxdim=None):
 
     cls = type(chains[0])
     result = cls(tensors)
-    result.center = 1
+    result.center = n
+    if cutoff or maxdim is not None:
+        # The block-diagonal concatenation above is in no canonical form at
+        # all, so a *truncating* left-to-right sweep straight off it would
+        # weigh each cut's singular values by whatever norm the untouched
+        # right part carries instead of by the state's true Schmidt values,
+        # and discard the wrong components. Right-canonicalize losslessly
+        # first (cutoff=0/maxdim=None, gauge only), then truncate on the way
+        # back -- the standard MPS compression recipe, and the same fix
+        # _apply_chain() needs for the same reason; see its comment for the
+        # measured symptom. Skipped entirely when nothing can be discarded
+        # (cutoff=0 and no maxdim), where the single sweep is already an
+        # exact canonicalization.
+        result.position(1)
     result.position(n, cutoff=cutoff, maxdim=maxdim)
     return result
 
@@ -266,6 +279,39 @@ def _apply_chain(K, X, out_cls, cutoff=0.0, maxdim=None):
     truncated (<=maxdim) left side, never a fused-but-about-to-be-
     discarded one.
     """
+    # Right-canonicalize both inputs before the left-to-right sweep. This is
+    # not a nicety, it is what makes the per-cut truncation *mean* anything:
+    # at cut i the left side is already orthonormal (it is the U of the
+    # previous SVD), so the singular values of `piece` are the true Schmidt
+    # values of the exact product only if the not-yet-contracted right side
+    # is orthonormal too. With both K and X right-orthogonal from site i+1
+    # on, the fused right environment satisfies
+    # sum (K†K) (x) (X†X) = I (x) I, so it is exactly orthonormal and the
+    # truncation is optimal. Without it the singular values are weighted by
+    # whatever norm the untouched right part happens to carry, and the cutoff
+    # discards the wrong components -- confirmed directly: applying a
+    # Heisenberg (H - E0 - omega) MPO to an MPS on a 10-site chain, with the
+    # bond dimension (32) far *below* maxdim (60) so maxdim never even bound,
+    # <Hb|Hb> and <b|H^2 b> disagreed by 0.86% (0.0018381 vs 0.0018222) where
+    # the compiled ITensor backends agree to 1e-15. That ~1% error per
+    # application is what left cvm.py's conjugate gradient stalling at a
+    # residual of ~7e-2 on itensor_version="python" (against ~9e-6 on
+    # itensor_version 2 and 3) and returning a visibly wrong spectrum.
+    # This is the canonicalization step the "zip-up" algorithm assumes
+    # (Stoudenmire & White, New J. Phys. 12, 055026 (2010), §3.2).
+    #
+    # Done in place rather than on copies: position() with the default
+    # cutoff=0/maxdim=None is lossless and only changes the gauge, so the
+    # represented state/operator is unchanged, and mutating in place means a
+    # reused operator (cvm.py applies the same Hshift hundreds of times) pays
+    # for it once -- every later call finds center==1 and both while loops in
+    # position() are no-ops.
+    for chain in (K, X):
+        if chain.center is None:
+            chain.center = chain.length()
+        if chain.center != 1:
+            chain.position(1)
+
     n = K.length()
     tensors = []
     leftover = None  # (bond, K's right link, X's right link) from the previous site, or None at site 1

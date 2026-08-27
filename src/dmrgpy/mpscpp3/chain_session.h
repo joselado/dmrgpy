@@ -1099,6 +1099,24 @@ class Chain
         return sum(wf1,wf2,{"MaxDim",maxm_,"Cutoff",cutoff_});
         }
 
+    // Rescale an MPS by a complex number. ITensor's own operator*=(MPS,Cplx)
+    // multiplies a *single* site tensor (mps.cc: x.ref(x.leftLim()+1) *= z),
+    // so this is O(chi^2 d) with no contraction, no bond growth and no
+    // truncation. It exists because mps.py's MPS.__mul__ used to express
+    // "multiply a wavefunction by a number" as a one-term "Id" AutoMPO sent
+    // through apply_operator() -- i.e. a full truncating MPO sweep over the
+    // whole chain per scalar. Measured on a 16-site Heisenberg CVM run
+    // (cvm.py, cvm_maxm=40), that accounted for 15.4 s of 43.8 s: the CG
+    // recurrence rescales an MPS five times per iteration, so a third of the
+    // solver's wall time was spent applying identity operators.
+    MPS
+    scale_mps(MPS const& wf, Cplx z) const
+        {
+        auto out = wf;
+        out *= z;
+        return out;
+        }
+
     MPS
     conjugate(MPS const& wf) const
         {

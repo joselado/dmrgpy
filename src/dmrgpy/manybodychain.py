@@ -180,6 +180,14 @@ class Many_Body_Chain():
       self.cvm_blowup = 100.0 # CVM CG early stop: running residual this
           # many times above the best one means the truncated recurrence
           # is diverging past the floor
+      self.cvm_solver = "cg" # CVM linear solver: "cg" (global conjugate
+          # gradient over whole-MPS primitives, every backend, the
+          # historical behavior) or "variational" (Jeckelmann's dynamical
+          # DMRG: minimize <x|M|x>-2Re<b|x> by two-site sweeping, so the
+          # truncation is part of the ansatz instead of an error injected
+          # after every operation -- itensor_version="python" only, and
+          # only for A=B^dagger; see pyitensor/ddmrg.py)
+      self.cvm_nsweeps = 6 # sweeps for cvm_solver="variational"
       self.cvm_maxm = self.maxm # bond dimension for the CVM correction
           # vector, independent of the ground state's own maxm (mirrors
           # kpmmaxm): a correction vector solving [(H-omega)^2+eta^2]xc=b
@@ -667,6 +675,9 @@ class Many_Body_Chain():
   def summps(self,wf1,wf2,**kwargs):
       """Apply an operator"""
       return mpsalgebra.summps(self,wf1,wf2,**kwargs)
+  def scale_mps(self,x,wf):
+      """Multiply an MPS by a number (see mpsalgebra.scale_mps)"""
+      return mpsalgebra.scale_mps(self,wf,x)
   def trace(self,A,**kwargs):
       """Compute the trace of an operator"""
       return mpsalgebra.trace(self,A,**kwargs)
