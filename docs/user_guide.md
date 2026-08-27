@@ -870,9 +870,48 @@ now the default there. The C++ backend has the same port, where it replaces a
 at 5 sites, a 4x win and an algorithm-beats-language result worth remembering. It does not reuse environments *across* tuples the way
 `ctmode="sweep"` does, so for a plain spinless chain prefer `"sweep"`.
 
+`ctmode="batched"` (`itensor_version="python"`, spinless and native spinful
+alike) computes the same tensor with every transfer contraction *batched*
+over the tuples that share it, and is the default under `"python"` since it
+is exact against both `"sweep"` and `"fold"` to machine precision and
+15-28x faster. The reorganization is worth understanding, because it fixes
+two separate problems at once. `"sweep"` and `"fold"` both evaluate one
+tuple's worth of MPS transfer at a time -- a chain of $\chi\times\chi$
+contractions -- and there are $O(n^4)$ of them, each far too small to keep
+BLAS busy; and the *repeated*-index tuples (those whose four indices are
+not pairwise distinct) get no environment reuse at all under `"sweep"`, so
+despite being only $O(n^3)$ of them they measured at 61-65% of its total
+runtime at $n=12..20$. `"batched"` writes each tuple in site-sorted order as
+a sequence of at most four (local matrix, parity) steps; two tuples agreeing
+on their first $r$ steps share a partial environment whatever sites those
+steps landed on, so the whole $(N,N,N,N)$ tensor collapses onto a trie of a
+few dozen matrix sequences, each holding one array of environments batched
+over the site combinations that realize it. One site of the sweep is then
+two large GEMMs per trie node instead of tens of thousands of small
+contractions, and distinct and repeated tuples go through the same
+machinery. Measured single-threaded on a spinless chain at `maxm=20`, full
+tensor: $n=16$, 10.65\,s (`"sweep"`) / 6.69\,s (ITensor v3, C++) /
+0.38\,s (`"batched"`); $n=30$, 117.3\,s / 72.4\,s / 7.4\,s. For native
+spinful the comparison is against `"fold"`: 1.29\,s $\to$ 0.22\,s at 5
+sites and 3.02\,s $\to$ 0.31\,s at 6, the crossover sitting at 4 sites
+(below that the trie build is a fixed cost the tensor is too small to
+amortize). The batch axis is also what makes this calculation worth putting
+on a GPU at all, and it is the one place in this library where the device
+wins *below* the usual chi ~ 120-160 crossover -- because the arithmetic per
+array operation comes from the tuple batch rather than from bond dimension.
+Measured on an H200 against one Xeon core at $n=30$ (warm, i.e. XLA's ~22\,s
+of per-shape compilation already paid): 0.97/0.95/0.98\,s at `maxm` =
+20/40/80 against 1.89/9.44/22.81\,s on the host, i.e. 2.0x, 9.9x and 23.3x
+-- the device time does not move at all across the range, so every one of
+those is a lower bound. Setting `backend.set_backend("jax")` immediately
+before the call is enough; the ground state itself can stay on NumPy, since
+the MPS is converted once. Full tables and the cold-run caveat in
+`docs/gpu_cpu_performance.md`.
+
 `ctmode=None` (the default) auto-selects the fastest method actually
-available for the wavefunction's backend/chain type: `"sweep"` whenever
-it applies, else `"full"` whenever it applies (any `itensor_version` in
+available for the wavefunction's backend/chain type: `"batched"` whenever
+it applies (`itensor_version="python"`, either flavour), else `"sweep"`
+whenever it applies, else `"full"` whenever it applies (any `itensor_version` in
 `2`/`3`/`"python"`, or `Spinful_Fermionic_Chain_Native` under
 `itensor_version=3` via its own `four_correlation_tensor_spinful()`),
 else the always-correct `"explicit"` fallback (e.g. for

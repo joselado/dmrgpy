@@ -3024,11 +3024,171 @@ a bigger fraction of the per-step cost here than the underlying NumPy
 linear algebra, so there is less for environment reuse to save on
 relative to the total.
 
+\subsection{The four-point tensor as batched GEMMs
+(\texttt{pyitensor/fourpoint.py})}
+
+\texttt{ctmode="batched"} is a third implementation of the same tensor, for
+\texttt{itensor\_version="python"} only, and the default there. It exists
+because both of the others are shaped wrong for the hardware.
+\texttt{"sweep"} and \texttt{"fold"} evaluate one tuple's worth of MPS
+transfer at a time -- a chain of $\chi\times\chi$ by $\chi\times d\times\chi$
+contractions -- and there are $O(n^4)$ such tuples, each contraction
+individually far too small to keep a BLAS call busy. On top of that,
+\texttt{"sweep"} shares environments only across the pairwise-\emph{distinct}
+tuples; the $O(n^3)$ repeated-index ones fall back to independent per-tuple
+folds, and a smaller count times a costlier per-tuple price still wins:
+instrumented at \texttt{maxm=20}, that fallback is 61--65\% of the sweep's
+own runtime at $n=12$, $16$ and $20$. Fixing only the distinct half would
+therefore cap the achievable speedup below $1.6\times$.
+
+The reorganization is a trie. Written in site-sorted order, a tuple becomes a
+sequence of at most four \emph{ranks} -- rank $r$ is the $r$-th smallest
+distinct site the four factors occupy, carrying the product of whichever
+factors sit there, with the Jordan-Wigner $F$ folded in. Two tuples that
+agree on their first $r$ (matrix, parity) steps have the same partial
+environment \emph{whatever sites those steps landed on}, so all
+$n_\mathrm{modes}^4$ tuples collapse onto a trie of a few dozen matrix
+sequences (75 shapes for a spinless chain: $m!\,S(4,m) = 1, 14, 36, 24$ for
+$m = 1\ldots4$ distinct sites, times the mode-name combinations, minus every
+shape whose composed local matrix vanishes -- which on spinless sites is most
+of the repeated-index enumeration, $C^\dagger C^\dagger = 0$). Each trie node
+holds one array of environments, $(B,\chi,\chi)$ with $B$ up to $\binom{n}{r}$,
+batched over the site combinations that realize it, and one site of the sweep
+becomes, per node, exactly two GEMMs:
+%
+\begin{verbatim}
+X[b,j,p,k] = sum_i  E[b,i,j] A_op[i,p,k]
+E'[b,k,l]  = sum_jp X[b,j,p,k] conj(A)[j,p,l]
+\end{verbatim}
+%
+each reshaped into a single $(B\chi,\chi)\times(\chi,d\chi)$ matmul. Distinct
+and repeated tuples go through the same machinery, so the trie subsumes the
+sweep's environment reuse and extends it to the half the sweep never covered.
+
+Every \emph{convention} is inherited from
+\texttt{four\_correlation\_tensor\_fold} rather than re-derived, because that
+is the one implementation covering all tuples under a single rule and already
+validated against the AutoMPO+\texttt{to\_mpo}+\texttt{inner} pipeline:
+operator matrices indexed \texttt{[ket, bra]} and applied as
+\texttt{tensordot(A, mat, ([1],[0])).transpose(0,2,1)}; same-site factors
+composed in increasing factor-position order; and the Jordan-Wigner string
+reduced to one statement covering gap sites and operator sites alike --
+\emph{a site carries an extra $F$ iff the number of factors placed up to and
+including it is odd}, which is what the fold's incremental
+\texttt{carry != odd} test amounts to. The cross-site reordering sign
+\texttt{\_four\_pt\_site\_sort\_sign} depends only on the rank assignment, so
+it is constant across every site combination realizing one shape and is
+applied once per shape at scatter time.
+
+The one thing not inherited is the gauge. The fold re-runs
+\texttt{psi.position(mn)} per group so it can start from an identity left
+environment; a single left-to-right batched pass cannot re-gauge per tuple,
+so this calls \texttt{psi.position(1)} once and grows the operator-free left
+environment \texttt{E0} alongside the trie. Closing is still a plain trace,
+because \texttt{position(1)} leaves every site to the right right-canonical.
+
+Two implementation notes that are load-bearing:
+
+\begin{itemize}
+\item \textbf{The arrays are read through \texttt{backend.xp().asarray}, not
+  \texttt{np.ascontiguousarray}.} \texttt{chain.py::\_mps\_arrays\_lpr} uses
+  the latter, which on a device backend is a silent device$\to$host copy per
+  site -- the exact round trip the GPU port exists to avoid -- so
+  \texttt{fourpoint.py} carries its own \texttt{\_arrays\_lpr}. That single
+  conversion, $O(n\chi^2 d)$, is the only host/device traffic in the whole
+  calculation apart from one leaf-value transfer per site;
+  \texttt{tests/test\_four\_point\_correlator.py::}
+  \texttt{test\_batched\_stays\_on\_the\_device} asserts it by the returned
+  array's \emph{type}, since a kernel that transferred every step would
+  return identical numbers, only slower.
+\item \textbf{It is deliberately not routed through \texttt{backend.jit}.}
+  The composites that module fuses have shapes fixed by the bond dimension,
+  which \texttt{set\_pad\_bonds} can freeze; this one's leading axis is the
+  environment batch, which changes at every site and every trie node by
+  construction, so jitting would trade one dispatch for thousands of
+  retraces. The batch is what replaces the fusion: one GEMM here already
+  carries what would otherwise be tens of thousands of calls. That is also
+  why this is a GPU target at all -- at the $\sim$0.35\,ms eager dispatch
+  floor Phase 0 measured, 164430 separate $\chi=20$ contractions would cost
+  $\sim$57\,s of pure dispatch at $n=30$, more than the entire calculation
+  costs on one CPU core.
+\end{itemize}
+
+Measured single-threaded (\texttt{MKL\_NUM\_THREADS=1}), spinless chain,
+\texttt{maxm=20}, full tensor, \texttt{"sweep"} / ITensor v3 (C++) /
+\texttt{"batched"}: $n=16$, 10.65\,s / 6.69\,s / 0.38\,s; $n=30$, 117.3\,s /
+72.4\,s / 7.4\,s -- $15.9\times$ over the pure-Python sweep it replaces and
+$9.8\times$ over the compiled C++ backend, from NumPy. (The $n=30$ v3 number
+is a separate process on the same host with the same pinning.) For
+\texttt{Spinful\_Fermionic\_Chain\_Native} the comparison is against
+\texttt{"fold"}: 1.29\,s $\to$ 0.22\,s at 5 sites, 3.02\,s $\to$ 0.31\,s at
+6, with the crossover at 4 sites -- below that the trie build is a fixed cost
+the tensor is too small to amortize. See
+\texttt{examples/staticcorrelators/four\_correlation\_tensor\_batched\_VS\_sweep}.
+
+On a device the same kernel is the one calculation in this library that wins
+below the $\chi\sim120$--$160$ crossover
+\texttt{docs/gpu\_cpu\_performance.md} establishes for everything else, and
+for a reason worth stating plainly: the arithmetic per array operation comes
+from the tuple batch, not from bond dimension, so it does not need a large
+$\chi$ to clear the dispatch floor. H200 against one Xeon core, $n=30$, warm:
+0.97 / 0.95 / 0.98\,s at \texttt{maxm} $=$ 20 / 40 / 80 against 1.89 / 9.44 /
+22.81\,s on the host ($2.0\times$, $9.9\times$, $23.3\times$) and against
+24.7 / 40.0\,s for the compiled v3 backend at the first two ($25\times$,
+$42\times$). The device column does not move across the range -- it is
+entirely dispatch-bound, the GEMMs are free at these sizes -- so every one of
+those ratios is a lower bound and the growth is the host getting slower. The
+price is a ${\sim}20$--$25$\,s near-constant cold run, which is XLA compiling
+one kernel per array shape and which \texttt{set\_pad\_bonds} cannot touch
+here (what varies is the batch, not the bond): worth it for several tensors
+in one process, or at \texttt{maxm=80} where a single cold run is already
+break-even at $0.92\times$. The ground state does not need to be on the
+device -- \texttt{\_arrays\_lpr} converts the MPS once, so
+\texttt{backend.set\_backend("jax")} immediately before the call is enough,
+which sidesteps DMRG's own below-crossover device tax.
+
+\textbf{Blocking, and why the block width is a budget rather than a
+constant.} The trie as described holds $O(n^3)$ live environments at level
+3 -- $6\binom{n}{3}$, which is fine at $n=30$ (140\,MB at $\chi=20$) and
+6.0\,GB at $n=100$. The sweep is therefore split on the \emph{first occupied
+site}: tuples whose smallest site falls in a given range are swept together.
+That split is exact rather than an approximation, and for a reason that falls
+straight out of the trie -- two tuples merge only when their (matrix, parity,
+site) prefixes agree, so environments with different first sites never meet,
+and partitioning on that site costs no arithmetic at all.
+
+The block \emph{width} is the knob, and both extremes are wrong. One block is
+the 6.0\,GB above. One block per site holds only $6\binom{n-a}{2}$ (0.19\,GB
+at $n=100$, $\chi=20$) but issues $n$ times as many array operations -- and on
+a device each pays the ${\sim}0.35$\,ms dispatch floor, so $n=100$ would spend
+${\sim}50$\,s in pure dispatch, reintroducing exactly the cost the batching
+exists to remove. So \texttt{\_block\_width()} solves a byte budget
+(\texttt{\_LIVE\_BYTES}, 2\,GB) for the width: one block for everything up to
+about $n=40$, 11 first-sites per block at $n=100$/$\chi=20$, one per site only
+when $\chi$ is large enough to force it. The scatter is bounded the same way
+-- codes are accumulated incrementally as the trie descends
+(\texttt{code*(n+1)+site}) and a leaf node's values are aligned to
+\texttt{itertools.combinations} order by a single \texttt{argsort}, rather
+than through a dense $(n+1)^m$ table that would be 1.66\,GB per $m=4$ node at
+$n=100$.
+
+Measured at $n=100$ ($\texttt{maxm}=20$, $\chi=20$, $10^8$ tuples, 23.5M
+distinct-index leaf values, a 1.6\,GB output tensor): 481.6\,s on one Xeon
+core, 19.9\,s warm on an H200 -- and, unlike $n=30$, 103.7\,s \emph{cold} as
+well, i.e.\ $4.65\times$ even for a single one-shot tensor, because the
+near-constant compile cost is now small against an 8-minute host run. At
+$\texttt{maxm}=40$: 2171.8\,s / 79.1\,s warm / 328.6\,s cold. Agreement with
+the host stays at 1.8e-15 to 2.8e-15.
+
+
+
 \texttt{get\_four\_correlation\_tensor(ctmode=...)}'s default changed
 from a fixed \texttt{ctmode="explicit"} to \texttt{ctmode=None}, resolved
 per-wavefunction by the new
 \texttt{\_four\_correlation\_tensor\_default\_ctmode()}
-(\texttt{entropytk/correlationentropy.py}): \texttt{"sweep"} whenever it
+(\texttt{entropytk/correlationentropy.py}): \texttt{"batched"} whenever it
+applies (\texttt{itensor\_version="python"}, either flavour), else
+\texttt{"sweep"} whenever it
 applies (\texttt{itensor\_version} in \texttt{(3,"python")},
 non-native-spinful), else \texttt{"full"} whenever it applies
 (\texttt{itensor\_version} in \texttt{(2,3,"python")}, or native-spinful

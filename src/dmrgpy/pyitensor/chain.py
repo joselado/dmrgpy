@@ -1071,6 +1071,20 @@ class Chain:
                     out[l, k, j, i] = np.conj(val)
         return out
 
+    def four_correlation_tensor_batched(self, wf, cdag_ops, c_ops,
+                                        accelerate=True):
+        """<Cdag_i C_j Cdag_k C_l> with every transfer contraction batched
+        over the site combinations that share it -- see
+        `pyitensor/fourpoint.py` for the trie this rests on.
+
+        Same signature and same answer as `four_correlation_tensor_fold`,
+        whose conventions it inherits wholesale. `accelerate` is accepted
+        and ignored: it exists on the other two implementations to skip the
+        conjugate half of the tuples, and here the cost is in the shared
+        environments rather than per tuple, so there is nothing to skip."""
+        from .fourpoint import four_correlation_tensor_batched
+        return four_correlation_tensor_batched(self, wf, cdag_ops, c_ops)
+
     def kpm_dynamical_correlator(self, terms_i, terms_j, kpmmaxm, kpm_scale, kpm_accelerate,
                                   kpm_n_scale, delta, kpm_cutoff):
         if not self.have_H:

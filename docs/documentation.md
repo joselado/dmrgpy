@@ -2703,6 +2703,151 @@ bigger fraction of the per-step cost here than the underlying NumPy
 linear algebra, so there is less for environment reuse to save on
 relative to the total.
 
+### The four-point tensor as batched GEMMs (`pyitensor/fourpoint.py`)
+
+`ctmode="batched"` is a third implementation of the same tensor, for
+`itensor_version="python"` only, and the default there. It exists because
+both of the others are shaped wrong for the hardware. `"sweep"` and
+`"fold"` evaluate one tuple's worth of MPS transfer at a time -- a chain of
+`chi x chi` by `chi x d x chi` contractions -- and there are `O(n^4)` such
+tuples, each contraction individually far too small to keep a BLAS call
+busy. On top of that, `"sweep"` shares environments only across the
+pairwise-*distinct* tuples; the `O(n^3)` repeated-index ones fall back to
+independent per-tuple folds, and a smaller count times a costlier per-tuple
+price still wins: instrumented at `maxm=20`, that fallback is 61–65% of the
+sweep's own runtime at `n=12`, `16` and `20`. Fixing only the distinct half
+would therefore cap the achievable speedup below 1.6x.
+
+The reorganization is a trie. Written in site-sorted order, a tuple becomes
+a sequence of at most four *ranks* -- rank `r` is the `r`-th smallest
+distinct site the four factors occupy, carrying the product of whichever
+factors sit there, with the Jordan-Wigner `F` folded in. Two tuples that
+agree on their first `r` `(matrix, parity)` steps have the same partial
+environment *whatever sites those steps landed on*, so all `n_modes^4`
+tuples collapse onto a trie of a few dozen matrix sequences (75 shapes for a
+spinless chain: `m! * S(4,m)` = 1, 14, 36, 24 for `m = 1..4` distinct sites,
+times the mode-name combinations, minus every shape whose composed local
+matrix vanishes -- which on spinless sites is most of the repeated-index
+enumeration, `Cdag*Cdag = 0`). Each trie node holds one array of
+environments, `(B, chi, chi)` with `B` up to `C(n, r)`, batched over the site
+combinations that realize it, and one site of the sweep becomes, per node,
+exactly two GEMMs:
+
+    X[b,j,p,k] = sum_i  E[b,i,j] A_op[i,p,k]
+    E'[b,k,l]  = sum_jp X[b,j,p,k] conj(A)[j,p,l]
+
+each reshaped into a single `(B*chi, chi) x (chi, d*chi)` matmul. Distinct
+and repeated tuples go through the same machinery, so the trie subsumes the
+sweep's environment reuse and extends it to the half the sweep never
+covered.
+
+Every *convention* is inherited from `four_correlation_tensor_fold` rather
+than re-derived, because that is the one implementation covering all tuples
+under a single rule and already validated against the AutoMPO+`to_mpo`+
+`inner` pipeline: operator matrices indexed `[ket, bra]` and applied as
+`tensordot(A, mat, ([1],[0])).transpose(0,2,1)`; same-site factors composed
+in increasing factor-position order; and the Jordan-Wigner string reduced to
+one statement covering gap sites and operator sites alike — *a site carries
+an extra `F` iff the number of factors placed up to and including it is
+odd*, which is what the fold's incremental `carry != odd` test amounts to.
+The cross-site reordering sign `_four_pt_site_sort_sign` depends only on the
+rank assignment, so it is constant across every site combination realizing
+one shape and is applied once per shape at scatter time.
+
+The one thing not inherited is the gauge. The fold re-runs
+`psi.position(mn)` per group so it can start from an identity left
+environment; a single left-to-right batched pass cannot re-gauge per tuple,
+so this calls `psi.position(1)` once and grows the operator-free left
+environment `E0` alongside the trie. Closing is still a plain trace, because
+`position(1)` leaves every site to the right right-canonical.
+
+Two implementation notes that are load-bearing:
+
+- **The arrays are read through `backend.xp().asarray`, not
+  `np.ascontiguousarray`.** `chain.py::_mps_arrays_lpr` uses the latter,
+  which on a device backend is a silent device→host copy per site — the
+  exact round trip the GPU port exists to avoid — so `fourpoint.py` carries
+  its own `_arrays_lpr`. That single conversion, `O(n chi^2 d)`, is the only
+  host↔device traffic in the whole calculation apart from one leaf-value
+  transfer per site; `tests/test_four_point_correlator.py::
+  test_batched_stays_on_the_device` asserts it by the returned array's
+  *type*, since a kernel that transferred every step would return identical
+  numbers, only slower.
+- **It is deliberately not routed through `backend.jit`.** The composites
+  that module fuses have shapes fixed by the bond dimension, which
+  `set_pad_bonds` can freeze; this one's leading axis is the environment
+  batch, which changes at every site and every trie node by construction, so
+  jitting would trade one dispatch for thousands of retraces. The batch is
+  what replaces the fusion: one GEMM here already carries what would
+  otherwise be tens of thousands of calls. That is also why this is a GPU
+  target at all — at the ~0.35 ms eager dispatch floor Phase 0 measured,
+  164430 separate `chi=20` contractions would cost ~57 s of pure dispatch at
+  `n=30`, more than the entire calculation costs on one CPU core.
+
+Measured single-threaded (`MKL_NUM_THREADS=1`), spinless chain, `maxm=20`,
+full tensor, `"sweep"` / ITensor v3 (C++) / `"batched"`: `n=16`, 10.65 s /
+6.69 s / 0.38 s; `n=30`, 117.3 s / 72.4 s / 7.4 s — 15.9x over the
+pure-Python sweep it replaces and 9.8x over the compiled C++ backend, from
+NumPy. (The `n=30` v3 number is a separate process on the same host with the
+same pinning.) For `Spinful_Fermionic_Chain_Native` the comparison is
+against `"fold"`: 1.29 s → 0.22 s at 5 sites, 3.02 s → 0.31 s at 6, with the
+crossover at 4 sites — below that the trie build is a fixed cost the tensor
+is too small to amortize. See `examples/staticcorrelators/
+four_correlation_tensor_batched_VS_sweep`.
+
+On a device the same kernel is the one calculation in this library that
+wins below the chi ~ 120-160 crossover `docs/gpu_cpu_performance.md`
+establishes for everything else, and for a reason worth stating plainly:
+the arithmetic per array operation comes from the tuple batch, not from
+bond dimension, so it does not need a large chi to clear the dispatch
+floor. H200 against one Xeon core, n=30, warm: 0.97 / 0.95 / 0.98 s at
+`maxm` = 20 / 40 / 80 against 1.89 / 9.44 / 22.81 s on the host (2.0x,
+9.9x, 23.3x) and against 24.7 / 40.0 s for the compiled v3 backend at the
+first two (25x, 42x). The device column does not move across the range --
+it is entirely dispatch-bound, the GEMMs are free at these sizes -- so
+every one of those ratios is a lower bound and the growth is the host
+getting slower. The price is a ~20-25 s near-constant cold run, which is
+XLA compiling one kernel per array shape and which `set_pad_bonds` cannot
+touch here (what varies is the batch, not the bond): worth it for several
+tensors in one process, or at maxm=80 where a single cold run is already
+break-even at 0.92x. The ground state does not need to be on the device --
+`_arrays_lpr` converts the MPS once, so `backend.set_backend("jax")`
+immediately before the call is enough, which sidesteps DMRG's own
+below-crossover device tax.
+
+**Blocking, and why the block width is a budget rather than a constant.**
+The trie as described holds `O(n^3)` live environments at level 3 --
+`6*C(n,3)`, which is fine at n=30 (140 MB at chi=20) and 6.0 GB at n=100.
+The sweep is therefore split on the *first occupied site*: tuples whose
+smallest site falls in a given range are swept together. That split is exact
+rather than an approximation, and for a reason that falls straight out of
+the trie -- two tuples merge only when their `(matrix, parity, site)`
+prefixes agree, so environments with different first sites never meet, and
+partitioning on that site costs no arithmetic at all.
+
+The block *width* is the knob, and both extremes are wrong. One block is the
+6.0 GB above. One block per site holds only `6*C(n-a,2)` (0.19 GB at n=100,
+chi=20) but issues n times as many array operations -- and on a device each
+pays the ~0.35 ms dispatch floor, so n=100 would spend ~50 s in pure
+dispatch, reintroducing exactly the cost the batching exists to remove. So
+`_block_width()` solves a byte budget (`_LIVE_BYTES`, 2 GB) for the width:
+one block for everything up to about n=40, 11 first-sites per block at
+n=100/chi=20, one per site only when chi is large enough to force it. The
+scatter is bounded the same way -- codes are accumulated incrementally as
+the trie descends (`code*(n+1)+site`) and a leaf node's values are aligned
+to `itertools.combinations` order by a single `argsort`, rather than through
+a dense `(n+1)**m` table that would be 1.66 GB per m=4 node at n=100.
+
+Measured at n=100 (maxm=20, chi=20, 10^8 tuples, 23.5M distinct-index leaf
+values, a 1.6 GB output tensor): 481.6 s on one Xeon core, 19.9 s warm on an
+H200 -- and, unlike n=30, 103.7 s *cold* as well, i.e. 4.65x even for a
+single one-shot tensor, because the near-constant compile cost is now small
+against an 8-minute host run. At maxm=40: 2171.8 s / 79.1 s warm / 328.6 s
+cold. Agreement with the host stays at 1.8e-15 to 2.8e-15.
+
+
+
+
 `get_four_correlation_tensor(ctmode=...)`'s default changed from a fixed
 `ctmode="explicit"` to `ctmode=None`, resolved per-wavefunction by the
 new `_four_correlation_tensor_default_ctmode()`

@@ -18,6 +18,14 @@ calculation you run: below chi ~ 120 the CPU is faster, above it the GPU
 pulls away without bound, and this is equally true for ground states and
 for dynamical correlators.
 
+The one exception, and the reason it is an exception, is worth reading
+before you generalize from that: the four-point correlator wins on the
+device at chi = 20, because `ctmode="batched"` gets its arithmetic-per-
+dispatch from a *tuple batch* rather than from bond dimension. See "The
+four-point correlator: batching beats bond dimension" below. The rule is
+really "the device needs enough work per array operation", and chi is only
+the usual way to get it.
+
 ## End-to-end, warm (steady state, compile cost already paid)
 
 KPM dynamical correlator, 30-site Heisenberg chain:
@@ -219,6 +227,92 @@ area law (see the trap below). Cross-backend agreement on a full
 trajectory: 1.5e-14. The chi-swept GPU table for it has not been run yet;
 `examples/backend_comparison/tdvp_cpu_VS_gpu` is the script that produces
 it.
+
+## The four-point correlator: batching beats bond dimension
+
+The one-sentence version above has one exception, and it is the most useful
+result in this file: the four-point tensor
+`<Cdag_i C_j Cdag_k C_l>` wins on the *device* at `chi = 20`, an order of
+magnitude below the chi ~ 120-160 crossover everything else obeys. Nothing
+about the hardware changed -- what changed is where the arithmetic-per-
+dispatch comes from. Every other calculation here gets it from bond
+dimension, so it needs a large chi to clear the floor. `ctmode="batched"`
+(`pyitensor/fourpoint.py`) gets it from the *tuple batch* instead: the
+`O(n^4)` tuples collapse onto a trie of a few dozen environment arrays,
+each `(B, chi, chi)` with `B` up to `C(n,3)`, so a single GEMM carries tens
+of thousands of tuples at any chi at all.
+
+n=30 spinless fermionic chain, H200 against one Xeon core, full tensor:
+
+| maxm | chi | ITensor v3 (C++) | `"sweep"` (host) | `"batched"` (host) | `"batched"` (device, cold) | `"batched"` (device, warm) |
+|---|---|---|---|---|---|---|
+| 20 | 20 | 24.7 s | 44.0 s | 1.89 s | 20.5 s | **0.97 s** |
+| 40 | 40 | 40.0 s | -- | 9.44 s | 21.5 s | **0.95 s** |
+| 80 | 69 | -- | -- | 22.8 s | 24.8 s | **0.98 s** |
+
+Read the warm column vertically. It does not move: 0.97, 0.95, 0.98 s while
+the host column grows 12x over the same range. The device is entirely
+dispatch-bound here -- the GEMMs themselves are free on an H200 at these
+sizes -- so warm device/host runs 1.95x, 9.90x, 23.34x purely because the
+*host* gets slower, and every one of those figures is a lower bound. Against
+the compiled C++ backend the same warm number is 25x at maxm=20 and 42x at
+maxm=40. Agreement with the host result: 7.8e-16 to 1.3e-15.
+
+At n=100 the same kernel enters a different regime, and both of the
+sentences above stop being true in an interesting way. 10^8 tuples, 23.5M
+distinct-index leaf values, a 1.6 GB output tensor:
+
+| maxm | chi | `"batched"` (host) | `"batched"` (device, cold) | `"batched"` (device, warm) |
+|---|---|---|---|---|
+| 20 | 20 | 481.6 s | 103.7 s (4.65x) | **19.9 s (24.19x)** |
+| 40 | 40 | 2171.8 s | 328.6 s (6.61x) | **79.1 s (27.44x)** |
+
+Agreement with the host: 1.8e-15 and 2.8e-15. Two things changed:
+
+* **The device wins cold too.** At n=30 a single one-shot run was 0.09-0.92x
+  -- the compile cost swamped everything. Here the host needs 8 minutes at
+  maxm=20, so the same compilation is amortized and even one tensor computed
+  once is 4.65x ahead. The operating rule below is therefore not only
+  "several tensors in one process" but also "one tensor, if n is large
+  enough".
+* **The device is no longer flat.** 19.9 s against 0.97 s at n=30 is 20.5x
+  for 143x the leaf values, so the H200 is now doing real arithmetic between
+  dispatches rather than idling. Part of that is the sweep being *blocked* at
+  this size: one block would hold 6*C(100,3) = 941094 level-3 environments,
+  6.0 GB at chi=20, so `fourpoint.py` splits the sweep on the first occupied
+  site (exact -- environments with different first sites never merge) and
+  picks a block width from a byte budget. Narrower blocks cost dispatches,
+  which is why the width is a budget rather than one-block-per-site: at
+  n=100, chi=20 it lands on 11 first-sites per block.
+
+Extrapolating the compiled v3 backend by its measured n^4 scaling puts a
+single n=100, maxm=20 tensor at ~51 min, i.e.\ ~6x slower than batched on
+one core and ~150x slower than batched on the H200 -- but that is an
+extrapolation from the n=30 row, not a measurement, and should be quoted as
+one.
+
+The cold column at n=30 is the cost of that flatness: ~20-25 s, near-constant,
+and it is XLA compiling a kernel per array shape. This kernel mints a fresh
+leading dimension `B` for every trie node at every site -- thousands of
+distinct shapes -- and `set_pad_bonds` cannot help, because what varies is
+the environment batch, not the bond. So the operating rule is the mirror of
+the one in the cold-versus-warm section below: **the device pays off when
+several tensors are computed in one process, or when chi is large enough
+that ~22 s of compilation is small next to the host time** (at maxm=80 a
+single cold run is already break-even at 0.92x). One tensor, one script,
+small chi: stay on the host, where `"batched"` is still 13x faster than the
+compiled v3 backend.
+
+Two practical notes:
+
+* the ground state does **not** have to be on the device. `_arrays_lpr`
+  converts the MPS once, `O(n chi^2 d)`, so `backend.set_backend("jax")`
+  immediately before the correlator call is enough -- which avoids paying
+  DMRG's own below-crossover device tax entirely. Every row above did
+  exactly that.
+* this kernel is deliberately *not* jitted; see
+  `docs/documentation.md`'s section on `pyitensor/fourpoint.py` for why the
+  batch axis and `jax.jit` are mutually exclusive here.
 
 ## A trap that produced a completely wrong conclusion
 

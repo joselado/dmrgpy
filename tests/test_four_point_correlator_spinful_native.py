@@ -229,13 +229,37 @@ def test_fold_matches_explicit_on_native_spinful():
         assert np.abs(fold - explicit).max() < 1e-12, n
 
 
-def test_fold_is_the_default_for_native_spinful_python():
-    """The auto-selected ctmode must be "fold" here -- otherwise the
-    speedup silently doesn't apply to anyone who doesn't pass ctmode."""
+def test_batched_is_the_default_for_native_spinful_python():
+    """The auto-selected ctmode must be "batched" here -- otherwise the
+    speedup silently doesn't apply to anyone who doesn't pass ctmode.
+
+    This used to assert "fold", which held until `ctmode="batched"`
+    (pyitensor/fourpoint.py) turned out to cover native spinful sites too:
+    it reads each mode's (name, site) off the chain's own C/Cdag exactly as
+    the fold does, so two modes sharing an ElectronSite are just a shape
+    whose four factors land on fewer distinct sites. Exact against both
+    "fold" and "explicit" to machine precision, and faster from n=4 modes=8
+    upward (n=5: 1.29s -> 0.22s, n=6: 3.02s -> 0.31s); below that the trie
+    build is a fixed cost the tensor is too small to pay off."""
     from dmrgpy.entropytk.correlationentropy import (
         _four_correlation_tensor_default_ctmode)
     wf = _native_chain_for_fold(2).get_gs()
-    assert _four_correlation_tensor_default_ctmode(wf) == "fold"
+    assert _four_correlation_tensor_default_ctmode(wf) == "batched"
+
+
+def test_batched_matches_explicit_on_native_spinful():
+    """The same elementwise check `fold` gets, for the same reason: two
+    modes on one ElectronSite are where the intra-site operator ordering and
+    the Jordan-Wigner carry can go wrong with no other symptom. The batched
+    kernel composes same-site factors in increasing factor-position order
+    and folds `F` in by the parity *after* the site, both inherited from the
+    fold -- this is what pins them."""
+    import numpy as np
+    for n in (2, 3):
+        wf = _native_chain_for_fold(n).get_gs()
+        batched = wf.get_four_correlation_tensor(ctmode="batched")
+        explicit = wf.get_four_correlation_tensor(ctmode="explicit")
+        assert np.abs(batched - explicit).max() < 1e-12, n
 
 
 def test_fold_agrees_with_sweep_on_a_spinless_chain():

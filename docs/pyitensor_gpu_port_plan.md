@@ -17,7 +17,7 @@ Status at a glance:
 | Phase 3, the KPM path (incl. energy truncation) | done, measured in Sec. 8 |
 | Phase 4, benchmark campaign | done (`benchmarks/gpu/`) |
 | Phase 5, docs / tests / example | done |
-| Phase 6, follow-ups | dispatch floor + TDVP **done**; METTS/tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
+| Phase 6, follow-ups | dispatch floor + TDVP + the four-point correlator **done**; METTS/tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
 
 Site-specific operating detail (how these jobs were submitted on one
 particular cluster) is deliberately kept in this checkout's untracked
@@ -695,14 +695,103 @@ namespace swap.
    the returned array's *type*, because agreement alone cannot catch a
    regression to transferring -- a round trip returns the same numbers,
    only slower. Cross-backend trajectory agreement: 1.5e-14.
-3. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
+3. **[done 2026-08-27] The four-point correlator
+   (`chain.py` -> new `pyitensor/fourpoint.py`).** Not on this list when it
+   was written, and it turned out to be the most interesting item on it,
+   because it is the one calculation that wins on a device *below* the
+   crossover the rest of this document establishes.
+
+   The target was `<Cdag_i C_j Cdag_k C_l>`, whose two existing
+   implementations (`ctmode="sweep"`, `"fold"`) evaluate one tuple's worth
+   of MPS transfer at a time -- `O(n^4)` chains of `chi x chi` contractions,
+   each far too small for BLAS, let alone for a device. Ported naively it
+   would have *lost*: 164430 separate chi=20 contractions at the ~0.35 ms
+   eager floor is ~57 s of pure dispatch at n=30, more than the whole
+   calculation costs on one CPU core.
+
+   *What landed.* A trie. In site-sorted order a tuple is a sequence of at
+   most four `(local matrix, parity)` steps, and two tuples agreeing on
+   their first r steps share a partial environment whatever sites those
+   steps landed on -- so all `n_modes^4` tuples collapse onto a few dozen
+   matrix sequences, each holding one `(B, chi, chi)` array batched over the
+   site combinations that realize it, and a site of the sweep becomes two
+   large GEMMs per node. Measuring first paid off twice here: the
+   *repeated*-index tuples, which `"sweep"` left as per-tuple folds and
+   whose `O(n^3)` count had them written off as subdominant, were 61-65% of
+   its runtime at n=12..20 -- batching only the distinct half would have
+   capped the whole thing at 1.6x. The trie covers both halves under one
+   rule. Every convention is inherited from `"fold"` rather than
+   re-derived; the one exception is the gauge (`position(1)` once, with the
+   operator-free left environment grown alongside the trie, since a batched
+   pass cannot re-gauge per tuple).
+
+   *Measured*, n=30 spinless chain, H200 against one Xeon core, full
+   tensor. Host first, because it is a real result on its own: 1.89 s
+   against 44.0 s for the `"sweep"` it replaces and 24.7 s for the compiled
+   ITensor v3 backend, i.e. 23x and 13x, from NumPy. On the device:
+
+   | maxm | chi | v3 (C++) | batched (host) | batched (device, cold) | batched (device, warm) |
+   |---|---|---|---|---|---|
+   | 20 | 20 | 24.7 s | 1.89 s | 20.5 s | **0.97 s** |
+   | 40 | 40 | 40.0 s | 9.44 s | 21.5 s | **0.95 s** |
+   | 80 | 69 | -- | 22.8 s | 24.8 s | **0.98 s** |
+
+   The warm column does not move. The device is entirely dispatch-bound
+   here -- the GEMMs are free on an H200 at these sizes -- so 1.95x / 9.90x
+   / 23.34x is the *host* getting slower, and all three are lower bounds.
+   Agreement with the host result: 7.8e-16 to 1.3e-15.
+
+   *The finding, stated as a correction to Sec. 8.* "Large chi yes, small
+   chi no" was the right summary of everything measured up to that point,
+   but the mechanism is arithmetic-per-dispatch, and bond dimension is only
+   the usual way to buy it. A batch buys the same thing at any chi: this
+   kernel clears the floor at chi=20, an order of magnitude below the
+   120-160 crossover. Where a calculation has a natural batch axis, look
+   for it before concluding the problem is too small for a device.
+
+   *At n=100 it changes regime*, which is worth recording because both
+   conclusions above invert. 10^8 tuples, 23.5M distinct-index leaf values,
+   a 1.6 GB output tensor; host is one Xeon core:
+
+   | maxm | chi | batched (host) | batched (device, cold) | batched (device, warm) |
+   |---|---|---|---|---|
+   | 20 | 20 | 481.6 s | 103.7 s (4.65x) | **19.9 s (24.19x)** |
+   | 40 | 40 | 2171.8 s | 328.6 s (6.61x) | **79.1 s (27.44x)** |
+
+   The device now wins *cold* as well -- the compile cost is unchanged but
+   the host run is 8 minutes, so a single one-shot tensor is 4.65x ahead --
+   and the warm column is no longer flat (19.9 s against 0.97 s at n=30,
+   i.e. 20.5x for 143x the leaf values), so the H200 is finally doing
+   arithmetic rather than idling between dispatches. Getting there needed
+   one real change: at n=100 a single block holds 6*C(100,3) = 941094
+   level-3 environments, 6.0 GB at chi=20, so the sweep is now split on the
+   first occupied site -- exact, since environments with different first
+   sites never merge -- with the width chosen from a byte budget rather than
+   fixed. One block per site would have bounded memory at 0.19 GB but issued
+   n times the array operations, ~50 s of pure dispatch at n=100, which is
+   the same trap in a new place. The v3 baseline at n=100 was not run
+   (a single tensor extrapolates to ~51 min), so the ~6x/~150x figures
+   against it are extrapolation from the n=30 row, not measurement.
+
+   *The price*, and it is the mirror image of item 1: a ~20-25 s
+   near-constant cold run, XLA compiling one kernel per array shape, which
+   `set_pad_bonds` cannot help with because what varies is the environment
+   batch rather than the bond -- and for the same reason `backend.jit` is
+   deliberately not used here (it would trade one dispatch for thousands of
+   retraces). So: device for several tensors in one process, or at maxm=80
+   where a single cold run is already break-even; host otherwise, where
+   `"batched"` still beats compiled C++ by 13x. The ground state need not be
+   on the device at all -- the MPS is converted once in `_arrays_lpr` -- so
+   `backend.set_backend("jax")` immediately before the call sidesteps DMRG's
+   own below-crossover tax entirely.
+4. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
    in the library -- samples x time steps x Krylov iterations -- and it
    inherits TDVP's large chi, so it sits directly on (2), now done.
    Smaller than its count suggests, in the other direction from TDVP:
    most of those `np.` sites are RNG, pooled-variance statistics over
    samples, and a d x d single-site `eigh` for the collapse basis, all of
    which *should* stay on the host. Audit before porting.
-4. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
+5. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
    No traps in either. `kpm_energy_truncation.py` is already done.
 
 Not worth doing now, with reasons rather than silence:
@@ -727,7 +816,12 @@ Not worth doing now, with reasons rather than silence:
 `kpm_gpu_probe.py` (the KPM cost split), `port_speedup.py` (end-to-end
 GS + KPM speedup, `--model`/`--pad-bonds`/`--backends`) and
 `jit_speedup.py` (the dispatch-floor knobs: eager/padded/jitted x ground
-state/TDVP, cold and warm, with the traced-kernel count). Each is a plain
+state/TDVP, cold and warm, with the traced-kernel count) and
+`four_point_bench.py` / `four_point_v3.py` (the four-point tensor:
+`ctmode="batched"` on host and device, cold and warm, against the
+`ctmode="sweep"` it replaces and against the compiled v3 backend -- which
+needs a checkout whose extension is actually built, hence its own script and
+its own process). Each is a plain
 script with `--help`; none of them needs a scheduler, and the job scripts
 that submitted them on one particular cluster are intentionally not
 tracked here.

@@ -248,3 +248,117 @@ def test_four_pt_sign_agrees_with_hterm():
         assert abs(ht.coef.imag) < 1e-15
         # and the sorted factor order is what resolve() then consumes
         assert [s for _nm, s in ht.ops] == sorted([i + 1, j + 1, k + 1, l + 1])
+
+
+# -- ctmode="batched" (pyitensor/fourpoint.py). Same tensor as "sweep" and
+# "fold", computed by batching every transfer contraction over the site
+# combinations that share it, so the whole calculation is a few dozen large
+# GEMMs instead of ~10^5 chi x chi contractions. It replaces both halves of
+# the sweep at once -- the pairwise-distinct tuples *and* the repeated-index
+# folds, which measured at 61-65% of the sweep's own runtime -- so these
+# tests deliberately re-check both against the slow oracles rather than
+# assuming the sweep's coverage carries over.
+
+def test_batched_matches_the_slow_paths():
+    """Against the two always-correct per-tuple oracles, distinct and
+    repeated-index entries alike."""
+    import numpy as np
+    wf = _fermion_chain_for_fold(6).get_gs()
+    fast = wf.get_four_correlation_tensor(ctmode="batched")
+    full = wf.get_four_correlation_tensor(ctmode="full")
+    explicit = wf.get_four_correlation_tensor(ctmode="explicit")
+    assert np.abs(fast - full).max() < 1e-12
+    assert np.abs(fast - explicit).max() < 1e-12
+    n = 6
+    rep = [(i, j, k, l)
+           for i in range(n) for j in range(n) for k in range(n) for l in range(n)
+           if len({i, j, k, l}) < 4]
+    assert max(abs(fast[t] - full[t]) for t in rep) < 1e-12
+
+
+def test_batched_matches_sweep_and_fold_on_a_longer_chain():
+    """n=10 is past where the oracles are affordable but well inside the
+    range where a trie bug would show: the sweep's own environment reuse and
+    the batched trie disagree about *nothing* if both are right, so the
+    tolerance here is machine precision, not a DMRG tolerance."""
+    import numpy as np
+    wf = _fermion_chain_for_fold(10).get_gs()
+    batched = wf.get_four_correlation_tensor(ctmode="batched")
+    sweep = wf.get_four_correlation_tensor(ctmode="sweep")
+    fold = wf.get_four_correlation_tensor(ctmode="fold")
+    assert np.abs(batched - sweep).max() < 1e-12
+    assert np.abs(batched - fold).max() < 1e-12
+
+
+def test_batched_keeps_the_complex_phases():
+    """A real-hopping Hamiltonian cannot catch a dropped `conj()` in the
+    bra: every entry stays real and the error cancels. This model's hoppings
+    are complex, so the two implementations only agree if the batched
+    transfer conjugates the same leg the fold does."""
+    import numpy as np
+    fc, _h = hopping_interaction_chain("python")
+    wf = fc.get_gs(mode="DMRG")
+    batched = wf.get_four_correlation_tensor(ctmode="batched")
+    full = wf.get_four_correlation_tensor(ctmode="full")
+    assert np.abs(np.imag(batched)).max() > 1e-6   # phases really are there
+    assert np.abs(batched - full).max() < 1e-8
+
+
+def test_batched_is_raw_not_normalized():
+    """Same convention as the sweep and the fold: the raw <wf|Op|wf>, so a
+    wf scaled by c scales every entry by c^2. The batched kernel fixes the
+    gauge with `position(1)` where the fold uses `position(mn)`, and a gauge
+    change that silently normalized would show up exactly here."""
+    import numpy as np
+    wf = _fermion_chain_for_fold(6).get_gs()
+    base = wf.get_four_correlation_tensor(ctmode="batched")
+    scaled = (wf * 2.5).get_four_correlation_tensor(ctmode="batched")
+    assert np.abs(scaled - 6.25 * base).max() < 1e-10
+
+
+def test_batched_stays_on_the_device():
+    """Residency, asserted through the array *type* rather than through
+    agreement: a kernel that transferred its environments to the host every
+    step would return the identical numbers, only far slower -- the exact
+    regression `docs/pyitensor_gpu_port_plan.md` Sec. 5 exists to prevent.
+    Runs on whatever device JAX finds (CPU in CI), which is enough: the
+    property under test is that no host round trip happens per contraction,
+    not that the device is fast."""
+    import numpy as np
+    jnp = pytest.importorskip("jax.numpy")
+    from dmrgpy.pyitensor import backend, fourpoint
+
+    wf = _fermion_chain_for_fold(5).get_gs()   # ground state built on NumPy
+    ref = wf.get_four_correlation_tensor(ctmode="batched")
+
+    seen = {"device": 0, "host": 0}
+    plain = fourpoint._transfer
+
+    def probe(E, A_op, A_conj):
+        got = plain(E, A_op, A_conj)
+        seen["device" if isinstance(got, jnp.ndarray) else "host"] += 1
+        return got
+
+    backend.set_backend("jax")
+    fourpoint._transfer = probe
+    try:
+        got = np.asarray(wf.get_four_correlation_tensor(ctmode="batched"))
+    finally:
+        fourpoint._transfer = plain
+        backend.set_backend("numpy")
+
+    assert seen["device"] > 0
+    assert seen["host"] == 0
+    assert np.abs(got - ref).max() < 1e-12
+
+
+def test_batched_rejects_a_backend_it_cannot_serve():
+    """`ctmode` is a hard request everywhere else in this dispatcher, and
+    this one is pyitensor-only -- it must raise rather than quietly hand
+    back a different implementation's answer."""
+    if not cppext.available(3):
+        pytest.skip("requires the compiled mpscpp3 (ITensor v3) extension")
+    fc, _h = hopping_interaction_chain(3)
+    wf = fc.get_gs(mode="DMRG")
+    with pytest.raises(ValueError):
+        wf.get_four_correlation_tensor(ctmode="batched")
