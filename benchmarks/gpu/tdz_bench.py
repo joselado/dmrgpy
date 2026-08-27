@@ -193,6 +193,8 @@ def report(results):
     print("=" * 78)
     tdz = results.get("tdz", {})
     maxms = sorted({m for b in tdz.values() for m in b}, key=int)
+    host_keys = sorted(k for k in tdz if k.startswith("numpy"))
+    dev_keys = sorted(k for k in tdz if k.startswith("jax"))
     for maxm in maxms:
         print("\nmaxm = %s" % maxm)
         print("  %-8s %-10s %12s %12s %10s" % ("backend", "config", "cold(s)",
@@ -208,15 +210,30 @@ def report(results):
                 print("  %-8s %-10s %12.2f %12.2f %10.1e"
                       % (name, label, e["cold"], e["warm"],
                          e["max_dev_vs_base"]))
-        host = tdz.get("numpy", {}).get(maxm, {}).get("both")
-        dev = tdz.get("jax", {}).get(maxm, {}).get("both")
-        if host and dev and "error" not in host and "error" not in dev:
-            print("  -> device speedup at this maxm: %.2fx cold, %.2fx warm"
-                  % (host["cold"] / dev["cold"], host["warm"] / dev["warm"]))
-        base = tdz.get("jax", {}).get(maxm, {}).get("base")
-        if base and dev and "error" not in base and "error" not in dev:
-            print("  -> optimizations on device: %.2fx cold, %.2fx warm"
-                  % (base["cold"] / dev["cold"], base["warm"] / dev["warm"]))
+        def ok(key, label):
+            e = tdz.get(key, {}).get(maxm, {}).get(label)
+            return e if e and "error" not in e else None
+
+        for hk in host_keys:
+            host = ok(hk, "both")
+            if not host:
+                continue
+            for dk in dev_keys:
+                dev = ok(dk, "both")
+                if dev:
+                    print("  -> %s vs %s: %.2fx cold, %.2fx warm"
+                          % (dk, hk, host["cold"] / dev["cold"],
+                             host["warm"] / dev["warm"]))
+        for dk in dev_keys:
+            base, both = ok(dk, "base"), ok(dk, "both")
+            if base and both:
+                # Warm is the honest attribution number: the configurations
+                # run in one process without clearing XLA's cache, so only
+                # the first one's cold run is genuinely cold -- the later
+                # rows inherit most of its compiled kernels.
+                print("  -> optimizations on %s: %.2fx warm (cold not "
+                      "comparable, shared kernel cache)"
+                      % (dk, base["warm"] / both["warm"]))
 
 
 def main():
@@ -258,16 +275,31 @@ def main():
         sys.path.insert(0, os.path.abspath(args.src))
 
     if args.from_json:
-        merged = None
+        # Backend keys are tagged with the dispatch mode the run used, not
+        # left as the bare backend name. Two GPU passes -- padded+jitted and
+        # eager -- are both "jax" and share config labels, so merging them
+        # on the bare name would have the second silently replace the
+        # first's rows at whatever bond dimensions they have in common.
+        # meta["pad_bonds"] distinguishes them, and it is already in every
+        # JSON this script writes.
+        merged = {"meta": {}, "tdz": {}}
         for path in args.from_json:
             with open(path) as fh:
                 part = json.load(fh)
-            if merged is None:
-                merged = part
-            else:
-                for name, block in part.get("tdz", {}).items():
-                    merged.setdefault("tdz", {}).setdefault(name, {}).update(block)
-                merged["meta"].update(part.get("meta", {}))
+            suffix = "+pad" if part.get("meta", {}).get("pad_bonds") else ""
+            for name, block in part.get("tdz", {}).items():
+                key = name + suffix
+                dest = merged["tdz"].setdefault(key, {})
+                for maxm, row in block.items():
+                    dest.setdefault(maxm, {}).update(row)
+            for mk, mv in part.get("meta", {}).items():
+                # per-run keys would otherwise be overwritten by whichever
+                # file was listed last
+                if mk in ("pad_bonds", "maxm", "device_jax", "device_numpy"):
+                    merged["meta"].setdefault("per_run", {}).setdefault(
+                            os.path.basename(path), {})[mk] = mv
+                else:
+                    merged["meta"].setdefault(mk, mv)
         report(merged)
         return
 

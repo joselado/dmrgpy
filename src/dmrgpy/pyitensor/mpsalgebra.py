@@ -185,6 +185,12 @@ class BatchedBras:
     the chain ends the true dimensions are 2, 4, 8, ... and padding those up
     to the middle's width would do a great deal of arithmetic on blocks
     known to be zero.
+
+    The prepared copy roughly doubles what the bras already occupy (B x N
+    padded site tensors: ~276 MB for B=5, N=30 at chi=240, complex128).
+    That is the cost of preparing once instead of per step, and it is
+    bounded by the caller's own maxm, but it is worth knowing before
+    batching a large family of bras rather than a handful.
     """
 
     __slots__ = ("_bras", "_n", "_nsites", "_batch")
