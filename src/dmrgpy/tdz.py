@@ -47,6 +47,20 @@ from .timedependent import _fourier_transform_correlator
 
 _MAX_SUPPORTED_ORDER = 4  # explicit Appendix-B g^(n) formulas only go this far
 
+# Whether to take each step's n_max+1 phi^(n) overlaps as one batched sweep
+# (pyitensor's BatchedBras) rather than as n_max+1 separate ones, when the
+# backend offers it. On by default; the switch exists so
+# benchmarks/gpu/tdz_bench.py can attribute a device speedup to this change
+# specifically. Both paths compute the same overlaps.
+_BATCHED_BRAS = [True]
+
+
+def set_batched_bras(enabled=True):
+    """Enable/disable the batched phi^(n) overlap path (performance only --
+    see _complex_time_correlator)."""
+    _BATCHED_BRAS[0] = bool(enabled)
+    return _BATCHED_BRAS[0]
+
 
 def _cumtrapz0(y, dt):
     """Cumulative trapezoidal integral of y (uniform grid, spacing dt),
@@ -197,10 +211,30 @@ def _complex_time_correlator(self, A, B, alpha0, n_max, dt, nt, omega0):
         integrand = -1j*((-1j*f_t)**n)*dz_dt
         Jn[n] = _cumtrapz0(integrand, dt)
 
+    # The bras are fixed for the whole run, so they can be prepared once
+    # into a single batched bra family and every step's n_max+1 overlaps
+    # taken in one sweep instead of n_max+1 -- see
+    # pyitensor/mpsalgebra.py's BatchedBras for why that matters on a GPU
+    # (same arithmetic, a fifth of the array dispatches, and dispatch is
+    # what the cost is made of at these bond dimensions). Backends that
+    # don't expose batched_bras -- the compiled C++ sessions and
+    # julia_live -- keep the plain loop over dot(); it is the same
+    # numbers either way, so this is purely a question of how the
+    # overlaps are scheduled.
+    bundle = None
+    session = getattr(self, "_session", None)   # julia_live has none
+    if _BATCHED_BRAS[0] and hasattr(session, "batched_bras"):
+        bundle = session.batched_bras([b.cpp_handle for b in bras])
+
     phi = {n: np.zeros(nt+1, dtype=complex) for n in range(n_max+1)}
     for k in range(nt+1):
-        for n in range(n_max+1):
-            phi[n][k] = bras[n].dot(wf_fwd)
+        if bundle is not None:
+            row = bundle.overlaps(wf_fwd.cpp_handle)
+            for n in range(n_max+1):
+                phi[n][k] = row[n]
+        else:
+            for n in range(n_max+1):
+                phi[n][k] = bras[n].dot(wf_fwd)
         if k < nt:
             wf_fwd = _advance_complex_time_step(self, Hop, wf_fwd, dz[k],
                     do_gse=(k < self.tdvp_gse_sweeps))

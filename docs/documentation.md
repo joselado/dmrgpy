@@ -3882,6 +3882,35 @@ contractor, the fused-einsum one) whenever `backend.is_device()`: both
 convert per call, so either would reinstate exactly the round trip the
 port exists to remove.
 
+Dispatch is not the only device cost the engine has to manage;
+*synchronization* is the other, and it binds hardest on the long, small-
+operation loops that time evolution is made of. JAX dispatch is
+asynchronous, so the host runs ahead enqueueing kernels while the device
+works -- and every `bk.to_host()` drains that queue. Two places therefore
+deliberately trade extra arithmetic for fewer stalls, both device-only so
+the NumPy path is untouched:
+
+* `tdvp.py`'s Krylov exponentiator keeps its alpha/beta on the device and
+  brings a block of them home per checkpoint instead of two per
+  iteration, *speculating* past its own stopping point and then rolling
+  back to the exact Krylov dimension the per-iteration loop would have
+  chosen -- so the returned vector is identical, and only a few matvecs
+  are wasted. `tdvp.set_krylov_defer_sync()` forces or disables it.
+* `mpsalgebra.BatchedBras` prepares a fixed family of bra MPS once
+  (transposed, conjugated, zero-padded to a common per-bond width) so
+  that many overlaps against one evolving ket come from a single batched
+  sweep. `tdz.py`'s complex-time correlator uses it for its n_max+1
+  phi^(n) overlaps per step; `tdz.set_batched_bras()` switches it off.
+  Backends without `Chain.batched_bras` fall back to a loop over
+  `overlap()`.
+
+`svd()` follows the same rule: only the O(chi) spectrum comes home (the
+truncation rule is data-dependent branching, which belongs on a host), it
+comes home once rather than twice, and the diagonal S tensor is built from
+the device-resident spectrum rather than from `np.diag()` of the host copy
+-- the latter was an O(chi^2) transfer per factorization, i.e. per bond
+per half-sweep per sweep.
+
 Measured speedups, the crossover, the primitive-by-primitive table and the
 benchmarking pitfalls are in `docs/gpu_cpu_performance.md`; the port's
 design history is in `docs/pyitensor_gpu_port_plan.md`.

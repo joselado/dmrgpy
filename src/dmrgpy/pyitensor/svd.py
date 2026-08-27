@@ -127,8 +127,17 @@ _gram_spectrum = bk.jit(_gram_spectrum_impl, static_argnums=(1,))
 
 
 def _svd_truncated(mat, cutoff, maxdim, mindim):
-    """(U_keep, S_all, Vh_keep, keep, discarded) for `mat`, i.e. a thin SVD
-    already truncated by _truncate()'s Cutoff/MaxDim/mindim rule.
+    """(U_keep, S_all, S_all_on_host, Vh_keep, keep, discarded) for `mat`,
+    i.e. a thin SVD already truncated by _truncate()'s Cutoff/MaxDim/mindim
+    rule.
+
+    The host copy of the spectrum is handed back rather than left to the
+    caller to fetch again: bringing it home is a synchronization, and on a
+    device a synchronization costs far more than the O(chi) it moves --
+    it drains JAX's asynchronous dispatch queue, which is the thing hiding
+    the per-call floor. svd() below needs exactly the same numbers this
+    function already has, and used to call bk.to_host(S) a second time to
+    get them.
 
     Prefers a Gram-matrix route -- eigendecompose the smaller of M M^dag /
     M^dag M, take singular values as square roots of its eigenvalues, and
@@ -168,13 +177,13 @@ def _svd_truncated(mat, cutoff, maxdim, mindim):
             else:
                 Vh = W.conj().T
                 U = (mat @ W) / S[None, :keep]
-            return U, S, Vh, keep, discarded
+            return U, S, S_host, Vh, keep, discarded
 
     U, S, Vh = bk.xp().linalg.svd(mat, full_matrices=False)
     S_host = bk.to_host(S) if bk.is_device() else S
     keep, discarded = _truncate(S_host, cutoff, maxdim if maxdim else None,
                                 max(1, mindim))
-    return U[:, :keep], S, Vh[:keep, :], keep, discarded
+    return U[:, :keep], S, S_host, Vh[:keep, :], keep, discarded
 
 
 def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
@@ -203,7 +212,8 @@ def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
     rdim = int(np.prod([ind.dim for ind in right_inds], dtype=int)) if right_inds else 1
     mat = arr.reshape(ldim, rdim)
 
-    U, S, Vh, keep, discarded = _svd_truncated(mat, cutoff, maxdim, mindim)
+    U, S, S_host, Vh, keep, discarded = _svd_truncated(mat, cutoff, maxdim,
+                                                       mindim)
 
     keep_true = keep          # before any padding: what was actually kept
     pad_to = bk.pad_bonds()
@@ -220,13 +230,19 @@ def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
         Vh = _xp.concatenate([Vh[:keep, :],
                               _xp.zeros((npad, Vh.shape[1]), dtype=Vh.dtype)], axis=0)
         S = _xp.concatenate([S[:keep], _xp.zeros(npad, dtype=S.dtype)])
+        # The host mirror is padded alongside rather than re-fetched: the
+        # appended values are known zeros, so this needs no second
+        # synchronization to learn them.
+        S_host = np.concatenate([np.asarray(S_host)[:keep_true],
+                                 np.zeros(npad, dtype=float)])
         keep = pad_to
 
     # The spectrum is O(chi) and everything downstream of it (entanglement
-    # entropy, truncation weight, the diagonal S tensor) is host-side
-    # bookkeeping, so bring it back once here rather than per use. U and Vh
-    # -- the O(chi^2) parts -- stay wherever they were computed.
-    S_host = bk.to_host(S).real if bk.is_device() else S
+    # entropy, truncation weight, the Spectrum below) is host-side
+    # bookkeeping. It came home once already, inside _svd_truncated, where
+    # the truncation rule needed it -- so it is reused here rather than
+    # transferred a second time.
+    S_host = np.asarray(S_host).real
     probs_full = (S_host.astype(float) ** 2)
     total = probs_full.sum()
     # probs/Spectrum describe the *physical* spectrum, so they stop at
@@ -242,7 +258,15 @@ def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
 
     Utensor = ITensor(tuple(left_inds) + (bond_u,), U.reshape(left_shape))
     Vtensor = ITensor((bond_v,) + tuple(right_inds), Vh.reshape(right_shape))
-    Stensor = ITensor((bond_u, bond_v), np.diag(S_host[:keep].astype(complex)))
+    # Built from the device-resident S, not from S_host: np.diag() of the
+    # host copy would make a keep x keep *host* matrix that ITensor.__init__
+    # then has to push back across the bus, i.e. an O(chi^2) host->device
+    # transfer per factorization -- and svd() runs at every bond of every
+    # half-sweep, so on a TDVP/TDZ run that is the single most frequent
+    # O(chi^2) transfer in the engine. Only the O(chi) spectrum needs to be
+    # on the host (for the truncation rule and the Spectrum below), and it
+    # already is. Bit-identical on NumPy, where S_host *is* S.
+    Stensor = ITensor((bond_u, bond_v), bk.xp().diag(S[:keep].astype(complex)))
     spectrum = Spectrum(S_host[:keep_true], probs, discarded)
     return Utensor, Stensor, Vtensor, spectrum
 

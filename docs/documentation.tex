@@ -4385,6 +4385,39 @@ numba contractor, the fused-einsum one) whenever
 \texttt{backend.is\_device()}: both convert per call, so either would
 reinstate exactly the round trip the port exists to remove.
 
+Dispatch is not the only device cost the engine has to manage;
+\emph{synchronization} is the other, and it binds hardest on the long,
+small-operation loops that time evolution is made of. JAX dispatch is
+asynchronous, so the host runs ahead enqueueing kernels while the device
+works --- and every \texttt{bk.to\_host()} drains that queue. Two places
+therefore deliberately trade extra arithmetic for fewer stalls, both
+device-only so the NumPy path is untouched:
+
+\begin{itemize}
+\item \texttt{tdvp.py}'s Krylov exponentiator keeps its alpha/beta on the
+  device and brings a block of them home per checkpoint instead of two per
+  iteration, \emph{speculating} past its own stopping point and then
+  rolling back to the exact Krylov dimension the per-iteration loop would
+  have chosen --- so the returned vector is identical, and only a few
+  matvecs are wasted. \texttt{tdvp.set\_krylov\_defer\_sync()} forces or
+  disables it.
+\item \texttt{mpsalgebra.BatchedBras} prepares a fixed family of bra MPS
+  once (transposed, conjugated, zero-padded to a common per-bond width) so
+  that many overlaps against one evolving ket come from a single batched
+  sweep. \texttt{tdz.py}'s complex-time correlator uses it for its
+  \texttt{n\_max+1} \texttt{phi}$^{(n)}$ overlaps per step;
+  \texttt{tdz.set\_batched\_bras()} switches it off. Backends without
+  \texttt{Chain.batched\_bras} fall back to a loop over
+  \texttt{overlap()}.
+\end{itemize}
+
+\texttt{svd()} follows the same rule: only the $O(\chi)$ spectrum comes
+home (the truncation rule is data-dependent branching, which belongs on a
+host), it comes home once rather than twice, and the diagonal $S$ tensor is
+built from the device-resident spectrum rather than from \texttt{np.diag()}
+of the host copy --- the latter was an $O(\chi^2)$ transfer per
+factorization, i.e.\ per bond per half-sweep per sweep.
+
 Measured speedups, the crossover, the primitive-by-primitive table and the
 benchmarking pitfalls are in \texttt{docs/gpu\_cpu\_performance.md}; the
 port's design history is in

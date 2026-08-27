@@ -20,7 +20,7 @@ import numpy as np
 from .autompo import AutoMPO
 from .dmrg import dmrg, dmrg_excited, dmrg_generalized
 from .mpobuilder import to_mpo
-from .mpsalgebra import applyMPO, inner, nmultMPO
+from .mpsalgebra import applyMPO, inner, nmultMPO, BatchedBras
 from .mpsalgebra import sum as mps_sum
 from .mpsalgebra import randomMPS, traceC
 from .mpsalgebra import _fresh_link_copy
@@ -331,6 +331,19 @@ class Chain:
 
     def overlap(self, wf1, wf2):
         return inner(wf1, wf2)
+
+    def batched_bras(self, wfs):
+        """Prepare a fixed family of bra MPS for repeated overlap against
+        many different kets, returning an opaque handle whose .overlaps(ket)
+        gives every <bra_b|ket> from a single batched sweep.
+
+        Exists for tdz.py's complex-time correlator, which overlaps one
+        evolving state against the same n_max+1 bras at every time step;
+        see mpsalgebra.BatchedBras for what it does and why the batch is
+        what makes those overlaps worth putting on a device. Backends
+        without this method fall back to a loop over overlap(), which is
+        what tdz.py does when hasattr() says so."""
+        return BatchedBras(wfs)
 
     def overlap_aMb(self, wf1, terms, wf2):
         A = to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)

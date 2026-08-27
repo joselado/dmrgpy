@@ -17,7 +17,7 @@ Status at a glance:
 | Phase 3, the KPM path (incl. energy truncation) | done, measured in Sec. 8 |
 | Phase 4, benchmark campaign | done (`benchmarks/gpu/`) |
 | Phase 5, docs / tests / example | done |
-| Phase 6, follow-ups | dispatch floor + TDVP + the four-point correlator **done**; METTS/tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
+| Phase 6, follow-ups | dispatch floor + TDVP + the four-point correlator + the TDZ complex-time correlator **done**; METTS/tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
 
 Site-specific operating detail (how these jobs were submitted on one
 particular cluster) is deliberately kept in this checkout's untracked
@@ -784,14 +784,70 @@ namespace swap.
    on the device at all -- the MPS is converted once in `_arrays_lpr` -- so
    `backend.set_backend("jax")` immediately before the call sidesteps DMRG's
    own below-crossover tax entirely.
-4. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
+4. **[done 2026-08-27] The complex-time-evolution dynamical correlator
+   (`tdz.py`, `submode="TDZ"`).** Not on this list when it was written
+   either, and like the four-point entry it turned out to be about
+   something other than what its `np.` count suggested -- `tdz.py` has
+   almost no array code at all. It sits on TDVP (item 2) and adds n_max+1
+   full-chain overlaps per time step.
+
+   *What the profile said, and why it was the wrong question.* On the host
+   it is ~90% TDVP and ~8% overlaps, which reads as "already ported,
+   nothing to do". On a device the binding constraint is not where the
+   FLOPs are but where the *synchronizations* are. JAX dispatch is
+   asynchronous; every `float(bk.to_host(...))` drains the queue that
+   hides the per-call floor. The Krylov exponentiator read two numbers
+   home per iteration -- ~1000 pipeline stalls per two-site TDVP step at
+   n=30, and a TDZ run is hundreds of steps of that.
+
+   *What landed*, three changes, none of which alters any arithmetic:
+   `_lanczos_expm_device` keeps alpha/beta as 0-d device arrays and brings
+   a block home per checkpoint, *speculating* past its own stopping point
+   and rolling back to the exact k the per-iteration loop would have
+   picked (so the vector is identical, not merely as accurate; the
+   checkpoint is placed at the previous call's k, which predicts well
+   enough that the speculation usually wastes nothing); `BatchedBras`
+   prepares the fixed bras once and takes each step's n_max+1 overlaps as
+   one sweep of batched GEMMs; and `svd()` stopped building its diagonal S
+   tensor with `np.diag()` from the host copy -- an O(chi^2) host->device
+   transfer per factorization, i.e. per bond per half-sweep per step, the
+   most frequent one in the engine -- and stopped fetching the O(chi)
+   spectrum twice.
+
+   *The rollback is the part worth testing*, and it does not need a GPU:
+   `tests/test_tdz_gpu_batching.py` forces the deferred path on NumPy,
+   where the unmodified loop is available as an exact reference, and
+   checks the stopping point rather than just the accuracy -- stopping
+   *later* would still be accurate and would silently break the 1e-14
+   cross-backend agreement the port promises. It also covers the
+   Lanczos-exhaustion case the speculation introduces (stepping past a
+   beta of ~0, clamped so the dead columns are zero rather than nan).
+
+   *Measured*: pending `benchmarks/gpu/tdz_bench.py` (`tdz_gpu.sbatch` +
+   `tdz_cpu.sbatch`), which runs base/krylov/bras/both x the maxm sweep in
+   one process so a single submission gives the whole attribution, and
+   asserts every configuration returns the same spectrum.
+
+   *The honest caveat, stated before the numbers arrive.* TDZ exists to
+   need a *small* bond dimension -- chi ~ 20-30 against 500-700 for
+   real-time evolution is the paper's own claim -- and this port's
+   crossover is chi ~ 120-160. So TDZ at its natural operating point is on
+   the wrong side of the line, and none of the above moves it; what moves
+   is how cheaply a device *can* be used, not whether it should be. The
+   lever that would move it is the one the four-point entry found: a real
+   batch axis. C_ij(t) for all j from a single evolution -- the whole
+   dynamical structure factor rather than one pair -- puts ~N bras where
+   n_max+1 sit today, which is the regime where a device wins at chi=20.
+   That needs a multi-pair dynamical-correlator entry point, which dmrgpy
+   does not have; it is a deliberate follow-up, not an oversight.
+5. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
    in the library -- samples x time steps x Krylov iterations -- and it
    inherits TDVP's large chi, so it sits directly on (2), now done.
    Smaller than its count suggests, in the other direction from TDVP:
    most of those `np.` sites are RNG, pooled-variance statistics over
    samples, and a d x d single-site `eigh` for the collapse basis, all of
    which *should* stay on the host. Audit before porting.
-5. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
+6. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
    No traps in either. `kpm_energy_truncation.py` is already done.
 
 Not worth doing now, with reasons rather than silence:

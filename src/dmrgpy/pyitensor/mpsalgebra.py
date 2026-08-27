@@ -111,6 +111,130 @@ def inner(*args):
 innerC = inner
 
 
+def _mps_arrays_lpr_device(psi):
+    """Every site tensor of `psi` as a (chi_left, d, chi_right) array in
+    the *active* array backend, length-1 axes inserted at the open ends.
+
+    chain.py has a `_mps_arrays_lpr` that does the same reordering and then
+    calls `np.ascontiguousarray`, which is correct there (the four-point
+    kernel converts once, deliberately, and wants a host array) and exactly
+    wrong here: this feeds a batch that must stay wherever the MPS already
+    lives. Same explicit transpose-against-named-indices, since index order
+    on an MPS tensor is not guaranteed."""
+    n = psi.length()
+    out = []
+    for i in range(1, n + 1):
+        T = psi.A(i)
+        phys = next(ind for ind in T.inds if ind.hastags("Site"))
+        left = commonIndex(psi.A(i - 1), T) if i > 1 else None
+        right = commonIndex(T, psi.A(i + 1)) if i < n else None
+        order = [ind for ind in (left, phys, right) if ind is not None]
+        arr = T.transpose_to(order)
+        if left is None:
+            arr = arr.reshape((1,) + arr.shape)
+        if right is None:
+            arr = arr.reshape(arr.shape + (1,))
+        out.append(arr)
+    return out
+
+
+def _batched_overlap_site(E, bra, ket):
+    """One site of BatchedBras.overlaps(): E[b,aL,cL] -> E'[b,aR,cR], as
+    the two batched GEMMs described in that class's docstring.
+
+    bra is already conjugated and padded, shape (B, AL, d, AR); ket is
+    (cL, d, cR); E is (B, AL, cL)."""
+    _xp = bk.xp()
+    B, AL, d, AR = bra.shape
+    cL, _, cR = ket.shape
+    # X[b, cL, d*AR] = sum_aL E[b, aL, cL] * bra[b, aL, d*AR]
+    X = _xp.matmul(E.transpose(0, 2, 1), bra.reshape(B, AL, d * AR))
+    # E'[b, AR, cR] = sum_{cL,d} X[b, cL, d, AR] * ket[cL, d, cR]
+    X = X.reshape(B, cL * d, AR)
+    return _xp.matmul(X.transpose(0, 2, 1), ket.reshape(cL * d, cR))
+
+
+_batched_overlap_site = bk.jit(_batched_overlap_site)
+
+
+class BatchedBras:
+    """A fixed set of bra MPS, prepared once so that <bra_b|ket> for every
+    b comes from a single sweep instead of one sweep per bra.
+
+    Why this exists. tdz.py's complex-time correlator (submode "TDZ",
+    arXiv:2311.10909) needs n_max+1 overlaps of the *same* evolving state
+    against a *fixed* family of bras -- phi^(n)(t) = <H^n B GS|psi(t)> --
+    at every one of hundreds of time steps. Written as a loop over
+    `inner()` that is (n_max+1) independent left-to-right sweeps, i.e.
+    (n_max+1) * N environment updates of a few array operations each, all
+    of them chi x chi and none of them big enough to occupy a GPU. Batched,
+    it is N steps of two GEMMs carrying all n_max+1 environments at once:
+    the same arithmetic, a fifth of the dispatches, which on a device is
+    the quantity that decides the cost (see docs/pyitensor_gpu_port_plan.md
+    Sec. 9's four-point entry for the same lesson learned the expensive
+    way).
+
+    The bras never change, so the transpose-to-(left,site,right), the
+    conjugation and the zero-padding to a common per-bond width all happen
+    here, once, rather than per step. Zero padding is exact rather than an
+    approximation: a padded column of the bra contracts against the ket to
+    zero and contributes nothing to any overlap, which is the same argument
+    backend.set_pad_bonds relies on.
+
+    Bond widths are equalized *per bond*, not to one global maximum: near
+    the chain ends the true dimensions are 2, 4, 8, ... and padding those up
+    to the middle's width would do a great deal of arithmetic on blocks
+    known to be zero.
+    """
+
+    __slots__ = ("_bras", "_n", "_nsites", "_batch")
+
+    def __init__(self, chains):
+        if not chains:
+            raise ValueError("BatchedBras: needs at least one bra")
+        _xp = bk.xp()
+        self._batch = len(chains)
+        self._nsites = chains[0].length()
+        for c in chains:
+            if c.length() != self._nsites:
+                raise ValueError("BatchedBras: every bra must have the same "
+                                 "number of sites")
+        per_bra = [_mps_arrays_lpr_device(c) for c in chains]
+        stacked = []
+        for i in range(self._nsites):
+            mats = [arrs[i] for arrs in per_bra]
+            AL = max(m.shape[0] for m in mats)
+            d = mats[0].shape[1]
+            AR = max(m.shape[2] for m in mats)
+            padded = []
+            for m in mats:
+                if m.shape != (AL, d, AR):
+                    buf = bk.zeros((AL, d, AR))
+                    buf = bk.setblock(buf, (slice(0, m.shape[0]), slice(None),
+                                            slice(0, m.shape[2])), m)
+                    m = buf
+                padded.append(m.conj())
+            stacked.append(_xp.stack(padded))
+        self._bras = stacked
+        self._n = self._nsites
+
+    def __len__(self):
+        return self._batch
+
+    def overlaps(self, ket):
+        """[<bra_b|ket> for b] as a NumPy complex array of length B, from
+        one batched sweep. One host transfer at the end, of B numbers."""
+        _xp = bk.xp()
+        kets = _mps_arrays_lpr_device(ket)
+        if len(kets) != self._nsites:
+            raise ValueError("BatchedBras.overlaps: ket has %d sites, bras "
+                             "have %d" % (len(kets), self._nsites))
+        E = _xp.ones((self._batch, 1, 1), dtype=complex)
+        for i in range(self._nsites):
+            E = _batched_overlap_site(E, self._bras[i], kets[i])
+        return np.asarray(bk.to_host(E.reshape(self._batch)))
+
+
 def _dag_local(T):
     from .tensor import dag
     return dag(T)

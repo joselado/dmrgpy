@@ -272,3 +272,79 @@ def test_jit_is_tied_to_padding_and_changes_no_result(numpy_backend_restored):
     with pytest.raises(ValueError):
         bk.set_jit("sometimes")
     bk.set_jit("auto")
+
+
+def test_svd_keeps_its_singular_value_tensor_on_the_device(numpy_backend_restored):
+    """svd() runs at every bond of every half-sweep, so its own output is
+    the engine's most frequent opportunity to leak an O(chi^2) transfer.
+
+    The diagonal S tensor used to be assembled with np.diag() from the
+    host copy of the spectrum -- correct, and a full keep x keep matrix
+    pushed back across the bus per factorization. Only the O(chi)
+    spectrum needs to be on the host; this asserts the matrix is not."""
+    from dmrgpy.pyitensor.index import Index
+    from dmrgpy.pyitensor.svd import svd
+    from dmrgpy.pyitensor.tensor import ITensor
+
+    bk.set_backend("jax")
+    rng = np.random.default_rng(3)
+    a, b = Index(6, tags="Link"), Index(8, tags="Link")
+    T = ITensor((a, b), bk.asarray(rng.standard_normal((6, 8))
+                                   + 1j * rng.standard_normal((6, 8))))
+    U, S, V, spectrum = svd(T, [a], cutoff=1e-12)
+    assert isinstance(S.array, jax.Array)
+    assert isinstance(U.array, jax.Array) and isinstance(V.array, jax.Array)
+    # The spectrum itself is host-side bookkeeping, by design.
+    assert not isinstance(spectrum.eigs, jax.Array)
+    # ...and the split still reconstructs the tensor it came from.
+    back = np.asarray(bk.to_host((U * S * V).transpose_to((a, b))))
+    assert np.max(np.abs(back - np.asarray(bk.to_host(T.array)))) < 1e-12
+
+
+def test_batched_bras_stay_on_the_device(numpy_backend_restored):
+    """mpsalgebra.BatchedBras exists to give the phi^(n) overlaps of a
+    submode="TDZ" run a batch axis, which is only worth anything if the
+    prepared bras live where the ket does -- a batch that transfers per
+    step would be strictly worse than the loop it replaces.
+
+    Agreement is checked on NumPy in tests/test_tdz_gpu_batching.py; what
+    needs a device is residency, so this asserts on the array type."""
+    from dmrgpy.pyitensor.mpsalgebra import BatchedBras, inner
+
+    bk.set_backend("jax")
+    sc = _heisenberg(n=4, maxm=8, nsweeps=2)
+    sc.get_gs()
+    Hop = sc.toMPO(sc.hamiltonian - sc.e0)
+    bras = [sc.toMPO(sc.Sz[1]) * sc.wf0]
+    for _ in range(2):
+        bras.append(Hop * bras[-1])
+    ket = sc.toMPO(sc.Sx[0]) * sc.wf0
+
+    bundle = BatchedBras([b.cpp_handle for b in bras])
+    assert all(isinstance(arr, jax.Array) for arr in bundle._bras)
+
+    got = bundle.overlaps(ket.cpp_handle)
+    ref = np.array([inner(b.cpp_handle, ket.cpp_handle) for b in bras])
+    assert np.max(np.abs(got - ref)) < 1e-11
+
+
+def test_tdz_correlator_matches_numpy(numpy_backend_restored):
+    """End to end on the device: complex-time evolution (submode="TDZ",
+    arXiv:2311.10909) exercises the deferred-synchronization Krylov path
+    and the batched phi^(n) overlaps together, on top of TDVP.
+
+    Tiny on purpose -- eager JAX is far slower than NumPy at this size
+    (see this module's docstring); the point is that the two backends
+    agree, not that either is fast here."""
+    es = np.linspace(-0.5, 2.5, 25)
+
+    def spectrum():
+        sc = _heisenberg(n=4, maxm=8, nsweeps=2)
+        return sc.get_dynamical_correlator(
+                mode="DMRG", submode="TDZ", name=(sc.Sz[1], sc.Sz[1]),
+                dt=0.1, nt=8, es=es)[1]
+
+    ref = spectrum()
+    bk.set_backend("jax")
+    got = spectrum()
+    assert np.max(np.abs(got - ref)) < 1e-9

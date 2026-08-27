@@ -228,6 +228,77 @@ trajectory: 1.5e-14. The chi-swept GPU table for it has not been run yet;
 `examples/backend_comparison/tdvp_cpu_VS_gpu` is the script that produces
 it.
 
+## Complex-time evolution (`submode="TDZ"`): removing synchronizations
+
+`submode="TDZ"` (`tdz.py`, complex-time evolution + perturbative real-axis
+reconstruction, arXiv:2311.10909) sits on the TDVP path above and adds
+n_max+1 full-chain overlaps per time step. Profiled on the host it is ~90%
+TDVP and ~8% those overlaps, but on a device the split that matters is a
+different one: nothing in it is a large GEMM, so its cost is made of
+per-call dispatch and, worse, of *host synchronizations*. JAX dispatch is
+asynchronous -- the host runs ahead enqueueing kernels while the device
+works, which is the only thing hiding the per-call floor -- and every
+`float(bk.to_host(...))` drains that queue.
+
+Three changes (2026-08-27) attack exactly that. None of them changes any
+arithmetic, so all of them are verified by the spectrum being unchanged:
+
+* **The Krylov exponentiator no longer synchronizes per iteration**
+  (`tdvp.py`, `_lanczos_expm_device`). alpha and beta stay 0-d device
+  arrays -- `w - alpha*q` and `w/beta` never needed a host value -- and a
+  whole block of them comes home in one transfer. Since the stopping test
+  cannot then be evaluated every iteration, the recursion *speculates*
+  past its own stopping point and rolls back to the exact same Krylov
+  dimension the per-iteration loop would have chosen, so the returned
+  vector is identical rather than merely as accurate. At n=30 this takes a
+  two-site TDVP step from ~1000 synchronizations to ~60. The next
+  checkpoint is placed at the previous call's converged k, which is an
+  excellent predictor here (Krylov convergence is set by the local
+  effective Hamiltonian's spectral width, which barely moves between
+  bonds), so the speculation usually wastes nothing.
+* **The phi^(n) overlaps are batched** (`mpsalgebra.BatchedBras`). The
+  bras are fixed for the whole run -- H^n(B|GS>), built once -- so they are
+  stacked, conjugated and zero-padded to a common per-bond width once, and
+  each step's n_max+1 overlaps become one sweep of two batched GEMMs per
+  site instead of n_max+1 separate sweeps. Same arithmetic, a fifth of the
+  dispatches. Padding is exact for the same reason `set_pad_bonds` is: a
+  padded column contracts to zero.
+* **`svd()` stopped round-tripping its S tensor.** The diagonal
+  singular-value tensor was assembled with `np.diag()` from the host copy
+  of the spectrum, so every factorization pushed a `keep x keep` matrix
+  back across the bus -- at every bond, of every half-sweep, of every step,
+  which makes it the most frequent O(chi^2) transfer in the engine. It is
+  built from the device-resident spectrum now. The same call also fetched
+  the O(chi) spectrum twice (once inside `_svd_truncated` for the
+  truncation rule, once again for the `Spectrum`); it is fetched once and
+  reused, halving the remaining per-SVD stalls.
+
+The one synchronization deliberately left in place is the truncation rule
+itself: `keep` is a cumulative sum with data-dependent branching over the
+spectrum, worthless on a device and not comparable against a Python float
+there, so O(chi) numbers come home per factorization by design.
+
+Measured numbers, n=30, are pending the benchmark job
+(`benchmarks/gpu/tdz_bench.py`, `tdz_gpu.sbatch` + `tdz_cpu.sbatch`); this
+section will be filled in with the table it produces. The honest
+expectation to hold while reading it: TDZ's entire selling point is that
+the complex-time contour damps high-energy content and so needs a *small*
+bond dimension (the paper reports chi ~ 20-30 against 500-700 for
+real-time evolution), while this port's crossover is chi ~ 120-160. At its
+natural operating point TDZ is therefore on the wrong side of that line,
+and the changes above widen the range of *session shapes* and bond
+dimensions for which a device is viable rather than making a small
+complex-time run worth a GPU.
+
+The lever that would change that verdict is the one the four-point
+correlator found and TDZ has not used yet: a genuine batch axis. Computing
+C_ij(t) for many j from the *same* evolution -- the whole dynamical
+structure factor rather than one operator pair -- would put ~N bras into
+the batch that currently holds n_max+1 of them, which is the regime where
+the next section's result says a device wins at chi=20. That is an API
+change (dmrgpy has no multi-pair dynamical-correlator entry point today),
+so it is named here as the follow-up rather than built.
+
 ## The four-point correlator: batching beats bond dimension
 
 The one-sentence version above has one exception, and it is the most useful

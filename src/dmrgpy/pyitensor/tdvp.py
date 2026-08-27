@@ -135,7 +135,23 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
     alpha and beta, because the projected tridiagonal matrix, its
     eigendecomposition and Saad's residual test are all k x k with k under
     ~10 -- host work by design, the same split dmrg.py's
-    _lanczos_ground_state uses."""
+    _lanczos_ground_state uses.
+
+    Those two numbers per iteration are cheap to *move* and expensive to
+    *wait for*. JAX dispatch is asynchronous: the host runs ahead
+    enqueueing kernels while the device works, which is the only thing
+    that hides the ~0.35 ms per-call dispatch floor this port fights
+    everywhere else. `float(bk.to_host(...))` is a synchronization point,
+    so reading alpha and beta every iteration drains that queue twice per
+    Lanczos step -- at n=30 a single two-site TDVP step is 2 half-sweeps x
+    29 bonds x ~9 iterations, i.e. ~1000 full pipeline stalls per time
+    step, and a submode="TDZ" run is hundreds of time steps of exactly
+    that. So on a device the recursion keeps alpha/beta as 0-d device
+    arrays (`w - alpha*q` and `w/beta` need no host value) and reads a
+    whole *block* of them home in one transfer -- see
+    _lanczos_expm_device below, which speculates past the stopping point
+    and then rolls back to the exact same k the host loop would have
+    chosen, so the two paths still return the same vector."""
     _xp = bk.xp()
     beta0 = float(bk.to_host(_xp.linalg.norm(v0)))
     if beta0 == 0:
@@ -143,17 +159,18 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
 
     m = min(niter, v0.size)
     basis = _KrylovBasis(v0 / beta0, m)
+    if krylov_defer_sync():
+        return _lanczos_expm_device(matvec, basis, beta0, coeff, m, tol,
+                                    errgoal)
     alphas = []
     betas = []
 
     def exp_first_column(k):
         """First column of exp(coeff * T_k), T_k the k x k projected
-        (real, symmetric tridiagonal) matrix built so far."""
-        if k == 1:
-            return np.array([np.exp(coeff * alphas[0])], dtype=complex)
-        evals, evecs = _eigh_tridiagonal_robust(np.array(alphas[:k]),
-                                                 np.array(betas[:k - 1]))
-        return evecs @ (np.exp(coeff * evals) * evecs[0, :])
+        (real, symmetric tridiagonal) matrix built so far. Shared with the
+        device path below, which evaluates the identical quantity from a
+        block of coefficients rather than one at a time."""
+        return _exp_first_column(alphas, betas, coeff, k)
 
     beta = 0.0
     for it in range(m):
@@ -185,6 +202,165 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
         basis.append(w / beta)
 
     raise AssertionError("unreachable: the it == m-1 branch always returns")
+
+
+# How many further Lanczos iterations the device path speculates through
+# before bringing a block of (alpha, beta) home. Every iteration past the
+# true stopping point is a wasted matvec, and every block boundary is a
+# pipeline stall, so this trades one against the other; 4 is small enough
+# that the waste stays bounded even when the hint below is useless.
+_KRYLOV_CHECK_BLOCK = 4
+
+# Where to place the *first* checkpoint: the k at which the previous call
+# converged. Krylov convergence here is set by the local effective
+# Hamiltonian's spectral width times |coeff|, which barely moves from bond
+# to bond or from step to step, so the previous k is an excellent
+# predictor and the common case becomes "check once, at exactly the right
+# place, waste nothing". This is a pure *scheduling* hint: it decides how
+# far the recursion runs ahead, never where it stops (that is
+# _first_converged_k's job, below), so a stale or wildly wrong value costs
+# a few matvecs and cannot change the returned vector. Hence a plain
+# process-global rather than per-chain state.
+_KRYLOV_K_HINT = [1]
+
+# Whether the Krylov exponentiator uses the deferred-synchronization path
+# below. None (the default) means "on exactly when the arrays are on a
+# device", which is the only case where it can help: on the host
+# bk.to_host() is a no-op and speculating past the stopping point would be
+# pure waste. True/False force it either way, which is what
+# benchmarks/gpu/tdz_bench.py uses to attribute a device speedup to this
+# change rather than to the others in the same run -- the same reason
+# backend.set_jit() can be forced.
+_KRYLOV_DEFER_SYNC = [None]
+
+
+def set_krylov_defer_sync(mode=None):
+    """Force (True) or disable (False) the deferred-synchronization Krylov
+    path; None restores the automatic "on iff on a device" default. Both
+    paths return the same vector -- see _lanczos_expm_device -- so this is
+    a performance knob only."""
+    if mode not in (True, False, None):
+        raise ValueError("set_krylov_defer_sync: mode must be True, False "
+                         "or None, got %r" % (mode,))
+    _KRYLOV_DEFER_SYNC[0] = mode
+    return mode
+
+
+def krylov_defer_sync():
+    """Whether the deferred-synchronization Krylov path is currently in
+    use."""
+    if _KRYLOV_DEFER_SYNC[0] is None:
+        return bk.is_device()
+    return bool(_KRYLOV_DEFER_SYNC[0])
+
+
+def _exp_first_column(alphas, betas, coeff, k):
+    """First column of exp(coeff * T_k), where T_k is the k x k real
+    symmetric tridiagonal matrix with diagonal alphas[:k] and
+    off-diagonal betas[:k-1]. Host-side by design: k is under ~10, and
+    only this first column is ever used, so the full matrix exponential
+    is never assembled (see _lanczos_expm_multiply's docstring)."""
+    if k == 1:
+        return np.array([np.exp(coeff * alphas[0])], dtype=complex)
+    evals, evecs = _eigh_tridiagonal_robust(np.array(alphas[:k]),
+                                             np.array(betas[:k - 1]))
+    return evecs @ (np.exp(coeff * evals) * evecs[0, :])
+
+
+def _first_converged_k(alphas, betas, beta0, coeff, m, tol, errgoal,
+                        scan_from=1):
+    """The smallest k in [scan_from, len(alphas)] at which the host loop
+    in _lanczos_expm_multiply would have stopped, or None if it would
+    have run past the coefficients available so far.
+
+    This is deliberately a transcription of that loop's own three-way
+    stopping test rather than an approximation of it -- beta < tol
+    (Lanczos exhaustion), k == m (the caller's iteration budget), and
+    Saad's a posteriori residual estimate -- because the device path's
+    whole claim is that speculating ahead changes only *when* the test is
+    evaluated, never *what* it decides. Returns the k, and the caller
+    discards every basis vector past it."""
+    for k in range(max(scan_from, 1), len(alphas) + 1):
+        beta = betas[k - 1]
+        if beta < tol or k == m:
+            return k
+        if beta0 * beta * abs(_exp_first_column(alphas, betas, coeff, k)[-1]) < errgoal:
+            return k
+    return None
+
+
+def _lanczos_expm_device(matvec, basis, beta0, coeff, m, tol, errgoal):
+    """_lanczos_expm_multiply's device path: the identical recursion with
+    the per-iteration host synchronization removed.
+
+    Two changes, and only the second one is visible from outside:
+
+    1. alpha and beta stay 0-d device arrays. Nothing in the recursion
+       needs their values on the host -- `w - alpha*q - beta*q_prev` and
+       `w / beta` are array operations either way -- so keeping them where
+       they are produced lets JAX's asynchronous dispatch keep running
+       ahead instead of stalling twice per iteration.
+    2. The stopping test therefore cannot be evaluated per iteration. So
+       the recursion *speculates*: it runs to the next checkpoint, brings
+       that whole block of coefficients home in one transfer, and asks
+       _first_converged_k where the host loop would have stopped. If that
+       point is inside the block, the extra basis vectors built past it
+       are simply dropped -- they cost matvecs, they do not affect the
+       answer, which is assembled from exactly the first k columns with
+       exactly the same k the host path would have used.
+
+    The one numerical wrinkle speculation introduces is that the
+    recursion can step *past* a beta of ~0 (Lanczos exhaustion), where
+    the host loop would already have returned. Dividing by it would put
+    inf/nan into the basis and, through the reorthogonalization, into
+    every later column. Clamping the divisor to 1 below instead makes
+    those speculative columns exactly zero, which is harmless: they are
+    orthogonal to everything, they are discarded by the rollback, and
+    they cannot poison the columns that are kept."""
+    _xp = bk.xp()
+    alphas_d, betas_d = [], []      # 0-d device arrays, never transferred
+    alphas, betas = [], []          # their host mirrors, one block at a time
+    home = 0                        # coefficients already brought home
+    next_check = min(max(_KRYLOV_K_HINT[0], 1), m)
+
+    for it in range(m):
+        q = basis.column(it)
+        w = matvec(q)
+        alpha = _xp.vdot(q, w).real
+        alphas_d.append(alpha)
+        if it > 0:
+            w = _lanczos_residual(w, alpha, q, betas_d[it - 1],
+                                  basis.column(it - 1))
+        else:
+            w = w - alpha * q
+        Qk = basis.matrix()         # exactly k = it+1 columns
+        w = _block_reorthogonalize(Qk, w)
+        beta = _xp.linalg.norm(w)
+        betas_d.append(beta)
+
+        k = it + 1
+        if k >= next_check or k == m:
+            # One transfer for the whole block: the 2*(k-home) new
+            # coefficients as a single stacked array, so a checkpoint
+            # costs one synchronization rather than 2 per iteration.
+            nnew = k - home
+            block = bk.to_host(_xp.stack(alphas_d[home:] + betas_d[home:])).real
+            alphas.extend(float(x) for x in block[:nnew])
+            betas.extend(float(x) for x in block[nnew:])
+            stop_k = _first_converged_k(alphas, betas, beta0, coeff, m, tol,
+                                        errgoal, scan_from=home + 1)
+            home = k
+            if stop_k is not None:
+                _KRYLOV_K_HINT[0] = stop_k
+                exp_col0 = _exp_first_column(alphas, betas, coeff, stop_k)
+                return beta0 * (Qk[:, :stop_k] @ bk.asarray(exp_col0))
+            next_check = min(k + _KRYLOV_CHECK_BLOCK, m)
+
+        # Clamped so a speculative step past Lanczos exhaustion produces a
+        # zero column rather than nan; see this function's docstring.
+        basis.append(w / _xp.where(beta > tol, beta, 1.0))
+
+    raise AssertionError("unreachable: the k == m checkpoint always returns")
 
 
 class _KrylovBasis:
