@@ -327,8 +327,13 @@ class Many_Body_Chain():
       invalidates the Hamiltonian/ground state already sent to the session,
       so the next gs_energy() re-sends and re-solves.
 
-      itensor_version=3 only for now (the other backends have no quantum
-      numbers at all), and DMRG-only: mode="ED" has no sector support.
+      itensor_version=3 and itensor_version="python" only (the other
+      backends have no quantum numbers at all), and DMRG-only: mode="ED"
+      has no sector support. The two implement it differently -- v3 with
+      genuinely block-sparse QN tensors, the pure-Python backend with a
+      charge grading on dense storage plus a charge penalty on the
+      variational solves (see pyitensor/sector.py) -- but the API, the
+      units (Sz in 2*Sz units) and the answers are the same.
       """
       previous = self.conserved_sector # restored below if the request is rejected
       if not qns: # switch sector targeting off
@@ -339,10 +344,11 @@ class Many_Body_Chain():
                   raise ValueError("set_conserved_sector: %s must be an integer "
                                    "(Sz is in 2*Sz units), got %s"%(k,repr(v)))
           self.conserved_sector = {k:int(v) for k,v in qns.items()}
-      if self.itensor_version!=3:
+      if self.itensor_version not in (3,"python"):
           raise NotImplementedError(
-              "set_conserved_sector is implemented for itensor_version=3 only "
-              "(this chain uses %s). Switch with setup_cpp(version=3)."
+              "set_conserved_sector is implemented for itensor_version=3 and "
+              "itensor_version=\"python\" only (this chain uses %s). Switch "
+              "with setup_cpp(version=3) or setup_python()."
               %repr(self.itensor_version))
       try:
           self._apply_conserved_sector()
@@ -365,6 +371,29 @@ class Many_Body_Chain():
           return
       qns = sorted((self.conserved_sector or {}).items())
       self._session.set_conserved_sector(qns)
+  def set_sector_penalty(self,lam=None):
+      """Strength of the charge penalty the pure-Python backend adds to its
+      variational solves while a conserved sector is set
+      (itensor_version="python" only -- itensor_version=3 confines the
+      calculation with genuinely block-sparse tensors and has no such
+      knob). `None` restores the default, derived from the Hamiltonian's
+      own coefficient scale.
+
+      The penalty is lambda*sum_k (Q_k-q_k)^2, identically zero on the
+      target sector, so this changes no converged number -- only how
+      strongly an excursion out of the sector is suppressed on the way
+      there. It exists because dense storage lets a truncating SVD leak
+      ~1e-16 of amplitude across charge sectors, which a variational sweep
+      then amplifies; see pyitensor/sector.py. Setting it to 0 disables
+      confinement entirely and is only useful for demonstrating that.
+      """
+      if self.itensor_version!="python":
+          raise NotImplementedError(
+              "set_sector_penalty applies to itensor_version=\"python\" only "
+              "(this chain uses %s): the other backends with sector support "
+              "confine the calculation structurally instead."
+              %repr(self.itensor_version))
+      self._session.set_sector_penalty(lam)
   def promote_to_dense(self):
       """Leave conserved-sector mode while *keeping* the state computed in it.
 
@@ -393,7 +422,11 @@ class Many_Body_Chain():
       (ITensor's own `removeQNs`, see `Chain::promote_to_dense` in
       mpscpp3/chain_session.h). What it costs is the block-sparsity speedup,
       which is gone from here on -- so promote after the expensive
-      sector-confined part of the calculation, not before it.
+      sector-confined part of the calculation, not before it. On
+      itensor_version="python" the state was dense all along (see
+      pyitensor/sector.py) and the conversion only relabels its site
+      indices, so nothing is lost there; what promotion buys is the same on
+      both backends -- the charge-changing operations the sector forbids.
 
       The Hamiltonian and the band-edge/iDMRG/VUMPS caches are dropped (they
       were built on the QN indices) and re-sent on the next call that needs
@@ -402,14 +435,15 @@ class Many_Body_Chain():
       re-solving unconstrained. Call `restart()` if an unconstrained
       re-solve is what you want.
 
-      Nothing happens if no sector is set. itensor_version=3 only, like
-      `set_conserved_sector` itself.
+      Nothing happens if no sector is set. itensor_version=3 and
+      itensor_version="python" only, like `set_conserved_sector` itself.
       """
       if not self.conserved_sector: return # nothing to promote
-      if self.itensor_version!=3:
+      if self.itensor_version not in (3,"python"):
           raise NotImplementedError(
-              "promote_to_dense is implemented for itensor_version=3 only "
-              "(this chain uses %s)."%repr(self.itensor_version))
+              "promote_to_dense is implemented for itensor_version=3 and "
+              "itensor_version=\"python\" only (this chain uses %s)."
+              %repr(self.itensor_version))
       if self._session is None:
           # No live session to promote: the sector was only ever recorded
           # on the Python object (_apply_conserved_sector is a no-op
@@ -441,7 +475,8 @@ class Many_Body_Chain():
       this before it can be contracted against an operator built afterwards.
       Returns a new `MPS`; a no-op on one that is already dense."""
       if wf is None: return None
-      if self.itensor_version!=3 or getattr(wf,"cpp_handle",None) is None:
+      if self.itensor_version not in (3,"python") \
+              or getattr(wf,"cpp_handle",None) is None:
           return wf
       if not hasattr(self._session,"promote_mps"):
           # Returning wf unconverted would hand back a handle still on the

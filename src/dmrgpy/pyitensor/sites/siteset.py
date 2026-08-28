@@ -40,11 +40,83 @@ def _site_class(type_code):
         raise ValueError("SiteX cannot build a site of type code {}".format(e.args[0]))
 
 
+def site_qn_names(type_code):
+    """The conserved quantities a site-type code can carry -- the
+    pyitensor counterpart of mpscpp3/get_sites.h's site_qn_names(), reading
+    the per-site-type charge tables instead of duplicating them. An empty
+    tuple means no conserved-sector support for that site type (the Z3/Z4
+    parafermion sites: they do carry a Z_n charge, but nothing in dmrgpy's
+    Python layer can name a target for it)."""
+    return _site_class(type_code).qn_names()
+
+
 class SiteX:
-    def __init__(self, site_types):
+    """The site set. `conserved`, when given, is the set of quantum-number
+    names the caller wants conserved (conserved-sector mode, see
+    sector.py): every site index is then built carrying a charge grading
+    for exactly those of its own quantities that appear in it, and the
+    whole site set gets fresh Index identities -- so a wavefunction built
+    in a sector cannot be silently contracted against an operator built
+    outside one. Mirrors mpscpp3/get_sites.h's SpinX(site_types,conserved),
+    including its rule that a site type contributing none of the requested
+    quantities is an error rather than a silently ungraded site.
+    """
+
+    def __init__(self, site_types, conserved=None):
         self._types = [_site_class(t) for t in site_types]
-        self._indices = [Index(t.dim, tags="Site,n={}".format(i + 1))
+        self._codes = tuple(site_types)
+        self._conserved = None if not conserved else tuple(sorted(conserved))
+        self._indices = [Index(t.dim, tags="Site,n={}".format(i + 1),
+                                qnnames=self._names_at(i + 1),
+                                qn=self._charges_at(i + 1))
                           for i, t in enumerate(self._types)]
+
+    def _names_at(self, i):
+        """Which of site i's own quantum numbers this site set grades it
+        by: the intersection of the request with what the site type
+        offers, or None outside sector mode."""
+        if self._conserved is None:
+            return None
+        own = self._types[i - 1].qn_names()
+        names = tuple(n for n in self._conserved if n in own)
+        if not names:
+            raise ValueError(
+                "SiteX: site %d (type code %s) conserves none of %s -- it "
+                "offers %s. A site set mixing graded and ungraded sites is "
+                "not something conserved-sector mode supports."
+                % (i, self._codes[i - 1], ", ".join(self._conserved),
+                   ", ".join(own) if own else "no quantum numbers at all"))
+        return names
+
+    def _charges_at(self, i):
+        names = self._names_at(i)
+        if names is None:
+            return None
+        t = self._types[i - 1]
+        return tuple(tuple(t.charges(n)[st] for n in names)
+                      for st in range(t.dim))
+
+    def conserved(self):
+        """The quantum numbers this site set is graded by (a tuple), or
+        None if it is an ordinary dense site set."""
+        return self._conserved
+
+    def site_codes(self):
+        return self._codes
+
+    def qn_names(self, i):
+        """The quantum numbers site i is graded by, or None."""
+        return self._indices[i - 1].qnnames
+
+    def state_charge(self, i, st, names):
+        """The charge of (1-based) basis state `st` of site i, as one
+        integer per name in `names` -- 0 for a quantity this site type
+        doesn't carry, exactly as adding a spin site's Sz to a spinless
+        fermion site's (absent) Sz would. Mirrors chain_session.h's
+        state_charge()."""
+        t = self._types[i - 1]
+        return tuple(int(t.charges(n)[st - 1]) if n in t._QN else 0
+                      for n in names)
 
     def length(self):
         return len(self._types)

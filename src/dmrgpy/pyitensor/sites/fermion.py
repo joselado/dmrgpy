@@ -19,6 +19,7 @@ class FermionSite(SiteType):
     """Spinless fermion, dim=2 (Emp=1, Occ=2). mpscpp3's SpinlessSite alias."""
     dim = 2
     _states = {"Emp": 1, "0": 1, "Occ": 2, "1": 2}
+    _QN = {"Nf": (0, 1)}
     _OPS = {
         "N": build_matrix(2, [(2, 2, 1)]),
         "n": build_matrix(2, [(2, 2, 1)]),
@@ -49,6 +50,9 @@ class ElectronSite(SiteType):
     """
     dim = 4
     _states = {"0": 1, "Emp": 1, "+": 2, "Up": 2, "-": 3, "Dn": 3, "S": 4, "UpDn": 4}
+    # Emp, Up, Dn, UpDn -- particle number and 2*Sz, independently
+    # selectable, exactly as electron.h's ConserveNf/ConserveSz are.
+    _QN = {"Nf": (0, 1, 1, 2), "Sz": (0, 1, -1, 0)}
     _OPS = {
         "Nup": build_matrix(4, [(2, 2, 1), (4, 4, 1)]),
         "Ndn": build_matrix(4, [(3, 3, 1), (4, 4, 1)]),

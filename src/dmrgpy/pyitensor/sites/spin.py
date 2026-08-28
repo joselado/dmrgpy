@@ -15,6 +15,8 @@ SQRT2 = np.sqrt(2.0)
 class SpinHalfSite(SiteType):
     dim = 2
     _states = {"Up": 1, "Dn": 2}
+    # 2*Sz, in the same 1-based state order as _states above.
+    _QN = {"Sz": (1, -1)}
     _OPS = {
         "Sz": build_matrix(2, [(1, 1, 0.5), (2, 2, -0.5)]),
         "Sx": build_matrix(2, [(1, 2, 0.5), (2, 1, 0.5)]),
@@ -33,6 +35,8 @@ class SpinHalfSite(SiteType):
 class SpinOneSite(SiteType):
     dim = 3
     _states = {"Up": 1, "+": 1, "Z0": 2, "0": 2, "Dn": 3, "-": 3}
+    # 2*Sz, in the same 1-based state order as _states above.
+    _QN = {"Sz": (2, 0, -2)}
     _OPS = {
         "Sz": build_matrix(3, [(1, 1, 1.0), (3, 3, -1.0)]),
         "Sx": build_matrix(3, [(1, 2, ISQRT2), (2, 1, ISQRT2), (2, 3, ISQRT2), (3, 2, ISQRT2)]),
@@ -58,6 +62,8 @@ class SpinThreeHalfSite(SiteType):
     dim = 4
     _states = {"Up": 1, "3": 1, "Upi": 2, "1": 2, "Dni": 3, "-1": 3, "Dn": 4, "-3": 4}
     _VAL1 = np.sqrt(3.0) / 2.0
+    # 2*Sz, in the same 1-based state order as _states above.
+    _QN = {"Sz": (3, 1, -1, -3)}
     _OPS = {
         "Sz": build_matrix(4, [(1, 1, 1.5), (2, 2, 0.5), (3, 3, -0.5), (4, 4, -1.5)]),
         "Sx": build_matrix(4, [(1, 2, _VAL1), (2, 1, _VAL1), (2, 3, 1.0), (3, 2, 1.0),
@@ -74,6 +80,8 @@ class SpinFiveHalfSite(SiteType):
     _VAL1 = np.sqrt(5.0) / 2.0
     _VAL2 = np.sqrt(8.0) / 2.0
     _VAL3 = np.sqrt(9.0) / 2.0
+    # 2*Sz, in the same 1-based state order as _states above.
+    _QN = {"Sz": (5, 3, 1, -1, -3, -5)}
     _OPS = {
         "Sz": build_matrix(6, [(1, 1, 2.5), (2, 2, 1.5), (3, 3, 0.5),
                                 (4, 4, -0.5), (5, 5, -1.5), (6, 6, -2.5)]),
@@ -94,6 +102,8 @@ class SpinTwoSite(SiteType):
                "Dni": 4, "-2": 4, "Dn": 5, "-4": 5}
     _VAL1 = np.sqrt(6.0) / 2.0
     _VAL2 = np.sqrt(6.0)
+    # 2*Sz, in the same 1-based state order as _states above.
+    _QN = {"Sz": (4, 2, 0, -2, -4)}
     _OPS = {
         "Sz": build_matrix(5, [(1, 1, 2.0), (2, 2, 1.0), (4, 4, -1.0), (5, 5, -2.0)]),
         "Sx": build_matrix(5, [(1, 2, 1.0), (2, 1, 1.0), (2, 3, _VAL1), (3, 2, _VAL1),

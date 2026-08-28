@@ -5,9 +5,19 @@ actually uses (see mpscpp3/chain_session.h): a stable identity ("this leg,
 regardless of prime level"), a prime level (distinguishes a "bra" copy of a
 leg from its "ket" original after prime()/dag()), a dimension, and a small
 set of string tags ("Site", "Link", plus free-form labels like "n=3" for
-readability). There is no QN/arrow information here at all -- mpscpp3 always
-builds sites with ConserveQNs=false (see get_sites.h's long comment on why),
-so nothing in dmrgpy ever needs an Index to carry quantum numbers.
+readability), plus -- only in conserved-sector mode -- a *charge grading*:
+one integer charge per basis state, per conserved quantity.
+
+That grading is the whole of the quantum-number bookkeeping here, and it
+is deliberately much less than real ITensor v3's. A QN-carrying v3 Index
+also reorders its basis states into contiguous per-charge blocks and makes
+every tensor built on it block-sparse; this one only *labels* the states it
+already had, leaving storage dense (see sector.py's module docstring for
+what that buys and what it costs). Two consequences worth stating plainly:
+the labels never affect Index equality or contraction (a graded Index and
+its dense twin differ only by identity, exactly as a v3 QN site index does),
+and only *site* indices are ever graded -- Link indices minted by svd()/
+sim() stay ungraded, since nothing here exploits their block structure.
 
 Two Index objects are the "same leg" for contraction/addition purposes iff
 they compare equal, which requires both the same identity and the same
@@ -29,13 +39,29 @@ def _parse_tags(tags):
 
 
 class Index:
-    __slots__ = ("_id", "_dim", "_tags", "_plev")
+    __slots__ = ("_id", "_dim", "_tags", "_plev", "_qnnames", "_qn")
 
-    def __init__(self, dim, tags=(), plev=0, _id=None):
+    def __init__(self, dim, tags=(), plev=0, _id=None, qnnames=None, qn=None):
         self._id = next(_id_counter) if _id is None else _id
         self._dim = int(dim)
         self._tags = _parse_tags(tags)
         self._plev = plev
+        # Charge grading, conserved-sector mode only (None when off): a
+        # tuple of quantum-number names, and one integer charge per name
+        # per basis state -- qn[state][k] is the charge of basis state
+        # `state` (0-based) under quantum number qnnames[k].
+        self._qnnames = None if qnnames is None else tuple(qnnames)
+        if qn is None:
+            self._qn = None
+        else:
+            self._qn = tuple(tuple(int(c) for c in row) for row in qn)
+            if len(self._qn) != self._dim:
+                raise ValueError("Index: %d charge rows for a dim-%d index"
+                                 % (len(self._qn), self._dim))
+            nq = len(self._qnnames or ())
+            if any(len(row) != nq for row in self._qn):
+                raise ValueError("Index: charge rows don't match qnnames %s"
+                                 % (self._qnnames,))
 
     @property
     def id(self):
@@ -53,6 +79,24 @@ class Index:
     def plev(self):
         return self._plev
 
+    @property
+    def qnnames(self):
+        """The conserved quantities this index is graded by, or None."""
+        return self._qnnames
+
+    @property
+    def qn(self):
+        """Per-basis-state charges (a tuple of tuples), or None when this
+        index carries no grading."""
+        return self._qn
+
+    def hasqns(self):
+        return self._qn is not None
+
+    def charge(self, state):
+        """The charge tuple of (0-based) basis state `state`."""
+        return self._qn[state]
+
     def hastags(self, tagmatch):
         """True if this Index carries every tag in tagmatch (a str or iterable
         of str). None/empty matches everything -- the "no filter" case used
@@ -61,10 +105,12 @@ class Index:
         return want <= self._tags
 
     def prime(self, inc=1):
-        return Index(self._dim, self._tags, self._plev + inc, _id=self._id)
+        return Index(self._dim, self._tags, self._plev + inc, _id=self._id,
+                     qnnames=self._qnnames, qn=self._qn)
 
     def setprime(self, plev):
-        return Index(self._dim, self._tags, plev, _id=self._id)
+        return Index(self._dim, self._tags, plev, _id=self._id,
+                     qnnames=self._qnnames, qn=self._qn)
 
     def noprime(self):
         return self.setprime(0)
@@ -84,8 +130,10 @@ class Index:
 
     def __repr__(self):
         tagstr = ",".join(sorted(self._tags))
-        return "Index(dim={},tags='{}',plev={},id={})".format(
-            self._dim, tagstr, self._plev, self._id)
+        qnstr = "" if self._qn is None else ",qns='{}'".format(
+            ",".join(self._qnnames))
+        return "Index(dim={},tags='{}',plev={},id={}{})".format(
+            self._dim, tagstr, self._plev, self._id, qnstr)
 
 
 def sim(index):

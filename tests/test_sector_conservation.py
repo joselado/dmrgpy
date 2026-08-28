@@ -11,9 +11,14 @@ come back as arbitrary superpositions, and numpy hands out mixtures whose
 <N> matches no sector at all. That mistake produced a 0.48 "discrepancy"
 against a DMRG answer that was in fact correct.
 
-itensor_version=3 only: no other backend has quantum numbers at all, and
-a sector-mode chain refuses to fall back to ED (mode.py) rather than
-silently answering with the global ground state.
+These tests all run on itensor_version=3, dmrgpy's block-sparse QN
+implementation of sector mode. itensor_version="python" implements the
+same API by a different mechanism (dense storage plus a charge penalty,
+see pyitensor/sector.py) and is covered by
+test_sector_conservation_python.py; the backends that have no quantum
+numbers at all still refuse rather than silently answering with the
+global ground state, which is what
+test_ed_and_other_backends_refuse_rather_than_answering_globally checks.
 """
 import numpy as np
 import pytest
@@ -230,12 +235,27 @@ def test_ed_and_other_backends_refuse_rather_than_answering_globally():
     fc.set_conserved_sector(Nf=3)
     with pytest.raises(NotImplementedError):
         fc.gs_energy(mode="ED")
-    with pytest.raises(NotImplementedError):
-        fc.setup_python()
     fc2, h2, _ = tV_chain(n)
     fc2.setup_cpp(version=2)
     with pytest.raises(NotImplementedError):
         fc2.set_conserved_sector(Nf=3)
+
+
+def test_switching_to_the_python_backend_keeps_the_sector():
+    """itensor_version="python" does have quantum numbers (it grades its
+    site indices and penalizes charge excursions instead of storing blocks
+    -- see pyitensor/sector.py), so switching a sector-mode chain to it is
+    allowed, and must carry the sector across rather than silently
+    dropping it."""
+    n, nf = 8, 3
+    fc, h, number = tV_chain(n)
+    fc.set_hamiltonian(h)
+    fc.set_conserved_sector(Nf=nf)
+    e_v3 = fc.gs_energy()
+    fc.setup_python()
+    assert fc.conserved_sector == {"Nf": nf}
+    assert fc.gs_energy() == pytest.approx(e_v3, abs=DMRG_TOL)
+    assert fc.vev(number).real == pytest.approx(nf, abs=1e-8)
 
 
 def test_dense_only_algorithms_refuse_instead_of_aborting():

@@ -2,7 +2,9 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 # Ground states of one *chosen* quantum-number sector
-# (Many_Body_Chain.set_conserved_sector, itensor_version=3 only).
+# (Many_Body_Chain.set_conserved_sector; this script uses the default
+# itensor_version=3 -- itensor_version="python" supports the same API,
+# see examples/backend_comparison/sector_v3_VS_python).
 #
 # By default DMRG here searches the whole Hilbert space and returns the
 # global ground state, whatever particle number or total Sz that happens

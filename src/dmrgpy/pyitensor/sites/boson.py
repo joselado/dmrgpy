@@ -52,6 +52,7 @@ def get_boson_site(dim):
             {
                 "dim": dim,
                 "_states": {str(k): k + 1 for k in range(dim)},
+                "_QN": {"Nb": tuple(range(dim))},
                 "_OPS": _boson_ops(dim),
             },
         )

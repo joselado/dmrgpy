@@ -533,10 +533,18 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   which is what the opt-in sector mode below actually does.
 - **`mpscpp3`-specific: opt-in conserved-sector (QN) mode.**
   `Many_Body_Chain.set_conserved_sector(Nf=6)` / `(Sz=0)` / `(Nf=8,Sz=0)`
-  (`itensor_version=3` only, off by default, no-args clears it) confines
+  (off by default, no-args clears it) confines
   the whole calculation to one quantum-number sector: `Chain::
   set_conserved_sector` rebuilds `sites_` via `SpinX(site_types,conserved)`
   with QN-carrying indices and drops everything built on the old site set.
+  The same public API (including `promote_to_dense`/`promote_mps`) is also
+  implemented by `itensor_version="python"`, by a different mechanism --
+  dense storage with a charge grading on the site indices plus a charge
+  penalty on the variational solves, see `pyitensor/sector.py`'s module
+  docstring and the pure-Python-backend section of `docs/documentation.md`;
+  everything else below is v3-specific. No other backend has quantum
+  numbers at all, and a sector-mode chain raises rather than falling back
+  to one that doesn't.
   It pays off with size, and only with size: measured through the Python
   API on Heisenberg chains, sector vs dense is 0.6x (n=20, maxm=60), 2.0x
   (n=40, maxm=100), 4.2x (n=60, maxm=200) — block sparsity scales, its

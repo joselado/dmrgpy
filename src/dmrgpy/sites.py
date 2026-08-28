@@ -31,10 +31,11 @@ def initialize(self,**kwargs):
             # set would silently answer with the global ground state instead
             # of the requested sector's, so that is an error, not a fallback.
             if getattr(self,"conserved_sector",None):
-                if self.itensor_version!=3:
+                if self.itensor_version not in (3,"python"):
                     raise NotImplementedError(
                         "this chain targets the conserved sector %s, which only "
-                        "itensor_version=3 implements -- clear it with "
+                        "itensor_version=3 and itensor_version=\"python\" "
+                        "implement -- clear it with "
                         "set_conserved_sector() before switching to %s"
                         %(self.conserved_sector,repr(self.itensor_version)))
                 self._apply_conserved_sector()

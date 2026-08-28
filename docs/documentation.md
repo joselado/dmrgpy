@@ -1915,12 +1915,14 @@ Notable, deliberate implementation details (not bugs to "fix"):
   matching v2's real (unconstrained-search) behavior rather than ITensor
   v3's stricter, QN-conserving-from-the-start convention, at the cost of
   losing the QN block-sparsity speedup for `itensor_version=3`.
-  `Many_Body_Chain.set_conserved_sector()` (`itensor_version=3` only) is
-  the opt-in that turns the quantum numbers back on for a chain whose
-  caller wants the search confined to one sector — see "Conserved-sector
-  mode" below, which also records why the "DMRG gets stuck at the product
-  state" observation behind the default does *not* generalize to sector
-  mode.
+  `Many_Body_Chain.set_conserved_sector()` is the opt-in that turns the
+  quantum numbers back on for a chain whose caller wants the search
+  confined to one sector — see "Conserved-sector mode" below, which also
+  records why the "DMRG gets stuck at the product state" observation
+  behind the default does *not* generalize to sector mode. The pure-Python
+  backend implements the same public API by a different mechanism (dense
+  storage plus a charge penalty, §4.5); no other backend has quantum
+  numbers at all.
 - **Conserved-sector mode** (`Chain::set_conserved_sector`,
   `mpscpp3/chain_session.h`): rebuilds `sites_` through
   `SpinX(site_types,conserved)` (`get_sites.h`) with QN-carrying indices,
@@ -2247,6 +2249,88 @@ faster than pyitensor here — NH-DMRG's per-bond cost already pays for
 *two* Arnoldi solves (right block and its adjoint) regardless of backend,
 narrowing the compiled-vs-pure-Python gap relative to plain ground-state
 DMRG's single local diagonalization per bond.
+
+**Conserved-sector mode (`pyitensor/sector.py`).** The pure-Python
+backend implements the same `set_conserved_sector`/`promote_to_dense`
+surface as `mpscpp3` (§4.4), reached by the identical
+`Many_Body_Chain.set_conserved_sector(Nf=6)`/`(Sz=0)` call and giving the
+same answers, but by a different mechanism — and the difference is the
+interesting part.
+
+An `Index` here gains an optional *charge grading*: one integer charge per
+basis state, per conserved quantity (`index.py`, from the per-site-type
+`_QN` tables in `sites/base.py` and friends, in ITensor's own units — `Sz`
+in integer $2S^z$). That is all it gains. Real ITensor v3's QN indices also
+sort their basis states into contiguous per-charge blocks and make every
+tensor built on them block-sparse; these only *label* the states they
+already had, so storage stays dense, `Link` indices are never graded, and
+no contraction or SVD in the engine changes at all. `SiteX(site_types,
+conserved)` mints the graded set with fresh Index identities (mirroring
+v3, where a QN site set is necessarily a different object), and the
+session keeps its own permanently dense `dense_sites` alongside, so
+`promote_to_dense`/`promote_mps` is exactly an index relabeling —
+position-based, so it still works on a state handed back long after the
+sector that produced it was cleared.
+
+Three consequences of the dense choice:
+
+- *The term-list normalization is still needed, for a different reason.*
+  `sector_terms` transcribes `mo_terms.h`'s `expand_xy_terms` +
+  `combine_terms` + charge check, so the textbook $S^xS^x+S^yS^y+S^zS^z$
+  Heisenberg Hamiltonian is accepted (its $S^+S^+$/$S^-S^-$ strings cancel
+  exactly once expanded) and a genuinely non-conserving operator is
+  rejected by name. In `mpscpp3` this exists because ITensor *aborts the
+  process* over a flux-violating term; here nothing would abort — the
+  check exists so that the operator being diagonalized provably commutes
+  with the conserved charges, which is what makes the answer the sector's
+  answer. Every `terms → MPO` path in `chain.py` routes through
+  `Chain._ampo`/`_mpo`, so the check covers `vev`, correlators, KPM
+  vertices and time evolution, not just `set_hamiltonian`; both are
+  pass-through outside sector mode.
+- *A charge penalty is needed, which `mpscpp3` does not need.* Contraction
+  preserves exact zeros, but a dense LAPACK SVD does not: Householder
+  bidiagonalization mixes rows across charge blocks, so every truncation
+  injects ~$10^{-16}$ of amplitude into neighboring sectors, and a
+  variational sweep amplifies that geometrically toward whichever sector
+  is lower in energy. So the *variational* solves (ground state, excited
+  states, band edges — nothing else) minimize $H+\lambda\sum_k(\hat
+  Q_k-q_k)^2$ instead of $H$, with the penalty MPO built in closed form as
+  the standard bond-dimension-3 $(\sum_i B_i)^2$ automaton
+  (`charge_penalty_mpo`) rather than by handing $O(N^2)$ two-site terms to
+  `mpobuilder.py`. It is identically zero on the target sector and
+  `gs_energy` reports $\langle H\rangle$ under the plain Hamiltonian
+  regardless, so no reported number changes; $\lambda$ defaults to the sum
+  of the Hamiltonian's coefficient magnitudes (enough to outweigh its
+  spectral range, so the target sector's ground state is the global
+  minimum of the penalized operator) and `Chain.set_sector_penalty` (`Many_Body_Chain.set_sector_penalty`)
+  overrides it. This is not defensive coding: measured on a 12-site chain
+  with attractive $V$ asked for $N_f=2$, an in-sector start with the
+  penalty disabled converges to the *full* band ($\langle(\hat Q-q)^2
+  \rangle = 144$), and with it enabled reproduces sector-restricted ED —
+  `tests/test_sector_conservation_python.py::test_the_charge_penalty_is_load_bearing`
+  locks that down. Every solve also checks its converged state's
+  $\langle(\hat Q-q)^2\rangle$ and raises rather than reporting the wrong
+  sector's energy.
+- *The start state is a sum of random in-sector product states*
+  (`sector_mps`), from the same exact dynamic program over reachable
+  partial charges as `chain_session.h`'s `sector_state_plan` (greedy
+  dead-ends on a Hubbard chain at fixed `Nf` *and* `Sz`). A single product
+  state would be a poor start for the same reason `default_mps()` avoids
+  one: this backend's DMRG has no noise term at all, so a start that is an
+  exact eigenstate has nothing to move it. Routing every solve through
+  `Chain._default_mps` means excited states and band edges inherit the
+  in-sector start for free.
+
+Two smaller differences from `mpscpp3`. `tevol_method="TEBD"` *works*
+here, where v3 refuses it: v3's gate assembly sums bond gates before their
+fluxes agree, while these gates are dense and simply inherit the
+Hamiltonian's charge conservation (checked against dense TDVP/TEBD to
+5e-7). And because mismatched dense site indices do not fail loudly — they
+would silently not contract, producing an outer product — `Chain` checks
+the site set of every wavefunction handed to `vev`/`apply_operator`/
+`overlap`/`set_wavefunction` and raises instead. METTS refuses in sector
+mode on both backends, for the physical reason on this one: it averages
+over an ensemble sampled from every sector at once.
 
 ### 4.6 The Julia backend (`mpsjulialive/`)
 

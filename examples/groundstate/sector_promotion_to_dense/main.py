@@ -2,7 +2,9 @@
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 # Leaving a conserved sector *without* losing the state computed inside it
-# (Many_Body_Chain.promote_to_dense, itensor_version=3 only).
+# (Many_Body_Chain.promote_to_dense; this script uses the default
+# itensor_version=3 -- itensor_version="python" supports the same API,
+# see examples/backend_comparison/sector_v3_VS_python).
 #
 # set_conserved_sector(Nf=k) confines the whole calculation to exactly k
 # particles, which is what you want for the expensive part -- the sweeps.

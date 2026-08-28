@@ -26,7 +26,8 @@ from .mpsalgebra import randomMPS, traceC
 from .mpsalgebra import _fresh_link_copy
 from .metts import metts_thermal_average as _metts_thermal_average
 from .metts import metts_dynamical_correlator as _metts_dynamical_correlator
-from .sites import SiteX
+from . import sector as sectortk
+from .sites import SiteX, site_qn_names
 from .svd import svd
 from .sweeps import Sweeps
 from .mpscontainer import _link_at
@@ -155,7 +156,24 @@ def _max_link_dim(psi):
 
 class Chain:
     def __init__(self, site_types):
+        self.site_types = list(site_types)
         self.sites = SiteX(site_types)
+        # The chain's own dense site set, kept for the whole lifetime of the
+        # session: conserved-sector mode swaps self.sites for a graded one
+        # (see set_conserved_sector) and promote_to_dense() rebases states
+        # back onto *this* set rather than a freshly minted one, so two
+        # states promoted from different sectors stay comparable. Mirrors
+        # chain_session.h's dense_sites_.
+        self.dense_sites = self.sites
+        # Requested sector as a sorted list of (name,target) pairs, empty
+        # when sector mode is off. See sector.py for what it does.
+        self.sector = []
+        self.sector_penalty = None  # None = derive from the Hamiltonian
+        self._penalty = None  # cached penalty MPO, at the chosen strength
+        self._probe = None  # cached penalty MPO at strength 1, for checks
+        self._solve_H_cache = None
+        self._h_terms = []
+        self._sector_draws = 0
         self.H = None
         self.have_H = False
         self.wf0 = None
@@ -231,10 +249,235 @@ class Chain:
         self.kpm_truncate_nsweeps = n_sweeps
         self.kpm_truncate_threshold = threshold
 
+    # -- conserved sector: opt-in quantum-number conservation ----------
+    #
+    # Everything below is inert while sector mode is off (self.sector
+    # empty): the checks return immediately and _ampo()/_default_mps()
+    # take exactly the paths they always did. See sector.py's module
+    # docstring for how this differs from mpscpp3's QN-block-sparse
+    # implementation of the same user-facing feature.
+
+    def set_conserved_sector(self, qns):
+        """Confine every calculation on this chain to one quantum-number
+        sector. `qns` is a list of (name,target) pairs -- [("Nf",6)],
+        [("Sz",0)], [("Nf",8),("Sz",0)] -- with Sz in ITensor's integer
+        2*Sz units; an empty list turns sector mode back off.
+
+        Rebuilds the site set with a charge grading (SiteX(...,conserved)),
+        which makes every state and operator built afterwards belong to it,
+        so everything already built on the old site set is dropped and the
+        next gs_energy() re-sends and re-solves. Mirrors chain_session.h's
+        Chain::set_conserved_sector, including its rollback: a request that
+        turns out to be impossible leaves the chain exactly as it was
+        rather than half-switched into a sector whose every later call
+        would fail.
+        """
+        qns = sorted((str(k), int(v)) for k, v in qns)
+        if not qns:  # sector mode off: back to this chain's dense sites
+            self.sites = self.dense_sites
+            self.sector = []
+            self._forget_everything_built_on_sites()
+            return
+        names = [k for k, _ in qns]
+        if len(set(names)) != len(names):
+            raise ValueError("set_conserved_sector: repeated quantum number "
+                             "in %s" % (names,))
+        for name in names:
+            if not any(name in site_qn_names(code) for code in self.site_types):
+                raise ValueError(
+                    "set_conserved_sector: no site in this chain carries the "
+                    "quantum number %s (this chain offers %s)"
+                    % (name, ", ".join(sorted(set(
+                        n for code in self.site_types
+                        for n in site_qn_names(code)))) or "none at all"))
+        old_sites, old_sector = self.sites, self.sector
+        try:
+            self.sites = SiteX(self.site_types, conserved=names)
+            self.sector = qns
+            sectortk.sector_state_plan(self.sites, self.sector)  # reachable?
+        except Exception:
+            self.sites, self.sector = old_sites, old_sector
+            raise
+        self._forget_everything_built_on_sites()
+
+    def conserved_sector(self):
+        """The currently requested sector, empty when sector mode is off."""
+        return list(self.sector)
+
+    def set_sector_penalty(self, lam):
+        """Strength of the charge penalty added to the *variational* solves
+        in sector mode (see sector.py). None restores the default, which is
+        derived from the Hamiltonian's own coefficient scale. The penalty
+        is identically zero on the target sector, so this knob changes no
+        converged number -- only how strongly an excursion out of the
+        sector is suppressed on the way there."""
+        self.sector_penalty = None if lam is None else float(lam)
+        self._penalty = None
+        self._solve_H_cache = None
+
+    def promote_to_dense(self):
+        """Leave sector mode while *keeping* the state computed inside it.
+
+        The counterpart of set_conserved_sector([]), which switches the
+        sector off but throws the ground state away with everything else
+        built on the graded site set. Here the state is kept, rebased
+        exactly onto this chain's own dense site indices, so the operations
+        a sector forbids (applying a bare C, an Sx correlator, a
+        charge-changing dynamical correlator) become available on a state
+        that was nevertheless obtained inside one. Mirrors
+        chain_session.h's Chain::promote_to_dense(); the conversion is
+        exact and involves no re-solve.
+        """
+        if not self.sector:
+            return  # already dense: nothing to promote
+        promoted = None if self.wf0 is None else self.promote_mps(self.wf0)
+        energy = self._wf0_energy
+        self.sites = self.dense_sites
+        self.sector = []
+        self._forget_everything_built_on_sites()
+        if promoted is not None:
+            self.wf0 = promoted
+            self._wf0_energy = energy
+
+    def promote_mps(self, wf):
+        """One wavefunction converted from the sector's graded site indices
+        to this chain's dense ones, exactly -- the per-wavefunction
+        counterpart of promote_to_dense(). A no-op on a state that is
+        already dense."""
+        if wf is None:
+            return None
+        site = sectortk.chain_site_index(wf)
+        if site is None or not site.hasqns():
+            return wf
+        return sectortk.promote_chain(wf, self.dense_sites)
+
+    def _reject_sector(self, where):
+        """Refuse a calculation that a sector cannot mean anything for.
+        METTS is the case: it averages over a thermal ensemble sampled from
+        *product* states drawn across every sector at once, so confining
+        the chain to one sector would not restrict the ensemble, it would
+        just make the sampled states inconsistent with the site set they
+        are built on. mpscpp3 refuses the same call for a harder reason
+        (its by-hand dense tensor assembly aborts under QN indices)."""
+        if self.sector:
+            raise ValueError(
+                "conserved-sector mode (%s): %s is not available inside a "
+                "sector -- it samples states from every sector at once. "
+                "Clear the sector with set_conserved_sector(), or promote "
+                "with promote_to_dense() first."
+                % (", ".join("%s=%d" % kv for kv in self.sector), where))
+
+    def _forget_everything_built_on_sites(self):
+        """Drop every piece of session state built against the old site set
+        -- which, after a site-set swap, is all of it."""
+        self.H = None
+        self.have_H = False
+        self.wf0 = None
+        self._wf0_energy = None
+        self._bandwidth_min = None
+        self._bandwidth_max = None
+        self._penalty = None
+        self._probe = None
+        self._solve_H_cache = None
+
+    def _ampo(self, terms):
+        """AutoMPO for a term list, sector-checked first. Every operator
+        this session builds -- the Hamiltonian, but also anything passed to
+        vev()/correlators/time evolution -- goes through here, so a term
+        that does not conserve the sector is named in a ValueError instead
+        of quietly producing an answer from the wrong Hilbert space."""
+        if self.sector:
+            terms = sectortk.sector_terms(self.sites, self.sector, terms)
+        return AutoMPO.from_terms(self.sites, terms)
+
+    def _mpo(self, terms, cutoff=_BUILD_CUTOFF, maxdim=None):
+        return to_mpo(self._ampo(terms), cutoff=cutoff,
+                      maxdim=self.mpomaxm if maxdim is None else maxdim)
+
+    def _penalty_mpo(self, lam=None):
+        """lambda*sum_k (Q_k-q_k)^2 for the current sector, cached."""
+        if lam is not None:
+            return sectortk.charge_penalty_mpo(self.sites, self.sector, lam)
+        if self._penalty is None:
+            strength = self.sector_penalty
+            if strength is None:
+                strength = sectortk.terms_scale(self._h_terms)
+            self._penalty = sectortk.charge_penalty_mpo(self.sites,
+                                                         self.sector, strength)
+        return self._penalty
+
+    def _penalized(self, mpo):
+        """`mpo` plus the sector's charge penalty; `mpo` unchanged outside
+        sector mode. Only the variational solves (ground state, excited
+        states, band edges) use this -- see sector.py on why they need it
+        and why nothing else does."""
+        if not self.sector:
+            return mpo
+        return mps_sum(mpo, self._penalty_mpo(), cutoff=_BUILD_CUTOFF,
+                       maxdim=self.mpomaxm)
+
+    def _solve_H(self):
+        if not self.sector:
+            return self.H
+        if self._solve_H_cache is None:
+            self._solve_H_cache = self._penalized(self.H)
+        return self._solve_H_cache
+
+    def _sector_deviation(self, wf):
+        """<(Q-q)^2> for a normalized state: 0 in the sector, positive
+        outside it."""
+        if self._probe is None:
+            self._probe = self._penalty_mpo(lam=1.0)
+        psi = wf.copy()
+        psi.normalize()
+        return abs(inner(psi, self._probe, psi))
+
+    def _check_in_sector(self, wf, where, tol=1e-6):
+        if not self.sector:
+            return
+        dev = self._sector_deviation(wf)
+        if dev > tol:
+            raise RuntimeError(
+                "%s: the converged state is not in the requested sector "
+                "(<(Q-q)^2> = %.3g). Raise the charge penalty with "
+                "set_sector_penalty(), or the sweep count/bond dimension."
+                % (where, dev))
+
+    def _check_wf_sites(self, wf, where):
+        """Refuse a wavefunction that belongs to a different *sector* site
+        set than this session currently has -- one computed in a sector and
+        handed back after it was cleared, or vice versa, or one from a
+        different sector. Contracting it would not fail loudly (dense
+        storage: the mismatched site indices would simply not contract,
+        silently producing an outer product), so it is checked rather than
+        discovered.
+
+        Deliberately narrower than "any site set that isn't ours": two
+        ungraded site sets of the same shape are left alone, since chains
+        cloned from one another have always been contracted together this
+        way and that is not what sector mode introduced."""
+        if wf is None:
+            return
+        site = sectortk.chain_site_index(wf)
+        if site is None:
+            return
+        mine = self.sites.si(1)
+        if site.hasqns() == mine.hasqns() and not site.hasqns():
+            return  # both ungraded: pre-existing behavior, untouched
+        if site != mine:
+            raise ValueError(
+                "%s: this wavefunction belongs to a different site set than "
+                "the chain currently has -- it was built under a different "
+                "conserved-sector setting. Convert it with promote_mps() "
+                "after promote_to_dense(), or rebuild it in the current "
+                "sector." % where)
+
     def set_hamiltonian(self, terms):
-        ampo = AutoMPO.from_terms(self.sites, terms)
+        ampo = self._ampo(terms)
+        self._h_terms = [(complex(c), list(f)) for c, f in terms]
         self.H = to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         self.have_H = True
+        self._solve_H_cache = None  # the penalized operator is stale too
         self._wf0_energy = None  # any cached energy is now stale
         self._bandwidth_min = None  # ...and so is any cached bandwidth
         self._bandwidth_max = None
@@ -253,7 +496,17 @@ class Chain:
         sweeps = self._make_sweeps_ramped(self.nsweeps, self.maxm, floor_dim)
         if self.wf0 is None:
             self.wf0 = self._default_mps(sweeps.at(0)[0])
-        energy = dmrg(self.wf0, self.H, sweeps, quiet=not self.verbose)
+        self._check_wf_sites(self.wf0, "gs_energy")
+        energy = dmrg(self.wf0, self._solve_H(), sweeps, quiet=not self.verbose)
+        if self.sector:
+            # The solve minimized H + the charge penalty; report <H>, which
+            # is the sector's own energy (the penalty is identically zero
+            # there, so the two agree to dust -- reporting <H> keeps that
+            # true by construction rather than by argument).
+            self._check_in_sector(self.wf0, "gs_energy")
+            psi = self.wf0.copy()
+            psi.normalize()
+            energy = inner(psi, self.H, psi).real
         self._wf0_energy = energy
         return energy
 
@@ -263,6 +516,7 @@ class Chain:
         return self.wf0
 
     def set_wavefunction(self, wf):
+        self._check_wf_sites(wf, "set_wavefunction")
         self.wf0 = wf
         self._wf0_energy = None  # energy no longer matches wf0
 
@@ -281,11 +535,12 @@ class Chain:
         which is not <psi|H|psi>) -- invalidated below instead."""
         if not self.have_H:
             raise RuntimeError("Chain.gs_energy_generalized called before set_hamiltonian")
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms_a), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = self._mpo(terms_a)
         if self.wf0 is None:
             self.wf0 = self._default_mps()
         sweeps = self._make_sweeps()
-        lam = dmrg_generalized(self.wf0, self.H, A, sweeps, quiet=not self.verbose, lam0=lam0)
+        lam = dmrg_generalized(self.wf0, self._solve_H(), A, sweeps,
+                                quiet=not self.verbose, lam0=lam0)
         self._wf0_energy = None  # stale: no longer <wf0|H|wf0>, see docstring
         return lam
 
@@ -301,8 +556,10 @@ class Chain:
         weight = self._bandwidth() * scale_lagrange
         for _ in range(1, n):
             psi1 = self._default_mps()
-            dmrg_excited(psi1, self.H, wfs, weight, sweeps, quiet=not self.verbose)
+            dmrg_excited(psi1, self._solve_H(), wfs, weight, sweeps,
+                          quiet=not self.verbose)
             psi1.normalize()
+            self._check_in_sector(psi1, "excited_states")
             wfs.append(psi1)
         if do_gram_schmidt:
             wfs = self._gram_schmidt(wfs)
@@ -314,7 +571,8 @@ class Chain:
         return energies, fluctuations, wavefunctions
 
     def vev(self, terms, wf, npow=1):
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        self._check_wf_sites(wf, "vev")
+        A = self._mpo(terms)
         psi = wf.copy()
         nrm = inner(psi, psi).real ** 0.5
         psi = psi * (1.0 / nrm)
@@ -326,10 +584,13 @@ class Chain:
         return inner(psi, A, psi1)
 
     def apply_operator(self, terms, wf):
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        self._check_wf_sites(wf, "apply_operator")
+        A = self._mpo(terms)
         return self._apply_mpo(A, wf)
 
     def overlap(self, wf1, wf2):
+        self._check_wf_sites(wf1, "overlap")
+        self._check_wf_sites(wf2, "overlap")
         return inner(wf1, wf2)
 
     def batched_bras(self, wfs):
@@ -346,7 +607,7 @@ class Chain:
         return BatchedBras(wfs)
 
     def overlap_aMb(self, wf1, terms, wf2):
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = self._mpo(terms)
         return inner(wf1, A, wf2)
 
     def sum_mps(self, wf1, wf2):
@@ -390,7 +651,7 @@ class Chain:
         return np.array(out, dtype=complex).reshape(dim, dim)
 
     def exponential_apply(self, terms, wf, tau, nsteps):
-        H = to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        H = self._mpo(terms)
         taui = tau / float(nsteps)
         expH = self._custom_exp(H, taui)
         psi1 = wf
@@ -399,7 +660,7 @@ class Chain:
         return psi1
 
     def build_operator(self, terms):
-        return to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        return self._mpo(terms)
 
     def nhdmrg(self, terms_h, terms_hadj, krylovdim=20, restarts=2):
         """Non-Hermitian DMRG: optimize a biorthogonal left/right
@@ -410,10 +671,8 @@ class Chain:
         (the annotated original) -- see nhdmrg.py in this package.
         Returns (energy, psil, psir)."""
         from .nhdmrg import nhdmrg as _nhdmrg
-        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h),
-                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        HA = to_mpo(AutoMPO.from_terms(self.sites, terms_hadj),
-                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        H = self._mpo(terms_h)
+        HA = self._mpo(terms_hadj)
         # fresh random start every run (never wf0): stalled runs are
         # detected by the caller's eigen-residual check and re-drawn
         # (see dmrgpy's nhdmrg.py retry loop)
@@ -436,12 +695,9 @@ class Chain:
         (lambda, psil, psir) with <psil|psir> = 1, same convention as
         nhdmrg()."""
         from .nhdmrg import nhdmrg_generalized as _nhdmrg_generalized
-        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h),
-                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        HA = to_mpo(AutoMPO.from_terms(self.sites, terms_hadj),
-                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms_a),
-                   cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        H = self._mpo(terms_h)
+        HA = self._mpo(terms_hadj)
+        A = self._mpo(terms_a)
         # fresh random start every run (never wf0), same rationale as
         # nhdmrg() above: the non-Hermitian "energy" is not a variational
         # bound, so a stalled run can only be detected/cured by the
@@ -543,13 +799,13 @@ class Chain:
     def quench(self, terms_h, terms_i, terms_j, nt, dt, fit_td=True):
         if self.wf0 is None:
             self.gs_energy()
-        ampo_h = AutoMPO.from_terms(self.sites, terms_h)
+        ampo_h = self._ampo(terms_h)
         H = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         EGS = inner(self.wf0, H, self.wf0).real / inner(self.wf0, self.wf0).real
         ampo_h.add(-EGS, "Id", 1)
         expH = self._evoloperator(to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm), dt)
-        A1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A1 = self._mpo(terms_i)
+        A2 = self._mpo(terms_j)
         psi1 = self._apply_mpo(A1, self.wf0)
         psi2 = self._apply_mpo(A2, self.wf0)
         norm0 = np.sqrt(inner(psi1, psi1))
@@ -565,9 +821,9 @@ class Chain:
         return correlator, psi1
 
     def evolve_and_measure(self, terms_h, terms_op, wf, nt, dt, fit_td=True):
-        ampo_h = AutoMPO.from_terms(self.sites, terms_h)
+        ampo_h = self._ampo(terms_h)
         expH = self._evoloperator(to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm), dt)
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = self._mpo(terms_op)
         psi = wf
         correlator = []
         for _ in range(nt):
@@ -581,13 +837,13 @@ class Chain:
     def quench_tdvp(self, terms_h, terms_i, terms_j, nt, dt):
         if self.wf0 is None:
             self.gs_energy()
-        ampo_h = AutoMPO.from_terms(self.sites, terms_h)
+        ampo_h = self._ampo(terms_h)
         H = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         EGS = inner(self.wf0, H, self.wf0).real / inner(self.wf0, self.wf0).real
         ampo_h.add(-EGS, "Id", 1)
         Hshift = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A1 = self._mpo(terms_i)
+        A2 = self._mpo(terms_j)
         psi1 = self._apply_mpo(A1, self.wf0)
         psi2 = self._apply_mpo(A2, self.wf0)
         norm0 = np.sqrt(inner(psi1, psi1))
@@ -612,8 +868,8 @@ class Chain:
         self.get_gs() already computed, so a second, unrelated
         measurement on "the same" ground state silently sees a partially
         time-evolved state instead."""
-        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        H = self._mpo(terms_h)
+        A = self._mpo(terms_op)
         psi = wf.copy()
         correlator = []
         for _ in range(nt):
@@ -633,13 +889,13 @@ class Chain:
         Chain::quench_tdvp_gse()/mpscpp3/chain_session.h."""
         if self.wf0 is None:
             self.gs_energy()
-        ampo_h = AutoMPO.from_terms(self.sites, terms_h)
+        ampo_h = self._ampo(terms_h)
         H = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         EGS = inner(self.wf0, H, self.wf0).real / inner(self.wf0, self.wf0).real
         ampo_h.add(-EGS, "Id", 1)
         Hshift = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A1 = self._mpo(terms_i)
+        A2 = self._mpo(terms_j)
         psi1 = self._apply_mpo(A1, self.wf0)
         psi2 = self._apply_mpo(A2, self.wf0)
         norm0 = np.sqrt(inner(psi1, psi1))
@@ -662,8 +918,8 @@ class Chain:
         """GSE counterpart of evolve_and_measure_tdvp() above -- see
         quench_tdvp_gse()'s docstring and evolve_and_measure_tdvp()'s own
         docstring for why `wf` is copied here too."""
-        H = to_mpo(AutoMPO.from_terms(self.sites, terms_h), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        H = self._mpo(terms_h)
+        A = self._mpo(terms_op)
         psi = wf.copy()
         correlator = []
         for it in range(nt):
@@ -689,13 +945,13 @@ class Chain:
         reason (removing the state's own e^{-i*EGS*t} global phase)."""
         if self.wf0 is None:
             self.gs_energy()
-        ampo_h = AutoMPO.from_terms(self.sites, terms_h)
+        ampo_h = self._ampo(terms_h)
         H = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         EGS = inner(self.wf0, H, self.wf0).real / inner(self.wf0, self.wf0).real
         terms_shifted = list(terms_h) + [(-EGS, [("Id", 1)])]
         evolver = _TEBDEvolver(self.sites, terms_shifted, dt, cutoff=self.cutoff, maxdim=self.maxm)
-        A1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        A2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A1 = self._mpo(terms_i)
+        A2 = self._mpo(terms_j)
         psi1 = self._apply_mpo(A1, self.wf0)
         psi2 = self._apply_mpo(A2, self.wf0)
         norm0 = np.sqrt(inner(psi1, psi1))
@@ -714,7 +970,7 @@ class Chain:
         docstring for why `wf` is copied here too (TEBDEvolver.step()
         mutates its input in place, same as _tdvp_step_fn)."""
         evolver = _TEBDEvolver(self.sites, terms_h, dt, cutoff=self.cutoff, maxdim=self.maxm)
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = self._mpo(terms_op)
         psi = wf.copy()
         correlator = []
         for _ in range(nt):
@@ -726,8 +982,8 @@ class Chain:
     def cvm_dynamical_correlator(self, terms_i, terms_j, omega, eta, energy, tol, max_it):
         if self.wf0 is None:
             raise RuntimeError("Chain.cvm_dynamical_correlator called before gs_energy")
-        S1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        S2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        S1 = self._mpo(terms_i)
+        S2 = self._mpo(terms_j)
         z = complex(omega + energy, eta)
         ampo = AutoMPO(self.sites)
         ampo.add(z, "Id", 1)
@@ -757,8 +1013,7 @@ class Chain:
         from . import ddmrg
         if self.wf0 is None:
             raise RuntimeError("Chain.ddmrg_correction_vector called before gs_energy")
-        S2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j),
-                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        S2 = self._mpo(terms_j)
         # (H - E0 - omega) as an MPO, then M = that squared plus eta^2.
         ampo = AutoMPO(self.sites)
         ampo.add(-(energy + omega), "Id", 1)
@@ -775,7 +1030,7 @@ class Chain:
         return -W / (np.pi * eta), x
 
     def apply_inverse(self, terms, wf, tol, max_it):
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A = self._mpo(terms)
         return self._bicstab(A, wf, tol, max_it)
 
     def correlation_matrix(self, wf):
@@ -1154,15 +1409,15 @@ class Chain:
         else:
             scaled_H, emin, emax, scale = self._scaled_hamiltonian(kpm_scale)
         n = int(round((emax - emin) / delta)) * kpm_n_scale
-        m1 = to_mpo(AutoMPO.from_terms(self.sites, terms_i), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        m2 = to_mpo(AutoMPO.from_terms(self.sites, terms_j), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        m1 = self._mpo(terms_i)
+        m2 = self._mpo(terms_j)
         psi1 = self._apply_mpo_with(m1, self.wf0, kpm_cutoff, kpmmaxm)
         psi2 = self._apply_mpo_with(m2, self.wf0, kpm_cutoff, kpmmaxm)
         moments = self._kpm_moments(scaled_H, psi1, psi2, n, kpmmaxm, kpm_cutoff, kpm_accelerate)
         return moments, emin, emax, scale, n
 
     def general_kpm(self, terms_x, wfa, wfb, kpmmaxm, kpm_accelerate, num_polynomials, kpm_cutoff):
-        m = to_mpo(AutoMPO.from_terms(self.sites, terms_x), cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        m = self._mpo(terms_x)
         return self._kpm_moments(m, wfa, wfb, num_polynomials, kpmmaxm, kpm_cutoff, kpm_accelerate)
 
     def metts_vev(self, terms_ops, T, nsamples=200, nwarmup=20,
@@ -1193,8 +1448,8 @@ class Chain:
         """
         if not self.have_H:
             raise RuntimeError("Chain.metts_vev called before set_hamiltonian")
-        ops = [to_mpo(AutoMPO.from_terms(self.sites, terms_op), cutoff=_BUILD_CUTOFF,
-                      maxdim=self.mpomaxm) for terms_op in terms_ops]
+        self._reject_sector("metts_vev")
+        ops = [self._mpo(terms_op) for terms_op in terms_ops]
         beta = 1.0 / T
         return _metts_thermal_average(
             self.H, self.sites, ops, beta, nsamples, nwarmup=nwarmup,
@@ -1224,12 +1479,11 @@ class Chain:
         Returns (means, stderrs), each a length-nt array -- see
         metts_dynamical_correlator()'s own docstring for their meaning.
         """
+        self._reject_sector("metts_dynamical_correlator")
         if not self.have_H:
             raise RuntimeError("Chain.metts_dynamical_correlator called before set_hamiltonian")
-        A = to_mpo(AutoMPO.from_terms(self.sites, terms_a), cutoff=_BUILD_CUTOFF,
-                   maxdim=self.mpomaxm)
-        B = to_mpo(AutoMPO.from_terms(self.sites, terms_b), cutoff=_BUILD_CUTOFF,
-                   maxdim=self.mpomaxm)
+        A = self._mpo(terms_a)
+        B = self._mpo(terms_b)
         beta = 1.0 / T
         return _metts_dynamical_correlator(
             self.H, self.sites, A, B, beta, nt, dt, nsamples, nwarmup=nwarmup,
@@ -1250,10 +1504,8 @@ class Chain:
         of the reference."""
         if n < 1:
             raise ValueError("Chain.nhkpm_moments: n must be >= 1")
-        hs = to_mpo(AutoMPO.from_terms(self.sites, terms_hs),
-                    cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
-        hsd = to_mpo(AutoMPO.from_terms(self.sites, terms_hs_dag),
-                     cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        hs = self._mpo(terms_hs)
+        hsd = self._mpo(terms_hs_dag)
 
         v = wfa * 1.0
         alpha_prev2 = self._apply_mpo_with(hsd, v, kpmcutoff, kpmmaxm)  # alpha[1]
@@ -1286,9 +1538,21 @@ class Chain:
     def _default_mps(self, maxm=None):
         """Random starting MPS. maxm defaults to self.maxm; gs_energy()
         passes the ramp's first sweep dimension instead (see
-        _make_sweeps_ramped())."""
+        _make_sweeps_ramped()).
+
+        In sector mode the start is a sum of random *in-sector* product
+        states instead (sector.py's sector_mps): a plain random MPS spreads
+        over every sector at once, which the charge penalty would then have
+        to sweep back out. Making every solve on this chain -- ground
+        state, excited states, band edges -- start in the sector comes for
+        free from routing them all through here."""
         if maxm is None:
             maxm = self.maxm
+        if self.sector:
+            self._sector_draws += 1
+            return sectortk.sector_mps(self.sites, self.sector,
+                                        max(1, int(maxm)),
+                                        seed=self._sector_draws)
         return randomMPS(self.sites, max(1, int(maxm)))
 
     def _apply_mpo(self, K, x, x0=None):
@@ -1384,7 +1648,7 @@ class Chain:
             psi = self._default_mps()
             sweeps = self._make_sweeps(ns=min(self.nsweeps, 5),
                                        maxdim=min(self.maxm, 20))
-            neg_H = self.H * (-1.0)
+            neg_H = self._penalized(self.H * (-1.0))
             self._bandwidth_max = -dmrg(psi, neg_H, sweeps, quiet=not self.verbose)
         return self._bandwidth_max
 

@@ -26,20 +26,24 @@ def get_mode(self,mode="DMRG"):
     # so a chain with a sector set never falls back at all.
     sector = getattr(self,"conserved_sector",None)
     if sector:
-        if self.itensor_version!=3 or self.mode=="ED" or mode=="ED":
+        if self.itensor_version not in (3,"python") or self.mode=="ED" \
+                or mode=="ED":
             raise NotImplementedError(
-                "conserved sector %s: only DMRG with itensor_version=3 can "
-                "target a quantum-number sector (this call asked for "
-                "mode=%s, itensor_version=%s). Clear it with "
-                "set_conserved_sector()."%(sector,repr(mode),
-                                           repr(self.itensor_version)))
+                "conserved sector %s: only DMRG with itensor_version=3 or "
+                "itensor_version=\"python\" can target a quantum-number "
+                "sector (this call asked for mode=%s, itensor_version=%s). "
+                "Clear it with set_conserved_sector()."
+                %(sector,repr(mode),repr(self.itensor_version)))
         from . import cppext
-        if not cppext.available(3):
+        if not cppext.available(self.itensor_version):
             raise NotImplementedError(
                 "conserved sector %s: the mpscpp3 extension is not compiled, "
                 "and the ED fallback cannot target a sector -- build it with "
                 "'python install.py --itensor-version=3'"%(sector,))
-        if self.ns<3:
+        # the short-chain restriction below is ITensor v3's own (its
+        # two-site dmrg() aborts on n<3); the Python backend handles those
+        # sizes correctly and needs no fallback.
+        if self.itensor_version==3 and self.ns<3:
             raise NotImplementedError(
                 "conserved sector %s: ITensor v3's two-site DMRG cannot handle "
                 "a chain this short (n=%d < 3 sites), and the ED fallback "

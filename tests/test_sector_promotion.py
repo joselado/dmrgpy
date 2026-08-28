@@ -15,7 +15,10 @@ test_sector_conservation.py spells out: filtering full-spectrum
 eigenvectors by <N> instead is not equivalent, because sector-degenerate
 eigenvalues come back as arbitrary superpositions.
 
-itensor_version=3 only, like set_conserved_sector itself.
+These tests run on itensor_version=3; itensor_version="python"
+implements the same promotion API (an index relabeling rather than a
+block scatter, see pyitensor/sector.py) and is covered by
+test_sector_promotion_python.py.
 """
 import numpy as np
 import pytest

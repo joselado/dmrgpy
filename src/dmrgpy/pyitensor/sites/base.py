@@ -31,6 +31,28 @@ class SiteType:
     dim = None
     _states = {}
     _OPS = None  # set by each subclass to a dict name -> (dim,dim) ndarray
+    # Charge tables for conserved-sector mode (sector.py): quantum-number
+    # name -> one integer charge per basis state, in the same 1-based basis
+    # order as _states/_OPS. Names and units follow ITensor's own site
+    # headers exactly ("Nf" particle number, "Sz" in integer 2*Sz units so
+    # a spin-1/2 carries +-1, "Nb" boson occupation), since dmrgpy's Python
+    # API spells a sector target the same way on both backends. A site type
+    # with no entry here has no sector support at all -- the parafermion
+    # sites, whose Z_n charge nothing in dmrgpy can name.
+    _QN = {}
+
+    @classmethod
+    def qn_names(cls):
+        """The conserved quantities this site type can carry, sorted --
+        the pyitensor counterpart of mpscpp3/get_sites.h's
+        site_qn_names()."""
+        return tuple(sorted(cls._QN))
+
+    @classmethod
+    def charges(cls, name):
+        """Per-basis-state charges under quantum number `name`, as a tuple
+        of dim integers (0-based state order)."""
+        return cls._QN[name]
 
     @classmethod
     def state(cls, name):

@@ -258,15 +258,39 @@ terms stay legal.
 This is the direct route to an addition spectrum $E_0(N)$, the charge gap
 $E_0(N{+}1)+E_0(N{-}1)-2E_0(N)$, or a magnetization curve — each point a
 genuine ground-state energy of its own sector, rather than something
-extracted by tuning a chemical potential or a field. Its cost relative to the
-unconstrained search depends on how big the solve is: the quantum numbers
-restore the block sparsity the default mode gives up, but they also add
-per-block bookkeeping, and only the former scales. Measured on Heisenberg
-chains (BLAS pinned to one thread), sector mode is **0.6x** — i.e. slower
-— at $n=20$, `maxm=60`; **2.0x** faster at $n=40$, `maxm=100`; and
-**4.2x** faster at $n=60$, `maxm=200`, always for the same energy. Expect
-a small penalty on toy systems and a real speedup on the ones that
-actually cost something.
+extracted by tuning a chemical potential or a field.
+
+On `itensor_version=3` its cost relative to the unconstrained search
+depends on how big the solve is: the quantum numbers restore the block
+sparsity the default mode gives up, but they also add per-block
+bookkeeping, and only the former scales. Measured on Heisenberg chains
+(BLAS pinned to one thread), sector mode is **0.6x** — i.e. slower — at
+$n=20$, `maxm=60`; **2.0x** faster at $n=40$, `maxm=100`; and **4.2x**
+faster at $n=60$, `maxm=200`, always for the same energy. Expect a small
+penalty on toy systems and a real speedup on the ones that actually cost
+something. On `itensor_version="python"` the mechanism is different — that backend
+stores its tensors densely and uses the quantum numbers only to *label*
+basis states, so there is no block sparsity to gain — but a sector is not
+a tax either. Measured on the same 40-site Heisenberg chain (`maxm=100`,
+15 sweeps, one P-core, BLAS pinned to one thread, 3 repeats):
+
+| | dense | sector |
+|---|---|---|
+| `itensor_version=3` | 2.85 s | 2.05 s |
+| `itensor_version="python"` | 11.04 s | 8.91 s |
+
+so the sector run is ~1.2x *faster* than the same backend's dense run, and
+~4.3x slower than `itensor_version=3`'s sector run (about the same 4x
+pure-Python-vs-compiled factor as everywhere else — the sector costs
+nothing extra relative to it). The pure-Python speedup has a different
+cause than v3's: confining the state lets it converge at a lower bond
+dimension (chi=52 against 94 for the same energy), which more than pays
+for the charge penalty's extra MPO bond dimension. That balance depends on
+the sweep count — at 6 sweeps, before the sector run has settled to its
+lower chi, it is the slower of the two — so treat "about the same, give or
+take 20%" as the honest summary rather than a reliable speedup. What a
+sector buys on this backend is the targeting itself: the sector's own
+ground state, which a dense search cannot reach at all.
 
 Two consequences to be aware of, both reported rather than left to be
 discovered. First, every operator built on the chain while a sector is
@@ -286,20 +310,62 @@ $S^+S^+$/$S^-S^-$ strings cancel exactly. Second, the sector invalidates
 the Hamiltonian and ground state already held by the backend, so the next
 `gs_energy()` re-solves from scratch.
 
-Sector targeting requires `itensor_version=3` and DMRG. A sector-mode
-chain deliberately raises rather than falling back to ED (or to any other
-backend), since a solver without quantum numbers would silently answer
-with the *global* ground state instead.
+Sector targeting requires DMRG and either `itensor_version=3` or
+`itensor_version="python"`. A sector-mode chain deliberately raises rather
+than falling back to ED (or to any other backend), since a solver without
+quantum numbers would silently answer with the *global* ground state
+instead.
+
+The two backends implement it differently, which matters in one place.
+`itensor_version=3` confines the calculation structurally: its tensors are
+block-sparse over quantum numbers, so an amplitude outside the sector has
+nowhere to be stored. `itensor_version="python"` keeps dense storage and
+confines the calculation instead by adding a charge penalty
+$\lambda\sum_k(\hat Q_k-q_k)^2$ to the operator its *variational* solves
+(ground state, excited states, band edges) minimize. That penalty is
+identically zero on the target sector, so it changes no reported number —
+`gs_energy()` reports $\langle H\rangle$ under the plain Hamiltonian
+regardless — and it is not optional: a dense SVD mixes rows across charge
+blocks at the $10^{-16}$ level on every truncation, and a variational
+sweep amplifies that leak toward whichever sector is lower in energy. With
+the penalty switched off, an $n=12$ chain asked for $N_f=2$ with an
+attractive interaction converges to the *full* band instead; with it on,
+it reproduces sector-restricted ED to $10^{-8}$. If a solve ever does end
+up outside the requested sector, it raises rather than reporting the
+energy of the wrong one. `chain.set_sector_penalty(lam)` overrides
+the default strength (derived from the Hamiltonian's own coefficient
+scale) on that backend.
+
+One accuracy caveat, on that backend only: *excited* states inside a
+sector are confined exactly (every one of them has the requested charge to
+$10^{-8}$) but converge less accurately than on `itensor_version=3`. The
+overlap-penalty excited-state solver is already the least accurate part of
+the pure-Python backend without any sector, and the charge penalty widens
+the local effective Hamiltonian's spectral range on top of that. Measured
+on a 6-site Heisenberg chain at $S^z=0$, the second and third levels of
+the sector came out $0.2$–$0.4$ above their exact values, where
+`itensor_version=3` reproduces them exactly. Ground-state energies,
+expectation values, correlators and time evolution are unaffected — those
+match sector-restricted ED to $10^{-8}$ on both backends. See
+`examples/backend_comparison/sector_v3_VS_python` for both backends' addition
+spectra checked against sector-restricted ED, and for the charge-penalty
+threshold measured directly.
 
 What works under a sector: ground state and excited states, expectation
 values and static correlators, entanglement entropies, real-time
 evolution and dynamical correlators via the default
 `tevol_method="TDVP"` (and `"TDVP_GSE"`) — all subject to the
 conserving-operator rule above. What does not, and says so: METTS
-(`metts_vev`, `metts_dynamical_correlator`), `tevol_method="TEBD"`, and
-the infinite-chain algorithms (iDMRG, VUMPS). Those assemble tensors by
-hand in a way that is dense-only, so they refuse rather than produce a
-wrong number. See
+(`metts_vev`, `metts_dynamical_correlator`), and the infinite-chain
+algorithms (iDMRG, VUMPS). METTS averages over an ensemble sampled from
+every sector at once, so confining the chain cannot restrict it; the
+infinite-chain algorithms assemble tensors by hand in a way that is
+dense-only under QN indices. They refuse rather than produce a wrong
+number. `tevol_method="TEBD"` is the one entry that differs by backend: it
+refuses on `itensor_version=3` (its gate assembly sums bond gates before
+their fluxes agree, which aborts inside ITensor) and works normally on
+`itensor_version="python"`, whose gates are dense and simply inherit the
+Hamiltonian's charge conservation. See
 `examples/groundstate/sector_targeted_groundstate` for the addition
 spectrum and charge gap of a $t$--$V$ chain, checked against ED.
 
@@ -327,7 +393,10 @@ Nothing is re-solved, truncated or approximated: a QN-conserving MPS is
 the same wavefunction as its dense counterpart, only stored
 block-sparsely, and promotion just scatters the blocks back into full
 tensors. What it costs is the block sparsity itself, so promote *after*
-the expensive sweeps, not before. The Hamiltonian and the band-edge
+the expensive sweeps, not before. On `itensor_version="python"` the state
+was stored densely all along and promotion only relabels its site
+indices, so there is nothing to lose by promoting early — but nothing to
+gain either. The Hamiltonian and the band-edge
 caches are rebuilt on the next call that needs them, while the
 ground-state energy and wavefunction are kept — a bare `gs_energy()`
 afterwards therefore still returns the sector's energy rather than
@@ -347,8 +416,11 @@ wf_Nm = fc.wf0.copy()
 Z = abs(fc.overlap(wf_Nm, fc.applyoperator(fc.C[i], wf_N)))**2  # photoemission weight
 ```
 
-`promote_to_dense()` is `itensor_version=3` only, like
-`set_conserved_sector` itself, and does nothing if no sector is set. See
+`promote_to_dense()` is available on `itensor_version=3` and
+`itensor_version="python"`, like `set_conserved_sector` itself, and does
+nothing if no sector is set. Handing a chain a wavefunction built under a
+different sector setting raises instead of quietly contracting the wrong
+indices. See
 `examples/groundstate/sector_promotion_to_dense` for the $t$--$V$ chain's
 CDW profile, one-body density matrix and site-resolved photoemission
 weight $Z_i=|\langle \mathrm{GS}_{N-1}|c_i|\mathrm{GS}_N\rangle|^2$, all
