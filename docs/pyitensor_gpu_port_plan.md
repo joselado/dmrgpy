@@ -823,23 +823,46 @@ namespace swap.
    Lanczos-exhaustion case the speculation introduces (stepping past a
    beta of ~0, clamped so the dead columns are zero rather than nan).
 
-   *Measured*: pending `benchmarks/gpu/tdz_bench.py` (`tdz_gpu.sbatch` +
-   `tdz_cpu.sbatch`), which runs base/krylov/bras/both x the maxm sweep in
-   one process so a single submission gives the whole attribution, and
-   asserts every configuration returns the same spectrum.
+   *Measured* (jobs 19975154/19975155, H200 vs one Skylake core, n=30,
+   nt=100; full tables in `docs/gpu_cpu_performance.md`). Warm seconds,
+   padded+jitted device: the device crosses one CPU core between maxm 30
+   and 60 (0.80x, 3.37x, 13.9x at 30/60/120) and the ratio is still
+   climbing at the top of the sweep. Every configuration agrees to
+   <= 4.2e-16.
 
-   *The honest caveat, stated before the numbers arrive.* TDZ exists to
-   need a *small* bond dimension -- chi ~ 20-30 against 500-700 for
-   real-time evolution is the paper's own claim -- and this port's
-   crossover is chi ~ 120-160. So TDZ at its natural operating point is on
-   the wrong side of the line, and none of the above moves it; what moves
-   is how cheaply a device *can* be used, not whether it should be. The
-   lever that would move it is the one the four-point entry found: a real
-   batch axis. C_ij(t) for all j from a single evolution -- the whole
-   dynamical structure factor rather than one pair -- puts ~N bras where
-   n_max+1 sit today, which is the regime where a device wins at chi=20.
-   That needs a multi-pair dynamical-correlator entry point, which dmrgpy
-   does not have; it is a deliberate follow-up, not an oversight.
+   *Three things the measurement said that the plan above did not.*
+
+   1. **TDZ is not a small-chi calculation here.** The caveat written into
+      this item before the run -- that the complex-time contour keeps chi
+      at 20-30, below the crossover, so none of this could matter -- is
+      wrong on this model. Measured directly: chi starts at 72 (the state
+      is `Sz|GS>`, inheriting the ground state's bond dimension), passes
+      the crossover at t ~ 3-4 and saturates a maxm=240 cap at t = 6.6,
+      a third of the way into an nt=100 run. The paper's 20-30 describes
+      its own impurity model and contour angle. So the device *is* worth
+      using for TDZ, well before the follow-up below.
+   2. **The batched overlaps were over-invested.** They are ~1.00-1.02x on
+      their own. This was knowable in advance and was not worked out:
+      the overlaps are ~8% of the work, so Amdahl caps a 5x improvement
+      there at 1.07x however well it is implemented. The Krylov
+      synchronization removal, which attacks the other ~90%, is what
+      produced the ~1.1x. Measure the share before optimizing the piece.
+   3. **The optimizations need the jit knob, and hurt without it.** Eager
+      on the device, `both` is 0.86x -- 14% *slower* than base -- because
+      the speculation's few extra matvecs per call are full eager
+      dispatches at the ~0.35 ms floor, outweighing the synchronizations
+      saved. The expectation was the opposite (eager has the longest queue
+      to unblock). And pad+jit itself is worth 10.1x here, an order of
+      magnitude more than everything in this item combined, which puts the
+      whole entry in proportion.
+
+   *The follow-up that remains.* A real batch axis: C_ij(t) for all j from
+   a single evolution -- the whole dynamical structure factor rather than
+   one pair -- puts ~N bras where n_max+1 sit today, which is the regime
+   the four-point entry showed wins at chi=20, and it is the one change
+   that would make `BatchedBras` earn its keep. That needs a multi-pair
+   dynamical-correlator entry point, which dmrgpy does not have; a
+   deliberate follow-up, not an oversight.
 5. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
    in the library -- samples x time steps x Krylov iterations -- and it
    inherits TDVP's large chi, so it sits directly on (2), now done.

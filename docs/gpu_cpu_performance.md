@@ -18,13 +18,22 @@ calculation you run: below chi ~ 120 the CPU is faster, above it the GPU
 pulls away without bound, and this is equally true for ground states and
 for dynamical correlators.
 
-The one exception, and the reason it is an exception, is worth reading
-before you generalize from that: the four-point correlator wins on the
-device at chi = 20, because `ctmode="batched"` gets its arithmetic-per-
-dispatch from a *tuple batch* rather than from bond dimension. See "The
-four-point correlator: batching beats bond dimension" below. The rule is
-really "the device needs enough work per array operation", and chi is only
-the usual way to get it.
+Two exceptions, and the reason they are exceptions is worth reading before
+you generalize from that. The four-point correlator wins on the device at
+chi = 20, because `ctmode="batched"` gets its arithmetic-per-dispatch from
+a *tuple batch* rather than from bond dimension. And the complex-time
+correlator (`submode="TDZ"`) crosses over between chi = 30 and 60, because
+it is TDVP-heavy and a two-site matvec at chi = 60 on 30 sites already
+carries enough arithmetic per dispatch. The rule is really "the device
+needs enough work per array operation", and chi is only the usual way to
+get it -- a batch axis, or simply a bigger local tensor, buys the same
+thing.
+
+A caveat that applies to both, and to every number below: none of it holds
+without `set_pad_bonds` + `set_jit`. Measured on TDZ, those two knobs are
+worth 10.1x on their own -- more than every other optimization in this file
+combined -- and eager on the device is *slower* than one CPU core at a
+bond dimension where the padded, jitted configuration is 3.4x faster.
 
 ## End-to-end, warm (steady state, compile cost already paid)
 
@@ -309,9 +318,83 @@ read as a statement about its own impurity model and contour angle, not a
 property of the method that transfers to every Hamiltonian -- a larger
 `alpha0` damps harder and would push these numbers down.
 
-Measured timings, n=30, are pending the benchmark job
-(`benchmarks/gpu/tdz_bench.py`, `tdz_gpu.sbatch` + `tdz_cpu.sbatch`); this
-section will be filled in with the table it produces.
+### Measured, n=30
+
+H200 against one Skylake Xeon core (`batch-skl`, not the Cascade Lake the
+other tables in this file use -- see `tdz_cpu.sbatch`), `nt=100`,
+`dt=0.1`, `alpha0=0.1`, `n_max=4`, one full TDZ correlator per cell.
+**Warm** seconds (second run of the same size in the same process),
+device configuration padded + jitted. The ground state is inside the timed
+region and is ~5 s on the host, 13-47 s on the device, so the
+correlator-only device advantage is slightly larger than these totals
+show.
+
+| maxm | CPU base | CPU both | GPU base | GPU +krylov | GPU +bras | GPU both | GPU both vs CPU |
+|---|---|---|---|---|---|---|---|
+| 30 | 98.6 | 99.9 | 135.5 | 128.6 | 130.5 | 124.7 | **0.80x** |
+| 60 | 459.4 | 458.1 | 144.5 | 137.9 | 141.8 | 135.8 | **3.37x** |
+| 120 | 2214.9 | 2105.4 | 200.6 | 157.5 | 197.6 | 151.5 | **13.9x** |
+| 240 | not run | not run | 875.0 | 833.5 | 885.9 | 832.3 | -- |
+
+Every cell agrees with its `base` to <= 4.2e-16, which is the claim the
+whole exercise rests on: these are scheduling changes and they change no
+number.
+
+The crossover for TDZ sits between maxm 30 and 60 -- *below* the chi ~
+120-160 this file quotes elsewhere, because TDZ is TDVP-heavy and a
+two-site TDVP matvec at chi=60 on 30 sites already carries enough
+arithmetic per dispatch. Read the CPU column's shape rather than only the
+ratios: it grows ~4.8x per doubling of maxm while the device column grows
+1.1x, 1.4x, 5.5x, so the ratio is still climbing at the top of the sweep
+and 13.9x is a lower bound. The maxm=240 CPU row was not measured -- it
+extrapolates to ~2.9 h per run and the job was stopped before reaching it.
+
+### What the attribution actually says, including where it disappoints
+
+Warm, device, `base` / `both`: **1.10x, 1.07x, 1.32x, 1.05x** at maxm
+30/60/120/240. Two honest readings of that:
+
+* **The Krylov synchronization removal is the change that pays**; the
+  batched overlaps are ~neutral (1.00-1.02x on their own, occasionally
+  slightly negative). That was predictable in advance and was not
+  predicted: the overlaps are ~8% of the work, so by Amdahl a 5x
+  improvement there is capped at 1.07x *however well it is done*. The
+  batching was over-invested relative to its ceiling. It is kept because
+  it costs nothing, it is exact, and it is the piece that would matter if
+  the batch axis below is ever built -- but it is not what made this
+  faster.
+* **The spread 1.05-1.32x is not a trend.** `--reps 2` gives exactly one
+  warm sample per cell, so few-percent differences between configurations
+  are not resolvable and the 1.32x at maxm=120 may be an outlier rather
+  than a peak. Treat the honest summary as "~1.1x, with one size showing
+  1.3x", and re-run with more reps before quoting a curve.
+
+### The knob that dominates all of this: pad + jit
+
+Second pass, same job, eager (no padding, hence no jit), maxm=60:
+
+| config | eager | padded + jitted |
+|---|---|---|
+| base | 1456.7 s | 144.5 s |
+| both | 1694.4 s | 135.8 s |
+
+**10.1x**, an order of magnitude more than anything else in this section --
+and eager on the device is 3.2x *slower* than one CPU core at the same
+size, against 3.4x faster with the knobs on. For this calculation
+`set_pad_bonds` + `set_jit` is not a tuning option, it is the difference
+between the device being worth using and not.
+
+The second row is the finding that inverts a prediction. The
+synchronization work was expected to help *most* in eager mode, where the
+dispatch queue it unblocks is longest. It does the opposite: eager,
+`both` is **0.86x**, i.e. 14% slower than `base`. The mechanism is the
+speculation -- running past the Krylov stopping point costs a few extra
+matvecs per call, and with no jit each of those is a full eager dispatch
+at the ~0.35 ms floor, which outweighs the synchronizations saved. The
+optimizations and the jit knob are therefore not independent: they
+compose, and the speculative path assumes the fused kernels are there.
+Anyone running this engine eager on a device should call
+`tdvp.set_krylov_defer_sync(False)`.
 
 The lever that would change that verdict is the one the four-point
 correlator found and TDZ has not used yet: a genuine batch axis. Computing
