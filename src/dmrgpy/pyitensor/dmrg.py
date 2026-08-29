@@ -600,9 +600,42 @@ def _all_overlap_right(wfs_k, psi):
 
 
 def _bond_projections(penalty_states, left_ov, right_ov, i):
+    """The rank-1 penalty direction for each already-found state, in psi's
+    own current 2-site index space: `proj_k` is defined by
+    `vdot(proj_k, v) == <wfs_k|Psi(v)>` for the full MPS Psi(v) obtained by
+    putting the 2-site tensor `v` into psi's window at bond i.
+
+    The two overlap environments are conjugated here, and that is not
+    cosmetic. `_extend_overlap_left/right` build them as
+    `dag(wfs_k.A) * psi.A`, i.e. they already carry conj(wfs_k) -- while
+    the in-window tensors `wk.A(i)`/`wk.A(i+1)` do not. Since
+    `_local_ground_state_penalized`'s matvec pairs the result with
+    `vdot(proj_k, v)`, which conjugates the WHOLE vector, leaving the
+    environments unconjugated here would conjugate them a second time and
+    the penalty would project onto the wrong direction. Conjugating them
+    now means `vdot` restores them, so exactly the window ends up
+    conjugated, which is what `<wfs_k|Psi(v)>` needs.
+
+    This is invisible for real-valued tensors (conj is the identity), and
+    that is why it survived: it silently mis-projects only once the states
+    are genuinely complex, which pyitensor's are in general -- a DMRG
+    solve started from a random complex MPS carries an arbitrary global
+    phase even for a real Hamiltonian. The symptom was excited states that
+    were not orthogonal to the ones they were penalized against at all
+    (measured `max|<i|j>| = 0.81` on an 8-site spin-1/2 chain) and hence
+    excitation energies off by ~0.5-1.2 where the compiled backends agree
+    with ED to ~1e-6. Verified directly: with the conjugation, contracting
+    `proj_k` against psi's own 2-site tensor reproduces the exact full-MPS
+    overlap `<wfs_k|psi>` to ~2e-17 at every bond, and gives the SAME
+    number at every bond (it is one scalar, however the MPS is sliced);
+    without it, the values were bond-dependent and off by 0.05-0.14."""
     projs = []
     for k, wk in enumerate(penalty_states):
         Lk, Rk = left_ov[k].get(i - 1), right_ov[k].get(i + 2)
+        if Lk is not None:
+            Lk = dag(Lk)
+        if Rk is not None:
+            Rk = dag(Rk)
         pieces = [p for p in (Lk, wk.A(i), wk.A(i + 1), Rk) if p is not None]
         projs.append(contract_many(pieces))
     return projs
@@ -664,36 +697,38 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True):
     either -- see excited_states() in chain.py, which recomputes
     <psi|H|psi> directly once converged.
 
-    Convergence margin is genuinely thin here, more so than plain
-    ground-state dmrg(): with no noise-term perturbation (see this
-    module's docstring) to escape local minima of the penalized objective,
-    a sweep over many random starting seeds at scale_lagrange=1.0 and a
-    middling sweep count found a substantial fraction landing on the wrong
-    (too-high) eigenvalue rather than slowly converging to the right one --
-    not just occasional slow convergence, but real stationary points of
-    the wrong energy. Doubling scale_lagrange and adding a few sweeps
-    fixed every case checked *in that sweep*, matching standard DMRG
-    practice that the penalty weight needs real margin above the
-    bandwidth -- but this is not a universal fix. Confirmed directly on a
-    different case (an 8-site transverse-field Ising chain, see
-    examples/v2_VS_v3_excited_states_gap): the first-excited gap settled
-    ~6e-4 off from the exact value, and this residual was *completely*
-    insensitive to maxdim, sweep count (tested to 100, vs. the usual ~15-
-    25), and scale_lagrange (tested 1x-100x bandwidth) -- a genuine
-    stationary point the search cannot escape by throwing more of any of
-    those knobs at it, for this Hamiltonian. So: more sweeps/weight is
-    worth trying first (often sufficient, per the case above), but callers
-    should treat a returned `fluctuations` entry that isn't small as a
-    sign the search didn't actually converge and may not be fixable by
-    parameter tuning alone -- only a real noise-term-style escape
-    mechanism (not implemented here) would close this class of gap in
-    general. This sensitivity is inherent to the algorithm as implemented,
-    not a floating-point precision issue (verified directly against the
-    JAX-vs-NumPy kernel comparison in kernels.py: a single matvec call
-    agrees to ~1e-15 relative between the two, so tiny, ordinary floating-
-    point differences between them are what's enough to occasionally tip
-    an already-marginal case, not the root cause of a 6e-4 stationary
-    point)."""
+    == A correction, kept because the reasoning that produced it was wrong ==
+
+    This docstring used to describe the penalized search as having "real
+    stationary points of the wrong energy" that no amount of sweeping or
+    penalty weight could escape, citing an 8-site transverse-field Ising
+    chain whose first-excited gap settled ~6e-4 off the exact value while
+    being "*completely* insensitive to maxdim, sweep count (tested to 100)
+    and scale_lagrange (tested 1x-100x bandwidth)", and concluded that only
+    a noise-term escape mechanism could close that class of gap.
+
+    Every measurement there was real. The conclusion was wrong. That
+    insensitivity to every convergence knob was not evidence of a hard
+    stationary point; it was evidence of a plain bug, which no convergence
+    parameter can fix. `_bond_projections` conjugated the penalty
+    projector's overlap environments once too few times, so the penalty
+    projected onto the wrong direction for any complex-valued state and
+    barely orthogonalized at all -- see that function's own docstring for
+    the derivation and the numbers. With it fixed, that same 8-site Ising
+    gap agrees with v2 and v3 to ~1e-14
+    (`examples/excited_states/v2_VS_v3_excited_states_gap`), and excited
+    energies match ED to ~1e-13 on spin, spinful-fermion and native
+    spinful-fermion chains alike -- tighter than the compiled backends,
+    which sit at ~1e-4..1e-6 on the same cases.
+
+    So: there is no known wrong-energy-stationary-point pathology here.
+    What remains true, and is ordinary DMRG practice rather than a defect,
+    is that this search has no noise term (see this module's docstring), so
+    a genuinely hard landscape can still need more sweeps or more penalty
+    weight than the defaults -- and `excited_states()` returns a
+    `fluctuations` entry per state precisely so a caller can tell. An entry
+    that is not small means that state is not an eigenstate, whatever its
+    energy looks like."""
     n = psi.length()
     k_states = len(penalty_states)
     energy = None

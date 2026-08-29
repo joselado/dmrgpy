@@ -7,19 +7,29 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # Weight-based excited-state DMRG path (pyitensor's overlap-penalty
 # dmrg_excited(), see dmrg.py) on all three backends.
 #
-# Unlike every other v2_VS_v3_* comparison in this directory, "Difference
-# v3 vs pure Python" here is NOT expected to be tiny: confirmed directly,
-# for this specific Hamiltonian pyitensor's excited-states path settles at
-# a gap ~6e-4 off from the exact/v3 value, and this residual is completely
-# insensitive to maxdim, sweep count (tested up to 100, no improvement
-# over 15), and penalty weight (tested 1x-100x bandwidth) -- i.e. a real
-# stationary point of the penalized objective, not a truncation or
-# under-sweeping artifact. This matches dmrg_excited()'s own docstring
-# (dmrg.py), which already documents that the overlap-penalty method's
-# landscape has genuine wrong-energy stationary points without the
-# noise-term escape mechanism ITensor's own DMRG has (deliberately not
-# implemented here, see dmrg.py's module docstring) -- this example is
-# the case that surfaces it, not a new bug.
+# All three backends agree to ~1e-14 here.
+#
+# This comment used to say the opposite, and the correction is worth
+# keeping. It read: pyitensor's gap "settles ~6e-4 off from the exact/v3
+# value", insensitive to maxdim, sweep count and penalty weight, and
+# therefore "a real stationary point of the penalized objective, not a
+# truncation or under-sweeping artifact ... not a new bug". Every
+# measurement in that claim was accurate. The conclusion drawn from it was
+# wrong: the insensitivity to every convergence knob was not evidence of a
+# hard stationary point, it was evidence of a plain bug, which no amount
+# of sweeping can fix.
+#
+# The cause was a double conjugation in dmrg_excited()'s overlap-penalty
+# projector (pyitensor/dmrg.py::_bond_projections -- see its docstring for
+# the derivation): the penalty projected onto the wrong direction whenever
+# the states were complex, so it barely orthogonalized at all. It went
+# unnoticed because it is exactly invisible for real-valued tensors, and
+# because nothing in tests/ covered pyitensor's excited states against ED.
+# It is fixed, and tests/test_excited_states_pyitensor.py now pins it.
+#
+# The lesson this example is kept for: "the error does not respond to any
+# convergence parameter" is a reason to suspect a bug, not a reason to
+# conclude the algorithm has converged to something.
 import numpy as np
 from dmrgpy import spinchain
 
@@ -44,6 +54,11 @@ print("Gap (ITensor v3)     =",gap3)
 print("Gap (pure Python)    =",gappy)
 print("Difference v2 vs v3          =",abs(gap2-gap3))
 print("Difference v3 vs pure Python =",abs(gap3-gappy))
+
+# Regression guard for the fix described at the top of this file: before
+# it, this difference was ~6e-4.
+assert abs(gap3-gappy) < 1e-8
+assert abs(gap2-gap3) < 1e-8
 
 import matplotlib.pyplot as plt
 labels = ["ITensor v2","ITensor v3","pure Python"]
