@@ -1,9 +1,15 @@
 """LaTeX + plot report generation for run_benchmarks.py.
 
 Kept separate from run_benchmarks.py (which owns problem construction,
-timing and CLI) so that a report can be regenerated from a previously
-saved results.json (e.g. after tweaking a table/plot) without rerunning
-the DMRG sweep -- see run_benchmarks.py's --from-json option.
+timing and CLI) and from calctk.py (which owns the catalogue of
+calculations) so that a report can be regenerated from a previously saved
+results.json (e.g. after tweaking a table/plot) without rerunning the
+DMRG sweep -- see run_benchmarks.py's --from-json option.
+
+All presentation metadata for a calculation -- its section title, its
+sweep axis, and any caveat the reader needs -- lives here, so adding a
+calculation means one calctk.CALCS entry plus one line in each dict
+below.
 """
 import os
 import math
@@ -14,9 +20,96 @@ matplotlib.use("Agg")  # no display needed to render report plots
 import matplotlib.pyplot as plt
 import numpy as np
 
-CALC_LABELS = {"gs": "Ground state energy", "static": "Static correlator",
-        "dynamic": "Dynamical correlator (KPM)"}
-CALC_ORDER = ["gs", "static", "dynamic"]
+# Section titles. These are LaTeX source (some carry math), so they are
+# written into the document verbatim and never passed through
+# tex_escape() -- unlike the backend labels, which are plain text.
+CALC_LABELS = {
+    "gs": "Ground state energy",
+    "static": "Static correlator",
+    "dynamic": "Dynamical correlator (KPM)",
+    "dynamic_td": "Dynamical correlator (real time + Fourier)",
+    "excited": "First excited state",
+    "entropy": "Entanglement entropy",
+    "evolution": "Real-time evolution after a quench",
+    "sector": "Ground state in the $S_z=0$ sector",
+    "idmrg_gs": "Infinite chain: iDMRG energy density",
+    "idmrg_vev": "Infinite chain: iDMRG $\\langle S^z\\rangle$",
+    "vumps_gs": "Infinite chain: VUMPS energy density",
+    "vumps_vev": "Infinite chain: VUMPS $\\langle S^z\\rangle$",
+}
+
+# The order sections appear in, and the order the summary aggregates in.
+CALC_ORDER = ["gs", "static", "dynamic", "dynamic_td", "excited", "entropy",
+        "evolution", "sector", "idmrg_gs", "idmrg_vev", "vumps_gs", "vumps_vev"]
+
+# Sweep axis of each calculation: chain length for the finite family,
+# bond dimension for the infinite one (an infinite chain has no length).
+CALC_AXIS = {c: ("chi" if c.startswith(("idmrg_", "vumps_")) else "N")
+        for c in CALC_ORDER}
+AXIS_MATH = {"N": "$N$", "chi": "$\\chi$"}
+
+# Plain-text stand-ins for the math in the labels above, used for PDF
+# bookmarks: hyperref cannot put math in one, and warns about every
+# section title that carries some unless it is given an alternative.
+PDF_LABEL_SUBS = [("$\\langle S^z\\rangle$", "<Sz>"), ("$S_z=0$", "Sz=0")]
+AXIS_PLOT = {"N": "chain length $N$", "chi": "bond dimension $\\chi$"}
+
+# What each accuracy column is measured against, per reference kind.
+REF_HEADERS = {
+    "gs": "ED energy", "static": None, "excited": "ED energy",
+    "entropy": None, "evolution": None,
+    "density": "exact density", "zero": "exact $\\langle S^z\\rangle$",
+}
+
+CALC_NOTES = {
+    "dynamic":
+        "No independent ED cross-check is run here (a KPM spectral function "
+        "is more involved to compare pointwise against an exact spectrum); "
+        "physics correctness for this path is covered by "
+        "\\texttt{tests/test\\_dynamical\\_correlator.py}. This section is "
+        "timing-only.",
+    "dynamic_td":
+        "The same spectral function as the previous section, computed "
+        "instead by real-time evolution followed by a Fourier transform "
+        "(\\texttt{submode=\"TD\"}). On \\texttt{itensor\\_version} 3 and "
+        "\\texttt{\"python\"} that evolution is TDVP; on 2 it is the "
+        "MPO-Taylor propagator, so that column times a different algorithm. "
+        "Timing-only, for the same reason as above.",
+    "evolution":
+        "Real-time evolution of $\\langle S^z_0\\rangle(t)$ after a quench "
+        "from the Neel ground state of a staggered field to the Heisenberg "
+        "Hamiltonian. \\texttt{itensor\\_version} 3 and \\texttt{\"python\"} "
+        "run TDVP here; \\texttt{itensor\\_version=2} has no TDVP and uses "
+        "the 2nd-order MPO-Taylor propagator instead "
+        "(\\texttt{timedependent.py}) -- a different algorithm with a "
+        "different accuracy/cost tradeoff, so read that column as such and "
+        "not as a like-for-like comparison.",
+    "sector":
+        "The same ground state as the first section, confined to the "
+        "$S_z=0$ quantum-number sector "
+        "(\\texttt{set\\_conserved\\_sector(Sz=0)}), which is where the "
+        "Heisenberg ground state lives -- so the energy must match the "
+        "dense run and only the time differs. Only "
+        "\\texttt{itensor\\_version=3} and \\texttt{\"python\"} implement "
+        "quantum numbers at all; the other columns are blank by "
+        "construction rather than by failure.",
+    "idmrg_vev":
+        "$\\langle S^z\\rangle$ vanishes by symmetry on this model, so the "
+        "accuracy column is simply the deviation from zero. It is worth "
+        "measuring separately from the energy: a correct energy density "
+        "computed from a wrongly gauged unit cell shows up here and nowhere "
+        "else.",
+    "vumps_vev":
+        "As above: the exact answer is zero by symmetry.",
+    "idmrg_gs":
+        "Swept over bond dimension $\\chi$, not chain length -- this is the "
+        "thermodynamic limit (\\texttt{infinitechain.py}), and $\\chi$ is "
+        "the knob that controls both cost and accuracy. The reference is "
+        "the Bethe-ansatz energy density $1/4-\\ln 2$.",
+    "vumps_gs":
+        "Same model and same reference as the iDMRG section, reached by a "
+        "different algorithm (\\texttt{gs\\_method=\"vumps\"}).",
+}
 
 
 # ---------------------------------------------------------------------
@@ -49,6 +142,13 @@ def tex_escape(s):
             "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
             "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
     return "".join(repl.get(c, c) for c in s)
+
+
+def pdf_label(label):
+    """The label with its math replaced by ASCII, for PDF bookmarks."""
+    for math, plain in PDF_LABEL_SUBS:
+        label = label.replace(math, plain)
+    return label
 
 
 def fmt_time(t):
@@ -96,12 +196,30 @@ def _series(results, calc, backend):
     return [r["n"] for r in rows], [r["time"] for r in rows]
 
 
+def _deviation(value, ref):
+    """|value - ref| for a scalar result, max|value - ref| for a vector
+    one. Returns None if the shapes don't line up (a backend that
+    returned a different number of points is a failure to report, not a
+    number to average)."""
+    if value is None or ref is None:
+        return None
+    if np.ndim(ref) == 0:
+        try:
+            return abs(float(np.real(value)) - float(np.real(ref)))
+        except (TypeError, ValueError):
+            return None
+    a, b = np.asarray(value, dtype=float), np.asarray(ref, dtype=float)
+    if a.shape != b.shape:
+        return None
+    return float(np.max(np.abs(a - b)))
+
+
 # ---------------------------------------------------------------------
 # Plots
 # ---------------------------------------------------------------------
 
 def make_plots(results, backends, outdir):
-    """One time-vs-N plot per calculation type actually present in
+    """One time-vs-size plot per calculation type actually present in
     `results`. Returns {calc: basename} for the calcs that got a plot
     (a calc with zero successful runs anywhere is skipped)."""
     plot_files = {}
@@ -119,7 +237,7 @@ def make_plots(results, backends, outdir):
         if not any_line:
             plt.close(fig)
             continue
-        ax.set_xlabel("chain length $N$")
+        ax.set_xlabel(AXIS_PLOT[CALC_AXIS[calc]])
         ax.set_ylabel("wall time [s]")
         ax.set_yscale("log")
         ax.set_title(CALC_LABELS[calc])
@@ -138,10 +256,11 @@ def make_plots(results, backends, outdir):
 # ---------------------------------------------------------------------
 
 def time_table(results, backends, sizes, calc):
+    axis = AXIS_MATH[CALC_AXIS[calc]]
     sizes = [n for n in sizes if any(_find(results, calc, k, n) for k, _, _ in backends)]
     cols = "l" + "r" * len(backends)
     lines = [r"\begin{tabular}{%s}" % cols, r"\toprule",
-            "$N$ & " + " & ".join(tex_escape(l) for _, l, _ in backends) + r" \\",
+            axis + " & " + " & ".join(tex_escape(l) for _, l, _ in backends) + r" \\",
             r"\midrule"]
     for n in sizes:
         cells = []
@@ -160,16 +279,17 @@ def time_table(results, backends, sizes, calc):
 
 def relative_speed_table(results, backends, sizes, calc):
     """Each backend's time as a multiple of the fastest backend at that
-    (calc, N) -- the table that most directly answers "what's worth
+    (calc, size) -- the table that most directly answers "what's worth
     optimizing": 1.00x is the current best, everything else is how much
-    slower that mode is at the same problem size."""
+    slower that mode is on the same problem."""
+    axis = AXIS_MATH[CALC_AXIS[calc]]
     sizes = [n for n in sizes if any(_find(results, calc, k, n) and _find(results, calc, k, n)["ok"]
                                       for k, _, _ in backends)]
     if not sizes:
         return None, {}
     cols = "l" + "r" * len(backends)
     lines = [r"\begin{tabular}{%s}" % cols, r"\toprule",
-            "$N$ & " + " & ".join(tex_escape(l) for _, l, _ in backends) + r" \\",
+            axis + " & " + " & ".join(tex_escape(l) for _, l, _ in backends) + r" \\",
             r"\midrule"]
     ratios_by_backend = {k: [] for k, _, _ in backends}
     for n in sizes:
@@ -194,46 +314,69 @@ def relative_speed_table(results, backends, sizes, calc):
     return _boxed("\n".join(lines)), ratios_by_backend
 
 
-def gs_accuracy_table(results, backends, ed_refs, sizes):
-    sizes = [n for n in sizes if ed_refs.get(n, {}).get("ok")]
+def accuracy_table(results, backends, refs, sizes, calc, ref_kind):
+    """Deviation of each backend's answer from the reference at every
+    size that has one: |dE| for a scalar result, max|d| over the whole
+    array for a vector one. A scalar reference is printed in its own
+    column, so the reader can see what the deviation is relative to."""
+    per_size = refs.get(calc, {})
+    sizes = [n for n in sizes if n in per_size]
     if not sizes:
         return None
-    cols = "lr" + "r" * len(backends)
+    header = REF_HEADERS.get(ref_kind)
+    show_ref = header is not None and np.ndim(per_size[sizes[0]]) == 0
+    axis = AXIS_MATH[CALC_AXIS[calc]]
+    cols = "l" + ("r" if show_ref else "") + "r" * len(backends)
+    head = [axis]
+    if show_ref:
+        head.append(header)
+    head += [f"{tex_escape(l)} $|\\Delta|$" for _, l, _ in backends]
     lines = [r"\begin{tabular}{%s}" % cols, r"\toprule",
-            "$N$ & ED energy & " + " & ".join(f"{tex_escape(l)} $|\\Delta E|$" for _, l, _ in backends) + r" \\",
-            r"\midrule"]
+            " & ".join(head) + r" \\", r"\midrule"]
     for n in sizes:
-        e_ed = ed_refs[n]["energy"]
-        cells = [f"{e_ed:.6f}"]
+        ref = per_size[n]
+        cells = []
+        if show_ref:
+            cells.append(f"{float(np.real(ref)):.6f}")
         for key, _label, _iv in backends:
-            r = _find(results, "gs", key, n)
-            if r is not None and r["ok"]:
-                cells.append(fmt_err(abs(r["energy"] - e_ed)))
-            else:
-                cells.append("--")
+            r = _find(results, calc, key, n)
+            dev = _deviation(r["value"], ref) if (r is not None and r["ok"]) else None
+            cells.append(fmt_err(dev))
         lines.append(f"{n} & " + " & ".join(cells) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     return _boxed("\n".join(lines))
 
 
-def static_accuracy_table(results, backends, ed_refs, sizes):
-    sizes = [n for n in sizes if ed_refs.get(n, {}).get("ok") and ed_refs[n].get("correlator") is not None]
-    if not sizes:
+def sector_ratio_table(results, backends, sizes):
+    """Sector-mode time divided by dense-mode time at the same N, per
+    backend. This is the number the conserved-sector feature is actually
+    judged on, and it is strongly size-dependent (block sparsity scales,
+    its per-block bookkeeping does not), which is exactly why it belongs
+    in a table rather than in a single quoted speedup."""
+    have = [(k, l, iv) for k, l, iv in backends
+            if any(r["calc"] == "sector" and r["backend"] == k and r["ok"]
+                   for r in results)]
+    if not have:
         return None
-    cols = "l" + "r" * len(backends)
-    lines = [r"\begin{tabular}{%s}" % cols, r"\toprule",
-            "$N$ & " + " & ".join(f"{tex_escape(l)} $\\max|\\Delta|$" for _, l, _ in backends) + r" \\",
-            r"\midrule"]
+    rows = []
     for n in sizes:
-        corr_ed = ed_refs[n]["correlator"]
         cells = []
-        for key, _label, _iv in backends:
-            r = _find(results, "static", key, n)
-            if r is not None and r["ok"]:
-                diffs = [abs(a - b) for a, b in zip(r["value"], corr_ed)]
-                cells.append(fmt_err(max(diffs)))
+        for key, _l, _iv in have:
+            a = _find(results, "sector", key, n)
+            b = _find(results, "gs", key, n)
+            if a is not None and b is not None and a["ok"] and b["ok"] and b["time"] > 0:
+                cells.append("%.2fx" % (a["time"] / b["time"]))
             else:
                 cells.append("--")
+        if any(c != "--" for c in cells):
+            rows.append((n, cells))
+    if not rows:
+        return None
+    cols = "l" + "r" * len(have)
+    lines = [r"\begin{tabular}{%s}" % cols, r"\toprule",
+            "$N$ & " + " & ".join(tex_escape(l) for _, l, _ in have) + r" \\",
+            r"\midrule"]
+    for n, cells in rows:
         lines.append(f"{n} & " + " & ".join(cells) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     return _boxed("\n".join(lines))
@@ -247,11 +390,39 @@ def failures_list(results, backends):
     lines = [r"\begin{itemize}"]
     for r in fails:
         label = label_of.get(r["backend"], r["backend"])
-        lines.append(r"\item %s, %s, $N=%d$: \texttt{%s}" % (
-                tex_escape(CALC_LABELS.get(r["calc"], r["calc"])),
-                tex_escape(label), r["n"], tex_escape(short_err(r["err"]))))
+        lines.append(r"\item %s, %s, %s$=%d$: \texttt{%s}" % (
+                CALC_LABELS.get(r["calc"], tex_escape(r["calc"])),
+                tex_escape(label), AXIS_MATH[CALC_AXIS.get(r["calc"], "N")],
+                r["n"], tex_escape(short_err(r["err"]))))
     lines.append(r"\end{itemize}")
     return "\n".join(lines)
+
+
+def coverage_table(results, backends, calc_sizes):
+    """Which calculation ran on which backend at all -- the answer to
+    "what does this benchmark actually cover", including the entries that
+    are blank because a backend does not implement that capability."""
+    cols = "l" + "c" * len(backends)
+    lines = [r"\begin{tabular}{%s}" % cols, r"\toprule",
+            "Calculation & " + " & ".join(tex_escape(l) for _, l, _ in backends) + r" \\",
+            r"\midrule"]
+    for calc in CALC_ORDER:
+        if calc not in calc_sizes:
+            continue
+        cells = []
+        for key, _l, _iv in backends:
+            rows = [r for r in results if r["calc"] == calc and r["backend"] == key]
+            if not rows:
+                cells.append("--")
+            elif all(r["ok"] for r in rows):
+                cells.append(r"\checkmark")
+            elif any(r["ok"] for r in rows):
+                cells.append("partial")
+            else:
+                cells.append(r"\textit{fail}")
+        lines.append(CALC_LABELS[calc] + " & " + " & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    return _boxed("\n".join(lines))
 
 
 # ---------------------------------------------------------------------
@@ -260,9 +431,9 @@ def failures_list(results, backends):
 
 def recommendation_text(results, backends):
     """Geometric-mean relative slowdown per backend, aggregated over
-    every (calc, N) point it completed successfully, expressed relative
-    to whichever backend was fastest at that same point. Highlights the
-    backend most worth optimizing next."""
+    every (calc, size) point it completed successfully, expressed
+    relative to whichever backend was fastest at that same point.
+    Highlights the backend most worth optimizing next."""
     ratios_all = {k: [] for k, _, _ in backends}
     for calc in CALC_ORDER:
         ns = sorted(set(r["n"] for r in results if r["calc"] == calc))
@@ -288,7 +459,7 @@ def recommendation_text(results, backends):
 
     ordered = sorted(geo.items(), key=lambda kv: kv[1])
     fastest_key, _ = ordered[0]
-    parts = [f"Averaged (geometric mean) across every chain length and "
+    parts = [f"Averaged (geometric mean) across every problem size and "
              f"calculation type it completed, \\textbf{{%s}} was the "
              f"fastest backend, normalized to 1.00x at each point it "
              f"was fastest." % tex_escape(label_of[fastest_key])]
@@ -296,11 +467,17 @@ def recommendation_text(results, backends):
         slowest_key, slowest_ratio = ordered[-1]
         parts.append(
             f"\\textbf{{%s}} was, on average, %.2fx slower than the "
-            f"fastest backend at the same problem size -- the strongest "
+            f"fastest backend on the same problem -- the strongest "
             f"candidate for further optimization work."
             % (tex_escape(label_of[slowest_key]), slowest_ratio))
     parts.append("Ranking (fastest to slowest, geometric-mean relative time): " +
             ", ".join(f"{tex_escape(label_of[k])} ({v:.2f}x)" for k, v in ordered) + ".")
+    parts.append("Note that the aggregate mixes calculations that not "
+            "every backend implements (the conserved sector and the "
+            "infinite chain run on two backends only), so a backend is "
+            "ranked on the subset of points it actually completed; the "
+            "per-section tables above are the ones to read before acting "
+            "on any single number.")
     return " ".join(parts)
 
 
@@ -312,6 +489,7 @@ PREAMBLE = r"""\documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{adjustbox}
@@ -330,22 +508,35 @@ PREAMBLE = r"""\documentclass[11pt]{article}
 """
 
 
-def _params_block(params, backends, sizes, dyn_sizes):
-    es = params["kpm_es"]
+def _params_block(params, backends, calc_sizes):
+    es = np.asarray(params["es"])
     emin, emax, npts = float(np.min(es)), float(np.max(es)), len(es)
     lines = [
         r"\section*{Run parameters}",
         r"\begin{itemize}",
         r"\item Backends: " + ", ".join(tex_escape(l) for _, l, _ in backends),
-        r"\item Chain lengths $N$: " + ", ".join(str(n) for n in sizes),
-        r"\item Dynamical-correlator subset: " + ", ".join(str(n) for n in dyn_sizes),
         r"\item DMRG: maxm=%d, nsweeps=%d, cutoff=%.1e" % (
                 params["maxm"], params["nsweeps"], params["cutoff"]),
-        r"\item KPM: n=%d moments, energy window [%.2f, %.2f] (%d points)" % (
-                params["kpm_n"], emin, emax, npts),
+        r"\item KPM: n=%d moments; spectral window [%.2f, %.2f] (%d points), "
+        r"shared with the real-time correlator (broadening $\delta=%.2f$)" % (
+                params["kpm_n"], emin, emax, npts, params["td_delta"]),
+        r"\item Real-time evolution: %d steps of $dt=%.3f$" % (
+                params["nt"], params["dt"]),
+        r"\item Infinite chain: maxiter=%d, etol=%.1e" % (
+                params["inf_maxiter"], params["inf_etol"]),
         r"\item Repeats per timing (minimum kept): %d" % params["repeats"],
         r"\end{itemize}",
+        r"\subsection*{Sweep ranges}",
+        r"\begin{itemize}",
     ]
+    for calc in CALC_ORDER:
+        if calc not in calc_sizes or not calc_sizes[calc]:
+            continue
+        axis = AXIS_MATH[CALC_AXIS[calc]]
+        lines.append(r"\item %s: %s = %s" % (
+                CALC_LABELS[calc], axis,
+                ", ".join(str(x) for x in calc_sizes[calc])))
+    lines.append(r"\end{itemize}")
     if any(k == "julia_live" for k, _, _ in backends):
         lines.append(
             r"\textit{Note: the Julia backend was warmed up with one "
@@ -357,12 +548,14 @@ def _params_block(params, backends, sizes, dyn_sizes):
     return "\n".join(lines)
 
 
-def _calc_section(calc, results, backends, sizes, ed_refs, plot_files, use_sizes):
-    title = CALC_LABELS[calc]
-    parts = [r"\section{%s}" % title]
+def _calc_section(calc, results, backends, refs, plot_files, use_sizes, ref_kind):
+    parts = [r"\section{\texorpdfstring{%s}{%s}}" % (
+            CALC_LABELS[calc], pdf_label(CALC_LABELS[calc]))]
+    if calc in CALC_NOTES:
+        parts.append(r"\textit{%s}" % CALC_NOTES[calc])
 
-    tbl = time_table(results, backends, use_sizes, calc)
-    parts += [r"\subsection*{Wall time}", tbl]
+    parts += [r"\subsection*{Wall time}",
+              time_table(results, backends, use_sizes, calc)]
 
     if calc in plot_files:
         parts.append(r"\begin{center}\includegraphics[width=0.7\linewidth]{%s}\end{center}"
@@ -370,44 +563,52 @@ def _calc_section(calc, results, backends, sizes, ed_refs, plot_files, use_sizes
 
     rel, _ = relative_speed_table(results, backends, use_sizes, calc)
     if rel is not None:
-        parts += [r"\subsection*{Relative speed (fastest backend = 1.00x at each $N$)}", rel]
+        axis = AXIS_MATH[CALC_AXIS[calc]]
+        parts += [r"\subsection*{Relative speed (fastest backend = 1.00x at each %s)}"
+                  % axis, rel]
 
-    if calc == "gs":
-        acc = gs_accuracy_table(results, backends, ed_refs, use_sizes)
+    if calc == "sector":
+        ratio = sector_ratio_table(results, backends, use_sizes)
+        if ratio is not None:
+            parts += [r"\subsection*{Sector vs. dense, same backend "
+                      r"(below 1.00x means the sector is faster)}", ratio]
+
+    if ref_kind is not None:
+        acc = accuracy_table(results, backends, refs, use_sizes, calc, ref_kind)
         if acc is not None:
-            parts += [r"\subsection*{Accuracy vs. exact diagonalization}", acc]
-    elif calc == "static":
-        acc = static_accuracy_table(results, backends, ed_refs, use_sizes)
-        if acc is not None:
-            parts += [r"\subsection*{Accuracy vs. exact diagonalization}", acc]
-    elif calc == "dynamic":
-        parts.append(
-            r"\textit{No independent ED cross-check is run here (a KPM "
-            r"spectral function is more involved to compare pointwise "
-            r"against an exact spectrum); physics correctness for this "
-            r"path is covered by \texttt{tests/test\_dynamical\_correlator.py}. "
-            r"This section is timing-only.}")
+            parts += [r"\subsection*{Accuracy vs. reference}", acc]
     return "\n\n".join(parts)
 
 
-def write_report(results, ed_refs, params, backends, sizes, dyn_sizes, outdir, generated_at=None):
-    """Build plots + report.tex under outdir and return the .tex path."""
+def write_report(results, refs, params, backends, calc_sizes, ref_kinds, outdir,
+        generated_at=None):
+    """Build plots + report.tex under outdir and return the .tex path.
+
+    `refs` is {calc: {size: reference value}}, `calc_sizes` is
+    {calc: [sizes swept]}, and `ref_kinds` is {calc: reference kind}
+    naming what that calculation is compared against (see REF_HEADERS);
+    a calculation absent from `ref_kinds` gets a timing-only section."""
     os.makedirs(outdir, exist_ok=True)
     plot_files = make_plots(results, backends, outdir)
 
     sections = []
     for calc in CALC_ORDER:
-        use_sizes = dyn_sizes if calc == "dynamic" else sizes
         if not any(r["calc"] == calc for r in results):
             continue
-        sections.append(_calc_section(calc, results, backends, sizes, ed_refs, plot_files, use_sizes))
+        use_sizes = calc_sizes.get(calc) or sorted(
+                set(r["n"] for r in results if r["calc"] == calc))
+        sections.append(_calc_section(calc, results, backends, refs, plot_files,
+                use_sizes, ref_kinds.get(calc)))
 
     summary = [r"\section{Summary}", recommendation_text(results, backends)]
+    cov = coverage_table(results, backends, calc_sizes)
+    if cov is not None:
+        summary += [r"\subsection*{Coverage}", cov]
     fails = failures_list(results, backends)
     if fails is not None:
         summary += [r"\subsection*{Failed runs}", fails]
 
-    doc = [PREAMBLE % (generated_at or ""), _params_block(params, backends, sizes, dyn_sizes)]
+    doc = [PREAMBLE % (generated_at or ""), _params_block(params, backends, calc_sizes)]
     doc += sections
     doc += summary
     doc.append(r"\end{document}")

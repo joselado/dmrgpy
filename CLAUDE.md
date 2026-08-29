@@ -339,21 +339,52 @@ its own.
 `benchmarks/run_benchmarks.py` answers a different question than
 `tests/`/`examples/`: not "is this backend correct" but "which backend is
 fastest, and by how much, for each kind of calculation" — the thing to
-check before deciding which mode is worth optimizing next. It sweeps a
-uniform S=1/2 Heisenberg chain over a range of chain lengths, timing
-ground-state energy, a static correlator, and a KPM dynamical correlator
-on every backend available in the current environment (`v2`, `v3`,
+check before deciding which mode is worth optimizing next. It runs on
+every backend available in the current environment (`v2`, `v3`,
 `"python"`, `"julia_live"`, auto-detected via `cppext.available()` and a
 live Julia import, same pattern as
-`examples/groundstate/dmrg_generalized_benchmark`), and cross-checks
-accuracy against ED at every size. It writes `benchmarks/output/report.tex`
+`examples/groundstate/dmrg_generalized_benchmark`), and sweeps two
+families of calculation over a uniform S=1/2 Heisenberg chain:
+
+- **finite**, swept over chain length: ground-state energy, static
+  correlator, KPM dynamical correlator, TD (real-time + Fourier)
+  dynamical correlator, first excited state, bond entanglement entropy,
+  real-time evolution after a quench, and the ground state confined to
+  the `Sz=0` conserved sector. Accuracy is cross-checked against ED at
+  every size cheap enough for it (energies, correlator, entropy profile
+  and evolution trajectory alike — the ED entropy reference is an SVD of
+  the ED state vector, since `entropy.py` is `self._session`-only and has
+  no ED path of its own).
+- **infinite**, swept over bond dimension (`infinitechain.py`): energy
+  density and `<Sz>` under both `gs_method="idmrg"` and
+  `gs_method="vumps"`, checked against the Bethe-ansatz density and
+  against `<Sz>=0`.
+
+The catalogue of what is covered lives in one place, `benchmarks/calctk.py`'s
+`CALCS` list; adding a capability to the benchmark is one entry there plus
+a label in `reporttk.CALC_LABELS`. Calculations that only some backends
+implement (the sector, the infinite chain — both `itensor_version=3` and
+`"python"` only) are part of the sweep, restricted to those backends, and
+show up as blank-by-construction rather than as failures in the report's
+coverage table. Two of the sections exist specifically because a single
+number would misrepresent them: the sector section tabulates the
+sector-vs-dense ratio per size (block sparsity scales, its bookkeeping
+doesn't), and the `<Sz>` sections catch a wrongly gauged iDMRG unit cell,
+which an energy-only check cannot see.
+
+It writes `benchmarks/output/report.tex`
 (tables + matplotlib plots + an auto-generated "which backend is worth
 optimizing" paragraph) and compiles it to `report.pdf` with `pdflatex` if
 available; `benchmarks/output/` is gitignored, so nothing under it is
 checked in. Run `python run_benchmarks.py --help` from `benchmarks/` for
-the full option list (sizes, backend selection, DMRG/KPM parameters,
+the full option list (sizes, bond dimensions, `--calcs` selection, backend
+selection, DMRG/KPM/evolution parameters, per-calculation size caps,
 repeats-per-timing); `--from-json results.json` regenerates the report
-from a previous run's raw data without rerunning the sweep. Because
+from a previous run's raw data without rerunning the sweep. Note that
+`--repeats>1` re-prepares each calculation from a fresh chain per repeat:
+the DMRG session caches its ground-state energy (`groundstate.py`'s
+send-cache), so timing a second `gs_energy()` on the same chain would
+otherwise record that backend as instantaneous. Because
 juliacall JIT-compiles each Julia method the first time it's called in a
 process (see the `julia_live` testing note above), the script always runs
 one untimed warm-up call on the Julia backend before the timed sweep, so

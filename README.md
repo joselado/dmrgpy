@@ -764,11 +764,19 @@ python run_tests.py     # or: pytest tests
 
 `benchmarks/run_benchmarks.py` answers a different question: not "is
 this backend correct" but "which backend is fastest, and by how much".
-It sweeps a uniform S=1/2 Heisenberg chain over a range of chain
-lengths, timing a ground-state energy, a static correlator and a KPM
-dynamical correlator on every backend available in the current
-environment, cross-checking each against ED, and writes a LaTeX report
-(compiled to PDF if `pdflatex` is available) with tables and plots:
+It sweeps a uniform S=1/2 Heisenberg chain on every backend available in
+the current environment, timing one calculation per capability: a
+ground-state energy, a static correlator, a KPM dynamical correlator and
+a real-time one, a first excited state, the bond entanglement entropy,
+real-time evolution after a quench, and the ground state confined to the
+Sz=0 conserved sector. It then sweeps the same model in the
+thermodynamic limit over bond dimension, covering both the iDMRG and the
+VUMPS solver. Every number is cross-checked, against exact
+diagonalization for the finite chains and against the Bethe-ansatz
+energy density for the infinite ones, so a backend that is fast because
+it is computing the wrong thing shows up as such. The output is a LaTeX
+report (compiled to PDF if `pdflatex` is available) with tables and
+plots:
 
 ```bash
 cd benchmarks && python run_benchmarks.py --help
