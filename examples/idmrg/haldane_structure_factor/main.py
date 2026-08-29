@@ -3,6 +3,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 import numpy as np  # conventional numpy library
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 from dmrgpy import infinitechain  # infinite-DMRG (iDMRG) chain object
 
 #####################################################################
@@ -116,25 +117,27 @@ print()
 print("Haldane e0 = %.10f   (literature -1.401484038971)  converged=%s"
       % (ich.gs_energy(), ich.converged))
 
-ksh = np.linspace(0.1, np.pi, 33)
+ksh = np.linspace(0.0, 2*np.pi, 49)
 dimh = min(12, D_HALDANE*D_HALDANE*2)
-band, frac_h, tot_h = [], [], []
+all_e, all_w, tot_h = [], [], []
 for k in ksh:
     e, w, tot = ich.spectral_weights("Sz", k, n=dimh, return_total=True)
-    band.append(e[0])
-    # The lowest three branches ARE the magnon triplet here (unlike AKLT,
-    # no crossing in this window); their weights are individually
-    # basis-arbitrary within the near-degenerate multiplet, so only their
-    # SUM is physical -- see spectral_weights' own docstring.
-    frac_h.append(w[:3].sum()/tot)
-    tot_h.append(tot)
-band, frac_h, tot_h = np.array(band), np.array(frac_h), np.array(tot_h)
+    all_e.append(e) ; all_w.append(w) ; tot_h.append(tot)
+all_e, all_w, tot_h = np.array(all_e), np.array(all_w), np.array(tot_h)
+band = all_e[:, 0]
+# The lowest three branches ARE the magnon triplet here (unlike AKLT, which
+# has a multiplet crossing). Their individual weights are basis-arbitrary
+# within the near-degenerate multiplet, so only the SUM is physical -- see
+# spectral_weights' own docstring, and note the splitting is set by the
+# variational error, so do NOT group them by an energy tolerance.
+frac_h = np.where(tot_h > 1e-12, all_w[:, :3].sum(axis=1)/np.maximum(tot_h, 1e-300), np.nan)
 
-gap = band[-1]
+ipi = int(np.argmin(np.abs(ksh - np.pi)))
+gap = band[ipi]
 print("  gap E(pi)   = %.8f   (literature Haldane gap 0.4104789, err %+.1e)"
       % (gap, gap - 0.4104789))
-print("  S^zz(pi)    = %.6f" % tot_h[-1])
-print("  triplet exhausts %.2f%% of the k=pi sum rule" % (100*frac_h[-1]))
+print("  S^zz(pi)    = %.6f" % tot_h[ipi])
+print("  triplet exhausts %.2f%% of the k=pi sum rule" % (100*frac_h[ipi]))
 
 # Independent cross-check of the sum rule against a real-space correlator
 # sum -- machinery that shares no code at all with the excitation ansatz.
@@ -145,16 +148,50 @@ mean = ich.vev("Sz", 0).real
 C = [ich.correlator("Sz", 0, "Sz", r).real - mean*mean for r in range(120)]
 ref = C[0] + 2.0*sum(np.cos(np.pi*r)*C[r] for r in range(1, 120))
 print("  S^zz(pi) from the real-space correlator sum = %.6f  (diff %.1e)"
-      % (ref, abs(ref - tot_h[-1])))
-assert abs(ref - tot_h[-1]) < 1e-5
+      % (ref, abs(ref - tot_h[ipi])))
+assert abs(ref - tot_h[ipi]) < 1e-5
 assert abs(gap - 0.4104789) < 0.01      # D=10 with xi~6
-assert frac_h[-1] > 0.90                # single-mode is excellent at k=pi
+assert frac_h[ipi] > 0.90               # single-mode is excellent at k=pi
 
+# ------- S^zz(k,w): broadened from those same exact delta peaks ---------
+delta = 0.08
+es = np.linspace(0.0, 6.0, 400)
+lor = (delta/np.pi)/((es[None, :, None] - all_e[:, None, :])**2 + delta**2)
+S_map = np.einsum('kea,ka->ke', lor, all_w)
+
+# dynamical_structure_factor is the convenience wrapper that does exactly
+# this; run it on a coarse grid to demonstrate the public API and confirm
+# the two agree, rather than paying for the whole fine grid twice.
+kc = ksh[::8]
+_, ec, Sc = ich.dynamical_structure_factor("Sz", ks=kc, energies=es,
+                                            delta=delta, n=dimh)
+assert np.max(np.abs(Sc - S_map[::8])) < 1e-10
+
+# Where does the weight the magnon branch does NOT carry actually sit? Not
+# at the two-magnon threshold 2*Delta, even though that is where the true
+# continuum starts: a single-B tangent-space ansatz cannot represent two
+# well-separated magnons at all (the multi-particle extension is Osborne &
+# McCulloch, arXiv:2408.17117, not implemented here). Measured directly at
+# k=pi with EVERY branch enumerated at D=8: the magnon triplet takes 97.6%,
+# and the remaining 2.4% sits between w=2.7 and w=7.7 -- inside the
+# two-magnon band [2*Delta, 2*max eps] = [0.82, ~5.0] but concentrated near
+# its top, with nothing at all near its lower edge. So read the map as a
+# single-mode result: quantitative on the magnon branch, and silent (not
+# zero -- silent) about the continuum.
+two_delta = 2*0.4104789
+carried = all_w[:, :3].sum(axis=1)
+print("  weight above the magnon branch, summed over k: %.4f of the total"
+      % ((tot_h - carried).sum()/tot_h.sum()))
+print("  S^zz(k) dynamic range across the zone: %.2e (k=0) .. %.3f (k=pi), factor %.1e"
+      % (tot_h.min(), tot_h.max(), tot_h.max()/max(tot_h.min(), 1e-300)))
+# k=0 must be an EXACT zero -- sum_j S^z_j is conserved. What is left is the
+# ground state's own convergence error, not physics.
+assert tot_h[0] < 1e-4
 
 # ==========================  plots  ==================================
-fig, axes = plt.subplots(1, 3, figsize=(16, 4.6))
+fig, axes = plt.subplots(2, 2, figsize=(13.5, 9.4))
 
-ax = axes[0]
+ax = axes[0, 0]
 for a in range(dim):
     ax.plot(ks, aklt_E[:, a], "o", ms=3, color="C0",
             label="tangent-space branches" if a == 0 else None)
@@ -162,26 +199,53 @@ ax.plot(ks, aklt_sma(ks), "k--", lw=1.4,
         label=r"AAH single mode $\frac{10}{27}(5+3\cos k)$")
 ax.set_xlabel("momentum $k$")
 ax.set_ylabel("$E(k)$")
-ax.set_title(r"AKLT at $D=2$ (exact): triplet + quintuplet")
+ax.set_title(r"AKLT at $D=2$ (exact): triplet + quintuplet, crossing at $k\approx0.6$")
 ax.legend(fontsize=8)
 
-ax = axes[1]
-ax.plot(ks, aklt_tot, "o", ms=4, label=r"dmrgpy $\sum_a w_a(k)$")
-ax.plot(ks, aklt_szz(ks), "k--", lw=1.4, label=r"exact $S^{zz}(k)$, AKLT")
+ax = axes[0, 1]
+ax.plot(ks, aklt_tot, "o", ms=4, label=r"AKLT, dmrgpy $\sum_a w_a(k)$")
+ax.plot(ks, aklt_szz(ks), "k--", lw=1.4, label=r"AKLT, exact $S^{zz}(k)$")
 ax.plot(ksh, tot_h, "s", ms=4, color="C3", label=r"Haldane, $D=%d$" % D_HALDANE)
+ax.set_xlim(0, np.pi)
 ax.set_xlabel("momentum $k$")
 ax.set_ylabel(r"$S^{zz}(k)$ (sum rule total)")
 ax.set_title("total spectral weight vs the exact structure factor")
 ax.legend(fontsize=8)
 
-ax = axes[2]
+ax = axes[1, 0]
+# LOG colour scale, deliberately. S^zz(k) spans 5.3e5 between k=pi and k=0
+# (measured: 3.31 vs 6.3e-6), so on a linear scale everything below ~1% of
+# the k=pi peak is black and the magnon looks like it exists only near the
+# zone boundary. It does not: the branch E_1(k) is well defined at every k
+# (1.22 at k=0, 2.72 at k=pi/2), it is the matrix element that collapses --
+# and at k=0 it collapses to an EXACT zero, since S^z(k=0) = sum_j S^z_j is
+# a conserved charge and cannot create any excitation at all (the 6.3e-6 we
+# see is that zero within this D=10 state's convergence). A linear scale is
+# the honest picture of where scattering intensity actually is; a log scale
+# is the honest picture of what the calculation produced, and it also makes
+# the second branch near w~3 visible, which linear hides entirely.
+im = ax.pcolormesh(ksh, es, np.maximum(S_map.T, 1e-12), shading="auto",
+                   cmap="magma", norm=LogNorm(vmin=1e-4, vmax=S_map.max()))
+ax.plot(ksh, band, "w--", lw=1.0, label="magnon branch (this calculation)")
+ax.axhline(two_delta, color="cyan", lw=1.0, ls=":",
+           label=r"$2\Delta$: true continuum edge, carries no ansatz weight")
+ax.set_xticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
+ax.set_xticklabels(["0", r"$\pi/2$", r"$\pi$", r"$3\pi/2$", r"$2\pi$"])
+ax.set_xlabel("momentum $k$")
+ax.set_ylabel(r"energy $\omega$")
+ax.set_title(r"$S^{zz}(k,\omega)$, Haldane chain, $D=%d$" % D_HALDANE)
+ax.legend(loc="upper center", fontsize=7.5, framealpha=0.75)
+fig.colorbar(im, ax=ax)
+
+ax = axes[1, 1]
 ax.plot(ksh, frac_h, "s-", ms=4, color="C3", label="Haldane (lowest triplet)")
 ax.plot(ks, aklt_trip, "o-", ms=3, color="C0", label="AKLT (triplet, exact 1)")
 ax.axhline(1.0, color="gray", lw=0.8, ls=":")
+ax.set_xlim(0, np.pi)
 ax.set_ylim(0.0, 1.08)
 ax.set_xlabel("momentum $k$")
 ax.set_ylabel("triplet weight / sum rule total")
-ax.set_title("how much of $S^{zz}(k)$ the single mode carries")
+ax.set_title(r"how much of $S^{zz}(k)$ the single mode carries")
 ax.legend(fontsize=8, loc="lower right")
 
 fig.tight_layout()
