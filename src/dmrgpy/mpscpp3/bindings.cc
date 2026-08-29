@@ -394,15 +394,6 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "-- requires vumps_ground_state/vumps_load_uniform_state to "
                "have been called first, see Chain::vumps_get_snapshot's own "
                "comment. Returns (D,d_g,AL,AR,C).")
-        .def("set_allow_defective_window", &Chain::set_allow_defective_window,
-             py::arg("allow"),
-             "Opt in to running td_dynamical_correlator_window despite its "
-             "known gauge defect (its window tiles the raw per-micro-step "
-             "idmrg_U_ factors, not the gauge-consistent cell, so S(x,t) is "
-             "quantitatively wrong for every operator -- see "
-             "docs/known_issue_v3_window_gauge.md). Exists for the tests "
-             "that pin the defect and for whoever fixes it; dmrgpy's own "
-             "public API never calls it and raises instead.")
         .def("td_dynamical_correlator_window",
              [](Chain& self, int n_window, std::string const& opname_A,
                 std::string const& opname_B, double dt, int nt,

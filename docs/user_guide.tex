@@ -3583,25 +3583,23 @@ the transfer-matrix fixed points, and the two see different energies). On
 the dimerized XX chain that alone took the residual against the exact
 free-fermion answer from $\sim$0.07 to $\sim$1e-5.
 
-\textbf{\texttt{itensor\_version=3} currently raises here, on purpose.}
-The v3 window tiles the raw per-micro-step \texttt{idmrg\_U\_} factors
-rather than the gauge-consistent unit cell every other v3 static
-observable uses, so its $S(x,t)$ is quantitatively wrong for \emph{any}
-operator, spin included: the exact $S(x,0) = $
-\texttt{correlator(...)} identity misses by up to $\sim$1.7e-1 on a plain
-Heisenberg chain whose energy density the two backends agree on to
-6.7e-11. Shape and finiteness look fine, which is how it went unnoticed.
-Rather than hand back numbers like that,
-\texttt{td\_dynamical\_correlator} raises \texttt{RuntimeError} for
-\texttt{itensor\_version=3} and
-\texttt{Chain::td\_dynamical\_correlator\_window} throws unless a caller
-explicitly opts in (\texttt{Chain::set\_allow\_defective\_window}, used
-only by the tests that pin the defect). Use
-\texttt{itensor\_version="python"}, which is exact on that identity ---
-see \texttt{docs/known\_issue\_v3\_window\_gauge.md} for the diagnosis and
-the fix, and
+\textbf{Both backends are exact on the $S(x,0)$ identity.} $S(x,t{=}0)$
+must equal the chain's own static \texttt{correlator(...)} exactly (no
+evolution has happened yet), and both \texttt{itensor\_version="python"}
+and \texttt{itensor\_version=3} satisfy it to $\sim$1e-15. That was not
+always true: until 2026-08-29 the v3 window tiled the raw per-micro-step
+iDMRG factors rather than the gauge-consistent unit cell every other v3
+static observable uses, and missed the identity by up to $\sim$1.7e-1 on
+a plain Heisenberg chain whose energy density the two backends agreed on
+to 6.7e-11 --- shape and finiteness looked fine throughout, which is how
+it went unnoticed. Fixing it also removed this backend's
+$\exp(+i\,\texttt{eshift}\,t)$ phase correction in favour of the exact
+vacuum normalization the Python backend already used, and a latent
+index-stride bug that only showed up when the converged unit cell is not
+square. See
 \texttt{examples/idmrg/td\_dynamical\_correlator\_python\_VS\_v3/main.py},
-which now measures the defect instead of asserting agreement.
+which checks the identity at every $x$ on both backends and then compares
+the two $S(x,t)$ trajectories.
 
 \textbf{Scope}: this simplifies the paper's own Eq.~7 to $t_1=0$ (the
 ground state is perturbed by \texttt{opname\_j} and evolved forward

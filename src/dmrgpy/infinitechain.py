@@ -1272,20 +1272,16 @@ class Infinite_Many_Body_Chain:
         method's own comment) are the two implemented backends; any other
         raises NotImplementedError.
 
-        **`itensor_version=3` currently RAISES here** (`RuntimeError`), and
-        deliberately so: that backend's window tiles the raw
-        per-micro-step `idmrg_U_` factors instead of the gauge-consistent
-        unit cell every other v3 static observable uses, so its `S(x,t)` is
-        quantitatively wrong for *every* operator -- it misses the exact
+        Both backends tile the *gauge-consistent* unit cell
+        (`IDMRGResult.cell_raw` for `"python"`, `Chain::idmrg_cell_raw_`
+        for v3), not the raw per-micro-step iDMRG factors: tiling the
+        latter leaves the window's energy right while putting `S(x,t)`
+        quantitatively wrong for *every* operator (it missed the exact
         `S(x,t=0) == correlator(...)` identity by up to ~1.7e-1 on a plain
-        spin chain, while shape, finiteness and even the energy density
-        all look right. Returning that is worse than refusing. Use
-        `itensor_version="python"`, which is exact on that identity. The
-        C++ method refuses too, unless
-        `Chain::set_allow_defective_window(true)` opts in (tests only).
-        See `docs/known_issue_v3_window_gauge.md`; everything below about
-        the v3 path describes what it will do again once the gauge is
-        fixed. BOTH require `self.gs_method == "idmrg"`
+        spin chain, with shape, finiteness and energy density all looking
+        right, which is how it went unnoticed on v3 until 2026-08-29).
+        Both now satisfy that identity to ~1e-10 or better. BOTH require
+        `self.gs_method == "idmrg"`
         (raises NotImplementedError otherwise, mirroring
         `local_excitation_gap`'s own gate) -- unlike `vev`/`correlator`/
         `excitation_energies`, this feature has no `gs_method="vumps"`
@@ -1379,30 +1375,6 @@ class Infinite_Many_Body_Chain:
                 "Infinite_Many_Body_Chain.td_dynamical_correlator: only "
                 "itensor_version=\"python\" or itensor_version=3 are "
                 "supported")
-        # itensor_version=3 is DISABLED here rather than answering with
-        # numbers that are known to be wrong. Chain::idmrg_build_window and
-        # Chain::idmrg_window_snapshot_correlator tile the raw
-        # per-micro-step `idmrg_U_` factors instead of the gauge-consistent
-        # unit cell that every other v3 static observable was moved onto,
-        # so S(x,t) fails the exact `S(x,0) == correlator(...)` identity by
-        # up to 7.4e-2 -- on a plain spin chain, for any operator, with no
-        # Jordan-Wigner string anywhere near it. The C++ method refuses too
-        # (Chain::set_allow_defective_window is the tests-only opt-in);
-        # this raise is here so the failure names the alternative and the
-        # write-up rather than surfacing as a bare C++ error. Delete both
-        # once the gauge is fixed -- docs/known_issue_v3_window_gauge.md
-        # has the diagnosis, the measured numbers and the fix.
-        raise RuntimeError(
-            "Infinite_Many_Body_Chain.td_dynamical_correlator: "
-            "itensor_version=3 is disabled because its window measures in "
-            "the wrong gauge -- it tiles the raw per-micro-step idmrg_U_ "
-            "factors instead of the gauge-consistent unit cell, so its "
-            "S(x,t)/S(k,omega) are quantitatively wrong for every operator "
-            "(the exact S(x,t=0) == correlator(...) identity misses by up "
-            "to 7.4e-2 on a spin chain). Use itensor_version=\"python\" "
-            "for this calculation -- it is exact on that identity and "
-            "matches the free-fermion Green function at t>0. See "
-            "docs/known_issue_v3_window_gauge.md.")
         if self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.td_dynamical_correlator: "

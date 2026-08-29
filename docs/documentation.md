@@ -1743,11 +1743,14 @@ approximation involved — matches to ~1e-6 (Krylov/SVD-truncation-limited,
 not a real discrepancy); (2) two independent, well-converged iDMRG solves
 of the same physical model now give closely-agreeing `S(x,t)`, not just a
 coincidentally-agreeing `e0` (`tests/test_idmrg_window_free_fermion.py`).
-The native ITensor v3 port (below) had the identical bug, fixed the same
-way (a post-hoc `exp(+i*eshift*t)` correction — equally exact, since the
-baseline provably factors as a uniform additive-to-identity scalar — used
-there instead of "fix at the source" since ITensorTDVP's own `tdvp()` is
-a vendored black box that cannot be wrapped like pyitensor's own matvec).
+The native ITensor v3 port (below) had the identical bug. It was fixed
+there first with a post-hoc `exp(+i*eshift*t)` correction (ITensorTDVP's
+own `tdvp()` is a vendored black box that cannot be wrapped at the source
+like pyitensor's own matvec), and then, with the 2026-08-29 gauge fix,
+replaced by the same vacuum normalization described below: once the
+snapshot closes the window's boundary legs with transfer-matrix fixed
+points rather than a bare trace, an `eshift` measured with those legs
+*traced* is no longer the right constant to divide out.
 
 `dynamical_correlator_td`/`snapshot_correlator` reconstruct
 `S(x,t)=<ψ|A_x e^{-i(H-EGS)t}B_0|ψ>` for *every* `x` from a *single* window
@@ -1863,37 +1866,53 @@ adaptation was needed: `idmrg_extend_HL`/`HR`'s own "bra" leg convention
 not what `LocalMPO::makeL`/`makeR`'s own `dag(prime(psi))` convention
 expects (a boundary tensor's bra leg being literally `prime()` of its own
 ket leg) — a one-time `replaceInds` relabeling reconciles the two.
-**Known issue (open), and the path is disabled**: this port tiles `idmrg_U_`, the raw
-per-micro-step iDMRG factors, in both `idmrg_build_window` and
+**Gauge (fixed 2026-08-29)**: this port originally tiled `idmrg_U_`, the
+raw per-micro-step iDMRG factors, in both `idmrg_build_window` and
 `idmrg_window_snapshot_correlator`'s own bra — not the gauge-consistent
-unit cell (`idmrg_theta_cell`/`ic_canonicalize_cell`) that
-`idmrg_onsite_expectation`/`idmrg_two_point_correlator` were moved onto
-for exactly this reason, and that `idmrg_window.py`'s own `_window_cell`
-uses on the Python side. The result fails the `S(x,t=0) ==
-two_point_correlator` identity by up to 7.4e-2 on a plain spin chain,
-with no fermions involved; `x=0` stays exact and the error grows with
-`|x|`, the signature of a bond-basis mismatch. The same method's
-*background* subtraction already reads the cell-based
-`idmrg_onsite_expectation`, so the file is internally inconsistent about
-this today. Both layers now refuse rather than answer:
-`infinitechain.td_dynamical_correlator` raises `RuntimeError` for
-`itensor_version=3`, and `Chain::td_dynamical_correlator_window` throws
-unless `Chain::set_allow_defective_window(true)` was called — a
-tests-only opt-in dmrgpy's own API never uses, so that the tests pinning
-the defect (and whoever fixes it) can still run the code. See
-`docs/known_issue_v3_window_gauge.md`, the strict xfail in
-`tests/test_idmrg_window_fermionic.py`, and
-`examples/idmrg/td_dynamical_correlator_python_VS_v3/main.py`, which was
-rewritten from an agreement check into a measurement of the defect (it
-had been comparing the two backends at `x=0` only — the one point a gauge
-error cannot touch). (The Jordan-Wigner string port above is a
-line-for-line mirror of the Python one and is correct independently of
-this; the vacuum normalization is not ported either, pending the same
-fix.)
+unit cell that `idmrg_onsite_expectation`/`idmrg_two_point_correlator`
+were moved onto for exactly this reason, and that `idmrg_window.py`'s own
+`_window_cell` uses on the Python side. That failed the exact
+`S(x,t=0) == two_point_correlator` identity by up to 1.7e-1 on a plain
+spin chain, with no fermions involved; `x=0` stayed exact and the error
+grew with `|x|`, the signature of a bond-basis mismatch, on a model whose
+energy density the two backends agreed on to 6.7e-11 — which is why an
+energy-only comparison never noticed. Both now tile the *raw* (not
+re-gauged) cell, kept as `idmrg_cell_raw_`: only there are the two outer
+legs still literally `idmrg_HL_ket_`/`idmrg_HR_ket_`, so the cell attaches
+to the window's environment caps with no assumption at all — the same
+choice, for the same reason, as `IDMRGResult.cell_raw` on the Python side.
+Because the raw cell is not exactly left-canonical, the snapshot's
+closures moved with it: a bare left trace became the cell's own left
+transfer fixed point, and the result is divided by the same contraction
+run over the ground state, so an operator-free chain returns exactly 1
+(`iw_build_cache`, `idmrg_close_array_chain`).
+
+Two further bugs surfaced in the same pass. First, that closure change
+invalidated this backend's `exp(+i*eshift*t)` phase correction: `eshift`
+is measured with the window's dangling boundary legs *traced*, and the
+two closings genuinely see different energies, so `S(x,t)` came out exact
+at `t=0` and drifted linearly after it (5.2e-2 by `t=0.15`). v3 now
+co-evolves an unperturbed vacuum window and divides by its
+`<psi|psi(t)>`, measured through the identical contraction — the same
+exact construction `dynamical_correlator_td` uses, which needs no energy
+measurement at all, so the whole `eshift` machinery is gone. Second, a
+latent index-stride bug in `idmrg_close_array_chain`'s own chain
+composition indexed the bra's left axis with the bra's *right* extent:
+silent for as long as every tiled tensor was square, and wrong the moment
+it is not — a dimerized spinless chain at `maxm=20` converges to a
+(18,20)/(20,18) cell, where it put `S(x,0)` at 0.83 against an exact 0.51
+for every operator. See `tests/test_idmrg_window_fermionic.py` (the t=0
+identity and the free-fermion Green function, both on v3),
+`tests/test_idmrg_window_v3.py`, and
+`examples/idmrg/td_dynamical_correlator_python_VS_v3/main.py`, now an
+agreement check again — and evaluated at every `x`, not just at `x=0`,
+which is the one point a gauge error cannot touch and the reason the old
+form of that example missed this for so long.
 
 The window's own static overlap/measurement machinery (`S(x,t)` itself,
-closed via a bare trace on the left plus the converged unit cell's own
-dominant transfer-matrix right fixed point, mirroring
+closed by the converged unit cell's own left and right dominant
+transfer-matrix fixed points and calibrated against the operator-free
+contraction, mirroring
 `idmrg_window.py`'s own `_close_array_chain`/`_all_right_fixed_points`)
 is, by contrast, implemented with plain dense arrays extracted from
 ITensor tensors rather than ITensor's own Index-based auto-contraction —

@@ -1,8 +1,6 @@
 # Real-time IBC-window dynamical correlator (arXiv:1804.09163, Sec. V.1)
 # on the uniform S=1/2 Heisenberg chain: pure-Python (pyitensor) backend
-# vs the native ITensor v3 (mpscpp3) backend -- and, since 2026-08-29, a
-# demonstration of WHY the v3 half of that comparison is currently
-# disabled rather than a demonstration that the two agree.
+# vs the native ITensor v3 (mpscpp3) backend.
 #
 # THE CHECK THAT MATTERS. S(x, t=0) is not an approximation of anything:
 # no evolution has happened yet, so it must equal the chain's own static
@@ -10,34 +8,23 @@
 # converged to. That identity needs no exact solution, no second backend,
 # and no tolerance argument -- it is the sharpest cheap oracle this
 # machinery has. This example evaluates it per backend, against that
-# backend's own `correlator`:
+# backend's own `correlator`, and then compares the two backends' whole
+# S(x,t) trajectories against each other.
 #
-#   itensor_version="python": exact to ~1e-15 at every x.
-#   itensor_version=3:        misses by up to ~1e-1, growing with |x|,
-#                             while staying exact at x=0.
-#
-# That last pattern -- exact at x=0, worse the further apart the two
-# operators sit -- is the signature of a bond-basis (gauge) mismatch, not
-# of a physics bug or of convergence: Chain::idmrg_build_window and
-# Chain::idmrg_window_snapshot_correlator tile the raw per-micro-step
-# `idmrg_U_` factors, whose two ends live in bases minted by *different*
-# iDMRG micro-steps, instead of the gauge-consistent unit cell
-# (idmrg_theta_cell/ic_canonicalize_cell) that this very backend's own
-# idmrg_onsite_expectation/idmrg_two_point_correlator were moved onto for
-# exactly this reason. See docs/known_issue_v3_window_gauge.md.
-#
-# WHAT THIS EXAMPLE USED TO DO, AND WHY IT MISSED IT: it compared the two
-# backends' S(x,t=0) at x=0 only, with a 0.1 tolerance -- and x=0 is the
-# one point the gauge error cannot touch. A comparison is only as sharp as
-# the point it is evaluated at; an identity evaluated everywhere would
-# have caught this years earlier. That is the transferable lesson here.
-#
-# Because the public API now raises for itensor_version=3 (a wrong number
-# is worse than an error), the v3 side below is reached through the
-# deliberate, tests-only opt-in Chain::set_allow_defective_window -- the
-# same one tests/test_idmrg_window_fermionic.py's strict xfail uses.
-# When the gauge is fixed, delete the opt-in, the raise, and this
-# paragraph, and this example becomes an ordinary agreement check again.
+# A HISTORY NOTE, because it is the transferable lesson. Between
+# 2026-08-29 and its fix later the same day, the v3 half of this
+# comparison was DISABLED: that backend's window tiled the raw
+# per-micro-step `idmrg_U_` factors, whose two ends live in bases minted
+# by *different* iDMRG micro-steps, instead of the gauge-consistent unit
+# cell that this very backend's own idmrg_onsite_expectation/
+# idmrg_two_point_correlator had already been moved onto for exactly that
+# reason. The symptom was: exact at x=0, missing by up to ~1e-1 and worse
+# with growing |x| -- the signature of a bond-basis (gauge) mismatch, not
+# of a physics bug or of convergence. And what let it survive so long was
+# this example's own earlier form: it compared the two backends at x=0
+# only, with a 0.1 tolerance, and x=0 is the one point a gauge error
+# cannot touch. A comparison is only as sharp as the point it is
+# evaluated at.
 
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
@@ -92,8 +79,11 @@ ts_py, xs_py, S_py = idmrg_window.dynamical_correlator_td(
     ic_py._result, N_WINDOW, "Sz", "Sz", DT, NT,
     cutoff=1e-10, maxdim=20, niter=30, x_values=X_VALUES, connected=False)
 
-# the v3 window refuses to run unless the caller acknowledges the defect
-ic_v3._session3.set_allow_defective_window(True)
+# The v3 counterpart of the same S(x,t) array. Both backends' PUBLIC
+# td_dynamical_correlator returns S(k,omega) (it Fourier-transforms this
+# before handing it back), so the real-space quantity the t=0 identity
+# lives in has to come from one level down on each side: the pyitensor
+# module function above, and the session method here.
 ts_v3, xs_v3, S_v3 = ic_v3._session3.td_dynamical_correlator_window(
     N_WINDOW, "Sz", "Sz", DT, NT, sorted(X_VALUES), 20, 1e-10, 30, False, 0)
 
@@ -125,46 +115,69 @@ for i, x in enumerate(xs_py):
              np.array(S_v3)[0][i].real, exact_v3[i], err_v3[i]))
 print("worst |err|:  python %.2e   v3 %.2e" % (err_py.max(), err_v3.max()))
 
-# The python backend's identity is exact and is a genuine regression check.
+# Both identities are exact, and both are genuine regression checks.
 assert err_py.max() < 1e-9, "the python window broke an exact identity"
-# The v3 backend's is not -- this asserts the defect is still what the
-# known-issue document says it is, so this example fails loudly if the
-# situation changes in either direction (fixed, or worse).
-assert err_v3.max() > 1e-3, (
-    "v3's S(x,0) now matches its own static correlator -- if the window "
-    "gauge was fixed, delete the opt-in above, the raise in "
-    "infinitechain.td_dynamical_correlator, the C++ refusal, and "
-    "docs/known_issue_v3_window_gauge.md, and turn this example back into "
-    "an agreement check")
+assert err_v3.max() < 1e-9, (
+    "the v3 window broke the exact S(x,0) == correlator(x) identity -- if "
+    "the error is exact at x=0 and grows with |x|, this is the gauge "
+    "defect fixed on 2026-08-29 coming back: the window must tile "
+    "Chain::idmrg_cell_raw_, not the raw per-micro-step idmrg_U_ factors")
 
+# -- and the two backends against each other, over the whole trajectory
+S_py_a = np.array(S_py)
+S_v3_a = np.array(S_v3)
 print()
-print("=== the public API refuses itensor_version=3 ===")
-try:
-    ic_v3.td_dynamical_correlator("Sz", 0, "Sz", n_window=N_WINDOW, dt=DT, nt=4)
-    raise AssertionError("expected td_dynamical_correlator to refuse on v3")
-except RuntimeError as e:
-    print(str(e))
+print("=== python vs v3, S(x,t) over the whole evolution ===")
+print("   t      max_x |S_py - S_v3|")
+for it, t in enumerate(ts_py):
+    print("  %.2f    %.2e" % (t, np.abs(S_py_a[it] - S_v3_a[it]).max()))
+worst = np.abs(S_py_a - S_v3_a).max()
+worst_t0 = np.abs(S_py_a[0] - S_v3_a[0]).max()
+print("worst at t=0:         %.2e   <- the two backends' own STATES differ"
+      % worst_t0)
+print("worst over all (x,t): %.2e" % worst)
+# The floor here is not the window machinery -- each backend reproduces its
+# OWN static correlator to ~1e-16 above. It is that the two iDMRG runs
+# converge to slightly different states at this deliberately small MAXM
+# (their static correlators already differ by ~1e-4 at t=0), and TDVP
+# amplifies that over the evolution. Tighten MAXM/MAXITER and this shrinks;
+# a regression in the window itself would blow straight past it.
+assert worst < 5e-3, "python and v3 windows disagree on S(x,t)"
+
+# The public API is what a user actually calls, and it returns S(k,omega).
+# Check that it runs on v3 (it raised outright while the gauge was broken)
+# and lands on the same spectrum as the python backend.
+ks_py, es_py, Sk_py = ic_py.td_dynamical_correlator(
+    "Sz", 0, "Sz", N_WINDOW, dt=DT, nt=NT, x_values=X_VALUES,
+    maxdim=20, cutoff=1e-10, niter=30)
+ks_v3, es_v3, Sk_v3 = ic_v3.td_dynamical_correlator(
+    "Sz", 0, "Sz", N_WINDOW, dt=DT, nt=NT, x_values=X_VALUES,
+    maxdim=20, cutoff=1e-10, niter=30)
+scale = np.abs(Sk_py).max()
+print()
+print("=== public API, S(k,omega): max |python - v3| = %.2e  (peak %.3f) ="
+      % (np.abs(Sk_py - Sk_v3).max(), scale))
+assert np.abs(Sk_py - Sk_v3).max() < 1e-2 * scale
 
 # -------------------------------------------------------------------- plot
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
 
 ax1.plot(xs_py, exact_py, "k-", lw=2, label="static correlator (the answer)")
 ax1.plot(xs_py, S_py[0].real, "o", color="tab:blue", label="window, python")
-ax1.plot(xs_v3, np.array(S_v3)[0].real, "s", color="tab:orange",
-         label="window, v3 (gauge-defective)")
+ax1.plot(xs_v3, S_v3_a[0].real, "s", mfc="none", color="tab:orange",
+         label="window, v3")
 ax1.set_xlabel("distance $x$") ; ax1.set_ylabel(r"$S(x,t=0)$")
 ax1.set_title("t=0 must reproduce the static correlator exactly")
 ax1.legend(fontsize=8)
 
-ax2.semilogy(xs_py, np.maximum(err_py, 1e-17), "o-", color="tab:blue",
-             label="python (~1e-15, i.e. exact)")
-ax2.semilogy(xs_v3, np.maximum(err_v3, 1e-17), "s-", color="tab:orange",
-             label="v3 (grows with |x|, exact at x=0)")
-ax2.set_xlabel("distance $x$") ; ax2.set_ylabel("|window - static|")
-ax2.set_title("the same identity, as an error")
-ax2.legend(fontsize=8)
+for i, x in enumerate(xs_py):
+    line, = ax2.plot(ts_py, S_py_a[:, i].real, "-", label="$x=%+d$" % x)
+    ax2.plot(ts_v3, S_v3_a[:, i].real, "o", mfc="none",
+             color=line.get_color())
+ax2.set_xlabel("time $t$") ; ax2.set_ylabel(r"$\mathrm{Re}\,S(x,t)$")
+ax2.set_title("lines: python    circles: v3")
+ax2.legend(fontsize=8, ncol=2)
 
-fig.suptitle("iDMRG IBC-window dynamical correlator: the t=0 identity, "
-              "python vs ITensor v3")
+fig.suptitle("iDMRG IBC-window dynamical correlator, python vs ITensor v3")
 fig.tight_layout()
 plt.show()

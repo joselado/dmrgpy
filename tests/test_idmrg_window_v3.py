@@ -30,25 +30,25 @@ than exact agreement, and are run at well-converged (maxm=30) settings so
 run-to-run gauge/seed variation stays small.
 
 
-NOTE (2026-08-29): `Chain::td_dynamical_correlator_window` is DISABLED by
-default and dmrgpy's public API raises for `itensor_version=3`, because
-this backend's window measures in the wrong gauge -- it tiles the raw
+NOTE (2026-08-29): for part of that day this backend's window was
+DISABLED, because it measured in the wrong gauge -- it tiled the raw
 per-micro-step `idmrg_U_` factors instead of the gauge-consistent unit
-cell (`idmrg_theta_cell`/`ic_canonicalize_cell`) that
-`idmrg_onsite_expectation`/`idmrg_two_point_correlator` were moved onto,
-and that `pyitensor/idmrg_window.py`'s own `_window_cell` uses. The
-consequence is measurable and operator-independent: `S(x,t=0)`, which
-must equal the static `two_point_correlator` exactly, misses it by up to
-7.4e-2 on a plain Heisenberg chain. See
-`docs/known_issue_v3_window_gauge.md`, and the strict xfail pinning it in
-`tests/test_idmrg_window_fermionic.py`.
+cell (`idmrg_theta_cell`) that `idmrg_onsite_expectation`/
+`idmrg_two_point_correlator` were moved onto, and that
+`pyitensor/idmrg_window.py`'s own `_window_cell` uses. The consequence
+was measurable and operator-independent: `S(x,t=0)`, which must equal the
+static `two_point_correlator` exactly, missed it by up to 1.7e-1 on a
+plain Heisenberg chain.
 
-The tests below therefore opt in explicitly (`_allow_defective_window`)
-and assert only *machinery* properties -- error handling, eshift
-measurement, shapes, run-to-run reproducibility -- never that a value is
-physically right. Read every cross-backend tolerance here in that light:
-they were set before the defect was known, and they pass *despite* it,
-which is precisely why none of them caught it."""
+Every test that lived in this module at that point asserted only
+*machinery* properties -- error handling, shapes, run-to-run
+reproducibility, insensitivity to an evolution parameter -- and every one
+of them passed throughout, which is exactly why none of them caught it.
+Shape and finiteness cannot see a gauge error. The oracle that can is the
+exact `S(x,t=0) == correlator(...)` identity, and it lives in
+`tests/test_idmrg_window_fermionic.py` for both backends; read the
+tolerances below in that light, as plumbing checks rather than as
+correctness checks."""
 import numpy as np
 import pytest
 
@@ -59,23 +59,6 @@ pytestmark = pytest.mark.skipif(
     not cppext.available(3), reason="ITensor v3 extension not compiled")
 
 MAXM, CUTOFF, MAXITER, ETOL, NITER, RESTARTS = 30, 1e-12, 60, 1e-9, 30, 2
-
-
-def _allow_defective_window(c):
-    """`Chain::td_dynamical_correlator_window` refuses to run by default:
-    its window tiles the raw per-micro-step `idmrg_U_` factors rather than
-    the gauge-consistent unit cell, so its `S(x,t)` is quantitatively
-    wrong for every operator (see `docs/known_issue_v3_window_gauge.md`,
-    and the strict xfail pinning it in
-    `tests/test_idmrg_window_fermionic.py`). dmrgpy's public API raises
-    rather than routing there; this opt-in is what lets the tests in this
-    module keep exercising the *machinery* around it (error handling,
-    eshift measurement, run-to-run reproducibility, shapes) -- none of
-    which asserts a physically-correct value, deliberately. Remove this
-    helper, and both refusals, when the gauge is fixed."""
-    if c.itensor_version == 3:
-        c._session3.set_allow_defective_window(True)
-    return c
 
 
 def _build(itensor_version):
@@ -92,7 +75,6 @@ def _build(itensor_version):
     h = c.SxC[0] * c.SxR[0] + c.SyC[0] * c.SyR[0] + c.SzC[0] * c.SzR[0]
     c.set_hamiltonian(h)
     c.gs_energy()
-    _allow_defective_window(c)
     return c
 
 
@@ -107,7 +89,6 @@ def _build_fast(itensor_version):
     h = c.SxC[0] * c.SxR[0] + c.SyC[0] * c.SyR[0] + c.SzC[0] * c.SzR[0]
     c.set_hamiltonian(h)
     c.gs_energy()
-    _allow_defective_window(c)
     return c
 
 
@@ -129,9 +110,6 @@ def test_td_dynamical_correlator_v3_requires_gs_energy_first():
     otherwise always satisfy this precondition first)."""
     backend = cppext.get_backend(3)
     chain = backend.Chain([2])  # site_types: one spin-1/2, matches SpinX's convention
-    # past the gauge-defect refusal (see _allow_defective_window), so that
-    # what this test observes is the missing-snapshot error it is about
-    chain.set_allow_defective_window(True)
     with pytest.raises(RuntimeError):
         chain.td_dynamical_correlator_window(
             2, "Sz", "Sz", 0.1, 2, [0], 20, 1e-10, 50, True, 0)
@@ -150,33 +128,27 @@ def test_td_dynamical_correlator_v3_rejects_x_beyond_window():
             n_window, "Sz", "Sz", 0.1, 1, [5], 20, 1e-10, 50, True, 0)
 
 
-def test_td_dynamical_correlator_v3_eshift_insensitive_to_evolution_maxdim():
-    """Basic sanity/consistency coverage for a real (now fixed) issue
-    found by code review in the `eshift` fix itself (not the original
-    pre-fix bug): the throwaway t=0 `tdvp()` call that measures `eshift`
-    (`Chain::td_dynamical_correlator_window`, `mpscpp3/chain_session.h`)
-    originally reused the *caller's* own `maxdim`/`cutoff` for its own
-    measurement sweep -- but TDVPWorker's per-bond SVD split still runs
-    (and truncates) even at `t=0` (`exp(0*Heff)=Id` makes the *local
-    update* a no-op, not the split), so a caller-chosen `maxdim` smaller
-    than the window's own already-converged bond dimension would silently
-    truncate the throwaway copy *before* its energy is read off, biasing
-    `eshift`. Fixed by measuring `eshift` with a fixed, generous
-    `maxdim`/`cutoff=0` regardless of the caller's own evolution settings
-    (mirroring pyitensor's own `window_total_energy`, which contracts
-    exactly with no truncation at all).
+def test_td_dynamical_correlator_v3_insensitive_to_evolution_maxdim():
+    """`S(x,t)` must not depend strongly on the evolution `maxdim` once it
+    is large enough -- a plumbing check that the truncation knob is wired
+    through and that nothing in the measurement is silently coupled to it.
 
-    NOT a strong regression test for this specific fix: confirmed
-    directly (temporarily reintroducing the bug and rebuilding) that at
-    `_build_fast`'s own modest `maxm=8`, the resulting eshift bias is too
-    small relative to ordinary evolution-truncation noise at `maxdim=4`
-    to reliably fail a loose tolerance here -- isolating it cleanly would
-    need a larger `maxm` and a more extreme `maxdim` mismatch, adding
-    real runtime to an already-slow test module (see this module's own
-    docstring), judged disproportionate for now. What this test does
-    check: `td_dynamical_correlator_window` stays finite and reasonably
-    self-consistent across different evolution `maxdim` choices on the
-    same converged chain -- a real, if modest, sanity check."""
+    This test replaces one about a mechanism that no longer exists. The
+    v3 window used to undo the window Hamiltonian's own (unsubtracted)
+    energy baseline with a post-hoc `exp(+i*eshift*t)` phase, `eshift`
+    measured by a throwaway t=0 `tdvp()` call -- and that measurement had
+    to be forced to `cutoff=0`/generous `maxdim`, because TDVPWorker's
+    per-bond SVD split still truncates at `t=0` (`exp(0*Heff)=Id` makes
+    the local *update* a no-op, not the split), so reusing a caller's
+    smaller `maxdim` biased `eshift` by exactly the discarded weight. The
+    2026-08-29 gauge fix removed the whole mechanism: once the snapshot
+    closes the window's boundary legs with the cell's transfer-matrix
+    fixed points rather than a bare trace, an energy measured with those
+    legs *traced* is the wrong constant to divide out. v3 now co-evolves
+    an unperturbed vacuum window and divides by its `<psi|psi(t)>`, which
+    cancels the factor exactly whatever it is -- the same construction
+    `pyitensor/idmrg_window.py`'s `dynamical_correlator_td` uses, and it
+    needs no separate energy measurement at all."""
     n_window, dt, nt = 4, 0.1, 3
     cv = _build_fast(3)  # maxm=8
 
@@ -196,16 +168,15 @@ def test_td_dynamical_correlator_v3_reproducible_across_convergence():
     -- pre-fix, TDVP-evolving the (perturbed) window under them directly
     carried a spurious, run-dependent global phase (see
     tests/test_idmrg_window_free_fermion.py's own module docstring for the
-    full derivation/pyitensor-side confirmation of this same bug). Fixed
-    here with a post-hoc `exp(+i*eshift*t)` correction (`eshift` measured
-    via a throwaway t=0 `tdvp()` call, see td_dynamical_correlator_window's
-    own comment in chain_session.h) rather than pyitensor's "fix at the
-    source" `eshift`-in-matvec approach, since ITensorTDVP's own boundary-
-    tensor `tdvp()` overload is a vendored black box that cannot be
-    wrapped the same way -- both are mathematically exact (the baseline
-    provably factors as a uniform additive-to-identity scalar), verified
-    independently on the pyitensor side by a dense-matrix exact-evolution
-    cross-check. Two independent (unseeded) `_build_fast(3)` runs of the
+    full derivation/pyitensor-side confirmation of this same bug). It was
+    first fixed with a post-hoc `exp(+i*eshift*t)` correction, and then
+    (2026-08-29, with the gauge fix) replaced by pyitensor's own exact
+    construction: an unperturbed copy of the same window, co-evolved and
+    measured through the identical contraction, whose `<psi|psi(t)>`
+    every S(x,t) is divided by. That cancels the factor whatever it is,
+    which the `eshift` estimate no longer did once the measurement's
+    boundary closure moved onto transfer-matrix fixed points.
+    Two independent (unseeded) `_build_fast(3)` runs of the
     *same* physical model should now give closely-agreeing S(x,t), not
     just a coincidentally-agreeing e0."""
     n_window, dt, nt = 4, 0.1, 5
@@ -225,22 +196,42 @@ def test_td_dynamical_correlator_v3_reproducible_across_convergence():
     assert np.max(np.abs(S_a - S_b)) < 0.3
 
 
-def test_td_dynamical_correlator_public_api_refuses_v3():
-    """The public entry point must REFUSE on itensor_version=3 rather than
-    return the numbers this backend's window currently produces: they are
-    quantitatively wrong for every operator, spin included (the window
-    tiles the raw per-micro-step idmrg_U_ factors instead of the
-    gauge-consistent unit cell -- see docs/known_issue_v3_window_gauge.md).
+def test_td_dynamical_correlator_public_api_v3_matches_the_static_correlator():
+    """The public entry point returns S(k,omega) on itensor_version=3 --
+    and, one level down, an S(x,t) whose t=0 slice reproduces this
+    backend's own static `correlator` exactly.
 
-    This test used to assert the opposite (that the call returns finite
-    S(k,omega) of the right shape). It did, and every number in it was
-    wrong: shape and finiteness cannot see a gauge error. When the gauge
-    is fixed, restore the positive assertion -- and give it an oracle this
-    time, e.g. the exact S(x,t=0) == correlator(...) identity that
+    This test previously asserted the opposite (that the call REFUSED),
+    and before that, that it returned finite S(k,omega) of the right
+    shape. It did, and every number in it was wrong: shape and finiteness
+    cannot see a gauge error. So this version carries the oracle that
+    can, the exact `S(x,0) == correlator(x)` identity -- the same one
     tests/test_idmrg_window_fermionic.py uses on both backends."""
     cv = _build_fast(3)
+    # EVEN separations only, deliberately. This model has n_uc=1, but the
+    # growing algorithm's extracted cell is always two sites long, and at
+    # finite bond dimension its two bonds are not exactly equivalent -- so
+    # an ODD separation measured from the window's own centre starts from
+    # the other cell position than `correlator`, whose p_i can only be 0
+    # here. That mismatch (~3e-2 at this maxm) is the period-2 structure,
+    # not the window; the same caveat is spelled out in
+    # examples/idmrg/td_dynamical_correlator_python_VS_v3/main.py, which
+    # sidesteps it by declaring an explicit two-site cell instead.
+    n_window, xs = 8, [-2, 0, 2]
+    _ts, xarr, S = cv._session3.td_dynamical_correlator_window(
+        n_window, "Sz", "Sz", 0.05, 1, xs, 40, 1e-10, 100, False, 0)
+    S = np.array(S).reshape(1, len(xs))
+    # Sz is Hermitian and parity-even, so +x and -x share one reference.
+    for ix, x in enumerate(xarr):
+        assert S[0, ix] == pytest.approx(
+            complex(cv.correlator("Sz", 0, "Sz", abs(int(x)))), abs=1e-8), \
+            "x={}".format(x)
+
+    # the public wrapper on top of it: right shape, finite, and the same
+    # spectrum the pyitensor backend gives for the same model
     ks = np.linspace(-np.pi, np.pi, 5)
-    with pytest.raises(RuntimeError, match="wrong gauge"):
-        cv.td_dynamical_correlator(
-            "Sz", 0, "Sz", n_window=8, dt=0.05, nt=6, x_values=[-1, 0, 1],
-            maxdim=40, cutoff=1e-10, niter=100, ks=ks, delta=0.2)
+    kk, ee, Sk = cv.td_dynamical_correlator(
+        "Sz", 0, "Sz", n_window=n_window, dt=0.05, nt=6, x_values=xs,
+        maxdim=40, cutoff=1e-10, niter=100, ks=ks, delta=0.2)
+    assert np.all(np.isfinite(Sk))
+    assert Sk.shape[0] == len(ks) or Sk.shape[1] == len(ks)

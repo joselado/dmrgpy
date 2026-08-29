@@ -998,34 +998,46 @@ def test_td_dynamical_correlator_rejects_p_i_out_of_range():
 
 @pytest.mark.skipif(not cppext.available(3),
                      reason="ITensor v3 extension not compiled")
-def test_td_dynamical_correlator_refuses_on_v3_backend():
-    """itensor_version=3 is currently REFUSED for td_dynamical_correlator:
-    Chain::td_dynamical_correlator_window's window tiles the raw
-    per-micro-step idmrg_U_ factors instead of the gauge-consistent unit
-    cell, so its S(x,t) is quantitatively wrong for every operator (see
-    docs/known_issue_v3_window_gauge.md). This test used to assert the
-    call succeeded with a finite, correctly-shaped S(k,omega) -- which it
-    did, with wrong numbers inside, since neither shape nor finiteness can
-    see a gauge error. Restore the positive version, with an oracle,
-    once the gauge is fixed."""
+def test_td_dynamical_correlator_runs_on_v3_backend():
+    """itensor_version=3 must return an S(k,omega) whose underlying
+    S(x,t=0) reproduces the chain's own static correlator exactly.
+
+    Between two earlier versions of this test, that identity is the whole
+    point. It first asserted only that the call returned a finite,
+    correctly-shaped S(k,omega) -- which it did, with wrong numbers
+    inside, because this backend's window tiled the raw per-micro-step
+    idmrg_U_ factors rather than the gauge-consistent unit cell, and
+    neither shape nor finiteness can see a gauge error. It then asserted
+    the call REFUSED, while that was being fixed. Now it asserts the
+    thing that can actually fail."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
     ic.gs_method = "idmrg"
     ic.maxm, ic.maxiter, ic.etol, ic.niter = 8, 30, 1e-6, 30
     # A plain single-coupling XX term leaves the transfer matrix's
     # dominant eigenvalue (near-)degenerate at this loose convergence
-    # (confirmed directly: RuntimeError from
-    # idmrg_dominant_right_fixed_point's own power iteration) -- the full
-    # XXX Heisenberg coupling (matching
+    # (confirmed directly: a RuntimeError out of the transfer-matrix
+    # fixed-point solve) -- the full XXX Heisenberg coupling (matching
     # examples/idmrg/heisenberg_infinite_python_VS_v3/main.py and
     # tests/test_idmrg_window_v3.py's own model) doesn't have this
     # problem.
     ic.set_hamiltonian(ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0]
                         + ic.SzC[0] * ic.SzR[0])
-    with pytest.raises(RuntimeError, match="wrong gauge"):
-        ic.td_dynamical_correlator(
-            "Sz", 0, "Sz", n_window=4, dt=0.05, nt=3, maxdim=20,
-            cutoff=1e-10, niter=30, x_values=[-1, 0, 1],
-            ks=np.linspace(-np.pi, np.pi, 3))
+    ks = np.linspace(-np.pi, np.pi, 3)
+    kk, ee, Sk = ic.td_dynamical_correlator(
+        "Sz", 0, "Sz", n_window=8, dt=0.05, nt=3, maxdim=20,
+        cutoff=1e-10, niter=30, x_values=[-2, 0, 2], ks=ks)
+    assert np.all(np.isfinite(Sk))
+    # The oracle, one level down: S(x,0) == correlator(x), exactly. Even
+    # separations only -- with n_uc=1 the extracted cell is still two
+    # sites long, so an odd separation measured from the window's centre
+    # starts from the other cell position than correlator's own p_i=0
+    # (see tests/test_idmrg_window_v3.py's own note).
+    _ts, xarr, S = ic._session3.td_dynamical_correlator_window(
+        8, "Sz", "Sz", 0.05, 1, [-2, 0, 2], 20, 1e-10, 30, False, 0)
+    S = np.array(S).reshape(1, len(xarr))
+    for ix, x in enumerate(xarr):
+        assert S[0, ix] == pytest.approx(
+            complex(ic.correlator("Sz", 0, "Sz", abs(int(x)))), abs=1e-8)
 
 
 def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():

@@ -3149,6 +3149,11 @@ class Chain
         ic_Es_.clear(); ic_chis_.clear(); ic_rho_after_.clear(); ic_l_before_.clear();
         idmrg_cell_.clear(); idmrg_cell_l_.clear();
         idmrg_cell_d_.clear(); idmrg_cell_r_.clear();
+        have_idmrg_cell_raw_ = false;
+        iw_cache_valid_ = false;
+        iw_Es_.clear(); iw_chis_.clear(); iw_rho_after_.clear(); iw_l_before_.clear();
+        idmrg_cell_raw_.clear(); idmrg_cell_raw_l_.clear();
+        idmrg_cell_raw_d_.clear(); idmrg_cell_raw_r_.clear();
         if (have_cell_seed)
             {
             std::vector<Cplx> a1, a2;
@@ -3160,6 +3165,14 @@ class Chain
                 idmrg_cell_l_ = {seed_Ul,seed_Vl};
                 idmrg_cell_d_ = {seed_Ud,seed_Vd};
                 idmrg_cell_r_ = {seed_Ur,seed_Vr};
+                // Keep the raw cell BEFORE ic_canonicalize_cell mutates it
+                // in place -- the window tiles this one, see
+                // idmrg_cell_raw_'s own declaration.
+                idmrg_cell_raw_ = idmrg_cell_;
+                idmrg_cell_raw_l_ = idmrg_cell_l_;
+                idmrg_cell_raw_d_ = idmrg_cell_d_;
+                idmrg_cell_raw_r_ = idmrg_cell_r_;
+                have_idmrg_cell_raw_ = true;
                 ic_canonicalize_cell(idmrg_cell_,idmrg_cell_l_,
                                       idmrg_cell_d_,idmrg_cell_r_);
                 have_idmrg_cell_ = true;
@@ -4211,13 +4224,6 @@ class Chain
     // prior idmrg_ground_state call, x_values reaching outside the
     // window, a bond-dimension mismatch from poor iDMRG convergence) is
     // exactly this kind of recoverable, caller-facing condition.
-    // See td_dynamical_correlator_window's own comment just below: that
-    // method is disabled because its numbers are known to be gauge-wrong,
-    // and this is the deliberate opt-in that re-enables it for the tests
-    // that pin the defect and for whoever fixes it.
-    void
-    set_allow_defective_window(bool b) { allow_defective_window_ = b; }
-
     TdWindowResult
     td_dynamical_correlator_window(int n_window, std::string const& opname_A,
                                     std::string const& opname_B,
@@ -4226,42 +4232,6 @@ class Chain
                                     int maxdim, double cutoff, int niter,
                                     bool connected, int p_i)
         {
-        // DISABLED BY DEFAULT: the numbers this returns are known to be
-        // wrong, so it refuses to return them rather than letting a caller
-        // mistake them for measurements. idmrg_build_window (and this
-        // method's own bra, in idmrg_window_snapshot_correlator) tile
-        // idmrg_U_, the raw per-micro-step iDMRG factors, whose two ends
-        // live in bond bases minted by *different* micro-steps -- not the
-        // gauge-consistent cell (idmrg_theta_cell/ic_canonicalize_cell,
-        // kept as idmrg_cell_) that idmrg_onsite_expectation and
-        // idmrg_two_point_correlator were moved onto for exactly this
-        // reason, and that pyitensor/idmrg_window.py's own _window_cell
-        // uses. Measured consequence: S(x,t=0), which must equal the
-        // static two_point_correlator exactly, misses it by up to 7.4e-2
-        // on a plain Heisenberg chain -- no fermions, no strings, any
-        // operator. x=0 stays exact and the error grows with |x|, the
-        // signature of a bond-basis mismatch.
-        //
-        // set_allow_defective_window(true) is the deliberate,
-        // hard-to-do-by-accident opt-in the tests that pin this defect
-        // (and whoever fixes it) use; nothing in dmrgpy's public API ever
-        // calls it -- infinitechain.py's own td_dynamical_correlator
-        // raises for itensor_version=3 instead of routing here. Delete
-        // both this check and that raise once the gauge is fixed; see
-        // docs/known_issue_v3_window_gauge.md.
-        if (!allow_defective_window_)
-            throw std::runtime_error(
-                  "Chain::td_dynamical_correlator_window is disabled: this "
-                  "backend's window tiles the raw per-micro-step idmrg_U_ "
-                  "factors instead of the gauge-consistent unit cell, so its "
-                  "S(x,t) is quantitatively wrong for every operator (it "
-                  "misses the exact S(x,t=0) == two_point_correlator identity "
-                  "by up to 7.4e-2 on a spin chain). Use "
-                  "itensor_version=\"python\" for this calculation. See "
-                  "docs/known_issue_v3_window_gauge.md; "
-                  "set_allow_defective_window(true) exists only to let the "
-                  "tests that pin the defect, and whoever fixes it, run this "
-                  "code deliberately.");
         if (!have_idmrg_snapshot_)
             throw ITError("Chain::td_dynamical_correlator_window called before "
                   "idmrg_ground_state (no converged environment snapshot "
@@ -4280,7 +4250,10 @@ class Chain
 
         auto win = idmrg_build_window(n_window);
         int n = win.n;
-        int center = idmrg_window_center(n_window,n_uc,p_i);
+        // win.n_window_uc, not the requested n_window: the tiling unit is
+        // the 2-site cell, so the realized window can be one unit cell
+        // longer than asked for (see IdmrgWindow::n_window_uc).
+        int center = idmrg_window_center(win.n_window_uc,n_uc,p_i);
 
         // ITensor's own environment-propagation convention (see this
         // method's own top comment) -- convert once, outside the time
@@ -4290,78 +4263,40 @@ class Chain
         ITensor LH = idmrg_relabel_bra_to_prime_ket(idmrg_HL_,idmrg_HL_bra_,idmrg_HL_ket_);
         ITensor RH = idmrg_relabel_bra_to_prime_ket(idmrg_HR_,idmrg_HR_bra_,idmrg_HR_ket_);
 
-        // eshift: the window's own total energy (baseline + genuine
-        // window physics), measured on the *unperturbed* ground window --
-        // mirrors pyitensor/idmrg_window.py's own window_tdvp_step
-        // `eshift` fix exactly (see that function's own docstring for the
-        // full derivation/justification, and window_total_energy's own
-        // docstring point 2). idmrg_HL_/idmrg_HR_ are, just like their
-        // pyitensor counterparts, not energy-baseline-subtracted -- they
-        // carry a large, macro-iteration-count-dependent additive
-        // constant left over from idmrg_ground_state's own growth, so
-        // TDVP evolution of the (perturbed) window under the unshifted
-        // LH/RH picks up a spurious global phase exp(-i*const*t) that
-        // varies run to run for the *same* physical, equally-converged
-        // ground state -- confirmed directly on the pyitensor side (see
-        // window_tdvp_step's own docstring); this v3 path shares the
-        // identical unshifted-LH/RH construction, so it has the same bug.
-        // Measured via a throwaway copy of win.psi and a null (t=0) tdvp()
-        // step purely to read off its own returned Rayleigh-quotient
-        // energy (TDVPWorker's own per-bond expectation value, which
-        // already correctly includes the LH/RH boundary caps) -- avoids
-        // hand-rolling a fresh LH*mpo*RH sandwich contraction. The
-        // *actual* win.psi below is left untouched by this measurement.
+        // NO eshift/global-phase correction here, unlike the pre-2026-08-29
+        // version of this method and unlike an ordinary finite-chain
+        // quench. The window's own effective H is built from idmrg_HL_/
+        // idmrg_HR_, which are NOT energy-baseline-subtracted, so evolving
+        // under it multiplies the state by a large, run-dependent
+        // exp(-i*E_win*t). This used to be undone by measuring E_win once
+        // (a null tdvp() step on a throwaway copy, whose Rayleigh quotient
+        // traces the window's two dangling boundary legs) and applying
+        // exp(+i*E_win*t) to every snapshot. That was only ever consistent
+        // while the snapshot itself closed those same legs by a bare
+        // trace; it does not survive closing them with the cell's own
+        // transfer-matrix fixed points (idmrg_close_array_chain), which is
+        // what the gauge fix requires -- the two closings genuinely see
+        // different energies, exactly as pyitensor/idmrg_window.py's own
+        // window_total_energy docstring (point 3) records. Measured after
+        // the gauge fix but before this one: v3 tracked the python backend
+        // to 2e-6 at t=0 and then drifted linearly, 5.2e-2 by t=0.15.
         //
-        // Deliberately does NOT reuse the caller's own maxdim/cutoff here
-        // (unlike the real evolution sweep below): TDVPWorker's per-bond
-        // step still runs an SVD split (with the requested truncation)
-        // even at t=0 -- exp(0*Heff)=Id makes the *local update* a no-op,
-        // but the split itself is not skipped, so reusing a caller-chosen
-        // maxdim smaller than the window's own already-converged bond
-        // dimension would silently truncate this throwaway copy *before*
-        // its energy is read off, biasing eshift (and therefore every
-        // reported S(x,t), via the post-hoc exp(+i*eshift*t) correction
-        // below) by exactly the discarded weight -- confirmed as a real
-        // risk, not hypothetical, for any caller passing a smaller
-        // maxdim to td_dynamical_correlator_window than the window's own
-        // natural bond dimension (a common pattern: a cheaper maxdim for
-        // the time-evolution sweep than the ground-state solve used).
-        // cutoff=0 and a generous maxdim make this split lossless (up to
-        // floating point), matching pyitensor's own window_total_energy,
-        // which contracts exactly with no truncation at all.
-        double eshift;
-        {
-        MPS psi_for_energy = win.psi;
-        psi_for_energy.position(1);
-        auto sweeps_e = Sweeps(1);
-        sweeps_e.maxdim() = 100000;
-        sweeps_e.cutoff() = 0.0;
-        sweeps_e.niter() = niter;
-        Args args_e("Quiet",true,"Silent",true,"NumCenter",2,"Truncate",true,"DoNormalize",true);
-        eshift = tdvp(psi_for_energy,win.mpo,Cplx(0,0),LH,RH,sweeps_e,args_e);
-        }
-        // Documented-not-fixed (code review): this path has no dense-
-        // matrix exact cross-check analogous to pyitensor's own
-        // test_window_tdvp_step_eshift_matches_exact_dense_evolution
-        // (tests/test_idmrg_window_free_fermion.py) -- building one here
-        // would need exposing this window's own tensors to Python (or a
-        // C++-side dense comparison) that doesn't exist yet. The fix
-        // above (untruncated eshift measurement) is verified only by
-        // tests/test_idmrg_window_v3.py's own loose reproducibility/
-        // consistency checks, not by a strong regression test: manually
-        // reintroducing the truncation-coupling bug this block fixes
-        // (reusing the caller's own maxdim/cutoff here instead) did NOT
-        // reliably fail those checks at the test module's own modest
-        // maxm=8 -- the resulting eshift bias was too small there to
-        // separate cleanly from ordinary evolution-truncation noise at
-        // low maxdim. Isolating it would need a larger maxm and a more
-        // extreme maxdim mismatch than currently used, adding real
-        // runtime to an already-slow test module; judged disproportionate
-        // for now given the fix itself is unambiguously more correct by
-        // construction (exact vs. truncated measurement) regardless of
-        // whether a dramatic before/after test currently demonstrates it.
+        // The vacuum branch below removes the factor exactly instead of
+        // estimating it: an unperturbed copy of the same window, evolved
+        // with the identical eshift-free tdvp() calls and measured every
+        // step through the *identical* contraction with the identity
+        // operator, carries the same exp(-i*E_win*t); dividing cancels it
+        // whatever E_win is and whichever closure is used. Direct port of
+        // idmrg_window.py's own dynamical_correlator_td vacuum
+        // normalization, including its shallow-copy trick: the two
+        // branches need independent tensor lists but must keep the same
+        // Index identities the environments LH/RH are keyed on, which an
+        // MPS copy gives (every operation below returns a new ITensor
+        // rather than mutating one).
 
-        // Sec. V.1 step 3: perturb (B_0|psi>), in place.
+        // Sec. V.1 step 3: perturb (B_0|psi>), in place -- keeping an
+        // unperturbed copy first, for the vacuum branch (see above).
+        IdmrgWindow win_ground = win;
         idmrg_window_apply_local_op(win,center,opname_B);
         // Establish a genuine orthogonality center now (via ITensor's own
         // robust QR-sweep-based position(), which -- unlike inner()/
@@ -4371,6 +4306,8 @@ class Chain
         // norm-save/restore fix just below needs it established *before*
         // that first call too (norm(MPS) requires isOrtho()).
         win.psi.position(1);
+        IdmrgWindow win_vac = win_ground; // unperturbed, evolved alongside
+        win_vac.psi.position(1);
 
         // The disconnected background <A><B>, from the same
         // gauge-consistent unit cell every other static observable on this
@@ -4409,20 +4346,6 @@ class Chain
                 }
             }
 
-        // The converged unit cell's own dominant right transfer-matrix
-        // fixed point (idmrg_window_snapshot_correlator's own right-edge
-        // closing weight) depends only on the static, unperturbed ground
-        // state -- never on win's own (TDVP-evolving) state -- so it is
-        // computed once here, outside the per-time-step loop below,
-        // rather than by every one of that loop's own nt calls (each of
-        // which would otherwise redo the same power iteration, capped at
-        // 2000 steps).
-        int p_right = (win.n-1)%n_uc;
-        auto rho_after = idmrg_all_right_fixed_points();
-        Index rl = idmrg_U_right_[p_right];
-        auto rho_flat = idmrg_matrix_to_array(rho_after[p_right],rl,prime(rl));
-        int chi_right = dim(rl);
-
         auto sweeps = Sweeps(1);
         sweeps.maxdim() = maxdim;
         sweeps.cutoff() = cutoff;
@@ -4438,18 +4361,22 @@ class Chain
         for (int it=0; it<nt; ++it)
             {
             out.ts[it] = it*dt;
-            auto snap = idmrg_window_snapshot_correlator(win,opname_A,x_values,center,
-                                                           rho_flat,chi_right);
-            // Undo the spurious global phase exp(-i*eshift*t) win.psi has
-            // picked up from evolving under unshifted LH/RH (see eshift's
-            // own comment above) -- applied to the *raw* snapshot value,
-            // before background subtraction, since `background` is
-            // computed from the static, un-evolved ground state and never
-            // carries this phase to begin with.
-            Cplx phase = std::exp(Cplx(0.0,1.0)*eshift*out.ts[it]);
+            auto snap = idmrg_window_snapshot_correlator(win,opname_A,x_values,center);
+            // <psi|psi(t)> through the identical contraction (same
+            // closure, same calibration) -- divides out the spurious
+            // exp(-i*E_win*t) both branches carry, see the block above.
+            // Applied to the *raw* snapshot value, before background
+            // subtraction, since `background` is computed from the static,
+            // un-evolved ground state and never carries that factor.
+            Cplx vac = idmrg_window_snapshot_correlator(
+                            win_vac,"Id",std::vector<int>{0},center)[0];
+            if (std::abs(vac) < 1e-300)
+                throw std::runtime_error("Chain::td_dynamical_correlator_window: "
+                      "the vacuum amplitude <psi|psi(t)> vanished -- the "
+                      "window's own evolution has lost its norm entirely");
             for (size_t ix=0; ix<x_values.size(); ++ix)
                 {
-                Cplx val = snap[ix]*phase;
+                Cplx val = snap[ix]/vac;
                 if (connected) val -= background[x_values[ix]];
                 out.S[(size_t)it*x_values.size()+ix] = val;
                 }
@@ -4483,6 +4410,14 @@ class Chain
                 tdvp(win.psi,win.mpo,t,LH,RH,sweeps,args);
                 win.psi.normalize();
                 win.psi *= norm0;
+                // The vacuum branch, stepped identically -- same dt, same
+                // sweeps/truncation, same norm save/restore -- so that
+                // whatever global factor and whatever truncation drift the
+                // perturbed branch picks up, this one picks up too.
+                Cplx norm0_vac = Cplx(norm(win_vac.psi),0.0);
+                tdvp(win_vac.psi,win_vac.mpo,t,LH,RH,sweeps,args);
+                win_vac.psi.normalize();
+                win_vac.psi *= norm0_vac;
                 }
             }
         return out;
@@ -4537,6 +4472,8 @@ class Chain
         have_idmrg_snapshot_ = false;
         have_idmrg_cell_ = false;
         ic_cache_valid_ = false;
+        have_idmrg_cell_raw_ = false;
+        iw_cache_valid_ = false;
         have_idmrg_superblock_ = false;
         have_vms_snapshot_ = false;
         have_vumps_snapshot_ = false;
@@ -9603,6 +9540,61 @@ class Chain
         ic_cache_valid_ = true;
         }
 
+    // The window's own counterpart of ic_build_cache, on the RAW (un-re-
+    // gauged) cell instead of the canonical one -- see idmrg_cell_raw_'s
+    // own declaration for why the window cannot use the canonical cell,
+    // and pyitensor/idmrg_window.py's _close_array_chain for the
+    // Python-side original. Same contents (transfer tensors, both
+    // families of fixed points), same invalidation, and the same reason
+    // for caching: none of it depends on which operator is measured, on
+    // x, or on the time step, so recomputing the transfer-matrix
+    // eigenproblems inside every one of a run's nt*len(x_values)
+    // snapshots would be pure repetition.
+    void
+    iw_build_cache() const
+        {
+        if (iw_cache_valid_) return;
+        iw_require_cell("iw_build_cache");
+        int n = (int)idmrg_cell_raw_.size();
+        // chis[n] = chis[0]: the cell wraps. That is only meaningful if
+        // the last position's own right bond really has the first
+        // position's own left dimension -- i.e. dim(HR_ket)==dim(HL_ket)
+        // for the raw cell, whose two outer legs are exactly those. A
+        // mismatch means the growing algorithm has not settled into a
+        // translationally-invariant state yet.
+        if (idmrg_cell_raw_r_[n-1] != idmrg_cell_raw_l_[0])
+            throw std::runtime_error(
+                  "Chain::td_dynamical_correlator_window: the converged unit "
+                  "cell's own wraparound bond dimension is inconsistent (its "
+                  "right edge is " + std::to_string(idmrg_cell_raw_r_[n-1]) +
+                  ", its left edge " + std::to_string(idmrg_cell_raw_l_[0]) +
+                  ") -- a tiled window needs these to agree; try a different "
+                  "maxm/maxiter/etol combination for gs_energy()/"
+                  "idmrg_ground_state()");
+        iw_chis_.assign(n+1,0);
+        for (int k=0;k<n;++k) iw_chis_[k] = idmrg_cell_raw_l_[k];
+        iw_chis_[n] = idmrg_cell_raw_l_[0];
+        iw_Es_.resize(n);
+        for (int k=0;k<n;++k)
+            iw_Es_[k] = ic_transfer(idmrg_cell_raw_[k],idmrg_cell_raw_l_[k],
+                                     idmrg_cell_raw_d_[k],idmrg_cell_raw_r_[k],{});
+        auto rr = ic_all_right_fixed_points(iw_Es_,iw_chis_);
+        iw_rho_after_ = std::move(rr.first);
+        auto ll = ic_all_left_fixed_points(iw_Es_,iw_chis_);
+        iw_l_before_ = std::move(std::get<0>(ll));
+        iw_cache_valid_ = true;
+        }
+
+    void
+    iw_require_cell(const char* who) const
+        {
+        if (!have_idmrg_cell_raw_)
+            throw std::runtime_error(std::string("Chain::")+who+": called before "
+                           "idmrg_ground_state, or the growing algorithm never "
+                           "produced a gauge-consistent unit cell (maxiter must be "
+                           "large enough for at least two macro-iterations)");
+        }
+
     void
     ic_require_cell(const char* who) const
         {
@@ -9781,108 +9773,6 @@ class Chain
         return true;
         }
 
-    // Doubled (ket (x) conj(bra)) transfer tensor for sublattice p, from
-    // the converged, static idmrg_U_[p] -- C++ analogue of
-    // pyitensor/idmrg.py's _transfer_matrices (one sublattice at a time).
-    // Legs: (idmrg_U_left_[p], prime(idmrg_U_left_[p]), idmrg_U_right_[p],
-    // prime(idmrg_U_right_[p])) -- consecutive p's own right/left legs
-    // coincide by construction (idmrg_ground_state's own capture comment),
-    // so composing several of these via ordinary ITensor multiply
-    // contracts correctly with no further bookkeeping, exactly as
-    // idmrg.py's own _compose does for plain NumPy arrays.
-    ITensor
-    idmrg_transfer_at(int p) const
-        {
-        ITensor const& U = idmrg_U_[p];
-        Index l = idmrg_U_left_[p], r = idmrg_U_right_[p];
-        ITensor bra = replaceInds(dag(U),{l,r},{prime(l),prime(r)});
-        return U*bra; // shared (unprimed) Site leg contracts automatically
-        }
-
-    // Dominant right eigenvector of the full unit-cell transfer matrix
-    // T_full=E_0*E_1*...*E_{n_uc-1} (viewed as a linear map on (l,prime(l))
-    // "density matrices", l=idmrg_U_left_[0]), normalized to trace 1 --
-    // C++ analogue of idmrg.py's own _dominant_right_fixed_point, but via
-    // power iteration (repeatedly applying T_full and renormalizing)
-    // rather than a dense eigensolve -- simpler to implement directly
-    // against ITensor's own automatic index contraction (no flattening to
-    // a dense chi^2 x chi^2 matrix needed) and robust regardless of chi.
-    // Returned already relabeled onto (r,prime(r)) legs (r=
-    // idmrg_U_right_[n_uc-1]) -- the natural convention every caller
-    // needs, since idmrg_U_left_[0] and idmrg_U_right_[n_uc-1] are
-    // generally *different* Index objects (only required to match in
-    // *dimension*, not identity -- see idmrg_build_window's own comment).
-    // Unlike idmrg.py's own dense-eigensolve version, this has no explicit
-    // near-degeneracy check (see that function's own extensive comment on
-    // why one matters) -- a genuinely (near-)degenerate dominant eigenvalue
-    // will instead simply fail to converge within the iteration cap below,
-    // surfacing as an explicit Error() rather than a silently-wrong single
-    // arbitrary branch.
-    ITensor
-    idmrg_dominant_right_fixed_point() const
-        {
-        int n_uc = idmrg_n_uc_;
-        ITensor T_full = idmrg_transfer_at(0);
-        for (int p=1;p<n_uc;++p) T_full = T_full*idmrg_transfer_at(p);
-        Index l = idmrg_U_left_[0], r = idmrg_U_right_[n_uc-1];
-        if (dim(l) != dim(r))
-            throw ITError("Chain::td_dynamical_correlator_window: the converged "
-                  "unit cell's wraparound bond dimension is inconsistent "
-                  "(idmrg_U_left_[0] and idmrg_U_right_[n_uc-1] differ) -- "
-                  "try a different maxm/maxiter/etol combination for "
-                  "gs_energy()/idmrg_ground_state()");
-        Index lp = prime(l), rp = prime(r);
-        ITensor rho = randomITensorC(IndexSet(l,lp));
-        const int maxit = 2000; const double tol = 1e-12;
-        for (int it=0; ; ++it)
-            {
-            if (it>=maxit)
-                throw ITError("Chain::td_dynamical_correlator_window: transfer-"
-                      "matrix dominant-eigenvector power iteration did not "
-                      "converge in 2000 steps -- state may be gapless/"
-                      "critical, poorly converged, or have a (near-)"
-                      "degenerate dominant eigenvalue (see idmrg.py's own "
-                      "_check_dominant_eigenvalue_nondegenerate for the "
-                      "Python-side analogue of this failure mode)");
-            ITensor new_rho = T_full*rho; // legs (r,rp)
-            Cplx tr = eltC(new_rho*delta(r,rp));
-            if (std::abs(tr)==0.0)
-                throw ITError("Chain::td_dynamical_correlator_window: transfer-"
-                      "matrix fixed-point iteration hit a zero-trace "
-                      "density matrix");
-            new_rho /= tr;
-            ITensor rho_l = replaceInds(new_rho,{r,rp},{l,lp});
-            double change = norm(rho_l-rho);
-            rho = rho_l;
-            if (change<tol) return replaceInds(rho,{l,lp},{r,rp});
-            }
-        }
-
-    // rho_after[p] = the fixed-point "everything strictly after
-    // sublattice p, wrapping back around" density matrix (legs
-    // (idmrg_U_right_[p], prime(idmrg_U_right_[p]))), for every
-    // p=0..n_uc-1 -- C++ analogue of idmrg.py's own
-    // _all_right_fixed_points: one dominant-eigenvector computation
-    // (p=n_uc-1) plus n_uc-1 cheap transfer-tensor applications.
-    std::vector<ITensor>
-    idmrg_all_right_fixed_points() const
-        {
-        int n_uc = idmrg_n_uc_;
-        std::vector<ITensor> rho_after(n_uc);
-        rho_after[n_uc-1] = idmrg_dominant_right_fixed_point();
-        ITensor cur = rho_after[n_uc-1];
-        for (int p=n_uc-1; p>0; --p)
-            {
-            ITensor step = idmrg_transfer_at(p)*cur; // legs (idmrg_U_left_[p],prime(...)) == (idmrg_U_right_[p-1],prime(...))
-            Index l = idmrg_U_left_[p], lp = prime(l);
-            Cplx tr = eltC(step*delta(l,lp));
-            step /= tr;
-            cur = step;
-            rho_after[p-1] = cur;
-            }
-        return rho_after;
-        }
-
     // A 1-based window site index near the geometric middle whose own
     // sublattice position ((site-1)%n_uc) equals p_i -- C++ analogue of
     // idmrg_window.py's own _default_center.
@@ -9906,21 +9796,67 @@ class Chain
         MPS psi;
         MPO mpo;
         int n = 0;
+        // Realized window size in UNIT CELLS. Generally >= the n_window
+        // the caller asked for: the tiling unit is the 2-site cell
+        // (idmrg_cell_raw_), which is n_cell/n_uc unit cells long -- 1 for
+        // n_uc=2 (nothing changes), 2 for n_uc=1, where an odd n_window is
+        // rounded up so the realized window is never smaller than asked.
+        // Every downstream site/sublattice computation (idmrg_window_center
+        // above all) must use this, not the requested value.
+        int n_window_uc = 0;
         std::vector<Index> phys; // phys[i-1] = window position i's own physical Index
         };
 
-    // n_window*n_uc-site finite MPS/MPO, built by tiling idmrg_U_/
-    // idmrg_rows_ n_window times and capping the two open ends with
-    // idmrg_HL_ket_/idmrg_HR_ket_ (ket) and idmrg_HL_mpo_/idmrg_HR_mpo_
-    // (mpo) -- C++ analogue of idmrg_window.py's own build_window/
-    // _tile_periodic. Every window position gets its own genuinely fresh
-    // physical Index (via idmrg_rows_[p].d, not sites_.si(p+1)) -- unlike
-    // pyitensor's own _tile_periodic (which reuses sites_uc's own physical
-    // Index across every copy of a given sublattice position, needing a
-    // separate _refresh_physical_legs fix for n_uc==1, see that module's
-    // own docstring), this sidesteps that whole bug class structurally:
-    // no two window positions can ever collide on a shared physical
-    // Index, regardless of n_uc.
+    // Dense (chi_l,d,chi_r) row-major array back into an ITensor over the
+    // given (left,phys,right) Index triple -- inverse of
+    // idmrg_tensor_to_lpr_array, used to lift the raw unit cell (kept as
+    // plain arrays, see idmrg_cell_raw_) into the ITensor objects a real
+    // MPS needs.
+    static ITensor
+    idmrg_lpr_array_to_tensor(std::vector<Cplx> const& A, Index const& left,
+                               Index const& phys, Index const& right)
+        {
+        int chi_l = dim(left), d = dim(phys), chi_r = dim(right);
+        if ((size_t)chi_l*d*chi_r != A.size())
+            throw std::runtime_error("Chain::idmrg_lpr_array_to_tensor: shape mismatch");
+        ITensor T(left,phys,right);
+        for (int l=1;l<=chi_l;++l)
+        for (int sI=1;sI<=d;++sI)
+        for (int r=1;r<=chi_r;++r)
+            T.set(left(l),phys(sI),right(r),
+                   A[((size_t)(l-1)*d+(sI-1))*chi_r+(r-1)]);
+        return T;
+        }
+
+    // Finite MPS/MPO covering `n_window` unit cells (rounded up to a whole
+    // number of 2-site cells, see IdmrgWindow::n_window_uc), built by
+    // tiling the gauge-consistent RAW unit cell idmrg_cell_raw_ and
+    // idmrg_rows_ and capping the two open ends with idmrg_HL_ket_/
+    // idmrg_HR_ket_ (ket) and idmrg_HL_mpo_/idmrg_HR_mpo_ (mpo) -- C++
+    // analogue of idmrg_window.py's own build_window/_tile_periodic.
+    //
+    // Tiles idmrg_cell_raw_, NOT the raw per-micro-step idmrg_U_ factors
+    // this used to tile. idmrg_U_'s two ends live in bond bases minted by
+    // *different* micro-steps, so every copy boundary in a multi-copy
+    // window silently identifies two different bases: the window's energy
+    // stays right while its static observables do not. That is exactly the
+    // failure idmrg_theta_cell exists to remove, and it was measured here
+    // as an S(x,t=0) missing the exact static two_point_correlator by up
+    // to 1.7e-1 on a plain Heisenberg chain (no fermions, no strings, any
+    // operator; x=0 exact, error growing with |x|). See idmrg_cell_raw_'s
+    // own declaration for why the RAW cell rather than the canonicalized
+    // idmrg_cell_ static observables use: only the raw cell's outer legs
+    // are still literally idmrg_HL_ket_/idmrg_HR_ket_, i.e. only it
+    // attaches to the environment caps below with no assumption at all.
+    //
+    // Every window position gets its own genuinely fresh physical Index
+    // (via idmrg_rows_[p].d, not sites_.si(p+1)) -- unlike pyitensor's own
+    // _tile_periodic (which reuses sites_uc's own physical Index across
+    // every copy of a given sublattice position, needing a separate
+    // _refresh_physical_legs fix for n_uc==1, see that module's own
+    // docstring), this sidesteps that whole bug class structurally: no two
+    // window positions can ever collide on a shared physical Index,
+    // regardless of n_uc.
     //
     // MPS::position()'s own initial canonicalization (called automatically
     // by TDVPWorker, see TDVP/tdvp.h, whenever `!isOrtho(psi) ||
@@ -9932,39 +9868,48 @@ class Chain
     IdmrgWindow
     idmrg_build_window(int n_window) const
         {
+        iw_require_cell("idmrg_build_window");
+        iw_build_cache(); // also runs the wraparound-dimension check
         int n_uc = idmrg_n_uc_;
-        int n = n_window*n_uc;
-        if (n_window>1 && dim(idmrg_U_right_[n_uc-1]) != dim(idmrg_U_left_[0]))
-            throw ITError("Chain::td_dynamical_correlator_window: converged unit "
-                  "cell's own wraparound bond dimension is inconsistent -- "
-                  "a multi-copy window needs U's own left/right natural "
-                  "bond dimensions to agree (see idmrg_window.py's own "
-                  "build_window comment for the Python-side analogue) -- "
-                  "try a different maxm/maxiter/etol combination for "
-                  "gs_energy()/idmrg_ground_state()");
+        int n_cell = (int)idmrg_cell_raw_.size();
+        // n_window counts unit cells but the tiling unit is the cell.
+        // Round the copy count up so the realized window is never smaller
+        // than the caller asked for, and record the realized size in unit
+        // cells so every downstream site/sublattice computation stays
+        // exact (mirrors build_window's own uc_per_cell/n_copies).
+        int uc_per_cell = n_cell/n_uc;
+        int n_copies = (n_window + uc_per_cell - 1)/uc_per_cell;
+        int n = n_copies*n_cell;
 
         static const TagSet link_tag("Link"), site_tag("Site");
         IdmrgWindow win;
         win.n = n;
+        win.n_window_uc = n_copies*uc_per_cell;
         win.phys.resize(n);
         std::vector<ITensor> ket(n), mpoT(n);
 
         Index ket_left = idmrg_HL_ket_;
         Index mpo_left = idmrg_HL_mpo_;
-        for (int c=0; c<n_window; ++c)
+        if (dim(ket_left) != idmrg_cell_raw_l_[0])
+            throw std::runtime_error(
+                  "Chain::idmrg_build_window: the converged cell's own left "
+                  "bond dimension does not match the stored environment "
+                  "snapshot's -- should be unreachable, since the cell is "
+                  "seeded at the very micro-step that snapshot is taken at");
+        for (int c=0; c<n_copies; ++c)
             {
-            bool last_copy = (c==n_window-1);
-            for (int p=0; p<n_uc; ++p)
+            bool last_copy = (c==n_copies-1);
+            for (int k=0; k<n_cell; ++k)
                 {
-                int i = c*n_uc+p+1; // 1-based window position
-                bool last_in_copy = (p==n_uc-1);
-                bool at_end = last_copy && last_in_copy;
+                int i = c*n_cell+k+1; // 1-based window position
+                int p = k%n_uc;       // sublattice at this cell position
+                bool at_end = last_copy && (k==n_cell-1);
 
                 win.phys[i-1] = Index(idmrg_rows_[p].d,site_tag);
-                Index ket_right = at_end ? idmrg_HR_ket_ : sim(idmrg_U_right_[p]);
-                ket[i-1] = replaceInds(idmrg_U_[p],
-                    {idmrg_U_left_[p], sites_.si(p+1), idmrg_U_right_[p]},
-                    {ket_left, win.phys[i-1], ket_right});
+                Index ket_right = at_end ? idmrg_HR_ket_
+                                          : Index(idmrg_cell_raw_r_[k],link_tag);
+                ket[i-1] = idmrg_lpr_array_to_tensor(idmrg_cell_raw_[k],ket_left,
+                                                      win.phys[i-1],ket_right);
 
                 Index mpo_right = at_end ? idmrg_HR_mpo_ : Index(idmrg_rows_[p].right_n,link_tag);
                 mpoT[i-1] = idmrg_make_W(idmrg_rows_[p], mpo_left, mpo_right,
@@ -10036,26 +9981,15 @@ class Chain
         return out;
         }
 
-    // Dense (chi,chi) array (row-major) for a rank-2 (i1,i2) ITensor (e.g.
-    // one of idmrg_all_right_fixed_points's own rho_after[p] tensors).
-    static std::vector<Cplx>
-    idmrg_matrix_to_array(ITensor const& M, Index const& i1, Index const& i2)
-        {
-        int n1 = dim(i1), n2 = dim(i2);
-        std::vector<Cplx> out((size_t)n1*n2,Cplx(0,0));
-        for (int a=1;a<=n1;++a)
-        for (int b=1;b<=n2;++b)
-            out[(size_t)(a-1)*n2+(b-1)] = eltC(M,i1(a),i2(b));
-        return out;
-        }
-
     // Sum over a chain of doubled (ket,conj(bra)) transfer steps, closed
-    // on the left by a bare trace (correct for a left-canonical bra --
-    // see td_dynamical_correlator_window's own top comment) and on the
-    // right by rho_right (idmrg_all_right_fixed_points's own
-    // rho_after[p_right], as a dense (chi,chi) array via
-    // idmrg_matrix_to_array) -- C++ analogue of idmrg_window.py's own
-    // _close_array_chain. bra_arrays/ket_arrays: same-length lists of flat
+    // on the left by the tiled cell's own left transfer fixed point
+    // (l_left, iw_build_cache's own iw_l_before_[0]) and on the right by
+    // its right one (rho_right, iw_rho_after_[n_cell-1]) -- C++ analogue
+    // of idmrg_window.py's own _close_array_chain, whose own comment
+    // records why a bare trace on the left is not good enough here. The
+    // caller divides by the same contraction over the unperturbed ground
+    // state, see idmrg_window_snapshot_correlator.
+    // bra_arrays/ket_arrays: same-length lists of flat
     // (chi_l,d,chi_r) arrays (idmrg_tensor_to_lpr_array's own layout),
     // aligned site by site; deliberately plain dense arrays rather than
     // ITensor objects, exactly as idmrg_window.py's own docstring explains
@@ -10079,16 +10013,16 @@ class Chain
     //
     // The final right-edge contraction (`out=sum_{r,R} left_traced[r,R]*
     // rho_right[r,R]`) still requires ket's own accumulated right
-    // dimension (Er) to equal rho_right's own dimension (chi_right,
-    // idmrg_U_right_[p_right]'s natural dimension) -- a genuine
+    // dimension (Er) to equal rho_right's own dimension (chi_right, the
+    // converged cell's own wraparound bond dimension) -- a genuine
     // requirement of the method itself (idmrg_window.py's own
     // `_close_array_chain` has the identical constraint, via its final
     // `np.einsum('rR,rR->', left_traced, rho_after[p_right])`, which would
     // likewise raise a shape-mismatch error if this failed to hold), not
     // an artifact of this port: it holds once the window's own true
     // right-edge bond dimension (idmrg_HR_ket_, the accumulated growth
-    // environment) has saturated to the *same* value as the per-unit-cell
-    // natural SVD bond (idmrg_U_right_) -- typically true once maxm/niter
+    // environment) has saturated to the *same* value as the cell's own
+    // wraparound bond -- typically true once maxm/niter
     // are large enough for both to hit the same maxm ceiling. If it
     // doesn't hold, this raises a clear Error() (see the check below)
     // rather than segfaulting or silently truncating.
@@ -10098,6 +10032,7 @@ class Chain
                              std::vector<int> const& ket_l, std::vector<int> const& ket_r,
                              std::vector<int> const& bra_l, std::vector<int> const& bra_r,
                              std::vector<int> const& dims_d,
+                             std::vector<Cplx> const& l_left,
                              std::vector<Cplx> const& rho_right, int chi_right)
         {
         int nsite = (int)ket_arrays.size();
@@ -10123,7 +10058,17 @@ class Chain
             if (site==0) { E = step; El=l; EL=L; Er=r; ER=R; }
             else
                 {
-                // E[l,L,s,S] = sum_{r,R} E_old[l,L,r,R]*step[r,R,s,S]
+                // E[l,L,s,S] = sum_{r,R} E_old[l,L,r,R]*step[r,R,s,S].
+                // step's own strides are (l:L*r*R, L:r*R, r:R, R:1), so
+                // its second axis has extent L (the BRA's left dimension),
+                // not R. Indexing it with R here instead was a real bug,
+                // silent for as long as every tiled tensor happened to be
+                // square (L==R, true of every cell with a uniform bond
+                // dimension) and wrong the moment it is not: on a
+                // dimerized spinless chain at maxm=20 the converged cell
+                // comes out (18,20)/(20,18) and this put S(x,0) at 0.83
+                // against an exact 0.51, for every operator including a
+                // plain N.
                 std::vector<Cplx> Enew((size_t)El*EL*r*R,Cplx(0,0));
                 for (int li=0;li<El;++li)
                 for (int Li=0;Li<EL;++Li)
@@ -10133,27 +10078,37 @@ class Chain
                     Cplx acc(0,0);
                     for (int ri=0;ri<Er;++ri)
                     for (int Ri=0;Ri<ER;++Ri)
-                        acc += E[((size_t)(li*EL+Li)*Er+ri)*ER+Ri]*step[((size_t)(ri*R+Ri)*r+si)*R+Si];
+                        acc += E[((size_t)(li*EL+Li)*Er+ri)*ER+Ri]*step[((size_t)(ri*L+Ri)*r+si)*R+Si];
                     Enew[((size_t)(li*EL+Li)*r+si)*R+Si] = acc;
                     }
                 E = Enew; Er=r; ER=R;
                 }
             }
-        // left_traced[r,R] = sum_l E[l,l,r,R] (bare trace, l==L) -- valid
-        // since El==EL by construction (site 0's own ket_l==bra_l, see
-        // idmrg_window_snapshot_correlator's own comment: both equal
-        // dim(idmrg_HL_ket_)==dim(idmrg_U_left_[0])).
-        if (El!=EL)
-            throw ITError("Chain::td_dynamical_correlator_window: window's own "
+        // left_traced[r,R] = sum_{l,L} l_left[l,L] E[l,L,r,R] -- closed
+        // against the tiled cell's own LEFT transfer fixed point, not a
+        // bare trace. The bare trace is the special case where every tiled
+        // tensor is exactly left-canonical, which held for the old
+        // idmrg_U_ tiling but does not for idmrg_cell_raw_ (its second
+        // tensor S.V.lambda_o^-1 is an isometry only to ~1e-3). Left as a
+        // bare trace it breaks the exact checks outright -- confirmed on
+        // the Python side first (idmrg_window.py's own _close_array_chain
+        // comment): S(x=0,t=0), which must equal <Sz Sz> = 0.25 for
+        // spin-1/2, came out at -0.0776. El==EL is still required (the
+        // fixed point is square): site 0's own ket_l==bra_l, both equal to
+        // dim(idmrg_HL_ket_)==idmrg_cell_raw_l_[0].
+        if (El!=EL || (size_t)El*EL != l_left.size())
+            throw std::runtime_error("Chain::td_dynamical_correlator_window: window's own "
                   "left-edge bond dimension does not match the converged "
                   "unit cell's own natural left bond dimension needed to "
                   "close S(x,t) there -- should be unreachable given "
-                  "idmrg_U_left_[0]==idmrg_HL_ket_ by construction");
+                  "idmrg_cell_raw_l_[0]==dim(idmrg_HL_ket_) by construction");
         std::vector<Cplx> left_traced((size_t)Er*ER,Cplx(0,0));
         for (int li=0;li<El;++li)
+        for (int Li=0;Li<EL;++Li)
         for (int ri=0;ri<Er;++ri)
         for (int Ri=0;Ri<ER;++Ri)
-            left_traced[(size_t)ri*ER+Ri] += E[((size_t)(li*EL+li)*Er+ri)*ER+Ri];
+            left_traced[(size_t)ri*ER+Ri] +=
+                l_left[(size_t)li*EL+Li]*E[((size_t)(li*EL+Li)*Er+ri)*ER+Ri];
         if (Er!=chi_right || ER!=chi_right)
             throw ITError("Chain::td_dynamical_correlator_window: window's own "
                   "right-edge bond dimension(s) do not match the converged "
@@ -10179,28 +10134,43 @@ class Chain
     // truncating x_values, see td_dynamical_correlator_window's own
     // caller-facing docstring in infinitechain.py). ket_arrays are read
     // directly off win's own (possibly TDVP-evolved) tensors; bra_arrays
-    // are freshly built from the static, converged idmrg_U_/idmrg_rows_
-    // (never touched by evolution), with opname_A inserted at position
-    // center+x -- see idmrg_close_array_chain's own comment for why these
-    // two sides deliberately don't share any ITensor Index identity.
+    // are freshly built from the static, converged gauge-consistent unit
+    // cell idmrg_cell_raw_ (never touched by evolution -- the SAME cell
+    // idmrg_build_window tiles the ket from, which is what makes the
+    // t=0 identity S(x,0)==two_point_correlator exact; building the bra
+    // from the raw per-micro-step idmrg_U_ chain instead is the gauge bug
+    // idmrg_build_window's own comment records), with opname_A inserted at
+    // position center+x -- see idmrg_close_array_chain's own comment for
+    // why these two sides deliberately don't share any ITensor Index
+    // identity.
     //
-    // rho_flat/chi_right: idmrg_all_right_fixed_points()'s own
-    // rho_after[p_right], already flattened by the caller (see
-    // td_dynamical_correlator_window, which computes this once before its
-    // own per-time-step loop) -- this depends only on the static,
-    // unperturbed converged ground state, never on win's own (evolving)
-    // state, so recomputing it on every one of this method's own nt calls
-    // would just redo the same power iteration (capped at 2000 steps)
-    // needlessly; confirmed directly via code review to be a real,
-    // avoidable cost, not a correctness requirement.
+    // Both closures come from iw_build_cache's own fixed points of that
+    // same cell: the left one (iw_l_before_[0], the window's first
+    // position is cell position 0) because the raw cell is not exactly
+    // left-canonical, and the right one (iw_rho_after_[n_cell-1], since
+    // win.n is always a whole number of cells) as the correct weighting
+    // for "everything beyond the window". The result is divided by the
+    // same contraction run over the ground state itself, so a chain
+    // carrying no operator returns exactly 1: both caps are independently
+    // trace-1-normalized and the left one is not the identity, so without
+    // this calibration the raw overlaps are off by an arbitrary constant
+    // -- measured on the Python side (idmrg_window.py's own
+    // _close_array_chain), S(x=0,t=0) came out at 0.025 instead of 0.25
+    // with a chi-only rescaling and -0.078 with none. The denominator
+    // depends only on the cell and on win.n, never on x or on t, so it is
+    // computed once here rather than per x.
     std::vector<Cplx>
     idmrg_window_snapshot_correlator(IdmrgWindow const& win, std::string const& opname_A,
-                                      std::vector<int> const& x_values, int center,
-                                      std::vector<Cplx> const& rho_flat, int chi_right) const
+                                      std::vector<int> const& x_values, int center) const
         {
         int n = win.n;
         int n_uc = idmrg_n_uc_;
+        int n_cell = (int)idmrg_cell_raw_.size();
         bool ferm_A = idmrg_is_fermionic(opname_A);
+        iw_build_cache();
+        auto const& l_left = iw_l_before_[0];
+        auto const& rho_right = iw_rho_after_[n_cell-1];
+        int chi_right = iw_chis_[n_cell];
 
         // ket_arrays: win's own tensors, positions 1..n. Left/right link
         // Index at each position is re-derived fresh via commonIndex (or
@@ -10218,17 +10188,39 @@ class Chain
             ket_arrays[i-1] = idmrg_tensor_to_lpr_array(win.psi.A(i),left,phys,right);
             }
 
-        // bra_l/bra_r: the static, converged unit cell's own natural
-        // per-position dimensions -- fixed for every x/t, unlike
-        // ket_l/ket_r above (which change as win.psi evolves), so built
-        // once here rather than inside the x loop below.
+        // bra_l/bra_r: the converged cell's own natural per-position
+        // dimensions -- fixed for every x/t, unlike ket_l/ket_r above
+        // (which change as win.psi evolves), so built once here rather
+        // than inside the x loop below.
         std::vector<int> bra_l(n), bra_r(n);
         for (int i=1;i<=n;++i)
             {
-            int p = (i-1)%n_uc;
-            bra_l[i-1] = dim(idmrg_U_left_[p]);
-            bra_r[i-1] = dim(idmrg_U_right_[p]);
+            int k = (i-1)%n_cell;
+            bra_l[i-1] = idmrg_cell_raw_l_[k];
+            bra_r[i-1] = idmrg_cell_raw_r_[k];
             }
+
+        // The calibration denominator: the identical closure run over the
+        // unperturbed ground state on both sides, i.e. the plain product
+        // of this window's own tiled transfer tensors, closed with the
+        // same two caps. Applied right to left so no (chi^2,chi^2) matrix
+        // product is ever formed.
+        Cplx den(0,0);
+        {
+        std::vector<Cplx> v = rho_right;
+        for (int i=n-1;i>=0;--i)
+            {
+            int k = i%n_cell;
+            v = ic_matvec(iw_Es_[k],iw_chis_[k]*iw_chis_[k],
+                           iw_chis_[k+1]*iw_chis_[k+1],v);
+            }
+        for (size_t idx=0; idx<l_left.size(); ++idx) den += l_left[idx]*v[idx];
+        if (std::abs(den) < 1e-300)
+            throw std::runtime_error("Chain::td_dynamical_correlator_window: the "
+                  "window's own normalization is zero -- the converged unit "
+                  "cell's transfer fixed points are degenerate or the state "
+                  "is not converged");
+        }
 
         std::vector<Cplx> out(x_values.size());
         for (size_t ix=0; ix<x_values.size(); ++ix)
@@ -10236,7 +10228,7 @@ class Chain
             int x = x_values[ix];
             int pos = center+x;
             if (pos<1 || pos>n)
-                throw ITError("Chain::td_dynamical_correlator_window: x_values "
+                throw std::runtime_error("Chain::td_dynamical_correlator_window: x_values "
                       "must keep center+x within the window's own explicit "
                       "range [1,n] -- increase n_window (idmrg_window.py's "
                       "own padding for x beyond the window is not ported "
@@ -10246,8 +10238,13 @@ class Chain
             std::vector<std::vector<Cplx>> bra_arrays(n);
             for (int i=1;i<=n;++i)
                 {
-                int p = (i-1)%n_uc;
-                Index l = idmrg_U_left_[p], s = sites_.si(p+1), r = idmrg_U_right_[p];
+                // bulk tensor by *cell* position, operator matrix by
+                // sublattice (n_cell is a multiple of n_uc, so the two
+                // agree modulo n_uc).
+                int k = (i-1)%n_cell, p = (i-1)%n_uc;
+                int chi_l = idmrg_cell_raw_l_[k], d = idmrg_cell_raw_d_[k];
+                int chi_r = idmrg_cell_raw_r_[k];
+                std::vector<Cplx> M;
                 if (i==pos)
                     {
                     // idmrg_close_array_chain conjugates the bra, so
@@ -10257,10 +10254,14 @@ class Chain
                     // what this did before, mirroring idmrg_window.py's own
                     // pre-fix bra -- silently computed <psi|A^dagger_x ...>
                     // instead: invisible for every Hermitian name, exactly
-                    // wrong for C/Cdag/Sp/Sm.)
-                    ITensor OpT = swapPrime(dag(idmrg_op_itensor(s,p,opname_A)),0,1);
-                    ITensor Uop = idmrg_U_[p]*OpT; Uop.noPrime("Site");
-                    bra_arrays[i-1] = idmrg_tensor_to_lpr_array(Uop,l,s,r);
+                    // wrong for C/Cdag/Sp/Sm.) idmrg_op_dense's own layout
+                    // is [in,out] row-major, so the adjoint is
+                    // Mdag[i,o] = conj(M[o,i]).
+                    auto Mop = idmrg_op_dense(p,opname_A);
+                    M.assign((size_t)d*d,Cplx(0,0));
+                    for (int a=0;a<d;++a)
+                    for (int b=0;b<d;++b)
+                        M[(size_t)a*d+b] = std::conj(Mop[(size_t)b*d+a]);
                     }
                 else if (ferm_A && i<pos)
                     {
@@ -10268,16 +10269,32 @@ class Chain
                     // same left reference (window site 1) that
                     // idmrg_window_apply_local_op truncates the ket's at.
                     // F is Hermitian, so applying it to the bra inserts F.
-                    ITensor FT = idmrg_op_itensor(s,p,"F");
-                    ITensor Uop = idmrg_U_[p]*FT; Uop.noPrime("Site");
-                    bra_arrays[i-1] = idmrg_tensor_to_lpr_array(Uop,l,s,r);
+                    M = idmrg_op_dense(p,"F");
                     }
+                if (M.empty())
+                    bra_arrays[i-1] = idmrg_cell_raw_[k];
                 else
-                    bra_arrays[i-1] = idmrg_tensor_to_lpr_array(idmrg_U_[p],l,s,r);
+                    {
+                    // Bop[l,o,r] = sum_i M[i,o] A[l,i,r] -- ic_transfer's
+                    // own operator convention.
+                    std::vector<Cplx> Bop((size_t)chi_l*d*chi_r,Cplx(0,0));
+                    auto const& A = idmrg_cell_raw_[k];
+                    for (int lI=0;lI<chi_l;++lI)
+                    for (int o=0;o<d;++o)
+                    for (int rI=0;rI<chi_r;++rI)
+                        {
+                        Cplx acc(0,0);
+                        for (int iI=0;iI<d;++iI)
+                            acc += M[(size_t)iI*d+o]*A[((size_t)lI*d+iI)*chi_r+rI];
+                        Bop[((size_t)lI*d+o)*chi_r+rI] = acc;
+                        }
+                    bra_arrays[i-1] = std::move(Bop);
+                    }
                 }
 
             out[ix] = idmrg_close_array_chain(bra_arrays,ket_arrays,ket_l,ket_r,
-                                               bra_l,bra_r,dims_d,rho_flat,chi_right);
+                                               bra_l,bra_r,dims_d,l_left,
+                                               rho_right,chi_right)/den;
             }
         return out;
         }
@@ -11047,11 +11064,6 @@ class Chain
     // binding's existing (density,converged,niter_done) 3-tuple stays
     // unchanged (same pattern as wf0_/have_wf0_ above for gs_energy()).
     bool have_idmrg_snapshot_ = false;
-    // Opt-in to running the known-gauge-defective window path -- see
-    // td_dynamical_correlator_window's own comment and
-    // docs/known_issue_v3_window_gauge.md. Never set from dmrgpy's own
-    // public API.
-    bool allow_defective_window_ = false;
     int idmrg_n_uc_ = 0;
     std::vector<IdmrgAutomatonRow> idmrg_rows_; // per-sublattice automaton row, dense data (see idmrg_make_W's own comment on why never a persistent ITensor)
     std::vector<ITensor> idmrg_U_; // idmrg_U_[p]: sublattice p's converged left-canonical ket tensor (legs: idmrg_U_left_[p], Site, idmrg_U_right_[p])
@@ -11067,6 +11079,33 @@ class Chain
     bool have_idmrg_cell_ = false;
     std::vector<std::vector<Cplx>> idmrg_cell_;
     std::vector<int> idmrg_cell_l_, idmrg_cell_d_, idmrg_cell_r_;
+    // The SAME cell before ic_canonicalize_cell re-gauges it -- what the
+    // IBC window (idmrg_build_window / idmrg_window_snapshot_correlator)
+    // must tile, and deliberately NOT idmrg_cell_ above. theta's own two
+    // outer legs literally ARE idmrg_HL_ket_/idmrg_HR_ket_ (the
+    // environment snapshot is taken entering the very micro-step theta is
+    // solved at, see the snap_* block in idmrg_ground_state), so the raw
+    // cell attaches to the window's own environment caps exactly, with no
+    // assumption at all; ic_canonicalize_cell's re-gauging is precisely
+    // what destroys that correspondence. Same choice, and for the same
+    // reason, as pyitensor/idmrg_window.py's own _window_cell picking
+    // IDMRGResult.cell_raw over cell_list. The two are the same state, so
+    // nothing is given up -- the price is only that the raw cell is not
+    // exactly left-canonical (its second tensor S.V.lambda_o^-1 is an
+    // isometry only to ~1e-3), which is why the window's own closures use
+    // genuine left/right transfer fixed points plus a calibration
+    // denominator (iw_build_cache / idmrg_close_array_chain) rather than
+    // the bare trace a left-canonical chain would allow.
+    bool have_idmrg_cell_raw_ = false;
+    std::vector<std::vector<Cplx>> idmrg_cell_raw_;
+    std::vector<int> idmrg_cell_raw_l_, idmrg_cell_raw_d_, idmrg_cell_raw_r_;
+    // The raw cell's own transfer tensors and both families of fixed
+    // points, cached exactly as ic_build_cache caches the canonical
+    // cell's (see iw_build_cache).
+    mutable bool iw_cache_valid_ = false;
+    mutable std::vector<std::vector<Cplx>> iw_Es_;
+    mutable std::vector<std::vector<Cplx>> iw_rho_after_, iw_l_before_;
+    mutable std::vector<int> iw_chis_;
 
     // Lazily-built, measurement-independent part of every static
     // observable on that cell (ic_build_cache): the per-position transfer

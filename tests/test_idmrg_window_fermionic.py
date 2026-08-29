@@ -268,35 +268,23 @@ def test_local_expectation_rejects_a_fermionic_operator():
 
 @pytest.mark.skipif(not cppext.available(3),
                      reason="mpscpp3 extension not compiled")
-@pytest.mark.xfail(strict=True, reason=(
-    "pre-existing, operator-independent defect in the itensor_version=3 "
-    "window: Chain::idmrg_build_window/idmrg_window_snapshot_correlator "
-    "tile the raw per-micro-step idmrg_U_ chain, not the gauge-consistent "
-    "cell (idmrg_cell_) every other v3 static observable uses -- see "
-    "docs/known_issue_v3_window_gauge.md"))
 def test_itensor_version3_window_matches_the_static_correlator_at_t0():
     """The same exact t=0 identity as the python backend's, on v3.
 
-    This is marked xfail because it fails for a reason that has nothing to
-    do with the Jordan-Wigner string this module is about: the v3 window
-    tiles `idmrg_U_`, whose two ends live in bond bases minted by different
-    iDMRG micro-steps, instead of the gauge-consistent unit cell
-    (`idmrg_theta_cell`/`ic_canonicalize_cell`) that the same file's own
-    `idmrg_onsite_expectation`/`idmrg_two_point_correlator` were fixed to
-    use. Measured on a *spin* chain, with no fermions anywhere near it, the
-    same identity misses by up to 7.4e-2 (x=+1: -0.0864 against an exact
-    -0.1607) while x=0 stays exact -- the signature of a bond-basis
-    mismatch, not of a string. The string port itself is unconditionally
-    correct on this backend the moment the gauge is: it is a line-for-line
-    mirror of the python one, pinned by the tests above."""
+    This was an xfail until 2026-08-29, and it failed for a reason that
+    has nothing to do with the Jordan-Wigner string this module is about:
+    the v3 window tiled `idmrg_U_`, whose two ends live in bond bases
+    minted by different iDMRG micro-steps, instead of the gauge-consistent
+    unit cell that the same file's own `idmrg_onsite_expectation`/
+    `idmrg_two_point_correlator` were fixed to use. Measured on a *spin*
+    chain, with no fermions anywhere near it, the same identity missed by
+    up to 7.4e-2 (x=+1: -0.0864 against an exact -0.1607) while x=0 stayed
+    exact -- the signature of a bond-basis mismatch, not of a string. The
+    string port itself was unconditionally correct on this backend the
+    whole time (a line-for-line mirror of the python one, pinned by the
+    tests above); `Chain::idmrg_build_window` now tiles
+    `idmrg_cell_raw_`, and this passes."""
     ic = _fermionic_chain(3, maxm=12)
-    # The C++ method refuses to run at all by default, and the public API
-    # raises before reaching it, precisely so nobody mistakes these numbers
-    # for measurements (see infinitechain.td_dynamical_correlator and
-    # Chain::set_allow_defective_window). Opting in here is what makes this
-    # test observe the *numeric* defect rather than the refusal -- so the
-    # xfail above stays honest, and flips the moment the gauge is fixed.
-    ic._session3.set_allow_defective_window(True)
     xs = list(range(-2, 3))
     _ts, _xs, S = ic._session3.td_dynamical_correlator_window(
         4, "Cdag", "C", 0.1, 1, xs, 40, 1e-10, 50, False, 0)
@@ -304,6 +292,42 @@ def test_itensor_version3_window_matches_the_static_correlator_at_t0():
     for ix, x in enumerate(xs):
         assert S[0, ix] == pytest.approx(
             _static_reference(ic, "Cdag", "C", x), abs=1e-6), "x={}".format(x)
+
+
+@pytest.mark.skipif(not cppext.available(3),
+                     reason="mpscpp3 extension not compiled")
+def test_itensor_version3_time_evolution_matches_the_green_function():
+    """Oracle 3 on v3: the exact free-fermion Green function through TDVP.
+
+    The t=0 test above pins the *gauge*; this one pins everything the
+    evolution adds on top of it, against an external number rather than
+    against the other backend. It is what caught the second half of the
+    2026-08-29 window fix: moving the snapshot's closure onto the cell's
+    transfer-matrix fixed points invalidated this backend's old
+    `exp(+i*eshift*t)` phase correction (eshift is measured with the
+    window's boundary legs *traced*, and the two closings see different
+    energies), so S(x,t) was exact at t=0 and drifted linearly afterwards.
+    v3 now co-evolves an unperturbed vacuum window and divides by its
+    `<psi|psi(t)>`, exactly as `dynamical_correlator_td` does.
+
+    Same tolerance as the python counterpart, and for the same reason:
+    what is left is the finite-window/finite-D error of the method plus
+    the string's own left-edge truncation, not the machinery."""
+    ic = _fermionic_chain(3, maxm=20)
+    h = _single_particle_matrix(_T1, _T2, _T3)
+    P = _one_body_density_matrix(h)
+    i0 = 2 * (h.shape[0] // 4)
+    dt, nt = 0.1, 5
+    xs = list(range(-2, 3))
+    ts, xarr, S = ic._session3.td_dynamical_correlator_window(
+        6, "Cdag", "C", dt, nt, xs, 60, 1e-10, 50, False, 0)
+    S = np.array(S).reshape(nt, len(xs))
+    for it, t in enumerate(ts):
+        U = scipy.linalg.expm(1j * h * t)
+        for ix, x in enumerate(xarr):
+            exact = U[i0 + int(x), :] @ P[:, i0]
+            assert S[it, ix] == pytest.approx(exact, abs=6e-2), \
+                "x={}, t={}".format(x, t)
 
 
 def test_kpm_finite_fermionic_matches_the_exact_free_fermion_sum_rule():
