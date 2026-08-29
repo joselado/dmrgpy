@@ -3001,6 +3001,21 @@ adjacent unit cells after \texttt{n\_uc}-grouping) is rejected with
 (\texttt{vumps\_ground\_state}'s own reach-1 check) rather than from the
 excitation machinery.
 
+\textbf{Cost.} The eigenproblem \texttt{excitation\_energies} solves has
+dimension $D^2(d_g-1)$, so its cost grows quickly with the converged bond
+dimension. On \texttt{itensor\_version="python"} two things bound that:
+the momentum-dependent channel resolvents are built once per momentum and
+cached (they do not depend on the excitation tensor, so rebuilding them
+per matrix element was pure waste), and above a size threshold the
+eigenproblem is solved by Lanczos on the effective Hamiltonian's action
+rather than by assembling that matrix at all. Neither changes any returned
+number -- the two solver paths are cross-checked against each other in
+\texttt{tests/test\_infinite\_chain.py} -- but a momentum scan at a large
+$D$ is substantially cheaper than it was. \texttt{itensor\_version=3}
+still assembles the matrix (and still rebuilds its resolvents per matrix
+element), so the two backends now differ in cost structure for this call,
+in the \texttt{"python"} backend's favour at large $D$.
+
 \textbf{Unit cells of more than 2 sites.}
 \texttt{Infinite\_Many\_Body\_Chain([...])} accepts a cell of any length,
 and \texttt{gs\_method="vumps"} (the default) then runs the

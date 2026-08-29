@@ -1149,6 +1149,51 @@ No metric reduction is needed for the resulting eigenproblem (unlike an
 earlier, uniform-gauge version of this module, see below) — the
 mixed-gauge tangent-space norm is already the trivial Euclidean one.
 
+**How that eigenproblem is actually solved.** `H_eff(k)` has dimension
+`dim = D*D*(d_g-1)`, and `excitation_energies` picks between two solvers
+by size (`_DENSE_EIG_MAX`): assemble the matrix one basis vector at a time
+and call `eigh` (`_lowest_dense`), or run Lanczos directly on
+`_h_eff_action` (`_lowest_iterative`, `scipy.sparse.linalg.eigsh` over a
+`LinearOperator`). The dense route costs `dim` applications of
+`_h_eff_action`; the iterative one costs a few hundred regardless of
+`dim` (measured: ~155-225 per momentum for `n=2` on a D=12 chain, not the
+"few tens" a first estimate suggests -- which is why the threshold is where
+it is rather than at 0).
+Three things keep the dense route load-bearing rather than vestigial:
+`dim` can legitimately be `1` (a `D=1` spin-1/2 chain), where ARPACK
+cannot be used at all since it needs `nev < dim`; it is genuinely faster
+below the threshold; and it is what the iterative route falls back to when
+its eigenpairs fail a residual check, the same "never less robust than the
+path it replaces" contract `_solve_linear_map` already has. The iterative
+route uses a fixed, deterministic start vector rather than ARPACK's random
+default, so a near-degenerate or gapless dispersion does not come out
+differently run to run.
+
+The bigger cost this sits on top of is `_channel_resolvent`, which
+`_build_GBL`/`_build_GBR` need once each per momentum and direction.
+Nothing in it depends on the excitation tensor `B` — only on `k` and the
+momentum-independent environment — yet it used to be rebuilt inside
+*every* `_h_eff_action` call: a dense `(D*D, D*D)` build plus a fresh
+`O(D^6)` solve, twice per application, `dim` applications per momentum.
+It is now built once per momentum and cached on the environment
+(`_resolvents_for`, `ExcitationEnvironment.resolvent_cache`), LU-factored
+once (`scipy.linalg.lu_factor`) so every later solve is two triangular
+solves. Because the factorization is now amortized over many solves rather
+than paid per solve, this resolvent keeps its own dense-vs-iterative
+threshold (`_RESOLVENT_DENSE_MAX`) set by *memory* rather than by flops,
+far above `_solve_linear_map`'s own `_DENSE_SOLVE_MAX` — the two solve
+genuinely different problems, one-shot versus reusable.
+
+`excitation_energies(env, k, n, return_vectors=True)` additionally returns
+the tangent-space parameters `X` (the excitation tensor itself being
+`B = (V_L @ X).reshape(D, d_g, D)`), which the energies alone previously
+discarded. Nothing consumes them yet; they are what a spectral weight
+`<Psi|O|Phi_k(B)>` would be built from. This is `pyitensor`-only: the
+`itensor_version=3` port (`Chain::vumps_build_h_eff_dense`) still assembles
+`H_eff(k)` densely and rebuilds its resolvents per application, so the two
+backends now differ in cost (not in results — the cross-checks in
+`tests/test_vumps_excitations_v3.py` are unchanged and still pass).
+
 **History.** An earlier version of this module built the ansatz on top
 of a single uniform-gauge tensor from `idmrg.py`'s growing algorithm
 instead, with a hand-derived, closed-form-resummed diagram list; it

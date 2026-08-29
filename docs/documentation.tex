@@ -1336,6 +1336,57 @@ eigenproblem (unlike an earlier, uniform-gauge version of this module,
 see below) -- the mixed-gauge tangent-space norm is already the trivial
 Euclidean one.
 
+\textbf{How that eigenproblem is actually solved.} $H_{\rm eff}(k)$ has
+dimension \texttt{dim} $= D^2(d_g-1)$, and
+\texttt{excitation\_energies} picks between two solvers by size
+(\texttt{\_DENSE\_EIG\_MAX}): assemble the matrix one basis vector at a
+time and call \texttt{eigh} (\texttt{\_lowest\_dense}), or run Lanczos
+directly on \texttt{\_h\_eff\_action}
+(\texttt{\_lowest\_iterative}, \texttt{scipy.sparse.linalg.eigsh} over
+a \texttt{LinearOperator}). The dense route costs \texttt{dim}
+applications of \texttt{\_h\_eff\_action}; the iterative one costs a
+few hundred regardless of \texttt{dim} (measured: $\sim$155--225 per
+momentum for $n=2$ on a $D=12$ chain, not the ``few tens'' a first estimate
+suggests -- which is why the threshold is where it is rather than at 0). Three things keep the dense route
+load-bearing rather than vestigial: \texttt{dim} can legitimately be $1$
+(a $D=1$ spin-1/2 chain), where ARPACK cannot be used at all since it
+needs \texttt{nev} $<$ \texttt{dim}; it is genuinely faster below the
+threshold; and it is what the iterative route falls back to when its
+eigenpairs fail a residual check, the same ``never less robust than the
+path it replaces'' contract \texttt{\_solve\_linear\_map} already has.
+The iterative route uses a fixed, deterministic start vector rather than
+ARPACK's random default, so a near-degenerate or gapless dispersion does
+not come out differently run to run.
+
+The bigger cost this sits on top of is \texttt{\_channel\_resolvent},
+which \texttt{\_build\_GBL}/\texttt{\_build\_GBR} need once each per
+momentum and direction. Nothing in it depends on the excitation tensor
+$B$ -- only on $k$ and the momentum-independent environment -- yet it used
+to be rebuilt inside \emph{every} \texttt{\_h\_eff\_action} call: a
+dense $(D^2, D^2)$ build plus a fresh $O(D^6)$ solve, twice per
+application, \texttt{dim} applications per momentum. It is now built once
+per momentum and cached on the environment
+(\texttt{\_resolvents\_for}, \texttt{ExcitationEnvironment.resolvent\_cache}),
+LU-factored once (\texttt{scipy.linalg.lu\_factor}) so every later solve
+is two triangular solves. Because the factorization is now amortized over
+many solves rather than paid per solve, this resolvent keeps its own
+dense-vs-iterative threshold (\texttt{\_RESOLVENT\_DENSE\_MAX}) set by
+\emph{memory} rather than by flops, far above
+\texttt{\_solve\_linear\_map}'s own \texttt{\_DENSE\_SOLVE\_MAX} --
+the two solve genuinely different problems, one-shot versus reusable.
+
+\texttt{excitation\_energies(env, k, n, return\_vectors=True)}
+additionally returns the tangent-space parameters $X$ (the excitation
+tensor itself being $B = (V_L X)$ reshaped to $(D, d_g, D)$), which the
+energies alone previously discarded. Nothing consumes them yet; they are
+what a spectral weight $\langle\Psi|O|\Phi_k(B)\rangle$ would be built
+from. This is \texttt{pyitensor}-only: the \texttt{itensor\_version=3}
+port (\texttt{Chain::vumps\_build\_h\_eff\_dense}) still assembles
+$H_{\rm eff}(k)$ densely and rebuilds its resolvents per application, so
+the two backends now differ in cost (not in results -- the cross-checks in
+\texttt{tests/test\_vumps\_excitations\_v3.py} are unchanged and still
+pass).
+
 \textbf{History.} An earlier version of this module built the ansatz on
 top of a single uniform-gauge tensor from \texttt{idmrg.py}'s growing
 algorithm instead, with a hand-derived, closed-form-resummed diagram

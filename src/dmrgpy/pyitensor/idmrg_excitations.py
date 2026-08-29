@@ -131,6 +131,7 @@ precision, at D=1, 2 and 3.
 """
 
 import numpy as np
+from scipy.linalg import lu_factor, lu_solve
 from scipy.linalg import null_space as _null_space
 
 from . import idmrg
@@ -295,6 +296,53 @@ _DENSE_SOLVE_MAX = 64
 # compare at 1e-8..1e-10.
 _ITERATIVE_SOLVE_RTOL = 1e-13
 
+# The same dense-vs-iterative decision for `_channel_resolvent`, which needs
+# its OWN, much higher threshold than `_solve_linear_map`'s -- the two solve
+# genuinely different problems. `_solve_linear_map` is a one-shot solve, so
+# there is nothing to amortize an O(D^6) factorization over and the dense
+# build is pure overhead. `_channel_resolvent` returns a *reusable* solve
+# callable that one `excitation_energies` call invokes ~2 per H_eff
+# application; with the per-momentum cache (`_resolvents_for`) the LU
+# factorization is paid once and every later solve is two triangular solves,
+# which beats re-running GMRES to 1e-13 every time by a wide margin. So the
+# threshold here is set by *memory*, not by flops: D*D=2048 is a
+# (2048, 2048) complex factorization, ~67 MB.
+_RESOLVENT_DENSE_MAX = 2048
+
+# `excitation_energies` builds H_eff(k) densely at or below this dimension
+# (dim = D*D*(d_g-1)) and uses an iterative eigensolver above it. Below it,
+# assembling the matrix costs `dim` applications of `_h_eff_action` plus a
+# dim^3 diagonalization, which is genuinely cheaper -- and exact -- for the
+# small cases the test suite is full of; above it the assembly is what
+# dominates, since the iterative solve's cost is set by ARPACK's own
+# iteration count rather than by `dim`. That count is NOT small: measured on
+# a D=12 TFIM chain (dim=144), n=2 took ~155-225 applications per momentum,
+# not the "few tens" a first estimate suggests -- which is exactly why the
+# threshold sits where it does rather than at 0.
+#
+# The true crossover depends on `n` (ARPACK needs more iterations for more
+# eigenpairs) and so cannot be captured by one number: measured on TFIM,
+# n=1 crosses over around dim~36-64 while n=2 still favours dense at
+# dim=144. 256 is chosen to sit above the n=2 crossover, i.e. deliberately
+# conservative -- the dense path is exact and cannot fail, so paying a
+# little extra there is the safe direction to err.
+# examples/idmrg/excitation_solver_scaling/main.py plots both curves.
+_DENSE_EIG_MAX = 256
+
+# Convergence tolerance handed to the iterative eigensolver, and the largest
+# relative residual ||H x - lambda x|| / |lambda| accepted from it before
+# falling back to the dense path.
+#
+# Unlike `_ITERATIVE_SOLVE_RTOL` (a linear solve, whose result feeds onward
+# unchecked), this one is measured rather than argued: at D=12 asking ARPACK
+# for machine precision (tol=0) cost 905 applications across a 4-momentum
+# scan while tol=1e-10 cost 627 -- 30% cheaper for an answer that differed
+# from the dense path by 1.15e-14 either way, i.e. no measurable accuracy at
+# all. What actually guards accuracy here is the explicit residual check
+# below, which is what a too-loose tolerance would trip.
+_ITERATIVE_EIG_TOL = 1e-10
+_ITERATIVE_EIG_RESIDUAL_MAX = 1e-7
+
 
 def _solve_linear_map(D, action, rhs):
     """Solve `action(X) = rhs` for a (D,D) complex X, where `action` is a
@@ -420,6 +468,15 @@ def _channel_resolvent(phase_factor, E_mixed, r_mixed, l_mixed, apply_fn, D):
     momentum's GBL(k)/GBR(k) solve needs (`_build_GBL`/`_build_GBR` each
     call this exactly once, for their own shared self-loop channel).
 
+    NOTHING here depends on the excitation tensor B -- only on the momentum
+    and on the (k-independent) environment. That is what makes
+    `_resolvents_for`'s per-momentum cache correct: one `excitation_energies`
+    call applies H_eff(k) many times, each application with a different B,
+    and every one of those applications used to rebuild BOTH of this
+    momentum's resolvents from scratch. Since the dense build costs D*D
+    applications of `action` plus an O(D^6) factorization, that was the
+    dominant cost of the whole ansatz at any non-trivial bond dimension.
+
     T's own dominant eigenvalue sits exactly at 1 (E_mixed is always
     built with M=None -- the plain identity/background transfer -- for the
     two channels that ever hit this function's own self-loop, see
@@ -448,12 +505,75 @@ def _channel_resolvent(phase_factor, E_mixed, r_mixed, l_mixed, apply_fn, D):
             out = out + l_mixed * np.trace(r_mixed.conj() @ X)
         return out
 
-    Mat = _dense_linear_map(D, action)
+    # Dense path: build the map once, LU-factor it once, and reuse that
+    # factorization for every solve this resolvent is asked for. The caller
+    # (`_build_GBL`/`_build_GBR`) solves twice per call, and the resolvent
+    # itself is now cached across the many `_h_eff_action` calls one
+    # eigensolve makes (see `_resolvents_for`), so re-solving from scratch
+    # each time was repeating an O(D^6) factorization for nothing.
+    lu_cache = []
+
+    def dense_solve(source):
+        if not lu_cache:
+            lu_cache.append(lu_factor(_dense_linear_map(D, action)))
+        return lu_solve(lu_cache[0], source.reshape(-1)).reshape(D, D)
+
+    if D * D <= _RESOLVENT_DENSE_MAX:
+        return dense_solve
+
+    # Above the threshold, never build the (D*D, D*D) matrix at all --
+    # GMRES on the same callable, exactly as `_solve_linear_map` does (and
+    # with the same tolerance, for the same reason: what this solves for
+    # feeds straight into the reported dispersion). Falls back to the dense
+    # path if GMRES does not converge, so this is never less robust than the
+    # dense solve, only cheaper.
+    from scipy.sparse.linalg import LinearOperator, gmres
+
+    n = D * D
+    op = LinearOperator((n, n), dtype=complex,
+                         matvec=lambda x: action(x.reshape(D, D)).reshape(-1))
 
     def solve(source):
-        return np.linalg.solve(Mat, source.reshape(-1)).reshape(D, D)
+        rhs = source.reshape(-1)
+        try:
+            x, info = gmres(op, rhs, rtol=_ITERATIVE_SOLVE_RTOL, atol=0.0,
+                             restart=min(n, 100), maxiter=200)
+        except TypeError:  # scipy < 1.12 spells rtol "tol"
+            x, info = gmres(op, rhs, tol=_ITERATIVE_SOLVE_RTOL, atol=0.0,
+                             restart=min(n, 100), maxiter=200)
+        if info == 0:
+            return x.reshape(D, D)
+        return dense_solve(source)
 
     return solve
+
+
+def _resolvents_for(env, k):
+    """(resolve_L, resolve_R): this momentum's two `_channel_resolvent`
+    solve-callables, built on first use and cached on `env`.
+
+    Both depend only on `k` and on the momentum-independent environment,
+    never on the excitation tensor B (see `_channel_resolvent`'s own
+    docstring), so one cache entry serves every `_h_eff_action` call at this
+    momentum -- which is what turns the eigensolve's per-application cost
+    from "rebuild and factorize two D^2-by-D^2 maps" into two triangular
+    solves.
+
+    Keyed on the momentum's exact float bit pattern rather than a rounded
+    value: callers pass the same `k` object through a whole eigensolve, so
+    exact equality always hits, and a near-miss would only cost a rebuild,
+    never a wrong answer."""
+    cache = env.resolvent_cache
+    key = float(k)
+    if key not in cache:
+        phase = np.exp(1j * k)
+        cache[key] = (
+            _channel_resolvent(1.0 / phase, env.E_RL, env.r_RL, env.l_RL,
+                                idmrg._apply_transfer_from_left, env.D),
+            _channel_resolvent(phase, env.E_LR, env.r_LR, env.l_LR,
+                                idmrg._apply_transfer, env.D),
+        )
+    return cache[key]
 
 
 def _build_GBL(env, B, k):
@@ -506,8 +626,7 @@ def _build_GBL(env, B, k):
     GL_full = env.GL_full
     phase = np.exp(1j * k)
 
-    resolve = _channel_resolvent(1.0 / phase, env.E_RL, env.r_RL, env.l_RL,
-                                  idmrg._apply_transfer_from_left, D)
+    resolve = _resolvents_for(env, k)[0]
 
     def E_RL(M):
         return _op_transfer_matrix(AR, AL, M)
@@ -567,8 +686,7 @@ def _build_GBR(env, B, k):
     GR_full = env.GR_full
     phase = np.exp(1j * k)
 
-    resolve = _channel_resolvent(phase, env.E_LR, env.r_LR, env.l_LR,
-                                  idmrg._apply_transfer, D)
+    resolve = _resolvents_for(env, k)[1]
 
     def E_LR(M):
         return _op_transfer_matrix(AL, AR, M)
@@ -642,6 +760,11 @@ class ExcitationEnvironment:
         self.r_LR, self.l_LR = r_LR, l_LR
         self.e_cell = e_cell
         self.lam_AC = lam_AC
+        # {k: (resolve_L, resolve_R)} -- see `_resolvents_for`. Lives on the
+        # environment because the environment is itself cached per converged
+        # ground state (infinitechain.py's `_excitation_env`), so a momentum
+        # scan that revisits a k pays for its resolvents exactly once.
+        self.resolvent_cache = {}
 
 
 def build_excitation_environment(vumps_result):
@@ -731,18 +854,110 @@ def _build_H_eff_dense(k, env):
     return H
 
 
-def excitation_energies(env, k, n=1):
+def _lowest_dense(k, env, n):
+    """(w, X_list): the `n` lowest eigenpairs of H_eff(k), by building the
+    matrix and diagonalizing it. Exact, and the cheaper of the two paths
+    when `dim` is small -- see `_DENSE_EIG_MAX`."""
+    D, d_g = env.D, env.d_g
+    Dx = D * (d_g - 1)
+    Hmat = _build_H_eff_dense(k, env)
+    # Hermitize. H_eff is Hermitian analytically; what this removes is
+    # numerical noise, measured at ~1e-16 relative for k away from 0 and
+    # ~1e-11 at exactly k=0, where `_channel_resolvent`'s own regularizing
+    # projector is armed and its residual inherits the ground state's own
+    # VUMPS convergence tolerance.
+    Hmat = (Hmat + Hmat.conj().T) / 2
+    w, V = np.linalg.eigh(Hmat)
+    order = np.argsort(w)[:n]
+    return w[order], [V[:, j].reshape(Dx, D) for j in order]
+
+
+def _lowest_iterative(k, env, n):
+    """(w, X_list) via Lanczos on `_h_eff_action` directly, or None if the
+    iterative solve did not produce eigenpairs good enough to trust.
+
+    This is the whole point of not assembling H_eff(k): the dense build
+    costs `dim` = D*D*(d_g-1) applications of `_h_eff_action`, while ARPACK
+    needs a few hundred of them regardless of `dim` (measured, see
+    `_ITERATIVE_EIG_TOL`) -- so this wins once `dim` is the larger of the
+    two, and `_DENSE_EIG_MAX` is where that happens. Returning None rather
+    than a bad answer keeps the same contract `_solve_linear_map` has -- the
+    iterative path is never allowed to be *less* reliable than the dense one
+    it replaces, only cheaper.
+
+    Two details that are not optional:
+
+    - `v0` is fixed and deterministic. ARPACK's default start vector is
+      random, which would make a near-degenerate or gapless dispersion come
+      out slightly differently run to run -- exactly the regime the n_uc=2
+      Heisenberg cross-checks live in.
+    - the eigenpairs are residual-checked before being returned, which also
+      covers the Hermiticity question: Lanczos assumes a Hermitian operator,
+      and if the H-vs-H^dagger asymmetry that `_lowest_dense` averages away
+      were ever structural rather than noise, it would show up here as a
+      residual this check rejects."""
+    from scipy.sparse.linalg import ArpackError, ArpackNoConvergence
+    from scipy.sparse.linalg import LinearOperator, eigsh
+
+    D, d_g = env.D, env.d_g
+    Dx = D * (d_g - 1)
+    dim = Dx * D
+
+    def matvec(x):
+        return _h_eff_action(k, x.reshape(Dx, D), env).reshape(-1)
+
+    op = LinearOperator((dim, dim), dtype=complex, matvec=matvec)
+    v0 = np.ones(dim, dtype=complex) / np.sqrt(dim)
+    try:
+        w, V = eigsh(op, k=n, which="SA", v0=v0, tol=_ITERATIVE_EIG_TOL)
+    except (ArpackNoConvergence, ArpackError):
+        return None
+
+    order = np.argsort(w)
+    w, V = w[order], V[:, order]
+    scale = max(np.max(np.abs(w)), 1.0)
+    for j in range(len(w)):
+        resid = np.linalg.norm(matvec(V[:, j]) - w[j] * V[:, j])
+        if resid / scale > _ITERATIVE_EIG_RESIDUAL_MAX:
+            return None
+    return w, [V[:, j].reshape(Dx, D) for j in range(len(w))]
+
+
+def excitation_energies(env, k, n=1, return_vectors=False):
     """The lowest `n` excitation energies (above the ground state) at
     momentum `k` (radians, per unit cell) of the tangent-space/
     quasiparticle excitation ansatz.
 
     Solves the *ordinary* (not generalized -- see this module's own
     docstring, algorithm step 1) Hermitian eigenproblem H_eff(k)[X] =
-    lambda*X directly, then subtracts `env.lam_AC` from every raw
-    eigenvalue -- see `ExcitationEnvironment`'s own docstring for why this,
-    not `env.e_cell`, is the correct renormalization constant."""
-    Hmat = _build_H_eff_dense(k, env)
-    Hmat = (Hmat + Hmat.conj().T) / 2  # Hermitize (H is Hermitian; this is numerical noise cleanup)
-    w = np.linalg.eigvalsh(Hmat)
-    w = np.sort(w) - env.lam_AC
-    return w[:n]
+    lambda*X, then subtracts `env.lam_AC` from every raw eigenvalue -- see
+    `ExcitationEnvironment`'s own docstring for why this, not `env.e_cell`,
+    is the correct renormalization constant.
+
+    Two solvers, picked by problem size (`_DENSE_EIG_MAX`): assemble
+    H_eff(k) and call `eigh` for small ones, Lanczos on `_h_eff_action`
+    directly for large ones, falling back to the dense path if the
+    iterative solve does not converge to an acceptable residual. Both are
+    exercised by the test suite (the threshold is monkeypatched, the same
+    way `_DENSE_SOLVE_MAX` is). The dense path is not vestigial: `dim` can
+    legitimately be 1 (a D=1 spin-1/2 chain), where `eigsh` cannot be used
+    at all since ARPACK needs `nev < dim`.
+
+    `return_vectors=True` additionally returns the tangent-space parameters
+    X (a list of (D*(d_g-1), D) arrays, one per returned energy, in the same
+    order). The excitation tensor itself is B = (V_L @ X).reshape(D, d_g, D)
+    -- what a spectral weight <Psi|O|Phi_k(B)> is built from."""
+    dim = env.D * env.D * (env.d_g - 1)
+    n = min(n, dim)
+
+    got = None
+    if dim > _DENSE_EIG_MAX and n < dim:  # ARPACK needs nev < dim
+        got = _lowest_iterative(k, env, n)
+    if got is None:
+        got = _lowest_dense(k, env, n)
+
+    w, X_list = got
+    w = np.asarray(w) - env.lam_AC
+    if return_vectors:
+        return w, X_list
+    return w

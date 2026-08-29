@@ -332,6 +332,23 @@ model-specific exception:
    (`imps_overlap`/`apply_mpo`/`imps_sum`), neither of which
    `infinitechain.py` exposes for `gs_method="idmrg"`.
 
+10. **The excitation ansatz's solver improvements, mirrored on
+   `itensor_version=3`.** `pyitensor/idmrg_excitations.py` now caches the
+   momentum-dependent channel resolvents per momentum instead of rebuilding
+   them inside every `_h_eff_action` call (they depend only on `k` and the
+   momentum-independent environment, never on the excitation tensor `B`),
+   and solves `H_eff(k)` by Lanczos on its action rather than by assembling
+   it once the eigenproblem exceeds `_DENSE_EIG_MAX`. Neither changes a
+   returned number — both are cross-checked against the dense path in
+   `tests/test_infinite_chain.py`. `mpscpp3/chain_session.h`'s
+   `Chain::vumps_build_h_eff_dense` is an independent port carrying the same
+   rebuild-per-application pattern in `vx_regularized_solve`'s callers, and
+   still assembles `H_eff(k)` densely, so the two backends now differ in
+   cost (not results) for `excitation_energies`/`excitation_gap`. Mirroring
+   at least the resolvent cache there is the natural follow-up; a C++
+   Lanczos is separate work again. See `docs/idmrg_improvement_plan.md`,
+   which also ranks what else is worth doing on infinite chains.
+
 After adding a capability to a backend, update this file's matrix and,
 if it's a new physics-facing method, `docs/user_guide.md`/`.tex` per
 `CLAUDE.md`'s documentation policy.

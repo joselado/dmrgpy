@@ -1901,6 +1901,113 @@ def test_iterative_dominant_fixed_point_matches_dense(n_uc, monkeypatch):
         assert np.allclose(rho_iter, rho_dense, atol=1e-8)
 
 
+def test_excitation_iterative_eigensolver_matches_dense(monkeypatch):
+    """`excitation_energies`' Lanczos route must reproduce the dense
+    assemble-and-`eigh` route it replaces above `_DENSE_EIG_MAX`.
+
+    The point of the iterative route is that it needs only tens of
+    `_h_eff_action` applications instead of `dim = D*D*(d_g-1)` of them, so
+    the two paths are only ever compared here -- in production one or the
+    other runs, picked by size. Uses a D=2 TFIM (dim=4, normally dense) with
+    the threshold monkeypatched both ways, the same style as
+    test_iterative_linear_solve_matches_dense below."""
+    from dmrgpy.pyitensor import idmrg_excitations as idmrg_exc
+
+    J, g = 1.0, 2.5
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "vumps"
+    ic.maxm = 2
+    ic.etol = 1e-12
+    ic.vumps_nrestarts = 6
+    ic.set_hamiltonian(-4.0 * J * ic.SxC[0] * ic.SxR[0] - 2.0 * g * ic.SzC[0])
+    ic.gs_energy()
+    env = ic._get_excitation_environment()
+
+    for k in [0.0, 0.7, 2.6]:
+        monkeypatch.setattr(idmrg_exc, "_DENSE_EIG_MAX", 10 ** 9)
+        dense = idmrg_exc.excitation_energies(env, k, n=2)
+        monkeypatch.setattr(idmrg_exc, "_DENSE_EIG_MAX", 0)
+        iterative = idmrg_exc.excitation_energies(env, k, n=2)
+        assert np.allclose(iterative, dense, atol=1e-9), (k, dense, iterative)
+
+
+def test_excitation_dense_path_survives_dim_one():
+    """A D=1 spin-1/2 chain has dim = D*D*(d_g-1) = 1, where ARPACK cannot
+    be used at all (it needs nev < dim). The dense path is what keeps this
+    working, so it is not an optimization that could be dropped once the
+    iterative one exists -- pinned here because the threshold that normally
+    protects it is a tunable constant."""
+    from dmrgpy.pyitensor import idmrg_excitations as idmrg_exc
+
+    J, h = 1.0, 3.0
+    ic = _polarized_xx_chain(J, h, maxm=1, gs_method="vumps")
+    env = ic._get_excitation_environment()
+    assert env.D * env.D * (env.d_g - 1) == 1
+    got = idmrg_exc.excitation_energies(env, 0.7, n=1)
+    assert got[0] == pytest.approx(2 * h - J * np.cos(0.7), abs=1e-8)
+
+
+def test_excitation_energies_can_return_eigenvectors():
+    """`return_vectors=True` hands back the tangent-space parameters X
+    alongside the energies -- what a spectral weight is built from. Checks
+    the shape contract and that each X really is an eigenvector of the same
+    H_eff(k) the energy came from."""
+    from dmrgpy.pyitensor import idmrg_excitations as idmrg_exc
+
+    J, g = 1.0, 2.5
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "vumps"
+    ic.maxm = 3
+    ic.etol = 1e-12
+    ic.vumps_nrestarts = 6
+    ic.set_hamiltonian(-4.0 * J * ic.SxC[0] * ic.SxR[0] - 2.0 * g * ic.SzC[0])
+    ic.gs_energy()
+    env = ic._get_excitation_environment()
+
+    k = 0.9
+    w, xs = idmrg_exc.excitation_energies(env, k, n=2, return_vectors=True)
+    assert len(xs) == len(w) == 2
+    Dx = env.D * (env.d_g - 1)
+    for X, lam in zip(xs, w):
+        assert X.shape == (Dx, env.D)
+        # H_eff(k)[X] = (lam + lam_AC) * X -- `excitation_energies` reports
+        # the energy *above* the ground state, i.e. with lam_AC subtracted.
+        residual = idmrg_exc._h_eff_action(k, X, env) - (lam + env.lam_AC) * X
+        assert np.linalg.norm(residual) < 1e-8, np.linalg.norm(residual)
+
+
+def test_excitation_resolvents_are_cached_per_momentum():
+    """The GBL/GBR channel resolvents depend only on the momentum and the
+    environment, never on the excitation tensor B -- so one per momentum is
+    enough, and rebuilding them inside every `_h_eff_action` call (which is
+    what used to happen) repeated a dense build plus an O(D^6)
+    factorization for nothing."""
+    from dmrgpy.pyitensor import idmrg_excitations as idmrg_exc
+
+    ic = _polarized_xx_chain(maxm=1, gs_method="vumps")
+    env = ic._get_excitation_environment()
+    assert env.resolvent_cache == {}
+
+    built = []
+    real_resolvent = idmrg_exc._channel_resolvent
+
+    def counting_resolvent(*args, **kwargs):
+        built.append(1)
+        return real_resolvent(*args, **kwargs)
+
+    idmrg_exc._channel_resolvent = counting_resolvent
+    try:
+        idmrg_exc.excitation_energies(env, 0.4, n=1)
+        after_first = len(built)
+        idmrg_exc.excitation_energies(env, 0.4, n=1)
+        assert len(built) == after_first  # same k: fully cached
+        idmrg_exc.excitation_energies(env, 1.1, n=1)
+        assert len(built) == after_first + 2  # a new k: one per direction
+    finally:
+        idmrg_exc._channel_resolvent = real_resolvent
+    assert set(env.resolvent_cache) == {0.4, 1.1}
+
+
 def test_iterative_linear_solve_matches_dense(monkeypatch):
     """_solve_linear_map's GMRES route must reproduce the dense LU route."""
     from dmrgpy.pyitensor import idmrg_excitations as idmrg_exc
