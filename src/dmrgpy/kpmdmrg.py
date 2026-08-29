@@ -56,12 +56,44 @@ def restrict_interval(x,y,window):
 def get_dynamical_correlator(self,n=1000,
              name=None,delta=1e-1,kernel="jackson",
              es=np.linspace(-1.,10,500),deconvolve=None,
+             hodc_order=6,hodc_eta=None,
              **kwargs):
     """
     Compute a dynamical correlator using the KPM-DMRG method, via the
     in-process pybind11 extension (mpscpp2/chain_session.h's
     Chain::kpm_dynamical_correlator).
+
+    kernel selects the reconstruction applied to the Chebyshev moments:
+    "jackson" (default), "lorentz", "plain", or "hodc" for the high-order
+    delta-Chebyshev kernel of arXiv:2512.03149 (see algebra/kpm.py).
+    hodc_order/hodc_eta are the order m and regularization width of the
+    latter and are ignored by every other kernel; hodc_eta is given in
+    the same energy units as delta/es and defaults to delta itself.
+
+    The moment computation is identical for every kernel -- see
+    dynamical_correlator_moments()/dynamical_correlator_from_moments(),
+    which this function just composes, and which let two kernels be
+    compared from a single (expensive) moment run.
     """
+    mus,emin,emax,scale,n,delta = dynamical_correlator_moments(self,
+            name=name,delta=delta,**kwargs)
+    return dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
+            kernel=kernel,delta=delta,
+            hodc_order=hodc_order,hodc_eta=hodc_eta)
+
+
+def dynamical_correlator_moments(self,name=None,delta=1e-1,**kwargs):
+    """Compute the raw (undamped) KPM-DMRG Chebyshev moments
+    <name[0]|T_k(H_scaled)|name[1]> of a dynamical correlator, plus
+    everything needed to turn them into a spectrum.
+
+    Returns (mus,emin,emax,scale,n,delta), where scale/emin/emax define
+    the rescaling of the spectrum onto [-1,1], n is the number of
+    polynomials the backend chose (before any kpm_extrapolate resampling
+    of mus) and delta is the effective resolution actually requested.
+    Split out of get_dynamical_correlator() so a caller can reconstruct
+    the same moments with several kernels without repeating the DMRG
+    work, which is all of the cost."""
     if delta<0.0: raise
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
     self.get_gs() # compute ground state (also sets self.e0)
@@ -89,11 +121,29 @@ def get_dynamical_correlator(self,n=1000,
     if self.kpm_extrapolate:
         mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
                 extrapolation_mode=self.kpm_extrapolate_mode)
+    return mus,emin,emax,scale,n,delta
+
+
+def dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
+        kernel="jackson",delta=None,hodc_order=6,hodc_eta=None):
+    """Reconstruct a dynamical correlator on the energy grid es from the
+    output of dynamical_correlator_moments(). See get_dynamical_
+    correlator() for the meaning of kernel/hodc_order/hodc_eta."""
     xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
-    ys = generate_profile(mus,xs,use_fortran=False,kernel=kernel) # generate the DOS
-    xs /= scale # scale back the energies
-    xs += (emin+emax)/2. -emin # shift the energies
-    ys *= scale # renormalize the y values
+    if kernel=="hodc":
+        # hodc_eta is quoted in physical energy units, like delta and es;
+        # generate_profile wants it in the rescaled units of xs, i.e.
+        # before the "xs/scale" below. Left unset it defaults to the
+        # requested resolution delta, which is also what keeps n*eta in
+        # the flat minimum of HODC's error-vs-eta curve -- see
+        # algebra/kpm.py's HODC_DEFAULT_P_ETA.
+        if hodc_eta is not None: hodc_eta = hodc_eta*scale
+        elif delta is not None: hodc_eta = delta*scale
+    ys = generate_profile(mus,xs,use_fortran=False,kernel=kernel,
+            hodc_order=hodc_order,hodc_eta=hodc_eta) # generate the DOS
+    xs = xs/scale # scale back the energies
+    xs = xs + (emin+emax)/2. -emin # shift the energies
+    ys = ys*scale # renormalize the y values
     from scipy.interpolate import interp1d
     fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
@@ -160,7 +210,7 @@ def general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,accelerate):
     return np.array(mus)
 
 
-def general_kpm(self,kernel="jackson",xs=None,**kwargs):
+def general_kpm(self,kernel="jackson",xs=None,hodc_order=6,hodc_eta=None,**kwargs):
     """
     Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
     """
@@ -169,7 +219,12 @@ def general_kpm(self,kernel="jackson",xs=None,**kwargs):
     kpmscales = scale
     num_p = len(mus)
     xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
-    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel) # generate the DOS
+    # hodc_eta is quoted in the units of the returned (physical) x axis,
+    # as it is in get_dynamical_correlator; generate_profile wants it in
+    # the rescaled units of xs2, before the "xs2 *= scale" below.
+    if kernel=="hodc" and hodc_eta is not None: hodc_eta = hodc_eta/scale
+    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel,
+            hodc_order=hodc_order,hodc_eta=hodc_eta) # generate the DOS
     xs2 += shift # add the shift
     xs2 *= scale # scale
     ys2 /= scale # scale
@@ -198,7 +253,7 @@ def scale_operator(self,X,a=-0.9,b=0.9):
 
 
 # this function is a bit redundant with general_kpm
-def kpm_wfa_wfb(self,kernel="jackson",xs=None,**kwargs):
+def kpm_wfa_wfb(self,kernel="jackson",xs=None,hodc_order=6,hodc_eta=None,**kwargs):
     """
     Compute a dynamical correlator of wfa and wfb
     """
@@ -207,7 +262,12 @@ def kpm_wfa_wfb(self,kernel="jackson",xs=None,**kwargs):
     kpmscales = scale
     num_p = len(mus)
     xs2 = 0.99*np.linspace(-1.0,1.0,int(num_p*10),endpoint=False) # energies
-    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel) # generate the DOS
+    # hodc_eta is quoted in the units of the returned (physical) x axis,
+    # as it is in get_dynamical_correlator; generate_profile wants it in
+    # the rescaled units of xs2, before the "xs2 *= scale" below.
+    if kernel=="hodc" and hodc_eta is not None: hodc_eta = hodc_eta/scale
+    ys2 = generate_profile(mus,xs2,use_fortran=False,kernel=kernel,
+            hodc_order=hodc_order,hodc_eta=hodc_eta) # generate the DOS
     xs2 += shift # add the shift
     xs2 *= scale # scale
     ys2 /= scale # scale

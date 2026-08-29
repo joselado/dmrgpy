@@ -457,8 +457,203 @@ def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
 
 
 
-def generate_profile(mus,xs,kernel="jackson",use_fortran=use_fortran):
+
+# ---------------------------------------------------------------------
+# High-order delta-Chebyshev (HODC) reconstruction
+#
+# Yi, Massatt, Horning, Luskin, Pixley & Kaye, "A high-order regularized
+# delta-Chebyshev method for computing spectral densities",
+# arXiv:2512.03149 (2025).
+#
+# Ordinary KPM damps the moments, mu_k -> g_k mu_k, and reconstructs with
+# the Chebyshev expansion of delta itself; the damping factors g_k are
+# what make the result a *positive* kernel of width ~pi/p, and the price
+# is that every such kernel is only second-order accurate: the
+# reconstructed density is rho convolved with something whose error at a
+# smooth point is O(p^-2).
+#
+# HODC keeps the moments untouched and changes what is reconstructed.
+# delta(E-x) is replaced by the order-m rational regularization (Eq. 15)
+#
+#     K_eta(E,x) = -1/pi sum_l Im[ w_l / (E - x + eta*z_l) ] ,
+#
+# a sum of m complex-weighted Lorentzians of width eta, with poles
+# z_l = x_l + i (Eq. 16). Writing F(zeta) = int rho(x)/(zeta-x) dx for the
+# Cauchy transform of the density and expanding F(E+eta*z_l) about
+# eta = 0, the l-sum multiplies the j-th derivative by sum_l w_l z_l^j, so
+# imposing the Vandermonde moment-matching conditions
+#
+#     sum_l w_l z_l^j = delta_{j0} ,   j = 0 ... m-1                 (*)
+#
+# annihilates every term below j = m and leaves K_eta -> delta weakly at
+# O(eta^m). m = 1 is w = 1, z = i, i.e. plain Lorentzian broadening,
+# which is only O(eta) -- the Lorentzian's second moment diverges, so the
+# usual "even kernel kills the linear term" argument does not apply and
+# the tails dominate. (*) also kills the large-|u| tail of K_eta itself
+# through the same cancellation, leaving eta^m/u^(m+1) rather than the
+# Lorentzian's eta/u^2.
+#
+# Because delta itself never appears, the reconstruction is no longer
+# "damped moments times T_k(E)": expanding K_eta(E,.) in Chebyshev
+# polynomials (Eq. 17) gives energy-*dependent* coefficients nu_k(E,eta),
+# and (Eq. 18)
+#
+#     rho^eta(E) = sum_{k<p} nu_k(E,eta) mu_k ,    mu_k = <b|T_k(H)|a>,
+#
+# with the *raw* moments -- the same ones ordinary KPM starts from. So
+# this is pure post-processing: no extra Chebyshev recursion, no change
+# to any DMRG/ED backend, and both kernels can be compared from a single
+# moment run.
+#
+# The paper computes nu_k by evaluating (15) at Chebyshev nodes and
+# applying a fast cosine transform. That is unnecessary here: the
+# Chebyshev expansion of a single Cauchy kernel is classical,
+#
+#     1/(zeta-x) = (1/sqrt(zeta^2-1)) [ 1 + 2 sum_{k>=1} q^k T_k(x) ],
+#     q = zeta - sqrt(zeta^2-1)   (the root with |q| < 1),
+#
+# so with zeta_l = E + eta*z_l the coefficients are closed-form,
+#
+#     nu_k(E,eta) = (2-delta_{k0}) * (-1/pi) * Im sum_l w_l q_l^k
+#                                                 / sqrt(zeta_l^2-1) ,
+#
+# and are real, so complex moments (a != b) work exactly as they do for
+# jackson. |q_l| = 1 - O(eta) makes q_l^k the whole convergence story:
+# the truncation at p terms costs ~exp(-p*eta), which is why eta cannot
+# be taken arbitrarily small at fixed p -- see hodc_default_eta.
+#
+# Caveat from the paper, reproduced here: for m > 2 the kernel is not
+# positive, so the reconstructed density can go slightly negative near
+# sharp features. That is the trade for the higher order, not a bug.
+# ---------------------------------------------------------------------
+
+HODC_MAX_ORDER = 8 # solving (*) in double precision degrades beyond this
+
+# p*eta at which the default eta is placed. This is not arbitrary: it is
+# the value that dmrgpy's own KPM conventions already imply. kpmdmrg's
+# get_dynamical_correlator asks for n = (emax-emin)/delta * kpm_n_scale
+# polynomials and rescales the spectrum by scale = 1/((emax-emin)*
+# kpm_scale), so setting eta to the *requested* resolution delta gives
+# n*eta*scale = kpm_n_scale/kpm_scale = 3/0.7 = 4.3 with the default
+# kpm_n_scale/kpm_scale. Empirically that also sits in the flat minimum of
+# the error-vs-eta curve *for accurate moments* (see examples/
+# dynamical_correlator/hodc_VS_jackson_kernel): below ~2 the truncated
+# Chebyshev series rings, above ~8 the O(eta^m) smoothing error takes
+# over. The optimum moves up when the moments themselves are noisy --
+# nu_k ~ q^k decays like exp(-k*eta), so eta is also the only damping
+# HODC applies to the high-k moments, which are exactly the ones an MPS
+# truncation gets wrong. That, not the value below, is the knob to reach
+# for when an HODC spectrum from a modest-bond-dimension run looks worse
+# than the Jackson one.
+HODC_DEFAULT_P_ETA = 4.0
+
+
+def hodc_default_eta(npol):
+    """Default HODC regularization width for npol Chebyshev moments, in
+    the rescaled energy units where the spectrum lives in [-1,1]."""
+    return HODC_DEFAULT_P_ETA/float(npol)
+
+
+def hodc_poles_weights(order=6):
+    """Poles z_l = x_l + i and weights w_l of the order-m regularized
+    delta (Eq. 15/16 of arXiv:2512.03149), solving the Vandermonde
+    moment-matching system sum_l w_l z_l^j = delta_{j0}, j < m.
+
+    The paper fixes Im z_l = 1 but leaves the real parts x_l unspecified.
+    They are taken here as `order` equispaced points of unit spacing,
+    symmetric about 0 -- the spacing matched to the (unit) pole height,
+    which is the balanced choice: crowding the x_l together makes the
+    Vandermonde system singular and the weights blow up, while spreading
+    them out widens the kernel at fixed eta for no gain. The symmetry
+    about 0 makes the pole set invariant under z -> -conj(z), hence
+    w -> conj(w) by uniqueness, hence K_eta even in E-x."""
+    order = int(order)
+    if order<1 or order>HODC_MAX_ORDER:
+        raise ValueError("hodc: order must be in 1..%d, got %s"%(
+            HODC_MAX_ORDER,order))
+    z = (np.arange(order) - (order-1)/2.0) + 1j
+    V = np.vander(z,N=order,increasing=True).T # V[j,l] = z_l**j
+    rhs = np.zeros(order,dtype=np.complex128) ; rhs[0] = 1.0
+    return z,np.linalg.solve(V,rhs)
+
+
+def _hodc_qa(xs,order,eta):
+    """(q_l(E), a_l(E)) with a_l = w_l/sqrt(zeta_l^2-1), shape (m,len(xs))."""
+    z,w = hodc_poles_weights(order)
+    zeta = np.asarray(xs,dtype=np.complex128)[None,:] + eta*z[:,None]
+    # sqrt(zeta-1)*sqrt(zeta+1), not sqrt(zeta**2-1): the factored form
+    # avoids the cancellation in zeta**2-1 for |zeta| close to 1, which is
+    # exactly where the KPM window's endpoints sit.
+    s = np.sqrt(zeta-1.0)*np.sqrt(zeta+1.0)
+    q = zeta - s
+    q = np.where(np.abs(q)>1.0,zeta+s,q) # pick the root inside the disc
+    return q,w[:,None]/s
+
+
+def hodc_coefficients(xs,npol,order=6,eta=None):
+    """nu_k(E,eta) of arXiv:2512.03149 Eq. (17), as a real (npol,len(xs))
+    array, so that rho(E) = sum_k nu_k(E) mu_k.
+
+    This materializes the full coefficient matrix and is meant for
+    testing/inspection; generate_profile_hodc() evaluates the same sum
+    without ever storing it."""
+    xs = np.asarray(xs)
+    npol = int(npol)
+    if eta is None: eta = hodc_default_eta(npol)
+    q,a = _hodc_qa(xs,order,float(eta))
+    nus = np.zeros((npol,xs.size))
+    qp = np.ones_like(q)
+    for k in range(npol):
+        nus[k] = -np.sum(a*qp,axis=0).imag/np.pi
+        if k>0: nus[k] *= 2.0
+        qp = qp*q
+    return nus
+
+
+def _hodc_horner(cs,q,a):
+    """sum_k (2-delta_k0) cs[k] * (-1/pi) Im sum_l a_l q_l^k, for a real
+    coefficient array cs. Since cs is real it commutes with Im, so the
+    whole k-sum collapses to one Horner evaluation of
+    P(q) = cs[0] + 2 sum_{k>=1} cs[k] q^k at the m poles -- O(m*npol)
+    work per energy and no (npol,npts) temporary."""
+    n = len(cs)
+    b = np.zeros_like(q)
+    for k in range(n-1,0,-1): b = b*q + 2.0*cs[k]
+    b = b*q + cs[0]
+    return -np.sum(a*b,axis=0).imag/np.pi
+
+
+def generate_profile_hodc(mus,xs,order=6,eta=None):
+    """Reconstruct a spectral density from raw Chebyshev moments with the
+    high-order delta-Chebyshev kernel instead of a damped-moment KPM one.
+
+    mus are the *undamped* moments <b|T_k(H)|a> (exactly what
+    generate_profile receives), xs the rescaled energies in [-1,1], order
+    the accuracy order m, and eta the regularization width in the same
+    rescaled units (default hodc_default_eta(len(mus))). Returns a complex
+    array, matching generate_profile's convention."""
+    mus = np.asarray(mus)
+    xs = np.asarray(xs)
+    npol = len(mus)
+    if eta is None: eta = hodc_default_eta(npol)
+    eta = float(eta)
+    if eta<=0.0: raise ValueError("hodc: eta must be positive, got %s"%eta)
+    q,a = _hodc_qa(xs,order,eta)
+    if np.iscomplexobj(mus): # nu_k is real, so real/imag parts decouple
+        return (_hodc_horner(mus.real,q,a)
+                + 1j*_hodc_horner(mus.imag,q,a))
+    return _hodc_horner(np.asarray(mus,dtype=float),q,a) + 0.0j
+
+
+def generate_profile(mus,xs,kernel="jackson",use_fortran=use_fortran,
+        hodc_order=6,hodc_eta=None):
     """ Uses the Chebychev expansion to create a certain profile"""
+    # HODC is not a damped-moment kernel -- it replaces the whole
+    # reconstruction (energy-dependent coefficients, no 1/sqrt(1-x^2)
+    # prefactor), so it short-circuits everything below, the fortran
+    # path included. See generate_profile_hodc.
+    if kernel=="hodc":
+        return generate_profile_hodc(mus,xs,order=hodc_order,eta=hodc_eta)
     # initialize polynomials
   #  xs = np.array([0.])
     tm = np.zeros(xs.shape) +1.
@@ -485,7 +680,8 @@ def generate_profile(mus,xs,kernel="jackson",use_fortran=use_fortran):
 
 
 
-def generate_profile_pair(mus_r,mus_i,xs,kernel="jackson",use_fortran=use_fortran):
+def generate_profile_pair(mus_r,mus_i,xs,kernel="jackson",use_fortran=use_fortran,
+        hodc_order=6,hodc_eta=None):
     """Evaluate generate_profile for two real moment arrays (mus_r, mus_i)
     against the same xs grid in one pass. generate_profile's Chebyshev
     recursion (tp = 2*xs*t - tm) depends only on xs, not on the moments,
@@ -494,6 +690,9 @@ def generate_profile_pair(mus_r,mus_i,xs,kernel="jackson",use_fortran=use_fortra
     summed, since the final result combines them as ysr - 1j*ysi, not
     generate_profile(mus_r+1j*mus_i)) used to redo that recursion twice;
     this shares it across both instead."""
+    if kernel=="hodc": # see generate_profile's own note
+        return (generate_profile_hodc(mus_r,xs,order=hodc_order,eta=hodc_eta),
+                generate_profile_hodc(mus_i,xs,order=hodc_order,eta=hodc_eta))
     if kernel=="jackson": mus_r = jackson_kernel(mus_r); mus_i = jackson_kernel(mus_i)
     elif kernel=="lorentz": mus_r = lorentz_kernel(mus_r); mus_i = lorentz_kernel(mus_i)
     elif kernel=="plain": pass # do nothing

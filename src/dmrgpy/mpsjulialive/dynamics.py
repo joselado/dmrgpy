@@ -2,7 +2,7 @@ import numpy as np
 
 from .. import multioperator
 from ..algebra import kpm
-from ..algebra.kpm import generate_profile
+from ..kpmdmrg import dynamical_correlator_from_moments
 
 
 def _max_energy_bound(self,H):
@@ -129,6 +129,7 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
 def _kpm_dynamical_correlator(self,n=1000,
              name=None,delta=1e-1,kernel="jackson",
              es=np.linspace(-1.,10,500),deconvolve=None,
+             hodc_order=6,hodc_eta=None,
              **kwargs):
     """The submode="KPM" implementation, factored out of
     get_dynamical_correlator so its own named-parameter defaults can't
@@ -170,12 +171,9 @@ def _kpm_dynamical_correlator(self,n=1000,
     if self.kpm_extrapolate:
         mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
                 extrapolation_mode=self.kpm_extrapolate_mode)
-    xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
-    ys = generate_profile(mus,xs,use_fortran=False,kernel=kernel) # generate the DOS
-    xs /= scale # scale back the energies
-    xs += (emin+emax)/2. -emin # shift the energies
-    ys *= scale # renormalize the y values
-    from scipy.interpolate import interp1d
-    fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)
-    fi = interp1d(xs, ys.imag,fill_value=0.0,bounds_error=False)
-    return (es,fr(es)+1j*fi(es)) # interpolate
+    # the reconstruction is backend-independent (it only ever sees the
+    # moments), so it is shared with kpmdmrg.py rather than duplicated --
+    # which is also what gives julia_live kernel="hodc" for free
+    return dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
+            kernel=kernel,delta=delta,
+            hodc_order=hodc_order,hodc_eta=hodc_eta)

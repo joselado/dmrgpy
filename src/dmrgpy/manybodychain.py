@@ -777,6 +777,21 @@ class Many_Body_Chain():
           return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED":
           return self.get_ED_obj().get_dynamical_correlator(**kwargs)
+  def get_dynamical_correlator_moments(self,**kwargs):
+      """Return the raw KPM Chebyshev moments of a dynamical correlator,
+      together with the rescaling data needed to reconstruct a spectrum
+      from them: (mus,emin,emax,scale,n,delta).
+
+      This is the expensive half of submode="KPM"'s
+      get_dynamical_correlator(); feeding the result to
+      kpmdmrg.dynamical_correlator_from_moments() reconstructs a spectrum
+      with any kernel ("jackson", "lorentz", "plain", "hodc") without
+      repeating the DMRG work, which is what makes a kernel-vs-kernel
+      comparison meaningful (same moments, no re-convergence in between).
+      DMRG/KPM only -- there is no ED counterpart, since the ED path
+      builds spectra by explicit summation rather than from moments."""
+      from . import kpmdmrg
+      return kpmdmrg.dynamical_correlator_moments(self,**kwargs)
   def get_distribution(self,mode="DMRG",**kwargs):
       """Return the distribution of an operator's spectrum"""
       if mode=="DMRG":

@@ -1039,6 +1039,78 @@ too tight for the chosen `kpm_scale`, the moment recursion detects the
 resulting exponential divergence and aborts with an explicit error
 rather than returning a silently wrong spectrum.
 
+**Reconstruction kernel (`kernel=`) — how the moments become a
+spectrum.** The formula above is only one way to turn $\{\mu_m\}$ into
+$S_{AB}$. `kernel="jackson"` (the default) is the classic choice;
+`"lorentz"` and `"plain"` are the usual alternatives. Every one of them
+damps the moments, $\mu_m\to g_m\mu_m$, which is equivalent to
+convolving the exact spectrum with a positive kernel of width $\sim\pi/N$
+— and *any* such kernel is only second-order accurate, so the error at a
+smooth point decays as $O(N^{-2})$ no matter how many moments are spent.
+
+`kernel="hodc"` selects the high-order delta-Chebyshev reconstruction of
+Yi, Massatt, Horning, Luskin, Pixley & Kaye, [arXiv:2512.03149
+(2025)](https://arxiv.org/abs/2512.03149), which breaks that
+second-order barrier. Instead of damping the moments it replaces
+$\delta$ itself by the order-$m$ rational regularization
+
+$$K_\eta(E,x)=-\frac1\pi\sum_{l=1}^{m}\mathrm{Im}\left[\frac{w_l}{E-x+\eta z_l}\right],\qquad z_l=x_l+i,\qquad \sum_{l}w_l z_l^{\,j}=\delta_{j0}\ \ (j<m)$$
+
+— $m$ complex-weighted Lorentzians of width $\eta$, whose weights are
+fixed by a Vandermonde moment-matching system that annihilates the first
+$m-1$ terms of the small-$\eta$ expansion, leaving $K_\eta\to\delta$ at
+$O(\eta^m)$ rather than $O(\eta)$. Expanding $K_\eta(E,\cdot)$ in
+Chebyshev polynomials gives energy-*dependent* coefficients
+$\nu_m(E,\eta)$ and the reconstruction
+
+$$S_{AB}(\tilde\omega)=\sum_{m=0}^{N-1}\nu_m(\tilde\omega,\eta)\,\mu_m$$
+
+from the **same, undamped** moments. Nothing in the expensive half of the
+calculation changes — no extra Chebyshev recursion, no backend change,
+and `kernel=` is available on every backend that supports
+`submode="KPM"`. `hodc_order` is $m$ (default 6, the paper's own choice;
+1–8 are allowed, and $m=1$ degenerates to plain Lorentzian broadening),
+and `hodc_eta` is $\eta$ in the same energy units as `delta`/`es`,
+defaulting to `delta` itself — i.e. "you asked for resolution `delta`,
+you get resolution `delta`, with an $O(\delta^m)$ error instead of an
+$O(\delta^2)$ one". Two caveats, both inherited from the method rather
+than from this implementation:
+
+* The kernel is **not positive** for $m>2$, so the reconstructed
+  spectrum can dip slightly negative next to a sharp feature. That is the
+  price of the higher order.
+* The gain is an asymptotic statement about *smooth* points. It is real
+  where the spectrum is a continuum and disappears at a van Hove
+  singularity or a band edge, and it disappears entirely for a spectrum
+  made of isolated $\delta$-peaks, which is not smooth at any
+  resolution. `examples/dynamical_correlator/hodc_VS_jackson_kernel`
+  measures both regimes against an exactly solvable case.
+* **It is more sensitive to MPS truncation noise than Jackson**, and this
+  one is specific to using it inside DMRG rather than to the method. The
+  Chebyshev recursion is only conditionally stable under truncation: the
+  error in $\mu_m$ grows roughly exponentially in $m$, and a damping
+  kernel's $g_m\to0$ as $m\to N$ happens to suppress exactly the worst
+  moments. HODC takes them undamped — its only high-$m$ suppression is
+  the $\nu_m\sim q^m\sim e^{-m\eta}$ decay of its own coefficients. So at
+  modest `kpmmaxm` the useful moment count is capped by moment accuracy
+  well before it is capped by cost, and if an HODC spectrum looks *worse*
+  than the Jackson one the first thing to try is a larger `hodc_eta`
+  (more damping), not more moments. Measured in that example, on an XX
+  chain at `kpmmaxm=32` with $N=1200$ moments whose error has grown to
+  $O(10^2)$ by the last of them: at the default $N\eta\approx3.3$ HODC is
+  more than 10x *worse* than Jackson, and at $N\eta\approx14$ it is
+  several times better (4-8x, drifting between DMRG runs).
+  On exact moments the same sweep puts the optimum right at the default,
+  which is where it belongs. The same example measures the moment
+  error directly against exact moments, which is the cleanest way to find
+  where that horizon sits for a given chain.
+
+Because the kernel only enters after the moments exist,
+`sc.get_dynamical_correlator_moments(...)` returns the raw
+$(\mu,E_\mathrm{min},E_\mathrm{max},a,N,\delta)$ and
+`kpmdmrg.dynamical_correlator_from_moments(...)` reconstructs from them,
+so several kernels can be compared without repeating the DMRG work.
+
 **Energy truncation (`itensor_version="python"` and `3`) — narrowing the KPM window
 below the full bandwidth.** The default `kpm_scale` rescales $H$ so its
 *entire* many-body spectrum fits in $[-1,1]$, which is always safe but
