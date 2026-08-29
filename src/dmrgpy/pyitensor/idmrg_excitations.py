@@ -765,6 +765,12 @@ class ExcitationEnvironment:
         # ground state (infinitechain.py's `_excitation_env`), so a momentum
         # scan that revisits a k pays for its resolvents exactly once.
         self.resolvent_cache = {}
+        # The same two caches for the spectral-weight machinery, filled
+        # lazily by `_spectral_cache`/`_spectral_resolvents_for` -- lazily
+        # rather than here, so a chain that only ever asks for a dispersion
+        # never pays for either (see `_spectral_source_vector`).
+        self._spectral_pieces = None
+        self._spectral_resolvent_cache = {}
 
 
 def build_excitation_environment(vumps_result):
@@ -961,3 +967,285 @@ def excitation_energies(env, k, n=1, return_vectors=False):
     if return_vectors:
         return w, X_list
     return w
+
+
+# ---------------------------------------------------------------------------
+# Spectral weights: <Phi_k(B)|O(k)|Psi>, the exact delta-peak weight of each
+# excitation branch (docs/idmrg_improvement_plan.md item 2).
+# ---------------------------------------------------------------------------
+
+def _spectral_resolvent(phase_factor, E, X0, apply_fn, D):
+    """A `solve(source) -> G` callable for the *transposed*, deflated
+    geometric-series map
+
+        (I - phase_factor*T + Pi)[G] = source,   T[G] = apply_fn(E, G)
+
+    where `T`'s dominant eigenvalue is exactly 1 with right eigenvector the
+    identity and left eigenvector `X0` (normalized to trace(X0)=1), and
+    `Pi[G] = I * sum(X0 * G)` is that eigenvalue's own spectral projector
+    written in the *bilinear* pairing `<X,Y> = sum_a X[a]*Y[a]` (no
+    conjugation anywhere -- this whole helper lives on the transposed side
+    of `_spectral_source_vector`'s own derivation, see its docstring).
+
+    `Pi` is added at EVERY momentum, not only at the singular one. That is
+    deliberate and is exactly what makes this well-conditioned near k=0:
+    deflating replaces the identity direction's own eigenvalue 1-phase_factor
+    (which vanishes at k=0, and is merely tiny just next to it) by
+    2-phase_factor, leaving every other direction untouched. The resulting
+    G differs from the un-deflated solution by a multiple of the identity,
+    and `_spectral_source_vector` contracts that multiple into a multiple of
+    AC, which its own final V_L^dagger projection annihilates exactly (V_L
+    is built as the null space of AL_mat^dagger, and AC = AL_mat @ C) -- so
+    the returned spectral weight is unchanged while the conditioning is
+    bounded uniformly in k. Doing this only at k==0, the way
+    `_channel_resolvent` has to, would leave a genuinely ill-conditioned
+    solve at every small-but-nonzero momentum.
+
+    Same dense-vs-iterative split (and same threshold) as
+    `_channel_resolvent`: LU-factor the (D*D,D*D) map once and reuse it,
+    or GMRES on the callable above `_RESOLVENT_DENSE_MAX`."""
+    def action(G):
+        return G - phase_factor * apply_fn(E, G) + np.eye(D) * np.sum(X0 * G)
+
+    lu_cache = []
+
+    def dense_solve(source):
+        if not lu_cache:
+            lu_cache.append(lu_factor(_dense_linear_map(D, action)))
+        return lu_solve(lu_cache[0], source.reshape(-1)).reshape(D, D)
+
+    if D * D <= _RESOLVENT_DENSE_MAX:
+        return dense_solve
+
+    from scipy.sparse.linalg import LinearOperator, gmres
+
+    n = D * D
+    op = LinearOperator((n, n), dtype=complex,
+                         matvec=lambda x: action(x.reshape(D, D)).reshape(-1))
+
+    def solve(source):
+        rhs = source.reshape(-1)
+        try:
+            x, info = gmres(op, rhs, rtol=_ITERATIVE_SOLVE_RTOL, atol=0.0,
+                             restart=min(n, 100), maxiter=200)
+        except TypeError:  # scipy < 1.12 spells rtol "tol"
+            x, info = gmres(op, rhs, tol=_ITERATIVE_SOLVE_RTOL, atol=0.0,
+                             restart=min(n, 100), maxiter=200)
+        if info == 0:
+            return x.reshape(D, D)
+        return dense_solve(source)
+
+    return solve
+
+
+def _spectral_cache(env):
+    """The momentum-independent pieces `_spectral_source_vector` needs,
+    built on first use and stashed on the environment: (AC, E_RR, E_LL,
+    rho_R, rho_L).
+
+    `rho_R = C^dagger C` and `rho_L = C C^dagger` are the two transfer
+    matrices' own non-trivial fixed points, written in closed form rather
+    than found by an eigensolve -- both are exact identities of the mixed
+    canonical gauge (AC = AL@C = C@AR, AL left-orthonormal, AR right-
+    orthonormal), confirmed directly: propagating C^dagger C forward
+    through E_RR gives sum_p AC_p^dagger AC_p = C^dagger (sum_p AL_p^dagger
+    AL_p) C = C^dagger C, and the mirror for C C^dagger through E_LL. The
+    *other* fixed point of each is the identity on both sides, by the same
+    orthonormality. Normalized to trace 1 so the deflation projector
+    `_spectral_resolvent` builds from them is idempotent."""
+    cached = env._spectral_pieces
+    if cached is not None:
+        return cached
+    AL, AR, C = env.AL, env.AR, env.C
+    AC = np.tensordot(AL, C, axes=([2], [0]))
+    rho_R = C.conj().T @ C
+    rho_L = C @ C.conj().T
+    rho_R = rho_R / np.trace(rho_R)
+    rho_L = rho_L / np.trace(rho_L)
+    cached = (AC, _op_transfer_matrix(AR, AR), _op_transfer_matrix(AL, AL),
+              rho_R, rho_L)
+    env._spectral_pieces = cached
+    return cached
+
+
+def _spectral_resolvents_for(env, k):
+    """(solve_R, solve_L): this momentum's two `_spectral_resolvent`
+    callables, cached on the environment exactly the way `_resolvents_for`
+    caches the H_eff(k) ones -- the matrices depend only on `k`, never on
+    the operator, so one entry serves every operator asked for at this
+    momentum (and every branch, since `_spectral_source_vector` needs the
+    two solves once in total, not once per branch)."""
+    cache = env._spectral_resolvent_cache
+    key = float(k)
+    if key not in cache:
+        _, E_RR, E_LL, rho_R, rho_L = _spectral_cache(env)
+        phase = np.exp(1j * k)
+        cache[key] = (
+            _spectral_resolvent(phase, E_RR, rho_R, idmrg._apply_transfer, env.D),
+            _spectral_resolvent(1.0 / phase, E_LL, rho_L,
+                                 idmrg._apply_transfer_from_left, env.D),
+        )
+    return cache[key]
+
+
+def _spectral_source_vector(env, M, k):
+    """v: the (Dx, D) matrix (Dx = D*(d_g-1)) representing the linear
+    functional `X -> <Phi_k(V_L X) | O(k) | Psi>` as `trace(X^dagger @ v)`,
+    for the supersite-local operator `M` (a d_g x d_g dense matrix in this
+    module's own M[i,o] convention) and momentum `k` (radians per unit
+    cell).
+
+    == What is being computed ==
+
+    With this module's own momentum convention |Phi_k(B)> = sum_n e^{ikn}
+    |...AL AL B_n AR AR...> and O(k) = (1/sqrt(N)) sum_m e^{ikm} O_m, the
+    overlap of the *normalized* ansatz state (norm sqrt(N * trace(X^dagger
+    X)), the cross terms vanishing by the left gauge fixing) with O(k)|Psi>
+    is exactly the per-site, N-independent quantity
+
+        S(k) = sum_j e^{ikj} <B at 0 | O_j | Psi>
+
+    (both factors of N cancel), which is what this returns in the X basis.
+    Vanderstraeten, Haegeman & Verstraete, arXiv:1810.07006 Sec. 6.3
+    ("dynamical correlations"), and Osborne & McCulloch, arXiv:2408.17117,
+    for the same object written recursively.
+
+    == The three regions ==
+
+    Put the ket in mixed canonical form with its center at site 0 (AL to
+    the left, AC at 0, AR to the right -- a valid gauge choice at any cut,
+    see vumps.two_point_correlator's own docstring) and the bra with its
+    excitation tensor B at site 0. Then, since AL is left- and AR is
+    right-orthonormal, both semi-infinite background halves close to the
+    identity and only three regions survive:
+
+    - `j == 0`: the operator sits on the excitation itself, contributing
+      `_apply_op_ket(M, AC)` directly.
+    - `j > 0`: an (AR,AR) transfer chain to the right of the excitation,
+      resummed as a geometric series `sum_{m>=0} (e^{ik} E_RR)^m` and
+      capped by one operator-carrying transfer and the identity.
+    - `j < 0`: the mirror, an (AL,AL) chain with `e^{-ik}`.
+
+    Both series converge even at k=0 despite the transfer matrices' own
+    unit dominant eigenvalue, because the source of each is orthogonal to
+    the corresponding dominant eigenvector: both reduce to
+    `sum conj(B) * AC = trace(X^dagger V_L^dagger AL_mat C) = 0`, which is
+    the left gauge-fixing condition itself. The deflation
+    `_spectral_resolvent` applies is therefore a conditioning device only,
+    never a physical regularization -- see its own docstring.
+
+    == Why the solves are transposed ==
+
+    Written forwards, each geometric series takes a B-dependent source and
+    the whole expression is one scalar, so producing `v` (i.e. keeping B's
+    legs open) would need one linear solve per basis element of B --
+    D^2*d_g solves per momentum. Transposing each solve instead (the map
+    `_apply_transfer_from_left` and `_apply_transfer` are each other's
+    transpose under the bilinear pairing, with the *same* E) moves the
+    solve to the B-independent end of the contraction, so the whole source
+    vector -- every branch's weight, and the sum rule below -- costs
+    exactly two solves per momentum regardless of D, d_g or how many
+    branches the caller wants.
+
+    == Sum rule ==
+
+    For a supersite-local O, O(k)|Psi> lies *exactly* inside the
+    tangent space (B = O.A is itself a valid excitation tensor), so
+    summing |<X_alpha, v>|^2 over a complete eigenbasis {X_alpha} of
+    H_eff(k) -- i.e. `norm(v)**2` -- is the per-site *connected* static
+    structure factor sum_r e^{ikr} (<O_0 O_r> - <O>^2). The connectedness
+    is automatic and needs no explicit <O> subtraction: the disconnected
+    piece lives entirely along the identity direction the transposed solves
+    leave undetermined, and `V_L^dagger` annihilates it (see
+    `_spectral_resolvent`). `spectral_weights(..., return_total=True)`
+    exposes this number, and tests/test_infinite_chain_spectral.py checks
+    it against an independent real-space correlator sum."""
+    D, d_g = env.D, env.d_g
+    AL, AR = env.AL, env.AR
+    AC, E_RR, E_LL, _, _ = _spectral_cache(env)
+    solve_R, solve_L = _spectral_resolvents_for(env, k)
+    phase = np.exp(1j * k)
+    I = np.eye(D, dtype=complex)
+
+    # j == 0.
+    v = _apply_op_ket(M, AC)
+
+    # j > 0: cap = trace(apply_transfer_from_left(E_RR_O, Y)), so the
+    # transposed chain starts from apply_transfer(E_RR_O, I).
+    G = solve_R(idmrg._apply_transfer(_op_transfer_matrix(AR, AR, M), I))
+    v = v + phase * _cap_right(AC, G)
+
+    # j < 0: the mirror. cap = trace(apply_transfer(E_LL_O, Y)), so the
+    # transposed chain starts from apply_transfer_from_left(E_LL_O, I).
+    G = solve_L(idmrg._apply_transfer_from_left(_op_transfer_matrix(AL, AL, M), I))
+    v = v + _cap_left(G, AC) / phase
+
+    return env.V_L.conj().T @ v.reshape(D * d_g, D)
+
+
+def spectral_weights(env, k, M, n=1, return_total=False):
+    """(energies, weights): the lowest `n` excitation energies at momentum
+    `k` (radians per unit cell) together with their exact delta-peak
+    spectral weights for the supersite-local operator `M` (a d_g x d_g
+    dense matrix, M[i,o] convention -- `vumps._embed_group_operator` builds
+    one from a named operator on a chosen sub-site of the unit cell).
+
+    `weights[a] = |<k,a| O(k) |Psi>|^2` for the normalized ansatz state
+    `|k,a>` and `O(k) = N^{-1/2} sum_m e^{ikm} O_m`, i.e. exactly the
+    residue of the delta peak that branch contributes to the zero-
+    temperature dynamical structure factor
+
+        S(k, w) = sum_a weights[a] * delta(w - energies[a])
+
+    -- a *momentum-resolved* dynamical correlator directly in the
+    thermodynamic limit, with no finite window and no broadening beyond
+    whatever the caller chooses to apply afterwards. Both arrays are
+    ordered by energy, matching `excitation_energies`' own ordering.
+
+    `return_total=True` additionally returns the branch-complete total
+    `sum_a |<k,a|O(k)|Psi>|^2` over EVERY branch, not just the `n`
+    requested -- the per-site connected static structure factor at this
+    momentum (see `_spectral_source_vector`'s own "Sum rule" section for
+    why that identity is exact here). Comparing `weights.sum()` against it
+    says how much of the k-resolved spectral weight the branches actually
+    returned carry, which is the practical measure of whether a
+    single-mode picture is adequate at that momentum. It costs nothing
+    extra: it is the squared norm of the same source vector every weight is
+    an inner product against.
+
+    Two things to know before reading an individual weight:
+
+    - **Within a degenerate multiplet the split between branches is
+      basis-arbitrary**, since `numpy.linalg.eigh`/ARPACK pick an
+      arbitrary basis of a degenerate eigenspace. Only the
+      multiplet-summed weight is physical. This is not a corner case on a
+      symmetric model: on the AKLT chain at D=2 the eight branches split
+      into an SU(2) triplet and a quintuplet at every momentum, and the
+      triplet's three individual weights come out ~0.08/0.84/0.08 while
+      their sum is the whole `return_total`. At finite D on a model with
+      no exact MPS ground state the multiplet is only *approximately*
+      degenerate -- split by the variational error, not by machine
+      precision: measured at 1.6e-5 on the Haldane chain at D=16, against
+      a 1e-13 splitting at D=12 of the same chain, i.e. not even monotonic
+      in D, since it tracks how well that particular VUMPS run converged.
+      So group branches by the multiplet's own size (the physics), not by
+      a fixed energy tolerance -- a 1e-6 tolerance silently reports one
+      member's arbitrary share (0.43 instead of 0.97) on exactly that
+      D=16 case.
+    - **A near-zero fraction means the wrong branches were asked for, not
+      that there is no response.** The operator can be forbidden by a
+      selection rule from reaching the branches returned -- exactly what
+      happens above the multiplet crossing on that same AKLT chain, where
+      below k~0.9 the *lowest* branch is the quintuplet and `Sz` cannot
+      reach it at all (weight ~1e-23), while the triplet carrying all of
+      the weight sits above it. Raising `n` is the fix; `return_total` is
+      what makes the situation visible rather than silent.
+
+    The momentum sign convention is this module's own (|Phi_k> = sum_n
+    e^{ikn}|...B_n...>); flipping it relabels k <-> -k and nothing else."""
+    w, X_list = excitation_energies(env, k, n=n, return_vectors=True)
+    v = _spectral_source_vector(env, M, k)
+    weights = np.array([abs(np.vdot(X, v)) ** 2 for X in X_list])
+    if return_total:
+        return w, weights, float(np.vdot(v, v).real)
+    return w, weights

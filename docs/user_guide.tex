@@ -3016,6 +3016,122 @@ still assembles the matrix (and still rebuilds its resolvents per matrix
 element), so the two backends now differ in cost structure for this call,
 in the \texttt{"python"} backend's favour at large $D$.
 
+\textbf{Spectral weights: $S(k,\omega)$ directly in the thermodynamic
+limit.} Each branch the ansatz returns is a genuine momentum eigenstate,
+so its contribution to a dynamical correlator is an exact $\delta$-peak
+--- not a broadened, windowed approximation to one.
+\texttt{ic.spectral\_weights(opname, k, p=0, n=1)} returns that peak's
+position \emph{and} its residue:
+
+\begin{verbatim}
+ic.gs_method = "vumps"                        # required, as above
+e, w = ic.spectral_weights("Sx", 0.7, n=1)    # energies and weights
+e, w, total = ic.spectral_weights("Sx", 0.7, n=1, return_total=True)
+ks, es, S = ic.dynamical_structure_factor("Sx", delta=0.05)
+\end{verbatim}
+
+with $w_a = |\langle k,a|O(k)|\Psi\rangle|^2$ for the normalized
+quasiparticle state $|k,a\rangle$ and $O(k) = N^{-1/2}\sum_m e^{ikm}
+O_m$, i.e.
+\[
+  S(k,\omega) \;=\; \sum_a w_a\,\delta(\omega - e_a).
+\]
+\texttt{opname} is a local operator on sub-site \texttt{p} of the unit
+cell, and $k$ is per unit cell. This is the same physical object
+\texttt{kpm\_finite}/\texttt{td\_dynamical\_correlator} estimate,
+computed a completely different way: those embed a \emph{finite} window
+in the infinite chain and therefore carry a window-size error plus a
+KPM/time-truncation broadening, while these peaks are exact in both
+momentum and energy. What they do not contain is multi-particle
+continuum weight --- which is exactly what \texttt{return\_total}
+measures, so the two families are complementary rather than one
+superseding the other.
+\texttt{ic.dynamical\_structure\_factor(opname, ks=None, energies=None,
+delta=0.05, p=0, n=1)} is the convenience wrapper that assembles those
+peaks into a Lorentzian-broadened $(k,\omega)$ grid ready to plot as a
+heat map; the broadening there is cosmetic only.
+
+\textbf{The sum rule, and what \texttt{return\_total} is for.} A one-site
+operator applied to a uniform MPS lands \emph{exactly} inside the same
+variational tangent space the excitations live in ($B = O\!\cdot\!A$ is
+itself a valid excitation tensor), so the total weight summed over
+\textbf{every} branch is exactly the per-site connected static structure
+factor $\sum_r e^{ikr}(\langle O_0 O_r\rangle - \langle O\rangle^2)$.
+\texttt{return\_total=True} returns that number --- free, since it is the
+squared norm of the same source vector each weight is an inner product
+against --- and \texttt{w.sum()/total} is then the fraction of the
+momentum-resolved response the branches actually returned account for.
+That is the practical test of whether a single-mode picture is adequate
+at that momentum, and it is a sharp one: on the paramagnetic
+transverse-field Ising chain, $\sigma^x$ (parity-odd, exactly one
+quasiparticle) puts $>99.9\%$ of its weight on the lowest branch, while
+$\sigma^z$ (parity-even) puts \emph{exactly zero} there --- measured at
+$\sim$$10^{-21}$, an exact selection rule --- and all of it on higher
+branches lying inside the exact two-particle continuum. See
+\texttt{examples/idmrg/dynamical\_structure\_factor\_tfim/main.py}, which
+plots all three.
+
+The connectedness is automatic: no $\langle O\rangle$ is subtracted
+anywhere, and none needs to be, because the disconnected piece lives
+entirely along the gauge direction the left gauge-fixing projector
+annihilates (see \texttt{pyitensor/idmrg\_excitations.py}'s
+\texttt{\_spectral\_source\_vector}/\texttt{\_spectral\_resolvent}). The
+$k=0$, $\langle\sigma^z\rangle=-1$ product-state case --- where the
+disconnected part is 1, not small --- is pinned by a test.
+
+\textbf{Validation and scope.} Four independent references, since a
+spectral weight has no single golden number. The sharpest is the
+\textbf{AKLT} point of the spin-1 chain ($H = S\!\cdot\!S +
+\tfrac13(S\!\cdot\!S)^2$), whose ground state is \emph{exactly} a $D=2$
+MPS --- so there is no variational error at all, and three closed forms
+are reproduced to machine precision ($\sim$$5\times10^{-15}$): the static
+structure factor summed from $\langle S_0\!\cdot\!S_r\rangle =
+4(-1/3)^r$; Arovas--Auerbach--Haldane's single-mode dispersion
+$\tfrac{5}{27}(5+3\cos k)$ [PRL \textbf{60}, 531 (1988)], which the
+\emph{first moment} must reproduce exactly since $S^z_k|\Psi\rangle$ lies
+entirely inside the tangent space; and the SU(2) content, which emerges
+rather than being imposed --- the eight branches split into a magnon
+triplet and a quintuplet at every momentum, $S^z$ reaches only the
+triplet (quintuplet weight $\sim$$10^{-23}$), and the two multiplets
+cross near $k\approx0.9$. On the pure \textbf{Haldane} chain the gap at
+$k=\pi$ converges monotonically from below to the literature $0.4104789$
+($0.2132/0.4074/0.4094/0.4098$ at $D=4/8/12/16$) while the sum rule holds
+identically at every $D$ --- including $D=4$, where the gap is 50\%
+wrong, which is the point: it is an identity of the ansatz, not of the
+ground state's accuracy. The magnon triplet exhausts 97.3--97.6\% of the
+$k=\pi$ sum rule and falls to $\sim$68\% at small $k$. See
+\texttt{examples/idmrg/haldane\_structure\_factor/main.py}.
+
+The other three, on spin-1/2: the exactly solvable $J=0$
+Ising product state ($\sigma^x$/$\sigma^y$ weight exactly 1 at every
+momentum, $\sigma^z$ exactly 0); the static sum rule above, checked
+against a real-space sum of \texttt{ic.correlator} --- machinery sharing
+no code with the excitation ansatz --- matching to $\sim$$10^{-13}$ at
+$D=2$; and the f-sum rule $\sum_a e_a w_a = \tfrac12 \langle
+[O_k^\dagger,[H,O_k]]\rangle$, which brings the excitation \emph{energies}
+in too and converges with the ground state's own bond dimension
+($2\times10^{-4}$ relative at $D=2$, $10^{-7}$ at $D=4$). See
+\texttt{tests/test\_infinite\_chain\_spectral.py}. Requires
+\texttt{itensor\_version="python"} --- unlike
+\texttt{excitation\_energies}, the mpscpp3 port is energies-only and has
+neither the eigenvectors nor the mixed-transfer source vector this needs,
+deferred for the same reason it has not picked up the iterative
+eigensolver (\texttt{docs/idmrg\_improvement\_plan.md}) --- plus
+\texttt{gs\_method="vumps"} and \texttt{n\_uc} $\le 2$ as above. A
+fermionic (parity-odd) \texttt{opname} is rejected: its Jordan-Wigner
+string would have to be closed at infinity, the same reason
+\texttt{correlator} rejects an odd-parity operator pair.
+
+\textbf{Cost.} Independent of how many branches are asked for, and of
+$D$, $d_g$ and the operator: exactly \textbf{two} linear solves per
+momentum, both cached on the chain across repeated calls at the same $k$.
+The naive way to build the weight --- leaving the excitation tensor's legs
+open and solving once per basis element --- would cost $D^2 d_g$ solves
+per momentum instead; transposing each geometric series moves its solve
+to the operator end of the contraction instead. So the eigensolve for the
+branches themselves dominates, and adding weights to an existing
+dispersion scan is close to free.
+
 \textbf{Unit cells of more than 2 sites.}
 \texttt{Infinite\_Many\_Body\_Chain([...])} accepts a cell of any length,
 and \texttt{gs\_method="vumps"} (the default) then runs the

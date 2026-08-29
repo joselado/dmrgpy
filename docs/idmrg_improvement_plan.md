@@ -13,7 +13,7 @@ checkout.
 | # | Item | Effort | Status |
 |---|------|--------|--------|
 | 1 | Iterative eigensolver for the excitation ansatz | ~1 day | **done** (pyitensor; v3 deferred, see below) |
-| 2 | Spectral weights → S(k,ω) from the excitation eigenvectors | ~1 week | open |
+| 2 | Spectral weights → S(k,ω) from the excitation eigenvectors | ~1 week | **done** (pyitensor; v3 deferred with item 1) |
 | 3 | Two-site VUMPS (dynamic bond dimension) | ~1–2 weeks | open |
 | 4 | Long-range interactions via exponential-decay channels | ~2 weeks | open |
 | 5 | iTDVP on the uniform state (global quenches) | ~2–3 weeks | open |
@@ -93,6 +93,123 @@ are finite-window approximations (`infinitechain.py::kpm_finite`,
 The machinery this needs (mixed transfer-matrix resolvents) already exists
 in the same module: `_channel_resolvent`, `_mixed_fixed_points`,
 `_solve_linear_map`.
+
+### What was actually done, and the two things that made it cheap
+
+`_spectral_source_vector` + `spectral_weights` in the same module, with
+`Infinite_Many_Body_Chain.spectral_weights` / `dynamical_structure_factor`
+as the public surface (`itensor_version="python"`, `gs_method="vumps"`,
+`n_uc<=2`, parity-even operators — same gating as `excitation_energies`,
+plus the v3 exclusion, since the C++ port returns energies only).
+
+The estimate above assumed the per-branch overlap would be assembled the
+obvious way. Two structural facts changed the shape of the work:
+
+1. **The two geometric series are solved transposed.** Written forwards,
+   each of the "operator to the left of the excitation" / "to the right"
+   sums takes a source that depends on the excitation tensor `B`, so
+   producing the whole functional `X -> <Phi_k(V_L X)|O(k)|Psi>` would
+   need one linear solve per basis element of `B`: `D^2 d_g` solves per
+   momentum. `_apply_transfer` and `_apply_transfer_from_left` are exact
+   transposes of each other under the bilinear pairing (same `E`), so
+   transposing each solve moves it to the *operator* end of the
+   contraction. Cost: exactly **two** solves per momentum, independent of
+   `D`, `d_g`, the operator, and how many branches the caller wants.
+2. **`_channel_resolvent` was deliberately not reused.** Its deflation
+   projector hardcodes the `conj(r_mixed)` dual convention validated for
+   the mixed `E_RL`/`E_LR` transfers. The transfers here are the ordinary
+   `(AR,AR)` and `(AL,AL)` ones, whose duals are exactly the identity and
+   whose non-trivial fixed points are exactly `C^dagger C` / `C C^dagger`
+   in closed form — no eigensolve, and no chance of re-introducing the
+   conjugate/transpose class of bug this module's history is about
+   (`_spectral_resolvent`). It also deflates at *every* momentum rather
+   than only at the singular one, which `_channel_resolvent` cannot: the
+   component that adds is a multiple of the identity, and the final
+   `V_L^dagger` projection annihilates it exactly, so the conditioning is
+   bounded uniformly in `k` for free.
+
+That second point is also why the `<O>` subtraction never appears
+anywhere: the disconnected part of the correlator lives entirely in that
+same annihilated direction, so `k=0` comes out connected on its own
+(pinned by a test on the `<sigma^z> = -1` product state, where the
+disconnected part is 1, not small).
+
+**Validation.** A spectral weight has no single golden number, so three
+independent references, none of them sharing code with the ansatz:
+
+- the exactly solvable `J=0` Ising product state (`sigma^x`/`sigma^y`
+  weight exactly 1 at every momentum, `sigma^z` exactly 0);
+- the **static sum rule**: a one-site operator applied to a uniform MPS
+  lands exactly inside the tangent space, so the branch-complete total is
+  exactly the connected static structure factor — checked against a
+  real-space sum of `Infinite_Many_Body_Chain.correlator`, matching to
+  ~1e-13 at D=2 and to the state's own convergence beyond that;
+- the **f-sum rule** `sum_a E_a w_a = (1/2)<[O_k^dagger,[H,O_k]]>`, which
+  brings the excitation *energies* in as well and converges with the
+  ground state's bond dimension (2e-4 relative at D=2, 1e-7 at D=4).
+
+A fourth reference was added afterwards, on a **spin-1** chain rather
+than spin-1/2, and it is the sharpest of the set: the **AKLT** point
+(`H = S.S + (1/3)(S.S)^2`), whose valence-bond-solid ground state is
+*exactly* a D=2 MPS, so at D=2 there is no variational error to hide
+behind. Three closed forms, all reproduced to machine precision
+(measured 4.7e-15 and 4.4e-15 across a momentum scan):
+
+- the static structure factor, summed analytically from
+  `<S_0.S_r> = 4(-1/3)^r`;
+- **Arovas, Auerbach & Haldane's single-mode dispersion**
+  `w(k) = (5/27)(5+3cos k)` (PRL 60, 531 (1988); our Hamiltonian is
+  `2*sum_j P^(2) + const`, hence a factor 2), which the *first moment*
+  must reproduce exactly because `S^z_k|Psi>` lies entirely inside the
+  tangent space -- this pins the excitation energies and the weights
+  together on a state with zero bond-dimension error;
+- the **SU(2) content**, which came out of the calculation rather than
+  being put in: the eight branches split into a magnon triplet and a
+  quintuplet at every momentum, `S^z` reaches only the triplet (quintuplet
+  weight ~1e-23), and the two multiplets *cross* near k~0.9.
+
+That crossing and that degeneracy are why `spectral_weights`' docstring
+now carries two warnings it did not before. Individual weights inside a
+degenerate multiplet are basis-arbitrary (only multiplet sums are
+physical), and a near-zero `weights.sum()/total` means the wrong branches
+were requested rather than "no response" -- below the AKLT crossing the
+lowest branch is the quintuplet, which `S^z` cannot reach at all. The
+practical trap is grouping multiplets by an energy tolerance: at finite D
+the splitting is set by the variational error, not machine precision, and
+it is not monotonic in D -- measured 1e-13 at D=12 and 1.6e-5 at D=16 on
+the Haldane chain, where a 1e-6 tolerance then reports one member's
+arbitrary share (0.43) instead of the multiplet's 0.97.
+
+On the **pure S=1 Heisenberg (Haldane) chain** the numbers track the
+literature as the bond dimension grows -- gap at k=pi 0.2132 / 0.4074 /
+0.4094 / 0.4098 at D=4/8/12/16 against 0.4104789, approached monotonically
+from below -- while the sum rule holds identically at *every* D including
+D=4, where the gap is off by 50%. That is the point: it is an identity of
+the ansatz, not a statement about ground-state accuracy. The magnon
+triplet exhausts 97.3-97.6% of the k=pi sum rule and degrades to ~68% at
+small k, the textbook single-mode-approximation picture.
+
+`tests/test_infinite_chain_spectral.py`;
+`examples/idmrg/dynamical_structure_factor_tfim/main.py` plots the
+`S^xx(k,w)` map, every branch coloured by its `sigma^z` weight against
+the exact two-particle continuum, and the cumulative sum-rule fraction;
+`examples/idmrg/haldane_structure_factor/main.py` plots the AKLT branches
+against the AAH curve, both chains' totals against the exact structure
+factor, and the triplet's exhaustion of the sum rule versus momentum.
+
+The sum-rule total is exposed as `return_total=True` rather than kept
+internal, because `weights.sum()/total` is the practical measure of
+whether a single-mode picture is adequate at a given momentum — and it is
+sharp: on the paramagnetic TFIM `sigma^x` puts >99.9% of its weight on
+the lowest branch while `sigma^z` puts *exactly zero* there (~1e-21, an
+exact parity selection rule), all of it landing instead on higher
+branches inside the exact two-particle continuum.
+
+**Not done here:** the Osborne–McCulloch recursive scheme for observables
+of larger spatial support and multi-particle states (arXiv:2408.17117).
+What is implemented is the one-site-operator overlap of arXiv:1810.07006
+Sec. 6.3, which is what a structure factor needs; a multi-site operator
+would need the recursion.
 
 References: Vanderstraeten, Haegeman & Verstraete, *Tangent-space methods
 for uniform matrix product states*, [arXiv:1810.07006](https://arxiv.org/abs/1810.07006)

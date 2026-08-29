@@ -150,7 +150,7 @@ You can find several tutorials [here](https://github.com/joselado/Advanced_Compu
 - Generic operator distributions computed with the Kernel polynomial method
 - Iterative MPS Hermitian and non-Hermitian diagonalization solvers 
 - Hermitian and non-Hermitian degeneracy detection
-- Infinite chains with iDMRG/VUMPS: ground states, excitation gaps and dynamical correlators directly in the thermodynamic limit
+- Infinite chains with iDMRG/VUMPS: ground states, excitation gaps and dynamical correlators directly in the thermodynamic limit, including a momentum-resolved dynamical structure factor S(k,w) built from the quasiparticle branches' own exact spectral weights
 - Finite-temperature calculations via METTS and thermal purification
 - Entanglement entropy, reduced density matrices, mutual information and CFT central charge extraction
 - Topological diagnostics: parity/symmetry sectors, edge/zero modes and Zak phase

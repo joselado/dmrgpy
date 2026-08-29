@@ -1378,14 +1378,75 @@ the two solve genuinely different problems, one-shot versus reusable.
 \texttt{excitation\_energies(env, k, n, return\_vectors=True)}
 additionally returns the tangent-space parameters $X$ (the excitation
 tensor itself being $B = (V_L X)$ reshaped to $(D, d_g, D)$), which the
-energies alone previously discarded. Nothing consumes them yet; they are
-what a spectral weight $\langle\Psi|O|\Phi_k(B)\rangle$ would be built
-from. This is \texttt{pyitensor}-only: the \texttt{itensor\_version=3}
+energies alone previously discarded. \texttt{spectral\_weights} is what
+consumes them. This is \texttt{pyitensor}-only: the
+\texttt{itensor\_version=3}
 port (\texttt{Chain::vumps\_build\_h\_eff\_dense}) still assembles
 $H_{\rm eff}(k)$ densely and rebuilds its resolvents per application, so
 the two backends now differ in cost (not in results -- the cross-checks in
 \texttt{tests/test\_vumps\_excitations\_v3.py} are unchanged and still
 pass).
+
+\textbf{Spectral weights (\texttt{spectral\_weights},
+\texttt{\_spectral\_source\_vector}).} With the eigenvectors in hand,
+each branch's exact $\delta$-peak residue $|\langle
+k,a|O(k)|\Psi\rangle|^2$ follows from one linear functional $X \mapsto
+\langle\Phi_k(V_L X)|O(k)|\Psi\rangle = \mathrm{tr}(X^\dagger v)$, and
+\texttt{\_spectral\_source\_vector} builds that $(D_x, D)$ matrix $v$
+once per (momentum, operator).
+\texttt{Infinite\_Many\_Body\_Chain.spectral\_weights} /
+\texttt{dynamical\_structure\_factor} are the public surface, gated
+exactly like \texttt{excitation\_energies} except that
+\texttt{itensor\_version=3} is excluded too
+(\texttt{Chain::vumps\_excitation\_energies} returns energies only).
+
+Putting the ket in mixed canonical form with its center where the bra's
+excitation tensor sits leaves only three regions --- operator on the
+excitation, operator somewhere to its right through an $(A_R,A_R)$
+chain, operator somewhere to its left through an $(A_L,A_L)$ chain ---
+with both semi-infinite backgrounds closing to the identity by
+canonicality. The two chains are geometric series in $e^{ik}E_{RR}$ and
+$e^{-ik}E_{LL}$.
+
+Two implementation decisions are worth knowing, because both are about
+cost or about the class of bug this module's history is made of:
+
+\begin{itemize}
+\item \textbf{The solves are transposed.} Written forwards, each series
+takes a $B$-dependent source, so keeping $B$'s legs open (which is what
+producing $v$ rather than one scalar means) would need $D^2 d_g$ solves
+per momentum. \texttt{idmrg.\_apply\_transfer} and
+\texttt{idmrg.\_apply\_transfer\_from\_left} are exact transposes of each
+other under the bilinear pairing with the \emph{same} $E$, so transposing
+each solve moves it to the operator end of the contraction:
+\textbf{two} solves per momentum, independent of $D$, $d_g$, the operator,
+and the number of branches requested. They are cached per momentum
+(\texttt{\_spectral\_resolvents\_for}) alongside the $H_{\rm eff}$ ones.
+\item \textbf{\texttt{\_channel\_resolvent} is deliberately not reused.}
+Its deflation projector hardcodes the \texttt{conj(r\_mixed)} dual
+convention validated for the \emph{mixed} $E_{RL}$/$E_{LR}$ transfers;
+the transfers here are the ordinary $(A_R,A_R)$/$(A_L,A_L)$ ones, whose
+duals are exactly the identity and whose non-trivial fixed points are
+$C^\dagger C$ / $C C^\dagger$ in closed form (no eigensolve).
+\texttt{\_spectral\_resolvent} writes that projector explicitly in the
+bilinear pairing, and --- unlike \texttt{\_channel\_resolvent}, which can
+only deflate at the singular momentum --- applies it at \emph{every}
+momentum: what deflation adds to the solution is a multiple of the
+identity, which contracts into a multiple of $A_C$, which $V_L^\dagger$
+annihilates exactly. The returned weight is unchanged and the
+conditioning is bounded uniformly in $k$.
+\end{itemize}
+
+That same annihilation is why no $\langle O\rangle$ is subtracted
+anywhere: the disconnected part of the correlator lives in exactly that
+direction, so the $k=0$ answer comes out connected on its own. It also
+makes the branch-complete total (\texttt{return\_total=True}) exactly the
+connected static structure factor --- a one-site operator applied to a
+uniform MPS lands exactly inside the tangent space, so nothing of
+$O(k)|\Psi\rangle$ is outside the span the branches diagonalize --- which
+is the sum rule \texttt{tests/test\_infinite\_chain\_spectral.py} checks
+against an independent real-space \texttt{correlator} sum, alongside the
+f-sum rule and the exact product-state limit.
 
 \textbf{History.} An earlier version of this module built the ansatz on
 top of a single uniform-gauge tensor from \texttt{idmrg.py}'s growing

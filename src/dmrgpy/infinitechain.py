@@ -845,6 +845,149 @@ class Infinite_Many_Body_Chain:
             ks = np.linspace(-np.pi, np.pi, 41)
         return min(self.excitation_energies(k, n=1)[0] for k in ks)
 
+    def _spectral_operator_matrix(self, opname, p):
+        """The grouped-supersite d_g x d_g matrix for `opname` on sub-site
+        `p` of the unit cell, in the M[i,o] convention every pyitensor
+        infinite-chain contraction uses -- shared argument checking for
+        spectral_weights/dynamical_structure_factor."""
+        if not (0 <= p < self.n_uc):
+            raise ValueError("spectral_weights: p must be in 0..{} (n_uc-1), "
+                              "got {!r}".format(self.n_uc - 1, p))
+        if is_fermionic(opname):
+            # A parity-odd operator drags a Jordan-Wigner string that this
+            # single-supersite ansatz would have to close at infinity -- the
+            # same reason correlator() rejects an odd-parity operator pair.
+            raise ValueError(
+                "spectral_weights: {!r} is a fermionic (parity-odd) operator, "
+                "whose Jordan-Wigner string cannot be closed inside a single "
+                "unit cell -- only parity-even (e.g. density/spin) operators "
+                "have a well-defined single-site spectral weight here".format(
+                    opname))
+        from .pyitensor import vumps
+        result = self._vumps_result
+        return vumps._embed_group_operator(
+            result.sites_uc, result.n_uc,
+            {p: result.sites_uc.site_type(p + 1).matrix(opname)})
+
+    def spectral_weights(self, opname, k, p=0, n=1, return_total=False):
+        """(energies, weights): the lowest `n` excitation energies at
+        momentum `k` (radians per *unit cell*) together with the exact
+        delta-peak spectral weight each of them carries for the local
+        operator `opname` on sub-site `p` of the unit cell.
+
+        `weights[a] = |<k,a| O(k) |Psi>|^2` with `O(k) = N^{-1/2} sum_m
+        e^{ikm} O_m` and `|k,a>` the normalized quasiparticle state, i.e.
+        the residue of the delta peak branch `a` contributes to the
+        zero-temperature dynamical structure factor
+
+            S(k, w) = sum_a weights[a] * delta(w - energies[a]).
+
+        This is a genuine thermodynamic-limit, momentum-resolved dynamical
+        correlator: unlike `kpm_finite`/`td_dynamical_correlator`, which
+        embed a finite window in the infinite chain and therefore carry a
+        window-size and a broadening/time-truncation error, the
+        quasiparticle branches here are exact delta functions at exactly
+        defined momenta. What they do *not* capture is multi-particle
+        continuum weight, which is precisely what `return_total` measures
+        (see below), so the two families of methods are complementary
+        rather than one superseding the other.
+
+        `return_total=True` appends a third return value: the total weight
+        summed over EVERY branch, not just the `n` requested -- which is
+        exactly the per-site connected static structure factor
+        `sum_r e^{ikr} (<O_0 O_r> - <O>^2)` at this momentum, since a
+        one-site operator applied to a uniform MPS lands exactly inside the
+        variational tangent space (see pyitensor.idmrg_excitations.
+        _spectral_source_vector's own "Sum rule" section). `weights.sum() /
+        total` is then the fraction of the k-resolved spectral weight the
+        returned branches carry -- the practical test of whether a
+        single-mode picture is adequate at that momentum. It is free: the
+        same source vector every weight is an inner product against.
+
+        Backend support mirrors `excitation_energies`' own
+        itensor_version="python" + gs_method="vumps" requirement, with one
+        further restriction: itensor_version=3 is NOT supported here at all
+        (excitation_energies does support it). The C++ port
+        (Chain::vumps_excitation_energies) has neither the eigenvectors nor
+        the mixed-transfer source vector this needs, the same way it has
+        not yet picked up the iterative eigensolver -- see
+        docs/idmrg_improvement_plan.md.
+
+        Two things to know before reading an individual weight. Within a
+        degenerate multiplet the split between branches is
+        **basis-arbitrary** (the eigensolver picks an arbitrary basis of a
+        degenerate eigenspace), so only multiplet sums are physical -- on
+        the AKLT chain at `D=2` the branches split into an SU(2) triplet
+        and a quintuplet at every momentum, and the triplet's three
+        weights come out ~0.08/0.84/0.08 with their sum equal to the whole
+        total. Away from an exactly-representable ground state the
+        multiplet is only *approximately* degenerate -- split by the
+        variational error rather than by machine precision (1.6e-5 on the
+        Haldane chain at `D=16`, against 1e-13 at `D=12`, so not even
+        monotonic in `D`) -- so group by the multiplet's size, not by a
+        fixed energy tolerance. And a near-zero `weights.sum()/total` means the *wrong
+        branches were asked for*, not that there is no response: on that
+        same chain the two multiplets cross, so below `k~0.9` the lowest
+        branch is the quintuplet, which `Sz` cannot reach at all (weight
+        ~1e-23) while the triplet carrying every bit of the weight sits
+        above it. Raise `n`; `return_total` is what makes this visible
+        instead of silent.
+
+        Sign convention: `k` labels the ansatz's own `sum_n e^{ikn}`; using
+        the opposite sign relabels `k <-> -k` and changes nothing else."""
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.spectral_weights: only "
+                "itensor_version=\"python\" is supported (the mpscpp3 port of "
+                "the excitation ansatz returns energies only) -- got "
+                "itensor_version={!r}".format(self.itensor_version))
+        env = self._get_excitation_environment()
+        from .pyitensor import idmrg_excitations
+        M = self._spectral_operator_matrix(opname, p)
+        return idmrg_excitations.spectral_weights(
+            env, k, M, n=n, return_total=return_total)
+
+    def dynamical_structure_factor(self, opname, ks=None, energies=None,
+                                    delta=0.05, p=0, n=1):
+        """(ks, energies, S): the quasiparticle contribution to the
+        dynamical structure factor `S(k, w)` on a (momentum, energy) grid,
+        Lorentzian-broadened by `delta`, built from `spectral_weights`'
+        own exact delta peaks:
+
+            S[i, j] = sum_a w_a(k_i) * (delta/pi)
+                      / ((energies[j] - E_a(k_i))**2 + delta**2)
+
+        `ks` defaults to `numpy.linspace(-pi, pi, 41)` (the same scan
+        `excitation_gap` uses); `energies` defaults to 200 points spanning
+        the computed band plus `5*delta` of margin on each side. `n` is how
+        many branches per momentum to include -- with `n=1` this is the
+        single-mode approximation to `S(k,w)`, exact for a model whose
+        low-energy response is one isolated coherent mode and a *lower
+        bound* on the true response otherwise (see `spectral_weights`'
+        `return_total` for how to measure the shortfall).
+
+        The broadening is purely cosmetic here, applied so the result can
+        be plotted as a heat map -- the underlying peaks are exact delta
+        functions at exact momenta, so `spectral_weights` is what to use
+        for anything quantitative."""
+        if ks is None:
+            ks = np.linspace(-np.pi, np.pi, 41)
+        ks = np.asarray(ks, dtype=float)
+        bands, wgts = [], []
+        for k in ks:
+            e, w = self.spectral_weights(opname, k, p=p, n=n)
+            bands.append(np.asarray(e, dtype=float))
+            wgts.append(np.asarray(w, dtype=float))
+        bands, wgts = np.array(bands), np.array(wgts)
+        if energies is None:
+            lo, hi = bands.min() - 5 * delta, bands.max() + 5 * delta
+            energies = np.linspace(lo, hi, 200)
+        energies = np.asarray(energies, dtype=float)
+        gap = energies[None, :, None] - bands[:, None, :]
+        lorentz = (delta / np.pi) / (gap ** 2 + delta ** 2)
+        S = np.einsum('kea,ka->ke', lorentz, wgts)
+        return ks, energies, S
+
     def local_excitation_gap(self, window=0, niter=200):
         """A cheap, cruder alternative to excitation_gap: re-diagonalizes
         the growing algorithm's own final 2-site effective Hamiltonian

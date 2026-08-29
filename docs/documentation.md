@@ -1187,12 +1187,66 @@ genuinely different problems, one-shot versus reusable.
 `excitation_energies(env, k, n, return_vectors=True)` additionally returns
 the tangent-space parameters `X` (the excitation tensor itself being
 `B = (V_L @ X).reshape(D, d_g, D)`), which the energies alone previously
-discarded. Nothing consumes them yet; they are what a spectral weight
-`<Psi|O|Phi_k(B)>` would be built from. This is `pyitensor`-only: the
+discarded. `spectral_weights` is what consumes them. This is
+`pyitensor`-only: the
 `itensor_version=3` port (`Chain::vumps_build_h_eff_dense`) still assembles
 `H_eff(k)` densely and rebuilds its resolvents per application, so the two
 backends now differ in cost (not in results — the cross-checks in
 `tests/test_vumps_excitations_v3.py` are unchanged and still pass).
+
+**Spectral weights (`spectral_weights`, `_spectral_source_vector`)**:
+with the eigenvectors in hand, each branch's exact delta-peak residue
+`|<k,a|O(k)|Psi>|^2` follows from one linear functional
+`X -> <Phi_k(V_L X)|O(k)|Psi> = trace(X^dagger @ v)`, and
+`_spectral_source_vector` builds that `(Dx, D)` matrix `v` once per
+(momentum, operator). `Infinite_Many_Body_Chain.spectral_weights` /
+`dynamical_structure_factor` are the public surface, gated exactly like
+`excitation_energies` except that `itensor_version=3` is excluded too
+(`Chain::vumps_excitation_energies` returns energies only).
+
+Putting the ket in mixed canonical form with its center where the bra's
+excitation tensor sits leaves only three regions — operator on the
+excitation, operator somewhere to its right through an `(AR,AR)` chain,
+operator somewhere to its left through an `(AL,AL)` chain — with both
+semi-infinite backgrounds closing to the identity by canonicality. The
+two chains are geometric series in `e^{ik} E_RR` / `e^{-ik} E_LL`.
+
+Two implementation decisions are worth knowing, because both are about
+cost or about the class of bug this module's history is made of:
+
+- **The solves are transposed.** Written forwards, each series takes a
+  `B`-dependent source, so keeping `B`'s legs open (which is what
+  producing `v` rather than one scalar means) would need `D^2*d_g` solves
+  per momentum. `idmrg._apply_transfer` and
+  `idmrg._apply_transfer_from_left` are exact transposes of each other
+  under the bilinear pairing with the *same* `E`, so transposing each
+  solve moves it to the operator end of the contraction: **two** solves
+  per momentum, independent of `D`, `d_g`, the operator, and the number
+  of branches requested. They are cached per momentum
+  (`_spectral_resolvents_for`) alongside the H_eff ones.
+- **`_channel_resolvent` is deliberately not reused.** Its deflation
+  projector hardcodes the `conj(r_mixed)` dual convention validated for
+  the *mixed* `E_RL`/`E_LR` transfers; the transfers here are the
+  ordinary `(AR,AR)`/`(AL,AL)` ones, whose duals are exactly the identity
+  and whose non-trivial fixed points are `C^dagger C` / `C C^dagger` in
+  closed form (no eigensolve). `_spectral_resolvent` writes that
+  projector explicitly in the bilinear pairing, and — unlike
+  `_channel_resolvent`, which can only deflate at the singular momentum —
+  applies it at *every* momentum: what deflation adds to the solution is
+  a multiple of the identity, which contracts into a multiple of `AC`,
+  which `V_L^dagger` annihilates exactly. The returned weight is
+  unchanged and the conditioning is bounded uniformly in `k`.
+
+That same annihilation is why no `<O>` is subtracted anywhere: the
+disconnected part of the correlator lives in exactly that direction, so
+the `k=0` answer comes out connected on its own. It also makes the
+branch-complete total (`return_total=True`) exactly the connected static
+structure factor — a one-site operator applied to a uniform MPS lands
+exactly inside the tangent space, so nothing of `O(k)|Psi>` is outside
+the span the branches diagonalize — which is the sum rule
+`tests/test_infinite_chain_spectral.py` checks against an independent
+real-space `correlator` sum, alongside the f-sum rule and the exact
+product-state limit.
 
 **History.** An earlier version of this module built the ansatz on top
 of a single uniform-gauge tensor from `idmrg.py`'s growing algorithm
