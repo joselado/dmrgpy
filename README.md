@@ -6,7 +6,7 @@ This is a Python library to compute quasi-one-dimensional
 spin chains and fermionic systems using matrix product states
 with the density matrix renormalization group as implemented in ITensor
 (C++ v2/v3, Julia, or a pure-Python/NumPy reimplementation that needs
-no compiler -- see "Choosing a backend" below). Chains can be finite or,
+no compiler; see "Choosing a backend" below). Chains can be finite or,
 through iDMRG/VUMPS, infinite (see "Infinite chains" below). Most
 of the computations can be performed both with DMRG and exact
 diagonalization for small systems, which allows to benchmark the
@@ -113,13 +113,13 @@ python3 install.py
 
 If you're using a module-provided Python distribution (e.g. Triton's
 `scicomp-python-env`), its bundled conda-style compiler wrapper can
-sometimes be present but broken (missing its `cc1plus` backend) -- if so,
+sometimes be present but broken (missing its `cc1plus` backend). If so,
 `install.py` automatically falls back to the system/module-loaded
 compiler and prints a note about it. Whichever compiler ends up being
 used, and whichever modules/conda environment were loaded at install
 time, must be loaded/activated again in every later session (including
-job scripts) that imports `dmrgpy` -- the compiled extension depends on
-them.
+job scripts) that imports `dmrgpy`, since the compiled extension depends
+on them.
 
 If you don't need the compiled C++ backend on the cluster, `pip install
 dmrgpy` (see above) works directly in your Triton Python environment
@@ -149,7 +149,7 @@ You can find several tutorials [here](https://github.com/joselado/Advanced_Compu
 
 # Capabilities #
 - Possible models include spinless fermions, spinful fermions, spins, parafermions and bosons
-- Interchangeable backends for the same API: compiled ITensor C++ (v2 and v3), a live Julia/ITensors.jl session, a pure-Python/NumPy reimplementation needing no compiler, and exact diagonalization -- results can be cross-checked between any of them
+- Interchangeable backends for the same API: compiled ITensor C++ (v2 and v3), a live Julia/ITensors.jl session, a pure-Python/NumPy reimplementation needing no compiler, and exact diagonalization; results can be cross-checked between any of them
 - Optional GPU execution of the pure-Python backend, by putting its tensors on a JAX device instead of in host memory
 - Optional conserved quantum-number sectors: confine an entire calculation to a fixed particle number and/or total Sz
 - Ground state energy
@@ -560,8 +560,8 @@ spinful fermions), `Sz` (total spin projection, in ITensor's integer
 `2*Sz` units, for spin chains and spinful fermions) and `Nb` (boson
 number), alone or in combination, e.g.
 `set_conserved_sector(Nf=8,Sz=0)` for a Hubbard chain. Every operator
-used on the chain -- the Hamiltonian, and anything passed to
-`vev`/correlators -- must itself conserve the requested quantities, or a
+used on the chain (the Hamiltonian, and anything passed to
+`vev`/correlators) must itself conserve the requested quantities, or a
 `ValueError` names the offending operator.
 
 ## Ground state of an infinite chain with iDMRG
@@ -607,7 +607,7 @@ Available backends are
   has no quantum-number sectors.
 - **Pure Python** (`pyitensor`, `itensor_version="python"`), a
   from-scratch NumPy/SciPy reimplementation of the ITensor v3 API subset
-  dmrgpy needs -- ground/excited-state DMRG, the same
+  dmrgpy needs: ground/excited-state DMRG, the same
   TDVP/TEBD/AUTO/TDVP_GSE/MPO time-evolution methods, KPM dynamical
   correlators, METTS, quantum-number sectors, iDMRG/VUMPS, and more.
   Needs no C++ compiler or compiled extension at all, at the cost of
@@ -616,16 +616,16 @@ Available backends are
 - **Julia (ITensors.jl)** (`itensor_version="julia_live"`), a live
   in-process Julia session driven through `juliacall`, set up with
   `python install_julia.py` instead of `install.py`. It implements a
-  subset of the API rather than all of it -- for instance
+  subset of the API rather than all of it. For instance,
   `get_dynamical_correlator` supports `submode` `"KPM"`, `"CVM"`,
   `"TDZ"`, `"EX"` and `"maxent"` there, and raises `NotImplementedError`
-  for the others -- and it never falls back to another backend: a
+  for the others. It also never falls back to another backend: a
   feature that isn't implemented there raises instead.
 - **Exact diagonalization (ED)**, a pure Python/NumPy/SciPy fallback.
   Used automatically for small systems, and automatically in place of a
   C++ backend whose extension wasn't compiled (and for `itensor_version=3`
   on chains of fewer than 3 sites, which ITensor v3's two-site DMRG
-  cannot handle), so a script keeps running -- just slower -- even
+  cannot handle), so a script keeps running, just slower, even
   without a full build. This automatic fallback covers the C++ backends
   only: the Julia backend never falls back, and neither does a chain with
   a conserved sector set, since ED would silently answer with the
@@ -660,8 +660,8 @@ thermodynamic limit. It is a separate object rather than a
 `Many_Body_Chain` subclass, since a fixed number of sites, an ED
 cross-check and the finite-chain dispatch machinery have no meaning for
 an infinite system. Hamiltonians are written with the L/C/R operator
-convention -- `SzC[i]` for the central cell, `SzR[i]` for the next cell
-to the right, `SzL[i]` for the previous one -- see the iDMRG example
+convention (`SzC[i]` for the central cell, `SzR[i]` for the next cell
+to the right, `SzL[i]` for the previous one); see the iDMRG example
 above.
 
 Two ground-state algorithms are available, selected with
@@ -682,7 +682,7 @@ Only `itensor_version="python"` (the default here) and
 | `spectral_weights`, `dynamical_structure_factor` | `"vumps"` | yes | no |
 | `local_excitation_gap` | `"idmrg"` | yes | `window=0` only |
 | `td_dynamical_correlator` | `"idmrg"` | yes | yes |
-| `kpm_finite` | -- | yes | yes |
+| `kpm_finite` | n/a | yes | yes |
 
 `kpm_finite` is a finite-window approximation: it builds a window of
 `n_window` unit cells with open boundaries and runs the ordinary
@@ -732,9 +732,9 @@ small the tensor is, so many small tensors lose and few large ones win.
 Measured on an H200: below a bond dimension of ~120 the GPU is *slower*
 than NumPy, ~120-160 is break-even, and above that it pays off (~5x at
 240, and ~20x at 480 on a calculation that genuinely needs that bond
-dimension -- a uniform Heisenberg ground state converges well below it
+dimension; a uniform Heisenberg ground state converges well below it
 and cannot show a speedup at any `maxm`). A naive design that converted arrays per call was
-5-11x slower than the host path -- which is why there is exactly one
+5-11x slower than the host path, which is why there is exactly one
 conversion point in the engine and everything downstream of it stays on
 the device.
 
@@ -743,8 +743,8 @@ Two knobs matter, and they work together rather than separately:
 minting a new tensor shape (and hence a new compiled kernel) every time
 a bond dimension changes, and `backend.set_jit()` fuses the hot inner
 kernels. The default `set_jit("auto")` turns jitting on exactly when
-`set_pad_bonds` has been set. On a cold run -- a script that starts,
-computes and exits -- the two together were measured at 6.4-12.1x, where
+`set_pad_bonds` has been set. On a cold run (a script that starts,
+computes and exits) the two together were measured at 6.4-12.1x, where
 either alone was worth only 2.4-3.8x; inside a long-running process the
 trade reverses and `set_jit(True)` *without* padding is the better
 choice.
@@ -762,7 +762,7 @@ backends against ED (and against each other) on small systems:
 python run_tests.py     # or: pytest tests
 ```
 
-`benchmarks/run_benchmarks.py` answers a different question -- not "is
+`benchmarks/run_benchmarks.py` answers a different question: not "is
 this backend correct" but "which backend is fastest, and by how much".
 It sweeps a uniform S=1/2 Heisenberg chain over a range of chain
 lengths, timing a ground-state energy, a static correlator and a KPM
