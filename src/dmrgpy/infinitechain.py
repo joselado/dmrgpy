@@ -1132,7 +1132,15 @@ class Infinite_Many_Body_Chain:
         opname_i/opname_j: named single-site operators, at sublattice
         position p_i (0..n_uc-1) of the window's central cell and p_i+r of
         whichever cell that lands in (r>=0 physical sites, see
-        two_point_correlator's own r convention).
+        two_point_correlator's own r convention). Fermionic (parity-odd)
+        names need no special handling here and get none: the finite window
+        is an ordinary `Many_Body_Chain`, so its operators pass through
+        `MultiOperator.to_terms()` and carry the *global*, finite-chain
+        Jordan-Wigner string -- the correct convention for the finite object
+        this method actually diagonalizes (pinned against exact free
+        fermions in `tests/test_idmrg_window_fermionic.py`). This is
+        unlike `td_dynamical_correlator`, which works with the infinite
+        chain's own tensors directly and threads its own local string.
 
         n_window: number of unit-cell repeats in the finite window -- no
         default (see the convergence caveat above); must at least be able
@@ -1261,8 +1269,23 @@ class Infinite_Many_Body_Chain:
         (native `mpscpp3.Chain::td_dynamical_correlator_window`, reusing
         ITensorTDVP's own boundary-tensor `tdvp()` overload directly rather
         than pyitensor's hand-rolled window-aware sweep -- see that
-        method's own comment) are both supported; any other backend raises
-        NotImplementedError. BOTH require `self.gs_method == "idmrg"`
+        method's own comment) are the two implemented backends; any other
+        raises NotImplementedError.
+
+        **`itensor_version=3` currently RAISES here** (`RuntimeError`), and
+        deliberately so: that backend's window tiles the raw
+        per-micro-step `idmrg_U_` factors instead of the gauge-consistent
+        unit cell every other v3 static observable uses, so its `S(x,t)` is
+        quantitatively wrong for *every* operator -- it misses the exact
+        `S(x,t=0) == correlator(...)` identity by up to ~1.7e-1 on a plain
+        spin chain, while shape, finiteness and even the energy density
+        all look right. Returning that is worse than refusing. Use
+        `itensor_version="python"`, which is exact on that identity. The
+        C++ method refuses too, unless
+        `Chain::set_allow_defective_window(true)` opts in (tests only).
+        See `docs/known_issue_v3_window_gauge.md`; everything below about
+        the v3 path describes what it will do again once the gauge is
+        fixed. BOTH require `self.gs_method == "idmrg"`
         (raises NotImplementedError otherwise, mirroring
         `local_excitation_gap`'s own gate) -- unlike `vev`/`correlator`/
         `excitation_energies`, this feature has no `gs_method="vumps"`
@@ -1279,6 +1302,22 @@ class Infinite_Many_Body_Chain:
         the "python" backend, it does not pad beyond the window with extra
         unevolved unit-cell copies, so increase `n_window` instead if a
         wider `x_values` is needed.
+
+        **Fermionic operators.** A parity-odd pair (`C`/`Cdag`, either
+        order) computes the physical fermionic correlator: the Jordan-Wigner
+        string is threaded on both sides -- explicitly across the window on
+        the ket (before the evolution, so it is evolved along with the
+        perturbation) and across the bra at measurement time -- exactly as
+        `correlator` does for the static case, and pinned against it by the
+        exact `S(x, t=0) == correlator(...)` identity in
+        `tests/test_idmrg_window_fermionic.py`. See
+        `pyitensor.idmrg_window.apply_local_operator` for where the two
+        semi-infinite strings are truncated and why that truncation is the
+        same boundary approximation the IBC window already makes. A pair
+        with odd *total* fermion parity (one fermionic operator against a
+        parity-even one) raises: its string can never close. `connected=True`
+        subtracts nothing for a parity-odd pair, whose disconnected
+        background `<A><B>` is zero by symmetry.
 
         `opname_j` is applied at sublattice position `p_i` (0..n_uc-1) and
         evolved forward in time; `opname_i` is inserted at the shifted
@@ -1340,6 +1379,30 @@ class Infinite_Many_Body_Chain:
                 "Infinite_Many_Body_Chain.td_dynamical_correlator: only "
                 "itensor_version=\"python\" or itensor_version=3 are "
                 "supported")
+        # itensor_version=3 is DISABLED here rather than answering with
+        # numbers that are known to be wrong. Chain::idmrg_build_window and
+        # Chain::idmrg_window_snapshot_correlator tile the raw
+        # per-micro-step `idmrg_U_` factors instead of the gauge-consistent
+        # unit cell that every other v3 static observable was moved onto,
+        # so S(x,t) fails the exact `S(x,0) == correlator(...)` identity by
+        # up to 7.4e-2 -- on a plain spin chain, for any operator, with no
+        # Jordan-Wigner string anywhere near it. The C++ method refuses too
+        # (Chain::set_allow_defective_window is the tests-only opt-in);
+        # this raise is here so the failure names the alternative and the
+        # write-up rather than surfacing as a bare C++ error. Delete both
+        # once the gauge is fixed -- docs/known_issue_v3_window_gauge.md
+        # has the diagnosis, the measured numbers and the fix.
+        raise RuntimeError(
+            "Infinite_Many_Body_Chain.td_dynamical_correlator: "
+            "itensor_version=3 is disabled because its window measures in "
+            "the wrong gauge -- it tiles the raw per-micro-step idmrg_U_ "
+            "factors instead of the gauge-consistent unit cell, so its "
+            "S(x,t)/S(k,omega) are quantitatively wrong for every operator "
+            "(the exact S(x,t=0) == correlator(...) identity misses by up "
+            "to 7.4e-2 on a spin chain). Use itensor_version=\"python\" "
+            "for this calculation -- it is exact on that identity and "
+            "matches the free-fermion Green function at t>0. See "
+            "docs/known_issue_v3_window_gauge.md.")
         if self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.td_dynamical_correlator: "

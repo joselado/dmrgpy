@@ -121,6 +121,7 @@ import numpy as np
 from . import idmrg as _idmrg_mod
 from . import kernels
 from .mpscontainer import MPO, MPS
+from .sites.base import is_fermionic
 from .svd import svd
 from .tdvp import _lanczos_expm_multiply
 from .tensor import ITensor
@@ -266,6 +267,13 @@ class IBCWindow:
         self.env_HR_bra = env_HR_bra
         self.n_uc = n_uc
         self.n_window = n_window
+        # Whether the operator `apply_local_operator` perturbed this window
+        # with was fermionic (parity-odd), i.e. whether its own
+        # Jordan-Wigner string is open across the window's left edge --
+        # `snapshot_correlator` needs to know, since for a measurement site
+        # left of the window that string continues into the frozen left
+        # pad (see both of their docstrings). False until perturbed.
+        self.op_ket_fermionic = False
 
 
 def build_window(result, n_window):
@@ -465,7 +473,35 @@ def window_total_energy(window):
        the whole subsequent evolution -- what's not meaningful is
        comparing this absolute value *across different `n_window`* (or
        against `e0`) without first differencing, not using it as-is at a
-       single, fixed window."""
+       single, fixed window.
+
+    3. **The closure this uses is not the one a correlator measures
+       through**, and that mismatch is real, not academic. Here the
+       window's two dangling boundary legs (env_HL_ket, env_HR_ket) are
+       *traced* -- identity weight on both sides. `snapshot_correlator`
+       instead closes them the way `local_expectation`'s own docstring
+       explains a physical expectation value must be closed: identity on
+       the left (correct for a left-canonical `U_list`) but the dominant
+       right transfer-matrix fixed point `rho` on the right. The two
+       closings see different energies, so the `eshift` measured here
+       cancels the evolution's global phase *only* for the trace closure.
+       Confirmed directly on a dimerized spinless-fermion chain: the
+       unperturbed window's own `<psi|psi(t)>` stayed at arg = -0.0014 rad
+       at t=0.4 through `inner()` (the trace closure) while the same state
+       measured through `snapshot_correlator` (the fixed-point closure)
+       rotated at 3.21 rad per unit time and grew to |.| = 1.05. That
+       spurious factor multiplied every `S(x,t)` this module produced, for
+       every operator -- spin included: it is a large part of what
+       `tests/test_idmrg_window_free_fermion.py`'s own
+       `test_dynamical_correlator_td_matches_dimerized_free_fermion` used
+       to absorb as a ~0.07 "iDMRG convergence residual" (spin drift
+       ~1.6 rad/t x t=0.2 x |S|~0.25 ~ 0.08 -- the arithmetic matches its
+       own observed number). `dynamical_correlator_td` now cancels it
+       exactly by dividing by the vacuum amplitude (see its own
+       docstring), so this function is left alone: its value no longer
+       needs to be the "right" energy for any particular closure, only a
+       fixed constant shared by both branches, and it has another caller
+       (`window_energy_density`) that wants exactly this convention."""
     n = window.mps.length()
     L, Lbra = _extend_through_left(window, n)
     # L's three dangling legs are (Lbra [a fresh bra-side mint from this
@@ -810,6 +846,15 @@ def window_tdvp_step(window, dt, cutoff, maxdim, niter=50, eshift=0.0):
     return window
 
 
+def _apply_site_matrix(window, site, mat):
+    """`mat` into window site `site`'s own physical axis, in place, in the
+    `M[in,out]` contraction convention idmrg.py's own `_op_transfer` uses
+    (`Aop[l,o,r] = sum_i M[i,o] A[l,i,r]`)."""
+    T = window.mps.A(site)
+    window.mps.set_A(site, ITensor(T.inds,
+                                    np.einsum('io,lir->lor', mat, T.array)))
+
+
 def apply_local_operator(window, result, site, opname):
     """Apply the named single-site operator (`result.sites_uc`'s own
     per-sublattice-type matrix convention, e.g. "Sz"/"Sx"/"Cdag" -- the
@@ -822,13 +867,38 @@ def apply_local_operator(window, result, site, opname):
     (`Aop[l,o,r] = sum_i M[i,o] A[l,i,r]`) -- matching it matters for any
     non-symmetric operator (e.g. Cdag/C/Sp/Sm); it happens to be
     invisible for the symmetric ones (Sz, Sx, ...) this module's own
-    tests exercise so far."""
+    tests exercise so far.
+
+    **Fermionic (parity-odd) operators.** A bare `C`/`Cdag` matrix is not
+    the physical fermionic operator: under Jordan-Wigner the operator at
+    site `s` is `(prod_{j<s} F_j) O_s`, a semi-infinite object. This
+    function applies that string explicitly on every window site left of
+    `site` -- truncated at the window's own left edge, since everything
+    further left is frozen and its string cancels against the identical
+    one the bra carries in `snapshot_correlator` (`F^2 = Id`). Truncating
+    there is not exact: the string's own left endpoint sits on the window
+    boundary, so the evolution it feeds is `P_L H P_L` rather than `H`
+    (`P_L` = parity of everything left of the window), which differ only
+    in the Hamiltonian terms crossing that boundary. That is the *same*
+    boundary error the IBC window already makes, arriving from the same
+    edge at the same Lieb-Robinson velocity -- it converges away with
+    `n_window` exactly like the rest of it, and at `t=0` it is absent
+    altogether (the two strings then cancel identically, leaving the
+    finite between-the-endpoints string `two_point_correlator` uses -- a
+    machine-precision identity, pinned by
+    tests/test_idmrg_window_fermionic.py).
+
+    A parity-even name ("N", "Sz", "Nup", ...) threads no string and this
+    reduces exactly to the single-matrix application it was before."""
     n_uc = result.n_uc
     p = (site - 1) % n_uc
     mat = result.sites_uc.site_type(p + 1).matrix(opname)
-    T = window.mps.A(site)
-    new_array = np.einsum('io,lir->lor', mat, T.array)
-    window.mps.set_A(site, ITensor(T.inds, new_array))
+    if is_fermionic(opname):
+        window.op_ket_fermionic = True
+        for j in range(1, site):
+            st_j = result.sites_uc.site_type(((j - 1) % n_uc) + 1)
+            _apply_site_matrix(window, j, st_j.matrix("F"))
+    _apply_site_matrix(window, site, mat)
 
 
 def local_expectation(window, result, site, opname):
@@ -862,6 +932,13 @@ def local_expectation(window, result, site, opname):
     directly (not idmrg.py's own functions verbatim, since those assume a
     *uniform* `U_list`, whereas the window's own tensors are generally
     non-uniform after a perturbation/time evolution)."""
+    if is_fermionic(opname):
+        raise ValueError(
+            "local_expectation: {!r} is a fermionic (parity-odd) operator, "
+            "whose Jordan-Wigner string cannot close on a single site -- its "
+            "expectation value is zero by symmetry and the number this would "
+            "otherwise return is a stringless artifact (same contract as "
+            "idmrg.onsite_expectation's)".format(opname))
     ket = window.mps
     n = ket.length()
     n_uc = result.n_uc
@@ -1041,6 +1118,7 @@ def snapshot_correlator(window_B, result, opname_A, x_values, center):
     n = window_B.mps.length()
     n_uc = result.n_uc
     cell, n_cell = _window_cell(result)
+    ferm = is_fermionic(opname_A)
     out = {}
     for x in x_values:
         pos = center + x
@@ -1049,12 +1127,38 @@ def snapshot_correlator(window_B, result, opname_A, x_values, center):
         for i in range(lo, hi + 1):
             # bulk tensor by *cell* position, operator matrix by sublattice
             arr = _idmrg_mod._to_array_lpr(cell[(i - 1) % n_cell])
+            st_i = result.sites_uc.site_type(((i - 1) % n_uc) + 1)
             if i == pos:
-                p = (i - 1) % n_uc
-                mat = result.sites_uc.site_type(p + 1).matrix(opname_A)
+                # `_close_array_chain` conjugates the bra, so whatever
+                # matrix is applied here acts as its own ADJOINT on the
+                # result: applying `A^dag` is what makes this the
+                # documented <psi|A_x ... |psi>. (Applying `A` itself --
+                # what this did before -- silently computed <psi|A^dag_x
+                # ...> instead: invisible for every Hermitian name, but
+                # exactly wrong for C/Cdag/Sp/Sm.)
+                mat = st_i.matrix(opname_A).conj().T
                 arr = np.einsum('io,lir->lor', mat, arr)
+            elif ferm and 1 <= i < pos:
+                # `opname_A`'s own Jordan-Wigner string, truncated at the
+                # same left reference (window site 1) `apply_local_operator`
+                # truncates the ket's at -- see its docstring. `F` is
+                # Hermitian, so applying it to the bra inserts `F` itself.
+                arr = np.einsum('io,lir->lor', st_i.matrix("F"), arr)
             bra_arrays.append(arr)
-        ket_arrays = _padded_arrays(window_B, result, max(0, 1 - lo), max(0, hi - n))
+        extra_left = max(0, 1 - lo)
+        ket_arrays = _padded_arrays(window_B, result, extra_left,
+                                     max(0, hi - n))
+        if extra_left and window_B.op_ket_fermionic:
+            # `pos < 1`: the common left reference moves out to `pos`
+            # itself, so the KET operator's string now also covers the
+            # frozen pad sites pos..0. Applying it here rather than in
+            # `apply_local_operator` is exact, not an approximation: those
+            # sites are never evolved, so applying F to them at t=0 and at
+            # measurement time are the same thing.
+            for m in range(extra_left):
+                st_m = result.sites_uc.site_type(((lo - 1 + m) % n_uc) + 1)
+                ket_arrays[m] = np.einsum('io,lir->lor', st_m.matrix("F"),
+                                           ket_arrays[m])
         p_right = (hi - 1) % n_cell
         p_left = (lo - 1) % n_cell
         out[x] = _close_array_chain(bra_arrays, ket_arrays, result, p_right,
@@ -1087,6 +1191,24 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     evolution (`window_B`), not one run per distance -- see
     `snapshot_correlator`'s own docstring for how a single run yields
     every `x`.
+
+    **Vacuum normalization.** A second, unperturbed copy of the same
+    window is evolved alongside `window_B` (same `eshift`, same `dt`, same
+    truncation), and every `S(x,t)` is divided by that copy's own
+    `<psi|psi(t)>`, measured through the identical contraction. This is
+    exact rather than cosmetic -- both branches carry the same
+    `exp(-i(E0-eshift)t)` factor, so `S_raw/<psi|psi(t)>` is the correlator
+    with it removed -- and it is *necessary*: `eshift`
+    (`window_total_energy`) is measured with the window's two boundary legs
+    traced, while this module measures correlators with them closed by the
+    transfer-matrix fixed points, and the two closings see different
+    energies (see `window_total_energy`'s own docstring, point 3, for the
+    measurement that shows it). Cost is one extra TDVP evolution of the
+    same window; measured effect on a dimerized free-fermion chain
+    (`<Cdag_x(t) C_0>` against the exact Green function, n_window=6,
+    maxm=20, up to t=0.5): worst error 7.1e-1 -> 4.2e-2, i.e. the
+    uncorrected numbers were dominated by the spurious factor at every
+    time step past the first.
 
     `connected=True` (default) subtracts the disconnected background
     `<A><B>` (idmrg.py's own exact `onsite_expectation`, at the
@@ -1130,6 +1252,14 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     Returns `(ts, xs, S)`: `ts` (length `nt`), `xs` (sorted `x_values`),
     `S` (`nt` x `len(xs)` complex array, `S[it,ix] = S(xs[ix], ts[it])`)."""
     n_uc = result.n_uc
+    ferm = is_fermionic(opname_A)
+    if ferm != is_fermionic(opname_B):
+        raise ValueError(
+            "dynamical_correlator_td: the operator pair ({!r}, {!r}) has odd "
+            "total fermion parity -- its Jordan-Wigner string can never "
+            "close, so <A_x(t) B_0> is not a well-defined object on an "
+            "infinite chain (same contract as two_point_correlator's)".format(
+                opname_A, opname_B))
     if x_values is None:
         margin = max(1, n_window * n_uc // 4)
         x_values = range(-margin, margin + 1)
@@ -1140,6 +1270,21 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     # docstring: env_HL/env_HR are not energy-baseline-subtracted, so this
     # must be measured on the *unperturbed* ground window, before
     # apply_local_operator, and held fixed for the whole evolution.
+    #
+    # The vacuum branch: the SAME window, unperturbed, evolved with the
+    # same eshift/dt/truncation, measured every step with the identity
+    # through the identical contraction. `S(x,t)` is divided by it. This
+    # is not a cosmetic normalization -- see the loop below and
+    # `window_total_energy`'s own docstring for the closure mismatch it
+    # cancels. A shallow `MPS.copy()` is deliberate: it shares the very
+    # same ITensor objects (and hence the same Index identities the
+    # environments are keyed on) while giving the two branches independent
+    # tensor lists, which is all TDVP needs since every operation here
+    # returns a new ITensor rather than mutating one.
+    window_vac = IBCWindow(window_B.mps.copy(), window_B.mpo,
+                            window_B.env_HL, window_B.env_HL_bra,
+                            window_B.env_HR, window_B.env_HR_bra,
+                            window_B.n_uc, window_B.n_window)
     # the realized window may be one cell larger than requested (see
     # `_window_cell`), so the center must come from `window_B.n_window`, not
     # the requested `n_window` -- otherwise the perturbation sits off-centre
@@ -1148,22 +1293,38 @@ def dynamical_correlator_td(result, n_window, opname_A, opname_B, dt, nt,
     apply_local_operator(window_B, result, center, opname_B)
 
     if connected:
-        p_B = (center - 1) % n_uc
-        mean_B = _idmrg_mod.onsite_expectation(result, opname_B, p_B)
         background = {}
-        for x in xs:
-            p_A = (center + x - 1) % n_uc
-            mean_A = _idmrg_mod.onsite_expectation(result, opname_A, p_A)
-            background[x] = mean_A * mean_B
+        if ferm:
+            # A parity-odd operator has <O> = 0 identically (its own
+            # Jordan-Wigner string cannot close on a single site, which is
+            # exactly why `onsite_expectation` refuses to evaluate one), so
+            # the disconnected background is zero by symmetry rather than by
+            # measurement -- there is nothing to subtract, and nothing to
+            # compute.
+            for x in xs:
+                background[x] = 0.0
+        else:
+            p_B = (center - 1) % n_uc
+            mean_B = _idmrg_mod.onsite_expectation(result, opname_B, p_B)
+            for x in xs:
+                p_A = (center + x - 1) % n_uc
+                mean_A = _idmrg_mod.onsite_expectation(result, opname_A, p_A)
+                background[x] = mean_A * mean_B
 
     ts = np.array([it * dt for it in range(nt)])
     S = np.zeros((nt, len(xs)), dtype=complex)
     for it in range(nt):
         snap = snapshot_correlator(window_B, result, opname_A, xs, center)
+        # Divide by the vacuum amplitude <psi|psi(t)>, measured through the
+        # very same contraction (same closure, same padding, same identity
+        # calibration) -- then subtract the (static, drift-free) background.
+        vac = snapshot_correlator(window_vac, result, "Id", [0], center)[0]
         for ix, x in enumerate(xs):
-            S[it, ix] = snap[x] - background[x] if connected else snap[x]
+            val = snap[x] / vac
+            S[it, ix] = val - background[x] if connected else val
         if it < nt - 1:
             window_tdvp_step(window_B, dt, cutoff=cutoff, maxdim=maxdim, niter=niter, eshift=eshift)
+            window_tdvp_step(window_vac, dt, cutoff=cutoff, maxdim=maxdim, niter=niter, eshift=eshift)
     return ts, np.array(xs), S
 
 

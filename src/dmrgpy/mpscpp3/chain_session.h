@@ -4211,6 +4211,13 @@ class Chain
     // prior idmrg_ground_state call, x_values reaching outside the
     // window, a bond-dimension mismatch from poor iDMRG convergence) is
     // exactly this kind of recoverable, caller-facing condition.
+    // See td_dynamical_correlator_window's own comment just below: that
+    // method is disabled because its numbers are known to be gauge-wrong,
+    // and this is the deliberate opt-in that re-enables it for the tests
+    // that pin the defect and for whoever fixes it.
+    void
+    set_allow_defective_window(bool b) { allow_defective_window_ = b; }
+
     TdWindowResult
     td_dynamical_correlator_window(int n_window, std::string const& opname_A,
                                     std::string const& opname_B,
@@ -4219,10 +4226,52 @@ class Chain
                                     int maxdim, double cutoff, int niter,
                                     bool connected, int p_i)
         {
+        // DISABLED BY DEFAULT: the numbers this returns are known to be
+        // wrong, so it refuses to return them rather than letting a caller
+        // mistake them for measurements. idmrg_build_window (and this
+        // method's own bra, in idmrg_window_snapshot_correlator) tile
+        // idmrg_U_, the raw per-micro-step iDMRG factors, whose two ends
+        // live in bond bases minted by *different* micro-steps -- not the
+        // gauge-consistent cell (idmrg_theta_cell/ic_canonicalize_cell,
+        // kept as idmrg_cell_) that idmrg_onsite_expectation and
+        // idmrg_two_point_correlator were moved onto for exactly this
+        // reason, and that pyitensor/idmrg_window.py's own _window_cell
+        // uses. Measured consequence: S(x,t=0), which must equal the
+        // static two_point_correlator exactly, misses it by up to 7.4e-2
+        // on a plain Heisenberg chain -- no fermions, no strings, any
+        // operator. x=0 stays exact and the error grows with |x|, the
+        // signature of a bond-basis mismatch.
+        //
+        // set_allow_defective_window(true) is the deliberate,
+        // hard-to-do-by-accident opt-in the tests that pin this defect
+        // (and whoever fixes it) use; nothing in dmrgpy's public API ever
+        // calls it -- infinitechain.py's own td_dynamical_correlator
+        // raises for itensor_version=3 instead of routing here. Delete
+        // both this check and that raise once the gauge is fixed; see
+        // docs/known_issue_v3_window_gauge.md.
+        if (!allow_defective_window_)
+            throw std::runtime_error(
+                  "Chain::td_dynamical_correlator_window is disabled: this "
+                  "backend's window tiles the raw per-micro-step idmrg_U_ "
+                  "factors instead of the gauge-consistent unit cell, so its "
+                  "S(x,t) is quantitatively wrong for every operator (it "
+                  "misses the exact S(x,t=0) == two_point_correlator identity "
+                  "by up to 7.4e-2 on a spin chain). Use "
+                  "itensor_version=\"python\" for this calculation. See "
+                  "docs/known_issue_v3_window_gauge.md; "
+                  "set_allow_defective_window(true) exists only to let the "
+                  "tests that pin the defect, and whoever fixes it, run this "
+                  "code deliberately.");
         if (!have_idmrg_snapshot_)
             throw ITError("Chain::td_dynamical_correlator_window called before "
                   "idmrg_ground_state (no converged environment snapshot "
                   "to cap a window with)");
+        if (idmrg_is_fermionic(opname_A)!=idmrg_is_fermionic(opname_B))
+            throw std::invalid_argument(
+                  "Chain::td_dynamical_correlator_window: the operator pair ("
+                  +opname_A+", "+opname_B+") has odd total fermion parity -- "
+                  "its Jordan-Wigner string can never close, so <A_x(t) B_0> "
+                  "is not a well-defined object on an infinite chain");
         int n_uc = idmrg_n_uc_;
         if (!(0<=p_i && p_i<n_uc))
             throw ITError("Chain::td_dynamical_correlator_window: p_i out of range");
@@ -4338,12 +4387,25 @@ class Chain
         std::map<int,Cplx> background;
         if (connected)
             {
-            int p_B = (center-1)%n_uc;
-            mean_B = idmrg_onsite_expectation(opname_B,p_B);
-            for (int x : x_values)
+            if (idmrg_is_fermionic(opname_B))
                 {
-                int p_A = ((center+x-1)%n_uc+n_uc)%n_uc;
-                background[x] = mean_B*idmrg_onsite_expectation(opname_A,p_A);
+                // A parity-odd operator has <O> = 0 identically (its own
+                // Jordan-Wigner string cannot close on a single site), so
+                // the disconnected background is zero by symmetry rather
+                // than by measurement -- and idmrg_onsite_expectation would
+                // return a stringless artifact for it. Mirrors
+                // idmrg_window.py's own dynamical_correlator_td.
+                for (int x : x_values) background[x] = Cplx(0,0);
+                }
+            else
+                {
+                int p_B = (center-1)%n_uc;
+                mean_B = idmrg_onsite_expectation(opname_B,p_B);
+                for (int x : x_values)
+                    {
+                    int p_A = ((center+x-1)%n_uc+n_uc)%n_uc;
+                    background[x] = mean_B*idmrg_onsite_expectation(opname_A,p_A);
+                    }
                 }
             }
 
@@ -9926,10 +9988,28 @@ class Chain
     // (1-based), in place -- Sec. V.1 step 3 of arXiv:1804.09163
     // (A^dagger_0|psi>/B_0|psi>), C++ analogue of idmrg_window.py's own
     // apply_local_operator.
+    //
+    // Fermionic (parity-odd) `opname`: a bare C/Cdag matrix is not the
+    // physical fermionic operator -- under Jordan-Wigner the operator at
+    // site s is (prod_{j<s} F_j) O_s, so the string is applied explicitly
+    // on every window site left of `site`, truncated at the window's own
+    // left edge exactly as idmrg_window.py's own apply_local_operator does
+    // (see its docstring for why truncating there is the same boundary
+    // approximation the IBC window already makes, and why it is absent
+    // altogether at t=0).
     void
     idmrg_window_apply_local_op(IdmrgWindow& win, int site, std::string const& opname) const
         {
         int n_uc = idmrg_n_uc_;
+        if (idmrg_is_fermionic(opname))
+            for (int j=1;j<site;++j)
+                {
+                int pj = (j-1)%n_uc;
+                ITensor FT = idmrg_op_itensor(win.phys[j-1],pj,"F");
+                ITensor Tj = win.psi.A(j)*FT;
+                Tj.noPrime("Site");
+                win.psi.set(j,Tj);
+                }
         int p = (site-1)%n_uc;
         Index phys = win.phys[site-1];
         ITensor OpT = idmrg_op_itensor(phys,p,opname);
@@ -10120,6 +10200,7 @@ class Chain
         {
         int n = win.n;
         int n_uc = idmrg_n_uc_;
+        bool ferm_A = idmrg_is_fermionic(opname_A);
 
         // ket_arrays: win's own tensors, positions 1..n. Left/right link
         // Index at each position is re-derived fresh via commonIndex (or
@@ -10169,8 +10250,26 @@ class Chain
                 Index l = idmrg_U_left_[p], s = sites_.si(p+1), r = idmrg_U_right_[p];
                 if (i==pos)
                     {
-                    ITensor OpT = idmrg_op_itensor(s,p,opname_A);
+                    // idmrg_close_array_chain conjugates the bra, so
+                    // whatever is applied here acts as its own ADJOINT on
+                    // the result: applying A^dagger is what makes this the
+                    // documented <psi|A_x ...|psi>. (Applying A itself --
+                    // what this did before, mirroring idmrg_window.py's own
+                    // pre-fix bra -- silently computed <psi|A^dagger_x ...>
+                    // instead: invisible for every Hermitian name, exactly
+                    // wrong for C/Cdag/Sp/Sm.)
+                    ITensor OpT = swapPrime(dag(idmrg_op_itensor(s,p,opname_A)),0,1);
                     ITensor Uop = idmrg_U_[p]*OpT; Uop.noPrime("Site");
+                    bra_arrays[i-1] = idmrg_tensor_to_lpr_array(Uop,l,s,r);
+                    }
+                else if (ferm_A && i<pos)
+                    {
+                    // opname_A's own Jordan-Wigner string, truncated at the
+                    // same left reference (window site 1) that
+                    // idmrg_window_apply_local_op truncates the ket's at.
+                    // F is Hermitian, so applying it to the bra inserts F.
+                    ITensor FT = idmrg_op_itensor(s,p,"F");
+                    ITensor Uop = idmrg_U_[p]*FT; Uop.noPrime("Site");
                     bra_arrays[i-1] = idmrg_tensor_to_lpr_array(Uop,l,s,r);
                     }
                 else
@@ -10948,6 +11047,11 @@ class Chain
     // binding's existing (density,converged,niter_done) 3-tuple stays
     // unchanged (same pattern as wf0_/have_wf0_ above for gs_energy()).
     bool have_idmrg_snapshot_ = false;
+    // Opt-in to running the known-gauge-defective window path -- see
+    // td_dynamical_correlator_window's own comment and
+    // docs/known_issue_v3_window_gauge.md. Never set from dmrgpy's own
+    // public API.
+    bool allow_defective_window_ = false;
     int idmrg_n_uc_ = 0;
     std::vector<IdmrgAutomatonRow> idmrg_rows_; // per-sublattice automaton row, dense data (see idmrg_make_W's own comment on why never a persistent ITensor)
     std::vector<ITensor> idmrg_U_; // idmrg_U_[p]: sublattice p's converged left-canonical ket tensor (legs: idmrg_U_left_[p], Site, idmrg_U_right_[p])

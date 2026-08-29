@@ -28,7 +28,27 @@ bit-identical ones -- cross-backend checks below use loose tolerances
 e.g. `test_idmrg_window.py`'s own `abs=0.15` energy-density checks) rather
 than exact agreement, and are run at well-converged (maxm=30) settings so
 run-to-run gauge/seed variation stays small.
-"""
+
+
+NOTE (2026-08-29): `Chain::td_dynamical_correlator_window` is DISABLED by
+default and dmrgpy's public API raises for `itensor_version=3`, because
+this backend's window measures in the wrong gauge -- it tiles the raw
+per-micro-step `idmrg_U_` factors instead of the gauge-consistent unit
+cell (`idmrg_theta_cell`/`ic_canonicalize_cell`) that
+`idmrg_onsite_expectation`/`idmrg_two_point_correlator` were moved onto,
+and that `pyitensor/idmrg_window.py`'s own `_window_cell` uses. The
+consequence is measurable and operator-independent: `S(x,t=0)`, which
+must equal the static `two_point_correlator` exactly, misses it by up to
+7.4e-2 on a plain Heisenberg chain. See
+`docs/known_issue_v3_window_gauge.md`, and the strict xfail pinning it in
+`tests/test_idmrg_window_fermionic.py`.
+
+The tests below therefore opt in explicitly (`_allow_defective_window`)
+and assert only *machinery* properties -- error handling, eshift
+measurement, shapes, run-to-run reproducibility -- never that a value is
+physically right. Read every cross-backend tolerance here in that light:
+they were set before the defect was known, and they pass *despite* it,
+which is precisely why none of them caught it."""
 import numpy as np
 import pytest
 
@@ -39,6 +59,23 @@ pytestmark = pytest.mark.skipif(
     not cppext.available(3), reason="ITensor v3 extension not compiled")
 
 MAXM, CUTOFF, MAXITER, ETOL, NITER, RESTARTS = 30, 1e-12, 60, 1e-9, 30, 2
+
+
+def _allow_defective_window(c):
+    """`Chain::td_dynamical_correlator_window` refuses to run by default:
+    its window tiles the raw per-micro-step `idmrg_U_` factors rather than
+    the gauge-consistent unit cell, so its `S(x,t)` is quantitatively
+    wrong for every operator (see `docs/known_issue_v3_window_gauge.md`,
+    and the strict xfail pinning it in
+    `tests/test_idmrg_window_fermionic.py`). dmrgpy's public API raises
+    rather than routing there; this opt-in is what lets the tests in this
+    module keep exercising the *machinery* around it (error handling,
+    eshift measurement, run-to-run reproducibility, shapes) -- none of
+    which asserts a physically-correct value, deliberately. Remove this
+    helper, and both refusals, when the gauge is fixed."""
+    if c.itensor_version == 3:
+        c._session3.set_allow_defective_window(True)
+    return c
 
 
 def _build(itensor_version):
@@ -55,6 +92,7 @@ def _build(itensor_version):
     h = c.SxC[0] * c.SxR[0] + c.SyC[0] * c.SyR[0] + c.SzC[0] * c.SzR[0]
     c.set_hamiltonian(h)
     c.gs_energy()
+    _allow_defective_window(c)
     return c
 
 
@@ -69,6 +107,7 @@ def _build_fast(itensor_version):
     h = c.SxC[0] * c.SxR[0] + c.SyC[0] * c.SyR[0] + c.SzC[0] * c.SzR[0]
     c.set_hamiltonian(h)
     c.gs_energy()
+    _allow_defective_window(c)
     return c
 
 
@@ -90,6 +129,9 @@ def test_td_dynamical_correlator_v3_requires_gs_energy_first():
     otherwise always satisfy this precondition first)."""
     backend = cppext.get_backend(3)
     chain = backend.Chain([2])  # site_types: one spin-1/2, matches SpinX's convention
+    # past the gauge-defect refusal (see _allow_defective_window), so that
+    # what this test observes is the missing-snapshot error it is about
+    chain.set_allow_defective_window(True)
     with pytest.raises(RuntimeError):
         chain.td_dynamical_correlator_window(
             2, "Sz", "Sz", 0.1, 2, [0], 20, 1e-10, 50, True, 0)
@@ -183,16 +225,22 @@ def test_td_dynamical_correlator_v3_reproducible_across_convergence():
     assert np.max(np.abs(S_a - S_b)) < 0.3
 
 
-def test_td_dynamical_correlator_public_api_dispatches_to_v3():
-    """Infinite_Many_Body_Chain.td_dynamical_correlator(itensor_version=3)
-    (the public, documented entry point) returns finite S(k,omega) with
-    the expected shape, exercising the full dispatch/FFT-reduction path in
-    infinitechain.py (not just the raw C++ binding used by the more
-    targeted tests above)."""
+def test_td_dynamical_correlator_public_api_refuses_v3():
+    """The public entry point must REFUSE on itensor_version=3 rather than
+    return the numbers this backend's window currently produces: they are
+    quantitatively wrong for every operator, spin included (the window
+    tiles the raw per-micro-step idmrg_U_ factors instead of the
+    gauge-consistent unit cell -- see docs/known_issue_v3_window_gauge.md).
+
+    This test used to assert the opposite (that the call returns finite
+    S(k,omega) of the right shape). It did, and every number in it was
+    wrong: shape and finiteness cannot see a gauge error. When the gauge
+    is fixed, restore the positive assertion -- and give it an oracle this
+    time, e.g. the exact S(x,t=0) == correlator(...) identity that
+    tests/test_idmrg_window_fermionic.py uses on both backends."""
     cv = _build_fast(3)
     ks = np.linspace(-np.pi, np.pi, 5)
-    ks_out, es, Skw = cv.td_dynamical_correlator(
-        "Sz", 0, "Sz", n_window=8, dt=0.05, nt=6, x_values=[-1, 0, 1],
-        maxdim=40, cutoff=1e-10, niter=100, ks=ks, delta=0.2)
-    assert Skw.shape == (len(ks_out), len(es))
-    assert np.all(np.isfinite(Skw))
+    with pytest.raises(RuntimeError, match="wrong gauge"):
+        cv.td_dynamical_correlator(
+            "Sz", 0, "Sz", n_window=8, dt=0.05, nt=6, x_values=[-1, 0, 1],
+            maxdim=40, cutoff=1e-10, niter=100, ks=ks, delta=0.2)

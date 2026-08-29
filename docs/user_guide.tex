@@ -3465,6 +3465,60 @@ the \emph{same} damping/FFT convention (\texttt{delta} ->
 Lorentzian broadening) every other dynamical-correlator submode in this
 codebase already uses.
 
+\textbf{Fermionic operators, and the vacuum normalization} (both since
+2026-08-29). A parity-odd pair (\texttt{"Cdag"}/\texttt{"C"}, either
+order, on any fermionic site type) computes the \emph{physical} fermionic
+correlator: the Jordan-Wigner string is threaded across the window on the
+ket (before the evolution, so it is evolved along with the perturbation)
+and across the bra at measurement time, matching the convention
+\texttt{correlator} already used for the static case. The two are pinned
+to each other by an exact identity --- $S(x,t{=}0)$ equals
+\texttt{correlator(...)} to machine precision at every $x$, both signs,
+across the window's own padding --- and against the exact free-fermion
+Green function $\langle c^\dagger_x(t) c_0\rangle = \sum_l [e^{iht}]_{xl}
+P[l,0]$ at $t>0$ (\texttt{tests/test\_idmrg\_window\_fermionic.py},
+\texttt{examples/idmrg/fermionic\_dynamical\_correlator/main.py}). Note
+the anticommutation sign this implies: for two parity-odd operators at
+different sites $\langle A_x B_0\rangle = -\langle B_0 A_x\rangle$, so a
+fermionic $S(x,t)$ and a static \texttt{correlator} written in the
+opposite site order differ by a minus sign. A pair with odd \emph{total}
+parity (one fermionic operator against a parity-even one) raises rather
+than returning a number, exactly as \texttt{correlator} does: its string
+can never close. \texttt{connected=True} subtracts nothing for a
+parity-odd pair, whose disconnected background is zero by symmetry.
+Before this, the path applied a bare \texttt{C}/\texttt{Cdag} matrix with
+no string on either backend --- a different number entirely, not a less
+converged one (measured: $+0.203$ at $x=2$ against an exact $-0.001$).
+Independently, every $S(x,t)$ --- spin included --- is now divided by the
+vacuum amplitude $\langle\psi|\psi(t)\rangle$ measured through the
+identical contraction, which cancels a spurious global factor that had
+been inflating results on both backends (the shift \texttt{eshift} that
+keeps the evolution phase-stationary is measured with the window's
+boundary legs traced, while correlators are measured with them closed by
+the transfer-matrix fixed points, and the two see different energies). On
+the dimerized XX chain that alone took the residual against the exact
+free-fermion answer from $\sim$0.07 to $\sim$1e-5.
+
+\textbf{\texttt{itensor\_version=3} currently raises here, on purpose.}
+The v3 window tiles the raw per-micro-step \texttt{idmrg\_U\_} factors
+rather than the gauge-consistent unit cell every other v3 static
+observable uses, so its $S(x,t)$ is quantitatively wrong for \emph{any}
+operator, spin included: the exact $S(x,0) = $
+\texttt{correlator(...)} identity misses by up to $\sim$1.7e-1 on a plain
+Heisenberg chain whose energy density the two backends agree on to
+6.7e-11. Shape and finiteness look fine, which is how it went unnoticed.
+Rather than hand back numbers like that,
+\texttt{td\_dynamical\_correlator} raises \texttt{RuntimeError} for
+\texttt{itensor\_version=3} and
+\texttt{Chain::td\_dynamical\_correlator\_window} throws unless a caller
+explicitly opts in (\texttt{Chain::set\_allow\_defective\_window}, used
+only by the tests that pin the defect). Use
+\texttt{itensor\_version="python"}, which is exact on that identity ---
+see \texttt{docs/known\_issue\_v3\_window\_gauge.md} for the diagnosis and
+the fix, and
+\texttt{examples/idmrg/td\_dynamical\_correlator\_python\_VS\_v3/main.py},
+which now measures the defect instead of asserting agreement.
+
 \textbf{Scope}: this simplifies the paper's own Eq.~7 to $t_1=0$ (the
 ground state is perturbed by \texttt{opname\_j} and evolved forward
 only; \texttt{opname\_i} is never itself time-evolved) rather than the

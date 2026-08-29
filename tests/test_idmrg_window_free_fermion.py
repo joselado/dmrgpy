@@ -33,8 +33,8 @@ mapping or iDMRG-convergence-quality confound at all. This is the
 strongest evidence the fix is not just "less wrong" but numerically
 exact for whatever `env_HL`/`env_HR`/window state it is given.
 
-The free-fermion comparison further downstream necessarily also reflects
-iDMRG's own ground-state convergence quality (not just this module's own
+The free-fermion comparison further downstream also reflects iDMRG's own
+ground-state convergence quality (not just this module's own
 correctness) -- confirmed directly: the *gapless*, exactly-half-filled
 uniform XX chain (`J2=None`) has iDMRG state_overlap topping out around
 0.87-0.96 even with many restart attempts (matching this codebase's own
@@ -50,6 +50,23 @@ gets state_overlap up to ~0.98-0.999 with the same modest bond dimension
 -- used here for the quantitative comparison, with tolerances set from
 the residual actually observed at that convergence quality, not
 machine precision.
+
+A LATER CORRECTION to that story, since it is the kind of note a reader
+will otherwise trust: the residual observed at the time (~0.07) was not
+mostly convergence quality. It was mostly a second, independent error --
+a closure mismatch between the `eshift` measured by
+`window_total_energy` (boundary legs traced) and the contraction
+`snapshot_correlator` measures through (boundary legs closed by the
+transfer-matrix fixed points), leaving a spurious factor of ~1.6 rad per
+unit time on the evolved branch. It was found on 2026-08-29 by a sharper
+oracle (a fermionic chain, where the same defect showed up as 3.0 rad/t
+against an exact Green function) and is now cancelled exactly, by
+dividing every `S(x,t)` by the vacuum amplitude measured through the
+identical contraction -- see `idmrg_window.window_total_energy`'s own
+docstring, point 3. The genuine convergence residual, now visible
+underneath it, is ~1e-5 at these parameters. The convergence *ordering*
+above (gapless chain worse than dimerized) is still real and still the
+reason this module uses a dimerized model.
 """
 import numpy as np
 import pytest
@@ -286,10 +303,16 @@ def test_dynamical_correlator_td_matches_dimerized_free_fermion():
     `t=0` is a tight check (the already-exact static correlator, no TDVP
     involved -- see `test_idmrg_window.py`'s own analogous check);
     `t>0` uses a tolerance set from the residual actually observed at
-    this convergence quality (see this module's own docstring for why
-    that residual reflects iDMRG's own ground-state approximation, not a
-    remaining bug in window_tdvp_step -- verified separately, exactly,
-    by `test_window_tdvp_step_eshift_matches_exact_dense_evolution`)."""
+    this convergence quality. NOTE that until 2026-08-29 that residual was
+    ~0.07 and was attributed, here and in this module's own docstring, to
+    iDMRG's own ground-state approximation. That was wrong: it was
+    dominated by a second, independent phase error (a closure mismatch
+    between `eshift` and the correlator's own contraction, see
+    `idmrg_window.window_total_energy`'s own docstring point 3), and it
+    dropped to ~1e-5 the moment `dynamical_correlator_td` started
+    dividing by the vacuum amplitude. `window_tdvp_step` itself was never
+    at fault -- that part of the old note stands, and is verified exactly
+    by `test_window_tdvp_step_eshift_matches_exact_dense_evolution`."""
     n_window, dt, nt = 8, 0.05, 5
     result, J1, J2 = _dimerized_setup(n_window, overlap_target=0.995)
 
@@ -310,10 +333,21 @@ def test_dynamical_correlator_td_matches_dimerized_free_fermion():
         for ix, x in enumerate(xs):
             ff_val = ff.sz_sz_connected(x0 + int(x), x0, t)
             max_err = max(max_err, abs(S[it, ix] - ff_val))
-    # 0.12, not a much looser bound: confirmed directly over several
-    # independent runs (varying state_overlap 0.95-0.998) that max_err
-    # consistently lands around 0.069-0.070 at these parameters -- 0.12
-    # gives headroom for run-to-run convergence variance without being so
-    # loose it would miss a real regression (e.g. a reintroduced partial
-    # phase error) roughly doubling the true residual.
-    assert max_err < 0.12
+    # 2e-3, three orders of magnitude below the bound this test used to
+    # carry. The old 0.12 was set from an observed 0.069-0.070 residual
+    # attributed to iDMRG's own ground-state convergence quality -- that
+    # attribution was wrong. Almost all of it was a spurious global factor
+    # from a closure mismatch: `eshift` (window_total_energy) is measured
+    # with the window's boundary legs traced, while the correlator is
+    # measured with them closed by the transfer-matrix fixed points, and
+    # the two see different energies, so the evolved branch rotated at
+    # ~1.6 rad per unit time relative to the un-evolved one (the arithmetic
+    # checks out: 1.6 x t=0.2 x |S|~0.25 ~ 0.08). Since
+    # dynamical_correlator_td started dividing by the vacuum amplitude
+    # measured through the identical contraction (see its own docstring),
+    # max_err here measures 1.1e-5 at t<=0.2 and 2.8e-5 out to t=0.9 --
+    # i.e. the genuine convergence residual was always ~4 orders of
+    # magnitude smaller than what this bound was absorbing. 2e-3 leaves
+    # room for run-to-run variation in an unseeded iDMRG solve while still
+    # catching any reintroduction of a phase error of that class.
+    assert max_err < 2e-3

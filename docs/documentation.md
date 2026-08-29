@@ -1796,6 +1796,43 @@ gapless uniform chain (state_overlap ~0.98-0.999 vs ~0.87-0.96 at the
 same bond dimension) — this is the check that found the `eshift` bug
 above.
 
+**Fermionic operators (2026-08-29)**: a parity-odd pair on this path
+needs the Jordan-Wigner string threaded on both sides, and did not have
+it. `apply_local_operator` now dresses the ket with `F` on every window
+site left of the perturbation *before* the evolution (so the string is
+evolved along with it), `snapshot_correlator` dresses the bra the same
+way up to its own measurement site, and both truncate at the same left
+reference — beyond it the two strings are identical and cancel (`F²=Id`),
+which is what makes the `t=0` reduction to the finite between-the-
+endpoints string of `two_point_correlator` exact. Truncating there is the
+same boundary approximation the IBC window already makes (the evolution
+sees `P_L H P_L`, differing from `H` only in terms crossing the window's
+left edge). `snapshot_correlator` also had a latent convention bug the
+same work exposed: `_close_array_chain` conjugates the bra, so applying
+`A` there computes `<ψ|A†…>`, not the documented `<ψ|A…>` — invisible for
+every Hermitian name (only `Sz` appeared in the tests and examples),
+exactly wrong for `C`/`Cdag`/`Sp`/`Sm`. It now applies the adjoint.
+
+**Vacuum normalization (2026-08-29, all operators)**: `eshift`
+(`window_total_energy`) is a Rayleigh quotient with the window's two
+dangling boundary legs *traced*, while `snapshot_correlator` measures
+with them closed by the transfer-matrix fixed points (identity on the
+left, `rho` on the right — the closure `local_expectation`'s own
+docstring derives). The two closings see different energies, so the
+evolved branch carried a spurious factor relative to the un-evolved one:
+measured on a dimerized spinless-fermion chain, the *unperturbed*
+window's own `<ψ|ψ(t)>` stayed at arg = -0.0014 rad at t=0.4 through the
+trace closure while rotating at 3.21 rad per unit time and growing to
+|·| = 1.05 through the fixed-point one. `dynamical_correlator_td` now
+evolves a second, unperturbed copy of the same window alongside and
+divides every `S(x,t)` by its `<ψ|ψ(t)>`, which is exact for an
+eigenstate (both branches carry the same `exp(-i(E0-eshift)t)`) and costs
+one extra TDVP evolution. This was not a small correction: the residual
+of the dimerized-XX free-fermion check dropped from ~0.07 — which the
+test had attributed to iDMRG convergence quality — to ~1e-5, and the
+fermionic Green-function check from 7.1e-1 to 4.2e-2 (that one is
+window-limited, not phase-limited, at the parameters used).
+
 `Infinite_Many_Body_Chain.td_dynamical_correlator` (`infinitechain.py`)
 wires this up as the public API, mirroring `kpm_finite`'s own docstring
 conventions (`p_i` sublattice position, an `n_window` convergence
@@ -1826,6 +1863,34 @@ adaptation was needed: `idmrg_extend_HL`/`HR`'s own "bra" leg convention
 not what `LocalMPO::makeL`/`makeR`'s own `dag(prime(psi))` convention
 expects (a boundary tensor's bra leg being literally `prime()` of its own
 ket leg) — a one-time `replaceInds` relabeling reconciles the two.
+**Known issue (open), and the path is disabled**: this port tiles `idmrg_U_`, the raw
+per-micro-step iDMRG factors, in both `idmrg_build_window` and
+`idmrg_window_snapshot_correlator`'s own bra — not the gauge-consistent
+unit cell (`idmrg_theta_cell`/`ic_canonicalize_cell`) that
+`idmrg_onsite_expectation`/`idmrg_two_point_correlator` were moved onto
+for exactly this reason, and that `idmrg_window.py`'s own `_window_cell`
+uses on the Python side. The result fails the `S(x,t=0) ==
+two_point_correlator` identity by up to 7.4e-2 on a plain spin chain,
+with no fermions involved; `x=0` stays exact and the error grows with
+`|x|`, the signature of a bond-basis mismatch. The same method's
+*background* subtraction already reads the cell-based
+`idmrg_onsite_expectation`, so the file is internally inconsistent about
+this today. Both layers now refuse rather than answer:
+`infinitechain.td_dynamical_correlator` raises `RuntimeError` for
+`itensor_version=3`, and `Chain::td_dynamical_correlator_window` throws
+unless `Chain::set_allow_defective_window(true)` was called — a
+tests-only opt-in dmrgpy's own API never uses, so that the tests pinning
+the defect (and whoever fixes it) can still run the code. See
+`docs/known_issue_v3_window_gauge.md`, the strict xfail in
+`tests/test_idmrg_window_fermionic.py`, and
+`examples/idmrg/td_dynamical_correlator_python_VS_v3/main.py`, which was
+rewritten from an agreement check into a measurement of the defect (it
+had been comparing the two backends at `x=0` only — the one point a gauge
+error cannot touch). (The Jordan-Wigner string port above is a
+line-for-line mirror of the Python one and is correct independently of
+this; the vacuum normalization is not ported either, pending the same
+fix.)
+
 The window's own static overlap/measurement machinery (`S(x,t)` itself,
 closed via a bare trace on the left plus the converged unit cell's own
 dominant transfer-matrix right fixed point, mirroring
