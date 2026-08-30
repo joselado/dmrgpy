@@ -351,7 +351,11 @@ def test_kpm_finite_fermionic_matches_the_exact_free_fermion_sum_rule():
     zero it correctly is.)"""
     ic = _fermionic_chain()
     n_window, r = 6, 3
-    es, ys = ic.kpm_finite("Cdag", 0, "C", r, n_window=n_window, n=4000,
+    # (no n= here: kpmdmrg.get_dynamical_correlator's `n` was shadowed by
+    # its own moment-count return value and never had any effect, so it was
+    # removed rather than wired up -- the backend picks the number of
+    # Chebyshev polynomials from delta.)
+    es, ys = ic.kpm_finite("Cdag", 0, "C", r, n_window=n_window,
                             delta=2e-2, es=np.linspace(-6, 6, 4000))
     integral = np.trapezoid(np.array(ys).real, es)
     L = n_window                       # unit cells, 2 sites each

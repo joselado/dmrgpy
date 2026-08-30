@@ -4,7 +4,7 @@ pre-optimization implementation (see reference_data.py).
 
 These are the main "did the optimization change any physics" checks:
 they build genuinely non-trivial Hamiltonians (via the "H = H + term"
-loop idiom, set_exchange, get_dagger, ...) and run real DMRG/ED
+loop idiom, the all-pairs exchange sum, get_dagger, ...) and run real DMRG/ED
 calculations through the C++ backend and the ED fallback.
 """
 import pytest
@@ -43,11 +43,17 @@ def test_heisenberg_chain_energy_matches_reference():
     assert sc.gs_energy(mode="ED") == pytest.approx(HEISENBERG_ED_ENERGY, abs=ED_TOL)
 
 
-def test_set_exchange_energy_and_term_count_matches_reference():
-    """spinchain.set_exchange (the O(9*L^2) exchange-coupling builder,
-    now assembled via multioperator.msum) must produce the same term
-    count (after an explicit clean()) and ground-state energy as the
-    original implementation."""
+def test_all_pairs_exchange_energy_and_term_count_matches_reference():
+    """The all-pairs exchange Hamiltonian sum_{i,j} f(i,j) S_i.S_j must
+    produce the same term count (after an explicit clean()) and
+    ground-state energy as the original implementation.
+
+    This used to go through spinchain.set_exchange(fj), which has since
+    been removed; the loop below is exactly what it built, including the
+    sum over BOTH orderings of every pair (so a nearest-neighbour f=1
+    gives 2*sum_<ij> S_i.S_j). The reference values are unchanged, which
+    is the point -- they pin that the removal did not quietly change the
+    Hamiltonian this codebase's examples and benchmarks were using."""
     n = 6
     spins = ["S=1/2" for _ in range(n)]
     sc = spinchain.Spin_Chain(spins)
@@ -55,10 +61,14 @@ def test_set_exchange_energy_and_term_count_matches_reference():
     def fj(i, j):
         return 1.0 if abs(i - j) == 1 else 0.0
 
-    sc.set_exchange(fj)
-    h = sc.exchange.copy()
-    h.clean()
-    assert len(h.op) == SET_EXCHANGE_NTERMS
+    h = 0
+    for i in range(n):
+        for j in range(n):
+            if fj(i, j) != 0.0: h = h + fj(i, j) * sc.SS(i, j)
+    sc.set_hamiltonian(h)
+    hc = h.copy()
+    hc.clean()
+    assert len(hc.op) == SET_EXCHANGE_NTERMS
     assert sc.gs_energy(mode="DMRG") == pytest.approx(SET_EXCHANGE_DMRG_ENERGY, abs=DMRG_TOL)
     assert sc.gs_energy(mode="ED") == pytest.approx(SET_EXCHANGE_ED_ENERGY, abs=ED_TOL)
 

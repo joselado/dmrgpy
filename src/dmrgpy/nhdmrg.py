@@ -299,6 +299,8 @@ def gs_energy_generalized_nhdmrg(self,A,**kwargs):
     self.computed_gs = True  # ...this must come after, not before (see
                               # gs_energy_generalized's own fix for
                               # exactly this ordering bug)
+    from .groundstate import solver_key
+    self._gs_solver_key = solver_key(self) # see groundstate.gs_is_current
     return lam
 
 
@@ -325,6 +327,8 @@ def gs_energy_nhdmrg(self,**kwargs):
               "(not NH-DMRG parameters)")
     e0,psil,psir = nhdmrg(self,**passed)
     self.computed_gs = True
+    from .groundstate import solver_key
+    self._gs_solver_key = solver_key(self) # see groundstate.gs_is_current
     self.e0 = e0
     # unit norm, matching the Arnoldi route's convention (MPS.normalize
     # returns a fresh normalized copy, or None for a degenerate state)

@@ -54,6 +54,10 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
     # doesn't change default behavior, only lets a caller-supplied
     # scale= finally take effect.
     esex,wsex = get_cached_excited_states(self,n=nex,scale=scale,**kwargs)
+    # normalize name= first: a documented string ("ZZ" with i=/j=) used to
+    # reach name[0].get_dagger() as a bare str and die with
+    # "AttributeError: 'str' object has no attribute 'get_dagger'"
+    name = operatornames.str2MO(self,name,i=i,j=j)
     A,B = name[0].get_dagger(),name[1] # operators
     h = self.hamiltonian # Hamiltonian
     n = len(wsex) # number of states

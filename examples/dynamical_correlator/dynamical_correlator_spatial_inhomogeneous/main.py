@@ -24,7 +24,14 @@ def fj(i,j): # first neighbor coupling
   else: return 0.0
 
 
-sc.set_exchange(fj) # add the exchange couplings to the Hamiltonian
+# set_exchange() was removed; this is the Hamiltonian it built --
+# the coupling summed over BOTH orderings of every pair, so a
+# nearest-neighbour fj=1 gives 2*sum_<ij> S_i.S_j, not sum_<ij>.
+h = 0
+for i in range(n):
+  for j in range(n):
+    if fj(i,j)!=0.0: h = h + fj(i,j)*sc.SS(i,j)
+sc.set_hamiltonian(h) # add the exchange couplings to the Hamiltonian
 
 sc.kpmmaxm = 20 # KPM maxm
 xs = [] # empty list

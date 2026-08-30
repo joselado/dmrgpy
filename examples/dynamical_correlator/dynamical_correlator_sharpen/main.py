@@ -36,7 +36,7 @@ t2 = time.time()
 print("Time without extrapolation",t2-t1)
 
 (x3,y3) = sc.get_dynamical_correlator(name=name,es=es,delta=delta,
-        deconvolve="pm",kernel="lorentz")
+        kernel="lorentz")
 t3 = time.time()
 print("Time with extrapolation",t3-t2)
 

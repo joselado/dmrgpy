@@ -53,10 +53,19 @@ def get_correlation_matrix_finiteT(self,T=1.,n=None,**kwargs):
 
 def get_correlation_matrix_zeroT(self,operators=None,
                               basis ="electron", 
-                              dmmode="fast",
+                              dmmode=None,
                               wf=None,**kwargs):
     """Compute the correlation matrix of a ground state"""
     from .. import fermionchain
+    if dmmode is None:
+        # "fast" (the historical hardcoded default) applies each single-
+        # fermion operator to the state on its own, which changes the
+        # particle number -- so in conserved-sector mode it raises before
+        # computing anything, while dmmode="explicit"/"full" return the
+        # right answer on the same chain. Resolve the default against the
+        # chain's state instead of hardcoding it.
+        if getattr(self,"conserved_sector",None): dmmode = "full"
+        else: dmmode = "fast"
     if dmmode=="full" and basis=="Nambu":
         dmmode="fast"
         print("C++ mode not implemented with Nambu basis")

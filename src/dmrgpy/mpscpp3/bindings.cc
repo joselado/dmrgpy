@@ -567,6 +567,14 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("reduced_dm",[](Chain& self, MPS const& wf, int site) {
                 auto flat = self.reduced_dm(wf,site);
                 int dim = self.site_dim(site);
+                // size check, so a short vector can never again be copied
+                // into an uninitialized array and returned as a density
+                // matrix (see Chain::reduced_dm's own comment)
+                if ((int)flat.size() != dim*dim)
+                    throw std::runtime_error(
+                        "reduced_dm: got "+std::to_string(flat.size())
+                        +" elements for a "+std::to_string(dim)+"x"
+                        +std::to_string(dim)+" density matrix");
                 py::array_t<std::complex<double>> arr({dim,dim});
                 std::copy(flat.begin(),flat.end(),arr.mutable_data());
                 return arr;

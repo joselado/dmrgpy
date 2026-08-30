@@ -2530,7 +2530,7 @@ es, ys = ic.kpm_finite("Sz", 0, "Sz", 0, n_window=16,
         delta=0.3, es=np.linspace(-1, 5, 200))
 ```
 
-`n_window` has no default — see the convergence caveat below. `window_chain_kwargs` is an optional dict of attribute overrides applied to the temporary finite `Many_Body_Chain` (`maxm`, `nsweeps`, `kpmmaxm`, `kpm_scale`, ...), independent of `ic`'s own `maxm`/etc.; remaining `**kwargs` (`delta`, `kernel`, `es`, `deconvolve`, ...) are forwarded to `kpmdmrg.get_dynamical_correlator` unchanged.
+`n_window` has no default — see the convergence caveat below. `window_chain_kwargs` is an optional dict of attribute overrides applied to the temporary finite `Many_Body_Chain` (`maxm`, `nsweeps`, `kpmmaxm`, `kpm_scale`, ...), independent of `ic`'s own `maxm`/etc.; remaining `**kwargs` (`delta`, `kernel`, `es`, ...) are forwarded to `kpmdmrg.get_dynamical_correlator` unchanged.
 
 **Scope restriction — a finite-window approximation, read before use.** This is *not* an exact infinite-size method: results carry finite-size/open-boundary corrections that must be checked by convergence in `n_window`, exactly as a static `vev`/`correlator` caller would check `maxm`/`etol` convergence of the original iDMRG ground state. One Chebyshev moment corresponds to one application of the (nearest-neighbor) window Hamiltonian, so it can only move information by ~1 site per moment (a Lieb-Robinson-style bound) — but KPM's own moment count scales with the *window's own extensive bandwidth* divided by the requested `delta` (an ordinary finite chain's KPM already has this property, nothing new here), so a genuinely fine `delta` can require a moment count comparable to (or larger than) `n_window` itself, at which point open-boundary reflections contaminate the result regardless of how large `n_window` is. Prefer a coarser `delta`, or check that the correlator has visibly converged with growing `n_window`, for quantitative work (especially near a gapless point, where a fine `delta` is most tempting). Unlike `vev`/`correlator`, this does not need `ic._result` (no dependency on a previously converged `IDMRGResult`, or even on `ic.itensor_version`), so it works regardless of which backend `gs_energy()` itself used. See `examples/idmrg/dynamical_correlator_finite_window/main.py` for a worked example sweeping `n_window`.
 
@@ -2743,3 +2743,61 @@ the tensors get large enough, and a script may have chosen its setting
 deliberately. Treat the numbers above as indicative — they come from a busy
 shared host — and measure on your own machine before tuning around them.
 See `dmrgpy/blasthreads.py` for the full measurements.
+
+## 20. What raises, and what changed in the 2026-08 audit
+
+A cross-backend audit in August 2026 (`docs/audit_2026_08_hole_hunt.md`,
+which records every reproduction) went looking for calls that silently did
+something other than what was asked. Most of what it found is now either
+fixed or loud. Two of the fixes **change numbers** and are worth knowing
+about if you have results from before them:
+
+- **`submode="TD"` and `submode="TDZ"` were a factor of $\pi$ too large.**
+  The Fourier transform behind them omitted the $1/\pi$ of the convention
+  $S_{AB}(\omega)=\frac1\pi\mathrm{Re}\int_0^T\!dt\,e^{i\omega t}C(t)w_\delta(t)$
+  that this guide documents and that every other submode already followed,
+  and gave the $t=0$ sample full rather than half weight. On a 4-site chain
+  the exact sum rule $\int S(\omega)d\omega=\langle AB\rangle=0.25$ came
+  out as 1.28. Peak positions and widths were never affected -- the error
+  is uniform in $\omega$ -- so only absolute spectral weight changes.
+  `sxt_to_skomega` and the infinite-chain $S(k,\omega)$ reduction share the
+  same transform and inherit the fix.
+- **`itensor_version=3` real-time evolution from a non-unit-norm state.**
+  `evolution_ABA` (whose start state is $A|\mathrm{gs}\rangle$) and
+  `evolve_and_measure(wf=...)` were rescaled by $1/\|\psi\|^2$ for every
+  $t>0$ under `tevol_method="TDVP"`/`"TDVP_GSE"`, while $C(0)$ stayed
+  correct. Against ED on a 5-site chain the error went from 0.176 to
+  1.7e-9. `"TEBD"`, `"MPO"`, `itensor_version=2` and `"python"` were never
+  affected.
+
+Beyond those, the following now raise where they used to be silent:
+
+| Call | Was | Now |
+|---|---|---|
+| `sc.maxm = m` with `m<1` | SIGABRT (v2/v3), wrong energy (`"python"`) | `ValueError` |
+| changing `maxm`/`nsweeps` between `gs_energy()` calls | returned the first, less converged energy | re-solves |
+| `sc.tevol_method = "tdvp"` (any unrecognized name) | ran the legacy MPO-Taylor integrator | `ValueError` |
+| `submode=` on a non-Hermitian Hamiltonian | every submode returned the CVM resolvent | dispatches; `NotImplementedError` for the Hermitian-only ones |
+| unknown keyword to `submode="KPM"` | silently discarded | `TypeError` |
+| `name="ZZ"` with `submode="KPM"`/`"EX"`, or any `mode="ED"` | `RuntimeError: No active exception to reraise` | works |
+| `submode="CVMimag"`/`"maxent"` | `exit()` -- terminated your process | `NotImplementedError` |
+| `kpm_energy_truncate=True` on `itensor_version=2` | silently ignored | `NotImplementedError` |
+| `kpm_energy_truncate=True` with far too small a `kpm_scale` | plausible spectrum at the wrong energy | `RuntimeError` in the worst regime (see `docs/known_issue_kpm_energy_truncation_window.md`) |
+| an operator on an out-of-range site (`"python"`) | treated as the identity | `IndexError` |
+| `get_excited_states(n=...)` beyond the Hilbert space | ground on for minutes | `ValueError` |
+| `Thermal_Spin_Chain(..., T<0)` | treated as `T=0` | `ValueError` |
+| `Thermal_Spin_Chain(..., itensor_version=...)` | dropped | honored |
+| `get_distribution*(mode="ED")` | `AttributeError` deep inside | dispatches, or `NotImplementedError` |
+| `vev(C[i]*C[i])` | `AttributeError` on every DMRG backend | `0` (as ED always answered) |
+| `Many_Body_Chain.evolution()` | `AttributeError` (it called a function that does not exist) | removed |
+
+And these combinations now work where they used to fail:
+
+- **conserved-sector mode + `get_rdm()`** on `itensor_version=3`, which
+  returned uninitialized heap memory (non-Hermitian, different every run);
+- **conserved-sector mode + a repeated-site operator product** such as the
+  four-point correlator's `Cdag_0 C_1 Cdag_0 C_1`, which aborted the whole
+  process inside ITensor and now evaluates to 0 as it should;
+- **conserved-sector mode + site/pair entropy, mutual information, and the
+  default `get_correlation_matrix()`**, all of which raised;
+- **`get_rdm(i=ns-1)`** (the last site) on `itensor_version="python"`.

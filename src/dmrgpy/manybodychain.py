@@ -35,6 +35,28 @@ class Coupling():
 
 
 class Many_Body_Chain():
+  @property
+  def maxm(self):
+      """Maximum MPS bond dimension kept in the DMRG/TDVP truncations."""
+      return self._maxm
+
+  @maxm.setter
+  def maxm(self,m):
+      """Validated on assignment rather than several calls deep.
+
+      maxm<=0 was checked nowhere: itensor_version=2/3 died inside
+      ITensor with an uncatchable SIGABRT ("m > maxdim"), taking the
+      user's whole process with them, and itensor_version="python"
+      silently returned a bond-dimension-1 (product-state) energy for
+      maxm=0 and something else again for maxm<0. Raising here names the
+      parameter and the value, and does it at the line that set it."""
+      try: mi = int(m)
+      except (TypeError,ValueError):
+          raise ValueError("maxm must be a positive integer, got "+repr(m))
+      if mi<1:
+          raise ValueError("maxm must be >= 1, got "+repr(m))
+      self._maxm = mi
+
   def __init__(self,sites,itensor_version=DEFAULT_ITENSOR_VERSION,**kwargs):
       """Create a many-body chain over the given list of sites, and
       initialize its DMRG/ED backend (itensor_version selects which one)"""
@@ -770,9 +792,20 @@ class Many_Body_Chain():
   def get_dynamical_correlator_MB(self,**kwargs):
       """Return a dynamical correlator, computed with DMRG"""
       return dynamics.get_dynamical_correlator(self,**kwargs)
-  def get_dynamical_correlator(self,mode="DMRG",**kwargs):
+  def get_dynamical_correlator(self,mode="DMRG",name=None,i=0,j=0,**kwargs):
       """Return a dynamical correlator, dispatching between DMRG and ED"""
       mode = self.get_mode(mode=mode) # overwrite mode
+      # Resolve name= here, once, for every submode and both solvers. The
+      # documented string form ("ZZ", "cdc", ... together with i=/j=) used
+      # to be understood only by the TD/CVM/TDZ submodes under mode="DMRG"
+      # -- the ones that happened to call str2MO themselves -- while the
+      # default submode="KPM", submode="EX" and every mode="ED" path
+      # crashed on it several frames deep. This chain object is also the
+      # only thing that *can* resolve it: an EDchain has no Sx/Sz/C
+      # attributes of its own.
+      if name is not None:
+          name = operatornames.str2MO(self,name,i=i,j=j)
+          kwargs["name"] = name
       if mode=="DMRG":
           return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED":
@@ -794,6 +827,12 @@ class Many_Body_Chain():
       return kpmdmrg.dynamical_correlator_moments(self,**kwargs)
   def get_distribution(self,mode="DMRG",**kwargs):
       """Return the distribution of an operator's spectrum"""
+      # get_mode(), like every neighbouring entry point: without it the
+      # DMRG branch ran even when mode.py had routed everything else to ED
+      # (mode="ED", or itensor_version=3 on a <3-site chain), handing
+      # session-only code an ED State and failing with the opaque
+      # "'State' object has no attribute 'cpp_handle'"
+      mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG":
           from . import distribution
           return distribution.get_distribution(self,**kwargs)
@@ -804,12 +843,18 @@ class Many_Body_Chain():
       else: raise
   def get_distribution_moments(self,mode="DMRG",**kwargs):
       """Return the moments of the distribution of an operator's spectrum"""
+      mode = self.get_mode(mode=mode) # overwrite mode, see get_distribution
       if mode=="DMRG":
           from . import distribution
           return distribution.get_distribution_moments(self,**kwargs)
       elif mode=="ED":
-          raise
-      else: raise
+          raise NotImplementedError(
+              "get_distribution_moments has no ED implementation (the ED "
+              "path builds spectra by explicit summation, not from KPM "
+              "moments). Note mode.py routes to ED on its own when the "
+              "requested C++ extension is unavailable, or for "
+              "itensor_version=3 on a chain with fewer than 3 sites.")
+      else: raise ValueError("Unrecognized mode "+repr(mode))
   def get_excited(self,mode="DMRG",**kwargs):
       """Return excitation energies.
 
@@ -891,7 +936,7 @@ class Many_Body_Chain():
       """Return the ground state"""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": # DMRG mode
-        if self.computed_gs: # if stored, rewrite and return
+        if groundstate.gs_is_current(self): # stored, and still valid
 #            self.wf0.write(name=self.wf0.name,path=self.path)
             return self.wf0
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
@@ -905,7 +950,10 @@ class Many_Body_Chain():
       """Return the ground state energy"""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": 
-          if self.computed_gs: return self.e0
+          # not just computed_gs: a stored energy is only an answer to
+          # this call if it was computed under the solver parameters in
+          # force now (groundstate.gs_is_current)
+          if groundstate.gs_is_current(self): return self.e0
           return groundstate.gs_energy(self,**kwargs)
       elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
       else: raise
@@ -931,12 +979,13 @@ class Many_Body_Chain():
           ops = [self.Cdag[i]*self.C[j] for (i,j) in pairs]
       else: raise
       return np.array([self.vev(o,**kwargs) for o in ops])
-  def evolution(self,**kwargs):
-      """
-      Perform time dependent DMRG
-      """
-      from . import timedependent
-      return timedependent.evolution(self,**kwargs)
+  # Many_Body_Chain.evolution() used to live here. It called
+  # timedependent.evolution(), which does not exist and (per git history)
+  # never did in this form, so every call raised AttributeError on every
+  # backend and in every mode -- dead API, removed rather than
+  # resurrected. The real entry points are evolution_ABA()/
+  # evolve_and_measure() (timedependent.py) and
+  # get_dynamical_correlator(submode="TD").
   def get_rdm(self,**kwargs):
       """
       Compute the reduced density matrix

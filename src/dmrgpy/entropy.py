@@ -2,10 +2,11 @@ import numpy as np
 
 
 
-def dynamical_correlator_kpm(self):
-    """Return the entropies of the dynamical correlator"""
-    s = self.execute(lambda: np.genfromtxt("KPM_ENTROPY.OUT"))
-    return s
+# dynamical_correlator_kpm() used to live here. It read a KPM_ENTROPY.OUT
+# file written by the old file-based backend, via self.execute() -- both of
+# which were removed with that backend, so it could only ever raise
+# AttributeError. Its one caller (examples/dynamical_correlator/
+# dynamical_correlator_entropy) no longer uses it.
 
 try:
     from statistics import geometric_mean

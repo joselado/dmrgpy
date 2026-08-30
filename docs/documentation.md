@@ -3961,6 +3961,73 @@ Current scope: only the "greater" branch of the correlator is computed
 same windowing/FFT tail as `"TD"` (factored out into
 `timedependent._fourier_transform_correlator` so both submodes share it).
 
+### 4.10 Where "silently wrong" was structurally possible
+
+The 2026-08 audit (`docs/audit_2026_08_hole_hunt.md`) found that most of
+this codebase's silent-wrong-answer bugs shared one shape: **a dispatch
+decision taken before the information that should inform it**. The
+architecture now guards each of those points, and they are worth knowing
+as a class, because new code can reintroduce any of them.
+
+- **A short circuit ahead of a cache key.** `gs_energy()`/`get_gs()`
+  returned on `computed_gs` alone, before `groundstate.gs_energy_single()`
+  and its send-cache -- which correctly keys on
+  `maxm`/`nsweeps`/`cutoff`/`noise`/ramp/sector -- was ever entered, so a
+  convergence ramp over `sc.maxm` on one chain returned the first energy
+  every time. The key now lives in `groundstate.solver_key()`, is recorded
+  on the chain when a state is stored, and `groundstate.gs_is_current()`
+  is what the short circuit tests. A state with no recorded key (one
+  injected via `set_gs()`) is still returned unconditionally, by design.
+
+- **A precondition tested ahead of the dispatch it should qualify.**
+  `dynamics.get_dynamical_correlator()` tested Hermiticity *before*
+  branching on `submode`, so a non-Hermitian Hamiltonian silently routed
+  every submode to the explicit CVM resolvent. The check is now
+  per-submode: KPM and CVM/CVM\_explicit have genuine non-Hermitian
+  implementations, EX/maxent are backend-agnostic and pass through, and
+  everything else raises. `edtk/dynamics.py` mirrors it. The
+  `julia_live` branch had already been fixed this way and is what the
+  others now follow.
+
+- **An `else` branch doing two jobs.** Each `tevol_method` dispatch chain
+  ended in a bare `else` that ran the legacy MPO-Taylor integrator. That
+  branch is the documented fallback for a backend without TDVP
+  (`itensor_version=2`), and it was also catching every misspelling.
+  `timedependent.check_tevol_method()` now validates the *name* up front
+  at all three dispatch sites (`evolution_dmrg_DC`,
+  `evolve_and_measure_dmrg`, `tdz.py`); backend capability still falls
+  back exactly as before.
+
+- **`**kwargs` with no consumer.** `kpmdmrg.dynamical_correlator_moments`
+  absorbed every unknown keyword; its sibling submodes always raised.
+  Solver parameters are chain attributes, never call arguments, so
+  anything unrecognized now raises `TypeError`.
+
+- **Resolution done in the branches instead of before them.** The
+  documented string form of `name=` (`"ZZ"`, `"cdc"`, ... plus `i=`/`j=`)
+  was understood only by whichever submodes happened to call
+  `operatornames.str2MO` themselves. It is now resolved once in
+  `Many_Body_Chain.get_dynamical_correlator`, which is also the only
+  object that *can* resolve it -- an `EDchain` has no `Sx`/`Sz`/`C`
+  attributes of its own.
+
+Two `mpscpp3` entries belong to the same audit and are specific to
+QN-conserving (`set_conserved_sector`) mode:
+
+- `Chain::reduced_dm` flattened the density matrix with `rho.visit()`,
+  which enumerates only the **stored** blocks; with QN-carrying indices
+  that is a handful of 1x1 blocks rather than the full `dim*dim`, and
+  `bindings.cc` copied that short vector into an uninitialized array. It
+  now reads the elements explicitly by index (`eltC(rho,s(a),prime(s)(b))`,
+  the convention `op_charge()` documents), and the binding size-checks.
+- `Chain::sector_terms` validated each term's **net** charge only, so a
+  net-neutral term could still pile an impossible charge onto a single
+  site (`Cdag_0 C_1 Cdag_0 C_1`, which the four-point correlator produces
+  routinely) and abort the process inside AutoMPO. It now also composes
+  each site's own factors: an identically-zero product drops the term
+  (matching ED), and a charge the site cannot carry raises
+  `std::invalid_argument` -- catchable, unlike ITensor's own `Error()`.
+
 ## 5. Backend performance: v3 vs the pure-Python backend
 
 The pure-Python backend (`itensor_version="python"`) trades raw speed for

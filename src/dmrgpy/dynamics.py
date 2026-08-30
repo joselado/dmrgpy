@@ -5,16 +5,51 @@ from . import dcex
 from . import tdz
 from . import rootndmrg
 
+SUBMODES = ("KPM","TD","TDZ","CVM","CVM_explicit","CVMimag","ROOTN","EX",
+            "maxent")
+
+
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
+    if submode not in SUBMODES:
+        # checked up front: otherwise an unrecognized submode on a
+        # non-Hermitian Hamiltonian gets described as "Hermitian-only"
+        # below, and on a Hermitian one it used to reach a bare `raise`
+        raise ValueError(
+            "get_dynamical_correlator: unrecognized submode "+repr(submode)
+            +"; expected one of "+", ".join(SUBMODES))
     if self.itensor_version in (2,3,"python"): # C++ or pure-Python
         self.set_initial_wf(self.wf0) # set the initial wavefunction
         if not self.is_hermitian(self.hamiltonian): # non Hermitian Hamiltonian
+            # Per-submode, not wholesale. This check used to run before the
+            # dispatch below and return the explicit resolvent for
+            # *everything* except "KPM", so on a non-Hermitian Hamiltonian
+            # the caller's submode= was a no-op: "EX", "maxent", "ROOTN",
+            # "TD", "CVM" and "CVM_explicit" all returned the same curve
+            # (bit-identical on the ED path). The same substitution reached
+            # mode="ED", submode="ED" -- i.e. the exact Lehmann reference a
+            # user would cross-validate against quietly became the
+            # approximate resolvent and agreed with itself. The julia_live
+            # branch below already fixed this shape for its own backend;
+            # this is the same fix for (2,3,"python"), see also
+            # edtk/dynamics.py.
             if submode=="KPM": # non-Hermitian KPM
                 from .nonhermitian.kpm import dynamical_correlator_nhkpm
                 return dynamical_correlator_nhkpm(self,**kwargs)
-            from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
-            return dynamical_correlator_non_hermitian(self,**kwargs)
-    #        submode = "CVM_explicit" # only mode that works with non-Hemrmitian
+            elif submode in ("CVM","CVM_explicit"):
+                # not a substitution: this *is* the non-Hermitian
+                # implementation of the correction-vector resolvent both
+                # of these compute
+                from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
+                return dynamical_correlator_non_hermitian(self,**kwargs)
+            elif submode in ("EX","maxent"):
+                pass # backend-agnostic, non-Hermitian-capable: fall through
+            else:
+                raise NotImplementedError(
+                    "get_dynamical_correlator: submode=%r assumes a "
+                    "Hermitian Hamiltonian and has no non-Hermitian "
+                    "implementation (KPM/CVM/CVM_explicit do, and EX/maxent "
+                    "are non-Hermitian-capable already). It used to return "
+                    "the CVM_explicit resolvent instead, silently."%submode)
         if submode=="KPM": # KPM method
             return kpmdmrg.get_dynamical_correlator(self,**kwargs)
         elif submode=="TD": # time dependent
@@ -34,7 +69,13 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         elif submode=="maxent": # Max ent mode
             from .distribution import dynamical_correlator_positive_defined
             return dynamical_correlator_positive_defined(self,**kwargs)
-        else: raise
+        else:
+            # a bare `raise` here used to surface as the thoroughly
+            # unhelpful "RuntimeError: No active exception to reraise"
+            raise ValueError(
+                "get_dynamical_correlator: unrecognized submode %r; "
+                "expected one of KPM, TD, TDZ, CVM, CVM_explicit, CVMimag, "
+                "ROOTN, EX, maxent"%submode)
     elif self.itensor_version=="julia_live": # Julia version
         # Only KPM/CVM/TDZ assume a Hermitian Hamiltonian (Chebyshev
         # spectrum-in-[-1,1], resolvent CG solve, and the TDZ damping

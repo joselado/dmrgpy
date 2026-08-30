@@ -4467,6 +4467,80 @@ fed into the same windowing/FFT tail as \texttt{"TD"} (factored out into
 \texttt{timedependent.\_fourier\_transform\_correlator} so both
 submodes share it).
 
+\subsection{Where "silently wrong" was structurally possible}
+
+The 2026-08 audit (\texttt{docs/audit\_2026\_08\_hole\_hunt.md}) found that
+most of this codebase's silent-wrong-answer bugs shared one shape:
+\textbf{a dispatch decision taken before the information that should
+inform it}. The architecture now guards each of those points, and they are
+worth knowing as a class, because new code can reintroduce any of them.
+
+\begin{itemize}
+  \item \textbf{A short circuit ahead of a cache key.}
+    \texttt{gs\_energy()}/\texttt{get\_gs()} returned on
+    \texttt{computed\_gs} alone, before
+    \texttt{groundstate.gs\_energy\_single()} and its send-cache --- which
+    correctly keys on \texttt{maxm}/\texttt{nsweeps}/\texttt{cutoff}/
+    \texttt{noise}/ramp/sector --- was ever entered, so a convergence ramp
+    over \texttt{sc.maxm} on one chain returned the first energy every
+    time. The key now lives in \texttt{groundstate.solver\_key()}, is
+    recorded on the chain when a state is stored, and
+    \texttt{groundstate.gs\_is\_current()} is what the short circuit
+    tests. A state with no recorded key (one injected via
+    \texttt{set\_gs()}) is still returned unconditionally, by design.
+  \item \textbf{A precondition tested ahead of the dispatch it should
+    qualify.} \texttt{dynamics.get\_dynamical\_correlator()} tested
+    Hermiticity \emph{before} branching on \texttt{submode}, so a
+    non-Hermitian Hamiltonian silently routed every submode to the
+    explicit CVM resolvent. The check is now per-submode: KPM and
+    CVM/CVM\_explicit have genuine non-Hermitian implementations,
+    EX/maxent are backend-agnostic and pass through, and everything else
+    raises. \texttt{edtk/dynamics.py} mirrors it. The
+    \texttt{julia\_live} branch had already been fixed this way and is
+    what the others now follow.
+  \item \textbf{An \texttt{else} branch doing two jobs.} Each
+    \texttt{tevol\_method} dispatch chain ended in a bare \texttt{else}
+    that ran the legacy MPO-Taylor integrator. That branch is the
+    documented fallback for a backend without TDVP
+    (\texttt{itensor\_version=2}), and it was also catching every
+    misspelling. \texttt{timedependent.check\_tevol\_method()} now
+    validates the \emph{name} up front at all three dispatch sites;
+    backend capability still falls back exactly as before.
+  \item \textbf{\texttt{**kwargs} with no consumer.}
+    \texttt{kpmdmrg.dynamical\_correlator\_moments} absorbed every unknown
+    keyword; its sibling submodes always raised. Solver parameters are
+    chain attributes, never call arguments, so anything unrecognized now
+    raises \texttt{TypeError}.
+  \item \textbf{Resolution done in the branches instead of before them.}
+    The documented string form of \texttt{name=} (\texttt{"ZZ"},
+    \texttt{"cdc"}, ... plus \texttt{i=}/\texttt{j=}) was understood only
+    by whichever submodes happened to call
+    \texttt{operatornames.str2MO} themselves. It is now resolved once in
+    \texttt{Many\_Body\_Chain.get\_dynamical\_correlator}, which is also
+    the only object that \emph{can} resolve it --- an \texttt{EDchain} has
+    no \texttt{Sx}/\texttt{Sz}/\texttt{C} attributes of its own.
+\end{itemize}
+
+Two \texttt{mpscpp3} entries belong to the same audit and are specific to
+QN-conserving (\texttt{set\_conserved\_sector}) mode:
+
+\begin{itemize}
+  \item \texttt{Chain::reduced\_dm} flattened the density matrix with
+    \texttt{rho.visit()}, which enumerates only the \textbf{stored}
+    blocks; with QN-carrying indices that is a handful of 1x1 blocks
+    rather than the full \texttt{dim*dim}, and \texttt{bindings.cc} copied
+    that short vector into an uninitialized array. It now reads the
+    elements explicitly by index, and the binding size-checks.
+  \item \texttt{Chain::sector\_terms} validated each term's \textbf{net}
+    charge only, so a net-neutral term could still pile an impossible
+    charge onto a single site (\texttt{Cdag\_0 C\_1 Cdag\_0 C\_1}, which
+    the four-point correlator produces routinely) and abort the process
+    inside AutoMPO. It now also composes each site's own factors: an
+    identically-zero product drops the term (matching ED), and a charge
+    the site cannot carry raises \texttt{std::invalid\_argument} ---
+    catchable, unlike ITensor's own \texttt{Error()}.
+\end{itemize}
+
 \section{Backend performance: v3 vs the pure-Python backend}
 \label{sec:perf}
 

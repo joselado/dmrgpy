@@ -160,6 +160,8 @@ def _advance_complex_time_step(self, Hop, wf, dz, do_gse=False):
     the session backends, so this function's choice of integrator no
     longer depends on which backend it is running on.
     """
+    from .timedependent import check_tevol_method
+    check_tevol_method(self) # reject a typo instead of running MPO-Taylor
     if self.itensor_version=="julia_live":
         from .mpsjulialive.timedependent import advance_complex_time_step
         return advance_complex_time_step(self,Hop,wf,dz,do_gse=do_gse)

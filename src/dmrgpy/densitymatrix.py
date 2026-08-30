@@ -53,10 +53,29 @@ def reduced_dm_projective(self,wf,i=0,j=None):
     # now compute the density matrix in this subspace
     n = len(Pk) # number of components
     dm = np.zeros((n,n),dtype=np.complex128) # initialize
-    for i in range(n):
-        wfi = Pk[i]*wf # projector
-        for j in range(n):
-            dm[i,j] = wfi.aMb(Pk[j],wf) # project
+    # dm[a,b] = <wf|Pa^dag Pb|wf>, evaluated as a single sandwich rather
+    # than by first building the intermediate MPS Pa|wf>. Two reasons, one
+    # of them load-bearing: the intermediate needs a variational
+    # compression per element (avoidable error, the same argument
+    # dcex.py's own aMb rewrite makes), and -- the actual bug -- some of
+    # these projectors change the conserved charge (P01 = Sx+i*Sy is S+,
+    # Cdag adds a particle), so applying one to the state made every
+    # site/pair entropy and mutual information raise outright in
+    # conserved-sector mode.
+    in_sector = bool(getattr(self,"conserved_sector",None))
+    for a in range(n):
+        for b in range(n):
+            op = Pk[a].get_dagger()*Pk[b]
+            if in_sector:
+                try: dm[a,b] = wf.aMb(op,wf)
+                except (ValueError,NotImplementedError):
+                    # Pa^dag Pb changes the sector's charge, so the chain
+                    # cannot represent it -- and its expectation value in
+                    # a fixed-charge state is exactly zero anyway, which
+                    # is what that entry is
+                    dm[a,b] = 0.0
+            else:
+                dm[a,b] = wf.aMb(op,wf)
 #    print(dm.real)
     return dm # return density matrix
 

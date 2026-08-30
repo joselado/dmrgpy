@@ -37,7 +37,14 @@ def Cdag(i):
 
 
 def CC(i,j):
-    if i==j: return 0
+    # C_i C_i = 0 by Pauli exclusion, but it has to be returned as an
+    # identically-zero MultiOperator rather than the Python int 0: every
+    # caller multiplies this into a term and then asks for .op, so the int
+    # surfaced as "AttributeError: 'float' object has no attribute 'op'"
+    # on all three DMRG backends for a perfectly legitimate vev(C[i]*C[i])
+    # (mode="ED" answered 0j). The product below is the same form the
+    # Cdag path already produces, and every backend evaluates it to 0.
+    if i==j: return obj2MO(["A",i])*obj2MO(["A",i])
     elif i<j:
         m = -1*obj2MO(["A",i])
         for k in range(i,j-1):

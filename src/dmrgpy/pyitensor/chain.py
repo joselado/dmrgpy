@@ -633,15 +633,24 @@ class Chain:
         # not its square root; preserved exactly as chain_session.h has it
         # (its own comment traces this back to a note in mpscpp2's version).
         # commonIndex(psi.A(site),psi.A(site+1)) is called unconditionally
-        # in the original too, i.e. it was never defended against site
-        # being the last site either -- not special-cased here either.
+        # in the original too -- but ITensor's own MPS tolerates the
+        # one-past-the-end access there, while this backend's tensor list
+        # does not: get_rdm(i=ns-1), the last site, raised "IndexError:
+        # list index out of range" here while itensor_version=2/3 both
+        # returned the correct reduced density matrix. At the last site
+        # there is no right link to prime; priming the physical index
+        # alone is the same contraction (position(site) has already put
+        # everything to the left into A(site)).
         psi = wf.copy()
         nrm2 = inner(psi, psi).real
         psi = psi * (1.0 / nrm2)
         psi.position(site)
-        ir = commonIndex(psi.A(site), psi.A(site + 1))
         s = self.sites.si(site)
-        rho = psi.A(site) * dag(prime(psi.A(site), s, ir))
+        if site < psi.length():
+            ir = commonIndex(psi.A(site), psi.A(site + 1))
+            rho = psi.A(site) * dag(prime(psi.A(site), s, ir))
+        else:
+            rho = psi.A(site) * dag(prime(psi.A(site), s))
         for k in range(site + 1, psi.length() + 1):
             rho = rho * psi.A(k)
             rho = rho * dag(prime(psi.A(k), "Link"))
@@ -1812,9 +1821,32 @@ class Chain:
         own recursion."""
         if not self.kpm_energy_truncate:
             return
-        _kpm_energy_truncate(psi, m, dK=self.kpm_truncate_dK,
-                              n_sweeps=self.kpm_truncate_nsweeps,
-                              threshold=self.kpm_truncate_threshold)
+        from .mpsalgebra import inner as _inner
+        nrm_before = _inner(psi, psi).real
+        _avg, change = _kpm_energy_truncate(
+            psi, m, dK=self.kpm_truncate_dK,
+            n_sweeps=self.kpm_truncate_nsweeps,
+            threshold=self.kpm_truncate_threshold)
+        # Holzner's Eq. (41) diagnostic, previously computed and dropped.
+        # Energy truncation is valid only while the correlator's weight
+        # actually fits in the ground-state-anchored window kpm_scale
+        # sets; push kpm_scale low enough and the discarded weight is not
+        # removed but piled onto the window edges, giving a plausible
+        # spectrum peaked at the window top with several times the right
+        # amplitude -- and moments that stay bounded by mu0, so
+        # _check_kpm_moment cannot see it either. The unambiguous end of
+        # that spectrum is the truncation annihilating the vector
+        # outright (relative change ~1, against 0.01-0.17 on healthy runs
+        # on the same chain); only that is rejected here. See
+        # docs/known_issue_kpm_energy_truncation_window.md.
+        if nrm_before > 0. and change/nrm_before > 0.5:
+            raise RuntimeError(
+                "kpm_energy_truncate: the energy truncation removed %.1f%% "
+                "of a Chebyshev vector, i.e. essentially all of it -- the "
+                "retained energy window (kpm_scale) is far too small for "
+                "this correlator, and the moments it produces are "
+                "meaningless. Raise kpm_scale, or set "
+                "kpm_energy_truncate=False." % (100.*change/nrm_before))
 
     def _kpm_moments_full(self, m, vi, vj, n, kpmmaxm, kpmcutoff):
         out = []

@@ -72,6 +72,30 @@ def remove_none(ws):
 
 def get_excited_states(self,n=2,purify=True,**kwargs):
     """Excited states"""
+    # A request for more states than the Hilbert space holds has no answer
+    # and no clean failure: the non-Hermitian Krylov route in particular
+    # spins for minutes printing "state is not normalizable" once it runs
+    # out of directions (seen with dcex's own default nex=20 on a 4-site
+    # spin-1/2 chain, dimension 16), rather than saying so.
+    # self.sites holds per-site *codes*, not dimensions: an int >=2 is the
+    # local dimension (spin/boson sites), 0 is the spinless-fermion code
+    # (dimension 2) and 1 is the native spinful-electron code (dimension
+    # 4). Any other code belongs to a site type this function does not
+    # know how to size, and skips the check rather than guessing it -- a
+    # wrong guess here would reject a perfectly legal request.
+    SITE_DIM = {0:2, 1:4}
+    dim = 1
+    for d in self.sites:
+        try: di = int(d)
+        except (TypeError,ValueError):
+            dim = None ; break
+        if di in SITE_DIM: dim = dim*SITE_DIM[di]
+        elif di>=2: dim = dim*di
+        else: dim = None ; break
+    if dim is not None and dim>0 and n>dim:
+        raise ValueError(
+            "get_excited_states: asked for %d states, but this chain's "
+            "Hilbert space has dimension %d"%(n,dim))
     H = self.hamiltonian # make a check
     if not self.is_hermitian(H): # non-Hermitian Hamiltonians
         if n==1 and self.itensor_version in (2,3,"python"):
@@ -109,7 +133,7 @@ from .algebra.arnolditk import gram_smith
 
 
 def excited_states_non_hermitian(self,n=3,recursive=True,
-        maxit=40,ncv=10,nkry_min=None,nkry_max=None,
+        maxit=40,ncv=10,nkry_min=None,nkry_max=None,scale=None,
      **kwargs):
     # recursive=True (one state at a time, each deflated against the
     # previous ones) is the default rather than a single simultaneous
@@ -134,6 +158,17 @@ def excited_states_non_hermitian(self,n=3,recursive=True,
     # shrink this back down to 6 for the common recursive n=1-per-call
     # case, right where the near-degenerate-safe extra margin matters
     # most.
+    # scale is likewise accepted and unused: it is the energy rescaling of
+    # the Hermitian excited-state search (get_excited_states_dmrg), which
+    # the Krylov/IRAM route here has no counterpart for. It has to be
+    # tolerated rather than rejected because dcex.dynamical_correlator
+    # always forwards a scale= (default 10.0, not something the caller
+    # chose) into get_excited_states, so a strict signature turns
+    # submode="EX" on a non-Hermitian Hamiltonian into "TypeError:
+    # mpsiram() got an unexpected keyword argument 'scale'" several calls
+    # deep -- which is exactly what it did, invisibly, for as long as the
+    # non-Hermitian check in dynamics.py ran before the submode dispatch
+    # and so never let submode="EX" reach this code at all.
     # nkry_min/nkry_max are accepted only for backward compatibility with
     # the old arnolditk-based signature (an adaptive Krylov-size range) --
     # any caller that used to pass them explicitly would otherwise now

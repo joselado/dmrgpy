@@ -53,9 +53,9 @@ def restrict_interval(x,y,window):
 
 
 
-def get_dynamical_correlator(self,n=1000,
+def get_dynamical_correlator(self,
              name=None,delta=1e-1,kernel="jackson",
-             es=np.linspace(-1.,10,500),deconvolve=None,
+             es=np.linspace(-1.,10,500),
              hodc_order=6,hodc_eta=None,
              **kwargs):
     """
@@ -74,6 +74,15 @@ def get_dynamical_correlator(self,n=1000,
     dynamical_correlator_moments()/dynamical_correlator_from_moments(),
     which this function just composes, and which let two kernels be
     compared from a single (expensive) moment run.
+
+    Two parameters that used to sit in this signature are gone rather
+    than fixed, because neither ever did anything: `n` was overwritten
+    one line later by dynamical_correlator_moments()'s own return value,
+    and `deconvolve` had no call site at all (its only use,
+    kpm.deconvolution, was already commented out before the file-based
+    backend was removed). Both were silently accepted; they now raise
+    TypeError like any other unknown keyword, which is what the sibling
+    submodes (CVM, CVM_explicit) already did.
     """
     mus,emin,emax,scale,n,delta = dynamical_correlator_moments(self,
             name=name,delta=delta,**kwargs)
@@ -82,7 +91,7 @@ def get_dynamical_correlator(self,n=1000,
             hodc_order=hodc_order,hodc_eta=hodc_eta)
 
 
-def dynamical_correlator_moments(self,name=None,delta=1e-1,**kwargs):
+def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
     """Compute the raw (undamped) KPM-DMRG Chebyshev moments
     <name[0]|T_k(H_scaled)|name[1]> of a dynamical correlator, plus
     everything needed to turn them into a spectrum.
@@ -94,15 +103,40 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,**kwargs):
     Split out of get_dynamical_correlator() so a caller can reconstruct
     the same moments with several kernels without repeating the DMRG
     work, which is all of the cost."""
-    if delta<0.0: raise
+    if kwargs:
+        # a bare **kwargs used to absorb and discard everything unknown --
+        # deconvolve=, n=, even maxm=/nsweeps= (which look like they would
+        # change the calculation and did not), all silently. CVM and
+        # CVM_explicit have always raised here; so does KPM now.
+        raise TypeError(
+            "Unexpected keyword argument(s) for the KPM dynamical "
+            "correlator: "+", ".join(sorted(kwargs))
+            +". Solver parameters are attributes of the chain "
+            "(self.maxm, self.nsweeps, self.kpmmaxm, ...), not call "
+            "arguments.")
+    if delta<0.0: raise ValueError("delta must be >= 0, got "+repr(delta))
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
     self.get_gs() # compute ground state (also sets self.e0)
-    if type(name[0])!=multioperator.MultiOperator: raise
+    # the documented string form ("ZZ"/"cdc"/... plus i=/j=) used to hit a
+    # bare `raise` here -- i.e. the default submode was the one submode it
+    # did not work with, and fermionchain.get_gr (name="cdc") could never
+    # have run at all
+    name = operatornames.str2MO(self,name,i=i,j=j)
     mi = name[1] # first operator
     mj = name[0].get_dagger() # second operator
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    if self.kpm_energy_truncate and self.itensor_version not in (3,"python"):
+        # only v3 (native method) and "python" (setter + internal branch)
+        # implement Holzner-style energy truncation; on itensor_version=2
+        # the flag used to be accepted and then quietly do nothing, so the
+        # run looked like a truncated one and was not
+        raise NotImplementedError(
+            "kpm_energy_truncate is implemented for itensor_version=3 and "
+            "itensor_version='python' only (got "
+            +repr(self.itensor_version)+"); it used to be silently ignored "
+            "here.")
     if self.kpm_energy_truncate and self.itensor_version==3:
         # v3's own independent method (see _sync_kpm_energy_truncation's
         # docstring) -- not the setter+branch pattern used for "python".

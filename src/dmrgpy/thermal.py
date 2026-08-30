@@ -6,12 +6,18 @@ from . import multioperator
 
 class Thermal_Spin_Chain():
     def __init__(self,sites,T=0.1,**kwargs):
+        if T<0.: # a negative temperature used to be silently treated as T=0
+            raise ValueError("Thermal_Spin_Chain: T must be >= 0, got "
+                             +repr(T))
         sitesT = []
         for s in sites: 
             sitesT += [s]
             sitesT += [s]
         n = len(sites) # number of sites
-        self.MBChain = Spin_Chain(sitesT) # get the chain
+        # **kwargs was accepted and then dropped on the floor here, so
+        # Thermal_Spin_Chain(...,itensor_version="python") silently built
+        # the default (compiled) backend instead
+        self.MBChain = Spin_Chain(sitesT,**kwargs) # get the chain
         self.computed_gs = False
         self.T = T # temperature
         Sx = [self.MBChain.Sx[2*i] for i in range(n)] 
@@ -42,7 +48,11 @@ class Thermal_Spin_Chain():
                 self.MBChain.set_hamiltonian(h) # singlet Hamiltonian
                 wf = self.MBChain.get_gs() # get the fully entangled WF
                 wf0 = anneal(self.MBChain,self.hamiltonian,wf,self.T)
-            elif self.T<1e-5:
+            else: # T<=1e-5: plain ground state. `else`, not another elif:
+                # the two branches used to leave T exactly 1e-5 (and, before
+                # the check in __init__, any negative T) falling through
+                # both, so wf0 was never assigned and the next line raised
+                # UnboundLocalError
                 self.MBChain.set_hamiltonian(self.hamiltonian)
                 wf0 = self.MBChain.get_gs() # get the fully entangled WF
             wf0 = wf0.normalize()

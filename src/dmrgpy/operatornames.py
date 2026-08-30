@@ -83,18 +83,35 @@ def name2MO(name,self):
         raise ValueError("Unrecognized operator name "+str(name))
 
 def str2MO(self,name,i=0,j=0):
+    """Normalize the `name=` argument of a correlator into a pair of
+    MultiOperators: either a documented string ("ZZ", "cdc", ...) plus
+    site indices i/j, or an explicit (A,B) MultiOperator pair.
+
+    The string branch used to cover Sx/Sy/Sz/Sp/Sm only and end in a bare
+    `raise`, so the documented fermionic names recognize() itself returns
+    ("cdc", "ccd", "densitydensity", ...) died with the opaque
+    "RuntimeError: No active exception to reraise" -- including from
+    fermionchain.get_gr, which passes name="cdc" itself. name2MO covers
+    the remaining families, so the string form now works wherever the
+    operator exists on the chain, and says what is wrong when it does
+    not."""
     from . import multioperator
     if type(name)==str:
         n1,n2 = recognize(name)
-        def f(n,i):
-            if n=="Sx": return self.Sx[i]
-            elif n=="Sy": return self.Sy[i]
-            elif n=="Sz": return self.Sz[i]
-            elif n=="Sp": return self.Sx[i]+1j*self.Sy[i]
-            elif n=="Sm": return self.Sx[i]-1j*self.Sy[i]
-            else: raise
+        def f(n,k):
+            if n=="Id": return multioperator.identity()
+            try: ops = name2MO(n,self)
+            except (ValueError,AttributeError):
+                raise ValueError(
+                    "Operator "+repr(n)+" (from correlator name "+repr(name)
+                    +") is not available on this chain; pass an explicit "
+                    "(A,B) MultiOperator pair instead")
+            return ops[k]
         return [f(n1,i),f(n2,j)]
     elif type(name[0])==multioperator.MultiOperator and type(name[1])==multioperator.MultiOperator:
         return [name[0],name[1]]
-    else: raise
+    else:
+        raise ValueError(
+            "name must be a documented correlator string (with i=/j=) or a "
+            "pair of MultiOperators, got "+repr(name))
 

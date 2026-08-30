@@ -50,10 +50,16 @@ def make_chain(n, itensor_version, params):
     spins = ["1/2" for _ in range(n)]
     sc = spinchain.Spin_Chain(spins, itensor_version=itensor_version)
 
-    def fj(i, j):
-        return 1.0 if abs(i - j) == 1 else 0.0
-
-    sc.set_exchange(fj)
+    # spinchain.set_exchange() was removed; this is exactly the
+    # Hamiltonian it built for this fj -- it summed the coupling over
+    # BOTH orderings of every pair, so this is 2*sum_<ij> S_i.S_j. Kept
+    # in that form so benchmark timings and energies stay comparable with
+    # every run recorded before the removal.
+    h = 0
+    for i in range(n):
+        for j in range(n):
+            if abs(i - j) == 1: h = h + sc.SS(i, j)
+    sc.set_hamiltonian(h)
     sc.maxm, sc.nsweeps, sc.cutoff = params["maxm"], params["nsweeps"], params["cutoff"]
     return sc
 

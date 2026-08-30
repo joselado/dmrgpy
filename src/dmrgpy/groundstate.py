@@ -40,6 +40,47 @@ def sector_key(self):
     return None if not sector else tuple(sorted(sector.items()))
 
 
+def solver_key(self):
+    """The solver parameters a stored ground state was computed under.
+
+    Same fields as gs_energy_single()'s own send-cache key, minus the
+    Hamiltonian itself (changing that goes through set_hamiltonian(),
+    which resets computed_gs outright). Used by gs_is_current() below to
+    decide whether a cached self.e0/self.wf0 still answers the question
+    being asked."""
+    return (self.maxm,self.nsweeps,self.cutoff,self.noise,
+            max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self))
+
+
+def gs_is_current(self):
+    """True if the stored ground state may be returned as-is.
+
+    computed_gs alone is not enough: gs_energy()/get_gs() used to short-
+    circuit on it, which returned before gs_energy_single() -- and hence
+    before its send-cache, which does key on maxm/nsweeps/cutoff/noise/
+    ramp/sector -- was ever entered. The textbook convergence check
+
+        for m in [10,20,40]: sc.maxm = m; print(sc.gs_energy())
+
+    therefore printed the m=10 energy three times, silently: no warning,
+    a perfectly plausible flat curve, and (measured on a 6-site
+    Heisenberg chain) an answer 5% above the true ground state. The
+    fluctuation-based retry inside gs_energy_single() bumps maxm the same
+    way and was equally affected. Comparing the solver parameters against
+    the ones in force when the state was stored makes the short circuit
+    honest while keeping a repeated call with unchanged parameters as
+    cheap as it was before.
+
+    A state with no recorded key was put there by something other than a
+    solve -- set_gs(), a restored julia_live snapshot -- and is returned
+    unconditionally: the user injected it deliberately, so re-solving
+    over it would discard exactly what they asked to use."""
+    if not self.computed_gs: return False
+    key = getattr(self,"_gs_solver_key",None)
+    if key is None: return True # externally injected state, see above
+    return key==solver_key(self)
+
+
 def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy via the in-process pybind11 extension
@@ -143,6 +184,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
           self.noise = noise
           self.bond_ramp = ramp
     self.computed_gs = True # ground state has been computed
+    self._gs_solver_key = solver_key(self) # ...under these parameters
     return out # return energy
 
 

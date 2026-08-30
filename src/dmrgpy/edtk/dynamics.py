@@ -20,6 +20,9 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
         raise ValueError("get_dynamical_correlator: name (the two-operator "
                           "tuple) must be given")
 
+    # `name` arrives already normalized to a MultiOperator pair by
+    # Many_Body_Chain.get_dynamical_correlator (an EDchain has no
+    # Sx/Sz/C attributes of its own to resolve a string against)
     A = EDOperator(name[0],self).SO # create first operator
     B = EDOperator(name[1],self).SO # create second operator
     h = self.get_hamiltonian() # Hamiltonian as matrix
@@ -44,11 +47,30 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     else:
         wf0 = wf0.v.copy()
     if not is_hermitian(h): # non Hermitian Hamiltonians
+        # Per-submode, not wholesale -- see the same fix in dynamics.py.
+        # This used to substitute the explicit resolvent for every submode
+        # but "KPM", which was worst for submode="ED": the exact Lehmann
+        # sum that exists precisely to be an independent reference became
+        # the approximate resolvent, silently, and matched it bit for bit.
         if submode=="KPM": # non-Hermitian KPM
             from ..nonhermitian.kpm import dynamical_correlator_nhkpm_ed
             return dynamical_correlator_nhkpm_ed(self,name=name,**kwargs)
-        from ..nonhermitian.dynamics import dynamical_correlator_non_hermitian
-        return dynamical_correlator_non_hermitian(self,name=name,**kwargs)
+        elif submode in ("CVM","INV"):
+            # the non-Hermitian implementation of the same resolvent
+            from ..nonhermitian.dynamics import dynamical_correlator_non_hermitian
+            return dynamical_correlator_non_hermitian(self,name=name,**kwargs)
+        elif submode=="EX": # backend-agnostic, non-Hermitian-capable
+            from .. import dcex
+            return dcex.dynamical_correlator(self,name=name,**kwargs)
+        else:
+            raise NotImplementedError(
+                "get_dynamical_correlator: submode=%r assumes a Hermitian "
+                "Hamiltonian and has no non-Hermitian implementation "
+                "(KPM/CVM/INV do, and EX is non-Hermitian-capable "
+                "already). It used to return the CVM-explicit resolvent "
+                "instead, silently -- including for submode='ED', whose "
+                "whole purpose is to be an exact independent "
+                "reference."%submode)
 #    print(wf0)
 #    print(np.round(wf0,2))
     # for Hermitian Hamiltonians, continue

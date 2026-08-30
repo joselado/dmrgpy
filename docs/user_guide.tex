@@ -3444,7 +3444,7 @@ overrides applied to the temporary finite \texttt{Many\_Body\_Chain}
 (\texttt{maxm}, \texttt{nsweeps}, \texttt{kpmmaxm}, \texttt{kpm\_scale},
 ...), independent of \texttt{ic}'s own \texttt{maxm}/etc.; remaining
 \texttt{**kwargs} (\texttt{delta}, \texttt{kernel}, \texttt{es},
-\texttt{deconvolve}, ...) are forwarded to
+...) are forwarded to
 \texttt{kpmdmrg.get\_dynamical\_correlator} unchanged.
 
 \textbf{Scope restriction -- a finite-window approximation, read before
@@ -4019,5 +4019,80 @@ the tensors get large enough, and a script may have chosen its setting
 deliberately. Treat the numbers above as indicative -- they come from a busy
 shared host -- and measure on your own machine before tuning around them.
 See \texttt{dmrgpy/blasthreads.py} for the full measurements.
+
+
+\section{What raises, and what changed in the 2026-08 audit}
+
+A cross-backend audit in August 2026 (\texttt{docs/audit\_2026\_08\_hole\_hunt.md},
+which records every reproduction) went looking for calls that silently did
+something other than what was asked. Most of what it found is now either
+fixed or loud. Two of the fixes \textbf{change numbers} and are worth
+knowing about if you have results from before them:
+
+\begin{itemize}
+\item \textbf{\texttt{submode="TD"} and \texttt{submode="TDZ"} were a factor
+of $\pi$ too large.} The Fourier transform behind them omitted the $1/\pi$
+of the convention
+$S_{AB}(\omega)=\frac1\pi\mathrm{Re}\int_0^T\!dt\,e^{i\omega t}C(t)w_\delta(t)$
+that this guide documents and that every other submode already followed,
+and gave the $t=0$ sample full rather than half weight. On a 4-site chain
+the exact sum rule $\int S(\omega)d\omega=\langle AB\rangle=0.25$ came out
+as 1.28. Peak positions and widths were never affected -- the error is
+uniform in $\omega$ -- so only absolute spectral weight changes.
+\texttt{sxt\_to\_skomega} and the infinite-chain $S(k,\omega)$ reduction
+share the same transform and inherit the fix.
+\item \textbf{\texttt{itensor\_version=3} real-time evolution from a
+non-unit-norm state.} \texttt{evolution\_ABA} (whose start state is
+$A|\mathrm{gs}\rangle$) and \texttt{evolve\_and\_measure(wf=...)} were
+rescaled by $1/\|\psi\|^2$ for every $t>0$ under
+\texttt{tevol\_method="TDVP"}/\texttt{"TDVP\_GSE"}, while $C(0)$ stayed
+correct. Against ED on a 5-site chain the error went from 0.176 to 1.7e-9.
+\texttt{"TEBD"}, \texttt{"MPO"}, \texttt{itensor\_version=2} and
+\texttt{"python"} were never affected.
+\end{itemize}
+
+Beyond those, the following now raise where they used to be silent:
+
+\begin{center}
+\begin{tabular}{@{}p{0.34\textwidth}p{0.30\textwidth}p{0.29\textwidth}@{}}
+\toprule
+\textbf{Call} & \textbf{Was} & \textbf{Now} \\
+\midrule
+\texttt{sc.maxm = m} with \texttt{m<1} & SIGABRT (v2/v3), wrong energy (\texttt{"python"}) & \texttt{ValueError} \\
+changing \texttt{maxm}/\texttt{nsweeps} between \texttt{gs\_energy()} calls & returned the first, less converged energy & re-solves \\
+\texttt{sc.tevol\_method = "tdvp"} (any unrecognized name) & ran the legacy MPO-Taylor integrator & \texttt{ValueError} \\
+\texttt{submode=} on a non-Hermitian Hamiltonian & every submode returned the CVM resolvent & dispatches; \texttt{NotImplementedError} for the Hermitian-only ones \\
+unknown keyword to \texttt{submode="KPM"} & silently discarded & \texttt{TypeError} \\
+\texttt{name="ZZ"} with \texttt{submode="KPM"}/\texttt{"EX"}, or any \texttt{mode="ED"} & \texttt{RuntimeError: No active exception to reraise} & works \\
+\texttt{submode="CVMimag"}/\texttt{"maxent"} & \texttt{exit()} -- terminated your process & \texttt{NotImplementedError} \\
+\texttt{kpm\_energy\_truncate=True} on \texttt{itensor\_version=2} & silently ignored & \texttt{NotImplementedError} \\
+\texttt{kpm\_energy\_truncate=True} with far too small a \texttt{kpm\_scale} & plausible spectrum at the wrong energy & \texttt{RuntimeError} in the worst regime \\
+an operator on an out-of-range site (\texttt{"python"}) & treated as the identity & \texttt{IndexError} \\
+\texttt{get\_excited\_states(n=...)} beyond the Hilbert space & ground on for minutes & \texttt{ValueError} \\
+\texttt{Thermal\_Spin\_Chain(..., T<0)} & treated as \texttt{T=0} & \texttt{ValueError} \\
+\texttt{Thermal\_Spin\_Chain(..., itensor\_version=...)} & dropped & honored \\
+\texttt{get\_distribution*(mode="ED")} & \texttt{AttributeError} deep inside & dispatches, or \texttt{NotImplementedError} \\
+\texttt{vev(C[i]*C[i])} & \texttt{AttributeError} on every DMRG backend & \texttt{0} (as ED always answered) \\
+\texttt{Many\_Body\_Chain.evolution()} & \texttt{AttributeError} & removed \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+And these combinations now work where they used to fail:
+
+\begin{itemize}
+\item \textbf{conserved-sector mode + \texttt{get\_rdm()}} on
+\texttt{itensor\_version=3}, which returned uninitialized heap memory
+(non-Hermitian, different every run);
+\item \textbf{conserved-sector mode + a repeated-site operator product}
+such as the four-point correlator's \texttt{Cdag\_0 C\_1 Cdag\_0 C\_1},
+which aborted the whole process inside ITensor and now evaluates to 0 as
+it should;
+\item \textbf{conserved-sector mode + site/pair entropy, mutual
+information, and the default \texttt{get\_correlation\_matrix()}}, all of
+which raised;
+\item \textbf{\texttt{get\_rdm(i=ns-1)}} (the last site) on
+\texttt{itensor\_version="python"}.
+\end{itemize}
 
 \end{document}

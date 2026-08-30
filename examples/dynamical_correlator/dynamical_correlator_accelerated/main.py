@@ -14,7 +14,14 @@ sc = spinchain.Spin_Chain(spins) # create the spin chain
 def fj(i,j):
   if abs(i-j)==1: return 1.0
   else: return 0.0
-sc.set_exchange(fj)
+# set_exchange() was removed; this is the Hamiltonian it built --
+# the coupling summed over BOTH orderings of every pair, so a
+# nearest-neighbour fj=1 gives 2*sum_<ij> S_i.S_j, not sum_<ij>.
+h = 0
+for i in range(n):
+  for j in range(n):
+    if fj(i,j)!=0.0: h = h + fj(i,j)*sc.SS(i,j)
+sc.set_hamiltonian(h)
 #sc.get_gs()
 
 #sc.kpmmaxm = 20 # KPM maxm

@@ -1138,9 +1138,25 @@ class Chain
             rho *= psi.A(k);
             rho *= dag(prime(psi.A(k),TagSet("Link")));
             }
+        // Read the dim*dim matrix elements out explicitly, by index,
+        // rather than with rho.visit(): visit() enumerates only the
+        // *stored* elements, which for QN-carrying site indices
+        // (set_conserved_sector) is a handful of 1x1 blocks rather than
+        // the full dim*dim, so the caller in bindings.cc used to copy a
+        // short vector into an uninitialized (dim,dim) array -- values
+        // landing at the wrong offsets and the rest of the array left as
+        // whatever was on the heap (confirmed by poisoning it: the poison
+        // bytes came back inside the "density matrix"). Element (a,b) is
+        // <a|rho|b>, matching the site-operator convention op_charge()
+        // documents (unprimed = in, primed = out) and the ordering
+        // pyitensor's own reduced_dm() produces.
+        auto s = sites_.si(site);
+        int d = dim(s);
         std::vector<std::complex<double>> out;
-        auto collect = [&out](Cplx z) { out.push_back(z); };
-        rho.visit(collect);
+        out.reserve(d*d);
+        for (int a=1;a<=d;a++)
+        for (int b=1;b<=d;b++)
+            out.push_back(eltC(rho,s(a),prime(s)(b)));
         return out;
         }
 
@@ -1368,6 +1384,20 @@ class Chain
         auto H = mpo_from_terms(terms_h);
         auto A = mpo_from_terms(terms_op);
         auto psi = wf;
+        // tdvp_step() passes {"DoNormalize",true}, so without restoring the
+        // input norm after every step this silently rescaled the whole
+        // trajectory by 1/||wf||^2 for any non-unit-norm start -- exactly
+        // what evolution_ABA() hands in (wfA = A*wf, for a non-unitary A).
+        // C(0) was still right (the loop measures before evolving), so the
+        // error looked like a discontinuity at the first step rather than
+        // an overall factor: on a 5-site XXZ chain with A=Sx[0]
+        // (||A|gs>||^2 = 0.25) the t>0 values came back 4x too large,
+        // recovering ED to ~1e-10 once multiplied by 0.25. quench_tdvp(),
+        // quench_tdvp_gse() and quench_tebd() have always done this; these
+        // two were the ones that did not. The same defect was found and
+        // fixed on the Julia backend (mpsjulialive/tdvp.jl), see
+        // docs/documentation.md.
+        auto norm0 = std::sqrt(std::real(innerC(psi,psi)));
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
@@ -1378,6 +1408,8 @@ class Chain
             // evolve-then-measure order was a real (not cosmetic) bug.
             out.correlator.push_back(innerC(psi,A,psi));
             psi = tdvp_step(H,psi,dt);
+            psi.normalize();
+            psi *= norm0;
             }
         out.final_wf = psi;
         return out;
@@ -1437,6 +1469,9 @@ class Chain
         auto H = mpo_from_terms(terms_h);
         auto A = mpo_from_terms(terms_op);
         auto psi = wf;
+        // see evolve_and_measure_tdvp() above for why the input norm has
+        // to be restored after every normalizing tdvp_step()
+        auto norm0 = std::sqrt(std::real(innerC(psi,psi)));
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
@@ -1446,6 +1481,8 @@ class Chain
             if (it<gse_sweeps)
                 psi = global_subspace_expand(H,psi,krylov_order,gse_cutoff,0);
             psi = tdvp_step(H,psi,dt,1);
+            psi.normalize();
+            psi *= norm0;
             }
         out.final_wf = psi;
         return out;
@@ -4573,10 +4610,106 @@ class Chain
     // own comment for why the cancellation has to happen here rather than
     // being left to AutoMPO), then reject whatever is left that still does
     // not conserve it, by name, before ITensor can abort over it.
+    // Dense d x d matrix of a single-site operator, in op_charge()'s own
+    // convention: element (a,b) is the amplitude taking basis state a to
+    // basis state b.
+    std::vector<Cplx>
+    site_matrix(std::string const& name, int site) const
+        {
+        auto O = dense_sites_.op(name,site);
+        auto sd = dense_sites_(site);
+        int d = dim(sd);
+        std::vector<Cplx> m(d*d,Cplx(0.,0.));
+        for (int a=1;a<=d;a++)
+        for (int b=1;b<=d;b++)
+            m[(a-1)*d+(b-1)] = eltC(O,sd(a),prime(sd)(b));
+        return m;
+        }
+
+    // Can a single site of this SiteSet carry a charge change of `delta`
+    // at all? (i.e. is there a pair of basis states whose QNs differ by
+    // it) A fermionic site holds 0 or 1 particle, so it can do -1, 0, +1
+    // and nothing else.
+    bool
+    site_delta_representable(int site, QN const& delta) const
+        {
+        auto s = sites_(site);
+        int d = dim(s);
+        for (int a=1;a<=d;a++)
+        for (int b=1;b<=d;b++)
+            if (qn_is_zero(qn(s(b))-qn(s(a))-delta)) return true;
+        return false;
+        }
+
     std::vector<MOTerm>
     sector_terms(std::vector<MOTerm> const& terms) const
         {
-        auto out = combine_terms(expand_xy_terms(dense_sites_,terms));
+        auto raw = combine_terms(expand_xy_terms(dense_sites_,terms));
+        // Same-site factors, before the net-charge check below. That check
+        // sums each term's charge over ALL its factors, so a term that is
+        // net-neutral could still pile an impossible charge onto ONE site
+        // -- Cdag(0) C(1) Cdag(0) C(1), which the four-point correlator
+        // produces as a matter of course, is net zero but +2 on site 0.
+        // AutoMPO then aborted the whole process ("Index does not contain
+        // given QN block"), uncatchably, since ITensor's Error() calls
+        // abort(). Such a product is usually identically zero by Pauli
+        // exclusion (mode="ED" answers 0), so drop those terms outright
+        // and raise a catchable error only for the ones that are not.
+        std::vector<MOTerm> out;
+        for (auto const& t : raw)
+            {
+            std::map<int,std::vector<std::string>> by_site;
+            for (auto const& f : t.factors) by_site[f.site].push_back(f.name);
+            bool vanishes = false;
+            for (auto const& kv : by_site)
+                {
+                int site = kv.first;
+                auto const& names = kv.second;
+                if (names.size()<2) continue;
+                int d = dim(dense_sites_(site));
+                // composite of the same-site factors: written left to
+                // right, the rightmost acts first, so with the (in,out)
+                // element convention above the matrices multiply in
+                // reverse order
+                std::vector<Cplx> comp(d*d,Cplx(0.,0.));
+                for (int a=0;a<d;a++) comp[a*d+a] = Cplx(1.,0.);
+                for (auto it=names.rbegin();it!=names.rend();++it)
+                    {
+                    auto m = site_matrix(*it,site);
+                    std::vector<Cplx> prod(d*d,Cplx(0.,0.));
+                    for (int a=0;a<d;a++)
+                    for (int c=0;c<d;c++)
+                        {
+                        Cplx acc(0.,0.);
+                        for (int b=0;b<d;b++) acc += comp[a*d+b]*m[b*d+c];
+                        prod[a*d+c] = acc;
+                        }
+                    comp = prod;
+                    }
+                double nrm = 0.;
+                for (auto const& z : comp) nrm += std::norm(z);
+                if (nrm < 1e-24) { vanishes = true; break; }
+                // not zero: is the charge it accumulates on this site one
+                // the site can actually carry?
+                QN acc;
+                bool ok = true;
+                for (auto const& nm : names)
+                    {
+                    QN q;
+                    if (!op_charge(nm,site,q)) { ok = false; break; }
+                    acc = acc + q;
+                    }
+                if (ok && !site_delta_representable(site,acc))
+                    throw std::invalid_argument(tinyformat::format(
+                        "Conserved-sector mode (%s): the term %s applies "
+                        "several operators to site %d that together change "
+                        "its charge by %s, which a single site cannot carry. "
+                        "(Without a sector this is built and evaluated "
+                        "normally; here it would abort inside ITensor.)",
+                        sector_string(),term_string(t),site,qn_string(acc)));
+                }
+            if (!vanishes) out.push_back(t);
+            }
         for (auto const& t : out)
             {
             QN total;
@@ -10964,13 +11097,48 @@ class Chain
             {
             ap = apply_mpo(m,a,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
             ap = sum(2.0*ap,-1.0*am,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
-            ap = kpm_energy_truncate(ap,m,dK,n_sweeps,threshold).first;
+            {
+            double nrm_before = innerC(ap,ap).real();
+            auto tr = kpm_energy_truncate(ap,m,dK,n_sweeps,threshold);
+            check_kpm_truncation(nrm_before,tr.second.state_change_norm);
+            ap = tr.first;
+            }
             out.push_back(innerC(vj,ap));
             check_kpm_moment(out,bound);
             am = 1.0*a;
             a = 1.0*ap;
             }
         return out;
+        }
+
+    // Guard on Holzner's own Eq. (41) diagnostic, which both truncated
+    // moment loops below used to compute and throw away (`.first`).
+    // Energy truncation is only valid while the correlator's spectral
+    // weight actually fits inside the ground-state-anchored window
+    // [E0,E0+Ws] that kpm_scale sets. Push kpm_scale far enough down and
+    // it does not: the discarded weight is not removed but piled onto the
+    // window edges, and since the resulting moments stay bounded by mu0,
+    // check_kpm_moment() cannot see it either -- the spectrum comes back
+    // peaked at ~0.96x the window top with several times the correct
+    // amplitude and no warning at all. The sharp, unambiguous end of that
+    // spectrum is the truncation annihilating the whole Chebyshev vector
+    // (relative state change ~1); healthy runs on the same chain sit
+    // around 0.01-0.17. Only that regime is rejected here -- see
+    // docs/known_issue_kpm_energy_truncation_window.md for what is still
+    // silent between the two.
+    void
+    check_kpm_truncation(double norm_before, double state_change_norm) const
+        {
+        if (norm_before <= 0.) return;
+        double rel = state_change_norm/norm_before;
+        if (rel > 0.5)
+            throw std::runtime_error(tinyformat::format(
+                "kpm_energy_truncate: the energy truncation removed %.1f%% "
+                "of a Chebyshev vector, i.e. essentially all of it -- the "
+                "retained energy window is far too small for this "
+                "correlator, and the moments it produces are meaningless. "
+                "Raise kpm_scale, or set kpm_energy_truncate=False.",
+                100.*rel));
         }
 
     std::vector<std::complex<double>>
@@ -10991,7 +11159,12 @@ class Chain
             {
             ap = apply_mpo(m,a,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
             ap = sum(2.0*ap,-1.0*am,{"MaxDim",kpmmaxm,"Cutoff",kpmcutoff});
-            ap = kpm_energy_truncate(ap,m,dK,n_sweeps,threshold).first;
+            {
+            double nrm_before = innerC(ap,ap).real();
+            auto tr = kpm_energy_truncate(ap,m,dK,n_sweeps,threshold);
+            check_kpm_truncation(nrm_before,tr.second.state_change_norm);
+            ap = tr.first;
+            }
             Cplx bk = 2.0*innerC(a,a) - mu0;
             Cplx bk1 = 2.0*innerC(a,ap) - mu1;
             out.push_back(bk);

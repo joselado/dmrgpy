@@ -260,6 +260,23 @@ systems) — the fastest way to check a `mpscpp3` change didn't diverge from
 removes generated working directories (`.mpsfolder`, `.pychainfolder`,
 `.dmrgfolder`) and stray `ERROR`/`*.OUT` files from the tree.
 
+**The 2026-08 audit.** `docs/audit_2026_08_hole_hunt.md` is the record of
+a five-lens cross-backend audit: 21 confirmed findings, each with the
+reproduction that was actually executed and an independent reviewer's
+analysis, and each marked with what was done about it. Every one is fixed
+except the `kpm_energy_truncate` window problem, which is guarded only in
+its worst regime (`docs/known_issue_kpm_energy_truncation_window.md`).
+The regressions live in `tests/test_audit_2026_08_regressions.py`. Two of
+those fixes changed numbers rather than behavior -- `submode="TD"`/`"TDZ"`
+were a factor of pi too large, and `itensor_version=3` real-time evolution
+from a non-unit-norm start was scaled by `1/||psi||^2` -- so results from
+before them are not comparable. Read `documentation.md`'s section 4.10
+before adding a new dispatch: almost every finding was a dispatch decision
+taken before the information that should inform it (a short circuit ahead
+of a cache key, a precondition ahead of the branch it qualifies, an `else`
+serving both "unsupported here" and "you typo'd it", a `**kwargs` with no
+consumer).
+
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
 result, so every `examples/*/*/main.py` should end with a `matplotlib`

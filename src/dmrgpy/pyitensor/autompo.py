@@ -77,11 +77,22 @@ class HTerm:
         check examples/pyitensor/selftest_autompo.py's cross-checks against
         dmrgpy's independent ED backend if this ever looks suspect.
         """
+        n = sites.length()
         by_site = {}
         for name, site in self.ops:
+            # An out-of-range site used to fall straight through the
+            # per-site loop below, which walks sites 1..n and simply never
+            # visits it -- so the operator silently became the identity:
+            # vev(Sz[10]) on a 6-site chain returned 1.0, and putting
+            # 5.0*Sz[10] in the Hamiltonian shifted the energy by exactly
+            # +5. itensor_version=2/3 and mode="ED" all raise IndexError
+            # on the same input; this backend now does too.
+            if not (1 <= site <= n):
+                raise IndexError(
+                    "operator %r placed on site %d, outside the chain's "
+                    "sites 1..%d"%(name,site,n))
             by_site.setdefault(site, []).append(name)
 
-        n = sites.length()
         out = [None] * n
         carry = False  # fermion parity carried in from sites < current
         for site in range(1, n + 1):

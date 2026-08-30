@@ -17,7 +17,8 @@ fo = open("DCF.OUT","w") # dynamical correlation function
 data = [] # (site, xs, ys) for plotting
 for i in range(n): # loop over sites
   name = (sc.Sz[i], sc.Sz[i])
-  (xs,ys) = sc.get_dynamical_correlator(n=300,mode="DMRG",name=name)
+  # n= removed: it never reached the KPM recursion (see the audit doc)
+  (xs,ys) = sc.get_dynamical_correlator(mode="DMRG",name=name)
   print("Doing",i)
   data.append((xs,ys))
   for (x,y) in zip(xs,ys):

@@ -18,6 +18,35 @@ from .edtk import timedependent as tded
 _TEBD_NN_ERROR_MARKER = "nearest-neighbor"
 
 
+TEVOL_METHODS = ("TDVP","TDVP_GSE","TEBD","AUTO","MPO")
+
+
+def check_tevol_method(self):
+    """Reject an unrecognized self.tevol_method instead of silently
+    running a different integrator.
+
+    Every dispatch below tests `itensor_version in (3,"python") and
+    tevol_method=="<literal>"` and ends in a bare `else` that runs the
+    legacy MPO-Taylor path. That else-branch is doing two jobs at once:
+    it is the documented, intended fallback for a backend that cannot
+    honor the request (itensor_version=2 has no TDVP/ module at all, see
+    docs/user_guide.md), and it was also catching every misspelling. So
+    tevol_method="tdvp" (wrong case), "TVDP", "TEBD " or any typo ran
+    MPO-Taylor without a word: measured against ED on a 6-site chain,
+    5.9e-5 error for the TDVP that was asked for versus 3.5e-2 for what
+    was actually run, bit-identical to an explicit "MPO".
+
+    Only the name is checked here. A recognized method that this backend
+    cannot run still falls back exactly as documented -- that case is a
+    property of the backend, the typo is a property of the caller."""
+    if self.tevol_method not in TEVOL_METHODS:
+        raise ValueError(
+            "Unrecognized tevol_method "+repr(self.tevol_method)+"; expected "
+            +", ".join(repr(m) for m in TEVOL_METHODS)
+            +". (An unrecognized method used to run the legacy MPO-Taylor "
+            "integrator silently.)")
+
+
 def _is_tebd_nn_error(exc):
     """True if `exc` is TEBD's own rejection of a non-nearest-neighbor
     Hamiltonian, as opposed to some other failure raised while attempting
@@ -126,6 +155,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     "restart" has no effect: quench()'s C++ implementation always starts
     from get_gs() regardless of its value.
     """
+    check_tevol_method(self) # reject a typo instead of running MPO-Taylor
     if self.itensor_version=="julia_live":
         from .mpsjulialive import timedependent as tdjl
         return tdjl.evolution_dmrg_DC(self,name=name,nt=nt,dt=dt,**kwargs)
@@ -204,6 +234,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     fidelity check where ED isn't feasible (see
     examples/tdvp_VS_ED_time_evolution/benchmark_scaling.py).
     """
+    check_tevol_method(self) # reject a typo instead of running MPO-Taylor
     if self.itensor_version=="julia_live":
         from .mpsjulialive import timedependent as tdjl
         return tdjl.evolve_and_measure_dmrg(self,operator=operator,nt=nt,
@@ -424,8 +455,25 @@ def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
     ts = tnew.copy() # overwrite
     cs = cnew.copy() # overwrite
     dtnew = dt/factor
-    # do the fourier transform
-    ss = np.fft.fft(cs)*dtnew # fourier transform (Riemann-sum normalization)
+    # Trapezoidal, not rectangular: giving the t=0 sample its full weight
+    # dtnew (as a plain Riemann sum does) leaves a real, frequency-
+    # independent offset Re C(0)*dtnew/2 across the whole spectrum --
+    # measured at exactly that value for dt=0.1/0.05/0.025 on a 4-site
+    # Heisenberg chain. The tail sample is halved for the same reason;
+    # after damping it is ~0 anyway, so that half costs nothing.
+    cs = cs.copy()
+    cs[0] = cs[0]*0.5
+    cs[-1] = cs[-1]*0.5
+    # do the fourier transform. The 1/pi is the codebase-wide convention
+    # for dynamical correlators, S_AB = -(1/pi) Im G_AB (docs/
+    # user_guide.md), which every other submode already follows and this
+    # one did not: KPM/CVM/EX/ED all satisfied the exact spectral sum rule
+    # int S(w) dw = <A B> while "TD" (and "TDZ", which shares this tail)
+    # came out a factor of pi too large -- 1.284 against an exact 0.250 on
+    # a 4-site chain. Uniform in w, so no peak position or width ever
+    # moved and nothing in tests/ could see it; it showed up only when the
+    # absolute weight was integrated.
+    ss = np.fft.fft(cs)*dtnew/np.pi # fourier transform (trapezoid + 1/pi)
     ws = np.fft.fftfreq(len(cs),d=dtnew)*2.*np.pi # fourier frequencies
     fr = interp1d(ws,ss.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(ws,ss.imag,fill_value=0.0,bounds_error=False)

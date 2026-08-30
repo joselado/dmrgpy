@@ -84,21 +84,16 @@ class Spin_Chain(Many_Body_Chain):
     def get_logdimension(self):
         """Return the logarithm of the Hilbert space dimension"""
         return get_logdimension(self)
-    def set_exchange(self,fun):
-        """Set the exchange coupling between sites"""
-        def terms():
-            for i in range(self.ns): # loop
-              for j in range(self.ns):  # loop
-                g = fun(i,j).real # call the function
-                if np.sum(np.abs(fun(i,j)-fun(j,i)))>1e-5: raise # something wrong
-                one = np.identity(3) # identity matrix
-                g = g*one # multiply by the identity
-                for ii in range(3):
-                  for jj in range(3):
-                      yield g[ii,jj]*self.Si[ii][i]*self.Si[jj][j]
-        h = multioperator.msum(terms())
-        self.exchange = h # exchange matrix
-        self.hamiltonian = self.exchange + self.fields # update Hamiltonian
+    # set_exchange(fun) used to live here: it built
+    # sum_{i,j} fun(i,j) S_i.S_j -- over both orderings of every pair, so
+    # a nearest-neighbour fun=1 gave 2*sum_<ij> S_i.S_j, not the
+    # conventional Heisenberg sum -- stored it as self.exchange and set
+    # self.hamiltonian = self.exchange + self.fields. It has been removed
+    # in favour of writing the Hamiltonian out with SS(i,j) and
+    # set_hamiltonian(), which is what every other model in this codebase
+    # already does and what its callers now do (see
+    # tests/test_benchmarks.py's all-pairs exchange test, which pins the
+    # same reference energy the old builder produced).
     def get_ED_obj(self):
         """Return the ED object (pychain wrapper), building it if not
         already cached"""
