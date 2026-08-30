@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dmrgpy"
-version = "0.1.0"
+version = "0.1.1"
 description = "Quasi-one-dimensional spin, fermionic, parafermion and bosonic systems with matrix product states (DMRG/ED)"
 readme = "README.md"
 license = "GPL-3.0-or-later"
