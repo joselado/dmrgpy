@@ -766,6 +766,29 @@ on the C++ DMRG side, `pyfermion/algebra/kpm.py` on the ED side) rather
 than direct spectral decomposition, since exact diagonalization of the
 full spectrum is infeasible for large chains.
 
+`submode="SECTOR"` (`sectordc.py`) is the exception to that shape, and
+the only submode that does not compute a spectrum on the chain it is
+called on: it solves the reference sector and the *one* sector
+`B|gs>` lands in (N+1 for `Cdag`, Sz+2 for `S+`) on an internal clone,
+promotes both to dense indices and contracts them, summing an explicit
+Lehmann representation over converged per-sector eigenstates. It rests
+entirely on `promote_mps` rebasing onto the chain's *original*
+`dense_sites_`, which `set_conserved_sector` never rebuilds -- already
+regression-tested by
+`tests/test_sector_promotion.py::test_states_promoted_from_different_sectors_are_comparable`.
+`get_spectral_function`/`get_spin_spectral_function` assemble the
+particle/hole and Sz channels on top, and a charge-indefinite operator
+(`Sx`) is split into `(S+ + S-)/2` and summed channel by channel
+(`multioperatortk/charge.py`) rather than rejected. Two things to know before touching
+it: the gating is explicit inside the submode (`mode.py`'s sector guard
+keys on the *caller's* `conserved_sector`, which is empty here, so it
+never fires), and the per-sector solves are cached with the clone that
+produced them (`_sector_states_cache`) because ITensor Index identity is
+per session -- that cache is also what makes a site sweep, and so
+`S(q,w)`/`A(k,w)`, cost about one site's correlator. See
+`docs/sector_resolved_spectral_function_plan.md` for the design and
+`tests/test_sector_spectral_function.py` for what is pinned.
+
 ### Julia vs C++ backend
 
 The two DMRG backends are independent implementations, not a shared

@@ -1480,6 +1480,121 @@ matrix and solves a generalized eigenvalue problem $Hc=eSc$ rather than
 assuming $S=1$), which is important in practice since Gram-Schmidt over
 bond-truncated MPS is itself only approximate.
 
+**`submode="SECTOR"` — the Lehmann sum over one quantum-number sector.**
+The same explicit pole sum as `"EX"`, but the intermediate states are not
+excited states of the whole Hilbert space: they are the lowest
+eigenstates of the *one conserved-quantum-number sector that $B|\mathrm{GS}\rangle$
+actually lands in*. That sector is not a choice. $B$ shifts every
+conserved charge by a fixed amount, so $\langle n|B|\mathrm{GS}\rangle$
+vanishes identically unless $|n\rangle$ carries the ground state's charges
+plus $\mathrm{charge}(B)$:
+
+| correlator | ground state in | intermediate states in |
+|---|---|---|
+| $(c_i,c_j^\dagger)$ | $N$ particles | $N+1$ |
+| $(c_j^\dagger,c_i)$ | $N$ particles | $N-1$ |
+| $(S^-_i,S^+_j)$ | $S_z$ | $S_z+1$ (i.e. `Sz`$+2$ in the 2$S_z$ units the sector API uses) |
+| $(S^+_i,S^-_j)$ | $S_z$ | $S_z-1$ |
+| $(S^z_i,S^z_j)$ | $S_z$ | $S_z$ |
+
+```python
+fc.set_conserved_sector(Nf=6)          # solve at exactly 6 particles
+(x, y) = fc.get_dynamical_correlator(submode="SECTOR",
+                                     name=(fc.C[0], fc.Cdag[0]), nex=20)
+```
+
+Each intermediate state is therefore a separately converged DMRG
+eigenstate of a *smaller* Hilbert space. Symmetry — not the overlap
+penalty `"EX"` has to rely on — is what keeps them out of the ground
+state and out of each other's charge channels: they live in a *different*
+sector, so the search cannot collapse back into $|\mathrm{GS}\rangle$.
+Within the target sector they are still found by that same penalty
+method, only in a much smaller and better-conditioned space, and the
+usual per-state fluctuation warning still applies. There is no broadening/resolution tradeoff, no
+expansion order, no time window and no Fourier artifact: the poles come
+out at their converged energies with their exact weights, and
+`return_poles=True` returns them as poles (energies and complex weights)
+rather than only as a curve.
+
+The single approximation is truncation of the sum at `nex` states, and it
+is *measured* rather than assumed. The returned `info["captured"]` is
+
+$$\text{captured}=\frac{\sum_{n\le n_{ex}}|\langle n|B|\mathrm{GS}\rangle|^2}{\langle \mathrm{GS}|B^\dagger B|\mathrm{GS}\rangle},$$
+
+the fraction of the spectral weight of $B|\mathrm{GS}\rangle$ the returned
+poles account for, and a warning fires below 0.9. `nex` is also capped
+automatically at the target sector's exact dimension, so asking for more
+states than exist is clipped rather than chased. Use this method for a
+few sharp low-lying excitations; for a broad continuum the low-lying
+states carry a small share of the weight and `"KPM"`/`"TD"` are the right
+tools — exactly the opposite tradeoff.
+
+Other keywords: `sector=` and `conserve=` override the reference sector
+and which quantities are conserved (by default the chain's own
+`set_conserved_sector`, or — with none set — the charges measured on the
+unconstrained ground state, restricted to the quantities the Hamiltonian
+actually conserves). Two operators whose charges do not cancel raise,
+since the correlator then vanishes identically by symmetry.
+
+An operator with *no* definite charge is handled rather than rejected:
+$S_x$ raises **and** lowers $S_z$, so `name=(Sx,Sx)` has no single target
+sector, but $S_x=(S^++S^-)/2$ splits it exactly into two pieces that do,
+and the channels whose charges cancel are summed — an $S_z+1$ and an
+$S_z-1$ contribution, which is also the physically right decomposition.
+`info["target_sector"]` is then a list, one entry per channel. The
+single-sector primitive `sectordc.sector_poles` still requires a definite
+charge, since its `info` names one sector and carries that sector's
+matrix elements; use it when you want those (to build $S(q,\omega)$ out
+of them, say). `itensor_version=3`
+and `itensor_version="python"` only, and never falls back to ED: falling
+back would answer with the *global* excited states, a different
+calculation.
+
+**`get_spectral_function(i, j=None, spin=None, ...)` — the single-particle
+spectral function.** The physics-facing wrapper, since "give me
+$A(\omega)$" should not require assembling the hole part by hand:
+
+$$A_{ij}(\omega)=\sum_n\langle \mathrm{GS}|c_i|n^{N+1}\rangle\langle n^{N+1}|c_j^\dagger|\mathrm{GS}\rangle\,L(\omega-\omega_n^+)+\sum_m\langle \mathrm{GS}|c_j^\dagger|m^{N-1}\rangle\langle m^{N-1}|c_i|\mathrm{GS}\rangle\,L(\omega-\omega_m^-)$$
+
+with $\omega_n^+=E_n^{N+1}-E_0^N-\mu$ and $\omega_m^-=-(E_m^{N-1}-E_0^N)-\mu$.
+The chemical potential $\mu=(E_0^{N+1}-E_0^{N-1})/2$ is subtracted by
+default (`shift="mu"`, `shift=None` for the raw axis), which is the
+convention that formula is normally written in: particle weight then sits
+at $\omega>0$ and hole weight at $\omega<0$, separated by the gap. That
+is not cosmetic — in the raw energies both families can land on the same
+side of zero, for any Hamiltonian carrying an explicit chemical-potential
+term or attractive interactions. `info` also returns `mu`, the charge gap
+$E_0^{N+1}+E_0^{N-1}-2E_0^N$, and the two halves separately. On a spinful
+chain pass `spin="up"`/`"dn"`; the target sectors are then $(N\pm1,S_z\pm1)$.
+See `examples/dynamical_correlator/sector_spectral_function_hubbard`,
+where the Mott gap opens with $U$ and $\mu=U/2$ by particle-hole
+symmetry.
+
+**`get_spin_spectral_function(i, j=None, ...)` — the dynamical spin
+structure factor, resolved by $S_z$ channel.** $S^{+-}$ from the $S_z+1$
+sector, $S^{-+}$ from $S_z-1$, $S^{zz}$ from the ground state's own
+sector; returns $S^{zz}+(S^{+-}+S^{-+})/2$ (the same combination as
+$S^{xx}+S^{yy}+S^{zz}$) and, with `return_poles=True`, the three channels
+separately. Keeping them separate is half the point: which channel a
+feature lives in is a selection rule no single broadened curve can show.
+Note $S^{zz}$'s target sector *is* the reference sector, so its $n=0$
+state is the ground state itself and the raw Lehmann sum carries an
+elastic $\omega=0$ pole of weight $\langle S^z_i\rangle\langle S^z_j\rangle$
+— that is the correct Lehmann sum (the exact ED reference contains it
+too) rather than the connected structure factor; pass `connected=True` to
+subtract it.
+
+One property specific to this method makes momentum-resolved work cheap:
+nothing in the expensive half depends on *which* operators are being
+correlated, so one set of sector solves serves the entire matrix of
+$(i,j)$ pairs. That is cached, so a full $S(q,\omega)$ or $A(k,\omega)$
+map costs one pair of sector solves plus $L$ sets of matrix elements —
+measured, a 12-site $S(q,\omega)$ map takes about as long as a single
+site's correlator. See
+`examples/dynamical_correlator/sector_spin_structure_factor`, which
+reproduces the des Cloizeaux–Pearson lower edge of the two-spinon
+continuum.
+
 **`submode="maxent"` — maximum-entropy reconstruction.** Reconstructs a
 positive-definite spectral function from a finite set of moments
 $\langle(H-E_0)^k\rangle$ using a maximum-entropy method

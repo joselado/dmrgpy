@@ -6,7 +6,7 @@ from . import tdz
 from . import rootndmrg
 
 SUBMODES = ("KPM","TD","TDZ","CVM","CVM_explicit","CVMimag","ROOTN","EX",
-            "maxent")
+            "SECTOR","maxent")
 
 
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
@@ -66,6 +66,12 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             return rootndmrg.dynamical_correlator(self,**kwargs)
         elif submode=="EX": # EX mode
             return dcex.dynamical_correlator(self,**kwargs)
+        elif submode=="SECTOR": # sector-resolved Lehmann sum
+            # itensor_version=2 reaches here (this branch admits 2, 3 and
+            # "python") but has no quantum numbers at all; sectordc's own
+            # _check_backend says so, naming the two backends that do.
+            from . import sectordc
+            return sectordc.dynamical_correlator(self,**kwargs)
         elif submode=="maxent": # Max ent mode
             from .distribution import dynamical_correlator_positive_defined
             return dynamical_correlator_positive_defined(self,**kwargs)
@@ -75,7 +81,7 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             raise ValueError(
                 "get_dynamical_correlator: unrecognized submode %r; "
                 "expected one of KPM, TD, TDZ, CVM, CVM_explicit, CVMimag, "
-                "ROOTN, EX, maxent"%submode)
+                "ROOTN, EX, SECTOR, maxent"%submode)
     elif self.itensor_version=="julia_live": # Julia version
         # Only KPM/CVM/TDZ assume a Hermitian Hamiltonian (Chebyshev
         # spectrum-in-[-1,1], resolvent CG solve, and the TDZ damping
@@ -87,6 +93,15 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         # dispatch entirely, which also rejected EX/maxent even though
         # they work fine -- confirmed directly, this was blocking a
         # working code path.
+        if submode=="SECTOR":
+            # No quantum numbers on this backend at all, so no sectors:
+            # say that, rather than letting mpsjulialive fail on an
+            # unrecognized submode several frames deeper.
+            raise NotImplementedError(
+                "get_dynamical_correlator: submode=\"SECTOR\" needs "
+                "conserved-sector support, which itensor_version="
+                "'julia_live' does not have -- use itensor_version=3 or "
+                "itensor_version=\"python\"")
         if submode in ("KPM","CVM","TDZ") and not self.is_hermitian(self.hamiltonian):
             # unlike the (2,3,"python") branch above, there is no
             # non-Hermitian route to fall back to here for these

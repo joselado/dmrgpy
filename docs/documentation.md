@@ -3593,6 +3593,86 @@ moment recursion on the ED side) rather than by direct spectral
 decomposition, since exact diagonalization of the full spectrum is
 infeasible for large chains.
 
+#### 4.8a-sector Sector-resolved correlators (`sectordc.py`, `submode="SECTOR"`)
+
+`submode="SECTOR"` is architecturally unlike every other submode: it does
+not compute a spectrum on the chain it is called on. It solves *two*
+quantum-number sectors on an internal clone and contracts states from one
+against states of the other.
+
+The mechanism it rests on is a property of `promote_mps`, not of anything
+new: promotion rebases a wavefunction onto the chain's **original** dense
+site indices (`dense_sites_` in `mpscpp3/chain_session.h`, fixed at
+construction, `self.dense_sites` in `pyitensor/chain.py`), and
+`set_conserved_sector` only ever replaces `sites_`. So two states solved
+in *different* sectors of one live session promote onto the same indices
+and can be contracted with each other — which is exactly what a
+cross-sector matrix element `<n^{N+1}|Cdag_i|0^N>` is. This is
+independently regression-tested in
+`tests/test_sector_promotion.py::test_states_promoted_from_different_sectors_are_comparable`,
+which predates the feature.
+
+Pipeline (`sectordc.sector_poles`), in an order that is forced rather
+than chosen:
+
+1. clone the chain — every sector switch happens on the clone, since the
+   pipeline ends *outside* sector mode and that must not be a side effect
+   the caller sees. `__deepcopy__` already rebuilds a fresh session and
+   re-applies the sector.
+2. solve the reference sector, promote its ground state;
+3. solve the target sector `reference + charge(B)`, promote its `nex`
+   lowest states;
+4. clear the sector, and only *now* build A and B — a charge-changing
+   operator cannot be built while a sector is set (`sector_terms` rejects
+   it, and ITensor's AutoMPO would abort the process over it);
+5. matrix elements via `aMb` on the promoted handles, then the Lehmann
+   sum in `dcex.py`'s convention.
+
+Three consequences worth knowing:
+
+- **Everything must happen in one session.** ITensor Index identity is
+  per session, so a fresh `Chain` mints indices no earlier handle
+  matches. The states are therefore cached *together with the clone that
+  produced them* (`_sector_states_cache`, a small dict, dropped by
+  `restart()`), which is also what makes a site sweep cheap: nothing in
+  the expensive half depends on which operators are correlated, so one
+  pair of sector solves serves the whole `(i,j)` matrix. Measured on a
+  12-site chain, a full `S(q,w)` map costs about one site's correlator.
+  The cache is a dict rather than a single slot because a spectral
+  function alternates between the `N+1` and `N-1` targets as it sweeps —
+  a one-entry cache is evicted by every call.
+- **Charge inference happens in Python, before any session is touched**
+  (`multioperatortk/charge.py`). It reuses `pyitensor/sector.py`'s
+  `op_charge`/`expand_xy_terms`/`combine_terms` as a *library* — an
+  ungraded `SiteX` built from the chain's site codes serves any backend,
+  since charge tables are a property of the site types, not of the
+  grading. The Sx/Sy expansion is load-bearing: the textbook Heisenberg
+  Hamiltonian conserves Sz only as a sum of terms, so the "does H
+  conserve this quantity" test would answer "cannot tell" without it.
+  The same module's `charge_components` runs that split the other way,
+  for the *operators being correlated* rather than for H: an `Sx` with no
+  definite charge is decomposed into `(S+ + S-)/2`, the components whose
+  charges cancel are paired, and `sectordc.sector_lehmann` sums one
+  contribution per surviving channel -- which is why `name=(Sx,Sx)`,
+  the way essentially every spin correlator in `examples/` is written,
+  works rather than raising. `sector_poles` remains the single-sector
+  primitive and still refuses a multi-channel pair, since its `info`
+  names one sector and carries that sector's matrix elements.
+- **Gating is explicit in the submode, not inherited.** `mode.py`'s
+  sector guard keys on `self.conserved_sector`, and the sector here lives
+  on the clone — the caller's chain typically has none, so that guard
+  never fires. `sectordc._check_backend` therefore rejects
+  `itensor_version` 2/`julia_live`, `ns<3` on v3 and non-Hermitian
+  Hamiltonians itself, `dynamics.py` rejects `"SECTOR"` on the
+  `julia_live` branch, and `edtk/dynamics.py` names it too — the last one
+  because `mode.py` can route a well-formed DMRG call to ED *silently*
+  (extension not compiled, or v3 below 3 sites), and a generic "no ED
+  implementation" would misdescribe what happened.
+
+`spectral_function`/`spin_spectral_function` in the same module are thin
+assemblies on top: two (or three) of these correlators, plus the
+chemical-potential bookkeeping for the particle/hole halves.
+
 #### 4.8a Cost of the dynamical-correlator submodes, and what makes them fast
 
 Both `submode="KPM"` and `submode="TD"` are dominated by one inner loop

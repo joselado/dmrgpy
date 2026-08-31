@@ -597,6 +597,9 @@ class Many_Body_Chain():
       self.wf0 = None # initial file for GS
       self._dcex_excited_cache = None # invalidate cached excited states
           # (dcex.py), tied to the ground state being replaced above
+      self._sector_states_cache = None # same, for sectordc.py's cached
+          # per-sector solves (which hold a whole clone chain alive, so
+          # dropping them here also releases that session)
       self._session_ham_cache = None # invalidate groundstate.py's
           # Hamiltonian-send cache so the next gs_energy() re-sends the
           # Hamiltonian (clearing the session's energy/band-edge caches)
@@ -810,6 +813,21 @@ class Many_Body_Chain():
           return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED":
           return self.get_ED_obj().get_dynamical_correlator(**kwargs)
+  def get_spectral_function(self,*args,**kwargs):
+      """Single-particle spectral function A_ij(w) of a fermionic chain,
+      assembled from the eigenstates of the N+1 and N-1 particle-number
+      sectors (see sectordc.py). Frequencies are measured from the
+      chemical potential by default. itensor_version=3 and
+      itensor_version="python" only, like every sector-based method."""
+      from . import sectordc
+      return sectordc.spectral_function(self,*args,**kwargs)
+  def get_spin_spectral_function(self,*args,**kwargs):
+      """Dynamical spin structure factor S_ij(w), resolved into its Sz
+      channels: S^{+-} and S^{-+} from the Sz+/-2 sectors, S^{zz} from the
+      ground state's own sector (see sectordc.py). itensor_version=3 and
+      itensor_version="python" only."""
+      from . import sectordc
+      return sectordc.spin_spectral_function(self,*args,**kwargs)
   def get_dynamical_correlator_moments(self,**kwargs):
       """Return the raw KPM Chebyshev moments of a dynamical correlator,
       together with the rescaling data needed to reconstruct a spectrum

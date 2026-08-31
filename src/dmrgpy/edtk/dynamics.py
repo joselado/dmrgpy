@@ -92,6 +92,24 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
       from .. import timedependent
       return timedependent.dynamical_correlator(self,mode="ED",
               name=name,**kwargs)
+    elif submode=="SECTOR":
+        # Named explicitly rather than left to the generic message below,
+        # because the two ways of arriving here look nothing alike to the
+        # caller: an explicit mode="ED", or mode.py's *silent* DMRG->ED
+        # fallback (extension not compiled, or itensor_version=3 on a
+        # <3-site chain), which turns a perfectly well-formed DMRG call
+        # into an ED one without anybody asking.
+        raise NotImplementedError(
+            "get_dynamical_correlator: submode='SECTOR' is DMRG-only -- it "
+            "sums a Lehmann representation over the eigenstates of one "
+            "conserved-quantum-number sector, and the ED backend has no "
+            "sector support (restricting ED to a sector is a submatrix "
+            "problem, not this method). This call reached ED either via "
+            "mode='ED' or via mode.py's fallback (the compiled extension "
+            "is missing, or itensor_version=3 on a chain with fewer than 3 "
+            "sites). Use mode='DMRG' with itensor_version=3 or "
+            "itensor_version='python'; compare against mode='ED', "
+            "submode='ED', which is the exact full Lehmann sum.")
     else:
         # A bare `raise` here (no active exception to re-raise) used to
         # crash with a confusing "RuntimeError: No active exception to
