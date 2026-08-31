@@ -58,6 +58,7 @@ import multiprocessing
 
 import numpy as np
 
+from . import backend as bk
 from .index import Index, reseed_id_counter_past
 from .mpscontainer import MPS
 from .mpsalgebra import applyMPO, inner
@@ -81,7 +82,7 @@ def _site_operator_matrix(sites, opname, i):
         vec[a] = 1.0
         ket = ITensor((s,), vec)
         res = noPrime(op * ket, "Site")
-        out[:, a] = res.array
+        out[:, a] = bk.to_host(res.array)
     return out
 
 
@@ -179,6 +180,7 @@ def collapse_to_cps(psi, sites, opname, rng, eigcache=None):
     eigenvalue (float) at site i, for diagnostics only.
     """
     n = sites.length()
+    xp = bk.xp()
     work = psi.copy()
     work.position(1)
     vectors = []
@@ -195,16 +197,30 @@ def collapse_to_cps(psi, sites, opname, rng, eigcache=None):
             mat = T.transpose_to((s, right_link))
         else:
             mat = T.transpose_to((s,)).reshape(s.dim, 1)
-        rot = evecs.conj().T @ mat  # amplitude of each eigenbasis outcome, per remaining right-link value
-        probs_raw = np.sum(np.abs(rot) ** 2, axis=1)
-        total = probs_raw.sum()
-        p = probs_raw / total
+        # `mat` is whatever array library the engine is running on
+        # (backend.py), so every step from here to `L` uses that namespace
+        # rather than np.* -- on NumPy these are the identical calls in the
+        # identical order, and on a device they are the difference between
+        # a resident (d,chi) amplitude block and one that makes a silent
+        # round trip per site, per collapse, per sample. `evecs` stays on
+        # the host: it is the d x d eigenbasis, needed there anyway for
+        # rng.choice and for the product state built below.
+        rot = bk.asarray(evecs.conj().T) @ mat  # amplitude of each eigenbasis outcome, per remaining right-link value
+        probs_raw = xp.sum(xp.abs(rot) ** 2, axis=1)
+        # The one host round trip of this loop, and it is O(d) rather than
+        # O(d*chi): rng.choice needs the probabilities, and a data-dependent
+        # multinomial draw is host work.
+        probs_host = np.asarray(bk.to_host(probs_raw), dtype=float)
+        total = probs_host.sum()
+        p = probs_host / total
         p = p / p.sum()  # re-normalize away roundoff so rng.choice never complains
         k = int(rng.choice(s.dim, p=p))
         vectors.append(evecs[:, k].copy())
         outcomes.append(float(evals[k]))
         if right_link is not None:
-            L = ITensor((right_link,), rot[k, :] / np.sqrt(probs_raw[k]))
+            # rot[k] and probs_raw[k] both still live wherever `mat` did,
+            # so the collapsed-prefix amplitude never leaves the device.
+            L = ITensor((right_link,), rot[k, :] / xp.sqrt(probs_raw[k]))
     new_cps = product_state(sites, vectors)
     return new_cps, outcomes
 
@@ -379,6 +395,19 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
         raise ValueError("metts_thermal_average: nsamples must be >= 1, got %r" % (nsamples,))
     if njobs < 1:
         raise ValueError("metts_thermal_average: njobs must be >= 1, got %r" % (njobs,))
+
+    if njobs > 1 and bk.is_device():
+        raise ValueError(
+            "%s: njobs>1 is not supported on the %s backend. The worker "
+            "processes are started with 'spawn', so each one re-imports "
+            "pyitensor with the default NumPy backend rather than "
+            "inheriting this process's device selection -- the chains "
+            "would silently run on the host, which is exactly the "
+            "quietly-became-a-CPU-run failure backend.py exists to "
+            "prevent (and several processes sharing one GPU is not what "
+            "you want anyway). Use njobs=1 on a device, or "
+            "backend.set_backend(\"numpy\") to parallelize on the host."
+            % ('metts_thermal_average', bk.backend_name()))
 
     if njobs == 1:
         means, stderrs, _ = _metts_single_chain(
@@ -574,6 +603,19 @@ def metts_dynamical_correlator(H, sites, A, B, beta, nt, dt, nsamples,
         raise ValueError("metts_dynamical_correlator: nt must be >= 1, got %r" % (nt,))
     if njobs < 1:
         raise ValueError("metts_dynamical_correlator: njobs must be >= 1, got %r" % (njobs,))
+
+    if njobs > 1 and bk.is_device():
+        raise ValueError(
+            "%s: njobs>1 is not supported on the %s backend. The worker "
+            "processes are started with 'spawn', so each one re-imports "
+            "pyitensor with the default NumPy backend rather than "
+            "inheriting this process's device selection -- the chains "
+            "would silently run on the host, which is exactly the "
+            "quietly-became-a-CPU-run failure backend.py exists to "
+            "prevent (and several processes sharing one GPU is not what "
+            "you want anyway). Use njobs=1 on a device, or "
+            "backend.set_backend(\"numpy\") to parallelize on the host."
+            % ('metts_dynamical_correlator', bk.backend_name()))
     if tdvp_cutoff is None: tdvp_cutoff = cutoff
     if tdvp_maxdim is None: tdvp_maxdim = maxdim
 
