@@ -17,7 +17,7 @@ Status at a glance:
 | Phase 3, the KPM path (incl. energy truncation) | done, measured in Sec. 8 |
 | Phase 4, benchmark campaign | done (`benchmarks/gpu/`) |
 | Phase 5, docs / tests / example | done |
-| Phase 6, follow-ups | dispatch floor + TDVP + the four-point correlator + the TDZ complex-time correlator **done**; METTS/tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
+| Phase 6, follow-ups | dispatch floor + TDVP + the four-point correlator + the TDZ complex-time correlator **done**; METTS **ported but not measured on a device** (Sec. 9 item 5); tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
 
 Site-specific operating detail (how these jobs were submitted on one
 particular cluster) is deliberately kept in this checkout's untracked
@@ -863,13 +863,75 @@ namespace swap.
    that would make `BatchedBras` earn its keep. That needs a multi-pair
    dynamical-correlator entry point, which dmrgpy does not have; a
    deliberate follow-up, not an oversight.
-5. **METTS (`metts.py`, 31 / 0 / 3).** Probably the biggest absolute win
-   in the library -- samples x time steps x Krylov iterations -- and it
-   inherits TDVP's large chi, so it sits directly on (2), now done.
-   Smaller than its count suggests, in the other direction from TDVP:
-   most of those `np.` sites are RNG, pooled-variance statistics over
-   samples, and a d x d single-site `eigh` for the collapse basis, all of
-   which *should* stay on the host. Audit before porting.
+5. **[ported 2026-09-01, not yet measured on a device] METTS
+   (`metts.py`, 31 / 0 / 3).** Predicted here to be "probably the biggest
+   absolute win in the library -- samples x time steps x Krylov
+   iterations". The audit this item asked for says the prediction was
+   half right, and the half that is wrong is the important one.
+
+   *The port.* As expected, most of the 31 `np.` sites are RNG,
+   pooled-variance statistics over samples and a d x d `eigh` for the
+   collapse basis, all of which belong on the host and stayed there.
+   Everything expensive was already resident: a sample is an
+   imaginary-time TDVP evolution (item 2), its observables are
+   `mpsalgebra.inner`, its truncations are `svd.py`. The single
+   host-bound piece left was `collapse_to_cps()`, and it was bound in the
+   way this document keeps warning about -- `np.sum(np.abs(rot)**2)` on a
+   device array pulls the whole (d, chi) amplitude block home, per site,
+   per collapse, per sample, silently, and the collapsed prefix `L` went
+   back out from a host array. Now the sweep runs in the active namespace
+   and exactly the O(d) probability vector `rng.choice` needs comes home.
+   On NumPy it is the same calls in the same order, so the host path is
+   bit-identical: `tests/test_metts_vev.py` and
+   `tests/test_metts_dynamical_correlator.py` pass unchanged, 35/35.
+   `tests/test_metts_gpu_backend.py` asserts residency two ways, since
+   agreement cannot see a round trip: the transfers the sweep performs are
+   counted (one O(d) vector per site, nothing of order chi), and the
+   prefix amplitude is required to still be a device array. Cross-backend
+   agreement over a full seeded Markov trajectory is 3e-11 -- looser than
+   the 1e-14 the deterministic calculations report, because a METTS run
+   renormalizes and re-collapses hundreds of times, and the value is the
+   right one to assert on only as long as no perturbation ever flips an
+   `rng.choice` draw (one would fail by O(1), not subtly).
+
+   `njobs>1` now raises on a device instead of running. Those workers are
+   started with `spawn`, so each re-imports `pyitensor` with the default
+   NumPy backend rather than inheriting the parent's device -- the
+   quietly-became-a-CPU-run failure `set_backend` exists to prevent, in a
+   place nobody would look for it.
+
+   *Where the prediction fails*, and it is a physics fact rather than an
+   implementation one: METTS states are *minimally entangled* by
+   construction -- that is the method's whole selling point -- so
+   `metts_vev` saturates its own entanglement well below the crossover
+   this port establishes, and no amount of hardware moves that. Measured
+   on one core, n=20 Heisenberg at beta=10: 8.5 s at maxm=30 against
+   12.4 s at maxm=60, with the answer moving by 6e-11 between them. A
+   static METTS run is not a device calculation. `metts_dynamical_-
+   correlator` is the opposite, for the same reason TDVP is: the two
+   real-time evolutions per sample grow entanglement with t, so chi
+   saturates whatever cap it is given -- 21.6 / 71.7 / 1107.8 s at
+   maxm = 30 / 60 / 240, same chain, nt=100 (t <= 10).
+
+   Worth recording separately, because it invalidated the first
+   benchmark written for this item: at the parameters that looked natural
+   (T=0.5, nt=20, i.e. t <= 2) the *whole sweep is flat in maxm* -- 1.02 s
+   for `vev` and 5.2 s for `dc` at both maxm=60 and maxm=240 -- because
+   neither calculation's bond dimension ever reaches the cap. A maxm sweep
+   in that regime measures nothing about bond dimension while looking
+   exactly like one that does.
+
+   *What is not done.* No device measurement: `benchmarks/gpu/
+   metts_bench.py` and its two job scripts are written, staged and
+   priced (the CPU sweep is ~1.7 h on one core here), but the jobs were
+   not submitted, so this item has no GPU column and none of the numbers
+   above is a speedup. METTS also has a batch axis nothing has used --
+   `njobs` independent chains, and the two independent evolutions per
+   sample of `dc` -- which is the shape the four-point entry (item 3)
+   showed can clear the dispatch floor an order of magnitude below the
+   chi crossover. That would need batched-MPS evolution, i.e. real work,
+   and should be priced against the measurement above before anyone
+   starts it.
 6. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
    No traps in either. `kpm_energy_truncation.py` is already done.
 
@@ -900,7 +962,10 @@ state/TDVP, cold and warm, with the traced-kernel count) and
 `ctmode="batched"` on host and device, cold and warm, against the
 `ctmode="sweep"` it replaces and against the compiled v3 backend -- which
 needs a checkout whose extension is actually built, hence its own script and
-its own process). Each is a plain
+its own process), and `metts_bench.py` (METTS and dynamical METTS, host
+versus device, with the bond-dimension regime chosen by measurement --
+see its docstring, and Sec. 9 item 5, on why the parameters that look
+natural make the sweep flat in maxm). Each is a plain
 script with `--help`; none of them needs a scheduler, and the job scripts
 that submitted them on one particular cluster are intentionally not
 tracked here.

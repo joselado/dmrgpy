@@ -4894,6 +4894,29 @@ built from the device-resident spectrum rather than from \texttt{np.diag()}
 of the host copy --- the latter was an $O(\chi^2)$ transfer per
 factorization, i.e.\ per bond per half-sweep per sweep.
 
+Sampling methods inherit all of the above rather than needing their own
+port. METTS (\texttt{pyitensor/metts.py}) is the case worth stating,
+because what remained after TDVP, \texttt{dmrg.py}'s environments,
+\texttt{svd.py} and \texttt{mpsalgebra.inner} were resident was a single
+loop: the collapse sweep that turns each evolved sample back into a
+product state. It is $O(n)$ small operations per sample against thousands
+inside the evolution, but it was host-bound in the silent way ---
+\texttt{np.sum}/\texttt{np.abs} applied to a device array pull the whole
+$(d,\chi)$ amplitude block home, once per site, per collapse, per sample,
+and nothing raises. The sweep now runs in the active namespace and only
+the $O(d)$ conditional-probability vector comes back, because the
+multinomial draw it feeds is data-dependent branching and belongs on a
+host; the collapsed-prefix amplitude stays resident.
+
+One consequence is user-visible: \texttt{metts\_vev} and
+\texttt{metts\_dynamical\_correlator} accept an \texttt{njobs>1} that
+fans independent Markov chains over worker processes, and those workers
+are started with \texttt{spawn} --- so each re-imports
+\texttt{pyitensor} with the default NumPy backend instead of inheriting
+the parent's device. That combination now raises rather than running, on
+the same principle as \texttt{set\_backend} itself: a GPU run that
+quietly became a CPU run is worse than a failure.
+
 Measured speedups, the crossover, the primitive-by-primitive table and the
 benchmarking pitfalls are in \texttt{docs/gpu\_cpu\_performance.md}; the
 port's design history is in

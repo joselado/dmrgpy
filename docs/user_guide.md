@@ -1999,7 +1999,13 @@ compile tax never amortizes). `njobs` is not available for
 `itensor_version=3` or `"julia_live"`: each is a single live in-process
 session (a C++ object, or a live Julia process) with no per-worker copy a
 process pool could hand out; requesting `njobs>1` on either raises rather
-than silently falling back to `njobs=1`.
+than silently falling back to `njobs=1`. It is also unavailable while the
+pure-Python backend is running on a device (`backend.set_backend("jax")`,
+see the GPU section of `docs/documentation.md`), for a related reason:
+the worker processes are started with `spawn`, so each one re-imports
+`pyitensor` with the default NumPy backend rather than inheriting this
+process's device selection, and the chains would silently run on the host
+— so that combination raises too.
 
 **`metts_dynamical_correlator(name, T, ...)`** extends METTS from static
 expectation values to real-time finite-temperature *dynamical*
