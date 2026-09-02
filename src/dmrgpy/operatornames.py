@@ -82,10 +82,56 @@ def name2MO(name,self):
     else:
         raise ValueError("Unrecognized operator name "+str(name))
 
-def str2MO(self,name,i=0,j=0):
+def compiled_operator_types():
+    """The already-built operator objects `Many_Body_Chain.toMPO()` can
+    return, one per backend: `StaticOperator` (itensor_version 2, 3 and
+    "python"), `EDOperator` (mode="ED") and `mpsjulialive`'s `MPO`
+    (itensor_version="julia_live").
+
+    Imported lazily and returned as a tuple rather than being named at
+    module level, because `edtk.edchain` and `multioperatortk.
+    staticoperator` both import back into the top-level package."""
+    from .multioperatortk.staticoperator import StaticOperator
+    from .edtk.edchain import EDOperator
+    from .mpsjulialive.mpo import MPO as JuliaMPO
+    return (StaticOperator,EDOperator,JuliaMPO)
+
+
+def is_compiled_operator(op):
+    """Whether `op` is an already-built operator produced by toMPO(),
+    as opposed to the symbolic MultiOperator it was built from"""
+    return isinstance(op,compiled_operator_types())
+
+
+def require_symbolic(op,context):
+    """Raise unless `op` is a symbolic MultiOperator.
+
+    For the correlator submodes that do not consume an operator by
+    applying it, but rebuild it inside the backend from its symbolic
+    term list (`MultiOperator.to_terms()`): KPM, TD, TDZ, SECTOR, METTS
+    and the variational (DDMRG) CVM solver. Those cannot be handed the
+    output of toMPO(), which has no symbolic form left -- so say that,
+    instead of dying several frames deep on a missing `to_terms`."""
+    from . import multioperator
+    if type(op)==multioperator.MultiOperator: return op
+    if is_compiled_operator(op):
+        raise TypeError(
+            context+" rebuilds its operators inside the backend from "
+            "their symbolic term list, so it needs the MultiOperator "
+            "itself, not the already-built operator toMPO() returned "
+            "(got "+type(op).__name__+"). Pass the MultiOperator you gave "
+            "toMPO(); the submodes that apply the operator instead of "
+            "rebuilding it -- every mode=\"ED\" one, and \"EX\"/\"CVM\"/"
+            "\"ROOTN\" under mode=\"DMRG\" -- take toMPO() output "
+            "directly.")
+    raise TypeError(
+        context+" needs a MultiOperator, got "+type(op).__name__)
+
+
+def str2MO(self,name,i=0,j=0,require_symbolic_for=None):
     """Normalize the `name=` argument of a correlator into a pair of
-    MultiOperators: either a documented string ("ZZ", "cdc", ...) plus
-    site indices i/j, or an explicit (A,B) MultiOperator pair.
+    operators: either a documented string ("ZZ", "cdc", ...) plus site
+    indices i/j, or an explicit (A,B) pair.
 
     The string branch used to cover Sx/Sy/Sz/Sp/Sm only and end in a bare
     `raise`, so the documented fermionic names recognize() itself returns
@@ -94,7 +140,23 @@ def str2MO(self,name,i=0,j=0):
     fermionchain.get_gr, which passes name="cdc" itself. name2MO covers
     the remaining families, so the string form now works wherever the
     operator exists on the chain, and says what is wrong when it does
-    not."""
+    not.
+
+    The (A,B) branch takes MultiOperators *and* the already-built
+    operators `toMPO()` returns (StaticOperator/EDOperator/julia MPO),
+    which it passes through untouched. That pass-through is the
+    documented fast path -- build the operator once, reuse it across a
+    frequency sweep -- and it worked for mode="ED" and submode="EX"
+    until name= resolution was centralized in
+    Many_Body_Chain.get_dynamical_correlator (before that, those two
+    paths never reached this function and consumed the compiled operator
+    directly). The submodes that instead rebuild the operator from its
+    symbolic terms pass `require_symbolic_for=<what they are>` and get a
+    TypeError naming the problem; see require_symbolic().
+
+    This function is idempotent, which the centralized resolution relies
+    on: get_dynamical_correlator resolves `name` once and every submode
+    below it resolves the already-resolved pair again."""
     from . import multioperator
     if type(name)==str:
         n1,n2 = recognize(name)
@@ -108,10 +170,18 @@ def str2MO(self,name,i=0,j=0):
                     "(A,B) MultiOperator pair instead")
             return ops[k]
         return [f(n1,i),f(n2,j)]
-    elif type(name[0])==multioperator.MultiOperator and type(name[1])==multioperator.MultiOperator:
-        return [name[0],name[1]]
-    else:
+    try: A,B = name[0],name[1]
+    except (TypeError,KeyError,IndexError):
         raise ValueError(
             "name must be a documented correlator string (with i=/j=) or a "
-            "pair of MultiOperators, got "+repr(name))
-
+            "pair of operators, got "+repr(name))
+    accepted = (multioperator.MultiOperator,)+compiled_operator_types()
+    if isinstance(A,accepted) and isinstance(B,accepted):
+        if require_symbolic_for is not None:
+            require_symbolic(A,require_symbolic_for)
+            require_symbolic(B,require_symbolic_for)
+        return [A,B]
+    raise ValueError(
+        "name must be a documented correlator string (with i=/j=) or a "
+        "pair of MultiOperators (or of the operators toMPO() returns), "
+        "got "+repr(name))

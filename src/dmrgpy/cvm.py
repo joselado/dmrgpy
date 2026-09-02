@@ -59,6 +59,14 @@ def _use_ddmrg(self,A,B):
     """
     if getattr(self,"cvm_solver","cg")!="variational": return False
     if self.itensor_version!="python": return False
+    # Unlike the CG path below, which only ever *applies* A and B (so the
+    # already-built operators toMPO() returns work there unchanged), this
+    # solver hands their symbolic term lists to ddmrg_correction_vector.
+    # Checked here rather than in dynamical_correlator_ddmrg because the
+    # A==B^dagger test just below already needs operator algebra a
+    # StaticOperator does not have (operator_norm calls .simplify()).
+    operatornames.require_symbolic(A,"cvm_solver='variational'")
+    operatornames.require_symbolic(B,"cvm_solver='variational'")
     return self.is_zero_operator(A.get_dagger()-B)
 
 

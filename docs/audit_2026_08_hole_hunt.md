@@ -20,6 +20,39 @@ key, the unreachable `"tevol_fit_td"` branch) and gaps ROADMAP.md already marks
 absent. `itensor_version="julia_live"` was not executed (juliacall JIT cost),
 so no finding below is about the Julia backend.
 
+## A regression this audit's own fix introduced (2026-09-02, fixed)
+
+Centralizing `name=` resolution -- the last item of the "dropped keyword
+arguments" lens, which moved the string form's resolution up into
+`Many_Body_Chain.get_dynamical_correlator` so every submode understood it --
+routed every submode through `operatornames.str2MO`, whose explicit-pair
+branch admitted only `MultiOperator`. `toMPO()` returns a `StaticOperator`
+(`mode="DMRG"`) or an `EDOperator` (`mode="ED"`), so the documented
+build-once/reuse-many fast path started raising `ValueError` on the paths that
+had always consumed an already-built operator directly and never reached
+`str2MO` before: every `mode="ED"` submode, and DMRG `submode="EX"`. Reported
+from a downstream project whose forward model builds its cotunneling channels
+as `toMPO(Cdagup[0])*toMPO(Cup[t])`.
+
+```python
+sc = spinchain.Spin_Chain(["S=1/2"]*4) ; sc.set_hamiltonian(...)
+B = sc.toMPO(sc.Sz[0], mode="ED")
+sc.get_dynamical_correlator(name=(B,B), mode="ED", submode="ED", es=es, delta=0.05)
+# ValueError: name must be a documented correlator string ...
+```
+
+Fixed by accepting already-built operators per element in `str2MO` and passing
+them through untouched. The submodes that do not *apply* the operator but
+rebuild it inside the backend from `MultiOperator.to_terms()` -- `"KPM"`,
+`"TD"`, `"TDZ"`, `"SECTOR"`, the METTS correlator, `cvm_solver="variational"`
+-- now raise a `TypeError` naming `toMPO()` instead of an `AttributeError`
+several frames deep; `"KPM"` and `"CVM"` had their own equivalent rejections
+before centralization, so those two are not regressions. Two adjacent bare
+`raise`s found on the way are now real errors: `EDOperator.__init__` on a
+foreign operator type, and `rootndmrg`'s own `MultiOperator` type check (which
+"ROOTN" did not need -- it only applies A and B, so it takes `toMPO()` output
+now). Regression test: `tests/test_tompo_correlator_operators.py`.
+
 ## Reproducing anything here
 
 Every repro in this file was run as:

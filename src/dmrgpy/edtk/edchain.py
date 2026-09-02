@@ -249,9 +249,17 @@ class EDOperator():
             self.SO = MBO.get_operator(MO) # generate the static operator
         elif type(MO)==EDOperator:
             self.SO = MO.SO.copy() # dummy copy
-        else: 
-            print("Unrecognized type in EDOperator",type(MO))
-            raise
+        else:
+            # a bare `raise` here meant "RuntimeError: No active exception
+            # to reraise" for the one thing that plausibly lands here: an
+            # operator built for a different backend (a StaticOperator from
+            # toMPO(mode="DMRG")) passed to a mode="ED" call
+            raise TypeError(
+                "EDOperator takes a MultiOperator or another EDOperator, "
+                "got "+type(MO).__name__+". Operators built for the DMRG "
+                "backend (toMPO(mode=\"DMRG\") -> StaticOperator) cannot "
+                "be reused under mode=\"ED\"; build them with "
+                "toMPO(mode=\"ED\"), or pass the MultiOperator itself.")
     def __add__(self,a):
         if multioperator.isnumber(a): # adding a number
             out = self.copy() # make a copy

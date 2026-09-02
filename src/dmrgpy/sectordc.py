@@ -86,7 +86,8 @@ def _resolve_operators(self, name, i, j):
         raise ValueError(
             "get_dynamical_correlator(submode=\"SECTOR\"): name (the two-"
             "operator tuple, e.g. name=(fc.C[0],fc.Cdag[0])) must be given")
-    name = operatornames.str2MO(self, name, i=i, j=j)
+    name = operatornames.str2MO(self, name, i=i, j=j,
+            require_symbolic_for="submode='SECTOR'")
     return name[0], name[1]
 
 

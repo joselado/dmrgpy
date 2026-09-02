@@ -1,6 +1,6 @@
 from __future__ import print_function
 import numpy as np
-from . import multioperator
+from . import operatornames
 
 
 def dynamical_correlator(self,es=np.linspace(-1.,10,100),
@@ -46,9 +46,12 @@ def dynamical_correlator(self,es=np.linspace(-1.,10,100),
     tensor contraction.
     """
     if delta<0.0: raise
-    if type(name[0])!=multioperator.MultiOperator: raise
-    A,B = name[0],name[1] # <GS|A(...)B|GS>, A used as-is (no dagger),
-                          # matching cvm.py's / algebra.rootn's convention
+    # <GS|A(...)B|GS>, A used as-is (no dagger), matching cvm.py's /
+    # algebra.rootn's convention. str2MO rather than the bare type check +
+    # bare `raise` this used to have: the submode only ever *applies* A and
+    # B (B*wf0 / A*v below), so the already-built operators toMPO() returns
+    # work here unchanged.
+    A,B = operatornames.str2MO(self,name)
     wf0 = self.get_gs() # ground state (also sets self.e0)
     Hmpo = self.toMPO(self.hamiltonian) # built once, shared across frequencies/steps
     out = []

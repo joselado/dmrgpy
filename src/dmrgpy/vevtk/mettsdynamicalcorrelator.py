@@ -137,7 +137,8 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
             "implemented for itensor_version='python' or 'julia_live' so "
             "far (got itensor_version=%r)" % (MB.itensor_version,))
 
-    resolved = operatornames.str2MO(MB, name)
+    resolved = operatornames.str2MO(MB, name,
+            require_symbolic_for="the METTS dynamical correlator")
     A, B = resolved[0], resolved[1]
 
     # Both backends' metts_dynamical_correlator want a concrete integer

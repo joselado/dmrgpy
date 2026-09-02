@@ -297,7 +297,8 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
     tmax_eff = nt*dt
     omega0 = 2.*np.pi/tmax_eff  # paper's own convention: lowest resolvable frequency
 
-    name = operatornames.str2MO(self, name, **kwargs)
+    name = operatornames.str2MO(self, name,
+            require_symbolic_for="submode='TDZ'", **kwargs)
     O1, O2 = name[0], name[1]
     A = O1.get_dagger()  # matches evolution_dmrg_DC's own A=O1.get_dagger()
     B = O2

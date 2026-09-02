@@ -165,6 +165,10 @@ class MBFermion(edchain.EDchain):
         from .. import multioperator
         if type(name)==multioperator.MultiOperator:
             return multioperator.MO2matrix(name,self) # return operator
+        elif type(name)==edchain.EDOperator:
+            # an already-built ED operator (toMPO(mode="ED")) -- see the
+            # same branch in the base class and in pychain/build.py
+            return name.SO
 
         elif name=="density" or name=="N": return self.get_density(i)
         elif name=="C": return self.get_c(i)

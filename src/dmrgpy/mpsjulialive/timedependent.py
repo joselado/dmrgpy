@@ -57,7 +57,8 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
     branches (itensor_version=3/"python"); the legacy MPO-Taylor path has
     no julia_live implementation at all."""
     _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD","AUTO"))
-    name = operatornames.str2MO(self,name,**kwargs)
+    name = operatornames.str2MO(self,name,
+            require_symbolic_for="submode='TD' on julia_live",**kwargs)
     name[0] = name[0].get_dagger()
     A,B = name[0],name[1]
     wf0 = self.get_gs() # also sets self.e0

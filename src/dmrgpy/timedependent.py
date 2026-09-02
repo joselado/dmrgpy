@@ -159,7 +159,8 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     if self.itensor_version=="julia_live":
         from .mpsjulialive import timedependent as tdjl
         return tdjl.evolution_dmrg_DC(self,name=name,nt=nt,dt=dt,**kwargs)
-    name = operatornames.str2MO(self,name,**kwargs)
+    name = operatornames.str2MO(self,name,
+            require_symbolic_for="submode='TD'",**kwargs)
     name[0] = name[0].get_dagger()
     A,B = name[0],name[1]
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)

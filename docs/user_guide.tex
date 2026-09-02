@@ -1162,6 +1162,40 @@ energy range/resolution/cost trade-off they offer:
                                       name=(sc.Sz[0], sc.Sz[0]))
 \end{lstlisting}
 
+\textbf{What \texttt{name=} accepts.} Either a documented correlator
+string together with the site indices it applies to
+(\texttt{name="ZZ", i=0, j=1}, and likewise
+\texttt{"XX"}/\texttt{"YY"}/\texttt{"+-"}/\texttt{"cdc"}/
+\texttt{"densitydensity"}/\ldots), or an explicit pair $(A,B)$ of
+operators. The pair may be \texttt{MultiOperator}s, as above, or the
+\emph{already-built} operators \texttt{toMPO()} returns
+(see \emph{Algebra on already-built operators} above): a
+\texttt{StaticOperator} under
+\texttt{mode="DMRG"}, an \texttt{EDOperator} under \texttt{mode="ED"}.
+Products of those are accepted too, which is the natural way to write a
+composite channel such as
+$c^\dagger_{0\uparrow}c^{\phantom\dagger}_{1\uparrow}$:
+
+\begin{lstlisting}
+Cdagup = [fc.toMPO(A, mode=mode) for A in fc.Cdagup]
+Cup    = [fc.toMPO(A, mode=mode) for A in fc.Cup]
+A01 = Cdagup[0]*Cup[1]
+(x, y) = fc.get_dynamical_correlator(name=(A01, A01.get_dagger()), mode=mode)
+\end{lstlisting}
+
+Handing over an already-built operator saves rebuilding it on every
+call, which is what makes it worth doing across a frequency sweep or a
+parameter scan. It works for \texttt{mode="ED"} (every submode) and for
+\texttt{submode="EX"}/\texttt{"CVM"}/\texttt{"ROOTN"} under
+\texttt{mode="DMRG"} --- the paths that consume an operator by
+\emph{applying} it. The remaining
+submodes (\texttt{"KPM"}, \texttt{"TD"}, \texttt{"TDZ"},
+\texttt{"SECTOR"}, the METTS finite-temperature correlator of
+\S\ref{sec:thermal}, and \texttt{cvm\_solver="variational"})
+instead rebuild the operator inside the backend from its symbolic term
+list, so they need the \texttt{MultiOperator} itself and raise a
+\texttt{TypeError} saying so if given \texttt{toMPO()} output.
+
 \textbf{\texttt{submode="KPM"} --- Kernel Polynomial Method.} $H$ is
 linearly rescaled into $\tilde H=(H-b)/a$ so its full spectrum lies in
 $[-1,1]$ (\texttt{kpm\_scale}, default 0.7, sets how much margin is left
@@ -4239,5 +4273,15 @@ which raised;
 \item \textbf{\texttt{get\_rdm(i=ns-1)}} (the last site) on
 \texttt{itensor\_version="python"}.
 \end{itemize}
+
+One thing the audit's own \texttt{name=} fix broke, since fixed:
+centralizing \texttt{name=} resolution made every submode go through the
+same normalizer, whose explicit-pair branch admitted only
+\texttt{MultiOperator}s --- so \texttt{name=(A,B)} with the already-built
+operators \texttt{toMPO()} returns started raising \texttt{ValueError} on
+the paths that had always accepted them (\texttt{mode="ED"}, and
+\texttt{submode="EX"}). They are accepted again, per element and
+including products of them; see \emph{What \texttt{name=} accepts} in
+\S\ref{sec:dynamical} for which submodes can and cannot take one.
 
 \end{document}

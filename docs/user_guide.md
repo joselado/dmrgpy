@@ -1016,6 +1016,33 @@ offer:
                                       name=(sc.Sz[0], sc.Sz[0]))
 ```
 
+**What `name=` accepts.** Either a documented correlator string together
+with the site indices it applies to (`name="ZZ", i=0, j=1`, and likewise
+`"XX"`/`"YY"`/`"+-"`/`"cdc"`/`"densitydensity"`/...), or an explicit pair
+`(A,B)` of operators. The pair may be `MultiOperator`s, as above, or the
+*already-built* operators `toMPO()` returns (§2): a `StaticOperator`
+under `mode="DMRG"`, an `EDOperator` under `mode="ED"`. Products of
+those are accepted too, which is the natural way to write a composite
+channel such as $c^\dagger_{0\uparrow}c^{\phantom\dagger}_{1\uparrow}$:
+
+```python
+Cdagup = [fc.toMPO(A, mode=mode) for A in fc.Cdagup]
+Cup    = [fc.toMPO(A, mode=mode) for A in fc.Cup]
+A01 = Cdagup[0]*Cup[1]
+(x, y) = fc.get_dynamical_correlator(name=(A01, A01.get_dagger()), mode=mode)
+```
+
+Handing over an already-built operator saves rebuilding it on every
+call, which is what makes it worth doing across a frequency sweep or a
+parameter scan. It works for `mode="ED"` (every submode) and for
+`submode="EX"`/`"CVM"`/`"ROOTN"` under `mode="DMRG"` — the paths that
+consume an operator by *applying* it. The remaining submodes (`"KPM"`,
+`"TD"`, `"TDZ"`, `"SECTOR"`, the METTS finite-temperature correlator of
+§9, and `cvm_solver="variational"`) instead rebuild the operator inside
+the backend from its symbolic term list, so they need the
+`MultiOperator` itself and raise a `TypeError` saying so if given
+`toMPO()` output.
+
 **`submode="KPM"` — Kernel Polynomial Method.** $H$ is linearly rescaled
 into $\tilde H=(H-b)/a$ so its full spectrum lies in $[-1,1]$
 (`kpm_scale`, default 0.7, sets how much margin is left inside $[-1,1]$),
@@ -2922,3 +2949,12 @@ And these combinations now work where they used to fail:
 - **conserved-sector mode + site/pair entropy, mutual information, and the
   default `get_correlation_matrix()`**, all of which raised;
 - **`get_rdm(i=ns-1)`** (the last site) on `itensor_version="python"`.
+
+One thing the audit's own `name=` fix broke, since fixed: centralizing
+`name=` resolution made every submode go through the same normalizer,
+whose explicit-pair branch admitted only `MultiOperator`s -- so
+`name=(A,B)` with the already-built operators `toMPO()` returns started
+raising `ValueError` on the paths that had always accepted them
+(`mode="ED"`, and `submode="EX"`). They are accepted again, per element
+and including products of them; see *What `name=` accepts* in §6 for
+which submodes can and cannot take one.

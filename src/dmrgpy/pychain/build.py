@@ -47,6 +47,13 @@ class Spin_chain(edchain.EDchain):
       """Return an operator"""
       if type(name)==multioperator.MultiOperator:
           return multioperator.MO2matrix(name,self) # return operator
+      elif type(name)==edchain.EDOperator:
+          # an already-built ED operator (toMPO(mode="ED")); the base
+          # class understands one, and this override has to as well, or
+          # the documented build-once fast path dies here with a bare
+          # `raise` on every submode that goes through get_operator
+          # (submode="TD", via edtk/timedependent.py::evolution_DC)
+          return name.SO
       else:
         if name=="X" or name=="Sx": return self.sxi[i]
         elif name=="Y" or name=="Sy": return self.syi[i]

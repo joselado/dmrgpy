@@ -121,7 +121,8 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
     # bare `raise` here -- i.e. the default submode was the one submode it
     # did not work with, and fermionchain.get_gr (name="cdc") could never
     # have run at all
-    name = operatornames.str2MO(self,name,i=i,j=j)
+    name = operatornames.str2MO(self,name,i=i,j=j,
+            require_symbolic_for="submode='KPM'")
     mi = name[1] # first operator
     mj = name[0].get_dagger() # second operator
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
