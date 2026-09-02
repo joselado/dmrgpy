@@ -119,6 +119,58 @@ def test_orbital_cotunneling_loops_over_the_real_orbital_count(fc):
     assert "range(norb)" in src
 
 
+@pytest.fixture(scope="module")
+def cotunneling(fc):
+    """get_orbital_cotunneling for every input orbital, computed once.
+
+    This fixture is the point of the two tests below. Until it was added,
+    nothing in the suite ever *ran* get_orbital_cotunneling: the two tests
+    above call it only with an out-of-range iorb (which raises inside
+    check_iorb, before a single operator is built) and read its source
+    text. That is exactly how a regression reached a release with a green
+    suite -- get_orbital_cotunneling is the one IETS entry point that
+    builds its operators with toMPO() and passes them to
+    get_dynamical_correlator's name=, and when name= resolution stopped
+    accepting already-built operators the function raised ValueError on
+    every call. get_spinflip passes MultiOperators and kept working, so
+    the numeric tests above stayed green throughout. See
+    tests/test_tompo_correlator_operators.py for the underlying contract;
+    this covers the caller that depends on it.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return {i: atom.get_orbital_cotunneling(fc, es=ES, iorb=i,
+                                                delta=1e-3, dex=1e-3)
+                for i in range(len(ORBS))}
+
+
+def test_orbital_cotunneling_runs_and_returns_a_real_spectrum(cotunneling):
+    """The regression guard proper: it runs, and produces a spectrum
+    rather than zeros or NaNs."""
+    x, y = cotunneling[2]
+    assert len(x) == len(y)
+    assert np.all(np.isfinite(y))
+    assert np.max(np.abs(y)) > 1e-6          # not silently empty
+    # the returned grid is the negative energies concatenated in front of
+    # the positive ones, so it is antisymmetric about 0 and sorted within
+    # each half
+    half = len(x)//2
+    assert np.all(x[:half] < 0) and np.all(x[half:] > 0)
+    assert np.allclose(np.sort(-x[:half]), np.sort(x[half:]))
+
+
+def test_orbital_cotunneling_respects_the_trigonal_orbital_symmetry(cotunneling):
+    """Same argument as the spin-flip version above, for the other entry
+    point: in a trigonal field the two orbitals of each (m=+-1, m=+-2)
+    pair must give identical cotunneling spectra, and inequivalent ones
+    must differ. Independent of this particular tij."""
+    y = {i: cotunneling[i][1] for i in cotunneling}
+    assert y[0] == pytest.approx(y[4], rel=1e-8)   # dxy == dx2y2 (m=+-2)
+    assert y[1] == pytest.approx(y[3], rel=1e-8)   # dyz == dxz   (m=+-1)
+    assert y[2] != pytest.approx(y[0], rel=1e-3)   # a1g  vs m=+-2
+    assert y[2] != pytest.approx(y[1], rel=1e-3)   # a1g  vs m=+-1
+
+
 # ---------------------------------------------------------------------
 # dex cutoff sensitivity
 # ---------------------------------------------------------------------
