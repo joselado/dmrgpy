@@ -2958,3 +2958,31 @@ raising `ValueError` on the paths that had always accepted them
 (`mode="ED"`, and `submode="EX"`). They are accepted again, per element
 and including products of them; see *What `name=` accepts* in §6 for
 which submodes can and cannot take one.
+
+**The ED Lehmann sum is now exact (2026-09-02).** `mode="ED",
+submode="ED"` -- the reference every other submode is validated against --
+truncated its final-state sum to `emu < max(es)`, comparing *absolute*
+eigenvalues against a frequency measured from the ground state. Three
+consequences, all reproduced: adding a constant to `H` changed the answer
+(1.1e-3 at `H+3*Id` on a 6-site Heisenberg chain) although a constant can
+move no pole; a spectrum sitting entirely above `max(es)` truncated itself
+away and raised numba's `"zero-size array to reduction"` from deep inside
+the sum; and the result depended on how wide an `es` window the caller
+happened to ask for. `dynamical_correlator_finite_T` (the `T>0` route,
+and the reference for the METTS correlator) carried the same line.
+
+Both now sum over the full spectrum. **For almost every existing caller
+this changes nothing measurable**: whenever the ground-state energy is
+comfortably negative -- the ordinary case, and why this survived since
+2025-11 -- the old threshold retained everything that mattered, and the
+difference is float noise (1.4e-17 on the 5-orbital IETS atom of
+`tests/test_atom_iets.py`, 8.3e-13 on a 6-site Heisenberg chain). It
+differs only where the old code was wrong. Nor is it slower: the `T=0`
+sum reads only `nex` rows of one matrix-element array and `nex` columns
+of the other, so only those are now built, which is cheaper than the full
+`n x n` products the truncated version was computing. The `T>0` route
+*does* cost more, and unavoidably so: it sums over every initial state
+with its own Boltzmann weight, so every row and column is genuinely read
+and no such shortcut exists. That is O(dim^2) in the sum, the same order
+as the dense diagonalization it already performs -- 0.47 s on a
+1024-dimensional Hilbert space, against 0.004 s for a 6-site chain.

@@ -235,18 +235,40 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     ex = emu-np.min(emu) # excitations
     check_dex_sensitivity(ex,dex) # warn if the cutoff is doing real work
 
-    # crop to the needed states
-    emax = np.max(es) # maximum energy
-    vs = vs[:,emu<emax] # restrict
-    emu = emu[emu<emax] # restrict
-    # finnish cropping
+    nex = len(ex[ex<dex]) # size of the (near-)degenerate initial manifold
 
-    # compute the needed matrix elements
-    U = np.array(vs) # matrix
+    # The final-state (j) sum below runs over the FULL spectrum. It used
+    # to be cropped to `emu<np.max(es)`, which compared *absolute*
+    # eigenvalues against a frequency measured from the ground state --
+    # two different origins, since dynamical_sum re-zeroes to the ground
+    # state itself. Three consequences, all confirmed directly on a
+    # 6-site Heisenberg chain (es to 3.0, delta=0.05): adding a constant
+    # to H changed the answer (1.1e-3 at H+3*Id) although a constant can
+    # move no pole; H+10*Id cropped the entire spectrum away and raised
+    # numba's "zero-size array to reduction" from inside dynamical_sum;
+    # and how many states survived depended on the *width* of the es
+    # window, neither of which is a physics input. Cropping on the
+    # excitation energy instead would be offset-invariant but is not the
+    # fix: on the 5-orbital atom of tests/test_atom_iets.py (delta=1e-3,
+    # es to 0.1) it keeps 3 states against the 17 carrying a nonzero
+    # <GS|A|j>, for 8.2e-3 relative error -- the dropped states' Lorentzian
+    # tails are not negligible at sharp delta, which is exactly the IETS
+    # regime. So this is now the exact Lehmann sum the docstrings have
+    # always advertised, and it costs almost nothing, because:
+    #
+    # dynamical_sum only ever reads A[i,j] and B[j,i] for i<nex, so only
+    # nex rows of A and nex columns of B are needed -- the old code built
+    # both full n x n products and used 1/n of one and 1/n of the other
+    # (nex=1 for a non-degenerate ground state, i.e. 1024 columns computed
+    # per element used on that atom). Associating the products so the
+    # narrow factor is contracted first keeps this O(nnz*nex + nex*dim*n)
+    # rather than O(dim*n^2): measured on the same atom, 2.4ms against
+    # 32ms for the naive `Uh@a0@U` full product, i.e. exact for ~2.7x the
+    # cost of the cropped code it replaces (0.9ms) instead of ~300x.
+    U = np.array(vs) # eigenvectors, ascending in energy (scipy eigh)
     Uh = np.conjugate(np.transpose(U)) # dagger
-    A = Uh@a0@U # get the matrix elements
-    B = Uh@b0@U # get the matrix elements
-    nex = len(ex[ex<dex]) # number of excited states
+    A = np.array((Uh[:nex]@a0)@U) # (nex,n) = <i|A|j>, i over the manifold
+    B = np.array(Uh@(b0@U[:,:nex])) # (n,nex) = <j|B|i>
     out = dynamical_sum(emu,es,delta,A,B,nex=nex) # perform the summation
     return (es,-out.imag/(2*np.pi)) # return correlator
 
@@ -306,25 +328,31 @@ def dynamical_correlator_finite_T(h,a0,b0,T,delta=2e-2,
     weights = np.exp(-beta*ex)
     weights = weights/weights.sum() # exact Boltzmann weight, full spectrum
 
-    # Crop only the *final*-state (j) index space to the requested
-    # frequency window, same approximation dynamical_correlator_ED already
-    # makes -- the *initial*-state (i) sum below always ranges over the
-    # FULL spectrum with its exact weight. Cropping i's index space too
-    # (as an earlier version of this function did) would silently drop
-    # any thermally-populated state above emax from the numerator while
-    # `weights` (computed from the full spectrum, above) still counted it
-    # in the normalization -- a real, silent under-count at any T large
-    # enough for excited states above emax to still carry non-negligible
-    # weight, confirmed by code review.
-    emax = np.max(es) # maximum energy
-    keep_j = emu<emax
-    ex_j = ex[keep_j] # restrict
-
-    Ufull = np.array(vs) # (dim, n) -- every eigenstate, for the i axis
-    Uj = np.array(vs[:,keep_j]) # (dim, nj) -- cropped, for the j axis
-    A = np.conjugate(np.transpose(Ufull))@a0@Uj # (n,nj): <i|A|j>
-    B = np.conjugate(np.transpose(Uj))@b0@Ufull # (nj,n): <j|B|i>
-    out = dynamical_sum_thermal(ex,ex_j,es,delta,A,B,weights) # perform the summation
+    # Both index spaces run over the FULL spectrum. The final-state (j)
+    # axis used to be cropped to `emu<np.max(es)` -- the same
+    # absolute-vs-ground-state-relative confusion dynamical_correlator_ED
+    # carried, and removed there for the same three reasons (a constant
+    # added to H changed the answer, a high-lying spectrum cropped itself
+    # away entirely, and the surviving count depended on the width of the
+    # es window; see that function's comment). Unlike the T=0 case there
+    # is no slicing shortcut available here -- dynamical_sum_thermal sums
+    # over *every* initial state i with its own Boltzmann weight, so every
+    # row and column of A and B is genuinely read -- and these products
+    # are therefore O(dim*n^2), the same order as the dense eigh this
+    # function already performs unconditionally. That is the price of the
+    # exactness this routine exists to provide: it is the reference the
+    # METTS finite-temperature correlator is validated against, and its
+    # own docstring promises an exact Boltzmann weight over the full
+    # spectrum. Cropping i's axis specifically must never come back: the
+    # numerator would lose thermally-populated states above emax while
+    # `weights` (computed from the full spectrum above) still counted them
+    # in the normalization, a silent under-count at any T large enough for
+    # those states to matter.
+    Ufull = np.array(vs) # (dim, n) -- every eigenstate, both axes
+    Uh = np.conjugate(np.transpose(Ufull))
+    A = np.array(Uh@(a0@Ufull)) # (n,n): <i|A|j>
+    B = np.array(Uh@(b0@Ufull)) # (n,n): <j|B|i>
+    out = dynamical_sum_thermal(ex,ex,es,delta,A,B,weights) # perform the summation
     return (es,-out.imag/(2*np.pi)) # return correlator
 
 

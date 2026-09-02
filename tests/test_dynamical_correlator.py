@@ -293,6 +293,106 @@ def test_finite_T_dynamical_correlator_independent_of_es_window():
     assert y1.real == pytest.approx(y2_on_x1, abs=1e-6)
 
 
+# ---------------------------------------------------------------------
+# The ED Lehmann sum is exact: no eigenstate truncation, and therefore
+# no dependence on where the spectrum sits or how wide `es` is.
+#
+# edtk/dynamics.py used to crop the final-state sum to `emu < max(es)`,
+# comparing absolute eigenvalues against a frequency measured from the
+# ground state. Symptoms, all reproduced before the fix: a constant added
+# to H changed the answer (1.1e-3 at H+3*Id on this chain) though a
+# constant can move no pole; a spectrum sitting entirely above max(es)
+# cropped itself away and raised numba's "zero-size array to reduction"
+# from inside dynamical_sum; and the answer depended on the width of the
+# requested window. Both dynamical_correlator_ED and
+# dynamical_correlator_finite_T carried it.
+# ---------------------------------------------------------------------
+
+
+def _shifted_chain(shift, n=6):
+    from dmrgpy import multioperator
+    sc = spinchain.Spin_Chain(["S=1/2"] * n)
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] + sc.Sz[i] * sc.Sz[i + 1]
+    sc.set_hamiltonian(h + shift * multioperator.identity())
+    return sc
+
+
+# +10 and +500 both cropped the entire spectrum away before the fix, so
+# these are crash regressions as well as numerical ones.
+@pytest.mark.parametrize("shift", [1.0, 3.0, -3.0, 10.0, 500.0, -500.0])
+@pytest.mark.parametrize("T", [None, 0.5])
+def test_ed_correlator_invariant_under_a_constant_shift_of_H(shift, T):
+    """H -> H + c*Id shifts every eigenvalue by c and every *excitation*
+    energy by nothing, so a correlator -- whose poles live at excitation
+    energies -- must be completely unchanged. Covers the T=0 sum and the
+    finite-temperature one, which had the same crop."""
+    es = np.linspace(0.05, 3.0, 120)
+
+    def run(c):
+        kwargs = dict(name=None, mode="ED", submode="ED", es=es, delta=0.05)
+        sc = _shifted_chain(c)
+        kwargs["name"] = (sc.Sz[0], sc.Sz[0])
+        if T is not None:
+            kwargs["T"] = T
+        return sc.get_dynamical_correlator(**kwargs)[1].real
+
+    base = run(0.0)
+    scale = np.max(np.abs(base))
+    assert scale > 1e-6  # the comparison would be vacuous otherwise
+    # the residual is float cancellation from adding +-500 to eigenvalues
+    # of order 1, not truncation; it grows with |shift| and stays ~1e-12
+    assert np.max(np.abs(run(shift) - base)) / scale < 1e-10
+
+
+@pytest.mark.parametrize("T", [None, 0.5])
+def test_ed_correlator_independent_of_the_es_window_at_fixed_frequency(T):
+    """The T=0 counterpart of the finite-T window test above: widening
+    `es` must not change the value returned at a frequency both windows
+    contain. The crop made max(es) a truncation threshold, so it did."""
+    sc = _shifted_chain(0.0)
+    name = (sc.Sz[0], sc.Sz[0])
+    kw = dict(name=name, mode="ED", submode="ED", delta=0.05)
+    if T is not None:
+        kw["T"] = T
+    # a shared step, so the narrow grid is an exact subset of the wide one
+    # and the two are compared point for point rather than through an
+    # interpolation whose own error would swamp what is being tested
+    step = 0.025
+    x1, y1 = sc.get_dynamical_correlator(es=0.05 + step*np.arange(40), **kw)
+    x2, y2 = sc.get_dynamical_correlator(es=0.05 + step*np.arange(320), **kw)
+    assert x1 == pytest.approx(x2[:len(x1)], abs=1e-12)  # subset, as intended
+    assert y1.real == pytest.approx(y2.real[:len(y1)], abs=1e-9)
+
+
+def test_ed_correlator_matches_a_textbook_lehmann_sum():
+    """Against an independent reference written straight from the
+    spectral representation -- full eigendecomposition, every final state,
+    no dmrgpy code in the sum itself. This is what "submode='ED' is the
+    exact Lehmann sum" is supposed to mean, and what the truncation
+    quietly made untrue."""
+    from dmrgpy.algebra import algebra
+    from dmrgpy.edtk import dynamics as edyn
+
+    sc = _shifted_chain(0.0)
+    es, delta = np.linspace(0.05, 3.0, 120), 0.05
+    y = sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[0]), mode="ED",
+                                    submode="ED", es=es, delta=delta)[1]
+
+    ed = sc.get_ED_obj()
+    a0 = edyn.EDOperator(sc.Sz[0], ed).SO
+    emu, vs = algebra.eigh(ed.get_hamiltonian())
+    ex = emu - emu.min()
+    Am = np.conjugate(vs.T) @ a0 @ vs
+    ref = np.zeros(len(es), dtype=complex)
+    for j in range(len(ex)):  # non-degenerate ground state: i = 0 only
+        ref += Am[0, j] * Am[j, 0] * (1.0 / (es + 1j * delta - ex[j])
+                                      - 1.0 / (es - 1j * delta - ex[j]))
+    ref = -ref.imag / (2 * np.pi)
+    assert np.max(np.abs(y.real - ref)) / np.max(np.abs(ref)) < 1e-12
+
+
 def test_realify_spin_terms_matches_verbatim_ampo():
     """The Sy -> (S+ - S-)/(2i) rewrite every mpscpp3 AutoMPO build goes
     through (mo_terms.h's build_ampo(), see docs/documentation.md 4.8a) is a
