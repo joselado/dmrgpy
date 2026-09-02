@@ -181,7 +181,33 @@ def test_first_moment_matches_f_sum_rule(k):
 # Two-site unit cell (grouped supersite).
 # ---------------------------------------------------------------------------
 
-def _dimerized_chain(J1=1.0, J2=0.25, D=3):
+def _dimerized_chain(J1=1.0, J2=0.25, D=4):
+    """Dimerized Heisenberg chain, two sites per cell, converged with
+    VUMPS at bond dimension `D`.
+
+    D=4 is a physical choice, not a comfortable one. This Hamiltonian is
+    SU(2)-symmetric, so the Schmidt spectrum across a cell bond comes in
+    degenerate multiplets: measured at D=8 it is
+
+        1.000e+00 | 3.355e-02  3.355e-02  3.355e-02 | 4.664e-05 (x3) | ...
+
+    i.e. a singlet then triplets, so the only truncations that keep an
+    invariant subspace are D = 1, 4, 7, ... Cutting a triplet in half
+    leaves the retained space non-invariant and VUMPS cannot settle in
+    it: at D=3 the converged *energy* itself varied by 3e-6 between runs
+    (2e-5 at D=2), and the spectral-weight check below came out at 2e-5
+    typical and 6.2e-5 worst over 30 runs against a 1e-4 tolerance --
+    close enough to fail intermittently, which it did. At D=4 the same 30
+    checks land at 7e-15 and the energy is reproducible to 1.7e-16.
+
+    So do not lower this back to 3 to save time (it saves none -- see the
+    cache below) and do not raise it to 6, which cuts the *second*
+    triplet and is 1e-7 rather than machine precision. 1, 4 and 7 are the
+    safe values; D=1 drops the inter-cell entanglement this file's
+    two-site-cell tests exist to exercise. Same lesson as
+    tests/test_vumps_excitations_v3.py's
+    test_excitation_accuracy_degrades_with_redundant_bond_dimension: ask
+    for the bond dimension the state actually wants."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"], itensor_version="python")
     h = J1 * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
     h = h + J2 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0]
@@ -193,6 +219,20 @@ def _dimerized_chain(J1=1.0, J2=0.25, D=3):
     return ic
 
 
+_DIMER_CACHE = {}
+
+
+def _dimerized_cached(J1=1.0, J2=0.25, D=4):
+    """Converge the dimerized chain once, for the same reason
+    _tfim_cached exists: VUMPS dominates this file's runtime and the
+    chains are read-only afterwards. This also removes five of the six
+    independent random VUMPS starts the parametrization used to take."""
+    key = (J1, J2, D)
+    if key not in _DIMER_CACHE:
+        _DIMER_CACHE[key] = _dimerized_chain(J1=J1, J2=J2, D=D)
+    return _DIMER_CACHE[key]
+
+
 @pytest.mark.parametrize("p", [0, 1])
 @pytest.mark.parametrize("k", [0.0, 0.9, np.pi])
 def test_two_site_cell_total_weight_matches_structure_factor(p, k):
@@ -201,15 +241,41 @@ def test_two_site_cell_total_weight_matches_structure_factor(p, k):
     the same sub-site p. The dimerized chain is gapped, so the sum
     converges.
 
-    Looser than the n_uc=1 case above (1e-4 relative, not 1e-9 absolute)
-    because the tolerance here is set by how well VUMPS converged this
-    grouped d_g=4 supersite at D=3, not by the spectral-weight arithmetic:
-    both sides read the same imperfectly converged AL/AR/C, and the
-    residual tracks the ground state's own gauge mismatch run to run."""
-    ic = _dimerized_chain()
+    The tolerance used to be 1e-4 relative, on the reasoning that it was
+    set by how well VUMPS had converged the grouped d_g=4 supersite
+    rather than by the spectral-weight arithmetic. That was true but
+    avoidable, and it made this test flaky: the residual sat at 2e-5
+    typical / 6.2e-5 worst, close enough to 1e-4 to trip. The cause was
+    the bond dimension splitting an SU(2) triplet, not anything about
+    this check -- see _dimerized_chain. At the multiplet-complete D=4 the
+    agreement is 7e-15 over 30 runs, so this is now pinned three orders
+    inside that, tight enough to actually catch a wrong weight."""
+    ic = _dimerized_cached()
     _, _, total = ic.spectral_weights("Sz", k, p=p, n=1, return_total=True)
     ref = _static_structure_factor(ic, "Sz", k, rmax=50, p=p, step=2)
-    assert total == pytest.approx(ref, rel=1e-4)
+    assert total == pytest.approx(ref, rel=1e-11)
+
+
+def test_dimerized_cell_bond_spectrum_is_multiplet_degenerate():
+    """Pins the reason _dimerized_chain runs at D=4 rather than 3.
+
+    The Hamiltonian is SU(2)-symmetric, so the Schmidt values across a
+    cell bond come in degenerate multiplets and only D = 1, 4, 7, ...
+    keep an invariant subspace. If this ever stops holding -- a changed
+    J1/J2, a symmetry-breaking term, a different grouping -- the D=4
+    choice above stops being principled and the tight tolerance there
+    will start failing for a reason nobody remembers. Check it here
+    instead, where the failure names itself."""
+    ic = _dimerized_cached(D=8)
+    env = ic._get_excitation_environment()
+    s = np.linalg.svd(np.array(env.C), compute_uv=False)
+    s = s / s[0]
+    assert s[0] == pytest.approx(1.0)                    # the cell singlet
+    assert s[1] == pytest.approx(s[2], rel=1e-8)         # a triplet, not
+    assert s[1] == pytest.approx(s[3], rel=1e-8)         # three singlets
+    assert s[3] > 100 * s[4]                             # and a clear gap
+    # so truncating at 2 or 3 splits that triplet, while 1 and 4 do not
+    assert s[1] / s[0] < 0.1
 
 
 # ---------------------------------------------------------------------------
