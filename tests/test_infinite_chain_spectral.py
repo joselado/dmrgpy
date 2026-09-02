@@ -205,9 +205,13 @@ def _dimerized_chain(J1=1.0, J2=0.25, D=4):
     triplet and is 1e-7 rather than machine precision. 1, 4 and 7 are the
     safe values; D=1 drops the inter-cell entanglement this file's
     two-site-cell tests exist to exercise. Same lesson as
-    tests/test_vumps_excitations_v3.py's
+    tests/test_infinite_chain.py's
     test_excitation_accuracy_degrades_with_redundant_bond_dimension: ask
-    for the bond dimension the state actually wants."""
+    for the bond dimension the state actually wants. The mechanism there
+    is the opposite of this one -- padding an exactly-D=1 state out to a
+    larger D leaves near-null bond directions -- so the shared lesson is
+    only that D must match the state's structure, not that smaller is
+    safer. Here smaller (3) is what breaks it."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"], itensor_version="python")
     h = J1 * (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1])
     h = h + J2 * (ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0]
