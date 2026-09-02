@@ -258,6 +258,12 @@ class Many_Body_Chain():
       # set_conserved_sector(). None means "no sector": DMRG searches the
       # full Hilbert space, which is what every backend has always done.
       self.conserved_sector = None
+      # whether self._session actually carries that sector. False both
+      # when no sector is set and when only the ED backend can represent
+      # it (a chain whose DMRG sites lack the quantum number, e.g. an Sz
+      # sector on the interleaved spinful chain, which mode="ED" targets
+      # and DMRG cannot) -- mode.py refuses DMRG in the latter case.
+      self._sector_on_session = False
       self.initialize(**kwargs)
       # and initialize the sites
   def initialize(self,**kwargs):
@@ -349,15 +355,26 @@ class Many_Body_Chain():
       invalidates the Hamiltonian/ground state already sent to the session,
       so the next gs_energy() re-sends and re-solves.
 
-      itensor_version=3 and itensor_version="python" only (the other
-      backends have no quantum numbers at all), and DMRG-only: mode="ED"
-      has no sector support. The two implement it differently -- v3 with
-      genuinely block-sparse QN tensors, the pure-Python backend with a
+      Three solvers implement this: DMRG with itensor_version=3 (genuinely
+      block-sparse QN tensors), DMRG with itensor_version="python" (a
       charge grading on dense storage plus a charge penalty on the
-      variational solves (see pyitensor/sector.py) -- but the API, the
-      units (Sz in 2*Sz units) and the answers are the same.
+      variational solves, see pyitensor/sector.py), and mode="ED" (the
+      charge is diagonal in the ED product basis, so a sector is a set of
+      basis states and every assembled operator is restricted to the
+      corresponding submatrix, see edtk/edchain.py). The API, the units
+      (Sz in 2*Sz units) and the answers are the same on all three;
+      itensor_version=2 and "julia_live" have no quantum numbers at all
+      and still refuse rather than answering with the global ground state.
+
+      Two things about the ED implementation differ in kind rather than in
+      result. It builds the *full* Hilbert space and then restricts, so a
+      sector buys a smaller eigenproblem and not a smaller construction.
+      And an unreachable target (Nf=99 on an 8-site chain) surfaces at the
+      first calculation rather than here, since the ED object is built
+      lazily; the quantum-number *names* are checked immediately either way.
       """
       previous = self.conserved_sector # restored below if the request is rejected
+      previous_on_session = self._sector_on_session
       if not qns: # switch sector targeting off
           self.conserved_sector = None
       else:
@@ -366,33 +383,117 @@ class Many_Body_Chain():
                   raise ValueError("set_conserved_sector: %s must be an integer "
                                    "(Sz is in 2*Sz units), got %s"%(k,repr(v)))
           self.conserved_sector = {k:int(v) for k,v in qns.items()}
-      if self.itensor_version not in (3,"python"):
-          raise NotImplementedError(
-              "set_conserved_sector is implemented for itensor_version=3 and "
-              "itensor_version=\"python\" only (this chain uses %s). Switch "
-              "with setup_cpp(version=3) or setup_python()."
-              %repr(self.itensor_version))
+      if qns and self.itensor_version not in (3,"python"):
+          # DMRG on this backend cannot do it, but ED can -- as long as
+          # this chain type defines the requested quantum numbers at all
+          try: charges = self.get_sector_charge_operators()
+          except NotImplementedError: charges = dict()
+          unknown = sorted(k for k in qns if k not in charges)
+          if len(charges)==0 or len(unknown)>0:
+              self.conserved_sector = previous
+              raise NotImplementedError(
+                  "set_conserved_sector%s is implemented for "
+                  "itensor_version=3, itensor_version=\"python\" and "
+                  "mode=\"ED\" (this chain uses %s%s). Switch with "
+                  "setup_cpp(version=3) or setup_python(), or run it "
+                  "with mode=\"ED\"."
+                  %("" if len(unknown)==0 else " with %s"%unknown,
+                    repr(self.itensor_version),
+                    "" if len(charges)>0 else
+                    ", whose ED backend defines no conserved quantities"))
       try:
           self._apply_conserved_sector()
       except Exception: # unreachable target, wrong quantum number for these
           self.conserved_sector = previous # sites, ...: leave the chain as it was
+          self._sector_on_session = previous_on_session
+          # ...and put the session back on the sector it was already in,
+          # so the rejected request costs nothing at all
+          try: self._apply_conserved_sector()
+          except Exception: self._sector_on_session = previous_on_session
           raise
       self.restart() # the Hamiltonian/ground state were built on the old sites
+  def get_sector_charge_operators(self):
+      """The conserved quantities this chain offers to
+      set_conserved_sector(), as {name: MultiOperator} measuring each one
+      over the whole chain -- `Nf` counts particles, `Sz` is in ITensor's
+      integer 2*Sz units (so one spin-1/2's worth is 1), `Nb` counts
+      bosons.
+
+      This is what the ED backend targets a sector with: each operator is
+      diagonal in the ED product basis, so its eigenvalue labels every
+      basis state and the sector is the set of states carrying the
+      requested labels (see edtk/edchain.py::set_conserved_sector). The
+      DMRG backends do not use it -- they get their quantum numbers from
+      the site set instead -- but the names and units are deliberately the
+      same on both sides.
+
+      Chain types that conserve nothing (parafermions) leave this raising,
+      which is what makes set_conserved_sector refuse them.
+      """
+      raise NotImplementedError(
+          "%s defines no conserved quantities for set_conserved_sector"
+          %type(self).__name__)
+  def _ed_only_quantum_numbers(self):
+      """Quantum numbers this chain's ED backend can target but its DMRG
+      site set cannot, so that set_conserved_sector knows not to try
+      pushing them onto the session (and not to report the session's
+      complaint as the answer).
+
+      Empty for almost every chain -- the two sides deliberately agree on
+      names and units. The exception is the interleaved spinful fermionic
+      chain, whose DMRG representation is 2n spinless fermionic sites that
+      know about Nf and nothing about spin.
+      """
+      return set()
+  def _apply_sector_to_ed(self,edobj):
+      """Push this chain's conserved sector down to a freshly built ED
+      object. Called from every get_ED_obj(): restart() (which
+      set_conserved_sector calls) drops the cached ED object, so the
+      sector is applied exactly once, when the object is rebuilt."""
+      sector = getattr(self,"conserved_sector",None)
+      if not sector: return edobj
+      edobj.set_conserved_sector(sector,self.get_sector_charge_operators())
+      return edobj
   def _apply_conserved_sector(self):
       """Push self.conserved_sector down to the in-process session, which is
       where the site set actually gets rebuilt (chain_session.h's
       Chain::set_conserved_sector). hasattr-guarded so an extension compiled
       before this existed still works as long as no sector is requested."""
+      self._sector_on_session = False
+      ed_only_ok = self.mode=="ED" # ED targets the sector by itself
+      if self.itensor_version not in (3,"python"):
+          # this DMRG backend has no quantum numbers at all
+          if self.conserved_sector and not ed_only_ok:
+              raise NotImplementedError(
+                  "this chain targets the conserved sector %s, which DMRG "
+                  "only implements for itensor_version=3 and "
+                  "itensor_version=\"python\" -- clear it with "
+                  "set_conserved_sector(), or run it with mode=\"ED\""
+                  %(self.conserved_sector,))
+          return
       if self._session is None: return
       if not hasattr(self._session,"set_conserved_sector"):
-          if self.conserved_sector:
+          if self.conserved_sector and not ed_only_ok:
               raise NotImplementedError(
                   "this compiled mpscpp3 extension predates conserved-sector "
                   "support -- rebuild it with 'python install.py "
                   "--itensor-version=3'")
           return
+      if self.conserved_sector and ed_only_ok \
+              and len(set(self.conserved_sector) & self._ed_only_quantum_numbers())>0:
+          # A chain run through ED may legitimately ask for a quantum
+          # number its DMRG site set does not carry (Sz on the interleaved
+          # spinful chain, whose DMRG sites are spinless fermions). Leave
+          # the session sector-free in that case: the ED backend targets
+          # the sector by itself, and mode.py refuses DMRG on this chain
+          # rather than letting it answer with the global ground state.
+          # Only the quantum numbers named above skip the session -- every
+          # other request still goes through it, so an unreachable target
+          # is still reported here rather than at the first calculation.
+          return
       qns = sorted((self.conserved_sector or {}).items())
       self._session.set_conserved_sector(qns)
+      self._sector_on_session = bool(self.conserved_sector)
   def set_sector_penalty(self,lam=None):
       """Strength of the charge penalty the pure-Python backend adds to its
       variational solves while a conserved sector is set

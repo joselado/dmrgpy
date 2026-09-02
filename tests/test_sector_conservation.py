@@ -226,19 +226,35 @@ def test_invalid_sector_requests_raise():
         fc.set_conserved_sector(Nf=1.5)  # not an integer
 
 
-def test_ed_and_other_backends_refuse_rather_than_answering_globally():
-    """A sector-mode chain must never silently fall back to a solver with
-    no quantum numbers: that would return the global ground state."""
+def test_ed_answers_the_sector_and_backends_without_qns_still_refuse():
+    """ED has quantum numbers of its own now (a charge is diagonal in its
+    product basis, so a sector is a submatrix -- edtk/edchain.py), so a
+    sector-mode chain answered by ED returns the *sector's* ground state
+    instead of refusing. The solvers that have none -- DMRG on
+    itensor_version=2 -- must still refuse rather than silently answering
+    with the global one."""
     n = 6
-    fc, h, _ = tV_chain(n)
+    nf = 5  # deliberately not the filling that minimizes the energy
+    fc, h, number = tV_chain(n)
     fc.set_hamiltonian(h)
-    fc.set_conserved_sector(Nf=3)
-    with pytest.raises(NotImplementedError):
-        fc.gs_energy(mode="ED")
+    fc.set_conserved_sector(Nf=nf)
+    e_ed = fc.gs_energy(mode="ED")
+    assert e_ed == pytest.approx(fc.gs_energy(), abs=DMRG_TOL)  # ED == v3
+    assert e_ed == pytest.approx(ed_sector_energy(fc, h, number, nf),
+                                 abs=DMRG_TOL)
+    fc_global, h_global, _ = tV_chain(n)
+    fc_global.set_hamiltonian(h_global)
+    # ...and it is emphatically not the unconstrained answer
+    assert e_ed > fc_global.gs_energy(mode="ED") + 1e-3
     fc2, h2, _ = tV_chain(n)
     fc2.setup_cpp(version=2)
     with pytest.raises(NotImplementedError):
         fc2.set_conserved_sector(Nf=3)
+    # ...unless the chain says up front that ED is what will answer
+    fc2.mode = "ED"
+    fc2.set_hamiltonian(h2)
+    fc2.set_conserved_sector(Nf=nf)
+    assert fc2.gs_energy(mode="ED") == pytest.approx(e_ed, abs=DMRG_TOL)
 
 
 def test_switching_to_the_python_backend_keeps_the_sector():

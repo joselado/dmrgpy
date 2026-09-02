@@ -26,18 +26,14 @@ def initialize(self,**kwargs):
             # the session's site set (chain_session.h rebuilds sites_ with
             # QN-carrying indices), so a session built or rebuilt here --
             # setup_cpp()/setup_python() switching backend, clone() making a
-            # fresh one -- has to be told about it again. Switching to a
-            # backend that has no quantum numbers at all with a sector still
-            # set would silently answer with the global ground state instead
-            # of the requested sector's, so that is an error, not a fallback.
+            # fresh one -- has to be told about it again.
+            # _apply_conserved_sector() is what decides what that means for
+            # this backend: it refuses outright for one with no quantum
+            # numbers at all (which would silently answer with the global
+            # ground state), unless the chain says mode="ED", in which case
+            # ED targets the sector by itself and the session is simply left
+            # out of it.
             if getattr(self,"conserved_sector",None):
-                if self.itensor_version not in (3,"python"):
-                    raise NotImplementedError(
-                        "this chain targets the conserved sector %s, which only "
-                        "itensor_version=3 and itensor_version=\"python\" "
-                        "implement -- clear it with "
-                        "set_conserved_sector() before switching to %s"
-                        %(self.conserved_sector,repr(self.itensor_version)))
                 self._apply_conserved_sector()
 
 

@@ -351,15 +351,18 @@ def test_invalid_sector_requests_raise():
         fc.set_conserved_sector(Nf=1.5)  # not an integer
 
 
-def test_ed_and_other_backends_refuse_rather_than_answering_globally():
-    """A sector-mode chain must never silently fall back to a solver with
-    no quantum numbers: that would return the global ground state."""
+def test_ed_answers_the_sector_and_backends_without_qns_still_refuse():
+    """Same contract as on itensor_version=3: ED targets the sector by
+    restricting to the basis states that carry the charge (see
+    edtk/edchain.py) and agrees with the pure-Python DMRG backend, while
+    itensor_version=2, which has no quantum numbers at all, still refuses
+    rather than answering with the global ground state."""
     n = 6
+    nf = 5  # deliberately not the filling that minimizes the energy
     fc, h, _ = tV_chain(n)
     fc.set_hamiltonian(h)
-    fc.set_conserved_sector(Nf=3)
-    with pytest.raises(NotImplementedError):
-        fc.gs_energy(mode="ED")
+    fc.set_conserved_sector(Nf=nf)
+    assert fc.gs_energy(mode="ED") == pytest.approx(fc.gs_energy(), abs=DMRG_TOL)
     with pytest.raises(NotImplementedError):
         fc.setup_cpp(version=2)
 

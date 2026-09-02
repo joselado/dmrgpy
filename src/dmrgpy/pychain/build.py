@@ -46,7 +46,9 @@ class Spin_chain(edchain.EDchain):
   def get_operator(self,name,i=0):
       """Return an operator"""
       if type(name)==multioperator.MultiOperator:
-          return multioperator.MO2matrix(name,self) # return operator
+          # restricted to the conserved sector when one is set (a no-op
+          # otherwise), see EDchain.sector_restrict
+          return self.sector_restrict(multioperator.MO2matrix(name,self),name)
       elif type(name)==edchain.EDOperator:
           # an already-built ED operator (toMPO(mode="ED")); the base
           # class understands one, and this override has to as well, or

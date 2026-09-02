@@ -295,7 +295,8 @@ Which quantities are available follows from the chain's site types:
 \toprule
 Chain & Conserved quantities \\
 \midrule
-\texttt{Fermionic\_Chain}, \texttt{Spinful\_\allowbreak Fermionic\_Chain} (Jordan--Wigner) & \texttt{Nf} \\
+\texttt{Fermionic\_Chain} & \texttt{Nf} \\
+\texttt{Spinful\_\allowbreak Fermionic\_Chain} (Jordan--Wigner) & \texttt{Nf}; also \texttt{Sz} under \lstinline|mode="ED"| \\
 \texttt{Spinful\_\allowbreak Fermionic\_\allowbreak Chain\_\allowbreak Native} (native Hubbard sites) & \texttt{Nf}, \texttt{Sz}, or both \\
 every spin chain (\texttt{Spin\_Chain}, any $S$) & \texttt{Sz} \\
 \texttt{Bosonic\_Chain} & \texttt{Nb} \\
@@ -364,13 +365,16 @@ $S^+S^+$/$S^-S^-$ strings cancel exactly. Second, the sector invalidates
 the Hamiltonian and ground state already held by the backend, so the next
 \lstinline|gs_energy()| re-solves from scratch.
 
-Sector targeting requires DMRG and either
-\lstinline|itensor_version=3| or \lstinline|itensor_version="python"|. A
-sector-mode chain deliberately raises rather than falling back to ED (or
-to any other backend), since a solver without quantum numbers would
-silently answer with the \emph{global} ground state instead.
+Sector targeting is implemented by three solvers: DMRG on
+\lstinline|itensor_version=3|, DMRG on
+\lstinline|itensor_version="python"|, and \lstinline|mode="ED"| (see
+below). DMRG on \lstinline|itensor_version=2| and on
+\lstinline|"julia_live"| has no quantum numbers at all, and a sector-mode
+chain deliberately raises rather than letting one of those answer, since a
+solver without quantum numbers would silently return the \emph{global}
+ground state instead.
 
-The two backends implement it differently, which matters in one place.
+The two DMRG backends implement it differently, which matters in one place.
 \lstinline|itensor_version=3| confines the calculation structurally: its
 tensors are block-sparse over quantum numbers, so an amplitude outside
 the sector has nowhere to be stored. \lstinline|itensor_version="python"|
@@ -425,6 +429,65 @@ and works normally on \lstinline|itensor_version="python"|, whose gates
 are dense and simply inherit the Hamiltonian's charge conservation. See
 \lstinline|examples/groundstate/sector_targeted_groundstate| for the
 addition spectrum and charge gap of a $t$--$V$ chain, checked against ED.
+
+\textbf{Sector targeting under} \lstinline|mode="ED"|\textbf{.} ED
+implements the same API, and by the simplest mechanism of the three: a
+conserved charge is diagonal in ED's product basis, so a sector is a
+\emph{set of basis states}, and confining a calculation to it means taking
+the corresponding submatrix of every assembled operator. Same call, same
+names, same $2S^z$ units, same answers --- checked sector by sector
+against \lstinline|itensor_version=3| in
+\lstinline|tests/test_sector_conservation_ed.py|.
+
+\begin{lstlisting}
+fc = fermionchain.Fermionic_Chain(8)
+fc.mode = "ED"                   # this chain is solved by ED
+fc.set_hamiltonian(h)
+fc.set_conserved_sector(Nf=3)
+fc.gs_energy(mode="ED")          # the three-particle ground state
+fc.vev(sum(fc.N), mode="ED")     # exactly 3.0
+\end{lstlisting}
+
+Three things about it differ in kind rather than in result:
+
+\begin{itemize}
+\item \textbf{It restricts, it does not shrink.} The full Hilbert space is
+  still assembled before the mask is applied, so a sector buys a smaller
+  eigenproblem, not a smaller construction. What limits ED is the full
+  space either way.
+\item \textbf{An unreachable target can surface at the first calculation}
+  rather than at \lstinline|set_conserved_sector|, because the ED object
+  is built lazily. When the chain's DMRG backend carries the same quantum
+  numbers it still validates the request immediately, as before; the lazy
+  case is the ED-only quantum number below.
+\item \textbf{\lstinline|promote_to_dense()| is DMRG-only.} It exists
+  because a sector re-solve is expensive there; in ED it is not, so the
+  way to leave a sector and keep working is
+  \lstinline|set_conserved_sector()| and re-solve.
+\end{itemize}
+
+ED is also the only solver that can target a total-$S^z$ sector of
+\texttt{Spinful\_\allowbreak Fermionic\_Chain}, the Jordan--Wigner
+spinful chain: its DMRG representation is $2n$ \emph{spinless} fermionic
+sites, which carry \lstinline|Nf| and know nothing about spin, while its
+ED representation has an explicit up/down mode per orbital. Set
+\lstinline|chain.mode = "ED"| before asking for it; a DMRG call on that
+chain afterwards raises rather than answering with an \lstinline|Nf|-only
+sector.
+
+Because ED has quantum numbers now, a sector also no longer forbids the
+automatic DMRG-to-ED fallbacks: a chain whose C++ extension was never
+compiled, or an \lstinline|itensor_version=3| chain too short for
+ITensor's two-site DMRG ($n<3$), answers the sector correctly through ED
+instead of refusing.
+
+The conserving-operator rule is the same under ED, and enforced for the
+same reason: restricting an operator to the sector is exact for a static
+expectation value but identically \emph{zero} for one that changes the
+charge, so \lstinline|vev(fc.C[0])| inside a fixed-$N_f$ sector raises
+instead of reporting a clean, wrong zero.
+\lstinline|examples/groundstate/ed_sector_addition_spectrum| sweeps the
+addition spectrum and charge gap of a $t$--$V$ chain this way.
 
 \textbf{Leaving a sector without losing the state.} The
 conserving-operator rule above rules out exactly the quantities one

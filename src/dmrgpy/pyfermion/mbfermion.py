@@ -70,7 +70,10 @@ class MBFermion(edchain.EDchain):
         """
         Add a multioperator Hamiltonian
         """
-        self.h = self.h + self.get_operator(m) # add the operator
+        # assembled on the full Hilbert space on purpose: self.h is the
+        # raw accumulator every other term is added to, and the conserved
+        # sector's restriction is applied once, in get_hamiltonian()
+        self.h = self.h + multioperator.MO2matrix(m,self) # add the operator
         self.hamiltonian = m
     def get_hopping(self,m):
         """
@@ -86,9 +89,18 @@ class MBFermion(edchain.EDchain):
         """
         if hubbard is None: return
         self.h = self.h + self.hubbard(hubbard) # add Hubbard term
+    def get_hamiltonian(self):
+        """Return the Hamiltonian, restricted to the conserved sector if
+        one is set. self.h is accumulated on the full Hilbert space (see
+        add_multioperator/add_hopping/add_pairing, which is why it cannot
+        simply be rebuilt from self.hamiltonian), so this is the single
+        point where the restriction is applied."""
+        if self.EDHamiltonian is None:
+            self.EDHamiltonian = self.sector_restrict(self.h,"the Hamiltonian")
+        return self.EDHamiltonian
     def get_excited(self,**kwargs):
         """Excited states"""
-        return algebra.lowest_eigenvalues(self.h,**kwargs)
+        return algebra.lowest_eigenvalues(self.get_hamiltonian(),**kwargs)
     def get_cd(self,i):
         """
         Return the creation operator for site i in the many body basis
@@ -146,11 +158,14 @@ class MBFermion(edchain.EDchain):
         for p in pairs: # loop over pairs
             A = self.get_operator(namei,p[0]) # get matrix
             A = A@self.get_operator(namej,p[1]) # get matrix
-            out.append(algebra.braket_wAw(self.wf0,A))
+            # the single-site factors above are full-Hilbert-space
+            # building blocks; their product is the operator being
+            # measured, so that is what the sector restricts
+            out.append(algebra.braket_wAw(self.wf0,self.sector_restrict(A,name)))
         return np.array(out) # return array
     def excited_vev(self,A,**kwargs):
         m = self.get_operator(A) # return the operator
-        wfs = algebra.lowest_eigenvectors(self.h,**kwargs)
+        wfs = algebra.lowest_eigenvectors(self.get_hamiltonian(),**kwargs)
         return np.array([algebra.braket_wAw(wf,m) for wf in wfs])
     def test(self):
         test_commutation(self)
@@ -164,7 +179,9 @@ class MBFermion(edchain.EDchain):
         if name is None: return self.get_zero() # return zero operator
         from .. import multioperator
         if type(name)==multioperator.MultiOperator:
-            return multioperator.MO2matrix(name,self) # return operator
+            # restricted to the conserved sector when one is set (a no-op
+            # otherwise), see EDchain.sector_restrict
+            return self.sector_restrict(multioperator.MO2matrix(name,self),name)
         elif type(name)==edchain.EDOperator:
             # an already-built ED operator (toMPO(mode="ED")) -- see the
             # same branch in the base class and in pychain/build.py

@@ -26,11 +26,12 @@ def old2ampo(self):
 
 def get_full_hamiltonian(self):
     sc = get_pychain(self) # get pychain object
+    # through sc.get_operator (not multioperator.MO2matrix directly) so
+    # that a conserved sector restricts this to its own submatrix
     if self.use_ampo_hamiltonian:
-        return multioperator.MO2matrix(self.hamiltonian,sc)
+        return sc.get_operator(self.hamiltonian)
     else: # conventional way
-        h = old2ampo(self)
-        return multioperator.MO2matrix(h,sc)
+        return sc.get_operator(old2ampo(self))
 #      def get_coupling(i,j):
 #        """Return the coupling between two sites"""
 #        for c in self.exchange:
@@ -49,6 +50,11 @@ def get_pychain(self):
     # whereas in DMRG s = 2 is for S=1/2
     sc.build((np.array(self.sites)-1.)/2.) 
     sc.hamiltonian = self.hamiltonian
+    # a conserved sector is applied here rather than in
+    # Spin_Chain.get_ED_obj() because get_full_hamiltonian() and the T=0
+    # spin dynamical correlator below build their own pychain object
+    # through this function, bypassing that cache
+    self._apply_sector_to_ed(sc)
     return sc
   else: return self.pychain_object # return stored object
 

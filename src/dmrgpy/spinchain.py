@@ -94,6 +94,11 @@ class Spin_Chain(Many_Body_Chain):
     # already does and what its callers now do (see
     # tests/test_benchmarks.py's all-pairs exchange test, which pins the
     # same reference energy the old builder produced).
+    def get_sector_charge_operators(self):
+        """A spin chain conserves total Sz, in ITensor's integer 2*Sz
+        units (Sz=1 is one spin-1/2's worth), which is the unit
+        set_conserved_sector takes on every backend"""
+        return {"Sz":2*sum(self.Sz)}
     def get_ED_obj(self):
         """Return the ED object (pychain wrapper), building it if not
         already cached"""

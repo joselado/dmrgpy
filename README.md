@@ -542,7 +542,7 @@ print("GS energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
 ```python
 from dmrgpy import fermionchain
 n = 8 # number of spinless fermionic sites
-# quantum-number sectors need itensor_version=3 or "python"
+# quantum-number sectors need itensor_version=3, "python", or mode="ED"
 fc = fermionchain.Fermionic_Chain(n,itensor_version="python")
 h = 0 # initialize Hamiltonian
 for i in range(n-1): h = h + fc.Cdag[i]*fc.C[i+1] # first neighbor hopping
@@ -563,6 +563,23 @@ number), alone or in combination, e.g.
 used on the chain (the Hamiltonian, and anything passed to
 `vev`/correlators) must itself conserve the requested quantities, or a
 `ValueError` names the offending operator.
+
+`mode="ED"` targets a sector too, by restricting every assembled
+operator to the basis states that carry the requested charge, so the
+same script works on a chain with no compiled backend at all:
+
+```python
+fc = fermionchain.Fermionic_Chain(8)
+fc.mode = "ED" # this chain is solved by exact diagonalization
+fc.set_hamiltonian(h)
+fc.set_conserved_sector(Nf=3)
+print(fc.gs_energy(mode="ED")) # the three-particle ground state
+```
+
+ED is also the only solver that can fix the total `Sz` of
+`Spinful_Fermionic_Chain` (the Jordan-Wigner spinful chain), whose DMRG
+representation is built from spinless fermionic sites that carry `Nf`
+alone.
 
 ## Ground state of an infinite chain with iDMRG
 ```python
@@ -627,9 +644,9 @@ Available backends are
   on chains of fewer than 3 sites, which ITensor v3's two-site DMRG
   cannot handle), so a script keeps running, just slower, even
   without a full build. This automatic fallback covers the C++ backends
-  only: the Julia backend never falls back, and neither does a chain with
-  a conserved sector set, since ED would silently answer with the
-  *global* ground state instead of the requested sector's.
+  only, the Julia backend never falls back. ED has quantum numbers of its
+  own, so a chain with a conserved sector set falls back to it like any
+  other, and gets the sector's ground state rather than the global one.
 
 The default backend is ITensor v3 (C++). Switch an existing chain to
 another one with `.setup_cpp(version=2)`, `.setup_python()` or

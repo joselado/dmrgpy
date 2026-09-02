@@ -1986,6 +1986,90 @@ per-statistics many-body operator construction; `edtk/one2many.py`
 promotes single-site operators to the full Hilbert space), diagonalized
 with `scipy.sparse.linalg`.
 
+`get_mode()` is a two-step decision, and the split is deliberate.
+`resolve_mode()` picks the solver on the availability grounds above
+alone; only then does `get_mode()` check that answer against the chain's
+conserved sector, if it has one. Written the other way round — the sector
+guard first, as it originally was — the guard had to *predict* which
+solver would answer, and it predicted wrong in both directions: it
+refused ED outright (which now targets a sector perfectly well, §4.3a)
+and it refused the extension-missing and `n<3` fallbacks (which land on
+ED, i.e. on the one solver that can still answer correctly). This is
+§4.10's pattern exactly: a precondition placed ahead of the branch that
+qualifies it.
+
+#### 4.3a Conserved sectors on the ED backend
+
+ED is the third implementation of `Many_Body_Chain.set_conserved_sector`,
+alongside `mpscpp3`'s block-sparse QN tensors (§4.4) and `pyitensor`'s
+charge grading plus penalty (§4.5), and it is the simplest: a conserved
+charge is diagonal in the ED product basis, so a sector is a *set of
+basis states* and confining a calculation to it is taking a submatrix.
+This is the same construction the sector tests have always used as their
+independent reference (`ed_sector_energy`), promoted to a supported path.
+
+Three pieces:
+
+- **The charge operators come from the chain, as `MultiOperator`s.**
+  `Many_Body_Chain.get_sector_charge_operators()` returns
+  `{name: MultiOperator}` — `{"Nf": sum(self.N)}` for spinless fermions,
+  `{"Sz": 2*sum(self.Sz)}` for spin chains (the factor of two is what
+  puts `Sz` in ITensor's integer $2S^z$ units, the same units every other
+  backend takes), `Nf`/`Sz` for both spinful chains, `{"Nb": sum(self.N)}`
+  for bosons, and nothing at all for parafermions, which is what makes
+  `set_conserved_sector` refuse them. Deriving the charges from the
+  chain's own operators rather than from a per-ED-class hook is what keeps
+  the two spinful chains — with quite different mode layouts — from each
+  needing a special case.
+- **`EDchain.set_conserved_sector(qns, charges)`** assembles each charge
+  operator on the *full* Hilbert space (its own sector is still off at
+  that point, so no recursion), checks it is diagonal and real
+  (`_diagonal_of`), and intersects the per-quantity masks into
+  `self._sector_mask`. An empty intersection raises rather than producing
+  a chain every later call would fail in.
+- **`EDchain.sector_restrict(A)`** is applied to every *assembled*
+  many-body operator on its way out — `get_operator(MultiOperator)`,
+  `MO2matrix`, `MBFermion.get_hamiltonian` — and to nothing else. The
+  single-site matrices in `self.operators` stay full-space on purpose:
+  they are the building blocks `multioperator.MO2matrix` multiplies
+  together, and restricting a factor is not the same as restricting the
+  product.
+
+`sector_restrict` *refuses* an operator that does not commute with the
+charge (checked on the operator's own nonzero entries — the charge is
+diagonal, so this is just "does A connect two basis states of different
+charge", with a relative tolerance so that an exactly-cancelling
+$S^+S^+$/$S^-S^-$ pair reads as the cancellation it is). Refusing rather
+than projecting matters: $PAP$ is exact for a static expectation value but
+identically *zero* for a charge-changing operator, so a dynamical
+correlator of `C` or `S+` inside a fixed-charge sector would come back as
+a clean, wrong zero. That also matches what the DMRG backends do with a
+flux-violating operator, so the same script behaves the same way on all
+three.
+
+Two asymmetries against the DMRG backends, both deliberate:
+
+- **`promote_to_dense()`/`promote_mps()` stay DMRG-only.** They exist
+  because a sector re-solve is expensive on a DMRG backend; in ED it is
+  not, so clearing the sector and re-solving is the whole answer.
+- **`Spinful_Fermionic_Chain` (Jordan--Wigner) can target `Sz` only under
+  ED**, because its DMRG session is $2n$ *spinless* fermionic sites that
+  carry `Nf` and nothing else, while its ED object has an explicit
+  up/down mode per orbital. `Many_Body_Chain._ed_only_quantum_numbers()`
+  names that case explicitly rather than having
+  `_apply_conserved_sector` infer it from a swallowed exception — which
+  would have silently thrown away the session's eager validation of
+  *every* request, including unreachable targets on ordinary chains.
+  `_sector_on_session` records whether the session actually carries the
+  sector, and `get_mode()` refuses DMRG when it does not, so an ED-only
+  sector can never be answered by a session that is not in it.
+
+Regression coverage: `tests/test_sector_conservation_ed.py` (sector
+energies against an independent full-space-then-restrict reference, ED
+against `itensor_version=3` sector by sector, both spinful chains,
+bosons, the enforcement errors, and the DMRG refusal on an ED-only
+sector).
+
 Above `algebra.maxsize` (2000) that diagonalization is iterative, and
 `algebra.lowest_states` does **not** hand the Hermitian case to a single
 `eigsh` call. A plain `eigsh(h,k=n)` silently loses members of a degenerate
@@ -2151,9 +2235,12 @@ Notable, deliberate implementation details (not bugs to "fix"):
   On the Python side the sector lives on the chain
   (`Many_Body_Chain.conserved_sector`), is re-applied whenever a session
   is rebuilt (`sites.py::initialize`, `__deepcopy__`/`clone`), is part of
-  `groundstate.py`'s Hamiltonian-send cache key, and makes `mode.py`
-  *raise* instead of falling back to ED — a fallback would silently
-  return the global ground state instead of the sector's.
+  `groundstate.py`'s Hamiltonian-send cache key, and is checked in
+  `mode.py` against the solver that will actually answer (§4.3): DMRG on
+  `itensor_version=2`/`"julia_live"` *raises*, since those have no
+  quantum numbers and would silently return the global ground state
+  instead of the sector's, while a fallback to ED is fine because ED
+  targets the sector too (§4.3a).
 - **Promotion out of a sector** (`Chain::promote_to_dense`/`promote_mps`,
   `Many_Body_Chain.promote_to_dense()`/`promote_mps(wf)`): leaves sector
   mode *keeping* the state computed inside it, which

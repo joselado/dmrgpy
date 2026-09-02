@@ -590,9 +590,19 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   dense storage with a charge grading on the site indices plus a charge
   penalty on the variational solves, see `pyitensor/sector.py`'s module
   docstring and the pure-Python-backend section of `docs/documentation.md`;
-  everything else below is v3-specific. No other backend has quantum
-  numbers at all, and a sector-mode chain raises rather than falling back
-  to one that doesn't.
+  everything else below is v3-specific. `mode="ED"` implements the same
+  API too, by a third mechanism (`edtk/edchain.py`: a conserved charge is
+  diagonal in the ED product basis, so a sector is a set of basis states
+  and every assembled operator is restricted to that submatrix; the
+  charge operators come from `Many_Body_Chain.
+  get_sector_charge_operators()`, and `promote_to_dense`/`promote_mps`
+  are deliberately *not* part of it, since an ED re-solve is cheap). The
+  backends that genuinely have no quantum numbers are DMRG on
+  `itensor_version=2` and `"julia_live"`, and `mode.py` raises rather
+  than letting one of those answer a sector-mode chain; falling back to
+  ED, on the other hand, is now correct rather than forbidden. See
+  `docs/documentation.md` §4.3a and
+  `tests/test_sector_conservation_ed.py`.
   It pays off with size, and only with size: measured through the Python
   API on Heisenberg chains, sector vs dense is 0.6x (n=20, maxm=60), 2.0x
   (n=40, maxm=100), 4.2x (n=60, maxm=200) — block sparsity scales, its

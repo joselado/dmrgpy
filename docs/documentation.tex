@@ -2170,6 +2170,104 @@ many-body operator construction; \texttt{edtk/one2many.py} promotes
 single-site operators to the full Hilbert space), diagonalized with
 \texttt{scipy.sparse.linalg}.
 
+\texttt{get\_mode()} is a two-step decision, and the split is deliberate.
+\texttt{resolve\_mode()} picks the solver on the availability grounds
+above alone; only then does \texttt{get\_mode()} check that answer
+against the chain's conserved sector, if it has one. Written the other way
+round --- the sector guard first, as it originally was --- the guard had
+to \emph{predict} which solver would answer, and it predicted wrong in
+both directions: it refused ED outright (which now targets a sector
+perfectly well, below) and it refused the extension-missing and $n<3$
+fallbacks, which land on ED, i.e.\ on the one solver that can still answer
+correctly. This is the pattern of \S``Where `silently wrong' was
+structurally possible'': a precondition placed ahead of the branch that
+qualifies it.
+
+\subsubsection{Conserved sectors on the ED backend}
+
+ED is the third implementation of
+\texttt{Many\_Body\_Chain.set\_conserved\_sector}, alongside
+\texttt{mpscpp3}'s block-sparse QN tensors and \texttt{pyitensor}'s
+charge grading plus penalty, and it is the simplest: a conserved charge is
+diagonal in the ED product basis, so a sector is a \emph{set of basis
+states} and confining a calculation to it is taking a submatrix. This is
+the same construction the sector tests have always used as their
+independent reference (\texttt{ed\_sector\_energy}), promoted to a
+supported path.
+
+Three pieces:
+
+\begin{itemize}
+\item \textbf{The charge operators come from the chain, as
+  \texttt{MultiOperator}s.}
+  \texttt{Many\_Body\_Chain.get\_sector\_charge\_operators()} returns
+  \texttt{\{name: MultiOperator\}} --- \texttt{\{"Nf": sum(self.N)\}}
+  for spinless fermions, \texttt{\{"Sz": 2*sum(self.Sz)\}} for spin
+  chains (the factor of two is what puts \texttt{Sz} in ITensor's integer
+  $2S^z$ units, the same units every other backend takes),
+  \texttt{Nf}/\texttt{Sz} for both spinful chains,
+  \texttt{\{"Nb": sum(self.N)\}} for bosons, and nothing at all for
+  parafermions, which is what makes \texttt{set\_conserved\_sector}
+  refuse them. Deriving the charges from the chain's own operators rather
+  than from a per-ED-class hook is what keeps the two spinful chains ---
+  with quite different mode layouts --- from each needing a special case.
+\item \textbf{\texttt{EDchain.set\_conserved\_sector(qns, charges)}}
+  assembles each charge operator on the \emph{full} Hilbert space (its own
+  sector is still off at that point, so no recursion), checks it is
+  diagonal and real (\texttt{\_diagonal\_of}), and intersects the
+  per-quantity masks into \texttt{self.\_sector\_mask}. An empty
+  intersection raises rather than producing a chain every later call would
+  fail in.
+\item \textbf{\texttt{EDchain.sector\_restrict(A)}} is applied to every
+  \emph{assembled} many-body operator on its way out ---
+  \texttt{get\_operator(MultiOperator)}, \texttt{MO2matrix},
+  \texttt{MBFermion.get\_hamiltonian} --- and to nothing else. The
+  single-site matrices in \texttt{self.operators} stay full-space on
+  purpose: they are the building blocks
+  \texttt{multioperator.MO2matrix} multiplies together, and restricting a
+  factor is not the same as restricting the product.
+\end{itemize}
+
+\texttt{sector\_restrict} \emph{refuses} an operator that does not
+commute with the charge (checked on the operator's own nonzero entries ---
+the charge is diagonal, so this is just ``does $A$ connect two basis states
+of different charge'', with a relative tolerance so that an
+exactly-cancelling $S^+S^+$/$S^-S^-$ pair reads as the cancellation it
+is). Refusing rather than projecting matters: $PAP$ is exact for a static
+expectation value but identically \emph{zero} for a charge-changing
+operator, so a dynamical correlator of \texttt{C} or \texttt{S+} inside a
+fixed-charge sector would come back as a clean, wrong zero. That also
+matches what the DMRG backends do with a flux-violating operator, so the
+same script behaves the same way on all three.
+
+Two asymmetries against the DMRG backends, both deliberate:
+
+\begin{itemize}
+\item \textbf{\texttt{promote\_to\_dense()}/\texttt{promote\_mps()}
+  stay DMRG-only.} They exist because a sector re-solve is expensive on a
+  DMRG backend; in ED it is not, so clearing the sector and re-solving is
+  the whole answer.
+\item \textbf{\texttt{Spinful\_Fermionic\_Chain} (Jordan--Wigner) can
+  target \texttt{Sz} only under ED}, because its DMRG session is $2n$
+  \emph{spinless} fermionic sites that carry \texttt{Nf} and nothing
+  else, while its ED object has an explicit up/down mode per orbital.
+  \texttt{Many\_Body\_Chain.\_ed\_only\_quantum\_numbers()} names
+  that case explicitly rather than having
+  \texttt{\_apply\_conserved\_sector} infer it from a swallowed
+  exception --- which would have silently thrown away the session's eager
+  validation of \emph{every} request, including unreachable targets on
+  ordinary chains. \texttt{\_sector\_on\_session} records whether the
+  session actually carries the sector, and \texttt{get\_mode()} refuses
+  DMRG when it does not, so an ED-only sector can never be answered by a
+  session that is not in it.
+\end{itemize}
+
+Regression coverage: \texttt{tests/test\_sector\_conservation\_ed.py}
+(sector energies against an independent full-space-then-restrict
+reference, ED against \texttt{itensor\_version=3} sector by sector, both
+spinful chains, bosons, the enforcement errors, and the DMRG refusal on an
+ED-only sector).
+
 Above \texttt{algebra.maxsize} (2000) that diagonalization is iterative, and
 \texttt{algebra.lowest\_states} does \textbf{not} hand the Hermitian case to
 a single \texttt{eigsh} call. A plain \texttt{eigsh(h,k=n)} silently loses
@@ -2371,10 +2469,12 @@ Notable, deliberate implementation details (not bugs to ``fix''):
     (\texttt{Many\_Body\_Chain.conserved\_sector}), is re-applied
     whenever a session is rebuilt (\texttt{sites.py::initialize},
     \texttt{\_\_deepcopy\_\_}/\texttt{clone}), is part of
-    \texttt{groundstate.py}'s Hamiltonian-send cache key, and makes
-    \texttt{mode.py} \emph{raise} instead of falling back to ED --- a
-    fallback would silently return the global ground state instead of the
-    sector's.
+    \texttt{groundstate.py}'s Hamiltonian-send cache key, and is checked
+    in \texttt{mode.py} against the solver that will actually answer:
+    DMRG on \texttt{itensor\_version=2}/\texttt{"julia\_live"}
+    \emph{raises}, since those have no quantum numbers and would silently
+    return the global ground state instead of the sector's, while a
+    fallback to ED is fine because ED targets the sector too.
   \item \textbf{Promotion out of a sector}
     (\texttt{Chain::promote\_to\_dense}/\texttt{promote\_mps},
     \texttt{Many\_Body\_Chain.promote\_to\_dense()}/

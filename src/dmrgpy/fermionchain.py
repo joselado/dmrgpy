@@ -128,8 +128,14 @@ class Fermionic_Chain(Many_Body_Chain):
             return Many_Body_Chain.gs_energy(self,**kwargs)
         elif mode=="ED":
             MBF = self.get_ED_obj()
-            return algebra.lowest_eigenvalues(MBF.h,n=1)[0]
+            # get_hamiltonian(), not the raw MBF.h: that is the full
+            # Hilbert space's accumulator, and a conserved sector's
+            # restriction is applied on top of it
+            return algebra.lowest_eigenvalues(MBF.get_hamiltonian(),n=1)[0]
         else: raise # unrecognised
+    def get_sector_charge_operators(self):
+        """Spinless fermions conserve the particle number"""
+        return {"Nf":sum(self.N)}
     def get_ED_obj(self):
         """
         Return the many body fermion object
@@ -139,6 +145,7 @@ class Fermionic_Chain(Many_Body_Chain):
         else:
             MBf = mbfermion.MBFermion(self.ns) # create object
             MBf.add_multioperator(self.hamiltonian) # add the Hamiltonian
+            self._apply_sector_to_ed(MBf) # conserved sector, if any
             self.ED_obj = MBf # store the object
             self.has_ED_obj = True # set to True
             return self.ED_obj # return the object
@@ -249,6 +256,23 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
         self.Ndn = [self.N[2*i+1] for i in range(n)]
         self.Ntot = [self.Nup[i]+self.Ndn[i] for i in range(n)]
         self.use_ampo_hamiltonian = True # use ampo
+    def get_sector_charge_operators(self):
+        """The same two quantities the native spinful chain offers, on the
+        interleaved up/down representation this class uses (mode 2*i is
+        up, 2*i+1 is down). Sz is in 2*Sz units, so each electron
+        contributes +-1.
+
+        Note these are the *ED* backend's quantum numbers, which is the
+        point: the DMRG side of this class is built on 2n spinless
+        fermionic sites that know about Nf and nothing about spin, so
+        mode="ED" is the only way to target an Sz sector on this chain."""
+        return {"Nf":sum(self.Ntot),
+                "Sz":sum(self.Nup) + (-1)*sum(self.Ndn)}
+    def _ed_only_quantum_numbers(self):
+        """Sz, for the reason spelled out above: the DMRG session of this
+        class is built on spinless fermionic sites, which carry Nf and no
+        notion of spin at all"""
+        return {"Sz"}
     def get_density_spinful(self,**kwargs):
         """
         Return the density in each site, summing over spin channels
@@ -553,9 +577,16 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
         from .pyfermion import mbfermion
         MBf = mbfermion.MBFermion(2*len(self.Cup))
         MBf.add_multioperator(self.hamiltonian)
+        self._apply_sector_to_ed(MBf) # conserved sector, if any
         self.ED_obj = MBf
         self.has_ED_obj = True
         return self.ED_obj
+    def get_sector_charge_operators(self):
+        """A spinful chain conserves the particle number and the total
+        spin projection independently -- Sz in 2*Sz units, so each
+        electron contributes +-1 and Nf and Sz are both integers"""
+        return {"Nf":sum(self.Ntot),
+                "Sz":sum(self.Nup) + (-1)*sum(self.Ndn)}
 
 
 

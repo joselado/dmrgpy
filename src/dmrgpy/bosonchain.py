@@ -41,12 +41,16 @@ class Bosonic_Chain(Many_Body_Chain):
         d = self.get_density(**kwargs) # get the density
         d2 = np.array([self.vev(self.N[i]*self.N[i],**kwargs) for i in range(self.ns)])
         return d2.real-d**2
+    def get_sector_charge_operators(self):
+        """A bosonic chain conserves the total boson number"""
+        return {"Nb":sum(self.N)}
     def get_ED_obj(self):
         """Return the associated ED object"""
         if not self.has_ED_obj: # not computed
           if np.exp(np.sum(np.log(self.maxnb)))>10000: raise
           out = boson.bosonchain(self.maxnb)
           out.hamiltonian = self.hamiltonian
+          self._apply_sector_to_ed(out) # conserved sector, if any
           self.ed_obj = out # store object
           return out
         else: return self.ed_obj
