@@ -1810,7 +1810,16 @@ def test_interacting_spinful_cell_backends_agree():
         ic = infinitechain.Infinite_Many_Body_Chain(
             [_SPINFUL_SITE_CODE] * 2, itensor_version=itensor_version)
         ic.gs_method = "idmrg"
-        ic.maxm = 8
+        # maxm=16, not 8. At 8 this model is not converged: each backend's
+        # own energy wandered by 4e-2 ("python") to 9e-2 (v3) between runs
+        # at maxiter=30, so the cross-backend difference below reached
+        # 1.145e-1 -- past the 0.1 this test allowed, which is exactly how
+        # it failed intermittently. Measured worst |e_v3-e_py| over 36
+        # pairings: 1.145e-1 at maxm=8, 3.7e-2 at 12, 1.145e-2 at 16.
+        # (More iterations work too -- maxm=8 with maxiter=120 reaches
+        # 3.9e-4 -- but cost 21s against 12s for maxm=16, so the bond
+        # dimension is the better spend here.)
+        ic.maxm = 16
         ic.maxiter = 30
         g = ic.get_operator
         Cup = [g("Cup", i, "C") for i in range(2)]
@@ -1841,10 +1850,18 @@ def test_interacting_spinful_cell_backends_agree():
     e_v3 = build(3).gs_energy()
     e_py = build("python").gs_energy()
     assert np.isfinite(e_v3) and np.isfinite(e_py)
-    # 0.1 is above the ~5e-2 run-to-run scatter measured for this model and
-    # far below the O(1) nonsense a genuinely mis-built Hamiltonian gives;
-    # see the docstring for why it is deliberately not tighter.
-    assert e_v3 == pytest.approx(e_py, abs=0.1)
+    # This used to read `abs=0.1`, on the stated grounds that 0.1 was
+    # "above the ~5e-2 run-to-run scatter measured for this model". That
+    # estimate was too optimistic: re-measured at the old maxm=8 the
+    # scatter reaches 1.145e-1, i.e. the tolerance sat *inside* the
+    # spread rather than above it. At maxm=16 (see build) the worst of 36
+    # pairings is 1.145e-2, so 0.05 keeps a 4.4x margin while still being
+    # far below the O(1) nonsense a genuinely mis-built Hamiltonian gives
+    # -- which is all this particular test claims. The tight
+    # backend-vs-backend check remains test_native_spinful_backends_agree.
+    # Note the residual is v3's: at maxm=16 the "python" energy is
+    # reproducible to 5.9e-5 and v3's to 6.7e-3.
+    assert e_v3 == pytest.approx(e_py, abs=0.05)
 
 
 def test_odd_fermion_parity_term_is_rejected_before_the_backend_sees_it():
