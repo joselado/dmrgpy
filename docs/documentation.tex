@@ -685,16 +685,66 @@ grouping is done first for \texttt{n\_uc<=2}, which is cheap there and is
 what the reach is read from, and never for \texttt{n\_uc>2}, where
 \texttt{d\_g} is the exponential object that branch exists to avoid), and
 its energy agrees with \texttt{"python"}'s to $2\times10^{-13}$ on the
-gapped long-range Ising chain. What v3 still cannot do for a
-sequential-solver answer is \texttt{vev}/\texttt{correlator}:
-\texttt{Chain::vumps\_onsite\_expectation}/
-\texttt{vumps\_two\_point\_correlator} read the GROUPED snapshot and
-\texttt{vms\_ground\_state} has never had a static-observable port, so
-they raise. That is a pre-existing gap of the C++ sequential path ---
-previously reachable only at \texttt{n\_uc>2}, now at \texttt{n\_uc<=2}
-with a long-range Hamiltonian too --- not a reach-specific one; those
-guards now say so rather than implying \texttt{gs\_energy} was never
-called.
+gapped long-range Ising chain. \texttt{vev}/\texttt{correlator} follow along on
+v3 too, at any \texttt{n\_uc} and any reach --- after a dispatch fix worth
+recording, because the two halves of the decision had drifted apart. The
+C++ picks the SOLVER on \texttt{n\_uc>2 || reach>1}, while
+\texttt{infinitechain.py} picked the READER on \texttt{n\_uc>2} alone; a
+reach>1 chain on a short cell therefore ran the sequential solver and was
+then handed to the grouped reader, which had no snapshot for it --- even
+though \texttt{Chain::vms\_onsite\_expectation}/
+\texttt{vms\_two\_point\_correlator} could answer it and had existed since
+\texttt{b81b6a9}. \texttt{Chain::vumps\_onsite\_expectation}/
+\texttt{vumps\_two\_point\_correlator} now fall through to the
+\texttt{vms\_*} pair whenever \texttt{have\_vms\_snapshot\_} is the one
+that is set, so the snapshot that exists decides the reader and the Python
+side has no dispatch of its own left to drift from it.
+
+\textbf{Redundant bond dimension} was, separately, fatal on
+\texttt{itensor\_version=3} for any model whose exact ground state is
+smaller than the requested \texttt{maxm} --- a field-polarized chain needs
+exactly one direction, and a gapped model generally needs fewer than it is
+given. The extra directions carry no Schmidt weight, so the state's
+transfer matrix acquires a decoupled unimodular block, i.e. a genuinely
+degenerate dominant eigenvalue. That is benign, but it is
+indistinguishable, from the eigenvalues alone, from the one thing
+\texttt{vx\_check\_perron\_nondegenerate} exists to reject: a ``cat
+state'', two branches with matched \emph{nonzero} weight.
+\texttt{gs\_energy()} therefore raised ``every attempt at D=... failed'' on
+the sequential solver for every such model at \texttt{maxm>1}, while
+\texttt{itensor\_version="python"} --- whose
+\texttt{vumps\_ms.\_cell\_fixed\_points} has no such guard at all ---
+returned the exact energy; the grouped C++ path walked the same edge and
+survived only by never landing exactly on it (its second eigenvalue was
+measured at 0.99996, just outside the guard's own $10^{-9}$ tolerance).
+Both environment builders now fall back to the fixed points the state
+itself names, $CC^\dagger$ and $C^\dagger C$
+(\texttt{Chain::vx\_bond\_fixed\_points}), whenever the eigensolver
+refuses. That is the exact fixed point under redundancy, and for a real
+cat state it is the branch mixture an unchecked eigensolver would return
+anyway --- where the eigensolver may instead return an arbitrary single
+branch, carrying its own wrong energy into \texttt{e\_cell}. What was
+tried first and is the wrong shape: a threshold on \texttt{C}'s own weight
+spectrum, to tell redundancy from a cat state before deciding. The guard
+trips mid-convergence, where the redundant direction is still on its way
+down, so the ratio to be caught is a moving number --- measured at
+$2.7\times10^{-9}$, $1.2\times10^{-4}$ and $1.6\times10^{-2}$ on three
+cells of one model --- with no defensible cutoff.
+\texttt{tests/test\_vumps\_redundant\_bond\_dimension.py}.
+
+\textbf{\texttt{Chain::vms\_ground\_state}'s D-ramp did not warm-start at
+all}, which is what made the above reachable at every rung rather than
+occasionally: its \texttt{reuse} test compared the previous rung's tensor
+size against the \emph{new} \texttt{D}, so it could never hold across a
+ramp step and every rung began from pure noise, landing straight in the
+redundant configuration. The per-site \texttt{Chain::vms\_grow\_init} (the
+sequential analogue of \texttt{vumps\_grow\_init}, and the port of
+\texttt{vumps\_ms.grow\_initial\_state}) fixes that, and the ramp also
+picked up the variational safety net both Python drivers have and neither
+C++ one did --- a bounded extra attempt budget spent only when a rung lands
+above the best smaller-\texttt{D} energy, which a variational method cannot
+legitimately do. Subspace expansion is still not ported to either C++
+driver; they noise-pad.
 
 \textbf{The Lanczos stopping criterion, and why VUMPS could not previously
 report convergence at all.} \texttt{pyitensor/dmrg.py}'s
@@ -730,11 +780,25 @@ $\to$ (4.64s, 865, \textbf{3/3}). Energies are identical to every printed
 digit throughout. The gapless Heisenberg chain is unchanged in iteration
 count (it cannot converge at these bond dimensions either way) and within
 $\sim$10\% in wall time, but its \texttt{D=8} accuracy improves from
-4.1e-3 to 2.1e-3. Note the C++ \texttt{itensor\_version=3} port shares the
-original eigenvalue criterion, so \texttt{Chain::vumps\_ground\_state}
-still floors at $\sim$1e-6 and still reports \texttt{converged=False} at
-\texttt{D>=8} --- another behavioural divergence between the two VUMPS
-backends, on top of the warm-start one above.
+4.1e-3 to 2.1e-3. The C++ \texttt{itensor\_version=3} port shared the
+original eigenvalue criterion for some time after this, so
+\texttt{Chain::vumps\_ground\_state} floored at $\sim$1e-6 and reported
+\texttt{converged=False} at \texttt{D>=8} --- a behavioural divergence
+between the two VUMPS backends that no longer exists.
+\texttt{Chain::vx\_lanczos\_ground\_state} now takes the same
+\texttt{residual\_tol} and both C++ VUMPS drivers (grouped and sequential)
+pass \texttt{tol/10}; every other caller of it is byte-identical. The
+alignment came with it as \texttt{Chain::vx\_align\_phase}, which removes
+the whole phase rather than only the sign: unlike the pure-Python solver,
+whose Ritz vectors come from a real symmetric tridiagonal, the C++ one can
+also return a vector from \texttt{zheev} on the dense
+\texttt{H\_AC}/\texttt{H\_C} (at or below \texttt{vx\_dense\_eig\_max\_}),
+and that fixes no phase at all. Re-measured through the public driver at
+\texttt{D=8}, \texttt{nrestarts=6}, the same TFIM chain: \texttt{converged}
+in \textbf{3/3} runs at both \texttt{g=1.5} and critical \texttt{g=1.0}, up
+from 0/3, with the energy unchanged.
+\texttt{tests/test\_lanczos\_residual\_criterion.py} now covers both
+backends.
 
 The same fix closed a second, initially unrelated-looking problem: the
 tangent-space excitation ansatz's loss of accuracy when a state is

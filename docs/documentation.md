@@ -511,11 +511,21 @@ critical `g=1.0` `D=4` (5.87s, 7268, **0/3**) -> (0.99s, 690, **3/3**);
 are identical to every printed digit throughout. The gapless Heisenberg
 chain is unchanged in iteration count (it cannot converge at these bond
 dimensions either way) and within ~10% in wall time, but its `D=8`
-accuracy improves from 4.1e-3 to 2.1e-3. Note the C++ `itensor_version=3`
-port shares the original eigenvalue criterion, so `Chain::
-vumps_ground_state` still floors at ~1e-6 and still reports
-`converged=False` at `D>=8` -- another behavioural divergence between the
-two VUMPS backends, on top of the warm-start one above.
+accuracy improves from 4.1e-3 to 2.1e-3. The C++ `itensor_version=3` port shared the original
+eigenvalue criterion for some time after this, so `Chain::
+vumps_ground_state` floored at ~1e-6 and reported `converged=False` at
+`D>=8` -- a behavioural divergence between the two VUMPS backends that no
+longer exists. `Chain::vx_lanczos_ground_state` now takes the same
+`residual_tol` and both C++ VUMPS drivers (grouped and sequential) pass
+`tol/10`; every other caller of it is byte-identical. The alignment came
+with it as `Chain::vx_align_phase`, which removes the whole phase rather
+than only the sign: unlike the pure-Python solver, whose Ritz vectors come
+from a real symmetric tridiagonal, the C++ one can also return a vector
+from `zheev` on the dense `H_AC`/`H_C` (at or below `vx_dense_eig_max_`),
+and that fixes no phase at all. Re-measured through the public driver at
+`D=8`, `nrestarts=6`, the same TFIM chain: `converged` in **3/3** runs at
+both `g=1.5` and critical `g=1.0`, up from 0/3, with the energy unchanged.
+`tests/test_lanczos_residual_criterion.py` now covers both backends.
 
 The same fix closed a second, initially unrelated-looking problem: the
 tangent-space excitation ansatz's loss of accuracy when a state is
@@ -1490,13 +1500,60 @@ reach is read from, and never for `n_uc>2`, where `d_g` is the exponential
 object that branch exists to avoid), and its energy agrees with
 `"python"`'s to 2e-13 on the gapped long-range Ising chain. Its
 `vumps_check_reach_one` raising wrapper is gone with the check that used it.
-What v3 still cannot do for a sequential-solver answer is `vev`/
-`correlator`: `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`
-read the GROUPED snapshot and `vms_ground_state` has never had a
-static-observable port, so they raise. That is a pre-existing gap of the C++
-sequential path -- previously reachable only at `n_uc>2`, now at `n_uc<=2`
-with a long-range Hamiltonian too -- not a reach-specific one; those three
-guards now say so rather than implying `gs_energy` was never called.
+`vev`/`correlator` follow along on v3 too, at any `n_uc` and any reach --
+after a dispatch fix worth recording, because the two halves of the
+decision had drifted apart. The C++ picks the SOLVER on
+`n_uc>2 || reach>1`, while `infinitechain.py` picked the READER on
+`n_uc>2` alone; a reach>1 chain on a short cell therefore ran the
+sequential solver and was then handed to the grouped reader, which had no
+snapshot for it -- even though `Chain::vms_onsite_expectation`/
+`vms_two_point_correlator` could answer it and had existed since
+`b81b6a9`. `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`
+now fall through to the `vms_*` pair whenever `have_vms_snapshot_` is the
+one that is set, so the snapshot that exists decides the reader and the
+Python side has no dispatch of its own left to drift from it.
+
+**Redundant bond dimension** was, separately, fatal on `itensor_version=3`
+for any model whose exact ground state is smaller than the requested
+`maxm` -- a field-polarized chain needs exactly one direction, and a
+gapped model generally needs fewer than it is given. The extra directions
+carry no Schmidt weight, so the state's transfer matrix acquires a
+decoupled unimodular block, i.e. a genuinely degenerate dominant
+eigenvalue. That is benign, but it is indistinguishable, from the
+eigenvalues alone, from the one thing `vx_check_perron_nondegenerate`
+exists to reject: a "cat state", two branches with matched *nonzero*
+weight. `gs_energy()` therefore raised "every attempt at D=... failed" on
+the sequential solver for every such model at `maxm>1`, while
+`itensor_version="python"` -- whose `vumps_ms._cell_fixed_points` has no
+such guard at all -- returned the exact energy; the grouped C++ path
+walked the same edge and survived only by never landing exactly on it (its
+second eigenvalue was measured at 0.99996, just outside the guard's own
+1e-9 tolerance). Both environment builders now fall back to the fixed
+points the state itself names, `C C^dag` and `C^dag C`
+(`Chain::vx_bond_fixed_points`), whenever the eigensolver refuses. That is
+the exact fixed point under redundancy, and for a real cat state it is the
+branch mixture an unchecked eigensolver would return anyway -- where the
+eigensolver may instead return an arbitrary single branch, carrying its
+own wrong energy into `e_cell`. What was tried first and is the wrong
+shape: a threshold on `C`'s own weight spectrum, to tell redundancy from a
+cat state before deciding. The guard trips mid-convergence, where the
+redundant direction is still on its way down, so the ratio to be caught is
+a moving number -- measured at 2.7e-9, 1.2e-4 and 1.6e-2 on three cells of
+one model -- with no defensible cutoff.
+`tests/test_vumps_redundant_bond_dimension.py`.
+
+**`Chain::vms_ground_state`'s D-ramp did not warm-start at all**, which is
+what made the above reachable at every rung rather than occasionally: its
+`reuse` test compared the previous rung's tensor size against the *new*
+`D`, so it could never hold across a ramp step and every rung began from
+pure noise, landing straight in the redundant configuration. The per-site
+`Chain::vms_grow_init` (the sequential analogue of `vumps_grow_init`, and
+the port of `vumps_ms.grow_initial_state`) fixes that, and the ramp also
+picked up the variational safety net both Python drivers have and neither
+C++ one did -- a bounded extra attempt budget spent only when a rung lands
+above the best smaller-`D` energy, which a variational method cannot
+legitimately do. Subspace expansion is still not ported to either C++
+driver; they noise-pad.
 
 **Per-bond subspace expansion** (`vumps_ms.subspace_expand`,
 `h_two_site_action`). `vumps.py`'s `_subspace_expand` warm-starts each rung

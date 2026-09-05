@@ -848,9 +848,15 @@ stays uniform-`D`. Measured the same way (`nrestarts=1`, median of 5): a
 wash on TFIM and on the easy rows, 4.3x faster on gapless Heisenberg
 `n_uc=2 D=8` (1701 -> 909 iterations, 21.4s -> 5.0s), and on `n_uc=1 D=8`
 (where neither start converges within `maxiter`) 1.4x faster with the
-accuracy spread ~5x tighter at both ends. `itensor_version=3`'s own
-`vms_ground_state` still noise-pads -- the C++ port has not picked this
-up, along with the residual criterion and the AC/C sign alignment.
+accuracy spread ~5x tighter at both ends. `itensor_version=3`'s own `vms_ground_state` has not picked up
+subspace expansion -- it noise-pads (`Chain::vms_grow_init`, the per-site
+`vumps_grow_init`). It DID have neither: its ramp's `reuse` test compared
+the previous rung's tensor size against the *new* `D`, so it could never
+hold across a rung and every rung started from pure noise. That is not a
+speed nicety on a model whose exact state is smaller than the requested
+`D` -- see the redundant-bond-dimension note further down. The residual
+criterion, the AC/C phase alignment and the variational safety net are now
+ported too.
 
 The sequential solver is also now the route for **couplings reaching
 further than one unit cell**, which used to be rejected outright
@@ -878,14 +884,42 @@ the fit per term rather than dropping one fixed copy, because a
 longer-ranged term runs off the end of the window sooner.
 `itensor_version=3` has the same dispatch (`Chain::vumps_ground_state`'s
 `use_multisite`, on `vumps_is_reach_one`) and agrees with `"python"` to
-2e-13. What it still cannot do for ANY sequential-solver answer --
-`n_uc>2` as well as reach>1 -- is `vev`/`correlator`:
-`Chain::vumps_onsite_expectation`/`vumps_two_point_correlator` read the
-GROUPED snapshot and `vms_ground_state` has no static-observable port, so
-they raise (with a message that now says so). Pre-existing gap of the C++
-sequential path, just newly reachable at `n_uc<=2`.
-`tests/test_infinite_long_range.py`,
+2e-13. `vev`/`correlator` follow along on it too, at any `n_uc` and
+any reach. They briefly did not, and the reason is worth keeping: the
+C++ picks the SOLVER on `n_uc>2 || reach>1` while `infinitechain.py`
+picked the READER on `n_uc>2` alone, so a reach>1 chain on a short cell
+ran the sequential solver and was then handed to the grouped reader,
+which had no snapshot -- even though `Chain::vms_onsite_expectation`/
+`vms_two_point_correlator` could answer it and had existed since
+`b81b6a9`. `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`
+now fall through to the `vms_*` pair on `have_vms_snapshot_`, i.e. the
+snapshot that exists decides the reader, and the Python side has no
+dispatch of its own left to drift. `tests/test_infinite_long_range.py`,
 `examples/idmrg/long_range_infinite_chain`.
+
+**Redundant bond dimension used to be fatal on `itensor_version=3`.** A
+gapped model's exact state often needs fewer directions than the requested
+`maxm` (a field-polarized chain needs exactly one), the extra ones then
+carry no weight, and the transfer matrix picks up a decoupled unimodular
+block -- a genuinely DEGENERATE dominant eigenvalue, which looks identical
+to the one thing `vx_check_perron_nondegenerate` exists to reject (a "cat
+state": two branches with matched *nonzero* weight). So `gs_energy()`
+raised "every attempt at D=... failed" for any such model at `maxm>1` on
+the sequential solver, and the grouped one survived only by never landing
+exactly on the degeneracy (its second eigenvalue was measured at 0.99996,
+just outside the guard's 1e-9). Both environment builders now fall back to
+the fixed points the state itself names, `C C^dag`/`C^dag C`
+(`Chain::vx_bond_fixed_points`) -- exact under redundancy, and for a real
+cat state the same branch mixture an unchecked eigensolver would give,
+where the eigensolver may instead return an arbitrary single branch with
+its own wrong energy. Note what was tried first and is the WRONG shape: a
+threshold on `C`'s weight spectrum to tell redundancy from a cat state.
+The guard trips mid-convergence, where the redundant direction is still on
+its way down, so the ratio to catch is a moving number (2.7e-9, 1.2e-4 and
+1.6e-2 on three cells of the same model) with no defensible cutoff. The
+pure-Python reference has no guard on the sequential path at all
+(`vumps_ms._cell_fixed_points`) and treats a trip on the grouped path as
+"skip this attempt". `tests/test_vumps_redundant_bond_dimension.py`.
 
 **Reading that led to a bigger, unrelated find, and it is the one to know
 about**: `pyitensor/dmrg.py`'s `_lanczos_ground_state` stops when the
@@ -906,17 +940,22 @@ relative sign was arbitrary, and a flip made the mismatch read ~4 instead
 of ~1e-6 in 11 of every 100 iterations. Measured through the public
 driver: `D=8` TFIM went from `converged` in **0/3** runs to **3/3**, and
 32.6s -> 6.7s (g=1.5) / 38.4s -> 4.6s (critical g=1.0), energies
-unchanged to every printed digit. Two consequences worth remembering:
-**the C++ `itensor_version=3` port still has the eigenvalue criterion**,
-so `Chain::vumps_ground_state` still floors at ~1e-6 and still reports
-`converged=False` at `D>=8`; and **finite DMRG's own MPS tensors carry
-the same ~1e-6 cap** -- energies are unaffected, but anything downstream
-that consumes a DMRG *wavefunction* rather than its energy is worth a
-look, and has not had one. So **the two VUMPS backends now diverge in
-convergence *behaviour* while still agreeing on results** -- a
-cross-backend test on energies is unaffected, one pinning an iteration
-count or a `converged` flag is not. See `docs/documentation.md`'s D-ramp
-section, `tests/test_lanczos_residual_criterion.py`,
+unchanged to every printed digit. One consequence worth
+remembering: **finite DMRG's own MPS tensors carry the same ~1e-6 cap** --
+energies are unaffected, but anything downstream that consumes a DMRG
+*wavefunction* rather than its energy is worth a look, and has not had
+one. The C++ `itensor_version=3` port carried the eigenvalue criterion for
+a while after this, so `Chain::vumps_ground_state` floored at ~1e-6 and
+reported `converged=False` at `D>=8` -- a documented divergence between the
+two VUMPS backends. `Chain::vx_lanczos_ground_state` now has the same
+`residual_tol` (both VUMPS drivers pass `tol/10`; every other caller is
+byte-identical) and `vx_align_phase` the same alignment, removing the whole
+phase rather than just the sign, since a vector from the dense
+`vx_dense_eig_max_` branch comes out of `zheev` with no fixed phase at all.
+Re-measured through the public driver at `D=8`, `nrestarts=6`: `converged`
+in **3/3** runs at both `g=1.5` and critical `g=1.0`, from 0/3.
+`tests/test_lanczos_residual_criterion.py` covers both backends. See also
+`docs/documentation.md`'s D-ramp section,
 `tests/test_vumps_subspace_expansion.py`, and the measurement tables in
 `vumps.py`'s own section comments.
 

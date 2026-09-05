@@ -83,8 +83,10 @@ that iteration budget, and raising `maxiter` is the caller's knob for that.
 Note the D-ramp's missing "beat a known-good smaller-D energy" safety-net budget (recorded
 in `vumps_ground_state`'s own doc comment as a deliberate simplification versus pyitensor's
 driver) was **not** the cause — that net only ever *adds* attempts, so it cannot explain a
-non-return. It remains a real difference between the two drivers, and a robustness gap
-worth closing separately.
+non-return. It was a real difference between the two drivers, and has since been closed
+separately: both C++ drivers (grouped `vumps_ground_state` and sequential
+`vms_ground_state`) now spend the same bounded extra attempt budget when a rung of the ramp
+lands above the best smaller-`D` energy.
 
 ## Reproduction
 

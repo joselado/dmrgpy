@@ -3641,11 +3641,9 @@ class Chain
     // eigenproblems, the orthogonal-Procrustes AL/AR update) and for the
     // documented D>1 convergence-robustness caveats this port shares
     // (single-attempt VUMPS from a random start is not reliable for D>1;
-    // mitigated the same way, a D-ramp with multiple restarts per step --
-    // see vumps_ground_state's own private helper below for the one
-    // simplification this port takes relative to pyitensor's own driver:
-    // no "beat a known-good smaller-D energy" safety-net budget, see that
-    // helper's own comment).
+    // mitigated the same way, a D-ramp with multiple restarts per step,
+    // including the "beat a known-good smaller-D energy" safety-net
+    // budget -- see the ramp's own comment below).
     //
     // Same scope as idmrg_ground_state: n_uc<=2 (this Chain's own
     // site_types), Hermitian only, and -- specific to VUMPS/the
@@ -3762,6 +3760,7 @@ class Chain
             };
 
         VumpsRunResult best; bool have_best=false;
+        double best_e = 0.0; bool have_best_e = false; // lowest cell energy seen on the ramp
         std::vector<Cplx> prev_AL, prev_AR; int prev_D=0; bool have_prev=false;
         // The bond dimensions actually solved at on the way to D: 1,2,4,
         // 8,...,D (doubling, always ending exactly at D) -- pyitensor/
@@ -3816,8 +3815,44 @@ class Chain
                               std::to_string(D_cur)+" failed (degenerate transfer-matrix "
                               "spectrum, or a singular regularized environment solve) -- "
                               "try increasing nrestarts");
+
+            // The variational safety net pyitensor/vumps.py's driver has
+            // and this port did not (its own doc comment recorded the
+            // omission as a deliberate simplification): a larger bond
+            // dimension can only LOWER a variational energy, so a rung
+            // that lands above the best smaller-D energy is stuck in a bad
+            // basin, and the answer is more attempts rather than accepting
+            // it. The extra budget is spent only when that happens, so a
+            // healthy ramp costs nothing.
+            if (have_best_e && local_best.e_cell > best_e + 1e-6)
+                {
+                for (int extra=0; extra<2*nrestarts; ++extra)
+                    {
+                    if (local_best.e_cell <= best_e + 1e-6) break;
+                    try
+                        {
+                        VumpsInit init2;
+                        bool has2 = have_prev;
+                        if (has2) init2 = vumps_grow_init(D_cur,d_g,prev_D,prev_AL,prev_AR,rng);
+                        auto r = vumps_single_run(D_cur,d_g,h1,pending,tol,maxiter,
+                                                   niter_lanczos,has2?&init2:nullptr,rng);
+                        if (verbose_)
+                            println("vumps D=",D_cur," extra=",extra,": e0=",
+                                    r.e_cell/n_uc," converged=",r.converged);
+                        if (better(r,local_best)) local_best = r;
+                        }
+                    catch (ITError const& e)
+                        {
+                        if (verbose_)
+                            println("vumps D=",D_cur," extra=",extra,": failed (",e.what(),")");
+                        }
+                    }
+                }
+
             prev_AL = local_best.AL; prev_AR = local_best.AR; prev_D = D_cur; have_prev = true;
             best = local_best; have_best = true;
+            if (!have_best_e || local_best.e_cell < best_e)
+                { best_e = local_best.e_cell; have_best_e = true; }
             }
         (void)have_best; // always true here: the D_cur loop runs at least once (D>=1 checked above)
 
@@ -3912,15 +3947,19 @@ class Chain
     Cplx
     vumps_onsite_expectation(std::string const& opname, int p)
         {
+        // Which snapshot exists is decided by vumps_ground_state's own
+        // solver dispatch (a cell longer than 2 sites, or a coupling
+        // reaching past one unit cell, runs the SEQUENTIAL solver), so
+        // read it here rather than making every caller re-derive that
+        // rule and pick a method -- which is what infinitechain.py used
+        // to do, on `n_uc > 2` alone, and so sent a reach>1 chain on a
+        // short cell to the grouped reader that has no snapshot for it.
+        if (!have_vumps_snapshot_ && have_vms_snapshot_)
+            return vms_onsite_expectation(opname,p);
         if (!have_vumps_snapshot_)
             throw ITError("Chain::vumps_onsite_expectation: called before "
-                           "vumps_ground_state (no converged grouped VUMPS snapshot)"
-                           ". Note that a unit cell longer than 2 sites, "
-                           "or a coupling reaching past one unit cell, runs on the "
-                           "SEQUENTIAL multi-site solver (vms_ground_state) instead, "
-                           "which this backend has no static-observable port for -- use "
-                           "itensor_version=\"python\" for those, or rewrite the chain "
-                           "on a cell that keeps every coupling within adjacent cells");
+                           "vumps_ground_state (no VUMPS snapshot of either "
+                           "kind on this Chain)");
         int n_uc = sites_.length();
         if (p<0 || p>=n_uc)
             throw ITError("Chain::vumps_onsite_expectation: p must be in 0.."+
@@ -3998,15 +4037,14 @@ class Chain
     vumps_two_point_correlator(std::string const& opname_i, int p_i,
                                 std::string const& opname_j, int r)
         {
+        // See vumps_onsite_expectation for why the snapshot decides the
+        // reader here rather than the caller.
+        if (!have_vumps_snapshot_ && have_vms_snapshot_)
+            return vms_two_point_correlator(opname_i,p_i,opname_j,r);
         if (!have_vumps_snapshot_)
             throw ITError("Chain::vumps_two_point_correlator: called before "
-                           "vumps_ground_state (no converged grouped VUMPS snapshot)"
-                           ". Note that a unit cell longer than 2 sites, "
-                           "or a coupling reaching past one unit cell, runs on the "
-                           "SEQUENTIAL multi-site solver (vms_ground_state) instead, "
-                           "which this backend has no static-observable port for -- use "
-                           "itensor_version=\"python\" for those, or rewrite the chain "
-                           "on a cell that keeps every coupling within adjacent cells");
+                           "vumps_ground_state (no VUMPS snapshot of either "
+                           "kind on this Chain)");
         if (r<0)
             throw ITError("Chain::vumps_two_point_correlator: r must be >= 0");
         int n_uc = sites_.length();
@@ -6172,6 +6210,7 @@ class Chain
     // every firing had the signature |lambda|=(1,0.999999999),
     // arg=(0,+-pi).
     static constexpr double vx_degeneracy_rtol_ = 1e-9;
+
     // Wider than vx_degeneracy_rtol_ on purpose: the observed tie sits at
     // exactly 1e-9, i.e. on that constant's own boundary, so reusing it
     // would leave the Perron selection decided by rounding.
@@ -6289,6 +6328,84 @@ class Chain
         ic_arnoldi_dominant(act,n,eta,eta1,vec);
         vx_check_perron_nondegenerate(eta,eta1,"Chain::vumps");
         return {eta,vec};
+        }
+
+    // The fixed points a mixed-gauge state HAS, read straight off its bond
+    // matrix: sum_p AL_p (C C^dag) AL_p^dag = C C^dag, and the mirror
+    // statement for AR and C^dag C. Trace-normalized, like the eigensolver
+    // route they stand in for.
+    //
+    // This is what the two environment builders fall back to when
+    // vx_check_perron_nondegenerate refuses a degenerate dominant
+    // eigenvalue. The guard exists for a real pathology (a "cat state":
+    // two branches with matched, nonzero per-site norm, where no single
+    // dominant fixed point is meaningful), but a degenerate dominant
+    // eigenvalue has a second, entirely benign cause it cannot tell apart:
+    // REDUNDANT BOND DIMENSION. A state that needs fewer directions than
+    // it was given leaves the extra ones with no weight, and the transfer
+    // matrix picks up a decoupled unimodular block. Reachable for any model
+    // whose exact ground state is smaller than the requested D -- a
+    // field-polarized chain (exactly D=1), AKLT above D=2, any gapped model
+    // asked for more bond dimension than it needs -- i.e. routinely.
+    //
+    // Confirmed directly: a field-polarized long-range chain converged to
+    // exactly that shape on the SEQUENTIAL solver (its AL-transfer spectrum
+    // came back (1,0),(1,0) plus two more unimodular eigenvalues, and the
+    // pure-Python reference's converged C had singular values [1,0]), and
+    // every attempt at D>=2 was rejected -- while itensor_version="python"
+    // returned the exact energy. The GROUPED path walks the same edge and
+    // survived only by never landing exactly on it (its second eigenvalue
+    // was measured at 0.99996 on the same model, just outside
+    // vx_degeneracy_rtol_).
+    //
+    // Falling back HERE rather than loosening the guard, and doing it
+    // whenever the guard trips rather than on a redundancy test, is
+    // deliberate. A threshold on C's own weight spectrum was tried first
+    // and is the wrong shape: the guard trips mid-convergence, where the
+    // redundant direction is still on its way down, so the ratio it
+    // catches is a moving number (measured at 2.7e-9, 1.2e-4 and 1.6e-2 on
+    // three cells of the same model) with no defensible cutoff. What is
+    // defensible is that C C^dag is the right answer in BOTH cases: for
+    // redundancy it is the exact fixed point, and for a genuine cat state
+    // it is the branch mixture -- which is also what an unchecked
+    // eigensolver returns, except that the eigensolver may instead return
+    // an arbitrary single branch, with its own (wrong) energy. So this is
+    // never worse than the behaviour it replaces, and the pure-Python
+    // reference it ports has no guard on the sequential path at all
+    // (vumps_ms._cell_fixed_points takes the dominant eigenvector
+    // unconditionally) and treats a trip on the grouped path as "skip this
+    // attempt".
+    //
+    // Two checks say it is the RIGHT element rather than merely a harmless
+    // one, which matters because vms_grow_init embeds the resulting tensors
+    // into the next rung of the D-ramp -- a wrong fixed point would be
+    // carried forward and show up as drift with D. It does not: a polarized
+    // chain stays exact through D=16 across seven cell/reach combinations,
+    // and AKLT -- whose exact state is genuinely entangled at D=2, so a
+    // wrongly-selected branch would carry its own energy rather than the
+    // ground state's -- returns -2/3 at D=3 and D=4 on both the grouped and
+    // the sequential path, agreeing with itensor_version="python" to 1e-10
+    // (tests/test_vumps_redundant_bond_dimension.py).
+    static std::pair<std::vector<Cplx>,std::vector<Cplx>>
+    vx_bond_fixed_points(std::vector<Cplx> const& C, int D)
+        {
+        std::vector<Cplx> r((size_t)D*D,Cplx(0,0)), l((size_t)D*D,Cplx(0,0));
+        for (int i=0;i<D;++i)
+        for (int j=0;j<D;++j)
+            {
+            Cplx ar(0,0), al(0,0);
+            for (int k=0;k<D;++k)
+                {
+                ar += C[i*D+k]*std::conj(C[j*D+k]);   // (C C^dag)_ij
+                al += std::conj(C[k*D+i])*C[k*D+j];   // (C^dag C)_ij
+                }
+            r[i*D+j] = ar; l[i*D+j] = al;
+            }
+        Cplx tr_r(0,0), tr_l(0,0);
+        for (int i=0;i<D;++i) { tr_r += r[i*D+i]; tr_l += l[i*D+i]; }
+        if (std::abs(tr_r) > 1e-300) for (auto& z : r) z /= tr_r;
+        if (std::abs(tr_l) > 1e-300) for (auto& z : l) z /= tr_l;
+        return {r,l};
         }
 
     // Dominant RIGHT fixed point rho of transfer tensor E (apply_transfer(E,rho)=eta*rho),
@@ -6968,10 +7085,18 @@ class Chain
         double e_cell = 0.0;
         };
 
+    // `C_cell` is the state's own bond matrix on the CELL BOUNDARY bond
+    // (C[n_uc-1], which by periodicity is both the cell's right and its
+    // left edge) -- used only when the transfer matrix's dominant fixed
+    // point comes out ambiguous, to name the one the state actually has
+    // rather than guessing out of a degenerate eigenspace. See
+    // vx_bond_fixed_points. Pass an empty vector to keep the pure
+    // eigensolver route (and its error).
     VmsEnv
     vms_environments(std::vector<std::vector<Cplx>> const& AL,
                       std::vector<std::vector<Cplx>> const& AR,
-                      std::vector<IdmrgAutomatonRow> const& rows, int D) const
+                      std::vector<IdmrgAutomatonRow> const& rows, int D,
+                      std::vector<Cplx> const& C_cell = {}) const
         {
         int n_uc = (int)AL.size();
         // The two dominant fixed points are found MATRIX-FREE above
@@ -7018,8 +7143,20 @@ class Chain
             for (auto& z : vec) z /= tr;
             return vec;
             };
-        auto r_AL = vx_hermitize(dominant(false,AL),D);
-        auto l_AR = vx_hermitize(dominant(true,AR),D);
+        std::vector<Cplx> r_AL, l_AR;
+        try
+            {
+            r_AL = vx_hermitize(dominant(false,AL),D);
+            l_AR = vx_hermitize(dominant(true,AR),D);
+            }
+        catch (ITError const&)
+            {
+            // Same fallback as vumps_build_environments -- see
+            // vx_bond_fixed_points.
+            if (C_cell.empty()) throw;
+            auto [rb,lb] = vx_bond_fixed_points(C_cell,D);
+            r_AL = rb; l_AR = lb;
+            }
         // The eigensolver leaves the scale free; these close a normalized
         // state against the other side's exact (identity) fixed point, so
         // their trace must be 1.
@@ -7225,6 +7362,43 @@ class Chain
         int niter = 0;
         };
 
+    // The ramp's warm start for the SEQUENTIAL solver: the previous rung's
+    // converged (AL,AR) re-embedded at the new bond dimension, one site at
+    // a time -- the per-site analogue of vumps_grow_init, which is exactly
+    // what the grouped driver already does, and the C++ counterpart of
+    // pyitensor/vumps_ms.py's own grow_initial_state.
+    //
+    // This is not a mere convergence-speed nicety here, the way it reads in
+    // the grouped driver. Without it every rung of the ramp started from
+    // pure noise (the old `reuse` test compared the PREVIOUS rung's tensor
+    // size against the NEW D, so it could never hold across a ramp step and
+    // the ramp was decorative), and on any model whose exact state needs
+    // fewer than D directions -- a polarized chain, an exactly-D=1 product
+    // state -- a random start at redundant D converges to "the exact state
+    // (x) decoupled junk". Its transfer matrix then has a genuinely
+    // degenerate dominant eigenvalue and vx_dominant_*_fixed_point rejects
+    // it, so the whole run failed with "every attempt at D=... failed"
+    // where the grouped path on the identical model returned the exact
+    // energy at every D. Confirmed directly: a field-polarized reach-2
+    // chain (tests/test_infinite_long_range.py) answered -1.825 at D=1 and
+    // raised at D=2 and D=4, while itensor_version="python" and the grouped
+    // C++ path both answered -1.825 throughout. Embedding the converged
+    // smaller-D solution keeps the redundant directions at noise amplitude
+    // instead, which is a well-defined single fixed point.
+    static std::vector<VumpsInit>
+    vms_grow_init(int D, int D_old, std::vector<IdmrgAutomatonRow> const& rows,
+                   std::vector<std::vector<Cplx>> const& AL_old,
+                   std::vector<std::vector<Cplx>> const& AR_old,
+                   std::mt19937_64& rng)
+        {
+        int n_uc = (int)rows.size();
+        std::vector<VumpsInit> out;
+        out.reserve(n_uc);
+        for (int n=0;n<n_uc;++n)
+            out.push_back(vumps_grow_init(D,rows[n].d,D_old,AL_old[n],AR_old[n],rng));
+        return out;
+        }
+
     VmsRun
     vms_single_run(std::vector<IdmrgAutomatonRow> const& rows, int D,
                     double tol, int maxiter, int niter_lanczos,
@@ -7249,15 +7423,22 @@ class Chain
         VmsEnv env;
         for (it=0; it<maxiter; ++it)
             {
-            env = vms_environments(AL,AR,rows,D);
+            env = vms_environments(AL,AR,rows,D,C[n_uc-1]);
             std::vector<std::vector<Cplx>> AC_new(n_uc), C_new(n_uc);
             for (int n=0;n<n_uc;++n)
                 {
                 int d = rows[n].d;
                 auto act_ac = [&](std::vector<Cplx> const& X)
                     { return vms_h_ac_action(X,env.GL[n],env.GR[n],rows[n],D); };
+                // residual_tol rather than the default eigenVALUE test:
+                // the convergence criterion below is a norm difference
+                // between independently-solved eigenVECTORS, whose
+                // accuracy the eigenvalue test caps at ~sqrt(tol). Same
+                // tol/10 as pyitensor/vumps_ms.py's own solves.
                 AC_new[n] = vx_lanczos_ground_state(act_ac,AC[n],D*d*D,
-                                                     niter_lanczos).second;
+                                                     niter_lanczos,1e-12,
+                                                     tol/10.0).second;
+                vx_align_phase(AC[n],AC_new[n]);
                 // H_C[n] lives on the bond to the RIGHT of site n: its left
                 // environment is the one left of site n+1, its right one is
                 // GR[n].
@@ -7266,7 +7447,9 @@ class Chain
                 auto act_c = [&](std::vector<Cplx> const& X)
                     { return vms_h_c_action(X,GL_bond,env.GR[n],D); };
                 C_new[n] = vx_lanczos_ground_state(act_c,C[n],D*D,
-                                                    niter_lanczos).second;
+                                                    niter_lanczos,1e-12,
+                                                    tol/10.0).second;
+                vx_align_phase(C[n],C_new[n]);
                 }
             mismatch = 0.0;
             for (int n=0;n<n_uc;++n)
@@ -7285,7 +7468,7 @@ class Chain
         // Refresh against the FINAL AL/AR -- what was built above reflects
         // this iteration's INPUT tensors, one update behind what is being
         // returned. Same reason the grouped single run does this.
-        env = vms_environments(AL,AR,rows,D);
+        env = vms_environments(AL,AR,rows,D,C[n_uc-1]);
         VmsRun out;
         out.AL=AL; out.AR=AR; out.C=C; out.AC=AC; out.env=env;
         out.e_cell=env.e_cell; out.mismatch=mismatch; out.converged=converged;
@@ -7311,47 +7494,96 @@ class Chain
             return a.e_cell < b.e_cell;
             };
         VmsRun best; bool have_best=false;
-        VmsRun prev; bool have_prev=false;
+        VmsRun prev; bool have_prev=false; int prev_D=0;
+
+        // One attempt at D_cur, warm-started from `init` when given.
+        // Returns false if it threw (a failed fixed point, say) -- a
+        // single failed attempt is not fatal while another one at the
+        // same rung can still succeed.
+        auto try_attempt = [&](int D_cur, int attempt, VmsRun const* init,
+                                VmsRun& local, bool& have_local)
+            {
+            try
+                {
+                auto r = vms_single_run(rows,D_cur,tol,maxiter,niter_lanczos,
+                                         init,rng);
+                if (verbose_)
+                    println("vumps_ms D=",D_cur," attempt=",attempt,": e_cell=",
+                            r.e_cell," converged=",r.converged);
+                if (!have_local || better(r,local)) { local=r; have_local=true; }
+                return true;
+                }
+            catch (ITError const& e)
+                {
+                if (verbose_)
+                    println("vumps_ms D=",D_cur," attempt=",attempt,
+                            ": failed (",e.what(),")");
+                return false;
+                }
+            };
+
+        // A VmsRun carrying only (AL,AR,C), which is all vms_single_run
+        // reads out of its `init`.
+        auto init_from = [&](std::vector<VumpsInit> const& per_site)
+            {
+            VmsRun st;
+            for (auto const& v : per_site)
+                { st.AL.push_back(v.AL); st.AR.push_back(v.AR); st.C.push_back(v.C); }
+            return st;
+            };
+
         for (int D_cur : ramp)
             {
             int n_here = (D_cur==D) ? nrestarts : std::min(nrestarts,3);
             VmsRun local; bool have_local=false;
             for (int attempt=0; attempt<n_here; ++attempt)
                 {
-                try
-                    {
-                    // Warm-starting across the ramp needs the previous
-                    // rung's tensors re-embedded at the new D; only the
-                    // same-D case is reused directly here, and a fresh
-                    // random start is used otherwise -- the ramp still
-                    // helps through the "beat the smaller D" check below.
-                    bool reuse = (attempt==0 && have_prev
-                                   && (int)prev.AL.size()==(int)rows.size()
-                                   && prev.AL[0].size()==(size_t)D_cur*rows[0].d*D_cur);
-                    auto r = vms_single_run(rows,D_cur,tol,maxiter,niter_lanczos,
-                                             reuse ? &prev : nullptr, rng);
-                    if (verbose_)
-                        println("vumps_ms D=",D_cur," attempt=",attempt,": e_cell=",
-                                r.e_cell," converged=",r.converged);
-                    if (!have_local || better(r,local)) { local=r; have_local=true; }
-                    }
-                catch (ITError const& e)
-                    {
-                    if (verbose_)
-                        println("vumps_ms D=",D_cur," attempt=",attempt,
-                                ": failed (",e.what(),")");
-                    }
+                // Attempt 0 of every rung after the first grows the
+                // previous rung's converged tensors into the new bond
+                // dimension; see vms_grow_init for why a purely random
+                // start here does not merely converge more slowly but
+                // fails outright at redundant D.
+                bool warm = (attempt==0 && have_prev);
+                VmsRun start;
+                if (warm)
+                    start = init_from(vms_grow_init(D_cur,prev_D,rows,
+                                                     prev.AL,prev.AR,rng));
+                try_attempt(D_cur,attempt,warm ? &start : nullptr,local,have_local);
                 }
             if (!have_local)
                 throw ITError("Chain::vms_ground_state: every attempt at D="+
                                std::to_string(D_cur)+" failed -- try increasing "
                                "nrestarts");
-            prev = local; have_prev = true;
-            best = local; have_best = true;
+
+            // The safety net pyitensor/vumps_ms.py's own driver has and
+            // this one did not: a larger bond dimension can only lower a
+            // variational energy, so a rung that lands ABOVE the best
+            // smaller-D energy has landed in a bad basin, and the fix is
+            // more attempts rather than accepting it. The extra budget is
+            // spent only when that happens, so a healthy ramp costs
+            // nothing.
+            if (have_best && local.e_cell > best.e_cell + 1e-6)
+                {
+                for (int extra=0; extra<2*nrestarts; ++extra)
+                    {
+                    if (local.e_cell <= best.e_cell + 1e-6) break;
+                    VmsRun start = init_from(vms_grow_init(D_cur,prev_D,rows,
+                                                            prev.AL,prev.AR,rng));
+                    try_attempt(D_cur,n_here+extra,&start,local,have_local);
+                    }
+                }
+
+            prev = local; have_prev = true; prev_D = D_cur;
+            // `best` tracks the lowest energy seen so far (the reference
+            // the check above compares against), while the RETURNED state
+            // is this rung's own -- the ramp's last rung is at the
+            // requested D, and returning a smaller-D state instead would
+            // silently answer at the wrong bond dimension.
+            if (!have_best || local.e_cell < best.e_cell) { best = local; have_best = true; }
             }
         if (!have_best)
             throw ITError("Chain::vms_ground_state: no attempt succeeded");
-        return best;
+        return prev;
         }
 
     // Groups n_uc<=2 per-sublattice dense automaton rows (idmrg_build_row's
@@ -7949,10 +8181,28 @@ class Chain
     // for exactly these two solves. The small tridiagonal eigenproblem is
     // handed to the existing dense solver: it is niter x niter at most, so
     // its own O(m^3) is irrelevant next to one call to the action.
+    //
+    // `residual_tol`, when positive, replaces that eigenVALUE test with the
+    // Ritz RESIDUAL test ||(H-lambda)v|| < residual_tol*max(1,|lambda|),
+    // available for free from the tridiagonal problem as beta*|s_last|.
+    // Which one a caller wants depends on whether it consumes the
+    // eigenvalue or the eigenVECTOR: for a Hermitian operator the Ritz
+    // value error is QUADRATIC in the eigenvector error, so stopping when
+    // the value stops moving at 1e-12 leaves the vector accurate only to
+    // ~1e-6. Right for finite DMRG, which reports energies; wrong for
+    // VUMPS, whose convergence criterion is a norm difference between two
+    // independently-solved eigenvectors (AC and C) -- which is why this
+    // backend's own gauge mismatch floored at ~1e-6 and `converged` stayed
+    // False at D>=8 while the energy was already right. Same fix, and the
+    // same tol/10, as pyitensor/dmrg.py's own `residual_tol` (see its
+    // docstring for the measurements); `tol` keeps its second job either
+    // way (the `beta < tol` Krylov-breakdown test). Callers that pass
+    // nothing are byte-identical to before this parameter existed.
     template <typename Fn>
     static std::pair<double,std::vector<Cplx>>
     vx_lanczos_ground_state(Fn&& action, std::vector<Cplx> v0, int n,
-                             int niter, double tol=1e-12)
+                             int niter, double tol=1e-12,
+                             double residual_tol=-1.0)
         {
         auto dot = [](std::vector<Cplx> const& a, std::vector<Cplx> const& b)
             {
@@ -7995,12 +8245,35 @@ class Chain
             return ev;
             };
 
+        // Ritz vector from the tridiagonal eigenvector, in the original
+        // space.
+        auto expand = [&](std::vector<Cplx> const& yv)
+            {
+            std::vector<Cplx> out(n,Cplx(0,0));
+            for (size_t k=0;k<qs.size();++k)
+                for (int i=0;i<n;++i)
+                    out[i] += yv[k]*qs[k][i];
+            return out;
+            };
+
         std::vector<Cplx> dummy;
         double prev_eval = tridiag_ground(false,dummy);
         int m = std::min(niter,n);
         for (int step=1; step<m; ++step)
             {
             double beta = nrm(w);
+            if (residual_tol > 0.0)
+                {
+                // The k=1 Ritz vector is q itself and its residual is
+                // exactly ||w|| = beta, so an already-converged warm start
+                // returns after a SINGLE call to the action -- which is
+                // where a late VUMPS iteration lives, and why this check
+                // sits before the loop body rather than at the end of it.
+                std::vector<Cplx> svec;
+                double val = tridiag_ground(true,svec);
+                if (beta*std::abs(svec.back()) < residual_tol*std::max(1.0,std::abs(val)))
+                    return {val,expand(svec)};
+                }
             if (beta < tol) break;
             betas.push_back(beta);
             std::vector<Cplx> q_new(w.size());
@@ -8020,6 +8293,7 @@ class Chain
                 Cplx c = dot(qs[k],w);
                 for (size_t i=0;i<w.size();++i) w[i] -= c*qs[k][i];
                 }
+            if (residual_tol > 0.0) continue; // the residual test above owns stopping
             double cur_eval = tridiag_ground(false,dummy);
             if (std::abs(cur_eval-prev_eval) < tol*std::max(1.0,std::abs(cur_eval)))
                 break;
@@ -8028,11 +8302,35 @@ class Chain
 
         std::vector<Cplx> yvec;
         double eval = tridiag_ground(true,yvec);
-        std::vector<Cplx> out(n,Cplx(0,0));
-        for (size_t k=0;k<qs.size();++k)
-            for (int i=0;i<n;++i)
-                out[i] += yvec[k]*qs[k][i];
-        return {eval,out};
+        return {eval,expand(yvec)};
+        }
+
+    // An eigenvector is defined only up to a phase, and VUMPS solves H_AC
+    // and H_C INDEPENDENTLY -- so nothing ties their phases together, while
+    // vumps_gauge_mismatch compares them directly. Each solve is
+    // warm-started from the previous iteration's own vector, so aligning
+    // every new vector with the one it started from keeps the pair
+    // consistent by induction (AC = AL@C exactly at iteration 0).
+    //
+    // pyitensor/vumps.py, whose Ritz vectors come from a real symmetric
+    // tridiagonal, only has to flip a SIGN, and records what it costs to
+    // skip: on a D=8 TFIM chain 11 of every 100 iterations reported a gauge
+    // mismatch of 4.0 for a state whose true mismatch was ~1e-6, making
+    // both the convergence test and the reported diagnostic a coin flip.
+    // Here the vector can also come from zheev on the dense H_AC/H_C
+    // (vx_dense_eig_max_ and below), which fixes no phase at all, so this
+    // removes the whole phase rather than just the sign -- reducing exactly
+    // to the reference's sign flip whenever the overlap is real.
+    static void
+    vx_align_phase(std::vector<Cplx> const& ref, std::vector<Cplx>& v)
+        {
+        if (ref.size() != v.size()) return;
+        Cplx z(0,0);
+        for (size_t i=0;i<v.size();++i) z += std::conj(ref[i])*v[i];
+        double a = std::abs(z);
+        if (a < 1e-300) return;
+        Cplx ph = std::conj(z)/a;
+        for (auto& x : v) x *= ph;
         }
 
     // Dense (D*d_g*D)x(D*d_g*D) matrix representing H_AC, built one basis
@@ -8142,20 +8440,38 @@ class Chain
     // GL/GR/e_cell/bond_envs from the current (AL,AR) -- one full
     // per-iteration environment build -- C++ analogue of pyitensor/
     // vumps.py's own _environments.
+    // `C` is the state's own bond matrix, used only when the dominant
+    // fixed point comes out ambiguous -- see vx_bond_fixed_points, and
+    // vms_environments' own copy of this parameter. Empty keeps the pure
+    // eigensolver route (and every result byte-identical to it).
     VumpsEnv
     vumps_build_environments(std::vector<Cplx> const& AL, std::vector<Cplx> const& AR,
                               int D, int d_g, std::vector<Cplx> const& h1,
-                              std::vector<PendingChan> const& pending) const
+                              std::vector<PendingChan> const& pending,
+                              std::vector<Cplx> const& C = {}) const
         {
-        auto E_AL = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
-        auto [r_AL_raw,eta_r] = vx_dominant_right_fixed_point(E_AL,D);
-        (void)eta_r;
-        auto r_AL = vx_hermitize(r_AL_raw,D);
+        std::vector<Cplx> r_AL, l_AR;
+        try
+            {
+            auto E_AL = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
+            auto [r_AL_raw,eta_r] = vx_dominant_right_fixed_point(E_AL,D);
+            (void)eta_r;
+            r_AL = vx_hermitize(r_AL_raw,D);
 
-        auto E_AR = vx_op_transfer_matrix(AR,D,d_g,AR,false,{});
-        auto [l_AR_raw,eta_l] = vx_dominant_left_fixed_point(E_AR,D);
-        (void)eta_l;
-        auto l_AR = vx_hermitize(l_AR_raw,D);
+            auto E_AR = vx_op_transfer_matrix(AR,D,d_g,AR,false,{});
+            auto [l_AR_raw,eta_l] = vx_dominant_left_fixed_point(E_AR,D);
+            (void)eta_l;
+            l_AR = vx_hermitize(l_AR_raw,D);
+            }
+        catch (ITError const&)
+            {
+            // A degenerate dominant eigenvalue: take the fixed points the
+            // state itself names instead of an arbitrary element of the
+            // degenerate subspace. See vx_bond_fixed_points.
+            if (C.empty()) throw;
+            auto [rb,lb] = vx_bond_fixed_points(C,D);
+            r_AL = rb; l_AR = lb;
+            }
 
         std::vector<Cplx> source_l, source_r;
         double e_L = vumps_energy_source_from_left(AL,D,d_g,h1,pending,r_AL,source_l);
@@ -8186,7 +8502,7 @@ class Chain
         VumpsEnv env;
         for (it=0; it<maxiter; ++it)
             {
-            env = vumps_build_environments(AL,AR,D,d_g,h1,pending);
+            env = vumps_build_environments(AL,AR,D,d_g,h1,pending,C);
 
             // Dense diagonalization below vx_dense_eig_max_, matrix-free
             // Lanczos above it -- see that constant's own comment for why
@@ -8206,8 +8522,12 @@ class Chain
                 {
                 auto act = [&](std::vector<Cplx> const& X)
                     { return vumps_h_ac_action(X,D,d_g,env.GL,env.GR,env.bond_envs,h1); };
-                AC_new = vx_lanczos_ground_state(act,AC,n_ac,niter_lanczos).second;
+                // See vx_lanczos_ground_state's own comment on residual_tol:
+                // the mismatch below compares eigenVECTORS.
+                AC_new = vx_lanczos_ground_state(act,AC,n_ac,niter_lanczos,
+                                                  1e-12,tol/10.0).second;
                 }
+            vx_align_phase(AC,AC_new);
             int n_c = D*D;
             std::vector<Cplx> C_new;
             if (n_c <= vx_dense_eig_max_)
@@ -8219,8 +8539,10 @@ class Chain
                 {
                 auto act = [&](std::vector<Cplx> const& X)
                     { return vumps_h_c_action(X,D,env.GL,env.GR,env.bond_envs); };
-                C_new = vx_lanczos_ground_state(act,C,n_c,niter_lanczos).second;
+                C_new = vx_lanczos_ground_state(act,C,n_c,niter_lanczos,
+                                                 1e-12,tol/10.0).second;
                 }
+            vx_align_phase(C,C_new);
 
             mismatch = vumps_gauge_mismatch(AC_new,C_new,AL,AR,D,d_g);
 
@@ -8234,7 +8556,7 @@ class Chain
         // iteration's own INPUT AL/AR) -- refresh once more against the
         // FINAL AL/AR before returning, exactly like pyitensor's own
         // _vumps_single_run does at its own return point.
-        env = vumps_build_environments(AL,AR,D,d_g,h1,pending);
+        env = vumps_build_environments(AL,AR,D,d_g,h1,pending,C);
 
         VumpsRunResult out;
         out.AL=AL; out.AR=AR; out.C=C; out.GL=env.GL; out.GR=env.GR;

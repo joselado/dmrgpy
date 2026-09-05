@@ -68,14 +68,13 @@ Two things do NOT follow along, and they differ in kind:
   tangent-space ansatz is genuinely reach-1 machinery ({GL, GR, bond_envs}
   rather than one environment matrix per automaton channel), so there is
   no sequential route for it to take. Rewrite the chain on a longer cell.
-* `vev`/`correlator` follow along on `itensor_version="python"` (and so does
-  `kpm_finite`, on either backend -- it builds its own finite window). On
-  `itensor_version=3` they raise for anything the sequential solver answered,
-  which is a pre-existing gap of that backend rather than something specific
-  to reach: `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`
-  read the GROUPED snapshot, and `vms_ground_state` has never had a
-  static-observable port. It was previously reachable only at `n_uc>2`; a
-  long-range Hamiltonian at `n_uc<=2` now reaches it too.
+* `vev`/`correlator` follow along on both backends, `kpm_finite` too (it
+  builds its own finite window). `itensor_version=3` reads whichever
+  snapshot the run actually left behind -- `Chain::vms_onsite_expectation`/
+  `vms_two_point_correlator` for a sequential answer, the grouped
+  `vumps_*` pair otherwise -- rather than re-deriving the solver choice
+  from `n_uc`, which is what made a reach>1 chain on a short cell raise
+  even though the per-site reader could answer it.
 """
 
 import warnings
@@ -753,10 +752,12 @@ class Infinite_Many_Body_Chain:
         if self.itensor_version == 3 and self.gs_method == "vumps":
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
-            # n_uc>2 keeps a per-site (multi-site) snapshot rather than the
-            # grouped one -- different representations, different reader.
-            if self.n_uc > 2:
-                return self._session3.vms_onsite_expectation(opname, p)
+            # Which of the two snapshots the run left behind (grouped, or
+            # the per-site one the sequential solver keeps) is the C++
+            # side's own dispatch decision, so it picks the reader too --
+            # this used to test `n_uc > 2` here, which is only half of
+            # that rule and sent a reach>1 chain on a short cell to the
+            # grouped reader that had nothing to read.
             return self._session3.vumps_onsite_expectation(opname, p)
         if self.itensor_version == 3 and self.gs_method == "idmrg":
             if self._session3 is None or self._session3_has_vumps:
@@ -822,9 +823,7 @@ class Infinite_Many_Body_Chain:
         if self.itensor_version == 3 and self.gs_method == "vumps":
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
-            if self.n_uc > 2:
-                return self._session3.vms_two_point_correlator(
-                    opname_i, p_i, opname_j, r)
+            # See vev for why the snapshot, not n_uc, picks the reader.
             return self._session3.vumps_two_point_correlator(opname_i, p_i, opname_j, r)
         if self.itensor_version == 3 and self.gs_method == "idmrg":
             if self._session3 is None or self._session3_has_vumps:

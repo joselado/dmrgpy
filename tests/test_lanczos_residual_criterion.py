@@ -14,12 +14,20 @@ for D>=8.
 The tests below pin, in order: that the two criteria really do differ in
 eigenvector accuracy by the square root the theory predicts; that the
 default path is untouched; and that VUMPS now actually converges on a case
-that previously could not.
+that previously could not -- on `itensor_version="python"`, and, since
+`Chain::vx_lanczos_ground_state` grew the same `residual_tol`, on
+`itensor_version=3` too. That second backend is the reason the last test
+is parametrized rather than duplicated: it carried the ORIGINAL eigenvalue
+criterion for some time after the Python one was fixed, so "the C++ port
+still floors at ~1e-6 and still reports converged=False at D>=8" was a
+documented divergence between the two VUMPS backends. It is not one any
+more, and this is what says so.
 """
 import numpy as np
 import pytest
 from scipy.integrate import quad
 
+from dmrgpy import cppext
 from dmrgpy import infinitechain
 from dmrgpy.pyitensor import vumps
 from dmrgpy.pyitensor.dmrg import _lanczos_ground_state
@@ -120,3 +128,23 @@ def test_vumps_actually_converges_at_D8(g):
     assert res.converged
     assert res.gauge_mismatch < 1e-10
     assert res.e0 == pytest.approx(_tfim_exact_energy_density(g), abs=1e-4)
+
+
+@pytest.mark.skipif(not cppext.available(3), reason="mpscpp3 not compiled")
+@pytest.mark.parametrize("g", [1.5, 1.0])
+def test_itensor_version3_vumps_also_converges_at_D8(g):
+    """The same regression on the C++ backend, through the public driver.
+
+    `Chain::vx_lanczos_ground_state` is the port of the same solver and
+    carried the same eigenvalue criterion, so this measured 0/3 runs
+    reporting `converged` at D=8 (at both couplings) while the energy was
+    already right -- exactly the shape of the pure-Python failure above,
+    and for exactly the same reason. Asserted through `gs_energy()` rather
+    than the session method so the whole dispatch is covered."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.maxm, ic.maxiter, ic.etol = 8, 300, 1e-10
+    ic.vumps_nrestarts = 2
+    ic.set_hamiltonian(-4.0 * ic.SxC[0] * ic.SxR[0] - 2.0 * g * ic.SzC[0])
+    e0 = ic.gs_energy()
+    assert ic.converged
+    assert e0 == pytest.approx(_tfim_exact_energy_density(g), abs=1e-4)

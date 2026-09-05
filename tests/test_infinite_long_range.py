@@ -97,28 +97,43 @@ def _ising_j2_chain(n_uc, g=2.5, J1=1.0, J2c=0.5, D=8, backend="python"):
 
 @pytest.mark.parametrize("n_uc", [1, 2, 3])
 @pytest.mark.parametrize("gs_method", ["vumps", "idmrg"])
-def test_polarized_chain_with_long_range_terms_is_exact(n_uc, gs_method):
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_polarized_chain_with_long_range_terms_is_exact(n_uc, gs_method, backend):
     """Both ground-state algorithms handle reach>1, and this pins the
     coefficient of every long-range term rather than just its presence.
-    (`idmrg` has its own, unrelated n_uc<=2 restriction.)"""
+    (`idmrg` has its own, unrelated n_uc<=2 restriction.)
+
+    Run on every backend, which is what makes it a REDUNDANT-BOND-DIMENSION
+    test as much as a long-range one: the polarized ground state is exactly
+    D=1 and `_polarized_chain` asks for `maxm=2`, so the extra direction
+    carries no weight and the transfer matrix acquires a degenerate dominant
+    eigenvalue. `itensor_version=3` used to reject every attempt at D>=2
+    here ("every attempt at D=2 failed"), from two independent causes -- a
+    D-ramp that never actually warm-started, and a degeneracy guard that
+    could not tell redundancy from a cat state. See `Chain::vms_grow_init`
+    and `Chain::vx_bond_is_rank_deficient`."""
     if gs_method == "idmrg" and n_uc > 2:
         pytest.skip("idmrg_ground_state supports n_uc<=2 only")
-    ic = _polarized_chain(n_uc, [(2, J2), (3, J3)])
+    ic = _polarized_chain(n_uc, [(2, J2), (3, J3)], backend=backend)
     assert ic._reach_cells == max(1, -(-3 // n_uc))   # ceil(3/n_uc)
     ic.gs_method = gs_method
     assert ic.gs_energy() == pytest.approx(POLARIZED_EXACT, abs=1e-9)
 
 
 @pytest.mark.parametrize("n_uc", [1, 2])
-def test_static_observables_follow_the_long_range_dispatch(n_uc):
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_static_observables_follow_the_long_range_dispatch(n_uc, backend):
     """`vev`/`correlator` on a reach>1 chain -- which at n_uc<=2 means a
-    `.multisite` VUMPSResult reaching `vumps_ms.onsite_expectation`/
-    `two_point_correlator` for the first time, a dispatch that could not
-    happen before (only n_uc>2 produced one). The polarized state fixes
-    both exactly: <Sz>=1/2 on every site, <Sz Sz>=1/4 at every distance."""
-    ic = _polarized_chain(n_uc, [(2, J2), (3, J3)])
+    sequential-solver answer reaching the per-site readers
+    (`vumps_ms.onsite_expectation`/`two_point_correlator`, or
+    `Chain::vms_onsite_expectation`/`vms_two_point_correlator`) for the
+    first time, a dispatch that could not happen before (only n_uc>2
+    produced one). The polarized state fixes both exactly: <Sz>=1/2 on
+    every site, <Sz Sz>=1/4 at every distance."""
+    ic = _polarized_chain(n_uc, [(2, J2), (3, J3)], backend=backend)
     ic.gs_energy()
-    assert getattr(ic._vumps_result, "multisite", False)
+    if backend == "python":
+        assert getattr(ic._vumps_result, "multisite", False)
     assert ic.vev("Sz", 0).real == pytest.approx(0.5, abs=1e-9)
     for r in (1, 2, 3):
         assert ic.correlator("Sz", 0, "Sz", r).real == pytest.approx(0.25, abs=1e-9)
@@ -179,18 +194,26 @@ def test_energy_is_independent_of_the_backend(backend):
 
 
 @pytest.mark.skipif(3 not in BACKENDS, reason="mpscpp3 not compiled")
-def test_v3_static_observables_say_why_they_cannot_answer():
-    """itensor_version=3 answers the ENERGY for a long-range chain but not
-    vev/correlator: `Chain::vumps_onsite_expectation` reads the grouped
-    snapshot, and `vms_ground_state` -- which is what actually ran -- has
-    never had a static-observable port. That is a pre-existing gap of the
-    C++ sequential path (previously reachable only at n_uc>2), and the
-    error has to name it rather than implying gs_energy was never
-    called."""
-    ic = _ising_j2_chain(1, backend=3)
-    ic.gs_energy()
-    with pytest.raises(RuntimeError, match="SEQUENTIAL multi-site solver"):
-        ic.vev("Sz", 0)
+def test_v3_static_observables_read_the_snapshot_that_exists():
+    """itensor_version=3 used to answer the ENERGY for a long-range chain
+    but raise for vev/correlator, because `infinitechain` picked the reader
+    from `n_uc > 2` while the C++ picked the SOLVER from
+    `n_uc > 2 or reach > 1` -- so a reach-2 chain on a 1-site cell ran the
+    sequential solver and was then read by the grouped reader, which had no
+    snapshot. `Chain::vms_onsite_expectation`/`vms_two_point_correlator`
+    could answer it all along. The C++ now picks the reader from the
+    snapshot it actually left behind, so the two decisions cannot drift
+    apart again.
+
+    Checked against the pure-Python backend rather than a golden number:
+    the point is that the two backends read the same state, not what that
+    state's correlator happens to be."""
+    ic3, icp = _ising_j2_chain(1, backend=3), _ising_j2_chain(1)
+    ic3.gs_energy(), icp.gs_energy()
+    assert ic3.vev("Sz", 0).real == pytest.approx(icp.vev("Sz", 0).real, abs=1e-6)
+    for r in (1, 2, 3):
+        assert (ic3.correlator("Sx", 0, "Sx", r).real
+                == pytest.approx(icp.correlator("Sx", 0, "Sx", r).real, abs=1e-6))
 
 
 # -- 3. canonicalization and gating ------------------------------------------
