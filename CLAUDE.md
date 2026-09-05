@@ -813,6 +813,81 @@ the C++ extension isn't compiled (`mode.py`).
 ### ITensor library
 the ITensor folders (`mpscpp2/ITensor` = v2, `mpscpp3/ITensor` = v3) are a library that is developed elsewhere, hence you do not need to read them carefully. Read them only if there is some feature that does not work with the mpscpp2/mpscpp3 code, and you need to figure out why
 
+**Upstream reference for the infinite-chain code**: ITensor's own
+infinite-MPS package, <https://github.com/ITensor/ITensorInfiniteMPS.jl>,
+implements iDMRG, VUMPS, the infinite MPO/`InfiniteMPS` types and the
+transfer-matrix fixed-point machinery that `infinitechain.py`,
+`pyitensor/idmrg.py`, `pyitensor/vumps.py` and the `ic_*`/`vx_*` helpers in
+`mpscpp3/chain_session.h` reimplement here. It is *not* vendored in this
+repo and dmrgpy does not depend on it — consult it as the reference
+implementation when an infinite-chain algorithm (unit-cell gauging,
+McCulloch wavefunction prediction, environment energy subtraction,
+fixed-point conventions for `<Sz>`/correlators) looks wrong or ambiguous,
+the same way `mpscppN/ITensor` is consulted for the finite algorithms.
+
+One thing has already been ported from it: `pyitensor/vumps.py`'s
+`_subspace_expand` (after upstream's `subspace_expansion.jl`) is how the
+`"python"` VUMPS D-ramp warm-starts each rung -- it picks the new bond
+directions from the SVD of `H` projected into `AL`/`AR`'s null spaces,
+instead of the noise-padding `_grow_initial_state` still does on
+`itensor_version=3`. The expansion cannot change the state or the energy
+(both enlarged tensors stay exactly isometric, `C` is embedded with zeros
+in the new block), only how fast the next rung converges: a wash on most
+models, and 4.6x faster plus 5x more accurate (and run-to-run
+reproducible, which the noise start is not) on the hardest one tested, a
+gapless `D=8` Heisenberg chain. `pyitensor/vumps_ms.py` (the sequential
+n_uc>2 solver) still noise-pads; porting the expansion there would need a
+per-bond version and has not been done.
+
+**Reading that led to a bigger, unrelated find, and it is the one to know
+about**: `pyitensor/dmrg.py`'s `_lanczos_ground_state` stops when the
+lowest Ritz *value* stops moving. For a Hermitian operator the value
+error is quadratic in the eigenvector error, so a value tolerance of
+1e-12 caps the eigen*vector* at ~1e-6 -- fine for finite DMRG, which
+reports energies, and fatal for VUMPS, whose convergence criterion is a
+norm difference between `AC` and `C`, two independently-solved
+eigenvectors. VUMPS's gauge mismatch therefore floored at ~1e-6 and
+`tol=1e-10` was unreachable at any number of outer iterations, while the
+*energy* was already correct -- which is exactly why nothing in `tests/`
+caught it. `_lanczos_ground_state` now has an opt-in `residual_tol`
+(Ritz residual `beta*|s_k|`, free from the tridiagonal problem) that
+`vumps.py`/`vumps_ms.py` pass as `tol/10`; every other caller is
+byte-identical. Alongside it, `AC`/`C` are now sign-aligned against the
+vectors they were warm-started from -- solved independently, their
+relative sign was arbitrary, and a flip made the mismatch read ~4 instead
+of ~1e-6 in 11 of every 100 iterations. Measured through the public
+driver: `D=8` TFIM went from `converged` in **0/3** runs to **3/3**, and
+32.6s -> 6.7s (g=1.5) / 38.4s -> 4.6s (critical g=1.0), energies
+unchanged to every printed digit. Two consequences worth remembering:
+**the C++ `itensor_version=3` port still has the eigenvalue criterion**,
+so `Chain::vumps_ground_state` still floors at ~1e-6 and still reports
+`converged=False` at `D>=8`; and **finite DMRG's own MPS tensors carry
+the same ~1e-6 cap** -- energies are unaffected, but anything downstream
+that consumes a DMRG *wavefunction* rather than its energy is worth a
+look, and has not had one. So **the two VUMPS backends now diverge in
+convergence *behaviour* while still agreeing on results** -- a
+cross-backend test on energies is unaffected, one pinning an iteration
+count or a `converged` flag is not. See `docs/documentation.md`'s D-ramp
+section, `tests/test_lanczos_residual_criterion.py`,
+`tests/test_vumps_subspace_expansion.py`, and the measurement tables in
+`vumps.py`'s own section comments.
+
+That fix also **overturned a previously-recorded diagnosis**, which is
+worth knowing before trusting a similar one: the tangent-space excitation
+ansatz's accuracy loss at redundant bond dimension (excitation error
+1.8e-15 at `maxm=1` up to 3.5e-3 at `maxm=8` on an exactly-`D=1` state,
+and a ~33% flake in the dispersion tests) had been investigated at length
+and attributed to conditioning alone -- `_random_raw_tensor`'s docstring
+in `vumps.py` concluded "the ground-state solver is not the thing to
+change". The amplification was real, but what it amplified was the ~1e-6
+eigenvector error; the ground-state solver's *stopping criterion* was
+exactly the thing to change. Re-measured, the error is now 1e-13-1e-12
+across `maxm` = 1..16 and no longer monotonic. The regression that pinned
+the degradation now pins its absence
+(`test_redundant_bond_dimension_no_longer_costs_excitation_accuracy`),
+as its own predecessor's docstring had asked for; both docstrings keep the
+superseded reasoning rather than deleting it.
+
 ## Documentation
 
 `docs/documentation.{md,tex}` covers the architecture (backends, dispatch,

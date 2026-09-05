@@ -508,9 +508,21 @@ def single_run(W_list, dims, D, tol, maxiter, niter_lanczos, init=None,
             def _hac(x, n=n):
                 return h_ac_action(x.reshape(D, dims[n], D), GL[n], GR[n],
                                     W_list[n]).reshape(-1)
+            # residual_tol rather than the default eigenVALUE test, for
+            # the same reason vumps.py's own single run uses it: the
+            # convergence criterion below is a norm difference between
+            # independently-solved eigenVECTORS, whose accuracy the
+            # eigenvalue test caps at ~sqrt(tol). See
+            # `_lanczos_ground_state`'s own docstring.
             _e, v = _lanczos_ground_state(_hac, AC[n].reshape(-1),
-                                           niter=niter_lanczos)
+                                           niter=niter_lanczos,
+                                           residual_tol=tol / 10.0)
             AC_new[n] = v.reshape(D, dims[n], D)
+            # ... and the same sign alignment: each solve is warm-started
+            # from its own previous vector, so aligning against that start
+            # keeps every AC[n]/C[n] pair mutually consistent.
+            if np.vdot(AC[n], AC_new[n]).real < 0:
+                AC_new[n] = -AC_new[n]
             # H_C[n] lives on the bond to the right of site n: its left
             # environment is the one to the left of site n+1 (which is
             # GL[n+1], or the next cell's GL[0] when n is the last site),
@@ -521,8 +533,11 @@ def single_run(W_list, dims, D, tol, maxiter, niter_lanczos, init=None,
             def _hc(x, GL_bond=GL_bond, n=n):
                 return h_c_action(x.reshape(D, D), GL_bond, GR[n]).reshape(-1)
             _e2, vc = _lanczos_ground_state(_hc, C[n].reshape(-1),
-                                             niter=niter_lanczos)
+                                             niter=niter_lanczos,
+                                             residual_tol=tol / 10.0)
             C_new[n] = vc.reshape(D, D)
+            if np.vdot(C[n], C_new[n]).real < 0:
+                C_new[n] = -C_new[n]
 
         mismatch = gauge_mismatch(AC_new, C_new, AL, AR)
         AC, C = AC_new, C_new

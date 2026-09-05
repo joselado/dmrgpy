@@ -440,9 +440,104 @@ a time, which made the *ramp*, not the solve at the target bond
 dimension, dominate the whole driver: every step is a full multi-restart
 VUMPS solve costing roughly `O(D^3)`, so a unit ramp is `O(D^4)` overall
 and needs ~100 complete solves to reach `D=30` where doubling needs 6.
-Warm-starting is unaffected -- `_grow_initial_state`/`vumps_grow_init`
-embed the previous solution in the new tensors' leading block plus noise
-and assume nothing about the size of the jump.
+**How each rung of that ramp is warm-started is now a real divergence
+between the two VUMPS backends.** `itensor_version=3`'s
+`vumps_grow_init` still does what both sides used to: embed the previous
+solution in the new tensors' leading block, add noise, re-canonicalize --
+which assumes nothing about the size of the jump, but hands VUMPS a set of
+*arbitrary* new directions and leaves it to discover by itself which ones
+the Hamiltonian actually wants. `itensor_version="python"` instead picks
+those directions from the Hamiltonian, by subspace expansion
+(`pyitensor/vumps.py`'s `_subspace_expand`, modelled on
+ITensorInfiniteMPS.jl's own `subspace_expansion.jl`): with `NL`/`NR`
+orthonormal bases of the directions the current `AL`/`AR` isometries do
+not reach and `theta = AL.C.AR`, the SVD of `NL^dagger (H2 theta)
+NR^dagger` supplies the new tensor columns, and `C` is embedded with zeros
+in the new block. Both enlarged tensors stay exactly isometric and the
+enlarged state is bit-for-bit the same physical state, so the expansion
+cannot move the energy -- the next rung provably starts no worse than
+where the previous one finished, which the noise start cannot promise.
+`_grow_initial_state` remains on the `"python"` side too, for the two jobs
+expansion cannot do: padding a rung whose null space was too small to fill
+(only possible when the ramp asks for more than a doubling), and the
+variational safety net's extra attempts, which need a *fresh* random
+perturbation of the same anchor each time and so cannot use a
+deterministic expansion.
+
+Measured at `nrestarts=1` (the setting that isolates the warm start --
+under the default restart budget the driver's cost is dominated by the
+random attempts, which expansion does not touch), as total outer VUMPS
+iterations to walk the whole ramp, noise start -> expansion: the TFIM
+rows barely move (72 -> 71 and 246 -> 238 at `g=1.5`, 146 -> 148 and
+212 -> 232 at the critical `g=1.0`), and so do most Heisenberg rows --
+but the hardest case, the gapless Heisenberg chain at `D=8`, goes 4001 ->
+2401 iterations and 29.0s -> 6.2s, and lands 5x closer to the
+Bethe-ansatz density *every* run (2.1e-3) where the noise start scattered
+between 2.1e-3 and 4.0e-2. That is the shape a better warm start should
+have: no help on a problem that was never hard, and the hard one no
+longer depending on luck. **This is a divergence in convergence
+*behaviour*, not in results**: the two backends still agree on the
+converged answer, they just take different numbers of iterations to get
+there, so a test comparing energies across backends is unaffected while
+one pinning an iteration count is not.
+
+**The Lanczos stopping criterion, and why VUMPS could not previously
+report convergence at all.** `pyitensor/dmrg.py`'s `_lanczos_ground_state`
+stops when the lowest Ritz *value* stops moving, which is right for
+finite DMRG (it reports energies) and wrong for VUMPS: for a Hermitian
+operator the value error is quadratic in the eigenvector error, so a
+value tolerance of 1e-12 leaves the eigenVECTOR accurate only to ~1e-6 --
+and VUMPS's own convergence criterion is a norm difference between AC and
+C, two independently-solved eigenvectors. The gauge mismatch therefore
+floored at ~1e-6 and `tol=1e-10` was unreachable at any number of outer
+iterations, while the energy was already correct, which is exactly why no
+energy-based test could see it. `_lanczos_ground_state` now takes an
+opt-in `residual_tol` selecting the Ritz *residual* criterion
+(`beta_{k+1}*|s_k|`, free from the tridiagonal problem), which
+`pyitensor/vumps.py` and `pyitensor/vumps_ms.py` pass as `tol/10`; every
+other caller, finite DMRG included, is byte-identical to before. A
+related second-order problem is fixed alongside it: AC and C are solved
+independently, so nothing ties their signs together, and a flipped pair
+made the mismatch read ~4 instead of ~1e-6 in 11 of every 100 iterations
+-- each new vector is now sign-aligned against the one it was warm-started
+from.
+
+Measured through the public driver at the default `nrestarts=6`, before
+-> after, as (wall time, total outer iterations, runs reporting
+`converged`): TFIM `g=1.5` `D=4` (2.52s, 2911, 3/3) -> (0.22s, 263, 3/3);
+`g=1.5` `D=8` (32.6s, 6450, **0/3**) -> (6.71s, 1152, **3/3**);
+critical `g=1.0` `D=4` (5.87s, 7268, **0/3**) -> (0.99s, 690, **3/3**);
+`g=1.0` `D=8` (38.4s, 9668, **0/3**) -> (4.64s, 865, **3/3**). Energies
+are identical to every printed digit throughout. The gapless Heisenberg
+chain is unchanged in iteration count (it cannot converge at these bond
+dimensions either way) and within ~10% in wall time, but its `D=8`
+accuracy improves from 4.1e-3 to 2.1e-3. Note the C++ `itensor_version=3`
+port shares the original eigenvalue criterion, so `Chain::
+vumps_ground_state` still floors at ~1e-6 and still reports
+`converged=False` at `D>=8` -- another behavioural divergence between the
+two VUMPS backends, on top of the warm-start one above.
+
+The same fix closed a second, initially unrelated-looking problem: the
+tangent-space excitation ansatz's loss of accuracy when a state is
+represented at a larger bond dimension than it needs. That was diagnosed
+at the time as pure conditioning ("padding leaves near-null bond
+directions and the ansatz's `(1-E)`-type inverses amplify them") and
+recorded as such, with a `~1e12` spread across bond dimensions --
+excitation error 1.8e-15 at `maxm=1` rising to 3.5e-3 at `maxm=8` on a
+field-polarized XX chain whose exact state is `D=1`, and a ~33% flake in
+the exact-dispersion tests as a result. The amplification was real, but
+what it amplified was the ~1e-6 eigenvector error above. Re-measured with
+the residual criterion in place: 8.9e-16, 2.1e-12, 1.4e-13, 2.9e-13,
+2.1e-12 at `maxm` = 1, 2, 4, 8, 16 -- no longer monotonic in `maxm`, which
+is itself the sign that the dominant error term has changed. The
+regression that used to pin the degradation now pins its absence
+(`tests/test_infinite_chain.py::
+test_redundant_bond_dimension_no_longer_costs_excitation_accuracy`, which
+its own predecessor's docstring had asked for should the conditioning ever
+be fixed). Projecting the redundant directions out of the excitation
+solves remains the principled fix for a genuinely-entangled case, where
+the input to that amplification would be a real truncation error rather
+than solver noise.
 
 The remaining `O(D^6)` costs inside a single solve have been removed on
 the `"python"` side only, and this is a real divergence between the two

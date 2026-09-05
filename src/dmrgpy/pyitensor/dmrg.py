@@ -115,13 +115,43 @@ def _block_reorthogonalize_impl(Q, w):
 _block_reorthogonalize = bk.jit(_block_reorthogonalize_impl)
 
 
-def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12):
+def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12, residual_tol=None):
     """Lowest eigenpair of a Hermitian linear operator (given as a matvec
     function) via Lanczos with full reorthogonalization, stopping early
     once the lowest Ritz value stabilizes to `tol` (relative). See this
     module's docstring for why this replaces scipy.sparse.linalg.eigsh
     here. Returns (eigenvalue, eigenvector) with eigenvector normalized
-    (v0 need not be)."""
+    (v0 need not be).
+
+    `residual_tol`, when given, replaces that eigenVALUE test with the
+    Ritz RESIDUAL test ||(H-lambda)v|| < residual_tol*max(1,|lambda|),
+    computed for free from the tridiagonal problem as beta_{k+1}*|s_k|
+    (the last component of the tridiagonal eigenvector). The two are not
+    interchangeable, and which one a caller wants depends on whether it
+    consumes the eigenvalue or the eigenvector:
+
+    For a Hermitian operator the Ritz value error is QUADRATIC in the
+    eigenvector error, so stopping when the value stops moving at 1e-12
+    leaves the vector accurate only to ~sqrt(1e-12) = 1e-6. That is
+    exactly right for finite DMRG, which reports energies; it is exactly
+    wrong for VUMPS, whose convergence criterion is a norm difference
+    between two independently-solved EIGENVECTORS (AC and C). Measured
+    directly on a D=8 TFIM chain: with the eigenvalue test the VUMPS gauge
+    mismatch floors at ~1e-6 and `tol=1e-10` is unreachable no matter how
+    many outer iterations are spent, while the same solve with the
+    eigenvalue test disabled reaches 2.8e-15 at the SAME `niter=30` --
+    i.e. the Krylov space was always big enough, the stopping rule was
+    just measuring the wrong thing. This is also the criterion
+    ITensorInfiniteMPS.jl's own `solver_tol` is defined on (KrylovKit's
+    `eigsolve` tolerance is a residual norm, not a value difference).
+
+    The eigenvalue test is skipped entirely when `residual_tol` is set --
+    it is the looser of the two here and would otherwise always fire
+    first. `tol` keeps its second job either way (the `beta < tol`
+    breakdown test, which declares the Krylov space invariant).
+
+    Callers that pass nothing are byte-identical to before this parameter
+    existed."""
     # The Krylov vectors stay wherever v0 lives (on the device, for a
     # device backend). Only the tridiagonal coefficients alpha/beta come
     # back to the host -- two numbers per iteration, against O(chi^2 d^2)
@@ -146,6 +176,16 @@ def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12):
     m = min(niter, v0.size)
     for _ in range(1, m):
         beta = float(bk.to_host(_xp.linalg.norm(w)))
+        if residual_tol is not None:
+            # The k=1 Ritz vector is q itself and its residual is exactly
+            # ||w|| = beta, so an already-converged warm start returns
+            # after a SINGLE matvec -- which is where a late VUMPS
+            # iteration lives, and why this check sits before the loop
+            # body rather than at the end of it.
+            val, svec = _tridiag_ground_ritz(alphas, betas)
+            if beta * abs(float(svec[-1])) < residual_tol * max(1.0, abs(val)):
+                Q = _xp.column_stack(qs)
+                return val, Q @ bk.asarray(svec)
         if beta < tol:
             break
         betas.append(beta)
@@ -175,6 +215,8 @@ def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12):
 
         # eigenvalue only for the convergence test; the eigenvector is
         # built once, on the iteration that actually returns
+        if residual_tol is not None:
+            continue                 # the residual test above owns stopping
         cur_eval = _tridiag_ground_value(alphas, betas)
         if abs(cur_eval - prev_eval) < tol * max(1.0, abs(cur_eval)):
             cur_eval, cur_vec = _tridiag_ground_ritz(alphas, betas)

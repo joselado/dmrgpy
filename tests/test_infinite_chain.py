@@ -1173,26 +1173,41 @@ def test_excitation_gap_matches_exact_minimum():
     assert ic.excitation_gap() == pytest.approx(2 * h - J, abs=1e-8)
 
 
-def test_excitation_accuracy_degrades_with_redundant_bond_dimension():
-    """Pins the real cause of what used to be a ~33% flake in the two
-    exact-dispersion tests above: representing an exactly-D=1 state at a
-    larger bond dimension costs excitation accuracy, badly, while leaving
-    the ground-state energy essentially untouched.
+def test_redundant_bond_dimension_no_longer_costs_excitation_accuracy():
+    """Representing an exactly-D=1 state at a larger bond dimension used to
+    cost excitation accuracy catastrophically. It no longer does, and this
+    test pins the fix rather than the defect.
 
-    The mechanism is conditioning, not convergence -- padding the state out
-    leaves near-null directions in the bond space and the excitation
-    ansatz's (1-E)-type inverses amplify them. Measured over 12 runs at each
-    bond dimension: worst excitation error 1.8e-15 (maxm=1), 1.8e-10
-    (maxm=2), 1.7e-7 (maxm=4), 3.5e-3 (maxm=8), with |e0 error| <= 8e-10
-    throughout.
-
-    Asserted loosely and one-sidedly, because the run-to-run spread at large
-    maxm is itself large (that is the phenomenon): only that maxm=1 is
-    essentially exact and that maxm=8 is at least a thousand times worse.
-    Uses a fixed comparison within a single run rather than pinned numbers,
-    so it cannot go stale against a future conditioning fix -- if someone
+    History, because the reversal is the point. This test previously
+    asserted the OPPOSITE -- that `maxm=8` had to be at least a thousand
+    times worse than `maxm=1` -- and its own docstring said "if someone
     fixes the conditioning, this test fails and should be updated to say
-    so."""
+    so". That is exactly what happened. Measured over 12 runs at each bond
+    dimension, the worst excitation error used to be 1.8e-15 (maxm=1),
+    1.8e-10 (maxm=2), 1.7e-7 (maxm=4), 3.5e-3 (maxm=8), while |e0 error|
+    stayed <= 8e-10 throughout -- and that ~1e12 spread was the real cause
+    of a ~33% flake in the two exact-dispersion tests above.
+
+    The diagnosis recorded at the time -- "the mechanism is conditioning,
+    not convergence", padding leaving near-null bond directions that the
+    excitation ansatz's (1-E)-type inverses amplify -- was only half right.
+    The amplification is real and still there, but what it was amplifying
+    was CONVERGENCE error in the VUMPS state itself: `_lanczos_ground_state`
+    stopped on the lowest Ritz *value*, which for a Hermitian operator caps
+    the eigenVECTOR at the square root of that tolerance, i.e. ~1e-6. Once
+    the VUMPS solves run under the Ritz *residual* criterion instead (see
+    `pyitensor/vumps.py` and `_lanczos_ground_state`'s own docstring) the
+    state is converged to machine precision, and a bounded amplification of
+    machine precision is still machine precision. Re-measured over 5 runs
+    each, worst excitation error: 8.9e-16 (maxm=1), 2.1e-12 (maxm=2),
+    1.4e-13 (maxm=4), 2.9e-13 (maxm=8), 2.1e-12 (maxm=16) -- no longer
+    monotonic in maxm, which is itself the signature that the dominant
+    error term changed.
+
+    Asserted as a flat bound across the whole range rather than as a
+    comparison between two bond dimensions: there is no longer a
+    degradation to compare against, and a bound is what a future regression
+    would actually violate."""
     J, h = 1.0, 3.0
 
     def worst_error(maxm):
@@ -1200,10 +1215,13 @@ def test_excitation_accuracy_degrades_with_redundant_bond_dimension():
         return max(abs(ic.excitation_energies(k, n=1)[0] - (2 * h - J * np.cos(k)))
                    for k in np.linspace(0, 2 * np.pi, 5, endpoint=False))
 
-    exact_D = worst_error(1)
-    padded = max(worst_error(8) for _ in range(3))  # spread is large; take the worst
-    assert exact_D < 1e-12, exact_D
-    assert padded > 1000 * max(exact_D, 1e-15), (exact_D, padded)
+    # 1e-9 is ~3 orders above the worst value measured anywhere in the sweep
+    # above, and ~6 orders below the 3.5e-3 this used to reach at maxm=8 --
+    # loose enough not to flake on the residual run-to-run spread, tight
+    # enough that a return of the old behaviour cannot slip through.
+    for maxm in (1, 2, 4, 8):
+        err = max(worst_error(maxm) for _ in range(2))
+        assert err < 1e-9, (maxm, err)
 
 
 def test_excitation_environment_is_cached_across_calls():

@@ -61,13 +61,35 @@ pyitensor only, same physical scope limit.
 
 == Convergence robustness (honest scope note) ==
 
+Before any of the below: the single most important thing about this
+loop's convergence is that its inner eigensolves run under
+`_lanczos_ground_state`'s RESIDUAL criterion (`residual_tol=tol/10`), not
+its default eigenVALUE one. `gauge_mismatch` compares AC and C, two
+independently-solved eigenVECTORS, and a value-based stopping rule leaves
+an eigenvector accurate only to the square root of its tolerance -- so
+under the default rule this loop floored at a mismatch of ~1e-6 and could
+not reach `tol=1e-10` at ANY number of outer iterations, while reporting a
+perfectly good energy the whole time. Measured on a D=8 TFIM chain,
+switching to the residual criterion took `converged` from 0/3 runs to 3/3
+and the whole driver from 32.6s to 6.7s (g=1.5) and 38.4s to 4.6s
+(g=1.0, critical), with the energy unchanged to every printed digit. See
+`_lanczos_ground_state`'s own docstring. A second, smaller piece of the
+same problem: AC and C being solved independently means nothing ties
+their SIGNS together, and a flipped pair makes `gauge_mismatch` read
+~4 instead of ~1e-6 -- 11 of every 100 iterations, measured -- so both
+the convergence test and the reported diagnostic were partly noise. Both
+are fixed in `_vumps_single_run`; the paragraphs below describe what
+remains after that.
+
 Plain single-attempt VUMPS from a random start turned out, during
 development, to be genuinely unreliable for D>1 -- confirmed directly to
 reach self-consistent (gauge_mismatch<tol) fixed points at an ENERGY WORSE
 than the same model's own smaller-D result, which cannot happen for the
 true variational optimum. `vumps_ground_state` mitigates this two ways:
 (1) a D-ramp (warm-start each bond dimension from the previous one's own
-best solution) plus multiple restarts at each step, and (2) a safety net
+best solution -- by subspace expansion, see `_subspace_expand` and the
+section comment above it; noise-padding only where expansion cannot supply
+the directions) plus multiple restarts at each step, and (2) a safety net
 that explicitly enforces the variational principle across the ramp -- if a
 given D's own restart search still lands worse than an already-known
 smaller-D energy, a bounded extra budget of attempts -- warm-started from
@@ -163,6 +185,7 @@ standard "AC-C gauge mismatch" diagnostic most VUMPS implementations use).
 
 import numpy as np
 from scipy.linalg import polar as _polar
+from scipy.linalg import null_space
 
 from . import idmrg
 from . import idmrg_excitations as idmrg_exc
@@ -270,14 +293,30 @@ def _random_raw_tensor(D, d_g, seed_AL=None, noise=0.05):
     ill-conditioned there.
 
     So a seeding fix would make the failures reproducible, not make them go
-    away, and the ground-state solver is not the thing to change. The tests
-    now ask for the bond dimension their state actually needs, which is
-    deterministic to 1.8e-15 over 30 runs, and the degradation itself is
-    pinned by
-    `test_excitation_accuracy_degrades_with_redundant_bond_dimension`. The
-    real fix, if this matters for a physical (non-product-state) case, is to
-    project the redundant directions out of the excitation ansatz's linear
-    solves rather than to reseed anything here."""
+    away. The rest of that conclusion -- "and the ground-state solver is not
+    the thing to change" -- was WRONG, and is kept here rather than deleted
+    because the way it was wrong is instructive. The conditioning
+    amplification is real, but what it was amplifying was convergence error
+    in the ground state itself: `_lanczos_ground_state` stopped on the
+    lowest Ritz VALUE, which caps the eigenVECTOR at the square root of that
+    tolerance (~1e-6), and the excitation ansatz's inverses turned that into
+    ~1e-3. The ground-state solver was exactly the thing to change -- not
+    its seeding, but its stopping criterion (see that function's own
+    docstring, and `_vumps_single_run`'s use of `residual_tol`). With the
+    state converged to machine precision the same amplification lands at
+    ~1e-13 and the phenomenon is gone: the regression that used to pin the
+    degradation now pins its absence, as
+    `tests/test_infinite_chain.py::
+    test_redundant_bond_dimension_no_longer_costs_excitation_accuracy`.
+
+    Two things survive from the original analysis. The measurement itself
+    stands (padding an exactly-D=1 state does leave near-null bond
+    directions, and the inverses do amplify them -- it is the size of what
+    they amplify that changed). And projecting those directions out of the
+    excitation ansatz's linear solves remains the principled fix if this
+    ever matters for a physical, genuinely-entangled case, where the input
+    to the amplification is a real truncation error rather than solver
+    noise; nothing here reseeds anything to paper over it."""
     rng = np.random.default_rng()
     A0 = noise * (rng.standard_normal((D, d_g, D)) + 1j * rng.standard_normal((D, d_g, D)))
     if seed_AL is not None:
@@ -301,6 +340,202 @@ def _canonicalize_raw(A0, D, d_g):
     return idmrg._to_array_lpr(U_list[0])
 
 
+# == Subspace expansion (bond-dimension growth) ==============================
+#
+# How the D-ramp gets from an already-converged solution at D_old to a
+# starting point at D_new > D_old. `_grow_initial_state` (below, kept as
+# the fallback) answers this with noise: embed the old tensors in the
+# top-left block of a larger random one and re-canonicalize. That works,
+# but the new directions it hands VUMPS are *arbitrary* -- the optimizer
+# then has to discover, by itself, which of them the Hamiltonian actually
+# wants populated, and the "Convergence robustness" section of this
+# module's own docstring is largely a record of what happens when it
+# fails to (a D=4 solve landing above its own D=2 energy, the restart
+# budget and the variational safety net that exist to catch that).
+#
+# `_subspace_expand` answers it the way ITensorInfiniteMPS.jl's own
+# `subspace_expansion.jl` does, and for the same reason: pick the new
+# directions to be the ones H itself couples the current state to most
+# strongly. Concretely -- with NL/NR orthonormal bases of the null spaces
+# of AL and AR (the directions the current isometries do NOT reach), and
+# theta = AL.C.AR the current two-site state --
+#
+#     M = NL^dagger . (H2 theta) . NR^dagger,   M = U S V^dagger (SVD)
+#
+# and the k largest singular pairs give the new left/right tensor columns
+# NL.U / NR.V. Because M's row/column spaces are orthogonal to AL/AR by
+# construction, the enlarged tensors are still exactly isometric, and
+# because C is embedded with zeros in the new block, the expanded state is
+# *the same physical state* as the D_old solution -- expansion adds
+# variational directions without moving the energy, so the ramp's next
+# step provably starts no worse than where the previous one finished. That
+# is exactly what the noise start cannot promise.
+#
+# H2 here is the genuine two-site effective Hamiltonian, background
+# environments included (GL, GR, both onsite terms, the bond term between
+# the two sites, and the two bond terms straddling the boundary to the
+# neighbours) -- i.e. `_h_ac_action`'s own diagram list widened from one
+# site to two, built from the same primitives. Upstream's own
+# `InfiniteSum{ITensor}` fast path drops the environments and keeps only
+# the local two-site term; the environments are cheap here (they are
+# already built and sitting on the VUMPSResult) and this is a *direction*
+# heuristic either way, so there is no reason to drop them.
+#
+# Measured, at nrestarts=1 (which is what isolates the warm start: with
+# the default restart budget the driver's cost is dominated by the RANDOM
+# attempts, which expansion does not touch). Total outer VUMPS iterations
+# to walk the whole ramp, noise start -> expansion, median over 3-5
+# independent runs (independent, not seeded: `_random_raw_tensor` draws
+# from an OS-seeded `default_rng`, so `np.random.seed` does not reach it):
+#
+#   TFIM g=1.5        D=4     72 ->  71     (0.05s -> 0.04s)
+#   TFIM g=1.5        D=8    246 -> 238     (1.16s -> 1.20s)
+#   TFIM g=1.0        D=4    146 -> 148     (0.18s -> 0.17s)
+#   TFIM g=1.0        D=8    212 -> 232     (0.83s -> 1.09s)
+#   Heisenberg        D=4   1601 -> 1601    (1.67s -> 1.49s)
+#   Heisenberg        D=8   4001 -> 2401    (28.96s -> 6.23s)
+#   Heisenberg n_uc=2 D=4   2400 -> 2400    (2.25s -> 2.01s)
+#   Heisenberg n_uc=2 D=8   3200 -> 3200    (8.32s -> 7.38s)
+#
+# Read that honestly: expansion is a wash on almost every row, and the one
+# row where it is decisive is the hardest one -- the gapless Heisenberg
+# chain at D=8, 4.6x faster and, more to the point, 5x more accurate AND
+# reproducible (the noise start's runs scattered between 2.1e-3 and 4.0e-2
+# from the Bethe-ansatz energy density; every expansion run landed at
+# 2.1e-3). That is the shape a better warm start should have: it cannot
+# help a problem that was never hard, and it stops the hard one from
+# depending on luck.
+#
+# These numbers replace a much more flattering earlier set (563 -> 127,
+# 2401 -> 907, ...) measured before `_lanczos_ground_state` grew its Ritz
+# RESIDUAL criterion. Most of that apparent gain was against a broken
+# baseline: with an eigenvector only accurate to ~1e-6, a poor starting
+# point cost many extra outer iterations to recover from, so *any*
+# improvement to the start looked large. With the eigenvectors solved
+# properly the starting point matters much less, and the honest benefit is
+# the table above. The lesson is worth keeping: measure an optimization
+# against a baseline you have already checked is not itself broken.
+
+
+def _h_two_site_action(theta, GL, GR, bond_envs, h1):
+    """H2[theta] for a (D,d_g,d_g,D) two-site tensor -- the two-site
+    widening of `_h_ac_action`'s own term list (see the section comment
+    above). The two physical legs are contracted with operators
+    individually, and the two bond legs are closed against GL/GR or against
+    the one-more-site bond environments exactly as in the one-site case.
+
+    Kept separate from the theta it is applied to (rather than folded into
+    `_subspace_expand`) so it can be checked on its own: assembled densely
+    over a basis, this map must come out Hermitian, which is what pins the
+    operator-ordering conventions of the three bond terms below -- the
+    intra-pair one in particular applies mat_a and mat_b to two DIFFERENT
+    legs, so a transposed factor there survives every isometry/state
+    check the expansion itself is subject to and shows up only here."""
+    D, d_g = theta.shape[0], theta.shape[1]
+
+    def as3(T):
+        return T.reshape(D, d_g * d_g, T.shape[3])
+
+    def un3(T):
+        return T.reshape(T.shape[0], d_g, d_g, T.shape[2])
+
+    # background environments: both physical legs ride along untouched, so
+    # the (d_g,d_g) pair is just one fat physical leg here.
+    Y = un3(idmrg_exc._cap_left(GL, as3(theta)))
+    Y = Y + un3(idmrg_exc._cap_right(as3(theta), GR))
+    # the two onsite terms
+    if h1 is not None:
+        Y = Y + np.einsum('io,liqr->loqr', h1, theta)
+        Y = Y + np.einsum('io,lpir->lpor', h1, theta)
+    for mat_a, mat_b, Lvec_a, Rvec_b in bond_envs:
+        # the bond BETWEEN the two sites: no environment at all, both ends
+        # of the term land inside theta itself.
+        Y = Y + np.einsum('io,jk,lijr->lokr', mat_a, mat_b, theta)
+        # the bond straddling theta's LEFT edge: mat_a sits on the site to
+        # the left (already summed into Lvec_a), mat_b on theta's own first
+        # physical leg.
+        Y = Y + un3(idmrg_exc._cap_left(
+            Lvec_a, as3(np.einsum('io,liqr->loqr', mat_b, theta))))
+        # ... and the mirror, straddling theta's RIGHT edge.
+        Y = Y + un3(idmrg_exc._cap_right(
+            as3(np.einsum('io,lpir->lpor', mat_a, theta)), Rvec_b))
+    return Y
+
+
+def _null_space_left(AL):
+    """(D, d_g, kL) orthonormal basis of the directions AL's own isometry
+    does not reach: columns orthogonal to AL's columns under the (l,p)
+    inner product, i.e. sum_{l,p} conj(AL[l,p,m]) NL[l,p,a] = 0."""
+    D, d_g, _ = AL.shape
+    M = AL.reshape(D * d_g, -1)
+    N = null_space(M.conj().T)
+    return N.reshape(D, d_g, N.shape[1])
+
+
+def _null_space_right(AR):
+    """(kR, d_g, D) mirror of `_null_space_left`: rows orthogonal to AR's
+    own rows, sum_{p,r} NR[a,p,r] conj(AR[l,p,r]) = 0. The conjugate sits
+    on AR (not on NR) because AR's right-canonicality is itself written
+    with the conjugate on the second factor -- so the complement is the
+    null space of conj(AR), not of AR."""
+    D, d_g, _ = AR.shape
+    M = AR.reshape(D, d_g * D)
+    N = null_space(M.conj())
+    return N.T.reshape(N.shape[1], d_g, D)
+
+
+def _subspace_expand(result, pending, h1, D_new, cutoff=1e-12):
+    """(AL, AR, C) at bond dimension D_new, grown from a converged
+    `VUMPSResult` at a smaller D by subspace expansion (see the section
+    comment above). Returns None if the expansion cannot supply any new
+    direction at all (D_new <= D, an exhausted null space, or an H2 that
+    has no weight outside the current subspace -- the last of which means
+    the state is already exact at this D and there is nothing to grow
+    into); the caller falls back to `_grow_initial_state` there.
+
+    The returned dimension is D + k with k <= D_new - D: the null spaces
+    have only D*(d_g-1) directions each and the SVD cutoff may discard
+    more, so the caller must be prepared for a state SMALLER than it asked
+    for and pad the remainder itself. It is never larger."""
+    AL, AR, C = result.AL, result.AR, result.C
+    D, d_g, _ = AL.shape
+    k_want = D_new - D
+    if k_want <= 0:
+        return None
+
+    NL = _null_space_left(AL)
+    NR = _null_space_right(AR)
+    if NL.shape[2] == 0 or NR.shape[0] == 0:
+        return None
+
+    bond_envs = _precompute_bond_environments(AL, AR, pending)
+    theta = np.einsum('lpm,mn,nqr->lpqr', AL, C, AR)
+    H2theta = _h_two_site_action(theta, result.GL, result.GR, bond_envs, h1)
+
+    # <NL_a NR_b| H2 |theta>: both bras conjugate, hence conj on both
+    # null-space factors.
+    M = np.einsum('lpa,lpqr,bqr->ab', NL.conj(), H2theta, NR.conj())
+    U, S, Vh = np.linalg.svd(M, full_matrices=False)
+    keep = int(np.sum(S > cutoff * max(S[0], 1.0))) if S.size else 0
+    keep = min(keep, k_want)
+    if keep == 0:
+        return None
+
+    AL_add = np.einsum('lpa,ak->lpk', NL, U[:, :keep])
+    AR_add = np.einsum('kb,bqr->kqr', Vh[:keep, :], NR)
+
+    Dn = D + keep
+    AL_new = np.zeros((Dn, d_g, Dn), dtype=complex)
+    AL_new[:D, :, :D] = AL
+    AL_new[:D, :, D:] = AL_add
+    AR_new = np.zeros((Dn, d_g, Dn), dtype=complex)
+    AR_new[:D, :, :D] = AR
+    AR_new[D:, :, :D] = AR_add
+    C_new = np.zeros((Dn, Dn), dtype=complex)
+    C_new[:D, :D] = C
+    return AL_new, AR_new, C_new
+
+
 def _grow_initial_state(D, d_g, AL_old, AR_old):
     """(AL0, AR0, C0) at bond dimension D, warm-started from a smaller,
     already-(locally-)converged D_old<D solution (AL_old, AR_old) --
@@ -308,6 +543,16 @@ def _grow_initial_state(D, d_g, AL_old, AR_old):
     trick, but seeding each raw tensor with the old solution embedded in
     its top-left block (plus small noise on every entry, see
     `_random_raw_tensor`) rather than starting from pure noise.
+
+    This is no longer the ramp's *first* choice: `_subspace_expand` (see
+    the section comment above) picks the new directions from H itself
+    rather than from noise; it is a wash on most models and decisive on
+    the hardest one tested (see that comment's own table). What is left
+    for this function is the two places expansion
+    cannot serve -- padding out a ramp step the null space was too small to
+    fill, and the variational safety net's extra attempts, which need a
+    FRESH perturbation of the same anchor each time and so cannot use a
+    deterministic expansion. Both remain load-bearing.
 
     This is the standard, much more reliable way to reach a large target D
     in practice -- confirmed directly this matters, not just nice-to-have:
@@ -756,15 +1001,33 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
             return a if a.converged else b
         return a if a.e0 < b.e0 else b
 
+    def warm_start(prev, D_cur):
+        """The ramp's first attempt at D_cur, grown from the previous
+        step's own best result. Subspace expansion when it can supply the
+        directions (see `_subspace_expand`), noise-padding for whatever it
+        cannot -- an exhausted null space or an SVD that keeps fewer
+        directions than the ramp step asks for both leave a state smaller
+        than D_cur, which `_grow_initial_state` then pads the rest of the
+        way. Never worse than the pure-noise start it replaces: the
+        fallback IS that start."""
+        expanded = _subspace_expand(prev, pending, h1, D_cur)
+        if expanded is None:
+            return _grow_initial_state(D_cur, d_g, prev.AL, prev.AR)
+        AL_e, AR_e, C_e = expanded
+        if AL_e.shape[0] < D_cur:
+            return _grow_initial_state(D_cur, d_g, AL_e, AR_e)
+        return AL_e, AR_e, C_e
+
     best = None
+    prev_result = None
     prev_AL = prev_AR = None
     best_e0_so_far = None
     for D_cur in _d_ramp(D):
         n_here = nrestarts if D_cur == D else min(nrestarts, 3)
         local_best = None
         for attempt_i in range(n_here):
-            init = (_grow_initial_state(D_cur, d_g, prev_AL, prev_AR)
-                    if attempt_i == 0 and prev_AL is not None else None)
+            init = (warm_start(prev_result, D_cur)
+                    if attempt_i == 0 and prev_result is not None else None)
             local_best = pick_better(one_attempt(D_cur, init), local_best)
         if local_best is None:
             raise RuntimeError(
@@ -797,6 +1060,7 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
                 init = (_grow_initial_state(D_cur, d_g, prev_AL, prev_AR)
                         if prev_AL is not None else None)
                 local_best = pick_better(one_attempt(D_cur, init), local_best)
+        prev_result = local_best
         prev_AL, prev_AR = local_best.AL, local_best.AR
         best_e0_so_far = (local_best.e0 if best_e0_so_far is None
                            else min(best_e0_so_far, local_best.e0))
@@ -850,8 +1114,16 @@ def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
             X = x.reshape(D, d_g, D)
             return _h_ac_action(X, GL, GR, bond_envs, h1).reshape(-1)
 
+        # residual_tol, not the default eigenVALUE test: the criterion
+        # below is a norm difference between AC and C, two independently
+        # solved eigenvectors, and the eigenvalue test caps eigenVECTOR
+        # accuracy at ~sqrt(tol) -- which is why this loop used to floor
+        # at a gauge mismatch of ~1e-6 and could not reach tol=1e-10 at
+        # any number of iterations. See `_lanczos_ground_state`'s own
+        # docstring for the measurement.
         _lam_ac, ac_vec = _lanczos_ground_state(
-            matvec_ac, AC.reshape(-1), niter=min(niter_lanczos, dim_ac))
+            matvec_ac, AC.reshape(-1), niter=min(niter_lanczos, dim_ac),
+            residual_tol=tol / 10.0)
         AC_new = ac_vec.reshape(D, d_g, D)
 
         def matvec_c(x, GL=GL, GR=GR, bond_envs=bond_envs):
@@ -859,8 +1131,27 @@ def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
             return _h_c_action(X, GL, GR, bond_envs).reshape(-1)
 
         _lam_c, c_vec = _lanczos_ground_state(
-            matvec_c, C.reshape(-1), niter=min(niter_lanczos, D * D))
+            matvec_c, C.reshape(-1), niter=min(niter_lanczos, D * D),
+            residual_tol=tol / 10.0)
         C_new = c_vec.reshape(D, D)
+
+        # An eigenvector is only defined up to a phase, and AC and C were
+        # just solved INDEPENDENTLY -- so nothing ties their phases
+        # together, while `_gauge_mismatch` below compares them directly.
+        # The Lanczos tridiagonal is real symmetric, so the freedom is a
+        # sign rather than a general phase, and each solve is warm-started
+        # from the previous iteration's own vector: aligning each new
+        # vector with the one it started from is enough to keep the pair
+        # consistent by induction (AC = AL@C exactly, at iteration 0).
+        # Without this, a sign flip makes ||AC-AL@C|| read ~2||AC||
+        # instead of ~0 -- measured on a D=8 TFIM chain, 11 of every 100
+        # iterations reported a mismatch of 4.0 for a state whose true
+        # mismatch was ~1e-6, so both the convergence test and the
+        # `gauge_mismatch` on the returned VUMPSResult were a coin flip.
+        if np.vdot(AC, AC_new).real < 0:
+            AC_new = -AC_new
+        if np.vdot(C, C_new).real < 0:
+            C_new = -C_new
 
         # Compared against the CURRENT (AL, AR) -- the gauge that was held
         # fixed while building GL/GR/bond_envs above and solving for this
