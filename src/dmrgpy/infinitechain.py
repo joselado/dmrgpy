@@ -35,17 +35,47 @@ purely as an ergonomic mirror so a coupling can be phrased in whichever
 direction is physically natural, e.g. `SxL[i]*SxC[j]` instead of manually
 reflecting indices into a `SxC[i]*SxR[j]` term).
 
-A term is valid iff the set of cell-groups (L/C/R) it touches is a subset of
-{L,C} or of {C,R} -- i.e. it may touch one or two *adjacent* cells, but
-never L and R at once (that would span three cells, out of scope) --
-`set_hamiltonian` validates this and raises ValueError otherwise. Any term
-touching an L-suffixed operator is canonicalized by shifting it one cell to
-the right (L->C, C->R), so the stored Hamiltonian is uniformly "intra-cell C
-terms" + "C-to-R inter-cell terms", each physical bond attributed to
-exactly one cell -- avoiding any double-counting between a cell's own C-R
-terms and its right neighbor's L-C terms, the same way a user is already
-expected not to redundantly write both `Sx[i]*Sx[i+1]` and `Sx[i+1]*Sx[i]`
-for one bond in existing finite-chain code today.
+A coupling longer-ranged than the three flat lists cover is written with an
+integer cell offset instead: `get_operator(name, i, group=c)` puts `name` on
+site `i` of the cell `c` cells to the right (`c=-1,0,1` are exactly L, C and
+R), so a next-nearest-*cell* bond is `SzC[0]*ic.get_operator("Sz",0,group=2)`.
+
+Terms of any finite range are accepted. Each is canonicalized by translating
+it, as a whole, onto the cell its leftmost site lives in, so the stored
+Hamiltonian is uniformly "intra-cell C terms" + "C-to-further-right
+inter-cell terms", each physical bond attributed to exactly one cell --
+avoiding any double-counting between a cell's own rightward terms and its
+neighbors' leftward ones, the same way a user is already expected not to
+redundantly write both `Sx[i]*Sx[i+1]` and `Sx[i+1]*Sx[i]` for one bond in
+existing finite-chain code today.
+
+What consumes a longer-range term is narrower than what `set_hamiltonian`
+accepts. Both GROUND-STATE algorithms handle any reach, on both backends.
+`gs_method="vumps"` (the default) routes a Hamiltonian whose couplings exceed
+one unit cell to the *sequential* multi-site solver (`pyitensor/vumps_ms.py`,
+or `Chain::vms_ground_state` on `itensor_version=3`), whose channel-resolved
+environments carry one channel per site of a term's reach and so cost
+linearly in it -- where the grouped reach-1 path it otherwise uses would need
+the same chain rewritten on an `n_uc >= range` cell and folded into a
+`d**range` supersite. `gs_method="idmrg"` handles one too, by a different
+route: its growth loop consumes whatever automaton `pyitensor/idmrg.py`'s
+`_build_periodic_mpo` builds, and that has always carried one pending channel
+per site of a term's reach, so it needed no dispatch at all.
+
+Two things do NOT follow along, and they differ in kind:
+
+* `excitation_energies`/`excitation_gap` raise on either backend. The
+  tangent-space ansatz is genuinely reach-1 machinery ({GL, GR, bond_envs}
+  rather than one environment matrix per automaton channel), so there is
+  no sequential route for it to take. Rewrite the chain on a longer cell.
+* `vev`/`correlator` follow along on `itensor_version="python"` (and so does
+  `kpm_finite`, on either backend -- it builds its own finite window). On
+  `itensor_version=3` they raise for anything the sequential solver answered,
+  which is a pre-existing gap of that backend rather than something specific
+  to reach: `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`
+  read the GROUPED snapshot, and `vms_ground_state` has never had a
+  static-observable port. It was previously reachable only at `n_uc>2`; a
+  long-range Hamiltonian at `n_uc<=2` now reaches it too.
 """
 
 import warnings
@@ -90,21 +120,6 @@ def _warn_if_growth_missed_local_ground_state(e0_fresh, e0_stored):
             "unreliable for this model.".format(
                 e0_stored, e0_fresh, e0_stored - e0_fresh),
             RuntimeWarning, stacklevel=3)
-
-
-def _term_groups(term, n_uc):
-    """The set of cell-groups ('L','C','R') a term's site indices touch,
-    using this module's convention: site<0 -> L, 0<=site<n_uc -> C,
-    site>=n_uc -> R."""
-    groups = set()
-    for _name, site in term[1:]:
-        if site < 0:
-            groups.add("L")
-        elif site < n_uc:
-            groups.add("C")
-        else:
-            groups.add("R")
-    return groups
 
 
 def _wrap_terms(op_terms, name):
@@ -156,29 +171,35 @@ def _canonicalize_hamiltonian(h, n_uc):
                 "Infinite_Many_Body_Chain.set_hamiltonian: a term touches "
                 "more than 2 distinct sites ({}) -- only 1- and 2-site "
                 "terms are supported".format(term))
-        groups = _term_groups(term, n_uc)
-        if "L" in groups and "R" in groups:
-            raise ValueError(
-                "Infinite_Many_Body_Chain.set_hamiltonian: a term spans "
-                "both the previous (L) and next (R) unit cell at once "
-                "({}) -- only couplings between at most two adjacent unit "
-                "cells are supported".format(term))
-        if "L" in groups:
-            # groups is a subset of {L,C} here (L+R together already
-            # raised above) -- shifting every site by +n_uc moves an
-            # L-range site (-n_uc<=site<0) into the C range and a
-            # C-range site (0<=site<n_uc) into the R range, so *both*
-            # labels advance one step, not just L. Leaving an original
-            # "C" labeled "C" post-shift mis-filed e.g. SxL[0]*SxC[0]
-            # (n_uc=2) under h_intra as ['Sx',0],['Sx',2] -- a term that
-            # actually touches the next cell (site 2 >= n_uc) -- instead
-            # of h_inter, violating this function's own documented split.
-            term = [term[0]] + [[name, site + n_uc] for name, site in term[1:]]
-            groups = {{"L": "C", "C": "R"}[g] for g in groups}
-        if groups == {"R"}:
-            term = [term[0]] + [[name, site - n_uc] for name, site in term[1:]]
-            groups = {"C"}
-        if groups <= {"C"}:
+        # Canonicalize the term's *position* by translating it, as a whole,
+        # onto the cell its leftmost site lives in -- which is well defined
+        # for a term of any reach, and reduces to this module's original
+        # three-cell L/C/R rules exactly where those applied: a subset of
+        # {L,C} shifts by +n_uc (L->C, C->R), a pure-R term shifts by -n_uc
+        # (a bare `SxR[i]*SxR[j]` coupling is the *next* cell's own
+        # intra-cell term, written via R for the user's convenience), and
+        # anything already anchored in C stays put. Shifting by cells, not
+        # sites, is what keeps the translation a symmetry of the tiling.
+        #
+        # An earlier version instead rejected any term touching both L and
+        # R ("spans three cells, out of scope"). That restriction is gone:
+        # the automaton builder (idmrg._build_periodic_mpo/
+        # _active_channels_at) has always carried one pending channel per
+        # site of a term's reach and so represents any finite range, and
+        # the sequential multi-site VUMPS solver keeps the full
+        # channel-resolved environments that consume it (see
+        # pyitensor/vumps_ms.py, and vumps.vumps_ground_state's own
+        # dispatch). gs_method="idmrg" needs no dispatch: its growth loop
+        # consumes whatever automaton is handed to it. The one thing a
+        # longer-range term still cannot do is the tangent-space
+        # excitation ansatz, which is genuinely reach-1 machinery and
+        # raises; see `_require_reach_one`.
+        sites = [site for _name, site in term[1:]]
+        shift = -(min(sites) // n_uc) * n_uc     # floor division: cell index
+        if shift:
+            term = [term[0]] + [[name, site + shift] for name, site in term[1:]]
+            sites = [site + shift for site in sites]
+        if max(sites) < n_uc:
             intra_terms.append(term)
         else:
             inter_terms.append(term)
@@ -197,17 +218,29 @@ def _shift_terms(op_terms, shift):
 def _window_hamiltonian(h_intra, h_inter, n_uc, n_window):
     """A finite, open-boundary MultiOperator over n_window*n_uc sites (0-
     based), built by tiling h_intra once per cell (0..n_window-1) and
-    h_inter once per *adjacent pair* of cells (0..n_window-2 -- one fewer
-    bond than a periodic ring, since there is no cell n_window to couple
-    the last cell's own h_inter to). See
-    Infinite_Many_Body_Chain.kpm_finite's own docstring for why this
-    finite tiling is used (and its approximation to the true infinite
-    chain) rather than an exact infinite-size construction."""
+    h_inter once per cell whose own copy of the term still *fits* inside
+    the window. See Infinite_Many_Body_Chain.kpm_finite's own docstring for
+    why this finite tiling is used (and its approximation to the true
+    infinite chain) rather than an exact infinite-size construction.
+
+    The fit is tested per term rather than once for the whole list: an
+    inter-cell term of the ordinary reach-1 kind drops only its last copy
+    (there is no cell n_window for the last cell to couple to), but a
+    longer-ranged one -- `get_operator(..., group=c)` with c>1, which
+    `_canonicalize_hamiltonian` now accepts -- reaches further and so has
+    to drop more. Shifting the whole list by a single, term-independent
+    cell range instead would have placed those copies on site indices past
+    the end of the window."""
     terms = []
+    n_sites = n_window * n_uc
     for c in range(n_window):
         terms += _shift_terms(h_intra.op, c * n_uc)
-    for c in range(n_window - 1):
-        terms += _shift_terms(h_inter.op, c * n_uc)
+    for term in h_inter.op:
+        top = max(site for _name, site in term[1:])
+        for c in range(n_window):
+            if top + c * n_uc >= n_sites:
+                break
+            terms += _shift_terms([term], c * n_uc)
     return _wrap_terms(terms, "h_window")
 
 
@@ -379,6 +412,7 @@ class Infinite_Many_Body_Chain:
         self.hamiltonian = None  # user-facing MultiOperator (L/C/R indices)
         self._h_intra = None
         self._h_inter = None
+        self._reach_cells = 0   # set by set_hamiltonian; see there
         self._result = None      # pyitensor.idmrg.IDMRGResult once converged
                                   # (itensor_version="python", gs_method=
                                   # "idmrg" only -- itensor_version=3 keeps
@@ -436,18 +470,69 @@ class Infinite_Many_Body_Chain:
 
     def get_operator(self, name, i, group="C"):
         """A bare, symbolic 1-site MultiOperator for `name` at site `i`
-        (0..n_uc-1) of cell-group `group` ('L','C','R') -- mirrors
+        (0..n_uc-1) of cell-group `group` -- mirrors
         Many_Body_Chain.get_operator's `multioperator.obj2MO([[name,i]])`,
-        just with the L/C/R site-index offset applied first."""
-        if group == "C":
-            site = i
-        elif group == "R":
-            site = self.n_uc + i
-        elif group == "L":
-            site = i - self.n_uc
+        just with the cell offset applied to the site index first.
+
+        `group` is 'L', 'C' or 'R' (the previous, central and next cell,
+        the three the flat SxL/SxC/SxR attribute lists cover), or an
+        integer cell offset for anything further out: -1, 0 and 1 are
+        exactly 'L', 'C' and 'R', and `group=2` reaches the cell after the
+        next one. That integer form is how a coupling longer-ranged than
+        one unit cell is written -- `SzC[0]*ic.get_operator("Sz",0,group=2)`
+        is a next-nearest-cell bond -- and it is supported by
+        `set_hamiltonian` and by `gs_method="vumps"` (which routes such a
+        Hamiltonian to the sequential multi-site solver, see
+        `pyitensor/vumps.py`'s own dispatch); `gs_method="idmrg"` and
+        `excitation_energies`/`excitation_gap` are reach-1 only and raise
+        for it."""
+        offsets = {"C": 0, "R": 1, "L": -1}
+        if isinstance(group, str):
+            try:
+                cell = offsets[group]
+            except KeyError:
+                raise ValueError(
+                    "get_operator: group must be 'L', 'C', 'R' or an integer "
+                    "cell offset, got {!r}".format(group))
+        elif isinstance(group, (int, np.integer)) and not isinstance(group, bool):
+            cell = int(group)
         else:
-            raise ValueError("get_operator: group must be 'L', 'C' or 'R', got {!r}".format(group))
-        return multioperator.obj2MO([[name, site]])
+            raise ValueError(
+                "get_operator: group must be 'L', 'C', 'R' or an integer "
+                "cell offset, got {!r}".format(group))
+        return multioperator.obj2MO([[name, cell * self.n_uc + i]])
+
+    def _require_reach_one(self, what):
+        """Raise NotImplementedError if this chain's Hamiltonian couples
+        cells further apart than nearest-neighbour, for a caller that only
+        implements the reach-1 case.
+
+        Both GROUND-STATE algorithms handle any finite reach and are not
+        gated by this: `gs_method="vumps"` routes such a Hamiltonian to the
+        sequential multi-site solver, and `gs_method="idmrg"`'s growth loop
+        consumes whatever automaton `_build_periodic_mpo` hands it, which
+        has always carried one pending channel per site of a term's reach.
+        Both were measured directly against an exactly-solvable polarized
+        chain carrying reach-2 and reach-3 Sz-Sz terms (agreement to 1e-14
+        or better) and against each other on a J1-J2 Heisenberg chain
+        written on a 1- and a 2-site cell.
+
+        The tangent-space excitation ansatz is the one that genuinely
+        cannot: it is built on the reach-1 {GL, GR, bond_envs} triple
+        rather than one environment matrix per automaton channel (see
+        pyitensor/idmrg_excitations.py's own `_check_reach_one`), so it
+        says so instead of returning a number its environments do not
+        represent."""
+        if self._reach_cells > 1:
+            raise NotImplementedError(
+                "{}: this chain's Hamiltonian has a coupling reaching {} unit "
+                "cells (a term spanning more than two adjacent cells), which "
+                "the tangent-space excitation ansatz does not implement -- it "
+                "keeps one accumulated environment plus one channel per "
+                "nearest-cell bond. gs_energy()/vev()/correlator() on this "
+                "same chain do work; rewrite it on a unit cell at least as "
+                "long as the coupling range if you need the "
+                "excitations.".format(what, self._reach_cells))
 
     def set_hamiltonian(self, h):
         """h: a MultiOperator built from this chain's SxL/SxC/SxR-style
@@ -471,6 +556,16 @@ class Infinite_Many_Body_Chain:
         # that regression.
         h = multioperator.obj2MO(h)
         self._h_intra, self._h_inter = _canonicalize_hamiltonian(h, self.n_uc)
+        # How far, in unit cells, the longest-ranged term reaches past the
+        # cell it is anchored on -- 0 for a purely intra-cell Hamiltonian,
+        # 1 for the ordinary nearest-cell case, more for a genuinely
+        # long-range one. Read off the canonicalized terms (whose leftmost
+        # site is in cell 0 by construction), so it is the same number
+        # idmrg._active_channels_at derives its pending-channel count from.
+        # The reach-1 algorithms gate on this; see `_require_reach_one`.
+        self._reach_cells = max(
+            [0] + [max(site for _name, site in term[1:]) // self.n_uc
+                   for term in self._h_inter.op])
         self.hamiltonian = h
         self._result = None
         self._vumps_result = None
@@ -817,6 +912,13 @@ class Infinite_Many_Body_Chain:
         tests/test_vumps_excitations_v3.py).
 
         Any converged bond dimension D>=1 is supported on both backends."""
+        # Both backends' ansatz is built on the grouped, reach-1
+        # {GL, GR, bond_envs} triple (pyitensor/idmrg_excitations.py and
+        # its C++ port), which a longer-range Hamiltonian's extra pending
+        # channels have no place in -- unlike the ground state itself, for
+        # which gs_method="vumps" has the sequential route.
+        self._require_reach_one("Infinite_Many_Body_Chain.excitation_energies/"
+                                 "excitation_gap")
         if self.itensor_version == "python":
             env = self._get_excitation_environment()
             from .pyitensor import idmrg_excitations

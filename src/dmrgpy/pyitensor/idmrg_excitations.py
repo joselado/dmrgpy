@@ -142,31 +142,49 @@ _S_IDX = 0
 _F_IDX = 1
 
 
-def _check_reach_one(W):
-    """Raise NotImplementedError if the grouped automaton W has any nonzero
-    entry directly connecting two distinct "pending" channels (anything
-    other than _S_IDX/_F_IDX) -- the signature of a bond term with reach>1
-    (see idmrg._build_periodic_mpo's own "propagates one more site" branch,
-    only reachable when a term's reach exceeds 1 unit cell). Checked
-    directly on the grouped automaton's own array rather than by
-    re-inspecting the original Hamiltonian term lists, so it also catches a
-    deliberately constructed longer-range term (e.g.
-    get_operator(name, i>=n_uc, group="R")) that idmrg.py's own automaton
-    builder happily accepts but this module's H_eff construction does not
-    support. Called once, inside `vumps.vumps_ground_state`, so a
-    `VUMPSResult` reaching this module's own `build_excitation_environment`
-    has already passed this check."""
+def is_reach_one(W):
+    """False if the grouped automaton W has any nonzero entry directly
+    connecting two distinct "pending" channels (anything other than
+    _S_IDX/_F_IDX) -- the signature of a bond term with reach>1 (see
+    idmrg._build_periodic_mpo's own "propagates one more site" branch, only
+    reachable when a term's reach exceeds 1 unit cell). Read directly off
+    the grouped automaton's own array rather than by re-inspecting the
+    original Hamiltonian term lists, so it also sees a longer-range term
+    written as `get_operator(name, i, group=c)` for a cell offset c>1, which
+    idmrg.py's own automaton builder happily accepts.
+
+    `vumps.vumps_ground_state` uses this to *dispatch* (the sequential
+    multi-site solver, pyitensor/vumps_ms.py, keeps full channel-resolved
+    environments and so handles any finite reach; the grouped reach-1
+    specialization here does not), and `_check_reach_one` below to reject.
+    """
     Dw = W.shape[0]
     pending = [c for c in range(Dw) if c not in (_S_IDX, _F_IDX)]
     for p in pending:
         for q in pending:
             if not np.allclose(W[p, :, :, q], 0):
-                raise NotImplementedError(
-                    "idmrg_excitations: a Hamiltonian term with reach>1 unit "
-                    "cell (a bond spanning more than 2 adjacent supersites) "
-                    "was detected -- the tangent-space excitation ansatz "
-                    "implemented here only supports nearest-adjacent-unit-"
-                    "cell (reach<=1) couplings.")
+                return False
+    return True
+
+
+def _check_reach_one(W):
+    """Raise NotImplementedError if `is_reach_one` is False -- the
+    tangent-space excitation ansatz built in this module is specialized to
+    a reach-1 automaton ({GL, GR, bond_envs} rather than one matrix per
+    channel), so unlike the ground-state solver it cannot simply be routed
+    to the sequential multi-site path."""
+    if not is_reach_one(W):
+        raise NotImplementedError(
+            "idmrg_excitations: a Hamiltonian term with reach>1 unit "
+            "cell (a bond spanning more than 2 adjacent supersites) "
+            "was detected -- the tangent-space excitation ansatz "
+            "implemented here only supports nearest-adjacent-unit-"
+            "cell (reach<=1) couplings. The ground-state solvers do "
+            "support it (vumps.vumps_ground_state routes such a "
+            "Hamiltonian to the sequential multi-site algorithm), so a "
+            "gs_energy()/vev()/correlator() calculation on the same "
+            "chain will work; only excitation_energies/excitation_gap "
+            "are restricted here.")
 
 
 def _pending_channels(W):
@@ -779,9 +797,29 @@ def build_excitation_environment(vumps_result):
     now-superseded version of this module (see this module's own "History"
     section), no separate Hamiltonian term lists / site types need to be
     passed in: AL, AR, C, GL, GR and the grouped automaton W are all
-    already on `vumps_result`, and reach<=1 has already been checked
-    inside `vumps_ground_state` itself."""
+    already on `vumps_result`.
+
+    Rejects a `.multisite` result up front. `vumps_ground_state` used to
+    guarantee reach<=1 by raising for anything longer; it now DISPATCHES
+    such a Hamiltonian (and any n_uc>2 cell) to the sequential multi-site
+    solver instead, whose result holds per-site LISTS where this function
+    wants single grouped tensors -- so the check has to live here, where
+    it can name what is actually wrong, rather than surfacing as a shape
+    error twenty contractions later. `Infinite_Many_Body_Chain.
+    excitation_energies` has its own, earlier guard on the same two
+    conditions; this one covers a direct call."""
     from . import vumps as _vumps  # lazy: vumps.py imports this module at load time
+
+    if getattr(vumps_result, "multisite", False):
+        raise NotImplementedError(
+            "idmrg_excitations.build_excitation_environment: this VUMPSResult "
+            "came from the SEQUENTIAL multi-site solver (vumps_ms.py), which "
+            "vumps_ground_state uses for a unit cell longer than 2 sites or a "
+            "coupling reaching past one unit cell. Its AL/AR/C are per-site "
+            "lists, and the tangent-space excitation ansatz here is built on "
+            "the grouped, reach-1 mixed gauge -- rewrite the chain on a cell "
+            "of at most 2 sites that keeps every coupling within adjacent "
+            "cells if you need excitations.")
 
     AL, AR, C = vumps_result.AL, vumps_result.AR, vumps_result.C
     GL, GR, W = vumps_result.GL, vumps_result.GR, vumps_result.W

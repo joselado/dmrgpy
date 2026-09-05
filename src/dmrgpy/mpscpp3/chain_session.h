@@ -129,7 +129,7 @@ struct IdmrgResult
 // zheev_wrapper/zgesv_wrapper/zgesvd_wrapper) rather than ITensor
 // tensor-network objects: d_g (the grouped supersite's own physical
 // dimension) and D are always small enough here (n_uc<=2, reach<=1
-// bonds -- see vumps_check_reach_one) that this is both simpler and
+// bonds -- see vumps_is_reach_one) that this is both simpler and
 // far less risky than re-deriving VUMPS's already extremely subtle
 // fixed-point/gauge bookkeeping (see pyitensor/vumps.py's and
 // pyitensor/idmrg_excitations.py's own module docstrings -- eight
@@ -3712,7 +3712,26 @@ class Chain
         // pyitensor/vumps_ms.py's own module docstring. n_uc <= 2 stays on
         // the grouped path purely so its already-validated values do not
         // move; the two agree to machine precision where both apply.
-        if (n_uc>2)
+        //
+        // ... and so does a Hamiltonian whose couplings reach further than
+        // one unit cell, at ANY n_uc: the grouped path below is specialized
+        // to a reach-1 automaton (one accumulated GL, one GR, a list of
+        // one-site-away bond channels), which is exactly what grouping buys
+        // and exactly what a longer-range coupling takes away, while the
+        // sequential solver's channel-resolved environments subsume it. The
+        // grouping is done first for n_uc<=2 (cheap there, and needed to
+        // read the reach off the automaton) but never for n_uc>2, where
+        // d_g would be the exponential object this whole branch avoids.
+        // Mirrors vumps.vumps_ground_state's own dispatch on the "python"
+        // side; see pyitensor/vumps_ms.py's module docstring for the cost
+        // argument, and tests/test_infinite_long_range.py.
+        bool use_multisite = (n_uc>2);
+        if (!use_multisite)
+            {
+            vumps_group_automaton(rows,n_uc,Dw,d_g,W);
+            use_multisite = !vumps_is_reach_one(W,Dw,d_g);
+            }
+        if (use_multisite)
             {
             std::mt19937_64 rng_ms(std::random_device{}());
             auto run = vms_ground_state(rows,D,tol,maxiter,niter_lanczos,
@@ -3729,9 +3748,8 @@ class Chain
             return out_ms;
             }
 
-        vumps_group_automaton(rows,n_uc,Dw,d_g,W);
-        vumps_check_reach_one(W,Dw,d_g);
-
+        // W/Dw/d_g were already filled by the dispatch above (this point is
+        // only reached with n_uc<=2 and a reach-1 automaton).
         auto h1 = vumps_onsite_matrix(W,Dw,d_g);
         auto pending = vumps_pending_channels(W,Dw,d_g);
 
@@ -3847,7 +3865,13 @@ class Chain
         {
         if (!have_vumps_snapshot_)
             throw ITError("Chain::vumps_excitation_energies: called before "
-                           "vumps_ground_state (no converged VUMPS snapshot)");
+                           "vumps_ground_state (no converged grouped VUMPS snapshot)"
+                           ". Note that a unit cell longer than 2 sites, "
+                           "or a coupling reaching past one unit cell, runs on the "
+                           "SEQUENTIAL multi-site solver (vms_ground_state) instead, "
+                           "which this backend has no excitation port for -- use "
+                           "itensor_version=\"python\" for those, or rewrite the chain "
+                           "on a cell that keeps every coupling within adjacent cells");
         int D = vumps_D_, d_g = vumps_dg_;
         int Dx = D*(d_g-1);
         if (Dx<=0)
@@ -3890,7 +3914,13 @@ class Chain
         {
         if (!have_vumps_snapshot_)
             throw ITError("Chain::vumps_onsite_expectation: called before "
-                           "vumps_ground_state (no converged VUMPS snapshot)");
+                           "vumps_ground_state (no converged grouped VUMPS snapshot)"
+                           ". Note that a unit cell longer than 2 sites, "
+                           "or a coupling reaching past one unit cell, runs on the "
+                           "SEQUENTIAL multi-site solver (vms_ground_state) instead, "
+                           "which this backend has no static-observable port for -- use "
+                           "itensor_version=\"python\" for those, or rewrite the chain "
+                           "on a cell that keeps every coupling within adjacent cells");
         int n_uc = sites_.length();
         if (p<0 || p>=n_uc)
             throw ITError("Chain::vumps_onsite_expectation: p must be in 0.."+
@@ -3970,7 +4000,13 @@ class Chain
         {
         if (!have_vumps_snapshot_)
             throw ITError("Chain::vumps_two_point_correlator: called before "
-                           "vumps_ground_state (no converged VUMPS snapshot)");
+                           "vumps_ground_state (no converged grouped VUMPS snapshot)"
+                           ". Note that a unit cell longer than 2 sites, "
+                           "or a coupling reaching past one unit cell, runs on the "
+                           "SEQUENTIAL multi-site solver (vms_ground_state) instead, "
+                           "which this backend has no static-observable port for -- use "
+                           "itensor_version=\"python\" for those, or rewrite the chain "
+                           "on a cell that keeps every coupling within adjacent cells");
         if (r<0)
             throw ITError("Chain::vumps_two_point_correlator: r must be >= 0");
         int n_uc = sites_.length();
@@ -7372,23 +7408,24 @@ class Chain
             }
         }
 
-    // Raises ITError if a grouped automaton has any nonzero transition
-    // directly connecting two distinct pending channels -- the signature
-    // of a bond with reach>1 supersite -- C++ analogue of pyitensor
-    // idmrg_excitations._check_reach_one.
-    static void
-    vumps_check_reach_one(std::vector<Cplx> const& W, int Dw, int d_g)
+    // False if a grouped automaton has any nonzero transition directly
+    // connecting two distinct pending channels -- the signature of a bond
+    // with reach>1 supersite -- C++ analogue of pyitensor
+    // idmrg_excitations.is_reach_one. vumps_ground_state uses this to
+    // DISPATCH (the sequential multi-site solver below keeps full
+    // channel-resolved environments and so handles any finite reach; the
+    // grouped reach-1 specialization does not), mirroring
+    // vumps.vumps_ground_state on the "python" side.
+    static bool
+    vumps_is_reach_one(std::vector<Cplx> const& W, int Dw, int d_g)
         {
         for (int p=2;p<Dw;++p)
         for (int q=2;q<Dw;++q)
             for (int si=0;si<d_g;++si)
             for (int so=0;so<d_g;++so)
                 if (std::abs(W[((p*Dw+q)*d_g+si)*d_g+so]) > 1e-12)
-                    throw ITError("Chain::vumps_ground_state: a Hamiltonian term with "
-                                   "reach>1 unit cell (a bond spanning more than 2 adjacent "
-                                   "supersites) was detected -- VUMPS/the tangent-space "
-                                   "excitation ansatz implemented here only support "
-                                   "nearest-adjacent-unit-cell (reach<=1) couplings");
+                    return false;
+        return true;
         }
 
     // W[S,:,:,F] -- the direct onsite Hamiltonian content, all-zero if

@@ -357,10 +357,19 @@ def test_itensor_version3_vev_and_correlator_rejects_bad_arguments():
         ic.correlator("Sz", 0, "Sz", -1)
 
 
-def test_l_and_r_in_same_term_rejected():
+def test_l_and_r_in_same_term_is_a_reach_2_coupling():
+    """A term touching both the previous and the next cell used to be
+    rejected outright ("spans three cells, out of scope"). It is now an
+    ordinary reach-2 coupling: canonicalization translates it onto the
+    cell its leftmost site lives in, which turns SxL[0]*SxR[0] into
+    SxC[0]*Sx[2*n_uc]. See tests/test_infinite_long_range.py for what the
+    solvers then do with it."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"])
-    with pytest.raises(ValueError):
-        ic.set_hamiltonian(ic.SxL[0] * ic.SxR[0])
+    ic.set_hamiltonian(ic.SxL[0] * ic.SxR[0])
+    assert list(ic._h_intra.op) == []
+    assert [list(t) for t in ic._h_inter.op] == [
+        [1.0, ["Sx", 0], ["Sx", 4]]]
+    assert ic._reach_cells == 2
 
 
 # -- idmrg.apply_mpo: applying a periodic (bounded) MPO to the converged
@@ -1290,18 +1299,20 @@ def test_excitation_energies_itensor_version3_not_implemented():
 
 
 def test_excitation_energies_rejects_reach_greater_than_one():
-    """A deliberately constructed longer-range term
-    (get_operator(..., group="R") with i>=n_uc) spans 2 supersites after
-    grouping -- rejected by idmrg_excitations._check_reach_one, called
-    from within vumps.vumps_ground_state itself (i.e. by the implicit
-    gs_energy() call inside excitation_gap(), not by the excitation
-    machinery directly)."""
+    """A longer-range term (get_operator(..., group=2)) spans 2 supersites
+    after grouping. The GROUND state is fine -- vumps.vumps_ground_state
+    routes it to the sequential multi-site solver -- but the tangent-space
+    ansatz is built on the reach-1 {GL, GR, bond_envs} triple, so
+    excitation_gap() itself raises. The rejection therefore comes from the
+    excitation machinery, not from the implicit gs_energy() call it makes
+    first, which is the opposite of where it used to come from."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"])
     ic.gs_method = "vumps"
-    far = ic.get_operator("Sx", 1, group="R")  # site n_uc+1 = 2, reach=2
+    far = ic.get_operator("Sx", 0, group=2)  # site 2*n_uc = 2, reach=2
     h = ic.SxC[0] * far - 2.0 * ic.SzC[0]
     ic.maxm, ic.maxiter, ic.etol = 4, 50, 1e-12
     ic.set_hamiltonian(h)
+    ic.gs_energy()                            # the ground state is supported
     with pytest.raises(NotImplementedError):
         ic.excitation_gap()
 

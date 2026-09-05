@@ -42,11 +42,20 @@ D-dimensional variational optimum of the energy (up to Lanczos/outer-loop
 convergence), not a truncated growth product.
 
 == Scope ==
-Same as idmrg_excitations.py: n_uc in {1,2} (grouped into one effective
-supersite via `_group_automaton` -- there is no existing per-sublattice
-ket tensor list to group here, VUMPS builds AL/AR from scratch), reach-1
-bonds after grouping (idmrg_excitations._check_reach_one), pyitensor
-engine only. Static correlators (`onsite_expectation`/`two_point_correlator`
+The GROUPED algorithm in this module is scoped as idmrg_excitations.py is:
+n_uc in {1,2} (folded into one effective supersite via `_group_automaton`
+-- there is no existing per-sublattice ket tensor list to group here,
+VUMPS builds AL/AR from scratch), reach-1 bonds after grouping, pyitensor
+engine only. `vumps_ground_state` itself is NOT so scoped: it dispatches
+anything outside that -- a longer unit cell, or a coupling reaching past
+one unit cell at any cell size (`idmrg_excitations.is_reach_one` off the
+grouped automaton) -- to the sequential multi-site solver, vumps_ms.py,
+whose channel-resolved environments subsume both restrictions. Such a
+result carries `.multisite = True` and holds per-site LISTS where the
+grouped one holds single tensors; `onsite_expectation`/
+`two_point_correlator` below dispatch on that flag, and
+`idmrg_excitations.build_excitation_environment` (whose ansatz is
+genuinely reach-1, grouped-gauge machinery) raises for it. Static correlators (`onsite_expectation`/`two_point_correlator`
 below) ARE implemented directly on a VUMPSResult, computed from the mixed-
 gauge {AC, AR} rather than idmrg.py's dominant-right-fixed-point
 eigenproblem -- see those functions' own docstrings, and
@@ -882,9 +891,10 @@ class VUMPSResult:
 
 def _multisite_ground_state(sites_uc, W_bulk, n_uc, D, tol, maxiter,
                              niter_lanczos, nrestarts, verbose):
-    """`vumps_ground_state` for a cell too big to group: run
-    `vumps_ms.ground_state` and wrap its result in the same `VUMPSResult`
-    the grouped path returns.
+    """`vumps_ground_state` for a Hamiltonian the grouped path cannot take
+    -- a cell too big to group, or a coupling reaching further than one
+    unit cell at any cell size: run `vumps_ms.ground_state` and wrap its
+    result in the same `VUMPSResult` the grouped path returns.
 
     The grouped fields (`d_g`, the single `AL`/`AR`/`C`/`AC`, the grouped
     `W`) have no single-tensor meaning here -- the state IS a list of
@@ -972,7 +982,24 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
             nrestarts, verbose)
 
     W = _group_automaton(W_bulk, n_uc)
-    idmrg_exc._check_reach_one(W)
+    # ... and so does a Hamiltonian whose couplings reach further than one
+    # unit cell, at ANY n_uc. The grouped path below is specialized to a
+    # reach-1 automaton (one accumulated GL, one GR, and a list of
+    # one-site-away bond channels -- see this module's own "Algorithm"
+    # docstring section), which is exactly what grouping buys and exactly
+    # what a longer-range coupling takes away. The sequential solver keeps
+    # the FULL channel-resolved environments instead, so it subsumes the
+    # reach-1 case rather than trading it for another restriction (see
+    # vumps_ms.py's own module docstring), and a reach-R coupling costs it
+    # R extra automaton channels -- linear. The alternative available to a
+    # user before this dispatch existed was to rewrite the same chain on an
+    # n_uc>=R cell, which the grouped path then folds into a d**R
+    # supersite: exponential in exactly the parameter that should be
+    # linear.
+    if not idmrg_exc.is_reach_one(W):
+        return _multisite_ground_state(
+            sites_uc, W_bulk, n_uc, D, tol, maxiter, niter_lanczos,
+            nrestarts, verbose)
     d_g = int(np.prod([sites_uc.dim(p + 1) for p in range(n_uc)]))
     pending = idmrg_exc._pending_channels(W)
     h1 = idmrg_exc._onsite_matrix(W)

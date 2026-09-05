@@ -43,6 +43,15 @@ so this module keeps the FULL channel-resolved environment instead:
 channel. That is the textbook formulation, it subsumes the reach-1 one, and
 it removes the reach restriction rather than trading it for another.
 
+That is not only a scope note about big cells: `vumps.vumps_ground_state`
+routes ANY reach>1 Hamiltonian here, at any `n_uc`, precisely because the
+grouped path cannot take it. A range-R coupling costs this module R extra
+automaton channels -- linear -- where writing the same chain on an
+`n_uc >= R` cell to make it reach-1 costs the grouped path a `d**R`
+supersite. `infinitechain.get_operator(name, i, group=c)`'s integer cell
+offset is how such a Hamiltonian is written; see
+`tests/test_infinite_long_range.py`.
+
 The automaton convention is `idmrg._build_periodic_mpo`'s, unchanged:
 `W[chan_l, s_in, s_out, chan_r]` with channel `_S_IDX` = "no term started
 yet" and `_F_IDX` = "term finished / accumulating", so `W[S,:,:,S]` and
@@ -86,6 +95,7 @@ from . import idmrg
 from . import idmrg_excitations as idmrg_exc
 from .dmrg import _lanczos_ground_state
 from .idmrg_excitations import _F_IDX, _S_IDX
+from .vumps import _null_space_left, _null_space_right
 
 
 # -- transfer primitives -----------------------------------------------------
@@ -369,6 +379,48 @@ def h_c_action(C, GL_right_of_n, GR_n):
     return Y
 
 
+def h_two_site_action(theta, GLn, GRm, Wn, Wm):
+    """`H2` applied to a two-site tensor `theta` (D,d_n,d_m,D) sitting on
+    sites `n` and `m=n+1`:
+
+        Y[L,o,q,R] = sum GL[n][a][l,L] theta[l,i,j,r]
+                         W[n][a,i,o,c] W[m][c,j,q,b] GR[m][b][r,R]
+
+    the two-site widening of `h_ac_action`, with the SAME channel-resolved
+    environments -- so, unlike `vumps.py`'s own `_h_two_site_action` (which
+    has to enumerate the on-site, intra-pair and two straddling bond terms
+    as four separate diagrams, because its reach-1 environments are not
+    channel-resolved), every term of `H` is already accounted for by the
+    single contraction above. `c` is the channel the term is in *between*
+    the two sites, which is exactly what makes the intra-pair bond term
+    fall out for free rather than needing its own diagram.
+
+    Only used by `subspace_expand` below, and only as a direction
+    heuristic -- note in particular that any constant shift of `H` (the
+    per-cell energy baseline `environments` subtracts, say) drops out of
+    that use entirely, since it would contribute `c*theta`, whose overlap
+    with the two null spaces is exactly zero."""
+    Dw = Wn.shape[0]
+    Y = np.zeros_like(theta)
+    for a in range(Dw):
+        if not GLn[a].any():
+            continue
+        # theta's left leg closed against GL[a]: einsum('lL,lijr->Lijr')
+        TL = np.tensordot(GLn[a], theta, axes=([0], [0]))
+        for c in range(Dw):
+            slab_n = Wn[a, :, :, c]
+            if not slab_n.any():
+                continue
+            T1 = np.einsum('io,lijr->lojr', slab_n, TL)
+            for b in range(Dw):
+                slab_m = Wm[c, :, :, b]
+                if not slab_m.any() or not GRm[b].any():
+                    continue
+                T2 = np.einsum('jq,lojr->loqr', slab_m, T1)
+                Y += np.tensordot(T2, GRm[b], axes=([3], [0]))
+    return Y
+
+
 # -- gauge update ------------------------------------------------------------
 
 def update_AL_AR(AC, C_left, C_right):
@@ -468,6 +520,151 @@ def grow_initial_state(D, dims, AL_old, AR_old, C_old, rng=None):
         Cn += 1e-3 * (rng.standard_normal((D, D)) + 1j * rng.standard_normal((D, D)))
         C.append(Cn / max(np.linalg.norm(Cn), 1e-300))
     return AL, AR, C
+
+
+# -- subspace expansion ------------------------------------------------------
+#
+# `vumps.py`'s own `_subspace_expand` (after ITensorInfiniteMPS.jl's
+# `subspace_expansion.jl`) picks the directions a bond dimension step grows
+# into from `H` itself -- the SVD of `H2` projected into the two null spaces
+# `AL`/`AR` do not reach -- instead of from the noise `grow_initial_state`
+# pads with. It cannot change the state or the energy (both enlarged tensors
+# stay exactly isometric and `C` is embedded with zeros in the new block),
+# only how fast the next rung of the D-ramp converges: a wash on most models,
+# and 4.6x faster plus 5x more accurate on the hardest one tested (see that
+# function's own measurement table).
+#
+# That version only ever runs at n_uc <= 2, where the cell is GROUPED into
+# one supersite and so has exactly one bond. Ungrouped, a cell has `n_uc` of
+# them, and the reference's own driver is likewise a loop over every bond in
+# the cell -- which is what this is. Two things generalize rather than
+# repeat:
+#
+#   * the two null spaces at bond `n` come from DIFFERENT tensors (`AL[n]`
+#     and `AR[n+1]`), where the grouped version takes both from its single
+#     site's own `AL`/`AR`; and `AR[n]`'s new directions therefore come from
+#     bond `n-1`, not from bond `n`.
+#   * the last bond of the cell straddles the cell boundary, so its right
+#     environment/automaton/tensor are site 0's -- of the NEXT cell, which by
+#     cell periodicity is the same `GR[0]`/`W_list[0]`/`AR[0]` this cell
+#     already holds.
+#
+# Every bond is grown by the SAME amount, so the state stays uniform-D and
+# the rest of this module (which carries one `D`, not one per bond) needs no
+# change. `keep` is therefore the min over bonds, and a bond that can supply
+# nothing at all makes the whole expansion decline -- the caller falls back
+# to noise-padding exactly as the grouped version's does.
+#
+# Measured the same way the grouped version's own table was, and read the
+# same way: at `nrestarts=1` (which isolates the warm start -- with the
+# default restart budget the driver's cost is dominated by the RANDOM
+# attempts, which expansion does not touch), median over 5 independent
+# (unseeded) runs, noise start -> expansion. `err` is the spread of
+# |e - Bethe| across those 5 runs, which is the number that matters on the
+# gapless model: not how fast it converges but whether it lands in the same
+# place twice.
+#
+#   TFIM g=1.5    n_uc=1 D=4     79 ->  74 iters   (0.24s ->  0.16s)
+#   TFIM g=1.5    n_uc=1 D=8    224 -> 244 iters   (1.42s ->  1.72s)
+#   Heisenberg    n_uc=1 D=4   1602 ->1602 iters  (11.66s -> 11.24s)
+#                                err 1.5e-2..4.0e-1 -> 1.5e-2..2.6e-1
+#   Heisenberg    n_uc=1 D=8   2402 ->2402 iters  (56.56s -> 41.61s)
+#                                err 1.1e-2..2.7e-1 -> 2.4e-3..5.4e-2
+#   Heisenberg    n_uc=2 D=4    898 -> 860 iters   (4.13s ->  3.71s)
+#                                err 2.1e-3..2.1e-3 -> 2.1e-3..2.1e-3
+#   Heisenberg    n_uc=2 D=8   1701 -> 909 iters  (21.39s ->  4.96s)
+#                                err 3.0e-4..3.0e-4 -> 4.0e-4..4.0e-4
+#
+# Same shape as the grouped module's own table, and worth stating as
+# plainly: expansion is a wash on every row except the hard ones. The
+# gapless Heisenberg chain at D=8 is where it pays -- 4.3x faster on the
+# 2-site cell, and on the 1-site cell (where neither start converges within
+# maxiter) 1.4x faster with the accuracy spread ~5x tighter at both ends.
+# The n_uc=1 D=4 row is the honest counterexample: both starts scatter
+# across two orders of magnitude there and neither is systematically
+# better, so this does not rescue a search that was going to be a lottery.
+
+
+def subspace_expand(result, W_list, dims, D_new, cutoff=1e-12):
+    """`(AL, AR, C)` lists at bond dimension `D + keep`, grown from a
+    converged `single_run` result at a smaller `D` by subspace expansion at
+    every bond of the unit cell (see the section comment above).
+
+    Returns None if no bond can supply a new direction at all (`D_new <= D`,
+    an exhausted null space, or an `H2` with no weight outside the current
+    subspace -- the last of which means the state is already exact at this
+    `D`); the caller falls back to `grow_initial_state` there.
+
+    `keep <= D_new - D`, so the caller must be prepared for a state SMALLER
+    than it asked for and pad the remainder itself. It is never larger."""
+    AL, AR, C = result["AL"], result["AR"], result["C"]
+    GL, GR = result["GL"], result["GR"]
+    n_uc = len(AL)
+    D = AL[0].shape[0]
+    k_want = D_new - D
+    if k_want <= 0:
+        return None
+
+    per_bond = []
+    for n in range(n_uc):
+        m = (n + 1) % n_uc          # cell periodicity: see the note above
+        NL = _null_space_left(AL[n])
+        NR = _null_space_right(AR[m])
+        if NL.shape[2] == 0 or NR.shape[0] == 0:
+            return None
+        theta = np.einsum('lpx,xy,yqr->lpqr', AL[n], C[n], AR[m])
+        H2theta = h_two_site_action(theta, GL[n], GR[m], W_list[n], W_list[m])
+        # <NL_a NR_b| H2 |theta>: both bras conjugate, hence conj on both
+        # null-space factors.
+        M = np.einsum('lpa,lpqr,bqr->ab', NL.conj(), H2theta, NR.conj())
+        U, S, Vh = np.linalg.svd(M, full_matrices=False)
+        per_bond.append((NL, NR, U, S, Vh))
+
+    keep = k_want
+    for _NL, _NR, _U, S, _Vh in per_bond:
+        here = int(np.sum(S > cutoff * max(S[0], 1.0))) if S.size else 0
+        keep = min(keep, here)
+    if keep <= 0:
+        return None
+
+    Dn = D + keep
+    AL_new, AR_new, C_new = [], [], []
+    for n in range(n_uc):
+        d = dims[n]
+        NL, _NR, U, _S, _Vh = per_bond[n]
+        T = np.zeros((Dn, d, Dn), dtype=complex)
+        T[:D, :, :D] = AL[n]
+        T[:D, :, D:] = np.einsum('lpa,ak->lpk', NL, U[:, :keep])
+        AL_new.append(T)
+
+        # AR[n]'s new LEFT directions live on the bond to its left, n-1.
+        _NL2, NR, _U2, _S2, Vh = per_bond[(n - 1) % n_uc]
+        Tr = np.zeros((Dn, d, Dn), dtype=complex)
+        Tr[:D, :, :D] = AR[n]
+        Tr[D:, :, :D] = np.einsum('kb,bqr->kqr', Vh[:keep, :], NR)
+        AR_new.append(Tr)
+
+        Cn = np.zeros((Dn, Dn), dtype=complex)
+        Cn[:D, :D] = C[n]
+        C_new.append(Cn)
+    return AL_new, AR_new, C_new
+
+
+def _warm_start(prev, W_list, dims, D_cur, rng):
+    """The ramp's first attempt at `D_cur`, grown from the previous rung's
+    own best result: subspace expansion where it can supply the directions,
+    noise-padding (`grow_initial_state`) for whatever it cannot -- an
+    exhausted null space, or an SVD keeping fewer directions than the ramp
+    step asks for. Never worse than the pure-noise start it replaces: the
+    fallback IS that start. Mirrors `vumps.py`'s own `warm_start`."""
+    expanded = subspace_expand(prev, W_list, dims, D_cur)
+    if expanded is None:
+        return grow_initial_state(D_cur, dims, prev["AL"], prev["AR"],
+                                   prev["C"], rng)
+    AL_e, AR_e, C_e = expanded
+    if AL_e[0].shape[0] < D_cur:
+        return grow_initial_state(D_cur, dims, AL_e, AR_e, C_e, rng)
+    return AL_e, AR_e, C_e
 
 
 # -- the iteration -----------------------------------------------------------
@@ -614,8 +811,7 @@ def ground_state(W_list, dims, D, tol=1e-10, maxiter=800, niter_lanczos=40,
         for i in range(n_here):
             init = None
             if i == 0 and prev is not None:
-                init = grow_initial_state(D_cur, dims, prev["AL"], prev["AR"],
-                                           prev["C"], rng)
+                init = _warm_start(prev, W_list, dims, D_cur, rng)
             local = better(attempt(D_cur, init), local)
         if local is None:
             raise RuntimeError(

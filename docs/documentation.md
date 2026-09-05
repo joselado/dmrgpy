@@ -1457,6 +1457,75 @@ trimerized free-fermion chain against its own 3-band integral with genuinely
 non-uniform per-site occupations; and cell-size invariance, including the
 same 3-periodic chain written on a 6-site cell.
 
+The one exception to "`n_uc <= 2` stays grouped" is **reach**. A Hamiltonian
+whose couplings span more than one unit cell has no grouped reach-1
+representation on that cell at all, so `vumps_ground_state` routes it here
+regardless of `n_uc` (`idmrg_excitations.is_reach_one` off the grouped
+automaton is the test; `_check_reach_one` is now the raising wrapper around
+it, kept for the excitation ansatz, which genuinely cannot). This is what
+makes a long-range model affordable: a range-R coupling costs the sequential
+path R extra automaton channels, linear, where the only route available
+before -- rewrite the chain on an `n_uc >= R` cell so every coupling becomes
+reach-1 -- costs the grouped path a `d**R` supersite. On the API side,
+`infinitechain.get_operator(name, i, group=c)` now takes an integer cell
+offset (`c = -1, 0, 1` being `L`, `C`, `R`), and `_canonicalize_hamiltonian`
+canonicalizes a term's position by translating it whole onto the cell its
+leftmost site lives in -- well defined at any reach, and identical to the old
+three-cell L/C/R rules everywhere those applied. `_window_hamiltonian`
+(`kpm_finite`'s open-boundary tiling) now tests the fit per term rather than
+dropping one fixed copy, since a longer-ranged term runs off the end sooner.
+`gs_method="idmrg"` needs no dispatch: its growth loop consumes whatever
+`_build_periodic_mpo` builds, and `_active_channels_at` has always carried
+one pending channel per site of a term's reach. Both solvers were measured
+against an exactly-solvable polarized chain carrying reach-2 and reach-3
+`Sz`-`Sz` terms (agreement to 1e-14 or better, the couplings' coefficients
+pinned by the exact shift they produce) and against each other on a J1-J2
+Heisenberg chain written on a 1- and a 2-site cell --
+`tests/test_infinite_long_range.py`.
+
+`itensor_version=3` has the same dispatch (`Chain::vumps_ground_state`'s
+`use_multisite`, on `vumps_is_reach_one` off the grouped automaton -- the
+grouping is done first for `n_uc<=2`, which is cheap there and is what the
+reach is read from, and never for `n_uc>2`, where `d_g` is the exponential
+object that branch exists to avoid), and its energy agrees with
+`"python"`'s to 2e-13 on the gapped long-range Ising chain. Its
+`vumps_check_reach_one` raising wrapper is gone with the check that used it.
+What v3 still cannot do for a sequential-solver answer is `vev`/
+`correlator`: `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`
+read the GROUPED snapshot and `vms_ground_state` has never had a
+static-observable port, so they raise. That is a pre-existing gap of the C++
+sequential path -- previously reachable only at `n_uc>2`, now at `n_uc<=2`
+with a long-range Hamiltonian too -- not a reach-specific one; those three
+guards now say so rather than implying `gs_energy` was never called.
+
+**Per-bond subspace expansion** (`vumps_ms.subspace_expand`,
+`h_two_site_action`). `vumps.py`'s `_subspace_expand` warm-starts each rung
+of the D-ramp by picking the new bond directions from `H` itself rather than
+from noise (see the D-ramp section above); ungrouped, a cell has `n_uc` bonds
+rather than one, which is also the shape ITensorInfiniteMPS.jl's own
+`subspace_expansion(psi, H)` has -- a loop over every bond of the cell,
+feeding an outer expand-then-solve ramp. Two things generalize rather than
+repeat: the two null spaces at bond `n` come from DIFFERENT tensors (`AL[n]`
+and `AR[n+1]`), so `AR[n]`'s new directions come from bond `n-1`; and the
+cell's last bond straddles the cell boundary, where the right
+environment/automaton/tensor are site 0's of the next cell, i.e. by
+periodicity the same `GR[0]`/`W_list[0]`/`AR[0]` this cell already holds.
+Every bond grows by the same amount, so the state stays uniform-`D` and the
+rest of the module (which carries one `D`, not one per bond) is untouched;
+`keep` is the min over bonds and a bond that can supply nothing declines the
+whole expansion, whereupon `_warm_start` falls back to noise-padding exactly
+as the grouped version's does. The new two-site effective Hamiltonian is a
+single channel-resolved contraction rather than the grouped version's four
+diagrams (on-site x2, intra-pair bond, two straddling bonds): the channel
+*between* the two sites is what makes the intra-pair term fall out for free.
+`tests/test_vumps_subspace_expansion_ms.py` pins that it reproduces
+`vumps._h_two_site_action` on a random tensor as well as on the physical
+theta (an operator identity, not agreement on one vector), that it picks the
+same directions as the grouped expansion at `n_uc = 1` (compared as a
+subspace -- the SVD fixes each direction only up to a phase), and per site
+the same exact invariants the grouped version's own test file pins:
+isometry, an unchanged `AC`, and an energy density that does not move.
+
 **Product-state traps in the growing algorithm, and the noise that breaks
 them** (`pyitensor/idmrg.py::_noise_perturbed_split`,
 `Chain::idmrg_noisy_isometry`). A particle-number-conserving Hamiltonian has

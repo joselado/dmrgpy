@@ -836,8 +836,56 @@ in the new block), only how fast the next rung converges: a wash on most
 models, and 4.6x faster plus 5x more accurate (and run-to-run
 reproducible, which the noise start is not) on the hardest one tested, a
 gapless `D=8` Heisenberg chain. `pyitensor/vumps_ms.py` (the sequential
-n_uc>2 solver) still noise-pads; porting the expansion there would need a
-per-bond version and has not been done.
+solver) now has the per-bond version too -- a loop over every bond of the
+cell, which is the shape upstream's own `subspace_expansion(psi, H)` has.
+Two things generalize rather than repeat: bond `n`'s two null spaces come
+from *different* tensors (`AL[n]` and `AR[n+1]`), so `AR[n]`'s new
+directions come from bond `n-1`; and the cell's last bond straddles the
+cell boundary, where the right environment/automaton/tensor are site 0's
+of the next cell -- by periodicity the same `GR[0]`/`W_list[0]`/`AR[0]`
+this cell already holds. Every bond grows by the same amount so the state
+stays uniform-`D`. Measured the same way (`nrestarts=1`, median of 5): a
+wash on TFIM and on the easy rows, 4.3x faster on gapless Heisenberg
+`n_uc=2 D=8` (1701 -> 909 iterations, 21.4s -> 5.0s), and on `n_uc=1 D=8`
+(where neither start converges within `maxiter`) 1.4x faster with the
+accuracy spread ~5x tighter at both ends. `itensor_version=3`'s own
+`vms_ground_state` still noise-pads -- the C++ port has not picked this
+up, along with the residual criterion and the AC/C sign alignment.
+
+The sequential solver is also now the route for **couplings reaching
+further than one unit cell**, which used to be rejected outright
+(`infinitechain._canonicalize_hamiltonian` refused any term touching both
+the previous and the next cell). A Hamiltonian with reach>1 has no grouped
+reach-1 representation on that cell at all, so `vumps_ground_state` sends
+it to `vumps_ms` regardless of `n_uc` -- `idmrg_excitations.is_reach_one`
+read off the grouped automaton is the test, `_check_reach_one` is now just
+the raising wrapper around it, kept for the excitation ansatz. That is
+what makes a long-range model affordable: range-R costs the sequential
+path R extra automaton channels (linear), where the only previous route --
+rewrite the chain on an `n_uc >= R` cell so every coupling is reach-1 --
+costs the grouped path a `d**R` supersite. `get_operator(name, i,
+group=c)` now takes an integer cell offset (`c = -1, 0, 1` being `L`, `C`,
+`R`) to write one, and `_canonicalize_hamiltonian` canonicalizes a term's
+position by translating it whole onto the cell its leftmost site lives in
+(well defined at any reach, identical to the old three-cell rules
+everywhere those applied). Two things worth knowing before touching this:
+`gs_method="idmrg"` needed no change at all -- its growth loop consumes
+whatever `_build_periodic_mpo` builds, and `_active_channels_at` has
+always carried one pending channel per site of a term's reach, confirmed
+directly against exact answers, so do NOT "fix" that by adding a guard;
+and `_window_hamiltonian` (`kpm_finite`'s open-boundary tiling) now tests
+the fit per term rather than dropping one fixed copy, because a
+longer-ranged term runs off the end of the window sooner.
+`itensor_version=3` has the same dispatch (`Chain::vumps_ground_state`'s
+`use_multisite`, on `vumps_is_reach_one`) and agrees with `"python"` to
+2e-13. What it still cannot do for ANY sequential-solver answer --
+`n_uc>2` as well as reach>1 -- is `vev`/`correlator`:
+`Chain::vumps_onsite_expectation`/`vumps_two_point_correlator` read the
+GROUPED snapshot and `vms_ground_state` has no static-observable port, so
+they raise (with a message that now says so). Pre-existing gap of the C++
+sequential path, just newly reachable at `n_uc<=2`.
+`tests/test_infinite_long_range.py`,
+`examples/idmrg/long_range_infinite_chain`.
 
 **Reading that led to a bigger, unrelated find, and it is the one to know
 about**: `pyitensor/dmrg.py`'s `_lanczos_ground_state` stops when the

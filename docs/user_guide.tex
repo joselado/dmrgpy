@@ -2949,9 +2949,12 @@ Every method above works on a \emph{finite} chain of \texttt{n} sites.
 chain that repeats a fixed-size \textbf{unit cell} forever in both
 directions, and solve it with infinite DMRG (iDMRG, White's growing
 algorithm generalized to a multi-site unit cell) rather than sweeping a
-fixed-length system. Currently limited to a 1- or 2-site unit cell
-(\texttt{n\_uc<=2}) -- a $>$2-site unit cell raises
-\texttt{NotImplementedError} at construction, see
+fixed-length system. A unit cell of any size is supported under
+\texttt{gs\_method="vumps"} (the default), which routes
+\texttt{n\_uc>2} to the sequential multi-site solver
+\texttt{pyitensor/vumps\_ms.py}; \texttt{gs\_method="idmrg"}, the
+growing algorithm, is limited to \texttt{n\_uc<=2} and raises
+\texttt{NotImplementedError} above that -- see
 \texttt{pyitensor/idmrg.py}'s module docstring for why.
 
 \texttt{itensor\_version="python"} (default) or \texttt{3} are both
@@ -2986,11 +2989,10 @@ infinite chain exposes each operator three times per unit-cell site
 the \emph{central} cell -- ordinary intra-cell use), \texttt{SxR[i]}
 (site \texttt{i} of the \emph{next} cell), and \texttt{SxL[i]} (site
 \texttt{i} of the \emph{previous} cell, provided purely so a coupling can
-be phrased in whichever direction reads most naturally). A term may
-touch at most two \emph{adjacent} unit cells (any subset of
-\texttt{\{L,C\}} or of \texttt{\{C,R\}}, never both \texttt{L} and
-\texttt{R} at once) -- \texttt{set\_hamiltonian} raises
-\texttt{ValueError} otherwise:
+be phrased in whichever direction reads most naturally). Terms of any
+finite range are accepted; each is canonicalized by translating it, as a
+whole, onto the cell its leftmost site lives in, so no bond is ever
+double-counted between a cell and its neighbour:
 
 \begin{lstlisting}
 from dmrgpy import infinitechain
@@ -3002,6 +3004,62 @@ ic.set_hamiltonian(h)
 A bare, single-site operator (e.g.\ \texttt{ic.SzC[0]}, no product) is
 also a valid term -- a Zeeman-field-style onsite Hamiltonian, either on
 its own or added alongside bond terms.
+
+\textbf{Couplings longer than one unit cell:
+\texttt{get\_operator(..., group=c)}.} The three flat lists reach one
+cell either way. For anything further out,
+\texttt{ic.get\_operator(name, i, group=c)} takes an \emph{integer} cell
+offset -- \texttt{c = -1, 0, 1} are exactly \texttt{L}, \texttt{C} and
+\texttt{R}, and \texttt{c = 2} is the cell after the next one -- so a
+$J_1$--$J_2$ (next-nearest-neighbour) chain fits on a one-site cell:
+
+\begin{lstlisting}
+ic = infinitechain.Infinite_Spin_Chain(["1/2"])       # n_uc=1
+J1, J2 = 1.0, 0.4
+h = 0
+for op in ("Sx", "Sy", "Sz"):
+    o0 = ic.get_operator(op, 0)                        # site 0 of this cell
+    h = h + J1*o0*ic.get_operator(op, 0, group=1)      # nearest neighbour
+    h = h + J2*o0*ic.get_operator(op, 0, group=2)      # next-nearest neighbour
+ic.set_hamiltonian(h)
+print(ic.gs_energy())
+\end{lstlisting}
+
+Both ground-state solvers handle this, on both backends.
+\texttt{gs\_method="vumps"} (the default) routes a Hamiltonian whose
+couplings exceed one unit cell to the \emph{sequential} multi-site solver
+(\texttt{pyitensor/vumps\_ms.py}, or \texttt{Chain::vms\_ground\_state}
+on \texttt{itensor\_version=3}), whose channel-resolved environments
+carry one channel per site of a term's reach and so cost linearly in it --
+where the grouped path it otherwise uses would need the same chain
+rewritten on an $n_{\mathrm{uc}} \ge \mathrm{range}$ cell and folded into
+a $d^{\mathrm{range}}$ supersite, i.e.\ exponentially.
+\texttt{gs\_method="idmrg"}'s growth loop consumes the same automaton and
+handles it too, needing no dispatch at all. \texttt{kpm\_finite} follows
+along (it builds its own finite window), and so do
+\texttt{vev}/\texttt{correlator} on \texttt{itensor\_version="python"}.
+
+Two things do not follow along.
+\texttt{excitation\_energies}/\texttt{excitation\_gap} raise
+\texttt{NotImplementedError} on either backend: the tangent-space ansatz
+is built on the reach-1 environment triple, so there is no sequential
+route for it to take -- the ground state on that same chain still works,
+so rewrite it on a longer unit cell if you need the excitations. And on
+\texttt{itensor\_version=3}, \texttt{vev}/\texttt{correlator} raise for
+anything the sequential solver answered -- a pre-existing gap of that
+backend (\texttt{Chain::vumps\_onsite\_expectation}/
+\texttt{vumps\_two\_point\_correlator} read the grouped snapshot, and
+\texttt{vms\_ground\_state} has never had a static-observable port) that
+was previously reachable only at \texttt{n\_uc>2} and that a long-range
+Hamiltonian at \texttt{n\_uc<=2} now reaches too; use
+\texttt{itensor\_version="python"} for those.
+
+See \texttt{tests/test\_infinite\_long\_range.py}, which pins a
+polarized chain carrying reach-2 and reach-3 \texttt{Sz}-\texttt{Sz}
+terms against its exact energy density (and its exact
+\texttt{vev}/\texttt{correlator}), and
+\texttt{examples/idmrg/long\_range\_infinite\_chain}, which sweeps
+$J_2$ and checks the 1- and 2-site cells against each other.
 
 A two-site unit cell can express a dimerized (alternating-bond) chain,
 and a coupling can skip over an intermediate site by reaching straight
@@ -3321,11 +3379,13 @@ case (both backends' own non-convex VUMPS restart search can land on
 slightly different local optima there, not a discrepancy in the ported
 algorithm itself) -- see \texttt{tests/test\_vumps\_excitations\_v3.py}
 and \texttt{examples/idmrg/vumps\_excitation\_v3\_VS\_python/main.py}. A
-deliberately constructed longer-range term (spanning more than 2
-adjacent unit cells after \texttt{n\_uc}-grouping) is rejected with
-\texttt{NotImplementedError}, raised from \texttt{gs\_energy()} itself
-(\texttt{vumps\_ground\_state}'s own reach-1 check) rather than from the
-excitation machinery.
+longer-range term (spanning more than 2 adjacent unit cells after
+\texttt{n\_uc}-grouping) is rejected with
+\texttt{NotImplementedError} by \texttt{excitation\_energies}/
+\texttt{excitation\_gap} themselves: the ansatz's environments are the
+reach-1 \{$G_L$, $G_R$, bond channels\} triple. The ground state on that
+same chain is unaffected -- \texttt{gs\_energy()} routes it to the
+sequential multi-site solver instead of raising.
 
 \textbf{Cost.} The eigenproblem \texttt{excitation\_energies} solves has
 dimension $D^2(d_g-1)$, so its cost grows quickly with the converged bond
