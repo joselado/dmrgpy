@@ -5,9 +5,10 @@ writing the README of a course whose notebooks build `Spin_Chain`/
 `Fermionic_Chain` with the default backend and call `gs_energy(mode="DMRG")`
 at 40-100+ sites, and which wants `pip install dmrgpy` to be the recommended
 path). Neither is fixed. Everything below was measured in this checkout at
-commit `a2eb46e`, not taken on report -- and one of the two headline claims
-did not reproduce, so read the "What did not reproduce" section before
-trusting the reporter's numbers.
+commit `a2eb46e`, not taken on report. The reporter's original absolute
+timings turned out to be wrong and have been retracted by them; the
+scaling problem they pointed at is real, and is the subject of problem 2.
+See "Settled: no regression, and where the reported numbers came from".
 
 The two problems compound: a pip install silently gives you ED (problem 1),
 and the backend it *should* give you instead is too slow at the sizes those
@@ -180,30 +181,50 @@ changes the exponent. For the course's L=100 target, (3) is required.
 * Not the MPO's final bond dimension -- it compresses to 5 correctly.
 * Not `set_hamiltonian`, which is ~0.00 s at every L measured (it stores a
   `MultiOperator`; the MPO is built later, inside `gs_energy`).
-* Not BLAS thread oversubscription, though that is a real secondary effect:
+* Not BLAS thread oversubscription -- but do not read that as "threads
+  don't matter here", because on the reporting machine they were worth
+  more than everything else combined. On this (otherwise idle) host,
   unpinned vs pinned was 2.04 s vs 1.08 s at L=20 and 12.7 s vs 8.3 s at
-  L=40, i.e. ~1.5-2x, no more. Timings above are all pinned. See
-  `src/dmrgpy/blasthreads.py`.
+  L=40, i.e. ~1.5-2x. On theirs, unpinned gave 25.6 s at L=20 against
+  1.15 s pinned -- a factor of ~22 -- and L=40 did not finish in ten
+  minutes against ~9 s pinned. That is the regime CLAUDE.md's benchmarking
+  note describes, where oversubscription dominates every other effect in
+  the file. **Pin threads before timing anything on this backend**;
+  every number above is pinned. See `src/dmrgpy/blasthreads.py`.
 * Not the DMRG sweeps, per the table above.
 
 ---
 
-## What did not reproduce
+## Settled: no regression, and where the reported numbers came from
 
-The reporter measured L=12: 4.0 s, L=20: 25.6 s, L=40: did not finish in 10
-minutes. Here the same script gives L=12: 0.28 s, L=20: 1.08 s, L=40: 8.3 s
--- roughly 20x faster at L=20 and finishing at L=40. Thread pinning explains
-at most 2x of that.
+The first version of this note flagged a 20x discrepancy between the
+reporter's timings (L=12: 4.0 s, L=20: 25.6 s, L=40: did not finish in ten
+minutes) and this checkout's (0.28 s / 1.08 s / 8.3 s), and asked whoever
+picked it up to re-measure against the installed wheel before doing
+anything -- because a since-fixed regression would have made the right
+action a release rather than a port.
 
-The untested differences are that they ran **PyPI dmrgpy 0.1.1 in a clean
-venv** while this was run from `src/` at `a2eb46e`, and that it was a
-different machine. Since 0.1.1 was tagged at `7cbe80e`, a fix landing
-between `7cbe80e` and now would show up exactly like this. **Anyone picking
-this up should first re-measure against the installed wheel**, because if
-the gap is a since-fixed regression then the priority of (3) above drops
-sharply, and the real action is a release rather than a port. The scaling
-exponent measured here (~L^3.7) is a property of the algorithm and would not
-change either way.
+**That has been done, and there is no regression.** The PyPI 0.1.1 wheel and
+`src@c78909e` are identical, on the reporting machine, with threads pinned:
+
+| | L=12 | L=20 | L=40 |
+|---|---|---|---|
+| wheel 0.1.1 | 0.29 s | 1.15 s | 8.77 s |
+| src `c78909e` | 0.30 s | 1.16 s | 8.60 s |
+
+with `E/L` agreeing to every printed digit, and both matching the numbers
+measured here. The original timings were BLAS thread oversubscription on an
+unpinned run (and a 10-minute command cap killing L=40), and have been
+retracted.
+
+So: **the wheel is not behind, a release fixes nothing here, and the
+priority of fix (3) stands as written.** The scaling exponent (~L^3.7) was
+always a property of the algorithm and is unaffected either way.
+
+The practical consequence for the course that prompted this: L=40 in ~9 s
+is fine for exercises, and L=100 in minutes is workable for self-study but
+borderline for a live session -- which is exactly the range fix (3) would
+move.
 
 ## Reproduction
 
