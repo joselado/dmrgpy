@@ -62,14 +62,16 @@ class Spin_Chain(Many_Body_Chain):
     def SS(self,i,j):
         """Return the Heisenberg dot product S_i . S_j"""
         return self.Sx[i]*self.Sx[j] + self.Sy[i]*self.Sy[j] + self.Sz[i]*self.Sz[j]
-    def set_fields(self,fun):
-        """Set the local magnetic field term of the Hamiltonian"""
-        h = 0
-        for i in range(self.ns):
-            b = fun(i)
-            for j in range(3):  h = h + b[j]*self.Si[j][i]
-        self.fields = h
-        self.hamiltonian = self.exchange + self.fields # update Hamiltonian
+    # set_fields(fun) used to live here: it built sum_i b(i).S_i and then
+    # assigned self.hamiltonian = self.exchange + self.fields directly,
+    # bypassing set_hamiltonian(). Once set_exchange() was removed,
+    # self.exchange was permanently the integer 0, so this silently
+    # REPLACED whatever Hamiltonian the caller had built with the field
+    # term alone rather than adding to it -- and, going around
+    # set_hamiltonian(), never told the backend session about it either.
+    # Write the field into the Hamiltonian directly instead
+    # (h = h + b[j]*sc.Si[j][i], then set_hamiltonian(h)), which is what
+    # its only caller (meanfield.py) now does.
     def test(self,ntries=3,**kwargs):
         """Check the anticommunation relations"""
         Sx = self.Sx

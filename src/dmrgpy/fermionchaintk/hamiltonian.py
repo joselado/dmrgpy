@@ -1,18 +1,3 @@
-def set_swave_pairing_spinful(self,fun):
-    """
-    Add onsite swave pairing to a spinful Hamiltonian
-    The pairing term is of the form
-    Delta_i c_{i,up} c_{i,down} + h.c.
-    """
-    def fp(i,j):
-        if i//2==j//2 and i!=j: # same site, different spins
-            if i<j: return fun(i//2) # pairing in that site
-            else: return -fun(i//2) # pairing in that site
-        else: return 0.0
-    self.set_pairings_MB(fp) # set pairing
-
-
-
 def set_hubbard_spinful(self,fun):
     """
     Add Hubbard interation in a spinful manner

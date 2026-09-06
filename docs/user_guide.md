@@ -164,17 +164,12 @@ the site indices and add the whole family of terms at once:
 | `fc.set_hoppings(fun)` | $\sum_{ij}f(i,j)\,c_i^\dagger c_j$ (spinless) |
 | `fc.set_hubbard(fun)` | $\sum_{ij}f(i,j)\,n_in_j$; on a spinful chain $n_i=n_{i\uparrow}+n_{i\downarrow}$ |
 | `sfc.set_hoppings_spinful(fun)` | the same hopping, spin-diagonal, with `fun` indexed by *physical* site rather than by interleaved spinless site |
-| `sfc.set_swave_pairing(fun)` | $\sum_i\Delta(i)\,c_{i\uparrow}c_{i\downarrow}+\mathrm{h.c.}$ |
 
 ```python
 fc = fermionchain.Fermionic_Chain(4)
 fc.set_hoppings(lambda i,j: 1.0 if abs(i-j)==1 else 0.0)
 fc.set_hubbard(lambda i,j: 2.0 if abs(i-j)==1 else 0.0)
 ```
-
-Note that `set_swave_pairing`'s `fun` takes a **single** argument (the
-physical site index), unlike the two-argument functions the others want —
-passing `lambda i,j: ...` raises `TypeError`.
 
 **Algebra on already-built operators.** `sc.toMPO(h)` compiles a
 `MultiOperator` into an already-built matrix product operator, on every
@@ -2376,19 +2371,30 @@ from dmrgpy import meanfield
 meanfield.spinchain_meanfield(sc, p=0.0)
 ```
 
-**Currently non-functional.** `meanfield.py` reads the exchange couplings
-back off the chain as `sc.exchange`, which was populated by
-`Spin_Chain.set_exchange(fun)`. That builder was removed in favour of
-writing the Hamiltonian out explicitly with `SS(i,j)` and
-`set_hamiltonian()`, so `sc.exchange` is now always the integer `0` and
-`spinchain_meanfield` raises `TypeError: 'int' object is not iterable`
-on any chain. The same removal leaves `Spin_Chain.set_fields(fun)`
-unsafe: it assigns `self.hamiltonian = self.exchange + self.fields`
-directly, so it silently *replaces* the Hamiltonian you built with the
-field term alone, instead of adding to it. Build the Weiss field into
-the Hamiltonian by hand (`h = h + b[2]*sc.Sz[i]`, then
-`set_hamiltonian(h)`) and iterate self-consistency in your own loop
-until both are fixed.
+The couplings are read straight off the chain's own Hamiltonian — the
+`MultiOperator` you passed to `set_hamiltonian()` — so any spin
+Hamiltonian written out of one- and two-site `Sx`/`Sy`/`Sz` terms works,
+including anisotropic exchange and bonds that are not
+nearest-neighbour. `meanfield.decompose_spin_hamiltonian(sc)` exposes
+that split directly, returning the on-site coefficients `b[i,a]`, the
+exchange `J[i,j,a,b]` and any constant offset. A Hamiltonian this
+decoupling is not defined for — a non-spin operator, a three-site term,
+two factors on the same site — raises `ValueError` rather than being
+silently approximated.
+
+The chain's own one-site terms are kept in full (they are an external
+field, not something being decoupled), so at `p=1` the mean-field
+Hamiltonian *is* the original model and the solver reproduces its exact
+ground state. Keyword arguments are forwarded to
+`gs_energy`/`get_magnetization`, so `mode="ED"` picks the ED solver; the
+mixing scheme is `mixmode=` (`"default"` or `"broyden"`), since `mode=`
+means the DMRG/ED solver here as everywhere else.
+
+Simple mixing on an antiferromagnet oscillates if every site is pushed
+the same way each iteration — the standard failure — so for an
+antiferromagnetic model start from a staggered `m0` and/or lower `mix`.
+The loop stops after `maxite` iterations with a warning rather than
+spinning forever.
 
 ## 12. Fidelity susceptibility and quantum phase transitions
 

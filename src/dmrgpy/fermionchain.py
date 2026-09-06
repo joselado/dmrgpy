@@ -7,7 +7,6 @@ from .fermionchaintk import staticcorrelator
 from .fermionchaintk import hamiltonian
 from . import funtk
 from . import gap
-from . import multioperator
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
@@ -305,13 +304,13 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
         n_i n_j, with n_i = n_{i,up} + n_{i,,down}
         """
         hamiltonian.set_hubbard_spinful(self,fun)
-    def set_swave_pairing(self,fun):
-        """
-        Add onsite swave pairing to a spinful Hamiltonian
-        The pairing term is of the form
-        Delta_i c_{i,up} c_{i,down} + h.c.
-        """
-        hamiltonian.set_swave_pairing_spinful(self,fun)
+    # set_swave_pairing(fun) used to live here. Unlike every other
+    # set_*(fun) builder on this class it took a ONE-argument function
+    # (the physical site), because fermionchaintk/hamiltonian.py wrapped
+    # it in a two-argument fp(i,j) over the interleaved spinless sites --
+    # so the natural `lambda i,j: ...` raised TypeError. Write the term
+    # out directly instead: sum_i Delta(i)*C[2*i]*C[2*i+1], plus its
+    # Hermitian conjugate, then set_hamiltonian().
     def get_density_fluctuation_spinful(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_fluctuation_spinful(self,**kwargs)
@@ -529,16 +528,10 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
         Add Hubbard interaction in a spinful manner
         """
         self.set_hubbard_spinful(fun)
-    def set_swave_pairing(self,fun):
-        """
-        Add onsite swave pairing to a spinful Hamiltonian
-        The pairing term is of the form
-        Delta_i c_{i,up} c_{i,down} + h.c.
-        """
-        h = multioperator.msum(fun(i)*self.Delta[i]
-                for i in range(len(self.Delta)))
-        self.pairing = h + h.get_dagger()
-        self.update_hamiltonian()
+    # set_swave_pairing(fun) used to live here too, with the same
+    # one-argument-function trap as its Spinful_Fermionic_Chain sibling.
+    # Write the term out directly: sum_i Delta(i)*self.Delta[i], plus its
+    # Hermitian conjugate, then set_hamiltonian().
     def get_density(self,**kwargs):
         """
         Return the density in each site, summing over spin channels

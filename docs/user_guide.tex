@@ -191,23 +191,15 @@ of the site indices and add the whole family of terms at once:
 \texttt{fc.set\_hoppings(fun)} adds $\sum_{ij}f(i,j)\,c_i^\dagger c_j$;
 \texttt{fc.set\_hubbard(fun)} adds $\sum_{ij}f(i,j)\,n_in_j$, with
 $n_i=n_{i\uparrow}+n_{i\downarrow}$ on a spinful chain;
-\texttt{sfc.set\_hoppings\_spinful(fun)} is the same hopping,
+and \texttt{sfc.set\_hoppings\_spinful(fun)} is the same hopping,
 spin-diagonal, with \texttt{fun} indexed by \emph{physical} site rather
-than by interleaved spinless site; and
-\texttt{sfc.set\_swave\_pairing(fun)} adds
-$\sum_i\Delta(i)\,c_{i\uparrow}c_{i\downarrow}+\mathrm{h.c.}$
+than by interleaved spinless site.
 
 \begin{lstlisting}
 fc = fermionchain.Fermionic_Chain(4)
 fc.set_hoppings(lambda i,j: 1.0 if abs(i-j)==1 else 0.0)
 fc.set_hubbard(lambda i,j: 2.0 if abs(i-j)==1 else 0.0)
 \end{lstlisting}
-
-Note that \texttt{set\_swave\_pairing}'s \texttt{fun} takes a
-\textbf{single} argument (the physical site index), unlike the
-two-argument functions the others want --- passing
-\texttt{lambda i,j: ...} raises \texttt{TypeError}.
-
 \textbf{Algebra on already-built operators.} \texttt{sc.toMPO(h)} compiles
 a \texttt{MultiOperator} into an already-built matrix product operator,
 on every backend: a \texttt{StaticOperator} for
@@ -2729,20 +2721,32 @@ from dmrgpy import meanfield
 meanfield.spinchain_meanfield(sc, p=0.0)
 \end{lstlisting}
 
-\textbf{Currently non-functional.} \texttt{meanfield.py} reads the
-exchange couplings back off the chain as \texttt{sc.exchange}, which was
-populated by \texttt{Spin\_Chain.set\_exchange(fun)}. That builder was
-removed in favour of writing the Hamiltonian out explicitly with
-\texttt{SS(i,j)} and \texttt{set\_hamiltonian()}, so \texttt{sc.exchange}
-is now always the integer \texttt{0} and \texttt{spinchain\_meanfield}
-raises \texttt{TypeError: 'int' object is not iterable} on any chain. The
-same removal leaves \texttt{Spin\_Chain.set\_fields(fun)} unsafe: it
-assigns \texttt{self.hamiltonian = self.exchange + self.fields} directly,
-so it silently \emph{replaces} the Hamiltonian you built with the field
-term alone, instead of adding to it. Build the Weiss field into the
-Hamiltonian by hand (\texttt{h = h + b[2]*sc.Sz[i]}, then
-\texttt{set\_hamiltonian(h)}) and iterate self-consistency in your own
-loop until both are fixed.
+The couplings are read straight off the chain's own Hamiltonian --- the
+\texttt{MultiOperator} you passed to \texttt{set\_hamiltonian()} --- so
+any spin Hamiltonian written out of one- and two-site
+\texttt{Sx}/\texttt{Sy}/\texttt{Sz} terms works, including anisotropic
+exchange and bonds that are not nearest-neighbour.
+\texttt{meanfield.decompose\_spin\_hamiltonian(sc)} exposes that split
+directly, returning the on-site coefficients $b[i,a]$, the exchange
+$J[i,j,a,b]$ and any constant offset. A Hamiltonian this decoupling is
+not defined for --- a non-spin operator, a three-site term, two factors
+on the same site --- raises \texttt{ValueError} rather than being
+silently approximated.
+
+The chain's own one-site terms are kept in full (they are an external
+field, not something being decoupled), so at $p=1$ the mean-field
+Hamiltonian \emph{is} the original model and the solver reproduces its
+exact ground state. Keyword arguments are forwarded to
+\texttt{gs\_energy}/\texttt{get\_magnetization}, so
+\lstinline|mode="ED"| picks the ED solver; the mixing scheme is
+\texttt{mixmode=} (\texttt{"default"} or \texttt{"broyden"}), since
+\texttt{mode=} means the DMRG/ED solver here as everywhere else.
+
+Simple mixing on an antiferromagnet oscillates if every site is pushed
+the same way each iteration --- the standard failure --- so for an
+antiferromagnetic model start from a staggered \texttt{m0} and/or lower
+\texttt{mix}. The loop stops after \texttt{maxite} iterations with a
+warning rather than spinning forever.
 
 \section{Fidelity susceptibility and quantum phase transitions}
 

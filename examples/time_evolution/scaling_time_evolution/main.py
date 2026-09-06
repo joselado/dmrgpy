@@ -32,7 +32,6 @@ def compute(n):
     for j in range(n):
       if fj(i,j)!=0.0: h = h + fj(i,j)*sc.SS(i,j)
   sc.set_hamiltonian(h) # set exchange couplings
-  #sc.set_fields(lambda x: [0.2,0.2,0.2]) # set exchange couplings
   sc.maxm = 10
   sc.nsweeps = 2
   sc.get_gs()
