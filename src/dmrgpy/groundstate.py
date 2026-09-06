@@ -285,6 +285,23 @@ def gs_energy_generalized(self,A,lam0=None):
             "chain.setup_python() to use the pure-Python backend instead")
     if self.hamiltonian is None:
         raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
+    if self.itensor_version=="python" and self.ns<2:
+        # pyitensor's sweeps are two-site as well, so a one-site chain has
+        # no update to make and the state never moves off its random start
+        # -- but unlike plain gs_energy(), which mode.py routes to ED for
+        # this size, there is no ED fallback here, and the outer
+        # self-consistent iteration still returns a lambda (the Rayleigh
+        # quotient of that untouched state), i.e. a silently wrong number
+        # rather than an obvious failure. Confirmed directly: a 1-site
+        # chain returned -0.3049 for an exact -0.5. Placed *before* the
+        # non-Hermitian dispatch below, unlike the itensor_version==3
+        # guard further down: NH-DMRG escapes v3's abort because it never
+        # calls ITensor's dmrg(), but it does not escape this one, its own
+        # sweep being two-site too (checked, same wrong-number symptom).
+        raise RuntimeError(
+            "gs_energy_generalized: pyitensor's two-site DMRG can't handle "
+            "a chain this short (n=%d < 2 sites) -- use mode=\"ED\" for the "
+            "plain ground state, or a longer chain"%self.ns)
     if not self.is_hermitian(self.hamiltonian):
         # Non-Hermitian H: dispatch to the NH-DMRG generalized solver
         # (nhdmrg.py's nhdmrg_generalized()/gs_energy_generalized_nhdmrg())

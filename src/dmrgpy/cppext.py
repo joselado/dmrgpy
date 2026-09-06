@@ -26,13 +26,39 @@ case every caller should fall back to ED, not fail outright (see mode.py).
 """
 
 # Single source of truth for dmrgpy's default C++ DMRG backend version.
-# Every other default (Many_Body_Chain.__init__, setup_cpp, get_backend,
-# available) is derived from this one constant -- change it here only.
-# Unrelated to the separate, opt-in "python" backend (see setup_python()),
-# which is never selected by default.
+# Every other default (setup_cpp, get_backend, available) is derived from
+# this one constant -- change it here only. Note it is the default *C++*
+# version, not unconditionally the default backend: a chain built without
+# an explicit itensor_version goes through default_backend() below, which
+# picks the pure-Python one when this extension isn't compiled.
 DEFAULT_ITENSOR_VERSION = 3
 
 _backends = {} # version -> compiled _dmrgcpp module (or pyitensor.chain), or None if unavailable
+
+
+def default_backend():
+    """The backend a chain gets when its caller names no itensor_version:
+    the default C++ version when that extension is actually compiled, and
+    the pure-Python one (pyitensor) otherwise.
+
+    The fallback is what makes a `pip install dmrgpy` usable. The wheel
+    deliberately ships no C++ at all (see CLAUDE.md's "Packaging / PyPI"),
+    so before this existed *every* default-backend chain in a pip install
+    silently ran exact diagonalization -- mode.py's extension-not-compiled
+    fallback -- which cannot reach the sizes an MPS backend exists to
+    serve. pyitensor implements the same Chain API with no compiler,
+    pybind11 or BLAS requirement of any kind, so it is always available
+    and is the right answer there.
+
+    Only the *implicit* choice moves. An explicit `itensor_version=3` on a
+    machine with no extension still falls back to ED (mode.py), because a
+    caller who named a version asked for that backend specifically; and
+    `mode="ED"` stays exactly what it always was, a deliberate choice and
+    the cross-check every test in tests/ is built on.
+    """
+    if available(DEFAULT_ITENSOR_VERSION):
+        return DEFAULT_ITENSOR_VERSION
+    return "python"
 
 
 def get_backend(version=DEFAULT_ITENSOR_VERSION):

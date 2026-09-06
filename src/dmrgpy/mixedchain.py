@@ -81,8 +81,8 @@ class Mixed_Spin_Fermion_Chain(Many_Body_Chain):
     def __init__(self, sitesin, **kwargs):
         itensor_version = kwargs.get("itensor_version", None)
         if itensor_version is None:
-            from .cppext import DEFAULT_ITENSOR_VERSION
-            itensor_version = DEFAULT_ITENSOR_VERSION
+            from .cppext import default_backend
+            itensor_version = default_backend()
         if itensor_version not in (3, "python"):
             raise ValueError("Mixed_Spin_Fermion_Chain only supports "
                     "itensor_version in (3,'python'), got "

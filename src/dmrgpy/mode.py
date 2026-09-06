@@ -60,7 +60,15 @@ def resolve_mode(self,mode="DMRG"):
     if self.itensor_version in (2,3,"python"):
         from . import cppext
         if not cppext.available(self.itensor_version):
-            print("C++ extension not compiled, using default ED routines")
+            # Only an *explicitly* requested C++ version can land here now:
+            # a chain that named no itensor_version was resolved to
+            # "python" at construction time instead (cppext.default_backend
+            # (), which is what makes a pip install do real DMRG rather
+            # than ED). So this is a caller who asked for version 2 or 3 by
+            # name on a machine where that extension isn't built.
+            print("ITensor v%s extension not compiled, using default ED "
+                  "routines (itensor_version=\"python\" would run DMRG "
+                  "here without needing a compiler)"%self.itensor_version)
             return "ED" # use exact diagonalization
     # ITensor v3's dmrg() always does two-site updates (see chain_session.h's
     # dmrg_args()) and its sweep loop aborts the whole process (SIGABRT,
@@ -77,6 +85,19 @@ def resolve_mode(self,mode="DMRG"):
     if self.itensor_version==3 and self.ns<3:
         print("ITensor v3's two-site DMRG can't handle a chain this short "
               "(n=%d < 3 sites), using default ED routines"%self.ns)
+        return "ED" # use exact diagonalization
+    # The pure-Python backend has its own, milder version of the same
+    # structural limit, and it is *not* v3's: pyitensor's DMRG is two-site
+    # too (pyitensor/dmrg.py's _dmrg_one_sweep sweeps `for i in range(1,n)`),
+    # so a one-site chain has no two-site update to make at all -- the sweep
+    # body never runs and dmrg() returns the `energy = None` it started
+    # with. Confirmed directly: a 1-site Spin_Chain on this backend returned
+    # None from gs_energy(mode="DMRG") against an ED answer of -0.4.
+    # n=2 is fine (one update covering both sites, checked against ED), so
+    # the cutoff here is 2, not v3's 3.
+    if self.itensor_version=="python" and self.ns<2:
+        print("pyitensor's two-site DMRG can't handle a chain this short "
+              "(n=%d < 2 sites), using default ED routines"%self.ns)
         return "ED" # use exact diagonalization
     # if there is an enforced mode, then use that one
     if self.mode is not None: return self.mode # use the enforced mode

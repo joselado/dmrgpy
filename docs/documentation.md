@@ -2187,16 +2187,17 @@ factors — see its module docstring.
 unless `self.itensor_version` is `2` or `3` and the corresponding
 compiled pybind11 extension isn't available (`cppext.available(version)`)
 — in which case DMRGPY silently falls back to ED.
-`itensor_version="python"` never falls back this way, since it has no
-compiled-extension precondition at all. Most public `Many_Body_Chain`
-methods accept `mode="DMRG"|"ED"` so results can be cross-validated
-between the two solver families.
+`itensor_version="python"` never falls back *this* way, since it has no
+compiled-extension precondition at all; it does fall back below two
+sites, its two-site DMRG having no update to make on a one-site chain.
+Most public `Many_Body_Chain` methods accept `mode="DMRG"|"ED"` so
+results can be cross-validated between the two solver families.
 
 | `itensor_version` | Engine | Requires | Fallback |
 |---|---|---|---|
 | `2` | ITensor v2, in-process C++ (`mpscpp2`) | compiled pybind11 extension | ED |
-| `3` (default) | ITensor v3, in-process C++ (`mpscpp3`) | compiled pybind11 extension | ED |
-| `"python"` | pure-Python `pyitensor/` | NumPy/SciPy only | none |
+| `3` (default *when compiled*) | ITensor v3, in-process C++ (`mpscpp3`) | compiled pybind11 extension | ED |
+| `"python"` (default otherwise) | pure-Python `pyitensor/` | NumPy/SciPy only | ED below 2 sites |
 | `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `juliacall`/PythonCall.jl (self-provisions Julia) | none (feature-by-feature; missing methods simply aren't implemented) |
 
 Regardless of `itensor_version`, if `self.mode` is forced to `"ED"`, or
@@ -2206,6 +2207,30 @@ Python/NumPy/SciPy (`pyfermion/`, `pyspin/`, `pyboson/`, `pyzn/` provide
 per-statistics many-body operator construction; `edtk/one2many.py`
 promotes single-site operators to the full Hilbert space), diagonalized
 with `scipy.sparse.linalg`.
+
+**Which backend a chain gets when its caller names none** is a separate
+decision from all of the above, taken once at construction time rather
+than per call: `Many_Body_Chain.__init__` takes `itensor_version=None`
+("pick one for me") and resolves it through `cppext.default_backend()`,
+which returns `DEFAULT_ITENSOR_VERSION` when that extension is compiled
+and `"python"` when it is not.
+
+That fallback is what makes `pip install dmrgpy` usable. The wheel ships
+no C++ at all (§1), so every default-backend chain in a pip install used
+to reach the extension-not-compiled branch above and run **exact
+diagonalization** — meaning a script written against the compiled backend
+kept running and silently changed algorithm, to one that cannot reach the
+sizes an MPS solver exists for. `pyitensor` implements the same `Chain`
+API with no compiler, pybind11 or BLAS requirement, so it is the correct
+answer there.
+
+Only the *implicit* choice moved. An explicit `itensor_version=3` on a
+machine with no extension still falls back to ED, because a caller who
+named a version asked for that backend specifically and silently
+rerouting them to a different DMRG engine would be the worse surprise;
+and `mode="ED"` remains exactly what it always was, a deliberate choice
+and the cross-check the whole test suite is built on. See
+`tests/test_default_backend_without_cpp.py`.
 
 `get_mode()` is a two-step decision, and the split is deliberate.
 `resolve_mode()` picks the solver on the availability grounds above
@@ -2693,7 +2718,71 @@ always-available option with no separate code path.
 It exists so DMRG/TDVP work with zero compiler/pybind11 dependency, at
 the cost of being slower than compiled ITensor by default (no
 block-sparsity, no JIT) — see §5 for how much slower in practice, and how
-`numba`/`jax` narrow that gap.
+`numba`/`jax` narrow that gap. It is also the backend a chain gets by
+default when no C++ extension is compiled (§4.3), which is every `pip
+install`.
+
+**MPO construction (`mpobuilder.py::to_mpo`).** Every operator this
+backend touches — the Hamiltonian, but equally every `vev`/correlator/
+time-evolution vertex — is built here, and it is worth knowing what
+changed. The original construction turned each `HTerm` into its own
+exact bond-dimension-1 MPO and block-diagonally concatenated all $T$ of
+them (`mpsalgebra.sum_many`), then ran one bidirectional truncating sweep
+to compress. That reached the right operator at the right *final* bond
+dimension — the textbook constant 5 for a nearest-neighbour Heisenberg
+chain — but only by passing through an intermediate of bond dimension
+$T \approx 3(L-1)$, so the compression sweep ran $O(L)$ truncating SVDs
+on $O(L)$-sized matrices: **$O(L^4)$**. Measured on an $S=1/2$ Heisenberg
+chain at the defaults (`maxm=30`, `nsweeps=15`, threads pinned), one
+`gs_energy(mode="DMRG")` scaled as $\sim L^{3.7}$, and at $L=100$ spent
+95% of a "ground state calculation" building the Hamiltonian and 5%
+solving it (the DMRG itself scaled linearly, i.e. correctly).
+
+`to_mpo` now assembles the MPO **directly as a finite-state machine** over
+the terms' partial products — the shape ITensor's own
+`toMPO(...,{"Exact",true})` produces. Each term, once `HTerm.resolve()`
+has spelled it out as one matrix per site (Jordan-Wigner strings
+included), occupies sites $[\mathrm{first},\mathrm{last}]$, and across
+any bond is in one of three situations, which are the machine's states:
+not started (**I**), finished (**F**), or one **partial** state per
+*distinct* left-partial product among the terms straddling that bond.
+Sharing partial states between terms is what compresses, and creates no
+spurious paths: sharing a state *means* the prefixes are identical, so
+following one term's prefix into another's suffix just reproduces that
+other term. The two truncating sweeps are kept, now purely to honour the
+caller's `cutoff`/`maxdim` and to squeeze out redundancy prefix-sharing
+cannot see (suffix sharing, linearly dependent channels); they are cheap
+because the incoming bond dimension is now $O(1)$.
+
+Two rules in there are load-bearing. A term's **coefficient goes on its
+transition into F**, never earlier, so terms differing only by a
+coefficient still share every partial state. And transitions into F
+**accumulate** while structural transitions are **assigned**: two
+syntactically identical terms trace the very same path, so their
+coefficients must sum, but their shared structural transitions must not
+be written twice.
+
+Same operator, same final bond dimension, and a build that is now
+$O(L^2)$ rather than $O(L^4)$ — the machine itself is $O(L)$, and what is
+left of the square is `HTerm.resolve()` spelling each of the $O(L)$ terms
+out over all $L$ sites, which is cheap (small dense per-site matrices) but
+real. `to_mpo` in isolation (min of 5, threads pinned, nearest-neighbour
+Heisenberg; the host was under unrelated load, so read the ratios rather
+than the absolutes):
+
+| $L$ | old | new | speedup |
+|---|---|---|---|
+| 20 | 0.125 s | 0.027 s | 4.6x |
+| 40 | 0.663 s | 0.029 s | 22.7x |
+| 60 | 2.96 s | 0.119 s | 24.8x |
+| 100 | 24.6 s | 0.235 s | **105x** |
+
+The previous construction is kept as `_sum_of_term_mpos`, as the
+independent reference the machine is checked against over a zoo of term
+shapes in `tests/test_mpo_automaton_builder.py`. That rewrite also fixed
+a real bug in it: on a **one-site** chain there were no bonds to sweep,
+so the concatenation was returned uncompressed and all but the last term
+was silently dropped ($0.8 S^z + 0.6 S^x$ came back as $0.6 S^x$ alone).
 
 One partial exception to that shared-surface rule:
 `dmrg.py::dmrg_generalized` (exposed as `Chain.gs_energy_generalized`/
@@ -4438,6 +4527,19 @@ now only ever worth opting into for a single long-running TDVP/METTS-like
 session, and even there the win is modest, ~10%, not a large one).
 Absolute times below will vary by machine and load, but the qualitative
 trends should hold.
+
+**These `python` columns predate the MPO builder rewrite (§4.5).** They
+were measured while `to_mpo` was still the O(L^4) concatenate-and-compress
+construction, which at these sizes was a large and *growing* share of each
+`python` timing (64% of a `gs_energy` call at L=40, 95% at L=100). The
+`v3` columns are unaffected -- ITensor builds its own MPOs. So the
+`python` numbers below, and every ratio derived from them, are an upper
+bound that gets looser as n grows: the true present-day gap is smaller
+than the tables say, and the trend of the ratio growing with n is partly
+an artifact of the builder rather than of block sparsity alone. They have
+not been re-measured (the host was under heavy unrelated load when the
+builder was rewritten, so a re-measurement would have been worse than no
+measurement). Treat them as historical until re-run.
 
 ### 5.1 Ground state energy (Heisenberg spin-1/2 chain)
 

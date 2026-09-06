@@ -444,7 +444,32 @@ symbolic building).
 `self.itensor_version` is `2` or `3` and the corresponding pybind11
 extension isn't compiled (see `cppext.available(version)`), in which case
 it silently falls back to ED. `itensor_version="python"` never falls back
-(see below — it has no compiled-extension precondition at all). Most
+for that reason (it has no compiled-extension precondition at all), but
+does below 2 sites: its DMRG is two-site, so a 1-site chain has no update
+to make and `dmrg()` returned `None` before that fallback existed — the
+same shape as, but not the same threshold as, ITensor v3's own `ns<3`
+fallback. `groundstate.py::gs_energy_generalized` needs its own copy of
+that guard (it has no ED fallback to be routed to), and there it *raises*,
+because the symptom was worse than `None`: the outer self-consistent
+iteration still returns the Rayleigh quotient of a state no sweep ever
+touched, i.e. a silently wrong number (-0.3049 for an exact -0.5). Note
+that guard sits *before* the non-Hermitian dispatch, unlike the
+`itensor_version==3` one below it — NH-DMRG escapes v3's abort by never
+calling `dmrg()`, but its own sweep is two-site too, so it does not escape
+this.
+
+**Which backend a chain gets when the caller names none** is
+`cppext.default_backend()`, not `DEFAULT_ITENSOR_VERSION` directly: the
+default C++ version when that extension is compiled, and `"python"`
+otherwise. That fallback is what makes `pip install dmrgpy` usable — the
+wheel ships no C++, so before it every default-backend chain in a pip
+install silently ran ED, which cannot reach the sizes an MPS backend
+exists for. Only the *implicit* choice moves: an explicit
+`itensor_version=3` with no extension still falls back to ED (a caller who
+named a version asked for that backend), and `mode="ED"` is untouched.
+`Many_Body_Chain.__init__`/`Mixed_Spin_Fermion_Chain.__init__` take
+`itensor_version=None` to mean "pick one for me". See
+`tests/test_default_backend_without_cpp.py`. Most
 public methods on `Many_Body_Chain` accept a `mode="DMRG"|"ED"` kwarg so
 results can be cross-validated between solvers (see the
 bilinear-biquadratic example in `README.md`).
@@ -480,10 +505,38 @@ bilinear-biquadratic example in `README.md`).
   cost of being substantially slower than compiled ITensor (no
   block-sparsity, no JIT) — see `pyitensor/__init__.py`'s docstring and
   the module-level docstrings throughout `pyitensor/` for the specific
-  simplifications taken versus real ITensor v3 (e.g. MPO construction sums
-  exact per-term bond-dim-1 MPOs rather than porting ITensor's automaton
-  compression algorithm) and why each one doesn't affect dmrgpy's own
-  results, only internal performance/bond-dimension efficiency.
+  simplifications taken versus real ITensor v3 and why each one doesn't
+  affect dmrgpy's own results, only internal performance/bond-dimension
+  efficiency.
+  **MPO construction is no longer one of them.** `pyitensor/mpobuilder.py`
+  used to build one exact bond-dimension-1 MPO per term and compress the
+  concatenation of all of them — right answer, right *final* bond
+  dimension (5 on a nearest-neighbour Heisenberg chain), but reached via
+  an intermediate of bond dimension ~3(L-1), so O(L) truncating SVDs on
+  O(L)-sized matrices: **O(L^4)**. Measured on an S=1/2 Heisenberg chain
+  at default `maxm=30`/`nsweeps=15`, one `gs_energy(mode="DMRG")` scaled
+  as ~L^3.7 and at L=100 spent 95% of its time building the Hamiltonian
+  and 5% solving it. `to_mpo` now assembles the finite-state machine over
+  the terms' partial products directly (the shape ITensor's own
+  `toMPO(...,{"Exact",true})` produces), keeping the same two truncating
+  sweeps afterwards purely to honour `cutoff`/`maxdim`. Same operator,
+  same final bond dimension, and a build that is O(L^2) rather than
+  O(L^4) (the machine itself is O(L); `HTerm.resolve()` spells each of the
+  O(L) terms out over all L sites, and that term is cheap but real):
+  `to_mpo` alone went 0.12s →
+  0.027s at L=20, 2.96s → 0.12s at L=60 and **24.6s → 0.235s (105x)** at
+  L=100 (min of 5, threads pinned). Two rules in there are load-bearing
+  and easy to get subtly wrong — the coefficient goes on the transition
+  *into* the final state (so terms differing only by a coefficient still
+  share partial states), and transitions into that state **accumulate**
+  while structural ones are **assigned** (two syntactically identical
+  terms trace the same path, so their coefficients must sum while their
+  shared structure must not be written twice). The old construction is
+  kept as `_sum_of_term_mpos`, as the reference the machine is tested
+  against on a term zoo in `tests/test_mpo_automaton_builder.py`; that
+  rewrite also fixed a real bug it had, silently dropping all but the last
+  term on a **1-site** chain (no bonds to sweep, so the concatenation was
+  returned as-is).
 - **DMRG, Julia (`itensor_version="julia_live"`)**: a live, in-process
   Julia session (`mpsjulialive/`, via `juliacall`/`juliasession.py`) with its
   own parallel set of modules (`mpsjulialive/groundstate.py`,

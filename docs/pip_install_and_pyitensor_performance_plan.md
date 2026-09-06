@@ -1,10 +1,15 @@
 # Making `pip install dmrgpy` usable: the ED fallback, and `to_mpo`'s O(L^4)
 
+**Status: both fixed.** See "What was done" at the end of this file for
+the implementation, the measurements and the tests. Everything in the two
+problem statements below is kept in the present tense as it was written,
+because the diagnoses are what the fixes were built on.
+
 Two independent problems, both reported from outside this repo (a session
 writing the README of a course whose notebooks build `Spin_Chain`/
 `Fermionic_Chain` with the default backend and call `gs_energy(mode="DMRG")`
 at 40-100+ sites, and which wants `pip install dmrgpy` to be the recommended
-path). Neither is fixed. Everything below was measured in this checkout at
+path). Everything below was measured in this checkout at
 commit `a2eb46e`, not taken on report. The reporter's original absolute
 timings turned out to be wrong and have been retracted by them; the
 scaling problem they pointed at is real, and is the subject of problem 2.
@@ -252,3 +257,142 @@ the `to_mpo` split.
 For problem 1, run anything with the default backend in an environment
 where `cppext.available(3)` is False and observe "C++ extension not
 compiled, using default ED routines".
+
+
+---
+
+## What was done
+
+Both problems are fixed, in that order reversed: the exponent first, since
+flipping the default (problem 1) before fixing the scaling (problem 2)
+would have routed every pip user onto a backend that takes minutes at
+L=100.
+
+### Problem 2 — `to_mpo` is now a finite-state machine, not a compression
+
+Fix (3) from the list above, taken directly rather than via the
+intermediate options. `pyitensor/mpobuilder.py::to_mpo` assembles the MPO
+as a finite-state machine over the terms' partial products -- the shape
+ITensor's own `toMPO(...,{"Exact",true})` produces -- instead of
+concatenating T bond-dimension-1 MPOs and compressing. The states at a
+bond are `I` (term not started), `F` (finished) and one per *distinct*
+left-partial product among the terms straddling that bond; sharing partial
+states between terms is what compresses, and it creates no spurious paths
+because sharing a state means the prefixes are identical. Two rules are
+load-bearing: the coefficient goes on the transition *into* `F` (so terms
+differing only by a coefficient still share partial states), and
+transitions into `F` accumulate while structural transitions are assigned
+(identical terms trace the same path -- coefficients must sum, structure
+must not be doubled).
+
+The build is now O(L^2) rather than O(L^4). The machine itself is O(L);
+what is left of the square is `HTerm.resolve()` spelling each of the O(L)
+terms out over all L sites -- cheap (small dense per-site matrices, ~30k
+of them at L=100), nowhere near dominant at the sizes measured, but it is
+the next wall if one ever appears.
+
+The two bidirectional truncating sweeps are **kept**, now purely to honour
+the caller's `cutoff`/`maxdim` and to squeeze out redundancy prefix-sharing
+cannot see. They are cheap because the bond dimension going into them is
+now O(1) instead of O(T).
+
+`to_mpo` in isolation, nearest-neighbour Heisenberg, min of 5, threads
+pinned (note the machine was under load from an unrelated job throughout,
+so treat the ratios as the result and the absolutes as an upper bound):
+
+| L | old | new | speedup |
+|---|---|---|---|
+| 20 | 0.125 s | 0.027 s | 4.6x |
+| 40 | 0.663 s | 0.029 s | 22.7x |
+| 60 | 2.96 s | 0.119 s | 24.8x |
+| 100 | 24.6 s | 0.235 s | **105x** |
+
+End to end, `gs_energy(mode="DMRG")` at L=100 went from 239 s to ~42 s on
+this host; what remains is the DMRG itself, which was always linear and
+was never the problem. Below L≈40 the end-to-end win is small, because
+there the MPO build was never the dominant cost.
+
+Fixes (1) and (2) from the list above -- caching the MPO on the `Chain`,
+and not rebuilding one for the Hermiticity check -- were **not** done.
+They were a constant-factor 2x on top of an O(L^4) build; against an O(L)
+build they buy a fraction of a second at L=100 and are not worth the cache
+invalidation surface. Worth revisiting only if a profile says otherwise.
+
+The previous construction is kept as `_sum_of_term_mpos` and is now the
+independent reference the machine is checked against, over a zoo of term
+shapes (long-range, gaps in the support, several factors per site, complex
+coefficients, mixed local dimensions, bare-coefficient terms, spinless and
+spinful fermions with their Jordan-Wigner strings, odd fermion parity,
+n=1 and n=2 chains) in `tests/test_mpo_automaton_builder.py`. The real
+reference there is `AutoMPO.dense_matrix()`, which Kronecker-multiplies
+the same per-site matrices without ever forming an MPO and so shares no
+code with either builder.
+
+**A bug found on the way, worth recording.** On a **one-site** chain the
+old builder silently kept only the *last* term: `to_mpo` had no bonds to
+sweep there, so `sum_many`'s concatenation was returned as-is, and
+`0.8*Sz + 0.6*Sx` came back as `0.6*Sx` alone. Through the public API that
+made a 1-site Hamiltonian a different operator -- and, being non-Hermitian
+by accident, sent it to NH-DMRG. Regression-tested.
+
+### Problem 1 — the default backend, not the mode
+
+Implemented where the note said it belonged: at the point the *version* is
+chosen, not in `get_mode`. `Many_Body_Chain.__init__` (and
+`Mixed_Spin_Fermion_Chain.__init__`) now take `itensor_version=None`
+meaning "pick one for me", resolved through the new
+`cppext.default_backend()` -- `DEFAULT_ITENSOR_VERSION` when that
+extension is compiled, `"python"` when it is not. The import-time warning
+in `dmrgpy/__init__.py` no longer says chains fall back to ED, because
+they no longer do; it now says they default to the pure-Python backend and
+that compiling the C++ one is a speed choice.
+
+All three things the note said must not be swept into this were kept:
+
+* **The `ns<3` fallback** stays scoped to `itensor_version==3`. A chain
+  resolved to `"python"` skips it, as intended.
+* **The conserved-sector guard** still raises rather than falling back.
+* **`mode="ED"`** is untouched, and so is an *explicit* `itensor_version=3`
+  on a machine with no extension -- that still falls back to ED, because a
+  caller who named a version asked for that backend specifically.
+
+`tests/test_default_backend_without_cpp.py` pins all of it, simulating the
+missing extension by emptying `cppext._backends` so the real decision is
+exercised on a machine where the extension is built. That file is also the
+first coverage `tests/` has had of the `itensor_version="python"` dispatch
+path at all, which the note flagged as worth fixing in the same change
+given the wheel's primary DMRG backend would otherwise be the only
+untested one.
+
+### A third, smaller fix that fell out of the first
+
+Making the 1-site MPO correct exposed that `itensor_version="python"`
+cannot do DMRG on a 1-site chain *at all*: pyitensor's DMRG is two-site
+(`dmrg.py::_dmrg_one_sweep` sweeps `for i in range(1, n)`), so the sweep
+body never runs and `dmrg()` returns the `energy = None` it started with.
+Before the MPO fix this was masked -- the wrong 1-site operator happened to
+be non-Hermitian, so the call went to NH-DMRG and returned a wrong number
+instead of `None`.
+
+`mode.py::resolve_mode` now routes `itensor_version=="python"` with
+`ns < 2` to ED, the same mechanism as the existing `itensor_version==3`
+with `ns < 3` fallback next to it. The threshold is 2, not 3: a two-site
+chain has exactly one two-site update and solves correctly, checked
+against ED.
+
+`gs_energy_generalized` needed its own copy of the guard, in
+`groundstate.py`, because it has no ED fallback to be routed to -- and
+there the symptom was worse than `None`: the outer self-consistent
+iteration still returns a lambda, the Rayleigh quotient of a state no
+sweep ever touched, so a 1-site chain answered **-0.3049 for an exact
+-0.5**. Unlike the `itensor_version==3` guard a few lines below it, this
+one sits *before* the non-Hermitian dispatch: NH-DMRG escapes ITensor
+v3's short-chain abort because it never calls `dmrg()`, but its own sweep
+is two-site as well, so it does not escape this one (checked -- same
+wrong-number symptom).
+
+None of these three 1-site bugs was reachable from the default backend
+before, on a machine with a compiled extension: `itensor_version=3` with
+`ns<3` was already routed to ED. They mattered because problem 1's fix
+makes `"python"` the default wherever there is no extension, which is
+exactly where a 1-site chain would now meet them.

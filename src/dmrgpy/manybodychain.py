@@ -16,6 +16,7 @@ from . import entropy
 from . import excited
 from . import effectivehamiltonian
 from . import multioperator
+from . import cppext
 from .cppext import DEFAULT_ITENSOR_VERSION
 
 dmrgpath = os.path.dirname(os.path.realpath(__file__)) # path to this package
@@ -57,9 +58,16 @@ class Many_Body_Chain():
           raise ValueError("maxm must be >= 1, got "+repr(m))
       self._maxm = mi
 
-  def __init__(self,sites,itensor_version=DEFAULT_ITENSOR_VERSION,**kwargs):
+  def __init__(self,sites,itensor_version=None,**kwargs):
       """Create a many-body chain over the given list of sites, and
-      initialize its DMRG/ED backend (itensor_version selects which one)"""
+      initialize its DMRG/ED backend (itensor_version selects which one).
+
+      itensor_version=None (the default) means "pick one for me", which is
+      cppext.default_backend(): the compiled ITensor v3 extension when it
+      exists, and the pure-Python pyitensor backend when it does not (a
+      pip install, which ships no C++). Naming a version explicitly is
+      taken at face value and never re-routed here -- see
+      cppext.default_backend()'s docstring."""
       self.sites = sites # list of the sites
       self.Id = self.get_operator("Id",0)
 #      self.path = id_generator() # random ID in dmrgpy_tmp
@@ -224,7 +232,9 @@ class Many_Body_Chain():
       self.skip_dmrg_gs = False # skip the DMRG minimization
       self.computed_gs = False # computed the GS already
       self.fit_td = False # use fitting procedure in time evolution
-      self.itensor_version = itensor_version # ITensor version
+      # ITensor version, resolving the "pick one for me" default
+      self.itensor_version = (cppext.default_backend()
+              if itensor_version is None else itensor_version)
       self.has_ED_obj = False # ED object has been computed
       self.ED_obj = None # no ED object
       self.kpm_extrapolate = False # use extrapolation

@@ -34,6 +34,7 @@
 \tableofcontents
 
 \section{Overview}
+\label{sec:intro}
 
 DMRGPY is a Python library for quasi-one-dimensional quantum lattice
 models --- spin chains, spinless and spinful fermionic chains, Kondo
@@ -2387,6 +2388,7 @@ since that recipe is already exact for an arbitrary product/order of
 factors --- see its module docstring.
 
 \subsection{Backend dispatch}
+\label{sec:dispatch}
 
 \texttt{mode.py} decides, per call, whether a calculation runs via DMRG
 or ED (the \texttt{get\_mode}/\texttt{run} functions): DMRG unless
@@ -2394,19 +2396,21 @@ or ED (the \texttt{get\_mode}/\texttt{run} functions): DMRG unless
 \texttt{2} or \texttt{3} and the corresponding compiled pybind11
 extension isn't available (\texttt{cppext.available(version)}) --- in
 which case DMRGPY silently falls back to ED.
-\texttt{itensor\_version="python"} never falls back this way, since it
-has no compiled-extension precondition at all. Most public
+\texttt{itensor\_version="python"} never falls back \emph{this} way,
+since it has no compiled-extension precondition at all; it does fall back
+below two sites, its two-site DMRG having no update to make on a one-site
+chain. Most public
 \texttt{Many\_Body\_Chain} methods accept \texttt{mode="DMRG"|"ED"} so
 results can be cross-validated between the two solver families.
 
 \begin{center}
-\begin{tabular}{@{}lp{0.32\textwidth}p{0.18\textwidth}l@{}}
+\begin{tabular}{@{}p{0.19\textwidth}p{0.27\textwidth}p{0.16\textwidth}p{0.16\textwidth}@{}}
 \toprule
 \texttt{itensor\_version} & Engine & Requires & Fallback \\
 \midrule
 \texttt{2} & ITensor v2, in-process C++ (mpscpp2) & compiled pybind11 ext. & ED \\
-\texttt{3} (default) & ITensor v3, in-process C++ (mpscpp3) & compiled pybind11 ext. & ED \\
-\texttt{"python"} & pure-Python \texttt{pyitensor/} & NumPy/SciPy only & none \\
+\texttt{3} (default \emph{when compiled}) & ITensor v3, in-process C++ (mpscpp3) & compiled pybind11 ext. & ED \\
+\texttt{"python"} (default otherwise) & pure-Python \texttt{pyitensor/} & NumPy/SciPy only & ED below 2 sites \\
 \texttt{"julia\_live"} & live in-process Julia (mpsjulialive), ITensors.jl & pyjulia + Julia & none (per-feature) \\
 \bottomrule
 \end{tabular}
@@ -2420,6 +2424,31 @@ operators built directly in Python/NumPy/SciPy (\texttt{pyfermion/},
 many-body operator construction; \texttt{edtk/one2many.py} promotes
 single-site operators to the full Hilbert space), diagonalized with
 \texttt{scipy.sparse.linalg}.
+
+\textbf{Which backend a chain gets when its caller names none} is a
+separate decision from all of the above, taken once at construction time
+rather than per call: \texttt{Many\_Body\_Chain.\_\_init\_\_} takes
+\texttt{itensor\_version=None} (``pick one for me'') and resolves it
+through \texttt{cppext.default\_backend()}, which returns
+\texttt{DEFAULT\_ITENSOR\_VERSION} when that extension is compiled and
+\texttt{"python"} when it is not.
+
+That fallback is what makes \texttt{pip install dmrgpy} usable. The wheel
+ships no C++ at all (Section~\ref{sec:intro}), so every default-backend
+chain in a pip install used to reach the extension-not-compiled branch
+above and run \emph{exact diagonalization} --- meaning a script written
+against the compiled backend kept running and silently changed algorithm,
+to one that cannot reach the sizes an MPS solver exists for.
+\texttt{pyitensor} implements the same \texttt{Chain} API with no
+compiler, pybind11 or BLAS requirement, so it is the correct answer there.
+
+Only the \emph{implicit} choice moved. An explicit
+\texttt{itensor\_version=3} on a machine with no extension still falls
+back to ED, because a caller who named a version asked for that backend
+specifically and silently rerouting them to a different DMRG engine would
+be the worse surprise; and \texttt{mode="ED"} remains exactly what it
+always was, a deliberate choice and the cross-check the whole test suite
+is built on. See \texttt{tests/test\_default\_backend\_without\_cpp.py}.
 
 \texttt{get\_mode()} is a two-step decision, and the split is deliberate.
 \texttt{resolve\_mode()} picks the solver on the availability grounds
@@ -2984,6 +3013,7 @@ Notable, deliberate implementation details (not bugs to ``fix''):
 \end{itemize}
 
 \subsection{The pure-Python backend (\texttt{pyitensor/})}
+\label{sec:pyitensor}
 
 \texttt{pyitensor/} is a from-scratch, pure-Python/NumPy/SciPy
 reimplementation of exactly the ITensor v3 API subset
@@ -3002,6 +3032,82 @@ It exists so DMRG/TDVP work with zero compiler/pybind11 dependency, at
 the cost of being slower than compiled ITensor by default (no
 block-sparsity, no JIT) --- see Section~\ref{sec:perf} for how much
 slower in practice, and how \texttt{numba}/\texttt{jax} narrow that gap.
+It is also the backend a chain gets by default when no C++ extension is
+compiled (Section~\ref{sec:dispatch}), which is every \texttt{pip
+install}.
+
+\textbf{MPO construction (\texttt{mpobuilder.py::to\_mpo}).} Every
+operator this backend touches --- the Hamiltonian, but equally every
+\texttt{vev}/correlator/time-evolution vertex --- is built here, and it
+is worth knowing what changed. The original construction turned each
+\texttt{HTerm} into its own exact bond-dimension-1 MPO and
+block-diagonally concatenated all $T$ of them
+(\texttt{mpsalgebra.sum\_many}), then ran one bidirectional truncating
+sweep to compress. That reached the right operator at the right
+\emph{final} bond dimension --- the textbook constant 5 for a
+nearest-neighbour Heisenberg chain --- but only by passing through an
+intermediate of bond dimension $T \approx 3(L-1)$, so the compression
+sweep ran $O(L)$ truncating SVDs on $O(L)$-sized matrices: $O(L^4)$.
+Measured on an $S=1/2$ Heisenberg chain at the defaults
+(\texttt{maxm=30}, \texttt{nsweeps=15}, threads pinned), one
+\texttt{gs\_energy(mode="DMRG")} scaled as ${\sim}L^{3.7}$, and at
+$L=100$ spent 95\% of a ``ground state calculation'' building the
+Hamiltonian and 5\% solving it (the DMRG itself scaled linearly, i.e.
+correctly).
+
+\texttt{to\_mpo} now assembles the MPO \textbf{directly as a
+finite-state machine} over the terms' partial products --- the shape
+ITensor's own \texttt{toMPO(...,\{"Exact",true\})} produces. Each term,
+once \texttt{HTerm.resolve()} has spelled it out as one matrix per site
+(Jordan-Wigner strings included), occupies sites
+$[\mathrm{first},\mathrm{last}]$, and across any bond is in one of three
+situations, which are the machine's states: not started (\textbf{I}),
+finished (\textbf{F}), or one \textbf{partial} state per \emph{distinct}
+left-partial product among the terms straddling that bond. Sharing partial
+states between terms is what compresses, and creates no spurious paths:
+sharing a state \emph{means} the prefixes are identical, so following one
+term's prefix into another's suffix just reproduces that other term. The
+two truncating sweeps are kept, now purely to honour the caller's
+\texttt{cutoff}/\texttt{maxdim} and to squeeze out redundancy
+prefix-sharing cannot see (suffix sharing, linearly dependent channels);
+they are cheap because the incoming bond dimension is now $O(1)$.
+
+Two rules in there are load-bearing. A term's \textbf{coefficient goes on
+its transition into F}, never earlier, so terms differing only by a
+coefficient still share every partial state. And transitions into F
+\textbf{accumulate} while structural transitions are \textbf{assigned}:
+two syntactically identical terms trace the very same path, so their
+coefficients must sum, but their shared structural transitions must not be
+written twice.
+
+Same operator, same final bond dimension, and a build that is now
+$O(L^2)$ rather than $O(L^4)$ --- the machine itself is $O(L)$, and what
+is left of the square is \texttt{HTerm.resolve()} spelling each of the
+$O(L)$ terms out over all $L$ sites, which is cheap (small dense per-site
+matrices) but real. \texttt{to\_mpo} in isolation (min of 5, threads
+pinned, nearest-neighbour Heisenberg; the host was under unrelated load,
+so read the ratios rather than the absolutes):
+
+\begin{center}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$L$ & old & new & speedup \\
+\midrule
+20 & 0.125 s & 0.027 s & 4.6x \\
+40 & 0.663 s & 0.029 s & 22.7x \\
+60 & 2.96 s & 0.119 s & 24.8x \\
+100 & 24.6 s & 0.235 s & \textbf{105x} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The previous construction is kept as \texttt{\_sum\_of\_term\_mpos},
+as the independent reference the machine is checked against over a zoo of
+term shapes in \texttt{tests/test\_mpo\_automaton\_builder.py}. That
+rewrite also fixed a real bug in it: on a \textbf{one-site} chain there
+were no bonds to sweep, so the concatenation was returned uncompressed and
+all but the last term was silently dropped ($0.8 S^z + 0.6 S^x$ came back
+as $0.6 S^x$ alone).
 
 One partial exception to that shared-surface rule:
 \texttt{dmrg.py::dmrg\_generalized} (exposed as
@@ -5012,6 +5118,21 @@ and guidance (numba is now only ever worth opting into for a single
 long-running TDVP/METTS-like session, and even there the win is modest,
 $\sim$10\%, not a large one). Absolute times below will vary by machine
 and load, but the qualitative trends should hold.
+
+\textbf{These \texttt{python} columns predate the MPO builder rewrite
+(Section~\ref{sec:pyitensor}).} They were measured while
+\texttt{to\_mpo} was still the $O(L^4)$ concatenate-and-compress
+construction, which at these sizes was a large and \emph{growing} share of
+each \texttt{python} timing (64\% of a \texttt{gs\_energy} call at
+$L=40$, 95\% at $L=100$). The \texttt{v3} columns are unaffected ---
+ITensor builds its own MPOs. So the \texttt{python} numbers below, and
+every ratio derived from them, are an upper bound that gets looser as $n$
+grows: the true present-day gap is smaller than the tables say, and the
+trend of the ratio growing with $n$ is partly an artifact of the builder
+rather than of block sparsity alone. They have not been re-measured (the
+host was under heavy unrelated load when the builder was rewritten, so a
+re-measurement would have been worse than no measurement). Treat them as
+historical until re-run.
 
 \subsection{Ground state energy (Heisenberg spin-1/2 chain)}
 
