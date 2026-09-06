@@ -12,15 +12,23 @@ this module only concerns itself with the term-compilation side) -- plus
 mo_terms.h's build_ampo(), which turns dmrgpy's own MultiOperator shape
 (coef, [(opname,site), ...]) into these HTerms.
 
-What this module deliberately does *not* port: ITensor's own automaton
-MPO-compression algorithm (autompo.cc's actual SVD/state-merging MPO
-builder). Reproducing that exactly is unnecessary here -- since dmrgpy
-never needs bit-for-bit matching internal bond dimensions between backends
-(only matching physical results, bounded by whatever MaxDim/Cutoff the
-caller already passes), mpo.py builds one exact, trivial bond-dimension-1
-MPO per HTerm and sum-compresses them together via ordinary MPO addition
-(mps.py/mpo.py's sum()), which is simpler to get right and asymptotically
-equivalent for the modest term counts dmrgpy's own Hamiltonians have.
+What this module deliberately does *not* port: autompo.cc's actual
+SVD/state-merging MPO *compression*. Turning these HTerms into an MPO is
+mpobuilder.py's job, and it does build a finite-state machine over the
+terms' partial products directly -- the same shape ITensor's own
+`toMPO(...,{"Exact",true})` produces, reaching the textbook minimal bond
+dimension without an SVD -- followed by one truncating sweep for the
+caller's cutoff/maxdim. What is not reproduced is v3's further
+SVD-based merging of *numerically* similar channels, which dmrgpy never
+needs: it only ever observes final results bounded by the Cutoff/MaxDim
+the caller already passes, never internal bond dimensions.
+
+(An earlier version built one trivial bond-dimension-1 MPO per HTerm and
+compressed the concatenation of all of them. That was correct and is
+still the reference implementation the builder is tested against, but its
+intermediate bond dimension was the term count, which made MPO
+construction O(L^4) and, at L=100, 95% of a ground-state calculation --
+see mpobuilder.py's own docstring for the measurements.)
 
 Every single-site matrix handed around in this module is in *standard*
 (physicist, output-row/input-column) convention -- i.e. the transpose of

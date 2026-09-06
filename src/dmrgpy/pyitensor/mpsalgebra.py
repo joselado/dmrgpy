@@ -6,11 +6,11 @@ Every one of these that grows bond dimension (sum, applyMPO, nmultMPO)
 finishes with a single truncating left-to-right SVD sweep (_Chain.position)
 down to the requested cutoff/maxdim -- the standard, correct way to
 compress a tensor-train sum/product, though not necessarily bit-for-bit
-the same intermediate bond dimensions ITensor's own automaton/variational
-methods would produce. That's an intentional simplification (see
-autompo.py's module docstring for the same reasoning applied to MPO
-construction): dmrgpy only ever observes final numerical results bounded
-by Cutoff/MaxDim, never internal bond dimensions.
+the same intermediate bond dimensions ITensor's own variational methods
+would produce. That's an intentional simplification (see autompo.py's
+module docstring for the same reasoning applied to MPO construction):
+dmrgpy only ever observes final numerical results bounded by
+Cutoff/MaxDim, never internal bond dimensions.
 
 ITensor v3 itself has both inner() (throws on complex operands) and
 innerC() (always works) because IQTensor/ITensor's real-vs-complex type
@@ -278,18 +278,25 @@ def sum_many(chains, cutoff=0.0, maxdim=None):
     via one K-way placement per site instead of K-1 pairwise merges each
     paying their own truncating SVD sweep.
 
-    This matters for mpobuilder.py's to_mpo(): building a T-term
-    Hamiltonian by folding in one term at a time via T-1 calls to sum()
-    forces T-1 full left-to-right SVD sweeps, even though (per
-    mpobuilder.py's own module docstring) that per-step compression
-    demonstrably doesn't reduce bond dimension at all until a final
-    bidirectional pass runs -- confirmed directly, a 14-site nearest-
-    neighbor Heisenberg chain (39 terms) landed at bond dimension exactly
-    39, i.e. zero compression, before that final pass brought it down to
-    5. Concatenating all T operands at once is exact array placement (no
-    linear algebra), so only the caller's own final compression sweep(s)
-    need to touch SVD at all -- this turns to_mpo()'s O(T) SVD sweeps
-    into O(1)."""
+    This was written for mpobuilder.py's to_mpo(), which no longer uses
+    it: building a T-term Hamiltonian by folding in one term at a time via
+    T-1 calls to sum() forces T-1 full left-to-right SVD sweeps, even
+    though that per-step compression demonstrably doesn't reduce bond
+    dimension at all until a final bidirectional pass runs -- confirmed
+    directly, a 14-site nearest-neighbor Heisenberg chain (39 terms)
+    landed at bond dimension exactly 39, i.e. zero compression, before
+    that final pass brought it down to 5. Concatenating all T operands at
+    once is exact array placement (no linear algebra), so only the
+    caller's own final compression sweep(s) need to touch SVD at all,
+    turning that builder's O(T) SVD sweeps into O(1).
+
+    That fix capped the number of sweeps but not their *size*: the
+    concatenated MPO still had bond dimension T going into them, which is
+    what made MPO construction O(L^4) until mpobuilder.py stopped
+    concatenating terms at all (it assembles the finite-state machine
+    directly now -- see its module docstring). sum_many() remains in use
+    for genuine K-way sums elsewhere, e.g. sector.py's in-sector start
+    state and charge-penalty operator."""
     chains = list(chains)
     if not chains:
         raise ValueError("sum_many: no chains given")
