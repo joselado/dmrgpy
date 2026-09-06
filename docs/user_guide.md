@@ -30,8 +30,9 @@ reference on small systems.
 16. [Worked-example cookbook](#16-worked-example-cookbook)
 17. [STM/Kondo tunneling spectra (third-order perturbation theory)](#17-stmkondo-tunneling-spectra-third-order-perturbation-theory)
 18. [Infinite chains (iDMRG)](#18-infinite-chains-idmrg)
-19. [Performance: BLAS threads](#19-performance-blas-threads)
-19b. [Running the pure-Python backend on a GPU](#19b-running-the-pure-python-backend-on-a-gpu)
+19. [Running the pure-Python backend on a GPU](#19-running-the-pure-python-backend-on-a-gpu)
+20. [Performance: BLAS threads](#20-performance-blas-threads)
+21. [What raises, and what changed in the 2026-08 audit](#21-what-raises-and-what-changed-in-the-2026-08-audit)
 
 ## 1. Physical models and Hilbert spaces
 
@@ -43,9 +44,10 @@ Every model is a chain of $n$ local Hilbert spaces $\mathcal H=\bigotimes_{i=1}^
 | `fermionchain.Fermionic_Chain` | spinless fermion (occupied/empty) | $c_i,c_i^\dagger,n_i=c_i^\dagger c_i$, Jordan-Wigner string $F_i$ |
 | `fermionchain.Majorana_Chain` | Majorana fermion | Majorana operators built from `Fermionic_Chain` |
 | `fermionchain.Spinful_Fermionic_Chain` | spin-$\tfrac12$ fermion (4 states: $0,\uparrow,\downarrow,\uparrow\downarrow$), built from two interleaved spinless sites per physical site | $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$, plus derived $S^x_i,S^y_i,S^z_i=\tfrac12(n_{i\uparrow}-n_{i\downarrow})$, onsite pairing $\Delta_i=\tfrac12 c_{i\uparrow}c_{i\downarrow}$ |
-| `fermionchain.Spinful_Fermionic_Chain_Native` | same physics as `Spinful_Fermionic_Chain`, but on a genuinely 4-dimensional local space (one tensor-network site per physical site, `itensor_version=3` only) | identical operator lists/formulas as `Spinful_Fermionic_Chain` |
+| `fermionchain.Spinful_Fermionic_Chain_Native` | same physics as `Spinful_Fermionic_Chain`, but on a genuinely 4-dimensional local space (one tensor-network site per physical site; `itensor_version=3` and `"python"` only) | identical operator lists/formulas as `Spinful_Fermionic_Chain` |
 | `bosonchain.Bosonic_Chain` | truncated boson Fock space, $n_i\in\{0,\ldots,\text{maxnb}_i-1\}$, per-site dimension `maxnb` (default 4, i.e. up to 3 bosons/site) settable via `Bosonic_Chain(n, maxnb=[...])` | $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}=\lvert k\rangle\langle k\rvert$ for $k=0,\ldots,\text{maxnb}_i-1$ (`bc.D[i][k]`, plus `bc.D0`..`bc.D3` when every site has `maxnb`$\,\ge 4$) |
 | `parafermionchain.Parafermionic_Chain` | $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ | clock/shift operators $\sigma_i,\tau_i$ and composite parafermion operators $\chi_i,\psi_i$ built as $\tau$-string $\times\sigma_i$ |
+| `bosonchain.SpinBoson_Chain` | mixes truncated-boson sites and genuine spin-$S$ sites *in the same chain*, one entry per location (the constructor takes the list of site labels, e.g. `SpinBoson_Chain(["boson","S=1/2",...])`) | at a boson location: $a_i,a_i^\dagger,n_i$ and the occupation projectors `D0`..`D3`; at a spin location: $S^x_i,S^y_i,S^z_i$. As in `Mixed_Spin_Fermion_Chain`, the operators that do not apply at a given location read as the integer `0` |
 | `mixedchain.Mixed_Spin_Fermion_Chain` | mixes genuine spin-$S$ sites and spinful-fermion locations *in the same chain*, one entry per logical location | at a spin location: native $S^x_i,S^y_i,S^z_i$; at a fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived $S^x_i,S^y_i,S^z_i,\Delta_i$ as in `Spinful_Fermionic_Chain` |
 
 Spinful fermionic chains are built by *interleaving* two spinless
@@ -61,8 +63,9 @@ with the same operator lists (`Cup`/`Cdagup`/`Cdn`/`Cdagdn`/`Nup`/`Ndn`/
 `Ntot`/`Sx`/`Sy`/`Sz`/`Delta`) and identical physics/sign convention as
 `Spinful_Fermionic_Chain` -- the two classes are drop-in equivalent for
 any given Hamiltonian, cross-checked to agree exactly under ED and to
-DMRG tolerance under `itensor_version=3` (the only DMRG backend this
-class wires up). Despite halving the site count, it is *not* generally
+DMRG tolerance under `itensor_version=3` and `itensor_version="python"`
+(the two DMRG backends this class wires up; `itensor_version=2` and
+`"julia_live"` have no native spinful site). Despite halving the site count, it is *not* generally
 faster in practice: see its class docstring
 (`fermionchain.py`) for a measured comparison against
 `Spinful_Fermionic_Chain` -- two-site DMRG's per-sweep cost is driven by
@@ -87,8 +90,10 @@ plain version needs). Measured (n=3,4,5,6,12 orbitals),
 `Spinful_Fermionic_Chain_Native`'s `ctmode="full"` is the fastest of all
 four combinations at every size tried, including n=12 (24 flat modes:
 ~620s vs ~890s for `Spinful_Fermionic_Chain`'s own `ctmode="full"`, a
-~30% win). Prefer `ctmode="full"` for this class whenever it's
-available (it always is, for `itensor_version=3`). Otherwise prefer
+~30% win). Leave `ctmode` at its default for this class — the resolver
+already picks the fastest available method (`"fold"` on
+`itensor_version=3`, `"batched"` under `"python"`), both of which are
+faster than the `"full"` this comparison was made against. Otherwise prefer
 `Spinful_Fermionic_Chain`; no other calculation tried so far makes the
 native-site class faster.
 
@@ -119,7 +124,8 @@ on the pure-Python side, `pyitensor/sites/boson.py`'s `get_boson_site()`
 factory) — `itensor_version=2` and the Julia backend still only
 understand the single fixed 4-level boson site regardless of what
 `maxnb` requests, so a non-default `maxnb` should be run under
-`itensor_version=3` (the default) or `"python"` for DMRG/ED results to
+`itensor_version=3` (the default when the compiled C++ extension is
+available, `"python"` otherwise) or `"python"` for DMRG/ED results to
 actually agree; see `examples/boson_models/boson_maxnb_v3_VS_ED`.
 
 ## 2. Building a Hamiltonian and observables
@@ -149,12 +155,37 @@ hopping $t\sum_i(c_i^\dagger c_{i+1}+\text{h.c.})$, Hubbard interaction
 $U\sum_i n_{i\uparrow}n_{i\downarrow}$, and so on — see §16 for concrete
 Hamiltonians.
 
+**Hamiltonian shortcuts on fermionic chains.** Rather than writing every
+term out, the fermionic classes offer builders that take a function of
+the site indices and add the whole family of terms at once:
+
+| Call | Adds |
+|---|---|
+| `fc.set_hoppings(fun)` | $\sum_{ij}f(i,j)\,c_i^\dagger c_j$ (spinless) |
+| `fc.set_hubbard(fun)` | $\sum_{ij}f(i,j)\,n_in_j$; on a spinful chain $n_i=n_{i\uparrow}+n_{i\downarrow}$ |
+| `sfc.set_hoppings_spinful(fun)` | the same hopping, spin-diagonal, with `fun` indexed by *physical* site rather than by interleaved spinless site |
+| `sfc.set_swave_pairing(fun)` | $\sum_i\Delta(i)\,c_{i\uparrow}c_{i\downarrow}+\mathrm{h.c.}$ |
+
+```python
+fc = fermionchain.Fermionic_Chain(4)
+fc.set_hoppings(lambda i,j: 1.0 if abs(i-j)==1 else 0.0)
+fc.set_hubbard(lambda i,j: 2.0 if abs(i-j)==1 else 0.0)
+```
+
+Note that `set_swave_pairing`'s `fun` takes a **single** argument (the
+physical site index), unlike the two-argument functions the others want —
+passing `lambda i,j: ...` raises `TypeError`.
+
 **Algebra on already-built operators.** `sc.toMPO(h)` compiles a
-`MultiOperator` into a `StaticOperator` (an already-built matrix product
-operator, `itensor_version` 2, 3, and `"python"` only — not
-`"julia_live"` yet). Two `StaticOperator`s can then be combined directly
-with `+`, `-`, unary `-`, and scalar `*`/`/`, without going back through
-the symbolic `MultiOperator` form:
+`MultiOperator` into an already-built matrix product operator, on every
+backend: a `StaticOperator` for `itensor_version` 2, 3 and `"python"`,
+an `EDOperator` under `mode="ED"`, and `mpsjulialive`'s own `MPO` for
+`itensor_version="julia_live"`. The `+`, `-`, unary `-` and scalar
+`*`/`/` algebra below is `StaticOperator`-only — the `julia_live` `MPO`
+supports `*` alone — so it is available for `itensor_version` 2, 3 and
+`"python"`, not yet for `"julia_live"`. Two `StaticOperator`s can be
+combined directly, without going back through the symbolic
+`MultiOperator` form:
 
 ```python
 A = sc.toMPO(sc.Sz[0])
@@ -168,6 +199,35 @@ only exist as already-built `StaticOperator`s (e.g. two independently
 constructed products or exponentials); for the common case of combining
 Hamiltonians before ever building an MPO, summing the underlying
 `MultiOperator`s directly (as `h = h + ...` above) remains preferred.
+
+**MPS and operator algebra.** Every chain also exposes the primitives
+that act on wavefunctions and operators directly, which the worked
+examples later in this guide use (e.g. §3's `promote_to_dense` example
+builds a photoemission weight out of `applyoperator` and `overlap`).
+Each takes the same `mode=`/`**kwargs` as the rest of the API:
+
+| Call | Returns |
+|---|---|
+| `sc.overlap(a, b)` | $\langle a|b\rangle$ |
+| `sc.aMb(a, M, b)` | $\langle a|M|b\rangle$ |
+| `sc.applyoperator(A, wf)` | $A|\psi\rangle$ |
+| `sc.applyinverse(A, wf)` | $A^{-1}|\psi\rangle$ (approximate — see §4) |
+| `sc.exponential(h, wf)` | $e^{h}|\psi\rangle$ |
+| `sc.summps(a, b)` | $|a\rangle+|b\rangle$ |
+| `sc.scale_mps(x, wf)` | $x|\psi\rangle$ (a single-tensor rescale, not an MPO sweep) |
+| `sc.trace(A)` | $\mathrm{Tr}\,A$, and `sc.inverse_trace(A)` for $\mathrm{Tr}\,A^{-1}$ |
+| `sc.operator_norm(A)` | an estimate of $\lVert A\rVert$; `sc.is_zero_operator(A)` thresholds it at $10^{-4}$ |
+
+`trace`, `operator_norm` and `is_zero_operator` take a `MultiOperator`,
+not a compiled `StaticOperator`. On the wavefunction itself,
+`wf.dot(other)` and `wf.norm()` give $\langle\psi|\phi\rangle$ and
+$\lVert\psi\rVert$, `wf.normalize(tol=1e-8)` returns the normalized
+state (or `None`, with a warning, if the norm is below `tol`),
+`wf.get_conjugate()` the complex conjugate state, and `wf.get_entropy(b)`
+the entanglement entropy at bond `b` (§5). `wf * x` and `A * wf` are
+shorthand for `scale_mps` and `applyoperator`. `wf.get_dm(inds=[...])`
+returns the single-particle density matrix $\langle
+c_i^\dagger c_j\rangle$ and is implemented for `Fermionic_Chain` only.
 
 ## 3. Ground-state properties
 
@@ -412,9 +472,14 @@ DMRG call on that chain afterwards raises rather than answering with an
 `Nf`-only sector.
 
 Because ED has quantum numbers now, a sector also no longer forbids the
-automatic DMRG-to-ED fallbacks: a chain whose C++ extension was never
-compiled, or an `itensor_version=3` chain too short for ITensor's two-site
-DMRG ($n<3$), answers the sector correctly through ED instead of refusing.
+automatic DMRG-to-ED fallbacks: a chain that *explicitly* asked for
+`itensor_version=2`/`3` on a machine where that extension was never
+compiled, or an `itensor_version=3` chain too short for ITensor's
+two-site DMRG ($n<3$), answers the sector correctly through ED instead of
+refusing. (A chain that named no `itensor_version` at all no longer
+reaches that fallback: it is resolved to `"python"` at construction time
+when no extension is compiled, and the pure-Python backend implements
+sectors itself.)
 
 The conserving-operator rule is the same under ED, and enforced for the
 same reason: restricting an operator to the sector is exact for a static
@@ -470,6 +535,13 @@ wf_Nm = fc.wf0.copy()
 Z = abs(fc.overlap(wf_Nm, fc.applyoperator(fc.C[i], wf_N)))**2  # photoemission weight
 ```
 
+`chain.get_sector_charge_operators()` returns the conserved quantities
+this chain offers to `set_conserved_sector`, as a
+`{name: MultiOperator}` dict measuring each one over the whole chain —
+the same names and the same integer $2S_z$ units. They are ordinary
+observables, so `chain.vev(ops["Nf"])` works directly. A chain that
+conserves nothing (parafermions) raises.
+
 `promote_to_dense()` is available on `itensor_version=3` and
 `itensor_version="python"`, like `set_conserved_sector` itself, and does
 nothing if no sector is set. Handing a chain a wavefunction built under a
@@ -490,6 +562,20 @@ $$\langle O\rangle=\langle\mathrm{GS}|O|\mathrm{GS}\rangle,\qquad \langle O^n\ra
 mz = [sc.vev(sc.Sz[i]).real for i in range(n)]        # local magnetization profile
 e2 = sc.vev(h, npow=2)                                  # <H^2>, e.g. for fluctuations
 ```
+
+The model classes wrap the most common of these profiles, so the loop
+above rarely has to be written by hand. Each takes the same `mode=`/
+`**kwargs` as `vev` and returns one value per site:
+
+| Call | Returns | Available on |
+|---|---|---|
+| `.get_density()` | $\langle n_i\rangle$, summed over spin on spinful chains | fermionic chains |
+| `.get_density_fluctuation()` | $\langle n_i^2\rangle-\langle n_i\rangle^2$ | fermionic chains |
+| `.get_onsite_pairing()` | $\langle c_{i\uparrow}c_{i\downarrow}\rangle$ | spinful fermionic chains |
+| `.get_magnetization()` | the $3\times n_s$ array of $\langle S^x_i\rangle,\langle S^y_i\rangle,\langle S^z_i\rangle$ | spin and spinful fermionic chains |
+
+`get_magnetization()` also writes a `MAGNETIZATION.OUT` file into the
+working directory as a side effect.
 
 **Energy fluctuation** (a measure of how sharply the DMRG/ED state is an eigenstate, and physically the variance of $H$ in the prepared state):
 
@@ -830,6 +916,15 @@ if called afterward. Call `gs_energy_generalized()` as the last step of a
 calculation, or recompute a genuine ground state (`gs_energy()`/`nhdmrg()`)
 first if you need one of those other methods too.
 
+Unlike plain `gs_energy()`, this method has no ED fallback for a chain
+too short for the backend's two-site sweep, so on
+`itensor_version="python"` it *raises* `RuntimeError` below 2 sites
+rather than returning a number. That is deliberate: the outer
+self-consistent iteration would otherwise still return the Rayleigh
+quotient of a state no sweep ever touched — measured at $-0.3049$ for
+an exact $-0.5$ — i.e. a silently wrong answer. Use `mode="ED"` for a
+chain that short.
+
 **Effective low-energy Hamiltonians.** Given the $n$ lowest eigenstates
 $\{|\psi_k\rangle\}$ and the projector $P=\sum_k|\psi_k\rangle\langle\psi_k|$
 onto the manifold they span, the projected Hamiltonian $PHP$ can be fitted
@@ -947,7 +1042,7 @@ $$S=-\sum_\alpha\Big[n_\alpha\log n_\alpha+(1-n_\alpha)\log(1-n_\alpha)\Big]$$
 correlators $\langle c_i^\dagger c_j^\dagger c_l c_k\rangle$ and
 $\langle c_i^\dagger c_j c_k^\dagger c_l\rangle$.
 
-`get_four_correlation_tensor(ctmode=...)` has three implementations:
+`get_four_correlation_tensor(ctmode=...)` has five implementations:
 `ctmode="explicit"` (backend-agnostic Python loop of `vev()`s, always
 available), `ctmode="full"` (native per-element AutoMPO build — C++ for
 `itensor_version` `2`/`3`, pure Python for `"python"` — builds and
@@ -961,7 +1056,7 @@ tensor-network contractions across the whole $(N,N,N,N)$ tensor. Agrees
 with `ctmode="full"` and ED to machine precision / solver tolerance on
 both backends, and is substantially faster: at $n=12$, 9.3s → 1.2s under
 `itensor_version=3` and 37.7s → 2.0s under `"python"` (measured
-single-threaded — see §19 on BLAS threads), i.e. roughly 8x and 19x,
+single-threaded — see §20 on BLAS threads), i.e. roughly 8x and 19x,
 against a `ctmode="full"` that is slower still.
 
 Those numbers reflect a fix worth knowing about if you read the older
@@ -1044,9 +1139,11 @@ else the always-correct `"explicit"` fallback (e.g. for
 `itensor_version="julia_live"`, which has no `"full"`/`"sweep"`
 implementation). Passing a `ctmode` explicitly is still a hard request —
 it raises rather than silently falling back if that method isn't
-available for the wavefunction at hand. `Spinful_Fermionic_Chain_Native`
-always needs `ctmode="full"` (or the default, which resolves to it):
-the sweep has no native-spinful-site counterpart yet.
+available for the wavefunction at hand. For `Spinful_Fermionic_Chain_Native` the only method that has no
+native-spinful counterpart is `ctmode="sweep"`; the default resolver
+picks `"batched"` under `itensor_version="python"`, `"fold"` under
+`itensor_version=3`, and falls back to `"full"` and then `"explicit"`
+if neither is available on the session at hand.
 
 ## 6. Dynamical (frequency-dependent) correlators
 
@@ -1060,7 +1157,7 @@ site gives the local dynamical spin structure factor $S^{zz}_{ii}(\omega)$
 (what a local probe like NMR/ESR couples to); choosing $A=S^z_i$,
 $B=S^z_j$ at different sites and Fourier-transforming over $i-j$ gives
 the momentum-resolved dynamical structure factor $S(q,\omega)$ measured
-in inelastic neutron scattering. All five submodes below compute
+in inelastic neutron scattering. All of the submodes below compute
 $G_{AB}(\omega)$ (or equivalently $S_{AB}(\omega)$); they differ only in
 *how*, and therefore in what energy range/resolution/cost trade-off they
 offer:
@@ -1256,8 +1353,9 @@ of the window before ever reaching a genuinely useful, narrower regime.
 Available for `itensor_version="python"` and `itensor_version=3`; there
 is no `itensor_version=2` port (mpscpp2 has no equivalent machinery to
 build a per-site local effective Hamiltonian from, unlike mpscpp3's
-`LocalMPO`/`diagHermitian`). Requesting it on `itensor_version=2` is
-silently a no-op (the existing, always-safe rescaling is used instead).
+`LocalMPO`/`diagHermitian`). Requesting it on `itensor_version=2` raises
+`NotImplementedError` (it used to be silently ignored there, so the run
+looked truncated and was not — see §21).
 The v3 port (`mpscpp3/chain_session.h`'s
 `kpm_dynamical_correlator_truncated()`) is a wholly independent method
 from `kpm_dynamical_correlator()` — a deliberate design choice so the
@@ -1328,6 +1426,19 @@ the neighboring point's correction vector was tried and measured to
 *hurt* — truncated CG from a nearby-but-wrong start can stagnate at a
 much worse residual than from the cold start — so each point is solved
 independently.)
+
+**`submode="CVM_explicit"` — the resolvent formed explicitly.** Computes
+the same $G_{AB}(\omega)$ as `submode="CVM"`, but without the
+positive-definite reformulation above: it applies
+$(\omega+E_0\pm i\eta-H)^{-1}$ to $B|\mathrm{GS}\rangle$ directly, as two
+`applyinverse` solves at $\pm i\eta$, and combines them. That is a more
+literal transcription of the definition and needs no conjugate-gradient
+machinery, but it inherits `applyinverse`'s accuracy rather than
+`"CVM"`'s controlled CG residual, so `"CVM"` is the better default; use
+this one to cross-check a suspicious `"CVM"` curve. It assumes
+$A^\dagger=B$ and raises otherwise. On a non-Hermitian $H$ it is one of
+the two submodes (with `"CVM"`) that has a genuine non-Hermitian
+implementation.
 
 **`submode="ROOTN"` — root-$N$ Krylov-space correction vector.**
 Implements Nocera & Alvarez, "Root-$N$ Krylov-space correction-vectors
@@ -1627,9 +1738,14 @@ single-sector primitive `sectordc.sector_poles` still requires a definite
 charge, since its `info` names one sector and carries that sector's
 matrix elements; use it when you want those (to build $S(q,\omega)$ out
 of them, say). `itensor_version=3`
-and `itensor_version="python"` only, and never falls back to ED: falling
-back would answer with the *global* excited states, a different
-calculation.
+and `itensor_version="python"` only, and never falls back to ED. The
+reason is `promote_mps`: this submode solves two sectors on an internal
+clone and contracts their states against each other, which needs both
+rebased onto the chain's original dense indices. ED targets a sector by
+a different mechanism (§3) and deliberately provides no
+`promote_to_dense`/`promote_mps`, so there is nothing to fall back *to*
+— and falling back to a plain ED solve would answer with the *global*
+excited states, a different calculation.
 
 **`get_spectral_function(i, j=None, spin=None, ...)` — the single-particle
 spectral function.** The physics-facing wrapper, since "give me
@@ -1676,12 +1792,32 @@ site's correlator. See
 reproduces the des Cloizeaux–Pearson lower edge of the two-spinon
 continuum.
 
+**The isotropic, degeneracy-averaged spin correlator.**
+`sc.get_full_SS_correlator(mode="ED", i=0, j=None)` returns the
+component-summed correlator
+
+$$S_{ij}(\omega)=\tfrac13\sum_{\alpha\in\{x,y,z\}}S^{\alpha\alpha}_{ij}(\omega)$$
+
+additionally averaged over the degenerate ground-state manifold
+(`get_gs_manifold`), which is what an unpolarized INS or ESR measurement
+of an isotropic magnet actually sees — neither the component sum nor the
+manifold average is a one-liner over `get_dynamical_correlator`. `j`
+defaults to `i`. It is **ED-only** and raises for any other mode;
+remaining keyword arguments are forwarded to `get_dynamical_correlator`,
+so `submode=` and the frequency grid still apply. See
+`examples/dynamical_correlator/full_spin_correlator`.
+
 **`submode="maxent"` — maximum-entropy reconstruction.** Reconstructs a
 positive-definite spectral function from a finite set of moments
 $\langle(H-E_0)^k\rangle$ using a maximum-entropy method
 (`distribution.get_distribution_maxent`), rather than a Chebyshev
 expansion — useful when positivity of the reconstructed $S(\omega)$
 matters more than matching KPM's polynomial-expansion artifacts.
+**Not available in a stock checkout:** the reconstruction itself lives
+in the third-party `dmrgpy.maxenttk` (PyMaxEnt) module, which is not
+distributed with this package, so `submode="maxent"` raises
+`NotImplementedError` until you install it separately. The same is true
+of `submode="CVMimag"`, whose Padé continuation needs `dmrgpy.padetk`.
 
 **`submode="KPM"` for non-Hermitian Hamiltonians.** When $H\neq H^\dagger$
 (§4), `submode="KPM"` automatically routes to a different algorithm, a
@@ -1763,10 +1899,18 @@ long simulated times/low frequencies, where TD's real-time bond-dimension
 growth becomes limiting; EX when a handful of excited states already
 capture the physics (e.g. a small gapped system); maxent when you want a
 guaranteed-positive reconstruction from limited moment data (e.g.\
-combined with finite-temperature ED, see §9). For a non-Hermitian $H$,
-`"KPM"` is currently the only submode with a genuine biorthogonal
-implementation (see above); the other submodes fall back to a
-correction-vector method that assumes $A^\dagger=B$.
+combined with finite-temperature ED, see §9) *and* you have installed the
+separate `maxenttk` module it needs. For a non-Hermitian $H$,
+the dispatch is per submode, not wholesale: `"KPM"` runs a genuine
+biorthogonal KPM (see above), `"CVM"`/`"CVM_explicit"` run the
+non-Hermitian correction-vector resolvent (which *is* their
+non-Hermitian implementation, not a substitution for it), and
+`"EX"`/`"maxent"` are backend-agnostic enough to work as they are.
+Every other submode — `"TD"`, `"TDZ"`, `"CVMimag"`, `"ROOTN"`,
+`"SECTOR"` — raises `NotImplementedError`. Before the 2026-08 audit
+these last ones silently returned the `CVM_explicit` resolvent instead,
+so a caller's `submode=` was effectively ignored on a non-Hermitian
+Hamiltonian (see §21).
 
 ## 7. Real-time dynamics: quenches
 
@@ -2185,6 +2329,29 @@ $$W=\det\Big[\textstyle\prod_k U(k,k+\delta k)\Big],\qquad U_{mn}(k,k+\delta k)=
 with $m,n$ running over occupied bands; $\gamma=\arg W$ is the
 polarization/Zak phase of that band manifold (and, combined with a scan
 over a second momentum direction, the ingredient for a Chern number).
+`topology.berry_phase_matrix(hkgen, nk=20)` computes this from a
+callable `hkgen(k)` returning $H(k)$.
+
+**Fermion parity.** For a fermionic chain, the total parity
+
+$$P=\Big\langle\prod_i(1-2n_i)\Big\rangle$$
+
+is $+1$ or $-1$ for a state of definite (even/odd) fermion number and is
+the $\mathbb{Z}_2$ invariant distinguishing the two sectors a Majorana
+chain's topological phase connects. It is evaluated on the wavefunction:
+
+```python
+wf = fc.get_gs()
+p = wf.get_fermionic_parity()          # fpmode="full" (default)
+p = wf.get_fermionic_parity(fpmode="iterative")
+```
+
+The two `fpmode` values are the same quantity by two routes — `"full"`
+builds the whole parity string as one operator, `"iterative"` applies it
+site by site — and any other value raises. See
+`examples/topological/parity` for a sweep of $P$ against chemical
+potential across the topological transition, and
+`examples/topological/parity_modes` and `parity_long_chain` alongside it.
 
 ## 11. Mean-field decoupling
 
@@ -2208,6 +2375,20 @@ phases where pure MF overestimates order).
 from dmrgpy import meanfield
 meanfield.spinchain_meanfield(sc, p=0.0)
 ```
+
+**Currently non-functional.** `meanfield.py` reads the exchange couplings
+back off the chain as `sc.exchange`, which was populated by
+`Spin_Chain.set_exchange(fun)`. That builder was removed in favour of
+writing the Hamiltonian out explicitly with `SS(i,j)` and
+`set_hamiltonian()`, so `sc.exchange` is now always the integer `0` and
+`spinchain_meanfield` raises `TypeError: 'int' object is not iterable`
+on any chain. The same removal leaves `Spin_Chain.set_fields(fun)`
+unsafe: it assigns `self.hamiltonian = self.exchange + self.fields`
+directly, so it silently *replaces* the Hamiltonian you built with the
+field term alone, instead of adding to it. Build the Weiss field into
+the Hamiltonian by hand (`h = h + b[2]*sc.Sz[i]`, then
+`set_hamiltonian(h)`) and iterate self-consistency in your own loop
+until both are fixed.
 
 ## 12. Fidelity susceptibility and quantum phase transitions
 
@@ -2281,6 +2462,12 @@ moments $\langle X^k\rangle$ via maximum entropy
 (`get_distribution_maxent`). Useful for e.g.\ full counting statistics of
 a conserved charge, or distinguishing a sharply peaked (well-defined
 quantum number) ground state from a broadly spread one.
+`sc.get_distribution_moments(...)` returns the raw $\langle X^k\rangle$
+moments both reconstructions are built from — the distribution
+counterpart of §6's `get_dynamical_correlator_moments`. It is a
+DMRG/KPM quantity with no ED implementation (the ED path builds spectra
+by explicit summation, not from moments), so it raises
+`NotImplementedError` under `mode="ED"`.
 
 ## 15. Post-processing tools
 
@@ -2288,7 +2475,9 @@ quantum number) ground state from a broadly spread one.
   continuation of a correlator known on the imaginary/complex-frequency
   axis (e.g.\ from a Matsubara-like or complex-shifted CVM calculation,
   §6's `submode="CVMimag"`) to the real frequency axis, where the
-  physical spectral function lives.
+  physical spectral function lives. Requires the third-party
+  `dmrgpy.padetk` module, which is not shipped with this package; without
+  it both this tool and `submode="CVMimag"` raise `NotImplementedError`.
 - **Function fitting** (`functionfit.py`): a generic multi-start Powell
   minimizer used e.g.\ to fit the Calabrese-Cardy entropy formula in §5.
 - **Finite-size extrapolation** (`extrapolate.py`): polynomial
@@ -2299,7 +2488,10 @@ quantum number) ground state from a broadly spread one.
 - **Maximum-entropy reconstruction** (`reconstruct.py`): reconstructs a
   positive spectral function from a truncated moment expansion,
   underlying both the `"maxent"` dynamical-correlator submode and
-  `get_distribution_maxent`.
+  `get_distribution_maxent`. Requires the third-party `dmrgpy.maxenttk`
+  (PyMaxEnt) module, which is not shipped with this package; without it
+  importing `reconstruct` raises `ModuleNotFoundError` and the two
+  callers above raise `NotImplementedError`.
 
 ## 16. Worked-example cookbook
 
@@ -2602,9 +2794,9 @@ ic.set_hamiltonian(h)
 print(ic.gs_energy())
 ```
 
-Both ground-state solvers handle this, on both backends. `gs_method="vumps"` (the default) routes a Hamiltonian whose couplings exceed one unit cell to the *sequential* multi-site solver (`pyitensor/vumps_ms.py`, or `Chain::vms_ground_state` on `itensor_version=3`), whose channel-resolved environments carry one channel per site of a term's reach and so cost linearly in it — where the grouped path it otherwise uses would need the same chain rewritten on an `n_uc >= range` cell and folded into a `d**range` supersite, i.e. exponentially. `gs_method="idmrg"`'s growth loop consumes the same automaton and handles it too, needing no dispatch at all. `kpm_finite` follows along (it builds its own finite window), and so do `vev`/`correlator` on `itensor_version="python"`.
+Both ground-state solvers handle this, on both backends. `gs_method="vumps"` (the default) routes a Hamiltonian whose couplings exceed one unit cell to the *sequential* multi-site solver (`pyitensor/vumps_ms.py`, or `Chain::vms_ground_state` on `itensor_version=3`), whose channel-resolved environments carry one channel per site of a term's reach and so cost linearly in it — where the grouped path it otherwise uses would need the same chain rewritten on an `n_uc >= range` cell and folded into a `d**range` supersite, i.e. exponentially. `gs_method="idmrg"`'s growth loop consumes the same automaton and handles it too, needing no dispatch at all. `kpm_finite` follows along (it builds its own finite window).
 
-Two things do not follow along. `excitation_energies`/`excitation_gap` raise `NotImplementedError` on either backend: the tangent-space ansatz is built on the reach-1 environment triple, so there is no sequential route for it to take — the ground state on that same chain still works, so rewrite it on a longer unit cell if you need the excitations. `vev`/`correlator`, by contrast, do follow along, on both backends and at any reach: `itensor_version=3` reads whichever snapshot the run left behind (`Chain::vms_onsite_expectation`/`vms_two_point_correlator` for a sequential answer, the grouped `vumps_*` pair otherwise), so nothing has to be rewritten to measure a long-range chain.
+One thing does not follow along. `excitation_energies`/`excitation_gap` raise `NotImplementedError` on either backend: the tangent-space ansatz is built on the reach-1 environment triple, so there is no sequential route for it to take — the ground state on that same chain still works, so rewrite it on a longer unit cell if you need the excitations. `vev`/`correlator`, by contrast, do follow along, on both backends and at any reach: `itensor_version=3` reads whichever snapshot the run left behind (`Chain::vms_onsite_expectation`/`vms_two_point_correlator` for a sequential answer, the grouped `vumps_*` pair otherwise), so nothing has to be rewritten to measure a long-range chain.
 
 See `tests/test_infinite_long_range.py`, which pins a polarized chain carrying reach-2 and reach-3 `Sz`-`Sz` terms against its exact energy density (and its exact `vev`/`correlator`), and `examples/idmrg/long_range_infinite_chain`, which sweeps `J2` and checks the 1- and 2-site cells against each other.
 
@@ -2658,7 +2850,7 @@ These are reconstructed *after* convergence, from the gauge-consistent unit cell
 
 Both were, until recently, routinely far from their ideal values, and correlators built on `n_uc=1` in particular could come out with the wrong *sign*. That is fixed: the growing algorithm now carries the state across iterations with McCulloch's wavefunction prediction, and extracts the unit cell in a single, self-consistent gauge. Measured against exactly solvable references, `<H_uc> - n_uc*density` now lands at `1e-15..1e-9` (it previously missed by up to `0.12`), `state_overlap` reaches `1-1e-13` (it previously plateaued around `0.5-0.65` for `n_uc=1`), and the XX chain's `<Sz>` comes out at `1e-13` against an exact `0`. Correlators still converge more slowly in `maxm` than the energy density does — that is ordinary finite-bond-dimension physics, most visible for a gapless model — so the `<H_uc>` check remains the right thing to run before trusting a number.
 
-**The default ground-state solver: VUMPS** (`ic.gs_method = "vumps"`, the default since 2026-08-08 — Variational Uniform Matrix Product States, Zauner-Stauber et al., arXiv:1701.07035; see `pyitensor/vumps.py`'s own module docstring for the algorithm) — instead of growing a finite window and truncating it down to `maxm` at every step (the `gs_method="idmrg"` growing algorithm above), VUMPS solves directly, in the thermodynamic limit, for the actual `maxm`-dimensional variational optimum (`ic.maxm` sets VUMPS's own target bond dimension `D` here too). Both `itensor_version="python"` (`pyitensor/vumps.py`) and `itensor_version=3` (`mpscpp3/chain_session.h`'s `Chain::vumps_ground_state`, a C++ port of the same algorithm — built from plain dense arrays closed over LAPACK rather than ITensor tensor-network objects, since the bond/physical dimensions this feature targets are always small; see that method's own doc comment) support `gs_method="vumps"`; the two are cross-checked directly against each other to ~1e-10 or tighter on TFIM/Heisenberg at `D=1,2,3` (`tests/test_vumps_v3.py`). Explicitly set `ic.gs_method = "idmrg"` instead for `local_excitation_gap`/`td_dynamical_correlator` (no VUMPS equivalent, see their own sections below) or for VUMPS's documented D>1 convergence-robustness gap (see below) if the growing algorithm's own more battle-tested behavior is preferred:
+**The default ground-state solver: VUMPS** (`ic.gs_method = "vumps"`, the default since 2026-08-08 — Variational Uniform Matrix Product States, Zauner-Stauber et al., arXiv:1701.07035; see `pyitensor/vumps.py`'s own module docstring for the algorithm) — instead of growing a finite window and truncating it down to `maxm` at every step (the `gs_method="idmrg"` growing algorithm above), VUMPS solves directly, in the thermodynamic limit, for the actual `maxm`-dimensional variational optimum (`ic.maxm` sets VUMPS's own target bond dimension `D` here too). Both `itensor_version="python"` (`pyitensor/vumps.py`) and `itensor_version=3` (`mpscpp3/chain_session.h`'s `Chain::vumps_ground_state`, a C++ port of the same algorithm — built from plain dense arrays closed over LAPACK rather than ITensor tensor-network objects, since the bond/physical dimensions this feature targets are always small; see that method's own doc comment) support `gs_method="vumps"`; the two are cross-checked directly against each other to ~1e-10 or tighter on TFIM/Heisenberg at `D=1,2,3` (`tests/test_vumps_v3.py`). Explicitly set `ic.gs_method = "idmrg"` instead for `local_excitation_gap`/`td_dynamical_correlator` (no VUMPS equivalent, see their own sections below) or if the growing algorithm's own more battle-tested behavior is preferred (VUMPS's former `D>1` convergence-robustness gap has since been traced to two bugs and fixed — see the reliability note below):
 
 ```python
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
@@ -2671,7 +2863,7 @@ ic.set_hamiltonian(h)
 density = ic.gs_energy()
 ```
 
-`vev`/`correlator` also work under `gs_method="vumps"`, on BOTH backends: `pyitensor.vumps.onsite_expectation`/`two_point_correlator` for `itensor_version="python"`, and `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator` (a line-for-line C++ port of the same formula) for `itensor_version=3` — cross-checked directly against each other to ~1e-14 or tighter on TFIM at `D=2,3` (`tests/test_vumps_correlator_v3.py`). Both are computed directly from the converged mixed-gauge `{AC, AR}` rather than `pyitensor.idmrg`'s dominant-right-fixed-point eigenproblem: `AC` is already the exactly-normalized single-(super)site reduced state by construction of the mixed canonical gauge (Vanderstraeten, Haegeman, Verstraete, "Tangent-space methods for uniform matrix product states", arXiv:1810.07006, Eq.(34)), and `AR`'s exact right-orthonormality lets a two-point correlator spanning multiple unit cells close by a direct trace with no eigenproblem either (the mixed-gauge analogue of that same review's Eq.(37)-(39)). Unlike the growing-algorithm's own reconstructed-from-the-last-macro-iteration correlators above, these carry no `maxiter`/`<H_uc>`-self-consistency caveat — VUMPS solves directly at the target bond dimension in the thermodynamic limit, so once `.converged` is `True` the correlator is exact for that converged `{AL,AR,C}`, only limited by the bond dimension `D` itself (same caveat as the energy density, see below). `local_excitation_gap` is the one method that still requires `gs_method="idmrg"` specifically (it re-diagonalizes the growing algorithm's own final 2-site effective Hamiltonian, which has no VUMPS equivalent), on either backend at `window=0` (`Chain::idmrg_local_excitation_gap` for `itensor_version=3`); its `window>0` variant is `itensor_version="python"`-only, being an explicit prototype rather than stable API; conversely `excitation_energies`/`excitation_gap` (below) *require* `gs_method="vumps"` (the default) — they need `VUMPSResult`'s own mixed-gauge `{AL,AR,C,GL,GR}`, which the growing algorithm's `IDMRGResult` (`gs_method="idmrg"`) has no equivalent of.
+`vev`/`correlator` also work under `gs_method="vumps"`, on BOTH backends: `pyitensor.vumps.onsite_expectation`/`two_point_correlator` for `itensor_version="python"`, and `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator` (a line-for-line C++ port of the same formula) for `itensor_version=3` — cross-checked directly against each other to ~1e-14 or tighter on TFIM at `D=2,3` (`tests/test_vumps_correlator_v3.py`). Both are computed directly from the converged mixed-gauge `{AC, AR}` rather than `pyitensor.idmrg`'s dominant-right-fixed-point eigenproblem: `AC` is already the exactly-normalized single-(super)site reduced state by construction of the mixed canonical gauge (Vanderstraeten, Haegeman, Verstraete, "Tangent-space methods for uniform matrix product states", arXiv:1810.07006, Eq.(34)), and `AR`'s exact right-orthonormality lets a two-point correlator spanning multiple unit cells close by a direct trace with no eigenproblem either (the mixed-gauge analogue of that same review's Eq.(37)-(39)). Unlike the growing-algorithm's own reconstructed-from-the-last-macro-iteration correlators above, these carry no `maxiter`/`<H_uc>`-self-consistency caveat — VUMPS solves directly at the target bond dimension in the thermodynamic limit, so once `.converged` is `True` the correlator is exact for that converged `{AL,AR,C}`, only limited by the bond dimension `D` itself (same caveat as the energy density, see below). `local_excitation_gap` is one of the two methods (with `td_dynamical_correlator`, below) that still require `gs_method="idmrg"` specifically (it re-diagonalizes the growing algorithm's own final 2-site effective Hamiltonian, which has no VUMPS equivalent), on either backend at `window=0` (`Chain::idmrg_local_excitation_gap` for `itensor_version=3`); its `window>0` variant is `itensor_version="python"`-only, being an explicit prototype rather than stable API; conversely `excitation_energies`/`excitation_gap` (below) *require* `gs_method="vumps"` (the default) — they need `VUMPSResult`'s own mixed-gauge `{AL,AR,C,GL,GR}`, which the growing algorithm's `IDMRGResult` (`gs_method="idmrg"`) has no equivalent of.
 
 ```python
 ic.gs_method = "vumps"
@@ -2679,7 +2871,7 @@ ic.vev("Sz", 0)                    # <Sz> at site 0, from the converged VUMPSRes
 ic.correlator("Sz", 0, "Sz", r)    # <Sz(0) Sz(0+r)>, same signature as gs_method="idmrg"
 ```
 
-**A real, scoped reliability caveat.** `D=1` converges reliably and exactly for every exactly-solvable (product-state-like) model tried (a pure field, a fully-decoupled Heisenberg dimer). Already at `D>1`, though — confirmed directly on the transverse-field Ising model, a simple gapped model with no special critical/symmetry complications — independent calls at the same `D` can land on noticeably different converged energies (most within a percent or two of the exact answer, but occasionally further off), even with `vumps_ground_state`'s own built-in D-ramp, multi-restart, and variational-principle safety-net machinery (see `pyitensor/vumps.py`'s own "Convergence robustness" docstring section for the full, numerically-confirmed account). A caller needing a reliable `D>1` result should call `gs_energy()` a few times independently (e.g. on freshly-constructed chains) and keep the lowest reported density, the same "rerun and take the best" discipline `idmrg_ground_state`'s own unseeded-random-MPS initialization already recommends elsewhere in this section. See `examples/idmrg/vumps_TFIM/main.py` for a worked example sweeping `D` and comparing VUMPS against both `gs_method="idmrg"` and the transverse-field Ising model's own exact (free-fermion) energy density.
+**A scoped reliability note.** `D>1` VUMPS was for a while genuinely unreliable here — independent calls at the same `D` could land on noticeably different energies, and a `D=4` TFIM run occasionally missed the exact answer by ~10%. That is no longer the state of the code: it was two identified bugs, both since fixed. The first was an environment fixed point closed against a missing conjugate, invisible at `D=1` and a real source of wrong `D>1` energies; with it fixed, the same `D=4` TFIM(g=1.5) case converges to ~1e-7 relative on 10/10 independent `nrestarts=6` calls. The second was the stopping criterion of the inner eigensolves: they stopped on the Ritz *value*, which leaves an eigen*vector* accurate only to the square root of its tolerance — fatal for VUMPS, whose convergence test compares `AC` and `C`, two independently-solved eigenvectors. That floored the gauge mismatch at ~1e-6, so `tol=1e-10` was unreachable at any number of iterations while the reported energy was perfectly good. Both backends now stop on the residual instead: `D=8` TFIM went from `converged` in 0/3 runs to 3/3 (and 32.6s to 6.7s at g=1.5, 38.4s to 4.6s at critical g=1.0), with the energies unchanged to every printed digit. What remains is ordinary restart-search difficulty rather than a known defect: the D-ramp, multi-restart and variational-principle safety-net machinery is load-bearing infrastructure, not vestigial, and for a `D>2` result on a harder or less-tested model it is still worth calling `gs_energy()` a few times independently and keeping the lowest reported density. Always check `.converged` — it is reported honestly and never silently assumed. See `pyitensor/vumps.py`'s own "Convergence robustness" docstring section for the full numerical account. See `examples/idmrg/vumps_TFIM/main.py` for a worked example sweeping `D` and comparing VUMPS against both `gs_method="idmrg"` and the transverse-field Ising model's own exact (free-fermion) energy density.
 
 Entanglement/entropy are not implemented for infinite chains yet.
 
@@ -2756,7 +2948,7 @@ es, ys = ic.kpm_finite("Sz", 0, "Sz", 0, n_window=16,
 
 **Scope restriction — a finite-window approximation, read before use.** This is *not* an exact infinite-size method: results carry finite-size/open-boundary corrections that must be checked by convergence in `n_window`, exactly as a static `vev`/`correlator` caller would check `maxm`/`etol` convergence of the original iDMRG ground state. One Chebyshev moment corresponds to one application of the (nearest-neighbor) window Hamiltonian, so it can only move information by ~1 site per moment (a Lieb-Robinson-style bound) — but KPM's own moment count scales with the *window's own extensive bandwidth* divided by the requested `delta` (an ordinary finite chain's KPM already has this property, nothing new here), so a genuinely fine `delta` can require a moment count comparable to (or larger than) `n_window` itself, at which point open-boundary reflections contaminate the result regardless of how large `n_window` is. Prefer a coarser `delta`, or check that the correlator has visibly converged with growing `n_window`, for quantitative work (especially near a gapless point, where a fine `delta` is most tempting). Unlike `vev`/`correlator`, this does not need `ic._result` (no dependency on a previously converged `IDMRGResult`, or even on `ic.itensor_version`), so it works regardless of which backend `gs_energy()` itself used. See `examples/idmrg/dynamical_correlator_finite_window/main.py` for a worked example sweeping `n_window`.
 
-**A genuinely infinite-chain dynamical correlator, via real-time TDVP (`td_dynamical_correlator`).** `kpm_finite`'s own open-boundary window has a real error source no amount of `n_window` alone can fix: an open chain's own ground state carries boundary artifacts (e.g. Friedel-oscillation-like features) that contaminate even the *central* region, not just the two edges. `ic.td_dynamical_correlator(opname_i, p_i, opname_j, n_window, dt=0.1, nt=200, x_values=None, maxdim=60, cutoff=1e-10, niter=50, connected=True, **kwargs)` fixes this by capping the window's two ends with the *converged* iDMRG growth environment (`idmrg_ground_state`'s own `HL`/`HR`, already computed during growth and exposed on `IDMRGResult`) instead of plain open boundaries — infinite boundary conditions (IBC), following Milsted/Vanderstraeten et al., "Infinite boundary conditions for response functions and limit cycles in iDMRG" (arXiv:1804.09163) — and evolves the perturbed window in real time via two-site TDVP rather than expanding in Chebyshev moments. Supports both `itensor_version="python"` and `itensor_version=3` (calls `gs_energy()` automatically if needed, like `vev`/`correlator`, though `vev`/`correlator` themselves still require `itensor_version="python"` regardless):
+**A genuinely infinite-chain dynamical correlator, via real-time TDVP (`td_dynamical_correlator`).** `kpm_finite`'s own open-boundary window has a real error source no amount of `n_window` alone can fix: an open chain's own ground state carries boundary artifacts (e.g. Friedel-oscillation-like features) that contaminate even the *central* region, not just the two edges. `ic.td_dynamical_correlator(opname_i, p_i, opname_j, n_window, dt=0.1, nt=200, x_values=None, maxdim=60, cutoff=1e-10, niter=50, connected=True, **kwargs)` fixes this by capping the window's two ends with the *converged* iDMRG growth environment (`idmrg_ground_state`'s own `HL`/`HR`, already computed during growth and exposed on `IDMRGResult`) instead of plain open boundaries — infinite boundary conditions (IBC), following Milsted/Vanderstraeten et al., "Infinite boundary conditions for response functions and limit cycles in iDMRG" (arXiv:1804.09163) — and evolves the perturbed window in real time via two-site TDVP rather than expanding in Chebyshev moments. Supports both `itensor_version="python"` and `itensor_version=3` (calls `gs_energy()` automatically if needed, like `vev`/`correlator`):
 
 The native ITensor v3 backend (`Chain::td_dynamical_correlator_window`, `mpscpp3/chain_session.h`) reuses the vendored ITensorTDVP library's own boundary-tensor `tdvp(psi,H,t,LH,RH,sweeps,args)` overload directly against a tiled window MPS/MPO — unlike the `"python"` backend, which has to hand-roll its own window-aware TDVP sweep (pyitensor's generic TDVP infers a site's Link via a same-Index chain-neighbor lookup that cannot see a window's extra boundary legs). Two scope differences versus `"python"`: (1) `x_values` may not extend beyond the window's own explicit range (`center+x` must stay within the window, i.e. increase `n_window` instead of relying on padding) — the `"python"` backend pads beyond the window with extra unevolved unit-cell copies, not ported here; (2) as of this writing, `itensor_version=3`'s own `idmrg_ground_state` has a known, pre-existing convergence bug for Hamiltonians with an onsite ("field") term (energy diverging every macro-iteration) — unrelated to `td_dynamical_correlator` itself, but it means a v3 `td_dynamical_correlator` call inherits that limitation for such models; a purely bond-coupled Hamiltonian (e.g. plain Heisenberg) is unaffected.
 
@@ -2775,7 +2967,7 @@ ks, es, Skw = ic.td_dynamical_correlator(
 
 **Scope**: this simplifies the paper's own Eq. 7 to `t1=0` (the ground state is perturbed by `opname_j` and evolved forward only; `opname_i` is never itself time-evolved) rather than the full two-branch trick (evolving a *second*, independent window backward in time too, which doubles the accessible total time for the same TDVP cost) — a documented, straightforward follow-up. `n_window` and `x_values` are two *separate* convergence axes to check (not one): `n_window` controls how much environment margin surrounds the perturbation, `x_values` how far the spatial sum/Fourier transform reaches — growing `x_values` together with `n_window` can keep changing results (a slowly decaying connected-correlator tail keeps contributing as the range widens), so converge each independently. See `examples/idmrg/td_dynamical_correlator/main.py` for a worked `n_window`-convergence sweep and a cross-check against `kpm_finite`.
 
-**Applying an operator/gate to the converged chain (advanced).** `pyitensor.idmrg.apply_mpo(result, W_bulk, cutoff=..., maxdim=...)` is the infinite-chain analogue of the finite backends' `applyMPO`: it contracts a periodic MPO onto every site of the converged unit cell and re-canonicalizes/truncates the grown bond dimension back down via the standard two-sided fixed-point infinite-MPS canonicalization procedure, returning a new `pyitensor.idmrg.PeriodicMPS` that `onsite_expectation`/`two_point_correlator` accept exactly like an `IDMRGResult`. There is no `Infinite_Many_Body_Chain`-level wrapper yet, so it is reached by working with `pyitensor.idmrg` directly against `ic._result` (only meaningful for `itensor_version="python"`, same restriction as `vev`/`correlator`):
+**Applying an operator/gate to the converged chain (advanced).** `pyitensor.idmrg.apply_mpo(result, W_bulk, cutoff=..., maxdim=...)` is the infinite-chain analogue of the finite backends' `applyMPO`: it contracts a periodic MPO onto every site of the converged unit cell and re-canonicalizes/truncates the grown bond dimension back down via the standard two-sided fixed-point infinite-MPS canonicalization procedure, returning a new `pyitensor.idmrg.PeriodicMPS` that `onsite_expectation`/`two_point_correlator` accept exactly like an `IDMRGResult`. There is no `Infinite_Many_Body_Chain`-level wrapper yet, so it is reached by working with `pyitensor.idmrg` directly against `ic._result` (`itensor_version="python"` only — unlike `vev`/`correlator`, which work on both backends):
 
 ```python
 from dmrgpy.pyitensor import idmrg
@@ -2861,7 +3053,7 @@ ic._session3.vumps_load_uniform_state(D, d_g, AL.flatten().tolist(),
 
 `W_bulk_flat[p]` is a dense, row-major `(Left,in,out,Right)` array (size `Dw_left[p]*d_p*d_p*Dw_right[p]`) — the same convention as `idmrg.apply_mpo`'s own ITensor list, just flattened. See `tests/test_vumps_apply_mpo_v3.py` and `examples/idmrg/vumps_apply_mpo_v3_VS_python/main.py` for the full cross-check against `itensor_version="python"`, including the same three cases (`D=1` exact, `D>1` unitary invariants, `chi_W>1` bond growth at `n_uc=2`).
 
-## 19b. Running the pure-Python backend on a GPU
+## 19. Running the pure-Python backend on a GPU
 
 `itensor_version="python"` can put its tensors on a GPU instead of in host
 memory. It is one process-wide switch, set before building a chain:
@@ -2925,7 +3117,7 @@ which models are and are not meaningful GPU benchmarks -- a uniform
 Heisenberg chain's ground state converges at chi ~ 60 and cannot show a
 speedup at any `maxm`.
 
-## 19. Performance: BLAS threads
+## 20. Performance: BLAS threads
 
 DMRG spends its time in a great many *small* dense linear-algebra calls
 rather than a few large ones — a two-site tensor at `maxm=30` on spin-1/2
@@ -2966,7 +3158,7 @@ deliberately. Treat the numbers above as indicative — they come from a busy
 shared host — and measure on your own machine before tuning around them.
 See `dmrgpy/blasthreads.py` for the full measurements.
 
-## 20. What raises, and what changed in the 2026-08 audit
+## 21. What raises, and what changed in the 2026-08 audit
 
 A cross-backend audit in August 2026 (`docs/audit_2026_08_hole_hunt.md`,
 which records every reproduction) went looking for calls that silently did
@@ -3012,6 +3204,7 @@ Beyond those, the following now raise where they used to be silent:
 | `get_distribution*(mode="ED")` | `AttributeError` deep inside | dispatches, or `NotImplementedError` |
 | `vev(C[i]*C[i])` | `AttributeError` on every DMRG backend | `0` (as ED always answered) |
 | `Many_Body_Chain.evolution()` | `AttributeError` (it called a function that does not exist) | removed |
+| `gs_energy_generalized()` on a chain below 2 sites (`"python"`) | the Rayleigh quotient of an untouched random state (-0.3049 for an exact -0.5) | `RuntimeError` |
 
 And these combinations now work where they used to fail:
 

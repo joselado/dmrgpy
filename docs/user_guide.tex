@@ -60,9 +60,10 @@ Chain class & Local Hilbert space & Key operators \\
 \texttt{fermionchain.\allowbreak Fermionic\_Chain} & spinless fermion (occupied/empty) & $c_i,c_i^\dagger,n_i=c_i^\dagger c_i$, JW string $F_i$ \\
 \texttt{fermionchain.\allowbreak Majorana\_Chain} & Majorana fermion & Majorana operators built from \texttt{Fermionic\_Chain} \\
 \texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_Chain} & spin-$\tfrac12$ fermion (4 states), two interleaved spinless sites per physical site & $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$; derived spin and pairing operators (see text) \\
-\texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_\allowbreak Chain\_\allowbreak Native} & same physics, genuinely 4-dimensional local space, one site per physical site (\texttt{itensor\_version=3} only) & identical operator lists/formulas as \texttt{Spinful\_Fermionic\_Chain} \\
+\texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_\allowbreak Chain\_\allowbreak Native} & same physics, genuinely 4-dimensional local space, one site per physical site (\texttt{itensor\_version=3} and \texttt{"python"} only) & identical operator lists/formulas as \texttt{Spinful\_Fermionic\_Chain} \\
 \texttt{bosonchain.\allowbreak Bosonic\_Chain} & truncated boson Fock space, $n_i\in\{0,\ldots,\text{maxnb}_i-1\}$, per-site dimension \texttt{maxnb} (default 4) settable via \texttt{Bosonic\_Chain(n,\allowbreak maxnb=[\ldots])} & $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}$ for $k=0,\ldots,\text{maxnb}_i-1$ \\
 \texttt{parafermionchain.\allowbreak Parafermionic\_\allowbreak Chain} & $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ & clock/shift operators $\sigma_i,\tau_i$, composite $\chi_i,\psi_i$ \\
+\texttt{bosonchain.\allowbreak SpinBoson\_Chain} & mixes truncated-boson sites and genuine spin-$S$ sites in the same chain, one entry per location (the constructor takes the list of site labels) & boson location: $a_i,a_i^\dagger,n_i$ and the occupation projectors \texttt{D0}..\texttt{D3}; spin location: $S^x_i,S^y_i,S^z_i$. As in \texttt{Mixed\_Spin\_Fermion\_Chain}, operators that do not apply at a location read as the integer \texttt{0} \\
 \texttt{mixedchain.\allowbreak Mixed\_Spin\_\allowbreak Fermion\_Chain} & mixes spin-$S$ sites and spinful-fermion locations in the same chain & spin location: native $S^x_i,S^y_i,S^z_i$; fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived spin/pairing operators \\
 \bottomrule
 \end{tabular}
@@ -83,8 +84,9 @@ tensor-network site per physical site, with the same operator lists and
 identical physics/sign convention as \texttt{Spinful\_Fermionic\_Chain}
 -- the two classes are drop-in equivalent for any given Hamiltonian,
 cross-checked to agree exactly under ED and to DMRG tolerance under
-\texttt{itensor\_version=3} (the only DMRG backend this class wires
-up). Despite halving the site count, it is \emph{not} generally faster
+\texttt{itensor\_version=3} and \texttt{itensor\_version="python"} (the
+two DMRG backends this class wires up; \texttt{itensor\_version=2} and
+\texttt{"julia\_live"} have no native spinful site). Despite halving the site count, it is \emph{not} generally faster
 in practice: two-site DMRG's per-sweep cost is driven by the local
 dimension of the two-site block being diagonalized, which grows faster
 ($4\times4=16$ per pair of native sites, versus $2\times2=4$ per pair of
@@ -111,9 +113,11 @@ names, since ITensor's \texttt{ElectronSite} has no bare
 \texttt{ctmode="full"} is the fastest of all four combinations at every
 size tried, including $n=12$ (24 flat modes: $\sim620$s vs $\sim890$s
 for \texttt{Spinful\_Fermionic\_Chain}'s own \texttt{ctmode="full"}, a
-$\sim30\%$ win). Prefer \texttt{ctmode="full"} for this class whenever
-it's available (it always is, for \texttt{itensor\_version=3}).
-Otherwise prefer \texttt{Spinful\_Fermionic\_Chain}; no other
+$\sim30\%$ win). Leave \texttt{ctmode} at its default for this class ---
+the resolver already picks the fastest available method
+(\texttt{"fold"} on \texttt{itensor\_version=3}, \texttt{"batched"}
+under \texttt{"python"}), both of which are faster than the
+\texttt{"full"} this comparison was made against. Otherwise prefer \texttt{Spinful\_Fermionic\_Chain}; no other
 calculation tried so far makes the native-site class faster.
 
 \texttt{Mixed\_Spin\_Fermion\_Chain} is for models that need a literal
@@ -148,7 +152,8 @@ pure-Python side, \texttt{pyitensor/sites/boson.py}'s
 the Julia backend still only understand the single fixed 4-level boson
 site regardless of what \texttt{maxnb} requests, so a non-default
 \texttt{maxnb} should be run under \texttt{itensor\_version=3} (the
-default) or \texttt{"python"} for DMRG/ED results to actually agree;
+default when the compiled C++ extension is available, \texttt{"python"}
+otherwise) or \texttt{"python"} for DMRG/ED results to actually agree;
 see \texttt{examples/boson\_models/boson\_maxnb\_v3\_VS\_ED}.
 
 \section{Building a Hamiltonian and observables}
@@ -180,13 +185,42 @@ S_i\times\mathbf S_{i+1})$, biquadratic exchange $(\mathbf S_i\cdot
 Hubbard interaction $U\sum_i n_{i\uparrow}n_{i\downarrow}$, and so on ---
 see Section~\ref{sec:cookbook} for concrete Hamiltonians.
 
+\textbf{Hamiltonian shortcuts on fermionic chains.} Rather than writing
+every term out, the fermionic classes offer builders that take a function
+of the site indices and add the whole family of terms at once:
+\texttt{fc.set\_hoppings(fun)} adds $\sum_{ij}f(i,j)\,c_i^\dagger c_j$;
+\texttt{fc.set\_hubbard(fun)} adds $\sum_{ij}f(i,j)\,n_in_j$, with
+$n_i=n_{i\uparrow}+n_{i\downarrow}$ on a spinful chain;
+\texttt{sfc.set\_hoppings\_spinful(fun)} is the same hopping,
+spin-diagonal, with \texttt{fun} indexed by \emph{physical} site rather
+than by interleaved spinless site; and
+\texttt{sfc.set\_swave\_pairing(fun)} adds
+$\sum_i\Delta(i)\,c_{i\uparrow}c_{i\downarrow}+\mathrm{h.c.}$
+
+\begin{lstlisting}
+fc = fermionchain.Fermionic_Chain(4)
+fc.set_hoppings(lambda i,j: 1.0 if abs(i-j)==1 else 0.0)
+fc.set_hubbard(lambda i,j: 2.0 if abs(i-j)==1 else 0.0)
+\end{lstlisting}
+
+Note that \texttt{set\_swave\_pairing}'s \texttt{fun} takes a
+\textbf{single} argument (the physical site index), unlike the
+two-argument functions the others want --- passing
+\texttt{lambda i,j: ...} raises \texttt{TypeError}.
+
 \textbf{Algebra on already-built operators.} \texttt{sc.toMPO(h)} compiles
-a \texttt{MultiOperator} into a \texttt{StaticOperator} (an already-built
-matrix product operator, \texttt{itensor\_version} 2, 3, and
-\texttt{"python"} only --- not \texttt{"julia\_live"} yet). Two
-\texttt{StaticOperator}s can then be combined directly with \texttt{+},
-\texttt{-}, unary \texttt{-}, and scalar \texttt{*}/\texttt{/}, without
-going back through the symbolic \texttt{MultiOperator} form:
+a \texttt{MultiOperator} into an already-built matrix product operator,
+on every backend: a \texttt{StaticOperator} for
+\texttt{itensor\_version} 2, 3 and \texttt{"python"}, an
+\texttt{EDOperator} under \texttt{mode="ED"}, and \texttt{mpsjulialive}'s
+own \texttt{MPO} for \texttt{itensor\_version="julia\_live"}. The
+\texttt{+}, \texttt{-}, unary \texttt{-} and scalar
+\texttt{*}/\texttt{/} algebra below is \texttt{StaticOperator}-only ---
+the \texttt{julia\_live} \texttt{MPO} supports \texttt{*} alone --- so it
+is available for \texttt{itensor\_version} 2, 3 and \texttt{"python"},
+not yet for \texttt{"julia\_live"}. Two \texttt{StaticOperator}s can be
+combined directly, without going back through the symbolic
+\texttt{MultiOperator} form:
 
 \begin{lstlisting}
 A = sc.toMPO(sc.Sz[0])
@@ -202,7 +236,48 @@ of combining Hamiltonians before ever building an MPO, summing the
 underlying \texttt{MultiOperator}s directly (as \texttt{h = h + ...}
 above) remains preferred.
 
+\textbf{MPS and operator algebra.} Every chain also exposes the
+primitives that act on wavefunctions and operators directly, which the
+worked examples later in this guide use (Section~\ref{sec:groundstate}'s
+\texttt{promote\_to\_dense} example builds a photoemission weight out of
+\texttt{applyoperator} and \texttt{overlap}). Each takes the same
+\texttt{mode=}/\texttt{**kwargs} as the rest of the API:
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{0.42\textwidth}p{0.5\textwidth}@{}}
+\toprule
+Call & Returns \\
+\midrule
+\texttt{sc.overlap(a, b)} & $\langle a|b\rangle$ \\
+\texttt{sc.aMb(a, M, b)} & $\langle a|M|b\rangle$ \\
+\texttt{sc.applyoperator(A, wf)} & $A|\psi\rangle$ \\
+\texttt{sc.applyinverse(A, wf)} & $A^{-1}|\psi\rangle$ (approximate --- see Section~\ref{sec:excited}) \\
+\texttt{sc.exponential(h, wf)} & $e^{h}|\psi\rangle$ \\
+\texttt{sc.summps(a, b)} & $|a\rangle+|b\rangle$ \\
+\texttt{sc.scale\_mps(x, wf)} & $x|\psi\rangle$ (a single-tensor rescale, not an MPO sweep) \\
+\texttt{sc.trace(A)} & $\mathrm{Tr}\,A$; \texttt{sc.inverse\_trace(A)} for $\mathrm{Tr}\,A^{-1}$ \\
+\texttt{sc.operator\_norm(A)} & an estimate of $\lVert A\rVert$; \texttt{sc.is\_zero\_operator(A)} thresholds it at $10^{-4}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{trace}, \texttt{operator\_norm} and \texttt{is\_zero\_operator}
+take a \texttt{MultiOperator}, not a compiled \texttt{StaticOperator}. On
+the wavefunction itself, \texttt{wf.dot(other)} and \texttt{wf.norm()}
+give $\langle\psi|\phi\rangle$ and $\lVert\psi\rVert$,
+\texttt{wf.normalize(tol=1e-8)} returns the normalized state (or
+\texttt{None}, with a warning, if the norm is below \texttt{tol}),
+\texttt{wf.get\_conjugate()} the complex conjugate state, and
+\texttt{wf.get\_entropy(b)} the entanglement entropy at bond \texttt{b}.
+\texttt{wf * x} and \texttt{A * wf} are shorthand for
+\texttt{scale\_mps} and \texttt{applyoperator}.
+\texttt{wf.get\_dm(inds=[...])} returns the single-particle density
+matrix $\langle c_i^\dagger c_j\rangle$ and is implemented for
+\texttt{Fermionic\_Chain} only.
+
 \section{Ground-state properties}
+\label{sec:groundstate}
 
 \textbf{Ground-state energy}
 
@@ -476,10 +551,14 @@ chain afterwards raises rather than answering with an \lstinline|Nf|-only
 sector.
 
 Because ED has quantum numbers now, a sector also no longer forbids the
-automatic DMRG-to-ED fallbacks: a chain whose C++ extension was never
-compiled, or an \lstinline|itensor_version=3| chain too short for
-ITensor's two-site DMRG ($n<3$), answers the sector correctly through ED
-instead of refusing.
+automatic DMRG-to-ED fallbacks: a chain that \emph{explicitly} asked for
+\lstinline|itensor_version=2|/\lstinline|3| on a machine where that
+extension was never compiled, or an \lstinline|itensor_version=3| chain
+too short for ITensor's two-site DMRG ($n<3$), answers the sector
+correctly through ED instead of refusing. (A chain that named no
+\lstinline|itensor_version| at all no longer reaches that fallback: it is
+resolved to \texttt{"python"} at construction time when no extension is
+compiled, and the pure-Python backend implements sectors itself.)
 
 The conserving-operator rule is the same under ED, and enforced for the
 same reason: restricting an operator to the sector is exact for a static
@@ -500,6 +579,12 @@ unconstrained and answers with the global ground state.
 \lstinline|promote_to_dense()| is the other option: it leaves sector mode
 while \emph{keeping} the state, converted exactly to its dense equivalent
 on the chain's ordinary site indices.
+\lstinline|chain.get_sector_charge_operators()| returns the conserved
+quantities this chain offers to \lstinline|set_conserved_sector|, as a
+\texttt{\{name: MultiOperator\}} dict measuring each one over the whole
+chain --- the same names and the same integer $2S_z$ units. They are
+ordinary observables, so \lstinline|chain.vev(ops["Nf"])| works directly.
+A chain that conserves nothing (parafermions) raises.
 
 \begin{lstlisting}
 fc.set_conserved_sector(Nf=6)          # sweeps confined to 6 particles
@@ -564,6 +649,21 @@ same way as $H$,
 mz = [sc.vev(sc.Sz[i]).real for i in range(n)]        # local magnetization profile
 e2 = sc.vev(h, npow=2)                                  # <H^2>, e.g. for fluctuations
 \end{lstlisting}
+
+The model classes wrap the most common of these profiles, so the loop
+above rarely has to be written by hand. Each takes the same
+\texttt{mode=}/\texttt{**kwargs} as \texttt{vev} and returns one value
+per site: \texttt{.get\_density()} gives $\langle n_i\rangle$ (summed
+over spin on spinful chains) and
+\texttt{.get\_density\_fluctuation()} gives
+$\langle n_i^2\rangle-\langle n_i\rangle^2$, both on fermionic chains;
+\texttt{.get\_onsite\_pairing()} gives
+$\langle c_{i\uparrow}c_{i\downarrow}\rangle$ on spinful fermionic
+chains; and \texttt{.get\_magnetization()} gives the $3\times n_s$ array
+of $\langle S^x_i\rangle,\langle S^y_i\rangle,\langle S^z_i\rangle$ on
+spin and spinful fermionic chains, also writing a
+\texttt{MAGNETIZATION.OUT} file into the working directory as a side
+effect.
 
 \textbf{Energy fluctuation} (a measure of how sharply the DMRG/ED state
 is an eigenstate, and physically the variance of $H$ in the prepared
@@ -948,6 +1048,15 @@ reference state if called afterward. Call
 recompute a genuine ground state (\lstinline|gs_energy()|/
 \lstinline|nhdmrg()|) first if you need one of those other methods too.
 
+Unlike plain \lstinline|gs_energy()|, this method has no ED fallback for
+a chain too short for the backend's two-site sweep, so on
+\texttt{itensor\_version="python"} it \emph{raises}
+\texttt{RuntimeError} below 2 sites rather than returning a number. That
+is deliberate: the outer self-consistent iteration would otherwise still
+return the Rayleigh quotient of a state no sweep ever touched ---
+measured at $-0.3049$ for an exact $-0.5$ --- i.e.\ a silently wrong
+answer. Use \lstinline|mode="ED"| for a chain that short.
+
 \textbf{Effective low-energy Hamiltonians.} Given the $n$ lowest
 eigenstates $\{|\psi_k\rangle\}$ and the projector
 $P=\sum_k|\psi_k\rangle\langle\psi_k|$ onto the manifold they span, the
@@ -1085,7 +1194,7 @@ and \texttt{get\_four\_correlation\_tensor} give the corresponding
 two-particle correlators $\langle c_i^\dagger c_j^\dagger c_l
 c_k\rangle$ and $\langle c_i^\dagger c_j c_k^\dagger c_l\rangle$.
 
-\texttt{get\_four\_correlation\_tensor(ctmode=...)} has three
+\texttt{get\_four\_correlation\_tensor(ctmode=...)} has five
 implementations: \texttt{ctmode="explicit"} (backend-agnostic Python loop
 of \texttt{vev()}s, always available), \texttt{ctmode="full"} (native
 per-element AutoMPO build -- C++ for \texttt{itensor\_version} \texttt{2}/
@@ -1195,9 +1304,12 @@ applies (any \texttt{itensor\_version} in \texttt{2}/\texttt{3}/
 \texttt{"full"}/\texttt{"sweep"} implementation). Passing a
 \texttt{ctmode} explicitly is still a hard request -- it raises rather
 than silently falling back if that method is not available for the
-wavefunction at hand. \texttt{Spinful\_Fermionic\_Chain\_Native} always
-needs \texttt{ctmode="full"} (or the default, which resolves to it): the
-sweep has no native-spinful-site counterpart yet.
+wavefunction at hand. For \texttt{Spinful\_Fermionic\_Chain\_Native} the only method
+that has no native-spinful counterpart is \texttt{ctmode="sweep"}; the
+default resolver picks \texttt{"batched"} under
+\texttt{itensor\_version="python"}, \texttt{"fold"} under
+\texttt{itensor\_version=3}, and falls back to \texttt{"full"} and then
+\texttt{"explicit"} if neither is available on the session at hand.
 
 \section{Dynamical (frequency-dependent) correlators}
 \label{sec:dynamical}
@@ -1215,7 +1327,7 @@ site gives the local dynamical spin structure factor
 $S^{zz}_{ii}(\omega)$ (what a local probe like NMR/ESR couples to);
 choosing $A=S^z_i$, $B=S^z_j$ at different sites and Fourier-transforming
 over $i-j$ gives the momentum-resolved dynamical structure factor
-$S(q,\omega)$ measured in inelastic neutron scattering. All five
+$S(q,\omega)$ measured in inelastic neutron scattering. All of the
 submodes below compute $G_{AB}(\omega)$ (or equivalently
 $S_{AB}(\omega)$); they differ only in \emph{how}, and therefore in what
 energy range/resolution/cost trade-off they offer:
@@ -1437,8 +1549,9 @@ genuinely useful, narrower regime. Available for
 is no \texttt{itensor\_version=2} port (mpscpp2 has no equivalent
 machinery to build a per-site local effective Hamiltonian from, unlike
 mpscpp3's \texttt{LocalMPO}/\texttt{diagHermitian}). Requesting it on
-\texttt{itensor\_version=2} is silently a no-op (the existing,
-always-safe rescaling is used instead). The v3 port
+\texttt{itensor\_version=2} raises \texttt{NotImplementedError} (it used
+to be silently ignored there, so the run looked truncated and was not ---
+see Section~\ref{sec:whatraises}). The v3 port
 (\texttt{mpscpp3/chain\_session.h}'s
 \texttt{kpm\_dynamical\_correlator\_truncated()}) is a wholly independent
 method from \texttt{kpm\_dynamical\_correlator()} --- a deliberate design
@@ -1520,6 +1633,19 @@ from the neighboring point's correction vector was tried and measured
 to \emph{hurt} --- truncated CG from a nearby-but-wrong start can
 stagnate at a much worse residual than from the cold start --- so each
 point is solved independently.)
+
+\textbf{\texttt{submode="CVM\_explicit"} --- the resolvent formed
+explicitly.} Computes the same $G_{AB}(\omega)$ as
+\texttt{submode="CVM"}, but without the positive-definite reformulation
+above: it applies $(\omega+E_0\pm i\eta-H)^{-1}$ to $B|\mathrm{GS}\rangle$
+directly, as two \texttt{applyinverse} solves at $\pm i\eta$, and combines
+them. That is a more literal transcription of the definition and needs no
+conjugate-gradient machinery, but it inherits \texttt{applyinverse}'s
+accuracy rather than \texttt{"CVM"}'s controlled CG residual, so
+\texttt{"CVM"} is the better default; use this one to cross-check a
+suspicious \texttt{"CVM"} curve. It assumes $A^\dagger=B$ and raises
+otherwise. On a non-Hermitian $H$ it is one of the two submodes (with
+\texttt{"CVM"}) that has a genuine non-Hermitian implementation.
 
 \textbf{\texttt{submode="ROOTN"} --- root-$N$ Krylov-space correction
 vector.} Implements Nocera \& Alvarez, ``Root-$N$ Krylov-space
@@ -1869,8 +1995,14 @@ requires a definite charge, since its \texttt{info} names one sector and
 carries that sector's matrix elements; use it when you want those (to
 build $S(q,\omega)$ out of them, say).
 \texttt{itensor\_version=3} and \texttt{itensor\_version="python"} only,
-and never falls back to ED: falling back would answer with the
-\emph{global} excited states, a different calculation.
+and never falls back to ED. The reason is \texttt{promote\_mps}: this
+submode solves two sectors on an internal clone and contracts their
+states against each other, which needs both rebased onto the chain's
+original dense indices. ED targets a sector by a different mechanism
+(Section~\ref{sec:groundstate}) and deliberately provides no
+\texttt{promote\_to\_dense}/\texttt{promote\_mps}, so there is nothing to
+fall back \emph{to} --- and falling back to a plain ED solve would answer
+with the \emph{global} excited states, a different calculation.
 
 \textbf{\texttt{get\_spectral\_function(i, j=None, spin=None, ...)} ---
 the single-particle spectral function.} The physics-facing wrapper, since
@@ -1927,13 +2059,37 @@ site's correlator. See
 which reproduces the des Cloizeaux--Pearson lower edge of the two-spinon
 continuum.
 
+\textbf{The isotropic, degeneracy-averaged spin correlator.}
+\texttt{sc.get\_full\_SS\_\allowbreak correlator(\allowbreak mode="ED",
+i=0, j=None)} returns the
+component-summed correlator
+
+\begin{equation}
+S_{ij}(\omega)=\tfrac13\sum_{\alpha\in\{x,y,z\}}S^{\alpha\alpha}_{ij}(\omega)
+\end{equation}
+
+additionally averaged over the degenerate ground-state manifold
+(\texttt{get\_gs\_manifold}), which is what an unpolarized INS or ESR
+measurement of an isotropic magnet actually sees --- neither the
+component sum nor the manifold average is a one-liner over
+\texttt{get\_dynamical\_correlator}. \texttt{j} defaults to \texttt{i}.
+It is \textbf{ED-only} and raises for any other mode; remaining keyword
+arguments are forwarded to \texttt{get\_dynamical\_correlator}, so
+\texttt{submode=} and the frequency grid still apply. See
+\texttt{examples/dynamical\_correlator/full\_spin\_correlator}.
+
 \textbf{\texttt{submode="maxent"} --- maximum-entropy reconstruction.}
 Reconstructs a positive-definite spectral function from a finite set of
 moments $\langle(H-E_0)^k\rangle$ using a maximum-entropy method
 (\texttt{distribution.get\_distribution\_maxent}), rather than a
 Chebyshev expansion --- useful when positivity of the reconstructed
 $S(\omega)$ matters more than matching KPM's polynomial-expansion
-artifacts.
+artifacts. \textbf{Not available in a stock checkout:} the
+reconstruction itself lives in the third-party \texttt{dmrgpy.maxenttk}
+(PyMaxEnt) module, which is not distributed with this package, so
+\texttt{submode="maxent"} raises \texttt{NotImplementedError} until you
+install it separately. The same is true of \texttt{submode="CVMimag"},
+whose Pad\'e continuation needs \texttt{dmrgpy.padetk}.
 
 \textbf{\texttt{submode="KPM"} for non-Hermitian Hamiltonians.} When
 $H\neq H^\dagger$ (Section~\ref{sec:excited}), \texttt{submode="KPM"}
@@ -2024,10 +2180,21 @@ long simulated times/low frequencies, where TD's real-time bond-dimension
 growth becomes limiting; EX when a handful of excited states already
 capture the physics (e.g.\ a small gapped system); maxent when you want
 a guaranteed-positive reconstruction from limited moment data (e.g.\
-combined with finite-temperature ED, see Section~\ref{sec:thermal}). For
-a non-Hermitian $H$, \texttt{"KPM"} is currently the only submode with a
-genuine biorthogonal implementation (see above); the other submodes fall
-back to a correction-vector method that assumes $A^\dagger=B$.
+combined with finite-temperature ED, see Section~\ref{sec:thermal})
+\emph{and} you have installed the separate \texttt{maxenttk} module it
+needs. For
+a non-Hermitian $H$, the dispatch is per submode, not wholesale:
+\texttt{"KPM"} runs a genuine biorthogonal KPM (see above),
+\texttt{"CVM"}/\texttt{"CVM\_explicit"} run the non-Hermitian
+correction-vector resolvent (which \emph{is} their non-Hermitian
+implementation, not a substitution for it), and
+\texttt{"EX"}/\texttt{"maxent"} are backend-agnostic enough to work as
+they are. Every other submode --- \texttt{"TD"}, \texttt{"TDZ"},
+\texttt{"CVMimag"}, \texttt{"ROOTN"}, \texttt{"SECTOR"} --- raises
+\texttt{NotImplementedError}. Before the 2026-08 audit these last ones
+silently returned the \texttt{CVM\_explicit} resolvent instead, so a
+caller's \texttt{submode=} was effectively ignored on a non-Hermitian
+Hamiltonian (see Section~\ref{sec:whatraises}).
 
 \section{Real-time dynamics: quenches}
 \label{sec:quenches}
@@ -2169,15 +2336,15 @@ plain TDVP instead, so a backend-comparison script can't quietly end up
 comparing different integrators.
 
 \begin{lstlisting}
+sc.setup_cpp(version=3)    # or sc.setup_python(), or sc.setup_julia()
+sc.tevol_method = "TEBD"
+\end{lstlisting}
+
+\begin{lstlisting}
 sc.tevol_method = "TDVP_GSE"
 sc.tdvp_gse_sweeps = 3
 sc.tdvp_gse_krylov_order = 3
 sc.tdvp_gse_cutoff = 1e-8
-\end{lstlisting}
-
-\begin{lstlisting}
-sc.setup_cpp(version=3)    # or sc.setup_python(), or sc.setup_julia()
-sc.tevol_method = "TEBD"
 \end{lstlisting}
 
 \section{Density of states}
@@ -2509,6 +2676,32 @@ U_{mn}(k,k+\delta k)=\langle u_m(k)|u_n(k+\delta k)\rangle
 with $m,n$ running over occupied bands; $\gamma=\arg W$ is the
 polarization/Zak phase of that band manifold (and, combined with a scan
 over a second momentum direction, the ingredient for a Chern number).
+\texttt{topology.berry\_phase\_matrix(hkgen, nk=20)} computes this from a
+callable \texttt{hkgen(k)} returning $H(k)$.
+
+\textbf{Fermion parity.} For a fermionic chain, the total parity
+
+\begin{equation}
+P=\Big\langle\prod_i(1-2n_i)\Big\rangle
+\end{equation}
+
+is $+1$ or $-1$ for a state of definite (even/odd) fermion number and is
+the $\mathbb{Z}_2$ invariant distinguishing the two sectors a Majorana
+chain's topological phase connects. It is evaluated on the wavefunction:
+
+\begin{lstlisting}
+wf = fc.get_gs()
+p = wf.get_fermionic_parity()          # fpmode="full" (default)
+p = wf.get_fermionic_parity(fpmode="iterative")
+\end{lstlisting}
+
+The two \texttt{fpmode} values are the same quantity by two routes ---
+\texttt{"full"} builds the whole parity string as one operator,
+\texttt{"iterative"} applies it site by site --- and any other value
+raises. See \texttt{examples/topological/parity} for a sweep of $P$
+against chemical potential across the topological transition, and
+\texttt{examples/topological/parity\_modes} and
+\texttt{parity\_long\_chain} alongside it.
 
 \section{Mean-field decoupling}
 
@@ -2535,6 +2728,21 @@ phases where pure MF overestimates order).
 from dmrgpy import meanfield
 meanfield.spinchain_meanfield(sc, p=0.0)
 \end{lstlisting}
+
+\textbf{Currently non-functional.} \texttt{meanfield.py} reads the
+exchange couplings back off the chain as \texttt{sc.exchange}, which was
+populated by \texttt{Spin\_Chain.set\_exchange(fun)}. That builder was
+removed in favour of writing the Hamiltonian out explicitly with
+\texttt{SS(i,j)} and \texttt{set\_hamiltonian()}, so \texttt{sc.exchange}
+is now always the integer \texttt{0} and \texttt{spinchain\_meanfield}
+raises \texttt{TypeError: 'int' object is not iterable} on any chain. The
+same removal leaves \texttt{Spin\_Chain.set\_fields(fun)} unsafe: it
+assigns \texttt{self.hamiltonian = self.exchange + self.fields} directly,
+so it silently \emph{replaces} the Hamiltonian you built with the field
+term alone, instead of adding to it. Build the Weiss field into the
+Hamiltonian by hand (\texttt{h = h + b[2]*sc.Sz[i]}, then
+\texttt{set\_hamiltonian(h)}) and iterate self-consistency in your own
+loop until both are fixed.
 
 \section{Fidelity susceptibility and quantum phase transitions}
 
@@ -2617,7 +2825,14 @@ reconstructed from a finite set of raw moments $\langle X^k\rangle$ via
 maximum entropy (\texttt{get\_distribution\_maxent}). Useful for e.g.\
 full counting statistics of a conserved charge, or distinguishing a
 sharply peaked (well-defined quantum number) ground state from a
-broadly spread one.
+broadly spread one. \texttt{sc.get\_distribution\_moments(...)} returns
+the raw $\langle X^k\rangle$ moments both reconstructions are built from
+--- the distribution counterpart of
+Section~\ref{sec:dynamical}'s
+\texttt{get\_dynamical\_correlator\_moments}. It is a DMRG/KPM quantity
+with no ED implementation (the ED path builds spectra by explicit
+summation, not from moments), so it raises
+\texttt{NotImplementedError} under \texttt{mode="ED"}.
 
 \section{Post-processing tools}
 
@@ -2627,10 +2842,13 @@ broadly spread one.
     imaginary/complex-frequency axis (e.g.\ from a Matsubara-like or
     complex-shifted CVM calculation, Section~\ref{sec:dynamical}'s
     \texttt{submode="CVMimag"}) to the real frequency axis, where the
-    physical spectral function lives.
+    physical spectral function lives. Requires the third-party
+    \texttt{dmrgpy.padetk} module, which is not shipped with this
+    package; without it both this tool and \texttt{submode="CVMimag"}
+    raise \texttt{NotImplementedError}.
   \item \textbf{Function fitting} (\texttt{functionfit.py}): a generic
     multi-start Powell minimizer used e.g.\ to fit the Calabrese-Cardy
-    entropy formula in Section~4.
+    entropy formula in Section~5.
   \item \textbf{Finite-size extrapolation} (\texttt{extrapolate.py}):
     polynomial extrapolation in $1/L$ of a size-dependent quantity
     $y(L)$ toward the thermodynamic limit $L\to\infty$ --- standard
@@ -2639,7 +2857,11 @@ broadly spread one.
   \item \textbf{Maximum-entropy reconstruction} (\texttt{reconstruct.py}):
     reconstructs a positive spectral function from a truncated moment
     expansion, underlying both the \texttt{"maxent"} dynamical-correlator
-    submode and \texttt{get\_distribution\_maxent}.
+    submode and \texttt{get\_distribution\_maxent}. Requires the
+    third-party \texttt{dmrgpy.maxenttk} (PyMaxEnt) module, which is not
+    shipped with this package; without it importing
+    \texttt{reconstruct} raises \texttt{ModuleNotFoundError} and the two
+    callers above raise \texttt{NotImplementedError}.
 \end{itemize}
 
 \section{Worked-example cookbook}
@@ -3036,10 +3258,9 @@ rewritten on an $n_{\mathrm{uc}} \ge \mathrm{range}$ cell and folded into
 a $d^{\mathrm{range}}$ supersite, i.e.\ exponentially.
 \texttt{gs\_method="idmrg"}'s growth loop consumes the same automaton and
 handles it too, needing no dispatch at all. \texttt{kpm\_finite} follows
-along (it builds its own finite window), and so do
-\texttt{vev}/\texttt{correlator} on \texttt{itensor\_version="python"}.
+along (it builds its own finite window).
 
-Two things do not follow along.
+One thing does not follow along.
 \texttt{excitation\_energies}/\texttt{excitation\_gap} raise
 \texttt{NotImplementedError} on either backend: the tangent-space ansatz
 is built on the reach-1 environment triple, so there is no sequential
@@ -3239,9 +3460,10 @@ each other to $\sim$$10^{-10}$ or tighter on TFIM/Heisenberg at
 $D=1,2,3$ (\texttt{tests/test\_vumps\_v3.py}). Explicitly set
 \texttt{ic.gs\_method = "idmrg"} instead for
 \texttt{local\_excitation\_gap}/\texttt{td\_dynamical\_correlator} (no
-VUMPS equivalent, see their own sections below) or for VUMPS's
-documented $D>1$ convergence-robustness gap (see below) if the growing
-algorithm's own more battle-tested behavior is preferred:
+VUMPS equivalent, see their own sections below) or if the growing
+algorithm's own more battle-tested behavior is preferred (VUMPS's former
+$D>1$ convergence-robustness gap has since been traced to two bugs and
+fixed --- see the reliability note below):
 
 \begin{lstlisting}
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
@@ -3279,7 +3501,8 @@ target bond dimension in the thermodynamic limit, so once
 \texttt{.converged} is \texttt{True} the correlator is exact for that
 converged \texttt{\{AL,AR,C\}}, only limited by the bond dimension $D$
 itself (same caveat as the energy density, see below).
-\texttt{local\_excitation\_gap} is the one method that still requires
+\texttt{local\_excitation\_gap} is one of the two methods (with
+\texttt{td\_dynamical\_correlator}, below) that still require
 \texttt{gs\_method="idmrg"} specifically (it re-diagonalizes the growing
 algorithm's own final 2-site effective Hamiltonian, which has no VUMPS
 equivalent), on either backend at \texttt{window=0}
@@ -3299,23 +3522,34 @@ ic.vev("Sz", 0)                    # <Sz> at site 0, from the converged VUMPSRes
 ic.correlator("Sz", 0, "Sz", r)    # <Sz(0) Sz(0+r)>, same signature as gs_method="idmrg"
 \end{lstlisting}
 
-\textbf{A real, scoped reliability caveat.} \texttt{D=1} converges
-reliably and exactly for every exactly-solvable (product-state-like)
-model tried (a pure field, a fully-decoupled Heisenberg dimer). Already
-at \texttt{D>1}, though -- confirmed directly on the transverse-field
-Ising model, a simple gapped model with no special critical/symmetry
-complications -- independent calls at the same \texttt{D} can land on
-noticeably different converged energies (most within a percent or two
-of the exact answer, but occasionally further off), even with
-\texttt{vumps\_ground\_state}'s own built-in $D$-ramp, multi-restart,
-and variational-principle safety-net machinery (see
-\texttt{pyitensor/vumps.py}'s own ``Convergence robustness'' docstring
-section for the full, numerically-confirmed account). A caller needing
-a reliable \texttt{D>1} result should call \texttt{gs\_energy()} a few
-times independently (e.g.\ on freshly-constructed chains) and keep the
-lowest reported density, the same ``rerun and take the best''
-discipline \texttt{idmrg\_ground\_state}'s own unseeded-random-MPS
-initialization already recommends elsewhere in this section. See
+\textbf{A scoped reliability note.} \texttt{D>1} VUMPS was for a while
+genuinely unreliable here --- independent calls at the same \texttt{D}
+could land on noticeably different energies, and a \texttt{D=4} TFIM run
+occasionally missed the exact answer by ${\sim}10\%$. That is no longer
+the state of the code: it was two identified bugs, both since fixed. The
+first was an environment fixed point closed against a missing conjugate,
+invisible at \texttt{D=1} and a real source of wrong \texttt{D>1}
+energies; with it fixed, the same \texttt{D=4} TFIM($g=1.5$) case
+converges to ${\sim}10^{-7}$ relative on 10/10 independent
+\texttt{nrestarts=6} calls. The second was the stopping criterion of the
+inner eigensolves: they stopped on the Ritz \emph{value}, which leaves an
+eigen\emph{vector} accurate only to the square root of its tolerance ---
+fatal for VUMPS, whose convergence test compares \texttt{AC} and
+\texttt{C}, two independently-solved eigenvectors. That floored the gauge
+mismatch at ${\sim}10^{-6}$, so \texttt{tol=1e-10} was unreachable at any
+number of iterations while the reported energy was perfectly good. Both
+backends now stop on the residual instead: \texttt{D=8} TFIM went from
+\texttt{converged} in 0/3 runs to 3/3 (and 32.6s to 6.7s at $g=1.5$,
+38.4s to 4.6s at critical $g=1.0$), with the energies unchanged to every
+printed digit. What remains is ordinary restart-search difficulty rather
+than a known defect: the $D$-ramp, multi-restart and
+variational-principle safety-net machinery is load-bearing
+infrastructure, not vestigial, and for a \texttt{D>2} result on a harder
+or less-tested model it is still worth calling \texttt{gs\_energy()} a few
+times independently and keeping the lowest reported density. Always check
+\texttt{.converged} --- it is reported honestly and never silently
+assumed. See \texttt{pyitensor/vumps.py}'s own ``Convergence
+robustness'' docstring section for the full numerical account. See
 \texttt{examples/idmrg/vumps\_TFIM/main.py} for a worked example
 sweeping \texttt{D} and comparing VUMPS against both
 \texttt{gs\_method="idmrg"} and the transverse-field Ising model's own
@@ -3792,8 +4026,7 @@ and evolves the perturbed window in real time via two-site TDVP rather
 than expanding in Chebyshev moments. Supports both
 \texttt{itensor\_version="python"} and \texttt{itensor\_version=3}
 (calls \texttt{gs\_energy()} automatically if needed, like
-\texttt{vev}/\texttt{correlator}, though \texttt{vev}/\texttt{correlator}
-themselves still require \texttt{itensor\_version="python"} regardless):
+\texttt{vev}/\texttt{correlator}):
 
 \begin{lstlisting}
 ks, es, Skw = ic.td_dynamical_correlator(
@@ -3929,9 +4162,8 @@ procedure, returning a new \texttt{pyitensor.idmrg.PeriodicMPS} that
 exactly like an \texttt{IDMRGResult}. There is no
 \texttt{Infinite\_Many\_Body\_Chain}-level wrapper yet, so it is reached
 by working with \texttt{pyitensor.idmrg} directly against
-\texttt{ic.\_result} (only meaningful for
-\texttt{itensor\_version="python"}, same restriction as
-\texttt{vev}/\texttt{correlator}):
+\texttt{ic.\_result} (\texttt{itensor\_version="python"} only --- unlike
+\texttt{vev}/\texttt{correlator}, which work on both backends):
 
 \begin{lstlisting}
 from dmrgpy.pyitensor import idmrg
@@ -4322,6 +4554,7 @@ See \texttt{dmrgpy/blasthreads.py} for the full measurements.
 
 
 \section{What raises, and what changed in the 2026-08 audit}
+\label{sec:whatraises}
 
 A cross-backend audit in August 2026 (\texttt{docs/audit\_2026\_08\_hole\_hunt.md},
 which records every reproduction) went looking for calls that silently did
@@ -4366,7 +4599,7 @@ unknown keyword to \texttt{submode="KPM"} & silently discarded & \texttt{TypeErr
 \texttt{name="ZZ"} with \texttt{submode="KPM"}/\texttt{"EX"}, or any \texttt{mode="ED"} & \texttt{RuntimeError: No active exception to reraise} & works \\
 \texttt{submode="CVMimag"}/\texttt{"maxent"} & \texttt{exit()} -- terminated your process & \texttt{NotImplementedError} \\
 \texttt{kpm\_energy\_truncate=True} on \texttt{itensor\_version=2} & silently ignored & \texttt{NotImplementedError} \\
-\texttt{kpm\_energy\_truncate=True} with far too small a \texttt{kpm\_scale} & plausible spectrum at the wrong energy & \texttt{RuntimeError} in the worst regime \\
+\texttt{kpm\_energy\_truncate=True} with far too small a \texttt{kpm\_scale} & plausible spectrum at the wrong energy & \texttt{RuntimeError} in the worst regime (see \texttt{docs/\allowbreak known\_issue\_\allowbreak kpm\_\allowbreak energy\_\allowbreak truncation\_\allowbreak window.md}) \\
 an operator on an out-of-range site (\texttt{"python"}) & treated as the identity & \texttt{IndexError} \\
 \texttt{get\_excited\_states(n=...)} beyond the Hilbert space & ground on for minutes & \texttt{ValueError} \\
 \texttt{Thermal\_Spin\_Chain(..., T<0)} & treated as \texttt{T=0} & \texttt{ValueError} \\
@@ -4374,6 +4607,7 @@ an operator on an out-of-range site (\texttt{"python"}) & treated as the identit
 \texttt{get\_distribution*(mode="ED")} & \texttt{AttributeError} deep inside & dispatches, or \texttt{NotImplementedError} \\
 \texttt{vev(C[i]*C[i])} & \texttt{AttributeError} on every DMRG backend & \texttt{0} (as ED always answered) \\
 \texttt{Many\_Body\_Chain.evolution()} & \texttt{AttributeError} & removed \\
+\texttt{gs\_energy\_generalized()} on a chain below 2 sites (\texttt{"python"}) & the Rayleigh quotient of an untouched random state ($-0.3049$ for an exact $-0.5$) & \texttt{RuntimeError} \\
 \bottomrule
 \end{tabular}
 \end{center}
