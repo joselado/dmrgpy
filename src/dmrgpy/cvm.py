@@ -135,8 +135,9 @@ def _cvm_sweep_params(self):
 def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
         b=None):
     """
-    Correction Vector Method (Ramasesha; Kuhner & White 1999):
-    -Im<GS|A (omega+E0+i*eta-H)^{-1} B|GS>/pi, computed by solving the
+    Correction Vector Method (Ramasesha; Kuhner & White 1999), returning
+    dynamics.py's house convention -- the complex Lehmann density
+    i*(G^R-G^A)/(2*pi) of the pair (A,B) -- computed by solving the
     Hermitian, positive-definite system
 
         [(H-omega-E0)^2 + eta^2] xc = -eta * B|GS>
@@ -234,9 +235,29 @@ def cvm_correction_vector(self,A,B,omega,eta,tol=1e-5,max_it=1000,
             p = r + (rs_new/rs_old)*p
             rs_old = rs_new
         _warn_if_unconverged(self,omega,best_res,tol)
-        x = 1j*best_xc + (Hshift*best_xc)*(1./eta) # full correction vector
-        G = wf0.dot(A*x) # <GS|A|x>
-        return -G.imag/np.pi, best_xc, niter, best_res
+        # The house convention (dynamics.py) needs both resolvents,
+        #   i*(G^R-G^A)/(2*pi),   G^R/G^A = <GS|A (w+E0 -+ ... i*eta-H)^-1 B|GS>,
+        # and both come out of this one CG solve for free. The system
+        # matrix (H-w-E0)^2+eta^2 is even in eta, so flipping eta only
+        # negates the right-hand side: xc(-eta) = -xc(+eta), and the
+        # recovery formula turns into
+        #   x(-eta) = -i*xc + (H-w-E0)*xc/eta  (vs  +i*xc + ... for +eta).
+        # Hence G^R-G^A = <GS|A (2i*xc)> and the whole correlator is just
+        #   i*(2i*<GS|A|xc>)/(2*pi) = -<GS|A|xc>/pi,
+        # with the (H-w-E0)*xc/eta piece -- the dispersive part -- cancelling
+        # identically. So this is also one MPO application cheaper than the
+        # -Im(G^R)/pi it replaces, which built the full correction vector
+        # x = i*xc + Hshift*xc/eta first.
+        #
+        # That -Im(G^R)/pi equals this only for a real Lehmann weight
+        # M_n = <GS|A|n><n|B|GS>, i.e. only for A = B^dagger. For a general
+        # pair the two differ by more than the correlator's own peak
+        # (measured 0.5746 against a peak of 0.4257 on a 4-site
+        # complex-hopping fermionic chain), and it was this backend, not
+        # mode="ED", that sat off the convention: only the density
+        # satisfies integral dw = <GS|A B|GS>. (2026-09 audit, finding #5.)
+        C = -wf0.dot(A*best_xc)/np.pi # <GS|A|xc>, xc = -eta*[(H-w-E0)^2+eta^2]^-1 B|GS>
+        return C, best_xc, niter, best_res
 
 
 _UNCONVERGED_WARNED = set()

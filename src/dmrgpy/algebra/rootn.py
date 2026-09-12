@@ -74,13 +74,42 @@ def apply_fractional_resolvent(H,v,omega,e0,eta,N,nkry):
     return Q@coords
 
 
-def rootn_correction_vector(H,wf0,e0,A,B,omega,eta,N=8,nkry=20):
-    """Correction vector <GS|A (omega-H+E0+i*eta)^{-1} B|GS> computed with
-    the root-N Krylov method: N sequential applications of the 1/N-power
-    resolvent, each within its own nkry-dimensional Lanczos subspace
-    re-seeded from the previous step's vector."""
+def rootn_resolvent(H,wf0,e0,A,B,omega,eta,N=8,nkry=20):
+    """Raw resolvent matrix element <GS|A (omega-H+E0+i*eta)^{-1} B|GS>
+    computed with the root-N Krylov method: N sequential applications of
+    the 1/N-power resolvent, each within its own nkry-dimensional Lanczos
+    subspace re-seeded from the previous step's vector. `eta` may be of
+    either sign (the retarded and advanced resolvents differ only by
+    that sign; the principal branch of z^(1/N) keeps arg(z) inside
+    (-pi/N,pi/N], so raising it back to the N-th power recovers z itself
+    on both sides of the real axis)."""
     v = B@wf0 # phi = O_j|GS>, the p=0 seed
     for p in range(N):
         v = apply_fractional_resolvent(H,v,omega,e0,eta,N,nkry)
-    G = np.vdot(wf0,A@v) # <GS|A|x>
-    return -G.imag/np.pi
+    return np.vdot(wf0,A@v) # <GS|A|x>
+
+
+def rootn_correction_vector(H,wf0,e0,A,B,omega,eta,N=8,nkry=20):
+    """Dynamical correlator of the pair (A,B) at frequency `omega`, in
+    dmrgpy's house convention (see src/dmrgpy/dynamics.py's module
+    docstring): the complex Lehmann density
+    i*(G^R-G^A)/(2*pi) = sum_n M_n*eta/(pi*((omega-D_n)^2+eta^2)),
+    with M_n = <GS|A|n><n|B|GS>.
+
+    Both resolvents are computed, at +i*eta and -i*eta, which is why this
+    runs the root-N recursion twice. That is the price of the convention:
+    unlike the correction-vector method (cvm.py), whose linear system for
+    -eta is the same system with the right-hand side negated, so the
+    advanced resolvent comes out of the same solve for free, the root-N
+    recursion applies a *function* of H and has no such shortcut -- the
+    -eta pass genuinely re-seeds N new Lanczos subspaces.
+
+    This used to return -Im(G^R)/pi from the +eta pass alone, half the
+    work, which equals the above only for real M_n (i.e. A=B^dagger) and
+    otherwise carries a dispersive term whose principal-value tails break
+    the integral dw = <GS|A B|GS> sum rule -- measured on a 4-site
+    complex-hopping fermionic chain, 0.13145 against an exact
+    0.11052176-0.27135291j. (2026-09 audit, finding #5.)"""
+    gp = rootn_resolvent(H,wf0,e0,A,B,omega,eta,N=N,nkry=nkry) # retarded
+    gm = rootn_resolvent(H,wf0,e0,A,B,omega,-eta,N=N,nkry=nkry) # advanced
+    return 1j*(gp-gm)/(2.*np.pi)

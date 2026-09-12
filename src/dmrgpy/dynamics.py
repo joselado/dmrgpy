@@ -1,3 +1,99 @@
+"""Dispatch of get_dynamical_correlator over its submodes.
+
+THE HOUSE CONVENTION
+--------------------
+The quantity this codebase calls a dynamical correlator -- what every
+submode except "TD"/"TDZ" returns, on whichever of mode="DMRG"/mode="ED"
+implements it -- is the *complex* Lehmann density of the operator pair
+(A,B), Lorentzian-broadened by `delta`:
+
+    C_AB(w) = sum_n M_n * delta/(pi*((w-D_n)^2+delta^2))
+            -> sum_n M_n delta(w-D_n)   as delta->0
+            =  i*(G^R_AB(w) - G^A_AB(w))/(2*pi)
+
+with M_n = <GS|A|n><n|B|GS> and D_n = E_n-E_0, and
+
+    G^R_AB(w) = <GS| A (w+E_0+i*delta-H)^{-1} B |GS>,  G^A = the same at
+    -i*delta.
+
+Note M_n is complex in general, so C_AB is complex too; it is real
+exactly when every M_n is real. A Hermitian pair A = B^dagger guarantees
+that (there M_n = |<n|B|GS>|^2, so C_AB is real *and* non-negative), and
+it is the overwhelmingly common case, the one every example and most
+tests use -- but it is not the only way: a real Hamiltonian with real
+operators has real M_n for any pair, Hermitian or not. `Im M_n == 0`,
+not `A == B^dagger`, is the discriminant wherever this docstring says two
+conventions coincide.
+
+The reason this, and not the also-common -(1/pi) Im G^R_AB, is the
+convention here: -(1/pi) Im G^R = sum_n [Re(M_n)*delta -
+Im(M_n)*(w-D_n)]/(pi*D) coincides with C_AB only for real M_n, and its
+dispersive second term has principal-value tails that leak arbitrarily
+far outside any finite frequency window, so it does not satisfy the
+kernel-independent sum rule
+
+    integral dw C_AB(w) = sum_n M_n = <GS|A B|GS>
+
+that every submode on this convention can be checked against (see
+tests/test_audit_2026_09_correlator-conventions.py). The default
+submode="KPM" -- a Chebyshev expansion of the spectral density, which has
+no notion of a retarded resolvent at all -- is on this convention in the
+sum-rule (and delta->0) sense, which is what the test file pins it by; it
+is NOT pointwise interchangeable with the resolvent submodes at a given
+delta, since delta there only sets the polynomial count (edtk/dynamics.py
+picks npol from int(2*scale/delta), and the DMRG side picks its own), so
+measured peak heights differ by a factor of 2-3 at delta=0.15..0.6.
+submode="INV"/"CVM" under mode="ED" and submode="EX" have always computed
+C_AB directly. The 2026-09 audit found four routes off the convention and
+brought them onto it rather than the other way round: submode="ED",
+submode="ROOTN" and mode="DMRG" submode="CVM" (finding #5), plus
+submode="CVM_explicit", which returned exactly 2x C_AB on every backend
+and additionally destroyed the sign of a negative-weight correlator with
+an np.abs() (finding #11). submode="TD"/"TDZ" are the routes still off
+this convention -- they return the complex one-sided Fourier transform,
+whose REAL part is C_AB when Im M_n == 0 -- recorded as open item O1 in
+docs/audit_2026_09_hole_hunt.md rather than changed in that pass. The
+test file above pins ED/{ED,INV,CVM,ROOTN} and DMRG/{CVM,ROOTN}
+pointwise against an exact Lehmann sum, and ED/{ED,INV,CVM,ROOTN,KPM}
+plus DMRG/KPM against the sum rule.
+
+The two backends do not offer the same submodes, so "every submode"
+never means "every (mode,submode) pair": mode="DMRG" takes the names in
+SUBMODES below, while mode="ED" implements KPM, ED, EX, INV, CVM, ROOTN
+and TD and raises NotImplementedError for the rest (edtk/dynamics.py).
+"INV" is ED-only; "TDZ", "CVM_explicit", "CVMimag", "SECTOR" and
+"maxent" are DMRG-only.
+
+itensor_version="julia_live" is a third case and is only partly covered
+by the statement above. Its CVM/TDZ/EX/maxent go through the very same
+shared modules as every other backend (cvm.py, tdz.py, dcex.py,
+distribution.py -- so they inherit whatever those return, the 2026-09
+fixes included), but its KPM is its own implementation
+(mpsjulialive/dynamics.py::_kpm_dynamical_correlator plus kpm.jl), which
+that audit did not exercise: it mirrors kpmdmrg.py and shares the same
+moment reconstruction, but nothing here has measured it, so this
+docstring makes no claim about it.
+
+THE TWO EXCEPTIONS: submode="TD" and submode="TDZ"
+-------------------------------------------------
+These two do NOT return C_AB, and finding #5's convention decision
+explicitly did not touch them. Both end in
+`timedependent._fourier_transform_correlator`, which returns the full
+*complex* one-sided Fourier transform of the real-time correlator --
+in the long-time limit -(i/pi)*G^A_AB(w), whose real part is C_AB when
+Im M_n = 0 and whose imaginary part is the dispersive -(1/pi)*Re G^A_AB
+that C_AB does not have. Measured on a 6-site Heisenberg chain with the
+Hermitian pair A = B = Sz_0 (so M_n is real and C_AB is the ordinary
+real density, peak 0.1421, delta=0.3): Re y reproduces C_AB to 2e-4 and
+y reproduces -(i/pi)*G^A to 2e-4, while max|Im y| = 0.0996, i.e. 70% of
+the density's own peak (submode="TDZ": 68%, with its complex-time
+contour putting Re y 1.8e-2 from C_AB). So take `np.real(...)` of a
+TD/TDZ result before comparing it against any other submode, and do not
+read its imaginary part as a complex Lehmann weight. This is recorded as
+an open item in docs/audit_2026_09_hole_hunt.md: moving them onto the
+convention changes numbers on the most commonly used real-time route,
+and was deliberately not done in that pass.
+"""
 from . import kpmdmrg
 from . import timedependent
 from . import cvm

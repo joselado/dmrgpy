@@ -62,20 +62,69 @@ def dynamical_correlator(self,es=np.linspace(-1.,10,100),
     return es,np.array(out)
 
 
-def rootn_correction_vector(self,A,B,omega,eta,N=8,nkry=20,
-        wf0=None,Hmpo=None):
-    """
-    Correction vector <GS|A(omega-H+E0+i*eta)^{-1}B|GS>, built as N
-    sequential fractional-power Lanczos steps (see module docstring).
-    """
+def rootn_resolvent(self,A,B,omega,eta,N=8,nkry=20,wf0=None,Hmpo=None):
+    """Raw resolvent matrix element <GS|A(omega-H+E0+i*eta)^{-1}B|GS>,
+    built as N sequential fractional-power Lanczos steps (see module
+    docstring). The MPS analogue of algebra/rootn.py's rootn_resolvent.
+
+    `eta` may be of either sign: the retarded and advanced resolvents
+    differ only by that sign, and the recursion is valid on both sides of
+    the real axis (see _apply_fractional_resolvent_mps' own note on the
+    principal branch)."""
     if wf0 is None: wf0 = self.get_gs()
     if Hmpo is None: Hmpo = self.toMPO(self.hamiltonian)
     e0 = self.e0
     v = B*wf0 # phi = O_j|GS>, the p=0 seed
     for p in range(N):
         v = _apply_fractional_resolvent_mps(self,Hmpo,v,omega,e0,eta,N,nkry)
-    G = wf0.dot(A*v)
-    return -G.imag/np.pi
+    return wf0.dot(A*v) # <GS|A|x>
+
+
+def rootn_correction_vector(self,A,B,omega,eta,N=8,nkry=20,
+        wf0=None,Hmpo=None):
+    """
+    Dynamical correlator of the pair (A,B) at frequency `omega`, in
+    dmrgpy's house convention (see src/dmrgpy/dynamics.py's module
+    docstring): the complex Lehmann density
+    i*(G^R-G^A)/(2*pi) = sum_n M_n*eta/(pi*((omega-D_n)^2+eta^2)),
+    with M_n = <GS|A|n><n|B|GS>.
+
+    Both resolvents are computed, at +i*eta and -i*eta, which is why this
+    runs the root-N recursion twice -- exactly as algebra/rootn.py's ED
+    implementation of the same submode does, and for the same reason.
+    There is no shortcut: unlike the correction-vector method (cvm.py),
+    whose linear system for -eta is the same system with the right-hand
+    side negated, the root-N recursion applies a *function* of H, so the
+    -eta pass genuinely re-seeds N new Lanczos subspaces. Nor does
+    conjugation help, since conj(G^R_{A,B}) = G^A_{B^dag,A^dag} is the
+    advanced resolvent of a *different* operator pair; it collapses to
+    G^A_{A,B} only for A = B^dag, which is precisely the case in which
+    the two conventions already coincide.
+
+    This used to return -Im(G^R)/pi from the +eta pass alone, half the
+    work, which equals the above only for real M_n (i.e. A = B^dag) and
+    otherwise carries a dispersive term whose principal-value tails break
+    the integral dw = <GS|A B|GS> sum rule. Measured on a 4-site
+    complex-hopping fermionic chain with A = Cdag_0, B = C_2: the
+    mode="DMRG" answer sat 5.720e-01 away from the complex density (on a
+    correlator peak of 0.6135) and 4.8e-08 from the old convention, i.e.
+    submode="ROOTN" returned a different observable depending on `mode`,
+    while mode="ED" submode="ROOTN" was already 7.9e-16 from the density.
+    With both passes it is 8.2e-07 from the density on that pair (at
+    N=6/nkry=16), i.e. on the convention up to this route's own
+    MPS/Lanczos error. For A = B^dag nothing moves at all -- and the
+    returned value is then exactly real, not merely real to roundoff,
+    whenever H is real: the -eta pass is the bitwise complex conjugate of
+    the +eta one, so 1j*(gp-conj(gp))/(2*pi) has an identically zero
+    imaginary part. (2026-09 audit, finding #5.)
+    """
+    if wf0 is None: wf0 = self.get_gs()
+    if Hmpo is None: Hmpo = self.toMPO(self.hamiltonian)
+    gp = rootn_resolvent(self,A,B,omega,eta,N=N,nkry=nkry,
+            wf0=wf0,Hmpo=Hmpo) # retarded
+    gm = rootn_resolvent(self,A,B,omega,-eta,N=N,nkry=nkry,
+            wf0=wf0,Hmpo=Hmpo) # advanced
+    return 1j*(gp-gm)/(2.*np.pi)
 
 
 def _lanczos_basis_mps(self,Hmpo,v,nkry):
@@ -113,7 +162,20 @@ def _apply_fractional_resolvent_mps(self,Hmpo,v,omega,e0,eta,N,nkry):
     """Apply (omega-H+e0+i*eta)^{1/N} to the MPS v, approximated within a
     Lanczos subspace of dimension nkry seeded by v itself -- same
     recipe/derivation as algebra/rootn.py's apply_fractional_resolvent,
-    operating on MPS objects instead of numpy vectors."""
+    operating on MPS objects instead of numpy vectors.
+
+    `eta` is carried through with its sign, so this serves the advanced
+    (eta<0) recursion as well as the retarded one. No branch handling is
+    needed for that: z = omega-e+e0+1j*eta never touches the negative
+    real axis for eta!=0, numpy's principal branch puts arg(z**(1./N)) in
+    (-pi/N,pi/N), and N-fold composition therefore lands back on arg(z)
+    without ever crossing a cut -- including the eta<0, omega-e+e0<0
+    quadrant, where arg(z) is in (-pi,-pi/2). Confirmed numerically on a
+    4-site complex-hopping chain: the two-pass result agrees with
+    algebra/rootn.py's exact ED answer to 8.2e-07 at N=6/nkry=16, the
+    ordinary MPS/Lanczos error of this route (see
+    rootn_correction_vector's docstring), not the ~0.5 a wrong sheet
+    would give."""
     nrm = np.sqrt(v.dot(v).real)
     Q,alphas,betas = _lanczos_basis_mps(self,Hmpo,v,nkry)
     m = len(alphas)

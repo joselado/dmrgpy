@@ -166,11 +166,19 @@ def dynamical_correlator_rootn(h,e0,wf0,A,B,delta=1e-1,
     the Lanczos subspace dimension used at every step (the ED analogue of
     the bond dimension m in the paper's MPS/DMRG setting).
 
-    Follows the same <GS|A(omega-H+E0+i*eta)^{-1}B|GS> convention (A used
-    as-is, no dagger) as dynamical_correlator_ED/dynamical_correlator_inv
-    above, so results are directly comparable to submode="ED"/"CVM"/"INV"
-    -- unlike dynamical_correlator_kpm, which conjugate-transposes A for
-    its own (different) vi/vj construction."""
+    A is used as-is (no dagger), as in dynamical_correlator_ED /
+    dynamical_correlator_inv above -- unlike dynamical_correlator_kpm,
+    which conjugate-transposes A for its own vi/vj construction. The
+    returned quantity is dynamics.py's house convention, the complex
+    Lehmann density i*(G^R-G^A)/(2*pi), so it is directly comparable to
+    submode="ED"/"CVM"/"INV"/"KPM"/"EX".
+
+    That comparability claim used to be in this docstring while being
+    measurably false in *both* directions: this submode returned
+    -Im(G^R)/pi, submode="ED" returned the real part of the density, and
+    only "CVM"/"INV" were on the density itself. All three now agree; see
+    algebra/rootn.py::rootn_correction_vector for what changed and what
+    it costs. (2026-09 audit, finding #5.)"""
     from ..algebra.rootn import rootn_correction_vector
     out = [rootn_correction_vector(h,wf0,e0,A,B,e,delta,N=N,nkry=nkry)
             for e in es]
@@ -270,7 +278,19 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     A = np.array((Uh[:nex]@a0)@U) # (nex,n) = <i|A|j>, i over the manifold
     B = np.array(Uh@(b0@U[:,:nex])) # (n,nex) = <j|B|i>
     out = dynamical_sum(emu,es,delta,A,B,nex=nex) # perform the summation
-    return (es,-out.imag/(2*np.pi)) # return correlator
+    # dynamical_sum returns G^R-G^A = sum_n M_n*(-2i*delta)/D, so
+    # i*out/(2*pi) = sum_n M_n*delta/(pi*D): the complex Lehmann density,
+    # dynamics.py's house convention. This used to be -out.imag/(2*pi) =
+    # sum_n Re(M_n)*delta/(pi*D), i.e. the same thing with Im(M_n)
+    # silently thrown away -- identical whenever M_n is real (A=B^dagger,
+    # or any real H with real eigenvectors, which is every case in tests/
+    # and examples/), and off by up to 68% of the peak on an ordinary
+    # off-diagonal Green's function <Cdag_i ... C_j> with complex
+    # hoppings. Confirmed by the sum rule: the old return integrated to
+    # Re<GS|A B|GS> alone, this one to the full complex <GS|A B|GS>,
+    # which is what submode="KPM"/"INV"/"CVM"/"EX" already gave.
+    # (2026-09 audit, finding #5.)
+    return (es,1j*out/(2*np.pi)) # return correlator
 
 from numba import jit
 
@@ -353,7 +373,11 @@ def dynamical_correlator_finite_T(h,a0,b0,T,delta=2e-2,
     A = np.array(Uh@(a0@Ufull)) # (n,n): <i|A|j>
     B = np.array(Uh@(b0@Ufull)) # (n,n): <j|B|i>
     out = dynamical_sum_thermal(ex,ex,es,delta,A,B,weights) # perform the summation
-    return (es,-out.imag/(2*np.pi)) # return correlator
+    # Same kernel, same convention fix as dynamical_correlator_ED above:
+    # i*out/(2*pi) is the (thermally weighted) complex Lehmann density,
+    # dynamics.py's house convention; -out.imag/(2*pi) dropped Im of the
+    # matrix element. Unchanged whenever that element is real.
+    return (es,1j*out/(2*np.pi)) # return correlator
 
 
 @jit(nopython=True)

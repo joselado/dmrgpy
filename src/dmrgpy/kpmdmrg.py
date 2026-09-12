@@ -194,7 +194,18 @@ def general_kpm_moments(self,X=None,A=None,B=None,
     """
     Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
     """
-    if X is None: raise
+    # A bare `raise` here (no active exception) used to surface as
+    # "RuntimeError: No active exception to reraise", naming neither the
+    # function nor the argument -- and this is reached straight from the
+    # public Many_Body_Chain.get_distribution(), whose own docstring
+    # documents no required argument at all. Same defect class the
+    # 2026-08 audit fixed at the `name` check further up this file.
+    if X is None:
+        raise TypeError(
+            "get_distribution/general_kpm_moments: X= is required -- it is "
+            "the operator whose spectral distribution is being computed "
+            "(e.g. X=chain.Sz[0], or any MultiOperator). There is no "
+            "default operator anywhere on this path.")
     # extrapolate
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
     if scale is not None: 
@@ -321,7 +332,15 @@ def kpm_moments_wfa_wfb(self,X=None,wfa=None,wfb=None,
     """
     Compute a dynamical correlator of Bdelta(X)A using the KPM-DMRG method
     """
-    if X is None: raise
+    # Same bare-`raise` defect as in general_kpm_moments above, fixed the
+    # same way -- this entry point takes the two wavefunctions directly
+    # instead of building them from A/B, but X is just as required.
+    if X is None:
+        raise TypeError(
+            "kpm_moments_wfa_wfb: X= is required -- it is the operator "
+            "whose spectral distribution is being computed (e.g. "
+            "X=chain.Sz[0], or any MultiOperator). There is no default "
+            "operator anywhere on this path.")
     # extrapolate
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
     if scale is not None:
