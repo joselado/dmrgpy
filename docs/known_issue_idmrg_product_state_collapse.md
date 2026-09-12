@@ -147,5 +147,26 @@ is a separate API question rather than a bug fix.
 `itensor_version=3` + `gs_method="idmrg"` is reliable on the half-filled plateau for this
 model (it reproduces `n_c = 1.0009`, `n_f = 0.9991` and matches a finite-chain correlator
 benchmark) but cannot reach hole doping beyond about `mu = -0.20`. `pyitensor` VUMPS does
-reach it. Combined with `docs/known_issue_v3_vumps_no_return.md`, no single
-(backend, solver) pair covers the whole parameter range of this Hamiltonian.
+reach it.
+
+**The "no single (backend, solver) pair covers the whole parameter range" conclusion this
+paragraph used to draw no longer follows**, and the reason is worth stating because it is
+the second half of the pair that moved, not this one. That conclusion rested on
+`docs/known_issue_v3_vumps_no_return.md` -- v3's *other* solver being unusable on this
+Hamiltonian -- and that issue is fixed. Re-checked directly on 2026-09-12: on a two-site
+native-spinful cell (`Infinite_Many_Body_Chain([1, 1])`, `d_g = 16`, the shape whose dense
+`H_AC` was the non-return's cause) in the free limit at `D=8`, `maxiter=60`,
+`nrestarts=2`, `gs_method="vumps"` returns `e0 = -1.08251258` in **4.3 s** on
+`itensor_version=3` and the same energy to 8 digits in 3.4 s on `itensor_version="python"`
+-- against "still at 100% CPU after 10:22, killed" before. So v3 VUMPS is now a usable
+route on this chain shape, and the doped region is not out of reach of every v3 solver.
+
+What is *not* re-verified is the claim in the first paragraph itself: the `mu = -0.20`
+boundary was measured on the interacting (`U`, `J` nonzero) Kondo model, whose parameter
+set lives in the reporting project's own `paper_figures/generate_idmrg_control.py` and not
+in this repository, so reconstructing it here would be measuring a different model. Treat
+the first paragraph as the record of what was seen then, and re-measure against that
+project's own script before relying on it.
+
+The trap fix itself re-verifies cleanly: `tests/test_idmrg_product_state_trap.py` passes
+6/6 on both backends in 23 s on the current build.

@@ -292,12 +292,12 @@ its executed repro, its reviewer's attempt to refute it, and a `**Status**`
 line saying what was done and which test now pins it. The regressions live
 in eight files, `tests/test_audit_2026_09_<name>.py`: one per fix cluster
 (there were seven) plus one for the `dispatch-leftovers` follow-up lane.
-Two entries are not a plain FIXED: **#20**'s compute half landed
+One entry is not a plain FIXED: **#20**'s compute half landed
 and its memory half did not (`idmrg.py` still materializes `Es`, ~540 MB
-peak at chi=64), and **#3** is fixed on `itensor_version="python"` only —
-the C++ VUMPS still returns energies *below* the exact variational
-minimum on redundant-bond-dimension models, which is
-`docs/known_issue_v3_vumps_variational_floor.md`. Results from before this
+peak at chi=64). **#3** was fixed on `itensor_version="python"` only at
+the time, the C++ VUMPS half following on 2026-09-12
+(`docs/known_issue_v3_vumps_variational_floor.md`, now FIXED — see the
+`vx_choose_fixed_point` paragraph further down). Results from before this
 audit are not comparable where it changed numbers rather than behavior,
 which it did in ten places: all `itensor_version="python"` TDVP
 real-time evolution (the default `tevol_method`, which carried an O(dt)
@@ -1063,19 +1063,38 @@ algebraic identity and therefore a yes/no test rather than a tuned
 threshold, so at convergence no eigensolve runs at all; the guarded
 eigensolver runs only when the residual says the gauge relation does not
 hold, and the two are cross-checked against each other by residual. That
-is bond-candidate-FIRST, where `Chain::vx_bond_fixed_points` is still only
-reached from a `catch (ITError const&)`, i.e. eigensolver-first. The
-difference is measurable and is not in the C++'s favour: on a
+is bond-candidate-FIRST, and **`itensor_version=3` got there on
+2026-09-12** -- `Chain::vx_choose_fixed_point`, one shared selection that
+both `vumps_build_environments` and `vms_environments` go through, where
+each used to hold its own `catch (ITError const&)` reaching
+`vx_bond_fixed_points` as a failure fallback. The difference between the
+two orderings was measurable and was not in the C++'s favour: on a
 field-polarized reach-1 one-site cell at `maxm=4`, `gs_energy()` on
 `itensor_version="python"` raised "every attempt at D=4 failed" in 7 of
-20 runs before the change and 0 of 20 after, while `itensor_version=3`
-still returns energies *below* the exact variational minimum, at a rate
-that moves between runs and builds (13 and 17 of 80 measured at D=6 on
-the grouped cell, worst 2.3e-8; worst 2.8e-3 on the sequential one) where
-`"python"` does so in 0 of 40. Quote the threshold with any rate, as the
+20 runs before its own change and 0 of 20 after, while
+`itensor_version=3` returned energies *below* the exact variational
+minimum at a rate that moved between runs and builds (13 and 17 of 80
+measured at D=6 on the grouped cell, worst 2.3e-8; worst 2.8e-3 on the
+sequential one) where `"python"` did so in 0 of 40. It is now 0 of 330
+past 1e-12 across six cells. Quote the threshold with any rate, as the
 known-issue file itself instructs -- see
-`docs/known_issue_v3_vumps_variational_floor.md`, which is open.
-`tests/test_vumps_redundant_bond_dimension.py`.
+`docs/known_issue_v3_vumps_variational_floor.md`, now FIXED, and
+`tests/test_vumps_redundant_bond_dimension.py`, whose narrow `xfail` came
+out and which gained a repeated-run guard (a 6-in-30 defect is invisible
+~80% of the time to a one-run test).
+
+**Porting that ordering is what caught a latent defect in the primitive
+itself**, and the lesson generalizes: `vx_bond_fixed_points`' LEFT
+candidate was `C^dag C` where the `X[ket,bra]` ordering needs
+`conj(C^dag C)` -- the transpose. Nothing had caught it because nothing
+had ever *measured* that candidate; adding the residual read it
+immediately (4e-15 for the correct orientation against 0.38-0.53 for the
+transpose, at convergence on the polarized cell at D=6). It survived
+because the only two models this function had been exercised on -- a
+field-polarized chain, whose converged `C` is real diagonal, and AKLT,
+whose `C` is real -- both have a real symmetric `C^dag C`, where the two
+orientations coincide. A fallback that is only reached on failure is a
+fallback nothing validates.
 
 **Reading that led to a bigger, unrelated find, and it is the one to know
 about**: `pyitensor/dmrg.py`'s `_lanczos_ground_state` stops when the
@@ -1096,11 +1115,29 @@ relative sign was arbitrary, and a flip made the mismatch read ~4 instead
 of ~1e-6 in 11 of every 100 iterations. Measured through the public
 driver: `D=8` TFIM went from `converged` in **0/3** runs to **3/3**, and
 32.6s -> 6.7s (g=1.5) / 38.4s -> 4.6s (critical g=1.0), energies
-unchanged to every printed digit. One consequence worth
-remembering: **finite DMRG's own MPS tensors carry the same ~1e-6 cap** --
-energies are unaffected, but anything downstream that consumes a DMRG
-*wavefunction* rather than its energy is worth a look, and has not had
-one. The C++ `itensor_version=3` port carried the eigenvalue criterion for
+unchanged to every printed digit. One consequence looked alarming and,
+**measured, is not**: finite DMRG's own local solves carry the same ~1e-6
+per-solve eigenvector cap, so anything consuming a DMRG *wavefunction*
+rather than its energy was flagged here as worth a look. It has had one
+(2026-09-12) and the answer is that the cap does not reach any consumer.
+On an 8-site Heisenberg chain at FULL bond dimension -- where the MPS can
+represent the exact state, so the local solver is the only error left --
+energies, `<Sz_i>`, two-site correlators, the bond entropy, `<wf|wf>` and
+the first three excited states all agree with ED to 1e-13..1e-15, and
+forcing `residual_tol=1e-13` into finite DMRG's own two
+`_lanczos_ground_state` call sites (`dmrg.py:421`/`:726`) moves every one
+of them by <= 5e-15. Below full bond dimension the error is
+truncation-dominated and the criterion makes no systematic difference
+either way: swept over `maxm` in 4..32 against ED, the loose/tight
+difference in the excited-state errors is non-monotonic noise (tight is
+slightly *worse* at maxm=8 and 12), not an improvement. The mechanism is
+the sweep: each local solve is warm-started from the previous sweep's own
+tensor and the sweep is iterated to convergence, so a per-solve vector
+error contracts instead of accumulating -- which is exactly what VUMPS
+lacks, its criterion being a difference between two *independently*
+solved eigenvectors with no outer contraction. So do not "fix" finite
+DMRG's criterion on this reasoning; it costs Krylov iterations and buys
+nothing measurable. The C++ `itensor_version=3` port carried the eigenvalue criterion for
 a while after this, so `Chain::vumps_ground_state` floored at ~1e-6 and
 reported `converged=False` at `D>=8` -- a documented divergence between the
 two VUMPS backends. `Chain::vx_lanczos_ground_state` now has the same

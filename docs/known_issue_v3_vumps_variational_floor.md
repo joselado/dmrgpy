@@ -1,12 +1,17 @@
-# Known issue: `itensor_version=3` VUMPS returns energies BELOW the exact variational minimum
+# Fixed issue: `itensor_version=3` VUMPS returned energies BELOW the exact variational minimum
 
-**Status**: NOT fixed. Guarded only on the sequential half, by a narrow
-non-strict `xfail`; the grouped half is unguarded and intermittently fails the
-suite (see "What is and is not guarded" below). Affects `itensor_version=3` only, on
-`gs_method="vumps"` (the default for `Infinite_Many_Body_Chain`), on both the
-grouped and the sequential solver. `itensor_version="python"` is unaffected --
-this is the C++ counterpart of the 2026-09 audit's finding #3, which was found
-and fixed only on the Python side.
+**Status**: FIXED on 2026-09-12, on both solvers, by porting the Python side's
+*ordering* as `Chain::vx_choose_fixed_point` -- see "The fix" at the bottom,
+which also carries the before/after measurements and the second, latent defect
+this turned up in `vx_bond_fixed_points` itself. The file is kept as the record
+of what the failure looked like, because the reasoning that localized it is the
+part worth keeping: everything above "The fix" is in the present tense as it was
+written while the issue was open.
+
+It affected `itensor_version=3` only, on `gs_method="vumps"` (the default for
+`Infinite_Many_Body_Chain`), on both the grouped and the sequential solver.
+`itensor_version="python"` was unaffected -- this was the C++ counterpart of the
+2026-09 audit's finding #3, which was found and fixed only on the Python side.
 
 ## What happens
 
@@ -169,42 +174,44 @@ is only meaningful because these runs are *not* reproducible.
 
 ## What is and is not guarded in the test suite
 
+**Historical, as of while this was open.**
 `tests/test_vumps_redundant_bond_dimension.py::test_sequential_solver_tolerates_redundant_bond_dimension`
-applies a narrow, non-strict `xfail` for exactly `backend == 3 and (n_uc, reach)
-== (1, 2) and D > 2`, which holds the sequential half of this issue. That marker
-should stay until this file says FIXED, and a deliberately narrow marker was
-chosen over a loosened tolerance so the other eleven `(n_uc, reach, D)`
-combinations keep catching the defect they exist for.
+applied a narrow, non-strict `xfail` for exactly `backend == 3 and (n_uc, reach)
+== (1, 2) and D > 2`, which held the sequential half of this issue; a
+deliberately narrow marker was chosen over a loosened tolerance so the other
+eleven `(n_uc, reach, D)` combinations kept catching the defect they exist for.
+That marker is **gone** -- all three of its cases xpass after the fix.
 
-The GROUPED half is **not** guarded: `test_grouped_solver_tolerates_redundant_bond_dimension`
-on `itensor_version=3` at D=6 and D=8 will fail whenever an excursion happens to
-land past its `abs=1e-9`, which is a small but real fraction of runs (2 of 80 and
-3 of 80 in the measurements above, 1 of 80 and 1 of 80 in a verifier's).
+The GROUPED half was not guarded at all: `test_grouped_solver_tolerates_redundant_bond_dimension`
+on `itensor_version=3` at D=6 and D=8 failed whenever an excursion happened to
+land past its `abs=1e-9`, a small but real fraction of runs (2 of 80 and
+3 of 80 in the measurements above, 1 of 80 and 1 of 80 in a verifier's). Both
+are 0 of 80 now.
 
-Two statements in that test file are stale in consequence, both outside the
-scope of this document and both worth fixing there:
+Two statements in that test file were stale in consequence, and both are
+corrected there now: the grouped test's own "0 of 10 at each of D=2,4,6,8 on
+both backends" (measured before the rebuild, and untrue of `itensor_version=3`
+while this was open), and the module docstring's claim that "All four
+environment builders ... now prefer the fixed points the state itself names",
+which was precisely what this file measured the C++ half NOT doing. That
+sentence is now true; it says so, and says since when.
 
-* its grouped test's own docstring (`test_grouped_solver_tolerates_redundant_
-  bond_dimension`, one occurrence, at "0 of 10 at each of D=2,4,6,8 on both
-  backends") -- measured before the rebuild, and no longer true of
-  `itensor_version=3`, which is 2 of 80 at D=6 and 3 of 80 at D=8 past the
-  `abs=1e-9` this test asserts at. The module docstring does not repeat that
-  sentence; its own "It is 0 of 20 now" is about the `"python"` grouped D=4
-  case and still holds.
-* the module docstring's claim that "All four environment builders (`vumps.py`
-  and `vumps_ms.py` on the Python side, `Chain::vx_*`'s grouped and sequential
-  halves on the C++ one) now prefer the fixed points the state itself names" --
-  which is the more serious of the two, because it is precisely what this file
-  measures the C++ half NOT doing: on `itensor_version=3` the bond candidate is
-  reached only from a `catch (ITError const&)`, i.e. it is a failure fallback,
-  not a preference. Only the two Python builders prefer it.
+What is newly guarded is the thing a single-run test could not catch. This
+defect appeared in 6 of 30 and 13 of 80 runs, so the two one-run tests above saw
+it ~20% and ~16% of the time. `test_variational_bound_holds_over_repeated_runs`
+asserts the one-sided bound over 8 runs of each of the two cells (grouped
+`(1,1)` and sequential `(1,2)`, at D=4), which would have caught it ~83% and
+~74% of the time.
 
 ## Where the code is
 
+- `src/dmrgpy/mpscpp3/chain_session.h::vx_choose_fixed_point` -- the shared
+  selection both builders now go through (the fix)
 - `src/dmrgpy/mpscpp3/chain_session.h::vumps_build_environments` (grouped) and
-  `::vms_environments` (sequential) -- the two `catch (ITError const&)` blocks
+  `::vms_environments` (sequential) -- which used to hold a
+  `catch (ITError const&)` block each
 - `src/dmrgpy/mpscpp3/chain_session.h::vx_bond_fixed_points` -- the primitive
-  that is already there
+  that was already there, and `::vx_fixed_point_residual`, which was not
 - `src/dmrgpy/pyitensor/vumps.py::_transfer_fixed_points` and
   `src/dmrgpy/pyitensor/vumps_ms.py::_cell_fixed_points` -- the fixed reference
 - `docs/audit_2026_09_hole_hunt.md` finding #3 -- the Python half, with its own
@@ -314,3 +321,97 @@ n_uc=1 reach=2 D=6 backend=python runs=40 below=0 below9=0 raised=0 worst=0.000e
 (The last of those is the slow one -- 494.0 s for 40 runs, against 5.8 s for 30
 runs of the same cell on `itensor_version=3`, which is the separate and expected
 Python-vs-C++ gap, not part of this issue.)
+
+---
+
+## The fix (2026-09-12)
+
+Ported the Python side's **ordering**, not another guard, exactly as "What a fix
+would involve" above asked for.
+
+`Chain::vx_choose_fixed_point` is now the single fixed-point selection both
+environment builders go through, and it is bond-candidate-first: measure the
+candidate's residual under the transfer map it is supposed to be a fixed point
+of (`Chain::vx_fixed_point_residual`, the C++ analogue of
+`vumps_ms._fixed_point_residual`), take it when that residual is at or below
+`vx_bond_fp_residual_tol_ = 1e-6`, and only otherwise run the eigensolver --
+then keep whichever of the two reproduces itself better. An empty `C` keeps the
+pure eigensolver route byte-identical to before. The two `catch (ITError const&)`
+blocks are gone; the eigensolver's own throw is now caught inside the shared
+helper, where it still falls back to the candidate and still rethrows when there
+is none.
+
+That tolerance is not a tuning knob, which is the whole reason this shape was
+chosen over the C-weight-spectrum threshold the earlier attempt tried: in mixed
+canonical gauge the bond candidate being a fixed point is an exact algebraic
+identity, so the residual is 0 to machine precision when the gauge relation
+holds and O(0.1) when it does not. Measured directly on the polarized cell at
+D=6 while converging: 4.4e-03 and 3.7e-03 mid-approach, then 2.9e-12, 3.4e-12,
+3.8e-15, 6.5e-15 -- there is no band in between to calibrate against.
+
+### A second, latent defect this turned up
+
+`vx_bond_fixed_points`' LEFT candidate was `C^dag C` where this codebase's
+`X[ket, bra]` index ordering needs `conj(C^dag C)` -- the transpose, `C^dag C`
+being Hermitian. `pyitensor/vumps_ms.py::_bond_fixed_points` has always carried
+the conjugate (`np.conj(C.conj().T @ C)`); the C++ port dropped it.
+
+It was invisible for as long as nothing *measured* the candidate. Adding the
+residual is what read it: at convergence on the polarized cell at D=6 the
+correct orientation reproduces itself to 4e-15 (3e-15 on the grouped path) and
+its transpose to 0.38-0.53, against the eigensolver's own 5e-16 -- so this was
+not a near miss, and without fixing it the AR side's candidate would simply
+never have been accepted and the fix would have been a half no-op. It survived
+because the two models this function had ever been exercised on both have a real
+symmetric `C^dag C` (a field-polarized chain's converged `C` is real diagonal,
+AKLT's is real), where the two orientations coincide. Only a complex `C` tells
+them apart -- and VUMPS's own random complex start produces one on every model,
+so this mattered wherever the old `catch` fallback actually fired.
+
+The same measurement also confirmed, as a by-product, that the sequential path's
+dense `vms_cell_transfer` route and its matrix-free push-chain agree on what
+"left fixed point" means: the dense eigenvector's residual under the push-chain
+action is ~5e-16. Those are two independent pieces of code for the same map, and
+the cross-check between them had never been made before.
+
+### Measured effect
+
+Exactly the script at the top of this section's "Reproduction", verbatim, on the
+`_dmrgcpp*.so` rebuilt after the change, thread-pinned to one core the same way.
+The "before" rows for the grouped D=6 and sequential D=6 cells were re-measured
+on this machine immediately before the change (13 of 80 and 5 of 30, agreeing
+with the table above); the other four "before" rows are that table's own.
+
+| solver | cell | D | runs | below (>1e-12) before | after | worst before |
+|---|---|---|---|---|---|---|
+| grouped | n_uc=1 reach=1 | 4 | 80 | 0 | **0** | -- |
+| grouped | n_uc=1 reach=1 | 6 | 80 | 13 | **0** | 2.33e-08 |
+| grouped | n_uc=1 reach=1 | 8 | 80 | 18 | **0** | 6.36e-08 |
+| sequential | n_uc=1 reach=2 | 4 | 30 | 6 | **0** | 6.13e-04 |
+| sequential | n_uc=1 reach=2 | 6 | 30 | 5 | **0** | 2.85e-03 |
+| sequential | n_uc=1 reach=2 | 8 | 30 | 3 | **0** | 6.73e-08 |
+
+330 runs, 0 below the exact minimum by more than 1e-12, and 0 raised. Quote the
+threshold with the rate, as this file has throughout: "0 of 330 past 1e-12".
+
+Note what did **not** need changing. The eigensolver's start vector was the
+other suspect named above, and it is not one: `ic_arnoldi_dominant` already
+starts from the identity deterministically. The irreproducibility this file's
+rate tables warn about comes from `vumps_random_init`, i.e. the random start
+MPS -- which `pyitensor`'s driver has too, so the two backends are on the same
+footing there and pinning `v0` would buy nothing. No parameter was added.
+
+### Tests
+
+- `tests/test_vumps_redundant_bond_dimension.py` -- 40 passed, and the 3
+  previously-`xfail`ed cases xpass, so the marker was removed rather than
+  loosened. Its new `test_variational_bound_holds_over_repeated_runs` is the
+  repeated-run guard described under "What is and is not guarded".
+- `tests/test_infinite_chain.py`, `test_infinite_long_range.py`,
+  `test_lanczos_residual_criterion.py`, `test_vumps_subspace_expansion.py`,
+  `test_idmrg_correlator_v3.py`, `test_audit_2026_09_pyitensor-infinite.py` --
+  180 passed, 2 skipped. The AKLT rows matter most: a bond-dimension-2 exact
+  state is genuinely entangled, so a wrongly-selected element of the degenerate
+  subspace would carry its own energy rather than the ground state's, which is
+  what says the candidate is the RIGHT fixed point and not merely a harmless
+  one.

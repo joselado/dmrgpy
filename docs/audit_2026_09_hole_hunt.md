@@ -15,10 +15,12 @@ kept rather than deleted, since the repro doubles as the regression check.
 All 36 have now been addressed. Counting the `**Status**` lines below
 mechanically (`grep -c '^\*\*Status\*\*'`): 36 of them, of which 35 read FIXED
 and one (**#20**) reads PARTIAL -- its compute half landed and its memory half
-(`Es` still materialized, ~540 MB peak at chi=64) did not. One of the 35 is
-qualified: **#3** is fixed on `itensor_version="python"` only, the C++
-counterpart of the same defect being open as
-`docs/known_issue_v3_vumps_variational_floor.md`.
+(`Es` still materialized, ~540 MB peak at chi=64) did not. **#3** was fixed on
+`itensor_version="python"` only at the time of writing, the C++ counterpart of
+the same defect being tracked separately as
+`docs/known_issue_v3_vumps_variational_floor.md`; that half was fixed on
+2026-09-12 and the file now reads FIXED, so #3 no longer carries a
+backend qualification.
 
 The work ran as seven file-disjoint fix clusters in parallel
 (`pyitensor-evolution`, `pyitensor-infinite`, `ed-backend`, `core-dispatch`,
@@ -232,7 +234,7 @@ polarized state is reachable from the trapped one and the coincidence hides the 
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `recent-commits`
 
-**Status**: FIXED on `itensor_version="python"`, on both VUMPS paths; the C++ counterpart is NOT fixed and is now its own known issue. `vumps_ms._cell_fixed_points` (sequential) and `vumps._transfer_fixed_points` (grouped, added by a follow-up lane) are bond-candidate-first: the fixed points the state itself names -- `C C^dag` for the AL transfer's right one, `conj(C^dag C)` for the AR transfer's left one in this codebase's `X[ket,bra]` ordering -- are accepted whenever they reproduce themselves to a residual <= 1e-6, which in mixed canonical gauge is an exact algebraic identity and so a yes/no test rather than a tuned threshold; the guarded `eigs(k=2)` runs only when it does not, with a zero-trace guard, a pinned `v0` (the solver is reproducible now, which it was not) and a residual cross-check between the two candidates. `mpscpp3`'s `vx_bond_fixed_points` exists but is reached only from a `catch (ITError const&)`, i.e. eigensolver-first, and `itensor_version=3` still returns energies below the exact variational minimum on this same family of models: see `docs/known_issue_v3_vumps_variational_floor.md`. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_sequential_vumps_never_returns_below_the_variational_minimum` and by `tests/test_vumps_redundant_bond_dimension.py`, extended from D=2 to D in {2,4,6,8} on both solvers.
+**Status**: FIXED on `itensor_version="python"` first, on both VUMPS paths; the C++ counterpart followed on 2026-09-12 (see the end of this entry). `vumps_ms._cell_fixed_points` (sequential) and `vumps._transfer_fixed_points` (grouped, added by a follow-up lane) are bond-candidate-first: the fixed points the state itself names -- `C C^dag` for the AL transfer's right one, `conj(C^dag C)` for the AR transfer's left one in this codebase's `X[ket,bra]` ordering -- are accepted whenever they reproduce themselves to a residual <= 1e-6, which in mixed canonical gauge is an exact algebraic identity and so a yes/no test rather than a tuned threshold; the guarded `eigs(k=2)` runs only when it does not, with a zero-trace guard, a pinned `v0` (the solver is reproducible now, which it was not) and a residual cross-check between the two candidates. `mpscpp3`'s `vx_bond_fixed_points` existed but was reached only from a `catch (ITError const&)`, i.e. eigensolver-first, and `itensor_version=3` returned energies below the exact variational minimum on this same family of models (13 of 80 grouped runs at D=6, 6 of 30 sequential at D=4, worst 6.1e-04). That is now fixed too: `Chain::vx_choose_fixed_point` is one shared bond-candidate-first selection for both C++ builders, with `Chain::vx_fixed_point_residual` as the yes/no test, and it is 0 of 330 past 1e-12 across six cells afterwards. Porting the ordering also caught a latent transpose in `vx_bond_fixed_points`' own left candidate (`C^dag C` where the `X[ket,bra]` ordering needs `conj(C^dag C)`), invisible for as long as nothing measured that candidate and for as long as the only models exercising it had a real symmetric `C^dag C`. See `docs/known_issue_v3_vumps_variational_floor.md`, now FIXED, for both. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_sequential_vumps_never_returns_below_the_variational_minimum` and by `tests/test_vumps_redundant_bond_dimension.py`, extended from D=2 to D in {2,4,6,8} on both solvers.
 
 **Where**: `src/dmrgpy/pyitensor/vumps_ms.py:262-298 (_cell_fixed_points), :806-833 (ground_state's restart/safety-net loop); reached from src/dmrgpy/pyitensor/vumps.py:892 (_multisite_ground_state) and :979-1001 (the n_uc>2 / reach>1 dispatch)`
 

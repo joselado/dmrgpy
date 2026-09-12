@@ -25,15 +25,29 @@ and every solver here has been through that:
 
 All four environment builders (`vumps.py` and `vumps_ms.py` on the Python
 side, `Chain::vx_*`'s grouped and sequential halves on the C++ one) now
-prefer the fixed points the state itself names, `C C^dag` and
-`C^dag C`, whenever those reproduce themselves under the transfer map --
-an exact algebraic identity in mixed canonical gauge, and so a yes/no
-test rather than a tuned threshold -- and fall back to the guarded
-eigensolver otherwise. See `Chain::vx_bond_fixed_points` and
-`vumps._transfer_fixed_points` for why that is the right element of the
-degenerate subspace in both the benign and the pathological case, and for
-why a threshold on `C`'s own weight spectrum (the shape tried first) is
-not.
+prefer the fixed points the state itself names -- `C C^dag` for the AL
+transfer's right one and `conj(C^dag C)` for the AR transfer's left one,
+in this codebase's `X[ket, bra]` ordering -- whenever those reproduce
+themselves under the transfer map: an exact algebraic identity in mixed
+canonical gauge, and so a yes/no test rather than a tuned threshold, with
+the guarded eigensolver used only when it does not hold. See
+`Chain::vx_bond_fixed_points` and `vumps._transfer_fixed_points` for why
+that is the right element of the degenerate subspace in both the benign
+and the pathological case, and for why a threshold on `C`'s own weight
+spectrum (the shape tried first) is not.
+
+The C++ half of that sentence was not true until 2026-09-12: both
+`Chain::` builders reached `vx_bond_fixed_points` only from a `catch`,
+i.e. as a FAILURE fallback, so an arbitrary element of a merely
+NEAR-degenerate subspace -- which trips no guard -- was accepted and its
+energy returned. `Chain::vx_choose_fixed_point` is the shared
+bond-candidate-first selection that closed it, and
+`docs/known_issue_v3_vumps_variational_floor.md` is the record of what it
+looked like while open. Fixing it also surfaced a second, latent defect
+in `vx_bond_fixed_points` itself: its LEFT candidate was `C^dag C` where
+the index ordering needs the conjugate, invisible for as long as nothing
+measured the candidate and for as long as the only models it was
+exercised on (a polarized chain, AKLT) had a real symmetric `C^dag C`.
 
 Separately but reachable through the same models: `Chain::vms_ground_state`
 had no D-ramp warm start at all (its `reuse` test compared the previous
@@ -93,7 +107,14 @@ def test_grouped_solver_tolerates_redundant_bond_dimension(backend, D):
     always has never has to be resolved by an eigensolver at all. Before
     that, D=4 here raised in 7 of 20 runs on `itensor_version="python"`
     (and this test was correspondingly flaky in the suite); it is 0 of 20
-    now, and 0 of 10 at each of D=2,4,6,8 on both backends.
+    now.
+
+    `itensor_version=3` reached the same ordering later (see the module
+    docstring). In between, this test was itself intermittently red on
+    that backend -- not raising, but returning an energy past the `abs=
+    1e-9` below asserted here, in 2 of 80 runs at D=6 and 3 of 80 at D=8.
+    Both are 0 of 80 with `Chain::vx_choose_fixed_point`, as is D=4, which
+    had been 0 of 80 throughout.
 
     Both asserts matter: the value, because a wrongly-chosen element of
     the degenerate subspace carries its own energy, and the one-sided
@@ -109,8 +130,8 @@ def test_grouped_solver_tolerates_redundant_bond_dimension(backend, D):
 @pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("D", [2, 4, 6, 8])
 @pytest.mark.parametrize("n_uc,reach", [(1, 2), (2, 3), (3, 1)])
-def test_sequential_solver_tolerates_redundant_bond_dimension(request, backend,
-                                                              n_uc, reach, D):
+def test_sequential_solver_tolerates_redundant_bond_dimension(backend, n_uc,
+                                                              reach, D):
     """The SEQUENTIAL path, reached three ways -- a coupling past the cell
     on a 1-site and on a 2-site cell, and a cell longer than 2 sites -- at
     four bond dimensions the exact (D=1) state does not need.
@@ -129,30 +150,52 @@ def test_sequential_solver_tolerates_redundant_bond_dimension(request, backend,
 
     `itensor_version="python"` satisfies both at every (n_uc, reach, D)
     here, worst case 3.6e-15 over 6 runs each. `itensor_version=3` does
-    too, worst case 8.5e-14 -- except on the ONE combination xfailed
-    below."""
-    if backend == 3 and (n_uc, reach) == (1, 2) and D > 2:
-        # A finding in `mpscpp3/chain_session.h`'s own sequential VUMPS,
-        # not in anything this test's Python counterpart does: on this one
-        # cell (a 1-site cell whose only coupling reaches two sites, i.e.
-        # the automaton with the most pending channels per site here) the
-        # C++ solver intermittently returns an energy BELOW the exact
-        # variational minimum -- measured over 6 runs each, D=6 reached
-        # -1.38e-5 and D=8 -7.28e-4 below -1.825, with D=4 missing by
-        # +1.2e-7 above. Below the variational minimum is not slow
-        # convergence; it is the wrong-environment signature this whole
-        # file exists to pin, so the marker is deliberately narrow (this
-        # cell only) and non-strict rather than a loosened tolerance that
-        # would stop the other eleven combinations from catching it.
-        # Non-strict also because it is intermittent (1-3 runs in 6) and
-        # because the `_dmrgcpp*.so` these numbers came from predates the
-        # current `chain_session.h` on disk, so a rebuild may move them.
-        request.applymarker(pytest.mark.xfail(
-            reason="mpscpp3 sequential VUMPS returns e < exact on the "
-                   "n_uc=1/reach=2 cell at D>2", strict=False))
+    too, worst case 8.5e-14.
+
+    The (1, 2) cell at D>2 carried a narrow, non-strict `xfail` on
+    `backend == 3` until 2026-09-12, for the C++ half of the same
+    wrong-fixed-point defect -- `Chain::vms_environments` reached
+    `vx_bond_fixed_points` only from a `catch`, so a near-degenerate
+    eigenvector that did not trip the guard was accepted silently and the
+    energy came back BELOW the exact variational minimum (measured 6 of 30
+    runs at D=4, worst 6.1e-04). `vx_choose_fixed_point` put both C++
+    builders on the same bond-candidate-first ordering the two Python ones
+    already had; that cell is 0 of 30 at every one of D=4, 6 and 8
+    afterwards, and the marker is gone rather than loosened."""
     e = _polarized(n_uc, reach, D, backend).gs_energy()
     assert e == pytest.approx(EXACT_E, abs=1e-9), (n_uc, reach, D)
     assert e >= EXACT_E - 1e-9, (n_uc, reach, D)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("n_uc,reach", [(1, 1), (1, 2)])
+def test_variational_bound_holds_over_repeated_runs(backend, n_uc, reach):
+    """The same one-sided bound as the two tests above, but over REPEATED
+    runs of the same cell -- which is what it takes to catch this defect
+    rather than to catch it 20% of the time.
+
+    Nothing here is reproducible run to run: the solver starts from a
+    random MPS (`vumps_random_init`, and `pyitensor`'s own equivalent), so
+    whether a given run lands on the degenerate fixed point is a property
+    of that run's start. The C++ excursions this file's own history
+    records were 6 of 30 runs on the (1, 2) cell and 13 of 80 on the
+    (1, 1) one -- so a single-run test, which is what the two tests above
+    are, had a ~20% and ~16% chance of seeing it. Eight runs raise that to
+    ~83% and ~74%, which is why this exists as its own test instead of
+    tightening those.
+
+    Both cells are here because the two solvers reach their environments
+    through different code: (1, 1) is reach-1 on a one-site cell, so the
+    GROUPED builder, and (1, 2) has a coupling past the cell, so the
+    SEQUENTIAL one. `D=4` is the cheapest bond dimension above the exact
+    state's own (which is 1) at which the C++ half was measured failing.
+
+    The bound is the assert that matters here, not the value: a converged
+    run can legitimately sit slightly ABOVE the exact minimum, while
+    nothing legitimate sits below it."""
+    for run in range(8):
+        e = _polarized(n_uc, reach, 4, backend).gs_energy()
+        assert e >= EXACT_E - 1e-9, (n_uc, reach, run, e)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

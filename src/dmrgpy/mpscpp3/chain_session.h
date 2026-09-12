@@ -6433,13 +6433,124 @@ class Chain
                 ar += C[i*D+k]*std::conj(C[j*D+k]);   // (C C^dag)_ij
                 al += std::conj(C[k*D+i])*C[k*D+j];   // (C^dag C)_ij
                 }
-            r[i*D+j] = ar; l[i*D+j] = al;
+            // The LEFT one is conj(C^dag C), not C^dag C -- i.e. the
+            // transpose, C^dag C being Hermitian. That conjugate is this
+            // codebase's X[ket,bra] index ordering doing its work, the
+            // same one pyitensor/vumps_ms.py's _bond_fixed_points carries
+            // (`np.conj(C.conj().T @ C)`), and it was MISSING here until
+            // vx_fixed_point_residual started reading this candidate
+            // rather than taking it on faith. Measured on the polarized
+            // cell at D=6, at convergence: this orientation reproduces
+            // itself under the AR transfer to 4e-15 (grouped 3e-15) and
+            // its transpose to 0.38-0.53, against the eigensolver's own
+            // 5e-16 -- so the transposed one was not a near miss.
+            //
+            // It was invisible for as long as this function was reached
+            // only from a `catch`, and on the models it had been
+            // exercised on: a field-polarized chain's converged C is real
+            // diagonal and AKLT's is real, and for a real symmetric
+            // C^dag C the two orientations coincide. Only a complex C
+            // tells them apart -- which VUMPS's own random complex start
+            // produces on every model, so this mattered everywhere the
+            // fallback actually fired on an unconverged cell.
+            r[i*D+j] = ar; l[i*D+j] = std::conj(al);
             }
         Cplx tr_r(0,0), tr_l(0,0);
         for (int i=0;i<D;++i) { tr_r += r[i*D+i]; tr_l += l[i*D+i]; }
         if (std::abs(tr_r) > 1e-300) for (auto& z : r) z /= tr_r;
         if (std::abs(tr_l) > 1e-300) for (auto& z : l) z /= tr_l;
         return {r,l};
+        }
+
+    using VxAction = std::function<std::vector<Cplx>(std::vector<Cplx> const&)>;
+
+    // max|act(M)/tr(act(M)) - M| -- exactly 0 when M is a fixed point of
+    // act, and the one quantity that says whether vx_bond_fixed_points'
+    // algebraic identity actually holds for the tensors in hand. C++
+    // analogue of pyitensor/vumps_ms.py's _fixed_point_residual.
+    static double
+    vx_fixed_point_residual(std::vector<Cplx> const& M, int D, VxAction const& act)
+        {
+        auto Y = act(M);
+        Cplx tr(0,0);
+        for (int i=0;i<D;++i) tr += Y[(size_t)i*D+i];
+        if (std::abs(tr) < 1e-300) return std::numeric_limits<double>::infinity();
+        double res = 0.0;
+        for (size_t k=0;k<M.size();++k)
+            res = std::max(res,std::abs(Y[k]/tr - M[k]));
+        return res;
+        }
+
+    // Residual below which the state's own bond fixed point is accepted
+    // as THE fixed point, with no eigensolve at all. This is a yes/no test
+    // on a quantity that is 0 by an exact algebraic identity whenever the
+    // mixed-gauge relation AL C = C AR holds -- not a tuning knob, and
+    // emphatically NOT the C-weight-spectrum ratio vx_bond_fixed_points'
+    // own comment rejects as "a moving number with no defensible cutoff".
+    // Same value, and the same reasoning, as
+    // pyitensor/vumps_ms.py::_BOND_FP_RESIDUAL_TOL, whose own measurements
+    // put the residual at ~1e-16 once the gauge relation holds and
+    // 1e-5..0.8 while it does not, i.e. this sits in the middle of a
+    // ten-decade gap.
+    static constexpr double vx_bond_fp_residual_tol_ = 1e-6;
+
+    // The one fixed-point selection both environment builders use:
+    // BOND-CANDIDATE-FIRST, with the eigensolver as the mid-approach
+    // fallback and a residual cross-check between the two.
+    //
+    // `act` applies the transfer map whose fixed point is wanted;
+    // `eigensolve` returns that map's dominant fixed point, already
+    // trace-normalized and Hermitized, and may throw ITError; `bond` is
+    // vx_bond_fixed_points' candidate for this side, or empty when the
+    // caller holds no C.
+    //
+    // The ORDERING is the whole point, and it is what
+    // docs/known_issue_v3_vumps_variational_floor.md was about. Both
+    // builders used to reach vx_bond_fixed_points only from a
+    // `catch (ITError const&)`, i.e. the candidate was a FAILURE FALLBACK,
+    // taken when vx_check_perron_nondegenerate raised and not when that
+    // guard passed on an eigenvector that was nonetheless an arbitrary
+    // element of a NEAR-degenerate subspace. Under redundant bond
+    // dimension -- any model whose exact state is smaller than the
+    // requested D -- that is the common case and nothing threw: measured
+    // on the field-polarized cell that known-issue file uses, 13 of 80
+    // grouped runs at D=6 and 5 of 30 sequential ones returned an energy
+    // BELOW the exact variational minimum (worst 4.0e-08 and 2.3e-04),
+    // through the ordinary public gs_energy() and with converged=True.
+    // Preferring the candidate whenever it reproduces itself fixes that at
+    // the root rather than widening a guard, and at convergence it also
+    // means no eigensolve runs on either side at all.
+    //
+    // Note what is NOT defensible and must not be reintroduced: a
+    // threshold on C's own weight spectrum to tell benign redundancy from
+    // a genuine cat state. See vx_bond_fixed_points' comment for the three
+    // measurements that killed that idea. The residual is defensible
+    // because it tests an identity, not a magnitude.
+    static std::vector<Cplx>
+    vx_choose_fixed_point(VxAction const& act,
+                           std::function<std::vector<Cplx>()> const& eigensolve,
+                           std::vector<Cplx> const& bond, int D)
+        {
+        double res_bond = bond.empty()
+                          ? std::numeric_limits<double>::infinity()
+                          : vx_fixed_point_residual(bond,D,act);
+        if (res_bond <= vx_bond_fp_residual_tol_) return bond;
+        std::vector<Cplx> cand;
+        try { cand = eigensolve(); }
+        catch (ITError const&)
+            {
+            // The degeneracy guard, the zero-trace guard or zgeev itself.
+            // With no candidate to fall back on this is the caller's own
+            // error, exactly as before.
+            if (bond.empty()) throw;
+            return bond;
+            }
+        // Both are candidates for the same fixed point; keep whichever
+        // reproduces itself better rather than trusting either by fiat.
+        if (!bond.empty()
+            && res_bond <= vx_fixed_point_residual(cand,D,act))
+            return bond;
+        return cand;
         }
 
     // Dominant RIGHT fixed point rho of transfer tensor E (apply_transfer(E,rho)=eta*rho),
@@ -7121,11 +7232,11 @@ class Chain
 
     // `C_cell` is the state's own bond matrix on the CELL BOUNDARY bond
     // (C[n_uc-1], which by periodicity is both the cell's right and its
-    // left edge) -- used only when the transfer matrix's dominant fixed
-    // point comes out ambiguous, to name the one the state actually has
-    // rather than guessing out of a degenerate eigenspace. See
-    // vx_bond_fixed_points. Pass an empty vector to keep the pure
-    // eigensolver route (and its error).
+    // left edge). The fixed points it names are PREFERRED over the
+    // eigensolver's whenever they actually reproduce themselves under the
+    // cell transfer map -- see vx_choose_fixed_point for why that ordering
+    // rather than the failure-fallback one this used to have. Pass an
+    // empty vector to keep the pure eigensolver route (and its error).
     VmsEnv
     vms_environments(std::vector<std::vector<Cplx>> const& AL,
                       std::vector<std::vector<Cplx>> const& AR,
@@ -7143,7 +7254,28 @@ class Chain
         // 3-site TFIM cell before this split: D=16 took 24.5s against the
         // pure-Python backend's 2.0s, i.e. the C++ port was 12x SLOWER
         // than the reference it was meant to accelerate.
-        auto dominant = [&](bool from_left, std::vector<std::vector<Cplx>> const& A)
+        //
+        // The push-chain action is defined once, OUTSIDE that branch,
+        // because vx_choose_fixed_point needs it to measure a residual on
+        // both routes -- it is the cell transfer map, matrix-free, and the
+        // dense branch below only differs in how it extracts an
+        // eigenvector of the same map.
+        VxAction act_r = [&](std::vector<Cplx> const& X)
+            {
+            auto Y = X;
+            for (int m=n_uc-1;m>=0;--m)
+                Y = vms_push_right(Y,AL[m],D,rows[m].d,{},false);
+            return Y;
+            };
+        VxAction act_l = [&](std::vector<Cplx> const& X)
+            {
+            auto Y = X;
+            for (int m=0;m<n_uc;++m)
+                Y = vms_push_left(Y,AR[m],D,rows[m].d,{},false);
+            return Y;
+            };
+        auto dominant = [&](bool from_left, std::vector<std::vector<Cplx>> const& A,
+                             VxAction const& act)
             {
             int n = D*D;
             std::vector<Cplx> vec;
@@ -7153,19 +7285,8 @@ class Chain
                 auto [v,eta] = from_left ? vx_dominant_left_fixed_point(E,D)
                                           : vx_dominant_right_fixed_point(E,D);
                 (void)eta;
-                return v;
+                return vx_hermitize(v,D);
                 }
-            auto act = [&](std::vector<Cplx> const& X)
-                {
-                auto Y = X;
-                if (from_left)
-                    for (int m=0;m<n_uc;++m)
-                        Y = vms_push_left(Y,A[m],D,rows[m].d,{},false);
-                else
-                    for (int m=n_uc-1;m>=0;--m)
-                        Y = vms_push_right(Y,A[m],D,rows[m].d,{},false);
-                return Y;
-                };
             Cplx e0c(0,0), e1c(0,0);
             ic_arnoldi_dominant(act,n,e0c,e1c,vec);
             vx_check_perron_nondegenerate(e0c,e1c,"Chain::vms_environments");
@@ -7175,22 +7296,14 @@ class Chain
                 throw ITError("Chain::vms_environments: dominant fixed point has "
                                "~zero trace -- degenerate/ill-defined normalization");
             for (auto& z : vec) z /= tr;
-            return vec;
+            return vx_hermitize(vec,D);
             };
-        std::vector<Cplx> r_AL, l_AR;
-        try
-            {
-            r_AL = vx_hermitize(dominant(false,AL),D);
-            l_AR = vx_hermitize(dominant(true,AR),D);
-            }
-        catch (ITError const&)
-            {
-            // Same fallback as vumps_build_environments -- see
-            // vx_bond_fixed_points.
-            if (C_cell.empty()) throw;
-            auto [rb,lb] = vx_bond_fixed_points(C_cell,D);
-            r_AL = rb; l_AR = lb;
-            }
+        std::vector<Cplx> bond_r, bond_l;
+        if (!C_cell.empty()) std::tie(bond_r,bond_l) = vx_bond_fixed_points(C_cell,D);
+        auto r_AL = vx_choose_fixed_point(
+            act_r,[&]{ return dominant(false,AL,act_r); },bond_r,D);
+        auto l_AR = vx_choose_fixed_point(
+            act_l,[&]{ return dominant(true,AR,act_l); },bond_l,D);
         // The eigensolver leaves the scale free; these close a normalized
         // state against the other side's exact (identity) fixed point, so
         // their trace must be 1.
@@ -8474,38 +8587,31 @@ class Chain
     // GL/GR/e_cell/bond_envs from the current (AL,AR) -- one full
     // per-iteration environment build -- C++ analogue of pyitensor/
     // vumps.py's own _environments.
-    // `C` is the state's own bond matrix, used only when the dominant
-    // fixed point comes out ambiguous -- see vx_bond_fixed_points, and
-    // vms_environments' own copy of this parameter. Empty keeps the pure
-    // eigensolver route (and every result byte-identical to it).
+    // `C` is the state's own bond matrix, and the fixed points it names
+    // are PREFERRED over the eigensolver's whenever they actually
+    // reproduce themselves -- see vx_choose_fixed_point for why that
+    // ordering rather than the failure-fallback one this used to have, and
+    // vms_environments for the sequential path's identical treatment.
+    // Empty keeps the pure eigensolver route (and every result
+    // byte-identical to it).
     VumpsEnv
     vumps_build_environments(std::vector<Cplx> const& AL, std::vector<Cplx> const& AR,
                               int D, int d_g, std::vector<Cplx> const& h1,
                               std::vector<PendingChan> const& pending,
                               std::vector<Cplx> const& C = {}) const
         {
-        std::vector<Cplx> r_AL, l_AR;
-        try
-            {
-            auto E_AL = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
-            auto [r_AL_raw,eta_r] = vx_dominant_right_fixed_point(E_AL,D);
-            (void)eta_r;
-            r_AL = vx_hermitize(r_AL_raw,D);
-
-            auto E_AR = vx_op_transfer_matrix(AR,D,d_g,AR,false,{});
-            auto [l_AR_raw,eta_l] = vx_dominant_left_fixed_point(E_AR,D);
-            (void)eta_l;
-            l_AR = vx_hermitize(l_AR_raw,D);
-            }
-        catch (ITError const&)
-            {
-            // A degenerate dominant eigenvalue: take the fixed points the
-            // state itself names instead of an arbitrary element of the
-            // degenerate subspace. See vx_bond_fixed_points.
-            if (C.empty()) throw;
-            auto [rb,lb] = vx_bond_fixed_points(C,D);
-            r_AL = rb; l_AR = lb;
-            }
+        auto E_AL = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
+        auto E_AR = vx_op_transfer_matrix(AR,D,d_g,AR,false,{});
+        std::vector<Cplx> bond_r, bond_l;
+        if (!C.empty()) std::tie(bond_r,bond_l) = vx_bond_fixed_points(C,D);
+        auto r_AL = vx_choose_fixed_point(
+            [&](std::vector<Cplx> const& X){ return vx_apply_transfer(E_AL,D,X); },
+            [&]{ return vx_hermitize(vx_dominant_right_fixed_point(E_AL,D).first,D); },
+            bond_r,D);
+        auto l_AR = vx_choose_fixed_point(
+            [&](std::vector<Cplx> const& X){ return vx_apply_transfer_from_left(E_AR,D,X); },
+            [&]{ return vx_hermitize(vx_dominant_left_fixed_point(E_AR,D).first,D); },
+            bond_l,D);
 
         std::vector<Cplx> source_l, source_r;
         double e_L = vumps_energy_source_from_left(AL,D,d_g,h1,pending,r_AL,source_l);

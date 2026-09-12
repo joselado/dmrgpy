@@ -1585,15 +1585,15 @@ the same cell and seed gave -1.11e-15, -2.22e-16 and -1.33e-15, so a
 
 All four environment builders -- `vumps._transfer_fixed_points` (grouped)
 and `vumps_ms._cell_fixed_points` (sequential) on the Python side,
-`Chain::vx_bond_fixed_points` serving both halves on the C++ one -- can
-now answer with the fixed points the state itself names (which of the two
-candidates each *prefers* is the divergence recorded two paragraphs
-below): `C C^dag` for the
+`Chain::vx_bond_fixed_points` serving both halves on the C++ one --
+answer with the fixed points the state itself names: `C C^dag` for the
 AL-transfer's right one and `conj(C^dag C)` for the AR-transfer's left
 one (the conjugate is this codebase's `X[ket,bra]` index ordering, i.e.
 the transpose of the Hermitian `C^dag C`, and was confirmed numerically
 against the eigensolver on a converged non-degenerate cell: agreement to
-1e-12 with it, 0.65 without). `vumps._environments` takes the bond matrix
+1e-12 with it, 0.65 without -- and re-confirmed by residual when the C++
+half dropped it, see two paragraphs below).
+`vumps._environments` takes the bond matrix
 `C` alongside `(AL, AR)` for that reason. In mixed canonical gauge
 `AC = AL C = C AR`, so these *are* the fixed points exactly -- redundancy
 and all -- and for a real cat state they give the branch **mixture**,
@@ -1613,26 +1613,32 @@ middle of a ten-decade gap, and the environments whose energy is actually
 reported are always built at `gauge_mismatch < tol`, where the residual
 is ~1e-16.
 
-**The two ports no longer have the same shape here, and this is the
-reverse of the usual direction** (the C++ is normally the port). Python
-is bond-candidate-*first*: the residual decides, the eigensolve runs only
-when it says the gauge relation does not hold, and the two answers are
-then cross-checked against each other by residual. The C++ is
-eigensolver-*first*, with the bond candidate reached only when a guard
-trips. On the Python side both builders return the exact answer on every
-case measured (the 38 runs above), but the orderings are not equivalent: a near-degeneracy at a
-~1e-8 relative gap -- just *outside*
-`idmrg._DEGENERACY_RTOL`/`vx_degeneracy_rtol_`, measured on a 4-site
-cell whose two leading eigenvalues came out at (1, 0.99999999), with the
-returned mixture still 2.9e-6 from the exact fixed point -- is caught by
-the residual test and passes the guard. That gap is *not* hypothetical on
-the C++ side: `itensor_version=3` VUMPS intermittently returns an energy
+**All four builders are bond-candidate-first, and the C++ half arrived
+there second.** The residual decides, the eigensolve runs only when it
+says the gauge relation does not hold, and the two answers are then
+cross-checked against each other by residual --
+`vumps._transfer_fixed_points`/`vumps_ms._cell_fixed_points` on the
+Python side, `Chain::vx_choose_fixed_point` (shared by
+`vumps_build_environments` and `vms_environments`) on the C++ one.
+
+Until 2026-09-12 the C++ was eigensolver-*first*, with the bond candidate
+reached only from a `catch (ITError const&)`, and the two orderings are
+not equivalent: a near-degeneracy at a ~1e-8 relative gap -- just
+*outside* `idmrg._DEGENERACY_RTOL`/`vx_degeneracy_rtol_`, measured on a
+4-site cell whose two leading eigenvalues came out at (1, 0.99999999),
+with the returned mixture still 2.9e-6 from the exact fixed point -- is
+caught by the residual test and passes the guard. That gap was not
+hypothetical: `itensor_version=3` VUMPS intermittently returned an energy
 **below** the exact variational minimum on this same family of models, on
-both its solvers, with nothing downstream flagging it -- not fixed, and
-not guarded on the grouped half. See
-`docs/known_issue_v3_vumps_variational_floor.md` for the measured rates
-and thresholds; the audit's finding #3 is correspondingly marked fixed on
-`itensor_version="python"` only.
+both its solvers, with nothing downstream flagging it (13 of 80 grouped
+runs at D=6, 6 of 30 sequential at D=4, worst 6.1e-04). It is 0 of 330
+past 1e-12 across six cells afterwards. Porting the ordering also
+surfaced a latent transpose in `vx_bond_fixed_points`' own left
+candidate, which nothing had caught because no code path had ever
+measured that candidate. See
+`docs/known_issue_v3_vumps_variational_floor.md`, now FIXED, for both and
+for the measured rates and thresholds; the audit's finding #3 is
+correspondingly fixed on both backends.
 
 Two consequences for existing results. Converged energies on paths that
 already *succeeded* move only at the ~1e-15 level (the bond candidate and
