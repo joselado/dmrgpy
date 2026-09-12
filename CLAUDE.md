@@ -192,7 +192,9 @@ standard way most tests cross-check ED against DMRG on the C++ backends (a
 `versions=` kwarg lets a test opt a specific `itensor_version` out — e.g. v3
 on an exactly-2-site chain, a real `mpscpp3` bug, see below); `versions=`
 only covers `(2, 3)` today, not the pure-Python backend
-(`itensor_version="python"`) — no existing test in `tests/` covers it yet.
+(`itensor_version="python"`) — which is *not* to say that backend is
+untested: dozens of files in `tests/` exercise it, they just parametrize
+their own `itensor_version` instead of going through this helper.
 `tests/reference_data.py` holds shared golden values pinned to a specific
 historical commit (its own module docstring explains how to regenerate
 them); several individual test files also just inline their own golden
@@ -256,7 +258,14 @@ inside each theme folder, and `examples/dynamical_correlator/
 dynamical_correlator_v2_VS_v3` directly compare the ITensor v2 and v3 C++
 backends against each other (same script, both `itensor_version`s, small
 systems) — the fastest way to check a `mpscpp3` change didn't diverge from
-`mpscpp2`'s numerics. After running examples, `python clean.py` recursively
+`mpscpp2`'s numerics. One rule if you use one as a template: pin the sweep
+schedule inside the script instead of inheriting the library defaults.
+`boson_models/v2_VS_v3_boson` did the latter and its `assert` fired
+non-deterministically on a clean tree (2 of 5 runs for the audit's
+reviewer, 5 of 7 for its hunter) — v2 and v3 were converging to the same answer,
+just not far enough to be compared at the tolerance it asserted; it now
+pins `nsweeps=80`/`maxm=100` and asserts at 1e-5 (2026-09 audit #24).
+After running examples, `python clean.py` recursively
 removes generated working directories (`.mpsfolder`, `.pychainfolder`,
 `.dmrgfolder`) and stray `ERROR`/`*.OUT` files from the tree.
 
@@ -276,6 +285,69 @@ taken before the information that should inform it (a short circuit ahead
 of a cache key, a precondition ahead of the branch it qualifies, an `else`
 serving both "unsupported here" and "you typo'd it", a `**kwargs` with no
 consumer).
+
+**The 2026-09 audit.** `docs/audit_2026_09_hole_hunt.md` is the same
+thing one lens-set wider: eight lenses, 36 confirmed findings, each with
+its executed repro, its reviewer's attempt to refute it, and a `**Status**`
+line saying what was done and which test now pins it. The regressions live
+in eight files, `tests/test_audit_2026_09_<name>.py`: one per fix cluster
+(there were seven) plus one for the `dispatch-leftovers` follow-up lane.
+Two entries are not a plain FIXED: **#20**'s compute half landed
+and its memory half did not (`idmrg.py` still materializes `Es`, ~540 MB
+peak at chi=64), and **#3** is fixed on `itensor_version="python"` only —
+the C++ VUMPS still returns energies *below* the exact variational
+minimum on redundant-bond-dimension models, which is
+`docs/known_issue_v3_vumps_variational_floor.md`. Results from before this
+audit are not comparable where it changed numbers rather than behavior,
+which it did in ten places: all `itensor_version="python"` TDVP
+real-time evolution (the default `tevol_method`, which carried an O(dt)
+error); every `"python"` `applyMPO` consumer, at the 1e-5..1e-9 level
+(`applyoperator`, `vev(npow>1)`, `gs_energy_fluctuation`, KPM/CVM, the
+MPO-Taylor stepper) and ~1.4x slower for the repeated-application ones;
+`submode="CVM_explicit"`, which was exactly 2x too large on every backend;
+`submode="ED"`, `mode="DMRG"` `submode="CVM"` and `submode="ROOTN"`, which
+now return the complex Lehmann density `i(G^R-G^A)/(2pi)`, as the
+resolvent submodes on `mode="ED"` already did (`submode="TD"`/`"TDZ"` are
+the routes still off it, deliberately — open item O1 in the audit record).
+Unchanged wherever the Lehmann weights `M_n = <GS|A|n><n|B|GS>` are real —
+`Im M_n == 0` is the discriminant, which a Hermitian pair `A = B^dagger`
+implies but does not exhaust: a real Hamiltonian with real operators has
+real `M_n` off-diagonally too. Where they are complex the two conventions
+differ by an amount comparable to the correlator's own peak (measured
+0.57 against a 0.61 peak; for `submode="ED"` the difference *is* the
+discarded imaginary part, so it can never exceed the peak);
+`vev(npow!=1)` and `gs_energy_fluctuation` on every ED
+route, which ignored `npow`/`mode=` entirely; `exponential()` on a DMRG
+backend, which computed `e^{-h}` or an unconverged 2-term Taylor series;
+`SpinBoson_Chain(maxnb=...)`, which used to build a 4-level boson
+whatever you asked for; `itensor_version="python"` parameter sweeps and
+`bandwidth()` on a *reused* chain (finding #2), which the
+pyitensor-evolution cluster recorded as wrong by up to the operator's
+full spectral width (+1.25 against an exact -2.4936 on a 6-site
+Heisenberg chain; `bandwidth()` 0.0 against an exact 2.366025) and which
+`mpsalgebra`'s bandwidth-scaled Taylor expansions, `excited_states`'
+Lagrange weight, `meanfield.py` and `thermal.py` all consume;
+`itensor_version="python"` `promote_to_dense()` followed by `gs_energy()`
+(finding #10), which re-solved unconstrained and returned the *global*
+ground state instead of the sector's (-2.3399 against -1.9408 on a 3-site
+Hubbard chain at `Nf=3`) — wrong, not merely different; and `mode="ED"`
+boson occupation projectors `bc.D[i][k]` on a number-*breaking*
+Hamiltonian (finding #4), where the ed-backend cluster recorded `P(n=1)`
+on site 0 going from -0.0626 to 0.5405 and `sum_k P` from 0.031 to 1.000
+(number-conserving Hamiltonians are unchanged to machine precision).
+`src/dmrgpy/dynamics.py`'s module docstring is now
+the single normative statement of the correlator convention — read it
+before adding a submode, the way §4.10 is what to read before adding a
+dispatch. Two items are open rather than fixed, found while re-measuring
+that record and recorded in its own "Open items found while correcting
+this record" section: `submode="TD"`/`"TDZ"` return the complex
+one-sided transform `-(i/pi)G^A` rather than the density (they agree in
+real part only, and only when `Im M_n = 0` — measured at 70% of the
+correlator's peak in the imaginary part on a Hermitian pair), and
+`mode="ED"` vs `mode="DMRG"` disagree pointwise under the default
+`submode="KPM"` (both satisfy the sum rule exactly, and the disagreement
+looks like a resolution difference rather than a convention one — but it
+is recorded as unexplained, so read the record before acting on it).
 
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
@@ -728,10 +800,19 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   Taylor expansion of `exp(-i dt H)` as an MPO (`evoloperator()`) instead.
   `Many_Body_Chain.tevol_method` (`manybodychain.py`, default `"TDVP"`)
   picks between them in `timedependent.py`'s `evolution_dmrg_DC()`/
-  `evolve_and_measure_dmrg()` — `"TDVP"` only applies when
-  `itensor_version==3` (mpscpp2 has no `TDVP/` and no `_tdvp` methods at
-  all); any other combination silently falls back to the MPO-Taylor path,
-  which remains the only option for `itensor_version=2`. Only the
+  `evolve_and_measure_dmrg()` — every one of those dispatches tests
+  `itensor_version in (3,"python")`, so `"TDVP"` applies on the C++ side
+  only at `itensor_version==3` (mpscpp2 has no `TDVP/` and no `_tdvp`
+  methods at all); any other combination silently falls back to the
+  MPO-Taylor path, which remains the only option for
+  `itensor_version=2`. Note `Chain::tdvp_step` takes `DoNormalize` from
+  the step (`dt.imag()==0.0`), not hardcoded: forcing unit norm after a
+  COMPLEX-time step deletes exactly the decay `tdz.py`'s `submode="TDZ"`
+  contour is built on, which is what made v3's TDZ return too much
+  spectral weight — the audit measured 36% too much, 0.340676 against an
+  exact 0.25 (2026-09 audit finding #7; that "before" figure is the audit
+  record, not re-measurable now that the extension has been rebuilt,
+  while the post-fix 0.249473 re-measures). Only the
   two-site TDVP algorithm is used (`NumCenter=2`); the global subspace
   expansion machinery in `TDVP/basisextension.h` (mainly useful for
   one-site TDVP or long-range Hamiltonians) is not wired in, since
@@ -970,9 +1051,31 @@ threshold on `C`'s weight spectrum to tell redundancy from a cat state.
 The guard trips mid-convergence, where the redundant direction is still on
 its way down, so the ratio to catch is a moving number (2.7e-9, 1.2e-4 and
 1.6e-2 on three cells of the same model) with no defensible cutoff. The
-pure-Python reference has no guard on the sequential path at all
-(`vumps_ms._cell_fixed_points`) and treats a trip on the grouped path as
-"skip this attempt". `tests/test_vumps_redundant_bond_dimension.py`.
+pure-Python reference has since gone one step further, and the ORDERING is
+the point: both its environment builders
+(`vumps_ms._cell_fixed_points` on the sequential path,
+`vumps._transfer_fixed_points` on the grouped one) now *prefer* the bond
+candidate -- `C C^dag` for the AL transfer's right fixed point,
+`conj(C^dag C)` for the AR transfer's left one in this codebase's
+`X[ket,bra]` ordering -- whenever it reproduces itself under the transfer
+map to a residual <= 1e-6, which in mixed canonical gauge is an exact
+algebraic identity and therefore a yes/no test rather than a tuned
+threshold, so at convergence no eigensolve runs at all; the guarded
+eigensolver runs only when the residual says the gauge relation does not
+hold, and the two are cross-checked against each other by residual. That
+is bond-candidate-FIRST, where `Chain::vx_bond_fixed_points` is still only
+reached from a `catch (ITError const&)`, i.e. eigensolver-first. The
+difference is measurable and is not in the C++'s favour: on a
+field-polarized reach-1 one-site cell at `maxm=4`, `gs_energy()` on
+`itensor_version="python"` raised "every attempt at D=4 failed" in 7 of
+20 runs before the change and 0 of 20 after, while `itensor_version=3`
+still returns energies *below* the exact variational minimum, at a rate
+that moves between runs and builds (13 and 17 of 80 measured at D=6 on
+the grouped cell, worst 2.3e-8; worst 2.8e-3 on the sequential one) where
+`"python"` does so in 0 of 40. Quote the threshold with any rate, as the
+known-issue file itself instructs -- see
+`docs/known_issue_v3_vumps_variational_floor.md`, which is open.
+`tests/test_vumps_redundant_bond_dimension.py`.
 
 **Reading that led to a bigger, unrelated find, and it is the one to know
 about**: `pyitensor/dmrg.py`'s `_lanczos_ground_state` stops when the

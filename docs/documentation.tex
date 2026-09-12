@@ -711,26 +711,125 @@ degenerate dominant eigenvalue. That is benign, but it is
 indistinguishable, from the eigenvalues alone, from the one thing
 \texttt{vx\_check\_perron\_nondegenerate} exists to reject: a ``cat
 state'', two branches with matched \emph{nonzero} weight.
-\texttt{gs\_energy()} therefore raised ``every attempt at D=... failed'' on
-the sequential solver for every such model at \texttt{maxm>1}, while
+\texttt{gs\_energy()} therefore raised ``every attempt at D=... failed''
+on the sequential solver for every such model at \texttt{maxm>1}; the
+grouped C++ path walked the same edge and survived only by never landing
+exactly on it (its second eigenvalue was measured at 0.99996, just
+outside the guard's own $10^{-9}$ tolerance).
+
+This paragraph used to continue ``\ldots while
 \texttt{itensor\_version="python"} --- whose
 \texttt{vumps\_ms.\_cell\_fixed\_points} has no such guard at all ---
-returned the exact energy; the grouped C++ path walked the same edge and
-survived only by never landing exactly on it (its second eigenvalue was
-measured at 0.99996, just outside the guard's own $10^{-9}$ tolerance).
-Both environment builders now fall back to the fixed points the state
-itself names, $CC^\dagger$ and $C^\dagger C$
-(\texttt{Chain::vx\_bond\_fixed\_points}), whenever the eigensolver
-refuses. That is the exact fixed point under redundancy, and for a real
-cat state it is the branch mixture an unchecked eigensolver would return
-anyway --- where the eigensolver may instead return an arbitrary single
-branch, carrying its own wrong energy into \texttt{e\_cell}. What was
-tried first and is the wrong shape: a threshold on \texttt{C}'s own weight
-spectrum, to tell redundancy from a cat state before deciding. The guard
-trips mid-convergence, where the redundant direction is still on its way
-down, so the ratio to be caught is a moving number --- measured at
-$2.7\times10^{-9}$, $1.2\times10^{-4}$ and $1.6\times10^{-2}$ on three
-cells of one model --- with no defensible cutoff.
+returned the exact energy''. \textbf{Both halves of that were wrong}
+(2026-09 audit, finding \#3), and the second is the instructive one:
+having \emph{no} guard is not the same as being right. A bare
+\texttt{eigs(k=1)} on a transfer matrix carrying a decoupled unimodular
+block returns an arbitrary element of a degenerate eigenspace, and the
+energy built on it came back \emph{below} the exact variational minimum,
+with \texttt{converged=True} and $\langle S^z\rangle$ reading exactly
+0.5 --- a wrong answer that looks like a converged one. The model is the
+polarized cell of
+\texttt{tests/test\_vumps\_redundant\_bond\_dimension.py}
+($-4\sum S^z + 0.7\sum S^z_i S^z_{i+\mathrm{reach}}$, exact density
+$-1.825$). Before the fix the sequential path either raised ``every
+attempt at D=\ldots{} failed'' (a swallowed
+\texttt{ArpackNoConvergence}) or returned an energy below that minimum
+--- the audit record has $-2.347$, $-1.82926$ and $-1.1\times10^{8}$
+against $-1.825$ --- and the \emph{grouped} Python path
+raised the same way on the \texttt{n\_uc=1} \texttt{reach=1}
+\texttt{D=4} cell, every failure traced to
+\texttt{vumps.\_environments}' two fixed-point calls and to nowhere else
+in that module. No failure \emph{rate} is quoted for either, and none
+should be: the pre-fix \texttt{eigs} call had no pinned \texttt{v0} and
+ARPACK's Fortran start vector is not touched by
+\texttt{np.random.seed}, so the count is not seed-determined, which is
+why independent records of the very same \texttt{D=4} grouped
+configuration disagree on it. After the fix, re-measured on this tree
+(one BLAS thread on one pinned core, \texttt{maxiter=300},
+\texttt{etol=1e-12}, \texttt{vumps\_nrestarts=2}): 0 of 20 runs (seeds
+0--19) raise or deviate on the grouped \texttt{n\_uc=1} \texttt{reach=1}
+\texttt{D=4} cell, and 0 of 6 (seeds 0--5) on each of \texttt{n\_uc=1}
+\texttt{reach=2} \texttt{D=4}, \texttt{n\_uc=1} \texttt{reach=2}
+\texttt{D=8} and \texttt{n\_uc=3} \texttt{reach=1} \texttt{D=4} --- every
+deviation over those 38 runs at machine precision ($\le 4\times10^{-15}$).
+Not a tighter digit than that: three separate processes on the same cell
+and seed gave $-1.11\times10^{-15}$, $-2.22\times10^{-16}$ and
+$-1.33\times10^{-15}$, so a 16th-digit bound is not a stable quantity to
+quote.
+
+All four environment builders ---
+\texttt{vumps.\_transfer\_fixed\_points} (grouped) and
+\texttt{vumps\_ms.\_cell\_fixed\_points} (sequential) on the Python side,
+\texttt{Chain::vx\_bond\_fixed\_points} serving both halves on the C++
+one --- can now answer with the fixed points the state itself names
+(which of the two candidates each \emph{prefers} is the divergence
+recorded two paragraphs below): $CC^\dagger$ for
+the AL-transfer's right one and $\overline{C^\dagger C}$ for the
+AR-transfer's left one (the conjugate is this codebase's
+\texttt{X[ket,bra]} index ordering, i.e. the transpose of the Hermitian
+$C^\dagger C$, and was confirmed numerically against the eigensolver on a
+converged non-degenerate cell: agreement to $10^{-12}$ with it, 0.65
+without). \texttt{vumps.\_environments} takes the bond matrix \texttt{C}
+alongside \texttt{(AL, AR)} for that reason. In mixed canonical gauge
+$A_C = A_L C = C A_R$, so these \emph{are} the fixed points exactly ---
+redundancy and all --- and for a real cat state they give the branch
+\textbf{mixture}, where an unchecked eigensolver may instead return one
+arbitrary branch carrying its own wrong energy into \texttt{e\_cell}.
+What was tried first and is the wrong shape: a threshold on \texttt{C}'s
+own weight spectrum, to tell redundancy from a cat state before deciding.
+The ambiguity appears mid-convergence, where the redundant direction is
+still on its way down, so the ratio to be caught is a moving number ---
+measured at $2.7\times10^{-9}$, $1.2\times10^{-4}$ and
+$1.6\times10^{-2}$ on three cells of one model --- with no defensible
+cutoff. The test that replaces it is a \emph{yes/no} one on a quantity
+that is zero by an exact identity: the candidate's own fixed-point
+residual $\max|T(M)/\mathrm{tr}\,T(M) - M|$, accepted below
+\texttt{\_BOND\_FP\_RESIDUAL\_TOL} ($10^{-6}$). Measured across whole
+solves it is machine-zero once the gauge relation holds and
+$10^{-5}$--0.8 while it does not, so the tolerance sits in the middle of
+a ten-decade gap, and the environments whose energy is actually reported
+are always built at \texttt{gauge\_mismatch < tol}, where the residual is
+$\sim10^{-16}$.
+
+\textbf{The two ports no longer have the same shape here, and this is the
+reverse of the usual direction} (the C++ is normally the port). Python is
+bond-candidate-\emph{first}: the residual decides, the eigensolve runs
+only when it says the gauge relation does not hold, and the two answers
+are then cross-checked against each other by residual. The C++ is
+eigensolver-\emph{first}, with the bond candidate reached only when a
+guard trips. On the Python side both builders return the exact answer on
+every case measured (the 38 runs above), but the orderings are not
+equivalent: a
+near-degeneracy at a $\sim10^{-8}$ relative gap --- just \emph{outside}
+\texttt{idmrg.\_DEGENERACY\_RTOL}/\texttt{vx\_degeneracy\_rtol\_},
+measured on a 4-site cell whose two leading eigenvalues came out at
+$(1, 0.99999999)$, with the returned mixture still $2.9\times10^{-6}$
+from the exact fixed point --- is caught by the residual test and passes
+the guard. That gap is \emph{not} hypothetical on the C++ side:
+\texttt{itensor\_version=3} VUMPS intermittently returns an energy
+\textbf{below} the exact variational minimum on this same family of
+models, on both its solvers, with nothing downstream flagging it --- not
+fixed, and not guarded on the grouped half. See
+\texttt{docs/known\_issue\_v3\_vumps\_variational\_floor.md} for the
+measured rates and thresholds; the audit's finding \#3 is
+correspondingly marked fixed on \texttt{itensor\_version="python"} only.
+
+Two consequences for existing results. Converged energies on paths that
+already \emph{succeeded} move only at the $\sim10^{-15}$ level (the bond
+candidate and the eigensolver agree to the gauge mismatch, and it is only
+the final environments, built at \texttt{gauge\_mismatch < tol}, that
+switch), so those remain comparable --- unlike the two number-changing
+fixes recorded elsewhere in this document. Sequential-path results at
+\texttt{maxm} \emph{above} the state's own bond dimension do not: they
+were wrong, not merely less converged. And run-to-run reproducibility
+changed in the user's favour --- \texttt{eigs} had no \texttt{v0}, so
+ARPACK's Fortran-internal random start (which \texttt{np.random.seed}
+does not touch) made the sequential solver irreproducible at a fixed
+seed. Measured directly on \texttt{n\_uc=3} \texttt{reach=1}
+\texttt{D=4}, seed 2, in three separate processes: $-1.825$,
+$-1.825000231$, $-1.825000052$ before; identical to all printed digits in
+every run after. \texttt{v0} is now pinned (to the bond candidate where
+there is one, the identity otherwise).
 \texttt{tests/test\_vumps\_redundant\_bond\_dimension.py}.
 
 \textbf{\texttt{Chain::vms\_ground\_state}'s D-ramp did not warm-start at
@@ -770,7 +869,12 @@ pair made the mismatch read $\sim$4 instead of $\sim$1e-6 in 11 of every
 100 iterations --- each new vector is now sign-aligned against the one it
 was warm-started from.
 
-Measured through the public driver at the default \texttt{nrestarts=6},
+Measured through the public driver at \texttt{nrestarts=6}
+(\textbf{not} the default, which is 4 --- in \texttt{infinitechain.py}'s
+\texttt{vumps\_nrestarts}, in \texttt{pyitensor/vumps.py}'s
+\texttt{vumps\_ground\_state} and in \texttt{pyitensor/vumps\_ms.py}'s
+\texttt{ground\_state} alike, and has never been 6; this sentence used to
+say ``at the default \texttt{nrestarts=6}'', 2026-09 audit finding \#36),
 before $\to$ after, as (wall time, total outer iterations, runs reporting
 \texttt{converged}): TFIM \texttt{g=1.5} \texttt{D=4} (2.52s, 2911, 3/3)
 $\to$ (0.22s, 263, 3/3); \texttt{g=1.5} \texttt{D=8} (32.6s, 6450,
@@ -832,8 +936,28 @@ turn (\texttt{idmrg.py}'s \texttt{\_dominant\_fixed\_point}), and solves
 the two environment systems with GMRES on the same kind of matvec
 (\texttt{idmrg\_excitations.py}'s \texttt{\_solve\_linear\_map}), instead
 of composing/materializing a \texttt{chi\^{}2 x chi\^{}2} matrix and
-calling \texttt{np.linalg.eig}/\texttt{np.linalg.solve} on it. Both keep
-the dense route as an exact fallback below a size threshold
+calling \texttt{np.linalg.eig}/\texttt{np.linalg.solve} on it. Since the
+2026-09 audit (finding \#20) the fixed-point matvec goes one
+re-association further: \texttt{\_dominant\_fixed\_point} optionally
+takes \texttt{sites=(ket\_arrays, bra\_arrays)} --- the same transfer
+chain \texttt{Es} encodes, as the per-position
+\texttt{(chi\_l,d,chi\_r)} tensors it was built from --- and then
+contracts \texttt{rho} into each site tensor rather than applying each
+site's already-materialized \texttt{chi\^{}4} transfer tensor. That is
+\texttt{O(chi\^{}3 d)} per site per Krylov iteration instead of
+\texttt{O(chi\^{}4)} work and \texttt{chi\^{}4} bytes streamed, it is the
+shape \texttt{mpscpp3}'s own \texttt{ic\_arnoldi\_dominant} already had,
+and it changes nothing about the answer. Measured on a random
+left-canonical \texttt{n\_uc=2} cell (one BLAS thread, taskset-pinned),
+the dominant right fixed point alone: 0.853\,s $\to$ 0.107\,s at
+\texttt{chi=32}, 8.49\,s $\to$ 0.477\,s at \texttt{chi=48}, 41.8\,s
+$\to$ 1.66\,s at \texttt{chi=64} (8.0x/17.8x/25.2x), with \texttt{eta}
+agreeing to 2e-16 and the fixed point itself to 4e-17. \texttt{Es} is
+still built --- the dense route below \texttt{\_DENSE\_EIG\_MAX} needs
+it, and so does the fallback when ARPACK does not converge --- so the
+\emph{memory} profile is unchanged; this is a time-per-iteration win
+only. Both keep the dense route as an exact fallback below a size
+threshold
 (\texttt{\_DENSE\_EIG\_MAX}, \texttt{\_DENSE\_SOLVE\_MAX}) and on
 non-convergence, so neither is less robust than what it replaced;
 \texttt{tests/test\_infinite\_chain.py} pins the thresholds to force each
@@ -874,8 +998,11 @@ the excitation ansatz needs) rather than ITensor's own tensor
 contraction/decomposition machinery. This is a deliberate
 simplification, not a shortcut taken for lack of a better option: $D$
 and $d_g$ (the grouped supersite's own physical dimension) are always
-small in this feature's scope (\texttt{n\_uc<=2}, reach-1 bonds only,
-the same scope \texttt{idmrg\_ground\_state} itself has), so exact,
+small in this feature's scope (\texttt{n\_uc<=2}, reach-1 bonds only ---
+the \emph{grouped} VUMPS path's scope; \texttt{idmrg\_ground\_state} was
+never restricted this way, and the sequential \texttt{vms\_*} solver now
+covers \texttt{n\_uc>2} and reach${}>1$, see the long-range paragraph
+below), so exact,
 dense-matrix linear algebra is both simpler to get right and
 dramatically lower-risk than re-deriving VUMPS's and the excitation
 ansatz's own already extremely subtle fixed-point/gauge bookkeeping
@@ -2067,6 +2194,71 @@ model (an exact ratio, not convergence noise, which is what exposed it
 as a real off-by-\texttt{n\_uc} bug rather than an iDMRG convergence
 limitation).
 
+\textbf{How \texttt{\_close\_array\_chain} contracts, and what it caches}
+(2026-09 audit, findings \#8, \#32 and \#9 --- all three pure
+performance, none changing a returned number). It used to build a running rank-4 transfer
+tensor, growing it site by site with
+\texttt{E = einsum('lLrR,rRsS->lLsS', E, step)}, and then immediately
+close that \texttt{E} on both ends against the two fixed points.
+Composing is \texttt{O(n chi\^{}6)} (and, at numpy's default
+\texttt{optimize=False}, an unoptimized C loop rather than BLAS);
+propagating the left cap through the chain one site at a time instead ---
+two \texttt{tensordot}s per site, the running object a
+\texttt{(chi,chi)} matrix --- computes the identical scalar in
+\texttt{O(n chi\^{}3 d)}. That is \texttt{\_propagate\_close}, the same
+re-association as \texttt{idmrg.\_apply\_site\_transfer}'s. Head to head
+on identical random inputs (10 sites, one BLAS thread, taskset-pinned):
+24x at \texttt{chi=8}, 1303x at \texttt{chi=16} and 8283x at
+\texttt{chi=24}, with the two scalars agreeing to
+$1.4\times10^{-15}$--$2.7\times10^{-14}$.
+
+Alongside it (finding \#32), everything in that closure that does
+\emph{not} depend on the snapshot being measured --- the tiled cell as plain arrays, both
+families of transfer-matrix fixed points, and the ground-state
+calibration denominators --- now lives in an \texttt{\_IWEnv} memoized on
+the \texttt{IDMRGResult} (\texttt{\_window\_env}), instead of being
+rebuilt per call: two \texttt{chi\^{}2 x chi\^{}2} eigenproblems,
+re-solved once per \texttt{x} value inside
+\texttt{snapshot\_correlator} and therefore once per \texttt{x}
+\emph{per time step} inside \texttt{dynamical\_correlator\_td}.
+\texttt{local\_expectation} built a third copy of its own and used only
+its \emph{shape}. This is the same defect and the same fix as
+\texttt{idmrg.\_CorrelatorEnv} on the static-observable path and
+\texttt{mpscpp3}'s own \texttt{iw\_build\_cache} for the v3 window; the
+calibration denominator is additionally memoized per
+\texttt{(p\_left, p\_right, nsites)}, \texttt{p\_right} belonging in that
+key because \texttt{snapshot\_correlator} varies it independently of
+\texttt{p\_left}. Measured end to end through the public API on a
+critical \texttt{n\_uc=1} transverse-field chain at
+\texttt{gs\_method="idmrg"}, \texttt{maxm=maxdim=24}, \texttt{nt=4},
+\texttt{n\_window=10}, 9 \texttt{x}-values:
+\texttt{td\_dynamical\_correlator} went \textbf{378\,s $\to$ 0.73\,s},
+with \texttt{e0} agreeing to $10^{-11}$ and the summed $|S(k,\omega)|$ to
+$3\times10^{-6}$ (the residual being the iDMRG solve's own run-to-run
+convergence, not the contraction). Its own documented defaults are
+\texttt{nt=200}, \texttt{maxdim=60} (the user guide's
+\texttt{td\_dynamical\_correlator} section) --- fifty times the time
+steps and more than twice the bond dimension of the run above --- so what
+changed is whether those defaults are usable at all, not how fast an
+already-cheap call is.
+
+One more in the same pass, in
+\texttt{idmrg\_excitations.\_op\_transfer\_matrix}: its
+\texttt{einsum(...).transpose(0,2,1,3)} returned a stride-permuted
+\emph{view}, and every consumer (\texttt{idmrg.\_apply\_transfer},
+\texttt{\_apply\_transfer\_from\_left}) immediately does
+\texttt{E4.reshape(chi*chi,-1)}, which numpy cannot do on a
+non-contiguous array without materializing a full \texttt{chi\^{}4} copy.
+These tensors are built once and applied thousands of times inside
+\texttt{vumps.py}'s environment solves, so that copy was being paid per
+iteration for an operator that never changes --- cProfile attributed
+41\% of a \texttt{D=24} VUMPS ground-state solve to
+\texttt{ndarray.reshape} called from exactly those two functions. One
+\texttt{np.ascontiguousarray} at construction pays it once. It cannot
+change any arithmetic (the reshape was copying into a contiguous buffer
+anyway), and it is the same mistake and the same fix as
+\texttt{kernels.py}'s own note on the finite-chain matvec.
+
 \textbf{Real-time evolution, shifted overlaps, and $S(k,\omega)$}:
 \texttt{window\_tdvp\_step} two-site-TDVP-evolves a capped window in
 place (mirroring \texttt{tdvp.py}'s own \texttt{tdvp\_step}), but
@@ -2462,6 +2654,36 @@ fallbacks, which land on ED, i.e.\ on the one solver that can still answer
 correctly. This is the pattern of \S``Where `silently wrong' was
 structurally possible'': a precondition placed ahead of the branch that
 qualifies it.
+
+\textbf{Switching an existing chain's backend is atomic.}
+\texttt{setup\_cpp(version)}, \texttt{setup\_python()} and
+\texttt{setup\_julia()} are now one helper,
+\texttt{Many\_Body\_Chain.\_switch\_backend(version)}. All three used to
+assign \texttt{self.itensor\_version} and only then call
+\texttt{initialize()}, which leaves the chain \emph{half-switched} if
+\texttt{initialize()} raises: the new \texttt{itensor\_version} alongside
+the previous backend's \texttt{self.\_session}. Everything keying on the
+session kept working off the stale one
+(\texttt{gs\_energy(mode="DMRG")} still answered correctly) while
+everything keying on \texttt{itensor\_version} diverged from it ---
+\texttt{tevol\_method}'s ``TDVP only on \texttt{itensor\_version==3}'',
+and \texttt{\_\_deepcopy\_\_}'s
+\texttt{cppext.get\_backend(self.itensor\_version).Chain(...)}, which
+would mint a session of the version the switch never actually reached.
+\texttt{initialize()} can raise in two ways, and they fail at
+\emph{different points}, which is why all three fields are snapshotted
+rather than just the version: \texttt{Bosonic\_Chain.initialize()}
+refuses \texttt{itensor\_version=2} for any local boson dimension other
+than 4 before anything at all is built, while
+\texttt{sites.py::initialize} assigns \texttt{self.\_session} and only
+\emph{then} applies the conserved sector, which refuses a backend with no
+quantum numbers --- so in that second case the session has already been
+replaced when the raise happens. On a failed switch
+\texttt{itensor\_version}, \texttt{\_session} and
+\texttt{\_sector\_on\_session} are all restored and the cached ground
+state is \textbf{not} discarded (\texttt{\_reset\_dmrg\_state()} is
+deferred until the switch has actually succeeded): a chain left on its
+old backend still holds a valid wavefunction for it.
 
 \subsubsection{Conserved sectors on the ED backend}
 
@@ -3108,6 +3330,162 @@ rewrite also fixed a real bug in it: on a \textbf{one-site} chain there
 were no bonds to sweep, so the concatenation was returned uncompressed and
 all but the last term was silently dropped ($0.8 S^z + 0.6 S^x$ came back
 as $0.6 S^x$ alone).
+
+\textbf{MPO application (\texttt{mpsalgebra.py::\_apply\_chain}, behind
+\texttt{applyMPO} and \texttt{nmultMPO}): build exactly, compress
+afterwards.} This used to be a ``zip-up'' in the sense of Stoudenmire \&
+White, New J. Phys. 12, 055026 (2010), \S3.2 --- one left-to-right sweep
+contracting \texttt{K} against \texttt{X} site by site and SVD-truncating
+each cut to \texttt{cutoff}/\texttt{maxdim} before moving on --- and the
+docstring claimed the result was therefore ``exact up to
+cutoff/maxdim''. It is not, and the gap is not a tolerance. At cut $i$ the
+left side of that SVD is orthonormal (it is the previous $U$), but the
+right side is the \emph{not-yet-contracted} product of \texttt{K}'s and
+\texttt{X}'s remaining tensors, and the product of two right-canonical
+chains is not itself right-canonical: right-canonicity of each factor
+gives $\sum_{s,s',a_R} K K^* = \delta_{a_L a_L'}$, whereas the product
+needs the finer $\sum_{s',a_R} K K^* = \delta_{a_L a_L'}\delta_{s s_2}$,
+which nothing supplies. So the singular values being truncated are not
+the Schmidt values of the exact product, and discarding the smallest of
+them is not the 2-norm-optimal truncation. Measured (2026-09 audit,
+finding \#13): applying an 8-site Heisenberg $H$ to its own ground state,
+whose exact $H|\psi\rangle$ has Schmidt rank \texttt{[2,4,8,16,8,4,2]} ---
+so \texttt{maxdim=16} discards \emph{literally nothing}, the 17th
+singular value being 0.0 at every bond --- the zip-up still lost 9.4e-05
+in 2-norm, against 1.6e-14 at \texttt{maxdim=32}. The sweep now truncates
+nothing (and splits with a QR rather than an SVD, since no singular
+values are wanted), and the caller's \texttt{cutoff}/\texttt{maxdim} are
+enforced afterwards by one truncating right-to-left \texttt{position()}
+sweep over the finished chain --- the gauge in which discarding the
+smallest singular values \emph{is} the optimal truncation, the same
+recipe and the same reason as \texttt{sum\_many()}'s own
+\texttt{position(1)}-then-\texttt{position(n)}. The exact sweep's cut
+dimensions run up to \texttt{dim(K-link)*dim(X-link)} instead of
+\texttt{maxdim}, so this costs: measured in isolation on a 10-site
+Heisenberg chain at \texttt{maxdim=30} (20 chained
+\texttt{applyMPO}+\texttt{sum} pairs, min of 7, one BLAS thread,
+taskset-pinned) 0.241\,s $\to$ 0.258\,s, i.e. 1.07x, and it grows with
+the gap between the exact product's bond dimension and \texttt{maxdim}.
+\texttt{\_apply\_chain}'s own docstring records the larger end-to-end
+figures the change was measured at, on a KPM dynamical correlator:
+1.30\,s $\to$ 1.82\,s at 12 sites, \texttt{maxm=kpmmaxm=30}, and
+9.9\,s $\to$ 13.5\,s at 16 sites, \texttt{maxm=kpmmaxm=60}, i.e. $\sim$1.4x
+--- the cost to budget for on a repeated-application workload, rather
+than the 1.07x of the micro-benchmark above. The numbers this moves are
+\emph{everything} on this backend that applies an MPO ---
+\texttt{applyoperator}, \texttt{vev(..., npow>1)},
+\texttt{gs\_energy\_fluctuation()}, the KPM Chebyshev recursion, CVM,
+\texttt{apply\_inverse}, the MPO-Taylor evolution path, and
+\texttt{nmultMPO}-built operators such as the $H\cdot H$ of
+\texttt{custom\_exp}/\texttt{evoloperator} --- at the 1e-5..1e-9 level,
+toward the values \texttt{itensor\_version} 2/3 and ED already gave.
+
+\textbf{TDVP's gauge precondition
+(\texttt{tdvp.py::tdvp\_step}).} Each half-sweep of two-site TDVP builds
+its local generator from plain $\langle\psi|\cdots|\psi\rangle$
+environments, and such an environment is the projection of $H$ onto the
+tangent space \emph{only} when the tensors it was contracted from are
+orthogonal --- left-orthogonal to the left of the site being updated,
+right-orthogonal to its right. The left-to-right half-sweep therefore
+requires $\psi$ right-canonical (orthogonality centre at site 1) on
+entry, and that requirement was never stated or enforced: when this was
+found, a state arriving from \texttt{mpsalgebra.applyMPO} (or from any
+\texttt{position(n)}) was \emph{left}-canonical, so every right
+environment the first half-sweep used was a non-orthogonal overlap matrix
+rather than an isometry, and the first step of every trajectory evolved
+under the wrong generator. (What \texttt{applyMPO} returns has since
+become gauge-dependent on its own arguments: the untruncated call still
+ends left-canonical, while a call carrying a
+\texttt{cutoff}/\texttt{maxdim} ends in \texttt{\_apply\_chain}'s own
+\texttt{position(1)} and arrives \emph{right}-canonical --- measured on
+an 8-site chain, \texttt{maxdim=None} leaves the centre at site 8 and
+\texttt{maxdim=16} or \texttt{32} at site 1. Which of the two arrives no
+longer matters, which is the point of the fix below.) Only the first ---
+\texttt{\_half\_sweep\_rl} leaves $\psi$ genuinely right-canonical, so
+every later step found the gauge it wanted --- which is why the symptom
+at fixed total time looked like a \emph{first-order integrator} rather
+than like one broken step, and why the audit's isolation had to rule out
+truncation, \texttt{maxdim}, the Krylov stopping rule, one-vs-two-site,
+the MPO and the environments before landing here.
+\texttt{tdvp\_step()} now canonicalizes to centre 1 first
+(\texttt{\_gauge\_center}), mirroring \texttt{mpscpp3/TDVP/tdvp.h}'s own
+\texttt{if(!isOrtho(psi) || psi.leftLim()!=0) psi.position(1)}. Measured
+through the public \texttt{evolve\_and\_measure} on a 6-site Heisenberg
+chain with symmetry-breaking fields ($+0.5(-1)^iS^z + 0.3S^x$,
+\texttt{maxm=64}, \texttt{cutoff=1e-14}, so bond dimensions are full and
+truncation is not in play), evolving $S^z_0|gs\rangle$ to \texttt{T=1.0}
+and reading $\langle S^z_0\rangle$ against \texttt{mode="ED"} at the same
+\texttt{dt} --- before $\to$ after:
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+\texttt{dt} & error before & error after \\
+\hline
+0.2   & 7.57e-03 & 1.73e-06 \\
+0.1   & 3.87e-03 & 6.09e-08 \\
+0.05  & 1.94e-03 & 1.95e-08 \\
+0.025 & 9.71e-04 & 5.88e-10 \\
+\hline
+\end{tabular}
+\end{center}
+
+The ``before'' column halves exactly when \texttt{dt} halves --- first
+order, from an integrator that is second order by construction and
+\emph{exact} here. In the ``after'' column the backend's own value is
+constant to all ten printed digits across the whole \texttt{dt} range
+($-0.0288689911$), as an exact integrator's must be; what is left is the
+ED reference's own time-grid discretization converging onto it.
+Two details are load-bearing. The move is done with \textbf{QR, not
+\texttt{MPS.position()}}: \texttt{position()}'s SVD, even at its lossless
+\texttt{cutoff=0.0} default, still \emph{drops} exactly-zero singular
+values, and the bond directions
+\texttt{gse.global\_subspace\_expand()} adds carry exactly zero weight by
+construction --- that is what makes the expansion state-preserving --- so
+canonicalizing with an SVD right before the sweep that exists to use them
+would throw them all away again; QR is not rank-revealing and leaves
+every bond dimension as it found it. And the guard is a no-op on a state
+that is already right-canonical, i.e. on every step after the first, so
+it costs one QR sweep per \emph{trajectory}, not per step. $n\le4$ hid
+the whole thing: there every two-site block already spans the full
+Hilbert space, so each local flow is the exact global one --- and the
+backend's own TDVP-vs-golden regression test in
+\texttt{tests/test\_time\_evolution.py} runs at \texttt{n=2}.
+
+\textbf{Session state across \texttt{set\_hamiltonian}
+(\texttt{chain.py}).} \texttt{Chain} keeps the previous solve's converged
+state in \texttt{self.wf0} and warm-starts DMRG from it. That is right
+for a re-send of the \emph{same} operator and wrong for a different one,
+and until the 2026-09 audit (finding \#2) nothing here distinguished the
+two: \texttt{Many\_Body\_Chain.set\_hamiltonian} calls
+\texttt{restart()}, whose comment promises ``a genuinely cold
+recalculation'', and that promise stopped at the Python object. Unlike
+the compiled backends this one has no noise term (see
+\texttt{dmrg.py}), so when the retained state happens to be an exact
+eigenstate of the \emph{new} Hamiltonian the variational solve is
+stationary there and never moves --- a field sweep on one chain object
+passing through a polarized phase is enough, and the measured symptom was
+a 6-site Heisenberg chain reporting $+1.25$, the ferromagnetic
+\emph{maximum} retained from \texttt{B=4}, against an exact $-2.4936$,
+surviving \texttt{maxm=40}/\texttt{nsweeps=40}/\texttt{noise=1e-2}.
+\texttt{Chain.set\_hamiltonian} now clears \texttt{self.wf0} when the
+term list actually changes. Note the deliberate asymmetry:
+\texttt{\_wf0\_energy} is still cleared \emph{unconditionally}, because
+\texttt{groundstate.py}'s send-cache relies on that to force a fresh
+solve after a \texttt{maxm}/\texttt{nsweeps}/\texttt{cutoff}/
+\texttt{noise}/ramp change, and \texttt{best\_gs()} relies on it to
+re-run DMRG. And one exception, \texttt{Chain.\_promoted\_gs}:
+\texttt{promote\_to\_dense()} drops the MPO built on the graded indices
+and so forces one re-send of the \emph{same} terms through
+\texttt{set\_hamiltonian} purely to rebuild it densely --- the state and
+its energy are handed across that one re-send, because it is a rebuild
+rather than a change of Hamiltonian. Without the carry the session
+re-solved \emph{unconstrained} (this backend confines a sector by a
+penalty on the variational solve, not structurally, so nothing holds the
+solve inside the sector once the penalty is gone) and silently returned
+the global ground state --- the opposite of what
+\texttt{promote\_to\_dense}'s own docstring guarantees, and of what
+\texttt{mpscpp3} and \texttt{mode="ED"} already did.
 
 One partial exception to that shared-surface rule:
 \texttt{dmrg.py::dmrg\_generalized} (exposed as
@@ -4008,7 +4386,18 @@ small native Julia primitive" pattern every fix above followed:
   $O(n^2)$-term squared operator directly) --- \texttt{mpsjulialive/vev.py}'s
   \texttt{vev(MBO,MO)} takes no \texttt{**kwargs} at all, so this raises
   a plain \texttt{TypeError} for \texttt{julia\_live} rather than
-  silently misbehaving. The one example exercising it,
+  silently misbehaving. This sentence used to draw that contrast against
+  nothing in particular; the 2026-09 audit (finding \#6) found the
+  \texttt{mode="ED"} path \emph{was} the one silently misbehaving ---
+  \texttt{EDchain.vev(self,op,T=0.,**kwargs)} swallowed \texttt{npow} and
+  returned $\langle op\rangle$ for every $n$, so
+  \texttt{gs\_energy\_fluctuation()} on any ED route (explicit, or
+  \texttt{mode.py}'s automatic fallbacks) was computing
+  $\sqrt{|\langle H\rangle-\langle H\rangle^2|}$. ED honours
+  \texttt{npow} now, and raises on the cases it cannot answer
+  (\texttt{NotImplementedError} at $T>0$, \texttt{ValueError} for a
+  negative \texttt{npow}), so \texttt{julia\_live} is genuinely the last
+  backend where this kwarg is unimplemented. The one example exercising it,
   \texttt{examples/utilities/power\_vev/main.py}, sets
   \texttt{sc.itensor\_version = "julia"} directly (bypassing
   \texttt{setup\_julia()}/\texttt{\_reset\_dmrg\_state()} entirely) ---
@@ -4497,6 +4886,60 @@ in \texttt{chain\_session.h} on the C++ side;
 rather than by direct spectral decomposition, since exact
 diagonalization of the full spectrum is infeasible for large chains.
 
+\textbf{The convention every submode returns is stated in exactly one
+place}, \texttt{src/dmrgpy/dynamics.py}'s module docstring, and every
+submode implementation points at it. That single statement is new
+(2026-09 audit, finding \#5); before it there was none, and the
+consequence is the last entry in the ``Where silently wrong was
+structurally possible'' list below. The quantity is the \emph{complex}
+Lehmann density of the operator pair, Lorentzian-broadened by
+\texttt{delta},
+\[
+  C_{AB}(\omega) \;=\; \sum_n \frac{M_n\,\delta}
+      {\pi\left((\omega-D_n)^2+\delta^2\right)}
+  \;=\; \frac{i\left(G^R_{AB}(\omega)-G^A_{AB}(\omega)\right)}{2\pi},
+\]
+with $M_n = \langle GS|A|n\rangle\langle n|B|GS\rangle$ and
+$D_n = E_n-E_0$, and \emph{not} the also-common
+$-\frac{1}{\pi}\mathrm{Im}\,G^R_{AB}(\omega)$, which coincides with it
+only for real $M_n$. That is \emph{implied} by the Hermitian pair
+$A = B^\dagger$ but is strictly weaker than it: a real Hamiltonian with
+real matrix elements has real $M_n$ for off-diagonal pairs too
+($A = S^z_0$, $B = S^z_1$ agree to $6.6\times10^{-15}$ on a $0.42$
+peak). $\mathrm{Im}\,M_n = 0$ is the discriminant, and
+\texttt{src/dmrgpy/dynamics.py} says so normatively. What selects it is the kernel-independent sum rule
+$\int d\omega\,C_{AB}(\omega) = \langle GS|AB|GS\rangle$: the
+$-\frac{1}{\pi}\mathrm{Im}\,G^R$ form carries a dispersive term whose
+principal-value tails leak arbitrarily far outside any finite frequency
+window and so does not satisfy it. The default \texttt{submode="KPM"} ---
+a Chebyshev expansion of the spectral density, with no notion of a
+retarded resolvent at all --- computes $C_{AB}$ directly and always has,
+as do \texttt{submode="INV"}/\texttt{"CVM"} under \texttt{mode="ED"} and
+\texttt{submode="EX"}; \texttt{submode="ED"}, \texttt{submode="ROOTN"}
+and \texttt{mode="DMRG"} \texttt{submode="CVM"} were the three sitting
+off it, and were brought onto it rather than the other way round.
+
+Two mechanism notes on that move, because the two implementations respond
+to it very differently. \texttt{cvm.py} gets the advanced resolvent for
+free: its conjugate-gradient system
+$[(H-\omega-E_0)^2+\eta^2]\,x_c = -\eta B|GS\rangle$ is \emph{even} in
+$\eta$, so flipping the sign only negates the right-hand side,
+$x_c(-\eta) = -x_c(+\eta)$, and the whole correlator collapses to
+$-\langle GS|A|x_c\rangle/\pi$ with the dispersive
+$(H-\omega-E_0)x_c/\eta$ piece cancelling identically --- one MPO
+application \emph{cheaper} than the $-\mathrm{Im}(G^R)/\pi$ it replaced,
+which had to assemble the full correction vector first.
+\texttt{algebra/rootn.py} (and its MPS twin \texttt{rootndmrg.py}) has no
+such shortcut: root-N applies a \emph{function} of $H$, not a resolvent
+linear system, so the $-i\eta$ pass genuinely re-seeds $N$ new Lanczos
+subspaces and \texttt{submode="ROOTN"} now costs about 2x what it did ---
+on both backends, \texttt{mode="DMRG"} having caught up with
+\texttt{mode="ED"} in the same audit. Nor does conjugation help there,
+since $\overline{G^R_{A,B}} = G^A_{B^\dagger,A^\dagger}$ is the advanced
+resolvent of a \emph{different} operator pair, and collapses to the one
+wanted only for $A = B^\dagger$, which is precisely the case in which the
+two conventions already agree.
+
 \subsubsection{Sector-resolved correlators (\texttt{sectordc.py},
 \texttt{submode="SECTOR"})}
 
@@ -4684,6 +5127,13 @@ The modest C++ \texttt{TD} figure is expected rather than a missed
 opportunity: $\exp(-iHt)$ makes the evolved state genuinely complex
 whatever the MPO's type, so only the $H$-side of each contraction gets
 cheaper there.
+
+Note the \texttt{"python"} row predates the 2026-09 audit's correctness
+fix to \texttt{mpsalgebra.\_apply\_chain} (see the pure-Python backend
+section): MPO application on that backend now forms the product exactly
+before truncating, which is more expensive, so the ``after'' column no
+longer reproduces and the \texttt{"python"} KPM figure in particular
+should be read as a lower bound. The C++ rows are unaffected.
 
 \subsubsection{Time-grid convention: measure before evolving}
 
@@ -5001,7 +5451,9 @@ complex coefficients with no changes needed;
 from a private helper to a public method and widened from
 \texttt{double dt} to \texttt{Cplx dt}) simply forwards to the vendored
 \texttt{TDVP/tdvp.h}, which documents its own time argument as natively
-``real, imaginary, or complex.''
+``real, imaginary, or complex.'' Forwarding it correctly turned out to
+need one more thing than the widening, and it is the subject of the
+paragraph below.
 \item \textbf{\texttt{itensor\_version=2}} (mpscpp2 has no TDVP at
 all): a single MPO-Taylor step, \texttt{Chain::evolve\_taylor\_step} in
 both \texttt{mpscpp2/chain\_session.h} and
@@ -5013,6 +5465,52 @@ real \texttt{dt} to a complex \texttt{z} throughout, including
 pre-existing deliberately-reproduced ``$z^3/6$ multiplies H2 not H3''
 quirk (see CLAUDE.md) is unaffected by this widening.
 \end{itemize}
+
+\textbf{\texttt{DoNormalize} is set from \texttt{dt}, not hardcoded}
+(2026-09 audit, finding \#7). $\exp(-iHdt)$ preserves the norm only for
+\emph{real} \texttt{dt}; along a complex-time contour the decay of
+$\|\psi\|$ \textbf{is} the physics --- it is precisely the damping the
+reconstruction above inverts. \texttt{Chain::tdvp\_step} used to pass
+\texttt{\{"DoNormalize",true\}} unconditionally, so on
+\texttt{itensor\_version=3} every complex step was rescaled back to unit
+norm and the damping was deleted. It now passes
+\texttt{dt.imag()==0.0}. This changed numbers: at the audit's own
+configuration ($n=4$, Heisenberg $+\,0.3S^z$,
+\texttt{es=linspace(-20,20,4001)}, \texttt{delta=0.1}) the audit recorded
+v3's \texttt{submode="TDZ"} spectral function integrating to
+\textbf{0.340842}
+against the exact sum rule $\int S(\omega)\,d\omega = \langle S^z_0
+S^z_0\rangle = 0.25$; re-measured after the rebuild it integrates to
+\textbf{0.249508} --- the same value \texttt{itensor\_version="python"}
+has always given, and the same value v3 itself gives with
+\texttt{tevol\_method="MPO"}, which routes around \texttt{tdvp\_step}
+entirely. (That \texttt{"MPO"} control is what pinned the cause here
+rather than in \texttt{tdz.py}'s shared reconstruction; all four
+combinations --- v3/\texttt{"python"} $\times$
+\texttt{"TDVP"}/\texttt{"MPO"} --- now read 0.249508.) Any recorded
+\texttt{itensor\_version=3} \texttt{submode="TDZ"} spectrum from before
+this is $\sim$36\% too heavy and is not comparable.
+
+Two pieces of earlier recorded reasoning are superseded by that, and are
+kept here rather than deleted because both were plausible. The 2026-08
+audit's finding \#10 attributed the residual TDZ inaccuracy to
+\texttt{tdz.py}'s own reconstruction --- but that reconstruction is
+shared Python code and \texttt{"python"} was already getting the right
+answer through it, so the reconstruction was never the culprit. And
+finding \#9's ``Where a fix goes'' explicitly advised \emph{against}
+flipping this flag, ``since \texttt{tdz.py}'s complex-time path and
+\texttt{metts\_vev} depend on its current semantics''. That is exactly
+backwards for the \texttt{tdz.py} half --- the complex-time path is the
+one thing forced normalization cannot survive --- and a no-op for the
+\texttt{metts\_vev} half: both imaginary-time call sites already follow
+every step with their own explicit
+\texttt{phi /= sqrt(innerC(phi,phi).real())}, so they are unaffected by
+which way the flag goes (and are now safe from underflow over a long
+beta besides). The real-time callers (\texttt{quench\_tdvp},
+\texttt{evolve\_and\_measure\_tdvp} and their \texttt{\_gse} siblings)
+pass a real \texttt{dt} and restore the input norm themselves, so they
+are unaffected too --- their restore now also absorbs the small
+truncation drift that forced normalization used to mask.
 
 Current scope: only the ``greater'' branch of the correlator is
 computed (the same simplification \texttt{submode="TD"} already makes),
@@ -5094,6 +5592,133 @@ QN-conserving (\texttt{set\_conserved\_sector}) mode:
     catchable, unlike ITensor's own \texttt{Error()}.
 \end{itemize}
 
+\textbf{The 2026-09 audit}
+(\texttt{docs/audit\_2026\_09\_hole\_hunt.md}, 36 confirmed findings)
+supplied six more entries. Two are fresh instances of patterns already
+listed above --- which is the main thing \emph{they} teach: a pattern
+being guarded at the site where it was found does not retire it --- and
+four are patterns this list did not have.
+
+\begin{itemize}
+  \item \textbf{A second \texttt{**kwargs} with no consumer.}
+    \texttt{Many\_Body\_Chain}'s own
+    \texttt{gs\_energy\_fluctuation(**kwargs)} accepted the whole API's
+    kwargs and forwarded none of them, so
+    \texttt{gs\_energy\_fluctuation(mode="ED")} returned the DMRG number
+    byte-for-byte while \texttt{sc.mode="ED"} on the same chain returned
+    a different one --- i.e. the documented way to cross-check a
+    convergence diagnostic against the exact solver silently did not. The
+    kwargs now reach both \texttt{vev} calls, and \texttt{npow=} is
+    rejected by name (the method defines the power itself).
+  \item \textbf{A second instance of ``resolution done in the
+    branches'', this time via an override.}
+    \texttt{Parafermionic\_Chain} carried its own
+    \texttt{get\_dynamical\_correlator}, which was the base method's two
+    branches verbatim \emph{minus} the two things the base method does
+    before them: \texttt{mode = self.get\_mode(mode=mode)} and
+    \texttt{operatornames.str2MO}. It was the only model-class override
+    in the tree skipping either. So an enforced \texttt{self.mode="ED"}
+    --- and every DMRG$\to$ED fallback \texttt{mode.py} makes on its own
+    --- was ignored and the call went to DMRG regardless, which on
+    \texttt{itensor\_version=3} reached
+    \texttt{Chain::kpm\_dynamical\_correlator} with \texttt{have\_H\_}
+    false, where ITensor's \texttt{Error()} calls \texttt{abort()}: the
+    user's whole process died with \texttt{SIGABRT}, uncatchable from
+    Python. The fix was \textbf{deleting} the override rather than
+    patching \texttt{get\_mode()} into it --- there was nothing else in
+    it, and deletion fixed the \texttt{name="ZZ"} resolution facet in the
+    same stroke. An override that reproduces a dispatcher's branches is a
+    dispatcher that will drift.
+  \item \textbf{A stale type test.}
+    \texttt{mpsalgebra.applyoperator}/\texttt{summps} selected their ED
+    branch on \texttt{type(wf)==np.ndarray}, which no ED route has
+    produced since \texttt{EDchain.get\_gs} started returning an
+    \texttt{edtk.edchain.State}. Both branches were therefore dead and
+    every ED call fell through to a bare \texttt{raise} (``RuntimeError:
+    No active exception to reraise''). \texttt{applyinverse}, in the same
+    file, had already been updated to test \texttt{State} and was the
+    in-file proof that the convention had moved. The lesson is narrower
+    than ``use \texttt{isinstance}'': a branch keyed on a
+    \emph{representation} has to be revisited when the representation
+    changes, and nothing makes that happen automatically. These
+    primitives now resolve the backend from the wavefunction's own type
+    (\texttt{mpsalgebra.wavefunction\_mode}) and treat an explicit
+    \texttt{mode=} as a consistency check rather than a switch, since for
+    them the wavefunction \emph{is} the backend.
+  \item \textbf{Validate the attribute, not just the argument.}
+    \texttt{mode.py::resolve\_mode} checked the \texttt{mode=} call
+    argument against the two legal strings and returned
+    \texttt{self.mode} unchecked, so \texttt{sc.mode = "ed"} made
+    \texttt{get\_gs()} fall off the end of its \texttt{if}/\texttt{elif}
+    and return \texttt{None}. And the check sat \emph{after} the
+    automatic ED fallbacks, so validating \texttt{self.mode} where it is
+    read would not have been enough either: on a 2-site
+    \texttt{itensor\_version=3} chain, or one with no compiled extension,
+    the fallback returns \texttt{"ED"} before that line is ever reached
+    --- exactly the chains where the wrong solver is hardest to notice.
+    Both names are now validated at the top of the function, before any
+    fallback can return, against \texttt{mode.VALID\_MODES} via
+    \texttt{mode.\_check\_mode}. Worth knowing alongside it: the pure
+    algebra primitives (\texttt{overlap}, \texttt{aMb},
+    \texttt{random\_state}, \texttt{reduced\_dm},
+    \texttt{compute\_entropy\_single}) deliberately call
+    \texttt{resolve\_mode} rather than \texttt{get\_mode} --- they need to
+    see the automatic ED fallbacks, but not \texttt{get\_mode()}'s
+    conserved-sector guard, which is about \emph{which ground state
+    answers a solve} and not about an inner product between two states
+    the caller already holds.
+  \item \textbf{A convention with no normative statement, so five
+    implementations each picked the formula its own algebra made cheap.}
+    This is the new pattern, and it is the same defect one level up: not
+    a dispatch taken before the information that should inform it, but a
+    dispatch with no definition behind it at all.
+    \texttt{get\_dynamical\_correlator} promised that every
+    \texttt{submode} returns the same quantity, while
+    \texttt{submode="KPM"} (a Chebyshev expansion of the spectral
+    density, which has no notion of a retarded resolvent),
+    \texttt{submode="ED"} (an explicit Lehmann sum), \texttt{cvm.py} (a
+    correction-vector linear solve) and \texttt{algebra/rootn.py} plus
+    its MPS twin \texttt{rootndmrg.py} (a fractional resolvent, once each
+    on the ED and the DMRG side) each returned whichever of the complex
+    Lehmann density and $-\frac{1}{\pi}\mathrm{Im}\,G^R$ came out of its own
+    formulation --- and the two differ by
+    $\sum_n \mathrm{Im}(M_n)(\omega-D_n)/(\pi[(\omega-D_n)^2+\delta^2])$
+    in the Lehmann weights
+    $M_n = \langle 0|A|n\rangle\langle n|B|0\rangle$ (poles $D_n$,
+    broadening $\delta$), i.e. they coincide
+    exactly whenever every $M_n$ is real and diverge only when one is
+    not. $A \neq B^\dagger$ is \emph{not} the discriminant: a real
+    Hamiltonian with real operators has real $M_n$ either way (measured,
+    4-site Heisenberg, \texttt{mode="ED"}, $A=$ \texttt{Sz[0]},
+    $B=$ \texttt{Sz[1]}: \texttt{submode="ED"} and \texttt{submode="CVM"}
+    agree to $6.6\times10^{-15}$ on a peak of 0.42). Where the weights
+    \emph{are} complex the gap exceeds the correlator itself --- 0.5746
+    against a peak of 0.4257 on the 4-site complex-hopping fermionic
+    chain \texttt{cvm.py}'s own comment records. Nothing was
+    locally wrong anywhere; what was missing was one place saying which
+    quantity the library returns. That place is now
+    \texttt{src/dmrgpy/dynamics.py}'s module docstring; the ``KPM /
+    dynamical correlators'' section above records the resolution, and
+    every submode implementation points at it.
+  \item \textbf{A two-field switch with no rollback, i.e. a dispatch left
+    \emph{inconsistent} rather than taken too early.}
+    \texttt{setup\_cpp}/\texttt{setup\_python}/\texttt{setup\_julia}
+    assigned \texttt{self.itensor\_version} and only then called
+    \texttt{initialize()}, so a raise in \texttt{initialize()} left the
+    new version label sitting beside the previous backend's
+    \texttt{self.\_session}. Everything keying on the session then kept
+    answering correctly off the stale one
+    (\texttt{gs\_energy(mode="DMRG")}) while everything keying on
+    \texttt{itensor\_version} --- \texttt{tevol\_method}'s ``TDVP only on
+    \texttt{itensor\_version==3}'', \texttt{\_\_deepcopy\_\_}'s
+    \texttt{cppext.get\_backend(self.itensor\_version)} --- acted on a
+    backend the chain never actually reached. The fix has the same shape
+    as the rest of this list: decide first, publish afterwards.
+    \texttt{\_switch\_backend} snapshots all three fields and restores
+    them if \texttt{initialize()} raises (see the backend-dispatch
+    section above).
+\end{itemize}
+
 \section{Backend performance: v3 vs the pure-Python backend}
 \label{sec:perf}
 
@@ -5133,6 +5758,18 @@ rather than of block sparsity alone. They have not been re-measured (the
 host was under heavy unrelated load when the builder was rewritten, so a
 re-measurement would have been worse than no measurement). Treat them as
 historical until re-run.
+
+One correction pushes the other way, and only on the rows that apply an
+MPO many times (the KPM table below, and the TDVP/METTS discussion after
+it): the 2026-09 audit's fix to \texttt{mpsalgebra.\_apply\_chain} (see
+the pure-Python backend section) made every
+\texttt{applyMPO}/\texttt{nmultMPO} on this backend build the exact
+product before truncating, which is more expensive than the
+truncate-as-you-go sweep these numbers were taken with. So for those rows
+the two corrections act in opposite directions and the net is not known
+without a re-run; for the ground-state table, which applies no MPO
+outside the DMRG sweep itself, the upper-bound reading above still
+stands.
 
 \subsection{Ground state energy (Heisenberg spin-1/2 chain)}
 

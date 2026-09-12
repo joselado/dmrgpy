@@ -63,7 +63,7 @@ Chain class & Local Hilbert space & Key operators \\
 \texttt{fermionchain.\allowbreak Spinful\_\allowbreak Fermionic\_\allowbreak Chain\_\allowbreak Native} & same physics, genuinely 4-dimensional local space, one site per physical site (\texttt{itensor\_version=3} and \texttt{"python"} only) & identical operator lists/formulas as \texttt{Spinful\_Fermionic\_Chain} \\
 \texttt{bosonchain.\allowbreak Bosonic\_Chain} & truncated boson Fock space, $n_i\in\{0,\ldots,\text{maxnb}_i-1\}$, per-site dimension \texttt{maxnb} (default 4) settable via \texttt{Bosonic\_Chain(n,\allowbreak maxnb=[\ldots])} & $a_i,a_i^\dagger,n_i$, occupation projectors $\hat n_i^{(k)}$ for $k=0,\ldots,\text{maxnb}_i-1$ \\
 \texttt{parafermionchain.\allowbreak Parafermionic\_\allowbreak Chain} & $\mathbb Z_N$ parafermion (clock model), $N\in\{2,3,4\}$ & clock/shift operators $\sigma_i,\tau_i$, composite $\chi_i,\psi_i$ \\
-\texttt{bosonchain.\allowbreak SpinBoson\_Chain} & mixes truncated-boson sites and genuine spin-$S$ sites in the same chain, one entry per location (the constructor takes the list of site labels) & boson location: $a_i,a_i^\dagger,n_i$ and the occupation projectors \texttt{D0}..\texttt{D3}; spin location: $S^x_i,S^y_i,S^z_i$. As in \texttt{Mixed\_Spin\_Fermion\_Chain}, operators that do not apply at a location read as the integer \texttt{0} \\
+\texttt{bosonchain.\allowbreak SpinBoson\_Chain} & mixes truncated-boson sites and genuine spin-$S$ sites in the same chain, one entry per location (the constructor takes the list of site labels, e.g.\ \texttt{SpinBoson\_Chain(["B",\allowbreak "S=1/2",\ldots])}) & boson location: $a_i,a_i^\dagger,n_i$ and the occupation projectors \texttt{sb.D[i][k]} (plus \texttt{D0}..\texttt{D3} when every boson location has $\ge4$ levels); spin location: $S^x_i,S^y_i,S^z_i$. As in \texttt{Mixed\_Spin\_Fermion\_Chain}, operators that do not apply at a location read as the integer \texttt{0} \\
 \texttt{mixedchain.\allowbreak Mixed\_Spin\_\allowbreak Fermion\_Chain} & mixes spin-$S$ sites and spinful-fermion locations in the same chain & spin location: native $S^x_i,S^y_i,S^z_i$; fermion location: $c_{i\sigma},c^\dagger_{i\sigma},n_{i\sigma}$ plus derived spin/pairing operators \\
 \bottomrule
 \end{tabular}
@@ -148,13 +148,60 @@ both thread a non-default \texttt{maxnb} through to the tensor-network
 site itself (encoded as the site type code $100+\text{maxnb}_i$, see
 \texttt{mpscpp3/get\_sites.h}/\texttt{extra/bosonfour.h} and, on the
 pure-Python side, \texttt{pyitensor/sites/boson.py}'s
-\texttt{get\_boson\_site()} factory) -- \texttt{itensor\_version=2} and
-the Julia backend still only understand the single fixed 4-level boson
-site regardless of what \texttt{maxnb} requests, so a non-default
-\texttt{maxnb} should be run under \texttt{itensor\_version=3} (the
-default when the compiled C++ extension is available, \texttt{"python"}
-otherwise) or \texttt{"python"} for DMRG/ED results to actually agree;
-see \texttt{examples/boson\_models/boson\_maxnb\_v3\_VS\_ED}.
+\texttt{get\_boson\_site()} factory) -- \texttt{itensor\_version=2}
+understands only the single fixed 4-level boson site (ITensor's
+\texttt{BosonFourSite}), and now says so: any \texttt{maxnb} entry other
+than 4 raises \texttt{ValueError} naming
+\texttt{itensor\_version=3}/\texttt{"python"}/\texttt{mode="ED"} as the
+alternatives, \emph{before} a session is built. It used to abort the
+whole interpreter with SIGABRT from inside ITensor instead, which no
+Python code could catch. So run a non-default \texttt{maxnb} under
+\texttt{itensor\_version=3} (the default when the compiled C++ extension
+is available, \texttt{"python"} otherwise) or \texttt{"python"}; see
+\texttt{examples/boson\_models/boson\_maxnb\_v3\_VS\_ED}. On a 3-site
+chain at \texttt{maxnb=[3,5,3]} the \texttt{"python"} DMRG and ED
+ground-state energies agree to machine precision (measured 8.9e-15).
+\texttt{itensor\_version=3} agrees on the same physics but neither to
+that tolerance nor reproducibly: it starts from a random MPS with QNs
+off, so its agreement varies run to run --- three runs of that example
+here disagreed by 1.05e-03, 1.78e-03 and 1.88e-03, each one over its own
+\texttt{tol = 1e-3}. Expect a loose agreement from v3 here, not a tight
+one, and re-run before concluding anything from a single number. The
+same restriction is \emph{believed} to hold for
+\texttt{itensor\_version="julia\_live"}, but that has not been verified
+here and is not guarded -- treat it as unchecked rather than as a
+documented limitation.
+
+\texttt{SpinBoson\_Chain(sitesin, maxnb=None)} takes one label per
+location: a spin label (\texttt{"S=1/2"}, \texttt{"1/2"},
+\texttt{"S=1"}, \ldots\ as in \texttt{Spin\_Chain}) or a boson label,
+which is \texttt{"B"} for the default 4-level site or \texttt{"B<k>"}
+(\texttt{"B6"}) to name the local dimension --- \texttt{"B4"} and
+\texttt{"B"} are the same site. \texttt{maxnb=} is the alternative
+spelling of the same thing and is honored rather than dropped: one entry
+per location with \texttt{None} at the spin positions, so
+\texttt{SpinBoson\_Chain(["B","S=1/2"], maxnb=[6,None])} and
+\texttt{SpinBoson\_Chain(["B6","S=1/2"])} both build sites
+\texttt{[106, 2]}. A list of the wrong length, an \texttt{n=} that
+contradicts \texttt{len(sitesin)}, a \texttt{maxnb} at a spin position,
+and an unrecognized label all raise \texttt{ValueError} naming what was
+wrong (an unknown label used to surface as \texttt{RuntimeError: No
+active exception to reraise}). Per-site occupation projectors are
+\texttt{sb.D[i][k]}, an empty list at a spin location, mirroring
+\texttt{Bosonic\_Chain}. This class has no ED backend:
+\texttt{mode="ED"} raises \texttt{NotImplementedError} pointing at
+\texttt{mode="DMRG"} (\texttt{itensor\_version=3} or \texttt{"python"}),
+or at \texttt{Bosonic\_Chain} for a purely bosonic model.
+
+\texttt{itensor\_version=} is now accepted by \emph{every} chain
+constructor. \texttt{Bosonic\_Chain}, \texttt{SpinBoson\_Chain},
+\texttt{Parafermionic\_Chain} and
+\texttt{spinfermionchain.Spin\_Fermion\_Hamiltonian} used to raise
+\texttt{TypeError: unexpected keyword argument} for it --- which is
+awkward precisely where the paragraph above tells a boson user to pick a
+backend --- and had to be constructed first and switched afterwards with
+\texttt{setup\_python()} / \texttt{setup\_cpp(version=3)}. Both
+spellings work now.
 
 \section{Building a Hamiltonian and observables}
 
@@ -233,7 +280,21 @@ primitives that act on wavefunctions and operators directly, which the
 worked examples later in this guide use (Section~\ref{sec:groundstate}'s
 \texttt{promote\_to\_dense} example builds a photoemission weight out of
 \texttt{applyoperator} and \texttt{overlap}). Each takes the same
-\texttt{mode=}/\texttt{**kwargs} as the rest of the API:
+\texttt{mode=}/\texttt{**kwargs} as the rest of the API, with one
+qualifier: \texttt{applyoperator}, \texttt{summps},
+\texttt{applyinverse}, \texttt{scale\_mps} and \texttt{exponential} take
+the backend from the \emph{wavefunction's own type}
+(\texttt{mps.MPS} $\to$ DMRG, \texttt{edtk.edchain.State} $\to$ ED),
+because for these the wavefunction is the backend. An explicit
+\texttt{mode=} there is a consistency check, not a switch: naming the
+other backend raises \texttt{TypeError} telling you to rebuild the
+wavefunction with \texttt{get\_gs(mode=...)} rather than silently
+running the solver the state did not come from. \texttt{overlap},
+\texttt{aMb}, \texttt{trace}, \texttt{inverse\_trace},
+\texttt{operator\_norm} and \texttt{is\_zero\_operator} route on
+\texttt{mode=} directly --- note \texttt{overlap}/\texttt{aMb} default to
+\texttt{mode="DMRG"}, so handing them ED states without saying so still
+fails inside the session rather than with a message.
 
 \begin{center}
 \footnotesize
@@ -253,6 +314,23 @@ Call & Returns \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\texttt{exponential(h, wf)} really is $e^{+h}$ on the DMRG backends now,
+as it always was under \texttt{mode="ED"}. It was neither before: for a
+\emph{multi-site} \texttt{h} --- every Hamiltonian-shaped operator,
+since the symbolic Hermiticity test reports \texttt{False} for
+$S^x_iS^x_j+S^y_iS^y_j+S^z_iS^z_j$ --- it fell through to an
+uncontrolled two-term Taylor truncation (1.5\%/16\%/247\% relative error
+at $z=0.25/0.5/1$ on a 4-site Heisenberg chain under
+\texttt{itensor\_version="python"}, unbounded in $z$ and compounding if
+used in a loop), and for a single-site \texttt{h}, where
+the Hermitian branch did run, it computed $e^{-h}$. Anything built on an
+anti-Hermitian argument, i.e.\ real-time evolution written as
+\texttt{exponential(1j*dt*h, wf)}, was therefore evolving
+\emph{backwards}. An operator that is neither Hermitian nor
+anti-Hermitian now raises \texttt{NotImplementedError} on the DMRG
+backends instead of printing a warning and returning a number; use
+\texttt{mode="ED"} on a small chain for that case.
 
 \texttt{trace}, \texttt{operator\_norm} and \texttt{is\_zero\_operator}
 take a \texttt{MultiOperator}, not a compiled \texttt{StaticOperator}. On
@@ -642,6 +720,24 @@ mz = [sc.vev(sc.Sz[i]).real for i in range(n)]        # local magnetization prof
 e2 = sc.vev(h, npow=2)                                  # <H^2>, e.g. for fluctuations
 \end{lstlisting}
 
+\texttt{npow=} now means $\langle O^n\rangle$ on the ED route too. Under
+\texttt{mode="ED"} it used to be accepted and ignored, returning
+$\langle O\rangle$ for every $n$ --- so any previously recorded ED value
+for \texttt{npow>1} is a different quantity and is not comparable.
+\texttt{npow=0} returns \texttt{1.0} on both routes. The two guards
+that were added are \textbf{ED-route only}: on that route a negative
+\texttt{npow} now raises \texttt{ValueError} and, at $T>0$
+(\texttt{vev(..., T=...)}), an \texttt{npow} other than 1 raises
+\texttt{NotImplementedError} telling you to pass the explicit product
+operator instead --- where both used to be accepted silently and answer
+with $\langle O\rangle$. The DMRG routes are unchanged and still answer
+rather than raise: under \texttt{itensor\_version="python"},
+\texttt{vev(Sz[0], npow=-1)} returns ${\approx}0$ and
+\texttt{vev(Sz[0], npow=2, T=1.0)} returns 0.25. This matters beyond an
+explicit \texttt{mode="ED"}: it also reaches the \emph{automatic} ED
+routes (no compiled C++ extension, or \texttt{itensor\_version=3} on a
+chain with fewer than 3 sites), which nobody opts into.
+
 The model classes wrap the most common of these profiles, so the loop
 above rarely has to be written by hand. Each takes the same
 \texttt{mode=}/\texttt{**kwargs} as \texttt{vev} and returns one value
@@ -668,6 +764,33 @@ state):
 \begin{lstlisting}
 de = sc.gs_energy_fluctuation()
 \end{lstlisting}
+
+\texttt{mode=} is now actually forwarded here:
+\texttt{gs\_energy\_fluctuation(mode="ED")} runs ED, where it used to
+return the DMRG number byte for byte --- so a value recorded as an ``ED
+energy fluctuation'' from before this change is a DMRG value. Together
+with the \texttt{npow} fix above, every ED route now evaluates
+$\sqrt{|\langle H^2\rangle-\langle H\rangle^2|}$ rather than
+$\sqrt{|\langle H\rangle-\langle H\rangle^2|}$: on a 4-site Heisenberg
+chain \texttt{mode="ED"} reports 0.0 where it used to report 2.0561, and
+a 2-site chain on the \emph{default} backend --- which \texttt{mode.py}
+routes to ED by itself --- reports 1.05e-08 where it used to report
+1.1456. Anything using this number as a convergence criterion
+(\texttt{get\_gs(maxde=...)}, or a script that tightens \texttt{maxm}
+until it drops) therefore behaves differently on an ED route.
+\texttt{npow=} is rejected with a \texttt{TypeError}: this function sets
+the powers itself.
+
+What the number floors at is backend-dependent, which is worth knowing
+since this is the one place the guide invites you to tune \texttt{maxm}
+by watching it. On a 10-site Heisenberg chain at the stock
+\texttt{maxm=30}, \texttt{itensor\_version=3} reports 1.7e-07 and
+\texttt{itensor\_version="python"} 6.3e-06 --- \texttt{"python"}'s floor
+is its Lanczos eigenvector accuracy ($\sim10^{-6}$; its ground-state
+solver stops on the Ritz \emph{value}, whose error is quadratic in the
+eigenvector error), not the double-precision cancellation floor the C++
+backend reaches. A \texttt{"python"} fluctuation that stops falling at
+$10^{-6}$ has hit that cap, not a bond-dimension limit.
 
 \textbf{Static two-point correlators.} \texttt{sc.vev(sc.Sz[0]*sc.Sz[i])}
 gives $\langle S^z_0 S^z_i\rangle$ directly; \texttt{correlator.get\_correlator}
@@ -1186,6 +1309,43 @@ and \texttt{get\_four\_correlation\_tensor} give the corresponding
 two-particle correlators $\langle c_i^\dagger c_j^\dagger c_l
 c_k\rangle$ and $\langle c_i^\dagger c_j c_k^\dagger c_l\rangle$.
 
+\texttt{get\_correlation\_matrix(dmmode=...)} picks how $C_{ij}$ is
+evaluated (\texttt{"simple"}, \texttt{"fast"}, \texttt{"explicit"},
+\texttt{"full"}). The default, \texttt{dmmode=None}, is resolved from
+\textbf{the state being measured}, not from the backend the chain was
+built with, and only after that state exists: with no conserved sector
+it is \texttt{"fast"} (apply each $c_i$ to the state and overlap the
+results --- much the cheapest); with a sector, that step would change
+the particle number, so it is \texttt{"full"} when the wavefunction
+carries a live DMRG session handle that can answer the matrix directly
+(\texttt{itensor\_version=3} and \texttt{"python"}), and the
+backend-agnostic \texttt{"explicit"} otherwise --- \texttt{mode="ED"},
+\texttt{"julia\_live"}, \texttt{basis="Nambu"}, or any state with no
+session handle. That last case is why a conserved sector plus
+\texttt{mode="ED"} now answers \texttt{get\_correlation\_matrix},
+\texttt{get\_correlation\_eigenvalues},
+\texttt{get\_correlation\_entropy},
+\texttt{get\_correlation\_entropy\_density},
+\texttt{get\_correlated\_orbitals} and
+\texttt{get\_correlated\_density} instead of dying with an
+\texttt{AttributeError}: the sector case used to hardcode the
+session-only \texttt{"full"}, on the since-obsolete premise that only
+DMRG could reach a sector at all.
+
+A \textbf{misspelled} \texttt{dmmode}, \texttt{basis}, \texttt{ctmode}
+or \texttt{fpmode} now raises \texttt{ValueError} naming the argument
+and listing the accepted values, where it used to surface as
+\texttt{RuntimeError: No active exception to reraise} --- or, for
+\texttt{basis=}, as no error at all: the old \texttt{else} branch served
+both \texttt{"electron"} and ``you typo'd it'', so a typo silently
+returned the electron-basis matrix. A \texttt{dmmode} you pass
+explicitly is now also rejected \emph{before} the ground-state solve
+rather than after it. What has not changed is that an
+explicitly-passed mode is still a hard request: it raises rather than
+silently falling back when that method is not available for the
+wavefunction at hand. The new error only distinguishes ``you misspelled
+this'' from ``this mode exists but not here''.
+
 \texttt{get\_four\_correlation\_tensor(ctmode=...)} has five
 implementations: \texttt{ctmode="explicit"} (backend-agnostic Python loop
 of \texttt{vev()}s, always available), \texttt{ctmode="full"} (native
@@ -1306,22 +1466,94 @@ default resolver picks \texttt{"batched"} under
 \section{Dynamical (frequency-dependent) correlators}
 \label{sec:dynamical}
 
-The central quantity is a retarded correlator (Green's function)
-between two operators $A,B$,
+The quantity returned is the \textbf{complex Lehmann density} of the
+operator pair $(A,B)$, Lorentzian-broadened by $\delta$:
 
 \begin{equation}
-G_{AB}(\omega)=\langle\mathrm{GS}|A\,\frac{1}{\omega-H+E_0+i\delta}\,B|\mathrm{GS}\rangle,\qquad
-S_{AB}(\omega)=-\frac1\pi\,\mathrm{Im}\,G_{AB}(\omega)
+S_{AB}(\omega)\;\equiv\;\sum_n M_n\,\frac{\delta}{\pi\big[(\omega-\Delta_n)^2+\delta^2\big]}
+\;\xrightarrow[\delta\to0]{}\;\sum_n M_n\,\delta(\omega-\Delta_n)
+\;=\;\frac{i}{2\pi}\Big[G^R_{AB}(\omega)-G^A_{AB}(\omega)\Big]
 \end{equation}
 
-where $\delta$ is a small broadening. Choosing $A=B=S^z_i$ at the same
+with $M_n=\langle\mathrm{GS}|A|n\rangle\langle n|B|\mathrm{GS}\rangle$,
+$\Delta_n=E_n-E_0$, and the retarded/advanced resolvents
+
+\begin{equation}
+G^{R/A}_{AB}(\omega)=\langle\mathrm{GS}|A\,\frac{1}{\omega-H+E_0\pm i\delta}\,B|\mathrm{GS}\rangle
+\end{equation}
+
+$\delta$ is the small broadening. $M_n$ is complex in general, so the
+returned array is complex. The discriminant that matters is
+$\mathrm{Im}\,M_n=0$: \textbf{whenever every $M_n$ is real}, the density
+is real and coincides exactly with the equally common convention
+$-\frac1\pi\mathrm{Im}\,G^R_{AB}$. That is a weaker condition than the
+\textbf{Hermitian pair} $A=B^\dagger$, which only adds non-negativity
+($M_n=|\langle n|B|\mathrm{GS}\rangle|^2\ge0$). A real Hamiltonian with
+real $A$ and $B$ has real $M_n$ whether or not $A=B^\dagger$: measured
+on a 6-site Heisenberg chain with $A=S^z_0$, $B=S^z_2$,
+$\max_n|\mathrm{Im}\,M_n|=0$ and the two conventions agree to 1.1e-16
+--- while the density does dip negative there (min $-0.0582$ against a
+peak $0.1515$), which a Hermitian pair never does. Every
+\texttt{name=(A,B)} example in this guide \textbf{on a Hermitian $H$} has
+real $M_n$ --- they are Hermitian pairs such as $(S^z_0,S^z_0)$ and
+$(A,A^\dagger)$, plus the $S(q,\omega)$ sweep below, whose
+$(S^z_i,S^z_j)$ at $i\neq j$ is \emph{not} a Hermitian pair but is still
+real --- so if that is the case you work in, nothing below changes
+anything for you. The qualifier is load-bearing: under a non-Hermitian
+$H$ (the \texttt{submode="KPM"} example in the non-Hermitian section) the
+$\Delta_n$ are themselves complex and this whole construction --- real
+$\Delta_n$, orthonormal $|n\rangle$ --- does not apply; that section
+defines its own quantity. The criterion is
+not vacuous: mixing $S^y$ with $S^z$ on the same real Hamiltonian gives
+a purely \emph{imaginary} $M_n$ ($\max_n|\mathrm{Re}\,M_n|=0$).
+
+The two conventions differ by the dispersive term:
+$-\frac1\pi\mathrm{Im}\,G^R_{AB}=\sum_n[\mathrm{Re}(M_n)\delta-\mathrm{Im}(M_n)(\omega-\Delta_n)]
+/\pi[(\omega-\Delta_n)^2+\delta^2]$. The operational reason dmrgpy picks
+the density is the kernel-independent sum rule
+
+\begin{equation}
+\int d\omega\,S_{AB}(\omega)=\sum_n M_n=\langle\mathrm{GS}|A\,B|\mathrm{GS}\rangle
+\end{equation}
+
+which any submode can be checked against, and which
+$-\frac1\pi\mathrm{Im}\,G^R$ does \emph{not} satisfy: its dispersive
+term has principal-value tails that leak arbitrarily far outside any
+finite frequency window. (Measured on a 4-site chain with complex
+hoppings and $A=c^\dagger_0$, $B=c_2$: the exact $\langle AB\rangle$ is
+$0.1105-0.2714i$; \texttt{submode="KPM"} integrates to that within 9e-11
+under \texttt{mode="ED"} and 3.8e-06 under \texttt{mode="DMRG"}, while
+the $-\frac1\pi\mathrm{Im}\,G^R$ curve integrates to a real 0.13145.)
+
+Choosing $A=B=S^z_i$ at the same
 site gives the local dynamical spin structure factor
 $S^{zz}_{ii}(\omega)$ (what a local probe like NMR/ESR couples to);
 choosing $A=S^z_i$, $B=S^z_j$ at different sites and Fourier-transforming
 over $i-j$ gives the momentum-resolved dynamical structure factor
 $S(q,\omega)$ measured in inelastic neutron scattering. All of the
-submodes below compute $G_{AB}(\omega)$ (or equivalently
-$S_{AB}(\omega)$); they differ only in \emph{how}, and therefore in what
+submodes below compute $S_{AB}(\omega)$ as defined above ---
+\texttt{submode="CVM"} under \texttt{mode="DMRG"} being the one that only
+recently joined them, so that it now agrees with its own
+\texttt{mode="ED"} counterpart (measured 1.9e-09 apart on a 6-site
+Heisenberg chain --- comfortably below the solver's own per-frequency
+residual, which prints at ${\sim}10^{-5}$ on that run; see
+Section~\ref{sec:whatraises}). Do not
+read that as \texttt{mode="ED"} and \texttt{mode="DMRG"} agreeing
+pointwise in general: they share a convention, not a kernel or a
+resolution. The default \texttt{submode="KPM"} in particular still
+differs between the two routes by an amount comparable to the peak ---
+on the 6-site Heisenberg chain with $A=B=S^z_0$ the two curves differ by
+a sizeable fraction of the peak height at $\delta=0.1$--$0.3$. No
+absolute figure is quoted here on purpose: the number depends on the
+$\omega$ grid (a spacing coarser than $\delta$ samples the peaks rather
+than resolving them), and three independent measurements on three grids
+gave three different answers. That is a resolution difference, not a convention one ---
+both integrate to $\langle AB\rangle$, as the sum-rule measurement above
+shows. The one qualifier is
+the real-time pair \texttt{submode="TD"}/\texttt{"TDZ"}, which returns
+the complex one-sided Fourier transform rather than the density itself:
+see that section's own formula and the note there. Otherwise they differ
+only in \emph{how}, and therefore in what
 energy range/resolution/cost trade-off they offer:
 
 \begin{lstlisting}
@@ -1627,7 +1859,7 @@ stagnate at a much worse residual than from the cold start --- so each
 point is solved independently.)
 
 \textbf{\texttt{submode="CVM\_explicit"} --- the resolvent formed
-explicitly.} Computes the same $G_{AB}(\omega)$ as
+explicitly.} Computes the same $S_{AB}(\omega)$ as
 \texttt{submode="CVM"}, but without the positive-definite reformulation
 above: it applies $(\omega+E_0\pm i\eta-H)^{-1}$ to $B|\mathrm{GS}\rangle$
 directly, as two \texttt{applyinverse} solves at $\pm i\eta$, and combines
@@ -1636,8 +1868,26 @@ conjugate-gradient machinery, but it inherits \texttt{applyinverse}'s
 accuracy rather than \texttt{"CVM"}'s controlled CG residual, so
 \texttt{"CVM"} is the better default; use this one to cross-check a
 suspicious \texttt{"CVM"} curve. It assumes $A^\dagger=B$ and raises
-otherwise. On a non-Hermitian $H$ it is one of the two submodes (with
-\texttt{"CVM"}) that has a genuine non-Hermitian implementation.
+\texttt{NotImplementedError} naming the submode otherwise (it used to be
+a bare \texttt{RuntimeError: No active exception to reraise} after a
+bare \texttt{print}). On a non-Hermitian $H$ it is one of the two
+submodes (with \texttt{"CVM"}) that has a genuine non-Hermitian
+implementation.
+
+``The same $S_{AB}$ as \texttt{"CVM"}'' is a statement that only became
+true recently, and it is the one number-changing item here that hits
+\emph{everyone}, Hermitian pairs included: \texttt{"CVM\_explicit"}
+returned exactly \textbf{twice} the correct value, at every frequency.
+This submode is DMRG-only --- \texttt{mode="ED"} raises
+\texttt{NotImplementedError: submode='CVM\_explicit' has no ED
+implementation} --- but it was the same factor of 2 on every DMRG
+backend, since the fix is one backend-agnostic line. Any spectrum, peak
+height, integrated weight or figure produced with it before that fix is
+a factor of 2 too large. On the 6-site staggered Heisenberg chain the
+two now agree to 5.7e-07. Its output is also plain complex now: on a
+non-Hermitian $H$ it used to be passed through \texttt{np.abs()}, which
+discarded the phase and reported $+|z|$ for values that are genuinely
+negative or complex.
 
 \textbf{\texttt{submode="ROOTN"} --- root-$N$ Krylov-space correction
 vector.} Implements Nocera \& Alvarez, ``Root-$N$ Krylov-space
@@ -1678,6 +1928,40 @@ independent of the Krylov truncation.
                                       name=(sc.Sz[0], sc.Sz[0]),
                                       N=8, nkry=20) # itensor_version in (2,3,"python")
 \end{lstlisting}
+
+\textbf{Both \texttt{mode=} values return the house convention}, the
+complex Lehmann density $\frac{i}{2\pi}(G^R-G^A)$ defined at the top of
+this section, and each gets there by running the fractional-resolvent
+recursion \textbf{twice}, once at $+i\delta$ and once at $-i\delta$.
+That is the price of the convention and it is close to a literal factor
+of two: \texttt{"ROOTN"} was already the most expensive submode here
+($N$ sequential Lanczos subspaces of dimension \texttt{nkry} per
+frequency, each step under \texttt{mode="DMRG"} a truncated MPO
+application over the whole chain), and it now runs $2N$ of them.
+
+There is no shortcut, and it is worth knowing why, because
+\texttt{"CVM"} does have one. \texttt{cvm.py} solves a linear system
+whose $-\eta$ version is the same system with the right-hand side
+negated, so both resolvents fall out of one solve; root-$N$ applies a
+\emph{function} of $H$, so the $-\eta$ pass genuinely re-seeds $N$ new
+Krylov subspaces. Nor does conjugation help:
+$\overline{G^R_{A,B}}=G^A_{B^\dagger,A^\dagger}$ is the advanced
+resolvent of a \emph{different} operator pair, and it collapses to
+$G^A_{A,B}$ only for $A=B^\dagger$ --- a case in which the two
+conventions already coincide, so the shortcut exists only where it is
+not needed.
+
+Results produced before this change used
+$-\frac1\pi\mathrm{Im}\,G^R$ and are \textbf{not comparable when some
+$M_n$ is complex}, which for real operators on a real Hamiltonian never
+happens (see the criterion at the top of this section); where the two
+conventions coincide the curves coincide too, up to the recursion's own
+tolerance. \texttt{mode="ED"} moved first and
+\texttt{mode="DMRG"} followed; on the 4-site complex-hopping chain with
+$A=c^\dagger_0$, $B=c_2$ at $N=6$, \texttt{nkry=16}, the
+\texttt{mode="DMRG"} curve moves by up to 5.7e-01 against a peak of
+0.61, and the returned array is genuinely complex there where it used to
+be a real float.
 
 Two implementations exist, both cross-checked to agree at machine
 precision on small chains (see
@@ -1733,6 +2017,27 @@ width $\delta$ in frequency) and Fourier transformed,
 \begin{equation}
 S_{AB}(\omega)=\frac1\pi\,\mathrm{Re}\!\int_0^{T}\!dt\;e^{i\omega t}\,C(t)\,w_\delta(t)
 \end{equation}
+
+Note the $\mathrm{Re}$ --- and that the returned array is the
+\textbf{whole complex transform, not its real part}, so it is not the
+density this section defines and does not become the density for a
+Hermitian pair either. A one-sided transform of $C(t)$ is a
+\emph{resolvent}, not a spectral density: in the $T\to\infty$ limit what
+comes back is $-\frac{i}{\pi}G^A_{AB}(\omega)$, whose real part is
+$\frac1\pi\mathrm{Im}\,G^A_{AB}$, and that real part equals the density
+whenever $M_n$ is real, since
+$\mathrm{Im}\,G^A=-\mathrm{Im}\,G^R$ only holds there. \textbf{So take
+\texttt{.real}} if you want the same quantity the other submodes return;
+the imaginary part is the dispersive term, and it is not small. Measured
+on the 6-site Heisenberg chain with the Hermitian pair $A=B=S^z_0$
+($\delta=0.3$, \texttt{nt=2000}, \texttt{dt=0.02}, density peak 0.1421):
+max $|\mathrm{Im}\,y|$ is 9.96e-02, i.e.\ 70\% of the peak, and the
+array as returned sits that same 9.96e-02 from the density --- while its
+real part matches the density to 4.0e-05 and the array as a whole
+reproduces $-\frac{i}{\pi}G^A_{AB}$ to 5.5e-05. On a pair with complex
+$M_n$ not even the real part is the density, so cross-check
+\texttt{"TD"}/\texttt{"TDZ"} there against \texttt{submode="KPM"} or
+\texttt{"ED"} rather than reading it directly.
 
 The total simulated time $T$ (\texttt{damping\_periods}/$\delta$) must
 be long enough that the damping has suppressed truncation ringing by
@@ -4673,5 +4978,173 @@ and column is genuinely read and no such shortcut exists. That is
 $O(\mathrm{dim}^2)$ in the sum, the same order as the dense
 diagonalization it already performs --- 0.47\,s on a 1024-dimensional
 Hilbert space, against 0.004\,s for a 6-site chain.
+
+
+\subsection*{The 2026-09 audit}
+
+A second cross-backend audit
+(\texttt{docs/audit\_2026\_09\_hole\_hunt.md}) recorded 36 confirmed
+findings, 35 of them now fixed; the one exception is marked PARTIAL
+there (the iDMRG matrix-free item, whose compute half landed and whose
+memory half did not). The list below is the physics-facing
+half --- what changes for a user who never reads the architecture docs.
+
+\textbf{Results that are not comparable across this change.} Read this
+the way you read the two 2026-08 items above.
+
+\begin{itemize}
+\item \textbf{\texttt{submode="CVM\_explicit"} returned exactly twice the
+correct spectrum}, at every frequency. The submode is DMRG-only
+(\texttt{mode="ED"} raises \texttt{NotImplementedError}), and the factor
+of 2 was the same on every DMRG backend, the fix being one
+backend-agnostic line. Verified directly on the 6-site staggered Heisenberg
+chain: the first four points came back as
+\texttt{[0.2169497, 0.0920095, 0.1731231, 0.1051759]} against
+\texttt{submode="CVM"}'s
+\texttt{[0.1084749, 0.0460046, 0.086561, 0.0525879]}, i.e.\ a ratio of 2
+to six digits; they now agree to 5.7e-07. Any peak height, integrated
+weight or figure produced with \texttt{"CVM\_explicit"} before this is a
+factor of 2 too large. This is the one correlator change that hits
+Hermitian pairs as well.
+\item \textbf{Three dynamical-correlator routes moved onto the house
+convention} of Section~\ref{sec:dynamical} (the complex Lehmann density)
+from $-\frac1\pi\mathrm{Im}\,G^R$: \texttt{mode="DMRG" submode="CVM"},
+\texttt{submode="ROOTN"} under both \texttt{mode=} values, and
+\texttt{mode="ED" submode="ED"} (at $T=0$ and $T>0$), which is the exact
+reference every other submode is validated against. \textbf{Where every
+$M_n$ is real nothing moves at all} --- the two conventions are then
+identical (measured to 1.1e-16), and that covers every
+\texttt{name=(A,B)} example in this guide, Hermitian pairs and the
+$S(q,\omega)$ sweep's $(S^z_i,S^z_j)$ alike; Section~\ref{sec:dynamical}
+states the criterion and why $A=B^\dagger$ is not it. For a pair with
+complex $M_n$ the curves move by more than their
+own peak: on a 4-site complex-hopping chain with $A=c^\dagger_0$,
+$B=c_2$ at $\delta=0.15$ the two conventions differ by up to 5.720e-01
+against a peak of 0.61. \texttt{submode="ED"} also returns a complex array now where it
+returned \texttt{float64} before (same real part, to the digit; the
+imaginary part it used to drop peaks at 0.5682 on that pair), so a caller
+that assumed a float array should take \texttt{.real}.
+\texttt{submode="KPM"} (the default), \texttt{"INV"}, \texttt{"CVM"}
+under \texttt{mode="ED"}, \texttt{"EX"}, \texttt{"TD"}, \texttt{"TDZ"}
+and \texttt{"SECTOR"} are untouched. \texttt{mode="ED" submode="ROOTN"}
+and \texttt{mode="DMRG" submode="ROOTN"} are also roughly \textbf{2x
+slower} now, for the reason given in Section~\ref{sec:dynamical}.
+\item \textbf{\texttt{vev(op, npow=n)} on an ED route} returned $\langle
+O\rangle$ for every $n$; it now returns $\langle O^n\rangle$. Measured on
+a 4-site Heisenberg chain, \texttt{vev(Sz[0], npow=2, mode="ED")} went
+from 5.6e-17 (i.e.\ $\langle S^z_0\rangle$) to 0.25.
+\item \textbf{\texttt{gs\_energy\_fluctuation} on an ED route} inherited
+that and also ignored \texttt{mode=}. On the same chain
+\texttt{sc.mode="ED"} reported 2.0561 and now reports 0.0; a 2-site chain
+on the \emph{default} backend (which \texttt{mode.py} routes to ED by
+itself) reported 1.1456 and now reports 1.05e-08. Anything using it as a
+convergence criterion behaves differently on those routes. DMRG-route
+values are bit-unchanged.
+\item \textbf{\texttt{exponential(h, wf)} on the DMRG backends} --- see the
+\emph{MPS and operator algebra} paragraph above. Measured as
+$\langle\mathrm{GS}|e^{zH}|\mathrm{GS}\rangle$ on a 4-site Heisenberg
+chain under \texttt{itensor\_version="python"}, against the ED value:
+0.6776 vs 0.6676 at $z=0.25$, 0.5184 vs 0.4457 at $z=0.5$, 0.6897 vs
+0.1987 at $z=1$ (1.5\%, 16\%, 247\%). It now agrees with ED to
+$\sim$1e-8 at all three.
+\item \textbf{Boson occupation projectors under \texttt{mode="ED"}} were
+wrong on any Hamiltonian that does not conserve the total boson number.
+On a 3-site, 4-level chain with an $a_i+a^\dagger_i$ drive, site 0's
+$P(n)$ read \texttt{[0.0042, 0.0054, -0.048, 0.0706]}, summing to 0.032
+--- a negative probability included. It now reads
+\texttt{[0.0322, 0.2393, 0.4732, 0.2553]}, summing to 1.0000 and matching
+DMRG. A number-\emph{conserving} Hamiltonian is unaffected to machine
+precision, which is why nothing caught this; $\langle n_i\rangle$, the
+energies and every DMRG backend were always right.
+\item \textbf{\texttt{SpinBoson\_Chain(..., maxnb=[...])}} silently built
+the 4-level site regardless:
+\texttt{SpinBoson\_Chain(["B","S=1/2"], maxnb=[6,None])} gave sites
+\texttt{[104, 2]} and now gives \texttt{[106, 2]}. Earlier results at a
+non-default \texttt{maxnb} are results at \texttt{maxnb=4}. With no
+\texttt{maxnb=} nothing changes.
+\item \textbf{\texttt{itensor\_version="python"}}, several ways. Its
+\texttt{applyMPO} used to truncate in a gauge where discarding the
+smallest singular values is not the optimal truncation, so every
+repeated-application consumer moved at the 1e-5..1e-9 level:
+\texttt{applyoperator}, \texttt{vev(..., npow>1)},
+\texttt{gs\_energy\_fluctuation} (5.06e-05 $\to$ 6.27e-06 on a 10-site
+Heisenberg chain at \texttt{maxm=30} --- the old number was mostly the
+MPO-application error rather than the state's), the KPM Chebyshev
+recursion and therefore every KPM correlator and
+\texttt{get\_distribution}, CVM, \texttt{applyinverse}, and the
+MPO-Taylor evolution paths. The new values are the ones that match
+\texttt{itensor\_version=3} and ED. The product is now formed exactly and
+truncated once afterwards, which is more work per application; the cost
+is workload-dependent, so budget for it rather than expecting a fixed
+factor. Separately, its TDVP real-time evolution
+did not canonicalize the state before the first half-sweep, so a
+trajectory whose start state was not already in that gauge took its
+first step under an unprojected generator; the audit record
+(\texttt{docs/audit\_2026\_09\_hole\_hunt.md}, finding \#1) carries the
+reproduction and the mechanism. Which start states escaped it is not
+recorded there and is not claimed here. And a chain object reused
+across several
+\texttt{set\_hamiltonian()} calls could keep a start state belonging to
+the previous Hamiltonian. Both are fixed; no \texttt{itensor\_version}
+other than \texttt{"python"} was affected by any of this.
+\item \textbf{\texttt{promote\_to\_dense()} now keeps the sector's
+energy on \texttt{itensor\_version="python"}} --- the guarantee
+the sector-targeting part of the ground-state section states (``a bare
+\texttt{gs\_energy()}
+afterwards still returns the sector's energy rather than re-solving'')
+was true on \texttt{itensor\_version=3} and \texttt{mode="ED"} but not
+there: promotion invalidated the session's cached energy, and
+pyitensor's unconstrained re-solve then left the sector. On a 3-site
+Hubbard chain confined to \texttt{Nf=3} the audit recorded a
+post-promotion energy of $-2.3399130755$ with $\langle N\rangle=2$
+against the sector's own $-1.9408140222$ with $\langle N\rangle=3$; it
+now returns the sector value, re-measured here. Any \texttt{"python"}
+result that called \texttt{gs\_energy()}/\texttt{get\_gs()} after
+\texttt{promote\_to\_dense()} --- the documented workflow --- is a
+different number than it was. The other backends are unchanged, and a
+chain where the sector and global ground states coincide never saw it.
+\end{itemize}
+
+\textbf{And these now raise, or now work, where they used to be silent:}
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{0.34\textwidth}p{0.30\textwidth}p{0.29\textwidth}@{}}
+\toprule
+\textbf{Call} & \textbf{Was} & \textbf{Now} \\
+\midrule
+\texttt{Bosonic\_Chain(n, maxnb=[...])} with \texttt{maxnb != 4} on \texttt{itensor\_version=2} & SIGABRT inside ITensor & \texttt{ValueError} naming the working backends \\
+\texttt{itensor\_version=} on \texttt{Bosonic\_\allowbreak Chain}, \texttt{SpinBoson\_\allowbreak Chain}, \texttt{Parafermionic\_\allowbreak Chain}, \texttt{Spin\_\allowbreak Fermion\_\allowbreak Hamiltonian} & \texttt{TypeError: unexpected keyword argument} & honored \\
+\texttt{SpinBoson\_Chain(["boson", ...])}, or any unknown site label & \texttt{RuntimeError: No active exception to reraise} & \texttt{ValueError} listing the accepted labels \\
+\texttt{SpinBoson\_Chain(..., maxnb=[...])} of the wrong length, or \texttt{n=} contradicting \texttt{len(sitesin)} & silently dropped & \texttt{ValueError} \\
+\texttt{SpinBoson\_Chain} under \texttt{mode="ED"} & failure inside an unimplemented stub & \texttt{NotImplementedError} naming the DMRG alternatives \\
+\texttt{vev(..., npow=n)} with \texttt{n<0}, or with \texttt{n!=1} at $T>0$, \textbf{on an ED route} & accepted silently, answering with $\langle O\rangle$ & \texttt{ValueError} / \texttt{NotImplementedError} (the DMRG routes still answer) \\
+\texttt{gs\_energy\_fluctuation(npow=...)} & accepted and misused & \texttt{TypeError} \\
+\texttt{exponential(h, wf)} with \texttt{h} neither Hermitian nor anti-Hermitian, on DMRG & a warning and a number & \texttt{NotImplementedError} \\
+\texttt{applyoperator}, \texttt{summps}, \texttt{applyinverse}, \texttt{scale\_mps}, \texttt{exponential} with a \texttt{mode=} naming the other backend & ran the wavefunction's own backend anyway (or a bare \texttt{raise}) & \texttt{TypeError} saying which backend the state belongs to \\
+\texttt{get\_rdm()} on any ED route & \texttt{AttributeError} several frames deep & \texttt{NotImplementedError} \\
+the bond entanglement entropy on any ED route & \texttt{AttributeError} several frames deep & \texttt{NotImplementedError} pointing at \texttt{get\_site\_\allowbreak entropy}, \texttt{get\_pair\_\allowbreak entropy} \\
+\texttt{get\_bond\_entropy(wf, i, j)} with a site out of range & the audit recorded a SIGABRT on the C++ backends & \texttt{IndexError} \\
+\texttt{get\_hamiltonian()} before \texttt{set\_hamiltonian()} & \texttt{'int' object is not iterable}, or \texttt{takes 0 positional arguments} & \texttt{ValueError} naming the fix \\
+a misspelled \texttt{ctmode}/\texttt{dmmode}/\texttt{fpmode} & \texttt{RuntimeError: No active exception to reraise} & \texttt{ValueError} listing the accepted values \\
+a misspelled \texttt{basis=} in \texttt{get\_correlation\_matrix} & the electron-basis matrix, silently & \texttt{ValueError} \\
+\texttt{submode="CVM\_explicit"} with $A^\dagger\neq B$ & a \texttt{print} then \texttt{RuntimeError: No active exception to reraise} & \texttt{NotImplementedError} naming the submode \\
+\texttt{get\_distribution()} with no \texttt{X=} & \texttt{RuntimeError: No active exception to reraise} & \texttt{TypeError} naming \texttt{X=} \\
+\texttt{MultiOperator / "a"}, \texttt{*} by an ndarray, or \texttt{multioperator.\allowbreak obj2MO} on an unrecognized object & \texttt{RuntimeError: No active exception to reraise} & \texttt{TypeError} naming what was passed \\
+\texttt{sc.mode = "dmrg"} (any unrecognized spelling) & accepted, and silently decided by the automatic fallbacks & \texttt{ValueError} \\
+a conserved sector under \texttt{mode="ED"} + the \texttt{get\_correlation\_*} family & \texttt{AttributeError} & works, via the backend-agnostic \texttt{dmmode="explicit"} \\
+\texttt{get\_dynamical\_correlator()} on \texttt{Parafermionic\_Chain} without an explicit \texttt{mode=} & the audit recorded a process abort & works, and obeys \texttt{self.mode} and the automatic ED fallbacks like every other chain class \\
+\bottomrule
+\end{tabular}
+\normalsize
+\end{center}
+
+\texttt{Parafermionic\_Chain} lost its own
+\texttt{get\_dynamical\_correlator} override in the process --- it was
+the base-class method minus the mode resolution and minus the
+\texttt{name="..."} string resolution --- so both the documented string
+form of \texttt{name=} and \texttt{mode=}/\texttt{self.mode} work there
+now. \texttt{Parafermionic\_Chain.test(ntries=...)} is honored too, as
+\texttt{Spin\_Chain.test(ntries=...)} already was.
 
 \end{document}

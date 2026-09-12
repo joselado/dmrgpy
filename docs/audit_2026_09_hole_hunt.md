@@ -9,7 +9,37 @@ whose brief was to *refute* it. `REFUTED` findings are not reproduced here.
 This file is the evidence, not a task list -- same convention as
 `audit_2026_08_hole_hunt.md`: it records what was observed and how to reproduce
 it, so a fix (or a decision that the behaviour is intended after all) does not
-have to re-derive any of it. Nothing here is fixed yet; mark entries as they are.
+have to re-derive any of it. Fixed entries are marked with a `**Status**` line and
+kept rather than deleted, since the repro doubles as the regression check.
+
+All 36 have now been addressed. Counting the `**Status**` lines below
+mechanically (`grep -c '^\*\*Status\*\*'`): 36 of them, of which 35 read FIXED
+and one (**#20**) reads PARTIAL -- its compute half landed and its memory half
+(`Es` still materialized, ~540 MB peak at chi=64) did not. One of the 35 is
+qualified: **#3** is fixed on `itensor_version="python"` only, the C++
+counterpart of the same defect being open as
+`docs/known_issue_v3_vumps_variational_floor.md`.
+
+The work ran as seven file-disjoint fix clusters in parallel
+(`pyitensor-evolution`, `pyitensor-infinite`, `ed-backend`, `core-dispatch`,
+`correlator-conventions`, `entropy-infinite`, `examples`), then three follow-up
+handoff lanes afterwards, not alongside them (`rootn-convention`,
+`vumps-grouped-fallback`, `dispatch-leftovers` -- which is why #5's Status says
+it was "completed afterwards by a follow-up lane"), plus one C++ fix (#7) taken
+separately by hand because swapping `_dmrgcpp*.so` mid-flight would have broken
+every other cluster's test runs.
+The regressions live in eight new `tests/test_audit_2026_09_<name>.py` files --
+one per fix cluster, plus one for the `dispatch-leftovers` handoff -- along with
+an extended `tests/test_vumps_redundant_bond_dimension.py`; each `**Status**`
+line names the tests that pin its own finding, or says so where none does (only
+#7). Several fixes changed numbers rather than
+behaviour -- CLAUDE.md's "the 2026-09 audit" paragraph carries the consolidated
+not-comparable list, and each finding's own `**Status**` line and the
+"Numbers changing" notes in the fix reports carry the detail.
+
+Two further items, found while re-measuring this record's own claims rather
+than by a lens, are open and unfixed: see "Open items found while correcting
+this record" below the findings.
 
 ## The eight lenses
 
@@ -48,6 +78,8 @@ MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 ### 1. pyitensor's TDVP integrator is first-order in dt, not second-order: every real-time evolution on itensor_version="python" carries an O(dt) error where itensor_version=3 is exact
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `python-backend-parity`
+
+**Status**: FIXED -- root-caused past where the audit could localize it: `tdvp_step()` had an unstated *gauge* precondition (the right environments it uses as the tangent-space projector are only isometries if psi is right-canonical), and every state arriving from `applyMPO` is left-canonical, so exactly the FIRST step of each trajectory evolved under an unprojected generator -- one O(dt) step followed by exact ones, which reads as a first-order integrator. `pyitensor/tdvp.py` now calls a lossless QR-based `_gauge_center(psi, 1)` at the top of `tdvp_step()`, the same guard `mpscpp3/TDVP/tdvp.h:186` already does. Pinned by `tests/test_audit_2026_09_pyitensor-evolution.py::test_python_tdvp_is_dt_independent_at_full_bond_dimension` (pins the ORDER, not a value) and `::test_python_tdvp_single_step_is_exact_at_full_bond_dimension`.
 
 **Where**: `src/dmrgpy/pyitensor/tdvp.py:_half_sweep_lr / _half_sweep_rl (tdvp_step, ~line 300); reached from pyitensor/chain.py:846 quench_tdvp, :870 evolve_and_measure_tdvp, :723 tdvp_step; dispatched at src/dmrgpy/timedependent.py:169,248 and src/dmrgpy/tdz.py:168`
 
@@ -126,6 +158,8 @@ WHERE I DISAGREE WITH THE HUNTER: the suggested location ("the RL half-sweep is 
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `dispatch-matrix`
 
+**Status**: FIXED -- `pyitensor/chain.py::set_hamiltonian` now drops `self.wf0` when the incoming term list actually differs from `self._h_terms`, so `restart()`'s "genuinely cold recalculation" contract reaches the session. Conditional rather than unconditional on purpose: `_wf0_energy` must keep being cleared on every call, because `groundstate.py`'s send-cache re-sends the SAME terms after a maxm/nsweeps/cutoff/noise/ramp change and relies on that to force a fresh solve. Pinned by `tests/test_audit_2026_09_pyitensor-evolution.py::test_set_hamiltonian_does_not_reuse_the_previous_ground_state` and `::test_bandwidth_on_the_python_backend`. NUMBERS CHANGE: any `itensor_version="python"` parameter sweep or `bandwidth()` that reused one chain object is not comparable with results from before this fix -- the cluster recorded the old numbers as wrong by up to the operator's full spectral width (+1.25 against an exact -2.4936 on a 6-site Heisenberg chain; `bandwidth()` 0.0 against an exact 2.366025), and `mpsalgebra`'s bandwidth-scaled Taylor expansions, `excited_states`' Lagrange weight, `meanfield.py` and `thermal.py` all consume those. New numbers match ED and `itensor_version=3`.
+
 **Where**: `src/dmrgpy/pyitensor/chain.py:475-511 (set_hamiltonian / gs_energy); src/dmrgpy/manybodychain.py:702-718 (restart); src/dmrgpy/mpscpp3/chain_session.h:518-553 (same retention, latent)`
 
 `pyitensor/chain.py::set_hamiltonian` invalidates `_solve_H_cache`, `_wf0_energy` and both bandwidth caches but leaves `self.wf0` — the previous Hamiltonian's converged MPS — in place, and `gs_energy()` then warm-starts DMRG from it (`floor_dim = _max_link_dim(self.wf0)`, `if self.wf0 is None: ...`). The Python layer believes otherwise: `Many_Body_Chain.set_hamiltonian` calls `restart()`, which sets `self.wf0 = None` and whose own comment says it "promises a genuinely cold recalculation". Nothing propagates that to the session. When the retained state happens to be an exact eigenstate of the NEW Hamiltonian — a sign flip, or any sweep that passes through a field-polarized phase, since a fully polarized product state is an exact eigenstate of the Heisenberg chain at every field — the variational solve is stationary and never moves. pyitensor's DMRG has no noise term at all (documented in `pyitensor/dmrg.py`'s module docstring and `chain.py:1613-1615`), so unlike the compiled backends it has no escape mechanism; `mpscpp3/chain_session.h::set_hamiltonian_mpo` retains `wf0_`/`have_wf0_` exactly the same way, so v3 escapes empirically (via noise) rather than structurally. This is the DEFAULT backend for a `pip install dmrgpy` (`cppext.default_backend()`), and the loop `for B in [...]: sc.set_hamiltonian(h0+B*Sz); sc.gs_energy()` is the textbook workflow. Supporting evidence that this was previously seen and misattributed: `mpsalgebra.py:29-38` works around `bandwidth()` returning <=0 with the comment that it "can occasionally underestimate a highly degenerate operator's spectral width depending on the random initial wavefunction" — it is not randomness, it is this.
@@ -198,6 +232,8 @@ polarized state is reachable from the trapped one and the coincidence hides the 
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `recent-commits`
 
+**Status**: FIXED on `itensor_version="python"`, on both VUMPS paths; the C++ counterpart is NOT fixed and is now its own known issue. `vumps_ms._cell_fixed_points` (sequential) and `vumps._transfer_fixed_points` (grouped, added by a follow-up lane) are bond-candidate-first: the fixed points the state itself names -- `C C^dag` for the AL transfer's right one, `conj(C^dag C)` for the AR transfer's left one in this codebase's `X[ket,bra]` ordering -- are accepted whenever they reproduce themselves to a residual <= 1e-6, which in mixed canonical gauge is an exact algebraic identity and so a yes/no test rather than a tuned threshold; the guarded `eigs(k=2)` runs only when it does not, with a zero-trace guard, a pinned `v0` (the solver is reproducible now, which it was not) and a residual cross-check between the two candidates. `mpscpp3`'s `vx_bond_fixed_points` exists but is reached only from a `catch (ITError const&)`, i.e. eigensolver-first, and `itensor_version=3` still returns energies below the exact variational minimum on this same family of models: see `docs/known_issue_v3_vumps_variational_floor.md`. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_sequential_vumps_never_returns_below_the_variational_minimum` and by `tests/test_vumps_redundant_bond_dimension.py`, extended from D=2 to D in {2,4,6,8} on both solvers.
+
 **Where**: `src/dmrgpy/pyitensor/vumps_ms.py:262-298 (_cell_fixed_points), :806-833 (ground_state's restart/safety-net loop); reached from src/dmrgpy/pyitensor/vumps.py:892 (_multisite_ground_state) and :979-1001 (the n_uc>2 / reach>1 dispatch)`
 
 `_cell_fixed_points` gets the cell transfer matrix's dominant fixed point with a bare `scipy.sparse.linalg.eigs(op, k=1, which='LM')`. When the requested bond dimension exceeds what the state actually needs (a field-polarized chain needs D=1), the extra directions carry no weight and the transfer matrix acquires a decoupled unimodular block, i.e. a genuinely DEGENERATE dominant eigenvalue. Two things then go wrong: (1) ARPACK fails to converge and the exception is swallowed by `ground_state`'s `attempt()`, so every restart at that rung dies and the driver raises "every attempt at D=... failed"; (2) when it does return, the eigenvector is an arbitrary element of the degenerate subspace whose trace can be ~0, and the normalization `r_AL = r_AL/tr_r` (guarded only by `abs(tr_r) > 1e-300`, which is no guard at all) blows the environment up, so `e_L`/`e_R` come back as garbage. `ground_state`'s "variational safety net" only retries when `local["e_cell"] > best_e + 1e-6`, so an energy *below* the previous rung sails through and wins `better()` (which prefers converged, then LOWEST e_cell). The result is reported with `converged=True`. Crucially the STATE is fine -- `<Sz>` still reads exactly 0.5 -- only the energy read-off is broken, so nothing downstream flags it. This is the exact failure class a2eb46e (in-window) fixed on `itensor_version=3` with `Chain::vx_bond_fixed_points` (fall back to the fixed points the state itself names, C C^dag / C^dag C); the pure-Python side never got it. 71ba8eb (in-window) made this the MANDATORY route for any Hamiltonian with reach>1 at any n_uc, and it was already the only route for n_uc>2. `"python"` is the constructor default for `Infinite_Many_Body_Chain` (infinitechain.py:298) and the pip-install default backend, so this is the out-of-the-box path. `tests/test_vumps_redundant_bond_dimension.py::test_sequential_solver_tolerates_redundant_bond_dimension` exercises the sequential path at D=2 only, which passes.
@@ -261,6 +297,8 @@ Scope: not a known issue -- the opposite is asserted in-window. docs/documentati
 ### 4. ED boson occupation-number projectors are |k><0|+|k><1|+... , not |k><k|: bc.D[i][k] under mode="ED" returns negative "probabilities" that do not sum to 1
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `ed-and-operators`
+
+**Status**: FIXED -- `pyboson/boson.py` builds the projector as `op[n,n] = 1.0` rather than `op[n] = 1.0` (which filled a whole row). NUMBERS CHANGE on any Hamiltonian that does NOT conserve the total boson number: every `bc.D[i][k]` / `bc.D0..D3[i]` expectation value under `mode="ED"` (and anything built from them) moves, and results from before this fix are not comparable -- the cluster recorded `P(n=1)` on site 0 of its test chain going from -0.0626 to 0.5405 and `sum_k P` from 0.031 to 1.000, with ED now matching DMRG to 1e-11 where it was off by up to 0.60 in absolute probability. Number-conserving Hamiltonians are unchanged to machine precision, which is why every pre-existing test passed through the bug. Pinned by `tests/test_audit_2026_09_ed-backend.py::test_ed_boson_occupation_operators_are_projectors` (Hermitian, idempotent, sum_k = Id on the bare single-site matrices) and `::test_boson_occupation_probabilities_ed_matches_dmrg` on a number-BREAKING Hamiltonian.
 
 **Where**: `src/dmrgpy/pyboson/boson.py:40 (also 36-42); surfaced through src/dmrgpy/bosonchain.py:26 (Bosonic_Chain.D) and :31-34 (D0..D3)`
 
@@ -331,6 +369,8 @@ Root cause confirmed by reading src/dmrgpy/pyboson/boson.py:36-42: `ops = ids[i]
 > hunter's diagnosis in the original title, which was: *mode="ED" computes a different dynamical correlator from the one documented, and from mode="DMRG": submode="ED" drops Im of the Lehmann weight, submode="CVM"/"INV" keeps the complex weight instead of -Im G/pi; three mutually inconsistent conventions, all coinciding only when A=B^dag*
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `ed-and-operators`
+
+**Status**: FIXED -- reported PARTIAL by the cluster that took it (`mode="DMRG"` `submode="ROOTN"` was left off-convention) and completed afterwards by a follow-up lane. `src/dmrgpy/dynamics.py`'s module docstring is now the single normative statement of the house convention -- the complex Lehmann density `C_AB(w) = sum_n M_n delta(w-D_n) = i(G^R-G^A)/(2pi)`, with the sum rule `int dw C_AB(w) = <GS|A B|GS>` as its operational test -- and every submode points at it. `edtk/dynamics.py` keeps the imaginary part it used to drop; `algebra/rootn.py` and `rootndmrg.py` run the fractional-resolvent recursion twice, at +i*delta and -i*delta (a function of H has no eta-parity shortcut, so this is a real 2x cost); `cvm.py` collapses to `-<GS|A|xc>/pi`, which is one MPO application *cheaper* than what it replaced because its CG system is even in eta. The lane that finished it measured `mode="DMRG"` `submode="ROOTN"` on this finding's own 4-site complex-hopping chain (the `np.random.RandomState(3)` hopping matrix of `probe8.py`, reproduced as `complex_hopping_chain()` in the test file below; A=Cdag_0, B=C_2, es=linspace(-1,6,40), delta=0.15, N=6, nkry=16) going from 5.72e-01 off the exact density to 8.18e-07 off it, against a peak of 0.6135. Re-measured on that same seeded chain: 2.6e-07 off the exact complex Lehmann density, same 0.6135 peak (the residual is the DMRG solve's own, so it moves at the 1e-7 level run to run; what is stable is that it sits five to six orders below the 5.7e-01 the two conventions differ by here). A Hermitian pair (A = B^dagger, which is every example in the docs) is bit-identical before and after. Pinned by `tests/test_audit_2026_09_correlator-conventions.py` (`test_every_submode_returns_the_complex_lehmann_density`, `test_sum_rule`, `test_submode_ED_keeps_the_imaginary_part`, `test_ed_and_dmrg_agree_on_the_same_submode_name`, `test_dmrg_rootn_is_on_the_convention_too` -- the last no longer xfail-marked).
 
 **Where**: `src/dmrgpy/edtk/dynamics.py:273 (submode="ED"), :356 (the T>0 sum, same shape), :409 (submode="INV"/"CVM"), :159-177 (submode="ROOTN"); src/dmrgpy/cvm.py:239 (mode="DMRG", submode="CVM"); definition in docs/user_guide.md:1148 and :1155-1156`
 
@@ -406,6 +446,8 @@ Ruled out as out of scope: not in docs/audit_2026_08_hole_hunt.md (#1 is the non
 ### 6. vev(op, npow=n) silently ignores npow on every ED route, returning <op> instead of <op^n>
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `docs-examples-drift` &middot; independently found by `python-backend-parity`, `dispatch-matrix`, `docs-examples-drift`
+
+**Status**: FIXED, in two halves. `edtk/edchain.py::vev` takes `npow` (npow=0 returns 1.0 before touching the state, a negative power raises ValueError, T>0 with npow!=1 raises NotImplementedError rather than leaking the kwarg into `thermal_vev_ex`); npow=1 is byte-identical to the old path. `manybodychain.gs_energy_fluctuation` separately forwards `**kwargs` into both its `vev` calls -- it was dropping `mode=` entirely, so a value recorded as an "ED fluctuation" before this was a DMRG value -- and rejects `npow=`, which it sets itself. Pinned by `tests/test_audit_2026_09_ed-backend.py::test_ed_vev_honours_npow` / `::test_ed_vev_npow_on_an_operator_identity` and `tests/test_audit_2026_09_core-dispatch.py::test_gs_energy_fluctuation_forwards_mode` / `::test_gs_energy_fluctuation_on_the_automatic_ed_fallback` / `::test_gs_energy_fluctuation_rejects_npow`.
 
 **Where**: `src/dmrgpy/edtk/edchain.py:226 (EDchain.vev(self,op,T=0.,**kwargs)); dispatched from src/dmrgpy/manybodychain.py:762-764; documented at docs/user_guide.md:558 and docs/documentation.md:3562`
 
@@ -589,6 +631,8 @@ sqrt(|E0-E0^2|)        = 1.14564392373896
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `python-backend-parity`
 
+**Status**: FIXED -- `Chain::tdvp_step` now derives `DoNormalize` from the step itself (`dt.imag() == 0.0`) instead of hardcoding `true`, so a complex-time step keeps the decay the TDZ contour is built on and a real-time one is unaffected. Re-measured after rebuilding `_dmrgcpp*.so`, on this finding's own n=6 chain (es=linspace(-20,20,4001), delta=0.1, maxm=20, nsweeps=12, exact sum rule 0.25): `itensor_version=3` TDZ integrates to 0.249473 with a peak of 0.3277, against the 0.340676 / 0.9287 this finding recorded before the fix (that "before" half is the audit's own record and is no longer re-measurable: it needs the pre-fix `_dmrgcpp*.so`, which the rebuild replaced) -- now digit-for-digit `itensor_version="python"`'s own TDZ, and in line with KPM (0.250000) and TD (0.249442) on the same chain. As the reviewer argued above, this overturns the 2026-08 audit's finding #9 advice not to flip this flag for the `tdz.py` half (that path is broken BY forced normalization) and is a no-op for the `metts_vev` half (both imaginary-time call sites normalize explicitly themselves). NOTE: no dedicated regression test was added -- `tests/test_dynamical_correlator.py::test_tdz_dynamical_correlator_peak_matches_exact_gap` checks peak POSITION, which this factor does not move, so the sum-rule assertion the "Suggested fix" asks for is still outstanding.
+
 **Where**: `src/dmrgpy/mpscpp3/chain_session.h:1601-1614 (Chain::tdvp_step, the {"DoNormalize",true} arg); consumed by src/dmrgpy/tdz.py:168-175`
 
 Chain::tdvp_step() passes {"DoNormalize",true} to ITensor's tdvp() unconditionally. For real-time evolution that is harmless (TDVP is norm-preserving anyway, and quench_tdvp/evolve_and_measure_tdvp restore the norm explicitly afterwards). For COMPLEX time -- the one thing this method exists to support, per its own 20-line comment ("dt may be any complex number ... complex time evolution (TDZ) share this same code path unchanged") -- the norm genuinely decays, and forcing it to 1 every step destroys exactly the damping the TDZ contour is built on. pyitensor's tdvp_step does not normalize, so "python" gets it right.
@@ -655,6 +699,8 @@ SCOPE, since this brushes the audit: docs/audit_2026_08_hole_hunt.md #10 does re
 
 `optimization` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `pyitensor-performance`
 
+**Status**: FIXED -- `idmrg_window` gained `_propagate_close(bra_arrays, ket_arrays, l, rho_R)`, two `tensordot`s per site carrying a `(chi_ket, chi_bra)` boundary matrix, and `_close_array_chain` calls it instead of composing the rank-4 chain. The running matrix stays rectangular, so a ket and bra of different bond dimension -- the shape a shifted window overlap has -- still work. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_propagated_chain_closure_matches_the_composed_one`, which keeps the pre-fix composed contraction verbatim inside the test as the reference, and `::test_window_local_expectation_is_uniform_on_the_ground_state`.
+
 **Where**: `src/dmrgpy/pyitensor/idmrg_window.py:964-1022 (_close_array_chain), hot via :1077 snapshot_correlator -> :1169 dynamical_correlator_td -> :1331 dynamical_correlator_komega; called from src/dmrgpy/infinitechain.py:1342 td_dynamical_correlator`
 
 `_close_array_chain` builds a running rank-4 transfer tensor E and grows it site by site with `E = np.einsum('lLrR,rRsS->lLsS', E, step)`. That composition is O(chi^6) per site (and, with numpy's default `optimize=False`, runs as an unoptimised C loop rather than BLAS), and it is done twice per call — once for the measured chain and once again for the `E_id` ground-state calibration denominator. But the composed E is only ever used as `close(E4) = einsum('rR,rR->', einsum('lL,lLrR->rR', l, E4), rho_after[p_right])`, i.e. it is immediately closed on both ends. Propagating the left boundary matrix `l` through the chain one site at a time instead (two `tensordot`s per site, O(chi^3 d)) computes the identical scalar without ever materialising a rank-4 object. Measured exponent of the shipped routine over maxm=6,8,12,16 is ~chi^5.3 (all-points log-log slope; top-two-point ratio chi^5.8); a standalone head-to-head of the two contraction orders gives chi^6.1 for compose against chi^3-ish for propagate. Note `mpscpp3/chain_session.h::idmrg_close_array_chain` (line 10522) is a literal port with the same six-deep loop nest, so the v3 backend shares the defect — out of this lens, but relevant to whoever fixes it. Practical impact: `td_dynamical_correlator`'s own defaults are `nt=200, maxdim=60` and `Infinite_Many_Body_Chain.maxm` defaults to 30, and at maxm=16 with nt=4 the call already takes ~20 s of which 97% is this closure.
@@ -708,6 +754,8 @@ S(k,w) shape (200, 800) max |a| 0.1174437922930987 max rel diff 5.06053931835435
 
 `optimization` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `pyitensor-performance`
 
+**Status**: FIXED -- `idmrg_excitations._op_transfer_matrix` wraps its return in `np.ascontiguousarray(...)`; every caller was checked and none relied on the transposed view. The alternative the hunter preferred (dropping `E_id` for a matrix-free site walk on the default VUMPS path) was deliberately not taken -- the one-line fix already carries the measured win. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_op_transfer_matrix_is_contiguous_and_unchanged`, which asserts the values are unchanged AND that consumers' `.reshape(D*D,-1)` now shares memory.
+
 **Where**: `src/dmrgpy/pyitensor/idmrg_excitations.py:246-259 (_op_transfer_matrix, the `.transpose(0, 2, 1, 3)`); consumed by src/dmrgpy/pyitensor/idmrg.py:2018 (_apply_transfer) and :2815 (_apply_transfer_from_left); hot via src/dmrgpy/pyitensor/vumps.py:652/693 (_solve_left_environment/_solve_right_environment) and :585/628 (_energy_density_and_source_from_left/right)`
 
 `_op_transfer_matrix` ends with `np.tensordot(ket, np.conj(bra), axes=([1],[1])).transpose(0, 2, 1, 3)`. The transpose produces a stride-permuted view that is not C-contiguous. Both consumers then do `E4.reshape(chi*chi, -1)`, and numpy cannot reshape a non-contiguous array without materialising a full copy — so every single application of that transfer tensor pays an extra chi^4 complex memcpy. In `_solve_left_environment`/`_solve_right_environment` the tensor is built ONCE and then applied inside the iterative `_solve_linear_map` many thousands of times, so the copy is paid per iteration for a tensor that never changes. cProfile attributes 3.76 s of a 9.07 s D=24 VUMPS ground-state solve to `ndarray.reshape` called from exactly those two functions (1.895 s from `_apply_transfer`, 1.869 s from `_apply_transfer_from_left`), i.e. 41% of the whole solve is memcpy. `gs_method="vumps"` is the DEFAULT for `Infinite_Many_Body_Chain`, so this is on the default path. The repo has already found and fixed this exact bug class once, in the finite-chain matvec: `kernels.py:398` says outright 'since a transposed array is generally not contiguous, that `.reshape` forces a full copy of the operator tensor each time, not a view' — `_op_transfer_matrix` is the same mistake, unfixed. `idmrg_excitations`' own public surfaces (`excitation_energies`, `dynamical_structure_factor`, `spectral_weights`) route through the same helper and very likely pay the same cost; I did not time them, so treat that extension as unverified.
@@ -757,6 +805,8 @@ D=32  PATCHED  15.276 s   e0=-0.44313904633538
 ### 10. promote_to_dense() on itensor_version="python" silently re-solves the ground state unconstrained, returning the GLOBAL ground-state energy instead of the sector's -- the exact opposite of what its own docstring guarantees
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `python-backend-parity`
+
+**Status**: FIXED -- `pyitensor/chain.py::promote_to_dense` records `(terms_at_promotion, promoted_wf, energy)` in a single-use `_promoted_gs` slot, and `set_hamiltonian` consumes it if and only if the terms it is handed are identical to the recorded ones, so it bridges exactly the one rebuild-not-change re-send that promotion forces and nothing else. Pinned by `tests/test_audit_2026_09_pyitensor-evolution.py::test_promote_to_dense_keeps_the_sector_energy` (Hubbard Nf=3, on `itensor_version=3` and `"python"`: the sector energy must survive promotion and `<N>` must stay 3). NUMBERS CHANGE: an `itensor_version="python"` `promote_to_dense()` followed by `gs_energy()` returned the GLOBAL ground state instead of the sector's (-2.3399130755 at `<N>`=2 against the sector's -1.9408140222 at `<N>`=3 on the 3-site Hubbard chain above), so results from before this fix are wrong, not merely different.
 
 **Where**: `src/dmrgpy/manybodychain.py:530-601 (promote_to_dense, the docstring guarantee and the `self._session_ham_cache = None` at the end); mechanism in src/dmrgpy/pyitensor/chain.py:475-484 (set_hamiltonian clears _wf0_energy) + :485-489 (gs_energy's skip_dmrg short circuit)`
 
@@ -808,6 +858,8 @@ I checked whether the hunter misread the intended design, and they did not: the 
 ### 11. submode="CVM_explicit" returns exactly 2x the spectral function it is documented to share with submode="CVM", on every backend, plus an np.abs() that destroys the sign of negative-weight correlators
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `python-backend-parity`
+
+**Status**: FIXED -- `nonhermitian/dynamics.py` returns `0.5j*outz/np.pi` where it returned `np.abs(1j*outz/np.pi)`: the factor of 2 is gone and so is the modulus, landing `submode="CVM_explicit"` on the house convention on every backend and under both `mode=`. Its `A^dagger == B` restriction now raises a NotImplementedError naming the submode and the alternatives instead of a bare `raise`. Pinned by `tests/test_audit_2026_09_correlator-conventions.py::test_cvm_explicit_matches_cvm`, `::test_hermitian_pair_is_unchanged[DMRG-CVM_explicit]` (which pins it against the pre-fix goldens of every OTHER submode, i.e. against exactly half of what it used to return) and `::test_cvm_explicit_names_its_own_restriction`.
 
 **Where**: `src/dmrgpy/nonhermitian/dynamics.py:7-30 (dynamical_correlator_cvm_explicit, the `return es, np.abs(1j*outz/np.pi)` at line 28), re-exported at src/dmrgpy/cvm.py:315 and dispatched at src/dmrgpy/dynamics.py:60`
 
@@ -861,6 +913,8 @@ The np.abs() SUB-CLAIM IS REFUTED, however, and should be dropped from the findi
 ### 12. Parafermionic_Chain.get_dynamical_correlator ignores self.mode="ED" and dispatches to DMRG anyway, aborting the whole process with SIGABRT on itensor_version=3
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `python-backend-parity`
+
+**Status**: FIXED -- but NOT by the "Suggested fix" below, which should be read as superseded rather than applied: `Parafermionic_Chain.get_dynamical_correlator` was DELETED outright. The override was byte-for-byte the base method's two branches minus `get_mode()` and `str2MO()` resolution, so removing it fixed the mode facet (the SIGABRT) and a second facet the reviewer found (the documented string form of `name=` dying inside `EDOperator`) in one move, and the class now picks up `mode.py`'s automatic fallbacks like every other model class. A commented-out copy of the old override is kept at the site. Pinned by `tests/test_audit_2026_09_dispatch-leftovers.py::test_parafermion_dynamical_correlator_honours_enforced_ed_mode`, `::test_parafermion_dynamical_correlator_resolves_string_names` and `::test_parafermion_class_no_longer_shadows_the_base_dispatcher` -- all on the ED route, deliberately, since a regression on the DMRG one would SIGABRT the pytest session rather than fail it.
 
 **Where**: `src/dmrgpy/parafermionchain.py:40-45 (the get_dynamical_correlator override -- `mode="DMRG"` default with no self.get_mode() consultation), vs src/dmrgpy/manybodychain.py:909 which does call get_mode()`
 
@@ -920,6 +974,8 @@ The code is dispositive: parafermionchain.py:40 is `def get_dynamical_correlator
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `wavefunction-consumers`
 
+**Status**: FIXED -- `pyitensor/mpsalgebra.py::_apply_chain` no longer truncates as it sweeps: it splits each cut exactly (`qr_split`, no singular values needed), and the caller's `cutoff`/`maxdim` are then enforced by a single `result.position(1, ...)` sweep, i.e. in the gauge where discarding the smallest singular values IS the 2-norm-optimal truncation. Same recipe `sum_many()` in the same file already used. Cost, as measured by the fix (before/after, so not re-measurable from here): ~1.4x on repeated-application workloads -- KPM 12 sites maxm=30, 1.30s -> 1.82s; 16 sites maxm=60, 9.9s -> 13.5s. Note the reviewer's struck sub-claim stays struck: `gs_energy_fluctuation` on `"python"` lands at 6.30e-06 (re-measured, 10-site Heisenberg chain at maxm=30), not the double-precision cancellation floor, because pyitensor's own ~1e-6 Lanczos eigenvector cap puts the state's true fluctuation there. Pinned by `tests/test_audit_2026_09_pyitensor-evolution.py::test_applympo_is_exact_at_a_lossless_bond_dimension` and `::test_vev_npow_matches_the_explicitly_squared_operator`.
+
 **Where**: `src/dmrgpy/pyitensor/mpsalgebra.py:453-472 (_apply_chain's SVD loop), :477-489 (applyMPO docstring), src/dmrgpy/pyitensor/chain.py:1567-1575 (_apply_mpo/_apply_mpo_with), consumers at chain.py:583,589,668,721,771,818-819,827,843,856-857,908-909,964-965,1001,1036,1423-1536,1670,1761-1769,1855-1883`
 
 `applyMPO(K, x)` is implemented by `_apply_chain`, a left-to-right zip-up: both K and X are put at `center=1`, then at each bond the running product `piece = leftover*K.A(i)*X.A(i)` is SVD-truncated to `cutoff`/`maxdim`. The right environment of that SVD is *not* orthogonal — K and X being individually right-canonical does not make the product K.X right-canonical — so the truncation is not the optimal (2-norm-minimizing) truncation, and discarded singular weight does not measure the actual error. The docstring nevertheless claims the routine is "exact up to cutoff/maxdim regardless of x0's value, so ignoring it is correctness-preserving", and it silently discards the variational seed `x0` that would make it so. Measured on an 8-site chain where the exact H|psi> has Schmidt rank exactly [2,4,8,16,8,4,2] — i.e. truncating to maxdim=16 removes literally nothing — `applyMPO(maxdim=16)` still loses 9.4e-05 in 2-norm, while maxdim=32 gives 1.6e-14. Because `_apply_mpo` passes the chain's own `self.maxm`, every public consumer inherits this: `sc.applyoperator` (`||H|gs>||^2` off by 8.8e-09 at maxm=16 vs 2.5e-14 on v3), `sc.vev(MO, npow>1)`, and `sc.gs_energy_fluctuation()`, which at stock defaults (maxm=30, nsweeps=15) on a 10-site Heisenberg chain reports 5.06e-05 for a state that is an exact eigenstate — 420x the v3 value of 1.19e-07, which is just the double-precision cancellation floor of subtracting 18.13 from 18.13. The user guide advertises that number as "a measure of how sharply the DMRG/ED state is an eigenstate", so a user tuning maxm by watching it would conclude the state is converged to 1e-4 when it is converged to 1e-15. Building the operator explicitly instead (`sc.vev(h*h)`, which needs no MPO application) gives 18.130863826435 against v3's 18.130863826376, confirming the loss is in the application, not the MPO or the state. The same primitive backs the KPM Chebyshev recursion (`_apply_mpo_with` at chain.py:1423-1536, 1855-1883, hundreds of applications per correlator), the MPO-Taylor `exponential_apply`/`evolve_taylor_step`/`quench` paths, and CVM/`apply_inverse` — not separately measured, but they apply the same non-optimal truncation repeatedly, where the error compounds. Default TDVP time evolution is NOT affected (it Krylov-propagates `two_site_heff` directly).
@@ -970,6 +1026,8 @@ Unverified parts of the finding, flagged as such: the compounding claim for KPM/
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `wavefunction-consumers`
 
+**Status**: FIXED -- `mpsalgebra.exponential` now gates on the chain's *numerical* `is_hermitian(h)` (then `is_hermitian(1j*h)` for the anti-Hermitian case) rather than `MultiOperator.is_hermitian`'s symbolic test, so a multi-site Hamiltonian reaches the DMRG exponential instead of the 2-term Taylor truncation, and an operator that is neither raises NotImplementedError instead of warning and returning a number. Two sign bugs on the path it could not previously reach are fixed with it: the anti-Hermitian branch passes `dt=1j` (was `-1j`) alongside `-1j*h`, and `exponential_dmrg`'s `tau = complex(-dt.real, dt.imag)` becomes `tau = complex(dt)` -- so `e^{+h}` is what comes back, as documented. `timeevolution.evolve_WF` is byte-identical (purely imaginary dt agrees under both tau formulas). The symbolic false negative in `MultiOperator.is_hermitian` was deliberately left alone. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_exponential_takes_the_dmrg_path_for_a_two_site_hamiltonian`, `::test_exponential_imaginary_step_is_unchanged`, `::test_exponential_of_an_antihermitian_operator` and `::test_exponential_rejects_a_non_hermitian_operator_on_dmrg`.
+
 **Where**: `src/dmrgpy/mpsalgebra.py:9-17 (the dispatch and its fallback), src/dmrgpy/multioperator.py:65-72 (is_hermitian/is_antihermitian), src/dmrgpy/manybodychain.py:837-839 (the public method)`
 
 `mpsalgebra.exponential(self,h,wf)` dispatches on the *symbolic* `MultiOperator.is_hermitian()` / `is_antihermitian()`, which test `(self -/+ self.get_dagger()).simplify() == 0`. `simplify()` does not recognize that `get_dagger()`'s operator-order reversal is a no-op for factors on different sites, so `Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j]` — the single most common Hamiltonian shape in this library — reports `is_hermitian() == False` while the chain's own numerical probe `sc.is_hermitian(h)` correctly reports True. Both branches therefore fail and control falls into the `else`, which prints "Warning, using 3rd order taylor expansion mode" and returns `wf + h*wf + h*h*wf/2` — a 2-term (mislabelled 3rd-order) Taylor truncation with no step subdivision, no normalization, and no dependence on ||h||, instead of `exponential_dmrg`'s converged expansion with its `nt0 = bandwidth*nt` sub-steps. `sc.exponential(h, wf)` is a documented public method (`docs/user_guide.md:210`, "e^{h}|psi>") and `examples/time_evolution/exponential_EV/main.py` is built entirely around comparing it between DMRG and ED — that example happens to escape the bug only because its operator `sum(sc.Sx)` is a sum of *single-site* terms, for which `is_hermitian()` does work. Replace it with any two-site H and the DMRG/ED comparison the example makes diverges: 9.6e-04 at z=0.25, 6.7e-03 at z=0.5, 4.1e-02 at z=1.0, growing without bound in z (and, used in a time-evolution loop, compounding per step). ED mode is unaffected (it never consults the symbolic test), as is `timeevolution.evolve_WF`'s DMRG branch, which calls `exponential_dmrg` directly. NOTE on prior art: `infinitechain.py:540-555` documents the `is_hermitian()` false-negative itself as a known, deliberately-not-fixed limitation *of that module's own Hamiltonian check*; the consequence in `mpsalgebra.exponential` — a public method that silently returns a badly wrong number on all three backends — is not recorded anywhere (not in docs/audit_2026_08_hole_hunt.md, ROADMAP.md, or any docs/known_issue_*.md).
@@ -1011,6 +1069,8 @@ So the finding is real -- a public, documented method silently returns an uncont
 ### 15. mode.py's automatic v3 ns<3 -> ED fallback yields a chain whose get_gs() returns an ED State that overlap/aMb/get_rdm/get_distribution cannot consume, because those modules branch on self.mode instead of get_mode()
 
 `hole` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `dispatch-matrix` &middot; independently found by `cpp-v3-completeness`
+
+**Status**: FIXED -- `mpsalgebra.overlap`/`overlap_aMb` and `manybodychain.random_state` open with `resolve_mode(self, mode=mode)`. `resolve_mode` rather than `get_mode` is the deliberate part and is commented at each site: these primitives need to see the automatic ED fallbacks, which is the whole finding, but not `get_mode()`'s conserved-sector guard, which is about which ground state answers a *solve* and not about an inner product or a random vector the caller already holds. The reviewer struck the `get_rdm` sub-claim (there is no ED reduced-density-matrix implementation to route to), so `densitymatrix.reduced_dm` and `entropy.compute_entropy_single` got only a named NotImplementedError in place of the opaque AttributeError. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_algebra_primitives_follow_the_automatic_ed_fallback` and `::test_get_rdm_names_the_ed_routing_instead_of_an_attributeerror`.
 
 **Where**: `src/dmrgpy/mpsalgebra.py:52-63 (overlap/overlap_aMb read self.mode); src/dmrgpy/densitymatrix.py:4-13 (reduced_dm reads neither); src/dmrgpy/manybodychain.py:1128-1141 (random_state reads self.mode); src/dmrgpy/mode.py:88-92 (the fallback)`
 
@@ -1096,6 +1156,8 @@ One discrepancy, in the hunter's disfavour as a reporter but not as a finding: t
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `dispatch-matrix`
 
+**Status**: FIXED -- `applyoperator`, `summps`, `applyinverse` and `scale_mps` all resolve through a new `mpsalgebra.wavefunction_mode(wf, mode=None)`, which `isinstance`-tests `mps.MPS` / `edtk.edchain.State` and raises a TypeError naming the type it received and the two it accepts; `scale_mps` gained a real ED branch. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_applyoperator_and_summps_work_on_the_ed_backend`, which checks not only the types but that `<gs|Sz0|gs>` computed via `applyoperator`+`overlap` matches `vev`, and `::test_algebra_primitives_reject_an_unknown_wavefunction_type`.
+
 **Where**: `src/dmrgpy/mpsalgebra.py:90-95 (applyoperator), 111-116 (summps); contrast :99-107 (applyinverse, which checks State and works)`
 
 `applyoperator(self,A,wf)` and `summps(self,wf1,wf2)` dispatch on the runtime type of the wavefunction: `if type(wf)==mps.MPS: mode="DMRG" ; elif type(wf)==np.ndarray: mode="ED" ; else: raise`. The ED backend has not handed out bare `np.ndarray` wavefunctions — `EDchain.get_gs()` returns an `edtk.edchain.State`. `applyinverse`, ten lines below, imports `State` and tests for it correctly, which is the same-file proof the other two are stale. So both ED branches are unreachable and every call on an ED chain falls into the bare `else: raise`, producing `RuntimeError: No active exception to reraise` with no indication of what went wrong. This fires on an explicit `sc.mode="ED"` (so it is not merely a consequence of finding C) and again on every automatic ED fallback. It is the same `else`-doing-two-jobs / stale-precondition shape §4.10 catalogues.
@@ -1130,6 +1192,8 @@ type(get_gs()) = State  is ndarray? False
 ### 17. Conserved sector + mode="ED": get_correlation_matrix/_entropy/_eigenvalues crash — the 2026-08 audit's own fix for finding #11 picked a session-only dmmode under a premise ("ED is unreachable") that has since become false
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `cpp-v3-completeness`
+
+**Status**: FIXED -- `correlationentropy.py` gained a `_default_dmmode(self, wf, basis)` resolver: no sector keeps `"fast"`; with a sector it returns `"full"` only when the state to be measured actually carries a live session handle that implements `correlation_matrix` and the basis is not Nambu, and the backend-agnostic `"explicit"` otherwise. The sector is read off the chain that was asked and the capability off the wavefunction that will be measured -- on the ED route those are not the same object, which is exactly what the 2026-08 fix conflated. `dmmode=None` is now resolved AFTER the wavefunction exists; an explicitly-passed one is still validated before `get_gs()`. Pinned by `tests/test_audit_2026_09_entropy-infinite.py::test_sector_correlation_matrix_works_on_the_ED_backend`, `::test_sector_dmmode_default_is_resolved_from_the_state_not_the_backend` and `::test_sector_correlation_matrix_still_works_on_the_DMRG_backends`.
 
 **Where**: `src/dmrgpy/entropytk/correlationentropy.py:60-68 (dmmode default) and :93/:235 (cpp_correlation_matrix -> self._session)`
 
@@ -1169,6 +1233,8 @@ Also verified the hunter's assertion that the pinned regression test covers DMRG
 ### 18. Bosonic_Chain with any maxnb != 4 on itensor_version=2 aborts the whole process (SIGABRT, exit 134) instead of the documented "silently uses the fixed 4-level site"
 
 `hole` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `ed-and-operators` &middot; independently found by `recent-commits`
+
+**Status**: FIXED, on the Python side only -- nothing under `mpscpp2/` was touched and no v2 rebuild was done. `bosonchain.py` gained `V2_BOSON_DIM = 4` and `_check_backend_supports_maxnb()`, raising a ValueError that names the offending dimensions and the working alternatives (`itensor_version=3`, `"python"`, `mode="ED"`); both `Bosonic_Chain` and `SpinBoson_Chain` override `initialize()` to run it, which covers the constructor and the `setup_cpp(version=2)` route at once, and mirrors the base's `mode=="ED"` early exit so an ED chain is not refused. Pinned by `tests/test_audit_2026_09_ed-backend.py::test_non_default_maxnb_on_itensor_version_2_raises` and `::test_maxnb_4_still_works_on_itensor_version_2`.
 
 **Where**: `src/dmrgpy/mpscpp2/get_sites.h:110-112 (dmrgpy's own header, not vendored ITensor); src/dmrgpy/bosonchain.py:15-20; docs/user_guide.md:117-129`
 
@@ -1274,6 +1340,8 @@ Not out of scope as vendored ITensor: mpscpp2/get_sites.h is dmrgpy's own site d
 
 `optimization` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `ed-and-operators`
 
+**Status**: FIXED -- `Bosonic_Chain.get_ED_obj`, `SpinBoson_Chain.get_ED_obj` and `Parafermionic_Chain.get_ED_obj` all use the `has_ED_obj`/`ED_obj` cache `Fermionic_Chain.get_ED_obj` already had, sector application included; no second mechanism was invented, and `restart()` remains what invalidates it. Pinned by `tests/test_audit_2026_09_ed-backend.py::test_ed_object_is_cached` and `::test_ed_cache_is_invalidated_by_a_new_hamiltonian`, the latter deliberately empirical (a different object, a moved energy, cross-checked against a freshly built chain) rather than trusting `restart()` -- i.e. it pins that this cache cannot recreate the 2026-08 audit's own finding #2.
+
 **Where**: `src/dmrgpy/bosonchain.py:47-56 (Bosonic_Chain.get_ED_obj) and :110-118 (SpinBoson_Chain.get_ED_obj); src/dmrgpy/parafermionchain.py:35-37 (Parafermionic_Chain.get_ED_obj); contrast src/dmrgpy/fermionchain.py:138-153`
 
 `Many_Body_Chain` has a caching protocol for the ED backend: `has_ED_obj`/`ED_obj`, invalidated by `restart()` (manybodychain.py:706). `Fermionic_Chain.get_ED_obj` implements it correctly.
@@ -1323,6 +1391,8 @@ Minor overstatement worth noting: the "cached" column in cache2.py pre-warms get
 ### 20. idmrg._dominant_fixed_point's ARPACK matvec applies materialised chi^4 transfer tensors (O(chi^4)/iteration, chi^4 memory) although _apply_site_transfer in the same file does it in O(chi^3 d)
 
 `optimization` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `pyitensor-performance`
+
+**Status**: PARTIAL -- the compute half landed, the memory half did not. `idmrg._apply_site_transfer` gained an explicit `bra` (default `A`, so every existing call is byte-identical) and a missing left-action mirror, and `_dominant_fixed_point(..., sites=(ket_arrays, bra_arrays))` swaps ONLY the ARPACK matvec for the matrix-free site walk -- `v0`, `k=2`, `ncv` and `tol` are untouched, so the two routes solve the identical eigenproblem. `Es` is still MATERIALIZED, for the dense route below `_DENSE_EIG_MAX`, as the non-convergence fallback and for the propagation steps that need it, so the memory half of this finding -- the ~540 MB peak at chi=64, one E4 tensor being 268 MB -- is UNCHANGED. Making it lazy means touching every `env.Es` consumer (`_expectation`, `two_point_correlator`, `_canonicalize_periodic`, `imps_overlap`, the `_all_*_fixed_points` propagation steps), a larger refactor than the other four findings in this cluster combined. Still on the E4 route and not converted: `vumps.py:344/831/835/1497` and `idmrg_excitations.py:442`, all single-site transfers where the chi^4 build is once per call rather than per Krylov iteration. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_matrix_free_site_transfer_matches_the_rank4_application` (both directions, with and without a mixed bra) and `::test_fixed_points_are_identical_with_and_without_the_matrix_free_matvec`.
 
 **Where**: `src/dmrgpy/pyitensor/idmrg.py:2344-2420 (_dominant_fixed_point's matvec), :1985-2010 (_transfer_matrices), :2278-2283 (_CorrelatorEnv.__init__); reached from infinitechain.vev/correlator with gs_method="idmrg"`
 
@@ -1379,6 +1449,8 @@ maxm=64  FIRST vev (env build)=11.549s  peak-alloc=540.2 MB
 
 `hole` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `docs-examples-drift`
 
+**Status**: FIXED -- and deliberately not by bolting on a `**kwargs` nobody consumes, which is the very §4.10 shape this audit is about. `applyoperator`/`summps`/`applyinverse`/`scale_mps`/`exponential` take an explicit `mode=None` routed through `wavefunction_mode`: for these the wavefunction IS the backend, so `mode=` is a consistency check and a disagreement is a TypeError naming both, not a silent switch. `operator_norm` gained a genuine `mode=` (forwarded to `random_mps`), and `trace`/`inverse_trace`/`overlap`/`aMb` already routed on `mode=` directly. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_every_mps_algebra_primitive_accepts_mode` and `::test_mode_disagreeing_with_the_wavefunction_is_refused`. The user-guide half of this finding is the documentation phase's.
+
 **Where**: `docs/user_guide.md:202-214 and docs/user_guide.tex:235-253 ('Each takes the same mode=/**kwargs as the rest of the API'); code at src/dmrgpy/manybodychain.py:824-856 and src/dmrgpy/mpsalgebra.py:50,90,110,119,179`
 
 The §2 'MPS and operator algebra' table lists nine primitives and prefaces them with 'Each takes the same `mode=`/`**kwargs` as the rest of the API' (identical sentence in the .tex). Executed against a 4-site Heisenberg chain, three of the nine raise TypeError on `mode=`: `scale_mps` (manybodychain.py:849 takes only `(self,x,wf)` — no kwargs at all), `operator_norm` and `is_zero_operator` (both land in mpsalgebra.py:179 `operator_norm(self,op,ntries=5,simplify=True)`, which has neither `mode` nor `**kwargs`). Three more accept `mode=` and discard it: `applyoperator`/`summps`/`applyinverse` (mpsalgebra.py:90/110/99) take `**kwargs`, never read them, and decide DMRG-vs-ED from `type(wf)` instead — so `mode="ED"` on an MPS argument silently runs DMRG. Two (`overlap`, `aMb`) route on `mode=` but then hand the MPS objects to the ED object, which just calls `.dot`, i.e. an MPS inner product again. Only `trace` behaves as the sentence promises. This is documentation advertising a uniform kwarg surface that does not exist, which is the same class as the audit's 'kwargs with no consumer'.
@@ -1418,6 +1490,8 @@ OK    exponential(A,wf,mode='ED') -> MPS
 
 `hole` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `docs-examples-drift`
 
+**Status**: FIXED -- `correlationentropy.py` gained module-level `DM_MODES`/`DM_BASES`/`CT_MODES` tuples (so the dispatcher and the message cannot drift apart) and `fermionicparity.py` an `FP_MODES`; a misspelling now raises a ValueError naming the argument and listing the accepted values. `basis=` is validated too -- its `else` previously served both "electron" and "you typo'd it" -- and an explicitly-passed `dmmode` is rejected BEFORE the ground-state solve rather than after it. The guide's existing promise that an explicit mode is a hard request is unchanged; what changed is that a misspelling is now distinguished from a valid-but-unavailable mode. Pinned by `tests/test_audit_2026_09_entropy-infinite.py::test_mistyped_mode_strings_name_the_valid_options` and `::test_a_mistyped_dmmode_is_rejected_before_the_ground_state_solve`.
+
 **Where**: `src/dmrgpy/entropytk/correlationentropy.py:261 (ctmode), :96 (dmmode), :84 (non-fermion chain); src/dmrgpy/fermionicparity.py:73 (fpmode); documented enumerations at docs/user_guide.md:1040-1073 (five ctmode values), :1138 (ctmode=None resolver), :2340-2341 (fpmode)`
 
 Three dispatchers over a documented string enumeration end their if/elif chain in a bare `raise` with no active exception, so Python turns a user typo into `RuntimeError: No active exception to reraise` — a message that names neither the argument nor the accepted values. `get_four_correlation_tensor(ctmode=...)` is the worst of the three because the user guide makes an explicit promise about it ('Passing a `ctmode` explicitly is still a hard request — it raises rather than silently falling back if that method isn't available'): that promise is kept for a valid-but-unavailable mode (the per-mode helpers raise a clear ValueError), and broken for a misspelling. `get_correlation_matrix(dmmode=...)` additionally `print`s 'fasst not recognized' to stdout before raising, so the diagnostic exists but is not in the exception. This is exactly documentation.md §4.10's 'an else serving both "unsupported here" and "you typo'd it"' class, which audit finding #12 fixed at `get_dynamical_correlator(name=)` and left standing here. I enumerated all 40 bare-`raise` sites under src/dmrgpy (excluding ITensor/) and executed these three, chosen because each gates a string option the user guide documents by name.
@@ -1456,6 +1530,8 @@ fasst not recognized
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `docs-examples-drift`
 
+**Status**: FIXED -- the whole `Spin_Chain.get_hamiltonian` override is deleted (its live half duplicated the base method exactly) and replaced by a comment recording what the dead branch was; `Many_Body_Chain.get_hamiltonian` gained its missing `self` and raises `ValueError("this chain has no Hamiltonian yet; call set_hamiltonian() first")`. Per the reviewer, `update_hamiltonian`'s `h + self.exchange` is harmless (0 is the additive identity for a MultiOperator sum) and the vestigial attributes were left in place rather than churning the file every other module imports. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_get_hamiltonian_without_set_hamiltonian_raises_by_name` and `::test_get_hamiltonian_takes_self`.
+
 **Where**: `src/dmrgpy/spinchain.py:136-152 (Spin_Chain.get_hamiltonian, the `else: # conventional way` branch, iterating `self.exchange` at :144 and `self.fields` at :147); dead attributes initialized at src/dmrgpy/manybodychain.py:76-77`
 
 `Spin_Chain.get_hamiltonian()` returns `self.hamiltonian` when one was set, and otherwise falls back to a 'conventional way' branch that builds the operator from `self.exchange` and `self.fields`. Those two attributes were populated by `Spin_Chain.set_exchange()`, a builder that has been removed; `Many_Body_Chain.__init__` now leaves both as the integer 0, so the fallback cannot run — it dies on `for c in self.exchange`. This is the same corpse commit 43d1a35 diagnosed and repaired in `meanfield.py` ('every call raised TypeError: int object is not iterable, on any chain, while the user guide documented it as working'); the fix was not applied to this sibling site, nor to `pychainwrapper.py::old2ampo` (which reads the same two attributes and additionally references a bare undefined name `fields` at :18-19, so it would NameError even if `self.exchange` were a list). `gs_energy_fluctuation()` is a public method that calls `get_hamiltonian()` unconditionally and so inherits the failure.
@@ -1493,6 +1569,8 @@ gs_energy_fluctuation FAIL: TypeError: 'int' object is not iterable
 > hunter's diagnosis in the original title, which was: *examples/boson_models/v2_VS_v3_boson/main.py — an assert-carrying regression example fails 5 of 7 runs, with ITensor v2 landing up to 0.025 above the ED/pure-Python energy*
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `docs-examples-drift`
+
+**Status**: FIXED -- the example pins `nsweeps=80` and `maxm=100` inside its own `get_energy()` (100 > 4**3 = 64, the exact MPS bond dimension at n=6, so nothing is truncated at all) and tightens its own tolerance from 1e-2 to 1e-5, 60x above the worst observed v2/v3 spread of 1.7e-7. The general lesson is recorded in CLAUDE.md: a cross-backend regression example must pin its sweep schedule rather than inherit the library defaults. Pinned by `tests/test_audit_2026_09_examples.py::test_boson_v2_VS_v3_example_pins_its_sweep_schedule` (static, reads the schedule back out of the example source) and `::test_boson_dmrg_reaches_ed_at_the_examples_pinned_schedule` (the mechanism, at U=0.2, the hardest point).
 
 **Where**: `examples/boson_models/v2_VS_v3_boson/main.py:70 (the U-sweep assert, tol=1e-2); the divergent backend is itensor_version=2 on Bosonic_Chain`
 
@@ -1539,6 +1617,8 @@ AssertionError: U=0.2: v2 vs ED disagree by 0.0151103 (tol=0.01)
 
 `hole` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `docs-examples-drift`
 
+**Status**: FIXED -- `bosonchain.get_site(label, maxnb=None)` returns `100+dim` for a boson label, understands a general `"B<k>"` spelling (`"B"`/`"B4"` unchanged at 104), and raises ValueError naming the accepted labels instead of a bare `raise`. `SpinBoson_Chain.__init__` takes `maxnb` as one entry per site (`None` at the spin positions), builds its site codes from it, sets `self.maxnb` before `Many_Body_Chain.__init__` so #18's backend check can read it, validates `n=` against `len(sitesin)` instead of dropping it, and exposes per-site `self.D` with `D0..D3` derived from it. `pyboson/boson.py`'s `SpinBosonChain` ED stub now says up front that it is not implemented. Pinned by `tests/test_audit_2026_09_ed-backend.py::test_spinboson_chain_honours_maxnb`, `::test_spinboson_chain_rejects_a_bad_site_label` and `::test_spinboson_chain_with_maxnb_agrees_across_dmrg_backends`.
+
 **Where**: `docs/user_guide.md:50 (SpinBoson_Chain(["boson","S=1/2",...])); code at src/dmrgpy/bosonchain.py:60-67 (get_site accepts only "B"/"B4") and :80-83 (__init__(self,sitesin,n=None,maxnb=None) — both n and maxnb are dead, the two lines that used them are commented out)`
 
 Two drifts in one class, both introduced or left by the recent documentation pass (3593a2c lists SpinBoson_Chain under 'Undocumented API, all verified working before being written up'). (1) The §1 model table gives the constructor call literally as `SpinBoson_Chain(["boson","S=1/2",...])`. `bosonchain.get_site` accepts only `"B"` or `"B4"` for a boson location, so the documented call dies in the constructor with `RuntimeError: No active exception to reraise` — the bare-raise problem of finding 4 met at the first line a reader following the guide would type. The shipped example `examples/fermion_models/spinboson_chain/main.py` uses `"B"`, confirming which spelling is real. This is also an md/tex divergence: docs/user_guide.tex:66 covers the same class without giving any example call, so only the .md is wrong. (2) `SpinBoson_Chain.__init__` takes `n=None, maxnb=None` and consumes neither — the two lines that would have applied maxnb are commented out immediately below the signature. A caller asking for larger bosons gets the 4-level site silently: sites come back as [104,104] with maxnb=[8,8], where the sibling `Bosonic_Chain(2, maxnb=[8,8])` correctly gives [108,108]. The guide's own boson section documents maxnb threading through to the site type code 100+maxnb for `Bosonic_Chain`, so the two classes look interchangeable in this respect and are not.
@@ -1574,6 +1654,8 @@ Bosonic_Chain(2,maxnb=[8,8]) -> sites = [108, 108]
 ### 26. get_excited_states(n=1, mode="DMRG") returns a plain list of energies while every other (n, mode) returns an ndarray, so get_gs_manifold(n=1) raises TypeError on DMRG but works on ED
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `wavefunction-consumers`
+
+**Status**: FIXED -- `excited.py`'s n=1 DMRG branch returns `np.array([e0])`, matching the sibling branch, and `groundstate.get_gs_manifold` coerces with `np.array(es)` before the boolean mask as defence against any other producer. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_get_excited_states_n1_returns_an_array[DMRG]` and `[ED]`.
 
 **Where**: `src/dmrgpy/excited.py:110-112 (the n==1 Hermitian branch) vs :101-107 (the sibling non-Hermitian n==1 branch, which returns np.array), consumer src/dmrgpy/groundstate.py:389`
 
@@ -1612,6 +1694,8 @@ The only refutation angle I could construct is that get_gs_manifold(n=1) is outs
 ### 27. get_bond_entropy's guard is off by one (b>self.ns rather than b>=self.ns), so an out-of-range site index kills the whole process with an uncatchable SIGABRT on both C++ backends
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `dispatch-matrix`
+
+**Status**: FIXED -- the guard is `if b<1 or b>=self.ns: raise IndexError(...)` naming `b` and the valid bond range; `bond_entropy` validates both `i` and `j` against 0..ns-1 BEFORE collapsing them with `max()`, so the message names the site the caller actually passed, and its non-adjacent `else` raises ValueError instead of a bare `raise`. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_get_bond_entropy_rejects_an_out_of_range_site`, whose own docstring warns that a regression here would SIGABRT the pytest session rather than fail it -- inherent to what it pins.
 
 **Where**: `src/dmrgpy/entropy.py:29-36 (compute_entropy_single); src/dmrgpy/entropy.py:38-42 (bond_entropy); src/dmrgpy/manybodychain.py:877-879`
 
@@ -1663,6 +1747,8 @@ timeout: the monitored command dumped core
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `dispatch-matrix`
 
+**Status**: FIXED -- `mode.py` gained `VALID_MODES = ("ED","DMRG")` and a `_check_mode(value, what)` helper, and `resolve_mode` validates BOTH the call argument and `self.mode` at the *top* of the function, before any fallback can return. Validating where `self.mode` is read would not have been enough: the ns<3 and extension-not-compiled fallbacks return "ED" first, so a typo would have slipped through on exactly the chains where a wrong solver is hardest to notice. `get_gs` gained a trailing `else: raise` so it can never return an implicit None, and the neighbouring bare raises in `mode.run`, `gs_energy`, `random_state`, `mpsalgebra.toMPO` and `MultiOperator.__add__` were named while there. Pinned by `tests/test_audit_2026_09_core-dispatch.py::test_a_mistyped_chain_mode_raises_instead_of_returning_none`, `::test_a_mistyped_mode_kwarg_names_the_valid_options` and `::test_a_mistyped_chain_mode_is_caught_even_behind_a_fallback` -- the last is the 2-site v3 chain, and is what pins the "validate at the top" decision.
+
 **Where**: `src/dmrgpy/mode.py:105-110 (resolve_mode returns self.mode unchecked); src/dmrgpy/manybodychain.py:1064-1074 (get_gs has no else); src/dmrgpy/manybodychain.py:1078-1087 (gs_energy's bare raise)`
 
 `resolve_mode` does `if self.mode is not None: return self.mode` before it ever checks the string against the two legal values — the validation `if mode in ["ED","DMRG"] ... else: print(...); raise` applies only to the *call argument*, never to the chain attribute. `Many_Body_Chain.mode` is the documented way to pin a solver (`sc.mode = "ED"`), so a lowercase or misspelled assignment is a realistic user error. `get_gs()` then falls off the end of its `if/elif` and returns `None` — the caller gets a null wavefunction with no error at all — while `gs_energy()` hits a bare `raise` with no active exception and reports `RuntimeError: No active exception to reraise`, which names neither the attribute nor the typo. This is the same §4.10 shape (a dispatch decision taken before the information that qualifies it) as the `else`-serving-two-jobs cases the audit fixed elsewhere.
@@ -1693,6 +1779,8 @@ gs_energy() -> RuntimeError No active exception to reraise
 ### 29. kpmdmrg.general_kpm_moments still has a bare `raise` for a missing X, so get_distribution() reports "RuntimeError: No active exception to reraise"
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `cpp-v3-completeness`
+
+**Status**: FIXED -- both `if X is None: raise` guards in `kpmdmrg.py` (`general_kpm_moments`, `kpm_moments_wfa_wfb`) raise a TypeError naming the function, the argument, what it is for and the fact that there is no default -- the wording the 2026-08 fix adopted for the neighbouring check in the same file. Pinned by `tests/test_audit_2026_09_correlator-conventions.py::test_get_distribution_without_X_names_the_argument` and `::test_kpm_moments_wfa_wfb_without_X_names_the_argument`.
 
 **Where**: `src/dmrgpy/kpmdmrg.py:197`
 
@@ -1733,6 +1821,8 @@ Worth flagging for triage: this is off the stated lens. A bare `raise` in backen
 ### 30. Bosonic_Chain and Parafermionic_Chain constructors still reject itensor_version=, the kwarg deb6bf8 added to the fermionic subclasses and the user guide tells boson users to pass
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `recent-commits`
+
+**Status**: FIXED -- `**kwargs` added to `Bosonic_Chain.__init__`, `SpinBoson_Chain.__init__`, `Parafermionic_Chain.__init__` and `Spin_Fermion_Hamiltonian.__init__` and forwarded at the existing `Many_Body_Chain.__init__` call sites (for the parafermion class, at the three sites inside its Z branch rather than by reordering its `get_operator()` setup; a comment records why). Its `else: raise` for an unsupported Z became a ValueError naming the supported values. Pinned by `tests/test_audit_2026_09_ed-backend.py::test_constructors_accept_itensor_version`, parametrized over all four classes.
 
 **Where**: `src/dmrgpy/bosonchain.py:10 (`def __init__(self,n,maxnb=None)`), :80 (`SpinBoson_Chain.__init__(self,sitesin,n=None,maxnb=None)`), src/dmrgpy/parafermionchain.py:7 (`def __init__(self,n,Z=3)`), src/dmrgpy/spinfermionchain.py:6; contrast src/dmrgpy/fermionchain.py:13/207/231/466/647 (all `**kwargs`)`
 
@@ -1780,6 +1870,8 @@ Mixed_Spin_Fermion_Chain           itensor_version='python'
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `recent-commits`
 
+**Status**: FIXED -- docstring only; the code was already right, as the finding says. `infinitechain.get_operator`'s docstring now documents the integer-group form as supported by `set_hamiltonian` and by BOTH ground-state methods at any finite reach, with the one-line mechanism for each (`vumps` routes to the sequential multi-site solver; `idmrg`'s growth loop carries one pending channel per site of the reach), and names `excitation_energies`/`excitation_gap` as the only reach-1 restriction, pointing at `_require_reach_one` for the reasoning. Pinned by `tests/test_audit_2026_09_entropy-infinite.py::test_idmrg_handles_a_coupling_past_one_unit_cell` (which also asserts `excitation_energies` DOES still raise) and `::test_get_operator_docstring_matches_what_idmrg_does`.
+
 **Where**: `src/dmrgpy/infinitechain.py:485-487 (get_operator docstring), contradicted by :504-534 (_require_reach_one's own docstring) and by its only call site, :919`
 
 `get_operator(name, i, group=<int>)` -- the API 71ba8eb added so a user can write a coupling longer than one unit cell -- documents that integer form as "supported by set_hamiltonian and by gs_method=\"vumps\" ...; gs_method=\"idmrg\" and excitation_energies/excitation_gap are reach-1 only and raise for it". That is wrong for iDMRG. `_require_reach_one` is called from exactly one place (line 919, `excitation_energies`), and its own docstring says the opposite in as many words ("gs_method=\"idmrg\"'s growth loop consumes whatever automaton _build_periodic_mpo hands it, which has always carried one pending channel per site of a term's reach"), as does CLAUDE.md ("gs_method=\"idmrg\" needed no change at all ... so do NOT 'fix' that by adding a guard"). Executed on a reach-2 chain, iDMRG returns the exact answer on both backends. Consequence: a user reading the docstring at the point of use rewrites their model on an n_uc>=R cell -- the exact cost 71ba8eb existed to remove -- or avoids iDMRG entirely.
@@ -1815,6 +1907,8 @@ Source checks: _require_reach_one has exactly one caller, infinitechain.py:919 (
 ### 32. idmrg_window re-solves the call-invariant transfer-matrix fixed points on every _close_array_chain / local_expectation call — 25 full rebuilds for a 4-step td_dynamical_correlator
 
 `optimization` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `pyitensor-performance`
+
+**Status**: FIXED -- `idmrg_window` gained an `_IWEnv` holding the cell, its arrays and both fixed-point families plus a `calibration(p_left, p_right, nsites)` memo, and `_window_env(result)` memoizes it on the result with the same identity invalidation `idmrg._correlator_env` uses (keyed on `result.cell_raw`, a stable attribute, so the invalidation genuinely holds rather than firing every call). The memo key is `(p_left, p_right, nsites)`, not the suggested `(p_left, nsites)`: `close(E_id)` reads `rho_after[p_right]`, which callers pass independently. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_window_environment_is_built_once_and_reused`, which counts `_transfer_matrices` calls through a real `td_dynamical_correlator` rather than timing it.
 
 **Where**: `src/dmrgpy/pyitensor/idmrg_window.py:986-1000 (inside _close_array_chain) and :949-951 (inside local_expectation)`
 
@@ -1855,6 +1949,8 @@ Observed:
 ### 33. examples/readme_examples/energy_VS_length/main.py is an empty stub: it computes no energy, sweeps no length, prints nothing and plots nothing
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `docs-examples-drift`
+
+**Status**: FIXED -- the script is now the sweep its name advertises: n over [4,8,12,16,20,24,30], printing each `gs_energy()` and plotting the energy density E0/n against n with the Bethe-ansatz `0.25-ln2` as an `axhline`. The last point, n=30, is exactly the README snippet's chain, so the printed number reproduces the snippet's and the directory finally earns its place under `examples/readme_examples/`. Pinned by `tests/test_audit_2026_09_examples.py::test_energy_VS_length_example_sweeps_length_and_plots`, which runs the script under Agg and checks the drawn curve.
 
 **Where**: `examples/readme_examples/energy_VS_length/main.py (whole file, 21 lines)`
 
@@ -1903,6 +1999,8 @@ EXIT=0
 ### 34. Two examples compute a full sequence and only print it, against CLAUDE.md's 'examples should plot' rule — both already import pyplot and never call it
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `docs-examples-drift`
+
+**Status**: FIXED -- `groundstate/energy_fluctuation` plots E against maxm on the left axis and the fluctuation semilogy on a twinx right axis (it spans decades, the energy does not); `utilities/multioperator_density` overlays the DMRG and ED densities against the site index. The latter also gained `np.random.seed(1)` and a pinned `nsweeps=60`/`maxm=40`: the plot's whole premise is that the two solvers lie on top of each other, and an unseeded all-to-all random hopping matrix can put a single-particle level essentially at zero, leaving a near-degenerate many-body ground state where DMRG and ED legitimately return different density profiles at the same energy. Pinned by `tests/test_audit_2026_09_examples.py::test_sequence_examples_draw_what_they_compute` and `::test_multioperator_density_plots_both_backends`.
 
 **Where**: `examples/groundstate/energy_fluctuation/main.py:21-26 (7-point maxm sweep); examples/utilities/multioperator_density/main.py:32-39 (6-site density profile, DMRG and ED)`
 
@@ -1955,6 +2053,8 @@ print("Density ED",[fc.vev(di,mode="ED").real for di in den])
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `docs-examples-drift`
 
+**Status**: FIXED -- `get_four_correlation_tensor`'s public docstring now names the real five-mode order (batched, sweep, fold for native spinful, full, explicit) and defers the per-mode conditions to `_four_correlation_tensor_default_ctmode()`, so there is one authoritative place rather than two that can drift. Pinned by `tests/test_audit_2026_09_entropy-infinite.py::test_four_correlation_tensor_docstring_lists_the_real_resolver_order`, which asserts the five names appear in the docstring in the order the resolver implements them.
+
 **Where**: `src/dmrgpy/entropytk/correlationentropy.py:237-246 (the docstring); the actual resolver is _four_correlation_tensor_default_ctmode at :436-495`
 
 `get_four_correlation_tensor(wf, ctmode=None)` is the public dispatcher and its docstring describes the auto-selection as '"sweep" whenever it applies (itensor_version in (3,"python"), non-native-spinful fermionic sites), else "full" ... else "explicit"' — a three-way choice. Two more modes were added since: `"batched"` (pyitensor-only, and now the *first* thing the resolver tries, measured 15-28x faster than sweep) and `"fold"` (for native spinful sites under v3). The resolver's own docstring at :436 is correct and lists all five, and docs/user_guide.md:1135-1141 is correct too ('"batched" whenever it applies ... else "sweep" ... else "full" ... else the always-correct "explicit" fallback'), so the public docstring is the one artefact left describing the pre-batched behaviour. A caller reading `help(get_four_correlation_tensor)` to decide whether to pass an explicit ctmode is told the default is 'sweep' when it is in fact 'batched' on the pure-Python backend.
@@ -1997,6 +2097,8 @@ itensor_version=3 -> resolver picks 'sweep'
 
 `hole` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `docs-examples-drift`
 
+**Status**: FIXED -- in the documentation, not the code: NO default changed. `infinitechain.py`'s inline comment on `self.vumps_nrestarts = 4` now records that 4 is the default in all three places (`infinitechain.py`, `pyitensor/vumps.py`, `pyitensor/vumps_ms.py`) and always has been, and that `documentation.md`'s residual-criterion timing table was measured at an explicitly-set 6 -- so the next reader comparing the two does not "fix" the code to match the prose. The prose itself is the documentation phase's. Pinned by `tests/test_audit_2026_09_entropy-infinite.py::test_vumps_nrestarts_default_is_four`, which pins the attribute AND both function signature defaults.
+
 **Where**: `docs/documentation.md:505 (and the matching passage in docs/documentation.tex); code at src/dmrgpy/infinitechain.py:369 (self.vumps_nrestarts = 4) and src/dmrgpy/pyitensor/vumps.py:924 (nrestarts=4)`
 
 The 'Let VUMPS converge' section reports its before/after timing table with the phrase 'Measured through the public driver at the default `nrestarts=6`'. `Infinite_Chain.__init__` sets `self.vumps_nrestarts = 4`, and `pyitensor.vumps.vumps_ground_state`'s own signature default is also 4. `git log -L369,369:src/dmrgpy/infinitechain.py` shows the attribute was introduced at 4 in b5593ec and never changed, so this is not a default that moved after the measurement was written — the sentence was wrong when written. The number matters because the table is the evidence for the residual-criterion fix (0/3 -> 3/3 converged), and a reader reproducing it at the real default 4 is running a different experiment from the one tabulated. Note the user guide's own VUMPS snippet is fine: it writes `ic.vumps_nrestarts = 6` as an explicit setting, not as the default.
@@ -2028,6 +2130,113 @@ b5593ec Add VUMPS ground-state solver; fix iDMRG excitation diagram 6a's |n|>=2 
 **Suggested fix**: Change 'at the default `nrestarts=6`' to 'at `nrestarts=6` (the default is 4)' in both documentation.md and documentation.tex. Line 526's '`D=8`, `nrestarts=6`' in the same section is already phrased correctly and needs no change.
 
 **Reviewer (CONFIRMED)**: Verified the three facts independently. docs/documentation.md:505 reads exactly 'Measured through the public driver at the default `nrestarts=6`, before', and docs/documentation.tex:773 carries the same sentence, so both formats are wrong. The code default is 4 in all three places I could find: infinitechain.py:369 (self.vumps_nrestarts = 4), pyitensor/vumps.py:924 and pyitensor/vumps_ms.py:772 (both nrestarts=4 in the signature). I grepped for any backend-specific override of 6 and found none -- the only other '6' is a prose mention in vumps.py:126. git log -L369,369:src/dmrgpy/infinitechain.py shows the line introduced as 4 in b5593ec with no later change, so this is not a default that moved after the text was written. Low severity but factually indisputable.
+
+
+---
+
+
+## Open items found while correcting this record (2026-09-12)
+
+Two things turned up while *re-measuring* the claims the documentation lanes
+wrote about this audit. **Neither is one of the 36 findings above, neither was
+fixed, and neither is pinned by a test.** They are recorded here so the next
+pass does not have to rediscover them. Both were measured on the tree as it
+stands after every fix above, thread-pinned (`MKL_NUM_THREADS=1
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1`, one core, this
+checkout's `src/` forced onto the path).
+
+
+### O1. submode="TD"/"TDZ" return the complex one-sided transform, not the Lehmann density -- the other half of finding #5's convention question
+
+Finding #5 settled the convention for the resolvent/Chebyshev family -- KPM,
+CVM, CVM_explicit, INV, ED and ROOTN, on whichever of `mode="DMRG"`/`mode="ED"`
+implements each (they are not all on both): they all return the complex Lehmann
+density
+`C_AB(w) = sum_n M_n delta_broadened(w-D_n) = i(G^R-G^A)/(2pi)`. It explicitly
+did not touch `submode="TD"` or `submode="TDZ"`, and those two are on something
+else. Both end in `timedependent._fourier_transform_correlator`, which returns
+the full *complex* one-sided Fourier transform of the real-time correlator --
+in the long-time limit `-(i/pi)*G^A_AB(w)`, whose real part is `C_AB` when
+`Im M_n = 0` and whose imaginary part is `-(1/pi)*Re G^A_AB`, a term `C_AB` does
+not have. The two therefore agree in *real part only*, and only when
+`Im M_n = 0` (a Hermitian pair `A = B^dagger`, or a real Hamiltonian with real
+operators) -- not for the complex-weight pairs finding #5 is about.
+
+Measured on a 6-site Heisenberg chain, `itensor_version=3`, with the Hermitian
+pair `A = B = Sz_0` (so `Im M_n = 0` exactly and `C_AB` is the ordinary real
+density), `es = linspace(0.01,4,30)`, `delta = 0.3`:
+
+```
+max|Im M_n| = 0.000e+00      peak |C_AB| = 0.1421
+TD  (nt=800, dt=0.025): max|Im y| = 0.0996  (70% of that peak)
+    max|Re y - C_AB| = 0.0002   max|y - (-i/pi)G^A| = 0.0002   max|y - C_AB| = 0.0996
+TDZ (nt=400, dt=0.05 ): max|Im y| = 0.0967  (68% of that peak)
+    max|Re y - C_AB| = 0.0183   max|y - (-i/pi)G^A| = 0.0194   max|y - C_AB| = 0.0968
+```
+
+i.e. even on the friendliest possible pair the returned array differs from the
+house quantity by 70% of the correlator's own peak, entirely in its imaginary
+part. `src/dmrgpy/dynamics.py`'s module docstring now says exactly this
+(it previously claimed the convention for "every submode, on every backend");
+`tdz.py` reaching the same tail as `timedependent.py` is by construction --
+`tdz.py:46` imports `_fourier_transform_correlator` from it -- so TDZ is not an
+independent second case.
+
+**Not fixed, deliberately.** Bringing them onto the convention means returning
+`np.real(...)` of that transform (or reconstructing `i(G^R-G^A)/(2pi)` from the
+time series), which changes every TD/TDZ number on the most commonly used
+real-time route -- a second numbers-changing correlator fix on top of the four
+finding #5 already made, on the one submode family whose output most users plot
+directly. It was left for a pass that can re-baseline the TD examples and the
+user guide's TD figures at the same time. Note `_fourier_transform_correlator`'s
+own in-line comment still describes the codebase convention as
+`S_AB = -(1/pi) Im G_AB`, which finding #5 superseded; that comment is part of
+the same fix, not a separate one.
+
+
+### O2. mode="ED" and mode="DMRG" disagree pointwise under the DEFAULT submode="KPM", and the disagreement is not about the operator pair
+
+On this audit's own seeded 4-site complex-hopping chain (`probe8.py`'s
+`np.random.RandomState(3)` Hamiltonian, `es = linspace(-1,6,40)`, `delta =
+0.15`, `itensor_version=3`), the default submode returns visibly different
+curves from the two solvers:
+
+```
+pair A=Cdag_0 B=C_2 (Im M_n != 0): peak |ED| = 1.9360  peak |DMRG| = 1.2597   max|ED-DMRG| = 6.763e-01
+pair A=Cdag_0 B=C_0 (Im M_n  = 0): peak |ED| = 1.2942  peak |DMRG| = 0.8421   max|ED-DMRG| = 4.521e-01
+   (exact Lorentzian density peaks at delta=0.15: 0.6135 and 0.4101)
+```
+
+Two things this is NOT. It is not the finding #5 defect class: both solvers
+satisfy the kernel-independent sum rule exactly -- over `es = linspace(-12,18,
+1500)`, `delta = 0.05`, both integrate to `0.110522-0.271353j` against an exact
+`<GS|A B|GS> = 0.110522-0.271353j` for the off-diagonal pair, and to `0.195869`
+for the diagonal one -- so neither is losing or mis-weighting spectral weight.
+And it is not specific to a non-Hermitian pair: the Hermitian pair disagrees
+too, by 4.5e-01, which is why this is recorded as its own item rather than as a
+residue of #5. (The check that prompted this entry reported agreement on a
+Hermitian pair; re-measured here on this chain, it does not agree.)
+
+What the numbers look like is a *resolution* difference. Sweeping the requested
+broadening over `delta = 0.15/0.30/0.60` (120 points), every peak scales as
+`1/delta` and the ratios stay put: ED/exact = 3.23/3.24/3.24 and DMRG/exact =
+2.05/2.09/2.17 for the off-diagonal pair, with `max|ED-DMRG|` halving each time
+(7.36e-01, 3.59e-01, 1.66e-01) exactly as the curves themselves do. Both are
+therefore sharper than the Lorentzian of width `delta` the resolvent submodes
+produce, by two different constant factors. The `ed-and-operators` lens noted
+the ED half of the mechanism and made no claim about it (see its section
+below): `edtk/dynamics.py::dynamical_correlator_kpm` uses `delta` to choose a
+polynomial count (`n = int(2*scale/delta)`, `npol = 4n`), not as a broadening,
+and the DMRG side chooses its own independently.
+
+**Recorded as unexplained.** Which of the two (if either) realizes `delta=` as
+the caller's broadening, and whether the two should be made to agree at all for
+a Chebyshev kernel, is not established here -- it is a convention question about
+what `delta` means for KPM, and answering it needs a decision, not just a
+measurement. Not caused by this audit's fixes: the check that first reported it
+ran the comparison on the pre-fix tree as well and saw the same disagreement
+there (that half is its record; everything re-measured above is on the post-fix
+tree only).
 
 
 ---
