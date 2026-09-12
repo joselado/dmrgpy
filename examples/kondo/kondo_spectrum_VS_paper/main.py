@@ -10,24 +10,32 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # Two of the paper's own closed-form equations for the numerical building
 # blocks (eq. "step-fkt" for the temperature-broadened step Theta(x), and
 # equ. "F_2" for the temperature-broadened Kondo log function F(eps,T))
-# turned out not to reproduce the physics/figures the paper itself
-# describes (Theta(x) as printed diverges as x->-inf instead of
-# saturating at 0; F(eps,T) as printed drops the temperature-dependent
-# broadening the surrounding text and Fig. F describe). kondospectrumtk/
-# uses corrected forms instead, re-derived directly from the paper's own
-# unambiguous defining equations (eq. "current" for Theta; equ. "F_1" for
-# F) -- see kondospectrumtk/stepfunctions.py's module docstring for the
-# full derivation notes. This example checks those corrected pieces
-# quantitatively against the paper's own plotted values (digitized by eye
-# from Fig. F(b)), and the assembled spectrum against the qualitative
-# shapes described in the text and shown in Figs. 2 and 3.
+# are garbled as printed (Theta(x) diverges as x->-inf instead of
+# saturating at 0; F's log does not depend on its own integration
+# variable and its sign is wrong). kondospectrumtk/stepfunctions.py
+# implements the evident intent of each -- Theta re-derived from eq.
+# "current", F as the closed-form symmetric log ln((w0+|x|)/|x+iG0|)
+# convolved with Theta' -- see that module's docstring. This example
+# checks those pieces quantitatively against the paper's own plotted
+# values (Fig. F(b) = arXiv v1 Fig. 5b), and the assembled spectrum
+# against the shapes and values of Figs. 2 and 3 (= arXiv v1 Figs. 4 and
+# 7; the "Fig. N" names below are the ones kondospectrumtk's docstrings
+# use).
 #
 # Figs. 3b/3d are plotted in ABSOLUTE units (e^2 T0^2/h), which makes them
 # a much stronger check than the shapes alone: their zero-bias peak values
 # (1.13 at U=0, 1.39 at U=0.25) simultaneously pin down every prefactor in
 # the third-order spectrum. Asserting on them here caught three real
 # normalization/structure bugs at once -- see kondospectrumtk/
-# conductance.py's module docstring for what they were.
+# conductance.py's module docstring for what they were. Their +-4 mV
+# tails (0.886, digitized) and the 10 T step asymmetry of Fig. 3d
+# (1.231 vs 1.177 at the overshoots) then caught two more on 2026-09-12:
+# the potential-interference term had its exchange diagram with the
+# wrong sign (so it did not vanish at B=0 and tilted the U=0.25
+# zero-field peak), and F was the electron-like defining integral used
+# for both diagrams, 3.5% low in the tails. tests/
+# test_kondo_spectrum_paper_fig7.py pins all of these; the plot below
+# overlays the same reference values.
 import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import spinchain
@@ -110,6 +118,29 @@ print("Fig. 3b zero-bias peak: %.3f (paper: 1.13)"%(pk_b[0]/(2*np.pi)))
 print("Fig. 3d zero-bias peak: %.3f (paper: 1.39)"%(pk_d[0]/(2*np.pi)))
 assert abs(pk_b[0]/(2*np.pi) - 1.13) < 0.02
 assert abs(pk_d[0]/(2*np.pi) - 1.39) < 0.02
+# the +-4 mV tails (digitized from Fig. 3b: 0.886) -- sensitive to the
+# form of F away from its peak, which the zero-bias values are not
+_, tails_b = sc0.get_kondo_spectrum(np.array([-4e-3, 4e-3]), site=0,
+                                    Jrho_s=-0.05, U=0.0, T=1.0, order=3,
+                                    omega0=20e-3)
+print("Fig. 3b tails at +-4 mV: %.3f %.3f (paper: 0.886)"%tuple(tails_b/(2*np.pi)))
+assert np.allclose(tails_b/(2*np.pi), 0.886, atol=0.006)
+# the potential-interference term is odd AND vanishes at B=0, so the
+# zero-field U=0.25 curve is exactly symmetric with its peak at eV=0
+eVs_fig3 = np.linspace(-4e-3, 4e-3, 161)
+_, d3d0 = sc0.get_kondo_spectrum(eVs_fig3, site=0, Jrho_s=-0.05, U=0.25,
+                                 T=1.0, order=3, omega0=20e-3)
+assert np.allclose(d3d0, d3d0[::-1], atol=1e-10) and np.argmax(d3d0) == 80
+# and at 10 T its sign and size show up as the step asymmetry of Fig. 3d
+# (digitized: overshoots 1.231 at -1.7 mV and 1.177 at +1.7 mV)
+_, d3d10 = make_chain(10.0).get_kondo_spectrum(eVs_fig3, site=0, Jrho_s=-0.05,
+                                               U=0.25, T=1.0, order=3,
+                                               omega0=20e-3)
+d3d10 = d3d10/(2*np.pi)
+print("Fig. 3d 10 T overshoots: %.3f / %.3f (paper: 1.231 / 1.177)"
+      %(d3d10[eVs_fig3 < -1e-3].max(), d3d10[eVs_fig3 > 1e-3].max()))
+assert abs(d3d10[eVs_fig3 < -1e-3].max() - 1.231) < 0.012
+assert abs(d3d10[eVs_fig3 > 1e-3].max() - 1.177) < 0.012
 
 print("All Kondo-spectrum checks against the paper's Figs. F/2/3 passed.")
 
@@ -155,7 +186,6 @@ axes[0, 0].set_ylabel("dI/dV (2nd order)")
 axes[0, 0].set_title("Zeeman step (Fig. 2)")
 
 # Fig. 3b itself: the zero-field Kondo peak splitting with magnetic field
-eVs_fig3 = np.linspace(-4e-3, 4e-3, 161)
 for Bfield in [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]:
     _, dfig = make_chain(Bfield).get_kondo_spectrum(
             eVs_fig3, site=0, Jrho_s=-0.05, U=0.0, T=1.0, order=3, omega0=20e-3)
@@ -164,16 +194,25 @@ _, dfig2 = make_chain(10.0).get_kondo_spectrum(eVs_fig3, site=0, T=1.0, order=2)
 axes[0, 1].plot(eVs_fig3*1e3, dfig2/(2*np.pi), "k--", lw=1,
                  label="2nd order, B=10 T")
 axes[0, 1].axhline(1.13, color="gray", lw=0.8, ls=":")
+axes[0, 1].axhline(0.886, color="gray", lw=0.8, ls=":")
 axes[0, 1].set_xlabel("eV (meV)")
 axes[0, 1].set_ylabel(r"dI/dV ($e^2T_0^2/h$)")
-axes[0, 1].set_title("Kondo peak splitting (Fig. 3b);\ndotted: paper's B=0 peak 1.13")
+axes[0, 1].set_title("Kondo peak splitting (Fig. 3b);\ndotted: paper's B=0 peak 1.13, tails 0.886")
 axes[0, 1].legend(fontsize=6)
 
-axes[0, 2].plot(eVs4, dU_only, color="tab:red")
-axes[0, 2].axhline(0, color="gray", lw=0.8, ls=":")
-axes[0, 2].set_xlabel("eV")
-axes[0, 2].set_ylabel("dI/dV (potential-interference term)")
-axes[0, 2].set_title("bias asymmetry (Fig. 3c/d)")
+# Fig. 3d: the same at U=0.25 -- symmetric at 0 T, with the odd
+# potential-interference term showing up as the step asymmetry at 10 T
+for Bfield in [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]:
+    _, dfig = make_chain(Bfield).get_kondo_spectrum(
+            eVs_fig3, site=0, Jrho_s=-0.05, U=0.25, T=1.0, order=3, omega0=20e-3)
+    axes[0, 2].plot(eVs_fig3*1e3, dfig/(2*np.pi), label="B=%g T"%Bfield)
+axes[0, 2].plot([-1.67, 1.69], [1.231, 1.177], "ko", ms=4, label="paper, 10 T overshoots")
+axes[0, 2].plot([-4, 4], [1.146, 1.128], "ks", ms=4, label="paper, 10 T tails")
+axes[0, 2].axhline(1.39, color="gray", lw=0.8, ls=":")
+axes[0, 2].set_xlabel("eV (meV)")
+axes[0, 2].set_ylabel(r"dI/dV ($e^2T_0^2/h$)")
+axes[0, 2].set_title("U=0.25 (Fig. 3d); dotted: paper's B=0 peak 1.39\nbias asymmetry = the odd potential-interference term")
+axes[0, 2].legend(fontsize=6)
 
 axes[1, 0].plot(eVs5*1e3, dIdV_T0, "o-", label="T=0 (exact)")
 axes[1, 0].plot(eVs5*1e3, dIdV_smallT, "x--", label="T=1e-3 (finite)")

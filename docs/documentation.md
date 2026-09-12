@@ -4682,17 +4682,26 @@ always goes through `Spin_Chain.get_ED_obj()` directly.
 
 Two of the source paper's own closed-form equations for supporting
 numerical functions (the temperature-broadened step and a
-temperature-broadened logarithmic Kondo function) do not reproduce the
-behavior the paper itself describes and plots for them; `kondospectrumtk/
-stepfunctions.py` re-derives both from the paper's own unambiguous
-defining integrals instead, each independently verified against
-digitized values from the paper's own figures. See that module's
-docstring and `docs/user_guide.md`'s §17 for the full derivation notes
-and the feature's other scope limitations (single tip-coupled site, the
-potential-scattering interference term's general-spin form is an
-extrapolation from the paper's own worked example) -- as well as the
-normalization conventions, which every term's prefactor is checked
-against via the paper's absolutely scaled Figs. 3b/3d.
+temperature-broadened logarithmic Kondo function) are garbled as
+printed; `kondospectrumtk/stepfunctions.py` implements the evident
+intent of each (the step re-derived from the paper's current formula,
+the Kondo function as its closed-form symmetric log convolved with the
+paper's own thermal kernel), each verified against values digitized
+from the paper's figures. See that module's docstring and
+`docs/user_guide.md`'s §17 for the derivation notes, the two
+2026-09-12 behaviour changes (the potential-interference term's
+exchange-diagram sign, and the switch from the electron-like defining
+integral to the symmetric closed form for F), and the feature's other
+scope limitations (single tip-coupled site, the potential-scattering
+interference term's general-spin form is an extrapolation from the
+paper's own worked example) -- as well as the normalization
+conventions, which every term's prefactor is checked against via the
+paper's absolutely scaled Fig. 7 (arXiv v1 numbering; called Fig. 3 in
+the docstrings), now pixel-digitized in
+`tests/test_kondo_spectrum_paper_fig7.py`. On the ED side the
+third-order sums are restricted to thermally occupied initial states
+(`conductance.P_CUT`, O(n_occ dim^2) instead of dim^3) and F is
+tabulated once per `FBuilder`.
 
 **`mode="DMRG"`** (`T=0` only) is a second, independent route through
 this same feature that *does* stay within `itensor_version=3`, never
@@ -4714,7 +4723,9 @@ requires:
   `tdz.py` already drives manually the same way), then converted to a
   frequency-domain quantity via two closed-form time-domain kernels
   (`Theta0`'s Cauchy-principal-value kernel, computed via an FFT-based
-  Hilbert transform; `F0`'s kernel, smooth and closed-form) rather than
+  Hilbert transform; `F0`'s kernel, closed-form in sine/cosine
+  integrals and log-singular at `t2=0`, where the Riemann sum takes
+  cell averages) rather than
   by evaluating those functions pointwise on a discrete frequency grid --
   an initial FFT-grid attempt at the same physics did not converge
   robustly (a discontinuous step function and a log singularity both
@@ -4763,10 +4774,11 @@ A 1-site test chain also hit an unrelated internal ITensor v3 error
 (building the Hamiltonian MPO, distinct from the two-site-`dmrg()`
 short-chain crash `mode.py`'s ED fallback already guards against) --
 chains need at least 3 sites for this feature. The second-order
-term (`submode="KPM"`) was spot-checked too, agreeing to within a few
-tens of percent at thresholds, consistent with the expected
-delta-broadening/moment-truncation error on top of what the ED path
-already has.
+term (`submode="KPM"`, delta=2e-5) agrees with the exact excited-state
+sum to 0.2% at every bias point; the "few tens of percent at
+thresholds" it was quoted at until 2026-09-12 was
+`secondorder_dc.py`'s own cumulative sum (a whole frequency bin
+attributed to one side of a threshold), now a trapezoid rule.
 
 The potential-interference term (`U!=0`, part of `order=3`) is also
 supported for `mode="DMRG"`, via `potentialdc.py`: its own `T=0` limit

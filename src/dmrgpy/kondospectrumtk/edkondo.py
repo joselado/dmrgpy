@@ -16,7 +16,7 @@ class KondoSpectrum():
     (shifted so the ground state is at 0), Boltzmann occupations at
     temperature T, and the impurity spin operators Sx/Sy/Sz transformed
     into the Hamiltonian eigenbasis."""
-    def __init__(self, chain, site, T, kB=8.617333262e-5):
+    def __init__(self, chain, site, T, kB=8.617333262e-5, degeneracy_tol=1e-9):
         # kB in eV/K by default (so T is given in Kelvin, energies in eV,
         # matching how the rest of dmrgpy's examples quote energies); pass
         # kB=1 if you'd rather work in units where T is already an energy.
@@ -39,7 +39,20 @@ class KondoSpectrum():
         self.vs = vs
         self.dim = len(self.e)
         if T == 0.:
-            self.p = np.zeros(self.dim); self.p[0] = 1. # only the GS is occupied
+            # Equal weights over the (numerically) degenerate ground-state
+            # manifold -- the T->0+ limit of the Boltzmann distribution.
+            # A one-hot p on eigh's first eigenvector is the same thing for
+            # a non-degenerate ground state, and for a multiplet whose
+            # members are related by a symmetry the unpolarized sums do
+            # not distinguish (an SU(2) irrep, a Kramers doublet), but for
+            # an accidental degeneracy -- e.g. S=1 with D*Sz^2+g*muB*B*Sz
+            # at the |0>/|-1> level crossing g*muB*B=D -- it silently
+            # picks whatever basis eigh returned for that eigenspace, and
+            # the spectrum then depends on it. degeneracy_tol is relative
+            # to the spectral bandwidth.
+            width = max(self.e[-1], 1e-300)
+            gs = (self.e <= degeneracy_tol*width).astype(float)
+            self.p = gs/np.sum(gs)
         else:
             kT = kB*T
             p = np.exp(-self.e/kT)

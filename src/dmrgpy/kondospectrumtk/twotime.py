@@ -36,11 +36,24 @@ import numpy as np
 # quadrature (which needs impractically fine grids for the same accuracy:
 # confirmed directly, see PR history).
 #
-# K_W(t2;eV) = (1/|t2|) * exp(-Gamma0*|t2|) * [cos(t2*eV) - cos(t2*(eV-omega0))]
-#   (the exact inverse FT of F0(eV-.)+F0(eV+.), derived from F0's own
-#   closed form via the standard FT pair ln(x^2+b^2) <-> -2*pi*exp(-b|w|)/|w|)
-# applied via ordinary numerical integration over t2 (K_W is smooth, no
-# singularity at t2=0 -- the two cosines cancel there).
+# K_W(t2;eV) = cos(eV*t2) * { exp(-Gamma0*|t2|)/|t2|
+#                 - (2/(pi*|t2|)) [sin(z) Ci(z) - cos(z) si(z)] },  z = omega0*|t2|
+#   (si(z) = Si(z) - pi/2; the exact inverse FT of F0(eV-.)+F0(eV+.) for
+#   F0(x) = ln(omega0+|x|) - 1/2 ln(x^2+Gamma0^2): the first term is the
+#   standard pair ln(x^2+b^2) <-> -2*pi*exp(-b|t|)/|t|, the second is
+#   2*int_0^inf ln(omega0+x) cos(xt) dx = -(2/t) int_0^inf sin(xt)/(omega0+x) dx
+#   by parts, Gradshteyn-Ryzhik 3.722.1). The two 1/|t2| pieces cancel at
+#   t2->0, leaving an integrable log, K_W ~ -(2*omega0/pi) ln(omega0|t2|):
+#   F0 decays only as omega0/|x| beyond the band, so its transform is not
+#   finite at t2=0. On the uniform t2 grid, which contains t2=0 exactly,
+#   that one point takes the average of K_W over its own cell (K_W's `dt`
+#   argument), which is what a Riemann sum wants of an integrable
+#   singularity; every other point is evaluated directly.
+#   Until 2026-09-12 F0 was the electron-like ln|omega0-x| - ln|x| (see
+#   stepfunctions.py's module docstring), whose transform
+#   (1/|t2|) exp(-Gamma0|t2|) [cos(t2 eV) - cos(t2 (eV-omega0))] is
+#   smooth at t2=0 -- the band-edge cosine there is the sharp-cutoff
+#   singularity at x=omega0 that the current F0 does not have.
 #
 # Both kernels were verified independently (direct numerical/closed-form
 # checks) and the full pipeline verified end-to-end against the exact,
@@ -77,15 +90,51 @@ def theta0_filter(tau_grid, G_of_tau, eV):
     return 0.5*G_of_tau[..., idx0] + (1j/2.)*Hh0
 
 
-def K_W(t2, eV, omega0, Gamma0):
+def K_W(t2, eV, omega0, Gamma0, dt=None, n_avg=8):
     """Closed-form time-domain kernel for F0(eV-.)+F0(eV+.) (see module
-    docstring). Smooth everywhere, including t2=0 (the naive 1/|t2|
-    factor there is cancelled by the vanishing bracket)."""
+    docstring). Log-singular (integrably) at t2=0, so on a uniform grid
+    of spacing `dt` the points within n_avg cells of it (t2=0 included)
+    are returned as cell averages, (1/dt) int_{t2-dt/2}^{t2+dt/2} K_W --
+    what a Riemann sum wants of a kernel that is not smooth on the cell
+    scale there (measured on a pure cosine: the plain midpoint values
+    left a 0.9% error at omega0*dt=0.5, the cell averages 0.02%). A t2
+    array containing an exact 0 requires dt."""
+    from scipy.special import sici
+    from scipy.integrate import quad
     t2 = np.asarray(t2, dtype=float)
     out = np.zeros_like(t2)
+    if dt is not None:
+        near = np.abs(t2) < (n_avg + 0.5)*dt
+        if near.any():
+            far = ~near
+            out[far] = K_W(t2[far], eV, omega0, Gamma0)
+            for i in np.nonzero(near)[0]:
+                a, b = t2[i] - dt/2., t2[i] + dt/2.
+                pts = [0.] if a < 0. < b else None
+                cell, _ = quad(lambda t: K_W(np.array([t]), eV, omega0, Gamma0)[0],
+                               a, b, points=pts, limit=200)
+                out[i] = cell/dt
+            return out
     nz = np.abs(t2) > 1e-300
-    tnz = np.abs(t2[nz])
-    out[nz] = (np.exp(-Gamma0*tnz)/tnz)*(np.cos(t2[nz]*eV) - np.cos(t2[nz]*(eV-omega0)))
+    ta = np.abs(t2[nz])
+    z = omega0*ta
+    small = z < 1e-4
+    band = np.empty_like(ta)
+    si, ci = sici(z[~small])
+    band[~small] = (2./(np.pi*ta[~small]))*(np.sin(z[~small])*ci
+                                           - np.cos(z[~small])*(si - np.pi/2))
+    # z->0: the 1/t of the band term cancels the 1/t of the Gamma0 term
+    # exactly; evaluate the difference by its series instead of by
+    # cancellation (gamma = Euler's constant)
+    gamma = 0.5772156649015329
+    ts = ta[small]
+    band[small] = 1./ts + (2*omega0/np.pi)*(gamma - 1. + np.log(omega0*ts)) - omega0**2*ts/2.
+    main = np.exp(-Gamma0*ta)/ta
+    main[small] = 1./ts - Gamma0 + Gamma0**2*ts/2.
+    out[nz] = np.cos(t2[nz]*eV)*(main - band)
+    if not nz.all():
+        raise ValueError("K_W diverges (logarithmically) at t2=0: pass "
+                         "dt, the grid spacing, to get its cell average")
     return out
 
 
@@ -139,7 +188,7 @@ def kondo_term_from_two_time(t2_grid, tau_grid, G_batches, eVs, omega0, Gamma0):
         weights[np.isclose(t2_chunk, t2_last)] *= 0.5
         for i, eV in enumerate(both):
             h_t2 = theta0_filter(tau_grid, G_chunk, eV)
-            kw = K_W(t2_chunk, eV, omega0, Gamma0)
+            kw = K_W(t2_chunk, eV, omega0, Gamma0, dt=dt2)
             totals[i] += np.sum(kw*h_t2*weights)
     out = np.imag(totals)/2. # SA factor 2 -- see conductance.py's docstring
     return out[:nev] + out[nev:]

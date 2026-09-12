@@ -49,25 +49,35 @@ def test_theta_prime_matches_finite_difference():
 
 
 def test_F_matches_figure_F_reference_values():
-    # digitized from the paper's own Fig. F(b), T=1K, omega0=200meV,
-    # Gamma0=5ueV curve: F(0)~7.5, F(10meV)~3.1
+    # digitized from the paper's own Fig. F(b) (arXiv v1: Fig. 5b), T=1K,
+    # omega0=200meV, Gamma0=5ueV curve: F(0)~7.5, F(10meV)~3.1
     vals = F(np.array([0., 10e-3]), T=1.0, omega0=0.2, Gamma0=5e-6)
     assert vals[0] == pytest.approx(7.5, abs=0.1)
     assert vals[1] == pytest.approx(3.1, abs=0.2)
     assert vals[0] > vals[1] > 0. # peaked and positive
+    # and the six peak values of Fig. 5(b,c), read off the plot at
+    # T=0.5,1,2,5,10,20 K: 8.1, 7.5, 6.8, 5.9, 5.2, 4.5 (the thermal
+    # broadening kernel; a Fermi-derivative kernel instead of Theta' comes
+    # out 0.37 too high at every T)
+    peaks = [F(np.array([0.]), T=T, omega0=0.2, Gamma0=5e-6)[0]
+             for T in (0.5, 1., 2., 5., 10., 20.)]
+    assert np.allclose(peaks, [8.1, 7.5, 6.8, 5.9, 5.2, 4.5], atol=0.06)
 
 
-def test_F_decays_away_from_the_peak():
-    # F is "electron-like" (equ. "F_1" uses 1-f(ep',T) in its numerator,
-    # not the symmetrized combination with the "hole-like" equ. "F_1h"),
-    # so it is NOT expected to be even in x=eV-eps_m -- only decay away
-    # from its peak at x=0 in both directions.
+def test_F_decays_away_from_the_peak_and_is_even():
+    # F is the paper's closed-form eq. 22, ln((w0+|x|)/|x+iG0|) thermally
+    # broadened -- even in x=eV-eps_m (electron- and hole-like
+    # intermediate states enter symmetrically), decaying away from its
+    # peak at x=0 in both directions. Until 2026-09-12 it was the
+    # electron-like eq. 20 alone, which is NOT even (its band edge is at
+    # x=+w0 only), and this test asserted only the decay.
     xs = np.array([0., 1e-3, 1.])
     vals = F(xs, T=1.0, omega0=0.2, Gamma0=5e-6)
     assert vals[0] > vals[1] > vals[2] # monotonically decaying away from 0
     assert vals[0] > 0. and vals[1] > 0. # positive near the peak
     neg_vals = F(np.array([-1e-3, -1.]), T=1.0, omega0=0.2, Gamma0=5e-6)
     assert vals[0] > neg_vals[0] > neg_vals[1]
+    assert np.allclose(vals[1:], neg_vals, rtol=1e-10, atol=0.) # even
 
 
 def test_second_order_zeeman_step_plateaus():

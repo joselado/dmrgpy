@@ -7,11 +7,16 @@ from .stepfunctions import F0, Theta0
 # different kernel. conductance.third_order_potential_dIdV's T=0 limit
 # (ks.p one-hot on the ground state) collapses its i,m sum, per tunneling
 # direction, to
-#   h(eV) = Theta0(eV) * sum_m sum_k |<m|Sk|GS>|^2 [F0(eV-eps_m0)+F0(eV+eps_m0)]
-# (k running over Sx,Sy,Sz, matching that function's Xi[a,b,alpha] stack),
+#   h(eV) = Theta0(eV) * sum_m sum_k |<m|Sk|GS>|^2 [F0(eV-eps_m0)-F0(eV+eps_m0)]
+# (k running over Sx,Sy,Sz, matching that function's Xi[a,b,alpha] stack;
+# direct MINUS exchange diagram -- see conductance.py's module docstring
+# for why this term, unlike the Kondo one, has them with opposite signs,
+# and third_order_potential_dIdV's docstring for the 2026-09-12 change
+# from the summed form, which this module followed at the same time),
 # with the measured term the odd combination h(eV)-h(-eV) over the two
 # tunneling directions (eq. "asym_U"; see conductance.py's module
-# docstring).
+# docstring). Because the bracket vanishes at eps_m0=0, the m=GS
+# (elastic) part of S(w) at w=0 drops out of the convolution.
 # sum_m |<m|Sk|GS>|^2 delta(w-eps_m0) is exactly the T=0 dynamical
 # structure factor S_kk(w) that get_dynamical_correlator already computes
 # -- so the m-sum becomes an F0-weighted convolution of S_kk against the
@@ -22,7 +27,7 @@ from .stepfunctions import F0, Theta0
 
 def _convolved_F0_weight(chain, op, eVs, omega0, Gamma0, mode, submode,
                           delta, es, **kwargs):
-    """dw * sum_i S(w_i) * [F0(eV-w_i) + F0(eV+w_i)] for every eV in eVs,
+    """dw * sum_i S(w_i) * [F0(eV-w_i) - F0(eV+w_i)] for every eV in eVs,
     where S(w) = sum_m |<m|op|GS>|^2 delta(w-eps_m0) is the T=0 dynamical
     structure factor for A=op.get_dagger(), B=op (see secondorder_dc.py's
     module docstring for why the explicit get_dagger() is required)."""
@@ -35,7 +40,7 @@ def _convolved_F0_weight(chain, op, eVs, omega0, Gamma0, mode, submode,
     diff = eVs[:, None] - x[None, :]
     ssum = eVs[:, None] + x[None, :]
     kernel = (F0(diff.ravel(), omega0=omega0, Gamma0=Gamma0).reshape(diff.shape)
-              + F0(ssum.ravel(), omega0=omega0, Gamma0=Gamma0).reshape(ssum.shape))
+              - F0(ssum.ravel(), omega0=omega0, Gamma0=Gamma0).reshape(ssum.shape))
     return dw*np.einsum('w,ew->e', S, kernel)
 
 

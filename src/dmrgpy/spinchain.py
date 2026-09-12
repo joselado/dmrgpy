@@ -232,9 +232,11 @@ class Spin_Chain(Many_Body_Chain):
               kondospectrumtk/dmrgtwotime.py's module docstring for what
               that surfaced and fixed): the third-order Kondo term's
               G(t2,tau) matches the ED reference to ~1e-9-1e-10, and the
-              swept second-order term (KPM) agrees to within a few tens
-              of percent at thresholds, consistent with the expected
-              delta-broadening/moment-truncation error.
+              swept second-order term (KPM, delta=2e-5) agrees with the
+              exact sum to 0.2% at every bias point (it was "a few tens
+              of percent at thresholds" until the cumulative integral in
+              secondorder_dc.py was made a trapezoid rule on 2026-09-12;
+              the error was never KPM's).
 
         Returns (eV, dIdV)."""
         if order not in (2, 3): raise ValueError("order must be 2 or 3")
@@ -257,8 +259,8 @@ class Spin_Chain(Many_Body_Chain):
         ks = KondoSpectrum(self, site, T, kB=kB)
         dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
-            # shared between both calls below: building it tabulates an
-            # expensive adaptive-quadrature integral (see FBuilder)
+            # shared between both calls below: building it tabulates F
+            # once (~0.4 s, see FBuilder)
             Fb = FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB) if T>0. else None
             dIdV = dIdV + conductance.third_order_kondo_dIdV(
                     ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0, Fb=Fb)

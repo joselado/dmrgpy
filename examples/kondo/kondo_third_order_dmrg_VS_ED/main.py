@@ -88,13 +88,15 @@ _, dIdV_dmrg = sc.get_kondo_spectrum(
 
 diff = np.max(np.abs(dIdV_dmrg-dIdV_ed))
 print("max |DMRG - ED| = %.3f (max |ED| = %.3f)"%(diff, np.max(np.abs(dIdV_ed))))
-# ~10%, not machine precision: the DMRG path carries KPM delta-broadening
-# error and t2/tau-grid discretization error on top of what the ED path
-# has. At these settings the residual is dominated by the *second-order*
-# term's KPM broadening (~10% at the step thresholds, measured directly);
-# the third-order Kondo term's own two-time grid error is ~15% of a term
-# that is itself ~50x smaller here, i.e. a negligible part of the total.
-assert diff < 0.12*np.max(np.abs(dIdV_ed))
+# ~0.6% (0.013 on 2.148), not machine precision: the DMRG path carries
+# KPM delta-broadening error and t2/tau-grid discretization error on top
+# of what the ED path has. It was ~10% until 2026-09-12, and that was
+# neither: secondorder_dc.py's cumulative integral counted the whole
+# frequency bin holding a threshold's peak as lying below it, so the
+# second-order term was off by 0.22 exactly at eV=0 (a trapezoid rule
+# now). What remains is the third-order Kondo term's own two-time grid
+# error, ~15% of a term that is itself ~50x smaller than the total here.
+assert diff < 0.02*np.max(np.abs(dIdV_ed))
 
 import matplotlib.pyplot as plt
 

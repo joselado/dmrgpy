@@ -56,6 +56,29 @@ from .stepfunctions import Theta, Theta0, FBuilder, F0
 #     plain sum_k |<m|S_k|i>|^2 already used below.
 # See examples/kondo/kondo_spectrum_VS_paper for these checks as runnable
 # assertions.
+#
+# Direct vs exchange diagram, per term. Every third-order process comes
+# in two interaction orders (the paper's "normal" and "reversed", the
+# latter tagged R in its Fig. 6/7 -- arXiv v1 numbering, which is what
+# this package's "Fig. 3"/"Fig. F" references below mean: its Fig. 3 is
+# the arXiv PDF's Fig. 7 and its Fig. F is Fig. 5). Reversing the order
+# does two things: it reverses the electron-spin trace, and it turns the
+# intermediate electron from electron-like into hole-like, whose F enters
+# with the opposite sign (the paper's eqs. 20/21 "with a change of sign").
+# For the Kondo term the trace is the antisymmetric Levi-Civita one, so
+# the two sign flips cancel and both orders enter with the SAME
+# coefficient, F(eV-eps_im) + F(eV+eps_im) (eqs. 24/25). For the
+# potential-interference term the trace is the symmetric delta_kj, so
+# only the hole-like sign flip survives and the two orders enter with
+# OPPOSITE signs, F(eV-eps_im) - F(eV+eps_im). That difference is what the
+# paper's Fig. 7c actually shows (121u and 121uR are mirror images with
+# opposite sign, their sum is smooth through zero bias), and it has two
+# consequences the summed form does not have: the elastic intermediate
+# state m=i cancels identically (no sign(eV)*F(eV) spike at zero bias),
+# and at B=0 the whole term vanishes -- which is why the paper's Fig. 7d
+# (U=0.25) is exactly symmetric at 0 T with the same peak position as
+# Fig. 7b. Until 2026-09-12 this term used the summed form; see
+# third_order_potential_dIdV's docstring for what that changed.
 
 
 def _theta_raw(ks, x):
@@ -116,17 +139,41 @@ for _i, _j, _k in [(0, 2, 1), (2, 1, 0), (1, 0, 2)]:
     _EPS3[_i, _j, _k] = -1.
 
 
-def _triple_product_coefficients(ks):
+# Thermal occupations below this fraction of the largest one are treated
+# as zero when choosing which initial states i to sum over. Every term in
+# this module is linear in p_i, so a state dropped here contributes less
+# than P_CUT times the largest single-state contribution -- far below the
+# accuracy of anything else in the model (Theta/F tabulations are
+# ~1e-6..1e-8). It is what makes the third-order terms O(n_occ*dim^2)
+# instead of O(dim^3): at T=0 n_occ is the ground-state degeneracy, and at
+# any T it is the number of states within ~28 kT of the ground state.
+P_CUT = 1e-12
+
+
+def _occupied_states(ks, p_cut=P_CUT):
+    """Indices of the initial states whose Boltzmann weight is not
+    negligible (p_i > p_cut*max(p)); p_cut=0 keeps every state."""
+    return np.nonzero(ks.p > p_cut*np.max(ks.p))[0]
+
+
+def _triple_product_coefficients(ks, occ=None):
     """coeff[i,f,m] = sum_jkl eps_jkl <i|S_l|f><f|S_k|m><m|S_j|i>, the
     Levi-Civita triple product appearing in eq. "3rd-normal"/"3rd-reversed"
     (both give the identical coefficient; only the F(...) argument
-    differs between the direct and exchange diagrams)."""
+    differs between the direct and exchange diagrams).
+
+    occ: indices of the initial states i to build it for (the first axis
+    of the result then runs over occ, in that order); None means all of
+    them, i.e. the full dim^3 tensor -- only worth paying for when every
+    state is thermally occupied."""
     Xi = np.stack([ks.Sx, ks.Sy, ks.Sz], axis=-1) # Xi[a,b,alpha]=<a|S_alpha|b>
-    return np.einsum('jkl,ifl,fmk,mij->ifm', _EPS3, Xi, Xi, Xi, optimize=True)
+    if occ is None: occ = np.arange(ks.dim)
+    return np.einsum('jkl,ifl,fmk,mij->ifm', _EPS3, Xi[occ, :, :], Xi,
+                     Xi[:, occ, :], optimize=True)
 
 
 def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
-                            Fb=None):
+                            Fb=None, p_cut=P_CUT):
     """Third-order Kondo term, eqs. "3rd-normal" (direct diagram) +
     "3rd-reversed" (exchange diagram -- despite the name this is NOT the
     s->t tunneling direction: the paper's own "t -R-> s" notation on eq.
@@ -146,9 +193,14 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     be. The overall normalization carries the "SA factor" 2 of this
     module's docstring, i.e. the Levi-Civita coefficient is Im[X]/2.
 
-    This is an O(dim^3 * len(eVs)) calculation, inherent to the triple sum
-    over eigenstates -- expected to be the bottleneck for larger Hilbert
-    spaces.
+    This is an O(n_occ * dim^2 * len(eVs)) calculation, n_occ being the
+    number of thermally occupied initial states (p_cut, see P_CUT: one
+    state at T=0 for a non-degenerate ground state), inherent to the
+    triple sum over eigenstates -- the f and m sums always run over the
+    full spectrum, since m is a virtual intermediate state. It used to be
+    O(dim^3) in both time and memory regardless of T (the full
+    coefficient tensor was built for every i, 3.4 GB and 13 s at dim=512
+    even at T=0, where all but one row of it is multiplied by p_i=0).
 
     Fb: an existing FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
     to reuse instead of building a new one -- building it tabulates
@@ -158,29 +210,31 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     once and pass it to both. Ignored at ks.T==0 (uses the closed-form F0
     instead)."""
     eVs = np.asarray(eVs, dtype=float)
-    coeff = np.imag(_triple_product_coefficients(ks))/2. # SA factor: see above
+    occ = _occupied_states(ks, p_cut) # initial states i that carry weight
+    p = ks.p[occ]
+    coeff = np.imag(_triple_product_coefficients(ks, occ))/2. # SA factor: see above
     # eps_if[i,f] = e_f - e_i and eps_im[i,m] = e_m - e_i are the same
-    # array (e[None,:]-e[:,None]) under two names for readability at the
-    # call sites below
-    eps_if = eps_im = ks.e[None, :] - ks.e[:, None]
+    # array (e[None,:]-e[occ,None]) under two names for readability at the
+    # call sites below; the first axis runs over occ
+    eps_if = eps_im = ks.e[None, :] - ks.e[occ, None]
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
-    dim = ks.dim
+    dim, nocc = ks.dim, len(occ)
 
     def one_direction(v):
         """d(I^{t->s})/dV at bias v; the s->t direction is this same
         expression at -v (only eV flips, not eps_if/eps_im)."""
-        Fim = Fcall((v[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(v), dim, dim)
-        Fmi = Fcall((v[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(v), dim, dim)
+        Fim = Fcall((v[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
+        Fmi = Fcall((v[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
         Th = _theta_raw(ks, v[:, None, None] - eps_if[None, :, :])
         Fsum = Fim + Fmi # direct (eps_im) + exchange (eps_mi=-eps_im) diagrams
-        return np.einsum('i,ifm,eif,eim->e', ks.p, coeff, Th, Fsum, optimize=True)
+        return np.einsum('i,ifm,eif,eim->e', p, coeff, Th, Fsum, optimize=True)
 
     total = one_direction(eVs) + one_direction(-eVs) # eq. "sym_z": same sign
     return 4*np.pi*T0**2*Jrho_s*total
 
 
 def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
-                                Gamma0=5e-6, Fb=None):
+                                Gamma0=5e-6, Fb=None, p_cut=P_CUT):
     """Third-order potential-scattering interference term, eq. "U-M"
     (the origin of the bias asymmetry in Fig. 3c/d), summed over both
     tunneling directions.
@@ -197,28 +251,53 @@ def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
     the impurity to return to its initial state (elastic), collapsing the
     i,f,m sum to a two-state i,m loop.
 
-    Unlike third_order_kondo_dIdV, the two tunneling directions enter with
-    OPPOSITE signs here, as h(eV)-h(-eV) -- eq. "asym_U": "the conductance
-    for processes that include potential scattering changes its sign when
-    inverting the tunneling direction". The result is therefore odd in eV
-    (in particular exactly 0 at eV=0), which is precisely the
-    bias-asymmetric lineshape of Fig. 3c (its "sum" curve is antisymmetric
-    about zero bias) and the source of the asymmetry in Fig. 3d.
+    The direct and exchange diagrams enter with OPPOSITE signs,
+    F(eV-eps_im) - F(eV+eps_im), not the summed combination the Kondo term
+    has -- see the module docstring for why (a symmetric electron trace
+    leaves the hole-like sign flip of the reversed order uncompensated),
+    and the paper's Fig. 3c (arXiv v1: Fig. 7c), where the 121u and 121uR
+    curves are mirror images of opposite sign and their sum is smooth
+    through zero bias. Two consequences: the m=i term cancels identically
+    (no zero-bias spike), and the whole term vanishes at B=0, so the
+    zero-field Kondo peak keeps its position and symmetry at U!=0 (the
+    paper's Fig. 3d/7d at 0 T is exactly symmetric, peak 1.39 at eV=0).
+
+    NUMBERS CHANGED on 2026-09-12: this term used F(eV-eps_im)+F(eV+eps_im)
+    before, which (i) kept a spurious m=i contribution, a sign(eV)*F(eV)
+    spike at zero bias that shifted and tilted the zero-field peak
+    (measured on the paper's own Fig. 7d parameters: peak at -0.2 mV
+    instead of 0, 1.47 instead of 1.39, tails 1.156/1.052 instead of
+    1.145/1.135), and (ii) gave the exchange diagram the wrong sign, so
+    the field-split step asymmetry at 10 T came out ~0.27 in the paper's
+    units against ~0.06 in its Fig. 7d. Every U!=0, order=3 result from
+    before this date is not comparable (U=0 and order=2 are untouched).
+
+    The two tunneling directions also enter with OPPOSITE signs, as
+    h(eV)-h(-eV) -- eq. "asym_U": "the conductance for processes that
+    include potential scattering changes its sign when inverting the
+    tunneling direction". The result is therefore odd in eV (in particular
+    exactly 0 at eV=0), which is precisely the bias-asymmetric lineshape
+    of Fig. 3c (its "sum" curve is antisymmetric about zero bias) and the
+    source of the asymmetry in Fig. 3d.
 
     Fb: see third_order_kondo_dIdV's docstring -- pass the same FBuilder
     to both to avoid rebuilding its expensive tabulation twice. Ignored at
     ks.T==0 (uses the closed-form F0 instead)."""
     eVs = np.asarray(eVs, dtype=float)
+    occ = _occupied_states(ks, p_cut) # initial states i that carry weight
+    p = ks.p[occ]
     Xi = np.stack([ks.Sx, ks.Sy, ks.Sz], axis=-1) # Xi[a,b,alpha]=<a|S_alpha|b>
-    loop = np.real(np.einsum('imk,mik->im', Xi, Xi)) # sum_k |<i|Sk|m>|^2
-    eps_im = ks.e[None, :] - ks.e[:, None] # eps_im[i,m] = e_m - e_i
+    # loop[i,m] = sum_k |<i|Sk|m>|^2, first axis over occ
+    loop = np.real(np.einsum('imk,mik->im', Xi[occ, :, :], Xi[:, occ, :]))
+    eps_im = ks.e[None, :] - ks.e[occ, None] # eps_im[i,m] = e_m - e_i
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
-    dim = ks.dim
+    dim, nocc = ks.dim, len(occ)
 
     def one_direction(v):
-        Fim = Fcall((v[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(v), dim, dim)
-        Fmi = Fcall((v[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(v), dim, dim)
-        weighted = np.einsum('i,im,eim->e', ks.p, loop, Fim + Fmi, optimize=True)
+        Fim = Fcall((v[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
+        Fmi = Fcall((v[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
+        # direct MINUS exchange: the m=i (eps_im=0) terms cancel here
+        weighted = np.einsum('i,im,eim->e', p, loop, Fim - Fmi, optimize=True)
         return weighted*_theta_raw(ks, v)
 
     total = one_direction(eVs) - one_direction(-eVs) # eq. "asym_U": sign flips

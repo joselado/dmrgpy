@@ -27,12 +27,13 @@ import numpy as np
 # rule (total spectral weight) matches to ~0.06%, and the swept dI/dV
 # matches to within ~0.7% (the residual is the expected effect of the
 # finite `delta` broadening the otherwise-sharp Theta0 threshold -- it
-# shrinks as delta/es resolution are tightened). Also spot-checked with
-# mode="DMRG", submode="KPM" against a compiled itensor_version=3
-# backend once one became available: same qualitative agreement (a few
-# tens of percent at the thresholds, matching elsewhere), with the
-# expected additional KPM moment-truncation error on top of the delta
-# broadening.
+# shrinks as delta/es resolution are tightened). With mode="DMRG",
+# submode="KPM" on a compiled itensor_version=3 backend (3-site chain,
+# delta=2e-5, es of 800 points over +-3 meV) the swept dI/dV matches the
+# exact sum to 0.2% of its maximum at every bias point, thresholds
+# included. It used to be quoted as "a few tens of percent at the
+# thresholds": that was the cumulative sum below, not KPM -- see
+# _cumulative_theta0_weight (fixed 2026-09-12).
 
 
 def _cumulative_theta0_weight(chain, op, eVs, mode, submode, delta, es,
@@ -46,8 +47,15 @@ def _cumulative_theta0_weight(chain, op, eVs, mode, submode, delta, es,
             mode=mode, submode=submode, name=(op.get_dagger(), op),
             delta=delta, es=es, **kwargs)
     S = np.asarray(S).real
-    dw = x[1] - x[0]
-    cum = np.cumsum(S)*dw # cumulative integral from -inf up to each x point
+    # cumulative integral from -inf up to each x point, by the trapezoid
+    # rule -- NOT np.cumsum(S)*dw, which counts the whole bin around x_i
+    # as lying below x_i and so, exactly at a threshold (where S is a
+    # delta-like peak a few bins wide), attributes far more than half of
+    # that peak's weight to eV=eps_f0: measured on a 3-site chain with
+    # submode="KPM", delta=2e-5, the value at eV=0 came out 1.033
+    # against an exact 0.808 while every other point agreed to 1e-4.
+    from scipy.integrate import cumulative_trapezoid
+    cum = cumulative_trapezoid(S, x, initial=0.)
     return np.interp(eVs, x, cum) + np.interp(-eVs, x, cum)
 
 

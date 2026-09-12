@@ -2835,7 +2835,14 @@ Two backends are available via `mode=`:
 - `mode="ED"` (default): full exact diagonalization of the chain's
   Hamiltonian (every eigenstate is needed as a possible virtual
   intermediate state, not just the low-energy ones), independent of the
-  chain's own `itensor_version`/mode setting. Works at any `T>=0`.
+  chain's own `itensor_version`/mode setting. Works at any `T>=0`. The
+  third-order sums run over the thermally occupied *initial* states only
+  (those with $p_i>10^{-12}\max p$; one state at $T=0$, or the whole
+  degenerate ground-state manifold with equal weights), so they cost
+  $O(n_{\rm occ}\,{\rm dim}^2)$ per bias point rather than the
+  ${\rm dim}^3$ they used to, and $F(\epsilon,T)$ is tabulated once per
+  call (0.4 s) instead of being integrated per point: at 64 states and
+  1 K a third-order term takes 0.05 s where it took 28 s and 4 GB.
 - `mode="DMRG"`: `itensor_version=3` throughout, never diagonalizing
   beyond the ground state — only `T=0` is supported. See "T=0 and the
   DMRG backend" below.
@@ -2885,6 +2892,32 @@ exactly at $eV=0$), and the potential-interference term is **odd** (zero
 at $eV=0$) — that term is the sole source of bias asymmetry in the
 spectrum.
 
+**Direct and exchange diagrams.** Every third-order process comes in
+two interaction orders (the paper's "normal" and "reversed"), and
+reversing the order both reverses the electron-spin trace and turns
+the intermediate electron from electron-like into hole-like, whose $F$
+enters with the opposite sign. For the Kondo term the trace is the
+antisymmetric Levi-Civita one, so the two sign flips cancel and both
+orders add, $F(eV-\epsilon_{im})+F(eV+\epsilon_{im})$; for the
+potential-interference term the trace is the symmetric $\delta_{kj}$, so
+only the hole-like flip survives and the two orders *subtract*,
+$F(eV-\epsilon_{im})-F(eV+\epsilon_{im})$ — which is what the paper's
+Fig. 7c shows (its 121u and 121uR curves are mirror images of opposite
+sign). Two consequences: the elastic intermediate state $m=i$ drops out
+of the potential term identically, and the whole term vanishes at $B=0$,
+so the zero-field Kondo peak keeps its position and symmetry at $U\neq0$
+(Fig. 7d at 0 T is exactly symmetric, peak 1.39 at $eV=0$).
+
+> **Note (behaviour change, 2026-09-12).** Until then the potential
+> term used the *summed* combination. That kept a spurious $m=i$ term,
+> a $\mathrm{sign}(eV)\,F(eV)$ spike at zero bias that shifted the
+> zero-field $U=0.25$ peak to $-0.2$ mV (1.47 instead of 1.39) and
+> tilted its tails (1.156/1.052 instead of 1.145/1.135), and it gave
+> the exchange diagram the wrong sign, so the 10 T step asymmetry came
+> out $\sim0.27$ against the figure's $\sim0.05$ (now 0.047 against a
+> digitized 0.054). Every `U!=0, order=3` result from before that date
+> is not comparable; `U=0` and `order=2` are untouched.
+
 **Scope and known limitations**, worth reading before trusting specific
 numbers:
 
@@ -2893,14 +2926,32 @@ numbers:
   implemented here.
 - The paper's own closed-form equations for two numerical building
   blocks — the temperature-broadened step $\Theta(x)$ and the
-  temperature-broadened Kondo log function $F(\epsilon,T)$ — do not
-  reproduce the physics the paper itself describes for them (checked
-  directly: the printed $\Theta(x)$ diverges rather than saturating, and
-  the printed $F$ closed form drops its own temperature broadening).
-  `kondospectrumtk/stepfunctions.py` uses corrected forms instead,
-  re-derived from the paper's own unambiguous defining integrals and
-  verified against digitized values from the paper's own figures (see
-  that module's docstring, and `examples/kondo/kondo_spectrum_VS_paper/`).
+  temperature-broadened Kondo log function $F(\epsilon,T)$ — are
+  garbled as printed (checked directly: the printed $\Theta(x)$ diverges
+  rather than saturating, and the printed $F$, its eq. 22, has a log that
+  does not depend on the integration variable and an overall sign that
+  makes it negative). `kondospectrumtk/stepfunctions.py` uses the
+  evident intent of each instead: $\Theta$ is re-derived from the
+  paper's current formula, and $F$ is the closed-form log
+  $\ln[(\omega_0+|\epsilon|)/|\epsilon+i\Gamma_0|]$ convolved with the
+  thermal kernel $\Theta'$, i.e. $F_0(\epsilon)=\ln(\omega_0+|\epsilon|)-\tfrac12\ln(\epsilon^2+\Gamma_0^2)$
+  at $T=0$. Both are verified against digitized values from the paper's
+  own figures: the six peak heights of its Fig. 5 (arXiv v1 numbering)
+  and the $\pm4$ mV tails of its Fig. 7b (see that module's docstring,
+  `examples/kondo/kondo_spectrum_VS_paper/` and
+  `tests/test_kondo_spectrum_paper_fig7.py`).
+
+  > **Note (behaviour change, 2026-09-12).** Until then $F$ was the
+  > paper's *electron-like* defining integral (its eq. 20) evaluated
+  > exactly, and used for the exchange diagram too, which the paper says
+  > is the hole-like eq. 21. That form is not even in $\epsilon$ (its
+  > band edge sits at $+\omega_0$ only, with a sharp-cutoff log
+  > singularity there), and it put the Fig. 7b tails at 0.854 where the
+  > figure reads 0.886. The thermal broadening is unchanged (eq. 20's
+  > own double integral reduces to the same $\Theta'$ kernel: 7.459 vs
+  > 7.460 at the Fig. 5 peak), so nothing changes at zero bias; every
+  > third-order number away from it moves by $O(|eV|/\omega_0)$, up to
+  > 3.5% of the total at $|eV|=\omega_0/5$.
 - The potential-interference term's general-spin closed form (`U!=0` in
   `order=3`) is an extrapolation from the paper's own worked $S=1/2$
   example (only that special case is spelled out in closed form in the
@@ -2951,7 +3002,10 @@ cannot enumerate excited states the way `mode="ED"` does:
   `kondospectrumtk/twotime.py`'s module docstring for the full
   derivation and the numerical pitfalls it was built to avoid ($\Theta_0$'s
   kernel is a Cauchy principal value, computed via an FFT-based Hilbert
-  transform for machine-precision accuracy). This is the expensive part:
+  transform for machine-precision accuracy; $F_0$'s, a sine/cosine-
+  integral expression since 2026-09-12, is log-singular at $t_2=0$
+  because $F_0$ decays only as $1/|\epsilon|$, and the grid points
+  within eight cells of it are taken as cell averages). This is the expensive part:
   cost scales with the number of $t_2$ checkpoints, each its own short
   TDVP trajectory (`kondospectrumtk/dmrgtwotime.py`).
 - **Potential-interference term** (`U!=0`, part of `order=3`) is also
@@ -3000,10 +3054,13 @@ time-stepping bug meant "backward" checkpoints never actually reached
 negative times; and a naive per-chunk trapezoidal integral is exactly 0
 for the single-$t_2$-point chunks real-time evolution necessarily
 produces, silently zeroing the entire term). The second-order term
-(`submode="KPM"`) was spot-checked too, agreeing to within a few tens of
-percent at thresholds, consistent with the expected
-$\delta$-broadening/moment-truncation error on top of what the ED path
-already has.
+(`submode="KPM"`, $\delta=2\times10^{-5}$) agrees with the exact
+excited-state sum to 0.2% of its maximum at every bias point on the
+same chain. It was quoted as "a few tens of percent at thresholds"
+until 2026-09-12; that error was the route's own cumulative sum, which
+counted the whole frequency bin holding a threshold's delta-like peak
+as lying below it (1.033 against an exact 0.808 at $eV=0$), not KPM --
+it is a trapezoid rule now.
 
 ### Orbital-resolved IETS of a magnetic atom
 

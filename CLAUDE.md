@@ -933,6 +933,33 @@ per session -- that cache is also what makes a site sweep, and so
 `docs/sector_resolved_spectral_function_plan.md` for the design and
 `tests/test_sector_spectral_function.py` for what is pinned.
 
+### STM/Kondo tunneling spectra (`kondospectrumtk/`)
+
+`Spin_Chain.get_kondo_spectrum` is the third-order perturbation theory
+of Ternes, NJP 17 063016 (2015), arXiv:1505.04430; `mode="ED"` (full
+diagonalization, any T) is the reference implementation and
+`mode="DMRG"` (T=0 only) reproduces its two T=0-reducible pieces via the
+dynamical correlator and the third one via a two-time TDVP construction.
+Read `conductance.py`'s module docstring before touching a prefactor:
+every normalization there was pinned against the paper's absolutely
+scaled Fig. 7 (arXiv v1 numbering; the docstrings' "Fig. 3"/"Fig. F" are
+that figure and Fig. 5), and `tests/test_kondo_spectrum_paper_fig7.py`
+holds pixel-digitized values from it (zero-bias peaks, +-4 mV tails, the
+10 T step asymmetry) that now agree to ~0.005. Two things there are
+easy to get wrong and were, until 2026-09-12: the potential-interference
+term's direct and exchange diagrams enter with OPPOSITE signs (a
+symmetric electron trace leaves the reversed order's hole-like sign
+flip uncompensated, unlike the Levi-Civita Kondo term), so it vanishes
+identically at B=0 -- the summed form tilted the zero-field peak and
+made the 10 T asymmetry 5x the figure's; and F(eps,T) is the paper's
+symmetric closed form eq. 22 thermally broadened with Theta', not the
+electron-like defining integral eq. 20 applied to both diagrams, which
+differs at O(|eV|/omega0) (3.5% at |eV|=omega0/5) and carries a sharp
+band-edge singularity at eps=omega0. On the ED side the third-order
+sums run over thermally occupied initial states only (O(n_occ dim^2),
+not dim^3) and F is tabulated once per FBuilder (0.4 s; it used to be a
+per-point quadrature that took 28 s and 4 GB at 64 states).
+
 ### Julia vs C++ backend
 
 The two DMRG backends are independent implementations, not a shared
