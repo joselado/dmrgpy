@@ -163,6 +163,11 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
             require_symbolic_for="submode='TD'",**kwargs)
     name[0] = name[0].get_dagger()
     A,B = name[0],name[1]
+    from .groundstate import send_hamiltonian
+    send_hamiltonian(self) # quench*/evolve_and_measure* start from the
+    # session's own get_gs(), which aborts the process if set_hamiltonian
+    # was never called -- reachable from a freshly built chain, see
+    # groundstate.send_hamiltonian's docstring.
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
@@ -242,6 +247,11 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
                 h=h,dt=dt,wf=wf,return_wf=return_wf,**kwargs)
     if h is None: h = self.hamiltonian # Hamiltonian
     if wf is None: wf = self.wf0 # get ground state
+    from .groundstate import send_hamiltonian
+    send_hamiltonian(self) # quench*/evolve_and_measure* start from the
+    # session's own get_gs(), which aborts the process if set_hamiltonian
+    # was never called -- reachable from a freshly built chain, see
+    # groundstate.send_hamiltonian's docstring.
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))

@@ -81,6 +81,53 @@ def gs_is_current(self):
     return key==solver_key(self)
 
 
+def send_hamiltonian(self):
+    """Put self.hamiltonian on the session, if it is not already there.
+
+    Split out of gs_energy_single() so that the paths which drive the
+    session DIRECTLY -- the real-time quench/evolve entry points in
+    timedependent.py -- can establish the same precondition. They pass
+    the Hamiltonian's terms to quench_tdvp()/quench_tebd()/... as an
+    argument, but those C++/pyitensor methods start the trajectory from
+    the session's OWN ground state (get_gs()), which needs set_hamiltonian
+    to have been called. On a chain whose ground state had not been solved
+    yet, that meant `Chain::gs_energy called before set_hamiltonian` --
+    ITensor's Error(), i.e. abort(), taking the interpreter with it, from
+    a plain `evolution_DC(mode="DMRG")` on a freshly built chain. It
+    "worked" for every caller that happened to touch gs_energy() first,
+    which is every test and example in this repo, and is why it survived
+    both the 2026-08 and 2026-09 audits. Found writing the regression test
+    for the 2026-09 audit's finding #7.
+
+    The caching rationale below is the original from gs_energy_single, and
+    is unchanged -- re-sending invalidates the session's energy and
+    band-edge caches, so it must stay conditional.
+    """
+    from .multioperatortk.staticoperator import StaticOperator
+    if isinstance(self.hamiltonian,StaticOperator):
+        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
+               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),
+               id(self.hamiltonian.cpp_handle))
+        cache = getattr(self,'_session_ham_cache',None)
+        if cache is None or cache[0] is not self._session or cache[1]!=key:
+            if not hasattr(self._session,"set_hamiltonian_mpo"):
+                raise NotImplementedError(
+                    "set_hamiltonian was given an already-built MPO "
+                    "(StaticOperator), which this backend cannot accept -- "
+                    "only itensor_version=3 implements set_hamiltonian_mpo. "
+                    "Pass a MultiOperator instead, or switch backend.")
+            self._session.set_hamiltonian_mpo(self.hamiltonian.cpp_handle)
+            self._session_ham_cache = (self._session,key)
+    else:
+        terms = self.hamiltonian.to_terms()
+        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
+               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),terms)
+        cache = getattr(self,'_session_ham_cache',None)
+        if cache is None or cache[0] is not self._session or cache[1]!=key:
+            self._session.set_hamiltonian(terms)
+            self._session_ham_cache = (self._session,key)
+
+
 def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
     Return the ground state energy via the in-process pybind11 extension
@@ -123,29 +170,7 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     # no symbolic term list to key a cache on, and building one would
     # defeat the point of having assembled it as an MPO. Identity of the
     # handle plus the solver parameters is the cache key instead.
-    from .multioperatortk.staticoperator import StaticOperator
-    if isinstance(self.hamiltonian,StaticOperator):
-        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),
-               id(self.hamiltonian.cpp_handle))
-        cache = getattr(self,'_session_ham_cache',None)
-        if cache is None or cache[0] is not self._session or cache[1]!=key:
-            if not hasattr(self._session,"set_hamiltonian_mpo"):
-                raise NotImplementedError(
-                    "set_hamiltonian was given an already-built MPO "
-                    "(StaticOperator), which this backend cannot accept -- "
-                    "only itensor_version=3 implements set_hamiltonian_mpo. "
-                    "Pass a MultiOperator instead, or switch backend.")
-            self._session.set_hamiltonian_mpo(self.hamiltonian.cpp_handle)
-            self._session_ham_cache = (self._session,key)
-    else:
-        terms = self.hamiltonian.to_terms()
-        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),terms)
-        cache = getattr(self,'_session_ham_cache',None)
-        if cache is None or cache[0] is not self._session or cache[1]!=key:
-            self._session.set_hamiltonian(terms)
-            self._session_ham_cache = (self._session,key)
+    send_hamiltonian(self) # precondition: H on the session (see above)
     if wf0 is not None:
         self._session.set_wavefunction(wf0.cpp_handle)
     if reconverge is not None: # overwrite skip_dmrg_gs
@@ -385,6 +410,7 @@ def get_gs_manifold(MBO,n=2,tol=1e-3,**kwargs):
     """Return the ground state manifold, i.e. all the states with the
     lowest energy"""
     (es,wfs) = MBO.get_excited_states(n=n,**kwargs)
+    es = np.array(es) # defensive: the boolean mask below needs an ndarray
     e0 = es[0] # ground state
     ngs = len(es[np.abs(es-e0)<tol]) # number of ground states
     if ngs<n: # all the GS found
