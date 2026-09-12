@@ -223,13 +223,42 @@ class EDchain():
           self.e0 = e0
           self.computed_gs = True
           return self.wf0
-    def vev(self,op,T=0.,**kwargs):
-        """Return a vacuum expectation value"""
+    def vev(self,op,T=0.,npow=1,**kwargs):
+        """Return a vacuum expectation value <GS|op^npow|GS>
+
+        npow is a real parameter here rather than something swallowed by
+        **kwargs: Many_Body_Chain.vev(MO,npow=n,mode="ED") forwards it
+        straight into this method, the DMRG side honours it
+        (vev.py::multi_vev -> Chain::vev), and gs_energy_fluctuation()
+        is built out of sqrt(|<H^2>-<H>^2|), so dropping it here turned
+        that into sqrt(|<H>-<H>^2|) -- a number with no meaning that is
+        large and plausible-looking rather than ~0 on an exact
+        eigenstate. npow==0 returns 1.0, matching multi_vev's own early
+        return for the same case.
+        """
+        npow = int(npow)
+        if npow<0:
+            raise ValueError("npow must be >= 0, got "+repr(npow))
         if T==0.: # zero temperature
+            if npow==0: return 1.0 # <GS|1|GS>, same as vev.py::multi_vev
             wf0 = self.get_gs_array()
             op = self.MO2matrix(op) # return operator
-            return algebra.braket_wAw(wf0,op)
+            # apply the operator npow times to the state rather than
+            # forming op^npow: the matrix is (sector) Hilbert-space sized
+            # and sparse, the state is a single vector
+            wf = wf0
+            for i in range(npow-1): wf = op@wf
+            return algebra.braket_wAw(wf,op,wi=wf0)
         else: # finite temperature
+            if npow!=1:
+                # thermal_vev_ex builds Tr[rho Op] out of the assembled
+                # operator and has no notion of a power; raise rather
+                # than silently answering the npow=1 question, which is
+                # exactly what this method used to do at T=0
+                raise NotImplementedError(
+                    "vev(..., npow=%d) is not implemented at finite "
+                    "temperature; pass the explicit product operator "
+                    "instead"%npow)
             from ..vevtk.thermalvev import thermal_vev_ex
             return thermal_vev_ex(self,op,T=T,**kwargs) # return thermal VEV
     def get_excited(self,**kwargs):
@@ -277,7 +306,12 @@ class EDchain():
         if type(m)==EDOperator: return m.SO # static operator
         else: return self.sector_restrict(multioperator.MO2matrix(m,self),m)
     def overlap(self,wf1,wf2):
-        return wf1.dot(wf2) 
+        # State() rather than a bare wf1.dot(wf2): an mps.MPS reaching
+        # here (a caller that resolved the backend from self.mode rather
+        # than from the wavefunction) would otherwise recurse forever,
+        # since MPS.dot calls back into Many_Body_Chain.overlap. Failing
+        # in the constructor names the problem instead.
+        return State(wf1,self).dot(State(wf2,self))
     def applyoperator(self,A,wf): 
         wf = State(wf,self)
         return A*wf #return self.MO2matrix(A)@wf
