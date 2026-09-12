@@ -110,9 +110,12 @@ class MultiOperator():
           return out # return the sum
         elif isnumber(a): # if it is a number
             return self+a*identity() # return identity
-        else: 
-            print(type(a),a)
-            raise
+        else:
+            # a bare `raise` here reported "RuntimeError: No active
+            # exception to reraise", which names neither operand
+            raise TypeError("cannot add a "+type(a).__name__+" to a "
+                    "MultiOperator: expected another MultiOperator or a "
+                    "number, got "+repr(a))
     def __radd__(self,a): return self.__add__(a)
     def __rmul__(self,a):
         """Multiply by a number"""
@@ -120,9 +123,14 @@ class MultiOperator():
     def __truediv__(self,a):
         if isnumber(a): # number
           return (1./a)*self
-        else: raise
+        else:
+            raise TypeError("cannot divide a MultiOperator by a "
+                    +type(a).__name__+": only division by a number is "
+                    "defined, got "+repr(a))
     def multiply_scalar(self,a):
-        if not isnumber(a): raise # number
+        if not isnumber(a): # number
+            raise TypeError("MultiOperator.multiply_scalar takes a number, "
+                    "got a "+type(a).__name__+": "+repr(a))
         out = self.copy()
         # Build fresh term lists rather than mutating out.op[i][0] in
         # place: out.copy() shares the term objects with self (see
@@ -132,7 +140,14 @@ class MultiOperator():
     def __mul__(self,a):
         """Compute the product between two multioperators"""
         if type(a)==MultiOperator: return self.multiply_MO(a)
-        elif type(a)==np.ndarray: raise  # prevent using rmul in array
+        elif type(a)==np.ndarray:
+            # deliberately refused rather than broadcast: numpy would
+            # otherwise element-wise multiply the array by this object
+            # through its own __rmul__, silently producing an array of
+            # MultiOperators instead of the operator the caller meant
+            raise TypeError("cannot multiply a MultiOperator by a numpy "
+                    "array (shape "+str(a.shape)+"): multiply by a number, "
+                    "or build the sum of terms explicitly")
         elif isnumber(a): return self.multiply_scalar(a)
         else: return NotImplemented
     def multiply_MO(self,a):
@@ -263,9 +278,10 @@ def write_ampo(out,name):
     f.write(str(len(out))+"\n") # number of lines
     for o in out:
       n = (len(o)-2)//2 # number of terms
-      if n>=n_mpo_max: 
-          print("Too long MPO")
-          raise # C++ code needs to be recompiled
+      if n>=n_mpo_max:
+          raise ValueError("write_ampo: a term with %d operators exceeds "
+                  "the %d-operator limit the C++ backend was compiled with "
+                  "(n_mpo_max); raise it there and recompile"%(n,n_mpo_max))
       f.write(str((len(o)-2)//2)+"\n") # number of terms
       for io in o:
           f.write(str(io)+"  ")
@@ -290,7 +306,16 @@ def obj2MO(a,name="multioperator"):
         out = a*identity()
         out.name = name # a bare number has no name of its own to keep
         return out
-    else: raise # unidentified input
+    else:
+        # a bare `raise` here reported "RuntimeError: No active exception
+        # to reraise", which names neither the function nor what it got --
+        # and this is reachable from public API: gs_energy_generalized(A=)
+        # (groundstate.py), vev(), mpsalgebra and infinitechain all funnel
+        # a user-supplied operator through here, so e.g. handing one of
+        # them the already-built operator toMPO() returns landed here
+        raise TypeError("obj2MO: expected a list/tuple of (name,site) "
+                "pairs, a MultiOperator, or a number, got a "
+                +type(a).__name__+": "+repr(a))
 
 
 

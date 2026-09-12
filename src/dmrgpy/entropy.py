@@ -29,19 +29,52 @@ def compute_entropy(self,psi,b=1):
 
 def compute_entropy_single(self,psi,b=1):
     """Compute entanglement entropy in a bond"""
-    if b<1 or b>self.ns: raise
+    # Bond b is the cut between sites b-1 and b, so with sites indexed
+    # 0..ns-1 the valid range is 1..ns-1 -- which is exactly what
+    # compute_entropy's own loop above uses (range(1,self.ns)). The guard
+    # used to read b>self.ns, one too far: b==ns slipped through to
+    # ITensor, whose own check calls abort(), killing the whole process
+    # with an uncatchable SIGABRT instead of reporting a bad index (the
+    # "python" backend raised a plain IndexError for the same call).
+    if b<1 or b>=self.ns:
+        raise IndexError("bond %s is out of range: this chain has %d "
+                "sites, so its bonds are 1..%d (bond b is the cut "
+                "between sites b-1 and b)"%(repr(b),self.ns,self.ns-1))
     if self.itensor_version=="julia_live":
         from .mpsjulialive import entropy as entjl
         return np.abs(entjl.bond_entropy(psi,b))
+    from .mode import resolve_mode
+    if resolve_mode(self)=="ED":
+        # session-only, like the rest of this function: there is no ED
+        # implementation of the bond entropy (the ED object has no MPS to
+        # cut). Say so, instead of handing an ED State to
+        # self._session and failing with the opaque "'State' object has
+        # no attribute 'cpp_handle'" -- same treatment as
+        # Many_Body_Chain.get_distribution_moments.
+        raise NotImplementedError(
+            "the bond entanglement entropy has no ED implementation (it "
+            "cuts an MPS bond, and the ED backend has no MPS). Note "
+            "mode.py routes to ED on its own when the requested C++ "
+            "extension is unavailable, or for itensor_version=3 on a "
+            "chain with fewer than 3 sites. Use get_site_entropy/"
+            "get_pair_entropy, which do have an ED route.")
     return np.abs(self._session.bond_entropy(psi.cpp_handle,b))
 
 
 
 def bond_entropy(self,wf,i,j):
     """Compute the entropy of a state in bond i"""
+    # validate the site indices the caller actually passed, before they
+    # are collapsed into a single bond index by max() -- otherwise the
+    # error message points at a bond the caller never named
+    for k in (i,j):
+        if not (0<=k<self.ns):
+            raise IndexError("site %s is out of range: this chain has %d "
+                    "sites, indexed 0..%d"%(repr(k),self.ns,self.ns-1))
     if abs(i-j)==1: # use the DMRG approach
         return compute_entropy_single(self,wf,b=max([i,j]))
-    else: raise
+    else: raise ValueError("get_bond_entropy needs two adjacent sites "
+            "(|i-j|==1), got i=%s, j=%s"%(repr(i),repr(j)))
 #    from .densitymatrix import reduced_dm_projective
 #    dm = reduced_dm_projective(self,wf,i=i,j=j) # compute density matrix
 #    return entropy_dm(dm,normalize=True) # return the entropy
@@ -73,7 +106,10 @@ def mutual_information(self,wf,i,j):
 
 def entropy_dm(dm,normalize=False):
     from scipy.linalg import eigvalsh
-    if np.abs(1.-np.trace(dm))>1e-3: raise
+    if np.abs(1.-np.trace(dm))>1e-3:
+        raise ValueError("this density matrix is not normalized (trace = "
+                +str(np.trace(dm))+", expected 1); its entropy is not "
+                "meaningful")
     ds = eigvalsh(dm) # compute eigenvalues
     ds = ds[ds>1e-6]
     if normalize: 

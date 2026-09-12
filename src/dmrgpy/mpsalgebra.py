@@ -1,31 +1,82 @@
 from . import mps
 import numpy as np
 
-def exponential(self,h,wf,mode="DMRG",**kwargs):
-    """Compute the exponential"""
-    mode = wf.mode # mode of the wavefunction
-#    if self.mode is not None: mode = self.mode # redefine
-    if mode=="DMRG": 
-        if h.is_hermitian(): 
+
+def wavefunction_mode(wf,mode=None):
+    """Resolve the solver that answers an MPS/operator-algebra primitive.
+
+    For these primitives the wavefunction *is* the backend -- an
+    mps.MPS lives in a DMRG session, an edtk.edchain.State is a dense
+    ED vector -- so the type is what decides, not self.mode. A mode=
+    given by the caller is still honoured, as a *check*: the user guide
+    advertises mode= across this whole family, and silently running the
+    other backend (which is what dropping it amounted to) is worse than
+    saying the two disagree.
+
+    The type test used to be `type(wf)==np.ndarray` in applyoperator/
+    summps, which no ED route has produced since EDchain.get_gs started
+    returning a State: both ED branches were dead and every ED call fell
+    into a bare `raise`, i.e. "RuntimeError: No active exception to
+    reraise". applyinverse, in the same file, already tested State."""
+    from .edtk.edchain import State
+    if isinstance(wf,mps.MPS): actual = "DMRG"
+    elif isinstance(wf,State): actual = "ED"
+    else:
+        raise TypeError("unsupported wavefunction type "
+                +type(wf).__name__+": expected an mps.MPS (DMRG backends) "
+                "or an edtk.edchain.State (ED backend)")
+    if mode is not None and mode!=actual:
+        raise TypeError("mode="+repr(mode)+" was requested, but this "
+                "wavefunction is a "+type(wf).__name__+", which only the "
+                +actual+" backend can consume. Rebuild the wavefunction "
+                "with that backend (e.g. get_gs(mode="+repr(mode)+")).")
+    return actual
+
+
+def exponential(self,h,wf,mode=None,**kwargs):
+    """Compute exp(h)|wf>"""
+    mode = wavefunction_mode(wf,mode=mode) # solver, see above
+    if mode=="DMRG":
+        # Gate on the chain's *numerical* Hermiticity probe, not on
+        # MultiOperator.is_hermitian(). The symbolic test compares
+        # h-h.get_dagger() against 0 after simplify(), which does not
+        # know that get_dagger()'s factor-order reversal is a no-op for
+        # factors living on different sites -- so it reports False for
+        # Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j], the single most common
+        # Hamiltonian shape in this library (the same false negative
+        # infinitechain.py:_check_reach_one documents for its own use).
+        # Both branches then failed and control fell into an
+        # uncontrolled 2-term Taylor truncation with no step
+        # subdivision: 4% wrong at z=1 on a 4-site Heisenberg chain and
+        # unbounded in z.
+        if self.is_hermitian(h):
             return exponential_dmrg(self,h,wf,dt=1.0,**kwargs)
-        elif h.is_antihermitian(): 
-            return exponential_dmrg(self,-1j*h,wf,dt=-1j,**kwargs)
+        elif self.is_hermitian(1j*h): # i.e. h is anti-Hermitian
+            # exp(h) = exp(1j*(-1j*h)) with -1j*h Hermitian, which is
+            # what exponential_dmrg's own Hermiticity check needs
+            return exponential_dmrg(self,-1j*h,wf,dt=1j,**kwargs)
         else:
-            print("Warning, using 3rd order taylor expansion mode")
-            wf1 = h*wf # apply Hamiltonian
-            wf2 = h*wf1 # apply Hamiltonian
-            return wf + wf1 + wf2/2.
-#            raise
-    elif mode=="ED": 
+            raise NotImplementedError(
+                "exponential() needs a Hermitian or anti-Hermitian "
+                "operator on the DMRG backends (the in-process "
+                "extension's custom_exp is a truncated Taylor expansion, "
+                "convergent only when the step count can be set from the "
+                "operator's bandwidth). This one is neither; use "
+                "mode=\"ED\" on a small chain instead.")
+    elif mode=="ED":
         return self.get_ED_obj().exponential(h,wf,**kwargs)
-    else: raise
+    else: raise ValueError("Unrecognized mode "+repr(mode))
 
 
 def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000,nt0=None):
-    """Compute the exponential of a wavefunction via the in-process
-    pybind11 extension (mpscpp2/chain_session.h's Chain::exponential_apply,
-    a custom 2nd-order Taylor expansion)."""
-    if not self.is_hermitian(h): raise
+    """Compute exp(dt*h)|wfa> via the in-process pybind11 extension
+    (mpscpp2/chain_session.h's Chain::exponential_apply, a custom
+    2nd-order Taylor expansion applied over nt0 sub-steps)."""
+    if not self.is_hermitian(h):
+        raise ValueError("exponential_dmrg needs a Hermitian operator "
+                "(the sub-step count is set from its bandwidth, which is "
+                "only meaningful for a real spectrum); pass -1j*h for an "
+                "anti-Hermitian h, as exponential() does")
     if nt0 is None:
         nt0 = int(h.get_bandwidth(self)*nt)
         # get_bandwidth() runs its own DMRG ground-state search (see
@@ -42,25 +93,62 @@ def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000,nt0=None):
                 "which only ever existed in the removed file-based backend; "
                 "the in-process extension only implements the custom_exp "
                 "(2nd-order Taylor) variant, so leave tevol_custom_exp=True")
-    tau = complex(-dt.real,dt.imag)
+    # Chain::exponential_apply computes exp(tau*h)|wfa>, so tau *is* dt:
+    # this used to read complex(-dt.real,dt.imag), i.e. it negated the
+    # real part only. Purely-imaginary dt (timeevolution.evolve_WF's
+    # dt=1j*dt01, the only caller that existed before this was noticed)
+    # was unaffected and is unchanged here; a *real* dt got exp(-dt*h),
+    # so exponential()'s Hermitian branch computed e^{-h} where
+    # edchain.exponential (algebra.expm(h)) and the user guide both say
+    # e^{+h}. That was invisible for as long as the Hermitian branch was
+    # unreachable for multi-site operators (see exponential() above), and
+    # in examples/time_evolution/exponential_EV, whose sum(Sx) has the
+    # same expectation value under either sign in a Z-polarized state.
+    tau = complex(dt)
     handle = self._session.exponential_apply(h.to_terms(),wfa.cpp_handle,
             tau,int(nt0))
     return mps.MPS(self,cpp_handle=handle).copy()
 
-def overlap(self,wf1,wf2,mode="DMRG"):
-    if self.mode is not None: mode = self.mode # redefine
+# `if self.mode is not None: mode = self.mode` used to stand where
+# resolve_mode() is called in the next two functions. That idiom honours
+# an explicit sc.mode="ED" but is blind to mode.py's *automatic*
+# fallbacks (no compiled extension for the requested C++ version;
+# itensor_version=3 on a chain with fewer than 3 sites), which return
+# "ED" without ever writing self.mode. On such a chain get_gs() hands
+# back an ED State while these functions still took their DMRG branch,
+# failing several frames deep with "'State' object has no attribute
+# 'cpp_handle'". resolve_mode() -- rather than get_mode() -- is what
+# these want: it sees both fallbacks, without get_mode()'s extra
+# conserved-sector guard, which is about *which ground state answers*
+# and not about an inner product between two states the caller already
+# holds.
+# These two take the wavefunction's own type, like every other
+# primitive in this file (see wavefunction_mode above), and NOT
+# resolve_mode(). Routing them through resolve_mode() instead is an
+# infinite recursion, not merely the wrong backend: EDchain.overlap is
+# `return wf1.dot(wf2)`, and mps.MPS.dot is `return self.MBO.overlap(...)`,
+# so handing an MPS to the ED branch comes straight back here and goes
+# round again. Reached in practice by NH-DMRG on a 2-site chain, where
+# mode.py's automatic itensor_version=3 ns<3 fallback makes resolve_mode
+# answer "ED" while nhdmrg -- which hand-rolls its own two-site sweep and
+# never calls dmrg(), so the fallback does not apply to it -- is still
+# holding genuine MPS objects with live cpp_handles
+# (tests/test_nhdmrg_generalized.py::test_nhdmrg_generalized_v3_short_chain_does_not_crash,
+# RecursionError). That is the general shape: an automatic fallback
+# describes which solver computes a *ground state*, and says nothing
+# about two wavefunctions the caller is already holding.
+def overlap(self,wf1,wf2,mode=None):
+    """Compute the overlap <wf1|wf2>"""
+    mode = wavefunction_mode(wf1,mode=mode) # solver, see above
     if mode=="DMRG": return overlap_dmrg(self,wf1,wf2)
-    elif mode=="ED": return self.get_ED_obj().overlap(wf1,wf2)
-    else: raise
+    return self.get_ED_obj().overlap(wf1,wf2)
 
 
-def overlap_aMb(self,wf1,A,wf2,mode="DMRG"):
+def overlap_aMb(self,wf1,A,wf2,mode=None):
     """Compute the overlap <wf1|M|wf2>"""
-    if self.mode is not None: mode = self.mode # redefine
-    #return wf1.dot(A*wf2) # workaround
+    mode = wavefunction_mode(wf1,mode=mode) # solver, see above
     if mode=="DMRG": return overlap_aMb_dmrg(self,wf1,A,wf2)
-    elif mode=="ED": return wf1.dot(A*wf2) # workaround
-    else: raise
+    return wf1.dot(A*wf2) # workaround
 
 
 def overlap_dmrg(self,wf1,wf2):
@@ -87,36 +175,32 @@ def overlap_aMb_dmrg_MO(self,wf1,A,wf2):
     return self._session.overlap_aMb(wf1.cpp_handle,A.to_terms(),wf2.cpp_handle)
 
 
-def applyoperator(self,A,wf,**kwargs):
-    if type(wf)==mps.MPS: mode="DMRG"
-    elif type(wf)==np.ndarray: mode="ED"
-    else: raise
+def applyoperator(self,A,wf,mode=None,**kwargs):
+    mode = wavefunction_mode(wf,mode=mode)
     if mode=="DMRG": return applyoperator_dmrg(self,A,wf)
-    elif mode=="ED": 
+    elif mode=="ED":
         return self.get_ED_obj().applyoperator(A,wf)
 
 
-def applyinverse(self,A,wf,**kwargs):
-    from .edtk.edchain import State
-    if type(wf)==mps.MPS: mode="DMRG"
-    elif type(wf)==State: mode="ED"
-    else: raise
+def applyinverse(self,A,wf,mode=None,**kwargs):
+    mode = wavefunction_mode(wf,mode=mode)
+    # note mode= is consumed above and deliberately *not* forwarded:
+    # applyinverse_dmrg takes only delta/maxn, so passing it on was a
+    # TypeError four frames deep
     if mode=="DMRG": return applyinverse_dmrg(self,A,wf,**kwargs)
-    elif mode=="ED": 
+    elif mode=="ED":
         return wf.applyinverse(A)
 #        return self.get_ED_obj().applyoperator(A,wf)
 
 
-def summps(self,wf1,wf2,**kwargs):
-    if type(wf1)==mps.MPS: mode="DMRG"
-    elif type(wf1)==np.ndarray: mode="ED"
-    else: raise
+def summps(self,wf1,wf2,mode=None,**kwargs):
+    mode = wavefunction_mode(wf1,mode=mode)
     if mode=="DMRG": return summps_dmrg(self,wf1,wf2)
     elif mode=="ED": return wf1 + wf2 #self.get_ED_obj().summps(A,wf1,wf2)
 
 
 
-def scale_mps(self,wf,x):
+def scale_mps(self,wf,x,mode=None):
     """Multiply an MPS by a number.
 
     Every backend whose session exposes scale_mps() (itensor_version 2, 3
@@ -139,6 +223,11 @@ def scale_mps(self,wf,x):
     multiplication, so results shift slightly (within DMRG tolerance) when
     switching to this path.
     """
+    if wavefunction_mode(wf,mode=mode)=="ED":
+        # an ED State is a dense vector; scaling it needs no session at
+        # all. Without this branch the State fell straight through to
+        # wf.cpp_handle below and died with an AttributeError.
+        return x*wf
     session = getattr(self,"_session",None)
     if session is not None and hasattr(session,"scale_mps"):
         handle = session.scale_mps(wf.cpp_handle,complex(x))
@@ -176,12 +265,19 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
 
 
 
-def operator_norm(self,op,ntries=5,simplify=True):
-    """Given a certain operator, compute its norm"""
+def operator_norm(self,op,ntries=5,simplify=True,mode=None):
+    """Given a certain operator, compute its norm.
+
+    mode= picks the solver the random witness states are drawn from, so
+    this (and is_zero_operator on top of it) really does take the same
+    mode= as the rest of the API rather than raising TypeError on it.
+    The ED route works unchanged: State supports both op*wf and
+    wf.overlap(wf)."""
     if simplify: op = op.simplify() # simplify the operator
     out = [] # empty list
     for i in range(ntries):
-        wf = self.random_mps() # random wavefunction
+        if mode is None: wf = self.random_mps() # random wavefunction
+        else: wf = self.random_mps(mode=mode)
         wf = op*wf # apply the operator
         o = (wf.overlap(wf)).real
         out.append(o)
@@ -293,11 +389,12 @@ def toMPO(self,H,mode="DMRG"):
         elif self.itensor_version=="julia_live":
             from .mpsjulialive.mpo import MPO
             return MPO(H,MBO=self)
-        else: raise # not implemented
+        else: raise NotImplementedError("toMPO is not implemented for "
+                "itensor_version="+repr(self.itensor_version))
     elif mode=="ED":
         from .edtk.edchain import EDOperator
         return EDOperator(H,self.get_ED_obj())
-    else: raise
+    else: raise ValueError("Unrecognized mode "+repr(mode))
 
 
 

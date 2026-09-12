@@ -622,22 +622,54 @@ class Many_Body_Chain():
       out = wf.copy()
       out.cpp_handle = self._session.promote_mps(wf.cpp_handle)
       return out
+  def _switch_backend(self,version):
+      """Move this chain onto another DMRG backend, atomically.
+
+      The three setup_*() methods below used to assign
+      self.itensor_version and only then call initialize(). initialize()
+      can raise -- Bosonic_Chain.initialize() refuses itensor_version=2
+      for any local dimension other than 4 (bosonchain.py, where ITensor
+      would otherwise abort the process), and sites.py::initialize's
+      _apply_conserved_sector() refuses a backend with no quantum numbers
+      -- and the chain was then left half-switched: the new
+      itensor_version alongside the previous backend's self._session.
+      Everything that keys on the session kept working off the stale one
+      (gs_energy(mode="DMRG") still answered correctly), while everything
+      keying on itensor_version diverged from it -- tevol_method's "TDVP
+      only on itensor_version==3", and __deepcopy__'s
+      cppext.get_backend(self.itensor_version).Chain(...), which would
+      mint a session of the version the switch never actually reached.
+
+      Everything initialize() writes is snapshotted, because any of it
+      can be the part already written when the raise happens:
+      sites.py::initialize assigns self._session and only *then* applies
+      the conserved sector, which is where a backend with no quantum
+      numbers is refused -- so a sector refusal leaves behind both the new
+      session and a cleared _sector_on_session, the mirror image of the
+      boson case, where nothing has been built yet.
+      _reset_dmrg_state() (which discards the cached ground state) is
+      likewise deferred until the switch has actually succeeded: a chain
+      left on its old backend still has a valid wavefunction for it."""
+      old = (self.itensor_version,getattr(self,"_session",None),
+             getattr(self,"_sector_on_session",False))
+      self.itensor_version = version
+      try:
+          self.initialize()
+      except Exception:
+          (self.itensor_version,self._session,
+              self._sector_on_session) = old
+          raise
+      self._reset_dmrg_state()
   def setup_julia(self):
       """Setup the Julia mode"""
-      self.itensor_version = "julia_live"
-      self._reset_dmrg_state()
-      self.initialize()
+      self._switch_backend("julia_live")
   def setup_cpp(self,version=DEFAULT_ITENSOR_VERSION):
       """Setup the C++ mode (version 2 = ITensor v2, 3 = ITensor v3)"""
-      self.itensor_version = version
-      self._reset_dmrg_state()
-      self.initialize()
+      self._switch_backend(version)
   def setup_python(self):
       """Setup the pure-Python DMRG backend (pyitensor.chain.Chain, no
       compiler/pybind11 needed) -- see cppext.py."""
-      self.itensor_version = "python"
-      self._reset_dmrg_state()
-      self.initialize()
+      self._switch_backend("python")
   def get_mode(self,**kwargs):
       """Resolve the effective calculation mode ("DMRG" or "ED") for this
       chain, see mode.py"""
@@ -846,9 +878,9 @@ class Many_Body_Chain():
   def summps(self,wf1,wf2,**kwargs):
       """Apply an operator"""
       return mpsalgebra.summps(self,wf1,wf2,**kwargs)
-  def scale_mps(self,x,wf):
+  def scale_mps(self,x,wf,**kwargs):
       """Multiply an MPS by a number (see mpsalgebra.scale_mps)"""
-      return mpsalgebra.scale_mps(self,wf,x)
+      return mpsalgebra.scale_mps(self,wf,x,**kwargs)
   def trace(self,A,**kwargs):
       """Compute the trace of an operator"""
       return mpsalgebra.trace(self,A,**kwargs)
@@ -1028,8 +1060,16 @@ class Many_Body_Chain():
     """Return the gap"""
     es = self.get_excited(n=2,**kwargs)
     return es[1] -es[0]
-  def get_hamiltonian():
+  def get_hamiltonian(self):
       """Return the Hamiltonian as a multioperator"""
+      # `self` used to be missing from this signature, so every call on
+      # any chain that did not override it (every model but Spin_Chain)
+      # raised "TypeError: get_hamiltonian() takes 0 positional arguments
+      # but 1 was given" -- including the ones gs_energy_fluctuation()
+      # makes internally.
+      if self.hamiltonian is None:
+          raise ValueError("this chain has no Hamiltonian yet; call "
+                  "set_hamiltonian() first")
       return self.hamiltonian
   def nhdmrg(self,**kwargs):
       """Non-Hermitian DMRG (itensor_version 2, 3 or "python"): return
@@ -1039,10 +1079,22 @@ class Many_Body_Chain():
       from .nhdmrg import nhdmrg
       return nhdmrg(self,**kwargs)
   def gs_energy_fluctuation(self,**kwargs):
-      """Compute the energy fluctuations"""
+      """Compute the energy fluctuation sqrt(|<H^2>-<H>^2|), a measure of
+      how sharply the computed state is an eigenstate of H (~0 when it
+      is)."""
+      # Forward the kwargs. They used to be accepted and dropped on the
+      # floor -- documentation.md 4.10's "**kwargs with no consumer" --
+      # so gs_energy_fluctuation(mode="ED") returned the DMRG number
+      # byte-for-byte while sc.mode="ED" on the same chain returned a
+      # different one, i.e. the documented way to cross-check a
+      # convergence diagnostic against the exact solver silently did not.
+      if "npow" in kwargs:
+          raise TypeError("gs_energy_fluctuation() does not take npow=: "
+                  "it is defined in terms of <H> and <H^2> and sets the "
+                  "power itself")
       h = self.get_hamiltonian()
-      e = self.vev(h)
-      e2 = self.vev(h,npow=2)
+      e = self.vev(h,**kwargs)
+      e2 = self.vev(h,npow=2,**kwargs)
       return np.sqrt(np.abs(e2-e**2))
   def set_initial_wf_guess(self,wf):
       """Set the initial guess, and perform the DMRG GS calculation"""
@@ -1072,6 +1124,9 @@ class Many_Body_Chain():
         else: self.gs_energy(**kwargs) # perform a ground state calculation
         return self.wf0 # return wavefunction
       elif mode=="ED": return self.get_ED_obj().get_gs(**kwargs)
+      # never fall off the end into an implicit None: a null wavefunction
+      # propagates into overlap/vev/entropy calls and fails far from here
+      else: raise ValueError("Unrecognized mode "+repr(mode))
   def get_gs_manifold(self,**kwargs):
       """Return the ground-state manifold"""
       return groundstate.get_gs_manifold(self,**kwargs)
@@ -1085,7 +1140,7 @@ class Many_Body_Chain():
           if groundstate.gs_is_current(self): return self.e0
           return groundstate.gs_energy(self,**kwargs)
       elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
-      else: raise
+      else: raise ValueError("Unrecognized mode "+repr(mode))
   def gs_energy_generalized(self,A,**kwargs):
       """Smallest generalized eigenvalue lambda solving
       H|psi>=lambda*A|psi> (H the chain's own Hamiltonian, A a Hermitian
@@ -1127,8 +1182,18 @@ class Many_Body_Chain():
       return 3*self.ns # estimated bandwidth
   def random_state(self,mode="DMRG",orthogonal=None):
       """Generate a random MPS"""
-      if self.mode is not None: mode = self.mode # redefine
-      if mode in ["DMRG","MPS"]:
+      if mode=="MPS": mode = "DMRG" # historical alias for the MPS route
+      # resolve_mode(), not `if self.mode is not None`: the latter honours
+      # an explicit sc.mode="ED" but is blind to mode.py's automatic
+      # fallbacks, so on a 2-site itensor_version=3 chain get_gs()
+      # returned an ED State while random_state() returned an MPS -- two
+      # public methods on the same chain disagreeing about what kind of
+      # object it holds, and no overlap() between them possible. (Not
+      # get_mode(): its conserved-sector guard is about which ground
+      # state answers a solve, not about drawing a random vector.)
+      from .mode import resolve_mode
+      mode = resolve_mode(self,mode=mode)
+      if mode=="DMRG":
          if self.itensor_version in (2,3,"python"): # C++ or pure-Python version
              from . import mps
              if orthogonal is None: return mps.random_mps(self)
@@ -1138,7 +1203,7 @@ class Many_Body_Chain():
              return mps.random_mps(self)
       elif mode=="ED":
           return self.get_ED_obj().random_state()
-      else: raise
+      else: raise ValueError("Unrecognized mode "+repr(mode))
   def random_mps(self,**kwargs):
       """Generate a random MPS (alias for random_state)"""
       return self.random_state(**kwargs)

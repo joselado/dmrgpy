@@ -132,24 +132,19 @@ class Spin_Chain(Many_Body_Chain):
     def get_effective_hamiltonian(self,**kwargs):
         """Return the effective Hamiltonian"""
         return effectivehamiltonian.get_effective_hamiltonian(self,**kwargs)
-    def get_hamiltonian(self):
-        """Return Hamiltonian as a multioperator"""
-        if self.hamiltonian is not None: return self.hamiltonian
-        else: # conventional way
-            sxs = [self.get_operator("Sx",i) for i in range(self.ns)]
-            sys = [self.get_operator("Sy",i) for i in range(self.ns)]
-            szs = [self.get_operator("Sz",i) for i in range(self.ns)]
-            ss = [sxs,sys,szs]
-        out = multioperator.msum(c.g[i,j]*ss[i][c.i]*ss[j][c.j]
-                for c in self.exchange # exchange coupling
-                for i in range(3) for j in range(3))
-        out.clean()
-        if len(self.fields)>0:
-            fieldterms = multioperator.msum(b[j]*ss[j][i]
-                    for i,b in enumerate(self.fields) for j in range(3))
-            out = out + fieldterms
-        # still have to add the fields!!
-        return out # return multioperator
+    # get_hamiltonian() used to live here, as an override with a
+    # "conventional way" fallback that rebuilt the Hamiltonian from
+    # self.exchange/self.fields when none had been set. Those two
+    # attributes were only ever populated by set_exchange()/set_fields(),
+    # both removed (see the comments above), so Many_Body_Chain.__init__
+    # leaves them as the integer 0 and that branch could only ever die
+    # with "TypeError: 'int' object is not iterable" -- the same corpse
+    # 43d1a35 removed from meanfield.py, on any chain with no
+    # set_hamiltonian() call, and inherited by the public
+    # gs_energy_fluctuation(), which calls get_hamiltonian()
+    # unconditionally. The live half (return self.hamiltonian) is exactly
+    # what Many_Body_Chain.get_hamiltonian already does, so the override
+    # is gone rather than reduced to a duplicate.
     def get_kondo_spectrum(self, eV, site=0, Jrho_s=0.0, U=0.0, T=1.0,
                             T0=1.0, omega0=20e-3, Gamma0=5e-6, order=3,
                             kB=8.617333262e-5, mode="ED", **kwargs):

@@ -1,10 +1,29 @@
 # routines to compute density matrices
 import numpy as np
 
-def reduced_dm(self,i=0):
+def reduced_dm(self,i=0,mode="DMRG"):
     """
     Compute the reduced density matrix
     """
+    from .mode import resolve_mode
+    if self.itensor_version!="julia_live" and resolve_mode(self,mode=mode)=="ED":
+        # No ED implementation exists (grep edtk/: there is no
+        # reduced_dm there), and this function is session-only, so
+        # without this guard an ED State reached self._session and died
+        # with the opaque "'State' object has no attribute 'cpp_handle'"
+        # -- the very symptom get_distribution's own get_mode() fix
+        # quotes. Say what happened instead, in that method's wording.
+        # Note reduced_dm_projective() below *does* work under ED and is
+        # what get_site_entropy/get_pair_entropy use, but it is not a
+        # drop-in: its basis is the projector list ([N,Cdag] /
+        # [Sz+1/2,S+]), so its diagonal comes out in the opposite order
+        # from ITensor's (empty,occupied) convention.
+        raise NotImplementedError(
+            "get_rdm has no ED implementation (the reduced density "
+            "matrix is read off an MPS bond, and the ED backend has no "
+            "MPS). Note mode.py routes to ED on its own when the "
+            "requested C++ extension is unavailable, or for "
+            "itensor_version=3 on a chain with fewer than 3 sites.")
     wf = self.get_gs() # compute ground state
     if self.itensor_version=="julia_live":
         from .mpsjulialive import densitymatrix as dmjl

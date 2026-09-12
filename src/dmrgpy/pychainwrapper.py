@@ -5,41 +5,37 @@ from .edtk import finitetemperature
 from . import operatornames
 from . import multioperator
 
-def old2ampo(self):
-    """Transform an old Hamiltonian into the AMPO form"""
-    if self.use_ampo_hamiltonian: return self.hamiltonian
-    else:
-        h = 0
-        Si = [self.Sx,self.Sy,self.Sz]
-        for c in self.exchange:
-            for i in range(3):
-              for j in range(3): h = h + c.g[i,j]*Si[i][c.i]*Si[j][c.j]
-        if len(self.fields)==len(self.Sz):
-            for i in range(len(fields)):
-                b = fields[i]
-                for j in range(3): h = h + b[j]*Si[j][i]
-        return h
-
-
+# old2ampo(self) used to live here, together with the
+# `else: return sc.get_operator(old2ampo(self))` branch of
+# get_full_hamiltonian() below. It rebuilt a Hamiltonian out of
+# self.exchange/self.fields whenever self.use_ampo_hamiltonian was False.
+# Those two attributes were only ever populated by Spin_Chain's
+# set_exchange()/set_fields(), both removed (see the comments in
+# spinchain.py), so Many_Body_Chain.__init__ leaves them as the integer 0
+# and `for c in self.exchange` could only ever die with "TypeError: 'int'
+# object is not iterable" -- and the field half referenced a bare,
+# undefined name `fields` (not self.fields), so it would have raised
+# NameError even if the exchange list had existed. This is the same corpse
+# 43d1a35 removed from meanfield.py and the 2026-09 audit round removed
+# from spinchain.py::get_hamiltonian.
+#
+# Nothing could reach it in any case: the only class with a
+# get_full_hamiltonian() is Spin_Chain, which sets
+# use_ampo_hamiltonian=True in its own __init__ (and set_hamiltonian()
+# sets it again), so the live branch was the only one taken. What is left
+# of that dead branch is the one real condition it stood for -- no
+# Hamiltonian has been set yet -- which is now reported as such.
 
 # wrapper function for pychain
 
 def get_full_hamiltonian(self):
+    if self.hamiltonian is None:
+        raise RuntimeError("get_full_hamiltonian: no Hamiltonian has been "
+                "set on this chain; call set_hamiltonian() first")
     sc = get_pychain(self) # get pychain object
     # through sc.get_operator (not multioperator.MO2matrix directly) so
     # that a conserved sector restricts this to its own submatrix
-    if self.use_ampo_hamiltonian:
-        return sc.get_operator(self.hamiltonian)
-    else: # conventional way
-        return sc.get_operator(old2ampo(self))
-#      def get_coupling(i,j):
-#        """Return the coupling between two sites"""
-#        for c in self.exchange:
-#          if i==c.i and j==c.j: return c.g
-#        return np.zeros((3,3))
-#      h = sc.add_tensor_interaction(get_coupling) # add interaction
-#      h = h + sc.add_exchange(self.fields) # add magnetic fields
-#      return h
+    return sc.get_operator(self.hamiltonian)
 
 
 def get_pychain(self):

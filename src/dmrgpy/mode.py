@@ -13,8 +13,24 @@ def run(self,automatic=False):
         juliarun.run(self)
         return
     else:
-        print("Unrecognized mode",get_mode(self))
-        raise
+        raise ValueError("run() only drives the legacy Julia subprocess "
+                "backend (itensor_version=\"julia\"); this chain uses "
+                +repr(self.itensor_version)+". The C++ and pure-Python "
+                "backends run in-process and never reach this function.")
+
+
+# The two solvers a calculation can be answered by. self.mode pins one on
+# the chain; every dispatching method takes the same strings as a mode=
+# kwarg. Anything else is a typo, and is rejected by name rather than
+# quietly falling off the end of a dispatch chain.
+VALID_MODES = ("ED","DMRG")
+
+
+def _check_mode(value,what):
+    """Reject an unrecognized solver name, naming it and the valid ones"""
+    if value not in VALID_MODES:
+        raise ValueError("unrecognized %s %s: expected one of %s"
+                %(what,repr(value)," or ".join(repr(m) for m in VALID_MODES)))
 
 
 
@@ -53,6 +69,19 @@ def get_mode(self,mode="DMRG"):
 def resolve_mode(self,mode="DMRG"):
     """Pick the solver for this call, ignoring any conserved sector (which
     get_mode() checks against the answer this returns)"""
+    # Validate BOTH names up front, before any fallback below can return.
+    # self.mode used to be returned unchecked (the `if mode in
+    # ["ED","DMRG"]` at the bottom only ever saw the *call argument*), so
+    # `sc.mode = "ed"` made get_gs() fall off the end of its if/elif and
+    # return None silently, and gs_energy() report "No active exception to
+    # reraise". And checking at the point self.mode is *read* would not be
+    # enough either: the fallbacks below return "ED" before that line, so
+    # a typo on a 2-site v3 chain (or one with no compiled extension)
+    # would still slip through unnoticed -- exactly the chains where a
+    # wrong solver is hardest to spot. This is documentation.md 4.10's
+    # "a dispatch decision taken before the information that qualifies it".
+    _check_mode(mode,"mode")
+    if self.mode is not None: _check_mode(self.mode,"chain mode (self.mode)")
     # if the in-process C++ extension isn't available for a C++ chain,
     # fall back to ED (Julia chains are unaffected by this check). The
     # "python" backend always passes this check (cppext.available("python")
@@ -99,12 +128,9 @@ def resolve_mode(self,mode="DMRG"):
         print("pyitensor's two-site DMRG can't handle a chain this short "
               "(n=%d < 2 sites), using default ED routines"%self.ns)
         return "ED" # use exact diagonalization
-    # if there is an enforced mode, then use that one
+    # if there is an enforced mode, then use that one (both names were
+    # validated at the top of this function)
     if self.mode is not None: return self.mode # use the enforced mode
-    else:
-        if mode in ["ED","DMRG"]: return mode # use default
-        else:
-            print("Unrecognized mode",mode)
-            raise
+    return mode # use default
 
 

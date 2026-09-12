@@ -110,7 +110,15 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
     if n==1: # workaround for just the ground state
         w = self.get_gs(**kwargs)
         e0 = self.gs_energy(**kwargs)
-        return ([e0],[w]) # return
+        # np.array, not a bare list: every other return of this function
+        # (the non-Hermitian n==1 short circuit three lines above,
+        # get_excited_states_dmrg, the purify branch, and the whole ED
+        # route) hands back an ndarray of energies, and consumers index
+        # it as one -- groundstate.get_gs_manifold does
+        # es[np.abs(es-e0)<tol], which raises TypeError on a list. This
+        # was the single (n,mode) combination in the API returning a
+        # different type.
+        return (np.array([e0]),[w]) # return
     if not purify: # just compute excited states
         return get_excited_states_dmrg(self,n=n,**kwargs) # compute 
     else: # purify the states
