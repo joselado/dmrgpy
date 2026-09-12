@@ -34,6 +34,14 @@ Real-time evolution needs tau purely imaginary (coeff = -i*tau forward,
 +i*tau backward) -- see _lanczos_expm_multiply's docstring for the
 Krylov-exponentiation method itself.
 
+Every half-sweep has a *gauge precondition*: the left-to-right one needs
+psi right-canonical (orthogonality center at site 1) on entry, the
+right-to-left one needs it left-canonical (center at site n). See
+_gauge_center() below for why that is a correctness requirement and not a
+tidiness one; tdvp_step() enforces it, exactly as the vendored reference
+TDVP/tdvp.h does with its own `if(!isOrtho(psi) || psi.leftLim()!=0)
+psi.position(1)`.
+
 As in dmrg.py, every environment here is a <psi|...|psi> self-overlap and
 built incrementally while the sweep rewrites psi's own tensors, so it
 reuses dmrg.py's _extend_left/_extend_right (and their _relabel_bra_local
@@ -461,6 +469,82 @@ def _evolve_zero_site(L, Lbra, R, Rbra, C, left_link, right_link, tau, niter):
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
+def _shift_center_right(psi, i):
+    """Move psi's orthogonality center from site i to site i+1, exactly,
+    via QR (see _gauge_center for why QR and not an SVD)."""
+    left_link = _link_at(psi, i, i - 1)
+    s_i = next(ind for ind in psi.A(i).inds if ind.hastags("Site"))
+    Q, C, _ = qr_split(psi.A(i), ([left_link] if left_link else []) + [s_i],
+                        orthonormal="left")
+    psi.set_A(i, Q)
+    psi.set_A(i + 1, C * psi.A(i + 1))
+
+
+def _shift_center_left(psi, i):
+    """Mirror of _shift_center_right: center from site i to site i-1."""
+    right_link = _link_at(psi, i, i + 1)
+    s_i = next(ind for ind in psi.A(i).inds if ind.hastags("Site"))
+    right_of_bond = [s_i] + ([right_link] if right_link else [])
+    left_of_bond = [ind for ind in psi.A(i).inds if ind not in right_of_bond]
+    C, V, _ = qr_split(psi.A(i), left_of_bond, orthonormal="right")
+    psi.set_A(i, V)
+    psi.set_A(i - 1, psi.A(i - 1) * C)
+
+
+def _gauge_center(psi, target):
+    """Put psi in mixed-canonical form with its orthogonality center at
+    site `target`, losslessly and without changing any bond dimension.
+
+    This is a *correctness* precondition of every half-sweep below, not a
+    tidiness one. The local generators the sweep exponentiates are built
+    from plain <psi|...|psi> environments, and such an environment is the
+    projection of H onto the tangent space only when the tensors it was
+    contracted from are orthogonal -- left-orthogonal to the left of the
+    site being updated, right-orthogonal to its right. Hand
+    _half_sweep_lr a state that is *left*-canonical instead (center at
+    site n -- which is what mpsalgebra.applyMPO returned when this was
+    found, and what any position(n) still leaves behind), and every right
+    environment it uses is a non-orthogonal overlap matrix, not an isometry:
+    the "effective Hamiltonian" is then not H's projection at all and the
+    step evolves under the wrong generator.
+
+    Measured before this was enforced, on a 6-site Heisenberg chain at
+    full bond dimension (maxm=128, cutoff=0), evolving Sz[0]|gs> by a
+    single tdvp_step: the error against the exact expm(-i*dt*H) was
+    2.9e-02/1.5e-02/7.4e-03 at dt=0.2/0.1/0.05, i.e. *first order in dt*
+    where two-site TDVP at full bond dimension is exact. Only the first
+    step of a trajectory was affected -- _half_sweep_rl leaves psi
+    genuinely right-canonical, so every later step found the gauge it
+    wanted -- which is why the symptom at fixed total time looked like a
+    first-order integrator rather than like one broken step. With the
+    gauge fixed the same single step is exact to ~1e-12 at every dt.
+    (n<=4 hid it: there every two-site block already spans the whole
+    Hilbert space, so each local flow is the exact global one.)
+
+    QR rather than MPS.position(): position()'s SVD, even at its lossless
+    cutoff=0.0 default, still *drops* exactly-zero singular values, and
+    the directions gse.global_subspace_expand() adds for the one-site
+    sweep carry exactly zero weight by construction -- that is what makes
+    the expansion state-preserving. Canonicalizing with an SVD right
+    before the sweep that exists to use them would throw them all away
+    again. QR is not rank-revealing, so it leaves every bond dimension
+    exactly as it found it."""
+    n = psi.length()
+    # An unknown center means an unknown gauge: start the sweep from the
+    # far end, which canonicalizes every tensor it passes regardless of
+    # what gauge it was in (same argument as _shift_right's docstring in
+    # mpscontainer.py).
+    center = n if psi.center is None else psi.center
+    while center < target:
+        _shift_center_right(psi, center)
+        center += 1
+    while center > target:
+        _shift_center_left(psi, center)
+        center -= 1
+    psi.center = target
+    return psi
+
+
 def _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter):
     n = psi.length()
     right_env = _all_right_environments(H, psi)  # sites i+1..N, ket = psi BEFORE this half-sweep
@@ -603,6 +687,13 @@ def tdvp_step(psi, H, dt, cutoff, maxdim, niter=50, num_center=2):
     scheme this module's own one-site path is meant to be paired with).
     Mutates psi in place."""
     tau = dt / 2.0
+    # The left-to-right half-sweep below needs psi right-canonical; see
+    # _gauge_center(). A no-op (both while loops skip) on a state that
+    # already is one, which every step after the first one is, so this
+    # costs a single QR sweep per trajectory, not per step. Mirrors
+    # TDVP/tdvp.h's own `if(!isOrtho(psi) || psi.leftLim()!=0)
+    # psi.position(1)` guard.
+    _gauge_center(psi, 1)
     if num_center == 1:
         _half_sweep_lr_onesite(psi, H, tau, niter)
         _half_sweep_rl_onesite(psi, H, tau, niter)

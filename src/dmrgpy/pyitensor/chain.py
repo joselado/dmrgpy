@@ -180,6 +180,9 @@ class Chain:
         self._wf0_energy = None
         self._bandwidth_min = None
         self._bandwidth_max = None
+        # Ground state handed across the one Hamiltonian re-send that
+        # promote_to_dense() forces, see there and set_hamiltonian().
+        self._promoted_gs = None
 
         self.maxm = 30
         self.nsweeps = 15
@@ -332,12 +335,29 @@ class Chain:
             return  # already dense: nothing to promote
         promoted = None if self.wf0 is None else self.promote_mps(self.wf0)
         energy = self._wf0_energy
+        terms = list(self._h_terms)
         self.sites = self.dense_sites
         self.sector = []
         self._forget_everything_built_on_sites()
         if promoted is not None:
             self.wf0 = promoted
             self._wf0_energy = energy
+            # ...and hand both across the Hamiltonian re-send that is about
+            # to happen. The MPO just dropped was built on the QN indices,
+            # so manybodychain.promote_to_dense() drops groundstate.py's
+            # send-cache and the next gs_energy() re-sends the *same* terms
+            # to rebuild it on the dense ones -- through set_hamiltonian(),
+            # whose job is to invalidate exactly what was kept here. That
+            # re-send is a rebuild, not a change of Hamiltonian, and the
+            # state converged inside the sector is still this operator's
+            # answer; without the carry the session re-solves it
+            # *unconstrained* (pyitensor confines a sector by a penalty on
+            # the variational solve, not structurally, so nothing holds the
+            # solve inside it once the penalty is gone) and silently
+            # returns the global ground state instead of the sector's --
+            # the exact opposite of what promote_to_dense's public
+            # docstring guarantees. 2026-09 audit, finding 10.
+            self._promoted_gs = (terms, promoted, energy)
 
     def promote_mps(self, wf):
         """One wavefunction converted from the sector's graded site indices
@@ -379,6 +399,7 @@ class Chain:
         self._penalty = None
         self._probe = None
         self._solve_H_cache = None
+        self._promoted_gs = None
 
     def _ampo(self, terms):
         """AutoMPO for a term list, sector-checked first. Every operator
@@ -474,13 +495,45 @@ class Chain:
 
     def set_hamiltonian(self, terms):
         ampo = self._ampo(terms)
-        self._h_terms = [(complex(c), list(f)) for c, f in terms]
+        h_terms = [(complex(c), list(f)) for c, f in terms]
+        changed = h_terms != self._h_terms
+        self._h_terms = h_terms
         self.H = to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         self.have_H = True
         self._solve_H_cache = None  # the penalized operator is stale too
         self._wf0_energy = None  # any cached energy is now stale
         self._bandwidth_min = None  # ...and so is any cached bandwidth
         self._bandwidth_max = None
+        if changed:
+            # A *different* Hamiltonian invalidates the start state too, not
+            # only the caches: gs_energy() warm-starts DMRG from self.wf0,
+            # and the previous Hamiltonian's converged state is a terrible
+            # start for the new one -- when it happens to be an exact
+            # eigenstate of the new one (a sign flip, or any field sweep
+            # passing through a polarized phase, where the fully polarized
+            # product state is an eigenstate of the Heisenberg chain at
+            # every field) the variational solve is *stationary* there and
+            # never moves. Unlike the compiled backends this one has no
+            # noise term to escape with (see dmrg.py), so it simply reports
+            # the stale eigenstate's energy: measured on a 6-site
+            # Heisenberg chain swept on one chain object, B=0 came back as
+            # +1.25, the ferromagnetic MAXIMUM retained from B=4, against
+            # an exact -2.4936, and it survived maxm=40/nsweeps=40/
+            # noise=1e-2. The Python layer already believes this is
+            # handled -- Many_Body_Chain.set_hamiltonian calls restart(),
+            # whose comment promises "a genuinely cold recalculation" --
+            # and nothing propagated that here. 2026-09 audit, finding 2.
+            # An explicitly requested warm start is unaffected:
+            # groundstate.gs_energy_single sends it with
+            # set_wavefunction() *after* this call.
+            self.wf0 = None
+        carry = self._promoted_gs
+        self._promoted_gs = None
+        if carry is not None and carry[0] == h_terms:
+            # Same terms, rebuilt on the dense site set right after
+            # promote_to_dense(): see there for why the state and its
+            # energy survive this particular re-send.
+            self.wf0, self._wf0_energy = carry[1], carry[2]
 
     def gs_energy(self, skip_dmrg=False):
         if not self.have_H:

@@ -3,11 +3,15 @@
 ITensor v3's own free-function API mpscpp3/chain_session.h calls directly.
 
 Every one of these that grows bond dimension (sum, applyMPO, nmultMPO)
-finishes with a single truncating left-to-right SVD sweep (_Chain.position)
-down to the requested cutoff/maxdim -- the standard, correct way to
+builds the exact result first and only then compresses it, with a single
+truncating SVD sweep (_Chain.position) down to the requested
+cutoff/maxdim, run in the gauge where discarding the smallest singular
+values is the 2-norm-optimal truncation -- the standard, correct way to
 compress a tensor-train sum/product, though not necessarily bit-for-bit
 the same intermediate bond dimensions ITensor's own variational methods
-would produce. That's an intentional simplification (see autompo.py's
+would produce. (Truncating *while* building, which applyMPO/nmultMPO used
+to do, is not the same thing and is not bounded by cutoff/maxdim at all;
+see _apply_chain's docstring.) That's an intentional simplification (see autompo.py's
 module docstring for the same reasoning applied to MPO construction):
 dmrgpy only ever observes final numerical results bounded by
 Cutoff/MaxDim, never internal bond dimensions.
@@ -27,7 +31,7 @@ from . import backend as bk
 
 from .index import Index
 from .mpscontainer import MPO, MPS, _link_at
-from .svd import svd
+from .svd import qr_split, svd
 from .tensor import ITensor, commonIndex, contract_many
 from .tensor import prime as _t_prime
 
@@ -388,13 +392,49 @@ def sum(A, B, cutoff=0.0, maxdim=None):
 
 def _apply_chain(K, X, out_cls, cutoff=0.0, maxdim=None):
     """Shared implementation of applyMPO (X=MPS, out_cls=MPS) and nmultMPO
-    (X=MPO, out_cls=MPO): a single left-to-right "zip-up" sweep that
-    contracts K against X one site at a time (whatever physical legs
-    match, auto-contract per ITensor.__mul__) and immediately SVD-
-    compresses each cut down to cutoff/maxdim before moving on, carrying
-    the (already-truncated) remainder -- `leftover`, with legs (new bond,
-    K's own right link, X's own right link) -- forward into the next
-    site's contraction.
+    (X=MPO, out_cls=MPO): a single left-to-right sweep that contracts K
+    against X one site at a time (whatever physical legs match,
+    auto-contract per ITensor.__mul__) and splits each cut before moving
+    on, carrying the remainder -- `leftover`, with legs (new bond, K's own
+    right link, X's own right link) -- forward into the next site's
+    contraction. That sweep is *exact* -- it truncates nothing, and uses a
+    QR rather than an SVD since no singular values are wanted -- and the
+    caller's cutoff/maxdim are then enforced by one truncating
+    right-to-left sweep over the finished chain.
+
+    Truncating inside the sweep instead -- the "zip-up" of Stoudenmire &
+    White, New J. Phys. 12, 055026 (2010), §3.2, which is what this
+    function used to do -- is *not* equivalent, and the difference is not
+    a tolerance. At cut i the left side of the SVD is orthonormal (it is
+    the previous U), but the right side is the not-yet-contracted product
+    of K's and X's remaining tensors, and that product is NOT
+    right-orthogonal even when K and X separately are: MPO/MPS
+    right-canonicity gives sum_{s,s',aR} K K* = delta_{aL aL'}, whereas
+    the product needs the finer sum_{s',aR} K K* = delta_{aL aL'}
+    delta_{s s2}, which nothing supplies. So the singular values of
+    `piece` are not the Schmidt values of the exact product, and dropping
+    the smallest of them is not the 2-norm-optimal truncation. Measured
+    (2026-09 audit, finding 13): applying an 8-site Heisenberg H to its
+    own ground state, whose exact H|psi> has Schmidt rank [2,4,8,16,8,4,2]
+    -- so maxdim=16 discards literally nothing, the 17th singular value
+    being 0.0 at every bond -- the zip-up still lost 9.4e-05 in 2-norm,
+    against 1.6e-14 at maxdim=32. Downstream that is a
+    gs_energy_fluctuation() of 5.1e-05 on a state that is an eigenstate,
+    i.e. a user watching that number to tune maxm is reading the
+    application error, not the state's.
+
+    The exact sweep costs more (its cut dimensions run up to
+    dim(K-link)*dim(X-link) rather than maxdim), and that is the price of
+    the truncation meaning what it says. Measured end to end on a KPM
+    dynamical correlator (12 sites, maxm=kpmmaxm=30: 1.30s -> 1.82s; 16
+    sites, maxm=kpmmaxm=60: 9.9s -> 13.5s), i.e. ~1.4x, of which the QR
+    (rather than a second SVD) in the exact sweep buys back a factor of
+    ~2. The final sweep is skipped entirely when there is nothing to
+    enforce (cutoff=0 and no maxdim), where the exact sweep already *is*
+    the whole answer -- note that in that case the result keeps QR-sized
+    bonds rather than rank-revealed ones, an identical operator stored
+    slightly more loosely; every call site inside this package passes a
+    maxdim, so that path is library-use only.
 
     This differs from the textbook-simplest approach (contract K.A(i)*X.A(i)
     at *every* site first, mechanically fusing each site's K-link and X-link
@@ -416,26 +456,25 @@ def _apply_chain(K, X, out_cls, cutoff=0.0, maxdim=None):
     truncated (<=maxdim) left side, never a fused-but-about-to-be-
     discarded one.
     """
-    # Right-canonicalize both inputs before the left-to-right sweep. This is
-    # not a nicety, it is what makes the per-cut truncation *mean* anything:
-    # at cut i the left side is already orthonormal (it is the U of the
-    # previous SVD), so the singular values of `piece` are the true Schmidt
-    # values of the exact product only if the not-yet-contracted right side
-    # is orthonormal too. With both K and X right-orthogonal from site i+1
-    # on, the fused right environment satisfies
-    # sum (K†K) (x) (X†X) = I (x) I, so it is exactly orthonormal and the
-    # truncation is optimal. Without it the singular values are weighted by
-    # whatever norm the untouched right part happens to carry, and the cutoff
-    # discards the wrong components -- confirmed directly: applying a
-    # Heisenberg (H - E0 - omega) MPO to an MPS on a 10-site chain, with the
-    # bond dimension (32) far *below* maxdim (60) so maxdim never even bound,
-    # <Hb|Hb> and <b|H^2 b> disagreed by 0.86% (0.0018381 vs 0.0018222) where
-    # the compiled ITensor backends agree to 1e-15. That ~1% error per
-    # application is what left cvm.py's conjugate gradient stalling at a
+    # Right-canonicalize both inputs before the left-to-right sweep. This
+    # keeps the sweep's cut dimensions honest (an SVD at cutoff=0 drops
+    # only genuinely-zero singular values when the right side carries no
+    # spurious norm of its own) and it is the canonicalization the
+    # zip-up algorithm assumes (Stoudenmire & White, New J. Phys. 12,
+    # 055026 (2010), §3.2). It was originally added because, without it,
+    # applying a Heisenberg (H - E0 - omega) MPO to an MPS on a 10-site
+    # chain -- bond dimension 32, far *below* maxdim 60, so maxdim never
+    # even bound -- made <Hb|Hb> and <b|H^2 b> disagree by 0.86%
+    # (0.0018381 vs 0.0018222) where the compiled ITensor backends agree
+    # to 1e-15, and left cvm.py's conjugate gradient stalling at a
     # residual of ~7e-2 on itensor_version="python" (against ~9e-6 on
-    # itensor_version 2 and 3) and returning a visibly wrong spectrum.
-    # This is the canonicalization step the "zip-up" algorithm assumes
-    # (Stoudenmire & White, New J. Phys. 12, 055026 (2010), §3.2).
+    # itensor_version 2 and 3) with a visibly wrong spectrum. The comment
+    # here used to go further and claim that this made the per-cut
+    # truncation *optimal* ("sum (K†K) (x) (X†X) = I (x) I"); it does not
+    # -- see this function's docstring for why the product of two
+    # right-canonical chains is not itself right-canonical, and for the
+    # measurement that finally pinned it. That is why the sweep below no
+    # longer truncates at all.
     #
     # Done in place rather than on copies: position() with the default
     # cutoff=0/maxdim=None is lossless and only changes the gauge, so the
@@ -465,12 +504,26 @@ def _apply_chain(K, X, out_cls, cutoff=0.0, maxdim=None):
             break
         right_links = set(l for l in (kR, xR) if l is not None)
         left_inds = [ind for ind in piece.inds if ind not in right_links]
-        U, S, V, spec = svd(piece, left_inds, cutoff=cutoff, maxdim=maxdim)
-        tensors.append(U)
-        leftover = S * V
+        # Exact split: cutoff/maxdim are deliberately NOT applied here,
+        # they are enforced by the right-to-left sweep below instead (see
+        # this function's docstring). QR rather than an untruncated SVD
+        # since nothing here looks at the singular values -- same split,
+        # about half the FLOPs, see svd.py's qr_split().
+        Q, C, _bond = qr_split(piece, left_inds, orthonormal="left")
+        tensors.append(Q)
+        leftover = C
 
     result = out_cls(tensors)
     result.center = n
+    if maxdim is not None or cutoff > 0.0:
+        # Sites 1..n-1 are the U's of the sweep above, i.e. left-orthogonal,
+        # so at every cut of this right-to-left sweep the left environment
+        # is an isometry and the right one is already right-orthogonal from
+        # the part of the sweep that has run -- which is exactly the gauge
+        # in which discarding the smallest singular values IS the optimal
+        # 2-norm truncation. Same recipe (and same reason) as sum_many()'s
+        # own position(1)-then-position(n) above.
+        result.position(1, cutoff=cutoff, maxdim=maxdim)
     return result
 
 
@@ -483,9 +536,11 @@ def applyMPO(K, x, x0=None, cutoff=0.0, maxdim=None):
     `x0` (an initial guess, used by real ITensor to seed an iterative
     variational "Fit" solve) is accepted for call-signature compatibility
     with chain_session.h's two applyMPO() overloads but is otherwise
-    unused: this always does the same direct contract-and-compress: not
-    the fastest possible method, but exact up to cutoff/maxdim regardless
-    of x0's value, so ignoring it is correctness-preserving."""
+    unused: this always does the same direct contract-then-compress (see
+    _apply_chain) -- not the fastest possible method, but the product is
+    formed exactly and only then truncated, in the gauge that makes the
+    truncation optimal, so the result is bounded by cutoff/maxdim
+    independently of x0 and ignoring it is correctness-preserving."""
     return _apply_chain(K, x, MPS, cutoff=cutoff, maxdim=maxdim)
 
 
