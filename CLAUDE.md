@@ -1076,7 +1076,12 @@ field-polarized reach-1 one-site cell at `maxm=4`, `gs_energy()` on
 minimum at a rate that moved between runs and builds (13 and 17 of 80
 measured at D=6 on the grouped cell, worst 2.3e-8; worst 2.8e-3 on the
 sequential one) where `"python"` did so in 0 of 40. It is now 0 of 330
-past 1e-12 across six cells. Quote the threshold with any rate, as the
+past 1e-12 across six cells. NUMBERS CHANGE, on the same terms the
+`"python"` half's own entry sets: any `itensor_version=3` VUMPS energy
+from before 2026-09-12 on a model whose exact state is smaller than the
+requested `maxm` is not comparable, on either solver -- those were wrong,
+not merely less converged. Energies from runs that were already fine move
+only at ~1e-15. Quote the threshold with any rate, as the
 known-issue file itself instructs -- see
 `docs/known_issue_v3_vumps_variational_floor.md`, now FIXED, and
 `tests/test_vumps_redundant_bond_dimension.py`, whose narrow `xfail` came

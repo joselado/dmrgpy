@@ -1647,7 +1647,10 @@ environments, built at `gauge_mismatch < tol`, that switch), so those
 remain comparable -- unlike the two number-changing fixes recorded
 elsewhere in this document. Sequential-path results at `maxm` *above* the
 state's own bond dimension do not: they were wrong, not merely less
-converged. And run-to-run reproducibility changed in the user's favour --
+converged. That last sentence applies to `itensor_version=3` too, and
+with a later date: any v3 VUMPS energy from before 2026-09-12 on a model
+whose exact state is smaller than the requested `maxm` is not comparable,
+on either solver. And run-to-run reproducibility changed in the user's favour --
 `eigs` had no `v0`, so ARPACK's Fortran-internal random start (which
 `np.random.seed` does not touch) made the sequential solver
 irreproducible at a fixed seed. Measured directly on `n_uc=3` `reach=1`

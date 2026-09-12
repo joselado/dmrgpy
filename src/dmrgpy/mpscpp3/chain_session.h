@@ -6369,12 +6369,18 @@ class Chain
     // statement for AR and C^dag C. Trace-normalized, like the eigensolver
     // route they stand in for.
     //
-    // This is what the two environment builders fall back to when
-    // vx_check_perron_nondegenerate refuses a degenerate dominant
-    // eigenvalue. The guard exists for a real pathology (a "cat state":
-    // two branches with matched, nonzero per-site norm, where no single
-    // dominant fixed point is meaningful), but a degenerate dominant
-    // eigenvalue has a second, entirely benign cause it cannot tell apart:
+    // This is the candidate both environment builders PREFER, via
+    // vx_choose_fixed_point -- see that function for the dispatch and for
+    // why the preference (rather than the failure-fallback ordering this
+    // comment used to describe) is the fix for a confirmed silent
+    // wrongness. What follows is why this candidate is the right answer,
+    // which is the part that does not depend on when it is reached.
+    //
+    // vx_check_perron_nondegenerate exists for a real pathology (a "cat
+    // state": two branches with matched, nonzero per-site norm, where no
+    // single dominant fixed point is meaningful), but a degenerate
+    // dominant eigenvalue has a second, entirely benign cause it cannot
+    // tell apart:
     // REDUNDANT BOND DIMENSION. A state that needs fewer directions than
     // it was given leaves the extra ones with no weight, and the transfer
     // matrix picks up a decoupled unimodular block. Reachable for any model
@@ -6390,25 +6396,25 @@ class Chain
     // returned the exact energy. The GROUPED path walks the same edge and
     // survived only by never landing exactly on it (its second eigenvalue
     // was measured at 0.99996 on the same model, just outside
-    // vx_degeneracy_rtol_).
+    // vx_degeneracy_rtol_). "Survived" meaning it did not raise: it was
+    // later measured returning energies BELOW the exact variational
+    // minimum on that same edge, which is what vx_choose_fixed_point
+    // exists for.
     //
-    // Falling back HERE rather than loosening the guard, and doing it
-    // whenever the guard trips rather than on a redundancy test, is
-    // deliberate. A threshold on C's own weight spectrum was tried first
-    // and is the wrong shape: the guard trips mid-convergence, where the
-    // redundant direction is still on its way down, so the ratio it
-    // catches is a moving number (measured at 2.7e-9, 1.2e-4 and 1.6e-2 on
-    // three cells of the same model) with no defensible cutoff. What is
-    // defensible is that C C^dag is the right answer in BOTH cases: for
-    // redundancy it is the exact fixed point, and for a genuine cat state
-    // it is the branch mixture -- which is also what an unchecked
-    // eigensolver returns, except that the eigensolver may instead return
-    // an arbitrary single branch, with its own (wrong) energy. So this is
-    // never worse than the behaviour it replaces, and the pure-Python
-    // reference it ports has no guard on the sequential path at all
-    // (vumps_ms._cell_fixed_points takes the dominant eigenvector
-    // unconditionally) and treats a trip on the grouped path as "skip this
-    // attempt".
+    // Answering HERE rather than loosening the guard is deliberate, and so
+    // is NOT deciding on a redundancy test. A threshold on C's own weight
+    // spectrum was tried first and is the wrong shape: the ambiguity
+    // appears mid-convergence, where the redundant direction is still on
+    // its way down, so the ratio it would catch is a moving number
+    // (measured at 2.7e-9, 1.2e-4 and 1.6e-2 on three cells of the same
+    // model) with no defensible cutoff. What is defensible is that C C^dag
+    // is the right answer in BOTH cases: for redundancy it is the exact
+    // fixed point, and for a genuine cat state it is the branch mixture --
+    // which is also what an unchecked eigensolver returns, except that the
+    // eigensolver may instead return an arbitrary single branch, with its
+    // own (wrong) energy. So this is never worse than the eigensolver, and
+    // vx_choose_fixed_point decides between them on a residual that is 0
+    // by an exact identity rather than on any magnitude.
     //
     // Two checks say it is the RIGHT element rather than merely a harmless
     // one, which matters because vms_grow_init embeds the resulting tensors

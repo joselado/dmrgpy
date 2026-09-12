@@ -197,11 +197,21 @@ which was precisely what this file measured the C++ half NOT doing. That
 sentence is now true; it says so, and says since when.
 
 What is newly guarded is the thing a single-run test could not catch. This
-defect appeared in 6 of 30 and 13 of 80 runs, so the two one-run tests above saw
-it ~20% and ~16% of the time. `test_variational_bound_holds_over_repeated_runs`
-asserts the one-sided bound over 8 runs of each of the two cells (grouped
-`(1,1)` and sequential `(1,2)`, at D=4), which would have caught it ~83% and
-~74% of the time.
+defect appeared in 6 of 30 runs on the sequential `(1,2)` cell at D=4 and 13 of
+80 on the grouped `(1,1)` cell at D=6, so the two one-run tests above saw it
+~20% and ~16% of the time.
+`test_variational_bound_holds_over_repeated_runs` asserts the one-sided bound
+over 8 runs of each, which would have caught it ~83% and ~74% of the time.
+
+Two things about that test are deliberate and easy to get wrong if it is ever
+rewritten. Its two cells run at *different* bond dimensions, because the two
+halves failed at different ones -- the grouped cell is 0 of 80 at D=4 in the
+table above and only starts excursing at D=6, so a grouped D=4 row would pin
+nothing. And it is `itensor_version=3`-only: the bound is backend-independent,
+but the `"python"` grouped D=6 cell carries the separate ~1-in-100
+`LinAlgError` noted above, and eight runs of it per suite would be a 5-8% flake
+in a test whose purpose is the opposite. The Python side's own guard is
+`tests/test_audit_2026_09_pyitensor-infinite.py::test_sequential_vumps_never_returns_below_the_variational_minimum`.
 
 ## Where the code is
 

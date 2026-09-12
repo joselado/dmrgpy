@@ -167,35 +167,46 @@ def test_sequential_solver_tolerates_redundant_bond_dimension(backend, n_uc,
     assert e >= EXACT_E - 1e-9, (n_uc, reach, D)
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-@pytest.mark.parametrize("n_uc,reach", [(1, 1), (1, 2)])
-def test_variational_bound_holds_over_repeated_runs(backend, n_uc, reach):
+@pytest.mark.skipif(not cppext.available(3),
+                    reason="guards a defect specific to mpscpp3")
+@pytest.mark.parametrize("n_uc,reach,D", [(1, 1, 6), (1, 2, 4)])
+def test_variational_bound_holds_over_repeated_runs(n_uc, reach, D):
     """The same one-sided bound as the two tests above, but over REPEATED
-    runs of the same cell -- which is what it takes to catch this defect
-    rather than to catch it 20% of the time.
+    runs of one cell -- which is what it takes to catch this defect rather
+    than to catch it 20% of the time.
 
     Nothing here is reproducible run to run: the solver starts from a
-    random MPS (`vumps_random_init`, and `pyitensor`'s own equivalent), so
-    whether a given run lands on the degenerate fixed point is a property
-    of that run's start. The C++ excursions this file's own history
-    records were 6 of 30 runs on the (1, 2) cell and 13 of 80 on the
-    (1, 1) one -- so a single-run test, which is what the two tests above
-    are, had a ~20% and ~16% chance of seeing it. Eight runs raise that to
-    ~83% and ~74%, which is why this exists as its own test instead of
-    tightening those.
+    random MPS (`vumps_random_init`), so whether a given run lands on the
+    degenerate fixed point is a property of that run's start. The C++
+    excursions this file's own history records were 6 of 30 runs on the
+    (1, 2) cell at D=4 and 13 of 80 on the (1, 1) cell at D=6 -- so a
+    single-run test, which is what the two tests above are, had a ~20% and
+    ~16% chance of seeing it. Eight runs raise that to ~83% and ~74%,
+    which is why this exists as its own test instead of tightening those.
 
     Both cells are here because the two solvers reach their environments
-    through different code: (1, 1) is reach-1 on a one-site cell, so the
-    GROUPED builder, and (1, 2) has a coupling past the cell, so the
-    SEQUENTIAL one. `D=4` is the cheapest bond dimension above the exact
-    state's own (which is 1) at which the C++ half was measured failing.
+    through different code: (1, 1) reach-1 is the GROUPED builder, and
+    (1, 2)'s coupling past the cell routes to the SEQUENTIAL one. The two
+    bond dimensions differ because the two halves failed at different
+    ones: the sequential cell was already 6 of 30 at D=4, while the
+    grouped cell was 0 of 80 there and only began excursing at D=6. D=4
+    on the grouped cell would pin nothing.
+
+    `itensor_version=3` only, deliberately, even though the bound itself
+    is backend-independent. The Python side is pinned by
+    `test_audit_2026_09_pyitensor-infinite.py::
+    test_sequential_vumps_never_returns_below_the_variational_minimum`,
+    and its grouped D=6 cell carries a separate, uninvestigated ~1-in-100
+    `numpy.linalg.LinAlgError` (1 of 40 runs, see the known-issue file) --
+    eight runs of it per suite would be a 5-8% flake in a test whose whole
+    purpose is to make the suite less intermittently red.
 
     The bound is the assert that matters here, not the value: a converged
     run can legitimately sit slightly ABOVE the exact minimum, while
     nothing legitimate sits below it."""
     for run in range(8):
-        e = _polarized(n_uc, reach, 4, backend).gs_energy()
-        assert e >= EXACT_E - 1e-9, (n_uc, reach, run, e)
+        e = _polarized(n_uc, reach, D, 3).gs_energy()
+        assert e >= EXACT_E - 1e-9, (n_uc, reach, D, run, e)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
