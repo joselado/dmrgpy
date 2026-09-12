@@ -259,15 +259,146 @@ def _solve_right_environment_cell(AR_list, l_AR, source, e, D):
     return idmrg_exc._solve_linear_map(D, action, source - e * I)
 
 
-def _cell_fixed_points(AL_list, AR_list, D):
+def _trace_normalized_hermitian(M, caller):
+    """`M` rescaled to trace 1 and then Hermitized -- in that order.
+
+    The order matters and is not cosmetic. An eigensolver returns its
+    eigenvector up to an arbitrary global PHASE, and Hermitizing first
+    (`(M + M^dag)/2`, which is what this function replaced) keeps only
+    `Re(M)` along the diagonal: a fixed point handed back with a phase near
+    `i` then has `Re(trace(M)) ~ 0` even though `|trace(M)|` is perfectly
+    healthy, and the subsequent division by that trace blows the
+    environment up. Dividing by the complex trace first removes the phase,
+    after which Hermitizing leaves the trace at exactly 1."""
+    tr = np.trace(M)
+    nrm = np.linalg.norm(M)
+    # For any positive-semidefinite fixed point trace >= ||M||_F (the sum
+    # of non-negative eigenvalues is at least their 2-norm), so this only
+    # fires on an eigenvector that is not a density matrix at all -- the
+    # near-traceless element of a degenerate eigenspace this whole guard
+    # exists to catch. The old test (`abs(tr) > 1e-300`, silently skipping
+    # the normalization) is no test: it let a trace of 1e-16 through and
+    # multiplied the environment by 1e16.
+    if nrm == 0.0 or abs(tr) < 1e-13 * nrm:
+        raise RuntimeError(
+            "{}: the transfer matrix's dominant fixed point has a ~zero "
+            "trace (|tr|={:.3e}, ||M||={:.3e}) -- it is an arbitrary "
+            "element of a degenerate eigenspace, not a density "
+            "matrix".format(caller, abs(tr), nrm))
+    M = M / tr
+    return (M + M.conj().T) / 2
+
+
+def _bond_fixed_points(C_cell):
+    """`(r_AL, l_AR)` read straight off the state's own boundary bond
+    matrix `C`, instead of from an eigensolver: `C C^dag` for the
+    AL-transfer's right fixed point and `conj(C^dag C)` for the
+    AR-transfer's left one, both trace-normalized.
+
+    This is the pure-Python counterpart of `mpscpp3/chain_session.h`'s
+    `vx_bond_fixed_points`, and it exists for the same reason: when the
+    requested bond dimension exceeds what the state actually needs (a
+    field-polarized chain needs `D=1`), the surplus directions carry no
+    weight, the cell transfer matrix picks up a decoupled unimodular block,
+    and its dominant eigenvalue is genuinely DEGENERATE. ARPACK then either
+    fails to converge or returns an arbitrary -- possibly near-traceless --
+    element of that eigenspace, whose normalization blows the environment
+    up and produces an energy BELOW the variational minimum while the state
+    itself is still exactly right (confirmed directly: an exactly polarized
+    chain reporting `e=-2.30` and `-4382` against an exact `-1.825`, with
+    `<Sz>` reading exactly 0.5 in both cases, and `converged=True`).
+
+    In mixed canonical gauge `AC = AL C = C AR`, so `C C^dag` IS the
+    AL-transfer's right fixed point exactly -- redundancy and all -- and
+    `conj(C^dag C)` the AR-transfer's left one in this module's own
+    `X[ket, bra]` index ordering (the conjugate, i.e. the transpose of the
+    Hermitian `C^dag C`, is that ordering's doing and was confirmed
+    numerically against the eigensolver on a converged, non-degenerate
+    3-site TFIM cell: agreement to 1e-12 with the conjugate, 0.65 without
+    it). For a genuine "cat state" -- two branches with matched nonzero
+    weight, the one other way to tie the dominant eigenvalue -- it gives
+    the branch MIXTURE, where an unchecked eigensolver may instead hand
+    back one arbitrary branch with its own wrong energy. So this is never
+    worse than what it replaces.
+
+    Note what was tried first on the C++ side and is the WRONG shape: a
+    threshold on `C`'s weight spectrum to tell redundancy from a cat state.
+    The tie appears mid-convergence, where the redundant direction is still
+    on its way down, so the ratio to catch is a moving number with no
+    defensible cutoff -- which is why this is reached by the eigensolver
+    tripping, not by a redundancy test."""
+    r = C_cell @ C_cell.conj().T
+    l = np.conj(C_cell.conj().T @ C_cell)
+    return (_trace_normalized_hermitian(r, "_bond_fixed_points"),
+            _trace_normalized_hermitian(l, "_bond_fixed_points"))
+
+
+def _fixed_point_residual(M, action):
+    """`max|action(M)/tr(action(M)) - M|` -- exactly 0 when `M` is a fixed
+    point of `action`, and the one quantity that says whether the bond
+    matrix's algebraic identity (see `_bond_fixed_points`) actually holds
+    for the tensors in hand."""
+    Y = action(M)
+    tr = np.trace(Y)
+    if abs(tr) < 1e-300:
+        return np.inf
+    return float(np.max(np.abs(Y / tr - M)))
+
+
+# Residual below which the state's own bond fixed point is accepted as THE
+# fixed point, no eigensolve needed. This is a yes/no test on a quantity
+# that is 0 by an exact algebraic identity whenever the mixed-gauge
+# relation `AL[k] C[k] = C[k-1] AR[k]` holds -- not a tuning knob, and
+# emphatically not the C-weight-spectrum ratio `mpscpp3`'s own
+# `vx_bond_fixed_points` comment rejects as "a moving number with no
+# defensible cutoff". Measured across a full solve (polarized chain and
+# gapless Heisenberg, 3- and 4-site cells, D=6): the residual is 0 to
+# machine precision once the gauge relation holds and 1e-5 .. 0.8 while it
+# does not, so this sits in the middle of a ten-decade gap. Note the final
+# environments -- the ones whose energy is reported -- are always built
+# from tensors at `gauge_mismatch < tol` (1e-10 by default), where the
+# residual is ~1e-16.
+_BOND_FP_RESIDUAL_TOL = 1e-6
+
+
+def _cell_fixed_points(AL_list, AR_list, D, C_cell=None):
     """`(r_AL, l_AR)`: the dominant right fixed point of the whole cell's
     AL-transfer and the dominant left fixed point of its AR-transfer, both
-    Hermitized. Obtained matrix-free by powering the cell action rather
-    than by building the `(D^2, D^2)` cell transfer matrix, so this stays
-    linear in the cell length too."""
-    from scipy.sparse.linalg import LinearOperator, eigs
+    Hermitized and trace-normalized. Obtained matrix-free by powering the
+    cell action rather than by building the `(D^2, D^2)` cell transfer
+    matrix, so this stays linear in the cell length too.
 
-    def _dominant(action, D):
+    `C_cell` is the state's own bond matrix on the CELL BOUNDARY bond
+    (`C[n_uc-1]`, which by periodicity is both the cell's right and its
+    left edge). When it is given, the fixed points it names
+    (`_bond_fixed_points`) are used in preference to the eigensolver's
+    WHENEVER THEY ARE ACTUALLY FIXED POINTS -- which, in mixed canonical
+    gauge, is an exact algebraic identity rather than an approximation, so
+    the converged state's own answer is taken without an eigensolve at all.
+    The eigensolver is what handles the tensors mid-approach, before that
+    gauge relation holds; it also still runs when the bond candidate does
+    not reproduce itself, and its answer is then cross-checked against the
+    bond one by residual, with the bond one falling in whenever the
+    eigensolver trips its guards outright.
+
+    That ordering is the fix for a confirmed silent wrongness, not a
+    preference. A bare `eigs(k=1)` on a transfer matrix with a decoupled
+    unimodular block (any bond dimension above what the state actually
+    needs) returns an arbitrary element of a degenerate eigenspace; the
+    resulting energy came back BELOW the exact variational minimum -- an
+    exactly polarized chain reporting -1.8285, -2.30 and -4382 against an
+    exact -1.825, all with `converged=True` and `<Sz>` reading exactly 0.5.
+    Widening the eigensolver's own degeneracy check is not enough on its
+    own: on a 4-site cell the two leading eigenvalues were measured at
+    (1, 0.99999999), i.e. a relative gap of 1e-8, just OUTSIDE
+    `idmrg._DEGENERACY_RTOL`, and the near-degenerate mixture it returned
+    was still 2.9e-6 away from the exact fixed point.
+
+    Passing `C_cell=None` keeps the pure eigensolver route and its error,
+    for a caller with no `C` to hand."""
+    from scipy.sparse.linalg import ArpackError, LinearOperator, eigs
+
+    def _dominant(action, D, v0, caller):
         n = D * D
         if n <= 4:
             mat = np.zeros((n, n), dtype=complex)
@@ -275,30 +406,64 @@ def _cell_fixed_points(AL_list, AR_list, D):
             for k in range(n):
                 mat[:, k] = action(basis[:, k].reshape(D, D)).reshape(-1)
             w, v = np.linalg.eig(mat)
-            k = int(np.argmax(np.abs(w)))
-            return v[:, k].reshape(D, D)
-        op = LinearOperator((n, n), dtype=complex,
-                             matvec=lambda x: action(x.reshape(D, D)).reshape(-1))
-        w, v = eigs(op, k=1, which='LM', maxiter=5000, tol=1e-13)
-        return v[:, 0].reshape(D, D)
+        else:
+            op = LinearOperator((n, n), dtype=complex,
+                                 matvec=lambda x: action(x.reshape(D, D)).reshape(-1))
+            # k=2, not 1: the runner-up is what the degeneracy check below
+            # needs, and a bare k=1 cannot tell a healthy fixed point from
+            # a MIXTURE of the physical branch and a decoupled redundant
+            # one -- which passes every trace test and returns a
+            # wrong-but-plausible energy.
+            #
+            # v0 fixed rather than left at ARPACK's own random default, for
+            # the same reason idmrg._dominant_fixed_point pins it: without
+            # it the whole sequential solver is irreproducible run to run
+            # even at a fixed numpy seed (ARPACK's start vector comes from
+            # its own Fortran state, which `np.random.seed` does not
+            # touch), which was confirmed directly -- the same seed gave
+            # -1.825 on one process and -2.077 on the next. Starting from
+            # the state's own bond candidate also starts nearer the answer
+            # than a random vector, the identity being the fallback when
+            # there is none.
+            w, v = eigs(op, k=2, which='LM', maxiter=5000, tol=1e-13, v0=v0)
+        # perron=True for the same reason idmrg._dominant_fixed_point uses
+        # it: a magnitude tie among the peripheral spectrum of a period-p
+        # state is well posed and only needs resolving, while two copies of
+        # the SAME eigenvalue are not.
+        idx = idmrg._check_dominant_eigenvalue_nondegenerate(
+            w, caller, perron=True)[0]
+        return _trace_normalized_hermitian(v[:, idx].reshape(D, D), caller)
 
-    r_AL = _dominant(lambda X: _cell_transfer_action_right(X, AL_list), D)
-    l_AR = _dominant(lambda X: _cell_transfer_action_left(X, AR_list), D)
-    r_AL = (r_AL + r_AL.conj().T) / 2
-    l_AR = (l_AR + l_AR.conj().T) / 2
-    # Fix the scale the eigensolver leaves arbitrary: these close a
-    # normalized state, so their trace against the other side's exact
-    # (identity) fixed point must be 1.
-    tr_r = np.trace(r_AL)
-    if abs(tr_r) > 1e-300:
-        r_AL = r_AL / tr_r
-    tr_l = np.trace(l_AR)
-    if abs(tr_l) > 1e-300:
-        l_AR = l_AR / tr_l
+    def _one_side(action, bond, caller):
+        res_bond = np.inf if bond is None else _fixed_point_residual(bond, action)
+        if res_bond <= _BOND_FP_RESIDUAL_TOL:
+            return bond
+        v0 = (np.eye(D, dtype=complex).reshape(-1) / np.sqrt(D)
+              if bond is None else bond.reshape(-1).copy())
+        try:
+            cand = _dominant(action, D, v0, caller)
+        except (ArpackError, RuntimeError, ValueError):
+            # ArpackError covers ArpackNoConvergence; RuntimeError is the
+            # degeneracy check's and the zero-trace guard's; ValueError is
+            # eigs' own "k too large for this n".
+            if bond is None:
+                raise
+            return bond
+        # Both are candidates for the same fixed point; keep whichever
+        # reproduces itself better rather than trusting either by fiat.
+        if bond is not None and res_bond <= _fixed_point_residual(cand, action):
+            return bond
+        return cand
+
+    bond_r, bond_l = (None, None) if C_cell is None else _bond_fixed_points(C_cell)
+    r_AL = _one_side(lambda X: _cell_transfer_action_right(X, AL_list), bond_r,
+                      "vumps_ms._cell_fixed_points (AL transfer)")
+    l_AR = _one_side(lambda X: _cell_transfer_action_left(X, AR_list), bond_l,
+                      "vumps_ms._cell_fixed_points (AR transfer)")
     return r_AL, l_AR
 
 
-def environments(AL_list, AR_list, W_list, D):
+def environments(AL_list, AR_list, W_list, D, C_cell=None):
     """`(GL, GR, e_cell)` -- the per-bond channel-resolved environments for
     the whole cell, and the energy density per unit cell.
 
@@ -307,10 +472,16 @@ def environments(AL_list, AR_list, W_list, D):
     immediately to its RIGHT. Both are `(Dw, D, D)`. They are built once at
     the cell edges and then simply pushed across, which is the whole point
     of the sequential formulation: one cell traversal gives every site's
-    environment, rather than one solve per site."""
+    environment, rather than one solve per site.
+
+    `C_cell` is forwarded to `_cell_fixed_points` as the fallback the state
+    itself names when the transfer matrix's dominant fixed point comes out
+    ambiguous -- see that function and `_bond_fixed_points`. Optional only
+    so a caller holding AL/AR but no C (a subspace-expansion check, say)
+    can still ask for the environments and get the eigensolver's error."""
     Dw = W_list[0].shape[0]
     n_uc = len(W_list)
-    r_AL, l_AR = _cell_fixed_points(AL_list, AR_list, D)
+    r_AL, l_AR = _cell_fixed_points(AL_list, AR_list, D, C_cell=C_cell)
 
     GL0, src_l = _nilpotent_channels_left(AL_list, W_list, D, Dw)
     GRlast, src_r = _nilpotent_channels_right(AR_list, W_list, D, Dw)
@@ -698,7 +869,11 @@ def single_run(W_list, dims, D, tol, maxiter, niter_lanczos, init=None,
     GL = GR = None
     e_cell = 0.0
     for it in range(maxiter):
-        GL, GR, e_cell = environments(AL, AR, W_list, D)
+        # C[n_uc-1] is the cell BOUNDARY bond -- by periodicity both the
+        # cell's right edge (where r_AL lives) and its left edge (where
+        # l_AR does) -- and is passed as the fixed points to fall back on
+        # when the eigensolver's are ambiguous. See _bond_fixed_points.
+        GL, GR, e_cell = environments(AL, AR, W_list, D, C_cell=C[n_uc - 1])
 
         AC_new, C_new = [None] * n_uc, [None] * n_uc
         for n in range(n_uc):
@@ -748,7 +923,7 @@ def single_run(W_list, dims, D, tol, maxiter, niter_lanczos, init=None,
     # were built from this iteration's INPUT tensors, one update behind
     # what is being returned. Same reason vumps.py's own single run does a
     # final `_environments` call after its loop.
-    GL, GR, e_cell = environments(AL, AR, W_list, D)
+    GL, GR, e_cell = environments(AL, AR, W_list, D, C_cell=C[n_uc - 1])
     return dict(AL=AL, AR=AR, C=C, AC=AC, GL=GL, GR=GR, e_cell=e_cell,
                 converged=converged, niter=min(it + 1, maxiter),
                 mismatch=mismatch)

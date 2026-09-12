@@ -817,7 +817,153 @@ def _gauge_mismatch(AC, C, AL, AR):
     return (np.linalg.norm(AC - lhs1) + np.linalg.norm(AC - lhs2)) / norm_ac
 
 
-def _environments(AL, AR, W, pending):
+# Frobenius norm above which a TRACE-NORMALIZED fixed point is rejected
+# as not a density matrix at all. Any positive-semidefinite matrix of
+# trace 1 has ||rho||_F <= 1 (the sum of its non-negative eigenvalues is at
+# least their 2-norm), so this only fires on an eigenvector whose trace was
+# ~0 before `idmrg._dominant_fixed_point` divided by it -- the near-
+# traceless element of a DEGENERATE eigenspace that `_transfer_fixed_points`
+# exists to catch. It is exactly `vumps_ms._trace_normalized_hermitian`'s
+# own `|tr| < 1e-13 * ||M||` test, written after the division rather than
+# before it: that function is not reachable here, because `idmrg`
+# normalizes internally and hands back a finite-but-enormous array with no
+# complaint (`rho / np.trace(rho)`, unguarded). The failure it prevents is
+# the one `vumps_ms._bond_fixed_points`' own docstring records on THAT
+# path -- an energy of -4382 against an exact -1.825, with converged=True.
+# On this path the degeneracy check raised instead of returning such a
+# number (every one of the 7-in-20 observed failures was a RuntimeError,
+# not a silently wrong energy), so this guard is what keeps the `C=None`
+# route -- which has no bond candidate to fall back to -- failing loudly
+# rather than quietly, not a fix for an observed silent wrongness here.
+_FIXED_POINT_MAX_NORM = 1e13
+
+
+def _bond_fixed_point_candidates(C):
+    """`(r_bond, l_bond)` -- the AL-transfer's right and the AR-transfer's
+    left fixed point as named by the state's OWN bond matrix `C`, or
+    `(None, None)` when there is no usable `C`.
+
+    Delegates to `vumps_ms._bond_fixed_points` (`C C^dag` and
+    `conj(C^dag C)`, trace-normalized then Hermitized) rather than
+    recomputing it: the two solvers index their environments identically
+    (`X[ket, bra]`, from `idmrg._apply_transfer`'s own
+    `einsum('lLrR,rR->lL')`), so the formula, the conjugate on the left
+    one, and the tolerance below which it is accepted are one shared
+    definition instead of two that can drift. Confirmed numerically on
+    this path as well as on that one: at gauge_mismatch 2.4e-3 on a
+    grouped D=4 Heisenberg cell, `C C^dag` reproduces itself under the AL
+    transfer to 1.5e-3 and every other pairing (its conjugate, `C^dag C`,
+    that conjugate) to 0.2-0.4.
+
+    The import is deferred because `vumps_ms` imports *this* module at its
+    own top level (`_null_space_left`/`_null_space_right`), so a top-level
+    import here would be a cycle. `RuntimeError` from the trace guard
+    inside means `C` is not a density-matrix source at all (a zero or
+    near-traceless bond matrix), which is a reason to have no candidate,
+    not a reason to fail the caller's whole attempt."""
+    if C is None:
+        return None, None
+    from . import vumps_ms
+    try:
+        return vumps_ms._bond_fixed_points(C)
+    except RuntimeError:
+        return None, None
+
+
+def _transfer_fixed_points(AL, AR, C=None):
+    """`(r_AL, l_AR)`: the dominant right fixed point of the AL transfer
+    and the dominant left fixed point of the AR transfer, both Hermitized
+    and trace-normalized -- the two objects `_environments` closes its
+    energy densities and its environment solves against.
+
+    `C` is the state's own bond matrix. When it is given, the fixed points
+    it names (`_bond_fixed_point_candidates`) are preferred over the
+    eigensolver's WHENEVER THEY ACTUALLY REPRODUCE THEMSELVES, which in
+    mixed canonical gauge (`AC = AL C = C AR`) is an exact algebraic
+    identity rather than an approximation. The eigensolver is what handles
+    the tensors mid-approach, before that relation holds; its answer is
+    then cross-checked against the bond one by residual, and the bond one
+    falls in whenever the eigensolver trips its guards outright.
+
+    This is the grouped counterpart of `vumps_ms._cell_fixed_points` (and,
+    on the C++ side, of `Chain::vx_bond_fixed_points`), and it is here for
+    the same reason. When the requested bond dimension exceeds what the
+    state actually needs -- a field-polarized chain needs exactly `D=1` --
+    the surplus directions carry no weight, the transfer matrix picks up a
+    decoupled unimodular block, and its dominant eigenvalue is genuinely
+    DEGENERATE. `idmrg._check_dominant_eigenvalue_nondegenerate` cannot
+    tell that benign case from the one it exists to reject (a "cat state":
+    two branches with matched NONZERO weight), so it raised, the attempt
+    was skipped, and with every attempt skipped `vumps_ground_state` failed
+    outright with "every attempt at D=... failed". Measured directly on the
+    polarized 1-site cell of `tests/test_vumps_redundant_bond_dimension.py`
+    at D=4: 7 of 20 runs raised, every one of them from this function's two
+    calls and from nowhere else in the module. It is 0 of 20 with the
+    fallback.
+
+    For a real cat state the bond candidate gives the branch MIXTURE, where
+    an unchecked eigensolver may hand back one arbitrary branch carrying its
+    own wrong energy -- so it is never worse than what it replaces. Note
+    what is the WRONG shape here and must not be reintroduced: a threshold
+    on `C`'s weight spectrum to tell redundancy from a cat state. The tie
+    appears mid-convergence, where the redundant direction is still on its
+    way down, so the ratio to catch is a moving number with no defensible
+    cutoff -- which is why this is reached by a residual that is 0 by an
+    exact identity, not by a redundancy test.
+
+    Passing `C=None` keeps the pure eigensolver route and its error, for a
+    caller holding AL/AR but no bond matrix."""
+    from scipy.sparse.linalg import ArpackError
+
+    from . import vumps_ms
+
+    E_AL = idmrg_exc._op_transfer_matrix(AL, AL, None)
+    E_AR = idmrg_exc._op_transfer_matrix(AR, AR, None)
+    bond_r, bond_l = _bond_fixed_point_candidates(C)
+
+    def _one_side(Es, side, action, bond, caller):
+        res_bond = (np.inf if bond is None
+                    else vumps_ms._fixed_point_residual(bond, action))
+        if res_bond <= vumps_ms._BOND_FP_RESIDUAL_TOL:
+            return bond
+        try:
+            rho = (idmrg._dominant_right_fixed_point(Es)[0] if side == "right"
+                   else idmrg._dominant_left_fixed_point(Es)[0])
+            # Trace-normalize first (idmrg already did), Hermitize second --
+            # the order matters, see `vumps_ms._trace_normalized_hermitian`.
+            rho = (rho + rho.conj().T) / 2
+            nrm = np.linalg.norm(rho)
+            if not np.isfinite(nrm) or nrm > _FIXED_POINT_MAX_NORM:
+                raise RuntimeError(
+                    "{}: the transfer matrix's dominant fixed point is not a "
+                    "density matrix (||rho||={:.3e} after trace "
+                    "normalization) -- it is an arbitrary, near-traceless "
+                    "element of a degenerate eigenspace".format(caller, nrm))
+        except (ArpackError, RuntimeError, ValueError):
+            # RuntimeError is the degeneracy check's and the norm guard's;
+            # ValueError is `_transfer_chain_dim`'s and `eigs`' own "k too
+            # large for this n"; ArpackError covers non-convergence that
+            # idmrg's own dense fallback did not already absorb.
+            if bond is None:
+                raise
+            return bond
+        # Both are candidates for the same fixed point; keep whichever
+        # reproduces itself better rather than trusting either by fiat.
+        if bond is not None and res_bond <= vumps_ms._fixed_point_residual(
+                rho, action):
+            return bond
+        return rho
+
+    r_AL = _one_side([E_AL], "right",
+                     lambda X: idmrg._apply_transfer(E_AL, X), bond_r,
+                     "vumps._transfer_fixed_points (AL transfer)")
+    l_AR = _one_side([E_AR], "left",
+                     lambda X: idmrg._apply_transfer_from_left(E_AR, X), bond_l,
+                     "vumps._transfer_fixed_points (AR transfer)")
+    return r_AL, l_AR
+
+
+def _environments(AL, AR, W, pending, C=None):
     """(GL, GR, e_cell, bond_envs) from the current (AL, AR) -- the full
     per-iteration environment build (steps 1-3 of this module's own
     docstring), factored out so `vumps_ground_state` can call it once per
@@ -826,14 +972,14 @@ def _environments(AL, AR, W, pending):
     `vumps_ground_state`'s own comment for why this extra call is
     needed: e_cell/GL/GR computed at the top of the last executed
     iteration reflect that iteration's *input* AL/AR, one update step
-    behind the AL/AR actually returned)."""
-    E_AL = idmrg_exc._op_transfer_matrix(AL, AL, None)
-    r_AL, _ = idmrg._dominant_right_fixed_point([E_AL])
-    r_AL = (r_AL + r_AL.conj().T) / 2
+    behind the AL/AR actually returned).
 
-    E_AR = idmrg_exc._op_transfer_matrix(AR, AR, None)
-    l_AR, _ = idmrg._dominant_left_fixed_point([E_AR])
-    l_AR = (l_AR + l_AR.conj().T) / 2
+    `C` is the bond matrix belonging to this same (AL, AR) gauge, forwarded
+    to `_transfer_fixed_points` as the fallback the state itself names when
+    the transfer matrix's dominant fixed point comes out degenerate -- see
+    that function. Optional only so a caller holding AL/AR but no C can
+    still ask for the environments and get the eigensolver's error."""
+    r_AL, l_AR = _transfer_fixed_points(AL, AR, C=C)
 
     e_L, source_l = _energy_density_and_source_from_left(AL, W, r_AL)
     e_R, source_r = _energy_density_and_source_from_right(AR, W, l_AR)
@@ -950,8 +1096,17 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
     can transiently hit a (near-)degenerate transfer-matrix spectrum,
     idmrg._dominant_right_fixed_point's own guard -- confirmed directly on
     a gapless Heisenberg chain, whose own SU(2) symmetry makes this a real,
-    reachable state along some trajectories -- such an attempt is simply
-    skipped, not fatal). Additionally, at every D' a variational-principle
+    reachable state along some trajectories -- and such an attempt is
+    simply skipped, not fatal. Note that a degenerate spectrum no longer
+    reaches that skip on its own: `_transfer_fixed_points` first tries the
+    fixed points the state's own bond matrix names, which are exact under
+    the commonest cause of the degeneracy -- a bond dimension larger than
+    the state actually needs -- so the skip is now the last resort it was
+    meant to be rather than the routine outcome. Before that fallback the
+    polarized 1-site cell of
+    `tests/test_vumps_redundant_bond_dimension.py` had EVERY attempt
+    skipped, and so raised below, in 7 of 20 runs at D=4).
+    Additionally, at every D' a variational-principle
     safety net spends a bounded extra attempt budget if the best result
     found so far is worse than an already-known smaller-D' energy (see the
     inline comment at that check, and this module's own "Convergence
@@ -1135,7 +1290,12 @@ def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
     dim_ac = D * d_g * D
     it = 0
     for it in range(maxiter):
-        GL, GR, e_cell, bond_envs = _environments(AL, AR, W, pending)
+        # C goes along: AL/AR were fitted from (AC, C) by the previous
+        # iteration's `_update_AL_AR` (and satisfy AL C = AC = C AR exactly
+        # at iteration 0), so this C is the bond matrix of THIS gauge and
+        # names its transfer matrices' fixed points -- see
+        # `_transfer_fixed_points` for why that matters at redundant D.
+        GL, GR, e_cell, bond_envs = _environments(AL, AR, W, pending, C=C)
 
         def matvec_ac(x, GL=GL, GR=GR, bond_envs=bond_envs):
             X = x.reshape(D, d_g, D)
@@ -1208,7 +1368,7 @@ def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
     # `_environments`' own docstring) -- refresh them once more here so
     # the returned VUMPSResult's GL/GR/e0 are consistent with its own
     # AL/AR/C/AC, not the previous iteration's.
-    GL, GR, e_cell, _bond_envs = _environments(AL, AR, W, pending)
+    GL, GR, e_cell, _bond_envs = _environments(AL, AR, W, pending, C=C)
 
     return VUMPSResult(sites_uc, n_uc, D, d_g, AL, AR, C, AC, GL, GR, W,
                         e_cell, converged, it + 1, mismatch)

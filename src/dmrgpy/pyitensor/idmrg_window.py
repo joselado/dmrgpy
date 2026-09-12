@@ -942,13 +942,15 @@ def local_expectation(window, result, site, opname):
     ket = window.mps
     n = ket.length()
     n_uc = result.n_uc
-    cell, n_cell = _window_cell(result)
     # the right-boundary weighting is indexed by *cell* position, while the
-    # operator's own site type is still indexed by sublattice
-    p_last = (n - 1) % n_cell
-    Es = _idmrg_mod._transfer_matrices(cell, n_cell)
-    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_cell)
-    rho_R = rho_after[p_last]
+    # operator's own site type is still indexed by sublattice. The weighting
+    # itself now comes from `_close_array_chain`'s own (cached) `_IWEnv`
+    # rather than being solved for again here -- this function used to build
+    # its own copy of the transfer matrices and right fixed points, use only
+    # the fixed point's shape, and then throw it away before calling
+    # `_close_array_chain` twice, each of which solved the same
+    # eigenproblems all over again.
+    p_last = (n - 1) % _window_env(result).n_cell
 
     p = (site - 1) % n_uc
     mat = result.sites_uc.site_type(p + 1).matrix(opname)
@@ -963,13 +965,16 @@ def local_expectation(window, result, site, opname):
 
 def _close_array_chain(bra_arrays, ket_arrays, result, p_right, p_left=0):
     """`Σ` over a chain of doubled (ket, conj(bra)) transfer steps, closed
-    on the left by a bare trace (correct for a left-canonical `U_list` --
-    see `local_expectation`'s own docstring) and on the right by the
-    dominant right transfer-matrix fixed point at sublattice position
-    `p_right` (idmrg.py's own `_all_right_fixed_points`, evaluated on the
-    converged, unperturbed `result.U_list` -- the correct weighting for
-    "everything beyond this chain", exactly as `onsite_expectation`/
-    `two_point_correlator` already rely on).
+    on the left by the dominant LEFT transfer-matrix fixed point at cell
+    position `p_left` and on the right by the dominant RIGHT one at
+    `p_right` (idmrg.py's own `_all_left_fixed_points`/
+    `_all_right_fixed_points`, evaluated on the converged, unperturbed
+    cell -- the correct weighting for "everything beyond this chain",
+    exactly as `onsite_expectation`/`two_point_correlator` already rely
+    on). The left cap used to be a bare trace, which is only correct for
+    an exactly left-canonical tiling -- see the comment at that line, and
+    `local_expectation`'s own docstring for the right-hand half of the
+    same argument.
 
     `bra_arrays`/`ket_arrays`: lists of `(chi_l,d,chi_r)` plain NumPy
     arrays of the same length, aligned site by site -- deliberately plain
@@ -980,14 +985,17 @@ def _close_array_chain(bra_arrays, ket_arrays, result, p_right, p_left=0):
     `_half_sweep_lr_window`'s own docstring), so an explicit, positional
     contraction (mirroring idmrg.py's own `_transfer_matrices`/
     `_apply_transfer` style) is simpler and no less correct than trying to
-    route this through ITensor's own identity-based auto-contraction."""
-    E = None
-    for Karr, Barr in zip(ket_arrays, bra_arrays):
-        step = np.einsum('lir,LiR->lLrR', Karr, np.conj(Barr))
-        E = step if E is None else np.einsum('lLrR,rRsS->lLsS', E, step)
-    cell, n_cell = _window_cell(result)
-    Es = _idmrg_mod._transfer_matrices(cell, n_cell)
-    rho_after, _eta = _idmrg_mod._all_right_fixed_points(Es, n_cell)
+    route this through ITensor's own identity-based auto-contraction.
+
+    The chain is contracted by PROPAGATING the left boundary matrix through
+    it one site at a time (`_propagate_close`), never by composing the
+    doubled steps into a running rank-4 transfer tensor -- see that
+    function for why that re-association is both free and worth ~20x here.
+    The call-invariant caps (both families of transfer-matrix fixed points,
+    and the ground-state calibration denominator) come from the `_IWEnv`
+    memoized on `result`, not from a fresh pair of eigensolves per call."""
+    env = _window_env(result)
+    n_cell = env.n_cell
     # Close on the left with the transfer operator's own left fixed point at
     # the chain's own starting cell position, not a bare trace. The bare
     # trace is the special case where every tiled tensor is exactly
@@ -996,14 +1004,9 @@ def _close_array_chain(bra_arrays, ket_arrays, result, p_right, p_left=0):
     # Left as a bare trace it broke this module's own exact checks outright:
     # S(x=0,t=0), which must equal <Sz Sz> = 0.25 for spin-1/2, came out at
     # -0.0776.
-    l_before, _eta_l, _scales = _idmrg_mod._all_left_fixed_points(Es, n_cell)
-    l = l_before[p_left % n_cell]
-
-    def close(E4):
-        return np.einsum('rR,rR->',
-                          np.einsum('lL,lLrR->rR', l, E4),
-                          rho_after[p_right % n_cell])
-
+    l = env.l_before[p_left % n_cell]
+    rho_R = env.rho_after[p_right % n_cell]
+    val = _propagate_close(bra_arrays, ket_arrays, l, rho_R)
     # Calibrate against the same contraction run over the *ground state*
     # itself, so a chain carrying no operator returns exactly 1. Both the
     # left and right caps come from independently trace-1-normalized fixed
@@ -1014,12 +1017,109 @@ def _close_array_chain(bra_arrays, ket_arrays, result, p_right, p_left=0):
     # 0.025 with a chi-only rescaling and -0.078 with none. Calibrating makes
     # the formula exact for any tiled tensors, canonical or not, and
     # reproduces the old convention identically when they are canonical.
-    E_id = None
-    for k in range(len(ket_arrays)):
-        arr = _idmrg_mod._to_array_lpr(cell[(p_left + k) % n_cell])
-        step = np.einsum('lir,LiR->lLrR', arr, np.conj(arr))
-        E_id = step if E_id is None else np.einsum('lLrR,rRsS->lLsS', E_id, step)
-    return close(E) / close(E_id)
+    return val / env.calibration(p_left, p_right, len(ket_arrays))
+
+
+def _propagate_close(bra_arrays, ket_arrays, l, rho_R):
+    """The chain of doubled (ket, conj(bra)) transfer steps closed between
+    the left cap `l[l_ket,l_bra]` and the right cap `rho_R[r_ket,r_bra]`,
+    computed by pushing `l` through the chain one site at a time.
+
+    Exactly the scalar the composed form computes -- only the contraction
+    order differs, as in `idmrg._apply_site_transfer`'s own re-association
+    and `vumps._precompute_bond_environments`' -- but the running object is
+    a `(chi,chi)` matrix rather than the `(chi,chi,chi,chi)` tensor the
+    composition builds and then immediately closes on both ends anyway.
+    Composing costs `O(n chi^6)` (and, at numpy's default `optimize=False`,
+    runs as an unoptimized C loop rather than BLAS); propagating costs
+    `O(n chi^3 d)`. Measured exponent of the composed routine over
+    maxm=6,8,12,16 was ~chi^5.3, and it was 97% of a
+    `td_dynamical_correlator` call -- 19.3s of 19.9s at maxm=16, nt=4.
+    Head to head on identical random inputs the two agree to ~1e-15 and
+    propagating is 56x faster at chi=8, 2325x at chi=16, 54572x at chi=32.
+
+    The ket and bra may carry different bond dimensions (a shifted overlap
+    between two independently evolved windows does): the running `X` simply
+    stays rectangular."""
+    X = l
+    for Karr, Barr in zip(ket_arrays, bra_arrays):
+        # X[l,L] . K[l,i,r] -> (L,i,r), then . conj(B)[L,i,R] -> (r,R)
+        tmp = np.tensordot(X, Karr, axes=([0], [0]))
+        X = np.tensordot(tmp, np.conj(Barr), axes=([0, 1], [0, 1]))
+    return np.einsum('rR,rR->', X, rho_R)
+
+
+class _IWEnv:
+    """Everything `_close_array_chain`/`local_expectation` need that does
+    NOT depend on the snapshot being measured: the tiled cell as plain
+    arrays, both families of transfer-matrix fixed points, and the
+    ground-state calibration denominators.
+
+    All of these are functions of the converged `IDMRGResult` alone, yet
+    `_close_array_chain` used to rebuild the whole set -- `_transfer_
+    matrices`, `_all_right_fixed_points`, `_all_left_fixed_points`, i.e.
+    two chi^2 x chi^2 eigenproblems -- on every single invocation, and
+    `local_expectation` built another copy of its own before calling it
+    twice. Since `snapshot_correlator` calls `_close_array_chain` once per
+    x value and `dynamical_correlator_td` calls that once per time step,
+    a `td_dynamical_correlator(nt=200, 5 x-values)` run re-solved ~2000
+    pairs of eigenproblems that have exactly one answer between them
+    (counted directly: 25 rebuilds for an nt=4 run, 2 with this cache).
+    Same defect, same fix, as `idmrg._CorrelatorEnv` on the static-
+    observable path and `mpscpp3`'s own `iw_build_cache` for the v3 window.
+
+    The calibration denominator is memoized per `(p_left, p_right,
+    nsites)`: it is the same propagated chain run over the ground state's
+    own tensors, so it depends on the chain's starting cell position, its
+    length, and which right fixed point closes it -- and on nothing else
+    about the snapshot. `p_right` belongs in that key (rather than only
+    `p_left` and the length) because callers pass it independently of
+    `p_left`; `snapshot_correlator` does exactly that."""
+
+    def __init__(self, result):
+        self.cell, self.n_cell = _window_cell(result)
+        Es = _idmrg_mod._transfer_matrices(self.cell, self.n_cell)
+        self.cell_arrays = [_idmrg_mod._to_array_lpr(T) for T in self.cell]
+        # `sites=` makes both fixed-point solves walk the cell tensors
+        # rather than applying the materialised chi^4 transfer tensors --
+        # identical answer, O(chi^3 d) per Krylov step instead of O(chi^4);
+        # see idmrg._dominant_fixed_point's own `sites` argument.
+        sites = (self.cell_arrays, self.cell_arrays)
+        self.rho_after, _eta = _idmrg_mod._all_right_fixed_points(
+            Es, self.n_cell, sites=sites)
+        self.l_before, _eta_l, _scales = _idmrg_mod._all_left_fixed_points(
+            Es, self.n_cell, sites=sites)
+        self._calibrations = {}
+
+    def calibration(self, p_left, p_right, nsites):
+        """`close(E_id)`: the same contraction run over the unperturbed
+        ground-state cell, tiled `nsites` long from cell position
+        `p_left`."""
+        key = (p_left % self.n_cell, p_right % self.n_cell, nsites)
+        val = self._calibrations.get(key)
+        if val is None:
+            arrays = [self.cell_arrays[(key[0] + k) % self.n_cell]
+                      for k in range(nsites)]
+            val = _propagate_close(arrays, arrays, self.l_before[key[0]],
+                                    self.rho_after[key[1]])
+            self._calibrations[key] = val
+        return val
+
+
+def _window_env(result):
+    """`_IWEnv` for `result`, built once and memoized on it.
+
+    Invalidated by identity of the tiled cell rather than blindly trusted,
+    exactly as `idmrg._correlator_env` does for its own equivalent: every
+    ordinary producer of a result builds a fresh `cell_raw` that is then
+    never mutated, so this only guards against a caller swapping a cell in
+    by hand."""
+    cell, _n_cell = _window_cell(result)
+    env = getattr(result, "_iw_env", None)
+    if env is None or env.cell is not cell:
+        env = _IWEnv(result)
+        result._iw_env = env
+    return env
 
 
 # -- Sec. V.1 steps 3-5: shifted overlaps, S(x,t) --------------------------

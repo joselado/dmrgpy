@@ -256,7 +256,26 @@ def _op_transfer_matrix(ket, bra, M=None):
         ket = _apply_op_ket(M, ket)
     # einsum('lpr,LpR->lLrR', ket, conj(bra)): contract only over the
     # physical leg p, then reorder the four open legs into (l,L,r,R).
-    return np.tensordot(ket, np.conj(bra), axes=([1], [1])).transpose(0, 2, 1, 3)
+    #
+    # np.ascontiguousarray, and it is not cosmetic: `.transpose` returns a
+    # stride-permuted VIEW that is not C-contiguous, and every consumer of
+    # this tensor (idmrg._apply_transfer, _apply_transfer_from_left)
+    # immediately does `E4.reshape(chi*chi, -1)` -- which numpy cannot do
+    # on a non-contiguous array without materializing a full chi^4 copy.
+    # These tensors are built ONCE and then applied thousands of times
+    # inside the iterative solves in vumps.py's _solve_left_environment/
+    # _solve_right_environment, so that copy was being paid per iteration
+    # for an operator that never changes: cProfile attributed 41% of a
+    # D=24 VUMPS ground-state solve to `ndarray.reshape` called from
+    # exactly those two functions. Paying the copy once here instead is
+    # 1.3x/1.8x/2.6x end-to-end at D=16/24/32, and cannot change any
+    # arithmetic -- the reshape was copying into a contiguous buffer
+    # anyway. Same mistake, same fix as kernels.py:398's own note on the
+    # finite-chain matvec ("since a transposed array is generally not
+    # contiguous, that `.reshape` forces a full copy of the operator
+    # tensor each time, not a view").
+    return np.ascontiguousarray(
+        np.tensordot(ket, np.conj(bra), axes=([1], [1])).transpose(0, 2, 1, 3))
 
 
 def _apply_op_ket(M, T):
