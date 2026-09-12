@@ -66,12 +66,27 @@ def fermi_string_parity(wf):
 
 
 
+# the documented enumeration get_fermionic_parity dispatches over, kept
+# next to the dispatcher so the two cannot drift apart
+FP_MODES = ("full","iterative")
+
+
 def get_fermionic_parity(wf,fpmode="full",**kwargs):
+    """Expectation value of the fermionic parity operator prod_i F_i.
+
+    fpmode="full" builds the whole parity operator and takes one
+    <wf|P|wf>; fpmode="iterative" applies the per-site Fermi strings to
+    the wavefunction one at a time instead."""
     if fpmode=="full":
         return fermi_string_parity(wf) # parity of the state
     elif fpmode=="iterative":
         return fermi_string_parity_iterative(wf) # parity of the state
-    else: raise
+    else: # a typo used to reach a bare `raise` here, i.e. "RuntimeError:
+        # No active exception to reraise", naming neither the argument
+        # nor what it accepts
+        raise ValueError("get_fermionic_parity: fpmode=%s is not "
+                "recognized; expected one of %s"
+                %(repr(fpmode),", ".join(repr(m) for m in FP_MODES)))
 
 
 

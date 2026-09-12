@@ -372,7 +372,14 @@ class Infinite_Many_Body_Chain:
                                    # pyitensor.vumps.vumps_ground_state's
                                    # own docstring for why this matters
                                    # (single-attempt VUMPS from a random
-                                   # start is not reliable for D>1)
+                                   # start is not reliable for D>1).
+                                   # 4 is the default everywhere (here,
+                                   # pyitensor.vumps.ground_state and
+                                   # pyitensor.vumps_ms.ground_state) and
+                                   # always has been; documentation.md's
+                                   # residual-criterion timing table was
+                                   # measured at an explicitly-set 6, not
+                                   # at this default.
         self.niter = 30         # itensor_version="python": per-micro-step
                                  # Lanczos iteration count -- note
                                  # idmrg.py's _local_two_site_solve always
@@ -480,11 +487,15 @@ class Infinite_Many_Body_Chain:
         next one. That integer form is how a coupling longer-ranged than
         one unit cell is written -- `SzC[0]*ic.get_operator("Sz",0,group=2)`
         is a next-nearest-cell bond -- and it is supported by
-        `set_hamiltonian` and by `gs_method="vumps"` (which routes such a
-        Hamiltonian to the sequential multi-site solver, see
-        `pyitensor/vumps.py`'s own dispatch); `gs_method="idmrg"` and
-        `excitation_energies`/`excitation_gap` are reach-1 only and raise
-        for it."""
+        `set_hamiltonian` and by BOTH ground-state methods, at any finite
+        reach: `gs_method="vumps"` routes such a Hamiltonian to the
+        sequential multi-site solver (see `pyitensor/vumps.py`'s own
+        dispatch) and `gs_method="idmrg"`'s growth loop consumes whatever
+        automaton `_build_periodic_mpo` hands it, which has always carried
+        one pending channel per site of a term's reach. Only
+        `excitation_energies`/`excitation_gap` are reach-1 and raise for
+        it -- see `_require_reach_one` below, which is the single caller
+        of that restriction and carries the full reasoning."""
         offsets = {"C": 0, "R": 1, "L": -1}
         if isinstance(group, str):
             try:

@@ -2,6 +2,12 @@ import numpy as np
 import scipy.linalg as lg
 
 
+# the documented enumerations get_correlation_matrix dispatches over, kept
+# here so the dispatcher and the "you typo'd it" message cannot drift apart
+DM_MODES = ("simple","fast","explicit","full")
+DM_BASES = ("electron","Nambu")
+CT_MODES = ("explicit","full","sweep","fold","batched")
+
 
 def get_correlation_matrix(self,T=0.,**kwargs):
     """Compute the correlation matrix of a finite temperature state"""
@@ -57,31 +63,43 @@ def get_correlation_matrix_zeroT(self,operators=None,
                               wf=None,**kwargs):
     """Compute the correlation matrix of a ground state"""
     from .. import fermionchain
-    if dmmode is None:
-        # "fast" (the historical hardcoded default) applies each single-
-        # fermion operator to the state on its own, which changes the
-        # particle number -- so in conserved-sector mode it raises before
-        # computing anything, while dmmode="explicit"/"full" return the
-        # right answer on the same chain. Resolve the default against the
-        # chain's state instead of hardcoding it.
-        if getattr(self,"conserved_sector",None): dmmode = "full"
-        else: dmmode = "fast"
+    if basis not in DM_BASES: # a typo here would silently give the
+        # electron basis (the old `else` branch below served both
+        # "electron" and "you typo'd it"), i.e. a wrong matrix rather
+        # than a message
+        raise ValueError("get_correlation_matrix: basis=%s is not "
+                "recognized; expected one of %s"
+                %(repr(basis),", ".join(repr(m) for m in DM_BASES)))
+    if dmmode is not None and dmmode not in DM_MODES:
+        # checked here, before get_gs(), so a misspelling doesn't cost a
+        # full ground-state solve before it is reported
+        raise ValueError("get_correlation_matrix: dmmode=%s is not "
+                "recognized; expected one of %s, or None to auto-select"
+                %(repr(dmmode),", ".join(repr(m) for m in DM_MODES)))
     if dmmode=="full" and basis=="Nambu":
         dmmode="fast"
         print("C++ mode not implemented with Nambu basis")
 #    print(dmmode)
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
     wf = wf.normalize() # normalize wavefunction
+    # the default is resolved *after* the wavefunction exists, because it
+    # is resolved against what that wavefunction can actually do (see
+    # _default_dmmode) rather than against which backend this chain was
+    # built with
+    if dmmode is None: dmmode = _default_dmmode(self,wf,basis)
     if operators is None: # no operators provided
         if fermionchain.isfermion(self):
-            if basis=="Nambu": 
-              operators = [o for o in self.C] 
-              operators += [o for o in self.Cdag] 
+            if basis=="Nambu":
+              operators = [o for o in self.C]
+              operators += [o for o in self.Cdag]
             else: # just normal basis
               operators = self.C # fermionic operators
-        else: 
-            print("Unrecognized type",type(self))
-            raise
+        else:
+            raise ValueError("get_correlation_matrix: no operators= given "
+                    "and this chain (%s) is not fermionic, so there is no "
+                    "default set of single-fermion operators to build the "
+                    "correlation matrix from -- pass operators= explicitly"
+                    %type(self).__name__)
     # create the matrix
     if dmmode=="simple":
         return correlation_matrix_clean(operators,wf,self)
@@ -91,9 +109,10 @@ def get_correlation_matrix_zeroT(self,operators=None,
         return correlation_matrix_explicit(operators,wf)
     elif dmmode=="full":
         return cpp_correlation_matrix(wf)
-    else: 
-        print(dmmode,"not recognized")
-        raise # not implemented
+    else: # unreachable: dmmode was validated against DM_MODES above
+        raise ValueError("get_correlation_matrix: dmmode=%s is not "
+                "recognized; expected one of %s, or None to auto-select"
+                %(repr(dmmode),", ".join(repr(m) for m in DM_MODES)))
     n = len(operators)
     cm = np.zeros((n,n),dtype=np.complex128)
     for i in range(n):
@@ -171,7 +190,11 @@ def get_highorder_correlation_matrix(self,operators=None,wf=None,**kwargs):
             operators = self.C # fermionic operators
         elif type(self)==fermionchain.Spinful_Fermionic_Chain:
             operators = self.C # fermionic operators
-        else: raise
+        else: # same shape as get_correlation_matrix_zeroT's own default
+            raise ValueError("get_highorder_correlation_matrix: no "
+                    "operators= given and this chain (%s) has no default "
+                    "set of single-fermion operators -- pass operators= "
+                    "explicitly"%type(self).__name__)
     # create the matrix
     n = len(operators)
     cm = np.zeros((n,n,n,n),dtype=np.complex128)
@@ -189,8 +212,13 @@ def get_highorder_correlation_matrix(self,operators=None,wf=None,**kwargs):
 #                    if np.abs(out)>1e-4:
 #                       print(i,j,k,l,np.round(out,2))
 #    print("Trace",np.sum([cm[i,i,i,i] for i in range(n)]))
-    cm = four2two(cm) 
-    if np.sum(np.abs(cm-np.conjugate(cm.T)))>1e-4: raise
+    cm = four2two(cm)
+    dev = np.sum(np.abs(cm-np.conjugate(cm.T))) # non-Hermitian part
+    if dev>1e-4: # internal consistency: this matrix must come out Hermitian
+        raise RuntimeError("get_highorder_correlation_matrix: the resulting "
+                "matrix is not Hermitian (|M-M^dag| summed to "+str(dev)+
+                ", tolerance 1e-4), which usually means the wavefunction "
+                "handed in is not a converged eigenstate")
     return cm # return matrix
 
 
@@ -235,19 +263,68 @@ def cpp_correlation_matrix(wf):
     return self._session.correlation_matrix(wf.cpp_handle)
 
 
+def _default_dmmode(self,wf,basis):
+    """Pick the dmmode for get_correlation_matrix_zeroT() when the caller
+    didn't request one explicitly. `self` is the chain that was asked (it
+    is the one carrying the sector), `wf` the state to be measured (it is
+    the one carrying the backend handle -- the two are not the same object
+    on the ED route, and need not even be the same class).
+
+    Without a conserved sector this is "fast", the historical hardcoded
+    default: it applies each single-fermion operator to the state on its
+    own and overlaps the results, which is the cheapest route by a wide
+    margin. That same step changes the particle number, so under a
+    conserved sector it raises before computing anything and something
+    else has to answer (2026-08 audit, finding #11).
+
+    Which something else is decided *here*, from what this particular
+    wavefunction can actually do, rather than from which backend the chain
+    was built with. The 2026-08 fix hardcoded "full" for the sector case
+    under the premise that only DMRG could reach it ("a sector-mode chain
+    deliberately refuses to fall back to ED"); d62a306 then gave ED its
+    own sector implementation and made that premise false, at which point
+    "full" -- which is `wf.MBO._session.correlation_matrix(wf.cpp_handle)`,
+    session-only -- died with AttributeError on every ED-answered
+    sector chain (2026-09 audit, finding #17). So test the handle and the
+    session that `cpp_correlation_matrix` actually uses, on `wf.MBO` (an
+    ED wavefunction's MBO is an edtk/pyfermion object, not the chain that
+    was asked), and fall back to the backend-agnostic "explicit"
+    otherwise. "explicit" is what mpsjulialive/mps.py hardcodes for the
+    same reason, and it is exact against "full" and against ED to 1e-12.
+
+    basis="Nambu" never picks "full": the C++ correlation_matrix has no
+    Nambu form (see get_correlation_matrix_zeroT's own downgrade of an
+    explicitly-requested one)."""
+    if not getattr(self,"conserved_sector",None):
+        return "fast" # no sector: nothing stops the cheapest route
+    session = getattr(getattr(wf,"MBO",None),"_session",None)
+    if basis!="Nambu" and getattr(wf,"cpp_handle",None) is not None \
+            and hasattr(session,"correlation_matrix"):
+        return "full" # a live DMRG session that can answer directly
+    return "explicit" # always correct, backend-agnostic
+
+
 def get_four_correlation_tensor(wf,ctmode=None,**kwargs):
     """Return the correlation tensor as <Cdag_i C_j Cdag_k C_l>.
 
     ctmode=None (the default) auto-selects the fastest method actually
-    available for this wavefunction's backend/chain type -- "sweep"
-    whenever it applies (itensor_version in (3,"python"), non-native-
-    spinful fermionic sites), else "full" whenever it applies, else the
-    always-correct but slowest "explicit" fallback (see
-    _four_correlation_tensor_default_ctmode()). Passing a ctmode
-    explicitly is still a hard request: it raises rather than silently
-    falling back if that method isn't available for this wavefunction."""
+    available for this wavefunction's backend/chain type, in this order:
+    "batched", then "sweep", then "fold" (native spinful sites), then
+    "full", then the always-correct but slowest "explicit" fallback.
+    _four_correlation_tensor_default_ctmode() is the resolver and its
+    docstring says which backend/chain each one needs and why they are
+    ordered that way -- keep that one authoritative rather than
+    duplicating the conditions here. Passing a ctmode explicitly is still
+    a hard request: it raises rather than silently falling back if that
+    method isn't available for this wavefunction."""
     if ctmode is None:
         ctmode = _four_correlation_tensor_default_ctmode(wf)
+    elif ctmode not in CT_MODES: # a typo, not an unavailable method: the
+        # per-mode helpers below raise their own clear message for the
+        # latter, and this branch used to serve both
+        raise ValueError("get_four_correlation_tensor: ctmode=%s is not "
+                "recognized; expected one of %s, or None to auto-select"
+                %(repr(ctmode),", ".join(repr(m) for m in CT_MODES)))
     if ctmode=="explicit":
         return get_four_correlation_tensor_explicit(wf,**kwargs)
     elif ctmode=="full":
@@ -258,7 +335,10 @@ def get_four_correlation_tensor(wf,ctmode=None,**kwargs):
         return get_four_correlation_tensor_fold(wf,**kwargs)
     elif ctmode=="batched":
         return get_four_correlation_tensor_batched(wf,**kwargs)
-    else: raise
+    else: # unreachable: ctmode was validated against CT_MODES above
+        raise ValueError("get_four_correlation_tensor: ctmode=%s is not "
+                "recognized; expected one of %s, or None to auto-select"
+                %(repr(ctmode),", ".join(repr(m) for m in CT_MODES)))
 
 
 
