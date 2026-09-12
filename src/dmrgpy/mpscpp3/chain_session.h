@@ -1605,10 +1605,44 @@ class Chain
         sweeps.maxdim() = maxm_;
         sweeps.cutoff() = cutoff_;
         sweeps.niter() = niter;
+        // DoNormalize is set from dt, not hardcoded true, and that
+        // distinction is the whole of the fix for the 2026-09 audit's
+        // finding #7. exp(-i*H*dt) preserves the norm only for REAL dt;
+        // for any dt with an imaginary part (imaginary time, and the
+        // complex-time contour tdz.py's "TDZ" submode walks) the decay
+        // of ||psi|| IS the physics, and forcing unit norm after every
+        // step deletes it. Measured through the public API before this:
+        // v3's TDZ spectral function integrated to 0.3407 against an
+        // exact sum rule of 0.25 (36% too much weight, peak 2.8x too
+        // high) while itensor_version="python" -- whose _tdvp_step_fn
+        // never normalized -- gave 0.2495; v3 with tevol_method="MPO",
+        // which routes around this method entirely, also gave 0.2495 on
+        // the same chain, which is what pinned the cause here rather
+        // than in tdz.py's reconstruction.
+        //
+        // The 2026-08 audit (finding #9's "Where a fix goes") explicitly
+        // advised against touching this flag, "since tdz.py's
+        // complex-time path and metts_vev depend on its current
+        // semantics". That is exactly backwards for the tdz.py half --
+        // the complex-time path is the one thing forced normalization
+        // cannot survive -- and a no-op for the metts_vev half: both
+        // imaginary-time call sites below already follow every step with
+        // their own explicit `phi /= sqrt(innerC(phi,phi).real())`, so
+        // they are unaffected by which way this flag goes (and are now
+        // safe from underflow over long beta besides).
+        //
+        // Real-time callers are likewise unaffected: quench_tdvp(),
+        // evolve_and_measure_tdvp() and their _gse siblings all pass a
+        // real dt and then restore the input norm themselves
+        // (psi.normalize(); psi *= norm0), which under norm-preserving
+        // evolution is what this flag was doing for them anyway -- their
+        // restore now also absorbs the small truncation drift that
+        // forced normalization used to mask.
+        bool norm_preserving = (dt.imag() == 0.0);
         tdvp(psi,H,t,sweeps,{"Quiet",!verbose_,"Silent",!verbose_,
                               "NumCenter",num_center,
                               "Truncate",num_center==2,
-                              "DoNormalize",true});
+                              "DoNormalize",norm_preserving});
         return psi;
         }
 
