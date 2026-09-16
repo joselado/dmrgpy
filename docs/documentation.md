@@ -5241,7 +5241,20 @@ Three places did need explicit work, and each is a trap worth knowing:
   one-time compile tax (measured: 672 compilations, 18.4 s of a 29.1 s
   run). `backend.set_pad_bonds(K)` freezes every bond at K to collapse
   that shape zoo; it appends zero singular values after truncation, so
-  the represented state is unchanged.
+  the represented state is unchanged. It applies to *MPS* bonds only
+  (`mpscontainer._Chain._pad_bonds`, True on `MPS` and False on `MPO`,
+  via `backend.pad_bonds_suspended`): an operator is built once by
+  `mpobuilder.to_mpo` and keeps its bond dimension for the whole run, so
+  there is no shape churn there to collapse, while padding it would
+  inflate the MPO bond `w` that every environment tensor carries and that
+  the two-site matvec's dominant O(chi^3 d^2 w) term is linear in.
+  `to_mpo`'s own compression sweep goes through the same `svd()`, so this
+  exemption is what keeps it out -- before it existed, `set_pad_bonds(60)`
+  took a next-nearest-neighbour Hamiltonian's MPO from bond dimension 8 to
+  60, which on a 6 GB consumer card was the difference between a padded
+  `maxm=60` ground state running and not (see
+  `docs/gpu_cpu_performance.md`'s consumer-GPU section, and
+  `tests/test_pad_bonds_mpo_exemption.py`).
 
 **The dispatch floor, and the two knobs against it.** Eager dispatch has
 a per-call floor (~0.35 ms on an H200, against ~0.07 ms for the same

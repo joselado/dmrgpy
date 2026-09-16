@@ -4844,7 +4844,13 @@ Three things to set when you use it:
     dimension) if the script does \emph{one} calculation and exits: it
     makes every tensor shape identical so the GPU compiles each kernel
     once, worth 1.4--3.1$\times$ on such a run. Skip it for long sweeps
-    inside one process, where it costs 6--31\%.
+    inside one process, where it costs 6--31\%. It pads the state's
+    bonds, never the Hamiltonian's, whose bond dimension does not move.
+    On a \emph{consumer} card skip it above small bond dimension
+    entirely: padding trades arithmetic for shape stability, and where
+    FP64 is 1/32-rate the arithmetic is the expensive half (measured on
+    a GTX 1060: a win at \texttt{maxm=30}, 2.6$\times$ slower at
+    \texttt{maxm=120}).
   \item \texttt{backend.set\_jit(True)} fuses the engine's hot inner
     kernels into one compiled kernel each, which is what lowers the
     $\sim$0.35\,ms-per-operation floor. The default \texttt{"auto"}

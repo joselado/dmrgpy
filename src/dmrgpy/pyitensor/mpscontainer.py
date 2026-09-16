@@ -16,6 +16,7 @@ via the common _Chain base -- mirrors how mpscpp3/chain_session.h itself
 never needs a separate code path for canonicalizing an MPS vs an MPO.
 """
 
+from . import backend as bk
 from .index import Index
 from .svd import svd
 from .tensor import ITensor, commonIndex
@@ -34,6 +35,16 @@ def _link_at(chain, i, j):
 
 
 class _Chain:
+    # Whether backend.set_pad_bonds applies to this chain's bonds. True for
+    # an MPS, whose bond dimensions really do change from sweep to sweep --
+    # which is the shape churn padding exists to stop. False for an MPO:
+    # an operator is built once and keeps its bond dimension for the whole
+    # run, so padding cannot stabilize a shape that was never moving, and
+    # it inflates the MPO bond `w` that every environment tensor and the
+    # two-site matvec's O(chi^3 d^2 w) cost are linear in. See
+    # backend.pad_bonds_suspended for the measurement.
+    _pad_bonds = True
+
     def __init__(self, tensors):
         self._tensors = list(tensors)
         self.center = None  # 1-based orthogonality center, or None if unknown
@@ -109,7 +120,8 @@ class _Chain:
         nxt = self.A(i + 1)
         right_link = _link_at(self, i, i + 1)
         left_inds = [ind for ind in T.inds if ind != right_link]
-        U, S, V, spec = svd(T, left_inds, cutoff=cutoff, maxdim=maxdim)
+        with bk.pad_bonds_suspended(not self._pad_bonds):
+            U, S, V, spec = svd(T, left_inds, cutoff=cutoff, maxdim=maxdim)
         self.set_A(i, U)
         SV = S * V
         self.set_A(i + 1, SV * nxt)
@@ -120,7 +132,8 @@ class _Chain:
         T = self.A(i)
         prev = self.A(i - 1)
         left_link = _link_at(self, i, i - 1)
-        U, S, V, spec = svd(T, [left_link], cutoff=cutoff, maxdim=maxdim)
+        with bk.pad_bonds_suspended(not self._pad_bonds):
+            U, S, V, spec = svd(T, [left_link], cutoff=cutoff, maxdim=maxdim)
         self.set_A(i, V)
         US = U * S
         self.set_A(i - 1, prev * US)
@@ -151,6 +164,8 @@ class MPS(_Chain):
 
 
 class MPO(_Chain):
+    _pad_bonds = False          # see _Chain._pad_bonds
+
     def __mul__(self, scalar):
         out = self.copy()
         c = out.center or 1

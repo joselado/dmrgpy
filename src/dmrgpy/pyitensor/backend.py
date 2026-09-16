@@ -69,6 +69,8 @@ supported (it would silently transfer per call, the exact thing this
 module exists to avoid).
 """
 
+import contextlib
+
 import numpy as np
 
 _NAME = "numpy"
@@ -195,6 +197,38 @@ def set_pad_bonds(dim):
 
 def pad_bonds():
     return _PAD_BONDS
+
+
+@contextlib.contextmanager
+def pad_bonds_suspended(suspend=True):
+    """Run a block with `set_pad_bonds` temporarily off.
+
+    Padding exists to stop the engine minting a fresh array shape every
+    time a bond dimension changes. An *operator's* bonds never change:
+    the Hamiltonian MPO is built once and its shape is the same on every
+    sweep, so padding buys nothing there and costs a great deal --
+    measured on a 12-site next-nearest-neighbour spin chain,
+    `set_pad_bonds(60)` took the Hamiltonian MPO from bond dimension 8 to
+    60, i.e. 7.5x the MPO bond `w` that the two-site matvec's dominant
+    O(chi^3 d^2 w) term is linear in, and that every environment tensor
+    carries. On a 6 GB GTX 1060 that turned a padded ground state at
+    maxm=60 into a 1.77 GiB allocation the card could not serve, so XLA
+    fell back to a slower plan and the solve never finished; the same
+    padding on an H200 is only an invisible constant factor, which is why
+    it survived the original port. `mpscontainer._Chain` uses this so MPS
+    bonds are still padded (they do vary, which is the whole point) while
+    MPO bonds are not.
+    """
+    global _PAD_BONDS
+    if not suspend:
+        yield
+        return
+    saved = _PAD_BONDS
+    _PAD_BONDS = None
+    try:
+        yield
+    finally:
+        _PAD_BONDS = saved
 
 
 _JIT_MODE = "auto"

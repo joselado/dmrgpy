@@ -3430,7 +3430,12 @@ Three things to set when you use it:
 * `backend.set_pad_bonds(K)` (with `K` your bond dimension) if the script
   does *one* calculation and exits: it makes every tensor shape identical
   so the GPU compiles each kernel once, worth 1.4-3.1x on such a run. Skip
-  it for long sweeps inside one process, where it costs 6-31%.
+  it for long sweeps inside one process, where it costs 6-31%. It pads the
+  state's bonds, never the Hamiltonian's, whose bond dimension does not
+  move. On a *consumer* card skip it above small bond dimension entirely:
+  padding trades arithmetic for shape stability, and where FP64 is
+  1/32-rate the arithmetic is the expensive half (measured on a GTX 1060:
+  a win at maxm=30, 2.6x slower at maxm=120).
 * `backend.set_jit(True)` fuses the engine's hot inner kernels into one
   compiled kernel each, which is what lowers the ~0.35 ms-per-operation
   floor. The default `"auto"` turns it on exactly when `set_pad_bonds` is
