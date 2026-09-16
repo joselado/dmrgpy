@@ -8,7 +8,10 @@ else in the package. Everything is complex128, because pyitensor's ITensor
 is unconditionally complex128 (see pyitensor/tensor.py's docstring); that
 means ZGEMM, i.e. ~4x the real-FLOP count of a same-shape real matmul, so
 the crossover sits at a higher bond dimension than an FP32 ML workload
-would suggest.
+would suggest. `--dtype complex64` re-runs the same shapes in single
+precision -- not a dmrgpy configuration, but the only way to separate "the
+device is slow here" from "this device's FP64 is slow", which is the whole
+question on a consumer card (see set_cdtype below).
 
 The four benchmarked primitives, and why exactly these:
 
@@ -46,6 +49,27 @@ import sys
 import time
 
 
+# ----------------------------------------------------------------- dtype
+
+# The engine is complex128 everywhere (pyitensor/tensor.py), so that is the
+# default and the only setting whose timings describe dmrgpy as it exists.
+# `--dtype complex64` is a *what-if*: a consumer GPU runs FP64 at 1/32 the
+# FP32 rate (GTX 1060: ~138 vs ~4400 GFLOP/s), so on such a card the
+# precision, not the port, is what decides whether the device is usable at
+# all -- and a single number for that gap is worth more than an argument
+# about it. It measures a port dmrgpy does not have; read it as a ceiling
+# on what mixed precision could buy, never as a dmrgpy timing.
+_CDTYPE = "complex128"
+
+
+def set_cdtype(name):
+    global _CDTYPE
+    if name not in ("complex128", "complex64"):
+        raise ValueError("--dtype must be complex128 or complex64, got %r" % name)
+    _CDTYPE = name
+    return _CDTYPE
+
+
 # ---------------------------------------------------------------- backends
 
 class NumpyBackend:
@@ -57,7 +81,7 @@ class NumpyBackend:
         self.device = "cpu:%s" % platform.processor()
 
     def asarray(self, a):
-        return self.xp.asarray(a, dtype=complex)
+        return self.xp.asarray(a, dtype=_CDTYPE)
 
     def sync(self, a):
         """No-op: NumPy is synchronous. Returned so callers can use the
@@ -91,7 +115,7 @@ class JaxBackend:
         self.device = ", ".join(str(d) for d in jax.devices())
 
     def asarray(self, a):
-        return self.xp.asarray(a, dtype=complex)
+        return self.xp.asarray(a, dtype=_CDTYPE)
 
     def sync(self, a):
         """JAX dispatch is asynchronous -- without this every timing here
@@ -143,8 +167,9 @@ class TorchBackend:
         self.xp = _XP()
 
     def asarray(self, a):
-        return self.torch.as_tensor(
-            a, dtype=self.torch.complex128, device=self.dev)
+        tdtype = (self.torch.complex64 if _CDTYPE == "complex64"
+                  else self.torch.complex128)
+        return self.torch.as_tensor(a, dtype=tdtype, device=self.dev)
 
     def sync(self, a):
         if self.dev.type == "cuda":
@@ -190,6 +215,10 @@ BACKENDS = {"numpy": NumpyBackend, "jax": JaxBackend, "torch": TorchBackend,
 
 # ------------------------------------------------------------------- ops
 
+def _itemsize():
+    return 8 if _CDTYPE == "complex64" else 16
+
+
 def _random_complex(rng, shape):
     import numpy as np
     return (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
@@ -226,7 +255,7 @@ def make_matvec(be, chi, d, w, rng):
     def run():
         return compiled(L, theta, W1, W2, R)
 
-    return run, {"theta_mib": (chi * d * d * chi * 16) / 2**20}
+    return run, {"theta_mib": (chi * d * d * chi * _itemsize()) / 2**20}
 
 
 def make_eigh(be, chi, d, w, rng):
@@ -279,7 +308,7 @@ def make_transfer(be, chi, d, w, rng):
         be.sync(dev)
         return be.to_host(dev)
 
-    return run, {"mib": (chi * d * d * chi * 16) / 2**20}
+    return run, {"mib": (chi * d * d * chi * _itemsize()) / 2**20}
 
 
 OPS = {"matvec": make_matvec, "eigh": make_eigh, "svd": make_svd,
@@ -351,8 +380,15 @@ def main():
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--budget", type=float, default=20.0,
                     help="seconds above which one call is the measurement")
+    ap.add_argument("--dtype", default="complex128",
+                    choices=("complex128", "complex64"),
+                    help="element type; complex128 is what dmrgpy uses, "
+                         "complex64 measures the FP32 ceiling on a card "
+                         "with crippled FP64 (see set_cdtype above)")
     ap.add_argument("--json", default=None, help="write raw results here")
     args = ap.parse_args()
+
+    set_cdtype(args.dtype)
 
     chis = [int(c) for c in args.chi.split(",")]
     ops = [o for o in args.ops.split(",") if o]
@@ -363,7 +399,7 @@ def main():
     results = {"meta": {"python": sys.version.split()[0],
                         "platform": platform.platform(),
                         "nvidia_smi": gpu_info(),
-                        "d": args.d, "w": args.w, "chi": chis,
+                        "d": args.d, "w": args.w, "chi": chis, "dtype": args.dtype,
                         "reps": args.reps, "warmup": args.warmup},
                "data": {}}
 
@@ -380,7 +416,8 @@ def main():
             results["data"][bname] = {"unavailable": str(exc)}
             continue
 
-        print("\n=== %s === device: %s" % (bname, be.device))
+        print("\n=== %s === device: %s  dtype: %s"
+              % (bname, be.device, args.dtype))
         results["data"][bname] = {"device": be.device,
                                   "device_bytes": be.free_bytes(), "ops": {}}
         import numpy as np

@@ -491,6 +491,309 @@ Two practical notes:
   `docs/documentation.md`'s section on `pyitensor/fourpoint.py` for why the
   batch axis and `jax.jit` are mutually exclusive here.
 
+## Consumer GPUs: measured on a GTX 1060 laptop
+
+Every other table in this file was measured on an H200 and says so, with a
+warning attached that on a consumer card with 1/32-rate FP64 none of it
+transfers. That warning was an inference, not a measurement, and this
+section is the measurement: **NVIDIA GeForce GTX 1060 Mobile (6 GB,
+Pascal sm_61)** against the **Intel i7-7700HQ** (4 cores / 8 threads,
+AVX2) in the same laptop, jax 0.11.1 on CUDA 13.0, threads pinned
+(`MKL_NUM_THREADS=1 OMP_NUM_THREADS=1`), `taskset` on the CPU runs.
+
+The inference was right about the conclusion and wrong about the reason,
+which matters for deciding what to do about it.
+
+### The port is correct here; that was never the question
+
+All 17 tests in `tests/test_pyitensor_gpu_backend.py` and
+`tests/test_metts_gpu_backend.py` pass on the CUDA device, and end to end
+the device reproduces the host *exactly*: ground-state energies agree to
+all 10 printed digits at every bond dimension in the sweep below
+(-13.8771534902, -13.8811961948, -13.8813580417, -13.8813610754,
+-13.8813610980), and the KPM sum rule lands on 0.250000 (error 3.4e-07)
+on both. Nothing about a consumer card makes the port less faithful. What
+it changes is whether running it is worth doing.
+
+### The GPU is not dispatch-bound here -- it is FP64-bound
+
+This is the finding that separates this card from an H200, and it inverts
+the advice in the rest of this file. Achieved GFLOP/s on the two-site
+matvec (`benchmarks/gpu/gpu_microbench.py`, complex128, median of 5):
+
+| chi | CPU 1 core | CPU 4 threads | GPU | GPU, complex64 |
+|---|---|---|---|---|
+| 128 | 33.1 | 60.8 | 92.8 | 896.8 |
+| 256 | 41.0 | 90.4 | 122.6 | 1757.5 |
+| 512 | 44.2 | 115.8 | 120.2 | 2513.9 |
+| 1024 | 45.9 | 127.8 | 99.0 | 2990.4 |
+
+The GTX 1060's FP64 peak is ~138 GFLOP/s (1/32 of its ~4.4 TFLOP/s FP32);
+the i7-7700HQ's is ~218 GFLOP/s. The GPU column reaches **123 GFLOP/s,
+89% of its own FP64 ceiling** -- it is flat out, with no headroom a
+dispatch or scheduling fix could recover, while the CPU column reaches
+59% of its ceiling. The `complex64` column is the proof: the same
+kernel in single precision is **30.2x faster at chi=1024**, which is
+this card's 1/32 FP64:FP32 ratio almost exactly. (That column is a
+what-if -- the engine is complex128 throughout, see
+`pyitensor/tensor.py` -- produced by `gpu_microbench.py --dtype
+complex64`. Read it as a ceiling on what a mixed-precision port could
+buy on such a card, not as a dmrgpy timing.)
+
+So on this hardware the H200 story runs backwards. There, the device had
+enormous arithmetic throughput and the whole problem was feeding it, so
+every lever was about dispatch: pad the bonds, jit the composites, keep
+arrays resident. Here the arithmetic throughput *is* the wall, the
+per-call speedups stop growing with chi instead of climbing without
+bound, and the ratios below are ceilings rather than lower bounds.
+
+Per-call primitive ratios (GPU vs CPU, complex128) make the same point:
+
+| operation | chi=128 | chi=256 | chi=512 | chi=1024 |
+|---|---|---|---|---|
+| matvec, vs 1 core | 2.80x | 2.99x | 2.72x | 2.16x |
+| matvec, vs 4 threads | 1.53x | 1.36x | 1.04x | **0.78x** |
+| `eigh`, vs 1 core | 1.01x | 1.73x | 3.73x | 3.85x |
+| `svd`, vs 1 core | **0.10x** | **0.09x** | **0.09x** | **0.49x** |
+| `qr`, vs 1 core | 0.79x | 1.21x | 1.85x | 1.92x |
+
+The matvec row is the one to read: on an H200 it goes 5.5x -> 688x across
+this range, here it *peaks at chi=256 and falls*. Against the whole CPU
+it is already losing by chi=1024. `svd` is a rout at every size, an
+order of magnitude worse -- which makes `svd.py`'s existing preference for
+the Gram+`eigh` route load-bearing on this hardware rather than merely
+nice.
+
+### End to end: 3-leg ladder, n=24, warm seconds
+
+`benchmarks/gpu/port_speedup.py --model ladder3 --n 24 --reps 2`. The GPU
+column is the better of the two device configurations at each size
+(padded+jitted up to maxm=30, eager above it -- see the padding note
+below); the energies are identical across all four columns.
+
+| maxm | CPU 1 core | CPU 4 threads | GPU | GPU vs 1 core | GPU vs 4 threads |
+|---|---|---|---|---|---|
+| 30 | 2.28 | 1.46 | 14.96 | 0.15x | 0.10x |
+| 60 | 6.77 | 3.96 | 19.67 | 0.34x | 0.20x |
+| 120 | 19.05 | 9.72 | 25.46 | 0.75x | 0.38x |
+| 240 | 53.23 | 24.12 | 38.40 | **1.39x** | 0.63x |
+| 360 | 93.08 | 41.92 | 76.79 | **1.21x** | 0.55x |
+
+KPM dynamical correlator (n=16, kpmmaxm=40): 61.4 s on one core, 39.2 s on
+four, **898 s cold on the device** -- 15x slower than one core, and the
+calculation this file's H200 table has winning by 3.3x at kpmmaxm=160.
+KPM issues thousands of small operations, so it is the worst case for a
+card that is slow per FLOP *and* pays a dispatch floor.
+
+Three things to take from the ground-state table:
+
+* **The crossover against one core is maxm ~ 180**, not the chi ~ 120-160
+  quoted elsewhere here -- close, but reached for a different reason, and
+  it is a *peak* rather than a threshold: 1.39x at maxm=240 falls to 1.21x
+  at 360, because the GPU is already at its FP64 ceiling while the CPU
+  still has cache to lose. On an H200 the same column climbs to 20x.
+* **Against the whole CPU there is no crossover in this range at all.**
+  0.63x is the best cell in the last column. A laptop user does not run
+  one core -- so on this machine the honest summary is that the GPU never
+  wins a ground state, and the one-core column is there to show where the
+  crossover *would* be if it did.
+* **The 4-thread column is not free either.** Below maxm ~ 120 it is the
+  BLAS-oversubscription case `CLAUDE.md` warns about; measured on a
+  contaminated first pass (a leftover device job holding a core) the same
+  4-thread sweep read 17.9 s at maxm=30 against 1.46 s clean, i.e. 12x.
+  Kill everything else before timing on a 4-core laptop; the numbers above
+  are from a re-run on an idle machine.
+
+### `set_pad_bonds` used to pad the Hamiltonian MPO too (fixed)
+
+Found here because 6 GB is small enough to turn a constant factor into a
+hard failure. `mpobuilder.to_mpo` compresses the finite-state machine with
+the same `position()`/`svd()` every MPS sweep uses, so `set_pad_bonds(K)`
+padded the *operator's* bonds along with the state's: measured on a
+12-site next-nearest-neighbour spin chain, `set_pad_bonds(60)` took the
+Hamiltonian MPO from bond dimension 8 to 60.
+
+That is not a small tax. The MPO bond `w` is a linear factor in the
+two-site matvec's dominant O(chi^3 d^2 w) term and in every environment
+tensor, and padding cannot buy anything back here, because an operator's
+bonds never move -- it is built once and keeps its shape for the whole
+run, so there was no shape churn to collapse. On this card it produced a
+single 1.77 GiB allocation the allocator could not serve; XLA fell back to
+a slower plan and a padded `maxm=60` ground state did not finish in 40
+minutes, against 6.8 s on one CPU core. The same padding on an H200 is an
+invisible constant factor, which is why it survived the original port.
+
+`mpscontainer._Chain._pad_bonds` (True on `MPS`, False on `MPO`) now
+exempts operators, via `backend.pad_bonds_suspended`. MPS bonds are still
+frozen at K, which is what padding is for. Measured effect on this card,
+same ladder3 ground state, padded configuration:
+
+| maxm | before | after | peak device memory |
+|---|---|---|---|
+| 30 | 27.52 s | **14.96 s** | 4810 -> 1304 MiB |
+| 60 | did not finish (>40 min) | **23.40 s** | OOM -> fits |
+
+Energies are unchanged (identical to 10 digits), which is the claim the
+change rests on: it removes arithmetic on blocks that were known zeros.
+`tests/test_pad_bonds_mpo_exemption.py` pins it, on the host, where it
+needs no GPU to check.
+
+Note what the fixed padding does *not* do here: it wins at maxm=30 and
+loses above it (65.9 s padded against 25.5 s eager at maxm=120, 281 s
+against 38.4 s at maxm=240). Padding trades real arithmetic for shape
+stability, and on a card this slow per FLOP the arithmetic is the
+expensive half. **On a consumer GPU, pad only at small bond dimension**;
+the opposite of the advice for an H200.
+
+### The operating rule for a consumer card
+
+Use the CPU. Concretely: on a 6 GB Pascal laptop the pure-Python engine is
+faster on the host for every ground state up to at least maxm=360 and for
+every KPM correlator, and the device's one-core crossover at maxm ~ 180
+does not survive contact with the other three cores. A card with real
+FP64 (V100/A100/H100/H200 class, 1/2-rate) is a different machine and the
+rest of this file applies to it.
+
+### Single precision does not rescue it (measured)
+
+The `complex64` column above prices the *arithmetic* at ~30x, so the
+obvious follow-up is to run the engine in single precision. It was tried
+directly, with a temporary dtype switch in `backend.py`'s three array
+constructors (`asarray`/`zeros`/`eye`), and it fails at every level that
+matters:
+
+| test | complex128 | complex64 |
+|---|---|---|
+| n=8 Heisenberg, full bond dimension (no truncation), error vs ED | 1.1e-14 | 3.1e-7 |
+| n=16 Heisenberg, maxm=40, E0 | -6.911737 | -6.906817 (error 4.9e-3) |
+| ladder3 n=24 maxm=120, host | E0 -13.8813580417 | **crash**: `SVD did not converge` |
+| ladder3 n=24 maxm=120, GPU | E0 -13.8813580417, 24.7 s warm | **E0 = -20297.4**, 1628 s warm |
+
+Read the rows in order, because each one fails in a different way:
+
+* **Without truncation the floor is ~3e-7** -- float32 rounding, what
+  anyone would expect, and on its own a usable if unimpressive accuracy.
+* **With truncation it is four orders of magnitude worse.** `svd.py`'s
+  Gram route diagonalizes `M M^dag`, i.e. the *squared* spectrum, so in
+  float32 (eps ~ 1.2e-7) singular values below ~sqrt(eps) ~ 3.5e-4 are not
+  resolved at all -- which is exactly where a truncation decision lives.
+  The Lanczos tolerances (1e-12, and VUMPS's `residual_tol`) are likewise
+  below what float32 can represent, so no solve can meet its own
+  stopping criterion.
+* **At a size worth putting on a device it diverges.** An energy of
+  -20297 on a 24-site spin-1/2 ladder is not a poor answer but an
+  impossible one -- the Lanczos basis loses orthogonality and the Rayleigh
+  quotient runs away -- and **nothing raises**. On the host the same
+  calculation at least dies loudly inside LAPACK.
+* **It is 66x *slower* on the GPU, not 30x faster.** With the numerics
+  broken every local solve runs to its iteration cap and the truncation
+  keeps landing on the exact-`svd` fallback, which is the one primitive
+  this card is worst at (0.09x against one CPU core, table above). The
+  30x lives in the matvec; the engine stops being matvec-dominated the
+  moment it stops converging.
+
+So the switch was removed again rather than kept as an experimental knob:
+a setting that returns -20297 without an error is a trap, not an option.
+What single precision would actually require is genuine *mixed*
+precision -- float32 only inside the two-site matvec, with the Lanczos
+recurrence and reorthogonalization, the Gram/SVD truncation and every
+reported quantity kept in float64 -- and that is a research port with an
+unmeasured payoff, not a dtype flag. On this laptop it would also be
+competing against a CPU that already wins.
+
+## Device compatibility, calculation by calculation
+
+Everything above is about *speed*. This section is about whether a
+calculation runs on the JAX backend at all, whether it gives the NumPy
+answer, and whether it really stays on the device -- three separate
+questions, and a calculation can pass the first two and fail the third
+with no visible symptom. Measured 2026-09-16 on the GTX 1060 laptop,
+jax 0.11.1, tiny sizes (the point is coverage, not timing).
+`tests/test_pyitensor_gpu_backend.py` already covered ground states,
+static/KPM/TDZ correlators and TDVP; this sweep covers the rest.
+
+| calculation | runs | vs NumPy (max abs diff) | on the device? |
+|---|---|---|---|
+| bond entanglement entropy | yes | 1.1e-13 | resident |
+| excited states | yes | 4.9e-15 | resident |
+| conserved-sector ground state | yes | 2.0e-14 | resident |
+| `submode="SECTOR"` spectral function | yes | 2.2e-08 | resident |
+| `submode="CVM"` correlator | yes | 8.7e-14 | resident |
+| `submode="TD"` correlator | yes | 5.7e-15 | resident |
+| TEBD evolution | yes | 1.2e-14 | resident |
+| TDVP-GSE evolution | yes | 2.8e-11 | transfers only while bonds grow |
+| four-point tensor, `ctmode="batched"` / `"full"` | yes | 1.6e-15 / 1.9e-15 | resident |
+| MPS algebra (`exponential`, MPO application, `vev(npow=2)`) | yes | 7.3e-08 (see below) | resident |
+| **iDMRG** (energy, `vev`, `correlator`, `local_excitation_gap`) | **no -> fixed** | <1e-12 energy, <4e-10 observables | **per growth step** |
+| VUMPS (energy, `vev`, `correlator`) | yes | 2.5e-16 | **per iteration** |
+| non-Hermitian DMRG (`nhdmrg`) | yes | 3.2e-14 | **per Arnoldi matvec** |
+
+"vs NumPy" is meaningful because NumPy is bit-for-bit deterministic from a
+fixed seed (re-running it gives a difference of exactly 0), so any nonzero
+entry is the device's own roundoff carried through an iterative solve. The
+two largest are not defects. The 7.3e-8 is `gs_energy_fluctuation` alone,
+<H^2>-<H>^2 of a converged state: two ~6.2 numbers cancelling to ~1e-7 on
+*both* backends (9.8e-8 host, 1.7e-7 device), i.e. noise at the precision
+floor of the quantity itself; every other MPS-algebra entry agrees to
+<=4e-12. The 2.2e-8 sits at the per-sector eigensolver's tolerance.
+
+### iDMRG did not run on a device at all (fixed)
+
+`pyitensor/idmrg.py` had never been ported to `backend.py`, and
+`gs_energy()` with `gs_method="idmrg"` raised before its first growth step
+on any device, twice over:
+
+* `np.take(T.array, idx, axis=...)` in `_project_channel`. With an integer
+  `idx` NumPy hands the call to the array's own `.take` method with its own
+  `mode="raise"`, which `jnp.take` does not implement --
+  `NotImplementedError`. Now `bk.xp().take`.
+* `arr[idx] -= shift * arr[src]` in `_subtract_energy_baseline`. JAX arrays
+  are immutable. Now `bk.setblock`, which is the same in-place write on
+  NumPy.
+
+Both are the traps `docs/documentation.md`'s GPU section lists; neither
+changes a NumPy result (216 host iDMRG/infinite-chain tests pass
+unchanged). `tests/test_pyitensor_gpu_compatibility.py` pins the fix --
+it fails with the original `NotImplementedError` without it -- and pins
+the other rows of the table above.
+
+### Running is not the same as staying on the device
+
+A NumPy free function that falls back to `__array__` copies the whole
+tensor to the host and returns the right answer, so nothing in the table's
+first two columns can see it. JAX can:
+`jax.transfer_guard_device_to_host("disallow")` raises at the first
+device-to-host transfer and `"log"` reports every one with its shape. The
+column above comes from running each calculation under that guard with the
+engine's *designed* synchronizations allowed (`backend.to_host`,
+`backend.scalar`, `ITensor.scalar` -- see `backend.py`'s docstring), so
+anything left is a transfer nobody intended. Whether one matters is
+decided by whether it repeats, which is measured by doubling the iteration
+count and counting again:
+
+| calculation | undesigned transfers, 1x -> 2x iterations | what moves |
+|---|---|---|
+| TDVP-GSE (nt 10 -> 20) | 57 -> 57 | `gse.py`'s companion density matrix, only while bonds are still growing |
+| iDMRG (20 -> 40 growth steps) | 159 -> 319 | site tensors (chi,d,chi), the chi x chi singular-value matrix, flat two-site Krylov vectors |
+| VUMPS (15 -> 30 iterations) | 6,556 -> 13,573 | `C`/`AC` blocks, into host-side eigensolvers |
+| NH-DMRG (4 -> 8 sweeps) | 13,734 -> 25,038 | flat two-site vectors, once per Arnoldi matvec |
+
+TDVP-GSE is effectively resident: its count does not grow with the time
+step count, because `_gse_bond_step` only expands while the bond dimension
+has room to grow (it becomes a per-step cost again only in a run whose
+bonds never saturate). The other three are correct on a device but are
+**not device calculations**: every iteration ships O(chi^2 d^2) data across
+the bus and back, which is the per-call pattern this file's transfer table
+shows losing to the host above chi ~ 64 however fast the device is. The
+origin is design, not a slip: NH-DMRG's `_arnoldi_smallest_real` is written
+over flat host NumPy vectors on purpose (its docstring says so), exactly as
+`tdvp.py`'s Krylov propagator was before its 2026-08-26 port; iDMRG and
+VUMPS lean on SciPy/ARPACK eigensolvers, which only take host arrays. Each
+would need the same kind of port the Krylov propagator got. None is
+pressing on a consumer card, where the device loses anyway -- but on a
+data-centre GPU, do not expect `gs_method="idmrg"`/`"vumps"` or `nhdmrg`
+to speed up on the device until that port exists.
+
 ## A trap that produced a completely wrong conclusion
 
 **Do not benchmark a ground state on a uniform 1D Heisenberg chain.** Its
@@ -533,3 +836,9 @@ dimension each model actually needs:
   clean and the profiled time so the distortion is visible.
 * Sanity-check any GPU number with the site's job-accounting tool: a
   "GPU" run that never touched the device shows 0% utilization.
+* Utilization is not enough to show a calculation *stays* on the device.
+  Run it under `jax.transfer_guard_device_to_host("log")` with
+  `backend.to_host`/`backend.scalar`/`ITensor.scalar` wrapped in
+  `"allow"`, and count the log lines at two iteration counts: a number
+  that doubles is a per-iteration round trip (see the
+  device-compatibility section).
