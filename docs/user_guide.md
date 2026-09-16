@@ -3425,6 +3425,15 @@ fit: entanglement grows with time, so bond dimension climbs into the
 paying range by construction, while a 1D ground state's does not (see the
 warning at the end of this section).
 
+So do excited states, conserved-sector ground states, entanglement
+entropies, TEBD, TDVP-GSE, the four-point correlation tensor, and the
+`"CVM"`/`"SECTOR"` correlators -- each checked against the NumPy result.
+Three more **run and give the same answer but do not stay on the device**:
+infinite chains (`gs_method="idmrg"` and `"vumps"`) and non-Hermitian DMRG
+(`nhdmrg`) move data to the host on every iteration, so do not expect them
+to get faster on a GPU (see `docs/gpu_cpu_performance.md`'s
+device-compatibility section).
+
 Three things to set when you use it:
 
 * `backend.set_pad_bonds(K)` (with `K` your bond dimension) if the script

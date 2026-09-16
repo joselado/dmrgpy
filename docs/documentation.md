@@ -5229,10 +5229,28 @@ per call loses however fast the device is. Consequently:
 
 Three places did need explicit work, and each is a trap worth knowing:
 
-* **`np.transpose(arr, perm)` and friends silently transfer.** JAX arrays
-  implement no `__array_function__`, so a NumPy free function falls back
-  to `__array__` and copies the whole tensor to the host -- per call, with
-  no error. `kernels.py`'s planned matvec used exactly this. Use methods.
+* **NumPy free functions on a device array are a trap -- and not one
+  trap but three, depending on the function.** JAX arrays implement no
+  `__array_function__`. What happens instead is decided per function,
+  measured with NumPy 2.5.3 / JAX 0.11.1 (2026-09-16): functions NumPy
+  implements by calling the object's own same-named method
+  (`np.transpose`, `np.reshape`) *stay on the device*; functions it
+  implements itself (`np.einsum`, `np.diag`, `np.linalg.norm`) fall back
+  to `__array__` and **silently copy the whole tensor to the host**, per
+  call, with no error; and `np.take` does either, by argument -- a list
+  index copies to the host, while an integer index reaches the method
+  with NumPy's own `mode="raise"`, which `jnp.take` does not implement,
+  and **raises**. That last case is what kept `idmrg.py` (never ported
+  to this module) from running on any device until it was switched to
+  `bk.xp().take`. Which bucket a function lands in is an implementation
+  detail of NumPy that can move between versions -- `kernels.py`'s
+  planned matvec was recorded silently transferring through
+  `np.transpose` on the NumPy/JAX pair the port was built with, which
+  the versions above no longer do -- so the rule does not
+  change: use ndarray methods or `backend.xp()`, never `np.<fn>` on
+  tensor data. `jax.transfer_guard_device_to_host("disallow")` is how to
+  check a calculation for the silent kind (see
+  `docs/gpu_cpu_performance.md`'s device-compatibility section).
 * **JAX arrays are immutable**, so `mpsalgebra.py`'s direct-sum block
   write goes through `backend.setblock`, which mutates in place on NumPy
   and returns a new array on JAX. Callers must use the return value.

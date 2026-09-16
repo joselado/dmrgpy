@@ -180,6 +180,7 @@ per-unit-cell transfer operator) -- see `onsite_expectation`/
 
 import numpy as np
 
+from . import backend as bk
 from . import kernels
 from .dmrg import _lanczos_ground_state
 from .index import Index
@@ -621,7 +622,11 @@ def _project_channel(T, side, idx):
     ambiguity entirely."""
     axis = 0 if side == "left" else -1
     new_inds = T.inds[1:] if side == "left" else T.inds[:-1]
-    new_array = np.take(T.array, idx, axis=axis)
+    # The backend's own take, not np.take: on a device array NumPy forwards
+    # the call to jnp.take with NumPy's default mode="raise", which JAX
+    # does not implement, so iDMRG failed before its first growth step on
+    # any device. idx is always in range here, so the modes agree.
+    new_array = bk.xp().take(T.array, idx, axis=axis)
     return ITensor(new_inds, new_array)
 
 
@@ -909,7 +914,9 @@ def _subtract_energy_baseline(env, mpo_idx, dst_chan, src_chan, shift):
     dst = [slice(None)] * arr.ndim
     src = [slice(None)] * arr.ndim
     dst[axis], src[axis] = dst_chan, src_chan
-    arr[tuple(dst)] -= shift * arr[tuple(src)]
+    # backend.setblock rather than `-=`: JAX arrays are immutable, so an
+    # in-place update raised on a device (NumPy: identical, in place).
+    arr = bk.setblock(arr, tuple(dst), arr[tuple(dst)] - shift * arr[tuple(src)])
     return ITensor(env.inds, arr)
 
 

@@ -4837,6 +4837,16 @@ is the natural fit: entanglement grows with time, so bond dimension
 climbs into the paying range by construction, while a 1D ground state's
 does not (see the warning at the end of this section).
 
+So do excited states, conserved-sector ground states, entanglement
+entropies, TEBD, TDVP-GSE, the four-point correlation tensor, and the
+\texttt{"CVM"}/\texttt{"SECTOR"} correlators --- each checked against the
+NumPy result. Three more \textbf{run and give the same answer but do not
+stay on the device}: infinite chains (\texttt{gs\_method="idmrg"} and
+\texttt{"vumps"}) and non-Hermitian DMRG (\texttt{nhdmrg}) move data to
+the host on every iteration, so do not expect them to get faster on a GPU
+(see \texttt{docs/gpu\_cpu\_performance.md}'s device-compatibility
+section).
+
 Three things to set when you use it:
 
 \begin{itemize}
