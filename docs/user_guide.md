@@ -266,7 +266,8 @@ inside the session rather than with a message.
 `exponential(h, wf)` really is $e^{+h}$ on the DMRG backends now, as it
 always was under `mode="ED"`. It was neither before: for a *multi-site*
 `h` — every Hamiltonian-shaped operator, since the symbolic Hermiticity
-test reports `False` for $S^x_iS^x_j+S^y_iS^y_j+S^z_iS^z_j$ — it fell
+test reported `False` for $S^x_iS^x_j+S^y_iS^y_j+S^z_iS^z_j$ back then,
+which it no longer does — it fell
 through to an uncontrolled two-term Taylor truncation (1.5%/16%/247%
 relative error at $z=0.25/0.5/1$ on a 4-site Heisenberg chain under
 `itensor_version="python"`, unbounded in $z$ and compounding if used in
@@ -277,6 +278,19 @@ on an anti-Hermitian argument, i.e. real-time evolution written as
 operator that is neither Hermitian nor anti-Hermitian now raises
 `NotImplementedError` on the DMRG backends instead of printing a warning
 and returning a number; use `mode="ED"` on a small chain for that case.
+
+On the operator itself, `A.simplify()` returns it in canonical form, the
+same operator with every term's factors sorted by site (carrying the sign
+of the fermionic reordering) and equal terms collected, and
+`A.is_hermitian()`, `A.is_antihermitian()` and `A.is_zero()` read the
+answer off that form. Those three are one-sided: `True` is a proof and
+needs no calculation at all, while `False` only means the canonical form
+did not collapse, which a Hermitian operator can survive whenever its
+Hermiticity rests on a same-site identity the operator names do not
+carry ($S^xS^x=1/4$ and the like). When a chain is at hand,
+`sc.is_hermitian(A)` answers the same question without that caveat,
+taking the proof when it lands and probing numerically when it does not,
+which is what `gs_energy()` and `exponential()` gate on.
 
 `trace`, `operator_norm` and `is_zero_operator` take a `MultiOperator`,
 not a compiled `StaticOperator`. On the wavefunction itself,

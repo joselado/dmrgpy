@@ -80,21 +80,31 @@ def test_gs_energy_fluctuation_rejects_npow():
 
 def test_exponential_takes_the_dmrg_path_for_a_two_site_hamiltonian():
     """`mpsalgebra.exponential` gated on the *symbolic*
-    MultiOperator.is_hermitian(), which false-rejects every two-site term
-    (simplify() does not know that get_dagger()'s factor-order reversal
-    is a no-op across sites).  Both branches failed and control fell into
-    an uncontrolled 2-term Taylor truncation: measured 1.5%, 16% and 247%
-    relative error at z = 0.25, 0.5 and 1.0 on this chain.
+    MultiOperator.is_hermitian(), which false-rejected every two-site term
+    (simplify() went through sympy and did not know that get_dagger()'s
+    factor-order reversal is a no-op across sites).  Both branches failed
+    and control fell into an uncontrolled 2-term Taylor truncation:
+    measured 1.5%, 16% and 247% relative error at z = 0.25, 0.5 and 1.0
+    on this chain.
 
     The reference is ED's own exp(z*H) on the same state, which is the
     quantity the user guide documents (`e^{h}|psi>`); note the DMRG path
     additionally computed e^{-z*H} for real z, a sign flip invisible for
     as long as this branch was unreachable.
+
+    The symbolic test itself has since been fixed at the root, by the
+    canonical form in multioperatortk/canonical.py, so it now proves this
+    Hamiltonian Hermitian rather than false-rejecting it -- the assertion
+    below is the reverse of what it was when this test was written, and
+    is kept as the pin on that.  The gate still goes through the chain's
+    own check, which falls back to the numerical probe, because the proof
+    is one-sided and an operator resting on a same-site identity is still
+    not provable (see tests/test_multioperator_canonical.py).
     """
     sc = heisenberg(n=4)
     h = sc.get_hamiltonian()
-    assert not h.is_hermitian()       # the symbolic test still says False...
-    assert sc.is_hermitian(h)         # ...while the numerical one is right
+    assert h.is_hermitian()           # the symbolic test proves it...
+    assert sc.is_hermitian(h)         # ...and the numerical one agrees
     wf = sc.get_gs()
     wf_ed = sc.get_gs(mode="ED")
     for z in [0.25, 0.5, 1.0]:

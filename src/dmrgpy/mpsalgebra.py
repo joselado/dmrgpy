@@ -37,18 +37,18 @@ def exponential(self,h,wf,mode=None,**kwargs):
     """Compute exp(h)|wf>"""
     mode = wavefunction_mode(wf,mode=mode) # solver, see above
     if mode=="DMRG":
-        # Gate on the chain's *numerical* Hermiticity probe, not on
-        # MultiOperator.is_hermitian(). The symbolic test compares
-        # h-h.get_dagger() against 0 after simplify(), which does not
-        # know that get_dagger()'s factor-order reversal is a no-op for
-        # factors living on different sites -- so it reports False for
-        # Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j], the single most common
-        # Hamiltonian shape in this library (the same false negative
-        # infinitechain.py:_check_reach_one documents for its own use).
-        # Both branches then failed and control fell into an
-        # uncontrolled 2-term Taylor truncation with no step
-        # subdivision: 4% wrong at z=1 on a 4-site Heisenberg chain and
-        # unbounded in z.
+        # Gate on the chain's Hermiticity check, which proves what it
+        # can symbolically and probes numerically otherwise, not on
+        # MultiOperator.is_hermitian() alone. The symbolic half is
+        # one-sided by construction (multioperatortk/canonical.py), so a
+        # Hermitian operator it cannot prove would otherwise fail both
+        # branches here and fall into an uncontrolled 2-term Taylor
+        # truncation with no step subdivision: 4% wrong at z=1 on a
+        # 4-site Heisenberg chain and unbounded in z. That was the
+        # behaviour before the canonical form existed, when the symbolic
+        # test could not see that get_dagger()'s factor-order reversal is
+        # a no-op for factors on different sites and so reported False
+        # for Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j] itself.
         if self.is_hermitian(h):
             return exponential_dmrg(self,h,wf,dt=1.0,**kwargs)
         elif self.is_hermitian(1j*h): # i.e. h is anti-Hermitian
@@ -288,7 +288,14 @@ def operator_norm(self,op,ntries=5,simplify=True,mode=None):
 def is_hermitian(self,op):
     """Given a certain operator, check if it is Hermitian.
 
-    This only needs to tell "dh := op-op.get_dagger() is exactly zero"
+    Symbolically first: multioperatortk/canonical.py rewrites
+    op-op.get_dagger() into a canonical form, in which an ordinary
+    Hamiltonian cancels term by term, and that cancellation is a proof,
+    so the numerical probe below never runs for one. It is one-sided
+    (see that module's docstring), so a failure to cancel falls through
+    to the probe rather than being reported as non-Hermitian.
+
+    The probe only needs to tell "dh := op-op.get_dagger() is exactly zero"
     apart from "dh is a genuine nonzero operator" -- it does not need its
     witness wavefunction to be numerically accurate, so building that
     witness (and applying dh to it) at the caller's *production* bond
@@ -309,6 +316,9 @@ def is_hermitian(self,op):
     proof, even before this change). So the witness here is built and
     probed at a small, fixed bond dimension instead of self.maxm,
     restored immediately after via try/finally."""
+    from . import multioperator
+    if isinstance(op,multioperator.MultiOperator) and op.is_hermitian():
+        return True # proven symbolically, no witness needed
     op = op - op.get_dagger()
     old_maxm = self.maxm
     self.maxm = min(old_maxm, 8)

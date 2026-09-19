@@ -24,8 +24,11 @@ def test_fermion_hamiltonian_is_hermitian():
     """A hopping Hamiltonian built as H + H.get_dagger() must be Hermitian.
 
     This exercises get_dagger() (rewritten to avoid its internal O(n^2))
-    together with is_hermitian()'s sympy-based simplify() path, on a
-    genuinely fermionic (not spin) operator.
+    together with is_hermitian()'s canonical-form path
+    (multioperatortk/canonical.py, which replaced a sympy round trip),
+    on a genuinely fermionic (not spin) operator: reordering the two
+    factors of a term across sites carries a sign here, which the spin
+    cases above do not test.
     """
     L = 5
     fc = fermionchain.Fermionic_Chain(L)

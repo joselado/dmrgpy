@@ -318,8 +318,9 @@ Call & Returns \\
 \texttt{exponential(h, wf)} really is $e^{+h}$ on the DMRG backends now,
 as it always was under \texttt{mode="ED"}. It was neither before: for a
 \emph{multi-site} \texttt{h} --- every Hamiltonian-shaped operator,
-since the symbolic Hermiticity test reports \texttt{False} for
-$S^x_iS^x_j+S^y_iS^y_j+S^z_iS^z_j$ --- it fell through to an
+since the symbolic Hermiticity test reported \texttt{False} for
+$S^x_iS^x_j+S^y_iS^y_j+S^z_iS^z_j$ back then, which it no longer does
+--- it fell through to an
 uncontrolled two-term Taylor truncation (1.5\%/16\%/247\% relative error
 at $z=0.25/0.5/1$ on a 4-site Heisenberg chain under
 \texttt{itensor\_version="python"}, unbounded in $z$ and compounding if
@@ -331,6 +332,21 @@ anti-Hermitian argument, i.e.\ real-time evolution written as
 anti-Hermitian now raises \texttt{NotImplementedError} on the DMRG
 backends instead of printing a warning and returning a number; use
 \texttt{mode="ED"} on a small chain for that case.
+
+On the operator itself, \texttt{A.simplify()} returns it in canonical
+form, the same operator with every term's factors sorted by site
+(carrying the sign of the fermionic reordering) and equal terms
+collected, and \texttt{A.is\_hermitian()},
+\texttt{A.is\_antihermitian()} and \texttt{A.is\_zero()} read the answer
+off that form. Those three are one-sided: \texttt{True} is a proof and
+needs no calculation at all, while \texttt{False} only means the
+canonical form did not collapse, which a Hermitian operator can survive
+whenever its Hermiticity rests on a same-site identity the operator
+names do not carry ($S^xS^x=1/4$ and the like). When a chain is at hand,
+\texttt{sc.is\_hermitian(A)} answers the same question without that
+caveat, taking the proof when it lands and probing numerically when it
+does not, which is what \texttt{gs\_energy()} and
+\texttt{exponential()} gate on.
 
 \texttt{trace}, \texttt{operator\_norm} and \texttt{is\_zero\_operator}
 take a \texttt{MultiOperator}, not a compiled \texttt{StaticOperator}. On

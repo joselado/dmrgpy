@@ -24,11 +24,13 @@ requires-python = ">=3.10"
 # numpy>=2.0: reconstruct.py/algebra/kpm.py use np.trapezoid, which replaced
 # np.trapz in numpy 2.0 (np.trapz is fully removed there, not just deprecated).
 # scipy>=1.13.0 and numba>=0.60.0 are the first releases of each that
-# support numpy 2.0; sympy>=1.12 is the version current at the same time.
+# support numpy 2.0. sympy used to be here too, for the round trip
+# MultiOperator.simplify() went through; multioperatortk/canonical.py
+# replaced that with a canonical form written directly on the terms, and
+# nothing imports sympy any more, so the dependency went with it.
 dependencies = [
     "numpy>=2.0",
     "scipy>=1.13.0",
-    "sympy>=1.12",
     "numba>=0.60.0",
 ]
 classifiers = [

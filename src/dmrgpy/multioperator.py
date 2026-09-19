@@ -55,23 +55,45 @@ class MultiOperator():
         self.i += 1 # increase the counter
         self.op.append([c]) # initialize
     def simplify(self):
-        from .multioperatortk import sympymultioperator
-        return sympymultioperator.simplifyMO(self)
+        """Return this operator in canonical form: every term rewritten
+        with its factors sorted by site (picking up the fermionic sign of
+        the reordering, and dropping identity factors), and terms that
+        are then spelled the same collected into one. Same operator,
+        fewer and canonically written terms.
+
+        Unlike the sympy round trip this used to go through, the result
+        is always a MultiOperator, never the plain number 0: ask
+        is_zero() rather than comparing against 0."""
+        from .multioperatortk import canonical
+        return canonical.canonicalize(self)
     def max_op_prod(self):
         """Maximum number of oprators in a product"""
     def get_bandwidth(self,MBO):
         """Get the bandwidth"""
         return MBO.bandwidth(self)
     def is_hermitian(self):
-        """Check if an operator is hermitian"""
-        dh = self - self.get_dagger() ; dh = dh.simplify()
-        return dh==0
+        """Check if this operator is Hermitian.
+
+        The test is symbolic and one-sided: True is a proof, while False
+        only means the canonical form of self-self.get_dagger() did not
+        collapse, which an operator can survive and still be Hermitian
+        through a same-site identity the names do not carry (Sx Sx = 1/4
+        and the like). See multioperatortk/canonical.py. When a chain is
+        at hand, Many_Body_Chain.is_hermitian() answers the same question
+        without that caveat, taking this proof when it succeeds and
+        probing numerically when it does not."""
+        from .multioperatortk import canonical
+        return canonical.is_hermitian(self)
     def is_antihermitian(self):
-        """Check if an operator is antiHermitian"""
-        dh = self + self.get_dagger() ; dh = dh.simplify()
-        return dh==0
+        """Check if this operator is anti-Hermitian, one-sided in the
+        same way is_hermitian() is"""
+        from .multioperatortk import canonical
+        return canonical.is_antihermitian(self)
     def is_zero(self):
-        return self.simplify()==0
+        """Check if this operator is zero, one-sided in the same way
+        is_hermitian() is"""
+        from .multioperatortk import canonical
+        return canonical.is_zero(self)
     def copy(self):
         """Return a cheap copy of this operator.
 

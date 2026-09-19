@@ -506,8 +506,40 @@ representation: the *same* `MultiOperator` is later either
 - converted to a sparse matrix via `multioperator.MO2matrix` for the ED backend (`edtk/edchain.py`).
 
 `multioperatortk/` holds supporting machinery (Jordan-Wigner strings for
-fermionic operators, static/long-range operator construction, sympy-based
-symbolic building).
+fermionic operators, static/long-range operator construction, the
+canonical form below).
+
+**Canonical form and the Hermiticity proof.**
+`multioperatortk/canonical.py` rewrites every term into one spelling --
+factors sorted by site (stable, so same-site factors keep their order),
+the coefficient carrying the sign of every fermionic exchange the sort
+makes, identity factors dropped -- so that terms which are the same
+operator have the same signature and collect in a dict.
+`MultiOperator.simplify()`/`is_zero()`/`is_hermitian()`/
+`is_antihermitian()` all read off it. It replaced a sympy round trip
+(`sympymultioperator.py`, deleted with it, taking sympy out of the
+dependencies), which mapped each factor to a non-commutative `Symbol`
+and so collected
+only terms already spelled identically: it took 0.834 s on an n=20
+spin-1/2 chain to report `False` for an ordinary Heisenberg
+Hamiltonian, the false negative `mpsalgebra.exponential` and
+`infinitechain.set_hamiltonian` both carry comments about. That chain is
+now proven Hermitian in 0.5 ms.
+The rewrite is exact, so the proof is **one-sided**: an empty canonical
+form of `H-H^dagger` means Hermitian, full stop, while a nonempty one
+means *not proven*, since a same-site identity (`Sx Sx = 1/4`) or a name
+alias (`Sp = Sx + i Sy`, `Sz = (Nup-Ndn)/2`) needs the site type, which
+lives on the chain and not on the operator. So `Many_Body_Chain.
+is_hermitian()` takes the proof when it lands and falls back to its
+random-witness probe otherwise -- do not turn that fallback into a
+rejection. Only the names in `canonical.py`'s `_PARITY` table are
+reordered; anything else (parafermionic `Sig`/`Tau`, which reorders with
+a Z_n phase, or a caller's own name) is left spelled as written, and the
+Hermiticity proof refuses outright when any name is off the table, since
+`get_dagger()` leaves an unrecognized name untouched and such an
+operator would otherwise cancel against its own "dagger". See
+`docs/documentation.md` 4.2a, `tests/test_multioperator_canonical.py`
+and `examples/algebra/operator_canonical_form`.
 
 ### Backend dispatch (DMRG vs ED, C++ vs Julia)
 

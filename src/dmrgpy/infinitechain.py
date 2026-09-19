@@ -554,16 +554,19 @@ class Infinite_Many_Body_Chain:
         # MultiOperator.is_hermitian() and routes a non-Hermitian
         # Hamiltonian to a dedicated NH-DMRG solver instead -- a real gap
         # for this module. A symbolic is_hermitian() check was tried here
-        # and reverted: confirmed directly (also on an ordinary *finite*
-        # Spin_Chain, so this is a pre-existing, general limitation, not
-        # specific to this module) that is_hermitian()'s simplify() step
-        # does not recognize that reversing a product of operators on
+        # and reverted, back when simplify() went through sympy and did
+        # not recognize that reversing a product of operators on
         # *different* sites (as get_dagger() does) gives an equivalent
-        # term to the un-reversed original, so it false-rejects an
-        # ordinary Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j] Heisenberg term --
+        # term to the un-reversed original, so it false-rejected an
+        # ordinary Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j] Heisenberg term,
         # the single most common Hamiltonian shape this module exists to
-        # support. Left as a known, documented gap rather than shipping
-        # that regression.
+        # support. multioperatortk/canonical.py fixed that root cause and
+        # such a term is now proven Hermitian, but the check stays out:
+        # the proof is one-sided (see that module's docstring), a
+        # Hermitian operator resting on a same-site identity is still not
+        # provable, and this module has no numerical witness of its own
+        # to fall back on, so gating on it would raise on a legitimate
+        # Hamiltonian. Left as a known, documented gap.
         h = multioperator.obj2MO(h)
         self._h_intra, self._h_inter = _canonicalize_hamiltonian(h, self.n_uc)
         # How far, in unit cells, the longest-ranged term reaches past the

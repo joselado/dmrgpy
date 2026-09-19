@@ -76,7 +76,7 @@ def name2MO(name,self):
     elif name=="Sz": return self.Sz
     # Sp/Sm have no native backend operator name (unlike Sx/Sy/Sz), so build
     # them from Sx/Sy on the fly: S+ = Sx + i*Sy, S- = Sx - i*Sy (matching
-    # the Sp<->Sm dagger convention in multioperator.py/sympymultioperator.py)
+    # the Sp<->Sm dagger convention in multioperator.py's _dagger_name)
     elif name=="Sp": return [self.Sx[i]+1j*self.Sy[i] for i in range(self.ns)]
     elif name=="Sm": return [self.Sx[i]-1j*self.Sy[i] for i in range(self.ns)]
     else:

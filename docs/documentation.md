@@ -1857,12 +1857,16 @@ full`/`_scaled_hamiltonian`) an ordinary finite `Spin_Chain`/
 get_dynamical_correlator` is called directly rather than through the
 usual public `Many_Body_Chain.get_dynamical_correlator`/`dynamics.
 get_dynamical_correlator` dispatch, to sidestep `dynamics.py`'s own
-`is_hermitian()` gate — confirmed (this is `set_hamiltonian`'s own
-already-documented gap, not a new finding) that `is_hermitian()`'s
-`simplify()` step false-rejects an ordinary cross-site
-`Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j]`-style term as non-Hermitian, which
-would otherwise misroute a perfectly ordinary Heisenberg-type window
-Hamiltonian to the non-Hermitian KPM/dynamics path.
+`is_hermitian()` gate — confirmed, at the time (this was
+`set_hamiltonian`'s own already-documented gap, not a new finding), that
+`is_hermitian()`'s `simplify()` step false-rejected an ordinary
+cross-site `Sx[i]*Sx[j]+Sy[i]*Sy[j]+Sz[i]*Sz[j]`-style term as
+non-Hermitian, which would have misrouted a perfectly ordinary
+Heisenberg-type window Hamiltonian to the non-Hermitian KPM/dynamics
+path. The canonical form (§4.2a) has since fixed that at the root, so
+such a term is now proven Hermitian and the gate would pass it; the
+direct call is kept because it is the shorter route to the same place,
+not because the gate is still wrong.
 
 Correctness of the term-tiling itself (as opposed to the pre-existing,
 independently-tested KPM math it feeds into) is checked in `tests/
@@ -2339,7 +2343,8 @@ representation: the *same* `MultiOperator` is later either
 
 `multioperatortk/` holds the supporting machinery: Jordan-Wigner string
 threading for fermionic operators, static/long-range operator
-construction, and sympy-based symbolic building. Spinless fermionic
+construction, and the canonical form described in the next section.
+Spinless fermionic
 operators (`C`/`Cdag`, one fermionic mode per site, `Fermionic_Chain`/
 `Spinful_Fermionic_Chain`'s interleaved sites) are threaded by
 `jordanwigner.py`; flavor-resolved operators on a native spinful site
@@ -2352,6 +2357,67 @@ uses the generic per-factor dressing recipe (no separate optimized
 2-/4-point path the way `jordanwigner.py` has for plain `C`/`Cdag`),
 since that recipe is already exact for an arbitrary product/order of
 factors — see its module docstring.
+
+### 4.2a Canonical form, and what it proves
+
+A term is a coefficient times an ordered product of named single-site
+operators, and nothing in `multioperator.py` knows that two terms
+spelling the same product in a different factor order are the same
+operator: terms are collected and cancelled by their literal spelling.
+`multioperatortk/canonical.py` is what closes that gap. It rewrites
+every term into one canonical spelling, factors sorted by site with a
+stable sort, so factors sharing a site keep the order they were written
+in, the coefficient picking up a minus sign for every pair of fermionic
+factors the sort exchanges, and identity factors dropped, after which
+terms that are equal have equal signatures and are collected in a dict.
+`MultiOperator.simplify()` returns exactly that, and `is_zero()`,
+`is_hermitian()` and `is_antihermitian()` are read off it.
+
+This replaced a sympy round trip (`sympymultioperator.py`, deleted with
+it, which is what took sympy out of the package's dependencies), which
+mapped each factor to a non-commutative `Symbol` and so carried no
+algebra beyond "these do not
+commute": it collected terms already spelled identically and nothing
+else. Measured on an n=20 spin-1/2 chain, `MultiOperator.is_hermitian()`
+took 0.834 s to report `False` for an ordinary
+`Sx[i]Sx[j]+Sy[i]Sy[j]+Sz[i]Sz[j]` Heisenberg Hamiltonian, which is the
+false negative `mpsalgebra.exponential` and `infinitechain.
+set_hamiltonian` both carry a comment about. The same chain is now
+proven Hermitian in 0.5 ms, and n=40 in 0.9 ms.
+
+What matters before using it is that the rewrite is exact and therefore
+the proof is one-sided. An empty canonical form of `H - H^dagger` means
+`H` is Hermitian, full stop, and no numerical witness is needed. The
+converse does not hold, because two spellings can be the same operator
+for reasons a `MultiOperator` cannot see:
+
+- same-site identities, `Sx Sx = 1/4` on a spin-1/2 site, `N N = N`, and
+  every other product rule that depends on the local Hilbert space the
+  chain was built with;
+- aliases between names, `Sp = Sx + i Sy`, or `Sz = (Nup-Ndn)/2` on a
+  spinful fermionic site, so one factor is already a sum of others.
+
+Both need the site type, which lives on the chain and not on the
+operator. So `True` means proven and `False` means not proven, and
+`Many_Body_Chain.is_hermitian()` (`mpsalgebra.is_hermitian`) consumes
+it in exactly that spirit: it takes the proof when it lands, which is
+what happens for every ordinary Hamiltonian, and falls back to its
+random-witness probe otherwise. The gain there is correctness rather
+than speed, the probe having already been made cheap by building its
+witness at a small fixed bond dimension: measured on a Heisenberg chain,
+the probe costs 0.010 s to 0.018 s on `itensor_version=3` and 0.041 s to
+0.130 s on `"python"` for n=16 to n=40, against 0.4 ms to 0.9 ms for the
+proof.
+
+Only the operator names dmrgpy itself builds are canonicalized, listed
+in `canonical.py`'s `_PARITY` table together with their grading. A term
+naming anything else, a parafermionic `Sig`/`Tau`, which reorders with a
+Z_n phase rather than a sign, or a name a caller invented, is left
+spelled exactly as it was written and only ever collects with a term
+spelled the same way. Nothing is reordered on a grading the table cannot
+check, and since `get_dagger()` also leaves an unrecognized name
+untouched, such an operator would cancel against its own "dagger": the
+Hermiticity proof refuses outright when any name is off the table.
 
 ### 4.3 Backend dispatch
 
