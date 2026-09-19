@@ -2395,7 +2395,13 @@ for reasons a `MultiOperator` cannot see:
   every other product rule that depends on the local Hilbert space the
   chain was built with;
 - aliases between names, `Sp = Sx + i Sy`, or `Sz = (Nup-Ndn)/2` on a
-  spinful fermionic site, so one factor is already a sum of others.
+  spinful fermionic site, so one factor is already a sum of others;
+- the order of two factors sharing a site, which the sort only
+  canonicalizes when both of them are diagonal (`canonical.py`'s
+  `_DIAGONAL`), since same-site operators do not commute in general and
+  `get_dagger()` reverses their order. `Nup[i]*Ndn[i]`, the Hubbard U
+  term, is diagonal and so is proven, and `Sx[i]*Sz[i]` is deliberately
+  left spelled as written.
 
 Both need the site type, which lives on the chain and not on the
 operator. So `True` means proven and `False` means not proven, and

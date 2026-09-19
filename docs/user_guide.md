@@ -286,8 +286,9 @@ of the fermionic reordering) and equal terms collected, and
 answer off that form. Those three are one-sided: `True` is a proof and
 needs no calculation at all, while `False` only means the canonical form
 did not collapse, which a Hermitian operator can survive whenever its
-Hermiticity rests on a same-site identity the operator names do not
-carry ($S^xS^x=1/4$ and the like). When a chain is at hand,
+Hermiticity rests on something the operator names do not carry, a
+same-site identity ($S^xS^x=1/4$) or two factors on one site commuting
+without both being diagonal. When a chain is at hand,
 `sc.is_hermitian(A)` answers the same question without that caveat,
 taking the proof when it lands and probing numerically when it does not,
 which is what `gs_energy()` and `exponential()` gate on.

@@ -19,8 +19,9 @@ from dmrgpy.multioperator import MultiOperator, MO2matrix
 # reversed partner, which is a proof, so nothing numerical runs at all.
 # The route is one-sided: True means proven, False only means the
 # canonical form did not collapse, which a Hermitian operator can
-# survive when its Hermiticity rests on a same-site identity the
-# operator names do not carry (Sx Sx = 1/4 on a spin-1/2 site).
+# survive when its Hermiticity rests on something the operator names do
+# not carry, a same-site identity (Sx Sx = 1/4 on a spin-1/2 site) or
+# two factors on one site commuting without both being diagonal.
 #
 # The numerical route is the fallback for exactly that case: apply
 # H-H^dagger to a random low-bond-dimension state and look at the norm.
@@ -52,7 +53,6 @@ def time_numerical(sc,h,nrep=5):
     try:
         ts = []
         for i in range(nrep):
-            sc._is_hermitian_cache = None # the chain caches the last answer
             t0 = time.time() ; out = mpsalgebra.is_hermitian(sc,h)
             ts.append(time.time()-t0)
         return min(ts),out

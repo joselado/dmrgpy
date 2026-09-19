@@ -49,9 +49,18 @@ def dynamical_correlator_positive_defined(self,name=None,
         es=np.linspace(-1.0,5.0,400),**kwargs):
     """Return a dynamical correlator that is positive defined"""
     A,B = name[0],name[1]
-    if not (A-B.get_dagger()).is_zero(): 
-        print("Non positive correlator")
-        raise
+    # canonical.is_dagger_pair rather than (A-B.get_dagger()).is_zero():
+    # get_dagger() leaves an operator name it does not recognize exactly
+    # as it found it, so such an operator cancels against its own
+    # "dagger" and passes this test whatever it is, which is the one
+    # thing this test exists to catch. is_dagger_pair refuses instead
+    # when either side names something whose adjoint is unknown.
+    from .multioperatortk import canonical
+    if not canonical.is_dagger_pair(A,B):
+        raise ValueError("dynamical_correlator_positive_defined needs "
+                "name=(A,B) with A = B^dagger, which could not be "
+                "established for this pair: the distribution it "
+                "reconstructs is only positive definite then")
     e0 = self.gs_energy() # ground state energy
     h0 = self.hamiltonian-e0*(1.+0j) # shift Hamiltonian
     wf = self.get_gs() # get ground state

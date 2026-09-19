@@ -292,8 +292,9 @@ def is_hermitian(self,op):
     op-op.get_dagger() into a canonical form, in which an ordinary
     Hamiltonian cancels term by term, and that cancellation is a proof,
     so the numerical probe below never runs for one. It is one-sided
-    (see that module's docstring), so a failure to cancel falls through
-    to the probe rather than being reported as non-Hermitian.
+    (see that module's docstring for the three things it cannot see),
+    so a failure to cancel falls through to the probe rather than being
+    reported as non-Hermitian.
 
     The probe only needs to tell "dh := op-op.get_dagger() is exactly zero"
     apart from "dh is a genuine nonzero operator" -- it does not need its

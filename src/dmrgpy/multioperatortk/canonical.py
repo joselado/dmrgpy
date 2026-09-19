@@ -35,7 +35,12 @@ does not model, so a nonempty canonical form means "not proven", not
   chain was built with, which a MultiOperator does not know;
 - aliases between names, Sp = Sx + i Sy, or Sz = (Nup-Ndn)/2 on a
   spinful fermionic site, so a single factor can already be a sum of
-  other single factors.
+  other single factors;
+- the order of two factors sharing a site, which is only canonicalized
+  when both are diagonal (see _DIAGONAL), since operators on one site do
+  not commute in general and get_dagger() reverses their order. So
+  Nup[i]*Ndn[i], the Hubbard U term, is proven, while a term resting on
+  two non-diagonal same-site factors commuting is not.
 
 Modelling either one needs the site type, which lives on the chain and
 not on the operator. So every prover here is one-sided: True means
@@ -76,6 +81,27 @@ _EVEN = ("Id", "X", "Y", "Z", "Sx", "Sy", "Sz", "Sp", "Sm", "S+", "S-",
          "F", "Fup", "Fdn")
 
 _PARITY = dict([(n, 1) for n in _ODD] + [(n, 0) for n in _EVEN])
+
+
+# Names that are diagonal in their own site's basis, and therefore
+# commute with each other when they share a site. Sorting by site alone
+# leaves a term like Nup[i]*Ndn[i] spelled differently from its own
+# dagger, which reverses the factor order -- that is the Hubbard U term
+# on a native spinful site, so without this the whole Hubbard
+# Hamiltonian is not proven Hermitian even though its hopping part is.
+# Only these names may be reordered within a site: Sx[i] and Sz[i] are
+# both even and do NOT commute, so a general same-site sort would be
+# wrong.
+_DIAGONAL = frozenset(("Id", "Z", "Sz", "N", "density", "Nup", "Ndn",
+                       "Ntot", "F", "Fup", "Fdn"))
+
+
+def is_diagonal(name):
+    """True if this operator is diagonal in its site's own basis, so
+    that it commutes with every other diagonal operator on that site."""
+    if name in _DIAGONAL: return True
+    # boson occupation projectors, diagonal by construction
+    return len(name) > 1 and name[0] == "N" and name[1:].isdigit()
 
 
 def parity(name):
@@ -119,7 +145,26 @@ def _canonical_signature(term):
             if keep[a][0][1] > keep[b][0][1] and keep[a][1] and keep[b][1]:
                 c = -c
     keep.sort(key=lambda fp: fp[0][1]) # stable, so same-site order stands
-    return tuple(f for (f, p) in keep), c
+    return tuple(_sort_diagonal_runs([f for (f, p) in keep])), c
+
+
+def _sort_diagonal_runs(factors):
+    """Given factors already sorted by site, put the ones sharing a site
+    into a canonical order too, but only where every factor on that site
+    is diagonal and they therefore commute. A site carrying anything
+    else keeps the order it was written in."""
+    out = []
+    i = 0
+    n = len(factors)
+    while i < n:
+        j = i
+        while j < n and factors[j][1] == factors[i][1]: j += 1
+        run = factors[i:j]
+        if len(run) > 1 and all(is_diagonal(name) for (name, site) in run):
+            run = sorted(run)
+        out.extend(run)
+        i = j
+    return out
 
 
 def canonical_dict(MO):
@@ -189,3 +234,18 @@ def is_antihermitian(MO):
     proven, see this module's docstring."""
     if not all_names_known(MO): return False
     return is_zero(MO + MO.get_dagger())
+
+
+def is_dagger_pair(A, B):
+    """True if A is provably B^dagger. False means not proven.
+
+    This is is_zero(A-B.get_dagger()) with the same guard is_hermitian()
+    carries, and for the same reason: get_dagger() leaves a name it does
+    not recognize untouched, so an operator built out of such a name
+    would cancel against its own "dagger" and be declared the adjoint of
+    itself. A caller asking this question is asking about adjoints, so
+    it has to refuse when the adjoint is not known, which plain
+    is_zero() (a statement about the operator it is handed, not about
+    anybody's dagger) has no reason to do."""
+    if not (all_names_known(A) and all_names_known(B)): return False
+    return is_zero(A - B.get_dagger())

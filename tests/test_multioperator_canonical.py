@@ -182,3 +182,50 @@ def test_ground_state_energy_is_unchanged(itensor_version):
     sc.set_hamiltonian(h)
     assert sc.gs_energy(mode="DMRG")==pytest.approx(sc.gs_energy(mode="ED"),
             abs=1e-6)
+
+
+def test_hubbard_u_term_is_proven_hermitian():
+    """Nup[i]*Ndn[i] and its dagger differ only in the order of two
+    factors sharing a site, so sorting by site alone left the Hubbard U
+    term, and with it the whole native-spinful Hubbard Hamiltonian,
+    unproven while its hopping part was proven. Both factors are
+    diagonal, hence commuting, so the canonical form orders them too."""
+    fs = fermionchain.Spinful_Fermionic_Chain_Native(3)
+    assert (fs.Nup[0]*fs.Ndn[0]).is_hermitian()
+    h = 0
+    for i in range(2): h = h + fs.Cdagup[i]*fs.Cup[i+1] + fs.Cdagup[i+1]*fs.Cup[i]
+    for i in range(3): h = h + 2.0*fs.Nup[i]*fs.Ndn[i]
+    assert h.is_hermitian()
+    # and the reordering really is an identity, not a convenience
+    fs.set_hamiltonian(h)
+    obj = fs.get_ED_obj()
+    m0 = np.array(MO2matrix(fs.Nup[0]*fs.Ndn[0],obj))
+    m1 = np.array(MO2matrix(fs.Ndn[0]*fs.Nup[0],obj))
+    assert np.max(np.abs(m0-m1))<1e-12
+
+
+def test_non_diagonal_same_site_factors_keep_their_order():
+    """Sx[i] and Sz[i] are both even and do not commute, so a general
+    same-site sort would be wrong: only diagonal factors are ordered."""
+    sc = spinchain.Spin_Chain(["1/2"]*4)
+    term = (sc.Sx[0]*sc.Sz[0]).simplify().op[0]
+    assert [(o[0],o[1]) for o in term[1:]]==[("Sx",0),("Sz",0)]
+    assert not (sc.Sx[0]*sc.Sz[0]-sc.Sz[0]*sc.Sx[0]).is_zero()
+    assert not canonical.is_diagonal("Sx")
+
+
+def test_an_unknown_name_is_never_its_own_adjoint():
+    """get_dagger() leaves a name it does not recognize alone, so such
+    an operator cancels against its own "dagger". is_zero() is a
+    statement about the operator it is handed and says so correctly;
+    the adjoint questions have to refuse, which is what
+    distribution.dynamical_correlator_positive_defined asks."""
+    from dmrgpy import multioperator as mo
+    A = mo.obj2MO([["Foo",0]])
+    assert (A-A.get_dagger()).is_zero() # is_zero is answering literally
+    assert not A.is_hermitian()
+    assert not canonical.is_dagger_pair(A,A)
+    # while a genuine adjoint pair is recognized
+    fc = fermionchain.Fermionic_Chain(4)
+    assert canonical.is_dagger_pair(fc.Cdag[1]*fc.C[2],fc.Cdag[2]*fc.C[1])
+    assert not canonical.is_dagger_pair(fc.Cdag[1]*fc.C[2],fc.Cdag[1]*fc.C[2])

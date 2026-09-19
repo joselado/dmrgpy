@@ -77,8 +77,9 @@ class MultiOperator():
         The test is symbolic and one-sided: True is a proof, while False
         only means the canonical form of self-self.get_dagger() did not
         collapse, which an operator can survive and still be Hermitian
-        through a same-site identity the names do not carry (Sx Sx = 1/4
-        and the like). See multioperatortk/canonical.py. When a chain is
+        through something the names do not carry, a same-site identity
+        (Sx Sx = 1/4) or two factors on one site commuting without both
+        being diagonal. See multioperatortk/canonical.py. When a chain is
         at hand, Many_Body_Chain.is_hermitian() answers the same question
         without that caveat, taking this proof when it succeeds and
         probing numerically when it does not."""

@@ -2636,7 +2636,14 @@ for reasons a \texttt{MultiOperator} cannot see:
     Hilbert space the chain was built with;
   \item aliases between names, $S^+ = S^x + i S^y$, or
     $S^z = (N_\uparrow - N_\downarrow)/2$ on a spinful fermionic site,
-    so one factor is already a sum of others.
+    so one factor is already a sum of others;
+  \item the order of two factors sharing a site, which the sort only
+    canonicalizes when both of them are diagonal
+    (\texttt{canonical.py}'s \texttt{\_DIAGONAL}), since same-site
+    operators do not commute in general and \texttt{get\_dagger()}
+    reverses their order. $N_{\uparrow i}N_{\downarrow i}$, the Hubbard
+    $U$ term, is diagonal and so is proven, and $S^x_i S^z_i$ is
+    deliberately left spelled as written.
 \end{itemize}
 
 Both need the site type, which lives on the chain and not on the

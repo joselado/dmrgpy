@@ -529,7 +529,11 @@ The rewrite is exact, so the proof is **one-sided**: an empty canonical
 form of `H-H^dagger` means Hermitian, full stop, while a nonempty one
 means *not proven*, since a same-site identity (`Sx Sx = 1/4`) or a name
 alias (`Sp = Sx + i Sy`, `Sz = (Nup-Ndn)/2`) needs the site type, which
-lives on the chain and not on the operator. So `Many_Body_Chain.
+lives on the chain and not on the operator. Two factors sharing a site
+are reordered only when both are diagonal (`_DIAGONAL`), which is what
+makes the Hubbard `Nup[i]*Ndn[i]` provable while leaving `Sx[i]*Sz[i]`
+alone -- do NOT widen that to a general same-site sort, those two are
+both even and do not commute. So `Many_Body_Chain.
 is_hermitian()` takes the proof when it lands and falls back to its
 random-witness probe otherwise -- do not turn that fallback into a
 rejection. Only the names in `canonical.py`'s `_PARITY` table are
