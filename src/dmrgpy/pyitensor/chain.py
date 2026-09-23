@@ -1470,7 +1470,15 @@ class Chain:
             scaled_H, emin, emax, scale = self._scaled_hamiltonian_gs_anchored(kpm_scale)
         else:
             scaled_H, emin, emax, scale = self._scaled_hamiltonian(kpm_scale)
-        n = int(round((emax - emin) / delta)) * kpm_n_scale
+        # The calibrated moment count every KPM route in this codebase
+        # shares (algebra/kpm.py::polynomials_for_broadening): 1/scale is
+        # the physical half-width of the interval the spectrum was
+        # rescaled onto, and delta is the same broadening the resolvent
+        # submodes give it, FWHM = 2*delta at the band centre. It used to
+        # be round((emax-emin)/delta)*kpm_n_scale, which came out at about
+        # 1.6*delta instead.
+        from ..algebra.kpm import polynomials_for_broadening
+        n = polynomials_for_broadening(1.0/scale,delta,n_scale=kpm_n_scale)
         m1 = self._mpo(terms_i)
         m2 = self._mpo(terms_j)
         psi1 = self._apply_mpo_with(m1, self.wf0, kpm_cutoff, kpmmaxm)

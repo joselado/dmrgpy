@@ -141,17 +141,44 @@ def get_kpm_emax(chain,m,e0):
 
 def dynamical_correlator_kpm(h,e0,wf0,A,B,chain=None,
         delta=1e-1,es=np.linspace(-1.,10,400)):
+    """Chebyshev (KPM) dynamical correlator against the exact ED
+    Hamiltonian.
+
+    The rescaling and the moment count are the same ones the DMRG routes
+    use (kpmdmrg.py and the backends' own kpm_dynamical_correlator): the
+    spectrum is centred on the middle of the many-body bandwidth and
+    rescaled so that it fills `kpm_scale` of the Chebyshev interval, and
+    the number of moments comes from algebra/kpm.py's
+    polynomials_for_broadening, so that `delta` is the broadening it is
+    everywhere else, FWHM = 2*delta at the band centre.
+
+    Both used to be this route's own: the window was
+    3*max(|E_0|,|E_max-E_0|), three times wider than the bandwidth on a
+    small chain, and the count was 4*int(2*window/delta). The two
+    mistakes partly cancelled, leaving a line 0.90*delta wide against the
+    DMRG route's 1.06*delta and the resolvent submodes' 2*delta, i.e. the
+    same submode name computing a visibly different curve on the two
+    solvers -- open item O2 of the 2026-09 audit, measured there at
+    max|ED-DMRG| = 6.8e-01 against exact peaks of 0.61."""
     A = np.conjugate(A.T)
     vi = B@wf0 # first wavefunction
     vj = A@wf0 # second wavefunction
     from scipy.sparse import identity
-    m = -identity(h.shape[0])*e0+h # matrix to use
-    emax = get_kpm_emax(chain,m,e0) # lowest energy (cached per chain)
-    scale = np.max([np.abs(e0),np.abs(emax)])*3.0
-    n = int(2*scale/delta) # number of polynomials
-    (xs,ys) = kpm.dm_vivj_energy(m,vi,vj,scale=scale,
-                                npol=n*4,ne=n*10,x=es)
-    return xs,np.conjugate(ys)*scale/np.pi # return correlator
+    idm = identity(h.shape[0])
+    m = -idm*e0+h # shifted so the ground state sits at zero
+    width = get_kpm_emax(chain,m,e0) # bandwidth E_max-E_0 (cached per chain)
+    # Many_Body_Chain.get_dynamical_correlator pushes both of these onto
+    # the ED object before dispatching here; the defaults are for an
+    # EDchain driven directly, which no public entry point does.
+    kpm_scale = getattr(chain,"kpm_scale",0.7)
+    n_scale = getattr(chain,"kpm_n_scale",1)
+    half = width*kpm_scale # physical half-width of the rescaled interval
+    npol = kpm.polynomials_for_broadening(half,delta,n_scale=n_scale)
+    mc = m - idm*(width/2.) # centre the band, as the DMRG route does
+    (xs,ys) = kpm.dm_vivj_energy(mc,vi,vj,scale=half,
+                                npol=npol,ne=npol*10,x=es-width/2.)
+    # xs is the centred grid, so the requested energies go back out
+    return es,np.conjugate(ys)*half/np.pi # return correlator
 
 
 

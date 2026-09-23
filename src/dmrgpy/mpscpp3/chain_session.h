@@ -220,6 +220,29 @@ struct VumpsChannelMap
     std::vector<std::vector<Cplx>> pending;
     };
 
+// One momentum's channel resolvent: the regularized (I - phase*T + P)
+// map Chain::vx_regularized_solve solves, kept TOGETHER with its LU
+// factorization so that every solve at that momentum shares one
+// factorization -- C++ analogue of pyitensor idmrg_excitations.
+// _channel_resolvent's own returned solve-callable and of the lu_cache
+// closed over inside it. Plain data, like every other struct here: the
+// building and the solving are Chain::vx_resolvent_build/
+// vx_resolvent_solve, which need Chain's own static transfer helpers.
+// `factored` is false above Chain::vx_resolvent_dense_max_, where no
+// matrix is ever formed and each solve runs matrix-free instead.
+struct VxResolvent
+    {
+    int D = 0;
+    Cplx phase = Cplx(1.0,0.0);
+    bool from_left = true;
+    bool add_projector = false;
+    std::vector<Cplx> E;                  // the transfer tensor T is built on
+    std::vector<Cplx> proj_out, proj_in;  // the phase==1 regularizing projector
+    bool factored = false;
+    std::vector<Cplx> lu;                 // (D*D,D*D) row-major LU factors
+    std::vector<int> piv;
+    };
+
 // Chain::td_dynamical_correlator_window's own return value: S(x,t) =
 // <psi0|A_x exp(-iHt)B_0|psi0> for every t=ts[it], x=xs[ix] -- S is flat
 // row-major, S[it*xs.size()+ix]. The k,omega Fourier transform is done on
@@ -282,6 +305,27 @@ struct IdmrgAutomatonRow
     int p, d, left_n, right_n;
     std::vector<Cplx> flat;
     };
+
+// The Jackson-kernel resolution calibration, the C++ copy of
+// algebra/kpm.py::polynomials_for_broadening (which carries the relation
+// this solves, the measurements behind the constant, and why the floor is
+// there). half_width is the physical half-width of the interval the
+// spectrum was rescaled onto, so that a Chebyshev line comes out at
+// FWHM = 2*delta at the centre of the band, the width the resolvent
+// submodes give for the same delta. The constant is 2*sqrt(2*ln(2))*pi.
+// Both KPM entry points below used to take
+// round((emax-emin)/delta)*kpm_n_scale instead, which is about 1.6*delta,
+// while the ED route took its own third rule -- open item O2 of the
+// 2026-09 audit.
+static inline int kpm_polynomials_for_broadening(double half_width,
+                                                 double delta, int n_scale)
+    {
+    const double jackson_fwhm_factor = 7.3978603334259664;
+    int npol = int(std::round(jackson_fwhm_factor*half_width/(2.0*delta)));
+    npol *= (n_scale>0 ? n_scale : 1);
+    return npol<16 ? 16 : npol;
+    }
+
 
 class Chain
     {
@@ -2592,7 +2636,7 @@ class Chain
         if (!have_H_) Error("Chain::kpm_dynamical_correlator called before set_hamiltonian");
         if (!have_wf0_) gs_energy(); // ensure a ground state is available
         auto hs = scaled_hamiltonian(kpm_scale);
-        int n = int(std::round((hs.emax-hs.emin)/delta))*kpm_n_scale;
+        int n = kpm_polynomials_for_broadening(1.0/hs.scale,delta,kpm_n_scale);
         auto m1 = mpo_from_terms(terms_i);
         auto m2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(m1,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
@@ -2708,7 +2752,7 @@ class Chain
         if (!have_H_) Error("Chain::kpm_dynamical_correlator_truncated called before set_hamiltonian");
         if (!have_wf0_) gs_energy(); // ensure a ground state is available
         auto hs = scaled_hamiltonian_gs_anchored(kpm_scale);
-        int n = int(std::round((hs.emax-hs.emin)/delta))*kpm_n_scale;
+        int n = kpm_polynomials_for_broadening(1.0/hs.scale,delta,kpm_n_scale);
         auto m1 = mpo_from_terms(terms_i);
         auto m2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(m1,wf0_,{"MaxDim",kpmmaxm,"Cutoff",kpm_cutoff});
@@ -3927,10 +3971,19 @@ class Chain
     //
     // Returns the lowest `n` excitation energies (above the ground state)
     // at momentum `k` (radians per unit cell) -- an ordinary (not
-    // generalized) Hermitian eigenproblem of size Dx*D (Dx=D*(d_g-1)),
-    // solved directly via itensor::zheev_wrapper.
+    // generalized) Hermitian eigenproblem of size Dx*D (Dx=D*(d_g-1)).
+    //
+    // Two solvers, picked by that size against `dense_max` (negative, the
+    // default, means vumps_h_eff_dense_max_): assemble H_eff(k) and hand
+    // it to itensor::zheev_wrapper for small ones, Lanczos on
+    // vumps_h_eff_action directly for large ones, falling back to the
+    // dense path whenever the iterative solve does not return `n`
+    // eigenvalues at an acceptable residual. Same split, and the same
+    // thresholds, as pyitensor idmrg_excitations.excitation_energies.
+    // The dense path is not vestigial: Dx*D can legitimately be 1 (a D=1
+    // spin-1/2 chain), where a Krylov method has nothing to iterate on.
     std::vector<double>
-    vumps_excitation_energies(double k, int n)
+    vumps_excitation_energies(double k, int n, int dense_max=-1)
         {
         if (!have_vumps_snapshot_)
             throw ITError("Chain::vumps_excitation_energies: called before "
@@ -3951,18 +4004,31 @@ class Chain
             throw ITError("Chain::vumps_excitation_energies: n must be >= 1");
         if (!have_vumps_exc_env_) vumps_build_excitation_environment();
 
-        auto Hmat = vumps_build_h_eff_dense(k);
         int nH = Dx*D;
-        // Hermitize (H_eff(k) is Hermitian by construction -- this only
-        // cleans up numerical noise, same convention idmrg_excitations.py's
-        // own excitation_energies uses).
-        for (int i=0;i<nH;++i)
-        for (int j=0;j<nH;++j)
+        int cut = (dense_max >= 0) ? dense_max : vumps_h_eff_dense_max_;
+        std::vector<double> evals;
+        if (nH > cut && n < nH)
             {
-            Cplx v = (Hmat[i*nH+j] + std::conj(Hmat[j*nH+i]))/2.0;
-            Hmat[i*nH+j] = v;
+            auto action = [&](std::vector<Cplx> const& x)
+                { return vumps_h_eff_action(k,x); };
+            vx_lanczos_lowest(action,nH,n,vumps_h_eff_lanczos_niter_,
+                               vumps_h_eff_residual_tol_,vumps_h_eff_residual_max_,
+                               evals);
             }
-        auto evals = vx_hermitian_eigvals(Hmat,nH); // ascending
+        if (evals.empty())
+            {
+            auto Hmat = vumps_build_h_eff_dense(k);
+            // Hermitize (H_eff(k) is Hermitian by construction -- this only
+            // cleans up numerical noise, same convention idmrg_excitations.py's
+            // own excitation_energies uses).
+            for (int i=0;i<nH;++i)
+            for (int j=0;j<nH;++j)
+                {
+                Cplx v = (Hmat[i*nH+j] + std::conj(Hmat[j*nH+i]))/2.0;
+                Hmat[i*nH+j] = v;
+                }
+            evals = vx_hermitian_eigvals(Hmat,nH); // ascending
+            }
         int take = std::min(n,(int)evals.size());
         std::vector<double> out(take);
         for (int i=0;i<take;++i) out[i] = evals[i] - vumps_lam_AC_;
@@ -6105,6 +6171,78 @@ class Chain
         return b;
         }
 
+    // LU factorization with partial pivoting of a row-major (n,n) matrix,
+    // in place: the factors overwrite A (unit-diagonal L below, U on and
+    // above the diagonal) and piv[k] records the row swapped into row k.
+    // Together with vx_lu_solve this is scipy's own lu_factor/lu_solve
+    // pair, which is what pyitensor idmrg_excitations._channel_resolvent
+    // caches per momentum.
+    //
+    // zgesv_wrapper cannot do this job: it is LAPACK's factor-and-solve in
+    // one call and its pivot array is a local of the wrapper (see
+    // ITensor's own lapack_wrap.cc), so the factorization cannot be handed
+    // back out and reused across right-hand sides, and ITensor exposes no
+    // zgetrf/zgetrs wrapper to hold one with. Reusing it matters here
+    // because one excitation-ansatz eigensolve asks the SAME map for
+    // hundreds of solves -- see vx_resolvent_build.
+    static void
+    vx_lu_factor(std::vector<Cplx>& A, int n, std::vector<int>& piv)
+        {
+        piv.assign(n,0);
+        for (int k=0;k<n;++k)
+            {
+            int p = k;
+            double best = std::abs(A[(size_t)k*n+k]);
+            for (int i=k+1;i<n;++i)
+                {
+                double v = std::abs(A[(size_t)i*n+k]);
+                if (v > best) { best = v; p = i; }
+                }
+            piv[k] = p;
+            if (!(best > 0.0))
+                throw ITError("Chain::vumps: vx_lu_factor hit an exactly zero pivot -- "
+                               "the regularized environment linear system is singular "
+                               "(a near-critical/gapless transfer spectrum?)");
+            if (p != k)
+                for (int j=0;j<n;++j) std::swap(A[(size_t)k*n+j],A[(size_t)p*n+j]);
+            Cplx d = A[(size_t)k*n+k];
+            for (int i=k+1;i<n;++i)
+                {
+                Cplx m = A[(size_t)i*n+k]/d;
+                A[(size_t)i*n+k] = m;
+                if (m == Cplx(0,0)) continue;
+                for (int j=k+1;j<n;++j) A[(size_t)i*n+j] -= m*A[(size_t)k*n+j];
+                }
+            }
+        }
+
+    // A x = b from vx_lu_factor's own output: the row swaps, then forward
+    // substitution through the unit-diagonal L, then back substitution
+    // through U.
+    static std::vector<Cplx>
+    vx_lu_solve(std::vector<Cplx> const& LU, std::vector<int> const& piv, int n,
+                 std::vector<Cplx> b)
+        {
+        for (int k=0;k<n;++k)
+            {
+            int p = piv[k];
+            if (p != k) std::swap(b[k],b[p]);
+            }
+        for (int i=1;i<n;++i)
+            {
+            Cplx s = b[i];
+            for (int j=0;j<i;++j) s -= LU[(size_t)i*n+j]*b[j];
+            b[i] = s;
+            }
+        for (int i=n-1;i>=0;--i)
+            {
+            Cplx s = b[i];
+            for (int j=i+1;j<n;++j) s -= LU[(size_t)i*n+j]*b[j];
+            b[i] = s/LU[(size_t)i*n+i];
+            }
+        return b;
+        }
+
     // Dense (n,n) matrix (n=D*D) representing a linear map action: (D,D)
     // flat -> (D,D) flat, built one standard basis matrix at a time --
     // same style pyitensor's own _dense_linear_map uses.
@@ -6174,6 +6312,27 @@ class Chain
         return X;
         }
 
+    // (I - phase*T + [projector])[x], the action itself -- written once
+    // here so that the one-shot solve (vx_regularized_solve, right below)
+    // and the cached resolvent (vx_resolvent_build/vx_resolvent_solve,
+    // below that) can never drift apart. See vx_regularized_solve's own
+    // comment for what the projector is for and when it is armed.
+    static std::vector<Cplx>
+    vx_regularized_action(int D, Cplx phase, std::vector<Cplx> const& E, bool from_left,
+                           bool add_projector, std::vector<Cplx> const& proj_out,
+                           std::vector<Cplx> const& proj_in, std::vector<Cplx> const& x)
+        {
+        auto Tx = from_left ? vx_apply_transfer_from_left(E,D,x) : vx_apply_transfer(E,D,x);
+        std::vector<Cplx> out((size_t)D*D);
+        for (int k=0;k<D*D;++k) out[k] = x[k] - phase*Tx[k];
+        if (add_projector)
+            {
+            Cplx s = vx_trace_conjA_X(proj_in,x,D);
+            for (int k=0;k<D*D;++k) out[k] += proj_out[k]*s;
+            }
+        return out;
+        }
+
     // The regularized (I - phase*T + [projector]) linear solve shared by
     // pyitensor's own _solve_left_environment/_solve_right_environment
     // (VUMPS's own GL/GR) AND idmrg_excitations._channel_resolvent
@@ -6194,15 +6353,8 @@ class Chain
         bool add_projector = std::abs(phase-Cplx(1.0,0.0)) < 1e-10;
         auto action = [&](std::vector<Cplx> const& x)->std::vector<Cplx>
             {
-            auto Tx = from_left ? vx_apply_transfer_from_left(E,D,x) : vx_apply_transfer(E,D,x);
-            std::vector<Cplx> out((size_t)D*D);
-            for (int k=0;k<D*D;++k) out[k] = x[k] - phase*Tx[k];
-            if (add_projector)
-                {
-                Cplx s = vx_trace_conjA_X(proj_in,x,D);
-                for (int k=0;k<D*D;++k) out[k] += proj_out[k]*s;
-                }
-            return out;
+            return vx_regularized_action(D,phase,E,from_left,add_projector,
+                                          proj_out,proj_in,x);
             };
         // vx_build_linear_map applies `action` D*D times purely to
         // MATERIALIZE the matrix, then vx_solve is another O(D^6) LU on it
@@ -6219,6 +6371,79 @@ class Chain
             }
         auto Mat = vx_build_linear_map(D,action);
         return vx_solve(Mat,D*D,rhs);
+        }
+
+    // The same regularized map, built ONCE and kept with its LU
+    // factorization, for the caller that solves with it many times over --
+    // the excitation ansatz, whose GBL(k)/GBR(k) each solve twice per
+    // application of H_eff(k) while one eigensolve applies H_eff(k)
+    // hundreds of times, always with the same two maps (they depend on the
+    // momentum and on the momentum-independent environment, never on the
+    // excitation tensor B). See vumps_exc_resolvents for where that cache
+    // lives, and pyitensor idmrg_excitations._channel_resolvent/
+    // _resolvents_for for the Python original.
+    //
+    // vx_resolvent_dense_max_ is deliberately far above
+    // vms_dense_solve_max_ (=256), even though both decide "dense or
+    // matrix-free" on the same map, because the two callers amortize
+    // differently -- exactly the split pyitensor makes between its own
+    // _DENSE_SOLVE_MAX (64) and _RESOLVENT_DENSE_MAX (2048). A one-shot
+    // solve has nothing to spread the O(D^6) build and factorization over,
+    // so the dense route is pure overhead; a resolvent pays that once per
+    // momentum and every later solve is two triangular solves, O(D^4),
+    // which beats re-running BiCGSTAB to 1e-12 each time by a wide margin.
+    // What sets the threshold here is therefore memory, not flops:
+    // D*D=2048 means a (2048,2048) complex factorization, about 67 MB.
+    static constexpr int vx_resolvent_dense_max_ = 2048;  // i.e. D <= 45
+
+    static VxResolvent
+    vx_resolvent_build(int D, Cplx phase, std::vector<Cplx> const& E, bool from_left,
+                        std::vector<Cplx> const& proj_out, std::vector<Cplx> const& proj_in)
+        {
+        VxResolvent R;
+        R.D = D; R.phase = phase; R.from_left = from_left;
+        R.E = E; R.proj_out = proj_out; R.proj_in = proj_in;
+        R.add_projector = std::abs(phase-Cplx(1.0,0.0)) < 1e-10;
+        if (D*D <= vx_resolvent_dense_max_)
+            {
+            auto action = [&](std::vector<Cplx> const& x)->std::vector<Cplx>
+                {
+                return vx_regularized_action(R.D,R.phase,R.E,R.from_left,R.add_projector,
+                                              R.proj_out,R.proj_in,x);
+                };
+            R.lu = vx_build_linear_map(D,action);
+            vx_lu_factor(R.lu,D*D,R.piv);
+            R.factored = true;
+            // The transfer tensor is only ever needed to apply the map,
+            // and nothing applies it once the factorization exists, so
+            // drop it: it is a (D,D,D,D) array, 5 MB at D=24 and 65 MB at
+            // the D=45 this threshold allows, held for as long as the
+            // momentum is.
+            R.E.clear();
+            R.E.shrink_to_fit();
+            }
+        return R;
+        }
+
+    // One solve with a built resolvent. Below the threshold this is the
+    // held factorization; above it nothing was ever formed, so it is the
+    // same matrix-free BiCGSTAB (with the same dense fallback on
+    // non-convergence) vx_regularized_solve itself runs there.
+    static std::vector<Cplx>
+    vx_resolvent_solve(VxResolvent const& R, std::vector<Cplx> const& rhs)
+        {
+        int n = R.D*R.D;
+        if (R.factored) return vx_lu_solve(R.lu,R.piv,n,rhs);
+        auto action = [&](std::vector<Cplx> const& x)->std::vector<Cplx>
+            {
+            return vx_regularized_action(R.D,R.phase,R.E,R.from_left,R.add_projector,
+                                          R.proj_out,R.proj_in,x);
+            };
+        bool ok = false;
+        auto sol = vx_bicgstab(action,rhs,n,1e-12,20*n,ok);
+        if (ok) return sol;
+        auto Mat = vx_build_linear_map(R.D,action);
+        return vx_solve(Mat,n,rhs);
         }
 
     // Relative tolerances for the transfer-matrix dominant-eigenvalue
@@ -8326,6 +8551,59 @@ class Chain
     static constexpr int vx_dense_eig_max_ = 64;
     static constexpr int vx_lanczos_niter_ = 60;
 
+    // The same split for H_eff(k), the excitation ansatz's own
+    // eigenproblem (vumps_excitation_energies): at or below this
+    // dimension (Dx*D) the matrix is assembled and diagonalized, above it
+    // the lowest eigenvalues are found by Lanczos on vumps_h_eff_action
+    // itself. Assembling costs Dx*D applications of H_eff(k), each of
+    // which solves four channel resolvents, while Lanczos costs a few
+    // tens of them per eigenvalue asked for, independent of the
+    // dimension -- so the dense route only wins while the dimension is of
+    // order the Lanczos iteration count.
+    //
+    // Measured on this port, over a 3-momentum scan with threads pinned,
+    // dense against forced Lanczos on the SAME converged state (the
+    // dense_max argument below is what forces it), n=1:
+    //
+    //   TFIM D=6   dim=36    0.033 s -> 0.022 s
+    //   TFIM D=8   dim=64    0.161 s -> 0.067 s
+    //   TFIM D=12  dim=144   1.523 s -> 0.419 s
+    //   TFIM D=16  dim=256   9.048 s -> 1.696 s
+    //   Heis D=10  dim=300   5.160 s -> 1.117 s
+    //   Heis D=12  dim=432  14.671 s -> 2.459 s
+    //
+    // and n=2 (Heis D=8, dim=192) 1.422 s -> 1.243 s, n=3 (Heis D=10,
+    // dim=300) 5.143 s -> 3.317 s: Lanczos is faster at every size
+    // measured, by more the larger the problem, and the crossover is
+    // therefore somewhere below dim=36 rather than at pyitensor
+    // idmrg_excitations' own _DENSE_EIG_MAX=256 (measured there against
+    // ARPACK, on a differently-priced application -- that number is not
+    // transferable, so this one is measured here instead). 64 is chosen
+    // above the crossover anyway, since the dense path is exact and
+    // cannot fail while the absolute saving below it is milliseconds, and
+    // it keeps every model this port was validated on -- TFIM/Heisenberg
+    // at D<=4, so dim<=48 -- on the exact dense path it was validated
+    // against.
+    //
+    // vumps_excitation_energies takes a `dense_max` argument that
+    // overrides this, which is how a test reaches the Lanczos path on a
+    // chain small enough for the dense answer to be the reference (a
+    // static constexpr cannot be monkeypatched).
+    static constexpr int vumps_h_eff_dense_max_ = 64;
+    // Enough iterations for the lowest few pairs of a several-hundred
+    // dimensional H_eff(k) without ever spending much more than the
+    // dense build itself would (min(niter, dim) caps it in any case).
+    static constexpr int vumps_h_eff_lanczos_niter_ = 300;
+    // Residual demanded before an eigenvalue is accepted, and the larger
+    // re-measured residual that still gets the whole answer refused --
+    // pyitensor's own _ITERATIVE_EIG_TOL/_ITERATIVE_EIG_RESIDUAL_MAX.
+    // The eigenvalue error is quadratic in the eigenvector residual for a
+    // Hermitian operator, so 1e-10 here is cheap insurance for a
+    // dispersion that is cross-checked against the other backend at that
+    // same order.
+    static constexpr double vumps_h_eff_residual_tol_ = 1e-10;
+    static constexpr double vumps_h_eff_residual_max_ = 1e-7;
+
     // Lowest eigenpair of a Hermitian operator given ONLY by its action on
     // a flat length-n complex vector -- a direct C++ port of pyitensor/
     // dmrg.py's own _lanczos_ground_state (Lanczos with full
@@ -8456,6 +8734,272 @@ class Chain
         std::vector<Cplx> yvec;
         double eval = tridiag_ground(true,yvec);
         return {eval,expand(yvec)};
+        }
+
+    // A deterministic pseudo-random unit-ish vector: a fixed linear
+    // congruential sequence, so the same problem always makes the same
+    // choice, run to run and machine to machine. Used as the start vector
+    // of vx_lanczos_lowest's own Lanczos runs.
+    //
+    // A "nicer" start -- the constant vector pyitensor
+    // idmrg_excitations._lowest_iterative hands ARPACK -- is the thing NOT
+    // to use here, and the reason is worth keeping: a start vector with a
+    // symmetry shares that symmetry with the whole Krylov space it
+    // generates, so every eigenvector in another symmetry sector is
+    // invisible to the run. Measured directly on the n_uc=2 Heisenberg
+    // cell at D=2 (dim=12), whose H_eff(k) spectrum is pairwise degenerate
+    // away from k=0: the constant start returned 0.298598886, 0.299768235,
+    // 1.337377610 as the three lowest at k=0.37 where the dense answer is
+    // 0.298598886, 0.298598886, 0.299768235 -- one copy of each degenerate
+    // pair, everything after it shifted up by one, an error of 1.0 at
+    // nev=3. A generic start plus the deflation below finds both copies.
+    static std::vector<Cplx>
+    vx_deterministic_start(int n, unsigned seed)
+        {
+        std::vector<Cplx> v((size_t)n);
+        unsigned s = 2654435761u*(seed+1u) + 12345u;
+        auto next = [&]()
+            {
+            s = s*1664525u + 1013904223u;
+            return ((s>>8) & 0xFFFFFFu)/double(0x1000000u) - 0.5;
+            };
+        for (int i=0;i<n;++i)
+            {
+            double a = next(), b = next();
+            v[i] = Cplx(a,b);
+            }
+        return v;
+        }
+
+    // The lowest `nev` EIGENVALUES of a Hermitian operator given only by
+    // its action -- the sibling of vx_lanczos_ground_state above, which
+    // keeps the lowest pair only. Written separately rather than by
+    // generalizing that one, since every other caller of it must stay
+    // byte-identical. Same Lanczos with full reorthogonalization; what
+    // differs is the stopping test, the start vector, and what a request
+    // for more than one eigenvalue does.
+    //
+    // Returns false, with nothing written to `evals_out`, whenever the
+    // iteration did not produce `nev` eigenvalues it can vouch for -- the
+    // caller is then expected to fall back to the dense path, exactly as
+    // pyitensor idmrg_excitations._lowest_iterative returns None rather
+    // than a bad answer. The iterative route is never allowed to be LESS
+    // reliable than the dense one it replaces, only cheaper.
+    //
+    // `nev` eigenvalues are found by `nev` SEQUENTIAL runs, each on the
+    // previous runs' converged eigenvectors deflated away, rather than by
+    // reading the nev lowest Ritz values off one run. One run cannot do
+    // it: a single-vector Krylov space contains at most one direction out
+    // of any degenerate eigenspace, so the second copy of a degenerate
+    // eigenvalue is simply absent from it, and the Ritz values below it
+    // are then a list of DISTINCT eigenvalues rather than the lowest nev
+    // of the spectrum. That is not a tolerance question and no residual
+    // test catches it -- every Ritz pair returned is a genuine eigenpair
+    // -- which is exactly why it is worth the extra runs (see
+    // vx_deterministic_start for the measurement).
+    //
+    // Deflation is by SHIFT, y += shift*v<v,x>, not by projection: a
+    // converged eigenvector is converged to `residual_tol`, not exactly,
+    // so projecting it out leaves a little of it behind and the next run
+    // can rediscover the same eigenvalue. Pushing it above the top of the
+    // spectrum instead leaves the same leak harmless. The shift is taken
+    // from the first run's own Ritz range, which bounds the spectrum from
+    // below and is the only estimate of it available for free.
+    //
+    // Three things here are not optional:
+    //
+    // - The stopping test is the RESIDUAL of the lowest Ritz pair
+    //   (beta*|s_m|, free from the tridiagonal problem), never the
+    //   "lowest Ritz value stopped moving" test vx_lanczos_ground_state
+    //   uses by default. For a Hermitian operator the Ritz value error is
+    //   quadratic in the eigenvector error, so a value that has stopped
+    //   moving at 1e-12 leaves the vector accurate only to ~1e-6 -- and
+    //   here the vector is not a diagnostic, it is what the NEXT run
+    //   deflates against.
+    // - Each accepted pair's residual is then RE-MEASURED against the
+    //   undeflated operator, one extra application per pair, and anything
+    //   above `residual_max` is refused. That is also what covers the
+    //   Hermiticity question: Lanczos assumes a Hermitian operator, and
+    //   the dense path Hermitizes its matrix, so were the H-vs-H^dagger
+    //   asymmetry ever structural rather than the ~1e-11 noise it is
+    //   measured to be, it would appear here as a residual this rejects.
+    // - The values must come out ascending. A run that returns a value
+    //   below the previous run's means an earlier run missed something,
+    //   so the whole answer is refused rather than sorted into shape.
+    //
+    // A Krylov breakdown (beta below `tol`) before the lowest pair has
+    // converged also returns false: the invariant subspace found is
+    // genuine, but nothing here establishes that it contains the lowest
+    // eigenvalue of the whole operator.
+    template <typename Fn>
+    static bool
+    vx_lanczos_lowest(Fn&& action, int n, int nev, int niter,
+                       double residual_tol, double residual_max,
+                       std::vector<double>& evals_out)
+        {
+        evals_out.clear();
+        if (nev < 1 || nev >= n) return false;
+        auto dot = [](std::vector<Cplx> const& a, std::vector<Cplx> const& b)
+            {
+            Cplx s(0,0);
+            for (size_t i=0;i<a.size();++i) s += std::conj(a[i])*b[i];
+            return s;
+            };
+        auto nrm = [&](std::vector<Cplx> const& a)
+            { return std::sqrt(std::abs(dot(a,a))); };
+
+        std::vector<std::vector<Cplx>> found; // converged eigenvectors, orthonormal
+        std::vector<double> vals;
+        double shift = 0.0;
+        int mmax = std::min(niter,n);
+
+        for (int run=0; run<nev; ++run)
+            {
+            auto act = [&](std::vector<Cplx> const& x)
+                {
+                auto y = action(x);
+                for (size_t f=0; f<found.size(); ++f)
+                    {
+                    Cplx c = dot(found[f],x);
+                    for (int i=0;i<n;++i) y[i] += shift*c*found[f][i];
+                    }
+                return y;
+                };
+
+            // Start: a fresh deterministic vector per run, orthogonalized
+            // against everything already found -- a run that started from
+            // the previous one's own start could not see a second copy of
+            // a degenerate eigenvalue, the deflation notwithstanding,
+            // since that start has no component in the rest of the
+            // eigenspace to begin with.
+            auto v0 = vx_deterministic_start(n,(unsigned)run);
+            for (auto const& f : found)
+                {
+                Cplx c = dot(f,v0);
+                for (int i=0;i<n;++i) v0[i] -= c*f[i];
+                }
+            double beta0 = nrm(v0);
+            if (!(beta0 > 0.0)) return false;
+            for (auto& z : v0) z /= beta0;
+
+            std::vector<std::vector<Cplx>> qs;
+            qs.push_back(v0);
+            std::vector<double> alphas, betas;
+
+            auto w = act(qs[0]);
+            double alpha = dot(qs[0],w).real();
+            alphas.push_back(alpha);
+            for (size_t i=0;i<w.size();++i) w[i] -= alpha*qs[0][i];
+
+            // Lowest eigenpair (and the top Ritz value, which is what the
+            // deflation shift is sized from) of the real symmetric
+            // tridiagonal built so far.
+            std::vector<double> ev;
+            std::vector<Cplx> evec_col; // column-major, evec_col[i+j*m]
+            auto tridiag_eig = [&]()
+                {
+                int m = (int)alphas.size();
+                std::vector<Cplx> T((size_t)m*m,Cplx(0,0));
+                for (int i=0;i<m;++i) T[(size_t)i*m+i] = Cplx(alphas[i],0);
+                for (int i=0;i+1<m;++i)
+                    {
+                    T[(size_t)i*m+(i+1)] = Cplx(betas[i],0);
+                    T[(size_t)(i+1)*m+i] = Cplx(betas[i],0);
+                    }
+                vx_hermitian_eig_full(T,m,ev,evec_col);
+                return m;
+                };
+
+            bool converged = false;
+            double val = 0.0;
+            std::vector<Cplx> vec;
+            for (int step=1; step<=mmax; ++step)
+                {
+                int m = tridiag_eig();
+                double beta = nrm(w);
+                if (beta*std::abs(evec_col[(m-1)]) < residual_tol*std::max(1.0,std::abs(ev[0])))
+                    {
+                    val = ev[0];
+                    vec.assign((size_t)n,Cplx(0,0));
+                    for (int q=0;q<m;++q)
+                        {
+                        Cplx c = evec_col[q];
+                        for (int i=0;i<n;++i) vec[i] += c*qs[q][i];
+                        }
+                    if (run == 0)
+                        {
+                        // Everything found later is pushed above the top
+                        // of the spectrum, whose only free estimate is
+                        // this run's own largest Ritz value (a lower
+                        // bound on it -- hence the extra margin).
+                        double spread = std::abs(ev.back()-ev[0]);
+                        shift = 2.0*spread + 2.0*std::max(1.0,std::abs(ev[0]));
+                        }
+                    converged = true;
+                    break;
+                    }
+                if (step == mmax) break;
+                if (beta < 1e-12) return false; // invariant subspace, lowest not yet converged
+                betas.push_back(beta);
+                std::vector<Cplx> q_new(w.size());
+                for (size_t i=0;i<w.size();++i) q_new[i] = w[i]/beta;
+                qs.push_back(q_new);
+                w = act(q_new);
+                alpha = dot(q_new,w).real();
+                alphas.push_back(alpha);
+                auto const& q_prev = qs[qs.size()-2];
+                for (size_t i=0;i<w.size();++i)
+                    w[i] -= alpha*q_new[i] + beta*q_prev[i];
+                // Full reorthogonalization against every earlier Lanczos
+                // vector, as in vx_lanczos_ground_state (the short
+                // recurrence alone loses orthogonality fast enough to
+                // matter), and against the already-found eigenvectors,
+                // which keeps the run inside the subspace the deflation
+                // is meant to confine it to.
+                for (size_t q=0;q+1<qs.size();++q)
+                    {
+                    Cplx c = dot(qs[q],w);
+                    for (size_t i=0;i<w.size();++i) w[i] -= c*qs[q][i];
+                    }
+                for (auto const& f : found)
+                    {
+                    Cplx c = dot(f,w);
+                    for (int i=0;i<n;++i) w[i] -= c*f[i];
+                    }
+                }
+            if (!converged) return false;
+
+            // Against the UNDEFLATED operator: this vector is orthogonal
+            // to everything deflated, so the two actions agree on it, and
+            // a residual that is small here is a statement about the
+            // operator the caller actually asked about.
+            auto Hv = action(vec);
+            double r2 = 0.0;
+            for (int i=0;i<n;++i)
+                {
+                Cplx d = Hv[i] - val*vec[i];
+                r2 += std::norm(d);
+                }
+            if (std::sqrt(r2) > residual_max*std::max(1.0,std::abs(val))) return false;
+            if (!vals.empty() && val < vals.back() - residual_max*std::max(1.0,std::abs(val)))
+                return false; // an earlier run missed one -- refuse the whole answer
+
+            // Re-orthonormalize before storing: the deflation and the
+            // residual test both assume `found` is an orthonormal set.
+            for (auto const& f : found)
+                {
+                Cplx c = dot(f,vec);
+                for (int i=0;i<n;++i) vec[i] -= c*f[i];
+                }
+            double nv = nrm(vec);
+            if (!(nv > 0.0)) return false;
+            for (auto& z : vec) z /= nv;
+            found.push_back(vec);
+            vals.push_back(val);
+            }
+
+        evals_out = vals;
+        return true;
         }
 
     // An eigenvector is defined only up to a phase, and VUMPS solves H_AC
@@ -8753,6 +9297,12 @@ class Chain
             }
         vumps_lam_AC_ = (num/den).real();
 
+        // Every field the resolvents are built from has just been
+        // replaced, so whatever momentum they were holding is stale --
+        // and this is the one place a rebuild can happen, so it is the
+        // one place that has to say so.
+        have_vumps_exc_resolvents_ = false;
+
         have_vumps_exc_env_ = true;
         }
 
@@ -8806,6 +9356,47 @@ class Chain
         return Y;
         }
 
+    // This momentum's two channel resolvents, built on first use and kept
+    // until the momentum changes (or until the excitation environment is
+    // rebuilt, which clears them) -- C++ analogue of pyitensor
+    // idmrg_excitations._resolvents_for.
+    //
+    // Both depend only on k and on the momentum-independent environment,
+    // never on the excitation tensor B, which is what makes the cache
+    // correct: one vumps_excitation_energies call applies H_eff(k)
+    // hundreds of times, each with a different B, and every one of those
+    // applications used to rebuild BOTH maps from scratch -- D*D
+    // applications of the action to materialize each, plus an O(D^6)
+    // factorization, which was the dominant cost of the whole ansatz at
+    // any non-trivial bond dimension. Measured over a 3-momentum scan
+    // with threads pinned to one core, this cache alone (before
+    // vumps_h_eff_dense_max_'s own Lanczos path existed) took a D=16 TFIM
+    // chain from 164.1 s to 10.3 s and an n_uc=2 Heisenberg chain at
+    // D=10 from 15.6 s to 5.4 s, the latter reproducing its dispersion to
+    // every one of the 12 digits printed.
+    //
+    // ONE momentum is held, not a map over every k a scan visits: the win
+    // is entirely within a single eigensolve, while excitation_gap()
+    // scans 41 momenta and a map would hold 41 pairs of factors at once
+    // (at D=32 that is 41*2*128 MB). The key is the exact double, since
+    // the caller threads the same k through a whole eigensolve, so
+    // equality always hits and a near-miss would only cost a rebuild.
+    void
+    vumps_exc_resolvents(double k) const
+        {
+        if (have_vumps_exc_resolvents_ && vumps_exc_resolvent_k_ == k) return;
+        int D = vumps_D_;
+        Cplx phase = std::exp(Cplx(0.0,1.0)*k);
+        vumps_exc_resolvent_L_ = vx_resolvent_build(D,1.0/phase,vumps_E_RL_,
+                                                     /*from_left=*/true,
+                                                     vumps_l_RL_,vumps_r_RL_);
+        vumps_exc_resolvent_R_ = vx_resolvent_build(D,phase,vumps_E_LR_,
+                                                     /*from_left=*/false,
+                                                     vumps_l_LR_,vumps_r_LR_);
+        vumps_exc_resolvent_k_ = k;
+        have_vumps_exc_resolvents_ = true;
+        }
+
     // GBL(k) -- the channel-resolved "the excitation has already happened
     // somewhere to the left" environment (MPSKit's own lBs) -- C++
     // analogue of pyitensor idmrg_excitations._build_GBL. See that
@@ -8822,9 +9413,14 @@ class Chain
         auto h1 = vumps_onsite_matrix(vumps_W_,vumps_Dw_,d_g);
         auto pending = vumps_pending_channels(vumps_W_,vumps_Dw_,d_g);
         Cplx phase = std::exp(Cplx(0.0,1.0)*k);
-        auto E_RL_id = vx_op_transfer_matrix(AR,D,d_g,AL,false,{});
-        auto const& proj_out = vumps_l_RL_;
-        auto const& proj_in = vumps_r_RL_;
+        // Both solves below share one resolvent, itself shared with every
+        // other application of H_eff(k) at this momentum -- see
+        // vumps_exc_resolvents. Its own transfer tensor is the identity/
+        // no-operator mixed transfer the environment already holds
+        // (vumps_E_RL_), which is the same array this used to rebuild
+        // per application.
+        vumps_exc_resolvents(k);
+        auto const& resolve = vumps_exc_resolvent_L_;
         auto E_RL = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(AR,D,d_g,AL,true,M); };
         auto E_B  = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(B,D,d_g,AL,true,M); };
         auto E_B_none = vx_op_transfer_matrix(B,D,d_g,AL,false,{});
@@ -8832,7 +9428,7 @@ class Chain
         auto src_S = vx_apply_transfer_from_left(E_B_none,D,vumps_GLfull_S_);
         std::vector<Cplx> src_S_scaled((size_t)D*D);
         for (int i=0;i<D*D;++i) src_S_scaled[i] = src_S[i]/phase;
-        auto G_S = vx_regularized_solve(D,1.0/phase,E_RL_id,/*from_left=*/true,proj_out,proj_in,src_S_scaled);
+        auto G_S = vx_resolvent_solve(resolve,src_S_scaled);
 
         std::vector<std::vector<Cplx>> G_pending(pending.size());
         for (size_t idx=0; idx<pending.size(); ++idx)
@@ -8857,7 +9453,7 @@ class Chain
             }
         std::vector<Cplx> rhs_F_scaled((size_t)D*D);
         for (int i=0;i<D*D;++i) rhs_F_scaled[i] = rhs_F[i]/phase;
-        auto G_F = vx_regularized_solve(D,1.0/phase,E_RL_id,/*from_left=*/true,proj_out,proj_in,rhs_F_scaled);
+        auto G_F = vx_resolvent_solve(resolve,rhs_F_scaled);
 
         VumpsChannelMap out; out.S=G_S; out.F=G_F; out.pending=G_pending;
         return out;
@@ -8876,9 +9472,10 @@ class Chain
         auto h1 = vumps_onsite_matrix(vumps_W_,vumps_Dw_,d_g);
         auto pending = vumps_pending_channels(vumps_W_,vumps_Dw_,d_g);
         Cplx phase = std::exp(Cplx(0.0,1.0)*k);
-        auto E_LR_id = vx_op_transfer_matrix(AL,D,d_g,AR,false,{});
-        auto const& proj_out = vumps_l_LR_;
-        auto const& proj_in = vumps_r_LR_;
+        // The mirror of vumps_build_GBL's own shared resolvent -- see
+        // that function and vumps_exc_resolvents.
+        vumps_exc_resolvents(k);
+        auto const& resolve = vumps_exc_resolvent_R_;
         auto E_LR = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(AL,D,d_g,AR,true,M); };
         auto E_B  = [&](std::vector<Cplx> const& M){ return vx_op_transfer_matrix(B,D,d_g,AR,true,M); };
         auto E_B_none = vx_op_transfer_matrix(B,D,d_g,AR,false,{});
@@ -8886,7 +9483,7 @@ class Chain
         auto src_F = vx_apply_transfer(E_B_none,D,vumps_GRfull_F_);
         std::vector<Cplx> src_F_scaled((size_t)D*D);
         for (int i=0;i<D*D;++i) src_F_scaled[i] = src_F[i]*phase;
-        auto G_F = vx_regularized_solve(D,phase,E_LR_id,/*from_left=*/false,proj_out,proj_in,src_F_scaled);
+        auto G_F = vx_resolvent_solve(resolve,src_F_scaled);
 
         std::vector<std::vector<Cplx>> G_pending(pending.size());
         for (size_t idx=0; idx<pending.size(); ++idx)
@@ -8911,7 +9508,7 @@ class Chain
             }
         std::vector<Cplx> rhs_S_scaled((size_t)D*D);
         for (int i=0;i<D*D;++i) rhs_S_scaled[i] = rhs_S[i]*phase;
-        auto G_S = vx_regularized_solve(D,phase,E_LR_id,/*from_left=*/false,proj_out,proj_in,rhs_S_scaled);
+        auto G_S = vx_resolvent_solve(resolve,rhs_S_scaled);
 
         VumpsChannelMap out; out.F=G_F; out.S=G_S; out.pending=G_pending;
         return out;
@@ -11840,7 +12437,16 @@ class Chain
     std::vector<Cplx> vumps_GLfull_S_, vumps_GLfull_F_; // (D,D) each
     std::vector<Cplx> vumps_GRfull_S_, vumps_GRfull_F_;
     std::vector<std::vector<Cplx>> vumps_GLfull_pending_, vumps_GRfull_pending_; // one (D,D) per pending channel
-    std::vector<Cplx> vumps_E_RL_, vumps_E_LR_;       // (D,D,D,D) mixed transfer tensors (kept for reference; not reused after vx_mixed_fixed_points)
+    std::vector<Cplx> vumps_E_RL_, vumps_E_LR_;       // (D,D,D,D) mixed transfer tensors, also what vumps_build_GBL/GBR's own resolvents are built on
     std::vector<Cplx> vumps_r_RL_, vumps_l_RL_, vumps_r_LR_, vumps_l_LR_; // (D,D)
     double vumps_lam_AC_ = 0.0; // H_AC's own Rayleigh quotient on converged AC -- see vumps_build_excitation_environment's own comment
+
+    // The channel resolvents of the momentum most recently asked for, and
+    // that momentum -- see Chain::vumps_exc_resolvents. `mutable` because
+    // vumps_h_eff_action/vumps_build_GBL/vumps_build_GBR are const and
+    // stay const: this is a cache of something those functions would
+    // otherwise recompute identically, not state of the chain.
+    mutable bool have_vumps_exc_resolvents_ = false;
+    mutable double vumps_exc_resolvent_k_ = 0.0;
+    mutable VxResolvent vumps_exc_resolvent_L_, vumps_exc_resolvent_R_;
     };

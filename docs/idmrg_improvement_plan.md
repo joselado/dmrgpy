@@ -12,8 +12,8 @@ checkout.
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| 1 | Iterative eigensolver for the excitation ansatz | ~1 day | **done** (pyitensor; v3 deferred, see below) |
-| 2 | Spectral weights → S(k,ω) from the excitation eigenvectors | ~1 week | **done** (pyitensor; v3 deferred with item 1) |
+| 1 | Iterative eigensolver for the excitation ansatz | ~1 day | **done** (both backends; v3 followed on 2026-09-22) |
+| 2 | Spectral weights → S(k,ω) from the excitation eigenvectors | ~1 week | **done** (pyitensor; v3 still needs the eigenvectors and the source vector) |
 | 3 | Two-site VUMPS (dynamic bond dimension) | ~1–2 weeks | open |
 | 4 | Long-range interactions via exponential-decay channels | ~2 weeks | open |
 | 5 | iTDVP on the uniform state (global quenches) | ~2–3 weeks | open |
@@ -73,13 +73,32 @@ iterative solve's residual check fails.
 `_solve_linear_map`'s `_DENSE_SOLVE_MAX` — because a cached, reused
 factorization amortizes an `O(D⁶)` cost that a one-shot solve cannot.
 
-**v3 parity is deliberately deferred.** `Chain::vumps_build_h_eff_dense`
-(`mpscpp3/chain_session.h`) is an independent C++ port with the same
-rebuild-per-application pattern in `vx_regularized_solve`'s callers. It
-still assembles `H_eff(k)` densely, so the two backends now differ in cost
-but not in results (`tests/test_vumps_excitations_v3.py` is unchanged and
-still passes). Mirroring at least the resolvent cache there is the obvious
-follow-up; a C++ Lanczos is separate work again.
+**v3 parity landed on 2026-09-22**, both halves, after standing deferred
+here for a while. The resolvents are cached per momentum together with
+their LU factorization (`Chain::vumps_exc_resolvents`, `vx_resolvent_build`
+/`vx_resolvent_solve`), so the hundreds of solves one eigensolve asks for
+share one factorization instead of rebuilding and refactorizing the map per
+application; and `H_eff(k)` is solved by Lanczos on its action
+(`vx_lanczos_lowest`) above `vumps_h_eff_dense_max_` instead of being
+assembled. On a 3-momentum scan with threads pinned, TFIM `n_uc=1` at
+`D=16` went 164.1 s to 10.3 s with the cache alone and to 1.7 s with both,
+and Heisenberg `n_uc=2` at `D=10` went 15.6 s to 5.4 s to 1.1 s. No
+returned number moves: dense against forced Lanczos on one converged state
+agrees to 4.6e-11, and the new build against the old one to 1.3e-10 on
+TFIM, against that build's own run-to-run scatter of 1.2e-10.
+
+Two numbers there are deliberately not the Python side's. The dense
+threshold is 64 rather than `_DENSE_EIG_MAX`'s 256, measured rather than
+copied: one application of `H_eff(k)` in C++ solves four channel
+resolvents, so the crossover sits below dim=36 and Lanczos was faster at
+every size tried. And the solver runs one *deflated* Lanczos per
+eigenvalue rather than a single Krylov space, because one Krylov space
+holds at most one direction out of a degenerate eigenspace and this cell's
+`H_eff(k)` is pairwise degenerate away from k=0 -- a plain version
+returned one copy of each pair with everything after it shifted up, an
+error of 1.0, and every value it returned was a genuine eigenpair, so a
+residual check passes it. The `"python"` side never had that exposure,
+since ARPACK returns both copies.
 
 ## 2. Spectral weights → S(k,ω) on the infinite chain (builds on 1)
 

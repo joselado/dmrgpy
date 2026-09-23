@@ -416,6 +416,59 @@ def dm_ij_energy(m_in,i=0,j=0,scale=10.,npol=None,ne=500,x=None):
 
 
 
+# Jackson-kernel resolution calibration.
+#
+# The Jackson kernel turns an exact delta peak at rescaled energy x into an
+# approximately Gaussian line of width sigma = pi*sqrt(1-x^2)/npol (Weisse,
+# Wellein, Alvermann & Fehske, Rev. Mod. Phys. 78, 275 (2006), Sec. II-B),
+# so its full width at half maximum, in the physical units the caller asked
+# for, is
+#
+#     FWHM = JACKSON_FWHM_FACTOR * half_width * sqrt(1-x^2) / npol
+#
+# with half_width the physical half-width of the interval the spectrum was
+# rescaled onto. Every KPM route in this codebase picks its moment count
+# from this relation, so that `delta` means the same broadening it means in
+# the resolvent submodes (CVM/INV/ED), whose Lorentzian has FWHM = 2*delta:
+# see polynomials_for_broadening below, dynamics.py's module docstring for
+# what that does and does not guarantee, and the same constant transcribed
+# by hand into mpscpp2/chain_session.h and mpscpp3/chain_session.h, the two
+# that cannot call this module. Every Python route, mpsjulialive included,
+# calls polynomials_for_broadening directly.
+JACKSON_FWHM_FACTOR = 2.0*np.sqrt(2.0*np.log(2.0))*np.pi # = 7.39786
+
+
+def polynomials_for_broadening(half_width,delta,n_scale=1,nmin=16):
+    """Number of Chebyshev moments whose Jackson-kernel reconstruction has
+    FWHM = 2*delta at the centre of the rescaled band, i.e. the same width
+    the resolvent submodes give for the same `delta`.
+
+    half_width is the physical half-width of the interval the spectrum was
+    rescaled onto ([-1,1] in Chebyshev variables), delta the requested
+    broadening, and n_scale a caller-side multiplier (the chain's
+    kpm_n_scale) for asking for a sharper curve than requested at
+    proportionally higher cost.
+
+    The floor nmin matters. A delta comparable to the bandwidth itself
+    asks for a line too broad for a handful of Chebyshev polynomials to
+    represent, and the reconstruction then stops being a broadened pole
+    at all: on a 2-site chain of bandwidth 1, delta=0.6 calibrates to 4
+    moments and comes back with a peak 0.12 wide, narrower than the
+    0.20 that delta=0.15 gives, which is the expansion's own structure
+    rather than a spectrum. Below the floor the line is therefore
+    sharper than requested, which a caller can always broaden afterwards,
+    instead of unrepresentable.
+
+    The width is exact at the band centre and tightens as sqrt(1-x^2)
+    towards the band edges, which is a property of the kernel and not of
+    this choice: no single moment count gives one width across the whole
+    band. Measured on a single-pole chain, the constant above reproduces
+    the observed FWHM to 4 to 6 per cent at npol of order 10 to 100, the
+    residual being the kernel's own asymptotics in npol."""
+    npol = int(round(JACKSON_FWHM_FACTOR*half_width/(2.0*delta)))
+    return max(int(nmin),npol*int(n_scale))
+
+
 def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
   """Return the correlation function"""
   if npol is None: npol = ne
@@ -530,12 +583,16 @@ def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
 HODC_MAX_ORDER = 8 # solving (*) in double precision degrades beyond this
 
 # p*eta at which the default eta is placed. This is not arbitrary: it is
-# the value that dmrgpy's own KPM conventions already imply. kpmdmrg's
-# get_dynamical_correlator asks for n = (emax-emin)/delta * kpm_n_scale
-# polynomials and rescales the spectrum by scale = 1/((emax-emin)*
-# kpm_scale), so setting eta to the *requested* resolution delta gives
-# n*eta*scale = kpm_n_scale/kpm_scale = 3/0.7 = 4.3 with the default
-# kpm_n_scale/kpm_scale. Empirically that also sits in the flat minimum of
+# the value that dmrgpy's own KPM conventions already imply. Every KPM
+# route asks for n = JACKSON_FWHM_FACTOR*half_width/(2*delta) * kpm_n_scale
+# polynomials (polynomials_for_broadening above) on a spectrum rescaled by
+# scale = 1/half_width, so setting eta to the *requested* resolution delta
+# gives n*eta*scale = JACKSON_FWHM_FACTOR/2 = 3.70 at the default
+# kpm_n_scale of 1. It used to imply 3/0.7 = 4.3, from the uncalibrated
+# count n = (emax-emin)/delta * kpm_n_scale at kpm_n_scale=3, which is why
+# the value below is 4.0 rather than 3.7; both sit in the flat minimum, so
+# the default is left where it is rather than chased.
+# Empirically that also sits in the flat minimum of
 # the error-vs-eta curve *for accurate moments* (see examples/
 # dynamical_correlator/hodc_VS_jackson_kernel): below ~2 the truncated
 # Chebyshev series rings, above ~8 the O(eta^m) smoothing error takes

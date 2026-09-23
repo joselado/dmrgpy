@@ -8,7 +8,7 @@ right-to-left, with new directions spanned by a Krylov subspace
 {H*phi, H^2*phi, ...} built via repeated MPO application -- but implemented
 directly against pyitensor's dense-array ITensor representation (a
 "combiner"/"plusser" in ITensor's own sparse-block formalism is just a
-plain numpy reshape/concatenate here) rather than transliterating
+plain reshape/concatenate on the dense array here) rather than transliterating
 ITensor's own sparse-tensor bookkeeping.
 
 The state-preserving property (phi's own state comes out *exactly*
@@ -23,12 +23,40 @@ M @ [V1^dagger|U2] 's second block is U1@S1@V1^dagger@U2 = 0 (U2 built
 orthogonal to V1 by construction). U2 is chosen as the dominant
 eigenvectors (above `cutoff`) of the companions' local density matrix,
 projected onto the orthogonal complement of V1's span -- exactly
-denmatSumDecomp()'s rho2/proj2 construction, just spelled out with numpy
-eigh instead of ITensor's diag_hermitian/combiner/plusser.
+denmatSumDecomp()'s rho2/proj2 construction, just spelled out with a
+dense eigh instead of ITensor's diag_hermitian/combiner/plusser.
+
+Where the arrays live
+---------------------
+Every array this sweep touches is a frontier tensor of phi or of one of
+its Krylov companions, so it arrives already on whatever device
+backend.py has selected and it must stay there. Three calls used to take
+it off: `np.concatenate` of V1's rows with U2's new ones, which returns a
+host array from device inputs with no error at all, so the enlarged
+tensor res.A(b) was rebuilt from the host once per bond, and the two
+`np.linalg.norm` calls that decide whether any new direction is worth
+adding, each of which pulled the whole (combined, combined) matrix home
+to produce one number. Measured on a 6-site spin chain at bond dimension
+8, with the array type recorded at every ITensor construction: 5 of the
+229 tensors a single expansion built came from a host array, exactly one
+per bond, and the count is 0 now. A `backend.to_host` counter cannot see
+any of this, since none of the three went through it; the array type is
+what shows it.
+
+What stays on the host is the same split the rest of the engine uses:
+`combined` is index bookkeeping on Python ints, and the two norms cross
+as scalars rather than as matrices. They cross one at a time rather than
+in one stacked transfer, so the second norm is still left uncomputed when
+the first is zero, which is what the host path has always done. Two
+synchronizations per bond is affordable here in a way it would not be
+inside a Krylov recursion: an expansion runs only for the leading
+`tdvp_gse_sweeps` steps of an evolution (3 by default), not once per time
+step.
 """
 
 import numpy as np
 
+from . import backend as bk
 from .index import Index
 from .mpsalgebra import applyMPO, _link_at
 from .svd import svd, eigh_truncate
@@ -48,6 +76,9 @@ def _gse_bond_step(B_phi, left_link, B_companions, right_inds, cutoff, bond_maxd
     are each frontier tensor projected into the new basis, ready for the
     caller to contract against site (b-1)'s own original tensor to build
     next bond's input."""
+    _xp = bk.xp()
+    # Index bookkeeping, on Python ints rather than on tensor data, so it
+    # stays on the host on every backend.
     combined = int(np.prod([ind.dim for ind in right_inds])) if right_inds else 1
 
     # phi's own currently-occupied subspace of the combined (physical [+
@@ -59,7 +90,7 @@ def _gse_bond_step(B_phi, left_link, B_companions, right_inds, cutoff, bond_maxd
     m = bond_v.dim
     V1_mat = V1.transpose_to([bond_v] + right_inds).reshape(m, combined)
 
-    rho2 = np.zeros((combined, combined), dtype=complex)
+    rho2 = bk.zeros((combined, combined))
     Bk_mats, Bk_lefts = [], []
     for Bk in B_companions:
         left_k = next(ind for ind in Bk.inds if ind not in right_inds)
@@ -71,13 +102,18 @@ def _gse_bond_step(B_phi, left_link, B_companions, right_inds, cutoff, bond_maxd
     # Project the companions' density matrix onto the orthogonal
     # complement of phi's own subspace, so any kept direction is
     # guaranteed new (and thus zero-weight in phi's own tensor below).
-    proj = np.eye(combined, dtype=complex) - V1_mat.conj().T @ V1_mat
+    proj = bk.eye(combined) - V1_mat.conj().T @ V1_mat
     rho2_proj = proj @ rho2 @ proj
     rho2_proj = 0.5 * (rho2_proj + rho2_proj.conj().T)  # enforce exact Hermiticity
 
-    U2 = np.zeros((combined, 0), dtype=complex)
-    norm_rho2 = np.linalg.norm(rho2)
-    if norm_rho2 > 0 and np.linalg.norm(rho2_proj) / norm_rho2 >= 1e-12:
+    U2 = bk.zeros((combined, 0))
+    # Two numbers per bond come home, the same split the rest of the engine
+    # uses: the norms are computed where rho2 lives and only the scalars
+    # cross. They are read one at a time rather than stacked into a single
+    # transfer, so the second norm is still not computed when the first is
+    # zero, which is the order the host path has always evaluated them in.
+    norm_rho2 = float(bk.to_host(_xp.linalg.norm(rho2)))
+    if norm_rho2 > 0 and float(bk.to_host(_xp.linalg.norm(rho2_proj))) / norm_rho2 >= 1e-12:
         # cap the *total* new_dim=m+keep2 at bond_maxdim, not just keep2
         # alone -- without this, only `cutoff` bounds how many new
         # directions get added at any one bond, and for a large-enough
@@ -104,7 +140,7 @@ def _gse_bond_step(B_phi, left_link, B_companions, right_inds, cutoff, bond_maxd
     # shows up once compounded with a *different* code path's own tensors
     # (e.g. TDVP's), since a single GSE call's own self-consistency check
     # can't detect a systematic conjugation mismatch.
-    new_res_mat = np.concatenate([V1_mat, U2.conj().T], axis=0)  # (new_dim, combined)
+    new_res_mat = _xp.concatenate([V1_mat, U2.conj().T], axis=0)  # (new_dim, combined)
     new_dim = new_res_mat.shape[0]
     new_link = Index(new_dim, tags="Link")
 

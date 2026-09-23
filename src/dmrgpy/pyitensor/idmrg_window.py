@@ -1078,17 +1078,17 @@ class _IWEnv:
 
     def __init__(self, result):
         self.cell, self.n_cell = _window_cell(result)
-        Es = _idmrg_mod._transfer_matrices(self.cell, self.n_cell)
         self.cell_arrays = [_idmrg_mod._to_array_lpr(T) for T in self.cell]
-        # `sites=` makes both fixed-point solves walk the cell tensors
-        # rather than applying the materialised chi^4 transfer tensors --
-        # identical answer, O(chi^3 d) per Krylov step instead of O(chi^4);
-        # see idmrg._dominant_fixed_point's own `sites` argument.
-        sites = (self.cell_arrays, self.cell_arrays)
+        # A lazy transfer chain, exactly as idmrg._CorrelatorEnv builds:
+        # both fixed-point solves then walk the cell tensors in O(chi^3 d)
+        # per Krylov step rather than applying materialized chi^4 transfer
+        # tensors, identical answer and no chi^4 array allocated at all.
+        # See idmrg._TransferChain.
+        Es = _idmrg_mod._transfer_chain(self.cell, self.n_cell)
         self.rho_after, _eta = _idmrg_mod._all_right_fixed_points(
-            Es, self.n_cell, sites=sites)
+            Es, self.n_cell)
         self.l_before, _eta_l, _scales = _idmrg_mod._all_left_fixed_points(
-            Es, self.n_cell, sites=sites)
+            Es, self.n_cell)
         self._calibrations = {}
 
     def calibration(self, p_left, p_right, nsites):

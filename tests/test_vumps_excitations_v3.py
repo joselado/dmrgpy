@@ -152,3 +152,91 @@ def test_switching_gs_method_after_idmrg_run_still_works():
     ic.gs_energy()
     ic.gs_method = "vumps"
     assert ic.excitation_energies(0.0, n=1)[0] == pytest.approx(2.0, abs=1e-6)
+
+
+def _heisenberg_chain(D, itensor_version=3):
+    ic = infinitechain.Infinite_Spin_Chain(["1/2", "1/2"], itensor_version=itensor_version)
+    h = (ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1] + ic.SzC[0] * ic.SzC[1]
+         + ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0] + ic.SzC[1] * ic.SzR[0])
+    ic.set_hamiltonian(h)
+    ic.gs_method = "vumps"
+    ic.maxm = D
+    ic.vumps_nrestarts = 6
+    return ic
+
+
+@pytest.mark.parametrize("model,D,dim", [("tfim", 2, 4), ("tfim", 3, 9),
+                                          ("tfim", 4, 16), ("heis", 2, 12),
+                                          ("heis", 3, 27), ("heis", 4, 48)])
+@pytest.mark.parametrize("nev", [1, 2, 3])
+def test_lanczos_h_eff_matches_the_dense_solver(model, D, dim, nev):
+    """Above `Chain::vumps_h_eff_dense_max_` the excitation ansatz solves
+    H_eff(k) by Lanczos on its action instead of assembling it -- the two
+    solvers must return the same energies, and the way to check that is on
+    ONE converged state, with the solver forced, rather than across two
+    runs whose ground states already differ.
+
+    `dense_max` is what forces it (a static constexpr cannot be
+    monkeypatched the way pyitensor's own `_DENSE_EIG_MAX` is): -1 keeps
+    the built-in threshold, so every chain here (dim<=48) takes the dense
+    path, and 0 puts the same chain on the Lanczos path.
+
+    The n_uc=2 Heisenberg rows are the ones that matter, and they are here
+    because they caught a real bug rather than to be thorough: their
+    H_eff(k) spectrum is pairwise degenerate away from k=0, and a plain
+    single-vector Lanczos finds only ONE copy of a degenerate eigenvalue,
+    so asking it for the lowest three returned three DISTINCT eigenvalues
+    (0.298598886, 0.299768235, 1.337377610 at k=0.37, D=2) where the dense
+    answer is 0.298598886 twice and then 0.299768235 -- everything after
+    the first copy shifted up, an error of 1.0 at nev=3, and every value
+    returned a genuine eigenvalue, so no residual test sees it. What fixes
+    it is the deflation and the per-run generic start vector in
+    `vx_lanczos_lowest`, which is what these rows pin."""
+    if nev >= dim:
+        pytest.skip("nev must be below the dimension for the iterative path")
+    ic = _tfim_chain(1.5, 3) if model == "tfim" else _heisenberg_chain(D)
+    if model == "tfim":
+        ic.gs_method = "vumps"
+        ic.maxm = D
+        ic.vumps_nrestarts = 6
+    ic.gs_energy()
+    session = ic._session3
+    for k in list(np.linspace(-np.pi, np.pi, 5)) + [0.37]:
+        dense = np.array(session.vumps_excitation_energies(k, nev, -1))
+        lanczos = np.array(session.vumps_excitation_energies(k, nev, 0))
+        assert len(lanczos) == len(dense)
+        assert lanczos == pytest.approx(dense, abs=1e-8)
+
+
+def test_momentum_resolvent_cache_does_not_leak_between_states():
+    """The two channel resolvents of the momentum most recently asked for
+    are cached on the Chain (`Chain::vumps_exc_resolvents`), so a chain
+    that solves a new ground state and is then asked about the SAME
+    momentum again must answer from the new state, not from the factors
+    the old one left behind. A stale cache would show up here as the D=1
+    field-only answer surviving into the D=2 chain."""
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.gs_method = "vumps"
+    ic.maxm = 1
+    ic.set_hamiltonian(2.0 * ic.SzC[0])
+    assert ic.excitation_energies(0.7, n=1)[0] == pytest.approx(2.0, abs=1e-6)
+
+    ic2 = _tfim_chain(1.5, 3)
+    ic2.gs_method = "vumps"
+    ic2.maxm = 2
+    ic2.vumps_nrestarts = 6
+    e_first = ic2.excitation_energies(0.7, n=1)[0]
+    # A second gs_energy() re-solves (infinitechain.py builds a fresh
+    # Chain each time rather than caching), so this asks the same
+    # momentum of a session that has never been asked it before, while
+    # the momentum walk below asks one session for several momenta in two
+    # different orders -- that walk is the direct test of the cache, this
+    # one only says the answer does not depend on the session's history.
+    ic2.gs_energy()
+    assert ic2.excitation_energies(0.7, n=1)[0] == pytest.approx(e_first, abs=1e-6)
+    # And the momentum scan itself must not depend on the order it is
+    # walked in, which a resolvent held for the wrong momentum would break.
+    ks = [0.0, 0.7, 1.9, np.pi]
+    forward = [ic2.excitation_energies(k, n=1)[0] for k in ks]
+    backward = [ic2.excitation_energies(k, n=1)[0] for k in reversed(ks)]
+    assert forward == pytest.approx(list(reversed(backward)), abs=1e-10)

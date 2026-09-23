@@ -299,14 +299,20 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "Chain::vumps_ground_state's own comment for the algorithm "
                "and scope (Hermitian, n_uc<=2, reach<=1 bonds only). "
                "Returns (e0, converged, niter_done, gauge_mismatch).")
-        .def("vumps_excitation_energies",[](Chain& self, double k, int n) {
-                return self.vumps_excitation_energies(k,n);
-            }, py::arg("k"),py::arg("n")=1,
+        .def("vumps_excitation_energies",[](Chain& self, double k, int n, int dense_max) {
+                return self.vumps_excitation_energies(k,n,dense_max);
+            }, py::arg("k"),py::arg("n")=1,py::arg("dense_max")=-1,
                "Lowest n tangent-space/quasiparticle excitation energies "
                "(above the ground state) at momentum k (radians per unit "
                "cell) -- requires vumps_ground_state to have been called "
                "first on this same Chain, see "
-               "Chain::vumps_excitation_energies's own comment.")
+               "Chain::vumps_excitation_energies's own comment. dense_max "
+               "overrides the size at or below which H_eff(k) is assembled "
+               "and diagonalized densely rather than solved by Lanczos on "
+               "its action (negative, the default, keeps the built-in "
+               "threshold); 0 forces the Lanczos path, which is how a test "
+               "checks the two solvers against each other on a chain small "
+               "enough for the dense answer to be the reference.")
         .def("vumps_onsite_expectation",[](Chain& self, std::string const& opname, int p) {
                 return self.vumps_onsite_expectation(opname,p);
             }, py::arg("opname"),py::arg("p"),

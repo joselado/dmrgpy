@@ -576,10 +576,47 @@ answer. Measured on a random left-canonical `n_uc=2` cell (one BLAS
 thread, taskset-pinned), the dominant right fixed point alone: 0.853 s →
 0.107 s at `chi=32`, 8.49 s → 0.477 s at `chi=48`, 41.8 s → 1.66 s at
 `chi=64` (8.0x/17.8x/25.2x), with `eta` agreeing to 2e-16 and the fixed
-point itself to 4e-17. `Es` is still built — the dense route below
-`_DENSE_EIG_MAX` needs it, and so does the fallback when ARPACK does not
-converge — so the *memory* profile is unchanged; this is a
-time-per-iteration win only. Both keep the dense route as an exact
+point itself to 4e-17. That first pass left `Es` itself built, so it
+bought time per iteration and no memory; the transfer chain went lazy in
+a second pass on 2026-09-22, as `idmrg.py`'s
+`_TransferChain`/`_transfer_chain`, which carry the same chain as the
+`(chi_l,d,chi_r)` site tensors it is built from and are accepted by
+`_transfer_chain_dim`, `_dominant_fixed_point` and both
+`_all_*_fixed_points`, so nothing on that path allocates a `chi^4` array
+at all. A lazy chain is deliberately *not* list-like, meaning that a
+leftover `Es[p]` or `list(Es)` written against the plain-list API raises
+`TypeError` rather than quietly materializing the chain again. What
+genuinely needs the composed matrices still gets them, through one
+`_compose_chain` helper that walks a lazy chain one position at a time:
+the dense eigensolve below `_DENSE_EIG_MAX`, the ARPACK
+non-convergence fallback, and `_dominant_eigenvalue_mixed`, which asks
+numpy for a whole spectrum and so needs the matrix to exist. Converted
+with it: `_CorrelatorEnv`, `_canonicalize_periodic`, `imps_overlap`'s
+two self-overlap solves, `idmrg_window`'s own window environment, and
+three places in `vumps.py` (`_canonicalize_raw`,
+`_transfer_fixed_points` for both the eigensolve and the residual, and
+`_to_mixed_gauge`). Left on the rank-4 route deliberately, and each for
+its own reason: `idmrg_excitations._mixed_fixed_points`, whose caller
+stores `E_RL`/`E_LR` on the `ExcitationEnvironment` for the resolvent
+solves anyway, so a matrix-free fixed point there removes no
+allocation; the `E_op` builders inside `vumps.py`'s two environment
+solves and `idmrg_excitations`' resolvent tensors, built once and
+applied thousands of times, which is a different question from this
+one; and `_expectation`, whose raw-`Es` API
+`tests/test_infinite_chain.py` exercises directly. Measured on a 2-site
+Heisenberg cell at `maxm=64`, threads pinned and seeded so the growth
+trajectory is identical either way: the tracemalloc peak of the first
+`vev` went 517.8 MB to 5.8 MB and of the growth loop 519.0 MB to
+10.4 MB, peak RSS 810.8 MB to 304.1 MB, and the growth loop 23.92 s to
+5.23 s. That last figure is a side effect rather than the point, and it
+says where the first pass had not reached: `_canonicalize_periodic`'s
+two fixed-point solves passed no `sites=` at all, so they were still on
+the rank-4 matvec. `gs_method="vumps"` at `D=16` is a wash rather than a
+win, 16.39 s to 16.11 s on a critical Heisenberg cell against a
+run-to-run spread on that box several times larger. The two contraction
+routes agree to 4.4e-16 on the fixed points and 5.8e-17 on
+`vev`/correlator on one converged state, and end to end, seeded, to
+5.6e-14 in the worst of four configurations. Both solvers keep the dense route as an exact
 fallback below a size
 threshold (`_DENSE_EIG_MAX`, `_DENSE_SOLVE_MAX`) and on non-convergence,
 so neither is less robust than what it replaced; `tests/
@@ -1316,12 +1353,65 @@ genuinely different problems, one-shot versus reusable.
 `excitation_energies(env, k, n, return_vectors=True)` additionally returns
 the tangent-space parameters `X` (the excitation tensor itself being
 `B = (V_L @ X).reshape(D, d_g, D)`), which the energies alone previously
-discarded. `spectral_weights` is what consumes them. This is
-`pyitensor`-only: the
-`itensor_version=3` port (`Chain::vumps_build_h_eff_dense`) still assembles
-`H_eff(k)` densely and rebuilds its resolvents per application, so the two
-backends now differ in cost (not in results — the cross-checks in
-`tests/test_vumps_excitations_v3.py` are unchanged and still pass).
+discarded. `spectral_weights` is what consumes them. Returning the
+vectors is still `pyitensor`-only, and it is now the only part of this
+that is: **both solver improvements above were ported to
+`itensor_version=3` on 2026-09-22** (ROADMAP item 10), so the two
+backends no longer differ in cost for
+`excitation_energies`/`excitation_gap`, and they never differed in
+results (`tests/test_vumps_excitations_v3.py`).
+
+`Chain::vumps_exc_resolvents` is the cache, holding the two resolvents
+of the momentum most recently asked for rather than a map over the whole
+scan, and `Chain::vx_resolvent_build`/`vx_resolvent_solve` keep that
+map's LU factorization, so the hundreds of solves one eigensolve asks
+for share one factorization instead of rebuilding and refactorizing a
+`D^2`-by-`D^2` map per application of `H_eff(k)`. The factorization is
+hand-rolled (`vx_lu_factor`/`vx_lu_solve`) for a mundane reason worth
+recording: ITensor wraps `zgesv` only, which factors and solves in one
+call and keeps its pivots to itself. Above
+`vx_resolvent_dense_max_ = 2048`, i.e. `D <= 45`, nothing is formed at
+all and each solve stays the matrix-free BiCGSTAB it already was.
+`Chain::vx_lanczos_lowest` is the second half, solving `H_eff(k)` on its
+action above `vumps_h_eff_dense_max_` and falling back to the dense path
+whenever it cannot vouch for what it found.
+
+Two things there do not carry over from the `"python"` side, and both
+were measured here rather than copied. The threshold is 64, not the 256
+`_DENSE_EIG_MAX` uses: one application of `H_eff(k)` solves four channel
+resolvents on this backend, so Lanczos already wins at `dim=36`, the
+smallest size tried, and 64 sits above that crossover while keeping
+every model the port was validated on (`dim<=48`) on the exact dense
+path. And a plain single-vector Lanczos is *wrong* for `n>1` here, since
+one Krylov space holds at most one direction out of a degenerate
+eigenspace and the `n_uc=2` Heisenberg cell's `H_eff(k)` is pairwise
+degenerate away from `k=0`: asked for the lowest three at `k=0.37`,
+`D=2`, it returned three distinct eigenvalues where two of them should
+have been the same one, an error of 1.0, with every returned value a
+genuine eigenpair that no residual test rejects. `vx_lanczos_lowest`
+therefore runs one deflated Lanczos per eigenvalue, each from its own
+generic start vector. The `"python"` side looks exposed to the same
+thing and is not, measured on that same cell at `D=2`: ARPACK's restarts
+recover the direction a single Krylov space cannot hold, so its
+iterative path returns both copies of every degenerate pair and agrees
+with its own dense path to 3.6e-15. The deflation is what this backend
+needs to reach the behaviour the other one already has, not a fix owed
+to both.
+
+Measured over a 3-momentum scan, threads pinned to one core, before
+against after: a `D=16` TFIM chain (dim 256) went 164.1 s to 10.3 s with
+the resolvent cache alone and to 1.8 s with both halves, and an `n_uc=2`
+Heisenberg chain at `D=10` (dim 300) went 15.6 s to 5.4 s to 1.2 s.
+Forcing the two eigensolvers against each other on one converged state,
+which is the only way to price the second half by itself, gives 5.3x at
+`dim=256` and 6.0x at `dim=432`. No returned number changes: dense
+against forced Lanczos on the same state agrees to 4.6e-11 over
+`D=2,3,4` at `n=1,2,3` on both models, the new build differs from the
+pre-change one by at most 1.3e-10 on TFIM against that build's own
+run-to-run scatter of 1.2e-10, and the agreement with
+`itensor_version="python"` stays at 2.7e-10, the figure the pre-change
+build gave too. At `D=16` the converged state itself moves by ~3e-5 from
+run to run, so that point prices the change and does not check it.
 
 **Spectral weights (`spectral_weights`, `_spectral_source_vector`)**:
 with the eigenvectors in hand, each branch's exact delta-peak residue
@@ -1330,8 +1420,11 @@ with the eigenvectors in hand, each branch's exact delta-peak residue
 `_spectral_source_vector` builds that `(Dx, D)` matrix `v` once per
 (momentum, operator). `Infinite_Many_Body_Chain.spectral_weights` /
 `dynamical_structure_factor` are the public surface, gated exactly like
-`excitation_energies` except that `itensor_version=3` is excluded too
-(`Chain::vumps_excitation_energies` returns energies only).
+`excitation_energies` except that `itensor_version=3` is excluded too:
+`Chain::vumps_excitation_energies` returns energies only, so neither the
+eigenvectors `X` nor the mixed-transfer source vector `v` exists on that
+backend. That is now the whole of the gap between the two ports, the
+solver half having been closed above.
 
 Putting the ket in mixed canonical form with its center where the bra's
 excitation tensor sits leaves only three regions — operator on the
@@ -4431,6 +4524,69 @@ always has, as do `submode="INV"`/`"CVM"` under `mode="ED"` and
 `submode="CVM"` were the three sitting off it, and were brought onto it
 rather than the other way round.
 
+**The two real-time routes joined that list on 2026-09-22, through one
+shared assembly point rather than per submode** (open item O1 of the
+2026-09 audit). `submode="TD"` and `submode="TDZ"` both end in a
+one-sided Fourier transform, which is a resolvent and not a density, so
+neither could be corrected by scaling: what they were missing is the
+`t<0` half of the transform. `timedependent.lehmann_density_from_one_sided`
+is where that half is supplied, and both submodes now call it instead of
+returning their transform directly (`timedependent.dynamical_correlator`
+and `tdz.py`'s own driver, which is why the complex-time contour needed
+no special case: the contour's damping `exp(-D_n*alpha*t)` is real and
+identical for a pair and for its adjoint). Architecturally it is a
+higher-order function: the submode hands it a `transform(pair)` closure
+carrying its own evolution, and *it* decides how many times to call it.
+`multioperatortk.canonical.is_dagger_pair` is that decision, and it is
+one-sided in the same way the Hermiticity proof next to it is: a proof
+that `A` is `B^dagger` collapses the combination to `Re F` and costs one
+evolution, anything unproven costs two, and a name with no known adjoint
+is refused rather than guessed, since `get_dagger()` would otherwise
+leave it untouched and the "adjoint" run would be the same run. The same
+pass fixed a parity defect one layer down: `edtk/timedependent.
+evolution_DC` put the caller's `A` on the ket and `B` on the bra, so
+`mode="ED"` returned `C[B,A]` where the DMRG route returns `C[A,B]`,
+invisible for as long as every test and example used one operator twice.
+One consumer of the same transform is deliberately left off this
+assembly, `timedependent.sxt_to_skomega`: it reduces `S(x,t)` to
+`S(k,omega)` and never sees the operator pair, so there is no adjoint
+pair for it to run.
+
+**`delta` is one broadening across five independent KPM
+implementations**, and the helper that makes it so is
+`algebra/kpm.py::polynomials_for_broadening` (open item O2 of the same
+audit). The Jackson kernel fixes the line width from the moment count,
+`FWHM = JACKSON_FWHM_FACTOR * half_width * sqrt(1-x^2) / npol` with
+`JACKSON_FWHM_FACTOR = 2*sqrt(2*ln2)*pi = 7.39786`, so choosing `npol`
+*is* choosing the broadening, and every route now solves that relation
+for `2*delta` at the band centre rather than picking a count of its own.
+Three of the five call the helper (`edtk/dynamics.py`,
+`pyitensor/chain.py`, `mpsjulialive/dynamics.py`, the last by
+construction only, since nothing has measured a line width on
+`itensor_version="julia_live"` and `dynamics.py`'s docstring declines to
+claim one); the two C++ backends
+cannot, so `mpscpp2/chain_session.h` and `mpscpp3/chain_session.h` each
+carry a `kpm_polynomials_for_broadening` transcription with the constant
+written out, each pointing back at the Python original. That duplication
+is the thing to keep in step when the relation is touched. The ED route
+additionally adopted the DMRG rescaling window, which is the part that
+is a dispatch decision rather than an arithmetic one: it used to anchor
+at the ground state over `3*max(|E_0|,|E_max-E_0|)` while the DMRG
+routes centre on the middle of the bandwidth, so even an identical
+moment count would have placed the same physical energy at a different
+Chebyshev `x`, where the kernel has a different width. `kpm_n_scale`
+survives as a multiplier on the calibrated count and its default moves
+from 3 to 1. One KPM path is deliberately outside this,
+`kpmdmrg.general_kpm_moments`: `get_distribution()` expands an arbitrary
+operator rather than the Hamiltonian, so there is no band whose centre
+the relation could be anchored to, and `delta` there still only sets a
+polynomial count. The `kpm_energy_truncate` route is inside it and worth
+one clarification: it takes the calibrated count like every other route,
+but rescales onto a ground-state-anchored window
+(`scaled_hamiltonian_gs_anchored`) rather than a bandwidth-centred one,
+so `FWHM = 2*delta` holds at the centre of *that* window and the
+`sqrt(1-x^2)` profile is read against it.
+
 Two mechanism notes on that move, because the two implementations respond
 to it very differently. `cvm.py` gets the advanced resolvent for free:
 its conjugate-gradient system `[(H-w-E0)^2 + eta^2] xc = -eta*B|GS>` is
@@ -4850,7 +5006,11 @@ term (`submode="KPM"`, delta=2e-5) agrees with the exact excited-state
 sum to 0.2% at every bias point; the "few tens of percent at
 thresholds" it was quoted at until 2026-09-12 was
 `secondorder_dc.py`'s own cumulative sum (a whole frequency bin
-attributed to one side of a threshold), now a trapezoid rule.
+attributed to one side of a threshold), now a trapezoid rule. The 0.2%
+predates the 2026-09-22 KPM broadening calibration (§4.8) and has not
+been re-measured against it; the term reads a cumulative integral of
+`S(w)`, which the sum rule pins independently of the moment count, so
+the recalibration is not expected to move it.
 
 The potential-interference term (`U!=0`, part of `order=3`) is also
 supported for `mode="DMRG"`, via `potentialdc.py`: its own `T=0` limit
@@ -4952,10 +5112,17 @@ a real `dt` and restore the input norm themselves, so they are unaffected
 too — their restore now also absorbs the small truncation drift that
 forced normalization used to mask.
 
-Current scope: only the "greater" branch of the correlator is computed
-(the same simplification `submode="TD"` already makes), fed into the
-same windowing/FFT tail as `"TD"` (factored out into
-`timedependent._fourier_transform_correlator` so both submodes share it).
+Current scope: only the "greater" branch of the correlator is simulated
+along the contour (the same simplification `submode="TD"` already
+makes), fed into the same windowing/FFT tail as `"TD"` (factored out
+into `timedependent._fourier_transform_correlator` so both submodes
+share it) and then into the same Lehmann assembly
+(`timedependent.lehmann_density_from_one_sided`, see §4.8), which is
+what supplies the `t<0` half and turns the one-sided transform into the
+density. The backward half comes from the adjoint pair on the *same*
+contour rather than from the paper's own second run at
+`alpha0 -> -alpha0`, which is affordable because the contour's damping
+of each Lehmann term is real and pair-independent.
 
 ### 4.10 Where "silently wrong" was structurally possible
 
@@ -5118,7 +5285,16 @@ four are patterns this list did not have.
   was missing was one place saying which quantity the library returns.
   That place is now `src/dmrgpy/dynamics.py`'s module docstring; §4.8
   above records the resolution, and every submode implementation points
-  at it.
+  at it. The same shape turned up twice more on 2026-09-22, which is why
+  it is worth recognizing rather than remembering: `submode="TD"`/
+  `"TDZ"` returned the one-sided transform their own algebra produced
+  rather than the density, and `delta` meant three different widths
+  under `submode="KPM"` depending on which route answered. Both were
+  resolved the same way as this one, by a normative statement plus a
+  single shared implementation
+  (`timedependent.lehmann_density_from_one_sided`,
+  `algebra/kpm.py::polynomials_for_broadening`) rather than by
+  correcting each route in place.
 
 - **A two-field switch with no rollback, i.e. a dispatch left
   *inconsistent* rather than taken too early.**

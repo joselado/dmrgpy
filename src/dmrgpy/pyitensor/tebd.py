@@ -34,6 +34,33 @@ Hamiltonian represents. bond_hamiltonians() asserts this explicitly rather
 than trusting it silently, so a non-parity-conserving term (which would
 need a JW string extending past the two-site bond, incompatible with a
 local gate) fails loudly instead of silently producing wrong physics.
+
+Where the arrays live
+---------------------
+This module is the one part of the engine whose NumPy calls are host work
+by design rather than an unported namespace, and it is worth saying which
+is which, because the two look identical in a `grep` for `np.`. Every
+`np.` call here sits in bond_hamiltonians()/_bond_gate(), which build one
+(d*d, d*d) matrix per bond out of the per-site matrices HTerm.resolve()
+returns. Those are host arrays at the source (sites/base.py builds every
+site operator with NumPy and nothing converts them), the matrix is
+exponentiated with scipy.linalg.expm, which has no device counterpart,
+and the result crosses to the device exactly once, at ITensor.__init__,
+which is backend.py's single conversion point. Routing any of it through
+backend.xp() would put a device to host and back round trip around expm
+and buy nothing, since a gate is built once at setup and reused
+unchanged for every one of the nt time steps (see this module's opening
+paragraph).
+
+The evolution itself, _apply_bond_gate() and step(), touches no NumPy at
+all: position(), the gate contraction and svd() are already dispatched,
+so the state stays wherever it was built. Measured on a 6-site spin chain
+at bond dimension 8 with the JAX backend selected, by recording the array
+type at every ITensor construction: one step() built 121 tensors and all
+121 came from a device array, and the only host traffic was the O(chi)
+singular-value spectra svd.py reads back to run its truncation rule, 21
+of them, of length 2, 4 and 8. So there was nothing to port here, which
+is a measurement rather than an assumption.
 """
 
 import numpy as np

@@ -35,7 +35,14 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 #     peak positions of the reconstructed spectrum. So KPM is checked by
 #     locating peaks in both spectra (scipy.signal.find_peaks) and
 #     matching each ED peak to the nearest KPM peak within a tolerance,
-#     rather than comparing values point-by-point.
+#     rather than comparing values point-by-point. Since the 2026-09
+#     audit's open item O2 the two are much closer than they were: both
+#     KPM routes now choose their moment count so the line comes out at
+#     FWHM = 2*delta at the band centre, the width ED's Lorentzian has
+#     (algebra/kpm.py::polynomials_for_broadening). What is left is the
+#     lineshape itself, near-Gaussian against Lorentzian, which at equal
+#     width and equal integrated weight stands about 1.6x higher at the
+#     peak, so the peak-position check above is still the right one.
 import numpy as np
 from scipy.signal import find_peaks
 from dmrgpy import spinchain

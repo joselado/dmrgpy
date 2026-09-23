@@ -44,6 +44,7 @@ import numpy as np
 from . import operatornames
 from . import multioperator
 from .timedependent import _fourier_transform_correlator
+from .timedependent import lehmann_density_from_one_sided
 
 _MAX_SUPPORTED_ORDER = 4  # explicit Appendix-B g^(n) formulas only go this far
 
@@ -281,15 +282,19 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
         reconstructed real-time correlator before that taper is applied,
         see `dynamicstk.linearprediction.linear_predict_extend`.
 
-    Note (current scope): only the "greater" branch
-    G>_{O1,O2}(t) ~ <B GS|exp(-iHt)A GS> is computed (A=O1^dagger, B=O2,
-    exactly evolution_dmrg_DC's own convention) and treated as the full
-    time-domain correlator fed to the FFT tail -- the same simplification
-    timedependent.py's own "TD" submode already makes (it computes but
-    never combines in a ga=conj(gr) "lesser" branch, see its
-    dynamical_correlator()). A genuine G< second run (the paper's Eq. 5,
-    alpha0->-alpha0 with O1<->O2 swapped) is a possible follow-up, not
-    required to match "TD"'s existing fidelity.
+    The second branch. Only the "greater" contour
+    G>_{O1,O2}(t) ~ <B GS|exp(-iHt)A GS> is evolved (A=O1^dagger, B=O2,
+    exactly evolution_dmrg_DC's own convention), and a one-sided
+    transform of it is a resolvent rather than the spectral density this
+    codebase returns. The missing half comes from the adjoint pair on the
+    *same* contour, not from the paper's own Eq. 5 second run at
+    alpha0->-alpha0: see timedependent.lehmann_density_from_one_sided,
+    which this shares with submode="TD". The contour does not obstruct
+    that identity, because the damping it puts on each Lehmann term,
+    exp(-D_n*alpha*t), is real and is the same for a pair and for its
+    adjoint, so conjugating the adjoint run reproduces the backward-time
+    half envelope and all. A pair that is provably its own adjoint, which
+    is every example here, still costs one run.
     """
     if nt is None:
         if tmax is None: nt = int(damping_periods/delta/dt)
@@ -297,16 +302,16 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
     tmax_eff = nt*dt
     omega0 = 2.*np.pi/tmax_eff  # paper's own convention: lowest resolvable frequency
 
-    name = operatornames.str2MO(self, name,
-            require_symbolic_for="submode='TDZ'", **kwargs)
-    O1, O2 = name[0], name[1]
-    A = O1.get_dagger()  # matches evolution_dmrg_DC's own A=O1.get_dagger()
-    B = O2
-
-    ts, cs = _complex_time_correlator(self, A, B, alpha0, n_max, dt, nt, omega0)
-    cs = cs.real - 1j*cs.imag  # match evolution_DC's own conjugation convention
-    return _fourier_transform_correlator(ts, cs, dt, es=es, window=window,
-            delta=delta, factor=factor, damping=damping, predict=predict,
-            lp_order=lp_order, lp_extend_factor=lp_extend_factor,
-            lp_fit_start_fraction=lp_fit_start_fraction,
-            lp_max_pole_radius=lp_max_pole_radius)
+    def transform(pair):
+        O1, O2 = pair[0], pair[1]
+        A = O1.get_dagger()  # matches evolution_dmrg_DC's own A=O1.get_dagger()
+        B = O2
+        ts, cs = _complex_time_correlator(self, A, B, alpha0, n_max, dt, nt,
+                omega0)
+        cs = cs.real - 1j*cs.imag  # match evolution_DC's conjugation convention
+        return _fourier_transform_correlator(ts, cs, dt, es=es, window=window,
+                delta=delta, factor=factor, damping=damping, predict=predict,
+                lp_order=lp_order, lp_extend_factor=lp_extend_factor,
+                lp_fit_start_fraction=lp_fit_start_fraction,
+                lp_max_pole_radius=lp_max_pole_radius)
+    return lehmann_density_from_one_sided(self, name, transform)

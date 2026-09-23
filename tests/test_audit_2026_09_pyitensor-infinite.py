@@ -208,6 +208,125 @@ def test_fixed_points_are_identical_with_and_without_the_matrix_free_matvec():
         assert abs(plain[1] - free[1]) == pytest.approx(0.0, abs=1e-10)
 
 
+def _left_canonical_cell(chi, d, nsites, seed):
+    """A list of exactly left-canonical (chi,d,chi) tensors, from the QR of
+    a random (chi*d, chi) matrix -- a legitimate converged unit cell as far
+    as the transfer machinery is concerned, with a nondegenerate leading
+    transfer eigenvalue of exactly 1, so ARPACK converges and the dense
+    fallback never fires for the wrong reason. Used instead of a real
+    ground state so the memory pin below costs milliseconds."""
+    rng = np.random.default_rng(seed)
+    cell = []
+    for _ in range(nsites):
+        M = rng.normal(size=(chi * d, chi)) + 1j * rng.normal(size=(chi * d, chi))
+        Q, _R = np.linalg.qr(M)
+        cell.append(Q.reshape(chi, d, chi))
+    return cell
+
+
+def test_the_fixed_point_solve_allocates_no_rank4_transfer_tensor():
+    """#20's MEMORY half: above `_DENSE_EIG_MAX` the fixed-point solve must
+    never materialize a (chi,chi,chi,chi) array. One of those is 268 MB at
+    chi=64, and `_CorrelatorEnv` used to hold one per cell site -- measured
+    at a 517.8 MB tracemalloc peak for the first `vev` on a 2-site cell at
+    maxm=64 (5.8 MB now), and 519.0 MB for the growth loop (10.4 MB now),
+    which reaches the same code through `_canonicalize_periodic`.
+
+    Asserted as a peak-allocation bound rather than a call count, since
+    that is the property the finding is about: one E4 at chi=32 is 16.8 MB,
+    ARPACK's own Krylov basis is ncv*chi^2*16 = 0.65 MB, and everything
+    else on this path is O(chi^2), so half an E4 leaves a wide margin
+    either way."""
+    import tracemalloc
+
+    chi, d, nsites = 32, 2, 2
+    assert chi * chi > idmrg._DENSE_EIG_MAX, "this must take the ARPACK route"
+    cell = _left_canonical_cell(chi, d, nsites, seed=7)
+    one_e4_bytes = chi ** 4 * 16
+
+    chain = idmrg._transfer_chain(cell, nsites)
+    tracemalloc.start()
+    try:
+        rho_after, eta = idmrg._all_right_fixed_points(chain, nsites)
+        l_before, eta_l, _scales = idmrg._all_left_fixed_points(chain, nsites)
+        _cur, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 0.5 * one_e4_bytes, (
+        "a rank-4 transfer tensor is being built on the lazy path "
+        "(peak {:.1f} MB against one E4 at {:.1f} MB)".format(
+            peak / 1e6, one_e4_bytes / 1e6))
+
+    # ... and it is the same answer the materializing route gives.
+    Es = idmrg._transfer_matrices(cell, nsites)
+    rho_ref, eta_ref = idmrg._all_right_fixed_points(Es, nsites)
+    l_ref, eta_l_ref, _s = idmrg._all_left_fixed_points(Es, nsites)
+    assert abs(eta - eta_ref) == pytest.approx(0.0, abs=1e-10)
+    assert abs(eta_l - eta_l_ref) == pytest.approx(0.0, abs=1e-10)
+    for a, b in zip(rho_after + l_before, rho_ref + l_ref):
+        assert np.max(np.abs(a - b)) == pytest.approx(0.0, abs=1e-10)
+
+
+def test_a_lazy_chain_refuses_list_indexing():
+    """#20: `_TransferChain` is deliberately not list-like, so any leftover
+    `Es[p]`/`list(Es)` written against the old plain-list API fails loudly
+    instead of quietly allocating chi^4 again."""
+    chain = idmrg._transfer_chain(_left_canonical_cell(4, 2, 2, seed=3), 2)
+    with pytest.raises(TypeError):
+        chain[0]
+    with pytest.raises(TypeError):
+        list(chain)
+    # The shapes are still readable, without building anything.
+    assert idmrg._transfer_shapes(chain) == [(4, 4, 4, 4), (4, 4, 4, 4)]
+
+
+def test_the_first_observable_never_touches_the_rank4_route():
+    """#20's memory half on the public surface: with a real converged
+    `gs_method="idmrg"` chain above the dense threshold, the first `vev`
+    (the call that builds `_CorrelatorEnv`) must not reach
+    `_transfer_matrices`, `_TransferChain.tensor` or the rank-4
+    applications at all. Deterministic, unlike a memory bound: every one of
+    those is monkeypatched to raise."""
+    ic = infinitechain.Infinite_Spin_Chain(["S=1/2"] * 2)
+    ic.set_hamiltonian(ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1]
+                       + ic.SzC[0] * ic.SzC[1]
+                       + ic.SxC[1] * ic.SxR[0] + ic.SyC[1] * ic.SyR[0]
+                       + ic.SzC[1] * ic.SzR[0])
+    ic.maxm, ic.maxiter = 12, 15
+    ic.gs_method = "idmrg"
+    ic.gs_energy()
+    result = ic._result
+    cell, n_cell = idmrg._correlator_cell(result)
+    chi = idmrg._to_array_lpr(cell[0]).shape[0]
+    assert chi * chi > idmrg._DENSE_EIG_MAX, (
+        "chi={} leaves the dense route, which legitimately builds a "
+        "composed tensor".format(chi))
+
+    def _forbidden(name):
+        def raiser(*a, **k):
+            raise AssertionError(
+                "{} was called on the lazy fixed-point path".format(name))
+        return raiser
+
+    saved = (idmrg._transfer_matrices, idmrg._TransferChain.tensor,
+             idmrg._apply_transfer, idmrg._apply_transfer_from_left)
+    idmrg._transfer_matrices = _forbidden("_transfer_matrices")
+    idmrg._TransferChain.tensor = _forbidden("_TransferChain.tensor")
+    idmrg._apply_transfer = _forbidden("_apply_transfer")
+    idmrg._apply_transfer_from_left = _forbidden("_apply_transfer_from_left")
+    try:
+        sz = idmrg.onsite_expectation(result, "Sz", 0)
+        c1 = idmrg.two_point_correlator(result, "Sz", 0, "Sz", 3)
+    finally:
+        (idmrg._transfer_matrices, idmrg._TransferChain.tensor,
+         idmrg._apply_transfer, idmrg._apply_transfer_from_left) = saved
+    # <Sz> is 0 by symmetry on a Heisenberg chain; this is a "a number came
+    # back, and it is the right one" check, not a convergence test, so the
+    # bound is loose enough for maxm=12.
+    assert abs(sz) < 1e-2
+    assert np.isfinite(c1.real) and abs(c1) > 1e-3
+
+
 # ------------------------------------------------------------- #8, #32 --
 
 def _compose_and_close(bra_arrays, ket_arrays, l, rho_R):
@@ -252,8 +371,12 @@ def test_window_environment_is_built_once_and_reused():
     a 4-step `td_dynamical_correlator`. They are functions of the converged
     `IDMRGResult` alone, so they belong on it.
 
-    Counted rather than timed: the number of `_transfer_matrices` calls a
-    run makes is the thing the fix changes."""
+    Counted rather than timed: the number of transfer-chain builds a run
+    makes is the thing the fix changes. The counter sits on
+    `_transfer_chain`, which is what the window environment builds since
+    #20's memory half landed (`_transfer_matrices`, the materializing
+    version, is no longer called on this path at all, so counting that one
+    would pass at zero forever)."""
     ic = infinitechain.Infinite_Spin_Chain(["S=1/2"] * 2)
     ic.set_hamiltonian(ic.SxC[0] * ic.SxC[1] + ic.SyC[0] * ic.SyC[1]
                        + ic.SzC[0] * ic.SzC[1]
@@ -264,22 +387,27 @@ def test_window_environment_is_built_once_and_reused():
     ic.gs_energy()
 
     calls = []
-    original = idmrg._transfer_matrices
+    original = idmrg._transfer_chain
 
     def counted(*a, **k):
         calls.append(1)
         return original(*a, **k)
 
-    idmrg_window._idmrg_mod._transfer_matrices = counted
+    idmrg_window._idmrg_mod._transfer_chain = counted
     try:
         ks, ws, skw = ic.td_dynamical_correlator(
             "Sz", 0, "Sz", n_window=6, dt=0.2, nt=3, maxdim=8,
             x_values=[-1, 0, 1])
     finally:
-        idmrg_window._idmrg_mod._transfer_matrices = original
-    # One build for the window environment; the pre-fix code made one per
-    # _close_array_chain call (18 here) plus local_expectation's own.
-    assert len(calls) <= 2, "the window environment is being rebuilt per call"
+        idmrg_window._idmrg_mod._transfer_chain = original
+    # One build for the window environment, plus _CorrelatorEnv's own; the
+    # pre-fix code made one per _close_array_chain call (18 here) plus
+    # local_expectation's own. Bounded below as well as above, so a later
+    # change that routes the environment through something else fails here
+    # rather than passing vacuously at zero.
+    assert 1 <= len(calls) <= 2, (
+        "the window environment is being rebuilt per call, or no longer "
+        "goes through _transfer_chain at all (counted {})".format(len(calls)))
     assert np.isfinite(skw).all() and np.max(np.abs(skw)) > 0.0
 
 

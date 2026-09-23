@@ -51,8 +51,20 @@ def evolution_ABA(self,h=None,A=None,B=None,**kwargs):
 
 
 def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,**kwargs):
-    """Special time evolution for the dynamical correlator"""
-    (A,B) = name[0],name[1] # get the operators
+    """Special time evolution for the dynamical correlator.
+
+    The operator convention is the DMRG backends' one (see
+    timedependent.evolution_dmrg_DC): the pair (A,B) the caller wrote
+    means the density sum_n <GS|A|n><n|B|GS>, so B is the operator that
+    acts on the ket and A the one that acts on the bra. This route used
+    to read the two the other way round and so returned the correlator
+    of the *swapped* pair, C[B,A) -- invisible whenever the two operators
+    are the same one, which is every example in the documentation, and
+    measured on the 2026-09 audit's own seeded 4-site complex-hopping
+    chain (A=Cdag_0, B=C_2) as agreeing with C[B,A] to 3.3e-04 while
+    mode="DMRG" agrees with C[A,B] to 2.6e-04, i.e. the two solvers
+    computed different quantities under one submode name."""
+    (A,B) = name[1],name[0] # get the operators, bra first
     Hop = self.get_operator(h) # return Hamiltonian
     Aop = self.get_operator(A) # return operator
     Bop = self.get_operator(B) # return operator

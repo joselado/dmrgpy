@@ -129,8 +129,14 @@ e0 = sc.gs_energy()
 print("ground state   DMRG %.10f   exact %.10f   (%.0f s)"%(
     e0,e0_exact,time.time()-t0))
 
-# delta is what sets the moment count: N = (emax-emin)/delta * kpm_n_scale
-delta = 2*abs(e0_exact)*sc.kpm_n_scale/PMAX
+# delta is what sets the moment count, through the Jackson-kernel
+# calibration algebra/kpm.py::polynomials_for_broadening applies:
+# N = JACKSON_FWHM_FACTOR*half_width/(2*delta) * kpm_n_scale, with
+# half_width = (emax-emin)*kpm_scale. Inverted here to land on PMAX
+# moments, using 2*|e0| as the usual stand-in for the bandwidth.
+from dmrgpy.algebra.kpm import JACKSON_FWHM_FACTOR
+delta = (JACKSON_FWHM_FACTOR*2*abs(e0_exact)*sc.kpm_scale
+         *sc.kpm_n_scale/(2*PMAX))
 t0 = time.time()
 mus,emin,emax,scale,npol,delta = sc.get_dynamical_correlator_moments(
         name=(sc.Sz[SITE],sc.Sz[SITE]),delta=delta)
@@ -172,7 +178,8 @@ def reconstruct(src,kern,n,eta=None,grid=None):
     _,y = kpmdmrg.dynamical_correlator_from_moments(
             SOURCES[src][:n],emin,emax,scale,n,
             ws_ref if grid is None else grid,kernel=kern,
-            delta=(emax-emin)*sc.kpm_n_scale/n,hodc_eta=eta)
+            delta=JACKSON_FWHM_FACTOR*sc.kpm_n_scale/(2*n*scale),
+            hodc_eta=eta)
     return y.real
 
 def rel_error(y,window):
@@ -256,7 +263,7 @@ assert max(gains) > 2.0, "HODC should beat Jackson on a smooth continuum"
 # (the dmrgpy default is spliced into the grid so the sweep's own
 # minimum and the default-eta number below are directly comparable)
 netas = np.sort(np.append(np.linspace(1.0,24.0,35),
-                          sc.kpm_n_scale/sc.kpm_scale))
+                          JACKSON_FWHM_FACTOR*sc.kpm_n_scale/2.))
 eta_scan = {src:[rel_error(reconstruct(src,"hodc",nbig,eta=ne/nbig/scale),w0)
                  for ne in netas] for src in SOURCES}
 print()
@@ -266,7 +273,7 @@ for src in SOURCES:
     print("%-5s moments, N=%d: HODC is best at N*eta=%.1f (err %.3e, "
           "%.1fx Jackson); at the default N*eta=%.1f it is %.3e"%(
           src,nbig,netas[i],eta_scan[src][i],ej/eta_scan[src][i],
-          sc.kpm_n_scale/sc.kpm_scale,
+          JACKSON_FWHM_FACTOR*sc.kpm_n_scale/2.,
           errors[(w0,src,"hodc")][-1]))
 
 
@@ -326,7 +333,7 @@ for src,ls,mk in (("exact","-","o"),("DMRG","--","s")):
                label="HODC m=6, %s moments"%src)
     a.axhline(errors[(w0,src,"jackson")][-1],color="C0",ls=ls,lw=1,
               label="Jackson, %s moments"%src)
-a.axvline(sc.kpm_n_scale/sc.kpm_scale,color="gray",ls=":",
+a.axvline(JACKSON_FWHM_FACTOR*sc.kpm_n_scale/2.,color="gray",ls=":",
           label="dmrgpy default $N\\eta$")
 a.set_xlabel("$N\\eta$   (regularization width $\\times$ moment count)")
 a.set_ylabel("relative $L_2$ error, smooth window")

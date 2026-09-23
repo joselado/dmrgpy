@@ -17,7 +17,7 @@ Status at a glance:
 | Phase 3, the KPM path (incl. energy truncation) | done, measured in Sec. 8 |
 | Phase 4, benchmark campaign | done (`benchmarks/gpu/`) |
 | Phase 5, docs / tests / example | done |
-| Phase 6, follow-ups | dispatch floor + TDVP + the four-point correlator + the TDZ complex-time correlator **done**; METTS **ported but not measured on a device** (Sec. 9 item 5); tebd/gse open; iDMRG/VUMPS deliberately not planned -- Sec. 9 |
+| Phase 6, follow-ups | dispatch floor + TDVP + the four-point correlator + the TDZ complex-time correlator **done**; METTS **ported but not measured on a device** (Sec. 9 item 5); tebd/gse **done, likewise not measured on a device** (Sec. 9 item 6); iDMRG/VUMPS deliberately not planned -- Sec. 9 |
 
 Site-specific operating detail (how these jobs were submitted on one
 particular cluster) is deliberately kept in this checkout's untracked
@@ -932,8 +932,84 @@ namespace swap.
    chi crossover. That would need batched-MPS evolution, i.e. real work,
    and should be priced against the measurement above before anyone
    starts it.
-6. **Cheap completeness: `tebd.py` (6 / 0 / 0), `gse.py` (7 / 0 / 0).**
-   No traps in either. `kpm_energy_truncation.py` is already done.
+6. **[done 2026-09-22] Cheap completeness: `tebd.py` (6 / 0 / 0),
+   `gse.py` (7 / 0 / 0).** Written here as the one item with no traps in
+   it. Half of that was right, and it was the other half that was worth
+   doing: `gse.py`'s silent-transfer column says 0 and the measurement
+   below says 3. Two of the three are easy to miss by eye, `concatenate`
+   taking a list rather than an array and `norm` living under
+   `np.linalg`, but how the count was made is not recorded, so what is
+   established here is that the number was wrong, not why.
+
+   *What landed.* `gse.py`'s `np.concatenate`, which joins `V1`'s existing
+   rows to `U2`'s new directions to form the enlarged basis, returns a
+   **host** array from device inputs, with no error, so the enlarged
+   tensor `res.A(b)` was rebuilt from the host once per bond and every
+   later contraction converted it back. Alongside it the two
+   `np.linalg.norm` calls that decide whether any new direction is worth
+   keeping each pulled the whole `(combined, combined)` matrix home to
+   produce one number. Now `bk.xp().concatenate`, `bk.zeros`, `bk.eye`,
+   and the two norms computed where the matrix lives with only the
+   scalars crossing, read one at a time so that the second is still not
+   computed when the first is zero (the order the host path evaluated
+   them in). `combined` stays on the host: it is `np.prod` over Python
+   ints, index bookkeeping rather than data. Two synchronizations per
+   bond is affordable in a way the same thing inside a Krylov recursion
+   would not be, since an expansion runs only for the leading
+   `tdvp_gse_sweeps` steps of an evolution (3 by default), not once per
+   step.
+
+   `tebd.py` needed nothing, and that is a measurement rather than a
+   concession. Every `np.` site in it sits in `bond_hamiltonians()`
+   and `_bond_gate()`, which build one `(d*d, d*d)` matrix per bond out of
+   the host matrices `HTerm.resolve()` returns and exponentiate it with
+   `scipy.linalg.expm`, which has no device counterpart; the gate crosses
+   once, at `ITensor.__init__`, at setup, and is reused unchanged for
+   every one of the `nt` steps. Both modules now carry a "Where the
+   arrays live" section saying which of their NumPy calls is host work by
+   design, because a `grep` for `np.` cannot tell that from an unported
+   namespace.
+
+   *Measured.* Bit-identity on the NumPy backend first, which is the
+   invariant Phase 1 set: the same quench (6-site Heisenberg, ground
+   state of a staggered field quenched to Heisenberg, `nt=30`, `dt=0.05`,
+   `maxm=20`) evolved with `tevol_method="TEBD"` and with `"TDVP_GSE"`
+   before and after the change gives trajectories equal under `==` on the
+   raw complex arrays, byte for byte, both methods. On JAX (CPU) the same
+   two trajectories are bit-identical to the pre-change JAX run as well,
+   `==` again, which says the port moved where the concatenation happens
+   and not what it computes; both agree with the NumPy reference at
+   1.2e-14 (TEBD) and 7.8e-15 (`TDVP_GSE`), unchanged by the port, a
+   different BLAS carried through 30 steps.
+
+   The transfer itself is invisible to a `backend.to_host` counter, since
+   none of the three calls goes through `to_host`: counting a 6-site
+   expansion's transfers that way reports 32 of them, all of size 24 or
+   less, and misses the whole thing. Recording the array type at every
+   `ITensor` construction instead shows it directly. One
+   `global_subspace_expand` at bond dimension 8 built 229 tensors, of
+   which **5 came from a host array, exactly one per bond**, and 0 do
+   now. The same recorder on one TEBD `step()` reports 121 of 121 from a
+   device array both before and after, which is how the "nothing to port"
+   conclusion above was reached rather than assumed.
+   `tests/test_pyitensor_gpu_compatibility.py` pins all of it:
+   cross-backend agreement for `TDVP_GSE` (new; `TEBD` was already
+   covered there, on an observable that was identically zero by symmetry,
+   so both now run the quench above instead) and the two residency
+   assertions, which are what
+   agreement cannot make, since a round trip returns the same numbers and
+   only costs time. Restoring the `np.concatenate` line on its own makes
+   `test_gse_keeps_every_tensor_on_the_device` fail on the extra
+   `ndarray` entry, which is the negative control an assertion of this
+   shape needs before it is worth keeping.
+
+   *No device measurement.* This was run on a machine whose
+   `jax.devices()` is a `CpuDevice` only, so there is no speedup column
+   here and none of the numbers above is one. JAX on CPU exercises the
+   same dispatch, the same immutability and the same conversion points,
+   which is what catches a silent transfer; what it cannot say is where
+   GSE's own crossover sits, and nothing else in this document predicts
+   it either. `kpm_energy_truncation.py` was already done.
 
 Not worth doing now, with reasons rather than silence:
 

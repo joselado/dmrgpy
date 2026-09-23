@@ -224,7 +224,14 @@ class Many_Body_Chain():
           # can need a different entanglement structure than the GS.
       self.kpm_scale = 0.7 # scaling of the spectra for KPM
       self.kpm_accelerate = True # set to true
-      self.kpm_n_scale = 3 # scaling factor for the number of polynomials
+      # Multiplier on the calibrated number of Chebyshev moments, whose
+      # base value (algebra/kpm.py::polynomials_for_broadening) already
+      # makes the KPM line FWHM = 2*delta at the band centre, the width
+      # the resolvent submodes give for the same delta. So 1 asks for the
+      # broadening you asked for and larger values buy a sharper curve at
+      # proportionally higher cost. It defaulted to 3 while the base count
+      # was the uncalibrated round((emax-emin)/delta).
+      self.kpm_n_scale = 1 # multiplier on the calibrated polynomial count
       self.gs_from_file = False # start from a random wavefunction
       self.excited_from_file = False # read excited states
       self.e0 = None # no ground state energy
@@ -955,7 +962,15 @@ class Many_Body_Chain():
       if mode=="DMRG":
           return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED":
-          return self.get_ED_obj().get_dynamical_correlator(**kwargs)
+          edobj = self.get_ED_obj()
+          # The KPM route reads the rescaling window and the moment-count
+          # multiplier off the chain, and an EDchain keeps no reference
+          # back to the one that built it -- so push them across here,
+          # the same shape as kpmdmrg._sync_kpm_energy_truncation pushing
+          # the truncation knobs onto a session.
+          edobj.kpm_scale = self.kpm_scale
+          edobj.kpm_n_scale = self.kpm_n_scale
+          return edobj.get_dynamical_correlator(**kwargs)
   def get_spectral_function(self,*args,**kwargs):
       """Single-particle spectral function A_ij(w) of a fermionic chain,
       assembled from the eigenstates of the N+1 and N-1 particle-number

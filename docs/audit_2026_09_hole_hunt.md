@@ -40,7 +40,8 @@ not-comparable list, and each finding's own `**Status**` line and the
 "Numbers changing" notes in the fix reports carry the detail.
 
 Two further items, found while re-measuring this record's own claims rather
-than by a lens, are open and unfixed: see "Open items found while correcting
+than by a lens, were open and unfixed when this record was written and were
+both fixed on 2026-09-22: see "Open items found while correcting
 this record" below the findings.
 
 ## The eight lenses
@@ -1394,7 +1395,7 @@ Minor overstatement worth noting: the "cached" column in cache2.py pre-warms get
 
 `optimization` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `pyitensor-performance`
 
-**Status**: PARTIAL -- the compute half landed, the memory half did not. `idmrg._apply_site_transfer` gained an explicit `bra` (default `A`, so every existing call is byte-identical) and a missing left-action mirror, and `_dominant_fixed_point(..., sites=(ket_arrays, bra_arrays))` swaps ONLY the ARPACK matvec for the matrix-free site walk -- `v0`, `k=2`, `ncv` and `tol` are untouched, so the two routes solve the identical eigenproblem. `Es` is still MATERIALIZED, for the dense route below `_DENSE_EIG_MAX`, as the non-convergence fallback and for the propagation steps that need it, so the memory half of this finding -- the ~540 MB peak at chi=64, one E4 tensor being 268 MB -- is UNCHANGED. Making it lazy means touching every `env.Es` consumer (`_expectation`, `two_point_correlator`, `_canonicalize_periodic`, `imps_overlap`, the `_all_*_fixed_points` propagation steps), a larger refactor than the other four findings in this cluster combined. Still on the E4 route and not converted: `vumps.py:344/831/835/1497` and `idmrg_excitations.py:442`, all single-site transfers where the chi^4 build is once per call rather than per Krylov iteration. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_matrix_free_site_transfer_matches_the_rank4_application` (both directions, with and without a mixed bra) and `::test_fixed_points_are_identical_with_and_without_the_matrix_free_matvec`.
+**Status**: FIXED, in two passes. The compute half landed first: `idmrg._apply_site_transfer` gained an explicit `bra` (default `A`, so every existing call is byte-identical) and a missing left-action mirror, and `_dominant_fixed_point(..., sites=(ket_arrays, bra_arrays))` swaps ONLY the ARPACK matvec for the matrix-free site walk -- `v0`, `k=2`, `ncv` and `tol` are untouched, so the two routes solve the identical eigenproblem. The memory half landed on 2026-09-22, as `idmrg._TransferChain`/`_transfer_chain`: the same transfer chain carried as the (chi_l,d,chi_r) site tensors it is built from, accepted by `_transfer_chain_dim`, `_dominant_fixed_point` and both `_all_*_fixed_points` (the propagation steps go through `_apply_position`), so nothing on the lazy path allocates a chi^4 array at all. It is deliberately NOT list-like, meaning that a leftover `Es[p]`/`list(Es)` written against the plain-list API raises TypeError rather than quietly materializing again. A materialized chain is still built by the dense eigensolve below `_DENSE_EIG_MAX`, by the ARPACK non-convergence fallback and by `_dominant_eigenvalue_mixed`, all three through one `_compose_chain` helper that walks a lazy chain one position at a time. Converted: `_CorrelatorEnv`, `_canonicalize_periodic`, `imps_overlap`'s two self-overlap solves, `idmrg_window`'s own window environment, and `vumps.py`'s `_canonicalize_raw`, `_transfer_fixed_points` (both the eigensolve and the residual, once per VUMPS iteration) and `_to_mixed_gauge`. Measured on a 2-site Heisenberg cell at maxm=64, threads pinned, seeded so the growth trajectory is identical before and after: the tracemalloc peak of the first `vev` went 517.8 MB -> 5.8 MB and of the growth loop 519.0 MB -> 10.4 MB (the growth loop reaches the same code through `_canonicalize_periodic`, which the audit had not measured), peak RSS 810.8 MB -> 304.1 MB, growth 23.92 s -> 5.23 s and the first `vev` 0.892 s -> 0.458 s (min of 3), with `e0`, `vev` and an r=1..7 correlator sweep identical to every printed digit. `gs_method="vumps"` at D=16, where `_transfer_fixed_points` now takes the matrix-free route once per iteration, is a wash rather than a win at that size: min of 4 seeded runs, 16.39 s -> 16.11 s on the critical Heisenberg cell and 5.70 s -> 5.31 s on the gapped Ising one, with a run-to-run spread on this shared box (up to 29.5 s) far larger than the difference and `e0` identical to 2e-15 in every run, so the spread is the machine and not the solver. On the same converged state, both routes run in one process, the fixed points agree to 4.4e-16 and the observables to 5.8e-17 on a critical Heisenberg cell at chi=40 and a gapped transverse-field Ising cell at chi=9; end to end across four seeded configurations (both models, both `gs_method` values) the worst difference is 5.6e-14, on the VUMPS ones. Left on the E4 route deliberately: `idmrg_excitations._mixed_fixed_points`, whose `E_RL`/`E_LR` its caller stores on the `ExcitationEnvironment` for the resolvent solves anyway, so a matrix-free fixed point there removes no allocation; `_dominant_eigenvalue_mixed`, which asks numpy for the whole spectrum of the composed matrix, so that matrix has to exist; `vumps.py`'s `E_op` builders in `_solve_left_environment`/`_solve_right_environment` and `idmrg_excitations`' resolvent tensors, built once and applied thousands of times, which is a different question from this one; and `_expectation`, whose raw-`Es` API `tests/test_infinite_chain.py` exercises directly. Pinned by `tests/test_audit_2026_09_pyitensor-infinite.py::test_matrix_free_site_transfer_matches_the_rank4_application` (both directions, with and without a mixed bra), `::test_fixed_points_are_identical_with_and_without_the_matrix_free_matvec`, `::test_the_fixed_point_solve_allocates_no_rank4_transfer_tensor` (a tracemalloc peak below half of one E4, plus the same-answer check), `::test_a_lazy_chain_refuses_list_indexing` and `::test_the_first_observable_never_touches_the_rank4_route` (every rank-4 entry point monkeypatched to raise during a real first `vev`).
 
 **Where**: `src/dmrgpy/pyitensor/idmrg.py:2344-2420 (_dominant_fixed_point's matvec), :1985-2010 (_transfer_matrices), :2278-2283 (_CorrelatorEnv.__init__); reached from infinitechain.vev/correlator with gs_method="idmrg"`
 
@@ -2184,16 +2185,76 @@ part. `src/dmrgpy/dynamics.py`'s module docstring now says exactly this
 `tdz.py:46` imports `_fourier_transform_correlator` from it -- so TDZ is not an
 independent second case.
 
-**Not fixed, deliberately.** Bringing them onto the convention means returning
-`np.real(...)` of that transform (or reconstructing `i(G^R-G^A)/(2pi)` from the
-time series), which changes every TD/TDZ number on the most commonly used
-real-time route -- a second numbers-changing correlator fix on top of the four
-finding #5 already made, on the one submode family whose output most users plot
-directly. It was left for a pass that can re-baseline the TD examples and the
-user guide's TD figures at the same time. Note `_fourier_transform_correlator`'s
-own in-line comment still describes the codebase convention as
-`S_AB = -(1/pi) Im G_AB`, which finding #5 superseded; that comment is part of
-the same fix, not a separate one.
+**Status**: FIXED on 2026-09-22, and the route taken is not either of the two
+this entry proposed. Returning `np.real(...)` of the transform would have been
+wrong rather than partial: on a complex-weight pair the real part carries the
+dispersive `Im(M_n)(w-D_n)` term, and measured on the chain below it is off by
+2.15e-01 against a peak of 0.2313, i.e. *worse* than leaving the transform
+whole (1.16e-01). What the fix uses instead is an identity. For `t>0`,
+
+    C(-t) = <GS|B e^{+i(H-E_0)t} A|GS>
+          = conj( <GS|A^dagger e^{-i(H-E_0)t} B^dagger|GS> ),
+
+so the backward half of the pair `(A,B)` is the conjugate of the *forward* half
+of the pair `(B^dagger,A^dagger)`, which the same machinery already computes.
+With a transform kernel satisfying `K(-t) = conj(K(t))`, the two halves give
+
+    C_AB = ( F[(A,B)] + conj(F[(B^dagger,A^dagger)]) ) / 2,
+
+and the `1/pi` the one-sided transform already carried becomes the `1/(2pi)`
+the two-sided one needs. When `A` is provably `B^dagger` the adjoint pair *is*
+the original pair and this collapses to `Re F` exactly, so the common case, and
+every example in the documentation, still costs one evolution rather than two;
+`canonical.is_dagger_pair` is the test and it refuses rather than guesses for a
+name with no known adjoint, which costs a second evolution and never a wrong
+number. `timedependent.lehmann_density_from_one_sided` holds it and both
+submodes go through it. The complex-time contour does not obstruct the identity
+either: the damping TDZ puts on each Lehmann term, `exp(-D_n*alpha*t)`, is real
+and is the same for a pair and for its adjoint.
+
+Measured against an exact Lehmann sum built by dense diagonalization outside
+dmrgpy, on this audit's own seeded 4-site complex-hopping chain
+(`complex_hopping_chain()`, A=Cdag_0, B=C_2, `max|Im M_n| = 0.271`, exact peak
+0.2313, es = linspace(-1,6,60), delta=0.4, dt=0.1), `max|y - exact|`:
+
+```
+submode="TD",  mode="DMRG"   1.16e-01  ->  2.57e-04
+submode="TD",  mode="ED"     2.76e-01  ->  2.57e-04
+submode="TDZ", mode="DMRG"   1.13e-01  ->  3.31e-02
+```
+
+and on a 4-site Heisenberg chain with the Hermitian pair A = B = Sz_0 (peak
+0.1869, delta=0.3) the imaginary part goes from 1.11e-01, 60% of that peak, to
+exactly zero, with `max|y - exact|` going 1.11e-01 -> 2.82e-04. TDZ keeps
+3.31e-02 of its own: that is its contour plus its Taylor-in-alpha0
+reconstruction, the same error measured as 1.8e-2 on a Hermitian pair above,
+and it is not a convention question.
+
+**A second defect, found while fixing this one and fixed with it.** The
+`mode="ED"` row above moved further than the others because that route
+additionally read the operator pair in the opposite order:
+`edtk/timedependent.evolution_DC` put the caller's `A` on the ket and `B` on
+the bra, so it returned `C[B,A]` where the DMRG route and every other submode
+return `C[A,B]`. Confirmed by matching the ED output against each candidate
+density in turn, with the combination above already applied and the order
+not yet fixed: `C[B,A]` to 3.3e-04, `C[A,B]` to 2.95e-01. The 2.76e-01
+in the table is therefore the two defects together, which is what a
+caller saw. Invisible
+whenever the two operators are the same one, which is every example.
+
+`_fourier_transform_correlator`'s in-line comment describing the convention as
+`S_AB = -(1/pi) Im G_AB` is superseded along with the rest. Numbers change: any
+`submode="TD"`/`"TDZ"` spectrum from before this is not comparable, its
+imaginary part most of all. Pinned by
+`tests/test_audit_2026_09_correlator-conventions.py`
+(`test_real_time_submodes_return_the_complex_lehmann_density`,
+`test_real_time_result_on_a_hermitian_pair_is_real`,
+`test_a_self_adjoint_pair_still_costs_one_evolution`,
+`test_a_pair_that_is_not_its_own_adjoint_takes_the_second_evolution`,
+`test_the_two_solvers_read_the_operator_pair_in_the_same_order`). Still on the
+raw transform, and deliberately: `timedependent.sxt_to_skomega`, the
+infinite-chain `S(k,omega)` reduction, whose input never names the operator
+pair.
 
 
 ### O2. mode="ED" and mode="DMRG" disagree pointwise under the DEFAULT submode="KPM", and the disagreement is not about the operator pair
@@ -2231,14 +2292,64 @@ below): `edtk/dynamics.py::dynamical_correlator_kpm` uses `delta` to choose a
 polynomial count (`n = int(2*scale/delta)`, `npol = 4n`), not as a broadening,
 and the DMRG side chooses its own independently.
 
-**Recorded as unexplained.** Which of the two (if either) realizes `delta=` as
-the caller's broadening, and whether the two should be made to agree at all for
-a Chebyshev kernel, is not established here -- it is a convention question about
-what `delta` means for KPM, and answering it needs a decision, not just a
-measurement. Not caused by this audit's fixes: the check that first reported it
-ran the comparison on the pre-fix tree as well and saw the same disagreement
-there (that half is its record; everything re-measured above is on the post-fix
-tree only).
+**Status**: FIXED on 2026-09-22. The decision this entry asked for was taken:
+`delta` means the same broadening under KPM that it means in the resolvent
+submodes, a line of FWHM `2*delta`. Neither route realized it, and they missed
+it differently in *two* independent ways, which is why the disagreement was
+larger than either error alone.
+
+The rescaling window. `mode="DMRG"` centres the spectrum on the middle of the
+many-body bandwidth and rescales so it fills `kpm_scale` of the Chebyshev
+interval; `mode="ED"` anchored at the ground state and used
+`3*max(|E_0|,|E_max-E_0|)`, three times the bandwidth on a small chain, so most
+of its Chebyshev domain covered empty spectrum. The moment count. The Jackson
+kernel turns a delta peak at rescaled energy `x` into a line of width
+`sigma = pi*sqrt(1-x^2)/npol` (Weisse et al., RMP 78, 275 (2006)), so the
+physical FWHM is `2*sqrt(2*ln2)*pi * half_width * sqrt(1-x^2) / npol`. Measured
+directly on five chain/delta combinations, that constant comes out at 6.9 to
+7.2 on the DMRG route and 7.45 to 7.77 on the ED one against the analytic
+7.3979, the spread being the kernel's own asymptotics at the `npol` of 9 to 51
+these rules produced. Neither rule solved that relation for `2*delta`: the DMRG
+count `round((emax-emin)/delta)*kpm_n_scale` gave about `1.6*delta` at the band
+centre and the ED count `4*int(2*scale/delta)` about `0.93*delta`.
+
+Both now share `algebra/kpm.py::polynomials_for_broadening`, which solves the
+relation, and the ED route adopted the DMRG rescaling so the two have the same
+`x` at the same physical energy. `kpm_n_scale` keeps its documented meaning as
+a multiplier on that count and its default moves from 3 to 1, since the base
+count is now the calibrated one. Measured with `A = B = Sz_0`, `max|ED-DMRG|`
+against the resolvent peak on the same grid:
+
+```
+chain / delta                before     after     peak of submode="INV"
+4-site Heisenberg, 0.15     4.42e-01   1.32e-02          0.3553
+6-site Heisenberg, 0.20     2.11e-01   1.26e-02          0.1950
+6-site + field,    0.25     1.56e-01   1.09e-02          0.1637
+```
+
+so a disagreement of 95 to 124 per cent of the resolvent peak becomes 4 to 7.
+The sum rule was satisfied before and is satisfied after, 0.250000 against an
+exact 0.250000 on both routes, which is exactly why it could not see this.
+
+Two residuals are documented rather than removed, both properties of the
+kernel. The width is `2*delta` at the band centre and tightens as
+`sqrt(1-x^2)` towards the edges: no single moment count gives one width across
+a band. And the Jackson line is near-Gaussian, so at equal FWHM and equal
+integrated weight its peak stands about 1.6x higher than a Lorentzian of the
+same width, measured 0.315 against 0.195 on a 6-site chain at delta=0.2. A
+`delta` comparable to the bandwidth now calibrates to a handful of moments,
+which stops being a spectrum at all (on a 2-site chain of bandwidth 1,
+delta=0.6 gives 4 moments and a peak 0.12 wide, narrower than delta=0.15
+gives), so the count is floored at 16 and the line comes out sharper than
+requested there instead of unrepresentable.
+
+`get_distribution()`'s own KPM path (`kpmdmrg.general_kpm_moments`, still
+`int(3*scale/delta)`) is deliberately NOT on this calibration: it expands an
+arbitrary operator rather than the Hamiltonian, so `delta` there still only
+sets a polynomial count. That is a third meaning of the same keyword and is
+recorded here as open. Pinned by
+`tests/test_audit_2026_09_correlator-conventions.py::test_ed_and_dmrg_kpm_agree_pointwise`
+and `::test_kpm_moment_count_is_calibrated_to_the_requested_broadening`.
 
 
 ---

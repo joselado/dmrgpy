@@ -26,6 +26,17 @@ solve, so roundoff from a different BLAS carries through). The other
 calculations here ran unchanged and agree to 1e-11..1e-16; they are
 pinned so that stays true.
 
+The same sweep run again on 2026-09-22, for the last two unported
+modules (docs/pyitensor_gpu_port_plan.md Sec. 9 item 6), found the other
+shape of the same problem in **GSE** (pyitensor/gse.py): it ran on a
+device and gave the right answer, and rebuilt one tensor per bond on the
+host while doing it, because `np.concatenate` on device inputs returns a
+host array rather than raising. Agreement cannot see that, so the two
+residency tests at the end of this file assert on the array type
+instead. TEBD (pyitensor/tebd.py) was measured the same way and needed
+nothing: its NumPy calls build the bond gates once at setup and the
+evolution itself never leaves the device.
+
 Skipped when JAX is not installed; not skipped on a CPU-only JAX, for the
 reason tests/test_pyitensor_gpu_backend.py gives (same code path, same
 immutability, just slower). Sizes are tiny for the same reason too.
@@ -144,17 +155,50 @@ def test_conserved_sector_ground_state_matches_numpy(numpy_backend_restored):
     assert got[0] == pytest.approx(ref[0], abs=1e-9)
 
 
-def test_tebd_matches_numpy(numpy_backend_restored):
-    def build():
-        sc = _heisenberg(6)
-        sc.tevol_method = "TEBD"
-        wf = sc.Sx[0] * sc.get_gs()
-        wf = wf * (1.0 / np.sqrt(abs(wf.dot(wf))))
-        _, sz = timedependent.evolve_and_measure(sc, operator=sc.Sz[1],
-                                                 nt=20, dt=0.05, wf=wf)
-        return sz
+def _quench_sz(n, tevol_method, nt=20, dt=0.05, **chain_attrs):
+    """<Sz_0>(t) after preparing the ground state of a staggered field
+    (plus a little XY, so it is not a product state) and quenching to
+    Heisenberg.
 
-    ref, got = _on_both(build)
+    The observable has to be chosen with some care here, and the obvious
+    choice is empty: evolving Sx[0]|GS> of a uniform Heisenberg chain and
+    measuring Sz[1] gives identically zero, because that state is
+    invariant under a global pi rotation about x, which flips Sz and
+    commutes with H. Measured, the whole trajectory sits at ~1e-13, so
+    a cross-backend comparison of it compares roundoff to roundoff and
+    an integrator that had corrupted the state would still pass. The
+    quench below carries <Sz_0> ~ -0.49 instead; measured on a 30-step
+    version of it, the two array backends agree at 1.2e-14 for TEBD and
+    7.8e-15 for TDVP_GSE, which is what sets the 1e-9 the callers assert.
+    """
+    sc = spinchain.Spin_Chain([2] * n, itensor_version="python")
+    sc.tevol_method = tevol_method
+    sc.maxm = 20
+    sc.nsweeps = 8
+    for name, value in chain_attrs.items():
+        setattr(sc, name, value)
+
+    h0 = 0
+    for i in range(n):
+        h0 = h0 + (-1) ** i * sc.Sz[i]
+    for i in range(n - 1):
+        h0 = h0 + 0.3 * (sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1])
+    h1 = 0
+    for i in range(n - 1):
+        h1 = h1 + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1] \
+            + sc.Sz[i] * sc.Sz[i + 1]
+
+    sc.set_hamiltonian(h0)
+    wf = sc.get_gs()
+    sc.set_hamiltonian(h1)
+    _, sz = timedependent.evolve_and_measure(sc, operator=sc.Sz[0],
+                                             nt=nt, dt=dt, wf=wf)
+    return sz
+
+
+def test_tebd_matches_numpy(numpy_backend_restored):
+    ref, got = _on_both(lambda: _quench_sz(6, "TEBD"))
+    assert np.max(np.abs(ref.real)) > 0.4, "the observable is trivially zero"
     assert np.max(np.abs(got - ref)) < 1e-9
 
 
@@ -185,3 +229,115 @@ def test_non_hermitian_dmrg_matches_numpy(numpy_backend_restored):
 
     ref, got = _on_both(build)
     assert got[0] == pytest.approx(ref[0], abs=1e-9)
+
+
+def _itensor_source_types(run):
+    """The array type every ITensor built during `run()` was constructed
+    from, as a Counter.
+
+    This is the only way to see the class of host transfer
+    docs/pyitensor_gpu_port_plan.md Sec. 5 warns about. A free NumPy
+    function applied to a device array, `np.concatenate` being the one
+    that mattered here, returns a *host* array with no error and no
+    exception, and the next ITensor built from it silently converts back:
+    the numbers are identical and only the time changes. A `backend.
+    to_host` counter cannot see it either, since none of those calls goes
+    through `to_host`. The array type does.
+    """
+    from collections import Counter
+
+    from dmrgpy.pyitensor.tensor import ITensor
+
+    seen = []
+    real_init = ITensor.__init__
+
+    def recording_init(self, inds, array=None):
+        real_init(self, inds, array)
+        if array is not None:
+            # isinstance, not type(...).__name__: jaxlib's concrete array
+            # class has already moved module once and its name is not API,
+            # while jax.Array is.
+            seen.append("host" if isinstance(array, np.ndarray)
+                        else "device" if isinstance(array, jax.Array)
+                        else type(array).__name__)
+
+    ITensor.__init__ = recording_init
+    try:
+        run()
+    finally:
+        ITensor.__init__ = real_init
+    return Counter(seen)
+
+
+def _gse_sweep_on(sites, terms, chi=8):
+    """One global_subspace_expand() call on a random MPS, which is the
+    whole of pyitensor/gse.py's array work."""
+    from dmrgpy.pyitensor.autompo import AutoMPO
+    from dmrgpy.pyitensor.gse import global_subspace_expand
+    from dmrgpy.pyitensor.mpobuilder import to_mpo
+    from dmrgpy.pyitensor.mpsalgebra import randomMPS
+
+    H = to_mpo(AutoMPO.from_terms(sites, terms))
+    psi = randomMPS(sites, chi)
+    psi.position(1)
+    return lambda: global_subspace_expand(H, psi, 3, 1e-8, maxdim=20,
+                                          bond_maxdim=20)
+
+
+def _heisenberg_terms(n):
+    return [(1.0, [(op, i), (op, i + 1)])
+            for i in range(1, n) for op in ("Sx", "Sy", "Sz")]
+
+
+def test_tdvp_gse_matches_numpy(numpy_backend_restored):
+    """tevol_method="TDVP_GSE" is one-site TDVP plus pyitensor/gse.py's
+    Krylov basis enrichment for the leading tdvp_gse_sweeps steps, so it
+    is the only route that exercises gse.py at all. tdvp_gse_sweeps is 5
+    of the 20 steps rather than the default 3, so the expansion runs on a
+    state that has already evolved."""
+    ref, got = _on_both(lambda: _quench_sz(
+        6, "TDVP_GSE", tdvp_gse_sweeps=5, tdvp_gse_krylov_order=3,
+        tdvp_gse_cutoff=1e-8))
+    assert np.max(np.abs(ref.real)) > 0.4, "the observable is trivially zero"
+    assert np.max(np.abs(got - ref)) < 1e-9
+
+
+def test_gse_keeps_every_tensor_on_the_device(numpy_backend_restored):
+    """The regression for gse.py's port. `np.concatenate` of V1's rows
+    with U2's new directions returned a host array from device inputs, so
+    the enlarged tensor res.A(b) was rebuilt on the host once per bond:
+    measured at 5 host-sourced tensors out of the 229 a 6-site expansion
+    builds, exactly one per bond. Agreement cannot see that, which is why
+    this asserts on the array type instead."""
+    from dmrgpy.pyitensor.sites import SiteX
+
+    n = 6
+    bk.set_backend("jax")
+    sites = SiteX([2] * n)   # 2 = SpinHalfSite (siteset.TYPE_CODE_TO_SITE)
+    counts = _itensor_source_types(_gse_sweep_on(sites, _heisenberg_terms(n)))
+    assert sum(counts.values()) > 100, counts
+    assert set(counts) == {"device"}, counts
+
+
+def test_tebd_keeps_every_tensor_on_the_device(numpy_backend_restored):
+    """tebd.py was never ported and did not need to be: its NumPy calls
+    build the bond Hamiltonians and exponentiate them with scipy, once at
+    setup, and the gate crosses to the device at ITensor.__init__ like
+    any other array. What matters is that the *evolution* adds no further
+    crossing, so this pins a step() rather than the setup."""
+    from dmrgpy.pyitensor.mpsalgebra import randomMPS
+    from dmrgpy.pyitensor.sites import SiteX
+    from dmrgpy.pyitensor.tebd import TEBDEvolver
+
+    n = 6
+    bk.set_backend("jax")
+    sites = SiteX([2] * n)
+    psi = randomMPS(sites, 8)
+    psi.position(1)
+    evolver = TEBDEvolver(sites, _heisenberg_terms(n), 0.05, 1e-10, 20)
+    gates = list(evolver._gates_half.values()) + list(evolver._gates_full.values())
+    assert gates and all(isinstance(g.array, jax.Array) for g in gates)
+
+    counts = _itensor_source_types(lambda: evolver.step(psi))
+    assert sum(counts.values()) > 100, counts
+    assert set(counts) == {"device"}, counts

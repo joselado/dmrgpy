@@ -52,8 +52,8 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Non-Hermitian generalized eigenproblem | ✅ | ✅ | ✅ | Same story as above, one level up (`gs_energy_generalized_nhdmrg`; `mpsjulialive/generalized.jl`'s `get_gs_generalized_nhdmrg` wraps the same outer loop around real ITensorNHDMRG.jl sweeps). v2 still excluded. |
 | iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. Both `gs_method` values are now on v3 too: `"idmrg"` (`Chain::idmrg_ground_state`) and `"vumps"` (`Chain::vumps_ground_state`, C++ port of `pyitensor/vumps.py` — dense LAPACK-based linear algebra, not ITensor tensor-network objects, see that method's own doc comment for why; the default on BOTH backends since 2026-08-08). Cross-checked directly against `itensor_version="python"`'s own VUMPS at `D=1,2,3` on TFIM and Heisenberg (n_uc=1 and 2), matching to ~1e-10 or tighter — see `tests/test_vumps_v3.py`. |
 | iDMRG vev / two-point correlator | 🟡 | ✅ | ❌ | pyitensor covers both `gs_method`s: `"idmrg"` (`idmrg.py`, dominant-right-fixed-point eigenproblem on `IDMRGResult.U_list`) and `"vumps"` (`vumps.py`, exact contraction on `VUMPSResult`'s mixed-gauge `{AC, AR}` — no eigenproblem needed, since `AL`/`AR` are already canonical by construction; see `vumps.py`'s own "Static correlators" section, following arXiv:1810.07006 Eq.(34)/(37)-(39)). v3 covers `gs_method="vumps"` only (`Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`, a line-for-line C++ port of the same AC/AR formula, same dense-LAPACK-array approach as `vumps_ground_state`/`vumps_excitation_energies`) — `gs_method="idmrg"` still has no correlator machinery on v3 at all (`IdmrgResult` keeps no per-sublattice `U_list`, same gap `idmrg_ground_state`'s own doc comment already documents). Cross-checked directly against `itensor_version="python"`'s own VUMPS correlators on TFIM at `D=2,3`, matching to ~1e-14 or tighter, plus the same exact D=1 closed-form cases (field-polarized product state, decoupled singlet dimer) both backends already had — see `tests/test_vumps_correlator_v3.py`. |
-| iDMRG excitation ansatz (quasiparticle, tangent-space) | ✅ | ✅ | ❌ | `Chain::vumps_excitation_energies` (C++ port of `pyitensor/idmrg_excitations.py`, same dense-array approach as `vumps_ground_state`) — requires `gs_method="vumps"` on both backends. Cross-checked directly against `itensor_version="python"` across a full momentum scan at `D=1,2,3` on TFIM (n_uc=1) and Heisenberg (n_uc=2), matching to ~1e-10 (TFIM, gapped) or ~1e-4..1e-7 (Heisenberg, gapless/critical — both backends land on slightly different local optima of the same non-convex restart search, not a discrepancy in the algorithm itself) — see `tests/test_vumps_excitations_v3.py`. Any `D>=1` is supported, matching pyitensor. |
-| iDMRG excitation spectral weights / `S(k,w)` | ❌ | ✅ | ❌ | `Infinite_Many_Body_Chain.spectral_weights`/`dynamical_structure_factor` (`pyitensor/idmrg_excitations.py`'s `spectral_weights`/`_spectral_source_vector`) give each quasiparticle branch's exact delta-peak residue `|<k,a|O(k)|Psi>|^2`, i.e. a momentum-resolved dynamical structure factor directly in the thermodynamic limit — no finite window, unlike `kpm_finite`/`td_dynamical_correlator`. `return_total=True` adds the branch-complete total, which is exactly the connected static structure factor (a one-site operator applied to a uniform MPS lies exactly in the tangent space), so `weights.sum()/total` measures how much of the response the single-mode picture carries. Not ported to v3: `Chain::vumps_excitation_energies` returns energies only — no eigenvectors, no mixed-transfer source vector — deferred for the same reason it has not picked up the iterative eigensolver (`docs/idmrg_improvement_plan.md` item 1). Validated four ways: the exact product-state limit, the static sum rule against an independent real-space `correlator` sum, the f-sum rule, and — sharpest — the S=1 **AKLT** point, whose ground state is exactly a D=2 MPS, where the closed-form structure factor and Arovas-Auerbach-Haldane's single-mode dispersion (PRL 60, 531 (1988), which the first moment must reproduce exactly) both come out to ~5e-15, and the SU(2) triplet/quintuplet split with its ΔS selection rule emerges rather than being imposed. On the pure Haldane chain the k=π gap converges monotonically to the literature 0.4104789 while the sum rule holds identically at every D. See `tests/test_infinite_chain_spectral.py`, `examples/idmrg/dynamical_structure_factor_tfim/main.py` and `examples/idmrg/haldane_structure_factor/main.py`. |
+| iDMRG excitation ansatz (quasiparticle, tangent-space) | ✅ | ✅ | ❌ | `Chain::vumps_excitation_energies` (C++ port of `pyitensor/idmrg_excitations.py`, same dense-array approach as `vumps_ground_state`) — requires `gs_method="vumps"` on both backends. Cross-checked directly against `itensor_version="python"` across a full momentum scan at `D=1,2,3` on TFIM (n_uc=1) and Heisenberg (n_uc=2), matching to ~1e-10 (TFIM, gapped) or ~1e-4..1e-7 (Heisenberg, gapless/critical — both backends land on slightly different local optima of the same non-convex restart search, not a discrepancy in the algorithm itself) — see `tests/test_vumps_excitations_v3.py`. Any `D>=1` is supported, matching pyitensor. Both of the solver improvements the pure-Python implementation carries are on v3 too since 2026-09-22 (item 10 below): the channel resolvents are built once per momentum and kept with their LU factorization rather than rebuilt inside every application of `H_eff(k)`, and `H_eff(k)` is solved by Lanczos on its action above `vumps_h_eff_dense_max_` instead of being assembled. A 3-momentum scan at `D=16` on TFIM went from 164.1 s to 1.8 s and at `D=10` on the `n_uc=2` Heisenberg cell from 15.6 s to 1.2 s, the latter on a state that came out the same either way, its dispersion agreeing to 1.2e-11. |
+| iDMRG excitation spectral weights / `S(k,w)` | ❌ | ✅ | ❌ | `Infinite_Many_Body_Chain.spectral_weights`/`dynamical_structure_factor` (`pyitensor/idmrg_excitations.py`'s `spectral_weights`/`_spectral_source_vector`) give each quasiparticle branch's exact delta-peak residue `|<k,a|O(k)|Psi>|^2`, i.e. a momentum-resolved dynamical structure factor directly in the thermodynamic limit — no finite window, unlike `kpm_finite`/`td_dynamical_correlator`. `return_total=True` adds the branch-complete total, which is exactly the connected static structure factor (a one-site operator applied to a uniform MPS lies exactly in the tangent space), so `weights.sum()/total` measures how much of the response the single-mode picture carries. Not ported to v3: `Chain::vumps_excitation_energies` returns energies only, and so does `Chain::vx_lanczos_lowest` underneath it, so what is missing there is the eigenvectors and the mixed-transfer source vector built from them, not the eigensolver itself, which was ported on 2026-09-22 (item 10 below, and `docs/idmrg_improvement_plan.md` item 1, whose own text predates that). Validated four ways: the exact product-state limit, the static sum rule against an independent real-space `correlator` sum, the f-sum rule, and — sharpest — the S=1 **AKLT** point, whose ground state is exactly a D=2 MPS, where the closed-form structure factor and Arovas-Auerbach-Haldane's single-mode dispersion (PRL 60, 531 (1988), which the first moment must reproduce exactly) both come out to ~5e-15, and the SU(2) triplet/quintuplet split with its ΔS selection rule emerges rather than being imposed. On the pure Haldane chain the k=π gap converges monotonically to the literature 0.4104789 while the sum rule holds identically at every D. See `tests/test_infinite_chain_spectral.py`, `examples/idmrg/dynamical_structure_factor_tfim/main.py` and `examples/idmrg/haldane_structure_factor/main.py`. |
 | iDMRG local excitation gap (deflation-based, `D`-capable) | ❌ | ✅ | ❌ | pyitensor only (`idmrg.py::local_excitation_gap`/`local_excitation_gap_windowed`). |
 | iDMRG dynamical correlator (finite-window KPM reduction) | ❌ | ✅ | ❌ | `infinitechain.py::kpm_finite` is gated to `itensor_version="python"` only. |
 | iDMRG real-time window dynamics (IBC-style TDVP, `td_dynamical_correlator`) | ✅ | ✅ | ❌ | Both wired (`idmrg_window.py` for pyitensor, `mpscpp3/chain_session.h`'s `td_dynamical_correlator_window` for v3); Phase 2+ generic sweep machinery beyond the current window construction is still pyitensor-only groundwork (`idmrg_window.py`'s own Phase 0-1 notes). **Fermionic (parity-odd) operator pairs are supported since 2026-08-29** on both backends — the Jordan-Wigner string is threaded across the window on the ket before the evolution and across the bra at measurement, pinned by the exact `S(x,t=0) == correlator(...)` identity and by the free-fermion Green function `<c†_x(t) c_0>` at `t>0` (`tests/test_idmrg_window_fermionic.py`, `examples/idmrg/fermionic_dynamical_correlator/main.py`); an odd-total-parity pair raises. **Four pre-existing bugs were found and fixed on the way**, all operator-independent. (1) The bra applied `A` where the contraction's own conjugation needs `A†` (silently `<A†_x ... B_0>`, invisible for Hermitian names). (2) Every `S(x,t)` carried a spurious global factor, because the window Hamiltonian's energy baseline is measured with the window's boundary legs *traced* while correlators close them with the transfer-matrix fixed points — now cancelled on **both** backends by co-evolving an unperturbed vacuum window and dividing by its `<ψ|ψ(t)>` through the identical contraction (the dimerized-XX free-fermion residual went from ~0.07, previously blamed on iDMRG convergence, to ~1e-5; v3's own `exp(+i*eshift*t)` estimate of the same factor, and with it the whole `eshift` measurement, is gone). (3) v3's window tiled the raw per-micro-step `idmrg_U_` factors instead of the gauge-consistent cell every other v3 static observable uses, missing the t=0 identity by up to 1.7e-1 even on a spin chain, on a model whose energy density the two backends agree on to 6.7e-11 — shape and finiteness looked fine throughout, which is how it survived; it now tiles the *raw* (un-re-gauged) cell `idmrg_cell_raw_`, whose outer legs are literally the environment caps, with the closures moved onto that cell's own left/right transfer fixed points plus a ground-state calibration denominator. (4) A latent index-stride bug in `idmrg_close_array_chain` indexed the bra's left axis with the bra's *right* extent — silent for as long as every tiled tensor was square, and wrong the moment it is not (a dimerized spinless chain at `maxm=20` converges to a (18,20)/(20,18) cell, where it put `S(x,0)` at 0.83 against an exact 0.51). Both backends are now exact on the t=0 identity to ~1e-15 and agree on `S(x,t)`; see `examples/idmrg/td_dynamical_correlator_python_VS_v3/main.py`, which evaluates it at *every* `x` — comparing at `x=0` alone, the one point a gauge error cannot touch, is what let (3) survive in the first place. |
@@ -334,21 +334,64 @@ model-specific exception:
    `infinitechain.py` exposes for `gs_method="idmrg"`.
 
 10. **The excitation ansatz's solver improvements, mirrored on
-   `itensor_version=3`.** `pyitensor/idmrg_excitations.py` now caches the
-   momentum-dependent channel resolvents per momentum instead of rebuilding
-   them inside every `_h_eff_action` call (they depend only on `k` and the
+   `itensor_version=3`.** Done, both halves, on 2026-09-22.
+   `pyitensor/idmrg_excitations.py` caches the momentum-dependent channel
+   resolvents per momentum instead of rebuilding them inside every
+   `_h_eff_action` call (they depend only on `k` and the
    momentum-independent environment, never on the excitation tensor `B`),
    and solves `H_eff(k)` by Lanczos on its action rather than by assembling
-   it once the eigenproblem exceeds `_DENSE_EIG_MAX`. Neither changes a
-   returned number — both are cross-checked against the dense path in
-   `tests/test_infinite_chain.py`. `mpscpp3/chain_session.h`'s
-   `Chain::vumps_build_h_eff_dense` is an independent port carrying the same
-   rebuild-per-application pattern in `vx_regularized_solve`'s callers, and
-   still assembles `H_eff(k)` densely, so the two backends now differ in
-   cost (not results) for `excitation_energies`/`excitation_gap`. Mirroring
-   at least the resolvent cache there is the natural follow-up; a C++
-   Lanczos is separate work again. See `docs/idmrg_improvement_plan.md`,
-   which also ranks what else is worth doing on infinite chains.
+   it once the eigenproblem exceeds `_DENSE_EIG_MAX`;
+   `mpscpp3/chain_session.h` now has both.
+   `Chain::vumps_exc_resolvents` holds the two resolvents of the momentum
+   most recently asked for, and `Chain::vx_resolvent_build`/
+   `vx_resolvent_solve` keep that map's LU factorization, so the hundreds
+   of solves one eigensolve asks for share one factorization instead of
+   rebuilding and refactorizing a `D^2`-by-`D^2` map per application (the
+   factorization is hand-rolled, `vx_lu_factor`/`vx_lu_solve`: ITensor
+   wraps `zgesv` only, which factors and solves in one call and keeps its
+   pivots to itself). `Chain::vx_lanczos_lowest` then solves `H_eff(k)` on
+   its action above `vumps_h_eff_dense_max_`, falling back to the dense
+   path whenever it cannot vouch for what it found. Measured over a
+   3-momentum scan, threads pinned to one core, before against after: a
+   `D=16` TFIM chain went from 164.1 s to 1.8 s and an `n_uc=2`
+   Heisenberg chain at `D=10` from 15.6 s to 1.2 s, the resolvent cache
+   carrying 164.1 s to 10.3 s and 15.6 s to 5.4 s of that and the Lanczos
+   solver the rest. Forcing the two solvers against each other on one
+   converged state, which is the only way to price the second half by
+   itself, it is 5.3x at `dim=256` and 6.0x at `dim=432`. Numbers are
+   unchanged: dense against forced Lanczos on the same state agrees to
+   4.6e-11 over `D=2,3,4` at `n=1,2,3` on both models, the new build
+   differs from the pre-change one by at most 1.3e-10 on TFIM at
+   `D=1,2,3` against that build's own run-to-run scatter of 1.2e-10, and
+   the agreement with `itensor_version="python"` over the same scan is
+   2.7e-10, the figure the pre-change build gave too. At `D=16` the
+   converged state itself moves by ~3e-5 from run to run, so that point
+   prices the change and does not check it.
+   Two things there are worth knowing before touching it. The threshold is
+   64, not the 256 `_DENSE_EIG_MAX` uses, because the crossover is not
+   transferable between the two backends and was measured again here: one
+   application of `H_eff(k)` solves four channel resolvents, so Lanczos
+   already wins at `dim=36`, the smallest size tried (see the measurement
+   table at `vumps_h_eff_dense_max_`), and 64 is above that while keeping
+   every model the port was validated on, `dim<=48`, on the exact dense
+   path. And a single-vector Lanczos cannot return a degenerate eigenvalue
+   twice, which the `n_uc=2` Heisenberg cell does away from `k=0`: asked
+   for the lowest three at `k=0.37`, `D=2`, it returned three distinct
+   eigenvalues where two of them should have been the same one, an error
+   of 1.0, with every returned value a genuine eigenpair that no residual
+   test rejects. `vx_lanczos_lowest` therefore runs one deflated Lanczos
+   per eigenvalue, each from its own generic start vector, and
+   `tests/test_vumps_excitations_v3.py` pins the pair of solvers against
+   each other on exactly that model. The `"python"` side, which asks
+   ARPACK for all `n` pairs at once from one constant start vector, looks
+   exposed to the same thing and is not: measured on that same cell at
+   `D=2`, its iterative path returns both copies of every degenerate pair
+   and agrees with its own dense path to 3.6e-15, ARPACK's restarts
+   recovering the direction a single Krylov space cannot hold. So the
+   deflation is what this backend needs to reach the behaviour the other
+   one already has, not a fix owed to both.
+   See `docs/idmrg_improvement_plan.md`, which also ranks what else is
+   worth doing on infinite chains.
 
 After adding a capability to a backend, update this file's matrix and,
 if it's a new physics-facing method, `docs/user_guide.md`/`.tex` per

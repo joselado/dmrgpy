@@ -1989,6 +1989,19 @@ def _to_array_lpr(U):
     return U.array.reshape((1,) + U.array.shape)
 
 
+def _as_lpr(A):
+    """The (chi_l, d, chi_r) array of a cell tensor given either as an
+    ITensor (the shape `U_list`/`cell_list` carry) or as a plain array
+    already (the shape vumps.py's own AL/AR carry).
+
+    Tested on `inds` rather than on `isinstance(A, np.ndarray)` so a
+    device array (see `backend.py`) is passed through as the array it is
+    instead of being mistaken for an ITensor."""
+    if hasattr(A, "inds"):
+        return _to_array_lpr(A)
+    return A
+
+
 def _transfer_matrices(U_list, n_uc, bra_list=None):
     """[E_p] for p=0..n_uc-1, each a (chi_l,chi_l,chi_r,chi_r) array (or
     (chi_l_ket,chi_l_bra,chi_r_ket,chi_r_bra) when `bra_list` differs from
@@ -1997,10 +2010,17 @@ def _transfer_matrices(U_list, n_uc, bra_list=None):
     IDMRGResult so apply_mpo's own canonicalization can reuse it on its own
     intermediate (not-yet-converged IDMRGResult) tensors too.
 
-    `bra_list=None` (the default, used by every caller except
-    `imps_overlap`) means the ordinary *self*-overlap transfer tensor,
-    ket-times-conj(same tensor) -- what onsite_expectation/
-    two_point_correlator/_canonicalize_periodic all need. Passing a
+    Materializes every position at once, so it costs one chi^4 array per
+    cell site: 268 MB per site at chi=64. Prefer `_transfer_chain`, whose
+    `_TransferChain` carries the same chain as the site tensors it is
+    built from and is accepted by every fixed-point entry point here; this
+    function is kept for callers that genuinely want the tensors
+    themselves, and for the tests that compare the two routes against each
+    other.
+
+    `bra_list=None` (the default) means the ordinary *self*-overlap
+    transfer tensor, ket-times-conj(same tensor), which is what every
+    static observable on a single state needs. Passing a
     *different* periodic tensor list computes the *mixed* transfer tensor
     between two distinct states instead -- what `imps_overlap` needs to
     compute <bra|ket> between two independently converged iMPS, which may
@@ -2010,8 +2030,8 @@ def _transfer_matrices(U_list, n_uc, bra_list=None):
         bra_list = U_list
     Es = []
     for p in range(n_uc):
-        A = _to_array_lpr(U_list[p])
-        Bc = _to_array_lpr(bra_list[p])
+        A = _as_lpr(U_list[p])
+        Bc = _as_lpr(bra_list[p])
         Es.append(np.einsum('lpr,LpR->lLrR', A, np.conj(Bc)))
     return Es
 
@@ -2226,10 +2246,12 @@ def _expectation(Es, running, running_id, rho_after_j, k_start, n_cell):
     operators dropped (`running_id`), so any residual normalization error
     cancels between the two rather than only mostly cancelling.
 
-    Kept for `_canonicalize_periodic`-style callers that hold only a raw
-    `Es`; the static observables themselves go through `_correlator_env`
-    (which caches `_all_left_fixed_points`, by far the expensive part here)
-    and close with `_close_expectation` directly."""
+    Kept for the raw-`Es` API `tests/test_infinite_chain.py` exercises
+    directly; `_canonicalize_periodic`, which used to be the shape of
+    caller this was kept for, holds a lazy `_TransferChain` now and never
+    called this anyway. The static observables themselves go through
+    `_correlator_env` (which caches `_all_left_fixed_points`, by far the
+    expensive part here) and close with `_close_expectation` directly."""
     l_before, _eta, _scales = _all_left_fixed_points(Es, n_cell)
     return _close_expectation(l_before[k_start % n_cell],
                               _apply_transfer(running, rho_after_j),
@@ -2288,10 +2310,116 @@ def _apply_site_transfer_from_left(A, M, rho, bra=None):
     return np.tensordot(tmp, np.conj(B), axes=([0, 1], [0, 1]))  # (r, R)
 
 
+class _TransferChain:
+    """The same per-position transfer tensors `_transfer_matrices` returns,
+    kept as the (chi_l,d,chi_r) site tensors they are built from rather
+    than materialized as (chi_l,chi_l,chi_r,chi_r) arrays.
+
+    The whole point is the memory. A materialized transfer tensor is
+    chi^4 complex numbers, meaning that one of them is 268 MB at chi=64 and
+    1.36 GB at chi=96, and the two places that used to build a full list of
+    them -- `_CorrelatorEnv` for the static observables and
+    `_canonicalize_periodic` inside the growth loop -- each held one per
+    cell site at once. Measured on a 2-site Heisenberg cell at maxm=64,
+    tracemalloc peak was 517.8 MB for the first `vev` and 519.0 MB for the
+    growth loop, against 5.8 MB and 10.4 MB with this class. Nothing about
+    any returned number changes, since every consumer either walks the site
+    tensors in O(chi^3 d) (`apply_right`/`apply_left`, the exact
+    re-association `_apply_site_transfer` documents) or asks for one
+    position's tensor at a time (`tensor`).
+
+    Deliberately NOT list-like: no `__getitem__`, no `__iter__`. A leftover
+    `Es[p]`/`list(Es)`/`Es[1:]` written against the old plain-list API is
+    then a loud TypeError rather than a silent chi^4 allocation, which is
+    exactly the property the memory regression test pins.
+
+    `bra_list=None` means the ordinary self-overlap chain; a different
+    `bra_list` is the mixed ket-times-conj(bra) chain `imps_overlap` needs,
+    the same distinction `_transfer_matrices` itself draws."""
+
+    def __init__(self, U_list, n_uc, bra_list=None):
+        self.ket = [_as_lpr(U_list[p]) for p in range(n_uc)]
+        self.bra = (self.ket if bra_list is None
+                    else [_as_lpr(bra_list[p]) for p in range(n_uc)])
+        self.n_uc = n_uc
+
+    def __len__(self):
+        return self.n_uc
+
+    def shape(self, p):
+        """The (l_ket,l_bra,r_ket,r_bra) shape position p's transfer tensor
+        WOULD have, read off the site tensors without building it."""
+        k, b = self.ket[p], self.bra[p]
+        return (k.shape[0], b.shape[0], k.shape[2], b.shape[2])
+
+    def tensor(self, p):
+        """Position p's materialized (l,L,r,R) transfer tensor -- the one
+        route that costs chi^4, kept for the dense eigensolve below
+        `_DENSE_EIG_MAX` and for `_compose_chain`'s fallbacks, where the
+        whole point is a matrix that has to exist."""
+        return np.einsum('lpr,LpR->lLrR', self.ket[p], np.conj(self.bra[p]))
+
+    def apply_right(self, p, rho):
+        """`_apply_transfer(E_p, rho)`, matrix-free."""
+        return _apply_site_transfer(self.ket[p], None, rho, bra=self.bra[p])
+
+    def apply_left(self, p, rho):
+        """`_apply_transfer_from_left(E_p, rho)`, matrix-free."""
+        return _apply_site_transfer_from_left(self.ket[p], None, rho,
+                                              bra=self.bra[p])
+
+
+def _transfer_chain(U_list, n_uc, bra_list=None):
+    """`_transfer_matrices`' lazy counterpart: the same transfer chain, as
+    a `_TransferChain` that never materializes a chi^4 tensor unless a
+    route genuinely needs one. Every fixed-point entry point below accepts
+    either this or the plain list `_transfer_matrices` returns."""
+    return _TransferChain(U_list, n_uc, bra_list=bra_list)
+
+
+def _transfer_shapes(Es):
+    """The (l,L,r,R) shape of every position's transfer tensor, for either
+    representation and without materializing anything."""
+    if isinstance(Es, _TransferChain):
+        return [Es.shape(p) for p in range(len(Es))]
+    return [E.shape for E in Es]
+
+
+def _compose_chain(Es):
+    """The whole chain composed into one rank-4 transfer tensor, for the
+    routes that genuinely need the matrix itself: the dense eigensolve
+    below `_DENSE_EIG_MAX`, the non-convergence fallback, and
+    `_dominant_eigenvalue_mixed`. A `_TransferChain` is walked one position
+    at a time, so the peak is at most three chi^4 tensors (the running
+    product, the position being composed in, and their product) rather
+    than one per cell site plus the product."""
+    if isinstance(Es, _TransferChain):
+        T4 = Es.tensor(0)
+        for p in range(1, len(Es)):
+            T4 = _compose(T4, Es.tensor(p))
+        return T4
+    T4 = Es[0]
+    for E in Es[1:]:
+        T4 = _compose(T4, E)
+    return T4
+
+
+def _apply_position(Es, p, rho, side):
+    """One position's transfer tensor applied to a boundary matrix, taking
+    the matrix-free route when `Es` is a `_TransferChain` and the
+    materialized one when it is the plain list `_transfer_matrices`
+    returns. Exactly the same number either way."""
+    if isinstance(Es, _TransferChain):
+        return (Es.apply_right(p, rho) if side == "right"
+                else Es.apply_left(p, rho))
+    return (_apply_transfer(Es[p], rho) if side == "right"
+            else _apply_transfer_from_left(Es[p], rho))
+
+
 class _CorrelatorEnv:
     """Everything a static observable on a converged unit cell needs that
     does NOT depend on which operator is being measured: the tiled cell, its
-    per-position transfer tensors, and both families of transfer-matrix
+    per-position transfer chain, and both families of transfer-matrix
     fixed points.
 
     Cached on the result object (`_correlator_env`) because it is both
@@ -2306,19 +2434,21 @@ class _CorrelatorEnv:
 
     def __init__(self, result):
         self.cell, self.n_cell = _correlator_cell(result)
-        self.Es = _transfer_matrices(self.cell, self.n_cell)
-        # The per-position site tensors, handed to the two fixed-point
-        # solves so their ARPACK matvecs walk the cell in O(chi^3 d)
-        # instead of applying the materialised chi^4 transfer tensors --
-        # the same numbers, see _dominant_fixed_point's `sites` argument.
-        # This is by far the dominant cost of a first observable call:
-        # 94% of it was inside _apply_transfer/_apply_transfer_from_left.
-        arrays = [_to_array_lpr(self.cell[p]) for p in range(self.n_cell)]
-        sites = (arrays, arrays)
+        # A LAZY transfer chain, not a list of materialized chi^4 tensors:
+        # both fixed-point solves then walk the cell's own site tensors in
+        # O(chi^3 d) per Krylov step instead of applying a chi^2 x chi^2
+        # gemv, and nothing on this path ever allocates a chi^4 array at
+        # all. Same numbers, see _dominant_fixed_point's own docstring.
+        # This is by far the dominant cost of a first observable call, in
+        # both time (94% of it was inside _apply_transfer/
+        # _apply_transfer_from_left) and memory (a tracemalloc peak of
+        # 517.8 MB for a 2-site cell at maxm=64, one E4 being 268 MB,
+        # against 5.8 MB now).
+        self.Es = _transfer_chain(self.cell, self.n_cell)
         self.rho_after, self.eta = _all_right_fixed_points(
-            self.Es, self.n_cell, sites=sites)
+            self.Es, self.n_cell)
         self.l_before, _eta_l, _scales = _all_left_fixed_points(
-            self.Es, self.n_cell, sites=sites)
+            self.Es, self.n_cell)
 
 
 def _correlator_env(result):
@@ -2344,9 +2474,12 @@ def _correlator_env(result):
 # matvec that applies each site's own transfer tensor in turn), because
 # both halves of the dense route cost O(chi^6): profiling a VUMPS run at
 # chi=12 spent 14.7s of ~20s inside np.linalg.eig alone, and at chi=30 a
-# single such eig is ~250x more work again. The iterative matvec is
-# O(n_uc*chi^4) and only the dominant pair is ever used (plus the
-# runner-up, for _check_dominant_eigenvalue_nondegenerate's tie check).
+# single such eig is ~250x more work again. The iterative matvec walks the
+# cell's own site tensors, O(n_uc*chi^3*d) per Krylov step and no chi^4
+# array anywhere (it used to apply materialized chi^4 transfer tensors,
+# O(n_uc*chi^4) and 268 MB per site at chi=64), and only the dominant pair
+# is ever used (plus the runner-up, for
+# _check_dominant_eigenvalue_nondegenerate's tie check).
 # Deliberately low rather than "large enough to never trigger" -- a test
 # monkeypatches it to 0 to check the two paths agree.
 _DENSE_EIG_MAX = 64
@@ -2368,15 +2501,18 @@ def _transfer_chain_dim(Es, message):
     truncated by its own micro-step's SVD, so the growing algorithm's raw
     U_list offers no guarantee they come out equal -- this is the same
     condition the dense route detected as a non-(chi,chi,chi,chi) composed
-    tensor, checked here without composing anything."""
-    chi = Es[0].shape[0]
-    ok = all(E.shape == (E.shape[0], E.shape[0], E.shape[2], E.shape[2])
-             for E in Es)
-    ok = ok and all(Es[i].shape[2] == Es[i + 1].shape[0]
-                    for i in range(len(Es) - 1))
-    ok = ok and Es[-1].shape[2] == chi and Es[0].shape[1] == chi
+    tensor, checked here without composing anything.
+
+    Reads the shapes through `_transfer_shapes`, so a `_TransferChain`
+    passes the check without a single chi^4 tensor being built."""
+    shapes = _transfer_shapes(Es)
+    chi = shapes[0][0]
+    ok = all(sh == (sh[0], sh[0], sh[2], sh[2]) for sh in shapes)
+    ok = ok and all(shapes[i][2] == shapes[i + 1][0]
+                    for i in range(len(shapes) - 1))
+    ok = ok and shapes[-1][2] == chi and shapes[0][1] == chi
     if not ok:
-        raise RuntimeError(message.format([E.shape for E in Es]))
+        raise RuntimeError(message.format(shapes))
     return chi
 
 
@@ -2391,29 +2527,40 @@ def _dominant_fixed_point(Es, side, caller, message, sites=None):
     since a single dominant fixed point is not well defined when the
     leading eigenvalue is (near-)degenerate -- see that function.
 
+    `Es` is either the plain list of materialized (chi,chi,chi,chi)
+    tensors `_transfer_matrices` returns, or the `_TransferChain`
+    `_transfer_chain` returns, which carries the same chain as the site
+    tensors it is built from and never materializes anything. Either way
+    the eigenproblem is the identical one: `v0`, `k=2`, `ncv` and `tol` do
+    not depend on the representation.
+
     `sites`, when given, is `(ket_arrays, bra_arrays)`: the SAME transfer
     chain `Es` encodes, as the per-position (chi_l,d,chi_r) tensors it was
-    built from. It changes nothing about the answer -- only how the ARPACK
-    matvec is contracted. Applying a materialised `E` is a chi^2 x chi^2
-    gemv, O(chi^4) work and chi^4 bytes streamed, per site per Krylov
-    iteration; walking the site tensors instead (`_apply_site_transfer`,
-    whose own docstring spells out the identical re-association) is
-    O(chi^3 d). Measured on a critical Heisenberg chain, same ARPACK
-    settings and the same v0, the dominant fixed point alone went 1.42s ->
-    0.084s at chi=48 and 5.57s -> 0.28s at chi=64, with eta agreeing to all
-    12 printed digits; per application the two agree to ~1e-16. `Es` is
-    still required, both for the dense route below `_DENSE_EIG_MAX` and as
-    the fallback when ARPACK does not converge."""
+    built from, which is how a caller holding a plain list asks for the
+    matrix-free matvec anyway (a `_TransferChain` carries them itself, so
+    it needs no `sites`). It changes nothing about the answer -- only how
+    the ARPACK matvec is contracted. Applying a materialised `E` is a
+    chi^2 x chi^2 gemv, O(chi^4) work and chi^4 bytes streamed, per site
+    per Krylov iteration; walking the site tensors instead
+    (`_apply_site_transfer`, whose own docstring spells out the identical
+    re-association) is O(chi^3 d). Measured on a critical Heisenberg
+    chain, same ARPACK settings and the same v0, the dominant fixed point
+    alone went 1.42s -> 0.084s at chi=48 and 5.57s -> 0.28s at chi=64,
+    with eta agreeing to all 12 printed digits; per application the two
+    agree to ~1e-16. A materialized chain is still built by the dense
+    route below `_DENSE_EIG_MAX` and by the fallback when ARPACK does not
+    converge, and `_compose_chain` serves both from either
+    representation."""
     chi = _transfer_chain_dim(Es, message)
     n = chi * chi
-    if side == "right":
-        order = list(reversed(Es))
-        step = _apply_transfer
-    else:
-        order = list(Es)
-        step = _apply_transfer_from_left
+    if sites is None and isinstance(Es, _TransferChain):
+        sites = (Es.ket, Es.bra)
 
     if sites is None:
+        step = (_apply_transfer if side == "right"
+                else _apply_transfer_from_left)
+        order = list(reversed(Es)) if side == "right" else list(Es)
+
         def matvec(x):
             X = x.reshape(chi, chi)
             for E in order:
@@ -2472,10 +2619,7 @@ def _dominant_fixed_point(Es, side, caller, message, sites=None):
             # route rather than failing the caller's whole calculation.
             w = v = None
     if w is None:
-        T4 = Es[0]
-        for E in Es[1:]:
-            T4 = _compose(T4, E)
-        Tmat = T4.reshape(n, n)
+        Tmat = _compose_chain(Es).reshape(n, n)
         w, v = np.linalg.eig(Tmat if side == "right" else Tmat.T)
     # perron=True: this is a genuine fixed point, so the peripheral
     # spectrum of a period-p state is resolvable rather than ambiguous
@@ -2519,13 +2663,17 @@ def _all_right_fixed_points(Es, n_uc, sites=None):
     wrapping back around" density matrix, for every sublattice position --
     obtained from one dominant-eigenvector computation (the p=n_uc-1 case)
     plus n_uc-1 cheap transfer-tensor applications, rather than a fresh
-    eigenproblem per position."""
+    eigenproblem per position.
+
+    `Es` is either the plain list or a `_TransferChain`; the propagation
+    step goes through `_apply_position`, so a chain never materializes the
+    tensor it propagates through either."""
     rho_full, eta = _dominant_right_fixed_point(Es, sites=sites)
     rho_after = [None] * n_uc
     rho_after[n_uc - 1] = rho_full
     cur = rho_full
     for p in range(n_uc - 1, 0, -1):
-        cur = _apply_transfer(Es[p], cur)
+        cur = _apply_position(Es, p, cur, "right")
         cur = cur / np.trace(cur)
         rho_after[p - 1] = cur
     return rho_after, eta
@@ -2681,10 +2829,16 @@ def _dominant_eigenvalue_mixed(Es):
     and a genuinely overlapping case) leave a wide margin, and
     `imps_overlap(result, apply_mpo(result, W_identity))`'s own
     gauge-comparison case (a non-trivial bond dimension, unlike the
-    orthogonal case above) does too."""
-    T4 = Es[0]
-    for E in Es[1:]:
-        T4 = _compose(T4, E)
+    orthogonal case above) does too.
+
+    Unlike the two self-overlap fixed-point solves, this one stays on the
+    dense route deliberately: it asks numpy for the WHOLE spectrum of the
+    composed transfer matrix, so that matrix has to exist, and a
+    (chi_ket*chi_bra)^2 dense eig already dominates whatever the compose
+    costs. Passing a `_TransferChain` still helps a little, since
+    `_compose_chain` then walks it one position at a time instead of
+    holding one materialized tensor per cell site at once."""
+    T4 = _compose_chain(Es)
     chi_ket, chi_bra = T4.shape[0], T4.shape[1]
     if T4.shape != (chi_ket, chi_bra, chi_ket, chi_bra):
         raise RuntimeError(
@@ -2758,13 +2912,17 @@ def imps_overlap(result_a, result_b, normalize=True):
             "imps_overlap: physical dimension mismatch per sublattice "
             "(result_a={}, result_b={})".format(dims_a, dims_b))
 
-    Es_ab = _transfer_matrices(cell_a, n_cell, bra_list=cell_b)
+    Es_ab = _transfer_chain(cell_a, n_cell, bra_list=cell_b)
     eta_ab = _dominant_eigenvalue_mixed(Es_ab)
     if not normalize:
         return complex(eta_ab)
 
-    _, eta_aa = _dominant_right_fixed_point(_transfer_matrices(cell_a, n_cell))
-    _, eta_bb = _dominant_right_fixed_point(_transfer_matrices(cell_b, n_cell))
+    # The two self-overlap eigenvalues go through the lazy chain (no chi^4
+    # tensor at all); the MIXED one above cannot, since
+    # _dominant_eigenvalue_mixed composes the chain into one matrix and
+    # asks numpy for its whole spectrum -- see that function's docstring.
+    _, eta_aa = _dominant_right_fixed_point(_transfer_chain(cell_a, n_cell))
+    _, eta_bb = _dominant_right_fixed_point(_transfer_chain(cell_b, n_cell))
     return complex(eta_ab) / np.sqrt(complex(eta_aa) * complex(eta_bb))
 
 
@@ -2956,7 +3114,7 @@ def _all_left_fixed_points(Es, n_uc, sites=None):
     cur = rho_full
     scale = 1.0
     for p in range(0, n_uc - 1):
-        cur = _apply_transfer_from_left(Es[p], cur)
+        cur = _apply_position(Es, p, cur, "left")
         step_trace = np.trace(cur)
         cur = cur / step_trace
         scale = scale * step_trace
@@ -3034,7 +3192,12 @@ def _canonicalize_periodic(B_list, n_uc, cutoff, maxdim):
     the result); eta is the new state's own self-overlap transfer
     eigenvalue (a norm diagnostic -- apply_mpo does not renormalize, so
     this is not necessarily close to 1)."""
-    Es = _transfer_matrices(B_list, n_uc)
+    # Lazy, for the same reason _CorrelatorEnv's own chain is: this runs
+    # inside the growth loop (via _canonical_theta_cell), and materializing
+    # one chi^4 tensor per cell site here was the growth loop's own
+    # tracemalloc peak, measured at 519.0 MB on a 2-site cell at maxm=64
+    # against 10.4 MB now, with the growth loop itself 23.9 s -> 5.2 s.
+    Es = _transfer_chain(B_list, n_uc)
     rho_after, eta_R = _all_right_fixed_points(Es, n_uc)
     rho_R_before = [rho_after[(p - 1) % n_uc] for p in range(n_uc)]
     rho_L_before, eta_L, scales = _all_left_fixed_points(Es, n_uc)

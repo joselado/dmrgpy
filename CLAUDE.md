@@ -292,9 +292,22 @@ its executed repro, its reviewer's attempt to refute it, and a `**Status**`
 line saying what was done and which test now pins it. The regressions live
 in eight files, `tests/test_audit_2026_09_<name>.py`: one per fix cluster
 (there were seven) plus one for the `dispatch-leftovers` follow-up lane.
-One entry is not a plain FIXED: **#20**'s compute half landed
-and its memory half did not (`idmrg.py` still materializes `Es`, ~540 MB
-peak at chi=64). **#3** was fixed on `itensor_version="python"` only at
+**#20** landed in two passes, the compute half first and the memory half
+on 2026-09-22: `idmrg.py`'s transfer chain is now `_TransferChain`, the
+per-position site tensors rather than materialized chi^4 arrays, so
+`_CorrelatorEnv`, `_canonicalize_periodic`, `imps_overlap`, the window
+environment and three of `vumps.py`'s own fixed-point sites allocate no
+chi^4 array at all (a materialized chain is still built by the dense
+eigensolve below `_DENSE_EIG_MAX`, by the ARPACK fallback and by
+`_dominant_eigenvalue_mixed`, all through `_compose_chain`). Measured on a
+2-site Heisenberg cell at maxm=64, seeded so the growth trajectory is
+identical: the tracemalloc peak of the first `vev` went 517.8 MB to 5.8 MB
+and of the growth loop 519.0 MB to 10.4 MB, peak RSS 810.8 MB to 304.1 MB,
+growth 23.92 s to 5.23 s, with every returned number unchanged to every
+printed digit (both routes on the same state agree to 4.4e-16 in the fixed
+points and 5.8e-17 in the observables). The class is deliberately not
+list-like, so a leftover `Es[p]` raises instead of quietly materializing
+again. **#3** was fixed on `itensor_version="python"` only at
 the time, the C++ VUMPS half following on 2026-09-12
 (`docs/known_issue_v3_vumps_variational_floor.md`, now FIXED — see the
 `vx_choose_fixed_point` paragraph further down). Results from before this
@@ -307,8 +320,8 @@ MPO-Taylor stepper) and ~1.4x slower for the repeated-application ones;
 `submode="CVM_explicit"`, which was exactly 2x too large on every backend;
 `submode="ED"`, `mode="DMRG"` `submode="CVM"` and `submode="ROOTN"`, which
 now return the complex Lehmann density `i(G^R-G^A)/(2pi)`, as the
-resolvent submodes on `mode="ED"` already did (`submode="TD"`/`"TDZ"` are
-the routes still off it, deliberately — open item O1 in the audit record).
+resolvent submodes on `mode="ED"` already did (`submode="TD"`/`"TDZ"` came
+onto it on 2026-09-22, see below).
 Unchanged wherever the Lehmann weights `M_n = <GS|A|n><n|B|GS>` are real —
 `Im M_n == 0` is the discriminant, which a Hermitian pair `A = B^dagger`
 implies but does not exhaust: a real Hamiltonian with real operators has
@@ -338,16 +351,43 @@ on site 0 going from -0.0626 to 0.5405 and `sum_k P` from 0.031 to 1.000
 `src/dmrgpy/dynamics.py`'s module docstring is now
 the single normative statement of the correlator convention — read it
 before adding a submode, the way §4.10 is what to read before adding a
-dispatch. Two items are open rather than fixed, found while re-measuring
-that record and recorded in its own "Open items found while correcting
-this record" section: `submode="TD"`/`"TDZ"` return the complex
-one-sided transform `-(i/pi)G^A` rather than the density (they agree in
-real part only, and only when `Im M_n = 0` — measured at 70% of the
-correlator's peak in the imaginary part on a Hermitian pair), and
-`mode="ED"` vs `mode="DMRG"` disagree pointwise under the default
-`submode="KPM"` (both satisfy the sum rule exactly, and the disagreement
-looks like a resolution difference rather than a convention one — but it
-is recorded as unexplained, so read the record before acting on it).
+dispatch. Two items were recorded as open rather than fixed,
+found while re-measuring that record, and **both were fixed on
+2026-09-22**; each moved numbers, so read their `**Status**` paragraphs
+in the record before comparing against anything older. **O1**:
+`submode="TD"`/`"TDZ"` returned the complex one-sided transform rather
+than the density. They now return
+`(F[(A,B)] + conj(F[(B^dagger,A^dagger)]))/2`, the two-sided transform
+written in terms of forward runs only, since the backward half of a pair
+is the conjugate of the forward half of the adjoint pair, and it
+collapses to `Re F` exactly when `A` is provably `B^dagger`, so the
+common case still costs one evolution
+(`timedependent.lehmann_density_from_one_sided`, shared by both
+submodes; `canonical.is_dagger_pair` is the test, and it refuses rather
+than guesses for a name with no known adjoint). Taking `np.real(...)`
+instead, the obvious fix, measured *worse* than leaving the transform
+whole on a complex-weight pair, 2.15e-01 against 1.16e-01 on a peak of
+0.2313. Fixed with it: `edtk/timedependent.evolution_DC` read the
+operator pair in the opposite order, so `mode="ED"` returned `C[B,A]`
+where everything else returns `C[A,B]`, invisible whenever the two
+operators are the same one. `sxt_to_skomega`, the infinite-chain
+`S(k,omega)` reduction, is still on the raw transform, since it never
+sees the pair. **O2**: `mode="ED"` and `mode="DMRG"` disagreed pointwise
+under the default `submode="KPM"`, by 95 to 124 per cent of the
+resolvent peak, because each picked both its rescaling window and its
+moment count independently. Both now go through
+`algebra/kpm.py::polynomials_for_broadening`, which solves the Jackson
+kernel's own resolution relation so that `delta` is the broadening it is
+everywhere else, FWHM = `2*delta` at the band centre, and the ED route
+adopted the DMRG rescaling so the two share the same `x` at the same
+physical energy; the disagreement is 4 to 7 per cent now. `kpm_n_scale`'s
+default moves from 3 to 1, the base count being the calibrated one. Two
+residuals are documented rather than removed: the width tightens as
+`sqrt(1-x^2)` away from the band centre, and the near-Gaussian Jackson
+line peaks about 1.6x higher than a Lorentzian of equal FWHM and equal
+weight. `get_distribution()`'s own KPM path is deliberately not on the
+calibration, and is the one place `delta` still means only a polynomial
+count.
 
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the

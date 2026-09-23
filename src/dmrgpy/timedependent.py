@@ -307,6 +307,118 @@ def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
 
 
 
+def lehmann_density_from_one_sided(self,name,transform):
+    """Assemble the house dynamical correlator from one-sided real-time
+    transforms, for the two submodes that are built on one.
+
+    `transform(pair)` must return `(es,y)` for the operator pair it is
+    given, where `y` is the one-sided Fourier transform
+    `(1/pi) int_0^inf dt e^{-i w t} C(t)` that
+    `_fourier_transform_correlator` produces; `name` is the pair the
+    caller asked for, in any form `operatornames.str2MO` understands.
+
+    What this is for. The house quantity (see dynamics.py's module
+    docstring) is the complex Lehmann density
+    `C_AB(w) = sum_n M_n L_delta(w-D_n)`, which is the *two*-sided
+    transform of the time correlator `C(t) = sum_n M_n e^{-i D_n t}`,
+    damped by `e^{-delta|t|}`. A real-time run only ever produces the
+    `t>=0` half, and that half alone is a resolvent: its real part is
+    `C_AB` when every `M_n` is real, while its imaginary part is the
+    dispersive term `C_AB` does not have, measured at 70% of the
+    correlator's own peak even on a Hermitian pair. That is what made
+    submode="TD"/"TDZ" the two routes off the convention, recorded as
+    open item O1 of the 2026-09 audit.
+
+    The missing half is not a second simulation backwards in time. For
+    `t>0`,
+
+        C(-t) = <GS|B e^{+i(H-E_0)t} A|GS>
+              = conj( <GS|A^dagger e^{-i(H-E_0)t} B^dagger|GS> ),
+
+    so the backward half of the pair `(A,B)` is the conjugate of the
+    *forward* half of the pair `(B^dagger, A^dagger)`, which the same
+    machinery computes with no change at all. With the transform kernel
+    satisfying `K(-t) = conj(K(t))` for real w, the two halves combine as
+
+        C_AB = ( F[(A,B)] + conj(F[(B^dagger,A^dagger)]) ) / 2,
+
+    and the 1/pi the one-sided transform already carries turns into the
+    1/(2*pi) the two-sided one needs. When `A` is provably `B^dagger`
+    the adjoint pair *is* the original pair and the formula collapses to
+    `Re F`, so that case costs one evolution rather than two; this is
+    every example in the documentation. `canonical.is_dagger_pair` is
+    the test, and it refuses rather than guesses when an operator name
+    has no known adjoint (a parafermionic `Sig`, a caller's own name),
+    which costs a second evolution and never a wrong number.
+
+    Measured on the 2026-09 audit's own seeded 4-site complex-hopping
+    chain (`A = Cdag_0`, `B = C_2`, `max|Im M_n| = 0.27`, exact peak
+    0.2313, delta=0.4, dt=0.1), against an exact Lehmann sum built by
+    dense diagonalization outside dmrgpy:
+
+        raw one-sided transform (what this replaced)  1.16e-01
+        its real part alone                           2.15e-01
+        this combination                              2.57e-04
+
+    i.e. the real part alone is not a partial fix on a complex-weight
+    pair, it is worse than leaving the transform whole, while the
+    combination lands at the TD method's own discretization error."""
+    # No require_symbolic_for here, deliberately: mode="ED" consumes the
+    # already-built operators toMPO(mode="ED") returns, and always has.
+    # The DMRG side rebuilds its operators from to_terms() inside the
+    # backend and rejects a compiled one in evolution_dmrg_DC, which is
+    # where that restriction belongs and where it is pinned.
+    pair = operatornames.str2MO(self,name)
+    (xs,ys) = transform([pair[0],pair[1]])
+    if _pair_is_self_adjoint(pair):
+        # the adjoint pair is this pair, so the second run would return
+        # the same array and the combination below is exactly its real part
+        return xs,np.asarray(ys).real+0.0j
+    (_xs,ys2) = transform(_adjoint_pair(pair))
+    return xs,(np.asarray(ys)+np.conjugate(ys2))/2.0
+
+
+def _dagger_operator(o):
+    """The adjoint of whatever `name=` was given, symbolic or compiled."""
+    if hasattr(o,"get_dagger"): return o.get_dagger()
+    so = getattr(o,"SO",None) # a compiled ED operator carries its matrix
+    if so is not None:
+        out = o.copy(); out.SO = so.conj().transpose(); return out
+    raise TypeError(
+        "submode='TD'/'TDZ': cannot take the adjoint of an operator of "
+        "type "+type(o).__name__+", which the correlator needs for a pair "
+        "that is not its own adjoint (see "
+        "lehmann_density_from_one_sided). Pass the MultiOperators "
+        "themselves rather than a compiled operator.")
+
+
+def _adjoint_pair(pair):
+    """(B^dagger, A^dagger): the pair whose forward-time correlator is the
+    conjugate of this pair's backward-time one."""
+    return [_dagger_operator(pair[1]),_dagger_operator(pair[0])]
+
+
+def _pair_is_self_adjoint(pair):
+    """True when A is provably B^dagger, so that the two-term combination
+    collapses to a real part and one evolution suffices. False is "not
+    proven" and only ever costs a second evolution.
+
+    Symbolically this is canonical.is_dagger_pair, which refuses rather
+    than guesses for a name with no known adjoint. A compiled operator
+    has no canonical form but does carry its own matrix, so there the
+    same question is a numerical one and is answered exactly."""
+    from .multioperatortk import canonical
+    from .multioperator import MultiOperator
+    A,B = pair[0],pair[1]
+    if isinstance(A,MultiOperator) and isinstance(B,MultiOperator):
+        return canonical.is_dagger_pair(A,B)
+    sa,sb = getattr(A,"SO",None),getattr(B,"SO",None)
+    if sa is not None and sb is not None:
+        try: return abs(sa-sb.conj().transpose()).max()<1e-12
+        except Exception: return False
+    return False
+
+
 def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
         nt=None,factor=1,delta=5e-2,damping_periods=6,damping="exp",
         predict=True,lp_order=None,lp_extend_factor=10,
@@ -356,12 +468,18 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     self.get_gs() # get the ground state
     if nt is None: nt=int(damping_periods/delta/dt)
     if lp_order is None: lp_order=min(20,max(4,nt//10))
-    (ts,cs) = evolution_DC(self,dt=dt,nt=nt,**kwargs) # get correlator
-    return _fourier_transform_correlator(ts,cs,dt,es=es,window=window,
-            delta=delta,factor=factor,damping=damping,predict=predict,
-            lp_order=lp_order,lp_extend_factor=lp_extend_factor,
-            lp_fit_start_fraction=lp_fit_start_fraction,
-            lp_max_pole_radius=lp_max_pole_radius)
+    name = kwargs.pop("name","XX")
+    def transform(pair):
+        (ts,cs) = evolution_DC(self,dt=dt,nt=nt,name=pair,**kwargs)
+        return _fourier_transform_correlator(ts,cs,dt,es=es,window=window,
+                delta=delta,factor=factor,damping=damping,predict=predict,
+                lp_order=lp_order,lp_extend_factor=lp_extend_factor,
+                lp_fit_start_fraction=lp_fit_start_fraction,
+                lp_max_pole_radius=lp_max_pole_radius)
+    # one evolution for a pair whose adjoint is itself, two otherwise --
+    # see lehmann_density_from_one_sided for the identity and what this
+    # used to return instead
+    return lehmann_density_from_one_sided(self,name,transform)
 
 
 def _damping_window(ts,delta,damping="exp"):

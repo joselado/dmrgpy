@@ -1537,9 +1537,13 @@ which any submode can be checked against, and which
 $-\frac1\pi\mathrm{Im}\,G^R$ does \emph{not} satisfy: its dispersive
 term has principal-value tails that leak arbitrarily far outside any
 finite frequency window. (Measured on a 4-site chain with complex
-hoppings and $A=c^\dagger_0$, $B=c_2$: the exact $\langle AB\rangle$ is
-$0.1105-0.2714i$; \texttt{submode="KPM"} integrates to that within 9e-11
-under \texttt{mode="ED"} and 3.8e-06 under \texttt{mode="DMRG"}, while
+hoppings and $A=c^\dagger_0$, $B=c_2$, over
+\texttt{es=np.linspace(-12,18,1500)} at $\delta=0.05$: the exact
+$\langle AB\rangle$ is
+$0.11052176-0.27135291i$; \texttt{submode="KPM"} integrates to that
+within 2.6e-08
+under \texttt{mode="ED"} and 7.5e-06 under \texttt{mode="DMRG"} on
+\texttt{itensor\_version="python"}, while
 the $-\frac1\pi\mathrm{Im}\,G^R$ curve integrates to a real 0.13145.)
 
 Choosing $A=B=S^z_i$ at the same
@@ -1554,22 +1558,28 @@ recently joined them, so that it now agrees with its own
 \texttt{mode="ED"} counterpart (measured 1.9e-09 apart on a 6-site
 Heisenberg chain --- comfortably below the solver's own per-frequency
 residual, which prints at ${\sim}10^{-5}$ on that run; see
-Section~\ref{sec:whatraises}). Do not
-read that as \texttt{mode="ED"} and \texttt{mode="DMRG"} agreeing
-pointwise in general: they share a convention, not a kernel or a
-resolution. The default \texttt{submode="KPM"} in particular still
-differs between the two routes by an amount comparable to the peak ---
-on the 6-site Heisenberg chain with $A=B=S^z_0$ the two curves differ by
-a sizeable fraction of the peak height at $\delta=0.1$--$0.3$. No
-absolute figure is quoted here on purpose: the number depends on the
-$\omega$ grid (a spacing coarser than $\delta$ samples the peaks rather
-than resolving them), and three independent measurements on three grids
-gave three different answers. That is a resolution difference, not a convention one ---
-both integrate to $\langle AB\rangle$, as the sum-rule measurement above
-shows. The one qualifier is
-the real-time pair \texttt{submode="TD"}/\texttt{"TDZ"}, which returns
-the complex one-sided Fourier transform rather than the density itself:
-see that section's own formula and the note there. Otherwise they differ
+Section~\ref{sec:whatraises}), and the real-time pair
+\texttt{submode="TD"}/\texttt{"TDZ"} being the one that joined them on
+2026-09-22, having returned the complex one-sided Fourier transform
+until then (see that section and Section~\ref{sec:whatraises}). Sharing
+the convention is not the same as agreeing pointwise, since two submodes
+can still differ in kernel and in resolution, but for the default
+\texttt{submode="KPM"} they no longer differ in resolution either:
+\texttt{delta} now sets the same width on \texttt{mode="ED"} as on
+\texttt{mode="DMRG"}, so the two routes sit a few per cent of the peak
+apart instead of a whole peak apart. On a 6-site Heisenberg chain with
+$A=B=S^z_0$ at $\delta=0.2$, over
+\texttt{es=np.linspace(0.01,4,120)}, the two curves sit 1.24e-02 apart
+on \texttt{itensor\_version="python"} against a resolvent
+(\texttt{submode="INV"}) peak of 0.194, and both integrate to 0.24999
+against the exact $\langle AB\rangle=0.25$. The audit that fixed this
+measured the same quantity on \texttt{itensor\_version=3} across three
+chains and found 4 to 7 per cent of the resolvent peak, down from 95 to
+124 per cent (\texttt{docs/audit\_2026\_09\_hole\_hunt.md}, open item
+O2). What remains between KPM and a resolvent submode is the kernel
+itself, a near-Gaussian Jackson line against a Lorentzian, which the
+\texttt{submode="KPM"} entry below quantifies.
+Otherwise the submodes differ
 only in \emph{how}, and therefore in what
 energy range/resolution/cost trade-off they offer:
 
@@ -1624,11 +1634,43 @@ S_{AB}(\tilde\omega)=\frac{1}{\pi\sqrt{1-\tilde\omega^2}}\left[\mu_0+2\sum_{m=1}
 \end{equation}
 
 with Jackson-kernel damping coefficients $g_m$ suppressing Gibbs
-ringing from the truncation at $N$ moments (\texttt{kpm\_n\_scale}
-scales $N$, i.e.\ the energy resolution, relative to the rescaled
-bandwidth). This is the default, general-purpose method: robust, works
+ringing from the truncation at $N$ moments.
+This is the default, general-purpose method: robust, works
 across the whole spectrum at once, cost grows only linearly with the
 number of moments.
+
+\emph{What \texttt{delta} buys you here.} The Jackson kernel turns an
+exact pole at rescaled energy $x$ into a line of width
+$\sigma=\pi\sqrt{1-x^2}/N$ (Weisse, Wellein, Alvermann \& Fehske,
+\href{https://doi.org/10.1103/RevModPhys.78.275}{RMP 78, 275 (2006)},
+Sec. II-B), so $N$ and the requested broadening are the same knob read
+two ways. Every KPM route in dmrgpy solves that relation for $N$
+(\texttt{algebra/kpm.py::polynomials\_for\_broadening}), so the
+reconstructed line comes out at FWHM $=2\delta$ at the centre of the
+rescaled band, which is the width the resolvent submodes
+(\texttt{"CVM"}, \texttt{"INV"}, \texttt{"ROOTN"}, \texttt{"ED"}) give
+for the same $\delta$. \texttt{kpm\_n\_scale} is a multiplier on that calibrated
+count, default 1: raise it to buy a line sharper than the $\delta$ you
+asked for, at proportionally higher cost. Both the calibration and that
+default are new in the 2026-09 audit's open item O2
+(Section~\ref{sec:whatraises}). Before it, \texttt{mode="DMRG"} counted
+\texttt{round((emax-emin)/delta)} moments and multiplied by a
+\texttt{kpm\_n\_scale} that defaulted to 3, which put the line at about
+$1.6\delta$, while \texttt{mode="ED"} used a rule of its own that read
+neither of those and landed at about $0.93\delta$, on a Chebyshev window
+three times as wide.
+Two residuals are properties of the kernel rather than of this choice,
+and are documented rather than removed. The width is exact at the band
+centre and tightens as $\sqrt{1-x^2}$ towards the band edges, since no
+single moment count gives one width across a whole band. And the line is
+near-Gaussian rather than Lorentzian, so at equal FWHM and equal
+integrated weight its peak stands about 1.6x higher than a resolvent
+submode's, measured 0.315 against 0.195 on a 6-site Heisenberg chain at
+$\delta=0.2$ with both integrating to the same 0.250000. One guard rail
+sits underneath: a $\delta$ comparable to the bandwidth itself
+calibrates to a handful of moments, which stops being a spectrum at all,
+so the count is floored at 16 and the line there comes out sharper than
+requested instead of unrepresentable.
 The band edges entering the rescaling are obtained variationally: the
 lower edge reuses the ground-state energy, and the upper edge runs a
 deliberately reduced-effort DMRG on $-H$ (few sweeps at modest bond
@@ -1707,11 +1749,19 @@ inherited from the method rather than from this implementation:
   thing to try is a larger \texttt{hodc\_eta} (more damping), not more
   moments. Measured in that example, on an XX chain at
   \texttt{kpmmaxm=32} with $N=1200$ moments whose error has grown to
-  $O(10^2)$ by the last of them: at the default $N\eta\approx3.3$ HODC is
+  $O(10^2)$ by the last of them: at the default $N\eta$ HODC is
   more than 10x \emph{worse} than Jackson, and at $N\eta\approx14$ it is
   several times better (4--8x, drifting between DMRG runs). On exact
   moments the same sweep puts the optimum right at the default, which is
-  where it belongs. The same example measures the moment error directly against
+  where it belongs. That default $N\eta$ is whatever the moment
+  calibration above implies for $\eta=\delta$, which is
+  \texttt{JACKSON\_FWHM\_FACTOR}$/2=3.70$ at \texttt{kpm\_n\_scale=1};
+  the two ratios just quoted were measured before that calibration
+  landed, when the same accounting gave 4.3, and they have not been
+  re-measured against it. Both values sit in the flat minimum of the
+  error-versus-$\eta$ curve, which is why the default was left where it
+  is rather than chased.
+  The same example measures the moment error directly against
   exact moments, which is the cleanest way to find where that horizon
   sits for a given chain.
 \end{itemize}
@@ -2032,29 +2082,54 @@ $w_\delta(t)=e^{-\delta t}$, equivalent to a Lorentzian broadening of
 width $\delta$ in frequency) and Fourier transformed,
 
 \begin{equation}
-S_{AB}(\omega)=\frac1\pi\,\mathrm{Re}\!\int_0^{T}\!dt\;e^{i\omega t}\,C(t)\,w_\delta(t)
+F_{AB}(\omega)=\frac1\pi\int_0^{T}\!dt\;e^{i\omega t}\,C(t)\,w_\delta(t)
 \end{equation}
 
-Note the $\mathrm{Re}$ --- and that the returned array is the
-\textbf{whole complex transform, not its real part}, so it is not the
-density this section defines and does not become the density for a
-Hermitian pair either. A one-sided transform of $C(t)$ is a
-\emph{resolvent}, not a spectral density: in the $T\to\infty$ limit what
-comes back is $-\frac{i}{\pi}G^A_{AB}(\omega)$, whose real part is
-$\frac1\pi\mathrm{Im}\,G^A_{AB}$, and that real part equals the density
-whenever $M_n$ is real, since
-$\mathrm{Im}\,G^A=-\mathrm{Im}\,G^R$ only holds there. \textbf{So take
-\texttt{.real}} if you want the same quantity the other submodes return;
-the imaginary part is the dispersive term, and it is not small. Measured
-on the 6-site Heisenberg chain with the Hermitian pair $A=B=S^z_0$
-($\delta=0.3$, \texttt{nt=2000}, \texttt{dt=0.02}, density peak 0.1421):
-max $|\mathrm{Im}\,y|$ is 9.96e-02, i.e.\ 70\% of the peak, and the
-array as returned sits that same 9.96e-02 from the density --- while its
-real part matches the density to 4.0e-05 and the array as a whole
-reproduces $-\frac{i}{\pi}G^A_{AB}$ to 5.5e-05. On a pair with complex
-$M_n$ not even the real part is the density, so cross-check
-\texttt{"TD"}/\texttt{"TDZ"} there against \texttt{submode="KPM"} or
-\texttt{"ED"} rather than reading it directly.
+A real-time run only ever produces $C(t)$ for $t\ge0$, and a one-sided
+transform of it is a \emph{resolvent}, not a spectral density: in the
+$T\to\infty$ limit $F_{AB}$ is $-\frac{i}{\pi}G^A_{AB}(\omega)$, whose
+real part is the density whenever every $M_n$ is real and whose
+imaginary part is a dispersive term the density does not have. The
+missing half of the transform is not a second simulation backwards in
+time. For $t>0$ one has
+$C(-t)=\langle\mathrm{GS}|B\,e^{i(H-E_0)t}A|\mathrm{GS}\rangle
+=\overline{\langle\mathrm{GS}|A^\dagger e^{-i(H-E_0)t}B^\dagger|\mathrm{GS}\rangle}$,
+so the backward half of the pair $(A,B)$ is the conjugate of the
+\emph{forward} half of the pair $(B^\dagger,A^\dagger)$, which the same
+machinery computes with no change at all, and the two halves combine as
+
+\begin{equation}
+S_{AB}(\omega)=\tfrac12\Big[F_{AB}(\omega)+\overline{F_{B^\dagger A^\dagger}(\omega)}\Big]
+\end{equation}
+
+which is what the returned array is. So \texttt{"TD"} returns the same
+density every other submode returns, and there is nothing left to take
+the \texttt{.real} of: on a Hermitian pair the imaginary part comes back
+exactly zero. Measured on a 4-site Heisenberg chain with $A=B=S^z_0$
+($\delta=0.3$, \texttt{dt=0.05}, \texttt{itensor\_version="python"},
+resolvent peak 0.1869), max $|\mathrm{Im}\,y|$ is 0.0 and the curve sits
+2.97e-04 from \texttt{submode="INV"}, which is the method's own
+discretization error, with \texttt{mode="ED"} and \texttt{mode="DMRG"}
+agreeing to 1.6e-10 on the same chain. When $A$ is \emph{provably}
+$B^\dagger$ the adjoint pair is the original pair and the combination
+collapses to $\mathrm{Re}\,F$ exactly, so that case, which is every
+\texttt{"TD"}/\texttt{"TDZ"} example in this guide, still costs one
+evolution;
+anything else costs two. The test is
+\texttt{multioperatortk.canonical.is\_dagger\_pair}, and it refuses
+rather than guesses for an operator name with no known adjoint (a
+parafermionic \texttt{Sig}, a name you invented yourself), which buys a
+second evolution and never a wrong number. Note that the cost
+discriminant is not the convention discriminant: what the combination
+needs is a \emph{proof} that $A=B^\dagger$, while what makes the
+imaginary part vanish is $\mathrm{Im}\,M_n=0$, and the $S(q,\omega)$
+sweep above sits in the gap. Its $(S^z_i,S^z_j)$ at $i\neq j$ has real
+weights, so the answer is real either way, and it is still not an
+adjoint pair, so under \texttt{"TD"} it pays two evolutions per site
+pair. All of this is new in the
+2026-09 audit's open item O1 (Section~\ref{sec:whatraises}), and it
+moves numbers: a \texttt{"TD"}/\texttt{"TDZ"} spectrum from before it is
+not comparable, its imaginary part most of all.
 
 The total simulated time $T$ (\texttt{damping\_periods}/$\delta$) must
 be long enough that the damping has suppressed truncation ringing by
@@ -2203,12 +2278,30 @@ counterpart on any backend to try, see \S\ref{sec:quenches}'s own note
 the MPO-Taylor propagator otherwise (\texttt{tevol\_method="MPO"} or
 \texttt{"TEBD"}, or \texttt{itensor\_version=2}, which has no TDVP) ---
 the same TDVP-vs-Taylor choice \texttt{"TD"} already makes. Current
-scope: only the ``greater'' branch of the correlator is computed (the
+scope: only the ``greater'' branch of the correlator is simulated along
+the contour (the
 same
 simplification \texttt{"TD"} itself already makes), so this is best
 used the same way as \texttt{"TD"}: high-resolution work in a narrow
 frequency window, now reachable at a lower bond-dimension cost for a
 given simulated time.
+
+The returned array is the density of this section, assembled from the
+one-sided transform exactly as in \texttt{"TD"} above and through the
+same shared code. The contour does not obstruct that identity: the
+damping it puts on each Lehmann term, $e^{-\Delta_n\alpha t}$, is real
+and is the same for a pair and for its adjoint, so conjugating the
+adjoint run reproduces the backward-time half envelope and all, and a
+pair that is provably its own adjoint still costs one run rather than
+two. What \texttt{"TDZ"} keeps, and \texttt{"TD"} does not, is an error
+of its own: on the 2026-09 audit's 4-site complex-hopping chain
+($A=c^\dagger_0$, $B=c_2$, $\delta=0.4$, \texttt{dt=0.1}, exact peak
+0.2313, \texttt{itensor\_version=3}) it lands 3.31e-02 from the exact
+Lehmann density where \texttt{"TD"} lands 2.57e-04. That residual is the
+complex-time contour plus the Taylor-in-$\alpha_0$ reconstruction, the
+same 1.8e-02 the audit measured on a Hermitian pair, and it is not a
+convention question: reduce it with a smaller \texttt{alpha0} or a
+larger \texttt{n\_max}, not by post-processing the array.
 
 \textbf{\texttt{submode="EX"} --- exact diagonalization in a truncated
 DMRG subspace.} Builds $A$, $B$, $H$ explicitly in the subspace spanned
@@ -3130,6 +3223,7 @@ g = sc.get_gs_degeneracy()
 \end{lstlisting}
 
 \section{Reduced density matrices and operator distributions}
+\label{sec:densitymatrices}
 
 \textbf{Reduced density matrix.} The single-site reduced density matrix
 $\rho_i=\mathrm{Tr}_{j\neq i}|\mathrm{GS}\rangle\langle\mathrm{GS}|$ is
@@ -3158,7 +3252,14 @@ Section~\ref{sec:dynamical}'s
 \texttt{get\_dynamical\_correlator\_moments}. It is a DMRG/KPM quantity
 with no ED implementation (the ED path builds spectra by explicit
 summation, not from moments), so it raises
-\texttt{NotImplementedError} under \texttt{mode="ED"}.
+\texttt{NotImplementedError} under \texttt{mode="ED"}. One thing it does
+\emph{not} share with Section~\ref{sec:dynamical}: its \texttt{delta} is
+deliberately left off the broadening calibration described there, and
+still only sets a polynomial count. This path expands an arbitrary
+operator $X$ rather than the Hamiltonian, so there is no rescaled band
+whose centre the FWHM $=2\delta$ relation could be anchored to; read
+\texttt{delta} here as a resolution knob and compare distributions
+computed at one value of it, not across values.
 
 \section{Post-processing tools}
 
@@ -3491,7 +3592,12 @@ trapezoidal integral is exactly 0 for the single-$t_2$-point chunks
 real-time evolution necessarily produces, silently zeroing the entire
 term). The second-order term (\texttt{submode="KPM"},
 $\delta=2\times10^{-5}$) agrees with the exact excited-state sum to
-0.2\% of its maximum at every bias point on the same chain. It was
+0.2\% of its maximum at every bias point on the same chain. That figure
+predates the 2026-09-22 KPM broadening calibration
+(Section~\ref{sec:whatraises}) and has not been re-measured against it;
+what the second-order term reads is a cumulative integral of
+$S(\omega)$, which the sum rule pins independently of the moment count,
+so the recalibration is not expected to move it. It was
 quoted as ``a few tens of percent at thresholds'' until 2026-09-12; that
 error was the route's own cumulative sum, which counted the whole
 frequency bin holding a threshold's delta-like peak as lying below it
@@ -3539,6 +3645,7 @@ requested. Results obtained with \lstinline|iorb!=0| on an earlier
 version need regenerating.
 
 \section{Infinite chains (iDMRG)}
+\label{sec:infinite}
 
 Every method above works on a \emph{finite} chain of \texttt{n} sites.
 \texttt{Infinite\_Many\_Body\_Chain}/\texttt{Infinite\_Spin\_Chain}
@@ -3813,6 +3920,32 @@ density does -- that is ordinary finite-bond-dimension physics, most
 visible for a gapless model -- so the $\langle H_{uc}\rangle$ check
 remains the right thing to run before trusting a number.
 
+\textbf{What these cost in memory}
+(\texttt{itensor\_version="python"}). Every fixed point and every
+correlator above is a contraction along the chain's transfer matrix, and
+that chain used to be assembled as one \texttt{chi\^{}2 x chi\^{}2}
+array per unit-cell position, so the peak memory of a run grew as
+\texttt{chi\^{}4} and was reached before any physics happened. Since
+2026-09-22 the chain is carried lazily instead, as the
+\texttt{(chi\_l, d, chi\_r)} site tensors it is built from, and applied
+one site at a time, so nothing on that path allocates the rank-4 array
+at all. Measured on a 2-site Heisenberg cell at \texttt{maxm=64} under
+\texttt{gs\_method="idmrg"}, threads pinned and seeded so the growth
+trajectory is identical either way: the tracemalloc peak of the first
+\texttt{vev} went from 517.8\,MB to 5.8\,MB and of the growth loop from
+519.0\,MB to 10.4\,MB, peak RSS from 810.8\,MB to 304.1\,MB, and the
+growth loop itself from 23.92\,s to 5.23\,s, with \texttt{e0},
+\texttt{vev} and an \texttt{r=1..7} correlator sweep identical to every
+printed digit. Nothing here changes a number, so read it as a budget you
+can spend on a larger \texttt{maxm} rather than as a result to recheck;
+what is left composing a full transfer matrix is the dense eigensolve
+small chains take anyway and the fallback for a non-converged ARPACK
+solve, so a small cell behaves exactly as it did.
+\texttt{gs\_method="vumps"} goes through the same lazy chain once per
+iteration and is a wash in time at \texttt{D=16} (16.39\,s to
+16.11\,s on a critical Heisenberg cell, against a run-to-run spread on
+that box several times larger), the win there being the memory alone.
+
 \textbf{The default ground-state solver: VUMPS.}
 \texttt{ic.gs\_method = "vumps"} (the default since 2026-08-08) switches
 \texttt{gs\_energy()} from the growing algorithm above to VUMPS
@@ -3996,18 +4129,36 @@ sequential multi-site solver instead of raising.
 
 \textbf{Cost.} The eigenproblem \texttt{excitation\_energies} solves has
 dimension $D^2(d_g-1)$, so its cost grows quickly with the converged bond
-dimension. On \texttt{itensor\_version="python"} two things bound that:
-the momentum-dependent channel resolvents are built once per momentum and
-cached (they do not depend on the excitation tensor, so rebuilding them
-per matrix element was pure waste), and above a size threshold the
-eigenproblem is solved by Lanczos on the effective Hamiltonian's action
-rather than by assembling that matrix at all. Neither changes any returned
-number -- the two solver paths are cross-checked against each other in
-\texttt{tests/test\_infinite\_chain.py} -- but a momentum scan at a large
-$D$ is substantially cheaper than it was. \texttt{itensor\_version=3}
-still assembles the matrix (and still rebuilds its resolvents per matrix
-element), so the two backends now differ in cost structure for this call,
-in the \texttt{"python"} backend's favour at large $D$.
+dimension. Two things bound that, and since 2026-09-22 they bound it on
+\textbf{both} backends rather than only on
+\texttt{itensor\_version="python"}: the momentum-dependent channel
+resolvents are built once per momentum and cached with their LU
+factorization (they depend only on $k$ and the momentum-independent
+environment, so rebuilding and refactorizing them inside every
+application of $H_{\rm eff}(k)$ was pure waste), and above a size
+threshold the eigenproblem is solved by Lanczos on that Hamiltonian's
+action rather than by assembling the matrix at all. Neither changes any
+returned number -- the two solver paths are cross-checked against each
+other in \texttt{tests/test\_infinite\_chain.py} and
+\texttt{tests/test\_vumps\_excitations\_v3.py}, agreeing to 4.6e-11 on
+\texttt{itensor\_version=3} -- and a momentum scan at large $D$ is
+substantially cheaper than it was: over a 3-momentum scan on
+\texttt{itensor\_version=3} with threads pinned to one core, a $D=16$
+TFIM chain went from 164.1\,s to 10.3\,s with the resolvent cache and to
+1.8\,s with both halves, and an \texttt{n\_uc=2} Heisenberg chain at
+$D=10$ from 15.6\,s to 5.4\,s to 1.2\,s. The two backends keep different
+thresholds, and deliberately: \texttt{itensor\_version=3} switches to
+Lanczos above dimension 64 rather than \texttt{"python"}'s 256, since one
+application of $H_{\rm eff}(k)$ there solves four channel resolvents,
+which puts the crossover below dimension 36. One design note if you ask
+for $n>1$ on a cell whose dispersion is degenerate away from $k=0$, as
+the \texttt{n\_uc=2} Heisenberg cell's is: a single Krylov space holds at
+most one direction out of a degenerate eigenspace, so the C++ solver runs
+one deflated Lanczos per eigenvalue rather than one Lanczos for all of
+them. A plain single-vector Lanczos there returns distinct eigenvalues
+where two should coincide, every one of them a genuine eigenpair, so a
+residual check passes it; \texttt{"python"} never had that exposure,
+since ARPACK's restarts recover the second copy.
 
 \textbf{Spectral weights: $S(k,\omega)$ directly in the thermodynamic
 limit.} Each branch the ansatz returns is a genuine momentum eigenstate,
@@ -4106,10 +4257,14 @@ in too and converges with the ground state's own bond dimension
 ($2\times10^{-4}$ relative at $D=2$, $10^{-7}$ at $D=4$). See
 \texttt{tests/test\_infinite\_chain\_spectral.py}. Requires
 \texttt{itensor\_version="python"} --- unlike
-\texttt{excitation\_energies}, the mpscpp3 port is energies-only and has
-neither the eigenvectors nor the mixed-transfer source vector this needs,
-deferred for the same reason it has not picked up the iterative
-eigensolver (\texttt{docs/idmrg\_improvement\_plan.md}) --- plus
+\texttt{excitation\_energies}, the mpscpp3 port is energies-only, so it
+has neither the eigenvectors nor the mixed-transfer source vector a
+weight is built from, and that pair is now the whole of what is missing
+there: the solver work \texttt{excitation\_energies} was waiting on (the
+cached, LU-factored channel resolvents and the Lanczos eigensolve) was
+ported on 2026-09-22, so a dispersion scan costs the same on both
+backends and only the weights are still one-sided
+(\texttt{docs/idmrg\_improvement\_plan.md}) --- plus
 \texttt{gs\_method="vumps"} and \texttt{n\_uc} $\le 2$ as above. A
 fermionic (parity-odd) \texttt{opname} is rejected: its Jordan-Wigner
 string would have to be closed at infinity, the same reason
@@ -4453,9 +4608,16 @@ dominant $k=0$ contribution with no discernible dispersion (the raw
 correlator approaches \texttt{<opname\_i><opname\_j>}, not $0$, at
 large separation). \texttt{Skw} (shape \texttt{(len(ks), len(es))}) is
 obtained via a spatial DFT ($S(k,t)=\sum_x e^{-ikx}S(x,t)$) followed by
-the \emph{same} damping/FFT convention (\texttt{delta} ->
-Lorentzian broadening) every other dynamical-correlator submode in this
-codebase already uses.
+the \emph{same} damping/FFT tail (\texttt{delta} $\to$
+Lorentzian broadening) \texttt{submode="TD"} uses, with one deliberate
+difference at the end of it: what comes back is the raw one-sided
+transform, not the density of Section~\ref{sec:dynamical}. The reduction
+that produces $S(k,t)$ never names the operator pair, so the
+adjoint-pair identity \texttt{"TD"} completes its transform with (see
+that submode) has nothing to act on here. Take the real part if you want
+the density, which is the right thing to do whenever the Lehmann weights
+are real, and note that this is the one dynamical-correlator route in
+the library where that instruction still stands.
 
 \textbf{Fermionic operators, and the vacuum normalization} (both since
 2026-08-29). A parity-odd pair (\texttt{"Cdag"}/\texttt{"C"}, either
@@ -5066,9 +5228,16 @@ Hilbert space, against 0.004\,s for a 6-site chain.
 
 A second cross-backend audit
 (\texttt{docs/audit\_2026\_09\_hole\_hunt.md}) recorded 36 confirmed
-findings, 35 of them now fixed; the one exception is marked PARTIAL
-there (the iDMRG matrix-free item, whose compute half landed and whose
-memory half did not). The list below is the physics-facing
+findings, all of them now fixed. The last to land was the iDMRG
+matrix-free item, which stood as PARTIAL for a while because its compute
+half arrived without its memory half; the second pass closed on
+2026-09-22, and what it buys an infinite-chain run is in
+Section~\ref{sec:infinite}. It also left two \emph{open items}, found while
+re-measuring the record rather than during the hunt itself, and both of
+those were closed on 2026-09-22: the real-time submodes sat off the
+correlator convention (O1) and \texttt{delta} meant a different width
+under \texttt{submode="KPM"} on each solver (O2). The list below is the
+physics-facing
 half --- what changes for a user who never reads the architecture docs.
 
 \textbf{Results that are not comparable across this change.} Read this
@@ -5108,9 +5277,55 @@ imaginary part it used to drop peaks at 0.5682 on that pair), so a caller
 that assumed a float array should take \texttt{.real}.
 \texttt{submode="KPM"} (the default), \texttt{"INV"}, \texttt{"CVM"}
 under \texttt{mode="ED"}, \texttt{"EX"}, \texttt{"TD"}, \texttt{"TDZ"}
-and \texttt{"SECTOR"} are untouched. \texttt{mode="ED" submode="ROOTN"}
+and \texttt{"SECTOR"} were untouched \emph{by that change};
+\texttt{"TD"}, \texttt{"TDZ"} and \texttt{"KPM"} moved later, on
+2026-09-22, for the two reasons in the following two entries.
+\texttt{mode="ED" submode="ROOTN"}
 and \texttt{mode="DMRG" submode="ROOTN"} are also roughly \textbf{2x
 slower} now, for the reason given in Section~\ref{sec:dynamical}.
+\item \textbf{\texttt{submode="TD"} and \texttt{submode="TDZ"} now
+return the density too}, where they used to return the complex one-sided
+transform it is assembled from (the audit's open item O1, closed
+2026-09-22). Section~\ref{sec:dynamical}'s \texttt{"TD"} entry carries
+the identity and the cost rule; what matters for a result you already
+have is that the array moved, and that the imaginary part moved most. On
+the audit's 4-site complex-hopping chain ($A=c^\dagger_0$, $B=c_2$,
+$\delta=0.4$, \texttt{dt=0.1}, exact peak 0.2313) the distance to the
+exact Lehmann density went from 1.16e-01 to 2.57e-04 under
+\texttt{mode="DMRG"}, from 2.76e-01 to 2.57e-04 under
+\texttt{mode="ED"}, and from 1.13e-01 to 3.31e-02 for \texttt{"TDZ"},
+whose own contour error the fix does not touch. On a Hermitian pair the
+imaginary part used to run at 60\% of the peak (1.11e-01 against 0.1869
+on a 4-site Heisenberg chain at $\delta=0.3$) and is now exactly zero,
+with the curve itself landing 2.82e-04 from exact. Taking
+\texttt{.real} of the result, which this guide used to instruct, is now
+a no-op on a real-weight pair and \emph{wrong} on a complex-weight one.
+\texttt{mode="ED"} moved further than \texttt{mode="DMRG"} because that
+route additionally read the operator pair in the opposite order,
+returning $S_{BA}$ where every other route returns $S_{AB}$; it was
+invisible whenever $A$ and $B$ are the same operator, which is every
+example here. A pair that is not provably its own adjoint now costs two
+evolutions rather than one.
+\item \textbf{\texttt{delta} under \texttt{submode="KPM"} is now the
+same broadening it is in the resolvent submodes}, FWHM $=2\delta$ at the
+band centre, on both solvers (the audit's open item O2, closed
+2026-09-22), and \texttt{kpm\_n\_scale}'s default changes from 3 to 1
+because the base moment count it multiplies is now the calibrated one.
+Neither solver realized the intended width before, and they missed it
+differently: \texttt{mode="ED"} rescaled onto a window three times the
+bandwidth and counted moments by its own rule, giving about
+$0.93\delta$, while \texttt{mode="DMRG"} gave about $1.6\delta$. Every
+KPM curve therefore changes width, and the two solvers stop disagreeing:
+measured with $A=B=S^z_0$ on three chains,
+$\max|\mathrm{ED}-\mathrm{DMRG}|$ against the resolvent peak went from
+95 to 124 per cent down to 4 to 7 per cent. Peak heights change with the
+width and the sum rule does not, which is exactly why nothing caught
+this: both routes integrated to 0.250000 against an exact 0.250000
+before and after. A script that was tuning \texttt{delta} by eye against
+a KPM curve, or carrying \texttt{kpm\_n\_scale=3} explicitly, gets a
+different spectrum now. \texttt{get\_distribution()}'s own KPM path is
+deliberately left off the calibration
+(Section~\ref{sec:densitymatrices}).
 \item \textbf{\texttt{vev(op, npow=n)} on an ED route} returned $\langle
 O\rangle$ for every $n$; it now returns $\langle O^n\rangle$. Measured on
 a 4-site Heisenberg chain, \texttt{vev(Sz[0], npow=2, mode="ED")} went

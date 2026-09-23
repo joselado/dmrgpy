@@ -320,3 +320,190 @@ def test_kpm_moments_wfa_wfb_without_X_names_the_argument():
     with pytest.raises(TypeError) as exc:
         kpmdmrg.kpm_moments_wfa_wfb(sc, wfa=wf, wfb=wf)
     assert "X=" in str(exc.value)
+
+
+# ------------------------------------------- O1: the two real-time routes
+#
+# submode="TD"/"TDZ" were the routes finding #5 deliberately left off the
+# convention, recorded as open item O1. A real-time run only produces
+# C(t) for t>=0, and a one-sided transform of that is a resolvent, not a
+# density. The missing half is the conjugate of the forward half of the
+# ADJOINT pair (B^dagger,A^dagger), which the same machinery computes:
+# see timedependent.lehmann_density_from_one_sided. Everything here is on
+# the same complex-M_n pair as the rest of this file, because the fix and
+# the bug are both invisible on a Hermitian one.
+
+TD_DELTA = 0.4    # 6/TD_DELTA/TD_DT = 150 steps covers ES to ~0.25%
+TD_DT = 0.1
+
+
+@pytest.mark.parametrize("mode,submode,tol", [
+    ("DMRG", "TD", 1e-3),    # was 1.16e-01
+    ("ED", "TD", 1e-3),      # was 2.76e-01, see the pair-order test below
+    ("DMRG", "TDZ", 6e-2),   # was 1.13e-01; 3.31e-02 is the contour's own
+])
+def test_real_time_submodes_return_the_complex_lehmann_density(mode, submode,
+                                                               tol):
+    """Pointwise against the same exact Lehmann sum every other submode
+    is held to. The TDZ bound is looser on purpose: its complex-time
+    contour plus Taylor-in-alpha0 reconstruction carries an error of its
+    own, 3.31e-02 here against an exact peak of 0.2313, which is not a
+    convention question and which the audit measured as 1.8e-2 on a
+    Hermitian pair. What all three rows pin is that the returned array is
+    the density and not the one-sided transform."""
+    fc = complex_hopping_chain()
+    A, B = fc.Cdag[0], fc.C[2]
+    D, M = lehmann(fc, A, B)
+    assert np.max(np.abs(M.imag)) > 0.1, "this pair must have complex weights"
+    ref = density(D, M, ES, TD_DELTA)
+    _x, y = fc.get_dynamical_correlator(mode=mode, submode=submode,
+                                        name=[A, B], es=ES, delta=TD_DELTA,
+                                        dt=TD_DT)
+    y = np.asarray(y, dtype=np.complex128)
+    assert np.max(np.abs(y - ref)) < tol, \
+        "%s/%s is off the complex Lehmann density by %.3e" \
+        % (mode, submode, np.max(np.abs(y - ref)))
+
+
+def test_real_time_result_on_a_hermitian_pair_is_real():
+    """The spurious part was the imaginary one, and on a Hermitian pair
+    the density has none: M_n is real there, so C_AB is real. It used to
+    come back at 1.11e-01, 60% of that correlator's own peak of 0.1869."""
+    sc = staggered_heisenberg(n=4)
+    name = [sc.Sz[0], sc.Sz[0]]
+    _x, y = sc.get_dynamical_correlator(mode="DMRG", submode="TD", name=name,
+                                        es=np.linspace(0.01, 4.0, 40),
+                                        delta=0.3, dt=TD_DT)
+    assert np.max(np.abs(np.asarray(y).imag)) == 0.0
+
+
+def _count_evolutions(monkeypatch):
+    """Count calls into timedependent.evolution_DC, which is one per
+    real-time run."""
+    from dmrgpy import timedependent
+    calls = []
+    original = timedependent.evolution_DC
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(timedependent, "evolution_DC", counted)
+    return calls
+
+
+def test_a_self_adjoint_pair_still_costs_one_evolution(monkeypatch):
+    """The combination collapses to Re F exactly when A is provably
+    B^dagger, so the common case must not have become twice as
+    expensive."""
+    sc = staggered_heisenberg(n=4)
+    calls = _count_evolutions(monkeypatch)
+    sc.get_dynamical_correlator(mode="DMRG", submode="TD",
+                                name=[sc.Sz[0], sc.Sz[0]],
+                                es=np.linspace(0.01, 4.0, 20), delta=0.3,
+                                dt=TD_DT)
+    assert len(calls) == 1
+    # and on a self-adjoint pair with A != B, which is the case A = B
+    # cannot distinguish -- see the test of that pair's *value* above
+    fc = complex_hopping_chain()
+    calls2 = _count_evolutions(monkeypatch)
+    fc.get_dynamical_correlator(mode="DMRG", submode="TD",
+                                name=[fc.Cdag[0], fc.C[0]], es=ES,
+                                delta=TD_DELTA, dt=TD_DT)
+    assert len(calls2) == 1
+
+
+def test_a_pair_that_is_not_its_own_adjoint_takes_the_second_evolution(
+        monkeypatch):
+    """And the uncommon case must actually pay for the half it needs,
+    rather than silently returning the resolvent again."""
+    fc = complex_hopping_chain()
+    calls = _count_evolutions(monkeypatch)
+    fc.get_dynamical_correlator(mode="DMRG", submode="TD",
+                                name=[fc.Cdag[0], fc.C[2]], es=ES,
+                                delta=TD_DELTA, dt=TD_DT)
+    assert len(calls) == 2
+
+
+def test_the_fast_path_is_right_on_a_self_adjoint_pair_that_is_not_a_b():
+    """The short-circuit returns Re F, and Re F is the density only when
+    every M_n is real. A = B = Sz_0 cannot discriminate: it is symmetric
+    under everything. (Cdag_0, C_0) can -- it is a self-adjoint pair with
+    A != B, on the same complex-hopping chain, where M_n = |<n|C_0|GS>|^2
+    is real for a reason (the pair) rather than by accident (the
+    Hamiltonian). So this pins both halves at once: that the fast path
+    fires, and that it is correct where it fires."""
+    from dmrgpy.multioperatortk import canonical
+    fc = complex_hopping_chain()
+    A, B = fc.Cdag[0], fc.C[0]
+    assert canonical.is_dagger_pair(A, B)
+    D, M = lehmann(fc, A, B)
+    assert np.max(np.abs(M.imag)) < 1e-10, "this pair must have real weights"
+    ref = density(D, M, ES, TD_DELTA)
+    _x, y = fc.get_dynamical_correlator(mode="DMRG", submode="TD",
+                                        name=[A, B], es=ES, delta=TD_DELTA,
+                                        dt=TD_DT)
+    y = np.asarray(y, dtype=np.complex128)
+    assert np.max(np.abs(y.imag)) == 0.0
+    assert np.max(np.abs(y - ref)) < 1e-3
+
+
+def test_the_two_solvers_read_the_operator_pair_in_the_same_order():
+    """edtk/timedependent.evolution_DC put the caller's A on the ket and
+    B on the bra, i.e. it returned C[B,A] where every other route returns
+    C[A,B]. On this pair the two differ by 2.8e-01 against a peak of
+    0.2313; on the Hermitian pairs every example uses, not at all."""
+    fc = complex_hopping_chain()
+    A, B = fc.Cdag[0], fc.C[2]
+    kw = dict(submode="TD", es=ES, delta=TD_DELTA, dt=TD_DT)
+    _x, yd = fc.get_dynamical_correlator(mode="DMRG", name=[A, B], **kw)
+    _x, ye = fc.get_dynamical_correlator(mode="ED", name=[A, B], **kw)
+    assert np.max(np.abs(np.asarray(yd) - np.asarray(ye))) < 1e-3
+    # and the swapped pair is a genuinely different curve, so the
+    # agreement above is not vacuous
+    _x, ys = fc.get_dynamical_correlator(mode="ED", name=[B, A], **kw)
+    assert np.max(np.abs(np.asarray(yd) - np.asarray(ys))) > 0.1
+
+
+# ---------------------------------- O2: what `delta` means under KPM
+#
+# Both solvers expand the same spectral density in Chebyshev polynomials,
+# but each used to pick its own rescaling window AND its own moment
+# count, so one submode name produced two visibly different curves. They
+# now share algebra/kpm.py's polynomials_for_broadening, which sets the
+# count from the Jackson kernel's own resolution so that the line comes
+# out at FWHM = 2*delta, the width the resolvent submodes give.
+
+def test_kpm_moment_count_is_calibrated_to_the_requested_broadening():
+    """The relation the count is derived from, on its own: the Jackson
+    kernel turns a delta peak at the band centre into a line of FWHM
+    JACKSON_FWHM_FACTOR*half_width/npol, so asking for 2*delta must
+    return the npol that solves that."""
+    from dmrgpy.algebra.kpm import (polynomials_for_broadening,
+                                    JACKSON_FWHM_FACTOR)
+    for half, delta in [(3.0, 0.05), (1.4, 0.02), (10.0, 0.1)]:
+        npol = polynomials_for_broadening(half, delta)
+        assert abs(JACKSON_FWHM_FACTOR * half / npol - 2 * delta) \
+            < 0.02 * 2 * delta
+    # n_scale multiplies, so it buys a proportionally sharper line
+    assert polynomials_for_broadening(3.0, 0.05, n_scale=3) == \
+        3 * polynomials_for_broadening(3.0, 0.05)
+    # and a delta comparable to the bandwidth is floored rather than
+    # collapsed to a handful of moments, which stops being a spectrum
+    assert polynomials_for_broadening(0.7, 0.6) == 16
+
+
+def test_ed_and_dmrg_kpm_agree_pointwise():
+    """Open item O2. Measured before the shared rule, on this chain at
+    this delta: max|ED-DMRG| = 4.4e-01 against a resolvent peak of
+    0.3553, i.e. the disagreement was larger than the correlator. Both
+    satisfied the sum rule throughout, which is why only a pointwise
+    comparison catches it."""
+    sc = staggered_heisenberg(n=4)
+    name = [sc.Sz[0], sc.Sz[0]]
+    es, delta = np.linspace(0.01, 5.0, 200), 0.15
+    _x, yed = sc.get_dynamical_correlator(mode="ED", submode="KPM",
+                                          name=name, es=es, delta=delta)
+    _x, ydm = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
+                                          name=name, es=es, delta=delta)
+    yed, ydm = np.real(yed), np.real(ydm)
+    assert np.max(np.abs(yed - ydm)) < 0.1 * np.max(np.abs(yed))

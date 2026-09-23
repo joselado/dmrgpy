@@ -342,7 +342,7 @@ def _canonicalize_raw(A0, D, d_g):
     left, right, phys = (Index(D, tags="Link"), Index(D, tags="Link"),
                           Index(d_g, tags="Site"))
     _, eta0 = idmrg._dominant_right_fixed_point(
-        idmrg._transfer_matrices([ITensor((left, phys, right), A0)], 1))
+        idmrg._transfer_chain([A0], 1))
     A0 = A0 / np.sqrt(eta0.real)
     B0 = ITensor((left, phys, right), A0)
     U_list, _eta = idmrg._canonicalize_periodic([B0], 1, cutoff=0.0, maxdim=D)
@@ -917,8 +917,13 @@ def _transfer_fixed_points(AL, AR, C=None):
 
     from . import vumps_ms
 
-    E_AL = idmrg_exc._op_transfer_matrix(AL, AL, None)
-    E_AR = idmrg_exc._op_transfer_matrix(AR, AR, None)
+    # Lazy transfer chains rather than materialized chi^4 tensors: this
+    # runs once per VUMPS iteration, so an E4 per side was 2 x 268 MB of
+    # allocation churn per iteration at D=64. Both the eigensolve and the
+    # residual below take the same matrix-free site walk, which is the
+    # exact re-association idmrg._apply_site_transfer documents.
+    chain_AL = idmrg._transfer_chain([AL], 1)
+    chain_AR = idmrg._transfer_chain([AR], 1)
     bond_r, bond_l = _bond_fixed_point_candidates(C)
 
     def _one_side(Es, side, action, bond, caller):
@@ -954,11 +959,11 @@ def _transfer_fixed_points(AL, AR, C=None):
             return bond
         return rho
 
-    r_AL = _one_side([E_AL], "right",
-                     lambda X: idmrg._apply_transfer(E_AL, X), bond_r,
+    r_AL = _one_side(chain_AL, "right",
+                     lambda X: chain_AL.apply_right(0, X), bond_r,
                      "vumps._transfer_fixed_points (AL transfer)")
-    l_AR = _one_side([E_AR], "left",
-                     lambda X: idmrg._apply_transfer_from_left(E_AR, X), bond_l,
+    l_AR = _one_side(chain_AR, "left",
+                     lambda X: chain_AR.apply_left(0, X), bond_l,
                      "vumps._transfer_fixed_points (AR transfer)")
     return r_AL, l_AR
 
@@ -1650,11 +1655,7 @@ def _complete_mixed_gauge(AL):
     docstring above for why that is the expected, correct outcome when AL
     is itself already a block-diagonal direct sum of two equally-
     normalized branches, not a bug to route around here."""
-    D, d_g, _ = AL.shape
-    left, right, phys = (Index(D, tags="Link"), Index(D, tags="Link"),
-                          Index(d_g, tags="Site"))
-    Es = idmrg._transfer_matrices([ITensor((left, phys, right), AL)], 1)
-    r, _eta = idmrg._dominant_right_fixed_point(Es)
+    r, _eta = idmrg._dominant_right_fixed_point(idmrg._transfer_chain([AL], 1))
     herm = (r + r.conj().T) / 2
     evals, evecs = np.linalg.eigh(herm)
     evals = np.clip(evals.real, 0.0, None)

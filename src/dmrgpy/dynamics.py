@@ -38,11 +38,28 @@ that every submode on this convention can be checked against (see
 tests/test_audit_2026_09_correlator-conventions.py). The default
 submode="KPM" -- a Chebyshev expansion of the spectral density, which has
 no notion of a retarded resolvent at all -- is on this convention in the
-sum-rule (and delta->0) sense, which is what the test file pins it by; it
-is NOT pointwise interchangeable with the resolvent submodes at a given
-delta, since delta there only sets the polynomial count (edtk/dynamics.py
-picks npol from int(2*scale/delta), and the DMRG side picks its own), so
-measured peak heights differ by a factor of 2-3 at delta=0.15..0.6.
+sum-rule (and delta->0) sense, which is what the test file pins it by,
+and its `delta` is the same broadening: every KPM route picks its moment
+count from algebra/kpm.py's polynomials_for_broadening, so the Jackson
+line comes out at FWHM = 2*delta, the width the resolvent submodes give.
+Two caveats, both measured rather than asserted. The width is exact at
+the centre of the rescaled band and tightens as sqrt(1-x^2) towards its
+edges, which is the kernel's own resolution profile and not a choice: no
+single moment count gives one width across a whole band. And the line is
+Jackson-Gaussian, not Lorentzian, so at equal FWHM and equal integrated
+weight its peak stands about 1.6x higher than the resolvent submodes' --
+measured 0.315 against 0.195 on a 6-site Heisenberg chain at delta=0.2,
+with both integrating to the same 0.250000. What it is NOT any more is a
+different curve on the two solvers: mode="ED" and mode="DMRG" used to
+pick both the rescaling window and the moment count independently
+(int(2*scale/delta) against round((emax-emin)/delta)*kpm_n_scale, on
+windows differing by a factor of three), and disagreed pointwise by
+4.4e-01 against a resolvent peak of 0.355 on a 4-site chain at
+delta=0.15. They now share both and agree to 1.3e-02 there. That was
+open item O2 of the 2026-09 audit. get_distribution()'s own KPM path
+(kpmdmrg.general_kpm_moments) is deliberately NOT on this calibration:
+it expands an arbitrary operator rather than the Hamiltonian, and its
+delta still only sets a polynomial count.
 submode="INV"/"CVM" under mode="ED" and submode="EX" have always computed
 C_AB directly. The 2026-09 audit found four routes off the convention and
 brought them onto it rather than the other way round: submode="ED",
@@ -74,25 +91,57 @@ that audit did not exercise: it mirrors kpmdmrg.py and shares the same
 moment reconstruction, but nothing here has measured it, so this
 docstring makes no claim about it.
 
-THE TWO EXCEPTIONS: submode="TD" and submode="TDZ"
--------------------------------------------------
-These two do NOT return C_AB, and finding #5's convention decision
-explicitly did not touch them. Both end in
-`timedependent._fourier_transform_correlator`, which returns the full
-*complex* one-sided Fourier transform of the real-time correlator --
-in the long-time limit -(i/pi)*G^A_AB(w), whose real part is C_AB when
-Im M_n = 0 and whose imaginary part is the dispersive -(1/pi)*Re G^A_AB
-that C_AB does not have. Measured on a 6-site Heisenberg chain with the
-Hermitian pair A = B = Sz_0 (so M_n is real and C_AB is the ordinary
-real density, peak 0.1421, delta=0.3): Re y reproduces C_AB to 2e-4 and
-y reproduces -(i/pi)*G^A to 2e-4, while max|Im y| = 0.0996, i.e. 70% of
-the density's own peak (submode="TDZ": 68%, with its complex-time
-contour putting Re y 1.8e-2 from C_AB). So take `np.real(...)` of a
-TD/TDZ result before comparing it against any other submode, and do not
-read its imaginary part as a complex Lehmann weight. This is recorded as
-an open item in docs/audit_2026_09_hole_hunt.md: moving them onto the
-convention changes numbers on the most commonly used real-time route,
-and was deliberately not done in that pass.
+THE TWO REAL-TIME ROUTES: submode="TD" and submode="TDZ"
+--------------------------------------------------------
+These two are built on a one-sided transform, and a one-sided transform
+is a resolvent rather than a density, so they used to be the exceptions
+to everything above. They are not any more. A real-time run produces
+C(t) for t>=0 only, and `_fourier_transform_correlator` turns that into
+-(i/pi)*G^A_AB(w), whose real part is C_AB when Im M_n = 0 and whose
+imaginary part is a dispersive term C_AB does not have, measured at 70%
+of the density's own peak even on a Hermitian pair. The missing half of
+the transform is not a second simulation: the backward half of the pair
+(A,B) is the conjugate of the FORWARD half of the pair
+(B^dagger,A^dagger), so
+
+    C_AB = ( F[(A,B)] + conj(F[(B^dagger,A^dagger)]) ) / 2
+
+with F the one-sided transform, and that collapses to Re F exactly when
+A is provably B^dagger, which is every example in the documentation and
+costs one evolution rather than two. See
+timedependent.lehmann_density_from_one_sided, which both submodes share;
+canonical.is_dagger_pair is the test, and it refuses rather than guesses
+for a name with no known adjoint, which costs a second evolution and
+never a wrong number.
+
+Measured against an exact Lehmann sum built by dense diagonalization
+outside dmrgpy, on the 2026-09 audit's own seeded 4-site complex-hopping
+chain (A = Cdag_0, B = C_2, max|Im M_n| = 0.271, exact peak 0.2313,
+delta=0.4, dt=0.1), max|y - exact|:
+
+    submode="TD",  mode="DMRG"   1.16e-01  ->  2.57e-04
+    submode="TD",  mode="ED"     2.76e-01  ->  2.57e-04
+    submode="TDZ", mode="DMRG"   1.13e-01  ->  3.31e-02
+
+and on a 4-site Heisenberg chain with the Hermitian pair A = B = Sz_0
+(peak 0.1869, delta=0.3) the imaginary part goes from 1.11e-01, 60% of
+that peak, to exactly zero, with max|y - exact| going 1.11e-01 ->
+2.82e-04. TDZ keeps a residual of its own, 3.31e-02 here: that is its
+complex-time contour and its Taylor-in-alpha0 reconstruction, the same
+error the audit measured as 1.8e-2 on a Hermitian pair, and it is not a
+convention question. The mode="ED" row moved further than the others
+because that route additionally read the operator pair in the opposite
+order, so the two solvers computed the correlator of different pairs
+under one submode name, invisible whenever A and B are the same
+operator; see edtk/timedependent.evolution_DC.
+
+This closes open item O1 of docs/audit_2026_09_hole_hunt.md. Numbers
+change accordingly: any submode="TD"/"TDZ" spectrum from before this is
+not comparable, its imaginary part most of all. The infinite-chain
+S(k,omega) route (timedependent.sxt_to_skomega, used by
+pyitensor.idmrg_window and infinitechain.py) still returns the raw
+transform, because the reduction it performs never sees the operator
+pair.
 """
 from . import kpmdmrg
 from . import timedependent

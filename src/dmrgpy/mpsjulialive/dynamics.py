@@ -152,7 +152,10 @@ def _kpm_dynamical_correlator(self,n=1000,
     self.wf0,self.e0,self.computed_gs = wf0,e0,True # restore GS cache
     shift = -(emin+emax)/2.0
     scale = 1.0/((emax-emin)*self.kpm_scale)
-    n = int(round((emax-emin)/delta))*self.kpm_n_scale
+    # the shared calibrated moment count, see
+    # algebra/kpm.py::polynomials_for_broadening and kpmdmrg.py
+    from ..algebra.kpm import polynomials_for_broadening
+    n = polynomials_for_broadening(1.0/scale,delta,n_scale=self.kpm_n_scale)
     Hscaled_MO = (H+shift*multioperator.identity())*scale
     from .mpo import MPO
     from .juliasession import Main as Mainjl

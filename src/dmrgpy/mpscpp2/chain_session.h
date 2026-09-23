@@ -58,6 +58,27 @@ struct NHDMRGResult
     MPS psil, psir;
     };
 
+// The Jackson-kernel resolution calibration, the C++ copy of
+// algebra/kpm.py::polynomials_for_broadening (which carries the relation
+// this solves, the measurements behind the constant, and why the floor is
+// there). half_width is the physical half-width of the interval the
+// spectrum was rescaled onto, so that a Chebyshev line comes out at
+// FWHM = 2*delta at the centre of the band, the width the resolvent
+// submodes give for the same delta. The constant is 2*sqrt(2*ln(2))*pi.
+// Both KPM entry points below used to take
+// round((emax-emin)/delta)*kpm_n_scale instead, which is about 1.6*delta,
+// while the ED route took its own third rule -- open item O2 of the
+// 2026-09 audit.
+static inline int kpm_polynomials_for_broadening(double half_width,
+                                                 double delta, int n_scale)
+    {
+    const double jackson_fwhm_factor = 7.3978603334259664;
+    int npol = int(std::round(jackson_fwhm_factor*half_width/(2.0*delta)));
+    npol *= (n_scale>0 ? n_scale : 1);
+    return npol<16 ? 16 : npol;
+    }
+
+
 class Chain
     {
     public:
@@ -850,7 +871,7 @@ class Chain
         if (!have_H_) Error("Chain::kpm_dynamical_correlator called before set_hamiltonian");
         if (!have_wf0_) gs_energy(); // ensure a ground state is available
         auto hs = scaled_hamiltonian(kpm_scale);
-        int n = int(std::round((hs.emax-hs.emin)/delta))*kpm_n_scale;
+        int n = kpm_polynomials_for_broadening(1.0/hs.scale,delta,kpm_n_scale);
         auto m1 = build_mpo(sites_,terms_i,mpomaxm_);
         auto m2 = build_mpo(sites_,terms_j,mpomaxm_);
         auto psi1 = exactApplyMPO(wf0_,m1,{"Maxm",kpmmaxm,"Cutoff",kpm_cutoff});
