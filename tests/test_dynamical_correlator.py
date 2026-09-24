@@ -220,12 +220,24 @@ def test_td_linear_prediction_sharpens_peak():
     """Linear-prediction extrapolation (dynamicstk/linearprediction.py,
     enabled via dynamical_correlator's predict=True) extends the raw C(t)
     before windowing, so the same real TDVP simulation should yield a
-    narrower resonance than the plain windowed FFT -- the entire point of
-    the technique (see docs/td_dynamical_correlator_sharpening_plan.md).
-    Checked on the same 4-site Heisenberg gap used throughout this file:
-    both the plain and linear-prediction spectra must still peak at the
-    exact gap, but the linear-prediction one must have a strictly
-    narrower full width at half max."""
+    narrower resonance than the plain windowed transform wherever the
+    finite time window, rather than the damping, sets the width -- the
+    entire point of the technique (see
+    docs/td_dynamical_correlator_sharpening_plan.md). Checked on the same
+    4-site Heisenberg gap used throughout this file: both the plain and
+    linear-prediction spectra must still peak at the exact gap, but the
+    linear-prediction one must have a strictly narrower full width at
+    half max.
+
+    The window is an explicit nt=200 (T=20, delta*T=1), not the default
+    damping_periods/delta/dt=1200 (delta*T=6). At the default the line is
+    already at the exact Lorentzian width, 0.0975 on this grid with or
+    without prediction, and there is nothing left to narrow: the
+    0.1275 -> 0.0975 this test used to see there was the old frequency
+    stage's linear interpolation of an FFT grid of spacing 1.05*delta,
+    which prediction's tenfold longer series made ten times finer
+    (2026-09-24 audit, finding 7). Here truncation is what broadens the
+    plain transform, 0.2125, and prediction takes it to 0.0975."""
     sc = _heisenberg_chain()
     sc.setup_python()
     name = (sc.Sz[0], sc.Sz[0])
@@ -233,10 +245,12 @@ def test_td_linear_prediction_sharpens_peak():
     delta = DELTA
 
     x0, y0 = sc.get_dynamical_correlator(mode="DMRG", submode="TD", name=name,
-                                          es=es, delta=delta, predict=False)
+                                          es=es, delta=delta, nt=200,
+                                          predict=False)
     x1, y1 = sc.get_dynamical_correlator(mode="DMRG", submode="TD", name=name,
-                                          es=es, delta=delta, predict=True,
-                                          lp_order=15, lp_extend_factor=8)
+                                          es=es, delta=delta, nt=200,
+                                          predict=True, lp_order=15,
+                                          lp_extend_factor=8)
     x0, y0 = np.array(x0), np.abs(y0)
     x1, y1 = np.array(x1), np.abs(y1)
 

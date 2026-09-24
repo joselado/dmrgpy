@@ -140,6 +140,11 @@ def _kpm_dynamical_correlator(self,n=1000,
     instead of self._session.kpm_dynamical_correlator (julia_live has no
     such session object)."""
     if delta<0.0: raise
+    # validated before the ground state and the band-edge search, the
+    # same check kpmdmrg.py makes ahead of its session calls: this route
+    # used to round a non-integer down silently through int() (finding 5
+    # of docs/audit_2026_09_24_hole_hunt.md)
+    n_scale = kpm.validate_kpm_n_scale(self.kpm_n_scale)
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
     if type(name[0])!=multioperator.MultiOperator: raise
     mi = name[1] # first operator
@@ -155,7 +160,7 @@ def _kpm_dynamical_correlator(self,n=1000,
     # the shared calibrated moment count, see
     # algebra/kpm.py::polynomials_for_broadening and kpmdmrg.py
     from ..algebra.kpm import polynomials_for_broadening
-    n = polynomials_for_broadening(1.0/scale,delta,n_scale=self.kpm_n_scale)
+    n = polynomials_for_broadening(1.0/scale,delta,n_scale=n_scale)
     Hscaled_MO = (H+shift*multioperator.identity())*scale
     from .mpo import MPO
     from .juliasession import Main as Mainjl
@@ -170,7 +175,12 @@ def _kpm_dynamical_correlator(self,n=1000,
     else:
         moments = _kpm_moments_full(Hscaled.jlmpo,psi1,psi2,
                 n,self.kpmmaxm,self.kpmcutoff)
-    mus = np.array(moments)
+    # exactly the calibrated n: kpm.jl's loops return 2+n (2+2*(n//2)
+    # accelerated), and the Jackson kernel takes its N from len(mus), so
+    # the extra moments made the line narrower than ED's by about 2/n.
+    # Cut before kpm_extrapolate, as in kpmdmrg.dynamical_correlator_
+    # moments (finding 4 of docs/audit_2026_09_24_hole_hunt.md)
+    mus = np.array(moments)[:n]
     if self.kpm_extrapolate:
         mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
                 extrapolation_mode=self.kpm_extrapolate_mode)

@@ -1083,8 +1083,12 @@ def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
     ts, xs, S = idmrg_window.dynamical_correlator_td(
         ic._result, n_window=10, opname_A="Sz", opname_B="Sz", dt=0.05,
         nt=25, cutoff=1e-10, maxdim=30, niter=20, x_values=[1])
+    # _evaluation="fft": at nt=25, delta*T = 0.375, the regime
+    # sxt_to_skomega is also kept on, where the direct evaluation of the
+    # 2026-09-24 audit's finding 7 has not been measured yet.
     es_td, g_td = _fourier_transform_correlator(ts, S[:, 0], 0.05, es=es,
-                                                  delta=0.3, window=[-1, 6])
+                                                  delta=0.3, window=[-1, 6],
+                                                  _evaluation="fft")
 
     peak_kpm = es[np.argmax(np.abs(y_kpm))]
     # Check that the TD spectrum still carries substantial weight *at*

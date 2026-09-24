@@ -924,7 +924,21 @@ class Infinite_Many_Body_Chain:
         models at D=1..3, matching to ~1e-10 or tighter -- see
         tests/test_vumps_excitations_v3.py).
 
-        Any converged bond dimension D>=1 is supported on both backends."""
+        Any converged bond dimension D>=1 is supported on both backends.
+
+        The `n` values are the n lowest eigenvalues of H_eff(k) WITH
+        multiplicity on both backends and on both of each backend's
+        solvers: an exactly degenerate level (e.g. the transverse pair of
+        the magnon triplet on the critical n_uc=2 Heisenberg cell) comes
+        back once per member. Above the dense-solver threshold each value
+        is its own deflated Lanczos run from its own generic start, since
+        a single Krylov space holds only one direction of a degenerate
+        eigenspace. On itensor_version="python" that has been so only
+        since the 2026-09-24 audit (finding 15): before it, one ARPACK
+        call for all n values could return one member of a degenerate
+        pair and the next level in place of the other, e.g.
+        [0.289896072 0.291597913 0.313428946] for the dense
+        [0.289896072 0.289896072 0.291597913] at k=0.37, maxm=10."""
         # Both backends' ansatz is built on the grouped, reach-1
         # {GL, GR, bond_envs} triple (pyitensor/idmrg_excitations.py and
         # its C++ port), which a longer-range Hamiltonian's extra pending
@@ -1024,14 +1038,17 @@ class Infinite_Many_Body_Chain:
         further restriction: itensor_version=3 is NOT supported here at all
         (excitation_energies does support it). The C++ port
         (Chain::vumps_excitation_energies) has neither the eigenvectors nor
-        the mixed-transfer source vector this needs, the same way it has
-        not yet picked up the iterative eigensolver -- see
-        docs/idmrg_improvement_plan.md.
+        the mixed-transfer source vector this needs: its eigensolvers
+        (dense, and the deflated Lanczos vx_lanczos_lowest) return
+        eigenvalues only -- see docs/idmrg_improvement_plan.md.
 
         Two things to know before reading an individual weight. Within a
         degenerate multiplet the split between branches is
-        **basis-arbitrary** (the eigensolver picks an arbitrary basis of a
-        degenerate eigenspace), so only multiplet sums are physical -- on
+        **basis-arbitrary** (both solvers return every member of the
+        multiplet, as an arbitrary orthonormal basis of the degenerate
+        eigenspace; see excitation_energies' docstring for why the
+        iterative one could not before 2026-09-24), so only multiplet sums
+        are physical -- on
         the AKLT chain at `D=2` the branches split into an SU(2) triplet
         and a quintuplet at every momentum, and the triplet's three
         weights come out ~0.08/0.84/0.08 with their sum equal to the whole
@@ -1079,7 +1096,10 @@ class Infinite_Many_Body_Chain:
         single-mode approximation to `S(k,w)`, exact for a model whose
         low-energy response is one isolated coherent mode and a *lower
         bound* on the true response otherwise (see `spectral_weights`'
-        `return_total` for how to measure the shortfall).
+        `return_total` for how to measure the shortfall). `n` counts
+        branches with multiplicity, so a degenerate multiplet takes as many
+        of the `n` as it has members, and an `n` that cuts through one
+        keeps an arbitrary share of its weight rather than all of it.
 
         The broadening is purely cosmetic here, applied so the result can
         be plotted as a heat map -- the underlying peaks are exact delta

@@ -179,7 +179,12 @@ class Spin_Chain(Many_Body_Chain):
               possible virtual intermediate state), via
               kondospectrumtk.edkondo.KondoSpectrum -- independent of this
               chain's own itensor_version/DMRG-vs-ED mode setting, and
-              valid at any T>=0.
+              valid at any T>=0. It reads the named parameters only, and
+              any other keyword raises TypeError: it is either one of
+              the mode="DMRG" parameters below or a misspelling, which
+              used to be dropped silently and leave that parameter at
+              its default (Jrho= for Jrho_s= returned the order=2
+              curve).
               "DMRG" instead uses this chain's own itensor_version
               (3 or "python", i.e. either the compiled ITensor v3
               extension or the pure-Python pyitensor backend -- both
@@ -205,19 +210,53 @@ class Spin_Chain(Many_Body_Chain):
               no excited-state enumeration either; it carries the same
               general-S-extrapolation caveat as
               conductance.third_order_potential_dIdV (see that
-              function's docstring). Extra
+              function's docstring). With mode="DMRG" the extra
               kwargs are forwarded: `submode` (default "KPM"), `delta`,
               `es` to kondospectrumtk.secondorder_dc.second_order_dIdV_dc
               (second-order term) and
               kondospectrumtk.potentialdc.third_order_potential_dIdV_dc
-              (potential-interference term, if U!=0) (`es` has no safe
-              default -- see either function's docstring -- and must be
-              supplied when order requests it). Any further kwargs (e.g.
-              `n`, the number of KPM moments -- its own default of 1000
-              is accurate but expensive; a compiled-backend smoke test
-              may want far fewer) are forwarded on to
-              chain.get_dynamical_correlator via both of the above, for
-              whichever mode/submode combination is in use. `dt2`, `n_t2_half`,
+              (potential-interference term, if U!=0). `es` has no safe
+              default and must always be supplied, and it is ONE grid
+              shared by both terms, so with U!=0 and order=3 it has to
+              meet the potential term's stricter requirement: it must
+              reach past the top of the site's S_k spectrum (every
+              transition from the ground state that carries weight in
+              sum_k |<m|S_k|GS>|^2, plus several delta, and w=0 itself),
+              where the second-order term alone only needs the
+              transitions below max|eV| -- see both functions'
+              docstrings. Any further kwargs go on to
+              chain.get_dynamical_correlator via both of the above, and
+              are whatever that submode's correlator takes: for
+              submode="KPM" that is `kernel`, `hodc_order` and
+              `hodc_eta`. The number of KPM moments is not a call
+              argument (`n=` raises TypeError): it follows from `delta`
+              and the chain's own attributes (kpm_n_scale, kpm_scale,
+              kpmmaxm, ...), see kpmdmrg.get_dynamical_correlator.
+              `n_gs` (default 1) is the size of the degenerate
+              ground-state manifold to average over. mode="ED" defines
+              T=0 as the T->0+ limit, the equal-weight average over the
+              degenerate ground manifold (edkondo.KondoSpectrum); the
+              DMRG route's T=0 is the single state the solver converged
+              to unless n_gs is given, which at an accidental degeneracy
+              (a level crossing) is whichever member, or superposition
+              of members, the random start reached, so the spectrum can
+              land anywhere between those of the members themselves.
+              With n_gs>1 every term (second order, third-order Kondo,
+              potential) is averaged with equal weight over the states
+              of get_excited_states(n=n_gs, purify=True), each set as
+              the chain's ground state in turn; every term is linear in
+              the ground-state density matrix, so this is exactly
+              mode="ED"'s average whichever orthonormal basis of the
+              manifold DMRG returns. The members are taken to be
+              degenerate with the ground state (every transition energy
+              is measured from its energy), so n_gs is the caller's
+              statement of the degeneracy, the same contract as
+              `dex` in the ED dynamical correlator: a warning is issued
+              when a member lies more than `delta` away from the
+              ground-state energy. It costs n_gs times the n_gs=1 run
+              plus one excited-state solve, and needs an MPS backend
+              (itensor_version 3 or "python" with its own session).
+              `dt2`, `n_t2_half`,
               `dtau`, `n_tau_half`
               to kondospectrumtk.dmrgtwotime.two_time_kondo_term_dmrg for
               the third-order Kondo term (order=3) -- these four also have
@@ -242,6 +281,26 @@ class Spin_Chain(Many_Body_Chain):
         if order not in (2, 3): raise ValueError("order must be 2 or 3")
         eV = np.asarray(eV, dtype=float)
         if mode == "ED":
+            # The ED route reads nothing beyond the named parameters, and
+            # a bare **kwargs used to swallow the rest silently: since the
+            # defaults are physical values, a misspelled one (Jrho= for
+            # Jrho_s=, u= for U=, t= for T=) returned a plausible spectrum
+            # at the default instead, e.g. exactly the order=2 curve for
+            # the Jrho typo (documentation.md 4.10's "**kwargs with no
+            # consumer"). No allow-list for the mode="DMRG" keywords
+            # either: delta=/submode=/es= would then be inert here, the
+            # same hole one level down.
+            if kwargs:
+                raise TypeError(
+                    "get_kondo_spectrum(mode=\"ED\") got unexpected keyword "
+                    "argument(s): "+", ".join(sorted(kwargs))+". They are "
+                    "either mode=\"DMRG\" parameters (submode, delta, es, "
+                    "dt2, n_t2_half, dtau, n_tau_half, n_gs and the "
+                    "dynamical-correlator keywords), which the exact "
+                    "full-spectrum route does not use -- its T=0 already "
+                    "averages a degenerate ground manifold -- or not "
+                    "parameters of this method at all (check the spelling "
+                    "of Jrho_s, U, T, T0, omega0, Gamma0, order, kB)")
             return self._get_kondo_spectrum_ed(eV, site, Jrho_s, U, T, T0,
                                                 omega0, Gamma0, order, kB)
         elif mode == "DMRG":
@@ -272,23 +331,96 @@ class Spin_Chain(Many_Body_Chain):
     def _get_kondo_spectrum_dmrg(self, eV, site, Jrho_s, U, T0, omega0,
                                   Gamma0, order, submode="KPM", delta=2e-6,
                                   es=None, dt2=None, n_t2_half=None,
-                                  dtau=None, n_tau_half=None, **dc_kwargs):
-        from .kondospectrumtk.secondorder_dc import second_order_dIdV_dc
-        dIdV = second_order_dIdV_dc(self, site, eV, T0=T0, U=U, mode="DMRG",
-                                     submode=submode, delta=delta, es=es,
-                                     **dc_kwargs)
-        if order == 3:
-            from .kondospectrumtk.dmrgtwotime import two_time_kondo_term_dmrg
-            term = two_time_kondo_term_dmrg(
-                    self, site, eV, omega0=omega0, Gamma0=Gamma0, dt2=dt2,
-                    n_t2_half=n_t2_half, dtau=dtau, n_tau_half=n_tau_half)
-            dIdV = dIdV + 4*np.pi*T0**2*Jrho_s*term
-            if U != 0.0:
-                from .kondospectrumtk.potentialdc import third_order_potential_dIdV_dc
-                dIdV = dIdV + third_order_potential_dIdV_dc(
-                        self, site, eV, Jrho_s, U, T0=T0, omega0=omega0,
-                        Gamma0=Gamma0, mode="DMRG", submode=submode,
-                        delta=delta, es=es, **dc_kwargs)
-        return eV, dIdV
+                                  dtau=None, n_tau_half=None, n_gs=1,
+                                  **dc_kwargs):
+        def terms():
+            """Every requested term on the state that is this chain's
+            ground state right now"""
+            from .kondospectrumtk.secondorder_dc import second_order_dIdV_dc
+            dIdV = second_order_dIdV_dc(self, site, eV, T0=T0, U=U,
+                                         mode="DMRG", submode=submode,
+                                         delta=delta, es=es, **dc_kwargs)
+            if order == 3:
+                from .kondospectrumtk.dmrgtwotime import two_time_kondo_term_dmrg
+                term = two_time_kondo_term_dmrg(
+                        self, site, eV, omega0=omega0, Gamma0=Gamma0,
+                        dt2=dt2, n_t2_half=n_t2_half, dtau=dtau,
+                        n_tau_half=n_tau_half)
+                dIdV = dIdV + 4*np.pi*T0**2*Jrho_s*term
+                if U != 0.0:
+                    from .kondospectrumtk.potentialdc import third_order_potential_dIdV_dc
+                    dIdV = dIdV + third_order_potential_dIdV_dc(
+                            self, site, eV, Jrho_s, U, T0=T0, omega0=omega0,
+                            Gamma0=Gamma0, mode="DMRG", submode=submode,
+                            delta=delta, es=es, **dc_kwargs)
+            return dIdV
+        if (isinstance(n_gs, bool) or not isinstance(n_gs, (int, np.integer))
+                or n_gs < 1):
+            raise ValueError("n_gs must be a positive integer, the size of "
+                             "the degenerate ground-state manifold to "
+                             "average over, got %r" % (n_gs,))
+        if n_gs == 1: return eV, terms() # the single converged state
+        # n_gs>1: equal-weight average over an orthonormal basis of the
+        # manifold, mode="ED"'s T->0+ limit (edkondo.KondoSpectrum). Every
+        # term is linear in the ground-state density matrix, so the
+        # average is Tr[P0 X]/n_gs whichever basis DMRG returns, while a
+        # single state gives <psi|X|psi>, anywhere between the members'
+        # own values: on an S=1 impurity at its |0>/|-1> crossing the
+        # zero-bias dI/dV/2pi is 1-<Sz_0> of the converged state, anywhere
+        # in [1.0, 2.0] against 1.5 (2026-09-24 hole hunt, finding 12).
+        # Detecting the degeneracy from energies instead would need a
+        # tolerance that no DMRG run can honour, since nothing separates
+        # "exactly degenerate" from "split below what the sweep resolved",
+        # hence the caller-supplied n_gs.
+        session = getattr(self, "_session", None)
+        if (self.get_mode(mode="DMRG") != "DMRG" or session is None
+                or not hasattr(session, "set_wavefunction")):
+            raise NotImplementedError(
+                "n_gs>1 sets each member of the ground-state manifold as "
+                "the ground state of this chain's MPS session in turn, and "
+                "this chain has none (itensor_version=%r, or a fallback to "
+                "ED). mode=\"ED\" averages the degenerate manifold at T=0 "
+                "on its own." % (self.itensor_version,))
+        import warnings
+        gs0 = self.get_gs() # the solved state, put back afterwards
+        e0 = self.gs_energy()
+        energies, members = self.get_excited_states(n=n_gs, purify=True)
+        if len(members) < n_gs:
+            raise RuntimeError("n_gs=%d: get_excited_states returned only %d "
+                               "independent states" % (n_gs, len(members)))
+        split = np.max(np.abs(np.real(np.asarray(energies)) - e0))
+        if split > delta:
+            warnings.warn(
+                "get_kondo_spectrum(n_gs=%d): a member of the averaged "
+                "manifold lies %.3g away from the ground-state energy, more "
+                "than delta=%.3g. Every member's transitions are measured from "
+                "the ground-state energy and weighted equally, so this is "
+                "not a T=0 average unless those states are meant to be "
+                "degenerate." % (n_gs, split, delta), RuntimeWarning,
+                stacklevel=3)
+        # Both halves of "the ground state" have to move: the Python-side
+        # wf0 is what the CVM route and the two-time Kondo term read
+        # (get_gs()/gs_energy(), current since set_gs keeps the solver
+        # key), while KPM and DDMRG read the session's own wf0, which
+        # set_gs() alone does not touch (measured: with set_gs alone both
+        # members returned the solved state's 1.3206 on the chain above).
+        # set_wavefunction() leaves the session's cached band edges alone
+        # -- filled from the solved ground state by the excited_states()
+        # call above, which sets its penalty weight from the bandwidth --
+        # so every member's correlator is measured on the same window
+        # from the same E0. It does drop the session's cached energy,
+        # which nothing reads again while the solver key is current:
+        # gs_energy() then returns the Python-side e0, and a changed key
+        # re-solves regardless.
+        total = 0.
+        try:
+            for wf in members:
+                self.set_gs(wf)
+                session.set_wavefunction(wf.cpp_handle)
+                total = total + terms()
+        finally:
+            self.set_gs(gs0)
+            session.set_wavefunction(gs0.cpp_handle)
+        return eV, total/len(members)
 
 Spin_Hamiltonian = Spin_Chain # backwards compatibility

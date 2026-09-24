@@ -307,7 +307,7 @@ def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
 
 
 
-def lehmann_density_from_one_sided(self,name,transform):
+def lehmann_density_from_one_sided(self,name,transform,i=0,j=0):
     """Assemble the house dynamical correlator from one-sided real-time
     transforms, for the two submodes that are built on one.
 
@@ -315,7 +315,11 @@ def lehmann_density_from_one_sided(self,name,transform):
     given, where `y` is the one-sided Fourier transform
     `(1/pi) int_0^inf dt e^{-i w t} C(t)` that
     `_fourier_transform_correlator` produces; `name` is the pair the
-    caller asked for, in any form `operatornames.str2MO` understands.
+    caller asked for, in any form `operatornames.str2MO` understands,
+    with `i`/`j` the sites of a string name. Both are resolved here, so
+    the two have to reach this function: they used not to, and
+    get_dynamical_correlator_MB(name="ZZ",i=1,j=1) returned C[Sz_0,Sz_0]
+    bit for bit on both submodes (2026-09-24 audit, finding 10).
 
     What this is for. The house quantity (see dynamics.py's module
     docstring) is the complex Lehmann density
@@ -349,7 +353,14 @@ def lehmann_density_from_one_sided(self,name,transform):
     every example in the documentation. `canonical.is_dagger_pair` is
     the test, and it refuses rather than guesses when an operator name
     has no known adjoint (a parafermionic `Sig`, a caller's own name),
-    which costs a second evolution and never a wrong number.
+    which costs a second evolution. That second evolution is built from
+    `get_dagger()`, so it is right exactly when `get_dagger()` knows the
+    name's adjoint: a name it leaves untouched is treated as Hermitian,
+    which for an anti-Hermitian one (the raw backend name `ISy`, i*Sy,
+    while get_dagger() passed it through unchanged) returns exactly minus
+    the correlator (2026-09-24 audit, finding 2). Refusing the proof
+    protects the one-run shortcut, not the adjoint the second run is
+    built on.
 
     Measured on the 2026-09 audit's own seeded 4-site complex-hopping
     chain (`A = Cdag_0`, `B = C_2`, `max|Im M_n| = 0.27`, exact peak
@@ -362,13 +373,18 @@ def lehmann_density_from_one_sided(self,name,transform):
 
     i.e. the real part alone is not a partial fix on a complex-weight
     pair, it is worse than leaving the transform whole, while the
-    combination lands at the TD method's own discretization error."""
+    combination lands at the TD method's own discretization error. These
+    three are submode="TD" at its default predict=True, with the
+    frequency stage of the time; since that stage evaluates the sum at
+    each requested frequency instead of interpolating an FFT grid (see
+    _fourier_transform_correlator), the combination is at 3.2e-05, with
+    TD at predict=False and TDZ both at 5.4e-04."""
     # No require_symbolic_for here, deliberately: mode="ED" consumes the
     # already-built operators toMPO(mode="ED") returns, and always has.
     # The DMRG side rebuilds its operators from to_terms() inside the
     # backend and rejects a compiled one in evolution_dmrg_DC, which is
     # where that restriction belongs and where it is pinned.
-    pair = operatornames.str2MO(self,name)
+    pair = operatornames.str2MO(self,name,i=i,j=j)
     (xs,ys) = transform([pair[0],pair[1]])
     if _pair_is_self_adjoint(pair):
         # the adjoint pair is this pair, so the second run would return
@@ -401,7 +417,10 @@ def _adjoint_pair(pair):
 def _pair_is_self_adjoint(pair):
     """True when A is provably B^dagger, so that the two-term combination
     collapses to a real part and one evolution suffices. False is "not
-    proven" and only ever costs a second evolution.
+    proven" and costs a second evolution, which is built from
+    get_dagger() and so is right exactly when get_dagger() knows the
+    adjoint of every name in the pair (see
+    lehmann_density_from_one_sided).
 
     Symbolically this is canonical.is_dagger_pair, which refuses rather
     than guesses for a name with no known adjoint. A compiled operator
@@ -428,7 +447,7 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     Compute a dynamical correlator from real-time evolution + Fourier
     transform (submode="TD", TDVP-backed for itensor_version=3).
 
-    The raw finite-time correlator C(t) is windowed before the FFT
+    The raw finite-time correlator C(t) is windowed before the Fourier sum
     (`damping`, see `_fourier_transform_correlator`'s docstring for the
     available choices and the tradeoff between them). The default,
     `damping="exp"`, applies exp(-delta*t); this is what actually turns
@@ -455,7 +474,19 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     give a measurably narrower, better-centered peak than plain `"exp"`
     damping alone, at no extra real-TDVP cost, which is why it is the
     default rather than opt-in; pass predict=False to recover the old
-    behavior exactly. `damping="exp"` (unchanged) stays the default taper
+    behavior exactly. That comparison was made on the old frequency
+    stage, and at the default time window (delta*T = damping_periods =
+    6) most of the narrowing it saw was that stage's FFT grid, which
+    prediction's tenfold longer series made ten times finer (see
+    `_fourier_transform_correlator`). Re-measured on the same 4-site
+    Heisenberg chain at delta=0.05: at the default window the line is at
+    the exact width with or without prediction (FWHM 0.0975 on a 0.0025
+    grid, as the exact density), and what prediction still buys there is
+    accuracy, max|y - exact| 2.55e-03 -> 3.3e-06, by carrying the series
+    past the e^-6 cut; where the window is short enough that truncation
+    sets the width it also narrows the line, 0.2125 -> 0.0975 at nt=200
+    (delta*T=1), 0.3875 -> 0.0975 at nt=100, and moves a displaced peak
+    back onto the gap. `damping="exp"` (unchanged) stays the default taper
     -- pairing prediction with "gaussian" was checked too and came out
     *worse* (its wider intrinsic FWHM at fixed delta partly cancels
     prediction's own narrowing), so it is offered but not defaulted to.
@@ -469,6 +500,12 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     if nt is None: nt=int(damping_periods/delta/dt)
     if lp_order is None: lp_order=min(20,max(4,nt//10))
     name = kwargs.pop("name","XX")
+    # i/j are the sites of a string name, and lehmann_density_from_one_sided
+    # is where the name is resolved, so they go there and nowhere else.
+    # Only these two are popped: every other keyword rides on into
+    # evolution_DC, and on the DMRG side into str2MO, which is what makes a
+    # misspelled one raise TypeError instead of being ignored.
+    i,j = kwargs.pop("i",0),kwargs.pop("j",0)
     def transform(pair):
         (ts,cs) = evolution_DC(self,dt=dt,nt=nt,name=pair,**kwargs)
         return _fourier_transform_correlator(ts,cs,dt,es=es,window=window,
@@ -479,12 +516,12 @@ def dynamical_correlator(self,window=[-1,10],es=None,dt=0.1,
     # one evolution for a pair whose adjoint is itself, two otherwise --
     # see lehmann_density_from_one_sided for the identity and what this
     # used to return instead
-    return lehmann_density_from_one_sided(self,name,transform)
+    return lehmann_density_from_one_sided(self,name,transform,i=i,j=j)
 
 
 def _damping_window(ts,delta,damping="exp"):
     """
-    Time-domain taper applied to C(t) before the FFT, selecting the
+    Time-domain taper applied to C(t) before the Fourier sum, selecting the
     lineshape/tail behavior of the resulting spectral function -- the
     time-domain analogue of `algebra/kpm.py`'s
     `kernel="jackson"/"lorentz"/"plain"` choice for the KPM submode.
@@ -517,7 +554,7 @@ def _damping_window(ts,delta,damping="exp"):
       independent of `delta`'s decay rate. This targets a different
       artifact than the peak-broadening tradeoff above: the Gibbs ringing
       from abruptly truncating C(t) at a finite Tmax (the implicit
-      rectangular window every choice here still has, since the FFT only
+      rectangular window every choice here still has, since the Fourier sum only
       ever sees `ts` up to Tmax) -- a taper that is exactly zero at both
       ends removes that discontinuity. Reported in the windowed-FT
       literature for real-time tensor-network correlators as the
@@ -542,31 +579,96 @@ def _damping_window(ts,delta,damping="exp"):
         raise ValueError("Unknown damping: "+str(damping))
 
 
+# Upper bound on the number of entries of the exp(-i w t) block the direct
+# frequency evaluation below builds at once (2**21 complex entries is 32
+# MB); the requested frequencies are taken in chunks of that size, so the
+# memory stays bounded whatever len(es)*len(ts) is.
+_DIRECT_FT_MAX_ELEMENTS = 2**21
+
+
+def _damped_sum_at(cs,dtnew,es):
+    """(dtnew/pi) sum_k cs[k] exp(-i w k dtnew), evaluated at every w in
+    `es`, chunked over `es`. The time origin is the first sample, k=0,
+    which is the phase the FFT puts on sample k, so at a frequency on the
+    FFT grid the two agree to rounding. Outside the band the FFT covers,
+    [min(fftfreq), max(fftfreq)], the result is 0, as the interpolation
+    of the FFT returned there: out of band the sum only repeats an
+    in-band frequency (aliasing), it carries no new information."""
+    es_arr = np.asarray(es,dtype=float)
+    ws = es_arr.reshape(-1)
+    tt = dtnew*np.arange(len(cs))
+    gr = np.zeros(len(ws),dtype=np.complex128)
+    rows = max(1,_DIRECT_FT_MAX_ELEMENTS//max(1,len(tt)))
+    for s in range(0,len(ws),rows):
+        gr[s:s+rows] = np.exp(-1j*np.outer(ws[s:s+rows],tt))@cs
+    gr = gr*dtnew/np.pi
+    n = len(cs)
+    wmin = -(n//2)*2.*np.pi/(n*dtnew)
+    wmax = ((n-1)//2)*2.*np.pi/(n*dtnew)
+    gr[(ws<wmin) | (ws>wmax)] = 0.0
+    return gr.reshape(es_arr.shape)
+
+
 def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
         delta=5e-2,factor=1,damping="exp",predict=False,lp_order=20,
         lp_extend_factor=10,lp_fit_start_fraction=0.5,
-        lp_max_pole_radius=1.0):
+        lp_max_pole_radius=1.0,_evaluation="direct"):
     """
     Shared time-domain -> frequency-domain tail: optional linear-
     prediction extrapolation (`predict`), a damping/window taper (see
     `_damping_window`'s docstring for the available choices and the
     tradeoff between them), interpolation onto a uniform (optionally
-    oversampled by `factor`) grid, a Riemann-sum-normalized FFT, and
-    interpolation onto the requested frequencies `es`. Factored out of
+    oversampled by `factor`) grid, and the trapezoid sum of the damped
+    series evaluated at each requested frequency in `es`. Factored out of
     dynamical_correlator (submode "TD") so other time-domain submodes
     (e.g. "TDZ", see tdz.py) and `sxt_to_skomega` (per k-point) can reuse
-    it unchanged instead of duplicating the FFT/windowing/extrapolation
+    it unchanged instead of duplicating the Fourier/windowing/extrapolation
     convention.
 
     predict=True runs `dynamicstk.linearprediction.linear_predict_extend`
     on the raw `(ts,cs)` first, extending the effective simulated time
     well beyond what was actually evolved -- done here, before damping,
     so the (now much longer) extrapolated series is what the damping
-    window and FFT actually see (see
+    window and the Fourier sum actually see (see
     docs/td_dynamical_correlator_sharpening_plan.md). `lp_order`/
     `lp_extend_factor`/`lp_fit_start_fraction`/`lp_max_pole_radius` are
     passed straight through to `linear_predict_extend` -- see its own
     docstring.
+
+    How the frequencies are evaluated. The sum used to be taken with an
+    FFT, i.e. only on the grid of spacing 2*pi/(nt*dt), and then
+    interpolated linearly onto `es`. At the default time window that
+    spacing is 2*pi*delta/damping_periods, 1.05*delta at
+    damping_periods=6, so a Lorentzian of half-width delta was sampled
+    about once per delta and the interpolation between samples was the
+    dominant error of every predict=False spectrum: on the 2026-09
+    audit's seeded 4-site complex-hopping chain (A=Cdag_0, B=C_2,
+    delta=0.4, dt=0.1, exact peak 0.2313) it was 3.31e-02 for TDZ at its
+    defaults and for TD at predict=False alike, on DMRG and on ED, an
+    error the records had attributed to TDZ's complex-time contour, whose
+    own share is 1e-06 (2026-09-24 audit, finding 7). The trapezoid sum
+    is now evaluated at each requested frequency directly
+    (`_damped_sum_at`), which at a frequency on the old grid gives the
+    FFT's value to rounding and in between gives the sum itself, so the
+    error left is the one set by the finite time window and the method:
+    5.4e-04 on that chain for TDZ and TD at predict=False, and 3.2e-05
+    for TD at its default predict=True, which went through the same
+    interpolation on a grid ten times finer (2.57e-04 before).
+
+    `_evaluation="fft"` keeps the old FFT-plus-interpolation stage, and
+    `sxt_to_skomega` is its one caller: the infinite-chain S(k,omega)
+    reduction takes the caller's `nt`, which at td_dynamical_correlator's
+    defaults gives delta*T=1, i.e. a series cut at e^-1 of its envelope,
+    where a direct evaluation would show the truncation ringing that the
+    interpolation on a grid of spacing 6.3*delta now smooths away. Nobody
+    has measured what that does to S(k,omega), so that route stays as it
+    was until somebody does. Note that the two places that pass iDMRG
+    window data to this function directly (tests/test_infinite_chain.py's
+    KPM cross-check and examples/idmrg/td_dynamical_correlator) are in
+    that same short-window regime, delta*T = 0.4 and 0.9, and get the
+    direct evaluation: measured on the test's own call, the weight at the
+    KPM peak went from 1.00 to 0.74 of the maximum, which then sits at
+    the edge of the window, as the example's already did before.
     """
     if predict:
         from .dynamicstk.linearprediction import linear_predict_extend
@@ -593,21 +695,25 @@ def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
     cs = cs.copy()
     cs[0] = cs[0]*0.5
     cs[-1] = cs[-1]*0.5
-    # do the fourier transform. The 1/pi is the codebase-wide convention
-    # for dynamical correlators, S_AB = -(1/pi) Im G_AB (docs/
-    # user_guide.md), which every other submode already follows and this
-    # one did not: KPM/CVM/EX/ED all satisfied the exact spectral sum rule
-    # int S(w) dw = <A B> while "TD" (and "TDZ", which shares this tail)
-    # came out a factor of pi too large -- 1.284 against an exact 0.250 on
-    # a 4-site chain. Uniform in w, so no peak position or width ever
-    # moved and nothing in tests/ could see it; it showed up only when the
-    # absolute weight was integrated.
+    # do the fourier transform. The 1/pi is what makes the two-sided
+    # combination in lehmann_density_from_one_sided come out with the
+    # 1/(2*pi) of the house convention, the complex Lehmann density C_AB
+    # (dynamics.py's module docstring), whose sum rule int C_AB dw = <A B>
+    # every other submode satisfies. It used to be missing, and "TD" (and
+    # "TDZ", which shares this tail) came out a factor of pi too large --
+    # 1.284 against an exact 0.250 on a 4-site chain. Uniform in w, so no
+    # peak position or width ever moved and nothing in tests/ could see
+    # it; it showed up only when the absolute weight was integrated.
+    if es is None:
+        es = np.linspace(window[0],window[1],800)
+    if _evaluation=="direct": # the sum itself at each es, see the docstring
+        return (es,_damped_sum_at(cs,dtnew,es))
+    if _evaluation!="fft":
+        raise ValueError("Unknown _evaluation: "+repr(_evaluation))
     ss = np.fft.fft(cs)*dtnew/np.pi # fourier transform (trapezoid + 1/pi)
     ws = np.fft.fftfreq(len(cs),d=dtnew)*2.*np.pi # fourier frequencies
     fr = interp1d(ws,ss.real,fill_value=0.0,bounds_error=False)
     fi = interp1d(ws,ss.imag,fill_value=0.0,bounds_error=False)
-    if es is None:
-        es = np.linspace(window[0],window[1],800)
     gr = fr(es)+ 1j*fi(es) # advanced
     ga = np.conjugate(gr) # retarded
 #    gp = fr(es) - fr(-es) + 1j*fi(es) + 1j*fi(-es)
@@ -636,7 +742,12 @@ def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
     `factor`/`damping`/`predict`/`lp_*` are passed straight through to
     `_fourier_transform_correlator` (applied independently per k-point)
     -- see its own docstring. Returns `(ks, es, Skw)`, `Skw` shaped
-    `(len(ks), len(es))`."""
+    `(len(ks), len(es))`.
+
+    This reduction, and only this one, stays on the old FFT-on-grid plus
+    linear interpolation frequency stage (`_evaluation="fft"`) that the
+    finite-chain TD/TDZ routes left behind, see
+    `_fourier_transform_correlator`'s docstring for why."""
     if ks is None:
         ks = np.linspace(-np.pi,np.pi,200)
     ks = np.asarray(ks)
@@ -653,7 +764,8 @@ def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
                                                   predict=predict,lp_order=lp_order,
                                                   lp_extend_factor=lp_extend_factor,
                                                   lp_fit_start_fraction=lp_fit_start_fraction,
-                                                  lp_max_pole_radius=lp_max_pole_radius)
+                                                  lp_max_pole_radius=lp_max_pole_radius,
+                                                  _evaluation="fft")
         if Skw is None:
             es_out = es_k
             Skw = np.zeros((len(ks),len(es_k)),dtype=complex)

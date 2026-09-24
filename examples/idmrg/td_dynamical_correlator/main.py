@@ -112,9 +112,13 @@ from dmrgpy.timedependent import _fourier_transform_correlator
 ts, xs, S = idmrg_window.dynamical_correlator_td(
     ic._result, n_window=16, opname_A="Sz", opname_B="Sz", dt=0.05, nt=60,
     cutoff=1e-10, maxdim=60, niter=50, x_values=[1])
+# _evaluation="fft": at nt=60, delta*T = 0.9, a window short enough that
+# the direct evaluation of the 2026-09-24 audit's finding 7 is unmeasured,
+# so this stays on the FFT stage sxt_to_skomega also uses.
 es_td, g_td = _fourier_transform_correlator(ts, S[:, 0], 0.05,
                                               es=np.linspace(-1, 6, 100),
-                                              delta=0.3, window=[-1, 6])
+                                              delta=0.3, window=[-1, 6],
+                                              _evaluation="fft")
 
 peak_kpm = es_kpm[np.argmax(np.abs(y_kpm))]
 peak_td = es_td[np.argmax(np.abs(g_td))]

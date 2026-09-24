@@ -96,7 +96,7 @@ def _reconstruct_real_axis(alpha0, n_max, Jn, phi):
     C(t,0) := i*G>(t,0) = phi[0] + sum_n g^(n), matching this codebase's
     own evolution_dmrg_DC/quench_tdvp convention (no -i prefactor)
     rather than the paper's own G> convention directly, so the result
-    can feed the same downstream FFT tail unchanged (see
+    can feed the same downstream Fourier tail unchanged (see
     dynamical_correlator_tdz) -- note this is *not* i*phi[0]+i*sum_n
     g^(n): the two i's from C:=i*G> and G>=-i*(...) cancel exactly.
     """
@@ -192,7 +192,7 @@ def _complex_time_correlator(self, A, B, alpha0, n_max, dt, nt, omega0):
 
     Returns (ts,cs) with ts=dt*arange(nt), matching evolution_DC's own
     (pre-conjugation) return shape so the two submodes can share the same
-    downstream windowing/FFT tail.
+    downstream windowing/Fourier tail.
     """
     self.get_gs()  # ensures self.wf0 (ground state) and self.e0 are set
     Hop = self.toMPO(self.hamiltonian - self.e0)  # build once, reused every step
@@ -250,7 +250,7 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
         dt=0.1, tmax=None, nt=None, delta=5e-2, damping_periods=6,
         window=[-1, 10], factor=1, damping="exp", predict=False,
         lp_order=20, lp_extend_factor=10, lp_fit_start_fraction=0.5,
-        lp_max_pole_radius=1.0, **kwargs):
+        lp_max_pole_radius=1.0, i=0, j=0):
     """
     Dynamical correlator via complex-time evolution + perturbative
     real-axis reconstruction (submode "TDZ"; Cao, Lu, Stoudenmire &
@@ -270,10 +270,10 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
         defaults from damping_periods/delta/dt exactly as "TD" does, if
         tmax is not given either.
     es,delta,damping_periods,window,factor,damping,predict,lp_*: passed
-        straight through to the same windowing/FFT tail "TD" uses
+        straight through to the same windowing/Fourier tail "TD" uses
         (timedependent._fourier_transform_correlator) -- delta here is
         the *final* broadening applied to the reconstructed real-time
-        correlator before the FFT, a separate knob from alpha0 (which
+        correlator before the Fourier sum, a separate knob from alpha0 (which
         only controls entanglement growth during the simulation itself,
         not the output broadening). `damping` selects the taper shape
         ("exp"/"gaussian"/"parzen"), see
@@ -295,7 +295,22 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
     adjoint, so conjugating the adjoint run reproduces the backward-time
     half envelope and all. A pair that is provably its own adjoint, which
     is every example here, still costs one run.
+
+    i,j: the sites of a string `name` ("ZZ", "cdc", ...), as everywhere
+        else; ignored for an explicit operator pair. They are named here,
+        and there is no **kwargs, because this function used to take one
+        and read nothing from it: a misspelled keyword (alpha= for alpha0=,
+        nmax= for n_max=) returned the default-parameter spectrum bit for
+        bit, and i=/j= on the lower-level get_dynamical_correlator_MB route
+        silently became i=j=0 (2026-09-24 audit, findings 9 and 10).
     """
+    # Resolve the pair here, before anything else, and insist on symbolic
+    # operators: the contour rebuilds A and B from their terms through
+    # toMPO(), so a compiled one would otherwise pass the adjoint test,
+    # survive get_dagger() and die inside toMPO several frames deeper
+    # instead of raising the TypeError that names the problem.
+    name = operatornames.str2MO(self, name, i=i, j=j,
+            require_symbolic_for="submode='TDZ'")
     if nt is None:
         if tmax is None: nt = int(damping_periods/delta/dt)
         else: nt = int(tmax/dt)
@@ -314,4 +329,4 @@ def dynamical_correlator_tdz(self, name="XX", es=None, alpha0=0.1, n_max=4,
                 lp_order=lp_order, lp_extend_factor=lp_extend_factor,
                 lp_fit_start_fraction=lp_fit_start_fraction,
                 lp_max_pole_radius=lp_max_pole_radius)
-    return lehmann_density_from_one_sided(self, name, transform)
+    return lehmann_density_from_one_sided(self, name, transform, i=i, j=j)

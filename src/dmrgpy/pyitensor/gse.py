@@ -85,10 +85,23 @@ def _gse_bond_step(B_phi, left_link, B_companions, right_inds, cutoff, bond_maxd
     # already-enlarged-link]) space: V1's rows, orthonormal by
     # construction (cutoff=0/maxdim=None -> lossless split, only exactly-
     # zero singular values ever get dropped).
-    _, S1, V1, _ = svd(B_phi, [left_link], cutoff=0.0, maxdim=None)
+    _, S1, V1, spec1 = svd(B_phi, [left_link], cutoff=0.0, maxdim=None)
     bond_v = next(ind for ind in V1.inds if ind not in right_inds)
     m = bond_v.dim
     V1_mat = V1.transpose_to([bond_v] + right_inds).reshape(m, combined)
+    # m is phi's RANK here, not the bond dimension svd() hands back, which
+    # under backend.set_pad_bonds is the pad width K: the padded rows of V1
+    # are zero, and counting them left `room = bond_maxdim - m` at 0 at the
+    # recommended K=maxm, so no direction was ever added (2026-09-24 audit,
+    # finding 16). The live rows come first, and the spectrum stops at the
+    # true rank (svd.py), so this is a static slice on a host-side count.
+    # Unpadded the two counts are equal and nothing here runs. The route
+    # through Chain.global_subspace_expand suspends padding altogether;
+    # this keeps a direct caller of this module right as well.
+    m_true = len(spec1.eigs())
+    if m_true < m:
+        V1_mat = V1_mat[:m_true]
+        m = m_true
 
     rho2 = bk.zeros((combined, combined))
     Bk_mats, Bk_lefts = [], []

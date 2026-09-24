@@ -2206,8 +2206,12 @@ the two-sided one needs. When `A` is provably `B^dagger` the adjoint pair *is*
 the original pair and this collapses to `Re F` exactly, so the common case, and
 every example in the documentation, still costs one evolution rather than two;
 `canonical.is_dagger_pair` is the test and it refuses rather than guesses for a
-name with no known adjoint, which costs a second evolution and never a wrong
-number. `timedependent.lehmann_density_from_one_sided` holds it and both
+name with no known adjoint, which costs a second evolution; both evolutions are
+built on `get_dagger()`, so they are right exactly when every name in the pair
+has a known adjoint (paired in `_dagger_name`, carrying a phase in
+`_dagger_phase`, or self-adjoint), which the 2026-09-24 record's finding 2
+(`docs/audit_2026_09_24_hole_hunt.md`) showed was false for `ISy` until
+`get_dagger()` gained that phase. `timedependent.lehmann_density_from_one_sided` holds it and both
 submodes go through it. The complex-time contour does not obstruct the identity
 either: the damping TDZ puts on each Lehmann term, `exp(-D_n*alpha*t)`, is real
 and is the same for a pair and for its adjoint.
@@ -2228,7 +2232,12 @@ and on a 4-site Heisenberg chain with the Hermitian pair A = B = Sz_0 (peak
 exactly zero, with `max|y - exact|` going 1.11e-01 -> 2.82e-04. TDZ keeps
 3.31e-02 of its own: that is its contour plus its Taylor-in-alpha0
 reconstruction, the same error measured as 1.8e-2 on a Hermitian pair above,
-and it is not a convention question.
+and it is not a convention question. That attribution was wrong: the 3.31e-02
+is the frequency stage's linear interpolation of an FFT grid of spacing
+2*pi/(nt*dt) = 1.05*delta, shared with TD at `predict=False`, and since the
+damped sum is evaluated at each requested frequency TDZ lands 5.4e-04 from
+exact, the contour's own share being about 1e-06
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 7).
 
 **A second defect, found while fixing this one and fixed with it.** The
 `mode="ED"` row above moved further than the others because that route
@@ -2328,6 +2337,12 @@ chain / delta                before     after     peak of submode="INV"
 ```
 
 so a disagreement of 95 to 124 per cent of the resolvent peak becomes 4 to 7.
+Most of that remainder was the DMRG routes reconstructing from n+2 moments where
+the calibration and ED use n, and since they were cut to n the same three rows
+read 2.55e-04, 2.09e-04 and 3.50e-04 on `itensor_version="python"`, 0.07 to 0.20
+per cent of the peak, the 4-site row being the uniform chain rather than the
+staggered one that `test_ed_and_dmrg_kpm_agree_pointwise` runs
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 4).
 The sum rule was satisfied before and is satisfied after, 0.250000 against an
 exact 0.250000 on both routes, which is exactly why it could not see this.
 
@@ -2336,7 +2351,11 @@ kernel. The width is `2*delta` at the band centre and tightens as
 `sqrt(1-x^2)` towards the edges: no single moment count gives one width across
 a band. And the Jackson line is near-Gaussian, so at equal FWHM and equal
 integrated weight its peak stands about 1.6x higher than a Lorentzian of the
-same width, measured 0.315 against 0.195 on a 6-site chain at delta=0.2. A
+same width, measured 0.315 against 0.195 on a 6-site chain at delta=0.2. That
+ratio was not taken at equal FWHM: the Jackson kernel's own ratio on one pole at
+the band centre is 1.514, and the 0.315 against 0.195 is 1.61 because the
+dominant pole sits at x=-0.527, where the line is already 0.850 of 2*delta
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 6). A
 `delta` comparable to the bandwidth now calibrates to a handful of moments,
 which stops being a spectrum at all (on a 2-site chain of bandwidth 1,
 delta=0.6 gives 4 moments and a peak 0.12 wide, narrower than delta=0.15

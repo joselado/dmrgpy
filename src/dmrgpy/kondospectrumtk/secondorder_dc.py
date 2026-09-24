@@ -73,12 +73,20 @@ def second_order_dIdV_dc(chain, site, eVs, T0=1.0, U=0.0, mode="DMRG",
     a correspondingly fine `es` grid to stay well resolved).
     es: frequency grid passed to get_dynamical_correlator. Required (no
     default): it must cover every eigenstate transition energy from the
-    ground state that matters for the eVs sweep, at several times finer
-    spacing than delta -- these are properties of the chain's own
-    spectrum, not of the eVs sweep range, so guessing a default from eVs
-    alone is unsafe (confirmed directly: doing so silently misses real
-    transitions whenever the eVs sweep happens to be narrower than, or
-    offset from, the system's actual energy scale).
+    ground state below max|eV|, i.e. run from several delta below w=0
+    (the elastic weight sits there, and the cumulative integral starts at
+    es[0]) to several delta above max|eV|, at several times finer spacing
+    than delta near the lines, and may be non-uniform -- the transitions
+    are properties of the chain's own spectrum, not of the eVs sweep
+    range, so guessing a default from eVs alone is unsafe (confirmed
+    directly: doing so silently misses real transitions whenever the eVs
+    sweep happens to be narrower than, or offset from, the system's
+    actual energy scale). Transitions above max|eV| do not enter this
+    term, since Theta0(eV-eps) vanishes for them; the potential-
+    interference term (potentialdc.third_order_potential_dIdV_dc) is
+    different, it needs every transition up to the top of the S_k
+    spectrum, so an es shared with it (as get_kondo_spectrum does) must
+    meet that stricter requirement.
 
     mode/submode: forwarded to chain.get_dynamical_correlator (e.g.
     mode="ED", submode="ED" for an exact small-system check; mode="DMRG",

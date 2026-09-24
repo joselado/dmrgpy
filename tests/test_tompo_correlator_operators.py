@@ -78,10 +78,12 @@ def test_dmrg_accepts_tompo_operators(submode):
     assert np.max(np.abs(np.array(out) - np.array(ref))) < 0.1
 
 
-@pytest.mark.parametrize("submode", ["KPM", "TD"])
+@pytest.mark.parametrize("submode", ["KPM", "TD", "TDZ"])
 def test_symbolic_only_submodes_name_the_problem(submode):
-    """KPM/TD rebuild their operators inside the backend from to_terms(),
-    so they cannot take a StaticOperator -- and must say that."""
+    """KPM/TD/TDZ rebuild their operators inside the backend from
+    to_terms(), so they cannot take a StaticOperator -- and must say that.
+    TDZ lost the check in 765b537 and died inside toMPO on a missing
+    to_terms instead (2026-09-24 audit, finding 9)."""
     sc = _heisenberg()
     sc.setup_python()
     B = sc.toMPO(sc.Sz[0])

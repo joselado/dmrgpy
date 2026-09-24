@@ -97,8 +97,14 @@ holds at most one direction out of a degenerate eigenspace and this cell's
 `H_eff(k)` is pairwise degenerate away from k=0 -- a plain version
 returned one copy of each pair with everything after it shifted up, an
 error of 1.0, and every value it returned was a genuine eigenpair, so a
-residual check passes it. The `"python"` side never had that exposure,
-since ARPACK returns both copies.
+residual check passes it. The `"python"` side was said here never to
+have had that exposure, since ARPACK returns both copies, and that was
+measured at a dimension where the Krylov basis is the whole space. Above
+its dense threshold it did have it, a single ARPACK call dropping one
+copy of a degenerate level in 7 of 16 calls on the `n_uc=2` critical
+Heisenberg cell at `maxm=10`, and since the 2026-09-24 audit
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 15) it runs one deflated
+Lanczos per value for `n>=2` as well.
 
 ## 2. Spectral weights → S(k,ω) on the infinite chain (builds on 1)
 

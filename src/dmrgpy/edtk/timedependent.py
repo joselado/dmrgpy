@@ -14,9 +14,8 @@ def evolution_ABC(self,h,A=None,B=None,C=None,wf=None,nt=100,dt=0.01):
     Cop = self.get_operator(C) # get operator
     ts = np.array([dt*ii for ii in range(nt)]) # times
     Hop = self.get_operator(h) # get Hamiltonian
-    if wf is None: 
-        e0,wf = slg.eigsh(-Hop,k=1,ncv=20,which="LA")
-        wf = wf.reshape(wf.shape[0])
+    if wf is None: # the cached ground state, see evolution_DC below
+        wf = self.get_gs_array()
     else: # use the wavefunction provided
         if type(wf)==State: wf = wf.v # get the vector
     wfA = Aop@wf # apply operator
@@ -50,7 +49,7 @@ def evolution_ABA(self,h=None,A=None,B=None,**kwargs):
 
 
 
-def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,**kwargs):
+def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,wf0=None,**kwargs):
     """Special time evolution for the dynamical correlator.
 
     The operator convention is the DMRG backends' one (see
@@ -63,19 +62,39 @@ def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,**kwargs):
     measured on the 2026-09 audit's own seeded 4-site complex-hopping
     chain (A=Cdag_0, B=C_2) as agreeing with C[B,A] to 3.3e-04 while
     mode="DMRG" agrees with C[A,B] to 2.6e-04, i.e. the two solvers
-    computed different quantities under one submode name."""
+    computed different quantities under one submode name.
+
+    wf0 is the state the correlator is measured in, an array or a State,
+    and defaults to the EDchain's cached ground state, the one the KPM,
+    INV, CVM and ROOTN submodes use. The energy origin is the cached
+    ground-state energy self.e0 either way, as in those submodes. This
+    used to re-solve the ground state with a randomly started eigsh on
+    every call and ignore both states it had access to, so on a
+    degenerate ground state each call measured a different member of the
+    manifold, and a pair that is not provably self-adjoint, whose density
+    takes two calls (timedependent.lehmann_density_from_one_sided), got
+    its two halves from two different members: the density of no state
+    and of no mixture, off the cached-state density by up to 3.4e-01 on a
+    peak of 1.8e-01 for (Sp_0,Sm_2) on a 3-site Heisenberg chain
+    (2026-09-24 audit, finding 8). On a non-degenerate ground state the
+    two constructions agree to ~1e-11. Note the sign of the shift below:
+    that eigsh ran on -H, so its eigenvalue was -E_0 and the line read
+    H + e0*I; with the cached +E_0 it is H - e0*I."""
     (A,B) = name[1],name[0] # get the operators, bra first
     Hop = self.get_operator(h) # return Hamiltonian
     Aop = self.get_operator(A) # return operator
     Bop = self.get_operator(B) # return operator
     ts = np.array([dt*ii for ii in range(nt)]) # times
-    e0,wf0 = slg.eigsh(-Hop,k=1,ncv=20,which="LA")
-    wf0 = wf0.reshape(wf0.shape[0])
+    gs = self.get_gs_array() # cached; this is also what sets self.e0
+    if wf0 is None: wf0 = gs
+    elif type(wf0)==State: wf0 = wf0.v # get the vector
+    wf0 = np.asarray(wf0).reshape(-1)
+    e0 = self.e0 # +E_0, the ground-state energy
     wf = wf0.copy() # copy wavefunction
     wf = Aop@wf # apply operator
     wfc = np.conjugate(wf0) # conjugate wavefunction
     cs = [] # empty list
-    ht = Hop + e0[0]*identity(Hop.shape[0],dtype=np.complex128)
+    ht = Hop - e0*identity(Hop.shape[0],dtype=np.complex128)
     for it in range(nt): # loop
         # Measure *before* evolving, so cs[k] is C(k*dt) and lines up with
         # the ts=[0,dt,...,(nt-1)*dt] grid built above -- see the

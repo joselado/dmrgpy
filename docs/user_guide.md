@@ -287,8 +287,17 @@ answer off that form. Those three are one-sided: `True` is a proof and
 needs no calculation at all, while `False` only means the canonical form
 did not collapse, which a Hermitian operator can survive whenever its
 Hermiticity rests on something the operator names do not carry, a
-same-site identity ($S^xS^x=1/4$) or two factors on one site commuting
-without both being diagonal. When a chain is at hand,
+same-site identity ($S^xS^x=1/4$), two factors on one site commuting
+without both being diagonal, or a term that names both a
+pre-Jordan-Wigner fermion (`C`, `Cdag`, `Cup`, ...) and a bare
+post-transform ladder operator (`A`, `Adag`, `Aup`, ...), which is left
+spelled as written because the sign of exchanging the two depends on
+which sits on the lower site. That last rule is new in the 2026-09-24
+audit: such terms used to be sorted with the wrong sign, so
+`simplify()` changed their value and an exactly anti-Hermitian operator
+could be proven Hermitian (`docs/audit_2026_09_24_hole_hunt.md`,
+finding 1); no chain class builds one, so no ordinary Hamiltonian lost
+its proof. When a chain is at hand,
 `sc.is_hermitian(A)` answers the same question without that caveat,
 taking the proof when it lands and probing numerically when it does not,
 which is what `gs_energy()` and `exponential()` gate on.
@@ -1364,16 +1373,25 @@ until then (see that section and §21). Sharing the convention is not the
 same as agreeing pointwise, since two submodes can still differ in
 kernel and in resolution, but for the default `submode="KPM"` they no
 longer differ in resolution either: `delta` now sets the same width on
-`mode="ED"` as on `mode="DMRG"`, so the two routes sit a few per cent of
-the peak apart instead of a whole peak apart. On a 6-site Heisenberg
-chain with $A=B=S^z_0$ at $\delta=0.2$, over
-`es=np.linspace(0.01,4,120)`, the two curves sit 1.24e-02 apart on
+`mode="ED"` as on `mode="DMRG"`, so the two routes sit a fraction of a
+per cent of the peak apart instead of a whole peak apart. On a 6-site
+Heisenberg chain with $A=B=S^z_0$ at $\delta=0.2$, over
+`es=np.linspace(0.01,4,120)`, the two curves sit 1.65e-04 apart on
 `itensor_version="python"` against a resolvent (`submode="INV"`) peak of
 0.194, and both integrate to 0.24999 against the exact
 $\langle AB\rangle=0.25$. The audit that fixed this measured the same
 quantity on `itensor_version=3` across three chains and found 4 to 7 per
 cent of the resolvent peak, down from 95 to 124 per cent
-(`docs/audit_2026_09_hole_hunt.md`, open item O2). What remains between
+(`docs/audit_2026_09_hole_hunt.md`, open item O2), and most of that
+remainder turned out to be the DMRG routes reconstructing from two more
+moments than the calibration asks for. Since they were cut to the
+calibrated count (`docs/audit_2026_09_24_hole_hunt.md`, finding 4) the
+same three chains sit 0.07 to 0.2 per cent of the peak apart on
+`itensor_version="python"`, while `itensor_version=3` agrees as closely
+in its median run and reaches about 1.3 per cent (worst of 25 runs on the
+staggered 4-site chain) only in the runs where its
+band-edge estimate, which moves by up to 2e-2 from run to run, lands
+below the true upper edge. What remains between
 KPM and a resolvent submode is the kernel itself, a near-Gaussian
 Jackson line against a Lorentzian, which the `submode="KPM"` entry below
 quantifies.
@@ -1435,10 +1453,28 @@ route in dmrgpy solves that relation for $N$
 (`algebra/kpm.py::polynomials_for_broadening`), so the reconstructed
 line comes out at FWHM $=2\delta$ at the centre of the rescaled band,
 which is the width the resolvent submodes (`"CVM"`, `"INV"`, `"ROOTN"`, `"ED"`)
-give for the same $\delta$. `kpm_n_scale` is a multiplier on that
-calibrated count, default 1: raise it to buy a line sharper than the
-$\delta$ you asked for, at proportionally higher cost. Both the calibration and
-that default are new in the 2026-09 audit's open item O2 (§21). Before
+give for the same $\delta$. The relation holds only when the kernel is
+handed exactly $N$ moments, and until the 2026-09-24 audit every DMRG
+route reconstructed from $N+2$, its moment loop returning two more than
+it was asked for, which made a DMRG line narrower and taller than the ED
+one by about $2/N$. The DMRG routes are cut to $N$ now, meaning that
+every DMRG KPM spectrum moved by roughly $2/N$ onto the ED one: on two
+decoupled Heisenberg dimers the band-centre peak of
+$\langle S^z_0;S^z_0\rangle$ went from 0.666761 to 0.620591 at
+$\delta=0.2$, on `itensor_version=3` and `"python"` alike, and now
+equals the ED peak (`docs/audit_2026_09_24_hole_hunt.md`, finding 4).
+`kpm_n_scale` is a multiplier on that calibrated count, default 1, and
+it has to be a positive integer (a Python or numpy integer, not a `bool`):
+raise it to buy a line sharper than the $\delta$ you asked for, at
+proportionally higher cost. Anything else raises a `TypeError` or
+`ValueError` naming `kpm_n_scale` on every backend before a single
+moment is computed, where `"python"`, `mode="ED"` and `"julia_live"`
+used to round it down silently (1.5 gave exactly the calibrated count,
+and anything below 1 the 16-moment floor at every $\delta$) while the
+C++ backends raised; note that `kpm_n_scale=2.0`, which gave 2x on those
+three routes, raises now too (finding 5 of the same record). Both the
+calibration and that default are new in the 2026-09 audit's open item
+O2 (§21). Before
 it, `mode="DMRG"` counted `round((emax-emin)/delta)` moments and
 multiplied by a `kpm_n_scale` that defaulted to 3, which put the line at
 about $1.6\delta$, while `mode="ED"` used a rule of its own that read
@@ -1447,11 +1483,32 @@ three times as wide. Two residuals are properties of the kernel rather
 than of this choice, and are documented rather than removed. The width
 is exact at the band centre and tightens as $\sqrt{1-x^2}$ towards the
 band edges, since no single moment count gives one width across a whole
-band. And the line is near-Gaussian rather than Lorentzian, so at equal
-FWHM and equal integrated weight its peak stands about 1.6x higher than
-a resolvent submode's, measured 0.315 against 0.195 on a 6-site
-Heisenberg chain at $\delta=0.2$ with both integrating to the same
-0.250000. One guard rail sits underneath: a $\delta$ comparable to the
+band, and for a ground-state correlator that narrowing is the rule
+rather than the exception. Every route rescales the same way, so with
+$s$ the `kpm_scale` and $W$ the many-body bandwidth the ground-state
+energy $E_0$ sits at $x_0=-1/(2s)$ on every chain ($-0.714$ at the
+default $s=0.7$), the band centre is the energy $E_0+W/2$, and an
+excitation at $\omega$ sits at $x(\omega)=x_0+\omega/(sW)$. As $W$ grows
+with the chain every intensive excitation therefore tends to $x_0$,
+where the line is $\sqrt{1-1/(4s^2)}=0.70$ of the requested width, and
+on the ground-state-anchored window of `kpm_energy_truncate=True` the
+factor at $E_0$ is 0.157. Measured on open Heisenberg chains with
+$A=B=S^z_i$, the isolated lowest pole comes out at 0.755 of $2\delta$ on
+12 sites and 0.725 on 20, and the delivered width averaged over the
+spectrum is 0.87 to 0.90 of the requested one on 8 sites, 0.83 to 0.86
+on 12 and 0.78 to 0.80 on 20. To get FWHM $=2\delta$ at a chosen
+$\omega$, pass $\delta/\sqrt{1-x(\omega)^2}$ instead, which is the only
+compensation available, since `kpm_n_scale` cannot ask for fewer moments
+than the calibrated count (`docs/audit_2026_09_24_hole_hunt.md`,
+finding 6, and `algebra/kpm.py::polynomials_for_broadening`'s docstring
+for the rest of the measurements). And the line is near-Gaussian rather
+than Lorentzian, so at equal FWHM and equal integrated weight its peak
+stands about 1.5x higher than a resolvent submode's, 1.514 being the
+Jackson kernel's own ratio on one pole at the band centre; the 0.315
+against 0.195 once quoted here, on a 6-site Heisenberg chain at
+$\delta=0.2$ with both integrating to the same 0.250000, is a ratio of
+1.61 because its dominant pole sits at $x=-0.527$, where the line is
+already 0.850 of $2\delta$. One guard rail sits underneath: a $\delta$ comparable to the
 bandwidth itself calibrates to a handful of moments, which stops being a
 spectrum at all, so the count is floored at 16 and the line there comes
 out sharper than requested instead of unrepresentable.
@@ -1855,7 +1912,13 @@ anything else costs two. The test is
 `multioperatortk.canonical.is_dagger_pair`, and
 it refuses rather than guesses for an operator name with no known
 adjoint (a parafermionic `Sig`, a name you invented yourself), which
-buys a second evolution and never a wrong number. Note that the cost
+buys a second evolution. That second evolution is built from
+`get_dagger()`, so it is right exactly when `get_dagger()` knows the
+name's adjoint, and it did not for the raw backend name `ISy`, which is
+$iS^y$ and so anti-Hermitian, until the 2026-09-24 audit gave
+`get_dagger()` a phase: before that, `ISy` in the first operator
+returned exactly minus the correlator under `"KPM"`, `"EX"`, `"TD"` and
+`"TDZ"` (`docs/audit_2026_09_24_hole_hunt.md`, finding 2). Note that the cost
 discriminant is not the convention discriminant: what the combination
 needs is a *proof* that $A=B^\dagger$, while what makes the imaginary
 part vanish is $\mathrm{Im}\,M_n=0$, and the $S(q,\omega)$ sweep above
@@ -1917,8 +1980,9 @@ independent, composable knobs address this:
   stays safe even for a short simulation) is fit to the tail of $C(t)$
   and used to synthesize `lp_extend_factor` times as many additional
   samples, so the same real TDVP/TEBD simulation yields a sharper
-  spectral function than windowing alone — the standard fix in the
-  DMRG-dynamics literature for finite-simulated-time resolution loss,
+  spectral function than windowing alone where truncation of the time
+  window, rather than the damping, sets the width, which is the standard
+  fix in the DMRG-dynamics literature for finite-simulated-time resolution loss,
   since it needs no additional entanglement growth. Pass `predict=False`
   to recover the exact pre-existing behavior. `lp_fit_start_fraction`
   (default 0.5) skips the corresponding leading fraction of $C(t)$ before
@@ -1934,7 +1998,20 @@ pairing `predict=True` with `"gaussian"` instead came out *worse* (its
 larger intrinsic FWHM at fixed $\delta$ partly cancels prediction's own
 narrowing), and pairing it with `"parzen"` came out statistically tied
 with plain `"exp"`, not better (`docs/td_dynamical_correlator_sharpening_plan.md`
-has the numbers). Note that neither knob changes the *asymptotic*
+has the numbers). That comparison was made on the old frequency stage,
+which evaluated the transform on an FFT grid of spacing
+$2\pi/(n_t\,dt)$ and interpolated linearly onto `es`, and at the default
+window ($\delta T=6$) most of the narrowing it saw was that grid, which
+prediction's tenfold longer series made ten times finer. Since the
+damped sum is evaluated at each requested frequency
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 7), a 4-site Heisenberg
+chain at $\delta=0.05$ shows the line at the exact width with or without
+prediction at the default window (FWHM 0.0975 on a 0.0025 grid, as the
+exact density gives), and what prediction still
+buys there is accuracy, $\max|y-y_{\rm exact}|$ going from 2.55e-03 to
+3.3e-06 by carrying the series past the $e^{-6}$ cut; at `nt=200`
+($\delta T=1$), where truncation sets the width, it narrows the line
+from 0.2125 to 0.0975, the exact width. Note that neither knob changes the *asymptotic*
 algebraic decay of the tail far from any resonance — `"KPM"`'s far tail
 still decays much faster, since its Jackson-kernel-damped Chebyshev
 reconstruction has no Lorentzian/algebraic tail to begin with; these
@@ -1943,9 +2020,13 @@ close that specific gap.
 
 Both `damping` and `predict`/`lp_*` are also accepted by `submode="TDZ"`
 and by the internal `S(k,\omega)` reduction (`sxt_to_skomega`), since all
-three share the same windowing/FFT tail -- but their own defaults are
+three share the same windowing stage, but their own defaults are
 unchanged (`damping="exp"`, `predict=False`), since the empirical
-comparison above was only run for `"TD"`.
+comparison above was only run for `"TD"`. What they no longer share is
+the last step: `"TD"` and `"TDZ"` evaluate the damped sum directly at
+each requested frequency, while `sxt_to_skomega` stays on the FFT grid,
+since at its defaults $\delta T=1$ and the direct evaluation is
+unmeasured there.
 
 **`submode="TDZ"` — complex-time evolution (Cao, Lu, Stoudenmire &
 Parcollet, arXiv:2311.10909).** Real-time evolution (`"TD"` above) grows
@@ -2007,15 +2088,25 @@ The contour does not obstruct that identity: the damping it puts on each
 Lehmann term, $e^{-\Delta_n\alpha t}$, is real and is the same for a pair
 and for its adjoint, so conjugating the adjoint run reproduces the
 backward-time half envelope and all, and a pair that is provably its own
-adjoint still costs one run rather than two. What `"TDZ"` keeps, and
-`"TD"` does not, is an error of its own: on the 2026-09 audit's 4-site
-complex-hopping chain ($A=c^\dagger_0$, $B=c_2$, $\delta=0.4$,
-`dt=0.1`, exact peak 0.2313, `itensor_version=3`) it lands 3.31e-02
-from the exact Lehmann density where `"TD"` lands 2.57e-04. That
-residual is the complex-time contour plus the Taylor-in-$\alpha_0$
-reconstruction, the same 1.8e-02 the audit measured on a Hermitian pair,
-and it is not a convention question: reduce it with a smaller `alpha0`
-or a larger `n_max`, not by post-processing the array.
+adjoint still costs one run rather than two. How close it lands is set
+by the same finite time window as `"TD"`, not by the contour: on the
+2026-09 audit's 4-site complex-hopping chain ($A=c^\dagger_0$, $B=c_2$,
+$\delta=0.4$, `dt=0.1`, exact peak 0.2313, `itensor_version=3`) it lands
+5.4e-04 from the exact Lehmann density, which is where `"TD"` lands at
+`predict=False`, while `"TD"` at its default `predict=True` lands
+3.2e-05. The contour and the Taylor-in-$\alpha_0$ reconstruction
+together account for about 1e-06 of that, the distance between `"TDZ"`
+and `"TD"` at `predict=False`, meaning that `alpha0` and `n_max` do not
+move the floor. It used to read 3.31e-02, which the 2026-09 records
+attributed to the contour and which was in fact the frequency stage's
+linear interpolation of an FFT grid of spacing
+$2\pi/(n_t\,dt)\approx1.05\delta$, shared with `"TD"` at `predict=False`
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 7). `"TDZ"` also takes
+only the parameters it names since that audit, so a misspelled keyword
+(`alpha=` for `alpha0=`, `nmax=` for `n_max=`) raises `TypeError`, where
+it used to be accepted and ignored, returning the default-parameter
+spectrum bit for bit, and a `toMPO()` operator raises the `TypeError`
+naming `toMPO` again (finding 9 of the same record).
 
 **`submode="EX"` — exact diagonalization in a truncated DMRG subspace.**
 Builds $A$, $B$, $H$ explicitly in the subspace spanned by the lowest
@@ -2845,7 +2936,17 @@ described there, and still only sets a polynomial count. This path
 expands an arbitrary operator $X$ rather than the Hamiltonian, so there
 is no rescaled band whose centre the FWHM $=2\delta$ relation could be
 anchored to; read `delta` here as a resolution knob and compare
-distributions computed at one value of it, not across values.
+distributions computed at one value of it, not across values. What it
+does share with every other distribution is the normalization,
+$\int P(x)\,dx=1$, and under `mode="ED"` that held only since the
+2026-09-24 audit: the ED route used to return a distribution whose total
+weight was exactly $1/$`scale` (0.1000 at the default `scale=10`), and
+with `xs=` given its imaginary part was a copy of its real part. An ED
+distribution from before therefore moves by exactly the factor `scale`
+and is now real on the requested points, a 2-site `itensor_version=3`
+chain having reached that route without asking for it through the
+automatic ED fallback, while nothing moved on any DMRG backend
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 3).
 
 ## 15. Post-processing tools
 
@@ -2945,7 +3046,13 @@ Two backends are available via `mode=`:
   $O(n_{\rm occ}\,{\rm dim}^2)$ per bias point rather than the
   ${\rm dim}^3$ they used to, and $F(\epsilon,T)$ is tabulated once per
   call (0.4 s) instead of being integrated per point: at 64 states and
-  1 K a third-order term takes 0.05 s where it took 28 s and 4 GB.
+  1 K a third-order term takes 0.05 s where it took 28 s and 4 GB. It
+  reads only its named parameters, and since the 2026-09-24 audit any
+  other keyword raises `TypeError` naming it, where it used to be
+  accepted and ignored, so that `Jrho=` for `Jrho_s=` silently removed
+  the whole third-order Kondo peak (`docs/audit_2026_09_24_hole_hunt.md`,
+  finding 11); the moment count of its KPM correlator is set through the
+  chain's `kpm_*` attributes, not through a keyword.
 - `mode="DMRG"`: `itensor_version=3` throughout, never diagonalizing
   beyond the ground state — only `T=0` is supported. See "T=0 and the
   DMRG backend" below.
@@ -3125,12 +3232,45 @@ cannot enumerate excited states the way `mode="ED"` does:
   costs nothing beyond evaluating them a second time at $-eV$ (the
   expensive dynamical correlator / $G(t_2,\tau)$ is still built once).
 
+What "the ground state" means at a degeneracy differs between the two
+modes unless you say which one you want. `mode="ED"` takes the
+$T\to0^+$ limit, the equal-weight average over the degenerate manifold,
+while `mode="DMRG"` uses the single state its solver converged to, which
+at an accidental crossing is whichever member, or superposition, the
+random start reached, so the spectrum lands anywhere between those of
+the members: on an $S=1$ impurity at the crossing of its $|0\rangle$ and
+$|-1\rangle$ levels, between 1.0 and 2.0 against the 1.5 of the average.
+Passing `n_gs=g` asks `mode="DMRG"` for that same average. Every term,
+second order, third-order Kondo and potential, is then averaged with
+equal weight over `get_excited_states(n=g, purify=True)`, which is
+exactly the ED average, since every term is linear in the ground-state
+density matrix, and it costs $g$ times the single-state run; on that
+crossing `n_gs=2` gives 1.50002 to 1.50004 in every run. The default
+`n_gs=1` is the unchanged single-state path, a `RuntimeWarning` fires
+when a member lies more than `delta` from $E_0$, and `n_gs>1` raises
+`NotImplementedError` on `itensor_version=2` and `"julia_live"`
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 12).
+
 Further `mode="DMRG"` limitations beyond the general ones above: the
-second-order term's `es`
-frequency-grid parameter has no safe default and must be supplied
-explicitly (it needs to cover every relevant transition energy, which is
-a property of the chain's spectrum, not of the `eV` sweep range — see
-`second_order_dIdV_dc`'s docstring); the third-order term's `dt2`,
+`es` frequency grid has no safe default and must be supplied
+explicitly, and what it has to cover is set by the chain's spectrum
+rather than by the `eV` sweep range, and differs between the terms. The
+second-order term needs only the transitions below $\max|eV|$, while
+the potential-interference term needs every transition up to the top of
+the tip-coupled site's $S_k$ spectrum, a few $\delta$ beyond it and
+$\omega=0$ itself, since its kernel falls off only as about $2eV/\omega$
+inside the band. One `es` is shared by both, so with `U!=0` it must meet
+the second requirement, and the potential term issues a `RuntimeWarning`
+when the sum rule $\sum_k\int S_{kk}(\omega)\,d\omega=S(S+1)$ says more
+than 1e-2 of the weight is missing (see `second_order_dIdV_dc`'s and
+`potentialdc`'s docstrings). The grid may be non-uniform, since both
+terms integrate with trapezoid weights of the grid they are given; the
+potential term weighted every point with the first spacing until the
+2026-09-24 audit (finding 13), and the one example of it,
+`examples/kondo/kondo_potential_term_dmrg_VS_ED`, violated the coverage
+requirement and blamed the resulting 9.7 per cent DMRG-versus-ED gap on
+KPM broadening, where with `es` spanning $\pm20$ meV it is 2.1 per cent,
+measured before the moment-count cut of finding 4 (finding 14). The third-order term's `dt2`,
 `n_t2_half`, `dtau`, `n_tau_half` time-grid parameters likewise have no
 safe default and must be supplied explicitly (a grid fine/wide enough for
 the default $\omega_0$/$\Gamma_0$ needs $\sim10^5$–$10^6$ $t_2$
@@ -3326,7 +3466,7 @@ ic.excitation_gap()                # min_k E(k), the scalar gap
 
 **Scope.** Both `itensor_version="python"` (`pyitensor/idmrg_excitations.py`) and `itensor_version=3` (`mpscpp3/chain_session.h`'s `Chain::vumps_excitation_energies`, a C++ port of the same algorithm, same dense-array/LAPACK approach as `vumps_ground_state` above) are supported — both require `gs_method="vumps"` (`NotImplementedError` otherwise, or if a different `itensor_version` is used). Any converged bond dimension `D>=1` is supported — including a genuinely entangled ground state (`D>1`, e.g. the transverse-field Ising or a dimerized Heisenberg chain), which used to be an explicit, rejected scope limit here (see `pyitensor/idmrg_excitations.py`'s own module docstring, "History" section, for the eight-pass investigation that limit came from and how it was eventually resolved by rewriting the ansatz from scratch on top of VUMPS's own mixed-gauge state, mirroring MPSKit.jl's own architecture). For `D=1` the computed dispersion matches the exact free-fermion single-magnon dispersion of a field-polarized XX chain to ~14 digits across the whole Brillouin zone (`examples/idmrg/excitation_gap_xx/main.py`); for `D=2` it matches an independently-converged MPSKit.jl transverse-field Ising result to 6 significant figures (`examples/idmrg/excitation_gap_tfim/main.py`), and `H_eff(k)` is Hermitian to machine precision at every `D` tried. `itensor_version=3` is cross-checked directly against `itensor_version="python"` across a full momentum scan, matching to ~1e-10 or tighter on the gapped TFIM case and to a looser ~1e-4..1e-7 on the gapless/critical Heisenberg case (both backends' own non-convex VUMPS restart search can land on slightly different local optima there, not a discrepancy in the ported algorithm itself) — see `tests/test_vumps_excitations_v3.py` and `examples/idmrg/vumps_excitation_v3_VS_python/main.py`. A longer-range term (spanning more than 2 adjacent unit cells after `n_uc`-grouping) is rejected with `NotImplementedError` by `excitation_energies`/`excitation_gap` themselves: the ansatz's environments are the reach-1 `{GL, GR, bond channels}` triple. The ground state on that same chain is unaffected — `gs_energy()` routes it to the sequential multi-site solver instead of raising.
 
-**Cost.** The eigenproblem `excitation_energies` solves has dimension `D*D*(d_g-1)`, so its cost grows quickly with the converged bond dimension. Two things bound that, and since 2026-09-22 they bound it on **both** backends rather than only on `itensor_version="python"`: the momentum-dependent channel resolvents are built once per momentum and cached with their LU factorization (they depend only on `k` and the momentum-independent environment, so rebuilding and refactorizing them inside every application of `H_eff(k)` was pure waste), and above a size threshold the eigenproblem is solved by Lanczos on that Hamiltonian's action rather than by assembling the matrix at all. Neither changes any returned number — the two solver paths are cross-checked against each other in `tests/test_infinite_chain.py` and `tests/test_vumps_excitations_v3.py`, agreeing to 4.6e-11 on `itensor_version=3` — and a momentum scan at large `D` is substantially cheaper than it was: over a 3-momentum scan on `itensor_version=3` with threads pinned to one core, a `D=16` TFIM chain went from 164.1 s to 10.3 s with the resolvent cache and to 1.8 s with both halves, and an `n_uc=2` Heisenberg chain at `D=10` from 15.6 s to 5.4 s to 1.2 s. The two backends keep different thresholds, and deliberately: `itensor_version=3` switches to Lanczos above dimension 64 rather than `"python"`'s 256, since one application of `H_eff(k)` there solves four channel resolvents, which puts the crossover below dimension 36. One design note if you ask for `n>1` on a cell whose dispersion is degenerate away from `k=0`, as the `n_uc=2` Heisenberg cell's is: a single Krylov space holds at most one direction out of a degenerate eigenspace, so the C++ solver runs one deflated Lanczos per eigenvalue rather than one Lanczos for all of them. A plain single-vector Lanczos there returns distinct eigenvalues where two should coincide, every one of them a genuine eigenpair, so a residual check passes it; `"python"` never had that exposure, since ARPACK's restarts recover the second copy.
+**Cost.** The eigenproblem `excitation_energies` solves has dimension `D*D*(d_g-1)`, so its cost grows quickly with the converged bond dimension. Two things bound that, and since 2026-09-22 they bound it on **both** backends rather than only on `itensor_version="python"`: the momentum-dependent channel resolvents are built once per momentum and cached with their LU factorization (they depend only on `k` and the momentum-independent environment, so rebuilding and refactorizing them inside every application of `H_eff(k)` was pure waste), and above a size threshold the eigenproblem is solved by Lanczos on that Hamiltonian's action rather than by assembling the matrix at all. Neither changes any returned number — the two solver paths are cross-checked against each other in `tests/test_infinite_chain.py` and `tests/test_vumps_excitations_v3.py`, agreeing to 4.6e-11 on `itensor_version=3` — and a momentum scan at large `D` is substantially cheaper than it was: over a 3-momentum scan on `itensor_version=3` with threads pinned to one core, a `D=16` TFIM chain went from 164.1 s to 10.3 s with the resolvent cache and to 1.8 s with both halves, and an `n_uc=2` Heisenberg chain at `D=10` from 15.6 s to 5.4 s to 1.2 s. The two backends keep different thresholds, and deliberately: `itensor_version=3` switches to Lanczos above dimension 64 rather than `"python"`'s 256, since one application of `H_eff(k)` there solves four channel resolvents, which puts the crossover below dimension 36. One design note if you ask for `n>1` on a cell whose dispersion is degenerate away from `k=0`, as the `n_uc=2` Heisenberg cell's is: a single Krylov space holds at most one direction out of a degenerate eigenspace, so both solvers run one deflated Lanczos per eigenvalue rather than one Krylov space for all of them. A plain single-vector Lanczos there returns distinct eigenvalues where two should coincide, every one of them a genuine eigenpair, so a residual check passes it. This guide used to say that `"python"` never had that exposure, and it did: above its dense threshold a single ARPACK call for all `n` from one constant start dropped one copy of a degenerate level and returned the next distinct one in its place, 7 of 16 calls wrong over four momenta on the `n_uc=2` critical Heisenberg cell at `maxm=10` (dimension 300), the earlier "not exposed" having been measured at dimension 12, where the Krylov basis is the whole space. Since the 2026-09-24 audit it runs one deflated Lanczos per value for `n>=2`, as the C++ solver does, and agrees with its dense path to 1.9e-15 there, while `n=1` is the unchanged single call (`docs/audit_2026_09_24_hole_hunt.md`, finding 15).
 
 **Spectral weights: `S(k,w)` directly in the thermodynamic limit.** Each branch the ansatz returns is a genuine momentum eigenstate, so its contribution to a dynamical correlator is an exact δ-peak — not a broadened, windowed approximation to one. `ic.spectral_weights(opname, k, p=0, n=1)` returns that peak's position *and* its residue:
 
@@ -3550,7 +3690,23 @@ Three things to set when you use it:
   so the GPU compiles each kernel once, worth 1.4-3.1x on such a run. Skip
   it for long sweeps inside one process, where it costs 6-31%. It pads the
   state's bonds, never the Hamiltonian's, whose bond dimension does not
-  move. On a *consumer* card skip it above small bond dimension entirely:
+  move. The padding is exact for the state, and it leaves every method's
+  algorithm alone except one-site TDVP, where a padded zero direction is
+  a live basis vector the integrator can populate: `tevol_method=
+  "TDVP_GSE"` under padding used to run one-site TDVP on the manifold of
+  bond dimension `K` instead of its Krylov expansion, 0.49 off the
+  unpadded run on a 10-site quench at `K=maxm`. Since the 2026-09-24
+  audit that route is exempt from the padding the way the Hamiltonian
+  is, the padding being stripped once at trajectory entry, so a padded
+  `TDVP_GSE` run follows the unpadded one to roundoff
+  (`docs/audit_2026_09_24_hole_hunt.md`, finding 16, and §21). The one
+  case still started padded is `submode="TDZ"` with
+  `tevol_method="TDVP_GSE"` at `tdvp_gse_sweeps=0`, since TDZ carries
+  its wavefunction between calls; at `tdvp_gse_sweeps>0` its first
+  expansion strips the padding. Under JAX with `set_jit("auto")` the
+  exempt route retraces once per bond dimension it grows through, which
+  is the cost padding is meant to remove, though that route never kept
+  frozen shapes anyway. On a *consumer* card skip it above small bond dimension entirely:
   padding trades arithmetic for shape stability, and where FP64 is
   1/32-rate the arithmetic is the expensive half (measured on a GTX 1060:
   a win at maxm=30, 2.6x slower at maxm=120).
@@ -3770,8 +3926,11 @@ you read the two 2026-08 items above.
   ($A=c^\dagger_0$, $B=c_2$, $\delta=0.4$, `dt=0.1`, exact peak 0.2313)
   the distance to the exact Lehmann density went from 1.16e-01 to
   2.57e-04 under `mode="DMRG"`, from 2.76e-01 to 2.57e-04 under
-  `mode="ED"`, and from 1.13e-01 to 3.31e-02 for `"TDZ"`, whose own
-  contour error the fix does not touch. On a Hermitian pair the
+  `mode="ED"`, and from 1.13e-01 to 3.31e-02 for `"TDZ"`, a residual
+  this entry used to put down to the contour and which was in fact the
+  frequency stage's FFT grid; since the 2026-09-24 audit (finding 7, in
+  the subsection below) `"TDZ"` lands 5.4e-04 from exact and `"TD"`
+  3.2e-05. On a Hermitian pair the
   imaginary part used to run at 60% of the peak (1.11e-01 against
   0.1869 on a 4-site Heisenberg chain at $\delta=0.3$) and is now
   exactly zero, with the curve itself landing 2.82e-04 from exact. Taking
@@ -3794,7 +3953,10 @@ you read the two 2026-08 items above.
   about $1.6\delta$. Every KPM curve therefore changes width, and the
   two solvers stop disagreeing: measured with $A=B=S^z_0$ on three
   chains, $\max|\mathrm{ED}-\mathrm{DMRG}|$ against the resolvent peak
-  went from 95 to 124 per cent down to 4 to 7 per cent. Peak heights
+  went from 95 to 124 per cent down to 4 to 7 per cent, and to 0.07 to
+  0.2 per cent on `itensor_version="python"` once the 2026-09-24 audit
+  cut the DMRG routes to the calibrated moment count (finding 4, in the
+  subsection below). Peak heights
   change with the width and the sum rule does not, which is exactly why
   nothing caught this: both routes integrated to 0.250000 against an
   exact 0.250000 before and after. A script that was tuning `delta` by
@@ -3900,3 +4062,118 @@ minus the `name="..."` string resolution — so both the documented string
 form of `name=` and `mode=`/`self.mode` work there now.
 `Parafermionic_Chain.test(ntries=...)` is honored too, as
 `Spin_Chain.test(ntries=...)` already was.
+
+### The 2026-09-24 audit
+
+A third hunt (`docs/audit_2026_09_24_hole_hunt.md`, five lenses over the
+commits `1c2606d..765b537` that closed the 2026-09 audit's open items)
+recorded 16 confirmed findings. Every code defect among them is fixed,
+with one residual kept by design, `submode="TDZ"` under `set_pad_bonds`
+at `tdvp_gse_sweeps=0` still being started from the padded state (§19),
+and finding 6, which was documentation only, is closed by §6's
+`"KPM"` entry.
+Several of the findings corrected what the entries above say, the
+`"TDZ"` residual and the KPM agreement between the two solvers among
+them, and those entries now point here. Each item below names its
+finding, and the record carries the reproduction that was actually run.
+
+**Results that are not comparable across this change.**
+
+- **`submode="TDZ"`, and `submode="TD"` at `predict=False`, were
+  evaluated on an FFT grid** of spacing $2\pi/(n_t\,dt)$, about
+  $1.05\delta$ at the default `damping_periods=6`, and interpolated
+  linearly onto `es`, meaning that a Lorentzian of half-width $\delta$
+  got about one sample per $\delta$. The damped sum is now evaluated at
+  each requested frequency. On the 2026-09 audit's complex-hopping chain
+  at $\delta=0.4$ (exact peak 0.2313) the distance to the exact density
+  goes from 3.314e-02 to 5.408e-04 for `"TDZ"` and for `"TD"` at
+  `predict=False`, and from 2.571e-04 to 3.169e-05 for `"TD"` at its
+  default, and the returned curves move by up to 14 per cent of the peak
+  for the first two (19 per cent at $\delta=0.25$) and by 2.89e-04 for
+  the third. `sxt_to_skomega`, the infinite-chain $S(k,\omega)$
+  reduction, stays on the FFT stage and returns the same bits as before
+  (§6, finding 7).
+- **Every DMRG KPM spectrum moves by roughly $2/N$ onto the ED one**,
+  $N$ being the calibrated moment count, since the DMRG routes
+  reconstructed from $N+2$ moments. On two decoupled Heisenberg dimers
+  the band-centre peak goes from 0.666761 to 0.620591 at $\delta=0.2$ and
+  from 1.266336 to 1.220236 at $\delta=0.1$, on `itensor_version=3` and
+  `"python"` alike, both now equal to the ED peak, and the three
+  residuals of the 2026-09 record's O2 table go from about 1.3e-02 to
+  2.55e-04, 2.09e-04 and 3.50e-04 on `"python"`. `mode="ED"` does not
+  move (§6, finding 4).
+- **`get_distribution(mode="ED")` moves by exactly the factor `scale`**:
+  on a 4-site open Heisenberg chain with $X=S^z_0$ at the default
+  `scale=10` and $\delta=0.05$ the total weight goes from 0.1000 to
+  1.0000 and the peak from 0.517316 to 5.173159, and with `xs=` the
+  imaginary part, which was a copy of the real one, goes from
+  $\max|\mathrm{Im}\,y|=4.96$ to exactly 0. Nothing moves on any DMRG
+  backend (§14, finding 3).
+- **`ISy` in the first operator of a correlator** returned exactly minus
+  the correlator under `"KPM"`, `"EX"`, `"TD"` and `"TDZ"`, since
+  `get_dagger()` treated this anti-Hermitian name as Hermitian. On a
+  4-site Heisenberg chain in a field, the KPM curve of
+  `(get_operator("ISy",0), Sz[1])` goes from exactly minus the curve of
+  `(1j*Sy[0], Sz[1])` to identical to it, and its first moment from
+  +0.079470 to -0.079470 (exact -0.079685); `sc.is_hermitian(ISy)` is
+  now `False` and `sc.is_hermitian(1j*ISy)` `True`, where both were the
+  other way round. Only operators that contain `ISy` move (§6,
+  finding 2).
+- **An operator that mixes pre-Jordan-Wigner `C`-type names with bare
+  `A`-type ones** was canonicalized with the wrong sign, so `simplify()`
+  changed its value and the Hermiticity, zero and adjoint-pair proofs
+  could be false. Such terms are now left as written (§2). A `"TD"`
+  pair of that kind on a 4-site complex-hopping chain goes from
+  3.616e-02 off exact, with one evolution, to 3.063e-05 with two, on
+  `"python"` and v3 alike, and no dmrgpy chain class builds such a term,
+  so no ordinary Hamiltonian moves (finding 1).
+- **`mode="ED"` `submode="TD"` on a degenerate ground state** built the
+  two halves of the density on two different randomly chosen ground
+  states: three identical calls on a degenerate 3-site Heisenberg chain
+  spread by 2.03e-01 against a 1.768e-01 peak. Both halves now use the
+  cached ground state, so the calls are identical and agree with
+  `"KPM"`, `"INV"`, `"CVM"` and `"ROOTN"`, though still not with
+  `submode="ED"`'s average over the manifold, a split between the two ED
+  conventions that predates this fix. `evolution_ABA(mode="ED")` and
+  `evolve_and_measure(mode="ED")` without `wf=` change the same way, and
+  a non-degenerate ground state moves by at most 3e-11 (finding 8).
+- **The Kondo potential-interference term on a non-uniform `es`**
+  weighted every point with the grid's first spacing. On a single
+  $S=1/2$ at 10 T the peak on a sinh-mapped grid goes from 68.2332 to
+  0.6704 against an exact 0.6709, and a uniform grid moves by 2.4e-08
+  (§17, finding 13).
+- **`excitation_energies(k, n)` with `n>=2` on `itensor_version="python"`**,
+  and `spectral_weights`/`dynamical_structure_factor` with it, could
+  drop one copy of a degenerate level of $H_{\rm eff}(k)$ above the dense
+  threshold (dimension 256) and return the next distinct level in its
+  place. At $k=0.37$ on the `n_uc=2` critical Heisenberg cell at
+  `maxm=10`, `[0.289896072 0.291597913 0.313428946]` becomes
+  `[0.289896072 0.289896072 0.291597913]`, and the $S^x$ and $S^z$ weight
+  fractions go from 0.058 to 0.184014 and from 0.339 to 0.041282, both
+  now equal to the dense path's. `n=1`, `excitation_gap` and dimensions
+  up to 256 are byte-identical (§18, finding 15).
+- **`tevol_method="TDVP_GSE"` under `set_pad_bonds(K)`** on
+  `itensor_version="python"` ran a different algorithm, one-site TDVP on
+  the manifold of bond dimension $K$, its bond growth coming from a QR
+  completion of the padded zero directions rather than from the Krylov
+  expansion. Padded runs through `quench_tdvp_gse` and
+  `evolve_and_measure_tdvp_gse` now follow the unpadded ones: on a
+  10-site XXZ quench at $K=$`maxm`$=4$ the two went from 0.4928 apart to
+  8.9e-16 at `tdvp_gse_sweeps=0` and from 4.1e-06 to 1.7e-07 at
+  `tdvp_gse_sweeps=3`. Note the direction at `tdvp_gse_sweeps=0`, where
+  the padded run used to sit 9.8e-05 from ED only because the larger
+  manifold held the answer, and now sits 0.4929 from it, like the
+  unpadded frozen product state, which is the correct one-site answer
+  (§19, finding 16).
+
+**And these now raise, or now work, where they used to be silent:**
+
+| Call | Was | Now |
+|---|---|---|
+| `kpm_n_scale` not a positive integer, on `"python"`, `mode="ED"` or `"julia_live"` | rounded down silently (1.5 gave 1x, anything below 1 the 16-moment floor) | `TypeError`/`ValueError` naming it, as v2/v3 already did; `kpm_n_scale=2.0` raises too |
+| a misspelled keyword to `submode="TDZ"` (`alpha=`, `nmax=`) | ignored, the default-parameter spectrum bit for bit | `TypeError` |
+| a `toMPO()` operator to `submode="TDZ"` | a crash several frames deep | `TypeError` naming `toMPO` |
+| `get_dynamical_correlator_MB(name="ZZ", i=1, j=1)` under `"TD"`/`"TDZ"` | $C[S^z_0,S^z_0]$, the sites dropped | the sites asked for (the public route was never affected; `"ROOTN"` on this route is still open) |
+| `get_kondo_spectrum(mode="ED")` with a keyword it does not read | ignored, so `Jrho=` for `Jrho_s=` removed the Kondo peak | `TypeError` naming the unknown keywords |
+| `get_kondo_spectrum(mode="DMRG")` at a degenerate ground state | one arbitrary member's spectrum | the same by default; `n_gs=g` gives the equal-weight average over the manifold that `mode="ED"` takes |
+| the potential term with an `es` that misses spectral weight | a silently low spectrum | `RuntimeWarning` from the sum rule |

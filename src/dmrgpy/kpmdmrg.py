@@ -97,12 +97,18 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
     everything needed to turn them into a spectrum.
 
     Returns (mus,emin,emax,scale,n,delta), where scale/emin/emax define
-    the rescaling of the spectrum onto [-1,1], n is the number of
-    polynomials the backend chose (before any kpm_extrapolate resampling
-    of mus) and delta is the effective resolution actually requested.
-    Split out of get_dynamical_correlator() so a caller can reconstruct
-    the same moments with several kernels without repeating the DMRG
-    work, which is all of the cost."""
+    the rescaling of the spectrum onto [-1,1], n is the calibrated moment
+    count (algebra/kpm.py::polynomials_for_broadening, the same count the
+    mode="ED" route uses) and delta is the effective resolution actually
+    requested. len(mus) == n exactly, unless kpm_extrapolate resamples
+    the moments afterwards, in which case len(mus) is that resampling's
+    own count and n is still the calibrated one. The backends' moment
+    loops return two more than n (one more on the accelerated path at odd
+    n), and those are cut here, since the Jackson kernel takes its N from
+    len(mus) and n+2 moments give a line narrower and taller than the
+    calibration by about 2/n. Split out of get_dynamical_correlator() so
+    a caller can reconstruct the same moments with several kernels
+    without repeating the DMRG work, which is all of the cost."""
     if kwargs:
         # a bare **kwargs used to absorb and discard everything unknown --
         # deconvolve=, n=, even maxm=/nsweeps= (which look like they would
@@ -115,6 +121,11 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
             "(self.maxm, self.nsweeps, self.kpmmaxm, ...), not call "
             "arguments.")
     if delta<0.0: raise ValueError("delta must be >= 0, got "+repr(delta))
+    # validated here, once, ahead of both session calls and of the ground
+    # state: the compiled bindings take an int and raised on any float,
+    # while "python" rounded it down through int(), so the same value
+    # meant two different things, or nothing, depending on the backend
+    n_scale = kpm.validate_kpm_n_scale(self.kpm_n_scale)
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
     self.get_gs() # compute ground state (also sets self.e0)
     # the documented string form ("ZZ"/"cdc"/... plus i=/j=) used to hit a
@@ -144,15 +155,28 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
         moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator_truncated(
                 mi.to_terms(),mj.to_terms(),
                 self.kpmmaxm,self.kpm_scale,self.kpm_accelerate,
-                self.kpm_n_scale,delta,self.kpmcutoff,
+                n_scale,delta,self.kpmcutoff,
                 self.kpm_truncate_dK,self.kpm_truncate_nsweeps,self.kpm_truncate_threshold)
     else:
         _sync_kpm_energy_truncation(self)
         moments,emin,emax,scale,n = self._session.kpm_dynamical_correlator(
                 mi.to_terms(),mj.to_terms(),
                 self.kpmmaxm,self.kpm_scale,self.kpm_accelerate,
-                self.kpm_n_scale,delta,self.kpmcutoff)
-    mus = np.array(moments)
+                n_scale,delta,self.kpmcutoff)
+    # Exactly n moments, the calibrated count. Every backend's loop (v2,
+    # v3 and its truncated variant, "python") returns 2+n, or 2+2*(n//2)
+    # on the accelerated path, a leftover of the file-based kpmcorrelator.h
+    # that predates the calibration; and since jackson_kernel sets its N
+    # from len(mus), the DMRG line came out narrower and taller than ED's
+    # by about 2/n (7.4 per cent on a band-centre pole at delta=0.2, 4
+    # sites), which was most of the ED-versus-DMRG residual O2 reported.
+    # Cut here rather than in the loops: those are shared with
+    # general_kpm, whose count is deliberately not the calibrated one, the
+    # accelerated recursion can only emit moments in pairs, and this cut
+    # covers every backend with no rebuild. It sits before
+    # kpm_extrapolate, which then resamples the calibrated count. Finding
+    # 4 of docs/audit_2026_09_24_hole_hunt.md.
+    mus = np.array(moments)[:n]
     if self.kpm_extrapolate:
         mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
                 extrapolation_mode=self.kpm_extrapolate_mode)

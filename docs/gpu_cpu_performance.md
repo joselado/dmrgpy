@@ -142,7 +142,12 @@ host. It appends *zero* singular values after truncation has chosen what
 to keep, so the state is unchanged (ground-state energies agree to
 1.8e-15) -- but it does perturb later truncation *decisions* in a long
 recursion (KPM spectra shift by ~3e-3 versus ~3e-4 run-to-run), so it is
-exact in representation, not in trajectory.
+exact in representation, not in trajectory. For one family of methods it
+was not even the same algorithm: one-site TDVP can populate a padded zero
+direction, which made a padded `TDVP_GSE` run one-site TDVP on the
+manifold of bond dimension K instead of its Krylov expansion. That route is
+exempt from padding now, see "`set_pad_bonds` used to change one-site TDVP
+(fixed)" below.
 
 Related: run KPM with `kpmmaxm == maxm`. Otherwise the ground-state solve
 and the moment recursion have two separate shape families and every kernel
@@ -644,6 +649,66 @@ against 38.4 s at maxm=240). Padding trades real arithmetic for shape
 stability, and on a card this slow per FLOP the arithmetic is the
 expensive half. **On a consumer GPU, pad only at small bond dimension**;
 the opposite of the advice for an H200.
+
+### `set_pad_bonds` used to change one-site TDVP (fixed)
+
+Not specific to a consumer card, and found by the 2026-09-24 audit
+(`docs/audit_2026_09_24_hole_hunt.md`, finding 16) rather than by a
+benchmark. Padding appends zero singular values, which leaves the state
+unchanged at every instant, and for a two-site method that is the whole
+story, since the next SVD discards the zero directions again. A one-site
+method does not truncate between its steps, and in the first
+left-to-right half-sweep `qr_split`, a reduced QR, completes the padded
+zero directions into live zero-weight basis vectors that one-site TDVP
+then populates. So under `set_pad_bonds(K)` at the recommended K = maxm,
+`tevol_method="TDVP_GSE"` added no direction at any bond of any call (27
+of 27 bond steps at n=10, K=4, and 33 of 33 at n=12, K=8, against 1 to 4
+per bond unpadded), because `gse._gse_bond_step` read the padded dimension
+as the bond's rank and found no room left, and its bond growth came from
+the QR completion rather than from the Krylov subspace. You can think of
+the padded route as one-site TDVP on the manifold of bond dimension K: a
+larger ansatz, not a wrong integrator, but not the method that was asked
+for either.
+
+The one-site route is now exempt from padding the way the MPO is:
+`Chain.global_subspace_expand` and `Chain.tdvp_step(num_center=1)` run
+under `backend.pad_bonds_suspended()`, `quench_tdvp_gse` and
+`evolve_and_measure_tdvp_gse` strip the padding once at trajectory entry
+(`_strip_bond_padding`, a lossless SVD sweep on the evolved state only, so
+the caller's `wf` keeps its padding), and `_gse_bond_step` reads the true
+rank from the spectrum, which keeps a direct padded caller of `gse.py`
+right as well. Measured on an XXZ quench (Delta=0.7, hz=0.1, Neel start,
+40 steps of dt=0.05), the largest distance between the padded and the
+unpadded `<Sz_0>(t)` over the trajectory:
+
+| chain | K | `tdvp_gse_sweeps` | before | after |
+|---|---|---|---|---|
+| n=10 | 4 (= maxm) | 0 | 0.4928 | 8.9e-16 |
+| n=12 | 8 | 0 | 0.4929 | 1.3e-14 |
+| n=10 | 4 | 3 | 4.086e-6 | 1.70e-7 |
+| n=12 | 8 | 3 | 1.911e-7 | 4.7e-10 |
+
+A `quench_tdvp_gse` correlator at n=8, K=4 went from 0.34 to 1.2e-15, and
+on the Gram SVD route (K=24, above `_GRAM_MIN_DIM`) the padded and
+unpadded runs now agree to 2.9e-15 and 1.3e-10 from a Neel start and to
+1.2e-12 and 1.1e-12 from an entangled start. Unpadded runs are unchanged,
+bit for bit at `tdvp_gse_sweeps` 0 and 3. Note the direction at
+`tdvp_gse_sweeps=0`: the padded run used to sit 9.8e-5 from ED only
+because it was one-site TDVP on the larger manifold, and it now sits
+0.4929 from ED, like the unpadded frozen product state, which is the
+correct one-site answer.
+
+Two things are left as they are, deliberately. `Chain.tdvp_step` never
+strips, because `submode="TDZ"` carries its wavefunction between calls and
+a per-call strip would delete the expansion's zero-weight directions, so a
+TDZ run with `TDVP_GSE` at `tdvp_gse_sweeps=0` under padding still starts
+from the padded state (0.467 against unpadded in an emulated TDZ loop,
+Neel start, n=8, K=4), while at `tdvp_gse_sweeps=3` its first expansion
+strips it (to 8e-13). And under JAX with `set_jit("auto")` this route
+again retraces once per bond dimension it grows through, the cost padding
+was meant to remove, though it never kept frozen shapes anyway.
+`tests/test_audit_2026_09_24_pyitensor.py` pins all of it on the host,
+where it needs no GPU to check.
 
 ### The operating rule for a consumer card
 

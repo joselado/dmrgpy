@@ -1376,8 +1376,9 @@ all and each solve stays the matrix-free BiCGSTAB it already was.
 action above `vumps_h_eff_dense_max_` and falling back to the dense path
 whenever it cannot vouch for what it found.
 
-Two things there do not carry over from the `"python"` side, and both
-were measured here rather than copied. The threshold is 64, not the 256
+Two things there did not carry over from the `"python"` side, and both
+were measured here rather than copied; the second has since been carried
+the other way. The threshold is 64, not the 256
 `_DENSE_EIG_MAX` uses: one application of `H_eff(k)` solves four channel
 resolvents on this backend, so Lanczos already wins at `dim=36`, the
 smallest size tried, and 64 sits above that crossover while keeping
@@ -1390,13 +1391,30 @@ degenerate away from `k=0`: asked for the lowest three at `k=0.37`,
 have been the same one, an error of 1.0, with every returned value a
 genuine eigenpair that no residual test rejects. `vx_lanczos_lowest`
 therefore runs one deflated Lanczos per eigenvalue, each from its own
-generic start vector. The `"python"` side looks exposed to the same
-thing and is not, measured on that same cell at `D=2`: ARPACK's restarts
-recover the direction a single Krylov space cannot hold, so its
-iterative path returns both copies of every degenerate pair and agrees
-with its own dense path to 3.6e-15. The deflation is what this backend
-needs to reach the behaviour the other one already has, not a fix owed
-to both.
+generic start vector. The `"python"` side was recorded here as exposed
+to the same thing in principle and not in practice, measured on that
+same cell at `D=2`, and that measurement could not discriminate: at
+`dim=12` scipy's `ncv = min(max(2n+1,20),dim)` equals `dim`, so the
+Krylov basis is the whole space. Above its dense threshold it was
+exposed, a single ARPACK call for all `n` from one constant start
+dropping one copy of a degenerate level and shifting everything after
+it up one slot, 7 of 16 calls wrong over four momenta and `n=1` to 4 on
+the `n_uc=2` critical Heisenberg cell at `maxm=10` (`dim=300`). Since
+the 2026-09-24 audit (`docs/audit_2026_09_24_hole_hunt.md`, finding 15)
+`_lowest_iterative` keeps its single ARPACK call for `n=1`, bit for
+bit, and for `n>=2` calls `_lowest_iterative_deflated`, a port of
+`vx_lanczos_lowest`: one Lanczos run per value with full
+reorthogonalization, each from its own seeded start
+(`np.random.default_rng(run)`, which leaves the global numpy stream
+alone) orthogonalized against the vectors already found, deflation by a
+shift sized from the first run's Ritz range, each value's residual
+re-measured against the undeflated operator, and a non-ascending value,
+a non-converged run or a breakdown handing the answer to the dense
+path. It is hand-written rather than a chain of `eigsh(k=1)` calls
+because scipy refuses `which="BE"` on a complex operator, so ARPACK
+cannot supply the Ritz range. On that cell it is 0 of 16 wrong (1.9e-15
+from dense) and cheaper than dense up to `n` of about 4. So the
+deflation turned out to be a fix owed to both backends.
 
 Measured over a 3-momentum scan, threads pinned to one core, before
 against after: a `D=16` TFIM chain (dim 256) went 164.1 s to 10.3 s with
@@ -2494,10 +2512,18 @@ for reasons a `MultiOperator` cannot see:
   `_DIAGONAL`), since same-site operators do not commute in general and
   `get_dagger()` reverses their order. `Nup[i]*Ndn[i]`, the Hubbard U
   term, is diagonal and so is proven, and `Sx[i]*Sz[i]` is deliberately
-  left spelled as written.
+  left spelled as written;
+- the order of a pre-Jordan-Wigner `C`-type factor and a bare local
+  `A`-type one (`canonical.py`'s `_LOCAL_LADDER`: `A`, `Adag`, `Aup`,
+  `Adagup`, `Adn`, `Adagdn`), whose exchange is not a parity at all: with
+  `C_j = F_0...F_{j-1} A_j`, `A_i` anticommutes with `C_j` for `j>i` and
+  commutes with it for `j<i`, so the sign depends on which of the two
+  sits on the lower site, and a term naming both kinds is not reordered
+  at all. `C0*A1 - A1*C0` is exactly zero and is not proven zero.
 
-Both need the site type, which lives on the chain and not on the
-operator. So `True` means proven and `False` means not proven, and
+The first three need the site type, which lives on the chain and not on
+the operator, and the fourth the string convention of the Jordan-Wigner
+transform, which the infinite-chain path does not use. So `True` means proven and `False` means not proven, and
 `Many_Body_Chain.is_hermitian()` (`mpsalgebra.is_hermitian`) consumes
 it in exactly that spirit: it takes the proof when it lands, which is
 what happens for every ordinary Hamiltonian, and falls back to its
@@ -2516,7 +2542,29 @@ spelled exactly as it was written and only ever collects with a term
 spelled the same way. Nothing is reordered on a grading the table cannot
 check, and since `get_dagger()` also leaves an unrecognized name
 untouched, such an operator would cancel against its own "dagger": the
-Hermiticity proof refuses outright when any name is off the table.
+Hermiticity proof refuses outright when any name is off the table. A
+term mixing `C`-type and `A`-type names is treated the same way, left as
+written and collected only with its own spelling, which is the fix for
+the 2026-09-24 audit's finding 1 (`docs/audit_2026_09_24_hole_hunt.md`):
+the `A`-type names used to be graded even against the `C`-type ones, so
+a mixed term was sorted with the wrong sign, and an exactly
+anti-Hermitian operator was proven Hermitian and one of norm 4 proven
+zero. The `A`-type names keep parity 0, since they are also the boson
+ladder operators of `Bosonic_Chain`/`SpinBoson_Chain` and the boson and
+Jordan-Wigner-transformed proofs need them even, and no dmrgpy chain
+class puts a `C`-type name next to a boson ladder operator, so no
+ordinary Hamiltonian lost its proof. The adjoint side carries one more
+piece of information than a renaming: `get_dagger()` multiplies the
+conjugated coefficient by a phase for a name whose adjoint is a
+multiple of itself (`multioperator._dagger_phase`, so far only
+`ISy -> -ISy`, since `ISy` is `i*Sy`), once per occurrence, so daggering
+twice gives the operator back and a term without such a name comes out
+byte-identical (finding 2 of the same record, where `ISy` passed through
+unchanged and every correlator with it in the first operator came out
+exactly minus itself). `ISy` stays off `_PARITY`, so the proof refuses
+it and the chain's random-witness probe, which now sees the phase,
+answers instead: `sc.is_hermitian(ISy)` is `False` and
+`sc.is_hermitian(1j*ISy)` is `True`.
 
 ### 4.3 Backend dispatch
 
@@ -4542,11 +4590,23 @@ one-sided in the same way the Hermiticity proof next to it is: a proof
 that `A` is `B^dagger` collapses the combination to `Re F` and costs one
 evolution, anything unproven costs two, and a name with no known adjoint
 is refused rather than guessed, since `get_dagger()` would otherwise
-leave it untouched and the "adjoint" run would be the same run. The same
-pass fixed a parity defect one layer down: `edtk/timedependent.
+leave it untouched and the "adjoint" run would be the same run. What
+the refusal protects is the one-run shortcut, not the adjoint the second
+run is built on: that run comes from `get_dagger()`, which was wrong for
+`ISy` until the 2026-09-24 audit gave it a phase (finding 2, see §4.2a).
+The same pass fixed a parity defect one layer down: `edtk/timedependent.
 evolution_DC` put the caller's `A` on the ket and `B` on the bra, so
 `mode="ED"` returned `C[B,A]` where the DMRG route returns `C[A,B]`,
 invisible for as long as every test and example used one operator twice.
+The 2026-09-24 audit found two more at this layer. `evolution_DC`
+re-solved the ground state from a random start on every call, so on a
+degenerate ground state the two halves of the density were built on two different randomly chosen
+members of the manifold; it now measures in the `EDchain`'s cached
+ground state (`wf0=`, forwarded by `edtk/dynamics.py`'s TD branch) with
+the energy origin at the cached `e0`, as KPM does (finding 8). And the
+lower-level route `timedependent.dynamical_correlator` dropped `i=`/`j=`
+on its way to `lehmann_density_from_one_sided`, which now takes them
+(finding 10); ROOTN's sibling on that route still drops them.
 One consumer of the same transform is deliberately left off this
 assembly, `timedependent.sxt_to_skomega`: it reduces `S(x,t)` to
 `S(k,omega)` and never sees the operator pair, so there is no adjoint
@@ -4561,14 +4621,29 @@ audit). The Jackson kernel fixes the line width from the moment count,
 *is* choosing the broadening, and every route now solves that relation
 for `2*delta` at the band centre rather than picking a count of its own.
 Three of the five call the helper (`edtk/dynamics.py`,
-`pyitensor/chain.py`, `mpsjulialive/dynamics.py`, the last by
-construction only, since nothing has measured a line width on
-`itensor_version="julia_live"` and `dynamics.py`'s docstring declines to
-claim one); the two C++ backends
+`pyitensor/chain.py`, `mpsjulialive/dynamics.py`, the last measured
+since the 2026-09-24 audit on one case only, the band-centre pole of two
+decoupled dimers, where it matches `mode="ED"` to better than 1e-6 at
+the reconstruction's own grid points, `tests/test_audit_2026_09_24_kpm.py`);
+the two C++ backends
 cannot, so `mpscpp2/chain_session.h` and `mpscpp3/chain_session.h` each
 carry a `kpm_polynomials_for_broadening` transcription with the constant
 written out, each pointing back at the Python original. That duplication
-is the thing to keep in step when the relation is touched. The ED route
+is the thing to keep in step when the relation is touched. What the
+helper calibrates is the number of moments the kernel is handed, since
+`jackson_kernel` takes its `N` from `len(mus)`, and that is not the
+number the backend loops return: the two C++ loops, pyitensor's and
+`kpm.jl`'s return `n+2` (`n+1` on the accelerated path at odd `n`), and
+until the 2026-09-24 audit every DMRG route handed all of them to the
+kernel, so its line came out narrower and taller than the ED one by
+about `2/n` (`docs/audit_2026_09_24_hole_hunt.md`, finding 4). The cut is
+made in Python rather than in the loops, which `general_kpm` shares:
+`kpmdmrg.dynamical_correlator_moments` (and through it v2, v3, v3's
+`kpm_dynamical_correlator_truncated`, `"python"` and
+`infinitechain.kpm_finite`) and
+`mpsjulialive/dynamics.py::_kpm_dynamical_correlator` keep the first `n`
+before `kpm_extrapolate`, meaning that a sixth route has to make the
+same cut or its line is `2/n` off the other five. The ED route
 additionally adopted the DMRG rescaling window, which is the part that
 is a dispatch decision rather than an arithmetic one: it used to anchor
 at the ground state over `3*max(|E_0|,|E_max-E_0|)` while the DMRG
@@ -4576,7 +4651,18 @@ routes centre on the middle of the bandwidth, so even an identical
 moment count would have placed the same physical energy at a different
 Chebyshev `x`, where the kernel has a different width. `kpm_n_scale`
 survives as a multiplier on the calibrated count and its default moves
-from 3 to 1. One KPM path is deliberately outside this,
+from 3 to 1, and since the 2026-09-24 audit (finding 5) it is validated
+once, before dispatch, by `algebra/kpm.py::validate_kpm_n_scale`, which
+accepts a positive `numbers.Integral` (numpy integers included, `bool`
+excluded) and raises `TypeError` or `ValueError` naming it otherwise. It
+is called in `kpmdmrg.dynamical_correlator_moments` ahead of `get_gs`
+and of both session calls, in the `mode="ED"` push of
+`get_dynamical_correlator` when the submode is KPM, at the top of the
+`julia_live` KPM and inside `polynomials_for_broadening` itself, so the
+C++ transcriptions' `n_scale>0 ? : 1` branch is unreachable and the
+Python routes no longer round a float down where the C++ ones raised.
+It is checked only where it is read, so an invalid value does not break
+the ED route's other submodes. One KPM path is deliberately outside this,
 `kpmdmrg.general_kpm_moments`: `get_distribution()` expands an arbitrary
 operator rather than the Hamiltonian, so there is no band whose centre
 the relation could be anchored to, and `delta` there still only sets a
@@ -4585,7 +4671,17 @@ one clarification: it takes the calibrated count like every other route,
 but rescales onto a ground-state-anchored window
 (`scaled_hamiltonian_gs_anchored`) rather than a bandwidth-centred one,
 so `FWHM = 2*delta` holds at the centre of *that* window and the
-`sqrt(1-x^2)` profile is read against it.
+`sqrt(1-x^2)` profile is read against it. Where on the window a
+ground-state correlator's weight sits is fixed by the same arithmetic on
+every route: `shift = -(emin+emax)/2` and
+`scale = 1/((emax-emin)*kpm_scale)`, so the ground state is at
+`x0 = -1/(2*kpm_scale)` on every chain (-0.714 at the default), the band
+centre is the energy `E0 + W/2`, and as `W` grows every intensive
+excitation tends to `x0`, where the calibrated line is 0.70 of the
+requested width, and to 0.157 of it at `E0` on the anchored window. That
+is a documentation fact rather than a defect (finding 6 of the same
+record), and `polynomials_for_broadening`'s docstring carries the
+measurements and the one compensation, `delta/sqrt(1-x(omega)^2)`.
 
 Two mechanism notes on that move, because the two implementations respond
 to it very differently. `cvm.py` gets the advanced resolvent for free:
@@ -5033,6 +5129,31 @@ with the other two is instead checked with the three underlying
 (expensive) calls monkeypatched out
 (`tests/test_kondo_spectrum.py::test_get_kondo_spectrum_dmrg_combines_terms_correctly`).
 
+Two dispatch facts about `get_kondo_spectrum` date from the 2026-09-24
+audit (`docs/audit_2026_09_24_hole_hunt.md`). The ED branch reads only
+its named parameters and raises `TypeError` on any other keyword,
+naming the unknown ones sorted and saying they are `mode="DMRG"`
+parameters or misspellings, with no allow-list: it used to take a
+`**kwargs` with no consumer, the §4.10 shape, so a misspelled `Jrho_s`
+silently removed the whole third-order Kondo peak (finding 11). And
+`n_gs>1` on the DMRG branch, the equal-weight average over a degenerate
+ground manifold that `mode="ED"` takes by definition (finding 12), has
+to switch each member in on both sides of the chain: `set_gs()` for the
+Python-side `wf0`, which the CVM route and the two-time third-order term
+read, and `session.set_wavefunction()` for the session's own `wf0`,
+which the KPM and DDMRG routes read. Measured, `set_gs()` alone left KPM
+on the solved state, both members returning the same 1.3206. The
+session's band edges stay cached from the solved state, so every member
+is measured from the same `E0`, and the solved state is restored in a
+`finally`, a repeated default call agreeing to 1.6e-13 on `"python"`
+and 3.2e-11 on v3. `n_gs>1` refuses `itensor_version=2` and
+`"julia_live"` with `NotImplementedError`. On the numerical side the
+potential term now integrates with the trapezoid weights of the grid it
+is given, where it used the first spacing for every point (finding 13),
+and it checks the sum rule `sum_k int S_kk = S(S+1)` on `Spin_Chain`
+sites, where `S(S+1) = (d^2-1)/4`, warning when more than 1e-2 of the
+weight is missing (finding 14).
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,
@@ -5114,9 +5235,13 @@ forced normalization used to mask.
 
 Current scope: only the "greater" branch of the correlator is simulated
 along the contour (the same simplification `submode="TD"` already
-makes), fed into the same windowing/FFT tail as `"TD"` (factored out
-into `timedependent._fourier_transform_correlator` so both submodes
-share it) and then into the same Lehmann assembly
+makes), fed into the same windowing and frequency stage as `"TD"`
+(factored out into `timedependent._fourier_transform_correlator` so both
+submodes share it, and since the 2026-09-24 audit's finding 7 evaluating
+the damped sum directly at each requested frequency rather than
+interpolating an FFT grid of spacing about `1.05*delta`, which is what
+the 3.31e-02 TDZ residual once attributed to the contour was; the
+contour's own share is about 1e-06) and then into the same Lehmann assembly
 (`timedependent.lehmann_density_from_one_sided`, see §4.8), which is
 what supplies the `t<0` half and turns the one-sided transform into the
 density. The backward half comes from the adjoint pair on the *same*
@@ -5520,7 +5645,19 @@ Three places did need explicit work, and each is a trap worth knowing:
   60, which on a 6 GB consumer card was the difference between a padded
   `maxm=60` ground state running and not (see
   `docs/gpu_cpu_performance.md`'s consumer-GPU section, and
-  `tests/test_pad_bonds_mpo_exemption.py`).
+  `tests/test_pad_bonds_mpo_exemption.py`). Since the 2026-09-24 audit
+  (`docs/audit_2026_09_24_hole_hunt.md`, finding 16) the one-site TDVP
+  route is exempt too: a one-site method does not truncate between its
+  steps, and `qr_split` completes a padded zero direction into a live
+  basis vector that it then populates, which made a padded `TDVP_GSE`
+  one-site TDVP on the manifold of bond dimension K rather than its
+  Krylov expansion. `Chain.global_subspace_expand` and
+  `Chain.tdvp_step(num_center=1)` run under `pad_bonds_suspended()`, and
+  `quench_tdvp_gse`/`evolve_and_measure_tdvp_gse` strip the padding once
+  at trajectory entry (`_strip_bond_padding`, on the evolved state only);
+  `Chain.tdvp_step` itself never strips, since `submode="TDZ"` carries
+  its wavefunction between calls, so a TDZ run at `tdvp_gse_sweeps=0` is
+  the one case still started padded.
 
 **The dispatch floor, and the two knobs against it.** Eager dispatch has
 a per-call floor (~0.35 ms on an H200, against ~0.07 ms for the same

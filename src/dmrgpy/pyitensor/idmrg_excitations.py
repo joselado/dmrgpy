@@ -364,6 +364,17 @@ _RESOLVENT_DENSE_MAX = 2048
 # conservative -- the dense path is exact and cannot fail, so paying a
 # little extra there is the safe direction to err.
 # examples/idmrg/excitation_solver_scaling/main.py plots both curves.
+#
+# Those figures are for ONE ARPACK call returning all n values, which is
+# what n=1 still is. For n>=2 the iterative path is now n deflated Lanczos
+# runs (see `_lowest_iterative_deflated` for why one call cannot be
+# trusted there), so its cost grows about linearly in n: measured on the
+# critical n_uc=2 Heisenberg cell at maxm=10 (dim=300) over four momenta,
+# 70 to 90 applications per run, i.e. 140 to 181 at n=2, 203 to 267 at n=3
+# and 262 to 345 at n=4, against the dense path's 300 (0.42-0.54 s, 0.62-
+# 0.80 s and 0.79-1.07 s, against 0.85-0.89 s dense). At this dim the two
+# are therefore close for n=3 and dense is the cheaper one from n~4 on; the
+# dense path stays exact either way, so this costs time, never accuracy.
 _DENSE_EIG_MAX = 256
 
 # Convergence tolerance handed to the iterative eigensolver, and the largest
@@ -379,6 +390,12 @@ _DENSE_EIG_MAX = 256
 # below, which is what a too-loose tolerance would trip.
 _ITERATIVE_EIG_TOL = 1e-10
 _ITERATIVE_EIG_RESIDUAL_MAX = 1e-7
+
+# Krylov dimension cap of one deflated Lanczos run (n>=2, see
+# `_lowest_iterative_deflated`); a run that has not converged by then is
+# refused and the dense path answers instead. The same cap as the C++ port's
+# vumps_h_eff_lanczos_niter_ (mpscpp3/chain_session.h).
+_ITERATIVE_EIG_MAX_ITER = 300
 
 
 def _solve_linear_map(D, action, rhs):
@@ -948,7 +965,11 @@ def _lowest_iterative(k, env, n):
     iterative path is never allowed to be *less* reliable than the dense one
     it replaces, only cheaper.
 
-    Two details that are not optional:
+    What follows is the n=1 route, a single ARPACK call; n>=2 goes to
+    `_lowest_iterative_deflated` instead, one deflated Lanczos run per
+    value, since a single Krylov space cannot hold the second copy of a
+    degenerate eigenvalue (see that function for the measurement). Two
+    details of the n=1 route are not optional:
 
     - `v0` is fixed and deterministic. ARPACK's default start vector is
       random, which would make a near-degenerate or gapless dispersion come
@@ -959,6 +980,9 @@ def _lowest_iterative(k, env, n):
       and if the H-vs-H^dagger asymmetry that `_lowest_dense` averages away
       were ever structural rather than noise, it would show up here as a
       residual this check rejects."""
+    if n >= 2:
+        return _lowest_iterative_deflated(k, env, n)
+
     from scipy.sparse.linalg import ArpackError, ArpackNoConvergence
     from scipy.sparse.linalg import LinearOperator, eigsh
 
@@ -986,6 +1010,164 @@ def _lowest_iterative(k, env, n):
     return w, [V[:, j].reshape(Dx, D) for j in range(len(w))]
 
 
+def _deflated_lanczos_run(act, v0, found, niter, residual_tol):
+    """(value, vector, top): the lowest eigenpair of the Hermitian map
+    `act` by Lanczos with full reorthogonalization, from the unit vector
+    `v0`, kept orthogonal to the columns of `found` (an orthonormal
+    (dim, j) array, possibly empty), plus the run's largest Ritz value,
+    which the caller sizes its deflation shift from. None when the run did
+    not converge within `niter` or broke down first. One run of the C++
+    port's vx_lanczos_lowest (mpscpp3/chain_session.h), step for step.
+
+    The stopping test is the RESIDUAL of the lowest Ritz pair, beta*|s_m|
+    (free from the tridiagonal problem), not "the lowest Ritz value stopped
+    moving": the value error is quadratic in the vector error, so a value
+    that has settled at 1e-12 leaves the vector at ~1e-6, and here the
+    vector is what the next run deflates against. A breakdown (beta below
+    1e-12) before that test passes is refused too: the invariant subspace
+    it found is genuine, but nothing here says it holds the lowest
+    eigenvalue of the whole map."""
+    from scipy.linalg import eigh_tridiagonal, eigvalsh_tridiagonal
+
+    dim = v0.size
+    mmax = min(niter, dim)
+    Q = np.zeros((min(mmax, 64), dim), dtype=complex)   # grown on demand
+    Q[0] = v0
+    alphas, betas = [], []
+    w = act(v0)
+    alpha = float(np.vdot(v0, w).real)
+    alphas.append(alpha)
+    w = w - alpha * v0
+    for step in range(1, mmax + 1):
+        m = len(alphas)
+        a = np.asarray(alphas)
+        b = np.asarray(betas)
+        if m == 1:
+            ev, s = a.copy(), np.ones((1, 1))
+        else:
+            ev, s = eigh_tridiagonal(a, b, select="i", select_range=(0, 0))
+        beta = float(np.linalg.norm(w))
+        if beta * abs(s[-1, 0]) < residual_tol * max(1.0, abs(ev[0])):
+            vec = s[:, 0] @ Q[:m]
+            top = ev[0] if m == 1 else eigvalsh_tridiagonal(
+                a, b, select="i", select_range=(m - 1, m - 1))[0]
+            return float(ev[0]), vec, float(top)
+        if step == mmax or beta < 1e-12:
+            return None
+        betas.append(beta)
+        q = w / beta
+        if m == Q.shape[0]:
+            Q = np.concatenate([Q, np.zeros((min(m, mmax + 1 - m), dim),
+                                            dtype=complex)])
+        Q[m] = q
+        w = act(q)
+        alpha = float(np.vdot(q, w).real)
+        alphas.append(alpha)
+        w = w - alpha * q - beta * Q[m - 1]
+        # Full reorthogonalization, twice (classical Gram-Schmidt needs the
+        # second pass to be as good as the modified one), against every
+        # Lanczos vector and against the vectors already found, which keeps
+        # the run inside the subspace the deflation confines it to.
+        for _ in range(2):
+            w = w - Q[:m + 1].T @ (Q[:m + 1].conj() @ w)
+            if found.shape[1]:
+                w = w - found @ (found.conj().T @ w)
+    return None
+
+
+def _lowest_iterative_deflated(k, env, n):
+    """(w, X_list) for n>=2: the n lowest eigenpairs of H_eff(k), with
+    multiplicity, by n SEQUENTIAL Lanczos runs, each on the operator with
+    the previous runs' eigenvectors deflated away, or None if any run
+    produced something this cannot vouch for, in which case the caller
+    takes the dense path. The C++ port's vx_lanczos_lowest, ported.
+
+    Why not the single ARPACK call n=1 uses: a single-vector Krylov space
+    holds only one direction out of a degenerate eigenspace, so the second
+    copy of a degenerate eigenvalue is absent from it and the n lowest Ritz
+    values are then a list of DISTINCT eigenvalues. Each one is a genuine
+    eigenpair, so no residual test catches it. Measured on the critical
+    n_uc=2 Heisenberg cell at maxm=10 (dim=300), whose lowest level at
+    k!=0 is the exactly degenerate transverse pair of the magnon triplet,
+    that call returned [0.289896072 0.291597913 0.313428946] at k=0.37
+    against the dense [0.289896072 0.289896072 0.291597913]. The audit's
+    probe found it wrong in 24 of 36 (seed, k, n) calls over three seeds,
+    four momenta and n=2,3,4, and another VUMPS run of the same cell in 7
+    of 16 over the same momenta and n=1..4; which calls miss moves with the
+    state, and n=1 never did.
+
+    What the port keeps, each for a measured reason:
+
+    - A FRESH generic start per run, orthogonalized against the vectors
+      already found. Deflation alone is not enough: a run started from the
+      previous run's start (or from the constant vector) has no component
+      in the rest of the eigenspace and fails exactly like the single call,
+      measured to every printed digit on that same cell. The starts are
+      seeded by the run index through their own `default_rng`, so the
+      answer is the same run to run and the caller's global numpy stream is
+      not touched.
+    - Deflation by SHIFT, y += shift*u<u,x>, not by projection: a converged
+      vector is converged to the residual tolerance, not exactly, and the
+      shift pushes whatever of it leaks back above the rest of the spectrum
+      rather than letting the next run rediscover it. The shift is sized
+      from the first run's own Ritz range, 2*(top-bottom) + 2*max(1,|bottom|),
+      the C++ port's expression; the range is a lower bound on the width of
+      the spectrum, hence the margin.
+    - Each value's residual is re-measured against the UNDEFLATED operator
+      (one extra application per run), and the values must come out
+      ascending: a run that lands below the previous one means an earlier
+      run missed something, so the whole answer is refused rather than
+      sorted into shape.
+
+    Returns the values in the order found, ascending to within
+    `_ITERATIVE_EIG_RESIDUAL_MAX`, and the vectors as an orthonormal set, so
+    inside a degenerate multiplet they are one arbitrary basis of it."""
+    D, d_g = env.D, env.d_g
+    Dx = D * (d_g - 1)
+    dim = Dx * D
+
+    def matvec(x):
+        return _h_eff_action(k, x.reshape(Dx, D), env).reshape(-1)
+
+    found = np.zeros((dim, 0), dtype=complex)
+    vals = []
+    shift = 0.0
+    for run in range(n):
+        def act(x, F=found, shift=shift):
+            y = matvec(x)
+            if F.shape[1]:
+                y = y + shift * (F @ (F.conj().T @ x))
+            return y
+
+        rng = np.random.default_rng(run)
+        v0 = rng.standard_normal(dim) + 1j * rng.standard_normal(dim)
+        if found.shape[1]:
+            v0 = v0 - found @ (found.conj().T @ v0)
+        nrm = np.linalg.norm(v0)
+        if not nrm > 0:
+            return None
+        got = _deflated_lanczos_run(act, v0 / nrm, found,
+                                    _ITERATIVE_EIG_MAX_ITER, _ITERATIVE_EIG_TOL)
+        if got is None:
+            return None
+        val, vec, top = got
+        if run == 0:
+            shift = 2.0 * abs(top - val) + 2.0 * max(1.0, abs(val))
+        scale = max(1.0, abs(val))
+        if np.linalg.norm(matvec(vec) - val * vec) > _ITERATIVE_EIG_RESIDUAL_MAX * scale:
+            return None
+        if vals and val < vals[-1] - _ITERATIVE_EIG_RESIDUAL_MAX * scale:
+            return None
+        if found.shape[1]:
+            vec = vec - found @ (found.conj().T @ vec)
+        nv = np.linalg.norm(vec)
+        if not nv > 0.5:    # a Ritz vector of the deflated run has norm ~1 here
+            return None
+        found = np.concatenate([found, (vec / nv)[:, None]], axis=1)
+        vals.append(val)
+    return np.asarray(vals), [found[:, j].reshape(Dx, D) for j in range(n)]
+
+
 def excitation_energies(env, k, n=1, return_vectors=False):
     """The lowest `n` excitation energies (above the ground state) at
     momentum `k` (radians, per unit cell) of the tangent-space/
@@ -999,8 +1181,11 @@ def excitation_energies(env, k, n=1, return_vectors=False):
 
     Two solvers, picked by problem size (`_DENSE_EIG_MAX`): assemble
     H_eff(k) and call `eigh` for small ones, Lanczos on `_h_eff_action`
-    directly for large ones, falling back to the dense path if the
-    iterative solve does not converge to an acceptable residual. Both are
+    directly for large ones (one ARPACK call at n=1, one deflated run per
+    value at n>=2, so that a degenerate level comes back with its
+    multiplicity -- see `_lowest_iterative_deflated`), falling back to the
+    dense path if the iterative solve does not converge to an acceptable
+    residual or comes out non-ascending. Both are
     exercised by the test suite (the threshold is monkeypatched, the same
     way `_DENSE_SOLVE_MAX` is). The dense path is not vestigial: `dim` can
     legitimately be 1 (a D=1 spin-1/2 chain), where `eigsh` cannot be used
@@ -1273,8 +1458,15 @@ def spectral_weights(env, k, M, n=1, return_total=False):
     Two things to know before reading an individual weight:
 
     - **Within a degenerate multiplet the split between branches is
-      basis-arbitrary**, since `numpy.linalg.eigh`/ARPACK pick an
-      arbitrary basis of a degenerate eigenspace. Only the
+      basis-arbitrary**, since both solvers return an arbitrary
+      orthonormal basis of a degenerate eigenspace (`numpy.linalg.eigh`
+      on the dense path; on the iterative path one member per deflated
+      Lanczos run, each from its own generic start). Both return every
+      member, i.e. the n lowest values with multiplicity, which is what
+      makes the multiplet sum below formable at all: before
+      `_lowest_iterative_deflated` existed, a single ARPACK call above
+      `_DENSE_EIG_MAX` could return one member of a degenerate pair and
+      the next level in place of the other. Only the
       multiplet-summed weight is physical. This is not a corner case on a
       symmetric model: on the AKLT chain at D=2 the eight branches split
       into an SU(2) triplet and a quintuplet at every momentum, and the

@@ -30,6 +30,7 @@ MUB = 5.7883818066e-5 # eV/T
 # same 3-site chain as examples/kondo_third_order_dmrg_VS_ED (ITensor
 # v3's two-site DMRG/TDVP needs at least 3 sites)
 sc = spinchain.Spin_Chain(["1/2", "1/2", "1/2"], itensor_version=3)
+sc.maxm, sc.nsweeps = 30, 15 # pin the sweep schedule (the library defaults)
 h = G*MUB*10.0*sc.Sz[0]
 for i in range(2):
     h = h + 0.01*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
@@ -38,7 +39,15 @@ sc.get_gs()
 ks = KondoSpectrum(sc, site=0, T=0.0)
 
 eVs = np.linspace(-2e-3, 2e-3, 41)
-es = np.linspace(-3e-3, 3e-3, 800) # must cover the ~1.16meV Zeeman gap
+# The potential term needs es to reach past the TOP of the impurity's S_k
+# spectrum, not just past the eVs sweep: its kernel F0(eV-w)-F0(eV+w)
+# falls off only as ~2eV/w inside the band, so every line contributes at
+# every bias (unlike the second-order term, where only transitions below
+# max|eV| enter). Here the lowest transition is at 0.77 meV, but lines
+# at 10 to 16 meV carry 0.40 of the total weight S(S+1)=0.75; an es over
+# +-3 meV dropped them, which was 0.0108 of the 0.111 peak (9.7 per
+# cent). +-20 meV covers them with room to spare, at the old spacing.
+es = np.linspace(-20e-3, 20e-3, 5328) # spacing 7.5e-6 = delta/2.7
 Jrho_s, U = 0.05, 0.2
 
 print("Computing the potential-interference term via the excited-state "
@@ -53,10 +62,13 @@ dIdV_dmrg = third_order_potential_dIdV_dc(sc, 0, eVs, Jrho_s, U, T0=1.0,
 
 diff = np.max(np.abs(dIdV_dmrg-dIdV_ed))
 print("max |DMRG - ED| = %.4f (max |ED| = %.4f)"%(diff, np.max(np.abs(dIdV_ed))))
-# qualitative/order-of-magnitude check (KPM delta-broadening error), not
-# a tight precision test -- see test_kondo_spectrum_potentialdc.py for
-# the tight mode="ED" submode="ED" check of this same function
-assert diff < 0.15*np.max(np.abs(dIdV_ed))
+# With es covering the whole S_k spectrum the remainder is KPM
+# broadening, and it sits next to the 0.77 meV line: the largest
+# difference is at eV=-0.80 meV and more than 0.3 meV away from that line
+# the two agree to 5e-5. It shrinks with delta (0.0006 at delta=1e-5).
+# See test_kondo_spectrum_potentialdc.py for the tight mode="ED"
+# submode="ED" check of this same function.
+assert diff < 0.05*np.max(np.abs(dIdV_ed))
 
 import matplotlib.pyplot as plt
 

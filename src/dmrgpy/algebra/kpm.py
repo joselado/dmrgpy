@@ -4,6 +4,7 @@ import scipy.sparse.linalg as lg
 from scipy.sparse import csc_matrix as csc
 import numpy.random as rand
 from scipy.sparse import coo_matrix,csc_matrix,bmat
+import numbers
 import numpy as np
 from scipy.signal import hilbert
 from . import algebra
@@ -438,6 +439,38 @@ def dm_ij_energy(m_in,i=0,j=0,scale=10.,npol=None,ne=500,x=None):
 JACKSON_FWHM_FACTOR = 2.0*np.sqrt(2.0*np.log(2.0))*np.pi # = 7.39786
 
 
+def validate_kpm_n_scale(n_scale):
+    """Check a chain's kpm_n_scale and return it as a plain int.
+
+    kpm_n_scale multiplies the calibrated moment count, and the one rule
+    every route shares is that it is a positive integer (numbers.Integral,
+    numpy integers included, bool excluded). The routes used to disagree:
+    the compiled v2/v3 bindings take an int and raised TypeError on any
+    float, 2.0 included, while "python", mode="ED" and julia_live went
+    through int() here, so 1.5 gave exactly 1x and anything below 1 gave
+    the nmin floor at every delta; and at kpm_n_scale<=0 the C++ copy
+    clamped to 1x (61 moments on a 4-site Heisenberg chain at delta=0.1)
+    where this one gave 16. It is called once where each route reads the
+    attribute off the chain, before any dispatch or ground-state work
+    (kpmdmrg.dynamical_correlator_moments ahead of both session calls,
+    Many_Body_Chain.get_dynamical_correlator's mode="ED" push,
+    mpsjulialive's KPM), and by polynomials_for_broadening itself, which
+    leaves the C++ `n_scale>0 ? n_scale : 1` branch unreachable. Finding 5
+    of docs/audit_2026_09_24_hole_hunt.md."""
+    if isinstance(n_scale,bool) or not isinstance(n_scale,numbers.Integral):
+        raise TypeError(
+            "kpm_n_scale must be a positive integer (it multiplies the "
+            "calibrated number of Chebyshev moments), got %r of type %s. "
+            "A non-integer value used to be rounded down silently on some "
+            "backends and rejected on others."
+            % (n_scale,type(n_scale).__name__))
+    if n_scale<=0:
+        raise ValueError(
+            "kpm_n_scale must be a positive integer (it multiplies the "
+            "calibrated number of Chebyshev moments), got %r." % (n_scale,))
+    return int(n_scale)
+
+
 def polynomials_for_broadening(half_width,delta,n_scale=1,nmin=16):
     """Number of Chebyshev moments whose Jackson-kernel reconstruction has
     FWHM = 2*delta at the centre of the rescaled band, i.e. the same width
@@ -446,8 +479,8 @@ def polynomials_for_broadening(half_width,delta,n_scale=1,nmin=16):
     half_width is the physical half-width of the interval the spectrum was
     rescaled onto ([-1,1] in Chebyshev variables), delta the requested
     broadening, and n_scale a caller-side multiplier (the chain's
-    kpm_n_scale) for asking for a sharper curve than requested at
-    proportionally higher cost.
+    kpm_n_scale, a positive integer, see validate_kpm_n_scale) for asking
+    for a sharper curve than requested at proportionally higher cost.
 
     The floor nmin matters. A delta comparable to the bandwidth itself
     asks for a line too broad for a handful of Chebyshev polynomials to
@@ -459,18 +492,70 @@ def polynomials_for_broadening(half_width,delta,n_scale=1,nmin=16):
     sharper than requested, which a caller can always broaden afterwards,
     instead of unrepresentable.
 
-    The width is exact at the band centre and tightens as sqrt(1-x^2)
-    towards the band edges, which is a property of the kernel and not of
-    this choice: no single moment count gives one width across the whole
-    band. Measured on a single-pole chain, the constant above reproduces
-    the observed FWHM to 4 to 6 per cent at npol of order 10 to 100, the
-    residual being the kernel's own asymptotics in npol."""
+    The calibration holds only if the kernel is handed exactly this many
+    moments, since jackson_kernel takes its N from len(mus): two more
+    narrow a band-centre line by about 2/npol. That is what every DMRG
+    route did until finding 4 of docs/audit_2026_09_24_hole_hunt.md, its
+    moment loop returning npol+2 (npol+1 on the accelerated path at odd
+    npol); kpmdmrg.dynamical_correlator_moments and mpsjulialive's KPM now
+    cut the moments to npol, as the ED route always had them. With
+    exactly npol moments, a numpy-only Jackson reconstruction of a single
+    pole at the band centre gives FWHM/(2*delta) = 0.964 at the npol=16
+    floor, 0.978 at 26, 0.992 at 52, 1.001 at 104, 1.005 at 200 and 1.009
+    at 1000, before the rounding of npol to an integer (at most 0.5/npol
+    either way): within 4 per cent at the floor and within 1 per cent
+    from npol of about 50 upwards, the residual being the kernel's own
+    line shape, which is not exactly the Gaussian the constant assumes.
+
+    Where the calibrated width holds. The width is exact at the band
+    centre and tightens as sqrt(1-x^2) away from it, which is a property
+    of the kernel and not of this choice: no single moment count gives
+    one width across the whole band. For a ground-state correlator the
+    narrowing is the rule rather than the exception. Every route rescales
+    with shift = -(emin+emax)/2 and scale = 1/((emax-emin)*kpm_scale), so
+    on the default, bandwidth-centred window the band centre is the
+    energy E0 + W/2 (W = emax-emin), the ground state sits at
+    x0 = -1/(2*kpm_scale) on every chain (-0.714 at the default
+    kpm_scale=0.7), and an excitation at omega sits at
+    x(omega) = x0 + omega/(kpm_scale*W). As W grows extensively every
+    intensive excitation therefore tends to x0, where the line is
+    sqrt(1-1/(4*kpm_scale^2)) = 0.70 of the requested width; on the
+    ground-state-anchored window (kpm_energy_truncate=True) E0 sits at
+    x = -0.9875 and the factor there is 0.157. Measured on open S=1/2
+    Heisenberg chains, <Sz_i;Sz_i>: the isolated lowest pole comes out at
+    0.755 of 2*delta on 12 sites (mode="ED", predicted 0.748), 0.725 on
+    20 (itensor_version=3 with the moments cut to npol, predicted 0.719)
+    and 0.464 on the anchored window on 12 sites (predicted 0.462);
+    weight-averaged over the spectrum the delivered width is 0.87 to 0.90
+    of the requested one on 8 sites, 0.83 to 0.86 on 12 and 0.78 to 0.80
+    on 20; and the 12-site curve matches the exact Lehmann sum broadened
+    by per-pole Gaussians of FWHM 2*delta*sqrt(1-x_n^2) to 3.2 per cent
+    of its peak, where Gaussians of the requested FWHM 2*delta miss it by
+    26.6 per cent. To get FWHM = 2*delta at a chosen omega, pass
+    delta/sqrt(1-x(omega)^2) instead; that is the only compensation
+    available, since n_scale cannot ask for fewer moments than the
+    calibrated count."""
+    n_scale = validate_kpm_n_scale(n_scale)
     npol = int(round(JACKSON_FWHM_FACTOR*half_width/(2.0*delta)))
-    return max(int(nmin),npol*int(n_scale))
+    return max(int(nmin),npol*n_scale)
 
 
 def dm_vivj_energy(m_in,vi,vj,scale=10.,npol=None,ne=500,x=None):
-  """Return the correlation function"""
+  """Return the correlation function, the Jackson-damped Chebyshev
+  reconstruction of <vj|delta(E-m_in)|vi>, on a grid spanning
+  [-0.95,0.95]*scale or at the energies x if given.
+
+  Its normalization is not the density's: both branches return pi/scale
+  times the physical density (the sibling dm_ij_energy returns pi times
+  it, one factor of scale less), so a caller that wants the density
+  multiplies by scale/pi. Both callers do exactly that,
+  edtk/dynamics.py::dynamical_correlator_kpm with *half/np.pi (the
+  O2-calibrated ED KPM correlator) and edtk/distribution.py::
+  distribution_kpm with *scale/np.pi; the latter divided by pi alone
+  until finding 3 of docs/audit_2026_09_24_hole_hunt.md, so ED's
+  get_distribution integrated to 1/scale. It is left as it is, rather
+  than normalized like dm_ij_energy, because doing so means changing
+  both callers in step."""
   if npol is None: npol = ne
   mus = get_moments_vivj(m_in/scale,vi,vj,n=npol)
   if np.sum(np.abs(mus.imag))>0.001:

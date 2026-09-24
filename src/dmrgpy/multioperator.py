@@ -434,6 +434,16 @@ _dagger_name = {"C":"Cdag","Cdag":"C","A":"Adag","Adag":"A",
                 "Sp":"Sm","S+":"S-","Sm":"Sp","S-":"S+",
                 "Sig":"SigDag","Tau":"TauDag","SigDag":"Sig","TauDag":"Tau"}
 
+# The phase each name's dagger carries on top of the renaming above, so
+# that name^dagger = phase * _dagger_name.get(name,name). Only needed for
+# a name whose adjoint is a multiple of itself rather than another name:
+# ISy is i*Sy, anti-Hermitian, so ISy^dagger = -ISy. Without it ISy was
+# taken as Hermitian and every correlator daggering it (KPM, EX, TD, TDZ)
+# came out exactly minus itself. A name in neither table is self-adjoint,
+# which every other name the site types define is (Sx, Sz, N, F, the
+# projectors, Sx2, ...).
+_dagger_phase = {"ISy":-1.0}
+
 def get_dagger(self,conjugate=True):
     """Return the dagger of a multioperator"""
     # Same accumulation fix as jordan_wigner(): build the flat term list
@@ -441,13 +451,15 @@ def get_dagger(self,conjugate=True):
     outterms = []
     for opi in self.op: # loop over terms
         n = len(opi) # number of terms in the product
-        c = opi[0] # coefficient
-        newterm = [np.conjugate(c)] # initialize
+        c = np.conjugate(opi[0]) # coefficient
+        newterm = [c] # initialize
         for i in range(n-1,0,-1): # reversed: (AB...)^dagger = ...B^dagger A^dagger
             name = opi[i][0] # name
             jj = opi[i][1] # index
             name2 = _dagger_name.get(name,name)
+            if name in _dagger_phase: c = c*_dagger_phase[name]
             newterm.append([name2,jj])
+        newterm[0] = c
         outterms.append(newterm)
     out = MultiOperator(term=False)
     out.op = outterms

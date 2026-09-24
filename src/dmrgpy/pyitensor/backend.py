@@ -177,7 +177,9 @@ def set_pad_bonds(dim):
     It is exact, not an approximation. The padding appends *zero*
     singular values and zero vectors after the truncation has already
     chosen what to keep, so the represented state is unchanged: the extra
-    columns of U and rows of V contract to zero everywhere. It is not
+    columns of U and rows of V contract to zero in the state and in every
+    overlap or expectation value built from it (but see the one-site TDVP
+    paragraph below for an algorithm they are not inert for). It is not
     free, though -- near the chain edges the true bond dimension is
     2, 4, 8, ... and padding those up to `dim` does arithmetic on blocks
     that are known to be zero. On a device that trade is usually worth it
@@ -189,6 +191,34 @@ def set_pad_bonds(dim):
     singular values that survived truncation -- forcing mindim up to
     `dim` instead would divide by ~0 and push every call into the exact-
     SVD fallback, which is the one primitive a GPU is worst at.
+
+    Exact for the state is not the same as exact for every algorithm run
+    on it, and one-site TDVP is where the two part. Its per-site split is
+    a QR (svd.py's qr_split), which is not rank-revealing, so it completes
+    the padded zero directions into live orthonormal basis vectors that
+    the next local evolution then populates: a padded tevol_method=
+    "TDVP_GSE" run was one-site TDVP on the bond-dimension-`dim` manifold,
+    with the Krylov expansion adding nothing at `dim`=maxm, instead of the
+    method it asked for (2026-09-24 audit, finding 16: 0.49 away from the
+    unpadded trajectory in <Sz_0>(t) with tdvp_gse_sweeps=0, 4e-6 at the
+    default 3). So the one-site route is exempted, the way the MPO is (see
+    pad_bonds_suspended): chain.py's quench_tdvp_gse/
+    evolve_and_measure_tdvp_gse strip the padded zeros from the evolved
+    state once at trajectory entry, and Chain.global_subspace_expand and
+    every one-site step run with padding suspended. The padded run then
+    follows the unpadded one, to roundoff without expansion and to ~1e-7
+    with it (the expansion's truncation sees the two runs' different
+    gauges). The price is that the one-site route gets no frozen shapes
+    (it never kept them anyway: qr_split un-padded the edge bonds on the
+    first step), so under jax with set_jit on it traces once per bond
+    dimension it grows through, as an unpadded run does, while the ground
+    state before it and the measurements after it keep their padding.
+    Chain.tdvp_step(num_center=1), which tdz.py
+    drives one step per call, is suspended too but strips nothing, since a
+    strip per step would delete the zero-weight directions the expansion
+    exists to add; a TDZ run with tdvp_gse_sweeps=0 therefore still starts
+    one-site TDVP from the padded state. Two-site TDVP, TEBD, DMRG, KPM
+    and every measurement are unaffected by padding to roundoff, measured.
     """
     global _PAD_BONDS
     _PAD_BONDS = int(dim) if dim else None

@@ -219,10 +219,16 @@ def svd(T, left_inds, cutoff=0.0, maxdim=None, mindim=1, tags="Link"):
     pad_to = bk.pad_bonds()
     if pad_to and keep < pad_to:
         # Freeze this bond at pad_to by appending zero singular values (see
-        # backend.set_pad_bonds). Exact: the appended columns/rows are zero,
-        # so they contribute nothing to any contraction -- they only keep
-        # the shape constant so XLA compiles each kernel once instead of
-        # once per bond dimension.
+        # backend.set_pad_bonds). Exact for the represented STATE: the
+        # appended columns/rows are zero, so they contribute nothing to it,
+        # to an overlap or to an expectation value -- they only keep the
+        # shape constant so XLA compiles each kernel once instead of once
+        # per bond dimension. Not inert for every algorithm, though: a
+        # later split that is not rank-revealing (qr_split, below) turns
+        # them into live orthonormal directions, and one-site TDVP then
+        # populates them, so the one-site route (TDVP_GSE) runs with
+        # padding suspended and its input stripped (chain.py's
+        # _strip_bond_padding; 2026-09-24 audit, finding 16).
         _xp = bk.xp()
         npad = pad_to - keep
         U = _xp.concatenate([U[:, :keep],

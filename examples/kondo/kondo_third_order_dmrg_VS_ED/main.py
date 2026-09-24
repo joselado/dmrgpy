@@ -13,14 +13,13 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # is exercised instead in examples/kondo_potential_term_dmrg_VS_ED).
 #
 # mode="DMRG"'s dynamical-correlator calls use a much coarser `delta`
-# (2e-5) than this feature's test suite (2e-6): the underlying C++ KPM
-# routine picks its own moment count from delta (not from an `n` kwarg,
-# confirmed directly -- `n` is accepted by the Python wrapper but never
-# forwarded to the compiled extension), so a very fine delta makes each
-# correlator call take tens of seconds even for this tiny 3-site chain
-# (confirmed directly: delta=2e-6 took ~40s per call: delta=2e-5 takes
-# ~1s and is still fine enough to resolve this chain's ~1.16meV Zeeman
-# splitting).
+# (2e-5) than this feature's test suite (2e-6): the KPM routine picks its
+# own moment count from delta and the chain's kpm_* attributes (there is
+# no `n` call argument, passing one raises TypeError), so a very fine
+# delta makes each correlator call take tens of seconds even for this
+# tiny 3-site chain (confirmed directly: delta=2e-6 took ~40s per call:
+# delta=2e-5 takes ~1s and is still fine enough to resolve this chain's
+# lowest S_k transition, at 0.77 meV).
 #
 # Gamma0 is also set much larger here (2e-3) than kondospectrumtk's
 # default (5e-6): the third-order Kondo term's t2/tau grid needs spacing
@@ -52,6 +51,7 @@ MUB = 5.7883818066e-5 # eV/T
 # this is the smallest chain this feature's DMRG path can run on
 # (see tests/test_kondo_spectrum_dmrgtwotime.py's _build_chain).
 sc = spinchain.Spin_Chain(["1/2", "1/2", "1/2"], itensor_version=3)
+sc.maxm, sc.nsweeps = 30, 15 # pin the sweep schedule (the library defaults)
 h = G*MUB*10.0*sc.Sz[0]
 for i in range(2):
     h = h + 0.01*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
@@ -59,7 +59,11 @@ sc.set_hamiltonian(h)
 sc.get_gs()
 
 eVs = np.linspace(-2e-3, 2e-3, 41)
-es = np.linspace(-3e-3, 3e-3, 800) # must cover the ~1.16meV Zeeman gap
+# U=0, so only the second-order term reads es, and it needs only the
+# transitions below max|eV|=2 meV: the lowest one is at 0.77 meV, the
+# rest sit at 10 to 16 meV. A U!=0 run would need es past the top of that
+# spectrum instead, see examples/kondo/kondo_potential_term_dmrg_VS_ED.
+es = np.linspace(-3e-3, 3e-3, 800)
 Jrho_s = 0.05
 omega0, Gamma0 = 2e-3, 2e-3 # see the module docstring for why Gamma0 is
                              # much larger than kondospectrumtk's own

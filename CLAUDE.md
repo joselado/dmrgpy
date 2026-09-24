@@ -364,7 +364,8 @@ collapses to `Re F` exactly when `A` is provably `B^dagger`, so the
 common case still costs one evolution
 (`timedependent.lehmann_density_from_one_sided`, shared by both
 submodes; `canonical.is_dagger_pair` is the test, and it refuses rather
-than guesses for a name with no known adjoint). Taking `np.real(...)`
+than guesses for a name with no known adjoint, and the second evolution
+is right only when `get_dagger()` knows that adjoint). Taking `np.real(...)`
 instead, the obvious fix, measured *worse* than leaving the transform
 whole on a complex-weight pair, 2.15e-01 against 1.16e-01 on a peak of
 0.2313. Fixed with it: `edtk/timedependent.evolution_DC` read the
@@ -380,12 +381,21 @@ moment count independently. Both now go through
 kernel's own resolution relation so that `delta` is the broadening it is
 everywhere else, FWHM = `2*delta` at the band centre, and the ED route
 adopted the DMRG rescaling so the two share the same `x` at the same
-physical energy; the disagreement is 4 to 7 per cent now. `kpm_n_scale`'s
-default moves from 3 to 1, the base count being the calibrated one. Two
-residuals are documented rather than removed: the width tightens as
-`sqrt(1-x^2)` away from the band centre, and the near-Gaussian Jackson
-line peaks about 1.6x higher than a Lorentzian of equal FWHM and equal
-weight. `get_distribution()`'s own KPM path is deliberately not on the
+physical energy; the disagreement was 4 to 7 per cent after O2, most of
+it the DMRG routes reconstructing from n+2 moments, and since those were
+cut to n (2026-09-24 finding 4) it is 0.07 to 0.2 per cent of the
+resolvent peak on `"python"` (the moment reconstruction's own 10n-grid
+interpolation), with v3's worst of 25 runs at 1.3 per cent, set by the
+run-to-run noise of its band-edge estimate `emax`. `kpm_n_scale`'s
+default moves from 3 to 1, the base count being the calibrated one, and
+it must be a positive integer (validated before dispatch on every route
+since 2026-09-24 finding 5). Two residuals are documented rather than
+removed: the width tightens as `sqrt(1-x^2)` away from the band centre,
+which for a ground-state correlator is the typical case, E0 sitting at
+x0 = -1/(2*kpm_scale), so an intensive excitation of a long chain gets
+0.70 of the requested width; and the near-Gaussian Jackson line peaks
+about 1.5x higher than a Lorentzian of equal FWHM and equal weight (the
+1.6x once quoted here included that off-centre narrowing). `get_distribution()`'s own KPM path is deliberately not on the
 calibration, and is the one place `delta` still means only a polynomial
 count.
 
@@ -393,23 +403,50 @@ count.
 hunt, five lenses (`kpm-calibration`, `td-convention`, `canonical-form`,
 `infinite-chain`, `recent-misc`) scoped to the eleven commits after the
 2026-09 fixes, `1c2606d..765b537`, on a baseline of 832 passing tests. It
-has 16 confirmed findings, none refuted and every one narrowed by its
-reviewer, and **all 16 are open**: nothing has been fixed yet, so the
-record's "The findings at a glance" table is the task list, with each
-entry's scripts and outputs inline because the scratch folders they ran in
-are gone. Several of them contradict statements elsewhere in this file and
-in the 2026-09 record, and the record's "Statements this hunt overturns"
-section lists which. Until they are fixed, treat these as known: the O1
-paragraph's "TDZ keeps 3.31e-02 of its own, its contour" is an FFT-grid
-interpolation error shared with TD at `predict=False` (the contour is
-6.2e-07 of it); every DMRG KPM route reconstructs from n+2 moments where
-the calibration and ED use n, so O2's residual ED-DMRG disagreement is
-mostly that; the "1.6x higher than a Lorentzian of equal FWHM" above is
-about 1.5x at really equal FWHM; the canonical form's Hermiticity proof is
-wrong for a term mixing `A`/`Adag` with `C`/`Cdag` (and the obvious fix,
-parity `None` for `A`, breaks the boson proofs); and the `"python"`
-excitation solver *is* exposed to losing a degenerate copy at n>=2 once
-dim > 256, contrary to the D=2 measurement that said otherwise.
+found 16 holes, none refuted and every one narrowed by its reviewer, and
+all 16 are fixed (finding 6 in the documentation, the rest in code), in
+five file-disjoint clusters whose regressions live in
+`tests/test_audit_2026_09_24_<cluster>.py` for `operators`, `kpm`,
+`realtime`, `kondo` and `pyitensor`; each finding's `**Status**` line says
+what changed and which test pins it, and the record carries every repro
+inline because the scratch folders it ran in are gone. Seven or eight of
+the sixteen came in with `765b537`, the commit that closed the previous
+hunt's open items. Several fixes changed numbers rather than behaviour,
+so results from before them are not comparable where they apply:
+every DMRG KPM spectrum on every backend, by roughly 2/n onto ED's, since
+the routes now reconstruct from exactly the calibrated n moments rather
+than n+2 (finding 4; 7.4 per cent at a band-centre pole at delta=0.2 on 4
+sites, 0.5 per cent on a 20-site chain); `get_distribution(mode="ED")`, by
+exactly the factor `scale` (10x at the default), plus its imaginary part,
+which was a copy of the real one (finding 3); `submode="TDZ"` at its
+defaults and `submode="TD"` at `predict=False`, by up to 14 to 19 per cent
+of the peak, and TD's default by about 1e-3 of it, all towards exact,
+since the Fourier sum is now evaluated at each requested frequency rather
+than interpolated off an FFT grid of spacing 1.05*delta (finding 7;
+`sxt_to_skomega` and the two short-window direct callers stay on the FFT
+stage); `mode="ED"` `submode="TD"` on a degenerate ground state, which
+built its two halves on two different random states (finding 8);
+correlators with `ISy` in the first operator, which were exactly minus
+the right ones on KPM, EX, TD and TDZ (finding 2); anything the canonical
+form proved about a term mixing `A`/`Adag` with `C`/`Cdag` (finding 1);
+the Kondo potential term on a non-uniform `es` (finding 13);
+`itensor_version="python"` `excitation_energies`/`spectral_weights`/
+`dynamical_structure_factor` at n>=2 on a cell with a degenerate
+H_eff(k) level and dim > 256, which dropped one copy of the level
+(finding 15); and every padded `TDVP_GSE` run, which now follows the
+unpadded one (finding 16). Behaviour changes without number changes: TDZ
+and `get_kondo_spectrum(mode="ED")` raise on unknown keywords, a
+non-integer or non-positive `kpm_n_scale` raises everywhere (2.0
+included), the lower-level correlator route honours `i=`/`j=` for TD and
+TDZ, and `get_kondo_spectrum(mode="DMRG")` takes `n_gs=` for the
+degenerate-manifold average `mode="ED"` uses. Left open and recorded as
+such: the TDZ run at `tdvp_gse_sweeps=0` under padding (still started from
+the padded state), ROOTN's own dropped `i=`/`j=`, `mode="ED"` TD's
+swallowed keywords, the shared "adjoint for a correlator" helper, the
+`vx_deterministic_start` comment in `mpscpp3/chain_session.h` (a C++ edit,
+left to a pass that rebuilds), and the record's "New leads", notably v3's
+run-to-run `emax` noise, which is now the whole of the ED-versus-v3 KPM
+residual.
 
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
@@ -595,14 +632,23 @@ lives on the chain and not on the operator. Two factors sharing a site
 are reordered only when both are diagonal (`_DIAGONAL`), which is what
 makes the Hubbard `Nup[i]*Ndn[i]` provable while leaving `Sx[i]*Sz[i]`
 alone -- do NOT widen that to a general same-site sort, those two are
-both even and do not commute. So `Many_Body_Chain.
+both even and do not commute. Nor is a term reordered when it names both
+a pre-transform `C`-type name and a bare `A`-type one (`_LOCAL_LADDER`):
+with `C_j = F_0...F_{j-1} A_j`, `A_i` anticommutes with `C_j` for j>i and
+commutes for j<i, so their exchange sign depends on the site order and is
+not a parity (2026-09-24 audit finding 1, where the old even grading
+proved an anti-Hermitian operator Hermitian). Do NOT fix that by giving
+the `A`-type names no parity: they are also the boson ladder operators,
+and the boson and Jordan-Wigner-transformed proofs need them even. So `Many_Body_Chain.
 is_hermitian()` takes the proof when it lands and falls back to its
 random-witness probe otherwise -- do not turn that fallback into a
 rejection. Only the names in `canonical.py`'s `_PARITY` table are
 reordered; anything else (parafermionic `Sig`/`Tau`, which reorders with
 a Z_n phase, or a caller's own name) is left spelled as written, and the
 Hermiticity proof refuses outright when any name is off the table, since
-`get_dagger()` leaves an unrecognized name untouched and such an
+`get_dagger()` leaves an unrecognized name untouched (and carries a
+phase for a name whose adjoint is a multiple of itself, `_dagger_phase`,
+so far only `ISy` -> `-ISy`, finding 2) and such an
 operator would otherwise cancel against its own "dagger". See
 `docs/documentation.md` 4.2a, `tests/test_multioperator_canonical.py`
 and `examples/algebra/operator_canonical_form`.
@@ -1056,7 +1102,15 @@ differs at O(|eV|/omega0) (3.5% at |eV|=omega0/5) and carries a sharp
 band-edge singularity at eps=omega0. On the ED side the third-order
 sums run over thermally occupied initial states only (O(n_occ dim^2),
 not dim^3) and F is tabulated once per FBuilder (0.4 s; it used to be a
-per-point quadrature that took 28 s and 4 GB at 64 states).
+per-point quadrature that took 28 s and 4 GB at 64 states). Since the
+2026-09-24 audit: `mode="ED"` raises `TypeError` on any keyword it does
+not read (a misspelled `Jrho_s` used to remove the Kondo peak silently);
+`mode="DMRG"`'s T=0 is the single converged state unless `n_gs=` asks for
+the equal-weight manifold average, which needs both `set_gs` and
+`session.set_wavefunction`, since KPM reads the session's own `wf0`; and
+the potential term needs `es` past the top of the S_k spectrum, not just
+past max|eV| as the second-order term does, and uses trapezoid weights,
+so a non-uniform `es` is fine.
 
 ### Julia vs C++ backend
 

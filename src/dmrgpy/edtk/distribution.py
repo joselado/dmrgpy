@@ -2,7 +2,6 @@ import scipy.sparse.linalg as slg
 from ..algebra import kpm
 from ..algebra import algebra
 import numpy as np
-from scipy.interpolate import interp1d
 from .edchain import State
 
 def get_distribution(self,X=None,wf=None,method="KPM",**kwargs):
@@ -18,7 +17,9 @@ def get_distribution(self,X=None,wf=None,method="KPM",**kwargs):
 
 def distribution_kpm(wf0,X=None,scale=10.0,
         delta=1e-1,xs=None):
-    """Compute <0| \delta (m-M) |0> using the KPM"""
+    """Compute P(x) = <0|delta(x-X)|0> using the KPM, a density in x that
+    integrates to <0|0> = 1 on a normalized state, returned on its own
+    grid or at the points xs if given"""
     if X is None: raise
     M = X # assign
     vi = wf0 # first wavefunction
@@ -28,13 +29,18 @@ def distribution_kpm(wf0,X=None,scale=10.0,
         emin = slg.eigsh(-M,k=1,ncv=20,which="LA")[0] # upper energy
         scale = np.max(np.abs([emin,emax]))*2. # compute the scale
     n = int(scale/delta) # number of polynomials
+    # dm_vivj_energy returns pi/scale times the density (see its
+    # docstring), so the normalization back is scale/pi, not 1/pi alone:
+    # dividing by pi only used to leave a distribution integrating to
+    # exactly 1/scale (0.1 at the default scale=10). With xs given it is
+    # evaluated there directly, through dm_vivj_energy's own x= branch,
+    # rather than interpolated off its grid; the interpolation this
+    # replaces read .real twice, so the imaginary part of the result was
+    # a copy of the real part. Finding 3 of
+    # docs/audit_2026_09_24_hole_hunt.md.
     (xs2,ys2) = kpm.dm_vivj_energy(M,vi,vj,scale=scale,
-                                npol=n*4,ne=n*10)
-    ys2 /= np.pi # normalization from the KPM
-    if xs is None: return xs2,ys2
-    ys = interp1d(xs2,ys2.real,fill_value=0.,bounds_error=False)(xs) 
-    ys = ys+ 1j*interp1d(xs2,ys2.real,fill_value=0.,bounds_error=False)(xs) 
-    return xs,ys # return correlator
+                                npol=n*4,ne=n*10,x=xs)
+    return xs2,ys2*scale/np.pi # return correlator
 
 
 def distribution_inversion(wf0,X=None,scale=10.0,

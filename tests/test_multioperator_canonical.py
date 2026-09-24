@@ -153,6 +153,26 @@ def test_an_unknown_name_is_never_reordered_or_proven():
     assert (("Sig",1),("SigDag",0)) in terms
 
 
+def test_a_term_mixing_c_and_a_names_is_left_as_written():
+    """C_j = F_0...F_{j-1} A_j, so A_i anticommutes with C_j for j>i and
+    commutes with it for j<i: not a grading, so a term naming both is
+    never reordered, while a term in either representation alone still
+    is (the A-type names are even among themselves, and are the boson
+    ladder operators on a bosonic chain)."""
+    fc = fermionchain.Fermionic_Chain(4)
+    term = (fc.Cdag[3]*fc.Adag[0]).simplify().op[0]
+    assert [(o[0],o[1]) for o in term[1:]]==[("Cdag",3),("Adag",0)]
+    assert term[0]==pytest.approx(1.0)
+    # so an exactly zero mixed commutator is not proven zero, the safe way
+    assert not (fc.C[0]*fc.A[1]-fc.A[1]*fc.C[0]).is_zero()
+    term = (fc.Adag[3]*fc.A[0]).simplify().op[0]
+    assert [(o[0],o[1]) for o in term[1:]]==[("A",0),("Adag",3)]
+    assert term[0]==pytest.approx(1.0)
+    term = (fc.Cdag[3]*fc.C[0]).simplify().op[0]
+    assert [(o[0],o[1]) for o in term[1:]]==[("C",0),("Cdag",3)]
+    assert term[0]==pytest.approx(-1.0)
+
+
 def test_identities_and_zero_terms_are_dropped():
     """The "h = 0; h = h + term" idiom leaves a 0*identity placeholder,
     and an explicit identity factor multiplies nothing."""

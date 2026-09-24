@@ -45,18 +45,31 @@ line comes out at FWHM = 2*delta, the width the resolvent submodes give.
 Two caveats, both measured rather than asserted. The width is exact at
 the centre of the rescaled band and tightens as sqrt(1-x^2) towards its
 edges, which is the kernel's own resolution profile and not a choice: no
-single moment count gives one width across a whole band. And the line is
+single moment count gives one width across a whole band. For a
+ground-state correlator that narrowing is the rule rather than the
+exception, since E0 sits at x0 = -1/(2*kpm_scale) on every chain and the
+band centre at E0 + W/2, so as W grows every intensive excitation tends to
+0.70 of the requested width (0.157 at E0 on the kpm_energy_truncate
+window); polynomials_for_broadening's docstring has the measured numbers
+and the compensation, delta/sqrt(1-x(omega)^2). And the line is
 Jackson-Gaussian, not Lorentzian, so at equal FWHM and equal integrated
-weight its peak stands about 1.6x higher than the resolvent submodes' --
-measured 0.315 against 0.195 on a 6-site Heisenberg chain at delta=0.2,
-with both integrating to the same 0.250000. What it is NOT any more is a
+weight its peak stands about 1.5x higher than the resolvent submodes'
+(1.514, the kernel's own ratio on one pole at x=0); the 0.315 against
+0.195 once quoted here, on a 6-site Heisenberg chain at delta=0.2, is
+1.61 because its dominant pole sits at x=-0.527, where the line is
+already 0.850 of 2*delta. What it is NOT any more is a
 different curve on the two solvers: mode="ED" and mode="DMRG" used to
 pick both the rescaling window and the moment count independently
 (int(2*scale/delta) against round((emax-emin)/delta)*kpm_n_scale, on
 windows differing by a factor of three), and disagreed pointwise by
 4.4e-01 against a resolvent peak of 0.355 on a 4-site chain at
-delta=0.15. They now share both and agree to 1.3e-02 there. That was
-open item O2 of the 2026-09 audit. get_distribution()'s own KPM path
+delta=0.15. They now share both, and since the DMRG routes were cut to
+the calibrated n moments (they reconstructed from n+2; 2026-09-24 audit,
+finding 4) they agree to 2.6e-04 there on itensor_version="python",
+which is the linear interpolation of the moment reconstruction's own
+10n-point grid onto es; on itensor_version=3 the median is the same and
+the worst runs reach about 8e-3, set by the run-to-run noise of its
+band-edge estimate emax. That was open item O2 of the 2026-09 audit. get_distribution()'s own KPM path
 (kpmdmrg.general_kpm_moments) is deliberately NOT on this calibration:
 it expands an arbitrary operator rather than the Hamiltonian, and its
 delta still only sets a polynomial count.
@@ -66,10 +79,10 @@ brought them onto it rather than the other way round: submode="ED",
 submode="ROOTN" and mode="DMRG" submode="CVM" (finding #5), plus
 submode="CVM_explicit", which returned exactly 2x C_AB on every backend
 and additionally destroyed the sign of a negative-weight correlator with
-an np.abs() (finding #11). submode="TD"/"TDZ" are the routes still off
-this convention -- they return the complex one-sided Fourier transform,
-whose REAL part is C_AB when Im M_n == 0 -- recorded as open item O1 in
-docs/audit_2026_09_hole_hunt.md rather than changed in that pass. The
+an np.abs() (finding #11). submode="TD"/"TDZ", which returned the
+complex one-sided Fourier transform, were brought onto it afterwards as
+open item O1 of docs/audit_2026_09_hole_hunt.md; see the real-time
+section below. The
 test file above pins ED/{ED,INV,CVM,ROOTN} and DMRG/{CVM,ROOTN}
 pointwise against an exact Lehmann sum, and ED/{ED,INV,CVM,ROOTN,KPM}
 plus DMRG/KPM against the sum rule.
@@ -86,10 +99,12 @@ by the statement above. Its CVM/TDZ/EX/maxent go through the very same
 shared modules as every other backend (cvm.py, tdz.py, dcex.py,
 distribution.py -- so they inherit whatever those return, the 2026-09
 fixes included), but its KPM is its own implementation
-(mpsjulialive/dynamics.py::_kpm_dynamical_correlator plus kpm.jl), which
-that audit did not exercise: it mirrors kpmdmrg.py and shares the same
-moment reconstruction, but nothing here has measured it, so this
-docstring makes no claim about it.
+(mpsjulialive/dynamics.py::_kpm_dynamical_correlator plus kpm.jl). Its
+moment count is the shared one and, since the 2026-09-24 audit's finding
+4, cut to exactly n like every other DMRG route; on the band-centre pole
+of two decoupled dimers it matches mode="ED" to better than 1e-6 at the
+reconstruction's own grid points (tests/test_audit_2026_09_24_kpm.py).
+Nothing wider than that has been measured on it.
 
 THE TWO REAL-TIME ROUTES: submode="TD" and submode="TDZ"
 --------------------------------------------------------
@@ -111,25 +126,34 @@ A is provably B^dagger, which is every example in the documentation and
 costs one evolution rather than two. See
 timedependent.lehmann_density_from_one_sided, which both submodes share;
 canonical.is_dagger_pair is the test, and it refuses rather than guesses
-for a name with no known adjoint, which costs a second evolution and
-never a wrong number.
+for a name with no known adjoint, which costs a second evolution; that
+second evolution is built from get_dagger(), so it is right exactly when
+get_dagger() knows the name's adjoint (it did not for ISy until the
+2026-09-24 audit's finding 2 gave get_dagger() a phase).
 
 Measured against an exact Lehmann sum built by dense diagonalization
 outside dmrgpy, on the 2026-09 audit's own seeded 4-site complex-hopping
 chain (A = Cdag_0, B = C_2, max|Im M_n| = 0.271, exact peak 0.2313,
 delta=0.4, dt=0.1), max|y - exact|:
 
-    submode="TD",  mode="DMRG"   1.16e-01  ->  2.57e-04
-    submode="TD",  mode="ED"     2.76e-01  ->  2.57e-04
-    submode="TDZ", mode="DMRG"   1.13e-01  ->  3.31e-02
+    submode="TD",  mode="DMRG"   1.16e-01  ->  2.57e-04  ->  3.2e-05
+    submode="TD",  mode="ED"     2.76e-01  ->  2.57e-04  ->  3.1e-05
+    submode="TDZ", mode="DMRG"   1.13e-01  ->  3.31e-02  ->  5.4e-04
+
+the last column being after the 2026-09-24 audit's finding 7, below,
 
 and on a 4-site Heisenberg chain with the Hermitian pair A = B = Sz_0
 (peak 0.1869, delta=0.3) the imaginary part goes from 1.11e-01, 60% of
 that peak, to exactly zero, with max|y - exact| going 1.11e-01 ->
-2.82e-04. TDZ keeps a residual of its own, 3.31e-02 here: that is its
-complex-time contour and its Taylor-in-alpha0 reconstruction, the same
-error the audit measured as 1.8e-2 on a Hermitian pair, and it is not a
-convention question. The mode="ED" row moved further than the others
+2.82e-04. The 3.31e-02 TDZ kept after O1 was not its contour, as this
+docstring used to say, but the frequency stage's linear interpolation of
+an FFT grid of spacing 2*pi/(nt*dt) = 1.05*delta, shared with TD at
+predict=False; since the damped sum is evaluated at each requested
+frequency (2026-09-24 audit, finding 7) TDZ and TD at predict=False sit
+at the 5.4e-04 finite-window floor, and the contour's own share,
+max|y_TDZ - y_TD(predict=False)|, is about 1e-06. sxt_to_skomega stays on
+the FFT stage, since at its defaults delta*T = 1 and the direct
+evaluation there is unmeasured. The mode="ED" row moved further than the others
 because that route additionally read the operator pair in the opposite
 order, so the two solvers computed the correlator of different pairs
 under one submode name, invisible whenever A and B are the same

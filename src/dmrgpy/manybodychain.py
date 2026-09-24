@@ -230,7 +230,12 @@ class Many_Body_Chain():
       # the resolvent submodes give for the same delta. So 1 asks for the
       # broadening you asked for and larger values buy a sharper curve at
       # proportionally higher cost. It defaulted to 3 while the base count
-      # was the uncalibrated round((emax-emin)/delta).
+      # was the uncalibrated round((emax-emin)/delta). It must be a
+      # positive integer, checked on every route before dispatch
+      # (algebra/kpm.py::validate_kpm_n_scale): 1.5, 0.5, 0 or True
+      # raise, where some backends used to round them down silently. It
+      # cannot ask for fewer moments than the calibration, so a broader
+      # line than delta gives is asked for with a larger delta.
       self.kpm_n_scale = 1 # multiplier on the calibrated polynomial count
       self.gs_from_file = False # start from a random wavefunction
       self.excited_from_file = False # read excited states
@@ -962,6 +967,15 @@ class Many_Body_Chain():
       if mode=="DMRG":
           return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED":
+          # kpm_n_scale is validated before it crosses, and only for the
+          # submode that reads it (KPM, the ED default), the same place
+          # kpmdmrg.dynamical_correlator_moments checks it on the DMRG
+          # side: a non-integer used to be rounded down silently here
+          # while v2/v3 rejected it (finding 5 of
+          # docs/audit_2026_09_24_hole_hunt.md)
+          if kwargs.get("submode","KPM")=="KPM":
+              from .algebra.kpm import validate_kpm_n_scale
+              validate_kpm_n_scale(self.kpm_n_scale)
           edobj = self.get_ED_obj()
           # The KPM route reads the rescaling window and the moment-count
           # multiplier off the chain, and an EDchain keeps no reference

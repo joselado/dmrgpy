@@ -338,18 +338,20 @@ TD_DT = 0.1
 
 
 @pytest.mark.parametrize("mode,submode,tol", [
-    ("DMRG", "TD", 1e-3),    # was 1.16e-01
-    ("ED", "TD", 1e-3),      # was 2.76e-01, see the pair-order test below
-    ("DMRG", "TDZ", 6e-2),   # was 1.13e-01; 3.31e-02 is the contour's own
+    ("DMRG", "TD", 1e-4),    # was 1.16e-01, then 2.57e-04, now 3.2e-05
+    ("ED", "TD", 1e-4),      # was 2.76e-01, see the pair-order test below
+    ("DMRG", "TDZ", 1e-3),   # was 1.13e-01, then 3.31e-02 (the FFT grid,
+                             # 2026-09-24 audit finding 7), now 5.4e-04
 ])
 def test_real_time_submodes_return_the_complex_lehmann_density(mode, submode,
                                                                tol):
     """Pointwise against the same exact Lehmann sum every other submode
-    is held to. The TDZ bound is looser on purpose: its complex-time
-    contour plus Taylor-in-alpha0 reconstruction carries an error of its
-    own, 3.31e-02 here against an exact peak of 0.2313, which is not a
-    convention question and which the audit measured as 1.8e-2 on a
-    Hermitian pair. What all three rows pin is that the returned array is
+    is held to. The TDZ bound is looser because TDZ runs at predict=False,
+    so it sits at the 5.4e-04 finite-window floor it shares with TD at
+    predict=False, against an exact peak of 0.2313; the 3.31e-02 once
+    recorded here as its contour's own error was the FFT grid of the
+    frequency stage (2026-09-24 audit, finding 7), and the contour itself
+    is about 1e-06. What all three rows pin is that the returned array is
     the density and not the one-sided transform."""
     fc = complex_hopping_chain()
     A, B = fc.Cdag[0], fc.C[2]
@@ -497,7 +499,12 @@ def test_ed_and_dmrg_kpm_agree_pointwise():
     this delta: max|ED-DMRG| = 4.4e-01 against a resolvent peak of
     0.3553, i.e. the disagreement was larger than the correlator. Both
     satisfied the sum rule throughout, which is why only a pointwise
-    comparison catches it."""
+    comparison catches it. Since the DMRG routes were cut to the
+    calibrated n moments (2026-09-24 audit, finding 4) the residual is
+    7.1e-4 of the peak at the median over 25 runs on itensor_version=3;
+    its tail, up to 1.27e-2, is v3's band-edge estimate emax landing up
+    to 2e-2 below the true E_max, which is why the bound is 3 per cent
+    and not tighter."""
     sc = staggered_heisenberg(n=4)
     name = [sc.Sz[0], sc.Sz[0]]
     es, delta = np.linspace(0.01, 5.0, 200), 0.15
@@ -506,4 +513,4 @@ def test_ed_and_dmrg_kpm_agree_pointwise():
     _x, ydm = sc.get_dynamical_correlator(mode="DMRG", submode="KPM",
                                           name=name, es=es, delta=delta)
     yed, ydm = np.real(yed), np.real(ydm)
-    assert np.max(np.abs(yed - ydm)) < 0.1 * np.max(np.abs(yed))
+    assert np.max(np.abs(yed - ydm)) < 0.03 * np.max(np.abs(yed))

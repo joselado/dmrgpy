@@ -22,6 +22,26 @@ also used by `tests/test_dynamical_correlator.py`
 | `gaussian` + predict | 0.207 | 0.6564 |
 | `parzen` + predict | 0.173 | 0.6564 |
 
+> **Status note (2026-09-24).** The FWHM column above was measured on the
+> frequency stage as it then was, which evaluated the damped transform on
+> an FFT grid of spacing `2*pi/(nt*dt)` and interpolated linearly onto
+> `es`, and at this window (`delta*T = damping_periods = 6`) most of the
+> narrowing it credits to prediction was that grid, which prediction's
+> tenfold longer series made ten times finer. Since the 2026-09-24 audit
+> (`docs/audit_2026_09_24_hole_hunt.md`, finding 7) `"TD"` and `"TDZ"`
+> evaluate the damped sum at each requested frequency, and re-measured on
+> the same chain at `delta=0.05` the line comes out at the exact width
+> with or without prediction (FWHM 0.0975 on a 0.0025 grid, as the exact
+> density gives), so what prediction buys at the default window is
+> accuracy, `max|y - exact|` going from 2.55e-03 to 3.3e-06 by carrying
+> the series past the `e^-6` cut. Where the window is short enough that
+> truncation sets the width it still narrows the line, 0.2125 to 0.0975
+> at `nt=200` (`delta*T=1`) and 0.3875 to 0.0975 at `nt=100`, which is
+> where `tests/test_dynamical_correlator.py::test_td_linear_prediction_sharpens_peak`
+> now runs. The default combination is unchanged, and `sxt_to_skomega`
+> stays on the FFT stage, since at its defaults `delta*T=1` and the
+> direct evaluation is unmeasured there.
+
 `predict=True` alone (any damping choice) fixes most of the peak-position
 error (`0.6564` vs the exact `0.6588`, all three tied, vs `0.6810` for
 the old undamped-window default). For FWHM, `exp`+predict and

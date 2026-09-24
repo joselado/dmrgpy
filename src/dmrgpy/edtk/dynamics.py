@@ -90,8 +90,11 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
       return dynamical_correlator_rootn(h,self.e0,wf0,A,B,**kwargs)
     elif submode=="TD":
       from .. import timedependent
+      # wf0 forwarded, so that both halves of a pair that takes two
+      # evolutions are measured in the same state, and in the one every
+      # other submode here uses (edtk/timedependent.evolution_DC)
       return timedependent.dynamical_correlator(self,mode="ED",
-              name=name,**kwargs)
+              name=name,wf0=wf0,**kwargs)
     elif submode=="SECTOR":
         # Named explicitly rather than left to the generic message below,
         # because the two ways of arriving here look nothing alike to the

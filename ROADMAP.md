@@ -382,14 +382,17 @@ model-specific exception:
    test rejects. `vx_lanczos_lowest` therefore runs one deflated Lanczos
    per eigenvalue, each from its own generic start vector, and
    `tests/test_vumps_excitations_v3.py` pins the pair of solvers against
-   each other on exactly that model. The `"python"` side, which asks
-   ARPACK for all `n` pairs at once from one constant start vector, looks
-   exposed to the same thing and is not: measured on that same cell at
-   `D=2`, its iterative path returns both copies of every degenerate pair
-   and agrees with its own dense path to 3.6e-15, ARPACK's restarts
-   recovering the direction a single Krylov space cannot hold. So the
-   deflation is what this backend needs to reach the behaviour the other
-   one already has, not a fix owed to both.
+   each other on exactly that model. The `"python"` side, which asked
+   ARPACK for all `n` pairs at once from one constant start vector, was
+   recorded here as not exposed, on a measurement at `D=2` (dimension
+   12) that could not discriminate, since there the Krylov basis is the
+   whole space. It was exposed above its dense threshold: on the same
+   cell at `maxm=10` (dimension 300) the single call was wrong in 7 of 16
+   calls over four momenta and `n=1` to 4, dropping one copy of a
+   degenerate level. Since the 2026-09-24 audit
+   (`docs/audit_2026_09_24_hole_hunt.md`, finding 15) it runs one deflated
+   Lanczos per value for `n>=2`, a port of `vx_lanczos_lowest`, and is 0
+   of 16 wrong there, so the deflation was a fix owed to both backends.
    See `docs/idmrg_improvement_plan.md`, which also ranks what else is
    worth doing on infinite chains.
 

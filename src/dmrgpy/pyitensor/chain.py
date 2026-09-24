@@ -36,8 +36,48 @@ from .tebd import TEBDEvolver as _TEBDEvolver
 from .gse import global_subspace_expand as _global_subspace_expand_fn
 from .kpm_energy_truncation import energy_truncate as _kpm_energy_truncate
 from .tensor import ITensor, commonIndex, contract_many, dag, delta, noPrime, prime, swapPrime
+from . import backend as _bk
 
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
+
+
+def _strip_bond_padding(psi):
+    """Remove the zero directions `backend.set_pad_bonds` appended to psi's
+    bonds, losslessly, and leave psi right-canonical with its center at
+    site 1 (what one-site TDVP's first half-sweep wants). A no-op, psi
+    untouched, whenever padding is off. Mutates psi's own tensor list, so
+    the caller hands it a chain it owns.
+
+    Why the one-site route needs this and the two-site one does not: a
+    padded bond is exact for the STATE (the appended singular values are
+    zero), but one-site TDVP splits every site with `qr_split`, and QR is
+    not rank-revealing, so it completes the padded zero directions into
+    live orthonormal basis vectors that the next local evolution then
+    populates. The run is then one-site TDVP on the bond-dimension-K
+    manifold instead of the Krylov expansion it asked for, and at K=maxm
+    `gse._gse_bond_step` sees no room left to expand into (2026-09-24
+    audit, finding 16). An SVD sweep with padding suspended drops exactly
+    those zero singular values (`position()` is lossless at its default
+    cutoff=0) and nothing else.
+
+    Called once, at trajectory entry, never per step: tdz.py advances one
+    step per `Chain.tdvp_step` call and carries the wavefunction between
+    calls, and a per-call strip there would be harmless only until a GSE
+    call had added zero-weight directions of its own, which a strip would
+    then delete."""
+    if not _bk.pad_bonds():
+        return psi
+    n = psi.length()
+    if n < 2:
+        return psi
+    with _bk.pad_bonds_suspended():
+        if psi.center is None:
+            # _shift_left's SVD is exact from any gauge, so the far end is
+            # as good a starting point as any
+            psi.center = n
+        psi.position(n)
+        psi.position(1)
+    return psi
 
 
 def _mps_arrays_lpr(psi):
@@ -794,7 +834,18 @@ class Chain:
         Chain::tdvp_step(H, psi, dt, ...)) is the REVERSE of the
         module-level tdvp.py::tdvp_step(psi, H, dt, ...) it calls below --
         any new call site added here should double check which of the two
-        orderings it means to match."""
+        orderings it means to match.
+
+        num_center=1 runs with `backend.set_pad_bonds` suspended, as the
+        whole one-site route does (see `_strip_bond_padding`). The padded
+        zeros a caller's state may still carry are NOT stripped here: this
+        is one step of a trajectory the caller drives, so a strip here
+        would run on every step and delete the zero-weight directions a
+        preceding global_subspace_expand() call exists to add."""
+        if num_center == 1:
+            with _bk.pad_bonds_suspended():
+                return _tdvp_step_fn(wf.copy(), H, dt, cutoff=self.cutoff,
+                        maxdim=self.maxm, niter=50, num_center=num_center)
         return _tdvp_step_fn(wf.copy(), H, dt, cutoff=self.cutoff,
                 maxdim=self.maxm, niter=50, num_center=num_center)
 
@@ -807,10 +858,28 @@ class Chain:
         itself is always hard-capped at self.maxm (matching
         Chain::global_subspace_expand()'s own "MaxDim",maxm_ on the
         v3/mpscpp3 side -- see gse.py's own comment for why this is
-        needed regardless of maxdim)."""
-        return _global_subspace_expand_fn(H, phi, krylov_order, cutoff,
-                maxdim=(maxdim if maxdim > 0 else None),
-                bond_maxdim=self.maxm)
+        needed regardless of maxdim).
+
+        Runs with `backend.set_pad_bonds` suspended, the way the MPO is
+        exempted from it: padded, every bond already sits at K, so at the
+        recommended K=maxm the expansion found no room to add any
+        direction at any bond (2026-09-24 audit, finding 16). Suspended,
+        the expansion's own lossless SVDs (its position(n) and the split
+        at every bond) drop the padded zeros, so it sees, and returns, the
+        true bond dimensions."""
+        with _bk.pad_bonds_suspended():
+            return _global_subspace_expand_fn(H, phi, krylov_order, cutoff,
+                    maxdim=(maxdim if maxdim > 0 else None),
+                    bond_maxdim=self.maxm)
+
+    def _tdvp_onesite_step(self, psi, H, dt):
+        """One one-site TDVP step (mutating psi, as _tdvp_step_fn does)
+        with `backend.set_pad_bonds` suspended -- the per-step half of
+        quench_tdvp_gse()/evolve_and_measure_tdvp_gse()'s exemption from
+        padding, see `_strip_bond_padding` for the other half."""
+        with _bk.pad_bonds_suspended():
+            return _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm,
+                    niter=50, num_center=1)
 
     def evolve_taylor_step(self, H, wf, z):
         """Applies one Taylor-expanded exp(z*H) step (_evoloperator()
@@ -948,7 +1017,14 @@ class Chain:
         measurement, but each per-step evolution is one-site TDVP
         (num_center=1) preceded by a global_subspace_expand() call for
         the first gse_sweeps steps -- mirrors
-        Chain::quench_tdvp_gse()/mpscpp3/chain_session.h."""
+        Chain::quench_tdvp_gse()/mpscpp3/chain_session.h.
+
+        Exempt from `backend.set_pad_bonds`, like the MPO: the evolved
+        state has its padded zeros stripped once, here at trajectory entry
+        (`_strip_bond_padding`), and every expansion and one-site step
+        runs with padding suspended, so a padded run follows the unpadded
+        trajectory (2026-09-24 audit, finding 16). psi2, the bra, keeps
+        its padding, which is exact for an overlap."""
         if self.wf0 is None:
             self.gs_energy()
         ampo_h = self._ampo(terms_h)
@@ -960,6 +1036,7 @@ class Chain:
         A2 = self._mpo(terms_j)
         psi1 = self._apply_mpo(A1, self.wf0)
         psi2 = self._apply_mpo(A2, self.wf0)
+        psi1 = _strip_bond_padding(psi1)
         norm0 = np.sqrt(inner(psi1, psi1))
         correlator = []
         for it in range(nt):
@@ -969,8 +1046,7 @@ class Chain:
             correlator.append(inner(psi2, psi1))
             if it < gse_sweeps:
                 psi1 = self.global_subspace_expand(Hshift, psi1, krylov_order, gse_cutoff)
-            psi1 = _tdvp_step_fn(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm,
-                    niter=50, num_center=1)
+            psi1 = self._tdvp_onesite_step(psi1, Hshift, dt)
             psi1.normalize()
             psi1 = psi1 * norm0
         return correlator, psi1
@@ -979,10 +1055,12 @@ class Chain:
             krylov_order, gse_cutoff):
         """GSE counterpart of evolve_and_measure_tdvp() above -- see
         quench_tdvp_gse()'s docstring and evolve_and_measure_tdvp()'s own
-        docstring for why `wf` is copied here too."""
+        docstring for why `wf` is copied here too, and quench_tdvp_gse()'s
+        for the exemption from `backend.set_pad_bonds` (the strip below
+        runs on the copy, so the caller's `wf` keeps its padding)."""
         H = self._mpo(terms_h)
         A = self._mpo(terms_op)
-        psi = wf.copy()
+        psi = _strip_bond_padding(wf.copy())
         correlator = []
         for it in range(nt):
             # Measure before evolving, so correlator[k] is C(k*dt),
@@ -991,8 +1069,7 @@ class Chain:
             correlator.append(inner(psi, A, psi))
             if it < gse_sweeps:
                 psi = self.global_subspace_expand(H, psi, krylov_order, gse_cutoff)
-            psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm,
-                    niter=50, num_center=1)
+            psi = self._tdvp_onesite_step(psi, H, dt)
         return correlator, psi
 
     def quench_tebd(self, terms_h, terms_i, terms_j, nt, dt):

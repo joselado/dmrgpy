@@ -40,13 +40,19 @@ does not model, so a nonempty canonical form means "not proven", not
   when both are diagonal (see _DIAGONAL), since operators on one site do
   not commute in general and get_dagger() reverses their order. So
   Nup[i]*Ndn[i], the Hubbard U term, is proven, while a term resting on
-  two non-diagonal same-site factors commuting is not.
+  two non-diagonal same-site factors commuting is not;
+- the order of a pre-Jordan-Wigner C-type factor and a bare local
+  A-type one (see _LOCAL_LADDER), whose exchange is neither a
+  commutation nor an anticommutation but depends on which of the two
+  sits on the lower site, so a term mixing the two is not reordered at
+  all: C0*A1-A1*C0 is exactly zero and is not proven zero.
 
-Modelling either one needs the site type, which lives on the chain and
-not on the operator. So every prover here is one-sided: True means
-proven, False means not proven. mpsalgebra.is_hermitian consumes exactly
-that, trusting a True and falling back to its random-witness probe
-otherwise.
+Modelling the first three needs the site type, which lives on the chain
+and not on the operator, and modelling the fourth needs the string
+convention of the Jordan-Wigner transform, which the infinite-chain path
+does not use. So every prover here is one-sided: True means proven,
+False means not proven. mpsalgebra.is_hermitian consumes exactly that,
+trusting a True and falling back to its random-witness probe otherwise.
 
 Which names it understands
 --------------------------
@@ -59,8 +65,10 @@ multioperator._dagger_name). A term naming anything else -- a
 parafermionic Sig/Tau, which reorders with a Z_n phase rather than a
 sign, or a name a caller invented -- is left exactly as it was written
 and only ever collects with a term spelled the same way, which is what
-the sympy version did for everything. Nothing is silently reordered on a
-grading this module cannot check.
+the sympy version did for everything. The same goes for a term that
+names both a C-type fermion and a bare A-type ladder operator, since
+the sign of exchanging those two is not a grading at all. Nothing is
+silently reordered on a grading this module cannot check.
 """
 
 from .. import multioperator
@@ -70,10 +78,21 @@ from .. import multioperator
 # different site. These are the pre-Jordan-Wigner names, the ones the ED
 # backends materialize with the statistics built into the occupation
 # basis (pyfermion/mbfermion.py's get_c/get_cd) and the ones
-# multioperator.jordan_wigner() dresses with a string. The bare
-# post-transform names (A/Adag/Aup/...) are plain local matrices by
-# construction, hence even, and are listed as such below.
+# multioperator.jordan_wigner() dresses with a string.
 _ODD = ("C", "Cdag", "Cup", "Cdagup", "Cdn", "Cdagdn")
+
+# The bare post-transform names, plain local matrices with no string:
+# the fermionic a_i that jordan_wigner() writes C_i in terms of, and on
+# Bosonic_Chain/SpinBoson_Chain the boson ladder operators. They commute
+# with each other, with F, N and the spin names on another site, so they
+# are listed as even below (giving them no parity instead would lose the
+# proof of every boson hopping and of every Jordan-Wigner-transformed
+# operator). What they are NOT is even against a C-type name: with
+# C_j = F_0...F_{j-1} A_j, A_i anticommutes with C_j when j>i and
+# commutes with it when j<i, a relation that depends on which of the two
+# sits on the lower site and is not a parity at all. A term naming both
+# kinds is therefore left as written, see _mixes_representations.
+_LOCAL_LADDER = frozenset(("A", "Adag", "Aup", "Adagup", "Adn", "Adagdn"))
 
 _EVEN = ("Id", "X", "Y", "Z", "Sx", "Sy", "Sz", "Sp", "Sm", "S+", "S-",
          "N", "density", "Nup", "Ndn", "Ntot",
@@ -81,6 +100,14 @@ _EVEN = ("Id", "X", "Y", "Z", "Sx", "Sy", "Sz", "Sp", "Sm", "S+", "S-",
          "F", "Fup", "Fdn")
 
 _PARITY = dict([(n, 1) for n in _ODD] + [(n, 0) for n in _EVEN])
+
+
+def _mixes_representations(factors, ps):
+    """True if a term names both a pre-Jordan-Wigner C-type fermion and
+    a bare A-type ladder operator, whose exchange sign this module does
+    not know (see _LOCAL_LADDER). ps are the factors' parities, and the
+    odd ones are exactly the C-type names."""
+    return 1 in ps and any(name in _LOCAL_LADDER for (name, i) in factors)
 
 
 # Names that are diagonal in their own site's basis, and therefore
@@ -126,7 +153,8 @@ def _canonical_signature(term):
     the sort exchanges. Identity factors are dropped, unless the whole
     term is identities and there would be nothing left.
 
-    A term naming an operator of unknown grading is returned spelled
+    A term naming an operator of unknown grading, or mixing a C-type
+    fermion with a bare A-type ladder operator, is returned spelled
     exactly as it came in, so it still collects with an identical term
     and is never reordered.
     """
@@ -134,6 +162,8 @@ def _canonical_signature(term):
     factors = [(o[0], o[1]) for o in term[1:]]
     ps = [parity(name) for (name, i) in factors]
     if any(p is None for p in ps): # not ours to reorder
+        return tuple(factors), c
+    if _mixes_representations(factors, ps): # sign depends on site order
         return tuple(factors), c
     keep = [(f, p) for (f, p) in zip(factors, ps) if f[0] != "Id"]
     if len(keep) == 0: # nothing but identities, leave the term alone
