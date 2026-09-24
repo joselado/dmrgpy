@@ -46,7 +46,16 @@ def _cumulative_theta0_weight(chain, op, eVs, mode, submode, delta, es,
     x, S = chain.get_dynamical_correlator(
             mode=mode, submode=submode, name=(op.get_dagger(), op),
             delta=delta, es=es, **kwargs)
-    S = np.asarray(S).real
+    # the correlator comes back on es exactly as the caller ordered it, and
+    # both cumulative_trapezoid and np.interp need an increasing grid: on a
+    # refined block appended after a coarse one, the unsorted grid was
+    # 3.04 off a 6.97 peak (2026-09-24b audit, finding 17). A stable sort
+    # leaves an increasing grid bit for bit as it was.
+    x = np.asarray(x, dtype=float)
+    S = np.asarray(S)
+    order = np.argsort(x, kind="stable")
+    x, S = x[order], S[order]
+    S = S.real
     # cumulative integral from -inf up to each x point, by the trapezoid
     # rule -- NOT np.cumsum(S)*dw, which counts the whole bin around x_i
     # as lying below x_i and so, exactly at a threshold (where S is a
@@ -75,8 +84,10 @@ def second_order_dIdV_dc(chain, site, eVs, T0=1.0, U=0.0, mode="DMRG",
     default): it must cover every eigenstate transition energy from the
     ground state below max|eV|, i.e. run from several delta below w=0
     (the elastic weight sits there, and the cumulative integral starts at
-    es[0]) to several delta above max|eV|, at several times finer spacing
-    than delta near the lines, and may be non-uniform -- the transitions
+    the lowest point of es) to several delta above max|eV|, at several
+    times finer spacing than delta near the lines, and may be non-uniform
+    and in any order (it is sorted before integrating, so a refined block
+    can simply be appended to a coarse grid) -- the transitions
     are properties of the chain's own spectrum, not of the eVs sweep
     range, so guessing a default from eVs alone is unsafe (confirmed
     directly: doing so silently misses real transitions whenever the eVs

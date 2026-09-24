@@ -114,7 +114,7 @@ def test_n_gs_averages_the_degenerate_manifold_like_ed():
     assert np.allclose(avg/TP, 1.5, atol=5e-3)
     # and the chain's own ground state is put back afterwards, on both the
     # Python side (vev) and the session (the KPM correlator reads the
-    # session's state, which set_gs alone does not reach)
+    # session's state, so the restore has to reach it too)
     assert np.real(sc.vev(sc.Sz[0])) == pytest.approx(sz, abs=1e-12)
     _, again = sc.get_kondo_spectrum(eVs, **kw)
     assert np.allclose(again, one, rtol=0., atol=1e-9)

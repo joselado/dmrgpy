@@ -2280,7 +2280,10 @@ correlator approaches `<A><B>` (not 0) at large `|x|`, and summing that
 non-decaying background over `x` with `e^{-ikx}` produces a spurious,
 dominant `k=0` contribution with no discernible dispersion.
 `dynamical_correlator_komega` does the spatial DFT
-(`S(k,t)=Σ_x e^{-ikx}S(x,t)`) then reuses `timedependent.py`'s own
+(`S(k,t)=Σ_x e^{-ikx}S(x,t)`), conjugates it (the finite TD route's
+conjugate-at-return, which puts the lines at ω = +D_n; without it every
+infinite-chain `S(k,ω)` was mirrored in ω until the 2026-09-24
+second-pass audit, finding 8), then reuses `timedependent.py`'s own
 `_fourier_transform_correlator` unchanged (it was explicitly factored out
 for other time-domain submodes to reuse, see `tdz.py`'s own use of it),
 so `delta` means the same Lorentzian-broadening thing here as in every
@@ -2290,11 +2293,16 @@ Validated: `S(x,t=0)` matches idmrg.py's own exact static
 `two_point_correlator` to machine precision (1e-16) for every `x` tested
 (`tests/test_idmrg_window.py`); `S(k,ω)` (with `connected=True`) shows a
 clear, k-dependent peak instead of a featureless background; cross-checked
-against `kpm_finite` (an independent approximation scheme — open-boundary
-window + KPM, vs. this method's IBC window + TDVP) for the same physical
-correlator — an exact match isn't expected, but both agree on where the
-dominant spectral weight sits (`tests/test_infinite_chain.py`,
-`examples/idmrg/td_dynamical_correlator/main.py`). Also cross-checked at
+against `kpm_finite` (an independent approximation scheme: open-boundary
+window + KPM, against this method's IBC window + TDVP) on the local
+`Sx,Sx` spectrum of the transverse-field paramagnet `1.4 Sz + Sx Sx`,
+whose single-magnon band [0.9, 1.9] is known: both put the line inside it
+at positive frequency (TD +1.120 against KPM +1.060 in the example, 0.056
+of the TD weight below zero; `tests/test_infinite_chain.py`,
+`examples/idmrg/td_dynamical_correlator/main.py`). The check used to
+compare `Sz,Sz` at r=1, KPM's disconnected elastic line against the TD
+route's connected continuum, and passed only because `S(k,ω)` was
+mirrored (2026-09-24 second-pass audit, finding 8). Also cross-checked at
 `t>0` against an *exact* non-interacting reference: the XX spin chain
 (`H=J*Σ(Sx_iSx_{i+1}+Sy_iSy_{i+1})`) maps exactly to free fermions under
 Jordan-Wigner (`tests/_free_fermion_reference.py`), whose connected Sz-Sz
@@ -2771,7 +2779,8 @@ the effective MPO bond dimension, the bond-ramp settings below), or the
 session object itself actually
 changed since the last send (`_session_ham_cache`). Repeated calculations on an
 unchanged Hamiltonian (e.g. successive `get_dynamical_correlator` calls,
-each of which re-verifies the ground state) then hit the session's
+each of which checks the stored ground state and makes no session call
+when it is current, `groundstate.ground_state_on_session`) then hit the session's
 caches instead of re-running warm DMRG sweeps and band-edge solves. Code
 paths that *want* a fresh solve of the same Hamiltonian either pass
 through `restart()`/`set_hamiltonian` (which force DMRG via
@@ -4610,7 +4619,9 @@ on its way to `lehmann_density_from_one_sided`, which now takes them
 One consumer of the same transform is deliberately left off this
 assembly, `timedependent.sxt_to_skomega`: it reduces `S(x,t)` to
 `S(k,omega)` and never sees the operator pair, so there is no adjoint
-pair for it to run.
+pair for it to run. It does take the finite route's conjugate-at-return,
+after the spatial sum, and the direct frequency stage (2026-09-24
+second-pass audit, findings 7 and 8).
 
 **`delta` is one broadening across five independent KPM
 implementations**, and the helper that makes it so is
@@ -4656,8 +4667,12 @@ once, before dispatch, by `algebra/kpm.py::validate_kpm_n_scale`, which
 accepts a positive `numbers.Integral` (numpy integers included, `bool`
 excluded) and raises `TypeError` or `ValueError` naming it otherwise. It
 is called in `kpmdmrg.dynamical_correlator_moments` ahead of `get_gs`
-and of both session calls, in the `mode="ED"` push of
-`get_dynamical_correlator` when the submode is KPM, at the top of the
+and of both session calls, in `edtk/dynamics.py::get_dynamical_correlator`
+on its Hermitian KPM branch, after the T>0 guard and before the ground
+state (the non-Hermitian KPM reads it on neither mode, its count being
+`n=`; it sat in the `mode="ED"` push until the 2026-09-24 second-pass
+audit, finding 5, ahead of the branch that decides whether it is read),
+at the top of the
 `julia_live` KPM and inside `polynomials_for_broadening` itself, so the
 C++ transcriptions' `n_scale>0 ? : 1` branch is unreachable and the
 Python routes no longer round a float down where the C++ ones raised.
@@ -5137,17 +5152,19 @@ parameters or misspellings, with no allow-list: it used to take a
 `**kwargs` with no consumer, the §4.10 shape, so a misspelled `Jrho_s`
 silently removed the whole third-order Kondo peak (finding 11). And
 `n_gs>1` on the DMRG branch, the equal-weight average over a degenerate
-ground manifold that `mode="ED"` takes by definition (finding 12), has
-to switch each member in on both sides of the chain: `set_gs()` for the
-Python-side `wf0`, which the CVM route and the two-time third-order term
-read, and `session.set_wavefunction()` for the session's own `wf0`,
-which the KPM and DDMRG routes read. Measured, `set_gs()` alone left KPM
-on the solved state, both members returning the same 1.3206. The
-session's band edges stay cached from the solved state, so every member
-is measured from the same `E0`, and the solved state is restored in a
-`finally`, a repeated default call agreeing to 1.6e-13 on `"python"`
-and 3.2e-11 on v3. `n_gs>1` refuses `itensor_version=2` and
-`"julia_live"` with `NotImplementedError`. On the numerical side the
+ground manifold that `mode="ED"` takes by definition (finding 12),
+switches each member in with `set_gs()` alone, which hands it to the
+session unswept on the next ground-state read, and restores `wf0`, `e0`,
+`computed_gs`, the solver key and the session's state as a unit; it runs
+on v2, v3 and `"python"`, accepts only the submodes that read the
+chain's state, and refuses `"julia_live"` with `NotImplementedError`.
+That is the shape since the 2026-09-24 second-pass audit (findings 13 to
+15): finding 12's own fix pushed each member with
+`session.set_wavefunction()`, which drops the session's energy cache, so
+the next correlator's ground-state round trip re-swept the member, and
+the `finally` never restored `e0`. The session's band edges stay cached
+from the solved state, so every member is measured from the same `E0`
+under KPM. On the numerical side the
 potential term now integrates with the trapezoid weights of the grid it
 is given, where it used the first spacing for every point (finding 13),
 and it checks the sum rule `sum_k int S_kk = S(S+1)` on `Spin_Chain`
@@ -5264,8 +5281,12 @@ as a class, because new code can reintroduce any of them.
   convergence ramp over `sc.maxm` on one chain returned the first energy
   every time. The key now lives in `groundstate.solver_key()`, is recorded
   on the chain when a state is stored, and `groundstate.gs_is_current()`
-  is what the short circuit tests. A state with no recorded key (one
-  injected via `set_gs()`) is still returned unconditionally, by design.
+  is what the short circuit tests. A state injected via `set_gs()` or
+  `set_initial_wf()` is not current until `gs_energy_single()` has handed
+  it to the session (`groundstate.mark_injected`; before the 2026-09-24
+  second-pass audit it was "returned unconditionally" on the Python side
+  only, and every DMRG correlator measured the session's own solved
+  state instead, findings 11 and 12).
 
 - **A precondition tested ahead of the dispatch it should qualify.**
   `dynamics.get_dynamical_correlator()` tested Hermiticity *before*
@@ -5654,7 +5675,9 @@ Three places did need explicit work, and each is a trap worth knowing:
   Krylov expansion. `Chain.global_subspace_expand` and
   `Chain.tdvp_step(num_center=1)` run under `pad_bonds_suspended()`, and
   `quench_tdvp_gse`/`evolve_and_measure_tdvp_gse` strip the padding once
-  at trajectory entry (`_strip_bond_padding`, on the evolved state only);
+  at trajectory entry (`_strip_bond_padding`, on the evolved state only,
+  keyed on the state rather than on the flag since the 2026-09-24
+  second-pass audit's finding 18);
   `Chain.tdvp_step` itself never strips, since `submode="TDZ"` carries
   its wavefunction between calls, so a TDZ run at `tdvp_gse_sweeps=0` is
   the one case still started padded.

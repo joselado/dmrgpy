@@ -50,17 +50,27 @@ def _convolved_F0_weight(chain, op, eVs, omega0, Gamma0, mode, submode,
     for why the explicit get_dagger() is required).
 
     The quadrature weights are the trapezoid ones of the actual grid, so
-    a non-uniform es (refined around a line) is weighted correctly. It
-    used to be the first spacing times a plain sum, which mis-weighted
-    every point by the ratio of the first spacing to the local one: 101.7
-    times the exact value at the peak on a smooth sinh-mapped grid dense
-    at the line (2026-09-24 hole hunt, finding 13). On a uniform grid the
-    two differ only by the two endpoint half-bins."""
+    an es that is non-uniform and in any order (refined around a line,
+    or a refined block appended after a coarse grid) is weighted
+    correctly. It used to be the first spacing times a plain sum, which
+    mis-weighted every point by the ratio of the first spacing to the
+    local one: 101.7 times the exact value at the peak on a smooth
+    sinh-mapped grid dense at the line (2026-09-24 hole hunt, finding 13).
+    On a uniform grid the two differ only by the two endpoint half-bins.
+
+    The grid is sorted first, since trapezoid weights from np.diff are
+    signed: on a coarse grid followed by a refined block the join counted
+    as a negative spacing, and the result was 0.654 off a 0.671 peak
+    (2026-09-24b audit, finding 17). A stable sort leaves an increasing
+    grid bit for bit as it was."""
     x, S = chain.get_dynamical_correlator(
             mode=mode, submode=submode, name=(op.get_dagger(), op),
             delta=delta, es=es, **kwargs)
     x = np.asarray(x, dtype=float)
-    S = np.asarray(S).real
+    S = np.asarray(S)
+    order = np.argsort(x, kind="stable")
+    x, S = x[order], S[order]
+    S = S.real
     dx = np.diff(x)
     wts = np.zeros_like(x) # trapezoid weights, built once for every eV
     wts[1:] += dx/2
@@ -106,7 +116,8 @@ def third_order_potential_dIdV_dc(chain, site, eVs, Jrho_s, U, T0=1.0,
     2*eV/w inside the band, so every line contributes at every bias (see
     the module docstring for a measured example, where the lines above
     the grid were 10 per cent of the peak). Its spacing must resolve
-    delta near the lines and may vary along the grid. Since sum_k int
+    delta near the lines, and the grid may be non-uniform and in any
+    order. Since sum_k int
     S_kk(w) dw = S(S+1) exactly, a spin site gets a RuntimeWarning when
     the grid misses more than 1e-2 of that weight -- a check of the
     coverage, not of the resolution, and one that counts the elastic

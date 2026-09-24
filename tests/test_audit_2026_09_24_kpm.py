@@ -318,9 +318,10 @@ def test_non_positive_integer_kpm_n_scale_raises_on_julia_live(
 
 
 def test_kpm_n_scale_is_only_checked_where_it_is_read():
-    """The ED push validates for submode="KPM" alone, mirroring the DMRG
-    side, where only the KPM route reaches the check: a submode that
-    never reads kpm_n_scale does not fail on it."""
+    """The ED route validates on its Hermitian KPM branch alone
+    (edtk/dynamics.py, since the 2026-09-24b audit's finding 5), mirroring
+    the DMRG side, where only the KPM route reaches the check: a submode
+    that never reads kpm_n_scale does not fail on it."""
     sc = heisenberg(4, "python")
     sc.kpm_n_scale = 1.5
     for submode in ("ED", "INV"):

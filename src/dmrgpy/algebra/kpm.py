@@ -145,11 +145,54 @@ def get_moments_vivj(m0,vi,vj,n=100,use_fortran=False):
   else: return get_moments_vivj_fortran(m0,vi,vj,n=n)
 
 
+# The divergence guard every KPM moment loop shares (this module's ED
+# recursion, pyitensor/chain.py::_check_kpm_moment, check_kpm_moment in
+# both mpscppN/chain_session.h and mpsjulialive/kpm.jl). For a Hermitian
+# operator whose rescaled spectrum lies in [-1,1], |T_k(x)| <= 1 there, so
+# |<vj|T_k|vi>| <= ||vi|| ||vj|| exactly (Cauchy-Schwarz). A pole outside
+# [-1,1] that carries weight grows as cosh(k*arccosh|x|) instead, and the
+# spectrum built from those moments is wrong. The factor is the margin
+# above the exact bound: every correct run measured, ED and DMRG alike,
+# truncated by kpmmaxm or by energy truncation or not, stays at a ratio of
+# at most 1.000, and every ED run with an error of 1.1 per cent or more
+# sits at 2.2 or above. It used to be 1e3*(bound+1) on the DMRG loops,
+# which let spectra up to 109 times the true peak through below
+# kpm_scale=1/2 and disabled the check for operators of small norm, and
+# nothing at all on ED (2026-09-24b audit, findings 2 and 3).
+KPM_MOMENT_BOUND_FACTOR = 1.5
+
+KPM_DIVERGENCE_MESSAGE = (
+    "KPM moments diverging: scaled spectrum outside [-1,1] (a Chebyshev "
+    "moment exceeds %g*||vi||*||vj||, which no pole inside the window can "
+    "give; the band-edge estimate is too tight or kpm_scale is below 1/2, "
+    "and increasing kpm_scale widens the safety margin)"
+    % KPM_MOMENT_BOUND_FACTOR)
+
+
+def check_kpm_moment(mu,bound):
+  """Raise RuntimeError when one Chebyshev moment mu = <vj|T_k|vi>
+  exceeds KPM_MOMENT_BOUND_FACTOR*bound, bound = ||vi||*||vj||. Valid for
+  a Hermitian operator only, which is what every caller expands."""
+  if abs(mu) > KPM_MOMENT_BOUND_FACTOR*bound:
+    raise RuntimeError(KPM_DIVERGENCE_MESSAGE)
+
+
 def get_moments_vivj_python(m0,vi,vj,n=100):
   """ Get the first n moments of a the |i><j| operator
-  using the Chebychev recursion relations"""
+  using the Chebychev recursion relations.
+
+  m0 must be Hermitian with its spectrum in [-1,1]; the moments are
+  checked against the exact bound ||vi||*||vj|| as they are produced
+  (check_kpm_moment), and a moment above it raises RuntimeError. Both
+  callers go through dm_vivj_energy: the Hermitian branch of
+  edtk/dynamics.py (the non-Hermitian KPM uses get_mu_n_nh instead) and
+  edtk/distribution.py, whose X is Hermitian by construction (its scale
+  comes from eigsh), where the check also catches a `scale` too small for
+  X."""
   m = csc_matrix(m0,dtype=np.complex128)
   mus = np.zeros(n,dtype=np.complex128) # empty arrray for the moments
+  bound = np.sqrt(np.abs(algebra.braket_ww(vi,vi).real
+                         *algebra.braket_ww(vj,vj).real))
   v = vi.copy()
   am = v.copy()
   a = m@v  # vector number 1
@@ -157,12 +200,14 @@ def get_moments_vivj_python(m0,vi,vj,n=100):
 #  bk = (vj.H*v).todense().trace()[0,0] # calculate bk
   bk1 = algebra.braket_ww(vj,a)
 #  bk1 = (vj.H*a).todense().trace()[0,0] # calculate bk
+  check_kpm_moment(bk1,bound)
   mus[0] = bk  # mu0
   mus[1] = bk1 # mu1
-  for ii in range(2,n): 
+  for ii in range(2,n):
     ap = 2.*m@a - am # recursion relation
     bk = algebra.braket_ww(vj,ap)
 #    bk = (vj.H*ap).todense().trace()[0,0]
+    check_kpm_moment(bk,bound)
     mus[ii] = bk
     am = a.copy() # new variables
     a = ap.copy() # new variables
@@ -451,12 +496,17 @@ def validate_kpm_n_scale(n_scale):
     the nmin floor at every delta; and at kpm_n_scale<=0 the C++ copy
     clamped to 1x (61 moments on a 4-site Heisenberg chain at delta=0.1)
     where this one gave 16. It is called once where each route reads the
-    attribute off the chain, before any dispatch or ground-state work
+    attribute off the chain, before any ground-state work
     (kpmdmrg.dynamical_correlator_moments ahead of both session calls,
-    Many_Body_Chain.get_dynamical_correlator's mode="ED" push,
-    mpsjulialive's KPM), and by polynomials_for_broadening itself, which
-    leaves the C++ `n_scale>0 ? n_scale : 1` branch unreachable. Finding 5
-    of docs/audit_2026_09_24_hole_hunt.md."""
+    edtk/dynamics.py::get_dynamical_correlator on its Hermitian KPM
+    branch, mpsjulialive's KPM), and by polynomials_for_broadening itself,
+    which leaves the C++ `n_scale>0 ? n_scale : 1` branch unreachable.
+    Finding 5 of docs/audit_2026_09_24_hole_hunt.md. The ED call sat one
+    frame higher, in Many_Body_Chain.get_dynamical_correlator's mode="ED"
+    push, until finding 5 of docs/audit_2026_09_24b_hole_hunt.md: there it
+    ran ahead of the Hermiticity branch, so a non-Hermitian KPM, which
+    never reads kpm_n_scale on either mode (its count is n=), was rejected
+    on ED and accepted on DMRG."""
     if isinstance(n_scale,bool) or not isinstance(n_scale,numbers.Integral):
         raise TypeError(
             "kpm_n_scale must be a positive integer (it multiplies the "

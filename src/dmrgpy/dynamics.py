@@ -63,7 +63,10 @@ pick both the rescaling window and the moment count independently
 (int(2*scale/delta) against round((emax-emin)/delta)*kpm_n_scale, on
 windows differing by a factor of three), and disagreed pointwise by
 4.4e-01 against a resolvent peak of 0.355 on a 4-site chain at
-delta=0.15. They now share both, and since the DMRG routes were cut to
+delta=0.15. They now share both on the default bandwidth-centred window
+(mode="ED" refuses kpm_energy_truncate, which moves v3 and "python" onto
+the ground-state-anchored one; 2026-09-24b audit, finding 4), and since
+the DMRG routes were cut to
 the calibrated n moments (they reconstructed from n+2; 2026-09-24 audit,
 finding 4) they agree to 2.6e-04 there on itensor_version="python",
 which is the linear interpolation of the moment reconstruction's own
@@ -151,9 +154,9 @@ an FFT grid of spacing 2*pi/(nt*dt) = 1.05*delta, shared with TD at
 predict=False; since the damped sum is evaluated at each requested
 frequency (2026-09-24 audit, finding 7) TDZ and TD at predict=False sit
 at the 5.4e-04 finite-window floor, and the contour's own share,
-max|y_TDZ - y_TD(predict=False)|, is about 1e-06. sxt_to_skomega stays on
-the FFT stage, since at its defaults delta*T = 1 and the direct
-evaluation there is unmeasured. The mode="ED" row moved further than the others
+max|y_TDZ - y_TD(predict=False)|, is about 1e-06. sxt_to_skomega, left on
+the FFT stage then, came onto the direct sum with the 2026-09-24b audit's
+finding 7. The mode="ED" row moved further than the others
 because that route additionally read the operator pair in the opposite
 order, so the two solvers computed the correlator of different pairs
 under one submode name, invisible whenever A and B are the same
@@ -165,7 +168,11 @@ not comparable, its imaginary part most of all. The infinite-chain
 S(k,omega) route (timedependent.sxt_to_skomega, used by
 pyitensor.idmrg_window and infinitechain.py) still returns the raw
 transform, because the reduction it performs never sees the operator
-pair.
+pair. It is on the house sign, though: its S(x,t) carries e^{-i(H-E_0)t}
+and it conjugates the momentum series after the spatial sum, so its lines
+sit at omega = +D_n and its real part is the house density whenever the
+momentum-resolved weights are real; until the 2026-09-24b audit's
+finding 8 every infinite-chain S(k,omega) was mirrored in omega.
 """
 from . import kpmdmrg
 from . import timedependent
@@ -187,7 +194,12 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             "get_dynamical_correlator: unrecognized submode "+repr(submode)
             +"; expected one of "+", ".join(SUBMODES))
     if self.itensor_version in (2,3,"python"): # C++ or pure-Python
-        self.set_initial_wf(self.wf0) # set the initial wavefunction
+        # the chain's current ground state, on the Python side and on the
+        # session alike, and the Hamiltonian on the session: free on a
+        # solved chain, the hand-off of a state set_gs()/set_initial_wf()
+        # injected, a solve otherwise (groundstate.ground_state_on_session)
+        from .groundstate import ground_state_on_session
+        ground_state_on_session(self)
         if not self.is_hermitian(self.hamiltonian): # non Hermitian Hamiltonian
             # Per-submode, not wholesale. This check used to run before the
             # dispatch below and return the explicit resolvent for

@@ -10,7 +10,9 @@ sc = spinchain.Spin_Chain(spins) # create the chain
 ##################################################################
 # This implements shows how to perform the following measurement #
 ##################################################################
-# <X|A^\dagger e^{-iHt} B e^{iHt} A |X> for some state |X>
+# <X|A^\dagger e^{iHt} B e^{-iHt} A |X> for some state |X>,
+# i.e. <psi(t)|B|psi(t)> with |psi(t)> = e^{-iHt} A|X>, on both
+# mode="DMRG" and mode="ED"
 
 # create two Hamiltonians
 h0 = 0

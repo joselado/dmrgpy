@@ -141,13 +141,17 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         else:
             correlator,wf_final_jl = Mainjl.evolve_and_measure_tdvp(Hop.jlmpo,
                     Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,self.maxm)
+    # <psi(t)|O|psi(t)> as measured, not conjugated, like
+    # timedependent.py::evolve_and_measure_dmrg (see its docstring);
+    # evolution_dmrg_DC above keeps its conjugation, which is the
+    # correlator convention and not an expectation value
     cs = np.array(correlator)
     ts = np.array([dt*ii for ii in range(int(nt))])
     if return_wf:
         from .mps import MPS
         wf_final = MPS(wf_final_jl,MBO=self)
-        return ts,cs.real-1j*cs.imag,wf_final
-    return ts,cs.real-1j*cs.imag
+        return ts,cs,wf_final
+    return ts,cs
 
 
 def advance_complex_time_step(self,Hop,wf,dz,do_gse=False):

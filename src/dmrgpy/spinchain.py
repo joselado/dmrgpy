@@ -248,14 +248,26 @@ class Spin_Chain(Many_Body_Chain):
               the ground-state density matrix, so this is exactly
               mode="ED"'s average whichever orthonormal basis of the
               manifold DMRG returns. The members are taken to be
-              degenerate with the ground state (every transition energy
-              is measured from its energy), so n_gs is the caller's
+              degenerate with the ground state (KPM measures every
+              member's transitions from the solved ground-state energy,
+              the other submodes from the member's own, and the two
+              coincide only within the split), so n_gs is the caller's
               statement of the degeneracy, the same contract as
               `dex` in the ED dynamical correlator: a warning is issued
               when a member lies more than `delta` away from the
               ground-state energy. It costs n_gs times the n_gs=1 run
               plus one excited-state solve, and needs an MPS backend
-              (itensor_version 3 or "python" with its own session).
+              with its own session (itensor_version 2, 3 or "python";
+              v2 behaves like v3 in every measured run). Each member is
+              measured exactly as returned, unswept, and gs_energy() is
+              that member's own energy while it is measured (what the
+              two-time Kondo term reads, and the ED references'
+              convention); the chain's state is put back afterwards,
+              gs_energy() included. Only the submodes that
+              read the chain's state are accepted with n_gs>1 (KPM, CVM,
+              CVM_explicit, ROOTN, TD, TDZ and EX); SECTOR, which
+              measures from its own per-sector solve, and the others
+              raise NotImplementedError.
               `dt2`, `n_t2_half`,
               `dtau`, `n_tau_half`
               to kondospectrumtk.dmrgtwotime.two_time_kondo_term_dmrg for
@@ -372,6 +384,20 @@ class Spin_Chain(Many_Body_Chain):
         # tolerance that no DMRG run can honour, since nothing separates
         # "exactly degenerate" from "split below what the sweep resolved",
         # hence the caller-supplied n_gs.
+        if submode not in _N_GS_SUBMODES:
+            # an allow-list, not a deny-list (documentation.md 4.10): a
+            # submode is averaged only if it is known to measure from the
+            # chain's own state. SECTOR measures from its own per-sector
+            # solve on a clone and returned the n_gs=1 value for every
+            # member; EX did the same from its cached basis until it was
+            # reprojected (2026-09-24b hole hunt, finding 15).
+            raise NotImplementedError(
+                "get_kondo_spectrum(n_gs=%d) averages over the manifold by "
+                "setting each member as the chain's ground state, and "
+                "submode=%r does not read that state (it measures from a "
+                "state of its own), so every member would give the same "
+                "number. Use one of %s." % (n_gs, submode,
+                                             ", ".join(_N_GS_SUBMODES)))
         session = getattr(self, "_session", None)
         if (self.get_mode(mode="DMRG") != "DMRG" or session is None
                 or not hasattr(session, "set_wavefunction")):
@@ -382,6 +408,7 @@ class Spin_Chain(Many_Body_Chain):
                 "ED). mode=\"ED\" averages the degenerate manifold at T=0 "
                 "on its own." % (self.itensor_version,))
         import warnings
+        from . import groundstate
         gs0 = self.get_gs() # the solved state, put back afterwards
         e0 = self.gs_energy()
         energies, members = self.get_excited_states(n=n_gs, purify=True)
@@ -393,34 +420,50 @@ class Spin_Chain(Many_Body_Chain):
             warnings.warn(
                 "get_kondo_spectrum(n_gs=%d): a member of the averaged "
                 "manifold lies %.3g away from the ground-state energy, more "
-                "than delta=%.3g. Every member's transitions are measured from "
-                "the ground-state energy and weighted equally, so this is "
+                "than delta=%.3g. Every member is weighted equally, as in "
+                "the T->0+ average over a degenerate manifold, so this is "
                 "not a T=0 average unless those states are meant to be "
                 "degenerate." % (n_gs, split, delta), RuntimeWarning,
                 stacklevel=3)
-        # Both halves of "the ground state" have to move: the Python-side
-        # wf0 is what the CVM route and the two-time Kondo term read
-        # (get_gs()/gs_energy(), current since set_gs keeps the solver
-        # key), while KPM and DDMRG read the session's own wf0, which
-        # set_gs() alone does not touch (measured: with set_gs alone both
-        # members returned the solved state's 1.3206 on the chain above).
-        # set_wavefunction() leaves the session's cached band edges alone
-        # -- filled from the solved ground state by the excited_states()
-        # call above, which sets its penalty weight from the bandwidth --
-        # so every member's correlator is measured on the same window
-        # from the same E0. It does drop the session's cached energy,
-        # which nothing reads again while the solver key is current:
-        # gs_energy() then returns the Python-side e0, and a changed key
-        # re-solves regardless.
+        # set_gs() marks each member as injected, so the first correlator
+        # of terms() hands it to the session unswept, where KPM and TD read
+        # it, and gives it its own energy <wf|H|wf> as self.e0, which is
+        # what the two-time Kondo term and the ED references measure each
+        # initial state from. The band edges KPM rescales with were filled
+        # by get_excited_states() above from the solved state, so every
+        # member is measured on the same window. This loop used to install
+        # each member with set_gs() plus session.set_wavefunction(), which
+        # dropped the session's energy, and the correlator's own ground-
+        # state re-verification then ran a real DMRG sweep from the
+        # member, which relaxed the upper one onto the lower one in 5 of 6
+        # runs on v3 at a split below delta (2026-09-24b hole hunt,
+        # finding 13); the dropped energy was not, as this comment said,
+        # something nothing read again.
+        #
+        # The chain's state is restored as a unit afterwards: wf0, e0,
+        # computed_gs, the solver key and the injection mark, plus the
+        # session's own state. Restoring wf0 alone left gs_energy() on the
+        # last member's energy (finding 14).
+        snapshot = (self.wf0, self.e0, self.computed_gs,
+                    getattr(self, "_gs_solver_key", None),
+                    getattr(self, "_gs_injected", None))
         total = 0.
         try:
             for wf in members:
                 self.set_gs(wf)
-                session.set_wavefunction(wf.cpp_handle)
                 total = total + terms()
         finally:
-            self.set_gs(gs0)
-            session.set_wavefunction(gs0.cpp_handle)
+            (self.wf0, self.e0, self.computed_gs, self._gs_solver_key,
+             self._gs_injected) = snapshot
+            session.set_wavefunction(groundstate.detached_copy(gs0).cpp_handle)
         return eV, total/len(members)
+
+# The dynamical-correlator submodes known to measure from the chain's own
+# ground state, the ones get_kondo_spectrum(n_gs>1) can average by setting
+# each member of the manifold as that state (measured with set_gs on the
+# two members of the 3-site Heisenberg doublet: each of these separates
+# them as mode="ED" does). maxent and CVMimag need modules this package
+# does not ship, and SECTOR measures from a per-sector solve of its own.
+_N_GS_SUBMODES = ("KPM", "CVM", "CVM_explicit", "ROOTN", "TD", "TDZ", "EX")
 
 Spin_Hamiltonian = Spin_Chain # backwards compatibility

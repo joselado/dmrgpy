@@ -205,7 +205,12 @@ def set_pad_bonds(dim):
     pad_bonds_suspended): chain.py's quench_tdvp_gse/
     evolve_and_measure_tdvp_gse strip the padded zeros from the evolved
     state once at trajectory entry, and Chain.global_subspace_expand and
-    every one-site step run with padding suspended. The padded run then
+    every one-site step run with padding suspended. The strip keys on the
+    state rather than on this flag, so a state padded earlier and evolved
+    after the flag was cleared, or inside pad_bonds_suspended(), is
+    stripped too, while with the flag off a state with no zero singular
+    value is left bit for bit as it is (2026-09-24b audit, finding 18).
+    The padded run then
     follows the unpadded one, to roundoff without expansion and to ~1e-7
     with it (the expansion's truncation sees the two runs' different
     gauges). The price is that the one-site route gets no frozen shapes

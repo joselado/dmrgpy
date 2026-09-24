@@ -239,6 +239,22 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     forward evolution into a subsequent backward one for a round-trip
     fidelity check where ED isn't feasible (see
     examples/tdvp_VS_ED_time_evolution/benchmark_scaling.py).
+
+    What comes back is <psi(t)|O|psi(t)>, psi(t) = e^{-iHt}|wf>, exactly
+    the list the session measures (every session method takes
+    <psi|O|psi>), so at t=0 it is vev(O) on the same state, and for a
+    non-Hermitian O it keeps the sign of its imaginary part. It used to
+    be returned conjugated, a line copied from evolution_dmrg_DC above,
+    which made this <psi(t)|O^dagger|psi(t)>: invisible on a Hermitian O,
+    whose imaginary part is roundoff, and exactly minus the imaginary part
+    otherwise, -0.5i at t=0 for O = Sz_0 + i*Sx_0 on the +x state where
+    vev(O) is +0.5i, on every backend and integrator (2026-09-24b audit,
+    finding 10). evolution_dmrg_DC keeps its conjugation, and for a
+    different reason: it returns a time correlator, not an expectation
+    value, and conjugating the session's <GS|B^dagger e^{-i(H-E_0)t}
+    A^dagger|GS> is what gives sum_n M_n e^{+i D_n t}, the series whose
+    one-sided transform puts the lines of dynamics.py's house convention
+    at omega = +D_n.
     """
     check_tevol_method(self) # reject a typo instead of running MPO-Taylor
     if self.itensor_version=="julia_live":
@@ -280,13 +296,15 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         correlator,_wf = self._session.evolve_and_measure(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,
                 int(nt),dt,False)
+    # <psi(t)|O|psi(t)> as measured, not conjugated: see the docstring for
+    # why evolution_dmrg_DC conjugates and this does not
     cs = np.array(correlator)
     ts = np.array([dt*ii for ii in range(int(nt))])
     if return_wf:
         from . import mps as mpsmod
         wf_final = mpsmod.MPS(self,cpp_handle=_wf).copy()
-        return ts,cs.real-1j*cs.imag,wf_final
-    return ts,cs.real-1j*cs.imag
+        return ts,cs,wf_final
+    return ts,cs
 
 
 def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
@@ -655,20 +673,21 @@ def _fourier_transform_correlator(ts,cs,dt,es=None,window=[-1,10],
     for TD at its default predict=True, which went through the same
     interpolation on a grid ten times finer (2.57e-04 before).
 
-    `_evaluation="fft"` keeps the old FFT-plus-interpolation stage, and
-    `sxt_to_skomega` is its one caller: the infinite-chain S(k,omega)
-    reduction takes the caller's `nt`, which at td_dynamical_correlator's
-    defaults gives delta*T=1, i.e. a series cut at e^-1 of its envelope,
-    where a direct evaluation would show the truncation ringing that the
-    interpolation on a grid of spacing 6.3*delta now smooths away. Nobody
-    has measured what that does to S(k,omega), so that route stays as it
-    was until somebody does. Note that the two places that pass iDMRG
-    window data to this function directly (tests/test_infinite_chain.py's
-    KPM cross-check and examples/idmrg/td_dynamical_correlator) are in
-    that same short-window regime, delta*T = 0.4 and 0.9, and get the
-    direct evaluation: measured on the test's own call, the weight at the
-    KPM peak went from 1.00 to 0.74 of the maximum, which then sits at
-    the edge of the window, as the example's already did before.
+    `_evaluation="fft"` keeps the old FFT-plus-interpolation stage as a
+    reference, and no production route calls it any more: its one test
+    (tests/test_audit_2026_09_24_realtime.py::
+    test_direct_evaluation_is_the_fft_on_its_own_grid) checks the direct
+    sum against it on the FFT's own grid. The infinite-chain
+    `sxt_to_skomega` was the last caller, deferred on the grounds that the
+    direct sum was unmeasured at the short windows its defaults give; the
+    deferral did not depend on the window, so a caller who converged it
+    (delta*T = 6) still got the interpolation, 2.1e-01 of the peak off
+    the exact damped transform of a single-magnon series with peak
+    heights down to 0.79 of exact, where the direct sum is 2.5e-04 off
+    it and equals the closed-form damped trapezoid sum to 1e-13
+    (2026-09-24b audit, finding 7). At the short windows (delta*T of 1
+    and below) neither stage is converged, and what that regime needs is
+    a longer `nt`, not a different frequency stage.
     """
     if predict:
         from .dynamicstk.linearprediction import linear_predict_extend
@@ -744,10 +763,41 @@ def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
     -- see its own docstring. Returns `(ks, es, Skw)`, `Skw` shaped
     `(len(ks), len(es))`.
 
-    This reduction, and only this one, stays on the old FFT-on-grid plus
-    linear interpolation frequency stage (`_evaluation="fft"`) that the
-    finite-chain TD/TDZ routes left behind, see
-    `_fourier_transform_correlator`'s docstring for why."""
+    The sign of the frequency. `S(x,t)` comes in as the infinite-window
+    routes produce it, `<psi|A_x e^{-i(H-E_0)t} B_0|psi> = sum_n M_n(x)
+    e^{-i D_n t}`, and the momentum series is conjugated after the
+    spatial sum, `conj(S(k,t))`, before the time transform. That is the
+    step the finite TD route takes at the end of evolution_dmrg_DC, which
+    returns `sum_n M_n e^{+i D_n t}`, and it is what puts the lines at
+    omega = +D_n, D_n = E_n - E_0 > 0, as on every finite route and in
+    dynamics.py's house convention. Without it every infinite-chain
+    S(k,omega), on both backends, came out mirrored, with the lines at
+    -D_n and mostly below the default window: on the transverse-field
+    paramagnet 1.4*Sz + Sx*Sx with A = B = Sx, the magnon at k=pi, where
+    eps = 0.9, peaked at omega = -1.045 with 0.928 of its weight below
+    zero (2026-09-24b audit, finding 8). The conjugation goes after the
+    sum and not on each x series before it: that would be the transform
+    of the conjugate at -k, which only a parity-symmetric model cannot
+    tell apart, and on a chiral free-fermion ring it puts the occupied
+    band at the wrong k.
+
+    What comes back is still the one-sided transform, not the two-sided
+    density `lehmann_density_from_one_sided` assembles for submode="TD",
+    since this reduction never sees the operator pair. Its real part is
+    the house density `sum_n W_n(k) delta/(pi((omega-D_n)^2+delta^2))`,
+    `W_n(k) = sum_x e^{-ikx} M_n(x)`, whenever the weights `W_n(k)` are
+    real, which a pair with `A_x = B_x^dagger` guarantees on a
+    translation-invariant state when `xs` is symmetric about 0 (the
+    default `x_values` of both routes) or runs over a full period; on a
+    one-sided or ragged `xs` they are complex even for such a pair. Its
+    imaginary part is the dispersive term the density does not have.
+
+    The frequency stage is the direct per-frequency sum, the same as on
+    every finite route. It used to be hard-wired to the FFT-plus-
+    interpolation stage, whatever `nt` the caller gave, which at a
+    converged window (delta*T = 6) is 2.1e-01 of the peak off exact on a
+    single-magnon series, see `_fourier_transform_correlator`'s docstring
+    (2026-09-24b audit, finding 7)."""
     if ks is None:
         ks = np.linspace(-np.pi,np.pi,200)
     ks = np.asarray(ks)
@@ -757,15 +807,15 @@ def sxt_to_skomega(ts,xs,S,dt,ks=None,es=None,window=[-1,10],
     es_out = es
     for ik,k in enumerate(ks):
         phase = np.exp(-1j*k*xs)
-        Skt = S@phase
+        # conjugate after the spatial sum, see the docstring
+        Skt = np.conj(S@phase)
         es_k,gk = _fourier_transform_correlator(ts,Skt,dt,es=es_out,
                                                   window=window,delta=delta,
                                                   factor=factor,damping=damping,
                                                   predict=predict,lp_order=lp_order,
                                                   lp_extend_factor=lp_extend_factor,
                                                   lp_fit_start_fraction=lp_fit_start_fraction,
-                                                  lp_max_pole_radius=lp_max_pole_radius,
-                                                  _evaluation="fft")
+                                                  lp_max_pole_radius=lp_max_pole_radius)
         if Skw is None:
             es_out = es_k
             Skw = np.zeros((len(ks),len(es_k)),dtype=complex)

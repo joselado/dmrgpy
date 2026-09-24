@@ -1051,19 +1051,30 @@ def test_td_dynamical_correlator_runs_on_v3_backend():
 
 def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
     """Cross-check the two independent dynamical-correlator approximations
-    against each other: kpm_finite (open-boundary window + KPM/Chebyshev)
-    and td_dynamical_correlator (IBC window + real-time TDVP) are
-    different approximation schemes with different systematic errors, so
-    an *exact* match isn't expected (the same way plotting both submodes
-    for an ordinary *finite* chain, see
-    examples/dynamical_correlator/dynamical_correlator_time_evolution/
-    main.py, only ever compares them visually, never asserts numerical
-    agreement) -- but both should agree on *where* the dominant spectral
-    weight sits. This mirrors that same example's own convention of
-    comparing KPM's real part against the TD submode's own magnitude
-    (`np.abs`), not its real part -- confirmed directly that using
-    `.real` for the TD side here gives a spurious sign/scale mismatch
-    that `np.abs` does not."""
+    against each other, kpm_finite (open-boundary window + KPM/Chebyshev)
+    and td_dynamical_correlator (IBC window + real-time TDVP), on a
+    quantity where the answer is known: the local Sx,Sx spectrum of the
+    transverse-field paramagnet 1.4*Sz + Sx*Sx, where Sx creates exactly
+    one quasiparticle, eps(k) = 2*sqrt(0.5525 + 0.35*cos k), so the
+    local line lives in the magnon band [0.9, 1.9] and at positive
+    frequency only, D_n = E_n - E_0 > 0 (dynamics.py's convention). The
+    two methods are not expected to agree pointwise, so the test asks
+    where the weight sits: both argmax inside the band, the TD weight on
+    omega < 0 small, and the two shapes correlated.
+
+    The TD side goes through the public route at x_values=[0], i.e.
+    sxt_to_skomega on a single series, so it carries that reduction's own
+    conjugation. This test used to compare Sz,Sz at r=1, where kpm_finite
+    (which subtracts no <A><B>) peaks on the elastic line at omega=0 and
+    the TD route on a connected continuum, so it compared two different
+    quantities, and it passed under both signs of omega: the infinite-
+    chain S(k,omega) was mirrored, with this line at -1.115 where KPM puts
+    it at +1.060, 0.943 of its weight below zero (2026-09-24b audit,
+    finding 8). Measured after the fix, at these parameters: TD argmax
+    +1.300, weight below zero 0.057, correlation with KPM +0.965 and with
+    its mirror image -0.402. The window, delta*T = 1.8, is short on
+    purpose (this is a qualitative check), which is what moves the TD
+    argmax off KPM's; at delta*T = 3.6 it is at +1.120."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="python")
     ic.gs_method = "idmrg"
     ic.maxm = 20
@@ -1073,48 +1084,27 @@ def test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite():
     ic.set_hamiltonian(1.4 * ic.SzC[0] + ic.SxC[0] * ic.SxR[0])
     ic.gs_energy()
 
-    es = np.linspace(-1, 6, 100)
-    es_kpm, y_kpm = ic.kpm_finite("Sz", 0, "Sz", 1, n_window=12,
+    es = np.linspace(-3.0, 3.0, 301)            # two-signed on purpose
+    es_kpm, y_kpm = ic.kpm_finite("Sx", 0, "Sx", 0, n_window=12,
                                     window_chain_kwargs=dict(maxm=16, nsweeps=5),
                                     delta=0.3, es=es)
+    y_kpm = np.asarray(y_kpm).real
+    _ks, es_td, Skw = ic.td_dynamical_correlator(
+        "Sx", 0, "Sx", n_window=8, dt=0.1, nt=60, x_values=[0],
+        maxdim=30, cutoff=1e-10, niter=20, ks=[0.0], es=es, delta=0.3)
+    y_td = Skw[0].real
 
-    from dmrgpy.pyitensor import idmrg_window
-    from dmrgpy.timedependent import _fourier_transform_correlator
-    ts, xs, S = idmrg_window.dynamical_correlator_td(
-        ic._result, n_window=10, opname_A="Sz", opname_B="Sz", dt=0.05,
-        nt=25, cutoff=1e-10, maxdim=30, niter=20, x_values=[1])
-    # _evaluation="fft": at nt=25, delta*T = 0.375, the regime
-    # sxt_to_skomega is also kept on, where the direct evaluation of the
-    # 2026-09-24 audit's finding 7 has not been measured yet.
-    es_td, g_td = _fourier_transform_correlator(ts, S[:, 0], 0.05, es=es,
-                                                  delta=0.3, window=[-1, 6],
-                                                  _evaluation="fft")
-
-    peak_kpm = es[np.argmax(np.abs(y_kpm))]
-    # Check that the TD spectrum still carries substantial weight *at*
-    # the KPM peak location, rather than requiring it to be the TD
-    # spectrum's own single dominant (argmax) feature -- confirmed
-    # directly (after idmrg_window.py's own `eshift` fix, see
-    # tests/test_idmrg_window_free_fermion.py's module docstring, which
-    # this run now correctly reflects) that a second, comparable-height
-    # low-frequency feature in the TD spectrum occasionally edges out the
-    # one matching KPM's own peak by argmax alone (about 1 run in 3, not
-    # obviously tied to iDMRG's own state_overlap) -- both features are
-    # genuine, low-frequency, physically-plausible spectral weight for
-    # this gapped model, so requiring "substantial weight at the KPM
-    # peak" is the more robust way to express "these two independent
-    # approximations agree on where the dominant spectral weight sits"
-    # than a bare argmax-vs-argmax comparison.
-    ix_kpm = np.argmin(np.abs(es_td - peak_kpm))
-    weight_at_kpm_peak = np.abs(g_td[ix_kpm])
-    # 0.5, not a much looser bound: confirmed directly over 4 independent
-    # runs that this fraction lands at 0.899-1.0 whenever the KPM peak
-    # isn't the TD spectrum's own argmax -- 0.5 stays well clear of that
-    # observed range while being tight enough to catch a real regression
-    # (e.g. a reintroduced partial phase error genuinely moving the
-    # dominant weight away from the KPM peak, not just a near-degenerate
-    # second feature edging out the argmax).
-    assert weight_at_kpm_peak > 0.5 * np.max(np.abs(g_td))
+    band = (0.9, 1.9)
+    peak_kpm = es_kpm[np.argmax(y_kpm)]
+    peak_td = es_td[np.argmax(y_td)]
+    assert band[0] <= peak_kpm <= band[1]
+    assert band[0] <= peak_td <= band[1]
+    a = np.abs(y_td)
+    w_neg = np.trapezoid(a[es_td < 0], es_td[es_td < 0]) / np.trapezoid(a, es_td)
+    # a single Lorentzian at 1.1 of half-width 0.3 already puts 0.066 of
+    # its weight on this grid below zero; the mirrored route had 0.94
+    assert w_neg < 0.15
+    assert np.corrcoef(y_td, y_kpm)[0, 1] > 0.8
 
 
 # -- excitation_energies/excitation_gap: the tangent-space/quasiparticle

@@ -41,12 +41,47 @@ from . import backend as _bk
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
 
 
+def _strip_sweep(psi):
+    """The lossless strip itself: an SVD sweep to the far end and back with
+    padding suspended, which drops exactly the zero singular values
+    (`position()`'s default cutoff=0) and leaves psi right-canonical with
+    its center at site 1. Mutates psi's own tensor list."""
+    n = psi.length()
+    with _bk.pad_bonds_suspended():
+        if psi.center is None:
+            # _shift_left's SVD is exact from any gauge, so the far end is
+            # as good a starting point as any
+            psi.center = n
+        psi.position(n)
+        psi.position(1)
+    return psi
+
+
+def _bond_dims(psi):
+    return [_link_at(psi, i, i + 1).dim for i in range(1, psi.length())]
+
+
 def _strip_bond_padding(psi):
     """Remove the zero directions `backend.set_pad_bonds` appended to psi's
     bonds, losslessly, and leave psi right-canonical with its center at
-    site 1 (what one-site TDVP's first half-sweep wants). A no-op, psi
-    untouched, whenever padding is off. Mutates psi's own tensor list, so
-    the caller hands it a chain it owns.
+    site 1 (what one-site TDVP's first half-sweep wants). Mutates psi's own
+    tensor list when it strips, so the caller hands it a chain it owns.
+
+    Keyed on the state, not only on the flag. With padding on, psi is
+    swept in place, as it always was. With padding off, psi may still
+    carry padding from earlier, a ground state computed under
+    set_pad_bonds(K) and evolved after the flag was cleared or inside
+    pad_bonds_suspended(), and then it is the flag that is wrong about
+    the state: the run used to be finding 16's one-site TDVP on the
+    bond-K manifold, 0.4929 off the unpadded trajectory from a Neel start
+    (2026-09-24b audit, finding 18). So the same sweep runs on a copy, and
+    the copy is adopted only if some bond dimension shrank; otherwise psi
+    is returned exactly as it came in, so that an unpadded state follows
+    the unpadded trajectory bit for bit (an ungated sweep re-gauges it,
+    which moved unpadded runs by 7e-16 to 4e-11). The test is on exactly
+    zero singular values, which is a wider set than "was padded": a state
+    that has such a direction for another reason is stripped too, as the
+    flag-on branch already does.
 
     Why the one-site route needs this and the two-site one does not: a
     padded bond is exact for the STATE (the appended singular values are
@@ -65,18 +100,15 @@ def _strip_bond_padding(psi):
     calls, and a per-call strip there would be harmless only until a GSE
     call had added zero-weight directions of its own, which a strip would
     then delete."""
-    if not _bk.pad_bonds():
+    if psi.length() < 2:
         return psi
-    n = psi.length()
-    if n < 2:
-        return psi
-    with _bk.pad_bonds_suspended():
-        if psi.center is None:
-            # _shift_left's SVD is exact from any gauge, so the far end is
-            # as good a starting point as any
-            psi.center = n
-        psi.position(n)
-        psi.position(1)
+    if _bk.pad_bonds():
+        return _strip_sweep(psi)
+    # _Chain.copy() copies the tensor list, and no operation here mutates
+    # an ITensor in place, so the trial sweep cannot touch psi
+    trial = _strip_sweep(psi.copy())
+    if any(a < b for a, b in zip(_bond_dims(trial), _bond_dims(psi))):
+        return trial
     return psi
 
 
@@ -2002,7 +2034,7 @@ class Chain:
             ap = mps_sum(ap * 2.0, am * (-1.0), cutoff=kpmcutoff, maxdim=kpmmaxm)
             self._maybe_energy_truncate(ap, m)
             out.append(inner(vj, ap))
-            self._check_kpm_moment(out, bound)
+            self._check_kpm_moment(out[-1], bound)
             am = a * 1.0
             a = ap * 1.0
         return out
@@ -2025,25 +2057,34 @@ class Chain:
             bk1 = 2.0 * inner(a, ap) - mu1
             out.append(bk)
             out.append(bk1)
-            self._check_kpm_moment(out, bound)
+            # both moments of the step, since the pair is appended together
+            self._check_kpm_moment(bk, bound)
+            self._check_kpm_moment(bk1, bound)
             am = a * 1.0
             a = ap * 1.0
         return out
 
     @staticmethod
-    def _check_kpm_moment(out, bound):
+    def _check_kpm_moment(mu, bound):
         # Chebyshev moments of a correctly scaled Hamiltonian (spectrum
-        # inside [-1,1]) satisfy |<vj|T_k|vi>| <= ||vi||*||vj|| = bound;
-        # exponential growth beyond it means the scaled spectrum leaked
-        # outside [-1,1] (band-edge estimate too tight for the chosen
-        # kpm_scale) and every subsequent moment is garbage. Mirrors the
-        # compiled backends' check_kpm_moment; the +1.0 keeps the
-        # threshold meaningful when both norms are tiny.
-        if abs(out[-1]) > 1e3 * (bound + 1.0):
-            raise RuntimeError(
-                "KPM moments diverging: scaled spectrum outside [-1,1] "
-                "(band-edge estimate too tight; increasing kpm_scale "
-                "widens the safety margin)")
+        # inside [-1,1]) satisfy |<vj|T_k|vi>| <= ||vi||*||vj|| = bound
+        # exactly; growth beyond it means the scaled spectrum leaked
+        # outside [-1,1] (band-edge estimate too tight, or kpm_scale below
+        # 1/2 on the bandwidth-centred window, where E0 sits at
+        # -1/(2*kpm_scale)) and the spectrum is wrong. The threshold is
+        # algebra/kpm.py's KPM_MOMENT_BOUND_FACTOR (1.5) times the bound,
+        # shared with the ED recursion and mirrored by the compiled
+        # backends' and julia_live's check_kpm_moment. It used to be
+        # 1e3*(bound+1): three orders of magnitude of silently wrong
+        # spectra below kpm_scale=1/2, and an absolute threshold for
+        # operators of small norm, where the moments, being bilinear in vi
+        # and vj, have no scale of their own (2026-09-24b audit, finding
+        # 3). A correct run stays at a ratio of at most 1, truncated
+        # (kpmmaxm or energy truncation) or not; only a truncation harsh
+        # enough to leave the spectrum wrong by its own peak or more
+        # (kpmmaxm=2 or 3 on 4 sites) pushes the accelerated loop above.
+        from ..algebra.kpm import check_kpm_moment
+        check_kpm_moment(mu, bound)
 
     def _kpm_moments(self, m, vi, vj, n, kpmmaxm, kpmcutoff, accelerate):
         if accelerate and self._same_mps(vi, vj, self.maxm, self.cutoff):

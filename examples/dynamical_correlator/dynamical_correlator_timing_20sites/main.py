@@ -30,8 +30,9 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # actually converged; see docs/user_guide.md's CVM section.
 #
 # Each get_dynamical_correlator() call below internally re-verifies the
-# ground state before computing its own correlator (dynamics.py calls
-# set_initial_wf(wf0) unconditionally). Since groundstate.py stopped
+# ground state before computing its own correlator
+# (groundstate.ground_state_on_session, which makes no session call on a
+# solved chain). Since groundstate.py stopped
 # re-sending an unchanged Hamiltonian to the session (which used to
 # invalidate the session's energy cache and turn every re-verification
 # into a real ~1 s warm re-sweep -- and, for KPM, invalidate the cached

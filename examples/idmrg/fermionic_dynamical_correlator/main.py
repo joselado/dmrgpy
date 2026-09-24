@@ -43,7 +43,11 @@
 # and the worst |S - S_exact| over the whole (x,t) grid is ~8e-2, growing
 # smoothly with t -- that growth is the window's own finite size and bond
 # dimension, the honest error of the method. The two S(k,omega) maps
-# should look like the same object at slightly different resolution.
+# should look like the same object at slightly different resolution, with
+# the occupied band at positive omega, at the removal energy -eps > 0 of
+# each filled level, where the house convention puts D_n = E_n(N-1) - E_0
+# for this pair (it sat mirrored at -eps until sxt_to_skomega started
+# conjugating the momentum series, 2026-09-24b audit finding 8).
 #
 # MODEL: the dimerized (SSH-like) spinless chain, two sites per cell, with
 # an extra next-cell A-A hopping t3. That t3 term is what makes the string

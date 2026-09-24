@@ -95,36 +95,59 @@ print("Plot saved to td_dynamical_correlator_Skw.png")
 plt.show()
 
 print()
-print("=== cross-check vs kpm_finite (independent approximation) at r=1 ===")
-# Same physical correlator (<Sz(0,t)Sz(1,0)>), same delta/window, via the
-# two independent methods -- an exact match isn't expected (different
-# approximation schemes, different systematic errors -- see
+print("=== cross-check vs kpm_finite (independent approximation), local Sx,Sx ===")
+# The two independent methods on a correlator whose answer is known: Sx
+# creates exactly one quasiparticle of this paramagnet, eps(k) =
+# 2*sqrt(0.5525 + 0.35*cos k), so the LOCAL Sx,Sx spectrum (TD at x=0,
+# kpm_finite at r=0) lives in the magnon band [0.9, 1.9], and at positive
+# frequency only, D_n = E_n - E_0 > 0. An exact match isn't expected
+# (different approximation schemes, different systematic errors -- see
 # examples/dynamical_correlator/dynamical_correlator_time_evolution/
 # main.py for the same "compare, don't expect exact agreement" spirit
 # between KPM and TD submodes on an ordinary *finite* chain), but both
-# should agree on *where* the dominant spectral weight sits.
-es_kpm, y_kpm = ic.kpm_finite("Sz", 0, "Sz", 1, n_window=20,
+# must put the line inside the band. The TD side is the public route at
+# x_values=[0], so it goes through sxt_to_skomega's own conjugation, and
+# the grid is two-signed so that a mirrored spectrum would show.
+#
+# This block used to compare Sz,Sz at r=1, where kpm_finite (which
+# subtracts no <A><B>) peaks on the elastic line at omega=0 and the TD
+# route on a connected continuum, two different quantities; it passed
+# only because every infinite-chain S(k,omega) was mirrored in omega at
+# the time, which put the TD line next to the elastic one (2026-09-24b
+# audit, finding 8).
+es_loc = np.linspace(-3, 3, 301)
+es_kpm, y_kpm = ic.kpm_finite("Sx", 0, "Sx", 0, n_window=20,
                                 window_chain_kwargs=dict(maxm=30, nsweeps=10),
-                                delta=0.3, es=np.linspace(-1, 6, 100))
+                                delta=0.3, es=es_loc)
+y_kpm = np.asarray(y_kpm).real
+_k, es_td, Sloc = ic.td_dynamical_correlator(
+    "Sx", 0, "Sx", n_window=12, dt=0.1, nt=120, x_values=[0],
+    maxdim=60, cutoff=1e-10, niter=50, ks=[0.0], es=es_loc, delta=0.3)
+y_td = Sloc[0].real
 
-from dmrgpy.pyitensor import idmrg_window
-from dmrgpy.timedependent import _fourier_transform_correlator
-ts, xs, S = idmrg_window.dynamical_correlator_td(
-    ic._result, n_window=16, opname_A="Sz", opname_B="Sz", dt=0.05, nt=60,
-    cutoff=1e-10, maxdim=60, niter=50, x_values=[1])
-# _evaluation="fft": at nt=60, delta*T = 0.9, a window short enough that
-# the direct evaluation of the 2026-09-24 audit's finding 7 is unmeasured,
-# so this stays on the FFT stage sxt_to_skomega also uses.
-es_td, g_td = _fourier_transform_correlator(ts, S[:, 0], 0.05,
-                                              es=np.linspace(-1, 6, 100),
-                                              delta=0.3, window=[-1, 6],
-                                              _evaluation="fft")
-
-peak_kpm = es_kpm[np.argmax(np.abs(y_kpm))]
-peak_td = es_td[np.argmax(np.abs(g_td))]
+peak_kpm = es_kpm[np.argmax(y_kpm)]
+peak_td = es_td[np.argmax(y_td)]
+a = np.abs(y_td)
+w_neg = np.trapezoid(a[es_td < 0], es_td[es_td < 0]) / np.trapezoid(a, es_td)
 print("kpm_finite peak at omega={:.3f}   td_dynamical_correlator peak at omega={:.3f}".format(
     peak_kpm, peak_td))
-assert abs(peak_kpm - peak_td) < 1.5
+print("TD weight on omega<0: {:.3f}   shape correlation TD vs KPM: {:+.3f}".format(
+    w_neg, np.corrcoef(y_td, y_kpm)[0, 1]))
+assert 0.9 <= peak_kpm <= 1.9 and 0.9 <= peak_td <= 1.9
+assert w_neg < 0.15
+
+plt.figure(figsize=(6, 4))
+plt.plot(es_kpm, y_kpm, label="kpm_finite, r=0")
+plt.plot(es_td, y_td, "--", label="td_dynamical_correlator, x=0 (Re)")
+plt.axvspan(0.9, 1.9, color="grey", alpha=0.15, label="magnon band")
+plt.xlabel(r"$\omega$")
+plt.ylabel(r"local $S^{xx}(\omega)$")
+plt.title("local Sx,Sx spectrum, two independent methods")
+plt.legend(fontsize=8)
+plt.tight_layout()
+plt.savefig("td_dynamical_correlator_local_crosscheck.png", dpi=150)
+print("Plot saved to td_dynamical_correlator_local_crosscheck.png")
+plt.show()
 
 print()
 print("td_dynamical_correlator example PASSED")

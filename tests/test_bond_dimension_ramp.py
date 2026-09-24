@@ -12,8 +12,9 @@ These tests target the two ways that could silently go wrong -- both
 produce a plausible-looking wrong number rather than a crash:
 
 * the ramp truncating a *warm* starting wavefunction (an MPS handed in
-  by set_initial_wf, or simply the previous gs_energy() call's own
-  converged solution) back down to the ramp's starting bond dimension;
+  by set_initial_wf_guess, or simply the previous gs_energy() call's own
+  converged solution, which is the case the test below exercises) back
+  down to the ramp's starting bond dimension;
 * gs_energy_single()'s Hamiltonian send-cache not keying on the ramp
   settings, so flipping self.bond_ramp between two otherwise identical
   gs_energy() calls returns the *cached* energy from the previous

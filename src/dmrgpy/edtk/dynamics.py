@@ -26,6 +26,7 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     A = EDOperator(name[0],self).SO # create first operator
     B = EDOperator(name[1],self).SO # create second operator
     h = self.get_hamiltonian() # Hamiltonian as matrix
+    herm = is_hermitian(h) # decided once, read by every branch below
 
     if T>0.: # finite-temperature Lehmann sum -- the exact reference used
         # to validate the finite-T MPS/METTS dynamical correlator (see
@@ -36,17 +37,46 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
                 "get_dynamical_correlator: T>0 is only implemented for "
                 "submode='ED' (the exact Lehmann sum) so far, got "
                 "submode=%r" % (submode,))
-        if not is_hermitian(h):
+        if not herm:
             raise NotImplementedError(
                 "get_dynamical_correlator: T>0 is not implemented for "
                 "non-Hermitian Hamiltonians")
         emu,vs = self.get_diagonalized_hamiltonian()
         return dynamical_correlator_finite_T(h,A,B,T,emu=emu,vs=vs,**kwargs)
 
+    if submode=="KPM" and herm:
+        # The Hermitian KPM branch below is the one that reads
+        # kpm_n_scale and the rescaling window, so its preconditions are
+        # checked here, on its own predicate and before any ground-state
+        # work; the non-Hermitian KPM reads neither (its count is n=, its
+        # window E_max=) and is not held to them. The kpm_n_scale check
+        # used to sit one frame up, in Many_Body_Chain.
+        # get_dynamical_correlator's mode="ED" push, ahead of this branch,
+        # so ED rejected kpm_n_scale=1.5 on a non-Hermitian chain where
+        # DMRG accepted it (2026-09-24b audit, finding 5).
+        if getattr(self,"kpm_energy_truncate",False):
+            # Holzner's energy truncation and its ground-state-anchored
+            # window exist on the v3 and "python" DMRG routes only. This
+            # route always used the bandwidth-centred window, so under the
+            # flag it returned the untruncated curve bit for bit while
+            # v3/"python" computed a different one (finding 4 of the same
+            # audit), and below kpm_scale=1/2 a diverging one.
+            raise NotImplementedError(
+                "kpm_energy_truncate is not implemented on the ED KPM "
+                "route (it is implemented for itensor_version=3 and "
+                "itensor_version='python' DMRG only); this route always "
+                "uses the bandwidth-centred window and used to ignore the "
+                "flag silently. Set kpm_energy_truncate=False, or use "
+                "submode='ED' for the exact spectrum. Note mode.py routes "
+                "to ED on its own when the requested C++ extension is "
+                "unavailable, or for itensor_version=3 on a chain with "
+                "fewer than 3 sites.")
+        from ..algebra.kpm import validate_kpm_n_scale
+        validate_kpm_n_scale(getattr(self,"kpm_n_scale",1))
     if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
     else:
         wf0 = wf0.v.copy()
-    if not is_hermitian(h): # non Hermitian Hamiltonians
+    if not herm: # non Hermitian Hamiltonians
         # Per-submode, not wholesale -- see the same fix in dynamics.py.
         # This used to substitute the explicit resolvent for every submode
         # but "KPM", which was worst for submode="ED": the exact Lehmann

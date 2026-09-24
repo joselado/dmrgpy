@@ -3,8 +3,11 @@
 **Status**: partially guarded, not fixed. Affects `itensor_version=3` and
 `itensor_version="python"`, only with the opt-in, off-by-default
 `kpm_energy_truncate=True`. `itensor_version=2` has no energy truncation
-at all (it now raises rather than ignoring the flag), and the ED path is
-unaffected.
+at all (it now raises rather than ignoring the flag), and `mode="ED"`
+does not implement it either: it now raises `NotImplementedError` too,
+where it used to return the untruncated bandwidth-centred curve under the
+flag, and with it `mode.py`'s fallback for a 2-site `itensor_version=3`
+chain (2026-09-24 second-pass audit, finding 4).
 
 ## What happens
 

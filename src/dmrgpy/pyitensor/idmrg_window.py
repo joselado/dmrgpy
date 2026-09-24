@@ -1432,16 +1432,22 @@ def dynamical_correlator_komega(result, n_window, opname_A, opname_B, dt, nt,
                                  cutoff, maxdim, niter=50, x_values=None,
                                  ks=None, es=None, delta=5e-2, window=[-1, 10],
                                  factor=1, connected=True, p_i=0):
-    """`S(k,omega)` from `dynamical_correlator_td`'s own `S(x,t)`: a
-    spatial DFT (`S(k,t) = sum_x e^{-ikx} S(x,t)`) followed by the *same*
-    time-domain damping+FFT convention `timedependent.py`'s own
-    `_fourier_transform_correlator` already uses for the finite-chain "TD"
+    """`S(k,omega)` from `dynamical_correlator_td`'s own `S(x,t)`, via
+    `timedependent.sxt_to_skomega`: a spatial DFT (`S(k,t) = sum_x
+    e^{-ikx} S(x,t)`), conjugated after the sum, followed by the *same*
+    time-domain stage `timedependent.py`'s own
+    `_fourier_transform_correlator` uses for the finite-chain "TD"
     submode (exponential-decay windowing -> Lorentzian broadening
-    `delta`, Riemann-sum-normalized FFT) -- reused directly (that function
-    was explicitly factored out for other time-domain submodes to reuse
-    unchanged, see its own docstring and `tdz.py`'s own use of it), not
-    reimplemented, so `delta` means the same thing here as in every other
-    dynamical-correlator submode in this codebase.
+    `delta`, trapezoid sum evaluated directly at each requested
+    frequency) -- reused, not reimplemented, so `delta` means the same
+    thing here as in every other dynamical-correlator submode in this
+    codebase. The conjugation is the finite TD route's own
+    conjugate-at-return: `S(x,t)` here carries `e^{-i(H-E_0)t}`, and
+    without it the lines came out at omega = -D_n instead of +D_n, on
+    both backends (2026-09-24b audit, finding 8). What is returned is
+    the one-sided transform, whose real part is the house density
+    whenever the momentum-resolved Lehmann weights are real; see
+    `sxt_to_skomega`'s docstring.
 
     `ks` defaults to 200 points in `[-pi,pi]` (the first Brillouin zone,
     since `x` is measured in physical sites); `es`/`delta`/`window`/

@@ -13,8 +13,23 @@ def get_cached_excited_states(self,n=20,scale=10.0,**kwargs):
     -- used to rerun the whole O(n) sequential DMRG excited-state search
     from scratch each time. The cache is invalidated by
     Many_Body_Chain.restart()/set_hamiltonian (see manybodychain.py),
-    since a new ground state changes what "the excited states" means."""
-    key = (n,scale,getattr(self,"excited_gram_schmidt",False))
+    since a new Hamiltonian changes what "the excited states" means, and
+    the key carries the solver parameters (groundstate.solver_key), since
+    a basis solved at one maxm/nsweeps/cutoff is not the answer at
+    another: a convergence loop over maxm used to reuse the first basis
+    for every value. It deliberately does not carry the ground state.
+    The basis's first vector is whatever state the session held when it
+    was built (Chain::excited_states seeds from it) and the rest are the
+    lowest states orthogonal to it, so at a degenerate ground state the
+    basis holds the whole manifold whenever the search finds the
+    partners, and dynamical_correlator() measures from whichever state
+    the chain holds, reprojected onto the basis, with a span check
+    (_reference_coefficients) for when it does not."""
+    from .groundstate import solver_key
+    # the ED chain (edtk/dynamics.py) comes through here too, and has no
+    # solver parameters
+    params = solver_key(self) if hasattr(self,"maxm") else None
+    key = (n,scale,getattr(self,"excited_gram_schmidt",False),params)
     cache = getattr(self,"_dcex_excited_cache",None)
     if cache is not None and cache[0]==key:
         return cache[1]
@@ -54,6 +69,7 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
     # doesn't change default behavior, only lets a caller-supplied
     # scale= finally take effect.
     esex,wsex = get_cached_excited_states(self,n=nex,scale=scale,**kwargs)
+    wsex_raw = wsex # the MPS of the basis, for the reprojection below
     # normalize name= first: a documented string ("ZZ" with i=/j=) used to
     # reach name[0].get_dagger() as a bare str and die with
     # "AttributeError: 'str' object has no attribute 'get_dagger'"
@@ -101,20 +117,72 @@ def dynamical_correlator(self,name="XX",i=0,j=0,delta=2e-2,
     U = svec[:,keep]/np.sqrt(sval[keep])
     Hred = np.conjugate(U.T)@Hop@U
     esex,vs = eigh(Hred) # well-conditioned, ordinary eigenvalue problem
-    wsex = (U@vs).T # coefficients back in the original nex-state basis
+    C = U@vs # column n: raw-basis coefficients of rediagonalized state |n>
+    wsex = C.T # coefficients back in the original nex-state basis
     # from now on we operate with numpy arrays
-    wf0 = wsex[0]
+    #
+    # The reference state is the chain's own ground state, reprojected onto
+    # the rediagonalized basis, d_n = <n|wf0>. It used to be wsex[0], the
+    # lowest vector of this basis, which the basis alone decides: at a
+    # degenerate ground state that is whichever member the search grew
+    # from, so EX ignored set_gs() and get_kondo_spectrum(n_gs>1) returned
+    # the n_gs=1 value for every member, anywhere in [1, 2] against the
+    # manifold average 1.5 (2026-09-24b hole hunt, finding 15). The basis
+    # stays cached: it holds the state the session had when it was built
+    # plus the lowest states orthogonal to it, so a member of a degenerate
+    # manifold set later lies in its span (to 1e-14 on the crossing chain
+    # of that finding), and _reference_coefficients raises when a state
+    # does not. At a unique ground state the chain's state is the basis's
+    # lowest vector and the two agree to roundoff (4e-15 measured).
+    d = _reference_coefficients(self,wsex_raw,C)
+    wf0 = C@d # the reference, in the raw nex-state basis
     wfa = Aop@wf0 # A times ground state
     wfb = Bop@wf0 # B times ground state
     c1 = [np.conjugate(wfa).dot(wfi) for wfi in wsex] # matrix element
     c2 = [np.conjugate(wfi).dot(wfb) for wfi in wsex] # matrix element
-    eex = esex - esex[0] # difference
+    # transitions from the reference's own energy, <wf0|H|wf0> in this
+    # basis, the ED references' convention (each initial state measured
+    # from its own energy); it is esex[0] at a unique ground state
+    e_ref = float(np.real(np.vdot(d,esex*d)))
+    eex = esex - e_ref # difference
     es,adv = dcex(eex,c1,c2,es=es,delta=delta) # return correlator
     es,ret = dcex(eex,c2,c1,es=es,delta=-delta) # return correlator
     return es,1j*(adv-ret)/(2.*np.pi) # return correlator
 
 
 
+
+
+# How far the chain's state may lie outside the span of the cached basis:
+# 1 - ||d||^2 is the fraction of the reference the basis cannot represent,
+# and the correlator loses that weight. A state in the span gives 1e-14 (a
+# unique ground state, or a member of a manifold the basis holds); what
+# this catches is a state the basis never saw, e.g. one set with set_gs()
+# after the basis was built from a different one.
+REFERENCE_SPAN_TOL = 1e-6
+
+
+def _reference_coefficients(self,ws,C):
+    """d_n = <n|wf0>/||wf0||, the chain's ground state in the orthonormal
+    rediagonalized basis |n> = sum_a C[a,n]|a> of the raw MPS basis ws,
+    checked to lie in its span (||d||^2 = 1)."""
+    ref = self.get_gs() # the chain's state (cheap: current by now)
+    nrm = np.sqrt(np.real(ref.dot(ref)))
+    o = np.array([ws[a].dot(ref) for a in range(len(ws))])/nrm
+    d = np.conjugate(C.T)@o
+    weight = float(np.real(np.vdot(d,d)))
+    if abs(weight-1.0)>REFERENCE_SPAN_TOL:
+        raise ValueError(
+            "submode='EX' measures from the chain's ground state expressed "
+            "in its cached excited-state basis, and that state lies outside "
+            "the basis: its weight in it is %.8f, not 1 (tolerance %g). "
+            "This happens when the state was set with set_gs() or "
+            "set_initial_wf() after the basis was built, or when the solver "
+            "parameters changed since; the basis is cached per Hamiltonian "
+            "(Many_Body_Chain._dcex_excited_cache, cleared by "
+            "set_hamiltonian()), so clear it, or raise nex so the basis "
+            "holds the state."%(weight,REFERENCE_SPAN_TOL))
+    return d
 
 
 def dcex(eex,c1,c2,es=np.linspace(-1.0,10.0,300),delta=1e-1):

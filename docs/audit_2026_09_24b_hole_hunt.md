@@ -23,6 +23,17 @@ re-derive any of it. Fixed entries gain a `**Status**` line under their
 classification line and are kept rather than deleted, since the repro doubles
 as the regression check.
 
+All 18 have now been addressed: every entry carries a `**Status**` line
+reading FIXED, the regressions live in four files,
+`tests/test_audit_2026_09_24b_<cluster>.py` for `groundstate`, `kpm`,
+`realtime` and `misc`, and finding 3 needed a rebuild of both compiled
+extensions. The four files pass together (144 passed). Two things are left
+open and say so in their Status lines: the sliver just below
+`kpm_scale=1/2` that no moment bound sees (findings 2 and 3) and
+`julia_live`'s warm start (finding 12). The fixes that changed numbers
+rather than behaviour are listed together in `CLAUDE.md`'s paragraph for
+this audit.
+
 What the hunt says about `30200a4` itself, in one paragraph: the fixes hold on
 the ground each one was written for (the nulls are collected in "Ruled out"),
 and the new holes sit where a fix met a neighbour it did not look at. The
@@ -160,6 +171,8 @@ fix at `dynamics.py:190` and `gs_energy_single`.
 ### 1. `disentangle_manifold` chooses between `eigh` and `eig` on the one-sided Hermiticity proof, so a Hermitian operator the proof cannot see is diagonalized as a general matrix and the "disentangled" basis comes back non-orthonormal by an O(1), roundoff-dependent amount (2.7e-02 to 7.9e-01 measured) whenever the operator is degenerate on the manifold
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `operators`
+
+**Status**: FIXED. `disentangle_manifold` decides on `wfs[0].MBO.is_hermitian(A)`, the chain's probe (proof first, then the random witness), falling back to the bare proof when a state carries no chain (`disentangle._is_hermitian`), and on the Hermitian branch takes `eigh` of `(ma+ma^dagger)/2`; the `eig` branch stays for a non-Hermitian operator, which is bit-identical. Pinned by `tests/test_audit_2026_09_24b_misc.py::test_unproven_hermitian_operator_gives_an_orthonormal_eigenbasis` (spin, fermion, parafermion: Gram error below 1e-12, exact levels, A diagonal on the output), `::test_bare_proof_would_have_taken_eig`, `::test_proven_operator_output_is_unchanged` (columns up to a phase, or eigenprojectors, to 1e-12), `::test_non_hermitian_operator_still_takes_eig` and `::test_states_without_a_chain_fall_back_to_the_bare_proof`. NUMBERS CHANGE: for `C0*Adag1+Cdag0*A1` on the hunter's 2-site fermion manifold the Gram error goes from 3.237e-01 to 1.177e-15 and the level error from 5.640e-02 to 1.665e-15; for `1j*Sx0*Sy0` from 3.546e-01 to 2.220e-15 and from 2.042e-01 to 1.554e-15; for `Sig0+SigDag0` on a 2-site Z3 chain from 1.65e-01 to 1.87e-14. Because the whole Hermitian branch is now symmetrized, a proven operator moves too, at the gauge level: a phase flip on one state of `0.3*N0+0.1*N1`, a rotation inside the degenerate eigenspace of `-0.5*Sz0` (eigenprojectors unchanged), and on truncated Heisenberg manifolds a correction at the truncation level for `-0.5*Sz_tot` (eigenvalues by 9.8e-5 at L=8, `maxm=6`), since plain `eigh` read one triangle of an `ma` that is Hermitian only to that level; the output of `0.3*Sz0+0.1*Sz1` is unchanged to 1e-15.
 
 **Where**: `src/dmrgpy/mpsalgebratk/disentangle.py:12` (the branch on the bare
 `A.is_hermitian()`), reached only as `dmrgpy.mpsalgebra.disentangle_manifold`
@@ -379,6 +392,8 @@ proof cannot see.
 ### 2. Since `765b537`, `mode="ED"` KPM rescales like the DMRG routes but carries no moment-divergence check, so whenever the ground state or the top of the band falls outside [-1,1] and carries weight it returns an unflagged wrong spectrum: a spurious 0.80 peak where the exact density is zero at `kpm_scale=0.49`, integrals of 102.6, 2.84e4 and -4.69e6 against a sum rule of 0.25 further down
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `kpm` &middot; origin `765b537`
+
+**Status**: FIXED. `algebra/kpm.py` gains `KPM_MOMENT_BOUND_FACTOR = 1.5` and a shared `check_kpm_moment(mu, bound)`, and `get_moments_vivj_python` checks every moment against 1.5*||vi||*||vj||, raising the DMRG loops' `RuntimeError` message; both of its callers, `edtk/dynamics.py`'s Hermitian KPM branch and `edtk/distribution.py`, go through `dm_vivj_energy`, and the non-Hermitian KPM uses `get_mu_n_nh`, which the bound does not reach. The "sliver" just below 1/2 that no moment bound sees is left open, as the reviewer measured it. Pinned by `tests/test_audit_2026_09_24b_kpm.py::test_ed_kpm_below_half_raises_where_it_returned_garbage` (0.49 and 0.45), `::test_ed_kpm_below_half_still_exact_without_elastic_weight` and `::test_ed_kpm_at_the_default_scale_is_unchanged`. No returned number of a correct run changes: on the field chain at `kpm_scale` 0.49 (integral 0.2467, a spurious 0.80 peak) and 0.45 (integral 102.6) ED now raises, the fieldless chain at 0.45 still returns 0.24997, 0.7 and 0.55 are bit-identical, and ED `get_distribution` with too small a `scale` (integrals of -8.07e+07 at 0.9 and 5.24e+15 at 0.5 on X=Sx0+Sx1) now raises.
 
 **Where**: `src/dmrgpy/algebra/kpm.py::get_moments_vivj_python` (the ED moment
 recursion, no check), reached from `edtk/dynamics.py::dynamical_correlator_kpm`
@@ -705,6 +720,8 @@ field=0.0 ks=0.3000 delta=0.200 n= 16 raw=2.018e+02 damped=1.922e+00  max|y-yref
 ### 3. The moment-divergence guard of every DMRG KPM route, `|mu_k| > 1e3*(||vi|| ||vj|| + 1)`, is 1e3 to 5e3 times looser than the exact bound and not scale-invariant, so v2, v3, `"python"` and `julia_live` return spectra up to 109 times the true peak without raising below `kpm_scale=1/2`, and scaling the operators by 1e-2 disables it over the whole band
 
 `bug` &middot; severity **MEDIUM** for the +1 term, **LOW to MEDIUM** for the band below 1/2 &middot; CONFIRMED, NARROWED &middot; lens `kpm` (found by the reviewer of finding 2) &middot; origin `a67228e`, `695c452`
+
+**Status**: FIXED, with a rebuild of both extensions. The threshold is 1.5*||vi||*||vj||, with no +1, in `pyitensor/chain.py::_check_kpm_moment` (now the shared check), in `check_kpm_moment` of both `chain_session.h` (the v3 copy covering the plain and the energy-truncated loops) and in `mpsjulialive/kpm.jl`; every accelerated loop now checks both moments it appends per step. `general_kpm` keeps the bound, since every in-tree X there is Hermitian and `scale_operator` places it in [-0.8,0.8]. The sliver below 1/2 stays open. One claim of the reviewer did not hold: truncation can push a moment past the bound when it is harsh, 10.05 at `kpmmaxm=2` and 2.60 at `kpmmaxm=3` on 4 sites at `kpm_scale=0.55`, on runs whose spectra are 683 and 55 per cent of the peak wrong, so the guard now raises there too (every run with an error below 10 per cent stays at a ratio of 1.0000 or less); its message then names the band edge and `kpm_scale` rather than `kpmmaxm`, a lead. `julia_live` raises `juliacall.JuliaError` rather than `RuntimeError`, as it did before. Pinned by `tests/test_audit_2026_09_24b_kpm.py::test_dmrg_kpm_raises_in_the_band_the_old_guard_let_through` (three `kpm_scale` values on `"python"`, v3 and v2), `::test_dmrg_kpm_full_recursion_raises_too` (with `julia_live`), `::test_dmrg_guard_is_scale_invariant`, `::test_dmrg_kpm_correct_runs_do_not_raise` and `::test_dmrg_kpm_truncated_correct_runs_do_not_raise` (8 sites, `kpmmaxm=8`, auto and cross pairs, acceleration on and off); before the rebuild the v2 and v3 cases failed, 10 of 15. No returned number of a correct run changes: at 0.495, 0.49 and 0.485, where `"python"` returned curves 1.931, 5.672 and 29.47 high (v3 1.879, 5.672, 29.49; v2 1.930, 5.666, 29.49), and at 0.45 with operators scaled by 1e-2, every backend now raises; 0.7 and 0.55 on `"python"` are identical, and v3 moves only by its documented run-to-run emax noise.
 
 **Where**: `src/dmrgpy/pyitensor/chain.py::_check_kpm_moment`; `check_kpm_moment`
 in `src/dmrgpy/mpscpp2/chain_session.h` and `src/dmrgpy/mpscpp3/chain_session.h`
@@ -1125,6 +1142,8 @@ promise in both formats.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `kpm` &middot; origin `51357d8` (the flag), made a stated contradiction by `765b537`
 
+**Status**: FIXED. `edtk/dynamics.py::get_dynamical_correlator` computes `herm = is_hermitian(h)` once and, on `submode=="KPM" and herm`, after the T>0 guard and before `get_gs_array()`, raises `NotImplementedError` under `kpm_energy_truncate`, naming `mode.py`'s fallback in the message; `Many_Body_Chain.get_dynamical_correlator` pushes the flag across. The non-Hermitian KPM reads neither the flag nor `kpm_scale` on either mode and still returns. The exact projected anchored window on ED is left as a feature for later. Pinned by `tests/test_audit_2026_09_24b_kpm.py::test_ed_kpm_refuses_energy_truncation_before_the_ground_state` (a spy on `get_gs_array`), `::test_two_site_v3_fallback_refuses_energy_truncation_by_name` and `::test_non_hermitian_ed_kpm_ignores_both_flags`. No number changes: the ED curve under the flag was identical to the flag-off one and now raises. The known-issue sentence and the O2 sentences in `dynamics.py` and `CLAUDE.md` are corrected.
+
 **Where**: `src/dmrgpy/manybodychain.py:985-986` (the ED push of
 `get_dynamical_correlator` forwards `kpm_scale` and `kpm_n_scale` only) and
 `src/dmrgpy/edtk/dynamics.py::dynamical_correlator_kpm` (always the
@@ -1433,6 +1452,8 @@ known-issue sentence and the two O2 sentences.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `kpm` &middot; origin `30200a4`
 
+**Status**: FIXED, with finding 4 in the same branch. The `kpm_n_scale` check sits in `edtk/dynamics.py`'s Hermitian KPM branch, after the T>0 guard and before the ground state, so a T>0 call gets its own error back; the pre-check in `manybodychain.py` is gone and its comment points there, and `validate_kpm_n_scale`'s docstring lists the new call site. Pinned by `tests/test_audit_2026_09_24b_kpm.py::test_non_hermitian_ed_kpm_ignores_both_flags` and `::test_hermitian_ed_kpm_n_scale_raises_before_the_ground_state` (1.5 and 0). No number changes: a non-Hermitian ED KPM at `kpm_n_scale=1.5` used to raise `TypeError` and now returns the spectrum at 1 exactly (difference 0.0).
+
 **Where**: `src/dmrgpy/manybodychain.py` (the pre-check on
 `kwargs.get("submode","KPM")=="KPM"` in the ED push, added by `30200a4`), one
 frame before `edtk/dynamics.py`'s non-Hermitian branch into
@@ -1709,6 +1730,8 @@ non-Hermitian KPM entry that its count is `n=`. No number changes.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `kpm` &middot; origin `d22a576`
 
+**Status**: FIXED. `kpm_finite` rejects `itensor_version` and `mode` by name, with a message pointing at the hardcoded `"python"` window, and then raises one `TypeError` naming, sorted, every key the temporary chain does not hold as a setting: a missing attribute, a private name or a method (a method passes `hasattr` too, and `gs_energy=3` would have overwritten it); both checks run before any DMRG. `deconvolve` is gone from the docstring. Pinned by `tests/test_audit_2026_09_24b_misc.py::test_misspelled_window_key_raises` (`kpm_nscale`, `kpmscale`, `max_m`, `nsweep`), `::test_every_unknown_window_key_is_named_sorted`, `::test_backend_keys_are_rejected_by_name`, `::test_method_or_private_window_key_raises` and `::test_correct_window_key_still_moves_the_spectrum`. No number changes: the correct `kpm_n_scale=3` gives the peak 0.90702 before and after on the reviewer's Heisenberg chain, and every in-tree caller passes only `maxm`, `nsweeps` or `kpmmaxm`.
+
 **Where**: `src/dmrgpy/infinitechain.py:1368-1369`, `for k, v in
 (window_chain_kwargs or {}).items(): setattr(wc, k, v)`, on a `Many_Body_Chain`
 the method builds and discards.
@@ -1816,6 +1839,8 @@ forwarded keywords, since `deconvolve=True` now raises.
 ### 7. `sxt_to_skomega` is hard-wired to the FFT-plus-interpolation stage that finding 7 of the previous record replaced, so every infinite-chain `td_dynamical_correlator` returns S(k,omega) as a straight line between FFT nodes: at a converged window, delta*T = 6, 20 per cent of the peak off with heights down to 0.79 of exact, where the direct sum on the same series is at 0.25 per cent
 
 `bug` &middot; severity **MEDIUM** (latent for every checked-in caller, real for any caller who converges the window) &middot; CONFIRMED, NARROWED &middot; lens `realtime` &middot; origin `30200a4` (the hard-wiring and its docstring)
+
+**Status**: FIXED, together with finding 8. `sxt_to_skomega` no longer passes `_evaluation="fft"`, so every infinite-chain S(k,omega) goes through the direct per-frequency sum; the switch stays, and `_fourier_transform_correlator`'s docstring now says no production route calls the FFT stage (checked by a grep of `src/`). The two short-window callers call the public `td_dynamical_correlator(..., x_values=[0], ks=[0.0])` instead of the transform directly. `test_sxt_to_skomega_stays_on_the_fft_stage` is replaced by `tests/test_audit_2026_09_24_realtime.py::test_sxt_to_skomega_matches_the_damped_trapezoid_sum` (delta*T = 6, relative error below 1e-11, and the FFT stage must miss by more than 0.1), with `tests/test_audit_2026_09_24b_realtime.py::test_sxt_to_skomega_is_the_direct_sum_at_every_window` on four windows. The short `nt` defaults are unchanged; raising them is the previous record's lead, not this finding. NUMBERS CHANGE for every infinite-chain S(k,omega): on a single magnon (L=16, dt=0.1, nt=1200, delta=0.05) the FFT stage was 2.103e-01 of the peak off the closed form with heights down to 0.797, and the direct sum is 2.0e-14 off; on the reviewer's saved TFIM window data (Sx,Sx) the k=pi line moves from +1.045 to +0.905 against eps = 0.900.
 
 **Where**: `src/dmrgpy/timedependent.py:768` (`sxt_to_skomega` passes
 `_evaluation="fft"` whatever `nt` it is given), reached from
@@ -2081,6 +2106,8 @@ of zero the line belongs on. NUMBERS CHANGE for every infinite-chain S(k,omega).
 ### 8. Every infinite-chain S(k,omega), on both backends, is mirrored in frequency: the lines sit at omega = -D_n where every finite route puts them at +D_n, so at the default `window=[-1,10]` the returned array is mostly the tail of lines lying below the window (9.5 to 53 per cent of a line's weight inside it), and the example's KPM cross-check passes only because of the mirror
 
 `bug` &middot; severity **MEDIUM** (every value of the feature, one feature) &middot; CONFIRMED &middot; lens `realtime` (found by the reviewer of finding 7) &middot; origin the `idmrg_window` port
+
+**Status**: FIXED, together with finding 7. `sxt_to_skomega` conjugates the momentum series after the spatial sum, `Skt = np.conj(S@phase)`, the finite route's conjugate-at-return at the one step both routes share, and its docstring and `dynamical_correlator_komega`'s now say so; nothing below the reduction changed. The two direct callers now go through the public route, so they carry the same conjugation, and both, the example's assertion included, moved to the local Sx,Sx anchor on the TFIM paramagnet. The fermionic example gained one sentence, and its code is unchanged. Conjugating before the sum passes the magnon's closed form, which is parity-symmetric, so the chiral ring is what pins the choice. Pinned by `tests/test_audit_2026_09_24b_realtime.py::test_sxt_to_skomega_momentum_label_and_sign_on_a_chiral_ring` and the rewritten `tests/test_infinite_chain.py::test_td_dynamical_correlator_agrees_qualitatively_with_kpm_finite` (both peaks in [0.9, 1.9], TD weight on omega<0 below 0.15, correlation with KPM above 0.8; passed three times on unseeded iDMRG). NUMBERS CHANGE for every infinite-chain S(k,omega) on both backends: on the TFIM paramagnet through the public route the `"python"` lines go from -2.095, -1.570 and -1.045 to +1.910, +1.495 and +0.905 at k = 0, pi/2 and pi (eps = 1.900, 1.487, 0.900), and the weight below zero from 0.971, 0.960 and 0.928 to 0.034, 0.047 and 0.083; v3 gives the same new lines. The example's cross-check now lands at TD +1.120 against KPM +1.060, and its tracked heatmap `td_dynamical_correlator_Skw.png` is regenerated.
 
 **Where**: `src/dmrgpy/timedependent.py::sxt_to_skomega`, the reduction shared by
 `Infinite_Many_Body_Chain.td_dynamical_correlator` on v3 and
@@ -2393,6 +2420,8 @@ on both backends, the fermionic example's panels included.
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `realtime` &middot; origin `f54b3c2` (2020)
 
+**Status**: FIXED, together with finding 10. `evolution_ABC` advances both of its states with `evolve(..., -Hop, ...)`, i.e. e^{-iHt}, and its docstring says so and why the minus sits there; `evolve()` and `scipy_evolution` are unchanged, since `evolution_DC` relies on e^{+iHt}. The comment at `examples/time_evolution/time_evolution_ABA/main.py:13` now reads <X|A^dagger e^{iHt} B e^{-iHt} A|X>. Pinned by `tests/test_audit_2026_09_24b_realtime.py::test_larmor_precession_runs_forward` (Sx, Sy and S+ against cos, sin and e^{+iBt}, on ED, `"python"` and v3) and `::test_flux_ring_circulates_forward`; against the committed code 24 of that file's 28 tests fail. NUMBERS CHANGE for `evolve_and_measure(mode="ED")` and `evolution_ABA(mode="ED")` wherever the Hamiltonian breaks time reversal, the start state is complex or the observable has imaginary matrix elements: Larmor precession (3 sites, B=1, +x start) <Sy_0>(t=1.0) goes from -0.4207 to +0.4207 (closed form +0.4207), and on the 3-site flux ring (phi = pi/6, mu = 3) <N_1>(t=1.5) from 0.1024 to 0.8413. Every existing test, which measures Sz or N under a real Hamiltonian, is unchanged.
+
 **Where**: `src/dmrgpy/edtk/timedependent.py::evolution_ABC` (lines 35-36), which
 advances both of its states with `edtk/tdtk.py::scipy_evolution`, integrating
 dpsi/dt = +1j*h@psi (`tdtk.py:28`); reached by `evolve_and_measure(mode="ED")`
@@ -2704,6 +2733,8 @@ has imaginary matrix elements.
 ### 10. DMRG `evolve_and_measure` conjugates its result on return, so on every backend and every integrator it returns <psi(t)|O^dagger|psi(t)> instead of <psi(t)|O|psi(t)>: a bond current reads with the wrong sign, and for O = Sz_0 + i*Sx_0 on an eigenstate at t=0 it returns -0.5i where `vev()` on the same state returns +0.5i
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `realtime` (found by the reviewer of finding 9) &middot; origin `9e33f32` (2020)
+
+**Status**: FIXED, together with finding 9. `evolve_and_measure_dmrg` returns `cs` unconjugated in both of its branches, in `timedependent.py` and in `mpsjulialive/timedependent.py`; `evolution_dmrg_DC` keeps its conjugation, and the docstring now states the return as <psi(t)|O|psi(t)> and says why the correlator route conjugates and this one does not. Pinned by `tests/test_audit_2026_09_24b_realtime.py::test_evolve_and_measure_on_an_eigenstate_is_vev` (ED, and `"python"` and v3 on TDVP, TDVP_GSE, TEBD, AUTO and MPO, v2 on MPO, `julia_live` on TDVP and TEBD), `::test_evolve_and_measure_return_wf_branch_is_not_conjugated` and `::test_evolution_aba_on_an_eigenstate_is_vev`. NUMBERS CHANGE for `evolve_and_measure(mode="DMRG")` and `evolution_ABA(mode="DMRG")` on any observable with a complex expectation value, by exactly twice its imaginary part, on v2, v3, `"python"` and `julia_live`: on the +x state of -sum Sx (3 sites), O = Sz_0 + i*Sx_0 goes from -0.5i to +0.5i, and ED stays at +0.5i. Hermitian observables do not move.
 
 **Where**: `src/dmrgpy/timedependent.py:288-289` (`evolve_and_measure_dmrg`
 returns `cs.real-1j*cs.imag`, in both its plain and its `return_wf` branch) and the
@@ -3057,6 +3088,8 @@ exactly twice its imaginary part.
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `realtime` &middot; origin `a8233ab` (the pybind port)
 
+**Status**: FIXED, with findings 12 to 14 in one change. The public `set_gs`, `set_initial_wf` and `set_initial_wf_guess` go through `groundstate.mark_injected()`, a mark that holds the injected object and counts only while `self.wf0` is that object, so a later solve or `restart()` retires it; `gs_is_current` is False while a mark is pending; `gs_energy_single` hands the session a detached copy of an injected state and, under skip, takes it unswept with e0 = <wf|H|wf>. `dynamics.py:190` is now `groundstate.ground_state_on_session()`, which makes no session call when the stored state is current and the Hamiltonian is on the session, and otherwise solves and sends. Two things the reviewers did not see had to go in with it: the session fills its lower band edge lazily through `gs_energy(skip_dmrg=True)`, which after a push would have swept the pushed state in place (|<x|session>|^2 0.989 on `"python"`, 0.987 on v3, measured), so the edges are filled before the push (`session.excited_states(1,1.0,False)`, no C++ change; one reduced solve when the edges are missing); and `__deepcopy__` now resets the clone's ground state, since the copied `wf0` carries the original session's site indices. Pinned by `tests/test_audit_2026_09_24b_groundstate.py::test_every_submode_measures_the_member_set_gs_set` (KPM, CVM, CVM_explicit, ROOTN, TD, TDZ and EX, on `"python"` and v3), `::test_injected_state_is_not_swept_by_the_first_kpm_call`, `::test_a_clone_of_a_solved_chain_runs_a_correlator` and `::test_a_repeated_correlator_on_a_solved_chain_does_not_resweep` (zero session calls, zero sweeps); against the committed code 37 of that file's 40 tests fail. NUMBERS CHANGE only after `set_gs` or `set_initial_wf`: on the 3-site Heisenberg chain after `set_gs` of the pure 2Sz=+1 member, TD goes from 2.036e-01 to 3.3e-06 off the member's exact density on `"python"` (from 1.505e-01 on v3), CVM and ROOTN from 2.036e-01 to 1e-15, and KPM from 2.787e-01 to 9.3e-04 off ED's KPM (from 4.538e-01 on v3), the up/down difference going from 0 to ED's 1.317.
+
 **Where**: `src/dmrgpy/dynamics.py:190` (`self.set_initial_wf(self.wf0)` at the
 top of every DMRG correlator, which sets `computed_gs=False`),
 `src/dmrgpy/groundstate.py:175` (`gs_energy_single` calls
@@ -3308,6 +3341,8 @@ closes findings 11, 12, 13 and 14. NUMBERS CHANGE only after `set_gs` or
 ### 12. `set_initial_wf` and `set_initial_wf_guess`, the documented way to re-enter `gs_energy()` with a state in hand, never reach the DMRG session on any backend, so the warm start does nothing and the transverse-field Ising example, which seeds the ferromagnetic branch at every field, plots Mz/n of 0.001 across the ordered phase on v3 and v2 where the seeded branch gives up to 0.4998
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `realtime` (found by the reviewer of finding 11) &middot; origin `a8233ab` (the pybind port)
+
+**Status**: FIXED, with finding 11's change. `set_initial_wf_guess` sweeps from a detached copy of the guess, `set_initial_wf` returns the state unswept, and the explicit `gs_energy(wf0=x)` pushes a copy too, so the caller's `x` is no longer mutated on `"python"`; `Many_Body_Chain.gs_energy` no longer returns its stored energy ahead of a `wf0=` argument, and a stored state whose Hamiltonian is no longer the session's is solved again. `set_initial_wf_guess`'s docstring and `tests/test_bond_dimension_ramp.py`'s module docstring are corrected. `julia_live` has the same shape (`get_gs_dmrg` starts from `random_state()` unless given `wf0=`) and is left as it is, recorded here as open. Pinned by `tests/test_audit_2026_09_24b_groundstate.py::test_warm_start_setters_reach_the_session`, `::test_the_callers_state_is_not_mutated`, `::test_explicit_wf0_is_read_on_a_current_chain` and `::test_transverse_ising_warm_start_seeds_the_branch`. NUMBERS CHANGE for every caller of the two setters: on v3, `set_initial_wf_guess(target)` then `gs_energy()` goes from |<target|result>|^2 = 0.4520 to 1.0000; the transverse-field Ising example at n=40 with its shipped schedule goes from Mz/n = +0.00085 to +0.4998 at B = +-0.026 and from 0.0000 to 0.3764 at B = -0.436, and its `_map` sibling from 0.2773 to 0.3701 at B = 0.436 and from 0.0000 to 0.0387 at B = 0.462.
 
 **Where**: `Many_Body_Chain.set_initial_wf`/`set_initial_wf_guess`
 (`manybodychain.py`, around line 1133), which set `self.wf0` and the pre-port
@@ -3620,6 +3655,8 @@ included.
 ### 13. `get_kondo_spectrum(mode="DMRG", n_gs>1)` runs a hidden DMRG sweep from each member of the manifold before measuring it, so on v2 and v3, at a split below `delta`, the excited member relaxes into the lower one in 16 of 24 runs and the call silently returns the single-state 2.0 against the two-state average 1.5, 33 per cent high
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `kondo` &middot; origin `30200a4` (the previous record's finding 12 fix)
+
+**Status**: FIXED, with finding 11's change. Each member is installed by `set_gs` alone, which the next ground-state read hands to the session unswept, so no member is re-swept; the `hasattr(session, "set_wavefunction")` guard stays and v2 is accepted on purpose, since it behaves like v3 in every run, and the docstring and the comment at `spinchain.py:412-413` are rewritten. Pinned by `tests/test_audit_2026_09_24b_groundstate.py::test_n_gs_measures_each_member_unswept_and_restores_the_chain` on v3 and v2, six runs each, since the defect showed in 16 of 24 runs and a single run is no guard. NUMBERS CHANGE on v2 and v3 at a split below `delta`: at eps=1e-5, delta=1e-4, six runs on v3 went from 1 of 6 at the two-state average 1.5 to 6 of 6 (1.499988 to 1.500009).
 
 **Where**: `src/dmrgpy/spinchain.py`, the `n_gs` loop of
 `_get_kondo_spectrum_dmrg`, which installs each member with `set_gs` and
@@ -3982,6 +4019,8 @@ split below `delta`, where the relaxed runs move from 2.0 onto 1.5.
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `kondo` &middot; origin `30200a4`
 
+**Status**: FIXED. The `n_gs` loop snapshots `(wf0, e0, computed_gs, _gs_solver_key, _gs_injected)` before the loop and restores it as a unit in the `finally`, pushing a copy of the solved state back to the session, and inside the loop `gs_energy()` is each member's own energy, the convention of the ED references. Pinned by `tests/test_audit_2026_09_24b_groundstate.py::test_n_gs_measures_each_member_unswept_and_restores_the_chain` (`gs_energy()` equal before and after, at a split below delta) and `::test_n_gs_gs_energy_is_each_members_own_inside_the_loop`. NUMBERS CHANGE only for a caller that read `gs_energy()` between an `n_gs>1` call and the next correlator: on `"python"` at eps=1e-5 `gs_energy()` after minus before goes from 1.000e-05 to exactly 0, and on v3 it is 0 in six runs.
+
 **Where**: `src/dmrgpy/spinchain.py`, the `finally` of the `n_gs` loop, which
 restores `wf0`/`computed_gs` through `set_gs` and the session through
 `set_wavefunction` but not `self.e0`; inside the loop `gs_energy_single`
@@ -4329,6 +4368,8 @@ next correlator.
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `kondo` &middot; origin `30200a4` (the `n_gs=` keyword)
 
+**Status**: FIXED, both halves. `n_gs>1` accepts only the submodes on `spinchain._N_GS_SUBMODES`, each verified with the up/down test to read the chain's state (KPM, CVM, CVM_explicit, ROOTN, TD, TDZ, EX), and raises `NotImplementedError` for SECTOR and anything else; and `dcex` measures from the chain's own state projected onto its cached basis, d = C^dagger o, with transitions measured from that state's own energy d^dagger diag(E) d, raising `ValueError` when the state's weight in the basis differs from 1 by more than 1e-6. Its cache key now includes the solver parameters, since a loop over `maxm` reused the first basis for every value. Pinned by `tests/test_audit_2026_09_24b_groundstate.py::test_n_gs_averages_under_ex`, `::test_ex_at_a_unique_ground_state_is_unchanged`, `::test_ex_refuses_a_state_outside_its_basis` and `::test_n_gs_refuses_a_submode_that_does_not_read_the_state` (SECTOR, maxent). NUMBERS CHANGE for EX at a degenerate ground state, which now reads the chain's state: at the exact crossing `n_gs=2` goes from 1.1392, 1.8711 and 1.6200 on three seeds to 1.512780 on every seed (the 0.013 above 1.5 is EX's Lorentzian letting the S+ pole at 2e-3 leak in, as the reviewer predicted); at a unique ground state EX moves at the last digit only (0.9286496805310763 to ...719).
+
 **Where**: `src/dmrgpy/dcex.py::dynamical_correlator` (its reference is
 `wsex[0]` of H rediagonalized in an excited-state basis cached in
 `_dcex_excited_cache`, keyed on `(nex, scale, gram_schmidt)`, cleared only by
@@ -4515,6 +4556,8 @@ ground state" is the wrong shape. NUMBERS CHANGE under the reprojection for EX a
 ### 16. The public `Many_Body_Chain.get_dynamical_correlator` takes `i=`/`j=` as named parameters and hands them to `str2MO`, which ignores them next to an operator pair, so every wrapper that builds its own pair and forwards `**kwargs` drops a caller's `i=`/`j=` silently; `get_kondo_spectrum(mode="DMRG", i=1, j=1)` returns the site-0 spectrum bit for bit where the same call on `mode="ED"` raises
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `kondo` &middot; origin `1b87543` (the signature), `30200a4` (the ED/DMRG asymmetry)
+
+**Status**: FIXED. `Many_Body_Chain.get_dynamical_correlator` defaults to `i=None, j=None`, raises `TypeError` when either is given with a non-string `name`, and passes 0 in their place on the string branch; `kpmdmrg.py` and the lower-level `_MB` route are untouched. Every inheriting wrapper, the Kondo route included, now raises on the same call. Pinned by `tests/test_audit_2026_09_24b_kpm.py::test_sites_next_to_an_operator_pair_raise` (`i=1, j=1` and `i=0, j=0` on DMRG and ED) and `::test_string_name_still_honours_the_sites`. No number changes: a pair with `i=1, j=1` returned C[Sz0,Sz0] exactly (0.306 from C[Sz1,Sz1]) on both modes and now raises, while `"ZZ", i=1, j=1` still gives C[Sz1,Sz1] with a difference of 0.
 
 **Where**: `src/dmrgpy/manybodychain.py::get_dynamical_correlator(self,
 mode="DMRG", name=None, i=0, j=0, **kwargs)`. Inheriting wrappers in `src/` (an
@@ -4722,6 +4765,8 @@ previous record's finding 11 sentence. No number changes.
 ### 17. Both correlator-based Kondo terms assume an increasing `es`, which nothing says and which `30200a4`'s docstrings now invite breaking: on a refined block appended after a coarse grid, the second-order term is silently 3.03 off a 6.97 peak and the potential term 0.654 off a 0.671 peak, where the same points sorted are right
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `kondo` &middot; origin pre-`30200a4` in the code, `30200a4` in the docstrings
+
+**Status**: FIXED. `_cumulative_theta0_weight` and `_convolved_F0_weight` `np.asarray` the grid and sort `x` and `S` together with a stable `np.argsort`; the docstrings now say "may be non-uniform and in any order", and the second-order docstring's "the cumulative integral starts at es[0]" reads "the lowest point of es". Pinned by `tests/test_audit_2026_09_24b_misc.py::test_kondo_terms_do_not_depend_on_the_order_of_es` (coarse then fine, fine then coarse, descending: agreement with the sorted grid to 1e-12 of the peak on both terms, and no sum-rule warning) and `::test_kondo_terms_accept_es_as_a_list`. NUMBERS CHANGE only on non-increasing grids, which were wrong: on the single S=1/2 at 10 T (`mode="ED"`, `submode="ED"`), coarse block then fine block, the potential term goes from 0.6536 to 0.0005091 off exact and the second-order term from 3.035 to 0.03183; fine then coarse was 0.6633 and 3.11, descending 1.341 and 10.99, and all three now give the sorted answer; increasing grids are `array_equal` before and after.
 
 **Where**: `src/dmrgpy/kondospectrumtk/secondorder_dc.py::_cumulative_theta0_weight`
 (`cumulative_trapezoid(S, x)` then `np.interp(eVs, x, cum)`, undefined over a
@@ -4978,6 +5023,8 @@ non-increasing grids, which were wrong.
 ### 18. The padding strip that `30200a4` added at the entry of the one-site TDVP route reads the process-global `set_pad_bonds` flag rather than the state it is handed, so a state padded earlier and evolved with the flag off runs the previous record's finding 16 algorithm: 0.4929 off the unpadded trajectory from a Neel start, 1.5e-6 from an entangled one
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `pyitensor` &middot; origin `30200a4`
+
+**Status**: FIXED, with the reviewer's `fixS`. `_strip_bond_padding` keys on the state: with the flag on the lossless suspended `position(n)`/`position(1)` sweep runs in place as before; with it off the same sweep runs on a copy (`_Chain.copy()` copies the tensor list and the centre, and nothing mutates an ITensor in place) and is adopted only if some bond shrank, so an unpadded state comes back untouched (`_strip_sweep`, `_bond_dims`). `set_pad_bonds`' docstring in `pyitensor/backend.py` now says the strip keys on the state. Pinned by `tests/test_audit_2026_09_24b_misc.py::test_padded_state_evolved_with_the_flag_off_follows_the_unpadded_run` (flag cleared and `pad_bonds_suspended()`), `::test_padded_entangled_state_evolved_with_the_flag_off_follows_the_unpadded_run` and `::test_unpadded_runs_are_bit_identical` (Neel and dimer starts at `tdvp_gse_sweeps` 0 and 3). The cost is one extra lossless SVD sweep on a copy at the entry of every unpadded `TDVP_GSE` trajectory. NUMBERS CHANGE only in the padded-then-unpadded configuration: on the Neel quench (XXZ Delta=0.7, hz=0.1, dt=0.05) at n=10, K=8, 40 steps, `tdvp_gse_sweeps=0`, the distance to the unpadded run goes from 4.929e-01 to 1.166e-15 (n=8, K=4: from 1.925e-01 to 7.772e-15; dimer start: from 7.034e-08 to 6.578e-15), and at `tdvp_gse_sweeps=3` it stays at the gauge level (2.540e-09 to 3.178e-09, the reviewer's own `fixS` value).
 
 **Where**: `src/dmrgpy/pyitensor/chain.py::_strip_bond_padding` (returns early on
 `if not _bk.pad_bonds()`), called from `Chain.evolve_and_measure_tdvp_gse`. Reached

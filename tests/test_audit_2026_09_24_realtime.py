@@ -12,7 +12,9 @@ What each section pins:
   evaluated at each requested frequency, so the tests hold every
   real-time route to its own accuracy, and the contour on its own, as a
   TDZ-against-TD difference that shares everything but the contour. The
-  infinite-chain `sxt_to_skomega` stays on the FFT stage on purpose.
+  infinite-chain `sxt_to_skomega`, left on the FFT stage at the time,
+  came onto the direct sum with the 2026-09-24b audit's finding 7, and
+  is pinned here against a closed form.
 - Finding 8. `mode="ED"` TD re-solved the ground state with a randomly
   started eigsh inside every evolution, so on a degenerate ground state
   the two halves of a pair that takes two evolutions came from two
@@ -155,29 +157,44 @@ def test_direct_evaluation_is_the_fft_on_its_own_grid(nt, monkeypatch):
     assert np.max(np.abs(y_chunked - y_direct)) < 1e-12
 
 
-def test_sxt_to_skomega_stays_on_the_fft_stage():
-    """The infinite-chain S(k,omega) reduction was deliberately left on
-    the FFT-plus-interpolation stage, since at its own defaults the series
-    is cut at e^-1 of its envelope and nobody has measured what a direct
-    evaluation does there. Pinned bit for bit, and in a regime where the
-    two stages do differ, so the pin means something."""
-    rng = np.random.RandomState(11)
-    nt, nx, dt, delta = 25, 7, 0.05, 0.3
+def test_sxt_to_skomega_matches_the_damped_trapezoid_sum():
+    """The infinite-chain S(k,omega) reduction was left on the FFT-plus-
+    interpolation stage here, pinned bit for bit, whatever window the
+    caller gave; at a converged window, delta*T = 6, that was 2.1e-01 of
+    the peak off the exact answer (2026-09-24b audit, finding 7). It now
+    takes the direct sum, pinned by value against a closed form.
+
+    A single magnon on L sites, S(x,t) = (1/L) sum_q e^{iqx}
+    e^{-i eps(q) t}, the sign the IBC window produces, so that on the q
+    grid the conjugated momentum series is exactly e^{+i eps(k) t}, whose
+    damped trapezoid sum is a geometric series,
+
+        T(w) = (dt/pi) [ sum_{j<n} r^j - (1 + r^{n-1})/2 ],
+        r = e^{(i(eps - w) - delta) dt},
+
+    a line at w = +eps(k) (finding 8 of the same record is the sign).
+    The FFT stage misses the same closed form by more than 0.1 of the
+    peak, so the pin separates the two stages."""
+    L = 16
+    xs = np.arange(L) - L // 2
+    qs = 2 * np.pi * np.arange(L) / L
+    qs = np.where(qs > np.pi, qs - 2 * np.pi, qs)
+    ks = np.sort(qs)
+    eps_q, eps_k = 2 - 2 * np.cos(qs), 2 - 2 * np.cos(ks)
+    dt, nt, delta = 0.1, 1200, 0.05          # delta*T = 5.995
     ts = dt * np.arange(nt)
-    xs = np.arange(nx) - nx // 2
-    S = rng.normal(size=(nt, nx)) + 1j * rng.normal(size=(nt, nx))
-    ks = np.linspace(-np.pi, np.pi, 5)
-    es = np.linspace(-1.0, 6.0, 50)
+    S = np.exp(-1j * np.outer(ts, eps_q)) @ (np.exp(1j * np.outer(qs, xs)) / L)
+    es = np.linspace(-2.0, 6.0, 801)
     _ks, _es, Skw = timedependent.sxt_to_skomega(ts, xs, S, dt, ks=ks, es=es,
                                                   delta=delta)
-    for ik, k in enumerate(ks):
-        Skt = S @ np.exp(-1j * k * xs)
-        _e, g_fft = timedependent._fourier_transform_correlator(
-            ts, Skt, dt, es=es, delta=delta, _evaluation="fft")
-        _e, g_direct = timedependent._fourier_transform_correlator(
-            ts, Skt, dt, es=es, delta=delta)
-        assert np.array_equal(Skw[ik], g_fft)
-        assert np.max(np.abs(g_direct - g_fft)) > 1e-3
+    r = np.exp((1j * (eps_k[:, None] - es[None, :]) - delta) * dt)
+    ref = dt / np.pi * ((1 - r ** nt) / (1 - r) - 0.5 * (1 + r ** (nt - 1)))
+    peak = np.max(np.abs(ref))
+    assert np.max(np.abs(Skw - ref)) / peak < 1e-11
+    g_fft = np.array([timedependent._fourier_transform_correlator(
+        ts, np.conj(S @ np.exp(-1j * k * xs)), dt, es=es, delta=delta,
+        _evaluation="fft")[1] for k in ks])
+    assert np.max(np.abs(g_fft - ref)) / peak > 0.1
 
 
 # ------------------------------------------------------------- finding 8

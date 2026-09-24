@@ -675,7 +675,8 @@ The one-site route is now exempt from padding the way the MPO is:
 under `backend.pad_bonds_suspended()`, `quench_tdvp_gse` and
 `evolve_and_measure_tdvp_gse` strip the padding once at trajectory entry
 (`_strip_bond_padding`, a lossless SVD sweep on the evolved state only, so
-the caller's `wf` keeps its padding), and `_gse_bond_step` reads the true
+the caller's `wf` keeps its padding, keyed on the state rather than on the
+flag since the 2026-09-24 second-pass audit's finding 18), and `_gse_bond_step` reads the true
 rank from the spectrum, which keeps a direct padded caller of `gse.py`
 right as well. Measured on an XXZ quench (Delta=0.7, hz=0.1, Neel start,
 40 steps of dt=0.05), the largest distance between the padded and the

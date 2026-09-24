@@ -1326,7 +1326,7 @@ class Chain
             ap = exactApplyMPO(a,m,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff});
             ap = sum(2.0*ap,-1.0*am,{"Maxm",kpmmaxm,"Cutoff",kpmcutoff});
             out.push_back(overlapC(vj,ap));
-            check_kpm_moment(out,bound);
+            check_kpm_moment(out.back(),bound);
             am = 1.0*a;
             a = 1.0*ap;
             }
@@ -1359,7 +1359,9 @@ class Chain
             Cplx bk1 = 2.0*overlapC(a,ap) - mu1;
             out.push_back(bk);
             out.push_back(bk1);
-            check_kpm_moment(out,bound);
+            // both moments of the step, since the pair is appended together
+            check_kpm_moment(bk,bound);
+            check_kpm_moment(bk1,bound);
             am = 1.0*a;
             a = 1.0*ap;
             }
@@ -1371,11 +1373,18 @@ class Chain
     // (passed by the caller; for the auto-correlator path that is just
     // the zeroth moment, for the cross path it is NOT -- <vj|vi> can be
     // ~0 for near-orthogonal pairs while the moments stay O(bound)).
-    // Exponential growth beyond the bound means the scaled spectrum
-    // leaked outside [-1,1] (band-edge estimate too tight for the
-    // chosen kpm_scale) and every subsequent moment is garbage, so fail
-    // loudly instead of returning a silently wrong correlator. The +1.0
-    // keeps the threshold meaningful when both norms are tiny. Mirrors
+    // Growth beyond the bound means the scaled spectrum leaked outside
+    // [-1,1] (band-edge estimate too tight, or kpm_scale below 1/2 on
+    // the bandwidth-centred window, where E0 sits at -1/(2*kpm_scale))
+    // and the spectrum is wrong, so fail loudly instead of returning a
+    // silently wrong correlator. The threshold is 1.5*bound, the same
+    // factor as algebra/kpm.py's KPM_MOMENT_BOUND_FACTOR on the ED and
+    // "python" routes: a correct run stays at a ratio of at most 1. It
+    // used to be 1e3*(bound+1.0), which let spectra up to 109 times the
+    // true peak through below kpm_scale=1/2 and was an absolute
+    // threshold for operators of small norm, the moments being bilinear
+    // in vi and vj (2026-09-24b audit, finding 3). One moment per call:
+    // the accelerated loop checks both moments of its step. Mirrors
     // mpscpp3's check_kpm_moment, including its `throw ITError(...)`
     // (not the `Error(...)` macro used elsewhere in this file for
     // genuine internal invariant violations): ITensor's own
@@ -1394,12 +1403,14 @@ class Chain
     // std::runtime_error, which pybind11 auto-translates to Python's
     // RuntimeError, matching pyitensor's own exception type/message.
     static void
-    check_kpm_moment(std::vector<std::complex<double>> const& out, double bound)
+    check_kpm_moment(std::complex<double> const& moment, double bound)
         {
-        if (std::abs(out.back()) > 1e3*(bound+1.0))
+        if (std::abs(moment) > 1.5*bound)
             throw ITError("KPM moments diverging: scaled spectrum outside [-1,1] "
-                          "(band-edge estimate too tight; increasing kpm_scale "
-                          "widens the safety margin)");
+                          "(a Chebyshev moment exceeds 1.5*||vi||*||vj||, which no "
+                          "pole inside the window can give; the band-edge estimate "
+                          "is too tight or kpm_scale is below 1/2, and increasing "
+                          "kpm_scale widens the safety margin)");
         }
 
     // Dispatcher, mirroring kpmmoments.h's moments_vi_vj(): picks the

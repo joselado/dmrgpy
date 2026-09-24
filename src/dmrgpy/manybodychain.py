@@ -322,6 +322,10 @@ class Many_Body_Chain():
               # the pybind11 Chain (unsupported), and the clone gets a
               # fresh, empty session below anyway, so it must start with
               # no send-cache
+          elif (k in ("_dcex_excited_cache","_sector_states_cache")
+                  and self._session is not None):
+              out.__dict__[k] = None # MPS of the old session, see below;
+              # the sector cache would also deepcopy whole clone chains
           else: out.__dict__[k] = deepcopy(v,memo)
       if self._session is not None:
           from . import cppext
@@ -329,6 +333,18 @@ class Many_Body_Chain():
           # a fresh session starts sector-less; re-apply the clone's own
           # sector so it searches the same Hilbert space the original did
           if out.conserved_sector: out._apply_conserved_sector()
+          # ...and with no ground state. The copied wf0 (and every cached
+          # MPS: dcex's excited states, sectordc's per-sector solves) is an
+          # MPS whose indices belong to the ORIGINAL session's site set,
+          # which the fresh Chain(out.sites) does not share: handing it to
+          # the clone's session aborts the process on v3 (an index
+          # mismatch inside a contraction) and raises on "python". The
+          # clone used to keep computed_gs=True with that wf0 and an empty
+          # session, and every correlator ran only because its first line
+          # forced a re-solve (2026-09-24b hole hunt, finding 13's
+          # reviewer); now the clone solves on its first ground-state read,
+          # like any fresh chain.
+          out._reset_dmrg_state()
       return out
   def _reset_dmrg_state(self):
       """Invalidate any cached ground state computed under the previous
@@ -342,11 +358,18 @@ class Many_Body_Chain():
       cpp_handle is not valid input to an mpscpp3 Chain, or vice versa).
       Same fields restart() resets, minus has_ED_obj (the ED backend is
       independent of itensor_version, so it doesn't need invalidating
-      just because the DMRG backend changed)."""
+      just because the DMRG backend changed). The MPS caches built on the
+      old session (dcex's excited states, sectordc's per-sector solves)
+      and any pending injected state go with it, for the same reason."""
       self.computed_gs = False
       self.gs_from_file = False
       self.skip_dmrg_gs = False
       self.wf0 = None
+      self.e0 = None
+      self._gs_solver_key = None
+      self._gs_injected = None
+      self._dcex_excited_cache = None
+      self._sector_states_cache = None
   def set_conserved_sector(self,**qns):
       """Confine every calculation on this chain to one quantum-number sector.
 
@@ -950,8 +973,14 @@ class Many_Body_Chain():
   def get_dynamical_correlator_MB(self,**kwargs):
       """Return a dynamical correlator, computed with DMRG"""
       return dynamics.get_dynamical_correlator(self,**kwargs)
-  def get_dynamical_correlator(self,mode="DMRG",name=None,i=0,j=0,**kwargs):
-      """Return a dynamical correlator, dispatching between DMRG and ED"""
+  def get_dynamical_correlator(self,mode="DMRG",name=None,i=None,j=None,
+                               **kwargs):
+      """Return a dynamical correlator, dispatching between DMRG and ED.
+
+      name is either a string ("ZZ", "cdc", ...), for which i and j are
+      the two sites (both 0 when not given), or an explicit operator pair
+      (A,B), which already names its sites; i= or j= next to a pair
+      raises TypeError."""
       mode = self.get_mode(mode=mode) # overwrite mode
       # Resolve name= here, once, for every submode and both solvers. The
       # documented string form ("ZZ", "cdc", ... together with i=/j=) used
@@ -961,29 +990,45 @@ class Many_Body_Chain():
       # crashed on it several frames deep. This chain object is also the
       # only thing that *can* resolve it: an EDchain has no Sx/Sz/C
       # attributes of its own.
+      if not isinstance(name,str) and (i is not None or j is not None):
+          # i/j mean something only next to a string name. They used to
+          # default to 0, which cannot tell "not passed" from "passed 0",
+          # so next to a pair they were dropped silently, on every solver
+          # and submode; a wrapper that builds its own pair and forwards
+          # **kwargs (get_kondo_spectrum(mode="DMRG", i=1, j=1)) returned
+          # the site-0 spectrum bit for bit (2026-09-24b audit, finding 16)
+          raise TypeError(
+              "get_dynamical_correlator: i=/j= select the sites of a "
+              "string name= (\"ZZ\", \"cdc\", ...), and name= is %s here, "
+              "so i=%r, j=%r would be ignored. Build the pair on the sites "
+              "you want, or pass a string name. If this call came through "
+              "a wrapper that builds its own operator pair (the Kondo "
+              "spectrum, for instance), use that wrapper's own site "
+              "argument." % ("not given" if name is None else "an "
+                             "operator pair, which names its own sites",
+                             i, j))
       if name is not None:
-          name = operatornames.str2MO(self,name,i=i,j=j)
+          name = operatornames.str2MO(self,name,i=0 if i is None else i,
+                                      j=0 if j is None else j)
           kwargs["name"] = name
       if mode=="DMRG":
           return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED":
-          # kpm_n_scale is validated before it crosses, and only for the
-          # submode that reads it (KPM, the ED default), the same place
-          # kpmdmrg.dynamical_correlator_moments checks it on the DMRG
-          # side: a non-integer used to be rounded down silently here
-          # while v2/v3 rejected it (finding 5 of
-          # docs/audit_2026_09_24_hole_hunt.md)
-          if kwargs.get("submode","KPM")=="KPM":
-              from .algebra.kpm import validate_kpm_n_scale
-              validate_kpm_n_scale(self.kpm_n_scale)
+          # kpm_n_scale and kpm_energy_truncate are checked on the ED side,
+          # in edtk/dynamics.py::get_dynamical_correlator, on the Hermitian
+          # KPM branch that reads them (the non-Hermitian KPM reads
+          # neither) and before any ground-state work, the counterpart of
+          # kpmdmrg.dynamical_correlator_moments on the DMRG side
           edobj = self.get_ED_obj()
           # The KPM route reads the rescaling window and the moment-count
           # multiplier off the chain, and an EDchain keeps no reference
           # back to the one that built it -- so push them across here,
           # the same shape as kpmdmrg._sync_kpm_energy_truncation pushing
-          # the truncation knobs onto a session.
+          # the truncation knobs onto a session. The truncation flag goes
+          # across only so that the ED route can refuse it.
           edobj.kpm_scale = self.kpm_scale
           edobj.kpm_n_scale = self.kpm_n_scale
+          edobj.kpm_energy_truncate = self.kpm_energy_truncate
           return edobj.get_dynamical_correlator(**kwargs)
   def get_spectral_function(self,*args,**kwargs):
       """Single-particle spectral function A_ij(w) of a fermionic chain,
@@ -1126,18 +1171,36 @@ class Many_Body_Chain():
       e2 = self.vev(h,npow=2,**kwargs)
       return np.sqrt(np.abs(e2-e**2))
   def set_initial_wf_guess(self,wf):
-      """Set the initial guess, and perform the DMRG GS calculation"""
+      """Use `wf` as the starting state of the next ground-state solve.
+
+      Nothing is computed here: the next gs_energy()/get_gs() (or anything
+      that reads the ground state) sweeps from a copy of `wf` instead of
+      from the session's previous state or a random one, and `wf` itself is
+      left untouched. Same as set_initial_wf(wf,reconverge=True)."""
       self.set_initial_wf(wf,reconverge=True)
   def set_initial_wf(self,wf,reconverge=False):
-      """Use a certain wavefunction as initial guess"""
+      """Make `wf` this chain's state for the next ground-state read.
+
+      With reconverge=False (the default) the next gs_energy()/get_gs()
+      takes a copy of `wf` as it is, unswept, with energy <wf|H|wf>, on the
+      Python side and on the DMRG session alike; with reconverge=True it
+      sweeps from it (set_initial_wf_guess). Either way `wf` itself is left
+      untouched. On a backend with no session (julia_live) the state is
+      only stored: the next read solves from that backend's own random
+      start (mpsjulialive/groundstate.py takes a start only as an explicit
+      gs_energy(wf0=...)) and replaces it. wf=None drops a
+      pending injected state, so the next read solves. Nothing is computed
+      here. See groundstate.mark_injected() for the mechanism."""
       self.computed_gs = False
       if wf is None:
-        self.gs_from_file = False # use a wavefunction from a file
+        self.gs_from_file = False # no stored state to start from
+        self._gs_injected = None
       else:
-        self.gs_from_file = True # use a wavefunction from a file
-        self.wf0 = wf.copy() # name of the wavefunction
+        self.gs_from_file = True # start from the stored state
+        groundstate.mark_injected(self,wf,reconverge=reconverge)
+        self.computed_gs = False # also where there is no session to mark
         if reconverge: self.skip_dmrg_gs = False # reconverge the calculation
-        else: self.skip_dmrg_gs = True # reconverge the calculation
+        else: self.skip_dmrg_gs = True # take the state as it is
   def set_gs(self,wf):
       """Set the ground state"""
       from .groundstate import set_gs 
@@ -1165,8 +1228,12 @@ class Many_Body_Chain():
       if mode=="DMRG": 
           # not just computed_gs: a stored energy is only an answer to
           # this call if it was computed under the solver parameters in
-          # force now (groundstate.gs_is_current)
-          if groundstate.gs_is_current(self): return self.e0
+          # force now (groundstate.gs_is_current), and if the call does
+          # not name a start state: gs_energy(wf0=x), the explicit warm
+          # start, used to return the stored energy without reading x
+          # whenever the state was current
+          if (groundstate.gs_is_current(self)
+                  and kwargs.get("wf0") is None): return self.e0
           return groundstate.gs_energy(self,**kwargs)
       elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
       else: raise ValueError("Unrecognized mode "+repr(mode))

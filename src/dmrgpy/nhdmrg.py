@@ -294,11 +294,12 @@ def gs_energy_generalized_nhdmrg(self,A,**kwargs):
     wf0 = psir.normalize()
     if wf0 is None: wf0 = psir.copy()
     self.nh_left_wf = psil.copy() # left eigenvector, for biorthogonal use
-    self.set_initial_wf(wf0) # sets self.wf0 (one copy) and resets
-                              # computed_gs=False, so...
-    self.computed_gs = True  # ...this must come after, not before (see
-                              # gs_energy_generalized's own fix for
-                              # exactly this ordering bug)
+    # the solve's own result: assigned, not injected (groundstate.
+    # mark_injected() is for the public setters, and would make the next
+    # gs_energy() hand this state to the session as the caller's)
+    self.wf0 = wf0.copy()
+    self._gs_injected = None
+    self.computed_gs = True
     from .groundstate import solver_key
     self._gs_solver_key = solver_key(self) # see groundstate.gs_is_current
     return lam

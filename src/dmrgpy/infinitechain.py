@@ -1289,7 +1289,14 @@ class Infinite_Many_Body_Chain:
         (manybodychain.py's Many_Body_Chain.__init__), independent of this
         iDMRG chain's own self.maxm/etc.
 
-        Remaining **kwargs (delta, kernel, es, deconvolve, ...) are
+        A key the temporary chain does not have raises TypeError, and so
+        do `itensor_version` and `mode`, which the chain has but which
+        cannot take effect here, since the window always runs on
+        itensor_version="python" (a misspelled key used to be set where
+        nothing reads it, and the call returned the default spectrum bit
+        for bit; 2026-09-24b audit, finding 6).
+
+        Remaining **kwargs (delta, kernel, es, ...) are
         forwarded to kpmdmrg.get_dynamical_correlator unchanged. Returns
         (es, correlator), exactly like a finite chain's own
         get_dynamical_correlator.
@@ -1365,7 +1372,30 @@ class Infinite_Many_Body_Chain:
         from . import kpmdmrg
         window_sites = self.site_types * n_window
         wc = Many_Body_Chain(window_sites, itensor_version="python")
-        for k, v in (window_chain_kwargs or {}).items():
+        window_chain_kwargs = dict(window_chain_kwargs or {})
+        fixed = sorted(k for k in window_chain_kwargs
+                       if k in ("itensor_version", "mode"))
+        if fixed:
+            raise TypeError(
+                "kpm_finite: window_chain_kwargs cannot set %s: the finite "
+                "window is always built with itensor_version=\"python\" and "
+                "run through its KPM (DMRG) route, so the value would be "
+                "stored on the temporary chain and ignored"
+                % ", ".join(fixed))
+        # a key must name a setting the chain holds: a private name or a
+        # method passes hasattr() too, and setting it would overwrite
+        # the chain's own state or behaviour rather than a setting
+        unknown = sorted(k for k in window_chain_kwargs
+                         if k.startswith("_") or not hasattr(wc, k)
+                         or callable(getattr(wc, k)))
+        if unknown:
+            raise TypeError(
+                "kpm_finite: unknown window_chain_kwargs key(s): %s. The "
+                "keys are attributes of the temporary finite Many_Body_Chain "
+                "(maxm, nsweeps, kpmmaxm, kpm_scale, kpm_n_scale, ...); a "
+                "name it does not have would be stored where nothing reads "
+                "it" % ", ".join(unknown))
+        for k, v in window_chain_kwargs.items():
             setattr(wc, k, v)
         h_window = _window_hamiltonian(self._h_intra, self._h_inter, self.n_uc, n_window)
         wc.set_hamiltonian(h_window)

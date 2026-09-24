@@ -381,7 +381,7 @@ moment count independently. Both now go through
 kernel's own resolution relation so that `delta` is the broadening it is
 everywhere else, FWHM = `2*delta` at the band centre, and the ED route
 adopted the DMRG rescaling so the two share the same `x` at the same
-physical energy; the disagreement was 4 to 7 per cent after O2, most of
+physical energy (on the bandwidth-centred window: under `kpm_energy_truncate` `mode="ED"` raises, second-pass finding 4); the disagreement was 4 to 7 per cent after O2, most of
 it the DMRG routes reconstructing from n+2 moments, and since those were
 cut to n (2026-09-24 finding 4) it is 0.07 to 0.2 per cent of the
 resolvent peak on `"python"` (the moment reconstruction's own 10n-grid
@@ -449,6 +449,62 @@ swallowed keywords, the shared "adjoint for a correlator" helper, the
 left to a pass that rebuilds), and the record's "New leads", notably v3's
 run-to-run `emax` noise, which is now the whole of the ED-versus-v3 KPM
 residual.
+
+**The 2026-09-24 second pass.** `docs/audit_2026_09_24b_hole_hunt.md` is a
+fourth hunt, scoped to the single commit `30200a4` that fixed the third,
+since the third had found seven or eight of its sixteen holes in the one
+commit that closed the hunt before it. Five lenses, one per fix cluster
+of `30200a4` (`operators`, `kpm`, `realtime`, `kondo`, `pyitensor`), 18
+confirmed findings, none refuted, four of them turned up by a reviewer
+while reviewing another candidate, and twelve older than `30200a4`,
+reached by probing next to it. All 18 are fixed, in four clusters whose
+regressions live in `tests/test_audit_2026_09_24b_<cluster>.py` for
+`groundstate`, `kpm`, `realtime` and `misc`; finding 3 needed a rebuild of
+both extensions. The run was capped at three concurrent Python processes
+across all agents (`run3.sh` in the record's "Shared helpers"), a rule to
+keep for the next one. The fixes that changed numbers rather than
+behaviour, so results from before them are not comparable: every
+infinite-chain `S(k,omega)` on both backends, which was mirrored in
+frequency and interpolated off an FFT grid (the k=pi magnon of the
+transverse-field paramagnet from -1.045 to +0.905, findings 7 and 8);
+`evolve_and_measure`/`evolution_ABA` on `mode="ED"`, which ran backwards in
+time, and on every DMRG backend, which returned the conjugate of <O>,
+both invisible on the real Hermitian observables every earlier test
+measured and cancelling on S+ and hoppings (findings 9 and 10); every DMRG
+correlator after `set_gs()`, which measured the session's own solved state
+and reverted the chain's to it, and every caller of `set_initial_wf`/
+`set_initial_wf_guess`, which never reached the session (the
+transverse-field Ising example's ordered phase from Mz/n 0.001 to 0.4998,
+findings 11 and 12; the fix is `groundstate.mark_injected` plus
+`ground_state_on_session` at the top of every correlator, which replaced
+the unconditional `set_initial_wf(self.wf0)` at `dynamics.py:190`);
+`get_kondo_spectrum(mode="DMRG", n_gs>1)` on v2/v3 at a split below
+`delta`, `gs_energy()` after it, and EX at a degenerate ground state,
+which now measures from the chain's own state (findings 13 to 15); the
+Kondo terms on a non-increasing `es` (finding 17); a padded state evolved
+with the flag cleared under `TDVP_GSE` (finding 18); and
+`disentangle_manifold` on a Hermitian operator the canonical proof cannot
+see, with proven operators now moving at the gauge level (finding 1).
+Behaviour changes without number changes: KPM raises on every backend
+once a moment exceeds 1.5 times the exact bound ||vi|| ||vj|| (the DMRG
+threshold was 1e3*(bound+1), which let spectra up to 109 times the peak
+through below `kpm_scale=1/2`, and ED had no check since `765b537`;
+findings 2 and 3), and so does a harshly truncated `kpmmaxm`, whose
+spectrum is tens of per cent wrong anyway; `mode="ED"` KPM raises under
+`kpm_energy_truncate` (finding 4); the ED `kpm_n_scale` check moved to the
+Hermitian KPM branch (finding 5); `kpm_finite` rejects unknown
+`window_chain_kwargs` keys (finding 6); a pair `name=` with `i=`/`j=`
+raises (finding 16); and `n_gs>1` takes only the submodes that read the
+chain's state (finding 15). Left open and recorded as such: the sliver
+just below `kpm_scale=1/2` where the elastic line is distorted while the
+moments are still under the bound; `julia_live`'s
+`set_initial_wf`/`set_initial_wf_guess` (same shape as finding 12,
+by reading); `juliacall.JuliaError` rather than `RuntimeError` from the
+`julia_live` KPM guard; the KPM guard's message naming the band edge when
+the cause is a harsh `kpmmaxm`; the short `nt` defaults of
+`td_dynamical_correlator` (delta*T = 1, the third hunt's lead); and the
+record's "New leads", notably `Many_Body_Chain.__init__(**kwargs)` dropping
+every keyword.
 
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
@@ -1108,8 +1164,10 @@ per-point quadrature that took 28 s and 4 GB at 64 states). Since the
 2026-09-24 audit: `mode="ED"` raises `TypeError` on any keyword it does
 not read (a misspelled `Jrho_s` used to remove the Kondo peak silently);
 `mode="DMRG"`'s T=0 is the single converged state unless `n_gs=` asks for
-the equal-weight manifold average, which needs both `set_gs` and
-`session.set_wavefunction`, since KPM reads the session's own `wf0`; and
+the equal-weight manifold average, for which `set_gs` alone suffices,
+since it hands each member to the session unswept on the next read (it
+used to push with `session.set_wavefunction`, which re-swept the member,
+second-pass findings 13 and 14 below); and
 the potential term needs `es` past the top of the S_k spectrum, not just
 past max|eV| as the second-order term does, and uses trapezoid weights,
 so a non-uniform `es` is fine.

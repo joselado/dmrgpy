@@ -6,8 +6,25 @@ from .. import multioperator
 from .edchain import State
 
 def evolution_ABC(self,h,A=None,B=None,C=None,wf=None,nt=100,dt=0.01):
-    """Aply operator C, evolve, apply operator B, evolve back,
-    apply operator A <AU-1BUC>"""
+    """<wf|C^dagger U(t)^dagger B U(t) A|wf> on the ts grid, with the
+    Schrodinger propagator U(t) = e^{-iHt}: A|wf> and C|wf> are both
+    evolved forward in time and B is measured between them, so with
+    A = C = identity this is <psi(t)|B|psi(t)>, psi(t) = e^{-iHt}|wf>,
+    what every DMRG backend's evolve_and_measure returns.
+
+    Both states are advanced with evolve(..., -Hop, ...), because
+    tdtk.evolve integrates dpsi/dt = +i*h@psi, i.e. it applies e^{+iht}.
+    That sign is what evolution_DC below is built on (its e^{-i w t}
+    Fourier kernel needs the e^{+iHt} series), so it stays as it is and
+    the minus goes here. This function used to pass Hop itself, so it
+    returned the time-reversed trajectory <psi(-t)|B|psi(-t)>, which a
+    real Hamiltonian, a real start and a real observable cannot tell
+    apart from the forward one, and which is why no ED-versus-DMRG test
+    saw it: Larmor precession under B*sum Sz from a +x start came out as
+    <Sy_0>(t=1) = -0.4207 against the closed form +sin(1)/2 = +0.4207,
+    and one fermion on a 3-site ring with flux pi/6 went round the wrong
+    way, <N_1>(t=1.5) = 0.1024 against 0.8413 (2026-09-24b audit,
+    finding 9)."""
     nt = int(nt)
     Aop = self.get_operator(A) # get operator
     Bop = self.get_operator(B) # get operator
@@ -32,8 +49,10 @@ def evolution_ABC(self,h,A=None,B=None,C=None,wf=None,nt=100,dt=0.01):
         # convention or every such comparison is off by one step.
         c = np.conjugate(wfC)@Bop@wfA # compute braket
         cs.append(c) # store value
-        wfA = evolve(wfA,Hop,t=dt,dt=dt) # evolve wavefunction
-        wfC = evolve(wfC,Hop,t=dt,dt=dt) # evolve wavefunction
+        # -Hop: evolve() applies e^{+iht}, so this is e^{-iHt}, forward in
+        # time (see the docstring)
+        wfA = evolve(wfA,-Hop,t=dt,dt=dt) # evolve wavefunction
+        wfC = evolve(wfC,-Hop,t=dt,dt=dt) # evolve wavefunction
     cs = np.array(cs) # to array
     return ts,cs # return
 

@@ -358,8 +358,9 @@ per ramping sweep, and is switched off entirely once the schedule reaches
 `sc.noise` for the first half of the sweeps, none for the second.
 
 A *warm* start is never truncated by the ramp: when `gs_energy()` is
-re-entered with a wavefunction already in hand (`set_initial_wf`, or
-simply a previous `gs_energy()` call's own solution), the ramp's starting
+re-entered with a wavefunction already in hand (`set_initial_wf_guess`,
+or simply a previous `gs_energy()` call's own solution; `set_initial_wf`
+instead takes the state as it is, unswept), the ramp's starting
 bond dimension is floored at whatever that state already carries, so a
 re-run can only improve the energy. The ramp applies to the ground-state
 solve on all three DMRG backends (`itensor_version` 2, 3 and `"python"`);
@@ -1518,9 +1519,21 @@ deliberately reduced-effort DMRG on $-H$ (few sweeps at modest bond
 dimension) — it is only a spectral *bound*, protected by the
 `kpm_scale` margin, not a physical result, and a variational
 underestimate only shrinks the number of moments. If the bound is ever
-too tight for the chosen `kpm_scale`, the moment recursion detects the
-resulting exponential divergence and aborts with an explicit error
-rather than returning a silently wrong spectrum.
+too tight for the chosen `kpm_scale`, or `kpm_scale` is below 1/2, where
+the ground state itself sits at $x_0=-1/(2s)$, $s$ being `kpm_scale`,
+outside $[-1,1]$, the moment recursion raises `RuntimeError` as soon as a
+moment exceeds 1.5 times $\|v_i\|\|v_j\|$, the exact bound for a
+spectrum inside $[-1,1]$, on every DMRG backend and on `mode="ED"` alike
+(`julia_live` raises `juliacall.JuliaError`). Until the 2026-09-24
+second-pass audit the DMRG threshold was $10^3(\|v_i\|\|v_j\|+1)$,
+which let spectra up to 109 times the true peak through, and ED had no
+check at all (findings 2 and 3). This catches every case where a pole
+outside the window carries enough weight to show; in a sliver just below
+1/2 (0.499 on a 4-site chain at $\delta=0.1$) the elastic line is
+already distorted while the moments are still under the bound, so stay
+above the ~0.5 floor unless `kpm_energy_truncate` is on. A harshly
+truncated `kpmmaxm` (2 or 3 on a small chain) can also cross the bound,
+and then its spectrum is tens of per cent wrong anyway.
 
 **Reconstruction kernel (`kernel=`) — how the moments become a
 spectrum.** The formula above is only one way to turn $\{\mu_m\}$ into
@@ -1662,7 +1675,10 @@ $A$/$B$ on the ground state, so the physically relevant region sits just
 above $E_0$, not around the spectrum's geometric middle — the
 midpoint-centered window would otherwise clip the ground state itself out
 of the window before ever reaching a genuinely useful, narrower regime.
-Available for `itensor_version="python"` and `itensor_version=3`; there
+Available for `itensor_version="python"` and `itensor_version=3`
+(`mode="ED"` raises `NotImplementedError`, and so does `mode.py`'s
+fallback onto it for a 2-site `itensor_version=3` chain; it used to
+return the untruncated curve, finding 4 of the second-pass record); there
 is no `itensor_version=2` port (mpscpp2 has no equivalent machinery to
 build a per-site local effective Hamiltonian from, unlike mpscpp3's
 `LocalMPO`/`diagHermitian`). Requesting it on `itensor_version=2` raises
@@ -2022,11 +2038,14 @@ Both `damping` and `predict`/`lp_*` are also accepted by `submode="TDZ"`
 and by the internal `S(k,\omega)` reduction (`sxt_to_skomega`), since all
 three share the same windowing stage, but their own defaults are
 unchanged (`damping="exp"`, `predict=False`), since the empirical
-comparison above was only run for `"TD"`. What they no longer share is
-the last step: `"TD"` and `"TDZ"` evaluate the damped sum directly at
-each requested frequency, while `sxt_to_skomega` stays on the FFT grid,
-since at its defaults $\delta T=1$ and the direct evaluation is
-unmeasured there.
+comparison above was only run for `"TD"`. All three also share the last
+step: they evaluate the damped sum directly at each requested frequency.
+`sxt_to_skomega` stayed on the FFT grid for a while after `"TD"` and
+`"TDZ"` left it, and at a converged window, $\delta T=6$, that put its
+$S(k,\omega)$ 21 per cent of the peak off exact, with peak heights down
+to 0.79 of the right ones; it moved onto the direct sum with the
+2026-09-24 second-pass audit (`docs/audit_2026_09_24b_hole_hunt.md`,
+finding 7, and §21).
 
 **`submode="TDZ"` — complex-time evolution (Cao, Lu, Stoudenmire &
 Parcollet, arXiv:2311.10909).** Real-time evolution (`"TD"` above) grows
@@ -2118,7 +2137,12 @@ $$G_{AB}(\omega)=\sum_{n=1}^{n_{ex}}\frac{\langle\mathrm{GS}|A|n\rangle\langle n
 i.e.\ a small, explicit sum over poles at the computed excited-state
 energies $E_n$, each with residue given by the transition matrix
 elements. Cheap and exact *within* the truncated subspace; only as good
-as how many/which excited states were computed. The `nex` excited-state
+as how many/which excited states were computed. Here $|\mathrm{GS}\rangle$
+is the chain's own state, the one `set_gs()` set if any, expressed in that
+subspace, and $E_n$ is measured from its energy; a state outside the
+subspace raises (until the 2026-09-24 second-pass audit, finding 15, EX
+measured from the lowest vector of its own subspace whatever the chain
+held). The `nex` excited-state
 MPS are not assumed to be orthonormal (`dcex.py` builds their own overlap
 matrix and solves a generalized eigenvalue problem $Hc=eSc$ rather than
 assuming $S=1$), which is important in practice since Gram-Schmidt over
@@ -3247,9 +3271,16 @@ exactly the ED average, since every term is linear in the ground-state
 density matrix, and it costs $g$ times the single-state run; on that
 crossing `n_gs=2` gives 1.50002 to 1.50004 in every run. The default
 `n_gs=1` is the unchanged single-state path, a `RuntimeWarning` fires
-when a member lies more than `delta` from $E_0$, and `n_gs>1` raises
-`NotImplementedError` on `itensor_version=2` and `"julia_live"`
-(`docs/audit_2026_09_24_hole_hunt.md`, finding 12).
+when a member lies more than `delta` from $E_0$, and `n_gs>1` runs on
+`itensor_version` 2, 3 and `"python"`, measures each member exactly as
+returned, with `gs_energy()` that member's own energy, restores the chain
+afterwards, `gs_energy()` included, and accepts only the submodes that
+read the chain's state (KPM, CVM, CVM_explicit, ROOTN, TD, TDZ, EX),
+raising `NotImplementedError` for SECTOR, any other submode and
+`"julia_live"` (`docs/audit_2026_09_24_hole_hunt.md`, finding 12, and
+the 2026-09-24 second-pass record, findings 13 to 15: until then each
+member was re-swept before it was measured, and on v2 and v3 an excited
+member split below `delta` relaxed into the lower one in 16 of 24 runs).
 
 Further `mode="DMRG"` limitations beyond the general ones above: the
 `es` frequency grid has no safe default and must be supplied
@@ -3263,8 +3294,12 @@ inside the band. One `es` is shared by both, so with `U!=0` it must meet
 the second requirement, and the potential term issues a `RuntimeWarning`
 when the sum rule $\sum_k\int S_{kk}(\omega)\,d\omega=S(S+1)$ says more
 than 1e-2 of the weight is missing (see `second_order_dIdV_dc`'s and
-`potentialdc`'s docstrings). The grid may be non-uniform, since both
-terms integrate with trapezoid weights of the grid they are given; the
+`potentialdc`'s docstrings). The grid may be non-uniform and in any
+order, since both terms sort it and then integrate with trapezoid weights
+of the grid they are given (an unsorted grid, such as a refined block
+appended after a coarse one, was silently wrong until the 2026-09-24
+second-pass audit, 3.04 off a 6.97 peak on the second-order term,
+finding 17); the
 potential term weighted every point with the first spacing until the
 2026-09-24 audit (finding 13), and the one example of it,
 `examples/kondo/kondo_potential_term_dmrg_VS_ED`, violated the coverage
@@ -3525,7 +3560,7 @@ es, ys = ic.kpm_finite("Sz", 0, "Sz", 0, n_window=16,
         delta=0.3, es=np.linspace(-1, 5, 200))
 ```
 
-`n_window` has no default — see the convergence caveat below. `window_chain_kwargs` is an optional dict of attribute overrides applied to the temporary finite `Many_Body_Chain` (`maxm`, `nsweeps`, `kpmmaxm`, `kpm_scale`, ...), independent of `ic`'s own `maxm`/etc.; remaining `**kwargs` (`delta`, `kernel`, `es`, ...) are forwarded to `kpmdmrg.get_dynamical_correlator` unchanged.
+`n_window` has no default — see the convergence caveat below. `window_chain_kwargs` is an optional dict of attribute overrides applied to the temporary finite `Many_Body_Chain` (`maxm`, `nsweeps`, `kpmmaxm`, `kpm_scale`, ...), independent of `ic`'s own `maxm`/etc.; a key the temporary chain does not hold as a setting (a misspelling, a method or a private name) raises `TypeError`, and so do `itensor_version` and `mode`, since the window always runs on `itensor_version="python"` (until the 2026-09-24 second-pass audit a misspelled key was stored where nothing reads it and the call returned the default spectrum, finding 6); remaining `**kwargs` (`delta`, `kernel`, `es`, ...) are forwarded to `kpmdmrg.get_dynamical_correlator` unchanged.
 
 **Scope restriction — a finite-window approximation, read before use.** This is *not* an exact infinite-size method: results carry finite-size/open-boundary corrections that must be checked by convergence in `n_window`, exactly as a static `vev`/`correlator` caller would check `maxm`/`etol` convergence of the original iDMRG ground state. One Chebyshev moment corresponds to one application of the (nearest-neighbor) window Hamiltonian, so it can only move information by ~1 site per moment (a Lieb-Robinson-style bound) — but KPM's own moment count scales with the *window's own extensive bandwidth* divided by the requested `delta` (an ordinary finite chain's KPM already has this property, nothing new here), so a genuinely fine `delta` can require a moment count comparable to (or larger than) `n_window` itself, at which point open-boundary reflections contaminate the result regardless of how large `n_window` is. Prefer a coarser `delta`, or check that the correlator has visibly converged with growing `n_window`, for quantitative work (especially near a gapless point, where a fine `delta` is most tempting). Unlike `vev`/`correlator`, this does not need `ic._result` (no dependency on a previously converged `IDMRGResult`, or even on `ic.itensor_version`), so it works regardless of which backend `gs_energy()` itself used. See `examples/idmrg/dynamical_correlator_finite_window/main.py` for a worked example sweeping `n_window`.
 
@@ -3540,7 +3575,7 @@ ks, es, Skw = ic.td_dynamical_correlator(
         ks=np.linspace(-np.pi, np.pi, 41), delta=0.1, window=[-1, 6])
 ```
 
-`opname_j` is applied at sublattice position `p_i` and evolved forward in time under the window's own ground-state-energy-shifted Hamiltonian (`e^{-i(H-E_GS)t}`, matching this codebase's own established real-time correlator convention, e.g. `mpscpp3::quench_tdvp`'s `Hshift=H-EGS*Id`); `opname_i` is inserted at the shifted position (bra side, not itself evolved) — this is the paper's own headline efficiency result: every `x` (and, via the spatial Fourier transform below, every `k`) comes from this *one* window evolution, not one run per distance the way a naive real-time approach (or `kpm_finite`'s own one-run-per-`r` KPM calls) would need. Cross-checked against an exact non-interacting (free-fermion) reference for the XX chain, on systems far larger than many-body ED could reach — see `docs/documentation.md`'s own architecture-level notes on this method for the full derivation and what that check found. `connected=True` (default) subtracts the disconnected background `<opname_i><opname_j>` before the spatial Fourier transform — turning it off produces a spurious, dominant `k=0` contribution with no discernible dispersion (the raw correlator approaches `<opname_i><opname_j>`, not 0, at large separation). `Skw` (shape `(len(ks), len(es))`) is obtained via a spatial DFT (`S(k,t)=sum_x e^{-ikx}S(x,t)`) followed by the *same* damping/FFT tail (`delta` -> Lorentzian broadening) `submode="TD"` uses, with one deliberate difference at the end of it: what comes back is the raw one-sided transform, not the §6 density. The reduction that produces `S(k,t)` never names the operator pair, so the adjoint-pair identity `"TD"` completes its transform with (see that submode above) has nothing to act on here. Take the real part if you want the density, which is the right thing to do whenever the Lehmann weights are real, and note that this is the one dynamical-correlator route in the library where that instruction still stands.
+`opname_j` is applied at sublattice position `p_i` and evolved forward in time under the window's own ground-state-energy-shifted Hamiltonian (`e^{-i(H-E_GS)t}`, matching this codebase's own established real-time correlator convention, e.g. `mpscpp3::quench_tdvp`'s `Hshift=H-EGS*Id`); `opname_i` is inserted at the shifted position (bra side, not itself evolved) — this is the paper's own headline efficiency result: every `x` (and, via the spatial Fourier transform below, every `k`) comes from this *one* window evolution, not one run per distance the way a naive real-time approach (or `kpm_finite`'s own one-run-per-`r` KPM calls) would need. Cross-checked against an exact non-interacting (free-fermion) reference for the XX chain, on systems far larger than many-body ED could reach — see `docs/documentation.md`'s own architecture-level notes on this method for the full derivation and what that check found. `connected=True` (default) subtracts the disconnected background `<opname_i><opname_j>` before the spatial Fourier transform — turning it off produces a spurious, dominant `k=0` contribution with no discernible dispersion (the raw correlator approaches `<opname_i><opname_j>`, not 0, at large separation). `Skw` (shape `(len(ks), len(es))`) is obtained via a spatial DFT (`S(k,t)=sum_x e^{-ikx}S(x,t)`), conjugated, and followed by the *same* damping and direct per-frequency sum (`delta` -> Lorentzian broadening) `submode="TD"` uses. The conjugation is the finite TD route's own conjugate-at-return: `S(x,t)` carries $e^{-i(H-E_{GS})t}$, and without it every line came out at $\omega=-D_n$ instead of $+D_n$ on both backends, mostly below the default `window=[-1,10]`, until the 2026-09-24 second-pass audit (finding 8). There is one deliberate difference at the end: what comes back is the raw one-sided transform, not the §6 density. The reduction that produces `S(k,t)` never names the operator pair, so the adjoint-pair identity `"TD"` completes its transform with (see that submode above) has nothing to act on here. Take the real part if you want the density, which is the right thing to do whenever the Lehmann weights are real, and note that this is the one dynamical-correlator route in the library where that instruction still stands.
 
 **Fermionic operators, and the vacuum normalization** (both since 2026-08-29). A parity-odd pair (`"Cdag"`/`"C"`, either order, on any fermionic site type) computes the *physical* fermionic correlator: the Jordan-Wigner string is threaded across the window on the ket (before the evolution, so it is evolved along with the perturbation) and across the bra at measurement time, matching the convention `correlator` already used for the static case. The two are pinned to each other by an exact identity — `S(x, t=0)` equals `correlator(...)` to machine precision at every `x`, both signs, across the window's own padding — and against the exact free-fermion Green function `<c†_x(t) c_0> = Σ_l [e^{iht}]_{xl} P[l,0]` at `t>0` (`tests/test_idmrg_window_fermionic.py`, `examples/idmrg/fermionic_dynamical_correlator/main.py`). Note the anticommutation sign this implies: for two parity-odd operators at different sites `<A_x B_0> = -<B_0 A_x>`, so a fermionic `S(x,t)` and a static `correlator` written in the opposite site order differ by a minus sign. A pair with odd *total* parity (one fermionic operator against a parity-even one) raises rather than returning a number, exactly as `correlator` does: its string can never close. `connected=True` subtracts nothing for a parity-odd pair, whose disconnected background is zero by symmetry. Before this, the path applied a bare `C`/`Cdag` matrix with no string on either backend — a different number entirely, not a less converged one (measured: `+0.203` at `x=2` against an exact `-0.001`). Independently, every `S(x,t)` — spin included — is now divided by the vacuum amplitude `<ψ|ψ(t)>` measured through the identical contraction, which cancels a spurious global factor that had been inflating results on both backends (the shift `eshift` that keeps the evolution phase-stationary is measured with the window's boundary legs traced, while correlators are measured with them closed by the transfer-matrix fixed points, and the two see different energies). On the dimerized XX chain that alone took the residual against the exact free-fermion answer from ~0.07 to ~1e-5.
 
@@ -3697,8 +3732,11 @@ Three things to set when you use it:
   bond dimension `K` instead of its Krylov expansion, 0.49 off the
   unpadded run on a 10-site quench at `K=maxm`. Since the 2026-09-24
   audit that route is exempt from the padding the way the Hamiltonian
-  is, the padding being stripped once at trajectory entry, so a padded
-  `TDVP_GSE` run follows the unpadded one to roundoff
+  is, the padding being stripped once at trajectory entry from whatever
+  state the evolution is handed (keyed on the state rather than on the
+  flag since the 2026-09-24 second-pass audit, finding 18, so a state
+  padded earlier and evolved after the flag is cleared is stripped too),
+  so a padded `TDVP_GSE` run follows the unpadded one to roundoff
   (`docs/audit_2026_09_24_hole_hunt.md`, finding 16, and §21). The one
   case still started padded is `submode="TDZ"` with
   `tevol_method="TDVP_GSE"` at `tdvp_gse_sweeps=0`, since TDZ carries
@@ -4091,8 +4129,8 @@ finding, and the record carries the reproduction that was actually run.
   default, and the returned curves move by up to 14 per cent of the peak
   for the first two (19 per cent at $\delta=0.25$) and by 2.89e-04 for
   the third. `sxt_to_skomega`, the infinite-chain $S(k,\omega)$
-  reduction, stays on the FFT stage and returns the same bits as before
-  (§6, finding 7).
+  reduction, stayed on the FFT stage and returned the same bits as
+  before (§6, finding 7), until the second pass below.
 - **Every DMRG KPM spectrum moves by roughly $2/N$ onto the ED one**,
   $N$ being the calibrated moment count, since the DMRG routes
   reconstructed from $N+2$ moments. On two decoupled Heisenberg dimers
@@ -4177,3 +4215,63 @@ finding, and the record carries the reproduction that was actually run.
 | `get_kondo_spectrum(mode="ED")` with a keyword it does not read | ignored, so `Jrho=` for `Jrho_s=` removed the Kondo peak | `TypeError` naming the unknown keywords |
 | `get_kondo_spectrum(mode="DMRG")` at a degenerate ground state | one arbitrary member's spectrum | the same by default; `n_gs=g` gives the equal-weight average over the manifold that `mode="ED"` takes |
 | the potential term with an `es` that misses spectral weight | a silently low spectrum | `RuntimeWarning` from the sum rule |
+
+### The 2026-09-24 second pass
+
+A fourth hunt (`docs/audit_2026_09_24b_hole_hunt.md`, five lenses over
+the single commit `30200a4` that closed the third) recorded 18 confirmed
+findings, twelve of them older than that commit and reached by probing
+next to it, and every one is fixed. Each item below names its finding;
+the record carries the reproduction that was actually run.
+
+**Results that are not comparable across this change.**
+
+- **Every infinite-chain $S(k,\omega)$**, on v3 and `"python"`, was
+  mirrored in frequency and interpolated off an FFT grid. It is now
+  conjugated after the spatial sum and evaluated directly at each
+  frequency: on the transverse-field paramagnet the $k=\pi$ magnon moves
+  from $\omega=-1.045$, with 0.928 of its weight below zero, to $+0.905$
+  against $\varepsilon=0.900$, and on a single magnon at $\delta T=6$ the
+  curve goes from 21 per cent of the peak off the closed form to 2e-14
+  (§18, findings 7 and 8).
+- **`evolve_and_measure` and `evolution_ABA` on `mode="ED"` ran backwards
+  in time**, and on every DMRG backend returned the conjugate of
+  $\langle O\rangle$. Larmor precession of a +x chain in a field now gives
+  $\langle S^y_0\rangle(t=1)=+0.4207$ on ED, where it gave $-0.4207$, and
+  $O=S^z_0+iS^x_0$ on an eigenstate now gives $+0.5i$ on DMRG, where it
+  gave $-0.5i$. A real Hamiltonian, a real start and a Hermitian
+  observable with real matrix elements, which is what every earlier test
+  measured, do not move (§7, findings 9 and 10).
+- **A state set by hand now reaches the solver.** After `set_gs()` every
+  DMRG correlator measured the session's own solved state and then
+  overwrote the chain's with it (TD on a pure doublet member goes from
+  2.04e-01 to 3.3e-06 off exact), and `set_initial_wf`/
+  `set_initial_wf_guess` never reached the session, so the transverse-field
+  Ising example plotted $M_z/n\approx0.001$ in the ordered phase where the
+  seeded branch gives 0.4998 (findings 11 and 12).
+- **`get_kondo_spectrum(mode="DMRG", n_gs>1)`** re-swept each member before
+  measuring it, so on v2 and v3 an excited member split below `delta`
+  relaxed into the lower one (1 of 6 runs at the average 1.5, now 6 of 6),
+  left `gs_energy()` at the last member's energy afterwards, and was inert
+  under `submode="EX"`, which now measures from the chain's own state
+  (1.1392 to 1.8711 across seeds, now 1.512780 on every one; §17,
+  findings 13 to 15).
+- **Smaller moves**: the Kondo terms on a non-increasing `es` (3.035 to
+  0.03183 off exact on a refined block appended after a coarse one,
+  finding 17); a padded ground state evolved with `set_pad_bonds` cleared
+  under `TDVP_GSE` at `tdvp_gse_sweeps=0` (0.4929 to 1.2e-15 off the
+  unpadded run, finding 18); `mpsalgebra.disentangle_manifold` on a
+  Hermitian operator the canonical proof cannot see (a non-orthonormal
+  basis, Gram error 0.32, now 1e-15, and proven operators move at the
+  gauge level, finding 1).
+
+**And these now raise where they used to be silent:**
+
+| Call | Was | Now |
+|---|---|---|
+| KPM with a pole outside the rescaled window (`kpm_scale` below 1/2) | DMRG spectra up to 109 times the true peak, ED integrals up to 1e6 | `RuntimeError` on every backend, the guard being 1.5 times the exact moment bound (findings 2 and 3) |
+| `kpm_energy_truncate=True` on `mode="ED"` | the untruncated curve | `NotImplementedError`, also through `mode.py`'s fallback (finding 4) |
+| `kpm_n_scale=1.5` on a non-Hermitian `mode="ED"` KPM | `TypeError`, where `mode="DMRG"` accepted it | accepted on both, neither reading it (finding 5) |
+| a misspelled key, a method or `itensor_version` in `kpm_finite`'s `window_chain_kwargs` | ignored, the default spectrum bit for bit | `TypeError` (finding 6) |
+| `name=(A,B)` with `i=`/`j=` in `get_dynamical_correlator` and every wrapper of it | the sites silently dropped | `TypeError` (finding 16) |
+| `n_gs>1` under `submode="SECTOR"` | the single-state value | `NotImplementedError` (finding 15) |

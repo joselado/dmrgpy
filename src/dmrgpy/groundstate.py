@@ -71,14 +71,143 @@ def gs_is_current(self):
     honest while keeping a repeated call with unchanged parameters as
     cheap as it was before.
 
-    A state with no recorded key was put there by something other than a
-    solve -- set_gs(), a restored julia_live snapshot -- and is returned
-    unconditionally: the user injected it deliberately, so re-solving
-    over it would discard exactly what they asked to use."""
+    A state the caller injected on a session backend (set_gs(),
+    set_initial_wf(), set_initial_wf_guess(), see mark_injected() below)
+    is never current until gs_energy_single() has taken it: that is the
+    step that hands it to the DMRG session, which KPM, TD and the
+    excited-state search read instead of the Python-side wf0, and that
+    gives it its own energy <wf|H|wf>. Returning it before that step is
+    what made every correlator measure the session's own solved state
+    after a set_gs() (2026-09-24b hole hunt, findings 11 and 12).
+
+    A state with no recorded key and no injection mark was put there by
+    a backend with no session, a restored julia_live snapshot or its
+    solve, and is returned as-is, since there is nothing to hand it to."""
     if not self.computed_gs: return False
+    if pending_injection(self) is not None: return False # see above
     key = getattr(self,"_gs_solver_key",None)
-    if key is None: return True # externally injected state, see above
+    if key is None: return True # no session to hand it to, see above
     return key==solver_key(self)
+
+
+def mark_injected(self,wf,reconverge=False):
+    """Store `wf` (a copy of it) as this chain's state, marked as injected
+    by the caller rather than produced by a solve.
+
+    This is the contract the file-based backend had and the pybind port
+    lost (2026-09-24b hole hunt, findings 11 and 12): the next ground-state
+    read, gs_energy() or get_gs(), reaches gs_energy_single(), which hands
+    a copy of the state to the session and either takes it unswept, with
+    e0 = <wf|H|wf> (reconverge=False: set_gs(), set_initial_wf()), or
+    sweeps from it (reconverge=True: set_initial_wf_guess()). Only the
+    public setters call this; a solver storing its own result assigns
+    self.wf0 directly, since its state is already the session's.
+
+    The mark holds the injected object itself and counts only while
+    self.wf0 is that object, so anything that replaces or clears wf0 --
+    restart(), a solve, a backend switch -- retires it without having to
+    know it exists. On a chain with no session (julia_live, or a C++
+    backend that fell back to ED) there is nothing to hand the state to,
+    and the old behaviour stands: set_gs() stores it as current and
+    set_initial_wf() leaves the next solve to that backend. Returns
+    whether the state was marked."""
+    self.wf0 = wf.copy()
+    if getattr(self,"_session",None) is None:
+        self._gs_injected = None
+        return False
+    self._gs_injected = ("reconverge" if reconverge else "skip",self.wf0)
+    self.computed_gs = False
+    self._gs_solver_key = None
+    return True
+
+
+def pending_injection(self):
+    """"skip" or "reconverge" when the Python-side state was injected by
+    the caller and has not been handed to the session yet, None
+    otherwise (see mark_injected())."""
+    mark = getattr(self,"_gs_injected",None)
+    if mark is None or mark[1] is not self.wf0: return None
+    return mark[0]
+
+
+def detached_copy(wf):
+    """A copy of an MPS that no session call can mutate behind the
+    caller's back. On itensor_version="python" set_wavefunction() stores
+    the handle it is given and the next sweep rewrites that MPS's tensor
+    list in place, so handing it the caller's own handle made
+    gs_energy(wf0=x) move x itself onto the ground state (<H> of x went
+    from -0.987 to -1.000 on a 3-site Heisenberg chain). MPS.copy()
+    duplicates that list on "python" and is free on the C++ backends,
+    whose MPS has value semantics."""
+    return wf.copy()
+
+
+def _session_parameters(self):
+    """Hand the chain's solver parameters to the session (every entry
+    point that may sweep needs them)."""
+    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
+    self._session.set_verbose(self.verbose)
+    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    # Bond-dimension ramp for the ground-state sweep schedule, see
+    # Many_Body_Chain.__init__ (manybodychain.py) for what it does and
+    # Chain::make_sweeps_ramped() / pyitensor's _make_sweeps_ramped() for
+    # the schedule itself. hasattr-guarded so an out-of-date compiled
+    # extension (one built before this method existed) keeps working: it
+    # then simply uses the C++-side defaults, which are the same as the
+    # Python-side ones.
+    if hasattr(self._session,"set_bond_ramp"):
+        self._session.set_bond_ramp(self.bond_ramp,self.bond_ramp_start,
+                                    self.bond_ramp_fraction,
+                                    self.bond_ramp_noise_decay)
+
+
+def _take_injected_state(self,wf):
+    """Make `wf` this chain's ground state, unswept, on both sides.
+
+    The session gets a detached copy with set_wavefunction(), and e0 is
+    <wf|H|wf>, which is what the file-based backend's get_gs_energy()
+    returned for a state read back under skip_dmrg_gs. The session's own
+    energy is NOT used: set_wavefunction() drops it, so the session's
+    gs_energy(skip_dmrg=True) would then run a sweep from the injected
+    state, which is finding 13 of the 2026-09-24b hole hunt.
+
+    The same drop leaves one more sweep in the session, and this is the
+    reason for the excited_states(1) call below: the band edges KPM
+    rescales with (and the excited-state search sets its penalty weight
+    from) are cached lazily, and the lower one is filled by
+    gs_energy(skip_dmrg=True), so the first KPM call after a push would
+    sweep the pushed state in place, whatever the Python side does. No
+    backend exposes its band edges, and excited_states(1) is the one
+    call on all three that fills both of them before the push, from the
+    session's own state, and returns without keeping anything else. It
+    costs nothing when the edges are cached already, the reduced -H
+    solve KPM pays anyway when only the upper one is missing, and a
+    solve of the session's own state when the session holds no energy
+    for it, e.g. on a chain that was never solved, or after the
+    Hamiltonian was re-sent. Without it the first KPM call after
+    set_gs(x), x not an eigenstate, left the session on a state with
+    |<x|session>|^2 = 0.989 on "python" and 0.987 on v3, on a 3-site
+    Heisenberg chain. The edges come out as the Hamiltonian's, from a
+    solve, not as the injected state's energy; for a member of a
+    degenerate ground manifold the two coincide."""
+    _session_parameters(self)
+    send_hamiltonian(self) # precondition: H on the session
+    hermitian = self.is_hermitian(self.hamiltonian)
+    # the band edges are a Hermitian-solver notion; the non-Hermitian
+    # routes (NH-KPM, NH-DMRG) do not read them
+    if hermitian: self._session.excited_states(1,1.0,False) # see above
+    self._session.set_wavefunction(detached_copy(wf).cpp_handle)
+    e = self.aMb(wf,self.hamiltonian,wf)/self.overlap(wf,wf)
+    if hermitian: e = float(np.real(e))
+    self.e0 = e
+    self.wf0 = wf
+    self._gs_injected = None
+    self.computed_gs = True
+    self.sites_from_file = True
+    self.gs_from_file = True
+    self.skip_dmrg_gs = True
+    self._gs_solver_key = solver_key(self)
+    return e
 
 
 def send_hamiltonian(self):
@@ -103,86 +232,148 @@ def send_hamiltonian(self):
     is unchanged -- re-sending invalidates the session's energy and
     band-edge caches, so it must stay conditional.
     """
-    from .multioperatortk.staticoperator import StaticOperator
-    if isinstance(self.hamiltonian,StaticOperator):
-        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),
-               id(self.hamiltonian.cpp_handle))
-        cache = getattr(self,'_session_ham_cache',None)
-        if cache is None or cache[0] is not self._session or cache[1]!=key:
-            if not hasattr(self._session,"set_hamiltonian_mpo"):
-                raise NotImplementedError(
-                    "set_hamiltonian was given an already-built MPO "
-                    "(StaticOperator), which this backend cannot accept -- "
-                    "only itensor_version=3 implements set_hamiltonian_mpo. "
-                    "Pass a MultiOperator instead, or switch backend.")
-            self._session.set_hamiltonian_mpo(self.hamiltonian.cpp_handle)
-            self._session_ham_cache = (self._session,key)
+    key,terms = _send_key(self)
+    if _sent(self,key): return
+    if terms is None: # an already-built MPO
+        if not hasattr(self._session,"set_hamiltonian_mpo"):
+            raise NotImplementedError(
+                "set_hamiltonian was given an already-built MPO "
+                "(StaticOperator), which this backend cannot accept -- "
+                "only itensor_version=3 implements set_hamiltonian_mpo. "
+                "Pass a MultiOperator instead, or switch backend.")
+        self._session.set_hamiltonian_mpo(self.hamiltonian.cpp_handle)
     else:
-        terms = self.hamiltonian.to_terms()
-        key = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-               max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),terms)
-        cache = getattr(self,'_session_ham_cache',None)
-        if cache is None or cache[0] is not self._session or cache[1]!=key:
-            self._session.set_hamiltonian(terms)
-            self._session_ham_cache = (self._session,key)
+        self._session.set_hamiltonian(terms)
+    self._session_ham_cache = (self._session,key)
+
+
+def _send_key(self):
+    """(key, terms): send_hamiltonian()'s cache key, and the term list to
+    send (None for a Hamiltonian that is already an MPO, a StaticOperator,
+    keyed on its handle instead)."""
+    from .multioperatortk.staticoperator import StaticOperator
+    base = (self.maxm,self.nsweeps,self.cutoff,self.noise,
+            max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self))
+    if isinstance(self.hamiltonian,StaticOperator):
+        return base+(id(self.hamiltonian.cpp_handle),),None
+    terms = self.hamiltonian.to_terms()
+    return base+(terms,),terms
+
+
+def hamiltonian_on_session(self):
+    """True when self.hamiltonian, under the current solver parameters, is
+    what this chain last sent to its current session, i.e. when
+    send_hamiltonian() would not re-send it."""
+    return _sent(self,_send_key(self)[0])
+
+
+def _sent(self,key):
+    cache = getattr(self,'_session_ham_cache',None)
+    return (cache is not None and cache[0] is self._session
+            and cache[1]==key)
+
+
+def ground_state_on_session(self):
+    """Make sure the ground state every session correlator reads is the
+    chain's current one, on both sides, and that the session has the
+    Hamiltonian; call it before driving the session directly.
+
+    Three cases. A state that is current and whose Hamiltonian is the
+    session's costs nothing, no session call at all, so a repeated
+    correlator on a solved chain does not re-sweep. A state the caller
+    injected (set_gs(), set_initial_wf()) is handed to the session by
+    get_gs() through gs_energy_single(), unswept. And a state that is
+    stored but was computed for a Hamiltonian the session no longer
+    has (set_hamiltonian(restart=False)) is solved again, warm-started
+    from the session's previous state on v2/v3 and from a random one on
+    "python", whose session drops its state when the terms change (2026-09
+    audit, finding 2), since the session answers with the Hamiltonian it
+    holds.
+
+    This replaces the set_initial_wf(self.wf0) that every correlator used
+    to open with, the trigger of the file-based backend's hand-off of the
+    stored state to the C++ program. The pybind port kept the trigger and
+    dropped the hand-off, so the line only reset computed_gs and the
+    next get_gs() put the session's own solved state back over whatever
+    set_gs() had set (2026-09-24b hole hunt, finding 11), or, after a
+    set_wavefunction() had dropped the session's energy, ran a real
+    sweep from it (finding 13)."""
+    current = gs_is_current(self)
+    if current and hamiltonian_on_session(self): return # the cache hit
+    if current: self.computed_gs = False # the stored state is not for this H
+    self.get_gs()
+    send_hamiltonian(self)
 
 
 def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     """
-    Return the ground state energy via the in-process pybind11 extension
-    (mpscpp2/chain_session.h's Chain): the Hamiltonian/sweep params/
-    wavefunction are passed as in-memory arguments to self._session.
+    Return the ground state energy via the in-process session
+    (mpscpp2/mpscpp3's chain_session.h Chain, or pyitensor's): the
+    Hamiltonian, sweep parameters and wavefunction are passed as in-memory
+    arguments to self._session.
+
+    Where the answer comes from, in order of precedence:
+
+    - wf0=, an explicit start: a detached copy (detached_copy()) is handed
+      to the session and swept from, or taken unswept with reconverge=False;
+    - a state the caller injected (mark_injected()): taken unswept, with
+      e0 = <wf|H|wf>, after set_gs()/set_initial_wf(), and swept from after
+      set_initial_wf_guess();
+    - otherwise the session's own state: its cached energy when it has one
+      under the current Hamiltonian and parameters (skip_dmrg_gs, which
+      reconverge=True overrides), a sweep from it when it does not.
     """
-    self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
-    self._session.set_verbose(self.verbose)
-    self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    # Bond-dimension ramp for the ground-state sweep schedule, see
-    # Many_Body_Chain.__init__ (manybodychain.py) for what it does and
-    # Chain::make_sweeps_ramped() / pyitensor's _make_sweeps_ramped() for
-    # the schedule itself. hasattr-guarded so an out-of-date compiled
-    # extension (one built before this method existed) keeps working: it
-    # then simply uses the C++-side defaults, which are the same as the
-    # Python-side ones.
-    if hasattr(self._session,"set_bond_ramp"):
-        self._session.set_bond_ramp(self.bond_ramp,self.bond_ramp_start,
-                                    self.bond_ramp_fraction,
-                                    self.bond_ramp_noise_decay)
-    # Only re-send the Hamiltonian when it (or the MPO bond dimension it
-    # is built with) actually changed since the last send to this same
-    # session: the session's set_hamiltonian() invalidates its energy
-    # and band-edge caches unconditionally, so an unconditional re-send
-    # here turned every get_dynamical_correlator() call's internal
-    # ground-state re-verification into a real warm re-sweep and forced
-    # KPM to redo its band-edge DMRG on every call even with an
-    # unchanged Hamiltonian. Keying on the session object itself (by
-    # reference) makes the cache self-invalidating whenever a fresh
-    # Chain is created (setup_cpp/setup_python/__deepcopy__); comparing
-    # the to_terms() output (not the MultiOperator identity) catches
-    # in-place mutation of self.hamiltonian. Every solver parameter that
-    # a re-run would pick up (maxm, nsweeps, cutoff, noise, and the MPO
-    # bond dimension the Hamiltonian is built with) is part of the key:
-    # the session's energy cache survives a skipped re-send, so a user
-    # bumping any of these between bare gs_energy() calls must get a
-    # fresh solve, not the cached energy computed under the old params.
-    # A Hamiltonian that is already an MPO (a StaticOperator, e.g. from
-    # toMPO() and MPO algebra) is handed to the session directly -- it has
-    # no symbolic term list to key a cache on, and building one would
-    # defeat the point of having assembled it as an MPO. Identity of the
-    # handle plus the solver parameters is the cache key instead.
-    send_hamiltonian(self) # precondition: H on the session (see above)
     if wf0 is not None:
-        self._session.set_wavefunction(wf0.cpp_handle)
-    if reconverge is not None: # overwrite skip_dmrg_gs
-        self.skip_dmrg_gs = not reconverge # if the computation should be rerun
-    out = self._session.gs_energy(skip_dmrg=self.skip_dmrg_gs)
-    self.e0 = out # store ground state energy
-    self.computed_gs = True
-    self.sites_from_file = True
-    self.gs_from_file = True
-    self.skip_dmrg_gs = True
-    wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
-    self.set_initial_wf(wf0) # set the initial wavefunction
+        mode = "skip" if reconverge is False else "reconverge"
+        start = wf0.copy()
+    else:
+        mode = pending_injection(self)
+        start = self.wf0
+    if mode=="skip":
+        out = _take_injected_state(self,start)
+    else:
+        _session_parameters(self)
+        # Only re-send the Hamiltonian when it (or the MPO bond dimension it
+        # is built with) actually changed since the last send to this same
+        # session: the session's set_hamiltonian() invalidates its energy
+        # and band-edge caches unconditionally, so an unconditional re-send
+        # here turned every get_dynamical_correlator() call's internal
+        # ground-state re-verification into a real warm re-sweep and forced
+        # KPM to redo its band-edge DMRG on every call even with an
+        # unchanged Hamiltonian. Keying on the session object itself (by
+        # reference) makes the cache self-invalidating whenever a fresh
+        # Chain is created (setup_cpp/setup_python/__deepcopy__); comparing
+        # the to_terms() output (not the MultiOperator identity) catches
+        # in-place mutation of self.hamiltonian. Every solver parameter that
+        # a re-run would pick up (maxm, nsweeps, cutoff, noise, and the MPO
+        # bond dimension the Hamiltonian is built with) is part of the key:
+        # the session's energy cache survives a skipped re-send, so a user
+        # bumping any of these between bare gs_energy() calls must get a
+        # fresh solve, not the cached energy computed under the old params.
+        # A Hamiltonian that is already an MPO (a StaticOperator, e.g. from
+        # toMPO() and MPO algebra) is handed to the session directly -- it
+        # has no symbolic term list to key a cache on, and building one
+        # would defeat the point of having assembled it as an MPO. Identity
+        # of the handle plus the solver parameters is the cache key instead.
+        send_hamiltonian(self) # precondition: H on the session (see above)
+        if mode=="reconverge":
+            # after send_hamiltonian, which on "python" drops the session's
+            # state when the terms changed (2026-09 audit, finding 2)
+            self._session.set_wavefunction(detached_copy(start).cpp_handle)
+            skip = False
+        elif reconverge is not None: skip = not reconverge
+        else: skip = self.skip_dmrg_gs
+        out = self._session.gs_energy(skip_dmrg=skip)
+        self.e0 = out # store ground state energy
+        self.sites_from_file = True
+        self.gs_from_file = True
+        self.skip_dmrg_gs = True
+        # the solve's own result, the session's state already: assigned,
+        # not injected (mark_injected() is for the public setters only)
+        self.wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
+        self._gs_injected = None
+    self.computed_gs = True # ground state has been computed
+    self._gs_solver_key = solver_key(self) # ...under these parameters
     if maxde is not None: # enforce a maximum fluctuation in the energy
       e = self.vev(self.hamiltonian)
       e2 = self.vev(self.hamiltonian,npow=2)
@@ -208,8 +399,8 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
           self.nsweeps = nsweeps # restore
           self.noise = noise
           self.bond_ramp = ramp
-    self.computed_gs = True # ground state has been computed
-    self._gs_solver_key = solver_key(self) # ...under these parameters
+          self.computed_gs = True # ground state has been computed
+          self._gs_solver_key = solver_key(self) # ...under these parameters
     return out # return energy
 
 
@@ -231,6 +422,11 @@ def gs_energy(self,**kwargs):
             self.wf0 = wf0
             return e0
         elif self.itensor_version in (2,3,"python"): # real non-Hermitian DMRG
+            if pending_injection(self)=="skip" and not kwargs:
+                # set_gs()/set_initial_wf() on a non-Hermitian chain: the
+                # state as given, as on the Hermitian route; NH-DMRG takes
+                # no start state, so set_initial_wf_guess() still re-solves
+                return _take_injected_state(self,self.wf0)
             from .nhdmrg import gs_energy_nhdmrg
             return gs_energy_nhdmrg(self,**kwargs)
         else: # any other backend falls back to Krylov
@@ -373,7 +569,7 @@ def gs_energy_generalized(self,A,lam0=None):
         from .mpsjulialive.generalized import gs_energy_generalized as gsg_jl
         lam,wf0 = gsg_jl(self,A,lam0=lam0)
         self.e0 = lam
-        self.set_initial_wf(wf0) # resets computed_gs, hence the order below
+        self.wf0 = wf0.copy() # the solve's own result: assigned, not injected
         self.computed_gs = True
         return lam
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
@@ -386,21 +582,16 @@ def gs_energy_generalized(self,A,lam0=None):
         session_lam0 = float('nan') if lam0 is None else lam0
     lam = self._session.gs_energy_generalized(A.to_terms(),lam0=session_lam0)
     self.e0 = lam
-    wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
-    self.set_initial_wf(wf0) # set the initial wavefunction (resets computed_gs)
-    self.computed_gs = True # ...so this must come after set_initial_wf, not
-                             # before -- mirrors gs_energy_single's own
-                             # ordering (its trailing re-assertion after the
-                             # same set_initial_wf() reset), which an earlier
-                             # version of this function got backwards: setting
-                             # computed_gs=True *before* set_initial_wf() left
-                             # it silently False on return, so the next
-                             # ordinary gs_energy()/get_gs() call would see
-                             # computed_gs==False and quietly re-run a plain
-                             # ground-state DMRG solve (warm-started from this
-                             # method's own wf0), overwriting self.wf0/self.e0
-                             # with a different quantity than the caller asked
-                             # for -- confirmed directly via execution.
+    # The solve's own result, which is the session's state already, so it
+    # is assigned rather than injected (mark_injected() is for the public
+    # setters only). It used to go through set_initial_wf(), which reset
+    # computed_gs=False, and an earlier version of this function set
+    # computed_gs=True *before* that call, so the next plain gs_energy()
+    # re-ran an ordinary ground-state solve over the generalized state.
+    self.wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
+    self._gs_injected = None
+    self.computed_gs = True
+    self._gs_solver_key = solver_key(self) # see gs_is_current
     return lam
 
 
@@ -426,11 +617,20 @@ def get_gs_manifold(MBO,n=2,tol=1e-3,**kwargs):
 
 
 def set_gs(MBO,wf):
-    """Set the ground state int he object"""
+    """Set `wf` as the ground state of the chain.
+
+    On a DMRG backend with a session the state is marked as injected
+    (mark_injected()): the next ground-state read hands a copy of it to
+    the session and gives it its own energy <wf|H|wf>, unswept, so that
+    every consumer -- vev(), the dynamical correlators, whichever of the
+    Python-side wf0 or the session's own state they read -- measures the
+    state that was set. It used to reach the Python-side wf0 only, and the
+    next correlator call put the session's solved state back over it
+    (2026-09-24b hole hunt, finding 11)."""
     mode = wf.mode # get the mode
     if mode=="DMRG": # DMRG mode
-        MBO.computed_gs = True 
-        MBO.wf0 = wf.copy() # set the wavefunction
+        if not mark_injected(MBO,wf,reconverge=False):
+            MBO.computed_gs = True # no session: the state is current as set
     elif mode=="ED": # ED mode
         MBO.get_ED_obj() # generate the ED object
         MBO.ED_obj.computed_gs = True # comptued GS

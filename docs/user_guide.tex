@@ -430,8 +430,9 @@ first half of the sweeps, none for the second.
 
 A \emph{warm} start is never truncated by the ramp: when
 \lstinline|gs_energy()| is re-entered with a wavefunction already in hand
-(\lstinline|set_initial_wf|, or simply a previous
-\lstinline|gs_energy()| call's own solution), the ramp's starting bond
+(\lstinline|set_initial_wf_guess|, or simply a previous
+\lstinline|gs_energy()| call's own solution; \lstinline|set_initial_wf|
+instead takes the state as it is, unswept), the ramp's starting bond
 dimension is floored at whatever that state already carries, so a re-run
 can only improve the energy. The ramp applies to the ground-state solve
 on all three DMRG backends (\lstinline|itensor_version| 2, 3 and
@@ -1740,9 +1741,22 @@ deliberately reduced-effort DMRG on $-H$ (few sweeps at modest bond
 dimension) --- it is only a spectral \emph{bound}, protected by the
 \texttt{kpm\_scale} margin, not a physical result, and a variational
 underestimate only shrinks the number of moments. If the bound is ever
-too tight for the chosen \texttt{kpm\_scale}, the moment recursion
-detects the resulting exponential divergence and aborts with an
-explicit error rather than returning a silently wrong spectrum.
+too tight for the chosen \texttt{kpm\_scale}, or \texttt{kpm\_scale}
+is below 1/2, where the ground state itself sits at
+$x_0=-1/(2s)$, $s$ being \texttt{kpm\_scale}, outside $[-1,1]$, the moment recursion
+raises \texttt{RuntimeError} as soon as a moment exceeds 1.5 times
+$\|v_i\|\|v_j\|$, the exact bound for a spectrum inside $[-1,1]$, on
+every DMRG backend and on \texttt{mode="ED"} alike (\texttt{julia\_live}
+raises \texttt{juliacall.JuliaError}). Until the 2026-09-24 second-pass
+audit the DMRG threshold was $10^3(\|v_i\|\|v_j\|+1)$, which let spectra
+up to 109 times the true peak through, and ED had no check at all
+(findings 2 and 3). This catches every case where a pole outside the
+window carries enough weight to show; in a sliver just below 1/2 (0.499
+on a 4-site chain at $\delta=0.1$) the elastic line is already distorted
+while the moments are still under the bound, so stay above the
+$\sim0.5$ floor unless \texttt{kpm\_energy\_truncate} is on. A harshly
+truncated \texttt{kpmmaxm} (2 or 3 on a small chain) can also cross the
+bound, and then its spectrum is tens of per cent wrong anyway.
 
 \textbf{Reconstruction kernel (\texttt{kernel=}) --- how the moments
 become a spectrum.} The formula above is only one way to turn
@@ -1899,7 +1913,11 @@ relevant region sits just above $E_0$, not around the spectrum's
 geometric middle --- the midpoint-centered window would otherwise clip
 the ground state itself out of the window before ever reaching a
 genuinely useful, narrower regime. Available for
-\texttt{itensor\_version="python"} and \texttt{itensor\_version=3}; there
+\texttt{itensor\_version="python"} and \texttt{itensor\_version=3}
+(\texttt{mode="ED"} raises \texttt{NotImplementedError}, and so does
+\texttt{mode.py}'s fallback onto it for a 2-site
+\texttt{itensor\_version=3} chain; it used to return the untruncated
+curve, finding 4 of the second-pass record); there
 is no \texttt{itensor\_version=2} port (mpscpp2 has no equivalent
 machinery to build a per-site local effective Hamiltonian from, unlike
 mpscpp3's \texttt{LocalMPO}/\texttt{diagHermitian}). Requesting it on
@@ -2308,11 +2326,15 @@ accepted by \texttt{submode="TDZ"} and by the internal $S(k,\omega)$
 reduction (\texttt{sxt\_to\_skomega}), since all three share the same
 windowing stage, but their own defaults are unchanged
 (\texttt{damping="exp"}, \texttt{predict=False}), since the empirical
-comparison above was only run for \texttt{"TD"}. What they no longer
-share is the last step: \texttt{"TD"} and \texttt{"TDZ"} evaluate the
-damped sum directly at each requested frequency, while
-\texttt{sxt\_to\_skomega} stays on the FFT grid, since at its defaults
-$\delta T=1$ and the direct evaluation is unmeasured there.
+comparison above was only run for \texttt{"TD"}. All three also share
+the last step: they evaluate the damped sum directly at each requested
+frequency. \texttt{sxt\_to\_skomega} stayed on the FFT grid for a while
+after \texttt{"TD"} and \texttt{"TDZ"} left it, and at a converged
+window, $\delta T=6$, that put its $S(k,\omega)$ 21 per cent of the peak
+off exact, with peak heights down to 0.79 of the right ones; it moved
+onto the direct sum with the 2026-09-24 second-pass audit
+(\texttt{docs/audit\_2026\_09\_24b\_hole\_hunt.md}, finding 7, and
+Section~\ref{sec:whatraises}).
 
 \textbf{\texttt{submode="TDZ"} --- complex-time evolution (Cao, Lu,
 Stoudenmire \& Parcollet, arXiv:2311.10909).} Real-time evolution
@@ -2420,7 +2442,12 @@ G_{AB}(\omega)=\sum_{n=1}^{n_{ex}}\frac{\langle\mathrm{GS}|A|n\rangle\langle n|B
 i.e.\ a small, explicit sum over poles at the computed excited-state
 energies $E_n$, each with residue given by the transition matrix
 elements. Cheap and exact \emph{within} the truncated subspace; only as
-good as how many/which excited states were computed. The \texttt{nex}
+good as how many/which excited states were computed. Here
+$|\mathrm{GS}\rangle$ is the chain's own state, the one
+\texttt{set\_gs()} set if any, expressed in that subspace, and $E_n$ is
+measured from its energy; a state outside the subspace raises (until the
+2026-09-24 second-pass audit, finding 15, EX measured from the lowest
+vector of its own subspace whatever the chain held). The \texttt{nex}
 excited-state MPS are not assumed to be orthonormal (\texttt{dcex.py}
 builds their own overlap matrix and solves a generalized eigenvalue
 problem $Hc=eSc$ rather than assuming $S=1$), which matters in practice
@@ -3697,10 +3724,18 @@ matrix, and it costs $g$ times the single-state run; on that crossing
 \texttt{n\_gs=2} gives 1.50002 to 1.50004 in every run. The default
 \texttt{n\_gs=1} is the unchanged single-state path, a
 \texttt{RuntimeWarning} fires when a member lies more than
-\texttt{delta} from $E_0$, and \texttt{n\_gs>1} raises
-\texttt{NotImplementedError} on \texttt{itensor\_version=2} and
+\texttt{delta} from $E_0$, and \texttt{n\_gs>1} runs on
+\texttt{itensor\_version} 2, 3 and \texttt{"python"}, measures each
+member exactly as returned, with \texttt{gs\_energy()} that member's own
+energy, restores the chain afterwards, \texttt{gs\_energy()} included,
+and accepts only the submodes that read the chain's state (KPM, CVM,
+CVM\_explicit, ROOTN, TD, TDZ, EX), raising
+\texttt{NotImplementedError} for SECTOR, any other submode and
 \texttt{"julia\_live"} (\texttt{docs/audit\_2026\_09\_24\_hole\_hunt.md},
-finding 12).
+finding 12, and the 2026-09-24 second-pass record, findings 13 to 15:
+until then each member was re-swept before it was measured, and on v2
+and v3 an excited member split below \texttt{delta} relaxed into the
+lower one in 16 of 24 runs).
 
 Further \texttt{mode="DMRG"} limitations beyond the general ones above:
 the \texttt{es} frequency grid has no safe default and must be supplied
@@ -3715,9 +3750,12 @@ by both, so with \texttt{U!=0} it must meet the second requirement, and
 the potential term issues a \texttt{RuntimeWarning} when the sum rule
 $\sum_k\int S_{kk}(\omega)\,d\omega=S(S+1)$ says more than $10^{-2}$
 of the weight is missing (see \texttt{second\_order\_dIdV\_dc}'s and
-\texttt{potentialdc}'s docstrings). The grid may be non-uniform, since
-both terms integrate with trapezoid weights of the grid they are given;
-the potential term weighted every point with the first spacing until the
+\texttt{potentialdc}'s docstrings). The grid may be non-uniform and in
+any order, since both terms sort it and then integrate with trapezoid
+weights of the grid they are given (an unsorted grid, such as a refined
+block appended after a coarse one, was silently wrong until the
+2026-09-24 second-pass audit, 3.04 off a 6.97 peak on the second-order
+term, finding 17); the potential term weighted every point with the first spacing until the
 2026-09-24 audit (finding 13), and the one example of it,
 \texttt{examples/kondo/kondo\_potential\_term\_dmrg\_VS\_ED}, violated
 the coverage requirement and blamed the resulting 9.7 per cent
@@ -4677,7 +4715,13 @@ es, ys = ic.kpm_finite("Sz", 0, "Sz", 0, n_window=16,
 \texttt{window\_chain\_kwargs} is an optional dict of attribute
 overrides applied to the temporary finite \texttt{Many\_Body\_Chain}
 (\texttt{maxm}, \texttt{nsweeps}, \texttt{kpmmaxm}, \texttt{kpm\_scale},
-...), independent of \texttt{ic}'s own \texttt{maxm}/etc.; remaining
+...), independent of \texttt{ic}'s own \texttt{maxm}/etc.; a key the
+temporary chain does not hold as a setting (a misspelling, a method or a
+private name) raises \texttt{TypeError}, and so do
+\texttt{itensor\_version} and \texttt{mode}, since the window always
+runs on \texttt{itensor\_version="python"} (until the 2026-09-24
+second-pass audit a misspelled key was stored where nothing reads it and
+the call returned the default spectrum, finding 6); remaining
 \texttt{**kwargs} (\texttt{delta}, \texttt{kernel}, \texttt{es},
 ...) are forwarded to
 \texttt{kpmdmrg.get\_dynamical\_correlator} unchanged.
@@ -4778,10 +4822,15 @@ spatial Fourier transform -- turning it off produces a spurious,
 dominant $k=0$ contribution with no discernible dispersion (the raw
 correlator approaches \texttt{<opname\_i><opname\_j>}, not $0$, at
 large separation). \texttt{Skw} (shape \texttt{(len(ks), len(es))}) is
-obtained via a spatial DFT ($S(k,t)=\sum_x e^{-ikx}S(x,t)$) followed by
-the \emph{same} damping/FFT tail (\texttt{delta} $\to$
-Lorentzian broadening) \texttt{submode="TD"} uses, with one deliberate
-difference at the end of it: what comes back is the raw one-sided
+obtained via a spatial DFT ($S(k,t)=\sum_x e^{-ikx}S(x,t)$),
+conjugated, and followed by the \emph{same} damping and direct
+per-frequency sum (\texttt{delta} $\to$ Lorentzian broadening)
+\texttt{submode="TD"} uses. The conjugation is the finite TD route's own
+conjugate-at-return: $S(x,t)$ carries $e^{-i(H-E_{GS})t}$, and without
+it every line came out at $\omega=-D_n$ instead of $+D_n$ on both
+backends, mostly below the default \texttt{window=[-1,10]}, until the
+2026-09-24 second-pass audit (finding 8). There is one deliberate
+difference at the end: what comes back is the raw one-sided
 transform, not the density of Section~\ref{sec:dynamical}. The reduction
 that produces $S(k,t)$ never names the operator pair, so the
 adjoint-pair identity \texttt{"TD"} completes its transform with (see
@@ -5215,8 +5264,11 @@ Three things to set when you use it:
     Krylov expansion, 0.49 off the unpadded run on a 10-site quench at
     \texttt{K=maxm}. Since the 2026-09-24 audit that route is exempt
     from the padding the way the Hamiltonian is, the padding being
-    stripped once at trajectory entry, so a padded \texttt{TDVP\_GSE}
-    run follows the unpadded one to roundoff
+    stripped once at trajectory entry from whatever state the evolution
+    is handed (keyed on the state rather than on the flag since the
+    2026-09-24 second-pass audit, finding 18, so a state padded earlier
+    and evolved after the flag is cleared is stripped too), so a padded
+    \texttt{TDVP\_GSE} run follows the unpadded one to roundoff
     (\texttt{docs/audit\_2026\_09\_24\_hole\_hunt.md}, finding 16,
     and Section~\ref{sec:whatraises}). The one case still started padded
     is \texttt{submode="TDZ"} with \texttt{tevol\_method="TDVP\_GSE"}
@@ -5672,9 +5724,9 @@ from 3.314e-02 to 5.408e-04 for \texttt{"TDZ"} and for \texttt{"TD"} at
 \texttt{"TD"} at its default, and the returned curves move by up to 14
 per cent of the peak for the first two (19 per cent at $\delta=0.25$)
 and by 2.89e-04 for the third. \texttt{sxt\_to\_skomega}, the
-infinite-chain $S(k,\omega)$ reduction, stays on the FFT stage and
-returns the same bits as before (Section~\ref{sec:dynamical}, finding
-7).
+infinite-chain $S(k,\omega)$ reduction, stayed on the FFT stage and
+returned the same bits as before (Section~\ref{sec:dynamical}, finding
+7), until the second pass below.
 \item \textbf{Every DMRG KPM spectrum moves by roughly $2/N$ onto the ED
 one}, $N$ being the calibrated moment count, since the DMRG routes
 reconstructed from $N+2$ moments. On two decoupled Heisenberg dimers the
@@ -5774,6 +5826,80 @@ a \texttt{toMPO()} operator to \texttt{submode="TDZ"} & a crash several frames d
 \texttt{get\_kondo\_spectrum(mode="ED")} with a keyword it does not read & ignored, so \texttt{Jrho=} for \texttt{Jrho\_s=} removed the Kondo peak & \texttt{TypeError} naming the unknown keywords \\
 \texttt{get\_kondo\_spectrum(mode="DMRG")} at a degenerate ground state & one arbitrary member's spectrum & the same by default; \texttt{n\_gs=g} gives the equal-weight average over the manifold that \texttt{mode="ED"} takes \\
 the potential term with an \texttt{es} that misses spectral weight & a silently low spectrum & \texttt{RuntimeWarning} from the sum rule \\
+\bottomrule
+\end{tabular}
+\normalsize
+\end{center}
+
+\subsection*{The 2026-09-24 second pass}
+
+A fourth hunt (\texttt{docs/audit\_2026\_09\_24b\_hole\_hunt.md}, five
+lenses over the single commit \texttt{30200a4} that closed the third)
+recorded 18 confirmed findings, twelve of them older than that commit and
+reached by probing next to it, and every one is fixed. Each item below
+names its finding; the record carries the reproduction that was actually
+run.
+
+\textbf{Results that are not comparable across this change.}
+
+\begin{itemize}
+\item \textbf{Every infinite-chain $S(k,\omega)$}, on v3 and
+  \texttt{"python"}, was mirrored in frequency and interpolated off an FFT
+  grid. It is now conjugated after the spatial sum and evaluated directly
+  at each frequency: on the transverse-field paramagnet the $k=\pi$ magnon
+  moves from $\omega=-1.045$, with 0.928 of its weight below zero, to
+  $+0.905$ against $\varepsilon=0.900$, and on a single magnon at
+  $\delta T=6$ the curve goes from 21 per cent of the peak off the closed
+  form to $2\times10^{-14}$ (Section~\ref{sec:infinite}, findings 7 and 8).
+\item \textbf{\texttt{evolve\_and\_measure} and \texttt{evolution\_ABA} on
+  \texttt{mode="ED"} ran backwards in time}, and on every DMRG backend
+  returned the conjugate of $\langle O\rangle$. Larmor precession of a
+  $+x$ chain in a field now gives $\langle S^y_0\rangle(t=1)=+0.4207$ on
+  ED, where it gave $-0.4207$, and $O=S^z_0+iS^x_0$ on an eigenstate now
+  gives $+0.5i$ on DMRG, where it gave $-0.5i$. A real Hamiltonian, a real
+  start and a Hermitian observable with real matrix elements, which is
+  what every earlier test measured, do not move (findings 9 and 10).
+\item \textbf{A state set by hand now reaches the solver.} After
+  \texttt{set\_gs()} every DMRG correlator measured the session's own
+  solved state and then overwrote the chain's with it (TD on a pure
+  doublet member goes from $2.04\times10^{-1}$ to $3.3\times10^{-6}$ off
+  exact), and \texttt{set\_initial\_wf}/\texttt{set\_initial\_wf\_guess}
+  never reached the session, so the transverse-field Ising example
+  plotted $M_z/n\approx0.001$ in the ordered phase where the seeded branch
+  gives 0.4998 (findings 11 and 12).
+\item \textbf{\texttt{get\_kondo\_spectrum(mode="DMRG", n\_gs>1)}}
+  re-swept each member before measuring it, so on v2 and v3 an excited
+  member split below \texttt{delta} relaxed into the lower one (1 of 6
+  runs at the average 1.5, now 6 of 6), left \texttt{gs\_energy()} at the
+  last member's energy afterwards, and was inert under
+  \texttt{submode="EX"}, which now measures from the chain's own state
+  (1.1392 to 1.8711 across seeds, now 1.512780 on every one; findings 13
+  to 15).
+\item \textbf{Smaller moves}: the Kondo terms on a non-increasing
+  \texttt{es} (3.035 to 0.03183 off exact on a refined block appended
+  after a coarse one, finding 17); a padded ground state evolved with
+  \texttt{set\_pad\_bonds} cleared under \texttt{TDVP\_GSE} at
+  \texttt{tdvp\_gse\_sweeps=0} (0.4929 to $1.2\times10^{-15}$ off the
+  unpadded run, finding 18); \texttt{mpsalgebra.disentangle\_manifold} on
+  a Hermitian operator the canonical proof cannot see (a non-orthonormal
+  basis, Gram error 0.32, now $10^{-15}$, and proven operators move at the
+  gauge level, finding 1).
+\end{itemize}
+
+\textbf{And these now raise where they used to be silent:}
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.34\textwidth}p{0.30\textwidth}p{0.29\textwidth}@{}}
+\toprule
+\textbf{Call} & \textbf{Was} & \textbf{Now} \\
+\midrule
+KPM with a pole outside the rescaled window (\texttt{kpm\_scale} below 1/2) & DMRG spectra up to 109 times the true peak, ED integrals up to $10^6$ & \texttt{RuntimeError} on every backend, the guard being 1.5 times the exact moment bound (findings 2 and 3) \\
+\texttt{kpm\_energy\_truncate=True} on \texttt{mode="ED"} & the untruncated curve & \texttt{NotImplementedError}, also through \texttt{mode.py}'s fallback (finding 4) \\
+\texttt{kpm\_n\_scale=1.5} on a non-Hermitian \texttt{mode="ED"} KPM & \texttt{TypeError}, where \texttt{mode="DMRG"} accepted it & accepted on both, neither reading it (finding 5) \\
+a misspelled key, a method or \texttt{itensor\_version} in \texttt{kpm\_finite}'s \texttt{window\_chain\_kwargs} & ignored, the default spectrum bit for bit & \texttt{TypeError} (finding 6) \\
+\texttt{name=(A,B)} with \texttt{i=}/\texttt{j=} in \texttt{get\_dynamical\_\allowbreak correlator} and every wrapper of it & the sites silently dropped & \texttt{TypeError} (finding 16) \\
+\texttt{n\_gs>1} under \texttt{submode="SECTOR"} & the single-state value & \texttt{NotImplementedError} (finding 15) \\
 \bottomrule
 \end{tabular}
 \normalsize

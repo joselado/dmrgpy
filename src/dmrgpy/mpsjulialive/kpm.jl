@@ -13,16 +13,22 @@
 # to ~28.4s (~18% faster), narrowing the gap to the compiled ITensor v3
 # backend's ~23.4s from ~1.47x to ~1.21x slower.
 
-function check_kpm_moment(lastmoment,bound)
+function check_kpm_moment(moment,bound)
 	# Chebyshev moments of a correctly scaled Hamiltonian (spectrum
-	# inside [-1,1]) satisfy |<vj|T_k|vi>| <= ||vi||*||vj|| = bound;
-	# exponential growth beyond it means the scaled spectrum leaked
-	# outside [-1,1] (band-edge estimate too tight for the chosen
-	# kpm_scale) and every subsequent moment is garbage.
-	if abs(lastmoment) > 1e3*(bound+1.0)
+	# inside [-1,1]) satisfy |<vj|T_k|vi>| <= ||vi||*||vj|| = bound
+	# exactly; growth beyond it means the scaled spectrum leaked outside
+	# [-1,1] (band-edge estimate too tight, or kpm_scale below 1/2 on the
+	# bandwidth-centred window) and the spectrum is wrong. The factor 1.5
+	# is algebra/kpm.py's KPM_MOMENT_BOUND_FACTOR, the same on every
+	# backend; it used to be 1e3*(bound+1), which let spectra up to 109
+	# times the true peak through and was an absolute threshold for
+	# operators of small norm (2026-09-24b audit, finding 3).
+	if abs(moment) > 1.5*bound
 		error("KPM moments diverging: scaled spectrum outside [-1,1] "*
-		      "(band-edge estimate too tight; increasing kpm_scale "*
-		      "widens the safety margin)")
+		      "(a Chebyshev moment exceeds 1.5*||vi||*||vj||, which no "*
+		      "pole inside the window can give; the band-edge estimate "*
+		      "is too tight or kpm_scale is below 1/2, and increasing "*
+		      "kpm_scale widens the safety margin)")
 	end
 end
 
@@ -64,7 +70,9 @@ function kpm_moments_accelerated(jlmpo,vi,n,kpmmaxm,kpmcutoff)
 		bk1 = 2.0*inner(a,ap)-mu1
 		push!(out,bk)
 		push!(out,bk1)
-		check_kpm_moment(out[end],bound)
+		# both moments of the step, since the pair is appended together
+		check_kpm_moment(bk,bound)
+		check_kpm_moment(bk1,bound)
 		am = 1.0*a
 		a = 1.0*ap
 	end
