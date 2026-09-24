@@ -7,9 +7,10 @@ description: Run a multi-lens hole hunt (audit) of the dmrgpy Python layer, or a
 
 A hole hunt is a parallel, multi-lens search for behaviour in the dmrgpy Python
 layer that is *silently* wrong: a number that is plausible and incorrect, a
-dispatch that answers a question nobody asked, a kwarg with no consumer. The two
-previous hunts are `docs/audit_2026_08_hole_hunt.md` (five lenses, 21 findings)
-and `docs/audit_2026_09_hole_hunt.md` (eight lenses, 36 findings). Read the
+dispatch that answers a question nobody asked, a kwarg with no consumer. The
+previous hunts are `docs/audit_2026_08_hole_hunt.md` (five lenses, 21 findings),
+`docs/audit_2026_09_hole_hunt.md` (eight lenses, 36 findings) and
+`docs/audit_2026_09_24_hole_hunt.md` (five lenses, 16 findings). Read the
 scope section and the lens table of the most recent one before starting: a
 finding already recorded there is not a new finding.
 
@@ -53,13 +54,20 @@ parallel. Previous sets, to vary rather than repeat:
 - 2026-09: `python-backend-parity`, `wavefunction-consumers`, `dispatch-matrix`,
   `pyitensor-performance`, `cpp-v3-completeness`, `ed-and-operators`,
   `recent-commits`, `docs-examples-drift`.
+- 2026-09-24 (`docs/audit_2026_09_24_hole_hunt.md`, scoped to the commits since
+  the previous hunt's fixes): `kpm-calibration`, `td-convention`,
+  `canonical-form`, `infinite-chain`, `recent-misc`. Scoping a hunt to a commit
+  window, one lens per recent change, found 16 holes in 11 commits, seven or
+  eight of them introduced by the single commit that closed the previous
+  hunt's open items; a hunt right after a fix pass is worth running for that
+  reason alone.
 
 Out of scope by construction, and stated in the record so the exclusion is on
 the page rather than in someone's head: vendored ITensor (`mpscpp2/ITensor/`,
 `mpscpp3/ITensor/`); the legacy bugs `CLAUDE.md` says are deliberately
 reproduced (`evoloperator`'s z^3/6 term on `H2`, the `"moise"` key, the
 unreachable `"tevol_fit_td"` branch); the open `docs/known_issue_*.md` items;
-anything already in either audit record; and gaps `ROADMAP.md` already marks as
+anything already in an earlier audit record; and gaps `ROADMAP.md` already marks as
 absent. Decide explicitly whether `itensor_version="julia_live"` is in scope,
 since its juliacall JIT cost dominates any lens that touches it, and say so.
 
@@ -77,9 +85,21 @@ version, and the narrowed version is what gets written down. The 2026-09 record
 carries several findings whose sub-claims the reviewer struck; keeping the strike
 visible is part of the point.
 
+Two practical points from the 2026-09-24 hunt. Subagents cannot write report
+files (the harness refuses them), so a reviewer's report arrives only as its
+hand-back text: save a condensed copy next to its scripts as it arrives, since
+the conversation that holds the full text may be compacted before the record is
+written. And the scratch folders every repro runs in do not outlive the session,
+so the record must carry each script and output inline rather than by path;
+the 2026-09-24 record was assembled by a small builder that splices the files
+from disk into the markdown, which keeps the outputs byte-for-byte what was run.
+A finding a reviewer turns up while reviewing another one gets its own reviewer
+before it enters the record.
+
 ## 4. Write the record
 
-`docs/audit_<YYYY_MM>_hole_hunt.md`, in the shape both existing records share:
+`docs/audit_<YYYY_MM>_hole_hunt.md` (`<YYYY_MM_DD>` when the month already has
+one), in the shape the existing records share:
 
 ````markdown
 # Audit, <YYYY-MM>: <n>-lens hole hunt

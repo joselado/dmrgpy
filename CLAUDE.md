@@ -389,6 +389,28 @@ weight. `get_distribution()`'s own KPM path is deliberately not on the
 calibration, and is the one place `delta` still means only a polynomial
 count.
 
+**The 2026-09-24 audit.** `docs/audit_2026_09_24_hole_hunt.md` is a third
+hunt, five lenses (`kpm-calibration`, `td-convention`, `canonical-form`,
+`infinite-chain`, `recent-misc`) scoped to the eleven commits after the
+2026-09 fixes, `1c2606d..765b537`, on a baseline of 832 passing tests. It
+has 16 confirmed findings, none refuted and every one narrowed by its
+reviewer, and **all 16 are open**: nothing has been fixed yet, so the
+record's "The findings at a glance" table is the task list, with each
+entry's scripts and outputs inline because the scratch folders they ran in
+are gone. Several of them contradict statements elsewhere in this file and
+in the 2026-09 record, and the record's "Statements this hunt overturns"
+section lists which. Until they are fixed, treat these as known: the O1
+paragraph's "TDZ keeps 3.31e-02 of its own, its contour" is an FFT-grid
+interpolation error shared with TD at `predict=False` (the contour is
+6.2e-07 of it); every DMRG KPM route reconstructs from n+2 moments where
+the calibration and ED use n, so O2's residual ED-DMRG disagreement is
+mostly that; the "1.6x higher than a Lorentzian of equal FWHM" above is
+about 1.5x at really equal FWHM; the canonical form's Hermiticity proof is
+wrong for a term mixing `A`/`Adag` with `C`/`Cdag` (and the obvious fix,
+parity `None` for `A`, breaks the boson proofs); and the `"python"`
+excitation solver *is* exposed to losing a degenerate copy at n>=2 once
+dim > 256, contrary to the D=2 measurement that said otherwise.
+
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
 result, so every `examples/*/*/main.py` should end with a `matplotlib`
