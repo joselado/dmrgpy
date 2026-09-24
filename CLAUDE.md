@@ -425,7 +425,9 @@ since the Fourier sum is now evaluated at each requested frequency rather
 than interpolated off an FFT grid of spacing 1.05*delta (finding 7;
 `sxt_to_skomega` and the two short-window direct callers stay on the FFT
 stage); `mode="ED"` `submode="TD"` on a degenerate ground state, which
-built its two halves on two different random states (finding 8);
+built its two halves on two different random states, and with it
+`evolution_ABA(mode="ED")` and `evolve_and_measure(mode="ED")` called
+without `wf=`, which now start from the cached ground state (finding 8);
 correlators with `ISy` in the first operator, which were exactly minus
 the right ones on KPM, EX, TD and TDZ (finding 2); anything the canonical
 form proved about a term mixing `A`/`Adag` with `C`/`Cdag` (finding 1);

@@ -20,6 +20,14 @@ overturn a statement an earlier record or the documentation makes; those are
 collected in "Statements this hunt overturns" at the end, so that the older
 records can be pointed at this one when the fixes land.
 
+All 16 have now been addressed, as of `30200a4`: every entry carries a
+`**Status**` line, fifteen of them reading FIXED and one (finding 16) FIXED
+for its main route with a residual left open by design, and the
+regressions live in five files, `tests/test_audit_2026_09_24_<cluster>.py`
+for `operators`, `kpm`, `realtime`, `kondo` and `pyitensor`. The fixes that
+changed numbers rather than behaviour are listed together in `CLAUDE.md`'s
+paragraph for this audit.
+
 ## The five lenses
 
 | Lens | Brief |
@@ -5119,6 +5127,19 @@ than findings.
   (5,4) typo; dmrgpy never requests it.
 - `secondorder_dc.py`'s "0.2% at every bias point" measures 0.46 per cent at
   most on its own documented setup (median 4.8e-06).
+- Found while fixing: `_fourier_transform_correlator` with `factor>1` builds
+  its resampled times with spacing T_max/(N*factor-1) but uses dt/factor for
+  the phases and weights; this predates the fixes and nothing in the
+  repository uses `factor>1`.
+- Found while fixing: VUMPS on the `n_uc=2` Heisenberg test cell at
+  `maxm=4` does not reproduce under a fixed `np.random.seed` (four runs gave
+  four e0 values at the 1e-8 level, all `converged=False`), which is why
+  finding 15's tests compare the two solvers on one shared environment.
+- Found while fixing: `dynamical_correlator_from_moments` rebuilds the KPM
+  curve on its own 10n-point grid and interpolates linearly onto `es`,
+  which after finding 4's fix is the whole of the `"python"`
+  ED-versus-DMRG residual (5.8e-4 of the peak on the dimer pole at
+  delta=0.1); evaluating at `es` directly, as ED does, would remove it.
 - Stale text: `dynamics.py:69` to `72` still says TD/TDZ "are the routes still off
   this convention"; `_fourier_transform_correlator` keeps the superseded
   `S_AB = -(1/pi) Im G_AB` comment; `infinitechain.py:1220` to `1221` still says
