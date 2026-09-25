@@ -102,7 +102,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
 
 
 def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
-        dt=1e-2,wf=None,return_wf=False,**kwargs):
+        dt=1e-2,wf=None,return_wf=False):
     """Real-time evolution + measurement on the Julia backend, via native
     TDVP (mpsjulialive/tdvp.jl's evolve_and_measure_tdvp), its one-site
     + global-subspace-expansion variant (evolve_and_measure_tdvp_gse) when

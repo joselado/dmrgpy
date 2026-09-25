@@ -368,6 +368,7 @@ class Many_Body_Chain():
       self.e0 = None
       self._gs_solver_key = None
       self._gs_injected = None
+      self._gs_supplied = False
       self._dcex_excited_cache = None
       self._sector_states_cache = None
   def set_conserved_sector(self,**qns):
@@ -623,6 +624,10 @@ class Many_Body_Chain():
               "this compiled mpscpp3 extension predates conserved-sector "
               "promotion -- rebuild it with 'python install.py "
               "--itensor-version=3'")
+      # read before the sector changes, since both key on it
+      pending = groundstate.pending_injection(self)
+      current = groundstate.gs_is_current(self)
+      supplied = groundstate.state_supplied(self)
       self._session.promote_to_dense()
       self.conserved_sector = None
       # The session dropped its Hamiltonian MPO along with the QN sites, so
@@ -634,6 +639,17 @@ class Many_Body_Chain():
       # groundstate.gs_energy_single, which copies gs_wavefunction() out),
       # so promoting the session does not reach it.
       self.wf0 = self.promote_mps(self.wf0)
+      # Keep the state the chain holds, as the docstring promises: re-mark
+      # the promoted copy, so the next read takes it unswept with its own
+      # energy on every backend. Without it the copy retired a pending
+      # set_gs() mark (x lost, overlap 0.0000), and a state already taken
+      # was re-swept on the dense sites, on "python" whenever the session
+      # held no energy for it and on v3 always, since set_hamiltonian_mpo
+      # clears the energy promote_to_dense carries (2026-09-24c audit,
+      # findings 3 and 4). A pending set_initial_wf_guess() stays a guess.
+      if self.wf0 is not None and (pending is not None or current):
+          groundstate.mark_injected(self,self.wf0,
+                  reconverge=(pending=="reconverge"),supplied=supplied)
   def promote_mps(self,wf):
       """Convert one wavefunction from a conserved sector's QN-carrying site
       indices to this chain's dense ones, exactly -- the per-wavefunction
@@ -747,8 +763,26 @@ class Many_Body_Chain():
       ITensor's toMPO already compresses a term list well (measured: 6.7x
       the terms cost 1.4x the sweep time on a spinful chain), so reach for
       it when the term list is awkward or quadratic, not on the assumption
-      that term count drives the solve."""
+      that term count drives the solve.
+
+      restart=False keeps the previous state as the warm start of the next
+      solve and nothing else: the stored ground state, its energy, the
+      cached excited-state and sector solves and the ED object all belong
+      to the old Hamiltonian and are dropped, so every read solves again.
+      It used to keep the stored state current, so gs_energy(), vev(),
+      get_excited() and the direct KPM moments answered for the old
+      Hamiltonian while the public correlator re-solved (-1.616025 against
+      an exact -1.780099 on a 4-site chain, 2026-09-24c audit, finding 5).
+      On v2/v3 the warm start is the session's own state, which stays
+      trapped in an eigenstate of the old Hamiltonian that is also one of
+      the new."""
       if restart: self.restart() # restar the calculation
+      else:
+          self.computed_gs = False
+          self.has_ED_obj = False
+          self._gs_supplied = False
+          self._dcex_excited_cache = None
+          self._sector_states_cache = None
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
   def get_heff(self,**kwargs):
@@ -773,6 +807,7 @@ class Many_Body_Chain():
       self.has_ED_obj = False # restart ED obj
       self.skip_dmrg_gs = False
       self.wf0 = None # initial file for GS
+      self._gs_supplied = False # the chain's state is no longer the caller's
       self._dcex_excited_cache = None # invalidate cached excited states
           # (dcex.py), tied to the ground state being replaced above
       self._sector_states_cache = None # same, for sectordc.py's cached
@@ -1167,9 +1202,29 @@ class Many_Body_Chain():
                   "it is defined in terms of <H> and <H^2> and sets the "
                   "power itself")
       h = self.get_hamiltonian()
+      mode = self.get_mode(mode=kwargs.get("mode","DMRG"))
+      if mode=="DMRG" and self.itensor_version in (2,3,"python"):
+          # <H^2>-<H>^2 through vev(npow=2) truncated H|psi> to maxm and
+          # was set by that truncation rather than by the state (2026-09-24c
+          # audit, finding 7); see vev.energy_variance
+          unknown = set(kwargs)-{"mode","wf"}
+          if unknown:
+              raise TypeError("gs_energy_fluctuation() got unexpected "
+                      "keyword argument(s) "+", ".join(sorted(unknown)))
+          return np.sqrt(np.abs(vev.energy_variance(self,h,wf=kwargs.get("wf"))))
+      # the same quantity on ED and julia_live: <(H-<H>)^2> rather than
+      # <H^2>-<H>^2, whose roundoff floor (about 1e-7 on an 8-site chain,
+      # where E0^2 is 11) sits far above the fluctuation of a converged state
+      from . import multioperator
       e = self.vev(h,**kwargs)
-      e2 = self.vev(h,npow=2,**kwargs)
-      return np.sqrt(np.abs(e2-e**2))
+      dh = h - e*multioperator.identity()
+      if mode=="DMRG" and self.itensor_version=="julia_live":
+          # julia_live's vev takes no npow (this used to raise TypeError
+          # there): the square as one operator, exact, O(L^2) terms
+          e2 = self.vev(dh*dh,**kwargs)
+      else:
+          e2 = self.vev(dh,npow=2,**kwargs)
+      return np.sqrt(np.abs(e2))
   def set_initial_wf_guess(self,wf):
       """Use `wf` as the starting state of the next ground-state solve.
 

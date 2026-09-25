@@ -222,7 +222,19 @@ class EDchain():
           self.wf0 = wf0
           self.e0 = e0
           self.computed_gs = True
+          self._injected_state = False # a solve replaces a set_gs() state
           return self.wf0
+    def lowest_energy(self):
+        """The lowest eigenvalue of the Hamiltonian, without touching the
+        stored state: the bottom of the KPM window whatever state is
+        measured. e0 is that number once this chain has solved; after a
+        set_gs() on a chain that never did, it used to be None, and the ED
+        KPM, TD, CVM and ROOTN routes raised TypeError on it."""
+        if self.e0 is not None: return self.e0
+        if getattr(self,"_lowest_energy",None) is None:
+            (es,ws) = algebra.lowest_states(self.get_hamiltonian(),n=1)
+            self._lowest_energy = float(np.real(es[0]))
+        return self._lowest_energy
     def vev(self,op,T=0.,npow=1,**kwargs):
         """Return a vacuum expectation value <GS|op^npow|GS>
 
@@ -320,6 +332,14 @@ class EDchain():
         n = self.sector_dimension() # dimension (of the sector, if one is set)
         v = np.random.random(n)-.5 + 1j*(np.random.random(n)-.5)
         return State(v,self).normalize() # return the state
+    def is_hermitian(self,A):
+        """Whether A is Hermitian, decided exactly on its matrix in this
+        chain's basis (restricted to the sector, if one is set). It needs
+        nothing from get_dagger(), so it is exact for names off
+        canonical.py's parity table too, and it makes an ED State's MBO
+        answer the question disentangle_manifold asks of it (2026-09-24c
+        audit, finding 18)."""
+        return algebra.is_hermitian(self.MO2matrix(A))
     def is_zero_operator(self,A):
         """Check if this is a zero operator"""
         return algebra.is_zero_matrix(self.obj2matrix(A))

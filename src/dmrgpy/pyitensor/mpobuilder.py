@@ -287,6 +287,18 @@ def to_mpo(ampo, cutoff=0.0, maxdim=None):
         # any redundancy the partial-prefix sharing cannot see (suffix
         # sharing, linearly dependent channels) is squeezed out. Cheap now
         # that the incoming bond dimension is O(1) rather than O(T).
-        result.position(result.length(), cutoff=cutoff, maxdim=maxdim)
+        #
+        # The first sweep is exact and only the return sweep truncates. A
+        # truncating sweep over the machine as built weighs each channel
+        # from the left, where the identity channel is a string of
+        # identities whose weight dominates even though it is dead at the
+        # right boundary, so a relative cutoff of 1e-14 was measured against
+        # it: a lone eps*Sz (discarded fraction eps^2/4) became the zero MPO
+        # for eps <= 2e-7, and a Heisenberg chain written in units of 3e-7
+        # was built 89 to 95 per cent wrong (2026-09-24c audit, finding
+        # 13). After an exact left-canonicalizing sweep the return sweep
+        # sees true operator-Schmidt values, in which a dead channel has
+        # zero weight; the final bond dimension is unchanged.
+        result.position(result.length(), cutoff=0.0)
         result.position(1, cutoff=cutoff, maxdim=maxdim)
     return result

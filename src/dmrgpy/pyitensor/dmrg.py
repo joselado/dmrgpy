@@ -386,9 +386,13 @@ def zero_site_heff(L, Lbra, R, Rbra, C, left_link, right_link):
     return matvec, order_in, shape, x0
 
 
-def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
+def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=200):
     """Diagonalize the 2-site effective Hamiltonian at bond (i,i+1) for its
-    lowest eigenpair. Returns (energy, theta_ITensor)."""
+    lowest eigenpair. Returns (energy, theta_ITensor).
+
+    niter_floor is the minimum Krylov dimension (see the comment below for
+    why 200); only a spectral-bound solve, whose answer is a window edge
+    rather than a state, passes a smaller one."""
     matvec, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
 
     dim = x0.size
@@ -418,7 +422,7 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter):
         # early-stop-on-stable-Ritz-value logic means this floor costs
         # little in practice -- most bonds still exit in far fewer than
         # 200 iterations once bond dimension saturates.
-        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=max(niter, 200))
+        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=max(niter, niter_floor))
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(eval0.real), theta
@@ -443,7 +447,7 @@ def _apply_local_update(ket, i, theta, cutoff, maxdim, direction):
         ket.center = i
 
 
-def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter):
+def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=200):
     """One full right-then-left two-site ground-state sweep against a
     fixed H, mutating psi in place. Returns the last local bond's
     eigenvalue (dmrg()'s own returned-`energy` convention -- see its
@@ -458,7 +462,8 @@ def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter):
     for i in range(1, n):
         L, Lbra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
-        energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter)
+        energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter,
+                                            niter_floor)
         _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
         left_env[i] = _extend_left(L, Lbra, H, psi, i)
 
@@ -466,23 +471,25 @@ def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter):
     for i in range(n - 1, 0, -1):
         L, Lbra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
-        energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter)
+        energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter,
+                                            niter_floor)
         _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
         right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
 
     return energy
 
 
-def dmrg(psi, H, sweeps, quiet=True):
+def dmrg(psi, H, sweeps, quiet=True, niter_floor=200):
     """Two-site ground-state DMRG. Mutates psi in place and returns the
     final energy -- mirrors ITensor's own dmrg(psi,H,sweeps,args) signature
     (minus the Args bag, which this package uses explicit kwargs for
     throughout, and minus the excited-state penalty overload -- see
-    dmrg_excited() for that)."""
+    dmrg_excited() for that). niter_floor is _local_ground_state's minimum
+    Krylov dimension; leave it alone except for a spectral-bound solve."""
     energy = None
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
-        energy = _dmrg_one_sweep(psi, H, maxdim, cutoff, niter)
+        energy = _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor)
         if not quiet:
             print("sweep {}: energy = {}".format(sweep_i, energy))
 

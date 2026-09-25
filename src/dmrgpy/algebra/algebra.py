@@ -354,10 +354,15 @@ def sorteigen(eig,vs):
 
 
 def ishermitian(m):
-    """Check if a matrix is Hermitian"""
-    d = m - np.conjugate(m.T)
-    if np.max(np.abs(d))>1e-6: return False
-    return True
+    """Check if a matrix is Hermitian, relative to its own size.
+
+    The same test as is_hermitian() below, so that the ED routes that
+    decide on either one take the same branch on the same matrix: the two
+    used to be an absolute 1e-6 on max|m-m^dagger| here and an absolute
+    1e-8 on ||m-m^dagger||_F^2 there, which disagreed with each other
+    (at c=3e-6 on 1j*c*Sz0) and depended on the units H is written in
+    (2026-09-24c audit, finding 12)."""
+    return is_hermitian(m)
 
 def expm(m):
     """Compute exponential"""
@@ -425,9 +430,20 @@ def trace(A):
 
 
 
-def is_hermitian(h,**kwargs):
-    h = h - dagger(h) # difference
-    return is_zero_matrix(h,**kwargs)
+def frobenius_norm(m):
+    """Frobenius norm of a dense or sparse matrix"""
+    if issparse(m):
+        from scipy.sparse.linalg import norm as spnorm
+        return spnorm(m)
+    return np.linalg.norm(np.asarray(m))
+
+
+def is_hermitian(h,rtol=1e-10):
+    """Whether ||h-h^dagger||_F <= rtol*||h||_F: a relative test, so that
+    the answer is a property of the operator and not of its units. For a
+    matrix assembled from a Hermitian operator the difference is at
+    roundoff, far below rtol; the zero matrix counts as Hermitian."""
+    return bool(frobenius_norm(h - dagger(h)) <= rtol*frobenius_norm(h))
 
 
 def is_zero_matrix(h,tol=1e-8):

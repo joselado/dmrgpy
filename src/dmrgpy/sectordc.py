@@ -124,7 +124,7 @@ def _check_backend(self):
             "which have non-Hermitian implementations.")
 
 
-def _quantum_numbers(self, clone, sector, conserve):
+def _quantum_numbers(self, clone, sector, conserve, state_charges=False):
     """Which quantities to conserve, and the reference sector's targets.
 
     Three ways the reference sector gets fixed, in order of directness:
@@ -176,7 +176,12 @@ def _quantum_numbers(self, clone, sector, conserve):
             targets[name] = sector[name]
         elif name in chain_sector:
             targets[name] = chain_sector[name]
-        else:
+    if state_charges: # a state the caller set: its own charges
+        own = _supplied_charges(self, names, targets)
+        for name in names:
+            if name not in targets and name in own: targets[name] = own[name]
+    for name in names:
+        if name not in targets:
             targets[name] = _measure_charge(self, clone, name)
     return tuple(names), targets
 
@@ -305,17 +310,65 @@ def _sector_states(self, clone, reference, target, nex, **kwargs):
     return out
 
 
+def _supplied_state_energy(self):
+    """<x|H|x> of a state the caller set on the chain (set_gs(),
+    set_initial_wf()), None when the chain's state is its own solve.
+
+    SECTOR measures the reference sector's ground state, solved on a clone,
+    and never the chain's state, so after set_gs() of anything else it
+    returned that ground state's spectrum without a word, 1.0485 off the set
+    state's on a 1.0616 peak (2026-09-24c audit, finding 8). A set state is
+    therefore taken on the chain first (get_gs(), unswept), its charges
+    read from it, and _poles_for_pair accepts it only if it is that ground
+    state, by energy."""
+    from . import groundstate
+    if not groundstate.state_supplied(self): return None
+    self.get_gs()
+    return float(np.real(self.e0))
+
+
+def _supplied_charges(self, names, reference):
+    """The set state's own charges, which must be definite and must be the
+    reference sector's when that was fixed by sector= or the chain."""
+    out = {}
+    for name in names:
+        op = chargetk.charge_operator(self, name)
+        if op is None: continue
+        q = complex(self.vev(op)).real
+        n = int(np.round(q))
+        if abs(q - n) > 1e-6:
+            raise NotImplementedError(
+                "get_dynamical_correlator(submode=\"SECTOR\"): the state "
+                "set on this chain (set_gs()/set_initial_wf()) has <%s> = "
+                "%.6g, not a definite charge, and SECTOR measures the ground "
+                "state of one sector. Use a submode that reads the chain's "
+                "state: KPM, CVM, CVM_explicit, ROOTN, TD, TDZ or EX."
+                % (name, q))
+        out[name] = n
+        if name in reference and reference[name] != n:
+            raise NotImplementedError(
+                "get_dynamical_correlator(submode=\"SECTOR\"): the state "
+                "set on this chain is in the %s=%d sector, not the "
+                "reference sector %s. Use a submode that reads the chain's "
+                "state: KPM, CVM, CVM_explicit, ROOTN, TD, TDZ or EX."
+                % (name, n, _sector_str(reference)))
+    return out
+
+
 def _prepare(self, name, i, j, sector, conserve):
     """Everything the pipeline needs before any sector is touched: the two
-    operators, the clone every sector switch happens on, and the reference
-    sector."""
+    operators, the clone every sector switch happens on, the reference
+    sector, and the energy of a state the caller set on the chain, if
+    any."""
     A, B = _resolve_operators(self, name, i, j)
     _check_backend(self)
+    e_supplied = _supplied_state_energy(self)
     clone = self.copy()  # every sector switch happens here, never on the
     # caller's chain: the pipeline ends outside the sector, and that must
     # not be a side effect the caller sees.
-    names, reference = _quantum_numbers(self, clone, sector, conserve)
-    return A, B, clone, names, reference
+    names, reference = _quantum_numbers(self, clone, sector, conserve,
+            state_charges=e_supplied is not None)
+    return A, B, clone, names, reference, e_supplied
 
 
 def _indefinite_charge_error(which, names):
@@ -379,13 +432,21 @@ def _homogeneous_pairs(self, A, B, names):
 
 
 def _poles_for_pair(self, clone, names, reference, A, B, dqB, nex,
-                    quiet=False, **kwargs):
+                    quiet=False, e_supplied=None, **kwargs):
     """One charge-homogeneous contribution: the poles of <0|A|n><n|B|0>
     over the states of the single sector B|gs> lands in."""
     target = {n: reference[n] + d for n, d in zip(names, dqB)}
     nex = _cap_nex(self, nex, target, quiet=quiet)
     clone, wf0, wfs, energies, e0 = _sector_states(
         self, clone, reference, target, nex, **kwargs)
+    if e_supplied is not None and abs(e_supplied - e0) > 1e-6*(1.0 + abs(e0)):
+        raise NotImplementedError(
+            "get_dynamical_correlator(submode=\"SECTOR\"): the state set on "
+            "this chain (set_gs()/set_initial_wf()) has energy %.10g, and "
+            "the ground state of its sector %s, which is what SECTOR "
+            "measures, has %.10g, so it is not that state. Use a submode "
+            "that reads the chain's state: KPM, CVM, CVM_explicit, ROOTN, "
+            "TD, TDZ or EX." % (e_supplied, _sector_str(reference), e0))
 
     norm0 = complex(clone.overlap(wf0, wf0)).real
     poles, weights, mel = [], [], []
@@ -430,8 +491,8 @@ def sector_poles(self, name=None, i=0, j=0, nex=20, sector=None,
     themselves -- to build S(q,w) out of them, say -- needs them attached
     to one identified sector.
     """
-    A, B, clone, names, reference = _prepare(self, name, i, j, sector,
-                                             conserve)
+    A, B, clone, names, reference, e_supplied = _prepare(
+        self, name, i, j, sector, conserve)
     pairs = _homogeneous_pairs(self, A, B, names)
     if len(pairs) > 1:
         raise ValueError(
@@ -443,7 +504,7 @@ def sector_poles(self, name=None, i=0, j=0, nex=20, sector=None,
                                      for _, _, q in pairs)))
     Aq, Bq, dqB = pairs[0]
     out = _poles_for_pair(self, clone, names, reference, Aq, Bq, dqB, nex,
-                          quiet=quiet, **kwargs)
+                          quiet=quiet, e_supplied=e_supplied, **kwargs)
     self._sector_dc_info = out[2]  # readable afterwards without changing
     # the (x,y) return shape every other submode has
     return out
@@ -462,13 +523,14 @@ def sector_lehmann(self, name=None, i=0, j=0, nex=20, sector=None,
     summed, so the answer is the same correlator, obtained from the Sz+2
     and Sz-2 sectors instead of from one.
     """
-    A, B, clone, names, reference = _prepare(self, name, i, j, sector,
-                                             conserve)
+    A, B, clone, names, reference, e_supplied = _prepare(
+        self, name, i, j, sector, conserve)
     pairs = _homogeneous_pairs(self, A, B, names)
     poles, weights, channels = [], [], []
     for Aq, Bq, dqB in pairs:
         e, w, ch = _poles_for_pair(self, clone, names, reference, Aq, Bq,
-                                   dqB, nex, quiet=quiet, **kwargs)
+                                   dqB, nex, quiet=quiet,
+                                   e_supplied=e_supplied, **kwargs)
         poles.append(e)
         weights.append(w)
         channels.append(ch)

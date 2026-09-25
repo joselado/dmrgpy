@@ -202,18 +202,25 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
 
 
 
-def evolve_and_measure(self,mode="DMRG",**kwargs):
-    """Evolve and measure"""
-    if mode=="DMRG": return evolve_and_measure_dmrg(self,**kwargs)
+def evolve_and_measure(self,mode="DMRG",nt=1000,dt=1e-2,h=None,**kwargs):
+    """Evolve and measure <psi(t)|operator|psi(t)>, psi(t) = e^{-iht}|wf>,
+    with h the chain's Hamiltonian unless given.
+
+    nt, dt and h are named here and forwarded to both modes, so one call
+    gives the same time grid and the same Hamiltonian on DMRG and on ED:
+    the ED route used to default to nt=100 against DMRG's 1000, and to
+    raise "got multiple values for argument 'h'" on an h= that DMRG
+    honours (2026-09-24c audit, finding 16)."""
+    if mode=="DMRG": return evolve_and_measure_dmrg(self,nt=nt,dt=dt,h=h,**kwargs)
     elif mode=="ED": 
         edobj = self.get_ED_obj() # get the ED object
-        h = self.hamiltonian # get the ED object
-        return tded.evolve_and_measure(edobj,h,**kwargs)
+        if h is None: h = self.hamiltonian
+        return tded.evolve_and_measure(edobj,h,nt=nt,dt=dt,**kwargs)
 
 
 
 def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
-        dt=1e-2,wf=None,return_wf=False,**kwargs):
+        dt=1e-2,wf=None,return_wf=False):
     """
     Real-time evolution + measurement via the in-process pybind11
     extension.
@@ -255,12 +262,16 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     A^dagger|GS> is what gives sum_n M_n e^{+i D_n t}, the series whose
     one-sided transform puts the lines of dynamics.py's house convention
     at omega = +D_n.
+
+    There is no **kwargs: it used to take one that nothing read, so a
+    misspelled keyword (DT=0.2) ran silently at the defaults, dt=1e-2
+    (2026-09-24c audit, finding 15), where mode="ED" raises.
     """
     check_tevol_method(self) # reject a typo instead of running MPO-Taylor
     if self.itensor_version=="julia_live":
         from .mpsjulialive import timedependent as tdjl
         return tdjl.evolve_and_measure_dmrg(self,operator=operator,nt=nt,
-                h=h,dt=dt,wf=wf,return_wf=return_wf,**kwargs)
+                h=h,dt=dt,wf=wf,return_wf=return_wf)
     if h is None: h = self.hamiltonian # Hamiltonian
     if wf is None: wf = self.wf0 # get ground state
     from .groundstate import send_hamiltonian
@@ -307,17 +318,21 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     return ts,cs
 
 
-def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,**kwargs):
-    """Apply an operator, evolve and measure"""
+def evolution_ABA(self,A=None,B=None,mode="DMRG",wf=None,nt=1000,dt=1e-2,
+        h=None,**kwargs):
+    """Apply A, evolve and measure: <wf|A^dagger e^{iht} B e^{-iht} A|wf>.
+    nt, dt and h are forwarded to both modes, as in evolve_and_measure."""
     if A is None: A = multioperator.identity()
     if B is None: B = multioperator.identity()
     if mode=="DMRG":
         if wf is None: wf = self.get_gs() # get ground state
         wfA = A*wf # apply the operator
-        return evolve_and_measure_dmrg(self,wf=wfA,operator=B,**kwargs)
+        return evolve_and_measure_dmrg(self,wf=wfA,operator=B,nt=nt,dt=dt,
+                h=h,**kwargs)
     elif mode=="ED":
         edobj = self.get_ED_obj() # get the ED object
-        return tded.evolution_ABA(edobj,h=self.hamiltonian,A=A,B=B,wf=wf,
+        if h is None: h = self.hamiltonian
+        return tded.evolution_ABA(edobj,h=h,A=A,B=B,wf=wf,nt=nt,dt=dt,
                 **kwargs)
 
 

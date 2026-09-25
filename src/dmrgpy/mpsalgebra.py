@@ -318,8 +318,26 @@ def is_hermitian(self,op):
     probed at a small, fixed bond dimension instead of self.maxm,
     restored immediately after via try/finally."""
     from . import multioperator
-    if isinstance(op,multioperator.MultiOperator) and op.is_hermitian():
-        return True # proven symbolically, no witness needed
+    tol = 1e-4 # legacy absolute threshold, for an operator that is not a MultiOperator
+    if isinstance(op,multioperator.MultiOperator):
+        # Hermiticity does not depend on units, so decide it on op/cmax,
+        # cmax the largest raw coefficient. The threshold below used to be
+        # an absolute 1e-4 on ||(op-op^dagger)w||^2, which called any
+        # anti-Hermitian part below about 1e-2 Hermitian: a whole operator
+        # written in small units, or an O(1) Hamiltonian with a weak loss
+        # term, whose decay rate Hermitian DMRG then dropped (2026-09-24c
+        # audit, finding 12). Rescaling before canonical.py's
+        # clean_threshold also makes the proof itself scale-free.
+        cmax = max([abs(t[0]) for t in op.op]+[0.])
+        if cmax==0.: return True # the zero operator
+        op = op*(1./cmax)
+        if op.is_hermitian(): return True # proven symbolically, no witness needed
+        # For a Hermitian op the MPO of op-op^dagger cancels exactly in
+        # floating point (identical terms accumulate to 0), so the probe
+        # reads exactly 0 there, and this tolerance only has to sit above
+        # roundoff: it resolves an anti-Hermitian part down to about 1e-10
+        # of the largest coefficient.
+        tol = 1e-20
     op = op - op.get_dagger()
     old_maxm = self.maxm
     self.maxm = min(old_maxm, 8)
@@ -351,15 +369,14 @@ def is_hermitian(self,op):
             self.maxm = 1
             wf = self.random_mps()
             if wf is None: return True # no usable witness: treat as Hermitian
-        wf = op*wf # apply the operator
-        # applyoperator() normalizes its result too, and a witness that
-        # op-op^dagger annihilates is exactly what a Hermitian op looks
-        # like here.
+        wf = op*wf # apply the operator (the result is not normalized)
+        # a witness that op-op^dagger annihilates is exactly what a
+        # Hermitian op looks like here
         if wf is None: return True
         norm = (wf.dot(wf)).real
     finally:
         self.maxm = old_maxm
-    return not norm>1e-4
+    return not norm>tol
 
 
 

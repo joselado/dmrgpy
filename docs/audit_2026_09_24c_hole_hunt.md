@@ -27,7 +27,22 @@ earlier records: it records what was observed and how to reproduce it, so that a
 fix, or a decision that the behaviour is intended after all, does not have to
 re-derive any of it. Fixed entries gain a `**Status**` line under their
 classification line and are kept rather than deleted, since the repro doubles as
-the regression check. None is fixed yet.
+the regression check.
+
+All 18 have now been addressed: every entry carries a `**Status**` line
+reading FIXED, the regressions live in five files,
+`tests/test_audit_2026_09_24c_<cluster>.py` for `session`, `fluctuation`,
+`hermiticity`, `pyitensor` and `realtime`, and findings 9 and 14 needed a
+rebuild of the compiled extensions (both for 9, v3 for 14). Four things are
+left as they were and say so in their Status lines: `gs_energy(mode="ED")`
+after `set_gs` still reports the lowest eigenvalue (finding 1), `vev(op,
+npow>=2)` still truncates each application at `maxm` and is now documented
+as doing so (finding 7), the non-Hermitian KPM's missing-`E_max` error still
+comes after a solve (finding 11), and the reviewer's extra `ma` check in
+`disentangle_manifold` was not added, for the reason given there (finding
+12). Finding 7 did not take its reviewer's fix, `vev(h*h)`, which is O(L^3)
+to build on `"python"`. The fixes that changed numbers rather than
+behaviour are listed together in `CLAUDE.md`'s paragraph for this audit.
 
 What the hunt says about `867e2b4` itself, in one paragraph: the fixes hold on the
 ground each one was written for (the nulls are collected in "Ruled out"), and the
@@ -178,6 +193,8 @@ fix of finding 9 a rebuild of both.
 ### 1. After `set_gs` of a state whose energy differs from the solved ground energy, `submode="KPM"` on every DMRG backend puts every line at E_n - E_0 of the solved ground state while CVM, CVM_explicit, ROOTN, TD, TDZ and EX put them at E_n - E_x, so the default submode's spectrum is rigidly shifted by E_x - E_0 (0.300 on a line at 1.000 on a 3-site chain, with the elastic line at +0.3), and `mode="ED"` uses three origins at once
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `groundstate`
+
+**Status**: FIXED, with finding 2 in the same change. On DMRG, `kpmdmrg.get_dynamical_correlator` reconstructs with `origin=self.e0`, a new argument of `dynamical_correlator_from_moments` that defaults to `emin`, so `mpsjulialive/dynamics.py`'s own call is unchanged and the window stays on the band edges. On ED, `edtk/dynamics.get_dynamical_correlator` measures a state set with `set_gs()` or passed as `wf0=` from its own energy <v|H|v>: KPM through an `es` shift on the window of the lowest eigenvalue (`EDchain.lowest_energy()`, which also ends the recorded `TypeError` from `e0=None` on an ED chain that was never solved), CVM, INV and ROOTN through their origin, TD through a new `e0=` of `edtk/timedependent.evolution_DC`. The ED mark is `ED_obj._injected_state`, set by `set_gs` and retired by the next ED solve. `gs_energy(mode="ED")` after `set_gs` is left as it was, the lowest eigenvalue, the choice the reviewer left open. The `n_gs` docstring's KPM caveat is gone. Pinned by `tests/test_audit_2026_09_24c_session.py::test_every_dmrg_submode_measures_a_set_state_from_its_own_energy` (KPM, CVM, ROOTN, TD and EX on `"python"`, v3 and v2), `::test_every_ed_submode_measures_a_set_state_from_its_own_energy` (KPM, CVM, INV, ROOTN, TD, EX, ED) `::test_kpm_axis_at_a_solved_ground_state_is_unchanged` and `::test_kpm_under_energy_truncation_measures_a_set_state_from_its_own_energy` (under `kpm_energy_truncate`, where the window is anchored on the Hamiltonian's E_0 and the axis on the state's energy, the lines sit at -0.3 and 0.7 on `"python"` and v3; the 1.2 line is absent there on both, which was not examined); against the committed code the KPM rows and every ED row but EX fail. NUMBERS CHANGE only after `set_gs`, `set_initial_wf` or `wf0=` of a state off the ground manifold: on the 3-site chain in Bz=0.3 after `set_gs(|1>)`, (S+_0,S-_0) under DMRG KPM and ED KPM, CVM, INV, ROOTN and TD goes from lines at [0.0, 1.0, 1.5] to [-0.3, 0.7, 1.2], the exact own-origin lines; at a solved ground state the public KPM curve equals the `emin` reconstruction to 1e-10 of its peak.
 
 **Where**: `src/dmrgpy/kpmdmrg.py:204` (the reconstructed axis,
 `xs + (emin+emax)/2 - emin`, with `emin` the session's lower band edge, i.e. the
@@ -768,6 +785,8 @@ energy.
 ### 2. `mode="ED"` `submode="ED"` reads no state at all, neither the one `set_gs` set nor an explicit `wf0=`, so after `set_gs` of a non-degenerate excited eigenstate it returns the ground state's spectrum, 2.834 off the set state's exact density on a 2.835 peak, while CVM, INV, ROOTN, TD and KPM on the same ED chain read the set state and EX reads it from its own energy
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `groundstate` (turned up by the reviewer of finding 1)
+
+**Status**: FIXED, with finding 1. `submode="ED"` with a state set or passed goes to `edtk/dynamics.dynamical_correlator_ED_state`, the exact single-vector Lehmann sum over the full spectrum from the state's own energy; with neither, the `dex` manifold average is unchanged. Pinned by `tests/test_audit_2026_09_24c_session.py::test_every_ed_submode_measures_a_set_state_from_its_own_energy[ED]` (to 1e-6 of the peak), `::test_ed_submode_ed_takes_an_explicit_state` and `::test_ed_submode_ed_default_is_the_manifold_average` (bit for bit against `dynamical_correlator_ED` on a degenerate doublet). NUMBERS CHANGE only after `set_gs` on ED or with an explicit `wf0=`: the (S+_0,S-_0) curve after `set_gs(|1>)` goes from the ground state's (lines [1.2]) to |1>'s own ([-0.3, 0.7, 1.2]).
 
 **Where**: `src/dmrgpy/edtk/dynamics.py:109-111` (the `submode=="ED"` branch
 passes `emu, vs` to `dynamical_correlator_ED`, whose signature
@@ -1406,6 +1425,8 @@ dropped. NUMBERS CHANGE only after `set_gs` or with an explicit `wf0=`.
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED &middot; lens `groundstate`
 
+**Status**: FIXED, together with finding 4, in the reviewer's wider form. `Many_Body_Chain.promote_to_dense` reads `groundstate.pending_injection`, `gs_is_current` and `state_supplied` before the sector changes, and after `self.wf0 = self.promote_mps(self.wf0)` re-marks the promoted copy with `groundstate.mark_injected(..., reconverge=(pending=="reconverge"), supplied=...)` whenever the state was current or an injection was pending, so the next read takes it unswept with <wf|H|wf>; the hunter's "simpler alternative" was not taken. Pinned by `tests/test_audit_2026_09_24c_session.py::test_promote_to_dense_keeps_a_set_state` (`set_gs` and `set_initial_wf`, with no read in between, on `"python"` and v3, with the reviewer's non-eigenstate x in a field) and `::test_promote_to_dense_keeps_the_solved_sector_state`. NUMBERS CHANGE only for a setter followed directly by `promote_to_dense`: on the reviewer's chain `gs_energy()` goes from the sector ground energy -1.616025 to <x|H|x> = -1.131526, with overlap from 0.2647 to 1.0000.
+
 **Where**: `src/dmrgpy/manybodychain.py:636` (`self.wf0 =
 self.promote_mps(self.wf0)` replaces the marked object); `groundstate.py:129`
 (`pending_injection`'s identity test, `mark[1] is not self.wf0`);
@@ -1823,6 +1844,8 @@ ground state to x (<Sz0Sz1> -0.227671 to -0.176777).
 ### 4. After `promote_to_dense()`, the next ground-state read re-sweeps whatever state the chain carries instead of keeping it, on `"python"` whenever the session holds no cached energy for it (every injected state) and on v3 always, so a carried state that is not the sector ground state is replaced, and on `"python"` one far from it leaves the sector for the global ground state (-1.857107 at Sz_tot=1 against the kept -1.131526)
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `groundstate` (turned up by the reviewer of finding 3)
+
+**Status**: FIXED, with finding 3's re-mark, which covers a taken state too (the `read_first=True` rows of the same test) and needs no rebuild; `pyitensor`'s `_promoted_gs` bridge stays for the solved state. NUMBERS CHANGE only when the carried state is not the sector ground state: on the reviewer's chain the read after promotion goes from -1.857107 at Sz_tot=1 (`"python"`) and -1.616025 (v3) to -1.131526 with Sz_tot=0 on both; the plain solve-then-promote workflow moves at roundoff (its energy is now <wf|H|wf> of the promoted state rather than the carried one).
 
 **Where**: `src/dmrgpy/groundstate.py::_take_injected_state` (the session
 receives the state through `set_wavefunction`, which drops its energy:
@@ -2269,6 +2292,8 @@ carried state is not the sector ground state: on the chain above, from -1.857107
 ### 5. After `set_hamiltonian(H2, restart=False)` on a solved chain, `gs_is_current` still holds, so `gs_energy()`, `get_gs()`/`vev()`, `get_excited()` and `get_dynamical_correlator_moments()` keep answering for H1 on v2, v3 and `"python"` (-1.616025 against an exact -1.780099, 9.2 per cent) while the public correlator alone re-solves, and `gs_energy()` on one chain reads either number depending on whether a correlator ran in between
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED &middot; lenses `groundstate` and `kpm` (found by both; the `kpm` half turned up by the reviewer of finding 11)
+
+**Status**: FIXED, at the event, as both reviewers preferred. `set_hamiltonian(..., restart=False)` now resets `computed_gs` and drops `has_ED_obj`, `_dcex_excited_cache` and `_sector_states_cache` (and the supplied-state mark of finding 8), keeping the session's state as the warm start; its docstring says so, including that on v2/v3 the warm start stays trapped in an eigenstate H1 and H2 share. `solver_key`'s docstring premise is now true as written, and so is `dcex`'s "cleared by `set_hamiltonian()`". `ground_state_on_session`'s own Hamiltonian test stays. Pinned by `tests/test_audit_2026_09_24c_session.py::test_restart_false_answers_for_the_new_hamiltonian_everywhere` (`"python"`, v3, v2) and `::test_restart_false_direct_kpm_moments_are_the_new_hamiltonians`. NUMBERS CHANGE only after `restart=False`: on the 4-site chain plus 0.8*Sx_0, `gs_energy()` goes from -1.616025 to -1.780099, `vev(Sx_0)` from 0.000000 to -0.349221 and `get_excited(n=2)` from [-1.748511, -1.298528] to [-1.780099, -1.321921]; the direct KPM moments are a fresh H2 chain's.
 
 **Where**: `src/dmrgpy/groundstate.py:43-52` (`solver_key` omits the
 Hamiltonian, and its docstring rests on the premise that changing it "goes
@@ -2971,6 +2996,8 @@ correlators do not move.
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `groundstate`
 
+**Status**: FIXED, together with finding 7. The `maxde` block returns `self.e0` once a retry ran, and after the parameters are restored re-keys the send cache, `self._session_ham_cache = (self._session, _send_key(self)[0])`, only when the MPO cap `max(maxm, mpomaxm)` is the same at both `maxm`, as the reviewer specified. Pinned by `tests/test_audit_2026_09_24c_fluctuation.py::test_maxde_returns_the_refined_energy_and_keeps_it` (returned value equal to the stored one and to ED, overlap with the refined state 1 to 1e-10 after one KPM call, on `"python"`, v3 and v2). NUMBERS CHANGE for every `maxde=` caller: on the 8-site chain at `maxm=3` the returned value goes from -3.279373 (`"python"`) and -3.279253 (v2, v3) to -3.374933, and a correlator afterwards measures that state rather than a fresh `maxm=3` solve (-3.000000 on v2/v3 before).
+
 **Where**: `src/dmrgpy/groundstate.py:377-404` (the `maxde` block: the recursive
 `gs_energy_single` at `:396`, the key restored at `:403`, `return out` at `:404`);
 `groundstate.py:301-305` (`ground_state_on_session` re-solves because the send
@@ -3289,6 +3316,8 @@ refined state, and the example's printed energies change.
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `groundstate` (turned up by the reviewer of finding 6)
 
+**Status**: FIXED, with finding 6, but not by the reviewer's `vev(h*h)`: building H^2 as one MPO is O(L^3) on `"python"`, measured at 1.57 s, 18.8 s and 302 s for 20, 40 and 80 sites against 0.23 s, 1.3 s and 1.8 s for the old route (v3 0.21 s, 2.1 s, 16.4 s). `vev.energy_variance` computes ||(H-<H>)|psi>||^2 instead: <H> is subtracted first and the npow=2 application runs with the `maxm` cap lifted, so the relative cutoff acts on the small residual itself. It agrees with `vev(h*h)` to six digits wherever the variance is far above roundoff, and below that it is more accurate, since <H^2>-<H>^2 bottoms out at 1e-7 on an 8-site chain (E0^2 = 11) where the new route reaches 1e-12. `gs_energy_fluctuation` uses it on every session backend and raises on an unknown keyword; on ED it subtracts <H> first too, and on `julia_live`, whose `vev` takes no `npow` (so the old route raised `TypeError` there), it takes the vev of the squared shifted operator; the `maxde` loop reads it per site, which is now documented. `vev(op, npow>=2)` itself is unchanged, each application still truncated at `maxm`, and its docstring now says so. The example `GS_enforce_maximum_fluctuation` plots the per-site value against `maxde`. The user guide's floor paragraph is rewritten. Pinned by `tests/test_audit_2026_09_24c_fluctuation.py::test_fluctuation_is_the_variance_of_the_state` (`maxm` 3 and 6, three backends, against `vev(h*h)` to 1e-6), `::test_fluctuation_of_a_state_wider_than_maxm`, `::test_fluctuation_on_ed_is_the_same_quantity`, `::test_fluctuation_rejects_unknown_keywords` and `::test_maxde_meets_its_tolerance`. NUMBERS CHANGE for every `gs_energy_fluctuation()` below full bond dimension on every DMRG backend, for every ED one, and for every `maxde=` run: 8-site chain at `maxm=3`, 6.725e-03 to 3.4362e-01 (`"python"`), 1.492e-02 to 3.4737e-01 (v3); the exact state at `maxm=3`, 1.636e+00 to 4.3e-12 (v3); ED at an exact eigenstate, 1.1e-07 to 5e-15; 10-site chain at the stock `maxm=30`, 1.7e-07 to 1.37e-05 (v3) and 6.3e-06 to 8.37e-06 (`"python"`); the example's three points, 2.6e-02, 2.0e-04 and 1.8e-06 per site at `maxde` 1e-1, 1e-3 and 1e-6.
+
 **Where**: `src/dmrgpy/vev.py:31-34` (`multi_vev` pushes `self.maxm` to the
 session before `vev(npow)`); `pyitensor/chain.py:707-709` (`_apply_mpo` with
 `maxdim=self.maxm`, `68c96eb`); `mpscpp3/chain_session.h:1110-1112`
@@ -3568,6 +3597,8 @@ in the table above, and for every `maxde=` run, which will now stop later.
 ### 8. `submode="SECTOR"` never reads the state `set_gs` put on the chain, so after `set_gs` of anything but the global ground state it returns the global ground state's spectrum with no warning (1.0485 off the set state's exact curve on a 1.0616 peak, and 2.8339 off for a member that is the lowest of its own sector) while CVM on the same chain returns the set state's to 0.0000
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED &middot; lens `groundstate`
+
+**Status**: FIXED, with the persistent mark the reviewer asked for and the reviewer's charge-and-energy test rather than a blanket refusal. `groundstate.state_supplied(self)` is true while the chain's state was set by the caller: the injection mark carries a third field, `supplied`, which `_take_injected_state` stores as `_gs_supplied`, retired by a solve, `restart()`, `set_hamiltonian()` and the clone reset, carried by `promote_to_dense`, and restored by the `n_gs` snapshot. `sectordc._prepare` takes such a state (`get_gs()`, unswept), reads its charges from the chain, raising on a non-integer one or on a mismatch with `sector=`/the chain's sector, and `_poles_for_pair` raises `NotImplementedError` unless the reference sector's ground energy equals the set state's to 1e-6 relative. A degenerate sector ground state is not checked for. Pinned by `tests/test_audit_2026_09_24c_session.py::test_sector_refuses_a_set_state_it_does_not_measure` and `::test_sector_measures_a_set_state_that_is_its_sectors_ground_state`. After `set_gs(|2>)` SECTOR raises where it returned the ground state's spectrum. NUMBERS CHANGE for a set state that is the lowest of its own sector: after `set_gs(|1>)`, (S-_0,S+_0) goes from the ground state's curve, 2.8339 off, to |1>'s own, within 1e-6 of the peak.
 
 **Where**: `src/dmrgpy/sectordc.py:285-288` (`_sector_states`:
 `clone.set_conserved_sector(**reference); clone.gs_energy(); wf0 =
@@ -3958,6 +3989,8 @@ sector state gets its own curve instead of the global ground state's.
 
 `performance` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `groundstate`
 
+**Status**: FIXED, with the reviewer's clean fix and a rebuild of both extensions. `minimum_energy()` in both `chain_session.h` and `pyitensor/chain.py::_minimum_energy` returns the cached energy when the session holds one for its state and otherwise solves from a fresh start (the backend's own `gs_energy()` with the held state set aside, so its start, ramp and sector logic are reused) and puts the state back; not a reduced solve, since the gs-anchored truncated KPM window takes this edge as E0 itself. The pre-fill in `_take_injected_state` is gone and its docstring rewritten. Pinned by `tests/test_audit_2026_09_24c_session.py::test_an_injected_read_fills_no_band_edge` and `::test_the_first_kpm_call_after_an_injection_does_not_sweep_it` (overlap 1 to 1e-10, `emin` equal to the ED ground energy), with the second pass's `test_injected_state_is_not_swept_by_the_first_kpm_call` still passing. No number changes. Re-measured on the 24-site chain (`maxm=30`, `nsweeps=6`, one process alongside the test suite): the injected read takes 0.059 s on `"python"` and 0.013 s on v3, against 0.044 s and 0.010 s for <x|H|x>, where it took 7.1 s and 0.42 s.
+
 **Where**: `src/dmrgpy/groundstate.py:195-198` (`_take_injected_state`'s
 Hermitian `session.excited_states(1,1.0,False)`); `pyitensor/chain.py:672-697`
 (`excited_states`: `gs_energy()` when `wf0` is None, `_bandwidth`, and
@@ -4258,6 +4291,8 @@ of the `"python"` cost. No number changes.
 ### 10. On `"python"`, the reduced-effort upper band edge `_maximum_energy()` costs 5 to 9 full ground-state solves on a 24-site Heisenberg chain (5.3 to 8.3 s against 0.90 to 1.0 s; v3's costs 0.75 of its own), because the value-criterion Lanczos stalls at the SU(2)-symmetric ferromagnetic top, up to 193 matvecs per local solve where 20 give Emax to 1e-10
 
 `performance` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `groundstate` (turned up by the reviewer of finding 9)
+
+**Status**: FIXED, with the reviewer's cap. `dmrg()`, `_dmrg_one_sweep` and `_local_ground_state` take `niter_floor=200`, and `_maximum_energy` passes `_BOUND_NITER = 20`; every other caller keeps the floor. Pinned by `tests/test_audit_2026_09_24c_pyitensor.py::test_upper_edge_is_capped_and_ground_state_floor_is_kept` (every local solve of the bound asks for at most 20 Krylov steps and every ground-state one for 200; Emax = 2.75 to 1e-8 on 12 sites) and `::test_upper_edge_matches_ed` (spin-1, a field-split Heisenberg chain and a spinless fermion chain, to 1e-7). No number changes beyond Emax at the 1e-10 level. Re-measured on the 24-site chain: the upper edge takes 1.14 s against 1.12 s for a full solve, a ratio of 1.0 where it was 5 to 9.
 
 **Where**: `src/dmrgpy/pyitensor/chain.py:1818-1832` (`_maximum_energy`, DMRG on
 -H at 5 sweeps and `maxdim` 20, cached per Hamiltonian), through
@@ -4568,6 +4603,8 @@ per local solve. No number changes beyond Emax at the 1e-10 level.
 ### 11. `867e2b4` put `ground_state_on_session` at the top of `get_dynamical_correlator`, ahead of every KPM argument check, so on v2, v3 and `"python"` a malformed KPM call runs a full ground-state solve before it raises (where `30200a4` and `mode="ED"` raise with none), and the first `submode="SECTOR"` call on an unsolved chain pays one global solve that SECTOR never reads
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED (the SECTOR half CONFIRMED, NARROWED) &middot; lens `kpm` (the SECTOR half turned up by this finding's reviewer)
+
+**Status**: FIXED, both halves. The KPM checks are one function, `kpmdmrg.check_kpm_arguments` (unknown keywords, `delta<0`, `kpm_n_scale`, the v2 `kpm_energy_truncate` refusal), which `dynamical_correlator_moments` calls for its direct callers and `dynamics.get_dynamical_correlator` calls, through `check_kpm_call`, before `ground_state_on_session`; the dispatcher decides Hermiticity first and skips `ground_state_on_session` for SECTOR; `dynamical_correlator_moments` calls `ground_state_on_session` in place of a bare `get_gs()`. The non-Hermitian KPM's missing-`E_max` `ValueError` still comes after a solve, as the reviewer noted of the correct non-Hermitian call too, and is left as it is. Pinned by `tests/test_audit_2026_09_24c_session.py::test_malformed_kpm_call_raises_before_the_ground_state` (`kpm_n_scale=1.5`, `deltaa=`, `delta=-0.1` on `"python"`, v3 and v2: zero `gs_energy_single` calls, `computed_gs` False), `::test_v2_energy_truncation_raises_before_the_ground_state` and `::test_sector_makes_no_solve_on_the_callers_chain`. No number changes; the texts at `kpmdmrg.py:124` and in `validate_kpm_n_scale`'s docstring are true again.
 
 **Where**: `src/dmrgpy/dynamics.py:199-202` (`ground_state_on_session` ahead of the
 dispatch), against the checks in `kpmdmrg.py:109-151` (unknown-keyword
@@ -5238,6 +5275,8 @@ effect goes away, that the caller's chain comes out of a SECTOR call with
 ### 12. The DMRG Hermiticity probe `Many_Body_Chain.is_hermitian` thresholds the unnormalized ||(A-A^dag)w||^2 at an absolute 1e-4, so any anti-Hermitian part below about 1e-2 in absolute size is called Hermitian: `gs_energy()` then drops a weak decay rate whole on v2 and v3 (Im E0 = -0.002134 returned as 0) and returns a real part 3 to 18 per cent off on `"python"`, and since `867e2b4` `disentangle_manifold` diagonalizes the operator's Hermitian part instead of the operator (eigen-residual 0.702 of max|ma| against 1e-17)
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lenses `kpm` and `misc` (found by both independently)
+
+**Status**: FIXED, with finding 18. `mpsalgebra.is_hermitian` rescales a `MultiOperator` by 1/max|c| over its raw coefficients before the proof and the probe, returns True for the zero operator, and compares the probe against 1e-20, keeping the old absolute 1e-4 only for an input that is not a `MultiOperator`; the false comment about `applyoperator()` normalizing is corrected. On ED, `algebra.is_hermitian` is the relative test ||h-h^dag||_F <= 1e-10 ||h||_F and `algebra.ishermitian` calls it. The reviewer's extra check in `disentangle_manifold`, `eig` whenever ||ma-ma^dag|| exceeds 1e-8||ma||, was not added: on a truncated manifold `ma` is Hermitian only to the truncation level (9.8e-5 measured by the second pass on a Heisenberg manifold at `maxm=6`), which that check would send to `eig`, bringing back the second pass's finding 1, and with the probe scale-free it has nothing left to catch. Pinned by `tests/test_audit_2026_09_24c_hermiticity.py::test_probe_verdict_does_not_depend_on_units` (s from 1 to 1e-6, and an unprovable Hermitian operator at every s, on `"python"`, v3 and v2), `::test_weak_loss_keeps_its_decay_rate`, `::test_rescaled_non_hermitian_hamiltonian_is_solved_as_one`, `::test_small_non_hermitian_operator_is_disentangled_on_its_eigenvectors` and `::test_ed_hermiticity_checks_agree_and_are_relative`; against the committed code 24 of that file's 27 tests fail. NUMBERS CHANGE only for operators whose anti-Hermitian part is below about 1e-2 in absolute size, all of them wrong before: the weak-loss chain goes from -2.457105+0i (v2, v3) and -2.887505/-2.537763 (`"python"`) to -2.457105-0.002134i; the non-Hermitian chain at s=1e-2 from real values between -1.50 and -2.09 to -1.242697 +- 0.291419i; `disentangle_manifold`'s eigen-residual from 0.702 of max|ma| to below 1e-10.
 
 **Where**: `src/dmrgpy/mpsalgebra.py:362` (`return not norm>1e-4`, `40e526e`,
 2022) and the comment at `:355-357` saying `applyoperator()` normalizes its
@@ -6494,6 +6533,8 @@ operators do not move.
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `kpm`
 
+**Status**: FIXED, with the reviewer's reordered sweep: `to_mpo` runs `position(n, cutoff=0)` and then the truncating `position(1, cutoff=cutoff, maxdim=maxdim)`. Pinned by `tests/test_audit_2026_09_24c_pyitensor.py::test_lone_small_term_is_built_exactly` (eps from 1e-6 to 1e-10 on two sites, against `dense_matrix()` to 1e-12 relative), `::test_hamiltonian_in_small_units_is_built_exactly` (6 and 8 sites, s down to 1e-7, bond dimension 5), `::test_bond_dimension_is_unchanged` (14 sites, with and without a field, equal to the reference builder's), `::test_relative_truncation_inside_a_sum_is_unchanged`, `::test_vev_of_a_small_operator_scales` and `::test_kpm_correlator_of_small_operators_scales`; `tests/test_mpo_automaton_builder.py` passes unchanged. NUMBERS CHANGE only on `"python"` and only for operators whose coefficients are all at or below about 2e-7 to 3e-7: `vev(1e-7*Sz0)` from 0 to -1.8936e-08, the KPM correlator of `1e-7*Sz0, 1e-7*Sz3` from identically 0 to 1e-14 times the unscaled curve (to 1e-8 of its peak), and a Heisenberg MPO in units of 3e-7 from 89 per cent wrong to 1e-12.
+
 **Where**: `src/dmrgpy/pyitensor/mpobuilder.py:280-292` (`to_mpo`; the two
 `result.position(..., cutoff=cutoff)` sweeps at `:290-291`), called with
 `pyitensor/chain.py:41` `_BUILD_CUTOFF = 1e-14` through `Chain._mpo`
@@ -7035,6 +7076,8 @@ there too, by a mechanism that is not the MPO builder (in "New leads").
 ### 14. On v3, `tevol_method="TDVP_GSE"` loses the whole Krylov expansion at the left edge before the first one-site update when site 0 is pinned to one local basis state, which every ladder operator or projector on site 0 produces, so site 0 stays frozen for the whole trajectory and the public TD correlator at the default i=j=0 of a fermion chain is off by 1.7 times its own peak (0.081 against an exact 0.476)
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `realtime`
+
+**Status**: FIXED, with a rebuild of the v3 extension. `Chain::global_subspace_expand` truncates after `addBasis` only when `maxLinkDim(phi) > maxm_`, and then with `Cutoff=-1`, ITensor's own "no cutoff"; the vendored header is untouched. The mechanism the reviewer suspected is confirmed by reading `decomp.cc::truncate()`, whose `while(truncerr+P(n) <= cutoff*scale && n >= mindim)` discards every exactly-zero weight at `Cutoff=0`. The false comment is rewritten, and the example comment, `docs/documentation.md` and `ROADMAP.md` now say the product-state case is fixed. Pinned by `tests/test_audit_2026_09_24c_realtime.py::test_v3_tdvp_gse_moves_a_site_pinned_at_the_left_edge` (C_0, 1-N_0, N_0, S+_0, S-_0, 1/2+Sz_0, against the dense propagator to 1e-5) and `::test_v3_tdvp_gse_td_spectrum_at_the_default_sites` (the public (Cdag_0,C_0) TD spectrum against v3's own two-site TDVP to 1e-3 of the peak); these were not run against the replaced extension. NUMBERS CHANGE only for v3 `TDVP_GSE` from a site-0-pinned or product-state start: the reviewer's zoo rerun on the new build gives C_0 1.08e-07 (was 4.74e-01), N_0 3.56e-07 (was 1.82e-02), 1-N_0 3.71e-07, S+_0 9.4e-12 and S-_0 3.6e-12, with the site-0 entropy equal to the exact one in every row, and a Neel start under the Heisenberg chain is within 3.3e-07 of exact in 8 of 8 trials, where the example comment recorded up to 5 of 8 failing at 0.02 to 0.04.
 
 **Where**: `src/dmrgpy/mpscpp3/chain_session.h:1942` (`Chain::
 global_subspace_expand`), `:1497` (`quench_tdvp_gse`, behind `evolution_DC` and
@@ -8677,6 +8720,8 @@ v3 with `tevol_method="TDVP_GSE"` from a site-0-pinned start, towards exact: the
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `realtime`
 
+**Status**: FIXED. `evolve_and_measure_dmrg` has no `**kwargs` in `timedependent.py` or `mpsjulialive/timedependent.py`, and the `julia_live` dispatch lost its trailing `**kwargs`. Pinned by `tests/test_audit_2026_09_24c_realtime.py::test_misspelled_keyword_raises_on_dmrg` (`evolve_and_measure` and `evolution_ABA`, `DT=0.2`, on `"python"`, v3 and v2). No number changes; a misspelled keyword raises `TypeError`.
+
 **Where**: `src/dmrgpy/timedependent.py:215-216` (the `evolve_and_measure_dmrg`
 signature; `kwargs` reaches only the `julia_live` branch at `:262`), `:310-317`
 (`evolution_ABA` forwards `**kwargs` into it); `mpsjulialive/timedependent.py:
@@ -8960,6 +9005,8 @@ call; a misspelled one raises.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `realtime` (turned up by the reviewer of finding 15)
 
+**Status**: FIXED, with finding 15. `timedependent.evolve_and_measure` and `evolution_ABA` name `nt=1000`, `dt=1e-2` and `h=None` and forward them to both modes; the ED branches use `h` when given and the chain's Hamiltonian when it is None. Pinned by `tests/test_audit_2026_09_24c_realtime.py::test_h_keyword_on_ed_evolves_under_it` (against cos(Bt)/2 to 1e-12 and against DMRG to 1e-10) and `::test_default_time_grid_is_the_same_on_both_modes`. No number changes for a call that worked; a default-argument ED call returns 1000 points where it returned 100.
+
 **Where**: `src/dmrgpy/timedependent.py:208-211` (`evolve_and_measure`'s ED branch
 passes `h` positionally and then `**kwargs`) and `:318-321` (`evolution_ABA`'s ED
 branch passes `h=self.hamiltonian` and then `**kwargs`); `edtk/timedependent.py:8`
@@ -9170,6 +9217,8 @@ call that worked; a default-argument ED call would return the longer trajectory.
 ### 17. The ED real-time propagator is `solve_ivp` RK45 at scipy's default rtol=1e-3/atol=1e-6, one call per dt, neither exact nor unitary, with an error set by dt times the absolute energy of the evolved state: a constant +20 added to H moves `evolve_and_measure(mode="ED")` from 2.1e-07 to 5.6e-04 off exact at the tests' own dt=0.1, and at dt=0.2 on an 8-site chain ED is 1.2 per cent off where `"python"` TDVP is at 7e-9
 
 `bug` &middot; severity **LOW to MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `realtime`
+
+**Status**: FIXED. `edtk/tdtk.scipy_evolution` is `scipy.sparse.linalg.expm_multiply(1j*t*h, psi)`, keeping `evolve()`'s e^{+iht} sign. Pinned by `tests/test_audit_2026_09_24c_realtime.py::test_ed_evolution_does_not_depend_on_the_energy_origin` (h and h+20*identity agreeing to 1e-12, the regression the reviewer asked for) and `::test_ed_evolution_matches_the_dense_propagator` (`evolution_ABA` on an 8-site chain at dt=0.2 against a hand-written e^{-iHt} to 1e-12). NUMBERS CHANGE on every `mode="ED"` real-time route, towards exact: 5.64e-04 to below 1e-12 under a +20 offset at dt=0.1, 8.46e-04 to below 1e-12 at dt=0.2 on the 8-site chain, and 1e-8 to 1e-6 on the small chains the tests use.
 
 **Where**: `src/dmrgpy/edtk/tdtk.py:26-33` (`solve_ivp(f, tspan, v0,
 method="RK45", t_eval=...)` with default tolerances); consumers
@@ -9576,6 +9625,8 @@ the tests use, 8e-4 at dt=0.2 and 1e-3 at dt=0.5 on the bandwidth-24 chain, and
 ### 18. `disentangle._is_hermitian` falls back to the bare proof only when a state's `MBO` is None, but an ED `State` carries its EDchain, which has no `is_hermitian`, so since `867e2b4` `disentangle_manifold` raises `AttributeError` on every ED manifold for every operator, including a proven `Sz0` it handled to 3.3e-15 before
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `misc`
+
+**Status**: FIXED, with the reviewer's placement. `EDchain.is_hermitian(A)` decides on `algebra.is_hermitian(self.MO2matrix(A))`, and `disentangle._is_hermitian` falls back to the bare proof only when the `MBO` has no `is_hermitian`. Pinned by `tests/test_audit_2026_09_24c_hermiticity.py::test_ed_spin_manifold_hermitian_operator_is_disentangled` (`Sz0` and `1j*Sx0*Sy0`), `::test_ed_spin_manifold_non_hermitian_operator_takes_eig` and `::test_ed_fermion_manifold_is_disentangled` (`N0` and `C0+Cdag0`), all on manifolds from `get_excited_states(mode="ED")`. No number changes: a raise becomes a result.
 
 **Where**: `src/dmrgpy/mpsalgebratk/disentangle.py:14-16` (`mbo =
 getattr(wfs[0],"MBO",None); if mbo is not None: return mbo.is_hermitian(A)`);
@@ -10069,6 +10120,11 @@ rather than findings.
   from the global `np.random` state and overwrites the chain's one-entry
   `_is_hermitian_cache`, so a seeded calculation sees different random numbers
   afterwards and the next `gs_energy()` re-probes the Hamiltonian (by reading).
+- Found while fixing finding 7: `julia_live`'s `vev` disagrees with itself on long
+  operator sums. On a 6-site Heisenberg chain at `maxm=3`, <(H-e)^2>, <H^2>-e^2 and
+  <H^2-2eH>+e^2 with e = <H> give 1.0110e-01, 1.0067e-01 and 1.0086e-01, where
+  `"python"` gives 9.94499312e-02 for all three to every printed digit. At full bond
+  dimension all three are at roundoff on both backends. Not located.
 - The probe's witness bond dimension is not the temporary `self.maxm = min(maxm, 8)`
   it sets: `randommps.random_mps_dummy` calls `self._session.random_mps()`, which on
   `"python"` uses the session's stored `maxm` (by reading).

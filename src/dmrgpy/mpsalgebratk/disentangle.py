@@ -10,9 +10,12 @@ def _is_hermitian(wfs,A):
   one-sided, "not proven" is not "not Hermitian": a same-site identity
   (1j*Sx0*Sy0 is exactly -Sz0/2), a term mixing a C-type and an A-type
   name, or any name off canonical.py's _PARITY table (every parafermionic
-  operator) is Hermitian and unprovable (2026-09-24b audit, finding 1)."""
+  operator) is Hermitian and unprovable (2026-09-24b audit, finding 1).
+  An ED State's MBO is its EDchain, whose is_hermitian decides exactly on
+  the operator's matrix; before it had one, every ED manifold raised
+  AttributeError here (2026-09-24c audit, finding 18)."""
   mbo = getattr(wfs[0],"MBO",None)
-  if mbo is not None: return mbo.is_hermitian(A)
+  if mbo is not None and hasattr(mbo,"is_hermitian"): return mbo.is_hermitian(A)
   return A.is_hermitian()
 
 

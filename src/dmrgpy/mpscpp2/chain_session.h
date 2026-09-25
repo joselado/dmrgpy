@@ -1095,7 +1095,26 @@ class Chain
         {
         if (!have_bandwidth_min_)
             {
-            bandwidth_emin_ = gs_energy(true);
+            if (have_wf0_ && have_wf0_energy_) bandwidth_emin_ = wf0_energy_;
+            else if (!have_wf0_) bandwidth_emin_ = gs_energy(false);
+            else
+                {
+                // A state held without its energy is one set_wavefunction()
+                // handed in (dmrgpy's set_gs()/set_initial_wf()), and
+                // gs_energy(true) would sweep it in place: solve from a
+                // fresh start instead and put the state back, since the
+                // band edge is the Hamiltonian's, not the state's. This
+                // replaces the Python-side pre-fill that did the same by
+                // running excited_states(1) before every push, at the cost
+                // of an upper-edge solve and an energy fluctuation it threw
+                // away (2026-09-24c audit, finding 9).
+                auto keep = wf0_;
+                have_wf0_ = false;
+                bandwidth_emin_ = gs_energy(false);
+                wf0_ = keep;
+                have_wf0_ = true;
+                have_wf0_energy_ = false; // the energy is not keep's
+                }
             have_bandwidth_min_ = true;
             }
         return bandwidth_emin_;

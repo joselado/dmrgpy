@@ -357,7 +357,15 @@ its proof. When a chain is at hand,
 \texttt{sc.is\_hermitian(A)} answers the same question without that
 caveat, taking the proof when it lands and probing numerically when it
 does not, which is what \texttt{gs\_energy()} and
-\texttt{exponential()} gate on.
+\texttt{exponential()} gate on. Both halves decide on $A/\max|c|$, $c$
+running over the coefficients of $A$, so the answer is a property of the
+operator and not of its units, and the probe resolves an anti-Hermitian
+part down to about $10^{-10}$ of the largest coefficient; on
+\texttt{mode="ED"} the same question is a relative test on the matrix,
+$\lVert h-h^\dagger\rVert_F\le10^{-10}\lVert h\rVert_F$. Until the third
+2026-09-24 pass the probe compared an unnormalized norm against an
+absolute $10^{-4}$, so a weak loss term on an $O(1)$ Hamiltonian was
+called Hermitian and its decay rate dropped (\S21).
 
 \texttt{trace}, \texttt{operator\_norm} and \texttt{is\_zero\_operator}
 take a \texttt{MultiOperator}, not a compiled \texttt{StaticOperator}. On
@@ -703,10 +711,14 @@ along and promotion only relabels its site indices, so there is nothing
 to lose by promoting early --- but nothing to gain either. The
 Hamiltonian and the
 band-edge caches are rebuilt on the next call that needs them, while the
-ground-state energy and wavefunction are kept --- a bare
-\lstinline|gs_energy()| afterwards therefore still returns the sector's
-energy rather than re-solving; call \lstinline|restart()| if an
-unconstrained re-solve is what you want. A wavefunction Python is already
+state the chain holds is kept --- the sector's ground state, or one set
+with \lstinline|set_gs()|/\lstinline|set_initial_wf()|, taken unswept with
+its own energy $\langle\psi|H|\psi\rangle$ on the next read, so a bare
+\lstinline|gs_energy()| afterwards returns that energy rather than
+re-solving; call \lstinline|restart()| if an unconstrained re-solve is
+what you want. Until the third 2026-09-24 pass a state set by hand was
+dropped by the promotion, or re-swept on the dense sites, which on
+\texttt{"python"} could leave the sector altogether (\S21). A wavefunction Python is already
 holding is not reached by \lstinline|promote_to_dense()| and needs
 \lstinline|wf = fc.promote_mps(wf)| of its own.
 
@@ -787,11 +799,27 @@ state):
 
 \begin{equation}
 \delta E=\sqrt{\langle H^2\rangle-\langle H\rangle^2}
+=\big\lVert(H-\langle H\rangle)|\psi\rangle\big\rVert
 \end{equation}
 
 \begin{lstlisting}
 de = sc.gs_energy_fluctuation()
 \end{lstlisting}
+
+It is computed as the right-hand side on every mode: $\langle H\rangle$
+is subtracted first and $(H-\langle H\rangle)|\psi\rangle$ is applied
+with no bond-dimension cap, so the truncation, set only by
+\texttt{cutoff}, acts on the small residual itself. Until the third
+2026-09-24 pass it was the left-hand side, with $H|\psi\rangle$ truncated
+to the chain's \texttt{maxm}, and that number was set by the truncation
+rather than by the state: a state solved and measured at the same
+\texttt{maxm} reported its fluctuation 10 to 51 times too low (6.7e-03
+against 0.344 on an 8-site chain at \texttt{maxm=3}), and one wider than
+\texttt{maxm} reported it at order one (\S21).
+\texttt{get\_gs(maxde=...)}/\texttt{gs\_energy(maxde=...)} reads the same
+quantity \textbf{per site}, $\delta E/n_s$, doubling \texttt{maxm} until
+it drops below \texttt{maxde}, and returns the refined energy, the one it
+leaves on the chain.
 
 \texttt{mode=} is now actually forwarded here:
 \texttt{gs\_energy\_fluctuation(mode="ED")} runs ED, where it used to
@@ -809,16 +837,15 @@ until it drops) therefore behaves differently on an ED route.
 \texttt{npow=} is rejected with a \texttt{TypeError}: this function sets
 the powers itself.
 
-What the number floors at is backend-dependent, which is worth knowing
-since this is the one place the guide invites you to tune \texttt{maxm}
-by watching it. On a 10-site Heisenberg chain at the stock
-\texttt{maxm=30}, \texttt{itensor\_version=3} reports 1.7e-07 and
-\texttt{itensor\_version="python"} 6.3e-06 --- \texttt{"python"}'s floor
-is its Lanczos eigenvector accuracy ($\sim10^{-6}$; its ground-state
-solver stops on the Ritz \emph{value}, whose error is quadratic in the
-eigenvector error), not the double-precision cancellation floor the C++
-backend reaches. A \texttt{"python"} fluctuation that stops falling at
-$10^{-6}$ has hit that cap, not a bond-dimension limit.
+What the number measures below full bond dimension is the truncation of
+the state, which is why it is worth watching while tuning \texttt{maxm}.
+On a 10-site Heisenberg chain at the stock \texttt{maxm=30}, one below
+the full bond dimension 32, \texttt{itensor\_version=3} reports 1.4e-05
+and \texttt{itensor\_version="python"} 8.4e-06, and \texttt{mode="ED"}
+4.2e-15. The two DMRG numbers used to read 1.7e-07 and 6.3e-06, which
+this guide attributed to backend-dependent floors (Lanczos accuracy on
+\texttt{"python"}, a double-precision cancellation floor on v3); both
+were artefacts of truncating $H|\psi\rangle$ at \texttt{maxm}.
 
 \textbf{Static two-point correlators.} \texttt{sc.vev(sc.Sz[0]*sc.Sz[i])}
 gives $\langle S^z_0 S^z_i\rangle$ directly; \texttt{correlator.get\_correlator}
@@ -1510,8 +1537,15 @@ $\Delta_n=E_n-E_0$, and the retarded/advanced resolvents
 G^{R/A}_{AB}(\omega)=\langle\mathrm{GS}|A\,\frac{1}{\omega-H+E_0\pm i\delta}\,B|\mathrm{GS}\rangle
 \end{equation}
 
-$\delta$ is the small broadening. $M_n$ is complex in general, so the
-returned array is complex. The discriminant that matters is
+$\delta$ is the small broadening. Here $|\mathrm{GS}\rangle$ is the
+chain's own state, the solved ground state or one set with
+\texttt{set\_gs()}, and $E_0$ is its energy, the one
+\texttt{gs\_energy()} reports, on every submode and both modes; SECTOR,
+which measures its reference sector's ground state, is the exception (see
+its entry). Until the third 2026-09-24 pass DMRG KPM measured a set state
+from the solved ground-state energy and \texttt{mode="ED"} from three
+different origins (\S21). $M_n$ is complex in general, so the returned
+array is complex. The discriminant that matters is
 $\mathrm{Im}\,M_n=0$: \textbf{whenever every $M_n$ is real}, the density
 is real and coincides exactly with the equally common convention
 $-\frac1\pi\mathrm{Im}\,G^R_{AB}$. That is a weaker condition than the
@@ -2522,6 +2556,16 @@ quantities the Hamiltonian actually conserves). Two operators whose
 charges do not cancel raise, since the correlator then vanishes
 identically by symmetry.
 
+The $|\mathrm{GS}\rangle$ here is always the ground state of the
+reference sector, solved on an internal clone, never the chain's own
+state. After \texttt{set\_gs()}/\texttt{set\_initial\_wf()} the reference
+charges are therefore read from the state that was set, and SECTOR
+proceeds only when that state is its sector's ground state (by energy, to
+$10^{-6}$ relative); any other state raises
+\texttt{NotImplementedError} naming the submodes that read the chain's
+state. Until the third 2026-09-24 pass it returned the ground state's
+spectrum instead, silently (\S21).
+
 An operator with \emph{no} definite charge is handled rather than
 rejected: $S_x$ raises \textbf{and} lowers $S_z$, so
 \texttt{name=(Sx,Sx)} has no single target sector, but
@@ -2762,6 +2806,21 @@ measuring $B(t)$. \texttt{timeevolution.imaginary\_exponential} computes
 autocorrelation functions directly, $\langle\psi_0|e^{iHt}|\psi_0
 \rangle$, without a separate measurement operator.
 
+\texttt{evolve\_and\_measure} and \texttt{evolution\_ABA} take the same
+keywords on both modes, \texttt{nt=1000}, \texttt{dt=1e-2} and
+\texttt{h=} (the Hamiltonian to evolve under, the chain's own by
+default), and raise \texttt{TypeError} on one they do not read. On
+\texttt{mode="ED"} the propagator is
+\texttt{scipy.sparse.linalg.expm\_multiply}, exact to rounding and
+unitary, so ED is the reference at any \texttt{dt} and whatever the
+energy origin of $H$. Until the third 2026-09-24 pass a misspelled
+keyword (\texttt{DT=0.2}) ran silently at the defaults on DMRG,
+\texttt{h=} raised on ED, the ED default was \texttt{nt=100}, and ED
+integrated with RK45 at scipy's default tolerances, whose error grew with
+\texttt{dt} times the absolute energy of the state: a constant $+20$
+added to $H$ moved an ED trajectory $5.6\times10^{-4}$ off exact at
+\texttt{dt=0.1} (\S21).
+
 \textbf{Choosing the propagator: \texttt{sc.tevol\_method}.} Five
 options:
 
@@ -2793,10 +2852,11 @@ options:
     \lstinline|expand(psi,H; alg="global_krylov")| (citing the same
     paper) and its \lstinline|tdvp| takes \lstinline|nsite=1| directly,
     so \texttt{mpsjulialive/tdvp.jl} only wires the two together; that
-    route also handles a bond-dimension-1 (product-state) start fine,
-    unlike \texttt{itensor\_version=3} (see
-    \texttt{examples/time\_evolution/tdvp\_gse\_VS\_ED\_time\_evolution}'s
-    own note on that edge case).
+    route also handles a bond-dimension-1 (product-state) start fine, and
+    so does \texttt{itensor\_version=3} since the third 2026-09-24 pass,
+    where a start whose site 0 is one local basis vector (a product
+    state, or any ladder operator or projector on site 0) used to lose
+    the expansion at the left edge and leave site 0 frozen (\S21).
   \item \texttt{"TEBD"} (\texttt{itensor\_version} \texttt{3},
     \texttt{"python"}, or \texttt{"julia\_live"}, and only for a strictly
     nearest-neighbor Hamiltonian --- any term touching 3 or more distinct
@@ -5900,6 +5960,105 @@ KPM with a pole outside the rescaled window (\texttt{kpm\_scale} below 1/2) & DM
 a misspelled key, a method or \texttt{itensor\_version} in \texttt{kpm\_finite}'s \texttt{window\_chain\_kwargs} & ignored, the default spectrum bit for bit & \texttt{TypeError} (finding 6) \\
 \texttt{name=(A,B)} with \texttt{i=}/\texttt{j=} in \texttt{get\_dynamical\_\allowbreak correlator} and every wrapper of it & the sites silently dropped & \texttt{TypeError} (finding 16) \\
 \texttt{n\_gs>1} under \texttt{submode="SECTOR"} & the single-state value & \texttt{NotImplementedError} (finding 15) \\
+\bottomrule
+\end{tabular}
+\normalsize
+\end{center}
+
+\subsection*{The 2026-09-24 third pass}
+
+A fifth hunt (\texttt{docs/audit\_2026\_09\_24c\_hole\_hunt.md}, four
+lenses over the single commit \texttt{867e2b4} that closed the second
+pass) recorded 18 findings, six of them from that commit and twelve
+older, and every one is fixed; two needed a rebuild of the compiled
+extensions. Each item below names its finding.
+
+\textbf{Results that are not comparable across this change.}
+
+\begin{itemize}
+\item \textbf{\texttt{gs\_energy\_fluctuation()} below full bond
+  dimension, on every DMRG backend}, was set by truncating $H|\psi\rangle$
+  to \texttt{maxm}. It is now $\lVert(H-\langle H\rangle)|\psi\rangle
+  \rVert$ with an uncapped application: on an 8-site Heisenberg chain
+  solved and measured at \texttt{maxm=3} it goes from 6.7e-03 to 0.344 on
+  \texttt{"python"} and from 1.5e-02 to 0.347 on v3, and an exact state
+  measured at \texttt{maxm=3} from 1.64 (v3) to $10^{-11}$.
+  \texttt{mode="ED"} subtracts $\langle H\rangle$ first too, so its value
+  at an exact eigenstate goes from the $10^{-7}$ roundoff floor to
+  $10^{-15}$. With it, \texttt{gs\_energy(maxde=...)} stops later, since
+  it used to stop on an under-reported number, and returns the refined
+  energy it leaves on the chain, $-3.374933$ where it returned the
+  unrefined $-3.279373$; a correlator afterwards measures that refined
+  state instead of re-solving at the original \texttt{maxm} (\S3,
+  findings 6 and 7).
+\item \textbf{After \texttt{set\_gs()} of a state off the ground
+  manifold} every submode on both modes measures it from its own energy.
+  DMRG KPM and ED KPM, CVM, INV, ROOTN and TD move by $E_x-E_0$ (0.3 on
+  the 3-site chain in a field, where the elastic line sat at $+0.3$), and
+  ED \texttt{submode="ED"}, which read no state at all, now gives the set
+  state's density, 2.834 away from what it returned on a 2.835 peak (\S6,
+  findings 1 and 2).
+\item \textbf{\texttt{promote\_to\_dense()} keeps the state the chain
+  holds.} A state set in a sector and promoted with no read in between
+  reads $-0.957107$, its own energy, where it read the sector ground
+  energy $-1.616025$, and a carried state that is not the sector ground
+  state is kept ($-1.131526$) where \texttt{"python"} re-swept it out of
+  the sector to the global ground state $-1.857107$ (\S3, findings 3 and
+  4).
+\item \textbf{\texttt{set\_hamiltonian(H2, restart=False)}} now drops the
+  stored ground state, so \texttt{gs\_energy()}, \texttt{vev()},
+  \texttt{get\_excited()} and the direct KPM moments answer for H2:
+  $-1.780099$ where they gave H1's $-1.616025$ on a 4-site chain (finding
+  5).
+\item \textbf{Weakly non-Hermitian operators.} The Hermiticity probe is
+  scale-free, so an anti-Hermitian part below about $10^{-2}$ in absolute
+  size is no longer called Hermitian: a weak loss term keeps its decay
+  rate ($\mathrm{Im}\,E_0=-0.002134$, where v2 and v3 returned 0 and
+  \texttt{"python"} a real part 3 to 18 per cent off), a non-Hermitian
+  chain written in small units is solved as one, and
+  \texttt{disentangle\_manifold} diagonalizes such an operator rather than
+  its Hermitian part (\S2, finding 12).
+\item \textbf{\texttt{"python"} operators whose coefficients are all
+  below about $2\times10^{-7}$} were built as a different operator, a lone
+  \texttt{1e-7*Sz0} as the zero MPO; \texttt{vev(1e-7*Sz0)} goes from 0 to
+  $-1.8936\times10^{-8}$ (finding 13).
+\item \textbf{v3 \texttt{TDVP\_GSE} from a start whose site 0 is one local
+  basis vector} (any ladder operator or projector on site 0, or a product
+  state) left site 0 frozen: \texttt{evolution\_ABA(A=C\_0)} goes from
+  0.47 to $10^{-7}$ off exact, the public (Cdag\_0, C\_0) TD spectrum's peak
+  from 0.081 to 0.47, and a N\'eel start is exact in 8 of 8 runs where up
+  to 5 of 8 failed (\S7, finding 14).
+\item \textbf{Every \texttt{mode="ED"} real-time route}
+  (\texttt{evolve\_and\_measure}, \texttt{evolution\_ABA},
+  \texttt{submode="TD"}) uses an exact propagator, and moves by $10^{-8}$
+  to $10^{-6}$ on the small chains the tests use and up to $10^{-3}$ at
+  \texttt{dt=0.2} on an 8-site chain with an extensive energy (\S7,
+  finding 17).
+\end{itemize}
+
+\textbf{Faster, with no number changed.} The first read after
+\texttt{set\_gs()} no longer solves the upper band edge and an energy
+fluctuation it discarded (7.1\,s on a 24-site \texttt{"python"} chain for
+a 0.04\,s result), and \texttt{"python"}'s upper band edge caps its local
+Krylov dimension at 20, costing about one ground-state solve where it
+cost 5 to 9 on a Heisenberg chain (findings 9 and 10). A malformed KPM
+call raises before any ground-state work again, and a SECTOR call makes
+no solve on the caller's chain (finding 11).
+
+\textbf{And these now raise, or now work, where they used to do something
+else:}
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.34\textwidth}p{0.30\textwidth}p{0.29\textwidth}@{}}
+\toprule
+\textbf{Call} & \textbf{Was} & \textbf{Now} \\
+\midrule
+a misspelled keyword to \texttt{evolve\_and\_\allowbreak measure}/\allowbreak\texttt{evolution\_ABA} on DMRG & ignored, the run at the defaults & \texttt{TypeError}, as on ED (finding 15) \\
+\texttt{h=} to \texttt{evolve\_and\_\allowbreak measure}/\allowbreak\texttt{evolution\_ABA} on ED & \texttt{TypeError}, ``multiple values for argument h'' & evolves under \texttt{h}, as on DMRG (finding 16) \\
+\texttt{submode="SECTOR"} after \texttt{set\_gs()} of a state that is not its sector's ground state & the ground state's spectrum & \texttt{NotImplementedError} (finding 8) \\
+\texttt{disentangle\_manifold} on an ED manifold & \texttt{AttributeError} for every operator & the eigenbasis (finding 18) \\
+an unknown keyword to \texttt{gs\_energy\_\allowbreak fluctuation()} on DMRG & forwarded and dropped & \texttt{TypeError} (finding 7) \\
 \bottomrule
 \end{tabular}
 \normalsize

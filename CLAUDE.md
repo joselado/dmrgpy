@@ -506,6 +506,69 @@ the cause is a harsh `kpmmaxm`; the short `nt` defaults of
 record's "New leads", notably `Many_Body_Chain.__init__(**kwargs)` dropping
 every keyword.
 
+**The 2026-09-24 third pass.** `docs/audit_2026_09_24c_hole_hunt.md` is a
+fifth hunt, scoped to the single commit `867e2b4` that fixed the second
+pass, four lenses, one per fix cluster of that commit (`groundstate`,
+`kpm`, `realtime`, `misc`), run as a workflow with the three-slot `run3.sh`
+cap from the start. It found 18 holes from 22 reviewed candidates (one
+refuted on scope, three pairs the same defect reached by two lenses); six
+came in with `867e2b4`, all at the edges of the injected-state machinery
+it built, and twelve are older. All 18 are fixed, in five clusters whose
+regressions live in `tests/test_audit_2026_09_24c_<cluster>.py` for
+`session`, `fluctuation`, `hermiticity`, `pyitensor` and `realtime`;
+findings 9 and 14 needed a rebuild (both extensions for 9, v3 for 14). Four
+things worth knowing before touching the code. `vev.energy_variance` is
+how an energy variance is computed now, ||(H-<H>)|psi>||^2 with the `maxm`
+cap lifted: <H^2>-<H>^2 through `vev(npow=2)` is a small difference of two
+numbers of order E0^2 whose error was set by the truncation of H|psi>,
+and building H^2 as an MPO instead is O(L^3) on `"python"` (302 s at 80
+sites). The session's lower band edge, `minimum_energy()` on all three
+session backends, never sweeps a state the session holds without its
+energy (every injected state): it solves from a fresh start and puts the
+state back, which replaced `867e2b4`'s `excited_states(1)` pre-fill. The
+injection mark carries a third field, `supplied`, read through
+`groundstate.state_supplied()`, which SECTOR uses to refuse a set state that
+is not its reference sector's ground state. And in
+`Chain::global_subspace_expand` a `Cutoff=0` sweep is not "no cutoff":
+ITensor v3's `truncate()` discards exactly-zero weights at `Cutoff=0`, which
+is what the expansion adds next to a site pinned to one basis vector, so the
+sweeps now run only when a bond exceeds `maxm`, with `Cutoff=-1`; this was
+also the product-state failure the TDVP_GSE example had recorded as
+isolated. The fixes that changed numbers rather than behaviour, so results
+from before them are not comparable: every `gs_energy_fluctuation()` below
+full bond dimension on every DMRG backend (6.725e-03 to 0.3436 on an 8-site
+chain at `maxm=3`, and 1.7e-07 to 1.37e-05 on 10 sites at the stock
+`maxm=30` on v3), every ED one (the 1e-7 roundoff floor to 5e-15), and every
+`maxde=` run, which also returns the refined energy now (-3.279373 to
+-3.374933) and keeps the refined state (findings 6 and 7); every submode
+after `set_gs` of a state off the ground manifold, KPM on DMRG and
+KPM/CVM/INV/ROOTN/TD/ED on `mode="ED"` moving onto the state's own energy
+(the 0.3 shift of the 3-site chain in a field, findings 1 and 2);
+`promote_to_dense` after a setter or with a carried non-lowest state
+(-1.616025 or -1.857107 to <x|H|x>, findings 3 and 4); every reader after
+`set_hamiltonian(restart=False)` (-1.616025 to -1.780099, finding 5); SECTOR
+after `set_gs` of a lowest-of-its-sector state (finding 8); weakly
+non-Hermitian operators, whose decay rate v2/v3 dropped (Im E0 0 to
+-0.002134, finding 12); `"python"` operators with every coefficient below
+about 2e-7 (`vev(1e-7*Sz0)` 0 to -1.8936e-08, finding 13); v3 `TDVP_GSE`
+from a site-0-pinned or product-state start (4.74e-01 to 1.1e-07 off exact,
+finding 14); and every `mode="ED"` real-time route, now `expm_multiply`
+(5.64e-04 to 1e-12 under a +20 energy offset, finding 17). Behaviour changes
+without number changes: `evolve_and_measure`/`evolution_ABA` raise on an
+unknown keyword on DMRG, take `h=` on ED and default to `nt=1000` on both
+(findings 15 and 16); a malformed KPM call raises before any ground-state
+work and SECTOR makes no solve on the caller's chain (finding 11);
+`disentangle_manifold` works on ED manifolds (finding 18); the first read
+after an injection costs about <x|H|x> (7.1 s to 0.059 s on 24 sites of
+`"python"`, finding 9) and `"python"`'s upper band edge about one solve (5
+to 9 solves before, finding 10). Left as they were and recorded as such:
+`gs_energy(mode="ED")` after `set_gs` still reports the lowest eigenvalue;
+`vev(op, npow>=2)` still truncates each application at `maxm`, now
+documented; the non-Hermitian KPM's missing-`E_max` error still comes after
+a solve; and the record's "New leads", notably the v2/v3 failure on a
+Hamiltonian in small energy units, which is not the MPO builder, and
+`multioperator.clean_threshold` dropping every term below an absolute 1e-8.
+
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
 result, so every `examples/*/*/main.py` should end with a `matplotlib`
@@ -792,8 +855,12 @@ bilinear-biquadratic example in `README.md`).
   as ~L^3.7 and at L=100 spent 95% of its time building the Hamiltonian
   and 5% solving it. `to_mpo` now assembles the finite-state machine over
   the terms' partial products directly (the shape ITensor's own
-  `toMPO(...,{"Exact",true})` produces), keeping the same two truncating
-  sweeps afterwards purely to honour `cutoff`/`maxdim`. Same operator,
+  `toMPO(...,{"Exact",true})` produces), keeping two sweeps afterwards
+  purely to honour `cutoff`/`maxdim`, the first exact and only the return
+  one truncating: a truncating first sweep weighed the dead identity
+  channel from the left and compressed any operator whose coefficients
+  were all below about 2e-7 into a different one (2026-09-24 third pass,
+  finding 13). Same operator,
   same final bond dimension, and a build that is O(L^2) rather than
   O(L^4) (the machine itself is O(L); `HTerm.resolve()` spells each of the
   O(L) terms out over all L sites, and that term is cheap but real):

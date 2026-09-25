@@ -73,6 +73,14 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
                 "fewer than 3 sites.")
         from ..algebra.kpm import validate_kpm_n_scale
         validate_kpm_n_scale(getattr(self,"kpm_n_scale",1))
+    # A state set with set_gs(), or passed as wf0=, is measured from its
+    # own energy <v|H|v>, the convention of EX here and of every DMRG
+    # submode; the solved ground state from e0. The KPM window stays on
+    # the lowest eigenvalue either way. After set_gs() of a state off the
+    # ground manifold, KPM, CVM, INV, ROOTN and TD used to measure it from
+    # the solved E_0, EX from its own energy and submode="ED" not at all
+    # (2026-09-24c audit, findings 1 and 2).
+    injected = wf0 is not None or getattr(self,"_injected_state",False)
     if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
     else:
         wf0 = wf0.v.copy()
@@ -104,27 +112,38 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
 #    print(wf0)
 #    print(np.round(wf0,2))
     # for Hermitian Hamiltonians, continue
+    e_low = self.lowest_energy() # the window's bottom
+    if injected: e_state = float(np.real(np.conjugate(wf0)@(h@wf0)
+                                         /(np.conjugate(wf0)@wf0)))
+    else: e_state = e_low
     if submode=="KPM":
-        return dynamical_correlator_kpm(h,self.e0,wf0,A,B,chain=self,**kwargs)
+        # the window is built on e_low, the origin moved to e_state
+        es = np.asarray(kwargs.pop("es",np.linspace(-1.,10,400)))
+        (_,y) = dynamical_correlator_kpm(h,e_low,wf0,A,B,chain=self,
+                es=es+(e_state-e_low),**kwargs)
+        return es,y
     elif submode=="ED":
         emu,vs = self.get_diagonalized_hamiltonian()
+        if injected:
+            return dynamical_correlator_ED_state(A,B,wf0,e_state,
+                    emu=emu,vs=vs,**kwargs)
         return dynamical_correlator_ED(h,A,B,emu=emu,vs=vs,**kwargs)
     elif submode=="EX":
         from .. import dcex
         return dcex.dynamical_correlator(self,name=name,**kwargs)
     elif submode=="INV":
-      return dynamical_correlator_inv(h,wf0,self.e0,A,B,mode="full",**kwargs)
+      return dynamical_correlator_inv(h,wf0,e_state,A,B,mode="full",**kwargs)
     elif submode=="CVM":
-      return dynamical_correlator_inv(h,wf0,self.e0,A,B,mode="cv",**kwargs)
+      return dynamical_correlator_inv(h,wf0,e_state,A,B,mode="cv",**kwargs)
     elif submode=="ROOTN":
-      return dynamical_correlator_rootn(h,self.e0,wf0,A,B,**kwargs)
+      return dynamical_correlator_rootn(h,e_state,wf0,A,B,**kwargs)
     elif submode=="TD":
       from .. import timedependent
       # wf0 forwarded, so that both halves of a pair that takes two
       # evolutions are measured in the same state, and in the one every
       # other submode here uses (edtk/timedependent.evolution_DC)
       return timedependent.dynamical_correlator(self,mode="ED",
-              name=name,wf0=wf0,**kwargs)
+              name=name,wf0=wf0,e0=e_state,**kwargs)
     elif submode=="SECTOR":
         # Named explicitly rather than left to the generic message below,
         # because the two ways of arriving here look nothing alike to the
@@ -351,6 +370,29 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     # which is what submode="KPM"/"INV"/"CVM"/"EX" already gave.
     # (2026-09 audit, finding #5.)
     return (es,1j*out/(2*np.pi)) # return correlator
+
+def dynamical_correlator_ED_state(a0,b0,wf,e_state,delta=2e-2,emu=None,
+        vs=None,es=np.linspace(-1.0,10.0,600)):
+    """The exact Lehmann density of one given state rather than of the dex
+    manifold: sum_n M_n delta/(pi((w - (E_n - e_state))^2 + delta^2)) with
+    M_n = <wf|a0|n><n|b0|wf>, over the full spectrum, wf normalized here.
+    dynamical_correlator_ED's equal-weight manifold average reads no state
+    at all, so after set_gs() of a non-degenerate excited eigenstate, or
+    with an explicit wf0=, it returned the ground state's spectrum, 2.834
+    off the set state's on a 2.835 peak (2026-09-24c audit, finding 2).
+    For wf the ground state this is dynamical_correlator_ED at nex=1."""
+    U = np.array(vs)
+    Uh = np.conjugate(np.transpose(U))
+    wf = np.asarray(wf).reshape(-1)
+    wf = wf/np.sqrt(np.real(np.conjugate(wf)@wf))
+    row = (np.conjugate(wf)@a0)@U # <wf|a0|n>
+    col = Uh@(b0@wf) # <n|b0|wf>
+    M = np.asarray(row).reshape(-1)*np.asarray(col).reshape(-1)
+    D = np.asarray(emu) - e_state
+    es = np.asarray(es)
+    ker = (delta/np.pi)/((es[:,None]-D[None,:])**2 + delta**2)
+    return es,ker@M
+
 
 from numba import jit
 

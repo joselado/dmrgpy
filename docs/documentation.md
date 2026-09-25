@@ -2542,6 +2542,22 @@ the probe costs 0.010 s to 0.018 s on `itensor_version=3` and 0.041 s to
 0.130 s on `"python"` for n=16 to n=40, against 0.4 ms to 0.9 ms for the
 proof.
 
+Both halves decide on $A/\max|c|$, $c$ the raw coefficients, and the probe
+compares $\lVert(A-A^\dagger)w\rVert^2$ against a roundoff-level $10^{-20}$:
+for a Hermitian $A$ the MPO of $A-A^\dagger$ cancels exactly in floating
+point, so the probe reads exactly 0 there and the tolerance only has to sit
+above roundoff. Until the 2026-09-24 third pass it compared the unnormalized
+norm against an absolute $10^{-4}$, so the verdict depended on the units the
+operator was written in and an anti-Hermitian part below about $10^{-2}$ was
+called Hermitian (finding 12). The ED side decides on one relative test,
+`algebra.is_hermitian`, $\lVert h-h^\dagger\rVert_F\le10^{-10}
+\lVert h\rVert_F$, which `algebra.ishermitian` now calls too (the two were an
+absolute $10^{-8}$ on $\lVert h-h^\dagger\rVert_F^2$ and an absolute
+$10^{-6}$ on the largest entry, and disagreed with each other), and an ED
+`State`'s `MBO`, the `EDchain`, answers `is_hermitian` exactly on the
+operator's matrix, which is what `disentangle_manifold` asks of it (finding
+18).
+
 Only the operator names dmrgpy itself builds are canonicalized, listed
 in `canonical.py`'s `_PARITY` table together with their grading. A term
 naming anything else, a parafermionic `Sig`/`Tau`, which reorders with a
@@ -2785,7 +2801,30 @@ caches instead of re-running warm DMRG sweeps and band-edge solves. Code
 paths that *want* a fresh solve of the same Hamiltonian either pass
 through `restart()`/`set_hamiltonian` (which force DMRG via
 `skip_dmrg_gs=False`) or clear `_session_ham_cache` explicitly (see
-`groundstate.py`'s best-of-`n` loops).
+`groundstate.py`'s best-of-`n` loops). `set_hamiltonian(H, restart=False)`
+resets `computed_gs` too and drops the caches keyed on the Hamiltonian
+(`_dcex_excited_cache`, `_sector_states_cache`, `has_ED_obj`), keeping only
+the session's state as the next solve's warm start; before the 2026-09-24
+third pass it kept the stored state current, so every reader but
+`ground_state_on_session` answered for the old Hamiltonian (finding 5).
+
+`ground_state_on_session` runs in `dynamics.get_dynamical_correlator`
+after the KPM route's argument checks (`kpmdmrg.check_kpm_arguments`, the
+same function `dynamical_correlator_moments` calls for its direct callers)
+and not at all for `submode="SECTOR"`, which solves both of its sectors on
+a clone; `dynamical_correlator_moments` itself calls it in place of a bare
+`get_gs()`. Put first, as `867e2b4` had it, a malformed KPM call paid a
+full solve before raising and SECTOR one it never read (finding 11).
+
+The session's lower band edge, `minimum_energy()` in both
+`chain_session.h` and `pyitensor/chain.py::_minimum_energy`, is the cached
+energy when the session holds one for its state, and otherwise a full
+solve from a fresh start with the held state put back afterwards, so a
+state handed in by `set_wavefunction()` (every injected state, whose energy
+the push drops) is never swept by it. `867e2b4` had the Python side pre-fill
+both band edges with `excited_states(1)` before every push instead, which
+cost an upper-edge solve and an energy fluctuation on the first read after
+an injection (finding 9).
 
 **The ground-state sweep schedule is ramped, not flat**
 (`Chain::make_sweeps_ramped()` in both `chain_session.h`s,
@@ -3169,10 +3208,18 @@ not started (**I**), finished (**F**), or one **partial** state per
 Sharing partial states between terms is what compresses, and creates no
 spurious paths: sharing a state *means* the prefixes are identical, so
 following one term's prefix into another's suffix just reproduces that
-other term. The two truncating sweeps are kept, now purely to honour the
-caller's `cutoff`/`maxdim` and to squeeze out redundancy prefix-sharing
-cannot see (suffix sharing, linearly dependent channels); they are cheap
-because the incoming bond dimension is now $O(1)$.
+other term. The two sweeps are kept, now purely to honour the caller's
+`cutoff`/`maxdim` and to squeeze out redundancy prefix-sharing cannot see
+(suffix sharing, linearly dependent channels); they are cheap because the
+incoming bond dimension is now $O(1)$. The first is exact (`cutoff=0`) and
+only the return sweep truncates: a truncating sweep over the machine as
+built weighs each channel from the left, where the identity channel's weight
+dominates although that channel is dead at the right boundary, so a relative
+cutoff of $10^{-14}$ made a lone `1e-7*Sz0` the zero MPO and built a
+Heisenberg chain in units of $3\times10^{-7}$ 89 to 95 per cent wrong
+(2026-09-24 third pass, finding 13). After the exact left-canonicalizing
+sweep the truncation sees true operator-Schmidt values, and the final bond
+dimension is unchanged.
 
 Two rules in there are load-bearing. A term's **coefficient goes on its
 transition into F**, never earlier, so terms differing only by a
@@ -3337,7 +3384,16 @@ change of Hamiltonian. Without the carry the session re-solved
 variational solve, not structurally, so nothing holds the solve inside
 the sector once the penalty is gone) and silently returned the global
 ground state — the opposite of what `promote_to_dense`'s own docstring
-guarantees, and of what `mpscpp3` and `mode="ED"` already did.
+guarantees, and of what `mpscpp3` and `mode="ED"` already did. The carry
+covered only a state the session held with its energy, so since the
+2026-09-24 third pass `Many_Body_Chain.promote_to_dense` also re-marks the
+promoted state as injected (`groundstate.mark_injected(...,
+supplied=...)`), whenever it was current or an injection was pending, and
+the next read takes it unswept with $\langle\psi|H|\psi\rangle$ on every
+backend: without that, a state set with `set_gs()` was dropped (the copy
+retired the injection mark) or re-swept on the dense sites, on v3 always,
+since `set_hamiltonian_mpo` clears the energy `Chain::promote_to_dense`
+carries (findings 3 and 4).
 
 One partial exception to that shared-surface rule:
 `dmrg.py::dmrg_generalized` (exposed as `Chain.gs_energy_generalized`/
@@ -4446,12 +4502,15 @@ conserves bond dimension exactly, so with the expansion switched off
 follow the quench. Measured on a 6-site chain: two-site TDVP 3.1e-7 from
 ED, one-site+GSE 9.4e-9, one-site with GSE off 4.9e-1. Both directions
 are asserted, in `tests/test_julia_live.py` and in
-`examples/time_evolution/tdvp_gse_julia_VS_ED_time_evolution`. Note this
-same product-state start is where `itensor_version=3` has a known,
-isolated failure (see that example's own comment and
-`examples/time_evolution/tdvp_gse_VS_ED_time_evolution`, which has to mix
-in an XX+YY coupling to avoid it) -- the Julia route needs no such
-workaround.
+`examples/time_evolution/tdvp_gse_julia_VS_ED_time_evolution`. This same
+product-state start was where `itensor_version=3` had a failure recorded as
+isolated; it was general, any start whose site 0 is one local basis
+vector, and is fixed (2026-09-24 third pass, finding 14):
+`Chain::global_subspace_expand` truncated after `addBasis` with two
+`Cutoff=0` sweeps, and ITensor v3's `truncate()` discards exactly-zero
+weights at `Cutoff=0`, which is what the directions added next to such a
+site carry. It now truncates only when a bond exceeds `maxm`, with
+`Cutoff=-1`, and a Néel start is exact in 8 of 8 runs.
 
 #### TEBD on `julia_live`
 
@@ -5162,9 +5221,10 @@ That is the shape since the 2026-09-24 second-pass audit (findings 13 to
 15): finding 12's own fix pushed each member with
 `session.set_wavefunction()`, which drops the session's energy cache, so
 the next correlator's ground-state round trip re-swept the member, and
-the `finally` never restored `e0`. The session's band edges stay cached
-from the solved state, so every member is measured from the same `E0`
-under KPM. On the numerical side the
+the `finally` never restored `e0`. Every submode, KPM included, measures
+each member from the member's own energy (the KPM axis moved onto the
+state's `e0` with the 2026-09-24 third pass, finding 1), while the KPM
+window stays on the Hamiltonian's band edges. On the numerical side the
 potential term now integrates with the trapezoid weights of the grid it
 is given, where it used the first spacing for every point (finding 13),
 and it checks the sum rule `sum_k int S_kk = S(S+1)` on `Spin_Chain`
@@ -5457,6 +5517,18 @@ four are patterns this list did not have.
   this list: decide first, publish afterwards. `_switch_backend`
   snapshots all three fields and restores them if `initialize()` raises
   (§4.3).
+
+- **A tolerance with units.** Two thresholds were absolute where the
+  quantity they judged was not: the Hermiticity probe's $10^{-4}$ on an
+  unnormalized norm, so the Hermitian/non-Hermitian dispatch depended on
+  the units the Hamiltonian was written in, and the pure-Python MPO
+  builder's relative cutoff measured against a dead identity channel, so a
+  small enough operator was compressed away (2026-09-24 third pass,
+  findings 12 and 13). Both now judge a scale-free quantity. The same pass
+  found `gs_energy_fluctuation()`'s $\langle H^2\rangle-\langle H\rangle^2$
+  truncated at `maxm`, the error of a small difference of two large numbers
+  set by an unrelated parameter (finding 7); it subtracts
+  $\langle H\rangle$ first now.
 
 ## 5. Backend performance: v3 vs the pure-Python backend
 

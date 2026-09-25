@@ -1987,13 +1987,27 @@ class Chain
         // silently turn every later one-site TDVP step into a pure
         // global-phase no-op (bond dimension right back to phi's
         // original rank, and a rank-1 local tensor under one-site TDVP
-        // literally cannot do anything but rotate its own phase). A
-        // MaxDim-only (Cutoff=0) truncation only trims anything at all
-        // once the *count* actually exceeds maxm_, leaving GSE's added
-        // directions alone whenever there's room -- exactly the desired
-        // "hard cap, but don't undo GSE" behavior.
-        phi.position(length(phi),{"Cutoff",0.0,"MaxDim",maxm_});
-        phi.position(1,{"Cutoff",0.0,"MaxDim",maxm_});
+        // literally cannot do anything but rotate its own phase).
+        //
+        // So the cap is applied only when some bond actually exceeds
+        // maxm_, and then with a negative Cutoff, ITensor's own "no
+        // cutoff" (mpoalgs.cc's default). Cutoff=0 is NOT that:
+        // truncate()'s `while(truncerr+P(n) <= cutoff*scale && n >=
+        // mindim)` discards every exactly-zero weight at Cutoff=0, and when
+        // a site of the state is exactly one local basis vector (any ladder
+        // operator or projector on it) the directions GSE added there carry
+        // exactly zero weight, so these sweeps removed all of them at the
+        // left edge and one-site TDVP could never move site 0 (2026-09-24c
+        // audit, finding 14). Skipping the sweeps when nothing exceeds
+        // maxm_ also leaves addBasis()'s own Krylov directions as they are,
+        // rather than replacing the zero-weight ones by whatever completion
+        // an SVD picks; addBasis() returns the orthogonality centre at site
+        // 1, which is where one-site TDVP starts.
+        if (maxLinkDim(phi) > maxm_)
+            {
+            phi.position(length(phi),{"Cutoff",-1.0,"MaxDim",maxm_});
+            phi.position(1,{"Cutoff",-1.0,"MaxDim",maxm_});
+            }
         return phi;
         }
 
@@ -11639,7 +11653,26 @@ class Chain
         {
         if (!have_bandwidth_min_)
             {
-            bandwidth_emin_ = gs_energy(true);
+            if (have_wf0_ && have_wf0_energy_) bandwidth_emin_ = wf0_energy_;
+            else if (!have_wf0_) bandwidth_emin_ = gs_energy(false);
+            else
+                {
+                // A state held without its energy is one set_wavefunction()
+                // handed in (dmrgpy's set_gs()/set_initial_wf()), and
+                // gs_energy(true) would sweep it in place: solve from a
+                // fresh start instead and put the state back, since the
+                // band edge is the Hamiltonian's, not the state's. This
+                // replaces the Python-side pre-fill that did the same by
+                // running excited_states(1) before every push, at the cost
+                // of an upper-edge solve and an energy fluctuation it threw
+                // away (2026-09-24c audit, finding 9).
+                auto keep = wf0_;
+                have_wf0_ = false;
+                bandwidth_emin_ = gs_energy(false);
+                wf0_ = keep;
+                have_wf0_ = true;
+                have_wf0_energy_ = false; // the energy is not keep's
+                }
             have_bandwidth_min_ = true;
             }
         return bandwidth_emin_;

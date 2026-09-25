@@ -24,13 +24,17 @@ def evolve(w,h,t=0.0,mode="scipy",dt=0.01,de=0.0,dp=0.0):
   else: raise
 
 def scipy_evolution(psi,h,t):
-  def f(t,psi):
-      return 1j*h@psi # evolution
-  tspan = [0.,t] # times
-  t_eval = [tspan[1]]
-  v0 = psi # initial wavefunction
-  sol = solve_ivp(f,tspan,v0,method="RK45",t_eval=t_eval)
-  return sol.y[:,0]
+  """e^{+iht}|psi>, exactly (to rounding) and unitarily.
+
+  This was solve_ivp RK45 at scipy's default rtol=1e-3/atol=1e-6, whose
+  error is set by t times the absolute energy of the state rather than by
+  anything physical: a constant +20 added to H moved evolve_and_measure(
+  mode="ED") from 2.1e-7 to 5.6e-4 off exact at dt=0.1, and at dt=0.2 on an
+  8-site chain ED, the reference every ED-versus-DMRG real-time test is
+  held to, was 1.2 per cent off where "python" TDVP was at 7e-9
+  (2026-09-24c audit, finding 17). The sign stays e^{+iht}: evolution_DC
+  is built on it, and evolution_ABC passes -h."""
+  return slg.expm_multiply(1j*t*h,psi)
 
 
 

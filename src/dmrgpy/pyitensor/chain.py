@@ -39,6 +39,9 @@ from .tensor import ITensor, commonIndex, contract_many, dag, delta, noPrime, pr
 from . import backend as _bk
 
 _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at all
+# Krylov steps per local solve of the reduced-effort upper band edge
+# (_maximum_energy), in place of dmrg()'s floor of 200.
+_BOUND_NITER = 20
 
 
 def _strip_sweep(psi):
@@ -1812,7 +1815,21 @@ class Chain:
 
     def _minimum_energy(self):
         if self._bandwidth_min is None:
-            self._bandwidth_min = self.gs_energy(skip_dmrg=True)
+            if self.wf0 is None or self._wf0_energy is not None:
+                self._bandwidth_min = self.gs_energy(skip_dmrg=True)
+            else:
+                # A state held without its energy is one set_wavefunction()
+                # handed in, and gs_energy() would sweep it in place: solve
+                # from a fresh start and put the state back, the band edge
+                # being the Hamiltonian's (2026-09-24c audit, finding 9; the
+                # same in both chain_session.h minimum_energy()).
+                keep = self.wf0
+                self.wf0 = None
+                try:
+                    self._bandwidth_min = self.gs_energy()
+                finally:
+                    self.wf0 = keep
+                    self._wf0_energy = None
         return self._bandwidth_min
 
     def _maximum_energy(self):
@@ -1824,11 +1841,20 @@ class Chain:
             # by kpm_scale's margin (~bandwidth/6 of headroom) and only
             # shrinks the KPM moment count; a too-tight bound is caught
             # loudly by _check_kpm_moment.
+            #
+            # The local solves are capped at 20 Krylov steps rather than
+            # floored at the ground-state solver's 200: at the top of an
+            # SU(2)-symmetric spectrum (a Heisenberg chain's ferromagnetic
+            # multiplet) the value-criterion Lanczos ran up to 193 steps
+            # per local solve, making this bound cost 5 to 9 full
+            # ground-state solves on 24 sites, while 20 steps give Emax to
+            # 1e-10 at the cost of about one (2026-09-24c audit, finding 10).
             psi = self._default_mps()
             sweeps = self._make_sweeps(ns=min(self.nsweeps, 5),
                                        maxdim=min(self.maxm, 20))
             neg_H = self._penalized(self.H * (-1.0))
-            self._bandwidth_max = -dmrg(psi, neg_H, sweeps, quiet=not self.verbose)
+            self._bandwidth_max = -dmrg(psi, neg_H, sweeps, quiet=not self.verbose,
+                                        niter_floor=_BOUND_NITER)
         return self._bandwidth_max
 
     def _bandwidth(self):

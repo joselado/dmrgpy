@@ -86,9 +86,61 @@ def get_dynamical_correlator(self,
     """
     mus,emin,emax,scale,n,delta = dynamical_correlator_moments(self,
             name=name,delta=delta,**kwargs)
+    # the frequency origin is the measured state's own energy, the one
+    # gs_energy() reports and every other submode measures from; the
+    # window stays on the band edges (2026-09-24c audit, finding 1)
     return dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
             kernel=kernel,delta=delta,
-            hodc_order=hodc_order,hodc_eta=hodc_eta)
+            hodc_order=hodc_order,hodc_eta=hodc_eta,origin=self.e0)
+
+
+def check_kpm_arguments(self,delta=1e-1,**kwargs):
+    """The KPM route's argument checks, which need no ground state:
+    dynamics.get_dynamical_correlator runs them before
+    groundstate.ground_state_on_session, and dynamical_correlator_moments
+    runs them again for its direct callers. `kwargs` is what reaches the
+    moment computation, i.e. without the reconstruction's own keywords.
+    Returns the validated kpm_n_scale.
+
+    Every one of these used to run after a full ground-state solve on the
+    public route, since 867e2b4 put ground_state_on_session at the top of
+    the dispatcher, so a malformed call paid a solve before it raised
+    (2026-09-24c audit, finding 11)."""
+    kwargs = {k:v for k,v in kwargs.items() if k not in ("name","i","j")}
+    if kwargs:
+        # a bare **kwargs used to absorb and discard everything unknown --
+        # deconvolve=, n=, even maxm=/nsweeps= (which look like they would
+        # change the calculation and did not), all silently. CVM and
+        # CVM_explicit have always raised here; so does KPM now.
+        raise TypeError(
+            "Unexpected keyword argument(s) for the KPM dynamical "
+            "correlator: "+", ".join(sorted(kwargs))
+            +". Solver parameters are attributes of the chain "
+            "(self.maxm, self.nsweeps, self.kpmmaxm, ...), not call "
+            "arguments.")
+    if delta<0.0: raise ValueError("delta must be >= 0, got "+repr(delta))
+    # the compiled bindings take an int and raised on any float, while
+    # "python" rounded it down through int(), so the same value meant two
+    # different things, or nothing, depending on the backend
+    n_scale = kpm.validate_kpm_n_scale(self.kpm_n_scale)
+    if self.kpm_energy_truncate and self.itensor_version not in (3,"python"):
+        # only v3 (native method) and "python" (setter + internal branch)
+        # implement Holzner-style energy truncation; on itensor_version=2
+        # the flag used to be accepted and then quietly do nothing, so the
+        # run looked like a truncated one and was not
+        raise NotImplementedError(
+            "kpm_energy_truncate is implemented for itensor_version=3 and "
+            "itensor_version='python' only (got "
+            +repr(self.itensor_version)+"); it used to be silently ignored "
+            "here.")
+    return n_scale
+
+
+def check_kpm_call(self,kernel="jackson",es=None,hodc_order=6,hodc_eta=None,
+        **kwargs):
+    """check_kpm_arguments() for a call to get_dynamical_correlator above:
+    strips the reconstruction's own keywords first."""
+    return check_kpm_arguments(self,**kwargs)
 
 
 def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
@@ -109,25 +161,16 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
     calibration by about 2/n. Split out of get_dynamical_correlator() so
     a caller can reconstruct the same moments with several kernels
     without repeating the DMRG work, which is all of the cost."""
-    if kwargs:
-        # a bare **kwargs used to absorb and discard everything unknown --
-        # deconvolve=, n=, even maxm=/nsweeps= (which look like they would
-        # change the calculation and did not), all silently. CVM and
-        # CVM_explicit have always raised here; so does KPM now.
-        raise TypeError(
-            "Unexpected keyword argument(s) for the KPM dynamical "
-            "correlator: "+", ".join(sorted(kwargs))
-            +". Solver parameters are attributes of the chain "
-            "(self.maxm, self.nsweeps, self.kpmmaxm, ...), not call "
-            "arguments.")
-    if delta<0.0: raise ValueError("delta must be >= 0, got "+repr(delta))
-    # validated here, once, ahead of both session calls and of the ground
-    # state: the compiled bindings take an int and raised on any float,
-    # while "python" rounded it down through int(), so the same value
-    # meant two different things, or nothing, depending on the backend
-    n_scale = kpm.validate_kpm_n_scale(self.kpm_n_scale)
+    # ahead of both session calls and of the ground state, here for the
+    # direct callers (get_dynamical_correlator_moments, fermionchain.get_gr)
+    # and in dynamics.get_dynamical_correlator for the public route
+    n_scale = check_kpm_arguments(self,delta=delta,**kwargs)
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
-    self.get_gs() # compute ground state (also sets self.e0)
+    # the chain's current state on both sides and the Hamiltonian on the
+    # session, not a bare get_gs(): that is what makes a direct caller see
+    # a state set with set_gs() and a Hamiltonian changed under it
+    from .groundstate import ground_state_on_session
+    ground_state_on_session(self) # also sets self.e0
     # the documented string form ("ZZ"/"cdc"/... plus i=/j=) used to hit a
     # bare `raise` here -- i.e. the default submode was the one submode it
     # did not work with, and fermionchain.get_gr (name="cdc") could never
@@ -139,16 +182,6 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    if self.kpm_energy_truncate and self.itensor_version not in (3,"python"):
-        # only v3 (native method) and "python" (setter + internal branch)
-        # implement Holzner-style energy truncation; on itensor_version=2
-        # the flag used to be accepted and then quietly do nothing, so the
-        # run looked like a truncated one and was not
-        raise NotImplementedError(
-            "kpm_energy_truncate is implemented for itensor_version=3 and "
-            "itensor_version='python' only (got "
-            +repr(self.itensor_version)+"); it used to be silently ignored "
-            "here.")
     if self.kpm_energy_truncate and self.itensor_version==3:
         # v3's own independent method (see _sync_kpm_energy_truncation's
         # docstring) -- not the setter+branch pattern used for "python".
@@ -184,10 +217,15 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
 
 
 def dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
-        kernel="jackson",delta=None,hodc_order=6,hodc_eta=None):
+        kernel="jackson",delta=None,hodc_order=6,hodc_eta=None,origin=None):
     """Reconstruct a dynamical correlator on the energy grid es from the
     output of dynamical_correlator_moments(). See get_dynamical_
-    correlator() for the meaning of kernel/hodc_order/hodc_eta."""
+    correlator() for the meaning of kernel/hodc_order/hodc_eta.
+
+    origin is the energy frequencies are measured from, the measured
+    state's own energy; None means emin, the lower band edge, which is the
+    same number whenever that state is the solved ground state."""
+    if origin is None: origin = emin
     xs = 0.99*np.linspace(-1.0,1.0,int(n*10),endpoint=False) # energies
     if kernel=="hodc":
         # hodc_eta is quoted in physical energy units, like delta and es;
@@ -201,7 +239,7 @@ def dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
     ys = generate_profile(mus,xs,use_fortran=False,kernel=kernel,
             hodc_order=hodc_order,hodc_eta=hodc_eta) # generate the DOS
     xs = xs/scale # scale back the energies
-    xs = xs + (emin+emax)/2. -emin # shift the energies
+    xs = xs + (emin+emax)/2. -origin # shift the energies
     ys = ys*scale # renormalize the y values
     from scipy.interpolate import interp1d
     fr = interp1d(xs, ys.real,fill_value=0.0,bounds_error=False)

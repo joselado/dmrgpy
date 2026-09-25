@@ -248,10 +248,9 @@ class Spin_Chain(Many_Body_Chain):
               the ground-state density matrix, so this is exactly
               mode="ED"'s average whichever orthonormal basis of the
               manifold DMRG returns. The members are taken to be
-              degenerate with the ground state (KPM measures every
-              member's transitions from the solved ground-state energy,
-              the other submodes from the member's own, and the two
-              coincide only within the split), so n_gs is the caller's
+              degenerate with the ground state (every submode measures a
+              member's transitions from the member's own energy), so
+              n_gs is the caller's
               statement of the degeneracy, the same contract as
               `dex` in the ED dynamical correlator: a warning is issued
               when a member lies more than `delta` away from the
@@ -446,7 +445,8 @@ class Spin_Chain(Many_Body_Chain):
         # last member's energy (finding 14).
         snapshot = (self.wf0, self.e0, self.computed_gs,
                     getattr(self, "_gs_solver_key", None),
-                    getattr(self, "_gs_injected", None))
+                    getattr(self, "_gs_injected", None),
+                    getattr(self, "_gs_supplied", False))
         total = 0.
         try:
             for wf in members:
@@ -454,7 +454,7 @@ class Spin_Chain(Many_Body_Chain):
                 total = total + terms()
         finally:
             (self.wf0, self.e0, self.computed_gs, self._gs_solver_key,
-             self._gs_injected) = snapshot
+             self._gs_injected, self._gs_supplied) = snapshot
             session.set_wavefunction(groundstate.detached_copy(gs0).cpp_handle)
         return eV, total/len(members)
 

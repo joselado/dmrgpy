@@ -68,7 +68,7 @@ def evolution_ABA(self,h=None,A=None,B=None,**kwargs):
 
 
 
-def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,wf0=None,**kwargs):
+def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,wf0=None,e0=None,**kwargs):
     """Special time evolution for the dynamical correlator.
 
     The operator convention is the DMRG backends' one (see
@@ -98,7 +98,11 @@ def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,wf0=None,**kwargs):
     (2026-09-24 audit, finding 8). On a non-degenerate ground state the
     two constructions agree to ~1e-11. Note the sign of the shift below:
     that eigsh ran on -H, so its eigenvalue was -E_0 and the line read
-    H + e0*I; with the cached +E_0 it is H - e0*I."""
+    H + e0*I; with the cached +E_0 it is H - e0*I.
+
+    e0= overrides the origin with the measured state's own energy, which
+    edtk/dynamics.py passes after a set_gs() (2026-09-24c audit, finding
+    1); left None it is the cached ground-state energy."""
     (A,B) = name[1],name[0] # get the operators, bra first
     Hop = self.get_operator(h) # return Hamiltonian
     Aop = self.get_operator(A) # return operator
@@ -108,7 +112,7 @@ def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,wf0=None,**kwargs):
     if wf0 is None: wf0 = gs
     elif type(wf0)==State: wf0 = wf0.v # get the vector
     wf0 = np.asarray(wf0).reshape(-1)
-    e0 = self.e0 # +E_0, the ground-state energy
+    if e0 is None: e0 = self.e0 # +E_0, the ground-state energy
     wf = wf0.copy() # copy wavefunction
     wf = Aop@wf # apply operator
     wfc = np.conjugate(wf0) # conjugate wavefunction

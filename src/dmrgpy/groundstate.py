@@ -44,8 +44,10 @@ def solver_key(self):
     """The solver parameters a stored ground state was computed under.
 
     Same fields as gs_energy_single()'s own send-cache key, minus the
-    Hamiltonian itself (changing that goes through set_hamiltonian(),
-    which resets computed_gs outright). Used by gs_is_current() below to
+    Hamiltonian itself: changing that goes through set_hamiltonian(),
+    which resets computed_gs outright, restart=False included (it used to
+    keep computed_gs, so every read but the public correlator answered for
+    the old Hamiltonian, 2026-09-24c audit, finding 5). Used by gs_is_current() below to
     decide whether a cached self.e0/self.wf0 still answers the question
     being asked."""
     return (self.maxm,self.nsweeps,self.cutoff,self.noise,
@@ -90,7 +92,7 @@ def gs_is_current(self):
     return key==solver_key(self)
 
 
-def mark_injected(self,wf,reconverge=False):
+def mark_injected(self,wf,reconverge=False,supplied=True):
     """Store `wf` (a copy of it) as this chain's state, marked as injected
     by the caller rather than produced by a solve.
 
@@ -110,12 +112,18 @@ def mark_injected(self,wf,reconverge=False):
     backend that fell back to ED) there is nothing to hand the state to,
     and the old behaviour stands: set_gs() stores it as current and
     set_initial_wf() leaves the next solve to that backend. Returns
-    whether the state was marked."""
+    whether the state was marked.
+
+    supplied=False is for the library's own re-marks of a state it
+    computed (promote_to_dense): the state is taken unswept like any
+    other, but does not count as the caller's, which is what
+    submode="SECTOR" asks (see state_supplied())."""
     self.wf0 = wf.copy()
     if getattr(self,"_session",None) is None:
         self._gs_injected = None
         return False
-    self._gs_injected = ("reconverge" if reconverge else "skip",self.wf0)
+    self._gs_injected = ("reconverge" if reconverge else "skip",self.wf0,
+                         bool(supplied))
     self.computed_gs = False
     self._gs_solver_key = None
     return True
@@ -128,6 +136,19 @@ def pending_injection(self):
     mark = getattr(self,"_gs_injected",None)
     if mark is None or mark[1] is not self.wf0: return None
     return mark[0]
+
+
+def state_supplied(self):
+    """True when the chain's current state was set by the caller (set_gs(),
+    set_initial_wf(), gs_energy(wf0=x, reconverge=False)) rather than
+    solved, pending or already taken; retired by the next solve, by
+    restart() and by set_hamiltonian(). submode="SECTOR", which measures
+    the reference sector's own ground state, reads it to refuse a state it
+    cannot see (2026-09-24c audit, finding 8)."""
+    mark = getattr(self,"_gs_injected",None)
+    if pending_injection(self) is not None:
+        return mark[2] if len(mark)>2 else True
+    return bool(getattr(self,"_gs_supplied",False))
 
 
 def detached_copy(wf):
@@ -161,7 +182,7 @@ def _session_parameters(self):
                                     self.bond_ramp_noise_decay)
 
 
-def _take_injected_state(self,wf):
+def _take_injected_state(self,wf,supplied=True):
     """Make `wf` this chain's ground state, unswept, on both sides.
 
     The session gets a detached copy with set_wavefunction(), and e0 is
@@ -171,37 +192,31 @@ def _take_injected_state(self,wf):
     gs_energy(skip_dmrg=True) would then run a sweep from the injected
     state, which is finding 13 of the 2026-09-24b hole hunt.
 
-    The same drop leaves one more sweep in the session, and this is the
-    reason for the excited_states(1) call below: the band edges KPM
-    rescales with (and the excited-state search sets its penalty weight
-    from) are cached lazily, and the lower one is filled by
-    gs_energy(skip_dmrg=True), so the first KPM call after a push would
-    sweep the pushed state in place, whatever the Python side does. No
-    backend exposes its band edges, and excited_states(1) is the one
-    call on all three that fills both of them before the push, from the
-    session's own state, and returns without keeping anything else. It
-    costs nothing when the edges are cached already, the reduced -H
-    solve KPM pays anyway when only the upper one is missing, and a
-    solve of the session's own state when the session holds no energy
-    for it, e.g. on a chain that was never solved, or after the
-    Hamiltonian was re-sent. Without it the first KPM call after
-    set_gs(x), x not an eigenstate, left the session on a state with
-    |<x|session>|^2 = 0.989 on "python" and 0.987 on v3, on a 3-site
-    Heisenberg chain. The edges come out as the Hamiltonian's, from a
-    solve, not as the injected state's energy; for a member of a
-    degenerate ground manifold the two coincide."""
+    The same drop used to leave one more sweep in the session: the lower
+    band edge KPM rescales with (and the excited-state search sets its
+    penalty weight from) was filled lazily by gs_energy(skip_dmrg=True),
+    so the first KPM call after a push swept the pushed state in place
+    (|<x|session>|^2 = 0.989 on "python", 0.987 on v3, for x not an
+    eigenstate). 867e2b4 pre-filled both edges with excited_states(1)
+    before every push, which cost an upper-edge -H solve and an energy
+    fluctuation it threw away on the first read after an injection, 7.1 s
+    on a 24-site "python" chain for a 0.04 s <x|H|x> (2026-09-24c audit,
+    finding 9). Each session's minimum_energy() now solves from a fresh
+    start when the state it holds has no energy, and puts the state back,
+    so nothing needs filling here and the edges are paid by the first
+    call that reads them. The edges are the Hamiltonian's, from a solve,
+    not the injected state's energy; for a member of a degenerate ground
+    manifold the two coincide."""
     _session_parameters(self)
     send_hamiltonian(self) # precondition: H on the session
     hermitian = self.is_hermitian(self.hamiltonian)
-    # the band edges are a Hermitian-solver notion; the non-Hermitian
-    # routes (NH-KPM, NH-DMRG) do not read them
-    if hermitian: self._session.excited_states(1,1.0,False) # see above
     self._session.set_wavefunction(detached_copy(wf).cpp_handle)
     e = self.aMb(wf,self.hamiltonian,wf)/self.overlap(wf,wf)
     if hermitian: e = float(np.real(e))
     self.e0 = e
     self.wf0 = wf
     self._gs_injected = None
+    self._gs_supplied = supplied
     self.computed_gs = True
     self.sites_from_file = True
     self.gs_from_file = True
@@ -323,14 +338,17 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
       under the current Hamiltonian and parameters (skip_dmrg_gs, which
       reconverge=True overrides), a sweep from it when it does not.
     """
+    supplied = True
     if wf0 is not None:
         mode = "skip" if reconverge is False else "reconverge"
         start = wf0.copy()
     else:
         mode = pending_injection(self)
         start = self.wf0
+        if mode is not None and len(self._gs_injected)>2:
+            supplied = self._gs_injected[2]
     if mode=="skip":
-        out = _take_injected_state(self,start)
+        out = _take_injected_state(self,start,supplied=supplied)
     else:
         _session_parameters(self)
         # Only re-send the Hamiltonian when it (or the MPO bond dimension it
@@ -372,12 +390,15 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
         # not injected (mark_injected() is for the public setters only)
         self.wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
         self._gs_injected = None
+        self._gs_supplied = False
     self.computed_gs = True # ground state has been computed
     self._gs_solver_key = solver_key(self) # ...under these parameters
     if maxde is not None: # enforce a maximum fluctuation in the energy
-      e = self.vev(self.hamiltonian)
-      e2 = self.vev(self.hamiltonian,npow=2)
-      de = np.sqrt(abs(e2-e**2)) # fluctuation in the energy
+      # the variance of the state itself, not of its truncation to maxm
+      # (2026-09-24c audit, finding 7), and per site: maxde is a
+      # fluctuation per site, while gs_energy_fluctuation() is the total
+      from . import vev as _vev
+      de = np.sqrt(abs(_vev.energy_variance(self,self.hamiltonian,wf=self.wf0)))
       de = de/self.ns # normalize by the number of sites
       if de>maxde and maxdepth>0: # if a maximum energy fluctuation
           maxm,nsweeps = self.maxm,self.nsweeps
@@ -395,12 +416,23 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
           self.bond_ramp = False
           gs_energy_single(self,maxde=maxde,reconverge=True,
                   maxdepth=maxdepth-1) # execute again
+          mpo_cap = max(self.maxm,self.mpomaxm) # what the refined solve built H with
           self.maxm = maxm
           self.nsweeps = nsweeps # restore
           self.noise = noise
           self.bond_ramp = ramp
           self.computed_gs = True # ground state has been computed
           self._gs_solver_key = solver_key(self) # ...under these parameters
+          # The session holds the refined state and its energy, and H built
+          # at the same MPO cap, so record it as sent under the restored
+          # parameters: left keyed on the doubled maxm, the next correlator
+          # saw a Hamiltonian that was not on the session and re-solved at
+          # the original maxm, discarding the refinement (2026-09-24c audit,
+          # finding 6). Re-sending instead would drop the session's energy
+          # cache and sweep the refined state at the original maxm anyway.
+          if mpo_cap==max(self.maxm,self.mpomaxm):
+              self._session_ham_cache = (self._session,_send_key(self)[0])
+          out = self.e0 # the refined energy, the one left on the chain
     return out # return energy
 
 
@@ -590,6 +622,7 @@ def gs_energy_generalized(self,A,lam0=None):
     # re-ran an ordinary ground-state solve over the generalized state.
     self.wf0 = mps.MPS(MBO=self,cpp_handle=self._session.gs_wavefunction()).copy()
     self._gs_injected = None
+    self._gs_supplied = False
     self.computed_gs = True
     self._gs_solver_key = solver_key(self) # see gs_is_current
     return lam
@@ -635,4 +668,8 @@ def set_gs(MBO,wf):
         MBO.get_ED_obj() # generate the ED object
         MBO.ED_obj.computed_gs = True # comptued GS
         MBO.ED_obj.wf0 = wf.v.copy() # copy the array
+        # every ED submode measures this state from its own energy, and
+        # submode="ED" reads it rather than the dex manifold (2026-09-24c
+        # audit, findings 1 and 2); the next ED solve retires the mark
+        MBO.ED_obj._injected_state = True
 

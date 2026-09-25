@@ -199,8 +199,16 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         # solved chain, the hand-off of a state set_gs()/set_initial_wf()
         # injected, a solve otherwise (groundstate.ground_state_on_session)
         from .groundstate import ground_state_on_session
-        ground_state_on_session(self)
-        if not self.is_hermitian(self.hamiltonian): # non Hermitian Hamiltonian
+        hermitian = self.is_hermitian(self.hamiltonian)
+        # The KPM route's own argument checks go ahead of the ground state,
+        # and SECTOR, which solves both its sectors on a clone and never
+        # reads the caller's state, makes no solve here at all: with the
+        # solve first, a malformed KPM call paid a full ground-state solve
+        # before raising, and the first SECTOR call one it never read
+        # (2026-09-24c audit, finding 11).
+        if submode=="KPM" and hermitian: kpmdmrg.check_kpm_call(self,**kwargs)
+        if submode!="SECTOR": ground_state_on_session(self)
+        if not hermitian: # non Hermitian Hamiltonian
             # Per-submode, not wholesale. This check used to run before the
             # dispatch below and return the explicit resolvent for
             # *everything* except "KPM", so on a non-Hermitian Hamiltonian
