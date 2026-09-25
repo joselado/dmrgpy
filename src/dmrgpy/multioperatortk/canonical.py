@@ -201,21 +201,33 @@ def canonical_dict(MO):
     """Return {signature: coefficient} for a MultiOperator, with terms
     of equal signature summed and near-zero coefficients dropped.
 
-    "Near-zero" is multioperator.clean_threshold, 1e-8 in absolute
-    value, which is the one place this path is less strict than the
-    sympy one it replaced: a term surviving at 1e-9 is treated as
-    absent, so an operator whose anti-Hermitian part is that small is
-    proven Hermitian here. Nothing downstream can see the difference --
-    every consumption point (write(), to_terms(), MO2matrix) already
-    drops the same terms through _filter_small, and the probe that
-    mpsalgebra.is_hermitian falls back to thresholds its witness norm at
-    1e-4, four orders looser."""
+    "Near-zero" is relative to what went INTO each sum, not to what came
+    out of it: a summed coefficient is dropped when it is at or below
+    multioperator.clean_threshold (1e-12) times the larger of
+      (a) the largest |coefficient| among MO's own terms, and
+      (b) the sum of the |coefficients| collected into that signature.
+    Taking the scale from the sums instead would keep everything in the
+    one case this exists for, H - H^dagger of a Hermitian H, whose sums
+    are exact zeros or rounding dust with nothing larger left to compare
+    against. (b) is what that dust scales with: 2000 copies of one term
+    minus their adjoints leave 2.1e-12 of the largest coefficient, above
+    (a) alone, but 1.1e-15 of their own sum. (a) is the floor
+    _filter_small applies at every consumption point (write(),
+    to_terms(), MO2matrix), so a term every backend drops cannot keep an
+    operator from being proven zero. Both are scale-free, so the answer
+    does not depend on the units the operator is written in; the absolute
+    1e-8 this replaced proved 1e-9*(Sz0+1j*Sx0) Hermitian and 1e-9*Sz0
+    zero (2026-09-25 audit, clean-threshold)."""
+    cmax = max([abs(t[0]) for t in MO.op]+[0.])
     out = dict()
+    weight = dict()
     for term in MO.op:
         sig, c = _canonical_signature(term)
         out[sig] = out.get(sig, 0.0) + c
+        weight[sig] = weight.get(sig, 0.0) + abs(c)
+    tol = multioperator.clean_threshold
     return dict([(sig, c) for (sig, c) in out.items()
-                 if abs(c) > multioperator.clean_threshold])
+                 if abs(c) > tol*max(cmax, weight[sig])])
 
 
 def canonicalize(MO):

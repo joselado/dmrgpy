@@ -172,6 +172,12 @@ for that statistics:
 | `parafermionchain.py` | `Parafermion_Chain` | parafermion sites |
 | `mixedchain.py` | `Mixed_Spin_Fermion_Chain` | mixes spin sites and spinful-fermion locations in one chain |
 
+Every model constructor forwards its keywords to `Many_Body_Chain.__init__`,
+where a keyword naming a chain setting is assigned after the session is
+built, as if assigned after construction, and anything else, including the
+operator lists the model class built before calling it, raises `TypeError`
+(`sites.check_settings`).
+
 All of the above build `self.sites`, the list of per-site type codes
 passed to `Many_Body_Chain.__init__`, from a **uniform** repetition of a
 single type code (e.g. `[0]*n` for `Fermionic_Chain`). Nothing in
@@ -2558,6 +2564,26 @@ $10^{-6}$ on the largest entry, and disagreed with each other), and an ED
 operator's matrix, which is what `disentangle_manifold` asks of it (finding
 18).
 
+The canonical form's own near-zero test is relative since the 2026-09-25
+pass: a summed coefficient is dropped at or below $10^{-12}$ times the larger
+of $\max|c|$ and the sum of the $|c|$ collected into that signature, the
+second being what the rounding dust of a long accumulation scales with
+(2000 copies of one term minus their adjoints leave $2.1\times10^{-12}$ of
+$\max|c|$ but $1.1\times10^{-15}$ of their own sum), and taking the scale
+from the sums themselves would keep everything in $H-H^\dagger$ of a
+Hermitian $H$. `multioperator._filter_small`, which every consumption point
+(`write()`, `to_terms()`, `MO2matrix`) goes through, drops a term at or
+below $10^{-12}$ of the largest coefficient of its own list, so exact zeros
+such as the `0*identity()` placeholder always go. So the division by
+$\max|c|$ is needed only by the probe, whose $10^{-20}$ is absolute. An
+anti-Hermitian part between about $10^{-10}$ and $10^{-8}$ of the largest
+coefficient, which the absolute $10^{-8}$ used to drop inside the proof, now
+reaches the probe and is called non-Hermitian, so `gs_energy()` sends such a
+Hamiltonian to NH-DMRG (the first-order decay rate $g\langle S^z_0\rangle$
+comes out on every backend, where it was exactly 0); between $10^{-12}$ and
+about $10^{-10}$ the proof says not proven and the probe still says
+Hermitian.
+
 Only the operator names dmrgpy itself builds are canonicalized, listed
 in `canonical.py`'s `_PARITY` table together with their grading. A term
 naming anything else, a parafermionic `Sig`/`Tau`, which reorders with a
@@ -2825,6 +2851,45 @@ the push drops) is never swept by it. `867e2b4` had the Python side pre-fill
 both band edges with `excited_states(1)` before every push instead, which
 cost an upper-edge solve and an energy fluctuation on the first read after
 an injection (finding 9).
+
+**Unit scale for ITensor's absolute thresholds** (`mo_terms.h`'s
+`unit_scale_up()`/`to_mpo_unit()`, `Chain::hscale_up_`/
+`solver_hamiltonian()`, both backends). Three numbers inside ITensor are
+absolute: svdMPO's `truncate()` compares the discarded squared singular
+values against its `Cutoff`, $10^{-13}$ by default and read from Args,
+without dividing by the operator's own scale; svdMPO skips a coefficient
+below a hardcoded $10^{-14}$; and `davidson()` replaces a Krylov direction
+whose residual is below a hardcoded $10^{-10}$ by a random vector. On a
+6-site Heisenberg chain written as $sH$ the first removes the exchange
+channels at $s\le6.3\times10^{-7}$ and $4.5\times10^{-7}$ on v3 (one
+realified channel, then both) and below $3.2\times10^{-7}$ and
+$2.2\times10^{-7}$ on v2, predicted and measured to the digit by
+`vev(s*X)/s` on a fixed state with no eigensolver running, which is the Néel
+$-1.25$; the third costs digits continuously from about $10^{-6}$ down even
+on an exactly scaled MPO. `to_mpo_unit()` hands `toMPO` the AutoMPO
+multiplied by the power of two that brings its largest coefficient into
+$[1,2)$ and multiplies the MPO back by $2^{-k}$; `build_mpo()`, the
+evolution Hamiltonians with their appended $-E_{GS}\,\mathrm{Id}$, the KPM
+band-centre shift and CVM's $z\,\mathrm{Id}$ go through it. Every `dmrg()`
+on the Hamiltonian (`gs_energy`, `excited_states` with its overlap weight
+scaled too, v3's `gs_energy_generalized`, `maximum_energy`) solves on
+`hscale_up_*H` and divides the energy back. A power of two makes the
+scaling and the scale-back exact, since ITensor's MPO `operator*=(Real)`
+multiplies the stored elements of one tensor. The gate is a largest
+coefficient of 1: at or above it `unit_scale_up()` returns 1.0 and the term
+MPO and the solver run the unscaled code, byte for byte, while below it
+(every $J=0.5$ model, and the XX chain at $J=1$, whose coefficients are 0.5
+once v3 realifies it) the answers move only within the run-to-run noise of
+the random start. `set_hamiltonian_mpo` resets `hscale_up_` to 1, since an
+already-built MPO carries no scale the session can read. The scale is one
+number per operator while `truncate()` runs bond by bond, so a bond whose
+strongest crossing term is far below the largest coefficient still meets
+the absolute cutoff: an $O(1)$ offset or field next to exchange at
+$10^{-7}$, or a weak link $J'=10^{-7}$ in a $J=1$ chain, keeps a third of
+its exchange at any units, and `"python"` drops such a bond altogether
+through the relative return-sweep cutoff of `pyitensor/mpobuilder.py`; a
+per-bond cutoff is the cure, recorded as open with strict xfails in
+`tests/test_audit_2026_09_25_scale.py` (2026-09-25 record, small-units).
 
 **The ground-state sweep schedule is ramped, not flat**
 (`Chain::make_sweeps_ramped()` in both `chain_session.h`s,
@@ -5346,7 +5411,24 @@ as a class, because new code can reintroduce any of them.
   it to the session (`groundstate.mark_injected`; before the 2026-09-24
   second-pass audit it was "returned unconditionally" on the Python side
   only, and every DMRG correlator measured the session's own solved
-  state instead, findings 11 and 12).
+  state instead, findings 11 and 12). `get_gs()` kept a copy of the short
+  circuit ahead of `wf0=` after `867e2b4` fixed `gs_energy()`'s, so a solved
+  chain ignored `get_gs(wf0=x)`; both now test the same condition, and a
+  keyword that should bypass one must bypass the other (2026-09-25,
+  get-gs-wf0). `julia_live`, which has no session, marks an injected state
+  the same way and takes it in `groundstate._gs_energy_julia()`, whose
+  `get_gs_dmrg()` always solves and clears the stale Link prime level of a
+  supplied start; it still records no solver key, so on that backend a
+  `maxm` ramp on one chain returns the first energy every time (-3.194321
+  at `maxm` = 2, 4 and 16 on an 8-site Heisenberg chain, against
+  `"python"`'s -3.186822, -3.371801, -3.374933), recorded as open. The two
+  non-Hermitian entry points, `nhdmrg.gs_energy_nhdmrg()` and
+  `gs_energy_generalized_nhdmrg()`, record H as sent
+  (`_record_hamiltonian_sent()`), as the Hermitian `gs_energy_generalized()`
+  now does through `send_hamiltonian()`: before, `ground_state_on_session()`
+  found H missing at the first correlator and re-solved over the solve's
+  state, a second solve after a plain one and a lost state after a
+  generalized one (2026-09-25, generalized-cache).
 
 - **A precondition tested ahead of the dispatch it should qualify.**
   `dynamics.get_dynamical_correlator()` tested Hermiticity *before*
@@ -5412,6 +5494,18 @@ four are patterns this list did not have.
   diagnostic against the exact solver silently did not. The kwargs now
   reach both `vev` calls, and `npow=` is rejected by name (the method
   defines the power itself).
+
+- **A third `**kwargs` with no consumer.** `Many_Body_Chain.__init__
+  (**kwargs)` handed every keyword to `initialize()`, which reads none, so
+  every model constructor dropped its settings and `Spin_Chain(sites,
+  maxm=50)` ran at `maxm=30`. Keywords are now checked by
+  `sites.check_settings()` before any session is built and assigned after
+  `initialize()`, all of them, `mode` included, so that a constructor keyword
+  is exactly an assignment made afterwards. Applying `mode` first was tried
+  and is the wrong shape: a chain built at `mode="ED"` then had no session
+  to go back to. `rootndmrg.dynamical_correlator` had the same `**kwargs`,
+  which swallowed `i=`/`j=` of a string name on the lower-level route and a
+  misspelled `nkry` (2026-09-25, init-kwargs and rootn-ij).
 
 - **A second instance of "resolution done in the branches", this time
   via an override.** `Parafermionic_Chain` carried its own

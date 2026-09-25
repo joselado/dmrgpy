@@ -12,6 +12,9 @@ class MPS():
     def __init__(self,jlmps,MBO=None):
         self.MBO = light_MBO(MBO) # clean and store
         self.jlmps = jlmps
+        # as mps.MPS: set_gs() dispatches on it, and raised AttributeError
+        # on every julia_live state without it
+        self.mode = "DMRG"
     def set_MBO(self,MBO):
         """Set the MBO"""
         self.MBO = MBO # set the object

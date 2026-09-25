@@ -326,8 +326,10 @@ def is_hermitian(self,op):
         # anti-Hermitian part below about 1e-2 Hermitian: a whole operator
         # written in small units, or an O(1) Hamiltonian with a weak loss
         # term, whose decay rate Hermitian DMRG then dropped (2026-09-24c
-        # audit, finding 12). Rescaling before canonical.py's
-        # clean_threshold also makes the proof itself scale-free.
+        # audit, finding 12). The symbolic proof no longer needs the
+        # rescaling, since canonical.py's near-zero test is relative to the
+        # operator's own coefficients (2026-09-25 audit, clean-threshold);
+        # the witness tolerance below is absolute and still does.
         cmax = max([abs(t[0]) for t in op.op]+[0.])
         if cmax==0.: return True # the zero operator
         op = op*(1./cmax)

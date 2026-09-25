@@ -8,12 +8,24 @@ from . import multioperator
 _COMPONENTS = ("Sx","Sy","Sz")
 _COMPONENT_INDEX = {n:k for k,n in enumerate(_COMPONENTS)}
 
-# Coefficient magnitude below which a decomposed term is treated as absent.
-# Same spirit as multioperator.clean_threshold, and applied for the same
-# reason: a Hamiltonian written as a sum of SS(i,j) products carries exact
-# zeros for the components that cancel, and rebuilding those as operator
-# terms would triple the size of the mean-field Hamiltonian for nothing.
+# Coefficient magnitude, relative to the largest coefficient of the
+# Hamiltonian being decoupled, below which a decomposed term is treated as
+# absent. Same spirit as multioperator.clean_threshold, and applied for the
+# same reason: a Hamiltonian written as a sum of SS(i,j) products carries
+# exact zeros for the components that cancel, and rebuilding those as
+# operator terms would triple the size of the mean-field Hamiltonian for
+# nothing. Relative for the same reason too: as an absolute 1e-10 it
+# emptied the mean-field Hamiltonian of any model written below that scale
+# (2026-09-25 audit, clean-threshold). p, the fraction of exchange kept, is
+# dimensionless and is compared against _tol itself.
 _tol = 1e-10
+
+
+def _scale(*coefficients):
+    """The largest magnitude among the given coefficient arrays, lists
+    and numbers: what _tol is relative to."""
+    return max([float(np.max(np.abs(np.asarray(c)))) if np.size(c) else 0.
+                for c in coefficients]+[0.])
 
 
 def decompose_spin_hamiltonian(sc):
@@ -105,6 +117,7 @@ def _mean_field_hamiltonian(sc,bonds,b,const,hmf,p):
     drops out and this is pure mean-field theory.
     """
     Si = [sc.Sx,sc.Sy,sc.Sz]
+    tol = _tol*_scale(b,hmf,const,[g for (i,j,a,bb,g) in bonds])
     h = 0
     if abs(p)>_tol: # many-body exchange, kept at strength p
         for (i,j,a,bb,g) in bonds: h = h + p*g*Si[a][i]*Si[bb][j]
@@ -112,10 +125,10 @@ def _mean_field_hamiltonian(sc,bonds,b,const,hmf,p):
     for i in range(ns): # the model's own fields, plus the Weiss field
         for a in range(3):
             c = b[i,a] + (1.-p)*hmf[i,a]
-            if abs(c)>_tol: h = h + c*Si[a][i]
-    if abs(const)>_tol: h = h + const*sc.Id # constant energy offset
+            if abs(c)>tol: h = h + c*Si[a][i]
+    if abs(const)>tol: h = h + const*sc.Id # constant energy offset
     if not isinstance(h,multioperator.MultiOperator):
-        # h is still the integer 0: every coefficient fell below _tol, so
+        # h is still the integer 0: every coefficient fell below tol, so
         # there is nothing to solve and set_hamiltonian would be handed a
         # bare int.
         raise ValueError("meanfield: the mean-field Hamiltonian is empty "
@@ -146,10 +159,11 @@ def spinchain_meanfield(sc,p=0.0,mix=0.9,m0=None,maxerror=1e-06,
     # The exchange never changes across iterations, so flatten it to the
     # nonzero entries once instead of walking a mostly-empty ns^2 x 9
     # array per iteration.
+    tol = _tol*_scale(b,J,const)
     bonds = [(i,j,a,bb,J[i,j,a,bb])
              for i in range(sc0.ns) for j in range(sc0.ns)
              for a in range(3) for bb in range(3)
-             if abs(J[i,j,a,bb])>_tol]
+             if abs(J[i,j,a,bb])>tol]
     if m0 is None:
         mold = np.array([np.random.random(3) for i in range(sc0.ns)])
     else: mold = np.array(m0)

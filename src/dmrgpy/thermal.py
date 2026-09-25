@@ -5,10 +5,16 @@ from .spinchain import Spin_Chain
 from . import multioperator
 
 class Thermal_Spin_Chain():
-    def __init__(self,sites,T=0.1,**kwargs):
+    def __init__(self,sites,T=0.1,mode="DMRG",**kwargs):
         if T<0.: # a negative temperature used to be silently treated as T=0
             raise ValueError("Thermal_Spin_Chain: T must be >= 0, got "
                              +repr(T))
+        # mode is the wrapper's own, and get_gs() writes it onto MBChain;
+        # that used to be a hardcoded "DMRG", which overwrote a forwarded
+        # mode="ED" so that Thermal_Spin_Chain(...,mode="ED") ran DMRG
+        if mode is not None: # None leaves the chain on its default, as on any chain
+            from .mode import _check_mode
+            _check_mode(mode,"Thermal_Spin_Chain mode (mode=)")
         sitesT = []
         for s in sites: 
             sitesT += [s]
@@ -17,7 +23,7 @@ class Thermal_Spin_Chain():
         # **kwargs was accepted and then dropped on the floor here, so
         # Thermal_Spin_Chain(...,itensor_version="python") silently built
         # the default (compiled) backend instead
-        self.MBChain = Spin_Chain(sitesT,**kwargs) # get the chain
+        self.MBChain = Spin_Chain(sitesT,mode=mode,**kwargs) # get the chain
         self.computed_gs = False
         self.T = T # temperature
         Sx = [self.MBChain.Sx[2*i] for i in range(n)] 
@@ -30,7 +36,7 @@ class Thermal_Spin_Chain():
         self.Sy = Sy
         self.Sz = Sz
         self.wf0 = None
-        self.mode = "DMRG"
+        self.mode = mode
     def get_gs(self):
         """Compute the ground state"""
         if self.computed_gs: 
@@ -48,18 +54,31 @@ class Thermal_Spin_Chain():
                 self.MBChain.set_hamiltonian(h) # singlet Hamiltonian
                 wf = self.MBChain.get_gs() # get the fully entangled WF
                 wf0 = anneal(self.MBChain,self.hamiltonian,wf,self.T)
+                wf0 = wf0.normalize()
+                # Through the public setters, so MBChain holds the
+                # physical Hamiltonian and the annealed state as a state
+                # set by hand: the next read takes it unswept, and every
+                # correlator measures it. Assigning MBChain.wf0 and
+                # MBChain.hamiltonian directly left the singlet
+                # Hamiltonian on the session and in the send-cache (and,
+                # on mode="ED", the singlet ED object), so gs_energy()
+                # returned the singlet energy (-2.25 against <wf|H|wf> =
+                # -0.4164 on a 3-site chain at T=1), a correlator re-solved
+                # over the annealed state and vev() on ED read the singlet
+                # state (<Sz0 Sz1> -0.1667 and 0.0 against -0.0694)
+                self.MBChain.set_hamiltonian(self.hamiltonian)
+                self.MBChain.set_gs(wf0)
             else: # T<=1e-5: plain ground state. `else`, not another elif:
                 # the two branches used to leave T exactly 1e-5 (and, before
                 # the check in __init__, any negative T) falling through
                 # both, so wf0 was never assigned and the next line raised
-                # UnboundLocalError
+                # UnboundLocalError. MBChain's own solved state is this
+                # one already, so nothing is written back to it
                 self.MBChain.set_hamiltonian(self.hamiltonian)
                 wf0 = self.MBChain.get_gs() # get the fully entangled WF
-            wf0 = wf0.normalize()
+                wf0 = wf0.normalize()
             self.computed_gs = True
             self.wf0 = wf0 # store
-            self.MBChain.wf0 = wf0 # overwrite in the full object
-            self.MBChain.hamiltonian = self.hamiltonian # overwrite
             return wf0
     def set_hamiltonian(self,h):
         self.hamiltonian = (h + h.get_dagger())/2.

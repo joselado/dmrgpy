@@ -24,7 +24,10 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
     pair from nhdmrg(). E_max (a real upper bound for the spectral radius
     of H) must be supplied by the user - there is no automatic estimator
     yet for non-Hermitian operators (see maximum_energy() in
-    chain_session.h, which only works for Hermitian H)."""
+    chain_session.h, which only works for Hermitian H). A state set by
+    hand has no left partner, so after set_gs()/set_initial_wf()/
+    gs_energy(wf0=...) this raises rather than pairing it with the left
+    state of an earlier solve."""
     if name is None: raise ValueError("name=(A,B) must be provided")
     if E_max is None:
         raise ValueError("E_max (an upper bound for the spectral radius "
@@ -37,7 +40,21 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
     from .. import multioperator
     e0 = self.gs_energy() # routes to nhdmrg, sets self.wf0/self.nh_left_wf
     psir = self.wf0
-    psil = self.nh_left_wf
+    psil = getattr(self,"nh_left_wf",None)
+    if psil is None or getattr(self,"_nh_left_for",None) is not psir:
+        # A right state with no left state of its own: set_gs(),
+        # set_initial_wf() and gs_energy(wf0=x, reconverge=False) give only
+        # the right one, and a right state that is not an eigenstate has no
+        # biorthogonal partner at all. This used to pair x with the
+        # nh_left_wf of the last NH-DMRG solve, the left eigenvector of a
+        # different state, and renormalize by <psil|x> (0.93 on a 4-site
+        # chain), or raise AttributeError when there had been no solve.
+        raise RuntimeError("the non-Hermitian KPM correlator needs the "
+                "left eigenvector that pairs with the chain's right state, "
+                "and this chain has none: its state was set with set_gs(), "
+                "set_initial_wf() or gs_energy(wf0=...), which give a right "
+                "state only. Solve the biorthogonal pair with NH-DMRG "
+                "instead, restart() and then gs_energy()")
     # gs_energy_nhdmrg() renormalizes wf0=psir.normalize() to unit norm but
     # leaves nh_left_wf at nhdmrg()'s own <psil|psir>=1 scale, so the two
     # no longer satisfy <psil|psir>=1 together - restore that biorthogonal

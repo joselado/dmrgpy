@@ -36,6 +36,20 @@ def _max_energy_bound(self,H):
     return emax
 
 
+def _min_energy(self,H):
+    """H's lower band edge from a solve at the chain's own parameters, for
+    the Chebyshev window when the chain holds a state that is not a solve's
+    (set_gs(), set_initial_wf()). Runs in place on `self` like
+    _max_energy_bound() above, and leaves the same restore to the caller."""
+    self.restart()
+    self.set_hamiltonian(H,restart=False)
+    try:
+        return self.gs_energy()
+    finally:
+        self.restart()
+        self.set_hamiltonian(H,restart=False)
+
+
 def _same_mps(vi,vj,maxm,cutoff):
     from .juliasession import Main as Mainjl
     return bool(Mainjl.same_mps(vi,vj,maxm,cutoff))
@@ -152,9 +166,16 @@ def _kpm_dynamical_correlator(self,n=1000,
     H = self.hamiltonian
     e0 = self.gs_energy() # compute ground state (also sets self.e0/self.wf0)
     wf0 = self.wf0
-    emin = self.e0
+    # A state set with set_gs()/set_initial_wf() is measured from its own
+    # energy e0 = <x|H|x>, which is not the lower band edge, so the window
+    # takes that edge from a solve of its own, as the session backends do
+    # (2026-09-24c audit, finding 1); a solved state's e0 is the edge.
+    from ..groundstate import state_supplied
+    supplied = state_supplied(self)
+    emin = _min_energy(self,H) if supplied else e0
     emax = _max_energy_bound(self,H)
     self.wf0,self.e0,self.computed_gs = wf0,e0,True # restore GS cache
+    self._gs_supplied = supplied # restart() above cleared it
     shift = -(emin+emax)/2.0
     scale = 1.0/((emax-emin)*self.kpm_scale)
     # the shared calibrated moment count, see
@@ -189,4 +210,4 @@ def _kpm_dynamical_correlator(self,n=1000,
     # which is also what gives julia_live kernel="hodc" for free
     return dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
             kernel=kernel,delta=delta,
-            hodc_order=hodc_order,hodc_eta=hodc_eta)
+            hodc_order=hodc_order,hodc_eta=hodc_eta,origin=e0)

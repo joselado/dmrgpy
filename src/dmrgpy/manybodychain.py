@@ -67,7 +67,17 @@ class Many_Body_Chain():
       exists, and the pure-Python pyitensor backend when it does not (a
       pip install, which ships no C++). Naming a version explicitly is
       taken at face value and never re-routed here -- see
-      cppext.default_backend()'s docstring."""
+      cppext.default_backend()'s docstring.
+
+      Any other keyword names a setting of the chain (maxm=, nsweeps=,
+      noise=, kpmmaxm=, mode=, ...) and takes effect as if assigned right
+      after construction, through its property setter where it has one
+      (maxm=0 raises); a keyword that is not a setting raises TypeError
+      naming it, see sites.check_settings()."""
+      # what the model class built before handing over (Fermionic_Chain's
+      # N, C, Cdag, Parafermionic_Chain's Sig, ...): the model's, and so
+      # not a setting a keyword may overwrite
+      model = set(vars(self))
       self.sites = sites # list of the sites
       self.Id = self.get_operator("Id",0)
 #      self.path = id_generator() # random ID in dmrgpy_tmp
@@ -286,8 +296,18 @@ class Many_Body_Chain():
       # sector on the interleaved spinful chain, which mode="ED" targets
       # and DMRG cannot) -- mode.py refuses DMRG in the latter case.
       self._sector_on_session = False
-      self.initialize(**kwargs)
-      # and initialize the sites
+      # Every other keyword is a chain setting and takes effect as if it
+      # had been assigned right after construction; anything else raises
+      # (sites.check_settings). They used to go to initialize(), which
+      # ignores them, so Spin_Chain(sites, maxm=4) ran at maxm=30. All of
+      # them after initialize(), mode included: applied first, mode="ED"
+      # built no session, so a later mode=None had no DMRG to go back to
+      # and Thermal_Spin_Chain, which writes its own mode onto the chain,
+      # failed where sc.mode="ED" after construction keeps a session.
+      from .sites import check_settings
+      settings = check_settings(self,kwargs,model=model)
+      self.initialize() # and initialize the sites
+      for k,v in settings.items(): setattr(self,k,v) # through any setter
   def initialize(self,**kwargs):
       """Initialize the sites"""
       if self.mode=="ED": return # do nothing
@@ -1190,7 +1210,8 @@ class Many_Body_Chain():
   def gs_energy_fluctuation(self,**kwargs):
       """Compute the energy fluctuation sqrt(|<H^2>-<H>^2|), a measure of
       how sharply the computed state is an eigenstate of H (~0 when it
-      is)."""
+      is). This is the total, extensive; gs_energy(maxde=...) compares
+      this number divided by the number of sites with maxde."""
       # Forward the kwargs. They used to be accepted and dropped on the
       # floor -- documentation.md 4.10's "**kwargs with no consumer" --
       # so gs_energy_fluctuation(mode="ED") returned the DMRG number
@@ -1240,10 +1261,10 @@ class Many_Body_Chain():
       takes a copy of `wf` as it is, unswept, with energy <wf|H|wf>, on the
       Python side and on the DMRG session alike; with reconverge=True it
       sweeps from it (set_initial_wf_guess). Either way `wf` itself is left
-      untouched. On a backend with no session (julia_live) the state is
-      only stored: the next read solves from that backend's own random
-      start (mpsjulialive/groundstate.py takes a start only as an explicit
-      gs_energy(wf0=...)) and replaces it. wf=None drops a
+      untouched. julia_live, which has no session, follows the same
+      contract through its own solver (groundstate._gs_energy_julia); it
+      used to store the state only, and the next read solved from a random
+      start and replaced it. wf=None drops a
       pending injected state, so the next read solves. Nothing is computed
       here. See groundstate.mark_injected() for the mechanism."""
       self.computed_gs = False
@@ -1264,8 +1285,12 @@ class Many_Body_Chain():
       """Return the ground state"""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": # DMRG mode
-        if groundstate.gs_is_current(self): # stored, and still valid
-#            self.wf0.write(name=self.wf0.name,path=self.path)
+        # stored and still valid, and the call names no start state: the
+        # same condition gs_energy() returns its stored energy on. The
+        # wf0= half was missing here, so get_gs(wf0=x) on a solved chain
+        # returned the stored state without reading x, where gs_energy(
+        # wf0=x) swept from x, or took it as it is with reconverge=False
+        if groundstate.gs_is_current(self) and kwargs.get("wf0") is None:
             return self.wf0
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
         else: self.gs_energy(**kwargs) # perform a ground state calculation
@@ -1278,7 +1303,15 @@ class Many_Body_Chain():
       """Return the ground-state manifold"""
       return groundstate.get_gs_manifold(self,**kwargs)
   def gs_energy(self,mode="DMRG",**kwargs):
-      """Return the ground state energy"""
+      """Return the ground state energy.
+
+      On a DMRG backend, wf0= names a state to sweep from (or to take as it
+      is, with energy <wf0|H|wf0>, with reconverge=False), and maxde= a
+      tolerance on the energy fluctuation per site, ||(H-<H>)|psi>||/ns:
+      maxm is doubled, at most five times, while the state's fluctuation
+      per site exceeds maxde, so it is gs_energy_fluctuation()/ns, not
+      gs_energy_fluctuation() itself, that is compared with maxde. See
+      groundstate.gs_energy_single."""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": 
           # not just computed_gs: a stored energy is only an answer to

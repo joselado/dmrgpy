@@ -151,6 +151,7 @@ class Chain
     set_hamiltonian(std::vector<MOTerm> const& terms)
         {
         H_ = build_mpo(sites_,terms,mpomaxm_);
+        hscale_up_ = unit_scale_up(max_abs_coef(terms));
         have_H_ = true;
         have_wf0_energy_ = false; // any cached energy is now stale
         have_bandwidth_min_ = false; // ...and so is any cached bandwidth
@@ -173,7 +174,7 @@ class Chain
             have_wf0_ = true;
             }
         auto sweeps = make_sweeps_ramped(nsweeps_,maxm_,floor_dim);
-        double energy = dmrg(wf0_,H_,sweeps,dmrg_args());
+        double energy = dmrg(wf0_,solver_hamiltonian(H_),sweeps,dmrg_args())/hscale_up_;
         wf0_energy_ = energy;
         have_wf0_energy_ = true;
         return energy;
@@ -214,12 +215,15 @@ class Chain
         normalize(psi0);
         wfs.push_back(psi0);
         double weight = bandwidth()*scale_lagrange;
+        // The overlap penalty is an energy, so it scales with the operator
+        // the solver sees (see solver_hamiltonian()).
+        auto Hs = solver_hamiltonian(H_);
         for (int i=1;i<n;i++)
             {
             MPS psi1(sites_);
             auto args = dmrg_args();
-            args.add("Weight",weight);
-            dmrg(psi1,H_,wfs,sweeps,args);
+            args.add("Weight",weight*hscale_up_);
+            dmrg(psi1,Hs,wfs,sweeps,args);
             normalize(psi1);
             wfs.push_back(psi1);
             }
@@ -662,7 +666,7 @@ class Chain
         double EGS = overlap(wf0_,H,wf0_)/overlap(wf0_,wf0_);
         auto ampo = build_ampo(sites_,terms_h);
         ampo += -EGS,"Id",1;
-        auto expH = evoloperator(MPO(ampo),dt);
+        auto expH = evoloperator(to_mpo_unit(ampo),dt);
         auto A1 = build_mpo(sites_,terms_i,mpomaxm_);
         auto A2 = build_mpo(sites_,terms_j,mpomaxm_);
         auto psi1 = exactApplyMPO(wf0_,A1,args);
@@ -698,7 +702,7 @@ class Chain
         {
         auto args = Args("Cutoff",cutoff_,"Maxm",maxm_);
         auto ampo = build_ampo(sites_,terms_h);
-        auto expH = evoloperator(MPO(ampo),dt);
+        auto expH = evoloperator(to_mpo_unit(ampo),dt);
         auto A = build_mpo(sites_,terms_op,mpomaxm_);
         auto psi = wf;
         TimeEvolutionResult out;
@@ -759,7 +763,7 @@ class Chain
         const Cplx z(omega+energy,eta);
         auto ampo = AutoMPO(sites_);
         ampo += z,"Id",1;
-        auto zId = MPO(ampo);
+        auto zId = to_mpo_unit(ampo); // svdMPO skips |z| below 1E-14, see mo_terms.h
         auto A = sum(zId,(-1.0)*H_,args);
         auto b = exactApplyMPO(S2,wf0_,args);
         auto x = bicstab(A,b,tol,max_it,args);
@@ -1009,6 +1013,22 @@ class Chain
     Args
     dmrg_args() const { return Args("Quiet",!verbose_,"Silent",!verbose_); }
 
+    // The Hamiltonian as ITensor's dmrg() should see it: H multiplied by
+    // hscale_up_, so that davidson()'s absolute 1E-10 randomization
+    // threshold acts at the unit scale it was calibrated for rather than
+    // at the caller's (mo_terms.h's unit_scale_up() has the measurement).
+    // H itself whenever hscale_up_ is 1, i.e. for every Hamiltonian whose
+    // largest coefficient is 1 or more. The MPS dmrg() returns is
+    // normalized, so only its energy carries the factor, and every caller
+    // divides it back out, exactly; the noise term, quadratic in H, gets
+    // back its unit-scale strength with it.
+    MPO
+    solver_hamiltonian(MPO const& H) const
+        {
+        if (hscale_up_==1.0) return H;
+        return hscale_up_*H;
+        }
+
     Sweeps
     make_sweeps(int ns, int maxm) const
         {
@@ -1141,8 +1161,8 @@ class Chain
             // divergence guard.
             auto psi = MPS(sites_);
             auto sweeps = make_sweeps(std::min(nsweeps_,5),std::min(maxm_,20));
-            auto negH = (-1.0)*H_;
-            bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args());
+            auto negH = (-hscale_up_)*H_; // -H at unit scale, see solver_hamiltonian()
+            bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args())/hscale_up_;
             have_bandwidth_max_ = true;
             }
         return bandwidth_emax_;
@@ -1205,7 +1225,11 @@ class Chain
         double shift = -(emin+emax)/2.0;
         auto ampo = AutoMPO(sites_);
         ampo += shift,"Id",1;
-        auto shift_mpo = MPO(ampo);
+        // through the unit scale: svdMPO's isZero skips a coefficient below
+        // an absolute 1E-14, which dropped this shift, and with it the
+        // whole spectrum's position, once H's band centre fell below it
+        // (1.2 of the ED peak off at s=1.5e-14; 2026-09-25 audit)
+        auto shift_mpo = to_mpo_unit(ampo);
         auto m = sum(H_,shift_mpo,{"Maxm",mpomaxm_,"Cutoff",cutoff_});
         double scale = (emax-emin)*kpm_scale;
         scale = 1.0/scale;
@@ -1446,6 +1470,10 @@ class Chain
 
     SiteSet sites_;
     MPO H_; bool have_H_ = false;
+    // The power of two bringing the largest coefficient of H_'s terms into
+    // [1,2), or 1.0 when it is already 1 or more (mo_terms.h's
+    // unit_scale_up()); what solver_hamiltonian() multiplies H_ by.
+    double hscale_up_ = 1.0;
     MPS wf0_; bool have_wf0_ = false;
     double wf0_energy_ = 0.0; bool have_wf0_energy_ = false;
 

@@ -534,6 +534,7 @@ class Chain
     set_hamiltonian(std::vector<MOTerm> const& terms)
         {
         set_hamiltonian_mpo(mpo_from_terms(terms));
+        hscale_up_ = unit_scale_up(max_abs_coef(terms)); // after: the MPO route resets it
         }
 
     // Set the Hamiltonian from an ALREADY-BUILT MPO, bypassing the symbolic
@@ -559,10 +560,17 @@ class Chain
     // solve. What this buys is the ability to express an operator the way it
     // is naturally structured, and to avoid materializing a term list that
     // grows quadratically when the operator itself does not.
+    //
+    // An already-built MPO carries no term list to read a scale from, so
+    // the local eigensolver sees it as given (hscale_up_ = 1): a Hamiltonian
+    // assembled this way in units where its coefficients are well below 1
+    // still meets davidson()'s absolute 1E-10 (see solver_hamiltonian()),
+    // while the pieces it was built from are unit-scaled by build_mpo().
     void
     set_hamiltonian_mpo(MPO const& H)
         {
         H_ = H;
+        hscale_up_ = 1.0;
         have_H_ = true;
         have_wf0_energy_ = false; // any cached energy is now stale
         have_bandwidth_min_ = false; // ...and so is any cached bandwidth
@@ -589,7 +597,7 @@ class Chain
             wf0_ = default_mps(sweeps.maxdim(1));
             have_wf0_ = true;
             }
-        double energy = dmrg(wf0_,H_,sweeps,dmrg_args());
+        double energy = dmrg(wf0_,solver_hamiltonian(H_),sweeps,dmrg_args())/hscale_up_;
         check_sector(wf0_,"gs_energy"); // no-op unless sector mode is on
         wf0_energy_ = energy;
         have_wf0_energy_ = true;
@@ -707,7 +715,9 @@ class Chain
             sweeps1.maxdim() = maxm_;
             sweeps1.cutoff() = cutoff_;
             sweeps1.noise() = (sw<=nsweeps_/2) ? noise_ : 0.0;
-            dmrg(wf0_,Heff,sweeps1,dmrg_args());
+            // lam is read back from innerC below, so only the state of
+            // this solve is used and the unit scale needs no undoing
+            dmrg(wf0_,solver_hamiltonian(Heff),sweeps1,dmrg_args());
             double a_psi = innerC(wf0_,A,wf0_).real();
             if (!(std::abs(a_psi)>1e-14))
                 // "!(>tol)", not "<tol": a NaN a_psi fails *both*
@@ -738,12 +748,15 @@ class Chain
         psi0.normalize();
         wfs.push_back(psi0);
         double weight = bandwidth()*scale_lagrange;
+        // The overlap penalty is an energy, so it scales with the operator
+        // the solver sees (see solver_hamiltonian()).
+        auto Hs = solver_hamiltonian(H_);
         for (int i=1;i<n;i++)
             {
             MPS psi1 = default_mps();
             auto args = dmrg_args();
-            args.add("Weight",weight);
-            dmrg(psi1,H_,wfs,sweeps,args);
+            args.add("Weight",weight*hscale_up_);
+            dmrg(psi1,Hs,wfs,sweeps,args);
             psi1.normalize();
             wfs.push_back(psi1);
             }
@@ -1310,7 +1323,7 @@ class Chain
         double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
         auto ampo = ampo_from_terms(terms_h);
         ampo += -EGS,"Id",1;
-        auto expH = evoloperator(toMPO(ampo),dt);
+        auto expH = evoloperator(to_mpo_unit(ampo),dt);
         auto A1 = mpo_from_terms(terms_i);
         auto A2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(A1,wf0_,args);
@@ -1341,7 +1354,7 @@ class Chain
         {
         auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
         auto ampo = ampo_from_terms(terms_h);
-        auto expH = evoloperator(toMPO(ampo),dt);
+        auto expH = evoloperator(to_mpo_unit(ampo),dt);
         auto A = mpo_from_terms(terms_op);
         auto psi = wf;
         TimeEvolutionResult out;
@@ -1397,7 +1410,7 @@ class Chain
         double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
         auto ampo = ampo_from_terms(terms_h);
         ampo += -EGS,"Id",1;
-        auto Hshift = toMPO(ampo);
+        auto Hshift = to_mpo_unit(ampo);
         auto A1 = mpo_from_terms(terms_i);
         auto A2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(A1,wf0_,args);
@@ -1481,7 +1494,7 @@ class Chain
         double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
         auto ampo = ampo_from_terms(terms_h);
         ampo += -EGS,"Id",1;
-        auto Hshift = toMPO(ampo);
+        auto Hshift = to_mpo_unit(ampo);
         auto A1 = mpo_from_terms(terms_i);
         auto A2 = mpo_from_terms(terms_j);
         auto psi1 = apply_mpo(A1,wf0_,args);
@@ -2024,7 +2037,7 @@ class Chain
         const Cplx z(omega+energy,eta);
         auto ampo = AutoMPO(sites_);
         ampo += z,"Id",1;
-        auto zId = toMPO(ampo);
+        auto zId = to_mpo_unit(ampo); // svdMPO skips |z| below 1E-14, see mo_terms.h
         auto A = sum(zId,(-1.0)*H_,args);
         auto b = apply_mpo(S2,wf0_,args);
         auto x = bicstab(A,b,tol,max_it,args);
@@ -4690,6 +4703,7 @@ class Chain
     forget_everything_built_on_sites()
         {
         have_H_ = false;
+        hscale_up_ = 1.0;
         have_wf0_ = false;
         have_wf0_energy_ = false;
         have_bandwidth_min_ = false;
@@ -11551,6 +11565,27 @@ class Chain
     Args
     dmrg_args() const { return Args("Quiet",!verbose_,"Silent",!verbose_); }
 
+    // The Hamiltonian as ITensor's dmrg() should see it: H multiplied by
+    // hscale_up_, so that davidson()'s absolute 1E-10 randomization
+    // threshold (iterativesolvers.h) acts at the unit scale it was
+    // calibrated for rather than at the caller's. Measured with a
+    // standalone build of ITensor's own dmrg() on the 6-site Heisenberg
+    // chain times s, with that one test made relative to s: exact to
+    // 2.7e-14 at every s from 1 to 1e-12, against 7.4e-6 at 1e-8 and 0.52
+    // at 1e-10 with the stock test, while making its convergence tests
+    // (Approx0, ErrGoal) relative instead changed nothing (2026-09-25
+    // audit, small-units). H itself whenever hscale_up_ is 1, i.e. for
+    // every Hamiltonian whose largest coefficient is 1 or more. The MPS
+    // dmrg() returns is normalized, so only its energy carries the factor,
+    // and every caller divides it back out, exactly; the noise term,
+    // quadratic in H, gets back its unit-scale strength with it.
+    MPO
+    solver_hamiltonian(MPO const& H) const
+        {
+        if (hscale_up_==1.0) return H;
+        return hscale_up_*H;
+        }
+
     Sweeps
     make_sweeps(int ns, int maxdim) const
         {
@@ -11703,8 +11738,8 @@ class Chain
             // is caught loudly by kpm_moments_*'s divergence guard.
             auto psi = default_mps();
             auto sweeps = make_sweeps(std::min(nsweeps_,5),std::min(maxm_,20));
-            auto negH = (-1.0)*H_;
-            bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args());
+            auto negH = (-hscale_up_)*H_; // -H at unit scale, see solver_hamiltonian()
+            bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args())/hscale_up_;
             have_bandwidth_max_ = true;
             }
         return bandwidth_emax_;
@@ -11749,7 +11784,11 @@ class Chain
         double shift = -(emin+emax)/2.0;
         auto ampo = AutoMPO(sites_);
         ampo += shift,"Id",1;
-        auto shift_mpo = toMPO(ampo);
+        // through the unit scale: svdMPO's isZero skips a coefficient below
+        // an absolute 1E-14, which dropped this shift, and with it the
+        // whole spectrum's position, once H's band centre fell below it
+        // (1.2 of the ED peak off at s=1.5e-14; 2026-09-25 audit)
+        auto shift_mpo = to_mpo_unit(ampo);
         auto m = sum(H_,shift_mpo,{"MaxDim",mpomaxm_,"Cutoff",cutoff_});
         double scale = (emax-emin)*kpm_scale;
         scale = 1.0/scale;
@@ -12035,7 +12074,7 @@ class Chain
         double shift = -e0-wp*a;
         auto ampo = AutoMPO(sites_);
         ampo += shift,"Id",1;
-        auto shift_mpo = toMPO(ampo);
+        auto shift_mpo = to_mpo_unit(ampo); // as in scaled_hamiltonian()
         auto m = sum(H_,shift_mpo,{"MaxDim",mpomaxm_,"Cutoff",cutoff_});
         m = m*scale;
         HamiltonianScale out; out.scaled_H = m; out.emin = e0; out.emax = e0+ws; out.scale = scale;
@@ -12355,6 +12394,11 @@ class Chain
     bool has_sector_ = false;
     mutable int sector_draws_ = 0; // varies sector_mps()'s arrangement per call
     MPO H_; bool have_H_ = false;
+    // The power of two bringing the largest coefficient of H_'s terms into
+    // [1,2), or 1.0 when it is already 1 or more (mo_terms.h's
+    // unit_scale_up()) or H_ came in as an MPO; what solver_hamiltonian()
+    // multiplies H_ by.
+    double hscale_up_ = 1.0;
     MPS wf0_; bool have_wf0_ = false;
     double wf0_energy_ = 0.0; bool have_wf0_energy_ = false;
 

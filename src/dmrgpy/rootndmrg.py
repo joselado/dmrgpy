@@ -4,7 +4,7 @@ from . import operatornames
 
 
 def dynamical_correlator(self,es=np.linspace(-1.,10,100),
-        delta=1e-1,name=None,N=8,nkry=20,**kwargs):
+        delta=1e-1,name=None,N=8,nkry=20,i=0,j=0):
     """
     Compute the dynamical correlator using the root-N Krylov-space
     correction-vector method (Nocera & Alvarez, arXiv:2204.03165).
@@ -51,7 +51,14 @@ def dynamical_correlator(self,es=np.linspace(-1.,10,100),
     # bare `raise` this used to have: the submode only ever *applies* A and
     # B (B*wf0 / A*v below), so the already-built operators toMPO() returns
     # work here unchanged.
-    A,B = operatornames.str2MO(self,name)
+    #
+    # i/j are the sites of a string name, as in cvm.dynamical_correlator,
+    # whose signature this now matches. They used to fall into a **kwargs
+    # with no consumer and str2MO took its own i=j=0, so on the lower-level
+    # get_dynamical_correlator_MB(name="ZZ", i=1, j=1) route ROOTN returned
+    # C[Sz_0,Sz_0] bit for bit, the shape the 2026-09-24 audit's finding 10
+    # fixed for TD and TDZ; the same **kwargs accepted a misspelled nkry.
+    A,B = operatornames.str2MO(self,name,i=i,j=j)
     wf0 = self.get_gs() # ground state (also sets self.e0)
     Hmpo = self.toMPO(self.hamiltonian) # built once, shared across frequencies/steps
     out = []

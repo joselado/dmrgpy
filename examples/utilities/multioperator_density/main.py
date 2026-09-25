@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 from dmrgpy import multioperator
 n = 6
-fc = fermionchain.Fermionic_Chain(n,spinful=False) # create the chain
+fc = fermionchain.Fermionic_Chain(n) # create the (spinless) chain
 np.random.seed(1) # make the random Hamiltonian reproducible run to run
 # The seed is not cosmetic. This Hamiltonian is quadratic, so its ground
 # state fills every single-particle level below zero -- and an unseeded

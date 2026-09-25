@@ -10057,14 +10057,14 @@ rather than findings.
   GS_enforce_maximum_fluctuation` plots the total against the per-site request on
   one axis (at `maxm=10` on v3 the loop reads 1.896e-03 per site where
   `gs_energy_fluctuation()` prints 1.896e-02 for the same state). Turned up by
-  finding 7's reviewer, with executed evidence, but given no reviewer of its own.
+  finding 7's reviewer, with executed evidence, but given no reviewer of its own. (2026-09-25: narrowed and fixed, see `audit_2026_09_25_open_items.md`, item 9: the example and user-guide halves were already fixed in `8dd2198`.)
 - After `set_gs(x)` on a non-Hermitian chain the NH-KPM route pairs x with the
   stale `nh_left_wf` of the last NH-DMRG solve (or raises `AttributeError` if there
   was none), and `gs_energy(wf0=x)` on a non-Hermitian chain reaches
-  `gs_energy_nhdmrg`, which drops `wf0` as an unknown keyword (by reading).
+  `gs_energy_nhdmrg`, which drops `wf0` as an unknown keyword (by reading). (2026-09-25: fixed, see `audit_2026_09_25_open_items.md`, item 8.)
 - `get_gs(wf0=x)` on a current chain returns the stored state without reading x
   (`manybodychain.py:1212`), the shape `867e2b4` fixed for `gs_energy(wf0=x)` only
-  (by reading).
+  (by reading). (2026-09-25: fixed, see `audit_2026_09_25_open_items.md`, item 5.)
 - Any solver-parameter change after `set_gs(x)` (`cutoff`, `noise`, `maxm`) makes
   `gs_is_current` False and the next read re-solves from x, discarding the
   caller's state; arguably the contract, but an injected state does not survive a
@@ -10072,11 +10072,11 @@ rather than findings.
 - `Thermal_Spin_Chain.get_gs` assigns `MBChain.wf0` and `MBChain.hamiltonian`
   directly (`thermal.py:59-62`), so a correlator on `MBChain` finds
   `hamiltonian_on_session` False and re-solves over the annealed state; the same
-  before `867e2b4` (by reading).
+  before `867e2b4` (by reading). (2026-09-25: fixed, see `audit_2026_09_25_open_items.md`, item 7.)
 - `gs_energy_generalized` re-sends the Hamiltonian with `session.set_hamiltonian`
   without updating `_session_ham_cache` (`groundstate.py:578`), so on a chain whose
   cache is empty the next correlator may re-solve a plain ground state over the
-  generalized one, against its own CAVEAT (by reading).
+  generalized one, against its own CAVEAT (by reading). (2026-09-25: fixed, see `audit_2026_09_25_open_items.md`, item 6, whose reviewer found the non-Hermitian route losing the state on every chain with no earlier correlator, solved first or not.)
 - The v3 -3.000000 after `maxde` in finding 6, a re-solve at `maxm=3` warm-started
   from a truncated `maxm=12` state landing exactly on a dimer product energy, was
   not investigated.
@@ -10087,11 +10087,11 @@ rather than findings.
   the returned state's <wf|H|wf> not matching the returned energy on v3 at 5e-7;
   -1.25 is the Neel ZZ energy, which suggests the XX+YY terms vanish in the vendored
   AutoMPO's compression (`isZero` 1E-13, `toMPO` Cutoff 1E-13, by reading) or an
-  absolute Davidson `ErrGoal`; not located.
+  absolute Davidson `ErrGoal`; not located. (2026-09-25: located and fixed on the narrowed claim, see `audit_2026_09_25_open_items.md`, item 2: both, the MPO construction and Davidson's absolute randomization threshold.)
 - `multioperator.clean_threshold = 1e-8` drops every term with |coef| <= 1e-8 on
   every backend including ED: `(1e-8*Sz0).to_terms() == []`, `vev` and correlator
   exactly 0, and `gs_energy()`/s = 0 at s=1e-8 on all three DMRG backends; absolute,
-  origin `593b394` or earlier.
+  origin `593b394` or earlier. (2026-09-25: fixed, see `audit_2026_09_25_open_items.md`, item 3.)
 - The second pass's finding 3 Status sentence that a harsh `kpmmaxm` truncation
   raises is a 4-site accident: on 8 sites `kpmmaxm=3` returns spectra 84 to 181 per
   cent wrong at moment ratios 0.85 to 0.99 with no raise. Not a defect of the

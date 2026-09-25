@@ -24,12 +24,17 @@ def _check_backend_supports_maxnb(version,maxnb):
     if version!=2: return # every other backend builds an arbitrary dimension
     bad = sorted(set(m for m in dims if m!=V2_BOSON_DIM))
     if len(bad)==0: return
+    # mode="ED" is not offered as a way out: a constructor keyword takes
+    # effect after the session is built, as if assigned afterwards, so
+    # Bosonic_Chain(..., itensor_version=2, mode="ED") reaches this check
+    # all the same
     raise ValueError(
         "itensor_version=2 only implements the fixed %d-level boson site "
         "(ITensor's BosonFourSite), but this chain asks for local boson "
-        "dimension(s) %s. Use itensor_version=3, itensor_version=\"python\" "
-        "or mode=\"ED\", which all build a boson site of the requested "
-        "dimension."%(V2_BOSON_DIM,str(bad)))
+        "dimension(s) %s. Use itensor_version=3 or itensor_version="
+        "\"python\", which build a boson site of the requested dimension "
+        "(and run by exact diagonalization under mode=\"ED\" as well)."
+        %(V2_BOSON_DIM,str(bad)))
 
 
 class Bosonic_Chain(Many_Body_Chain):

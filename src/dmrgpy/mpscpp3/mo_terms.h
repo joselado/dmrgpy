@@ -15,6 +15,7 @@
 // no 99-way-switch code generation is needed at all.
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <stdexcept>
 #include <set>
@@ -302,10 +303,86 @@ build_ampo(SiteSet const& sites, std::vector<MOTerm> const& terms)
     return ampo;
     }
 
+// -- unit scale for ITensor's absolute thresholds ------------------------
+//
+// Three numbers inside ITensor are absolute, calibrated for an operator of
+// order one. svdMPO's truncate() (autompo.cc, at its default Cutoff=1E-13
+// with doRelCutoff=false) normalizes the squared singular values by the
+// largest one and divides the cutoff by it too, so the discarded weight is
+// compared in absolute terms; that cutoff is read from Args ("Cutoff"),
+// while the other two are hardcoded: svdMPO skips a coefficient below
+// 1E-14 (isZero(coef,eps)), and davidson() (iterativesolvers.h) replaces a
+// Krylov direction by a random vector once its residual is below 1E-10.
+// A Hamiltonian written in small units hits
+// both: a 6-site Heisenberg chain at J=4e-7 has lost both S+S-/S-S+
+// channels of every bond to the first (the Neel energy, -1.25 against
+// -2.4936 in units of J), and the same chain built exactly at J=1e-8
+// still comes out 5.5e-6 off through the second (2026-09-25 audit,
+// small-units). So an operator whose largest coefficient is below 1 is
+// handed to ITensor multiplied by the power of two that brings it into
+// [1,2), and the factor is taken back out afterwards. A power of two
+// makes the scaling and the scale-back exact in floating point, and the
+// SVD is homogeneous under it (every matrix svdMPO decomposes is exactly
+// 2^k times the unscaled one, and so are its singular values, away from
+// the underflow range where LAPACK rescales internally), so what changes
+// is which side of the absolute thresholds a number falls on, which is
+// the fix. It also keeps
+// an exactly real coefficient exactly real, which svdMPO's is_real test
+// and the realification in build_ampo() both rely on. At a largest
+// coefficient of 1 or more, unit_scale_up() returns 1.0 and every caller
+// takes the unscaled code path, byte for byte.
+//
+// What one scale per operator cannot cover: truncate() runs bond by bond,
+// against that bond's own largest weight, so a bond whose strongest
+// crossing term is far below the operator's largest coefficient still
+// meets the absolute 1E-13, at any units. An O(1) energy offset or
+// one-site field next to exchange below about 4e-7 of it is one such case
+// ([vev(s*H+1)-1]/s reads 1/3 of vev(H) at s=1e-7), a weak link J'=1e-7 in
+// a J=1 chain another (it reads 1/3 of itself); both are a property of the
+// bond rather than of the units (2026-09-25 audit, small-units, repair).
+inline double
+unit_scale_up(double cmax)
+    {
+    if (!(cmax > 0.0) || cmax >= 1.0) return 1.0;
+    int e = 0;
+    std::frexp(cmax,&e); // cmax in [2^(e-1),2^e), and e <= 0
+    return std::ldexp(1.0,std::min(1-e,1000)); // cmax*up in [1,2)
+    }
+
+// toMPO() with the operator at unit scale (see unit_scale_up() above).
+// The scale is read from the AutoMPO ITensor actually sees, i.e. after
+// build_ampo()'s realification, so the XX chain at J=1 (every coefficient
+// 0.5 once written with S+/S-) takes the scaled path too. Reordering is
+// not an issue: AutoMPO keeps its terms ordered by operator string alone
+// (LessNoCoef), so the scaled copy holds the same terms in the same order.
+MPO inline
+to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global())
+    {
+    double cmax = 0.0;
+    for (auto const& t : ampo.terms()) cmax = std::max(cmax,std::abs(t.coef));
+    double up = unit_scale_up(cmax);
+    if (up==1.0) return toMPO(ampo,args);
+    auto scaled = AutoMPO(ampo.sites());
+    for (auto t : ampo.terms()) { t.coef *= up; scaled.add(t); }
+    auto W = toMPO(scaled,args);
+    W *= 1.0/up; // exact: multiplies one tensor's elements by 2^-k
+    return W;
+    }
+
+// The largest |coefficient| of a term list, which is what a session reads
+// its Hamiltonian's unit scale from (Chain::hscale_up_).
+inline double
+max_abs_coef(std::vector<MOTerm> const& terms)
+    {
+    double cmax = 0.0;
+    for (auto const& t : terms) cmax = std::max(cmax,std::abs(t.coef));
+    return cmax;
+    }
+
 MPO inline
 build_mpo(SiteSet const& sites, std::vector<MOTerm> const& terms, int mpomaxm)
     {
     auto ampo = build_ampo(sites,terms);
     if (mpomaxm<5) mpomaxm = 5000; // default, mirrors get_ampo_operator.h
-    return toMPO(ampo,{"MaxDim",mpomaxm,"Exact",false});
+    return to_mpo_unit(ampo,{"MaxDim",mpomaxm,"Exact",false});
     }

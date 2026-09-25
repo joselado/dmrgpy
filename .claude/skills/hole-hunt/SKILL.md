@@ -12,7 +12,10 @@ previous hunts are `docs/audit_2026_08_hole_hunt.md` (five lenses, 21 findings),
 `docs/audit_2026_09_hole_hunt.md` (eight lenses, 36 findings),
 `docs/audit_2026_09_24_hole_hunt.md` (five lenses, 16 findings),
 `docs/audit_2026_09_24b_hole_hunt.md` (five lenses, 18 findings) and
-`docs/audit_2026_09_24c_hole_hunt.md` (four lenses, 18 findings). Read the
+`docs/audit_2026_09_24c_hole_hunt.md` (four lenses, 18 findings), followed by
+`docs/audit_2026_09_25_open_items.md`, a fix pass over ten of their open items
+rather than a hunt, whose "Left open, and new leads" section belongs in the
+next brief next to every record's "New leads". Read the
 scope section and the lens table of the most recent one before starting: a
 finding already recorded there is not a new finding.
 

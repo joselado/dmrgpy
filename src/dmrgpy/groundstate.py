@@ -108,18 +108,24 @@ def mark_injected(self,wf,reconverge=False,supplied=True):
     The mark holds the injected object itself and counts only while
     self.wf0 is that object, so anything that replaces or clears wf0 --
     restart(), a solve, a backend switch -- retires it without having to
-    know it exists. On a chain with no session (julia_live, or a C++
-    backend that fell back to ED) there is nothing to hand the state to,
-    and the old behaviour stands: set_gs() stores it as current and
-    set_initial_wf() leaves the next solve to that backend. Returns
-    whether the state was marked.
+    know it exists. julia_live has no session either, but its solver takes
+    a start state, so it is marked the same way and gs_energy()'s
+    julia_live branch reads the mark (_gs_energy_julia()); before that,
+    set_initial_wf() and set_initial_wf_guess() never reached the Julia
+    solve, which started from its own random state (|<x|gs>|^2 anywhere
+    from 0.0008 to 0.68 over runs, for a doublet member x of a 3-site
+    chain), and set_gs() raised AttributeError on the Julia MPS. On a C++ backend that fell back to ED
+    there is nothing to hand the state to, and the old behaviour stands:
+    set_gs() stores it as current and set_initial_wf() leaves the next
+    solve to that backend. Returns whether the state was marked.
 
     supplied=False is for the library's own re-marks of a state it
     computed (promote_to_dense): the state is taken unswept like any
     other, but does not count as the caller's, which is what
     submode="SECTOR" asks (see state_supplied())."""
     self.wf0 = wf.copy()
-    if getattr(self,"_session",None) is None:
+    if (getattr(self,"_session",None) is None
+            and self.itensor_version!="julia_live"):
         self._gs_injected = None
         return False
     self._gs_injected = ("reconverge" if reconverge else "skip",self.wf0,
@@ -206,12 +212,20 @@ def _take_injected_state(self,wf,supplied=True):
     so nothing needs filling here and the edges are paid by the first
     call that reads them. The edges are the Hamiltonian's, from a solve,
     not the injected state's energy; for a member of a degenerate ground
-    manifold the two coincide."""
-    _session_parameters(self)
-    send_hamiltonian(self) # precondition: H on the session
+    manifold the two coincide.
+
+    julia_live has no session, so there is nothing to push: the state is
+    the chain's, with the same energy, read with the Julia MPS's own
+    <wf|H|wf>, and no solver key, like that backend's own solves (see
+    gs_is_current())."""
+    session = getattr(self,"_session",None) is not None
     hermitian = self.is_hermitian(self.hamiltonian)
-    self._session.set_wavefunction(detached_copy(wf).cpp_handle)
-    e = self.aMb(wf,self.hamiltonian,wf)/self.overlap(wf,wf)
+    if session:
+        _session_parameters(self)
+        send_hamiltonian(self) # precondition: H on the session
+        self._session.set_wavefunction(detached_copy(wf).cpp_handle)
+        e = self.aMb(wf,self.hamiltonian,wf)/self.overlap(wf,wf)
+    else: e = wf.aMb(self.hamiltonian,wf)/wf.dot(wf) # julia_live
     if hermitian: e = float(np.real(e))
     self.e0 = e
     self.wf0 = wf
@@ -221,7 +235,7 @@ def _take_injected_state(self,wf,supplied=True):
     self.sites_from_file = True
     self.gs_from_file = True
     self.skip_dmrg_gs = True
-    self._gs_solver_key = solver_key(self)
+    self._gs_solver_key = solver_key(self) if session else None
     return e
 
 
@@ -337,6 +351,13 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     - otherwise the session's own state: its cached energy when it has one
       under the current Hamiltonian and parameters (skip_dmrg_gs, which
       reconverge=True overrides), a sweep from it when it does not.
+
+    maxde= is a tolerance on the energy fluctuation PER SITE,
+    ||(H-<H>)|psi>||/ns, the intensive quantity, so gs_energy_fluctuation(),
+    which returns the total ||(H-<H>)|psi>||, is to be divided by ns before
+    it is compared with it. While the per-site value exceeds maxde, maxm is
+    doubled and the state refined with two sweeps, at most maxdepth times;
+    the refined energy is returned and the refined state kept.
     """
     supplied = True
     if wf0 is not None:
@@ -404,7 +425,9 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
           maxm,nsweeps = self.maxm,self.nsweeps
           noise = self.noise
           ramp = self.bond_ramp
-          print("Energy fluctuation = ",de,maxm)
+          # labelled: the bare "Energy fluctuation =" read as the total
+          # gs_energy_fluctuation() returns, ns times this number
+          print("Energy fluctuation per site = ",de,maxm)
           self.maxm = maxm*2
           self.nsweeps = 2 # just two sweeps
           self.noise = 0.0
@@ -436,24 +459,67 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     return out # return energy
 
 
+def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None):
+    """gs_energy() on julia_live, with gs_energy_single()'s precedence: an
+    explicit wf0= (swept from, or taken unswept with reconverge=False),
+    then a state the caller injected (taken unswept, with e0 = <wf|H|wf>,
+    after set_gs()/set_initial_wf(), swept from after
+    set_initial_wf_guess()), then a solve from that backend's own random
+    start. Both branches used to call get_gs_dmrg() directly, so the mark
+    was never read and every setter was dropped (2026-09-24b hole hunt,
+    finding 12, recorded there as open for julia_live). The caller's state
+    is not moved: get_gs_dmrg() hands the solver a Julia-side copy, and
+    ITensorMPS's dmrg() sweeps a copy of that again (dmrg.jl, psi =
+    copy(psi0)). reconverge= means something only next to wf0=, since
+    there is no session state to re-sweep here."""
+    if wf0 is None and reconverge is not None:
+        raise TypeError("gs_energy(reconverge=...) on julia_live needs a "
+                "state to take or sweep from, given as wf0=")
+    supplied = True
+    if wf0 is not None:
+        mode = "skip" if reconverge is False else "reconverge"
+        start = wf0.copy()
+    else:
+        mode = pending_injection(self)
+        start = self.wf0
+        if mode is not None and len(self._gs_injected)>2:
+            supplied = self._gs_injected[2]
+    if mode=="skip": return _take_injected_state(self,start,supplied=supplied)
+    from .mpsjulialive.groundstate import get_gs_dmrg
+    e0,wf = get_gs_dmrg(self,ishermitian=ishermitian,
+            wf0=start if mode=="reconverge" else None)
+    # the solve's own result: assigned, not injected
+    self.wf0 = wf
+    self._gs_injected = None
+    self._gs_supplied = False
+    return e0
+
+
 def gs_energy(self,**kwargs):
     if self.is_hermitian(self.hamiltonian): # put a check for Hermitian
         if self.itensor_version in (2,3,"python"): # C++ or pure-Python version
             return gs_energy_single(self,**kwargs)
         elif self.itensor_version=="julia_live":
-            from .mpsjulialive.groundstate import get_gs_dmrg
-            e0,wf0 = get_gs_dmrg(self,**kwargs)
-            self.wf0 = wf0
-            return e0
+            return _gs_energy_julia(self,**kwargs)
         else: raise
     else: # non-Hermitian excited states
         # Julia version has its own function
         if self.itensor_version=="julia_live":
-            from .mpsjulialive.groundstate import get_gs_dmrg
-            e0,wf0 = get_gs_dmrg(self,ishermitian=False,**kwargs)
-            self.wf0 = wf0
-            return e0
+            return _gs_energy_julia(self,ishermitian=False,**kwargs)
         elif self.itensor_version in (2,3,"python"): # real non-Hermitian DMRG
+            if kwargs.get("wf0") is not None:
+                # NH-DMRG takes no start state, so an explicit wf0= can
+                # only be taken as it is; gs_energy_nhdmrg() used to drop
+                # it as an unknown keyword and re-solve, so the call
+                # returned the NH-DMRG energy with |<x|wf0>|^2 = 0.02 to
+                # 0.11 for a random x on a 4-site chain
+                if kwargs.get("reconverge") is not False or len(kwargs)>2:
+                    raise TypeError("gs_energy(wf0=...) on a non-Hermitian "
+                            "Hamiltonian: NH-DMRG takes no start state, so "
+                            "a state to sweep from cannot be honoured; pass "
+                            "reconverge=False (and nothing else) to take it "
+                            "as it is, as set_gs() does")
+                return _take_injected_state(self,kwargs["wf0"].copy())
             if pending_injection(self)=="skip" and not kwargs:
                 # set_gs()/set_initial_wf() on a non-Hermitian chain: the
                 # state as given, as on the Hermitian route; NH-DMRG takes
@@ -509,10 +575,15 @@ def gs_energy_generalized(self,A,lam0=None):
     overlap-penalty anchor), any dynamical/KPM correlator, NH-KPM
     (nonhermitian/kpm.py) -- has no way to detect this and will silently
     build on the wrong reference state if called afterward without first
-    recomputing a genuine ground state (gs_energy()/nhdmrg(), which reset
-    wf0 to a real eigenstate of self.hamiltonian). Call
-    gs_energy_generalized() as the last step of a calculation, or
-    explicitly recompute the plain ground state before using any other
+    recomputing a genuine ground state. That is what happens on every chain
+    now: the solve records H as sent, on both the Hermitian and the
+    non-Hermitian route, so a correlator reads the generalized state and
+    lambda whether or not the chain was solved before (it used to re-solve
+    a plain ground state over it on a chain whose send-cache was empty, and
+    on a non-Hermitian H on every chain, 2026-09-25 fixes). A bare
+    gs_energy() does not recompute either: the stored state is current, so
+    it returns lambda. Call gs_energy_generalized() as the last step of a
+    calculation, or restart() and then gs_energy() before using any other
     method that reads self.wf0."""
     if self.mode=="ED":
         raise NotImplementedError(
@@ -602,12 +673,22 @@ def gs_energy_generalized(self,A,lam0=None):
         lam,wf0 = gsg_jl(self,A,lam0=lam0)
         self.e0 = lam
         self.wf0 = wf0.copy() # the solve's own result: assigned, not injected
+        self._gs_injected = None
+        self._gs_supplied = False # read by mpsjulialive/dynamics.py's KPM window
         self.computed_gs = True
         return lam
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-    self._session.set_hamiltonian(self.hamiltonian.to_terms())
+    # Through the send-cache, so the chain records that H is on the session.
+    # A bare session.set_hamiltonian() here left the cache as it was, so on
+    # a chain whose cache was empty the next correlator found H "not on the
+    # session", re-solved a plain ground state over the generalized one and
+    # measured that (|<wg|wf0>|^2 = 0.60 and <Sz0> -0.48 -> 0 on a 6-site
+    # chain), while a chain solved beforehand read the generalized state, as
+    # the CAVEAT above says. Skipping an identical re-send loses nothing:
+    # both sessions drop their own energy cache after this solve anyway.
+    send_hamiltonian(self)
     if self.itensor_version=="python": # pyitensor accepts lam0=None directly
         session_lam0 = lam0
     else: # the compiled v3 binding takes a plain float, NaN meaning "unset"
@@ -659,7 +740,8 @@ def set_gs(MBO,wf):
     Python-side wf0 or the session's own state they read -- measures the
     state that was set. It used to reach the Python-side wf0 only, and the
     next correlator call put the session's solved state back over it
-    (2026-09-24b hole hunt, finding 11)."""
+    (2026-09-24b hole hunt, finding 11). julia_live is marked the same
+    way, and read by _gs_energy_julia()."""
     mode = wf.mode # get the mode
     if mode=="DMRG": # DMRG mode
         if not mark_injected(MBO,wf,reconverge=False):

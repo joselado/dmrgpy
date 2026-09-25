@@ -22,14 +22,35 @@ def isnumber(x):
 ampo_counter = 0
 use_jordan_wigner = True
 n_mpo_max = 100 # maximum number of MPO products
-clean_threshold = 1e-8 # coefficient magnitude below which a term is dropped
+# Coefficient magnitude, RELATIVE to the largest coefficient of the same
+# term list, at or below which a term is dropped. It used to be an absolute
+# 1e-8, which made an operator mean different things in different units of
+# energy: 1e-8*Sz0 had no terms at all, so vev and every correlator of it
+# were exactly 0 and gs_energy() of a Hamiltonian written at that scale was
+# 0 on every backend, ED included (2026-09-25 audit, clean-threshold).
+# 1e-12 is the factor mpscpp3/mo_terms.h's combine_terms and
+# pyitensor/sector.py already use for the same job: the rounding dust an
+# exact cancellation leaves sits near 1e-16 of the magnitudes that went
+# into it, and anything a caller wrote on purpose sits far above.
+clean_threshold = 1e-12
 
 
 def _filter_small(op):
     """Return a new term list with near-zero-coefficient terms dropped,
     without mutating the input (terms may be shared between several
-    MultiOperator objects, see MultiOperator.copy)."""
-    return [o for o in op if abs(o[0])>clean_threshold]
+    MultiOperator objects, see MultiOperator.copy).
+
+    Near-zero is relative, at or below clean_threshold times the largest
+    |coefficient| of the list itself, so an exact zero (the 0*identity()
+    placeholder "h = 0; h = h + term" leaves) always goes, while an
+    operator written in small units keeps every term and a small term
+    next to a large one is dropped only once it is below what the large
+    one's own rounding can resolve. The list is not summed here, so the
+    rounding dust of a cancellation never reaches this test; that case is
+    canonical.canonical_dict's."""
+    cmax = max([abs(o[0]) for o in op]+[0.])
+    tol = clean_threshold*cmax
+    return [o for o in op if abs(o[0])>tol]
 
 
 class MultiOperator():
@@ -124,8 +145,9 @@ class MultiOperator():
           out = self.copy() # create a copy
           out.op = self.op + a.op # sum the two operators
           out.i = len(out.op)-1 # increase the index
-          # No clean() here: concatenating two already-clean term lists
-          # cannot introduce new near-zero terms, and calling clean()
+          # No clean() here: the drop is relative to the largest
+          # coefficient of the whole list (see _filter_small), so it can
+          # only be decided once the list is complete, and calling clean()
           # (an O(len(op)) rescan) on every "+" is what made building a
           # Hamiltonian one term at a time (H = H + term, used pervasively
           # across this codebase) quadratic. Filtering happens lazily,
@@ -184,7 +206,8 @@ class MultiOperator():
         out.i = len(out.op)-1
         return out # return operator
     def clean(self):
-        """Remove terms with zero weight"""
+        """Remove terms with zero weight, relative to the largest
+        coefficient of this operator (see _filter_small)"""
         self.op = _filter_small(self.op)
         self.i = len(self.op)-1
     def write(self,name=None):

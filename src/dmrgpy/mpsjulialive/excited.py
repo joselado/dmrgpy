@@ -13,9 +13,11 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     wf0 = self.get_gs()
     H = self.hamiltonian
     e0 = self.e0
+    supplied = getattr(self,"_gs_supplied",False)
     from .dynamics import _max_energy_bound
     emax = _max_energy_bound(self,H) # mutates self.wf0/self.e0, see below
     self.wf0,self.e0,self.computed_gs = wf0,e0,True # restore GS cache
+    self._gs_supplied = supplied # which restart() cleared
     weight = (emax-e0)*scale
     Hop = MPO(H,MBO=self)
     from .juliasession import Main as Mainjl

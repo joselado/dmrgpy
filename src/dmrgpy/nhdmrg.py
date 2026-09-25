@@ -298,11 +298,31 @@ def gs_energy_generalized_nhdmrg(self,A,**kwargs):
     # mark_injected() is for the public setters, and would make the next
     # gs_energy() hand this state to the session as the caller's)
     self.wf0 = wf0.copy()
+    self._nh_left_for = self.wf0 # the right state psil pairs with, see gs_energy_nhdmrg
     self._gs_injected = None
+    self._gs_supplied = False
     self.computed_gs = True
     from .groundstate import solver_key
     self._gs_solver_key = solver_key(self) # see groundstate.gs_is_current
+    _record_hamiltonian_sent(self)
     return lam
+
+
+def _record_hamiltonian_sent(self):
+    """Put H on the session through groundstate's send-cache after an NH
+    solve, so that ground_state_on_session() finds the solve's state
+    current. NH-DMRG hands the session its terms per call and never set
+    them as the session's Hamiltonian, so the next correlator found H
+    missing, reset computed_gs and re-solved plain NH-DMRG over the state:
+    a generalized one was discarded even on a chain solved first
+    (|<wg|wf0>|^2 = 0.6877, e0 from lambda to the plain -1.596396 on a
+    4-site chain), and a plain one cost a second solve. No NH reader needs
+    more than this: NH-KPM hands the session its own terms and states, and
+    CVM_explicit reads self.wf0, so the session holds no NH state to lose.
+    julia_live has no session and no send-cache."""
+    if getattr(self,"_session",None) is None: return
+    from .groundstate import send_hamiltonian
+    send_hamiltonian(self)
 
 
 def gs_energy_nhdmrg(self,**kwargs):
@@ -327,6 +347,9 @@ def gs_energy_nhdmrg(self,**kwargs):
         print("nhdmrg: ignoring keyword arguments",ignored,
               "(not NH-DMRG parameters)")
     e0,psil,psir = nhdmrg(self,**passed)
+    # a solve for an H= other than the chain's own Hamiltonian is stored as
+    # before, but not recorded as that Hamiltonian's state on the session
+    own = passed.get("H") is None or passed["H"] is self.hamiltonian
     self.computed_gs = True
     from .groundstate import solver_key
     self._gs_solver_key = solver_key(self) # see groundstate.gs_is_current
@@ -336,4 +359,13 @@ def gs_energy_nhdmrg(self,**kwargs):
     wf0 = psir.normalize()
     self.wf0 = wf0 if wf0 is not None else psir.copy()
     self.nh_left_wf = psil.copy() # left eigenvector, for biorthogonal use
+    # ...of this right state, the object itself, as groundstate.
+    # mark_injected() does: anything that replaces self.wf0 (set_gs(), a
+    # take of gs_energy(wf0=x, reconverge=False), restart()) unpairs the
+    # two, and nonhermitian/kpm.py refuses an unpaired right state instead
+    # of pairing it with a left state solved for another one
+    self._nh_left_for = self.wf0
+    self._gs_injected = None
+    self._gs_supplied = False # a solve's state, not the caller's
+    if own: _record_hamiltonian_sent(self)
     return self.e0

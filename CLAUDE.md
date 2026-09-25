@@ -443,10 +443,11 @@ included), the lower-level correlator route honours `i=`/`j=` for TD and
 TDZ, and `get_kondo_spectrum(mode="DMRG")` takes `n_gs=` for the
 degenerate-manifold average `mode="ED"` uses. Left open and recorded as
 such: the TDZ run at `tdvp_gse_sweeps=0` under padding (still started from
-the padded state), ROOTN's own dropped `i=`/`j=`, `mode="ED"` TD's
-swallowed keywords, the shared "adjoint for a correlator" helper, the
-`vx_deterministic_start` comment in `mpscpp3/chain_session.h` (a C++ edit,
-left to a pass that rebuilds), and the record's "New leads", notably v3's
+the padded state), ROOTN's own dropped `i=`/`j=` (fixed on 2026-09-25),
+`mode="ED"` TD's swallowed keywords, the shared "adjoint for a correlator"
+helper, the `vx_deterministic_start` comment in `mpscpp3/chain_session.h`
+(a C++ edit, left to a pass that rebuilds, and still unedited after the
+2026-09-25 rebuild), and the record's "New leads", notably v3's
 run-to-run `emax` noise, which is now the whole of the ED-versus-v3 KPM
 residual.
 
@@ -499,12 +500,12 @@ chain's state (finding 15). Left open and recorded as such: the sliver
 just below `kpm_scale=1/2` where the elastic line is distorted while the
 moments are still under the bound; `julia_live`'s
 `set_initial_wf`/`set_initial_wf_guess` (same shape as finding 12,
-by reading); `juliacall.JuliaError` rather than `RuntimeError` from the
+by reading; fixed on 2026-09-25); `juliacall.JuliaError` rather than `RuntimeError` from the
 `julia_live` KPM guard; the KPM guard's message naming the band edge when
 the cause is a harsh `kpmmaxm`; the short `nt` defaults of
 `td_dynamical_correlator` (delta*T = 1, the third hunt's lead); and the
 record's "New leads", notably `Many_Body_Chain.__init__(**kwargs)` dropping
-every keyword.
+every keyword (fixed on 2026-09-25).
 
 **The 2026-09-24 third pass.** `docs/audit_2026_09_24c_hole_hunt.md` is a
 fifth hunt, scoped to the single commit `867e2b4` that fixed the second
@@ -566,8 +567,70 @@ to 9 solves before, finding 10). Left as they were and recorded as such:
 `vev(op, npow>=2)` still truncates each application at `maxm`, now
 documented; the non-Hermitian KPM's missing-`E_max` error still comes after
 a solve; and the record's "New leads", notably the v2/v3 failure on a
-Hamiltonian in small energy units, which is not the MPO builder, and
-`multioperator.clean_threshold` dropping every term below an absolute 1e-8.
+Hamiltonian in small energy units and `multioperator.clean_threshold`
+dropping every term below an absolute 1e-8, both fixed on 2026-09-25. The
+first is not the `"python"` MPO builder of finding 13, as this paragraph used
+to say it was not the MPO builder at all: it is ITensor's own `toMPO`, whose
+svdMPO truncates on an absolute cutoff, plus Davidson's absolute 1e-10
+randomization threshold below it.
+
+**The 2026-09-25 open items.** `docs/audit_2026_09_25_open_items.md` hunted
+nothing new: it took the ten most urgent items the five hunts had left open
+or recorded as unreviewed leads, reproduced each on `8dd2198` against a
+snapshot of that tree with copies of its compiled extensions, fixed it, and
+handed every fix to a reviewer briefed to refute both the defect and the fix,
+with a repair pass where the reviewer found a fix incomplete (three of four
+clusters; the repairs were not reviewed a second time). None was refuted and
+four were narrowed. The regressions live in
+`tests/test_audit_2026_09_25_<cluster>.py` for `construction`, `session` and
+`scale`, and the small-units fix rebuilt both extensions. Three things worth
+knowing before touching the code. A chain constructor keyword is now a
+setting assigned after `initialize()`, exactly as an assignment afterwards,
+`mode` included (`sites.check_settings`; applying `mode` first leaves a chain
+at `mode="ED"` with no session to go back to), and anything that is not a
+setting raises. `multioperator.clean_threshold` is 1e-12 and relative, to the
+largest coefficient of the term list in `_filter_small` and, in
+`canonical_dict`, to the larger of that and the magnitudes summed into a
+signature, which is what the rounding dust of H-H^dagger scales with. And
+v2/v3 hand ITensor every term-built MPO and every `dmrg()` at the power of two
+that brings the largest coefficient into [1,2) when it is below 1
+(`mo_terms.h`'s `unit_scale_up`/`to_mpo_unit`, `Chain::hscale_up_`), which
+fixes the Hamiltonian's units but not a hierarchy inside it: a bond whose
+strongest term is far below the largest coefficient still loses channels on
+v2, v3 and `"python"`, held by strict xfails. The fixes that changed numbers,
+so results from before them are not comparable: every setting passed to a
+chain constructor, which ran at the defaults (12-site Heisenberg at
+`maxm=4, nsweeps=10` on v3, -5.1420906326 to -5.1323602278), a constructor
+`mode="ED"` and `Thermal_Spin_Chain(..., mode="ED")`, which ran DMRG; v2/v3
+Hamiltonians whose largest coefficient is below about 1e-6 (6-site Heisenberg
+s*H from the Neel -1.25 to -2.4935771339 for E0/s at s from 4e-7 down, and
+the excited states, band edges, KPM and `gs_energy_generalized` with it; every
+v2/v3 calculation whose largest coefficient is below 1 now runs on 2^k H,
+which moved nothing beyond run-to-run noise at ordinary scales); every
+operator with coefficients at or below 1e-8, which had no terms on any
+backend (`vev(eps*Sz0)/eps` 0 to -0.189361), a term more than twelve decades
+below its operator's largest coefficient, now dropped, and an anti-Hermitian
+part between about 1e-10 and 1e-8 of the largest coefficient, now sent to
+NH-DMRG; `julia_live`'s `set_initial_wf`/`set_initial_wf_guess` (0.0008 to
+1.0000 overlap with the target); `get_gs(wf0=x, reconverge=False)` on a
+solved chain, which returned the stored state; every reader after a
+correlator that followed `gs_energy_generalized()` on a Hermitian chain never
+solved, or on a non-Hermitian chain with no earlier correlator (e0 -2.493577
+to lambda -3.597994 on 6 sites); `tc.MBChain` after `Thermal_Spin_Chain.
+get_gs()` at T>1e-5 (`gs_energy()` -2.25 to -0.416388 at T=1, `vev` on ED 0 to
+-0.069398); `gs_energy(wf0=x, reconverge=False)` on a non-Hermitian chain,
+now <x|H|x>; and lower-level `submode="ROOTN"` at sites other than (0,0).
+Behaviour changes without number changes: a non-setting constructor keyword,
+an unknown ROOTN keyword, `gs_energy(wf0=x)` on a non-Hermitian chain and the
+NH-KPM after `set_gs` all raise; `maxde` is documented as per site, which it
+always was. Left open and recorded as such: `gs_energy(maxde=...)` on a
+current chain returning the stored energy unrefined; TD and every TDVP route
+depending on units through the Krylov exponentiator's absolute error goal
+(on `"python"` at operator scales below 1e-8 this is now a quietly wrong
+spectrum where it raised `ZeroDivisionError`); the bond-local truncation, the
+MPO-set Hamiltonian, small-unit real-time evolution, v2 NH-DMRG and
+`"python"`'s Lanczos at small units; `julia_live` recording no solver key;
+and the lower-level route's pair `name=` next to `i=`/`j=`.
 
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
@@ -941,6 +1004,17 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   directly (a live C++ session has no well-defined "copy" semantics);
   instead it builds a fresh `Chain` for the clone when the original had
   one, which is what `clone()`/`bandwidth()`/`lowest_eigenvalue()` rely on.
+- **Both backends hand ITensor its operators at unit scale.** Three
+  thresholds inside ITensor are absolute (svdMPO's `Cutoff` of 1e-13 on
+  squared singular values, its 1e-14 coefficient skip, Davidson's 1e-10
+  residual below which a Krylov direction is randomized), so `build_mpo()`
+  goes through `mo_terms.h`'s `to_mpo_unit()` and every `dmrg()` on the
+  Hamiltonian through `solver_hamiltonian()`, both at the power of two that
+  brings a largest coefficient below 1 into [1,2), divided back exactly;
+  at a largest coefficient of 1 or more they run the unscaled code byte for
+  byte, and `set_hamiltonian_mpo` resets the scale to 1. A new MPO built
+  from an AutoMPO, or a new `dmrg()` call, should go through the same two,
+  or it reintroduces the small-units failure (2026-09-25 record, item 2).
 - A few **pre-existing bugs in the original design are deliberately
   reproduced, not fixed**, in both `chain_session.h`s (see comments at the
   call sites for details): `evoloperator()`'s z³/6 term multiplies `H2`
