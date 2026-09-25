@@ -15,7 +15,9 @@ previous hunts are `docs/audit_2026_08_hole_hunt.md` (five lenses, 21 findings),
 `docs/audit_2026_09_24c_hole_hunt.md` (four lenses, 18 findings), followed by
 `docs/audit_2026_09_25_open_items.md`, a fix pass over ten of their open items
 rather than a hunt, whose "Left open, and new leads" section belongs in the
-next brief next to every record's "New leads". Read the
+next brief next to every record's "New leads", and by
+`docs/audit_2026_09_25b_hole_hunt.md` (four lenses, 29 findings) over that fix
+pass. Read the
 scope section and the lens table of the most recent one before starting: a
 finding already recorded there is not a new finding.
 
@@ -35,6 +37,14 @@ Record, and keep true for the whole hunt:
   first, because a fix that lands mid-hunt and replaces `_dmrgcpp*.so` invalidates
   every other lens's measurements. The 2026-09 hunt took its one C++ fix by hand,
   separately, for exactly this reason.
+- When the hunt is scoped to one commit, a compiled snapshot of its parent, so
+  every candidate runs on both trees and the record can say whether the commit
+  brought the defect in. `git archive` of the parent without the vendored
+  `ITensor`/`TDVP` folders, those linked back to this checkout's copies (check
+  they are unchanged between the two commits), then `make pybind` in each
+  `mpscppN`: about a minute, and it never touches the repo's own `.so`. The
+  recipe and the two-runner setup are in the 2026-09-25b record's "Shared
+  helpers".
 - The invocation every repro uses:
 
 ```bash
@@ -78,6 +88,17 @@ parallel. Previous sets, to vary rather than repeat:
   a lead two records back that the brief left out. And a candidate turned up by
   a reviewer of a reviewer-found candidate needs its own reviewer too; a
   workflow that stops one level down leaves it as a lead.
+- 2026-09-25b (`docs/audit_2026_09_25b_hole_hunt.md`, scoped to the fix-pass
+  commit `e7b1196`): one lens per fix cluster, `construction`, `session`,
+  `scale`, `scale_cpp`, run on `e7b1196` and on a compiled snapshot of its
+  parent; 32 candidates reviewed to depth three, none refuted, 29 findings,
+  three from the commit itself and four more it made reachable. What it
+  taught: a fix that lowers one floor exposes the next one. Once
+  `clean_threshold` stopped dropping small operators, seventeen absolute
+  thresholds further down became reachable, and one of them sat in the
+  previous record's "Ruled out" as unreachable for exactly the reason the fix
+  removed. After a threshold or a guard changes, read the earlier "Ruled out"
+  sections as candidates, not as settled.
 
 Out of scope by construction, and stated in the record so the exclusion is on
 the page rather than in someone's head: vendored ITensor (`mpscpp2/ITensor/`,
