@@ -241,8 +241,14 @@ def test_gs_energy_generalized_leaves_computed_gs_true(itensor_version):
     lam = fc.gs_energy_generalized(m)
     assert fc.computed_gs is True
     # gs_energy()'s own DMRG branch returns self.e0 immediately without
-    # resolving anything when computed_gs is already True (manybodychain.py)
-    assert fc.gs_energy() == lam
+    # resolving anything when computed_gs is already True (manybodychain.py).
+    # That is the generalized state's own energy <wg|H|wg>, not lambda,
+    # since the 2026-09-25b hole hunt's finding 8 (it was lambda before,
+    # which this line pinned); lambda is kept as lam_generalized.
+    wg = fc.wf0
+    e_wg = np.real(wg.dot(fc.hamiltonian*wg)/wg.dot(wg))
+    assert fc.gs_energy() == pytest.approx(e_wg, abs=1e-8)
+    assert fc.lam_generalized == lam
 
 
 @pytest.mark.parametrize("itensor_version", ITENSOR_VERSIONS)

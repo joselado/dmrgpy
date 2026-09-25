@@ -177,13 +177,24 @@ followed by `sc.maxm, sc.nsweeps = 60, 20`, through the same checks
 `Spin_Chain(sites, mode="ED")` builds its DMRG session all the same, so
 `sc.mode = None` later goes back to DMRG, and
 `Thermal_Spin_Chain(sites, T, mode="ED")` sets the wrapper's own `tc.mode`,
-which its `get_gs()` hands to `tc.MBChain`. A keyword that is not a
-setting (a misspelling, a private name, a method, the chain's state such as
-`hamiltonian`, `conserved_sector`, `wf0`, `e0` or `computed_gs`, or an
-operator list the model class builds, as in `Fermionic_Chain(4, N=5)`)
-raises `TypeError` naming every offending key. Until the 2026-09-25 fixes
-every such keyword was dropped, so a bond dimension asked for at
-construction silently ran at `maxm=30` (§21). Note that `cvm_maxm` is set
+which its `get_gs()` hands to `tc.MBChain`. A chain's `mode="ED"`
+overrides the `mode=` of every call made on it, while `mode="DMRG"` on the
+chain means what no mode means, so an explicit `mode="ED"` call is still
+answered by ED; until the 2026-09-25b pass a chain set to `"DMRG"`
+answered that cross-check by DMRG, and `Thermal_Spin_Chain` now defaults
+to `mode=None`. The settings are an explicit list, `sites.SETTINGS`, and a
+keyword that is not one of them (a misspelling, a private name, a method,
+the chain's state such as `hamiltonian`, `conserved_sector`, `wf0`, `e0`
+or `computed_gs`, the Hamiltonian pieces `hopping`, `hubbard`, `pairing`
+and `exchange` that the `set_*` methods accumulate, or an operator list
+the model class builds, as in `Fermionic_Chain(4, N=5)`) raises
+`TypeError` naming every offending key, `Thermal_Spin_Chain` included.
+Until the 2026-09-25 fixes every such keyword was dropped, so a bond
+dimension asked for at construction silently ran at `maxm=30` (§21), and
+until the 2026-09-25b pass nine public attributes that are not settings
+were admitted, so `Fermionic_Chain(4, hubbard=2.0)` followed by
+`set_hoppings()` added the constant $2\,\mathrm{Id}$ to the free-fermion
+Hamiltonian ($-0.236068$ against $-2.236068$). Note that `cvm_maxm` is set
 from the default `maxm` when the chain is built, so it stays 30 unless it
 is given too, exactly as when `maxm` is assigned afterwards.
 
@@ -281,7 +292,7 @@ inside the session rather than with a message.
 | `sc.summps(a, b)` | $|a\rangle+|b\rangle$ |
 | `sc.scale_mps(x, wf)` | $x|\psi\rangle$ (a single-tensor rescale, not an MPO sweep) |
 | `sc.trace(A)` | $\mathrm{Tr}\,A$, and `sc.inverse_trace(A)` for $\mathrm{Tr}\,A^{-1}$ |
-| `sc.operator_norm(A)` | an estimate of $\lVert A\rVert$; `sc.is_zero_operator(A)` thresholds it at $10^{-4}$ |
+| `sc.operator_norm(A)` | an estimate of $\lVert A\rVert$; `sc.is_zero_operator(A)` tests $A/c_{\max}$ against $10^{-20}$, $c_{\max}$ its largest coefficient (see below) |
 
 `exponential(h, wf)` really is $e^{+h}$ on the DMRG backends now, as it
 always was under `mode="ED"`. It was neither before: for a *multi-site*
@@ -328,7 +339,17 @@ anti-Hermitian part down to about $10^{-10}$ of the largest coefficient; on
 $\lVert h-h^\dagger\rVert_F\le10^{-10}\lVert h\rVert_F$. Until the third
 2026-09-24 pass the probe compared an unnormalized norm against an absolute
 $10^{-4}$, so a weak loss term on an $O(1)$ Hamiltonian was called Hermitian
-and its decay rate dropped (§21).
+and its decay rate dropped (§21). `sc.is_zero_operator(A)` is relative in
+the same way since the 2026-09-25b pass: an operator with no terms, only
+zero coefficients or an empty canonical form is zero outright, and
+otherwise $A/c_{\max}$, $c_{\max}$ its largest coefficient, is probed
+against $10^{-20}$ on the mean squared norm, and on `mode="ED"` the exact
+matrix is tested as
+$\lVert A\rVert_F\le10^{-10}c_{\max}\lVert\mathbb 1\rVert_F$. It used to
+threshold a squared norm at an absolute $10^{-4}$, so a nonzero operator
+written at $10^{-2}$ read as zero; `cvm_solver="variational"` asks it
+whether $A^\dagger=B$ when `canonical.is_dagger_pair` cannot prove it,
+before choosing its solver (§6).
 
 A term counts as absent only when its coefficient is at or below
 $10^{-12}$ of the largest coefficient of the operator, and in the canonical
@@ -354,29 +375,49 @@ states, the band edges and every KPM spectrum come out the same in any unit
 of energy. Before, a Heisenberg chain written at $J\lesssim4\times10^{-7}$
 (v3) or $10^{-7}$ (v2) lost its exchange channels and returned the Néel
 energy, $-1.25J$ against $-2.4936J$ on 6 sites, and from about $J=10^{-6}$
-down every energy lost digits. What one scale cannot reach is a hierarchy
+down every energy lost digits. The largest coefficient is read after
+ITensor has merged duplicate terms, the same reading the MPO is built
+from, so $sH+S^z_0-S^z_0$ is solved exactly as $sH$; until the 2026-09-25b
+pass the solver read the raw term list, ran that operator unscaled, and
+returned $E_0/s$ 0.09 to 0.53 off on a 6-site Heisenberg chain at
+$s=10^{-10}$. Since then `"python"` builds its operators at the same unit
+scale too (a Heisenberg MPO at $s=10^{-7}$ was $1.1\times10^{-9}$ off
+relative to itself on numpy with OpenBLAS, and is now at roundoff at every
+scale), and NH-DMRG, on v2, v3 and `"python"`, solves $2^kH$ and divides
+the energy back in the same way. What one scale cannot reach is a hierarchy
 inside the Hamiltonian: `toMPO` truncates bond by bond, so a bond whose
 strongest term is below about $4\times10^{-7}$ (v3) or $3\times10^{-7}$ (v2)
 of the largest coefficient loses channels at any units, which is an $O(1)$
 energy offset or one-site field next to exchange written at $10^{-7}$, or a
 weak link $J'=10^{-7}$ in a $J=1$ chain, both read at a third of their
-exchange, and `"python"` drops such a bond altogether. Four more routes are
-not scale-free, and on those the Hamiltonian is best written in units where
-its largest coefficient is of order 1: a Hamiltonian set as an already-built
-MPO (`set_hamiltonian(toMPO(H))` on v3, $9.8\times10^{-6}$ off at
-$J=10^{-8}$), real-time evolution ($6.4\times10^{-4}$ off with TDVP at
+exchange, and `"python"` drops such a bond altogether. Three more routes
+are not scale-free, and on those the Hamiltonian is best written in units
+where its largest coefficient is of order 1: a Hamiltonian set as an
+already-built MPO (`set_hamiltonian(toMPO(H))` on v3, $9.8\times10^{-6}$ off
+at $J=10^{-8}$), real-time evolution ($6.4\times10^{-4}$ off with TDVP at
 $J=10^{-8}$ on v3, the MPO-Taylor stepper of v2 diverging there, and the
 Krylov exponentiator of `"python"` and v3 stopping on an absolute error),
-NH-DMRG on v2, and the Lanczos of `"python"`, which stops on an absolute
-test ($1.2\times10^{-6}$ relative at $J=10^{-9}$). `mode="ED"` is
-unaffected by any of this, and `"julia_live"` by the units.
+and the Lanczos of `"python"`'s finite DMRG, which stops on an absolute
+test ($1.2\times10^{-6}$ relative at $J=10^{-9}$, measured before its MPOs
+were built at unit scale). NH-DMRG on v2 was a fourth until the 2026-09-25b
+pass. `mode="ED"` does not meet ITensor's thresholds, but until that pass
+it had absolute ones of its own: its iterative eigensolver above 2000
+states, which now runs at unit infinity norm, `submode="ROOTN"`'s Lanczos
+breakdown, now relative to the seed's own $\lVert Hq_0\rVert$ on ED and on
+the MPS route alike, and the `dex` cutoff (§6) and `State.normalize()`'s
+floor, which stay absolute and now warn. `"julia_live"` is unaffected by
+the units.
 
 `trace`, `operator_norm` and `is_zero_operator` take a `MultiOperator`,
 not a compiled `StaticOperator`. On the wavefunction itself,
 `wf.dot(other)` and `wf.norm()` give $\langle\psi|\phi\rangle$ and
 $\lVert\psi\rVert$, `wf.normalize(tol=1e-8)` returns the normalized
-state (or `None`, with a warning, if the norm is below `tol`),
-`wf.get_conjugate()` the complex conjugate state, and `wf.get_entropy(b)`
+state (or `None`, with a warning, if the norm is below `tol`), on every
+backend, `mode="ED"` included since the 2026-09-25b pass, where
+`normalize()` took no `tol` and `norm()` did not exist; `tol` is an
+absolute floor on the norm, so for a state of another scale pass it
+relative to that scale. `wf.get_conjugate()` gives the complex conjugate
+state, and `wf.get_entropy(b)`
 the entanglement entropy at bond `b` (§5). `wf * x` and `A * wf` are
 shorthand for `scale_mps` and `applyoperator`. `wf.get_dm(inds=[...])`
 returns the single-particle density matrix $\langle
@@ -393,13 +434,27 @@ e0 = sc.gs_energy()          # E0
 wf = sc.get_gs()             # the |GS> wavefunction itself
 ```
 
-`get_gs()` takes the same `wf0=`/`reconverge=` keywords as `gs_energy()`
-and returns the stored state under the same condition, a current state and
-no `wf0=`: `get_gs(wf0=x)` sweeps from x, and
-`get_gs(wf0=x, reconverge=False)` returns x itself with `e0` =
-$\langle x|H|x\rangle$, on a solved chain as on a fresh one, and every later
-reader measures x. Until the 2026-09-25 fixes a solved chain returned its
-stored state without reading x.
+`get_gs()` takes the same keywords as `gs_energy()` and returns the stored
+state under the same condition, which is that the stored answer already
+answers the call: a current state, no `wf0=`, and no keyword but
+`reconverge=False`, `maxde=None` or `maxdepth=` (on `"julia_live"`, no
+keyword at all). Every other call goes to the solver, as on a chain that
+was never solved, so `reconverge=True` sweeps from the stored state,
+`maxde=` refines it, and a misspelled keyword raises `TypeError`. Until the
+2026-09-25b pass a solved chain returned the stored answer before reading
+any of them: `gs_energy(maxde=1e-4)` gave the unrefined $-4.1432$ against
+$-4.2580$ on a 10-site Heisenberg chain at `maxm=3`, and `wf=x` or
+`reconverg=False` were swallowed. `get_gs(wf0=x)` sweeps from x, and
+`get_gs(wf0=x, reconverge=False)` returns the unit vector
+$x/\lVert x\rVert$ with `e0` = $\langle x|H|x\rangle/\langle x|x\rangle$,
+on a solved chain as on a fresh one and on every route, those that resolve
+to ED included, and every later reader measures that state. A state and its
+multiples are one state: every setter normalizes what it is given, once,
+and a state whose norm is zero or not finite raises `ValueError`. Until the
+2026-09-25 fixes a solved chain returned its stored state without reading
+x, and until the 2026-09-25b pass the readers met a state whose norm is not
+one at two different normalizations, and the routes that resolve to ED
+raised `TypeError` or dropped x.
 
 **The DMRG sweep schedule: bond-dimension ramp.** `sc.maxm` is the
 *target* bond dimension, not the one every sweep runs at. By default
@@ -437,7 +492,7 @@ per ramping sweep, and is switched off entirely once the schedule reaches
 A *warm* start is never truncated by the ramp: when `gs_energy()` is
 re-entered with a wavefunction already in hand (`set_initial_wf_guess`,
 or simply a previous `gs_energy()` call's own solution; `set_initial_wf`
-instead takes the state as it is, unswept), the ramp's starting
+instead takes the state unswept, normalized), the ramp's starting
 bond dimension is floored at whatever that state already carries, so a
 re-run can only improve the energy. On `itensor_version="julia_live"` the
 setters follow the same contract since the 2026-09-25 fixes: a state set
@@ -448,7 +503,18 @@ window. Before, both setters were dropped and the next read solved from a
 random start, `set_gs()` raised `AttributeError`, and `gs_energy(wf0=x)` on
 a solved chain raised `TypeError`. The ramp applies to the ground-state
 solve on all three DMRG backends (`itensor_version` 2, 3 and `"python"`);
-`"julia_live"` keeps its own schedule. See
+`"julia_live"` keeps its own schedule, but since the 2026-09-25b pass a
+solve there that has no state of its own starts from a random MPS of link
+dimension `min(maxm, bond_ramp_start)` and puts `sc.noise` on the first
+half of the sweeps, as the other backends do. It used to start from a
+product state with no noise, so a Hamiltonian whose couplings skip a site
+stopped at a classical product state with no warning: $-0.5$ against the
+exact $-1.0$ for the Heisenberg chain on the even sites of 6, and
+$\langle H\rangle=-0.5$ against $-1.0$ for a 3-site `Thermal_Spin_Chain` at
+$T=0$, whose physical Hamiltonian lives on the even sites of the doubled
+chain. Every `"julia_live"` solve now
+varies from run to run within the solver's noise, and a warm 16-site solve
+takes 2.1 to 2.35 s where it took 1.5 s. See
 `examples/groundstate/bond_dimension_ramp` for a 30-site inhomogeneous
 Heisenberg--Hubbard chain timing ramp against flat.
 
@@ -1135,9 +1201,14 @@ backend, narrowing the compiled-vs-pure-Python gap relative to plain
 ground-state DMRG's single local diagonalization per bond.
 
 **Caveat (both Hermitian and non-Hermitian `gs_energy_generalized`).**
-Afterward, `fc.wf0`/`fc.e0` hold the eigenstate/eigenvalue of the
-*generalized* problem, not a plain eigenstate of `fc.hamiltonian` alone --
-every other method that reads `fc.wf0` as an ordinary ground state
+Afterward, `fc.wf0` holds the eigenstate $|w_g\rangle$ of the
+*generalized* problem, not a plain eigenstate of `fc.hamiltonian` alone,
+and `fc.e0` that state's own energy
+$\langle w_g|H|w_g\rangle/\langle w_g|w_g\rangle$ (on a non-Hermitian chain
+the biorthogonal $\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|\psi_R\rangle$
+of the pair), while $\lambda$, still what the call returns, is kept as
+`fc.lam_generalized` -- every other method that reads `fc.wf0` as an
+ordinary ground state
 (`get_excited_states()`, any dynamical/KPM correlator, ...) has no way to
 tell the difference and will silently build on the wrong reference state
 if called afterward. Since the 2026-09-25 fixes this is what every
@@ -1147,10 +1218,17 @@ ground state over the generalized one at the first correlator on a
 Hermitian chain never solved ($|\langle w_g|w_0\rangle|^2=0.60$ on a
 6-site chain), and on a non-Hermitian chain whether it was solved first or
 not (0.6877 on a 4-site chain), unless a correlator had run before the
-generalized solve. A bare `gs_energy()` afterwards returns $\lambda$, since
-the stored state is current, so call `gs_energy_generalized()` as the last
-step of a calculation, or `restart()` and then `gs_energy()` if you need a
-genuine ground state for one of those other methods.
+generalized solve. A bare `gs_energy()` afterwards returns that energy,
+since the stored state is current, and every submode measures the state's
+lines from it, as TD and EX always did. Until the 2026-09-25b pass `e0` was
+$\lambda$, so KPM, CVM, ROOTN and TDZ put every line $\lambda-E_{w_g}$ away
+from where TD and EX put it: for $A=2\,\mathrm{Id}$, whose generalized state
+is the ground state itself, the $(S^z_0,S^z_0)$ lines of a 4-site chain in
+a field sat at $-0.15$ and $+0.56$ against the exact $+0.66$ and $+1.365$,
+a line at negative frequency in a ground-state autocorrelator. Call
+`gs_energy_generalized()` as the last step of a calculation, or
+`restart()` and then `gs_energy()` if you need a genuine ground state for
+one of those other methods.
 
 Unlike plain `gs_energy()`, this method has no ED fallback for a chain
 too short for the backend's two-site sweep, so on
@@ -1852,23 +1930,44 @@ global KPM expansion, at the cost of re-solving the linear system for
 every $\omega$ on the requested grid. Two things keep that per-$\omega$
 cost down. First, everything $\omega$-independent is computed once per
 sweep instead of once per point — in particular the right-hand side
-$-\eta B|\mathrm{GS}\rangle$. Second, the CG loop terminates early once
-the bond-dimension truncation (`cvm_maxm`) puts a floor under the
-reachable residual — past that floor the iteration cannot improve the
-tracked best solution any further (the truncated recurrence in fact
-diverges), so the solver returns the best correction vector seen
-instead of burning the full `cvm_nit` iteration budget (`cvm_patience`
-sets how many iterations without meaningful improvement conclude the
-floor is reached, and `cvm_blowup` how far past the best residual the
-running one may diverge before stopping). Neither feature
-changes the answer. Each point reports its CG iteration count and best
-residual; if that residual stalls far above `cvm_tol`, the correction
-vector is not converged at this bond dimension and the fix is a larger
-`cvm_maxm`, not more iterations. (Warm-starting each point's CG from
-the neighboring point's correction vector was tried and measured to
-*hurt* — truncated CG from a nearby-but-wrong start can stagnate at a
-much worse residual than from the cold start — so each point is solved
-independently.)
+$b=-\eta B|\mathrm{GS}\rangle$. Second, the CG loop stops early once the
+bond-dimension truncation (`cvm_maxm`) keeps it from improving, instead
+of burning the full `cvm_nit` iteration budget. The CG starts from zero
+($b=0$ returns 0 at once) and stops when its residual reaches `cvm_tol`
+(default $10^{-5}$) relative to $\lVert b\rVert=\eta\lVert
+B|\mathrm{GS}\rangle\rVert$. Its two early exits read the CG functional
+$\phi(x)=\tfrac12\langle x|M|x\rangle-\mathrm{Re}\langle b|x\rangle$, $M$
+the system matrix above, which exact CG lowers at every step: `cvm_patience`
+(default 50) counts iterations without a new minimum of $\phi$, and
+`cvm_blowup` (default 100) fires only when $\phi$ is above its minimum and
+the running residual is that many times the best iterate's. The solver
+returns the iterate that reached the tolerance or, failing that, the one
+of lowest $\phi$. On an untruncated solve neither exit can fire, so
+neither changes the answer there; on a truncated one they stop a
+recurrence that has stopped improving, and the point warns. Each point
+reports its CG iteration count and best residual; if that residual stalls
+far above `cvm_tol`, the correction vector is not converged at this bond
+dimension and the fix is a larger `cvm_maxm`, not more iterations.
+(Warm-starting each point's CG from the neighboring point's correction
+vector was tried and measured to *hurt* — truncated CG from a
+nearby-but-wrong start can stagnate at a much worse residual than from
+the cold start — so each point is solved independently.)
+
+Until the 2026-09-25b pass `cvm_tol` was absolute, the CG started from $b$
+itself, and both exits read the running residual, which exact CG does not
+lower monotonically. Whenever $\eta\lVert B|\mathrm{GS}\rangle\rVert$ was
+at or below $10^{-5}$ (an operator at scale $10^{-4}$, a Hamiltonian in
+small units, or `get_kondo_spectrum`'s documented default `delta=2e-6`) the
+start passed at iteration 0 and every frequency returned the flat
+$\eta\langle AB\rangle/\pi$, and at full bond dimension the exits fired
+on the stall that precedes CG's drop and returned the start: an on-line
+point of a 6-site chain at $\eta=2\times10^{-3}$ gave
+$1.5915\times10^{-4}$ against 13.2636, and 10 of the 121 points of a
+10-site grid at $\eta=0.05$ were off by up to 0.989 of the peak. The
+earlier claim that the exits never change the answer was therefore false
+then; it holds now for untruncated solves. The cost moved with it: that
+10-site grid takes 1214 s on v3 where it took 677 s, and a truncated
+point about twice as long.
 
 **`submode="CVM_explicit"` — the resolvent formed explicitly.** Computes
 the same $S_{AB}(\omega)$ as `submode="CVM"`, but without the
@@ -1878,10 +1977,19 @@ $(\omega+E_0\pm i\eta-H)^{-1}$ to $B|\mathrm{GS}\rangle$ directly, as two
 literal transcription of the definition and needs no conjugate-gradient
 machinery, but it inherits `applyinverse`'s accuracy rather than
 `"CVM"`'s controlled CG residual, so `"CVM"` is the better default; use
-this one to cross-check a suspicious `"CVM"` curve. It assumes
-$A^\dagger=B$ and raises `NotImplementedError` naming the submode
-otherwise (it used to be a bare `RuntimeError: No active exception to
-reraise` after a bare `print`). On a non-Hermitian $H$ it is one of
+this one to cross-check a suspicious `"CVM"` curve. `applyinverse`'s own
+tolerance `delta=` is relative to the norm of the vector it inverts
+against since the 2026-09-25b pass, so the solve is as accurate for a
+small operator as for a large one. It takes any pair: it inverts against
+$B|\mathrm{GS}\rangle$ and takes the overlap with
+$A^\dagger|\mathrm{GS}\rangle$, which is
+$\langle\mathrm{GS}|A(z-H)^{-1}B|\mathrm{GS}\rangle$, i.e. $C[A,B]$, and
+the non-Hermitian CVM and INV do the same on DMRG and on ED. Until that
+pass it assumed $A^\dagger=B$ behind an absolute test on a squared norm,
+so it raised `NotImplementedError` for a non-adjoint pair at unit scale
+(and, before that, a bare `RuntimeError` after a `print`) and answered one
+at scale $10^{-2}$ with the adjoint pair's curve, 2.004 of the peak off
+for $(10^{-2}S^x_0,10^{-2}S^y_1)$. On a non-Hermitian $H$ it is one of
 the two submodes (with `"CVM"`) that has a genuine non-Hermitian
 implementation.
 
@@ -2456,8 +2564,8 @@ right state with no left partner, and `submode="KPM"` raises
 the left eigenvector of an earlier solve and absorbed
 $\langle\psi_L|x\rangle$ (0.93 on a 4-site chain) into the normalization.
 `gs_energy(wf0=x)` on a non-Hermitian chain raises `TypeError`, since
-NH-DMRG takes no start state, and with `reconverge=False` takes x as it is,
-on every session backend. Implemented so far for the ED backend, `itensor_version=3`,
+NH-DMRG takes no start state, and with `reconverge=False` takes x,
+normalized, on every session backend. Implemented so far for the ED backend, `itensor_version=3`,
 and `itensor_version="python"`; `itensor_version=2` raises
 `NotImplementedError`. See `examples/non_hermitian/nhkpm_v3_VS_ED`
 (ED vs `itensor_version=3`, machine-precision agreement on a small
@@ -2488,8 +2596,19 @@ the very splitting it was meant to resolve. No single `dex` works at both
 ends of such a sweep: it must be large enough to keep the whole manifold
 at zero field and small enough to exclude the split states at finite
 field. DMRGPY emits a `RuntimeWarning` whenever an eigenvalue lies within
-a factor of three of `dex` on either side, i.e.\ exactly when the answer
-depends on where the cutoff was placed.
+a factor of three of `dex` on either side, where the answer depends on
+exactly where the cutoff was placed, and, since the 2026-09-25b pass, a
+second one whenever the averaged manifold holds more than one state and is
+wider than the broadening, `ex[nex-1] > delta`. The first alone cannot see
+a cutoff that lies far above the levels it swallows, which is where the
+answer depends on it most: a Hamiltonian written in small units puts its
+whole spectrum below `dex/3`, and the call then averages over every state
+with equal weight, i.e. returns the infinite-temperature spectrum, 0.738
+of the peak off on a 6-site Heisenberg chain with $0.3S^z_0$ written at
+$s=10^{-7}$, with no warning before. There the remedy is a `dex` in the
+Hamiltonian's own units, `dex=s*1e-5`, which is exact and quiet. A
+genuinely degenerate multiplet stays quiet under the second test, since
+its width is roundoff.
 
 The clean way out of that regime is to stop using a cutoff at all and
 weight the manifold physically instead: pass a small `T` (see §9), which
@@ -2708,16 +2827,54 @@ state under the *physical* Hamiltonian $H$,
 
 $$|\Psi(\beta)\rangle=e^{-\beta H/2}|\Psi(0)\rangle,\qquad \beta=1/T$$
 
-(stepped via repeated small first-order updates
-$|\Psi(\beta+\Delta\beta)\rangle\propto(1-\Delta\beta\,H)|\Psi(\beta)\rangle$,
-renormalized at each step) and tracing out the ancillas gives exactly the
-thermal (Gibbs) density matrix of the physical chain,
-$\rho(T)=\mathrm{Tr}_{\rm anc}|\Psi(\beta)\rangle\langle\Psi(\beta)|\propto e^{-\beta H}$:
+and tracing out the ancillas gives the thermal (Gibbs) density matrix of
+the physical chain,
+$\rho(T)=\mathrm{Tr}_{\rm anc}|\Psi(\beta)\rangle\langle\Psi(\beta)|\propto e^{-\beta H}$,
+up to the error of the imaginary-time stepper described below:
 
 ```python
 from dmrgpy import thermal
 tc = thermal.Thermal_Spin_Chain(spins, T=0.1)
+tc.anneal_step = 2.0    # the default: largest dimensionless step dtau*W
+tc.anneal_order = 8     # the default: Taylor order of each step
 ```
+
+**The imaginary-time stepper.** $e^{-\beta H/2}$ is applied as $n_{\rm st}$
+steps, each the order-$k$ Taylor polynomial of
+$e^{-\Delta\tau(H-E_{\rm ref})}$, with $E_{\rm ref}$ the middle of the
+spectrum $[E_{\min},E_{\max}]$, $\Delta\tau=\beta/(2n_{\rm st})$ and
+$n_{\rm st}=\max(1,\lceil\beta W/(2a)\rceil)$, where $a$ is `anneal_step`
+and $W=E_{\max}-E_{\min}$ comes from two band-edge solves on a clone of the
+chain, on its own backend and mode. Every eigenvalue then enters a step as
+$x=\Delta\tau(E-E_{\rm ref})\in[-a/2,a/2]$, so the error depends on the
+dimensionless step $a$ and the order $k$ alone, in any units and at any
+constant offset, and converges as $a^k$. Each polynomial is applied as its $k$ linear factors over its complex
+roots, i.e. $k$ applications of $H$ per step, which runs on every backend.
+At the defaults, `anneal_step = 2` and `anneal_order = 8` (class attributes
+of `Thermal_Spin_Chain`, which an instance overrides as it sets `T`), the
+thermal energy of the open $S=1/2$ Heisenberg chain is within
+$6.8\times10^{-7}$ (relative) of the Boltzmann value from 3 to 12 sites and
+$T$ from 0.05 to 10, for about $2\beta W$ applications of $H$. The
+ground-state branch is taken at $T\le10^{-5}W$, and $T=\infty$ returns the
+singlet purification without a step. `thermal.anneal(..., step=, order=)`
+takes the same two directly, and its `dbeta=` is an optional absolute cap
+on $\Delta\tau$.
+
+Until the 2026-09-25b pass the stepper was first order,
+$|\Psi\rangle\to(1-0.1H)|\Psi\rangle$ repeated `int(beta/2/0.1)` times on
+the unshifted $H$, so its error was set by 0.1 times the extensive energy
+($-2.777892$ against the exact $-3.166396$ on 10 sites at $T=0.5$), a
+constant offset changed the answer, every $T>5$ took no step at all (a
+`ZeroDivisionError` for a float $T$, the $T=\infty$ state for a numpy
+scalar), and it returned early once one step changed the state by less
+than $10^{-7}$, so a Hamiltonian in small units came back at the wrong
+temperature ($E/s$ of 0.000000 at $s=10^{-3}$ against $-0.769460$ on 3
+sites at $T=0.5s$). The ground-state switch was an absolute $T>10^{-5}$.
+Finite-temperature results from before are not comparable (§21). The
+cost now grows with $\beta W$: 8.6 s where it was 4.9 s on 12 sites at
+$T=0.5$. See `examples/finite_temperature/thermal_purification_VS_exact`,
+which compares 6 sites against the exact Boltzmann energy from $T=0.1$ to
+10, with a constant offset, and plots the relative error.
 
 `tc.MBChain` holds the annealed state as a state set by hand, so `vev()`
 and the correlators on `tc.MBChain` measure $|\Psi(\beta)\rangle$ on every
@@ -2727,12 +2884,14 @@ the lowest eigenvalue of $H$). Until the 2026-09-25 fixes `gs_energy()`
 returned the singlet Hamiltonian's energy ($-2.25$ against $-0.4164$ on a
 3-site chain at $T=1$), a correlator re-solved the plain ground state, and
 `vev()` and the KPM sum rule on `mode="ED"` read the singlet state
-($\langle S^z_0S^z_1\rangle$ 0.0 against $-0.0694$). Note that a dynamical
+($\langle S^z_0S^z_1\rangle$ 0.0 against $-0.0694$). Those two reference
+values are the first-order stepper's of the time; the present stepper
+gives $-0.428230$ and $-0.071372$, both exact. Note that a dynamical
 correlator of the purified state under $H$ on the physical sites alone is
 not the thermal correlator, which needs $H$ minus its ancilla copy, so of
 these only the static readers and the sum rule are thermal quantities.
 
-`T=0` recovers ordinary ground-state DMRG. For small systems (Hilbert
+`T=0`, like any $T\le10^{-5}W$, recovers ordinary ground-state DMRG. For small systems (Hilbert
 space dimension $\lesssim2000$, `algebra.maxsize`), `get_correlation_matrix(T=...)`
 (ED only, `entropytk/correlationentropy.py`'s `get_correlation_matrix_finiteT`)
 instead computes the exact thermal average directly by brute-force ED,
@@ -4027,7 +4186,9 @@ And these combinations now work where they used to fail:
   process inside ITensor and now evaluates to 0 as it should;
 - **conserved-sector mode + site/pair entropy, mutual information, and the
   default `get_correlation_matrix()`**, all of which raised;
-- **`get_rdm(i=ns-1)`** (the last site) on `itensor_version="python"`.
+- **`get_rdm(i=ns-1)`** (the last site) on `itensor_version="python"`, and
+  on `"julia_live"` since the 2026-09-25b pass, where it raised
+  `BoundsError`.
 
 One thing the audit's own `name=` fix broke, since fixed: centralizing
 `name=` resolution made every submode go through the same normalizer,
@@ -4244,13 +4405,13 @@ you read the two 2026-08 items above.
 | `gs_energy_fluctuation(npow=...)` | accepted and misused | `TypeError` |
 | `exponential(h, wf)` with `h` neither Hermitian nor anti-Hermitian, on DMRG | a warning and a number | `NotImplementedError` |
 | `applyoperator`/`summps`/`applyinverse`/`scale_mps`/`exponential` with a `mode=` naming the other backend | ran the wavefunction's own backend anyway (or a bare `raise`) | `TypeError` saying which backend the state belongs to |
-| `get_rdm()` on any ED route | `AttributeError` several frames deep | `NotImplementedError` |
-| the bond entanglement entropy on any ED route | `AttributeError` several frames deep | `NotImplementedError` pointing at `get_site_entropy`/`get_pair_entropy` |
+| `get_rdm()` on any ED route | `AttributeError` several frames deep | `NotImplementedError` (on `"julia_live"` since the 2026-09-25b pass) |
+| the bond entanglement entropy on any ED route | `AttributeError` several frames deep | `NotImplementedError` pointing at `get_site_entropy`/`get_pair_entropy` (on `"julia_live"` since the 2026-09-25b pass) |
 | `get_bond_entropy(wf, i, j)` with a site out of range | the audit recorded a SIGABRT on the C++ backends | `IndexError` |
 | `get_hamiltonian()` before `set_hamiltonian()` | `'int' object is not iterable`, or `takes 0 positional arguments` | `ValueError` naming the fix |
 | a misspelled `ctmode`/`dmmode`/`fpmode` | `RuntimeError: No active exception to reraise` | `ValueError` listing the accepted values |
 | a misspelled `basis=` in `get_correlation_matrix` | the electron-basis matrix, silently | `ValueError` |
-| `submode="CVM_explicit"` with $A^\dagger\neq B$ | a `print` then `RuntimeError: No active exception to reraise` | `NotImplementedError` naming the submode |
+| `submode="CVM_explicit"` with $A^\dagger\neq B$ | a `print` then `RuntimeError: No active exception to reraise` | `NotImplementedError` naming the submode; since the 2026-09-25b pass it returns $C[A,B]$ |
 | `get_distribution()` with no `X=` | `RuntimeError: No active exception to reraise` | `TypeError` naming `X=` |
 | `MultiOperator / "a"`, `*` by an ndarray, or `multioperator.obj2MO` on an object it does not recognize | `RuntimeError: No active exception to reraise` | `TypeError` naming what was passed |
 | `sc.mode = "dmrg"` (any unrecognized spelling) | accepted, and silently decided by the automatic fallbacks | `ValueError` |
@@ -4560,20 +4721,28 @@ below names its entry in that record.
 - **`get_gs(wf0=x, reconverge=False)` on a solved chain** returns x with
   `e0` = $\langle x|H|x\rangle$ (0.0388284989 where it returned the stored
   $-2.5231886435$ on a 6-site `"python"` chain), and every later reader
-  measures x; `get_gs(wf0=x)` sweeps from x (§3, get-gs-wf0).
+  measures x; `get_gs(wf0=x)` sweeps from x (§3, get-gs-wf0). Since the
+  2026-09-25b pass the state returned and measured is $x/\lVert x\rVert$,
+  and the call works on the routes that resolve to ED, where it raised
+  `TypeError`.
 - **Readers after a correlator that followed `gs_energy_generalized()`**
   measure the generalized state: on a Hermitian chain never solved before,
   `e0` goes from $-2.493577$ to $\lambda=-3.597994$ and $\langle
   S^z_0\rangle$ from 0 to $-0.4801$ (6 sites, $A=1+0.8S^z_0$); on a
   non-Hermitian chain with no correlator before the generalized solve,
   solved first or not, `e0` goes from $-1.596396$ to
-  $\lambda=-2.17581-0.213083i$ (§3, generalized-cache).
+  $\lambda=-2.17581-0.213083i$ (§3, generalized-cache). Since the
+  2026-09-25b pass `e0` is the generalized state's own energy instead of
+  $\lambda$, which is kept as `lam_generalized` (next subsection).
 - **`tc.MBChain` after `Thermal_Spin_Chain.get_gs()` at $T>10^{-5}$**:
   on a 3-site chain at $T=1$, `gs_energy()` goes from $-2.25$ to $-0.416388$
   and the KPM sum rule from $-0.166370$ to $-0.069291$ on the DMRG
   backends, and on `mode="ED"` `vev(Sz0*Sz1)` from 0 to $-0.069398$ and
   `gs_energy()` from $-2.25$ to $-1.0$, the lowest eigenvalue (§9,
-  thermal-bypass).
+  thermal-bypass). The 2026-09-25b stepper moved these again, to
+  $-0.428230$ for `gs_energy()`, $-0.071372$ for `vev(Sz0*Sz1)` (both
+  exact) and $-0.071331$ (DMRG) and $-0.071188$ (ED) for the sum rule, and
+  the switch is now at $T>10^{-5}W$, $W$ the spectral width.
 - **`gs_energy(wf0=x, reconverge=False)` on a non-Hermitian chain** is
   $\langle x|H|x\rangle$ on `"python"`, v2 and v3, where it returned the
   NH-DMRG $-1.596396$ (§6, nh-injected).
@@ -4598,3 +4767,230 @@ below names its entry in that record.
 `TypeError`; `gs_energy_generalized()` on a v3 MPO Hamiltonian, which raised
 `AttributeError` (-3.59799449, the `MultiOperator` route's value); and the
 first correlator after a plain NH solve no longer repeats the solve.
+
+### The 2026-09-25b hole hunt
+
+A sixth hunt (`docs/audit_2026_09_25b_hole_hunt.md`, four lenses over the
+single commit `e7b1196` that fixed the open items above) recorded 29
+findings and two unreviewed leads, and its fix pass found one more
+(finding 30). Three of the 29 came from that commit and the rest are
+older, reached by probing next to it, and seventeen are one family: a
+threshold in absolute energy units, which the relative term cutoff of
+`e7b1196` let a Hamiltonian or an operator written in small units reach
+for the first time. Every one is fixed, and both compiled extensions were
+rebuilt. Each item below names its finding; the record carries the
+reproduction that was actually run, and every number is from it.
+
+**Results that are not comparable across this change.**
+
+- **A state whose norm is not one**, set with `set_gs()`,
+  `set_initial_wf()` or `set_initial_wf_guess()`, or passed as `wf0=` with
+  `reconverge=False`, is now normalized once, where it becomes the chain's,
+  on every backend. Before, `e0`, the session's `vev()` and the energy
+  fluctuation divided by $\langle x|x\rangle$ while KPM, CVM, TD, TDZ,
+  ROOTN, `evolve_and_measure()` and, on `mode="ED"` and `"julia_live"`,
+  `vev()` did not, so each of those now drops by exactly
+  $1/\langle x|x\rangle$. On a 4-site Heisenberg chain at $x=2s$, $s$ its
+  ground state: the KPM sum rule of $(S^z_0,S^z_0)$ goes from 0.999995 to
+  0.249999, `evolve_and_measure(Sz0*Sz1)` at $t=0$ and ED's `vev(Sz0*Sz1)`
+  from $-0.910684$ to $-0.227671$, `gs_energy_fluctuation()` on ED and
+  `"julia_live"` from 9.696152 to 0 ($8\times10^{-9}$ on `"julia_live"`),
+  and `"julia_live"`'s
+  `get_excited_states(n=2)` from $[-6.464102, -0.957107]$ to
+  $[-1.616025, -0.957107]$. `get_gs()` hands back $x/\lVert x\rVert$, and
+  `get_rdm()` is the density matrix of the ray on all four backends, where
+  it was $\rho/c^2$ for a state of norm $c$ (trace 0.25 at $c=2$). An
+  explicit `wf=` to `evolve_and_measure`/`evolution_ABA` is left as given
+  (findings 1 and 11).
+- **Readers after `gs_energy(wf0=x, reconverge=False)` on a route that
+  resolves to ED** (the chain's `mode="ED"`, a `mode="ED"` call, or v3's own
+  fallback below three sites) measure x, where the ED ground state stayed
+  on the chain: on a 4-site Heisenberg chain with $0.4S^z_0+0.3S^x_3$,
+  `vev(Sz0)` goes from $-0.2286763037$ to $\langle x|S^z_0|x\rangle$,
+  $-0.1089088536$ and $0.0390101221$ for the random states drawn on
+  `"python"` and v3. The returned energy stays the lowest eigenvalue
+  (finding 2).
+- **A chain whose `mode` is `"DMRG"` no longer overrides a `mode="ED"`
+  call**, so the ED cross-check is ED again: `gs_energy(mode="ED")` on an
+  8-site Heisenberg chain in a staggered field at `maxm=2` goes from
+  $-3.6734578613$ to the exact $-3.7040879103$, and
+  `get_correlation_matrix(T=1)`, which is ED only, from occupations up to
+  0.149 off the Fermi function to $5.6\times10^{-16}$, and from 4.2 s to
+  0.1 s (finding 3).
+- **`gs_energy(reconverge=True)` and `gs_energy(maxde=...)` on a solved
+  chain** reach the solver, with `get_gs()` alike: the first sweeps from the
+  stored state ($-4.2548001917$ to $-4.2548333556$ on a 10-site Heisenberg
+  chain at `maxm=6` and one sweep, `"python"`), and the second refines
+  ($-4.1431954920$ to $-4.2580352072$ at `maxm=3`, exact $-4.2580352073$)
+  (finding 5, and the 2026-09-25 record's `maxde=` lead).
+- **`"julia_live"` solves on a Hamiltonian whose couplings skip a site**
+  leave the product state they were trapped in (§3): the ground energy goes
+  from $-0.5$ to $-1.0$ on the Heisenberg chain on the even sites of 6 and
+  from $-1.5$ to $-3.232051$ on an 8-site chain with next-nearest-neighbour
+  exchange only, `Thermal_Spin_Chain` at $T=0$ from
+  $\langle H\rangle=-0.5$ to $-1.0$, `gs_energy_generalized` from
+  $-0.833333$ to $-1.496331$, the non-Hermitian solve from
+  $-1.4997+0.0994i$ to $-3.219401$, and the lowest excited state from
+  $-3.190943$ to $-3.232051$, all now exact. Every other `"julia_live"`
+  solve moves within its run-to-run noise, and a warm 16-site solve costs
+  about 40 per cent more (finding 7).
+- **`gs_energy()` and `e0` after `gs_energy_generalized()`** are the
+  generalized state's own energy (§4), where they were $\lambda$: on a
+  4-site Heisenberg chain in a field of 0.3, from $-2.162930$ to $-1.385986$
+  for $A=1+0.8S^z_0$, from $-0.808013$ to $-1.616025$ for $A=2\,\mathrm{Id}$
+  and from $-1.115761$ to $-1.565921$ for $A=1.5+0.4S^z_0$, on `"python"`,
+  v3 and `"julia_live"`, and on a non-Hermitian chain the biorthogonal
+  energy of the pair. $\lambda$ is still the return value and is kept as
+  `sc.lam_generalized`. Every KPM, CVM, ROOTN and TDZ spectrum afterwards
+  moves rigidly by $\lambda-E_{w_g}$ onto the lines TD and EX already gave
+  ($-0.777$ for $A=1+0.8S^z_0$, $+0.808$ for $A=2\,\mathrm{Id}$), and on
+  `"julia_live"` the KPM window takes its lower edge from a solve of $H$,
+  so the calls that raised "KPM moments diverging" return, and the
+  $A=1+0.8S^z_0$ line's height goes from 1.2248 to 1.3037
+  (findings 8 and 10).
+- **`submode="CVM"` whenever $\eta\lVert B|\mathrm{GS}\rangle\rVert$ is
+  small, and on exact solves at small $\eta$** (§6): on a 6-site Heisenberg
+  chain with $0.3S^z_0$, every frequency of $(S^z_0,S^z_0)$ at an operator
+  scale of $10^{-4}$ was the flat $\eta\langle AB\rangle/\pi$ (0.0159 after
+  dividing by $\epsilon^2$) and is now the ED curve, and the same for
+  $sH$ at $s=10^{-4}$; `get_kondo_spectrum(mode="DMRG", submode="CVM",
+  order=2, T=0)` at its default `delta=2e-6` on three spins at
+  $J=10^{-3}$ goes from about $10^{-8}$, flat, to the exact curve on the
+  same grid (4.6981 at the ends, 0.6763 in the middle); the on-line point
+  $\omega_0=0.52710639$ of that 6-site chain goes from
+  $1.5915\times10^{-4}$ to 13.2636 at $\eta=2\times10^{-3}$ and from
+  $1.5915\times10^{-5}$ to 132.6333 at $\eta=2\times10^{-4}$, as ED; and on a
+  10-site chain on a 121-point grid, v3, 10 wrong points (up to 0.989 of
+  the peak) become none at $\eta=0.05$, and 45 become none at $\eta=0.02$.
+  At unit scale the tolerance tightens by $1/\lVert b\rVert$ (tenfold at
+  $\eta=0.2$), so ordinary curves move within the old tolerance, the
+  6-site one from $6.8\times10^{-7}$ to $6.7\times10^{-9}$ of the peak on
+  `"python"`. A truncated solve still stops early and warns, and is not
+  converged either way: a 20-site chain at `maxm=cvm_maxm=30` gives
+  0.30333897 at $\omega=0.3$ where it gave the flat 0.01193662. The
+  121-point grid takes 1214 s where it took 677 s, and a truncated point
+  about twice as long. `applyinverse` stops relative to the norm of the
+  vector it inverts against, so `CVM_explicit` on
+  $(\epsilon S^z_0,\epsilon S^z_0)$ is $1.4\times10^{-6}$ of the peak off at
+  every $\epsilon$ on v3, where it was 0.37 off at $\epsilon=10^{-4}$
+  (findings 13 and 14).
+- **Non-adjoint pairs under `CVM_explicit`, the non-Hermitian CVM and INV,
+  and `cvm_solver="variational"`** return their own $C[A,B]$ (§6), where an
+  absolute adjoint gate answered small pairs with another pair's density:
+  `CVM_explicit` on $(10^{-2}S^x_0,10^{-2}S^y_1)$ from 2.004 of the peak off
+  to $3.5\times10^{-5}$, the variational solver on
+  $(10^{-2}S^z_0,10^{-2}S^z_3)$ from 2.124 to $5.9\times10^{-8}$, and ED's
+  non-Hermitian CVM/INV on $(10^{-5}S^x_0,10^{-5}S^y_1)$ from 2.064 to
+  $1.4\times10^{-15}$ (finding 16).
+- **Every finite-temperature `Thermal_Spin_Chain` result** (§9). At
+  $T=0.5$, on 10 sites ($\langle H\rangle$, `"python"` DMRG at `maxm=64`)
+  from $-2.777892$ to $-3.166391$ (exact $-3.166396$), on 12 sites from
+  $-3.287097$ to $-3.849203$ (exact $-3.849213$), on 6 sites on `mode="ED"`
+  from $-1.674494$ to $-1.800863$, and on 3 sites from $-0.754223$ to
+  $-0.769459$ (exact $-0.769460$), now the same at every scale and under a
+  constant offset, where an offset of 20 gave 0.393848. On that 3-site
+  chain in a field $B$ at $T=B$, $\langle S^z_{\rm tot}\rangle$ goes from $-0.089480$,
+  $-0.013179$ and $-0.002545$ at $B=10^{-2}$, $5\times10^{-3}$ and
+  $10^{-3}$ to $-0.231057$ at all three (exact $-0.231059$). A float $T$
+  above 5 returns ($-0.071119$ at $T=5.5$) where it raised
+  `ZeroDivisionError`, and a numpy scalar above 5 gets its temperature
+  ($-0.055408$ at `np.float64(7.0)`) where it got $T=\infty$. The
+  2026-09-25 thermal-bypass numbers move with it, `tc.MBChain.gs_energy()`
+  at $T=1$ on 3 sites from $-0.416388$ to $-0.428230$ and `vev(Sz0*Sz1)`
+  from $-0.069398$ to $-0.071372$. On `"julia_live"` a 4-site chain at
+  $T=0.5$ comes out $2.3\times10^{-5}$ off where the other backends are
+  $2\times10^{-8}$ off, since its band-edge solves returned a narrower
+  width (not examined further). The cost grows with $\beta W$: 8.6 s where
+  it was 4.9 s on 12 sites at $T=0.5$, and 19.8 s where it was 0.7 s for
+  the field chain at $B=10^{-3}$ (findings 17 to 19).
+- **`get_excited(n, mode="ED")` above 2000 states in small units** keeps
+  every copy of a degenerate level: on a 12-site ferromagnet at
+  $s=2\times10^{-7}$ the six-fold ground level came back with a magnon at
+  $-2.715926s$ in place of a copy of $-2.75s$ in 8 of 8 calls, and the
+  calls that stalled at $s=10^{-5}$ and $10^{-6}$ return. Below an infinity
+  norm of 1 the levels also move at roundoff (finding 20).
+- **`submode="ROOTN"` in small units** keeps its Lanczos basis, where it
+  collapsed to the seed alone and returned one Lorentzian: the peak of
+  $sC_s$ on a 6-site chain goes from 0.393371 to the unit-scale 0.157205 at
+  $s=10^{-12}$ on ED and $s=10^{-10}$ on v3 (finding 21).
+- **A KPM cross-correlator of two small operators** is no longer read as
+  an autocorrelator: $C[\epsilon S^z_0,\epsilon S^z_3]/\epsilon^2$ at
+  $\epsilon=1.2\times10^{-10}$ and $10^{-11}$ was $C[S^z_3,S^z_3]$, 2.070 of
+  the peak off, and is now $C[S^z_0,S^z_3]$ to $10^{-14}$ on v2, v3 and
+  `"python"` and to $7\times10^{-5}$, its run-to-run noise, on
+  `"julia_live"`; `get_distribution` likewise, from 1.935 to $10^{-14}$
+  (finding 23).
+- **VUMPS in small units or next to a large constant**, on v3 and
+  `"python"`, reports `converged=True` where it could not: TFIM at $D=8$
+  from $s=0.1$ down to $10^{-8}$ and at constant offsets of $+10$, $+100$
+  and $-100$ on v3; below about $s=10^{-6}$ the energy moves too, $e_0/s$
+  from $-0.440126707917$ to $-0.440127030549$ at $s=10^{-8}$
+  (finding 24).
+- **v3 iDMRG in small units**: the energy density of TFIM is
+  $4.8\times10^{-12}$ off the closed form at every $s$ down to $10^{-14}$,
+  where it was 0.12 off at $s=10^{-13}$ and of the wrong sign at $10^{-14}$
+  (finding 27).
+- **NH-DMRG in small units or next to a large constant**, on v2, v3 and
+  `"python"`, lands on the lowest level where it returned an excited one:
+  $E_0/s$ on a 6-site Heisenberg chain with $0.3iS^z_0$ at $s=10^{-7}$ goes
+  from $-0.9904-0.0568i$ to $-2.4610410218$ on v2, $E_0-c$ at
+  $c=5\times10^5$ from $-1.9919-0.1109i$ to $-2.4610374186$ on `"python"`,
+  and v3 at $s=10^{-13}$ from 0.570 off to $7\times10^{-15}$. At unit scale
+  the tie window between Ritz values is about three times wider than it
+  was, which moved nothing measured (findings 25 and 27).
+- **v2 and v3 Hamiltonians whose duplicate terms cancel** are solved at the
+  scale of the MPO they build (§2): $sH+S^z_0-S^z_0$ at $s=10^{-10}$ from
+  0.09 to 0.53 off in $E_0/s$ on a 6-site Heisenberg chain to
+  $5\times10^{-15}$. On v3 the XX chain at $J=1$, whose realified
+  coefficients are 0.5, now also solves at scale 2, moving within its
+  run-to-run noise (finding 28).
+- **`"python"` operators whose largest coefficient is below 1** are built
+  at unit scale (§2): a Heisenberg MPO at $s=10^{-7}$ goes from
+  $1.1\times10^{-9}$ off relative to itself ($2.5\times10^{-4}$ at
+  $s=2^{-40}$) to $10^{-15}$ at every scale, on numpy with OpenBLAS, and
+  every `"python"` `MultiOperator*MPS` in small units moves with it,
+  $\lVert(sH)|u\rangle\rVert/s$ reading 0.897242774928 at every $s$ down to
+  $10^{-16}$, where it read 1.432 at $10^{-16}$ (finding 30).
+- **`mpsalgebra.lowest_energy_arnoldi` in small units**, a non-default
+  route: $E_0/s$ on a 4-site Heisenberg chain at $s=10^{-6}$ goes from
+  $-1.6150192976$ to $-1.6160253791$, and at $s=10^{-7}$ with
+  `delta=s*1e-3` from $+0.3510023868$ to $-1.6160254038$ (lead
+  `scale-arnolditk-absolute-stop`).
+
+**New attributes.** `sc.lam_generalized` holds $\lambda$ after
+`gs_energy_generalized()`; `tc.anneal_step` and `tc.anneal_order` set the
+thermal stepper (§9); `sites.SETTINGS` is the explicit list of the 36
+settings a chain constructor accepts (§1); and on `mode="ED"` the state
+gains `normalize(tol=)` and `norm()`, as on the MPS backends (§2).
+
+**Quieter changes.** With `verbose` on, v2 and v3 print one line before
+each solve that runs at $2^kH$, saying that the energies logged below it
+are $2^k$ times those of the operator (finding 29); the returned energies
+never were. NH-DMRG's convergence certificate is relative to the
+Hamiltonian's units and constant, so a run it used to accept silently in
+small units or next to an offset now retries up to `ntries` times and
+warns with its "best relative residual" (finding 26). `State.normalize()`
+on `mode="ED"` prints the MPS backends' warning where it was silent below
+its floor (finding 22).
+
+**And these now raise, or now work, where they used to do something
+else:**
+
+| Call | Was | Now |
+|---|---|---|
+| a constructor keyword naming one of nine attributes that are not settings (`hopping`, `hubbard`, `pairing`, `exchange`, `fields`, `resorder`, `resordered_indexes`, `hubbard_matrix`, `fit_td`) | accepted; `hubbard=2.0` added $2\,\mathrm{Id}$ to the Hamiltonian | `TypeError` naming the key, `Thermal_Spin_Chain` included; the last five are gone from the chain (finding 4) |
+| a misspelled keyword (`wf=`, `reconverg=`) to `gs_energy()`, `get_gs()` or `get_excited(n=1)` on a solved chain | swallowed, the stored answer returned | `TypeError`, as on a fresh chain (finding 5) |
+| a reader on a chain with no Hamiltonian | an error not naming the cause | `ValueError` saying to call `set_hamiltonian()` (finding 6) |
+| `gs_energy(H=H2)` on a non-Hermitian chain | H2's pair stored as the chain's state | `TypeError` naming `nhdmrg(H=...)` (finding 9) |
+| `get_gs(wf0=x, reconverge=False)` on a route that resolves to ED | `TypeError` | $x/\lVert x\rVert$ (finding 2) |
+| an MPS as `wf0=`, or a misspelled keyword, to `gs_energy()` on a route that resolves to ED | ignored | `TypeError` (finding 2) |
+| a set state whose norm is zero or not finite | `None` stored as the state | `ValueError` (finding 1) |
+| an unknown single-site name on an ED spin chain (`ISy`, `Adag`) | `RuntimeError: No active exception to reraise` | `ValueError` naming it (finding 6) |
+| `mode="ED"`, `submode="ED"` with the averaged manifold wider than `delta` | silent | `RuntimeWarning` (finding 15) |
+| `Thermal_Spin_Chain` with a negative or NaN `T` set after construction | the ground state | `ValueError` (finding 19) |
+| `get_rdm(i=ns-1)` on `"julia_live"` | `BoundsError` | the matrix (finding 12) |
+| `get_rdm()` or the bond entropy under an ED mode on `"julia_live"` | the DMRG matrix, or `AttributeError` | `NotImplementedError`, as on the other backends (lead `session-julia-ed-guard-carveout-rdm-bond-entropy`) |
+| `CVM_explicit`, or the non-Hermitian CVM/INV, on a non-adjoint pair | `NotImplementedError` | $C[A,B]$ (finding 16) |
+
+Results from before this pass are not comparable wherever a number above
+moved; everywhere else the calculation is the one it was.

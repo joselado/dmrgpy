@@ -158,7 +158,13 @@ def test_gs_energy_generalized_nonhermitian_leaves_computed_gs_true(itensor_vers
     _setup(fc, itensor_version)
     lam = fc.gs_energy_generalized(m)
     assert fc.computed_gs is True
-    assert fc.gs_energy() == lam
+    # the pair's own biorthogonal energy <psil|H|psir>/<psil|psir>, not
+    # lambda, since the 2026-09-25b hole hunt's finding 8 (this line pinned
+    # lambda before); lambda is kept as lam_generalized
+    psil, psir = fc.nh_left_wf, fc.wf0
+    e_pair = psil.dot(fc.hamiltonian*psir)/psil.dot(psir)
+    assert fc.gs_energy() == pytest.approx(e_pair, abs=1e-8)
+    assert fc.lam_generalized == lam
 
 
 def test_gs_energy_generalized_nonhermitian_requires_supported_backend():

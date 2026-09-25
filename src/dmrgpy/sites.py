@@ -37,10 +37,40 @@ def initialize(self,**kwargs):
                 self._apply_conserved_sector()
 
 
-# Attributes a chain holds that a constructor keyword may not set: its
-# state, each with its own entry point (the site list is the positional
-# argument), and the two flags the model class fixes after
-# Many_Body_Chain.__init__ has run, which would overwrite the keyword.
+# The settings of a chain: the solver parameters a constructor keyword may
+# set, every one of them read by a solver. An allowlist, where the rule used
+# to be "any public attribute the chain has that is not a method, less
+# STATE": that rule admitted every attribute STATE forgot, the Hamiltonian
+# accumulators below among them, so Fermionic_Chain(4, hubbard=2.0) put the
+# constant 2*Id into the Hamiltonian of the next set_hoppings() (-0.2360679775
+# against the free-fermion -2.2360679775), and five attributes nothing reads
+# were accepted and stored (2026-09-25b hole hunt, finding 4). A setting
+# left out of this list fails loudly, with a TypeError naming it; a state
+# name left out of STATE is refused all the same, with the generic message.
+# itensor_version is not here: it is the constructor's own named argument.
+SETTINGS = frozenset((
+    "maxm","nsweeps","noise","cutoff","mpomaxm","verbose","mode",
+    "bond_ramp","bond_ramp_start","bond_ramp_fraction",
+    "bond_ramp_noise_decay",
+    "kpmmaxm","kpmcutoff","kpm_scale","kpm_accelerate","kpm_n_scale",
+    "kpm_extrapolate","kpm_extrapolate_factor","kpm_extrapolate_mode",
+    "kpm_energy_truncate","kpm_truncate_dK","kpm_truncate_nsweeps",
+    "kpm_truncate_threshold",
+    "cvm_tol","cvm_nit","cvm_patience","cvm_blowup","cvm_solver",
+    "cvm_nsweeps","cvm_maxm",
+    "tevol_method","tevol_custom_exp","tdvp_gse_sweeps",
+    "tdvp_gse_krylov_order","tdvp_gse_cutoff",
+    "excited_gram_schmidt",
+))
+
+
+# Attributes a chain holds that a constructor keyword may not set, each with
+# the reason the message gives: its state, each with its own entry point
+# (the site list is the positional argument), the Hamiltonian accumulators
+# update_hamiltonian() sums (a keyword would be summed in as value*Id), and
+# the two flags the model class fixes after Many_Body_Chain.__init__ has run,
+# which would overwrite the keyword. They are refused because they are not
+# in SETTINGS; this table only names the way to set each.
 STATE = {
     "sites":"the site list is the constructor's positional argument",
     "ns":"the site list is the constructor's positional argument",
@@ -58,6 +88,10 @@ STATE = {
     "ED_obj":"the ED object is built on demand",
     "fermionic":"the chain class sets it",
     "use_ampo_hamiltonian":"the chain class sets it",
+    "hopping":"use set_hoppings() or set_hamiltonian()",
+    "hubbard":"use set_hubbard() or set_hamiltonian()",
+    "pairing":"use set_pairings_MB() or set_hamiltonian()",
+    "exchange":"use set_hamiltonian()",
 }
 
 
@@ -69,16 +103,16 @@ def check_settings(self,settings,model=()):
     initialize(), which ignores them, so Spin_Chain(sites, maxm=50) built a
     chain at the default maxm=30 and a misspelled keyword was accepted
     without a word, on every model chain, since they all forward to it. A
-    setting is what the check in Infinite_Many_Body_Chain.kpm_finite
-    accepts for window_chain_kwargs: a public attribute the chain already
-    has that is not a method (a missing name would be stored where nothing
-    reads it, and a private one or a method would overwrite the chain's own
-    state or behaviour), less the state in STATE above and less `model`,
-    the attributes the model class built before calling
-    Many_Body_Chain.__init__ (Fermionic_Chain's N, Parafermionic_Chain's
-    Sig, ...), which a keyword would overwrite with a number. Called
-    before any session is built, so a bad keyword costs nothing; mode= is
-    checked for its value here too, as sc.mode is when it is read."""
+    setting is a name in SETTINGS above; anything else is refused, the
+    state in STATE and `model`, the attributes the model class built before
+    calling Many_Body_Chain.__init__ (Fermionic_Chain's N,
+    Parafermionic_Chain's Sig, ...), with a message saying so, since a
+    keyword would overwrite them with a number. The check reads nothing off
+    `self` but its class name, which names the constructor in the message,
+    so a wrapper such as Thermal_Spin_Chain runs it on itself before it
+    builds its chain. Called before any session is built, so a bad keyword
+    costs nothing; mode= is checked for its value here too, as sc.mode is
+    when it is read."""
     def why(k):
         if k in STATE: return STATE[k]
         return "the %s class builds it" % type(self).__name__
@@ -89,16 +123,15 @@ def check_settings(self,settings,model=()):
             "not a setting (%s)" % (type(self).__name__, ", ".join(state),
             "that" if len(state)==1 else "each",
             "; ".join("%s: %s" % (k,why(k)) for k in state)))
-    unknown = sorted(k for k in settings
-                     if k.startswith("_") or not hasattr(self,k)
-                     or callable(getattr(self,k)))
+    unknown = sorted(k for k in settings if k not in SETTINGS)
     if unknown:
         raise TypeError(
             "%s() got unexpected keyword argument(s) %s. A constructor "
             "keyword names a setting of the chain (maxm, nsweeps, noise, "
             "cutoff, kpmmaxm, kpm_scale, tevol_method, mode, ...) and takes "
-            "effect as if assigned right after construction; a name the "
-            "chain does not have would be stored where nothing reads it"
+            "effect as if assigned right after construction; any other "
+            "name would be stored where nothing reads it, or overwrite the "
+            "chain's own state or behaviour"
             % (type(self).__name__, ", ".join(unknown)))
     if settings.get("mode") is not None:
         from .mode import _check_mode

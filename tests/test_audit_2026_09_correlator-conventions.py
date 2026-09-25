@@ -117,7 +117,7 @@ def test_every_submode_returns_the_complex_lehmann_density(mode, submode):
                                         name=[A, B], es=ES, delta=DELTA)
     y = np.asarray(y, dtype=np.complex128)
     # The ED routes are exact here; mode="DMRG" submode="CVM" is limited
-    # by its own conjugate-gradient tolerance (self.cvm_tol, 1e-5 by
+    # by its own solver tolerance (self.cvm_tol, 1e-5 of ||b|| by
     # default), which is what the looser bound tracks -- both are five
     # orders of magnitude below the 3e-1/6e-1 the two conventions differ
     # by on this pair. submode="KPM" is deliberately absent: it is on the
@@ -287,15 +287,22 @@ def test_cvm_explicit_matches_cvm():
     assert np.max(np.abs(np.asarray(y_exp) - np.asarray(y_cvm))) < 1e-5
 
 
-def test_cvm_explicit_names_its_own_restriction():
+def test_cvm_explicit_takes_an_off_diagonal_pair():
     """Its A^dagger == B guard was a bare `raise`: "RuntimeError: No
-    active exception to reraise", after a bare print()."""
+    active exception to reraise", after a bare print(). It then raised
+    NotImplementedError naming the submode, which this test pinned. The
+    guard is gone (2026-09-25b audit, finding 16): the routine inverted
+    (z-H) against A^dagger|GS> and dotted with B|GS>, the adjoint pair's
+    density, which is why it had to refuse every other pair; it now
+    inverts against B|GS> and dots with A^dagger|GS>, which is C[A,B]
+    for any pair, so this complex-weight pair gets its own density."""
     fc = complex_hopping_chain()
-    with pytest.raises(NotImplementedError) as exc:
-        fc.get_dynamical_correlator(submode="CVM_explicit",
-                                    name=[fc.Cdag[0], fc.C[2]],
-                                    es=ES, delta=DELTA)
-    assert "CVM_explicit" in str(exc.value)
+    A, B = fc.Cdag[0], fc.C[2]
+    D, M = lehmann(fc, A, B)
+    ref = density(D, M, ES, DELTA)
+    _x, y = fc.get_dynamical_correlator(submode="CVM_explicit",
+                                        name=[A, B], es=ES, delta=DELTA)
+    assert np.max(np.abs(np.asarray(y) - ref)) < 1e-4*np.max(np.abs(ref))
 
 
 # ------------------------------------------------- #29: the missing X=

@@ -87,7 +87,7 @@ output is carried inline.
 
 **Status**: FIXED. Many_Body_Chain.__init__ now checks its keywords with sites.check_settings() before any session is built and assigns every one of them after initialize(), mode= included, so a constructor keyword is exactly an assignment made right after construction: a chain built with mode="ED" keeps its session, as sc.mode="ED" afterwards does, and sc.mode=None goes back to DMRG (-1.6282694864 on both paths of the 4-site "python" chain). A setting is what kpm_finite accepts for window_chain_kwargs (second-pass finding 6): a public attribute the chain already has that is not a method. Refused besides, each with a message naming its own entry point, are the chain's state (hamiltonian, conserved_sector, wf0, e0, computed_gs, ns, Id, the ground-state bookkeeping flags, the ED cache, and fermionic and use_ampo_hamiltonian, which the model class sets after the base constructor and would overwrite) and every attribute the model class built before calling the base constructor, so Fermionic_Chain(4, N=5) and Parafermionic_Chain(3, Sig=1) raise TypeError naming the key; mode= is checked for its value. Every forwarding constructor inherits this without an edit of its own. Thermal_Spin_Chain hands every setting to its MBChain, except that its own hardcoded mode="DMRG" overwrites MBChain.mode on the first get_gs(), as on the parent, so Thermal_Spin_Chain(..., mode="ED") still runs DMRG (left open, the edit is in the notes). The v2 boson refusal no longer names mode="ED" as a way out, since its check runs before a constructor keyword is applied. The first fix pass applied mode before initialize(), which left a mode="ED" chain with no session, so a later sc.mode=None and Thermal_Spin_Chain(..., mode="ED").get_gs() raised AttributeError where the parent ran; that ordering is reverted, and with it the claim that Bosonic_Chain(3, maxnb=[6]*3, itensor_version=2, mode="ED") builds (it raises the v2 ValueError, as on the parent). The one in-tree caller that passed a non-setting, examples/utilities/multioperator_density (spinful=False), was fixed and rerun (ED -3.876034843149142, DMRG -3.876034843149144). Pinned by tests/test_audit_2026_09_25_construction.py: test_a_constructor_setting_takes_effect and test_a_keyword_that_is_not_a_setting_raises_naming_every_one over nine constructors, test_private_names_methods_and_names_the_chain_lacks_are_not_settings, test_the_chain_state_is_not_a_setting, test_what_the_model_class_builds_is_not_a_setting, test_a_constructor_setting_goes_through_its_setter, test_a_constructor_setting_is_the_same_as_assigning_it, test_mode_at_construction_keeps_the_session over nine constructors, test_mode_at_construction_can_be_left_again, test_thermal_chain_with_mode_at_construction_still_solves (which passes on the parent and pins the absence of the first pass's regression), test_the_v2_boson_refusal_does_not_offer_mode_ed and test_an_unknown_mode_is_refused_at_construction. NUMBERS CHANGE for every caller that passed a setting to a chain constructor: on a 12-site open S=1/2 Heisenberg chain on itensor_version=3, Spin_Chain(["S=1/2"]*12, itensor_version=3, maxm=4, nsweeps=10).gs_energy() goes from -5.1420906326 (the maxm=30 answer) to -5.1323602278, the number the same request made by assignment returns. A mode="ED" keyword now takes effect for every read that does not pass mode= itself: on the 4-site open S=1/2 Heisenberg chain with 0.2*Sz_0, the maximum of get_dynamical_correlator(name="ZZ", es=linspace(0,3,7), delta=0.3) goes from 0.205144 ("python") and 0.205151 (v3), both of them DMRG, to 0.205190, the ED number. No in-tree number moves: the four-correlation example's Fermionic_Chain(n0, mode="ED") now keeps its mode, and every call there already passed mode="ED" (sum|ct_ed| 51.433292772677 and E0 -2.450108689391 on both trees).
 
-**Status addendum** (the main agent, after the workflow): the `Thermal_Spin_Chain` edit this item left open was applied as specified: `Thermal_Spin_Chain.__init__` takes `mode="DMRG"`, validates it with `mode._check_mode`, keeps it as the wrapper's own `self.mode` and hands it to `MBChain` at construction too, so `Thermal_Spin_Chain(..., mode="ED")` solves by ED where it ran DMRG, on the parent as after the first pass. Pinned by `tests/test_audit_2026_09_25_construction.py::test_thermal_chain_mode_at_construction_is_the_mode_it_solves_with` (the mode on the wrapper and on `MBChain`, the default still `"DMRG"`, and an unknown mode refused with `ValueError`); the construction, session and 2026-08 regression files pass with it (119 passed). NUMBERS CHANGE for every caller of `Thermal_Spin_Chain(..., mode="ED")`, which now gets the ED answer; no in-tree caller passes it.
+**Status addendum** (the main agent, after the workflow): the `Thermal_Spin_Chain` edit this item left open was applied as specified: `Thermal_Spin_Chain.__init__` takes `mode="DMRG"`, validates it with `mode._check_mode`, keeps it as the wrapper's own `self.mode` and hands it to `MBChain` at construction too, so `Thermal_Spin_Chain(..., mode="ED")` solves by ED where it ran DMRG, on the parent as after the first pass. Pinned by `tests/test_audit_2026_09_25_construction.py::test_thermal_chain_mode_at_construction_is_the_mode_it_solves_with` (the mode on the wrapper and on `MBChain`, the default still `"DMRG"` (`None` since the 2026-09-25b fix pass, finding 3, where a `"DMRG"` pin stopped overriding a call's `mode="ED"`), and an unknown mode refused with `ValueError`); the construction, session and 2026-08 regression files pass with it (119 passed). NUMBERS CHANGE for every caller of `Thermal_Spin_Chain(..., mode="ED")`, which now gets the ED answer; no in-tree caller passes it.
 
 **Recorded in**: 2026-08 record (a reviewer's sharpening near line 1723); 2026-09-24b New leads. Recorded as a reviewer's sharpening in docs/audit_2026_08_hole_hunt.md around line 1723 and as the first bullet of 'New leads, not reviewed' in docs/audit_2026_09_24b_hole_hunt.md; never a finding
 
@@ -3648,7 +3648,8 @@ reviewers' own reports follow verbatim, since several carry repros.
 - `gs_energy(maxde=...)` on a chain whose ground state is current returns the
   stored energy without refining (-3.3468165405 against -3.4061631313 on a fresh
   chain, found by the construction reviewer): the same short circuit as `wf0=`,
-  in `gs_energy`'s own condition, and `get_gs` must widen with it.
+  in `gs_energy`'s own condition, and `get_gs` must widen with it. (fixed in
+  the 2026-09-25b fix pass, see tests/test_audit_2026_09_25b_construction.py)
 - `submode="TD"` and every TDVP real-time route depend on units on `"python"` and
   v3 through the Krylov exponentiator's absolute error goal, in the operator norm
   as well as in the Hamiltonian's scale (the scale reviewer: 8.76e-02 of the
@@ -3674,9 +3675,10 @@ reviewers' own reports follow verbatim, since several carry repros.
   would let rounding dust in coefficients a caller computed make an ordinary
   Hamiltonian fail its Hermiticity proof and go to NH-DMRG.
 - `julia_live` records no solver key, so a `maxm` ramp on one chain returns the
-  first energy every time (-3.194321 at maxm 2, 4 and 16 on an 8-site chain), and
-  its KPM re-solves the chain for the lower band edge on every call of a supplied
-  state.
+  first energy every time (-3.194321 at maxm 2, 4 and 16 on an 8-site chain)
+  (fixed in the 2026-09-25b fix pass, see tests/test_audit_2026_09_25b_session.py),
+  and its KPM re-solves the chain for the lower band edge on every call of a
+  supplied state.
 - On the lower-level `get_dynamical_correlator_MB` route a pair `name=` next to
   `i=`/`j=` is still dropped silently, on ROOTN and CVM alike, where the public
   route raises (second pass finding 16).
@@ -3684,7 +3686,9 @@ reviewers' own reports follow verbatim, since several carry repros.
   from random, as the existing comment says; raising would be the consistent
   choice.
 - `get_gs(best=True, **kwargs)` forwards to a `best_gs` that takes no keyword, and
-  an unknown keyword to `Thermal_Spin_Chain` raises naming `Spin_Chain()`.
+  an unknown keyword to `Thermal_Spin_Chain` raises naming `Spin_Chain()`. (both
+  fixed in the 2026-09-25b fix pass, see
+  tests/test_audit_2026_09_25b_construction.py)
 
 ### What the construction reviewer reported beyond its items
 

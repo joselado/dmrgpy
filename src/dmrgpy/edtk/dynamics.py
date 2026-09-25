@@ -83,7 +83,11 @@ def get_dynamical_correlator(self,name=None,submode="KPM",
     injected = wf0 is not None or getattr(self,"_injected_state",False)
     if wf0 is None:  wf0 = self.get_gs_array() # compute ground state
     else:
-        wf0 = wf0.v.copy()
+        # the ray x/||x||, as set_gs() takes it: an explicit wf0=2x used to
+        # come back 4 times the spectrum of x, while its origin <x|H|x>/<x|x>
+        # did not move (2026-09-25b hole hunt, finding 1)
+        from ..groundstate import unit_copy
+        wf0 = unit_copy(wf0).v
     if not herm: # non Hermitian Hamiltonians
         # Per-submode, not wholesale -- see the same fix in dynamics.py.
         # This used to substitute the explicit resolvent for every submode
@@ -264,9 +268,10 @@ def dynamical_correlator_rootn(h,e0,wf0,A,B,delta=1e-1,
     return es,np.array(out)
 
 
-def check_dex_sensitivity(ex,dex,factor=3.):
+def check_dex_sensitivity(ex,dex,factor=3.,delta=None):
     """Warn when the equal-weight `dex` cutoff of dynamical_correlator_ED
-    is placed inside a cluster of levels rather than in a clean gap.
+    is doing real work: placed inside a cluster of levels rather than in a
+    clean gap, or averaging over levels the broadening resolves.
 
     The cutoff is a step function of the excitation energy, so the answer
     only depends on its exact value when some eigenvalue sits close to it.
@@ -275,20 +280,54 @@ def check_dex_sensitivity(ex,dex,factor=3.):
     weight and one just above is dropped entirely, and an infinitesimal
     change of the swept parameter can move one across. `ex` is the array
     of excitation energies (ascending, already relative to the ground
-    state)."""
-    near = ex[(ex>=dex/factor) & (ex<=dex*factor)] # levels straddling it
-    if len(near)==0: return # cutoff sits in a gap, result is robust
+    state).
+
+    That window cannot see a cutoff lying far above the levels it
+    swallows, which is where the second test comes in, when the
+    broadening `delta` is given: the equal-weight average is a
+    degenerate-manifold average only while the manifold is unresolved,
+    so it warns once the manifold's own width ex[nex-1] exceeds delta,
+    the contract get_kondo_spectrum's n_gs already uses. Both tests are
+    needed. With the absolute default dex=1e-5 and a Hamiltonian written
+    in small units, every level can sit below dex/3: the first test is
+    then silent while the call averages over the whole spectrum with
+    equal weight, i.e. returns the infinite-temperature spectrum -- 0.738
+    of the peak off the T=0 one on a 6-site Heisenberg chain written as
+    s*H at s=1e-7, with no warning (2026-09-25b audit, finding 15). The
+    width test is scale-free and can never fire on a genuine multiplet
+    (its width is roundoff), nor whenever dex <= delta; nex=1 has width
+    0, so a non-degenerate ground state is never reached by it."""
     import warnings
-    warnings.warn(
-        "dynamical_correlator_ED: %d eigenvalue(s) lie within a factor "
-        "%g of the dex=%g cutoff (lowest such level at %g), so the equally-weighted "
-        "initial manifold (nex=%d) depends on exactly where dex was "
-        "placed and can jump discontinuously as a swept parameter moves a "
-        "level across it. Choose dex relative to the splittings being "
-        "resolved, or pass a small T to get_dynamical_correlator for the "
-        "Boltzmann-weighted finite-temperature sum instead."
-        %(len(near),factor,dex,near[0],len(ex[ex<dex])),
-        RuntimeWarning,stacklevel=3)
+    nex = len(ex[ex<dex]) # size of the equal-weight initial manifold
+    near = ex[(ex>=dex/factor) & (ex<=dex*factor)] # levels straddling it
+    if len(near)>0:
+        warnings.warn(
+            "dynamical_correlator_ED: %d eigenvalue(s) lie within a factor "
+            "%g of the dex=%g cutoff (lowest such level at %g), so the equally-weighted "
+            "initial manifold (nex=%d) depends on exactly where dex was "
+            "placed and can jump discontinuously as a swept parameter moves a "
+            "level across it. Choose dex relative to the splittings being "
+            "resolved, or pass a small T to get_dynamical_correlator for the "
+            "Boltzmann-weighted finite-temperature sum instead."
+            %(len(near),factor,dex,near[0],nex),
+            RuntimeWarning,stacklevel=3)
+    if delta is not None and nex>1:
+        width = ex[nex-1] # ex is ascending, so this is the manifold's width
+        if width>abs(delta):
+            warnings.warn(
+                "dynamical_correlator_ED: the dex=%g cutoff takes nex=%d "
+                "of the %d eigenstates as the initial manifold and weights "
+                "them equally, but that manifold is %g wide, %.3g times the "
+                "broadening delta=%g: these are levels the requested "
+                "resolution separates, not one degenerate ground state, so "
+                "the result is not a ground-state correlator (with nex "
+                "equal to the whole spectrum it is the infinite-temperature "
+                "one). dex is an absolute energy: choose it relative to the "
+                "splittings of this Hamiltonian, in its units, or pass a "
+                "small T to get_dynamical_correlator for the "
+                "Boltzmann-weighted sum."
+                %(dex,nex,len(ex),width,width/abs(delta),delta),
+                RuntimeWarning,stacklevel=3)
 
 
 def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
@@ -315,12 +354,16 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     Boltzmann weights, reproducing this function's degenerate-manifold
     average smoothly as T->0 rather than through a step. The equal-weight
     cutoff is kept as the T=0 default so existing callers' results are
-    unchanged; check_dex_sensitivity below warns when the answer actually
-    depends on where the cutoff was placed."""
+    unchanged; check_dex_sensitivity above warns when the answer depends
+    on where the cutoff was placed, and when the manifold it takes is
+    wider than the broadening `delta`, i.e. not a degenerate manifold at
+    all (which, `dex` being absolute, is what a Hamiltonian written in
+    small units runs into: below a spectral width of about dex/3 every
+    eigenstate is averaged in)."""
     if emu is None or vs is None: # if not provided
         emu,vs = algebra.eigh(h) # compute them
     ex = emu-np.min(emu) # excitations
-    check_dex_sensitivity(ex,dex) # warn if the cutoff is doing real work
+    check_dex_sensitivity(ex,dex,delta=delta) # warn if the cutoff is doing real work
 
     nex = len(ex[ex<dex]) # size of the (near-)degenerate initial manifold
 

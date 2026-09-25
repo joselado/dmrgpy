@@ -25,7 +25,59 @@ now only a fallback for backends without a session (julia_live keeps its
 own path in groundstate.py).
 """
 
+import math
+
 from . import mps
+
+
+def _unit_scale_up(cmax):
+    """The power of two mpscpp2/3's mo_terms.h unit_scale_up() returns:
+    it brings a largest |coefficient| below 1 into [1,2), and is exactly
+    1.0 when that coefficient is 1 or more (or not a positive number), so
+    a caller that branches on it runs its unscaled code byte for byte
+    there. Multiplying by it and dividing back is exact."""
+    if not (cmax>0.0) or cmax>=1.0: return 1.0
+    _,e = math.frexp(cmax) # cmax in [2^(e-1),2^e), and e <= 0
+    return math.ldexp(1.0,min(1-e,1000)) # cmax*up in [1,2)
+
+
+def _max_abs_coef(terms):
+    """Largest |coefficient| of a to_terms() list, read the way mo_terms.h's
+    max_abs_coef() reads the list a session receives (raw, unmerged)."""
+    return max([abs(c) for c,_ in terms]+[0.0])
+
+
+def _is_identity_term(ops):
+    """Whether a to_terms() factor list is the identity (every factor Id)."""
+    return all(name=="Id" for (name,_) in ops)
+
+
+def _residual_scale(terms):
+    """(c, e_id) for the eigen-residual certificate of an operator given
+    by its to_terms() list: e_id the summed coefficient of its pure
+    identity terms, and c = min(1, largest |coefficient| among the other
+    terms), or 1 when there are none. See nhdmrg()'s docstring."""
+    e_id = 0.0
+    cnon = 0.0
+    for coef,ops in terms:
+        if _is_identity_term(ops): e_id = e_id + coef
+        else: cnon = max(cnon,abs(coef))
+    return (min(1.0,cnon) if cnon>0.0 else 1.0),e_id
+
+
+def _generalized_residual_scale(terms_h,terms_a):
+    """(c_H, shift, s_A) for nhdmrg_generalized()'s certificate, which
+    divides by c_H + |lambda - shift|*s_A; see its docstring."""
+    c_h,e_id = _residual_scale(terms_h)
+    s_a = _max_abs_coef(terms_a)
+    if not (s_a>0.0): s_a = 1.0 # A=0 has no eigenproblem; any scale will do
+    a_id = _residual_scale(terms_a)[1]
+    if abs(a_id)>1e-12*s_a: return c_h,e_id/a_id,s_a
+    # A with no identity part: lambda cannot absorb H's constant, which
+    # is then just one more of H's coefficients
+    cnon = max([abs(c) for c,o in terms_h if not _is_identity_term(o)]+[0.0])
+    cmax = max(cnon,abs(e_id))
+    return (min(1.0,cmax) if cmax>0.0 else 1.0),0.0,s_a
 
 
 def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
@@ -58,6 +110,32 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
       at ~1e-1, so tol's exact value is uncritical). An attempt that
       fails outright (RuntimeError) is redrawn the same way; only when
       *every* attempt fails does this raise.
+      "Relative" is to c + |E - e_id|, with e_id the summed coefficient of
+      H's pure identity terms and c = min(1, the largest |coefficient| of
+      the others): scale-covariant (H -> s*H scales both the residual and
+      the denominator by s) and blind to a constant offset (which moves E
+      and e_id together and leaves the residual vector alone), and exactly
+      the old 1 + |E| for any H with no identity term and a largest
+      coefficient of 1 or more, the case the ~1e-14/~1e-1 calibration
+      above was measured on. The old 1 + |E| certified every state below
+      s = tol/(2||h||) (2e-5 on a 6-site Heisenberg chain) and every
+      unconverged run next to an offset of ~1e4 (2026-09-25b audit,
+      finding 26). The warning prints this relative number.
+
+    On itensor_version 2, 3 and "python" the session solves 2^k*H, the
+    power of two mo_terms.h's unit_scale_up() takes from the largest
+    |coefficient| of H's terms (exactly 1, i.e. the unscaled call, at a
+    largest coefficient of 1 or more), and the energy is divided back
+    exactly; psil/psir are the same eigenvectors either way. The local
+    Arnoldi's thresholds (its 1e-13 breakdown, its 1e-10*(1+|lambda|)
+    restart test) are absolute, calibrated at unit scale, and so were
+    unconverged below s ~ 1e-13 on v3 (E0/s 0.24 to 2.7 off ED on a
+    6-site chain) and in small units generally (finding 27); every other
+    dmrg() already ran at that scale since the 2026-09-25 record, item 2.
+    The session stores nothing of H: the energy handed back, e0 and every
+    later reader (send_hamiltonian, NH-KPM) see H in the caller's units.
+    The certificate's residuals are formed at the same 2^k on every
+    backend (julia_live's solve itself is left in the caller's units).
     """
     if self.itensor_version not in (2,3,"python","julia_live"):
         raise NotImplementedError("nhdmrg requires itensor_version 2, 3, "
@@ -80,6 +158,19 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
             "chain.setup_julia() to use a backend that needs no compiler")
     if H is None: H = self.hamiltonian
     Hd = H.get_dagger()
+    terms = H.to_terms()
+    rscale,e_id = _residual_scale(terms) # the certificate's, see docstring
+    # H's unit scale, see the docstring (H's adjoint has the same
+    # magnitudes, so one factor serves both); exactly 1.0 at a largest
+    # coefficient of 1 or more
+    up = _unit_scale_up(_max_abs_coef(terms))
+    # the certificate's MPS algebra runs at that scale too, since it is
+    # not free of units either: in the caller's units "python"'s own
+    # H*psir is off in small units (||H psir||/s 2.662 and 3.195 against
+    # 2.604 at s=1e-14 and 1e-16 on a 6-site chain, a residual floor of
+    # 6e-9*s already at 1e-8), which read a pair whose energy is exact to
+    # 5e-15 as a relative residual of 0.16 at s=1e-14 and 0.54 at 1e-16
+    Hc,Hcd = (H,Hd) if up==1.0 else (up*H,up*Hd)
     if self.itensor_version=="julia_live":
         from .mpsjulialive.nhdmrg import nhdmrg_attempt
         attempt = lambda: nhdmrg_attempt(self,H,krylovdim=krylovdim,
@@ -89,11 +180,15 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
                 self.noise)
         self._session.set_verbose(self.verbose)
         self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-        terms = H.to_terms()
         terms_dag = Hd.to_terms()
+        # the solve at unit scale, see the docstring
+        if up!=1.0:
+            terms = [(c*up,o) for c,o in terms]
+            terms_dag = [(c*up,o) for c,o in terms_dag]
         def attempt():
             energy,hl,hr = self._session.nhdmrg(terms,terms_dag,
                     int(krylovdim),int(restarts))
+            if up!=1.0: energy = energy/up # exact, a power of two
             return (energy,mps.MPS(self,cpp_handle=hl).copy(),
                     mps.MPS(self,cpp_handle=hr).copy())
     best = None
@@ -117,14 +212,18 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
                 print("nhdmrg attempt",i,"raised",repr(e),
                       "-- retrying with a fresh random start")
             continue
-        r = H*psir - energy*psir
-        l = Hd*psil - energy.conjugate()*psil
-        resid = max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(1.0+abs(energy))
+        # at unit scale: up*(H psir - E psir), divided by up*(c + |E-e_id|)
+        eu = energy*up
+        r = Hc*psir - eu*psir
+        l = Hcd*psil - eu.conjugate()*psil
+        resid = max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(
+                up*(rscale+abs(energy-e_id)))
         if best is None or resid<best[0]:
             best = (resid,energy,psil,psir)
         if resid<tol: break
         if self.verbose>0:
-            print("nhdmrg attempt",i,"did not converge, residual",resid)
+            print("nhdmrg attempt",i,"did not converge, relative residual",
+                  resid)
     if best is None:
         # Carry the last attempt's own message and traceback through
         # (`from last_error`). Every backend raises RuntimeError for its
@@ -143,8 +242,8 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
     resid,energy,psil,psir = best
     if resid>=tol:
         print("Warning: nhdmrg did not reach the residual tolerance "
-              "after",ntries,"tries (best residual "+str(resid)+"); "
-              "consider raising nsweeps, maxm or krylovdim")
+              "after",ntries,"tries (best relative residual "+str(resid)+
+              "); consider raising nsweeps, maxm or krylovdim")
     return energy,psil,psir
 
 
@@ -184,9 +283,27 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
       psi_R alone is a genuine eigenvector). Each attempt starts from its
       own fresh random MPS (same rationale as nhdmrg()); the best of up
       to ntries attempts is returned regardless of whether tol was met.
+      The residuals carry the units of H and lambda those of H over A, so
+      they are divided by c_H + |lambda - e_id/a_id|*s_A: c_H and e_id as
+      in nhdmrg() (min(1, H's largest non-identity |coefficient|), and
+      H's summed identity coefficient), a_id A's summed identity
+      coefficient and s_A its largest |coefficient|. That is covariant
+      under H -> s*H and invariant under A -> t*A (lambda -> lambda/t)
+      and, for A = a_id*Id, under an offset of H; it is exactly nhdmrg()'s
+      certificate at A = Id, and exactly the old 1 + |lambda| for an H
+      with no identity term and a largest coefficient of 1 or more
+      against an A whose largest coefficient is 1 (A = 1 + 0.2*Sz0, say).
+      s_A is not capped at 1 the way c_H is: lambda*A has to come out in
+      H's units whatever A's own. An A with no identity part cannot
+      absorb H's constant, which then just counts towards c_H.
     - lam0: starting lambda estimate passed through unchanged to every
       attempt (defaults to a data-driven guess seeded from each attempt's
       own fresh random state -- see pyitensor/nhdmrg.py's own default).
+
+    On itensor_version 3 and "python" the session solves 2^k*H against
+    the same A, the unit scale of nhdmrg() read from H's terms, with lam0
+    carried into and lambda back out of those units exactly (see
+    nhdmrg()'s docstring).
     """
     if self.itensor_version not in (3,"python","julia_live"):
         raise NotImplementedError(
@@ -210,6 +327,14 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
     from . import multioperator
     A = multioperator.obj2MO(A)
     Hd = H.get_dagger()
+    terms = H.to_terms()
+    terms_a = A.to_terms()
+    # the certificate's scale, see the docstring
+    rscale,shift,a_scale = _generalized_residual_scale(terms,terms_a)
+    # H (not A) at unit scale, see nhdmrg(); lambda scales with H, and the
+    # certificate's algebra runs at that scale too
+    up = _unit_scale_up(_max_abs_coef(terms))
+    Hc,Hcd = (H,Hd) if up==1.0 else (up*H,up*Hd)
     if self.itensor_version=="julia_live":
         from .mpsjulialive.nhdmrg import nhdmrg_generalized_attempt
         attempt = lambda: nhdmrg_generalized_attempt(self,H,A,
@@ -219,16 +344,19 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
                 self.noise)
         self._session.set_verbose(self.verbose)
         self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-        terms = H.to_terms()
         terms_dag = Hd.to_terms()
-        terms_a = A.to_terms()
+        if up!=1.0:
+            terms = [(c*up,o) for c,o in terms]
+            terms_dag = [(c*up,o) for c,o in terms_dag]
         if self.itensor_version=="python": # pyitensor accepts lam0=None directly
-            session_lam0 = lam0
+            # (a NaN stays NaN, i.e. unset, under the scaling)
+            session_lam0 = None if lam0 is None else lam0*up
         else: # the compiled v3 binding takes a plain complex, NaN meaning "unset"
-            session_lam0 = complex(float('nan'),0.0) if lam0 is None else lam0
+            session_lam0 = complex(float('nan'),0.0) if lam0 is None else lam0*up
         def attempt():
             lam,hl,hr = self._session.nhdmrg_generalized(terms,terms_dag,
                     terms_a,int(krylovdim),int(restarts),lam0=session_lam0)
+            if up!=1.0: lam = lam/up # exact, a power of two
             return (lam,mps.MPS(self,cpp_handle=hl).copy(),
                     mps.MPS(self,cpp_handle=hr).copy())
     best = None
@@ -251,14 +379,17 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
                 print("nhdmrg_generalized attempt",i,"raised",repr(e),
                       "-- retrying with a fresh random start")
             continue
-        r = H*psir - lam*(A*psir)
-        l = Hd*psil - lam.conjugate()*(A*psil)
-        resid = max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(1.0+abs(lam))
+        lu = lam*up # the certificate at unit scale, as in nhdmrg()
+        r = Hc*psir - lu*(A*psir)
+        l = Hcd*psil - lu.conjugate()*(A*psil)
+        resid = max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(
+                up*(rscale+abs(lam-shift)*a_scale))
         if best is None or resid<best[0]:
             best = (resid,lam,psil,psir)
         if resid<tol: break
         if self.verbose>0:
-            print("nhdmrg_generalized attempt",i,"did not converge, residual",resid)
+            print("nhdmrg_generalized attempt",i,"did not converge, "
+                  "relative residual",resid)
     if best is None:
         # Same reasoning as nhdmrg()'s own all-attempts-failed message:
         # report the last attempt's actual error rather than asserting a
@@ -277,8 +408,8 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
     resid,lam,psil,psir = best
     if resid>=tol:
         print("Warning: nhdmrg_generalized did not reach the residual "
-              "tolerance after",ntries,"tries (best residual "+str(resid)+
-              "); consider raising nsweeps, maxm or krylovdim")
+              "tolerance after",ntries,"tries (best relative residual "+
+              str(resid)+"); consider raising nsweeps, maxm or krylovdim")
     return lam,psil,psir
 
 
@@ -288,9 +419,17 @@ def gs_energy_generalized_nhdmrg(self,A,**kwargs):
     eigenvector as the chain's ground state wavefunction, mirroring
     gs_energy_nhdmrg()'s own wf0/nh_left_wf handling (including its unit
     normalization of wf0 -- nhdmrg_generalized()'s own psir carries
-    <psil|psir>=1 biorthogonal normalization instead)."""
+    <psil|psir>=1 biorthogonal normalization instead).
+
+    Returns lambda, kept as self.lam_generalized; self.e0 is the pair's own
+    biorthogonal energy <psil|H|psir>/<psil|psir>, which NH-KPM measures
+    from, as on the Hermitian route (groundstate.gs_energy_generalized's
+    docstring, and 2026-09-25b hole hunt, finding 8): e0 used to be lambda,
+    which is not an energy of the state."""
     lam,psil,psir = nhdmrg_generalized(self,A,**kwargs)
-    self.e0 = lam
+    from .groundstate import _state_energy
+    self.e0 = _state_energy(self,psir,left=psil)
+    self.lam_generalized = lam
     wf0 = psir.normalize()
     if wf0 is None: wf0 = psir.copy()
     self.nh_left_wf = psil.copy() # left eigenvector, for biorthogonal use
@@ -339,17 +478,30 @@ def gs_energy_nhdmrg(self,**kwargs):
     Arnoldi route accepted a different set of solver knobs
     (maxit/delta/nkry_min/... -- see algebra/arnolditk.py's mpsarnoldi),
     so a strict signature would turn previously-working calls like
-    get_gs_degeneracy(delta=...) into TypeErrors."""
-    known = ("H","krylovdim","restarts","tol","ntries")
+    get_gs_degeneracy(delta=...) into TypeErrors.
+
+    H= is the exception, refused rather than ignored: the result is stored
+    as the chain's state, and a pair solved for another operator is not
+    the chain's ground state. It used to be accepted and stored with e0,
+    the pair and the solver key, so the chain's own Hamiltonian's NH-KPM,
+    finding H on the session, read the other operator's pair and energy
+    (-1.836506+0.072051j against -1.596396 on a 4-site chain, 0.587 of the
+    peak off; 2026-09-25b hole hunt, finding 9), and the Hermitian route
+    already raised TypeError on the same keyword. nhdmrg(H=...) returns
+    that pair without storing it."""
+    if "H" in kwargs:
+        raise TypeError("gs_energy(H=...): the ground state of an operator "
+                "other than the chain's own Hamiltonian is not the chain's "
+                "ground state, so it is not stored as one; nhdmrg(H=...) "
+                "returns its (energy, psil, psir) without touching the "
+                "chain, or set_hamiltonian(H) makes it the chain's own")
+    known = ("krylovdim","restarts","tol","ntries")
     passed = {k:v for k,v in kwargs.items() if k in known}
     ignored = [k for k in kwargs if k not in known]
     if ignored and self.verbose>0:
         print("nhdmrg: ignoring keyword arguments",ignored,
               "(not NH-DMRG parameters)")
     e0,psil,psir = nhdmrg(self,**passed)
-    # a solve for an H= other than the chain's own Hamiltonian is stored as
-    # before, but not recorded as that Hamiltonian's state on the session
-    own = passed.get("H") is None or passed["H"] is self.hamiltonian
     self.computed_gs = True
     from .groundstate import solver_key
     self._gs_solver_key = solver_key(self) # see groundstate.gs_is_current
@@ -367,5 +519,5 @@ def gs_energy_nhdmrg(self,**kwargs):
     self._nh_left_for = self.wf0
     self._gs_injected = None
     self._gs_supplied = False # a solve's state, not the caller's
-    if own: _record_hamiltonian_sent(self)
+    _record_hamiltonian_sent(self)
     return self.e0

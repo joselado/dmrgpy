@@ -2178,7 +2178,7 @@ cd /tmp/claude-3291340/-u-40-ladovj1-data-Documents-programs-dmrgpy/305c3d6c-b1e
 
 - **Severity**: medium  **Class**: crash
 - **Code**: `/u/40/ladovj1/data/Documents/programs/dmrgpy/src/dmrgpy/pyitensor/chain.py:642`
-- **Status**: FIXED -- pyitensor's reduced_dm handles the last site, where there is no right link to prime.
+- **Status**: FIXED -- pyitensor's reduced_dm handles the last site, where there is no right link to prime. The `julia_live` port (`mpsjulialive/densitymatrix.jl`) kept the same missing guard until the 2026-09-25b fix pass (`docs/audit_2026_09_25b_hole_hunt.md`, finding 12).
 - **Affects**: Broken: itensor_version="python" (pyitensor), via the single public call Many_Body_Chain.get_rdm(i=ns-1) -> densitymatrix.reduced_dm -> Chain.reduced_dm. By inspection the same one-line pattern exists in mpsjulialive/densitymatrix.jl (ir = commonind(psi[site],psi[site+1]); ITensors.jl psi[N+1] is a BoundsError), so julia_live is very likely affected too, but per instructions it was NOT executed and is unverified. Unaffected: itensor_version=2 and 3 (correct answer), and mode="ED" chains have no get_rdm path at all. Only get_rdm is hit; the public entropy API is not (see explanation).
 
 **Expected**

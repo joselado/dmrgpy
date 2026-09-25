@@ -65,9 +65,11 @@ end
 
 
 """
-    get_gs_generalized(H, A, psi0; nsweeps, cutoff, maxm, lam0)
+    get_gs_generalized(H, A, psi0; nsweeps, cutoff, maxm, noise, lam0)
 
-Hermitian generalized eigenproblem. Returns `(lam, psi)`.
+Hermitian generalized eigenproblem. Returns `(lam, psi)`. `psi0` is
+mpsalgebra.jl's `dmrg_start_state`, a random MPS of link dimension above
+one (a product-state start trapped this solver on decoupled sublattices).
 
 `lam0` is the starting lambda estimate; `NaN` means "unset" and defaults
 to `psi0`'s own generalized Rayleigh quotient (two cheap `inner`s, giving
@@ -89,21 +91,17 @@ function get_gs_generalized(H, A, psi0; nsweeps = 10, cutoff = 1e-8,
 	# a fresh single-sweep Sweeps rebuilt against each new Heff rather
 	# than one nsweeps-long Sweeps handed to a single dmrg() call.
 	# `noise` is Many_Body_Chain.noise, forwarded exactly as the session
-	# backends forward it through set_sweep_params -- without it this
-	# backend would silently run a noise-free variant of an algorithm
-	# whose whole point is escaping local minima.
-# Deliberately NOT given self.noise, unlike the Hermitian
-# get_gs_generalized: DMRG's density-matrix noise term is defined against
-# a Hermitian density matrix, and ITensorNHDMRG's biorthogonal truncation
-# (the "fidelity" algorithm's rho=(rho_l+rho_r)/2 isometry) is not that.
-# Feeding a noisy Sweeps through it was tried and measurably broke
-# previously-converged runs -- the tie-break's own anchor check started
-# rejecting every angle on a chain that had converged to ~1e-15 without
-# it. The session backends do pass self.noise down their NH-DMRG path,
-# so this is a real backend difference; it is documented rather than
-# forced, because forcing it makes this backend worse, not more faithful.
-	sweeps = make_sweeps(1, maxm, cutoff)
+	# backends forward it: mpscpp3's Chain::gs_energy_generalized puts it
+	# on outer iterations 1..nsweeps/2 and none after, so the taper runs
+	# over the iterations here, with make_sweeps' own per-schedule taper
+	# off (it would give a one-sweep schedule no noise at all). This
+	# comment used to say so while the loop built make_sweeps(1,maxm,
+	# cutoff) and never read `noise` (2026-09-25 hole hunt 25b, finding
+	# 7); the non-Hermitian solver below is the one that is noise-free on
+	# purpose.
 	for i = 1:nsweeps
+		noise_i = i <= div(nsweeps, 2) ? noise : 0.0
+		sweeps = make_sweeps(1, maxm, cutoff; noise = noise_i, taper = false)
 		Heff = shifted_mpo(H, A, lam)
 		_e, psi = run_quiet() do
 			dmrg(Heff, psi, sweeps)

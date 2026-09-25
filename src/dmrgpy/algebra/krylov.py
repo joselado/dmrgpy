@@ -35,6 +35,42 @@ def recompute_energies(H,vs,wfs):
 
 
 
+def normalize_image(wf):
+    """wf/||wf|| for wf = A|u>, the image of a unit vector under an
+    operator, or None when that image is exactly zero.
+
+    Such a state's norm carries A's units, so wf.normalize()'s absolute
+    1e-8 floor is a floor on the operator's units, not a test for a
+    vanishing state: with A written in small units (1e-9*H), a perfectly
+    good H|u> came back as None and the next product raised TypeError
+    (2026-09-25b audit, finding 22, through powermethod.estimate_radius).
+    Dividing by the norm itself is right here and only here: an image of
+    a unit vector is not a difference of two states, so there is no
+    cancellation to normalize into noise. Anything that subtracts goes
+    through normalize(tol=...) with a reference of its own. The norm is
+    computed as normalize() computes it, so where normalize() would have
+    divided, this divides by the same number."""
+    nrm = np.sqrt(max(np.real(wf.dot(wf)),0.))
+    if nrm==0.: return None
+    return wf*(1./nrm)
+
+
+def is_hermitian_matrix(mh,atol=1e-6):
+    """Whether a small Krylov-space matrix is Hermitian:
+    max|mh-mh^dagger| < atol*min(1,max|mh|), the zero matrix counting as
+    Hermitian. It was an absolute max|mh-mh^dagger| < 1e-6, which every
+    matrix of an operator written in small units passes, sending a
+    non-Hermitian one to eigh (2026-09-25b audit, lead
+    scale-arnolditk-absolute-stop, by reading). Below entries of order one
+    the test is now relative to the matrix; at and above it, it is the old
+    absolute one bit for bit, so no decision of the IRAM and Arnoldi
+    routes on a Hamiltonian in ordinary units moves -- the one-sided rule
+    e7b1196 set for v2/v3 (mo_terms.h's unit_scale_up)."""
+    scale = np.max(np.abs(mh))
+    if scale==0.: return True
+    return bool(np.max(np.abs(mh-np.conjugate(mh.T))) < atol*min(1.,scale))
+
+
 def gram_smith_single(w,ws):
     """Gram smith orthogonalization for a single wavefunction"""
     if len(ws)==0: return w
@@ -59,7 +95,7 @@ def gram_smith(ws):
 
 
 def diagonalize(mh):
-    if np.max(np.abs(mh-np.conjugate(mh.T)))<1e-6:
+    if is_hermitian_matrix(mh): # relative to mh's own size, see there
         return lg.eigh(mh)
     else: # non Hermitian
         es,ws = lg.eig(np.conjugate(mh).T)
@@ -142,7 +178,7 @@ def generalized_diagonalize(H,wfs):
     mh = krylov_matrix_representation(H,wfs) # matrix representation
     b = krylov_matrix_representation(1.,wfs) # matrix representation
 #    print(np.round(b,2))
-    if np.max(np.abs(mh-np.conjugate(mh.T)))<1e-6:
+    if is_hermitian_matrix(mh): # relative to mh's own size, see there
         return lg.eigh(mh,b=b)
     else: # non Hermitian
         es,ws = lg.eig(np.conjugate(mh).T,b=b)

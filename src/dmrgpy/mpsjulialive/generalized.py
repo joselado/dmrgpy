@@ -15,7 +15,7 @@ from contextlib import contextmanager
 
 from .juliasession import Main as Mainjl
 from .mpo import MPO
-from .mps import MPS, random_mps
+from .mps import MPS, start_mps
 
 
 # Julia-level *programming* errors: a typo, a rename, a signature change
@@ -70,7 +70,9 @@ def gs_energy_generalized(self, A, lam0=None):
     """
     H = MPO(self.hamiltonian, MBO=self)
     Aop = MPO(A, MBO=self)
-    psi0 = random_mps(self) # NOT self.random_state(), see julia_random_mps note
+    # NOT self.random_state(), see julia_random_mps's note, and not a
+    # product state either, see mps.start_mps
+    psi0 = start_mps(self)
     with metric_guard():
         lam, psi = Mainjl.get_gs_generalized(H.jlmpo, Aop.jlmpo, psi0.jlmps,
                 nsweeps=self.nsweeps, cutoff=self.cutoff, maxm=self.maxm,

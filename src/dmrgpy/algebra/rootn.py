@@ -20,6 +20,36 @@
 import numpy as np
 
 
+# Relative breakdown thresholds of the two Lanczos basis builders of
+# submode="ROOTN": this one (ED vectors, exact products) and rootndmrg.py's
+# _lanczos_basis_mps (MPS vectors, every H application truncated, hence the
+# looser factor). Both compare beta against ||H q_0||, see is_breakdown.
+BREAKDOWN_RTOL_ED = 1e-12
+BREAKDOWN_RTOL_MPS = 1e-10
+
+
+def is_breakdown(beta,href,rtol):
+    """Whether a Lanczos step has reached an invariant subspace: the new
+    direction's norm `beta` against `href` = ||H q_0||, the norm of H
+    applied to the (normalized) seed, which is the Krylov problem's own
+    energy scale.
+
+    Both builders used to test beta against an absolute constant (1e-12
+    here, 1e-10 on the MPS route), while beta carries the units of H: for
+    a Hamiltonian written as s*H it is s times the unit-scale value, so
+    once the seed's energy spread fell below the constant the basis
+    stopped at the seed alone and the spectrum became one Lorentzian of
+    weight |B|GS>|^2, 1.75 to 1.85 of the peak off, on ED from s of about
+    2e-12 and on v3 from about 2e-10 (2026-09-25b audit, finding 21). At
+    unit scale href is of order one and the rule is the old one to within
+    that factor. `<=` rather than `<` keeps href=0 (H q_0 = 0 exactly)
+    safe: only an exactly zero beta breaks there. A break that fires too
+    late costs nothing -- a normalized roundoff direction enters T with an
+    off-diagonal near zero and decouples from the seed -- so the threshold
+    only has to keep the division by beta away from an exact zero."""
+    return beta<=rtol*href
+
+
 def lanczos_basis(H,v0,k):
     """Build an orthonormal Lanczos basis of size <=k for the Hermitian
     operator H (anything supporting H@v), starting from seed v0, and
@@ -29,18 +59,21 @@ def lanczos_basis(H,v0,k):
     the classic three-term recurrence) since k is always small (tens of
     vectors) here, so the O(k) extra work per step is negligible and it
     avoids the well known loss of orthogonality of plain Lanczos.
-    If an invariant subspace is hit before k vectors are built (beta=0),
-    the basis is simply truncated there -- this is the exact subspace
-    already, not an error."""
+    If an invariant subspace is hit before k vectors are built (beta
+    zero relative to ||H q_0||, see is_breakdown), the basis is simply
+    truncated there -- this is the exact subspace already, not an
+    error."""
     n = v0.shape[0]
     q = v0/np.linalg.norm(v0)
     Q = [q]
     alphas = []
     betas = []
     beta = 0.0
+    href = None # ||H q_0||, the scale beta is compared against
     q_prev = np.zeros(n,dtype=complex)
     for j in range(k):
         w = H@Q[j] - beta*q_prev
+        if href is None: href = np.linalg.norm(w) # j=0: w is H q_0
         alpha = np.vdot(Q[j],w).real # real for Hermitian H
         alphas.append(alpha)
         w = w - alpha*Q[j]
@@ -48,7 +81,7 @@ def lanczos_basis(H,v0,k):
             w = w - np.vdot(q_i,w)*q_i
         beta = np.linalg.norm(w)
         if j==k-1: break # T already has k rows/cols, no need for q_{k}
-        if beta<1e-12: break # invariant subspace reached
+        if is_breakdown(beta,href,BREAKDOWN_RTOL_ED): break # invariant subspace
         betas.append(beta)
         q_prev = Q[j]
         Q.append(w/beta)

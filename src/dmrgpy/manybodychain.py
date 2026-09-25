@@ -83,13 +83,17 @@ class Many_Body_Chain():
 #      self.path = id_generator() # random ID in dmrgpy_tmp
       self.ns = len(sites) # number of sites
       self.mode = None # no mode (use the input parameter)
+      # the pieces update_hamiltonian() sums, set by set_hoppings(),
+      # set_hubbard() and set_pairings_MB() (exchange has had no setter
+      # since set_exchange() was removed); state, not settings (sites.STATE)
       self.exchange = 0 # zero
-      self.fields = 0 # zero
       self.pairing = 0
       self.hubbard = 0
       self.hopping = 0
-      self.resorder = False # reorder the indexes
-      self.resordered_indexes = None # reordered indexes
+      # fields, resorder, resordered_indexes, hubbard_matrix and fit_td
+      # used to be set here too; nothing read any of them, and a
+      # constructor keyword naming one was accepted and stored where
+      # nothing reads it (2026-09-25b hole hunt, finding 4)
       self.fermionic = False
       self.sites_from_file = False
       self.excited_gram_schmidt = False # it does not seem very effective
@@ -97,7 +101,6 @@ class Many_Body_Chain():
       self._dcex_excited_cache = None # cache for dcex.py's excited-state
           # search (submode="EX" dynamical correlator), invalidated in
           # restart()
-      self.hubbard_matrix = np.zeros((self.ns,self.ns)) # empty matrix
       self.use_ampo_hamiltonian = False # use ampo Hamiltonian
       # additional arguments
       self.kpmmaxm = 50 # bond dimension in KPM
@@ -211,15 +214,16 @@ class Many_Body_Chain():
       self.tdvp_gse_cutoff = 1e-8 # "TDVP_GSE" only: SVD cutoff used both
           # for each Krylov-vector MPO application and for the final
           # density-matrix truncation in global_subspace_expand().
-      self.cvm_tol = 1e-5 # tolerance for CVM
+      self.cvm_tol = 1e-5 # tolerance for CVM, relative to ||b|| =
+          # eta*||B|GS>|| (cvm.py::cvm_correction_vector)
       self.cvm_nit = 1e3 # iterations for CVM
-      self.cvm_patience = 50 # CVM CG early stop: iterations without a
-          # meaningful (>0.1% relative) best-residual improvement before
-          # concluding the truncation-imposed residual floor is reached
-          # (see cvm.py::cvm_correction_vector)
-      self.cvm_blowup = 100.0 # CVM CG early stop: running residual this
-          # many times above the best one means the truncated recurrence
-          # is diverging past the floor
+      self.cvm_patience = 50 # CVM CG early stop: iterations without a new
+          # minimum of the CG functional phi, which exact CG lowers at
+          # every step, so this fires only once a truncated recurrence has
+          # stopped improving (see cvm.py::cvm_correction_vector)
+      self.cvm_blowup = 100.0 # CVM CG early stop: phi above its minimum
+          # and the running residual this many times above the best
+          # iterate's means the truncated recurrence is diverging
       self.cvm_solver = "cg" # CVM linear solver: "cg" (global conjugate
           # gradient over whole-MPS primitives, every backend, the
           # historical behavior) or "variational" (Jeckelmann's dynamical
@@ -253,7 +257,6 @@ class Many_Body_Chain():
       self.wf0 = None # no initial WF
       self.skip_dmrg_gs = False # skip the DMRG minimization
       self.computed_gs = False # computed the GS already
-      self.fit_td = False # use fitting procedure in time evolution
       # ITensor version, resolving the "pick one for me" default
       self.itensor_version = (cppext.default_backend()
               if itensor_version is None else itensor_version)
@@ -724,6 +727,14 @@ class Many_Body_Chain():
       old = (self.itensor_version,getattr(self,"_session",None),
              getattr(self,"_sector_on_session",False))
       self.itensor_version = version
+      # the previous backend's session is not the new one's. initialize()
+      # builds none for julia_live, nor for a C++ version whose extension
+      # is missing (mode.py falls back to ED there) or on a chain whose mode
+      # is "ED", so it used to stay behind: setup_julia() left the python or
+      # C++ Chain on the chain, and every reader that tests for a session
+      # found one of a backend the chain no longer uses
+      self._session = None
+      self._sector_on_session = False
       try:
           self.initialize()
       except Exception:
@@ -854,6 +865,13 @@ class Many_Body_Chain():
       (bandwidth(), lowest_eigenvalue(), each a different object with no
       repeat to benefit from anyway), so a one-entry cache captures the
       case that matters without the bookkeeping of an unbounded one."""
+      if H is None:
+          # every DMRG reader probes self.hamiltonian here first, so this is
+          # where a chain with none is refused, by name, rather than with
+          # "'NoneType' object has no attribute 'get_dagger'" from
+          # mpsalgebra (2026-09-25b hole hunt, finding 6)
+          groundstate.require_hamiltonian(self)
+          raise TypeError("is_hermitian() needs an operator, got None")
       cache = getattr(self,'_is_hermitian_cache',None)
       if cache is not None and cache[0] is H:
           return cache[1]
@@ -882,8 +900,9 @@ class Many_Body_Chain():
               return vevjl(self,MO,**kwargs)
           else: raise
       elif mode=="ED":
+          ed = self._ed_reader() # refuses a chain with no Hamiltonian
           MOf = self.toMPO(MO,mode="ED") # fast operator
-          return self.get_ED_obj().vev(MOf,**kwargs) # ED object
+          return ed.vev(MOf,**kwargs) # ED object
       else: raise
   def metts_vev(self,MO,T,**kwargs):
       """Finite-temperature <MO> via METTS sampling (White & Stoudenmire,
@@ -952,10 +971,33 @@ class Many_Body_Chain():
   def operator_norm(self,op,**kwargs):
       """Estimate the norm of an operator"""
       return mpsalgebra.operator_norm(self,op,**kwargs)
-  def is_zero_operator(self,op,**kwargs):
-      """Check if this is the zero operator"""
-      out = self.operator_norm(op,**kwargs)
-      return out<1e-4
+  def is_zero_operator(self,op,tol=1e-20,**kwargs):
+      """Check if this is the zero operator.
+
+      Decided on op/cmax, cmax the largest raw coefficient of op, the
+      rescaling mpsalgebra.is_hermitian has made since the 2026-09-24c
+      audit (finding 12): whether an operator vanishes does not depend on
+      its units. This used to be operator_norm(op)<1e-4, absolute on a
+      squared norm, and it is what decided A^dagger == B for
+      cvm_solver="variational", so any pair of operators below about
+      1e-2 in size passed as adjoint and the solver answered for another
+      pair (2026-09-25b audit, finding 16). A MultiOperator whose canonical
+      form is empty is zero without a witness; otherwise
+      operator_norm(op/cmax), the mean of ||(op/cmax)|psi>||^2 over
+      random states, is compared with tol, which resolves a nonzero part
+      down to about 1e-10 of the largest coefficient. The zero operator
+      (no terms, or every coefficient zero) returns True."""
+      from .multioperator import MultiOperator
+      if not isinstance(op,MultiOperator): # e.g. an already built operator
+          return self.operator_norm(op,**kwargs)<1e-4 # legacy, no terms to scale by
+      cmax = max([abs(t[0]) for t in op.op]+[0.])
+      if cmax==0.: return True # the zero operator
+      op = op*(1./cmax)
+      if kwargs.get("simplify",True):
+          op = op.simplify()
+          if len(op.op)==0: return True # zero term by term
+          kwargs["simplify"] = False # done here already
+      return self.operator_norm(op,**kwargs)<=tol
   def exponential(self,h,wf,**kwargs):
       """Compute the overlap"""
       return mpsalgebra.exponential(self,h,wf,**kwargs)
@@ -1074,7 +1116,7 @@ class Many_Body_Chain():
           # KPM branch that reads them (the non-Hermitian KPM reads
           # neither) and before any ground-state work, the counterpart of
           # kpmdmrg.dynamical_correlator_moments on the DMRG side
-          edobj = self.get_ED_obj()
+          edobj = self._ed_reader() # refuses a chain with no Hamiltonian
           # The KPM route reads the rescaling window and the moment-count
           # multiplier off the chain, and an EDchain keeps no reference
           # back to the one that built it -- so push them across here,
@@ -1129,7 +1171,7 @@ class Many_Body_Chain():
      #     raise # not implemented
        #   return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED": 
-          return self.get_ED_obj().get_distribution(**kwargs)
+          return self._ed_reader().get_distribution(**kwargs)
       else: raise
   def get_distribution_moments(self,mode="DMRG",**kwargs):
       """Return the moments of the distribution of an operator's spectrum"""
@@ -1170,7 +1212,7 @@ class Many_Body_Chain():
       if mode=="DMRG":
           return excited.get_excited(self,**kwargs) # return excitation energies
       elif mode=="ED": 
-          return self.get_ED_obj().get_excited(**kwargs) # ED
+          return self._ed_reader().get_excited(**kwargs) # ED
   def get_full_matrix(self,name):
       """Return the full matrix of a named operator, via ED"""
       return self.get_ED_obj().get_operator(name) # get the full operator
@@ -1184,7 +1226,7 @@ class Many_Body_Chain():
       if mode=="DMRG":
           return excited.get_excited_states(self,**kwargs) # return es and waves
       elif mode=="ED": 
-          return self.get_ED_obj().get_excited_states(**kwargs) # ED
+          return self._ed_reader().get_excited_states(**kwargs) # ED
   def get_gap(self,**kwargs):
     """Return the gap"""
     es = self.get_excited(n=2,**kwargs)
@@ -1196,10 +1238,20 @@ class Many_Body_Chain():
       # raised "TypeError: get_hamiltonian() takes 0 positional arguments
       # but 1 was given" -- including the ones gs_energy_fluctuation()
       # makes internally.
-      if self.hamiltonian is None:
-          raise ValueError("this chain has no Hamiltonian yet; call "
-                  "set_hamiltonian() first")
+      groundstate.require_hamiltonian(self) # ValueError naming the fix
       return self.hamiltonian
+  def _ed_reader(self):
+      """The ED object, for a reader of the ground state or the spectrum:
+      a chain with no Hamiltonian is refused here, by name, as the DMRG
+      route refuses it in is_hermitian(), rather than inside whichever ED
+      builder first reads it ("No active exception to reraise" on
+      Spin_Chain, 'NoneType' object has no attribute 'op' on the fermion
+      chains, 'shape' or 'T' on the boson and parafermion chains;
+      2026-09-25b hole hunt, finding 6). get_ED_obj() itself stays lazy,
+      so ED operators and states can still be built before the
+      Hamiltonian is set."""
+      groundstate.require_hamiltonian(self)
+      return self.get_ED_obj()
   def nhdmrg(self,**kwargs):
       """Non-Hermitian DMRG (itensor_version 2, 3 or "python"): return
       (energy,psil,psir), the eigenvalue with smallest real part of the
@@ -1258,22 +1310,26 @@ class Many_Body_Chain():
       """Make `wf` this chain's state for the next ground-state read.
 
       With reconverge=False (the default) the next gs_energy()/get_gs()
-      takes a copy of `wf` as it is, unswept, with energy <wf|H|wf>, on the
-      Python side and on the DMRG session alike; with reconverge=True it
-      sweeps from it (set_initial_wf_guess). Either way `wf` itself is left
-      untouched. julia_live, which has no session, follows the same
-      contract through its own solver (groundstate._gs_energy_julia); it
-      used to store the state only, and the next read solved from a random
-      start and replaced it. wf=None drops a
-      pending injected state, so the next read solves. Nothing is computed
-      here. See groundstate.mark_injected() for the mechanism."""
-      self.computed_gs = False
+      takes a normalized copy of `wf`, unswept, with energy <wf|H|wf>, on
+      the Python side and on the DMRG session alike; with reconverge=True
+      it sweeps from it (set_initial_wf_guess). Either way `wf` itself is
+      left untouched, and a state with a zero or non-finite norm raises
+      ValueError before anything on the chain changes. julia_live, which
+      has no session, follows the same contract through its own solver
+      (groundstate._gs_energy_julia); it used to store the state only, and
+      the next read solved from a random start and replaced it. wf=None
+      drops a pending injected state, so the next read solves. Nothing is
+      computed here. See groundstate.mark_injected() for the mechanism."""
       if wf is None:
+        self.computed_gs = False
         self.gs_from_file = False # no stored state to start from
         self._gs_injected = None
       else:
-        self.gs_from_file = True # start from the stored state
+        # first: mark_injected() is where a state that cannot be
+        # normalized is refused, and the flags below used to be written
+        # before it, leaving a half-set chain behind the ValueError
         groundstate.mark_injected(self,wf,reconverge=reconverge)
+        self.gs_from_file = True # start from the stored state
         self.computed_gs = False # also where there is no session to mark
         if reconverge: self.skip_dmrg_gs = False # reconverge the calculation
         else: self.skip_dmrg_gs = True # take the state as it is
@@ -1282,20 +1338,30 @@ class Many_Body_Chain():
       from .groundstate import set_gs 
       groundstate.set_gs(self,wf) # set this as ground state
   def get_gs(self,best=False,n=1,mode="DMRG",**kwargs):
-      """Return the ground state"""
+      """Return the ground state.
+
+      Takes the keywords gs_energy() takes, read the same way on both
+      solvers, and returns the stored state under the same condition. With
+      best=True the lowest of n solves is kept (groundstate.best_gs), and
+      every keyword but wf0= goes to each solve."""
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": # DMRG mode
-        # stored and still valid, and the call names no start state: the
-        # same condition gs_energy() returns its stored energy on. The
-        # wf0= half was missing here, so get_gs(wf0=x) on a solved chain
-        # returned the stored state without reading x, where gs_energy(
-        # wf0=x) swept from x, or took it as it is with reconverge=False
-        if groundstate.gs_is_current(self) and kwargs.get("wf0") is None:
-            return self.wf0
+        # stored and still valid, and the call asks nothing the stored
+        # state does not answer: the one condition gs_energy() returns its
+        # stored energy on (groundstate.stored_answer_holds). The wf0= half
+        # was missing here once, so get_gs(wf0=x) on a solved chain
+        # returned the stored state without reading x; and every other
+        # keyword was read by neither, so a typo or maxde= went unread on a
+        # solved chain (2026-09-25b hole hunt, finding 5)
+        if groundstate.stored_answer_holds(self,kwargs): return self.wf0
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
         else: self.gs_energy(**kwargs) # perform a ground state calculation
         return self.wf0 # return wavefunction
-      elif mode=="ED": return self.get_ED_obj().get_gs(**kwargs)
+      elif mode=="ED":
+          # the keywords, read as gs_energy() reads them on ED; they used
+          # to go to EDchain.get_gs(), which raised TypeError on every one
+          # (2026-09-25b hole hunt, finding 2)
+          return groundstate.ed_ground_state(self,**kwargs).get_gs()
       # never fall off the end into an implicit None: a null wavefunction
       # propagates into overlap/vev/entropy calls and fails far from here
       else: raise ValueError("Unrecognized mode "+repr(mode))
@@ -1311,19 +1377,36 @@ class Many_Body_Chain():
       maxm is doubled, at most five times, while the state's fluctuation
       per site exceeds maxde, so it is gs_energy_fluctuation()/ns, not
       gs_energy_fluctuation() itself, that is compared with maxde. See
-      groundstate.gs_energy_single."""
+      groundstate.gs_energy_single. On a chain whose ground state is
+      current the stored energy is returned only when the call asks nothing
+      it does not answer (groundstate.stored_answer_holds): maxde=,
+      reconverge=True and a keyword the solver does not take go to the
+      solver, as on a chain that is not current.
+
+      On a chain that answers by ED (mode="ED", or mode.py's fallbacks)
+      the same keywords are read the way an exact solve honours them
+      (groundstate.ed_ground_state): wf0=x with reconverge=False makes x
+      the chain's state through set_gs(); a start state, maxde= and
+      maxdepth= are met by the exact solve; any other keyword raises
+      TypeError. The energy returned there is the lowest eigenvalue, also
+      after wf0=x with reconverge=False, as after set_gs(x)."""
       mode = self.get_mode(mode=mode) # overwrite mode
-      if mode=="DMRG": 
+      if mode=="DMRG":
           # not just computed_gs: a stored energy is only an answer to
           # this call if it was computed under the solver parameters in
-          # force now (groundstate.gs_is_current), and if the call does
-          # not name a start state: gs_energy(wf0=x), the explicit warm
-          # start, used to return the stored energy without reading x
-          # whenever the state was current
-          if (groundstate.gs_is_current(self)
-                  and kwargs.get("wf0") is None): return self.e0
+          # force now (groundstate.gs_is_current), and if the call asks
+          # nothing it does not answer (groundstate.stored_answer_holds):
+          # gs_energy(wf0=x), the explicit warm start, used to return the
+          # stored energy without reading x whenever the state was current,
+          # and so did gs_energy(maxde=...) without refining, and a
+          # misspelled keyword that raises on a fresh chain
+          if groundstate.stored_answer_holds(self,kwargs): return self.e0
           return groundstate.gs_energy(self,**kwargs)
-      elif mode=="ED": return self.get_ED_obj().gs_energy() # ED object
+      elif mode=="ED":
+          # the keywords, read as an exact solve honours them; they used to
+          # be dropped, so gs_energy(wf0=x, reconverge=False) left the ED
+          # ground state on the chain (2026-09-25b hole hunt, finding 2)
+          return groundstate.ed_ground_state(self,**kwargs).gs_energy()
       else: raise ValueError("Unrecognized mode "+repr(mode))
   def gs_energy_generalized(self,A,**kwargs):
       """Smallest generalized eigenvalue lambda solving
@@ -1334,7 +1417,9 @@ class Many_Body_Chain():
       self.wf0 is an eigenstate of the shifted problem, not a plain
       eigenstate of self.hamiltonian, which other methods that read
       self.wf0 (get_excited_states, dynamical/KPM correlators, ...) have
-      no way to detect."""
+      no way to detect. lambda is the return value, and is kept as
+      self.lam_generalized; self.e0, the energy every reader measures the
+      state's lines from, is <wg|H|wg> of that state, not lambda."""
       return groundstate.gs_energy_generalized(self,A,**kwargs)
   def get_correlator(self,pairs=[],**kwargs):
       """Return a correlator, default one"""

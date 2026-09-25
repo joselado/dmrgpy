@@ -117,6 +117,27 @@ def random_mps(self):
     return MPS(jlmps,MBO=self)
 
 
+def start_linkdims(self):
+    """Link dimension of a fresh solve's start: min(maxm, bond_ramp_start),
+    the first maxdim the "python" and v3 backends build their own random
+    start at (Many_Body_Chain.bond_ramp_start, 10 by default), and never
+    above maxm. julia_live has no ramp, so this is only the start."""
+    k = min(int(self.maxm),int(getattr(self,"bond_ramp_start",10)))
+    return max(1,k)
+
+
+def start_mps(self):
+    """The random start of a julia_live DMRG-family solve with no state of
+    its own to sweep from, at link dimension start_linkdims(): see
+    mpsalgebra.jl's dmrg_start_state for why this is not random_mps()
+    above, a product state, which every such solve used to start from.
+    Built on self.jlsites directly, not through the chain-level
+    random_state(), which honours self.mode and on mode="ED" returns an
+    edtk State with no .jlmps."""
+    jlmps = Mainjl.dmrg_start_state(self.jlsites,start_linkdims(self))
+    return MPS(jlmps,MBO=self)
+
+
 
 
 

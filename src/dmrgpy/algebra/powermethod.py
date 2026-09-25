@@ -3,21 +3,35 @@ import numpy as np
 
 def power_method_several(self,H,verbose=0,n0=10,ntries=10,shift=0.0,
         orthogonal=None,unfiltered=False,error=1e-6,**kwargs):
-    """Simple implementation of the power method"""
+    """Simple implementation of the power method.
+
+    An iteration stops once its Rayleigh quotient moves by less than
+    error*min(1,|ei|): relative below energies of order one, the old
+    absolute `error` at and above them. Both that stop and the
+    normalization of each iterate were absolute (|eold-ei|<1e-6, and
+    normalize()'s 1e-8 floor on H|psi>), so an H written in small units
+    stopped after its first step or lost its iterate to None (2026-09-25b
+    audit, finding 22 and lead scale-arnolditk-absolute-stop, both by
+    reading; the one caller, arnolditk.most_positive_energy, cannot reach
+    this function, whose name it never imports)."""
     from .arnolditk import random_state
-    from .krylov import gram_smith,gram_smith_single
+    from .krylov import gram_smith,gram_smith_single,normalize_image
     def f(): # function to perform a single power method iteration
         wf = random_state(self,orthogonal=orthogonal) # take a random MPS
         eold = -1e20
         for i in range(n0): # number of tries
-            if shift!=0.: wf = shift*wf + H*wf
-            else: wf = H*wf # perform one iteration
-            wf = wf.normalize() # normalize wavefunction
+            if shift!=0.:
+                # a sum can cancel: floor it relative to its two terms'
+                # scale (wf is a unit vector, so |shift| and ||H wf||)
+                hw = H*wf
+                ref = np.abs(shift) + np.sqrt(np.abs(hw.dot(hw)))
+                wf = (shift*wf + hw).normalize(tol=1e-8*ref)
+            else: wf = normalize_image(H*wf) # H|unit>: its norm is H's scale
             if orthogonal is not None: # reorthogonalize
                 wf = gram_smith_single(wf,orthogonal)
             ei = wf.aMb(H,wf)
             if verbose>2: print("Energy in this iteration",ei)
-            if np.abs(eold-ei)<error:
+            if np.abs(eold-ei)<error*min(1.,np.abs(ei)):
                 if verbose>2: print("Stopping PM")
                 break
             eold = ei
@@ -74,11 +88,20 @@ def power_method_orthogonal(self,H,nwf=1,**kwargs):
 
 
 def estimate_radius(self,H,n0=10):
-    """Given a Hamiltonian, make an estimate of the radius of the spectra"""
+    """Given a Hamiltonian, make an estimate of the radius of the spectra.
+
+    Each iterate H|u> is divided by its own norm (krylov.normalize_image):
+    it used to go through wf.normalize(), whose absolute 1e-8 floor
+    returned None for an H written below about 1e-8, so the next product
+    raised TypeError inside mpsalgebra.lowest_energy_arnoldi (2026-09-25b
+    audit, finding 22). At unit scale the division is the same one.
+    Returns 0 when H annihilates the iterate exactly."""
     from .arnolditk import random_state
+    from .krylov import normalize_image
     wf = random_state(self) # random state
     for i in range(n0): # warmup number of tries
-        wf = wf.normalize() # normalize
+        wf = normalize_image(wf) # normalize, whatever H's units
+        if wf is None: return 0. # H|u> = 0 exactly
         wf = H*wf # multiply
     return np.sqrt(np.abs(wf.dot(wf)))
 

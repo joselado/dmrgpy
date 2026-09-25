@@ -530,11 +530,19 @@ class Chain
     MPS
     promote_mps(MPS const& wf) const { return to_dense_mps(wf); }
 
+    // The solver's scale is the one the MPO was built at, reported by
+    // to_mpo_unit() from the merged AutoMPO, so the two readings cannot
+    // part: taken from the raw term list, a list whose duplicate strings
+    // cancel (s*H + Sz0 - Sz0, exactly s*H) got a unit-scaled MPO and an
+    // unscaled solve, 0.12 to 0.52 off at s=1e-10 (2026-09-25b audit,
+    // finding 28).
     void
     set_hamiltonian(std::vector<MOTerm> const& terms)
         {
-        set_hamiltonian_mpo(mpo_from_terms(terms));
-        hscale_up_ = unit_scale_up(max_abs_coef(terms)); // after: the MPO route resets it
+        double up = 1.0;
+        auto H = mpo_from_terms(terms,&up);
+        set_hamiltonian_mpo(H);
+        hscale_up_ = up; // after: the MPO route resets it
         }
 
     // Set the Hamiltonian from an ALREADY-BUILT MPO, bypassing the symbolic
@@ -1186,7 +1194,11 @@ class Chain
     reduced_dm(MPS const& wf, int site) const
         {
         auto psi = wf;
-        psi /= innerC(psi,psi).real(); // normalize (see note in mpscpp2/chain_session.h)
+        // normalized by the norm, not the squared norm the original
+        // divided by (see the note in mpscpp2/chain_session.h: it made
+        // get_rdm() exactly rho/c^2 for a set state c*s)
+        double nrm2 = innerC(psi,psi).real();
+        if (nrm2 > 0.0) psi /= std::sqrt(nrm2);
         psi.position(site);
         auto ir = commonIndex(psi.A(site),psi.A(site+1));
         auto rho = psi.A(site)*dag(prime(psi.A(site),sites_.si(site),ir));
@@ -3806,6 +3818,10 @@ class Chain
         for (int p=0;p<n_uc;++p)
             rows.push_back(idmrg_build_row(p,n_uc,bonds,onsite,
                                             chans[p],chans[(p+1)%n_uc]));
+        // the Hamiltonian's own unit, for every stopping test below that is
+        // an energy (see vx_hamiltonian_unit)
+        double hunit = vx_hamiltonian_unit(onsite,bonds);
+        vumps_hunit_ = hunit;
 
         int Dw=0, d_g=0;
         std::vector<Cplx> W;
@@ -3838,7 +3854,7 @@ class Chain
             {
             std::mt19937_64 rng_ms(std::random_device{}());
             auto run = vms_ground_state(rows,D,tol,maxiter,niter_lanczos,
-                                         nrestarts,rng_ms);
+                                         nrestarts,rng_ms,hunit);
             vms_AL_ = run.AL; vms_AR_ = run.AR; vms_C_ = run.C; vms_AC_ = run.AC;
             vms_rows_ = rows; vms_D_ = D;
             have_vms_snapshot_ = true;
@@ -3895,7 +3911,8 @@ class Chain
                 try
                     {
                     auto r = vumps_single_run(D_cur,d_g,h1,pending,tol,maxiter,
-                                               niter_lanczos,has_init?&init:nullptr,rng);
+                                               niter_lanczos,has_init?&init:nullptr,rng,
+                                               hunit);
                     if (verbose_)
                         println("vumps D=",D_cur," attempt=",attempt,": e0=",
                                 r.e_cell/n_uc," converged=",r.converged);
@@ -3928,19 +3945,25 @@ class Chain
             // that lands above the best smaller-D energy is stuck in a bad
             // basin, and the answer is more attempts rather than accepting
             // it. The extra budget is spent only when that happens, so a
-            // healthy ramp costs nothing.
-            if (have_best_e && local_best.e_cell > best_e + 1e-6)
+            // healthy ramp costs nothing. The margin is an energy, so below
+            // unit scale it is in the Hamiltonian's unit: an absolute 1e-6
+            // could never fire below units of about 1e-6 (2026-09-25b
+            // audit, finding 24, by reading); at a unit of 1 or more it is
+            // the old 1e-6.
+            double margin = 1e-6*std::min(1.0,hunit);
+            if (have_best_e && local_best.e_cell > best_e + margin)
                 {
                 for (int extra=0; extra<2*nrestarts; ++extra)
                     {
-                    if (local_best.e_cell <= best_e + 1e-6) break;
+                    if (local_best.e_cell <= best_e + margin) break;
                     try
                         {
                         VumpsInit init2;
                         bool has2 = have_prev;
                         if (has2) init2 = vumps_grow_init(D_cur,d_g,prev_D,prev_AL,prev_AR,rng);
                         auto r = vumps_single_run(D_cur,d_g,h1,pending,tol,maxiter,
-                                                   niter_lanczos,has2?&init2:nullptr,rng);
+                                                   niter_lanczos,has2?&init2:nullptr,rng,
+                                                   hunit);
                         if (verbose_)
                             println("vumps D=",D_cur," extra=",extra,": e0=",
                                     r.e_cell/n_uc," converged=",r.converged);
@@ -4040,7 +4063,7 @@ class Chain
                 { return vumps_h_eff_action(k,x); };
             vx_lanczos_lowest(action,nH,n,vumps_h_eff_lanczos_niter_,
                                vumps_h_eff_residual_tol_,vumps_h_eff_residual_max_,
-                               evals);
+                               evals,vumps_hunit_);
             }
         if (evals.empty())
             {
@@ -4938,11 +4961,14 @@ class Chain
         return out;
         }
 
+    // `up_out`: the unit-scale factor the MPO was built at (to_mpo_unit()),
+    // read off the AutoMPO actually built -- after sector_terms() in sector
+    // mode -- which is what set_hamiltonian() takes its solver scale from.
     MPO
-    mpo_from_terms(std::vector<MOTerm> const& terms) const
+    mpo_from_terms(std::vector<MOTerm> const& terms, double* up_out = nullptr) const
         {
-        if (!has_sector_) return build_mpo(sites_,terms,mpomaxm_);
-        return build_mpo(sites_,sector_terms(terms),mpomaxm_);
+        if (!has_sector_) return build_mpo(sites_,terms,mpomaxm_,up_out);
+        return build_mpo(sites_,sector_terms(terms),mpomaxm_,up_out);
         }
 
     AutoMPO
@@ -5479,10 +5505,30 @@ class Chain
             for (int k=2;k<=m;++k) remin = std::min(remin,ev[k-1].real());
             if (sel==Sel::SRTieBreak)
                 {
-                double degtol = 1e-6*(1.0+std::abs(remin));
+                // The tie window is measured against the Ritz spectrum's
+                // own spread, which is free of the units and of any
+                // constant offset, plus a roundoff floor that keeps a
+                // genuinely Re-degenerate pair (split only by roundoff of
+                // order eps*|E|) inside it. It used to be
+                // 1e-6*(1+|remin|): absolute below unit scale and growing
+                // with an offset, so once it exceeded the real-part gap the
+                // sweep followed the previous bond onto a converged EXCITED
+                // eigenpair -- 0.449 to 1.85 off below s=2.2e-6 on a 6-site
+                // chain, and likewise above an offset of about gap/1e-6
+                // (2026-09-25b audit, finding 25). Identical to
+                // pyitensor/nhdmrg.py's _select_ritz. <=, so a lone or an
+                // all-equal set of Ritz values stays a candidate.
+                double remax = remin, amax = 0.0;
+                for (int k=1;k<=m;++k)
+                    {
+                    remax = std::max(remax,ev[k-1].real());
+                    amax = std::max(amax,std::abs(ev[k-1]));
+                    }
+                double degtol = 1e-6*(remax-remin)
+                              + 100.0*std::numeric_limits<double>::epsilon()*amax;
                 kbest = 0;
                 for (int k=1;k<=m;++k)
-                    if (ev[k-1].real()<remin+degtol)
+                    if (ev[k-1].real()<=remin+degtol)
                         if (kbest==0 ||
                             std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
                             kbest = k;
@@ -5530,6 +5576,22 @@ class Chain
         // own TagSet("Site").
         static const TagSet a_tag("a");
         Cplx lambda = 0;
+        // The operator's own scale, for the three stopping tests below:
+        // the largest ||A v|| over every unit vector it has been applied to
+        // in this call (the start, then each Krylov vector, whose spread
+        // this picks up even when the start is a near-eigenvector of
+        // eigenvalue ~0), capped at 1. The tests used to be absolute --
+        // breakdown at ||w|| < 1e-13, and the early and restart residual
+        // tests at 1e-10*(1+|lambda|) -- so for s*H below unit scale the
+        // local solve returned an unconverged vector as converged: the v3
+        // iDMRG density was 1e-5..1e-3 relative off at s=1e-11..1e-12 and
+        // O(1) off with the wrong sign from 1e-13 down, all with
+        // converged=True (2026-09-25b audit, finding 27). Capped at 1 so
+        // that at an operator scale of 1 or more (every ordinary
+        // Hamiltonian) the tests are the unscaled ones, exactly;
+        // min(1,||A||)+|lambda| is scale-covariant below that.
+        double opnorm = 0.0;
+        auto opscale = [&]() { return std::min(1.0,opnorm); };
         for (int r=0;r<restarts;++r)
             {
             double nx = norm(x0);
@@ -5543,6 +5605,7 @@ class Chain
             for (int j=0;j<krylovdim;++j)
                 {
                 auto w = A(V.at(j));
+                opnorm = std::max(opnorm,norm(w));
                 for (int i=0;i<=j;++i)
                     {
                     auto c = eltC(dag(V.at(i))*w);
@@ -5558,7 +5621,10 @@ class Chain
                 m = j+1;
                 double nw = norm(w);
                 h.at(j+1).at(j) = nw;
-                if (nw<1e-13) break; // happy breakdown: invariant subspace
+                // happy breakdown: invariant subspace (relative to the
+                // operator's scale, see opnorm; ! > so that w = 0, the
+                // start in the kernel of a zero operator, breaks too)
+                if (!(nw > 1e-13*opscale())) break;
                 // Early-exit convergence check (see early_tol's own
                 // comment above). Skipped below m=8 (a residual bound
                 // from a tiny subspace is not a reliable signal) and only
@@ -5591,7 +5657,7 @@ class Chain
                     int kbest_chk = arnoldi_select_kbest(ev_chk,sel,target);
                     Cplx ebest_chk = ev_chk[kbest_chk-1];
                     double resid_chk = nw*std::abs(eltC(Wchk,a_chk(m),cchk(kbest_chk)));
-                    if (resid_chk<early_tol*(1.0+std::abs(ebest_chk))) break;
+                    if (resid_chk<=early_tol*(opscale()+std::abs(ebest_chk))) break;
                     }
                 if (j+1<krylovdim) V.push_back(w/nw);
                 }
@@ -5622,7 +5688,7 @@ class Chain
             // further restarts would just rebuild the same subspace
             double resid_est = h.at(m).at(m-1).real()
                               *std::abs(eltC(W,a(m),c(kbest)));
-            if (resid_est<1e-10*(1.0+std::abs(ebest))) break;
+            if (resid_est <= 1e-10*(opscale()+std::abs(ebest))) break;
             }
         return {lambda,x0};
         }
@@ -7808,7 +7874,8 @@ class Chain
     VmsRun
     vms_single_run(std::vector<IdmrgAutomatonRow> const& rows, int D,
                     double tol, int maxiter, int niter_lanczos,
-                    VmsRun const* init, std::mt19937_64& rng) const
+                    VmsRun const* init, std::mt19937_64& rng,
+                    double hunit=1.0) const
         {
         int n_uc = (int)rows.size();
         std::vector<std::vector<Cplx>> AL(n_uc), AR(n_uc), C(n_uc), AC(n_uc);
@@ -7840,10 +7907,12 @@ class Chain
                 // the convergence criterion below is a norm difference
                 // between independently-solved eigenVECTORS, whose
                 // accuracy the eigenvalue test caps at ~sqrt(tol). Same
-                // tol/10 as pyitensor/vumps_ms.py's own solves.
+                // tol/10 as pyitensor/vumps_ms.py's own solves, relative to
+                // the Hamiltonian's unit (see vx_lanczos_ground_state's
+                // `scale`).
                 AC_new[n] = vx_lanczos_ground_state(act_ac,AC[n],D*d*D,
                                                      niter_lanczos,1e-12,
-                                                     tol/10.0).second;
+                                                     tol/10.0,hunit).second;
                 vx_align_phase(AC[n],AC_new[n]);
                 // H_C[n] lives on the bond to the RIGHT of site n: its left
                 // environment is the one left of site n+1, its right one is
@@ -7854,7 +7923,7 @@ class Chain
                     { return vms_h_c_action(X,GL_bond,env.GR[n],D); };
                 C_new[n] = vx_lanczos_ground_state(act_c,C[n],D*D,
                                                     niter_lanczos,1e-12,
-                                                    tol/10.0).second;
+                                                    tol/10.0,hunit).second;
                 vx_align_phase(C[n],C_new[n]);
                 }
             mismatch = 0.0;
@@ -7888,7 +7957,8 @@ class Chain
     VmsRun
     vms_ground_state(std::vector<IdmrgAutomatonRow> const& rows, int D,
                       double tol, int maxiter, int niter_lanczos,
-                      int nrestarts, std::mt19937_64& rng) const
+                      int nrestarts, std::mt19937_64& rng,
+                      double hunit=1.0) const
         {
         std::vector<int> ramp;
         for (int d_cur=1; d_cur<D; d_cur*=2) ramp.push_back(d_cur);
@@ -7912,7 +7982,7 @@ class Chain
             try
                 {
                 auto r = vms_single_run(rows,D_cur,tol,maxiter,niter_lanczos,
-                                         init,rng);
+                                         init,rng,hunit);
                 if (verbose_)
                     println("vumps_ms D=",D_cur," attempt=",attempt,": e_cell=",
                             r.e_cell," converged=",r.converged);
@@ -7967,12 +8037,14 @@ class Chain
             // smaller-D energy has landed in a bad basin, and the fix is
             // more attempts rather than accepting it. The extra budget is
             // spent only when that happens, so a healthy ramp costs
-            // nothing.
-            if (have_best && local.e_cell > best.e_cell + 1e-6)
+            // nothing. The margin is in the Hamiltonian's unit below unit
+            // scale, as on the grouped driver.
+            double margin = 1e-6*std::min(1.0,hunit);
+            if (have_best && local.e_cell > best.e_cell + margin)
                 {
                 for (int extra=0; extra<2*nrestarts; ++extra)
                     {
-                    if (local.e_cell <= best.e_cell + 1e-6) break;
+                    if (local.e_cell <= best.e_cell + margin) break;
                     VmsRun start = init_from(vms_grow_init(D_cur,prev_D,rows,
                                                             prev.AL,prev.AR,rng));
                     try_attempt(D_cur,n_here+extra,&start,local,have_local);
@@ -8632,6 +8704,52 @@ class Chain
     static constexpr double vumps_h_eff_residual_tol_ = 1e-10;
     static constexpr double vumps_h_eff_residual_max_ = 1e-7;
 
+    // The Hamiltonian's own unit, for the VUMPS local solves' stopping tests
+    // (vx_lanczos_ground_state's and vx_lanczos_lowest's `scale`/`unit`,
+    // and the D-ramp's variational safety net): the largest |coefficient|
+    // of its classified terms, skipping every term whose operator is a
+    // multiple of the identity -- a constant, however it is spelled
+    // (4c*Sz0*Sz0 is c*Id on a spin-1/2 site, and composes to a diagonal
+    // (c/4)*Id matrix here). So it is proportional to s under H -> s*H,
+    // blind to an energy offset. The tests use it as a CAP on their old
+    // max(1,|lambda|) reference, and in place of their old absolute
+    // constants only below 1, so at a unit of 1 or more nothing changes
+    // for an ordinary Hamiltonian (see vx_lanczos_ground_state's `scale`).
+    // Offset-free spectral quantities of H_AC itself were the alternative
+    // and are the wrong size: its eigenvalue spread is ~4x the coupling on
+    // the D=8 transverse-field Ising cell, which would loosen the test past
+    // the requested tol at s=1. 1 when there is no non-constant term at
+    // all (a zero or constant H), which leaves the old tests. The pyitensor
+    // twin is vumps._hamiltonian_unit.
+    static double
+    vx_hamiltonian_unit(std::vector<IdmrgOnsite> const& onsite,
+                         std::vector<IdmrgBond> const& bonds)
+        {
+        // whether a square row-major matrix is c*Id, relative to its own
+        // largest element (a zero matrix counts, as 0*Id)
+        auto is_identity_multiple = [](std::vector<Cplx> const& M)
+            {
+            int d = (int)std::lround(std::sqrt((double)M.size()));
+            double mmax = 0.0;
+            for (auto const& z : M) mmax = std::max(mmax,std::abs(z));
+            double tol = 1e-12*mmax;
+            for (int i=0;i<d;++i)
+            for (int j=0;j<d;++j)
+                {
+                Cplx want = (i==j) ? M[0] : Cplx(0,0);
+                if (std::abs(M[(size_t)i*d+j]-want) > tol) return false;
+                }
+            return true;
+            };
+        double unit = 0.0;
+        for (auto const& o : onsite)
+            if (!is_identity_multiple(o.mat)) unit = std::max(unit,std::abs(o.coef));
+        for (auto const& b : bonds)
+            if (!(is_identity_multiple(b.mat_a) && is_identity_multiple(b.mat_b)))
+                unit = std::max(unit,std::abs(b.coef));
+        return (unit > 0.0) ? unit : 1.0;
+        }
+
     // Lowest eigenpair of a Hermitian operator given ONLY by its action on
     // a flat length-n complex vector -- a direct C++ port of pyitensor/
     // dmrg.py's own _lanczos_ground_state (Lanczos with full
@@ -8657,11 +8775,32 @@ class Chain
     // docstring for the measurements); `tol` keeps its second job either
     // way (the `beta < tol` Krylov-breakdown test). Callers that pass
     // nothing are byte-identical to before this parameter existed.
+    //
+    // `scale`, when positive, is the operator's own unit, supplied by the
+    // caller (the VUMPS drivers pass vx_hamiltonian_unit): the residual
+    // test becomes ||(H-lambda)v|| <= residual_tol*min(scale,max(1,|lambda|))
+    // and the breakdown beta <= tol*min(1,scale). max(1,|lambda|) alone is
+    // neither free of the units nor of an energy offset, and the gauge
+    // mismatch VUMPS tests for convergence floors at about
+    // 2.7*residual_tol*max(1,|lambda_AC|)/gap: above the requested tol on
+    // the D=8 transverse-field Ising cell at s*H for s <= 0.1 (2.7e-7 at
+    // s=1e-4, 1.9e-3 at 1e-8) and at s=1 under an onsite constant of 10 to
+    // 100 (2.2e-9), all converged=False (2026-09-25b audit, finding 24).
+    // Capping it by the unit cures both, since an offset can only push
+    // |lambda| up and the cap is offset-free, while leaving the old test
+    // exactly as it was whenever max(1,|lambda|) <= unit, i.e. for every
+    // ordinary Hamiltonian at unit scale or above. The unit alone, without
+    // the old term under it, is too LOOSE above 1: on -4 SxSx - 2g Sz at
+    // g=1 (unit 4, |lambda_AC| ~ 1.5) it made the critical D=8 run miss
+    // tol (tests/test_lanczos_residual_criterion.py). The breakdown moves
+    // with it: once the residual threshold is relative, an absolute 1e-12
+    // would be the test that binds at small scale and stop an unconverged
+    // solve.
     template <typename Fn>
     static std::pair<double,std::vector<Cplx>>
     vx_lanczos_ground_state(Fn&& action, std::vector<Cplx> v0, int n,
                              int niter, double tol=1e-12,
-                             double residual_tol=-1.0)
+                             double residual_tol=-1.0, double scale=-1.0)
         {
         auto dot = [](std::vector<Cplx> const& a, std::vector<Cplx> const& b)
             {
@@ -8730,10 +8869,13 @@ class Chain
                 // sits before the loop body rather than at the end of it.
                 std::vector<Cplx> svec;
                 double val = tridiag_ground(true,svec);
-                if (beta*std::abs(svec.back()) < residual_tol*std::max(1.0,std::abs(val)))
-                    return {val,expand(svec)};
+                double resid = beta*std::abs(svec.back());
+                bool done = (scale > 0.0)
+                    ? !(resid > residual_tol*std::min(scale,std::max(1.0,std::abs(val))))
+                    : (resid < residual_tol*std::max(1.0,std::abs(val)));
+                if (done) return {val,expand(svec)};
                 }
-            if (beta < tol) break;
+            if ((scale > 0.0) ? !(beta > tol*std::min(1.0,scale)) : (beta < tol)) break;
             betas.push_back(beta);
             std::vector<Cplx> q_new(w.size());
             for (size_t i=0;i<w.size();++i) q_new[i] = w[i]/beta;
@@ -8834,6 +8976,17 @@ class Chain
     // from the first run's own Ritz range, which bounds the spectrum from
     // below and is the only estimate of it available for free.
     //
+    // `unit` is the operator's own unit (the VUMPS ground state's
+    // vx_hamiltonian_unit, vumps_hunit_): wherever the tests below read
+    // max(1,|lambda|) they read max(min(1,unit),|lambda|), and the 1e-12
+    // breakdown is 1e-12*min(1,unit) -- covariant under H -> s*H below unit
+    // scale, where max(1,.) was absolute (2026-09-25b audit, finding 24, by
+    // reading), and the old tests exactly at a unit of 1 or more. |lambda|
+    // can stay in them because H_eff(k)'s eigenvalues are excitation
+    // energies, measured from the ground state, so an energy offset never
+    // reaches them -- unlike the ground-state solves of
+    // vx_lanczos_ground_state. unit=1, the default, is the old test.
+    //
     // Three things here are not optional:
     //
     // - The stopping test is the RESIDUAL of the lowest Ritz pair
@@ -8863,8 +9016,9 @@ class Chain
     static bool
     vx_lanczos_lowest(Fn&& action, int n, int nev, int niter,
                        double residual_tol, double residual_max,
-                       std::vector<double>& evals_out)
+                       std::vector<double>& evals_out, double unit=1.0)
         {
+        unit = std::min(1.0,unit); // see the `unit` comment above
         evals_out.clear();
         if (nev < 1 || nev >= n) return false;
         auto dot = [](std::vector<Cplx> const& a, std::vector<Cplx> const& b)
@@ -8945,7 +9099,7 @@ class Chain
                 {
                 int m = tridiag_eig();
                 double beta = nrm(w);
-                if (beta*std::abs(evec_col[(m-1)]) < residual_tol*std::max(1.0,std::abs(ev[0])))
+                if (beta*std::abs(evec_col[(m-1)]) < residual_tol*std::max(unit,std::abs(ev[0])))
                     {
                     val = ev[0];
                     vec.assign((size_t)n,Cplx(0,0));
@@ -8961,13 +9115,13 @@ class Chain
                         // this run's own largest Ritz value (a lower
                         // bound on it -- hence the extra margin).
                         double spread = std::abs(ev.back()-ev[0]);
-                        shift = 2.0*spread + 2.0*std::max(1.0,std::abs(ev[0]));
+                        shift = 2.0*spread + 2.0*std::max(unit,std::abs(ev[0]));
                         }
                     converged = true;
                     break;
                     }
                 if (step == mmax) break;
-                if (beta < 1e-12) return false; // invariant subspace, lowest not yet converged
+                if (beta < 1e-12*unit) return false; // invariant subspace, lowest not yet converged
                 betas.push_back(beta);
                 std::vector<Cplx> q_new(w.size());
                 for (size_t i=0;i<w.size();++i) q_new[i] = w[i]/beta;
@@ -9008,8 +9162,8 @@ class Chain
                 Cplx d = Hv[i] - val*vec[i];
                 r2 += std::norm(d);
                 }
-            if (std::sqrt(r2) > residual_max*std::max(1.0,std::abs(val))) return false;
-            if (!vals.empty() && val < vals.back() - residual_max*std::max(1.0,std::abs(val)))
+            if (std::sqrt(r2) > residual_max*std::max(unit,std::abs(val))) return false;
+            if (!vals.empty() && val < vals.back() - residual_max*std::max(unit,std::abs(val)))
                 return false; // an earlier run missed one -- refuse the whole answer
 
             // Re-orthonormalize before storing: the deflation and the
@@ -9210,7 +9364,8 @@ class Chain
     vumps_single_run(int D, int d_g, std::vector<Cplx> const& h1,
                       std::vector<PendingChan> const& pending,
                       double tol, int maxiter, int niter_lanczos,
-                      VumpsInit const* init, std::mt19937_64& rng) const
+                      VumpsInit const* init, std::mt19937_64& rng,
+                      double hunit=1.0) const
         {
         VumpsInit start = init ? *init : vumps_random_init(D,d_g,rng);
         auto AL = start.AL, AR = start.AR, C = start.C;
@@ -9241,9 +9396,10 @@ class Chain
                 auto act = [&](std::vector<Cplx> const& X)
                     { return vumps_h_ac_action(X,D,d_g,env.GL,env.GR,env.bond_envs,h1); };
                 // See vx_lanczos_ground_state's own comment on residual_tol:
-                // the mismatch below compares eigenVECTORS.
+                // the mismatch below compares eigenVECTORS; and on `scale`,
+                // the Hamiltonian's unit the residual is measured in.
                 AC_new = vx_lanczos_ground_state(act,AC,n_ac,niter_lanczos,
-                                                  1e-12,tol/10.0).second;
+                                                  1e-12,tol/10.0,hunit).second;
                 }
             vx_align_phase(AC,AC_new);
             int n_c = D*D;
@@ -9258,7 +9414,7 @@ class Chain
                 auto act = [&](std::vector<Cplx> const& X)
                     { return vumps_h_c_action(X,D,env.GL,env.GR,env.bond_envs); };
                 C_new = vx_lanczos_ground_state(act,C,n_c,niter_lanczos,
-                                                 1e-12,tol/10.0).second;
+                                                 1e-12,tol/10.0,hunit).second;
                 }
             vx_align_phase(C,C_new);
 
@@ -11583,7 +11739,28 @@ class Chain
     solver_hamiltonian(MPO const& H) const
         {
         if (hscale_up_==1.0) return H;
+        announce_solver_scale();
         return hscale_up_*H;
+        }
+
+    // With verbose on, the sweep and per-bond lines ITensor's dmrg() prints
+    // are the energies of the operator it was handed, which below unit
+    // scale is hscale_up_ times the one the user set (a J=0.5 chain logged
+    // -2.4936 for a returned -1.2468, and s=1e-8 logged 2^27 times the
+    // returned energy; 2026-09-25b audit, finding 29). One line before each
+    // scaled solve says so. A DMRGObserver dividing the sweep line back was
+    // the alternative, and the weaker one: davidson()'s per-bond "I n q E"
+    // lines are printed where no observer reaches (iterativesolvers.h), and
+    // the observer's "%.12f" would print a physical energy below 1e-12 as
+    // zero, which is exactly the regime the unit scale exists for.
+    void
+    announce_solver_scale() const
+        {
+        if (!verbose_ || hscale_up_==1.0) return;
+        printfln("dmrgpy: the DMRG energies logged below are 2^%d = %.17g times "
+                 "those of the operator being solved (unit scale for the local "
+                 "eigensolver, see solver_hamiltonian); returned values are "
+                 "divided back",(int)std::lround(std::log2(hscale_up_)),hscale_up_);
         }
 
     Sweeps
@@ -11739,6 +11916,7 @@ class Chain
             auto psi = default_mps();
             auto sweeps = make_sweeps(std::min(nsweeps_,5),std::min(maxm_,20));
             auto negH = (-hscale_up_)*H_; // -H at unit scale, see solver_hamiltonian()
+            announce_solver_scale();
             bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args())/hscale_up_;
             have_bandwidth_max_ = true;
             }
@@ -11797,12 +11975,22 @@ class Chain
         return out;
         }
 
+    // Whether vi and vj are the same vector, to 1e-10 of their own size --
+    // which is what lets kpm_moments take the single-vector recursion.
+    // Relative, because the two vectors are A^dagger|gs> and B|gs>, never
+    // normalized: the absolute ||vi-vj|| < 1e-10 this used to be declared
+    // any pair of small images equal, so C[eps*Sz0,eps*Sz3] came back as
+    // C[Sz3,Sz3] from eps=1.2e-10 down, and a raising-operator pair on a
+    // nearly saturated state at eps=3e-8 likewise (2.0 of the peak off;
+    // 2026-09-25b audit, finding 23). Strict <, so two zero vectors take the
+    // full recursion, which returns their zero moments.
     bool
     same_mps(MPS const& vi, MPS const& vj, int maxm, double cutoff) const
         {
         auto d = sum(1.0*vi,-1.0*vj,{"MaxDim",maxm,"Cutoff",cutoff});
         double dd = sqrt(innerC(d,d).real());
-        return dd<1e-10;
+        double ref = std::max(sqrt(innerC(vi,vi).real()),sqrt(innerC(vj,vj).real()));
+        return dd<1e-10*ref;
         }
 
     MPO
@@ -12520,6 +12708,7 @@ class Chain
     std::vector<Cplx> vumps_AL_, vumps_AR_, vumps_C_; // (D,d_g,D)/(D,d_g,D)/(D,D), row-major
     std::vector<Cplx> vumps_GL_, vumps_GR_;           // (D,D) row-major
     std::vector<Cplx> vumps_W_;                       // (Dw,Dw,d_g,d_g) row-major, see vumps_group_automaton
+    double vumps_hunit_ = 1.0; // the last vumps_ground_state()'s vx_hamiltonian_unit, for the excitation solves
 
     // Excitation environment -- built lazily on the first
     // vumps_excitation_energies() call (have_vumps_exc_env_ false until

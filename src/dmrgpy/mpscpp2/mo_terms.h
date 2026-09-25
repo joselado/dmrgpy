@@ -69,12 +69,21 @@ unit_scale_up(double cmax)
 // ordered by operator string alone (LessNoCoef), so the scaled copy holds
 // the same terms in the same order. The default Args are toMPO's own, so
 // the MPO(ampo) conversions this replaces are unchanged at up==1.
+//
+// `up_out`, when given, receives the factor used: the session's solver
+// scale (Chain::hscale_up_) is read through it, from the same merged
+// AutoMPO the MPO is built from, not from the raw term list, whose largest
+// coefficient differs whenever duplicate strings cancel (s*H + Sz0 - Sz0
+// ran dmrg() unscaled on a unit-scaled MPO, 0.14 to 0.39 off at s=1e-10;
+// 2026-09-25b audit, finding 28).
 MPO inline
-to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global())
+to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global(),
+            double* up_out = nullptr)
     {
     double cmax = 0.0;
     for (auto const& t : ampo.terms()) cmax = std::max(cmax,std::abs(t.coef));
     double up = unit_scale_up(cmax);
+    if (up_out) *up_out = up;
     if (up==1.0) return toMPO<ITensor>(ampo,args);
     auto scaled = AutoMPO(ampo.sites());
     for (auto t : ampo.terms()) { t.coef *= up; scaled.add(t); }
@@ -83,20 +92,12 @@ to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global())
     return W;
     }
 
-// The largest |coefficient| of a term list, which is what the session reads
-// its Hamiltonian's unit scale from (Chain::hscale_up_).
-inline double
-max_abs_coef(std::vector<MOTerm> const& terms)
-    {
-    double cmax = 0.0;
-    for (auto const& t : terms) cmax = std::max(cmax,std::abs(t.coef));
-    return cmax;
-    }
-
+// `up_out`: the unit-scale factor the MPO was built at, see to_mpo_unit().
 MPO inline
-build_mpo(SiteSet const& sites, std::vector<MOTerm> const& terms, int mpomaxm)
+build_mpo(SiteSet const& sites, std::vector<MOTerm> const& terms, int mpomaxm,
+          double* up_out = nullptr)
     {
     auto ampo = build_ampo(sites,terms);
     if (mpomaxm<5) mpomaxm = 5000; // default, mirrors get_ampo_operator.h
-    return to_mpo_unit(ampo,{"Maxm",mpomaxm,"Exact",false});
+    return to_mpo_unit(ampo,{"Maxm",mpomaxm,"Exact",false},up_out);
     }

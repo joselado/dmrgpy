@@ -77,6 +77,29 @@ function random_state(sites)
 end
 
 
+# The start of every julia_live DMRG-family solve that has no state of its
+# own to sweep from (get_gs_dmrg's fresh branch, both generalized solvers,
+# the NH-DMRG attempts, each excited state): a random MPS of link
+# dimension `linkdims`, the counterpart of mpscpp3's
+# default_mps() = randomMPS(sites_,m) and of pyitensor's _default_mps at
+# its ramp's first maxdim. random_state above is left as it is, a product
+# state, for the consumers that want a random vector rather than a solver
+# start (chain.random_state(), the random-witness probes).
+#
+# They used to share it, and a bond-dimension-1 start is a trap for
+# two-site DMRG on a Hamiltonian that couples two sites across a site
+# carrying no term (decoupled sublattices; every Thermal_Spin_Chain's
+# physical H on the doubled chain): the two-site update never holds a
+# coupled pair, sees the far site only through a bond of dimension 1, and
+# without noise returns a product state -- -0.5 against an exact -1.0 on
+# the Heisenberg chain on the even sites of 6 (2026-09-25 hole hunt 25b,
+# finding 7). The non-Hermitian solves take no noise (nhdmrg.jl's note),
+# so the start is the only thing that rescues them.
+function dmrg_start_state(sites, linkdims)
+	return random_mps(sites; linkdims = linkdims)
+end
+
+
 function mpstimesscalar(a,wf1)
 	return a*wf1
 end

@@ -11,13 +11,53 @@ from . import powermethod
 arnoldimode = "DMRG" # mode of the arnoldi method
 
 
+def energy_unit(H):
+    """The energy unit the stopping tests below are measured in: the
+    largest |coefficient| of H when it is a MultiOperator and that is
+    below 1, else 1.
+
+    `delta` (the residual stop) and the warm-up's Rayleigh-quotient stop
+    are tolerances in this unit, and the invariant-subspace test is
+    relative to the norm of the vector it tests. All three used to be
+    absolute energies (1e-3, 1e-2 and 1e-8), so for H written as s*H the
+    residual stop was met after one outer iteration from s of about 1e-6
+    (E0/s 6.2e-4 to 4.0e-3 relative off ED on 4 sites), and a warm start
+    whose Krylov directions fell under 1e-8 was padded with random vectors
+    coupled to it by their own norm, one, returning E0/s = +0.351 for an
+    exact -1.616 at s=1e-7 (2026-09-25b audit, lead
+    scale-arnolditk-absolute-stop). The largest coefficient is what v2/v3
+    bring into [1,2) before ITensor sees an operator (mo_terms.h's
+    unit_scale_up), and the same one-sided rule is taken here: below 1 it
+    is exactly s times the unit-scale value, so the stops are the same
+    tests for s*H at every such s; at 1 or more (every Hamiltonian written
+    with couplings of order one, U=10 included) the unit is 1 and every
+    test is the old absolute one, never looser than it was. Like every
+    scale taken from H itself, a large constant offset inflates it."""
+    try:
+        from ..multioperator import MultiOperator
+        if isinstance(H,MultiOperator):
+            cmax = max([abs(t[0]) for t in H.op]+[0.])
+            if np.isfinite(cmax) and 0.<cmax<1.: return float(cmax)
+    except Exception: pass
+    return 1.
+
+
 def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-3,
         mode="GS",P=None,
         recursive_arnoldi=False,
-        nwf=1, 
+        nwf=1,
         **kwargs):
-    """Compute an eigenvector using the Arnoldi algorithm"""
+    """Compute an eigenvector using the Arnoldi algorithm.
+
+    `delta` is the residual tolerance in units of H's largest coefficient
+    when that is below 1 (see energy_unit), i.e. an absolute energy for a
+    Hamiltonian written with couplings of order one or more, as it always
+    was, and the same relative one for s*H at any smaller s."""
     shift = 0. # zero shift unless stated otherwise
+    unit = energy_unit(H) # H's units: every stop below is measured in them
+    # the residual is in Op's units: H's for every affine Op, their
+    # inverse for ShiftInv's (H-e)^-1
+    rscale = 1./unit if mode=="ShiftInv" else unit
     if mode=="ShiftInv": # target a specific energy with shift and invert
         Mi = H - e # shift
         M = self.toMPO(H,mode=arnoldimode) # accelerate
@@ -76,7 +116,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-3,
     if nwf==1: # just the ground state
         return mpsarnoldi_iteration(self,Op,M,fe,ne=1,
                 shift=shift,maxde=delta,op_is_affine=op_is_affine,
-                **kwargs)
+                escale=unit,rscale=rscale,**kwargs)
     else:
         if recursive_arnoldi:
             wfout = [] # empty list
@@ -85,6 +125,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-3,
                 ei,wfi = mpsarnoldi_iteration(self,
                         Op,M,fe,ne=1,
                         wfs=[],maxde=delta,op_is_affine=op_is_affine,
+                        escale=unit,rscale=rscale,
                         wfskip=wfout,**kwargs)
                 wfout.append(wfi[0].copy()) # store wavefunction
                 eout.append(ei[0]) # store wavefunction
@@ -93,18 +134,20 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-3,
         else:
           return mpsarnoldi_iteration(self,Op,M,fe,
                   maxde=delta,op_is_affine=op_is_affine,
+                  escale=unit,rscale=rscale,
                   ne=nwf,**kwargs)
 
 
 def mpsarnoldi_iteration(self,Op,H,fe,
         verbose=0, # verbosity
-        maxde=1e-3, # maximum error in the energies
+        maxde=1e-3, # maximum error in the energies, in units of rscale
         maxit=10, # maximum number of recursive iterations
         wfs = None, # initial Krylov vectors (only wfs[0], if any, is used
                      # as the restart seed -- see mpsarnoldi_iteration_single)
         nkry_min = None, # minimum number of krylov vectors
         nkry_max = None, # maximum number of krylov vectors
         ne=1, # number of energies to return
+        rscale=1., # the unit Op's residual is measured in (energy_unit)
         **kwargs # other arguments
         ):
         """Restarted Arnoldi ("thick restart"): build a Krylov subspace of
@@ -115,7 +158,12 @@ def mpsarnoldi_iteration(self,Op,H,fe,
         (near-)degenerate eigenvalues, which a single restart vector
         cannot: a lone vector's Krylov chain only ever explores one
         direction inside a degenerate eigenspace. Optional deflation
-        against wfskip covers excited states found in earlier calls."""
+        against wfskip covers excited states found in earlier calls.
+
+        The stop and the Krylov-size update read the residual in units of
+        `rscale` (energy_unit for the modes affine in H), so that they
+        are the same tests for s*H at every s; at rscale=1 they are the
+        old absolute ones."""
         if nkry_min is None: nkry_min = ne + 2 # default value
         if nkry_max is None: nkry_max = 2*ne + 4 # default value
         nkry_max = max(nkry_max,nkry_min) # keep the range well ordered
@@ -128,6 +176,7 @@ def mpsarnoldi_iteration(self,Op,H,fe,
             es,wfs,error = mpsarnoldi_iteration_single(self,Op,H,fe,
                            ne=ne,n=ne+nkry,seeds=seeds,verbose=verbose,**kwargs)
             seeds = wfs # reseed the next restart with all ne Ritz vectors
+            error = error/rscale # dimensionless: in units of Op's scale
             dnk = np.abs(np.log(np.mean(error))/np.log(maxde)) # rescaled error
             dnk = np.min([dnk,1.]) # upper cutoff
             dnk = np.max([0,dnk]) # lower cutoff
@@ -154,6 +203,7 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
         seeds=None, # seed vector(s) for the Krylov chain, up to ne of them
         n=10, # dimension of krylov space
         op_is_affine=True, # is Op an affine function of H (Op=a*H+b)?
+        escale=1., # H's energy unit (energy_unit): the warm-up stop's unit
         ntries_pm=3 # unused, kept for backwards-compatible call sites
         ):
     """Build an Arnoldi (Krylov) chain of dimension n starting from seeds
@@ -180,8 +230,8 @@ def mpsarnoldi_iteration_single(self,Op,H,fe,
     if verbose>1:
         print("Eigenvalue shift",shift)
     if not seeds: # no seed given, get ne of them with a warm-up power method
-        seeds = arnoldi_warmup_multi(self,Op,H,n0,ne,wfskip,error=maxde*10,
-                verbose=verbose) if n0>0 else \
+        seeds = arnoldi_warmup_multi(self,Op,H,n0,ne,wfskip,
+                error=maxde*10*escale,verbose=verbose) if n0>0 else \
                 [random_state(self,orthogonal=wfskip if wfskip else None)
                         for _ in range(ne)]
     else:
@@ -242,13 +292,19 @@ def arnoldi_warmup(self,Op,H,n0,wfskip,error=1e-2,verbose=0):
     deflated against wfskip, to get a decent seed direction. Replaces
     running one independent power-method chain per desired eigenvalue
     (as the old block warm-start did) with a single shared one, and
-    breaks out as soon as the Rayleigh quotient stops moving."""
+    breaks out as soon as the Rayleigh quotient stops moving.
+
+    `error` is an energy in H's units (the caller scales it by
+    energy_unit), and each Op|wf> is divided by its own norm, which
+    carries Op's units: wf.normalize()'s absolute 1e-8 floor returned None
+    for an Op written in small units (2026-09-25b audit, finding 22)."""
     wf = random_state(self,orthogonal=wfskip if wfskip else None)
     eold = -1e20
     for i in range(n0):
-        wf = Op(wf)
-        if wfskip: wf = gram_smith_single(wf,wfskip)
-        wf = wf.normalize()
+        v = normalize_image(Op(wf)) # the image of a unit vector
+        if v is None: break # Op|wf> = 0 exactly: wf is an eigenvector
+        if wfskip: v = gram_smith_single(v,wfskip).normalize()
+        wf = v
         ei = wf.aMb(H,wf).real
         if verbose>2: print("Warmup energy",ei)
         if np.abs(eold-ei)<error: break
@@ -302,6 +358,7 @@ def build_arnoldi_chain(self,Op,seeds,n,wfskip=None,verbose=0):
         return v,coeffs
     for k in range(n-1):
         v = Op(wfs[k])
+        vnorm = norm(v) # ||Op q_k||, the scale the breakdown test reads
         if wfskip: v,_ = orthogonalize(v,wfskip) # deflate found states
         # orthogonalize against the *entire* current basis (not just
         # wfs[0..k]): with multiple independent seeds, Op(wfs[k]) can
@@ -310,10 +367,6 @@ def build_arnoldi_chain(self,Op,seeds,n,wfskip=None,verbose=0):
         hmat[k,:len(wfs)] = coeffs
         if len(wfs)<n: # still need to grow the basis to reach size n
             beta = norm(v)
-            if beta<1e-8: # invariant subspace hit, use a random vector
-                if verbose>1: print("Invariant subspace found, using random vector")
-                v = random_state(self,orthogonal=wfs+wfskip)
-                beta = norm(v)
             # hmat follows krylov_matrix_representation's convention,
             # hmat[a,b] = <wfs[b]|Op|wfs[a]> -- so the coupling from
             # wfs[k] to the newly appended vector belongs at column
@@ -321,7 +374,22 @@ def build_arnoldi_chain(self,Op,seeds,n,wfskip=None,verbose=0):
             # drops the coupling entirely and silently produces a wrong
             # Hessenberg matrix/wrong energies)
             hmat[k,len(wfs)] = beta
-            wfs.append(v.normalize())
+            # Invariant subspace: beta relative to ||Op q_k||. It was an
+            # absolute beta<1e-8, which an Op written in small units meets
+            # on ordinary directions, and the random vector that replaced
+            # the direction then entered hmat coupled by its own norm, one,
+            # where Op q_k has no component along it at all -- E0/s=+0.351
+            # for an exact -1.616 on 4 sites at s=1e-7 (2026-09-25b audit,
+            # lead scale-arnolditk-absolute-stop). The coupling written
+            # above is the true, vanishing beta, whichever vector follows.
+            if beta<=1e-8*vnorm:
+                if verbose>1: print("Invariant subspace found, using random vector")
+                v = random_state(self,orthogonal=wfs+wfskip)
+                beta = norm(v)
+            # divide by the norm itself: beta can be far below
+            # normalize()'s absolute 1e-8 floor in small units, and the
+            # test above already decided this direction is not zero
+            wfs.append(v*(1./beta))
     # complete the last row: this single extra Op(x) call gives beta_last,
     # which yields the residual of ALL ne selected Ritz pairs at once
     # (see mpsarnoldi_iteration_single)
@@ -338,6 +406,7 @@ from .krylov import gram_smith_single
 from .krylov import gram_smith
 from .krylov import diagonalize
 from .krylov import rediagonalize
+from .krylov import normalize_image
 from . import krylov
 
 selectwf = krylov.selectwf

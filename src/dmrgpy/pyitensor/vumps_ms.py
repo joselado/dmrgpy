@@ -841,8 +841,14 @@ def _warm_start(prev, W_list, dims, D_cur, rng):
 # -- the iteration -----------------------------------------------------------
 
 def single_run(W_list, dims, D, tol, maxiter, niter_lanczos, init=None,
-                rng=None):
+                rng=None, hunit=None):
     """One sequential multi-site VUMPS attempt.
+
+    `hunit` is the Hamiltonian's own unit (`vumps._hamiltonian_unit`),
+    which the local solves measure their residual in (see
+    `_lanczos_ground_state`'s `scale`); None keeps the old
+    max(1,|lambda|) test, which is neither free of the units nor of an
+    energy offset (2026-09-25b audit, finding 24).
 
     Each iteration builds the environments once for the whole cell and then
     sweeps it, solving `H_AC[n]` at every site and `H_C[n]` at every bond,
@@ -888,7 +894,8 @@ def single_run(W_list, dims, D, tol, maxiter, niter_lanczos, init=None,
             # `_lanczos_ground_state`'s own docstring.
             _e, v = _lanczos_ground_state(_hac, AC[n].reshape(-1),
                                            niter=niter_lanczos,
-                                           residual_tol=tol / 10.0)
+                                           residual_tol=tol / 10.0,
+                                           scale=hunit)
             AC_new[n] = v.reshape(D, dims[n], D)
             # ... and the same sign alignment: each solve is warm-started
             # from its own previous vector, so aligning against that start
@@ -906,7 +913,8 @@ def single_run(W_list, dims, D, tol, maxiter, niter_lanczos, init=None,
                 return h_c_action(x.reshape(D, D), GL_bond, GR[n]).reshape(-1)
             _e2, vc = _lanczos_ground_state(_hc, C[n].reshape(-1),
                                              niter=niter_lanczos,
-                                             residual_tol=tol / 10.0)
+                                             residual_tol=tol / 10.0,
+                                             scale=hunit)
             C_new[n] = vc.reshape(D, D)
             if np.vdot(C[n], C_new[n]).real < 0:
                 C_new[n] = -C_new[n]
@@ -944,7 +952,7 @@ def _d_ramp(D):
 
 
 def ground_state(W_list, dims, D, tol=1e-10, maxiter=800, niter_lanczos=40,
-                  nrestarts=4, verbose=False, rng=None):
+                  nrestarts=4, verbose=False, rng=None, hunit=None):
     """Sequential multi-site VUMPS with the same restart/D-ramp discipline
     `vumps.py`'s own driver uses -- warm-start each rung of the ramp from
     the previous one, try `nrestarts` attempts per rung, keep the best
@@ -954,14 +962,23 @@ def ground_state(W_list, dims, D, tol=1e-10, maxiter=800, niter_lanczos=40,
     is a real, reachable outcome of a restart search rather than a
     hypothetical.
 
+    `hunit`: the Hamiltonian's own unit, passed to `single_run` and used
+    for the safety net's energy margin (`vumps.vumps_ground_state` passes
+    `vumps._hamiltonian_unit`; None is a unit of 1 there and the old
+    residual test in the solves).
+
     Returns the same dict `single_run` does."""
     if rng is None:
         rng = np.random.default_rng()
+    # an energy margin, so below unit scale in the Hamiltonian's unit: an
+    # absolute 1e-6 could never fire below units of about 1e-6 (2026-09-25b
+    # audit, finding 24, by reading); the old 1e-6 at a unit of 1 or more
+    margin = 1e-6 * min(1.0, hunit if hunit is not None else 1.0)
 
     def attempt(D_cur, init):
         try:
             return single_run(W_list, dims, D_cur, tol, maxiter,
-                               niter_lanczos, init=init, rng=rng)
+                               niter_lanczos, init=init, rng=rng, hunit=hunit)
         except Exception as exc:                      # noqa: BLE001
             # A degenerate transfer-matrix spectrum or a singular
             # regularized solve: recoverable by retrying from a different
@@ -992,9 +1009,9 @@ def ground_state(W_list, dims, D, tol=1e-10, maxiter=800, niter_lanczos=40,
             raise RuntimeError(
                 "vumps_ms.ground_state: every attempt at D={} failed -- try "
                 "increasing nrestarts".format(D_cur))
-        if best_e is not None and local["e_cell"] > best_e + 1e-6:
+        if best_e is not None and local["e_cell"] > best_e + margin:
             for _ in range(2 * nrestarts):
-                if local["e_cell"] <= best_e + 1e-6:
+                if local["e_cell"] <= best_e + margin:
                     break
                 init = (grow_initial_state(D_cur, dims, prev["AL"], prev["AR"],
                                             prev["C"], rng)

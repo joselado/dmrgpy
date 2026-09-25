@@ -341,8 +341,22 @@ class EDchain():
         audit, finding 18)."""
         return algebra.is_hermitian(self.MO2matrix(A))
     def is_zero_operator(self,A):
-        """Check if this is a zero operator"""
-        return algebra.is_zero_matrix(self.obj2matrix(A))
+        """Whether A is the zero operator, decided exactly on its matrix in
+        this chain's basis (restricted to the sector, if one is set), and
+        relative to A's own size: ||A||_F <= 1e-10*cmax*||Id||_F, cmax the
+        largest raw coefficient of A, the same rtol as is_hermitian above.
+        It used to be |Tr(A A^dagger)| < 1e-8, absolute, so a difference
+        A^dagger-B of two operators below about sqrt(2e-8/dim) in size
+        passed as zero whatever the pair (2026-09-25b audit, finding 16).
+        An operator with no terms, or only zero coefficients, is zero; an
+        EDOperator carries no coefficients to scale by, so only an exactly
+        zero matrix is zero there."""
+        m = self.obj2matrix(A)
+        if isinstance(A,multioperator.MultiOperator):
+            cmax = max([abs(t[0]) for t in A.op]+[0.])
+            scale = cmax*np.sqrt(m.shape[0]) # cmax*||Id||_F
+        else: scale = 0.
+        return algebra.is_zero_matrix(m,scale)
     def obj2matrix(self,a):
         return obj2matrix(self,a)
     def applyinverse(self,A,wf):
@@ -420,10 +434,30 @@ class State():
     def dot(self,a):
         return np.sum(np.conjugate(self.v)*a.v)
     def aMb(self,M,b): return self.dot(M*b)
-    def normalize(self):
+    def normalize(self,tol=1e-8):
+        """The normalized state, or None, with the same printed warning
+        as MPS.normalize, when the norm is not above `tol`.
+
+        The same signature and contract as mps.py's MPS.normalize, which
+        docs/user_guide.md documents for every backend: this one took no
+        tol, so the documented wf.normalize(tol=1e-8) raised TypeError on
+        mode="ED", and it returned None silently (2026-09-25b audit,
+        finding 22). `tol` is an absolute floor on the norm, and the None
+        return is a protocol, not only a failure: krylov.gram_smith_single
+        relies on it to drop a linearly dependent vector, whose input it
+        normalizes to 1 first, so the floor is relative there. A caller
+        whose state has another scale -- H|psi> with H in small units --
+        either passes tol relative to that scale or divides by the norm
+        itself; lowering the default instead would normalize a state that
+        is zero by cancellation into roundoff noise."""
         norm = np.sqrt(self.dot(self).real) # norm
-        if norm>1e-8: return self/norm
-        else: return None
+        if norm>tol: return self/norm
+        else:
+            print("WARNING, state is not normalizable. Returning None")
+            return None
+    def norm(self):
+        """sqrt(<psi|psi>), as MPS.norm."""
+        return np.sqrt(self.dot(self).real)
     def get_correlation_entropy(self,**kwargs):
         from .. import entanglement
         return entanglement.get_correlation_entropy_from_wf(self,**kwargs)

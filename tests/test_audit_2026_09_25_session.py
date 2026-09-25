@@ -212,7 +212,10 @@ def test_correlator_after_gs_energy_generalized_reads_the_generalized_state(
     _quiet(lambda: sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[1]),
                                                es=np.linspace(-1, 4, 11)))
     assert _fidelity(sc.wf0, wg) == pytest.approx(1.0, abs=1e-10)
-    assert sc.e0 == pytest.approx(lam, abs=1e-12)
+    # e0 is wg's own energy and lambda is lam_generalized since the
+    # 2026-09-25b hole hunt's finding 8 (this line pinned e0 == lambda)
+    assert sc.e0 == pytest.approx(_energy(sc, wg), abs=1e-10)
+    assert sc.lam_generalized == lam
     assert np.real(sc.vev(sc.Sz[0])) == pytest.approx(
         np.real(_expect(wg, sc.Sz[0])), abs=1e-10)
     assert abs(np.real(_expect(wg, sc.Sz[0]))) > 0.1
@@ -234,7 +237,11 @@ def test_nh_correlator_after_gs_energy_generalized_reads_the_generalized_state(
     assert groundstate.hamiltonian_on_session(sc)
     _quiet(lambda: sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[0]), **NHKPM))
     assert _fidelity(sc.wf0, wg) == pytest.approx(1.0, abs=1e-10)
-    assert sc.e0 == pytest.approx(lam, abs=1e-12)
+    # the pair's own biorthogonal energy since the 2026-09-25b hole hunt's
+    # finding 8 (this line pinned e0 == lambda)
+    assert sc.e0 == pytest.approx(complex(sc.nh_left_wf.dot(sc.hamiltonian*wg)
+                                          /sc.nh_left_wf.dot(wg)), abs=1e-10)
+    assert sc.lam_generalized == lam
     assert sc.vev(sc.Sz[0]) == pytest.approx(_expect(wg, sc.Sz[0]), abs=1e-10)
     assert abs(np.real(_expect(wg, sc.Sz[0]))) > 0.1
 
@@ -286,7 +293,8 @@ def test_every_reader_of_the_thermal_chain_measures_the_annealed_state(
     and a KPM correlator re-solved the plain ground state (sum rule -0.1664,
     vev afterwards -0.1667). Now vev, the correlator's sum rule and, on the
     DMRG backends, gs_energy() all read the annealed state, whose <Sz0 Sz1>
-    is the exact Boltzmann -0.0714 up to anneal()'s Euler steps. On
+    is the exact Boltzmann -0.0714 (anneal()'s Euler steps put it at
+    -0.0694 until the 2026-09-25b rewrite, which reaches -0.071372). On
     mode="ED" gs_energy() is the lowest eigenvalue, which the 2026-09-24c
     record leaves as it is, so it is not pinned here."""
     np.random.seed(4)

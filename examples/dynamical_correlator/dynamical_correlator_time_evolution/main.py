@@ -26,7 +26,6 @@ print("Starting")
 t0 = time.time()
 (x1,y1) = sc.get_dynamical_correlator(es=es,name=name,submode="KPM")
 t1 = time.time()
-sc.fit_td = True
 sc.tevol_custom_exp = True
 (x2,y2) = sc.get_dynamical_correlator(es=es,name=name,submode="TD")
 t2 = time.time()

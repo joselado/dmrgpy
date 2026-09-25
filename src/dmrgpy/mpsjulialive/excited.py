@@ -21,8 +21,14 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     weight = (emax-e0)*scale
     Hop = MPO(H,MBO=self)
     from .juliasession import Main as Mainjl
+    from .mps import start_linkdims
+    # every excited state from the start a ground-state solve takes, and
+    # with the chain's own noise (self.noise, as the session backends'
+    # excited_states use it; the noise= argument above is the dead
+    # file-backend keyword excited.py's docstring describes)
     energies_jl,wfs_jl = Mainjl.excited_states_dmrg(Hop.jlmpo,wf0.jlmps,
-            int(n),weight,self.jlsites,self.nsweeps,self.cutoff,self.maxm)
+            int(n),weight,self.jlsites,self.nsweeps,self.cutoff,self.maxm,
+            int(start_linkdims(self)),noise=float(self.noise))
     from .mps import MPS
     wfs = [MPS(w,MBO=self) for w in wfs_jl]
     if self.excited_gram_schmidt:

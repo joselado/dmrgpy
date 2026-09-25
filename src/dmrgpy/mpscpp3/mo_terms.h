@@ -355,12 +355,21 @@ unit_scale_up(double cmax)
 // 0.5 once written with S+/S-) takes the scaled path too. Reordering is
 // not an issue: AutoMPO keeps its terms ordered by operator string alone
 // (LessNoCoef), so the scaled copy holds the same terms in the same order.
+//
+// `up_out`, when given, receives the factor used. That is how a session
+// reads its solver's scale (Chain::hscale_up_) from the same merged
+// AutoMPO the MPO is built from: reading it from the raw term list instead
+// ran dmrg() at the wrong scale whenever duplicate strings cancel -- s*H +
+// Sz0 - Sz0 is exactly s*H, its MPO was built at unit scale, and its solve
+// was 0.12 to 0.52 off at s=1e-10 (2026-09-25b audit, finding 28).
 MPO inline
-to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global())
+to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global(),
+            double* up_out = nullptr)
     {
     double cmax = 0.0;
     for (auto const& t : ampo.terms()) cmax = std::max(cmax,std::abs(t.coef));
     double up = unit_scale_up(cmax);
+    if (up_out) *up_out = up;
     if (up==1.0) return toMPO(ampo,args);
     auto scaled = AutoMPO(ampo.sites());
     for (auto t : ampo.terms()) { t.coef *= up; scaled.add(t); }
@@ -369,20 +378,12 @@ to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global())
     return W;
     }
 
-// The largest |coefficient| of a term list, which is what a session reads
-// its Hamiltonian's unit scale from (Chain::hscale_up_).
-inline double
-max_abs_coef(std::vector<MOTerm> const& terms)
-    {
-    double cmax = 0.0;
-    for (auto const& t : terms) cmax = std::max(cmax,std::abs(t.coef));
-    return cmax;
-    }
-
+// `up_out`: the unit-scale factor the MPO was built at, see to_mpo_unit().
 MPO inline
-build_mpo(SiteSet const& sites, std::vector<MOTerm> const& terms, int mpomaxm)
+build_mpo(SiteSet const& sites, std::vector<MOTerm> const& terms, int mpomaxm,
+          double* up_out = nullptr)
     {
     auto ampo = build_ampo(sites,terms);
     if (mpomaxm<5) mpomaxm = 5000; // default, mirrors get_ampo_operator.h
-    return to_mpo_unit(ampo,{"MaxDim",mpomaxm,"Exact",false});
+    return to_mpo_unit(ampo,{"MaxDim",mpomaxm,"Exact",false},up_out);
     }

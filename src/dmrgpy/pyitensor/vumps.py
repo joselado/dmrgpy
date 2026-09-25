@@ -204,6 +204,38 @@ from .tensor import ITensor
 from .tensor import noPrime as _t_noPrime
 
 
+def _hamiltonian_unit(h_intra_op, h_inter_op, sites_uc, n_uc):
+    """The Hamiltonian's own unit, for the stopping tests of the VUMPS local
+    solves (`_lanczos_ground_state`'s `scale`) and the D-ramp's variational
+    safety net: the largest |coefficient| of its classified terms
+    (`idmrg._classify_terms`), skipping every term whose operator is a
+    multiple of the identity -- a constant, however it is spelled
+    (4c*Sz0*Sz0 is c*Id on a spin-1/2 site). So it is proportional to s
+    under H -> s*H and blind to an energy offset. The tests use it as a cap
+    on their old max(1,|lambda|) reference, and in place of their old
+    absolute constants only below 1, so at a unit of 1 or more nothing
+    changes for an ordinary Hamiltonian (2026-09-25b audit, finding 24; see
+    `_lanczos_ground_state`'s `scale`). An offset-free spectral quantity of
+    H_AC itself is the wrong size: its eigenvalue spread is ~4x the
+    coupling on the D=8 transverse-field Ising cell, which would loosen
+    the test past the requested tol at s=1. 1 when no term is
+    non-constant (a zero or constant H). The C++ twin is
+    Chain::vx_hamiltonian_unit."""
+    def is_identity_multiple(M):
+        M = np.asarray(M)
+        tol = 1e-12 * np.max(np.abs(M)) if M.size else 0.0
+        return np.max(np.abs(M - M[0, 0] * np.eye(M.shape[0]))) <= tol
+    onsite, bonds = idmrg._classify_terms(h_intra_op, h_inter_op, sites_uc, n_uc)
+    unit = 0.0
+    for _rel, coef, mat in onsite:
+        if not is_identity_multiple(mat):
+            unit = max(unit, abs(coef))
+    for b in bonds:
+        if not (is_identity_multiple(b["mat_a"]) and is_identity_multiple(b["mat_b"])):
+            unit = max(unit, abs(b["coef"]))
+    return unit if unit > 0 else 1.0
+
+
 def _group_automaton(W_bulk, n_uc):
     """The grouped, single-supersite automaton W (Dw,Dw,d_g,d_g) -- VUMPS
     has no existing per-sublattice ket tensor list to group (unlike
@@ -1041,7 +1073,7 @@ class VUMPSResult:
 
 
 def _multisite_ground_state(sites_uc, W_bulk, n_uc, D, tol, maxiter,
-                             niter_lanczos, nrestarts, verbose):
+                             niter_lanczos, nrestarts, verbose, hunit=None):
     """`vumps_ground_state` for a Hamiltonian the grouped path cannot take
     -- a cell too big to group, or a coupling reaching further than one
     unit cell at any cell size: run `vumps_ms.ground_state` and wrap its
@@ -1060,7 +1092,8 @@ def _multisite_ground_state(sites_uc, W_bulk, n_uc, D, tol, maxiter,
     dims = [sites_uc.dim(p + 1) for p in range(n_uc)]
     out = vumps_ms.ground_state(W_list, dims, D, tol=tol, maxiter=maxiter,
                                  niter_lanczos=niter_lanczos,
-                                 nrestarts=nrestarts, verbose=verbose)
+                                 nrestarts=nrestarts, verbose=verbose,
+                                 hunit=hunit)
     d_g = int(np.prod(dims))
     res = VUMPSResult(sites_uc, n_uc, D, d_g, out["AL"], out["AR"], out["C"],
                        out["AC"], out["GL"], out["GR"], W_list,
@@ -1127,6 +1160,9 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
         raise ValueError("vumps_ground_state: nrestarts must be >= 1, got {}".format(nrestarts))
 
     sites_uc, W_bulk = idmrg._build_automaton(h_intra_op, h_inter_op, site_types, n_uc)
+    # the Hamiltonian's own unit, for every stopping test below that is an
+    # energy (see `_hamiltonian_unit`)
+    hunit = _hamiltonian_unit(h_intra_op, h_inter_op, sites_uc, n_uc)
 
     # n_uc > 2 goes to the sequential multi-site algorithm, which never
     # groups the cell and so costs LINEARLY rather than exponentially in
@@ -1139,7 +1175,7 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
     if n_uc > 2:
         return _multisite_ground_state(
             sites_uc, W_bulk, n_uc, D, tol, maxiter, niter_lanczos,
-            nrestarts, verbose)
+            nrestarts, verbose, hunit=hunit)
 
     W = _group_automaton(W_bulk, n_uc)
     # ... and so does a Hamiltonian whose couplings reach further than one
@@ -1159,7 +1195,7 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
     if not idmrg_exc.is_reach_one(W):
         return _multisite_ground_state(
             sites_uc, W_bulk, n_uc, D, tol, maxiter, niter_lanczos,
-            nrestarts, verbose)
+            nrestarts, verbose, hunit=hunit)
     d_g = int(np.prod([sites_uc.dim(p + 1) for p in range(n_uc)]))
     pending = idmrg_exc._pending_channels(W)
     h1 = idmrg_exc._onsite_matrix(W)
@@ -1167,7 +1203,8 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
     def one_attempt(D_cur, init):
         try:
             result = _vumps_single_run(sites_uc, n_uc, D_cur, d_g, W, pending, h1,
-                                        tol, maxiter, niter_lanczos, verbose, init=init)
+                                        tol, maxiter, niter_lanczos, verbose, init=init,
+                                        hunit=hunit)
         except RuntimeError as exc:
             if verbose:
                 print("vumps D={} attempt: failed ({})".format(D_cur, exc))
@@ -1239,10 +1276,14 @@ def vumps_ground_state(site_types, h_intra_op, h_inter_op, n_uc, D,
         # likely to contain a good D_cur solution instead of resampling the
         # full, much less favorable random landscape from scratch every
         # time -- see this module's "Convergence robustness" docstring
-        # section.
-        if best_e0_so_far is not None and local_best.e0 > best_e0_so_far + 1e-6:
+        # section. The margin is an energy, so below unit scale it is in the
+        # Hamiltonian's unit: an absolute 1e-6 could never fire below units
+        # of about 1e-6 (2026-09-25b audit, finding 24, by reading); at a
+        # unit of 1 or more it is the old 1e-6.
+        margin = 1e-6 * min(1.0, hunit)
+        if best_e0_so_far is not None and local_best.e0 > best_e0_so_far + margin:
             for _ in range(2 * nrestarts):
-                if local_best.e0 <= best_e0_so_far + 1e-6:
+                if local_best.e0 <= best_e0_so_far + margin:
                     break
                 init = (_grow_initial_state(D_cur, d_g, prev_AL, prev_AR)
                         if prev_AL is not None else None)
@@ -1282,11 +1323,15 @@ def _d_ramp(D):
 
 
 def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
-                       tol, maxiter, niter_lanczos, verbose, init=None):
+                       tol, maxiter, niter_lanczos, verbose, init=None,
+                       hunit=None):
     """One VUMPS attempt -- see `vumps_ground_state`'s own docstring for
     why this is wrapped in a multi-restart/D-ramp driver rather than
     called directly. `init`: an optional (AL,AR,C) starting point (see
-    `_grow_initial_state`); defaults to a fresh `_random_initial_state`."""
+    `_grow_initial_state`); defaults to a fresh `_random_initial_state`.
+    `hunit`: the Hamiltonian's own unit (`_hamiltonian_unit`), which the
+    two local solves measure their residual in; None keeps the old
+    max(1,|lambda|) test."""
     AL, AR, C = init if init is not None else _random_initial_state(D, d_g)
     AC = np.einsum('lpm,mr->lpr', AL, C)
 
@@ -1315,7 +1360,7 @@ def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
         # docstring for the measurement.
         _lam_ac, ac_vec = _lanczos_ground_state(
             matvec_ac, AC.reshape(-1), niter=min(niter_lanczos, dim_ac),
-            residual_tol=tol / 10.0)
+            residual_tol=tol / 10.0, scale=hunit)
         AC_new = ac_vec.reshape(D, d_g, D)
 
         def matvec_c(x, GL=GL, GR=GR, bond_envs=bond_envs):
@@ -1324,7 +1369,7 @@ def _vumps_single_run(sites_uc, n_uc, D, d_g, W, pending, h1,
 
         _lam_c, c_vec = _lanczos_ground_state(
             matvec_c, C.reshape(-1), niter=min(niter_lanczos, D * D),
-            residual_tol=tol / 10.0)
+            residual_tol=tol / 10.0, scale=hunit)
         C_new = c_vec.reshape(D, D)
 
         # An eigenvector is only defined up to a phase, and AC and C were

@@ -61,6 +61,17 @@ class Spin_chain(edchain.EDchain):
         elif name=="Y" or name=="Sy": return self.syi[i]
         elif name=="Z" or name=="Sz": return self.szi[i]
         elif name=="Id": return self.get_identity()
+        # This used to be `print(name); raise`, a bare raise with no
+        # active exception, so mode="ED" died with "No active exception to
+        # reraise" on a single-site name this builder does not know (ISy,
+        # Adag, 2026-09-24 record's leads) and on a chain with no
+        # Hamiltonian, whose None reached this line (2026-09-25b hole hunt,
+        # finding 6, now refused by name before it gets here)
+        elif isinstance(name,str):
+            raise ValueError("the ED spin chain has no single-site "
+                    "operator named %r (it builds Sx, Sy, Sz and Id, also "
+                    "spelled X, Y and Z)" % (name,))
         else:
-            print(name)
-            raise
+            raise TypeError("the ED spin chain cannot build an operator "
+                    "from %r (%s): expected a MultiOperator, an EDOperator "
+                    "or a single-site name" % (name,type(name).__name__))

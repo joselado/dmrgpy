@@ -15,7 +15,11 @@ def get_gs_dmrg(self,ishermitian=True,wf0=None):
     chain raised instead of sweeping from x."""
     H = self.toMPO(self.hamiltonian) # get the Hamiltonian
     if wf0 is None:
-        psi0 = self.random_state().jlmps # random state
+        # a random MPS of link dimension above one, as v3 and "python"
+        # start from, not the product state self.random_state() gives:
+        # see mps.start_mps (2026-09-25 hole hunt 25b, finding 7)
+        from .mps import start_mps
+        psi0 = start_mps(self).jlmps
     else: # from input
         # An MPS made by operator algebra (MPO.__mul__, i.e. any state a
         # caller builds as A*psi) carries a stale prime level on its Link
@@ -31,9 +35,14 @@ def get_gs_dmrg(self,ishermitian=True,wf0=None):
         if NH_dmrg: use_dmrg = False # use the NH version
         else: use_dmrg = True # use conventional DMRG
     if use_dmrg: # for Hermitian Hamiltonians, usual DMRG
+        # with the chain's noise, on the first half of the schedule, as
+        # the session backends run it (get_gs.jl's make_sweeps); it was
+        # never passed, so self.noise did nothing on this backend
         e0,wf0 = Mainjl.get_gs_dmrg(H.jlmpo,psi0,nsweeps=self.nsweeps,
-            cutoff=self.cutoff,maxm=self.maxm,ishermitian=ishermitian)
-    else: # for non-Hermitian, the specialized routine
+            cutoff=self.cutoff,maxm=self.maxm,ishermitian=ishermitian,
+            noise=float(self.noise))
+    else: # for non-Hermitian, the specialized routine, noise-free on
+        # purpose (nhdmrg.jl's note), so only the start above rescues it
         e0,wfl0,wfr0 = Mainjl.get_gs_nhdmrg(H.jlmpo,psi0,
             nsweeps=self.nsweeps,
             biorthoalg = NH_biorthoalg,

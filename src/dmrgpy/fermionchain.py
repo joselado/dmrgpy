@@ -126,11 +126,13 @@ class Fermionic_Chain(Many_Body_Chain):
         if mode=="DMRG": 
             return Many_Body_Chain.gs_energy(self,**kwargs)
         elif mode=="ED":
-            MBF = self.get_ED_obj()
-            # get_hamiltonian(), not the raw MBF.h: that is the full
-            # Hilbert space's accumulator, and a conserved sector's
-            # restriction is applied on top of it
-            return algebra.lowest_eigenvalues(MBF.get_hamiltonian(),n=1)[0]
+            # the base class's ED route, which reads gs_energy()'s keywords
+            # (groundstate.ed_ground_state); this branch used to drop them,
+            # the third entry point of 2026-09-25b hole hunt finding 2. Its
+            # energy is the same number: MBFermion.gs_energy() is the lowest
+            # eigenvalue of MBF.get_hamiltonian(), the conserved sector's
+            # restriction of the full-space accumulator MBF.h
+            return Many_Body_Chain.gs_energy(self,mode="ED",**kwargs)
         else: raise # unrecognised
     def get_sector_charge_operators(self):
         """Spinless fermions conserve the particle number"""

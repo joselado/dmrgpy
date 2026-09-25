@@ -40,17 +40,17 @@ def compute_entropy_single(self,psi,b=1):
         raise IndexError("bond %s is out of range: this chain has %d "
                 "sites, so its bonds are 1..%d (bond b is the cut "
                 "between sites b-1 and b)"%(repr(b),self.ns,self.ns-1))
-    if self.itensor_version=="julia_live":
-        from .mpsjulialive import entropy as entjl
-        return np.abs(entjl.bond_entropy(psi,b))
     from .mode import resolve_mode
     if resolve_mode(self)=="ED":
-        # session-only, like the rest of this function: there is no ED
+        # MPS-only, like the rest of this function: there is no ED
         # implementation of the bond entropy (the ED object has no MPS to
         # cut). Say so, instead of handing an ED State to
         # self._session and failing with the opaque "'State' object has
         # no attribute 'cpp_handle'" -- same treatment as
-        # Many_Body_Chain.get_distribution_moments.
+        # Many_Body_Chain.get_distribution_moments. Ahead of the
+        # julia_live branch, which used to come first and so failed the
+        # same way on 'jlmps' (2026-09-25 hole hunt 25b, lead
+        # session-julia-ed-guard-carveout-rdm-bond-entropy).
         raise NotImplementedError(
             "the bond entanglement entropy has no ED implementation (it "
             "cuts an MPS bond, and the ED backend has no MPS). Note "
@@ -58,6 +58,9 @@ def compute_entropy_single(self,psi,b=1):
             "extension is unavailable, or for itensor_version=3 on a "
             "chain with fewer than 3 sites. Use get_site_entropy/"
             "get_pair_entropy, which do have an ED route.")
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive import entropy as entjl
+        return np.abs(entjl.bond_entropy(psi,b))
     return np.abs(self._session.bond_entropy(psi.cpp_handle,b))
 
 

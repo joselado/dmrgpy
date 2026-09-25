@@ -6,7 +6,14 @@ def reduced_dm(self,i=0,mode="DMRG"):
     Compute the reduced density matrix
     """
     from .mode import resolve_mode
-    if self.itensor_version!="julia_live" and resolve_mode(self,mode=mode)=="ED":
+    # On every backend, julia_live included: it used to be exempted
+    # (`self.itensor_version!="julia_live" and ...`), so on julia_live
+    # sc.mode="ED" died with "'State' object has no attribute 'jlmps'"
+    # and get_rdm(mode="ED") quietly returned the DMRG matrix (2026-09-25
+    # hole hunt 25b, lead session-julia-ed-guard-carveout-rdm-bond-
+    # entropy). resolve_mode() answers "DMRG" on a julia_live chain that
+    # asks for nothing else, so this costs that backend nothing.
+    if resolve_mode(self,mode=mode)=="ED":
         # No ED implementation exists (grep edtk/: there is no
         # reduced_dm there), and this function is session-only, so
         # without this guard an ED State reached self._session and died
@@ -25,6 +32,19 @@ def reduced_dm(self,i=0,mode="DMRG"):
             "requested C++ extension is unavailable, or for "
             "itensor_version=3 on a chain with fewer than 3 sites.")
     wf = self.get_gs() # compute ground state
+    # A density matrix of the ray: every backend's reduced_dm divided the
+    # state by <wf|wf> rather than by its square root, a no-op only while
+    # the state is unit norm, and set_gs(c*s)/set_initial_wf(c*s)/
+    # gs_energy(wf0=c*s, reconverge=False) hand over a caller's state
+    # unswept, so the matrix came back as rho/c^2 (2026-09-25 hole hunt
+    # 25b, finding 11). Normalized here once, for all four backends; the
+    # backend's own division then divides by 1. Not wf.normalize(), which
+    # returns None below its tolerance.
+    nrm2 = float(np.real(wf.dot(wf)))
+    if not nrm2>0.0: # "not >", so that a NaN is caught too
+        raise ValueError("get_rdm: the chain's state has zero norm "
+                "(<wf|wf> = %r), so it has no density matrix"%nrm2)
+    if abs(nrm2-1.0)>1e-14: wf = wf*(1.0/np.sqrt(nrm2))
     if self.itensor_version=="julia_live":
         from .mpsjulialive import densitymatrix as dmjl
         return dmjl.reduced_dm(self,wf,i)

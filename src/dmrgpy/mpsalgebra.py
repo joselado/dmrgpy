@@ -253,14 +253,35 @@ def applyoperator_dmrg(self,A,wf):
 
 
 def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
-    """Apply operator to a many body wavefunction"""
+    """Return A^-1|wf>, by the session's BiCGSTAB (Chain::apply_inverse,
+    pyitensor's _bicstab), which stops once the residual of A x = wf is
+    at most delta*||wf||.
+
+    delta is relative to ||wf||, for every caller. The sessions compare it
+    with the absolute residual, and it used to be handed over as it
+    stood, so the solve's relative accuracy was delta/||wf||: whenever
+    ||wf|| is small -- a small operator applied to the ground state, which
+    is how submode="CVM_explicit" builds its right-hand side -- the start
+    x = wf already passed after one step. On (eps*Sz0, eps*Sz0) the
+    spectrum was off by 3.6e-04 of its peak at eps=1e-2 and 1.2e-01 at
+    1e-4 against 1.4e-06 at eps=1 (2026-09-25b audit, finding 13). The
+    scaling is done here so that the compiled sessions need no rebuild. A
+    unit-norm wf, which is what the shift-invert Arnoldi/IRAM solvers
+    (algebra/arnolditk.py, arpacktk.mpsiram_shift_invert) and the
+    stochastic trace hand in, sees no change;
+    arpacktk.mpsiram_generalized hands in M_A*x, whose norm is not 1, and
+    its delta= is now relative to that norm too. wf = 0 has the exact
+    answer 0, returned as it is: the BiCGSTAB recurrence divides by zero
+    on it."""
     if delta is None: delta = self.cvm_tol # overwrite
     if maxn is None: maxn = self.cvm_nit # overwrite
+    norm = np.sqrt(abs(wf.dot(wf).real)) # ||wf||, the scale of the residual
+    if norm==0.: return wf.copy() # A^-1 0 = 0
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
     handle = self._session.apply_inverse(A.to_terms(),wf.cpp_handle,
-            delta,int(maxn))
+            delta*norm,int(maxn))
     return mps.MPS(self,cpp_handle=handle).copy()
 
 

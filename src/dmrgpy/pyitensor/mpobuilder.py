@@ -80,9 +80,12 @@ Two rules make the bookkeeping correct rather than merely plausible:
   no term's transition ever leaves the F row.)
 """
 
+import math
+
 import numpy as np
 
 from . import backend as bk
+from .autompo import AutoMPO, HTerm
 
 from .index import Index
 from .mpscontainer import MPO
@@ -277,9 +280,37 @@ def _automaton_mpo(ampo):
     return mpo
 
 
+def _unit_scale_up(cmax):
+    """mo_terms.h's unit_scale_up(): the power of two that brings a largest
+    |coefficient| below 1 into [1,2), and exactly 1.0 otherwise."""
+    if not cmax > 0.0 or cmax >= 1.0:
+        return 1.0
+    _, e = math.frexp(cmax)  # cmax in [2^(e-1),2^e), and e <= 0
+    return math.ldexp(1.0, min(1 - e, 1000))
+
+
 def to_mpo(ampo, cutoff=0.0, maxdim=None):
     if not ampo.terms:
         return _zero_mpo(ampo.sites)
+    # Built at unit scale and scaled back, as v2/v3's to_mpo_unit() does.
+    # The machine's identity channel carries O(1) entries whatever the
+    # coefficients, and the sweeps below leave roundoff of order 1e-16 in
+    # them, which is an absolute error: a Heisenberg chain written at
+    # s=1e-7 came out 1e-9 off relative to itself and at s=2^-40 2.5e-4 off
+    # (with numpy on OpenBLAS; MKL happened to round those entries to exact
+    # zero). A power of two makes both scalings exact, and at a largest
+    # coefficient of 1 or more nothing changes, byte for byte.
+    up = _unit_scale_up(max(abs(t.coef) for t in ampo.terms))
+    if up != 1.0:
+        scaled = AutoMPO(ampo.sites)
+        for t in ampo.terms:
+            u = HTerm(t.coef*up)
+            u.ops = list(t.ops)
+            scaled.terms.append(u)
+        result = to_mpo(scaled, cutoff=cutoff, maxdim=maxdim)
+        c = result.center or 1
+        result.set_A(c, result.A(c)*(1.0/up))
+        return result
     result = _automaton_mpo(ampo)
     if result.length() > 1:
         # The machine is exact but not canonical and not truncated: this is

@@ -757,9 +757,13 @@ class Chain:
         return out
 
     def reduced_dm(self, wf, site):
-        # psi /= innerC(psi,psi).real() -- divides by the norm *squared*,
-        # not its square root; preserved exactly as chain_session.h has it
-        # (its own comment traces this back to a note in mpscpp2's version).
+        # The state is normalized by its norm, sqrt(<psi|psi>), so rho has
+        # trace 1 for any wf. This used to divide by <psi|psi> itself, the
+        # norm *squared*, ported from chain_session.h, harmless only while
+        # every state reaching it was a unit-norm solver output: after
+        # set_gs(c*s) the matrix came back as exactly rho/c^2 (trace 0.25
+        # at c=2; 2026-09-25b audit, finding 11). A zero state is left
+        # unscaled (zeros, as before).
         # commonIndex(psi.A(site),psi.A(site+1)) is called unconditionally
         # in the original too -- but ITensor's own MPS tolerates the
         # one-past-the-end access there, while this backend's tensor list
@@ -771,7 +775,8 @@ class Chain:
         # everything to the left into A(site)).
         psi = wf.copy()
         nrm2 = inner(psi, psi).real
-        psi = psi * (1.0 / nrm2)
+        if nrm2 > 0:
+            psi = psi * (1.0 / np.sqrt(nrm2))
         psi.position(site)
         s = self.sites.si(site)
         if site < psi.length():
@@ -1940,9 +1945,16 @@ class Chain:
         return m, e0, e0 + ws, scale
 
     def _same_mps(self, vi, vj, maxm, cutoff):
+        # Relative to the vectors' own size: they are A^dagger|gs> and
+        # B|gs>, never normalized, and the absolute ||vi-vj|| < 1e-10 this
+        # used to be declared any two small images equal, so
+        # C[eps*Sz0,eps*Sz3] came back as C[Sz3,Sz3] from eps=1.2e-10 down
+        # (2026-09-25b audit, finding 23). Strict <, so two zero vectors take
+        # the full recursion, which returns their zero moments.
         d = mps_sum(vi * 1.0, vj * (-1.0), cutoff=cutoff, maxdim=maxm)
         dd = np.sqrt(inner(d, d).real)
-        return dd < 1e-10
+        ref = max(np.sqrt(inner(vi, vi).real), np.sqrt(inner(vj, vj).real))
+        return dd < 1e-10 * ref
 
     def _sum_mpo(self, A1, A2):
         return mps_sum(A1, A2, cutoff=self.cutoff, maxdim=self.maxm)

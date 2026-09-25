@@ -212,6 +212,28 @@ than a value. Where a fix removes a bug from an existing computation, keeping
 the pre-fix reference construction verbatim inside the test is the cheapest way
 to prove the new path agrees with the old one where it should.
 
+The 2026-09-25b fix pass ran nine clusters as parallel agents, each in its own
+git worktree, and four things about that shape are worth keeping:
+- **Take the baseline on the machine the fix pass runs on**, with freshly built
+  extensions, before any agent starts. That pass ran on a different machine
+  from its hunt, and the baseline turned up a thirtieth defect: a roundoff floor
+  that MKL had rounded to exact zero and OpenBLAS did not (finding 30).
+- **A worktree has no compiled extension.** The `.so` files are gitignored, so
+  v2/v3 silently fall back to ED and every test passes vacuously. Each agent
+  copies (not symlinks) both `.so` in and asserts `cppext.available` first.
+  The cluster that edits C++ builds its own by copying the untracked
+  `ITensor/this_dir.mk` and `options.mk` into its worktree, which points the
+  build at the main checkout's `libitensor.a`.
+- **Agents amend their commits.** Merge into a separate integration worktree,
+  never into the main checkout the other agents still use as their pristine
+  reference. Rebuild the integration branch from the final branch heads with a
+  script rather than re-merging on top, and resolve the audit record's
+  Status-line conflicts by keeping both sides.
+- **Decide shared formulas in the brief.** Where a fix has a Python and a C++
+  half owned by two clusters (the NH Ritz window) or must happen in exactly one
+  place (NH unit scaling at the Python entry, not also inside
+  `Chain::nhdmrg`), write the formula and the place into both briefs.
+
 ## 6. Say when numbers change
 
 A fix that makes a previously-returned number different is a different kind of

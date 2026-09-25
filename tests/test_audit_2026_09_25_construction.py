@@ -197,7 +197,10 @@ def test_thermal_chain_mode_at_construction_is_the_mode_it_solves_with():
     tc.set_hamiltonian(h)
     _quiet(tc.get_gs)
     assert tc.mode == "ED" and tc.MBChain.mode == "ED"
-    assert thermal.Thermal_Spin_Chain(["S=1/2"]*2).mode == "DMRG"
+    # the default is None since the 2026-09-25b fixes (finding 3): a chain
+    # whose mode was "DMRG" answered an explicit mode="ED" call by DMRG,
+    # and the wrapper's default put exactly that on MBChain
+    assert thermal.Thermal_Spin_Chain(["S=1/2"]*2).mode is None
     with pytest.raises(ValueError):
         thermal.Thermal_Spin_Chain(["S=1/2"]*2, mode="ed")
 

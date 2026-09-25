@@ -1,4 +1,6 @@
 #include <tuple>
+#include <cmath> // std::sqrt/std::lround/std::log2 (reduced_dm, announce_solver_scale)
+#include <limits> // std::numeric_limits<double>::epsilon() (SRTieBreak window)
 
 // Phase 3 session/handle model: one Chain instance per Python
 // Many_Body_Chain object, replacing the old model of one fresh mpscpp.x
@@ -147,11 +149,17 @@ class Chain
     // against the same Hamiltonian never rebuild it -- this is what fixes
     // the "get_hamiltonian.h always rereads from disk" inefficiency flagged
     // in the migration plan.
+    //
+    // The solver's scale (hscale_up_) is the one the MPO was built at, as
+    // to_mpo_unit() reports it from the merged AutoMPO -- not read from the
+    // raw term list, whose largest coefficient differs whenever duplicate
+    // strings cancel (2026-09-25b audit, finding 28).
     void
     set_hamiltonian(std::vector<MOTerm> const& terms)
         {
-        H_ = build_mpo(sites_,terms,mpomaxm_);
-        hscale_up_ = unit_scale_up(max_abs_coef(terms));
+        double up = 1.0;
+        H_ = build_mpo(sites_,terms,mpomaxm_,&up);
+        hscale_up_ = up;
         have_H_ = true;
         have_wf0_energy_ = false; // any cached energy is now stale
         have_bandwidth_min_ = false; // ...and so is any cached bandwidth
@@ -492,22 +500,28 @@ class Chain
         return out;
         }
 
-    // Reduced density matrix, mirroring reduced_dm.h's reduced_dm() exactly
-    // (including its psi /= overlap(psi,psi) normalization -- dividing by
-    // the squared norm rather than its square root looks like a bug, but is
-    // a no-op in practice since wf here is always already unit-normalized
-    // coming out of dmrg()/gs_energy(), so it's preserved verbatim rather
-    // than "fixed" as an unrelated change), just taking wf/site directly
-    // and returning the flat dim*dim matrix instead of DM.OUT (which today
-    // is written one tensor element at a time via a separate file
-    // open/close per element). site is 1-based, matching every other
-    // site-index convention at this extension boundary (MOTerm::factors,
-    // build_ampo/build_mpo).
+    // Reduced density matrix, mirroring reduced_dm.h's reduced_dm(), just
+    // taking wf/site directly and returning the flat dim*dim matrix instead
+    // of DM.OUT (which today is written one tensor element at a time via a
+    // separate file open/close per element). site is 1-based, matching
+    // every other site-index convention at this extension boundary
+    // (MOTerm::factors, build_ampo/build_mpo).
+    //
+    // The state is normalized by its norm, sqrt(<psi|psi>), so the result
+    // has trace 1 for any wf. The original divided by <psi|psi> itself,
+    // the squared norm, and this comment used to call that a no-op because
+    // every state reaching it came out of dmrg() at unit norm. That stopped
+    // being true once set_gs()/set_initial_wf()/gs_energy(wf0=x,
+    // reconverge=False) could hand the session a caller's state unswept:
+    // for wf = c*s the returned matrix was exactly rho/c^2 (trace 0.25 at
+    // c=2, 4.0 at c=0.5; 2026-09-25b audit, finding 11). A zero state has
+    // no density matrix; it is left unscaled and gives zeros, as before.
     std::vector<std::complex<double>>
     reduced_dm(MPS const& wf, int site) const
         {
         auto psi = wf;
-        psi /= overlap(psi,psi); // normalize (see note above)
+        double nrm2 = overlap(psi,psi);
+        if (nrm2 > 0.0) psi /= std::sqrt(nrm2); // normalize (see note above)
         psi.position(site);
         auto ir = commonIndex(psi.A(site),psi.A(site+1));
         auto rho = psi.A(site)*dag(prime(psi.A(site),Site,ir));
@@ -918,6 +932,12 @@ class Chain
                           Sel sel=Sel::SR, Cplx target=0) const
         {
         Cplx lambda = 0;
+        // the operator's own scale for the stopping tests, capped at 1 (see
+        // the mpscpp3 original's opnorm comment; the absolute 1e-13
+        // breakdown and 1e-10*(1+|lambda|) restart tests stopped v3's iDMRG
+        // unconverged in small units, 2026-09-25b audit, finding 27)
+        double opnorm = 0.0;
+        auto opscale = [&]() { return std::min(1.0,opnorm); };
         for (int r=0;r<restarts;++r)
             {
             double nx = norm(x0);
@@ -931,6 +951,7 @@ class Chain
             for (int j=0;j<krylovdim;++j)
                 {
                 auto w = A(V.at(j));
+                opnorm = std::max(opnorm,norm(w));
                 for (int i=0;i<=j;++i)
                     {
                     auto c = (dag(V.at(i))*w).cplx();
@@ -946,7 +967,8 @@ class Chain
                 m = j+1;
                 double nw = norm(w);
                 h.at(j+1).at(j) = nw;
-                if (nw<1e-13) break; // happy breakdown: invariant subspace
+                // happy breakdown: invariant subspace (w = 0 included)
+                if (!(nw > 1e-13*opscale())) break;
                 if (j+1<krylovdim) V.push_back(w/nw);
                 }
             auto a = Index("a",m);
@@ -972,10 +994,26 @@ class Chain
                 for (int k=2;k<=m;++k) remin = std::min(remin,ev[k-1].real());
                 if (sel==Sel::SRTieBreak)
                     {
-                    double degtol = 1e-6*(1.0+std::abs(remin));
+                    // tie window against the Ritz spectrum's own spread
+                    // plus a roundoff floor, free of the units and of an
+                    // offset; it was 1e-6*(1+|remin|), which in small
+                    // units or under an offset outgrew the real-part gap
+                    // and let the sweep follow the previous bond onto an
+                    // excited eigenpair (see the mpscpp3 original,
+                    // arnoldi_select_kbest, and pyitensor's _select_ritz;
+                    // 2026-09-25b audit, finding 25). <=, so a lone or
+                    // all-equal set of Ritz values stays a candidate.
+                    double remax = remin, amax = 0.0;
+                    for (int k=1;k<=m;++k)
+                        {
+                        remax = std::max(remax,ev[k-1].real());
+                        amax = std::max(amax,std::abs(ev[k-1]));
+                        }
+                    double degtol = 1e-6*(remax-remin)
+                                  + 100.0*std::numeric_limits<double>::epsilon()*amax;
                     kbest = 0;
                     for (int k=1;k<=m;++k)
-                        if (ev[k-1].real()<remin+degtol)
+                        if (ev[k-1].real()<=remin+degtol)
                             if (kbest==0 ||
                                 std::abs(ev[k-1]-target)<std::abs(ev[kbest-1]-target))
                                 kbest = k;
@@ -1001,7 +1039,7 @@ class Chain
             // once the build already converged
             double resid_est = h.at(m).at(m-1).real()
                               *std::abs(W.cplx(a(m),c(kbest)));
-            if (resid_est<1e-10*(1.0+std::abs(ebest))) break;
+            if (resid_est <= 1e-10*(opscale()+std::abs(ebest))) break;
             }
         return {lambda,x0};
         }
@@ -1026,7 +1064,26 @@ class Chain
     solver_hamiltonian(MPO const& H) const
         {
         if (hscale_up_==1.0) return H;
+        announce_solver_scale();
         return hscale_up_*H;
+        }
+
+    // With verbose on, the sweep and per-bond lines ITensor's dmrg() prints
+    // are the energies of the operator it was handed, which below unit
+    // scale is hscale_up_ times the one the user set (a J=0.5 chain logged
+    // -2.4936 for a returned -1.2468; 2026-09-25b audit, finding 29). One
+    // line before each scaled solve says so, rather than an observer that
+    // divides the sweep line back: davidson's per-bond lines are printed
+    // where no observer reaches, and "%.12f" would print a physical energy
+    // below 1e-12 as zero, so the scaled log is the readable one.
+    void
+    announce_solver_scale() const
+        {
+        if (!verbose_ || hscale_up_==1.0) return;
+        printfln("dmrgpy: the DMRG energies logged below are 2^%d = %.17g times "
+                 "those of the operator being solved (unit scale for the local "
+                 "eigensolver, see solver_hamiltonian); returned values are "
+                 "divided back",(int)std::lround(std::log2(hscale_up_)),hscale_up_);
         }
 
     Sweeps
@@ -1162,6 +1219,7 @@ class Chain
             auto psi = MPS(sites_);
             auto sweeps = make_sweeps(std::min(nsweeps_,5),std::min(maxm_,20));
             auto negH = (-hscale_up_)*H_; // -H at unit scale, see solver_hamiltonian()
+            announce_solver_scale();
             bandwidth_emax_ = -dmrg(psi,negH,sweeps,dmrg_args())/hscale_up_;
             have_bandwidth_max_ = true;
             }
@@ -1241,13 +1299,20 @@ class Chain
     // Whether two MPS are numerically the same state, mirroring
     // mpsalgebra.h's same_mps() (used to pick the accelerated single-vector
     // KPM recursion when vi==vj), just taking maxm/cutoff as explicit
-    // parameters instead of reading tasks.in.
+    // parameters instead of reading tasks.in. The test is relative to the
+    // vectors' own size, ||vi-vj|| < 1e-10*max(||vi||,||vj||): they are
+    // A^dagger|gs> and B|gs>, never normalized, and the absolute 1e-10 the
+    // original used declared any pair of small images equal (C[eps*Sz0,
+    // eps*Sz3] returned as C[Sz3,Sz3] from eps=1.2e-10 down; 2026-09-25b
+    // audit, finding 23). Strict <, so two zero vectors take the full
+    // recursion, which returns their zero moments.
     bool
     same_mps(MPS const& vi, MPS const& vj, int maxm, double cutoff) const
         {
         auto d = sum(1.0*vi,-1.0*vj,{"Maxm",maxm,"Cutoff",cutoff});
         double dd = sqrt(overlap(d,d));
-        return dd<1e-10;
+        double ref = std::max(sqrt(overlap(vi,vi)),sqrt(overlap(vj,vj)));
+        return dd<1e-10*ref;
         }
 
     // MPO sum/product, mirroring mpsalgebra.h's sum_mpo()/mult_mpo() exactly,

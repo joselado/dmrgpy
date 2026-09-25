@@ -80,8 +80,20 @@ function kpm_moments_accelerated(jlmpo,vi,n,kpmmaxm,kpmcutoff)
 end
 
 
+# Whether vi and vj are the same vector, which decides between the
+# auto-correlator recursion above and the full one. Relative to their own
+# size: vi = B|gs> and vj = A^dagger|gs> are not normalized, and the old
+# absolute ||vi-vj|| < 1e-10 took any pair of small images for one vector,
+# returning C[B^dagger,B] for C[A,B] (C[eps*Sz0,eps*Sz3] as C[Sz3,Sz3]
+# from eps ~1.2e-10 down; 2026-09-25 hole hunt 25b, finding 23, the same
+# test as mpscpp2/mpscpp3's same_mps and pyitensor's _same_mps). At O(1)
+# operators the band between the two thresholds is empty. The strict <
+# is the zero guard: two zero vectors (max = 0) take the full recursion,
+# which returns their zero moments.
 function same_mps(vi,vj,maxm,cutoff)
+	ni = sqrt(abs(real(inner(vi,vi))))
+	nj = sqrt(abs(real(inner(vj,vj))))
 	d = summps(1.0*vi,(-1.0)*vj,maxm,cutoff)
 	dd = sqrt(abs(real(inner(d,d))))
-	return dd<1e-10
+	return dd < 1e-10*max(ni,nj)
 end

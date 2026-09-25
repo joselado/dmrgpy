@@ -19,9 +19,10 @@ def run(self,automatic=False):
                 "backends run in-process and never reach this function.")
 
 
-# The two solvers a calculation can be answered by. self.mode pins one on
-# the chain; every dispatching method takes the same strings as a mode=
-# kwarg. Anything else is a typo, and is rejected by name rather than
+# The two solvers a calculation can be answered by. self.mode="ED" forces
+# ED on the chain (self.mode="DMRG" is accepted and means the same as None,
+# see resolve_mode); every dispatching method takes the same strings as a
+# mode= kwarg. Anything else is a typo, and is rejected by name rather than
 # quietly falling off the end of a dispatch chain.
 VALID_MODES = ("ED","DMRG")
 
@@ -128,9 +129,17 @@ def resolve_mode(self,mode="DMRG"):
         print("pyitensor's two-site DMRG can't handle a chain this short "
               "(n=%d < 2 sites), using default ED routines"%self.ns)
         return "ED" # use exact diagonalization
-    # if there is an enforced mode, then use that one (both names were
-    # validated at the top of this function)
-    if self.mode is not None: return self.mode # use the enforced mode
-    return mode # use default
+    # A chain forced to ED answers every call by ED; otherwise the call's
+    # own mode (both names were validated at the top of this function).
+    # Only an "ED" on the chain overrides the call: every reader defaults to
+    # mode="DMRG", so a call cannot tell an explicit "DMRG" from the
+    # default, and a chain's "DMRG" carries nothing the call lacks. It used
+    # to be returned ahead of the call in both directions, so a chain whose
+    # mode was "DMRG" answered an explicit mode="ED" -- the cross-check --
+    # by DMRG: gs_energy(mode="ED") -3.6734578613 against the exact
+    # -3.7040879103 on an 8-site chain at maxm=2 (2026-09-25b hole hunt,
+    # finding 3). The automatic fallbacks above come first either way.
+    if self.mode=="ED": return "ED" # forced by the chain
+    return mode # the call's own
 
 

@@ -21,7 +21,14 @@ def _max_energy_bound(self,H):
     juliacall session -- e.g. a JuliaError from the DMRG call) would
     propagate with self.hamiltonian still pointing at -H and
     self.maxm/self.nsweeps still clamped down, corrupting every later
-    call on this chain object, not just this one."""
+    call on this chain object, not just this one.
+
+    The solver key and the lower-edge mark are put back here too
+    (groundstate.solve_marks()): the -H solve records its own, under the
+    clamped maxm/nsweeps, and the caller's restore of wf0/e0 would
+    otherwise leave the state looking stale at the chain's parameters."""
+    from ..groundstate import solve_marks,restore_solve_marks
+    marks = solve_marks(self)
     maxm0,nsweeps0 = self.maxm,self.nsweeps
     self.maxm = min(self.maxm,20)
     self.nsweeps = min(self.nsweeps,5)
@@ -33,14 +40,19 @@ def _max_energy_bound(self,H):
         self.maxm,self.nsweeps = maxm0,nsweeps0
         self.restart()
         self.set_hamiltonian(H,restart=False)
+        restore_solve_marks(self,marks)
     return emax
 
 
 def _min_energy(self,H):
     """H's lower band edge from a solve at the chain's own parameters, for
-    the Chebyshev window when the chain holds a state that is not a solve's
-    (set_gs(), set_initial_wf()). Runs in place on `self` like
-    _max_energy_bound() above, and leaves the same restore to the caller."""
+    the Chebyshev window when the chain's e0 is not marked as that edge
+    (groundstate.mark_lower_edge()): a state set with set_gs() or
+    set_initial_wf(), or gs_energy_generalized()'s. Runs in place on `self` like
+    _max_energy_bound() above, and leaves the same restore to the caller,
+    apart from the solver key and the lower-edge mark, put back here."""
+    from ..groundstate import solve_marks,restore_solve_marks
+    marks = solve_marks(self)
     self.restart()
     self.set_hamiltonian(H,restart=False)
     try:
@@ -48,6 +60,7 @@ def _min_energy(self,H):
     finally:
         self.restart()
         self.set_hamiltonian(H,restart=False)
+        restore_solve_marks(self,marks)
 
 
 def _same_mps(vi,vj,maxm,cutoff):
@@ -166,13 +179,16 @@ def _kpm_dynamical_correlator(self,n=1000,
     H = self.hamiltonian
     e0 = self.gs_energy() # compute ground state (also sets self.e0/self.wf0)
     wf0 = self.wf0
-    # A state set with set_gs()/set_initial_wf() is measured from its own
-    # energy e0 = <x|H|x>, which is not the lower band edge, so the window
-    # takes that edge from a solve of its own, as the session backends do
-    # (2026-09-24c audit, finding 1); a solved state's e0 is the edge.
-    from ..groundstate import state_supplied
+    # The state is measured from its own energy e0, and the window takes
+    # its lower edge from e0 only when a plain solve marked e0 as H's lower
+    # edge (groundstate.mark_lower_edge), and from a solve of its own
+    # otherwise, as the session backends do (2026-09-24c audit, finding 1).
+    # The test used to be the other way round, e0 unless the state was
+    # supplied, so after gs_energy_generalized() the edge was lambda, and
+    # a metric putting lambda above E0 raised (2026-09-25b, finding 10).
+    from ..groundstate import state_supplied,e0_is_lower_edge
     supplied = state_supplied(self)
-    emin = _min_energy(self,H) if supplied else e0
+    emin = e0 if e0_is_lower_edge(self) else _min_energy(self,H)
     emax = _max_energy_bound(self,H)
     self.wf0,self.e0,self.computed_gs = wf0,e0,True # restore GS cache
     self._gs_supplied = supplied # restart() above cleared it

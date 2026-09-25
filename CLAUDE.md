@@ -588,7 +588,8 @@ knowing before touching the code. A chain constructor keyword is now a
 setting assigned after `initialize()`, exactly as an assignment afterwards,
 `mode` included (`sites.check_settings`; applying `mode` first leaves a chain
 at `mode="ED"` with no session to go back to), and anything that is not a
-setting raises. `multioperator.clean_threshold` is 1e-12 and relative, to the
+setting raises (nine public attributes that are not settings slipped through
+until the 2026-09-25b fix pass made it an explicit allowlist, `sites.SETTINGS`). `multioperator.clean_threshold` is 1e-12 and relative, to the
 largest coefficient of the term list in `_filter_small` and, in
 `canonical_dict`, to the larger of that and the magnitudes summed into a
 signature, which is what the rounding dust of H-H^dagger scales with. And
@@ -616,21 +617,150 @@ NH-DMRG; `julia_live`'s `set_initial_wf`/`set_initial_wf_guess` (0.0008 to
 solved chain, which returned the stored state; every reader after a
 correlator that followed `gs_energy_generalized()` on a Hermitian chain never
 solved, or on a non-Hermitian chain with no earlier correlator (e0 -2.493577
-to lambda -3.597994 on 6 sites); `tc.MBChain` after `Thermal_Spin_Chain.
-get_gs()` at T>1e-5 (`gs_energy()` -2.25 to -0.416388 at T=1, `vev` on ED 0 to
--0.069398); `gs_energy(wf0=x, reconverge=False)` on a non-Hermitian chain,
+to lambda -3.597994 on 6 sites; since the 2026-09-25b pass e0 is the state's
+own energy <wg|H|wg> and lambda is `lam_generalized`); `tc.MBChain` after
+`Thermal_Spin_Chain.get_gs()` at T>1e-5 (`gs_energy()` -2.25 to -0.416388 at
+T=1, `vev` on ED 0 to -0.069398; -0.428230 and -0.071372, the exact values,
+since the 2026-09-25b `anneal()` rewrite); `gs_energy(wf0=x, reconverge=False)` on a non-Hermitian chain,
 now <x|H|x>; and lower-level `submode="ROOTN"` at sites other than (0,0).
 Behaviour changes without number changes: a non-setting constructor keyword,
 an unknown ROOTN keyword, `gs_energy(wf0=x)` on a non-Hermitian chain and the
 NH-KPM after `set_gs` all raise; `maxde` is documented as per site, which it
 always was. Left open and recorded as such: `gs_energy(maxde=...)` on a
-current chain returning the stored energy unrefined; TD and every TDVP route
+current chain returning the stored energy unrefined (fixed in 2026-09-25b); TD and every TDVP route
 depending on units through the Krylov exponentiator's absolute error goal
 (on `"python"` at operator scales below 1e-8 this is now a quietly wrong
 spectrum where it raised `ZeroDivisionError`); the bond-local truncation, the
-MPO-set Hamiltonian, small-unit real-time evolution, v2 NH-DMRG and
-`"python"`'s Lanczos at small units; `julia_live` recording no solver key;
+MPO-set Hamiltonian, small-unit real-time evolution, v2 NH-DMRG (fixed in
+2026-09-25b) and `"python"`'s Lanczos at small units (fixed for VUMPS in
+2026-09-25b); `julia_live` recording no solver key (fixed in 2026-09-25b);
 and the lower-level route's pair `name=` next to `i=`/`j=`.
+
+**The 2026-09-25b hunt and its fix pass.** `docs/audit_2026_09_25b_hole_hunt.md`
+is a sixth hunt: four lenses (`construction`, `session`, `scale`, `scale_cpp`)
+scoped to the fix-pass commit `e7b1196`, with 29 findings. All 29 were fixed on
+2026-09-26, together with the record's two unreviewed leads and five items the
+earlier records had left open. The pass ran on a different machine from the
+hunt (numpy on OpenBLAS, `juliacall` installed for it) as nine file-disjoint
+clusters. Each cluster worked in its own git worktree with its own copy of the
+compiled extensions (the `cpp` one built its own), and all shared a cap of three
+concurrent processes on three cores. The regressions live in
+`tests/test_audit_2026_09_25b_<cluster>.py` for `construction`, `session`,
+`cvm`, `thermal`, `ednum`, `nh`, `cpp`, `julia` and `mpobuilder`, and both
+extensions were rebuilt. Taking that machine's baseline turned up a thirtieth
+defect, recorded as finding 30: `"python"`'s MPO builder had an absolute
+roundoff floor that MKL had hidden, so `test_audit_2026_09_24c_pyitensor.py`
+failed there at s <= 1e-6.
+
+Four things are worth knowing before touching the code:
+- **A state becomes the chain's normalized** (`groundstate.unit_copy`, applied
+  in `mark_injected`, in the `wf0=` copies and in `set_gs`'s ED branch), and a
+  zero state raises. An explicit `wf=` to `evolve_and_measure`/`evolution_ABA`
+  is still evolved as given.
+- **After `gs_energy_generalized`, `e0` is the state's own energy**, <wg|H|wg>
+  (biorthogonal on the NH route), and lambda is kept as `lam_generalized`. On
+  `julia_live` the KPM window trusts `e0` as the lower band edge only when
+  `groundstate.mark_lower_edge` says a plain solve produced it.
+- **Every threshold of the family this hunt found is now relative** to a scale
+  of the problem it acts on. Where a rule exists it is `e7b1196`'s: multiply by
+  the power of two that brings a largest coefficient below 1 into [1,2), and
+  leave everything byte-identical at 1 or more. That rule now also covers
+  `pyitensor`'s `to_mpo` (finding 30), the NH-DMRG Python entry (`nhdmrg.py`, for
+  all three session backends, so do NOT also scale inside `Chain::nhdmrg`) and
+  ED's deflated eigensolver. The solver scale `hscale_up_` is now read from the
+  merged AutoMPO (`to_mpo_unit`'s `up_out`), so the XX chain at J=1 solves at 2.
+  The other thresholds:
+  - CVM stops relative to ||b||, and its early exits read the CG functional phi,
+    which exact CG lowers at every step.
+  - NH-DMRG's Ritz tie window is `1e-6*(max Re - min Re) + 100*eps*max|ev|`,
+    compared with `<=`, identically in `pyitensor/nhdmrg.py` and both
+    `arnoldi_select_kbest`. Its certificate divides by `c + |E - e_id|`.
+  - VUMPS's Lanczos residual reference is capped by the Hamiltonian's unit.
+  - The KPM same-vector shortcut and ROOTN's Lanczos breakdown compare against
+    the vectors' own norms.
+- **Dispatch and settings.** `mode.resolve_mode` lets only a chain pinned to
+  "ED" override a call's `mode=`; a "DMRG" pin is the same as None.
+  `sites.SETTINGS` is an explicit allowlist of constructor keywords.
+  `groundstate.stored_answer_holds` is the one condition under which
+  `gs_energy`/`get_gs` return a stored answer. `julia_live` starts every DMRG
+  solve from a random MPS of link dimension min(maxm,10), with the chain's
+  noise on the first half of the sweeps.
+
+The fixes that changed numbers, so results from before them are not comparable:
+- **Anything after `set_gs`, `set_initial_wf` or `wf0=` of a state whose norm is
+  not one.** Every reader that did not normalize drops by exactly 1/<x|x>: the
+  KPM sum rule at <x|x>=4 goes from 0.999995 to 0.249999 on a 4-site Heisenberg
+  chain, the ED `vev` and every `julia_live` reader move with it, and so does
+  `get_rdm` on all four backends.
+- **Readers after `gs_energy(wf0=x, reconverge=False)` on any route that
+  resolves to ED.**
+- **Calls with `mode="ED"` on a chain pinned to "DMRG"**, which ran DMRG
+  (-3.6734578613 to -3.7040879103 at `maxm=2`).
+- **`gs_energy(maxde=...)` and `gs_energy(reconverge=True)` on a current chain**,
+  which returned the stored energy (-4.1431954920 to -4.2580352072).
+- **`julia_live` on any Hamiltonian that couples sites across a decoupled one**:
+  -0.5 to -1.0 and -1.5 to -3.232051, and `Thermal_Spin_Chain` at T=0 from
+  -0.5 to -1.0. Every other `julia_live` solve now varies run to run by solver
+  noise, and a 16-site warm solve is about 40% slower.
+- **`e0` and every KPM/CVM/ROOTN/TDZ spectrum after `gs_energy_generalized`**,
+  which shift rigidly by lambda - <wg|H|wg>: `gs_energy()` goes from -0.808013
+  to -1.616025 for A = 2*Id on a 4-site chain. `gs_energy_generalized`'s own
+  return value does not move.
+- **`submode="CVM"`, `CVM_explicit`, and the non-Hermitian CVM/INV.**
+  - The CG tolerance was absolute, so below delta*||B|GS>|| of about 1e-5 every
+    frequency returned the flat eta*<AB>/pi. This includes the Kondo route at
+    its default broadening, whose curve went from ~1e-8 to ED's.
+  - The early exits returned the initial guess on a line: 1.5915e-04 against
+    13.2636 at delta=2e-3 on 6 sites, and 10 to 45 of 121 points wrong on a
+    10-site grid.
+  - A non-adjoint small pair was answered with another pair's density.
+- **Every finite-temperature `Thermal_Spin_Chain` result.** `anneal()` is now
+  order-8 Taylor steps of exp(-dtau(H-E_mid)) at dtau*W <= 2. n=10 at T=0.5
+  goes from -2.777892 to -3.166391 (exact -3.166396), and T > 5 no longer
+  gives zero steps.
+- **ED `get_excited` above 2000 states, ROOTN, the `arnolditk` route, KPM on
+  pairs whose images agree to 1e-10, v3 VUMPS (`converged` False to True) and
+  v3 iDMRG** in small units or next to an offset.
+- **NH-DMRG wherever its real-part gap fell inside the old tie window**, and
+  every NH solve whose largest coefficient is below 1.
+- **v2/v3 Hamiltonians whose duplicate terms cancel** (finding 28).
+- **`"python"` operators whose largest coefficient is below 1**, at the
+  roundoff level (finding 30).
+
+Behaviour changes without number changes, all of which now raise:
+- a keyword on a current chain that the stored answer would have ignored;
+- a Hamiltonian accumulator such as `hubbard=` passed to a constructor;
+- `gs_energy(H=H2)` on a non-Hermitian chain (use `nhdmrg(H=...)`);
+- a zero state set with `set_gs` or passed as `wf0=`;
+- any reader on a chain with no Hamiltonian, now with a message naming
+  `set_hamiltonian()`.
+
+Other behaviour changes:
+- `CVM_explicit` accepts any pair.
+- `State.normalize(tol=)` and `norm()` exist on ED.
+- The `dex` warning also fires when the averaged manifold is wider than delta.
+- `verbose` v2/v3 runs print the solver scale.
+- `julia_live`'s `get_rdm(i=ns-1)` works, and the `julia_live` rdm and bond
+  entropy raise on ED routes as the others do.
+
+Left open and recorded as such:
+- the truncated CVM regime, now about 2x the cost and still unconverged, but
+  warned;
+- `Thermal_Spin_Chain`'s cost, now about 2*beta*W factor applications, and its
+  band width, which comes from variational band edges that can be too small;
+- `pyitensor/idmrg_excitations.py::_deflated_lanczos_run`'s `max(1,|lam|)`;
+- ShiftInv's `applyinverse(delta=)`;
+- the NH window's headroom at large L;
+- `kpm_finite`'s `window_chain_kwargs` check;
+- `edtk/edchain.py`'s silent `None` on an unknown operator;
+- the reason for `julia_live`'s slowdown;
+- from earlier records, TD's absolute Krylov error goal and the bond-local
+  truncation.
+
+The full suite on the merged tree gives 2275 passed, 2 skipped and 14
+xfailed without `julia_live`, and all 64 `julia_live` tests pass; that
+machine's baseline before the pass was 1840 passed and 6 failed, the six
+being finding 30.
 
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the
@@ -923,7 +1053,11 @@ bilinear-biquadratic example in `README.md`).
   one truncating: a truncating first sweep weighed the dead identity
   channel from the left and compressed any operator whose coefficients
   were all below about 2e-7 into a different one (2026-09-24 third pass,
-  finding 13). Same operator,
+  finding 13); and an operator whose largest coefficient is below 1 is
+  built at unit scale and scaled back, like v2/v3's `to_mpo_unit()`,
+  since the identity channel's O(1) roundoff is otherwise an absolute
+  error (1.1e-9 relative at s=1e-7 on OpenBLAS, 2026-09-25b finding 30).
+  Same operator,
   same final bond dimension, and a build that is O(L^2) rather than
   O(L^4) (the machine itself is O(L); `HTerm.resolve()` spells each of the
   O(L) terms out over all L sites, and that term is cheap but real):
@@ -1012,9 +1146,15 @@ entirely from `mpscpp2`, and `mpscpp3` never had one.
   Hamiltonian through `solver_hamiltonian()`, both at the power of two that
   brings a largest coefficient below 1 into [1,2), divided back exactly;
   at a largest coefficient of 1 or more they run the unscaled code byte for
-  byte, and `set_hamiltonian_mpo` resets the scale to 1. A new MPO built
-  from an AutoMPO, or a new `dmrg()` call, should go through the same two,
-  or it reintroduces the small-units failure (2026-09-25 record, item 2).
+  byte, and `set_hamiltonian_mpo` resets the scale to 1. The session's
+  `hscale_up_` is the factor `to_mpo_unit()` actually applied to the merged
+  AutoMPO (its `up_out`), not a maximum over the raw terms, which cancelling
+  duplicates made wrong (2026-09-25b finding 28). A new MPO built from an
+  AutoMPO, or a new `dmrg()` call, should go through the same two, or it
+  reintroduces the small-units failure (2026-09-25 record, item 2).
+  NH-DMRG is not a `dmrg()` call: it is unit-scaled once, at the Python entry
+  in `nhdmrg.py`, for all three session backends, so do not add a second
+  scale inside `Chain::nhdmrg`.
 - A few **pre-existing bugs in the original design are deliberately
   reproduced, not fixed**, in both `chain_session.h`s (see comments at the
   call sites for details): `evoloperator()`'s z³/6 term multiplies `H2`
@@ -1527,7 +1667,10 @@ a while after this, so `Chain::vumps_ground_state` floored at ~1e-6 and
 reported `converged=False` at `D>=8` -- a documented divergence between the
 two VUMPS backends. `Chain::vx_lanczos_ground_state` now has the same
 `residual_tol` (both VUMPS drivers pass `tol/10`; every other caller is
-byte-identical) and `vx_align_phase` the same alignment, removing the whole
+byte-identical; since 2026-09-25b finding 24 its reference `max(1,|lambda|)`
+is capped by the Hamiltonian's own unit, its largest non-identity
+coefficient, on both backends, so that it holds in small units and next to
+an offset) and `vx_align_phase` the same alignment, removing the whole
 phase rather than just the sign, since a vector from the dense
 `vx_dense_eig_max_` branch comes out of `zheev` with no fixed phase at all.
 Re-measured through the public driver at `D=8`, `nrestarts=6`: `converged`

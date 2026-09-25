@@ -46,6 +46,15 @@ def _matvec(h,x):
   return np.asarray(h@x).reshape(-1)
 
 
+def _infinity_norm(h):
+  """max_i sum_j |h_ij| of a sparse or dense matrix, an upper bound of its
+  spectral radius (the largest single element is not one: a hopping
+  chain's elements are t while its many-body spectrum grows with the
+  length). NaN/inf propagate, so a non-finite matrix is never rescaled."""
+  rows = abs(h).sum(axis=1)
+  return float(np.max(np.asarray(rows))) if h.shape[0]>0 else 0.
+
+
 def _deflated_lowest_hermitian(h,n):
   """Lowest `n` eigenpairs of a Hermitian `h`, DEGENERATE LEVELS INCLUDED.
 
@@ -100,7 +109,34 @@ def _deflated_lowest_hermitian(h,n):
   ~0.8 s at dim 4096 and ~4.4 s at dim 16384. Accepted deliberately -- a
   fast wrong spectrum is worth less than a slow right one on the reference
   path.
+
+  The routine runs at unit scale: a matrix whose infinity norm is below 1
+  is first multiplied by the power of two that brings that norm into
+  [1,2), and the levels are divided back exactly (vectors are
+  scale-free); at a norm of 1 or more nothing is scaled and the code runs
+  byte for byte as it always did. Four constants below are absolute
+  energies -- the residual acceptance 1e-7*(1+|ev|), the degenerate-
+  partner window 1e-8*(1+|emin|), the parking sigma = es[0]+10*(1+|es[0]|)
+  and the parked-copy skip at sigma-1 -- and in small units two of them
+  failed in complementary ways, both measured on the 12-site ferromagnet
+  written as s*(-sum S.S) (2026-09-25b audit, finding 20): the window
+  accepted the lowest magnon as a missing copy of the ground multiplet
+  once its gap 0.034*s fell below 1e-8 (s below 2.9e-7, silently, in up
+  to 6 of 8 calls), and sigma parked found levels near an absolute +10
+  over a spectrum of order s, where ARPACK's relative stopping rule could
+  not be met next to them: a deflated round then did not converge (a hang
+  of hours at maxiter=1e6, from s of about 3e-4 down). The four have to
+  move together, which scaling the matrix does at once: scaling sigma
+  alone put the skip below the whole spectrum and returned short lists,
+  scaling the window alone exposed more stalled rounds. The infinity norm
+  bounds the spectral radius, so sigma stays above the spectrum. A
+  constant offset still inflates |es[0]| and the norm alike, as before.
   """
+  hinf = _infinity_norm(h)
+  if 0.<hinf<1.:
+    k = 1-np.frexp(hinf)[1] # hinf*2**k in [1,2); a power of two is exact
+    es,vs = _deflated_lowest_hermitian(np.ldexp(1.,int(k))*h,n)
+    return np.ldexp(es,-int(k)),vs
   dim = h.shape[0]
   es,vs = [],[] # levels and (orthonormal) eigenvectors found so far
   sigma = None # where deflated levels get parked; set after the first round
@@ -446,10 +482,17 @@ def is_hermitian(h,rtol=1e-10):
     return bool(frobenius_norm(h - dagger(h)) <= rtol*frobenius_norm(h))
 
 
-def is_zero_matrix(h,tol=1e-8):
-    h = h@dagger(h)
-    t = np.abs(trace(h)) # this should be a trace
-    return t<tol
+def is_zero_matrix(h,scale,rtol=1e-10):
+    """Whether ||h||_F <= rtol*scale. A zero test has no scale of its own,
+    so the caller supplies one: the size a genuinely nonzero operator of
+    the same origin would have (edchain.is_zero_operator passes its
+    largest coefficient times ||Id||_F). This used to be |Tr(h h^dagger)|
+    < 1e-8, absolute on the squared Frobenius norm, i.e. carrying the
+    square of the operator's units and the Hilbert-space dimension, so a
+    difference of two operators below about sqrt(2e-8/dim) in size passed
+    as zero (2026-09-25b audit, finding 16). rtol is algebra.is_hermitian's.
+    The zero matrix is zero at any scale, including scale=0."""
+    return bool(frobenius_norm(h) <= rtol*scale)
 
 
 

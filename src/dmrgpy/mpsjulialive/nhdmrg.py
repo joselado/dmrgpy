@@ -19,15 +19,22 @@ not map one-to-one: see nhdmrg_attempt's own note.
 from .generalized import metric_guard
 from .juliasession import Main as Mainjl
 from .mpo import MPO
-from .mps import MPS, random_mps
+from .mps import MPS, start_mps
 from .groundstate import NH_alg, NH_biorthoalg
 
 
 def julia_random_mps(self):
-    """A fresh random MPS living in the Julia session.
+    """A fresh random MPS living in the Julia session, at the link
+    dimension every julia_live solve starts from (mps.start_mps). It used
+    to be mps.random_mps, a product state, and NH-DMRG takes no noise to
+    leave one (nhdmrg.jl's note): from that start the plain
+    non-Hermitian gs_energy(), the same ITensorNHDMRG solver, returned
+    -1.473178+0.015373j, not an eigenvalue, for an exact -3.219401 on a
+    Hamiltonian coupling two sites across a decoupled one (2026-09-25
+    hole hunt 25b, finding 7).
 
-    Deliberately mpsjulialive.mps.random_mps rather than the chain-level
-    Many_Body_Chain.random_state(): that one honors self.mode, so on a
+    Deliberately built on the Julia sites rather than through the
+    chain-level Many_Body_Chain.random_state(): that one honors self.mode, so on a
     chain with mode="ED" it returns an edtk State, which has no .jlmps
     and blows up with an opaque AttributeError several frames later
     inside the juliacall call below. The session backends never hit this
@@ -38,7 +45,7 @@ def julia_random_mps(self):
     of just running the DMRG solver, which is what every backend does
     (NH-DMRG has no ED implementation for mode= to select).
     """
-    return random_mps(self)
+    return start_mps(self)
 
 
 def nhdmrg_attempt(self, H, krylovdim=20, restarts=2):

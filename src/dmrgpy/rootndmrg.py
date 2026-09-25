@@ -141,7 +141,14 @@ def _lanczos_basis_mps(self,Hmpo,v,nkry):
     (Hmpo*q) truncates via the chain's ordinary self.maxm/self.cutoff,
     exactly like every other MPS operation in this codebase -- nkry plays
     the role of the paper's bond dimension m (see algebra/rootn.py's own
-    module docstring)."""
+    module docstring).
+
+    The invariant-subspace break compares beta against ||H q_0||, through
+    the same algebra/rootn.py is_breakdown rule the ED builder uses (with
+    its looser MPS factor): it was an absolute beta<1e-10, so on s*H the
+    basis collapsed to the seed from s of about 2e-10 on v3, a hundred
+    times earlier than the ED twin (2026-09-25b audit, finding 21)."""
+    from .algebra.rootn import is_breakdown, BREAKDOWN_RTOL_MPS
     nrm = np.sqrt(v.dot(v).real)
     q = (1./nrm)*v
     Q = [q]
@@ -149,8 +156,10 @@ def _lanczos_basis_mps(self,Hmpo,v,nkry):
     betas = []
     qprev = None
     beta = 0.0
+    href = None # ||H q_0||, the scale beta is compared against
     for it in range(nkry):
         w = Hmpo*Q[-1]
+        if href is None: href = np.sqrt(abs(w.dot(w).real)) # H q_0
         if qprev is not None: w = w - beta*qprev
         alpha = Q[-1].dot(w).real # real for Hermitian H
         alphas.append(alpha)
@@ -158,7 +167,7 @@ def _lanczos_basis_mps(self,Hmpo,v,nkry):
         for qi in Q: w = w - qi.dot(w)*qi # full reorthogonalization
         if it==nkry-1: break
         beta = np.sqrt(abs(w.dot(w).real))
-        if beta<1e-10: break # invariant subspace reached
+        if is_breakdown(beta,href,BREAKDOWN_RTOL_MPS): break # invariant subspace
         betas.append(beta)
         qprev = Q[-1]
         Q.append((1./beta)*w)

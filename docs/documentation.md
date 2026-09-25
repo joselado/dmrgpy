@@ -176,7 +176,21 @@ Every model constructor forwards its keywords to `Many_Body_Chain.__init__`,
 where a keyword naming a chain setting is assigned after the session is
 built, as if assigned after construction, and anything else, including the
 operator lists the model class built before calling it, raises `TypeError`
-(`sites.check_settings`).
+(`sites.check_settings`). The test is an explicit allowlist,
+`sites.SETTINGS`, the 36 solver settings every chain holds, so a new
+setting has to be added there or it is refused, and it reads nothing off
+the chain but its class name, which is how `Thermal_Spin_Chain` runs the
+same check under its own name before it builds its chain. `sites.STATE`
+is kept for its messages, the reason each state name is refused (usually
+the setter to call instead). Until the 2026-09-25b pass the rule was "a public attribute the chain
+has that is not a method, less `STATE`", which admitted nine names that
+are not settings: the four Hamiltonian accumulators `hopping`, `hubbard`,
+`pairing` and `exchange` that `update_hamiltonian()` sums, so
+`Fermionic_Chain(4, hubbard=2.0)` added $2\,\mathrm{Id}$ to the
+Hamiltonian `set_hoppings()` then built, and five attributes nothing read
+(`fields`, `resorder`, `resordered_indexes`, `hubbard_matrix`, `fit_td`),
+which are gone from `Many_Body_Chain.__init__` (2026-09-25b record,
+finding 4).
 
 All of the above build `self.sites`, the list of per-site type codes
 passed to `Many_Body_Chain.__init__`, from a **uniform** repetition of a
@@ -537,6 +551,31 @@ and that fixes no phase at all. Re-measured through the public driver at
 `D=8`, `nrestarts=6`, the same TFIM chain: `converged` in **3/3** runs at
 both `g=1.5` and critical `g=1.0`, up from 0/3, with the energy unchanged.
 `tests/test_lanczos_residual_criterion.py` now covers both backends.
+
+What the residual is measured against was settled in the 2026-09-25b
+pass. Each ground-state run computes the Hamiltonian's own unit $u$ once,
+the largest coefficient over the terms that are not a multiple of the
+identity however spelled (`Chain::vx_hamiltonian_unit`,
+`pyitensor/vumps.py::_hamiltonian_unit`), and hands it to both local
+solves through a `scale` argument of `vx_lanczos_ground_state` and
+`_lanczos_ground_state`: the residual test is
+$\lVert(H-\lambda)v\rVert\le(\mathtt{tol}/10)\min(u,\max(1,|\lambda|))$ and
+the breakdown $\beta\le10^{-12}\min(1,u)$. Every caller that passes no
+`scale` is byte-identical. The old reference $\max(1,|\lambda|)$ is kept
+wherever it is at most $u$, which covers every ordinary Hamiltonian at
+unit scale or above; below it, in small units or next to a large constant,
+it floored the gauge mismatch above `tol`, so TFIM at $D=8$ reported
+`converged=False` from $s=0.1$ down to $10^{-8}$ and at constant offsets
+of $+10$, $+100$ and $-100$ on v3, with $e_0/s$ off in the seventh digit at
+$s=10^{-8}$ (2026-09-25b record, finding 24). $u$ alone was tried first
+and is too loose above
+1: it broke the critical TFIM's `D=8` convergence test above, and the cap
+restores that model's old test exactly. `vx_lanczos_lowest` (the
+excitation ansatz) reads $\max(\min(1,u),|\lambda|)$ where it read
+$\max(1,|\lambda|)$, and the D-ramp's variational safety net compares with
+$10^{-6}\min(1,u)$ on all four drivers, both by reading rather than
+measured; the Python twin of the former,
+`idmrg_excitations._deflated_lanczos_run`, still reads $\max(1,|\lambda|)$.
 
 The same fix closed a second, initially unrelated-looking problem: the
 tangent-space excitation ansatz's loss of accuracy when a state is
@@ -2680,6 +2719,22 @@ ED, i.e. on the one solver that can still answer correctly). This is
 §4.10's pattern exactly: a precondition placed ahead of the branch that
 qualifies it.
 
+**Which mode wins, the chain's or the call's.** After the automatic
+fallbacks, `resolve_mode()` returns `"ED"` when the chain's `self.mode` is
+`"ED"`, and the call's own `mode=` otherwise. The asymmetry is deliberate:
+every reader defaults to `mode="DMRG"`, so a call cannot tell an explicit
+`"DMRG"` from the default, and a chain's `"DMRG"` carries nothing the call
+lacks, so a chain whose mode is `"DMRG"` behaves exactly as one whose mode
+is `None`. Until the 2026-09-25b pass the chain's mode was returned ahead
+of the call in both directions, so a chain set to `"DMRG"` answered the ED
+cross-check `gs_energy(mode="ED")` by DMRG ($-3.6734578613$ against the
+exact $-3.7040879103$ on an 8-site chain at `maxm=2`), and
+`get_correlation_matrix(T>0)`, which is ED only, came back up to 0.149 off
+the Fermi function (2026-09-25b record, finding 3). `Thermal_Spin_Chain`
+now defaults to `mode=None` for the same reason; `check_settings` still
+admits `mode="DMRG"`, since a constructor keyword is the assignment it
+names.
+
 **Switching an existing chain's backend is atomic.** `setup_cpp(version)`,
 `setup_python()` and `setup_julia()` are now one helper,
 `Many_Body_Chain._switch_backend(version)`. All three used to assign
@@ -2789,7 +2844,20 @@ each round solving for the lowest eigenvalue of `P h P + sigma|V><V|` with
 `P = 1 - |V><V|` over the eigenvectors found so far, which makes any
 remaining copy the extremal eigenvalue rather than an already-converged one.
 No setting of `tol`/`ncv`/over-requesting substitutes for this; measured,
-each fixes some (N,n) and breaks others. The non-Hermitian branch (`eigs`)
+each fixes some (N,n) and breaks others. Four numbers inside the routine
+are absolute, calibrated for a matrix of order one: the residual that
+accepts a Ritz pair, the window that takes one for a degenerate partner,
+the shift that parks converged levels and the skip that recognizes a
+parked copy. Since the 2026-09-25b pass a matrix whose infinity norm
+(`algebra._infinity_norm`, which bounds the spectral radius where the
+largest element does not) lies in $(0,1)$ is solved as $2^kh$, the power
+of two that brings the norm into $[1,2)$, and the levels are divided back
+exactly, which moves all four together; at a norm of 1 or more the routine
+is the old one byte for byte. Before, a 12-site ferromagnet written at
+$s=2\times10^{-7}$ got a magnon in place of one of its six ground-level
+copies in 8 of 8 calls, and at $s=10^{-5}$ and $10^{-6}$ half the calls
+stalled under a capped restart count (2026-09-25b record, finding 20).
+The non-Hermitian branch (`eigs`)
 is *not* deflated — the projector needs orthogonal eigenvectors — and can
 still drop copies. See `docs/ed_vs_dmrg_degenerate_multiplets.md` and
 `tests/test_ed_degenerate_levels.py`.
@@ -2873,15 +2941,37 @@ evolution Hamiltonians with their appended $-E_{GS}\,\mathrm{Id}$, the KPM
 band-centre shift and CVM's $z\,\mathrm{Id}$ go through it. Every `dmrg()`
 on the Hamiltonian (`gs_energy`, `excited_states` with its overlap weight
 scaled too, v3's `gs_energy_generalized`, `maximum_energy`) solves on
-`hscale_up_*H` and divides the energy back. A power of two makes the
+`hscale_up_*H` and divides the energy back. `hscale_up_` is the factor
+`to_mpo_unit()` itself used, reported through its `up_out` argument and
+threaded through `build_mpo()` (and v3's `mpo_from_terms()`, after
+`sector_terms()` in sector mode) to `Chain::set_hamiltonian`, which stores
+it after `set_hamiltonian_mpo`'s reset, so the solver's scale and the
+MPO's are one reading of the merged AutoMPO by construction. Until the
+2026-09-25b pass `hscale_up_` was read from the raw term list Python sends
+(`max_abs_coef`, since removed), which `MultiOperator.to_terms()` does not
+collect, so a list whose duplicate terms cancel, $sH+S^z_0-S^z_0$, built an
+exact MPO at unit scale and ran `dmrg()` unscaled: $E_0/s$ 0.09 to 0.53 off
+at $s=10^{-10}$ on a 6-site Heisenberg chain, now $5\times10^{-15}$
+(2026-09-25b record, finding 28). A power of two makes the
 scaling and the scale-back exact, since ITensor's MPO `operator*=(Real)`
 multiplies the stored elements of one tensor. The gate is a largest
 coefficient of 1: at or above it `unit_scale_up()` returns 1.0 and the term
 MPO and the solver run the unscaled code, byte for byte, while below it
-(every $J=0.5$ model, and the XX chain at $J=1$, whose coefficients are 0.5
-once v3 realifies it) the answers move only within the run-to-run noise of
-the random start. `set_hamiltonian_mpo` resets `hscale_up_` to 1, since an
-already-built MPO carries no scale the session can read. The scale is one
+every $J=0.5$ model moves only within the run-to-run noise of the random
+start. The coefficient is read after AutoMPO's merge and, on v3, after it
+realifies the terms, so the XX chain at $J=1$, raw 1 and realified 0.5, has
+been built at scale 2 since the 2026-09-25 fixes and, since the 2026-09-25b
+pass, also solves at 2, which ends the byte-for-byte claim for that solver
+path: a 20-site chain at `maxm=10` moved from a mean of $-6.190466081518$
+to $-6.190466063581$ over five runs, inside the run-to-run noise.
+`set_hamiltonian_mpo` resets `hscale_up_` to 1, since an
+already-built MPO carries no scale the session can read. With `verbose`
+on, `Chain::announce_solver_scale()` prints one line before each solve
+`solver_hamiltonian()` or `maximum_energy` scales, saying that the energies
+logged below are $2^k$ times those of the operator being solved; they
+were logged unannounced until the 2026-09-25b pass, $2^{27}$ times the
+returned energy at $s=10^{-8}$ (2026-09-25b record, finding 29). The
+scale is one
 number per operator while `truncate()` runs bond by bond, so a bond whose
 strongest crossing term is far below the largest coefficient still meets
 the absolute cutoff: an $O(1)$ offset or field next to exchange at
@@ -2890,6 +2980,39 @@ its exchange at any units, and `"python"` drops such a bond altogether
 through the relative return-sweep cutoff of `pyitensor/mpobuilder.py`; a
 per-bond cutoff is the cure, recorded as open with strict xfails in
 `tests/test_audit_2026_09_25_scale.py` (2026-09-25 record, small-units).
+
+**The eigensolvers that do not go through `solver_hamiltonian()`** got
+the same treatment in the 2026-09-25b pass (whose record the finding
+numbers below refer to), each where its absolute thresholds live. NH-DMRG is scaled at its Python entry, not inside
+`Chain::nhdmrg`/`nhdmrg_generalized`: `nhdmrg.py::nhdmrg` and
+`nhdmrg_generalized` hand every session backend (v2, v3, `"python"`)
+$2^kH$ and its adjoint, $2^k$ the factor `unit_scale_up()` takes from the
+largest raw coefficient (exactly 1, i.e. the unscaled call, at 1 or more),
+carry a caller's `lam0` into the same units, leave the metric $A$
+untouched, and divide the energy or $\lambda$ back exactly; the session
+keeps nothing of the scaled operator, and NH-KPM reads the divided-back
+`e0` and builds its own operators from `self.hamiltonian`. The tie window
+of the right solve's Ritz selection (`arnoldi_select_kbest` on v3, its
+inline copy in v2's `arnoldi_smallest_real`, `_select_ritz` on
+`"python"`) is $10^{-6}$ of the Ritz values' real-part spread plus a
+$100\epsilon\max|\theta|$ roundoff floor, compared with `<=` so a lone
+value stays a candidate, rather than $10^{-6}(1+|\mathrm{Re}\,\theta_{\min}|)$,
+which a small unit or a constant offset made meaningless; it is about three
+times wider at unit scale, which moved nothing measured. The certificate
+in `nhdmrg.py` divides the worse residual by $c+|E-e_{\rm id}|$, $e_{\rm
+id}$ the summed coefficient of H's identity terms and
+$c=\min(1,\text{largest other coefficient})$ (`_residual_scale`), in place
+of $1+|E|$, which it equals for any H with no identity term and a largest
+coefficient of 1 or more, and forms both residuals at the solve's unit
+scale (findings 25 to 27). `arnoldi_smallest_real` itself, which v3's
+iDMRG and `local_excitation_gap` also call, now stops relative to
+$\min(1,\lVert A\rVert)$, $\lVert A\rVert$ the largest $\lVert Av\rVert$
+over the vectors it has applied $A$ to: the breakdown at
+$10^{-13}\min(1,\lVert A\rVert)$ and both residual tests at
+$10^{-10}(\min(1,\lVert A\rVert)+|\lambda|)$, the old tests exactly at a
+norm of 1 or more. v3's iDMRG energy density of TFIM at $s=10^{-14}$ had
+the wrong sign before and is $4.8\times10^{-12}$ off now, as at $s=1$
+(finding 27).
 
 **The ground-state sweep schedule is ramped, not flat**
 (`Chain::make_sweeps_ramped()` in both `chain_session.h`s,
@@ -3286,6 +3409,21 @@ Heisenberg chain in units of $3\times10^{-7}$ 89 to 95 per cent wrong
 sweep the truncation sees true operator-Schmidt values, and the final bond
 dimension is unchanged.
 
+The build runs at unit scale since the 2026-09-25b pass: an operator whose
+largest coefficient is below 1 is built at the power of two that brings it
+into $[1,2)$ and one tensor is scaled back (`_unit_scale_up`, the rule of
+v2/v3's `to_mpo_unit()`), and at 1 or more the unscaled path runs byte for
+byte. The machine's identity channel carries $O(1)$ entries whatever the
+coefficients, so the roundoff the two sweeps leave there is an absolute
+error, about $10^{-16}/s$ relative for an operator at scale $s$, and whether
+it comes out as exact zero depends on the BLAS: on numpy with OpenBLAS a
+Heisenberg chain written at $s=10^{-7}$ came out $1.1\times10^{-9}$ off
+relative to itself and at $s=2^{-40}$ $2.5\times10^{-4}$ off, and
+$\lVert(sH)|u\rangle\rVert/s$ for a fixed random MPS read 1.432 at
+$s=10^{-16}$ against 0.897242774928 at $s=1$, while MKL rounded those
+entries to zero and hid it. Both are at roundoff at every scale now
+(2026-09-25b record, finding 30).
+
 Two rules in there are load-bearing. A term's **coefficient goes on its
 transition into F**, never earlier, so terms differing only by a
 coefficient still share every partial state. And transitions into F
@@ -3506,6 +3644,20 @@ faster than pyitensor here — NH-DMRG's per-bond cost already pays for
 narrowing the compiled-vs-pure-Python gap relative to plain ground-state
 DMRG's single local diagonalization per bond.
 
+What the chain stores after either generalized solve is decided above
+the backends, in `groundstate.gs_energy_generalized` and
+`nhdmrg.gs_energy_generalized_nhdmrg`, and is the same on every backend:
+`wf0` is the generalized state and `e0` its own energy, through
+`groundstate._state_energy()`, the quotient
+$\langle\psi|H|\psi\rangle/\langle\psi|\psi\rangle$ a set state also gets,
+or the biorthogonal $\langle\psi_L|H|\psi_R\rangle/\langle\psi_L|\psi_R\rangle$
+on the non-Hermitian route; $\lambda$ is the return value and is kept as
+`lam_generalized`. No reader changed: KPM, CVM, ROOTN, TDZ, NH-KPM and
+`julia_live`'s TD route measure from `e0`, and TD and EX already measured
+from the state's own energy. Until the 2026-09-25b pass `e0` was
+$\lambda$, so those two groups of submodes put the same state's lines
+$\lambda-E_{w_g}$ apart (2026-09-25b record, finding 8).
+
 **Conserved-sector mode (`pyitensor/sector.py`).** The pure-Python
 backend implements the same `set_conserved_sector`/`promote_to_dense`
 surface as `mpscpp3` (§4.4), reached by the identical
@@ -3615,6 +3767,35 @@ site that used to rely on that now goes through
 `juliasession.to_julia_strvec()`, which forces the conversion explicitly
 via `juliacall.convert`.
 
+**Start state and noise.** Every `julia_live` DMRG-family solve that has
+no state of its own starts from `mpsalgebra.jl::dmrg_start_state`,
+`random_mps(sites; linkdims=k)` with `k = min(maxm, bond_ramp_start)` (10
+by default; `mpsjulialive/mps.py::start_linkdims`/`start_mps`, built on
+`self.jlsites` rather than through the chain's `random_state()`): the
+fresh branch of `groundstate.py`'s Hermitian and non-Hermitian
+`gs_energy`, `generalized.py`, `nhdmrg.py::julia_random_mps` (so
+`nhdmrg()` and the non-Hermitian generalized solve) and each state of
+`excited.jl::excited_states_dmrg`. `get_gs.jl::make_sweeps(...; noise,
+taper=true)` puts `sc.noise` on sweeps 1 to `div(nsweeps,2)` only, as v2,
+v3 and `"python"` do, and `get_gs_dmrg` and `excited_states_dmrg` receive
+`self.noise`; `get_gs_generalized` applies the noise it is given on outer
+iterations 1 to nsweeps/2 (`taper=false` on its one-sweep schedules, as
+v3's `Chain::gs_energy_generalized`). The non-Hermitian solves stay
+noise-free on purpose (see the ITensorNHDMRG discussion below), so for
+them the start is what matters. `random_state`/`mps.random_mps` stay
+product states for their other consumers. Until the 2026-09-25b pass
+every solve started from `random_mps(sites)`, a bond-dimension-1 product
+state, and the Hermitian ones got no noise, so a Hamiltonian that couples
+two sites across a site carrying no term had nothing to entangle the pair
+through and stopped at a classical product state with no warning: $-0.5$
+against $-1.0$ on the Heisenberg chain on the even sites of 6, $-1.5$
+against $-3.232051$ on an 8-site next-nearest-neighbour chain, and
+$\langle H\rangle=-0.5$ against $-1.0$ for `Thermal_Spin_Chain` at $T=0$,
+whose physical Hamiltonian lives on the even sites of the doubled chain
+(2026-09-25b record, finding 7). Every solve now carries run-to-run noise
+from its random start, and a warm 16-site solve went from 1.5 s to 2.1 to
+2.35 s, a cost not isolated further.
+
 The KPM dynamical correlator's Chebyshev-moment recursion runs natively
 in Julia (`mpsjulialive/kpm.jl`'s `kpm_moments_full`/
 `kpm_moments_accelerated`, driven through `kpm.jl`'s own `apply_op`/
@@ -3631,6 +3812,27 @@ v3 backend (v3: 23.4s, Julia native loop warm: 34.0s, vs. 37.7s for the
 earlier per-step Python loop) — most of the remaining time is genuine
 Julia-side tensor-contraction/truncation cost (`alg="densitymatrix"`
 SVD-based `add`/`contract`), not Python↔Julia marshaling overhead.
+
+**The KPM window's lower edge** is `e0` only when `e0` is a solve's lower
+band edge of $H$. `groundstate.mark_lower_edge()` says so; only a plain
+Hermitian solve in `_gs_energy_julia()` sets it, and the mark holds the
+state and energy it was made for, so every other writer of `e0` or `wf0`
+(`gs_energy_generalized()` on every route, the setters, a take of an
+injected state, `restart()`) retires it without a line of its own, the way
+`mark_injected()`'s mark works. `mpsjulialive/dynamics.py` reads
+`emin = e0 if e0_is_lower_edge(self) else _min_energy(self,H)`, and the
+origin of the lines stays `e0`. The two band-edge helpers there,
+`_min_energy()` and `_max_energy_bound()`, put back the solver key and this
+mark in their `finally` (`groundstate.solve_marks()`/
+`restore_solve_marks()`), since their solves run at a clamped
+`maxm`/`nsweeps` and would otherwise leave the restored state looking
+stale. The session backends need no mark: their window is
+`minimum_energy()`, which solves whenever the state carries no energy of
+its own. Until the 2026-09-25b pass the window took `e0` whatever had
+written it, so after `gs_energy_generalized()` with $\lambda$ above $E_0$
+($A=2\,\mathrm{Id}$, $A=1.5+0.4S^z_0$) the moments diverged and the call
+raised, and with $\lambda$ below $E_0$ the window was too wide
+(2026-09-25b record, finding 10).
 
 **Follow-up optimization**: `kpm_moments_full`/`kpm_moments_accelerated`
 originally called `mpsalgebra.jl`'s `applyoperator()` once per Chebyshev
@@ -3702,17 +3904,28 @@ agreed to ~9e-11 on a 6-site chain.
 Excited states (`get_excited_states`/`get_excited`, `n>1`, Hermitian) and
 the single-site reduced density matrix (`get_rdm`) are implemented the
 same way: `mpsjulialive/excited.jl`'s `excited_states_dmrg` runs the
-whole *n*-state loop in one Julia call (one new random-start warm state
-per additional excited state, deflated against every wavefunction found
+whole *n*-state loop in one Julia call (one new warm state per additional
+excited state, a random MPS of link dimension `min(maxm, bond_ramp_start)`
+swept with `sc.noise` on its first half since the 2026-09-25b pass, see
+"Start state and noise" above, deflated against every wavefunction found
 so far via `ITensorMPS.jl`'s own orthogonality-penalty
 `dmrg(H, wfs, psi0, sweeps; weight)`, mirroring
 `mpscpp3/chain_session.h`'s `Chain::excited_states` and
 `pyitensor/chain.py`'s `excited_states`); `mpsjulialive/densitymatrix.jl`'s
 `reduced_dm` is a direct Julia port of `pyitensor/chain.py`'s
-`reduced_dm` (itself a port of `Chain::reduced_dm`), including its
-"divide by the norm squared, not its square root" quirk, preserved for
-cross-backend consistency (in practice a no-op, since the ground state
-is essentially always already unit-norm). Validated directly: excited
+`reduced_dm` (itself a port of `Chain::reduced_dm`). All four divide the
+state by its norm, $\sqrt{\langle\psi|\psi\rangle}$, since the 2026-09-25b
+pass; before, all four divided by $\langle\psi|\psi\rangle$, a quirk kept
+for cross-backend consistency on the grounds that it was a no-op for a
+unit-norm state, which a state set by hand need not be: $c\,s$ gave
+$\rho/c^2$, trace 0.25 at $c=2$ (2026-09-25b record, finding 11).
+`densitymatrix.py::reduced_dm`
+also scales the state by $1/\sqrt{\mathrm{Re}\langle\psi|\psi\rangle}$
+before it dispatches (skipped within $10^{-14}$ of 1, so a solved state is
+handed over byte-identical), which makes `get_rdm` the matrix of the ray
+whatever a backend's formula does, and `densitymatrix.jl` takes the
+last-site guard `pyitensor/chain.py` got for 2026-08 finding 16, line for
+line, where `get_rdm(i=ns-1)` raised `BoundsError` (finding 12). Validated directly: excited
 energies match the golden regression values in
 `tests/test_excited_states.py` to ~3e-15 on a 4-site chain, and
 `get_rdm` matches the existing backend-agnostic `reduced_dm_projective`
@@ -3738,6 +3951,15 @@ entanglement), and on a 6-site chain the bond entropy at the first bond
 exactly matches the existing generic `get_site_entropy` (which computes
 the same quantity a completely different way, through
 `reduced_dm_projective`).
+
+Both are MPS-only quantities, and a request for them under an ED mode
+raises `NotImplementedError` on `julia_live` as on the other backends
+since the 2026-09-25b pass: `densitymatrix.py::reduced_dm` used to exempt
+`julia_live` from its ED guard, and `entropy.py::compute_entropy_single`
+took its `julia_live` branch before the `resolve_mode` ED check, so
+`get_rdm(mode="ED")` answered by DMRG and, with `sc.mode="ED"`, both calls
+raised `AttributeError` (the record's lead
+`session-julia-ed-guard-carveout-rdm-bond-entropy`).
 
 The CVM dynamical-correlator submode (`get_dynamical_correlator(...,
 submode="CVM")`, `cvm.py`) needed almost no Julia-specific code at all:
@@ -3996,7 +4218,8 @@ vs.\ `False` gives identical wall-clock on the dominant part).
 
 `four_correlation_tensor_sweep()` originally renormalized its internal
 copy of `wf` before the fast-sweep computation (`psi /=
-innerC(psi,psi).real()`, mirroring `reduced_dm()`'s own convention), but
+innerC(psi,psi).real()`, mirroring `reduced_dm()`'s convention of the
+time, which the 2026-09-25b pass replaced by a division by the norm), but
 the repeated-index fallback loop calls `innerC(wf,...)` on the raw,
 un-renormalized `wf` — a real bug, caught by code review, not by any of
 the (unit-norm-only) validation above: for any non-unit-norm input MPS
@@ -4328,10 +4551,14 @@ One more finding was fixed as a cleanup rather than a correctness bug:
 on shared `make_sweeps`/`run_quiet` helpers in `get_gs.jl`.
 
 A seventh candidate (`densitymatrix.jl`/`entropy.jl` lacking a bounds
-check when `site`/`b` is the chain's last site) was investigated and
-found to be a pre-existing, deliberately-preserved limitation shared
-identically by `pyitensor/chain.py` and `mpscpp3/chain_session.h` (see
-`reduced_dm`'s own docstring above) — not a new risk, so left as-is.
+check when `site`/`b` is the chain's last site) was recorded here at the
+time as a pre-existing, deliberately-preserved limitation shared
+identically by `pyitensor/chain.py` and `mpscpp3/chain_session.h`, and
+left as-is. That was false on both counts: `pyitensor` had been guarded
+since 2026-08 finding 16, and v2 and v3 return the last-site matrix to
+$10^{-11}$, so only `julia_live` had it, `get_rdm(i=ns-1)` raising
+`BoundsError`. `densitymatrix.jl::reduced_dm` has taken `pyitensor`'s
+guard since the 2026-09-25b pass (2026-09-25b record, finding 12).
 
 (A separate, older subprocess-based Julia path, `itensor_version="julia"`
 via `juliarun.py`, is not reachable through the normal public API and
@@ -4502,11 +4729,14 @@ asymmetric hopping + staggered imaginary potential):
    so the normal path costs one extra `inner()`.
 
 One deliberate backend difference is documented rather than forced:
-`get_gs_generalized` forwards `self.noise` (DMRG's density-matrix noise
-term, default 1e-1) into its `Sweeps` exactly as the session backends do
-through `set_sweep_params`, since without it this backend would silently
-run a noise-free variant of an algorithm whose whole point is escaping
-local minima. The ITensorNHDMRG-backed paths deliberately do **not**:
+`get_gs_generalized` applies `self.noise` (DMRG's density-matrix noise
+term, default 1e-1) on the first half of its outer iterations, as v3's
+`Chain::gs_energy_generalized` does, since without it this backend would
+silently run a noise-free variant of an algorithm whose whole point is
+escaping local minima. This paragraph said so before it was true: until
+the 2026-09-25b pass the function took `noise=` and built its sweeps
+with `make_sweeps(1, maxm, cutoff)`, without it (2026-09-25b record,
+finding 7, and "Start state and noise" above). The ITensorNHDMRG-backed paths deliberately do **not**:
 noise is defined against a Hermitian density matrix, and the "fidelity"
 algorithm's biorthogonal `rho=(rho_l+rho_r)/2` isometry is not that.
 Feeding a noisy `Sweeps` through it was tried and measurably broke
@@ -5415,13 +5645,41 @@ as a class, because new code can reintroduce any of them.
   circuit ahead of `wf0=` after `867e2b4` fixed `gs_energy()`'s, so a solved
   chain ignored `get_gs(wf0=x)`; both now test the same condition, and a
   keyword that should bypass one must bypass the other (2026-09-25,
-  get-gs-wf0). `julia_live`, which has no session, marks an injected state
+  get-gs-wf0). That condition, `groundstate.stored_answer_holds(self,
+  kwargs)`, is itself the short circuit inverted since the 2026-09-25b
+  pass: the stored answer comes back only for a call it already answers,
+  a current state with no `wf0=` and, on the session backends, nothing
+  but `reconverge=False`/`None`, `maxde=None` and `maxdepth=` (on
+  `julia_live`, nothing at all), and every other call goes to the solver,
+  which reads the keyword or raises on it under its own signature exactly
+  as on a chain that is not current; `get_excited(n=1)` follows. Written
+  the other way round, "current and no `wf0=`", it returned before any
+  other keyword was read, so a misspelled `wf=x` or `reconverg=False` was
+  swallowed on a solved chain and raised on a fresh one, `maxde=` came back
+  unrefined ($-4.1431954920$ against $-4.2580352072$ on a 10-site chain at
+  `maxm=3`), `reconverge=True` did not sweep, and on a non-Hermitian chain
+  `gs_energy(H=H2)` answered with the stored energy of H (2026-09-25b
+  record, finding 5). `reconverge=False` and `maxdepth=` alone stay on the
+  stored answer on purpose: for a state taken as it was set the session has
+  no energy of its own, so its `gs_energy(skip_dmrg=True)` would sweep it.
+  `julia_live`, which has no session, marks an injected state
   the same way and takes it in `groundstate._gs_energy_julia()`, whose
   `get_gs_dmrg()` always solves and clears the stale Link prime level of a
-  supplied start; it still records no solver key, so on that backend a
-  `maxm` ramp on one chain returns the first energy every time (-3.194321
-  at `maxm` = 2, 4 and 16 on an 8-site Heisenberg chain, against
-  `"python"`'s -3.186822, -3.371801, -3.374933), recorded as open. The two
+  supplied start; it records a solver key since the 2026-09-25b pass, where
+  a `maxm` ramp on one chain used to return the first energy every time
+  (-3.194321 at `maxm` = 2, 4 and 16 on an 8-site Heisenberg chain, against
+  `"python"`'s -3.186822, -3.371801, -3.374933). Every injected state is
+  normalized once, where it becomes the chain's, by
+  `groundstate.unit_copy()`: `mark_injected()` stores the unit-norm copy,
+  and so do the `wf0=` copies of `gs_energy_single()` and
+  `_gs_energy_julia()` and `_take_injected_state()`, and a norm of zero or
+  not finite raises `ValueError`. Normalizing at injection rather than in
+  each reader is the point: `e0`, the session's `vev()` and the fluctuation
+  divided by $\langle x|x\rangle$ while KPM, CVM, TD, TDZ, ROOTN,
+  `evolve_and_measure()` and, on ED and `julia_live`, `vev()` did not, so
+  one state was read at two normalizations (2026-09-25b record, finding
+  1). The explicit `wf=` of `evolve_and_measure`/`evolution_ABA` is left as
+  given. The two
   non-Hermitian entry points, `nhdmrg.gs_energy_nhdmrg()` and
   `gs_energy_generalized_nhdmrg()`, record H as sent
   (`_record_hamiltonian_sent()`), as the Hermitian `gs_energy_generalized()`
@@ -5623,6 +5881,54 @@ four are patterns this list did not have.
   truncated at `maxm`, the error of a small difference of two large numbers
   set by an unrelated parameter (finding 7); it subtracts
   $\langle H\rangle$ first now.
+
+**The 2026-09-25b hunt** (`docs/audit_2026_09_25b_hole_hunt.md`, 29
+findings over `e7b1196` and one found during its fix pass) found mostly
+fresh instances of patterns listed above, next to sites where those
+patterns had already been guarded, which is the lesson the 2026-09
+entries already drew.
+
+- **A tolerance with units, seventeen more times.** The relative term
+  cutoff of `e7b1196` let an operator or a Hamiltonian written in small
+  units reach code that had never seen one, and seventeen findings are a
+  quantity in absolute energy units further down that then decides
+  something: CVM's `cvm_tol` and its two early exits, the $A^\dagger=B$
+  gate of `CVM_explicit`, the non-Hermitian CVM/INV and the variational
+  CVM solver (removed where it could only refuse a correct answer, and
+  decided by `canonical.is_dagger_pair` first and a relative
+  `is_zero_operator` second where it picks the solver), the ED deflated
+  eigensolver's windows (§4.3), ROOTN's Lanczos breakdown, the thermal
+  anneal's step and early return, NH-DMRG's tie window and certificate,
+  VUMPS's residual reference, v3's Arnoldi stops, the KPM same-vector
+  test and the C++ solver scale read off the raw term list (§4.4). Each now
+  judges a quantity read from the operator it is about, or runs the solve
+  at unit scale, and several of the new scales are capped at one
+  ($\min(1,u)$, $\min(1,\lVert A\rVert)$) so that the test is the old one,
+  byte for byte, at ordinary units.
+- **A dispatch reading the wrong party's information.** `resolve_mode`
+  let a chain's `mode="DMRG"` override a call's `mode="ED"`, although the
+  call cannot tell an explicit `"DMRG"` from its own default (§4.3,
+  finding 3).
+- **A short circuit ahead of the keywords, and a route with no keyword
+  consumer.** `stored_answer_holds` inverts the first (above, finding 5).
+  On every route that resolves to ED, `gs_energy()` passed none of its
+  keywords on, so `gs_energy(wf0=x, reconverge=False)` left the ED ground
+  state on the chain and a misspelled keyword was swallowed (finding 2);
+  `gs_energy()` and `get_gs()` now read them through one helper,
+  `groundstate.ed_ground_state()`, and `Fermionic_Chain.gs_energy()`'s own
+  ED branch, a third entry point that dropped them the same way, delegates
+  to the base class.
+- **A precondition tested where the missing thing is first touched.** A
+  chain with no Hamiltonian failed with an error naming whatever first
+  touched the `None` (`'NoneType' object has no attribute 'get_dagger'`).
+  `groundstate.require_hamiltonian()` raises the `ValueError` of
+  `get_hamiltonian()` instead, from `Many_Body_Chain.is_hermitian`, which
+  every DMRG reader probes first, and from `Many_Body_Chain._ed_reader()`,
+  through which the ED readers take the ED object (finding 6).
+- **A value with two meanings.** `e0` after `gs_energy_generalized()` was
+  $\lambda$ to some readers and the state's energy to others (§4.5,
+  finding 8), and on `julia_live` also the KPM window's lower edge, which
+  the `mark_lower_edge()` mark now decides (§4.6, finding 10).
 
 ## 5. Backend performance: v3 vs the pure-Python backend
 

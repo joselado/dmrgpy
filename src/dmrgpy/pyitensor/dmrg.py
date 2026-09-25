@@ -115,7 +115,8 @@ def _block_reorthogonalize_impl(Q, w):
 _block_reorthogonalize = bk.jit(_block_reorthogonalize_impl)
 
 
-def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12, residual_tol=None):
+def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12, residual_tol=None,
+                          scale=None):
     """Lowest eigenpair of a Hermitian linear operator (given as a matvec
     function) via Lanczos with full reorthogonalization, stopping early
     once the lowest Ritz value stabilizes to `tol` (relative). See this
@@ -151,7 +152,26 @@ def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12, residual_tol=None):
     breakdown test, which declares the Krylov space invariant).
 
     Callers that pass nothing are byte-identical to before this parameter
-    existed."""
+    existed.
+
+    `scale`, when given together with `residual_tol`, is the operator's
+    own unit (the VUMPS drivers pass `vumps._hamiltonian_unit`): the
+    residual test becomes ||(H-lambda)v|| <= residual_tol*min(scale,
+    max(1,|lambda|)) and the breakdown beta <= tol*min(1,scale).
+    max(1,|lambda|) alone is neither free of the units nor of an energy
+    offset, and VUMPS's gauge mismatch floors at about
+    2.7*residual_tol*max(1,|lambda_AC|)/gap: above the requested tol on a
+    D=8 transverse-field Ising cell at s*H from s=1e-2 down (7.2e-10 at
+    1e-2, 1.1e-7 at 1e-4) and at s=1 with an onsite constant of 100
+    (3.0e-9), all converged=False (2026-09-25b audit, finding 24). Capping
+    it by the unit cures both (an offset can only push |lambda| up, and the
+    cap is offset-free) while leaving the old test exactly as it was
+    whenever max(1,|lambda|) <= unit, i.e. for every ordinary Hamiltonian
+    at unit scale or above; the unit alone is too loose above 1 (on the v3
+    twin it made the critical -4 SxSx - 2 Sz chain at D=8 miss tol). The
+    breakdown moves with it, since an absolute 1e-12 would otherwise be
+    the test that binds at small scale. `scale=None` is byte-identical to
+    before, which is what every non-VUMPS caller passes."""
     # The Krylov vectors stay wherever v0 lives (on the device, for a
     # device backend). Only the tridiagonal coefficients alpha/beta come
     # back to the host -- two numbers per iteration, against O(chi^2 d^2)
@@ -183,10 +203,18 @@ def _lanczos_ground_state(matvec, v0, niter=30, tol=1e-12, residual_tol=None):
             # iteration lives, and why this check sits before the loop
             # body rather than at the end of it.
             val, svec = _tridiag_ground_ritz(alphas, betas)
-            if beta * abs(float(svec[-1])) < residual_tol * max(1.0, abs(val)):
+            resid = beta * abs(float(svec[-1]))
+            if scale is not None:
+                done = not (resid > residual_tol * min(scale, max(1.0, abs(val))))
+            else:
+                done = resid < residual_tol * max(1.0, abs(val))
+            if done:
                 Q = _xp.column_stack(qs)
                 return val, Q @ bk.asarray(svec)
-        if beta < tol:
+        if residual_tol is not None and scale is not None:
+            if not beta > tol * min(1.0, scale):
+                break
+        elif beta < tol:
             break
         betas.append(beta)
         q_new = w / beta

@@ -65,13 +65,33 @@ def _select_ritz(evals, sel, target):
     global-min-then-candidates formulation is the reference semantics all
     three backends implement (the C++ ports mirror it exactly), so the
     backends cannot silently target different members of a degenerate
-    Ritz cluster."""
+    Ritz cluster.
+
+    The tie window is measured against the Ritz spectrum's own spread,
+    1e-6*(max Re - min Re), plus a roundoff floor of 100 eps times the
+    largest |Ritz value| (the two members of a genuinely Re-degenerate
+    pair are split by at least that much), and compared with <=, so a
+    lone Ritz value or an all-equal set is its own candidate. It used to
+    be 1e-6*(1+|remin|): absolute at small |E|, so for s*H it was
+    1e-6/s wide in units of H, and growing with |E|, so a constant
+    offset c widened it to 1e-6*c. Once that exceeded the real-part gap
+    the sweep followed the previous bond onto an excited eigenpair, a
+    converged one that no residual certificate can reject: 0.482 off ED
+    at s=1e-6 and at c=5e5 on a 6-site Heisenberg + 0.3j*Sz0 chain,
+    1.06 at s=1e-7 (2026-09-25b audit, finding 25). The spread is
+    shift-invariant and scale-covariant, so neither trigger remains.
+    What it does not buy is headroom at large L: the spread grows like
+    the local bandwidth, ~L*J, so a gapless chain whose gap is ~J/L
+    still meets the window once L^2 is of order 1e6, the same regime
+    where the old form failed through |E0| ~ L*J."""
     if sel == "closest":
         return int(np.argmin(np.abs(evals - target)))
     if sel == "SRTieBreak":
-        remin = evals.real.min()
-        degtol = 1e-6 * (1.0 + abs(remin))
-        cand = np.flatnonzero(evals.real < remin + degtol)
+        re = evals.real
+        remin = re.min()
+        degtol = (1e-6 * (re.max() - remin)
+                  + 100.0 * np.finfo(float).eps * np.max(np.abs(evals)))
+        cand = np.flatnonzero(re <= remin + degtol)
         return int(cand[np.argmin(np.abs(evals[cand] - target))])
     return int(np.argmin(evals.real))
 
