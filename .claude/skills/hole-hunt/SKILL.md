@@ -9,8 +9,10 @@ A hole hunt is a parallel, multi-lens search for behaviour in the dmrgpy Python
 layer that is *silently* wrong: a number that is plausible and incorrect, a
 dispatch that answers a question nobody asked, a kwarg with no consumer. The
 previous hunts are `docs/audit_2026_08_hole_hunt.md` (five lenses, 21 findings),
-`docs/audit_2026_09_hole_hunt.md` (eight lenses, 36 findings) and
-`docs/audit_2026_09_24_hole_hunt.md` (five lenses, 16 findings). Read the
+`docs/audit_2026_09_hole_hunt.md` (eight lenses, 36 findings),
+`docs/audit_2026_09_24_hole_hunt.md` (five lenses, 16 findings),
+`docs/audit_2026_09_24b_hole_hunt.md` (five lenses, 18 findings) and
+`docs/audit_2026_09_24c_hole_hunt.md` (four lenses, 18 findings). Read the
 scope section and the lens table of the most recent one before starting: a
 finding already recorded there is not a new finding.
 
@@ -61,6 +63,18 @@ parallel. Previous sets, to vary rather than repeat:
   eight of them introduced by the single commit that closed the previous
   hunt's open items; a hunt right after a fix pass is worth running for that
   reason alone.
+- 2026-09-24b (`docs/audit_2026_09_24b_hole_hunt.md`, scoped to the one fix
+  commit `30200a4`): one lens per fix cluster, `operators`, `kpm`, `realtime`,
+  `kondo`, `pyitensor`; 18 findings, twelve of them older than the commit and
+  reached by probing next to it.
+- 2026-09-24c (`docs/audit_2026_09_24c_hole_hunt.md`, scoped to the one fix
+  commit `867e2b4`): again one lens per fix cluster, `groundstate`, `kpm`,
+  `realtime`, `misc`; 18 findings, six of them from the commit itself. Two things
+  it taught. The brief listing what is already recorded has to carry every
+  earlier record's "New leads", not only the last one's: its one refutation was
+  a lead two records back that the brief left out. And a candidate turned up by
+  a reviewer of a reviewer-found candidate needs its own reviewer too; a
+  workflow that stops one level down leaves it as a lead.
 
 Out of scope by construction, and stated in the record so the exclusion is on
 the page rather than in someone's head: vendored ITensor (`mpscpp2/ITensor/`,
