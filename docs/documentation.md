@@ -5193,14 +5193,25 @@ it to win there.
 callers pass 50, matching the compiled backend's `MaxIter`) and
 exponentiates the projected tridiagonal matrix. `niter` is an upper
 *bound*, not the iteration count: the recursion stops as soon as Saad's a
-posteriori residual estimate `‖v‖·β_k·|e_k^T exp(coeff·T_k) e_1|` falls
-below 1e-10 — the same convergence target ITensor's own `applyExp()`
-(`iterativesolvers.h`) uses via its Expokit-style extended-T-matrix
-correction. The first column of `exp(coeff·T_k)` is needed to assemble the
-result anyway, so the test costs one extra `eigh_tridiagonal` of a k×k
-matrix per iteration against an O(D³) MPS-level matvec. Typical
-convergence is under ten iterations, so running the full 50 unconditionally
-was the single largest cost in the pure-Python `submode="TD"` path.
+posteriori error estimate `|coeff|·β_k·|e_k^T exp(coeff·T_k) e_1|`, which
+is relative to `‖v‖` and dimensionless, falls below 1e-10, the same number
+ITensor's own `applyExp()` (`iterativesolvers.h`) uses as its goal. The
+first column of `exp(coeff·T_k)` is needed to assemble the result anyway,
+so the test costs one extra `eigh_tridiagonal` of a k×k matrix per
+iteration against an O(D³) MPS-level matvec. Typical convergence is under
+ten iterations, so running the full 50 unconditionally was the single
+largest cost in the pure-Python `submode="TD"` path. Until 2026-09-26 the
+estimate read `‖v‖·β_k·|…|`, with no time factor and absolute in the
+vector, so it carried the units of H and the norm of the state; the
+Lanczos-exhaustion test (`β_k ≤ tol` times the largest α or β so far) is
+relative for the same reason. A step the budget cannot take is split
+rather than returned unconverged: the largest dyadic fraction of it that
+converges on the basis already built is taken with that basis, and the
+rest follows as further sub-steps. The host loop and the device path
+(below) share one stopping test, `_krylov_verdict`, and the sub-stepping
+lives above both, so they still pick the same Krylov dimension and the
+same sub-steps. v3's `applyExp` is vendored ITensor and keeps its absolute
+goal.
 
 **Truncation via the smaller Gram matrix (`pyitensor/svd.py`).** Every
 truncation in the pure-Python engine is "reshape across an index partition,

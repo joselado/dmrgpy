@@ -81,12 +81,23 @@ from .svd import qr_split, svd
 from .tensor import ITensor
 
 
-# Convergence target for the Krylov exponentiation below, matching the
-# compiled backend's own hard-wired value: ITensor's applyExp()
-# (iterativesolvers.h) defaults its "ErrGoal" to 1e-10, and
-# mpscpp3/chain_session.h's tdvp_step() never overrides it. Not exposed as
-# a knob for the same reason `niter` isn't on that side.
+# Convergence target for the Krylov exponentiation below, the same number
+# as the compiled backend's hard-wired value (ITensor's applyExp(),
+# iterativesolvers.h, defaults its "ErrGoal" to 1e-10 and
+# mpscpp3/chain_session.h's tdvp_step() never overrides it). It is compared
+# with a *relative, dimensionless* error estimate, see
+# _lanczos_expm_multiply's docstring, so it means the same thing whatever
+# the Hamiltonian's units and whatever the norm of the vector evolved. Not
+# exposed as a knob for the same reason `niter` isn't on that side.
 _KRYLOV_ERRGOAL = 1e-10
+
+# How many sub-steps one call may split its time step into once the
+# Krylov budget `niter` runs out before the error estimate converges (see
+# _lanczos_expm_multiply). Each sub-step costs at most `niter` matvecs, so
+# this bound is only reached by a step that is wildly too long for the
+# budget, and then raising says so instead of spending 10^4 matvecs on
+# one local update.
+_KRYLOV_MAX_SUBSTEPS = 1000
 
 
 def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
@@ -104,23 +115,56 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
 
     `niter` is an upper *bound*, not the iteration count: the recursion
     stops as soon as the Krylov approximation has converged, measured by
-    Saad's a posteriori residual estimate (Y. Saad, SIAM J. Numer. Anal.
-    29, 209 (1992), Sec. 5.1)
+    Saad's a posteriori error estimate (Y. Saad, SIAM J. Numer. Anal. 29,
+    209 (1992), Sec. 5.1; the "er1" form, which Expokit also uses)
 
-        err_k ~ ||v0|| * beta_k * |e_k^T exp(coeff T_k) e_1|,
+        err_k / ||v0|| ~ |coeff| * beta_k * |e_k^T exp(coeff T_k) e_1|,
 
     i.e. the size of the coupling from the last basis vector actually kept
-    into the one the recursion would build next -- the same quantity the
-    compiled backend's applyExp() (ITensor's iterativesolvers.h) tests via
-    its Expokit-style extended-T-matrix correction. `c` (the first column of
-    exp(coeff*T_k)) is needed to assemble the result anyway, so this test
-    costs one extra eigh_tridiagonal of the k x k projected matrix per
-    iteration -- O(k^2), against an O(D^3) MPS-level matvec -- and nothing
-    else. Without it this function ran the full `niter` matvecs on *every*
-    local update of *every* bond of *every* TDVP step, whether or not the
-    subspace had converged 40 iterations earlier: with the callers' niter=50,
-    a submode="TD" dynamical correlator on an L=30 Heisenberg chain spent
-    1082 s where ~9 matvecs per call suffice.
+    into the one the recursion would build next, times the time it acts
+    for. Both factors of that matter, and both were missing until
+    2026-09-26: the test used to read ||v0|| * beta_k * |...| < errgoal,
+    with no |coeff| and with the norm of v0 in place of 1. The first made
+    the test carry the units of A -- for s*A evolved for tau/s, the same
+    dimensionless problem, the Krylov dimension fell from 11 to 4 at
+    s=1e-8 and to 1 at s=1e-11, and the error rose from 1e-11 to 2.6e-3
+    and 0.49 -- and the second made the error goal absolute in the vector,
+    so a state of norm 1e-8 came back with a relative error of 2.6e-3.
+    That was the "absolute Krylov error goal" the 2026-09-25 record left
+    open (submode="TD" at an operator scale of 1e-8 was 8.8e-2 off). The
+    estimate is now scale-free in both, and at an ordinary scale it moves
+    results only below errgoal: for tau=dt/2=0.05 it reads 20 times
+    smaller than the old one, which saves 5-11% of the matvecs (6.00 to
+    5.35 per call at dt=0.1 on a 30-site Heisenberg chain at maxm=64).
+
+    The Lanczos-exhaustion test is relative for the same reason: beta_k
+    below `tol` times the largest alpha or beta seen so far (an invariant
+    subspace was found, and the approximation is exact), compared with <=
+    so that an exact zero mode (every alpha and beta 0) stops rather than
+    dividing by zero. A Krylov space as large as the vector itself is
+    exact too, whatever the estimate says.
+
+    If `niter` runs out before the estimate converges, the time step is
+    too long for the budget, and this used to return the unconverged
+    vector silently (30% off at |coeff| times the spectral width = 100,
+    niter=50). Now the step is split, reusing the basis already built: the
+    largest dyadic fraction of the step whose estimate on that same T_k
+    converges is taken with it, and the rest follows as further sub-steps
+    of at most that size, each a fresh Krylov run from the vector reached
+    so far (the approach of Expokit, R. B. Sidje, ACM TOMS 24, 130
+    (1998), with halving in place of its step-size formula). A step the
+    budget can take in one go -- every step of every ordinary run -- never
+    reaches this branch and costs exactly what it did.
+
+    `c` (the first column of exp(coeff*T_k)) is needed to assemble the
+    result anyway, so the test costs one eigh_tridiagonal of the k x k
+    projected matrix per iteration -- O(k^2), against an O(D^3) MPS-level
+    matvec -- and nothing else. Without it this function ran the full
+    `niter` matvecs on *every* local update of *every* bond of *every*
+    TDVP step, whether or not the subspace had converged 40 iterations
+    earlier: with the callers' niter=50, a submode="TD" dynamical
+    correlator on an L=30 Heisenberg chain spent 1082 s where ~9 matvecs
+    per call suffice.
 
     Reorthogonalization is done as two BLAS matrix-vector products against
     the (preallocated, incrementally filled) basis built so far, not a
@@ -157,59 +201,111 @@ def _lanczos_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
     that. So on a device the recursion keeps alpha/beta as 0-d device
     arrays (`w - alpha*q` and `w/beta` need no host value) and reads a
     whole *block* of them home in one transfer -- see
-    _lanczos_expm_device below, which speculates past the stopping point
+    _krylov_run_device below, which speculates past the stopping point
     and then rolls back to the exact same k the host loop would have
-    chosen, so the two paths still return the same vector."""
+    chosen, so the two paths still return the same vector. Both paths
+    return their basis and coefficients here rather than a vector, so the
+    sub-stepping above is shared and cannot drift between them."""
     _xp = bk.xp()
     beta0 = float(bk.to_host(_xp.linalg.norm(v0)))
     if beta0 == 0:
         return v0.copy()
 
-    m = min(niter, v0.size)
-    basis = _KrylovBasis(v0 / beta0, m)
-    if krylov_defer_sync():
-        return _lanczos_expm_device(matvec, basis, beta0, coeff, m, tol,
-                                    errgoal)
+    n = v0.size
+    m = min(niter, n)
+    run = _krylov_run_device if krylov_defer_sync() else _krylov_run_host
+    v = v0
+    remaining = 1.0  # fraction of coeff not yet applied
+    frac = 1.0       # fraction the current sub-step attempts
+    # Dyadic fractions throughout, so remaining and frac are exact.
+    for _ in range(_KRYLOV_MAX_SUBSTEPS):
+        basis = _KrylovBasis(v / beta0, m)
+        Qk, alphas, betas, k, converged, c = run(
+                matvec, basis, coeff * frac, m, n, tol, errgoal)
+        if not converged:
+            frac, c = _largest_converged_substep(alphas, betas, k, coeff,
+                                                 frac, errgoal)
+        # c is k numbers computed on the host; this is the only
+        # host->device move in the whole routine, and it is O(k).
+        v = beta0 * (Qk @ bk.asarray(c))
+        if converged and frac >= remaining:
+            return v
+        remaining -= frac
+        frac = min(frac, remaining)
+        beta0 = float(bk.to_host(_xp.linalg.norm(v)))
+        if beta0 == 0:
+            return v
+    raise RuntimeError(
+        "Krylov exponentiator: the step |coeff|=%.3g needed more than %d "
+        "sub-steps of niter=%d Lanczos iterations each; the time step is "
+        "far too long for the operator's spectral width -- reduce dt"
+        % (abs(coeff), _KRYLOV_MAX_SUBSTEPS, niter))
+
+
+def _krylov_verdict(alphas, betas, coeff, k, m, n, tol, errgoal):
+    """The stopping test after k Lanczos iterations, shared verbatim by
+    the host loop and the device path's rollback (_first_converged_k):
+    (None, None) to continue, else (converged, c) with c the first column
+    of exp(coeff*T_k). `converged` is False only when the budget m ran out
+    first. See _lanczos_expm_multiply's docstring for each test."""
+    beta = betas[k - 1]
+    scale = max(max(abs(a) for a in alphas[:k]), max(betas[:k]))
+    c = _exp_first_column(alphas, betas, coeff, k)
+    if beta <= tol * scale or k >= n:
+        return True, c
+    if abs(coeff) * beta * abs(c[-1]) < errgoal:
+        return True, c
+    if k == m:
+        return False, c
+    return None, None
+
+
+def _largest_converged_substep(alphas, betas, k, coeff, frac, errgoal):
+    """The largest frac/2^j (j >= 1) whose error estimate converges on the
+    k x k projected matrix already built, and the first column of its
+    exponential: the sub-step _lanczos_expm_multiply takes when the budget
+    runs out. Always terminates, since the estimate falls as |coeff|^k."""
+    beta = betas[k - 1]
+    s = frac
+    for _ in range(60):
+        s = s / 2.0
+        c = _exp_first_column(alphas, betas, coeff * s, k)
+        if abs(coeff * s) * beta * abs(c[-1]) < errgoal:
+            return s, c
+    raise RuntimeError("Krylov exponentiator: no sub-step of the "
+                       "unconverged Krylov space meets the error goal")
+
+
+def _krylov_run_host(matvec, basis, coeff, m, n, tol, errgoal):
+    """The per-iteration host Lanczos loop of _lanczos_expm_multiply.
+    Returns (Q, alphas, betas, k, converged, c): the k basis vectors kept,
+    the projected coefficients, and the stopping verdict."""
+    _xp = bk.xp()
     alphas = []
     betas = []
-
-    def exp_first_column(k):
-        """First column of exp(coeff * T_k), T_k the k x k projected
-        (real, symmetric tridiagonal) matrix built so far. Shared with the
-        device path below, which evaluates the identical quantity from a
-        block of coefficients rather than one at a time."""
-        return _exp_first_column(alphas, betas, coeff, k)
-
-    beta = 0.0
     for it in range(m):
         q = basis.column(it)
         w = matvec(q)
         alpha = float(bk.to_host(_xp.vdot(q, w).real))
         alphas.append(alpha)
         if it > 0:
-            w = _lanczos_residual(w, alpha, q, beta, basis.column(it - 1))
+            w = _lanczos_residual(w, alpha, q, betas[it - 1],
+                                  basis.column(it - 1))
         else:
             w = w - alpha * q
         Qk = basis.matrix()  # every basis vector built so far
         w = _block_reorthogonalize(Qk, w)
         beta = float(bk.to_host(_xp.linalg.norm(w)))
+        betas.append(beta)
 
         k = it + 1
-        exp_col0 = exp_first_column(k)
-        # beta < tol is Lanczos-sequence exhaustion (the Krylov space is
-        # A-invariant and the approximation is exact); it == m-1 exhausts
-        # the caller's iteration budget; otherwise stop once Saad's
-        # residual estimate is below errgoal.
-        if (beta < tol or it == m - 1
-                or beta0 * beta * abs(exp_col0[-1]) < errgoal):
-            # exp_col0 is k numbers computed on the host; this is the only
-            # host->device move in the whole routine, and it is O(k).
-            return beta0 * (Qk @ bk.asarray(exp_col0))
-
-        betas.append(beta)
+        converged, c = _krylov_verdict(alphas, betas, coeff, k, m, n, tol,
+                                       errgoal)
+        if converged is not None:
+            return Qk, alphas, betas, k, converged, c
         basis.append(w / beta)
 
-    raise AssertionError("unreachable: the it == m-1 branch always returns")
+    raise AssertionError("unreachable: the k == m verdict always returns")
 
 
 # How many further Lanczos iterations the device path speculates through
@@ -245,7 +341,7 @@ _KRYLOV_DEFER_SYNC = [None]
 def set_krylov_defer_sync(mode=None):
     """Force (True) or disable (False) the deferred-synchronization Krylov
     path; None restores the automatic "on iff on a device" default. Both
-    paths return the same vector -- see _lanczos_expm_device -- so this is
+    paths return the same vector -- see _krylov_run_device -- so this is
     a performance knob only."""
     if mode not in (True, False, None):
         raise ValueError("set_krylov_defer_sync: mode must be True, False "
@@ -275,31 +371,28 @@ def _exp_first_column(alphas, betas, coeff, k):
     return evecs @ (np.exp(coeff * evals) * evecs[0, :])
 
 
-def _first_converged_k(alphas, betas, beta0, coeff, m, tol, errgoal,
+def _first_converged_k(alphas, betas, coeff, m, n, tol, errgoal,
                         scan_from=1):
-    """The smallest k in [scan_from, len(alphas)] at which the host loop
-    in _lanczos_expm_multiply would have stopped, or None if it would
-    have run past the coefficients available so far.
+    """(k, converged, c) for the smallest k in [scan_from, len(alphas)] at
+    which the host loop in _krylov_run_host would have stopped, or None if
+    it would have run past the coefficients available so far.
 
-    This is deliberately a transcription of that loop's own three-way
-    stopping test rather than an approximation of it -- beta < tol
-    (Lanczos exhaustion), k == m (the caller's iteration budget), and
-    Saad's a posteriori residual estimate -- because the device path's
-    whole claim is that speculating ahead changes only *when* the test is
-    evaluated, never *what* it decides. Returns the k, and the caller
-    discards every basis vector past it."""
+    This is deliberately the host loop's own stopping test,
+    _krylov_verdict, rather than an approximation of it, because the
+    device path's whole claim is that speculating ahead changes only
+    *when* the test is evaluated, never *what* it decides. The caller
+    discards every basis vector past the returned k."""
     for k in range(max(scan_from, 1), len(alphas) + 1):
-        beta = betas[k - 1]
-        if beta < tol or k == m:
-            return k
-        if beta0 * beta * abs(_exp_first_column(alphas, betas, coeff, k)[-1]) < errgoal:
-            return k
+        converged, c = _krylov_verdict(alphas, betas, coeff, k, m, n, tol,
+                                       errgoal)
+        if converged is not None:
+            return k, converged, c
     return None
 
 
-def _lanczos_expm_device(matvec, basis, beta0, coeff, m, tol, errgoal):
-    """_lanczos_expm_multiply's device path: the identical recursion with
-    the per-iteration host synchronization removed.
+def _krylov_run_device(matvec, basis, coeff, m, n, tol, errgoal):
+    """_krylov_run_host's device path: the identical recursion with the
+    per-iteration host synchronization removed.
 
     Two changes, and only the second one is visible from outside:
 
@@ -321,13 +414,16 @@ def _lanczos_expm_device(matvec, basis, beta0, coeff, m, tol, errgoal):
     recursion can step *past* a beta of ~0 (Lanczos exhaustion), where
     the host loop would already have returned. Dividing by it would put
     inf/nan into the basis and, through the reorthogonalization, into
-    every later column. Clamping the divisor to 1 below instead makes
+    every later column. Clamping the divisor to 1 exactly where the host
+    loop's exhaustion test fires (beta <= tol times the largest alpha or
+    beta so far, kept here as a running device maximum) instead makes
     those speculative columns exactly zero, which is harmless: they are
     orthogonal to everything, they are discarded by the rollback, and
     they cannot poison the columns that are kept."""
     _xp = bk.xp()
     alphas_d, betas_d = [], []      # 0-d device arrays, never transferred
     alphas, betas = [], []          # their host mirrors, one block at a time
+    scale_d = None                  # running max(|alpha|, beta), on device
     home = 0                        # coefficients already brought home
     next_check = min(max(_KRYLOV_K_HINT[0], 1), m)
 
@@ -345,6 +441,9 @@ def _lanczos_expm_device(matvec, basis, beta0, coeff, m, tol, errgoal):
         w = _block_reorthogonalize(Qk, w)
         beta = _xp.linalg.norm(w)
         betas_d.append(beta)
+        step_max = _xp.maximum(_xp.abs(alpha), beta)
+        scale_d = step_max if scale_d is None else _xp.maximum(scale_d,
+                                                               step_max)
 
         k = it + 1
         if k >= next_check or k == m:
@@ -355,18 +454,22 @@ def _lanczos_expm_device(matvec, basis, beta0, coeff, m, tol, errgoal):
             block = bk.to_host(_xp.stack(alphas_d[home:] + betas_d[home:])).real
             alphas.extend(float(x) for x in block[:nnew])
             betas.extend(float(x) for x in block[nnew:])
-            stop_k = _first_converged_k(alphas, betas, beta0, coeff, m, tol,
-                                        errgoal, scan_from=home + 1)
+            found = _first_converged_k(alphas, betas, coeff, m, n, tol,
+                                       errgoal, scan_from=home + 1)
             home = k
-            if stop_k is not None:
-                _KRYLOV_K_HINT[0] = stop_k
-                exp_col0 = _exp_first_column(alphas, betas, coeff, stop_k)
-                return beta0 * (Qk[:, :stop_k] @ bk.asarray(exp_col0))
+            if found is not None:
+                stop_k, converged, c = found
+                # Only a converged run says where the next one will stop;
+                # a budget-exhausted one stops at m whatever the operator,
+                # and would send the next call's speculation all the way.
+                if converged:
+                    _KRYLOV_K_HINT[0] = stop_k
+                return Qk[:, :stop_k], alphas, betas, stop_k, converged, c
             next_check = min(k + _KRYLOV_CHECK_BLOCK, m)
 
         # Clamped so a speculative step past Lanczos exhaustion produces a
         # zero column rather than nan; see this function's docstring.
-        basis.append(w / _xp.where(beta > tol, beta, 1.0))
+        basis.append(w / _xp.where(beta > tol * scale_d, beta, 1.0))
 
     raise AssertionError("unreachable: the k == m checkpoint always returns")
 

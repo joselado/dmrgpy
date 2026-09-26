@@ -64,6 +64,16 @@ def _bond_dims(psi):
     return [_link_at(psi, i, i + 1).dim for i in range(1, psi.length())]
 
 
+def _renormalized(psi, norm0):
+    """psi scaled in place back to norm norm0, the evolve_and_measure_*
+    loops' per-step undoing of truncation's norm loss (see
+    Chain.evolve_and_measure_tdvp). A zero state is returned as it is."""
+    nrm = np.sqrt(abs(inner(psi, psi)))
+    if nrm > 0:
+        psi *= norm0 / nrm
+    return psi
+
+
 def _strip_bond_padding(psi):
     """Remove the zero directions `backend.set_pad_bonds` appended to psi's
     bonds, losslessly, and leave psi right-canonical with its center at
@@ -1038,10 +1048,21 @@ class Chain:
         without this copy, a call with the default wf changes what
         self.get_gs() already computed, so a second, unrelated
         measurement on "the same" ground state silently sees a partially
-        time-evolved state instead."""
+        time-evolved state instead.
+
+        The state is put back to `wf`'s own norm after every step, as
+        quench_tdvp() above and the v3 and julia_live copies of this loop
+        all do: real-time evolution conserves the norm, so what two-site
+        TDVP's SVD truncation removes from it is truncation error, not
+        physics, and leaving it in scaled every later <psi|O|psi> by the
+        weight discarded so far. It did until 2026-09-26: on a 12-site
+        Neel quench at maxm=8, <psi|psi> fell to 0.982 by t=5 and <H> with
+        it, a drift of 4.9e-2 where v3 drifts 1.8e-4 -- the same 1.8e-4
+        once divided by the norm. See _renormalized()."""
         H = self._mpo(terms_h)
         A = self._mpo(terms_op)
         psi = wf.copy()
+        norm0 = np.sqrt(abs(inner(psi, psi)))
         correlator = []
         for _ in range(nt):
             # Measure before evolving, so correlator[k] is C(k*dt),
@@ -1049,6 +1070,7 @@ class Chain:
             # pairs it with -- see evolution_dmrg_DC()'s own comment there.
             correlator.append(inner(psi, A, psi))
             psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
+            psi = _renormalized(psi, norm0)
         return correlator, psi
 
     def quench_tdvp_gse(self, terms_h, terms_i, terms_j, nt, dt, gse_sweeps,
@@ -1101,6 +1123,7 @@ class Chain:
         H = self._mpo(terms_h)
         A = self._mpo(terms_op)
         psi = _strip_bond_padding(wf.copy())
+        norm0 = np.sqrt(abs(inner(psi, psi)))
         correlator = []
         for it in range(nt):
             # Measure before evolving, so correlator[k] is C(k*dt),
@@ -1110,6 +1133,10 @@ class Chain:
             if it < gse_sweeps:
                 psi = self.global_subspace_expand(H, psi, krylov_order, gse_cutoff)
             psi = self._tdvp_onesite_step(psi, H, dt)
+            # One-site TDVP does not truncate, so this is a roundoff-level
+            # correction here; kept for the symmetry with
+            # evolve_and_measure_tdvp() and with v3's copy of this loop.
+            psi = _renormalized(psi, norm0)
         return correlator, psi
 
     def quench_tebd(self, terms_h, terms_i, terms_j, nt, dt):
@@ -1147,15 +1174,20 @@ class Chain:
         """TEBD counterpart of evolve_and_measure_tdvp() above -- see
         quench_tebd()'s docstring and evolve_and_measure_tdvp()'s own
         docstring for why `wf` is copied here too (TEBDEvolver.step()
-        mutates its input in place, same as _tdvp_step_fn)."""
+        mutates its input in place, same as _tdvp_step_fn), and for why
+        the state is put back to `wf`'s own norm after every step (the
+        TEBD truncation loses norm exactly as two-site TDVP's does; on the
+        12-site Neel quench at maxm=8, <psi|psi> reached 0.970 by t=5)."""
         evolver = _TEBDEvolver(self.sites, terms_h, dt, cutoff=self.cutoff, maxdim=self.maxm)
         A = self._mpo(terms_op)
         psi = wf.copy()
+        norm0 = np.sqrt(abs(inner(psi, psi)))
         correlator = []
         for _ in range(nt):
             # Measure before evolving -- see quench()'s own comment.
             correlator.append(inner(psi, A, psi))
             psi = evolver.step(psi)
+            psi = _renormalized(psi, norm0)
         return correlator, psi
 
     def cvm_dynamical_correlator(self, terms_i, terms_j, omega, eta, energy, tol, max_it):

@@ -258,7 +258,7 @@ Three changes (2026-08-27) attack exactly that. None of them changes any
 arithmetic, so all of them are verified by the spectrum being unchanged:
 
 * **The Krylov exponentiator no longer synchronizes per iteration**
-  (`tdvp.py`, `_lanczos_expm_device`). alpha and beta stay 0-d device
+  (`tdvp.py`, `_krylov_run_device`). alpha and beta stay 0-d device
   arrays -- `w - alpha*q` and `w/beta` never needed a host value -- and a
   whole block of them comes home in one transfer. Since the stopping test
   cannot then be evaluated every iteration, the recursion *speculates*

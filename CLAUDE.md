@@ -630,7 +630,8 @@ always was. Left open and recorded as such: `gs_energy(maxde=...)` on a
 current chain returning the stored energy unrefined (fixed in 2026-09-25b); TD and every TDVP route
 depending on units through the Krylov exponentiator's absolute error goal
 (on `"python"` at operator scales below 1e-8 this is now a quietly wrong
-spectrum where it raised `ZeroDivisionError`); the bond-local truncation, the
+spectrum where it raised `ZeroDivisionError`; fixed on `"python"` on 2026-09-26,
+v3's vendored `applyExp` keeps it); the bond-local truncation, the
 MPO-set Hamiltonian, small-unit real-time evolution, v2 NH-DMRG (fixed in
 2026-09-25b) and `"python"`'s Lanczos at small units (fixed for VUMPS in
 2026-09-25b); `julia_live` recording no solver key (fixed in 2026-09-25b);
@@ -754,13 +755,46 @@ Left open and recorded as such:
 - `kpm_finite`'s `window_chain_kwargs` check;
 - `edtk/edchain.py`'s silent `None` on an unknown operator;
 - the reason for `julia_live`'s slowdown;
-- from earlier records, TD's absolute Krylov error goal and the bond-local
-  truncation.
+- from earlier records, TD's absolute Krylov error goal (v3 only since
+  2026-09-26) and the bond-local truncation.
 
 The full suite on the merged tree gives 2275 passed, 2 skipped and 14
 xfailed without `julia_live`, and all 64 `julia_live` tests pass; that
 machine's baseline before the pass was 1840 passed and 6 failed, the six
 being finding 30.
+
+**The 2026-09-26 review of `"python"` real-time evolution.** Not a hole
+hunt: every `"python"` integrator was checked against exact propagation and
+against v3. Two-site and one-site TDVP are exact to ~1e-11 at full bond
+dimension (spin-1/2 long-range and DM, spin-1, JW fermions, bosons, real
+and complex dt) and track ED below it exactly as v3 does, so the sweeps
+were left alone. Three things around them were fixed, each moving numbers
+(user guide §21 has the measurements; regressions in
+`tests/test_pyitensor_time_evolution_review.py`):
+- `tdvp._lanczos_expm_multiply` stops on `|coeff|*beta_k*|c_k| < 1e-10`,
+  relative to the vector and dimensionless, with a relative exhaustion test
+  (`beta <= tol*max|alpha|,beta`) and sub-stepping when `niter` runs out
+  (it used to return that step unconverged, 0.31 off at |coeff|*width=100).
+  The host loop and the device path share one test, `_krylov_verdict`, and
+  return their basis rather than a vector, so the sub-stepping above them
+  cannot drift between the two; keep it that way if either changes.
+- Every `evolve_and_measure_*` loop on every backend now restores the
+  input norm `norm0` after each step (python TDVP/GSE/TEBD and v3 TEBD
+  did not), as every `quench_*` loop always did. v3's copy scales by
+  `norm0/nrm` rather than calling `MPS::normalize()`, which aborts below
+  an absolute 1e-20.
+- `gse.global_subspace_expand` normalizes each Krylov vector, as v3's
+  `addBasis(..."DoNormalize",true)` does; unnormalized, the expansion's
+  basis depended on the units of H.
+Recorded, not changed: `TDVP_GSE` stops growing the bond dimension after
+`tdvp_gse_sweeps` steps (3, after `TDVP/sample/run.cc`, although
+`TDVP/README.md` says to switch to two-site TDVP there instead), so a
+growing-entanglement quench saturates (~2e-3 on a 12-site Neel quench at
+any maxm where `"TDVP"` reaches 9e-7). That, and the other improvement
+leads the review turned up (v3's Krylov thresholds, environment reuse
+across half-sweeps, controlled bond expansion arXiv:2208.10972, a
+fourth-order composition), are ranked with their anchors in
+`docs/time_evolution_improvement_plan.md`.
 
 **Examples should plot, not just print/assert.** What sets `examples/`
 apart from `tests/` is that a human is expected to actually look at the

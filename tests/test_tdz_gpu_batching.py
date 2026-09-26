@@ -108,7 +108,7 @@ def test_deferred_krylov_sync_survives_lanczos_exhaustion(krylov_default_restore
     A rank-2 operator exhausts its Krylov sequence after two iterations,
     where the host loop returns immediately and the deferred path keeps
     going to its checkpoint -- dividing by that beta is exactly the
-    inf/nan trap _lanczos_expm_device clamps against.
+    inf/nan trap _krylov_run_device clamps against.
     """
     rng = np.random.default_rng(9)
     dim = 24

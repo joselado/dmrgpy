@@ -58,7 +58,7 @@ import numpy as np
 
 from . import backend as bk
 from .index import Index
-from .mpsalgebra import applyMPO, _link_at
+from .mpsalgebra import applyMPO, inner, _link_at
 from .svd import svd, eigh_truncate
 from .tensor import ITensor
 
@@ -194,6 +194,18 @@ def global_subspace_expand(H, phi, krylov_order, cutoff, maxdim=None, bond_maxdi
     for _ in range(krylov_order - 1):
         cur = applyMPO(H, cur, cutoff=cutoff, maxdim=maxdim)
         cur.noPrime("Site")  # applyMPO leaves the physical leg primed
+        # Each Krylov vector enters the density matrix at unit weight, as
+        # it does on v3, where Chain::global_subspace_expand passes
+        # addBasis() "DoNormalize",true. Unnormalized, H^k*phi weighed
+        # ||H^k phi||^2 against the others, so which directions the
+        # relative cutoff kept depended on the units of H (and differed
+        # from v3 at any units): an 8-site Neel quench under s*H at dt/s
+        # was 1.0e-4 off ED at s=1 and 1.3e-3 at s<=1e-4, until
+        # 2026-09-26. A zero vector (phi an eigenvector at eigenvalue 0)
+        # contributes nothing either way and is left as it is.
+        nrm = np.sqrt(abs(inner(cur, cur)))
+        if nrm > 0:
+            cur *= 1.0 / nrm
         companions.append(cur)
 
     n = phi.length()

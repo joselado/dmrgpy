@@ -1620,6 +1620,16 @@ class Chain
         auto gates = build_tebd_gates(sites_,h_bonds,dt);
         auto A = mpo_from_terms(terms_op);
         auto psi = wf;
+        // Restore the input norm after every step, as
+        // evolve_and_measure_tdvp() above and the "python"/julia_live
+        // copies of this loop do: the gates are unitary, so the norm each
+        // SVD truncation removes is truncation error, and without this
+        // every later <psi|A|psi> was scaled by the weight discarded so
+        // far (<psi|psi> 0.970 by t=5 on a 12-site Neel quench at
+        // maxm=8, 2026-09-26). Scaled directly rather than through
+        // MPS::normalize(), which calls Error("Zero norm"), i.e. abort(),
+        // below an absolute 1e-20.
+        auto norm0 = std::sqrt(std::abs(innerC(psi,psi)));
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
@@ -1627,6 +1637,8 @@ class Chain
             // quench() above.
             out.correlator.push_back(innerC(psi,A,psi));
             tebd_step(psi,gates,cutoff_,maxm_);
+            auto nrm = std::sqrt(std::abs(innerC(psi,psi)));
+            if (nrm > 0) psi *= norm0/nrm;
             }
         out.final_wf = psi;
         return out;

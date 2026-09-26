@@ -3659,7 +3659,13 @@ reviewers' own reports follow verbatim, since several carry repros.
   call returns a spectrum that far off, so item 3 turned a loud failure into a
   quiet one there. The suggested cure is to evolve the normalized state in
   `quench_tdvp` and multiply the correlator back, and on v3 the same in
-  `chain_session.h`, which needs a rebuild.
+  `chain_session.h`, which needs a rebuild. (2026-09-26: fixed on
+  `"python"` in the exponentiator itself, whose stopping test is now
+  `|coeff|*beta_k*|c_k| < 1e-10`, relative and dimensionless, so neither
+  the operator's norm nor the Hamiltonian's units reach it: 1e-11 at an
+  operator scale of 1e-9, see user_guide.md §21 and
+  tests/test_pyitensor_time_evolution_review.py. v3's vendored `applyExp`
+  is unchanged.)
 - The bond-local truncation of item 2: a bond whose strongest crossing term is
   far below the largest coefficient of the operator loses channels at any units
   on v2, v3 and `"python"`, pinned by strict xfails; the per-bond design is in

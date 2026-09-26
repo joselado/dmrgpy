@@ -4,3 +4,4 @@
 - Entropy density
 - Work folder to tmp
 - Hybrid dynamical-correlator method (coarse KPM/TD locate, CVM/INV/EX refine) -- see docs/hybrid_dynamical_correlator_plan.md
+- Real-time evolution: TDVP_GSE bond-dimension freeze, v3 Krylov thresholds, CBE-TDVP and more -- see docs/time_evolution_improvement_plan.md

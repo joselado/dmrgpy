@@ -395,9 +395,9 @@ are not scale-free, and on those the Hamiltonian is best written in units
 where its largest coefficient is of order 1: a Hamiltonian set as an
 already-built MPO (`set_hamiltonian(toMPO(H))` on v3, $9.8\times10^{-6}$ off
 at $J=10^{-8}$), real-time evolution ($6.4\times10^{-4}$ off with TDVP at
-$J=10^{-8}$ on v3, the MPO-Taylor stepper of v2 diverging there, and the
-Krylov exponentiator of `"python"` and v3 stopping on an absolute error),
-and the Lanczos of `"python"`'s finite DMRG, which stops on an absolute
+$J=10^{-8}$ on v3, the MPO-Taylor stepper of v2 diverging there, and v3's
+Krylov exponentiator stopping on an absolute error; `"python"`'s has been
+scale-free since 2026-09-26, see §21), and the Lanczos of `"python"`'s finite DMRG, which stops on an absolute
 test ($1.2\times10^{-6}$ relative at $J=10^{-9}$, measured before its MPOs
 were built at unit scale). NH-DMRG on v2 was a fourth until the 2026-09-25b
 pass. `mode="ED"` does not meet ITensor's thresholds, but until that pass
@@ -5056,3 +5056,57 @@ Results from before are not comparable. The lower-level
 `kondospectrumtk.twotime.kondo_term_from_two_time` now takes
 `(t, G, Gx)` triples and raises on the old `(t, G)` pairs, and its
 kernel `K_W` is replaced by the one-sided `K_F`.
+
+### The 2026-09-26 review of `"python"` real-time evolution
+
+Not an audit: a check of `itensor_version="python"`'s real-time evolution
+against exact propagation. The integrators themselves were right. Two-site
+and one-site TDVP reproduce $e^{-iH\,dt}$ to $10^{-11}$ at full bond
+dimension on spin-1/2 (long-range and Dzyaloshinskii-Moriya), spin-1,
+Jordan-Wigner fermion and boson chains, at real and complex $dt$, and below
+full bond dimension they track ED as closely as v3 does. Three things
+around them changed numbers:
+
+- **The Krylov exponentiator** behind every `"python"` TDVP route (TD,
+  TDZ, `evolve_and_measure`, `evolution_ABA`, METTS, the infinite-chain
+  window, the Kondo two-time construction) now stops when
+  $|z|\,\beta_k\,|[e^{zT_k}]_{k1}|<10^{-10}$ for $e^{zH}$, an error
+  relative to the evolved vector and free of units. It used to stop on
+  $\lVert v\rVert\,\beta_k\,|[e^{zT_k}]_{k1}|$, which carries the units of
+  $H$ and the norm of the state, and it returned a step its 50-vector
+  budget could not take unconverged (0.31 off at $|z|$ times the spectral
+  width equal to 100); such a step is now split. This closes the "absolute
+  Krylov error goal" the 2026-09-25 record left open, on `"python"`:
+  $C[\epsilon S^z_0,\epsilon S^z_3]/\epsilon^2$ under `submode="TD"` was
+  $8.8\times10^{-2}$ off $C[S^z_0,S^z_3]$ at $\epsilon=10^{-8}$ and $0.24$
+  at $10^{-9}$, and is $10^{-11}$ at both, and a Néel quench under $sH$ at
+  $dt/s$ was $0.48$ off ED at $s=10^{-12}$ and is at the $2.9\times10^{-6}$
+  of $s=1$. At ordinary units results move below $10^{-10}$. v3's
+  `applyExp` is vendored ITensor and keeps its absolute goal.
+- **`evolve_and_measure` and `evolution_ABA`** on `"python"` (TDVP,
+  TDVP_GSE, TEBD) and on v3 TEBD now put the state back to its initial
+  norm after every step, as v3's TDVP and every `"julia_live"` loop
+  already did. Real-time evolution conserves the norm, so what the
+  truncation removes from it is error, and it used to scale every later
+  $\langle\psi(t)|O|\psi(t)\rangle$: on a 12-site Néel quench at
+  `maxm=8`, $\langle\psi|\psi\rangle$ fell to 0.982 by $t=5$ under TDVP and
+  to 0.970 under TEBD, and $\langle H\rangle$ drifted by
+  $4.9\times10^{-2}$ where v3 drifted by $1.8\times10^{-4}$ (now the
+  same $1.8\times10^{-4}$ on both). Nothing moves where nothing truncates,
+  and the `quench` loops behind `submode="TD"` always renormalized.
+- **`tevol_method="TDVP_GSE"` on `"python"`** now normalizes each Krylov
+  vector $H^k|\psi\rangle$ before choosing the new directions, as v3's
+  expansion does. The choice used to depend on $\lVert H\rVert$: that
+  8-site Néel quench was $1.0\times10^{-4}$ off ED at $s=1$ and
+  $1.3\times10^{-3}$ at every $s\le10^{-4}$, and is $2.7\times10^{-5}$ at
+  all of them.
+
+Results from before are not comparable where these apply. The
+regressions are in `tests/test_pyitensor_time_evolution_review.py`. One
+thing was measured and left as it is, on every backend: under
+`TDVP_GSE` the bond dimension stops growing after `tdvp_gse_sweeps` steps
+(3 by default), so a quench whose entanglement keeps growing saturates.
+On the 12-site Néel quench the largest error up to $t=5$ stays near
+$2\times10^{-3}$ from `maxm=16` to 64, where `"TDVP"` reaches $9\times10^{-7}$ at
+`maxm=64`. Raise `tdvp_gse_sweeps` to the number of steps, or use
+`"TDVP"`, for such a run.
