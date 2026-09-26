@@ -1428,7 +1428,9 @@ every normalization there was pinned against the paper's absolutely
 scaled Fig. 7 (arXiv v1 numbering; the docstrings' "Fig. 3"/"Fig. F" are
 that figure and Fig. 5), and `tests/test_kondo_spectrum_paper_fig7.py`
 holds pixel-digitized values from it (zero-bias peaks, +-4 mV tails, the
-10 T step asymmetry) that now agree to ~0.005. Two things there are
+10 T step asymmetry) that agree to ~0.005 -- except the in-field Kondo
+term, where the code deliberately departs from the paper (next paragraph
+but one). Two things there are
 easy to get wrong and were, until 2026-09-12: the potential-interference
 term's direct and exchange diagrams enter with OPPOSITE signs (a
 symmetric electron trace leaves the reversed order's hole-like sign
@@ -1441,8 +1443,32 @@ differs at O(|eV|/omega0) (3.5% at |eV|=omega0/5) and carries a sharp
 band-edge singularity at eps=omega0. On the ED side the third-order
 sums run over thermally occupied initial states only (O(n_occ dim^2),
 not dim^3) and F is tabulated once per FBuilder (0.4 s; it used to be a
-per-point quadrature that took 28 s and 4 GB at 64 states). Since the
-2026-09-24 audit: `mode="ED"` raises `TypeError` on any keyword it does
+per-point quadrature that took 28 s and 4 GB at 64 states).
+
+**The Kondo term's exchange diagram departs from the paper (2026-09-26).**
+The paper's eq. 25, and the formula under its Fig. 6, put the
+reversed-order diagram's log at F(eV-eps_mi) = F(eV+eps_im). A brute-force
+second-order T-matrix of the paper's own Hamiltonian, built as explicit
+fermion x impurity operators with every intermediate state's denominator
+read off H0 (`tests/test_kondo_spectrum_tmatrix.py`), puts it at
+F(eV-(e_f-e_m)): the sample vertex acts first and creates the outgoing
+electron, so the hole goes on shell at an outgoing energy of e_i-e_m, and
+the outgoing electron has eV-eps_if. The two differ only when f != i, so
+the U term (I_fi forces f=i), every zero-bias value and a free S=1/2 at
+B=0 are unaffected, which is why none of the paper's figure values caught
+it; its own 10 T curves were drawn from eq. 25, and
+`test_kondo_spectrum_paper_fig7.py` now checks them against a paper-form
+reconstruction (`_paper_form`) and pins the code's own values separately.
+Do NOT "restore" eq. 25 to get back on the figure. The two-time DMRG/ED
+route cannot express the new argument along G's t2 axis, so it builds a
+second, sheared function Gx(s,tau) = G(-s,tau+s) =
+<psi_l(-s-tau)|Sk|psi_j(-s)> from checkpoints of the same trajectories
+(1.5x the TDVP cost), and `kondo_term_from_two_time` takes (t, G, Gx)
+triples with the one-sided kernel `K_F` (K_W is gone; the s->t direction
+reuses conj(K_F), since its cell-averaged quadratures were most of the
+cost).
+
+Since the 2026-09-24 audit: `mode="ED"` raises `TypeError` on any keyword it does
 not read (a misspelled `Jrho_s` used to remove the Kondo peak silently);
 `mode="DMRG"`'s T=0 is the single converged state unless `n_gs=` asks for
 the equal-weight manifold average, for which `set_gs` alone suffices,

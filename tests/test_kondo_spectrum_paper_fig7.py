@@ -23,6 +23,20 @@ panels then read 0.750/0.250 (7b) and 1.000/0.500 (7d), so the pins are
 good to ~0.005. Comparing at the 10 T tails and step overshoots tests
 the odd term's sign AND magnitude, which the zero-bias values (where it
 vanishes) cannot.
+
+Where the figure is no longer the target (2026-09-26): the paper draws
+its in-field curves from its eq. 25, which puts the Kondo term's exchange
+log at eV+eps_im; kondospectrumtk puts it at eV-(e_f-e_m), where the
+second-order T-matrix of the paper's own Hamiltonian has it (conductance.py's
+module docstring, tests/test_kondo_spectrum_tmatrix.py). The two agree at
+B=0 and at every zero-bias value, so those pins are unchanged. In a field
+they do not, so the 10 T pins are held twice: _paper_form, which is this
+package's second-order and potential terms plus a Kondo term written with
+eq. 25's argument, must still match the figure, which keeps the digitized
+values pinning everything the change did not touch (the U term's sign and
+size above all); and the code's own 10 T values are pinned where they
+now are, with the difference from _paper_form checked to be exactly even
+in bias, i.e. confined to the Kondo term.
 """
 import numpy as np
 import pytest
@@ -30,7 +44,8 @@ import pytest
 from dmrgpy import spinchain
 from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 from dmrgpy.kondospectrumtk.conductance import (
-    third_order_kondo_dIdV, third_order_potential_dIdV, _occupied_states)
+    second_order_dIdV, third_order_kondo_dIdV, third_order_potential_dIdV,
+    _occupied_states, _triple_product_coefficients, _theta_raw)
 from dmrgpy.kondospectrumtk.stepfunctions import FBuilder, Theta, F0
 
 G = 2.0
@@ -51,16 +66,56 @@ def _spectrum(B, U, eVs):
     return d/TP
 
 
+def _paper_eq25_kondo_dIdV(ks, eVs, Jrho_s, Fb):
+    """The third-order Kondo term exactly as the paper's eqs. 24/25 print
+    it, exchange log at F(eV-eps_mi) = F(eV+eps_im): what
+    conductance.third_order_kondo_dIdV computed until 2026-09-26, kept
+    here as the form the figure was drawn from."""
+    occ = _occupied_states(ks)
+    p = ks.p[occ]
+    coeff = np.imag(_triple_product_coefficients(ks, occ))/2.
+    eps = ks.e[None, :] - ks.e[occ, None] # eps[i,x] = e_x - e_i
+    n, d = len(eVs), ks.dim
+    def one(v):
+        Fim = Fb((v[:, None, None] - eps[None]).ravel()).reshape(n, len(occ), d)
+        Fmi = Fb((v[:, None, None] + eps[None]).ravel()).reshape(n, len(occ), d)
+        Th = _theta_raw(ks, v[:, None, None] - eps[None])
+        return np.einsum('i,ifm,eif,eim->e', p, coeff, Th, Fim + Fmi)
+    return 4*np.pi*Jrho_s*(one(eVs) + one(-eVs))
+
+
+def _paper_form(B, U, eVs):
+    """_spectrum with the Kondo term replaced by the paper's eq. 25 form
+    (second-order and potential terms are this package's own)."""
+    ks = KondoSpectrum(_chain(B), site=0, T=1.0)
+    Fb = FBuilder(1.0, omega0=20e-3)
+    d = (second_order_dIdV(ks, eVs, U=U)
+         + _paper_eq25_kondo_dIdV(ks, eVs, -0.05, Fb))
+    if U: d = d + third_order_potential_dIdV(ks, eVs, -0.05, U, Fb=Fb)
+    return d/TP
+
+
 def test_fig7b_zero_bias_and_tails():
     """U=0: zero-bias values at 0, 0.5, 1, 2.5, 10 T and the +-4 mV
-    tails, which every field curve shares."""
+    tails, which every field curve shares in the figure. The zero-bias
+    values do not depend on where the exchange log sits; the tails do,
+    increasingly with the field, and at 10 T the code's sit 0.006 above
+    the figure's while the paper's own eq. 25 form stays on it."""
     eVs = np.array([-4e-3, 0., 4e-3])
     for B, y0 in ((0., 1.13), (0.5, 1.082), (1., 0.942), (2.5, 0.535),
                   (10., 0.324)):
         d = _spectrum(B, 0.0, eVs)
+        dp = _paper_form(B, 0.0, eVs)
         assert d[1] == pytest.approx(y0, abs=0.01)
-        assert d[0] == pytest.approx(0.886, abs=0.006) # tails
-        assert d[2] == pytest.approx(0.886, abs=0.006)
+        assert d[1] == pytest.approx(dp[1], abs=1e-12)
+        assert dp[0] == pytest.approx(0.886, abs=0.006) # tails
+        assert dp[2] == pytest.approx(0.886, abs=0.006)
+        if B <= 2.5:
+            assert d[0] == pytest.approx(0.886, abs=0.006)
+            assert d[2] == pytest.approx(0.886, abs=0.006)
+    d = _spectrum(10., 0.0, eVs)
+    assert d[0] == pytest.approx(0.89291, abs=2e-4)
+    assert d[2] == pytest.approx(0.89291, abs=2e-4)
 
 
 def test_fig7d_zero_bias_values_and_symmetric_zero_field_peak():
@@ -80,16 +135,39 @@ def test_fig7d_zero_bias_values_and_symmetric_zero_field_peak():
 
 
 def test_fig7d_10T_asymmetry_matches_the_figure():
-    """The odd (potential-interference) term's sign and size: at 10 T the
-    figure's step overshoots read 1.231 (-1.67 mV) / 1.177 (+1.69 mV) and
-    the +-4 mV tails 1.146 / 1.128."""
+    """The odd (potential-interference) term's sign and size, against the
+    figure through the paper's own eq. 25 form: at 10 T the figure's step
+    overshoots read 1.231 (-1.67 mV) / 1.177 (+1.69 mV) and the +-4 mV
+    tails 1.146 / 1.128."""
     eVs = np.linspace(-4e-3, 4e-3, 801)
-    d = _spectrum(10., 0.25, eVs)
+    d = _paper_form(10., 0.25, eVs)
     left, right = (eVs < -1e-3), (eVs > 1e-3)
     assert d[left].max() == pytest.approx(1.231, abs=0.012)
     assert d[right].max() == pytest.approx(1.177, abs=0.012)
     assert d[0] == pytest.approx(1.146, abs=0.008)
     assert d[-1] == pytest.approx(1.128, abs=0.008)
+    assert d[left].max() - d[right].max() == pytest.approx(0.054, abs=0.012)
+    assert d[0] - d[-1] == pytest.approx(0.018, abs=0.006)
+
+
+def test_fig7d_10T_departs_from_the_figure_only_in_the_kondo_term():
+    """The code at 10 T, where its exchange log moved off the paper's
+    eq. 25 (2026-09-26): overshoots 1.248 / 1.203 against the figure's
+    1.231 / 1.177, tails 1.149 / 1.137 against 1.146 / 1.128. The
+    difference from the paper form is exactly even in bias, so the odd
+    part -- the potential term, which the figure pins above -- is
+    untouched, and the asymmetries still read as the figure's."""
+    eVs = np.linspace(-4e-3, 4e-3, 801)
+    d = _spectrum(10., 0.25, eVs)
+    dp = _paper_form(10., 0.25, eVs)
+    left, right = (eVs < -1e-3), (eVs > 1e-3)
+    assert d[left].max() == pytest.approx(1.24828, abs=2e-4)
+    assert d[right].max() == pytest.approx(1.20329, abs=2e-4)
+    assert d[0] == pytest.approx(1.14918, abs=2e-4)
+    assert d[-1] == pytest.approx(1.13665, abs=2e-4)
+    diff = d - dp
+    assert np.max(np.abs(diff)) > 0.02 # a real move, the size of 7d's features
+    assert np.allclose(diff, diff[::-1], rtol=0., atol=1e-12) # even
     assert d[left].max() - d[right].max() == pytest.approx(0.054, abs=0.012)
     assert d[0] - d[-1] == pytest.approx(0.018, abs=0.006)
 

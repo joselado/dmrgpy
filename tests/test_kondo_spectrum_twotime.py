@@ -9,7 +9,9 @@ eigenstates. The two-time construction instead builds a Heisenberg
 three-point function G(t2,tau)=<GS|Sl(t2+tau)Sk(t2)Sj(0)|GS> via real-time
 evolution and extracts the same physical quantity through two closed-form
 time-domain kernels (a Hilbert-transform-based Theta0 filter and a direct
-K_W convolution) -- see twotime.py's module docstring for the full
+K_F convolution, applied to G for the direct diagram and to its sheared
+counterpart Gx(s,tau) = G(-s,tau+s) for the exchange one) -- see
+twotime.py's module docstring for the full
 derivation. It exists because, unlike the eigenstate-sum approach, it
 generalizes to DMRG without ever diagonalizing/enumerating excited
 states (the actual DMRG side reuses the same kernel machinery on top of
@@ -26,7 +28,7 @@ per test) and correspondingly loose tolerances -- finer grids converge
 tighter (verified interactively during development: ~0.01% agreement at
 higher resolution) but are too slow for routine test runs. See PR
 history / kondospectrumtk module docstrings for the resolution/accuracy
-tradeoffs (K_W needs t2 spacing finer than 1/omega0 and a range wider
+tradeoffs (K_F needs t2 spacing finer than 1/omega0 and a range wider
 than several/Gamma0; the Hilbert-transform-based Theta0 filter converges
 much faster than that and is not the bottleneck).
 """
@@ -37,7 +39,7 @@ from dmrgpy import spinchain
 from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 from dmrgpy.kondospectrumtk.conductance import third_order_kondo_dIdV
 from dmrgpy.kondospectrumtk.edtwotimeref import two_time_kondo_term_ed
-from dmrgpy.kondospectrumtk.twotime import theta0_filter, K_W
+from dmrgpy.kondospectrumtk.twotime import theta0_filter, K_F
 from dmrgpy.kondospectrumtk.stepfunctions import Theta0, F0
 
 G = 2.0
@@ -49,7 +51,7 @@ def test_theta0_filter_reproduces_theta0_on_pure_exponentials():
     for a pure exponential exp(-i*eps*tau) (a single "eigenstate" term),
     the filter should reproduce Theta0(eV-eps) essentially exactly (this
     is the piece that converges to machine precision even on coarse
-    grids -- confirmed during development; the K_W piece is the one that
+    grids -- confirmed during development; the K_F piece is the one that
     needs a fine/wide grid)."""
     tau_grid = np.linspace(-2*np.pi/1e-5, 2*np.pi/1e-5, 4000, endpoint=False)
     eps = 3e-4
@@ -59,17 +61,30 @@ def test_theta0_filter_reproduces_theta0_on_pure_exponentials():
     assert val == pytest.approx(Theta0(np.array([eV-eps]))[0], abs=1e-6)
 
 
-def test_K_W_matches_F0_pm_via_direct_integration():
-    """Unit check of the K_W kernel alone: integrating K_W(t2;eV) against
-    exp(-i*wm*t2) over t2 should reproduce F0(eV-wm)+F0(eV+wm)."""
+def test_K_F_matches_F0_via_direct_integration():
+    """Unit check of the K_F kernel alone: integrating K_F(t;eV) against
+    exp(-i*wm*t) over t should reproduce F0(eV-wm), real -- one diagram's
+    log, not the F0(eV-wm)+F0(eV+wm) pair the symmetric kernel it replaced
+    produced -- and K_F(t;-eV) is its complex conjugate."""
     from scipy import integrate
     omega0, Gamma0 = 0.2, 5e-6
     eV, wm = 3e-4, 1.6e-4
-    expected = F0(np.array([eV-wm]), omega0, Gamma0)[0] + F0(np.array([eV+wm]), omega0, Gamma0)[0]
     T = 30/Gamma0
-    re, _ = integrate.quad(lambda t2: K_W(np.array([t2]), eV, omega0, Gamma0)[0]*np.cos(wm*t2),
-                            -T, T, limit=2000, points=[0.])
-    assert re == pytest.approx(expected, rel=2e-3)
+    def kf(t, e): return K_F(np.array([t]), e, omega0, Gamma0)[0]
+    for w in (wm, -wm):
+        expected = F0(np.array([eV-w]), omega0, Gamma0)[0]
+        # Re and Im of K_F(t) exp(-i*w*t)
+        re, _ = integrate.quad(lambda t: kf(t, eV).real*np.cos(w*t)
+                               + kf(t, eV).imag*np.sin(w*t),
+                               -T, T, limit=2000, points=[0.])
+        im, _ = integrate.quad(lambda t: kf(t, eV).imag*np.cos(w*t)
+                               - kf(t, eV).real*np.sin(w*t),
+                               -T, T, limit=2000, points=[0.])
+        assert re == pytest.approx(expected, rel=2e-3)
+        assert abs(im) < 2e-3*abs(expected)
+    ts = np.array([-7e3, -10., 3., 5e4])
+    assert np.allclose(K_F(ts, -eV, omega0, Gamma0),
+                       np.conj(K_F(ts, eV, omega0, Gamma0)), rtol=0, atol=0)
 
 
 def test_two_time_kondo_term_matches_eigenstate_sum():

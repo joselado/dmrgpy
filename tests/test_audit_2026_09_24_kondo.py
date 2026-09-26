@@ -128,7 +128,7 @@ def test_n_gs_averages_the_two_time_kondo_term_too(monkeypatch):
     test_kondo_spectrum_dmrgtwotime.py's grid-consistent reference; a
     deliberately coarse grid, since it is the same for both sides). The
     second-order term is stubbed to zero, so only the two-time term runs,
-    and the bias points are few because the K_W kernel quadrature, not the
+    and the bias points are few because the K_F kernel quadrature, not the
     time evolution, is what this costs."""
     import dmrgpy.kondospectrumtk.secondorder_dc as secondorder_dc
     from dmrgpy.kondospectrumtk.edtwotimeref import _levi_civita_coeff_G_chunk
@@ -149,7 +149,7 @@ def test_n_gs_averages_the_two_time_kondo_term_too(monkeypatch):
     term = d/(4*np.pi*Jrho_s)
     t2_grid = dt2*np.arange(-n_t2_half, n_t2_half+1)
     tau_grid = dtau*np.arange(-n_tau_half, n_tau_half+1)
-    G = []
+    G, Gx = [], []
     for first in (0, 1): # each degenerate eigenvector as "the" ground state
         order = [first, 1-first] + list(range(2, ks.dim))
         k = KondoSpectrum.__new__(KondoSpectrum)
@@ -157,12 +157,16 @@ def test_n_gs_averages_the_two_time_kondo_term_too(monkeypatch):
         for a in ("Sx", "Sy", "Sz"):
             setattr(k, a, getattr(ks, a)[np.ix_(order, order)])
         G.append(_levi_civita_coeff_G_chunk(k, t2_grid, tau_grid))
+        Gx.append(_levi_civita_coeff_G_chunk(k, t2_grid, tau_grid,
+                                             exchange=True))
     # the two members' three-point functions do differ (on a 9x13 grid their
-    # zero-bias terms were -11.98 and -17.17), and the term is linear in G,
-    # so the reference is the term of the averaged G
+    # zero-bias terms were -11.98 and -17.17), and the term is linear in G
+    # and in the exchange diagram's Gx, so the reference is the term of the
+    # averaged pair
     assert np.max(np.abs(G[0] - G[1])) > 0.1*np.max(np.abs(G[0]))
     ref = kondo_term_from_two_time(t2_grid, tau_grid,
-                                   iter([(t2_grid, 0.5*(G[0] + G[1]))]),
+                                   iter([(t2_grid, 0.5*(G[0] + G[1]),
+                                          0.5*(Gx[0] + Gx[1]))]),
                                    eVs, omega0, Gamma0)
     assert np.allclose(term, ref, rtol=0., atol=1e-6)
 

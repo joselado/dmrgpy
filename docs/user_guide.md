@@ -3426,7 +3426,8 @@ require summing over *all* eigenstates as virtual intermediate states
 $m$ (energy conservation is not required for $m$): a Kondo term (a
 Levi-Civita triple product of spin matrix elements $\langle i|S|f\rangle$,
 $\langle f|S|m\rangle$, $\langle m|S|i\rangle$, weighted by a
-temperature-broadened logarithmic function $F(eV-\epsilon_m,T)$ that
+temperature-broadened logarithmic function $F(eV-\epsilon_m,T)$, one
+for each of its two diagrams with different arguments (see below), that
 produces the characteristic zero-bias Kondo-like resonance, splitting
 into two peaks under a Zeeman field), and — when `U!=0` — a
 potential-scattering interference term responsible for a bias-asymmetric
@@ -3454,8 +3455,9 @@ reversing the order both reverses the electron-spin trace and turns
 the intermediate electron from electron-like into hole-like, whose $F$
 enters with the opposite sign. For the Kondo term the trace is the
 antisymmetric Levi-Civita one, so the two sign flips cancel and both
-orders add, $F(eV-\epsilon_{im})+F(eV+\epsilon_{im})$; for the
-potential-interference term the trace is the symmetric $\delta_{kj}$, so
+orders add, $F(eV-\epsilon_{im})+F(eV-(\epsilon_f-\epsilon_m))$ (the
+second argument is not the paper's, see "Where the exchange log sits"
+below); for the potential-interference term the trace is the symmetric $\delta_{kj}$, so
 only the hole-like flip survives and the two orders *subtract*,
 $F(eV-\epsilon_{im})-F(eV+\epsilon_{im})$ — which is what the paper's
 Fig. 7c shows (its 121u and 121uR curves are mirror images of opposite
@@ -3473,6 +3475,41 @@ so the zero-field Kondo peak keeps its position and symmetry at $U\neq0$
 > out $\sim0.27$ against the figure's $\sim0.05$ (now 0.047 against a
 > digitized 0.054). Every `U!=0, order=3` result from before that date
 > is not comparable; `U=0` and `order=2` are untouched.
+
+**Where the exchange log sits, a departure from the paper.** The direct
+diagram tunnels first: its intermediate state is the tunnelled electron
+in the sample with the impurity in $m$, which goes on shell at the
+sample's Fermi edge when $eV=\epsilon_m-\epsilon_i$, hence
+$F(eV-\epsilon_{im})$. The exchange diagram scatters a sample electron
+first, into the outgoing state, and leaves a hole behind; that goes on
+shell when the hole reaches the Fermi edge, which fixes the *outgoing*
+electron's energy at $\epsilon_i-\epsilon_m$, and the outgoing electron
+has $eV-\epsilon_{if}$. So the exchange log is
+$F(eV-(\epsilon_f-\epsilon_m))$. The paper's eq. 25, and the formula
+under its Fig. 6, has $F(eV-\epsilon_{mi})=F(eV+\epsilon_{im})$ instead,
+measured from the incoming energy as if the impurity absorbed nothing.
+The two agree when $f=i$, so the potential term, whose $I_{fi}$ forces
+$f=i$, is the same either way, and whenever every state the initial one
+connects to is degenerate with it (a free $S=1/2$ at $B=0$, a Kramers
+doublet). Any field, anisotropy or exchange splitting separates them.
+`tests/test_kondo_spectrum_tmatrix.py` builds the second-order T-matrix
+of the paper's own Hamiltonian as explicit fermion $\otimes$ impurity
+operators, reading every intermediate state's energy denominator off
+$H_0$, and the spectrum agrees with it to roundoff on anisotropic $S=1$
+and exchange-coupled impurities in tilted fields, where the printed form
+missed it by 5–20% of the third-order term.
+
+> **Note (behaviour change, 2026-09-26).** Every third-order Kondo
+> spectrum with an inelastic transition out of an occupied state moved,
+> on `mode="ED"` and `mode="DMRG"` alike; a free $S=1/2$ at $B=0$, every
+> zero-bias value, `order=2` and the potential term did not. On the
+> paper's own Fig. 7d parameters at 10 T the step overshoots go from
+> 1.226/1.183 to 1.248/1.203 and the $\pm4$ mV tails from 1.143/1.130 to
+> 1.149/1.137, where the figure, drawn from eq. 25, reads 1.231/1.177 and
+> 1.146/1.128; the step asymmetry, which is the potential term, does not
+> move. At $T=1$ K on an anisotropic $S=1$ ($D=1$ meV, $E=0.3$ meV, 3 T)
+> the largest move is 0.044 on a peak of 2.52. Results from before are
+> not comparable.
 
 **Scope and known limitations**, worth reading before trusting specific
 numbers:
@@ -3551,8 +3588,16 @@ cannot enumerate excited states the way `mode="ED"` does:
   construction (evolve $S_j|\mathrm{GS}\rangle$ forward/backward in
   $t_2$, apply $S_k$ at each checkpoint, evolve each branch further in
   $\tau$, overlap with a fixed $S_l|\mathrm{GS}\rangle$ reference at
-  every step), then extracted via two closed-form time-domain kernels
-  (derived by inverse-Fourier-transforming $\Theta_0$ and $F_0$) rather
+  every step). $G$ carries the direct diagram; the exchange diagram, whose
+  log sits at $eV-(\epsilon_f-\epsilon_m)$, needs that difference as a
+  frequency, which $G$'s $t_2$ axis does not have, so it comes from the
+  sheared function $G_x(s,\tau)=G(-s,\tau+s)
+  =\langle\psi_l(-s-\tau)|S_k|\psi_j(-s)\rangle$, with
+  $\psi_j(t)=e^{-i(H-E_0)t}S_j|\mathrm{GS}\rangle$ the $t_2$ trajectories
+  already computed (one more short $\tau$ trajectory per $l$ per row,
+  1.5x the cost). Both are then extracted via two closed-form time-domain
+  kernels (derived by inverse-Fourier-transforming $\Theta_0$ and
+  $F_0(eV-\cdot)$) rather
   than by evaluating those functions pointwise on a discrete frequency
   grid, which does not converge robustly for this construction — see
   `kondospectrumtk/twotime.py`'s module docstring for the full
@@ -4994,3 +5039,20 @@ else:**
 
 Results from before this pass are not comparable wherever a number above
 moved; everywhere else the calculation is the one it was.
+
+### The 2026-09-26 Kondo exchange diagram
+
+Not an audit: a check of the Kondo spectrum against the paper found that
+its eq. 25 puts the third-order Kondo term's exchange-diagram log at
+$eV+\epsilon_{im}$ where the second-order T-matrix of its own
+Hamiltonian puts it at $eV-(\epsilon_f-\epsilon_m)$ (§17, "Where the
+exchange log sits"). `get_kondo_spectrum` now uses the latter on both
+`mode="ED"` and `mode="DMRG"`. Every third-order spectrum with an
+inelastic transition out of an occupied state moves, by up to 5–20% of
+the third-order term at $T=0$ and a few per cent of the total at 1 K
+(the Fig. 7d 10 T overshoots from 1.226/1.183 to 1.248/1.203); zero-bias
+values, a free $S=1/2$ at $B=0$, `order=2` and the potential term do not.
+Results from before are not comparable. The lower-level
+`kondospectrumtk.twotime.kondo_term_from_two_time` now takes
+`(t, G, Gx)` triples and raises on the old `(t, G)` pairs, and its
+kernel `K_W` is replaced by the one-sided `K_F`.

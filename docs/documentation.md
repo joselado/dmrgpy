@@ -5424,9 +5424,15 @@ requires:
   robustly (a discontinuous step function and a log singularity both
   have slowly-decaying spectral content that a finite discrete grid
   resolves poorly), which is why this construction exists in the first
-  place rather than a simpler direct approach. `twotime.py`'s functions
-  are backend-agnostic (they only ever consume a discretely-sampled
-  `G(t2,tau)` array or batches thereof) -- `edtwotimeref.py` supplies
+  place rather than a simpler direct approach. Since 2026-09-26 a second,
+  sheared function `Gx(s,tau)=G(-s,tau+s)=<psi_l(-s-tau)|Sk|psi_j(-s)>`
+  rides along, built from checkpoints of the same `t2` trajectories plus
+  one short `tau` trajectory per `l` per row: it carries the exchange
+  diagram, whose log sits at `eV-(e_f-e_m)`, a frequency `G`'s `t2` axis
+  does not have (user guide §17, "Where the exchange log sits", for why
+  that departs from the paper's eq. 25). `twotime.py`'s functions
+  are backend-agnostic (they only ever consume discretely-sampled
+  `G(t2,tau)` and `Gx(s,tau)` arrays or batches thereof) -- `edtwotimeref.py` supplies
   the same interface via exact ED eigenbasis time evolution, used both
   as the development-time reference this construction was validated
   against and as a fast, exact ground truth for `dmrgtwotime.py`'s own

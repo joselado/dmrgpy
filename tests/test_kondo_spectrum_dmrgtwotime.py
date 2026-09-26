@@ -123,7 +123,9 @@ def test_tdvp_trajectory_matches_ed_time_evolution(itensor_version):
 def test_two_time_G_matches_ed_reference_pointwise(itensor_version):
     """The full Levi-Civita-contracted G(t2,tau) construction
     (_levi_civita_coeff_G_batches_dmrg), compared point by point against
-    the ED reference on a small grid."""
+    the ED reference on a small grid -- and so is the exchange diagram's
+    sheared Gx(s,tau) = G(-s,tau+s), which the DMRG side assembles from
+    checkpoints of the same trajectories rather than from a new one."""
     from dmrgpy.kondospectrumtk.dmrgtwotime import _levi_civita_coeff_G_batches_dmrg
 
     sc = _build_chain(itensor_version)
@@ -154,13 +156,18 @@ def test_two_time_G_matches_ed_reference_pointwise(itensor_version):
                     total += c*np.conjugate(Sops[l][:, 0]).dot(phi_tau)
         return total
 
-    maxdiff = 0.
-    for t2_chunk, tau_row, G_chunk in dmrg_rows:
+    maxdiff = maxdiff_x = 0.
+    for t2_chunk, tau_row, G_chunk, Gx_chunk in dmrg_rows:
         t2 = t2_chunk[0]
         for it, tau in enumerate(tau_row):
-            diff = abs(G_chunk[0, it] - coeffG_ed(t2, tau))
-            maxdiff = max(maxdiff, diff)
+            maxdiff = max(maxdiff, abs(G_chunk[0, it] - coeffG_ed(t2, tau)))
+            maxdiff_x = max(maxdiff_x,
+                            abs(Gx_chunk[0, it] - coeffG_ed(-t2, tau + t2)))
     assert maxdiff < 1e-6
+    assert maxdiff_x < 1e-6
+    # and Gx is not G: the shear is what carries the exchange diagram's
+    # e_f-e_m frequency
+    assert max(np.max(np.abs(r[3] - r[2])) for r in dmrg_rows) > 1e-3
 
 
 @pytest.mark.parametrize("itensor_version", _BACKENDS)
@@ -190,7 +197,8 @@ def test_two_time_kondo_term_dmrg_matches_grid_consistent_ed_reference(itensor_v
     t2_grid = dt2*np.arange(-n_t2_half, n_t2_half+1)
     tau_grid = dtau*np.arange(-n_tau_half, n_tau_half+1)
     def batches():
-        yield t2_grid, _levi_civita_coeff_G_chunk(ks, t2_grid, tau_grid)
+        yield (t2_grid, _levi_civita_coeff_G_chunk(ks, t2_grid, tau_grid),
+               _levi_civita_coeff_G_chunk(ks, t2_grid, tau_grid, exchange=True))
     ed_term = kondo_term_from_two_time(t2_grid, tau_grid, batches(), eVs,
                                         omega0, Gamma0)
 

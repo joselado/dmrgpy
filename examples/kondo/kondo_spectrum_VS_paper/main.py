@@ -36,6 +36,16 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # for both diagrams, 3.5% low in the tails. tests/
 # test_kondo_spectrum_paper_fig7.py pins all of these; the plot below
 # overlays the same reference values.
+#
+# At 10 T the code is no longer ON the figure, deliberately (2026-09-26):
+# the paper draws its in-field curves from its eq. 25, which puts the
+# Kondo term's exchange-diagram log at eV+eps_im, and kondospectrumtk puts
+# it at eV-(e_f-e_m), where the second-order T-matrix of the paper's own
+# Hamiltonian has it (conductance.py's module docstring,
+# tests/test_kondo_spectrum_tmatrix.py). Zero bias and B=0 are unchanged;
+# the 10 T overshoots move from the figure's 1.231/1.177 to 1.248/1.203,
+# while their difference -- the potential term, which the change does not
+# touch -- still reads as the figure's.
 import numpy as np
 import matplotlib.pyplot as plt
 from dmrgpy import spinchain
@@ -132,15 +142,18 @@ _, d3d0 = sc0.get_kondo_spectrum(eVs_fig3, site=0, Jrho_s=-0.05, U=0.25,
                                  T=1.0, order=3, omega0=20e-3)
 assert np.allclose(d3d0, d3d0[::-1], atol=1e-10) and np.argmax(d3d0) == 80
 # and at 10 T its sign and size show up as the step asymmetry of Fig. 3d
-# (digitized: overshoots 1.231 at -1.7 mV and 1.177 at +1.7 mV)
+# (digitized: overshoots 1.231 at -1.7 mV and 1.177 at +1.7 mV, a
+# difference of 0.054; the overshoots themselves sit 0.02 above the
+# figure's, see the header)
 _, d3d10 = make_chain(10.0).get_kondo_spectrum(eVs_fig3, site=0, Jrho_s=-0.05,
                                                U=0.25, T=1.0, order=3,
                                                omega0=20e-3)
 d3d10 = d3d10/(2*np.pi)
-print("Fig. 3d 10 T overshoots: %.3f / %.3f (paper: 1.231 / 1.177)"
-      %(d3d10[eVs_fig3 < -1e-3].max(), d3d10[eVs_fig3 > 1e-3].max()))
-assert abs(d3d10[eVs_fig3 < -1e-3].max() - 1.231) < 0.012
-assert abs(d3d10[eVs_fig3 > 1e-3].max() - 1.177) < 0.012
+left10, right10 = d3d10[eVs_fig3 < -1e-3].max(), d3d10[eVs_fig3 > 1e-3].max()
+print("Fig. 3d 10 T overshoots: %.3f / %.3f (paper, from its eq. 25: "
+      "1.231 / 1.177)"%(left10, right10))
+assert abs(left10 - 1.248) < 0.003 and abs(right10 - 1.203) < 0.003
+assert abs((left10 - right10) - 0.054) < 0.012 # the odd term, as the figure
 
 print("All Kondo-spectrum checks against the paper's Figs. F/2/3 passed.")
 
@@ -206,8 +219,8 @@ for Bfield in [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]:
     _, dfig = make_chain(Bfield).get_kondo_spectrum(
             eVs_fig3, site=0, Jrho_s=-0.05, U=0.25, T=1.0, order=3, omega0=20e-3)
     axes[0, 2].plot(eVs_fig3*1e3, dfig/(2*np.pi), label="B=%g T"%Bfield)
-axes[0, 2].plot([-1.67, 1.69], [1.231, 1.177], "ko", ms=4, label="paper, 10 T overshoots")
-axes[0, 2].plot([-4, 4], [1.146, 1.128], "ks", ms=4, label="paper, 10 T tails")
+axes[0, 2].plot([-1.67, 1.69], [1.231, 1.177], "ko", ms=4, label="paper (eq. 25), 10 T overshoots")
+axes[0, 2].plot([-4, 4], [1.146, 1.128], "ks", ms=4, label="paper (eq. 25), 10 T tails")
 axes[0, 2].axhline(1.39, color="gray", lw=0.8, ls=":")
 axes[0, 2].set_xlabel("eV (meV)")
 axes[0, 2].set_ylabel(r"dI/dV ($e^2T_0^2/h$)")

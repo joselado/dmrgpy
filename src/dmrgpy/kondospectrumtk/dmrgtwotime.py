@@ -5,7 +5,7 @@ from .twotime import kondo_term_from_two_time
 # replacing edtwotimeref.py's exact eigenbasis time evolution with real
 # TDVP time evolution -- avoiding excited-state enumeration/
 # diagonalization entirely, as requested. Reuses the exact same kernel
-# machinery (theta0_filter, K_W) already validated against the
+# machinery (theta0_filter, K_F) already validated against the
 # excited-state-sum third_order_kondo_dIdV via edtwotimeref.py, since
 # that machinery only ever consumes a discretely-sampled G(t2,tau) array
 # -- it does not care how G was computed.
@@ -50,8 +50,8 @@ from .twotime import kondo_term_from_two_time
 #   2. step |psi_j(0)> forward AND backward in time (tdvp_step with
 #      +dt2/-dt2) to get a trajectory of checkpoints |psi_j(t2)> across
 #      the full t2_grid (both signs, since G(t2,tau) is needed for
-#      negative t2 too -- see twotime.py's K_W kernel, defined for all
-#      real t2)
+#      negative t2 too -- see twotime.py's K_F kernel, defined for all
+#      real t2, and step 6, which reads the trajectory at -s)
 #   3. at each checkpoint, apply each k in {Sx,Sy,Sz}: |phi_jk(t2)> =
 #      Sk|psi_j(t2)>
 #   4. step |phi_jk(t2)> forward AND backward across the full tau_grid,
@@ -60,13 +60,22 @@ from .twotime import kondo_term_from_two_time
 #      gives G_jkl(t2,tau) for that (j,k,l) triple
 #   5. combine via the Levi-Civita contraction (as edtwotimeref.py does)
 #      into the single coeffG(t2,tau) twotime.py's kernels consume.
+#   6. the exchange diagram's sheared function (twotime.py's module
+#      docstring), Gx(s,tau) = G(-s,tau+s) = <psi_l(-s-tau)|Sk|psi_j(-s)>
+#      with psi_l(t) = exp(-i(H-E0)t) Sl|GS>: at each row s, step
+#      psi_l(-s) -- already a checkpoint of step 2's trajectory for l --
+#      across the tau_grid, and overlap every checkpoint with
+#      Sk|psi_j(-s)> (also from step 2). No new long evolution is needed:
+#      the shear only picks which checkpoints meet.
 #
 # This costs, per t2 checkpoint (of which there are len(t2_grid)), one
-# tau-direction trajectory per (j,k) pair (9 combinations, several
-# vanishing by antisymmetry but computed generically here) -- i.e.
-# O(len(t2_grid)) separate short TDVP trajectories, each
-# O(len(tau_grid)) steps. This is the "N_t2 separate DMRG runs" cost
-# flagged from the start of this feature's design discussion.
+# tau-direction trajectory per (j,k) pair with j != k (six; the three
+# with j == k vanish by antisymmetry and are skipped) for G, plus one per
+# l (three) for Gx -- i.e. O(len(t2_grid)) separate short TDVP
+# trajectories, each O(len(tau_grid)) steps. This is the "N_t2 separate
+# DMRG runs" cost flagged from the start of this feature's design
+# discussion; Gx, added on 2026-09-26 when the exchange log moved to
+# eV-(e_f-e_m), made it 1.5x.
 
 _AXES = ("Sx", "Sy", "Sz")
 
@@ -131,9 +140,12 @@ def _tdvp_trajectory(chain, Hop, wf0, dt, n_half):
 
 def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
                                        n_tau_half, t2_batch=1):
-    """Generator of (t2_chunk, G_chunk) pairs -- see twotime.py's
-    kondo_term_from_two_time for the contract -- built via real TDVP
+    """Generator of (t2_chunk, tau_row, G_chunk, Gx_chunk) rows -- see
+    twotime.py's kondo_term_from_two_time for the contract on the
+    (t2_chunk, G_chunk, Gx_chunk) it consumes -- built via real TDVP
     time evolution instead of edtwotimeref.py's eigenbasis shortcut.
+    Gx_chunk is the exchange diagram's Gx(s,tau) at s = t2 (this module's
+    step 6).
     t2_batch=1 here (each checkpoint's tau-trajectory is its own
     "chunk"): unlike the ED case, there is no cheap way to batch many t2
     checkpoints into one vectorized array, since each one requires its
@@ -174,7 +186,25 @@ def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
                     if c == 0.: continue
                     overlap = np.array([ref_wf[l].dot(wf) for wf in tau_wfs])
                     G_row[0, :] += c*overlap
-        yield np.array([t2]), tau_grid_row, G_row
+        # exchange diagram (step 6): Gx(s,tau) = <psi_l(-s-tau)|Sk|psi_j(-s)>
+        # at s = t2; the t2 grid is symmetric, so -s is the mirrored index
+        mirror = n_t2 - 1 - it2
+        kets = {(j, k): ops[k][site]*t2_wfs_by_j[j][mirror]
+                for j in _AXES for k in _AXES if j != k}
+        Gx_row = np.zeros((1, 2*n_tau_half + 1), dtype=complex)
+        for ll, l in enumerate(_AXES):
+            # checkpoints psi_l(-s+tau') for tau' on the tau grid; reversed,
+            # entry n is psi_l(-s-tau_n) (the grid is symmetric)
+            _, bras = _tdvp_trajectory(chain, Hop, t2_wfs_by_j[l][mirror],
+                                       dtau, n_tau_half)
+            bras = bras[::-1]
+            for jj, j in enumerate(_AXES):
+                for kk, k in enumerate(_AXES):
+                    c = _EPS3[jj, kk, ll]
+                    if c == 0.: continue
+                    Gx_row[0, :] += c*np.array([b.dot(kets[(j, k)])
+                                                for b in bras])
+        yield np.array([t2]), tau_grid_row, G_row, Gx_row
 
 
 def two_time_kondo_term_dmrg(chain, site, eVs, omega0=20e-3, Gamma0=5e-6,
@@ -185,7 +215,7 @@ def two_time_kondo_term_dmrg(chain, site, eVs, omega0=20e-3, Gamma0=5e-6,
 
     dt2/n_t2_half and dtau/n_tau_half set the (uniform) time grids in
     each leg and have no default (all four required): see twotime.py's
-    module docstring for the resolution/range requirements (K_W needs t2
+    module docstring for the resolution/range requirements (K_F needs t2
     spacing finer than 1/omega0 and a range wider than several/Gamma0).
     The Hilbert-transform-based Theta0 filter is NOT as forgiving about
     dtau/n_tau_half as this docstring used to claim: measured directly on
@@ -218,9 +248,9 @@ def two_time_kondo_term_dmrg(chain, site, eVs, omega0=20e-3, Gamma0=5e-6,
             "for arbitrary omega0/Gamma0 -- see this function's own "
             "docstring")
     def batches():
-        for t2_chunk, _tau_row, G_chunk in _levi_civita_coeff_G_batches_dmrg(
+        for t2_chunk, _tau_row, G_chunk, Gx_chunk in _levi_civita_coeff_G_batches_dmrg(
                 chain, site, dt2, n_t2_half, dtau, n_tau_half):
-            yield t2_chunk, G_chunk
+            yield t2_chunk, G_chunk, Gx_chunk
 
     # kondo_term_from_two_time only needs t2_grid/tau_grid for their
     # spacing (dt2/dtau) and midpoint check, both fully determined by the

@@ -67,18 +67,48 @@ from .stepfunctions import Theta, Theta0, FBuilder, F0
 # with the opposite sign (the paper's eqs. 20/21 "with a change of sign").
 # For the Kondo term the trace is the antisymmetric Levi-Civita one, so
 # the two sign flips cancel and both orders enter with the SAME
-# coefficient, F(eV-eps_im) + F(eV+eps_im) (eqs. 24/25). For the
-# potential-interference term the trace is the symmetric delta_kj, so
-# only the hole-like sign flip survives and the two orders enter with
-# OPPOSITE signs, F(eV-eps_im) - F(eV+eps_im). That difference is what the
-# paper's Fig. 7c actually shows (121u and 121uR are mirror images with
-# opposite sign, their sum is smooth through zero bias), and it has two
-# consequences the summed form does not have: the elastic intermediate
-# state m=i cancels identically (no sign(eV)*F(eV) spike at zero bias),
-# and at B=0 the whole term vanishes -- which is why the paper's Fig. 7d
-# (U=0.25) is exactly symmetric at 0 T with the same peak position as
-# Fig. 7b. Until 2026-09-12 this term used the summed form; see
-# third_order_potential_dIdV's docstring for what that changed.
+# coefficient. For the potential-interference term the trace is the
+# symmetric delta_kj, so only the hole-like sign flip survives and the two
+# orders enter with OPPOSITE signs, F(eV-eps_im) - F(eV+eps_im). That
+# difference is what the paper's Fig. 7c actually shows (121u and 121uR
+# are mirror images with opposite sign, their sum is smooth through zero
+# bias), and it has two consequences the summed form does not have: the
+# elastic intermediate state m=i cancels identically (no sign(eV)*F(eV)
+# spike at zero bias), and at B=0 the whole term vanishes -- which is why
+# the paper's Fig. 7d (U=0.25) is exactly symmetric at 0 T with the same
+# peak position as Fig. 7b. Until 2026-09-12 this term used the summed
+# form; see third_order_potential_dIdV's docstring for what that changed.
+#
+# Where the exchange diagram's log sits. The direct diagram tunnels first:
+# its intermediate state is the tunnelled electron in the sample plus the
+# impurity in m, on shell at the sample Fermi edge when eV = e_m - e_i, so
+# F(eV - eps_im). The exchange diagram scatters a sample electron first,
+# into the outgoing state, leaving a hole; that intermediate state is on
+# shell when the hole is at the Fermi edge, which fixes the OUTGOING
+# electron's energy at e_i - e_m, and the outgoing electron has eV - eps_if
+# at the tip's Fermi edge. So the exchange log is F(eV - (e_f - e_m)).
+# This DEPARTS FROM THE PAPER: its eq. 25 (and its Fig. 6 caption,
+# F(E_m - E_i + eV)) has F(eV - eps_mi) = F(eV + eps_im), which measures
+# the log from the incoming energy eV, i.e. as if the impurity absorbed
+# nothing. The two agree when f = i -- so the potential term, whose
+# I_fi forces f = i, is the same either way -- and whenever every state
+# the initial one connects to is degenerate with it (a free S=1/2 at
+# B=0, a Kramers doublet). Any field, anisotropy or exchange splitting
+# separates them. tests/test_kondo_spectrum_tmatrix.py builds the
+# second-order T-matrix of the paper's own Hamiltonian as explicit fermion
+# x impurity operators, with every intermediate Fock state's denominator
+# read off H0, and this module agrees with it to 1e-15 on anisotropic
+# S=1 and exchange-coupled impurities in tilted fields; the printed form
+# missed it by 5-20% of the third-order term.
+#
+# NUMBERS CHANGED on 2026-09-26 for every third-order Kondo term with an
+# inelastic transition out of an occupied state (any B != 0, any
+# anisotropy, any coupled spin), on mode="ED" and mode="DMRG" alike. For
+# the paper's own Fig. 7d at 10 T the step overshoots move from
+# 1.226/1.183 to 1.248/1.203 and the +-4 mV tails from 1.143/1.130 to
+# 1.149/1.137 (2pi*e^2T0^2/h units); the paper's figure, drawn from its
+# eq. 25, reads 1.231/1.177 and 1.146/1.128. Zero-bias values, B=0,
+# order=2 and the U term are untouched.
 
 
 def _theta_raw(ks, x):
@@ -160,7 +190,8 @@ def _triple_product_coefficients(ks, occ=None):
     """coeff[i,f,m] = sum_jkl eps_jkl <i|S_l|f><f|S_k|m><m|S_j|i>, the
     Levi-Civita triple product appearing in eq. "3rd-normal"/"3rd-reversed"
     (both give the identical coefficient; only the F(...) argument
-    differs between the direct and exchange diagrams).
+    differs between the direct and exchange diagrams, see the module
+    docstring for which).
 
     occ: indices of the initial states i to build it for (the first axis
     of the result then runs over occ, in that order); None means all of
@@ -193,14 +224,23 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     be. The overall normalization carries the "SA factor" 2 of this
     module's docstring, i.e. the Levi-Civita coefficient is Im[X]/2.
 
+    The direct diagram enters as F(eV - eps_im) and the exchange diagram
+    as F(eV - (e_f - e_m)), NOT the paper's printed F(eV - eps_mi): see
+    the module docstring for why, and for what that changed on
+    2026-09-26.
+
     This is an O(n_occ * dim^2 * len(eVs)) calculation, n_occ being the
     number of thermally occupied initial states (p_cut, see P_CUT: one
     state at T=0 for a non-degenerate ground state), inherent to the
     triple sum over eigenstates -- the f and m sums always run over the
-    full spectrum, since m is a virtual intermediate state. It used to be
-    O(dim^3) in both time and memory regardless of T (the full
-    coefficient tensor was built for every i, 3.4 GB and 13 s at dim=512
-    even at T=0, where all but one row of it is multiplied by p_i=0).
+    full spectrum, since m is a virtual intermediate state. The exchange
+    diagram's F depends on the (f, m) pair rather than on (i, m), so it
+    costs dim^2 F evaluations per bias point whatever n_occ is; they are
+    made in chunks of bias points, which bounds the memory at a few
+    million entries. It used to be O(dim^3) in both time and memory
+    regardless of T (the full coefficient tensor was built for every i,
+    3.4 GB and 13 s at dim=512 even at T=0, where all but one row of it is
+    multiplied by p_i=0).
 
     Fb: an existing FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
     to reuse instead of building a new one -- building it tabulates
@@ -217,17 +257,26 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     # array (e[None,:]-e[occ,None]) under two names for readability at the
     # call sites below; the first axis runs over occ
     eps_if = eps_im = ks.e[None, :] - ks.e[occ, None]
+    e_fm = ks.e[:, None] - ks.e[None, :] # e_fm[f,m] = e_f - e_m
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
     dim, nocc = ks.dim, len(occ)
+    chunk = max(1, int(4e6)//(dim*dim)) # bias points per block of F calls
 
     def one_direction(v):
         """d(I^{t->s})/dV at bias v; the s->t direction is this same
-        expression at -v (only eV flips, not eps_if/eps_im)."""
-        Fim = Fcall((v[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
-        Fmi = Fcall((v[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
-        Th = _theta_raw(ks, v[:, None, None] - eps_if[None, :, :])
-        Fsum = Fim + Fmi # direct (eps_im) + exchange (eps_mi=-eps_im) diagrams
-        return np.einsum('i,ifm,eif,eim->e', p, coeff, Th, Fsum, optimize=True)
+        expression at -v (only eV flips, not eps_if/eps_im/e_fm)."""
+        out = np.empty(len(v))
+        for s0 in range(0, len(v), chunk):
+            vc = v[s0:s0+chunk]
+            nv = len(vc)
+            Th = _theta_raw(ks, vc[:, None, None] - eps_if[None, :, :])
+            # direct diagram: log at eV = e_m - e_i
+            Fd = Fcall((vc[:, None, None] - eps_im[None, :, :]).ravel()).reshape(nv, nocc, dim)
+            # exchange diagram: log at eV = e_f - e_m
+            Fx = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()).reshape(nv, dim, dim)
+            out[s0:s0+nv] = (np.einsum('i,ifm,eif,eim->e', p, coeff, Th, Fd, optimize=True)
+                             + np.einsum('i,ifm,eif,efm->e', p, coeff, Th, Fx, optimize=True))
+        return out
 
     total = one_direction(eVs) + one_direction(-eVs) # eq. "sym_z": same sign
     return 4*np.pi*T0**2*Jrho_s*total
@@ -253,7 +302,10 @@ def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
 
     The direct and exchange diagrams enter with OPPOSITE signs,
     F(eV-eps_im) - F(eV+eps_im), not the summed combination the Kondo term
-    has -- see the module docstring for why (a symmetric electron trace
+    has (with f = i the exchange log F(eV - (e_f - e_m)) is F(eV+eps_im),
+    the paper's eq. 25 argument, so this term is unaffected by the
+    2026-09-26 change to the Kondo term) -- see the module docstring for
+    why (a symmetric electron trace
     leaves the hole-like sign flip of the reversed order uncompensated),
     and the paper's Fig. 3c (arXiv v1: Fig. 7c), where the 121u and 121uR
     curves are mirror images of opposite sign and their sum is smooth

@@ -200,8 +200,10 @@ def test_third_order_kondo_eps_if_sign_on_asymmetric_spectrum():
     S=1 impurity with both anisotropy and a field has a non-degenerate,
     asymmetric-under-relabeling spectrum, so it does distinguish the two
     conventions: cross-check third_order_kondo_dIdV against an
-    independently written reference that only uses the (m,i) energy
-    differences and Boltzmann weights, not the module's own eps_if."""
+    independently written reference that only uses the eigenenergies and
+    Boltzmann weights, not the module's own eps_if. The same spectrum is
+    what separates the exchange diagram's F(eV-(e_f-e_m)) from the paper's
+    printed F(eV+eps_im), since that needs e_f != e_i."""
     sc = spinchain.Spin_Chain(["1"])
     D, B = 3e-4, 4.0
     sc.set_hamiltonian(D*sc.Sz[0]*sc.Sz[0] + G*MUB*B*sc.Sz[0])
@@ -235,8 +237,11 @@ def test_third_order_kondo_eps_if_sign_on_asymmetric_spectrum():
                     th = Theta(np.array([(v - eps_if_ref)/kT]))[0]
                     for m in range(ks.dim):
                         eps_im_ref = ks.e[m] - ks.e[i]
+                        # direct diagram's log at e_m-e_i, exchange
+                        # diagram's at e_f-e_m (conductance.py's module
+                        # docstring; the paper's eq. 25 has -eps_im_ref)
                         fsum = (Fb(np.array([v - eps_im_ref]))[0]
-                                + Fb(np.array([v + eps_im_ref]))[0])
+                                + Fb(np.array([v - (ks.e[f] - ks.e[m])]))[0])
                         acc += ks.p[i]*coeff[i, f, m]*th*fsum
         ref[e_idx] = 4*np.pi*1.0**2*Jrho_s*acc
     assert np.allclose(got, ref, atol=1e-8)

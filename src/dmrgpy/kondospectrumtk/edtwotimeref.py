@@ -22,15 +22,23 @@ for _i, _j, _k in [(0, 2, 1), (2, 1, 0), (1, 0, 2)]:
 _AXES = ("Sx", "Sy", "Sz")
 
 
-def _levi_civita_coeff_G_chunk(ks, t2_chunk, tau_grid):
+def _levi_civita_coeff_G_chunk(ks, t2_chunk, tau_grid, exchange=False):
     """coeffG(t2,tau) = sum_jkl eps_jkl <GS|Sl(t2+tau)Sk(t2)Sj(0)|GS>,
     the full Levi-Civita-contracted two-time correlator (eq. "3rd-normal"'s
     triple product, now as a function of two real times instead of three
-    discrete states), on one t2-chunk x the full tau_grid."""
+    discrete states), on one t2-chunk x the full tau_grid.
+
+    exchange=True returns the exchange diagram's sheared counterpart
+    instead, coeffGx(s,tau) = coeffG(-s,tau+s), with t2_chunk read as s:
+    the phase exp(-i*(e_f-e_m)*s) that carries the exchange log at
+    eV-(e_f-e_m) (twotime.py's module docstring)."""
     e = ks.e
     ops = {"Sx": ks.Sx, "Sy": ks.Sy, "Sz": ks.Sz} # ops[name][a,b] = <a|S|b>
-    phase_t2 = np.exp(-1j*np.outer(t2_chunk, e)) # (nb, dim)
+    sign = 1. if exchange else -1.
+    phase_t2 = np.exp(sign*1j*np.outer(t2_chunk, e)) # (nb, dim), on m
     phase_tau = np.exp(-1j*np.outer(tau_grid, e)) # (ntau, dim)
+    # exp(-i*e_f*s) on f, the tau+s shift of the exchange grid
+    phase_f = np.exp(-1j*np.outer(t2_chunk, e)) if exchange else 1.
     out = np.zeros((len(t2_chunk), len(tau_grid)), dtype=complex)
     for jj, j in enumerate(_AXES):
         v0 = ops[j][:, 0] # Sj|GS> in the eigenbasis
@@ -41,7 +49,7 @@ def _levi_civita_coeff_G_chunk(ks, t2_chunk, tau_grid):
                 c = _EPS3[jj, kk, ll]
                 if c == 0.: continue
                 ref_l = ops[l][:, 0] # <GS|Sl, for the final overlap
-                weighted = phi_t2*np.conjugate(ref_l)[None, :]
+                weighted = phi_t2*np.conjugate(ref_l)[None, :]*phase_f
                 out += c*(weighted @ phase_tau.T)
     return out
 
@@ -58,9 +66,10 @@ def two_time_kondo_term_ed(ks, eVs, omega0=20e-3, Gamma0=5e-6,
     docs for why T=0 is the natural regime for this method in general).
 
     t2_width/tau_width default to scales tied to Gamma0/omega0 (see
-    module docstring in twotime.py for why K_W needs t2 resolution finer
-    than 1/omega0 and range wider than ~1/Gamma0). G(t2,tau) is built
-    once per t2-chunk and reused for the whole eVs sweep."""
+    module docstring in twotime.py for why K_F needs t2 resolution finer
+    than 1/omega0 and range wider than ~1/Gamma0). G(t2,tau) and its
+    exchange counterpart Gx(s,tau) are built once per t2-chunk and reused
+    for the whole eVs sweep."""
     if ks.T != 0.: raise ValueError("two_time_kondo_term_ed requires T=0")
     if t2_width is None: t2_width = 40./Gamma0
     if tau_width is None: tau_width = 2*np.pi/1e-5
@@ -70,7 +79,9 @@ def two_time_kondo_term_ed(ks, eVs, omega0=20e-3, Gamma0=5e-6,
     def batches():
         for start in range(0, t2_npts, t2_batch):
             t2_chunk = t2_grid[start:start+t2_batch]
-            yield t2_chunk, _levi_civita_coeff_G_chunk(ks, t2_chunk, tau_grid)
+            yield (t2_chunk, _levi_civita_coeff_G_chunk(ks, t2_chunk, tau_grid),
+                   _levi_civita_coeff_G_chunk(ks, t2_chunk, tau_grid,
+                                              exchange=True))
 
     return kondo_term_from_two_time(t2_grid, tau_grid, batches(), eVs,
                                      omega0, Gamma0)
