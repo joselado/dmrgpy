@@ -102,8 +102,8 @@ parallel. Previous sets, to vary rather than repeat:
 
 Out of scope by construction, and stated in the record so the exclusion is on
 the page rather than in someone's head: vendored ITensor (`mpscpp2/ITensor/`,
-`mpscpp3/ITensor/`); the legacy bugs `CLAUDE.md` says are deliberately
-reproduced (`evoloperator`'s z^3/6 term on `H2`, the `"moise"` key, the
+`mpscpp3/ITensor/`); the legacy bugs `.claude/rules/cpp-backend.md` lists as
+deliberately reproduced (`evoloperator`'s z^3/6 term on `H2`, the `"moise"` key, the
 unreachable `"tevol_fit_td"` branch); the open `docs/known_issue_*.md` items;
 anything already in an earlier audit record; and gaps `ROADMAP.md` already marks as
 absent. Decide explicitly whether `itensor_version="julia_live"` is in scope,
@@ -240,15 +240,23 @@ A fix that makes a previously-returned number different is a different kind of
 event from a fix that makes a crash stop, because saved results elsewhere are
 now not comparable. Every such fix gets `NUMBERS CHANGE` in its `**Status**`
 line, naming the old value, the new one and the exact chain it was measured on,
-and the consolidated list goes into `CLAUDE.md`'s paragraph for that audit.
+and the consolidated list goes into section 21 of `docs/user_guide.md` (and
+its `.tex`), under a heading for that audit, as every hunt since 2026-09 has
+done.
 Other projects save results produced by this library, so this is not
 bookkeeping.
 
 ## 7. Close the loop
 
-Update `CLAUDE.md` with a paragraph for the hunt: how many lenses, how many
-findings, where the regressions live, which fixes changed numbers, and which
-items are open rather than fixed. An open item stays in the record with what is
+Close the loop in three places. The record itself gets its scope section, its
+lens table and a `**Status**` line per finding. Section 21 of
+`docs/user_guide.md` gets the ledger of numbers that changed (section 6).
+`CLAUDE.md`'s "The audits, and what to know before touching the code" gets
+the hunt added to its list of records and, for each durable rule the fixes
+left (a threshold made relative, a dispatch moved, an invariant a later
+change must respect), one bullet naming the test that pins it; it does not
+get the ledger, the measurements or the story of the hunt, which live in the
+record. An open item stays in the record with what is
 known about it, the way the `kpm_energy_truncate` window problem and the
 `submode="TD"`/`"TDZ"` convention items did, rather than being dropped because
 it did not get fixed.

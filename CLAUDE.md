@@ -1,6 +1,18 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with
+code in this repository. It holds what every session needs: how to build, how
+to test, the architecture, and the rules the audits taught. Three parts of
+the codebase have their own notes under `.claude/rules/`, loaded only when a
+file they cover is read or edited: `cpp-backend.md` (the pybind11 extension,
+`mpscpp2/` and `mpscpp3/`), `infinite-chain.md` (iDMRG and VUMPS on both
+backends) and `kondo.md` (`kondospectrumtk/`). They load when the Read,
+Write or Edit tool touches a matching file, not when a shell command prints
+it, so a session that reads with `cat` or `sed` opens the matching one by
+hand before touching those files; a pointer at the place each used to live
+says where it went. The history of every fix, with its repro and its reviewer, is in
+`docs/audit_*.md`, and the ledger of every result that changed is section 21
+of `docs/user_guide.md`.
 
 ## What this is
 
@@ -10,24 +22,25 @@ It exposes a single Python API (`src/dmrgpy/`) backed by interchangeable
 solvers per calculation:
 
 - **DMRG**, executed in-process via a pybind11 extension over ITensor
-  (C++, either v2 or v3 -- see below), or via a separate Julia/ITensors.jl
-  backend
+  (C++, either v2 or v3, see below), via a pure-Python reimplementation
+  (`itensor_version="python"`), or via a live Julia/ITensors.jl backend
 - **ED** (exact diagonalization), a pure-Python fallback used for small
   systems, for cross-checking DMRG results, and automatically whenever the
-  C++ extension isn't compiled
+  C++ extension is not compiled
 
 The Python layer is what this project actually develops. The C++/ITensor
 backends under `src/dmrgpy/mpscpp2/ITensor/` (ITensor v2) and
 `src/dmrgpy/mpscpp3/ITensor/` (ITensor v3) are vendored copies of the
-ITensor library maintained upstream — treat them as black boxes, not code
-to read or modify here.
+ITensor library maintained upstream: treat them as black boxes, not code to
+read or modify here. Read them only if some feature does not work with the
+`mpscpp2`/`mpscpp3` code and you need to figure out why.
 
 ## Install / build
 
-There is a `pyproject.toml`, but it is *only* for building the PyPI
-distribution (see "Packaging / PyPI" below) -- it is not how this repo is
-developed. For development the project is used from `src/` via a path
-added to `PYTHONPATH` (or a symlink into `site-packages`), which is what
+There is a `pyproject.toml`, but it is only for building the PyPI
+distribution (see "Packaging / PyPI" below); it is not how this repo is
+developed. For development the project is used from `src/` via a path added
+to `PYTHONPATH` (or a symlink into `site-packages`), which is what
 `install.py` sets up; there is no `setup.py` and no editable install.
 
 ```bash
@@ -35,84 +48,76 @@ python install.py                    # compiles ITensor v2 (mpscpp2) + its pybin
 python install.py --itensor-version=3    # compiles ITensor v3 (mpscpp3) instead
 python install.py --itensor-version=both # compiles both v2 and v3 backends
 python install.py --gpp=g++-6        # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
+python install.py --doctor           # only the requirement checks, no multi-minute ITensor build
 python install_julia.py              # alternative: Julia backend instead of/alongside C++
 ```
 
 `install.py` runs in two phases: `installtk/requirements.py` first checks
-every build requirement -- OS, `make`, a C++ compiler, LAPACK/BLAS,
-`pybind11` -- actually trial-compiling/trial-linking each one (not just
-checking a version string), and only once everything checks out does
-`installtk/install2.py` compile the vendored ITensor static library and
-the `pybind` Makefile target for whichever backend(s) `--itensor-version`
+every build requirement (OS, `make`, a C++ compiler, LAPACK/BLAS,
+`pybind11`), actually trial-compiling and trial-linking each one rather
+than checking a version string, and only once everything checks out does
+`installtk/install2.py` compile the vendored ITensor static library and the
+`pybind` Makefile target for whichever backend(s) `--itensor-version`
 selects (`2` = mpscpp2/ITensor v2; `3` = mpscpp3/ITensor v3, the default;
-`both` builds both, one after the other).
-
-Both `mpscppN/Makefile`s list `$(wildcard *.h)` among the extension's
-prerequisites: without that, editing `chain_session.h` — where the actual
-DMRG implementation lives — leaves `make pybind` reporting "Nothing to be
-done" while the `.so` keeps the old code, which is a confusing way to test a
-change that was never compiled.
-
-`install2.py` picks the right
+`both` builds both, one after the other). `install2.py` picks the right
 `mpscppN` directory and C++ language standard per version (v2 needs only
 C++14; v3 needs C++17 with the concepts TS extension, `-fconcepts`, see
 `mpscpp3/ITensor/options.mk.sample`'s own `CCCOM` line) but otherwise runs
 the identical compiler/BLAS/LAPACK configuration resolved in phase 1.
-`pybind11` is a hard requirement (auto-installed via `pip` into the
-current interpreter if missing, since the pybind11 extension is the only
-DMRG backend besides ED). The compiler is auto-detected rather than
-defaulting to plain `g++`, via a cascade of candidates rather than a
-single guess: `installtk/requirements.py::_compiler_candidates()` yields
-a conda-provided compiler first when running under a conda Python
+`pybind11` is a hard requirement (auto-installed via `pip` into the current
+interpreter if missing, since the pybind11 extension is the only DMRG
+backend besides ED and `"python"`).
+
+The compiler is auto-detected via a cascade of candidates rather than a
+single guess: `installtk/requirements.py::_compiler_candidates()` yields a
+conda-provided compiler first when running under a conda Python
 (`installtk/cppversion.py::find_conda_compiler()` looks for one, e.g. the
-`gxx_linux-64` package, next to the running interpreter -- preferred
-because the extension is loaded into the same process as conda's own
-numpy/scipy, which bundle their own libstdc++, and building against the
-system compiler instead has reproducibly segfaulted in the past, see the
-long comment in `mpscpp2/Makefile`), then falls back to the system
-`g++`/`c++` on PATH if that candidate doesn't actually work (`--gpp`
-overrides the whole cascade with a single hard choice). Each candidate is
-verified for real, not just checked for existence: besides an actual
-trial compile+link (`cppversion.trial_compile()`),
-`cppversion.backend_missing()` proactively asks the driver
-(`gpp -print-prog-name=cc1plus`) whether it can even locate its own
-compilation backend, since `--version`/`shutil.which()` both pass for a
-compiler binary that's present but incomplete. This isn't hypothetical:
-confirmed directly on Aalto's Triton cluster, whose `scicomp-python-env`
-module ships a conda-style Python distribution with exactly such a
-broken `x86_64-conda-linux-gnu-g++` wrapper (no matching `cc1plus`
-installed) -- the cascade transparently falls back to Triton's login-node
-system compiler in that case and prints a note about it.
-`installtk/cppversion.py::lmod_state()` detects environment-module
-systems (Lmod, via `$LMOD_CMD`/`$MODULEPATH`) so failure messages can
-suggest `module load ...` instead of the sudo-based apt-get/brew hints
-that are meaningless (no sudo) or simply wrong on a cluster; `check()`
-also prints a reminder to reload the same modules/conda environment used
-at install time in any later session that imports `dmrgpy`, since the
-compiled extension depends on them being present again at import time.
-`install.py --doctor` runs only this requirement-checking phase and
-exits, without starting the multi-minute ITensor build -- useful for
-diagnosing a cluster environment or reporting a bug.
-`installtk/blaslapack.py::find_working_config()`
-similarly tries several LAPACK/BLAS candidates (conda's own libs, system
-`-lblas -llapack`, OpenBLAS, and a Debian/Ubuntu-multiarch workaround that
-asks the system compiler where it actually finds `libblas.so`/
-`liblapack.so`) and picks the first one that actually links, rather than
-assuming a fixed default. Finally, `install.py` adds the repo's `src` to
-the Python path and to the user's shell rc file
+`gxx_linux-64` package, next to the running interpreter; preferred because
+the extension is loaded into the same process as conda's own numpy/scipy,
+which bundle their own libstdc++, and building against the system compiler
+instead has reproducibly segfaulted in the past, see the long comment in
+`mpscpp2/Makefile`), then falls back to the system `g++`/`c++` on PATH if
+that candidate does not actually work (`--gpp` overrides the whole cascade
+with a single hard choice). Each candidate is verified for real: besides an
+actual trial compile and link (`cppversion.trial_compile()`),
+`cppversion.backend_missing()` asks the driver (`gpp -print-prog-name=cc1plus`)
+whether it can even locate its own compilation backend, since `--version`
+and `shutil.which()` both pass for a compiler binary that is present but
+incomplete. This is not hypothetical: Aalto's Triton cluster ships a
+conda-style Python distribution with exactly such a broken
+`x86_64-conda-linux-gnu-g++` wrapper (no matching `cc1plus`), and the
+cascade falls back to the system compiler there and prints a note.
+`installtk/cppversion.py::lmod_state()` detects environment-module systems
+(Lmod, via `$LMOD_CMD`/`$MODULEPATH`) so failure messages can suggest
+`module load ...` instead of sudo-based apt-get/brew hints; `check()` also
+prints a reminder to reload the same modules or conda environment in any
+later session that imports `dmrgpy`, since the compiled extension depends
+on them being present again at import time.
+`installtk/blaslapack.py::find_working_config()` similarly tries several
+LAPACK/BLAS candidates (conda's own libs, system `-lblas -llapack`,
+OpenBLAS, and a Debian/Ubuntu-multiarch workaround that asks the system
+compiler where it actually finds `libblas.so`/`liblapack.so`) and picks the
+first one that actually links. Finally, `install.py` adds the repo's `src`
+to the Python path and to the user's shell rc file
 (`installtk/addpythonpath.py`, `installtk/addsystem.py`, both idempotent
 across reruns). There is no separate lint or CI config in this repo.
+
+Both `mpscppN/Makefile`s list `$(wildcard *.h)` among the extension's
+prerequisites: without that, editing `chain_session.h`, where the actual
+DMRG implementation lives, leaves `make pybind` reporting "Nothing to be
+done" while the `.so` keeps the old code. A C++ change is not tested until
+the `.so` has been rebuilt.
 
 ## Packaging / PyPI
 
 `pyproject.toml` builds a **pure-Python** distribution: a `py3-none-any`
 wheel (~450KB) containing the ED backend, the `itensor_version="python"`
-pyitensor DMRG/TDVP backend, and the Julia bridge. It deliberately ships
-no C++ at all. `[tool.setuptools.packages.find]` excludes `dmrgpy.mpscpp2`
-and `dmrgpy.mpscpp3` — those are ~400MB of vendored ITensor plus a build
-that needs a compiler, LAPACK/BLAS and pybind11, none of which belongs in
-a pip install. Users who want the compiled backends clone the repo and
-run `install.py`; without them everything still works via `"python"`/ED
+pyitensor DMRG/TDVP backend, and the Julia bridge. It deliberately ships no
+C++ at all. `[tool.setuptools.packages.find]` excludes `dmrgpy.mpscpp2` and
+`dmrgpy.mpscpp3`, which are ~400MB of vendored ITensor plus a build that
+needs a compiler, LAPACK/BLAS and pybind11, none of which belongs in a pip
+install. Users who want the compiled backends clone the repo and run
+`install.py`; without them everything still works via `"python"`/ED
 (`mode.py`), so the wheel is fully usable as installed.
 
 ```bash
@@ -128,11 +133,11 @@ Things in here that are load-bearing and easy to break:
   imports it at module level and sits on the unconditional
   `manybodychain -> dynamics -> kpmdmrg -> algebra.kpm` import path, so
   without it even `import dmrgpy.spinchain` raises `ModuleNotFoundError`.
-  This is unrelated to pyitensor's *own* opt-in numba/JAX matvec kernel
+  This is unrelated to pyitensor's own opt-in numba/JAX matvec kernel
   (`pyitensor/kernels.py`), which is properly `try/except`-guarded and
   genuinely optional.
 - **`requires-python = ">=3.10"` is set by numba**, which declares
-  `>=3.10`. Claiming a lower floor doesn't make dmrgpy work on 3.9 — pip
+  `>=3.10`. Claiming a lower floor does not make dmrgpy work on 3.9; pip
   just backtracks onto an ancient, untested numba/numpy pair.
 - **`setuptools>=77` in `[build-system]`**, not the more common 61: the
   `[project]` table uses PEP 639 licensing (bare SPDX `license` string plus
@@ -140,27 +145,22 @@ Things in here that are load-bearing and easy to break:
 - **The `julia` extra is `juliacall`, not `julia`.** The live backend
   migrated from PyJulia to juliacall/PythonCall.jl. The only surviving
   `import julia` is `juliarun.py`, part of the legacy subprocess path that
-  isn't reachable from the public API, so PyJulia is intentionally not
+  is not reachable from the public API, so PyJulia is intentionally not
   pulled in.
 - **`src/dmrgpy/juliapkg.json` must stay in `package-data`.** juliacall/
   juliapkg reads it at import time to resolve and precompile ITensors,
-  ITensorMPS and ITensorNHDMRG; if it's missing from the wheel,
+  ITensorMPS and ITensorNHDMRG; if it is missing from the wheel,
   `pip install dmrgpy[julia]` yields a Julia backend with no ITensors.jl.
-  (`.gitignore`'s unanchored `julia*` pattern would also swallow it —
-  hence the explicit `!src/dmrgpy/juliapkg.json` un-ignore. Don't remove
-  either one.)
-- **The classifiers say `OS Independent`**: the pip-installed package
-  (ED and `itensor_version="python"` backends) works on Windows.
-  `sites.py::initialize()` used to shell out to `mkdir -p` via
-  `subprocess` and break there, but that call was removed in `1f7b7a9`
-  ("Stop creating .mpsfolder; remove dead file-based-backend
-  leftovers"), which also means `self.path`/`.mpsfolder` is never
-  created on disk any more -- `Many_Body_Chain.clean()`, whose only job
-  was `rm -rf`-ing that folder (and whose only caller, `bandwidth()`,
-  just deleted nothing every time), was removed outright rather than
-  ported to `shutil.rmtree`, since there was nothing left for it to do.
-  The compiled C++ backends (`install.py`) remain POSIX-only and are
-  not part of the wheel regardless.
+  `.gitignore`'s unanchored `julia*` pattern would also swallow it, hence
+  the explicit `!src/dmrgpy/juliapkg.json` un-ignore. Do not remove either
+  one.
+- **The classifiers say `OS Independent`**: the pip-installed package (ED
+  and `itensor_version="python"` backends) works on Windows. Nothing in the
+  Python layer shells out any more (`sites.py::initialize()` used to run
+  `mkdir -p` via `subprocess`, removed in `1f7b7a9` along with the
+  `.mpsfolder` it created and `Many_Body_Chain.clean()`, whose only job was
+  removing that folder). The compiled C++ backends (`install.py`) remain
+  POSIX-only and are not part of the wheel regardless.
 - Every module in the wheel must at least byte-compile, or pip prints a
   `SyntaxError` on install; `python -m compileall` over the installed
   package is the cheap check.
@@ -168,956 +168,524 @@ Things in here that are load-bearing and easy to break:
 Verify a release candidate by installing the built wheel into a clean
 virtualenv (not from `src/`, so import bugs and missing package-data
 actually surface) and cross-checking the two shipped backends against each
-other — `itensor_version="python"` DMRG vs `mode="ED"` on a small chain
-should agree to ~1e-15. `dist/`/`build/` are gitignored; build artifacts
-are not committed. Note that a given version can never be re-uploaded to
-PyPI (or TestPyPI) once published — bump the version rather than trying to
-replace a release.
+other: `itensor_version="python"` DMRG against `mode="ED"` on a small chain
+should agree to ~1e-15. `dist/`/`build/` are gitignored; build artifacts are
+not committed. A given version can never be re-uploaded to PyPI (or
+TestPyPI) once published, so bump the version rather than trying to replace
+a release.
 
 ## Running / verifying changes
 
-There is a `tests/` directory with a real pytest suite (`test_spin_chain.py`,
-`test_fermion_chain.py`, `test_spinful_fermion_chain.py`,
-`test_parafermion_chain.py`, `test_dynamical_correlator.py`,
-`test_entanglement.py`, `test_excited_states.py`, `test_time_evolution.py`,
-`test_long_chain.py`, `test_jordan_wigner.py`, `test_internal_consistency.py`,
-`test_benchmarks.py`) — run it with `python run_tests.py` from the repo root
-(a thin wrapper: runs `pytest tests` from the repo root, then `clean.py`) or
-plain `pytest tests`. `tests/conftest.py` inserts this checkout's own `src/`
-at the front of `sys.path`, so — unlike running an `examples/*/*/main.py`
-script directly — pytest always exercises the current working tree's code,
-never a stale `site-packages`/symlinked checkout (see the worktree-symlink
-pitfall below). `tests/_helpers.py`'s `energy_ed_v2_v3`/`vev_ed_v2_v3` are the
+`tests/` is a real pytest suite. Run it with `python run_tests.py` from the repo root (a thin wrapper: `pytest tests`
+from the repo root, then `clean.py`) or plain `pytest tests`.
+`tests/conftest.py` inserts this checkout's own `src/` at the front of
+`sys.path`, so pytest always exercises the current working tree's code,
+never a stale `site-packages`/symlinked checkout (see the worktree pitfall
+below). `tests/_helpers.py`'s `energy_ed_v2_v3`/`vev_ed_v2_v3` are the
 standard way most tests cross-check ED against DMRG on the C++ backends (a
-`versions=` kwarg lets a test opt a specific `itensor_version` out — e.g. v3
-on an exactly-2-site chain, a real `mpscpp3` bug, see below); `versions=`
-only covers `(2, 3)` today, not the pure-Python backend
-(`itensor_version="python"`) — which is *not* to say that backend is
-untested: dozens of files in `tests/` exercise it, they just parametrize
-their own `itensor_version` instead of going through this helper.
+`versions=` kwarg lets a test opt a specific `itensor_version` out; it
+covers `(2, 3)` only, and the pure-Python backend is tested by the dozens
+of files that parametrize their own `itensor_version` instead).
 `tests/reference_data.py` holds shared golden values pinned to a specific
 historical commit (its own module docstring explains how to regenerate
-them); several individual test files also just inline their own golden
-values as local constants instead, which is equally fine for values that
-are only used in one place. When a test's assertion is against exact
-DMRG/ED agreement (not a golden regression value), prefer
-`pytest.approx(..., abs=1e-6)`-style tolerances over exact equality, since
-DMRG is iterative.
+them); several test files inline their own golden values as local
+constants instead, which is equally fine for values used in one place. When
+a test's assertion is against exact DMRG/ED agreement (not a golden
+regression value), prefer `pytest.approx(..., abs=1e-6)`-style tolerances
+over exact equality, since DMRG is iterative. The audits' regressions live
+in `tests/test_audit_<date>_<cluster>.py`, one file per fix cluster; each
+`**Status**` line in the matching `docs/audit_*.md` record names the test
+that pins it.
 
 **`itensor_version="julia_live"` tests only need to run when a change
 touches Julia code** (`mpsjulialive/`, any `*.jl` file, or a shared entry
-point like `manybodychain.py`/`infinitechain.py` that dispatches into
-that backend). These tests carry a large, mostly *fixed* cost unrelated
-to what they're actually testing: `juliacall`'s JIT compiles each
-distinct Julia function signature the first time it's called in a
-process, and this compile cost dominates wall time regardless of how
-small the test's own parameters are — confirmed directly by isolating a
-`julia_live` `metts_dynamical_correlator` call down to `nsamples=1`,
-`nwarmup=1`, `nt=1`: it still took ~73s, almost entirely JIT, versus ~27s
-of genuine algorithmic work for the same call at its normal (nsamples=40)
-parameters once the function was already warm. Reducing test parameters
-further cannot buy back that fixed cost, and it's paid independently by
-*every* distinct Julia function signature exercised across the whole
-suite (`tests -k julia_live` alone still pays it many times over), which
-is why the full suite's slowest handful of tests are almost all
-`[julia_live]`-parametrized. For a change that doesn't touch Julia code
-at all, skip them locally with `pytest tests -k "not julia_live"` (the
-parametrize id `julia_live` appears in every such test's node id) rather
-than paying this tax on every iteration; run the full suite including
-`julia_live` before finishing work that *does* touch Julia code, or
-before a release.
+point like `manybodychain.py`/`infinitechain.py` that dispatches into that
+backend). These tests carry a large, mostly fixed cost unrelated to what
+they are testing: `juliacall`'s JIT compiles each distinct Julia function
+signature the first time it is called in a process, and this compile cost
+dominates wall time regardless of how small the test's own parameters are.
+Confirmed directly by isolating a `julia_live` `metts_dynamical_correlator`
+call down to `nsamples=1`, `nwarmup=1`, `nt=1`: it still took ~73s, almost
+entirely JIT, against ~27s of genuine algorithmic work for the same call at
+its normal (nsamples=40) parameters once the function was already warm.
+Reducing test parameters further cannot buy back that fixed cost, and it is
+paid independently by every distinct Julia function signature exercised
+across the whole suite, which is why the full suite's slowest handful of
+tests are almost all `[julia_live]`-parametrized. For a change that does not
+touch Julia code at all, skip them locally with
+`pytest tests -k "not julia_live"` (the parametrize id `julia_live` appears in every such test's
+node id); run the full suite including `julia_live` before finishing work
+that does touch Julia code, or before a release.
 
 The `examples/` directory (100+ self-contained scripts, one per physical
-model or feature, organized into thematic subfolders — `groundstate/`,
-`staticcorrelators/`, `dynamical_correlator/`, `spin_models/`,
-`fermion_models/`, `boson_models/`, `time_evolution/`, `excited_states/`,
-`entanglement/`, `topological/`, `kondo/`, `non_hermitian/`,
-`finite_temperature/`, `magnetization/`, `backend_comparison/`,
-`utilities/`, `algebra/`, ...) is a second, complementary regression
-surface — broader and more exploratory than `tests/` (most scripts just
-print/plot rather than assert), but also covers more ground (every
-physical model, every dynamical-correlator submode, every backend
-combination including `"python"`). Some `examples/*/*/main.py` scripts
-*do* use real `assert`s and are meant as regression tests in the same
-spirit as `tests/` (e.g. `time_evolution/tdvp_VS_ED_time_evolution`,
+model or feature, organized into thematic subfolders) is a second,
+complementary regression surface: broader and more exploratory than
+`tests/` (most scripts just print and plot rather than assert), but
+covering more ground (every physical model, every dynamical-correlator
+submode, every backend combination including `"python"`). Some
+`examples/*/*/main.py` scripts do use real `assert`s and are meant as
+regression tests in the same spirit as `tests/` (e.g.
+`time_evolution/tdvp_VS_ED_time_evolution`,
 `backend_comparison/backend_switch_consistency`,
 `finite_temperature/thermal_purification_VS_exact`,
 `staticcorrelators/static_correlator_VS_ED`,
 `entanglement/entanglement_entropy_VS_ED`,
-`dynamical_correlator/dynamical_correlator_VS_ED` — several of these were
-added specifically to lock in bugs found and fixed in this codebase, and
-are good templates for adding another one). To run one:
+`dynamical_correlator/dynamical_correlator_VS_ED`). To run one:
 
 ```bash
 cd examples/readme_examples/static_correlator_S12 && python <script>.py
 ```
 
 `examples/readme_examples/` mirrors the snippets shown in `README.md`.
-`examples/backend_comparison/`, the `v2_VS_v3_*`-named examples living
-inside each theme folder, and `examples/dynamical_correlator/
-dynamical_correlator_v2_VS_v3` directly compare the ITensor v2 and v3 C++
-backends against each other (same script, both `itensor_version`s, small
-systems) — the fastest way to check a `mpscpp3` change didn't diverge from
+`examples/backend_comparison/` and the `v2_VS_v3_*`-named examples inside
+each theme folder directly compare the ITensor v2 and v3 C++ backends
+against each other (same script, both `itensor_version`s, small systems),
+the fastest way to check a `mpscpp3` change did not diverge from
 `mpscpp2`'s numerics. One rule if you use one as a template: pin the sweep
-schedule inside the script instead of inheriting the library defaults.
-`boson_models/v2_VS_v3_boson` did the latter and its `assert` fired
-non-deterministically on a clean tree (2 of 5 runs for the audit's
-reviewer, 5 of 7 for its hunter) — v2 and v3 were converging to the same answer,
-just not far enough to be compared at the tolerance it asserted; it now
-pins `nsweeps=80`/`maxm=100` and asserts at 1e-5 (2026-09 audit #24).
-After running examples, `python clean.py` recursively
-removes generated working directories (`.mpsfolder`, `.pychainfolder`,
+schedule inside the script instead of inheriting the library defaults
+(`boson_models/v2_VS_v3_boson` inherited them and its `assert` fired
+non-deterministically; it now pins `nsweeps=80`/`maxm=100`, 2026-09 audit
+#24). After running examples, `python clean.py` recursively removes
+generated working directories (`.mpsfolder`, `.pychainfolder`,
 `.dmrgfolder`) and stray `ERROR`/`*.OUT` files from the tree.
 
-**The 2026-08 audit.** `docs/audit_2026_08_hole_hunt.md` is the record of
-a five-lens cross-backend audit: 21 confirmed findings, each with the
-reproduction that was actually executed and an independent reviewer's
-analysis, and each marked with what was done about it. Every one is fixed
-except the `kpm_energy_truncate` window problem, which is guarded only in
-its worst regime (`docs/known_issue_kpm_energy_truncation_window.md`).
-The regressions live in `tests/test_audit_2026_08_regressions.py`. Two of
-those fixes changed numbers rather than behavior -- `submode="TD"`/`"TDZ"`
-were a factor of pi too large, and `itensor_version=3` real-time evolution
-from a non-unit-norm start was scaled by `1/||psi||^2` -- so results from
-before them are not comparable. Read `documentation.md`'s section 4.10
-before adding a new dispatch: almost every finding was a dispatch decision
-taken before the information that should inform it (a short circuit ahead
-of a cache key, a precondition ahead of the branch it qualifies, an `else`
-serving both "unsupported here" and "you typo'd it", a `**kwargs` with no
-consumer).
-
-**The 2026-09 audit.** `docs/audit_2026_09_hole_hunt.md` is the same
-thing one lens-set wider: eight lenses, 36 confirmed findings, each with
-its executed repro, its reviewer's attempt to refute it, and a `**Status**`
-line saying what was done and which test now pins it. The regressions live
-in eight files, `tests/test_audit_2026_09_<name>.py`: one per fix cluster
-(there were seven) plus one for the `dispatch-leftovers` follow-up lane.
-**#20** landed in two passes, the compute half first and the memory half
-on 2026-09-22: `idmrg.py`'s transfer chain is now `_TransferChain`, the
-per-position site tensors rather than materialized chi^4 arrays, so
-`_CorrelatorEnv`, `_canonicalize_periodic`, `imps_overlap`, the window
-environment and three of `vumps.py`'s own fixed-point sites allocate no
-chi^4 array at all (a materialized chain is still built by the dense
-eigensolve below `_DENSE_EIG_MAX`, by the ARPACK fallback and by
-`_dominant_eigenvalue_mixed`, all through `_compose_chain`). Measured on a
-2-site Heisenberg cell at maxm=64, seeded so the growth trajectory is
-identical: the tracemalloc peak of the first `vev` went 517.8 MB to 5.8 MB
-and of the growth loop 519.0 MB to 10.4 MB, peak RSS 810.8 MB to 304.1 MB,
-growth 23.92 s to 5.23 s, with every returned number unchanged to every
-printed digit (both routes on the same state agree to 4.4e-16 in the fixed
-points and 5.8e-17 in the observables). The class is deliberately not
-list-like, so a leftover `Es[p]` raises instead of quietly materializing
-again. **#3** was fixed on `itensor_version="python"` only at
-the time, the C++ VUMPS half following on 2026-09-12
-(`docs/known_issue_v3_vumps_variational_floor.md`, now FIXED — see the
-`vx_choose_fixed_point` paragraph further down). Results from before this
-audit are not comparable where it changed numbers rather than behavior,
-which it did in ten places: all `itensor_version="python"` TDVP
-real-time evolution (the default `tevol_method`, which carried an O(dt)
-error); every `"python"` `applyMPO` consumer, at the 1e-5..1e-9 level
-(`applyoperator`, `vev(npow>1)`, `gs_energy_fluctuation`, KPM/CVM, the
-MPO-Taylor stepper) and ~1.4x slower for the repeated-application ones;
-`submode="CVM_explicit"`, which was exactly 2x too large on every backend;
-`submode="ED"`, `mode="DMRG"` `submode="CVM"` and `submode="ROOTN"`, which
-now return the complex Lehmann density `i(G^R-G^A)/(2pi)`, as the
-resolvent submodes on `mode="ED"` already did (`submode="TD"`/`"TDZ"` came
-onto it on 2026-09-22, see below).
-Unchanged wherever the Lehmann weights `M_n = <GS|A|n><n|B|GS>` are real —
-`Im M_n == 0` is the discriminant, which a Hermitian pair `A = B^dagger`
-implies but does not exhaust: a real Hamiltonian with real operators has
-real `M_n` off-diagonally too. Where they are complex the two conventions
-differ by an amount comparable to the correlator's own peak (measured
-0.57 against a 0.61 peak; for `submode="ED"` the difference *is* the
-discarded imaginary part, so it can never exceed the peak);
-`vev(npow!=1)` and `gs_energy_fluctuation` on every ED
-route, which ignored `npow`/`mode=` entirely; `exponential()` on a DMRG
-backend, which computed `e^{-h}` or an unconverged 2-term Taylor series;
-`SpinBoson_Chain(maxnb=...)`, which used to build a 4-level boson
-whatever you asked for; `itensor_version="python"` parameter sweeps and
-`bandwidth()` on a *reused* chain (finding #2), which the
-pyitensor-evolution cluster recorded as wrong by up to the operator's
-full spectral width (+1.25 against an exact -2.4936 on a 6-site
-Heisenberg chain; `bandwidth()` 0.0 against an exact 2.366025) and which
-`mpsalgebra`'s bandwidth-scaled Taylor expansions, `excited_states`'
-Lagrange weight, `meanfield.py` and `thermal.py` all consume;
-`itensor_version="python"` `promote_to_dense()` followed by `gs_energy()`
-(finding #10), which re-solved unconstrained and returned the *global*
-ground state instead of the sector's (-2.3399 against -1.9408 on a 3-site
-Hubbard chain at `Nf=3`) — wrong, not merely different; and `mode="ED"`
-boson occupation projectors `bc.D[i][k]` on a number-*breaking*
-Hamiltonian (finding #4), where the ed-backend cluster recorded `P(n=1)`
-on site 0 going from -0.0626 to 0.5405 and `sum_k P` from 0.031 to 1.000
-(number-conserving Hamiltonians are unchanged to machine precision).
-`src/dmrgpy/dynamics.py`'s module docstring is now
-the single normative statement of the correlator convention — read it
-before adding a submode, the way §4.10 is what to read before adding a
-dispatch. Two items were recorded as open rather than fixed,
-found while re-measuring that record, and **both were fixed on
-2026-09-22**; each moved numbers, so read their `**Status**` paragraphs
-in the record before comparing against anything older. **O1**:
-`submode="TD"`/`"TDZ"` returned the complex one-sided transform rather
-than the density. They now return
-`(F[(A,B)] + conj(F[(B^dagger,A^dagger)]))/2`, the two-sided transform
-written in terms of forward runs only, since the backward half of a pair
-is the conjugate of the forward half of the adjoint pair, and it
-collapses to `Re F` exactly when `A` is provably `B^dagger`, so the
-common case still costs one evolution
-(`timedependent.lehmann_density_from_one_sided`, shared by both
-submodes; `canonical.is_dagger_pair` is the test, and it refuses rather
-than guesses for a name with no known adjoint, and the second evolution
-is right only when `get_dagger()` knows that adjoint). Taking `np.real(...)`
-instead, the obvious fix, measured *worse* than leaving the transform
-whole on a complex-weight pair, 2.15e-01 against 1.16e-01 on a peak of
-0.2313. Fixed with it: `edtk/timedependent.evolution_DC` read the
-operator pair in the opposite order, so `mode="ED"` returned `C[B,A]`
-where everything else returns `C[A,B]`, invisible whenever the two
-operators are the same one. `sxt_to_skomega`, the infinite-chain
-`S(k,omega)` reduction, is still on the raw transform, since it never
-sees the pair. **O2**: `mode="ED"` and `mode="DMRG"` disagreed pointwise
-under the default `submode="KPM"`, by 95 to 124 per cent of the
-resolvent peak, because each picked both its rescaling window and its
-moment count independently. Both now go through
-`algebra/kpm.py::polynomials_for_broadening`, which solves the Jackson
-kernel's own resolution relation so that `delta` is the broadening it is
-everywhere else, FWHM = `2*delta` at the band centre, and the ED route
-adopted the DMRG rescaling so the two share the same `x` at the same
-physical energy (on the bandwidth-centred window: under `kpm_energy_truncate` `mode="ED"` raises, second-pass finding 4); the disagreement was 4 to 7 per cent after O2, most of
-it the DMRG routes reconstructing from n+2 moments, and since those were
-cut to n (2026-09-24 finding 4) it is 0.07 to 0.2 per cent of the
-resolvent peak on `"python"` (the moment reconstruction's own 10n-grid
-interpolation), with v3's worst of 25 runs at 1.3 per cent, set by the
-run-to-run noise of its band-edge estimate `emax`. `kpm_n_scale`'s
-default moves from 3 to 1, the base count being the calibrated one, and
-it must be a positive integer (validated before dispatch on every route
-since 2026-09-24 finding 5). Two residuals are documented rather than
-removed: the width tightens as `sqrt(1-x^2)` away from the band centre,
-which for a ground-state correlator is the typical case, E0 sitting at
-x0 = -1/(2*kpm_scale), so an intensive excitation of a long chain gets
-0.70 of the requested width; and the near-Gaussian Jackson line peaks
-about 1.5x higher than a Lorentzian of equal FWHM and equal weight (the
-1.6x once quoted here included that off-centre narrowing). `get_distribution()`'s own KPM path is deliberately not on the
-calibration, and is the one place `delta` still means only a polynomial
-count.
-
-**The 2026-09-24 audit.** `docs/audit_2026_09_24_hole_hunt.md` is a third
-hunt, five lenses (`kpm-calibration`, `td-convention`, `canonical-form`,
-`infinite-chain`, `recent-misc`) scoped to the eleven commits after the
-2026-09 fixes, `1c2606d..765b537`, on a baseline of 832 passing tests. It
-found 16 holes, none refuted and every one narrowed by its reviewer, and
-all 16 are fixed (finding 6 in the documentation, the rest in code), in
-five file-disjoint clusters whose regressions live in
-`tests/test_audit_2026_09_24_<cluster>.py` for `operators`, `kpm`,
-`realtime`, `kondo` and `pyitensor`; each finding's `**Status**` line says
-what changed and which test pins it, and the record carries every repro
-inline because the scratch folders it ran in are gone. Seven or eight of
-the sixteen came in with `765b537`, the commit that closed the previous
-hunt's open items. Several fixes changed numbers rather than behaviour,
-so results from before them are not comparable where they apply:
-every DMRG KPM spectrum on every backend, by roughly 2/n onto ED's, since
-the routes now reconstruct from exactly the calibrated n moments rather
-than n+2 (finding 4; 7.4 per cent at a band-centre pole at delta=0.2 on 4
-sites, 0.5 per cent on a 20-site chain); `get_distribution(mode="ED")`, by
-exactly the factor `scale` (10x at the default), plus its imaginary part,
-which was a copy of the real one (finding 3); `submode="TDZ"` at its
-defaults and `submode="TD"` at `predict=False`, by up to 14 to 19 per cent
-of the peak, and TD's default by about 1e-3 of it, all towards exact,
-since the Fourier sum is now evaluated at each requested frequency rather
-than interpolated off an FFT grid of spacing 1.05*delta (finding 7;
-`sxt_to_skomega` and the two short-window direct callers stay on the FFT
-stage); `mode="ED"` `submode="TD"` on a degenerate ground state, which
-built its two halves on two different random states, and with it
-`evolution_ABA(mode="ED")` and `evolve_and_measure(mode="ED")` called
-without `wf=`, which now start from the cached ground state (finding 8);
-correlators with `ISy` in the first operator, which were exactly minus
-the right ones on KPM, EX, TD and TDZ (finding 2); anything the canonical
-form proved about a term mixing `A`/`Adag` with `C`/`Cdag` (finding 1);
-the Kondo potential term on a non-uniform `es` (finding 13);
-`itensor_version="python"` `excitation_energies`/`spectral_weights`/
-`dynamical_structure_factor` at n>=2 on a cell with a degenerate
-H_eff(k) level and dim > 256, which dropped one copy of the level
-(finding 15); and every padded `TDVP_GSE` run, which now follows the
-unpadded one (finding 16). Behaviour changes without number changes: TDZ
-and `get_kondo_spectrum(mode="ED")` raise on unknown keywords, a
-non-integer or non-positive `kpm_n_scale` raises everywhere (2.0
-included), the lower-level correlator route honours `i=`/`j=` for TD and
-TDZ, and `get_kondo_spectrum(mode="DMRG")` takes `n_gs=` for the
-degenerate-manifold average `mode="ED"` uses. Left open and recorded as
-such: the TDZ run at `tdvp_gse_sweeps=0` under padding (still started from
-the padded state), ROOTN's own dropped `i=`/`j=` (fixed on 2026-09-25),
-`mode="ED"` TD's swallowed keywords, the shared "adjoint for a correlator"
-helper, the `vx_deterministic_start` comment in `mpscpp3/chain_session.h`
-(a C++ edit, left to a pass that rebuilds, and still unedited after the
-2026-09-25 rebuild), and the record's "New leads", notably v3's
-run-to-run `emax` noise, which is now the whole of the ED-versus-v3 KPM
-residual.
-
-**The 2026-09-24 second pass.** `docs/audit_2026_09_24b_hole_hunt.md` is a
-fourth hunt, scoped to the single commit `30200a4` that fixed the third,
-since the third had found seven or eight of its sixteen holes in the one
-commit that closed the hunt before it. Five lenses, one per fix cluster
-of `30200a4` (`operators`, `kpm`, `realtime`, `kondo`, `pyitensor`), 18
-confirmed findings, none refuted, four of them turned up by a reviewer
-while reviewing another candidate, and twelve older than `30200a4`,
-reached by probing next to it. All 18 are fixed, in four clusters whose
-regressions live in `tests/test_audit_2026_09_24b_<cluster>.py` for
-`groundstate`, `kpm`, `realtime` and `misc`; finding 3 needed a rebuild of
-both extensions. The run was capped at three concurrent Python processes
-across all agents (`run3.sh` in the record's "Shared helpers"), a rule to
-keep for the next one. The fixes that changed numbers rather than
-behaviour, so results from before them are not comparable: every
-infinite-chain `S(k,omega)` on both backends, which was mirrored in
-frequency and interpolated off an FFT grid (the k=pi magnon of the
-transverse-field paramagnet from -1.045 to +0.905, findings 7 and 8);
-`evolve_and_measure`/`evolution_ABA` on `mode="ED"`, which ran backwards in
-time, and on every DMRG backend, which returned the conjugate of <O>,
-both invisible on the real Hermitian observables every earlier test
-measured and cancelling on S+ and hoppings (findings 9 and 10); every DMRG
-correlator after `set_gs()`, which measured the session's own solved state
-and reverted the chain's to it, and every caller of `set_initial_wf`/
-`set_initial_wf_guess`, which never reached the session (the
-transverse-field Ising example's ordered phase from Mz/n 0.001 to 0.4998,
-findings 11 and 12; the fix is `groundstate.mark_injected` plus
-`ground_state_on_session` at the top of every correlator, which replaced
-the unconditional `set_initial_wf(self.wf0)` at `dynamics.py:190`);
-`get_kondo_spectrum(mode="DMRG", n_gs>1)` on v2/v3 at a split below
-`delta`, `gs_energy()` after it, and EX at a degenerate ground state,
-which now measures from the chain's own state (findings 13 to 15); the
-Kondo terms on a non-increasing `es` (finding 17); a padded state evolved
-with the flag cleared under `TDVP_GSE` (finding 18); and
-`disentangle_manifold` on a Hermitian operator the canonical proof cannot
-see, with proven operators now moving at the gauge level (finding 1).
-Behaviour changes without number changes: KPM raises on every backend
-once a moment exceeds 1.5 times the exact bound ||vi|| ||vj|| (the DMRG
-threshold was 1e3*(bound+1), which let spectra up to 109 times the peak
-through below `kpm_scale=1/2`, and ED had no check since `765b537`;
-findings 2 and 3), and so does a harshly truncated `kpmmaxm`, whose
-spectrum is tens of per cent wrong anyway; `mode="ED"` KPM raises under
-`kpm_energy_truncate` (finding 4); the ED `kpm_n_scale` check moved to the
-Hermitian KPM branch (finding 5); `kpm_finite` rejects unknown
-`window_chain_kwargs` keys (finding 6); a pair `name=` with `i=`/`j=`
-raises (finding 16); and `n_gs>1` takes only the submodes that read the
-chain's state (finding 15). Left open and recorded as such: the sliver
-just below `kpm_scale=1/2` where the elastic line is distorted while the
-moments are still under the bound; `julia_live`'s
-`set_initial_wf`/`set_initial_wf_guess` (same shape as finding 12,
-by reading; fixed on 2026-09-25); `juliacall.JuliaError` rather than `RuntimeError` from the
-`julia_live` KPM guard; the KPM guard's message naming the band edge when
-the cause is a harsh `kpmmaxm`; the short `nt` defaults of
-`td_dynamical_correlator` (delta*T = 1, the third hunt's lead); and the
-record's "New leads", notably `Many_Body_Chain.__init__(**kwargs)` dropping
-every keyword (fixed on 2026-09-25).
-
-**The 2026-09-24 third pass.** `docs/audit_2026_09_24c_hole_hunt.md` is a
-fifth hunt, scoped to the single commit `867e2b4` that fixed the second
-pass, four lenses, one per fix cluster of that commit (`groundstate`,
-`kpm`, `realtime`, `misc`), run as a workflow with the three-slot `run3.sh`
-cap from the start. It found 18 holes from 22 reviewed candidates (one
-refuted on scope, three pairs the same defect reached by two lenses); six
-came in with `867e2b4`, all at the edges of the injected-state machinery
-it built, and twelve are older. All 18 are fixed, in five clusters whose
-regressions live in `tests/test_audit_2026_09_24c_<cluster>.py` for
-`session`, `fluctuation`, `hermiticity`, `pyitensor` and `realtime`;
-findings 9 and 14 needed a rebuild (both extensions for 9, v3 for 14). Four
-things worth knowing before touching the code. `vev.energy_variance` is
-how an energy variance is computed now, ||(H-<H>)|psi>||^2 with the `maxm`
-cap lifted: <H^2>-<H>^2 through `vev(npow=2)` is a small difference of two
-numbers of order E0^2 whose error was set by the truncation of H|psi>,
-and building H^2 as an MPO instead is O(L^3) on `"python"` (302 s at 80
-sites). The session's lower band edge, `minimum_energy()` on all three
-session backends, never sweeps a state the session holds without its
-energy (every injected state): it solves from a fresh start and puts the
-state back, which replaced `867e2b4`'s `excited_states(1)` pre-fill. The
-injection mark carries a third field, `supplied`, read through
-`groundstate.state_supplied()`, which SECTOR uses to refuse a set state that
-is not its reference sector's ground state. And in
-`Chain::global_subspace_expand` a `Cutoff=0` sweep is not "no cutoff":
-ITensor v3's `truncate()` discards exactly-zero weights at `Cutoff=0`, which
-is what the expansion adds next to a site pinned to one basis vector, so the
-sweeps now run only when a bond exceeds `maxm`, with `Cutoff=-1`; this was
-also the product-state failure the TDVP_GSE example had recorded as
-isolated. The fixes that changed numbers rather than behaviour, so results
-from before them are not comparable: every `gs_energy_fluctuation()` below
-full bond dimension on every DMRG backend (6.725e-03 to 0.3436 on an 8-site
-chain at `maxm=3`, and 1.7e-07 to 1.37e-05 on 10 sites at the stock
-`maxm=30` on v3), every ED one (the 1e-7 roundoff floor to 5e-15), and every
-`maxde=` run, which also returns the refined energy now (-3.279373 to
--3.374933) and keeps the refined state (findings 6 and 7); every submode
-after `set_gs` of a state off the ground manifold, KPM on DMRG and
-KPM/CVM/INV/ROOTN/TD/ED on `mode="ED"` moving onto the state's own energy
-(the 0.3 shift of the 3-site chain in a field, findings 1 and 2);
-`promote_to_dense` after a setter or with a carried non-lowest state
-(-1.616025 or -1.857107 to <x|H|x>, findings 3 and 4); every reader after
-`set_hamiltonian(restart=False)` (-1.616025 to -1.780099, finding 5); SECTOR
-after `set_gs` of a lowest-of-its-sector state (finding 8); weakly
-non-Hermitian operators, whose decay rate v2/v3 dropped (Im E0 0 to
--0.002134, finding 12); `"python"` operators with every coefficient below
-about 2e-7 (`vev(1e-7*Sz0)` 0 to -1.8936e-08, finding 13); v3 `TDVP_GSE`
-from a site-0-pinned or product-state start (4.74e-01 to 1.1e-07 off exact,
-finding 14); and every `mode="ED"` real-time route, now `expm_multiply`
-(5.64e-04 to 1e-12 under a +20 energy offset, finding 17). Behaviour changes
-without number changes: `evolve_and_measure`/`evolution_ABA` raise on an
-unknown keyword on DMRG, take `h=` on ED and default to `nt=1000` on both
-(findings 15 and 16); a malformed KPM call raises before any ground-state
-work and SECTOR makes no solve on the caller's chain (finding 11);
-`disentangle_manifold` works on ED manifolds (finding 18); the first read
-after an injection costs about <x|H|x> (7.1 s to 0.059 s on 24 sites of
-`"python"`, finding 9) and `"python"`'s upper band edge about one solve (5
-to 9 solves before, finding 10). Left as they were and recorded as such:
-`gs_energy(mode="ED")` after `set_gs` still reports the lowest eigenvalue;
-`vev(op, npow>=2)` still truncates each application at `maxm`, now
-documented; the non-Hermitian KPM's missing-`E_max` error still comes after
-a solve; and the record's "New leads", notably the v2/v3 failure on a
-Hamiltonian in small energy units and `multioperator.clean_threshold`
-dropping every term below an absolute 1e-8, both fixed on 2026-09-25. The
-first is not the `"python"` MPO builder of finding 13, as this paragraph used
-to say it was not the MPO builder at all: it is ITensor's own `toMPO`, whose
-svdMPO truncates on an absolute cutoff, plus Davidson's absolute 1e-10
-randomization threshold below it.
-
-**The 2026-09-25 open items.** `docs/audit_2026_09_25_open_items.md` hunted
-nothing new: it took the ten most urgent items the five hunts had left open
-or recorded as unreviewed leads, reproduced each on `8dd2198` against a
-snapshot of that tree with copies of its compiled extensions, fixed it, and
-handed every fix to a reviewer briefed to refute both the defect and the fix,
-with a repair pass where the reviewer found a fix incomplete (three of four
-clusters; the repairs were not reviewed a second time). None was refuted and
-four were narrowed. The regressions live in
-`tests/test_audit_2026_09_25_<cluster>.py` for `construction`, `session` and
-`scale`, and the small-units fix rebuilt both extensions. Three things worth
-knowing before touching the code. A chain constructor keyword is now a
-setting assigned after `initialize()`, exactly as an assignment afterwards,
-`mode` included (`sites.check_settings`; applying `mode` first leaves a chain
-at `mode="ED"` with no session to go back to), and anything that is not a
-setting raises (nine public attributes that are not settings slipped through
-until the 2026-09-25b fix pass made it an explicit allowlist, `sites.SETTINGS`). `multioperator.clean_threshold` is 1e-12 and relative, to the
-largest coefficient of the term list in `_filter_small` and, in
-`canonical_dict`, to the larger of that and the magnitudes summed into a
-signature, which is what the rounding dust of H-H^dagger scales with. And
-v2/v3 hand ITensor every term-built MPO and every `dmrg()` at the power of two
-that brings the largest coefficient into [1,2) when it is below 1
-(`mo_terms.h`'s `unit_scale_up`/`to_mpo_unit`, `Chain::hscale_up_`), which
-fixes the Hamiltonian's units but not a hierarchy inside it: a bond whose
-strongest term is far below the largest coefficient still loses channels on
-v2, v3 and `"python"`, held by strict xfails. The fixes that changed numbers,
-so results from before them are not comparable: every setting passed to a
-chain constructor, which ran at the defaults (12-site Heisenberg at
-`maxm=4, nsweeps=10` on v3, -5.1420906326 to -5.1323602278), a constructor
-`mode="ED"` and `Thermal_Spin_Chain(..., mode="ED")`, which ran DMRG; v2/v3
-Hamiltonians whose largest coefficient is below about 1e-6 (6-site Heisenberg
-s*H from the Neel -1.25 to -2.4935771339 for E0/s at s from 4e-7 down, and
-the excited states, band edges, KPM and `gs_energy_generalized` with it; every
-v2/v3 calculation whose largest coefficient is below 1 now runs on 2^k H,
-which moved nothing beyond run-to-run noise at ordinary scales); every
-operator with coefficients at or below 1e-8, which had no terms on any
-backend (`vev(eps*Sz0)/eps` 0 to -0.189361), a term more than twelve decades
-below its operator's largest coefficient, now dropped, and an anti-Hermitian
-part between about 1e-10 and 1e-8 of the largest coefficient, now sent to
-NH-DMRG; `julia_live`'s `set_initial_wf`/`set_initial_wf_guess` (0.0008 to
-1.0000 overlap with the target); `get_gs(wf0=x, reconverge=False)` on a
-solved chain, which returned the stored state; every reader after a
-correlator that followed `gs_energy_generalized()` on a Hermitian chain never
-solved, or on a non-Hermitian chain with no earlier correlator (e0 -2.493577
-to lambda -3.597994 on 6 sites; since the 2026-09-25b pass e0 is the state's
-own energy <wg|H|wg> and lambda is `lam_generalized`); `tc.MBChain` after
-`Thermal_Spin_Chain.get_gs()` at T>1e-5 (`gs_energy()` -2.25 to -0.416388 at
-T=1, `vev` on ED 0 to -0.069398; -0.428230 and -0.071372, the exact values,
-since the 2026-09-25b `anneal()` rewrite); `gs_energy(wf0=x, reconverge=False)` on a non-Hermitian chain,
-now <x|H|x>; and lower-level `submode="ROOTN"` at sites other than (0,0).
-Behaviour changes without number changes: a non-setting constructor keyword,
-an unknown ROOTN keyword, `gs_energy(wf0=x)` on a non-Hermitian chain and the
-NH-KPM after `set_gs` all raise; `maxde` is documented as per site, which it
-always was. Left open and recorded as such: `gs_energy(maxde=...)` on a
-current chain returning the stored energy unrefined (fixed in 2026-09-25b); TD and every TDVP route
-depending on units through the Krylov exponentiator's absolute error goal
-(on `"python"` at operator scales below 1e-8 this is now a quietly wrong
-spectrum where it raised `ZeroDivisionError`; fixed on `"python"` on 2026-09-26,
-v3's vendored `applyExp` keeps it); the bond-local truncation, the
-MPO-set Hamiltonian, small-unit real-time evolution, v2 NH-DMRG (fixed in
-2026-09-25b) and `"python"`'s Lanczos at small units (fixed for VUMPS in
-2026-09-25b); `julia_live` recording no solver key (fixed in 2026-09-25b);
-and the lower-level route's pair `name=` next to `i=`/`j=`.
-
-**The 2026-09-25b hunt and its fix pass.** `docs/audit_2026_09_25b_hole_hunt.md`
-is a sixth hunt: four lenses (`construction`, `session`, `scale`, `scale_cpp`)
-scoped to the fix-pass commit `e7b1196`, with 29 findings. All 29 were fixed on
-2026-09-26, together with the record's two unreviewed leads and five items the
-earlier records had left open. The pass ran on a different machine from the
-hunt (numpy on OpenBLAS, `juliacall` installed for it) as nine file-disjoint
-clusters. Each cluster worked in its own git worktree with its own copy of the
-compiled extensions (the `cpp` one built its own), and all shared a cap of three
-concurrent processes on three cores. The regressions live in
-`tests/test_audit_2026_09_25b_<cluster>.py` for `construction`, `session`,
-`cvm`, `thermal`, `ednum`, `nh`, `cpp`, `julia` and `mpobuilder`, and both
-extensions were rebuilt. Taking that machine's baseline turned up a thirtieth
-defect, recorded as finding 30: `"python"`'s MPO builder had an absolute
-roundoff floor that MKL had hidden, so `test_audit_2026_09_24c_pyitensor.py`
-failed there at s <= 1e-6.
-
-Four things are worth knowing before touching the code:
-- **A state becomes the chain's normalized** (`groundstate.unit_copy`, applied
-  in `mark_injected`, in the `wf0=` copies and in `set_gs`'s ED branch), and a
-  zero state raises. An explicit `wf=` to `evolve_and_measure`/`evolution_ABA`
-  is still evolved as given.
-- **After `gs_energy_generalized`, `e0` is the state's own energy**, <wg|H|wg>
-  (biorthogonal on the NH route), and lambda is kept as `lam_generalized`. On
-  `julia_live` the KPM window trusts `e0` as the lower band edge only when
-  `groundstate.mark_lower_edge` says a plain solve produced it.
-- **Every threshold of the family this hunt found is now relative** to a scale
-  of the problem it acts on. Where a rule exists it is `e7b1196`'s: multiply by
-  the power of two that brings a largest coefficient below 1 into [1,2), and
-  leave everything byte-identical at 1 or more. That rule now also covers
-  `pyitensor`'s `to_mpo` (finding 30), the NH-DMRG Python entry (`nhdmrg.py`, for
-  all three session backends, so do NOT also scale inside `Chain::nhdmrg`) and
-  ED's deflated eigensolver. The solver scale `hscale_up_` is now read from the
-  merged AutoMPO (`to_mpo_unit`'s `up_out`), so the XX chain at J=1 solves at 2.
-  The other thresholds:
-  - CVM stops relative to ||b||, and its early exits read the CG functional phi,
-    which exact CG lowers at every step.
-  - NH-DMRG's Ritz tie window is `1e-6*(max Re - min Re) + 100*eps*max|ev|`,
-    compared with `<=`, identically in `pyitensor/nhdmrg.py` and both
-    `arnoldi_select_kbest`. Its certificate divides by `c + |E - e_id|`.
-  - VUMPS's Lanczos residual reference is capped by the Hamiltonian's unit.
-  - The KPM same-vector shortcut and ROOTN's Lanczos breakdown compare against
-    the vectors' own norms.
-- **Dispatch and settings.** `mode.resolve_mode` lets only a chain pinned to
-  "ED" override a call's `mode=`; a "DMRG" pin is the same as None.
-  `sites.SETTINGS` is an explicit allowlist of constructor keywords.
-  `groundstate.stored_answer_holds` is the one condition under which
-  `gs_energy`/`get_gs` return a stored answer. `julia_live` starts every DMRG
-  solve from a random MPS of link dimension min(maxm,10), with the chain's
-  noise on the first half of the sweeps.
-
-The fixes that changed numbers, so results from before them are not comparable:
-- **Anything after `set_gs`, `set_initial_wf` or `wf0=` of a state whose norm is
-  not one.** Every reader that did not normalize drops by exactly 1/<x|x>: the
-  KPM sum rule at <x|x>=4 goes from 0.999995 to 0.249999 on a 4-site Heisenberg
-  chain, the ED `vev` and every `julia_live` reader move with it, and so does
-  `get_rdm` on all four backends.
-- **Readers after `gs_energy(wf0=x, reconverge=False)` on any route that
-  resolves to ED.**
-- **Calls with `mode="ED"` on a chain pinned to "DMRG"**, which ran DMRG
-  (-3.6734578613 to -3.7040879103 at `maxm=2`).
-- **`gs_energy(maxde=...)` and `gs_energy(reconverge=True)` on a current chain**,
-  which returned the stored energy (-4.1431954920 to -4.2580352072).
-- **`julia_live` on any Hamiltonian that couples sites across a decoupled one**:
-  -0.5 to -1.0 and -1.5 to -3.232051, and `Thermal_Spin_Chain` at T=0 from
-  -0.5 to -1.0. Every other `julia_live` solve now varies run to run by solver
-  noise, and a 16-site warm solve is about 40% slower.
-- **`e0` and every KPM/CVM/ROOTN/TDZ spectrum after `gs_energy_generalized`**,
-  which shift rigidly by lambda - <wg|H|wg>: `gs_energy()` goes from -0.808013
-  to -1.616025 for A = 2*Id on a 4-site chain. `gs_energy_generalized`'s own
-  return value does not move.
-- **`submode="CVM"`, `CVM_explicit`, and the non-Hermitian CVM/INV.**
-  - The CG tolerance was absolute, so below delta*||B|GS>|| of about 1e-5 every
-    frequency returned the flat eta*<AB>/pi. This includes the Kondo route at
-    its default broadening, whose curve went from ~1e-8 to ED's.
-  - The early exits returned the initial guess on a line: 1.5915e-04 against
-    13.2636 at delta=2e-3 on 6 sites, and 10 to 45 of 121 points wrong on a
-    10-site grid.
-  - A non-adjoint small pair was answered with another pair's density.
-- **Every finite-temperature `Thermal_Spin_Chain` result.** `anneal()` is now
-  order-8 Taylor steps of exp(-dtau(H-E_mid)) at dtau*W <= 2. n=10 at T=0.5
-  goes from -2.777892 to -3.166391 (exact -3.166396), and T > 5 no longer
-  gives zero steps.
-- **ED `get_excited` above 2000 states, ROOTN, the `arnolditk` route, KPM on
-  pairs whose images agree to 1e-10, v3 VUMPS (`converged` False to True) and
-  v3 iDMRG** in small units or next to an offset.
-- **NH-DMRG wherever its real-part gap fell inside the old tie window**, and
-  every NH solve whose largest coefficient is below 1.
-- **v2/v3 Hamiltonians whose duplicate terms cancel** (finding 28).
-- **`"python"` operators whose largest coefficient is below 1**, at the
-  roundoff level (finding 30).
-
-Behaviour changes without number changes, all of which now raise:
-- a keyword on a current chain that the stored answer would have ignored;
-- a Hamiltonian accumulator such as `hubbard=` passed to a constructor;
-- `gs_energy(H=H2)` on a non-Hermitian chain (use `nhdmrg(H=...)`);
-- a zero state set with `set_gs` or passed as `wf0=`;
-- any reader on a chain with no Hamiltonian, now with a message naming
-  `set_hamiltonian()`.
-
-Other behaviour changes:
-- `CVM_explicit` accepts any pair.
-- `State.normalize(tol=)` and `norm()` exist on ED.
-- The `dex` warning also fires when the averaged manifold is wider than delta.
-- `verbose` v2/v3 runs print the solver scale.
-- `julia_live`'s `get_rdm(i=ns-1)` works, and the `julia_live` rdm and bond
-  entropy raise on ED routes as the others do.
-
-Left open and recorded as such:
-- the truncated CVM regime, now about 2x the cost and still unconverged, but
-  warned;
-- `Thermal_Spin_Chain`'s cost, now about 2*beta*W factor applications, and its
-  band width, which comes from variational band edges that can be too small;
-- `pyitensor/idmrg_excitations.py::_deflated_lanczos_run`'s `max(1,|lam|)`;
-- ShiftInv's `applyinverse(delta=)`;
-- the NH window's headroom at large L;
-- `kpm_finite`'s `window_chain_kwargs` check;
-- `edtk/edchain.py`'s silent `None` on an unknown operator;
-- the reason for `julia_live`'s slowdown;
-- from earlier records, TD's absolute Krylov error goal (v3 only since
-  2026-09-26) and the bond-local truncation.
-
-The full suite on the merged tree gives 2275 passed, 2 skipped and 14
-xfailed without `julia_live`, and all 64 `julia_live` tests pass; that
-machine's baseline before the pass was 1840 passed and 6 failed, the six
-being finding 30.
-
-**The 2026-09-26 review of `"python"` real-time evolution.** Not a hole
-hunt: every `"python"` integrator was checked against exact propagation and
-against v3. Two-site and one-site TDVP are exact to ~1e-11 at full bond
-dimension (spin-1/2 long-range and DM, spin-1, JW fermions, bosons, real
-and complex dt) and track ED below it exactly as v3 does, so the sweeps
-were left alone. Three things around them were fixed, each moving numbers
-(user guide §21 has the measurements; regressions in
-`tests/test_pyitensor_time_evolution_review.py`):
-- `tdvp._lanczos_expm_multiply` stops on `|coeff|*beta_k*|c_k| < 1e-10`,
-  relative to the vector and dimensionless, with a relative exhaustion test
-  (`beta <= tol*max|alpha|,beta`) and sub-stepping when `niter` runs out
-  (it used to return that step unconverged, 0.31 off at |coeff|*width=100).
-  The host loop and the device path share one test, `_krylov_verdict`, and
-  return their basis rather than a vector, so the sub-stepping above them
-  cannot drift between the two; keep it that way if either changes.
-- Every `evolve_and_measure_*` loop on every backend now restores the
-  input norm `norm0` after each step (python TDVP/GSE/TEBD and v3 TEBD
-  did not), as every `quench_*` loop always did. v3's copy scales by
-  `norm0/nrm` rather than calling `MPS::normalize()`, which aborts below
-  an absolute 1e-20.
-- `gse.global_subspace_expand` normalizes each Krylov vector, as v3's
-  `addBasis(..."DoNormalize",true)` does; unnormalized, the expansion's
-  basis depended on the units of H.
-Recorded, not changed: `TDVP_GSE` stops growing the bond dimension after
-`tdvp_gse_sweeps` steps (3, after `TDVP/sample/run.cc`, although
-`TDVP/README.md` says to switch to two-site TDVP there instead), so a
-growing-entanglement quench saturates (~2e-3 on a 12-site Neel quench at
-any maxm where `"TDVP"` reaches 9e-7). That, and the other improvement
-leads the review turned up (v3's Krylov thresholds, environment reuse
-across half-sweeps, controlled bond expansion arXiv:2208.10972, a
-fourth-order composition), are ranked with their anchors in
-`docs/time_evolution_improvement_plan.md`.
-
 **Examples should plot, not just print/assert.** What sets `examples/`
-apart from `tests/` is that a human is expected to actually look at the
-result, so every `examples/*/*/main.py` should end with a `matplotlib`
-plot of whatever it computed (a quantity vs. time/site/parameter, a
-backend-vs-backend overlay, a timing/error scaling curve, ...) whenever
-the script produces a sequence of values that can meaningfully be
-visualized — not just `print()`ed. This applies even to the scripts noted
-above that *also* carry a real `assert` for regression purposes (e.g.
-`time_evolution/tdvp_VS_ED_time_evolution`,
-`time_evolution/tebd_VS_ED_time_evolution`,
-`time_evolution/tdvp_gse_VS_ED_time_evolution`): the assert stays as the
-pass/fail regression guard, but the script should still plot the two
-trajectories being compared afterwards, so the same script is useful both
-as an automated check and as a visual sanity check when run by hand. A
-script whose entire output is a single scalar (e.g. one ground-state
-energy, one overlap) is the one legitimate exception — there, sweep the
-relevant parameter (system size, time, coupling strength, ...) instead of
-computing just one point, if a sweep is cheap enough to be worth adding;
-otherwise printing is fine. Treat that exception as a last resort, not a
-default: an audit of the whole `examples/` tree found 105 scripts that had
-quietly settled for print/assert-only even though an obvious cheap axis
-was sitting right there (chain length, a coupling/field, time/frequency,
-site/bond index, backend or `itensor_version` comparison, ED vs DMRG) —
-usually because the script already computed an array or a comparison and
-simply never plotted it. When adding a new example or touching an old
-one, check first whether it already has such an axis before reaching for
-the single-scalar exception.
+apart from `tests/` is that a human is expected to look at the result, so
+every `examples/*/*/main.py` ends with a `matplotlib` plot of whatever it
+computed whenever the script produces a sequence of values; the scripts
+that also carry a regression `assert` keep it and plot afterwards. A script
+whose entire output is a single scalar is the one exception, and a last
+resort: sweep a cheap axis (chain length, a coupling, time, bond dimension,
+backend against backend) instead. An audit found 105 scripts that had
+settled for print-only output with such an axis already computed. The
+`new-example` skill (`.claude/skills/new-example/SKILL.md`) has the full
+rules, the path line, and how to run a script against this worktree.
 
-**Worktree/symlink pitfall**: `~/.local/lib/python3.13/site-packages/dmrgpy`
-is typically a symlink into *one specific* checkout's `src/dmrgpy/` (often
-the primary working directory, not whichever worktree you're in). Since
-every `examples/*/*/main.py` does `sys.path.append(...)` (append, not
-prepend/insert), that symlinked package can resolve *before* the appended
-path when running a script directly with plain `python3 main.py` from a
-different worktree — silently testing the wrong checkout's code with no
-error. Force the intended checkout explicitly, e.g.
-`PYTHONPATH=/path/to/this/worktree/src python3 main.py`, or insert
-`sys.path.insert(0, ...)` in a one-off driver script instead of relying on
-the example's own `sys.path.append`. `tests/conftest.py` (see above) avoids
-this problem entirely for anything run through pytest.
+**Worktree/symlink pitfall**: `site-packages/dmrgpy` is typically a symlink
+into one specific checkout's `src/dmrgpy/` (usually the primary working
+directory, not whichever worktree you are in;
+`python3 -c 'import dmrgpy; print(dmrgpy.__file__)'` shows which). Since every
+`examples/*/*/main.py` does `sys.path.append(...)` (append, not insert),
+that symlinked package resolves before the appended path when running a
+script directly with plain `python3 main.py` from a different worktree,
+silently testing the wrong checkout's code with no error. Force the intended
+checkout explicitly with
+`PYTHONPATH=/path/to/this/worktree/src python3 main.py`, or
+`sys.path.insert(0, ...)` in a one-off driver script.
+`tests/conftest.py` avoids this problem entirely for anything run through
+pytest.
 
 **A real, confirmed `mpscpp3` bug**: ITensor v3's two-site `dmrg()` (see
 `chain_session.h`'s `dmrg_args()`) aborts the whole process (`SIGABRT`,
 `"LocalOp is default constructed"`, an internal ITensor v3 check in
 `itensor/mps/localop.h`) for any chain with fewer than 3 physical sites,
-independent of physics type — confirmed for spin, fermionic, and other
-chains. `mode.py`'s `get_mode()` now falls back to ED automatically for
-`itensor_version==3` with `self.ns<3` (same mechanism as the existing
-"extension not compiled" fallback), so this no longer crashes — but a few
-older tests under `tests/` predate that fix and still manually exclude v3 for
-2-site chains via `_helpers.py`'s `versions=` kwarg (see
-`test_spin_chain.py`/`test_fermion_chain.py`'s dimer tests,
-`test_entanglement.py`'s Bell-pair test, and `_helpers.py`'s own docstring)
-— those exclusions are now redundant defense-in-depth rather than required
-to avoid a crash, not something to "fix" by removing.
+independent of physics type. `mode.py`'s `get_mode()` falls back to ED
+automatically for `itensor_version==3` with `self.ns<3` (same mechanism as
+the "extension not compiled" fallback), so this no longer crashes; a few
+older tests under `tests/` predate that fix and still manually exclude v3
+for 2-site chains via `_helpers.py`'s `versions=` kwarg (the dimer tests in
+`test_spin_chain.py`/`test_fermion_chain.py`, `test_entanglement.py`'s
+Bell-pair test). Those exclusions are redundant defense-in-depth now, not
+something to "fix" by removing.
 
 ### Cross-backend performance benchmarking
 
 **Before benchmarking anything, check BLAS thread counts.** DMRG is a great
-many *small* dense linear-algebra calls (a two-site tensor at `maxm=30` on
+many small dense linear-algebra calls (a two-site tensor at `maxm=30` on
 spin-1/2 sites is 60x60), and at that size more BLAS threads is slower, not
-faster: measured 1 thread vs 2, `svd` 1.6x and `eigh` 2.3x slower. End to end
-that alone is minor (~1.13x for `"python"`, nothing for v3), but under
-*oversubscription* — a shared cluster node, or several dmrgpy runs in
-parallel, where every process's BLAS thinks it owns the machine — it
-dominates every other effect in this file: on a 14-core host with another job
-holding 10 cores, MKL's default thread count turned a 9.4s `"python"` solve
-into 28.2s and a 1.6s v3 solve into 26.7s. Pin threads before importing numpy
-(`MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 ...`) when timing anything, or
-timings across runs are not comparable. `src/dmrgpy/blasthreads.py` has the
-full measurements and an opt-in `limit()` context manager (needs
-`threadpoolctl`; the env-var route is more effective, since some BLAS
-libraries fix threading on first use). dmrgpy never changes thread counts on
-its own.
-
+faster: measured 1 thread against 2, `svd` 1.6x and `eigh` 2.3x slower. End
+to end that alone is minor (~1.13x for `"python"`, nothing for v3), but
+under oversubscription (a shared cluster node, or several dmrgpy runs in
+parallel, where every process's BLAS thinks it owns the machine) it
+dominates every other effect in this file: on a 14-core host with another
+job holding 10 cores, MKL's default thread count turned a 9.4s `"python"`
+solve into 28.2s and a 1.6s v3 solve into 26.7s. Pin threads before
+importing numpy (`MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 ...`) when
+timing anything, or timings across runs are not comparable.
+`src/dmrgpy/blasthreads.py` has the full measurements and an opt-in
+`limit()` context manager (needs `threadpoolctl`; the env-var route is more
+effective, since some BLAS libraries fix threading on first use). dmrgpy
+never changes thread counts on its own. The same cap applies to agents: at
+most three Python processes at once across all subagents of a hunt or
+workflow (`run3.sh` in the 2026-09-24b record's "Shared helpers").
 
 `benchmarks/run_benchmarks.py` answers a different question than
 `tests/`/`examples/`: not "is this backend correct" but "which backend is
-fastest, and by how much, for each kind of calculation" — the thing to
-check before deciding which mode is worth optimizing next. It runs on
-every backend available in the current environment (`v2`, `v3`,
-`"python"`, `"julia_live"`, auto-detected via `cppext.available()` and a
-live Julia import, same pattern as
-`examples/groundstate/dmrg_generalized_benchmark`), and sweeps two
-families of calculation over a uniform S=1/2 Heisenberg chain:
+fastest, and by how much, for each kind of calculation". It runs on every
+backend available in the current environment (`v2`, `v3`, `"python"`,
+`"julia_live"`, auto-detected via `cppext.available()` and a live Julia
+import) and sweeps two families of calculation over a uniform S=1/2
+Heisenberg chain: **finite**, swept over chain length (ground-state energy,
+static correlator, KPM and TD dynamical correlators, first excited state,
+bond entanglement entropy, real-time evolution after a quench, and the
+ground state confined to the `Sz=0` sector), cross-checked against ED at
+every size cheap enough for it (the ED entropy reference is an SVD of the
+ED state vector, since `entropy.py` is `self._session`-only and has no ED
+path); and **infinite**, swept over bond dimension (`infinitechain.py`):
+energy density and `<Sz>` under both `gs_method="idmrg"` and
+`gs_method="vumps"`, checked against the Bethe-ansatz density and against
+`<Sz>=0`. The catalogue of what is covered is `benchmarks/calctk.py`'s
+`CALCS` list; adding a capability is one entry there plus a label in
+`reporttk.CALC_LABELS`. Calculations only some backends implement (the
+sector, the infinite chain, both `itensor_version=3` and `"python"` only)
+are restricted to those backends and show up as blank-by-construction
+rather than as failures in the coverage table. The sector section tabulates
+the sector-against-dense ratio per size (block sparsity scales, its
+bookkeeping does not), and the `<Sz>` sections catch a wrongly gauged iDMRG
+unit cell, which an energy-only check cannot see.
 
-- **finite**, swept over chain length: ground-state energy, static
-  correlator, KPM dynamical correlator, TD (real-time + Fourier)
-  dynamical correlator, first excited state, bond entanglement entropy,
-  real-time evolution after a quench, and the ground state confined to
-  the `Sz=0` conserved sector. Accuracy is cross-checked against ED at
-  every size cheap enough for it (energies, correlator, entropy profile
-  and evolution trajectory alike — the ED entropy reference is an SVD of
-  the ED state vector, since `entropy.py` is `self._session`-only and has
-  no ED path of its own).
-- **infinite**, swept over bond dimension (`infinitechain.py`): energy
-  density and `<Sz>` under both `gs_method="idmrg"` and
-  `gs_method="vumps"`, checked against the Bethe-ansatz density and
-  against `<Sz>=0`.
+It writes `benchmarks/output/report.tex` (tables, matplotlib plots and an
+auto-generated "which backend is worth optimizing" paragraph) and compiles
+it to `report.pdf` with `pdflatex` if available; `benchmarks/output/` is
+gitignored. Run `python run_benchmarks.py --help` from `benchmarks/` for
+the full option list; `--from-json results.json` regenerates the report
+from a previous run's raw data. `--repeats>1` re-prepares each calculation
+from a fresh chain per repeat, because the DMRG session caches its
+ground-state energy (`groundstate.py`'s send-cache) and timing a second
+`gs_energy()` on the same chain would record that backend as instantaneous.
+The script always runs one untimed warm-up call on the Julia backend before
+the timed sweep, for the JIT reason above.
 
-The catalogue of what is covered lives in one place, `benchmarks/calctk.py`'s
-`CALCS` list; adding a capability to the benchmark is one entry there plus
-a label in `reporttk.CALC_LABELS`. Calculations that only some backends
-implement (the sector, the infinite chain — both `itensor_version=3` and
-`"python"` only) are part of the sweep, restricted to those backends, and
-show up as blank-by-construction rather than as failures in the report's
-coverage table. Two of the sections exist specifically because a single
-number would misrepresent them: the sector section tabulates the
-sector-vs-dense ratio per size (block sparsity scales, its bookkeeping
-doesn't), and the `<Sz>` sections catch a wrongly gauged iDMRG unit cell,
-which an energy-only check cannot see.
+## The audits, and what to know before touching the code
 
-It writes `benchmarks/output/report.tex`
-(tables + matplotlib plots + an auto-generated "which backend is worth
-optimizing" paragraph) and compiles it to `report.pdf` with `pdflatex` if
-available; `benchmarks/output/` is gitignored, so nothing under it is
-checked in. Run `python run_benchmarks.py --help` from `benchmarks/` for
-the full option list (sizes, bond dimensions, `--calcs` selection, backend
-selection, DMRG/KPM/evolution parameters, per-calculation size caps,
-repeats-per-timing); `--from-json results.json` regenerates the report
-from a previous run's raw data without rerunning the sweep. Note that
-`--repeats>1` re-prepares each calculation from a fresh chain per repeat:
-the DMRG session caches its ground-state energy (`groundstate.py`'s
-send-cache), so timing a second `gs_energy()` on the same chain would
-otherwise record that backend as instantaneous. Because
-juliacall JIT-compiles each Julia method the first time it's called in a
-process (see the `julia_live` testing note above), the script always runs
-one untimed warm-up call on the Julia backend before the timed sweep, so
-its reported numbers are steady-state rather than dominated by one-time
-compilation cost.
+Six hole hunts, a fix pass and one review ran between 2026-08 and
+2026-09-26, each hunt a multi-lens search for numbers that are plausible and
+wrong, with every finding reproduced, handed to a reviewer briefed to refute
+it, and fixed:
+`docs/audit_2026_08_hole_hunt.md` (21 findings), `docs/audit_2026_09_hole_hunt.md`
+(36), `docs/audit_2026_09_24_hole_hunt.md` (16), `docs/audit_2026_09_24b_hole_hunt.md`
+(18), `docs/audit_2026_09_24c_hole_hunt.md` (18), `docs/audit_2026_09_25_open_items.md`
+(ten open items, a fix pass rather than a hunt) and
+`docs/audit_2026_09_25b_hole_hunt.md` (29, all fixed on 2026-09-26 together
+with its leads), followed by the 2026-09-26 review of `"python"` real-time
+evolution (regressions in `tests/test_pyitensor_time_evolution_review.py`,
+measurements in user guide section 21, leads ranked in
+`docs/time_evolution_improvement_plan.md`). Four things to read before
+changing the kind of code they cover:
+
+- **Section 21 of `docs/user_guide.md`** before comparing any number against
+  a result from before 2026-09-26. It is the ledger of every fix that moved
+  numbers rather than behaviour, by call and by size, and most of the fixes
+  did: the TD/TDZ pi factor and the KPM calibration, every injected state
+  (normalized now), every constructor keyword (applied now), every
+  finite-temperature result, every `gs_energy_fluctuation`, every `CVM`
+  spectrum, and more. The records' `**Status**` lines carry the same
+  entries finding by finding.
+- **`docs/documentation.md` section 4.10** before adding a dispatch. Almost
+  every finding of the first hunt was a dispatch decision taken before the
+  information that should inform it: a short circuit ahead of a cache key,
+  a precondition ahead of the branch it qualifies, an `else` serving both
+  "unsupported here" and "you typo'd it", a `**kwargs` with no consumer.
+- **`src/dmrgpy/dynamics.py`'s module docstring** before adding a
+  correlator submode. It is the single normative statement of the
+  convention: every submode returns the complex Lehmann density
+  `i(G^R-G^A)/(2pi)`, unchanged wherever the Lehmann weights
+  `M_n = <GS|A|n><n|B|GS>` are real (`Im M_n == 0` is the discriminant,
+  which a Hermitian pair implies but does not exhaust).
+- **The `hole-hunt` skill** (`.claude/skills/hole-hunt/SKILL.md`) before
+  running or extending an audit; the record shape and the evidence standard
+  are fixed there.
+
+The durable rules the hunts left, each with the test or file that pins it.
+Do not undo one without reading its finding first.
+
+- **A state becomes the chain's normalized.** `groundstate.unit_copy` is
+  applied in `mark_injected`, in the `wf0=` copies and in `set_gs`'s ED
+  branch, and a zero state raises; an explicit `wf=` to
+  `evolve_and_measure`/`evolution_ABA` is still evolved as given
+  (`test_audit_2026_09_25b_session.py`).
+- **Every correlator starts from `ground_state_on_session`**, with
+  `groundstate.mark_injected` marking a state the caller supplied, so that
+  a DMRG correlator after `set_gs()`, `set_initial_wf` or
+  `set_initial_wf_guess` measures that state and not the session's own
+  solved one (on `julia_live` too, since 2026-09-25); the mark's third field,
+  `supplied`, read through `groundstate.state_supplied()`, is what SECTOR
+  uses to refuse a set state that is not its reference sector's ground
+  state (`test_audit_2026_09_24b_groundstate.py`,
+  `test_audit_2026_09_24c_session.py`).
+- **`groundstate.stored_answer_holds` is the one condition** under which
+  `gs_energy`/`get_gs` return a stored answer; a keyword the stored answer
+  would ignore (`maxde=`, `reconverge=True`, `wf0=`) raises or re-solves.
+  After `gs_energy_generalized`, `e0` is the state's own energy `<wg|H|wg>`
+  (biorthogonal on the NH route) and lambda is kept as `lam_generalized`
+  (`test_audit_2026_09_25b_session.py`).
+- **The session's lower band edge, `minimum_energy()`, never sweeps a state
+  the session holds without its energy**: it solves from a fresh start and
+  puts the state back (`test_audit_2026_09_24c_session.py`).
+- **`vev.energy_variance` is how an energy variance is computed**,
+  `||(H-<H>)|psi>||^2` with the `maxm` cap lifted. `<H^2>-<H>^2` through
+  `vev(npow=2)` is a small difference of two numbers of order E0^2 whose
+  error is set by the truncation of H|psi>, and H^2 as an MPO is O(L^3) on
+  `"python"` (`test_audit_2026_09_24c_fluctuation.py`).
+- **Every threshold is relative to a scale of the problem it acts on.**
+  Where a rule exists it is: multiply by the power of two that brings a
+  largest coefficient below 1 into [1,2), and leave everything
+  byte-identical at 1 or more. It covers v2/v3's `to_mpo_unit`/
+  `solver_hamiltonian` (`hscale_up_`, read from the merged AutoMPO),
+  `pyitensor`'s `to_mpo`, the NH-DMRG entry in `nhdmrg.py` (once, for all
+  three session backends, so do NOT also scale inside `Chain::nhdmrg`) and
+  ED's deflated eigensolver. The others: `multioperator.clean_threshold` is
+  1e-12 relative to the largest coefficient (in `canonical_dict`, to the
+  larger of that and the summed signature magnitudes); CVM stops relative
+  to `||b||` and its early exits read the CG functional; NH-DMRG's Ritz tie
+  window is `1e-6*(max Re - min Re) + 100*eps*max|ev|` with `<=`,
+  identically in `pyitensor/nhdmrg.py` and both `arnoldi_select_kbest`; the
+  VUMPS Lanczos reference is capped by the Hamiltonian's unit; the KPM
+  same-vector shortcut and ROOTN's Lanczos breakdown compare against the
+  vectors' own norms (`test_audit_2026_09_25_scale.py`,
+  `test_audit_2026_09_25b_{cvm,nh,cpp,ednum,mpobuilder}.py`). Not covered,
+  and held by strict xfails: a bond whose strongest term is far below the
+  largest coefficient still loses channels on every backend.
+- **A chain constructor keyword is a setting assigned after `initialize()`**,
+  exactly as an assignment afterwards, `mode` included (`sites.check_settings`,
+  the explicit allowlist `sites.SETTINGS`); anything else, a Hamiltonian
+  accumulator such as `hubbard=` included, raises
+  (`test_audit_2026_09_25_construction.py`,
+  `test_audit_2026_09_25b_construction.py`).
+- **`mode.resolve_mode` lets only a chain pinned to `"ED"` override a call's
+  `mode=`**; a `"DMRG"` pin is the same as None, and both names are
+  validated before any fallback can return (`test_audit_2026_09_25b_session.py`).
+- **KPM broadening is calibrated.** Every KPM route goes through
+  `algebra/kpm.py::polynomials_for_broadening`, which solves the Jackson
+  kernel's resolution relation so that `delta` is the broadening it is
+  everywhere else (FWHM `2*delta` at the band centre); the DMRG routes
+  reconstruct from exactly those n moments, the ED route uses the DMRG
+  rescaling so the two share the same `x` at the same physical energy (on
+  the bandwidth-centred window only: under `kpm_energy_truncate`,
+  `mode="ED"` raises), `kpm_n_scale` defaults to 1 and must be a positive
+  integer, and
+  every backend raises once a moment exceeds 1.5 times the exact bound
+  `||vi|| ||vj||`. Two residuals are documented rather than removed: the
+  width tightens as `sqrt(1-x^2)` away from the band centre (0.70 of the
+  requested width for an intensive excitation of a long chain), and the
+  Jackson line peaks about 1.5x higher than a Lorentzian of equal FWHM.
+  `get_distribution()`'s own KPM path is deliberately not on the
+  calibration (`test_audit_2026_09_24_kpm.py`, `test_audit_2026_09_24b_kpm.py`).
+- **`submode="TD"`/`"TDZ"` return the two-sided transform** written in
+  terms of forward runs only, `(F[(A,B)] + conj(F[(B^dagger,A^dagger)]))/2`
+  (`timedependent.lehmann_density_from_one_sided`), collapsing to `Re F`
+  exactly when `canonical.is_dagger_pair` proves `A = B^dagger`; it refuses
+  rather than guesses for a name with no known adjoint. Taking `np.real`
+  instead measured worse than leaving the transform whole. The Fourier sum
+  is evaluated at each requested frequency, not interpolated off an FFT
+  grid; `sxt_to_skomega`, the infinite-chain `S(k,omega)` reduction, and
+  the two short-window direct callers stay on the FFT stage, and
+  `sxt_to_skomega` on the raw transform, since it never sees the pair
+  (`test_audit_2026_09_24_realtime.py`).
+- **Real-time evolution on `"python"`** (`tdvp._lanczos_expm_multiply`)
+  stops on `|coeff|*beta_k*|c_k| < 1e-10` relative to the vector, with
+  sub-stepping when `niter` runs out; the host loop and the device path
+  share one test, `_krylov_verdict`, and return their basis rather than a
+  vector, so the sub-stepping above them cannot drift between the two. Keep
+  it that way if either changes. Every `evolve_and_measure_*` loop on every
+  backend restores the input norm `norm0` after each step, and
+  `gse.global_subspace_expand` normalizes each Krylov vector
+  (`test_pyitensor_time_evolution_review.py`). `TDVP_GSE` stops growing the
+  bond dimension after `tdvp_gse_sweeps` steps, so a growing-entanglement
+  quench saturates; recorded, not changed.
+- **`mode="ED"` real-time routes are `expm_multiply`**, start from the
+  cached ground state when called without `wf=`, and
+  `evolve_and_measure`/`evolution_ABA` raise on an unknown keyword on DMRG,
+  take `h=` on ED and default to `nt=1000` on both
+  (`test_audit_2026_09_24c_realtime.py`).
+- **`julia_live` starts every DMRG solve from a random MPS** of link
+  dimension min(maxm,10), with the chain's noise on the first half of the
+  sweeps, so its solves vary run to run by solver noise and a warm 16-site
+  solve is about 40% slower than before; the KPM window there trusts `e0`
+  as the lower band edge only when `groundstate.mark_lower_edge` says a
+  plain solve produced it (`test_audit_2026_09_25b_julia.py`).
+- **`Thermal_Spin_Chain.anneal()` is order-8 Taylor steps** of
+  `exp(-dtau(H-E_mid))` at `dtau*W <= 2`, about `2*beta*W` factor
+  applications (`test_audit_2026_09_25b_thermal.py`).
+- **Out of scope by construction** for every hunt: the vendored ITensor and
+  TDVP folders, the three legacy quirks `.claude/rules/cpp-backend.md` lists
+  as deliberately reproduced (`evoloperator()`'s z^3/6 term on `H2`, the
+  `"moise"` key, the unreachable `"tevol_fit_td"` branch), the open
+  `docs/known_issue_*.md` items, and what `ROADMAP.md` marks as absent by
+  design.
+
+Left open and recorded as such, in the records' "Left open" and "New leads"
+sections: the `kpm_energy_truncate` window problem outside its worst regime
+(`docs/known_issue_kpm_energy_truncation_window.md`); the sliver just below
+`kpm_scale=1/2` where the elastic line is distorted while the moments are
+still under the bound; the truncated CVM regime (warned, about 2x the cost,
+still unconverged); `Thermal_Spin_Chain`'s cost and its variational band
+width; the bond-local truncation above; the MPO-set Hamiltonian and
+small-unit real-time evolution; v3's Krylov exponentiator's absolute error
+goal (`applyExp`) and v3's run-to-run `emax` noise, which is the whole of
+the ED-against-v3 KPM residual; `kpm_finite`'s `window_chain_kwargs` check;
+`edtk/edchain.py`'s silent `None` on an unknown operator; the reason for
+`julia_live`'s slowdown and its KPM guard raising `juliacall.JuliaError`
+rather than `RuntimeError`; `ShiftInv`'s `applyinverse(delta=)`; the lower-level route's pair `name=` next to
+`i=`/`j=`; and the short `nt` defaults of `td_dynamical_correlator`.
 
 ## Architecture
 
 ### Entry point classes
 
 Each physical model is a thin subclass of `Many_Body_Chain`
-(`manybodychain.py`), which holds all shared state (bond dimensions,
-sweep count, cutoffs, mode, temp folder, etc.) and implements the generic
-operations (`set_hamiltonian`, `gs_energy`, `vev`, `get_gs`, correlators,
-time evolution, entanglement, ...). Model modules just define the local
-Hilbert space and convenience operators:
+(`manybodychain.py`), which holds all shared state (bond dimensions, sweep
+count, cutoffs, mode, etc.) and implements the generic operations
+(`set_hamiltonian`, `gs_energy`, `vev`, `get_gs`, correlators, time
+evolution, entanglement, ...). Model modules just define the local Hilbert
+space and convenience operators:
 
-- `spinchain.py` → `Spin_Chain` (aliased directly to `Many_Body_Chain`)
-- `fermionchain.py` → `Fermionic_Chain` (spinless fermions, `C`/`Cdag`/`N`/Fermi-string `F`)
-- `spinfermionchain.py`, `bosonchain.py`, `parafermionchain.py` — same pattern for other statistics/models
+- `spinchain.py` -> `Spin_Chain` (aliased directly to `Many_Body_Chain`)
+- `fermionchain.py` -> `Fermionic_Chain` (spinless fermions, `C`/`Cdag`/`N`/Fermi-string `F`)
+- `spinfermionchain.py`, `bosonchain.py`, `parafermionchain.py`: same pattern for other statistics/models
 
 ### Operator representation: `MultiOperator`
 
 Hamiltonians and observables are built as `MultiOperator` objects
-(`multioperator.py`) — sums of products of named single-site operators
-(e.g. `Sx[i]*Sx[j]`). This is a backend-agnostic intermediate
-representation: the *same* `MultiOperator` is later either
-
-- written out as an AMPO-style operator file for the C++/Julia DMRG backend, or
-- converted to a sparse matrix via `multioperator.MO2matrix` for the ED backend (`edtk/edchain.py`).
-
-`multioperatortk/` holds supporting machinery (Jordan-Wigner strings for
-fermionic operators, static/long-range operator construction, the
-canonical form below).
+(`multioperator.py`), sums of products of named single-site operators (e.g.
+`Sx[i]*Sx[j]`). This is a backend-agnostic intermediate representation: the
+same `MultiOperator` is later either converted to ITensor terms for the
+C++/Julia/`"python"` DMRG backends (`MultiOperator.to_terms()`), or
+converted to a sparse matrix via `multioperator.MO2matrix` for the ED
+backend (`edtk/edchain.py`). `multioperatortk/` holds supporting machinery
+(Jordan-Wigner strings for fermionic operators, static/long-range operator
+construction, the canonical form below).
 
 **Canonical form and the Hermiticity proof.**
-`multioperatortk/canonical.py` rewrites every term into one spelling --
-factors sorted by site (stable, so same-site factors keep their order),
-the coefficient carrying the sign of every fermionic exchange the sort
-makes, identity factors dropped -- so that terms which are the same
-operator have the same signature and collect in a dict.
-`MultiOperator.simplify()`/`is_zero()`/`is_hermitian()`/
-`is_antihermitian()` all read off it. It replaced a sympy round trip
-(`sympymultioperator.py`, deleted with it, taking sympy out of the
-dependencies), which mapped each factor to a non-commutative `Symbol`
-and so collected
-only terms already spelled identically: it took 0.834 s on an n=20
-spin-1/2 chain to report `False` for an ordinary Heisenberg
-Hamiltonian, the false negative `mpsalgebra.exponential` and
-`infinitechain.set_hamiltonian` both carry comments about. That chain is
-now proven Hermitian in 0.5 ms.
-The rewrite is exact, so the proof is **one-sided**: an empty canonical
-form of `H-H^dagger` means Hermitian, full stop, while a nonempty one
-means *not proven*, since a same-site identity (`Sx Sx = 1/4`) or a name
+`multioperatortk/canonical.py` rewrites every term into one spelling
+(factors sorted by site, stable so same-site factors keep their order, the
+coefficient carrying the sign of every fermionic exchange the sort makes,
+identity factors dropped) so that terms which are the same operator have
+the same signature and collect in a dict.
+`MultiOperator.simplify()`/`is_zero()`/`is_hermitian()`/`is_antihermitian()`
+all read off it. It replaced a sympy round trip (`sympymultioperator.py`,
+deleted with it, taking sympy out of the dependencies) that collected only
+terms already spelled identically: 0.834 s on an n=20 spin-1/2 chain to
+report `False` for an ordinary Heisenberg Hamiltonian, now proven Hermitian
+in 0.5 ms. The rewrite is exact, so the proof is **one-sided**: an empty
+canonical form of `H-H^dagger` means Hermitian, full stop, while a nonempty
+one means not proven, since a same-site identity (`Sx Sx = 1/4`) or a name
 alias (`Sp = Sx + i Sy`, `Sz = (Nup-Ndn)/2`) needs the site type, which
-lives on the chain and not on the operator. Two factors sharing a site
-are reordered only when both are diagonal (`_DIAGONAL`), which is what
-makes the Hubbard `Nup[i]*Ndn[i]` provable while leaving `Sx[i]*Sz[i]`
-alone -- do NOT widen that to a general same-site sort, those two are
-both even and do not commute. Nor is a term reordered when it names both
-a pre-transform `C`-type name and a bare `A`-type one (`_LOCAL_LADDER`):
-with `C_j = F_0...F_{j-1} A_j`, `A_i` anticommutes with `C_j` for j>i and
+lives on the chain and not on the operator. Two factors sharing a site are
+reordered only when both are diagonal (`_DIAGONAL`), which is what makes the
+Hubbard `Nup[i]*Ndn[i]` provable while leaving `Sx[i]*Sz[i]` alone; do NOT
+widen that to a general same-site sort, those two are both even and do not
+commute. Nor is a term reordered when it names both a pre-transform
+`C`-type name and a bare `A`-type one (`_LOCAL_LADDER`): with
+`C_j = F_0...F_{j-1} A_j`, `A_i` anticommutes with `C_j` for j>i and
 commutes for j<i, so their exchange sign depends on the site order and is
-not a parity (2026-09-24 audit finding 1, where the old even grading
-proved an anti-Hermitian operator Hermitian). Do NOT fix that by giving
-the `A`-type names no parity: they are also the boson ladder operators,
-and the boson and Jordan-Wigner-transformed proofs need them even. So `Many_Body_Chain.
-is_hermitian()` takes the proof when it lands and falls back to its
-random-witness probe otherwise -- do not turn that fallback into a
-rejection. Only the names in `canonical.py`'s `_PARITY` table are
-reordered; anything else (parafermionic `Sig`/`Tau`, which reorders with
-a Z_n phase, or a caller's own name) is left spelled as written, and the
+not a parity (2026-09-24 audit finding 1). Do NOT fix that by giving the
+`A`-type names no parity: they are also the boson ladder operators, and the
+boson and Jordan-Wigner-transformed proofs need them even. So
+`Many_Body_Chain.is_hermitian()` takes the proof when it lands and falls
+back to its random-witness probe otherwise; do not turn that fallback into
+a rejection. Only the names in `canonical.py`'s `_PARITY` table are
+reordered; anything else (parafermionic `Sig`/`Tau`, which reorder with a
+Z_n phase, or a caller's own name) is left spelled as written, and the
 Hermiticity proof refuses outright when any name is off the table, since
-`get_dagger()` leaves an unrecognized name untouched (and carries a
-phase for a name whose adjoint is a multiple of itself, `_dagger_phase`,
-so far only `ISy` -> `-ISy`, finding 2) and such an
-operator would otherwise cancel against its own "dagger". See
-`docs/documentation.md` 4.2a, `tests/test_multioperator_canonical.py`
-and `examples/algebra/operator_canonical_form`.
+`get_dagger()` leaves an unrecognized name untouched (and carries a phase
+for a name whose adjoint is a multiple of itself, `_dagger_phase`, so far
+only `ISy` -> `-ISy`) and such an operator would otherwise cancel against
+its own "dagger". See `docs/documentation.md` 4.2a,
+`tests/test_multioperator_canonical.py` and
+`examples/algebra/operator_canonical_form`.
 
 ### Backend dispatch (DMRG vs ED, C++ vs Julia)
 
 `mode.py` decides, per call, whether a calculation runs via DMRG or ED
-(`get_mode`/`run`): DMRG unless `self.mode` forces ED, or unless
-`self.itensor_version` is `2` or `3` and the corresponding pybind11
-extension isn't compiled (see `cppext.available(version)`), in which case
-it silently falls back to ED. `itensor_version="python"` never falls back
-for that reason (it has no compiled-extension precondition at all), but
-does below 2 sites: its DMRG is two-site, so a 1-site chain has no update
-to make and `dmrg()` returned `None` before that fallback existed — the
-same shape as, but not the same threshold as, ITensor v3's own `ns<3`
-fallback. `groundstate.py::gs_energy_generalized` needs its own copy of
-that guard (it has no ED fallback to be routed to), and there it *raises*,
-because the symptom was worse than `None`: the outer self-consistent
-iteration still returns the Rayleigh quotient of a state no sweep ever
-touched, i.e. a silently wrong number (-0.3049 for an exact -0.5). Note
-that guard sits *before* the non-Hermitian dispatch, unlike the
-`itensor_version==3` one below it — NH-DMRG escapes v3's abort by never
-calling `dmrg()`, but its own sweep is two-site too, so it does not escape
-this.
+(`get_mode`/`resolve_mode`): DMRG unless `self.mode` pins the chain to ED,
+or unless `self.itensor_version` is `2` or `3` and the corresponding
+pybind11 extension is not compiled (see `cppext.available(version)`), in
+which case it falls back to ED with a printed note. Two more automatic
+fallbacks exist, both structural: ITensor v3's two-site `dmrg()` aborts
+below 3 sites (see "A real, confirmed `mpscpp3` bug" above), and
+`"python"`'s two-site DMRG has no update to make on 1 site, where `dmrg()`
+returned `None` before the fallback existed, so `itensor_version==3` with
+`ns<3` and `"python"` with `ns<2` route to ED. `itensor_version="python"`
+never falls back for a missing extension (it has none).
+`groundstate.py::gs_energy_generalized` needs its own copy of the short-chain
+guard (it has no ED fallback to be routed to), and there it raises, because
+the symptom was worse than `None`: the outer self-consistent iteration
+returned the Rayleigh quotient of a state no sweep ever touched, a silently
+wrong number (-0.3049 for an exact -0.5); that guard sits before the
+non-Hermitian dispatch, since NH-DMRG escapes v3's abort by never calling
+`dmrg()` but its own sweep is two-site too. A conserved sector
+(`set_conserved_sector`) makes `get_mode` raise on DMRG with
+`itensor_version=2` or `"julia_live"`, the two backends with no quantum
+numbers, rather than answer with the global ground state; falling back to
+ED is correct there, since ED restricts to the sector itself.
 
 **Which backend a chain gets when the caller names none** is
 `cppext.default_backend()`, not `DEFAULT_ITENSOR_VERSION` directly: the
 default C++ version when that extension is compiled, and `"python"`
-otherwise. That fallback is what makes `pip install dmrgpy` usable — the
-wheel ships no C++, so before it every default-backend chain in a pip
-install silently ran ED, which cannot reach the sizes an MPS backend
-exists for. Only the *implicit* choice moves: an explicit
-`itensor_version=3` with no extension still falls back to ED (a caller who
-named a version asked for that backend), and `mode="ED"` is untouched.
+otherwise. That fallback is what makes `pip install dmrgpy` usable; before
+it every default-backend chain in a pip install silently ran ED, which
+cannot reach the sizes an MPS backend exists for. Only the implicit choice
+moves: an explicit `itensor_version=3` with no extension still falls back
+to ED, and `mode="ED"` is untouched.
 `Many_Body_Chain.__init__`/`Mixed_Spin_Fermion_Chain.__init__` take
 `itensor_version=None` to mean "pick one for me". See
-`tests/test_default_backend_without_cpp.py`. Most
-public methods on `Many_Body_Chain` accept a `mode="DMRG"|"ED"` kwarg so
-results can be cross-validated between solvers (see the
-bilinear-biquadratic example in `README.md`).
+`tests/test_default_backend_without_cpp.py`. Most public methods on
+`Many_Body_Chain` accept a `mode="DMRG"|"ED"` kwarg so results can be
+cross-validated between solvers.
 
-- **DMRG, C++ (`itensor_version=2` or `itensor_version=3` (the default))**:
-  entirely in-process, see "In-process pybind11 extension" below. Both
+- **DMRG, C++ (`itensor_version=2` or `3`, the default)**: entirely
+  in-process through a pybind11 extension over a vendored ITensor, one
+  `Chain` session per `Many_Body_Chain` held as `self._session`. Both
   versions expose the identical `Chain` session API and public
-  `Many_Body_Chain` surface — `itensor_version` only picks which compiled
-  extension (`mpscpp2._dmrgcpp` vs `mpscpp3._dmrgcpp`, via
-  `cppext.get_backend(version)`) backs `self._session`.
+  `Many_Body_Chain` surface; `itensor_version` only picks which compiled
+  extension (`mpscpp2._dmrgcpp` or `mpscpp3._dmrgcpp`, via
+  `cppext.get_backend(version)`) backs the session.
   `cppext.DEFAULT_ITENSOR_VERSION` (currently `3`) is the single source of
   truth for the default, threaded through `Many_Body_Chain.__init__`,
   `setup_cpp()`, `get_backend()`/`available()`, and `install.py`'s own
   `--itensor-version` default (`installtk/__init__.py`'s matching
-  constant) — change it there, not per call site.
-  `Many_Body_Chain.setup_cpp(version=2)` switches an existing chain
-  between them. There is no file-based/subprocess fallback for either —
-  if the requested extension isn't compiled, `mode.py` routes to ED
-  instead.
+  constant); change it there, not per call site.
+  `Many_Body_Chain.setup_cpp(version=2)` switches an existing chain between
+  them. Everything else about this backend, the `cpp_handle` pattern, the
+  unit-scale rule, the three deliberately reproduced legacy quirks, the
+  `mpscpp3`-specific behaviour (QNs off by default and a random-MPS start,
+  the opt-in conserved-sector mode, `apply_mpo()`'s `.noPrime("Site")`,
+  `innerC`, TDVP as the default real-time method, `py::module_local()`), is
+  in `.claude/rules/cpp-backend.md`, formerly this file's "In-process
+  pybind11 extension" section.
 - **DMRG, pure Python (`itensor_version="python"`)**: `pyitensor/`
   (`Many_Body_Chain.setup_python()` switches an existing chain to it) is a
   from-scratch, pure-Python/NumPy/SciPy reimplementation of exactly the
-  ITensor v3 API subset `mpscpp3/chain_session.h` uses — Index/ITensor
-  tensor core, the same ten site types, an AutoMPO term compiler with its
-  own from-scratch Jordan-Wigner threading, MPS/MPO algebra, two-site
-  Lanczos-based DMRG (ground + excited states via the overlap-penalty
+  ITensor v3 API subset `mpscpp3/chain_session.h` uses: Index/ITensor tensor
+  core, the same ten site types, an AutoMPO term compiler with its own
+  from-scratch Jordan-Wigner threading, MPS/MPO algebra, two-site
+  Lanczos-based DMRG (ground and excited states via the overlap-penalty
   method), two-site Krylov-based TDVP, and a `pyitensor/chain.py::Chain`
   exposing the identical method surface as the compiled backends'
   `self._session`, so every `itensor_version in (2,3)` call site elsewhere
-  in this codebase treats `"python"` as a third, always-available option
-  wherever such a site was updated to include it — no separate code path.
-  Exists so DMRG/TDVP work with zero compiler/pybind11 dependency, at the
-  cost of being substantially slower than compiled ITensor (no
-  block-sparsity, no JIT) — see `pyitensor/__init__.py`'s docstring and
-  the module-level docstrings throughout `pyitensor/` for the specific
-  simplifications taken versus real ITensor v3 and why each one doesn't
-  affect dmrgpy's own results, only internal performance/bond-dimension
-  efficiency.
-  **MPO construction is no longer one of them.** `pyitensor/mpobuilder.py`
-  used to build one exact bond-dimension-1 MPO per term and compress the
-  concatenation of all of them — right answer, right *final* bond
-  dimension (5 on a nearest-neighbour Heisenberg chain), but reached via
-  an intermediate of bond dimension ~3(L-1), so O(L) truncating SVDs on
-  O(L)-sized matrices: **O(L^4)**. Measured on an S=1/2 Heisenberg chain
-  at default `maxm=30`/`nsweeps=15`, one `gs_energy(mode="DMRG")` scaled
-  as ~L^3.7 and at L=100 spent 95% of its time building the Hamiltonian
-  and 5% solving it. `to_mpo` now assembles the finite-state machine over
-  the terms' partial products directly (the shape ITensor's own
-  `toMPO(...,{"Exact",true})` produces), keeping two sweeps afterwards
-  purely to honour `cutoff`/`maxdim`, the first exact and only the return
-  one truncating: a truncating first sweep weighed the dead identity
-  channel from the left and compressed any operator whose coefficients
-  were all below about 2e-7 into a different one (2026-09-24 third pass,
-  finding 13); and an operator whose largest coefficient is below 1 is
-  built at unit scale and scaled back, like v2/v3's `to_mpo_unit()`,
-  since the identity channel's O(1) roundoff is otherwise an absolute
-  error (1.1e-9 relative at s=1e-7 on OpenBLAS, 2026-09-25b finding 30).
-  Same operator,
-  same final bond dimension, and a build that is O(L^2) rather than
-  O(L^4) (the machine itself is O(L); `HTerm.resolve()` spells each of the
-  O(L) terms out over all L sites, and that term is cheap but real):
-  `to_mpo` alone went 0.12s →
-  0.027s at L=20, 2.96s → 0.12s at L=60 and **24.6s → 0.235s (105x)** at
-  L=100 (min of 5, threads pinned). Two rules in there are load-bearing
-  and easy to get subtly wrong — the coefficient goes on the transition
-  *into* the final state (so terms differing only by a coefficient still
-  share partial states), and transitions into that state **accumulate**
-  while structural ones are **assigned** (two syntactically identical
-  terms trace the same path, so their coefficients must sum while their
-  shared structure must not be written twice). The old construction is
-  kept as `_sum_of_term_mpos`, as the reference the machine is tested
-  against on a term zoo in `tests/test_mpo_automaton_builder.py`; that
-  rewrite also fixed a real bug it had, silently dropping all but the last
-  term on a **1-site** chain (no bonds to sweep, so the concatenation was
-  returned as-is).
+  treats `"python"` as a third, always-available option wherever such a
+  site was updated to include it. Exists so DMRG/TDVP work with zero
+  compiler/pybind11 dependency, at the cost of being substantially slower
+  than compiled ITensor (no block-sparsity, no JIT); see
+  `pyitensor/__init__.py`'s docstring and the module docstrings throughout
+  `pyitensor/` for the specific simplifications taken and why each one does
+  not affect dmrgpy's own results. MPO construction is no longer one of
+  them: `pyitensor/mpobuilder.py`'s `to_mpo` assembles the finite-state
+  machine over the terms' partial products directly (the shape ITensor's
+  own `toMPO(...,{"Exact",true})` produces), O(L^2) instead of the old
+  O(L^4) sum-and-compress, keeping two sweeps afterwards purely to honour
+  `cutoff`/`maxdim`, the first exact and only the return one truncating (a
+  truncating first sweep compressed any operator whose coefficients were
+  all below about 2e-7 into a different one), and an operator whose largest
+  coefficient is below 1 is built at unit scale and scaled back, like
+  v2/v3's `to_mpo_unit()`. Two rules in there are load-bearing and easy to
+  get subtly wrong: the coefficient goes on the transition into the final
+  state (so terms differing only by a coefficient still share partial
+  states), and transitions into that state accumulate while structural
+  ones are assigned (two syntactically identical terms trace the same path,
+  so their coefficients must sum while their shared structure must not be
+  written twice). The old construction is kept as `_sum_of_term_mpos`, the
+  reference the machine is tested against in
+  `tests/test_mpo_automaton_builder.py`.
 - **DMRG, Julia (`itensor_version="julia_live"`)**: a live, in-process
-  Julia session (`mpsjulialive/`, via `juliacall`/`juliasession.py`) with its
-  own parallel set of modules (`mpsjulialive/groundstate.py`,
-  `vev.py`, `mps.py`, `mpo.py`, ...) mirroring the top-level ones but
-  talking to Julia's ITensors.jl instead of the C++ pybind11 extension.
+  Julia session (`mpsjulialive/`, via `juliacall`/`juliasession.py`) with
+  its own parallel set of modules (`mpsjulialive/groundstate.py`, `vev.py`,
+  `mps.py`, `mpo.py`, ...) mirroring the top-level ones but talking to
+  Julia's ITensors.jl instead of the C++ pybind11 extension.
   `Many_Body_Chain.setup_julia()` switches a chain to this mode.
   `itensor_version="julia"` (a separate, older subprocess-based Julia path
   via `juliarun.py`) is not reachable through the normal public API today
-  (`gs_energy()` and friends only special-case `2` and `"julia_live"`)
   and should be treated as legacy/inert.
 - **ED path**: `edtk/edchain.py` (`EDchain`) builds dense/sparse operators
   directly in Python/NumPy/SciPy (`pyfermion/`, `pyspin/`, `pyboson/`,
@@ -1125,288 +693,25 @@ bilinear-biquadratic example in `README.md`).
   `edtk/one2many.py` promotes single-site operators to the full Hilbert
   space) and diagonalizes with `scipy.sparse.linalg`.
 
-### In-process pybind11 extension (the C++ DMRG backend: v2 and v3)
-
-`mpscpp2/bindings.cc` and `mpscpp3/bindings.cc` each compile a pybind11
-extension module (`mpscpp2/_dmrgcpp*.so` / `mpscpp3/_dmrgcpp*.so`, built by
-the `pybind` target in each backend's own `Makefile`) that runs DMRG
-entirely in-process against its own vendored ITensor copy — no task files,
-no operator files, no subprocess, no temp directory. `mpscpp3` is a
-line-by-line port of `mpscpp2` to the ITensor v3 API (IQTensor/IQIndex
-merged into a single ITensor/Index type with QN blocks living on the
-Index; see the porting-notes comment at the top of `mpscpp3/chain_session.h`
-for the full v2→v3 API mapping) exposing the *identical* `Chain`
-class/Python surface, not an independent reimplementation. There is no
-file-based/subprocess design for either version — that was removed
-entirely from `mpscpp2`, and `mpscpp3` never had one.
-
-- **`cppext.py`** lazily imports whichever compiled extension a chain
-  needs and caches whether it loaded (`get_backend(version)`/
-  `available(version)`, `version` is `2` or `3`).
-- **`mpscppN/chain_session.h`**'s `Chain` class is the stateful, in-process
-  session: one `Chain` instance per `Many_Body_Chain` (held as
-  `self._session`, created in `sites.py::initialize` whenever
-  `itensor_version in (2,3)` and the corresponding extension is
-  available), with a method per DMRG task (`gs_energy`, `vev`,
-  `apply_operator`, KPM/CVM dynamical correlators, `correlation_matrix`,
-  `reduced_dm`, `excited_states`, time evolution, ...), built directly
-  against ITensor's `AutoMPO`/`MPS`/`MPO` APIs. `check_task.h`,
-  `get_sites.h` and `mo_terms.h` are the only other `mpscppN/*.h` headers
-  it depends on; everything else it needs is self-contained in
-  `chain_session.h`.
-- **`mpscppN/mo_terms.h`** and `MultiOperator.to_terms()`
-  (`multioperator.py`) convert a `MultiOperator` into a plain list of
-  `(coefficient, [(opname, site), ...])` tuples that `Chain` turns directly
-  into an ITensor `HTerm`/`AutoMPO`.
-- **The `cpp_handle` pattern**: `mps.py::MPS` and
-  `multioperatortk/staticoperator.py::StaticOperator` both carry an opaque
-  `cpp_handle` attribute holding the pybind11-wrapped ITensor object living
-  in C++ memory — these classes have no other representation now, so
-  `cpp_handle` is always set for `itensor_version in (2,3)` chains (it's
-  `None` only for objects that were never meant to touch the C++ backend,
-  e.g. `mpsjulialive`'s own `MPS`/`MPO` classes are separate types
-  entirely).
-- Because `cpp_handle` objects have no pickle/deepcopy support, `MPS.copy()`
-  / `StaticOperator.copy()` use a shallow `copy.copy()` (never
-  `deepcopy()`). `Many_Body_Chain.__deepcopy__` never copies `_session`
-  directly (a live C++ session has no well-defined "copy" semantics);
-  instead it builds a fresh `Chain` for the clone when the original had
-  one, which is what `clone()`/`bandwidth()`/`lowest_eigenvalue()` rely on.
-- **Both backends hand ITensor its operators at unit scale.** Three
-  thresholds inside ITensor are absolute (svdMPO's `Cutoff` of 1e-13 on
-  squared singular values, its 1e-14 coefficient skip, Davidson's 1e-10
-  residual below which a Krylov direction is randomized), so `build_mpo()`
-  goes through `mo_terms.h`'s `to_mpo_unit()` and every `dmrg()` on the
-  Hamiltonian through `solver_hamiltonian()`, both at the power of two that
-  brings a largest coefficient below 1 into [1,2), divided back exactly;
-  at a largest coefficient of 1 or more they run the unscaled code byte for
-  byte, and `set_hamiltonian_mpo` resets the scale to 1. The session's
-  `hscale_up_` is the factor `to_mpo_unit()` actually applied to the merged
-  AutoMPO (its `up_out`), not a maximum over the raw terms, which cancelling
-  duplicates made wrong (2026-09-25b finding 28). A new MPO built from an
-  AutoMPO, or a new `dmrg()` call, should go through the same two, or it
-  reintroduces the small-units failure (2026-09-25 record, item 2).
-  NH-DMRG is not a `dmrg()` call: it is unit-scaled once, at the Python entry
-  in `nhdmrg.py`, for all three session backends, so do not add a second
-  scale inside `Chain::nhdmrg`.
-- A few **pre-existing bugs in the original design are deliberately
-  reproduced, not fixed**, in both `chain_session.h`s (see comments at the
-  call sites for details): `evoloperator()`'s z³/6 term multiplies `H2`
-  instead of the computed `H3`; the old file-based backend's `"noise"`
-  tasks.in key was actually read back as `"moise"`, and `"tevol_fit"` was
-  written but `"tevol_fit_td"` was read, making that fitting branch
-  unreachable — both reproduced as hardcoded values rather than silently
-  "fixed". If ITensor results look numerically "close but not exact" to a
-  hand-derivation, check here before assuming a porting bug.
-- **`mpscpp3`-specific: every site is built with `ConserveQNs=false` by
-  default** (`mpscpp3/get_sites.h`), and `Chain`'s DMRG starting state is an actual
-  `randomMPS(sites_,maxm_)`, not a plain product state
-  (`chain_session.h`'s `default_mps()`). This isn't cosmetic: v2's own
-  plain `MPS(sites_)` (no `InitState`) ends up, in practice, performing an
-  *unconstrained* search of the full Hilbert space rather than one pinned
-  to a single total-Sz/particle-number sector — confirmed by cross-checking
-  against the compiled v2 extension with a symmetry-breaking field term,
-  where v2 correctly finds a fully-polarized ground state. ITensor v3 is
-  stricter about QN-conserving tensors needing a well-defined flux from
-  the start, and a naive port (QN on, product-state start) gets DMRG
-  permanently stuck at that starting product state's energy (a textbook
-  "DMRG trapped at an exact eigenstate" failure, reproducible even with a
-  large noise term) instead of raising an error. Turning QN off and
-  starting from an actual random MPS reproduces v2's real behavior at the
-  cost of the QN block-sparsity speedup for `itensor_version=3` — a
-  genuine perf/memory tradeoff of this backend, not a bug to "fix" later.
-  Note the "permanently stuck" observation is specific to the
-  *all-first-basis-state* product start it was measured with: that state
-  (all spins up) is the unique state of its own Sz=N/2 sector, so no noise
-  term can move it and its energy is the correct answer for that sector.
-  It says nothing about QN mode from a *non-trivial* in-sector start,
-  which is what the opt-in sector mode below actually does.
-- **`mpscpp3`-specific: opt-in conserved-sector (QN) mode.**
-  `Many_Body_Chain.set_conserved_sector(Nf=6)` / `(Sz=0)` / `(Nf=8,Sz=0)`
-  (off by default, no-args clears it) confines
-  the whole calculation to one quantum-number sector: `Chain::
-  set_conserved_sector` rebuilds `sites_` via `SpinX(site_types,conserved)`
-  with QN-carrying indices and drops everything built on the old site set.
-  The same public API (including `promote_to_dense`/`promote_mps`) is also
-  implemented by `itensor_version="python"`, by a different mechanism --
-  dense storage with a charge grading on the site indices plus a charge
-  penalty on the variational solves, see `pyitensor/sector.py`'s module
-  docstring and the pure-Python-backend section of `docs/documentation.md`;
-  everything else below is v3-specific. `mode="ED"` implements the same
-  API too, by a third mechanism (`edtk/edchain.py`: a conserved charge is
-  diagonal in the ED product basis, so a sector is a set of basis states
-  and every assembled operator is restricted to that submatrix; the
-  charge operators come from `Many_Body_Chain.
-  get_sector_charge_operators()`, and `promote_to_dense`/`promote_mps`
-  are deliberately *not* part of it, since an ED re-solve is cheap). The
-  backends that genuinely have no quantum numbers are DMRG on
-  `itensor_version=2` and `"julia_live"`, and `mode.py` raises rather
-  than letting one of those answer a sector-mode chain; falling back to
-  ED, on the other hand, is now correct rather than forbidden. See
-  `docs/documentation.md` §4.3a and
-  `tests/test_sector_conservation_ed.py`.
-  It pays off with size, and only with size: measured through the Python
-  API on Heisenberg chains, sector vs dense is 0.6x (n=20, maxm=60), 2.0x
-  (n=40, maxm=100), 4.2x (n=60, maxm=200) — block sparsity scales, its
-  per-block bookkeeping doesn't. Don't quote a single speedup number. Three ITensor
-  behaviors shape the implementation, each confirmed directly and none of
-  them a clean failure:
-  - `randomMPS(SiteSet)` refuses to guess a sector under QNs and
-    `randomMPS(InitState,m>1)` does not exist here (`mps.cc`), so the
-    start state is a normalized `sum()` of random in-sector product
-    states (`sector_mps`), with the per-site assignment coming from an
-    exact DP over reachable partial charges (`sector_state_plan` — greedy
-    dead-ends on a Hubbard chain at fixed `Nf` *and* `Sz`).
-  - Building a non-QN-definite operator (`Sx` on Sz-conserving sites)
-    aborts the process inside `ITensor::set`, and AutoMPO aborts on a
-    flux-violating term *even when its coefficient cancels exactly*
-    ("Index does not contain given QN block") — which is why the textbook
-    `Sx*Sx+Sy*Sy+Sz*Sz` Heisenberg Hamiltonian needs `mo_terms.h`'s
-    `expand_xy_terms`+`combine_terms` normalization here rather than
-    being left to AutoMPO, and why `op_charge()` infers an operator's
-    charge from its *dense* matrix elements instead of building it on QN
-    indices. Every `terms → MPO` path routes through
-    `mpo_from_terms`/`ampo_from_terms` so the check covers `vev`/
-    correlators/KPM vertices too; both are pass-through when no sector is
-    set, keeping the default path byte-identical.
-  - ITensor's own `Error()` calls `abort()` (`util/error.h`), so nothing
-    it raises is catchable from Python — the sector code throws
-    `std::invalid_argument`/`std::runtime_error` instead.
-  Python side: the sector lives on the chain, is re-applied wherever a
-  session is rebuilt (`sites.py::initialize`, `__deepcopy__`), is part of
-  `groundstate.py`'s send-cache key, and makes `mode.py` raise rather than
-  fall back to ED (a fallback would silently answer with the *global*
-  ground state). `tests/test_sector_conservation.py` cross-checks every
-  sector against ED restricted to that sector — note the reference must
-  *restrict* (the charge operator is diagonal in the ED basis, so a sector
-  is a submatrix), not filter full-spectrum eigenvectors by ⟨N⟩: sector-
-  degenerate eigenvalues come back as arbitrary superpositions.
-- **`mpscpp3`-specific: `applyMPO()` doesn't restore the standard unprimed
-  physical index** the way v2's `exactApplyMPO`/`fitApplyMPO` implicitly
-  did — it just contracts whichever leg of the MPO happens to match the
-  input MPS's own (possibly already-primed) physical index, so the *next*
-  `sum()` of two independently-produced results can hit a hard
-  `ITensor::operator+=: different index structure` abort. Every MPO
-  application in `mpscpp3/chain_session.h` goes through a private
-  `apply_mpo()` wrapper that always calls `.noPrime("Site")` on the result
-  before returning, restoring that invariant globally instead of patching
-  individual call sites. Likewise, `nmultMPO(A,B)` (used to build `H*H` for
-  `custom_exp()`/`evoloperator()`) requires `nmultMPO(A,prime(B))` when `A`
-  and `B` share the same physical indices (any two operators built on the
-  same chain always do) — v2 tolerated the unprimed form directly — and the
-  result's output leg then needs `.mapPrime(2,1)` to get back to the
-  standard single-application convention before it can be summed against
-  any other operator (see `mult_mpo()`'s comment, and ITensor v3's own
-  `unittest/mpo_test.cc` "nmultMPO" section, which documents exactly this
-  usage).
-- **`mpscpp3`-specific: plain `inner()` throws on complex MPS/MPO** ("Cannot
-  use inner(...) with complex MPS/MPO, use innerC(...) instead"), unlike
-  v2's `overlap()` (which just silently returns the real part regardless).
-  Since `MOTerm::coef` is always `Cplx`, any MPO/MPS built from
-  Python-supplied terms is complex-typed even when every coefficient's
-  imaginary part is exactly 0 — confirmed directly, the KPM dynamical
-  correlator path aborted here in `same_mps()` until every "Re[<x|y>]" use
-  in `chain_session.h` was changed to `innerC(...).real()`.
-- **`mpscpp3`-specific: real-time MPS evolution defaults to TDVP.**
-  `mpscpp3/TDVP/` (vendored from ITensor's own TDVP repo, see its
-  `README.md`) provides a proper two-site TDVP integrator, wired into
-  `chain_session.h` as `Chain::quench_tdvp()`/
-  `Chain::evolve_and_measure_tdvp()` (via the private `tdvp_step()`
-  helper) alongside the pre-existing `Chain::quench()`/
-  `Chain::evolve_and_measure()`, which apply a hand-rolled 2nd-order
-  Taylor expansion of `exp(-i dt H)` as an MPO (`evoloperator()`) instead.
-  `Many_Body_Chain.tevol_method` (`manybodychain.py`, default `"TDVP"`)
-  picks between them in `timedependent.py`'s `evolution_dmrg_DC()`/
-  `evolve_and_measure_dmrg()` — every one of those dispatches tests
-  `itensor_version in (3,"python")`, so `"TDVP"` applies on the C++ side
-  only at `itensor_version==3` (mpscpp2 has no `TDVP/` and no `_tdvp`
-  methods at all); any other combination silently falls back to the
-  MPO-Taylor path, which remains the only option for
-  `itensor_version=2`. Note `Chain::tdvp_step` takes `DoNormalize` from
-  the step (`dt.imag()==0.0`), not hardcoded: forcing unit norm after a
-  COMPLEX-time step deletes exactly the decay `tdz.py`'s `submode="TDZ"`
-  contour is built on, which is what made v3's TDZ return too much
-  spectral weight — the audit measured 36% too much, 0.340676 against an
-  exact 0.25 (2026-09 audit finding #7; that "before" figure is the audit
-  record, not re-measurable now that the extension has been rebuilt,
-  while the post-fix 0.249473 re-measures). Only the
-  two-site TDVP algorithm is used (`NumCenter=2`); the global subspace
-  expansion machinery in `TDVP/basisextension.h` (mainly useful for
-  one-site TDVP or long-range Hamiltonians) is not wired in, since
-  two-site TDVP already grows bond dimension via SVD like two-site DMRG.
-- **`mpscpp3`-specific: `Chain::idmrg_ground_state` is a full port of
-  `pyitensor/idmrg.py`, static observables included.** It was for a long
-  time only *most* of one, and the three missing pieces are worth knowing
-  about because they are exactly the parts an energy-only test cannot
-  see: (1) McCulloch's wavefunction prediction (`theta = lambda_k . B_k .
-  lambda_{k-1}^{-1} . A_k . lambda_k`) as each micro-step's Krylov start,
-  now `idmrg_wavefunction_prediction` (the older heuristic it replaced —
-  reusing a raw flat vector whenever its size matches — survives as the
-  fallback when the previous step's shapes don't line up yet); (2)
-  extraction of the converged unit cell from a single micro-step's theta,
-  now `idmrg_theta_cell` + `ic_canonicalize_cell`, kept on the Chain as
-  `idmrg_cell_` — tiling the per-micro-step `idmrg_U_` chain instead
-  (whose two ends live in bond bases minted by *different* micro-steps)
-  leaves the energy correct while putting `<Sz>` at -0.13 against an exact
-  0 on the XX chain; (3) the per-site energy baseline subtracted from both
-  growing environments each micro-step (`idmrg_subtract_energy_baseline`,
-  the reference `idmrg.h`'s `HL += -energy*IL`), with the density adding
-  the shift back. On top of (2), `bindings.cc` now exposes
-  `idmrg_onsite_expectation`/`idmrg_two_point_correlator`/
-  `idmrg_local_excitation_gap`, so `gs_method="idmrg"` supports
-  `vev`/`correlator`/`local_excitation_gap` on `itensor_version=3`;
-  `td_dynamical_correlator_window`'s own connected-background subtraction
-  reads the same cell-based expectation value (it used to tile `idmrg_U_`,
-  i.e. it had the gauge bug (2) exists to fix).
-  `tests/test_infinite_chain.py::test_itensor_version3_matches_python_backend`
-  now compares `vev` and a `correlator` sweep as well as `e0`, so the
-  divergence is guarded rather than merely documented, and
-  `tests/test_idmrg_correlator_v3.py` covers the new surface directly.
-  Still `itensor_version="python"`-only: `local_excitation_gap(window>0)`
-  (`local_excitation_gap_windowed` is an explicit prototype, not stable
-  API) and the iMPS algebra over `IDMRGResult`
-  (`imps_overlap`/`apply_mpo`/`imps_sum`), which `infinitechain.py` never
-  exposed for `gs_method="idmrg"` and which the VUMPS path already covers
-  on this backend.
-- **`mpscpp3`-specific: the iDMRG static observables are dense arrays, not
-  ITensors** — the `ic_*` helpers in `chain_session.h`, the same design
-  (and for the same reasons) as the VUMPS `vx_*` ones next to them. Two
-  deliberate departures from a literal transcription of `idmrg.py`, both
-  pure performance and neither changing a returned number: the
-  measurement-independent part (transfer tensors + both families of
-  fixed points) is built once per ground-state run and cached
-  (`ic_build_cache`) rather than recomputed inside every `vev`/
-  `correlator` call the way `idmrg.py` does; and a two-point correlator
-  applies the operator string to the right fixed point one site at a time
-  (O(chi^4) per site) instead of composing transfer matrices (O(chi^6)
-  per site). Measured on a critical Heisenberg chain at `maxm=24`: a
-  single `r=3` correlator went from ~4.1s to ~0.01s. Above
-  `ic_dense_eig_max_` (=64, matching `idmrg.py`'s own `_DENSE_EIG_MAX`)
-  the transfer-matrix eigenproblems switch from a dense `zgeev` on the
-  whole `chi^2 x chi^2` matrix to a matrix-free restarted Arnoldi
-  (`ic_arnoldi_dominant`), the C++ counterpart of `idmrg.py`'s own ARPACK
-  branch. Net effect versus `itensor_version="python"` on that same
-  chain: the *growth loop* is no faster (v3 runs ~1.5-2x slower — it is
-  ITensor-object-bound, see the benchmark note in
-  `docs/documentation.md`), while the *observables* are 5-500x faster.
-- **Both backends can be loaded in the same process** (needed for anything
-  that directly compares `itensor_version=2` vs `=3` results, e.g. the
-  `v2_VS_v3_*`-named examples in each theme folder, or `examples/
-  dynamical_correlator/dynamical_correlator_v2_VS_v3`) only because
-  `mpscpp3/bindings.cc`
-  registers its pybind11 types with `py::module_local()`. Without it,
-  `mpscpp2` and `mpscpp3` define their own, ABI-incompatible
-  `Chain`/`MPS`/`MPO` C++ types (same unqualified/unnamespaced names,
-  different vendored ITensor copies), and libstdc++'s cross-DSO RTTI
-  equality falls back to comparing the mangled type-name *string*, not the
-  address — so pybind11 (keyed on `std::type_index`) sees the exact same
-  "type" already registered the moment both extensions are imported into
-  one process, and aborts with `generic_type: type "Chain" is already
-  registered!`. `module_local()` keeps mpscpp3's registration in a
-  module-scoped table instead of the shared global one, avoiding the
-  collision regardless of import order (confirmed both ways). This is
-  applied only on the mpscpp3 side — mpscpp2 is untouched and still uses
-  the ordinary global registration.
+**Conserved sectors.** `Many_Body_Chain.set_conserved_sector(Nf=6)`/
+`(Sz=0)`/`(Nf=8,Sz=0)` (off by default, no-args clears it) confines the
+whole calculation to one quantum-number sector, by three mechanisms behind
+one API: QN-carrying ITensor indices on `itensor_version=3`, dense storage
+with a charge grading plus a charge penalty on `"python"`
+(`pyitensor/sector.py`), and a restriction of every assembled operator to
+the basis states carrying the charge on `mode="ED"` (`edtk/edchain.py`,
+where `promote_to_dense`/`promote_mps` are deliberately not implemented
+since an ED re-solve is cheap). The sector lives on the chain, is re-applied
+wherever a session is rebuilt (`sites.py::initialize`, `__deepcopy__`) and
+is part of `groundstate.py`'s send-cache key. It pays off with size, and
+only with size (0.6x at n=20, 4.2x at n=60 on Heisenberg chains); do not
+quote a single speedup number. `tests/test_sector_conservation.py` and
+`tests/test_sector_conservation_ed.py` cross-check every sector against ED
+restricted to that sector; the reference must restrict, not filter
+full-spectrum eigenvectors by `<N>`, since sector-degenerate eigenvalues
+come back as arbitrary superpositions. See `docs/documentation.md` 4.3a and
+the C++ rule file for the three ITensor behaviours that shape the v3
+implementation.
 
 ### Supporting `*tk` packages
 
@@ -1423,366 +728,125 @@ counterpart.
 Dynamical correlators and generic operator distributions are computed with
 the Kernel Polynomial Method (`kpmdmrg.py`, `Chain::kpm_dynamical_correlator`/
 `Chain::general_kpm` in `mpscpp2/chain_session.h`/`mpscpp3/chain_session.h`
-on the C++ DMRG side, `pyfermion/algebra/kpm.py` on the ED side) rather
-than direct spectral decomposition, since exact diagonalization of the
-full spectrum is infeasible for large chains.
+on the C++ DMRG side, `algebra/kpm.py` on the ED side) rather than direct
+spectral decomposition, since exact diagonalization of the full spectrum is
+infeasible for large chains. The convention and the calibration are in the
+rules above.
 
-`submode="SECTOR"` (`sectordc.py`) is the exception to that shape, and
-the only submode that does not compute a spectrum on the chain it is
-called on: it solves the reference sector and the *one* sector
-`B|gs>` lands in (N+1 for `Cdag`, Sz+2 for `S+`) on an internal clone,
-promotes both to dense indices and contracts them, summing an explicit
-Lehmann representation over converged per-sector eigenstates. It rests
-entirely on `promote_mps` rebasing onto the chain's *original*
-`dense_sites_`, which `set_conserved_sector` never rebuilds -- already
-regression-tested by
-`tests/test_sector_promotion.py::test_states_promoted_from_different_sectors_are_comparable`.
+`submode="SECTOR"` (`sectordc.py`) is the exception to that shape, and the
+only submode that does not compute a spectrum on the chain it is called on:
+it solves the reference sector and the one sector `B|gs>` lands in (N+1 for
+`Cdag`, Sz+2 for `S+`) on an internal clone, promotes both to dense indices
+and contracts them, summing an explicit Lehmann representation over
+converged per-sector eigenstates. It rests entirely on `promote_mps`
+rebasing onto the chain's original `dense_sites_`, which
+`set_conserved_sector` never rebuilds
+(`tests/test_sector_promotion.py::test_states_promoted_from_different_sectors_are_comparable`).
 `get_spectral_function`/`get_spin_spectral_function` assemble the
 particle/hole and Sz channels on top, and a charge-indefinite operator
 (`Sx`) is split into `(S+ + S-)/2` and summed channel by channel
-(`multioperatortk/charge.py`) rather than rejected. Two things to know before touching
-it: the gating is explicit inside the submode (`mode.py`'s sector guard
-keys on the *caller's* `conserved_sector`, which is empty here, so it
-never fires), and the per-sector solves are cached with the clone that
-produced them (`_sector_states_cache`) because ITensor Index identity is
-per session -- that cache is also what makes a site sweep, and so
+(`multioperatortk/charge.py`) rather than rejected. Two things to know
+before touching it: the gating is explicit inside the submode (`mode.py`'s
+sector guard keys on the caller's `conserved_sector`, which is empty here,
+so it never fires), and the per-sector solves are cached with the clone
+that produced them (`_sector_states_cache`) because ITensor Index identity
+is per session; that cache is also what makes a site sweep, and so
 `S(q,w)`/`A(k,w)`, cost about one site's correlator. See
 `docs/sector_resolved_spectral_function_plan.md` for the design and
 `tests/test_sector_spectral_function.py` for what is pinned.
 
 ### STM/Kondo tunneling spectra (`kondospectrumtk/`)
 
-`Spin_Chain.get_kondo_spectrum` is the third-order perturbation theory
-of Ternes, NJP 17 063016 (2015), arXiv:1505.04430; `mode="ED"` (full
-diagonalization, any T) is the reference implementation and
-`mode="DMRG"` (T=0 only) reproduces its two T=0-reducible pieces via the
-dynamical correlator and the third one via a two-time TDVP construction.
-Read `conductance.py`'s module docstring before touching a prefactor:
-every normalization there was pinned against the paper's absolutely
-scaled Fig. 7 (arXiv v1 numbering; the docstrings' "Fig. 3"/"Fig. F" are
-that figure and Fig. 5), and `tests/test_kondo_spectrum_paper_fig7.py`
-holds pixel-digitized values from it (zero-bias peaks, +-4 mV tails, the
-10 T step asymmetry) that agree to ~0.005 -- except the in-field Kondo
-term, where the code deliberately departs from the paper (next paragraph
-but one). Two things there are
-easy to get wrong and were, until 2026-09-12: the potential-interference
-term's direct and exchange diagrams enter with OPPOSITE signs (a
-symmetric electron trace leaves the reversed order's hole-like sign
-flip uncompensated, unlike the Levi-Civita Kondo term), so it vanishes
-identically at B=0 -- the summed form tilted the zero-field peak and
-made the 10 T asymmetry 5x the figure's; and F(eps,T) is the paper's
-symmetric closed form eq. 22 thermally broadened with Theta', not the
-electron-like defining integral eq. 20 applied to both diagrams, which
-differs at O(|eV|/omega0) (3.5% at |eV|=omega0/5) and carries a sharp
-band-edge singularity at eps=omega0. On the ED side the third-order
-sums run over thermally occupied initial states only (O(n_occ dim^2),
-not dim^3) and F is tabulated once per FBuilder (0.4 s; it used to be a
-per-point quadrature that took 28 s and 4 GB at 64 states).
-
-**The Kondo term's exchange diagram departs from the paper (2026-09-26).**
-The paper's eq. 25, and the formula under its Fig. 6, put the
-reversed-order diagram's log at F(eV-eps_mi) = F(eV+eps_im). A brute-force
-second-order T-matrix of the paper's own Hamiltonian, built as explicit
-fermion x impurity operators with every intermediate state's denominator
-read off H0 (`tests/test_kondo_spectrum_tmatrix.py`), puts it at
-F(eV-(e_f-e_m)): the sample vertex acts first and creates the outgoing
-electron, so the hole goes on shell at an outgoing energy of e_i-e_m, and
-the outgoing electron has eV-eps_if. The two differ only when f != i, so
-the U term (I_fi forces f=i), every zero-bias value and a free S=1/2 at
-B=0 are unaffected, which is why none of the paper's figure values caught
-it; its own 10 T curves were drawn from eq. 25, and
-`test_kondo_spectrum_paper_fig7.py` now checks them against a paper-form
-reconstruction (`_paper_form`) and pins the code's own values separately.
-Do NOT "restore" eq. 25 to get back on the figure. The two-time DMRG/ED
-route cannot express the new argument along G's t2 axis, so it builds a
-second, sheared function Gx(s,tau) = G(-s,tau+s) =
-<psi_l(-s-tau)|Sk|psi_j(-s)> from checkpoints of the same trajectories
-(1.5x the TDVP cost), and `kondo_term_from_two_time` takes (t, G, Gx)
-triples with the one-sided kernel `K_F` (K_W is gone; the s->t direction
-reuses conj(K_F), since its cell-averaged quadratures were most of the
-cost).
-
-Since the 2026-09-24 audit: `mode="ED"` raises `TypeError` on any keyword it does
-not read (a misspelled `Jrho_s` used to remove the Kondo peak silently);
-`mode="DMRG"`'s T=0 is the single converged state unless `n_gs=` asks for
-the equal-weight manifold average, for which `set_gs` alone suffices,
-since it hands each member to the session unswept on the next read (it
-used to push with `session.set_wavefunction`, which re-swept the member,
-second-pass findings 13 and 14 below); and
-the potential term needs `es` past the top of the S_k spectrum, not just
-past max|eV| as the second-order term does, and uses trapezoid weights,
-so a non-uniform `es` is fine.
+`Spin_Chain.get_kondo_spectrum` is the third-order perturbation theory of
+Ternes (NJP 17 063016, arXiv:1505.04430); `mode="ED"` is the reference
+implementation at any T and `mode="DMRG"` reproduces it at T=0 via the
+dynamical correlator and a two-time TDVP construction. Every prefactor was
+pinned against the paper's Fig. 7, except that the Kondo term's exchange
+diagram deliberately departs from the paper's eq. 25, where a brute-force
+T-matrix puts the log elsewhere; do NOT "restore" eq. 25 to get back on the
+figure. The notes, formerly this file's section of the same name, are in
+`.claude/rules/kondo.md`.
 
 ### Julia vs C++ backend
 
 The two DMRG backends are independent implementations, not a shared
-protocol: the C++ path runs in-process through the pybind11 extension (see
-above), while `itensor_version="julia_live"` (`mpsjulialive/`) drives a
-live Julia/ITensors.jl session via `juliacall` with its own mirrored set of
-modules. A feature missing on one side simply isn't implemented there yet
+protocol: the C++ path runs in-process through the pybind11 extension,
+while `itensor_version="julia_live"` (`mpsjulialive/`) drives a live
+Julia/ITensors.jl session via `juliacall` with its own mirrored set of
+modules. A feature missing on one side simply is not implemented there yet
 (check the relevant `mpsjulialive/*.py` file, or lack thereof) rather than
-falling back automatically — the only automatic fallback is DMRG → ED when
-the C++ extension isn't compiled (`mode.py`).
+falling back automatically; the only automatic fallbacks are the DMRG to ED
+ones `mode.py` makes (missing extension, too few sites), none of which
+substitutes one DMRG backend for another.
 
-### ITensor library
-the ITensor folders (`mpscpp2/ITensor` = v2, `mpscpp3/ITensor` = v3) are a library that is developed elsewhere, hence you do not need to read them carefully. Read them only if there is some feature that does not work with the mpscpp2/mpscpp3 code, and you need to figure out why
+### Infinite chains (iDMRG and VUMPS)
 
-**Upstream reference for the infinite-chain code**: ITensor's own
-infinite-MPS package, <https://github.com/ITensor/ITensorInfiniteMPS.jl>,
-implements iDMRG, VUMPS, the infinite MPO/`InfiniteMPS` types and the
-transfer-matrix fixed-point machinery that `infinitechain.py`,
-`pyitensor/idmrg.py`, `pyitensor/vumps.py` and the `ic_*`/`vx_*` helpers in
-`mpscpp3/chain_session.h` reimplement here. It is *not* vendored in this
-repo and dmrgpy does not depend on it — consult it as the reference
-implementation when an infinite-chain algorithm (unit-cell gauging,
-McCulloch wavefunction prediction, environment energy subtraction,
-fixed-point conventions for `<Sz>`/correlators) looks wrong or ambiguous,
-the same way `mpscppN/ITensor` is consulted for the finite algorithms.
+`infinitechain.py` is the public API, `pyitensor/idmrg.py`, `vumps.py` and
+`vumps_ms.py` the `"python"` implementation, and the `idmrg_*`/`ic_*`/
+`vx_*`/`vms_*` helpers in `mpscpp3/chain_session.h` the `itensor_version=3`
+one; the upstream reference is ITensor's own
+<https://github.com/ITensor/ITensorInfiniteMPS.jl>, not vendored here. The
+rules, with the reasoning and the measurements in
+`.claude/rules/infinite-chain.md` (formerly this file's notes under the
+"ITensor library" header):
 
-One thing has already been ported from it: `pyitensor/vumps.py`'s
-`_subspace_expand` (after upstream's `subspace_expansion.jl`) is how the
-`"python"` VUMPS D-ramp warm-starts each rung -- it picks the new bond
-directions from the SVD of `H` projected into `AL`/`AR`'s null spaces,
-instead of the noise-padding `_grow_initial_state` still does on
-`itensor_version=3`. The expansion cannot change the state or the energy
-(both enlarged tensors stay exactly isometric, `C` is embedded with zeros
-in the new block), only how fast the next rung converges: a wash on most
-models, and 4.6x faster plus 5x more accurate (and run-to-run
-reproducible, which the noise start is not) on the hardest one tested, a
-gapless `D=8` Heisenberg chain. `pyitensor/vumps_ms.py` (the sequential
-solver) now has the per-bond version too -- a loop over every bond of the
-cell, which is the shape upstream's own `subspace_expansion(psi, H)` has.
-Two things generalize rather than repeat: bond `n`'s two null spaces come
-from *different* tensors (`AL[n]` and `AR[n+1]`), so `AR[n]`'s new
-directions come from bond `n-1`; and the cell's last bond straddles the
-cell boundary, where the right environment/automaton/tensor are site 0's
-of the next cell -- by periodicity the same `GR[0]`/`W_list[0]`/`AR[0]`
-this cell already holds. Every bond grows by the same amount so the state
-stays uniform-`D`. Measured the same way (`nrestarts=1`, median of 5): a
-wash on TFIM and on the easy rows, 4.3x faster on gapless Heisenberg
-`n_uc=2 D=8` (1701 -> 909 iterations, 21.4s -> 5.0s), and on `n_uc=1 D=8`
-(where neither start converges within `maxiter`) 1.4x faster with the
-accuracy spread ~5x tighter at both ends. `itensor_version=3`'s own `vms_ground_state` has not picked up
-subspace expansion -- it noise-pads (`Chain::vms_grow_init`, the per-site
-`vumps_grow_init`). It DID have neither: its ramp's `reuse` test compared
-the previous rung's tensor size against the *new* `D`, so it could never
-hold across a rung and every rung started from pure noise. That is not a
-speed nicety on a model whose exact state is smaller than the requested
-`D` -- see the redundant-bond-dimension note further down. The residual
-criterion, the AC/C phase alignment and the variational safety net are now
-ported too.
-
-The sequential solver is also now the route for **couplings reaching
-further than one unit cell**, which used to be rejected outright
-(`infinitechain._canonicalize_hamiltonian` refused any term touching both
-the previous and the next cell). A Hamiltonian with reach>1 has no grouped
-reach-1 representation on that cell at all, so `vumps_ground_state` sends
-it to `vumps_ms` regardless of `n_uc` -- `idmrg_excitations.is_reach_one`
-read off the grouped automaton is the test, `_check_reach_one` is now just
-the raising wrapper around it, kept for the excitation ansatz. That is
-what makes a long-range model affordable: range-R costs the sequential
-path R extra automaton channels (linear), where the only previous route --
-rewrite the chain on an `n_uc >= R` cell so every coupling is reach-1 --
-costs the grouped path a `d**R` supersite. `get_operator(name, i,
-group=c)` now takes an integer cell offset (`c = -1, 0, 1` being `L`, `C`,
-`R`) to write one, and `_canonicalize_hamiltonian` canonicalizes a term's
-position by translating it whole onto the cell its leftmost site lives in
-(well defined at any reach, identical to the old three-cell rules
-everywhere those applied). Two things worth knowing before touching this:
-`gs_method="idmrg"` needed no change at all -- its growth loop consumes
-whatever `_build_periodic_mpo` builds, and `_active_channels_at` has
-always carried one pending channel per site of a term's reach, confirmed
-directly against exact answers, so do NOT "fix" that by adding a guard;
-and `_window_hamiltonian` (`kpm_finite`'s open-boundary tiling) now tests
-the fit per term rather than dropping one fixed copy, because a
-longer-ranged term runs off the end of the window sooner.
-`itensor_version=3` has the same dispatch (`Chain::vumps_ground_state`'s
-`use_multisite`, on `vumps_is_reach_one`) and agrees with `"python"` to
-2e-13. `vev`/`correlator` follow along on it too, at any `n_uc` and
-any reach. They briefly did not, and the reason is worth keeping: the
-C++ picks the SOLVER on `n_uc>2 || reach>1` while `infinitechain.py`
-picked the READER on `n_uc>2` alone, so a reach>1 chain on a short cell
-ran the sequential solver and was then handed to the grouped reader,
-which had no snapshot -- even though `Chain::vms_onsite_expectation`/
-`vms_two_point_correlator` could answer it and had existed since
-`b81b6a9`. `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`
-now fall through to the `vms_*` pair on `have_vms_snapshot_`, i.e. the
-snapshot that exists decides the reader, and the Python side has no
-dispatch of its own left to drift. `tests/test_infinite_long_range.py`,
-`examples/idmrg/long_range_infinite_chain`.
-
-**Redundant bond dimension used to be fatal on `itensor_version=3`.** A
-gapped model's exact state often needs fewer directions than the requested
-`maxm` (a field-polarized chain needs exactly one), the extra ones then
-carry no weight, and the transfer matrix picks up a decoupled unimodular
-block -- a genuinely DEGENERATE dominant eigenvalue, which looks identical
-to the one thing `vx_check_perron_nondegenerate` exists to reject (a "cat
-state": two branches with matched *nonzero* weight). So `gs_energy()`
-raised "every attempt at D=... failed" for any such model at `maxm>1` on
-the sequential solver, and the grouped one survived only by never landing
-exactly on the degeneracy (its second eigenvalue was measured at 0.99996,
-just outside the guard's 1e-9). Both environment builders now fall back to
-the fixed points the state itself names, `C C^dag`/`C^dag C`
-(`Chain::vx_bond_fixed_points`) -- exact under redundancy, and for a real
-cat state the same branch mixture an unchecked eigensolver would give,
-where the eigensolver may instead return an arbitrary single branch with
-its own wrong energy. Note what was tried first and is the WRONG shape: a
-threshold on `C`'s weight spectrum to tell redundancy from a cat state.
-The guard trips mid-convergence, where the redundant direction is still on
-its way down, so the ratio to catch is a moving number (2.7e-9, 1.2e-4 and
-1.6e-2 on three cells of the same model) with no defensible cutoff. The
-pure-Python reference has since gone one step further, and the ORDERING is
-the point: both its environment builders
-(`vumps_ms._cell_fixed_points` on the sequential path,
-`vumps._transfer_fixed_points` on the grouped one) now *prefer* the bond
-candidate -- `C C^dag` for the AL transfer's right fixed point,
-`conj(C^dag C)` for the AR transfer's left one in this codebase's
-`X[ket,bra]` ordering -- whenever it reproduces itself under the transfer
-map to a residual <= 1e-6, which in mixed canonical gauge is an exact
-algebraic identity and therefore a yes/no test rather than a tuned
-threshold, so at convergence no eigensolve runs at all; the guarded
-eigensolver runs only when the residual says the gauge relation does not
-hold, and the two are cross-checked against each other by residual. That
-is bond-candidate-FIRST, and **`itensor_version=3` got there on
-2026-09-12** -- `Chain::vx_choose_fixed_point`, one shared selection that
-both `vumps_build_environments` and `vms_environments` go through, where
-each used to hold its own `catch (ITError const&)` reaching
-`vx_bond_fixed_points` as a failure fallback. The difference between the
-two orderings was measurable and was not in the C++'s favour: on a
-field-polarized reach-1 one-site cell at `maxm=4`, `gs_energy()` on
-`itensor_version="python"` raised "every attempt at D=4 failed" in 7 of
-20 runs before its own change and 0 of 20 after, while
-`itensor_version=3` returned energies *below* the exact variational
-minimum at a rate that moved between runs and builds (13 and 17 of 80
-measured at D=6 on the grouped cell, worst 2.3e-8; worst 2.8e-3 on the
-sequential one) where `"python"` did so in 0 of 40. It is now 0 of 330
-past 1e-12 across six cells. NUMBERS CHANGE, on the same terms the
-`"python"` half's own entry sets: any `itensor_version=3` VUMPS energy
-from before 2026-09-12 on a model whose exact state is smaller than the
-requested `maxm` is not comparable, on either solver -- those were wrong,
-not merely less converged. Energies from runs that were already fine move
-only at ~1e-15. Quote the threshold with any rate, as the
-known-issue file itself instructs -- see
-`docs/known_issue_v3_vumps_variational_floor.md`, now FIXED, and
-`tests/test_vumps_redundant_bond_dimension.py`, whose narrow `xfail` came
-out and which gained a repeated-run guard (a 6-in-30 defect is invisible
-~80% of the time to a one-run test).
-
-**Porting that ordering is what caught a latent defect in the primitive
-itself**, and the lesson generalizes: `vx_bond_fixed_points`' LEFT
-candidate was `C^dag C` where the `X[ket,bra]` ordering needs
-`conj(C^dag C)` -- the transpose. Nothing had caught it because nothing
-had ever *measured* that candidate; adding the residual read it
-immediately (4e-15 for the correct orientation against 0.38-0.53 for the
-transpose, at convergence on the polarized cell at D=6). It survived
-because the only two models this function had been exercised on -- a
-field-polarized chain, whose converged `C` is real diagonal, and AKLT,
-whose `C` is real -- both have a real symmetric `C^dag C`, where the two
-orientations coincide. A fallback that is only reached on failure is a
-fallback nothing validates.
-
-**Reading that led to a bigger, unrelated find, and it is the one to know
-about**: `pyitensor/dmrg.py`'s `_lanczos_ground_state` stops when the
-lowest Ritz *value* stops moving. For a Hermitian operator the value
-error is quadratic in the eigenvector error, so a value tolerance of
-1e-12 caps the eigen*vector* at ~1e-6 -- fine for finite DMRG, which
-reports energies, and fatal for VUMPS, whose convergence criterion is a
-norm difference between `AC` and `C`, two independently-solved
-eigenvectors. VUMPS's gauge mismatch therefore floored at ~1e-6 and
-`tol=1e-10` was unreachable at any number of outer iterations, while the
-*energy* was already correct -- which is exactly why nothing in `tests/`
-caught it. `_lanczos_ground_state` now has an opt-in `residual_tol`
-(Ritz residual `beta*|s_k|`, free from the tridiagonal problem) that
-`vumps.py`/`vumps_ms.py` pass as `tol/10`; every other caller is
-byte-identical. Alongside it, `AC`/`C` are now sign-aligned against the
-vectors they were warm-started from -- solved independently, their
-relative sign was arbitrary, and a flip made the mismatch read ~4 instead
-of ~1e-6 in 11 of every 100 iterations. Measured through the public
-driver: `D=8` TFIM went from `converged` in **0/3** runs to **3/3**, and
-32.6s -> 6.7s (g=1.5) / 38.4s -> 4.6s (critical g=1.0), energies
-unchanged to every printed digit. One consequence looked alarming and,
-**measured, is not**: finite DMRG's own local solves carry the same ~1e-6
-per-solve eigenvector cap, so anything consuming a DMRG *wavefunction*
-rather than its energy was flagged here as worth a look. It has had one
-(2026-09-12) and the answer is that the cap does not reach any consumer.
-On an 8-site Heisenberg chain at FULL bond dimension -- where the MPS can
-represent the exact state, so the local solver is the only error left --
-energies, `<Sz_i>`, two-site correlators, the bond entropy, `<wf|wf>` and
-the first three excited states all agree with ED to 1e-13..1e-15, and
-forcing `residual_tol=1e-13` into finite DMRG's own two
-`_lanczos_ground_state` call sites (`dmrg.py:421`/`:726`) moves every one
-of them by <= 5e-15. Below full bond dimension the error is
-truncation-dominated and the criterion makes no systematic difference
-either way: swept over `maxm` in 4..32 against ED, the loose/tight
-difference in the excited-state errors is non-monotonic noise (tight is
-slightly *worse* at maxm=8 and 12), not an improvement. The mechanism is
-the sweep: each local solve is warm-started from the previous sweep's own
-tensor and the sweep is iterated to convergence, so a per-solve vector
-error contracts instead of accumulating -- which is exactly what VUMPS
-lacks, its criterion being a difference between two *independently*
-solved eigenvectors with no outer contraction. So do not "fix" finite
-DMRG's criterion on this reasoning; it costs Krylov iterations and buys
-nothing measurable. The C++ `itensor_version=3` port carried the eigenvalue criterion for
-a while after this, so `Chain::vumps_ground_state` floored at ~1e-6 and
-reported `converged=False` at `D>=8` -- a documented divergence between the
-two VUMPS backends. `Chain::vx_lanczos_ground_state` now has the same
-`residual_tol` (both VUMPS drivers pass `tol/10`; every other caller is
-byte-identical; since 2026-09-25b finding 24 its reference `max(1,|lambda|)`
-is capped by the Hamiltonian's own unit, its largest non-identity
-coefficient, on both backends, so that it holds in small units and next to
-an offset) and `vx_align_phase` the same alignment, removing the whole
-phase rather than just the sign, since a vector from the dense
-`vx_dense_eig_max_` branch comes out of `zheev` with no fixed phase at all.
-Re-measured through the public driver at `D=8`, `nrestarts=6`: `converged`
-in **3/3** runs at both `g=1.5` and critical `g=1.0`, from 0/3.
-`tests/test_lanczos_residual_criterion.py` covers both backends. See also
-`docs/documentation.md`'s D-ramp section,
-`tests/test_vumps_subspace_expansion.py`, and the measurement tables in
-`vumps.py`'s own section comments.
-
-That fix also **overturned a previously-recorded diagnosis**, which is
-worth knowing before trusting a similar one: the tangent-space excitation
-ansatz's accuracy loss at redundant bond dimension (excitation error
-1.8e-15 at `maxm=1` up to 3.5e-3 at `maxm=8` on an exactly-`D=1` state,
-and a ~33% flake in the dispersion tests) had been investigated at length
-and attributed to conditioning alone -- `_random_raw_tensor`'s docstring
-in `vumps.py` concluded "the ground-state solver is not the thing to
-change". The amplification was real, but what it amplified was the ~1e-6
-eigenvector error; the ground-state solver's *stopping criterion* was
-exactly the thing to change. Re-measured, the error is now 1e-13-1e-12
-across `maxm` = 1..16 and no longer monotonic. The regression that pinned
-the degradation now pins its absence
-(`test_redundant_bond_dimension_no_longer_costs_excitation_accuracy`),
-as its own predecessor's docstring had asked for; both docstrings keep the
-superseded reasoning rather than deleting it.
+- Both environment builders on both backends try the bond candidate first
+  (`C C^dag` and `conj(C^dag C)` in this codebase's `X[ket,bra]` ordering,
+  `vumps._transfer_fixed_points`, `vumps_ms._cell_fixed_points`,
+  `Chain::vx_choose_fixed_point`), a yes/no residual test, and run the
+  guarded eigensolver only when it fails; a threshold on `C`'s weight
+  spectrum is the WRONG shape, since the ratio to catch is a moving number
+  mid-convergence. The LEFT candidate is the transpose, `conj(C^dag C)`,
+  and only a measured residual ever caught that.
+- VUMPS's Lanczos stops on the Ritz residual (`residual_tol`, passed as
+  `tol/10` by `vumps.py`/`vumps_ms.py` and by `Chain::vumps_ground_state`),
+  since an eigenvalue criterion caps the eigenvector at ~1e-6 and the
+  VUMPS criterion is a difference of two independently solved eigenvectors;
+  `AC`/`C` are phase-aligned against their warm starts. Do not "fix" finite
+  DMRG's criterion on this reasoning: measured, its sweep contracts the
+  per-solve error and the tight criterion moves nothing above 5e-15.
+- Any Hamiltonian with reach>1 goes to the sequential solver (`vumps_ms`,
+  `Chain::vumps_ground_state`'s `use_multisite`), and the snapshot that
+  exists decides the reader; `gs_method="idmrg"`'s `_active_channels_at`
+  carries one pending channel per site of a term's reach by design, so do
+  NOT add a guard there.
+- `idmrg.py`'s transfer chain is `_TransferChain`, deliberately not
+  list-like, so a leftover `Es[p]` raises instead of materializing a chi^4
+  array; v3's static observables come from the extracted unit cell
+  (`idmrg_cell_`), never from tiling the per-micro-step `idmrg_U_`.
+- Any `itensor_version=3` VUMPS energy from before 2026-09-12 on a model
+  whose exact state is smaller than the requested `maxm` is not comparable
+  (`docs/known_issue_v3_vumps_variational_floor.md`, FIXED;
+  `tests/test_vumps_redundant_bond_dimension.py`, with a repeated-run guard).
 
 ## Documentation
 
 `docs/documentation.{md,tex}` covers the architecture (backends, dispatch,
-directory layout); `docs/user_guide.{md,tex}` covers the physics-facing
-API (what calculation each method performs, with the formula behind it).
-Whenever a new feature is implemented — a new physical model, a new
+directory layout); `docs/user_guide.{md,tex}` covers the physics-facing API
+(what calculation each method performs, with the formula behind it), and
+its section 21 is the ledger of what raises and what changed numbers.
+Whenever a new feature is implemented (a new physical model, a new
 `Many_Body_Chain` method, a new dynamical-correlator submode, a new
-post-processing tool, etc. — update `docs/user_guide.md` **and**
-`docs/user_guide.tex` accordingly (and `docs/documentation.{md,tex}` too,
-if the change affects architecture/backend dispatch rather than just
-physics). Keep the two formats of each document in sync; verify the
-`.tex` file still compiles cleanly with `pdflatex` (no errors, ideally no
-overfull-hbox warnings) after editing it.
+post-processing tool) update `docs/user_guide.md` **and**
+`docs/user_guide.tex` accordingly, and `docs/documentation.{md,tex}` too if
+the change affects architecture or backend dispatch rather than just
+physics. Keep the two formats of each document in sync and verify the
+`.tex` still compiles cleanly with `pdflatex` after editing it; the
+`docs-sync` skill (`.claude/skills/docs-sync/SKILL.md`) is the procedure.
 
 ## Git workflow
 
 Working directly on `master` is fine at all times, unless the user says
 otherwise for a given task or the change is a really major one with real
-potential to conflict with other concurrent development (in which case
-use a feature branch/PR instead).
+potential to conflict with other concurrent development (in which case use
+a feature branch/PR instead).
 
-When a feature branch is warranted, new work (a new branch, a new PR)
-should start from `master`, not from another feature/staging branch,
-unless explicitly told otherwise. This repo previously reused a
-long-lived branch (`mpo-algebra-tdvp-gse`) as a staging area for several
-stacked PRs; once `master` and the staging branch diverged (each gained
-commits the other lacked), a PR built on the staging branch picked up
-unrelated content and produced conflicting/misleading diffs against
-`master`. Branching from `master` (`git fetch origin master && git
-checkout -b <branch> origin/master`) avoids this.
+When a feature branch is warranted, new work (a new branch, a new PR) should
+start from `master`, not from another feature/staging branch, unless
+explicitly told otherwise. This repo previously reused a long-lived branch
+(`mpo-algebra-tdvp-gse`) as a staging area for several stacked PRs; once
+`master` and the staging branch diverged (each gained commits the other
+lacked), a PR built on the staging branch picked up unrelated content and
+produced conflicting/misleading diffs against `master`. Branching from
+`master` (`git fetch origin master && git checkout -b <branch>
+origin/master`) avoids this.

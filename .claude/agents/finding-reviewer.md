@@ -19,8 +19,9 @@ settles it.
 Then attack it, in roughly this order, because these are the ways candidate
 findings have actually failed here:
 
-- Is the behaviour intended and documented? `CLAUDE.md` lists bugs that are
-  deliberately reproduced rather than fixed, `docs/known_issue_*.md` holds the
+- Is the behaviour intended and documented? `CLAUDE.md`'s audit section and
+  `.claude/rules/cpp-backend.md` list the bugs that are deliberately
+  reproduced rather than fixed, `docs/known_issue_*.md` holds the
   known-open ones, `ROADMAP.md` marks what is absent by design, and a
   `NotImplementedError` naming its own restriction is a documented boundary, not
   a hole.
