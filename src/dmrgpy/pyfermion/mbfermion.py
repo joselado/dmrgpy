@@ -21,10 +21,10 @@ class MBFermion(edchain.EDchain):
         Initialize the object
         """
         super().__init__()
-        if nf is not None: raise
+        if nf is not None: raise NotImplementedError("A fixed particle number nf is not implemented, got nf=%s" % (nf,))
         fconf = lambda x: True
         self.n = n # number of different levels
-        if n>nmax: raise # too big system
+        if n>nmax: raise ValueError("Number of levels %d exceeds the maximum %d" % (n,nmax)) # too big system
         self.c_dict = dict() # dictionary with the annhilation operators
         self.basis = states.generate_basis(self.n,fconf) # basis
         self.nMB = len(self.basis) # dimension of many body hamiltonian
@@ -208,8 +208,7 @@ class MBFermion(edchain.EDchain):
         elif name=="Ndn": return self.get_density(2*i+1)
         elif name=="Ntot": return self.get_density(2*i)+self.get_density(2*i+1)
         else:
-            print("Unrecognised operator",name)
-            raise
+            raise ValueError("Unrecognised operator %s" % (name,))
 
 
 
@@ -227,17 +226,14 @@ def test_commutation(self):
         j = np.random.randint(n)
         d = Cdag[i]@Cdag[j] + Cdag[j]@Cdag[i]
         if np.max(np.abs(d))>1e-7: 
-            print("Cdag,Cdag failed",i,j)
-            raise
+            raise RuntimeError("Cdag,Cdag anticommutator failed for sites %d %d" % (i,j))
         d = C[i]@C[j] + C[j]@C[i]
         if np.max(np.abs(d))>1e-7: 
-            print("C,C failed",i,j)
-            raise
+            raise RuntimeError("C,C anticommutator failed for sites %d %d" % (i,j))
         if i==j: d = Cdag[i]@C[j] + C[j]@Cdag[i] - Id
         else: d = Cdag[i]@C[j] + C[j]@Cdag[i] 
         if np.max(np.abs(d))>1e-7:
-            print("Cdag,C failed",i,j)
-            raise
+            raise RuntimeError("Cdag,C anticommutator failed for sites %d %d" % (i,j))
     print("Commutation test passed")
 
 

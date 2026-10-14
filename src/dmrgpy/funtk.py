@@ -24,7 +24,7 @@ def obj2fun(a):
     """
     if callable(a): return a
     elif type(a)==np.array: return lambda i,j: a[i,j]
-    else: raise
+    else: raise ValueError("Cannot convert object of type %s into a function" % type(a))
 
 
 def obj2mat(a):
@@ -32,5 +32,5 @@ def obj2mat(a):
     Transform an object into a matrix
     """
     if type(a)==np.matrix: return a
-    elif callable(a): raise
+    elif callable(a): raise NotImplementedError("Converting a callable into a matrix is not implemented")
 

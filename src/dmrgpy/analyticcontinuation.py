@@ -35,7 +35,7 @@ def polyexp_fit(zs,us,n=10,bnds=[-5.,5.]):
             fint = lambda x: fx(x)*np.exp(-tau*x)/(1+np.exp(beta*x))
             out = quad(fint,bnds[0],bnds[1])
     from scipy.optimize import minimize
-    raise # not finished yet
+    raise NotImplementedError("polyexp_fit is not finished yet") # not finished yet
 
 
 

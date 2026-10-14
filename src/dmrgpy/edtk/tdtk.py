@@ -21,7 +21,7 @@ def evolve(w,h,t=0.0,mode="scipy",dt=0.01,de=0.0,dp=0.0):
     return discrete_evolution_taylor2(w,h,t,dt)
   elif mode=="scipy":
     return scipy_evolution(w,h,t)
-  else: raise
+  else: raise ValueError("Unknown time evolution mode %s" % mode)
 
 def scipy_evolution(psi,h,t):
   """e^{+iht}|psi>, exactly (to rounding) and unitarily.

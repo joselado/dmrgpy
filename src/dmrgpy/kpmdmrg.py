@@ -412,8 +412,7 @@ def kpm_moments_wfa_wfb(self,X=None,wfa=None,wfb=None,
         X,scale,shift = scale_operator(self,X,a=a,b=b)
     num_p = int(3*scale/delta) # number of polynomials
     if wfa is None or wfb is None:
-        print("Wavefunctions must be provided")
-        raise
+        raise TypeError("Wavefunctions must be provided (wfa= and wfb=)")
     mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,False)
     if self.kpm_extrapolate:
         mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,

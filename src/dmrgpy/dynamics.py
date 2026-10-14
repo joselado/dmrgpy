@@ -309,7 +309,7 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
                 "(2,3,'python') instead"%submode)
         from .mpsjulialive import dynamics as dynamicsjl
         return dynamicsjl.get_dynamical_correlator(self,submode=submode,**kwargs)
-    else: raise
+    else: raise ValueError("get_dynamical_correlator: unknown itensor_version %r" % self.itensor_version)
 
 
 

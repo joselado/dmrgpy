@@ -77,7 +77,8 @@ def one2many_basis(m,basis,bdict=None):
   """Convert a one body operator into a manybody operator"""
   if bdict is None: bdict = get_dictionary(basis) # get the dictionary
   nm = m.shape[0] # dimension of one body
-  if nm!=len(basis[0]): raise # error if wrong dimensions
+  if nm!=len(basis[0]): raise ValueError("one-body matrix of dimension %d "
+          "does not match %d sites in the basis" % (nm,len(basis[0]))) # error if wrong dimensions
   on = len(basis) # dimension of output matrix
   nout = len(basis) # length of the output matrix
   mout = csc_matrix(([],([],[])),shape=(on,on)) # output matrix
@@ -108,7 +109,8 @@ def four2many(m,basis,bdict=None):
   """Convert a four fermion operator into a many body operator"""
   if bdict is None: bscit = get_dictionary(basis) # get the dictionary
   nm = m.shape[0] # dimension of one body
-  if nm!=len(basis[0]): raise # error if wrong dimensions
+  if nm!=len(basis[0]): raise ValueError("four-fermion tensor of dimension "
+          "%d does not match %d sites in the basis" % (nm,len(basis[0]))) # error if wrong dimensions
   on = len(basis) # dimension of output matrix
   mout = csc_matrix(shape=(on,on)) # output matrix
   for i in range(nm): # loop over states
@@ -155,7 +157,8 @@ def write_basis(basis):
 
 def one2many(m,ne=None):
   """Return a matrix in the many body basis, with ne electrons"""
-  if 2**m.shape[0]>dimmax: raise # too big system
+  if 2**m.shape[0]>dimmax: raise ValueError("Hilbert space of %d sites "
+          "is above the maximum dimension %d" % (m.shape[0],dimmax)) # too big system
   if ne is None: # no constrain
     f = lambda x: True
   else: # with constrain
@@ -168,7 +171,8 @@ def one2many(m,ne=None):
 def destroy(basis,bdict,nm,isite):
   """Convert a one body operator into a manybody operator"""
   if bdict is None: bdict = get_dictionary(basis) # get the dictionary
-  if nm!=len(basis[0]): raise # error if wrong dimensions
+  if nm!=len(basis[0]): raise ValueError("destroy: %d sites do not match "
+          "%d sites in the basis" % (nm,len(basis[0]))) # error if wrong dimensions
   on = len(basis) # dimension of output matrix
   nout = len(basis) # length of the output matrix
   mout = csc_matrix(([],([],[])),shape=(on,on)) # output matrix

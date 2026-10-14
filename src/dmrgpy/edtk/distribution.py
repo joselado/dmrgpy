@@ -20,7 +20,7 @@ def distribution_kpm(wf0,X=None,scale=10.0,
     """Compute P(x) = <0|delta(x-X)|0> using the KPM, a density in x that
     integrates to <0|0> = 1 on a normalized state, returned on its own
     grid or at the points xs if given"""
-    if X is None: raise
+    if X is None: raise ValueError("distribution_kpm: operator X must be provided")
     M = X # assign
     vi = wf0 # first wavefunction
     vj = wf0 # second wavefunction
@@ -61,7 +61,7 @@ def distribution_inversion(wf0,X=None,scale=10.0,
 #          o1 = solve_cv(h0,wf0,A,B,e+e0,delta=delta) # conjugate gradient
 #          o2 = solve_cv(h0,wf0,A,B,e+e0,delta=-delta) # conjugate gradient
 #          o = 1j*(o1 - o2)/2. # substract
-      else: raise # not recognised
+      else: raise ValueError("distribution_inversion: unknown mode %r" % mode) # not recognised
       out.append(o)
   return es,np.array(out) # return result
 

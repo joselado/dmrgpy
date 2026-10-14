@@ -28,7 +28,7 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
             SO = StaticOperator(h,wf.MBO)
             def TP(wf0,dt01,**kwargs):
                 return first_order_exponential(SO,wf0,dt01)
-        else: raise
+        else: raise ValueError("Unknown tmode %s" % tmode)
         for i in range(len(ts)):
             t1 = ts[i] # final time
             dt01 = t1-t0 # time difference
@@ -39,7 +39,8 @@ def evolve_WF(h,wf,ts=np.linspace(0.,10.,10),dt=1e-3):
             wfout.append(wf1.copy()) # store
             t0 = t1+0.0 # new old time
         return wfout
-    else: raise # unrecognized option
+    else: raise NotImplementedError("evolve_WF takes an ED State or an MPS, "
+            "got %s" % type(wf).__name__) # unrecognized option
 
 
 imaginary_exponential = evolve_WF # just a wrapper exponential

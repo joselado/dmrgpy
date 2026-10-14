@@ -22,7 +22,7 @@ def get_correlator_spinless(self,name="cdc",mode="DMRG",**kwargs):
       elif mode=="ED": # using ED
         MBF = self.get_ED_obj() # get the object
         return MBF.get_correlator(name=name,**kwargs)
-      else: raise
+      else: raise ValueError("Unknown mode %r, expected DMRG or ED" % mode)
 
 
 

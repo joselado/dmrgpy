@@ -82,7 +82,7 @@ class Spin_Chain(Many_Body_Chain):
             j = np.random.randint(self.ns)
             op = Sx[i]*Sy[j] - Sy[j]*Sx[i]
             if i==j: op = op - 1j*Sz[i]
-            if not self.is_zero_operator(op,**kwargs): raise
+            if not self.is_zero_operator(op,**kwargs): raise RuntimeError("Spin commutation relation [Sx,Sy] failed for sites %d %d" % (i,j))
     def get_logdimension(self):
         """Return the logarithm of the Hilbert space dimension"""
         return get_logdimension(self)

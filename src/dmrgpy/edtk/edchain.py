@@ -286,9 +286,11 @@ class EDchain():
     def create_operator(self,a,i=None,name=None):
         """Create the different operators"""
         ns = self.localdim # local dimensions
-        if name is None: raise
-        if i is None: raise
-        if a.shape[0]!=ns[i]: raise
+        if name is None: raise ValueError("create_operator needs a name")
+        if i is None: raise ValueError("create_operator needs a site index i")
+        if a.shape[0]!=ns[i]: raise ValueError("create_operator: matrix of "
+                "dimension %d does not match the local dimension %d of "
+                "site %d" % (a.shape[0],ns[i],i))
         # create operators in each site
         ids = [np.identity(n,dtype=np.complex128) for n in ns] # identities
         op = one2many(ids,a,i) # one to many body
@@ -401,10 +403,12 @@ class State():
                     "with set_conserved_sector() to apply it.")
             w = a@self.v
             return type(self)(w,self.MBO) # create a new object
-        else: raise # not implemented
+        else: raise TypeError("cannot multiply an ED State by "
+                "an object of type %s" % type(a).__name__) # not implemented
     def __add__(self,a):
         if isinstance(a,State): return type(self)(self.v + a.v,self.MBO)
-        else: raise
+        else: raise TypeError("cannot add an object of type %s "
+                "to an ED State" % type(a).__name__)
     def get_fermionic_parity(self,**kwargs):
         from ..fermionicparity import get_fermionic_parity
         return get_fermionic_parity(self,**kwargs) # parity of the state
@@ -415,11 +419,13 @@ class State():
     def __mul__(self,x):
         if multioperator.isnumber(x): 
             return type(self)(x*self.v,self.MBO)
-        else: raise
+        else: raise TypeError("cannot multiply an ED State by "
+                "an object of type %s" % type(x).__name__)
     def __truediv__(self,a):
         if multioperator.isnumber(a): # number
           return (1./a)*self
-        else: raise
+        else: raise TypeError("cannot divide an ED State by "
+                "an object of type %s" % type(a).__name__)
     def __sub__(self,a):
         return self + (-1)*a
     def __neg__(self):
@@ -427,7 +433,8 @@ class State():
     def overlap(self,a):
         if isinstance(a,State): # state object
             return np.dot(np.conjugate(self.v),a.v)
-        else: raise # not implemented
+        else: raise TypeError("overlap of an ED State with an "
+                "object of type %s" % type(a).__name__) # not implemented
     def copy(self):
         from copy import deepcopy
         return deepcopy(self)
@@ -482,7 +489,8 @@ class State():
             A = self.MBO.MO2matrix(a)  # get the matrix
         elif type(a)==EDOperator: # multioperator
             A = a.SO  # get the matrix
-        else: raise
+        else: raise TypeError("applyinverse takes a MultiOperator "
+                "or an EDOperator, got %s" % type(a).__name__)
         w = algebra.applyinverse(A,self.v)
         return type(self)(w,self.MBO) # create a new object
 
@@ -494,7 +502,8 @@ def obj2matrix(self,a):
         return self.MO2matrix(a)  # get the matrix
     elif type(a)==EDOperator: # EDoperator
         return a.SO  # get the matrix
-    else: raise
+    else: raise TypeError("obj2matrix takes a MultiOperator or "
+            "an EDOperator, got %s" % type(a).__name__)
 
 
 
@@ -535,8 +544,8 @@ class EDOperator():
             out.SO = self.SO + a.SO
             return out
         else:
-            print("Not recognized",type(a))
-            raise
+            raise TypeError("cannot add an object of type %s "
+                    "to an EDOperator" % type(a).__name__)
     def __radd__(self,a): return self + a # commutative
     def __sub__(self,a): return self + (-1)*a # commutative
     def __rsub__(self,a): return -self + a # commutative
@@ -556,15 +565,16 @@ class EDOperator():
         elif type(v)==MultiOperator: # input is a multioperator
             return self*EDOperator(v,self.MBO)
         else: 
-            print("Incompatible object",type(v))
-            raise
+            raise TypeError("cannot multiply an EDOperator by "
+                    "an object of type %s" % type(v).__name__)
     def __rmul__(self,v):
         from ..multioperator import MultiOperator
         if type(v)==MultiOperator: # input is a multioperator
             return EDOperator(v,self.MBO)*self
         elif multioperator.isnumber(v): # adding a number
             return self*v
-        else: raise
+        else: raise NotImplementedError("cannot multiply an object of "
+                "type %s by an EDOperator" % type(v).__name__)
     def copy(self):
         from copy import deepcopy
         return deepcopy(self)

@@ -59,16 +59,13 @@ def test_commutation(self):
         if i>=j: continue
         d = Chi[i]@Chi[j] - omega*Chi[j]@Chi[i]
         if np.max(np.abs(d))>1e-7:
-            print("Chi,Chi failed",i,j)
-            raise
+            raise RuntimeError("Chi,Chi commutation failed for sites %d %d" % (i,j))
         d = Psi[i]@Psi[j] - omega*Psi[j]@Psi[i]
         if np.max(np.abs(d))>1e-7:
-            print("Psi,Psi failed",i,j)
-            raise
+            raise RuntimeError("Psi,Psi commutation failed for sites %d %d" % (i,j))
         d = Chi[i]@Psi[j] - omega*Psi[j]@Chi[i]
         if np.max(np.abs(d))>1e-7:
-            print("Psi,Chi failed",i,j)
-            raise
+            raise RuntimeError("Psi,Chi commutation failed for sites %d %d" % (i,j))
     print("Commutation test passed")
 
 

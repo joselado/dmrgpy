@@ -34,8 +34,8 @@ def get_correlation_eigenvalues(self,**kwargs):
     cm = get_correlation_matrix(self,**kwargs)
     ce = lg.eigvalsh(cm) # return eigenvalues
     # a sanity check
-    if np.max(ce)>1.01: raise # they should be at most 1.
-    if np.min(ce)<-0.01: raise # they should be zero the smallest
+    if np.max(ce)>1.01: raise RuntimeError("Correlation eigenvalue %g is above 1" % np.max(ce)) # they should be at most 1.
+    if np.min(ce)<-0.01: raise RuntimeError("Correlation eigenvalue %g is below 0" % np.min(ce)) # they should be zero the smallest
     return ce
 
 
@@ -53,7 +53,7 @@ def get_correlation_entropy_from_wf(self,**kwargs):
     """Return the correlation entropy of a wavefunction"""
     if self.MBO is not None: # if it has an MBO
         return get_correlation_entropy(self.MBO,wf=self,**kwargs)
-    else: raise
+    else: raise RuntimeError("The wavefunction has no MBO attached")
 
 
 

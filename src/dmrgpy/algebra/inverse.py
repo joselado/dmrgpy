@@ -7,7 +7,7 @@ import numpy as np
 # these functions are quite buggy, not functional at the current stage
 
 def solve_Ab_cv(A, b,tol=1e-4,nmax=-1):
-    raise # this is buggy
+    raise NotImplementedError("solve_Ab_cv is not functional yet") # this is buggy
     x = b.copy()  # initialize x as the initial guess
     A = b.MBO.toMPO(A) # transform into an static MPO
     r = b - A*x  # compute the initial residual
@@ -28,7 +28,7 @@ def solve_Ab_cv(A, b,tol=1e-4,nmax=-1):
 
 
 def solve_Ab_cg(A, b,tol=1e-4,nmax=-1):
-    raise # this is buggy
+    raise NotImplementedError("solve_Ab_cg is not functional yet") # this is buggy
     def dot(x, y):
         return x.dot(y)
 
@@ -59,7 +59,7 @@ def solve_Ab_cg(A, b,tol=1e-4,nmax=-1):
 
 
 def bicgstab(A, b, x0 = None, tol=1e-4, nmax=1e3):
-    raise # this is buggy
+    raise NotImplementedError("bicgstab is not functional yet") # this is buggy
     if x0 is None: x_0 = b.copy()
     else: x_0 = x0
     max_iter = nmax

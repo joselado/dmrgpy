@@ -304,7 +304,7 @@ def ground_state(h,nmax=maxsize):
 def todense(m):
     """Turn a matrix dense"""
     if issparse(m):
-        if m.shape[0]>maxsize: raise
+        if m.shape[0]>maxsize: raise ValueError("Matrix dimension %d exceeds the maximum %d for a dense conversion" % (m.shape[0],maxsize))
         else: return m.todense()
     else: return m
 

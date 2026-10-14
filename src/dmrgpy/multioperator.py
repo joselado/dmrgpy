@@ -438,7 +438,7 @@ def jordan_wigner(MO):
                     mi = c*jordanwigner.four_fermions(ls[0],i,ls[1],j,ls[2],
                             k,ls[3],l)
             else:
-                if "C" in ls or "Cdag" in ls: raise # not implemented
+                if "C" in ls or "Cdag" in ls: raise NotImplementedError("Jordan-Wigner for more than four fermionic operators") # not implemented
           except: # brute force
             inds = [opi[kk+1][1] for kk in range(n)]
             mi = c*jordanwigner.product2jw(ls,inds)

@@ -27,14 +27,13 @@ class StaticOperator():
             out.cpp_handle = self.MBO._session.scale_operator(self.cpp_handle,complex(v))
             return out
         else:
-            print("Unrecognized type in __mul__",type(v))
-            raise
+            raise TypeError("Unrecognized type in __mul__ %s" % (type(v),))
     def __rmul__(self,v):
         from ..multioperator import MultiOperator, isnumber
         if type(v)==MultiOperator: # input is a multioperator
             return StaticOperator(v,self.MBO)*self
         elif isnumber(v): return self*v
-        else: raise
+        else: raise TypeError("Unrecognized type in __rmul__ %s" % (type(v),))
     def __truediv__(self,v): return self*(1./v)
     def __neg__(self): return (-1)*self
     def __radd__(self,v): return self + v

@@ -190,8 +190,8 @@ def dcex(eex,c1,c2,es=np.linspace(-1.0,10.0,300),delta=1e-1):
     Compute a dynamical correlator with excitation energies and
     matrix elements
     """
-    if len(eex)!=len(c1): raise # something wrong
-    if len(eex)!=len(c2): raise # something wrong
+    if len(eex)!=len(c1): raise ValueError("eex has %d energies but c1 has %d matrix elements" % (len(eex),len(c1))) # something wrong
+    if len(eex)!=len(c2): raise ValueError("eex has %d energies but c2 has %d matrix elements" % (len(eex),len(c2))) # something wrong
     if es is None: es = np.linspace(-1.0,np.max(eex),2000)
     out = np.zeros(len(es),dtype=np.complex128) # output
     out = [] # empty list

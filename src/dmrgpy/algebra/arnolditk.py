@@ -105,7 +105,7 @@ def mpsarnoldi(self,H,wf=None,e=0.0,delta=1e-3,
             esi = np.abs(es.imag) # take the imaginary part
             d = 1./(esr**2 +esi**2/delta + delta) # weight for each eigenvalue
             return np.where(d==np.max(d))[0][0] # return the index
-    else: raise
+    else: raise ValueError("mpsarnoldi: unknown mode %r, expected one of ShiftInv, LM, GS, SM, SI, MRGS" % mode)
     # Op is an affine function of M (Op=a*M+b) for every mode above except
     # "ShiftInv" (Op=(M-e)^-1): affine Op shares M's eigenvectors, so its
     # own cheap Hessenberg matrix can be diagonalized directly (only the

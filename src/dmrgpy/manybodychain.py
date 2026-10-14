@@ -320,7 +320,7 @@ class Many_Body_Chain():
       elif self.itensor_version=="julia_live":
           from .mpsjulialive.sites import initialize
           initialize(self)
-      else: raise
+      else: raise ValueError("Unknown itensor_version %r" % self.itensor_version)
   def __deepcopy__(self,memo):
       """Deepcopy that never tries to copy the in-process extension session
       (an opaque Chain object -- pybind11-backed for itensor_version 2/3,
@@ -898,12 +898,12 @@ class Many_Body_Chain():
           elif self.itensor_version=="julia_live": # julia live version
               from .mpsjulialive.vev import vev as vevjl
               return vevjl(self,MO,**kwargs)
-          else: raise
+          else: raise RuntimeError("vev: unknown itensor_version %r" % self.itensor_version)
       elif mode=="ED":
           ed = self._ed_reader() # refuses a chain with no Hamiltonian
           MOf = self.toMPO(MO,mode="ED") # fast operator
           return ed.vev(MOf,**kwargs) # ED object
-      else: raise
+      else: raise RuntimeError("vev: unknown mode %r" % mode)
   def metts_vev(self,MO,T,**kwargs):
       """Finite-temperature <MO> via METTS sampling (White & Stoudenmire,
       arXiv:1002.1305) -- see vevtk/mettsvev.py. Implemented for
@@ -1172,7 +1172,7 @@ class Many_Body_Chain():
        #   return dynamics.get_dynamical_correlator(self,**kwargs)
       elif mode=="ED": 
           return self._ed_reader().get_distribution(**kwargs)
-      else: raise
+      else: raise ValueError("get_distribution: unknown mode %r" % mode)
   def get_distribution_moments(self,mode="DMRG",**kwargs):
       """Return the moments of the distribution of an operator's spectrum"""
       mode = self.get_mode(mode=mode) # overwrite mode, see get_distribution
@@ -1430,7 +1430,7 @@ class Many_Body_Chain():
           ops = [self.Sz[i]*self.Sz[j] for (i,j) in pairs]
       elif type(self)==fermionchain.Fermionic_Chain: 
           ops = [self.Cdag[i]*self.C[j] for (i,j) in pairs]
-      else: raise
+      else: raise NotImplementedError("get_correlator: not implemented for %s" % type(self).__name__)
       return np.array([self.vev(o,**kwargs) for o in ops])
   # Many_Body_Chain.evolution() used to live here. It called
   # timedependent.evolution(), which does not exist and (per git history)
@@ -1504,7 +1504,7 @@ def setup_sweep(self,mode="default"):
   elif mode=="accurate": # default mode
     sweep["n"] = "10"
     sweep["maxm"] = "50" 
-  else: raise
+  else: raise ValueError("setup_sweep: unknown mode %r" % mode)
   sweep["n"] = self.nsweeps
   sweep["maxm"] = self.maxm
   sweep["cutoff"] = self.cutoff

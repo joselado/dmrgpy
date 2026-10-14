@@ -81,8 +81,7 @@ class SpinBosonChain(EDchain):
             if isboson[i]: bosons.append(sites[i]) # add to bosons
             else: spins.append(sites[i]) # add to spins
         self.nsites = len(nsites) # number of sites
-        print("Spin Boson Chain is not functional yet")
-        raise # this is not finished
+        raise NotImplementedError("Spin Boson Chain is not functional yet") # this is not finished
         EDchain.__init__(self) # parent initialization
         ### Now create all the operators
 

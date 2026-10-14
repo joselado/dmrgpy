@@ -56,21 +56,17 @@ def generate_atom(orbs=None, # orbitals
     """Build the Hamiltonian"""
     # first some initial checks
     if tij is None: 
-        print("Hopping matrix must be provided")
-        raise
+        raise ValueError("Hopping matrix must be provided")
     if orbs is None: 
-        print("Orbital indexes must be provided")
-        raise
+        raise ValueError("Orbital indexes must be provided")
     if len(tij)!=len(orbs):
-        print("tij size must be the same as orbitals given")
-        raise
+        raise ValueError("tij size %d must be the same as the number of orbitals given, %d" % (len(tij),len(orbs)))
 #    orbs = ["dz2","dxz","dyz","dx2y2","dxy"]
     # get transformation from real orbital to spherical harmonics
     T = get_T(orbs)
 
     if len(orbs)!=5:
-        print("So far only implemented for d-orbitals")
-        raise
+        raise NotImplementedError("So far only implemented for d-orbitals, got %d orbitals" % len(orbs))
     # angular momenta operators
     Lzp = np.diag([2, 1, 0, -1, -2])
 

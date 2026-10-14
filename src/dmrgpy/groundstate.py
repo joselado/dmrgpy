@@ -747,7 +747,8 @@ def gs_energy(self,**kwargs):
             return gs_energy_single(self,**kwargs)
         elif self.itensor_version=="julia_live":
             return _gs_energy_julia(self,**kwargs)
-        else: raise
+        else: raise NotImplementedError("gs_energy is not implemented for "
+                "itensor_version=%r" % (self.itensor_version,))
     else: # non-Hermitian excited states
         # Julia version has its own function
         if self.itensor_version=="julia_live":

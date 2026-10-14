@@ -62,7 +62,7 @@ def CdagCCdagC(i,j,k,l):
 def one_fermion(ni,i,**kwargs):
     if (ni=="C"): return C(i,**kwargs)
     elif (ni=="Cdag"): return Cdag(i,**kwargs)
-    else: raise
+    else: raise ValueError("Unknown fermion operator name %s" % ni)
 
 
 def two_fermions(ni,i,nj,j,**kwargs):
@@ -70,7 +70,7 @@ def two_fermions(ni,i,nj,j,**kwargs):
     elif (ni=="Cdag") and (nj=="C"): return CdagC(i,j,**kwargs)
     elif (ni=="Cdag") and (nj=="Cdag"): return CdagCdag(i,j,**kwargs)
     elif (ni=="C") and (nj=="C"): return CC(i,j,**kwargs)
-    else: raise
+    else: raise ValueError("Unknown fermion operator names %s, %s" % (ni,nj))
 
 
 def four_fermions(ni,i,nj,j,nk,k,nl,l,**kwargs):

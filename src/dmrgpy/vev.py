@@ -32,7 +32,7 @@ def multi_vev(self,MO,wf=None,npow=1,**kwargs):
     energy_variance() below instead.
     """
     MO = multioperator.obj2MO(MO,name="vev_multioperator")
-    if MO.name!="vev_multioperator": raise
+    if MO.name!="vev_multioperator": raise RuntimeError("multi_vev: operator name was not set by obj2MO, got %r" % MO.name)
     if npow==0: return 1.0
     if wf is None: wf = self.get_gs() # get the ground state
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)

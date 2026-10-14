@@ -69,7 +69,7 @@ def fit_power_transform(mus):
 
 def extrapolate_moments(mus0,fac,extrapolation_mode="1/n"):
     """Extrapolate moments"""
-    if np.max(mus0.imag)>1e-4: raise # not implemented
+    if np.max(mus0.imag)>1e-4: raise NotImplementedError("Moment extrapolation is not implemented for complex moments, max imaginary part %g" % np.max(mus0.imag)) # not implemented
     mus = mus0.real
     if extrapolation_mode=="plain":
         ftrans,ftransinv = no_transform()
@@ -123,7 +123,7 @@ def deconvolution(es,gs,mode=None,delta0=1e-6,delta=None):
         selfh = es - 1j/gs +1j*delta0 # finite size selfenergy
         self = es - 1j/gs - 1j*delta + 1j*delta0 # infinite selfenergy
         return es,1j/(es-self+1j*delta0) # return the sharpened one
-    else: raise
+    else: raise ValueError("Unknown deconvolution mode %s" % mode)
 
 
 

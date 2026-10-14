@@ -17,7 +17,7 @@ def random_mps_dummy(self,normalize=True):
 def random_product_state(self):
     """Generate a random product state, this ensures a correct
     statistical distribution of the generated states"""
-    raise # this is not functional now
+    raise NotImplementedError("random_product_state is not functional now") # this is not functional now
     from .fermionchain import Fermionic_Chain, Spinful_Fermionic_Chain
     from .spinchain import Spin_Chain
     mbc = self.clone() # clone the object
@@ -32,7 +32,7 @@ def random_product_state(self):
         for i in range(len(mbc.Sz)): # loop over sites
             m = np.random.random(3) -.5 # random magnetic field
             h = h + m[0]*mbc.Sx[i] + m[1]*mbc.Sy[i] + m[2]*mbc.Sz[i]  # empty
-    else: raise # not implemented
+    else: raise NotImplementedError("random_product_state: not implemented for %s" % type(mbc).__name__) # not implemented
     mbc.set_hamiltonian(h) # set the Hamiltonian
     wf = mbc.get_gs() # get the ground state
     wf.set_MBO(self) # set the correct MBO

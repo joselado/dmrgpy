@@ -29,7 +29,7 @@ def gs_degeneracy_simple(self,dmode="real",delta=1e-2,n=1,**kwargs):
             ind = np.where(esre==emin)[0][0]# index in the array
             ezmin = es[ind] # complex energy of the ground state
             des = np.abs(es-ezmin)**2 # distance to the minimum energy
-        else: raise
+        else: raise ValueError("Unknown dmode %s" % (dmode,))
         deg = np.sum(np.exp(-(des/delta)**2)) # return degeneracy
         if deg<n: break # consider it done
         n = n + 1 # add one
@@ -64,7 +64,7 @@ def eigenvalue_degeneracy(self,A,e,n=3,emode="real",delta=1e-2):
         if emode=="real":
             emin = np.min(es.real) # ground state energy
             des = np.abs(es.real-emin)**2 # distance to the minimum energy
-        else: raise
+        else: raise ValueError("Unknown emode %s" % (emode,))
         deg = np.sum(np.exp(-(des/delta)**2)) # return degeneracy
         if deg<n: break # consider it done
         n = n + 1 # add one

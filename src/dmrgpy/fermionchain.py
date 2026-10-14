@@ -133,7 +133,7 @@ class Fermionic_Chain(Many_Body_Chain):
             # eigenvalue of MBF.get_hamiltonian(), the conserved sector's
             # restriction of the full-space accumulator MBF.h
             return Many_Body_Chain.gs_energy(self,mode="ED",**kwargs)
-        else: raise # unrecognised
+        else: raise ValueError("Unknown mode %s" % (mode,)) # unrecognised
     def get_sector_charge_operators(self):
         """Spinless fermions conserve the particle number"""
         return {"Nf":sum(self.N)}

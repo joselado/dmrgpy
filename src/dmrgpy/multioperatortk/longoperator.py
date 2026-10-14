@@ -9,8 +9,8 @@ def is_long_operator(MO):
 
 def toMPO(MBO,MO,maxp=4):
     """Transform a long operator into an MPO by using products"""
-    if not type(MO)==MultiOperator: raise
-    if len(MO.op)>1: raise # not implemented
+    if not type(MO)==MultiOperator: raise ValueError("Expected a MultiOperator, got %s" % type(MO))
+    if len(MO.op)>1: raise NotImplementedError("Long operators with more than one term are not implemented, got %d terms" % len(MO.op)) # not implemented
     MO = jordan_wigner(MO) # use JW if needed
     opt = MO.op[0] # total operator
     nump = len(opt) - 1 # total number of products

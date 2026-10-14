@@ -45,7 +45,7 @@ def dynamical_correlator(self,es=np.linspace(-1.,10,100),
     costing a full (truncated) MPO application rather than a cheap local
     tensor contraction.
     """
-    if delta<0.0: raise
+    if delta<0.0: raise ValueError("delta must be non-negative, got %s" % delta)
     # <GS|A(...)B|GS>, A used as-is (no dagger), matching cvm.py's /
     # algebra.rootn's convention. str2MO rather than the bare type check +
     # bare `raise` this used to have: the submode only ever *applies* A and

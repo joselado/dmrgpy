@@ -6,7 +6,7 @@ def thermal_vev(MB,Op,submode="EX",**kwargs):
     """Compute the thermal vev"""
     if submode=="EX": # excited states method
         return thermal_vev_ex(MB,Op,**kwargs) # thermal VEV
-    else: raise
+    else: raise ValueError("Unknown thermal vev submode %s" % submode)
 
 
 
@@ -29,8 +29,7 @@ def thermal_vev_ex(MB,Op,mode="ED",T=0.,**kwargs):
         P = np.exp(-beta*es) # Boltzman probabilities
         P = P/np.sum(P) # normalize probabilities
     else:
-        print("Only finite temperature")
-        raise # not implemented
+        raise ValueError("Only finite temperature, got T=%s" % T) # not implemented
     if truncated and P[-1]>1e-6*np.max(P):
         # the highest computed excited state still carries non-negligible
         # Boltzmann weight, so the states left out by the truncation are

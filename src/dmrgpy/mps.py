@@ -25,10 +25,10 @@ class MPS():
         self.MBO = MBO # set the object
     def dot(self,x):
         if self.MBO is not None: return self.MBO.overlap(self,x)
-        else: raise
+        else: raise RuntimeError("MPS has no many-body object attached, cannot compute the overlap")
     def overlap(self,x):
         if self.MBO is not None: return self.MBO.overlap(self,x)
-        else: raise
+        else: raise RuntimeError("MPS has no many-body object attached, cannot compute the overlap")
     def aMb(self,M,b):
         if self.MBO is not None: return self.MBO.aMb(self,M,b)
         return self.dot(M*b) # workaround
@@ -36,7 +36,7 @@ class MPS():
     def __add__(self,x):
         if x==0: return self # do nothing
         if self.MBO is not None: return self.MBO.summps(self,x)
-        else: raise
+        else: raise RuntimeError("MPS has no many-body object attached, cannot add MPS")
     def __sub__(self,x):
         return self + (-1)*x
     def __neg__(self):
@@ -117,11 +117,11 @@ class MPS():
         return self.get_bond_entropy(b)
     def get_site_entropy(self,i):
         if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
-        else: raise # not implemented
+        else: raise RuntimeError("MPS has no many-body object attached, cannot compute the site entropy") # not implemented
     def get_bond_entropy(self,i,j=None):
         if j is None: j = i + 1
         if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
-        else: raise # not implemented
+        else: raise RuntimeError("MPS has no many-body object attached, cannot compute the bond entropy") # not implemented
     def get_correlation_matrix(self,**kwargs):
         from . import entanglement
         return entanglement.get_correlation_matrix(self.MBO,
@@ -140,17 +140,17 @@ class MPS():
         return entropy.central_charge(self)
     def get_pair_entropy(self,i,j):
         if self.MBO is not None: return self.MBO.get_pair_entropy(self,i,j)
-        else: raise # not implemented
+        else: raise RuntimeError("MPS has no many-body object attached, cannot compute the pair entropy") # not implemented
     def get_mutual_information(self,i,j):
         if self.MBO is not None: 
             return self.MBO.get_mutual_information(self,i,j)
-        else: raise # not implemented
+        else: raise RuntimeError("MPS has no many-body object attached, cannot compute the mutual information") # not implemented
     def norm(self):
         return np.sqrt(self.dot(self).real) # norm
     def get_conjugate(self):
         """Return the conjugate wavefunction"""
         from .mpsalgebra import conjugate_mps
-        if self.MBO is None: raise
+        if self.MBO is None: raise RuntimeError("MPS has no many-body object attached, cannot conjugate it")
         return conjugate_mps(self.MBO,self)
     def normalize(self,tol=1e-8):
         """Normalize a wavefunction"""
@@ -176,13 +176,13 @@ class MPS():
                 # solve's wall time) and for the fallback it keeps for
                 # backends without the scale_mps binding.
                 return self.MBO.scale_mps(A,self)
-            else: raise
-        else: raise
+            else: raise TypeError("Cannot multiply an MPS by an object of type %s" % type(A))
+        else: raise RuntimeError("MPS has no many-body object attached, cannot multiply it")
     def __mul__(self,x):
         if multioperator.isnumber(x):
             if self.MBO is not None: return self.MBO.scale_mps(x,self)
-            raise
-        else: raise
+            raise RuntimeError("MPS has no many-body object attached, cannot multiply it")
+        else: raise TypeError("Cannot multiply an MPS by an object of type %s" % type(x))
     def get_dm(self,**kwargs):
         """COmpute the density matrix"""
         from .dmtk.densitymatrix import dm

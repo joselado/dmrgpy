@@ -5,7 +5,8 @@ def krylov_matrix_representation(H,wfs):
     """Given a Krylov subspace, return the matrix representation"""
     accelerate=False
     nw = len(wfs) # number of wavefunction
-    if nw==0: raise # something wrong
+    if nw==0: raise ValueError("krylov_matrix_representation: the list "
+                               "of Krylov vectors is empty")
     mh = np.zeros((nw,nw),dtype=np.complex128) # output matrix
     if accelerate:
         for i in range(nw):

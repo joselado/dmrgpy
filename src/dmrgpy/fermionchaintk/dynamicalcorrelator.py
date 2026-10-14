@@ -13,7 +13,7 @@ def get_dynamical_correlator_spinless(self,name="densitydensity",
     elif mode=="ED":
         MBF = self.get_ED_obj() # get the object
         return MBF.get_dynamical_correlator(name=name,**kwargs)
-    else: raise
+    else: raise ValueError("Unknown mode %s, use \"DMRG\" or \"ED\"" % mode)
 
 
 
@@ -90,7 +90,7 @@ def get_dynamical_correlator_spinful(self,name="densitydensity",
         mi = self.Delta[i]
         mj = self.Delta[j]
         return getij(mi,mj)
-    else: raise # not implemented
+    else: raise ValueError("Unknown dynamical correlator name %s" % name) # not implemented
 
 
 

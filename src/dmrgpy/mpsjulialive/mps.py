@@ -33,7 +33,7 @@ class MPS():
                     self.MBO.cutoff)
             wf3 = MPS(jlmps,MBO=self.MBO)
             return wf3
-        else: raise
+        else: raise RuntimeError("MPS sum needs a chain attached to the MPS (MBO is None)")
     def __sub__(self,x):
         return self + (-1)*x
     def __neg__(self):
@@ -46,11 +46,11 @@ class MPS():
         return # dummy method
     def get_site_entropy(self,i):
         if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
-        else: raise # not implemented
+        else: raise RuntimeError("get_site_entropy needs a chain attached to the MPS (MBO is None)") # not implemented
     def get_bond_entropy(self,i,j=None):
         if j is None: j = i + 1
         if self.MBO is not None: return self.MBO.get_bond_entropy(self,i,j)
-        else: raise # not implemented
+        else: raise RuntimeError("get_bond_entropy needs a chain attached to the MPS (MBO is None)") # not implemented
     def get_four_correlation_tensor(self,**kwargs):
         """<Cdag_i C_j Cdag_k C_l>, via entropytk/correlationentropy.py's
         auto-selected ctmode="explicit" (a Python loop of MultiOperator
@@ -97,12 +97,12 @@ class MPS():
                 jlmps = Mainjl.mpstimesscalar(A,self.jlmps)
                 return MPS(jlmps,MBO=self.MBO)
 #                return A*multioperator.identity()*self
-            else: raise
-        else: raise
+            else: raise TypeError("Cannot multiply an MPS by an object of type %s" % type(A).__name__)
+        else: raise RuntimeError("Applying an operator needs a chain attached to the MPS (MBO is None)")
     def __mul__(self,x):
         if multioperator.isnumber(x):
             return x*self
-        else: raise
+        else: raise TypeError("MPS*x needs a number x, got %s" % type(x).__name__)
     def get_fermionic_parity(self,**kwargs):
         from ..fermionicparity import get_fermionic_parity
         return get_fermionic_parity(self,**kwargs) # parity of the state

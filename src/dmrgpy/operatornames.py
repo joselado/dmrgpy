@@ -21,13 +21,13 @@ def recognize(name):
     elif name[0]=="Z": namei="Sz"
     elif name[0]=="+": namei="Sp" # the other way around!
     elif name[0]=="-": namei="Sm" # the other way around!
-    else: raise
+    else: raise ValueError("Unknown correlator name %s" % name)
     if name[1]=="X": namej="Sx"
     elif name[1]=="Y": namej="Sy"
     elif name[1]=="Z": namej="Sz"
     elif name[1]=="-": namej="Sm"
     elif name[1]=="+": namej="Sp"
-    else: raise
+    else: raise ValueError("Unknown correlator name %s" % name)
 #    if self.sites[i] !=1 or self.sites[j]!=1:
 #        if name!="ZZ": raise  # fermions only accept ZZ
   else: # fermionic correlator
@@ -45,7 +45,7 @@ def recognize(name):
         namei = "N" ; namej = "N"
     elif name=="density": # density density correlator
         namei = "N" ; namej = "N"
-    else: raise
+    else: raise ValueError("Dynamical correlator not recognised: %s" % name)
 #  else:
 #      print("Dynamical correlator not recognised")
 #      raise

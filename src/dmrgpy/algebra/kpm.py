@@ -216,7 +216,7 @@ def get_moments_vivj_python(m0,vi,vj,n=100):
 
 
 def get_moments_vivj_fortran(m0,vi,vj,n=100):
-    raise # I haven't check this function
+    raise NotImplementedError("get_moments_vivj_fortran is not checked and cannot be used") # I haven't check this function
     mo = coo_matrix(m0) # convert to coo matrix
     vi1 = vi.todense() # convert to conventional vector
     vj1 = vj.todense() # convert to conventional vector
@@ -373,7 +373,7 @@ def random_trace(m_in,ntries=20,n=200,fun=None,operator=None):
   """ Calculates local DOS using the KPM"""
   if fun is not None: # check that dimensions are fine
     v0 = fun()
-    if len(v0) != m_in.shape[0]: raise
+    if len(v0) != m_in.shape[0]: raise ValueError("Random vector of length %d does not match matrix dimension %d" % (len(v0),m_in.shape[0]))
   if fun is None:
 #    def fun(): return rand.random(nd) -.5 + 1j*rand.random(nd) -.5j
     def fun(): return (rand.random(nd) - 0.5)*np.exp(2*1j*np.pi*rand.random(nd))
@@ -854,7 +854,7 @@ def generate_profile(mus,xs,kernel="jackson",use_fortran=use_fortran,
     elif kernel=="lorentz": mus = lorentz_kernel(mus)
     elif kernel=="plain": pass # do nothing
     elif kernel is None: pass
-    else: raise
+    else: raise ValueError("Unknown KPM kernel %s" % kernel)
     if use_fortran: # call the fortran routine
       ys = kpmf90.generate_profile(mus,xs) 
     else: # do a python loop
@@ -889,7 +889,7 @@ def generate_profile_pair(mus_r,mus_i,xs,kernel="jackson",use_fortran=use_fortra
     elif kernel=="lorentz": mus_r = lorentz_kernel(mus_r); mus_i = lorentz_kernel(mus_i)
     elif kernel=="plain": pass # do nothing
     elif kernel is None: pass
-    else: raise
+    else: raise ValueError("Unknown KPM kernel %s" % kernel)
     if use_fortran: # call the fortran routine (no fused variant available)
       ysr = kpmf90.generate_profile(mus_r,xs)
       ysi = kpmf90.generate_profile(mus_i,xs)
@@ -919,7 +919,7 @@ def generate_green_profile(mus,xs,kernel="jackson",use_fortran=use_fortran):
   ys = np.zeros(xs.shape,dtype=np.complex128) + mus[0]/2 # first term
   if kernel=="jackson": mus = jackson_kernel(mus)
   elif kernel=="lorentz": mus = lorentz_kernel(mus)
-  else: raise
+  else: raise ValueError("Unknown KPM kernel %s" % kernel)
   if True:
     for i in range(1,len(mus)): # loop over mus
       ys += np.exp(1j*i*np.arccos(xs))*mus[i] # add contribution

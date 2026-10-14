@@ -166,14 +166,14 @@ def _kpm_dynamical_correlator(self,n=1000,
     computes the moments with the mpsjulialive Julia MPS/MPO primitives
     instead of self._session.kpm_dynamical_correlator (julia_live has no
     such session object)."""
-    if delta<0.0: raise
+    if delta<0.0: raise ValueError("delta must be >= 0, got "+repr(delta))
     # validated before the ground state and the band-edge search, the
     # same check kpmdmrg.py makes ahead of its session calls: this route
     # used to round a non-integer down silently through int() (finding 5
     # of docs/audit_2026_09_24_hole_hunt.md)
     n_scale = kpm.validate_kpm_n_scale(self.kpm_n_scale)
     if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
-    if type(name[0])!=multioperator.MultiOperator: raise
+    if type(name[0])!=multioperator.MultiOperator: raise ValueError("name must be a pair of MultiOperators, got "+repr(type(name[0])))
     mi = name[1] # first operator
     mj = name[0].get_dagger() # second operator
     H = self.hamiltonian

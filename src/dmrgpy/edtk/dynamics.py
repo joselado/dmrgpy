@@ -577,7 +577,8 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
           o1 = solve_cv(h0,wf0,A,B,e+e0,delta=delta,**kwargs) # conjugate gradient
           o2 = solve_cv(h0,wf0,A,B,e+e0,delta=-delta,**kwargs) # conjugate gradient
           o = 1j*(o1 - o2)/2. # substract
-      else: raise # not recognised
+      else: raise ValueError("dynamical_correlator_inv: unknown mode %r, "
+                             "use \"full\" or \"cv\"" % (mode,))
       out.append(o)
   return es,np.array(out)/np.pi # return result
 

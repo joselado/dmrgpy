@@ -8,7 +8,7 @@ def text_mpo(MO):
     ls += [str(len(out))] # number of lines
     for o in out:
         n = (len(o)-2)//2 # number of terms
-        if n>=200: raise # C++ code needs to be recompiled
+        if n>=200: raise ValueError("Too many factors in one term (%d), the limit is 199" % n) # C++ code needs to be recompiled
         ls += [str((len(o)-2)//2)] # number of terms
         ils = ""
         for io in o:
@@ -45,25 +45,24 @@ class MPO():
                     v.jlmps,self.MBO.maxm,self.MBO.cutoff)
             return MPS(jlmps,MBO=self.MBO)
         elif type(v)==MPO: # input is an MPO
-            raise # not implemented
+            raise NotImplementedError("MPO*MPO is not implemented on julia_live") # not implemented
         elif type(v)==MultiOperator: # input is a multioperator
             self*MPO(v,MBO=self.MBO)
         else:
-            print("Unrecognized type in __mul__",type(v))
-            raise
+            raise TypeError("Unrecognized type in __mul__ %s" % (type(v),))
     def __rmul__(self,v):
         from ..multioperator import MultiOperator
         if type(v)==MultiOperator: # input is a multioperator
             return MPO(v,MBO=self.MBO)*self
-        else: raise
+        else: raise TypeError("Unrecognized type in __rmul__ %s" % (type(v),))
     def get_dagger(self):
-        raise
+        raise NotImplementedError("get_dagger is not implemented for julia_live MPOs")
     def copy(self):
         from copy import deepcopy
         return deepcopy(self)
     def trace(self):
-        raise
+        raise NotImplementedError("trace is not implemented for julia_live MPOs")
     def aMb(self,wf1,wf2):
-        raise
+        raise NotImplementedError("aMb is not implemented for julia_live MPOs")
 
 
