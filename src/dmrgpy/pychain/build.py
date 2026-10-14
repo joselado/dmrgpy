@@ -20,9 +20,9 @@ class Spin_chain(edchain.EDchain):
   def build(self,spins):
     """Creates a spin chain, using as input the spins list"""
     if get_dimension(spins)>maxsize:
-      print("Surpased maximum allowed dimension for ED",maxsize)
-      print("Dimension of the requested Hilbert space",get_dimension(spins))
-      raise
+      raise ValueError("Hilbert space dimension %d exceeds the maximum "
+                       "allowed for ED (%d); use DMRG instead"
+                       % (get_dimension(spins),maxsize))
     from . import chain
     ###############################
     # now build the spin operators #
