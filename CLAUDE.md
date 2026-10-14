@@ -822,17 +822,33 @@ rules, with the reasoning and the measurements in
 ## Documentation
 
 `docs/documentation.{md,tex}` covers the architecture (backends, dispatch,
-directory layout); `docs/user_guide.{md,tex}` covers the physics-facing API
-(what calculation each method performs, with the formula behind it), kept
-brief and physics-first, with no history in it; `docs/numerical_changes.md`
-is the ledger of what raises and what changed numbers.
+directory layout); the user guide covers the physics-facing API (what
+calculation each method performs, with the formula behind it), kept brief
+and physics-first, with no history in it; `docs/numerical_changes.md` is
+the ledger of what raises and what changed numbers.
+
+**The user guide is a website.** Its only source is `docs/guide/*.md`, one
+page per topic, built with MkDocs Material from `mkdocs.yml` (repo root,
+`docs_dir: docs/guide`, so nothing else under `docs/` is published) and
+deployed to <https://joselado.github.io/dmrgpy/> by
+`.github/workflows/guide.yml` on every push to `master` that touches it.
+The PDF is generated from the same pages (`docs/build_guide_pdf.py`, pandoc
+and xelatex, also run by the workflow); there is no handwritten `.tex` any
+more, and `docs/user_guide.md` is only a pointer. Math is `$...$`/`$$...$$`
+(MathJax through `pymdownx.arithmatex`); a `|` inside math in a table row
+is written `\vert`/`\lvert`/`\rvert`, or the table splits. Pages link to
+each other by page name (`[Ground state](ground-state.md)`), never by a
+section number. A new page needs an entry in `nav`, or it is neither in
+the menu nor in the PDF. `mkdocs build` is strict and fails on a broken
+link or anchor; run it (`pip install mkdocs==1.6.1 mkdocs-material==9.7.7`)
+before committing a guide change.
+
 Whenever a new feature is implemented (a new physical model, a new
 `Many_Body_Chain` method, a new dynamical-correlator submode, a new
-post-processing tool) update `docs/user_guide.md` **and**
-`docs/user_guide.tex` accordingly, and `docs/documentation.{md,tex}` too if
-the change affects architecture or backend dispatch rather than just
-physics. Keep the two formats of each document in sync and verify the
-`.tex` still compiles cleanly with `pdflatex` after editing it; the
+post-processing tool) update the matching page under `docs/guide/`, and
+`docs/documentation.{md,tex}` too if the change affects architecture or
+backend dispatch rather than just physics, keeping those two in sync and
+verifying the `.tex` still compiles cleanly with `pdflatex`; the
 `docs-sync` skill (`.claude/skills/docs-sync/SKILL.md`) is the procedure.
 
 **The user guide's style is fixed.** Its readers are condensed matter
@@ -843,8 +859,9 @@ control the physics or the accuracy as a one-line-per-item list. Short plain
 sentences, one idea each. No audit history, no "used to", no old numbers, no
 timings, no implementation internals (caches, penalties, block sparsity,
 stopping rules), and a backend caveat only when a number would otherwise be
-wrong, in one sentence. Every snippet in it has been run. Section 3,
-"Ground-state properties", is the reference: a new or edited section matches
+wrong, in one sentence. Every snippet in it has been run. The
+"Ground state" page (`docs/guide/ground-state.md`, formerly section 3,
+"Ground-state properties") is the reference: a new or edited page matches
 it in length per topic and in tone. History and changed numbers go to
 `docs/numerical_changes.md`, never into the guide.
 

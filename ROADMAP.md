@@ -397,5 +397,5 @@ model-specific exception:
    worth doing on infinite chains.
 
 After adding a capability to a backend, update this file's matrix and,
-if it's a new physics-facing method, `docs/user_guide.md`/`.tex` per
+if it's a new physics-facing method, its page under `docs/guide/` per
 `CLAUDE.md`'s documentation policy.

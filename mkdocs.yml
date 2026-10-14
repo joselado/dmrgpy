@@ -1,0 +1,81 @@
+site_name: DMRGPY user guide
+site_url: https://joselado.github.io/dmrgpy/
+repo_url: https://github.com/joselado/dmrgpy
+repo_name: joselado/dmrgpy
+docs_dir: docs/guide
+site_dir: site
+strict: true
+validation:
+  anchors: warn
+  unrecognized_links: warn
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - toc.follow
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Models and Hilbert spaces: models.md
+      - Hamiltonians and operators: operators.md
+  - Ground state:
+      - Ground state: ground-state.md
+      - Excited states and gaps: excited-states.md
+      - Ground-state degeneracy: degeneracy.md
+      - Entanglement: entanglement.md
+      - Density matrices and distributions: density-matrices.md
+  - Phases:
+      - Topological invariants: topology.md
+      - Fidelity susceptibility: fidelity.md
+      - Mean-field decoupling: mean-field.md
+  - Dynamics:
+      - Dynamical correlators: dynamical-correlators.md
+      - Choosing a correlator method: correlator-methods.md
+      - Real-time evolution: real-time.md
+      - Density of states: density-of-states.md
+      - STM and Kondo spectra: kondo.md
+  - Finite temperature: finite-temperature.md
+  - Infinite chains: infinite-chains.md
+  - More:
+      - Cookbook: cookbook.md
+      - Post-processing tools: post-processing.md
+      - GPU: gpu.md
+      - BLAS threads: blas-threads.md

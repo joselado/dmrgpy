@@ -124,6 +124,12 @@ The C++ backends do not work on Windows. If you need them, install
 example with [Virtual Box](https://www.virtualbox.org/)) and follow the
 Linux instructions.
 
+# User guide #
+The user guide is at <https://joselado.github.io/dmrgpy/>. For each
+calculation it gives the physical quantity, its formula, the code and the
+keywords that matter. It is also available as a
+[PDF](https://joselado.github.io/dmrgpy/user_guide.pdf).
+
 # Tutorials #
 You can find several tutorials [here](https://github.com/joselado/Advanced_Computational_Methods_Physics_2024), on the following topics
 

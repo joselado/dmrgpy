@@ -449,7 +449,7 @@ repeated calls on the same simple, gapped model at `D=4` were still
 confirmed to occasionally (roughly 1 in 10 calls) land noticeably further
 from the exact answer than the typical run. See `pyitensor/vumps.py`'s
 own "Convergence robustness" module-docstring section for the full,
-numerically-confirmed account, and `docs/user_guide.md`'s own iDMRG
+numerically-confirmed account, and `docs/guide/infinite-chains.md`'s own iDMRG
 section for the user-facing version of this caveat.
 
 **How the `D`-ramp is walked, and where the two VUMPS backends now
@@ -2035,7 +2035,7 @@ directly instead of to iDMRG's own converged energy density.
 
 This is a genuine finite-size **approximation**, not an exact
 infinite-size dynamical-correlator method — see `kpm_finite`'s own
-docstring (and `docs/user_guide.md`'s corresponding section) for the
+docstring (and the user guide page `docs/guide/infinite-chains.md`) for the
 light-cone/moment-count argument for why a fixed `delta` needs
 `n_window` chosen large enough (and, past a point, `delta` itself
 coarsened) to avoid open-boundary reflections contaminating the result,
@@ -2216,8 +2216,8 @@ a critical `n_uc=1` transverse-field chain at `gs_method="idmrg"`,
 `td_dynamical_correlator` went **378 s → 0.73 s**, with `e0` agreeing to
 1e-11 and the summed `|S(k,w)|` to 3e-6 (the residual being the iDMRG
 solve's own run-to-run convergence, not the contraction). Its own
-documented defaults are `nt=200`, `maxdim=60` (`user_guide.md`'s
-`td_dynamical_correlator` section) — fifty times the time steps and more
+documented defaults are `nt=200`, `maxdim=60` (`docs/guide/infinite-chains.md`'s
+`td_dynamical_correlator` entry) — fifty times the time steps and more
 than twice the bond dimension of the run above — so what changed is
 whether those defaults are usable at all, not how fast an already-cheap
 call is.
@@ -2490,7 +2490,7 @@ is implemented — increase `n_window` instead); and, independently,
 `itensor_version=3`'s own `idmrg_ground_state` has a known,
 pre-existing divergence bug for Hamiltonians carrying an onsite ("field")
 term, unrelated to this feature but inherited by it. See
-`docs/user_guide.md`'s own iDMRG section for the user-facing version.
+`docs/guide/infinite-chains.md`'s own iDMRG section for the user-facing version.
 
 ### 4.2 Operator representation: `MultiOperator`
 
@@ -3018,7 +3018,7 @@ the wrong sign before and is $4.8\times10^{-12}$ off now, as at $s=1$
 (`Chain::make_sweeps_ramped()` in both `chain_session.h`s,
 `pyitensor/chain.py::_make_sweeps_ramped()`; the public knobs are
 `Many_Body_Chain.bond_ramp`/`bond_ramp_start`/`bond_ramp_fraction`/
-`bond_ramp_noise_decay`, documented physics-side in `user_guide.md` §3).
+`bond_ramp_noise_decay`).
 `Chain::gs_energy()` builds its `Sweeps` through this variant rather than
 the flat `make_sweeps()`: the first `floor(nsweeps*bond_ramp_fraction)`
 sweeps interpolate the bond dimension geometrically from
@@ -5371,8 +5371,8 @@ correctly sharpens with more moments.)
 
 ### 4.8c STM/Kondo tunneling spectra (`kondospectrumtk/`)
 
-`Spin_Chain.get_kondo_spectrum` (physics documented in the user guide,
-§17) is a different kind of ED calculation from the dynamical-correlator
+`Spin_Chain.get_kondo_spectrum` (physics documented in the user guide page
+`docs/guide/kondo.md`) is a different kind of ED calculation from the dynamical-correlator
 machinery above: it needs the *full* spectrum (every eigenstate, as a
 possible virtual intermediate state in the third-order perturbation
 theory), not just the ground state or a resolvent at a target frequency.
@@ -5392,7 +5392,7 @@ intent of each (the step re-derived from the paper's current formula,
 the Kondo function as its closed-form symmetric log convolved with the
 paper's own thermal kernel), each verified against values digitized
 from the paper's figures. See that module's docstring and
-`docs/user_guide.md`'s §17 for the derivation notes, the two
+`docs/guide/kondo.md` for the derivation notes, the two
 2026-09-12 behaviour changes (the potential-interference term's
 exchange-diagram sign, and the switch from the electron-like defining
 integral to the symmetric closed form for F), and the feature's other
@@ -5440,7 +5440,7 @@ requires:
   rides along, built from checkpoints of the same `t2` trajectories plus
   one short `tau` trajectory per `l` per row: it carries the exchange
   diagram, whose log sits at `eV-(e_f-e_m)`, a frequency `G`'s `t2` axis
-  does not have (user guide §17, "Where the exchange log sits", for why
+  does not have (user guide page `docs/guide/kondo.md`, "Third order", for why
   that departs from the paper's eq. 25). `twotime.py`'s functions
   are backend-agnostic (they only ever consume discretely-sampled
   `G(t2,tau)` and `Gx(s,tau)` arrays or batches thereof) -- `edtwotimeref.py` supplies

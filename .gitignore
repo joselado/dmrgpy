@@ -40,3 +40,7 @@ benchmarks/output/
 # (login, scratch paths, Slurm partitions) that must not be published.
 *.local.md
 benchmarks/gpu/*.sbatch
+
+# user guide website and PDF (built by mkdocs / docs/build_guide_pdf.py)
+/site/
+docs/user_guide.pdf

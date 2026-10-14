@@ -579,7 +579,7 @@ still confirmed to occasionally (roughly 1 in 10 calls) land noticeably
 further from the exact answer than the typical run. See
 \texttt{pyitensor/vumps.py}'s own ``Convergence robustness''
 module-docstring section for the full, numerically-confirmed account,
-and \texttt{docs/user\_guide.tex}'s own iDMRG section for the
+and \texttt{docs/guide/infinite-chains.md}'s own iDMRG section for the
 user-facing version of this caveat.
 
 \textbf{How the \texttt{D}-ramp is walked, and where the two VUMPS
@@ -2207,7 +2207,7 @@ density.
 This is a genuine finite-size \textbf{approximation}, not an exact
 infinite-size dynamical-correlator method -- see
 \texttt{kpm\_finite}'s own docstring (and
-\texttt{docs/user\_guide.tex}'s corresponding section) for the
+the user guide page \texttt{docs/guide/infinite-chains.md}) for the
 light-cone/moment-count argument for why a fixed \texttt{delta} needs
 \texttt{n\_window} chosen large enough (and, past a point,
 \texttt{delta} itself coarsened) to avoid open-boundary reflections
@@ -2739,7 +2739,7 @@ Scope differences versus the \texttt{"python"} backend:
 instead); and, independently, \texttt{itensor\_version=3}'s own
 \texttt{idmrg\_ground\_state} has a known, pre-existing divergence bug
 for Hamiltonians carrying an onsite (``field'') term, unrelated to this
-feature but inherited by it. See \texttt{docs/user\_guide.tex}'s own
+feature but inherited by it. See \texttt{docs/guide/infinite-chains.md}'s own
 iDMRG section for the user-facing version.
 
 \subsection{Operator representation: \texttt{MultiOperator}}
@@ -3350,8 +3350,7 @@ the wrong sign before and is $4.8\times10^{-12}$ off now, as at $s=1$
 \texttt{chain\_session.h}s,
 \texttt{pyitensor/chain.py::\_make\_sweeps\_ramped()}; the public knobs
 are \texttt{Many\_Body\_Chain.bond\_ramp}/\texttt{bond\_ramp\_start}/
-\texttt{bond\_ramp\_fraction}/\texttt{bond\_ramp\_noise\_decay},
-documented physics-side in \texttt{user\_guide.md} \S3).
+\texttt{bond\_ramp\_fraction}/\texttt{bond\_ramp\_noise\_decay}).
 \texttt{Chain::gs\_energy()} builds its \texttt{Sweeps} through this
 variant rather than the flat \texttt{make\_sweeps()}: the first
 $\lfloor$\texttt{nsweeps*bond\_ramp\_fraction}$\rfloor$ sweeps
@@ -6115,8 +6114,8 @@ behavior the paper itself describes and plots for them;
 \texttt{kondospectrumtk/stepfunctions.py} re-derives both from the
 paper's own unambiguous defining integrals instead, each independently
 verified against digitized values from the paper's own figures. See
-that module's docstring and the user guide's ``STM/Kondo tunneling
-spectra'' section for the full derivation notes and the
+that module's docstring and the user guide's ``STM and Kondo
+spectra'' page for the full derivation notes and the
 feature's other scope limitations (single tip-coupled site, the
 potential-scattering interference term's general-spin form is an
 extrapolation from the paper's own worked example) -- as well as the
@@ -6159,8 +6158,8 @@ needing the full spectrum \texttt{mode="ED"} requires:
   along, built from checkpoints of the same \texttt{t2} trajectories plus
   one short \texttt{tau} trajectory per \texttt{l} per row: it carries the
   exchange diagram, whose log sits at \texttt{eV-(e\_f-e\_m)}, a frequency
-  \texttt{G}'s \texttt{t2} axis does not have (user guide \S17, ``Where
-  the exchange log sits'', for why that departs from the paper's
+  \texttt{G}'s \texttt{t2} axis does not have (user guide page ``STM and Kondo
+  spectra'', ``Third order'', for why that departs from the paper's
   eq.~25). \texttt{twotime.py}'s functions are backend-agnostic (they
   only ever consume discretely-sampled \texttt{G(t2,tau)} and
   \texttt{Gx(s,tau)} arrays or batches thereof) -- \texttt{edtwotimeref.py} supplies the same interface via

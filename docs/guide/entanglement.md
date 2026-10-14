@@ -1,0 +1,126 @@
+# Entanglement
+
+On this page we measure the entanglement of a state. Here `wf` is a
+ground state, for example `wf = sc.get_gs()` for the Heisenberg chain of
+[Ground state](ground-state.md).
+
+## Entanglement entropy of a cut
+
+We cut the chain between sites $i$ and
+$i+1$. The Schmidt decomposition of the state is
+$|\psi\rangle=\sum_\alpha\lambda_\alpha|\alpha\rangle_L|\alpha\rangle_R$,
+and the von Neumann entropy of the left part is
+
+$$S_i=-\sum_\alpha\lambda_\alpha^2\log\lambda_\alpha^2
+=-\mathrm{Tr}\,\rho_L\log\rho_L,\qquad
+\rho_L=\mathrm{Tr}_R|\psi\rangle\langle\psi|.$$
+
+```python
+s = wf.get_bond_entropy(i, i+1)     # cut between sites i and i+1
+s = wf.get_entropy(b)               # the same, cut between sites b-1 and b
+```
+
+In a gapped chain $S_i$ saturates with the size of the block, and in a
+critical chain it grows as $\log\ell$. It also tells us the bond dimension
+we need, roughly $\chi\gtrsim e^{S}$. The bond entropy needs an MPS, so it
+is not available with `mode="ED"`.
+
+## Entropy of one site or two sites
+
+`wf.get_site_entropy(i)` and
+`wf.get_pair_entropy(i, j)` give the entropy of the reduced density matrix
+of site $i$, or of the two sites $i$ and $j$ (not necessarily neighbors),
+with the rest of the chain. They are available for spin-1/2 chains and
+spinless fermionic chains. With `mode="ED"`, call them on the chain:
+`sc.get_site_entropy(wf, i)`, `sc.get_pair_entropy(wf, i, j)`.
+
+## Mutual information
+
+For two sites $i$ and $j$,
+
+$$I(i,j)=S_i+S_j-S_{ij},$$
+
+```python
+mi = wf.get_mutual_information(i, j)
+```
+
+$I(i,j)$ measures all the correlations, classical and quantum, between the
+two sites, so it shows which sites are coupled in the state even when no
+term of $H$ couples them. Same availability as the site entropy.
+
+## Central charge
+
+For a critical open chain of length $L$, the entropy
+of a cut at position $\ell$ follows the Calabrese-Cardy formula,
+
+$$S(\ell)=\frac c6\log\!\left[\frac{2L}{\pi}\sin\frac{\pi\ell}{L}\right]+\text{const}.$$
+
+The central charge $c$ identifies the conformal field theory, for example
+$c=1/2$ for the critical Ising chain and $c=1$ for the XX and Heisenberg
+chains. `get_CFT_central_charge()` fits this formula to the entropy of
+every bond:
+
+```python
+c = wf.get_CFT_central_charge()
+```
+
+On an open chain the entropy also has a term that alternates between even
+and odd bonds, and the fit does not remove it. So the result converges
+slowly with $L$: for the spin-1/2 XX chain it gives about 0.54 at $L=20$
+and 0.74 at $L=40$. Use long chains, or fit the bond entropies yourself
+with only even (or only odd) $\ell$.
+
+## Single-particle correlation matrix
+
+For fermions, the correlation
+matrix is
+
+$$C_{ij}=\langle c_i^\dagger c_j\rangle .$$
+
+Its eigenvalues $n_\alpha\in[0,1]$ are the occupations of the natural
+orbitals. For a single Slater determinant every $n_\alpha$ is 0 or 1.
+Interactions move them away from 0 and 1, and the correlation entropy
+measures how far the state is from a single Slater determinant:
+
+$$S=-\sum_\alpha\Big[n_\alpha\log n_\alpha+(1-n_\alpha)\log(1-n_\alpha)\Big].$$
+
+Here `fc` is a fermionic chain with its Hamiltonian set.
+
+```python
+cm = fc.get_correlation_matrix()          # C_ij
+na = fc.get_correlation_eigenvalues()     # n_alpha
+s = fc.get_correlation_entropy()          # S
+orb = fc.get_correlated_orbitals()        # |orbital|^2, most correlated first
+rho = fc.get_correlated_density(n=2)      # weight of the 2 most correlated orbitals
+sd = fc.get_gs().get_correlation_entropy_density()   # S resolved by site
+```
+
+The most correlated orbitals are those with $n_\alpha$ closest to $1/2$.
+The keywords are:
+
+- `T`: temperature of `get_correlation_matrix` (default 0). Finite $T$ is
+  computed with exact eigenstates, for small chains.
+- `dmmode`: how $C_{ij}$ is computed (`"fast"`, `"full"`, `"explicit"`,
+  `"simple"`). The default chooses the fastest one for the state.
+  `"explicit"` works on every backend.
+
+## Two-particle correlators
+
+The four-point tensor
+$\langle c_i^\dagger c_jc_k^\dagger c_l\rangle$ for all $i,j,k,l$ is
+
+```python
+t = fc.get_gs().get_four_correlation_tensor()   # shape (n, n, n, n)
+```
+
+The keyword `ctmode` chooses the method (`"batched"`, `"sweep"`, `"fold"`,
+`"full"`, `"explicit"`). The default chooses the fastest one for the
+backend, and `"explicit"` works on every backend.
+The two-particle density matrix
+$\langle c_i^\dagger c_j^\dagger c_lc_k\rangle$, with the pairs $i<j$ and
+$k<l$ as row and column, is
+
+```python
+from dmrgpy.entropytk.correlationentropy import get_highorder_correlation_matrix
+d2 = get_highorder_correlation_matrix(fc)
+```
