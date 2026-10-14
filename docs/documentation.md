@@ -3353,7 +3353,7 @@ Notable, deliberate implementation details (not bugs to "fix"):
 
 `pyitensor/` is a from-scratch, pure-Python/NumPy/SciPy reimplementation
 of exactly the ITensor v3 API subset `mpscpp3/chain_session.h` uses: an
-`Index`/`ITensor` tensor core, the same ten site types, an `AutoMPO` term
+`Index`/`ITensor` tensor core, the same eleven site types, an `AutoMPO` term
 compiler with its own Jordan-Wigner threading, MPS/MPO algebra, two-site
 Lanczos-based DMRG (ground and excited states via the overlap-penalty
 method), two-site Krylov-based TDVP, and a `chain.Chain` facade exposing

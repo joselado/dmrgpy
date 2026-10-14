@@ -3,3 +3,4 @@
 #include "bosonfour.h"
 #include "spintwo.h"
 #include "Z4.h"
+#include "Z2.h"

@@ -3663,7 +3663,7 @@ reviewers' own reports follow verbatim, since several carry repros.
   `"python"` in the exponentiator itself, whose stopping test is now
   `|coeff|*beta_k*|c_k| < 1e-10`, relative and dimensionless, so neither
   the operator's norm nor the Hamiltonian's units reach it: 1e-11 at an
-  operator scale of 1e-9, see user_guide.md §21 and
+  operator scale of 1e-9, see docs/numerical_changes.md and
   tests/test_pyitensor_time_evolution_review.py. v3's vendored `applyExp`
   is unchanged.)
 - The bond-local truncation of item 2: a bond whose strongest crossing term is

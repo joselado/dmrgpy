@@ -111,6 +111,10 @@ def _weiss_field(J,m):
 def _mean_field_hamiltonian(sc,bonds,b,const,hmf,p):
     """H_MF = p*H_exchange + H_onsite + (1-p)*sum_i h_i.S_i + const.
 
+    const includes the double-counting constant -(1-p)*sum J m m that the
+    caller (spinchain_meanfield) adds, so that the ground-state energy of
+    H_MF is the mean-field energy of the original Hamiltonian.
+
     The model's own one-site terms are kept in full: they are an external
     field, not something being decoupled. At p=1 the Weiss field drops out
     and this is exactly the Hamiltonian that came in; at p=0 the exchange
@@ -152,7 +156,10 @@ def spinchain_meanfield(sc,p=0.0,mix=0.9,m0=None,maxerror=1e-06,
     forwards it there.)
 
     Returns the converged chain, whose Hamiltonian is the last mean-field
-    one and whose ground state is its solution.
+    one and whose ground state is its solution; its gs_energy() is the
+    mean-field energy, <H> of the original Hamiltonian in that state at
+    p=0 (the double-counting constant is part of the mean-field
+    Hamiltonian).
     """
     sc0 = sc.copy() # copy the spin chain object
     b,J,const = decompose_spin_hamiltonian(sc0) # read the Hamiltonian once
@@ -170,8 +177,17 @@ def spinchain_meanfield(sc,p=0.0,mix=0.9,m0=None,maxerror=1e-06,
     def get_new(mold):
         """Return new magnetization"""
         sc = sc0.copy() # copy the initial Hamiltonian
-        hmf = _weiss_field(J,np.array(mold,dtype=np.complex128))
-        sc.set_hamiltonian(_mean_field_hamiltonian(sc,bonds,b,const,hmf,p))
+        m = np.array(mold,dtype=np.complex128)
+        hmf = _weiss_field(J,m)
+        # The decoupling S^a_i S^b_j -> S^a_i m^b_j + m^a_i S^b_j - m^a_i m^b_j
+        # carries a constant, -sum J m m, that the Weiss field alone leaves
+        # out; without it gs_energy() of the returned chain counted the
+        # decoupled exchange twice (-2.5 for -1.25 on a 6-site Neel state).
+        # With it, at self-consistency the energy is <H> of the original
+        # Hamiltonian in the mean-field state, the standard mean-field
+        # energy. It shifts the spectrum only, not the state.
+        dc = -(1.-p)*np.einsum("ijab,ia,jb->",J,m,m)
+        sc.set_hamiltonian(_mean_field_hamiltonian(sc,bonds,b,const+dc,hmf,p))
         sc.gs_energy(**kwargs) # perform calculation
         mnew = np.array(sc.get_magnetization(**kwargs)).transpose()
         return mnew,sc # return new magnetization

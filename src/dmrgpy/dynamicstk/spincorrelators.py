@@ -5,11 +5,15 @@ def get_full_SS_correlator(sc,mode="ED",i=0,j=None,**kwargs):
     """Return the full SS correlator, summing over ground states
     and summing over components. Factor out trivial contributions
     from the delta function"""
-    if mode !="ED": raise # only implemented for ED
+    if mode !="ED":
+        raise NotImplementedError("get_full_SS_correlator is only "
+                "implemented for mode='ED'")
     if j is None: j = i # overwrite
     wfs = sc.get_gs_manifold(mode="ED") # return ground state manifold
-    sc.get_gs(mode="ED") # return ground state manifold
-    print("Computing SS correlator with ",len(wfs),"states")
+    # every state of the manifold is set on a copy, so the chain itself
+    # keeps its own state; set_gs() on the chain used to leave the last
+    # state of the manifold set there, and later calls measured it
+    sc = sc.copy()
     do = 0. # initialize
     for wf in wfs: # loop over wavefunctions
         sc.set_gs(wf) # set this wavefunction as ground state

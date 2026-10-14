@@ -1086,6 +1086,13 @@ class Chain
                  "divided back",(int)std::lround(std::log2(hscale_up_)),hscale_up_);
         }
 
+    // Davidson steps per two-site solve (Sweeps::niter, davidson()'s
+    // MaxIter in dmrg()). ITensor's default of 2 left a chain whose
+    // Hamiltonian conserves a charge the sites do not short of its ground
+    // state after the default 15 sweeps; see mpscpp3/chain_session.h's
+    // dmrg_niter_ for the measurements.
+    static constexpr int dmrg_niter_ = 4;
+
     Sweeps
     make_sweeps(int ns, int maxm) const
         {
@@ -1093,6 +1100,7 @@ class Chain
         sweeps.maxm() = maxm;
         sweeps.cutoff() = cutoff_;
         sweeps.noise() = noise_;
+        sweeps.niter() = dmrg_niter_; // see dmrg_niter_
         // Noise only in the first half of the schedule (mirrors the old
         // file-based backend's get_sweeps.h). Sweeps is 1-based -- its
         // arrays are sized nsweep+1 and ITensor's dmrg() loops
@@ -1131,6 +1139,7 @@ class Chain
         if (nr>ns-1) nr = ns-1; // always at least one sweep at full maxm
         auto sweeps = Sweeps(ns);
         sweeps.cutoff() = cutoff_;
+        sweeps.niter() = dmrg_niter_; // see dmrg_niter_
         for (int i=0;i<ns;i++)
             {
             int m = maxm;

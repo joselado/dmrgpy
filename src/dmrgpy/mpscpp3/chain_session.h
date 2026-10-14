@@ -723,6 +723,7 @@ class Chain
             sweeps1.maxdim() = maxm_;
             sweeps1.cutoff() = cutoff_;
             sweeps1.noise() = (sw<=nsweeps_/2) ? noise_ : 0.0;
+            sweeps1.niter() = dmrg_niter_; // see dmrg_niter_
             // lam is read back from innerC below, so only the state of
             // this solve is used and the unit scale needs no undoing
             dmrg(wf0_,solver_hamiltonian(Heff),sweeps1,dmrg_args());
@@ -11775,6 +11776,21 @@ class Chain
                  "divided back",(int)std::lround(std::log2(hscale_up_)),hscale_up_);
         }
 
+    // Davidson steps per two-site solve (Sweeps::niter, read by dmrg() as
+    // davidson()'s MaxIter). ITensor's own Sweeps default is 2, and with
+    // davidson()'s ErrGoal of 1e-14 nearly no local solve exits early, so
+    // every solve got exactly two steps. That is too few on a chain whose
+    // Hamiltonian conserves a charge the sites do not (QNs are off by
+    // default): the random start mixes every sector, and two steps per
+    // solve drain the wrong sectors so slowly that 15 sweeps did not
+    // finish. A 4-site spinless chain with hopping and a nearest-neighbour
+    // interaction (ED -1.7015621187) came out anywhere from -1.6215 to
+    // -1.7015621 over repeated runs, a 30-site one 1e-6 high. Four steps
+    // reach ED to 1e-15 in every repeat, at about 1.5x the sweep cost;
+    // three left 2e-9. davidson() still stops early on a residual below
+    // 1e-12, so a converged solve costs no more than before.
+    static constexpr int dmrg_niter_ = 4;
+
     Sweeps
     make_sweeps(int ns, int maxdim) const
         {
@@ -11782,6 +11798,7 @@ class Chain
         sweeps.maxdim() = maxdim;
         sweeps.cutoff() = cutoff_;
         sweeps.noise() = noise_;
+        sweeps.niter() = dmrg_niter_; // see dmrg_niter_
         // Noise only in the first half of the schedule (mirrors the old
         // file-based backend's get_sweeps.h). Sweeps is 1-based -- its
         // arrays are sized nsweep+1 and ITensor's dmrg() loops
@@ -11850,6 +11867,7 @@ class Chain
         if (nr>ns-1) nr = ns-1; // always at least one sweep at full maxdim
         auto sweeps = Sweeps(ns);
         sweeps.cutoff() = cutoff_;
+        sweeps.niter() = dmrg_niter_; // see dmrg_niter_
         for (int i=0;i<ns;i++)
             {
             int m = maxdim;

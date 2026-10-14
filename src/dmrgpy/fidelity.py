@@ -11,14 +11,15 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
     if fmode=="PT": # perturbation theory mode
         H = H0 + l*H1 # full Hamiltonian
         MBO.set_hamiltonian(H) # set the Hamiltonian
-        (es,wfs) = MBO.get_excited_states(purify=True,**kwargs) # get excited states
-        print("Excited states",np.round(es,2))
+        # n states enter the sum (the ground state and n-1 excited ones);
+        # n used to be dropped here, so the sum always ran over the
+        # default two states whatever n the caller passed
+        (es,wfs) = MBO.get_excited_states(n=n,purify=True,**kwargs) # get excited states
         chi = 0. # initialize
         e0,wf0 = es[0],wfs[0] # ground state
-        for n in range(1,len(es)): # loop over states
-            den = np.abs(es[n]-e0)**2 + delta**2
-            wij = np.abs(wf0.dot(H1*wfs[n]))
-            print(np.round(wij,2))
+        for k in range(1,len(es)): # loop over states
+            den = np.abs(es[k]-e0)**2 + delta**2
+            wij = np.abs(wf0.dot(H1*wfs[k]))
             chi = chi + wij**2/den
         return chi
     elif fmode=="derivative": # use explicit derivative

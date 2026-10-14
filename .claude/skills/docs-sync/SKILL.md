@@ -57,6 +57,12 @@ rather than trusting the exit status.
 
 ## What a section should say
 
+The user guide's style is fixed (see `CLAUDE.md`, "Documentation"): brief,
+physics-first, for physicists who do not care how the code works inside.
+Section 3, "Ground-state properties", is the reference section; read it before
+writing and match its length per topic and its tone. No history, no internals,
+no timings, every snippet run before it goes in.
+
 The house shape, and the reason the guide reads the way it does: open with one
 sentence saying what we will now see, give the physics before the code, then
 read the result aloud afterwards, saying what to look for in the arrays rather
@@ -67,4 +73,6 @@ you and when to reach for it.
 
 Where the change moved numbers rather than behaviour, say so in the same terms
 the audit records use: which calls, how large, and that results from before are
-not comparable. `docs/user_guide.md`'s closing section is where that lives.
+not comparable. That goes in `docs/numerical_changes.md`, never in the user
+guide, which stays brief and physics-first: a short physics explanation per
+capability, then the code, then the few keywords that matter, in simple English.

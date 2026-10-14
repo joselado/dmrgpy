@@ -11,8 +11,8 @@ Write or Edit tool touches a matching file, not when a shell command prints
 it, so a session that reads with `cat` or `sed` opens the matching one by
 hand before touching those files; a pointer at the place each used to live
 says where it went. The history of every fix, with its repro and its reviewer, is in
-`docs/audit_*.md`, and the ledger of every result that changed is section 21
-of `docs/user_guide.md`.
+`docs/audit_*.md`, and the ledger of every result that changed is
+`docs/numerical_changes.md`.
 
 ## What this is
 
@@ -359,11 +359,11 @@ it, and fixed:
 `docs/audit_2026_09_25b_hole_hunt.md` (29, all fixed on 2026-09-26 together
 with its leads), followed by the 2026-09-26 review of `"python"` real-time
 evolution (regressions in `tests/test_pyitensor_time_evolution_review.py`,
-measurements in user guide section 21, leads ranked in
+measurements in `docs/numerical_changes.md`, leads ranked in
 `docs/time_evolution_improvement_plan.md`). Four things to read before
 changing the kind of code they cover:
 
-- **Section 21 of `docs/user_guide.md`** before comparing any number against
+- **`docs/numerical_changes.md`** before comparing any number against
   a result from before 2026-09-26. It is the ledger of every fix that moved
   numbers rather than behaviour, by call and by size, and most of the fixes
   did: the TD/TDZ pi factor and the KPM calibration, every injected state
@@ -648,7 +648,7 @@ cross-validated between solvers.
   (`Many_Body_Chain.setup_python()` switches an existing chain to it) is a
   from-scratch, pure-Python/NumPy/SciPy reimplementation of exactly the
   ITensor v3 API subset `mpscpp3/chain_session.h` uses: Index/ITensor tensor
-  core, the same ten site types, an AutoMPO term compiler with its own
+  core, the same eleven site types, an AutoMPO term compiler with its own
   from-scratch Jordan-Wigner threading, MPS/MPO algebra, two-site
   Lanczos-based DMRG (ground and excited states via the overlap-penalty
   method), two-site Krylov-based TDVP, and a `pyitensor/chain.py::Chain`
@@ -823,8 +823,9 @@ rules, with the reasoning and the measurements in
 
 `docs/documentation.{md,tex}` covers the architecture (backends, dispatch,
 directory layout); `docs/user_guide.{md,tex}` covers the physics-facing API
-(what calculation each method performs, with the formula behind it), and
-its section 21 is the ledger of what raises and what changed numbers.
+(what calculation each method performs, with the formula behind it), kept
+brief and physics-first, with no history in it; `docs/numerical_changes.md`
+is the ledger of what raises and what changed numbers.
 Whenever a new feature is implemented (a new physical model, a new
 `Many_Body_Chain` method, a new dynamical-correlator submode, a new
 post-processing tool) update `docs/user_guide.md` **and**
@@ -833,6 +834,19 @@ the change affects architecture or backend dispatch rather than just
 physics. Keep the two formats of each document in sync and verify the
 `.tex` still compiles cleanly with `pdflatex` after editing it; the
 `docs-sync` skill (`.claude/skills/docs-sync/SKILL.md`) is the procedure.
+
+**The user guide's style is fixed.** Its readers are condensed matter
+physicists who want to compute things, not to learn how the code works. Each
+capability gets a short physics explanation (the quantity, its formula, what
+it is used for, what measures it), then the code, then the few keywords that
+control the physics or the accuracy as a one-line-per-item list. Short plain
+sentences, one idea each. No audit history, no "used to", no old numbers, no
+timings, no implementation internals (caches, penalties, block sparsity,
+stopping rules), and a backend caveat only when a number would otherwise be
+wrong, in one sentence. Every snippet in it has been run. Section 3,
+"Ground-state properties", is the reference: a new or edited section matches
+it in length per topic and in tone. History and changed numbers go to
+`docs/numerical_changes.md`, never into the guide.
 
 ## Git workflow
 

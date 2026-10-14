@@ -17,8 +17,8 @@ every anchor a real symbol in this checkout.
 | 5 | Fourth-order composition of the TDVP step | ~1 day | open, unmeasured |
 | 6 | Expokit step-size formula for the Krylov sub-stepping | ~hours | open, low value |
 
-What the review found right, and fixed, is recorded in `docs/user_guide.md`
-§21 ("The 2026-09-26 review of `"python"` real-time evolution") and pinned by
+What the review found right, and fixed, is recorded in `docs/numerical_changes.md`
+("The 2026-09-26 review of `"python"` real-time evolution") and pinned by
 `tests/test_pyitensor_time_evolution_review.py`: two-site and one-site TDVP are
 exact to ~1e-11 at full bond dimension (spin-1/2 with long-range and DM terms,
 spin-1, Jordan-Wigner fermions, bosons; real and complex dt) and track ED

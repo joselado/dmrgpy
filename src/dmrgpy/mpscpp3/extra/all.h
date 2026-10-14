@@ -9,3 +9,4 @@
 #include "spinthreehalf.h"
 #include "bosonfour.h"
 #include "Z4.h"
+#include "Z2.h"

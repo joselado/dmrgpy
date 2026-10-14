@@ -8,6 +8,23 @@ import numpy as np
 from .base import SiteType, build_matrix
 
 
+class Z2Site(SiteType):
+    """Z2 clock site (type code -1), the mod-2 member of the family, with
+    the same operator names and convention as mpscpp3/extra/Z2.h: Sig the
+    shift, Tau the clock diag(1,-1), both their own adjoints."""
+    dim = 2
+    _states = {"0": 1, "1": 2}
+    _OPS = {
+        "N": build_matrix(2, [(2, 2, 1)]),
+        "Sig": build_matrix(2, [(1, 2, 1), (2, 1, 1)]),
+        "SigDag": build_matrix(2, [(1, 2, 1), (2, 1, 1)]),
+        "Tau": build_matrix(2, [(1, 1, 1), (2, 2, -1)]),
+        "TauDag": build_matrix(2, [(1, 1, 1), (2, 2, -1)]),
+        "Proj0": build_matrix(2, [(1, 1, 1)]),
+        "Proj1": build_matrix(2, [(2, 2, 1)]),
+    }
+
+
 class Z3Site(SiteType):
     dim = 3
     _states = {"0": 1, "1": 2, "2": 3}

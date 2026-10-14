@@ -240,8 +240,8 @@ A fix that makes a previously-returned number different is a different kind of
 event from a fix that makes a crash stop, because saved results elsewhere are
 now not comparable. Every such fix gets `NUMBERS CHANGE` in its `**Status**`
 line, naming the old value, the new one and the exact chain it was measured on,
-and the consolidated list goes into section 21 of `docs/user_guide.md` (and
-its `.tex`), under a heading for that audit, as every hunt since 2026-09 has
+and the consolidated list goes into `docs/numerical_changes.md`, under a
+heading for that audit, as every hunt since 2026-09 has
 done.
 Other projects save results produced by this library, so this is not
 bookkeeping.
@@ -249,8 +249,7 @@ bookkeeping.
 ## 7. Close the loop
 
 Close the loop in three places. The record itself gets its scope section, its
-lens table and a `**Status**` line per finding. Section 21 of
-`docs/user_guide.md` gets the ledger of numbers that changed (section 6).
+lens table and a `**Status**` line per finding. `docs/numerical_changes.md` gets the ledger of numbers that changed (section 6).
 `CLAUDE.md`'s "The audits, and what to know before touching the code" gets
 the hunt added to its list of records and, for each durable rule the fixes
 left (a threshold made relative, a dispatch moved, an invariant a later

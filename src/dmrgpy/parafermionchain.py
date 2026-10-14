@@ -18,9 +18,7 @@ class Parafermionic_Chain(Many_Body_Chain):
         # before it
         if Z==3: Many_Body_Chain.__init__(self,[-2 for i in range(n)],**kwargs)
         elif Z==4: Many_Body_Chain.__init__(self,[-3 for i in range(n)],**kwargs)
-        elif Z==2: 
-             print("Not with DMRG!")
-             Many_Body_Chain.__init__(self,[-1 for i in range(n)],**kwargs)
+        elif Z==2: Many_Body_Chain.__init__(self,[-1 for i in range(n)],**kwargs)
         else: raise ValueError("only Z=2,3,4 parafermions are implemented, got "+repr(Z))
         self.use_ampo_hamiltonian = True # use ampo
         self.Chi = []

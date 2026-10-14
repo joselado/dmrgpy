@@ -3,7 +3,7 @@ constructor -- a SiteSet built directly from in-memory per-site type codes,
 with no file I/O, using the exact same type-code convention as
 manybodychain.py's callers (see get_sites.h's comment and CLAUDE.md):
 2=spin-1/2, 0=spinless fermion, 1=spinful fermion (Hubbard), 3=spin-1,
-4=spin-3/2, 5=spin-2, 6=spin-5/2, -2=Z3, -3=Z4. Boson is a *range* of
+4=spin-3/2, 5=spin-2, 6=spin-5/2, -1=Z2, -2=Z3, -3=Z4. Boson is a *range* of
 codes, 102..199 (code = 100+dim, dim being the requested local Hilbert
 space dimension -- see bosonchain.Bosonic_Chain's "maxnb"), routed to
 boson.get_boson_site(dim) below instead of a single dict entry -- the
@@ -14,7 +14,7 @@ from ..index import Index
 from ..tensor import ITensor
 from .boson import BosonFourSite, get_boson_site
 from .fermion import ElectronSite, FermionSite
-from .parafermion import Z3Site, Z4Site
+from .parafermion import Z2Site, Z3Site, Z4Site
 from .spin import SpinFiveHalfSite, SpinHalfSite, SpinOneSite, SpinThreeHalfSite, SpinTwoSite
 
 TYPE_CODE_TO_SITE = {
@@ -26,6 +26,7 @@ TYPE_CODE_TO_SITE = {
     5: SpinTwoSite,
     6: SpinFiveHalfSite,
     104: BosonFourSite,
+    -1: Z2Site,
     -2: Z3Site,
     -3: Z4Site,
 }

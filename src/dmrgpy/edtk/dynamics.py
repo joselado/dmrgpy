@@ -415,7 +415,7 @@ def dynamical_correlator_ED(h,a0,b0,delta=2e-2,
     return (es,1j*out/(2*np.pi)) # return correlator
 
 def dynamical_correlator_ED_state(a0,b0,wf,e_state,delta=2e-2,emu=None,
-        vs=None,es=np.linspace(-1.0,10.0,600)):
+        vs=None,es=np.linspace(-1.0,10.0,600),dex=None):
     """The exact Lehmann density of one given state rather than of the dex
     manifold: sum_n M_n delta/(pi((w - (E_n - e_state))^2 + delta^2)) with
     M_n = <wf|a0|n><n|b0|wf>, over the full spectrum, wf normalized here.
@@ -423,7 +423,11 @@ def dynamical_correlator_ED_state(a0,b0,wf,e_state,delta=2e-2,emu=None,
     at all, so after set_gs() of a non-degenerate excited eigenstate, or
     with an explicit wf0=, it returned the ground state's spectrum, 2.834
     off the set state's on a 2.835 peak (2026-09-24c audit, finding 2).
-    For wf the ground state this is dynamical_correlator_ED at nex=1."""
+    For wf the ground state this is dynamical_correlator_ED at nex=1.
+    dex, the width of dynamical_correlator_ED's ground manifold, is taken
+    and has no effect: the initial state here is the one state given. It
+    used to raise TypeError, so a call that works on the solved ground
+    state failed after set_gs()."""
     U = np.array(vs)
     Uh = np.conjugate(np.transpose(U))
     wf = np.asarray(wf).reshape(-1)

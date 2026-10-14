@@ -656,6 +656,7 @@ class Infinite_Many_Body_Chain:
             self._result = None
             self.e0 = self._vumps_result.e0
             self.converged = self._vumps_result.converged
+            self._gauge_mismatch = self._vumps_result.gauge_mismatch
         elif self.itensor_version == "python":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.gs_energy: gs_method={!r} is not "
@@ -693,7 +694,7 @@ class Infinite_Many_Body_Chain:
             # it does pyitensor.vumps.vumps_ground_state's own
             # niter_lanczos; it only bites once those solves are big enough
             # to go matrix-free (Chain::vx_dense_eig_max_).
-            e0, converged, _niter_done, _gauge_mismatch = chain.vumps_ground_state(
+            e0, converged, _niter_done, gauge_mismatch = chain.vumps_ground_state(
                 terms_intra, terms_inter, self.maxm, self.etol, self.maxiter,
                 self.vumps_nrestarts, max(self.niter, 2))
             self._session3 = chain  # kept alive for excitation_energies/excitation_gap
@@ -702,12 +703,46 @@ class Infinite_Many_Body_Chain:
             self._vumps_result = None
             self.e0 = e0
             self.converged = converged
+            self._gauge_mismatch = gauge_mismatch
         else:  # itensor_version == 3, unknown gs_method
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.gs_energy: gs_method={!r} is not "
                 "implemented -- only \"idmrg\" and \"vumps\" are supported "
                 "for itensor_version=3".format(self.gs_method))
+        if not self.converged: self._warn_not_converged()
         return self.e0
+
+    def _warn_not_converged(self):
+        """Say, every time, that the energy just returned is not that of a
+        converged state. A J1-J2 chain at J2=0.4 on a one-site cell gave
+        +0.006, -0.001, +0.154 and -0.050 at maxm=4 on "python" VUMPS
+        (about -0.380 converged on a two-site cell) with nothing but
+        `converged=False` to tell them apart from a result: its ground
+        state is dimerized, so no uniform state of a one-site cell is a
+        fixed point, the gauge mismatch stays of order one and the
+        iteration wanders."""
+        msg = ("Infinite chain gs_energy: gs_method={!r} did not converge "
+               "within maxiter={} at maxm={}".format(
+                   self.gs_method, self.maxiter, self.maxm))
+        if self.gs_method == "vumps":
+            mismatch = getattr(self, "_gauge_mismatch", None)
+            if mismatch is not None:
+                msg += " (gauge mismatch {:.1e}, etol {:.0e})".format(
+                    float(mismatch), self.etol)
+            msg += (", so the energy is that of an unconverged state. A "
+                    "mismatch of order one has two causes. Either no uniform "
+                    "state of this unit cell is a fixed point, because the "
+                    "ground state breaks the translation symmetry of the "
+                    "cell (dimerized or Neel order on n_uc=1): then the "
+                    "energy is not a result, use a larger cell (n_uc=2). "
+                    "Or maxm is larger than the state needs (a product "
+                    "state at maxm>1): then the energy can still be exact, "
+                    "compare a smaller maxm. A small mismatch means the "
+                    "state is close: raise maxiter.")
+        else:
+            msg += (". For a gapless model the energy can already be "
+                    "accurate; compare a larger maxiter or maxm.")
+        warnings.warn(msg, RuntimeWarning, stacklevel=3)
 
     def _make_cpp_chain(self):
         """A fresh mpscpp3 Chain for this unit cell -- shared setup
