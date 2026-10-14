@@ -33,6 +33,19 @@ entanglement grows with time after a quench, so the bond dimension needed
 grows too. When the result stops agreeing with a larger `maxm`, the
 simulation has reached its maximum time.
 
+![Light cone of a domain wall in the XX chain](img/real-time_light_cone.png#only-light)
+![Light cone of a domain wall in the XX chain](img/real-time_light_cone-dark.png#only-dark)
+
+The figure shows a quench in the XX chain,
+$H=\sum_i(S^x_iS^x_{i+1}+S^y_iS^y_{i+1})$, with $n=40$. The initial state
+is a domain wall, all spins up on the left half and all down on the right
+half. Left: $\langle S^z_x(t)\rangle$ from TDVP. The magnetization moves
+only inside a cone of slope one (dashed lines), since the fastest
+excitations have velocity $v=J$. Right: the profile at three times. The
+model maps to free fermions, so the exact profile is known (dashed lines).
+TDVP agrees with it to $10^{-4}$. At long times the profile approaches
+$-\frac1\pi\arcsin(x/t)$ (dotted line).
+
 ## Local quench
 
 `evolution_ABA` first applies an operator $A$ to the

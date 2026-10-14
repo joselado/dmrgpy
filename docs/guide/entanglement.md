@@ -21,7 +21,8 @@ s = wf.get_entropy(b)               # the same, cut between sites b-1 and b
 ```
 
 In a gapped chain $S_i$ saturates with the size of the block, and in a
-critical chain it grows as $\log\ell$. It also tells us the bond dimension
+critical chain it grows as $\log\ell$ (see the figure in
+[Central charge](#central-charge)). It also tells us the bond dimension
 we need, roughly $\chi\gtrsim e^{S}$. The bond entropy needs an MPS, so it
 is not available with `mode="ED"`.
 
@@ -70,6 +71,21 @@ slowly with $L$: for the spin-1/2 XX chain it gives about 0.54 at $L=20$
 and 0.74 at $L=40$. Use long chains, or fit the bond entropies yourself
 with only even (or only odd) $\ell$.
 
+![Entanglement entropy and central charge](img/entanglement_central_charge.png#only-light)
+![Entanglement entropy and central charge](img/entanglement_central_charge-dark.png#only-dark)
+
+The figure shows open chains with $L=100$ sites. On the left is the
+entropy of every cut. For the XX chain the DMRG entropies lie on the
+exact free-fermion values (circles). The XX, Heisenberg and critical
+Ising chains follow an arch. For the XX and Heisenberg chains the
+even-odd oscillation of the open chain sits on top of it. The gapped spin-1 chain is flat in the bulk: its entropy
+saturates. On the right, the even bonds lie on straight lines against the
+Calabrese-Cardy variable. The XX and Heisenberg lines are parallel, with
+$c\approx1$, and the Ising line has half their slope, $c\approx1/2$. At
+$L=100$ the fits give 1.07, 1.05 and 0.52; the exact free-fermion
+entropies of the XX chain give the same 1.07, so the remaining
+difference is a finite-size effect.
+
 ## Single-particle correlation matrix
 
 For fermions, the correlation
@@ -103,6 +119,18 @@ The keywords are:
 - `dmmode`: how $C_{ij}$ is computed (`"fast"`, `"full"`, `"explicit"`,
   `"simple"`). The default chooses the fastest one for the state.
   `"explicit"` works on every backend.
+
+![Natural orbitals of the Hubbard chain](img/entanglement_natural_orbitals.png#only-light)
+![Natural orbitals of the Hubbard chain](img/entanglement_natural_orbitals-dark.png#only-dark)
+
+The figure shows the half-filled Hubbard chain with $n=12$ sites and
+hopping $t=1$. On the left are the occupations $n_\alpha$ for several
+values of $U$. At $U=0$ the ground state is one Slater determinant, so
+half of the occupations are 1 and the other half are 0. As $U$ grows,
+the step melts and all occupations move towards $1/2$. On the right is
+the correlation entropy. It starts at zero and grows towards its maximum
+$2n\log 2$. For a chain with $n=4$ the DMRG values (squares) lie on the
+ED curve (dashed line).
 
 ## Two-particle correlators
 

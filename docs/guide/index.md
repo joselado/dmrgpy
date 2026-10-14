@@ -44,6 +44,14 @@ print(sc.gs_energy(mode="ED"))   # exact diagonalization
 Both print $E_0\approx-5.1420906$. Every chain class has the same methods,
 and most of them accept `mode="ED"` in the same way.
 
+![Dynamical spin structure factor of the Heisenberg chain](img/dynamical-correlators_sqw.png#only-light)
+![Dynamical spin structure factor of the Heisenberg chain](img/dynamical-correlators_sqw-dark.png#only-dark)
+
+A Heisenberg chain with $n=32$ gives the dynamical spin structure factor
+$S(q,\omega)$, the quantity measured by inelastic neutron scattering. The
+weight fills the two-spinon continuum between its exact edges (dashed). See
+[Dynamical correlators](dynamical-correlators.md).
+
 ## Backends
 
 The keyword `itensor_version=` of a chain chooses the DMRG code. The

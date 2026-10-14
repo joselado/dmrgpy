@@ -40,6 +40,14 @@ bound on $E_0$ otherwise. The keywords that control accuracy are:
 The chain stores the ground state. A second call to `gs_energy()` returns
 it without solving again.
 
+![Energy convergence with the bond dimension](img/ground-state_convergence.png#only-light)
+![Energy convergence with the bond dimension](img/ground-state_convergence-dark.png#only-dark)
+
+The figure shows the energy error and the energy fluctuation per site of
+a Heisenberg chain with $n=16$, as a function of `maxm`. The reference is
+ED. Both fall fast with `maxm`. The energy error follows $\delta E^2$
+(dashed line). From `maxm=64` on, both stay at the numerical precision.
+
 ## Expectation values
 
 For any operator $O$ built from the chain
@@ -80,6 +88,19 @@ $S(q)=\sum_{i,j}e^{iq(i-j)}\langle O_iO_j\rangle$. This is the
 quantity measured by neutron or X-ray diffraction, and it is the
 frequency integral of the [dynamical correlators](dynamical-correlators.md).
 
+![Spin correlations in spin-1/2 and spin-1 chains](img/ground-state_correlators.png#only-light)
+![Spin correlations in spin-1/2 and spin-1 chains](img/ground-state_correlators-dark.png#only-dark)
+
+The figure shows $|\langle S^z_iS^z_{i+r}\rangle|$ in two open Heisenberg
+chains with $n=64$, measured from site $i=16$. The spin-1/2 chain is
+gapless, and its correlations decay as a power law, $\sqrt{\ln r}/r$
+(dashed line). The small zigzag between even and odd $r$ is an effect of
+the open ends. The spin-1 chain has the Haldane gap, and its correlations decay
+exponentially, as $e^{-r/\xi}/\sqrt r$ with $\xi=6.03$ (dotted line). A
+free fit of the DMRG data gives $\xi=6.09$. In the spin-1 chain, the two
+end sites are spin 1/2. They bind the edge states of the open chain, so
+that the ground state is unique.
+
 ## Energy fluctuation
 
 The energy variance tells us how close the state is
@@ -95,7 +116,9 @@ For an exact eigenstate $\delta E=0$. In DMRG, $\delta E$ comes from the
 truncation of the bond dimension, so it is a direct check of `maxm`. It is
 a stricter check than the energy itself: roughly, the energy error is of
 order $\delta E^2$, while the error of other observables is of order
-$\delta E$.
+$\delta E$. The figure in
+[Ground-state energy](#ground-state-energy) shows this on a Heisenberg
+chain.
 
 ## Fixed particle number or fixed magnetization
 
@@ -125,6 +148,19 @@ $E_0(N+1)+E_0(N-1)-2E_0(N)$, and the magnetization curve, each point being
 a true ground state of its own sector. The same calls work with
 `mode="ED"`. On large chains a sector is also faster, by about 4 times at
 $n=60$.
+
+![Magnetization curves from sector energies](img/ground-state_sectors.png#only-light)
+![Magnetization curves from sector energies](img/ground-state_sectors-dark.png#only-dark)
+
+The figure shows the magnetization curve of two open chains with $n=32$.
+In a field $h$, the ground state is in the sector $M=S^z_\mathrm{tot}$ that
+minimizes $E_0(M)-hM$. So the magnetization jumps from $M$ to $M+1$ at
+$h_M=E_0(M+1)-E_0(M)$, and one solve per sector gives the whole curve. For
+the XX chain ($S^xS^x+S^yS^y$) the steps follow the free-fermion curve
+$\arcsin(h/J)/\pi$ (dashed line), and every $E_0(M)$ agrees with free
+fermions on the same chain within $3\times10^{-10}$. The Heisenberg chain saturates
+close to $h_s=2J$; on this open chain the last step is at
+$J(1+\cos(\pi/n))=1.995\,J$.
 
 Inside a sector, every operator must conserve the charge. An operator that
 changes it, for example $c_i$ at fixed $N_f$ or $S^x_i$ at fixed $S^z$,

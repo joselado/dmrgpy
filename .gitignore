@@ -44,3 +44,13 @@ benchmarks/gpu/*.sbatch
 # user guide website and PDF (built by mkdocs / docs/build_guide_pdf.py)
 /site/
 docs/user_guide.pdf
+
+# user-guide figures: the data are committed, the run files are not
+!docs/figures/*/data.npz
+docs/figures/.locks/
+docs/figures/*/DONE
+docs/figures/*/FAILED
+docs/figures/*/RUNNING
+docs/figures/*/compute.log
+docs/figures/*/run.out
+docs/figures/COMMIT

@@ -64,6 +64,23 @@ differ by 5 to 20 per cent of the third-order term. The keywords are:
 - `T0`: the tunneling strength. It only sets the overall scale.
 - `order`: 2 or 3.
 
+![STM spectra of magnetic atoms and chains](img/kondo_dIdV.png#only-light)
+![STM spectra of magnetic atoms and chains](img/kondo_dIdV-dark.png#only-dark)
+
+Left: the second-order spectrum of an $S=2$ atom with
+$H=D(S^z)^2+E[(S^x)^2-(S^y)^2]$, $D=-1.55$ meV and $E=0.31$ meV (Fe on
+Cu$_2$N), at $T=0.5$ K. The steps sit at the excitation energies of the
+spin multiplet, 0.18, 3.90 and 5.76 meV (dotted lines), which come from
+the exact $5\times5$ Hamiltonian. Middle: the third-order spectrum of an
+$S=1/2$ with $J\rho_s=-0.05$, $U=0$ and $T=1$ K, divided by $2\pi$
+to give units of $e^2T_0^2/h$. At $B=0$ there is a Kondo peak at zero bias. Its height,
+1.137, and its value at $\pm4$ mV, 0.885, match the paper's 1.13 and 0.886
+(dotted lines). In a field the peak splits. The spectrum drops in the gap
+$|eV|<g\mu_BB$, and the Kondo term gives two peaks just outside the
+Zeeman steps. Right: the $T=0$ spectrum of a 3-site chain
+from `mode="DMRG"` agrees with `mode="ED"` to 0.5 per cent (see
+[ED and DMRG](#ed-and-dmrg)).
+
 ## ED and DMRG
 
 `mode="ED"` (the default) diagonalizes the full
@@ -100,7 +117,8 @@ These keywords have no default and must be chosen for the problem:
   ground state, `mode="ED"` averages over the multiplet, while DMRG
   returns one member. `n_gs=g` makes DMRG average over `g` states too.
 
-See `examples/kondo/kondo_third_order_dmrg_VS_ED`. The tip couples to one
+See `examples/kondo/kondo_third_order_dmrg_VS_ED`, which is the right
+panel of the figure in [Third order](#third-order). The tip couples to one
 site only; several sites with independent couplings are not implemented.
 
 ## Orbital-resolved IETS of a magnetic atom

@@ -49,6 +49,19 @@ As a rule: KPM for the full spectrum, CVM or TD for a narrow window at
 high resolution, TDZ when TD needs too large a bond dimension, EX or
 SECTOR when a few states are enough.
 
+![Six methods against ED](img/correlator-methods_comparison.png#only-light)
+![Six methods against ED](img/correlator-methods_comparison-dark.png#only-dark)
+
+The figure shows the local correlator $S^{zz}_{00}(\omega)$ at the edge of
+a Heisenberg chain with $n=10$, computed with six methods and the same
+$\delta=0.1$. The dashed lines are ED. The number next to each curve is the
+largest deviation from ED, relative to the peak height. CVM, TD, TDZ and
+SECTOR fall on the exact Lehmann sum. The KPM lines are narrower and taller
+than the Lorentzian lines of ED (dotted). Compared with ED and the same KPM
+kernel, KPM agrees to 0.1 per cent. EX with `nex=20` misses all the weight
+above $\omega\approx1.2J$, because the states that carry it are not among
+its 20 states.
+
 ```python
 pair = (sc.Sz[0], sc.Sz[0])
 (x, y) = sc.get_dynamical_correlator(submode="CVM", name=pair, es=es, delta=0.1)

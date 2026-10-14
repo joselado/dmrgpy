@@ -86,6 +86,19 @@ model the convergence of iDMRG is slow, so `converged` can be `False`
 while the energy is already accurate to several digits. Entanglement
 entropies are not available for infinite chains.
 
+![Energy and spin correlator of the infinite Heisenberg chain](img/infinite-chains_energy.png#only-light)
+![Energy and spin correlator of the infinite Heisenberg chain](img/infinite-chains_energy-dark.png#only-dark)
+
+The left panel shows the error of the iDMRG energy per site of the
+spin-1/2 Heisenberg chain, against the Bethe-ansatz value
+$e_\infty=1/4-\ln 2$, as a function of `maxm`. The chain is gapless, so
+the error falls as a power of `maxm`, from $3\times10^{-4}$ at `maxm=8`
+to $1.6\times10^{-6}$ at `maxm=64`. On the one-site cell it stops there.
+A two-site cell gives $5\times10^{-7}$ at `maxm=96` (square). Here
+`converged` stays `False` up to `maxm=64`, while the energy is already
+accurate. The right panel is described in
+[Static correlators](#static-correlators).
+
 ## Static correlators
 
 
@@ -99,6 +112,19 @@ They work with both solvers and both backends. A pair with an odd number
 of fermion operators raises an error. A good check of `maxm` needs no
 reference value: the sum of the bond correlators of one unit cell must be
 equal to `n_uc` times the energy per site.
+With iDMRG on a gapless chain the state can have a period of two sites,
+also when `n_uc=1`. Then the bonds alternate in strength, and
+`ic.correlator("Sz", 0, "Sz", 1)` gives only one of them. Use a two-site
+cell and average over its two sites.
+
+The right panel of the figure in [Two solvers](#two-solvers) shows
+$|\langle S^z_0S^z_r\rangle|$ of the Heisenberg chain on a two-site
+cell at `maxm=96`, averaged over the two sites. There is no edge, so the
+correlator decays as the power law $a\sqrt{\ln r}/r$ of a Luttinger
+liquid (dashed, $a$ fitted at $r=8$ to 20). At $r=1$ it gives
+$3\langle S^z_0S^z_1\rangle=-0.443147$, which is $e_\infty$. At the
+largest $r$ the data fall a little below the power law, because a finite
+`maxm` gives a finite correlation length.
 
 ## Excitations
 
@@ -138,6 +164,22 @@ When it is close to 1, a single-mode picture is valid at that $k$. In
 plotting. These two methods need `itensor_version="python"` and
 `gs_method="vumps"`, and a parity-even operator. See
 `examples/idmrg/dynamical_structure_factor_tfim`.
+
+![Excitation bands and structure factors of infinite chains](img/infinite-chains_excitations.png#only-light)
+![Excitation bands and structure factors of infinite chains](img/infinite-chains_excitations-dark.png#only-dark)
+
+The left panel is the transverse-field Ising chain
+$H=-\sum\sigma^x\sigma^x-g\sum\sigma^z$ at $g=2.5$, in the paramagnetic
+phase, with `maxm=4`. The map is $S^{xx}(k,\omega)$. The VUMPS band
+(dashed) lies on the exact free-fermion band
+$2\sqrt{1+g^2-2g\cos k}$ (dotted) within $10^{-8}$. The right panel is
+the spin-1 Heisenberg chain with `maxm=16`, and the map is
+$S^{zz}(k,\omega)$ on a log color scale. The magnon branch has its
+minimum at $k=\pi$. There it gives the Haldane gap $0.4098$, against the
+reference $0.4105$ (dotted line). Near $k=0$ the weight goes to zero,
+because $\sum_jS^z_j$ is conserved. The weak features above the branch
+come from higher states of the ansatz. The ansatz does not describe the
+two-magnon continuum, which starts at $2\Delta$.
 
 ## Local gap estimate
 

@@ -28,6 +28,19 @@ gamma = np.angle(prod)        # 0 or pi
 
 See `examples/topological/zak_phase` for the dimerized Heisenberg chain.
 
+![Berry phase and fermion parity](img/topology_berry_phase.png#only-light)
+![Berry phase and fermion parity](img/topology_berry_phase-dark.png#only-dark)
+
+On the left, the figure shows the Berry phase of a ring of 12 spins 1/2
+with exchange $J_i=1+\delta(-1)^i$ and the twist on the bond with
+$J=1-\delta$, from 16 values of $\phi$. It is $\pi$ when the twisted bond
+is a strong bond ($\delta<0$) and 0 when it is a weak bond ($\delta>0$),
+and it jumps at $\delta=0$. The dashed line is the Zak phase of the SSH
+chain with the same dimerization (see
+[Single-particle Berry phase](#single-particle-berry-phase)), and it
+jumps at the same point. The middle and right panels belong to
+[Fermion parity](#fermion-parity).
+
 ## Single-particle Berry phase
 
 For a Bloch Hamiltonian $H(k)$, the Zak
@@ -65,3 +78,13 @@ p = wf.get_fermionic_parity(fpmode="iterative")   # same number, other route
 
 See `examples/topological/parity` for $P$ as a function of the chemical
 potential.
+
+The middle and right panels of the figure in
+[Many-body Berry phase](#many-body-berry-phase) show a chain of 6 sites
+with hopping $t=1$, chemical potential $\mu=-0.5$, onsite pairing
+$0.5\,(c_{i\uparrow}c_{i\downarrow}+\mathrm{h.c.})$, a weak Hubbard
+interaction $U=0.5$, and a Zeeman field $B\,S^z_0$ on the first site, a
+magnetic impurity. At $B\approx1.97$ the impurity binds one
+quasiparticle. The parity jumps from $+1$ to $-1$, and the total
+$\langle S^z\rangle$ jumps from 0 to $-1/2$ at the same field. DMRG
+(points) agrees with ED (dashed lines).

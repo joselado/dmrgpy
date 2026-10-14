@@ -29,3 +29,20 @@ This is $A_{ii}(\omega)$ of [Dynamical correlators](dynamical-correlators.md), a
 `get_spectral_function(i=i)`, or from the two correlators
 $(c_i,c_i^\dagger)$ and $(c_i^\dagger,c_i)$ as shown there. On a spinful
 chain, pass `spin="up"` or `spin="dn"` and add the two.
+
+![Local density of states of a fermion chain](img/density-of-states_ldos.png#only-light)
+![Local density of states of a fermion chain](img/density-of-states_ldos-dark.png#only-dark)
+
+The figure shows $A_i(\omega)$ of an open chain of 20 spinless fermions at
+half filling, with
+$H=-t\sum_i(c^\dagger_ic_{i+1}+\mathrm{h.c.})+V\sum_i(n_i-\frac12)(n_{i+1}-\frac12)$,
+from `get_spectral_function` with `nex=50` and $\delta=0.1$. The left panel
+is a site in the middle of the chain and the right panel the edge site. At
+$V=0$ the result lies on the exact free-fermion spectrum (dashed): 20
+levels inside the band $|\omega|<2t$, with a weight that depends on the
+site. In the middle of the chain the weight piles up at the band edges, as
+in $1/\sqrt{4t^2-\omega^2}$. At the edge it is largest at the band center.
+At $V=3t$ the chain is a charge density wave, and a gap of about $t$ opens
+at $\omega=\mu$. The weight moves to higher energies, around $\pm V$. Here
+the 50 states hold 79 per cent of the weight at the middle site, so part of
+the spectrum at high energy is missing; `info["captured"]` tells this.

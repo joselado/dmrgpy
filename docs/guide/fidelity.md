@@ -32,3 +32,23 @@ until $\chi$ stops changing. The keywords are:
   states in the sum (default 2) and `delta` is the $\delta$ of the
   formula above.
 - `mode="ED"`: exact diagonalization, for small chains.
+
+![Fidelity susceptibility of the Ising chain](img/fidelity_ising.png#only-light)
+![Fidelity susceptibility of the Ising chain](img/fidelity_ising-dark.png#only-dark)
+
+The figure shows open Ising chains, $H=\sum_i\sigma^z_i\sigma^z_{i+1}+\lambda\sum_i\sigma^x_i$,
+computed with `dl=0.02`. On the left is $\chi/n$ for four lengths. For the
+longer chains the peak grows with $n$ and moves towards the critical
+point $\lambda=1$: it is at $\lambda=0.86$, 0.91 and 0.94 for $n=16$, 24
+and 32. For $n=12$ the ED curve (dashed line)
+covers the DMRG one. On the right, the difference of the two longest
+chains removes the contribution of the edges and gives $\chi/n$ of the
+bulk. Away from $\lambda=1$ it lies on the exact result of the infinite
+chain, $\chi/n=1/[16(1-\lambda^2)]$ for $\lambda<1$ and
+$1/[16\lambda^2(\lambda^2-1)]$ for $\lambda>1$. Close to $\lambda=1$ the
+correlation length is longer than the chains, so they do not reach the
+infinite-chain result there. We start the scan at $\lambda=0.85$: deeper
+in the ordered phase, the two ground states of a long open chain become
+degenerate within the tolerance `delta`. The default estimator then
+treats them as one degenerate manifold, and the number it returns is no
+longer $\chi$ of one ground state.

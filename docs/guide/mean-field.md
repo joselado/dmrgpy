@@ -43,6 +43,23 @@ The keywords are:
 - `mixmode`: `"default"` (linear mixing) or `"broyden"`.
 - `mode="ED"`: solve each step with exact diagonalization.
 
+![Mean-field Neel order of the Heisenberg chain](img/mean-field_neel.png#only-light)
+![Mean-field Neel order of the Heisenberg chain](img/mean-field_neel-dark.png#only-dark)
+
+The figure shows the Heisenberg chain with $n=24$ sites, started from the
+staggered pattern above. On the left is $\langle S^z_i\rangle$. At $p=0$
+it is the classical Neel state with $|\langle S^z_i\rangle|=1/2$. As $p$
+grows, the order gets weaker. On the right, the staggered magnetization
+of the 12 central sites falls with $p$ and drops to zero between $p=0.9$
+and $p=0.95$, before $p=1$: in a finite chain the order disappears once
+the Weiss field is small compared with the finite-size gap. The squares
+are $\langle H\rangle$ of the original Heisenberg chain in the
+self-consistent state, not `gs_energy()` of the returned chain, which
+differs from it for $0<p<1$. The energy goes from the Neel value
+$-(n-1)/(4n)$ at $p=0$ to the exact energy of the chain at $p=1$. In the
+bulk this exact energy is $1/4-\log2=-0.443$ per site; the open chain
+with $n=24$ gives $-0.4356$, because of its edges.
+
 `meanfield.decompose_spin_hamiltonian(sc)` returns the onsite fields
 `b[i,a]`, the exchange `J[i,j,a,b]` and the constant read from the
 Hamiltonian. A Hamiltonian that is not of this form, for example with a

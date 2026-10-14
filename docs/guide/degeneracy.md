@@ -2,7 +2,8 @@
 
 A degenerate ground state signals a broken symmetry or a topological
 phase. Examples are the two ordered states of an Ising chain and the four
-edge states of an open Haldane chain. We count the levels close to $E_0$,
+edge states of an open Haldane chain, whose splitting is shown in
+[Excited states](excited-states.md#low-lying-spectrum). We count the levels close to $E_0$,
 
 $$g\approx\sum_i\exp\!\left[-\left(\frac{(E_i-E_0)^2}{\delta}\right)^2\right],$$
 

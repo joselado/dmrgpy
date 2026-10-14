@@ -44,3 +44,18 @@ Chebyshev moments of the rescaled operator and has no ED version. A
 maximum-entropy reconstruction from the moments $\langle X^k\rangle$,
 `distribution.get_distribution_maxent`, needs the module
 `dmrgpy.maxenttk`, which is not shipped, and raises an error without it.
+
+![Magnetization distribution of the Ising chain](img/density-matrices_distribution.png#only-light)
+![Magnetization distribution of the Ising chain](img/density-matrices_distribution-dark.png#only-dark)
+
+The figure shows $P(m)$ for the magnetization per site
+$m=\frac1n\sum_iS^z_i$ in the transverse-field Ising chain
+$H=-\sum_iS^z_iS^z_{i+1}-h\sum_iS^x_i$, which is critical at $h=1/2$.
+A small field $10^{-4}\sum_iS^z_i$ selects one of the two ordered states.
+In the ordered phase ($h=0.2$), $P(m)$ is one sharp peak close to the
+exact bulk value $m=0.489$. At the critical field it is broad and flat,
+and in the paramagnet ($h=1$) it is one peak at $m=0$. On the left, with
+$n=12$, the DMRG curves lie on the ED curves (dashed lines). There the
+peaks are separated, because $m$ only takes the values $k/n$. On the
+right, with $n=24$, these values are closer than the resolution set by
+`delta`, so the distribution looks smooth.

@@ -87,6 +87,20 @@ For a Heisenberg chain the weight is largest at $q=\pi$, the
 antiferromagnetic wave vector, and its lower edge follows the two-spinon
 dispersion $\frac{\pi}{2}|\sin q|$ for long chains.
 
+![Two-spinon continuum of the Heisenberg chain](img/dynamical-correlators_sqw.png#only-light)
+![Two-spinon continuum of the Heisenberg chain](img/dynamical-correlators_sqw-dark.png#only-dark)
+
+The figure shows $S^{zz}(q,\omega)$ of an open Heisenberg chain with
+$n=32$, with KPM and $\delta=0.15$. On an open chain the momentum states
+are standing waves, so we use one operator per momentum,
+$S^z_q=\sqrt{2/(n+1)}\sum_i\sin(q(i+1))S^z_i$ with $q=\pi k/(n+1)$, and one
+KPM run per $q$. The weight fills the two-spinon continuum between the
+exact edges $\frac{\pi}{2}J|\sin q|$ and $\pi J|\sin(q/2)|$ (dashed). It is
+largest just above the lower edge and near $q=\pi$. The right panel shows
+two cuts, with the lower edge as a dotted line. Their integrals match
+$\langle S^z_qS^z_q\rangle$ from `vev`. At every $q$ this sum rule holds
+to a few parts in $10^5$.
+
 Two methods give the spin structure factor directly:
 
 - `sc.get_spin_spectral_function(i, j=None, es=..., delta=..., nex=20)`:
@@ -156,6 +170,23 @@ A00 = np.concatenate([yh.real[::-1], yp.real])
 Here the frequency is measured from $E_0^N$ in both halves, without the
 $\mu$ shift. If the chain is not in a sector, $|\mathrm{GS}\rangle$ is the
 global ground state, at whatever particle number it has.
+
+![Mott gap of the Hubbard chain](img/dynamical-correlators_spectral_function.png#only-light)
+![Mott gap of the Hubbard chain](img/dynamical-correlators_spectral_function-dark.png#only-dark)
+
+The left panel shows $A_{ii}(\omega)$ at a bulk site of a half-filled
+Hubbard chain with $n=12$, from the two KPM correlators above with
+$\delta=0.25$. We write the interaction as
+$U\sum_i(n_{i\uparrow}-\frac12)(n_{i\downarrow}-\frac12)$, so the global
+ground state is at half filling and $\mu=0$. At $U=0$ the result lies on
+the exact free-fermion spectrum (dashed), drawn with the same KPM kernel. As $U$ grows, the single band
+splits into a lower and an upper Hubbard band. The right panel shows the
+charge gap from the ground states of the sectors $N-1$, $N$ and $N+1$. It
+approaches the Lieb-Wu gap of the infinite chain (dashed) as $n$ grows,
+and the finite chains stay above it because of the level spacing. For
+these sectors we use $U\sum_in_{i\uparrow}n_{i\downarrow}$, and the
+chemical potential comes out exactly at $U/2$, as particle-hole symmetry
+requires.
 
 ## Any pair of operators
 

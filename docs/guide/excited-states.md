@@ -43,6 +43,24 @@ es = s1.get_excited(n=6)    # s1: an open spin-1 Heisenberg chain
 haldane_gap = es[4] - es[0]
 ```
 
+![Haldane gap and edge states of the spin-1 chain](img/excited-states_haldane.png#only-light)
+![Haldane gap and edge states of the spin-1 chain](img/excited-states_haldane-dark.png#only-dark)
+
+The figure shows the same physics on long open spin-1 chains. Here the
+energies come from the ground states of three
+[sectors](ground-state.md#fixed-particle-number-or-fixed-magnetization),
+$S^z_\mathrm{tot}=0$, 1 and 2, which is faster and safer than
+`get_excited` at these lengths. The edge splitting is $E_0(1)-E_0(0)$ and
+the bulk gap is $E_0(2)-E_0(1)$, one magnon on top of the edge triplet.
+On the left, the gap goes as $1/n^2$, and the fit $a+b/n^2$ on
+$n=48$ to 128 gives $0.4107\,J$, against the known $\Delta=0.4105\,J$.
+The inset shows that the edge splitting falls as $e^{-n/\xi}$ with
+$\xi\approx6$, to below $10^{-7}$ at $n=96$, so the four edge states
+become degenerate. On the right is $\langle S^z_i\rangle$ in the
+$S^z_\mathrm{tot}=1$ ground state at $n=48$. Each end carries a spin 1/2
+(each half sums to exactly $1/2$), spread over about 6 sites, and the
+bulk is not magnetized.
+
 ## Gap to another particle number
 
 For a conserved charge $A$, for
@@ -96,6 +114,20 @@ Excited states of a non-Hermitian $H$ come from `get_excited_states(n)` and
 is less accurate than NH-DMRG, so check it against `mode="ED"` on a small
 chain (`examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`). NH-DMRG works on
 `itensor_version=2`, `3`, `"python"` and `"julia_live"`.
+
+![Skin effect of the interacting Hatano-Nelson chain](img/excited-states_nonhermitian.png#only-light)
+![Skin effect of the interacting Hatano-Nelson chain](img/excited-states_nonhermitian-dark.png#only-dark)
+
+The figure shows the many-body skin effect of an interacting
+Hatano-Nelson chain at half filling, with hopping $t\pm\gamma$ and a
+nearest-neighbor repulsion $V=t$. On the left is the density of the right
+ground state, $\langle\psi_R|n_i|\psi_R\rangle/\langle\psi_R|\psi_R\rangle$,
+from `nhdmrg()` on 16 sites. It is flat at $\gamma=0$, and charge moves to
+the left end as $\gamma$ grows. On the right is the charge moved into the
+left half. The dashed curves are exact, since with open ends $H$ is a
+similarity transform of a Hermitian chain, and ED on 10 sites agrees with
+NH-DMRG to $10^{-14}$. The problem becomes ill conditioned fast with $n$
+and $\gamma$; `nhdmrg` warns when it does not converge.
 
 ## Generalized eigenvalue problem
 
@@ -161,3 +193,15 @@ as a LaTeX string. The keywords are:
 
 See `examples/groundstate/effective_hamiltonian`, which fits the twisted
 exchange of a Hubbard dimer with a Peierls phase.
+
+![Exchange of the Hubbard dimer](img/excited-states_heff.png#only-light)
+![Exchange of the Hubbard dimer](img/excited-states_heff-dark.png#only-dark)
+
+The figure shows the exchange $J$ that `get_heff` fits on a Hubbard dimer
+(`n=4`, `mode="ED"`, with $20(N-2)^2$ added to $H$ to keep the four
+states at half filling). The three couplings come out equal, as for an
+isotropic exchange. At large $U$ the fitted $J$ joins the singlet-triplet
+splitting $E_T-E_S$ and $4t^2/U$. At small $U$ it is larger, because the
+singlet has doubly occupied weight and the projected spin operators are
+shorter than spin 1/2; the fit is then exactly
+$(E_T-E_S)/(1/4+3w/4)$ (dashed), with $w$ the singly occupied weight.

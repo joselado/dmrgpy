@@ -841,7 +841,11 @@ each other by page name (`[Ground state](ground-state.md)`), never by a
 section number. A new page needs an entry in `nav`, or it is neither in
 the menu nor in the PDF. `mkdocs build` is strict and fails on a broken
 link or anchor; run it (`pip install mkdocs==1.6.1 mkdocs-material==9.7.7`)
-before committing a guide change.
+before committing a guide change. Every figure in the guide is computed:
+`docs/figures/<id>/compute.py` writes `data.npz` (committed), `plot.py`
+reads only that and writes the light and dark PNGs into `docs/guide/img/`;
+`docs/figures/README.md` says how to recompute, replot and run on a remote
+host, and `docs/figures/plan.md` is the physics each figure checks.
 
 Whenever a new feature is implemented (a new physical model, a new
 `Many_Body_Chain` method, a new dynamical-correlator submode, a new

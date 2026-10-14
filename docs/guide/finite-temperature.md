@@ -45,6 +45,18 @@ is accurate to about $10^{-6}$ relative at the defaults. The keywords are:
 
 See `examples/finite_temperature/thermal_purification_VS_exact`.
 
+![Thermal energy and specific heat of the Heisenberg chain](img/finite-temperature_specific_heat.png#only-light)
+![Thermal energy and specific heat of the Heisenberg chain](img/finite-temperature_specific_heat-dark.png#only-dark)
+
+The figure shows the thermal energy and the specific heat per site of a
+spin-1/2 Heisenberg chain with $n=10$. The specific heat is the energy
+variance, $C(T)=(\langle H^2\rangle_T-\langle H\rangle_T^2)/T^2$, measured
+in the purified state, so no numerical derivative is needed. The reference
+is the full spectrum of the chain (dashed lines). Purification agrees with
+it to $10^{-5}$ at every temperature. $C(T)$ has a broad maximum near
+$T\approx0.46J$, the scale of the antiferromagnetic correlations. The
+METTS points are discussed in [METTS](#metts).
+
 ## METTS
 
 Minimally entangled typical thermal states (Stoudenmire and
@@ -62,6 +74,9 @@ res = sc.metts_vev([sc.Sz[0], sc.Sz[1], h], T)   # list of (mean, err)
 ```
 
 Being a Monte Carlo method, it returns a mean and a statistical error.
+The METTS energies in the figure of [Purification](#purification), with
+300 samples per temperature, agree with the exact energy within two error
+bars.
 The error assumes independent samples, so it is too small when samples
 are correlated. Measuring several operators in one call is much cheaper
 than one call per operator, since they share the samples. The keywords

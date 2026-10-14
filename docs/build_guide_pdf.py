@@ -53,8 +53,19 @@ def local_links_to_text(text):
     return re.sub(r"\[([^\]]+)\]\((?:[\w-]+\.md)?(?:#[\w-]+)?\)", r"\1", text)
 
 
+def light_figures_only(text):
+    """Keep the light image of each #only-light/#only-dark pair.
+
+    The website shows one of the two PNG files by theme; the PDF takes the
+    light one, with the fragment stripped so pandoc finds the file.
+    """
+    text = re.sub(r"^!\[[^\]]*\]\([^)]*#only-dark\)[ \t]*\n?", "", text,
+                  flags=re.M)
+    return text.replace("#only-light)", ")")
+
+
 def page_source(fn):
-    text = open(os.path.join(GUIDE, fn)).read()
+    text = light_figures_only(open(os.path.join(GUIDE, fn)).read())
     if fn == "index.md":
         text = re.sub(r"^# [^\n]*\n", "# Introduction\n", text, count=1)
     return local_links_to_text(admonitions_to_quotes(text))
@@ -67,7 +78,8 @@ def main():
            "--toc", "--toc-depth=1", "--number-sections",
            "-V", "geometry:margin=2.2cm", "-V", "fontsize=10pt",
            "-V", "colorlinks=true", "-V", "documentclass=article",
-           "-M", "title=DMRGPY user guide"]
+           "-M", "title=DMRGPY user guide",
+           "--resource-path", GUIDE]  # images are img/... relative to docs/guide/
     subprocess.run(cmd, input=md.encode(), check=True)
     print("wrote", out)
 
