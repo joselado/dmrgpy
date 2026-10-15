@@ -11,14 +11,19 @@ The plan of all figures, with the conventions, is `plan.md`.
 
 - `style.py`: the matplotlib style. A `plot.py` defines `draw(theme)` and
   ends with `style.main(draw, "<id>")`, which writes both PNG files.
-- `common.py`: `common.start(params)` prints the parameters,
-  `common.save(__file__, params, **arrays)` writes `data.npz` with the
-  parameters, the git commit, the host and the wall time as JSON under
-  `params`, and `common.load(path)` reads it back.
+- `common.py`: `run.sh` calls it after a successful run to add the git
+  commit, the host, the dmrgpy path and the wall time to `data.npz`, as
+  JSON under the key `provenance`; `common.provenance(path)` reads it back.
+
+Both scripts are shown whole in the guide, so they stay short and read as
+physics. `compute.py` imports only numpy and dmrgpy, sets the parameters
+as plain variables at the top, prints nothing and ends with one
+`np.savez("data.npz", ...)`. `plot.py` starts with
+`d = np.load("data.npz")` and does any numpy fit of a reference curve.
 - `run.sh <id>`: runs `compute.py` with one BLAS thread, `PYTHONPATH` on
   this checkout, at most three jobs per machine (each pinned to its own
   P-core), and a memory cap of 8 GB. It writes `<id>/compute.log`, and
-  `<id>/DONE` or `<id>/FAILED` at the end.
+  `<id>/DONE` or `<id>/FAILED` at the end, and stamps `data.npz`.
 - `d22.sh`: runs the jobs on the workstation D22 from here. It needs
   `D22_HOST` (user@host), `D22_DIR` (the remote checkout) and `D22_PYTHON`
   (the remote python), set in the environment or in an untracked
@@ -29,7 +34,7 @@ The plan of all figures, with the conventions, is `plan.md`.
 
 ```bash
 bash docs/figures/run.sh <id>          # compute, writes <id>/data.npz
-cd docs/figures/<id> && python3 plot.py
+cd docs/figures/<id> && PYTHONPATH=.. python3 plot.py
 ```
 
 ## Run on D22

@@ -1,19 +1,7 @@
-"""Plot figure 10, topology_berry_phase, from data.npz.
-
-Writes docs/guide/img/topology_berry_phase.png and -dark.png.
-    python3 plot.py [--theme light|dark]
-"""
-import os
-import sys
-
 import numpy as np
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import common
 import style
 
-params, d = common.load(os.path.join(HERE, "data.npz"))
+d = np.load("data.npz")
 
 
 def wrap(g):

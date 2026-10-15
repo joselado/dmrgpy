@@ -1,27 +1,20 @@
-"""Helpers shared by every docs/figures/<id>/compute.py.
+"""Provenance of the user-guide figures.
 
-    import os, sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import common
-
-    params = common.start(dict(model="...", n=16, maxm=[...]))  # prints them
-    ...                                                           # compute
-    common.save(__file__, params, energy=e, maxm=m)               # data.npz
-
-save() writes data.npz next to compute.py, with the parameters as one JSON
-string under the key "params", completed with the git commit, the host,
-the dmrgpy path and the wall time. Read it back with common.load(path).
+A docs/figures/<id>/compute.py is plain dmrgpy and numpy: it ends with
+np.savez("data.npz", ...) and knows nothing about this module. run.sh
+calls stamp() after it, which adds the git commit, the host, the dmrgpy
+path and the wall time to data.npz, as one JSON string under the key
+"provenance". provenance(path) reads it back.
 """
 import json
 import os
 import socket
 import subprocess
-import time
+import sys
 
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-_T0 = time.time()
 
 
 def git_commit():
@@ -45,32 +38,23 @@ def git_commit():
             return "unknown"
 
 
-def start(params):
-    """Print the parameters before the calculation starts; return them."""
-    global _T0
-    _T0 = time.time()
-    print("parameters:")
-    for k, v in params.items():
-        print("  %s = %r" % (k, v))
-    print(flush=True)
-    return params
-
-
-def save(script, params, **arrays):
-    """Write data.npz next to `script`, with params stored as JSON."""
+def stamp(path, wall_time_s):
+    """Add the provenance to the data.npz at `path`."""
     import dmrgpy
-    p = dict(params)
-    p["git_commit"] = git_commit()
-    p["host"] = socket.gethostname()
-    p["dmrgpy_path"] = os.path.dirname(dmrgpy.__file__)
-    p["wall_time_s"] = round(time.time() - _T0, 1)
-    path = os.path.join(os.path.dirname(os.path.abspath(script)), "data.npz")
-    np.savez(path, params=json.dumps(p), **arrays)
-    print("wrote", path, "wall time %.1f s" % p["wall_time_s"])
-    return path
+    with np.load(path) as f:
+        arrays = {k: f[k] for k in f.files if k != "provenance"}
+    p = dict(git_commit=git_commit(), host=socket.gethostname(),
+             dmrgpy_path=os.path.dirname(dmrgpy.__file__),
+             wall_time_s=float(wall_time_s))
+    np.savez(path, provenance=json.dumps(p), **arrays)
+    print("stamped", path, p)
 
 
-def load(path):
-    """Return (params dict, npz arrays) of a data.npz."""
-    d = np.load(path)
-    return json.loads(str(d["params"])), d
+def provenance(path):
+    """The provenance dict of a data.npz."""
+    with np.load(path) as f:
+        return json.loads(str(f["provenance"]))
+
+
+if __name__ == "__main__":
+    stamp(sys.argv[1], sys.argv[2])

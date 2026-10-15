@@ -20,24 +20,25 @@ runtimes are therefore estimates, and the figure scripts print their own.
   only `data.npz` and writes the PNG files into `docs/guide/img/`.
   `plot.py` never imports `dmrgpy`, so a figure can be replotted on any
   machine without the compiled backend.
-- `compute.py` prints every parameter it uses before the calculation
-  starts, and stores them in `data.npz` under the key `params`, as one JSON
-  string (`np.savez(..., params=json.dumps(params))`). The dictionary holds
-  the model, the sizes, `maxm`, `nsweeps`, `delta`, the time step, the
-  backend, every seed, the git commit of `dmrgpy` (`git rev-parse HEAD`)
-  and the wall time of the run. Every array in `data.npz` is named in a
-  comment block at the top of `compute.py`.
-- A reference curve that needs no `dmrgpy` (an analytic formula, a
-  free-fermion diagonalization) is computed in `compute.py` too and stored
-  in `data.npz`, so that `plot.py` only draws.
-- `docs/figures/style.py` is the shared style (below). `plot.py` loads it
-  with `sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))`.
+- `compute.py` is shown whole in the guide, so it is short and reads as
+  physics: the parameters as plain variables with literal values at the
+  top, the chain, the Hamiltonian, the calculation, and one
+  `np.savez("data.npz", ...)` at the end. No prints, no timing, no
+  parameter dictionary. A reference that needs `dmrgpy` or is physics in
+  its own right (ED, free fermions, an exact formula) is computed there; a
+  pure numpy fit of a reference curve is done in `plot.py`.
+- The provenance (git commit, host, `dmrgpy` path, wall time) is added to
+  `data.npz` by `run.sh` after the run, through `common.py`, as one JSON
+  string under the key `provenance`. The parameters are in `compute.py`
+  at that commit.
+- `docs/figures/style.py` is the shared style (below). `plot.py` imports
+  it as `import style`, with `docs/figures` on `PYTHONPATH`.
 - `docs/figures/run.sh <id>` runs `compute.py` and then `plot.py` with the
   environment pinned:
 
 ```bash
 export MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
-export PYTHONPATH=<repo>/src
+export PYTHONPATH=<repo>/src:<repo>/docs/figures
 cd docs/figures/<id> && taskset -c <P-core> python3 compute.py && python3 plot.py
 ```
 

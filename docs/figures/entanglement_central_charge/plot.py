@@ -1,27 +1,16 @@
-"""Plot figure 7, entanglement_central_charge, from data.npz.
-
-Writes docs/guide/img/entanglement_central_charge.png and -dark.png.
-    python3 plot.py [--theme light|dark]
-"""
-import os
-import sys
-
 import numpy as np
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import common
 import style
 
-params, d = common.load(os.path.join(HERE, "data.npz"))
-L = params["L"]
-ell = d["ell"]
-S = d["entropy"]
-x = np.log(2*L/np.pi*np.sin(np.pi*ell/L))
-even = (ell % 2 == 0) & (ell >= 4) & (ell <= L-4)
+d = np.load("data.npz")
+L, ell, S = int(d["L"]), d["ell"], d["entropy"]
+names = [str(a) for a in d["names"]]
 labels = {"xx": "XX", "heisenberg": "Heisenberg", "ising": "critical Ising",
           "spin1": "spin-1 Heisenberg"}
-names = [str(a) for a in d["names"]]
+# Calabrese-Cardy, S = c/6 x + const, fitted on even l from 4 to L-4
+x = np.log(2*L/np.pi*np.sin(np.pi*ell/L))
+even = (ell % 2 == 0) & (ell >= 4) & (ell <= L-4)
+c_even = [6*np.polyfit(x[even], s[even], 1)[0] for s in S]
+c_exact = 6*np.polyfit(x[even], d["s_exact"][even], 1)[0]  # quoted in the guide
 
 
 def draw(theme):
@@ -39,16 +28,14 @@ def draw(theme):
 
     xs = np.linspace(x[even].min(), x[even].max(), 2)
     for k, name in enumerate(names):
-        if name == "spin1":
-            lab = "%s (gapped)" % labels[name]
-        else:
-            lab = r"%s, fit $c=%.2f$" % (labels[name], d["c_even"][k])
+        lab = ("%s (gapped)" % labels[name] if name == "spin1" else
+               r"%s, fit $c=%.2f$" % (labels[name], c_even[k]))
         b.plot(x[even], S[k][even], "o", color=c["series"][k], ms=3.5,
                label=lab)
     for name, slope in (("heisenberg", 1/6), ("ising", 1/12)):
-        k = names.index(name)
-        s0 = np.mean(S[k][even] - slope*x[even])
-        b.plot(xs, slope*xs + s0, **style.reference(theme),
+        s = S[names.index(name)][even]
+        b.plot(xs, slope*xs + np.mean(s - slope*x[even]),
+               **style.reference(theme),
                label=r"slope $c/6$ with $c=1$ and $c=1/2$"
                if name == "heisenberg" else None)
     b.set_xlabel(r"$\ln\left[\frac{2L}{\pi}\sin\frac{\pi\ell}{L}\right]$")

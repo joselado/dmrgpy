@@ -1,33 +1,16 @@
-"""Plot figure 22, post-processing_extrapolation, from data.npz.
-
-Writes docs/guide/img/post-processing_extrapolation.png and -dark.png.
-    python3 plot.py [--theme light|dark]
-"""
-import os
-import sys
-
 import numpy as np
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import common
+from numpy.polynomial import polynomial as P
 import style
 
-params, d = common.load(os.path.join(HERE, "data.npz"))
+d = np.load("data.npz")
 L = d["L"]
-x = 1.0/L
-y = d["energy"]/L
+x, y = 1.0/L, d["energy"]/L
 e_exact = float(d["e_exact"])
 e1, e2 = float(d["e_inf_n1"]), float(d["e_inf_n2"])
-# the same weighted quadratic fit as extrapolate.size_extrapolation(n=2)
-c = np.polynomial.polynomial.polyfit(x, y, 2, w=L)
-assert abs(c[0] - e2) < 1e-12
+# the same weighted fits as extrapolate.size_extrapolation(n=1, 2)
 xf = np.linspace(0.0, x.max()*1.05, 200)
-yf = np.polynomial.polynomial.polyval(xf, c)
-c1 = np.polynomial.polynomial.polyfit(x, y, 1, w=L)
-assert abs(c1[0] - e1) < 1e-12
-yf1 = np.polynomial.polynomial.polyval(xf, c1)
-print("n=2: %.6f  n=1: %.6f  exact: %.6f" % (e2, e1, e_exact))
+yf1, yf = (P.polyval(xf, P.polyfit(x, y, deg, w=L)) for deg in (1, 2))
+assert abs(yf1[0] - e1) < 1e-12 and abs(yf[0] - e2) < 1e-12
 
 
 def draw(theme):
@@ -39,13 +22,16 @@ def draw(theme):
             label=r"extrapolated, $%.5f$" % e2)
     ax.plot([0], [e_exact], "x", color=col["ink"], ms=9, mew=1.6,
             label=r"Bethe ansatz $1/4-\ln 2=%.5f$" % e_exact)
+    ax.plot(xf, yf1, color=col["ink2"], ls=":", lw=style.LW_REF,
+            label=r"linear fit, $%.5f$" % e1)
     for Li, xi, yi in zip(L, x, y):
         if Li in (16, 32, 64, 128):
             ax.annotate("L=%d" % Li, (xi, yi), textcoords="offset points",
                         xytext=(4, -12), fontsize=8, color=col["ink2"])
-    ax.plot(xf, yf1, color=col["ink2"], ls=":", lw=style.LW_REF,
-            label=r"linear fit, $%.5f$" % e1)
     ax.set_xlim(-0.003, x.max()*1.08)
+    ax.set_xlabel(r"$1/L$")
+    ax.set_ylabel(r"$E_0/L$ [$J$]")
+    ax.legend(loc="upper left")
     # zoom on the extrapolation
     ins = ax.inset_axes([0.6, 0.08, 0.37, 0.37])
     ins.plot(xf, yf, **style.reference(theme))
@@ -61,9 +47,6 @@ def draw(theme):
     ins.set_yticklabels([r"$e_\infty$", r"$+10^{-4}$", r"$+2\cdot10^{-4}$"])
     ins.tick_params(labelsize=7)
     ins.set_facecolor("none")
-    ax.set_xlabel(r"$1/L$")
-    ax.set_ylabel(r"$E_0/L$ [$J$]")
-    ax.legend(loc="upper left")
     return fig
 
 

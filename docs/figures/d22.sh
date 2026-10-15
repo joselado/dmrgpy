@@ -82,7 +82,7 @@ pull)
     ;;
 plot)
     [ $# -gt 0 ] || { echo "usage: d22.sh plot <id>..." >&2; exit 2; }
-    for id in "$@"; do (cd "$here/$id" && python3 plot.py); done
+    for id in "$@"; do (cd "$here/$id" && PYTHONPATH="$here" python3 plot.py); done
     ;;
 *)
     sed -n '2,21p' "$0"; exit 2

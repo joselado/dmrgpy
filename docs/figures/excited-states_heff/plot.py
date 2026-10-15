@@ -1,19 +1,10 @@
-"""Plot figure 6, excited-states_heff, from data.npz.
-
-Writes docs/guide/img/excited-states_heff.png and -dark.png.
-    python3 plot.py [--theme light|dark]
-"""
-import os
-import sys
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-import common
+import numpy as np
 import matplotlib.ticker as ticker
 import style
 
-params, d = common.load(os.path.join(HERE, "data.npz"))
-U = d["U"]
+d = np.load("data.npz")
+U, t = d["U"], d["t"]
+j_exact = 0.5*(np.sqrt(U**2 + 16*t**2) - U)  # triplet-singlet splitting
 
 
 def draw(theme):
@@ -23,9 +14,8 @@ def draw(theme):
             label=r"get_heff, singly occupied projector")
     ax.plot(U, d["jfit_noproj"][:, 2], "s", mfc="none",
             color=c["series"][1], label=r"get_heff, no projector")
-    ax.plot(U, d["j_exact"], **style.reference(theme),
-            label=r"exact, $E_T-E_S$")
-    ax.plot(U, d["j_strong"], color=c["ink2"], ls="-.", lw=style.LW_REF,
+    ax.plot(U, j_exact, **style.reference(theme), label=r"exact, $E_T-E_S$")
+    ax.plot(U, 4*t**2/U, color=c["ink2"], ls="-.", lw=style.LW_REF,
             label=r"$4t^2/U$")
     ax.set_xscale("log")
     ax.set_yscale("log")

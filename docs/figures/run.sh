@@ -3,7 +3,8 @@
 #
 #   bash docs/figures/run.sh <id>
 #
-# - BLAS/OpenMP threads pinned to 1, PYTHONPATH set to this checkout's src.
+# - BLAS/OpenMP threads pinned to 1, PYTHONPATH set to this checkout's src
+#   and to docs/figures (for style.py).
 # - At most three jobs per machine: a job takes one of three slot locks
 #   (flock on docs/figures/.locks/slot{0,1,2}) and waits while all three
 #   are taken. Each slot is pinned with taskset to its own physical P-core
@@ -13,6 +14,8 @@
 #   systemd-run works; otherwise without it, with a note in the log.
 # - Writes docs/figures/<id>/compute.log, RUNNING while it runs, and DONE
 #   (exit 0 and data.npz written) or FAILED at the end.
+# - On success, common.py stamps data.npz with the git commit, the host,
+#   the dmrgpy path and the wall time (key "provenance").
 #
 # Environment: PYTHON (default python3), FIGURE_CPUS (default "0 2 4").
 set -u
@@ -25,7 +28,7 @@ PYTHON="${PYTHON:-python3}"
 read -r -a CPUS <<< "${FIGURE_CPUS:-0 2 4}"
 
 export MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
-export PYTHONPATH="$repo/src"
+export PYTHONPATH="$repo/src:$here"
 
 log="$dir/compute.log"
 rm -f "$dir/DONE" "$dir/FAILED"
@@ -66,6 +69,7 @@ start=$(date +%s)
 status=$?
 echo "# exit $status after $(( $(date +%s) - start )) s" >> "$log"
 if [ $status -eq 0 ] && [ -f "$dir/data.npz" ] && [ "$dir/data.npz" -nt "$dir/RUNNING" ]; then
+    "$PYTHON" "$here/common.py" "$dir/data.npz" "$(( $(date +%s) - start ))" >> "$log" 2>&1
     date '+%F %T' > "$dir/DONE"
 else
     echo "exit $status $(date '+%F %T')" > "$dir/FAILED"
