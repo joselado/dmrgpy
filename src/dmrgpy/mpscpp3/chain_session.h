@@ -3376,6 +3376,45 @@ class Chain
                                      chis[p]*chis[p],x_num,x_den);
         }
 
+    // Schmidt weights at every bond of the tiled cell, bond k between cell
+    // positions k and k+1 (the last one wraps), each sorted in decreasing
+    // order and normalized to sum 1: the eigenvalues of conj(l) r, with l
+    // the left fixed point before position k+1 and r the right one after
+    // position k, the same pair ic_close_expectation contracts, so they
+    // are gauge invariant. Port of pyitensor/idmrg.py's cell_bond_weights,
+    // see its docstring: on n_uc=1 the cell has two sites, and a
+    // translation-invariant state gives the same spectrum on both bonds.
+    std::vector<std::vector<double>>
+    idmrg_cell_bond_weights() const
+        {
+        ic_require_cell("idmrg_cell_bond_weights");
+        ic_build_cache();
+        int n_cell = (int)idmrg_cell_.size();
+        std::vector<std::vector<double>> out;
+        for (int k=0;k<n_cell;++k)
+            {
+            auto const& l = ic_l_before_[(k+1)%n_cell];
+            auto const& r = ic_rho_after_[k];
+            int chi = ic_chis_[k+1];
+            std::vector<Cplx> M((size_t)chi*chi,Cplx(0,0));
+            for (int a=0;a<chi;++a)
+            for (int c=0;c<chi;++c)
+                {
+                Cplx lac = std::conj(l[(size_t)a*chi+c]);
+                for (int b=0;b<chi;++b) M[(size_t)a*chi+b] += lac*r[(size_t)c*chi+b];
+                }
+            std::vector<Cplx> evals, evecs;
+            ic_geev_all(M,chi,evals,evecs);
+            std::vector<double> w(chi);
+            double tot = 0;
+            for (int i=0;i<chi;++i) { w[i] = evals[i].real(); tot += w[i]; }
+            for (auto& x : w) x /= tot;
+            std::sort(w.begin(),w.end(),std::greater<double>());
+            out.push_back(std::move(w));
+            }
+        return out;
+        }
+
     // <opname_i(site p_i) opname_j(site p_i + r)> of a converged
     // idmrg_ground_state()'s infinite chain, r measured in physical sites
     // (r>=0) -- C++ port of pyitensor/idmrg.py's own two_point_correlator,

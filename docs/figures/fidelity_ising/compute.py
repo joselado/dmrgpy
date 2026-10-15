@@ -30,15 +30,17 @@ ns_env = os.environ.get("FIG_NS")
 params = common.start(dict(
     model="H = h0 + lambda h1, h0 = 4 sum SzSz, h1 = 2 sum Sx, open",
     ns=[int(a) for a in ns_env.split(",")] if ns_env else [12, 16, 24, 32],
-    lam=list(np.round(np.linspace(0.85, 1.4, int(os.environ.get("FIG_NL", 45))), 8)),
+    lam=list(np.round(np.linspace(0.8, 1.4, int(os.environ.get("FIG_NL", 49))), 8)),
     dl=0.02,
     fmode="derivative",
     tol=float(os.environ.get("FIG_TOL", 1e-4)),
     maxm=60,
     nsweeps=20,
-    note="lambda starts at 0.85: below it the Z2 doublet of the ordered "
-         "open chain splits by less than about 1e-4 at n=32, and the "
-         "derivative estimator then returns |det| over a two-state manifold",
+    note="lambda starts at 0.8: below about 0.75 the Z2 doublet of the "
+         "ordered open chain splits by less than tol=1e-4 at n=32, and the "
+         "derivative estimator then returns chi summed over both states of "
+         "the doublet; with a smaller tol DMRG lands on an arbitrary "
+         "superposition of the doublet and the overlaps are meaningless",
     itensor_version=3,
     seeds="none (ITensor v3 random initial MPS)",
 ))

@@ -433,6 +433,11 @@ class Infinite_Many_Body_Chain:
                                     # self._session3 instead, see below)
         self.e0 = None           # converged ground-state energy per site
         self.converged = None
+        self._cell_asymmetry = None  # gs_method="idmrg", n_uc=1 only:
+                                      # (L1 distance, S_0, S_1) between the
+                                      # Schmidt spectra of the two bonds of
+                                      # the extracted two-site cell, see
+                                      # _measure_cell_asymmetry
         self._excitation_env = None  # pyitensor.idmrg_excitations.
                                       # ExcitationEnvironment, lazily built by
                                       # excitation_energies/excitation_gap and
@@ -584,6 +589,7 @@ class Infinite_Many_Body_Chain:
         self._vumps_result = None
         self.e0 = None
         self.converged = None
+        self._cell_asymmetry = None
         self._excitation_env = None
         self._session3 = None
         self._session3_has_vumps = False
@@ -636,6 +642,7 @@ class Infinite_Many_Body_Chain:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.gs_energy called before set_hamiltonian")
         self._excitation_env = None  # about to rebuild self._result; see __init__'s own comment
+        self._cell_asymmetry = None
         if self.itensor_version == "python" and self.gs_method == "idmrg":
             from .pyitensor import idmrg
             self._result = idmrg.idmrg_ground_state(
@@ -709,8 +716,111 @@ class Infinite_Many_Body_Chain:
                 "Infinite_Many_Body_Chain.gs_energy: gs_method={!r} is not "
                 "implemented -- only \"idmrg\" and \"vumps\" are supported "
                 "for itensor_version=3".format(self.gs_method))
-        if not self.converged: self._warn_not_converged()
+        if self.gs_method == "idmrg" and self.n_uc == 1:
+            self._measure_cell_asymmetry()
+        if self._cell_is_dimerized():
+            self._warn_dimerized_cell("gs_energy")
+        elif not self.converged:
+            self._warn_not_converged()
         return self.e0
+
+    # Above this L1 distance between the sorted Schmidt spectra of the two
+    # bonds of the n_uc=1 iDMRG cell, the state is not translation
+    # invariant. Measured (2026-10-15, maxm=16 unless noted): S=1/2
+    # Heisenberg 0.84/0.78/0.73 at maxm=8/16/32 and the XX chain 0.39,
+    # both dimerized; critical TFIM 3.4e-7, TFIM at g=1.5 4.8e-9, AKLT
+    # 1.3e-7 and the S=1 Heisenberg chain 3.4e-4, all uniform. The
+    # distance lies in [0, 2] and has no scale of its own.
+    _CELL_ASYMMETRY_TOL = 1e-2
+
+    def _measure_cell_asymmetry(self):
+        """Compare the Schmidt spectra of the two bonds of the two-site
+        cell that `gs_method="idmrg"` extracts on n_uc=1 (both backends,
+        `pyitensor.idmrg.cell_bond_weights`/`Chain::idmrg_cell_bond_weights`).
+        A translation-invariant state has the same spectrum on both.
+
+        This is the check for what the 2026-10-15 audit found on the S=1/2
+        Heisenberg chain: the growing chain's own central bond alternates
+        between a strong and a weak bond from one micro-step to the next
+        (-0.4721 and -0.4140 for 3<Sz Sz> at maxm=16), so the iDMRG fixed
+        point at finite maxm is dimerized, the density alternates between
+        macro-iterations and never meets etol, and a one-site observable
+        reads only one of the two inequivalent bonds. The extraction itself
+        is exact: the cell reproduces the growing chain's two bonds, AKLT
+        and Majumdar-Ghosh give exact correlators, and on n_uc=2 the mean
+        bond energy of the cell equals the energy density to the
+        truncation error."""
+        self._cell_asymmetry = None
+        try:
+            if self.itensor_version == "python":
+                from .pyitensor import idmrg
+                if self._result is None or self._result.cell_list is None:
+                    return
+                weights = idmrg.cell_bond_weights(self._result)
+            else:
+                weights = [np.asarray(w) for w in
+                           self._session3.idmrg_cell_bond_weights()]
+        except RuntimeError:
+            return
+        if len(weights) != 2:
+            return
+        n = max(len(w) for w in weights)
+        a, b = (np.concatenate([w, np.zeros(n - len(w))]) for w in weights)
+
+        def entropy(w):
+            w = w[w > 1e-16]
+            return float(-np.sum(w * np.log(w)))
+        self._cell_asymmetry = (float(np.abs(a - b).sum()),
+                                entropy(a), entropy(b))
+
+    def _cell_is_dimerized(self):
+        return (self._cell_asymmetry is not None
+                and self._cell_asymmetry[0] > self._CELL_ASYMMETRY_TOL)
+
+    def _warn_dimerized_cell(self, caller):
+        """Warn that the n_uc=1 iDMRG state is not translation invariant,
+        so a one-site observable reads one of two inequivalent bonds."""
+        dist, s0, s1 = self._cell_asymmetry
+        msg = ("Infinite chain {}: gs_method=\"idmrg\" on n_uc=1 at "
+               "maxm={} ended on a state that is not translation "
+               "invariant: the two bonds of its two-site cell have "
+               "entanglement entropies {:.4f} and {:.4f} (Schmidt spectra "
+               "{:.2e} apart). This is a dimerized state, which iDMRG can "
+               "reach on a gapless chain at finite maxm; the dimerization "
+               "decreases as maxm grows.".format(
+                   caller, self.maxm, s0, s1, dist))
+        if caller == "gs_energy" and not self.converged:
+            msg += (" The energy density is the mean over the two bonds, "
+                    "but it alternates between macro-iterations, so "
+                    "converged=False.")
+        msg += (" vev and correlator on n_uc=1 read only the first bond of "
+                "the cell. Use n_uc=2 to see both bonds and their mean.")
+        warnings.warn(msg, RuntimeWarning, stacklevel=3)
+
+    def _warn_unconverged_vumps_state(self, caller):
+        """Warn that an observable is being read off a VUMPS state that
+        did not converge. A gauge mismatch of order one means AC, C, AL and
+        AR do not describe one uniform MPS, so the energy can look right
+        while correlators do not: on the S=1/2 Heisenberg chain at n_uc=1,
+        maxm=16 (2026-10-15 audit) both backends gave e0=-0.44284628 while
+        the nearest-neighbour bond read -0.391 on itensor_version=3 and
+        -0.467 on "python", with <Sz> nonzero. A warning rather than a
+        refusal, matching gs_energy, since a small mismatch is just a state
+        that needs more iterations."""
+        if self.gs_method != "vumps" or self.converged is not False:
+            return
+        mismatch = getattr(self, "_gauge_mismatch", None)
+        mm = (" (gauge mismatch {:.1e}, etol {:.0e})".format(
+            float(mismatch), self.etol) if mismatch is not None else "")
+        warnings.warn(
+            "Infinite chain {}: the VUMPS ground state did not converge{}, "
+            "so this observable is read off a state that is not a "
+            "consistent uniform MPS. A mismatch of order one can make "
+            "correlators wrong even when the energy looks right, unless "
+            "maxm is only larger than the state needs (a product state at "
+            "maxm>1); see the gs_energy warning for the causes (use n_uc=2 for a "
+            "dimerized or Neel state, or raise maxiter).".format(caller, mm),
+            RuntimeWarning, stacklevel=3)
 
     def _warn_not_converged(self):
         """Say, every time, that the energy just returned is not that of a
@@ -791,16 +901,20 @@ class Infinite_Many_Body_Chain:
         if self.itensor_version == "python" and self.gs_method == "idmrg":
             if self._result is None:
                 self.gs_energy()
+            if self._cell_is_dimerized():
+                self._warn_dimerized_cell("vev")
             from .pyitensor import idmrg
             return idmrg.onsite_expectation(self._result, opname, p)
         if self.itensor_version == "python" and self.gs_method == "vumps":
             if self._vumps_result is None:
                 self.gs_energy()
+            self._warn_unconverged_vumps_state("vev")
             from .pyitensor import vumps
             return vumps.onsite_expectation(self._vumps_result, opname, p)
         if self.itensor_version == 3 and self.gs_method == "vumps":
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
+            self._warn_unconverged_vumps_state("vev")
             # Which of the two snapshots the run left behind (grouped, or
             # the per-site one the sequential solver keeps) is the C++
             # side's own dispatch decision, so it picks the reader too --
@@ -811,6 +925,8 @@ class Infinite_Many_Body_Chain:
         if self.itensor_version == 3 and self.gs_method == "idmrg":
             if self._session3 is None or self._session3_has_vumps:
                 self.gs_energy()
+            if self._cell_is_dimerized():
+                self._warn_dimerized_cell("vev")
             return self._session3.idmrg_onsite_expectation(opname, p)
         raise NotImplementedError(
             "Infinite_Many_Body_Chain.vev: only itensor_version=\"python\" "
@@ -862,21 +978,27 @@ class Infinite_Many_Body_Chain:
         if self.itensor_version == "python" and self.gs_method == "idmrg":
             if self._result is None:
                 self.gs_energy()
+            if self._cell_is_dimerized():
+                self._warn_dimerized_cell("correlator")
             from .pyitensor import idmrg
             return idmrg.two_point_correlator(self._result, opname_i, p_i, opname_j, r)
         if self.itensor_version == "python" and self.gs_method == "vumps":
             if self._vumps_result is None:
                 self.gs_energy()
+            self._warn_unconverged_vumps_state("correlator")
             from .pyitensor import vumps
             return vumps.two_point_correlator(self._vumps_result, opname_i, p_i, opname_j, r)
         if self.itensor_version == 3 and self.gs_method == "vumps":
             if self._session3 is None or not self._session3_has_vumps:
                 self.gs_energy()
+            self._warn_unconverged_vumps_state("correlator")
             # See vev for why the snapshot, not n_uc, picks the reader.
             return self._session3.vumps_two_point_correlator(opname_i, p_i, opname_j, r)
         if self.itensor_version == 3 and self.gs_method == "idmrg":
             if self._session3 is None or self._session3_has_vumps:
                 self.gs_energy()
+            if self._cell_is_dimerized():
+                self._warn_dimerized_cell("correlator")
             return self._session3.idmrg_two_point_correlator(
                 opname_i, p_i, opname_j, r)
         raise NotImplementedError(
@@ -935,6 +1057,7 @@ class Infinite_Many_Body_Chain:
                 "excitation_energies/excitation_gap)")
         if self._vumps_result is None:
             self.gs_energy()
+        self._warn_unconverged_vumps_state("excitation_energies")
         if self._excitation_env is None:
             from .pyitensor import idmrg_excitations
             self._excitation_env = idmrg_excitations.build_excitation_environment(
@@ -994,6 +1117,7 @@ class Infinite_Many_Body_Chain:
                 "gs_energy()/excitation_energies()")
         if self._session3 is None or not self._session3_has_vumps:
             self.gs_energy()
+        self._warn_unconverged_vumps_state("excitation_energies")
         return np.array(self._session3.vumps_excitation_energies(k, n))
 
     def excitation_gap(self, ks=None):

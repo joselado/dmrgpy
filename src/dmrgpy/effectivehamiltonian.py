@@ -21,6 +21,19 @@ here rather than left to the caller:
 * **The eigenstates must be orthonormal.** ED's are to machine precision;
   DMRG's overlap-penalty excited states are not, so the basis is
   Lowdin-orthonormalized when it needs to be. See `orthonormalize`.
+
+The model space. Without `projector=`, the operators are fitted inside the
+span of the eigenstates themselves. That is an effective Hamiltonian only
+when the operators act in that same space. When they act in a smaller
+model space (the spin operators of a Hubbard chain act on the singly
+occupied states), pass its projector Q, and the fit is the des Cloizeaux
+effective Hamiltonian: the eigenstates are projected, Q|psi_n>, Lowdin
+orthonormalized into |n~>, and H_eff = sum_n E_n |n~><n~| is fitted with
+the operators represented on the |n~>. This H_eff has exactly the
+eigenvalues E_n, so it reproduces the low-energy spectrum. Without the
+projector, the Hubbard dimer fit gives J = (E_T-E_S)/(1/4+3w/4), with w
+the singly occupied weight of the singlet, 40% above the splitting at U=t;
+with it, J = E_T-E_S at every U. See `single_occupancy_projector`.
 """
 import numpy as np
 
@@ -33,6 +46,33 @@ DEGENERACY_TOL = 1e-6
 # Above this deviation from the identity, the eigenstate Gram matrix is
 # considered non-orthonormal and the basis is Lowdin-orthonormalized.
 ORTHONORMALITY_TOL = 1e-10
+
+
+def single_occupancy_projector(self):
+    """The projector on the states with exactly one electron on every
+    orbital, as a list of the commuting local projectors
+    Nup_i + Ndn_i - 2 Nup_i Ndn_i, one per orbital (their product is the
+    projector). This is the model space of the spin operators of a
+    Hubbard chain at half filling, to be passed as `projector=`."""
+    return [self.Nup[i] + self.Ndn[i] - 2*self.Nup[i]*self.Ndn[i]
+            for i in range(len(self.Nup))]
+
+
+def project_manifold(ws, projector):
+    """Project the orthonormal eigenstates `ws` onto the model space and
+    Lowdin-orthonormalize them (des Cloizeaux). `projector` is a
+    MultiOperator, or a list of commuting MultiOperators applied in turn.
+    The symmetric Lowdin step keeps |n~> tied to |psi_n>, so that
+    H_eff = sum_n E_n |n~><n~| is the matrix <psi_n|H|psi_m> in the |n~>
+    basis."""
+    if projector is None: return list(ws)
+    factors = list(projector) if isinstance(projector, (list, tuple)) \
+        else [projector]
+    out = []
+    for w in ws:
+        for q in factors: w = q*w
+        out.append(w)
+    return orthonormalize(out, what="model space")
 
 
 def get_manifold(self, n, mode="DMRG", degeneracy_tol=DEGENERACY_TOL):
@@ -77,7 +117,7 @@ def get_manifold(self, n, mode="DMRG", degeneracy_tol=DEGENERACY_TOL):
     return es[:n], orthonormalize(ws[:n])
 
 
-def orthonormalize(ws, tol=ORTHONORMALITY_TOL):
+def orthonormalize(ws, tol=ORTHONORMALITY_TOL, what=None):
     """Return an orthonormal basis spanning the same space as `ws`.
 
     `get_representation` assumes <psi_i|psi_j> = delta_ij. ED satisfies
@@ -99,11 +139,15 @@ def orthonormalize(ws, tol=ORTHONORMALITY_TOL):
     if np.max(np.abs(S-np.identity(ne))) < tol:
         return list(ws) # already orthonormal, nothing to do
     evals, evecs = np.linalg.eigh(S)
-    if np.min(evals) <= 0.0:
-        raise ValueError("effectivehamiltonian: the eigenstates are linearly "
-                         "dependent (Gram matrix has a non-positive "
-                         "eigenvalue %.3g) and cannot span a manifold"
-                         % np.min(evals))
+    if np.min(evals) <= 1e-10*max(np.max(evals), 0.0):
+        msg = ("effectivehamiltonian: the eigenstates are linearly "
+               "dependent (Gram matrix eigenvalues from %.3g to %.3g) and "
+               "cannot span a manifold" % (np.min(evals), np.max(evals)))
+        if what is not None:
+            msg += ("; after projection on the " + what + ", so either n "
+                    "exceeds the dimension of the model space or the "
+                    "projector annihilates some of the states")
+        raise ValueError(msg)
     sinvhalf = evecs@np.diag(1.0/np.sqrt(evals))@evecs.conj().T
     # built term by term starting from the first one, rather than with
     # sum(): the ED backend's State has no __radd__, so summing from the
@@ -117,21 +161,24 @@ def orthonormalize(ws, tol=ORTHONORMALITY_TOL):
 
 
 def get_effective_hamiltonian_coefficients(self, mode="DMRG", n=4,
-        tol=1e-4, operators=None):
+        tol=1e-4, operators=None, projector=None):
     """Fit the projected Hamiltonian with a caller-supplied list of
     operators, and return one coefficient per operator (in the same
     order), zero where the fit put no weight.
 
     `tol` is the magnitude below which a fitted coefficient is reported as
-    exactly zero.
+    exactly zero. `projector` is the model space (see the module
+    docstring); None fits inside the span of the eigenstates.
     """
     if operators is None:
         raise ValueError("get_effective_hamiltonian_coefficients requires an "
                          "explicit list of operators to fit the projected "
                          "Hamiltonian with (operators=...)")
     es, ws = get_manifold(self, n, mode=mode)
+    vs = project_manifold(ws, projector) # model-space basis |n~>
     ops = {i: operators[i] for i in range(len(operators))}
-    opm = {key: get_representation(ws, ops[key]) for key in ops}
+    opm = {key: get_representation(vs, ops[key]) for key in ops}
+    # H on the eigenstates themselves: sum_n E_n |n~><n~| in the |n~> basis
     h = get_representation(ws, self.hamiltonian)
     opm["Id"] = np.identity(len(es)) # the overall energy offset
     coef = fit_matrix(h, opm, cutoff=tol)
@@ -143,7 +190,7 @@ def get_effective_hamiltonian_coefficients(self, mode="DMRG", n=4,
 
 
 def get_effective_hamiltonian_couplings(self, mode="DMRG", n=4,
-        method="single", tol=1e-4, operators=None):
+        method="single", tol=1e-4, operators=None, projector=None):
     """Fit the projected Hamiltonian with the *pairwise products* of a set
     of single-site operators, and return a dict keyed by the pair.
 
@@ -167,12 +214,15 @@ def get_effective_hamiltonian_couplings(self, mode="DMRG", n=4,
     target is; the anti-Hermitian parts have to cancel among themselves.
 
     `tol` is the magnitude below which a fitted coefficient is dropped.
+    `projector` is the model space (see the module docstring); None fits
+    inside the span of the eigenstates.
     """
     es, ws = get_manifold(self, n, mode=mode)
+    vs = project_manifold(ws, projector) # model-space basis |n~>
     op = get_projection_operators(self) if operators is None else operators
     opm = dict()
     if method == "single":
-        for key in op: opm[key] = get_representation(ws, op[key])
+        for key in op: opm[key] = get_representation(vs, op[key])
     elif method != "full":
         raise ValueError("get_effective_hamiltonian_couplings: method must be "
                          "'single' or 'full', got "+repr(method))
@@ -182,7 +232,7 @@ def get_effective_hamiltonian_couplings(self, mode="DMRG", n=4,
             if method == "single":
                 m = opm[key1]@opm[key2]
             else:
-                m = get_representation(ws, op[key1]*op[key2])
+                m = get_representation(vs, op[key1]*op[key2])
             if acceptable_matrix(m, ops): # if the matrix can be accepted
                 ops[(key1, key2)] = m
     h = get_representation(ws, self.hamiltonian)

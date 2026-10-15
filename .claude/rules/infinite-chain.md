@@ -311,6 +311,28 @@ counterpart of `idmrg.py`'s own ARPACK branch. Net effect against
 (v3 runs ~1.5-2x slower, being ITensor-object-bound, see the benchmark note
 in `docs/documentation.md`), while the observables are 5-500x faster.
 
+## A dimerized iDMRG fixed point is not an extraction bug
+
+On the S=1/2 Heisenberg chain, iDMRG at finite `maxm` gives alternating
+bonds (n_uc=2, maxm=16: -0.4719 and -0.4143 for 3<SzSz>), and on n_uc=1
+`correlator("Sz",0,"Sz",1)` reads -0.4137 against e=-0.4431. The 2026-10-15
+audit checked the obvious suspect, a missing `lambda^-1` in `_theta_cell`/
+`idmrg_theta_cell`, and it is not there: the growing chain's own central
+bond, read straight off each micro-step's theta, alternates -0.4721/-0.4140
+step to step, the cell reproduces both values, AKLT (maxm=2) and
+Majumdar-Ghosh (two-site cell) tile exactly on both backends, and on n_uc=2
+the mean bond equals e to 4e-7 (truncation; unchanged from etol 1e-10 to
+1e-13, 1e-8 at maxm=48). The alternation shrinks with maxm. So it is the
+iDMRG fixed point, and on n_uc=1 the density itself alternates between
+macro-iterations, which is why `converged` stays False there. The response
+is a warning, not code: `infinitechain._measure_cell_asymmetry` compares
+the Schmidt spectra of the two bonds of the n_uc=1 cell
+(`idmrg.cell_bond_weights`/`Chain::idmrg_cell_bond_weights`, gauge
+invariant) and `gs_energy`/`vev`/`correlator` warn above an L1 distance of
+1e-2 (dimerized: 0.4 to 0.8; uniform: 1e-9 to 3e-4). Do NOT average the
+two cell positions for n_uc=1: that reports a bond no bond has.
+`tests/test_audit_2026_10_15_infinite.py`.
+
 ## The `"python"` iDMRG transfer chain
 
 `idmrg.py`'s transfer chain is `_TransferChain` (2026-09 audit, finding

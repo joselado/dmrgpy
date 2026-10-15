@@ -82,8 +82,10 @@ reason. VUMPS starts from a random state, so on a hard model
 call `gs_energy()` a few times and keep the lowest energy. A simple
 product state, such as the Neel state, gives an upper bound to compare
 with. For a gapless
-model the convergence of iDMRG is slow, so `converged` can be `False`
-while the energy is already accurate to several digits. Entanglement
+model on a one-site cell, iDMRG can end in a dimerized state (see
+[Static correlators](#static-correlators)). Then the energy per site
+alternates between iterations, so `converged` stays `False` while the
+energy is already accurate to several digits. Entanglement
 entropies are not available for infinite chains.
 
 ![Energy and spin correlator of the infinite Heisenberg chain](img/infinite-chains_energy.png#only-light)
@@ -95,8 +97,8 @@ $e_\infty=1/4-\ln 2$, as a function of `maxm`. The chain is gapless, so
 the error falls as a power of `maxm`, from $3\times10^{-4}$ at `maxm=8`
 to $1.6\times10^{-6}$ at `maxm=64`. On the one-site cell it stops there.
 A two-site cell gives $5\times10^{-7}$ at `maxm=96` (square). Here
-`converged` stays `False` up to `maxm=64`, while the energy is already
-accurate. The right panel is described in
+`converged` stays `False` up to `maxm=64`, because the one-site state is
+dimerized, while the energy is already accurate. The right panel is described in
 [Static correlators](#static-correlators).
 
 ## Static correlators
@@ -112,10 +114,20 @@ They work with both solvers and both backends. A pair with an odd number
 of fermion operators raises an error. A good check of `maxm` needs no
 reference value: the sum of the bond correlators of one unit cell must be
 equal to `n_uc` times the energy per site.
-With iDMRG on a gapless chain the state can have a period of two sites,
-also when `n_uc=1`. Then the bonds alternate in strength, and
-`ic.correlator("Sz", 0, "Sz", 1)` gives only one of them. Use a two-site
-cell and average over its two sites.
+
+With iDMRG at finite `maxm`, a gapless chain can end in a dimerized
+state: the bonds alternate in strength. This comes from the finite
+`maxm`, and the alternation becomes smaller when `maxm` grows. A one-site
+cell cannot hold this state. The energy per site then alternates between
+iterations, so `converged` stays `False`, and
+`ic.correlator("Sz", 0, "Sz", 1)` gives only one of the two bonds. In
+this case `gs_energy`, `vev` and `correlator` give a `RuntimeWarning`
+with the entanglement entropies of the two bonds. On a two-site cell both
+bonds are measured, and their mean is the energy per site.
+
+When VUMPS did not converge, `vev`, `correlator` and the excitations also
+give a `RuntimeWarning`. Such a state is not a consistent uniform MPS, and
+its correlators can be wrong by 10 per cent while its energy is accurate.
 
 The right panel of the figure in [Two solvers](#two-solvers) shows
 $|\langle S^z_0S^z_r\rangle|$ of the Heisenberg chain on a two-site

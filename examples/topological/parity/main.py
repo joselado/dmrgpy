@@ -10,7 +10,7 @@ from dmrgpy import fermionchain
 ##################
 
 
-def get_den_par(mu=0.,U=0.5,Bz=1.0,delta=0.5):
+def get_den_par(mu=0.,U=0.5,Bz=2.0,delta=0.2):
     """Return parity and number of electrons"""
     L = 4 # number of fermionic sites
     fc = fermionchain.Spinful_Fermionic_Chain(L) # create the chain
@@ -18,15 +18,16 @@ def get_den_par(mu=0.,U=0.5,Bz=1.0,delta=0.5):
     for i in range(L-1): # hopping
         h = h + fc.Cdagup[i]*fc.Cup[i+1]
         h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-    for i in range(L): # hopping
+    for i in range(L): # s-wave superconductivity
+        h = h + delta*fc.Cup[i]*fc.Cdn[i]
+    h = h + h.get_dagger() # Hermitian conjugate of hopping and pairing
+    # the Hermitian terms below are added once, after the conjugate
+    for i in range(L): # chemical potential
         h = h + mu*fc.Cdagup[i]*fc.Cup[i]
         h = h + mu*fc.Cdagdn[i]*fc.Cdn[i]
-    for i in range(L): # s-wave superconductivity
-        h = h + mu*fc.Cup[i]*fc.Cdn[i]
     for i in range(L-1): # Hubbard
         h = h + U*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
     h = h + Bz*fc.Sz[0] # add magnetic impurity
-    h = h + h.get_dagger()
     fc.set_hamiltonian(h)
     wf = fc.get_gs(mode="DMRG") # compute ground state
     p = wf.get_fermionic_parity() # parity of the state

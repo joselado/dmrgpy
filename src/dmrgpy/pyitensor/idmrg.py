@@ -2712,6 +2712,31 @@ def onsite_expectation(result, opname, p):
         _apply_site_transfer(A, None, env.rho_after[p]))
 
 
+def cell_bond_weights(result):
+    """Schmidt weights at every bond of the tiled cell, bond k sitting
+    between cell positions k and k+1 (the last one wraps), each sorted in
+    decreasing order and normalized to sum 1.
+
+    The weights are the eigenvalues of `conj(l) r`, with `l` the left fixed
+    point before position k+1 and `r` the right one after position k, the
+    same pair `_close_expectation` contracts, so they are gauge invariant:
+    the canonicalization of the cell does not enter. What this is for: on
+    n_uc=1 the cell has two sites, and a translation-invariant state gives
+    the same spectrum on both of its bonds. iDMRG on a gapless chain at
+    finite maxm can converge to a state where they differ (the S=1/2
+    Heisenberg chain dimerizes, 2026-10-15 audit), and then a one-site
+    observable reads only one of the two inequivalent bonds.
+    `Chain::idmrg_cell_bond_weights` is the itensor_version=3 port."""
+    env = _correlator_env(result)
+    out = []
+    for k in range(env.n_cell):
+        l = env.l_before[(k + 1) % env.n_cell]
+        r = env.rho_after[k]
+        w = np.sort(np.real(np.linalg.eigvals(np.conj(l) @ r)))[::-1]
+        out.append(w / w.sum())
+    return out
+
+
 def two_point_correlator(result, opname_i, p_i, opname_j, r):
     """<opname_i(site p_i) opname_j(site p_i + r)> of the converged
     infinite chain, r measured in physical sites (r=0: both operators at

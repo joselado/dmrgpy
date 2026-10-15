@@ -240,6 +240,13 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "idmrg_ground_state()'s infinite chain -- requires "
                "idmrg_ground_state to have been called first on this same "
                "Chain. See Chain::idmrg_onsite_expectation's own comment.")
+        .def("idmrg_cell_bond_weights",[](Chain& self) {
+                return self.idmrg_cell_bond_weights();
+            },
+               "Schmidt weights at every bond of a converged "
+               "idmrg_ground_state()'s tiled cell, bond k between cell "
+               "positions k and k+1, sorted and normalized. See "
+               "Chain::idmrg_cell_bond_weights's own comment.")
         .def("idmrg_two_point_correlator",[](Chain& self, std::string const& opname_i,
                                               int p_i, std::string const& opname_j, int r) {
                 return self.idmrg_two_point_correlator(opname_i,p_i,opname_j,r);

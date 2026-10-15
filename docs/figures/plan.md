@@ -278,16 +278,21 @@ get no figure of their own: the profiles appear in figures 5 and 13.
 1. File `excited-states_heff.png`, page `excited-states.md`, in
    "Effective low-energy Hamiltonians".
 2. The exchange of the Hubbard dimer: `get_heff` fits $J$ in the four
-   lowest states, and the exact singlet-triplet splitting of the dimer is
-   $J=\tfrac12\big(\sqrt{U^2+16t^2}-U\big)$, which tends to $4t^2/U$ at
-   strong coupling. Both references are on the figure.
-3. `Spinful_Fermionic_Chain(2)`, $t=1$, $U$ in `np.linspace(1, 12, 23)`,
-   `mode="ED"`, `get_heff(operators=[SxSx, SySy, SzSz], n=4, mode="ED")`,
-   the fitted $J$ is the common coefficient.
-4. One panel, $J$ against $U$ on a log $y$ scale: the fitted $J$ (blue
-   points), the exact dimer formula (dashed ink) and $4t^2/U$ (dotted
-   ink). The reader sees the points on the exact curve and the $4t^2/U$
-   line joining it above $U\approx6$.
+   lowest states, with and without the singly occupied projector. With it
+   the fit is the des Cloizeaux effective Hamiltonian and $J$ is the exact
+   singlet-triplet splitting $E_T-E_S=\tfrac12\big(\sqrt{U^2+16t^2}-U\big)$,
+   which tends to $4t^2/U$ at strong coupling. Without it the fit is
+   $(E_T-E_S)/(1/4+3w/4)$, too large at small $U$.
+3. `Spinful_Fermionic_Chain(2)`, $t=1$, $U$ in `np.geomspace(1, 20, 25)`,
+   $20(N-2)^2$ added to pin half filling, `mode="ED"`,
+   `get_heff(operators=[SxSx, SySy, SzSz], n=4, mode="ED", projector=Q)`
+   with `Q = single_occupancy_projector(fc)`, and the same call without
+   `projector`; the fitted $J$ is the common coefficient.
+4. One panel, $J$ against $U$ on log axes: the fit with the projector
+   (filled points), the fit without it (open squares), $E_T-E_S$ (dashed
+   ink) and $4t^2/U$ (dash-dotted ink). The reader sees the filled points
+   on the exact curve at every $U$, and the open squares above it at
+   small $U$.
 5. Under 1 minute.
 
 "Gap to another particle number" and "Generalized eigenvalue problem"

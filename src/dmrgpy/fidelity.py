@@ -6,7 +6,13 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
       fmode="derivative",**kwargs):
     """Given two Hamiltonians H0 and H1, compute the fidelity as a function
     of lambda.
-    -fmode: mode of the calculation"""
+    -fmode: "derivative" (default) takes the second difference in lambda
+     of the ground-state overlap, with step dl. When the ground state is
+     degenerate within delta (searched among n states) it takes the second
+     difference of |det U| of the overlap matrix of the manifold, which is
+     the sum of chi over the degenerate states. "PT" sums the
+     perturbative formula over the n lowest states, with delta as the
+     broadening of the denominator."""
     MBO = MBO.copy() # copy the object
     if fmode=="PT": # perturbation theory mode
         H = H0 + l*H1 # full Hamiltonian
@@ -35,40 +41,45 @@ def get_fidelity(MBO,H0,H1,l=1.0,delta=1e-4,
         MBO.set_hamiltonian(Hm) # set the Hamiltonian
         (e,wfsm) = MBO.get_excited_states(n=ngs,purify=False,
                                       **kwargs) # get GS manifold
-        # make orthogonal just in case
-        if True: # several waves
-            from .algebra.arnolditk import gram_smith
-            wfs = gram_smith(wfs) # orthogonalize
-            wfsp = gram_smith(wfsp) # orthogonalize
-            wfsm = gram_smith(wfsm) # orthogonalize
-            from .algebra.algebra import smooth_gauge
-            def Uij(ws1,ws2):
-                m = np.zeros((ngs,ngs),dtype=np.complex128) # empty matrix
-                for i in range(ngs):
-                  for j in range(ngs):
-                      m[i,j] = ws1[i].dot(ws2[j]) # scalar product
-                return m # return matrix
-#            return -2*np.log(np.abs(algebra.det(Uij(wfsm,wfsp))))/dl**2
-            wfsp = smooth_gauge(wfs,wfsp) # smooth gauge
-            wfsm = smooth_gauge(wfs,wfsm) # smooth gauge
-            Um = Uij(wfs,wfsm) # below
-            Up = Uij(wfs,wfsp) # above
-            U = Uij(wfs,wfs) # above
-            Ud = ((Up-U)-(U-Um))/dl**2 # difference
-            chi = np.abs(algebra.det(Ud))
-            return chi
-        else: # just one wave
-            w = wfs[0]
-            wp = wfsp[0]
-            wm = wfsm[0]
-            # factor the phase just in case
-            wp = wp*np.exp(1j*np.angle(wp.dot(w)))
-            wm = wm*np.exp(1j*np.angle(wm.dot(w)))
-            dw2 = (wp - w) - (w - wm) # difference
-            chi = np.abs(w.dot(dw2))/(dl**2)
-            return chi
+        if ngs==1: return _chi_single(wfs[0],wfsp[0],wfsm[0],dl)
+        return _chi_manifold(wfs,wfsp,wfsm,dl)
+    else: raise ValueError("Unknown fmode "+str(fmode))
 
 
+def _chi_single(w,wp,wm,dl):
+    """Fidelity susceptibility of a single ground state w, from the ground
+    states wp and wm at lambda+dl and lambda-dl: the second difference of
+    the overlap, |<w|wp> + <w|wm> - 2|/dl^2, with the phases of wp and wm
+    fixed so that both overlaps are real and positive."""
+    w,wp,wm = [x.copy().normalize() for x in (w,wp,wm)]
+    wp = wp*np.exp(1j*np.angle(wp.dot(w)))
+    wm = wm*np.exp(1j*np.angle(wm.dot(w)))
+    dw2 = (wp - w) - (w - wm) # difference
+    return np.abs(w.dot(dw2))/(dl**2)
 
 
-
+def _chi_manifold(wfs,wfsp,wfsm,dl):
+    """Fidelity susceptibility of a ground-state manifold of g states, the
+    matrix generalization of _chi_single: the second difference of |det U|,
+    with U_ij = <w_i|w'_j> the overlap matrix of the two manifolds,
+    |(|det U+| + |det U-| - 2|det U0|)|/dl^2. For g=1 it is exactly
+    _chi_single. For g>1 it is the trace of the quantum metric of the
+    manifold, sum_{a in GS, m not in GS} |<m|H1|a>|^2/(E_m-E_0)^2, so it
+    is a sum over the g states and not an average. The determinant of the
+    second difference of the matrix, used before 2026-10-15, scaled as
+    chi^g instead."""
+    from .algebra.arnolditk import gram_smith
+    wfs = gram_smith(wfs) # orthogonalize
+    wfsp = gram_smith(wfsp) # orthogonalize
+    wfsm = gram_smith(wfsm) # orthogonalize
+    ngs = len(wfs)
+    def Uij(ws1,ws2):
+        m = np.zeros((ngs,ngs),dtype=np.complex128) # empty matrix
+        for i in range(ngs):
+          for j in range(ngs):
+              m[i,j] = ws1[i].dot(ws2[j]) # scalar product
+        return m # return matrix
+    dp = np.abs(algebra.det(Uij(wfs,wfsp)))
+    dm = np.abs(algebra.det(Uij(wfs,wfsm)))
+    d0 = np.abs(algebra.det(Uij(wfs,wfs)))
+    return np.abs(dp + dm - 2*d0)/dl**2

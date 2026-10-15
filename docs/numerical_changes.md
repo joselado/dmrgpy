@@ -987,3 +987,93 @@ Its ground state is dimerized, so no uniform state of one site is a fixed
 point. On `"python"` VUMPS at `maxm=4` it gave +0.006, -0.001, +0.154 and
 -0.050 in four runs, and -0.380 at `maxm=30`, all unconverged. On a
 two-site cell it converges to -0.3801177 at `maxm=4`.
+
+### The 2026-10-15 effective Hamiltonian
+
+- **`get_heff` and the two fits in `effectivehamiltonian.py` take a
+  `projector=`, the model space of the effective Hamiltonian.** With it,
+  the $n$ lowest eigenstates are projected on the model space and Löwdin
+  orthonormalized, and the fit is $H_\mathrm{eff}=\sum_nE_n|\tilde n\rangle\langle\tilde n|$
+  (des Cloizeaux), which has exactly the eigenvalues $E_n$.
+  `effectivehamiltonian.single_occupancy_projector(fc)` is the singly
+  occupied space, where the spin operators of a Hubbard chain act. Without
+  `projector=` the call is unchanged and returns the same numbers as
+  before: the operators are fitted inside the span of the eigenstates.
+- **The exchange of the Hubbard dimer changes when the projector is
+  passed**, which the user guide and its figure now do. Without it the
+  singlet carries doubly occupied weight, where $\mathbf S_0\cdot\mathbf S_1=0$,
+  and the fit gives $J=(E_T-E_S)/(1/4+3w/4)$, with $w$ the singly occupied
+  weight of the singlet. With it, $J=E_T-E_S$, on ED and on DMRG:
+
+| $U/t$ | without projector | with projector | $E_T-E_S$ |
+|---|---|---|---|
+| 1 | 2.18109 | 1.56155 | 1.56155 |
+| 4 | 0.93064 | 0.82843 | 0.82843 |
+| 20 | 0.19949 | 0.19804 | 0.19804 |
+
+- The check for linearly dependent states in `orthonormalize` is now
+  relative to the largest eigenvalue of the Gram matrix (1e-10), not a
+  test for a non-positive one. A manifold larger than the model space
+  raises a `ValueError` that names the model space.
+
+### The 2026-10-15 infinite chains
+
+No returned number moves. Two kinds of state now give a `RuntimeWarning`
+when an observable is read off them
+(`tests/test_audit_2026_10_15_infinite.py`).
+
+- **iDMRG on a one-site cell can end in a dimerized state.** On the
+  spin-1/2 Heisenberg chain the central bond of the growing chain
+  alternates between a strong and a weak bond from one step to the next
+  ($3\langle S^z_0S^z_1\rangle=-0.4721$ and $-0.4140$ at `maxm=16`), so the
+  fixed point of iDMRG at finite `maxm` has a period of two sites. The
+  extraction of the cell is exact: the cell reproduces both bonds of the
+  growing chain, AKLT at `maxm=2` and Majumdar-Ghosh on a two-site cell
+  give exact correlators on both backends, and on `n_uc=2` the mean of the
+  two bonds is the energy per site to $4\times10^{-7}$ at `maxm=16`, the
+  truncation error (unchanged from `etol=1e-10` to `1e-13`). On `n_uc=1`,
+  `correlator("Sz",0,"Sz",1)` reads only the first bond of the cell
+  ($3\langle S^z_0S^z_1\rangle=-0.4137$ against $e=-0.4431$ at `maxm=16`),
+  and the energy per site alternates between macro-iterations, so
+  `converged` stays `False`. `gs_energy`, `vev` and `correlator` now warn
+  when the Schmidt spectra of the two bonds of the cell differ, with
+  their entanglement entropies (0.909 and 0.968 at `maxm=16`). The
+  alternation of the two-site cell decreases with `maxm`: bonds $-0.4970$
+  and $-0.3887$ at `maxm=8`, $-0.4719$ and $-0.4143$ at 16, $-0.4607$ and
+  $-0.4256$ at 32. VUMPS on the same two-site cell at `maxm=16` finds a
+  lower energy ($-0.44311147$ against $-0.44308908$), with nearly equal
+  bonds and Neel order instead.
+- **An unconverged VUMPS state gives wrong correlators while its energy
+  looks right.** On the Heisenberg chain on one site at `maxm=16` both
+  backends give $e=-0.44284628$, while the sum of the bond correlators is
+  $-0.391$ on `itensor_version=3` and $-0.467$ and $-0.434$ in two runs
+  on `"python"`, with $\langle S^z\rangle\neq0$ and a gauge mismatch of
+  1.5. VUMPS does not converge on this one-site cell; the reason was not
+  investigated. `vev`, `correlator` and `excitation_energies`
+  now warn when `converged` is `False`, with the gauge mismatch.
+
+### The 2026-10-15 fidelity susceptibility
+
+- **`get_fidelity(fmode="derivative")` on a ground state that is
+  degenerate within `delta` changed.** It returned $|\det U_d|$, with $U_d$
+  the second difference of the overlap matrix of the manifold, which scales
+  as $\chi^g$ for $g$ states. It now returns the second difference of
+  $|\det U|$, the same form as for a single state, which is the sum of
+  $\chi$ over the $g$ states:
+  $\sum_{a\in\mathrm{GS}}\sum_{m\notin\mathrm{GS}}|\langle m|H_1|a\rangle|^2/(E_m-E_0)^2$.
+  With a single ground state nothing changes. Open Ising chain,
+  $h_0=4\sum S^zS^z$, $h_1=2\sum S^x$, `dl=0.02`, $\chi/n$:
+
+| case | before | now |
+|---|---|---|
+| ED, $n=12$, $\lambda=0.6$, `delta=1e-4` (one state) | 0.19304 | 0.19304 |
+| ED, $n=12$, $\lambda=0.6$, `delta=1e-2` (doublet, split 2.8e-3) | 0.3454 | 0.3421 (= 0.1930 + 0.1490, even plus odd) |
+| ED, $n=8$, $\lambda=0$, exact doublet, total $\chi$ | 0.7657 | 1.74996 (exact 1.75) |
+| DMRG v3, $n=24$, $\lambda=0.6$, default `delta` | 0.4357 | 0.2694 |
+
+- The two states of the doublet do not have the same $\chi$ on an open
+  chain, so the new value is not twice the value of one state. A call with
+  `delta` below the splitting, on DMRG, still gives a meaningless number
+  (55 at $n=24$, $\lambda=0.6$, `delta=1e-12`): DMRG lands on an arbitrary
+  superposition of the two states, and that path did not change.
+- An unknown `fmode` raises `ValueError`; it returned `None`.

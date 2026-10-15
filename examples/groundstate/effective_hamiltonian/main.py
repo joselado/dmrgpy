@@ -27,8 +27,11 @@ phi0 = 0.1
 fc = build_chain(phi0)
 
 # print the effective Hamiltonian in latex form
+# the spin operators act on the singly occupied states only, so the
+# eigenstates are projected onto that model space before the fit
+Q = effectivehamiltonian.single_occupancy_projector(fc)
 l = effectivehamiltonian.get_effective_hamiltonian(fc,method="single",
-        mode="ED")
+        mode="ED",projector=Q)
 print("Effective Hamiltonian in latex form")
 print(l) # write the Hamiltonian in latex
 
@@ -48,8 +51,10 @@ J = 4.0 * 1.0**2 / 40.0
 phis = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
 xx, xy, zz = [], [], []
 for phi in phis:
+    fcp = build_chain(phi)
     coef = effectivehamiltonian.get_effective_hamiltonian_couplings(
-            build_chain(phi), method="single", mode="ED")
+            fcp, method="single", mode="ED",
+            projector=effectivehamiltonian.single_occupancy_projector(fcp))
     # get() rather than [] : a coupling that is exactly zero at some phi
     # (e.g. the XY rotation at phi=0) falls below the fit's cutoff and is
     # simply absent from the returned dict

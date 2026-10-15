@@ -156,39 +156,57 @@ correlators) uses this state. So call it last, or call `fc.restart()` and
 
 ## Effective low-energy Hamiltonians
 
-Take the $n$ lowest eigenstates and
-the projector $P=\sum_{k<n}|\psi_k\rangle\langle\psi_k|$ on them. We write
-the projected Hamiltonian as a combination of projected operators $O_a$,
+An effective Hamiltonian acts in a small model space and has the same
+low-energy spectrum as $H$. For a Hubbard chain at strong coupling the
+model space is the states with one electron per site, and the effective
+model is a spin model. We take the $n$ lowest eigenstates
+$|\psi_k\rangle$, project them on the model space with its projector $Q$,
+and orthonormalize them (Löwdin), which gives $|\tilde k\rangle$. The
+effective Hamiltonian is
 
-$$PHP\simeq\sum_aJ_a\,PO_aP,$$
+$$H_\mathrm{eff}=\sum_{k<n}E_k|\tilde k\rangle\langle\tilde k|
+\simeq\sum_aJ_a\,O_a,$$
 
-and fit the couplings $J_a$ by least squares. This gives, for example, the
-spin exchange of a Hubbard model at strong coupling,
-$J\approx4t^2/U$:
+and the couplings $J_a$ of the operators $O_a$ are fitted by least
+squares, with the $O_a$ represented on the $|\tilde k\rangle$. This is the
+des Cloizeaux effective Hamiltonian. It has the eigenvalues $E_k$, so on a
+Hubbard dimer the fitted exchange is the singlet-triplet splitting
+$E_T-E_S$, which tends to $4t^2/U$ at strong coupling:
 
 ```python
 # fc: a Spinful_Fermionic_Chain(2) Hubbard dimer
-J = fc.get_heff(operators=[fc.Sx[0]*fc.Sx[1], fc.Sy[0]*fc.Sy[1],
-                           fc.Sz[0]*fc.Sz[1]], n=4)    # one J per operator
-
 from dmrgpy import effectivehamiltonian
-coef = effectivehamiltonian.get_effective_hamiltonian_couplings(fc, n=4)
-latex = effectivehamiltonian.get_effective_hamiltonian(fc, n=4)
+Q = effectivehamiltonian.single_occupancy_projector(fc)
+J = fc.get_heff(operators=[fc.Sx[0]*fc.Sx[1], fc.Sy[0]*fc.Sy[1],
+                           fc.Sz[0]*fc.Sz[1]], n=4, projector=Q)
+
+coef = effectivehamiltonian.get_effective_hamiltonian_couplings(fc, n=4,
+                                                               projector=Q)
+latex = effectivehamiltonian.get_effective_hamiltonian(fc, n=4, projector=Q)
 ```
 
-`get_heff` fits the operators given. `get_effective_hamiltonian_couplings`
+`get_heff` fits the operators given and returns one $J$ per operator.
+`get_effective_hamiltonian_couplings`
 fits all products $S^\alpha_iS^\beta_j$ of the chain spin operators and
 returns a dictionary, and `get_effective_hamiltonian` returns the same fit
 as a LaTeX string. The keywords are:
 
-- `n`: the number of states in the manifold. It must not cut a degenerate
-  multiplet, otherwise the fit is not meaningful and it raises an error.
+- `n`: the number of states. It must not cut a degenerate multiplet, and
+  it must not be larger than the dimension of the model space. Otherwise
+  it raises an error.
+- `projector`: the projector on the model space, as an operator or a list
+  of commuting operators. `single_occupancy_projector(fc)` gives the states
+  with one electron per site. Without it, the model space is the span of
+  the $n$ eigenstates themselves. This is right for a spin chain, but for
+  a Hubbard chain the spin operators then miss the doubly occupied weight,
+  and $J$ is too large at small $U$.
 - `operators`: the operators of the fit. They must be linearly independent
-  in the manifold, otherwise the couplings are not unique and it raises an
-  error.
+  in the model space, otherwise the couplings are not unique and it raises
+  an error.
 - `tol`: couplings smaller than this are set to zero.
-- `method`: `"single"` (default) fits $PO_aP\,PO_bP$, and `"full"` fits
-  $P\,O_aO_b\,P$. They differ when the manifold is not closed under $O_a$.
+- `method`: `"single"` (default) fits $QO_aQ\,QO_bQ$, and `"full"` fits
+  $Q\,O_aO_b\,Q$. They differ when the model space is not closed under
+  $O_a$.
 - `mode="ED"`: exact eigenstates, for small systems.
 
 See `examples/groundstate/effective_hamiltonian`, which fits the twisted
@@ -200,8 +218,9 @@ exchange of a Hubbard dimer with a Peierls phase.
 The figure shows the exchange $J$ that `get_heff` fits on a Hubbard dimer
 (`n=4`, `mode="ED"`, with $20(N-2)^2$ added to $H$ to keep the four
 states at half filling). The three couplings come out equal, as for an
-isotropic exchange. At large $U$ the fitted $J$ joins the singlet-triplet
-splitting $E_T-E_S$ and $4t^2/U$. At small $U$ it is larger, because the
-singlet has doubly occupied weight and the projected spin operators are
-shorter than spin 1/2; the fit is then exactly
-$(E_T-E_S)/(1/4+3w/4)$ (dashed), with $w$ the singly occupied weight.
+isotropic exchange. With the projector, $J$ is the splitting $E_T-E_S$
+(dashed) at every $U$, and it joins $4t^2/U$ at large $U$. Without the
+projector, $J$ is too large at small $U$: the singlet has doubly occupied
+weight, where $\mathbf S_0\cdot\mathbf S_1=0$, and the fit gives
+$(E_T-E_S)/(1/4+3w/4)$, with $w$ the singly occupied weight. This is 40%
+above the splitting at $U=t$.

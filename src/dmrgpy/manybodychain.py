@@ -817,7 +817,16 @@ class Many_Body_Chain():
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
   def get_heff(self,**kwargs):
-      """Return effective Hamiltonian"""
+      """Return the couplings of an effective Hamiltonian, one per operator
+      in `operators=`, fitted in the `n` lowest eigenstates.
+
+      With `projector=` (for instance
+      effectivehamiltonian.single_occupancy_projector(self) for the spin
+      operators of a Hubbard chain) the eigenstates are projected on that
+      model space and Lowdin orthonormalized (des Cloizeaux), and the fit
+      reproduces the low-energy spectrum. Without it, the operators are
+      fitted inside the span of the eigenstates; see
+      effectivehamiltonian.py's module docstring."""
       return effectivehamiltonian.get_effective_hamiltonian_coefficients(self,
               **kwargs)
   def bandwidth(self,h,**kwargs):
