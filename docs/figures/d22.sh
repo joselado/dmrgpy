@@ -14,15 +14,21 @@
 # slot locks, so a push cannot overwrite a remote result. Results only
 # flow back with pull. Several `run` jobs queue on the three slots of
 # run.sh, so it is safe to start more than three at once.
+#
+# The remote machine is set by three environment variables, D22_HOST
+# (user@host for ssh), D22_DIR (the remote checkout) and D22_PYTHON (the
+# remote python). They can also be put in docs/figures/d22.local.sh,
+# which is not tracked by git and is sourced when it exists.
 set -eu
-HOST="${D22_HOST:-ladovj1@D22-0161.org.aalto.fi}"
-RDIR="${D22_DIR:-/l/ladovj1/dmrgpy-guide}"
-RPY="${D22_PYTHON:-/l/ladovj1/venv/bin/python}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$here/d22.local.sh" ] && . "$here/d22.local.sh"
+HOST="${D22_HOST:?set D22_HOST (user@host), see the header of d22.sh}"
+RDIR="${D22_DIR:?set D22_DIR (remote checkout), see the header of d22.sh}"
+RPY="${D22_PYTHON:?set D22_PYTHON (remote python), see the header of d22.sh}"
 # one SMT sibling of three P-cores (0, 1, 4); CPUs 4-7 (P-cores 2, 3) are
 # taken by another project's jobs on D22, which do not share our locks
 RCPUS="${D22_CPUS:-0 2 8}"
 SSH=(ssh -o BatchMode=yes)
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 NOSEND=(--exclude='*.so' --exclude='*.a' --exclude='*.o'
         --exclude='mpscpp*/ITensor/lib/' --exclude='__pycache__/')
@@ -79,6 +85,6 @@ plot)
     for id in "$@"; do (cd "$here/$id" && python3 plot.py); done
     ;;
 *)
-    sed -n '2,16p' "$0"; exit 2
+    sed -n '2,21p' "$0"; exit 2
     ;;
 esac

@@ -19,7 +19,10 @@ The plan of all figures, with the conventions, is `plan.md`.
   this checkout, at most three jobs per machine (each pinned to its own
   P-core), and a memory cap of 8 GB. It writes `<id>/compute.log`, and
   `<id>/DONE` or `<id>/FAILED` at the end.
-- `d22.sh`: runs the jobs on the workstation D22 from here.
+- `d22.sh`: runs the jobs on the workstation D22 from here. It needs
+  `D22_HOST` (user@host), `D22_DIR` (the remote checkout) and `D22_PYTHON`
+  (the remote python), set in the environment or in an untracked
+  `d22.local.sh` next to it.
 - `ground-state_convergence/`: figure 1, the template for a new figure.
 
 ## Recompute and replot here
