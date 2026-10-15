@@ -49,13 +49,11 @@ the class whose physics they need:
 
 - `Spin_Chain`: `SS(i, j)`, `get_magnetization()`, `get_kondo_spectrum()`
   ([STM and Kondo spectra](kondo.md)), `get_full_SS_correlator()`.
-- The fermionic chains: `set_hoppings()`, `set_hubbard()`,
-  `get_density()`, `get_density_fluctuation()`, `get_charge_gap()`, the
-  correlation matrix and its entropies ([Entanglement](entanglement.md)),
+- The fermionic chains: `get_density()`, `get_density_fluctuation()`,
+  `get_charge_gap()`, the correlation matrix and its entropies ([Entanglement](entanglement.md)),
   and `get_fermionic_parity()` on their states ([Topological invariants](topology.md)).
-- The spinful fermionic chains: `set_hoppings_spinful()`,
-  `get_magnetization()`, `get_onsite_pairing()`, `get_spectral_function()`
-  with `spin=`.
+- The spinful fermionic chains: `get_magnetization()`,
+  `get_onsite_pairing()`, `get_spectral_function()` with `spin=`.
 - `Bosonic_Chain`: `get_density()`, `get_density_fluctuation()`.
 
 Every constructor takes `itensor_version=` and the chain settings as

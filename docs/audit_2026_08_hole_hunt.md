@@ -309,7 +309,7 @@ missing input validation is the bug.  INTENDED-BEHAVIOUR DEFENSE, considered
 and rejected. The strongest candidate is tdz.py:153's parenthetical "the way an
 unrecognized/inapplicable tevol_method otherwise would" -- it proves the author
 knew the mechanism exists, but "inapplicable" is the documented v2/MPO case,
-and nothing in CLAUDE.md, ROADMAP.md, docs/user_guide.md, docs/documentation.md
+and nothing in CLAUDE.md, ROADMAP.md, docs/user_guide.md, docs/development.md
 or the source documents typo -> MPO as a designed alias. The project states the
 opposite principle four times, one of them locked in by a test:
 mpsjulialive/timedependent.py::_check_tevol_method's docstring ("Raised rather
@@ -792,7 +792,7 @@ likely not cure. The claimed locus explains explicit/full only.  Not intended,
 not a documented gap, not misuse: docs/user_guide.md promises a non-conserving
 operator "raises a ValueError naming it", set_conserved_sector's docstring
 promises v3 and "python" give "the same answers",
-CLAUDE.md/docs/documentation.md state the sector code exists precisely because
+CLAUDE.md/docs/development.md state the sector code exists precisely because
 ITensor's Error() aborts uncatchably and that "every terms -> MPO path routes
 through mpo_from_terms/ampo_from_terms so the check covers vev/correlators/KPM
 vertices too", and ROADMAP §2 marks all three four-point ctmodes ✅ on v3.
@@ -874,7 +874,7 @@ cutoff, noise, and the MPO bond dimension the Hamiltonian is built with) is
 part of the key: the session's energy cache survives a skipped re-send, so a
 user bumping any of these between bare gs_energy() calls must get a fresh
 solve, not the cached energy computed under the old params."
-docs/documentation.md:2024-2037 repeats it. The send-cache key really does
+docs/development.md:2024-2037 repeats it. The send-cache key really does
 include maxm/nsweeps and the Hamiltonian really is re-sent -- but
 gs_energy_single() sets self.skip_dmrg_gs = True at groundstate.py:117 at the
 end of every call, and line 112 then passes skip_dmrg=True into
@@ -951,7 +951,7 @@ leaving computed_gs=True changes nothing (five identical values).  NOT
 INTENDED, by the codebase's own words. groundstate.py's send-cache comment ("a
 user bumping any of these between bare gs_energy() calls must get a fresh
 solve, not the cached energy computed under the old params"),
-docs/documentation.md 4.4, and tests/test_bond_dimension_ramp.py's own
+docs/development.md 4.4, and tests/test_bond_dimension_ramp.py's own
 docstring ("without them, flipping bond_ramp between two bare gs_energy() calls
 would hand back the previous schedule's cached energy, silently, forever") all
 state the exact contract that is violated. That test has to set
@@ -1068,7 +1068,7 @@ dependence is involved. Import path verified to resolve to this checkout's
 src/.  Not intended: I searched CLAUDE.md (including its explicit list of
 deliberately-reproduced legacy bugs -- evoloperator's z^3/6, the
 "moise"/"tevol_fit_td" key typos -- none of which is this), ROADMAP.md in full,
-docs/documentation.md, docs/user_guide.md, and every pyitensor module
+docs/development.md, docs/user_guide.md, and every pyitensor module
 docstring. Nothing documents a site-index validation gap or any deliberate
 leniency. The opposite: autompo.py's own docstring declares itself a
 transcription of mpscpp3/ITensor's autompo.cc, whose real counterpart range-
@@ -1152,7 +1152,7 @@ These came out of the same five lenses but exceeded the first run's reviewer bud
 - **Severity**: high  **Class**: silent-wrong
 - **Code**: `/u/40/ladovj1/data/Documents/programs/dmrgpy/src/dmrgpy/mpscpp3/chain_session.h:1364 (evolve_and_measure_tdvp) and :1431 (evolve_and_measure_tdvp_gse)`
 - **Status**: FIXED -- both v3 methods capture the input norm and restore it after each normalizing tdvp_step, as quench_tdvp/quench_tebd always did.
-- **Affects**: Only the compiled itensor_version=3 backend, and only via Chain::evolve_and_measure_tdvp (chain_session.h ~1364) and Chain::evolve_and_measure_tdvp_gse (~1431). Public API hit: timedependent.evolve_and_measure(mode="DMRG", wf=<non-unit-norm MPS>) and timedependent.evolution_ABA(mode="DMRG", A=<non-unitary operator>), with tevol_method in ("TDVP","TDVP_GSE") -- TDVP is the default and itensor_version=3 is the default -- plus tevol_method="AUTO" whenever TEBD rejects a non-nearest-neighbour H and AUTO falls back to TDVP. return_wf=True hands back a wrongly-normalized final MPS from the same calls. NOT affected: mode="ED", itensor_version=2, v3 with tevol_method="TEBD" or "MPO", itensor_version="python" (its _tdvp_step_fn does not normalize), every quench_*/dynamical-correlator path on all backends (they all do psi.normalize(); psi *= norm0), and julia_live (the identical defect is recorded as already fixed there, docs/documentation.md:3265 -- not re-run here per instructions). The wf=None default path (unit-norm wf0) is numerically unaffected.
+- **Affects**: Only the compiled itensor_version=3 backend, and only via Chain::evolve_and_measure_tdvp (chain_session.h ~1364) and Chain::evolve_and_measure_tdvp_gse (~1431). Public API hit: timedependent.evolve_and_measure(mode="DMRG", wf=<non-unit-norm MPS>) and timedependent.evolution_ABA(mode="DMRG", A=<non-unitary operator>), with tevol_method in ("TDVP","TDVP_GSE") -- TDVP is the default and itensor_version=3 is the default -- plus tevol_method="AUTO" whenever TEBD rejects a non-nearest-neighbour H and AUTO falls back to TDVP. return_wf=True hands back a wrongly-normalized final MPS from the same calls. NOT affected: mode="ED", itensor_version=2, v3 with tevol_method="TEBD" or "MPO", itensor_version="python" (its _tdvp_step_fn does not normalize), every quench_*/dynamical-correlator path on all backends (they all do psi.normalize(); psi *= norm0), and julia_live (the identical defect is recorded as already fixed there, docs/development.md:3265 -- not re-run here per instructions). The wf=None default path (unit-norm wf0) is numerically unaffected.
 
 **Expected**
 
@@ -1218,12 +1218,12 @@ true norm, which is why C(0) is right and the trajectory is discontinuous after
 one step.  Not intended, by the repo's own documentation. ROADMAP.md:109 says
 julia's METTS "needs no manual norm-restoration workaround (unlike the C++
 port), since this backend's tdvp_step already passes normalize=false" -- i.e.
-the C++ port is known to require the restoration. docs/documentation.md:3265
+the C++ port is known to require the restoration. docs/development.md:3265
 records the identical defect being found and fixed in mpsjulialive/tdvp.jl's
 evolve_and_measure_tdvp, described verbatim as "silently rescaling every result
 by 1/||wf||^2 whenever the input wasn't already unit-norm (e.g.
 evolution_ABA()'s wfA = A*wf, for any non-unitary A)", fixed by the norm0
-pattern. docs/documentation.md:3871 records the same tdvp_step trap producing
+pattern. docs/development.md:3871 records the same tdvp_step trap producing
 "exactly a factor of 2 too large" results in dmrgtwotime.py. ROADMAP.md:81-82
 mark v3 TDVP and TDVP_GSE real-time evolution as implemented, not restricted,
 and this is not one of CLAUDE.md's deliberately reproduced legacy bugs
@@ -1500,14 +1500,14 @@ entanglement entropies do work -- the correlation-matrix family is neither
 excluded nor promised; the documented "every operator built on the chain must
 conserve" rule is about operators the caller supplies, and here the caller
 supplies none. dmmode is documented nowhere in docs/user_guide.{md,tex} (only
-in docs/documentation.md's internal notes and one example script), so the
+in docs/development.md's internal notes and one example script), so the
 workaround is not discoverable from the user-facing docs, and the error message
 does not name it. Two existing precedents show the project's own convention is
 to auto-select an available mode in exactly this situation:
 _four_correlation_tensor_default_ctmode() picks the best available ctmode per
 backend, and mpsjulialive/mps.py:64,69,109 hardcodes dmmode="explicit" because
 julia_live's OpSum cannot build a parity-odd bare-C MPO either (documented at
-docs/documentation.md:3138). Blast radius is limited by the fact that it fails
+docs/development.md:3138). Blast radius is limited by the fact that it fails
 loudly and a one-kwarg workaround exists; no wrong numbers are ever returned.
 One caveat for any fix: basis="Nambu" genuinely contains non-conserving <C_i
 C_j> entries and must keep raising in a sector. Incidental and out of scope: on
@@ -2227,7 +2227,7 @@ prime(T,s,ir) then primes only the site index -- exactly the right thing at the
 right edge. pyitensor's mpscontainer deliberately drops the trivial boundary
 Link and stores a plain Python list, so A(N+1) is an out-of-range list access.
 I tried hard to read this as intended and it does not hold up. chain.py:634-638
-and docs/documentation.md:3247-3252 both assert the missing bounds check is "a
+and docs/development.md:3247-3252 both assert the missing bounds check is "a
 pre-existing, deliberately-preserved limitation shared identically by
 pyitensor/chain.py and mpscpp3/chain_session.h ... not a new risk, so left as-
 is". That premise is measurably false for reduced_dm: the C++ backends do not
@@ -2255,7 +2255,7 @@ number, trivially worked around. Note it is already listed unfixed as item 16
 in the committed docs/audit_2026_08_hole_hunt.md index, so this is a re-
 discovery, not a new regression.
 
-**Where a fix goes**: In pyitensor/chain.py::Chain.reduced_dm, make the right bond optional at the edge: ir = commonIndex(psi.A(site), psi.A(site+1)) if site < psi.length() else None, and prime only the site index when ir is None -- mpscontainer._link_at already encodes exactly this boundary rule and could be reused. The same one-line guard belongs in mpsjulialive/densitymatrix.jl's reduced_dm, and the stale "the original never defended against this either" comment plus the matching paragraph in docs/documentation.md should be corrected.
+**Where a fix goes**: In pyitensor/chain.py::Chain.reduced_dm, make the right bond optional at the edge: ir = commonIndex(psi.A(site), psi.A(site+1)) if site < psi.length() else None, and prime only the site index when ir is None -- mpscontainer._link_at already encodes exactly this boundary rule and could be reused. The same one-line guard belongs in mpsjulialive/densitymatrix.jl's reduced_dm, and the stale "the original never defended against this either" comment plus the matching paragraph in docs/development.md should be corrected.
 
 **Repro**
 
@@ -2366,7 +2366,7 @@ pyitensor, and `maxent` as ✅ for v3, pyitensor **and** Julia ("backend-agnosti
 post-processing over `power_vev` moments"). `README.md:165` advertises both
 submodes. `docs/user_guide.md` §6 documents `submode="maxent"` and §15
 documents the Padé continuation behind `CVMimag`, neither with any caveat. Only
-`docs/documentation.md:2798-2806` admits the maxent gap ("wired up for parity
+`docs/development.md:2798-2806` admits the maxent gap ("wired up for parity
 but not actually functional on *any* backend right now ... a pre-existing,
 cross-backend gap"); `CVMimag`'s deadness is documented nowhere, and even that
 passage does not defend `exit()`. - Not API misuse: my call is the documented

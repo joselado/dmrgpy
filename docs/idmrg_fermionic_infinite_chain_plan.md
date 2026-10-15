@@ -5,7 +5,7 @@ backends, and an extra Krylov pass beyond the plan removed the `O(chi^6)` dense 
 point/environment solves on the `"python"` side, and cross-site fermionic correlators were
 threaded afterwards too). The outcome and the before/after numbers are in the commit
 messages on `idmrg-fermionic-infinite`; the user-facing result is in
-`docs/user_guide.md`'s iDMRG section and `docs/documentation.md`'s backend-dispatch
+`docs/user_guide.md`'s iDMRG section and `docs/development.md`'s backend-dispatch
 section. Kept only as a record of the investigation -- the bug report it was written
 against has been removed now that it is fixed.
 
@@ -208,7 +208,7 @@ tens of minutes.
   wrong; the confirmed diagnosis is in §A/§B above and its reproduction case survives as
   `tests/test_infinite_chain.py::test_interacting_spinful_cell_backends_agree`).
 - Update `docs/user_guide.{md,tex}` (fermionic infinite chains are now supported; state the
-  ≤2-distinct-sites and even-parity contracts) and `docs/documentation.{md,tex}` (the v3
+  ≤2-distinct-sites and even-parity contracts) and `docs/development.md` (the v3
   infinite path consumes raw, non-JW terms and threads JW itself, unlike every finite v3
   call site). Keep `.md`/`.tex` in sync; re-check `pdflatex`.
 

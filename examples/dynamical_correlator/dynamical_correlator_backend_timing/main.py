@@ -8,7 +8,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # spectral functions themselves so the timings can be read next to the
 # result they buy.
 #
-# This is the script behind docs/documentation.md's section 4.8a ("Cost of
+# This is the script behind docs/development.md's section 4.8a ("Cost of
 # the dynamical-correlator submodes, and what makes them fast"), whose
 # reference point is L=30; it sweeps a range of smaller sizes so it stays
 # runnable by hand in a couple of minutes.

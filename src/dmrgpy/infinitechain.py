@@ -378,7 +378,7 @@ class Infinite_Many_Body_Chain:
                                    # 4 is the default everywhere (here,
                                    # pyitensor.vumps.ground_state and
                                    # pyitensor.vumps_ms.ground_state) and
-                                   # always has been; documentation.md's
+                                   # always has been; development.md's
                                    # residual-criterion timing table was
                                    # measured at an explicitly-set 6, not
                                    # at this default.

@@ -493,7 +493,7 @@ Two practical notes:
   DMRG's own below-crossover device tax entirely. Every row above did
   exactly that.
 * this kernel is deliberately *not* jitted; see
-  `docs/documentation.md`'s section on `pyitensor/fourpoint.py` for why the
+  `docs/development.md`'s section on `pyitensor/fourpoint.py` for why the
   batch axis and `jax.jit` are mutually exclusive here.
 
 ## Consumer GPUs: measured on a GTX 1060 laptop
@@ -817,7 +817,7 @@ on any device, twice over:
   are immutable. Now `bk.setblock`, which is the same in-place write on
   NumPy.
 
-Both are the traps `docs/documentation.md`'s GPU section lists; neither
+Both are the traps `docs/development.md`'s GPU section lists; neither
 changes a NumPy result (216 host iDMRG/infinite-chain tests pass
 unchanged). `tests/test_pyitensor_gpu_compatibility.py` pins the fix --
 it fails with the original `NotImplementedError` without it -- and pins

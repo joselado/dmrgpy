@@ -297,7 +297,7 @@ class Spin_Chain(Many_Body_Chain):
             # defaults are physical values, a misspelled one (Jrho= for
             # Jrho_s=, u= for U=, t= for T=) returned a plausible spectrum
             # at the default instead, e.g. exactly the order=2 curve for
-            # the Jrho typo (documentation.md 4.10's "**kwargs with no
+            # the Jrho typo (development.md 4.10's "**kwargs with no
             # consumer"). No allow-list for the mode="DMRG" keywords
             # either: delta=/submode=/es= would then be inert here, the
             # same hole one level down.
@@ -384,7 +384,7 @@ class Spin_Chain(Many_Body_Chain):
         # "exactly degenerate" from "split below what the sweep resolved",
         # hence the caller-supplied n_gs.
         if submode not in _N_GS_SUBMODES:
-            # an allow-list, not a deny-list (documentation.md 4.10): a
+            # an allow-list, not a deny-list (development.md 4.10): a
             # submode is averaged only if it is known to measure from the
             # chain's own state. SECTOR measures from its own per-sector
             # solve on a clone and returned the n_gs=1 value for every

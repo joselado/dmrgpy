@@ -499,7 +499,7 @@ def test_correlator_starts_at_t0_on_every_backend():
     `correlator[k]` is the value at `t = k*dt` and lines up with the
     `ts = [0, dt, ...]` grid returned alongside it (see
     timedependent.py's evolution_dmrg_DC docstring, and
-    docs/documentation.md 4.8a-bis).
+    docs/development.md 4.8a-bis).
 
     Regression test for a real bug: the loops used to evolve first and
     measure after, making `correlator[k]` the value at `(k+1)*dt` while

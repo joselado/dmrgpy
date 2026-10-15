@@ -409,7 +409,7 @@ def test_ed_correlator_matches_a_textbook_lehmann_sum():
 
 def test_realify_spin_terms_matches_verbatim_ampo():
     """The Sy -> (S+ - S-)/(2i) rewrite every mpscpp3 AutoMPO build goes
-    through (mo_terms.h's build_ampo(), see docs/documentation.md 4.8a) is a
+    through (mo_terms.h's build_ampo(), see docs/development.md 4.8a) is a
     pure representation change: it exists so a real Hamiltonian written the
     textbook dmrgpy way -- Sx.Sx + Sy.Sy + Sz.Sz -- yields a *real*-valued
     MPO instead of a complex one (ITensor picks the MPO's element type from

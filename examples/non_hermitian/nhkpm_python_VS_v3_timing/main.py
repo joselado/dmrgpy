@@ -8,7 +8,7 @@
 # Chain.nhkpm_moments, mpscpp3/chain_session.h's Chain::nhkpm_moments),
 # now exercised on the pure-Python backend as well, and timed against v3
 # to gauge the cost of running NH-KPM with zero compiler/pybind11
-# dependency (see docs/documentation.md's "Backend performance" section
+# dependency (see docs/development.md's "Backend performance" section
 # for the general itensor_version=3-vs-"python" comparison; NH-KPM's own
 # repeated-per-frequency moment recursion makes this comparison
 # particularly relevant, since it is far more matvec-heavy per correlator

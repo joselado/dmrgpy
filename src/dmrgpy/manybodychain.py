@@ -83,13 +83,6 @@ class Many_Body_Chain():
 #      self.path = id_generator() # random ID in dmrgpy_tmp
       self.ns = len(sites) # number of sites
       self.mode = None # no mode (use the input parameter)
-      # the pieces update_hamiltonian() sums, set by set_hoppings(),
-      # set_hubbard() and set_pairings_MB() (exchange has had no setter
-      # since set_exchange() was removed); state, not settings (sites.STATE)
-      self.exchange = 0 # zero
-      self.pairing = 0
-      self.hubbard = 0
-      self.hopping = 0
       # fields, resorder, resordered_indexes, hubbard_matrix and fit_td
       # used to be set here too; nothing read any of them, and a
       # constructor keyword naming one was accepted and stored where
@@ -962,12 +955,6 @@ class Many_Body_Chain():
       h = multioperator.msum(fun(i,j)*A[i]*B[j]
               for i in range(len(A)) for j in range(len(B)))
       return 0.5*(h + h.get_dagger()) # Hermitian
-  def update_hamiltonian(self):
-      """Rebuild the Hamiltonian from the stored hopping/hubbard/pairing/
-      exchange terms"""
-      h = self.hopping + self.hubbard + self.pairing
-      h = h + self.exchange
-      self.set_hamiltonian(h)
   def get_dagger(self,m):
       """Return the Hermitian conjugate of an operator"""
       return m.get_dagger() # dummy method
@@ -1028,21 +1015,6 @@ class Many_Body_Chain():
   def inverse_trace(self,A,**kwargs):
       """Compute the trace of the inverse of an operator"""
       return mpsalgebra.inverse_trace(self,A,**kwargs)
-  def set_pairings_MB(self,fun):
-      """Generic pairing term"""
-      h = self.generate_bilinear(fun,self.C,self.C)
-      self.pairing = h
-      self.update_hamiltonian()
-  def set_hubbard_MB(self,fun):
-      """Hubbard term"""
-      h = self.generate_bilinear(fun,self.N,self.N)
-      self.hubbard = h # store
-      self.update_hamiltonian()
-  def set_hoppings_MB(self,fun):
-      """Hubbard term"""
-      h = self.generate_bilinear(fun,self.Cdag,self.C)
-      self.hopping = h # store
-      self.update_hamiltonian()
   def run(self,**kwargs):
       """Run the calculation, dispatching through mode.py"""
       from .mode import run
@@ -1274,7 +1246,7 @@ class Many_Body_Chain():
       is). This is the total, extensive; gs_energy(maxde=...) compares
       this number divided by the number of sites with maxde."""
       # Forward the kwargs. They used to be accepted and dropped on the
-      # floor -- documentation.md 4.10's "**kwargs with no consumer" --
+      # floor -- development.md 4.10's "**kwargs with no consumer" --
       # so gs_energy_fluctuation(mode="ED") returned the DMRG number
       # byte-for-byte while sc.mode="ED" on the same chain returned a
       # different one, i.e. the documented way to cross-check a

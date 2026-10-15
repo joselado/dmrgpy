@@ -23,7 +23,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # the remaining gap (~5.7x) is the dense-tensor-vs-QN-block-sparse gap
 # real ITensor v3 still has here (unlike ground-state DMRG, TDVP evolves a
 # 2-site tensor through many real-time steps, so mpscpp3's ConserveQNs off
-# + random-MPS-start tradeoff -- see documentation.md -- costs it less
+# + random-MPS-start tradeoff -- see development.md -- costs it less
 # than it does for reaching a converged ground state from scratch).
 import time
 import matplotlib.pyplot as plt

@@ -6,7 +6,7 @@ original symptom, the reproduction that was executed and the reviewer's
 analysis. They share a shape: a dispatch decision taken without the
 information that should inform it -- a `**kwargs` nobody consumes, a
 module reading `self.mode` instead of asking `mode.py`, a type test that
-went stale, an `else` doing two jobs -- see documentation.md 4.10.
+went stale, an `else` doing two jobs -- see development.md 4.10.
 
 Chains are deliberately tiny: ED is exact at this size and is the
 reference wherever one is needed.

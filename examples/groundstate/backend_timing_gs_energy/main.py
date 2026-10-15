@@ -25,7 +25,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # dimension ground-state DMRG tells a different story entirely: pyitensor
 # is at parity with, or faster than, v3 (e.g. n=24/maxdim=300: v3 ~107s vs
 # python ~25-31s) because mpscpp3 in this repo runs with ConserveQNs=false
-# and a random-MPS start (see CLAUDE.md/documentation.md), sacrificing the
+# and a random-MPS start (see CLAUDE.md/development.md), sacrificing the
 # QN block-sparsity that would otherwise help it at scale.
 import time
 import matplotlib.pyplot as plt

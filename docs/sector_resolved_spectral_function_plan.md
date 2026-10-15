@@ -8,7 +8,7 @@ Plan, 2026-08-31. Revised after an independent review (Sections 3, 4, 7,
 `src/dmrgpy/multioperatortk/charge.py`,
 `tests/test_sector_spectral_function.py`, three examples under
 `examples/dynamical_correlator/sector_*`, documented in
-`docs/user_guide.{md,tex}` and `docs/documentation.{md,tex}`). Phase 4
+`docs/user_guide.{md,tex}` and `docs/development.md`). Phase 4
 (Krylov enrichment of the target-sector basis) is not implemented and is
 not needed for any use case so far: where the sum is truncated, the
 `captured` diagnostic says so and `nex` fixes it. Two Phase-1 items were
@@ -429,9 +429,9 @@ captured-weight diagnostic rising toward 1.
 
 New subsection in `docs/user_guide.{md,tex}` under the dynamical
 correlator section (the physics, the sum rule, the return convention,
-when to prefer this over KPM), and in `docs/documentation.{md,tex}` for
+when to prefer this over KPM), and in `docs/development.md` for
 the dispatch and the promote/clear pipeline (this adds a dispatch
-branch, and `documentation.md` 4.10 is explicitly about getting those
+branch, and `development.md` 4.10 is explicitly about getting those
 right). `.tex` recompiled with `pdflatex`.
 
 ## 12. Phases

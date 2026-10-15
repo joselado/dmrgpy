@@ -663,7 +663,7 @@ instead would bake the finite-chain string convention (string from site 0) into
 (`to_terms(jordan_wigner_transform=False)`). With the narrow fix the "exact"
 statements about the rewrite stay true; what needs correcting is the comment at
 lines 72 to 75 and the docstring's list of what the module refuses, mirrored in
-`CLAUDE.md` and `documentation.md` section 4.2a. Regression: `P.is_hermitian()`
+`CLAUDE.md` and `development.md` section 4.2a. Regression: `P.is_hermitian()`
 False, `X.is_zero()` False, `<simplify(Cdag3 Adag0)>` equal to `<Cdag3 Adag0>`,
 `is_dagger_pair` False on the TD pair, the boson hopping still proven. Numbers
 change only for operators that mix the two representations, from wrong to
@@ -1800,7 +1800,7 @@ kpm_n_scale=2.5  python: TypeError: 'float' object cannot be interpreted as an i
 ```
 
 **Suggested fix**: validate the attribute once, before dispatch, where it is
-read off the chain (the documentation.md section 4.10 shape): one shared helper
+read off the chain (the development.md section 4.10 shape): one shared helper
 rejecting anything that is not a positive integer (`numbers.Integral`, not
 `bool`, >0), called from `kpmdmrg.dynamical_correlator_moments` ahead of both
 session calls, from the ED push at `manybodychain.py:972` and from the
@@ -1814,11 +1814,11 @@ Numbers do not change for any integer caller.
 
 `docs` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `kpm-calibration`
 
-**Status**: FIXED -- in the documentation, as the finding asked, with no code change: `algebra/kpm.py::polynomials_for_broadening`'s docstring, `dynamics.py`'s module docstring, the user guide's KPM entry (both formats), `documentation.{md,tex}`'s "delta is one broadening" paragraph, `CLAUDE.md`'s O2 paragraph and a pointer sentence in the O2 Status paragraph of `audit_2026_09_hole_hunt.md` now say where the calibrated width holds: E0 at x0 = -1/(2*kpm_scale) on every chain, the band centre at E0 + W/2, a ground-state correlator's width tending to 0.70 of the requested one (0.157 at E0 on the anchored window), the measured 12- and 20-site numbers, and the compensation delta/sqrt(1-x(omega)^2) with x(omega) = x0 + omega/(kpm_scale*W); the 1.6x peak-ratio sentence is now about 1.5x (1.514, the kernel's own ratio at equal FWHM), with the 0.315/0.195 = 1.61 read as including the off-centre narrowing of its dominant pole at x=-0.527. No numbers change.
+**Status**: FIXED -- in the documentation, as the finding asked, with no code change: `algebra/kpm.py::polynomials_for_broadening`'s docstring, `dynamics.py`'s module docstring, the user guide's KPM entry (both formats), `development.md`'s "delta is one broadening" paragraph, `CLAUDE.md`'s O2 paragraph and a pointer sentence in the O2 Status paragraph of `audit_2026_09_hole_hunt.md` now say where the calibrated width holds: E0 at x0 = -1/(2*kpm_scale) on every chain, the band centre at E0 + W/2, a ground-state correlator's width tending to 0.70 of the requested one (0.157 at E0 on the anchored window), the measured 12- and 20-site numbers, and the compensation delta/sqrt(1-x(omega)^2) with x(omega) = x0 + omega/(kpm_scale*W); the 1.6x peak-ratio sentence is now about 1.5x (1.514, the kernel's own ratio at equal FWHM), with the 0.315/0.195 = 1.61 read as including the off-centre narrowing of its dominant pole at x=-0.527. No numbers change.
 
 **Where**: `algebra/kpm.py::polynomials_for_broadening`'s docstring,
 `dynamics.py`'s module docstring, `docs/user_guide.{md,tex}`'s KPM section,
-`docs/documentation.{md,tex}`, `CLAUDE.md`'s O2 paragraph and the O2 Status
+`docs/development.md`, `CLAUDE.md`'s O2 paragraph and the O2 Status
 paragraph of `audit_2026_09_hole_hunt.md`. No code defect.
 
 The O2 calibration makes the Jackson line FWHM = 2*delta at x=0 of the Chebyshev
@@ -2919,7 +2919,7 @@ The rewrite moved name resolution into `lehmann_density_from_one_sided`, so on
 the public route `get_dynamical_correlator(mode="DMRG", submode="TDZ", ...)`
 `alpha` for `alpha0`, `nmax` for `n_max`, or `foo` are accepted and ignored,
 while `submode="TD"` still raises (its keywords reach `evolution_dmrg_DC`'s
-`str2MO`). `docs/documentation.md` section 4.10 states the policy this breaks:
+`str2MO`). `docs/development.md` section 4.10 states the policy this breaks:
 "Solver parameters are chain attributes, never call arguments, so anything
 unrecognized now raises `TypeError`". What is lost is exactly what the typo was
 meant to change: on the hunter's chain a real `n_max=0` gives 3.58e-02 against
@@ -3330,7 +3330,7 @@ legitimate spectrum: `Jrho_s` defaults to 0.0 and the third-order term is
 proportional to it, so the typo returns exactly the `order=2` curve; at finite
 field it returns a Zeeman step, nothing that looks empty. On `mode="DMRG"` the
 same typos raise, only because the dynamical correlator downstream is strict.
-This is `documentation.md` section 4.10's "`**kwargs` with no consumer". It came
+This is `development.md` section 4.10's "`**kwargs` with no consumer". It came
 in with the feature (`2d47de9`) and survived `b75003d`, which edited the same
 docstring and branch; no test passes an unknown keyword to `get_kondo_spectrum`.
 
@@ -4173,7 +4173,7 @@ taken whenever dim = D*D*(d_g-1) > `_DENSE_EIG_MAX` = 256, which on an
 `n_uc=2` spin-1/2 cell means `maxm>=10`; consumers `spectral_weights` and
 `dynamical_structure_factor` at n>=2. The statements it contradicts:
 `ROADMAP.md:386` to `391`, `docs/user_guide.md:3329`, `docs/user_guide.tex:4160`
-to `4161`, `docs/documentation.md:1394`, `docs/documentation.tex:1858`,
+to `4161`, `docs/development.md:1394`, `docs/documentation.tex:1858`,
 `docs/idmrg_improvement_plan.md:100` to `101`, and the `vx_deterministic_start`
 comment at `mpscpp3/chain_session.h:8742` to `8756`.
 

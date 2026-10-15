@@ -87,7 +87,7 @@ line shape). A finding that lies outside `867e2b4` but was reached by probing ne
 to it is reported with its origin named, since a hole the suite passes through is
 worth the record whatever commit brought it in; the at-a-glance table carries that
 origin as a column. One entry, finding 14, widens a failure that an example
-comment, `docs/documentation.md` and `ROADMAP.md` record as an isolated,
+comment, `docs/development.md` and `ROADMAP.md` record as an isolated,
 intermittent edge case; it is in scope because none of the three says how wide it
 is, and it is marked as such.
 
@@ -7077,7 +7077,7 @@ there too, by a mechanism that is not the MPO builder (in "New leads").
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `realtime`
 
-**Status**: FIXED, with a rebuild of the v3 extension. `Chain::global_subspace_expand` truncates after `addBasis` only when `maxLinkDim(phi) > maxm_`, and then with `Cutoff=-1`, ITensor's own "no cutoff"; the vendored header is untouched. The mechanism the reviewer suspected is confirmed by reading `decomp.cc::truncate()`, whose `while(truncerr+P(n) <= cutoff*scale && n >= mindim)` discards every exactly-zero weight at `Cutoff=0`. The false comment is rewritten, and the example comment, `docs/documentation.md` and `ROADMAP.md` now say the product-state case is fixed. Pinned by `tests/test_audit_2026_09_24c_realtime.py::test_v3_tdvp_gse_moves_a_site_pinned_at_the_left_edge` (C_0, 1-N_0, N_0, S+_0, S-_0, 1/2+Sz_0, against the dense propagator to 1e-5) and `::test_v3_tdvp_gse_td_spectrum_at_the_default_sites` (the public (Cdag_0,C_0) TD spectrum against v3's own two-site TDVP to 1e-3 of the peak); these were not run against the replaced extension. NUMBERS CHANGE only for v3 `TDVP_GSE` from a site-0-pinned or product-state start: the reviewer's zoo rerun on the new build gives C_0 1.08e-07 (was 4.74e-01), N_0 3.56e-07 (was 1.82e-02), 1-N_0 3.71e-07, S+_0 9.4e-12 and S-_0 3.6e-12, with the site-0 entropy equal to the exact one in every row, and a Neel start under the Heisenberg chain is within 3.3e-07 of exact in 8 of 8 trials, where the example comment recorded up to 5 of 8 failing at 0.02 to 0.04.
+**Status**: FIXED, with a rebuild of the v3 extension. `Chain::global_subspace_expand` truncates after `addBasis` only when `maxLinkDim(phi) > maxm_`, and then with `Cutoff=-1`, ITensor's own "no cutoff"; the vendored header is untouched. The mechanism the reviewer suspected is confirmed by reading `decomp.cc::truncate()`, whose `while(truncerr+P(n) <= cutoff*scale && n >= mindim)` discards every exactly-zero weight at `Cutoff=0`. The false comment is rewritten, and the example comment, `docs/development.md` and `ROADMAP.md` now say the product-state case is fixed. Pinned by `tests/test_audit_2026_09_24c_realtime.py::test_v3_tdvp_gse_moves_a_site_pinned_at_the_left_edge` (C_0, 1-N_0, N_0, S+_0, S-_0, 1/2+Sz_0, against the dense propagator to 1e-5) and `::test_v3_tdvp_gse_td_spectrum_at_the_default_sites` (the public (Cdag_0,C_0) TD spectrum against v3's own two-site TDVP to 1e-3 of the peak); these were not run against the replaced extension. NUMBERS CHANGE only for v3 `TDVP_GSE` from a site-0-pinned or product-state start: the reviewer's zoo rerun on the new build gives C_0 1.08e-07 (was 4.74e-01), N_0 3.56e-07 (was 1.82e-02), 1-N_0 3.71e-07, S+_0 9.4e-12 and S-_0 3.6e-12, with the site-0 entropy equal to the exact one in every row, and a Neel start under the Heisenberg chain is within 3.3e-07 of exact in 8 of 8 trials, where the example comment recorded up to 5 of 8 failing at 0.02 to 0.04.
 
 **Where**: `src/dmrgpy/mpscpp3/chain_session.h:1942` (`Chain::
 global_subspace_expand`), `:1497` (`quench_tdvp_gse`, behind `evolution_DC` and
@@ -7096,7 +7096,7 @@ equals `tdvp_gse_sweeps=0` exactly; if it is pinned to the second (Occ, Dn: `N_0
 starts and the right edge are unaffected. The same failure for a product-state
 start is recorded as "a real, isolated bug", intermittent (5 of 8 at 0.02 to
 0.04), in `examples/time_evolution/tdvp_gse_VS_ED_time_evolution/main.py:28-41`,
-`docs/documentation.md` around line 4449 and `ROADMAP.md` line 82; none says how
+`docs/development.md` around line 4449 and `ROADMAP.md` line 82; none says how
 wide it is, and here it is deterministic. The origin is `19bbee0` (2026-07-20). It
 survived because no test runs v3's `quench_tdvp_gse` against ED at all; the v3
 `evolve_and_measure_tdvp_gse` tests start from `Sx_0|GS>`, and `Sx` is invertible,
@@ -8710,7 +8710,7 @@ wrong discriminant. The regression should run v3 `TDVP_GSE` against exact from e
 starts pinned to both basis states (`C_0` and `Cdag_0` on a half-filled chain,
 `S+_0` and `S-_0`), through `evolution_ABA` and through `quench_tdvp_gse` via
 `submode="TD"`, including the site-0 entropy check, which discriminates sharply.
-Needs a rebuild of the v3 extension. The example comment, the `documentation.md`
+Needs a rebuild of the v3 extension. The example comment, the `development.md`
 paragraph and the `ROADMAP.md` line should point here. NUMBERS CHANGE only for
 v3 with `tevol_method="TDVP_GSE"` from a site-0-pinned start, towards exact: the
 (Cdag_0,C_0) TD peak from 0.081 to about 0.474 on the 6-site chain, and
@@ -8727,7 +8727,7 @@ signature; `kwargs` reaches only the `julia_live` branch at `:262`), `:310-317`
 (`evolution_ABA` forwards `**kwargs` into it); `mpsjulialive/timedependent.py:
 104-105` (the same signature, by reading).
 
-This is `documentation.md` section 4.10's "`**kwargs` with no consumer". The DMRG
+This is `development.md` section 4.10's "`**kwargs` with no consumer". The DMRG
 body never reads `kwargs` outside the `julia_live` branch, and the `julia_live`
 function names it only on its signature line, so a typo of `dt`, `nt` or
 `tevol_method` is dropped and the run goes ahead at the defaults. `867e2b4` edited
@@ -10162,7 +10162,7 @@ when the corresponding fix lands, the older text should gain a pointer here.
   sector" (finding 4).
 - The "isolated" `TDVP_GSE` failure of
   `examples/time_evolution/tdvp_gse_VS_ED_time_evolution/main.py:28-41`,
-  `docs/documentation.md` around line 4449 and `ROADMAP.md` line 82, and the comment
+  `docs/development.md` around line 4449 and `ROADMAP.md` line 82, and the comment
   in `mpscpp3/chain_session.h` that `Cutoff=0` "only trims once the count exceeds
   maxm_", which ITensor v3's `truncate()` contradicts for exact zeros (finding 14).
 - `user_guide.md:705-714`'s fluctuation paragraph, silent that below full bond

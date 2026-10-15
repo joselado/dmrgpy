@@ -350,9 +350,7 @@ page links to.
    $U$. Reference: at $U=0$ the occupations are exactly 0 and 1, so
    $S=0$; at $n=4$ orbitals the whole curve is checked with `mode="ED"`.
 3. `Spinful_Fermionic_Chain(12)` (24 spinless sites), hopping $t=1$,
-   interaction written as `U*sum(Nup[i]*Ndn[i])` (not `set_hubbard`,
-   whose diagonal entry adds a $U/2$ chemical potential, harmless at
-   fixed $N_f$ but better left out), $U$ in `[0, 1, 2, 4, 8, 16]`, half
+   interaction written as `U*sum(Nup[i]*Ndn[i])`, $U$ in `[0, 1, 2, 4, 8, 16]`, half
    filling through
    `set_conserved_sector(Nf=12)`, `itensor_version=3`, `maxm=100`,
    `nsweeps=14`; `get_correlation_eigenvalues()` and

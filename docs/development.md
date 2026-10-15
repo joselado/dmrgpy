@@ -1,4 +1,4 @@
-# DMRGPY Documentation
+# DMRGPY development notes
 
 ## 1. Overview
 
@@ -190,7 +190,11 @@ are not settings: the four Hamiltonian accumulators `hopping`, `hubbard`,
 Hamiltonian `set_hoppings()` then built, and five attributes nothing read
 (`fields`, `resorder`, `resordered_indexes`, `hubbard_matrix`, `fit_td`),
 which are gone from `Many_Body_Chain.__init__` (2026-09-25b record,
-finding 4).
+finding 4). The accumulators and their setters (`set_hoppings()`,
+`set_hubbard()`, their spinful and spinless variants, the `_MB` helpers
+and `update_hamiltonian()`) have since been removed, so a Hamiltonian is
+always a sum of operators passed to `set_hamiltonian()`; their names stay
+in `sites.STATE` so that such a keyword points there.
 
 All of the above build `self.sites`, the list of per-site type codes
 passed to `Many_Body_Chain.__init__`, from a **uniform** repetition of a
@@ -6277,7 +6281,7 @@ design history is in `docs/pyitensor_gpu_port_plan.md`.
 | `examples/backend_comparison/`, `v2_VS_v3_*` examples within each theme folder | backend-vs-backend correctness comparisons |
 | `examples/groundstate/backend_timing_gs_energy/` | backend-vs-backend timing comparison |
 | `installtk/` | build-requirement checking and ITensor/extension compilation |
-| `docs/` | this document, and its LaTeX counterpart |
+| `docs/` | this document (`development.md`), the user guide sources and the audit records |
 
 ## 7. Further reading
 

@@ -1466,7 +1466,7 @@ class Chain
         // quench_tdvp_gse() and quench_tebd() have always done this; these
         // two were the ones that did not. The same defect was found and
         // fixed on the Julia backend (mpsjulialive/tdvp.jl), see
-        // docs/documentation.md.
+        // docs/development.md.
         auto norm0 = std::sqrt(std::real(innerC(psi,psi)));
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)

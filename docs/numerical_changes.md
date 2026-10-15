@@ -52,6 +52,8 @@ Beyond those, the following now raise where they used to be silent:
 | `get_distribution*(mode="ED")` | `AttributeError` deep inside | dispatches, or `NotImplementedError` |
 | `vev(C[i]*C[i])` | `AttributeError` on every DMRG backend | `0` (as ED always answered) |
 | `Many_Body_Chain.evolution()` | `AttributeError` (it called a function that does not exist) | removed |
+| `set_hoppings()`, `set_hubbard()`, their `_spinful`/`_spinless` variants, `set_hoppings_MB()`, `set_hubbard_MB()`, `set_pairings_MB()`, `update_hamiltonian()` | built the Hamiltonian as $\sum_{ij}f(i,j)A_iB_j$ over both orderings, keeping every zero term | removed; write the sum and call `set_hamiltonian()` |
+| `Fermionic_Chain.hamiltonian_free()`, `gs_energy_free()`, `get_correlator_free()`, `get_gr_free()` | `AttributeError` (they read `self.hoppings`, which nothing sets) | removed |
 | `gs_energy_generalized()` on a chain below 2 sites (`"python"`) | the Rayleigh quotient of an untouched random state (-0.3049 for an exact -0.5) | `RuntimeError` |
 
 And these combinations now work where they used to fail:

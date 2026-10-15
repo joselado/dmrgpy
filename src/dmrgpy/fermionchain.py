@@ -4,7 +4,6 @@ import scipy.linalg as lg
 from .pyfermion import mbfermion
 from .algebra import algebra
 from .fermionchaintk import staticcorrelator
-from .fermionchaintk import hamiltonian
 from . import funtk
 from . import gap
 
@@ -26,9 +25,6 @@ class Fermionic_Chain(Many_Body_Chain):
     def get_charge_gap(self,**kwargs):
         """Return the charge gap"""
         return gap.sector_gap(self,sum(self.N),**kwargs)
-    def set_hoppings(self,fun):
-        """Add the spin independent hoppings"""
-        self.set_hoppings_MB(fun)
     def get_logdimension(self):
         """Return the logarithm of the Hilbert space dimension"""
         return len(self.C)*np.log(2) # log dimension
@@ -38,12 +34,6 @@ class Fermionic_Chain(Many_Body_Chain):
     def get_density(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_spinless(self,**kwargs)
-    def set_hubbard_spinless(self,fun):
-        """ Hubbard term """
-        hamiltonian.set_hubbard_spinless(self,fun)
-    def set_hubbard(self,fun):
-        """ Hubbard term """
-        hamiltonian.set_hubbard_spinless(self,fun)
     def get_density_fluctuation_spinless(self,**kwargs):
         """Return the electronic density fluctuations"""
         return staticcorrelator.get_density_fluctuation_spinless(self,**kwargs)
@@ -69,15 +59,6 @@ class Fermionic_Chain(Many_Body_Chain):
     def excited_vev(self,MO,**kwargs):
         """Compute a vacuum expectation value using excited states"""
         return self.excited_vev_spinless(MO,**kwargs)
-    def hamiltonian_free(self,pairs=[[]]):
-        """
-        Return the free part of the fermionic Hamiltonian
-        """
-        m = np.zeros((self.ns,self.ns),dtype=np.complex128) # matrix
-        for key in self.hoppings:
-              t = self.hoppings[key]
-              m[t.i,t.j] = t.g
-        return m
 #    def get_excited(self,mode="DMRG",**kwargs):
 #          """
 #          Wrapper for static correlator
@@ -87,34 +68,9 @@ class Fermionic_Chain(Many_Body_Chain):
 #          elif mode=="ED":
 #            MBF = self.get_ED_obj() # get the object
 #            return algebra.lowest_eigenvalues(MBF.h,**kwargs)
-    def get_correlator_free(self,pairs=[[]]):
-          """Get the correlator for free fermions"""
-          m = self.hamiltonian_free() # get the single body matrix
-          (es,vs) = lg.eigh(m) # diagonalize
-          vs = vs.transpose()
-          out = []
-          for p in pairs:
-              o = 0.0 # initialize
-              for (e,v) in zip(es,vs):
-                  if e<=0.0: 
-                      if self.spinful: # spinful Hamiltonian
-                          for i in range(2):
-                            o += v[2*p[0]+i]*np.conjugate(v[2*p[1]+i]) # add
-                      else: 
-                            o += v[p[0]]*np.conjugate(v[p[1]]) # add
-              out.append(o)
-          return np.array(out) # return
-    def gs_energy_free(self):
-        """Get the energy for free fermions"""
-        m = self.hamiltonian_free() # get the single body matrix
-        es = lg.eigvalsh(m) # get the energies
-        return np.sum(es[es<0.0]) # return energies
     def get_gr(self,**kwargs):
         """Return the retarded Green's function"""
         return get_gr(self,**kwargs)
-    def get_gr_free(self,**kwargs):
-        """Return the retarded Green's function for free fermions"""
-        return get_gr_free(self,**kwargs)
     def gs_energy(self,mode="DMRG",**kwargs):
         """Compute ground state energy, overrriding the method"""
         # This override answers mode="ED" directly instead of routing
@@ -150,28 +106,6 @@ class Fermionic_Chain(Many_Body_Chain):
             self.ED_obj = MBf # store the object
             self.has_ED_obj = True # set to True
             return self.ED_obj # return the object
-
-
-
-
-
-
-def get_gr_free(self,es=np.linspace(-10.,10.,800),delta=0.1,i=0,j=0):
-    m = self.hamiltonian_free() # get the single body matrix
-#    print(m)
-    y = np.zeros(es.shape[0],dtype=np.complex128) # output
-    iden = np.identity(m.shape[0])
-    for ii in range(len(es)):
-        yi = np.matrix(m-(es[ii]+1j*delta)*iden).I[i,j]
-        y[ii] = yi # store
-    return es,y
-
-
-
-
-
-
-
 
 
 
@@ -292,41 +226,12 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
         Return the expectation value of the onsite pairing
         """
         return staticcorrelator.get_onsite_pairing_spinful(self,**kwargs)
-    def set_hubbard_spinful(self,fun):
-        """
-        Add Hubbard interation in a spinful manner
-        The Hubbard term will be defined as
-        n_i n_j, with n_i = n_{i,up} + n_{i,,down}
-        """
-        hamiltonian.set_hubbard_spinful(self,fun)
-    def set_hubbard(self,fun):
-        """
-        Add Hubbard interation in a spinful manner
-        The Hubbard term will be defined as
-        n_i n_j, with n_i = n_{i,up} + n_{i,,down}
-        """
-        hamiltonian.set_hubbard_spinful(self,fun)
-    # set_swave_pairing(fun) used to live here. Unlike every other
-    # set_*(fun) builder on this class it took a ONE-argument function
-    # (the physical site), because fermionchaintk/hamiltonian.py wrapped
-    # it in a two-argument fp(i,j) over the interleaved spinless sites --
-    # so the natural `lambda i,j: ...` raised TypeError. Write the term
-    # out directly instead: sum_i Delta(i)*C[2*i]*C[2*i+1], plus its
-    # Hermitian conjugate, then set_hamiltonian().
     def get_density_fluctuation_spinful(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_fluctuation_spinful(self,**kwargs)
     def get_density_fluctuation(self,**kwargs):
         """Return the electronic density"""
         return staticcorrelator.get_density_fluctuation_spinful(self,**kwargs)
-    def set_hoppings_spinful(self,fun):
-        """
-        Function to Add hopping in a spinful manner
-        """
-        def fun2(i,j):
-            if i%2==j%2: return fun(i//2,j//2)
-            return 0.0
-        self.set_hoppings(fun2)
 
 
 
@@ -506,34 +411,6 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
     def get_charge_gap(self,**kwargs):
         """Return the charge gap"""
         return gap.sector_gap(self,sum(self.Ntot),**kwargs)
-    def set_hoppings_spinful(self,fun):
-        """
-        Add a spin-conserving hopping fun(i,j), for both flavors
-        """
-        h = self.generate_bilinear(fun,self.Cdagup,self.Cup)
-        h = h + self.generate_bilinear(fun,self.Cdagdn,self.Cdn)
-        self.hopping = h # store
-        self.update_hamiltonian()
-    def set_hoppings(self,fun):
-        """Add the spin-conserving hoppings"""
-        self.set_hoppings_spinful(fun)
-    def set_hubbard_spinful(self,fun):
-        """
-        Add Hubbard interaction in a spinful manner
-        The Hubbard term will be defined as
-        n_i n_j, with n_i = n_{i,up} + n_{i,down}
-        """
-        self.hubbard = self.generate_bilinear(fun,self.Ntot,self.Ntot)
-        self.update_hamiltonian()
-    def set_hubbard(self,fun):
-        """
-        Add Hubbard interaction in a spinful manner
-        """
-        self.set_hubbard_spinful(fun)
-    # set_swave_pairing(fun) used to live here too, with the same
-    # one-argument-function trap as its Spinful_Fermionic_Chain sibling.
-    # Write the term out directly: sum_i Delta(i)*self.Delta[i], plus its
-    # Hermitian conjugate, then set_hamiltonian().
     def get_density(self,**kwargs):
         """
         Return the density in each site, summing over spin channels

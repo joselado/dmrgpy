@@ -14,7 +14,7 @@ because someone sees it; what this process exists to catch is a plausible number
 that is incorrect, a dispatch that quietly answers a different question than the
 one asked, a kwarg that no consumer reads, a precondition tested after the
 branch it was meant to qualify, an `else` that serves both "unsupported here"
-and "you typed it wrong". `docs/documentation.md` section 4.10 is the standing
+and "you typed it wrong". `docs/development.md` section 4.10 is the standing
 statement of that last family and is worth reading before a dispatch lens.
 
 ## How to work

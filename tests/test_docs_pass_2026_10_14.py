@@ -33,8 +33,9 @@ def _heisenberg(n, **kwargs):
 
 def _interacting_fermions(**kwargs):
     fc = fermionchain.Fermionic_Chain(4, **kwargs)
-    fc.set_hoppings(lambda i, j: 1.0 if abs(i-j) == 1 else 0.0)
-    fc.set_hubbard(lambda i, j: 2.0 if abs(i-j) == 1 else 0.0)
+    nn = lambda i, j: 1.0 if abs(i-j) == 1 else 0.0
+    fc.set_hamiltonian(fc.generate_bilinear(nn, fc.Cdag, fc.C)
+                       + 2.0*fc.generate_bilinear(nn, fc.N, fc.N))
     return fc
 
 
@@ -43,8 +44,9 @@ def _interacting_fermions(**kwargs):
 @pytest.mark.parametrize("mode", ["ED", "DMRG"])
 def test_density_matrix_reads_the_requested_sites(mode):
     fc = fermionchain.Fermionic_Chain(6, itensor_version="python")
-    fc.set_hoppings(lambda i, j: (1.0+0.3*i) if abs(i-j) == 1 else 0.0)
-    fc.set_hamiltonian(fc.hamiltonian + 0.4*fc.N[1] - 0.2*fc.N[3])
+    hop = fc.generate_bilinear(lambda i, j: (1.0+0.3*i) if abs(i-j) == 1 else 0.0,
+                               fc.Cdag, fc.C)
+    fc.set_hamiltonian(hop + 0.4*fc.N[1] - 0.2*fc.N[3])
     inds = [1, 3, 4]
     wf = _quiet(fc.get_gs, mode=mode)
     dm = wf.get_dm(inds=inds)
@@ -111,7 +113,8 @@ def test_default_sweeps_reach_ed_on_a_small_fermion_chain(version):
 @pytest.mark.parametrize("mode", ["ED", "DMRG"])
 def test_charge_gap_on_both_solvers(mode):
     fc = fermionchain.Fermionic_Chain(4, itensor_version="python")
-    fc.set_hoppings(lambda i, j: 1.0 if abs(i-j) == 1 else 0.0)
+    fc.set_hamiltonian(sum(fc.Cdag[i]*fc.C[i+1] + fc.Cdag[i+1]*fc.C[i]
+                           for i in range(3)))
     # free fermions, levels 2cos(k pi/5): half filling, then one more
     exact = 2*np.cos(2*np.pi/5)
     assert _quiet(fc.get_charge_gap, d=1, mode=mode) == pytest.approx(exact, abs=1e-6)

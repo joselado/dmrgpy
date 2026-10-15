@@ -79,7 +79,7 @@ def resolve_mode(self,mode="DMRG"):
     # enough either: the fallbacks below return "ED" before that line, so
     # a typo on a 2-site v3 chain (or one with no compiled extension)
     # would still slip through unnoticed -- exactly the chains where a
-    # wrong solver is hardest to spot. This is documentation.md 4.10's
+    # wrong solver is hardest to spot. This is development.md 4.10's
     # "a dispatch decision taken before the information that qualifies it".
     _check_mode(mode,"mode")
     if self.mode is not None: _check_mode(self.mode,"chain mode (self.mode)")

@@ -1462,7 +1462,7 @@ frame before `edtk/dynamics.py`'s non-Hermitian branch into
 has returned.
 
 The fix's own rule, stated four times (`validate_kpm_n_scale`'s docstring,
-`test_kpm_n_scale_is_only_checked_where_it_is_read`, `documentation.md:4664`, the
+`test_kpm_n_scale_is_only_checked_where_it_is_read`, `development.md:4664`, the
 previous record's finding 5 Status, "the same reach as on `mode="DMRG"`"), is that
 the value is checked only where it is read. Non-Hermitian KPM takes `n=` and never
 reads `kpm_n_scale` on either mode (`nonhermitian/kpm.py`, `nhkpm_moments` in
@@ -2410,7 +2410,7 @@ both should move to the Sx,Sx local anchor; the example's assertion changes in t
 same commit, and the fermionic example gains one sentence. Pin it with a
 DMRG-free test on the chiral ring (the only model that sees the k label) and a sign
 test on the local Sx,Sx anchor (weight on omega<0 below 0.1, today 0.943). Correct
-the user guide's S(k,omega) paragraph in both formats, `documentation.md`'s "both
+the user guide's S(k,omega) paragraph in both formats, `development.md`'s "both
 agree on where the dominant spectral weight sits" (true only by accident), the
 closing paragraph of `dynamics.py`, and the docstrings of `sxt_to_skomega` and
 `dynamical_correlator_komega`. NUMBERS CHANGE for every infinite-chain S(k,omega)
@@ -5602,7 +5602,7 @@ when the corresponding fix lands, the older text should gain a pointer here.
   switch's one caller and the two short-window callers as getting the direct
   evaluation (finding 7).
 - The previous record's finding 5 Status, "the same reach as on `mode="DMRG"`",
-  and `documentation.md:4664`'s placement of the check (finding 5).
+  and `development.md:4664`'s placement of the check (finding 5).
 - The previous record's finding 16 Status, FIXED for `evolve_and_measure_tdvp_gse`,
   `set_pad_bonds`' docstring and the user guide's "the padding being stripped once
   at trajectory entry" (finding 18).
@@ -5618,7 +5618,7 @@ when the corresponding fix lands, the older text should gain a pointer here.
 - The user guide's KPM promise that the recursion "detects the resulting
   exponential divergence and aborts with an explicit error rather than returning a
   silently wrong spectrum" (findings 2 and 3).
-- `documentation.md`'s "both agree on where the dominant spectral weight sits"
+- `development.md`'s "both agree on where the dominant spectral weight sits"
   (finding 8).
 - The comment at `examples/time_evolution/time_evolution_ABA/main.py:13`
   (finding 9).

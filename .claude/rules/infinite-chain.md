@@ -236,7 +236,7 @@ whole phase rather than just the sign, since a vector from the dense
 Re-measured through the public driver at `D=8`, `nrestarts=6`: `converged`
 in 3/3 runs at both `g=1.5` and critical `g=1.0`, from 0/3.
 `tests/test_lanczos_residual_criterion.py` covers both backends. See also
-`docs/documentation.md`'s D-ramp section,
+`docs/development.md`'s D-ramp section,
 `tests/test_vumps_subspace_expansion.py`, and the measurement tables in
 `vumps.py`'s own section comments.
 
@@ -313,7 +313,7 @@ matrix to a matrix-free restarted Arnoldi (`ic_arnoldi_dominant`), the C++
 counterpart of `idmrg.py`'s own ARPACK branch. Net effect against
 `itensor_version="python"` on that same chain: the growth loop is no faster
 (v3 runs ~1.5-2x slower, being ITensor-object-bound, see the benchmark note
-in `docs/documentation.md`), while the observables are 5-500x faster.
+in `docs/development.md`), while the observables are 5-500x faster.
 
 ## A dimerized iDMRG fixed point is not an extraction bug
 

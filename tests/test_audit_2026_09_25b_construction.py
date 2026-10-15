@@ -12,7 +12,7 @@ leads the 2026-09-25 record left open.
       the cross-check, by DMRG.
   #4  sites.check_settings admitted nine attributes that are not settings,
       the Hamiltonian accumulators among them (hubbard=2.0 put 2*Id into the
-      next set_hoppings() Hamiltonian).
+      Hamiltonian of the next set_hoppings(), a setter since removed).
   #5  On a chain whose ground state is current, gs_energy()/get_gs() read no
       keyword but wf0=, so a typo was swallowed there and raised on a fresh
       chain; with it the leads maxde= (unrefined on a current chain) and
@@ -224,7 +224,7 @@ def test_a_dmrg_mode_on_the_chain_does_not_override_a_mode_ed_call(version,
 
 
 def test_an_ed_mode_on_the_chain_still_overrides_the_call():
-    """documentation.md 4.3: DMRG unless self.mode forces ED"""
+    """development.md 4.3: DMRG unless self.mode forces ED"""
     sc = spinchain.Spin_Chain(["S=1/2"]*6, itensor_version="python",
                               maxm=2, nsweeps=2)
     sc.set_hamiltonian(_staggered(sc))
@@ -297,11 +297,13 @@ def test_the_nine_names_that_are_not_settings_are_refused(name, key):
 
 def test_a_constructor_accumulator_no_longer_shifts_the_energy():
     """Fermionic_Chain(4, hubbard=2.0) + set_hoppings gave -0.2360679775,
-    the free-fermion -2.2360679775 plus the constant 2*Id"""
+    the free-fermion -2.2360679775 plus the constant 2*Id (set_hoppings has
+    since been removed, the keyword is still refused)"""
     with pytest.raises(TypeError):
         fermionchain.Fermionic_Chain(4, itensor_version="python", hubbard=2.0)
     fc = fermionchain.Fermionic_Chain(4, itensor_version="python")
-    fc.set_hoppings(lambda i, j: -1.0 if abs(i-j) == 1 else 0.0)
+    fc.set_hamiltonian(sum(-fc.Cdag[i]*fc.C[i+1] - fc.Cdag[i+1]*fc.C[i]
+                           for i in range(3)))
     t = np.diag([-1.0]*3, 1) + np.diag([-1.0]*3, -1)
     lev = np.linalg.eigvalsh(t)
     assert fc.gs_energy(mode="ED") == pytest.approx(lev[lev < 0].sum(), abs=1e-10)
@@ -317,7 +319,13 @@ def test_every_setting_is_settable_and_every_chain_attribute_is_classified():
         c = build(itensor_version="python")
         for k in sites.SETTINGS:
             assert hasattr(c, k) and not callable(getattr(c, k)), (name, k)
-        for k in DEAD:
+        for k in DEAD + ACCUMULATORS:
+            assert not hasattr(c, k), (name, k)
+        for k in ("set_hoppings", "set_hoppings_spinful", "set_hubbard",
+                  "set_hubbard_spinful", "set_hubbard_spinless",
+                  "set_hoppings_MB", "set_hubbard_MB", "set_pairings_MB",
+                  "update_hamiltonian", "hamiltonian_free", "gs_energy_free",
+                  "get_correlator_free", "get_gr_free"):
             assert not hasattr(c, k), (name, k)
     sc = spinchain.Spin_Chain(["S=1/2"]*3, itensor_version="python")
     same = spinchain.Spin_Chain(["S=1/2"]*3, itensor_version="python",

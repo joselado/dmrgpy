@@ -36,23 +36,18 @@ $\mathbf S_i\cdot\mathbf S_j$, so the chain above is
 `sc.generate_bilinear(f, A, B)` returns the Hermitian part of
 $\sum_{ij}f(i,j)\,A_iB_j$ for two operator lists, for example
 `sc.generate_bilinear(f, sc.Sz, sc.Sz)` for an Ising coupling with any
-range. The fermionic chains have methods that take a function `f(i,j)` of
-two sites and add the whole family of terms to the Hamiltonian:
-
-- `fc.set_hoppings(f)`: $\sum_{ij}f(i,j)\,c_i^\dagger c_j$. On a
-  `Spinful_Fermionic_Chain` the indices run over the spinless sites
-  (up and down alternate).
-- `fc.set_hoppings_spinful(f)`: the same hopping for both spins, with `f`
-  indexed by orbital. Spinful chains.
-- `fc.set_hubbard(f)`: $\sum_{ij}f(i,j)\,n_in_j$, with
-  $n_i=n_{i\uparrow}+n_{i\downarrow}$ on spinful chains. Note that the
-  $i=j$ term is $f(i,i)\,n_i^2=f(i,i)(n_i+2n_{i\uparrow}n_{i\downarrow})$.
+range. A fermionic Hamiltonian is written the same way, as a sum of
+operators. The Hubbard-like chain with hopping $t=1$ and
+nearest-neighbor repulsion $V=2$ is:
 
 ```python
 from dmrgpy import fermionchain
 fc = fermionchain.Fermionic_Chain(4)
-fc.set_hoppings(lambda i,j: 1.0 if abs(i-j)==1 else 0.0)
-fc.set_hubbard(lambda i,j: 2.0 if abs(i-j)==1 else 0.0)
+h = 0
+for i in range(3):
+    h = h + fc.Cdag[i]*fc.C[i+1] + fc.Cdag[i+1]*fc.C[i]  # hopping
+    h = h + 2.0*fc.N[i]*fc.N[i+1]                        # repulsion
+fc.set_hamiltonian(h)
 ```
 
 ## Operators

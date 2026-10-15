@@ -171,7 +171,7 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
   `itensor_version="python"`, by a different mechanism (dense storage with
   a charge grading on the site indices plus a charge penalty on the
   variational solves, see `pyitensor/sector.py`'s module docstring and the
-  pure-Python-backend section of `docs/documentation.md`), and by
+  pure-Python-backend section of `docs/development.md`), and by
   `mode="ED"` by a third (`edtk/edchain.py`: a conserved charge is diagonal
   in the ED product basis, so a sector is a set of basis states and every
   assembled operator is restricted to that submatrix; `promote_to_dense`/

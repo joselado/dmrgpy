@@ -70,12 +70,8 @@ class Mixed_Spin_Fermion_Chain(Many_Body_Chain):
     NotImplementedError for a mixed chain with fewer than 3 physical
     sites -- use a larger chain or itensor_version="python" instead.
 
-    The generic Many_Body_Chain._MB Hamiltonian-building helpers
-    (set_hoppings_MB/set_hubbard_MB/set_pairings_MB) are not usable
-    here: they reference self.C/self.Cdag/self.N, which this class does
-    not define (a single-species "C" is not well-defined at a spinful
-    fermion location) -- build the Hamiltonian directly from
-    Cup/Cdagup/Cdn/Cdagdn/Nup/Ndn/Ntot/Delta and Sx/Sy/Sz instead, as
+    The Hamiltonian is built directly from
+    Cup/Cdagup/Cdn/Cdagdn/Nup/Ndn/Ntot/Delta and Sx/Sy/Sz, as
     tests/test_mixed_chain.py and examples/mixed_spin_fermion_chain do.
     """
     def __init__(self, sitesin, **kwargs):

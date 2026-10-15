@@ -498,7 +498,7 @@ H100), crossover point, and the accuracy cross-check at every point.
 
 ### Phase 5 — docs, tests, examples (repo conventions)
 
-* `docs/documentation.{md,tex}` — architecture: a new device axis under
+* `docs/development.md` — architecture: a new device axis under
   backend dispatch. `docs/user_guide.{md,tex}` — the user-facing switch.
   Both formats kept in sync; `.tex` must still compile under `pdflatex`.
 * `tests/test_pyitensor_gpu.py` — skips cleanly with no device.

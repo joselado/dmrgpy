@@ -371,7 +371,7 @@ changing the kind of code they cover:
   finite-temperature result, every `gs_energy_fluctuation`, every `CVM`
   spectrum, and more. The records' `**Status**` lines carry the same
   entries finding by finding.
-- **`docs/documentation.md` section 4.10** before adding a dispatch. Almost
+- **`docs/development.md` section 4.10** before adding a dispatch. Almost
   every finding of the first hunt was a dispatch decision taken before the
   information that should inform it: a short circuit ahead of a cache key,
   a precondition ahead of the branch it qualifies, an `else` serving both
@@ -581,7 +581,7 @@ Hermiticity proof refuses outright when any name is off the table, since
 `get_dagger()` leaves an unrecognized name untouched (and carries a phase
 for a name whose adjoint is a multiple of itself, `_dagger_phase`, so far
 only `ISy` -> `-ISy`) and such an operator would otherwise cancel against
-its own "dagger". See `docs/documentation.md` 4.2a,
+its own "dagger". See `docs/development.md` 4.2a,
 `tests/test_multioperator_canonical.py` and
 `examples/algebra/operator_canonical_form`.
 
@@ -709,7 +709,7 @@ quote a single speedup number. `tests/test_sector_conservation.py` and
 `tests/test_sector_conservation_ed.py` cross-check every sector against ED
 restricted to that sector; the reference must restrict, not filter
 full-spectrum eigenvectors by `<N>`, since sector-degenerate eigenvalues
-come back as arbitrary superpositions. See `docs/documentation.md` 4.3a and
+come back as arbitrary superpositions. See `docs/development.md` 4.3a and
 the C++ rule file for the three ITensor behaviours that shape the v3
 implementation.
 
@@ -821,8 +821,8 @@ rules, with the reasoning and the measurements in
 
 ## Documentation
 
-`docs/documentation.{md,tex}` covers the architecture (backends, dispatch,
-directory layout); the user guide covers the physics-facing API (what
+`docs/development.md` is the development document: the architecture
+(backends, dispatch, directory layout); the user guide covers the physics-facing API (what
 calculation each method performs, with the formula behind it), kept brief
 and physics-first, with no history in it; `docs/numerical_changes.md` is
 the ledger of what raises and what changed numbers.
@@ -854,9 +854,8 @@ runs from the repo root.
 Whenever a new feature is implemented (a new physical model, a new
 `Many_Body_Chain` method, a new dynamical-correlator submode, a new
 post-processing tool) update the matching page under `docs/guide/`, and
-`docs/documentation.{md,tex}` too if the change affects architecture or
-backend dispatch rather than just physics, keeping those two in sync and
-verifying the `.tex` still compiles cleanly with `pdflatex`; the
+`docs/development.md` too if the change affects architecture or
+backend dispatch rather than just physics; the
 `docs-sync` skill (`.claude/skills/docs-sync/SKILL.md`) is the procedure.
 
 **The user guide's style is fixed.** Its readers are condensed matter

@@ -42,8 +42,9 @@ def initialize(self,**kwargs):
 # to be "any public attribute the chain has that is not a method, less
 # STATE": that rule admitted every attribute STATE forgot, the Hamiltonian
 # accumulators below among them, so Fermionic_Chain(4, hubbard=2.0) put the
-# constant 2*Id into the Hamiltonian of the next set_hoppings() (-0.2360679775
-# against the free-fermion -2.2360679775), and five attributes nothing reads
+# constant 2*Id into the Hamiltonian of the next set_hoppings(), a setter
+# since removed (-0.2360679775 against the free-fermion -2.2360679775),
+# and five attributes nothing reads
 # were accepted and stored (2026-09-25b hole hunt, finding 4). A setting
 # left out of this list fails loudly, with a TypeError naming it; a state
 # name left out of STATE is refused all the same, with the generic message.
@@ -66,8 +67,9 @@ SETTINGS = frozenset((
 
 # Attributes a chain holds that a constructor keyword may not set, each with
 # the reason the message gives: its state, each with its own entry point
-# (the site list is the positional argument), the Hamiltonian accumulators
-# update_hamiltonian() sums (a keyword would be summed in as value*Id), and
+# (the site list is the positional argument), the names of the Hamiltonian
+# accumulators the removed set_hoppings()/set_hubbard() setters used to
+# sum, kept so that such a keyword is told to use set_hamiltonian(), and
 # the two flags the model class fixes after Many_Body_Chain.__init__ has run,
 # which would overwrite the keyword. They are refused because they are not
 # in SETTINGS; this table only names the way to set each.
@@ -88,9 +90,9 @@ STATE = {
     "ED_obj":"the ED object is built on demand",
     "fermionic":"the chain class sets it",
     "use_ampo_hamiltonian":"the chain class sets it",
-    "hopping":"use set_hoppings() or set_hamiltonian()",
-    "hubbard":"use set_hubbard() or set_hamiltonian()",
-    "pairing":"use set_pairings_MB() or set_hamiltonian()",
+    "hopping":"use set_hamiltonian()",
+    "hubbard":"use set_hamiltonian()",
+    "pairing":"use set_hamiltonian()",
     "exchange":"use set_hamiltonian()",
 }
 

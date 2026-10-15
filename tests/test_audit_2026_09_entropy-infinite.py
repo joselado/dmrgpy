@@ -200,7 +200,7 @@ def test_four_correlation_tensor_docstring_lists_the_real_resolver_order():
 # ------------------------------------------- #36: the VUMPS restart default is 4
 
 def test_vumps_nrestarts_default_is_four():
-    """documentation.md reported its VUMPS timing table "at the default
+    """development.md reported its VUMPS timing table "at the default
     nrestarts=6"; the default is 4 in all three places and has never been
     6 (the measurement itself was run at 6, explicitly). Pinned here so
     the prose and the code cannot drift apart again unnoticed."""
