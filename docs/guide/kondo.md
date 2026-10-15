@@ -81,6 +81,16 @@ Zeeman steps. Right: the $T=0$ spectrum of a 3-site chain
 from `mode="DMRG"` agrees with `mode="ED"` to 0.5 per cent (see
 [ED and DMRG](#ed-and-dmrg)).
 
+??? example "Code of this figure (docs/figures/kondo_dIdV/)"
+
+    ```python title="compute.py"
+    --8<-- "kondo_dIdV/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "kondo_dIdV/plot.py"
+    ```
+
 ## ED and DMRG
 
 `mode="ED"` (the default) diagonalizes the full

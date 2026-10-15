@@ -48,6 +48,16 @@ a Heisenberg chain with $n=16$, as a function of `maxm`. The reference is
 ED. Both fall fast with `maxm`. The energy error follows $\delta E^2$
 (dashed line). From `maxm=64` on, both stay at the numerical precision.
 
+??? example "Code of this figure (docs/figures/ground-state_convergence/)"
+
+    ```python title="compute.py"
+    --8<-- "ground-state_convergence/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "ground-state_convergence/plot.py"
+    ```
+
 ## Expectation values
 
 For any operator $O$ built from the chain
@@ -100,6 +110,16 @@ exponentially, as $e^{-r/\xi}/\sqrt r$ with $\xi=6.03$ (dotted line). A
 free fit of the DMRG data gives $\xi=6.09$. In the spin-1 chain, the two
 end sites are spin 1/2. They bind the edge states of the open chain, so
 that the ground state is unique.
+
+??? example "Code of this figure (docs/figures/ground-state_correlators/)"
+
+    ```python title="compute.py"
+    --8<-- "ground-state_correlators/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "ground-state_correlators/plot.py"
+    ```
 
 ## Energy fluctuation
 
@@ -161,6 +181,16 @@ $\arcsin(h/J)/\pi$ (dashed line), and every $E_0(M)$ agrees with free
 fermions on the same chain within $3\times10^{-10}$. The Heisenberg chain saturates
 close to $h_s=2J$; on this open chain the last step is at
 $J(1+\cos(\pi/n))=1.995\,J$.
+
+??? example "Code of this figure (docs/figures/ground-state_sectors/)"
+
+    ```python title="compute.py"
+    --8<-- "ground-state_sectors/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "ground-state_sectors/plot.py"
+    ```
 
 Inside a sector, every operator must conserve the charge. An operator that
 changes it, for example $c_i$ at fixed $N_f$ or $S^x_i$ at fixed $S^z$,

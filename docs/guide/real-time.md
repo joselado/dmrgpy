@@ -46,6 +46,16 @@ model maps to free fermions, so the exact profile is known (dashed lines).
 TDVP agrees with it to $10^{-4}$. At long times the profile approaches
 $-\frac1\pi\arcsin(x/t)$ (dotted line).
 
+??? example "Code of this figure (docs/figures/real-time_light_cone/)"
+
+    ```python title="compute.py"
+    --8<-- "real-time_light_cone/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "real-time_light_cone/plot.py"
+    ```
+
 ## Local quench
 
 `evolution_ABA` first applies an operator $A$ to the

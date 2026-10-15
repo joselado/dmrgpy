@@ -86,6 +86,16 @@ $L=100$ the fits give 1.07, 1.05 and 0.52; the exact free-fermion
 entropies of the XX chain give the same 1.07, so the remaining
 difference is a finite-size effect.
 
+??? example "Code of this figure (docs/figures/entanglement_central_charge/)"
+
+    ```python title="compute.py"
+    --8<-- "entanglement_central_charge/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "entanglement_central_charge/plot.py"
+    ```
+
 ## Single-particle correlation matrix
 
 For fermions, the correlation
@@ -131,6 +141,16 @@ the step melts and all occupations move towards $1/2$. On the right is
 the correlation entropy. It starts at zero and grows towards its maximum
 $2n\log 2$. For a chain with $n=4$ the DMRG values (squares) lie on the
 ED curve (dashed line).
+
+??? example "Code of this figure (docs/figures/entanglement_natural_orbitals/)"
+
+    ```python title="compute.py"
+    --8<-- "entanglement_natural_orbitals/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "entanglement_natural_orbitals/plot.py"
+    ```
 
 ## Two-particle correlators
 

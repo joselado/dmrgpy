@@ -46,3 +46,13 @@ At $V=3t$ the chain is a charge density wave, and a gap of about $t$ opens
 at $\omega=\mu$. The weight moves to higher energies, around $\pm V$. Here
 the 50 states hold 79 per cent of the weight at the middle site, so part of
 the spectrum at high energy is missing; `info["captured"]` tells this.
+
+??? example "Code of this figure (docs/figures/density-of-states_ldos/)"
+
+    ```python title="compute.py"
+    --8<-- "density-of-states_ldos/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "density-of-states_ldos/plot.py"
+    ```

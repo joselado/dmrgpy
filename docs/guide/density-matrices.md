@@ -59,3 +59,13 @@ $n=12$, the DMRG curves lie on the ED curves (dashed lines). There the
 peaks are separated, because $m$ only takes the values $k/n$. On the
 right, with $n=24$, these values are closer than the resolution set by
 `delta`, so the distribution looks smooth.
+
+??? example "Code of this figure (docs/figures/density-matrices_distribution/)"
+
+    ```python title="compute.py"
+    --8<-- "density-matrices_distribution/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "density-matrices_distribution/plot.py"
+    ```

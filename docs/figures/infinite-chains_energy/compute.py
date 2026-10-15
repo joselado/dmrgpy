@@ -2,7 +2,7 @@
 spin-1/2 Heisenberg chain against the bond dimension (iDMRG), and the
 spin correlator at long distance.
 
-Run with  bash docs/figures/d22.sh run infinite-chains_energy
+Run with  bash docs/figures/run.sh infinite-chains_energy
 
 Arrays in data.npz:
     maxm       (k,)  bond dimensions

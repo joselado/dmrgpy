@@ -16,6 +16,16 @@ Bethe-ansatz value $1/4-\ln 2=-0.443147$ by $4\times10^{-6}$. The linear
 fit (`n=1`) misses the curvature and is more than 15 times worse. The
 inset zooms on $1/L=0$.
 
+??? example "Code of this figure (docs/figures/post-processing_extrapolation/)"
+
+    ```python title="compute.py"
+    --8<-- "post-processing_extrapolation/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "post-processing_extrapolation/plot.py"
+    ```
+
 - `functionfit.fit(f, x0)`: minimizes a function `f` with several random
   starts of the Powell method. Use it for fits such as the
   [Calabrese-Cardy formula](entanglement.md#central-charge).

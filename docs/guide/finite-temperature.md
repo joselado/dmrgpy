@@ -57,6 +57,16 @@ it to $10^{-5}$ at every temperature. $C(T)$ has a broad maximum near
 $T\approx0.46J$, the scale of the antiferromagnetic correlations. The
 METTS points are discussed in [METTS](#metts).
 
+??? example "Code of this figure (docs/figures/finite-temperature_specific_heat/)"
+
+    ```python title="compute.py"
+    --8<-- "finite-temperature_specific_heat/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "finite-temperature_specific_heat/plot.py"
+    ```
+
 ## METTS
 
 Minimally entangled typical thermal states (Stoudenmire and

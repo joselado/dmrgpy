@@ -62,6 +62,16 @@ kernel, KPM agrees to 0.1 per cent. EX with `nex=20` misses all the weight
 above $\omega\approx1.2J$, because the states that carry it are not among
 its 20 states.
 
+??? example "Code of this figure (docs/figures/correlator-methods_comparison/)"
+
+    ```python title="compute.py"
+    --8<-- "correlator-methods_comparison/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "correlator-methods_comparison/plot.py"
+    ```
+
 ```python
 pair = (sc.Sz[0], sc.Sz[0])
 (x, y) = sc.get_dynamical_correlator(submode="CVM", name=pair, es=es, delta=0.1)

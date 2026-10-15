@@ -2,7 +2,7 @@
 spin-1/2 Heisenberg chains against 1/L, extrapolated to L -> infinity
 with extrapolate.size_extrapolation.
 
-Run with  bash docs/figures/d22.sh run post-processing_extrapolation
+Run with  bash docs/figures/run.sh post-processing_extrapolation
 
 Arrays in data.npz:
     L         (k,)  chain lengths

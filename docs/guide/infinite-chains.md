@@ -101,6 +101,16 @@ A two-site cell gives $5\times10^{-7}$ at `maxm=96` (square). Here
 dimerized, while the energy is already accurate. The right panel is described in
 [Static correlators](#static-correlators).
 
+??? example "Code of this figure (docs/figures/infinite-chains_energy/)"
+
+    ```python title="compute.py"
+    --8<-- "infinite-chains_energy/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "infinite-chains_energy/plot.py"
+    ```
+
 ## Static correlators
 
 
@@ -192,6 +202,16 @@ reference $0.4105$ (dotted line). Near $k=0$ the weight goes to zero,
 because $\sum_jS^z_j$ is conserved. The weak features above the branch
 come from higher states of the ansatz. The ansatz does not describe the
 two-magnon continuum, which starts at $2\Delta$.
+
+??? example "Code of this figure (docs/figures/infinite-chains_excitations/)"
+
+    ```python title="compute.py"
+    --8<-- "infinite-chains_excitations/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "infinite-chains_excitations/plot.py"
+    ```
 
 ## Local gap estimate
 

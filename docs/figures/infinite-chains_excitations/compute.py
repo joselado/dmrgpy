@@ -6,7 +6,7 @@ dynamical structure factor S(k,omega) of the same ansatz.
     S^xx(k,omega); exact band 2 sqrt(1+g^2-2g cos k).
 (b) spin-1 Heisenberg chain, S^zz(k,omega); Haldane gap 0.4104789 at k=pi.
 
-Run with  bash docs/figures/d22.sh run infinite-chains_excitations
+Run with  bash docs/figures/run.sh infinite-chains_excitations
 
 Arrays in data.npz:
     ks_a      (na,)     momenta of (a), radians per site

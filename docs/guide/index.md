@@ -52,6 +52,16 @@ $S(q,\omega)$, the quantity measured by inelastic neutron scattering. The
 weight fills the two-spinon continuum between its exact edges (dashed). See
 [Dynamical correlators](dynamical-correlators.md).
 
+??? example "Code of this figure (docs/figures/dynamical-correlators_sqw/)"
+
+    ```python title="compute.py"
+    --8<-- "dynamical-correlators_sqw/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "dynamical-correlators_sqw/plot.py"
+    ```
+
 ## Backends
 
 The keyword `itensor_version=` of a chain chooses the DMRG code. The

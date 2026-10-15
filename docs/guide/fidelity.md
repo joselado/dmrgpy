@@ -60,3 +60,13 @@ default `delta` near $\lambda=0.75$. Below that point the default
 estimator returns $\chi$ summed over the two states. A smaller `delta`
 does not help: DMRG does not separate two states this close in energy,
 and the overlaps are then not meaningful.
+
+??? example "Code of this figure (docs/figures/fidelity_ising/)"
+
+    ```python title="compute.py"
+    --8<-- "fidelity_ising/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "fidelity_ising/plot.py"
+    ```

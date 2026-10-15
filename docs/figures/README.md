@@ -45,10 +45,27 @@ changes this.
 
 ## Add a figure to a page
 
-```markdown
+````markdown
 ![One sentence that reads the physics off the plot.](img/<id>.png#only-light)
 ![One sentence that reads the physics off the plot.](img/<id>-dark.png#only-dark)
-```
+
+The paragraph that reads the figure.
+
+??? example "Code of this figure (docs/figures/<id>/)"
+
+    ```python title="compute.py"
+    --8<-- "<id>/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "<id>/plot.py"
+    ```
+````
+
+The collapsed block shows the two scripts on the website when the reader
+clicks on it. `pymdownx.snippets` copies them in at build time from
+`docs/figures/`, so the page always shows the code that is in git, and a
+wrong `<id>` fails the build. The PDF prints the path instead of the code.
 
 The website shows one image per theme, and the PDF
 (`docs/build_guide_pdf.py`) keeps the light one. Check both with

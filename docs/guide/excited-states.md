@@ -61,6 +61,16 @@ $S^z_\mathrm{tot}=1$ ground state at $n=48$. Each end carries a spin 1/2
 (each half sums to exactly $1/2$), spread over about 6 sites, and the
 bulk is not magnetized.
 
+??? example "Code of this figure (docs/figures/excited-states_haldane/)"
+
+    ```python title="compute.py"
+    --8<-- "excited-states_haldane/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "excited-states_haldane/plot.py"
+    ```
+
 ## Gap to another particle number
 
 For a conserved charge $A$, for
@@ -128,6 +138,16 @@ left half. The dashed curves are exact, since with open ends $H$ is a
 similarity transform of a Hermitian chain, and ED on 10 sites agrees with
 NH-DMRG to $10^{-14}$. The problem becomes ill conditioned fast with $n$
 and $\gamma$; `nhdmrg` warns when it does not converge.
+
+??? example "Code of this figure (docs/figures/excited-states_nonhermitian/)"
+
+    ```python title="compute.py"
+    --8<-- "excited-states_nonhermitian/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "excited-states_nonhermitian/plot.py"
+    ```
 
 ## Generalized eigenvalue problem
 
@@ -224,3 +244,13 @@ projector, $J$ is too large at small $U$: the singlet has doubly occupied
 weight, where $\mathbf S_0\cdot\mathbf S_1=0$, and the fit gives
 $(E_T-E_S)/(1/4+3w/4)$, with $w$ the singly occupied weight. This is 40%
 above the splitting at $U=t$.
+
+??? example "Code of this figure (docs/figures/excited-states_heff/)"
+
+    ```python title="compute.py"
+    --8<-- "excited-states_heff/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "excited-states_heff/plot.py"
+    ```

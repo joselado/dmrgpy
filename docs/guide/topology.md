@@ -41,6 +41,16 @@ chain with the same dimerization (see
 jumps at the same point. The middle and right panels belong to
 [Fermion parity](#fermion-parity).
 
+??? example "Code of this figure (docs/figures/topology_berry_phase/)"
+
+    ```python title="compute.py"
+    --8<-- "topology_berry_phase/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "topology_berry_phase/plot.py"
+    ```
+
 ## Single-particle Berry phase
 
 For a Bloch Hamiltonian $H(k)$, the Zak

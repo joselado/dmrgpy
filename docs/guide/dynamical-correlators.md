@@ -101,6 +101,16 @@ two cuts, with the lower edge as a dotted line. Their integrals match
 $\langle S^z_qS^z_q\rangle$ from `vev`. At every $q$ this sum rule holds
 to a few parts in $10^5$.
 
+??? example "Code of this figure (docs/figures/dynamical-correlators_sqw/)"
+
+    ```python title="compute.py"
+    --8<-- "dynamical-correlators_sqw/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "dynamical-correlators_sqw/plot.py"
+    ```
+
 Two methods give the spin structure factor directly:
 
 - `sc.get_spin_spectral_function(i, j=None, es=..., delta=..., nex=20)`:
@@ -187,6 +197,16 @@ and the finite chains stay above it because of the level spacing. For
 these sectors we use $U\sum_in_{i\uparrow}n_{i\downarrow}$, and the
 chemical potential comes out exactly at $U/2$, as particle-hole symmetry
 requires.
+
+??? example "Code of this figure (docs/figures/dynamical-correlators_spectral_function/)"
+
+    ```python title="compute.py"
+    --8<-- "dynamical-correlators_spectral_function/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "dynamical-correlators_spectral_function/plot.py"
+    ```
 
 ## Any pair of operators
 

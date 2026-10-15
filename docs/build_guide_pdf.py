@@ -48,6 +48,27 @@ def admonitions_to_quotes(text):
     return "\n".join(out)
 
 
+def figure_code_to_pointer(text):
+    """Replace a collapsed block of figure code by the path of the code.
+
+    On the website the block opens on a click; the PDF cannot fold it, so
+    it says where the scripts are instead of printing them.
+    """
+    out, lines, i = [], text.split("\n"), 0
+    while i < len(lines):
+        m = re.match(r'^\?\?\? example "Code of this figure \((.*)\)"\s*$', lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        i += 1
+        while i < len(lines) and (lines[i].startswith("    ") or not lines[i].strip()):
+            i += 1
+        out.append("The code of this figure is in `%s`." % m.group(1))
+        out.append("")
+    return "\n".join(out)
+
+
 def local_links_to_text(text):
     """A link to another page of the site becomes its text."""
     return re.sub(r"\[([^\]]+)\]\((?:[\w-]+\.md)?(?:#[\w-]+)?\)", r"\1", text)
@@ -68,7 +89,7 @@ def page_source(fn):
     text = light_figures_only(open(os.path.join(GUIDE, fn)).read())
     if fn == "index.md":
         text = re.sub(r"^# [^\n]*\n", "# Introduction\n", text, count=1)
-    return local_links_to_text(admonitions_to_quotes(text))
+    return local_links_to_text(admonitions_to_quotes(figure_code_to_pointer(text)))
 
 
 def main():

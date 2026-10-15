@@ -846,6 +846,10 @@ before committing a guide change. Every figure in the guide is computed:
 reads only that and writes the light and dark PNGs into `docs/guide/img/`;
 `docs/figures/README.md` says how to recompute, replot and run on a remote
 host, and `docs/figures/plan.md` is the physics each figure checks.
+Under each figure a collapsed block shows its `compute.py` and `plot.py`,
+copied in at build time by `pymdownx.snippets` with `base_path:
+docs/figures`, a path relative to the current directory, so `mkdocs build`
+runs from the repo root.
 
 Whenever a new feature is implemented (a new physical model, a new
 `Many_Body_Chain` method, a new dynamical-correlator submode, a new
