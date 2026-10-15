@@ -21,16 +21,23 @@ complex coefficients. This covers single-ion anisotropy $D(S^z_i)^2$,
 Dzyaloshinskii-Moriya terms $\mathbf D\cdot(\mathbf S_i\times\mathbf S_{i+1})$,
 biquadratic exchange $(\mathbf S_i\cdot\mathbf S_{i+1})^2$, hopping
 $t\sum_i(c_i^\dagger c_{i+1}+\mathrm{h.c.})$, the Hubbard term
-$U\sum_in_{i\uparrow}n_{i\downarrow}$, and so on. [Cookbook](cookbook.md) gives complete
+$U\sum_in_{i\uparrow}n_{i\downarrow}$, and so on. The
+[Cookbook](cookbook.md) gives the complete Hamiltonian of the common
 models. `h.get_dagger()` returns $h^\dagger$, so `h + h.get_dagger()` adds
 the Hermitian conjugate. It is best to write $H$ in units where its largest
 coefficient is of order 1: a few routes, such as real-time evolution, use
 absolute thresholds.
 
-## Shortcuts on fermionic chains
+## Shortcuts
 
-These methods take a function `f(i,j)`
-of two sites and add the whole family of terms:
+On a spin chain, `sc.SS(i, j)` is the Heisenberg bond
+$\mathbf S_i\cdot\mathbf S_j$, so the chain above is
+`h = sum(sc.SS(i, i+1) for i in range(n-1))`. On every chain,
+`sc.generate_bilinear(f, A, B)` returns the Hermitian part of
+$\sum_{ij}f(i,j)\,A_iB_j$ for two operator lists, for example
+`sc.generate_bilinear(f, sc.Sz, sc.Sz)` for an Ising coupling with any
+range. The fermionic chains have methods that take a function `f(i,j)` of
+two sites and add the whole family of terms to the Hamiltonian:
 
 - `fc.set_hoppings(f)`: $\sum_{ij}f(i,j)\,c_i^\dagger c_j$. On a
   `Spinful_Fermionic_Chain` the indices run over the spinless sites
@@ -58,10 +65,13 @@ $S^xS^x=1/4$ for spin 1/2. `sc.is_hermitian(A)` does not have this
 limitation, since it also checks numerically on the chain.
 
 `sc.toMPO(A)` builds the matrix product operator of `A` once. Two such
-operators can be added, subtracted and multiplied by numbers
-(`A + 2*B - A`). Not available on `"julia_live"`. To combine Hamiltonians,
-it is simpler to sum the operator expressions before calling
-`set_hamiltonian`.
+operators can be added, subtracted, multiplied by numbers and multiplied
+with each other (`A + 2*B - A`, `A*B`), and `A.trace()` is their trace,
+so `(Sz[0]*Hmpo*Hmpo).trace()` is a moment of the spectrum. Not available
+on `"julia_live"`. To combine Hamiltonians, it is simpler to sum the
+operator expressions before calling `set_hamiltonian`. On a small chain,
+`sc.get_full_matrix(A)` returns the dense matrix of any operator, to
+check a model against another code.
 
 ## States and operators
 

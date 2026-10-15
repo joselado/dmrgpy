@@ -255,19 +255,47 @@ ks, es, Skw = ic.td_dynamical_correlator("Sz", 0, "Sz", n_window=14,
 
 See `examples/idmrg/td_dynamical_correlator` for both.
 
-## Lower-level tools
+## Operators on the state, overlaps and sums
 
-These act on the converged state of
-`itensor_version="python"` (`ic._result` for iDMRG, `ic._vumps_result`
-for VUMPS) and have no method on the chain:
+Three methods act on the converged state itself and return the result as
+a new chain, so that `vev` and `correlator` measure it. Here `ic` and
+`ic2` are two converged chains on the same unit cell, on
+`itensor_version="python"`:
 
-- `pyitensor.idmrg.apply_mpo` and `pyitensor.vumps.apply_mpo`: apply a
-  bounded periodic operator, for example a product of one-site operators
-  or a gate, and truncate. Not for a Hamiltonian, which is extensive.
-- `pyitensor.idmrg.imps_overlap`: the overlap per site of two infinite
-  states, 1 in magnitude for the same state.
-- `pyitensor.idmrg.imps_sum` and `pyitensor.vumps.imps_sum`: the direct
-  sum of two states. Two normalized ground states give a cat state, which
-  this cannot represent, and raise an error.
+```python
+flipped = ic.apply_operator(2*ic.SxC[0])   # Pauli X on every site
+flipped.vev("Sz", 0)                       # -<Sz> of ic
+flipped.eta                                # 1 for a unitary operator
+f = ic.overlap(flipped)                    # fidelity per site, 0 to 1
+f2 = ic.overlap(ic2)                       # between two solved chains
+try:
+    cat = ic.summps(ic2)                   # |ic> + |ic2>
+except RuntimeError:
+    pass                                   # two normalized states, see below
+```
 
-See `examples/idmrg/vumps_apply_mpo`, `imps_overlap` and `vumps_imps_sum`.
+- `apply_operator(op)`: `op` is an operator on the central cell, built
+  from `ic.SxC`, `ic.SzC[0]*ic.SzC[1]` and so on, applied in every cell at
+  once. It must stay inside the cell (an `SxR` factor raises an error),
+  since it is repeated cell by cell. The state is normalized afterwards,
+  and `eta` is the factor by which the operator changed its norm per
+  cell. A gate that entangles neighboring sites grows the bond
+  dimension, and the result is refused when truncating it back loses
+  weight; pass `maxdim=` larger than `ic.maxm`. The gauge fixing behind
+  this holds only for a state solved at a modest `maxm` (4 worked, 8 did
+  not, on a free-fermion cell), so apply such a gate to a small state.
+- `overlap(other)`: the fidelity per site of two states on the same unit
+  cell, $|\langle\phi|\psi\rangle|^{1/N}$ in the limit of $N$ sites. It is 1 for the
+  same physical state in any gauge, and below 1 otherwise. Two ground
+  states on the two sides of a phase transition have a fidelity that
+  drops at the transition, the infinite-chain version of
+  [Fidelity susceptibility](fidelity.md).
+- `summps(other)`: the direct sum of two states. Tiled to infinity, the
+  sum keeps only the branch of larger norm per site, so two normalized
+  ground states tie and raise an error: a cat state of two ordered
+  states has no uniform MPS representation.
+
+The returned chain is not a ground state, so `gs_energy()` and the
+excitations raise on it; `set_hamiltonian()` makes it an ordinary chain
+again. See `examples/idmrg/apply_mpo_to_infinite_chain` and
+`examples/idmrg/imps_overlap`.

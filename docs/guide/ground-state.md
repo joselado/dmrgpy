@@ -38,7 +38,8 @@ bound on $E_0$ otherwise. The keywords that control accuracy are:
   DMRG.
 
 The chain stores the ground state. A second call to `gs_energy()` returns
-it without solving again.
+it without solving again. The sweep schedule and warm starts are on
+[Controlling the solver](solver.md).
 
 ![Energy convergence with the bond dimension](img/ground-state_convergence.png#only-light)
 ![Energy convergence with the bond dimension](img/ground-state_convergence-dark.png#only-dark)

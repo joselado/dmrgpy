@@ -376,8 +376,9 @@ def test_l_and_r_in_same_term_is_a_reach_2_coupling():
 # iMPS -- see idmrg.py's own "Applying a (bounded) MPO to the converged
 # iMPS" section docstring for the algorithm and its scope restriction
 # (bounded/local operators only, not idmrg.py's own extensive Hamiltonian
-# automaton). These go through pyitensor.idmrg directly (not
-# infinitechain.py, which has no public wrapper for this yet) --
+# automaton). These go through pyitensor.idmrg directly (the public
+# wrappers, Infinite_Many_Body_Chain.apply_operator/overlap/summps, are
+# covered by tests/test_infinite_chain_tools.py) --
 # tests/test_metts_vev.py and others already establish that reaching into
 # dmrgpy.pyitensor submodules directly from a test is a normal pattern
 # here, not a workaround.

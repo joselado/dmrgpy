@@ -1,6 +1,6 @@
-"""Plot figure 17, density-of-states_ldos, from data.npz.
+"""Plot figure 17, dynamical-correlators_ldos, from data.npz.
 
-Writes docs/guide/img/density-of-states_ldos.png and -dark.png.
+Writes docs/guide/img/dynamical-correlators_ldos.png and -dark.png.
     python3 plot.py [--theme light|dark]
 """
 import os
@@ -43,4 +43,4 @@ def draw(theme):
     return fig
 
 
-style.main(draw, "density-of-states_ldos")
+style.main(draw, "dynamical-correlators_ldos")

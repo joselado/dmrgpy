@@ -300,9 +300,9 @@ get no figure: the charge gap is the same calculation as figure 3 (sector
 energies), and the generalized problem has no standard physics picture
 that a reader recognizes.
 
-### Ground-state degeneracy (`degeneracy.md`): no new figure
+### Ground-state degeneracy (`excited-states.md`): no new figure
 
-The page is one method, and its physics (the four-fold edge manifold of
+The section is one method, and its physics (the four-fold edge manifold of
 the Haldane chain, with its finite-size splitting) is figure 4, which the
 page links to.
 
@@ -370,11 +370,11 @@ Site entropy, pair entropy, mutual information and the four-point tensor
 get no figure: they are the same measurement on other reduced density
 matrices, and the page's text says when to use them.
 
-### Density matrices and distributions (`density-matrices.md`)
+### Correlators and distributions (`correlators.md`)
 
-#### 9. `density-matrices_distribution`
+#### 9. `correlators_distribution`
 
-1. File `density-matrices_distribution.png`, page `density-matrices.md`,
+1. File `correlators_distribution.png`, page `correlators.md`,
    in "Operator distributions".
 2. The full counting statistics of the magnetization in the
    transverse-field Ising chain: $P(m)$ of $m=\frac1n\sum_iS^z_i$ is one
@@ -626,12 +626,12 @@ arbitrary operator pair (a sum over sites).
 wall is a local quench of the same kind, and the states route is the
 same propagator.
 
-### Density of states (`density-of-states.md`)
+### Local density of states (`dynamical-correlators.md`)
 
-#### 17. `density-of-states_ldos`
+#### 17. `dynamical-correlators_ldos`
 
-1. File `density-of-states_ldos.png`, page `density-of-states.md`, in
-   "Local density of states".
+1. File `dynamical-correlators_ldos.png`, page `dynamical-correlators.md`,
+   in "Local density of states".
 2. The local density of states of a spinless fermion chain at a bulk site
    and at the edge site: at $V=0$ the exact free-fermion result on the
    same open chain, $A_i(\omega)=\sum_k|\varphi_k(i)|^2L_\delta(\omega-\varepsilon_k+\mu)$,
@@ -821,15 +821,12 @@ Every recipe points to a page that now has the figure (figures 4, 7, 11,
    curved line reaching $-0.4431$ at the axis.
 5. About 5 minutes (the $L=128$ solve at `maxm=100` is about 2 minutes).
 
-### GPU (`gpu.md`): no figure
+### Performance (`performance.md`): no figure
 
 The page quotes measured speedups from `docs/gpu_cpu_performance.md`,
-which needs a data-centre GPU; nothing to compute here.
-
-### BLAS threads (`blas-threads.md`): no figure
-
-A one-command instruction; a timing plot would be hardware-specific and
-is not physics.
+which needs a data-centre GPU; nothing to compute here. The BLAS-thread
+and parallel-scan sections are one-command instructions; a timing plot
+would be hardware-specific and is not physics.
 
 ## Summary
 
@@ -843,7 +840,7 @@ is not physics.
 | 6 `excited-states_heff` | excited-states | 1 min |
 | 7 `entanglement_central_charge` | entanglement | 12 min |
 | 8 `entanglement_natural_orbitals` | entanglement | 4 min |
-| 9 `density-matrices_distribution` | density-matrices | 2 min |
+| 9 `correlators_distribution` | correlators | 2 min |
 | 10 `topology_berry_phase` | topology | 3 min |
 | 11 `fidelity_ising` | fidelity | 10 min |
 | 12 `mean-field_neel` | mean-field | 4 min |
@@ -851,7 +848,7 @@ is not physics.
 | 14 `dynamical-correlators_spectral_function` | dynamical-correlators | 8 min |
 | 15 `correlator-methods_comparison` | correlator-methods | 8 min |
 | 16 `real-time_light_cone` | real-time | 10 min |
-| 17 `density-of-states_ldos` | density-of-states | 5 min |
+| 17 `dynamical-correlators_ldos` | dynamical-correlators | 5 min |
 | 18 `kondo_dIdV` | kondo | 11 min |
 | 19 `finite-temperature_specific_heat` | finite-temperature | 8 min |
 | 20 `infinite-chains_energy` | infinite-chains | 5 min |

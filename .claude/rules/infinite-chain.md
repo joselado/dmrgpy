@@ -288,8 +288,12 @@ is guarded rather than merely documented, and
 `itensor_version="python"`-only: `local_excitation_gap(window>0)`
 (`local_excitation_gap_windowed` is an explicit prototype, not stable API)
 and the iMPS algebra over `IDMRGResult` (`imps_overlap`/`apply_mpo`/
-`imps_sum`), which `infinitechain.py` never exposed for `gs_method="idmrg"`
-and which the VUMPS path already covers on this backend.
+`imps_sum`), exposed since 2026-10-15 as
+`Infinite_Many_Body_Chain.overlap`/`apply_operator`/`summps` on
+`itensor_version="python"` for both `gs_method`s (the VUMPS `Chain` methods
+on v3 are not wired to them yet); `overlap` returns the fidelity per site
+as the spectral radius of the mixed transfer matrix, not one eigenvalue,
+since a state and its spin-flipped copy give a tied pair of opposite sign.
 
 The iDMRG static observables on v3 are dense arrays, not ITensors: the
 `ic_*` helpers in `chain_session.h`, the same design (and for the same

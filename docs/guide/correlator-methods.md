@@ -92,6 +92,12 @@ the ground state itself, so `maxm` and `nsweeps` ([Ground state](ground-state.md
   error when the expansion becomes unstable.
 - `sc.kpm_n_scale` (KPM, default 1): a positive integer that multiplies the
   number of Chebyshev moments, for a line sharper than $2\delta$.
+- `sc.kpm_extrapolate = True` (KPM): computes the moments for the
+  broadening `kpm_extrapolate_factor` times `delta` (default 2, so half
+  as many moments) and extrapolates the sequence to the full count. On a
+  Heisenberg chain of 10 sites the line agrees with the full calculation
+  within 2 per cent of its peak, at half the cost. Check it against the
+  full calculation on a small chain before using it in a scan.
 - `kernel=` (KPM): how the moments become a spectrum, `"jackson"`
   (default), `"lorentz"`, `"plain"` or `"hodc"`. The last is the high-order
   kernel of [arXiv:2512.03149](https://arxiv.org/abs/2512.03149), with

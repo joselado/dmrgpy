@@ -1,11 +1,11 @@
-"""Figure 17, density-of-states_ldos: local density of states A_i(omega) of
+"""Figure 17, dynamical-correlators_ldos: local density of states A_i(omega) of
 an open spinless fermion chain at half filling, at a bulk site and at the
 edge site, for V=0 (free fermions, exact reference) and V=3t (charge
 density wave, gapped), from get_spectral_function (SECTOR method).
 
 H = -t sum_i (c^dag_i c_{i+1} + h.c.) + V sum_i (n_i - 1/2)(n_{i+1} - 1/2)
 
-Run with  bash docs/figures/run.sh density-of-states_ldos
+Run with  bash docs/figures/run.sh dynamical-correlators_ldos
 
 Arrays in data.npz:
     Vs          (nv,)         interaction strengths V, in t

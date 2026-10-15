@@ -12,7 +12,7 @@ and the observables are then built from these operators ([Hamiltonians and opera
 | `fermionchain.Majorana_Chain(n)` | $n$ Majorana modes, built from $n/2$ fermions | `G`, with $\gamma_{2j}=(c_j+c_j^\dagger)/\sqrt2$, $\gamma_{2j+1}=i(c_j-c_j^\dagger)/\sqrt2$ |
 | `fermionchain.Spinful_Fermionic_Chain(n)` | spin-1/2 fermion: $0,\uparrow,\downarrow,\uparrow\downarrow$ | `Cup`, `Cdagup`, `Cdn`, `Cdagdn`, `Nup`, `Ndn`, `Ntot`, `Sx`, `Sy`, `Sz`, `Delta` |
 | `fermionchain.Spinful_Fermionic_Chain_Native(n)` | the same, one 4-state site per orbital | the same as above |
-| `bosonchain.Bosonic_Chain(n, maxnb=...)` | boson with $0$ to $\text{maxnb}_i-1$ particles (default `maxnb=4`) | `A`, `Adag`, `N`, projectors `D[i][k]` $=\lvert k\rangle\langle k\rvert$ |
+| `bosonchain.Bosonic_Chain(n, maxnb=...)` | boson with $0$ to $\text{maxnb}_i-1$ particles; `maxnb` is a list with one entry per site, 4 everywhere by default | `A`, `Adag`, `N`, projectors `D[i][k]` $=\lvert k\rangle\langle k\rvert$ |
 | `bosonchain.SpinBoson_Chain(sites)` | boson and spin sites mixed, labels `"B"`, `"B6"`, `"S=1/2"`, ... | `A`, `Adag`, `N`, `D` on boson sites; `Sx`, `Sy`, `Sz` on spin sites |
 | `parafermionchain.Parafermionic_Chain(n, Z=3)` | $\mathbb Z_N$ clock model, $N=2,3,4$ | clock and shift `Sig`, `Tau`, parafermions `Chi`, `Psi` |
 | `mixedchain.Mixed_Spin_Fermion_Chain(sites)` | spin sites and spinful-fermion sites mixed, labels `"1/2"`, `"1"`, ..., `"F"` | `Sx`, `Sy`, `Sz` everywhere; `Cup`, `Cdagup`, `Cdn`, `Cdagdn`, `Nup`, `Ndn`, `Ntot`, `Delta` on fermion sites |
@@ -37,10 +37,26 @@ conduction electrons, such as the Kondo lattice
 
     - `Spinful_Fermionic_Chain_Native`, `Mixed_Spin_Fermion_Chain` and
       `SpinBoson_Chain`: `itensor_version=3` and `"python"` only.
-    - `SpinBoson_Chain`: no `mode="ED"`. Use `Bosonic_Chain` for a purely
-      bosonic model.
+    - `SpinBoson_Chain` and `Mixed_Spin_Fermion_Chain`: no `mode="ED"`.
+      Use `Bosonic_Chain` for a purely bosonic model, and
+      `Spinful_Fermionic_Chain` with its `Sx`, `Sy`, `Sz` for a spin
+      model on fermions.
     - `Bosonic_Chain` with `maxnb` different from 4: not on
       `itensor_version=2`, it raises an error.
+
+Every chain has the methods of this guide. A few methods exist only on
+the class whose physics they need:
+
+- `Spin_Chain`: `SS(i, j)`, `get_magnetization()`, `get_kondo_spectrum()`
+  ([STM and Kondo spectra](kondo.md)), `get_full_SS_correlator()`.
+- The fermionic chains: `set_hoppings()`, `set_hubbard()`,
+  `get_density()`, `get_density_fluctuation()`, `get_charge_gap()`, the
+  correlation matrix and its entropies ([Entanglement](entanglement.md)),
+  and `get_fermionic_parity()` on their states ([Topological invariants](topology.md)).
+- The spinful fermionic chains: `set_hoppings_spinful()`,
+  `get_magnetization()`, `get_onsite_pairing()`, `get_spectral_function()`
+  with `spin=`.
+- `Bosonic_Chain`: `get_density()`, `get_density_fluctuation()`.
 
 Every constructor takes `itensor_version=` and the chain settings as
 keywords. A keyword has the same effect as an assignment after

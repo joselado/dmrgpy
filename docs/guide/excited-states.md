@@ -1,8 +1,8 @@
 # Excited states and gaps
 
 On this page we compute the low-energy spectrum: excited states, gaps,
-non-Hermitian and generalized eigenproblems, and effective Hamiltonians of
-a low-energy manifold. Here `sc` is the Heisenberg chain of [Ground state](ground-state.md).
+the degeneracy of the ground state, non-Hermitian and generalized
+eigenproblems, and effective Hamiltonians of a low-energy manifold. Here `sc` is the Heisenberg chain of [Ground state](ground-state.md).
 
 ## Low-lying spectrum
 
@@ -70,6 +70,51 @@ bulk is not magnetized.
     ```python title="plot.py"
     --8<-- "excited-states_haldane/plot.py"
     ```
+
+## Ground-state degeneracy
+
+A degenerate ground state signals a broken symmetry or a topological
+phase. Examples are the two ordered states of an Ising chain and the four
+edge states of an open Haldane chain, whose splitting is shown in
+[Low-lying spectrum](#low-lying-spectrum). We count the levels close to $E_0$,
+
+$$g\approx\sum_i\exp\!\left[-\left(\frac{(E_i-E_0)^2}{\delta}\right)^2\right],$$
+
+adding excited states $E_i$ until the count stops growing:
+
+```python
+g = sc.get_gs_degeneracy()             # close to an integer
+g = sc.get_gs_degeneracy(delta=1e-4)   # a stricter window
+```
+
+A level counts when $|E_i-E_0|$ is smaller than about $\sqrt{\delta}$,
+which is 0.1 at the default `delta=1e-2`. A result that is not close to
+an integer means that a level sits at the edge of the window. On a finite
+chain a degeneracy is often split by an amount that decays with the
+length, so choose `delta` relative to that splitting. `mode="ED"` uses
+exact diagonalization.
+
+The states of the manifold are `sc.get_gs_manifold(n=2, tol=1e-3)`, the
+eigenstates within `tol` of $E_0$ (more states are searched when all `n`
+turn out degenerate), and `sc.vev(A, wf=w)` measures an operator in any
+of them. Here `sc` is an Ising chain
+$H=-\sum_iS^z_iS^z_{i+1}-0.2\sum_iS^x_i$ in its ordered phase:
+
+```python
+wfs = sc.get_gs_manifold(n=2, tol=1e-3)         # two states
+M = sum(sc.Sz)
+print([sc.vev(M, wf=w).real for w in wfs])      # 0 and 0
+print(sc.aMb(wfs[0], M, wfs[1]).real)           # 4.82 on 10 sites
+up = sc.summps(wfs[0], wfs[1]).normalize()      # the ordered states
+dn = sc.summps(wfs[0], -1*wfs[1]).normalize()
+print(sc.vev(M, wf=up).real, sc.vev(M, wf=dn).real)   # +4.82 and -4.82
+```
+
+The eigenstates are the symmetric and antisymmetric combinations of the
+two ordered states, so the magnetization vanishes in each of them and
+appears in the off-diagonal element. The ordered states are their sum
+and difference. The [dynamical correlator](correlator-methods.md#degenerate-ground-states)
+with `mode="ED"` averages over such a manifold by itself.
 
 ## Gap to another particle number
 

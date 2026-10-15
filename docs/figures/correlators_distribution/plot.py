@@ -1,6 +1,6 @@
-"""Plot figure 9, density-matrices_distribution, from data.npz.
+"""Plot figure 9, correlators_distribution, from data.npz.
 
-Writes docs/guide/img/density-matrices_distribution.png and -dark.png.
+Writes docs/guide/img/correlators_distribution.png and -dark.png.
     python3 plot.py [--theme light|dark]
 """
 import os
@@ -45,4 +45,4 @@ def draw(theme):
     return fig
 
 
-style.main(draw, "density-matrices_distribution")
+style.main(draw, "correlators_distribution")

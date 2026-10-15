@@ -249,10 +249,12 @@ class Infinite_Many_Body_Chain:
     `set_hamiltonian`, `gs_energy` (converged energy *per site*), static
     one-/two-point expectation values (`vev`/`correlator`), an
     open-boundary-window approximation to dynamical correlators
-    (`kpm_finite`), and an infinite-boundary-condition, real-time-TDVP
+    (`kpm_finite`), an infinite-boundary-condition, real-time-TDVP
     dynamical correlator (`td_dynamical_correlator`, itensor_version=
     "python" only -- see its own docstring for how it differs from
-    `kpm_finite`). No excited states, no entanglement/entropy yet.
+    `kpm_finite`), and the iMPS algebra (`apply_operator`, `overlap`,
+    `summps`, itensor_version="python" only, see the section comment
+    above `_require_ground_state`). No entanglement/entropy yet.
 
     `itensor_version="python"` (default) or `3` -- the ITensor v3 C++
     backend (`mpscpp3/chain_session.h`'s `Chain::idmrg_ground_state`/
@@ -433,6 +435,20 @@ class Infinite_Many_Body_Chain:
                                     # self._session3 instead, see below)
         self.e0 = None           # converged ground-state energy per site
         self.converged = None
+        self.eta = None          # norm diagnostic of a state produced by
+                                  # apply_operator/summps (the dominant
+                                  # self-overlap transfer eigenvalue of the
+                                  # grown cell before it is renormalized, 1
+                                  # for a unitary operator); None on a chain
+                                  # whose state is a solved ground state
+        self._state_origin = None  # None for a solved ground state; the
+                                    # name of the method (apply_operator,
+                                    # summps) that produced the stored
+                                    # state otherwise -- such a state is
+                                    # not an eigenstate, so gs_energy and
+                                    # every method that reads the solver's
+                                    # own environments refuse it, see
+                                    # _require_ground_state
         self._cell_asymmetry = None  # gs_method="idmrg", n_uc=1 only:
                                       # (L1 distance, S_0, S_1) between the
                                       # Schmidt spectra of the two bonds of
@@ -589,6 +605,8 @@ class Infinite_Many_Body_Chain:
         self._vumps_result = None
         self.e0 = None
         self.converged = None
+        self.eta = None
+        self._state_origin = None
         self._cell_asymmetry = None
         self._excitation_env = None
         self._session3 = None
@@ -641,6 +659,7 @@ class Infinite_Many_Body_Chain:
         if self._h_intra is None:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.gs_energy called before set_hamiltonian")
+        self._require_ground_state("gs_energy")
         self._excitation_env = None  # about to rebuild self._result; see __init__'s own comment
         self._cell_asymmetry = None
         if self.itensor_version == "python" and self.gs_method == "idmrg":
@@ -1008,6 +1027,472 @@ class Infinite_Many_Body_Chain:
             "itensor_version={!r}, gs_method={!r}".format(
                 self.itensor_version, self.gs_method))
 
+    # -- iMPS algebra: apply an operator, overlap two states, sum two states --
+    #
+    # Thin public wrappers over pyitensor.idmrg's apply_mpo/imps_overlap/
+    # imps_sum (gs_method="idmrg") and pyitensor.vumps's apply_mpo/imps_sum
+    # (gs_method="vumps"), itensor_version="python" only. The operator a
+    # caller hands apply_operator is an ordinary MultiOperator on the
+    # central cell; `_cell_operator_mpo` turns it into the periodic W_bulk
+    # list those functions take. The states those functions return
+    # (PeriodicMPS/UniformMPS) are not eigenstates and carry none of the
+    # solver's environments, so they are handed back on a NEW chain object
+    # (`_derived_chain`) whose vev/correlator read them and whose gs_energy
+    # and environment-based methods refuse (`_require_ground_state`).
+
+    def _require_ground_state(self, caller):
+        """Raise if this chain's state was produced by apply_operator or
+        summps rather than by the ground-state solver. Such a state is not
+        an eigenstate of the Hamiltonian, so an energy per site has no
+        meaning for it, and the result object holding it (PeriodicMPS/
+        UniformMPS) has none of the solver's environments (GL/GR, the
+        local superblock, the window boundary) that excitation_energies,
+        local_excitation_gap, kpm_finite and td_dynamical_correlator read;
+        without this guard those surface as an AttributeError deep inside
+        pyitensor."""
+        if self._state_origin is not None:
+            raise RuntimeError(
+                "Infinite_Many_Body_Chain.{}: this chain holds the state "
+                "returned by {}(), which is not a ground state, so {} has "
+                "no meaning for it; only vev/correlator/overlap/"
+                "apply_operator/summps read such a state. Call "
+                "set_hamiltonian() on it to start over from a fresh "
+                "ground-state solve.".format(caller, self._state_origin, caller))
+
+    def _python_state(self, caller):
+        """The stored pyitensor state object (IDMRGResult/PeriodicMPS for
+        gs_method="idmrg", VUMPSResult/UniformMPS for "vumps"), solving
+        the ground state first if there is none yet. Shared argument
+        checking for apply_operator/overlap/summps: itensor_version=
+        "python" only (the C++ backend keeps its state inside its own
+        Chain and exposes none of these operations through this class),
+        and the grouped VUMPS tensors only (the sequential multi-site
+        solver, taken for n_uc>2 or a coupling reaching past one cell,
+        stores AL/AR/C as per-site lists that pyitensor.vumps's apply_mpo/
+        imps_sum do not accept)."""
+        if self.itensor_version != "python":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.{}: only itensor_version=\"python\" "
+                "is supported (the mpscpp3 backend keeps its state inside "
+                "the C++ Chain and this class does not expose the iMPS "
+                "algebra on it) -- got itensor_version={!r}".format(
+                    caller, self.itensor_version))
+        if self.gs_method == "idmrg":
+            if self._result is None:
+                self.gs_energy()
+            return self._result
+        if self.gs_method == "vumps":
+            if self._vumps_result is None:
+                self.gs_energy()
+            if getattr(self._vumps_result, "multisite", False):
+                raise NotImplementedError(
+                    "Infinite_Many_Body_Chain.{}: the VUMPS state of this "
+                    "chain comes from the sequential multi-site solver "
+                    "(n_uc>2, or a coupling reaching past one unit cell), "
+                    "whose per-site tensors pyitensor.vumps's iMPS algebra "
+                    "does not take; use a one- or two-site cell with "
+                    "nearest-cell couplings".format(caller))
+            return self._vumps_result
+        raise NotImplementedError(
+            "Infinite_Many_Body_Chain.{}: gs_method={!r} is not implemented "
+            "-- only \"idmrg\" and \"vumps\"".format(caller, self.gs_method))
+
+    def _derived_chain(self, state, origin):
+        """A new chain holding `state` (a PeriodicMPS or UniformMPS from
+        pyitensor.idmrg/vumps) in place of the solved ground state, with
+        every cached derivative of the old state cleared. A shallow copy is
+        enough: every other attribute is a scalar, a MultiOperator that is
+        never mutated in place, or a cache reset here."""
+        import copy
+        new = copy.copy(self)
+        if self.gs_method == "idmrg":
+            new._result = state
+            new._vumps_result = None
+        else:
+            new._vumps_result = state
+            new._result = None
+        new.e0 = None
+        new.converged = None  # neither converged nor unconverged: not a solve
+        new._gauge_mismatch = None
+        new._cell_asymmetry = None
+        new._excitation_env = None
+        new._session3 = None
+        new._session3_has_vumps = False
+        eta = complex(state.eta)
+        new.eta = eta.real if abs(eta.imag) <= 1e-12 * max(1.0, abs(eta)) else eta
+        new._state_origin = origin
+        return new
+
+    def _cell_operator_mpo(self, op, result):
+        """The periodic MPO `W_bulk` (one rank-4 ITensor per site of the
+        unit cell, indices (link_l, s, s', link_r) with s the state's own
+        physical Index `sites_uc.si(p+1)`, the convention pyitensor.idmrg's
+        and pyitensor.vumps's apply_mpo take) for the MultiOperator `op` on
+        the central cell -- see apply_operator for what is accepted.
+
+        Every term is composed into per-site matrices by
+        pyitensor.idmrg._term_site_matrices, the routine the Hamiltonian's
+        own automaton is built with: same-site factors are multiplied in
+        the term's order, a fermionic reordering carries its sign, and a
+        fermionic endpoint carries its Jordan-Wigner F factor; the sites
+        strictly between two touched sites carry F while the parity
+        accumulated so far is odd (identity on every spin site). The terms
+        are summed into one dense d_g x d_g cell matrix (site 0 slowest,
+        the kron order vumps._embed_group_operator uses, in the M[in,out]
+        layout every pyitensor site matrix has), which is then split into
+        a chain of site tensors by successive SVDs, dropping only singular
+        values at zero, so the MPO is exact."""
+        from .pyitensor import idmrg
+        from .pyitensor.index import Index
+        from .pyitensor.tensor import ITensor
+        op = multioperator.obj2MO(op)
+        sites_uc, n_uc = result.sites_uc, self.n_uc
+        dims = [sites_uc.dim(p + 1) for p in range(n_uc)]
+        d_g = int(np.prod(dims))
+        dense = np.zeros((d_g, d_g), dtype=complex)
+        for term in op.op:
+            for name, site in term[1:]:
+                if not (0 <= site < n_uc):
+                    raise ValueError(
+                        "apply_operator: factor {!r} at site {} lies outside "
+                        "the central cell (sites 0..{}); the operator is "
+                        "applied identically in every cell, so write every "
+                        "factor on the central-cell operators (SxC[i], "
+                        "get_operator(name, i))".format(name, site, n_uc - 1))
+            if len(term) == 1:  # a multiple of the identity
+                mats = [np.eye(d, dtype=complex) for d in dims]
+                coef = complex(term[0])
+            else:
+                try:
+                    rel_sites, coef, touched, ferm = idmrg._term_site_matrices(
+                        term, sites_uc, n_uc)
+                except ValueError as exc:
+                    raise ValueError(
+                        "apply_operator: {} -- a parity-odd operator drags a "
+                        "Jordan-Wigner string across every cell to the "
+                        "left, which a per-cell operator cannot "
+                        "hold".format(exc)) from None
+                mats = [None] * n_uc
+                carry = False
+                for k, site in enumerate(rel_sites):
+                    mats[site] = touched[k]
+                    carry = carry != ferm[k]
+                    if carry and k + 1 < len(rel_sites):
+                        for q in range(site + 1, rel_sites[k + 1]):
+                            mats[q] = sites_uc.site_type(q + 1).matrix("F")
+                for p in range(n_uc):
+                    if mats[p] is None:
+                        mats[p] = np.eye(dims[p], dtype=complex)
+            M = mats[0]
+            for m in mats[1:]:
+                M = np.kron(M, m)
+            dense += coef * M
+        # Split (i_0 i_1 ..., o_0 o_1 ...) into site tensors (l, i_p, o_p, r).
+        T = dense.reshape(dims + dims)
+        perm = []
+        for p in range(n_uc):
+            perm += [p, n_uc + p]
+        T = np.transpose(T, perm).reshape([1] + [d * d for d in dims])
+        W_bulk = []
+        for p in range(n_uc):
+            d = dims[p]
+            chi_l = T.shape[0]
+            if p == n_uc - 1:
+                site_arr = T.reshape(chi_l, d, d, 1)
+            else:
+                mat = T.reshape(chi_l * d * d, -1)
+                U, S, Vh = np.linalg.svd(mat, full_matrices=False)
+                keep = max(1, int(np.sum(S > 1e-14 * S[0])))
+                # sqrt(S) on each side: the balanced split the examples
+                # use. Putting the whole scale on one site is the same
+                # operator, but the gauge-fixing step of apply_mpo factors
+                # fixed points at every cut and reads the imbalance as
+                # ill-conditioning (measured 7.5e-4 against its 1e-4
+                # isometry check on a two-site Heisenberg gate at maxm=4,
+                # 1e-13 with the balanced split).
+                sq = np.sqrt(S[:keep])
+                site_arr = (U[:, :keep] * sq[None, :]).reshape(chi_l, d, d, keep)
+                T = (sq[:, None] * Vh[:keep, :]).reshape(
+                    [keep] + [dd * dd for dd in dims[p + 1:]])
+            s = sites_uc.si(p + 1)
+            link_l = (W_bulk[-1].inds[-1] if W_bulk
+                      else Index(1, tags="Link"))
+            link_r = Index(site_arr.shape[-1], tags="Link")
+            W_bulk.append(ITensor((link_l, s, s.prime(1), link_r), site_arr))
+        return W_bulk, float(np.linalg.norm(dense, 2))
+
+    def _cell_norm(self, result, W_bulk, opnorm):
+        """(<psi|W^dag W|psi>, <psi|psi>) per unit cell for the stored
+        state and the periodic MPO `W_bulk`: the dominant eigenvalues of
+        the self-overlap transfer matrices of the grown (not yet
+        truncated) cell and of the cell itself, each raised to the power
+        that brings it from the state's own cell to one unit cell (the
+        gauge-consistent idmrg cell is two unit cells long at n_uc=1, the
+        grouped VUMPS tensor is one).
+
+        Needed because pyitensor.idmrg._canonicalize_periodic does not
+        renormalize and verifies that its output is left-canonical, so it
+        raises on any operator that changes the norm (0.9*Id, or Sz on a
+        superposition); apply_operator divides the operator by the square
+        root of the first number and reports their ratio as `eta`. The
+        ratio, not the first number alone: a VUMPS AL is left-canonical to
+        machine precision, but the idmrg cell of a gapless chain is
+        normalized only to about 1e-4 (the dimerized fixed point, see
+        `_measure_cell_asymmetry`), and that is the state's own gauge
+        artifact, not a property of the operator.
+
+        `opnorm` is the operator norm of the dense cell operator, the
+        scale against which a grown tensor counts as zero: an operator
+        that annihilates the state (Sp*Sp on any spin-1/2 state) raises
+        ValueError here rather than reaching the eigensolver's own
+        degeneracy check with an all-zero transfer matrix."""
+        from .pyitensor import idmrg
+        if self.gs_method == "idmrg":
+            cell, n_cell = idmrg._correlator_cell(result)
+            W_tiled = [W_bulk[k % self.n_uc] for k in range(n_cell)]
+            B = idmrg.grow_by_mpo(W_tiled, cell, n_cell)
+            arrays = [b.array for b in B]
+        else:
+            from .pyitensor import vumps
+            n_cell = 1
+            cell = [result.AL]
+            W_arr = vumps._group_automaton(W_bulk, self.n_uc)
+            Lw, _d, _d2, Rw = W_arr.shape
+            La, d_g, Ra = result.AL.shape
+            arrays = [np.einsum('lsor,msn->lmorn', W_arr, result.AL).reshape(
+                Lw * La, d_g, Rw * Ra)]
+            B = arrays
+        if max(np.max(np.abs(a)) for a in arrays) <= 1e-14 * opnorm:
+            raise ValueError(
+                "apply_operator: the operator annihilates the stored state "
+                "(W|psi> vanishes on every site of the cell against an "
+                "operator norm of {:.3g}), so there is no state to "
+                "return".format(opnorm))
+        _, eta = idmrg._dominant_right_fixed_point(idmrg._transfer_chain(B, n_cell))
+        _, eta_self = idmrg._dominant_right_fixed_point(idmrg._transfer_chain(cell, n_cell))
+        power = self.n_uc / n_cell
+        return float(np.real(eta)) ** power, float(np.real(eta_self)) ** power
+
+    def apply_operator(self, op, cutoff=None, maxdim=None):
+        """Apply the operator `op`, the same one in every unit cell, to the
+        stored state and return a NEW chain holding the result,
+        (prod over cells W) |psi>, so that vev/correlator on the returned
+        chain measure W|psi>. The state is stored normalized; `.eta` on
+        the returned chain is <psi|W^dag W|psi>/<psi|psi> per unit cell,
+        the factor by which the operator changed the squared norm of the
+        state (1 for a unitary operator, 0.81 for 0.9*Id on a one-site
+        cell, 1/4 for Sz on a spin-1/2 site). An operator that annihilates
+        the state raises ValueError.
+
+        `op` is a MultiOperator built from this chain's own central-cell
+        operators: `2*ic.SxC[0]`, `ic.SzC[0]*ic.SzC[1]`, a sum of such
+        terms, `ic.get_operator("Id", 0)` for a multiple of the identity.
+        Every factor must act on a site of the central cell (index
+        0..n_uc-1); a factor on another cell (`SxR`, `SxL`) raises
+        ValueError, since the operator is tiled cell by cell and a term
+        straddling two cells would be counted twice. The operator must be
+        bounded (a product of per-cell factors), which is what every
+        MultiOperator on one cell is; the Hamiltonian's own extensive sum
+        over cells is not of this kind, see pyitensor.idmrg's "Applying a
+        (bounded) MPO" section.
+
+        Fermionic names (C, Cdag, ...) are accepted when the term's total
+        fermion parity is even, with the Jordan-Wigner string threaded
+        inside the cell exactly as the Hamiltonian's own terms are
+        (pyitensor.idmrg._term_site_matrices); a parity-odd term raises
+        ValueError, since its string would run across every cell.
+
+        itensor_version="python" only (NotImplementedError otherwise), under
+        gs_method="idmrg" (pyitensor.idmrg.apply_mpo) and gs_method="vumps"
+        (pyitensor.vumps.apply_mpo, grouped cells only, i.e. n_uc<=2 with
+        nearest-cell couplings). `cutoff`/`maxdim` default to this chain's
+        own `cutoff`/`maxm`; an operator whose MPO bond dimension is above
+        1 (a two-site gate) grows the bond dimension by that factor, and
+        truncating it back to a `maxdim` that discards more than about
+        1e-4 of weight raises RuntimeError (the gauge fixing cannot hold
+        it, see `_canonicalized`), so pass a larger `maxdim` for an
+        entangling gate on a state already at `maxm`. The gauge fixing is
+        delicate in the other direction too: when the grown bond dimension
+        is far above the entanglement the state has (an entangling gate on
+        a chain at maxm=8 or more), its isometry check can fail at every
+        maxdim/cutoff, so apply an entangling gate to a chain solved at a
+        modest maxm, as the examples do. The returned chain's
+        gs_energy() raises RuntimeError (its state is not a ground state);
+        set_hamiltonian() on it starts over."""
+        from .pyitensor.tensor import ITensor
+        result = self._python_state("apply_operator")
+        W_bulk, opnorm = self._cell_operator_mpo(op, result)
+        if cutoff is None:
+            cutoff = self.cutoff
+        if maxdim is None:
+            maxdim = self.maxm
+        # The per-unit-cell squared norm of W|psi>, measured before the
+        # operator is applied: the state handed to apply_mpo must come out
+        # normalized (see _cell_norm), so the operator is divided by its
+        # square root, and its ratio to the state's own norm is what
+        # `.eta` reports.
+        norm_w, norm_self = self._cell_norm(result, W_bulk, opnorm)
+        eta = norm_w / norm_self
+        W_bulk[0] = ITensor(W_bulk[0].inds, W_bulk[0].array / np.sqrt(norm_w))
+        if self.gs_method == "idmrg":
+            from .pyitensor import idmrg
+            fn = idmrg.apply_mpo
+        else:
+            from .pyitensor import vumps
+            fn = vumps.apply_mpo
+        new = self._canonicalized("apply_operator", fn, (result, W_bulk), cutoff, maxdim)
+        new.eta = eta
+        return self._derived_chain(new, "apply_operator")
+
+    @staticmethod
+    def _canonicalized(caller, fn, args, cutoff, maxdim):
+        """Call `fn(*args, cutoff=, maxdim=)` (pyitensor's apply_mpo or
+        imps_sum) and translate the one failure a caller can do something
+        about. Their shared gauge-fixing step, idmrg._canonicalize_periodic,
+        checks that the tensors it returns are isometric to 1e-4 and raises
+        "indicates a bug" otherwise; the discarded Schmidt weight of a
+        truncation lands in that same number, so truncating an entangling
+        gate's grown bond back to the chain's own maxm (the default) fails
+        that check whenever it discards more than 1e-4 of weight (measured
+        7.5e-4 on a two-site Heisenberg gate at maxm=4, where the grown
+        bond is 16). That is a truncation too strong for the gauge fixing,
+        not a bug, so it is reported as such, with the original attached."""
+        try:
+            return fn(*args, cutoff=cutoff, maxdim=maxdim)
+        except RuntimeError as exc:
+            if "non-left-canonical" not in str(exc):
+                raise
+            raise RuntimeError(
+                "Infinite_Many_Body_Chain.{}: truncating the grown state to "
+                "maxdim={} (cutoff={:g}) discarded too much weight for the "
+                "gauge fixing to hold (the isometry check reads the discarded "
+                "weight; underlying message: {}). Pass a larger maxdim (the "
+                "grown bond dimension is at most maxdim times the operator's "
+                "own bond dimension), or loosen cutoff.".format(
+                    caller, maxdim, cutoff, exc)) from exc
+
+    def _compatible_state(self, other, caller):
+        """`other`'s stored pyitensor state, after checking it can be
+        combined with this chain's: same backend, same gs_method (the two
+        store different tensor shapes), same unit cell."""
+        if not isinstance(other, Infinite_Many_Body_Chain):
+            raise TypeError(
+                "Infinite_Many_Body_Chain.{}: other must be an "
+                "Infinite_Many_Body_Chain, got {!r}".format(caller, type(other)))
+        if other.itensor_version != self.itensor_version:
+            raise ValueError(
+                "Infinite_Many_Body_Chain.{}: the two chains use different "
+                "backends ({!r} and {!r})".format(
+                    caller, self.itensor_version, other.itensor_version))
+        if other.gs_method != self.gs_method:
+            raise ValueError(
+                "Infinite_Many_Body_Chain.{}: the two chains use different "
+                "gs_method ({!r} and {!r}); their states are stored in "
+                "different forms and are not combined".format(
+                    caller, self.gs_method, other.gs_method))
+        if other.n_uc != self.n_uc or list(other.site_types) != list(self.site_types):
+            raise ValueError(
+                "Infinite_Many_Body_Chain.{}: the two chains have different "
+                "unit cells ({} and {})".format(
+                    caller, self.site_types, other.site_types))
+        return other._python_state(caller)
+
+    def overlap(self, other):
+        """The fidelity per site of two infinite chains on the same unit
+        cell, a real number between 0 and 1: the spectral radius of the
+        mixed transfer matrix of the two states, divided by the geometric
+        mean of each state's own, and taken to the power 1/(sites per
+        cell). It is 1 exactly when the two chains hold the same physical
+        state (any gauge, any bond dimension) and below 1 otherwise. The
+        literal overlap of two infinite states is this number raised to
+        the number of sites, 0 or infinite in the thermodynamic limit,
+        which is why the per-site quantity is the one returned (see
+        pyitensor.idmrg.imps_overlap, which keeps the per-cell eigenvalue
+        with its phase). The spectral radius rather than one dominant
+        eigenvalue because two different states can share the modulus of
+        their top mixed eigenvalues and differ in phase (a state and its
+        spin-flipped copy on the TFIM give +0.456 and -0.456), which is a
+        sign that alternates with the number of sites and not a
+        degeneracy of the fidelity.
+
+        itensor_version="python" only. Under gs_method="idmrg" the two
+        gauge-consistent cells are compared; under gs_method="vumps" the
+        two grouped left-canonical tensors AL (grouped cells only, see
+        apply_operator). Both chains must have the same gs_method and the
+        same unit cell (ValueError otherwise). Works on the chains
+        apply_operator/summps return too."""
+        state_a = self._python_state("overlap")
+        state_b = self._compatible_state(other, "overlap")
+        from .pyitensor import idmrg
+        if self.gs_method == "idmrg":
+            cell_a, n_a = idmrg._correlator_cell(state_a)
+            cell_b, n_b = idmrg._correlator_cell(state_b)
+            if n_a != n_b:
+                raise ValueError(
+                    "Infinite_Many_Body_Chain.overlap: the two states tile "
+                    "cells of different lengths ({} and {})".format(n_a, n_b))
+            n_sites = n_a   # one physical site per cell tensor
+        else:
+            # VUMPS: the grouped supersite tensor AL is a one-site periodic
+            # cell of n_uc physical sites
+            cell_a, cell_b = [state_a.AL], [state_b.AL]
+            if state_a.AL.shape[1] != state_b.AL.shape[1]:
+                raise ValueError(
+                    "Infinite_Many_Body_Chain.overlap: grouped physical "
+                    "dimension mismatch ({} and {})".format(
+                        state_a.AL.shape[1], state_b.AL.shape[1]))
+            n_a, n_sites = 1, self.n_uc
+        # The spectral radius for the two self-overlaps as well: the
+        # fixed-point solvers refuse a tied dominant eigenvalue, which the
+        # iDMRG state of a symmetry-broken phase (a cat of the two ordered
+        # states) has, while the fidelity itself is well defined there.
+        def radius(Es):
+            T4 = idmrg._compose_chain(Es)
+            chi_ket, chi_bra = T4.shape[0], T4.shape[1]
+            w = np.linalg.eigvals(T4.reshape(chi_ket*chi_bra, chi_ket*chi_bra))
+            return np.max(np.abs(w))
+        rad_ab = radius(idmrg._transfer_chain(cell_a, n_a, bra_list=cell_b))
+        rad_aa = radius(idmrg._transfer_chain(cell_a, n_a))
+        rad_bb = radius(idmrg._transfer_chain(cell_b, n_a))
+        f = rad_ab/np.sqrt(rad_aa*rad_bb)
+        return float(f**(1.0/n_sites))
+
+    def summps(self, other, cutoff=None, maxdim=None):
+        """The direct sum |self> + |other> of two infinite chains on the
+        same unit cell, returned as a NEW chain like apply_operator (its
+        `.eta` is the surviving norm, its gs_energy() raises). The sum is
+        block-diagonal in the bond space at every cut and is then
+        re-canonicalized and truncated (pyitensor.idmrg.imps_sum,
+        pyitensor.vumps.imps_sum).
+
+        Tiled to the thermodynamic limit this sum keeps only the branch of
+        larger per-site norm: two states whose per-site norms differ reduce
+        to the larger one, while two normalized states tie exactly and
+        raise RuntimeError, since the resulting cat state of two
+        macroscopic branches has no single-fixed-point representation.
+        Every state this class produces is normalized (a solved ground
+        state, and the state apply_operator returns, by construction), so
+        through the public API this method raises for any pair of chains;
+        the well-posed case needs a state rescaled by hand, as the imps_sum
+        examples do. The error is left to propagate with the underlying
+        function's message. itensor_version="python" only, same gs_method
+        and unit cell on both chains (ValueError otherwise); `cutoff`/
+        `maxdim` default to this chain's own `cutoff`/`maxm`."""
+        state_a = self._python_state("summps")
+        state_b = self._compatible_state(other, "summps")
+        if cutoff is None:
+            cutoff = self.cutoff
+        if maxdim is None:
+            maxdim = self.maxm
+        if self.gs_method == "idmrg":
+            from .pyitensor import idmrg
+            fn = idmrg.imps_sum
+        else:
+            from .pyitensor import vumps
+            fn = vumps.imps_sum
+        new = self._canonicalized("summps", fn, (state_a, state_b), cutoff, maxdim)
+        return self._derived_chain(new, "summps")
+
     def _get_excitation_environment(self):
         """Lazily build (or reuse) the pyitensor.idmrg_excitations.
         ExcitationEnvironment for the converged ground state -- expensive
@@ -1055,6 +1540,7 @@ class Infinite_Many_Body_Chain:
                 "pyitensor.idmrg_excitations' own module docstring "
                 "(itensor_version=3 is handled separately, directly inside "
                 "excitation_energies/excitation_gap)")
+        self._require_ground_state("excitation_energies")
         if self._vumps_result is None:
             self.gs_energy()
         self._warn_unconverged_vumps_state("excitation_energies")
@@ -1331,6 +1817,7 @@ class Infinite_Many_Body_Chain:
                 "Infinite_Many_Body_Chain.local_excitation_gap: only "
                 "gs_method=\"idmrg\" is supported -- see "
                 "pyitensor.idmrg.local_excitation_gap's own docstring")
+        self._require_ground_state("local_excitation_gap")
         if self.itensor_version == 3:
             if window != 0:
                 raise NotImplementedError(
@@ -1511,6 +1998,7 @@ class Infinite_Many_Body_Chain:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.kpm_finite called "
                 "before set_hamiltonian")
+        self._require_ground_state("kpm_finite")
         if not (0 <= p_i < self.n_uc):
             raise ValueError("kpm_finite: p_i must be in 0..{} "
                               "(n_uc-1), got {!r}".format(self.n_uc - 1, p_i))
@@ -1678,6 +2166,7 @@ class Infinite_Many_Body_Chain:
         if not (0 <= p_i < self.n_uc):
             raise ValueError("td_dynamical_correlator: p_i must be in 0..{} "
                               "(n_uc-1), got {!r}".format(self.n_uc - 1, p_i))
+        self._require_ground_state("td_dynamical_correlator")
         if self.itensor_version == "python":
             if self.gs_method != "idmrg":
                 raise NotImplementedError(

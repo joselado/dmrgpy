@@ -1,9 +1,9 @@
-"""Figure 9, density-matrices_distribution: the distribution P(m) of the
+"""Figure 9, correlators_distribution: the distribution P(m) of the
 magnetization per site m = (1/n) sum_i Sz_i in the ground state of the
 transverse-field Ising chain, in the ordered phase, at the critical field
 and in the paramagnet.
 
-Run with  bash docs/figures/run.sh density-matrices_distribution
+Run with  bash docs/figures/run.sh correlators_distribution
 
 The check is done on the small chain: DMRG and ED with the same Chebyshev
 expansion (same window, same number of moments, same Jackson kernel), so

@@ -9,7 +9,7 @@ D=1 (exact) and genuinely entangled D>1 (TFIM), where the surviving
 branch's onsite_expectation/two_point_correlator are checked directly.
 
 There is no `Infinite_Many_Body_Chain`-level wrapper for imps_sum on
-EITHER backend (matches pyitensor's own scope) -- v3's own imps_sum is
+itensor_version=3 (the "python" backend has one since 2026-10-15) -- v3's own imps_sum is
 reached directly via `ic._session3.vumps_imps_sum(...)`.
 
 Skipped automatically if mpscpp3 isn't compiled, exactly like

@@ -1,32 +1,29 @@
 # Per-site overlap/fidelity between two converged infinite MPS --
-# pyitensor.idmrg.imps_overlap: the thermodynamic-limit generalization of
-# a finite MPS inner product <phi|psi>. A literal <phi|psi> over an
+# Infinite_Many_Body_Chain.overlap: the thermodynamic-limit generalization
+# of a finite MPS inner product <phi|psi>. A literal <phi|psi> over an
 # infinite chain is 0 or infinite (it scales as eta^N over N unit cells)
 # unless the dominant mixed-transfer-matrix eigenvalue eta has magnitude
-# exactly 1 -- so imps_overlap returns the *per-site fidelity*
-# eta_ab/sqrt(eta_aa*eta_bb) by default (normalize=True), which has
-# magnitude 1 iff the two iMPS represent the same physical state (any
-# gauge/normalization convention), and magnitude < 1 otherwise.
+# exactly 1 -- so overlap returns the *per-site fidelity*
+# eta_ab/sqrt(eta_aa*eta_bb) (pyitensor.idmrg.imps_overlap underneath),
+# which has magnitude 1 iff the two iMPS represent the same physical state
+# (any gauge/normalization convention), and magnitude < 1 otherwise.
 #
-# Demonstrated below: (1) self-overlap and overlap with an identity-MPO'd
-# copy (idmrg.apply_mpo) are both exactly 1 -- a gauge-independent
-# cross-check that apply_mpo's own canonicalization didn't change the
-# physical state; (2) two independently-converged, oppositely-polarized
-# product states (a strong onsite field pinning <Sz> to +-0.5) are
-# orthogonal, |overlap| ~ 0.
+# Demonstrated below: (1) self-overlap and overlap with an identity-applied
+# copy (apply_operator with the identity re-gauges the state) are both
+# exactly 1 -- a gauge-independent cross-check that apply_operator's own
+# canonicalization didn't change the physical state; (2) two
+# independently-converged, oppositely-polarized product states (a strong
+# onsite field pinning <Sz> to +-0.5) are orthogonal, |overlap| ~ 0.
 
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
 from dmrgpy import infinitechain
-from dmrgpy.pyitensor import idmrg
-from dmrgpy.pyitensor.index import Index
-from dmrgpy.pyitensor.tensor import ITensor
 import numpy as np
 import matplotlib.pyplot as plt
 
 ################################################################
-### (1) self-overlap and gauge-invariance under apply_mpo(Id) ###
+### (1) self-overlap and gauge-invariance under apply_operator(Id) ###
 ################################################################
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
 ic.gs_method = "idmrg"
@@ -36,21 +33,16 @@ ic.maxm, ic.maxiter, ic.etol = 30, 60, 1e-9
 ic.gs_energy()
 
 print("=== self-overlap of a converged Heisenberg ground state ===")
-ov_self = idmrg.imps_overlap(ic._result, ic._result)
+ov_self = ic.overlap(ic)
 print("<psi|psi> per site:", ov_self, " (expect exactly 1)")
 assert abs(ov_self - 1.0) < 1e-6
 
-sites_uc = ic._result.sites_uc
-d = sites_uc.dim(1)
-link_l, link_r = Index(1, tags="Link"), Index(1, tags="Link")
-s = sites_uc.si(1)
-W_id = [ITensor((link_l, s, s.prime(1), link_r), np.eye(d, dtype=complex).reshape(1, d, d, 1))]
-same_state = idmrg.apply_mpo(ic._result, W_id, cutoff=1e-12, maxdim=None)
+same_state = ic.apply_operator(ic.get_operator("Id", 0))
 
 print()
-print("=== overlap with an identity-MPO'd (re-gauged) copy ===")
-ov_gauge = idmrg.imps_overlap(ic._result, same_state)
-print("|<psi|apply_mpo(Id, psi)>| per site:", abs(ov_gauge), " (expect exactly 1)")
+print("=== overlap with an identity-applied (re-gauged) copy ===")
+ov_gauge = ic.overlap(same_state)
+print("|<psi|apply_operator(Id, psi)>| per site:", abs(ov_gauge), " (expect exactly 1)")
 assert abs(abs(ov_gauge) - 1.0) < 1e-6
 
 ########################################################################
@@ -71,21 +63,21 @@ ic_down.gs_energy()
 print()
 print("=== overlap between opposite-field-polarized product states ===")
 print("<Sz> up-chain:", ic_up.vev("Sz", 0), " down-chain:", ic_down.vev("Sz", 0))
-ov_orth = idmrg.imps_overlap(ic_up._result, ic_down._result)
+ov_orth = ic_up.overlap(ic_down)
 print("|<down|up>| per site:", abs(ov_orth), " (expect ~0, orthogonal states)")
 assert abs(ov_orth) < 1e-6
 
 print()
-print("imps_overlap example PASSED")
+print("overlap example PASSED")
 
-labels = ["self-overlap\n(same state)", "gauge-invariance\n(apply_mpo(Id))",
+labels = ["self-overlap\n(same state)", "gauge-invariance\n(apply_operator(Id))",
           "orthogonality\n(opposite-polarized)"]
 values = [abs(ov_self), abs(ov_gauge), abs(ov_orth)]
 fig, ax = plt.subplots(figsize=(6.5, 4.5))
 bars = ax.bar(labels, values, color=["tab:blue", "tab:green", "tab:red"])
 ax.axhline(1.0, color="gray", lw=0.8, ls=":")
-ax.set_ylabel("per-site fidelity |imps_overlap|")
-ax.set_title("imps_overlap: self / gauge-invariance / orthogonality checks")
+ax.set_ylabel("per-site fidelity |overlap|")
+ax.set_title("overlap: self / gauge-invariance / orthogonality checks")
 for bar, v in zip(bars, values):
     ax.text(bar.get_x() + bar.get_width()/2, v, "{:.3f}".format(v),
             ha="center", va="bottom")

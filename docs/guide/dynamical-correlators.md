@@ -1,8 +1,9 @@
 # Dynamical correlators
 
 On this page we compute zero-temperature dynamical correlators: the
-dynamical spin structure factor, the single-particle spectral function, and
-the correlator of any pair of operators $(A,B)$.
+dynamical spin structure factor, the single-particle spectral function
+and the local density of states, and the correlator of any pair of
+operators $(A,B)$.
 
 ## The quantity
 
@@ -181,6 +182,40 @@ Here the frequency is measured from $E_0^N$ in both halves, without the
 $\mu$ shift. If the chain is not in a sector, $|\mathrm{GS}\rangle$ is the
 global ground state, at whatever particle number it has.
 
+### Local density of states
+
+The local spectral function $A_{ii}(\omega)$ is the density of states
+measured by STM ($dI/dV$) above site $i$, with electron addition at
+$\omega>0$ and electron removal at $\omega<0$. On a spinful chain, pass
+`spin="up"` or `spin="dn"` to `get_spectral_function` and add the two.
+
+![Local density of states of a fermion chain](img/dynamical-correlators_ldos.png#only-light)
+![Local density of states of a fermion chain](img/dynamical-correlators_ldos-dark.png#only-dark)
+
+The figure shows $A_i(\omega)$ of an open chain of 20 spinless fermions at
+half filling, with
+$H=-t\sum_i(c^\dagger_ic_{i+1}+\mathrm{h.c.})+V\sum_i(n_i-\frac12)(n_{i+1}-\frac12)$,
+from `get_spectral_function` with `nex=50` and $\delta=0.1$. The left panel
+is a site in the middle of the chain and the right panel the edge site. At
+$V=0$ the result lies on the exact free-fermion spectrum (dashed): 20
+levels inside the band $|\omega|<2t$, with a weight that depends on the
+site. In the middle of the chain the weight piles up at the band edges, as
+in $1/\sqrt{4t^2-\omega^2}$. At the edge it is largest at the band center.
+At $V=3t$ the chain is a charge density wave, and a gap of about $t$ opens
+at $\omega=\mu$. The weight moves to higher energies, around $\pm V$. Here
+the 50 states hold 79 per cent of the weight at the middle site, so part of
+the spectrum at high energy is missing; `info["captured"]` tells this.
+
+??? example "Code of this figure (docs/figures/dynamical-correlators_ldos/)"
+
+    ```python title="compute.py"
+    --8<-- "dynamical-correlators_ldos/compute.py"
+    ```
+
+    ```python title="plot.py"
+    --8<-- "dynamical-correlators_ldos/plot.py"
+    ```
+
 ![Mott gap of the Hubbard chain](img/dynamical-correlators_spectral_function.png#only-light)
 ![Mott gap of the Hubbard chain](img/dynamical-correlators_spectral_function-dark.png#only-dark)
 
@@ -218,7 +253,7 @@ A = hc.Cdagup[0]*hc.Cup[1]
 (x, y) = hc.get_dynamical_correlator(name=(A, A.get_dagger()), es=es, delta=0.1)
 ```
 
-The pair may also be operators already converted with `toMPO()` (section
-2). This avoids building them again in a scan over parameters. It works
+The pair may also be operators already converted with `toMPO()`
+([Hamiltonians and operators](operators.md)). This avoids building them again in a scan over parameters. It works
 with `mode="ED"` and with the DMRG submodes `"EX"`, `"CVM"` and `"ROOTN"`;
 the other submodes raise an error and need the operator itself.

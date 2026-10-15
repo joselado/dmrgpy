@@ -26,6 +26,22 @@ critical chain it grows as $\log\ell$ (see the figure in
 we need, roughly $\chi\gtrsim e^{S}$. The bond entropy needs an MPS, so it
 is not available with `mode="ED"`.
 
+## Reduced density matrix
+
+The reduced density matrix of one site,
+
+$$\rho_i=\mathrm{Tr}_{j\neq i}|\mathrm{GS}\rangle\langle\mathrm{GS}|,$$
+
+contains every local observable of that site, and its eigenvalues give the
+site entropy of the next section.
+
+```python
+rho = sc.get_rdm(i=0)     # d x d matrix, d the local dimension
+```
+
+It is computed from the MPS, so it is not available with `mode="ED"`,
+where it raises an error.
+
 ## Entropy of one site or two sites
 
 `wf.get_site_entropy(i)` and
@@ -122,7 +138,8 @@ sd = fc.get_gs().get_correlation_entropy_density()   # S resolved by site
 ```
 
 The most correlated orbitals are those with $n_\alpha$ closest to $1/2$.
-The keywords are:
+The four-point correlators and the two-particle density matrix are on
+the [Correlators and distributions](correlators.md) page. The keywords are:
 
 - `T`: temperature of `get_correlation_matrix` (default 0). Finite $T$ is
   computed with exact eigenstates, for small chains.
@@ -151,24 +168,3 @@ ED curve (dashed line).
     ```python title="plot.py"
     --8<-- "entanglement_natural_orbitals/plot.py"
     ```
-
-## Two-particle correlators
-
-The four-point tensor
-$\langle c_i^\dagger c_jc_k^\dagger c_l\rangle$ for all $i,j,k,l$ is
-
-```python
-t = fc.get_gs().get_four_correlation_tensor()   # shape (n, n, n, n)
-```
-
-The keyword `ctmode` chooses the method (`"batched"`, `"sweep"`, `"fold"`,
-`"full"`, `"explicit"`). The default chooses the fastest one for the
-backend, and `"explicit"` works on every backend.
-The two-particle density matrix
-$\langle c_i^\dagger c_j^\dagger c_lc_k\rangle$, with the pairs $i<j$ and
-$k<l$ as row and column, is
-
-```python
-from dmrgpy.entropytk.correlationentropy import get_highorder_correlation_matrix
-d2 = get_highorder_correlation_matrix(fc)
-```

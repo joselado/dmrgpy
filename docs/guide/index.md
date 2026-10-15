@@ -69,7 +69,7 @@ results are the same; only the speed and a few features differ.
 
 - `3`: ITensor v3 in C++, the default when it is compiled. The fastest.
 - `"python"`: the pure-Python DMRG, the default after `pip install`. It
-  can also run on a GPU ([GPU](gpu.md)).
+  can also run on a GPU ([Performance](performance.md)).
 - `2`: ITensor v2 in C++. Some features are missing.
 - `"julia_live"`: ITensors.jl in Julia, after
   `pip install "dmrgpy[julia]"`.
@@ -81,14 +81,17 @@ results are the same; only the speed and a few features differ.
 - [Getting started](models.md): the chain classes, their local operators,
   and how to write a Hamiltonian.
 - [Ground state](ground-state.md): energies, expectation values,
-  correlators, conserved sectors, excited states and entanglement.
-- [Phases](topology.md): Berry phases, fermion parity, fidelity
-  susceptibility and mean-field decoupling.
+  correlators and conserved sectors; the solver settings and warm starts;
+  excited states and degeneracies; entanglement; four-point correlators
+  and distributions; mean-field decoupling.
+- [Phases](topology.md): Berry phases, fermion parity and the fidelity
+  susceptibility.
 - [Dynamics](dynamical-correlators.md): dynamical correlators, spectral
-  functions, real-time evolution and STM spectra.
+  functions and the local density of states, real-time evolution and STM
+  spectra.
 - [Finite temperature](finite-temperature.md): purification, METTS and
   ED.
 - [Infinite chains](infinite-chains.md): iDMRG and VUMPS directly in the
   thermodynamic limit.
-- [More](cookbook.md): short recipes, post-processing tools and
-  performance.
+- [More](cookbook.md): the common models written out, post-processing
+  tools and performance.
