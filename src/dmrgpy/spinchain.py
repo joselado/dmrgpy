@@ -211,7 +211,9 @@ class Spin_Chain(Many_Body_Chain):
               general-S-extrapolation caveat as
               conductance.third_order_potential_dIdV (see that
               function's docstring). With mode="DMRG" the extra
-              kwargs are forwarded: `submode` (default "KPM"), `delta`,
+              kwargs are forwarded: `submode` (default "TASK" on
+              itensor_version="python" and 3, see below, and "KPM" on
+              the others), `delta`,
               `es` to kondospectrumtk.secondorder_dc.second_order_dIdV_dc
               (second-order term) and
               kondospectrumtk.potentialdc.third_order_potential_dIdV_dc
@@ -264,7 +266,7 @@ class Spin_Chain(Many_Body_Chain):
               convention); the chain's state is put back afterwards,
               gs_energy() included. Only the submodes that
               read the chain's state are accepted with n_gs>1 (KPM, CVM,
-              CVM_explicit, ROOTN, TD, TDZ and EX); SECTOR, which
+              CVM_explicit, ROOTN, TD, TDZ, EX and TASK); SECTOR, which
               measures from its own per-sector solve, and the others
               raise NotImplementedError.
               `dt2`, `n_t2_half`,
@@ -288,6 +290,14 @@ class Spin_Chain(Many_Body_Chain):
               secondorder_dc.py was made a trapezoid rule on 2026-09-12;
               the error was never KPM's).
 
+          submode="TASK" (itensor_version="python" and 3, where it
+              is the default) replaces all of the above by the exact sums of mode="ED" over the tangent-space
+              Krylov spectrum of the ground state
+              (kondospectrumtk/taskkondo.py, arXiv:2510.07279): no `es`,
+              `delta` or time grid, which raise if passed, only `nkry`
+              (default 100) and `n_gs`. Exact when maxm saturates the
+              Hilbert space (cutoff=0) and nkry exhausts the Krylov space.
+
         Returns (eV, dIdV)."""
         if order not in (2, 3): raise ValueError("order must be 2 or 3")
         eV = np.asarray(eV, dtype=float)
@@ -306,7 +316,7 @@ class Spin_Chain(Many_Body_Chain):
                     "get_kondo_spectrum(mode=\"ED\") got unexpected keyword "
                     "argument(s): "+", ".join(sorted(kwargs))+". They are "
                     "either mode=\"DMRG\" parameters (submode, delta, es, "
-                    "dt2, n_t2_half, dtau, n_tau_half, n_gs and the "
+                    "dt2, n_t2_half, dtau, n_tau_half, nkry, n_gs and the "
                     "dynamical-correlator keywords), which the exact "
                     "full-spectrum route does not use -- its T=0 already "
                     "averages a degenerate ground manifold -- or not "
@@ -340,31 +350,80 @@ class Spin_Chain(Many_Body_Chain):
                         Gamma0=Gamma0)
         return eV, dIdV
     def _get_kondo_spectrum_dmrg(self, eV, site, Jrho_s, U, T0, omega0,
-                                  Gamma0, order, submode="KPM", delta=2e-6,
+                                  Gamma0, order, submode=None, delta=None,
                                   es=None, dt2=None, n_t2_half=None,
                                   dtau=None, n_tau_half=None, n_gs=1,
                                   **dc_kwargs):
-        def terms():
-            """Every requested term on the state that is this chain's
-            ground state right now"""
-            from .kondospectrumtk.secondorder_dc import second_order_dIdV_dc
-            dIdV = second_order_dIdV_dc(self, site, eV, T0=T0, U=U,
-                                         mode="DMRG", submode=submode,
-                                         delta=delta, es=es, **dc_kwargs)
-            if order == 3:
-                from .kondospectrumtk.dmrgtwotime import two_time_kondo_term_dmrg
-                term = two_time_kondo_term_dmrg(
-                        self, site, eV, omega0=omega0, Gamma0=Gamma0,
-                        dt2=dt2, n_t2_half=n_t2_half, dtau=dtau,
-                        n_tau_half=n_tau_half)
-                dIdV = dIdV + 4*np.pi*T0**2*Jrho_s*term
-                if U != 0.0:
-                    from .kondospectrumtk.potentialdc import third_order_potential_dIdV_dc
-                    dIdV = dIdV + third_order_potential_dIdV_dc(
-                            self, site, eV, Jrho_s, U, T0=T0, omega0=omega0,
-                            Gamma0=Gamma0, mode="DMRG", submode=submode,
-                            delta=delta, es=es, **dc_kwargs)
-            return dIdV
+        implicit = submode is None
+        if submode is None:
+            # TASK wherever it exists: exact at saturation, no grids to
+            # choose, and orders of magnitude faster than the two-time
+            # TDVP Kondo term on the same chain. v2 and julia_live have no
+            # TASK, so they keep the correlator and two-time route.
+            from .taskdmrg import BACKENDS
+            submode = "TASK" if self.itensor_version in BACKENDS else "KPM"
+        if submode == "TASK":
+            # No frequency or time grid at all: the exact sums of the ED
+            # route (conductance.py) on the tangent-space Krylov spectrum
+            # (kondospectrumtk/taskkondo.py). The grid keywords of the other
+            # DMRG routes would be inert here, so they raise.
+            nkry = dc_kwargs.pop("nkry", 100)
+            unused = sorted(k for k, v in (("delta", delta), ("es", es),
+                    ("dt2", dt2), ("n_t2_half", n_t2_half), ("dtau", dtau),
+                    ("n_tau_half", n_tau_half)) if v is not None)
+            unused += sorted(dc_kwargs)
+            if unused:
+                raise TypeError(
+                    "get_kondo_spectrum(mode=\"DMRG\", submode=\"TASK\") "
+                    "takes nkry and n_gs only, it sums the poles exactly "
+                    "with no frequency or time grid; got "+", ".join(unused)
+                    +(". TASK is the default on itensor_version=\"python\" and 3; "
+                      "pass submode=\"KPM\" (or another correlator submode) "
+                      "for the correlator and two-time route these grids "
+                      "belong to" if implicit else ""))
+            def terms():
+                from .kondospectrumtk.taskkondo import TaskKondoSpectrum
+                from .kondospectrumtk import conductance
+                if self.get_mode(mode="DMRG") == "DMRG":
+                    ks = TaskKondoSpectrum(self, site, nkry=nkry)
+                else: # a chain too short for the session (mode.py): the
+                    # exact spectrum, as every other DMRG route falls back
+                    from .kondospectrumtk.edkondo import KondoSpectrum
+                    ks = KondoSpectrum(self, site, T=0.)
+                dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
+                if order == 3:
+                    dIdV = dIdV + conductance.third_order_kondo_dIdV(
+                            ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0)
+                    if U != 0.0:
+                        dIdV = dIdV + conductance.third_order_potential_dIdV(
+                                ks, eV, Jrho_s, U, T0=T0, omega0=omega0,
+                                Gamma0=Gamma0)
+                return dIdV
+            split_tol = Gamma0 # no broadening: the F kernel's own width
+        else:
+            if delta is None: delta = 2e-6
+            split_tol = delta
+            def terms():
+                """Every requested term on the state that is this chain's
+                ground state right now"""
+                from .kondospectrumtk.secondorder_dc import second_order_dIdV_dc
+                dIdV = second_order_dIdV_dc(self, site, eV, T0=T0, U=U,
+                                             mode="DMRG", submode=submode,
+                                             delta=delta, es=es, **dc_kwargs)
+                if order == 3:
+                    from .kondospectrumtk.dmrgtwotime import two_time_kondo_term_dmrg
+                    term = two_time_kondo_term_dmrg(
+                            self, site, eV, omega0=omega0, Gamma0=Gamma0,
+                            dt2=dt2, n_t2_half=n_t2_half, dtau=dtau,
+                            n_tau_half=n_tau_half)
+                    dIdV = dIdV + 4*np.pi*T0**2*Jrho_s*term
+                    if U != 0.0:
+                        from .kondospectrumtk.potentialdc import third_order_potential_dIdV_dc
+                        dIdV = dIdV + third_order_potential_dIdV_dc(
+                                self, site, eV, Jrho_s, U, T0=T0, omega0=omega0,
+                                Gamma0=Gamma0, mode="DMRG", submode=submode,
+                                delta=delta, es=es, **dc_kwargs)
+                return dIdV
         if (isinstance(n_gs, bool) or not isinstance(n_gs, (int, np.integer))
                 or n_gs < 1):
             raise ValueError("n_gs must be a positive integer, the size of "
@@ -415,14 +474,14 @@ class Spin_Chain(Many_Body_Chain):
             raise RuntimeError("n_gs=%d: get_excited_states returned only %d "
                                "independent states" % (n_gs, len(members)))
         split = np.max(np.abs(np.real(np.asarray(energies)) - e0))
-        if split > delta:
+        if split > split_tol:
             warnings.warn(
                 "get_kondo_spectrum(n_gs=%d): a member of the averaged "
                 "manifold lies %.3g away from the ground-state energy, more "
-                "than delta=%.3g. Every member is weighted equally, as in "
+                "than %.3g (delta, or Gamma0 under submode=\"TASK\"). Every member is weighted equally, as in "
                 "the T->0+ average over a degenerate manifold, so this is "
                 "not a T=0 average unless those states are meant to be "
-                "degenerate." % (n_gs, split, delta), RuntimeWarning,
+                "degenerate." % (n_gs, split, split_tol), RuntimeWarning,
                 stacklevel=3)
         # set_gs() marks each member as injected, so the first correlator
         # of terms() hands it to the session unswept, where KPM and TD read
@@ -464,6 +523,7 @@ class Spin_Chain(Many_Body_Chain):
 # two members of the 3-site Heisenberg doublet: each of these separates
 # them as mode="ED" does). maxent and CVMimag need modules this package
 # does not ship, and SECTOR measures from a per-sector solve of its own.
-_N_GS_SUBMODES = ("KPM", "CVM", "CVM_explicit", "ROOTN", "TD", "TDZ", "EX")
+_N_GS_SUBMODES = ("KPM", "CVM", "CVM_explicit", "ROOTN", "TD", "TDZ", "EX",
+                  "TASK")
 
 Spin_Hamiltonian = Spin_Chain # backwards compatibility

@@ -94,8 +94,9 @@ The two backends do not offer the same submodes, so "every submode"
 never means "every (mode,submode) pair": mode="DMRG" takes the names in
 SUBMODES below, while mode="ED" implements KPM, ED, EX, INV, CVM, ROOTN
 and TD and raises NotImplementedError for the rest (edtk/dynamics.py).
-"INV" is ED-only; "TDZ", "CVM_explicit", "CVMimag", "SECTOR" and
-"maxent" are DMRG-only.
+"INV" is ED-only; "TDZ", "CVM_explicit", "CVMimag", "SECTOR", "TASK"
+and "maxent" are DMRG-only, and "TASK" (taskdmrg.py, the tangent-space
+Krylov poles of arXiv:2510.07279) is itensor_version="python"-only.
 
 itensor_version="julia_live" is a third case and is only partly covered
 by the statement above. Its CVM/TDZ/EX/maxent go through the very same
@@ -182,7 +183,7 @@ from . import tdz
 from . import rootndmrg
 
 SUBMODES = ("KPM","TD","TDZ","CVM","CVM_explicit","CVMimag","ROOTN","EX",
-            "SECTOR","maxent")
+            "SECTOR","TASK","maxent")
 
 
 def get_dynamical_correlator(self,submode="KPM",**kwargs):
@@ -199,6 +200,9 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         # solved chain, the hand-off of a state set_gs()/set_initial_wf()
         # injected, a solve otherwise (groundstate.ground_state_on_session)
         from .groundstate import ground_state_on_session
+        if submode=="TASK": # before any solve, see taskdmrg._check_backend
+            from . import taskdmrg
+            taskdmrg._check_backend(self)
         hermitian = self.is_hermitian(self.hamiltonian)
         # The KPM route's own argument checks go ahead of the ground state,
         # and SECTOR, which solves both its sectors on a clone and never
@@ -255,6 +259,9 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             return rootndmrg.dynamical_correlator(self,**kwargs)
         elif submode=="EX": # EX mode
             return dcex.dynamical_correlator(self,**kwargs)
+        elif submode=="TASK": # tangent-space Krylov (arXiv:2510.07279)
+            from . import taskdmrg
+            return taskdmrg.dynamical_correlator(self,**kwargs)
         elif submode=="SECTOR": # sector-resolved Lehmann sum
             # itensor_version=2 reaches here (this branch admits 2, 3 and
             # "python") but has no quantum numbers at all; sectordc's own
@@ -270,7 +277,7 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             raise ValueError(
                 "get_dynamical_correlator: unrecognized submode %r; "
                 "expected one of KPM, TD, TDZ, CVM, CVM_explicit, CVMimag, "
-                "ROOTN, EX, SECTOR, maxent"%submode)
+                "ROOTN, EX, SECTOR, TASK, maxent"%submode)
     elif self.itensor_version=="julia_live": # Julia version
         # Only KPM/CVM/TDZ assume a Hermitian Hamiltonian (Chebyshev
         # spectrum-in-[-1,1], resolvent CG solve, and the TDZ damping
@@ -282,6 +289,9 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         # dispatch entirely, which also rejected EX/maxent even though
         # they work fine -- confirmed directly, this was blocking a
         # working code path.
+        if submode=="TASK":
+            from . import taskdmrg
+            taskdmrg._check_backend(self)
         if submode=="SECTOR":
             # No quantum numbers on this backend at all, so no sectors:
             # say that, rather than letting mpsjulialive fail on an

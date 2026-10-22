@@ -5154,6 +5154,101 @@ Three consequences worth knowing:
 assemblies on top: two (or three) of these correlators, plus the
 chemical-potential bookkeeping for the particle/hole halves.
 
+#### 4.8a-task Tangent-space Krylov (`taskdmrg.py`, `pyitensor/task.py`, `submode="TASK"`)
+
+`submode="TASK"` is the method of Kovalska, von Delft and Gleis,
+arXiv:2510.07279. The Lanczos recursion runs in the one-site tangent space
+of the ground-state MPS, vectors $\sum_\ell A_1\cdots A_{\ell-1}T_\ell
+B_{\ell+1}\cdots B_L$ with $T_\ell$ in the discarded space of $A_\ell$, so
+that the terms are mutually orthogonal and orthogonal to the ground state
+and every vector operation acts on the $T_\ell$ alone. Nothing is
+compressed, which is the difference from `rootndmrg.py` and from a
+Hallberg continued fraction on MPS, whose Krylov bases lose orthogonality
+through the compression after every $H|v\rangle$. One application of
+$P(H-E_0)P$ is one sweep, $O(LD^3dw)$, through two families of
+environments: the plain $A$-$A$ and $B$-$B$ ones built once, and the mixed
+ones carrying $T$ to their left (right), rebuilt every step.
+
+What to know before touching it:
+
+- Everything is dense NumPy on `_mps_arrays_lpr` arrays and on
+  `task.mpo_arrays(self.H)`, with every contraction a `tensordot` chain.
+  `np.einsum` with a precomputed path ran the same complex contractions
+  outside BLAS and was measured 1400x slower (576 s against 0.4 s for 30
+  steps on a 12-site chain at $D=64$).
+- The arithmetic is real whenever the ground state, $H$ and the operator
+  are exactly real (`task.real_if_exact`), and complex otherwise, numpy
+  promoting a complex start vector on real environments. The Lanczos and
+  block Krylov bases are stored flattened, so the reorthogonalization is
+  two matrix products. Together they took a 32-site Heisenberg chain at
+  $D=64$, `nkry=100`, from 17.9 s to 5.0 s, on both backends. One
+  application of $P(H-E_0)P$ at $L=40$, $D=64$ is then 56 ms, about 0.8
+  Gflop of real matrix products, which is close to what one core of BLAS
+  gives at these matrix sizes; this is why the v3 route exports arrays
+  instead of reimplementing the recursion in C++, which would run the same
+  products.
+- `mixed_gauge` makes $A_\ell$ and $B_\ell$ the same shape (a left QR
+  sweep, a right LQ sweep, a second left QR sweep). A rank-deficient bond
+  keeps its dimension, and the $A_\ell$ there is completed arbitrarily by
+  the QR, which keeps both gauge relations.
+- It uses `self.H`, never `_solve_H()`: under a conserved sector the
+  penalized operator would be wrong for $B|\mathrm{GS}\rangle$, which
+  leaves the sector.
+- The elastic term $\langle A\rangle\langle B\rangle$ at $\omega=0$ is
+  added explicitly, since the tangent space is orthogonal to the ground
+  state.
+- For $A\neq B^\dagger$ (`canonical.is_dagger_pair` false) the weights are
+  $\overline{\langle\alpha|a\rangle}\langle\alpha|b\rangle$ with
+  $|a\rangle=PA^\dagger|\mathrm{GS}\rangle$ expanded in the Krylov basis
+  of $|b\rangle$, one approximation beyond the paper.
+- The tangent space is the whole complement of the ground state only when
+  every bond is at its full dimension, which needs `cutoff=0`: with the
+  default cutoff a 10-site Heisenberg ground state keeps 31 of 32 states
+  on the middle bond and TaSK misses one direction, flagged by a two-site
+  variance of 1.8e-6 on the weighted poles.
+- With `nkry` well past the converged spectrum (400 steps on that 10-site
+  chain) extra poles appear with negligible weight and a large variance;
+  they do not move the curve, so the variance is read on the weighted
+  poles only.
+
+`tests/test_task_dynamical_correlator.py` pins the saturated case against
+the Lehmann sum (Hermitian pair, complex off-diagonal pair, the elastic
+term) and that truncation shows up in the variance;
+`examples/dynamical_correlator/task_VS_ED` plots both.
+
+The same machinery gives the T=0 Kondo spectrum
+(`kondospectrumtk/taskkondo.py`, `get_kondo_spectrum(mode="DMRG",
+submode="TASK")`). `task.projected_spectrum` runs a block Krylov from
+$PS_a|\mathrm{GS}\rangle$ and $PS_a^\dagger|\mathrm{GS}\rangle$, keeps
+the basis flattened so every overlap is one matrix product, and returns the
+energies of $\{|\mathrm{GS}\rangle\}\cup\{$Ritz states$\}$ with
+$\langle a|S_a|b\rangle$ in that basis, the tangent-tangent block as
+$PS_aP$. `TaskKondoSpectrum` has the six attributes `conductance.py`
+reads, so the second-order, Kondo and potential sums run unchanged. Two
+measured traps: a block Krylov breakdown threshold of 1e-12 accepted
+rounding noise once the reachable space was exhausted and normalized its
+gauge violation up to a unit vector, which made $PSP$ non-Hermitian by 0.4
+on the basis (the threshold is 1e-10, and the gauge is reapplied after each
+orthogonalization pass); and a ground-state partner comes out of the Ritz
+solve at $\pm10^{-16}$, so the zero-bias step read the wrong side of
+$\Theta_0$ in 5 runs of 6 on a Kramers doublet until energies within
+`edkondo`'s degeneracy tolerance were snapped to 0
+(`tests/test_kondo_spectrum_task.py`).
+
+On `itensor_version=3` the numerics are the same Python code. The session
+exports the ground-state MPS, the Hamiltonian MPO and each operator MPO as
+dense numpy site tensors (`Chain::hamiltonian_mpo`, and `mps_site_arrays`/
+`mpo_site_arrays` in `mpscpp3/bindings.cc`, which scatter QN blocks into
+the dense layout first, so a conserved-sector state exports too), and
+`taskdmrg.session_poles`/`session_spectrum` hand them to
+`task.correlator_poles`/`task.spectrum_from_arrays`, which the `"python"`
+session calls as well. Only the basis of each site index must be shared
+between the MPS and the MPOs, which it is since all are built on the
+session's own `sites_`. On a saturated 10-site Heisenberg chain v3 and
+`"python"` agree to 1e-11, and the export costs nothing next to the
+Lanczos. TASK is the Kondo default on both backends; v2 and `julia_live`
+raise.
+
 #### 4.8a Cost of the dynamical-correlator submodes, and what makes them fast
 
 Both `submode="KPM"` and `submode="TD"` are dominated by one inner loop

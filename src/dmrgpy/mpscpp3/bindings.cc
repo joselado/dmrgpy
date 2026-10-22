@@ -68,6 +68,75 @@ terms_from_python(std::vector<PyTerm> const& pyterms)
     return out;
     }
 
+// A dense copy of T with its indices in the given order, an absent
+// (default-constructed) Index standing for a length-1 axis at an open end.
+// Used to hand MPS and MPO site tensors to the tangent-space Krylov method,
+// which runs on numpy arrays (pyitensor/task.py). QN blocks are scattered
+// into the dense layout first, so a conserved-sector state exports too.
+static py::array_t<Cplx>
+tensor_to_array(ITensor T, std::vector<Index> order)
+    {
+    if (hasQNs(T)) T = removeQNs(T);
+    std::vector<py::ssize_t> shape;
+    std::vector<int> live;
+    for (int k = 0; k < (int)order.size(); ++k)
+        {
+        if (!order[k]) { shape.push_back(1); continue; }
+        order[k] = removeQNs(order[k]);
+        shape.push_back(dim(order[k]));
+        live.push_back(k);
+        }
+    py::array_t<Cplx> out(shape);
+    auto* data = out.mutable_data();
+    std::vector<IndexVal> ivs;
+    for (int k : live) ivs.push_back(order[k]=1);
+    std::vector<int> cnt(live.size(),1);
+    py::ssize_t total = out.size();
+    for (py::ssize_t flat = 0; flat < total; ++flat)
+        {
+        data[flat] = T.eltC(ivs);
+        // row-major: the last live index runs fastest
+        for (int k = (int)live.size()-1; k >= 0; --k)
+            {
+            if (cnt[k] < dim(order[live[k]])) { ++cnt[k]; ivs[k] = (order[live[k]]=cnt[k]); break; }
+            cnt[k] = 1; ivs[k] = (order[live[k]]=1);
+            }
+        }
+    return out;
+    }
+
+// Site tensors of an MPS as (left link, site, right link) arrays.
+static std::vector<py::array_t<Cplx>>
+mps_site_arrays(MPS const& psi)
+    {
+    int n = length(psi);
+    std::vector<py::array_t<Cplx>> out;
+    for (int i = 1; i <= n; ++i)
+        {
+        auto l = i > 1 ? linkIndex(psi,i-1) : Index();
+        auto r = i < n ? linkIndex(psi,i) : Index();
+        out.push_back(tensor_to_array(psi(i),{l,siteIndex(psi,i),r}));
+        }
+    return out;
+    }
+
+// Site tensors of an MPO as (left link, primed site, site, right link)
+// arrays, the primed leg being the bra (output) one.
+static std::vector<py::array_t<Cplx>>
+mpo_site_arrays(MPO const& H)
+    {
+    int n = length(H);
+    std::vector<py::array_t<Cplx>> out;
+    for (int i = 1; i <= n; ++i)
+        {
+        auto l = i > 1 ? linkIndex(H,i-1) : Index();
+        auto r = i < n ? linkIndex(H,i) : Index();
+        auto s = siteIndex(H,i);
+        out.push_back(tensor_to_array(H(i),{l,prime(s),s,r}));
+        }
+    return out;
+    }
+
 PYBIND11_MODULE(_dmrgcpp, m)
     {
     m.doc() = "dmrgpy in-process ITensor extension";
@@ -606,6 +675,16 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "scale_operator produced from one) instead of from a symbolic "
                "term list -- see Chain::set_hamiltonian_mpo's own comment for "
                "when that is worth doing.")
+        .def("hamiltonian_mpo",&Chain::hamiltonian_mpo,
+             py::return_value_policy::copy)
+        .def("mps_site_arrays",[](Chain&, MPS const& wf) { return mps_site_arrays(wf); },
+             py::arg("wf"),
+             "The site tensors of wf as dense (left link, site, right link) "
+             "complex arrays, length-1 links at the open ends.")
+        .def("mpo_site_arrays",[](Chain&, MPO const& A) { return mpo_site_arrays(A); },
+             py::arg("A"),
+             "The site tensors of A as dense (left link, primed site, site, "
+             "right link) complex arrays, length-1 links at the open ends.")
         .def("build_operator",[](Chain& self, std::vector<PyTerm> const& terms) {
                 return self.build_operator(terms_from_python(terms));
             }, py::arg("terms"))

@@ -1240,6 +1240,46 @@ class Chain:
                                         x0=x0)
         return -W / (np.pi * eta), x
 
+    def task_dynamical_correlator(self, terms_i, terms_j, terms_idag, nkry,
+                                  variance=False):
+        """Tangent-space Krylov poles of <GS|A delta(w-H+E0) B|GS>
+        (task.py, arXiv:2510.07279), A = terms_i and B = terms_j.
+
+        terms_idag is A^dagger, or None when A = B^dagger, in which case
+        the weights are |<alpha|P B|GS>|^2. Returns (w, weights, elastic,
+        variances, dim): the poles relative to E0, their complex weights,
+        the n = GS weight <A><B> sitting at w = 0, the two-site variance of
+        each pole (None unless variance=True) and the dimension of the
+        tangent space."""
+        from . import task
+        if self.wf0 is None:
+            raise RuntimeError("Chain.task_dynamical_correlator called before gs_energy")
+        Wadag = None
+        if terms_idag is not None:
+            Wadag = task.mpo_arrays(self._mpo(terms_idag))
+        ws, weights, var, dim = task.correlator_poles(
+            _mps_arrays_lpr(self.wf0), task.mpo_arrays(self.H),
+            task.mpo_arrays(self._mpo(terms_j)), Wadag, nkry, variance)
+        elastic = self.vev(terms_i, self.wf0) * self.vev(terms_j, self.wf0)
+        return ws, weights, complex(elastic), var, dim
+
+    def task_projected_spectrum(self, ops_terms, nkry):
+        """The ground state plus the Ritz states of the tangent-space
+        Hamiltonian on the block Krylov space of the given operators
+        (task.projected_spectrum, arXiv:2510.07279).
+
+        ops_terms is a list of (terms of O, terms of O^dagger). Returns
+        (e, mats, dim): energies relative to E0 (e[0] = 0 is the ground
+        state), the matrix <a|O|b> of each operator in that basis, and the
+        dimension of the tangent space."""
+        from . import task
+        if self.wf0 is None:
+            raise RuntimeError("Chain.task_projected_spectrum called before gs_energy")
+        ops = [(task.mpo_arrays(self._mpo(t)), task.mpo_arrays(self._mpo(td)))
+               for t, td in ops_terms]
+        return task.spectrum_from_arrays(_mps_arrays_lpr(self.wf0),
+                                         task.mpo_arrays(self.H), ops, nkry)
+
     def apply_inverse(self, terms, wf, tol, max_it):
         A = self._mpo(terms)
         return self._bicstab(A, wf, tol, max_it)

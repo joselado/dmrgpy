@@ -76,3 +76,15 @@ finding 13 and second-pass finding 17). `submode="CVM"`'s CG tolerance used
 to be absolute, so the Kondo route at its default broadening returned a flat
 curve of about 1e-8 where ED has a peak; it is relative to ||b|| since the
 2026-09-25b pass.
+
+**`submode="TASK"` (2026-10-22)** is a third T=0 DMRG route for all three
+terms: `kondospectrumtk/taskkondo.py` builds a `KondoSpectrum`-shaped
+object from the tangent-space Krylov spectrum (`pyitensor/task.py`,
+arXiv:2510.07279) and feeds it to `conductance.py` unchanged, so every
+prefactor and the exchange-diagram argument are inherited from the ED route
+rather than reimplemented. Exact at saturation (`cutoff=0`) once the Krylov
+space is exhausted (2e-11 on a 10-site S=1 impurity chain at `nkry=400`);
+`itensor_version="python"` and 3 (v3 exports its site tensors to the same
+Python code, `taskdmrg.session_spectrum`), the default on both; the near-zero Ritz energies are snapped
+to 0 or the zero-bias point is rounding-dependent on a degenerate ground
+state. It is in `_N_GS_SUBMODES`, checked on a Kramers doublet.

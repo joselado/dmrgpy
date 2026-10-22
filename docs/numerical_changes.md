@@ -1079,3 +1079,31 @@ when an observable is read off them
   (55 at $n=24$, $\lambda=0.6$, `delta=1e-12`): DMRG lands on an arbitrary
   superposition of the two states, and that path did not change.
 - An unknown `fmode` raises `ValueError`; it returned `None`.
+
+### The 2026-10-22 tangent-space Krylov route
+
+- **`get_kondo_spectrum(mode="DMRG")` without a `submode` changed on
+  `itensor_version=3` and `"python"`.** The default was `"KPM"`, with the
+  second-order and potential terms from the broadened dynamical correlator
+  and the Kondo term from two-time TDVP. It is now `"TASK"`, the exact sums
+  of `mode="ED"` over the tangent-space Krylov spectrum of the ground state
+  (arXiv:2510.07279), with no frequency or time grid. The result is exact
+  when `maxm` saturates the Hilbert space (`cutoff=0`) and `nkry` exhausts
+  the Krylov space. On `itensor_version=2` and `"julia_live"` the default
+  is still `"KPM"`.
+
+| case | before (`"KPM"`) | now (`"TASK"`) |
+|---|---|---|
+| 3-site chain of the Kondo guide page, against ED | 0.5% off, 119 s | 1e-15, 0.02 s |
+| S=1 impurity and 4 spins, saturated, against ED | broadened by `delta` | below 1e-9 |
+| 10-site S=1 impurity chain, saturated, `nkry=400` | not run (two-time TDVP too slow) | 2e-11 |
+
+- With the implicit default, the grid keywords of the old route (`es`,
+  `delta`, `dt2`, `n_t2_half`, `dtau`, `n_tau_half`) raise `TypeError`,
+  whose message says to pass `submode="KPM"`. An explicit `submode="KPM"`
+  gives exactly what the default gave before.
+- On a chain too short for the session (v3 below 3 sites, `"python"` on 1
+  site), the TASK route uses the exact T=0 ED spectrum, as the other DMRG
+  routes do.
+- `get_dynamical_correlator(submode="TASK")` is new on both backends;
+  nothing it replaces changed.

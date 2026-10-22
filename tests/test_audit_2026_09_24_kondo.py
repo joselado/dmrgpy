@@ -144,6 +144,7 @@ def test_n_gs_averages_the_two_time_kondo_term_too(monkeypatch):
     dt2, dtau = 25./Gamma0/10, (2*np.pi/2e-5)/15
     _, d = sc.get_kondo_spectrum(
             eVs, site=0, Jrho_s=Jrho_s, T=0.0, order=3, mode="DMRG",
+            submode="KPM", # the two-time route, not the TASK default
             omega0=omega0, Gamma0=Gamma0, es=np.array([0.]), n_gs=2,
             dt2=dt2, n_t2_half=n_t2_half, dtau=dtau, n_tau_half=n_tau_half)
     term = d/(4*np.pi*Jrho_s)
@@ -187,7 +188,7 @@ def test_n_gs_1_never_touches_the_excited_states(monkeypatch):
     for extra in ({}, dict(n_gs=1)):
         _, d = sc._get_kondo_spectrum_dmrg(eVs, 0, 0.5, 0.0, 2.0, 20e-3,
                                            5e-6, order=2, es=np.array([0.]),
-                                           **extra)
+                                           submode="KPM", **extra)
         assert np.allclose(d, 1.0)
 
 
@@ -196,7 +197,8 @@ def test_n_gs_must_be_a_positive_integer(n_gs):
     sc = zeeman_spin(B=5.0)
     with pytest.raises(ValueError, match="n_gs"):
         sc.get_kondo_spectrum(np.array([0.0]), site=0, T=0.0, order=2,
-                              mode="DMRG", es=np.array([0.0]), n_gs=n_gs)
+                              mode="DMRG", submode="KPM", es=np.array([0.0]),
+                              n_gs=n_gs)
 
 
 def test_n_gs_needs_an_mps_session():
@@ -206,7 +208,8 @@ def test_n_gs_needs_an_mps_session():
     sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
     with pytest.raises(NotImplementedError, match="n_gs"):
         sc.get_kondo_spectrum(np.array([0.0]), site=0, T=0.0, order=2,
-                              mode="DMRG", es=np.array([0.0]), n_gs=2)
+                              mode="DMRG", submode="KPM", es=np.array([0.0]),
+                              n_gs=2)
 
 
 # ------------------------------------------------------------ finding 13

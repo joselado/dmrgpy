@@ -127,8 +127,29 @@ These keywords have no default and must be chosen for the problem:
   ground state, `mode="ED"` averages over the multiplet, while DMRG
   returns one member. `n_gs=g` makes DMRG average over `g` states too.
 
+With `submode="TASK"`, the default on `itensor_version=3` and
+`"python"`, there is no frequency or time grid at all. On
+`itensor_version=2` the default stays `"KPM"` with the two-time route
+above. The tangent-space Krylov method of
+[Choosing a correlator method](correlator-methods.md) gives the ground
+state and the excited states that the spin of the site reaches, as
+discrete energies, and the exact sums of `mode="ED"` run over them:
+
+```python
+eV, dIdV = sc.get_kondo_spectrum(eV, Jrho_s=-0.05, U=0.0, T=0.0, order=3,
+               omega0=2e-3, Gamma0=2e-3, mode="DMRG", submode="TASK",
+               nkry=100)
+```
+
+The result is exact when `maxm` holds the whole Hilbert space (with
+`sc.cutoff = 0`) and `nkry` is large enough; with a smaller `maxm` the
+excited states are one-site changes of the ground state, which moves the
+steps slightly. It takes only `nkry` (default 100, increase until the
+spectrum stops changing) and `n_gs`.
+
 See `examples/kondo/kondo_third_order_dmrg_VS_ED`, which is the right
-panel of the figure in [Third order](#third-order). The tip couples to one
+panel of the figure in [Third order](#third-order), and
+`examples/kondo/kondo_third_order_task_VS_ED`. The tip couples to one
 site only; several sites with independent couplings are not implemented.
 
 ## Orbital-resolved IETS of a magnetic atom

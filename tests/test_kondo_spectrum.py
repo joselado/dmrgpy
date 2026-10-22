@@ -284,7 +284,8 @@ def test_get_kondo_spectrum_mode_dmrg_rejects_nonzero_T_and_missing_kwargs():
     # test_kondo_spectrum_dmrgtwotime.py for the functional coverage of
     # this path with a compiled backend.
     with pytest.raises(ValueError):
-        sc.get_kondo_spectrum(eVs, site=0, T=0.0, U=0.1, order=3, mode="DMRG")
+        sc.get_kondo_spectrum(eVs, site=0, T=0.0, U=0.1, order=3, mode="DMRG",
+                              submode="KPM")
     with pytest.raises(ValueError):
         sc.get_kondo_spectrum(eVs, site=0, mode="bogus")
 
@@ -321,7 +322,7 @@ def test_get_kondo_spectrum_dmrg_combines_terms_correctly(monkeypatch):
     sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
     T0, Jrho_s = 2.0, 0.5
     common = dict(es=np.array([0.]), dt2=1., n_t2_half=1, dtau=1.,
-                  n_tau_half=1)
+                  n_tau_half=1, submode="KPM")
 
     _, dIdV = sc._get_kondo_spectrum_dmrg(eVs, 0, Jrho_s, 0.0, T0, 20e-3,
                                            5e-6, order=3, **common)

@@ -39,6 +39,15 @@ defined in [Dynamical correlators](dynamical-correlators.md#the-quantity).
   excitations: the poles come out at converged energies with exact weights.
   It needs `itensor_version=3` or `"python"`. `get_spectral_function` and
   `get_spin_spectral_function` are built on it.
+- `"TASK"`: the tangent-space Krylov method of Kovalska, von Delft and
+  Gleis ([arXiv:2510.07279](https://arxiv.org/abs/2510.07279)). A Lanczos
+  recursion runs in the space of one-site changes of the ground-state MPS,
+  where the Krylov vectors stay exactly orthogonal. It gives discrete poles
+  and weights for all frequencies at once, and an error bar for each pole.
+  The one approximation is that the excited states are one-site changes of
+  the ground state, which is exact when `maxm` reaches the full Hilbert
+  space and weakest for broad multi-particle continua. It needs
+  `itensor_version=3` or `"python"`.
 - `"ED"` and `"INV"` (`mode="ED"` only): the exact Lehmann sum and the
   exact resolvent. These are the references to check the other methods.
 - `"maxent"` and `"CVMimag"`: need the separate modules `dmrgpy.maxenttk`
@@ -47,7 +56,8 @@ defined in [Dynamical correlators](dynamical-correlators.md#the-quantity).
 
 As a rule: KPM for the full spectrum, CVM or TD for a narrow window at
 high resolution, TDZ when TD needs too large a bond dimension, EX or
-SECTOR when a few states are enough.
+SECTOR when a few states are enough, TASK for sharp poles with an error
+bar on each.
 
 ![Six methods against ED](img/correlator-methods_comparison.png#only-light)
 ![Six methods against ED](img/correlator-methods_comparison-dark.png#only-dark)
@@ -136,6 +146,15 @@ the ground state itself, so `maxm` and `nsweeps` ([Ground state](ground-state.md
   and `info["captured"]` is the fraction of the weight
   $\langle\mathrm{GS}|B^\dagger B|\mathrm{GS}\rangle$ they account for. A
   warning appears below 0.9; increase `nex` then.
+- `nkry` (TASK, default 100): the number of Lanczos steps, about the
+  number of poles. With `return_poles=True`, TASK returns
+  `(es, y, info)`: `info["omega"]` and `info["weight"]` are the poles and
+  their weights, `info["elastic"]` the weight
+  $\langle A\rangle\langle B\rangle$ at $\omega=0$, and
+  `info["variance"]` the two-site variance of each pole,
+  $\lVert P^{2\perp}H|\alpha\rangle\rVert^2$. Its square root is an
+  error bar on the energy of the pole; increase `maxm` until it is small
+  for the poles you need.
 
 ## Reusing the KPM moments
 

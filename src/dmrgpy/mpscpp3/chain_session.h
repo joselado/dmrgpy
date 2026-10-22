@@ -1249,6 +1249,15 @@ class Chain
         return mpo_from_terms(terms);
         }
 
+    // The Hamiltonian MPO in physical units, for the tangent-space Krylov
+    // method (submode="TASK"), which reads its site tensors from Python.
+    MPO const&
+    hamiltonian_mpo() const
+        {
+        if (!have_H_) Error("Chain::hamiltonian_mpo called before set_hamiltonian");
+        return H_;
+        }
+
     MPS
     apply_pure_operator(MPO const& A, MPS const& wf) const
         {
