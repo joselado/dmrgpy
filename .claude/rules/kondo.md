@@ -12,7 +12,8 @@ These are the notes CLAUDE.md used to carry as its "STM/Kondo tunneling
 spectra" section; they load when a file under `kondospectrumtk/`, a Kondo
 test or a Kondo example is read or edited.
 
-`Spin_Chain.get_kondo_spectrum` is the third-order perturbation theory of
+`get_kondo_spectrum` (`Spin_Chain` and the spinful fermion chains, see the
+last paragraph) is the third-order perturbation theory of
 Ternes, NJP 17 063016 (2015), arXiv:1505.04430; `mode="ED"` (full
 diagonalization, any T) is the reference implementation and `mode="DMRG"`
 (T=0 only) reproduces its two T=0-reducible pieces via the dynamical
@@ -88,3 +89,16 @@ space is exhausted (2e-11 on a 10-site S=1 impurity chain at `nkry=400`);
 Python code, `taskdmrg.session_spectrum`), the default on both; the near-zero Ritz energies are snapped
 to 0 or the zero-bias point is rounding-dependent on a degenerate ground
 state. It is in `_N_GS_SUBMODES`, checked on a Kramers doublet.
+
+**Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
+`kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by
+`Spin_Chain`, `Spinful_Fermionic_Chain` and `Spinful_Fermionic_Chain_Native`;
+nothing in the route reads the site statistics, only `Sx/Sy/Sz[site]`, the
+Hamiltonian and the session. `edkondo` takes its spin matrices from
+`edobj.get_operator()`, so a conserved sector restricts them (Nf=n makes a
+6-site Hubbard chain 924 states instead of 4096) and an Sz sector raises.
+TASK agrees with ED to 1e-11 on both classes at saturation; at maxm=12 on 6
+sites the interleaved class missed by 3.5e-2 and the native by 8e-3 (at
+equal maxm, which is not the same truncation on twice the bonds, so the
+two-site S_site there is a likely cause, not an isolated one). `tests/test_kondo_spectrum_spinful.py`,
+`examples/kondo/kondo_third_order_hubbard_VS_heisenberg`.

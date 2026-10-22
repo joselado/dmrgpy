@@ -757,7 +757,8 @@ is per session; that cache is also what makes a site sweep, and so
 
 ### STM/Kondo tunneling spectra (`kondospectrumtk/`)
 
-`Spin_Chain.get_kondo_spectrum` is the third-order perturbation theory of
+`get_kondo_spectrum` (on `Spin_Chain` and both spinful fermion chains,
+`kondospectrumtk/kondomethod.py`) is the third-order perturbation theory of
 Ternes (NJP 17 063016, arXiv:1505.04430); `mode="ED"` is the reference
 implementation at any T and `mode="DMRG"` reproduces it at T=0 via the
 dynamical correlator and a two-time TDVP construction. Every prefactor was

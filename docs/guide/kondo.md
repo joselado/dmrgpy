@@ -152,6 +152,48 @@ panel of the figure in [Third order](#third-order), and
 `examples/kondo/kondo_third_order_task_VS_ED`. The tip couples to one
 site only; several sites with independent couplings are not implemented.
 
+## Hubbard chains
+
+The same method works on the spinful fermion chains,
+`Spinful_Fermionic_Chain` and `Spinful_Fermionic_Chain_Native`. The tip
+then couples to the electron spin of the site,
+$\mathbf{S}_i=\frac12 c^\dagger_i\boldsymbol{\sigma}c_i$. The spectrum
+includes the charge fluctuations that a spin model leaves out. At half
+filling and large $U$ the Hubbard chain maps onto a Heisenberg chain with
+$J=4t^2/U$, so the two spectra can be compared with the bias in units of
+$J$:
+
+```python
+import numpy as np
+from dmrgpy import fermionchain
+n, t, U = 6, 1.0, 16.0
+J = 4*t**2/U
+fc = fermionchain.Spinful_Fermionic_Chain_Native(n)
+h = 0
+for i in range(n-1):
+    h = h - t*(fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1])
+h = h + h.get_dagger()
+for i in range(n):
+    h = h + U*(fc.Nup[i]-0.5)*(fc.Ndn[i]-0.5)
+fc.set_hamiltonian(h)
+fc.set_conserved_sector(Nf=n)       # half filling, for mode="ED"
+eV, dIdV = fc.get_kondo_spectrum(np.linspace(-3*J, 3*J, 240), Jrho_s=-0.05,
+               T=0.0, kB=1.0, omega0=10*J, Gamma0=1e-2*J)
+```
+
+With `mode="ED"` a sector of fixed electron number `Nf` is exact at
+$T=0$, since $\mathbf{S}_i$ does not change the number of electrons. At
+$T>0$ it gives the canonical ensemble at that `Nf`. A sector of fixed
+`Sz` raises, since $S_\pm$ leaves it. `mode="DMRG"` with
+`submode="TASK"` works on both classes. Use
+`Spinful_Fermionic_Chain_Native`: there the site is one tensor, while on
+`Spinful_Fermionic_Chain` the spin of the site acts on two tensors, so a
+truncated `maxm` was less accurate in our tests. As $U/t$ grows the Hubbard spectrum
+approaches the Heisenberg one, with a difference of order $(t/U)^2$: the
+weight of the steps drops with the double occupancy, and the steps move
+with the corrections to $J$. See
+`examples/kondo/kondo_third_order_hubbard_VS_heisenberg`.
+
 ## Orbital-resolved IETS of a magnetic atom
 
 `dmrgpy.atom` describes a single atom with five $d$ orbitals instead of a

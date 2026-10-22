@@ -5470,8 +5470,13 @@ correctly sharpens with more moments.)
 
 ### 4.8c STM/Kondo tunneling spectra (`kondospectrumtk/`)
 
-`Spin_Chain.get_kondo_spectrum` (physics documented in the user guide page
-`docs/guide/kondo.md`) is a different kind of ED calculation from the dynamical-correlator
+`get_kondo_spectrum` (physics documented in the user guide page
+`docs/guide/kondo.md`) is defined once, on
+`kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, which `Spin_Chain`,
+`Spinful_Fermionic_Chain` and `Spinful_Fermionic_Chain_Native` inherit;
+it reads only the chain's `Sx/Sy/Sz[site]`, Hamiltonian and session, so
+on a fermion chain the impurity spin is the electron spin of the orbital.
+It is a different kind of ED calculation from the dynamical-correlator
 machinery above: it needs the *full* spectrum (every eigenstate, as a
 possible virtual intermediate state in the third-order perturbation
 theory), not just the ground state or a resolvent at a target frequency.

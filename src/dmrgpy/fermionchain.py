@@ -6,6 +6,7 @@ from .algebra import algebra
 from .fermionchaintk import staticcorrelator
 from . import funtk
 from . import gap
+from .kondospectrumtk.kondomethod import KondoSpectrumMixin
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
@@ -159,7 +160,7 @@ class Majorana_Chain(Fermionic_Chain):
 
 
 
-class Spinful_Fermionic_Chain(Fermionic_Chain):
+class Spinful_Fermionic_Chain(KondoSpectrumMixin,Fermionic_Chain):
     """
     Class to deal with fermionic Hamiltonians with
     spin degree of freedom
@@ -235,7 +236,7 @@ class Spinful_Fermionic_Chain(Fermionic_Chain):
 
 
 
-class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
+class Spinful_Fermionic_Chain_Native(KondoSpectrumMixin,Many_Body_Chain):
     """
     Spinful fermionic (Hubbard-like) chain built directly on native
     spinful sites: each orbital is a *single* tensor-network site with a
@@ -254,10 +255,11 @@ class Spinful_Fermionic_Chain_Native(Many_Body_Chain):
     transform in Python keeps every backend (ED, the C++ extensions, the
     pure-Python engine, Julia) fed from the exact same term list.
 
-    Only itensor_version=3 wires up a native spinful site on the DMRG
-    side today: mpscpp2/get_sites.h never registered a Hubbard/Electron
-    site type, and neither pyitensor (itensor_version="python") nor
-    mpsjulialive (itensor_version="julia_live") implement one. A DMRG
+    Only itensor_version=3 and "python" wire up a native spinful site on
+    the DMRG side today (pyitensor/sites/fermion.py's ElectronSite):
+    mpscpp2/get_sites.h never registered a Hubbard/Electron site type,
+    and mpsjulialive (itensor_version="julia_live") does not implement
+    one. A DMRG
     call with any other itensor_version simply is not available for this
     class -- unlike an uncompiled C++ extension, there is no automatic
     ED fallback for a site type mode.py doesn't know how to build, so
