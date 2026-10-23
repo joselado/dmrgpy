@@ -697,9 +697,9 @@ class Chain
     gs_energy_generalized(std::vector<MOTerm> const& terms_a,
                            double lam0=std::numeric_limits<double>::quiet_NaN())
         {
-        if (!have_H_) Error("Chain::gs_energy_generalized called before set_hamiltonian");
+        if (!have_H_) throw std::runtime_error("Chain::gs_energy_generalized called before set_hamiltonian");
         if (sites_.length()<3)
-            Error("Chain::gs_energy_generalized: ITensor v3's two-site dmrg() "
+            throw std::runtime_error("Chain::gs_energy_generalized: ITensor v3's two-site dmrg() "
                   "aborts the whole process for chains shorter than 3 sites "
                   "(see mode.py's own itensor_version==3 guard) -- use "
                   "itensor_version=\"python\" for short chains instead");
@@ -728,17 +728,22 @@ class Chain
             // this solve is used and the unit scale needs no undoing
             dmrg(wf0_,solver_hamiltonian(Heff),sweeps1,dmrg_args());
             double a_psi = innerC(wf0_,A,wf0_).real();
-            if (!(std::abs(a_psi)>1e-14))
+            // positive, not only nonzero: A=-1 returned the largest
+            // eigenvalue and an indefinite A a number that is no eigenvalue
+            if (!(a_psi>1e-14))
                 // "!(>tol)", not "<tol": a NaN a_psi fails *both*
                 // comparisons, so the more obvious "<tol" form would let
                 // a NaN silently slip past this guard -- found via code
                 // review, same fix applied to pyitensor/dmrg.py's
                 // identical guard.
-                Error("Chain::gs_energy_generalized: <psi|A|psi> collapsed to "
-                      "~0 (or NaN) mid-iteration (A may not be positive "
+                // a throw, not ITensor's Error(), which calls abort() and
+                // killed the interpreter for a singular A
+                throw std::runtime_error(tinyformat::format(
+                      "Chain::gs_energy_generalized: <psi|A|psi> = %g is not "
+                      "positive mid-iteration (A is not positive "
                       "definite, or the sweep drove psi toward A's "
                       "near-null-space) -- cannot form a meaningful "
-                      "generalized Rayleigh quotient");
+                      "generalized Rayleigh quotient",a_psi));
             double h_psi = innerC(wf0_,H_,wf0_).real();
             lam = h_psi/a_psi;
             }
@@ -1100,7 +1105,7 @@ class Chain
                 // "!(>tol)", not "<tol": see gs_energy_generalized's
                 // identical guard for why the negated form is needed to
                 // also catch NaN.
-                Error("Chain::nhdmrg_generalized: <psi_L|A|psi_R> collapsed "
+                throw std::runtime_error("Chain::nhdmrg_generalized: <psi_L|A|psi_R> collapsed "
                       "to ~0 (or NaN) mid-iteration (A may not be positive "
                       "definite, or the sweep drove the biorthogonal pair "
                       "toward A's near-null-space) -- cannot form a "

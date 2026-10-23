@@ -1149,3 +1149,28 @@ weight of every other route, which no earlier result could have used since
 the route never ran. `Spinon_Chain.gs_energy()` returns the projected
 energy (-2.4935771 on 6 sites, equal to the Heisenberg ED) where every call
 raised `AttributeError`.
+
+Afterwards, the reviewed leads (the record's last section, findings 6 to
+11). Two calls return different numbers now, and in both the old number was
+wrong:
+
+| Call | Chain | Before | After |
+|---|---|---|---|
+| `get_site_entropy`, `get_pair_entropy`, `get_mutual_information`, every backend and `mode="ED"` | any state with a site or pair density-matrix eigenvalue at or below 1e-6, e.g. a 4-site chain in a staggered field with XY coupling 0.003 | the -p ln p of each such eigenvalue dropped: 5.625e-7 | exact: 8.657e-6, at most about 1.4e-5 higher per dropped eigenvalue |
+| `gs_energy` and everything after it on `"python"` | two equivalent spins on a `SpinBoson_Chain` (exact swap symmetry inside the first two-site block) | an excited level, -4.470573 in 11 of 12 runs | the ground state, -5.917370 |
+
+Every other fresh `"python"` solve agrees with the old one to its
+convergence: the random part that now enters each Lanczos start is there
+on the first sweep only, from a generator of its own, so numpy's global
+stream and every seeded start are where they were. A warm start takes no
+noise and is unchanged. Calls that raise now
+where they returned a number: `get_pair_entropy`/`get_mutual_information`
+are scale invariant where they raised (or, at norm^2 within 1e-3 of 1, were
+up to 3e-4 off per 1e-3); `gs_energy_generalized` with a non-Hermitian
+metric (`ValueError`) or one whose `<psi|A|psi>` goes to 0 or below
+(`RuntimeError`; A=-1 returned the largest eigenvalue, 2.4936 on a 6-site
+Heisenberg chain, and on v3 a singular A aborted the interpreter); and
+`metts_vev` with an all-diagonal basis on a chain whose conserved charge H
+keeps (`("Nupdn",)`, `("F",)`, `("N2",)`, ...: one charge sector, error bar
+0). An NH-DMRG state that did not converge prints its warning again on
+every reuse.

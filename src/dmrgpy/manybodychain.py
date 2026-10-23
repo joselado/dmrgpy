@@ -1336,7 +1336,9 @@ class Many_Body_Chain():
         # returned the stored state without reading x; and every other
         # keyword was read by neither, so a typo or maxde= went unread on a
         # solved chain (2026-09-25b hole hunt, finding 5)
-        if groundstate.stored_answer_holds(self,kwargs): return self.wf0
+        if groundstate.stored_answer_holds(self,kwargs):
+            groundstate.warn_unconverged(self)
+            return self.wf0
         if best: groundstate.best_gs(self,n=n,**kwargs) # best ground state
         else: self.gs_energy(**kwargs) # perform a ground state calculation
         return self.wf0 # return wavefunction
@@ -1383,7 +1385,9 @@ class Many_Body_Chain():
           # stored energy without reading x whenever the state was current,
           # and so did gs_energy(maxde=...) without refining, and a
           # misspelled keyword that raises on a fresh chain
-          if groundstate.stored_answer_holds(self,kwargs): return self.e0
+          if groundstate.stored_answer_holds(self,kwargs):
+              groundstate.warn_unconverged(self)
+              return self.e0
           return groundstate.gs_energy(self,**kwargs)
       elif mode=="ED":
           # the keywords, read as an exact solve honours them; they used to

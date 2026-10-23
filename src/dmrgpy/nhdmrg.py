@@ -240,6 +240,7 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
             "help; otherwise it is not a convergence problem. Last "
             "attempt's error: "+repr(last_error)) from last_error
     resid,energy,psil,psir = best
+    self._nh_last_residual = (resid,tol) # read by gs_energy_nhdmrg
     if resid>=tol:
         print("Warning: nhdmrg did not reach the residual tolerance "
               "after",ntries,"tries (best relative residual "+str(resid)+
@@ -517,6 +518,8 @@ def gs_energy_nhdmrg(self,**kwargs):
     # two, and nonhermitian/kpm.py refuses an unpaired right state instead
     # of pairing it with a left state solved for another one
     self._nh_left_for = self.wf0
+    resid,tol = self._nh_last_residual
+    self._gs_unconverged = (self.wf0,resid,tol) if resid>=tol else None
     self._gs_injected = None
     self._gs_supplied = False # a solve's state, not the caller's
     _record_hamiltonian_sent(self)

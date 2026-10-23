@@ -32,14 +32,16 @@ work around (_fresh_link_copy) -- except here the environment is built
 actively rewrites psi's own tensors as it goes, so the fix has to be
 applied per-site-as-we-go rather than once upfront.
 
-Noise-term support (density-matrix perturbation, meant to help DMRG escape
-symmetric local minima) is not implemented -- randomMPS()'s starting point
-already avoids the specific trap that exists to fix (see get_sites.h's
-comment on why mpscpp3 seeds from an actual random MPS rather than a
-product state), and dropping it is exactly the kind of optionality
-CLAUDE.md's plan allows as long as dmrgpy's own results aren't affected.
-Sweeps.noise is accepted (for call-signature compatibility with
-mpscpp3/chain_session.h's make_sweeps()) but otherwise unused.
+ITensor's density-matrix noise term is not implemented. Its job, getting
+DMRG out of a symmetric local minimum, is done instead by _noisy_start:
+on the first sweep from a fresh start, when the schedule gives that sweep
+noise, dmrg() mixes a random vector of relative weight `noise` into each
+Lanczos start, drawn from its own generator. A random
+MPS start is not enough on its own: the first local solve can land exactly
+in one sector of a symmetry H conserves (two equivalent sites inside one
+two-site block), and a Krylov space grown from there never leaves it
+(2026-10-23 hole hunt, leads, finding 11). The excited-state and
+generalized searches below still take no noise.
 
 dmrg_generalized() below solves the *generalized* eigenproblem
 H|psi>=lambda*A|psi> (A Hermitian positive definite) by reusing the same
@@ -414,14 +416,43 @@ def zero_site_heff(L, Lbra, R, Rbra, C, left_link, right_link):
     return matvec, order_in, shape, x0
 
 
-def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=200):
+# its own stream, so that noise leaves numpy's global one, which seeds the
+# random start states, exactly where it was
+_NOISE_RNG = np.random.default_rng(0)
+
+
+def _noisy_start(x0, noise):
+    """The Lanczos start x0 plus a random vector of relative weight noise
+    (norm sqrt(noise)*||x0||). A Krylov space grown from a vector inside a
+    sector H conserves never leaves it, so without this a state that falls
+    into the wrong sector at its first local solve stays there: two
+    equivalent spins of a SpinBoson_Chain ended in the swap-antisymmetric
+    sector, -4.470573 for an exact -5.917370, in 11 of 12 runs (2026-10-23
+    hole hunt, leads, finding 11). It plays the role of ITensor's noise term.
+    dmrg() uses it on the first sweep of a fresh start only: on every sweep
+    of the noise schedule it left the eigenvectors of a short run less
+    converged, and on a warm start it moved the state inside a degenerate
+    level the caller had chosen a member of."""
+    if not noise > 0: return x0
+    _xp = bk.xp()
+    r = _NOISE_RNG.standard_normal(x0.size)
+    if np.iscomplexobj(x0): r = r + 1j*_NOISE_RNG.standard_normal(x0.size)
+    r = bk.asarray(r)
+    nx = _xp.linalg.norm(x0)
+    return x0 + (np.sqrt(noise)*nx/_xp.linalg.norm(r))*r
+
+
+def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=200,
+                        noise=0.0):
     """Diagonalize the 2-site effective Hamiltonian at bond (i,i+1) for its
     lowest eigenpair. Returns (energy, theta_ITensor).
 
     niter_floor is the minimum Krylov dimension (see the comment below for
     why 200); only a spectral-bound solve, whose answer is a window edge
-    rather than a state, passes a smaller one."""
+    rather than a state, passes a smaller one. noise, when positive, mixes
+    a random vector into the Lanczos start (_noisy_start)."""
     matvec, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
+    x0 = _noisy_start(x0, noise)
 
     dim = x0.size
     if dim <= 3:
@@ -475,7 +506,8 @@ def _apply_local_update(ket, i, theta, cutoff, maxdim, direction):
         ket.center = i
 
 
-def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=200):
+def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=200,
+                    noise=0.0):
     """One full right-then-left two-site ground-state sweep against a
     fixed H, mutating psi in place. Returns the last local bond's
     eigenvalue (dmrg()'s own returned-`energy` convention -- see its
@@ -491,7 +523,7 @@ def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=200):
         L, Lbra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
         energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter,
-                                            niter_floor)
+                                            niter_floor, noise)
         _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
         left_env[i] = _extend_left(L, Lbra, H, psi, i)
 
@@ -500,24 +532,29 @@ def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=200):
         L, Lbra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
         energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter,
-                                            niter_floor)
+                                            niter_floor, noise)
         _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
         right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
 
     return energy
 
 
-def dmrg(psi, H, sweeps, quiet=True, niter_floor=200):
+def dmrg(psi, H, sweeps, quiet=True, niter_floor=200, noisy_start=True):
     """Two-site ground-state DMRG. Mutates psi in place and returns the
     final energy -- mirrors ITensor's own dmrg(psi,H,sweeps,args) signature
     (minus the Args bag, which this package uses explicit kwargs for
     throughout, and minus the excited-state penalty overload -- see
     dmrg_excited() for that). niter_floor is _local_ground_state's minimum
-    Krylov dimension; leave it alone except for a spectral-bound solve."""
+    Krylov dimension; leave it alone except for a spectral-bound solve.
+    noisy_start=False keeps psi's own sector (_noisy_start), for a warm
+    start the caller chose, such as one member of a degenerate level."""
+    global _NOISE_RNG
+    _NOISE_RNG = np.random.default_rng(0) # the same solve twice, bit for bit
     energy = None
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
-        energy = _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor)
+        energy = _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor,
+                                 noise if noisy_start and sweep_i == 0 else 0.0)
         if not quiet:
             print("sweep {}: energy = {}".format(sweep_i, energy))
 
@@ -619,17 +656,19 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
         Heff = mps_sum(H, A * (-lam))
         _dmrg_one_sweep(psi, Heff, maxdim, cutoff, niter)
         a_psi = inner(psi, A, psi).real
-        if not (abs(a_psi) > 1e-14):
+        # positive, not only nonzero: A=-1 returned the largest
+        # eigenvalue and an indefinite A a number that is no eigenvalue
+        if not (a_psi > 1e-14):
             # written as "not (> tol)" rather than "< tol": a NaN a_psi
             # (e.g. from numerical blowup elsewhere) fails *both*
             # comparisons, so the more obvious "< tol" form would let a
             # NaN silently slip past this guard and propagate as a
             # seemingly-converged NaN lambda -- confirmed by code review.
             raise RuntimeError(
-                "dmrg_generalized: <psi|A|psi> collapsed to ~0 (or NaN) "
-                "mid-iteration (A may not be positive definite, or the "
+                "dmrg_generalized: <psi|A|psi> = {} is not positive "
+                "mid-iteration (A is not positive definite, or the "
                 "sweep drove psi toward A's near-null-space) -- cannot "
-                "form a meaningful generalized Rayleigh quotient")
+                "form a meaningful generalized Rayleigh quotient".format(a_psi))
         h_psi = inner(psi, H, psi).real
         lam = h_psi / a_psi
         if not quiet:

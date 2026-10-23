@@ -182,7 +182,8 @@ the left end as $\gamma$ grows. On the right is the charge moved into the
 left half. The dashed curves are exact, since with open ends $H$ is a
 similarity transform of a Hermitian chain, and ED on 10 sites agrees with
 NH-DMRG to $10^{-14}$. The problem becomes ill conditioned fast with $n$
-and $\gamma$; `nhdmrg` warns when it does not converge.
+and $\gamma$; `nhdmrg` warns when it does not converge, and again each
+time the unconverged state is used.
 
 ??? example "Code of this figure (docs/figures/excited-states_nonhermitian/)"
 
@@ -209,7 +210,8 @@ lam = fc.gs_energy_generalized(A)   # smallest lambda
 DMRG solves this directly, with no inverse of $A$. A non-Hermitian $H$ is
 also accepted, and then $\lambda$ is the complex eigenvalue with the
 smallest real part. Not available on `itensor_version=2`, it raises an
-error.
+error. It also raises if $A$ is not Hermitian, or if $\langle\psi|A|\psi\rangle$
+is not positive during the solve.
 
 After this call the chain stores the generalized eigenstate as its ground
 state, and `fc.e0` is its energy

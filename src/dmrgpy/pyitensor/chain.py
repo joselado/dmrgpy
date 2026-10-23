@@ -599,7 +599,7 @@ class Chain:
             # product state is an eigenstate of the Heisenberg chain at
             # every field) the variational solve is *stationary* there and
             # never moves. Unlike the compiled backends this one has no
-            # noise term to escape with (see dmrg.py), so it simply reports
+            # noise term for a warm start (see dmrg.py), so it simply reports
             # the stale eigenstate's energy: measured on a 6-site
             # Heisenberg chain swept on one chain object, B=0 came back as
             # +1.25, the ferromagnetic MAXIMUM retained from B=4, against
@@ -632,10 +632,14 @@ class Chain:
         # maxdim rather than at the full maxm only to be truncated.
         floor_dim = 0 if self.wf0 is None else _max_link_dim(self.wf0)
         sweeps = self._make_sweeps_ramped(self.nsweeps, self.maxm, floor_dim)
-        if self.wf0 is None:
+        fresh = self.wf0 is None
+        if fresh:
             self.wf0 = self._default_mps(sweeps.at(0)[0])
         self._check_wf_sites(self.wf0, "gs_energy")
-        energy = dmrg(self.wf0, self._solve_H(), sweeps, quiet=not self.verbose)
+        # noise only on a fresh start: a warm start is a state the caller
+        # chose, and noise would move it inside a degenerate level
+        energy = dmrg(self.wf0, self._solve_H(), sweeps, quiet=not self.verbose,
+                      noisy_start=fresh)
         if self.sector:
             # The solve minimized H + the charge penalty; report <H>, which
             # is the sector's own energy (the penalty is identically zero
@@ -1861,9 +1865,10 @@ class Chain:
         Noise decays by bond_ramp_noise_decay per ramping sweep and is off
         entirely once the schedule reaches full maxdim, so the final,
         converged sweeps are noise-free. (Note the pure-Python DMRG in
-        dmrg.py has no noise term at all -- see its docstring -- so the
-        noise part of the schedule is carried for parity with the compiled
-        backends rather than acted on here.)
+        dmrg.py reads only the first sweep's noise, and only on a fresh
+        start, as the weight of a random part in its Lanczos starts -- see
+        its docstring -- so the rest of the schedule's noise is carried for
+        parity with the compiled backends rather than acted on here.)
         """
         if not self.bond_ramp or ns < 2 or maxdim <= 1:
             return self._make_sweeps(ns, maxdim)

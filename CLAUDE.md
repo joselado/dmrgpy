@@ -370,7 +370,8 @@ measurements in `docs/numerical_changes.md`, leads ranked in
 Kondo spectrum on fermion chains, all fixed on 2026-10-23), and by
 `docs/audit_2026_10_23_hole_hunt.md` (four bugs and one performance item,
 over the least-covered areas rather than a commit; the bugs fixed the same
-day). Four things to read before
+day, and its nine leads reviewed the same day into six more findings, all
+fixed). Four things to read before
 changing the kind of code they cover:
 
 - **`docs/numerical_changes.md`** before comparing any number against
@@ -517,10 +518,28 @@ Do not undo one without reading its finding first.
   (`test_audit_2026_10_task.py`).
 - **A collapse basis METTS cannot sample with is refused.** `metts_vev`
   raises on a non-Hermitian basis operator, and on an all-diagonal basis
-  (`("N",)`, `("Sz",)`) when H conserves `sum_i O_i` for one of its names,
-  tested on a random witness, since every sample would then stay in the
-  first sample's charge sector with an error bar of 0
-  (`test_audit_2026_10_23.py`).
+  (`("N",)`, `("Sz",)`, `("Nupdn",)`, `("N2",)`) when H conserves
+  `sum_i O_i` for one of its names or one of the chain's
+  `get_sector_charge_operators()`, tested on a random witness, since a
+  diagonal name collapses to computational states and every sample would
+  then stay in the first sample's charge sector with an error bar of 0
+  (`test_audit_2026_10_23.py`, `test_audit_2026_10_23_leads.py`).
+- **`"python"` DMRG mixes noise into its Lanczos starts.**
+  `pyitensor/dmrg.py`'s `_noisy_start` adds a random vector of relative
+  weight `noise`, from its own generator reseeded per `dmrg()` call, on the
+  first sweep of a fresh start only; without it a state that falls into one sector of an exact
+  symmetry at its first local solve stays there (two equivalent spins,
+  -4.470573 for -5.917370). Do NOT remove it on the grounds that the random
+  MPS start is enough, and do NOT widen it to more sweeps, warm starts or
+  the global random stream without reading finding 11's Status
+  (`test_audit_2026_10_23_leads.py`).
+- **`gs_energy_generalized` refuses a metric it cannot use**: `ValueError`
+  for a non-Hermitian A, `RuntimeError` once `<psi|A|psi>` is not positive,
+  on v3 through a C++ throw, never ITensor's aborting `Error()`; an NH-DMRG
+  state that did not converge warns again on every reuse
+  (`groundstate.warn_unconverged`). Entropies of a site or a pair are those
+  of the normalized state, with a relative eigenvalue floor
+  (`test_audit_2026_10_23_leads.py`).
 - **The DMRG `vev` has no `**kwargs`**: an unknown keyword raises, and
   `T>0` raises naming `mode="ED"` and `metts_vev()`
   (`test_audit_2026_10_23.py`).

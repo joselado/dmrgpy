@@ -38,7 +38,14 @@ def _check_basis(MB, basis_ops):
     hunt, finding 1). Conservation is tested on a random witness state, as
     mpsalgebra.is_hermitian does, since the canonical form cannot prove
     [H,Q]=0 when it rests on a same-site identity such as N C = 0. A name
-    the sites do not know is left to the backend, which raises on it."""
+    the sites do not know is left to the backend, which raises on it.
+
+    The charges tested are the basis names' own sums and the chain's
+    conserved quantities (get_sector_charge_operators), since a diagonal
+    name collapses to computational states whatever its own sum does:
+    ("Nupdn",) and ("F",) on a Hubbard chain and ("N2",) on a Bose-Hubbard
+    chain gave <Ntot> 6, 4, 2 by seed, stderr 0, for an exact 2.74
+    (2026-10-23 hole hunt, leads, finding 10)."""
     from ..multioperator import obj2MO
     from ..multioperatortk.canonical import is_diagonal
     for name in basis_ops:
@@ -53,13 +60,16 @@ def _check_basis(MB, basis_ops):
     if cmax == 0.: return
     H = H*(1./cmax)
     wf = MB.random_state()
-    for name in basis_ops:
-        Q = sum(obj2MO([[name, i]]) for i in range(MB.ns))
+    charges = [("sum_i %s_i" % name, sum(obj2MO([[name, i]]) for i in range(MB.ns)))
+               for name in basis_ops]
+    try: charges += sorted(MB.get_sector_charge_operators().items())
+    except NotImplementedError: pass
+    for name, Q in charges:
         c = (H*Q - Q*H)*wf
         hq = (H*Q)*wf
         if c is None or hq is None: continue
         if abs(c.dot(c)) <= 1e-20*abs(hq.dot(hq)):
-            raise ValueError("metts_vev: H conserves sum_i %s_i and every "
+            raise ValueError("metts_vev: H conserves %s and every "
                     "basis operator is diagonal, so the samples never leave "
                     "the charge sector of the first one and the average is "
                     "not thermal. Add a basis operator that changes the "

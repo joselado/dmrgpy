@@ -8,30 +8,16 @@ import numpy as np
 # AttributeError. Its one caller (examples/dynamical_correlator/
 # dynamical_correlator_entropy) no longer uses it.
 
-try:
-    from statistics import geometric_mean
-except:
-    def geometric_mean(x):
-        return np.exp(np.mean(np.log(x)))
-
-def gmean(x):
-    if np.max(x)<1e-10: return 0.0
-    else: return geometric_mean(x)
-
-
-def compute_entropy(self,psi,b=1):
-    if b is None:
-        out = np.array([compute_entropy_single(self,psi,b=i) 
-            for i in range(1,self.ns)])
-        return gmean(out)
-    else: return compute_entropy_single(self,psi,b=b)
+# compute_entropy(b=None), a geometric mean over the bonds, lived here. It
+# had no caller, and disagreed with the arithmetic mean MPS.get_entropy()
+# returns (0 as soon as one bond was unentangled), so it was removed.
 
 
 def compute_entropy_single(self,psi,b=1):
     """Compute entanglement entropy in a bond"""
     # Bond b is the cut between sites b-1 and b, so with sites indexed
     # 0..ns-1 the valid range is 1..ns-1 -- which is exactly what
-    # compute_entropy's own loop above uses (range(1,self.ns)). The guard
+    # MPS.get_entropy(b=None) loops over (bonds 1..ns-1). The guard
     # used to read b>self.ns, one too far: b==ns slipped through to
     # ITensor, whose own check calls abort(), killing the whole process
     # with an uncatchable SIGABRT instead of reporting a bad index (the
@@ -91,9 +77,20 @@ def bond_entropy(self,wf,i,j):
 #    return entropy_dm(dm,normalize=True) # return the entropy
 
 
+def _unit_state(wf):
+    """The state divided by its norm; the entropy belongs to the ray"""
+    n2 = wf.dot(wf).real
+    if not n2>0.: raise ValueError("entropy of a zero state")
+    if abs(n2-1.)>1e-12: wf = wf*(1./np.sqrt(n2))
+    return wf
+
+
 def pair_entropy(self,wf,i,j):
     """Compute the entropy of a state in bond i"""
     from .densitymatrix import reduced_dm_projective
+    # normalized like site_entropy: a state of norm^2 4 raised, and one of
+    # norm^2 1.0004 passed the trace check and came out 1.1e-4 too high
+    wf = _unit_state(wf)
     dm = reduced_dm_projective(self,wf,i=i,j=j) # compute density matrix
     return entropy_dm(dm,normalize=False) # return the entropy
 
@@ -101,7 +98,7 @@ def pair_entropy(self,wf,i,j):
 def site_entropy(self,wf,i):
     """Compute the entropy of a state in bond i"""
     from .densitymatrix import reduced_dm_projective
-    wf = wf.normalize() # normalize the wavefunction
+    wf = _unit_state(wf) # normalize the wavefunction
     dm = reduced_dm_projective(self,wf,i=i,j=None) # compute density matrix
     return entropy_dm(dm,normalize=False) # return the entropy
 
@@ -122,7 +119,10 @@ def entropy_dm(dm,normalize=False):
                 +str(np.trace(dm))+", expected 1); its entropy is not "
                 "meaningful")
     ds = eigvalsh(dm) # compute eigenvalues
-    ds = ds[ds>1e-6]
+    # Relative floor, only to drop roundoff (including negative eigenvalues).
+    # An absolute 1e-6 dropped the -p ln p of a real weight p<=1e-6, so a
+    # nearly product site with p=5.6e-7 gave 5.6e-7 for an exact 8.6e-6.
+    ds = ds[ds>1e-14*np.max(np.abs(ds))]
     if normalize: 
         n = dm.shape[0]
         norm = np.log(n) # normalize

@@ -3570,7 +3570,7 @@ a different one, and until the 2026-09 audit (finding #2) nothing here
 distinguished the two: `Many_Body_Chain.set_hamiltonian` calls
 `restart()`, whose comment promises "a genuinely cold recalculation", and
 that promise stopped at the Python object. Unlike the compiled backends
-this one has no noise term (see `dmrg.py`), so when the retained state
+this one has no noise term for a warm start (see `dmrg.py`), so when the retained state
 happens to be an exact eigenstate of the *new* Hamiltonian the
 variational solve is stationary there and never moves — a field sweep on
 one chain object passing through a polarized phase is enough, and the
@@ -3728,8 +3728,10 @@ Three consequences of the dense choice:
   partial charges as `chain_session.h`'s `sector_state_plan` (greedy
   dead-ends on a Hubbard chain at fixed `Nf` *and* `Sz`). A single product
   state would be a poor start for the same reason `default_mps()` avoids
-  one: this backend's DMRG has no noise term at all, so a start that is an
-  exact eigenstate has nothing to move it. Routing every solve through
+  one: this backend's DMRG has noise only on the first sweep of a fresh
+  start (a random part in each Lanczos start, `dmrg.py`'s `_noisy_start`,
+  added after the 2026-10-23 leads, finding 11), so a start that is an
+  exact eigenstate has little to move it. Routing every solve through
   `Chain._default_mps` means excited states and band edges inherit the
   in-sector start for free.
 

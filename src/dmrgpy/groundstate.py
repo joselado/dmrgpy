@@ -130,6 +130,22 @@ def require_hamiltonian(self):
         raise ValueError(NO_HAMILTONIAN)
 
 
+def warn_unconverged(self):
+    """Repeat NH-DMRG's warning whenever a stored state it did not converge
+    is handed out again. It printed once, at the solve, and every later
+    gs_energy(), get_gs() and vev() reused the state silently: past the
+    exceptional point of a PT-symmetric chain, a relative residual of 0.1
+    to 0.4 and an energy up to 0.18 from every eigenvalue (2026-10-23 hole
+    hunt, leads, finding 8). Keyed to the state object, so set_gs() or a new
+    solve clears it."""
+    u = getattr(self,"_gs_unconverged",None)
+    if u is None or u[0] is not self.wf0: return
+    print("Warning: the stored ground state is the best attempt of an "
+          "NH-DMRG solve that did not converge (relative residual "+
+          str(u[1])+", tol "+str(u[2])+"); consider raising nsweeps, maxm "
+          "or krylovdim and solving again")
+
+
 def stored_answer_holds(self,kwargs):
     """True when gs_energy()/get_gs() may hand back the stored ground state
     (and its energy) for a call with these keywords, without reaching the
@@ -561,7 +577,9 @@ def ground_state_on_session(self):
     set_wavefunction() had dropped the session's energy, ran a real
     sweep from it (finding 13)."""
     current = gs_is_current(self)
-    if current and hamiltonian_on_session(self): return # the cache hit
+    if current and hamiltonian_on_session(self): # the cache hit
+        warn_unconverged(self)
+        return
     if current: self.computed_gs = False # the stored state is not for this H
     self.get_gs()
     send_hamiltonian(self)
@@ -862,6 +880,12 @@ def gs_energy_generalized(self,A,lam0=None):
             "chain.setup_python() to use the pure-Python backend instead")
     if self.hamiltonian is None:
         raise RuntimeError("gs_energy_generalized called before set_hamiltonian")
+    if not self.is_hermitian(A):
+        # the solvers assume a Hermitian metric and returned a number that
+        # is no generalized eigenvalue for A=1+1j*Sz_0 (-1.86 on v3, -1.37
+        # on "python", for an exact -1.709-0.730j)
+        raise ValueError("gs_energy_generalized needs a Hermitian positive "
+                "definite metric A, and this A is not Hermitian")
     if self.itensor_version=="python" and self.ns<2:
         # pyitensor's sweeps are two-site as well, so a one-site chain has
         # no update to make and the state never moves off its random start

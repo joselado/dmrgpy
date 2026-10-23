@@ -120,7 +120,7 @@ def _mixes_representations(factors, ps):
 # both even and do NOT commute, so a general same-site sort would be
 # wrong.
 _DIAGONAL = frozenset(("Id", "Z", "Sz", "N", "density", "Nup", "Ndn",
-                       "Ntot", "F", "Fup", "Fdn"))
+                       "Ntot", "Nupdn", "F", "Fup", "Fdn"))
 
 
 def is_diagonal(name):

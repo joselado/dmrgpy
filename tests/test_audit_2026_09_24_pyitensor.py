@@ -217,6 +217,10 @@ def _neel_chain(pad, n=N_SITES):
     sc.tevol_method = "TDVP_GSE"
     sc.maxm = K_PAD
     sc.nsweeps = 8
+    # no noise in the preparation: the noisy first sweep reaches the same
+    # Neel state but fills the padded bond directions differently, and this
+    # gauge-sensitive comparison of two runs moved from 5e-8 to 1.7e-6
+    sc.noise = 0.0
     h0 = 0
     for i in range(n):
         h0 = h0 + (-1) ** i * sc.Sz[i]

@@ -102,9 +102,9 @@ are:
 
 METTS works with `itensor_version=3` (at least 3 sites) and `"python"`. It
 is not available on `itensor_version=2`, where it raises an error. It also
-raises if the basis operators are all diagonal and $H$ conserves their
-charge, since the samples then never leave one charge sector. The default
-`basis_ops` avoids this.
+raises if the basis operators are all diagonal and $H$ conserves a
+charge, such as the particle number, since the samples then never leave
+one charge sector. The default `basis_ops` avoids this.
 
 The same sampling gives real-time thermal correlators
 $C_{AB}(t)=\langle A(t)B\rangle_T$ (arXiv:2405.18484). Each sample
