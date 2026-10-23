@@ -1,55 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-# Compare ITensor v2 vs v3 vs the pure-Python backend (itensor_version=
-# "python") on the Kernel Polynomial Method dynamical correlator path
-# (Chain::kpm_dynamical_correlator in chain_session.h; pyfermion/algebra/
-# kpm.py-style moment recursion in pyitensor -- see kpmdmrg.py).
+# Local spin spectrum of the S=1/2 Heisenberg chain with the Kernel
+# Polynomial Method (KPM), S(w) = sum_n |<n|Sz_0|GS>|^2 delta(w - E_n + E_0).
+# We compute it with the ITensor v3 backend and with the pure Python
+# backend, which must give the same spectrum.
 import numpy as np
 from dmrgpy import spinchain
 
-n = 6
+n = 6 # number of sites
 
-def get_correlator(itensor_version):
-    sc = spinchain.Spin_Chain([2 for i in range(n)],itensor_version=itensor_version)
+def get_spectrum(version):
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)], itensor_version=version)
     h = 0
-    for i in range(n-1):
+    for i in range(n-1): # Heisenberg Hamiltonian
         h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
     sc.set_hamiltonian(h)
-    sc.get_gs()
-    name = (sc.Sz[0],sc.Sz[0]) # local dynamical correlator <Sz_0(t)Sz_0(0)>
-    (x,y) = sc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name)
-    return np.array(x),np.array(y)
+    sc.maxm = 40 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
+    name = (sc.Sz[0], sc.Sz[0])
+    return sc.get_dynamical_correlator(mode="DMRG", submode="KPM", name=name)
 
-x2,y2 = get_correlator(2)
-x3,y3 = get_correlator(3)
-xpy,ypy = get_correlator("python")
+(x1, y1) = get_spectrum(3)
+(x2, y2) = get_spectrum("python")
+print("Max difference v3-python =", np.max(np.abs(np.array(y1)-np.array(y2))))
 
-print("Sample of the correlator (ITensor v2)  :",y2[:5])
-print("Sample of the correlator (ITensor v3)  :",y3[:5])
-print("Sample of the correlator (pure Python) :",ypy[:5])
-# v3 and the python backend always return the same-length grid (both are
-# real DMRG runs with the same nominal settings); print this comparison
-# first since it's the one this example is actually about.
-print("Max abs difference v3 vs pure Python =",np.max(np.abs(y3-ypy)))
-# v2's ED fallback (when the mpscpp2 extension isn't compiled -- see
-# mode.py) can return a differently-sized frequency grid than v3's own
-# KPM path; not related to the python backend, so just guard against it
-# instead of crashing the whole script.
-if len(y2) == len(y3):
-    print("Max abs difference v2 vs v3          =",np.max(np.abs(y2-y3)))
-else:
-    print("Max abs difference v2 vs v3          = N/A (different grid sizes: "
-          "{} vs {} points -- likely v2's ED fallback, see mode.py)".format(len(y2),len(y3)))
-
-# --- plot: overlay of the KPM dynamical correlator from all three backends ---
 import matplotlib.pyplot as plt
-
-plt.plot(x2,y2.real,c="red",label="ITensor v2")
-plt.plot(x3,y3.real,c="blue",ls="--",label="ITensor v3")
-plt.plot(xpy,ypy.real,c="green",ls=":",label="pure Python")
-plt.xlabel("frequency [J]")
-plt.ylabel("Dynamical correlator")
-plt.title("KPM dynamical correlator: backend comparison (n=%d)"%n)
+plt.plot(x1, np.real(y1), linewidth=4, label="ITensor v3")
+plt.plot(x2, np.real(y2), "--", linewidth=2, label="python")
+plt.xlabel("energy w")
+plt.ylabel("S(w), first site")
 plt.legend()
 plt.show()

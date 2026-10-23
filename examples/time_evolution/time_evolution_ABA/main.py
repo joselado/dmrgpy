@@ -1,63 +1,36 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Time evolution of a state after applying an operator A to it,
+# <X|A^dag e^{iHt} B e^{-iHt} A|X> = <psi(t)|B|psi(t)>, with
+# |psi(t)> = e^{-iHt} A|X>. Here |X> is the Neel state of a 3 site
+# Heisenberg chain, A = Sx_0 + Sy_1 and B = Sz_0. We use DMRG and ED.
 import numpy as np
-from dmrgpy import spinchain
-n = 3 # number of sites in the chain
-spins = [2 for i in range(n)] # S=1/2
-sc = spinchain.Spin_Chain(spins) # create the chain
+from dmrgpy import spinchain, timedependent
 
-##################################################################
-# This implements shows how to perform the following measurement #
-##################################################################
-# <X|A^\dagger e^{iHt} B e^{-iHt} A |X> for some state |X>,
-# i.e. <psi(t)|B|psi(t)> with |psi(t)> = e^{-iHt} A|X>, on both
-# mode="DMRG" and mode="ED"
+n = 3 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+h0 = 0 # staggered field, its ground state is the Neel state
+for i in range(n): h0 = h0 + (-1)**i*sc.Sz[i]
+h1 = 0 # Heisenberg Hamiltonian
+for i in range(n-1):
+    h1 = h1 + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h0)
+wf, wfED = sc.get_gs(), sc.get_gs(mode="ED") # Neel states
+sc.set_hamiltonian(h1) # Hamiltonian for the evolution
 
-# create two Hamiltonians
-h0 = 0
-h1 = 0
-for i in range(n): # stagger Hamiltonian
-    h0 = h0+(-1)**i*sc.Sz[i]
-for i in range(n-1): # Heisenberg Hamiltonian
-    h1 = h1+sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1] 
+A = sc.Sx[0] + sc.Sy[1] # operator applied to the state
+B = sc.Sz[0] # operator that we measure
+nt, dt = 500, 0.02 # number of time steps, time step
+(ts, sz) = timedependent.evolution_ABA(sc, A=A, B=B, nt=nt, dt=dt, wf=wf)
+(tsED, szED) = timedependent.evolution_ABA(sc, A=A, B=B, nt=nt, dt=dt,
+                                           wf=wfED, mode="ED")
+print("Max difference =", np.max(np.abs(sz-szED)))
 
-# first get a Neel state by minimizing a dummy Hamiltonian
-sc.set_hamiltonian(h0) # set AF hamiltonian
-wf = sc.get_gs() # compute ground state
-wfED = sc.get_gs(mode="ED") # compute ground state with ED
-
-# now set the new Hamiltonian for the time evolution
-sc.set_hamiltonian(h1) # set the (new) Heisenberg Hamiltonian
-
-# define the two operators to apply
-A = sc.Sx[0] + sc.Sy[1] # apply some operator to your state
-B = sc.Sz[0] # and measure some other operator
-
-from dmrgpy import timedependent
-
-nt = 1e3 # number of time steps
-dt = 1e-2 # time step
-
-# perform the two calculations with DMRG and ED
-(ts,sz) = timedependent.evolution_ABA(sc,A=A,B=B,nt=nt,dt=dt,wf=wf)
-(tsED,szED) = timedependent.evolution_ABA(sc,A=A,B=B,
-        nt=nt,dt=dt,wf=wfED,mode="ED")
-
-# now plot the result
 import matplotlib.pyplot as plt
-plt.plot(ts,sz.real,label="DMRG",c="blue")
-plt.scatter(tsED,szED.real,label="ED",c="red")
+plt.plot(tsED, szED.real, linewidth=4, label="ED")
+plt.plot(ts, sz.real, "--", linewidth=2, label="DMRG")
+plt.xlabel("time t")
+plt.ylabel("<B>(t)")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

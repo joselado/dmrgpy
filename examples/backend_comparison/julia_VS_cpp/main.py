@@ -1,62 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Ground-state energy of the S=1/2 Heisenberg chain with DMRG, computed
+# with the C++ backend (ITensor v2) and with the Julia backend. Both must
+# give the same energy, and we compare them as a function of chain length.
+# Needs Julia and juliacall installed.
 import numpy as np
 from dmrgpy import spinchain
 
+def get_energy(n, julia):
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+    if julia: sc.setup_julia() # Julia backend
+    h = 0
+    for i in range(n-1):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+    sc.set_hamiltonian(h)
+    sc.maxm = 40 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
+    return sc.gs_energy()
 
-def get(version,n=30):
-  spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-  sc = spinchain.Spin_Chain(spins) # create the spin chain
-  if version=="julia": sc.setup_julia() # setup the Julia mode
-  h = 0
-  for i in range(n-1):
-      h = h +sc.Sx[i]*sc.Sx[i+1]
-      h = h +sc.Sy[i]*sc.Sy[i+1]
-      h = h +sc.Sz[i]*sc.Sz[i+1]
-  sc.set_hamiltonian(h)
-  return sc.gs_energy()
-
-
-e0 = get("julia",n=10) # warmup round with Julia to precompile
-
-import time
-
-def time_ratio(n):
-  t0 = time.time()
-  e0 = get(2,n=n)
-  t1 = time.time()
-  e1 = get("julia",n=n)
-  t2 = time.time()
-  print("Energy with C++",e0)
-  print("Energy with Julia",e1)
-  print("Time with C++",t1-t0)
-  print("Time with Julia",t2-t1)
-  return (t1-t0)/(t2-t1)
-
-
-ns = list(range(14,40))
-ratios = []
-for n in ns:
-    ratio = time_ratio(n)
-    print("Length",n,"C++/Julia",ratio)
-    ratios.append(ratio)
+ns = [10, 14, 18, 22]
+get_energy(8, True) # first call, Julia compiles
+e_cpp = np.array([get_energy(n, False) for n in ns])
+e_jul = np.array([get_energy(n, True) for n in ns])
+print("Max difference =", np.max(np.abs(e_cpp - e_jul)))
 
 import matplotlib.pyplot as plt
-plt.plot(ns,ratios,marker="o")
-plt.axhline(1.0,color="gray",linestyle="--",label="equal speed")
-plt.xlabel("Chain length n")
-plt.ylabel("C++ / Julia time ratio")
+plt.plot(ns, e_cpp/np.array(ns), linewidth=4, label="C++")
+plt.plot(ns, e_jul/np.array(ns), "--", linewidth=2, label="Julia")
+plt.xlabel("chain length n")
+plt.ylabel("energy per site")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

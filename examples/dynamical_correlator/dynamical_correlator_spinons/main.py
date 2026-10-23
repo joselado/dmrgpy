@@ -1,64 +1,31 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Spinon chain: a Heisenberg chain written with spinon operators, which
+# are fermions with one particle per site. We compute the spectral
+# function A(w) = sum_n |<n|Cdag_up,0|GS>|^2 delta(w - E_n + E_0),
+# which is the weight a tunneling electron or a spinon probe would see.
 import numpy as np
-from dmrgpy import fermionchain,spinchain
-n = 4
+from dmrgpy import fermionchain
 
-# create first neighbor exchange
-sc = fermionchain.Spinon_Chain(n) # create the spin chain
-#sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)]) # create the spin chain
-#sc.setup_julia()
+n = 6 # number of sites
+sc = fermionchain.Spinon_Chain(n)
+
+# Heisenberg Hamiltonian, H = sum_i S_i . S_{i+1}
 h = 0
 for i in range(n-1):
-    h = h + sc.Sx[i]*sc.Sx[i+1]
-    h = h + sc.Sy[i]*sc.Sy[i+1]
-    h = h + sc.Sz[i]*sc.Sz[i+1]
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
-sc.get_gs()
+sc.maxm = 40 # bond dimension
+sc.nsweeps = 10 # number of DMRG sweeps
 
+es = np.linspace(-0.5, 6.0, 800) # energies
+name = (sc.Cdagup[0], sc.Cup[0]) # the two operators of the correlator
+(x, y) = sc.get_dynamical_correlator(mode="DMRG", name=name, es=es, delta=0.05)
 
-#print(sc.vev(sc.Cdagup[0]*sc.Cup[1]))
-
-#sc.kpmmaxm = 20 # KPM maxm
-import time
-i = np.random.randint(n)
-j = np.random.randint(n)
-i,j = 0,0
-t1 = time.time()
-name = (sc.Sz[i],sc.Sz[j])
-name = (sc.Cdagup[i],sc.Cup[j])
-es = np.linspace(-0.5,6,2000)
-delta = 5e-2
-(x2,y2) = sc.get_dynamical_correlator(mode="DMRG",name=name,es=es,delta=delta)
-t2 = time.time()
-print("Time with DMRG",t2-t1)
-
-
-
-
-# plot the results
 import matplotlib.pyplot as plt
-import matplotlib
-
-matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
-fig = plt.figure()
-fig.subplots_adjust(0.2,0.2)
-plt.plot(x2,y2.real,c="blue",label="DMRG")
+plt.plot(x, y.real, label="DMRG")
+plt.xlabel("energy w")
+plt.ylabel("A(w), first site")
 plt.legend()
-plt.xlabel("frequency [J]")
-plt.ylabel("Dynamical correlator")
-plt.xlim([-0.5,4.5])
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,43 +1,31 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Total particle number N = sum_i n_i of a spinless fermion chain with
+# hopping t=1 and nearest-neighbor repulsion V=1, as a function of the
+# chemical potential mu. N goes down in steps, which are the charge plateaus
+# that a gate voltage scan would show.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
+
 L = 4 # number of sites
 
-def get_N(mu):
-    fc = fermionchain.Fermionic_Chain(L) # create the chain
-    h = 0 # initialize
-    for i in range(L-1): h = h + fc.Cdag[i]*fc.C[i+1] # first neighbor hopping
-    h = h + h.get_dagger() # add Hermitian conjugate
-    V = 1.0 # strength of many-body repulsion
-    for i in range(L-1): h = h + V*fc.N[i]*fc.N[i+1] # first neighbor repulsion
+def particle_number(mu):
+    fc = fermionchain.Fermionic_Chain(L)
+    h = 0
+    for i in range(L-1): h = h + fc.Cdag[i]*fc.C[i+1] # hopping
+    h = h + h.get_dagger()
+    for i in range(L-1): h = h + fc.N[i]*fc.N[i+1] # repulsion V=1
     for i in range(L): h = h + mu*fc.N[i] # chemical potential
-    fc.set_hamiltonian(h) # set Hamiltonian
-    wf = fc.get_gs() # compute ground state
-    Nop = 0 
-    for i in range(L): Nop = Nop + fc.N[i] # total number operator
-    nf = wf.dot(Nop*wf).real # expectation value of the number operator
-    print("Particle number for mu =",mu," N = ",nf)
-    return nf
+    fc.set_hamiltonian(h)
+    N = sum(fc.N) # total number operator
+    return fc.vev(N).real
 
-mus = np.linspace(-5.,5.,30) # chemical potentials
-ns = [get_N(mu) for mu in mus] # particle number operator for different mu
+mus = np.linspace(-5., 5., 30) # chemical potentials
+ns = [particle_number(mu) for mu in mus]
 
 import matplotlib.pyplot as plt
-
-plt.plot(mus,ns,marker="o")
-plt.xlabel("mu")
-plt.ylabel("# of electrons")
+plt.plot(mus, ns, "o-")
+plt.xlabel("chemical potential mu")
+plt.ylabel("number of electrons")
 plt.show()
-
-
-
-
-
-
-
-
-
-

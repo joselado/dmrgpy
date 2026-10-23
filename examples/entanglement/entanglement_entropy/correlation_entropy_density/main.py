@@ -1,46 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../../src')
 
-import numpy as np
+# Correlation entropy density of the ground state of interacting
+# spinless fermions, on each site. It measures how far the state is from
+# a single Slater determinant, so it is zero without interactions.
 from dmrgpy import fermionchain
 
-def get(U=1.,mode="ED"):
-    n = 8 # number of spinless fermionic sites
-    fc = fermionchain.Fermionic_Chain(n) # create the chain
+def get(mode):
+    n = 6 # number of sites
+    U = 1.0 # nearest-neighbor interaction
+    fc = fermionchain.Fermionic_Chain(n)
     h = 0
-    for i in range(n-1): # hopping
-        h = h + fc.Cdag[i]*fc.C[i+1]
-        h = h + U*(fc.N[i]-.5)*(fc.N[i+1]-.5)
-    for i in range(n-2): # hopping
-        h = h + 0.1*fc.Cdag[i]*fc.C[i+2] # some small NNN
+    for i in range(n-1):
+        h = h + fc.Cdag[i]*fc.C[i+1] + U*(fc.N[i]-.5)*(fc.N[i+1]-.5)
     h = h + 0.5*fc.N[0] # a local perturbation
     h = h + h.get_dagger()
-    ##############################
-    # Setup the Many Body Hamiltonian
-    fc.set_hamiltonian(h) # set the hoppings
-    wf = fc.get_gs(mode=mode) # get the ground state
-    return wf.get_correlation_entropy_density() # compute the corr ent density
+    fc.set_hamiltonian(h)
+    fc.maxm = 40 # bond dimension
+    fc.nsweeps = 10 # number of DMRG sweeps
+    wf = fc.get_gs(mode=mode)
+    return wf.get_correlation_entropy_density()
 
-Sed = get(mode="ED") # get from ED
-Stn = get(mode="DMRG") # get from MPS
-inds = range(len(Sed)) # site indexes
+Sed = get("ED")
+Sdmrg = get("DMRG")
+print("Max difference DMRG-ED =", max(abs(Sed - Sdmrg)))
+
 import matplotlib.pyplot as plt
-
-plt.plot(inds,Sed,label="ED",c="red")
-plt.scatter(inds,Stn,label="DMRG",c="blue")
+plt.plot(Sed, linewidth=4, label="ED")
+plt.plot(Sdmrg, "--", linewidth=2, label="DMRG")
+plt.xlabel("site")
+plt.ylabel("correlation entropy density")
 plt.legend()
-
-plt.xlabel("Site")
-plt.ylabel("Correlation entropy density")
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

@@ -1,88 +1,37 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Interacting fermion chain with gain and loss, so H is non-Hermitian.
+# We take the two states with the lowest Re(E), 0 and 1, and compute
+# |<0|c_i^dag|1>|^2 + |<0|c_i|1>|^2 on every site i.
+# The states come from ED and from DMRG with a non-Hermitian Arnoldi.
 import numpy as np
 from dmrgpy import fermionchain
 
-n = 2 # number of unit cells
-ns = 4*n # total number of sites
+ns = 8 # number of sites
+fc = fermionchain.Fermionic_Chain(ns)
+eta = 1.0 # strength of gain and loss
+gl = [1j*eta, -1j*eta, -1j*eta, 1j*eta] # pattern of gain and loss
 
-# create the tight binding matrix
-mh = np.zeros((ns,ns),dtype=np.complex) # TB matrix
-for i in range(ns-1):
-    mh[i,i+1] = 1.0
-    mh[i+1,i] = 1.0
-
-eta = 1.0 # imaginary part
-for i in range(n): 
-    mh[4*i,4*i] = 1j*eta
-    mh[4*i+1,4*i+1] = -1j*eta
-    mh[4*i+2,4*i+2] = -1j*eta
-    mh[4*i+3,4*i+3] = 1j*eta
-
-# create the many-body object
-fc = fermionchain.Fermionic_Chain(ns) # create the fermion chain
-
-# add the single particle term
-h = 0 # initialize Hamiltonian
-for i in range(ns):
-    for j in range(ns):
-        h = h + mh[i,j]*fc.Cdag[i]*fc.C[j]
-
-# now add the density-density interactions
-V = 1.0
-for i in range(ns-1): h = h + V*(fc.N[i]-0.5)*(fc.N[i+1]-0.5)
-
-
-# Compute the states with lowest Re(E) with exact diagonalization
-# Note that this will only work for small systems
+h = 0
+for i in range(ns-1): # hopping and interaction
+    h = h + fc.Cdag[i]*fc.C[i+1] + fc.Cdag[i+1]*fc.C[i]
+    h = h + (fc.N[i]-0.5)*(fc.N[i+1]-0.5)
+for i in range(ns): # gain and loss
+    h = h + gl[i % 4]*fc.Cdag[i]*fc.C[i]
 fc.set_hamiltonian(h)
-esed,wfsed = fc.get_excited_states(mode="ED",
-                         n=2 # number of excited states
-                         )
-# Compute the states with lowest Re(E) with MPS non-hermitian arnoldi
-from dmrgpy import mpsalgebra
-es,wfs = fc.get_excited_states(mode="DMRG",
-         recursive=False,
-         verbose=1, # print info on how it is progressing
-         n=2 # number of excited states
-         )
 
+(e0, wf0) = fc.get_excited_states(mode="ED", n=2)
+(e1, wf1) = fc.get_excited_states(mode="DMRG", n=2, recursive=False)
 
-# now define the function to compute the correlators
-def proj(wf1,wf2,i):
-    """Compute |<0|c^\dagger_n|1>|^2 + |<0|c_n|1>|^2"""
-    return np.abs(wf1.dot(fc.Cdag[i]*wf2))**2 + np.abs(wf1.dot(fc.C[i]*wf2))**2
-
-
-def get_proj(wfs):
-    """Compute the projection with the lowest energy state"""
-    ps = [proj(wfs[0],wfs[1],i) for i in range(ns)]
-    return ps
-
-# compute the correlators with both methods
-pss = get_proj(wfs) # get the projection for the MPS wavefunctions
-pssed = get_proj(wfsed) # get the projection for the ED wavefunctions
+def proj(wfs): # weight of the transition between the two states
+    return [abs(wfs[0].dot(fc.Cdag[i]*wfs[1]))**2
+            + abs(wfs[0].dot(fc.C[i]*wfs[1]))**2 for i in range(ns)]
 
 import matplotlib.pyplot as plt
-plt.scatter(range(len(pss)),pss,c="blue",s=80,label="MPS")
-plt.scatter(range(len(pss)),pssed,c="red",s=40,label="ED")
+plt.plot(range(ns), proj(wf0), "o", markersize=12, label="ED")
+plt.plot(range(ns), proj(wf1), "x", markersize=12, label="DMRG")
+plt.xlabel("site i")
+plt.ylabel("correlator")
 plt.legend()
-plt.xlabel("Site")
-plt.ylabel("Correlator")
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

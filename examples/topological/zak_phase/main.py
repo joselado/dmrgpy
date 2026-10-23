@@ -1,61 +1,41 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Zak phase of a dimerized Heisenberg chain, J_i = 1 + delta (-1)^i. A twist
+# exp(2 pi i k) in the last bond gives a ground state |k>. The Zak phase is
+# the phase of the product <k_1|k_2><k_2|k_3>...<k_N|k_1>. It is 0 or pi
+# and it changes when the dimerization changes sign (topological transition).
 import numpy as np
 from dmrgpy import spinchain
-n = 4
-spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-sc = spinchain.Spin_Chain(spins) # create the spin chain
 
-def get_zak(delta):
-    """Compute the Zak phase of the dimerized spin chain for a given
-    dimerization strength delta"""
-    ks = np.linspace(0.,1.,20,endpoint=False)
+n = 4 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+
+def zak(delta):
     wfs = []
-    for k in ks: # loop over kpoints
+    for k in np.linspace(0., 1., 20, endpoint=False): # twist angle
         h = 0
         for i in range(n-1):
-            Ji = 1. + delta*(-1)**i # exchange
-            h = h + Ji*sc.Sx[i]*sc.Sx[i+1]
-            h = h + Ji*sc.Sy[i]*sc.Sy[i+1]
-            h = h + Ji*sc.Sz[i]*sc.Sz[i+1]
-        z = np.exp(1j*np.pi*2.*k) # complex twist
-        zc = np.conjugate(z) # conjugate
-        Spn = sc.Sx[n-1] + 1j*sc.Sy[n-1] # S+_n
-        Sp0 = sc.Sx[0] + 1j*sc.Sy[0] # S+_n
-        Smn = Spn.get_dagger() # S-_n
-        Sm0 = Sp0.get_dagger() # S-_n
-        # add the last link
-        Ji = 1. + delta*(-1)**(n-1) # exchange
-        h = h + Ji*(z*(Spn*Sm0)/2. + zc*(Sp0*Smn)/2. + sc.Sz[0]*sc.Sz[n-1])
-        # set the Hamiltonian
+            J = 1. + delta*(-1)**i # exchange
+            h = h + J*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
+        z = np.exp(2j*np.pi*k) # twist
+        Spn = sc.Sx[n-1] + 1j*sc.Sy[n-1] # S+ in the last site
+        Sp0 = sc.Sx[0] + 1j*sc.Sy[0] # S+ in the first site
+        J = 1. + delta*(-1)**(n-1)
+        h = h + J*(z*Spn*Sp0.get_dagger()/2 + np.conj(z)*Sp0*Spn.get_dagger()/2
+                   + sc.Sz[0]*sc.Sz[n-1]) # last bond with the twist
         sc.set_hamiltonian(h)
-        wf0 = sc.get_gs(mode="DMRG") # compute ground state
-        wfs.append(wf0) # store
+        wfs.append(sc.get_gs(mode="DMRG"))
+    phi = 1.
+    for i in range(len(wfs)): # product of overlaps, closing the loop
+        phi = phi*wfs[i].dot(wfs[(i+1) % len(wfs)])
+    return (np.angle(phi)/np.pi + 0.5) % 2 - 0.5 # phase / pi, 0 or 1
 
-    phi = 1. # initialize
-    for i in range(len(wfs)-1): # all pairs
-        phi = phi*wfs[i].dot(wfs[i+1])
-    phi = phi*wfs[len(wfs)-1].dot(wfs[0]) # last link
-    return np.angle(phi)/np.pi
-
-delta = -0.2 # dimerization
-print("Zak phase",get_zak(delta))
-
-# sweep the dimerization to see the topological transition at delta=0
-deltas = np.linspace(-0.6,0.6,13)
-phis = [get_zak(d) for d in deltas]
+deltas = np.linspace(-0.6, 0.6, 13) # dimerization
+phis = [zak(d) for d in deltas]
 
 import matplotlib.pyplot as plt
-
-plt.plot(deltas,phis,marker="o")
+plt.plot(deltas, phis, "o-")
 plt.xlabel("Dimerization delta")
 plt.ylabel("Zak phase / pi")
 plt.show()
-
-
-
-
-
-
-

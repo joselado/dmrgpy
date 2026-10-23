@@ -1,60 +1,38 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-# Regression test: real-time quench evolution of an MPS via TEBD
-# (pyitensor/tebd.py's TEBDEvolver, self.tevol_method="TEBD",
-# itensor_version="python" only -- see CLAUDE.md and
-# timedependent.py's evolve_and_measure_dmrg()) must agree with exact
-# diagonalization on a small nearest-neighbor system. Modeled directly on
-# examples/time_evolution/tdvp_VS_ED_time_evolution, with the same
-# structure and tolerance, but exercising TEBD instead of TDVP.
+# Quench dynamics <Sz_0(t)> of a Heisenberg chain. We start from the ground
+# state of a staggered field (Neel order) and let it evolve with the
+# Heisenberg Hamiltonian. We use time evolving block decimation (TEBD),
+# available in the pure Python backend, and compare with exact diagonalization.
 import numpy as np
-from dmrgpy import spinchain
-from dmrgpy import timedependent
+from dmrgpy import spinchain, timedependent
 
-n = 4 # small enough for exact diagonalization
-spins = [2 for i in range(n)] # S=1/2
-sc = spinchain.Spin_Chain(spins)
-sc.setup_python() # TEBD only exists on the pure-Python backend
+n = 4 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+sc.setup_python() # TEBD is in the pure Python backend
 sc.tevol_method = "TEBD"
-assert sc.itensor_version=="python" and sc.tevol_method=="TEBD"
 
-# create two Hamiltonians: prepare the GS of h0, then quench to h1
-h0 = 0
+h0 = sum((-1)**i*sc.Sz[i] for i in range(n)) # staggered field
 h1 = 0
-for i in range(n):
-    h0 = h0+(-1)**i*sc.Sz[i] # Neel-favoring field (onsite -> split across bonds)
-for i in range(n-1):
-    h1 = h1+sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1] # strictly NN
-
+for i in range(n-1): # Heisenberg Hamiltonian
+    h1 = h1 + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h0)
-wf = sc.get_gs() # DMRG (TEBD) ground state
-wfED = sc.get_gs(mode="ED") # ED ground state, same Hamiltonian
-sc.set_hamiltonian(h1) # quench to the Heisenberg Hamiltonian
+wf = sc.get_gs() # initial state
+wfed = sc.get_gs(mode="ED")
+sc.set_hamiltonian(h1) # quench
 
-op = sc.Sz[0] # operator to measure
+nt, dt = 50, 0.05 # number of time steps and time step
+(t1, s1) = timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=nt, dt=dt, wf=wf)
+(t2, s2) = timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=nt, dt=dt, wf=wfed, mode="ED")
+diff = np.max(np.abs(s1-s2))
+print("Max difference TEBD-ED =", diff)
+assert diff < 1e-4
 
-nt = 50 # number of time steps
-dt = 0.05 # time step
-
-(ts,sz) = timedependent.evolve_and_measure(sc,operator=op,nt=nt,dt=dt,wf=wf)
-(tsED,szED) = timedependent.evolve_and_measure(sc,
-        operator=op,nt=nt,dt=dt,wf=wfED,mode="ED")
-
-diff = np.max(np.abs(sz-szED))
-print("<Sz_0>(t) sample (DMRG, TEBD):",sz[:5].real)
-print("<Sz_0>(t) sample (ED):",szED[:5].real)
-print("Max abs difference between TEBD and ED =",diff)
-
-tol = 1e-4
-assert diff<tol, "TEBD time evolution disagrees with ED by %g (tol=%g)"%(diff,tol)
-
-print("TEST PASSED")
-
-# visualize the comparison behind the assert above
 import matplotlib.pyplot as plt
-plt.plot(ts,sz.real,label="DMRG (TEBD)",c="blue")
-plt.scatter(tsED,szED.real,label="ED",c="red")
-plt.xlabel("time") ; plt.ylabel(r"$\langle S_0^z\rangle(t)$")
+plt.plot(t2, s2.real, linewidth=4, label="ED")
+plt.plot(t1, s1.real, "--", linewidth=2, label="TEBD")
+plt.xlabel("time")
+plt.ylabel("<Sz_0>(t)")
 plt.legend()
 plt.show()

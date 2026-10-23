@@ -1,55 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-
+# Static correlators <c^+_i c_j> of spinless fermions with a random
+# hopping matrix. They give the density (i=j) and the bond order (i!=j)
+# of the ground state. We compute them with DMRG and with exact
+# diagonalization (ED), and compare both.
 import numpy as np
 from dmrgpy import fermionchain
 
-nf = 4 # number of different spinless fermionic orbitals
-fc = fermionchain.Fermionic_Chain(nf) # create the object
-C = fc.C # annihilation
-Cdag = fc.Cdag # creation
+n = 4 # number of orbitals
+fc = fermionchain.Fermionic_Chain(n)
+np.random.seed(3)
+h = 0
+for i in range(n):
+    for j in range(n): # random hopping
+        h = h + np.random.random()*fc.Cdag[i]*fc.C[j]
+h = h + h.get_dagger()
+fc.set_hamiltonian(h)
+fc.maxm = 40 # bond dimension
+fc.nsweeps = 10 # number of DMRG sweeps
 
-H = 0 # initialize Hamiltonian 
-
-# random Hamiltonian
-for i in range(nf):
-  for j in range(nf):
-    H = H + Cdag[i]*C[j]*np.random.random() # random hopping
-
-#H = 1j*Cdag[0]*C[1]
-
-#for i in range(nf-1):
-#    H = H + Cdag[i]*C[i]*Cdag[i+1]*C[i+1]*np.random.random() 
-fc.test_ED() # test the ED part
-H = H + H.get_dagger() # make it Hermitian
-
-fc.set_hamiltonian(H) # set the Hamiltonian
-print("Energy with DMRG",fc.gs_energy(mode="DMRG")) # energy with DMRG
-print("Energy with ED",fc.gs_energy(mode="ED")) # energy with exact diag.
-
-nc = 6 # number of random correlators
-def r(): return np.random.randint(0,nf-1)
-ops = [fc.Cdag[r()]*fc.C[r()] for i in range(nc)] # random pairs of operators
-
-# now compute the static correlators with ED and DMRG
-c1 = np.array([fc.vev(o,mode="DMRG") for o in ops])
-c2 = np.array([fc.vev(o,mode="ED") for o in ops])
+pairs = [(i, j) for i in range(n) for j in range(i, n)]
+c1 = np.array([fc.vev(fc.Cdag[i]*fc.C[j], mode="DMRG") for i, j in pairs])
+c2 = np.array([fc.vev(fc.Cdag[i]*fc.C[j], mode="ED") for i, j in pairs])
+print("Max difference DMRG-ED =", np.max(np.abs(c1-c2)))
 
 import matplotlib.pyplot as plt
-plt.scatter(range(nc),c1.real,label="DMRG",c="blue")
-plt.plot(range(nc),c2.real,label="ED",c="red")
+plt.plot(range(len(pairs)), c2.real, "o", markersize=10, label="ED")
+plt.plot(range(len(pairs)), c1.real, "x", markersize=10, label="DMRG")
+plt.xlabel("pair number (i,j)")
+plt.ylabel("<c^+_i c_j>")
 plt.legend()
-
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

@@ -1,92 +1,33 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Interacting non-Hermitian chain made of tetramers with onsite gain and loss,
+# +i, -i, -i, +i, hopping 1 and interaction V. The complex many-body
+# energies E-E0 show the edge zero modes of the chain. We follow the
+# lowest 10 states as a function of V, using exact diagonalization.
 import numpy as np
-from dmrgpy import fermionchain,mpsalgebra
-import numpy as np
+from dmrgpy import fermionchain
 
-# this is a minimal example of an interacting non-Hermitian system
-# with edge zero modes
+ns = 8 # number of sites (two tetramers)
+fc = fermionchain.Fermionic_Chain(ns)
 
-def get(V=0.0,c=1.0):
-    """Return non-Hermitian eigenvalues
-    V in the interaction
-    c is the coupling between first and last sites"""
-    n = 2 # number of tetramers
-    ns = 4*n # total number of sites
-    mh = np.zeros((ns,ns),dtype=complex) # TB matrix
+def spectrum(V):
+    h = 0
     for i in range(ns-1):
-        mh[i,i+1] = 1.0
-        mh[i+1,i] = 1.0
-    
-    mh[ns-1,0] = c
-    mh[0,ns-1] = c
-    
-    eta = 1.0
-    for i in range(n):
-        mh[4*i,4*i] = 1j*eta
-        mh[4*i+1,4*i+1] = -1j*eta
-        mh[4*i+2,4*i+2] = -1j*eta
-        mh[4*i+3,4*i+3] = 1j*eta
-    
-    
-    
-    fc = fermionchain.Fermionic_Chain(ns) # create the fermion chain
-    h = 0 # initialize Hamiltonian
-    # put all the hoppings
+        h = h + fc.Cdag[i]*fc.C[i+1] + fc.Cdag[i+1]*fc.C[i] # hopping
+        h = h + V*(fc.N[i]-0.5)*(fc.N[i+1]-0.5) # interaction
     for i in range(ns):
-        for j in range(ns):
-            h = h + mh[i,j]*fc.Cdag[i]*fc.C[j]
-    for i in range(ns-1): h = h + V*(fc.N[i]-0.5)*(fc.N[i+1]-0.5)
-    
-    
+        gain = 1j*(-1)**(i//2 + i) # +i,-i,-i,+i pattern
+        h = h + gain*fc.Cdag[i]*fc.C[i]
     fc.set_hamiltonian(h)
-    nex = 10 # lowest states
-    # the following methods target the states with minimum Re(E)
-    # use this if you wanted to use MPS
-#    es,wfs = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=1,n=nex,maxit=7)
-    # this method is just for ED
-    es,wfs = fc.get_excited_states(mode="ED",n=nex) # get excited states
-    return es - es[0] # return energies
+    es, wfs = fc.get_excited_states(mode="ED", n=10)
+    return es - es[0]
 
-# open file
-f = open("EIGS.OUT","w")
-
-# compute for different interactions
-Vs = np.linspace(0.0,1.0,20)
-allV = [] ; allRe = [] ; allIm = [] ; allIdx = []
-for V in Vs:
-    esed = get(c=0.0,V=V)
-    print("Computing ",V)
-    for i,e in enumerate(esed):
-        f.write(str(e.real)+"  ")
-        f.write(str(e.imag)+"  ")
-        f.write(str(V)+"\n")
-        allV.append(V) ; allRe.append(e.real) ; allIm.append(e.imag)
-        allIdx.append(i)
-    f.flush()
-f.close()
-
-# plot the real and imaginary parts of the (shifted) excitation
-# energies as a function of the interaction strength V
 import matplotlib.pyplot as plt
-allV = np.array(allV) ; allRe = np.array(allRe)
-allIm = np.array(allIm) ; allIdx = np.array(allIdx)
-plt.subplot(1,2,1)
-plt.scatter(allV,allRe,c=allIdx,cmap="rainbow")
-plt.xlabel("V") ; plt.ylabel("Re(E-E0)")
-plt.subplot(1,2,2)
-plt.scatter(allV,allIm,c=allIdx,cmap="rainbow")
-plt.xlabel("V") ; plt.ylabel("Im(E-E0)")
-plt.tight_layout()
+for V in np.linspace(0.0, 1.0, 20):
+    es = spectrum(V)
+    plt.scatter(es*0+V, es.real, c="black", s=8)
+    plt.scatter(es*0+V, es.imag, c="red", s=8)
+plt.xlabel("interaction V")
+plt.ylabel("E-E0 (black: real part, red: imaginary part)")
 plt.show()
-
-
-
-
-
-
-
-
-
-

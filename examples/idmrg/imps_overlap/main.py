@@ -1,86 +1,30 @@
-# Per-site overlap/fidelity between two converged infinite MPS --
-# Infinite_Many_Body_Chain.overlap: the thermodynamic-limit generalization
-# of a finite MPS inner product <phi|psi>. A literal <phi|psi> over an
-# infinite chain is 0 or infinite (it scales as eta^N over N unit cells)
-# unless the dominant mixed-transfer-matrix eigenvalue eta has magnitude
-# exactly 1 -- so overlap returns the *per-site fidelity*
-# eta_ab/sqrt(eta_aa*eta_bb) (pyitensor.idmrg.imps_overlap underneath),
-# which has magnitude 1 iff the two iMPS represent the same physical state
-# (any gauge/normalization convention), and magnitude < 1 otherwise.
-#
-# Demonstrated below: (1) self-overlap and overlap with an identity-applied
-# copy (apply_operator with the identity re-gauges the state) are both
-# exactly 1 -- a gauge-independent cross-check that apply_operator's own
-# canonicalization didn't change the physical state; (2) two
-# independently-converged, oppositely-polarized product states (a strong
-# onsite field pinning <Sz> to +-0.5) are orthogonal, |overlap| ~ 0.
-
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-from dmrgpy import infinitechain
+# Overlap between two infinite matrix product states (iMPS). An overlap
+# over an infinite chain is 0 or infinite, so we compute the fidelity per
+# site, which has modulus 1 only if the two states are the same state.
+# Here we compare the ground state of the Heisenberg chain with the ground
+# state of the XXZ chain, H = sum_i Sx Sx + Sy Sy + Delta Sz Sz.
 import numpy as np
+from dmrgpy import infinitechain
+
+def get_state(delta):
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"])
+    ic.gs_method = "idmrg"
+    ic.set_hamiltonian(ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0]
+                       + delta*ic.SzC[0]*ic.SzR[0])
+    ic.maxm, ic.maxiter, ic.etol = 30, 60, 1e-9 # bond dimension, iterations
+    ic.gs_energy()
+    return ic
+
+ref = get_state(1.0) # Heisenberg chain
+print("Self overlap =", ref.overlap(ref))
+deltas = np.linspace(0.6, 1.4, 9)
+fidelity = [abs(ref.overlap(get_state(d))) for d in deltas]
+
 import matplotlib.pyplot as plt
-
-################################################################
-### (1) self-overlap and gauge-invariance under apply_operator(Id) ###
-################################################################
-ic = infinitechain.Infinite_Spin_Chain(["1/2"])
-ic.gs_method = "idmrg"
-h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
-ic.set_hamiltonian(h)
-ic.maxm, ic.maxiter, ic.etol = 30, 60, 1e-9
-ic.gs_energy()
-
-print("=== self-overlap of a converged Heisenberg ground state ===")
-ov_self = ic.overlap(ic)
-print("<psi|psi> per site:", ov_self, " (expect exactly 1)")
-assert abs(ov_self - 1.0) < 1e-6
-
-same_state = ic.apply_operator(ic.get_operator("Id", 0))
-
-print()
-print("=== overlap with an identity-applied (re-gauged) copy ===")
-ov_gauge = ic.overlap(same_state)
-print("|<psi|apply_operator(Id, psi)>| per site:", abs(ov_gauge), " (expect exactly 1)")
-assert abs(abs(ov_gauge) - 1.0) < 1e-6
-
-########################################################################
-### (2) two independently-converged, oppositely-polarized product states ###
-########################################################################
-ic_up = infinitechain.Infinite_Spin_Chain(["1/2"])
-ic_up.gs_method = "idmrg"
-ic_up.maxm, ic_up.maxiter, ic_up.etol = 4, 50, 1e-12
-ic_up.set_hamiltonian(-10.0 * ic_up.SzC[0])
-ic_up.gs_energy()
-
-ic_down = infinitechain.Infinite_Spin_Chain(["1/2"])
-ic_down.gs_method = "idmrg"
-ic_down.maxm, ic_down.maxiter, ic_down.etol = 4, 50, 1e-12
-ic_down.set_hamiltonian(10.0 * ic_down.SzC[0])
-ic_down.gs_energy()
-
-print()
-print("=== overlap between opposite-field-polarized product states ===")
-print("<Sz> up-chain:", ic_up.vev("Sz", 0), " down-chain:", ic_down.vev("Sz", 0))
-ov_orth = ic_up.overlap(ic_down)
-print("|<down|up>| per site:", abs(ov_orth), " (expect ~0, orthogonal states)")
-assert abs(ov_orth) < 1e-6
-
-print()
-print("overlap example PASSED")
-
-labels = ["self-overlap\n(same state)", "gauge-invariance\n(apply_operator(Id))",
-          "orthogonality\n(opposite-polarized)"]
-values = [abs(ov_self), abs(ov_gauge), abs(ov_orth)]
-fig, ax = plt.subplots(figsize=(6.5, 4.5))
-bars = ax.bar(labels, values, color=["tab:blue", "tab:green", "tab:red"])
-ax.axhline(1.0, color="gray", lw=0.8, ls=":")
-ax.set_ylabel("per-site fidelity |overlap|")
-ax.set_title("overlap: self / gauge-invariance / orthogonality checks")
-for bar, v in zip(bars, values):
-    ax.text(bar.get_x() + bar.get_width()/2, v, "{:.3f}".format(v),
-            ha="center", va="bottom")
-fig.tight_layout()
-fig.savefig("imps_overlap.png", dpi=150)
-print("saved plot to imps_overlap.png")
+plt.plot(deltas, fidelity, marker="o")
+plt.xlabel("anisotropy Delta of the XXZ chain")
+plt.ylabel("|overlap| per site with Delta=1")
+plt.show()

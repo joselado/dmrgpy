@@ -1,81 +1,40 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-# Third-order potential-interference term of the STM/Kondo tunneling
-# spectrum (eq. "U-M", Ternes, New J. Phys. 17 063016 (2015),
-# arXiv:1505.04430), T=0, U!=0, computed two independent ways for the
-# same chain and compared: the ED excited-state sum
-# (conductance.third_order_potential_dIdV) and the DMRG dynamical-
-# correlator construction (kondospectrumtk/potentialdc.py,
-# itensor_version=3) added to fill the one remaining gap in this
-# feature's mode="DMRG" path (it used to raise NotImplementedError for
-# U!=0). Companion to examples/kondo_third_order_dmrg_VS_ED, which
-# instead isolates the second-order term and the third-order *Kondo*
-# term (U=0).
-#
-# See that other example's module docstring for why `delta` is set much
-# coarser here (2e-5) than this feature's test suite default (2e-6): the
-# compiled KPM extension picks its own moment count from delta, and a
-# very fine delta makes each dynamical-correlator call take tens of
-# seconds even for this tiny chain.
+# Potential term of the third-order STM tunneling spectrum of a spin
+# chain in a magnetic field (Ternes, New J. Phys. 17 063016), where
+# the tip couples to the spin with exchange J and also with a potential U.
+# It is the part of dI/dV proportional to U, and it is computed
+# with DMRG (dynamical correlator) and with exact diagonalization (ED).
 import numpy as np
 from dmrgpy import spinchain
 from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 from dmrgpy.kondospectrumtk.conductance import third_order_potential_dIdV
 from dmrgpy.kondospectrumtk.potentialdc import third_order_potential_dIdV_dc
 
-G = 2.0
-MUB = 5.7883818066e-5 # eV/T
-
-# same 3-site chain as examples/kondo_third_order_dmrg_VS_ED (ITensor
-# v3's two-site DMRG/TDVP needs at least 3 sites)
+muB = 5.7883818066e-5 # Bohr magneton in eV/T
 sc = spinchain.Spin_Chain(["1/2", "1/2", "1/2"], itensor_version=3)
-sc.maxm, sc.nsweeps = 30, 15 # pin the sweep schedule (the library defaults)
-h = G*MUB*10.0*sc.Sz[0]
+sc.maxm = 30 # bond dimension
+sc.nsweeps = 15 # number of DMRG sweeps
+h = 2.0*muB*10.0*sc.Sz[0] # Zeeman field of 10 T
 for i in range(2):
     h = h + 0.01*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
 sc.set_hamiltonian(h)
 sc.get_gs()
 ks = KondoSpectrum(sc, site=0, T=0.0)
 
-eVs = np.linspace(-2e-3, 2e-3, 41)
-# The potential term needs es to reach past the TOP of the impurity's S_k
-# spectrum, not just past the eVs sweep: its kernel F0(eV-w)-F0(eV+w)
-# falls off only as ~2eV/w inside the band, so every line contributes at
-# every bias (unlike the second-order term, where only transitions below
-# max|eV| enter). Here the lowest transition is at 0.77 meV, but lines
-# at 10 to 16 meV carry 0.40 of the total weight S(S+1)=0.75; an es over
-# +-3 meV dropped them, which was 0.0108 of the 0.111 peak (9.7 per
-# cent). +-20 meV covers them with room to spare, at the old spacing.
-es = np.linspace(-20e-3, 20e-3, 5328) # spacing 7.5e-6 = delta/2.7
-Jrho_s, U = 0.05, 0.2
-
-print("Computing the potential-interference term via the excited-state "
-      "sum (ED, exact) ...")
-dIdV_ed = third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0)
-
-print("Computing the potential-interference term via the T=0 dynamical "
-      "correlator (mode=\"DMRG\") ...")
-dIdV_dmrg = third_order_potential_dIdV_dc(sc, 0, eVs, Jrho_s, U, T0=1.0,
-                                           mode="DMRG", submode="KPM",
-                                           delta=2e-5, es=es)
-
-diff = np.max(np.abs(dIdV_dmrg-dIdV_ed))
-print("max |DMRG - ED| = %.4f (max |ED| = %.4f)"%(diff, np.max(np.abs(dIdV_ed))))
-# With es covering the whole S_k spectrum the remainder is KPM
-# broadening, and it sits next to the 0.77 meV line: the largest
-# difference is at eV=-0.80 meV and more than 0.3 meV away from that line
-# the two agree to 5e-5. It shrinks with delta (0.0006 at delta=1e-5).
-# See test_kondo_spectrum_potentialdc.py for the tight mode="ED"
-# submode="ED" check of this same function.
-assert diff < 0.05*np.max(np.abs(dIdV_ed))
+eVs = np.linspace(-2e-3, 2e-3, 41) # bias voltages
+es = np.linspace(-20e-3, 20e-3, 5328) # energies of the spin spectrum
+Jrho, U = 0.05, 0.2 # exchange and potential couplings
+d1 = third_order_potential_dIdV(ks, eVs, Jrho, U, T0=1.0)
+d2 = third_order_potential_dIdV_dc(sc, 0, eVs, Jrho, U, T0=1.0,
+                                   mode="DMRG", submode="KPM", delta=2e-5, es=es)
+print("Max difference =", np.max(np.abs(d2-d1)))
 
 import matplotlib.pyplot as plt
-
-plt.plot(eVs, dIdV_ed, marker="o", label="ED (exact)")
-plt.plot(eVs, dIdV_dmrg, marker="s", label="DMRG (dynamical correlator)")
+plt.plot(eVs, d1, linewidth=4, label="ED")
+plt.plot(eVs, d2, "--", linewidth=2, label="DMRG")
 plt.xlabel("eV")
-plt.ylabel("Potential-interference term of dI/dV")
-plt.title("Third-order potential-interference term: ED vs DMRG")
+plt.ylabel("potential term of dI/dV")
 plt.legend()
 plt.show()

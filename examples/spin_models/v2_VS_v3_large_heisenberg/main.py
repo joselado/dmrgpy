@@ -1,56 +1,33 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-# Regression test: ITensor v2 and v3 must keep agreeing on the ground
-# state energy of a Heisenberg spin-1/2 chain at larger system sizes
-# (n>=20), not just the small n=8 case covered by
-# examples/v2_VS_v3_heisenberg_spin_half. ED is not feasible at these
-# sizes, so this checks DMRG-vs-DMRG cross-backend consistency instead.
-# Added after directly comparing dmrgpy's current in-process v2/v3
-# backends against the old (pre-rewrite) file-based v2 backend at
-# n=20..32 and finding agreement to ~1e-6..1e-14 (normal DMRG variational
-# noise from differing internal sweep paths, not a regression) -- this
-# test locks in that same v2-vs-v3 agreement going forward.
+# Ground state energy of the S=1/2 Heisenberg chain for chains too large
+# for exact diagonalization. We compute it with the two ITensor backends,
+# v2 and v3, and check that both give the same energy.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
-sizes = [16, 24, 32]
-
-def get_energy(itensor_version, n):
-    spins = ["S=1/2" for i in range(n)]
-    sc = spinchain.Spin_Chain(spins, itensor_version=itensor_version)
+def energy(version, n):
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)], itensor_version=version)
     h = 0
-    for i in range(n-1):
+    for i in range(n-1): # Heisenberg Hamiltonian
         h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
     sc.set_hamiltonian(h)
+    sc.maxm = 40 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
     return sc.gs_energy(mode="DMRG")
 
-tol = 1e-3 # generous: only meant to catch a real divergence, not to pin
-           # down DMRG's sweep-to-sweep numerical noise
-e2s,e3s,diffs = [],[],[]
-for n in sizes:
-    e2 = get_energy(2, n)
-    e3 = get_energy(3, n)
-    diff = abs(e2-e3)
-    print("n=%d  v2=%.10f  v3=%.10f  diff=%.2e"%(n, e2, e3, diff))
-    assert diff<tol, "v2 vs v3 disagree by %g at n=%d (tol=%g)"%(diff, n, tol)
-    e2s.append(e2) ; e3s.append(e3) ; diffs.append(diff)
+ns = [16, 24, 32] # chain lengths
+e2 = [energy(2, n) for n in ns]
+e3 = [energy(3, n) for n in ns]
+diff = np.max(np.abs(np.array(e2)-e3))
+print("Max difference v2-v3 =", diff)
+assert diff < 1e-3
 
-print("TEST PASSED")
-
-# overlay the v2 vs v3 ground state energies, and separately show how
-# small the cross-backend disagreement stays as the chain grows
-fig,(ax1,ax2) = plt.subplots(1,2,figsize=(10,4))
-ax1.plot(sizes,e2s,marker="o",label="ITensor v2")
-ax1.plot(sizes,e3s,marker="s",label="ITensor v3")
-ax1.set_xlabel("Chain length")
-ax1.set_ylabel("Ground state energy")
-ax1.legend()
-
-ax2.plot(sizes,diffs,marker="o",color="tab:red")
-ax2.set_yscale("log")
-ax2.set_xlabel("Chain length")
-ax2.set_ylabel("|E(v2) - E(v3)|")
-fig.tight_layout()
+import matplotlib.pyplot as plt
+plt.plot(ns, e2, linewidth=4, label="v2")
+plt.plot(ns, e3, "--", linewidth=2, label="v3")
+plt.xlabel("chain length n")
+plt.ylabel("ground state energy")
+plt.legend()
 plt.show()

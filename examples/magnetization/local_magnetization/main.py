@@ -1,56 +1,33 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Local magnetization <Sz_i> of the S=1/2 Heisenberg chain with a magnetic
+# field acting on the first site, H = sum_i S_i . S_{i+1} + 0.1 Sz_0.
+# The field polarizes the edge and the response decays into the chain,
+# which a spin-polarized STM would measure site by site.
+# We compute it with DMRG and compare with exact diagonalization (ED).
 import numpy as np
 from dmrgpy import spinchain
-import matplotlib.pyplot as plt
-####################################
-### Create the spin chain object ###
-####################################
-n = 6 # total number of spins
-spins = ["S=1/2" for i in range(n)] # list with the different spins 
-sc = spinchain.Spin_Chain(spins) # create the spin chain object
-#sc.setup_julia() # use Julia
 
-##############################
-### Create the hamiltonian ###
-##############################
-h = 0 
+n = 6 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+
+h = 0
 for i in range(n-1):
-    h = h + sc.Sx[i]*sc.Sx[i+1]
-    h = h + sc.Sy[i]*sc.Sy[i+1]
-    h = h + sc.Sz[i]*sc.Sz[i+1]
-
-h = h + 0.1*sc.Sz[0]
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+h = h + 0.1*sc.Sz[0] # field on the first site
 sc.set_hamiltonian(h)
-# this parameters control the DMRG algorithm, in principle default ones are fine
-#sc.maxm = 40 # maximum bond dimension
-#sc.nsweeps = 12 # number of DMRG sweeps
-e0 = sc.gs_energy() # compute ground state energy
-e1 = sc.gs_energy(mode="ED") # compute ground state energy
-print("Energy with DMRG is",e0)
-print("Energy with ED is",e1)
-mx,my,mz = sc.get_magnetization() # use DMRG
-mx2,my2,mz2 = sc.get_magnetization(mode="ED") # use ED
+sc.maxm = 40 # bond dimension
+sc.nsweeps = 10 # number of DMRG sweeps
 
-# plot the resutls
-plt.plot(range(len(mz)),mz,label="DMRG",c="red")
-plt.scatter(range(len(mz2)),mz2,label="ED",c="blue")
+mx1, my1, mz1 = sc.get_magnetization(mode="DMRG")
+mx2, my2, mz2 = sc.get_magnetization(mode="ED")
+print("Max difference DMRG-ED =", np.max(np.abs(np.array(mz1)-mz2)))
+
+import matplotlib.pyplot as plt
+plt.plot(range(n), mz2, "o", markersize=10, label="ED")
+plt.plot(range(n), mz1, "x", markersize=10, label="DMRG")
+plt.xlabel("site i")
+plt.ylabel("<Sz_i>")
 plt.legend()
-plt.xlabel("Site #")
-plt.ylabel("Expectation value of Sz")
 plt.show()
-# uncomment this to check the code (only for small systems!!)
-#e1 = sc.gs_energy(mode="ED") # ground state energy using exact diagonalization
-#print("Energy using exact diagonalization",e1)
-
-
-
-
-
-
-
-
-
-
-

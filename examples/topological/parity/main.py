@@ -1,58 +1,41 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Fermion parity of the ground state of a superconducting chain with a
+# magnetic impurity. The parity is even or odd depending on whether the
+# number of electrons is even or odd. Changing the chemical potential
+# makes the ground state switch parity, a signature of a quantum phase
+# transition that can be detected with Yu-Shiba-Rusinov states in STM.
 import numpy as np
 from dmrgpy import fermionchain
 
-##################
-# this example shows how to compute the parity of a many-body fermionic
-# state, meaning whether if it made of an odd or even number of electrons
-##################
+L = 4 # number of sites
 
-
-def get_den_par(mu=0.,U=0.5,Bz=2.0,delta=0.2):
-    """Return parity and number of electrons"""
-    L = 4 # number of fermionic sites
-    fc = fermionchain.Spinful_Fermionic_Chain(L) # create the chain
+def number_and_parity(mu):
+    fc = fermionchain.Spinful_Fermionic_Chain(L)
     h = 0
     for i in range(L-1): # hopping
-        h = h + fc.Cdagup[i]*fc.Cup[i+1]
-        h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
+        h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
     for i in range(L): # s-wave superconductivity
-        h = h + delta*fc.Cup[i]*fc.Cdn[i]
-    h = h + h.get_dagger() # Hermitian conjugate of hopping and pairing
-    # the Hermitian terms below are added once, after the conjugate
+        h = h + 0.2*fc.Cup[i]*fc.Cdn[i]
+    h = h + h.get_dagger()
     for i in range(L): # chemical potential
-        h = h + mu*fc.Cdagup[i]*fc.Cup[i]
-        h = h + mu*fc.Cdagdn[i]*fc.Cdn[i]
-    for i in range(L-1): # Hubbard
-        h = h + U*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
-    h = h + Bz*fc.Sz[0] # add magnetic impurity
+        h = h + mu*(fc.Cdagup[i]*fc.Cup[i] + fc.Cdagdn[i]*fc.Cdn[i])
+    for i in range(L-1): # Hubbard interaction
+        h = h + 0.5*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
+    h = h + 2.0*fc.Sz[0] # magnetic impurity
     fc.set_hamiltonian(h)
-    wf = fc.get_gs(mode="DMRG") # compute ground state
-    p = wf.get_fermionic_parity() # parity of the state
-    n = wf.dot(sum(fc.N)*wf) # total number of electrons 
-    return n,p
+    fc.maxm = 40 # bond dimension
+    fc.nsweeps = 10 # number of DMRG sweeps
+    wf = fc.get_gs(mode="DMRG")
+    return wf.dot(sum(fc.N)*wf).real, wf.get_fermionic_parity()
 
-
-mus = np.linspace(-1.,0.,20)
-nps = np.array([get_den_par(mu=mu) for mu in mus])
-
-ns = nps[:,0] # densities
-ps = nps[:,1] # parities
+mus = np.linspace(-1., 0., 20)
+res = np.array([number_and_parity(mu) for mu in mus])
 
 import matplotlib.pyplot as plt
-
-plt.subplot(1,2,1)
-plt.scatter(mus,ns,c="blue")
-plt.xlabel("Chemical potential")
-plt.ylabel("Particle number")
-
-plt.subplot(1,2,2)
-plt.scatter(mus,ps,c="red")
-plt.xlabel("Chemical potential")
-plt.ylabel("Particle parity")
-
-plt.tight_layout()
-
+plt.plot(mus, res[:,0], "o", label="number of electrons")
+plt.plot(mus, res[:,1], "x", label="parity")
+plt.xlabel("chemical potential")
+plt.legend()
 plt.show()

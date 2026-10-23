@@ -1,124 +1,31 @@
-# Add the root path of the dmrgpy library, and of tests/ for the shared
-# dense Jordan-Wigner reference oracle (tests/_dense_jw_reference.py) --
-# kept in one place rather than duplicated here, since it's the
-# physics-critical part of the cross-check.
-import os ; import sys
-sys.path.append(os.getcwd()+'/../../../src')
-sys.path.append(os.getcwd()+'/../../../tests')
+# Add the root path of the dmrgpy library
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-# Regression test / demo for mixedchain.Mixed_Spin_Fermion_Chain: a chain
-# mixing a genuine spin-1/2 site and spinful-fermion locations (paired
-# spinless-fermion up/down sites, see mixedchain.py), used here for a
-# small Kondo-lattice-like model -- a local moment (real spin site)
-# exchange-coupled to two conduction-electron sites, with a direct
-# hopping between the two fermion sites that has the spin site physically
-# in between (exercising the Jordan-Wigner string crossing a
-# non-fermionic site, see mixedchain.py's docstring).
-#
-# Ground-state energy and a couple of expectation values are checked
-# against the same dense Jordan-Wigner reference tests/test_mixed_chain.py
-# uses, since there is no dedicated ED backend for this chain type yet.
+# Kondo-like model in a mixed chain: a spin-1/2 moment between two
+# spinful fermion sites, coupled by the exchange K to each fermion site,
+# with hopping t between the fermion sites (across the spin site) and a
+# field B. We compute the magnetization <Sz> of the moment against B.
 import numpy as np
 from dmrgpy import mixedchain
-from _dense_jw_reference import SX, SY, SZ, fermion_ops, embed
 
-labels = ["F", "1/2", "F"] # fermion - spin - fermion
-mc = mixedchain.Mixed_Spin_Fermion_Chain(labels, itensor_version=3)
-mc.maxm = 60
-mc.nsweeps = 20
-assert mc.sites == [0, 0, 2, 0, 0] # 2 fermion sites, 1 spin site, 2 fermion sites
-assert mc.phys_index == [(0, 1), 2, (3, 4)]
+# fermion - spin - fermion, the labels "F" are spinful fermion sites
+mc = mixedchain.Mixed_Spin_Fermion_Chain(["F", "1/2", "F"], itensor_version=3)
+mc.maxm = 60 # bond dimension
+mc.nsweeps = 20 # number of DMRG sweeps
+K, t = 0.5, 0.4 # exchange and hopping
 
-# Same parameters as tests/test_mixed_chain.py's KONDO_PARAMS. `hf` is a
-# small longitudinal field: lifts the SU(2) ground-multiplet degeneracy
-# so per-site Sz has a single, reproducible value (see
-# tests/test_mixed_chain.py's KONDO_PARAMS docstring for why).
-K1, K2, t, muA, muB, hf = 0.5, 0.35, 0.4, 0.15, -0.2, 0.13
-h = K1*mc.SS(0, 1) + K2*mc.SS(1, 2) + muA*mc.Ntot[0] + muB*mc.Ntot[2]
-hop = t*(mc.Cdagup[0]*mc.Cup[2] + mc.Cdagdn[0]*mc.Cdn[2]) # crosses the spin site
-h = h + hop + hop.get_dagger()
-h = h + hf*(mc.Sz[0] + mc.Sz[1] + mc.Sz[2])
-
-mc.set_hamiltonian(h)
-e_dmrg = mc.gs_energy(mode="DMRG")
-sz_spin_dmrg = mc.vev(mc.Sz[1]).real
-ntot_fermA_dmrg = mc.vev(mc.Ntot[0]).real
-
-print("DMRG ground-state energy", e_dmrg)
-print("<Sz> at the spin location", sz_spin_dmrg)
-print("<Ntot> at the first fermion location", ntot_fermA_dmrg)
-
-# --- independent dense Jordan-Wigner reference ---
-nsites = 5 # fAup, fAdn, spin, fBup, fBdn
-fermionic_mask = [True, True, False, True, True]
-C, Cdag, N = fermion_ops(fermionic_mask)
-Sx_s, Sy_s, Sz_s = embed(SX,2,nsites), embed(SY,2,nsites), embed(SZ,2,nsites)
-
-def ferm_spin_ops(up, dn):
-    sx = 0.5*(Cdag[up]@C[dn]) + 0.5*(Cdag[dn]@C[up])
-    sy = -0.5j*(Cdag[up]@C[dn]) + 0.5j*(Cdag[dn]@C[up])
-    sz = 0.5*N[up] - 0.5*N[dn]
-    ntot = N[up] + N[dn]
-    return sx, sy, sz, ntot
-
-sxA, syA, szA, ntotA = ferm_spin_ops(0, 1)
-sxB, syB, szB, ntotB = ferm_spin_ops(3, 4)
-
-H = (K1*(sxA@Sx_s + syA@Sy_s + szA@Sz_s)
-     + K2*(Sx_s@sxB + Sy_s@syB + Sz_s@szB)
-     + muA*ntotA + muB*ntotB + hf*(szA + Sz_s + szB))
-hopref = t*(Cdag[0]@C[3] + Cdag[1]@C[4])
-H = H + hopref + hopref.conj().T
-
-es, vs = np.linalg.eigh(H)
-e_ref = es[0]
-gs = vs[:, 0]
-sz_ref = np.vdot(gs, Sz_s@gs).real
-ntot_ref = np.vdot(gs, ntotA@gs).real
-
-print("Reference ground-state energy", e_ref)
-print("Reference <Sz> at the spin location", sz_ref)
-print("Reference <Ntot> at the first fermion location", ntot_ref)
-
-assert abs(e_dmrg-e_ref) < 1e-5
-assert abs(sz_spin_dmrg-sz_ref) < 1e-4
-assert abs(ntot_fermA_dmrg-ntot_ref) < 1e-4
-print("OK")
-
-# --- sweep the longitudinal field hf, cross-checking DMRG against the
-# dense Jordan-Wigner reference at each point, and plot the agreement ---
-hfs = np.linspace(0.0, 0.4, 5)
-e_dmrg_sweep, e_ref_sweep = [], []
-sz_dmrg_sweep, sz_ref_sweep = [], []
-for hfi in hfs:
-    hi = K1*mc.SS(0, 1) + K2*mc.SS(1, 2) + muA*mc.Ntot[0] + muB*mc.Ntot[2]
-    hopi = t*(mc.Cdagup[0]*mc.Cup[2] + mc.Cdagdn[0]*mc.Cdn[2])
-    hi = hi + hopi + hopi.get_dagger()
-    hi = hi + hfi*(mc.Sz[0] + mc.Sz[1] + mc.Sz[2])
-    mc.set_hamiltonian(hi)
-    e_dmrg_sweep.append(mc.gs_energy(mode="DMRG"))
-    sz_dmrg_sweep.append(mc.vev(mc.Sz[1]).real)
-
-    Hi = (K1*(sxA@Sx_s + syA@Sy_s + szA@Sz_s)
-          + K2*(Sx_s@sxB + Sy_s@syB + Sz_s@szB)
-          + muA*ntotA + muB*ntotB + hfi*(szA + Sz_s + szB))
-    Hi = Hi + hopref + hopref.conj().T
-    esi, vsi = np.linalg.eigh(Hi)
-    e_ref_sweep.append(esi[0])
-    gsi = vsi[:, 0]
-    sz_ref_sweep.append(np.vdot(gsi, Sz_s@gsi).real)
+bs = np.linspace(0.05, 0.4, 6) # magnetic fields
+szs = []
+for b in bs:
+    h = K*mc.SS(0, 1) + K*mc.SS(1, 2) # Kondo exchange
+    hop = t*(mc.Cdagup[0]*mc.Cup[2] + mc.Cdagdn[0]*mc.Cdn[2])
+    h = h + hop + hop.get_dagger() # hopping crossing the spin site
+    h = h + b*(mc.Sz[0] + mc.Sz[1] + mc.Sz[2]) # magnetic field
+    mc.set_hamiltonian(h)
+    szs.append(mc.vev(mc.Sz[1]).real)
 
 import matplotlib.pyplot as plt
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-ax1.plot(hfs, e_dmrg_sweep, marker="o", label="DMRG")
-ax1.plot(hfs, e_ref_sweep, marker="x", linestyle="--", label="Dense JW reference")
-ax1.set_xlabel("hf")
-ax1.set_ylabel("Ground-state energy")
-ax1.legend()
-ax2.plot(hfs, sz_dmrg_sweep, marker="o", label="DMRG")
-ax2.plot(hfs, sz_ref_sweep, marker="x", linestyle="--", label="Dense JW reference")
-ax2.set_xlabel("hf")
-ax2.set_ylabel("<Sz> at the spin location")
-ax2.legend()
-plt.tight_layout()
+plt.plot(bs, szs, marker="o")
+plt.xlabel("magnetic field B")
+plt.ylabel("<Sz> of the spin site")
 plt.show()

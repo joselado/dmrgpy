@@ -1,78 +1,43 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Chain of Sachdev-Ye-Kitaev (SYK) dots with random quartic couplings,
+# H = sum J_ijkl c_i c_j c^+_k c^+_l + h.c., inside each dot of n fermionic
+# sites and between neighboring dots. There is no hopping, so the
+# interaction is the only energy scale. We compute the density of
+# fermions with DMRG and compare with exact diagonalization (ED).
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
-n = 4
-L = 3
-fc = fermionchain.Fermionic_Chain(n*L) # create the chain
+
+np.random.seed(1)
+n = 3 # sites per dot
+L = 3 # number of dots
+fc = fermionchain.Fermionic_Chain(n*L)
+C, Cdag = fc.C, fc.Cdag
+
 h = 0
-#for i in range(n):
-#  for j in range(i):
-#    h = h + np.random.random()*fc.C[i]*fc.Cdag[j]
-C = fc.C
-Cdag = fc.Cdag
-for ll in range(L):
-  for i in range(n):
-    for j in range(i+1,n):
-      for k in range(n):
-        for l in range(k+1,n):
-          Ni = C[i+ll*n]*C[j+ll*n]
-          Nj = Cdag[k+ll*n]*Cdag[l+ll*n]
-          h = h + (np.random.random()-.5)*Ni*Nj
-          if ll<(L-1):
-            Ni = C[i+ll*n]*C[j+ll*n]
-            Nj = Cdag[k+(ll+1)*n]*Cdag[l+(ll+1)*n]
-            h = h + (np.random.random()-.5)*Ni*Nj
+for l in range(L):
+    for i in range(n):
+        for j in range(i+1, n):
+            for k in range(n):
+                for m in range(k+1, n):
+                    A = C[i+l*n]*C[j+l*n]
+                    h = h + (np.random.random()-0.5)*A*Cdag[k+l*n]*Cdag[m+l*n]
+                    if l < L-1: # coupling to the next dot
+                        h = h + (np.random.random()-0.5)*A*Cdag[k+(l+1)*n]*Cdag[m+(l+1)*n]
 h = h + h.get_dagger()
-
-ms = [3,10,20,1000]
-#ms = [10]
-#fc.set_hamiltonian(h)
-#e0 = fc.gs_energy(mode="ED") # energy with exact diagonalization
-#print(e0)
-import profile
-#
-#def f():
-#  fc.set_hamiltonian(h)
-#  e1 = fc.gs_energy(mode="DMRG") # energy with DMRG
-#
-#profile.run('f()','restats')
-#import pstats
-#from pstats import SortKey
-#p = pstats.Stats('restats')
-#p.sort_stats(SortKey.CUMULATIVE).print_stats(20)
-#exit()
-import time
 fc.set_hamiltonian(h)
-t0 = time.time()
-e1 = fc.gs_energy(mode="DMRG") # energy with DMRG
-t1 = time.time()
-print("Time in GS = ",t1-t0)
-print(np.mean(fc.get_density()))
-exit()
-#fc.mpomaxm = 500
-wf = fc.get_gs()
-#wf = fc.C[0]*wf
-#fc.applyinverse(h-e1-1j*1e-1,wf)
-(x,y) = fc.get_dynamical_correlator(name=(fc.Cdag[0],fc.C[0]),submode="TD")
-#t2 = time.time()
-print("Time in KPM = ",t2-t1)
-exit()
+fc.maxm = 40 # bond dimension
+fc.nsweeps = 10 # number of DMRG sweeps
+
+d1 = fc.get_density(mode="DMRG")
+d2 = fc.get_density(mode="ED")
+print("Max difference =", np.max(np.abs(np.array(d1)-d2)))
+
 import matplotlib.pyplot as plt
-plt.plot(x,y)
+plt.plot(range(n*L), d2, "o", markersize=10, label="ED")
+plt.plot(range(n*L), d1, "x", markersize=10, label="DMRG")
+plt.xlabel("site i")
+plt.ylabel("density <n_i>")
+plt.legend()
 plt.show()
-exit()
-t2 = time.time()
-print("Time in correlator = ",t2-t1)
-
-
-
-
-
-
-
-
-
-

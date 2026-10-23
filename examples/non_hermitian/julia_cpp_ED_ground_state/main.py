@@ -1,58 +1,38 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Ground state of an interacting non-Hermitian chain of spinless fermions,
+# H = sum_ij M_ij c^dag_i c_j + V sum_i (n_i - 1/2)(n_{i+1} - 1/2),
+# where M has first-neighbor hopping and an imaginary onsite potential
+# i*gamma*cos(2 pi sqrt(2) i). We compare ED with the Julia DMRG backend.
+# Needs Julia and juliacall installed.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
 
-def gs_energy(mode="ED",gamma=0.3):
-    n = 4
-    if mode=="DMRGJ":
-        # create the fermion chain
-        fc = fermionchain.Fermionic_Chain(n,itensor_version="julia_live")
-    else:
-        fc = fermionchain.Fermionic_Chain(n) # create the fermion chain
-    if mode=="ED": mode0="ED"
-    else: mode0 = "DMRG"
-    mh = np.zeros((n,n),dtype=np.complex128) # TB matrix
-    for i in range(n-1):
-        mh[i,i+1] = 1.0
-        mh[i+1,i] = 1.0
-    for i in range(n):
-        mh[i,i] = 1j*gamma*np.cos(2*np.pi*np.sqrt(2)*i) # imaginary AAH
-    h = 0 # initialize Hamiltonian
-    for i in range(n):
-        for j in range(n):
-            h = h + mh[i,j]*fc.Cdag[i]*fc.C[j]
-    for i in range(n-1):
+n = 4 # number of sites
+
+def get_energy(gamma, julia):
+    if julia: fc = fermionchain.Fermionic_Chain(n, itensor_version="julia_live")
+    else: fc = fermionchain.Fermionic_Chain(n)
+    h = 0
+    for i in range(n-1): # hopping
+        h = h + fc.Cdag[i]*fc.C[i+1] + fc.Cdag[i+1]*fc.C[i]
+    for i in range(n): # imaginary onsite potential
+        h = h + 1j*gamma*np.cos(2*np.pi*np.sqrt(2)*i)*fc.Cdag[i]*fc.C[i]
+    for i in range(n-1): # interaction
         h = h + (fc.N[i]-0.5)*(fc.N[i+1]-0.5)
     fc.set_hamiltonian(h)
-    e = fc.gs_energy(mode=mode0)
-    return e
+    return fc.gs_energy(mode="DMRG" if julia else "ED")
 
-for mode in ["ED","DMRGJ"]:
-    e = gs_energy(mode=mode)
-    print(mode,e)
+gammas = np.linspace(0.0, 0.6, 5)
+e_ed = np.array([get_energy(g, False) for g in gammas])
+e_jul = np.array([get_energy(g, True) for g in gammas])
+print("Max difference =", np.max(np.abs(e_ed - e_jul)))
 
-# sweep the imaginary AAH potential strength, comparing ED VS the live
-# Julia DMRG backend (itensor_version="julia_live") over the whole range
-gammas = np.linspace(0.,0.6,5)
-es_ed = [gs_energy(mode="ED",gamma=g) for g in gammas]
-es_dmrgj = [gs_energy(mode="DMRGJ",gamma=g) for g in gammas]
-for g,eed,ej in zip(gammas,es_ed,es_dmrgj):
-    print("gamma =",round(g,3),"ED =",eed,"DMRGJ =",ej)
-
-plt.plot(gammas,[e.real for e in es_ed],marker="o",label="ED")
-plt.scatter(gammas,[e.real for e in es_dmrgj],marker="x",c="red",label="DMRG (Julia)")
-plt.xlabel("Imaginary AAH potential strength $\\gamma$")
-plt.ylabel("Ground state energy (Re)")
+import matplotlib.pyplot as plt
+plt.plot(gammas, e_ed.real, linewidth=4, label="ED")
+plt.plot(gammas, e_jul.real, "--", linewidth=2, label="DMRG Julia")
+plt.xlabel("imaginary potential gamma")
+plt.ylabel("ground state energy (real part)")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-

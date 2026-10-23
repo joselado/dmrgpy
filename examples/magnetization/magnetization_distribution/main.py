@@ -1,66 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Distribution of the magnetization M = sum_i Sz_i / n in the ground state
+# of a Heisenberg chain with a transverse field. The ground state is not
+# an eigenstate of M, so P(m) = sum_k |<k|GS>|^2 delta(m - m_k) has weight
+# at several values. We compute it with the kernel polynomial method (KPM)
+# and compare two kernels, which differ in how they broaden the peaks.
 import numpy as np
 from dmrgpy import spinchain
 
-n = 10 # number of sites in your chain
-spins = ["S=1/2" for i in range(n)] # create the sites
-sc = spinchain.Spin_Chain(spins) # create the chain
-#sc.itensor_version = "julia"
-
-# now define the Hamiltonian
+n = 6 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
 h = 0
-for i in range(n-1): 
-    h = h + sc.Sx[i]*sc.Sx[i+1] # add exchange
-    h = h + sc.Sy[i]*sc.Sy[i+1] # add exchange
-    h = h + sc.Sz[i]*sc.Sz[i+1] # add exchange
-for i in range(n): h = h - .6*sc.Sx[i] # add transverse field
-#h = h - sc.Sz[n-1]*sc.Sz[0] # and apply periodic boundary conditions
-#sc.set_hamiltonian(sum(sc.Sz)) ; wf = sc.get_gs()
-sc.set_hamiltonian(h) # and initialize the Hamiltonian
-wf = sc.get_gs()
-
-mz = sum(sc.Sz)
-mzv = wf.dot(mz*wf).real
-mz2v = wf.dot(mz*(mz*wf)).real
-
-print("Error",mz2v-mzv**2,mz2v,mzv)
-#exit()
-# setup some parameters
-sc.maxm = 20
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+for i in range(n): h = h - 0.6*sc.Sx[i] # transverse field
+sc.set_hamiltonian(h)
+sc.maxm = 20 # bond dimension
 sc.kpmmaxm = sc.maxm
+sc.nsweeps = 10 # number of DMRG sweeps
 
+M = sum(sc.Sz)/n # operator whose distribution we want
+(x1, y1) = sc.get_distribution(X=M, delta=5e-2, kernel="lorentz")
+(x2, y2) = sc.get_distribution(X=M, delta=5e-2, kernel="jackson")
+print("Weight, Lorentz =", np.trapezoid(y1.real, dx=x1[1]-x1[0]))
 
-# now define the operator for which you want the distribution
-M = (1/n)*sum(sc.Sz)
-import time
-t0 = time.time()
-x,y = sc.get_distribution(X=M,delta=2e-2,kernel="lorentz") # compute a distribution
-t1 = time.time()
-print("Time",t1-t0)
-x1,y1 = sc.get_distribution(X=M,delta=2e-2,kernel="jackson") # compute a distribution
-#x1,y1 = sc.get_distribution(X=M,delta=1e-1,mode="ED") # compute a distribution
-
-# plot the result and save it in a file
-print("Integral DMRG=",np.trapezoid(y.real,dx=x[1]-x[0]))
-#print("Integral ED=",np.trapezoid(y1.real,dx=x1[1]-x1[0]))
 import matplotlib.pyplot as plt
-np.savetxt("DISTRIBUTION.OUT",np.array([x,y.real]).T)
-plt.plot(x,y.real,marker="o",label="DMRG Lorentz") # correlator using DMRG
-plt.plot(x1,y1.real,marker="o",label="DMRG Jackson") # correlator using DMRG
+plt.plot(x1, y1.real, label="Lorentz")
+plt.plot(x2, y2.real, label="Jackson")
 plt.xlabel("magnetization")
 plt.ylabel("distribution")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

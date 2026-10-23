@@ -1,69 +1,39 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Spectral function <Cdag_1 C_2> of a small interacting spinless fermion
+# chain, G(w) = sum_n <GS|Cdag_1|n><n|C_2|GS> delta(w - E_n + E_0).
+# We compute it with three methods: exact diagonalization (ED), DMRG with
+# the kernel polynomial method (KPM), and DMRG with explicit excited states.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import fermionchain
-n = 6
-fc = fermionchain.Fermionic_Chain(n) # create the chain
-m = np.matrix(np.random.random((n,n)) + 1j*np.random.random((n,n)))
-m = m + m.H # Make it Hermitian
-h = 0
 
+n = 6 # number of sites
+fc = fermionchain.Fermionic_Chain(n)
+
+# hopping between all pairs of sites, and nearest neighbor interaction
+h = 0
 for i in range(n):
     for j in range(n):
         h = h + fc.Cdag[i]*fc.C[j]
-
 for i in range(n-1):
     h = h + (fc.N[i]-0.5)*(fc.N[i+1]-0.5)
+fc.set_hamiltonian(h)
+fc.maxm = 40 # bond dimension
+fc.nsweeps = 10 # number of DMRG sweeps
 
-
-# Initialize the Hamiltonian
-fc.set_hamiltonian(h) # Hamiltonian
-e0 = fc.gs_energy(mode="ED") # energy with exact diagonalization
-e1 = fc.gs_energy(mode="DMRG") # energy with DMRG
-print("Energy with ED",e0)
-print("Energy with DMRG",e1)
-
-
-### Compute the dyamical correlator ###
-
-i,j = 1,2
-name = (fc.Cdag[i],fc.C[j])
-
-es = np.linspace(-0.5,6.0,100) # energies of the correlator
-eskpm = np.linspace(min(es),max(es),len(es)*8) # finer grid for KPM
-
-
-delta = 3e-2 # smearing of the correlator
-x2,y2 = fc.get_dynamical_correlator(mode="DMRG",submode="EX",name=name,
-        nex=10, # number of excited states
-        es=eskpm,delta=delta)
-x0,y0 = fc.get_dynamical_correlator(mode="ED",name=name,submode="KPM",
-        es=eskpm,delta=delta)
-x1,y1 = fc.get_dynamical_correlator(mode="DMRG",submode="KPM",name=name,
-        es=eskpm,delta=delta)
-
-
-
-### Plot the result ###
+name = (fc.Cdag[1], fc.C[2]) # the two operators of the correlator
+es = np.linspace(-0.5, 6.0, 800) # energies
+delta = 0.03 # broadening of the peaks
+(x0, y0) = fc.get_dynamical_correlator(name=name, es=es, delta=delta, mode="ED", submode="KPM")
+(x1, y1) = fc.get_dynamical_correlator(name=name, es=es, delta=delta, mode="DMRG", submode="KPM")
+(x2, y2) = fc.get_dynamical_correlator(name=name, es=es, delta=delta, mode="DMRG", submode="EX", nex=10)
 
 import matplotlib.pyplot as plt
-
-plt.plot(x0,y0.real,label="ED",marker="o")
-plt.plot(x1,y1.real,label="DMRG-KPM",marker="o")
-plt.plot(x2,y2.real,label="DMRG-Excited",marker="o")
-plt.ylabel("Dynamical correlator")
-plt.xlabel("Frequency")
+plt.plot(x0, y0.real, linewidth=4, label="ED")
+plt.plot(x1, y1.real, "--", linewidth=2, label="DMRG-KPM")
+plt.plot(x2, y2.real, ":", linewidth=2, label="DMRG-excited")
+plt.xlabel("energy w")
+plt.ylabel("G(w)")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-

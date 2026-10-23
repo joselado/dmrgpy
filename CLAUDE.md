@@ -257,7 +257,12 @@ that also carry a regression `assert` keep it and plot afterwards. A script
 whose entire output is a single scalar is the one exception, and a last
 resort: sweep a cheap axis (chain length, a coupling, time, bond dimension,
 backend against backend) instead. An audit found 105 scripts that had
-settled for print-only output with such an axis already computed. The
+settled for print-only output with such an axis already computed.
+**Examples are short and simple** (the author's rule since 2026-10-23): 40
+lines, 50 at most, written in plain English the way a condensed matter
+physicist who is not a programmer would write them, about the physics and the
+one capability shown, nothing else. The
+`new-example` skill has the full rules and the two approved models. The
 `new-example` skill (`.claude/skills/new-example/SKILL.md`) has the full
 rules, the path line, and how to run a script against this worktree.
 

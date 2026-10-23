@@ -1,54 +1,37 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Repeated application of the Hamiltonian, |psi> -> H|psi>, on a random
+# MPS of a Heisenberg chain. The norm <psi|psi> grows as H^(2k), and it
+# is a check that a StaticOperator, built once, gives the same MPS as
+# the default operator, which is rebuilt on every call.
 import numpy as np
 from dmrgpy import spinchain
+from dmrgpy.multioperatortk.staticoperator import StaticOperator
 
-n = 60 # number of sites in your chain
-spins = ["S=1/2" for i in range(n)] # create the sites
-sc = spinchain.Spin_Chain(spins) # create the chain
-
+n = 20 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
 wf0 = sc.random_mps()
-
 h = 0
 for i in range(n-1):
-    h = h +sc.Sx[i]*sc.Sx[i+1]
-    h = h +sc.Sy[i]*sc.Sy[i+1]
-    h = h +sc.Sz[i]*sc.Sz[i+1]
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+sh = StaticOperator(h, sc) # static version of h
 
-Op = h # operator
-from dmrgpy.multioperatortk.staticoperator import StaticOperator
-SOp = StaticOperator(Op,sc) # create a static operator
-
-import time
-dots = {} # store the trajectory of <wf|wf> for each mode
-times = {} # store the total time spent for each mode
-for (O,mode) in [(SOp,"static"),(Op,"default")]:
-    wf = wf0.copy()
-    ds = []
-    t0 = time.time()
-    for i in range(50):
-        d = wf.dot(wf)
-        print(d)
-        ds.append(d.real)
+def norms(O):
+    wf = wf0.copy() ; ds = []
+    for i in range(10):
+        ds.append(wf.dot(wf).real)
         wf = O*wf
-    t1 = time.time()
-    print("Time in",mode,t1-t0)
-    dots[mode] = ds
-    times[mode] = t1-t0
+    return np.array(ds)
+
+d1 = norms(h)
+d2 = norms(sh)
+print("Max relative difference =", np.max(np.abs(d1-d2)/d1))
 
 import matplotlib.pyplot as plt
-
-plt.subplot(1,2,1)
-for mode in dots:
-    plt.plot(dots[mode],marker="o",label=mode)
-plt.xlabel("Iteration")
-plt.ylabel(r"$\langle \psi | \psi \rangle$")
+plt.semilogy(d1, linewidth=4, label="default")
+plt.semilogy(d2, "--", linewidth=2, label="static")
+plt.xlabel("iteration k")
+plt.ylabel("<psi|psi>")
 plt.legend()
-
-plt.subplot(1,2,2)
-plt.bar(list(times.keys()),list(times.values()))
-plt.ylabel("Time (s)")
-
-plt.tight_layout()
 plt.show()

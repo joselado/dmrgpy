@@ -1,75 +1,33 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Algebra with matrix product states (MPS) on a chain of 20 spins. The
+# ground states of +-sum Sz are the fully up and fully down states, which
+# are orthogonal. Applying 2 Sx on every site flips all the spins, and the
+# sum of two MPS is again an MPS. We follow the overlaps as a function of n.
 import numpy as np
 from dmrgpy import spinchain
 
-n = 20 # number of sites in your chain
-spins = ["S=1/2" for i in range(n)] # create the sites
-sc = spinchain.Spin_Chain(spins) # create the chain
-
-hfe = sum(sc.Sz) # Fully ferromagnetic
-sc.set_hamiltonian(-hfe) ; wfup = sc.get_gs() # Fully up wavefunction
-sc.set_hamiltonian(hfe) ; wfdn = sc.get_gs() # Fully down wavefunction
-
-print("Overlap between orthogonal wavefunctions",wfup.dot(wfdn).real)
-
-# Time a repeated local operator application (benchmark only)
-wfflip = wfdn.copy()
-import time
-t0 = time.time()
-for i in range(n):
-  wfflip = (sc.Sx[0]*sc.Sx[2])*wfflip
-#wfflip = (sc.Sx[0])*wfflip
-t1 = time.time()
-print("Time",t1-t0)
-
-# Now flip all the spins in each site, to go from up to down
-wfflip = wfdn.copy() # reset, and perform the actual global spin flip
-for i in range(n): wfflip = 2.*sc.Sx[i]*wfflip
-
-# Now do some simple algebra with MPS
-print("Rotate and overlap",wfup.dot(wfflip).real)
-print("Magnetization up",wfup.dot(hfe*wfup).real)
-print("Magnetization down",wfdn.dot(hfe*wfdn).real)
-
-wfs = wfup + 3.7*wfdn # sum the two wavefunctions
-
-print("Overlap with the sum",wfdn.overlap(wfs).real)
-
-# sweep the chain size and see how these quantities evolve with n
-def sweep(n):
+def overlaps(n):
     sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
-    hfe = sum(sc.Sz)
-    sc.set_hamiltonian(-hfe) ; wfup = sc.get_gs()
-    sc.set_hamiltonian(hfe) ; wfdn = sc.get_gs()
-    overlap_updn = wfup.dot(wfdn).real
+    hfe = sum(sc.Sz) # fully ferromagnetic operator
+    sc.set_hamiltonian(-hfe) ; wfup = sc.get_gs() # all spins up
+    sc.set_hamiltonian(hfe) ; wfdn = sc.get_gs() # all spins down
     wfflip = wfdn.copy()
-    for i in range(n): wfflip = 2.*sc.Sx[i]*wfflip
-    rotate_overlap = wfup.dot(wfflip).real
-    wfs = wfup + 3.7*wfdn
-    overlap_sum = wfdn.overlap(wfs).real
-    return overlap_updn,rotate_overlap,overlap_sum
+    for i in range(n):
+        wfflip = 2.*sc.Sx[i]*wfflip # flip every spin
+    wfs = wfup + 3.7*wfdn # sum of two MPS
+    return wfup.dot(wfdn).real, wfup.dot(wfflip).real, wfdn.overlap(wfs).real
 
-ns = range(4,21,4)
-out = np.array([sweep(ni) for ni in ns])
+ns = range(4, 21, 4) # chain sizes
+out = np.array([overlaps(n) for n in ns])
+print("Overlaps for the largest chain =", out[-1])
 
 import matplotlib.pyplot as plt
-
-plt.plot(ns,out[:,0],marker="o",label="Overlap up/down")
-plt.plot(ns,out[:,1],marker="o",label="Rotate and overlap")
-plt.plot(ns,out[:,2],marker="o",label="Overlap with sum")
-plt.xlabel("Chain size n")
-plt.ylabel("Overlap")
+plt.plot(ns, out[:,0], "o-", label="up and down")
+plt.plot(ns, out[:,1], "o-", label="up and flipped down")
+plt.plot(ns, out[:,2], "o-", label="down and (up + 3.7 down)")
+plt.xlabel("chain size n")
+plt.ylabel("overlap")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-

@@ -1,50 +1,31 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Local density fluctuation <N_i^2> - <N_i>^2 of the Hubbard chain at
+# half filling, H = sum t c^dag c + U sum (n_up - 1/2)(n_dn - 1/2).
+# For large U the electrons localize and the fluctuation goes to zero,
+# and it is large for U=0. It is related to the double occupation.
 import numpy as np
 from dmrgpy import fermionchain
-n = 10 # number of spinful fermionic sites
-def get_fc(u):
-  fc = fermionchain.Spinful_Fermionic_Chain(n) # create the chain
-  h = 0
-  for i in range(n-1):
-      h = h + fc.Cdagup[i]*fc.Cup[i+1]
-      h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-  for i in range(n):
-      h = h + u*(fc.Nup[i]-0.5)*(fc.Ndn[i]-0.5)
-  h = h + h.get_dagger()
-  fc.set_hamiltonian(h) 
-  
-  # Compute the dynamical correlator defined by
-  # <0|c_i^dagger \delta(H-E_0-\omega) c_j |0>
-  
-  fc.nsweeps = 6
-  fc.maxm = 20 # maximum bond dimension in KPM
-  return fc
 
-us = np.linspace(-10.0,10.0,20)
+n = 8 # number of spinful sites
+us = np.linspace(-10.0, 10.0, 11) # Hubbard interactions
 ds = []
 for u in us:
-  fc = get_fc(u)
-  d = np.mean(fc.get_density_fluctuation())
-  ds.append(d)
-  print(u,d)
-ds = np.array(ds)
-np.savetxt("D_VS_MU.OUT",np.matrix([us,ds]).T)
+    fc = fermionchain.Spinful_Fermionic_Chain(n)
+    h = 0
+    for i in range(n-1): # hopping, spin up and spin down
+        h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
+    h = h + h.get_dagger()
+    for i in range(n): # Hubbard interaction
+        h = h + u*(fc.Nup[i]-0.5)*(fc.Ndn[i]-0.5)
+    fc.set_hamiltonian(h)
+    fc.maxm = 20 # bond dimension
+    fc.nsweeps = 6 # number of DMRG sweeps
+    ds.append(np.mean(fc.get_density_fluctuation()))
+
 import matplotlib.pyplot as plt
-plt.plot(us,ds,marker="o")
+plt.plot(us, ds, marker="o")
+plt.xlabel("Hubbard interaction U")
+plt.ylabel("density fluctuation")
 plt.show()
-# The result will be written in a file called DYNAMICAL_CORRELATOR.OUT
-fc.gs_energy()
-exit()
-
-
-
-
-
-
-
-
-
-
-

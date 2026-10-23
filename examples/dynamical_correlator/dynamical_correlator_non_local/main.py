@@ -1,64 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Non-local spin correlator of the S=1/2 Heisenberg chain,
+# S(r,w) = sum_n <GS|Sz_r|n><n|Sz_0|GS> delta(w - E_n + E_0).
+# It tells how a spin excitation created at site 0 shows up at site r.
+# Its Fourier transform in r is the S(q,w) seen in neutron scattering.
 import numpy as np
 from dmrgpy import spinchain
-n = 6
-# create an S=1/2 spin chain
-spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
 
-
-# create first neighbor exchange (Heisenberg model)
-sc = spinchain.Spin_Chain(spins) # create the spin chain
+n = 6 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
 h = 0
 for i in range(n-1):
-    h = h + sc.Sx[i]*sc.Sx[i+1]
-    h = h + sc.Sy[i]*sc.Sy[i+1]
-    h = h + sc.Sz[i]*sc.Sz[i+1]
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
+sc.maxm = 20 # bond dimension
+sc.kpmmaxm = 20 # bond dimension of the KPM
+sc.nsweeps = 10 # number of DMRG sweeps
 
-# you may need to make this bigger for bigger chains
-sc.kpmmaxm = 20 # band dimension in KPM
-sc.maxm = 20 # bond dimension in GS
+es = np.linspace(-0.5, 3.0, 200) # energies
+zs = []
+for r in range(n): # correlator between site 0 and site r
+    name = (sc.Sz[r], sc.Sz[0])
+    (e, s) = sc.get_dynamical_correlator(mode="DMRG", name=name, es=es, delta=0.05)
+    zs.append(s.real)
+zs = np.array(zs).T # energy along the first axis
 
-xs = [] # empty list
-ys = [] # empty list
-zs = [] # empty list
-xs = range(n) # indexes
-ys = np.linspace(-0.5,3.0,200) # frequencies
-def compute(i):
-  print("Computing ",i)
-  name = (sc.Sz[i],sc.Sz[0]) # these are the two operators of the dyn. corr.
-  (e,s) = sc.get_dynamical_correlator(mode="DMRG",name=name,
-          es=ys,delta=0.05)
-  return s
-
-zs = [compute(x) for x in xs] # compute all the dynamical correlators
-
-zs = np.array(zs).T # transpose the array
-
-# plot the results
 import matplotlib.pyplot as plt
-import matplotlib
-
-# the Fourier transform in the x direction would be S(q,w)
-matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
-fig = plt.figure()
-fig.subplots_adjust(0.2,0.2)
-plt.contourf(xs,ys,zs,100,cmap="rainbow")
-plt.ylabel("Frequency [J]")
-plt.xlabel("Distance")
+plt.contourf(range(n), es, zs, 100, cmap="rainbow")
+plt.xlabel("distance r")
+plt.ylabel("energy w")
 plt.colorbar(label="S(r,w)")
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-

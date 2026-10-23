@@ -1,44 +1,32 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Transverse field Ising chain, H = sum_i Sz_i Sz_{i+1} + Bx sum_i Sx_i.
+# The fluctuation of the magnetization, <Mx^2> - <Mx>^2 with
+# Mx = sum_i Sx_i / N, changes strongly at the quantum phase transition.
+# It is computed with DMRG as a function of the field Bx.
 import numpy as np
 from dmrgpy import spinchain
-# This example shows the quantum phase transition in the transverse Ising model
-# generate a 1D Ising chain
-def get_gap(bx):
-    """
-    Compute the gap of the 1D Ising model with DMRG
-    """
-    print("Computing B_x = ",bx)
-    N = 20
-    sc = spinchain.Spin_Chain(["S=1/2" for i in range(N)]) # create 
+
+N = 12 # number of sites
+bxs = np.linspace(0., 1., 20) # transverse fields
+fluct = []
+for bx in bxs:
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(N)])
     h = 0
     for i in range(N-1): h = h + sc.Sz[i]*sc.Sz[i+1]
     for i in range(N): h = h + bx*sc.Sx[i]
     sc.set_hamiltonian(h)
-    # if you wanted to compute the Mz magnetization instead, uncomment this line
-    mz = sum(sc.Sx)/N
-    wf = sc.get_gs() # get ground state
-    z = wf.dot(mz*wf) # mz
-    z2 = wf.dot(mz*(mz*wf)) # mz
-    return z2 - z*z
+    sc.maxm = 20 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
+    wf = sc.get_gs()
+    mx = sum(sc.Sx)/N # magnetization along x
+    m1 = wf.dot(mx*wf).real
+    m2 = wf.dot(mx*(mx*wf)).real
+    fluct.append(m2 - m1**2)
 
-bs = np.linspace(0.,1.,30) # list of fields
-gs = [get_gap(b) for b in bs] # list of gaps
 import matplotlib.pyplot as plt
-plt.plot(bs,gs,marker="o")
-plt.xlabel("$B_x$")
-plt.ylabel("$\\langle M^2_x \\rangle - \\langle M_x \\rangle^2$")
-plt.tight_layout()
+plt.plot(bxs, fluct, "o-")
+plt.xlabel("transverse field Bx")
+plt.ylabel("<Mx^2> - <Mx>^2")
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

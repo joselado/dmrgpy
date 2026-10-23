@@ -1,63 +1,35 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-
+# Ground-state energy of a random spinless fermion chain written in second
+# quantization, with first neighbor hopping, pairing and interaction,
+# H = sum_i t_i c^+_i c_{i+1} + d_i c_i c_{i+1} + U_i n_i n_{i+1} + h.c.
+# We compute it with DMRG and with exact diagonalization (ED).
 import numpy as np
 from dmrgpy import fermionchain
 
-def get_energies(nf,seed):
-    """Ground-state energy (DMRG and ED) of a random spinless-fermion
-    Hamiltonian on nf orbitals, for a fixed random seed (reproducible)."""
-    np.random.seed(seed)
-    fc = fermionchain.Fermionic_Chain(nf) # create the object
-    C = fc.C # annihilation
-    Cdag = fc.Cdag # creation
-
-    H = 0 # initialize Hamiltonian
-
-    # random Hamiltonian
-    for i in range(nf-1):
-        H = H + Cdag[i]*C[i+1]*np.random.random() # random first neigh. hopping
-        H = H + C[i]*C[i+1]*np.random.random() # random first neigh. pairing
-        # random first neigh. interaction
-        H = H + Cdag[i]*C[i]*Cdag[i+1]*C[i+1]*np.random.random()
-
-    H = H + H.get_dagger() # make it Hermitian
-
-    fc.set_hamiltonian(H) # set the Hamiltonian
-    edmrg = fc.gs_energy(mode="DMRG") # energy with DMRG
-    eed = fc.gs_energy(mode="ED") # energy with exact diag.
-    return edmrg,eed
-
-nf = 10 # number of different spinless fermionic orbitals
-e_dmrg,e_ed = get_energies(nf,seed=1)
-print("Energy with DMRG",e_dmrg)
-print("Energy with ED",e_ed)
-
-# sweep the number of orbitals (cheap, keeps the seed fixed per point so
-# each Hamiltonian realization is reproducible)
-nfs = [4,6,8,10]
-edmrg_sweep = []
-eed_sweep = []
-for nfi in nfs:
-    edi,eedi = get_energies(nfi,seed=1)
-    edmrg_sweep.append(edi)
-    eed_sweep.append(eedi)
-    print("nf =",nfi,"DMRG =",edi,"ED =",eedi)
+nfs = [4, 6, 8, 10] # numbers of sites
+edmrg, eed = [], []
+for n in nfs:
+    np.random.seed(1) # same random numbers in every run
+    fc = fermionchain.Fermionic_Chain(n)
+    h = 0
+    for i in range(n-1):
+        h = h + fc.Cdag[i]*fc.C[i+1]*np.random.random() # hopping
+        h = h + fc.C[i]*fc.C[i+1]*np.random.random() # pairing
+        h = h + fc.N[i]*fc.N[i+1]*np.random.random() # interaction
+    h = h + h.get_dagger() # make it Hermitian
+    fc.set_hamiltonian(h)
+    fc.maxm = 40 # bond dimension
+    fc.nsweeps = 10 # number of DMRG sweeps
+    edmrg.append(fc.gs_energy(mode="DMRG"))
+    eed.append(fc.gs_energy(mode="ED"))
+print("Max difference DMRG-ED =", np.max(np.abs(np.array(edmrg)-eed)))
 
 import matplotlib.pyplot as plt
-plt.plot(nfs,edmrg_sweep,marker="o",label="DMRG")
-plt.plot(nfs,eed_sweep,marker="x",linestyle="--",label="ED")
-plt.xlabel("Number of orbitals")
-plt.ylabel("Ground-state energy")
+plt.plot(nfs, eed, linewidth=4, label="ED")
+plt.plot(nfs, edmrg, "--", linewidth=2, label="DMRG")
+plt.xlabel("number of sites")
+plt.ylabel("ground-state energy")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-

@@ -1,57 +1,35 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-import numpy as np # conventional numpy library
-from dmrgpy import spinchain # library dealing with DMRG for spin chains
-import matplotlib.pyplot as plt # library to plot the results
-####################################
-### Create the spin chain object ###
-####################################
-n = 10 # total number of spins
-spins = ["S=1/2" for i in range(n)] # list with the different spins of your system
-# the spins are labeled by 2s+1, so that 2 means s=1/2, 3 meand S=1 ....
-sc = spinchain.Spin_Chain(spins) # create the spin chain object
-##############################
-### Create the hamiltonian ###
-##############################
-def fj(i,j): # function to define the exchange couplings
-    if abs(i-j)==1: return 1.0  # first neighbors
-    else: return 0.0 # otherwise
+# Ground state energy of a Heisenberg chain in a random magnetic field,
+# obtained by repeating one single DMRG sweep. Each call starts from the
+# wavefunction of the previous one, so the energy decreases and
+# converges to the ground state energy.
+import numpy as np
+from dmrgpy import spinchain
 
+n = 10 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+
+# H = sum_i S_i . S_{i+1} + sum_i B_i . S_i, with random B_i
 h = 0
-
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 for i in range(n):
-    for j in range(n): 
-        h = h + sc.Sx[i]*sc.Sx[j]*fj(i,j)
-        h = h + sc.Sy[i]*sc.Sy[j]*fj(i,j)
-        h = h + sc.Sz[i]*sc.Sz[j]*fj(i,j)
-
-for i in range(n):
-    h = h + sc.Sx[i]*np.random.random()
-    h = h + sc.Sy[i]*np.random.random()
-    h = h + sc.Sz[i]*np.random.random()
-
+    h = h + np.random.random()*(sc.Sx[i] + sc.Sy[i] + sc.Sz[i])
 sc.set_hamiltonian(h)
+sc.maxm = 20 # bond dimension
+sc.nsweeps = 1 # a single sweep per call
 
-#sc.itensor_version = "julia"
-sc.nsweeps = 1 # one sweep
 es = []
 wf = None # initial guess
 for i in range(10):
-    e = sc.gs_energy(wf0=wf,reconverge=True)
-    wf = sc.wf0.copy() # save the wavefunction
+    e = sc.gs_energy(wf0=wf, reconverge=True)
+    wf = sc.wf0.copy() # use this state as the next guess
     es.append(e)
+
 import matplotlib.pyplot as plt
-plt.plot(range(len(es)),es,marker="o")
+plt.plot(range(len(es)), es, "o-")
+plt.xlabel("number of sweeps")
+plt.ylabel("energy")
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

@@ -1,46 +1,36 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Ground state of a non-Hermitian Heisenberg chain with an imaginary field,
+# H = sum_i S_i . S_{i+1} + 0.4 i sum_i Sz_i.
+# The MPS ground state is found with an Arnoldi iteration. We
+# see how the error of the energy goes down with the number of iterations.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import spinchain
-n = 12
-spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-sc = spinchain.Spin_Chain(spins) # create the spin chain
+
+n = 12 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
 h = 0
 for i in range(n-1):
-    h = h +sc.Sx[i]*sc.Sx[i+1]
-    h = h +sc.Sy[i]*sc.Sy[i+1]
-    h = h +sc.Sz[i]*sc.Sz[i+1]
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+for i in range(n):
+    h = h + 1j*0.4*sc.Sz[i] # non-Hermitian part
+sc.set_hamiltonian(h)
+sc.maxm = 30 # bond dimension
+sc.nsweeps = 10 # number of DMRG sweeps
+e0 = sc.gs_energy(mode="ED") # exact energy
 
-# add non Hermitian part
-for i in range(n): h = h + 1j*0.4*sc.Sz[i]
+ites = [1, 4, 10, 40] # number of Arnoldi iterations
+des = []
+for ite in ites:
+    sc.set_hamiltonian(h) # start again for each ite
+    e = sc.gs_energy(mode="DMRG", maxit=ite)
+    des.append(np.abs(e0-e))
+    print("iterations =", ite, "error =", des[-1])
 
-sc.set_hamiltonian(h) # initialize the system
-e0 = sc.gs_energy(mode="ED") # get the ground state energy
-
-# now compute the GS energy with MPS using different numbers of iterations 
-ites = [1,4,10,40] # the default is 40, make it bigger for better accuracy
-
-des = [] # store the error for each number of iterations
-for ite in ites: # loop over number of iterations
-    sc.set_hamiltonian(h) # initialize the system
-    # the parameter maxit controls the number of iterations of the
-    # MPS arnoldi algorithm, the bigger the more precise
-    e = sc.gs_energy(mode="DMRG",maxit=ite) # get the ground state energy
-    de = np.abs(e0-e) # difference with respect to the true GS energy
-    des.append(de)
-    print("# iterations = ",ite,", error = ",de)
-
-# plot the convergence of the ground state energy error VS iterations
-plt.plot(ites,des,marker="o")
-plt.xlabel("Number of Arnoldi iterations")
-plt.ylabel("Energy error $|E_0-E|$")
+import matplotlib.pyplot as plt
+plt.plot(ites, des, "o-")
 plt.yscale("log")
+plt.xlabel("Arnoldi iterations")
+plt.ylabel("energy error")
 plt.show()
-
-
-
-
-
-

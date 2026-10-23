@@ -1,45 +1,31 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Kondo coupling of a spin to a short spinful fermion chain. Site 0 is a
+# Hubbard site that holds the spin, and it is coupled with JK to site 1 of
+# the chain. The correlation entropy of the ground state measures how far it
+# is from a single Slater determinant, and it jumps when the Kondo coupling is switched on.
 import numpy as np
 from dmrgpy import fermionchain
 
-def get(JK):
-    n = 4 # number of spinful fermionic sites
-    fc = fermionchain.Spinful_Fermionic_Chain(n) # create the chain
+def get_entropy(JK):
+    n = 4 # number of sites
+    fc = fermionchain.Spinful_Fermionic_Chain(n)
     h = 0
-    mu = 0.
-    for i in range(1,n-1): # hopping
-        h = h + fc.Cdagup[i]*fc.Cup[i+1]
-        h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-    for i in range(1,n): # hopping
-        h = h + mu/2.*fc.Cdagup[i]*fc.Cup[i]
-        h = h + mu/2.*fc.Cdagdn[i]*fc.Cdn[i]
-    for i in [0]: # Hubbard, to enforce half filling
-        h = h + (fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
-    h = h + JK/2.*fc.Sx[0]*fc.Sx[1]
-    h = h + JK/2.*fc.Sy[0]*fc.Sy[1]
-    h = h + JK/2.*fc.Sz[0]*fc.Sz[1]
+    for i in range(1, n-1): # hopping along the chain
+        h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
+    h = h + (fc.Nup[0]-.5)*(fc.Ndn[0]-.5) # Hubbard, to keep half filling
+    h = h + JK/2.*(fc.Sx[0]*fc.Sx[1] + fc.Sy[0]*fc.Sy[1] + fc.Sz[0]*fc.Sz[1])
     h = h + h.get_dagger()
-    ##############################
-    # Setup the Many Body Hamiltonian
-    fc.maxm = 40
-    fc.set_hamiltonian(h) # set the hoppings
-    
-    wf = fc.get_gs()
-    ss = wf.get_correlation_entropy()
-    return ss
+    fc.maxm = 40 # bond dimension
+    fc.set_hamiltonian(h)
+    return fc.get_gs().get_correlation_entropy()
 
-Js = np.linspace(0.,2.,10) ; sss = [get(J) for J in Js]
-fo = open("MAP.OUT","w")
-for j in range(len(sss[0])):
-    for i in range(len(Js)):
-        fo.write(str(j)+"  ")
-        fo.write(str(Js[i])+"  ")
-        fo.write(str(sss[i][j])+"\n")
-fo.close()
-exit()
-ss = get(0.4) # get the density
+Js = np.linspace(0., 2., 8) # Kondo couplings
+ss = [get_entropy(J) for J in Js]
+
 import matplotlib.pyplot as plt
-plt.plot(range(len(ss)),ss)
+plt.plot(Js, ss, "o-")
+plt.xlabel("Kondo coupling JK")
+plt.ylabel("correlation entropy")
 plt.show()

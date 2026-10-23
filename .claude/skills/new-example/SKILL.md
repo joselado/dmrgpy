@@ -32,9 +32,22 @@ Open with the path line the tree already uses, which is depth three:
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 ```
 
-Then a short comment saying what the script demonstrates and, where the script
-is meant as a regression guard, what it is guarding. Build the smallest system
-that shows the effect, and put the physics before the mechanics.
+**Keep it short and simple** (the author's standing rule, 2026-10-23: "from
+now on, i want all the examples like this"). An example is 40 lines, 50 at
+most, blank lines and comments included. It is written the way a condensed
+matter physicist who is not a professional programmer and not a native English
+speaker writes it: plain English, short sentences, simple code. It focuses on
+the physics and on the one capability it demonstrates, and leaves out
+everything else: history, audit notes, implementation explanations, timing
+code, loops over backends, helper functions, try/except, long docstrings. The
+two approved models are `staticcorrelators/spin_correlator_short/main.py` and
+`dynamical_correlator/spin_spectrum_short/main.py`; read them before writing.
+
+Then a header comment of three to six lines saying the physics: what is
+computed, the formula if it is short, what it is used for or what measures it.
+Build the Hamiltonian with explicit loops, with an inline comment only where a
+line is not obvious (`sc.maxm = 40 # bond dimension`). Build the smallest
+system that shows the effect.
 
 **Pin the sweep schedule.** Set `nsweeps`, `maxm` and any tolerance explicitly
 rather than inheriting the library defaults, and assert at a tolerance the
@@ -46,13 +59,9 @@ compared them. It now pins `nsweeps=80`, `maxm=100` and asserts at 1e-5.
 
 **Plot what you computed.** Any script that produces a sequence of values ends
 with a `matplotlib` figure of it: a quantity against time, site, frequency or a
-coupling; two backends overlaid; an error or timing curve. Save it next to
-`main.py` under the folder's own name and then show it:
-
-```python
-plt.savefig("<folder_name>.png",dpi=150)
-plt.show()
-```
+coupling; the reference as a thick line and the other method dashed on top of
+it. One simple figure, `plt.plot`, axis labels, a legend and `plt.show()`, no
+`savefig` and no styling.
 
 A script whose entire output is one scalar is the single exception, and it is a
 last resort rather than a default: before taking it, look for the cheap axis
@@ -69,7 +78,8 @@ asserts and are meant as tests in the same spirit as `tests/`, for instance
 `entanglement/entanglement_entropy_VS_ED`. Those are the templates to copy. The
 assert stays as the pass or fail guard and the plot goes in after it, so the one
 script serves as an automated check and as a visual sanity check when run by
-hand.
+hand. In the short style this is one printed "Max difference" number and one
+`assert` on it.
 
 ## Run it before declaring it done
 

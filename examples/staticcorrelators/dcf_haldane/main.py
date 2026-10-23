@@ -1,41 +1,33 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Dynamical correlator of Sz_i in the S=1 Heisenberg chain (Haldane chain),
+# S_i(w) = sum_n |<n|Sz_i|GS>|^2 delta(w - E_n + E_0).
+# It is computed site by site with the kernel polynomial method. The map
+# of site against energy is what inelastic neutron scattering measures.
 import numpy as np
 from dmrgpy import spinchain
-n = 12
-spins = [3 for i in range(n)] # spin 1 Haldane chain
-sc = spinchain.Spin_Chain(spins) # create the spin chain
+
+n = 10 # number of sites
+sc = spinchain.Spin_Chain([3 for i in range(n)]) # 3 means S=1
+
+# Heisenberg Hamiltonian, H = sum_i S_i . S_{i+1}
 h = 0
-for i in range(n-1): # nearest-neighbor Heisenberg exchange
+for i in range(n-1):
     h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
-sc.maxm = 30
-sc.nsweeps = 10
-sc.kpmmaxm = 10 # KPM max m
-fo = open("DCF.OUT","w") # dynamical correlation function
-data = [] # (site, xs, ys) for plotting
-for i in range(n): # loop over sites
-  name = (sc.Sz[i], sc.Sz[i])
-  # n= removed: it never reached the KPM recursion (see the audit doc)
-  (xs,ys) = sc.get_dynamical_correlator(mode="DMRG",name=name)
-  print("Doing",i)
-  data.append((xs,ys))
-  for (x,y) in zip(xs,ys):
-    fo.write(str(i)+"  ")
-    fo.write(str(x)+"  ")
-    fo.write(str(y)+"\n")
-  fo.flush()
-fo.close()
+sc.maxm = 30 # bond dimension
+sc.nsweeps = 10 # number of DMRG sweeps
+sc.kpmmaxm = 10 # bond dimension used in the KPM
 
-# dynamical structure factor <Sz_i(t) Sz_i(0)> as a function of site and
-# frequency: a natural site-vs-frequency heatmap
+data = []
+for i in range(n): # loop over sites
+    (xs, ys) = sc.get_dynamical_correlator(mode="DMRG", name=(sc.Sz[i], sc.Sz[i]))
+    data.append(np.abs(ys))
+
 import matplotlib.pyplot as plt
-xs0 = data[0][0]
-cmap = np.array([np.abs(ys) for (xs,ys) in data])
-plt.imshow(cmap,aspect="auto",origin="lower",
-        extent=[xs0[0],xs0[-1],0,n-1])
-plt.colorbar(label="|DCF(i,w)|")
-plt.xlabel("frequency [J]")
+plt.imshow(data, aspect="auto", origin="lower", extent=[xs[0], xs[-1], 0, n-1])
+plt.colorbar(label="|S_i(w)|")
+plt.xlabel("energy w")
 plt.ylabel("site i")
 plt.show()

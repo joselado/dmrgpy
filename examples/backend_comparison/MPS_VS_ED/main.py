@@ -1,52 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Ground state energy of random spin chains, with random spin sizes
+# (S=1 to S=3/2 here) and random exchange between all pairs of sites.
+# The energy from DMRG (matrix product states) is compared with the
+# exact one from exact diagonalization (ED).
 import numpy as np
 from dmrgpy import spinchain
-n = 6
-e0s,e1s = [],[]
-for i in range(5):
-#  spins = [np.random.randint(2,6) for i in range(n)] # spin 1/2 heisenberg chain
-  spins = [np.random.randint(2,5) for i in range(n)] # spin 1/2 heisenberg chain
-  sc = spinchain.Spin_Chain(spins) # create the spin chain
-  ms = [np.random.random((3,3)) for i in range(n)]
-  ms = [m + m.T for m in ms]
-  h = 0
-  Si = [sc.Sx,sc.Sy,sc.Sz]
-  for i in range(n):
-      for j in range(n):
-          h = h + sc.Sx[i]*sc.Sx[j]*np.random.random()
-          h = h + sc.Sy[i]*sc.Sy[j]*np.random.random()
-          h = h + sc.Sz[i]*sc.Sz[j]*np.random.random()
-  sc.hamiltonian = h
-  e0 = sc.gs_energy(mode="DMRG") # compute the ground state energy
-  e1 = sc.gs_energy(mode="ED") # compute the ground state energy
-  print("Spin chain",spins)
-  print("Energy with ED",e1)
-  print("Energy with DMRG",e0)
-  print("\n")
-  de = np.abs(e1-e0)
-  if de>0.1: raise
-  e0s.append(e0)
-  e1s.append(e1)
-print("Test passed")
+
+np.random.seed(1)
+n = 5 # number of sites
+e_dmrg, e_ed = [], []
+for k in range(4): # four random chains
+    spins = [np.random.randint(2, 5) for i in range(n)] # 2S+1 of each site
+    sc = spinchain.Spin_Chain(spins)
+    h = 0
+    for i in range(n):
+        for j in range(n): # random exchange between all pairs
+            h = h + np.random.random()*(sc.Sx[i]*sc.Sx[j] + sc.Sy[i]*sc.Sy[j] + sc.Sz[i]*sc.Sz[j])
+    sc.set_hamiltonian(h)
+    sc.maxm = 60 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
+    e_dmrg.append(sc.gs_energy(mode="DMRG"))
+    e_ed.append(sc.gs_energy(mode="ED"))
+print("Max difference DMRG-ED =", np.max(np.abs(np.array(e_dmrg)-e_ed)))
 
 import matplotlib.pyplot as plt
-lims = [min(e0s+e1s),max(e0s+e1s)]
-plt.plot(lims,lims,color="gray",linestyle="--",label="ED = DMRG")
-plt.scatter(e1s,e0s,marker="o")
-plt.xlabel("Energy with ED")
-plt.ylabel("Energy with DMRG")
+plt.plot(e_ed, e_ed, linewidth=4, label="ED")
+plt.plot(e_ed, e_dmrg, "x", markersize=10, label="DMRG")
+plt.xlabel("energy ED")
+plt.ylabel("energy")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

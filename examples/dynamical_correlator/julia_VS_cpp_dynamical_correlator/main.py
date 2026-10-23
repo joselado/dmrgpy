@@ -1,70 +1,37 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Local spin spectrum S(w) = sum_n |<n|Sx_0|GS>|^2 delta(w - E_n + E_0) of
+# the S=1/2 Heisenberg chain, computed with the default C++ DMRG backend
+# and with the Julia backend (ITensors.jl). Both must give the same peaks,
+# which are the spin excitations seen in neutron scattering.
 import numpy as np
 from dmrgpy import spinchain
-def get(n):
-  spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-  sc = spinchain.Spin_Chain(spins) # create the spin chain
-  h = 0
-  for i in range(n-1):
-      h = h +sc.Sx[i]*sc.Sx[i+1]
-      h = h +sc.Sy[i]*sc.Sy[i+1]
-      h = h +sc.Sz[i]*sc.Sz[i+1]
-  sc.set_hamiltonian(h)
-  return sc
 
+def get_chain(n):
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+    # Heisenberg Hamiltonian, H = sum_i S_i . S_{i+1}
+    h = 0
+    for i in range(n-1):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+    sc.set_hamiltonian(h)
+    sc.maxm = 40 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
+    return sc
 
-import time
-
-
-def compare(n):
-  t0 = time.time()
-  sc = get(n)
-  name = (sc.Sx[0],sc.Sx[0])
-#  e0 = sc.gs_energy() # compute the ground state energy
-  sc.get_dynamical_correlator(name=name)
-  t1 = time.time()
-  sc = get(n)
-#  sc.itensor_version = "julia" # setup this version
-  sc.setup_julia()
-  sc.get_dynamical_correlator(name=name)
-#  e1 = sc.gs_energy() # compute the ground state energy
-  t2 = time.time()
-  return t1-t0,t2-t1
-
-
-
-ns = [4,8,10,20]
-dt0s,dt1s = [],[]
-f = open("TIMES.OUT","w")
-for n in ns:
-    dt0,dt1 = compare(n)
-    f.write(str(n)+"  ")
-    f.write(str(dt0)+"  ")
-    f.write(str(dt1)+"\n")
-    f.flush()
-    print("Time with C++",dt0)
-    print("Time with Julia",dt1)
-    print()
-    dt0s.append(dt0) ; dt1s.append(dt1)
-f.close()
+n = 8 # number of sites
+es = np.linspace(-0.5, 3.0, 300) # energies
+sc = get_chain(n) # C++ backend
+(e1, s1) = sc.get_dynamical_correlator(name=(sc.Sx[0], sc.Sx[0]), es=es, delta=0.05)
+sc = get_chain(n)
+sc.setup_julia() # Julia backend
+(e2, s2) = sc.get_dynamical_correlator(name=(sc.Sx[0], sc.Sx[0]), es=es, delta=0.05)
+print("Max difference =", np.max(np.abs(s1-s2)))
 
 import matplotlib.pyplot as plt
-
-plt.plot(ns,dt0s,marker="o",label="C++")
-plt.plot(ns,dt1s,marker="o",label="Julia")
-plt.xlabel("number of sites")
-plt.ylabel("wall time [s]")
-plt.title("Dynamical correlator: C++ vs Julia backend timing")
+plt.plot(e1, s1.real, linewidth=4, label="C++")
+plt.plot(e2, s2.real, "--", linewidth=2, label="Julia")
+plt.xlabel("energy w")
+plt.ylabel("S(w), first site")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-

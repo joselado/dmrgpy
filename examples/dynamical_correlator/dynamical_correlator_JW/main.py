@@ -1,60 +1,40 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Jordan-Wigner transformation. The spin XX chain, H = sum_i Sx_i Sx_{i+1} + Sy_i Sy_{i+1},
+# is the same model as free spinless fermions with hopping 1/2.
+# The spectral function of Sx_0 in the spin chain must then be equal to
+# the one of the fermion operator C_0 (up to a factor 2 in the normalization).
 import numpy as np
-from dmrgpy import spinchain,fermionchain
-n = 6
+from dmrgpy import spinchain, fermionchain
 
-site = 0
+n = 6 # number of sites
+es = np.linspace(-0.5, 3, 500) # energies
+delta = 5e-2 # broadening of the peaks
 
-def get_spin():
-    # create a random spin chain
-    spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-    # create first neighbor exchange
-    sc = spinchain.Spin_Chain(spins) # create the spin chain
-    h = 0
-    for i in range(n-1):
-        h = h + sc.Sx[i]*sc.Sx[i+1]
-        h = h + sc.Sy[i]*sc.Sy[i+1]
-    sc.set_hamiltonian(h)
-    name = (sc.Sx[site],sc.Sx[site]) # correlator to compute
-    es = np.linspace(-0.5,3,2000)
-    delta = 5e-2
-    (x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
-    return (x,y)
+# spin XX chain
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+h = 0
+for i in range(n-1):
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1]
+sc.set_hamiltonian(h)
+(xs, ys) = sc.get_dynamical_correlator(name=(sc.Sx[0], sc.Sx[0]), es=es, delta=delta)
 
+# spinless fermions with hopping 1/2
+fc = fermionchain.Fermionic_Chain(n)
+h = 0
+for i in range(n-1):
+    h = h + fc.Cdag[i]*fc.C[i+1]/2.
+h = h + h.get_dagger()
+fc.set_hamiltonian(h)
+(xf, yf) = fc.get_dynamical_correlator(name=(fc.Cdag[0], fc.C[0]), es=es, delta=delta)
 
-def get_fermion():
-    sc = fermionchain.Fermionic_Chain(n) # create the spin chain
-    h = 0
-    for i in range(n-1):
-        h = h + sc.Cdag[i]*sc.C[i+1]/2.
-    h = h + h.get_dagger()
-    sc.set_hamiltonian(h)
-    name = (sc.Cdag[site],sc.C[site]) # correlator to compute
-    es = np.linspace(-0.5,3,2000)
-    delta = 5e-2
-    (x,y) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
-    return (x,y/2)
-
-(xs,ys) = get_spin()
-(xf,yf) = get_fermion()
-
+print("Max difference =", np.max(np.abs(ys.real-yf.real/2)))
 
 import matplotlib.pyplot as plt
-plt.plot(xf,yf.real,c="blue",label="Fermion")
-plt.scatter(xs,ys.real,c="red",label="Spin")
+plt.plot(xs, ys.real, linewidth=4, label="spin Sx")
+plt.plot(xf, yf.real/2, "--", linewidth=2, label="fermion C")
+plt.xlabel("energy w")
+plt.ylabel("S(w), first site")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-

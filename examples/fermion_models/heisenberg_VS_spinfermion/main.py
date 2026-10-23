@@ -1,60 +1,29 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Ground-state energy of the S=1/2 Heisenberg chain, H = sum_i S_i . S_{i+1},
+# written in two ways: with spin operators, and with spins built from
+# a fermion per site (spin-fermion chain). Both describe the same
+# physics, so the energies must agree for every chain length.
 import numpy as np
-from dmrgpy import spinchain
-from dmrgpy import spinfermionchain
-n = 7
-spins = [2 for i in range(n)] # spin 1/2 heisenberg chain
-def geth(sc):
-  h = 0
-  for i in range(n-1):
-      h = h + sc.Sx[i]*sc.Sx[i+1]
-      h = h + sc.Sy[i]*sc.Sy[i+1]
-      h = h + sc.Sz[i]*sc.Sz[i+1]
-  return h
+from dmrgpy import spinchain, spinfermionchain
 
-sc = spinchain.Spin_Chain(spins) # create the spin chain
-fc = spinfermionchain.Spin_Fermion_Hamiltonian(["S" for s in spins])
+def energy(chain, n):
+    h = 0
+    for i in range(n-1):
+        h = h + chain.Sx[i]*chain.Sx[i+1] + chain.Sy[i]*chain.Sy[i+1] + chain.Sz[i]*chain.Sz[i+1]
+    chain.set_hamiltonian(h)
+    return chain.gs_energy()
 
-sc.set_hamiltonian(geth(sc)) # create Hamiltonian
-fc.set_hamiltonian(geth(fc)) # create Hamiltonian
-
-print("Energy with spins",sc.gs_energy())
-print("Energy with fermions",fc.gs_energy())
-print(fc.get_density())
-
-# sweep the chain length to confirm the two representations keep
-# agreeing on the ground-state energy (cheap, small chains)
-ns_list = [3,4,5,6,7]
-e_spin = []
-e_fermion = []
-for nn in ns_list:
-    n = nn
-    spins_n = [2 for i in range(n)]
-    scn = spinchain.Spin_Chain(spins_n)
-    fcn = spinfermionchain.Spin_Fermion_Hamiltonian(["S" for s in spins_n])
-    scn.set_hamiltonian(geth(scn))
-    fcn.set_hamiltonian(geth(fcn))
-    e_spin.append(scn.gs_energy())
-    e_fermion.append(fcn.gs_energy())
-    print("n =",nn,"E(spins) =",e_spin[-1],"E(fermions) =",e_fermion[-1])
+ns = [3, 4, 5, 6, 7] # chain lengths
+e1 = [energy(spinchain.Spin_Chain(["S=1/2" for i in range(n)]), n) for n in ns]
+e2 = [energy(spinfermionchain.Spin_Fermion_Hamiltonian(["S" for i in range(n)]), n) for n in ns]
+print("Max difference =", np.max(np.abs(np.array(e1)-e2)))
 
 import matplotlib.pyplot as plt
-plt.plot(ns_list,e_spin,marker="o",label="Spin chain")
-plt.plot(ns_list,e_fermion,marker="x",label="Spin-fermion chain")
-plt.xlabel("Number of sites")
-plt.ylabel("Ground-state energy")
+plt.plot(ns, e1, "o", markersize=10, label="spin chain")
+plt.plot(ns, e2, "x", markersize=10, label="spin-fermion chain")
+plt.xlabel("number of sites")
+plt.ylabel("ground-state energy")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

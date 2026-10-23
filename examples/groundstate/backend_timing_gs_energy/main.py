@@ -1,81 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-# Compare wall-clock time for ground state energy calculations across the
-# three DMRG backends -- ITensor v2 (mpscpp2), ITensor v3 (mpscpp3), and
-# the pure-Python backend (itensor_version="python", src/dmrgpy/pyitensor/,
-# no compiler/pybind11 needed) -- for a spin-1/2 Heisenberg chain, at a few
-# system sizes. Unlike the v2_VS_v3_* examples in this directory (which
-# cross-check *results* between backends), this one is purely about
-# *timing*: how much slower is the compiler-free pure-Python backend
-# compared to compiled ITensor, and how does that gap scale with system
-# size. If v2/v3 aren't compiled in this environment, their gs_energy()
-# calls silently fall back to ED (see mode.py) -- so their timings would
-# then reflect ED, not real DMRG; itensor_version="python" always exercises
-# the real in-process pyitensor DMRG sweep regardless.
-#
-# Confirmed directly on one machine (numbers will vary by machine/load --
-# this script is meant to be re-run, not read as a fixed benchmark table):
-# at the default (small) bond dimension this script uses, the python
-# backend is ~1.5-2x slower than v3 for n=8-20 -- numba is NOT on by
-# default (pyitensor/kernels.py's USE_NUMBA defaults to False; see that
-# module's docstring for why, and examples/finite_temperature/
-# backend_timing_metts_dynamical_correlator for a workload where the gap
-# is much larger and numba's tradeoffs actually matter). At *larger* bond
-# dimension ground-state DMRG tells a different story entirely: pyitensor
-# is at parity with, or faster than, v3 (e.g. n=24/maxdim=300: v3 ~107s vs
-# python ~25-31s) because mpscpp3 in this repo runs with ConserveQNs=false
-# and a random-MPS start (see CLAUDE.md/development.md), sacrificing the
-# QN block-sparsity that would otherwise help it at scale.
+# Time needed for the ground state energy of the S=1/2 Heisenberg chain
+# as a function of the chain length, for the three DMRG backends: ITensor
+# v2, ITensor v3 and the pure Python one. The result shows how much
+# slower the Python backend is, which does not need any compiler.
 import time
-import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
-
-def gs_energy_timed(itensor_version, n):
-    spins = ["S=1/2" for i in range(n)]
-    sc = spinchain.Spin_Chain(spins, itensor_version=itensor_version)
+def run(version, n):
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)], itensor_version=version)
+    # Heisenberg Hamiltonian, H = sum_i S_i . S_{i+1}
     h = 0
     for i in range(n-1):
         h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
     sc.set_hamiltonian(h)
-    t0 = time.perf_counter()
-    energy = sc.gs_energy()
-    dt = time.perf_counter() - t0
-    return energy, dt
-
-
-# Warm up the python backend's numba JIT once, outside the timed loop --
-# the first call to each numba-compiled kernel pays a one-time compile
-# cost (~0.3-0.5s) that has nothing to do with the DMRG algorithm itself
-# and would otherwise distort the smallest system size the most.
-gs_energy_timed("python", 6)
+    sc.maxm = 40 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
+    t0 = time.time()
+    sc.gs_energy()
+    return time.time() - t0
 
 sizes = [8, 12, 16, 20]
-times2, times3, timespy = [], [], []
-
-print(f"{'n':>4}{'v2 (s)':>10}{'v3 (s)':>10}{'python (s)':>12}{'python/v3':>12}")
-for n in sizes:
-    _, t2 = gs_energy_timed(2, n)
-    _, t3 = gs_energy_timed(3, n)
-    _, tpy = gs_energy_timed("python", n)
-    times2.append(t2) ; times3.append(t3) ; timespy.append(tpy)
-    print(f"{n:4d}{t2:10.3f}{t3:10.3f}{tpy:12.3f}{tpy/t3:12.1f}")
-
-print()
-print("Total time across all sizes above:")
-print(f"  ITensor v2  : {sum(times2):.3f} s")
-print(f"  ITensor v3  : {sum(times3):.3f} s")
-print(f"  pure Python : {sum(timespy):.3f} s")
-
-plt.plot(sizes, times2, "o-", label="ITensor v2 (mpscpp2)")
-plt.plot(sizes, times3, "s-", label="ITensor v3 (mpscpp3)")
-plt.plot(sizes, timespy, "^-", label="pure Python")
+import matplotlib.pyplot as plt
+for version in [2, 3, "python"]:
+    ts = [run(version, n) for n in sizes]
+    print(version, ts)
+    plt.plot(sizes, ts, "o-", label=str(version))
 plt.xlabel("chain length n")
-plt.ylabel("wall time [s]")
+plt.ylabel("time (s)")
 plt.yscale("log")
-plt.title("Ground state energy: DMRG backend timing vs system size")
 plt.legend()
-plt.grid(alpha=0.3, which="both")
-plt.tight_layout()
 plt.show()

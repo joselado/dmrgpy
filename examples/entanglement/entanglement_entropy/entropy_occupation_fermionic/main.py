@@ -1,43 +1,27 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../../src')
 
+# Entanglement entropy of the sites (0,1) with the rest, in the ground
+# state of four spinless fermions with first-neighbor hopping. The two
+# halves (0,1) and (2,3) are coupled by the hopping c, and we sweep c.
+# For c=0 the two halves are decoupled and the entropy is zero.
 import numpy as np
 from dmrgpy import fermionchain
-n = 4
-# This example shows how compute the entropy between sites (0,1) and
 
-# function computing the entropy
-def get(c01):
-    """Compute entropy"""
+n = 4 # number of sites
+cs = np.linspace(0.0, 1.0, 11) # coupling between the two halves
+ss = []
+for c in cs:
     fc = fermionchain.Fermionic_Chain(n)
-    h = 0
-    for i in range(n-1):
-        c = 1.0 # default coupling
-        h = h -fc.C[i]*fc.Cdag[i]
+    h = fc.Cdag[0]*fc.C[1] + fc.Cdag[2]*fc.C[3]
+    h = h + c*fc.Cdag[1]*fc.C[2] # coupling between the halves
     h = h + h.get_dagger() # add the Hermitian conjugate
     fc.set_hamiltonian(h)
-    wf = fc.get_gs() # compute ground state
-    s = wf.get_pair_entropy(0,None) # entropy of the sites (0,1) with the rest
-    return s
-
-print(get(0.)) ; exit()
-
-cs = np.linspace(0.,1.,20) # coupling between left and right parts
-ss = [get(c) for c in cs] # compute all the entropies
+    wf = fc.get_gs() # ground state
+    ss.append(wf.get_pair_entropy(0, 1)) # entropy of (0,1) with the rest
 
 import matplotlib.pyplot as plt
-
-plt.plot(cs,ss,marker="o")
-plt.xlabel("Coupling between (1,2) and (3,4)")
-plt.ylabel("Entanglement entropy of the (1,2) pair")
+plt.plot(cs, ss, marker="o")
+plt.xlabel("coupling c between (0,1) and (2,3)")
+plt.ylabel("entropy of the pair (0,1)")
 plt.show()
-
-
-
-
-
-
-
-
-
-

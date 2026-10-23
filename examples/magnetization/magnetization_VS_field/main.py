@@ -1,57 +1,37 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Magnetization Mz = sum_i <Sz_i> of the S=1/2 Heisenberg chain in a
+# magnetic field B, H = sum_i S_i . S_{i+1} + B sum_i Sz_i.
+# The magnetization grows in steps, and it saturates once the Zeeman
+# energy wins over the exchange. We use DMRG and compare with exact diagonalization (ED).
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
-n = 10 # number of sites in your chain
-spins = ["S=1/2" for i in range(n)] # create the sites
-sc = spinchain.Spin_Chain(spins) # create the chain
+n = 10 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+sc.maxm = 30 # bond dimension
+sc.nsweeps = 10 # number of DMRG sweeps
 
-# now define the Hamiltonian
-def geth(b):
-  h = 0
-  for i in range(n-1): 
-      h = h + sc.Sx[i]*sc.Sx[i+1] # add exchange
-      h = h + sc.Sy[i]*sc.Sy[i+1] # add exchange
-      h = h + sc.Sz[i]*sc.Sz[i+1] # add exchange
-  for i in range(n): h = h + b*sc.Sz[i] # add transverse field
-  return h
+h0 = 0 # Heisenberg Hamiltonian
+Mz = 0 # total magnetization
+for i in range(n-1):
+    h0 = h0 + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+for i in range(n):
+    Mz = Mz + sc.Sz[i]
 
-Mz = 0
-for i in range(n): Mz = Mz + sc.Sz[i]
-
-bs = np.linspace(0.,4.0,20)
-mz0s = [] # magnetization with DMRG
-mz1s = [] # magnetization with ED
+bs = np.linspace(0., 4.0, 20) # magnetic fields
+m1, m2 = [], []
 for b in bs:
-  h = geth(b)
-  sc.set_hamiltonian(h) # and initialize the Hamiltonian
-  mz0 = sc.vev(Mz,mode="DMRG").real
-  mz1 = sc.vev(Mz,mode="ED").real
-  mz0s.append(mz0)
-  mz1s.append(mz1)
-  b = round(b,2)
-  mz0 = round(mz0,2)
-  mz1 = round(mz1,2)
-  print("B=",b,"Mz DMRG = ",mz0,"Mz ED",mz1)
+    sc.set_hamiltonian(h0 + b*Mz)
+    m1.append(sc.vev(Mz, mode="ED").real)
+    m2.append(sc.vev(Mz, mode="DMRG").real)
+print("Max difference DMRG-ED =", np.max(np.abs(np.array(m1)-m2)))
 
-# plot the magnetization VS the applied field, comparing both solvers
-plt.plot(bs,mz0s,marker="o",label="DMRG")
-plt.scatter(bs,mz1s,label="ED",c="red")
+import matplotlib.pyplot as plt
+plt.plot(bs, m1, linewidth=4, label="ED")
+plt.plot(bs, m2, "--", linewidth=2, label="DMRG")
+plt.xlabel("magnetic field B")
+plt.ylabel("magnetization Mz")
 plt.legend()
-plt.xlabel("Magnetic field B")
-plt.ylabel("Total magnetization $M_z$")
 plt.show()
-
-
-
-
-
-
-
-
-
-
-

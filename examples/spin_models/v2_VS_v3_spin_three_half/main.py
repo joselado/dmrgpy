@@ -1,49 +1,33 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-# Compare ITensor v2 vs v3 vs the pure-Python backend (itensor_version=
-# "python") for a spin-3/2 chain: this is one of dmrgpy's own custom
-# (non-stock-ITensor) site types (extra/spinthreehalf.h in both mpscpp2
-# and mpscpp3, SpinThreeHalfSite in pyitensor/sites/spin.py), so this also
-# checks that both the ITensor-v3 port and the from-scratch pyitensor port
-# of that custom site type reproduce the same physics. Only Sz/Sx/Sy are
-# defined for this representation (no Sp/Sm), unlike spin-1/2 or spin-1.
+# Ground state energy of the S=3/2 Heisenberg chain with three DMRG
+# backends: ITensor v2, ITensor v3 and the pure Python one. The S=3/2 site
+# is a custom site of dmrgpy, so all three have to give the same energy.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import spinchain
 
-n = 4
-
-def get_energy(itensor_version,n):
-    spins = ["S=3/2" for i in range(n)]
-    sc = spinchain.Spin_Chain(spins,itensor_version=itensor_version)
+def energy(version, n):
+    sc = spinchain.Spin_Chain(["S=3/2" for i in range(n)], itensor_version=version)
     h = 0
     for i in range(n-1):
-        h = h + sc.Sx[i]*sc.Sx[i+1]
-        h = h + sc.Sy[i]*sc.Sy[i+1]
-        h = h + sc.Sz[i]*sc.Sz[i+1]
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
     sc.set_hamiltonian(h)
+    sc.maxm = 40 # bond dimension
+    sc.nsweeps = 10 # number of DMRG sweeps
     return sc.gs_energy()
 
-e2 = get_energy(2,n)
-e3 = get_energy(3,n)
-epy = get_energy("python",n)
+ns = [3, 4, 5] # chain lengths
+e2 = [energy(2, n) for n in ns]
+e3 = [energy(3, n) for n in ns]
+epy = [energy("python", n) for n in ns]
+print("Max difference v2-v3 =", np.max(np.abs(np.array(e2) - e3)))
+print("Max difference v3-python =", np.max(np.abs(np.array(e3) - epy)))
 
-print("Ground state energy (ITensor v2)     =",e2)
-print("Ground state energy (ITensor v3)     =",e3)
-print("Ground state energy (pure Python)    =",epy)
-print("Difference v2 vs v3                  =",abs(e2-e3))
-print("Difference v3 vs pure Python         =",abs(e3-epy))
-
-# sweep the chain length and overlay all three backends
-ns = [3,4,5]
-e2s = [get_energy(2,ni) for ni in ns]
-e3s = [get_energy(3,ni) for ni in ns]
-epys = [get_energy("python",ni) for ni in ns]
-
-plt.plot(ns,e2s,marker="o",label="ITensor v2")
-plt.plot(ns,e3s,marker="s",label="ITensor v3")
-plt.plot(ns,epys,marker="x",label="pure Python")
+import matplotlib.pyplot as plt
+plt.plot(ns, e2, "o-", linewidth=4, label="ITensor v2")
+plt.plot(ns, e3, "s--", linewidth=2, label="ITensor v3")
+plt.plot(ns, epy, "x:", linewidth=2, label="python")
 plt.xlabel("Chain length")
 plt.ylabel("Ground state energy")
 plt.legend()

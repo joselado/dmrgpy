@@ -1,89 +1,41 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Non-Hermitian chain of spinless fermions with gain and loss, in a ring of
+# 8 sites whose last bond has strength c. For c=0 the chain is open and
+# has edge zero modes, so the ground state is degenerate. Closing the
+# ring with c splits the levels. We use exact diagonalization (ED).
 import numpy as np
-from dmrgpy import fermionchain,mpsalgebra
-import numpy as np
+from dmrgpy import fermionchain
 
-# this is a minimal example of an interacting non-Hermitian system
-# with edge zero modes
-
-def get(V=0.0,c=1.0,eta=1.0):
-    """Return non-Hermitian eigenvalues
-    V in the interaction
-    c is the coupling between first and last sites"""
-    n = 2 # number of tetramers
-    ns = 4*n # total number of sites
-    mh = np.zeros((ns,ns),dtype=np.complex_) # TB matrix
+def get_spectrum(c, eta=1.0):
+    ns = 8 # number of sites
+    t = np.zeros((ns, ns), dtype=complex) # hopping matrix
     for i in range(ns-1):
-        mh[i,i+1] = 1.0
-        mh[i+1,i] = 1.0
-    
-    mh[ns-1,0] = c
-    mh[0,ns-1] = c
-    
-    for i in range(n):
-        mh[4*i,4*i] = 1j*eta
-        mh[4*i+1,4*i+1] = -1j*eta
-        mh[4*i+2,4*i+2] = -1j*eta
-        mh[4*i+3,4*i+3] = 1j*eta
-    
-    
-    
-    fc = fermionchain.Fermionic_Chain(ns) # create the fermion chain
-    h = 0 # initialize Hamiltonian
-    # put all the hoppings
+        t[i, i+1] = t[i+1, i] = 1.0
+    t[0, ns-1] = t[ns-1, 0] = c # closing bond
+    for i in range(ns): # gain and loss pattern
+        t[i, i] = 1j*eta*[1, -1, -1, 1][i % 4]
+    fc = fermionchain.Fermionic_Chain(ns)
+    h = 0
     for i in range(ns):
         for j in range(ns):
-            h = h + mh[i,j]*fc.Cdag[i]*fc.C[j]
-    for i in range(ns-1): h = h + V*(fc.N[i]-0.5)*(fc.N[i+1]-0.5)
-    
-    
+            h = h + t[i, j]*fc.Cdag[i]*fc.C[j]
     fc.set_hamiltonian(h)
-    nex = 10 # lowest states
-    # the following methods target the states with minimum Re(E)
-    # use this if you wanted to use MPS
-#    es,wfs = mpsalgebra.lowest_energy_non_hermitian_arnoldi(fc,h,verbose=1,n=nex,maxit=7)
-    # this method is just for ED
-    es,wfs = fc.get_excited_states(mode="ED",n=nex) # get excited states
-    es = es - es[0] # return energies
-    deg = fc.get_gs_degeneracy(mode="ED",delta=0.1)
-    return es,deg
+    (es, wfs) = fc.get_excited_states(mode="ED", n=10)
+    return es - es[0], fc.get_gs_degeneracy(mode="ED", delta=0.1)
 
-xp = []
-yp = []
-zp = []
-degs = []
-ps = np.linspace(0.0,1.0,20)
-# compute for different interactions
-for p in ps:
-    esed,deg = get(c=p,V=0.,eta=1.0)
-    print(np.round(np.abs(esed.real),3))
-    yp += [e for e in esed] # store
-    xp += [p for e in esed] # store
-    zp += [i for i in range(len(esed))] # store
-    degs.append(deg)
+cs = np.linspace(0.0, 1.0, 20) # strength of the closing bond
+xs, ys = [], []
+for c in cs:
+    (es, deg) = get_spectrum(c)
+    print("c =", round(c, 2), " degeneracy =", deg)
 
+    xs += [c]*len(es)
+    ys += list(es.real)
 
 import matplotlib.pyplot as plt
-xp = np.array(xp)
-yp = np.array(yp)
-plt.subplot(1,3,1) ; plt.xlabel("Open-Closed boundary")
-plt.ylabel("Re(E)")
-plt.scatter(xp,yp.real,c=zp,cmap="rainbow")
-plt.subplot(1,3,2) ; plt.xlabel("Open-Closed boundary")
-plt.ylabel("Im(E)")
-plt.scatter(xp,yp.imag,c=zp,cmap="rainbow")
-plt.subplot(1,3,3) ; plt.xlabel("Open-Closed boundary")
-plt.ylabel("Degeneracy")
-plt.scatter(ps,degs)
-
-plt.tight_layout()
+plt.scatter(xs, ys, s=10)
+plt.xlabel("closing bond c")
+plt.ylabel("Re(E-E0)")
 plt.show()
-
-
-
-
-
-
-

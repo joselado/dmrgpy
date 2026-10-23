@@ -1,56 +1,37 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Expectation values <O> of the parafermion operators Chi and Psi in the
+# ground state of a random Z3 parafermion chain. Parafermions generalize
+# Majorana fermions, and their operators fulfill a Z3 algebra. We compute
+# the expectation values with DMRG and compare with exact diagonalization.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import parafermionchain
-n = 3
-pc = parafermionchain.Parafermionic_Chain(n) # create the chain
 
+n = 3 # number of sites
+np.random.seed(1) # same random Hamiltonian in every run
+pc = parafermionchain.Parafermionic_Chain(n)
 h = 0
 for i in range(n):
-  for j in range(n):
-      h = h + pc.Sig[i]*pc.Tau[j]*np.random.random()
-      h = h + 1j*pc.Sig[i]*pc.Sigd[j]*np.random.random()
-      h = h + pc.Tau[i]*pc.Tau[j]*np.random.random()
-      h = h + 1j*pc.Tau[i]*pc.Taud[j]*np.random.random()
+    for j in range(n):
+        h = h + pc.Sig[i]*pc.Tau[j]*np.random.random()
+        h = h + 1j*pc.Sig[i]*pc.Sigd[j]*np.random.random()
+        h = h + pc.Tau[i]*pc.Tau[j]*np.random.random()
+        h = h + 1j*pc.Tau[i]*pc.Taud[j]*np.random.random()
+h = h + h.get_dagger() # make it Hermitian
+pc.set_hamiltonian(h)
+pc.maxm = 60 # bond dimension
+pc.nsweeps = 40 # number of DMRG sweeps
 
-h = h + h.get_dagger() # Make the Hamiltonian Hermitian
-pc.set_hamiltonian(h) # set the Hamiltonian
+ops = pc.Chi + pc.Psi # all the parafermion operators
+c1 = np.array([pc.vev(o, mode="ED") for o in ops])
+c2 = np.array([pc.vev(o, mode="DMRG") for o in ops])
+print("Max difference DMRG-ED =", np.max(np.abs(c1-c2)))
 
-pc.test_ED()
-
-pc.maxm = 60
-pc.nsweeps = 40
-
-ops = pc.Chi + pc.Psi
-no = 10
-
-print("Energy ED",pc.gs_energy(mode="ED"))
-print("Energy DMRG",pc.gs_energy(mode="DMRG"))
-
-def rando():
-    o = ops[np.random.randint(len(ops))]
-    return o #+ o.get_dagger()
-
-print(pc.get_excited(mode="ED",n=10))
-
-cs = [rando() for i in range(no)]
-
-c1 = np.array([pc.vev(o,mode="ED") for o in cs])
-c2 = np.array([pc.vev(o,mode="DMRG") for o in cs])
-
-
-plt.plot(range(no),c2.real,color="red",label="DMRG")
-plt.scatter(range(no),c1.real,color="blue",label="ED")
+import matplotlib.pyplot as plt
+plt.plot(range(len(ops)), c1.real, "o", markersize=10, label="ED")
+plt.plot(range(len(ops)), c2.real, "x", markersize=10, label="DMRG")
+plt.xlabel("operator")
+plt.ylabel("<O>")
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-

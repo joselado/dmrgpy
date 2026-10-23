@@ -1,57 +1,35 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Transverse field Ising chain, H = -sum_i Sz_i Sz_{i+1} + B sum_i Sx_i.
+# The ferromagnetic order, the magnetization per site <Sz>, is large
+# for small B and disappears when the transverse field is increased.
+# We start every DMRG run from the ferromagnetic state, so the chain
+# stays in one of the two degenerate ground states.
 import numpy as np
 from dmrgpy import spinchain
 
-n = 40 # number of sites in your chain
-spins = ["S=1/2" for i in range(n)] # create the sites
-sc = spinchain.Spin_Chain(spins) # create the chain
-
-# now define the Hamiltonian
-def geth(b):
-  h = 0
-  for i in range(n-1): 
-      h = h - sc.Sz[i]*sc.Sz[i+1] # add exchange
-  for i in range(n): h = h + b*sc.Sx[i] # add transverse field
-  return h
-
-# define the total spin in the z-direction
-Mz = 0
+n = 40 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+Mz = 0 # total magnetization
 for i in range(n): Mz = Mz + sc.Sz[i]
+sc.maxm = 20 # bond dimension
+sc.nsweeps = 10 # number of DMRG sweeps
+sc.set_hamiltonian(-Mz)
+wf0 = sc.get_gs().copy() # ferromagnetic state, initial guess
 
-# get a fully ferromagnetic wavefunction (to be used as initial guess later on)
-sc.set_hamiltonian(-Mz) ; wffe = sc.get_gs().copy() # ferromagnetic wavefunction
-
-bs = np.linspace(-1.0,1.0,40) # list of magnetic fields
+bs = np.linspace(-1.0, 1.0, 21) # transverse fields
 mzs = []
-# loop over magnetic fields
 for b in bs:
-    h = geth(b) # get the Hamiltonian
-    sc.set_hamiltonian(h) # and initialize the Hamiltonian
-    sc.set_initial_wf_guess(wffe) # setup this wavefunction as the initial guess
-    mz = sc.vev(Mz).real/n # compute the magnetization per site
-    print("B=",b,"Mz = ",mz)
-    mzs.append(mz) # store in an array
-
-np.savetxt("MZ_VS_B.OUT",np.array([bs,mzs]).T) # save in a file
-
-
+    h = 0
+    for i in range(n-1): h = h - sc.Sz[i]*sc.Sz[i+1]
+    for i in range(n): h = h + b*sc.Sx[i]
+    sc.set_hamiltonian(h)
+    sc.set_initial_wf_guess(wf0)
+    mzs.append(sc.vev(Mz).real/n) # magnetization per site
 
 import matplotlib.pyplot as plt
-
-
-plt.plot(bs,mzs,marker="o",c="red")
-plt.xlabel("B")
-plt.ylabel("Sz")
+plt.plot(bs, mzs, "o-")
+plt.xlabel("transverse field B")
+plt.ylabel("<Sz> per site")
 plt.show()
-
-
-
-
-
-
-
-
-
-

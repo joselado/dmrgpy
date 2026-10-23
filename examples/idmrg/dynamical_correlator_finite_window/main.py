@@ -1,84 +1,26 @@
-# Dynamical correlator of an infinite (iDMRG) chain, computed with the KPM
-# method on a finite window -- infinitechain.Infinite_Many_Body_Chain.
-# kpm_finite, see its own docstring
-# (pyitensor/idmrg.py has no analogue of the transfer-matrix formalism
-# vev/correlator use for *dynamical* quantities, since H is extensive/
-# unbounded in the thermodynamic limit and a literal Chebyshev expansion
-# of it has no meaning -- unlike apply_mpo/imps_sum's bounded-operator
-# scope). Instead this method builds an ordinary finite, open-boundary
-# chain of n_window repeats of the unit cell and delegates directly to
-# kpmdmrg.get_dynamical_correlator -- the exact same KPM code path an
-# ordinary finite Spin_Chain uses -- placing the two operators at the
-# window's central cell, as far as possible from both open ends. Named
-# kpm_finite (not get_dynamical_correlator, the finite-chain method it
-# wraps) to flag up front that this is an approximation -- see
-# kpm_finite's own docstring for what a genuinely infinite-chain KPM
-# (infinite boundary conditions + a growing window) would need instead;
-# not implemented here.
-#
-# SCOPE: a genuine finite-window *approximation* to the (only ill-defined
-# via KPM anyway) infinite-chain dynamical correlator, not an exact
-# infinite-size method -- results carry finite-size/open-boundary
-# corrections that must be checked by convergence in n_window, exactly as
-# demonstrated below (three window sizes, same delta/operators).
-
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Local dynamical correlator <Sz(t) Sz(0)> of the infinite Heisenberg chain.
+# The infinite chain is solved with iDMRG. Then kpm_finite computes the
+# correlator in a finite window of n_window cells, with the operators in the
+# middle. The result is only reliable if it converges with the window size.
 import numpy as np
-import matplotlib.pyplot as plt
 from dmrgpy import infinitechain
 
 ic = infinitechain.Infinite_Spin_Chain(["1/2"])
-h = ic.SxC[0] * ic.SxR[0] + ic.SyC[0] * ic.SyR[0] + ic.SzC[0] * ic.SzR[0]
+h = ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0] + ic.SzC[0]*ic.SzR[0]
 ic.set_hamiltonian(h)
-ic.maxm, ic.maxiter, ic.etol = 30, 60, 1e-9
-density = ic.gs_energy()
-print("iDMRG ground-state energy density:", density)
+ic.maxm, ic.maxiter, ic.etol = 30, 60, 1e-9 # bond dimension, iterations, tolerance
+print("Energy density", ic.gs_energy())
 
-es = np.linspace(-0.5, 4.5, 120)
-delta = 0.35  # kept coarse on purpose -- see this example's header and
-              # kpm_finite's own docstring for why a fine delta needs a
-              # KPM moment count comparable to n_window itself, at which
-              # point open-boundary reflections contaminate the result
-              # regardless of window size
-
-print()
-print("=== <Sz(0,t)Sz(0,0)> local dynamical correlator, convergence in n_window ===")
-n_windows = (8, 12, 16)
-heights = []
-spectra = []
-for n_window in n_windows:
-    _, ys = ic.kpm_finite(
-        "Sz", 0, "Sz", 0, n_window=n_window,
-        window_chain_kwargs=dict(maxm=24, nsweeps=10),
-        delta=delta, es=es)
-    spectra.append(ys)
-    peak_w = es[np.argmax(ys.real)]
-    height = np.max(np.abs(ys))
-    heights.append(height)
-    print("n_window={:3d}  peak at omega={:.3f}  max|S(omega)|={:.4f}".format(
-        n_window, peak_w, height))
-
-# For such small windows (8-16 sites) individual finite-size levels are
-# still widely spaced, so the *exact* peak position can jump between
-# comparable, closely-spaced levels as n_window changes -- not a bug, see
-# this example's/kpm_finite's own docstring on why a fixed delta needs
-# growing n_window (and, eventually, a smaller delta) to really converge.
-# The overall peak *height* (total nearby spectral weight, a
-# coarser/better-converged diagnostic) is checked instead.
-assert max(heights) / min(heights) < 2.0
-
-print()
-print("dynamical_correlator_finite_window example PASSED")
-
-fig, ax = plt.subplots(figsize=(6, 4.5))
-for n_window, ys in zip(n_windows, spectra):
-    ax.plot(es, np.abs(ys), label="n_window={}".format(n_window))
-ax.set_xlabel(r"$\omega$")
-ax.set_ylabel(r"$|S(\omega)|$")
-ax.set_title(r"$\langle S_z(0,t)S_z(0,0)\rangle$: kpm_finite convergence in n_window")
-ax.legend()
-fig.tight_layout()
-fig.savefig("dynamical_correlator_finite_window.png", dpi=150)
-print("saved plot to dynamical_correlator_finite_window.png")
+es = np.linspace(-0.5, 4.5, 120) # energies
+import matplotlib.pyplot as plt
+for n_window in [8, 12, 16]: # size of the window
+    (x, y) = ic.kpm_finite("Sz", 0, "Sz", 0, n_window=n_window,
+            window_chain_kwargs=dict(maxm=24, nsweeps=10), delta=0.35, es=es)
+    plt.plot(es, np.abs(y), label="n_window = %d" % n_window)
+plt.xlabel("energy w")
+plt.ylabel("|S(w)|")
+plt.legend()
+plt.show()

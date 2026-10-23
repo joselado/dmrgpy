@@ -1,57 +1,30 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Local spin spectrum S(w) = sum_n |<n|Sz_0|GS>|^2 delta(w - E_n + E_0)
+# at the end of an open S=1 Heisenberg chain. The Haldane chain has
+# spin-1/2 edge modes, so a low energy peak appears that becomes sharp
+# when the chain is long. It is computed with the excited states (EX).
 import numpy as np
 from dmrgpy import spinchain
-n = 6
 
 def get_dc(n):
-    spins = ["S=1" for i in range(n)] # spin 1/2 heisenberg chain
-    # create first neighbor exchange
-    sc = spinchain.Spin_Chain(spins) # create the spin chain
+    sc = spinchain.Spin_Chain(["S=1" for i in range(n)])
     h = 0
     for i in range(n-1):
-        h = h + sc.Sx[i]*sc.Sx[i+1]
-        h = h + sc.Sy[i]*sc.Sy[i+1]
-        h = h + sc.Sz[i]*sc.Sz[i+1]
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
     sc.set_hamiltonian(h)
-    
     sc.maxm = 20 # bond dimension
-    
-    name = (sc.Sz[0],sc.Sz[0]) # correlator to compute
-    es = np.linspace(-0.2,1,300)
-    delta = 2e-2
-    (x,y) = sc.get_dynamical_correlator(name=name,
-            nex = 10, # number of excited states
-            mode="DMRG",submode="EX",es=es,delta=delta)
-    return (x,y)
+    name = (sc.Sz[0], sc.Sz[0])
+    es = np.linspace(-0.2, 1, 300) # energies
+    return sc.get_dynamical_correlator(name=name, nex=10, mode="DMRG",
+            submode="EX", es=es, delta=0.02) # nex excited states
 
-
-Ns = range(4,16,2)
 import matplotlib.pyplot as plt
-fig = plt.figure(figsize=(6,5))
-
-ii = 0
-for n in Ns:
-    c = ii/len(Ns) # colorcode
-    print("Doing L=",n)
-    (x,y) = get_dc(n) ; ii+= 1
-    plt.plot(x,y.real+ii,c=(c,0.,1-c),label="L = "+str(n))
-
+for n in [4, 6, 8, 10]:
+    x, y = get_dc(n)
+    plt.plot(x, y.real + n/2, label="L = "+str(n)) # shifted for clarity
+plt.xlabel("energy w")
+plt.ylabel("S(w), first site")
 plt.legend()
-plt.xlabel("Energy")
-plt.ylabel("Dynamical correlator")
-plt.tight_layout()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-

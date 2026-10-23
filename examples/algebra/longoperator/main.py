@@ -1,48 +1,40 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Correlator <C^dagger_0 C_j> in a spinful fermionic chain. The operator
+# has a long Jordan-Wigner string, so for big systems we first build it as
+# a product of MPOs with toMPO. We compare it with the direct operator.
 import numpy as np
 from dmrgpy import fermionchain
-ns = 20 # number of spinful fermionic sites
-fc = fermionchain.Spinful_Fermionic_Chain(ns) # create the chain
-h = 0 # initialize Hamiltonian
-
-mu = -1.0 # chemical potential
-
-# first add the hoppings
-for i in range(ns-1): # loop over sites
-    h = h + fc.Cdagup[i]*fc.Cup[i+1]
-    h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-h = h + h.get_dagger() # complex conjugate
-
-
-# now add the chemical potential
-for i in range(ns): # loop over sites
-    h = h + mu*fc.Cdagup[i]*fc.Cup[i]
-    h = h + mu*fc.Cdagdn[i]*fc.Cdn[i]
-
-# setup the Hamiltonian
-fc.set_hamiltonian(h) # initialize Hamiltonian
-wf = fc.get_gs() # get ground state
-i = 0
-inds = range(ns)
-
-# function to enable computing correlators in big systems
 from dmrgpy.multioperatortk.longoperator import toMPO
 
-vevs0,vevs1 = [],[]
-for j in inds: # loop over correlators
-    op0 = fc.Cdagup[i]*fc.Cup[j] # operator
-    op1 = toMPO(fc,op0) # use the prodcut trick (enables very big systems)
-    vevs0.append(wf.dot(op0*wf)) # full mode
-    vevs1.append(wf.dot(op1*wf)) # prodcut mode
+ns = 10 # number of spinful sites
+fc = fermionchain.Spinful_Fermionic_Chain(ns)
 
+# hopping t=1 and chemical potential mu
+mu = -1.0
+h = 0
+for i in range(ns-1):
+    h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
+h = h + h.get_dagger()
+for i in range(ns):
+    h = h + mu*(fc.Cdagup[i]*fc.Cup[i] + fc.Cdagdn[i]*fc.Cdn[i])
+fc.set_hamiltonian(h)
+fc.maxm = 40 # bond dimension
+fc.nsweeps = 10 # number of DMRG sweeps
+wf = fc.get_gs() # ground state
+
+full, prod = [], []
+for j in range(ns):
+    op = fc.Cdagup[0]*fc.Cup[j]
+    full.append(wf.dot(op*wf).real) # direct operator
+    prod.append(wf.dot(toMPO(fc,op)*wf).real) # product of MPOs
+print("Max difference =", np.max(np.abs(np.array(full)-prod)))
 
 import matplotlib.pyplot as plt
-plt.plot(inds,vevs1,marker="o",label="product")
-plt.plot(inds,vevs0,label="full")
+plt.plot(range(ns), full, linewidth=4, label="direct")
+plt.plot(range(ns), prod, "--", linewidth=2, label="product of MPOs")
+plt.xlabel("site j")
+plt.ylabel("<C^dagger_0 C_j>")
 plt.legend()
-plt.xlabel("Site j")
-plt.ylabel("$\\langle C^\\dagger_i C_j \\rangle$")
 plt.show()
-

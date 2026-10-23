@@ -1,55 +1,35 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Trace of an operator, Tr(O) = sum_s <s|O|s>, summed over all the states
+# of the chain, and the trace of its inverse. Here O = H^2 + i, with H the
+# Heisenberg Hamiltonian. The inverse needs no diagonalization of H.
+# The trace gives, for example, the infinite temperature average.
+# We compute it with matrix product states (MPS) and compare with ED.
 import numpy as np
 from dmrgpy import spinchain
 
-def get_traces(n):
-    spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-    sc = spinchain.Spin_Chain(spins) # create the spin chain
-    h = 0 # generate a Heisenberg Hamiltonian
-    for i in range(n-1):
-        h = h +sc.Sx[i]*sc.Sx[i+1]
-        h = h +sc.Sy[i]*sc.Sy[i+1]
-        h = h +sc.Sz[i]*sc.Sz[i+1]
-
-    h = h*h + 1j
-
-    tr_ed = sc.trace(h,mode="ED")
-    tr_mps = sc.trace(h,mode="DMRG")
-    itr_ed = sc.inverse_trace(h,mode="ED")
-    itr_mps = sc.inverse_trace(h,mode="DMRG")
-    return tr_ed,tr_mps,itr_ed,itr_mps
-
-ns = [2,4,6] # sweep the chain length (ED cost grows exponentially, keep small)
-tr_eds,tr_mpss,itr_eds,itr_mpss = [],[],[],[]
+ns = [2, 4, 6] # chain lengths, ED cost grows exponentially
+tr_ed, tr_mps = [], []
 for n in ns:
-    tr_ed,tr_mps,itr_ed,itr_mps = get_traces(n)
-    print("n =",n)
-    print("Trace ED",tr_ed)
-    print("Trace MPS",tr_mps)
-    print("Inverse trace ED",itr_ed)
-    print("Inverse trace MPS",itr_mps)
-    tr_eds.append(tr_ed)
-    tr_mpss.append(tr_mps)
-    itr_eds.append(itr_ed)
-    itr_mpss.append(itr_mps)
+    sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+    # Heisenberg Hamiltonian, H = sum_i S_i . S_{i+1}
+    h = 0
+    for i in range(n-1):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+    o = h*h + 1j
+    tr_ed.append(sc.trace(o, mode="ED"))
+    tr_mps.append(sc.trace(o, mode="DMRG"))
+    itr_ed = sc.inverse_trace(o, mode="ED")
+    itr_mps = sc.inverse_trace(o, mode="DMRG")
+    print("n =", n, " inverse trace difference =", abs(itr_ed-itr_mps))
+print("Max difference =", np.max(np.abs(np.array(tr_ed)-tr_mps)))
 
 import matplotlib.pyplot as plt
-fig,axes = plt.subplots(1,2,figsize=(10,4))
-axes[0].plot(ns,[abs(x) for x in tr_eds],marker="o",label="ED")
-axes[0].plot(ns,[abs(x) for x in tr_mpss],marker="s",linestyle="--",label="MPS")
-axes[0].set_xlabel("Chain length n")
-axes[0].set_ylabel("|Trace(H^2 + i)|")
-axes[0].set_yscale("log")
-axes[0].legend()
-
-axes[1].plot(ns,[abs(x) for x in itr_eds],marker="o",label="ED")
-axes[1].plot(ns,[abs(x) for x in itr_mpss],marker="s",linestyle="--",label="MPS")
-axes[1].set_xlabel("Chain length n")
-axes[1].set_ylabel("|Inverse trace(H^2 + i)|")
-axes[1].set_yscale("log")
-axes[1].legend()
-
-plt.tight_layout()
+plt.plot(ns, np.abs(tr_ed), linewidth=4, label="ED")
+plt.plot(ns, np.abs(tr_mps), "--", linewidth=2, label="MPS")
+plt.yscale("log")
+plt.xlabel("number of sites n")
+plt.ylabel("|Tr(H^2 + i)|")
+plt.legend()
 plt.show()

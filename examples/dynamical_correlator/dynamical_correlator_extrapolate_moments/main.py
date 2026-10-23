@@ -1,80 +1,39 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Local spin spectrum S(w) of an anisotropic Heisenberg chain with the
+# kernel polynomial method (KPM). A narrow peak needs many moments. With
+# extrapolation we get a narrow broadening from the moments of a broad one.
 import numpy as np
 from dmrgpy import spinchain
 
-
-n = 10
-# create a random spin chain
-spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-
-
-# create first neighbor exchange
-sc = spinchain.Spin_Chain(spins) # create the spin chain
-#sc.itensor_version = "julia"
+n = 10 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
 h = 0
 for i in range(n-1):
-    h = h + sc.Sx[i]*sc.Sx[i+1]*np.random.random()
-    h = h + sc.Sy[i]*sc.Sy[i+1]
-    h = h + sc.Sz[i]*sc.Sz[i+1]
+    h = h + 0.5*sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
 sc.set_hamiltonian(h)
-#sc.get_gs()
+sc.maxm = 20 # bond dimension
+sc.kpmmaxm = 20 # bond dimension in the KPM
 
-sc.kpmmaxm = 20 # KPM maxm
-sc.maxm = 20 # KPM maxm
-import time
-i = np.random.randint(n)
-i = 1
-j = np.random.randint(n)
-j = i
-name = (sc.Sz[i],sc.Sz[j])
-es = np.linspace(-0.5,6,2000)
-factor = 2.
-delta = 2e-1
+name = (sc.Sz[1], sc.Sz[1]) # the two operators of the correlator
+es = np.linspace(-0.5, 6, 1000) # energies
+delta = 0.2 # broadening
+factor = 2. # the extrapolation doubles the number of moments
+
 sc.kpm_extrapolate = False
-(x1,y1) = sc.get_dynamical_correlator(name=name,es=es,delta=delta*factor)
-t1 = time.time()
-(x2,y2) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
-t2 = time.time()
-print("Time without extrapolation",t2-t1)
-
+(x1, y1) = sc.get_dynamical_correlator(name=name, es=es, delta=delta)
+(x2, y2) = sc.get_dynamical_correlator(name=name, es=es, delta=2*delta)
 sc.kpm_extrapolate = True
 sc.kpm_extrapolate_factor = factor
-sc.kpm_extrapolate_mode = "plain"
-(x3,y3) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
 sc.kpm_extrapolate_mode = "power"
-(x4,y4) = sc.get_dynamical_correlator(name=name,es=es,delta=delta)
-t3 = time.time()
-print("Time with extrapolation",t3-t2)
+(x3, y3) = sc.get_dynamical_correlator(name=name, es=es, delta=delta)
 
-
-
-# plot the results
 import matplotlib.pyplot as plt
-import matplotlib
-
-matplotlib.rcParams['font.family'] = "Bitstream Vera Serif"
-fig = plt.figure()
-fig.subplots_adjust(0.2,0.2)
-plt.scatter(x1,y1.real,c="red",label="Reduced quality")
-plt.plot(x2,y2.real,c="blue",label="No extrapolation")
-plt.scatter(x3,y3.real,c="green",label="Extrapolation plain")
-plt.scatter(x4,y4.real,c="black",label="Extrapolation power")
+plt.plot(x1, y1.real, linewidth=4, label="all moments")
+plt.plot(x2, y2.real, ":", linewidth=2, label="half the moments")
+plt.plot(x3, y3.real, "--", linewidth=2, label="extrapolated")
+plt.xlabel("energy w")
+plt.ylabel("S(w), site 1")
 plt.legend()
-plt.xlabel("frequency [J]")
-plt.ylabel("Dynamical correlator")
-plt.xlim([-0.5,4.5])
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-

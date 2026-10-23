@@ -1,42 +1,35 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Ground state degeneracy of the ferromagnetic Heisenberg dimer.
+# The ground state is the S=1 triplet, so the degeneracy is 3.
+# It is estimated from the weight of the pole of a correlator at E0,
+# and it should not depend on the broadening delta of the poles.
 import numpy as np
 from dmrgpy import spinchain
-n = 2
-spins = ["S=1/2" for i in range(n)] # spin 1/2 heisenberg chain
-sc = spinchain.Spin_Chain(spins) # create the spin chain
-h = 0 # generate a Heisenberg Hamiltonian
-for i in range(n-1):
-    h = h +sc.Sx[i]*sc.Sx[i+1]
-    h = h +sc.Sy[i]*sc.Sy[i+1]
-    h = h +sc.Sz[i]*sc.Sz[i+1]
-
-h = -h
-
-mode = "DMRG"
-sc.set_hamiltonian(h)
-e0 = sc.gs_energy(mode=mode) # get ground state energy
-print("Energy",e0)
 from dmrgpy.degeneracy import pole_eigenvalue_degeneracy
 
-# sweep the pole broadening "delta" used by the degeneracy estimator;
-# this is the cheap parameter available in this example and the
-# degeneracy estimate should stay close to the true value (3, the
-# ferromagnetic Heisenberg dimer's triplet ground state) across it
-deltas = [0.05,0.1,0.2,0.3,0.5]
-degs = []
-for delta in deltas:
-    deg = pole_eigenvalue_degeneracy(sc,h,e0,mode=mode,delta=delta) # compute the degeneracy
-    print("Delta",delta,"Degeneracy",deg)
-    degs.append(deg.real)
+n = 2 # number of sites
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
 
-print("Excited states",sc.get_excited(n=int(degs[1])+2,mode=mode))
+# ferromagnetic Heisenberg Hamiltonian, H = -sum_i S_i . S_{i+1}
+h = 0
+for i in range(n-1):
+    h = h - sc.Sx[i]*sc.Sx[i+1] - sc.Sy[i]*sc.Sy[i+1] - sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+sc.maxm = 20 # bond dimension
+sc.nsweeps = 10 # number of DMRG sweeps
+e0 = sc.gs_energy()
+print("Ground state energy =", e0)
+
+deltas = [0.05, 0.1, 0.2, 0.3, 0.5] # broadenings of the poles
+degs = [float(pole_eigenvalue_degeneracy(sc, h, e0, delta=d).real) for d in deltas]
+print("Degeneracies =", degs)
 
 import matplotlib.pyplot as plt
-plt.plot(deltas,degs,marker="o",label="estimated degeneracy")
-plt.axhline(3.0,color="gray",linestyle="--",label="expected (3)")
-plt.xlabel("Pole broadening delta")
-plt.ylabel("Ground state degeneracy")
+plt.plot(deltas, degs, "o-", label="estimated")
+plt.axhline(3, color="gray", linestyle="--", label="exact")
+plt.xlabel("broadening delta")
+plt.ylabel("ground state degeneracy")
 plt.legend()
 plt.show()

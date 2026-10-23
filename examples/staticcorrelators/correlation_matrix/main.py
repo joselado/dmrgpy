@@ -1,56 +1,30 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Correlated orbitals of a spinful chain with a Hubbard interaction U on
+# the first site only. Diagonalizing the correlation matrix <c^dag_i c_j>
+# gives orbitals that are either full, empty or entangled with the rest.
+# out[i][j] is the weight of orbital i on site j.
 import numpy as np
 from dmrgpy import fermionchain
-n = 20 # number of spinful fermionic sites
-fc = fermionchain.Spinful_Fermionic_Chain(n) # create the chain
+
+n = 12 # number of spinful sites
+U = 2.0 # Hubbard interaction on site 0
+fc = fermionchain.Spinful_Fermionic_Chain(n)
 h = 0
-U = 2.0
 for i in range(n-1): # hopping
-    h = h + fc.Cdagup[i]*fc.Cup[i+1]
-    h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-for i in [0]: # Hubbard
-    h = h + U*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
+    h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
+h = h + U*(fc.Nup[0]-.5)*(fc.Ndn[0]-.5) # Hubbard on site 0
 h = h + h.get_dagger()
-##############################
-# Setup the Many Body Hamiltonian
-fc.maxm = 40
-fc.nsweeps = 10
-fc.set_hamiltonian(h) # set the hoppings
+fc.maxm = 40 # bond dimension
+fc.nsweeps = 10 # number of DMRG sweeps
+fc.set_hamiltonian(h)
 fc.get_gs()
+out = np.array(fc.get_correlated_orbitals(ordered=False))
 
-#print(fc.get_correlation_entropy()) ; exit()
-out = fc.get_correlated_orbitals(ordered=False)
-f = open("MAP.OUT","w")
-for i in range(len(out)):
-  for j in range(len(out[0])):
-      f.write(str(i)+"  ")
-      f.write(str(j)+"  ")
-      f.write(str(out[i][j])+"\n")
-
-f.close()
-
-# out[i][j] is the weight of orbital i on site j: a natural heatmap of
-# the correlated-orbital decomposition of the ground state
 import matplotlib.pyplot as plt
-plt.imshow(np.array(out),aspect="auto",origin="lower")
-plt.colorbar(label="Orbital weight")
-plt.xlabel("Site j")
-plt.ylabel("Orbital i")
+plt.imshow(out, aspect="auto", origin="lower")
+plt.colorbar(label="orbital weight")
+plt.xlabel("site j")
+plt.ylabel("orbital i")
 plt.show()
-
-exit()
-
-cm = fc.get_correlation_matrix()
-import scipy.linalg as lg
-print(lg.eigvalsh(cm))
-
-
-
-
-
-
-
-
-

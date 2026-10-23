@@ -1,79 +1,43 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
-# for example PATH = /home/jose/programs/dmrgpy/src
-#PATH = PATH_TO_DMRGPY_LIBRARY
 
+# Spin spectrum S(w) of the half-filled Hubbard chain at large U, compared
+# with the S=1/2 Heisenberg chain. At large U the charge is frozen and the
+# spins interact with the exchange J = 4t^2/U, so the two spectra coincide
+# once the energy is measured in units of J. Inelastic neutron scattering
+# or spin-polarized STM measure this spectrum.
 import numpy as np
-import matplotlib.pyplot as plt
-from dmrgpy import fermionchain
-from dmrgpy import spinchain
-n = 4 # number of spin sites
-import time
-# first let us create a Hubabrd model
+from dmrgpy import fermionchain, spinchain
 
-fc = fermionchain.Spinful_Fermionic_Chain(n) # create the object
-#fc.maxm = 20
-#fc.nsweeps = 40
-U = 10.0
+n = 4 # number of sites
+U = 10.0 # Hubbard interaction, in units of the hopping t
+es = np.linspace(-1, 6, 400) # energies, in units of t
 
-h0 = 0
+# Hubbard chain
+fc = fermionchain.Spinful_Fermionic_Chain(n)
+h = 0
 for i in range(n-1):
-    h0 = h0 + fc.Cdagup[i]*fc.Cup[i+1]
-    h0 = h0 + fc.Cdagdn[i]*fc.Cdn[i+1]
-h0 = h0 + h0.get_dagger()
+    h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
+h = h + h.get_dagger() # hopping
 for i in range(n):
-   # h0 = h0 + U*fc.Nup[i]*fc.Ndn[i] -U*0.5*(fc.Nup[i]+fc.Ndn[i])
-    h0 = h0 + U*(fc.Nup[i]-.5)*(fc.Ndn[i]-0.5)
+    h = h + U*(fc.Nup[i]-0.5)*(fc.Ndn[i]-0.5)
+fc.set_hamiltonian(h)
+J = 4./U # effective exchange
+(e1, s1) = fc.get_dynamical_correlator(name=(fc.Sx[1], fc.Sx[1]), es=es, mode="DMRG")
 
-fc.set_hamiltonian(h0)
-print([fc.vev(o).real for o in fc.Sx])
-print([fc.vev(o).real for o in fc.Sy])
-print([fc.vev(o).real for o in fc.Sz])
-#print(fc.get_excited(n=4,mode="ED"))
-
-es = np.linspace(-1,6,600)
-
-t0 = time.time()
-ii = 1
-jj = 1
-name = (fc.Sx[ii],fc.Sx[jj])
-(esh,ch) = fc.get_dynamical_correlator(name=name,mode="DMRG",es=es)
-scale = 4./U
-esh /= scale # scale by the estimated effective exchange
-ch *= scale
-t1 = time.time()
-print("Time with fermions",t1-t0)
-# now create the Heisenberg chain
-sc = spinchain.Spin_Chain([2 for i in range(n)])
-h1 = 0
+# Heisenberg chain
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)])
+h = 0
 for i in range(n-1):
-    h1 = h1 + sc.Sx[i]*sc.Sx[i+1]
-    h1 = h1 + sc.Sy[i]*sc.Sy[i+1]
-    h1 = h1 + sc.Sz[i]*sc.Sz[i+1]
-sc.set_hamiltonian(h1)
-name = (sc.Sx[ii],sc.Sx[jj])
-(ess,cs) = sc.get_dynamical_correlator(name=name,mode="DMRG",es=es)
-t2 = time.time()
-print("Time with spins",t2-t1)
+    h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+sc.set_hamiltonian(h)
+(e2, s2) = sc.get_dynamical_correlator(name=(sc.Sx[1], sc.Sx[1]), es=es/J,
+                                       delta=0.1/J, mode="DMRG")
 
 import matplotlib.pyplot as plt
-
-plt.scatter(esh,ch.real,c="red",label="Hubbard")
-plt.plot(ess,cs.real,c="blue",label="Heisenberg")
-#plt.plot(inds,mz2,c="green",label="Exact")
+plt.plot(e2, s2.real, linewidth=4, label="Heisenberg")
+plt.plot(e1/J, s1.real*J, "--", linewidth=2, label="Hubbard")
+plt.xlabel("energy w / J")
+plt.ylabel("S(w), site 1")
 plt.legend()
-plt.xlabel("Site")
-plt.ylabel("Correlator")
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-

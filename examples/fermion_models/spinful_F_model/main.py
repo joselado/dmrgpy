@@ -1,50 +1,31 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Chain with two kinds of fermions on each site: spinful electrons with
+# a Hubbard interaction, and one spinless pseudofermion F. The F fermion
+# hops along the chain and hybridizes with the electron density. We
+# compute the ground state energy as a function of the chain length.
 import numpy as np
 from dmrgpy import fermionchain
 
-# example for a model containing spinful fermions
-# and spinless pseudofermions in each site
-
 def get_energy(n):
-    """Ground state energy of the spinful+pseudofermion chain with n sites."""
-    fc = fermionchain.Spinful_F_Fermionic_Chain(n) # create the chain
-    # initialize Hamiltonian #
+    fc = fermionchain.Spinful_F_Fermionic_Chain(n)
     h = 0
-
-    # first make a Hubbard model for the spinful fermions
-    for i in range(n-1): # hopping
-        h = h + fc.Cdagup[i]*fc.Cup[i+1]
-        h = h + fc.Cdagdn[i]*fc.Cdn[i+1]
-    for i in range(n): # Hubbard
-        h = h + (fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
-
-    # now add kinetic energy for the pseudofermions
-    for i in range(n-1): # hopping
+    for i in range(n-1): # hopping of the electrons and of F
+        h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
         h = h + fc.Fdag[i]*fc.F[i+1]
+    for i in range(n):
+        h = h + (fc.Nup[i]-.5)*(fc.Ndn[i]-.5) # Hubbard interaction
+        h = h + fc.Fdag[i]*(fc.Nup[i]+fc.Ndn[i]) # hybridization
+    fc.set_hamiltonian(h + h.get_dagger())
+    return fc.gs_energy()
 
-    # and now add hybridization between spinful and pseudo fermions
-    for i in range(n): # local hybridization
-        h = h + fc.Fdag[i]*(fc.Nup[i]+fc.Ndn[i]) # fermion times density
-
-    h = h + h.get_dagger() # add the Hermitian conjugate
-    ##############################
-    # Setup the Many Body Hamiltonian
-    fc.set_hamiltonian(h) # set the hoppings
-    return fc.gs_energy() # compute the ground state energy
-
-n = 4 # number of fermionic sites (each having spin and f fermions)
-print(get_energy(n))
-
-# sweep the chain length (cheap for this small Hilbert space per site)
-ns = [2,3,4,5]
-es = [get_energy(ni) for ni in ns]
-for ni,ei in zip(ns,es):
-    print("n =",ni,"Energy =",ei)
+ns = [2, 3, 4, 5] # number of sites
+es = [get_energy(n) for n in ns]
+print("Energies =", es)
 
 import matplotlib.pyplot as plt
-plt.plot(ns,es,marker="o")
-plt.xlabel("Number of sites")
-plt.ylabel("Ground-state energy")
+plt.plot(ns, es, "o-")
+plt.xlabel("number of sites")
+plt.ylabel("ground state energy")
 plt.show()

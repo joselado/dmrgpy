@@ -1,94 +1,43 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
-import time
+# Hubbard chain with two kinds of sites: native spinful sites (one site of
+# dimension 4 per orbital) and two spinless sites per orbital. The physics is
+# the same, so the ground state energy and the spectral function
+# A(w) = -Im G(w)/pi of the electron operator Cup_0 have to agree.
 import numpy as np
 from dmrgpy import fermionchain
 
-# Demonstrates fermionchain.Spinful_Fermionic_Chain_Native: a Hubbard-model
-# chain built directly on native spinful (Electron/Hubbard) sites -- one
-# dimension-4 tensor-network site per orbital (Empty/Up/Down/UpDn) -- instead
-# of Spinful_Fermionic_Chain.py's two interleaved dimension-2 sites per
-# orbital. Only itensor_version=3 wires up this site type on the DMRG side.
-#
-# Part 1 checks the two classes agree exactly (same physics, same
-# Jordan-Wigner sign convention, see multioperatortk/jordanwigner_spinful.py)
-# for both the ground-state energy and a KPM dynamical correlator.
-#
-# Part 2 is the actual performance comparison this class was built to
-# answer: does packing both spin flavors into one site (fewer, "fatter"
-# tensor-network sites) pay off for two-site DMRG? Measured answer: no --
-# see fermionchain.Spinful_Fermionic_Chain_Native's docstring for why.
+n = 4 # number of sites
+U = 2.0 # Hubbard interaction
 
-n = 4
-U = 2.0
-
-
-def build(chain_cls, maxm=60, nsweeps=14):
-    fc = chain_cls(n)
+def build(chain_class):
+    fc = chain_class(n)
     h = 0
-    for i in range(n - 1):
-        h = h + fc.Cdagup[i] * fc.Cup[i + 1]
-        h = h + fc.Cdagdn[i] * fc.Cdn[i + 1]
+    for i in range(n-1):
+        h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
+    h = h + h.get_dagger() # make it Hermitian
     for i in range(n):
-        h = h + U * (fc.Nup[i] - .5) * (fc.Ndn[i] - .5)
-    h = h + h.get_dagger()
-    fc.maxm = maxm
-    fc.nsweeps = nsweeps
+        h = h + U*(fc.Nup[i]-.5)*(fc.Ndn[i]-.5)
     fc.set_hamiltonian(h)
+    fc.maxm = 60 # bond dimension
+    fc.nsweeps = 14 # number of DMRG sweeps
     fc.setup_cpp(3)
     return fc
 
-
-print("### Part 1: correctness cross-check ###")
-fc_native = build(fermionchain.Spinful_Fermionic_Chain_Native)
-fc_double = build(fermionchain.Spinful_Fermionic_Chain)
-
-e_native = fc_native.gs_energy(mode="DMRG")
-e_double = fc_double.gs_energy(mode="DMRG")
-print("Native  E0 =", e_native)
-print("Doubled E0 =", e_double)
-assert abs(e_native - e_double) < 1e-5
-
-es = np.linspace(-4, 4, 60)
-(_, y_native) = fc_native.get_dynamical_correlator(
-        name=(fc_native.Cup[0], fc_native.Cdagup[0]), es=es, delta=0.3)
-(_, y_double) = fc_double.get_dynamical_correlator(
-        name=(fc_double.Cup[0], fc_double.Cdagup[0]), es=es, delta=0.3)
-assert np.max(np.abs(y_native - y_double)) < 5e-3
-print("KPM dynamical correlator matches between the two site conventions")
+es = np.linspace(-4, 4, 100) # energies
+fc1 = build(fermionchain.Spinful_Fermionic_Chain_Native)
+fc2 = build(fermionchain.Spinful_Fermionic_Chain)
+print("Energies", fc1.gs_energy(), fc2.gs_energy())
+(x, y1) = fc1.get_dynamical_correlator(name=(fc1.Cup[0], fc1.Cdagup[0]), es=es, delta=0.3)
+(x, y2) = fc2.get_dynamical_correlator(name=(fc2.Cup[0], fc2.Cdagup[0]), es=es, delta=0.3)
+print("Max difference =", np.max(np.abs(y1 - y2)))
+assert np.max(np.abs(y1 - y2)) < 5e-3
 
 import matplotlib.pyplot as plt
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
-
-ax1.plot(es, y_native, label="Native (dim-4 sites)")
-ax1.plot(es, y_double, label="Doubled (dim-2 sites)", linestyle="--")
-ax1.set_xlabel("Energy")
-ax1.set_ylabel("KPM dynamical correlator")
-ax1.set_title("Part 1: correctness cross-check")
-ax1.legend()
-
-print()
-print("### Part 2: performance comparison (fixed maxm, growing n) ###")
-n_sizes = [6, 10, 14]
-walltimes = {"native (n sites, dim 4)": [], "doubled (2n sites, dim 2)": []}
-for n_size in n_sizes:
-    n = n_size
-    for chain_cls, label in [(fermionchain.Spinful_Fermionic_Chain_Native, "native (n sites, dim 4)"),
-                              (fermionchain.Spinful_Fermionic_Chain, "doubled (2n sites, dim 2)")]:
-        fc = build(chain_cls, maxm=80, nsweeps=16)
-        t0 = time.time()
-        e0 = fc.gs_energy(mode="DMRG")
-        dt = time.time() - t0
-        print(f"  n={n_size:2d}  {label:26s}  n_sites={fc.ns:2d}  E0={e0:.6f}  wall={dt:.2f}s")
-        walltimes[label].append(dt)
-
-for label, dts in walltimes.items():
-    ax2.plot(n_sizes, dts, marker="o", label=label)
-ax2.set_xlabel("n (chain length)")
-ax2.set_ylabel("Wall time (s)")
-ax2.set_title("Part 2: performance comparison")
-ax2.legend()
-
-plt.tight_layout()
+plt.plot(x, y2.real, linewidth=4, label="two spinless sites")
+plt.plot(x, y1.real, "--", linewidth=2, label="native spinful site")
+plt.xlabel("energy w")
+plt.ylabel("A(w), first site")
+plt.legend()
 plt.show()

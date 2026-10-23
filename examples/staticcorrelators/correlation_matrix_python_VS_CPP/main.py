@@ -1,52 +1,34 @@
 # Add the root path of the dmrgpy library
 import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 
+# Correlation matrix <c^dag_i c_j> of the ground state of a spinless
+# fermion chain with complex hopping and interaction U. It gives the
+# density and the coherence between sites. We compute it with the
+# "fast" (Python) and the "full" (C++) algorithms, which must agree.
 import numpy as np
 from dmrgpy import fermionchain
-n = 20 # number of fermionic sites
-fc = fermionchain.Fermionic_Chain(n) # create the chain
+
+n = 12 # number of sites
+U = -0.95 # nearest-neighbor interaction
+fc = fermionchain.Fermionic_Chain(n)
 h = 0
-U = -0.95
-for i in range(n-1): # hopping
-    h = h + 1j*fc.Cdag[i]*fc.C[i+1] # complex, just to check things are ok
-    h = h + U*(fc.N[i]-.5)*(fc.N[i+1]-.5)
+for i in range(n-1):
+    h = h + 1j*fc.Cdag[i]*fc.C[i+1] # complex hopping
+    h = h + U*(fc.N[i]-.5)*(fc.N[i+1]-.5) # interaction
 h = h + h.get_dagger()
-##############################
-# Setup the Many Body Hamiltonian
-fc.maxm = 20
-fc.nsweeps = 10
-fc.set_hamiltonian(h) # set the hoppings
+fc.maxm = 20 # bond dimension
+fc.nsweeps = 10 # number of DMRG sweeps
+fc.set_hamiltonian(h)
 wf = fc.get_gs(mode="DMRG")
 
-#from dmrgpy.mps import random_mps
-#wf = random_mps(fc)
+m1 = wf.get_correlation_matrix(dmmode="fast") # Python algorithm
+m2 = wf.get_correlation_matrix(dmmode="full") # C++ algorithm
+print("Max difference =", np.max(np.abs(m1-m2)))
 
-import time
-
-t0 = time.time()
-m1 = wf.get_correlation_matrix(dmmode="fast")
-t1 = time.time()
-
-
-m2 = wf.get_correlation_matrix(dmmode="full")
-t2 = time.time()
-
-print("Python mode",t1-t0)
-print("C++ mode",t2-t1)
-
-print("Difference",np.mean(np.abs(m1-m2)))
-
-# compare the "fast" (Python) and "full" (C++) correlation matrices, and
-# their difference, as heatmaps
 import matplotlib.pyplot as plt
-fig,axes = plt.subplots(1,3,figsize=(12,4))
-for ax,m,title in zip(axes,[m1,m2,np.abs(m1-m2)],
-        ["Python (fast)","C++ (full)","|Python - C++|"]):
-    im = ax.imshow(np.abs(m),aspect="auto",origin="lower")
-    ax.set_title(title)
-    ax.set_xlabel("Site j")
-    ax.set_ylabel("Site i")
-    fig.colorbar(im,ax=ax)
-plt.tight_layout()
+plt.plot(np.abs(m2[0]), linewidth=4, label="full (C++)")
+plt.plot(np.abs(m1[0]), "--", linewidth=2, label="fast (Python)")
+plt.xlabel("site j")
+plt.ylabel("|<c^dag_0 c_j>|")
+plt.legend()
 plt.show()
-
