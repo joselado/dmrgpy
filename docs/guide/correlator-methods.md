@@ -50,9 +50,13 @@ defined in [Dynamical correlators](dynamical-correlators.md#the-quantity).
   `itensor_version=3` or `"python"`.
 - `"ED"` and `"INV"` (`mode="ED"` only): the exact Lehmann sum and the
   exact resolvent. These are the references to check the other methods.
-- `"maxent"` and `"CVMimag"`: need the separate modules `dmrgpy.maxenttk`
-  and `dmrgpy.padetk`, which are not distributed with dmrgpy. Without them
-  they raise an error.
+- `"maxent"`: the smoothest spectrum with the first six moments of
+  $H-E_0$ in the state $B|\mathrm{GS}\rangle$. It gives the envelope of
+  the spectrum, not its separate peaks.
+- `"CVMimag"`: the correction vector at 20 frequencies above the real
+  axis, continued to it with a Pade approximant. The total weight and the
+  peak positions are right, the peaks are smoothed: on a 6-site Heisenberg
+  chain the main peak is 8% lower than the exact one.
 
 As a rule: KPM for the full spectrum, CVM or TD for a narrow window at
 high resolution, TDZ when TD needs too large a bond dimension, EX or

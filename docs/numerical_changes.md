@@ -1139,3 +1139,13 @@ non-Hermitian basis operator, or with an all-diagonal basis whose charge H
 conserves (`ValueError`; `("N",)` on a hopping chain returned the value of
 one particle-number sector with an error bar of 0). `Fermionic_Chain.excited_vev(mode="ED")`
 works where it raised a matmul `ValueError`.
+
+Afterwards, while fixing the broken examples. `submode="maxent"`,
+`submode="CVMimag"`, `get_distribution_maxent` and
+`reconstruct.reconstruct_distribution` return a result where they raised
+`NotImplementedError`, since `dmrgpy.maxenttk` and `dmrgpy.padetk` now
+exist. `"CVMimag"` returns `-Im G/pi`; its code had `-2 Im G/pi`, twice the
+weight of every other route, which no earlier result could have used since
+the route never ran. `Spinon_Chain.gs_energy()` returns the projected
+energy (-2.4935771 on 6 sites, equal to the Heisenberg ED) where every call
+raised `AttributeError`.

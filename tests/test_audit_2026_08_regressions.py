@@ -184,17 +184,19 @@ def test_string_operator_names_work_on_every_submode(mode):
     assert np.max(np.abs(np.asarray(y))) > 0.
 
 
-def test_missing_optional_submodes_raise_instead_of_exiting():
-    """submode="CVMimag"/"maxent" import optional modules that are not
-    part of this package; the import failure used to print "Not functional
+def test_optional_submodes_return_instead_of_exiting():
+    """submode="CVMimag"/"maxent" imported modules that were not part of
+    this package, and the import failure used to print "Not functional
     yet" and call exit(), terminating the caller's process from inside a
-    library."""
+    library. Both modules exist since 2026-10-23 (dmrgpy.padetk,
+    dmrgpy.maxenttk), so both submodes now return a spectrum, with the
+    total weight <Sz Sz> = 1/4 of the exact one."""
     sc = heisenberg(n=4)
-    es = np.linspace(0, 3, 20)
+    es = np.linspace(-0.5, 4, 200)
     for submode in ["CVMimag", "maxent"]:
-        with pytest.raises(NotImplementedError):
-            sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[0]),
-                                         submode=submode, es=es)
+        x, y = sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[0]),
+                                           submode=submode, es=es, delta=0.05)
+        assert np.trapezoid(np.real(y), x) == pytest.approx(0.25, rel=5e-2)
 
 
 def test_kpm_energy_truncation_is_not_silently_ignored_on_v2():

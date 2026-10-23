@@ -395,7 +395,10 @@ def dynamical_correlator_analytic_continuation(self,name=None,
 #    xz = 40.*np.array(xz)
     outz = np.array([f(z) for z in xz]) # complex axis
     esz,out = imag2real(xz,outz,x=es+1j*delta)
-    out = -out.imag*2/np.pi
+    # -Im G/pi, the Lehmann density of dynamics.py's convention; this was
+    # -2 Im G/pi, twice the weight of every other route, unnoticed while
+    # dmrgpy.padetk was missing and the route could not run (2026-10-23)
+    out = -out.imag/np.pi
     return es,out
 
 

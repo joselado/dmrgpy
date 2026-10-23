@@ -3304,8 +3304,10 @@ def _canonicalize_periodic(B_list, n_uc, cutoff, maxdim):
             raise RuntimeError(
                 "idmrg apply_mpo: canonicalization produced a non-left-"
                 "canonical tensor at sublattice {} (max deviation from "
-                "Identity: {}) -- indicates a bug in the gauge-fixing "
-                "construction, not a benign numerical issue".format(
+                "Identity: {}) -- either an input state that is not a "
+                "converged fixed point (an iDMRG state stopped early on a "
+                "gapless chain does this, raise maxiter) or a bug in the "
+                "gauge-fixing construction".format(
                     p, np.max(np.abs(gram - ident))))
 
     return U_list_new, eta_R

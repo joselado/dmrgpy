@@ -132,3 +132,50 @@ def test_metts_refuses_a_conserved_sector(v):
         sc.metts_vev(sc.Sz[0], T=1.0, nsamples=3, nwarmup=1, seed=1)
     with pytest.raises(ValueError, match="conserved-sector mode"):
         sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), T=1.0, nt=3, nsamples=2, nwarmup=1, seed=1)
+
+
+# Found while fixing the broken examples: the two missing modules, the
+# CVMimag weight and Spinon_Chain.get_gs
+
+def test_maxent_recovers_a_density_of_its_own_family():
+    from dmrgpy.maxenttk.pymaxent import reconstruct
+    x = np.linspace(-2, 3, 20001)
+    p = np.exp(-0.5*x**2 + 0.3*x - 0.1*x**4)
+    p /= np.trapezoid(p, x)
+    mu = [np.trapezoid(p*x**k, x) for k in range(5)]
+    sol, lam = reconstruct(mu, bnds=[-2, 3])
+    assert np.max(np.abs(sol(x)-p)) < 1e-7
+    assert sol(np.array([-3., 4.])).tolist() == [0., 0.]
+
+
+def test_pade_reproduces_a_rational_function_near_the_axis():
+    from dmrgpy.padetk import bruteforcepade
+    E, W = np.array([0.5, 1.3, 2.2]), np.array([1., 0.5, 0.2])
+    G = lambda z: np.sum(W/(z-E))
+    zs = np.linspace(-0.5, 3, 20) + 2.0j
+    p = bruteforcepade.fit(zs, [G(z) for z in zs])
+    xs = np.linspace(0, 3, 7) + 0.05j
+    assert max(abs(p(z)-G(z)) for z in xs) < 1e-6
+
+
+def test_cvmimag_has_the_weight_of_the_exact_spectrum():
+    # it returned -2 Im G/pi, twice the weight of every other route
+    sc = heisenberg(6, 3)
+    es = np.linspace(-0.5, 3, 200)
+    name = (sc.Sx[0], sc.Sx[0])
+    _, ed = sc.get_dynamical_correlator(mode="ED", submode="ED", name=name, es=es, delta=0.05)
+    _, ci = sc.get_dynamical_correlator(submode="CVMimag", name=name, es=es, delta=0.05)
+    w_ed, w_ci = np.trapezoid(np.real(ed), es), np.trapezoid(np.real(ci), es)
+    assert w_ci == pytest.approx(w_ed, rel=2e-2)
+    assert es[np.argmax(np.real(ci))] == pytest.approx(es[np.argmax(np.real(ed))], abs=0.05)
+
+
+@pytest.mark.parametrize("v", [3, "python"])
+def test_spinon_chain_reproduces_the_heisenberg_energy(v):
+    n = 6
+    fc = fermionchain.Spinon_Chain(n, itensor_version=v)
+    fc.set_hamiltonian(sum(fc.Sx[i]*fc.Sx[i+1] + fc.Sy[i]*fc.Sy[i+1]
+                           + fc.Sz[i]*fc.Sz[i+1] for i in range(n-1)))
+    fc.maxm, fc.nsweeps = 40, 10
+    sc = heisenberg(n, v)
+    assert fc.gs_energy() == pytest.approx(sc.gs_energy(mode="ED"), abs=1e-6)

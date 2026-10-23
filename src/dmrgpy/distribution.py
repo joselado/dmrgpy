@@ -27,14 +27,7 @@ def get_distribution_maxent(self,X=None,wf=None,
     Compute a distribuion using a maxentropy method
     """
     if wf is None: wf = self.get_gs(**kwargs) # get wavefunction
-    try: from .maxenttk.pymaxent import reconstruct
-    except ImportError:
-        # as in analyticcontinuation.py: this used to exit() the caller's
-        # process rather than raise
-        raise NotImplementedError(
-            "submode='maxent' needs the maximum-entropy reconstruction "
-            "module dmrgpy.maxenttk, which is not part of this package; use "
-            "submode='KPM'/'CVM'/'EX' instead")
+    from .maxenttk.pymaxent import reconstruct
     from .vev import power_vev
     mu = power_vev(self,n=n,X=X,wf=wf).real
     scale = mu[0] # scale of the problem (1 for probabilities)

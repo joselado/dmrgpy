@@ -31,10 +31,8 @@ inset zooms on $1/L=0$.
   [Calabrese-Cardy formula](entanglement.md#central-charge).
 - `analyticcontinuation.imag2real(zs, us)`: Pade continuation of a
   function known at complex frequencies `zs` to the real axis, for
-  example the output of `submode="CVMimag"` ([Choosing a correlator method](correlator-methods.md)). It needs the
-  module `dmrgpy.padetk`, which is not shipped, and raises an error
-  without it.
+  example the output of `submode="CVMimag"` ([Choosing a correlator method](correlator-methods.md)). The farther
+  `zs` is from the real axis, the more the result is smoothed.
 - `reconstruct.reconstruct_distribution`: maximum-entropy reconstruction of a positive spectral
   function from its moments, used by `submode="maxent"` and
-  `get_distribution_maxent`. It needs the module `dmrgpy.maxenttk`, which
-  is not shipped, and raises an error without it.
+  `get_distribution_maxent`.

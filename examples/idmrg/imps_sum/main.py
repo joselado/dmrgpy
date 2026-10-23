@@ -5,6 +5,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # the sum is dominated by the branch with the larger norm per site, and the
 # other branch is discarded. We sum a Heisenberg ground state with an XXZ ground state
 # rescaled by 0.9, and check that we get back the Heisenberg state.
+# Both states must be well converged, or the sum cannot be gauge fixed.
 from dmrgpy import infinitechain
 from dmrgpy.pyitensor import idmrg
 from dmrgpy.pyitensor.tensor import ITensor
@@ -14,7 +15,7 @@ def ground_state(delta): # XXZ chain with anisotropy delta
     ic.gs_method = "idmrg"
     ic.set_hamiltonian(ic.SxC[0]*ic.SxR[0] + ic.SyC[0]*ic.SyR[0]
             + delta*ic.SzC[0]*ic.SzR[0])
-    ic.maxm, ic.maxiter, ic.etol = 16, 30, 1e-9 # bond dimension, iterations
+    ic.maxm, ic.maxiter, ic.etol = 16, 100, 1e-12 # bond dimension, iterations
     ic.gs_energy()
     return ic._result
 
@@ -26,10 +27,11 @@ b = idmrg.PeriodicMPS(b.sites_uc, 1, [ITensor(T.inds, 0.9*T.array)
 c = idmrg.imps_sum(a, b, cutoff=1e-12, maxdim=None)
 
 chi = [s.U_list[0].array.shape[-1] for s in (a, b, c)] # bond dimensions
-sz = [idmrg.onsite_expectation(s, "Sz", 0) for s in (a, b, c)]
+zz = [idmrg.two_point_correlator(s, "Sz", 0, "Sz", 1).real for s in (a, b, c)]
 print("Bond dimension of the Heisenberg, XXZ and summed states:", chi)
-print("Max difference <Sz> =", abs(sz[2]-sz[0]))
-assert chi[2] == chi[0] and abs(sz[2]-sz[0]) < 1e-6
+print("<Sz_0 Sz_1> of the three states:", zz)
+print("Max difference =", abs(zz[2]-zz[0]))
+assert chi[2] == chi[0] and abs(zz[2]-zz[0]) < 1e-6
 
 import matplotlib.pyplot as plt
 plt.bar(["Heisenberg", "XXZ", "sum"], chi)

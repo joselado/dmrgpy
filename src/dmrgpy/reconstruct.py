@@ -1,10 +1,7 @@
 import numpy as np
 # routines for distribution reconstruction
 
-try: from .maxenttk.pymaxent import reconstruct as reconstruct_from_moments
-except:
-    print("Reconstruction not functional yet")
-    raise
+from .maxenttk.pymaxent import reconstruct as reconstruct_from_moments
 
 
 def reconstruct_distribution(x,y,bnds=None,delta=1e-3,**kwargs):

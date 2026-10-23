@@ -60,8 +60,9 @@ distributions computed with the same `delta`. `get_distribution` also
 works with `mode="ED"`. `get_distribution_moments` returns the raw
 Chebyshev moments of the rescaled operator and has no ED version. A
 maximum-entropy reconstruction from the moments $\langle X^k\rangle$,
-`distribution.get_distribution_maxent`, needs the module
-`dmrgpy.maxenttk`, which is not shipped, and raises an error without it.
+`distribution.get_distribution_maxent(sc, X=..., n=6)`, gives the smoothest
+distribution with the first `n` moments. With few moments it shows the
+envelope of the distribution, not its separate peaks.
 
 ![Magnetization distribution of the Ising chain](img/correlators_distribution.png#only-light)
 ![Magnetization distribution of the Ising chain](img/correlators_distribution-dark.png#only-dark)

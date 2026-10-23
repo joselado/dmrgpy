@@ -4101,7 +4101,12 @@ for parity but not actually functional on *any* backend right now —
 (confirmed directly: `ModuleNotFoundError`), so it hits the same
 `except: print("Not functional yet"); exit()` regardless of
 `itensor_version` — a pre-existing, cross-backend gap, not something
-introduced or left broken by this work.
+introduced or left broken by this work. (Since 2026-10-23 the module
+exists: `maxenttk/pymaxent.py` is a Newton solution of the convex
+maximum-entropy dual in a Legendre basis, with PyMaxEnt's
+`reconstruct(mu, bnds) -> (sol, lambdas)` interface, and
+`padetk/bruteforcepade.py` is the Thiele continued fraction `"CVMimag"`
+continues with; both submodes now run.)
 
 The fermionic 4-point correlator tensor (`MPS.get_four_correlation_tensor`,
 `<Cdag_i C_j Cdag_k C_l>`) was missing the same way bond entropy was — no

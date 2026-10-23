@@ -694,3 +694,31 @@ The guide's remark that some real-time routes still use absolute
 thresholds was checked against the records and kept: small-unit real-time
 evolution and v3's `applyExp` absolute error goal are listed as open in
 `CLAUDE.md`.
+
+## Found afterwards, while fixing the six broken examples
+
+The example rewrite left six scripts that failed as their originals did.
+
+- `Spinon_Chain.get_gs` took the `(energies, states)` pair `mpsarnoldi`
+  returns as the state, so every call failed on `wf.dot`. **Status**:
+  FIXED, it unpacks the pair; the projected energy equals the Heisenberg ED
+  energy to 1e-6 on 6 sites on v3 and `"python"`
+  (`test_spinon_chain_reproduces_the_heisenberg_energy`).
+- `idmrg.imps_sum` refused the example's states with a "non-left-canonical
+  tensor" error at 2e-4 against a 1e-4 check. The example stopped iDMRG on
+  the gapless Heisenberg chain after 30 iterations, and that state is not a
+  fixed point; with 100 the sum returns the Heisenberg state, <Sz_0 Sz_1>
+  equal to 3e-16. **Status**: the example converges its states, and the
+  error message now names an unconverged input state as a cause, not only a
+  bug in the code.
+- `dmrgpy.maxenttk` and `dmrgpy.padetk`, imported by `"maxent"`,
+  `"CVMimag"`, `get_distribution_maxent` and `reconstruct_distribution`,
+  were never in the repository. **Status**: written, and tested on exact
+  cases (`test_maxent_recovers_a_density_of_its_own_family`,
+  `test_pade_reproduces_a_rational_function_near_the_axis`). Running
+  `"CVMimag"` for the first time showed that it returned twice the weight
+  of every other route (0.4929 against 0.2449 for ED on a 6-site chain),
+  from a `-2 Im G/pi` where the convention is `-Im G/pi`. **Status**: FIXED,
+  0.2465 now (`test_cvmimag_has_the_weight_of_the_exact_spectrum`). The
+  continuation from 20 points two units above the axis smooths the peaks,
+  8% low on that chain, as the guide says.

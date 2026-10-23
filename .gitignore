@@ -26,8 +26,6 @@ julia*
 !examples/non_hermitian/julia_cpp_ED_ground_state/main.py
 .mpsfolder
 ERROR
-maxenttk
-padetk
 *.egg*
 setup.py
 pipupdate.sh
