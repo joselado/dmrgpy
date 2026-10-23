@@ -52,14 +52,9 @@ class Fermionic_Chain(Many_Body_Chain):
     def vev_spinless(self,MO,**kwargs):
         """ Return a vacuum expectation value"""
         return self.vev(MO,**kwargs)
-    def excited_vev_spinless(self,MO,mode="DMRG",**kwargs):
+    def excited_vev_spinless(self,MO,**kwargs):
         """ Return a vaccum expectation value"""
-        self.get_mode(mode=mode) # refuses ED on a conserved-sector chain
-        if mode=="DMRG": return self.excited_vev_MB(MO,**kwargs)
-        elif mode=="ED": return self.get_ED_obj().excited_vev(MO,**kwargs) 
-    def excited_vev(self,MO,**kwargs):
-        """Compute a vacuum expectation value using excited states"""
-        return self.excited_vev_spinless(MO,**kwargs)
+        return self.excited_vev_MB(MO,**kwargs)
 #    def get_excited(self,mode="DMRG",**kwargs):
 #          """
 #          Wrapper for static correlator

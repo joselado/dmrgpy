@@ -20,7 +20,7 @@ def power_vev(self,wf=None,n=4,X=None,**kwargs):
 
 
 
-def multi_vev(self,MO,wf=None,npow=1,**kwargs):
+def multi_vev(self,MO,wf=None,npow=1,T=0.):
     """
     Compute a VEV using multioperators
 
@@ -31,6 +31,12 @@ def multi_vev(self,MO,wf=None,npow=1,**kwargs):
     variance, where that error is the whole answer, goes through
     energy_variance() below instead.
     """
+    # No **kwargs: an unknown keyword raises TypeError. One used to be
+    # swallowed here, so vev(O,T=2.0) returned the T=0 value, -0.2277 for an
+    # exact thermal -0.0345 (2026-10-23 hole hunt, finding 2).
+    if T!=0.:
+        raise NotImplementedError("vev with T>0 has no DMRG route: use "
+                "mode=\"ED\" or metts_vev()")
     MO = multioperator.obj2MO(MO,name="vev_multioperator")
     if MO.name!="vev_multioperator": raise RuntimeError("multi_vev: operator name was not set by obj2MO, got %r" % MO.name)
     if npow==0: return 1.0
@@ -78,9 +84,6 @@ def energy_variance(self,h,wf=None):
 def vev(*args,**kwargs):
     return multi_vev(*args,**kwargs)
 
-
-def excited_vev(*args,**kwargs):
-    return multi_vev(*args,excited=True,**kwargs)
 
 
 

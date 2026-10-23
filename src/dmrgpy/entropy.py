@@ -61,6 +61,14 @@ def compute_entropy_single(self,psi,b=1):
     if self.itensor_version=="julia_live":
         from .mpsjulialive import entropy as entjl
         return np.abs(entjl.bond_entropy(psi,b))
+    # The entropy belongs to the ray, so cut the normalized state: v2 and v3
+    # take -sum w ln w over the raw Schmidt weights, and a state of norm^2 4
+    # came out up to 3.5 too high there while "python" (which normalizes)
+    # was exact (2026-10-23 hole hunt, finding 4). A unit-norm state, every
+    # solver output, is left untouched.
+    n2 = psi.dot(psi).real
+    if not n2>0.: raise ValueError("bond entropy of a zero state")
+    if abs(n2-1.)>1e-12: psi = psi*(1./np.sqrt(n2))
     return np.abs(self._session.bond_entropy(psi.cpp_handle,b))
 
 

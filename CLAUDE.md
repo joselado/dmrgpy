@@ -348,7 +348,7 @@ the timed sweep, for the JIT reason above.
 
 ## The audits, and what to know before touching the code
 
-Seven hole hunts, a fix pass and one review ran between 2026-08 and
+Eight hole hunts, a fix pass and one review ran between 2026-08 and
 2026-10-23, each hunt a multi-lens search for numbers that are plausible and
 wrong, with every finding reproduced, handed to a reviewer briefed to refute
 it, and fixed:
@@ -362,7 +362,10 @@ evolution (regressions in `tests/test_pyitensor_time_evolution_review.py`,
 measurements in `docs/numerical_changes.md`, leads ranked in
 `docs/time_evolution_improvement_plan.md`), and by
 `docs/audit_2026_10_hole_hunt.md` (7, over the TASK correlator and the
-Kondo spectrum on fermion chains, all fixed on 2026-10-23). Four things to read before
+Kondo spectrum on fermion chains, all fixed on 2026-10-23), and by
+`docs/audit_2026_10_23_hole_hunt.md` (four bugs and one performance item,
+over the least-covered areas rather than a commit; the bugs fixed the same
+day). Four things to read before
 changing the kind of code they cover:
 
 - **`docs/numerical_changes.md`** before comparing any number against
@@ -507,6 +510,15 @@ Do not undo one without reading its finding first.
   degenerate Majorana pair) at truncated `maxm`. `taskdmrg.get_poles`
   returns it as `missing_weight` and warns above 1e-6 of the weight
   (`test_audit_2026_10_task.py`).
+- **A collapse basis METTS cannot sample with is refused.** `metts_vev`
+  raises on a non-Hermitian basis operator, and on an all-diagonal basis
+  (`("N",)`, `("Sz",)`) when H conserves `sum_i O_i` for one of its names,
+  tested on a random witness, since every sample would then stay in the
+  first sample's charge sector with an error bar of 0
+  (`test_audit_2026_10_23.py`).
+- **The DMRG `vev` has no `**kwargs`**: an unknown keyword raises, and
+  `T>0` raises naming `mode="ED"` and `metts_vev()`
+  (`test_audit_2026_10_23.py`).
 - **Out of scope by construction** for every hunt: the vendored ITensor and
   TDVP folders, the three legacy quirks `.claude/rules/cpp-backend.md` lists
   as deliberately reproduced (`evoloperator()`'s z^3/6 term on `H2`, the

@@ -26,6 +26,47 @@ small even at low temperature (no ancilla doubling).
 import random
 
 
+def _check_basis(MB, basis_ops):
+    """Refuse a collapse basis METTS cannot sample the thermal state with.
+
+    Each name must be Hermitian, since the collapse diagonalizes it with
+    eigh. And when every name is diagonal (N, Sz, ...) the collapsed product
+    states carry a definite value of each Q = sum_i O_i, so if H conserves
+    one of those Q the Markov chain never leaves the sector it started in:
+    on a 4-site hopping chain basis_ops=("N",) returned <Ntot> = 3, 1, 1, 4
+    by seed, with stderr 0, for an exact thermal 1.7811 (2026-10-23 hole
+    hunt, finding 1). Conservation is tested on a random witness state, as
+    mpsalgebra.is_hermitian does, since the canonical form cannot prove
+    [H,Q]=0 when it rests on a same-site identity such as N C = 0. A name
+    the sites do not know is left to the backend, which raises on it."""
+    from ..multioperator import obj2MO
+    from ..multioperatortk.canonical import is_diagonal
+    for name in basis_ops:
+        try: op = obj2MO([[name, 0]])
+        except Exception: return
+        if not MB.is_hermitian(op):
+            raise ValueError("metts_vev: basis operator %r is not Hermitian, "
+                    "the collapse needs a Hermitian one" % (name,))
+    if not all(is_diagonal(name) for name in basis_ops): return
+    H = MB.hamiltonian
+    cmax = max([abs(t[0]) for t in H.op]+[0.])
+    if cmax == 0.: return
+    H = H*(1./cmax)
+    wf = MB.random_state()
+    for name in basis_ops:
+        Q = sum(obj2MO([[name, i]]) for i in range(MB.ns))
+        c = (H*Q - Q*H)*wf
+        hq = (H*Q)*wf
+        if c is None or hq is None: continue
+        if abs(c.dot(c)) <= 1e-20*abs(hq.dot(hq)):
+            raise ValueError("metts_vev: H conserves sum_i %s_i and every "
+                    "basis operator is diagonal, so the samples never leave "
+                    "the charge sector of the first one and the average is "
+                    "not thermal. Add a basis operator that changes the "
+                    "charge (e.g. basis_ops=(\"Sz\",\"Sx\") on spins), or "
+                    "use mode=\"ED\"." % (name,))
+
+
 def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
               basis_ops=("Sz", "Sx"), seed=None, niter=30, njobs=1):
     """Thermal <Op> at temperature T via METTS sampling.
@@ -120,6 +161,8 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
             "metts_vev: njobs>1 (parallel independent Markov chains) is "
             "only implemented for itensor_version='python' so far (got "
             "itensor_version=%r)" % (MB.itensor_version,))
+    if MB.itensor_version in ("python", 3):
+        _check_basis(MB, basis_ops)
     single = not isinstance(Op, (list, tuple))
     ops = [Op] if single else list(Op)
     if not ops:

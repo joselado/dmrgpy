@@ -934,11 +934,13 @@ class Many_Body_Chain():
   def toMPO(self,H,**kwargs):
       """Transport an operator into a matrix-product operator"""
       return mpsalgebra.toMPO(self,H,**kwargs)
-  def excited_vev_MB(self,MO,**kwargs):
-      """
-      Compute a vacuum expectation value
-      """
-      return vev.excited_vev(self,MO,**kwargs)
+  def excited_vev_MB(self,MO,n=2,mode="DMRG"):
+      """<n|MO|n> for each of the n lowest eigenstates, one entry per
+      state as get_excited_states() returns them. It used to return the
+      ground-state vev whatever n was, on both modes (2026-10-23 hole
+      hunt, finding 2)."""
+      (es,wfs) = self.get_excited_states(mode=mode,n=n)
+      return np.array([wf.dot(MO*wf)/wf.dot(wf) for wf in wfs])
   def excited_vev(self,MO,**kwargs):
       """Compute a vacuum expectation value using excited states"""
       return self.excited_vev_MB(MO,**kwargs)
@@ -1407,9 +1409,16 @@ class Many_Body_Chain():
       print("Method get_correlator is deprecated, use vev instead")
       from . import spinchain
       from . import fermionchain
-      if type(self)==spinchain.Spin_Chain: 
+      # Each class has exactly one correlator here. A name= used to fall
+      # into **kwargs and be swallowed by vev(), so name="SS" on a spin
+      # chain returned <Sz Sz>, -0.236 for an exact <S.S> of -0.664
+      # (2026-10-23 hole hunt, finding 3); it now raises.
+      if "name" in kwargs:
+          raise TypeError("get_correlator: name= is not supported, build "
+                  "the operator and call vev(), e.g. vev(Sx[i]*Sx[j])")
+      if type(self)==spinchain.Spin_Chain:
           ops = [self.Sz[i]*self.Sz[j] for (i,j) in pairs]
-      elif type(self)==fermionchain.Fermionic_Chain: 
+      elif type(self)==fermionchain.Fermionic_Chain:
           ops = [self.Cdag[i]*self.C[j] for (i,j) in pairs]
       else: raise NotImplementedError("get_correlator: not implemented for %s" % type(self).__name__)
       return np.array([self.vev(o,**kwargs) for o in ops])

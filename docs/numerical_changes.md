@@ -1119,3 +1119,23 @@ chain too short for the session returns the exact ED Kondo term where it
 raised `AttributeError`, and raises `NotImplementedError` on v2 where it
 raised `AttributeError`. A non-integer `nkry` raises where it was cut to an
 integer on the TASK correlator.
+
+## The 2026-10-23 audit
+
+`docs/audit_2026_10_23_hole_hunt.md`. Two calls return different numbers
+now, and in both the old number was wrong:
+
+| Call | Chain | Before | After |
+|---|---|---|---|
+| `excited_vev(Sz[0]*Sz[1], n=3)`, every backend and `mode="ED"` | 4-site XXZ, Jz=0.7 | the ground-state value, once, whatever `n` | one value per state, equal to ED to 1e-5 |
+| `get_bond_entropy` of `2*wf` on v2 and v3 | 8-site XXZ, Jz=0.7 | 2.08 to 3.52 above the exact entropy | exact to 1e-10 |
+
+The bond entropy of a unit-norm state, every solver output, is unchanged.
+Four calls raise where they returned a wrong number: `vev(O, T>0)` on DMRG
+(`NotImplementedError`; it returned the T=0 value), `vev` with an unknown
+keyword on DMRG (`TypeError`), `Spin_Chain.get_correlator(name=...)`
+(`TypeError`; it returned <Sz Sz> for every name), and `metts_vev` with a
+non-Hermitian basis operator, or with an all-diagonal basis whose charge H
+conserves (`ValueError`; `("N",)` on a hopping chain returned the value of
+one particle-number sector with an error bar of 0). `Fermionic_Chain.excited_vev(mode="ED")`
+works where it raised a matmul `ValueError`.
