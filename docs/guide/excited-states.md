@@ -104,10 +104,10 @@ $H=-\sum_iS^z_iS^z_{i+1}-0.2\sum_iS^x_i$ in its ordered phase:
 wfs = sc.get_gs_manifold(n=2, tol=1e-3)         # two states
 M = sum(sc.Sz)
 print([sc.vev(M, wf=w).real for w in wfs])      # 0 and 0
-print(sc.aMb(wfs[0], M, wfs[1]).real)           # 4.82 on 10 sites
+print(sc.aMb(wfs[0], M, wfs[1]).real)           # modulus 4.82 on 10 sites
 up = sc.summps(wfs[0], wfs[1]).normalize()      # the ordered states
 dn = sc.summps(wfs[0], -1*wfs[1]).normalize()
-print(sc.vev(M, wf=up).real, sc.vev(M, wf=dn).real)   # +4.82 and -4.82
+print(sc.vev(M, wf=up).real, sc.vev(M, wf=dn).real)   # 4.82 and -4.82, in some order
 ```
 
 The eigenstates are the symmetric and antisymmetric combinations of the
@@ -239,7 +239,8 @@ Hubbard dimer the fitted exchange is the singlet-triplet splitting
 $E_T-E_S$, which tends to $4t^2/U$ at strong coupling:
 
 ```python
-# fc: a Spinful_Fermionic_Chain(2) Hubbard dimer
+# fc: a Spinful_Fermionic_Chain(2) Hubbard dimer, with 20*(N-2)^2 added
+# to H to keep the four lowest states at half filling
 from dmrgpy import effectivehamiltonian
 Q = effectivehamiltonian.single_occupancy_projector(fc)
 J = fc.get_heff(operators=[fc.Sx[0]*fc.Sx[1], fc.Sy[0]*fc.Sy[1],

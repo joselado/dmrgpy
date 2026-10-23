@@ -204,7 +204,8 @@ in $1/\sqrt{4t^2-\omega^2}$. At the edge it is largest at the band center.
 At $V=3t$ the chain is a charge density wave, and a gap of about $t$ opens
 at $\omega=\mu$. The weight moves to higher energies, around $\pm V$. Here
 the 50 states hold 79 per cent of the weight at the middle site, so part of
-the spectrum at high energy is missing; `info["captured"]` tells this.
+the spectrum at high energy is missing; `info["particle"]["captured"]` and
+`info["hole"]["captured"]` tell this.
 
 ??? example "Code of this figure (docs/figures/dynamical-correlators_ldos/)"
 
@@ -253,7 +254,8 @@ A = hc.Cdagup[0]*hc.Cup[1]
 (x, y) = hc.get_dynamical_correlator(name=(A, A.get_dagger()), es=es, delta=0.1)
 ```
 
-The pair may also be operators already converted with `toMPO()`
+The pair may also be operators already converted with `sc.toMPO(A)`
 ([Hamiltonians and operators](operators.md)). This avoids building them again in a scan over parameters. It works
-with `mode="ED"` and with the DMRG submodes `"EX"`, `"CVM"` and `"ROOTN"`;
-the other submodes raise an error and need the operator itself.
+with the DMRG submodes `"EX"`, `"CVM"` and `"ROOTN"`, and with
+`mode="ED"` when the operators are built with `sc.toMPO(A, mode="ED")`.
+The other submodes raise an error and need the operator itself.

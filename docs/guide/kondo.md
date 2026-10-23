@@ -100,9 +100,17 @@ works at $T=0$ only and never needs excited states. The second-order and
 potential terms come from the [dynamical correlator](dynamical-correlators.md), and the
 Kondo term from a real-time evolution of a three-point function. It runs
 on `itensor_version=3` and `"python"`, on chains of at least 3 sites.
-Here `sc` is a 3-site chain with couplings of order $10^{-3}$ eV:
+Here the chain has 3 sites, with the field on the first one and a weak
+Heisenberg coupling. Without a field the ground state is degenerate, see
+`n_gs` below:
 
 ```python
+sc = spinchain.Spin_Chain(["S=1/2"]*3)
+h = g*muB*B*sc.Sz[0]
+for i in range(2):
+    h = h + 0.01*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
+sc.set_hamiltonian(h)
+eV = np.linspace(-2e-3, 2e-3, 41)
 es = np.linspace(-3e-3, 3e-3, 800)
 eV, dIdV = sc.get_kondo_spectrum(eV, Jrho_s=-0.05, U=0.0, T=0.0, order=3,
                omega0=2e-3, Gamma0=2e-3, mode="DMRG", submode="KPM",

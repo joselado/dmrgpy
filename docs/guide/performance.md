@@ -55,7 +55,7 @@ default, and the processes need the package `multiprocess`; without it
 ## GPU
 
 The `itensor_version="python"` backend can keep its tensors on a GPU. It
-needs `jax` with CUDA support. The switch is global and is set before
+needs `jax` with CUDA support and a GPU with fast double precision, as in data-centre cards. A consumer card with slow double precision does not give a speedup. The switch is global and is set before
 building a chain:
 
 ```python

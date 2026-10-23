@@ -659,3 +659,38 @@ in `qr_split` on the numpy backend, if a 1.1x is wanted.
   -1.27093 against -4/pi = -1.27324 at `maxm=30`, probably truncation.
 - The spin-boson chain gives near-degenerate ground-state energies off by
   up to 5e-5 on v3, not rerun with tighter sweeps.
+
+## Found afterwards, by the check of the user guide
+
+`evolve_and_measure` on DMRG without `wf=` took `self.wf0`, which is None
+on a chain that was never solved and right after `set_hamiltonian`, so the
+session failed with `AttributeError: 'NoneType' object has no attribute
+'cpp_handle'`, while `evolution_ABA` solves the ground state in the same
+case. **Status**: FIXED on 2026-10-23, `timedependent.evolve_and_measure_dmrg`
+calls `self.get_gs()` when `wf` is None. Pinned by
+`test_evolve_and_measure_solves_the_ground_state_when_none_is_given`, which
+also records that v2's MPO-Taylor integrator drifts by about 4e-6 per step
+at `dt=0.05` on the stationary ground state. No number changes: the call
+raised before.
+
+The same check found two more things.
+
+- `metts_vev` and `metts_dynamical_correlator` on v3 in a conserved sector
+  did not return within 3 minutes, where the guide promises an error and
+  `"python"` raises one (`Chain._reject_sector`). The probable cause was
+  finding 1's basis check, which builds a random witness state before the
+  backend can refuse. **Status**: FIXED on 2026-10-23, both routes refuse a
+  sector first, with the same `ValueError` on every backend. Pinned by
+  `test_metts_refuses_a_conserved_sector`.
+- `get_CFT_central_charge()` fitted a linear model with a minimizer from a
+  random start. It found the same minimum as the exact solution (identical
+  to 6 digits on XX chains of 8, 20 and 40 sites), so the -0.63 seen on the
+  8-site Heisenberg chain is the true fit, driven by the alternating
+  even/odd term, not noise. **Status**: the fit is now a linear least
+  squares (`entropy.central_charge`), deterministic, same numbers; the
+  guide says the result can be negative on a short chain.
+
+The guide's remark that some real-time routes still use absolute
+thresholds was checked against the records and kept: small-unit real-time
+evolution and v3's `applyExp` absolute error goal are listed as open in
+`CLAUDE.md`.

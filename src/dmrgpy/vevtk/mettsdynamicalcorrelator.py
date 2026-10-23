@@ -93,6 +93,15 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     see MB.metts_vev()'s own docstring for the same Markov-correlation
     caveat on what that stderr does and doesn't capture.
     """
+    if getattr(MB, "conserved_sector", None):
+        # the collapse draws product states from every sector at once, as
+        # pyitensor's Chain._reject_sector says; refused here, ahead of the
+        # basis check, which on v3 did not return in 3 minutes in a sector
+        # (2026-10-23 guide check)
+        raise ValueError(
+            "conserved-sector mode (%s): metts_dynamical_correlator is not available inside a "
+            "sector, since the METTS collapse changes the charge; clear it "
+            "with set_conserved_sector()" % (MB.conserved_sector,))
     if MB.itensor_version not in ("python", 3, "julia_live"):
         raise NotImplementedError(
             "metts_dynamical_correlator is only implemented for "

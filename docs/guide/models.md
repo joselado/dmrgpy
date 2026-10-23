@@ -35,14 +35,14 @@ conduction electrons, such as the Kondo lattice
 !!! note "Backends"
     Some classes do not run on every backend:
 
-    - `Spinful_Fermionic_Chain_Native`, `Mixed_Spin_Fermion_Chain` and
-      `SpinBoson_Chain`: `itensor_version=3` and `"python"` only.
+    - `Mixed_Spin_Fermion_Chain`: `itensor_version=3` and `"python"` only.
+    - `Spinful_Fermionic_Chain_Native`: not on `"julia_live"`.
     - `SpinBoson_Chain` and `Mixed_Spin_Fermion_Chain`: no `mode="ED"`.
       Use `Bosonic_Chain` for a purely bosonic model, and
       `Spinful_Fermionic_Chain` with its `Sx`, `Sy`, `Sz` for a spin
       model on fermions.
-    - `Bosonic_Chain` with `maxnb` different from 4: not on
-      `itensor_version=2`, it raises an error.
+    - `Bosonic_Chain` and `SpinBoson_Chain` with a boson site that does not
+      have 4 levels: not on `itensor_version=2`, it raises an error.
 
 Every chain has the methods of this guide. A few methods exist only on
 the class whose physics they need:

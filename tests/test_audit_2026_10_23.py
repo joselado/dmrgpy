@@ -106,3 +106,29 @@ def test_bond_entropy_is_scale_invariant(v):
     s2 = [w2.get_bond_entropy(b-1, b) for b in range(1, 6)]
     assert np.max(np.abs(np.array(s2)-s1)) < 1e-10
     assert max(s1) > 0.1
+
+
+# Found by the guide check of the same day: evolve_and_measure without wf=
+
+@pytest.mark.parametrize("v", BACKENDS)
+def test_evolve_and_measure_solves_the_ground_state_when_none_is_given(v):
+    from dmrgpy import timedependent
+    sc = heisenberg(4, v)
+    (ts, sz) = timedependent.evolve_and_measure(sc, operator=sc.Sz[0]*sc.Sz[1], nt=5, dt=0.05)
+    # it starts from the ground state, which is stationary; v2's MPO-Taylor
+    # integrator drifts by about 4e-6 per step at this dt, the others less
+    e = sc.vev(sc.Sz[0]*sc.Sz[1], mode="ED").real
+    assert np.real(sz[0]) == pytest.approx(e, abs=1e-8)
+    assert np.max(np.abs(np.real(sz)-e)) < 1e-4
+
+
+# Found by the guide check: METTS on a chain with a conserved sector
+
+@pytest.mark.parametrize("v", METTS_BACKENDS)
+def test_metts_refuses_a_conserved_sector(v):
+    sc = heisenberg(4, v)
+    sc.set_conserved_sector(Sz=0)
+    with pytest.raises(ValueError, match="conserved-sector mode"):
+        sc.metts_vev(sc.Sz[0], T=1.0, nsamples=3, nwarmup=1, seed=1)
+    with pytest.raises(ValueError, match="conserved-sector mode"):
+        sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), T=1.0, nt=3, nsamples=2, nwarmup=1, seed=1)

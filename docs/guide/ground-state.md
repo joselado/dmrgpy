@@ -81,8 +81,8 @@ Common profiles have their own methods, each returning one value per site:
 - `get_onsite_pairing()`: $\langle c_{i\uparrow}c_{i\downarrow}\rangle$.
   Spinful fermionic chains.
 - `get_magnetization()`: $\langle S^x_i\rangle$, $\langle S^y_i\rangle$,
-  $\langle S^z_i\rangle$ as a $3\times n$ array. Spin and spinful fermionic
-  chains.
+  $\langle S^z_i\rangle$. A $3\times n$ array on spin chains, and an
+  $n\times 3$ array on spinful fermionic chains.
 
 ## Static correlators
 

@@ -109,6 +109,15 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
     Ops. See pyitensor.metts.metts_thermal_average's own docstring for
     the stderr's (Markov-correlated, so optimistic) meaning.
     """
+    if getattr(MB, "conserved_sector", None):
+        # the collapse draws product states from every sector at once, as
+        # pyitensor's Chain._reject_sector says; refused here, ahead of the
+        # basis check, which on v3 did not return in 3 minutes in a sector
+        # (2026-10-23 guide check)
+        raise ValueError(
+            "conserved-sector mode (%s): metts_vev is not available inside a "
+            "sector, since the METTS collapse changes the charge; clear it "
+            "with set_conserved_sector()" % (MB.conserved_sector,))
     if MB.itensor_version not in ("python", 3, "julia_live"):
         raise NotImplementedError(
             "metts_vev is only implemented for itensor_version='python', "

@@ -120,7 +120,7 @@ h = h - mu*sum(fc.N)
 For $|\mu|<2t$ the open chain has Majorana end modes and its two lowest
 states, of opposite fermion parity, are split only by $e^{-n/\xi}$. DMRG
 then returns a superposition of the two, and the
-[parity](topology.md#fermion-parity) of the state is not $\pm1$ (0.07
+[parity](topology.md#fermion-parity) of the state is not $\pm1$ (-0.06
 on 8 sites in our run). Take the two lowest states from
 `get_excited_states(n=2)` and measure the parity of each, or use
 `mode="ED"` on a short chain.
@@ -179,7 +179,7 @@ chain, each coupled to the two conduction sites next to it:
 ```python
 mc = mixedchain.Mixed_Spin_Fermion_Chain(["F", "1/2", "F", "1/2", "F"])   # c S c S c
 t, JK = 1.0, 0.8
-h = t*(mc.Cdagup[0]*mc.Cup[2] + mc.Cdagdn[0]*mc.Cdn[2]
+h = -t*(mc.Cdagup[0]*mc.Cup[2] + mc.Cdagdn[0]*mc.Cdn[2]
        + mc.Cdagup[2]*mc.Cup[4] + mc.Cdagdn[2]*mc.Cdn[4])
 h = h + h.get_dagger()
 h = h + JK*(mc.SS(0, 1) + mc.SS(1, 2) + mc.SS(2, 3) + mc.SS(3, 4))

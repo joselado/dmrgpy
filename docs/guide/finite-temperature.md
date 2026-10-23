@@ -100,8 +100,11 @@ are:
 - `njobs`: runs independent Markov chains in parallel processes. Only
   for `itensor_version="python"`.
 
-METTS works with `itensor_version=3` and `"python"`. It is not available
-on `itensor_version=2`, where it raises an error.
+METTS works with `itensor_version=3` (at least 3 sites) and `"python"`. It
+is not available on `itensor_version=2`, where it raises an error. It also
+raises if the basis operators are all diagonal and $H$ conserves their
+charge, since the samples then never leave one charge sector. The default
+`basis_ops` avoids this.
 
 The same sampling gives real-time thermal correlators
 $C_{AB}(t)=\langle A(t)B\rangle_T$ (arXiv:2405.18484). Each sample
@@ -129,7 +132,8 @@ sc.get_dynamical_correlator(mode="ED", submode="ED", T=0.5,
                             name=(sc.Sz[0], sc.Sz[0]))
 ```
 
-The sum uses the full spectrum when the Hilbert space has at most about
+The default `vev` on a DMRG chain raises at `T>0`, so `mode="ED"` is
+needed. The sum uses the full spectrum when the Hilbert space has at most about
 2000 states. Above that, only the `n=` lowest states are used, and an
 error is raised if the last one still has a large Boltzmann weight. The
 ED dynamical correlator is the exact reference for

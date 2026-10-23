@@ -273,7 +273,10 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
         return tdjl.evolve_and_measure_dmrg(self,operator=operator,nt=nt,
                 h=h,dt=dt,wf=wf,return_wf=return_wf)
     if h is None: h = self.hamiltonian # Hamiltonian
-    if wf is None: wf = self.wf0 # get ground state
+    # the chain's ground state, solved if needed, as evolution_ABA does;
+    # self.wf0 was None on a chain never solved (or just after
+    # set_hamiltonian), and the session then failed with AttributeError
+    if wf is None: wf = self.get_gs()
     from .groundstate import send_hamiltonian
     send_hamiltonian(self) # quench*/evolve_and_measure* start from the
     # session's own get_gs(), which aborts the process if set_hamiltonian

@@ -17,7 +17,7 @@ $$S_i=-\sum_\alpha\lambda_\alpha^2\log\lambda_\alpha^2
 
 ```python
 s = wf.get_bond_entropy(i, i+1)     # cut between sites i and i+1
-s = wf.get_entropy(b)               # the same, cut between sites b-1 and b
+s = wf.get_entropy(b)               # the same as get_bond_entropy(b, b+1)
 ```
 
 In a gapped chain $S_i$ saturates with the size of the block, and in a
@@ -84,7 +84,8 @@ c = wf.get_CFT_central_charge()
 On an open chain the entropy also has a term that alternates between even
 and odd bonds, and the fit does not remove it. So the result converges
 slowly with $L$: for the spin-1/2 XX chain it gives about 0.54 at $L=20$
-and 0.74 at $L=40$. Use long chains, or fit the bond entropies yourself
+and 0.74 at $L=40$, and on a short chain it can even be negative
+(-0.63 for the 8-site Heisenberg chain). Use long chains, or fit the bond entropies yourself
 with only even (or only odd) $\ell$.
 
 ![Entanglement entropy and central charge](img/entanglement_central_charge.png#only-light)

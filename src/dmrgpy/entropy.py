@@ -136,14 +136,13 @@ def central_charge(wf):
     sr = [wf.get_bond_entropy(i-1,i) for i in range(1,L)] # entropy
     sr = np.array(sr)
     ls = np.array(range(1,L)) # lengths
-    def f(x): # function to fit
-        c = x[0] # central charge
-        cons = x[1] # shift
-        a = 1.0 # factor
-        # central charge formula from J.Stat.Mech.0406:P06002,2004
-        sf = c/6.*np.log(2*L/(np.pi*a)*np.sin(np.pi*ls/L)) + cons
-        return np.sum((sr-sf)**2)
-    from .functionfit import fit
-    x0 = np.random.random(2) # random initial guess
-    return fit(f,x0)[0] # return central charge
+    # S = c/6 log(2L/pi sin(pi l/L)) + const, J.Stat.Mech.0406:P06002,2004.
+    # Linear in (c, const), so solved as a linear least-squares problem,
+    # deterministic and with the same minimum the old random-start minimizer
+    # found (identical to 6 digits on XX chains of 8, 20 and 40 sites). On a
+    # short chain the alternating even/odd term dominates and that minimum
+    # can be negative: -0.63 on the 8-site Heisenberg chain.
+    x = np.log(2*L/np.pi*np.sin(np.pi*ls/L))/6.
+    A = np.array([x,np.ones(len(x))]).T
+    return np.linalg.lstsq(A,sr,rcond=None)[0][0] # return central charge
 

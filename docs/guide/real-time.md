@@ -26,7 +26,7 @@ $t=0,\,dt,\,2dt,\dots$. The keywords are:
   used.
 - `h`: the Hamiltonian of the evolution, if not the one of the chain.
 - `mode="ED"`: exact evolution, the reference for small chains.
-- `return_wf=True` (DMRG): also return the final state.
+- `return_wf=True` (DMRG): also return the final state as a third output.
 
 The accuracy of the DMRG evolution is set by `sc.maxm` and `dt`. The
 entanglement grows with time after a quench, so the bond dimension needed
