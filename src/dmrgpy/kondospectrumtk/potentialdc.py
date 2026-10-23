@@ -82,15 +82,20 @@ def _convolved_F0_weight(chain, op, eVs, omega0, Gamma0, mode, submode,
     return np.einsum('w,w,ew->e', wts, S, kernel), np.dot(wts, S)
 
 
-def _spin_casimir(chain, site):
-    """S(S+1) of a spin site, or None when the site is not a plain spin
-    (the sum rule below then has no fixed value to check against)"""
+def _spin_casimir(chain, site, mode="DMRG"):
+    """sum_k <GS|S_k S_k|GS>, the total weight sum_k int S_kk(w) dw: S(S+1)
+    on a spin site, and measured on the state otherwise, since on a
+    fermion orbital charge fluctuations put it below 3/4 (empty and
+    doubly occupied states carry no spin). None when it cannot be had."""
     from ..spinchain import Spin_Chain
-    if not isinstance(chain, Spin_Chain): return None
-    try: d = int(chain.sites[site])
-    except (TypeError, ValueError, IndexError): return None
-    if d < 2: return None
-    return (d*d - 1)/4. # S=(d-1)/2
+    if isinstance(chain, Spin_Chain):
+        try: d = int(chain.sites[site])
+        except (TypeError, ValueError, IndexError): return None
+        if d < 2: return None
+        return (d*d - 1)/4. # S=(d-1)/2
+    S2 = (chain.Sx[site]*chain.Sx[site] + chain.Sy[site]*chain.Sy[site]
+          + chain.Sz[site]*chain.Sz[site])
+    return float(np.real(chain.vev(S2, mode=mode)))
 
 
 def third_order_potential_dIdV_dc(chain, site, eVs, Jrho_s, U, T0=1.0,
@@ -118,8 +123,9 @@ def third_order_potential_dIdV_dc(chain, site, eVs, Jrho_s, U, T0=1.0,
     the grid were 10 per cent of the peak). Its spacing must resolve
     delta near the lines, and the grid may be non-uniform and in any
     order. Since sum_k int
-    S_kk(w) dw = S(S+1) exactly, a spin site gets a RuntimeWarning when
-    the grid misses more than 1e-2 of that weight -- a check of the
+    S_kk(w) dw = sum_k <GS|S_k S_k|GS> exactly (S(S+1) on a spin site,
+    measured on the state on a fermion orbital), a RuntimeWarning is
+    raised when the grid misses more than 1e-2 of that weight -- a check of the
     coverage, not of the resolution, and one that counts the elastic
     weight at w=0 too.
 
@@ -143,17 +149,19 @@ def third_order_potential_dIdV_dc(chain, site, eVs, Jrho_s, U, T0=1.0,
         wk, sk = _convolved_F0_weight(chain, op, both, omega0, Gamma0,
                                       mode, submode, delta, es, **kwargs)
         weighted, weight = weighted + wk, weight + sk
-    casimir = _spin_casimir(chain, site)
+    casimir = _spin_casimir(chain, site, mode=mode)
+    from ..spinchain import Spin_Chain
+    label = "S(S+1)" if isinstance(chain, Spin_Chain) else "sum_k <S_k S_k>"
     if casimir is not None and abs(casimir - weight) > 1e-2*casimir:
         warnings.warn(
             "third_order_potential_dIdV_dc: the es grid [%.4g, %.4g] holds "
-            "%.4g of the spectral weight sum_k int S_kk = S(S+1) = %.4g. "
+            "%.4g of the spectral weight sum_k int S_kk = %s = %.4g. "
             "This term needs every transition up to the top of the site's "
             "S_k spectrum, not only those below max|eV|, so the missing "
             "weight is missing from the result; widen es past the highest "
             "transition by several delta (the sum rule also counts the "
             "elastic weight at w=0, so es must include w=0)."
-            % (np.min(es), np.max(es), weight, casimir), RuntimeWarning,
+            % (np.min(es), np.max(es), weight, label, casimir), RuntimeWarning,
             stacklevel=2)
     h = weighted*Theta0(both)
     total = h[:nev] - h[nev:]

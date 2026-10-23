@@ -348,8 +348,8 @@ the timed sweep, for the JIT reason above.
 
 ## The audits, and what to know before touching the code
 
-Six hole hunts, a fix pass and one review ran between 2026-08 and
-2026-09-26, each hunt a multi-lens search for numbers that are plausible and
+Seven hole hunts, a fix pass and one review ran between 2026-08 and
+2026-10-23, each hunt a multi-lens search for numbers that are plausible and
 wrong, with every finding reproduced, handed to a reviewer briefed to refute
 it, and fixed:
 `docs/audit_2026_08_hole_hunt.md` (21 findings), `docs/audit_2026_09_hole_hunt.md`
@@ -360,7 +360,9 @@ it, and fixed:
 with its leads), followed by the 2026-09-26 review of `"python"` real-time
 evolution (regressions in `tests/test_pyitensor_time_evolution_review.py`,
 measurements in `docs/numerical_changes.md`, leads ranked in
-`docs/time_evolution_improvement_plan.md`). Four things to read before
+`docs/time_evolution_improvement_plan.md`), and by
+`docs/audit_2026_10_hole_hunt.md` (7, over the TASK correlator and the
+Kondo spectrum on fermion chains, all fixed on 2026-10-23). Four things to read before
 changing the kind of code they cover:
 
 - **`docs/numerical_changes.md`** before comparing any number against
@@ -497,6 +499,14 @@ Do not undo one without reading its finding first.
 - **`Thermal_Spin_Chain.anneal()` is order-8 Taylor steps** of
   `exp(-dtau(H-E_mid))` at `dtau*W <= 2`, about `2*beta*W` factor
   applications (`test_audit_2026_09_25b_thermal.py`).
+- **TASK's error bar is two numbers, not one.** The two-site variance of
+  a pole does not see the part of `B|GS>` outside the one-site tangent
+  space, which is dropped before the recursion starts: zero for a sum of
+  one-site operators and for a fermion operator on a state of definite
+  parity, up to all of the weight for `C_i` on a parity mixture (a
+  degenerate Majorana pair) at truncated `maxm`. `taskdmrg.get_poles`
+  returns it as `missing_weight` and warns above 1e-6 of the weight
+  (`test_audit_2026_10_task.py`).
 - **Out of scope by construction** for every hunt: the vendored ITensor and
   TDVP folders, the three legacy quirks `.claude/rules/cpp-backend.md` lists
   as deliberately reproduced (`evoloperator()`'s z^3/6 term on `H2`, the

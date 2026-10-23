@@ -154,7 +154,12 @@ the ground state itself, so `maxm` and `nsweeps` ([Ground state](ground-state.md
   `info["variance"]` the two-site variance of each pole,
   $\lVert P^{2\perp}H|\alpha\rangle\rVert^2$. Its square root is an
   error bar on the energy of the pole; increase `maxm` until it is small
-  for the poles you need.
+  for the poles you need. `info["missing_weight"]` is the sum rule
+  $\langle A B\rangle$ minus all the weights. It is not zero when $B$
+  changes more than one site of the ground state: a bond operator, or
+  $c_i$ on a state of mixed fermion parity, such as a degenerate pair of
+  Majorana ground states. The variance does not see this loss. A warning
+  appears when it is above $10^{-6}$ of the weight; increase `maxm` then.
 
 ## Reusing the KPM moments
 

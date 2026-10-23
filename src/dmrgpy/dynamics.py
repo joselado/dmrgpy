@@ -96,7 +96,8 @@ SUBMODES below, while mode="ED" implements KPM, ED, EX, INV, CVM, ROOTN
 and TD and raises NotImplementedError for the rest (edtk/dynamics.py).
 "INV" is ED-only; "TDZ", "CVM_explicit", "CVMimag", "SECTOR", "TASK"
 and "maxent" are DMRG-only, and "TASK" (taskdmrg.py, the tangent-space
-Krylov poles of arXiv:2510.07279) is itensor_version="python"-only.
+Krylov poles of arXiv:2510.07279) is on itensor_version="python" and 3
+only.
 
 itensor_version="julia_live" is a third case and is only partly covered
 by the statement above. Its CVM/TDZ/EX/maxent go through the very same

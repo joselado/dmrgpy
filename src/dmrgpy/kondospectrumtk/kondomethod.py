@@ -245,7 +245,9 @@ class KondoSpectrumMixin():
             # TASK wherever it exists: exact at saturation, no grids to
             # choose, and orders of magnitude faster than the two-time
             # TDVP Kondo term on the same chain. v2 and julia_live have no
-            # TASK, so they keep the correlator and two-time route.
+            # TASK, so they get the correlator route, which there covers
+            # order=2 only: the two-time Kondo term needs the TDVP of
+            # itensor_version="python" or 3.
             from ..taskdmrg import BACKENDS
             submode = "TASK" if self.itensor_version in BACKENDS else "KPM"
         if submode == "TASK":
@@ -254,6 +256,12 @@ class KondoSpectrumMixin():
             # (kondospectrumtk/taskkondo.py). The grid keywords of the other
             # DMRG routes would be inert here, so they raise.
             nkry = dc_kwargs.pop("nkry", 100)
+            # checked here and not only in TaskKondoSpectrum, which a chain
+            # too short for the session never builds
+            if (isinstance(nkry, bool)
+                    or not isinstance(nkry, (int, np.integer)) or nkry < 1):
+                raise ValueError("nkry must be a positive integer, got %r"
+                                 % (nkry,))
             unused = sorted(k for k, v in (("delta", delta), ("es", es),
                     ("dt2", dt2), ("n_t2_half", n_t2_half), ("dtau", dtau),
                     ("n_tau_half", n_tau_half)) if v is not None)
@@ -289,6 +297,15 @@ class KondoSpectrumMixin():
         else:
             if delta is None: delta = 2e-6
             split_tol = delta
+            short = self.get_mode(mode="DMRG") != "DMRG"
+            if (order == 3 and not short
+                    and self.itensor_version not in ("python", 3)):
+                raise NotImplementedError(
+                    "get_kondo_spectrum(mode=\"DMRG\", order=3) with "
+                    "submode=%r: the two-time Kondo term runs on the TDVP "
+                    "of itensor_version=\"python\" and 3 only (got "
+                    "itensor_version=%r); use order=2, mode=\"ED\", or one "
+                    "of those backends" % (submode, self.itensor_version))
             def terms():
                 """Every requested term on the state that is this chain's
                 ground state right now"""
@@ -296,19 +313,28 @@ class KondoSpectrumMixin():
                 dIdV = second_order_dIdV_dc(self, site, eV, T0=T0, U=U,
                                              mode="DMRG", submode=submode,
                                              delta=delta, es=es, **dc_kwargs)
-                if order == 3:
+                if order == 3 and short:
+                    # a chain too short for the session (mode.py): the
+                    # correlators above fell back to ED, and so does the
+                    # Kondo term, which has no session to evolve
+                    from .edkondo import KondoSpectrum
+                    from . import conductance
+                    dIdV = dIdV + conductance.third_order_kondo_dIdV(
+                            KondoSpectrum(self, site, T=0.), eV, Jrho_s,
+                            T0=T0, omega0=omega0, Gamma0=Gamma0)
+                elif order == 3:
                     from .dmrgtwotime import two_time_kondo_term_dmrg
                     term = two_time_kondo_term_dmrg(
                             self, site, eV, omega0=omega0, Gamma0=Gamma0,
                             dt2=dt2, n_t2_half=n_t2_half, dtau=dtau,
                             n_tau_half=n_tau_half)
                     dIdV = dIdV + 4*np.pi*T0**2*Jrho_s*term
-                    if U != 0.0:
-                        from .potentialdc import third_order_potential_dIdV_dc
-                        dIdV = dIdV + third_order_potential_dIdV_dc(
-                                self, site, eV, Jrho_s, U, T0=T0, omega0=omega0,
-                                Gamma0=Gamma0, mode="DMRG", submode=submode,
-                                delta=delta, es=es, **dc_kwargs)
+                if order == 3 and U != 0.0:
+                    from .potentialdc import third_order_potential_dIdV_dc
+                    dIdV = dIdV + third_order_potential_dIdV_dc(
+                            self, site, eV, Jrho_s, U, T0=T0, omega0=omega0,
+                            Gamma0=Gamma0, mode="DMRG", submode=submode,
+                            delta=delta, es=es, **dc_kwargs)
                 return dIdV
         if (isinstance(n_gs, bool) or not isinstance(n_gs, (int, np.integer))
                 or n_gs < 1):

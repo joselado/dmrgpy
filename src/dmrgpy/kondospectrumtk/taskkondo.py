@@ -57,6 +57,20 @@ class TaskKondoSpectrum():
         # the bandwidth, so the step is read at Theta0(0) = 1/2 as on ED.
         width = max(np.max(np.abs(e)), 1e-300)
         e[np.abs(e) <= degeneracy_tol*width] = 0.
+        # A Ritz energy of P(H-E0)P is the energy of an actual state, so one
+        # below the snapping window means the state handed over is not the
+        # ground state: on a near-degenerate doublet DMRG can stop at a
+        # mixture of the two members, and the sums below then measured an
+        # order-one deviation from ED (2026-10 audit, finding 3).
+        if np.min(e) < 0.:
+            import warnings
+            warnings.warn(
+                "get_kondo_spectrum(submode=\"TASK\"): the tangent space "
+                "of the ground state reaches a state %.3g below it, so the "
+                "state DMRG converged to is not the ground state (an "
+                "accidental near-degeneracy, or an unconverged solve). "
+                "Converge further, or pass n_gs= for a degenerate manifold."
+                % (np.min(e),), RuntimeWarning, stacklevel=4)
         self.e = e
         self.dim = len(self.e)
         self.tangent_dimension = dim

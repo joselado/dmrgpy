@@ -88,7 +88,10 @@ space is exhausted (2e-11 on a 10-site S=1 impurity chain at `nkry=400`);
 `itensor_version="python"` and 3 (v3 exports its site tensors to the same
 Python code, `taskdmrg.session_spectrum`), the default on both; the near-zero Ritz energies are snapped
 to 0 or the zero-bias point is rounding-dependent on a degenerate ground
-state. It is in `_N_GS_SUBMODES`, checked on a Kramers doublet.
+state. It is in `_N_GS_SUBMODES`, checked on a Kramers doublet. A Ritz
+energy below the snapping window means the state handed over is not the
+ground state (DMRG stopped at a mixture of a near-degenerate doublet), and
+`TaskKondoSpectrum` warns (2026-10 audit, finding 3).
 
 **Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
 `kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by
@@ -101,4 +104,10 @@ TASK agrees with ED to 1e-11 on both classes at saturation; at maxm=12 on 6
 sites the interleaved class missed by 3.5e-2 and the native by 8e-3 (at
 equal maxm, which is not the same truncation on twice the bonds, so the
 two-site S_site there is a likely cause, not an isolated one). `tests/test_kondo_spectrum_spinful.py`,
-`examples/kondo/kondo_third_order_hubbard_VS_heisenberg`.
+`examples/kondo/kondo_third_order_hubbard_VS_heisenberg`. The potential
+term's `es` coverage check compares against the measured
+`sum_k <S_k S_k>` on a fermion orbital (below 3/4 by the empty and doubly
+occupied weight), not S(S+1). On a chain too short for the session the
+correlator route's Kondo term is the exact ED one, and `order=3` with a
+correlator submode raises on v2 and `julia_live`, which have no TDVP for
+the two-time term (2026-10 audit, findings 2 and 4).

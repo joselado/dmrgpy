@@ -1107,3 +1107,15 @@ when an observable is read off them
   routes do.
 - `get_dynamical_correlator(submode="TASK")` is new on both backends;
   nothing it replaces changed.
+
+## The 2026-10 audit
+
+`docs/audit_2026_10_hole_hunt.md`. No fix changed a number that was
+returned before. `taskdmrg.get_poles` gained the `missing_weight` entry and
+a warning; the potential term's coverage warning now fires on the spinful
+fermion chains; `TaskKondoSpectrum` warns when handed a state above the
+ground state. `get_kondo_spectrum(order=3)` with a correlator submode on a
+chain too short for the session returns the exact ED Kondo term where it
+raised `AttributeError`, and raises `NotImplementedError` on v2 where it
+raised `AttributeError`. A non-integer `nkry` raises where it was cut to an
+integer on the TASK correlator.

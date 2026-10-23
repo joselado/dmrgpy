@@ -320,6 +320,10 @@ def test_get_kondo_spectrum_dmrg_combines_terms_correctly(monkeypatch):
 
     sc = spinchain.Spin_Chain(["1/2"])
     sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
+    # a one-site chain is too short for the session, where the Kondo term
+    # now falls back to ED (2026-10 audit, finding 4); this test checks the
+    # wiring of the DMRG route, so it is told the session is there
+    monkeypatch.setattr(sc, "get_mode", lambda *a, **kw: "DMRG")
     T0, Jrho_s = 2.0, 0.5
     common = dict(es=np.array([0.]), dt2=1., n_t2_half=1, dtau=1.,
                   n_tau_half=1, submode="KPM")

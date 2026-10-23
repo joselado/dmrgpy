@@ -13,8 +13,10 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 #   - dimer: J = (sqrt(U^2+16t^2)-U)/2, the exact singlet-triplet gap,
 #     so the step sits at eV=J for every U/t and only its height moves
 #   - chain: J = 4t^2/U, the leading order of the mapping, so the curves
-#     approach the Heisenberg one as U/t grows, with a deviation of
-#     order (t/U)^2
+#     approach the Heisenberg one as U/t grows; the deviation falls as
+#     (t/U)^2 once U/t is a few tens, while at U/t below about 30 the
+#     higher orders in t/U still matter, so the sweep of the deviation
+#     goes up to U/t=256
 # The Hubbard charge excitations sit at about U = (U/t)^2 J/4, outside the
 # plotted bias window, and inside omega0 = 10 J for U/t < 6.
 #
@@ -61,7 +63,8 @@ def spectrum(chain, x, J, **extra):
     return d/(2*np.pi)
 
 x = np.linspace(-3., 3., 240) # eV/J, off the steps at eV=J of the dimer
-Uts = [4., 8., 16., 32.]
+Uts = [4., 8., 16., 32.] # the curves that are plotted
+Uts_dev = Uts + [64., 128., 256.] # the deviation against t/U
 
 # dimer, exact J
 dimer = {}
@@ -76,7 +79,7 @@ n = 6
 chain = {0.: {}, 1.: {}}
 heis = {}
 for b in chain:
-    for Ut in Uts:
+    for Ut in Uts_dev:
         J = 4*t**2/Ut
         chain[b][Ut] = spectrum(hubbard(n, Ut*t, b=b*J), x, J)
     heis[b] = spectrum(heisenberg(n, 1., b=b), x, 1.)
@@ -94,9 +97,10 @@ assert err < 1e-6
 # deviation from the Heisenberg curve against t/U, averaged over the bias
 # window: at T=0 the steps are sharp, so a maximum would only measure
 # whether a shifted step crossed a grid point
-dev = {b: [np.mean(np.abs(chain[b][Ut]-heis[b])) for Ut in Uts] for b in chain}
+dev = {b: [np.mean(np.abs(chain[b][Ut]-heis[b])) for Ut in Uts_dev]
+       for b in chain}
 for b in chain:
-    for Ut, dv in zip(Uts, dev[b]):
+    for Ut, dv in zip(Uts_dev, dev[b]):
         print("b=%.0f J, U/t=%4.0f: mean |Hubbard - Heisenberg| = %.5f" % (b, Ut, dv))
 
 fig, axs = plt.subplots(2, 2, figsize=(10, 8))
@@ -112,10 +116,11 @@ for ax, curves, ref, title in panels:
     ax.set_title(title)
 axs[0,0].legend(fontsize=8)
 ax = axs[1,1]
-tU = t/np.array(Uts)
+tU = t/np.array(Uts_dev)
 for b, m in zip(chain, ("o", "s")):
     ax.loglog(tU, dev[b], m+"-", label="n=6, B=%g J" % b)
-ax.loglog(tU, dev[0.][-1]*(tU/tU[-1])**2, "k:", label=r"$\propto (t/U)^2$")
+# anchored at the largest U/t, where the deviation is asymptotic
+ax.loglog(tU, dev[1.][-1]*(tU/tU[-1])**2, "k:", label=r"$\propto (t/U)^2$")
 ax.set_xlabel("t / U") ; ax.set_ylabel("mean |Hubbard - Heisenberg|")
 ax.legend(fontsize=8)
 plt.tight_layout()

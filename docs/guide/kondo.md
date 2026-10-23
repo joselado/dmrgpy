@@ -189,7 +189,8 @@ $T>0$ it gives the canonical ensemble at that `Nf`. A sector of fixed
 `Spinful_Fermionic_Chain_Native`: there the site is one tensor, while on
 `Spinful_Fermionic_Chain` the spin of the site acts on two tensors, so a
 truncated `maxm` was less accurate in our tests. As $U/t$ grows the Hubbard spectrum
-approaches the Heisenberg one, with a difference of order $(t/U)^2$: the
+approaches the Heisenberg one. The difference falls as $(t/U)^2$ once
+$U/t$ is a few tens; below that, higher orders in $t/U$ still matter. The
 weight of the steps drops with the double occupancy, and the steps move
 with the corrections to $J$. See
 `examples/kondo/kondo_third_order_hubbard_VS_heisenberg`.
