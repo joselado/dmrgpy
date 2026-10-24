@@ -82,8 +82,9 @@ def set_backend(name):
     """Select the array library for arrays created from now on. "numpy"
     (default) or "jax". Raises rather than falling back silently -- a
     GPU run that quietly became a CPU run is a benchmark that lies."""
-    global _NAME, _XP, _JAX
-    _JIT_CACHE.clear()   # jitted wrappers are bound to one array library
+    global _NAME, _XP, _JAX, _SETROW
+    _JIT_CACHE.clear()
+    _SETROW = None   # jitted wrappers are bound to one array library
     if name == "numpy":
         _NAME, _XP, _JAX = "numpy", np, None
         return _NAME
@@ -157,6 +158,32 @@ def setblock(arr, idx, value):
         arr[idx] = value
         return arr
     return arr.at[idx].set(value)
+
+
+_SETROW = None
+
+
+def setrow(arr, i, value):
+    """arr[i] = value on a preallocated (rows, N) store, returning the
+    array to use from now on.
+
+    In place on NumPy. On JAX `setblock`'s `.at[].set()` would allocate a
+    second store per write, which for a Krylov basis of a few hundred
+    tangent vectors (task.py) doubles a peak that is already tens of GB;
+    here the update is jitted with the store donated, so XLA writes the
+    row into the same buffer on a device that supports donation (GPU, TPU;
+    the CPU backend copies and JAX warns). The row index is traced, so
+    there is one compilation per store shape, not one per row. The caller
+    must drop every other reference to `arr`, a donated buffer is invalid
+    afterwards."""
+    global _SETROW
+    if _NAME == "numpy":
+        arr[i] = value
+        return arr
+    if _SETROW is None:
+        _SETROW = _JAX.jit(lambda a, k, v: a.at[k].set(v.astype(a.dtype)),
+                           donate_argnums=(0,))
+    return _SETROW(arr, i, value)
 
 
 _PAD_BONDS = None

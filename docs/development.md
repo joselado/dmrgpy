@@ -5256,6 +5256,28 @@ session's own `sites_`. On a saturated 10-site Heisenberg chain v3 and
 Lanczos. TASK is the Kondo default on both backends; v2 and `julia_live`
 raise.
 
+Everything in `task.py` runs on the array library of
+`pyitensor/backend.py`, so under `backend.set_backend("jax")` the
+environments, the Krylov basis and every matvec stay on the device, on
+`"python"` and on v3 alike: `real_if_exact` moves the host site arrays to
+the backend once, and only scalars and the small Krylov-space matrices
+(`Hq`, the operator matrices, both `eigh`) come back. What sets the memory
+is the basis, one flattened tangent vector per row, so it is the only
+basis-sized array ever alive. $HQ$ is not stored: when $P(H-E_0)P|q_j\rangle$
+is computed its overlaps with every vector already in the basis give the
+upper triangle of `Hq`, and Hermiticity gives the rest; the Ritz vectors
+$U^TQ$ and $OQ$ are never formed either, their overlaps are accumulated
+column by column. Before this the block Krylov held about four copies of
+the basis at its peak (on a 16-site Hubbard chain at `maxm=60`, 1651 MB
+against 525 MB now, at the same time). Rows are written with
+`backend.setrow`, a jitted update with the store donated, since
+`.at[].set()` in eager JAX would allocate a second store per row, and on
+a device the full store is used in every overlap rather than a slice of
+it, the rows not yet written being exactly zero. Old and new agree to
+rounding; with `nkry` past convergence the unconverged Ritz values are
+sensitive to rounding at that level, and a 1e-14 perturbation of the
+start vectors moves them more than the rewrite does.
+
 #### 4.8a Cost of the dynamical-correlator submodes, and what makes them fast
 
 Both `submode="KPM"` and `submode="TD"` are dominated by one inner loop
