@@ -724,6 +724,18 @@ cross-validated between solvers.
   written twice). The old construction is kept as `_sum_of_term_mpos`, the
   reference the machine is tested against in
   `tests/test_mpo_automaton_builder.py`.
+  New `pyitensor` methods are written to run on the GPU as well, whenever
+  that is possible, locked by the author on 2026-10-24 ("whenever we
+  implement a new method, if possible, we should write it so that it also
+  works on the GPU", for pyitensor). The way we do this is by taking the
+  array namespace from `pyitensor/backend.py` (`xp = backend.xp()`, once
+  per function) instead of `np`, moving host data to the backend at one
+  entry point, bringing back only scalars and small matrices
+  (`backend.scalar`, `backend.to_host`), and never writing into an array
+  in place without `backend.setblock`/`backend.setrow`; a new method is
+  then checked under `backend.set_backend("jax")` against its NumPy
+  result. `pyitensor/task.py` is a worked example. When a step cannot run
+  on the device, say so in the method's docstring.
 - **DMRG, Julia (`itensor_version="julia_live"`)**: a live, in-process
   Julia session (`mpsjulialive/`, via `juliacall`/`juliasession.py`) with
   its own parallel set of modules (`mpsjulialive/groundstate.py`, `vev.py`,
