@@ -359,19 +359,10 @@ class TangentSpace:
 # ---------------------------------------------------------------- Lanczos
 #
 # A Krylov basis is a preallocated store, one flattened tangent vector per
-# row, so that every overlap with it is a matrix product. On NumPy the
-# first m rows are a view; on a device a slice would copy the whole basis,
-# so the full store is used instead, whose rows beyond m are exactly zero
-# and contribute exactly zero to every overlap and every combination.
-
-def _rows(store, m):
-    return store if backend.is_device() else store[:m]
-
-
-def _overlaps(Q, w):
-    """Q^* w, the overlaps <q_i|w>, without forming the conjugate of Q,
-    which would be a second copy of the basis."""
-    return (Q @ w.conj()).conj()
+# row, so that every overlap with it is a matrix product over its first m
+# rows: backend.row_overlaps and backend.project_rows, a view on NumPy and a
+# loop over row chunks on a device, where a slice or a whole-store product
+# would copy the basis.
 
 
 def lanczos(ts, b, nkry, breakdown=1e-10):
@@ -400,14 +391,11 @@ def lanczos(ts, b, nkry, breakdown=1e-10):
         if w.dtype != store.dtype:  # a complex P H P on a real start
             store = store.astype(w.dtype)
         scale = float(xp.linalg.norm(w))
-        Q = _rows(store, m)
         for rep in range(2):
-            c = _overlaps(Q, w)
+            c, w = backend.project_rows(store, w, m)
             if rep == 0:
                 alpha.append(float(c[i].real))
-            w = w - c @ Q
             w = ts.flat(ts.gauge(ts.unflat(w)))
-        del Q
         if i == nkry:
             break
         bnext = float(xp.linalg.norm(w))
@@ -433,7 +421,7 @@ def poles(ts, b, nkry, a=None):
     if a is None:
         weights = np.abs(bproj) ** 2 + 0j
     else:
-        ak = backend.to_host(_overlaps(store, ts.flat(a)))[:m]  # <v_i|a>
+        ak = backend.to_host(backend.row_overlaps(store, ts.flat(a), m))[:m]  # <v_i|a>
         aproj = U.conj().T @ ak  # <alpha|a>
         weights = aproj.conj() * bproj
     return ws, weights, U, (store, m)
@@ -459,15 +447,15 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
     every vector already in the basis, which includes all q_i with i <= j,
     give Hq[:, j] above the diagonal, and Hermiticity gives the rest.
     Returns (store, count, Hq), the basis being the first `count` rows of
-    the flattened store (all of it padded with zero rows on a device, see
-    _rows) and Hq a host (count, count) array."""
+    the flattened store (the rows after `count` are zero) and Hq a host
+    (count, count) array."""
     xp = backend.xp()
     N = ts.flat_size()
     # preallocated and filled row by row: a vstack per accepted vector
     # copies the whole basis each time
     dtype = np.result_type(*[x.dtype for w in starts for x in w],
                            ts.As[0].dtype, *[W.dtype for W in ts.Ws])
-    nmax = min(N, len(starts) * (nkry + 1))
+    nmax = min(N, len(starts))
     store = xp.zeros((nmax, N), dtype=dtype)
     count = 0
 
@@ -476,19 +464,28 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
         for w in block:
             if count == nmax:
                 break
-            Q = _rows(store, count)
             w = ts.flat(ts.gauge(w))
             scale = float(xp.linalg.norm(w))
             for rep in range(2):
-                w = w - _overlaps(Q, w) @ Q
+                w = backend.project_rows(store, w, count)[1]
                 w = ts.flat(ts.gauge(ts.unflat(w)))
-            del Q
             nw = float(xp.linalg.norm(w))
             if scale > 0.0 and nw > breakdown * scale:
                 store = backend.setrow(store, count, w / nw)
                 count += 1
 
+    # The starts that survive their own orthogonalization size the store:
+    # no later block is larger than the one before it, so count*(nkry+1)
+    # rows hold the whole basis. For S, S^dagger pairs of Hermitian
+    # operators (TaskKondoSpectrum's Sx, Sy, Sz) half the starts are
+    # duplicates, and sizing by len(starts) doubled a store of tens of GB.
     add(starts)
+    first = store
+    nmax = min(N, count * (nkry + 1))
+    store = xp.zeros((nmax, N), dtype=dtype)
+    for k in range(count):
+        store = backend.setrow(store, k, first[k])
+    del first
     done = 0
     Hu = np.zeros((nmax, nmax), dtype=complex)  # Hu[i, j] for i <= j
     for step in range(nkry + 1):
@@ -498,7 +495,7 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
         Hb = []
         for j in range(done, n):
             h = ts.apply_h(ts.unflat(store[j]))
-            Hu[:n, j] = backend.to_host(_overlaps(_rows(store, n), ts.flat(h)))[:n]
+            Hu[:n, j] = backend.to_host(backend.row_overlaps(store, ts.flat(h), n))[:n]
             Hb.append(h)
         done = n
         if step == nkry:
@@ -529,10 +526,8 @@ def projected_spectrum(ts, ops, nkry):
     ws, U = np.linalg.eigh(Hq)
     Uh = U.conj().T
     e = np.concatenate([[0.0], ws])
-    Q = _rows(store, n)
-
     def overlaps(v):  # <q_i|v> for the n basis vectors, on the host
-        return backend.to_host(_overlaps(Q, v))[:n]
+        return backend.to_host(backend.row_overlaps(store, v, n))[:n]
 
     mats = []
     for (W, Wd), bk, bdk in zip(ops, b, bd):

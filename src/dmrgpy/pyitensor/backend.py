@@ -186,6 +186,83 @@ def setrow(arr, i, value):
     return _SETROW(arr, i, value)
 
 
+_ROWS_FN = {}
+# Bytes of store read per chunk by row_overlaps/project_rows on JAX.
+_ROWS_CHUNK_BYTES = 1 << 28
+
+
+def _rows_chunked(store, w, count, subtract):
+    """The JAX path of row_overlaps/project_rows: one jitted loop over row
+    chunks of the store, stopping at `count`, so that no product ever takes
+    the whole store as an operand. On a 606 x 4.29e6 complex Krylov store
+    (41.6 GB, a ten-cell TASK run on an 80 GB card) the eager
+    `w - (Q @ w*)^* @ Q` failed allocating exactly one more store; a chunk
+    bounds any such copy at _ROWS_CHUNK_BYTES, and the zero rows above
+    `count` of a preallocated store are not read at all. A chunk that would
+    run past the end is moved back to fit and its repeated rows are masked
+    out, since dynamic_slice clamps rather than pads."""
+    rows, N = store.shape
+    if rows == 0:
+        return _XP.zeros(0, _XP.result_type(store.dtype, w.dtype)), w
+    chunk = int(max(1, min(rows, _ROWS_CHUNK_BYTES // max(1, N * store.dtype.itemsize))))
+    key = (chunk, subtract)
+    if key not in _ROWS_FN:
+        jnp, lax = _XP, _JAX.lax
+
+        def fn(store, w, count):
+            rows, N = store.shape
+            nch = (count + chunk - 1) // chunk
+            wc = w.conj()
+
+            def block(k):
+                start = k * chunk
+                s = jnp.minimum(start, rows - chunk)
+                Qk = lax.dynamic_slice(store, (s, 0), (chunk, N))
+                idx = s + jnp.arange(chunk)
+                return Qk, idx, (idx >= start) & (idx < count)
+
+            dtype = jnp.result_type(store.dtype, w.dtype)
+
+            def overlaps(k, c):
+                Qk, idx, valid = block(k)
+                ck = jnp.where(valid, (Qk @ wc).conj(), 0)
+                return c.at[idx].add(ck.astype(dtype))
+
+            c = lax.fori_loop(0, nch, overlaps, jnp.zeros(rows, dtype))
+            if not subtract:
+                return c, w
+
+            def remove(k, v):
+                Qk, idx, valid = block(k)
+                return v - jnp.where(valid, c[idx], 0) @ Qk
+
+            return c, lax.fori_loop(0, nch, remove, w.astype(dtype))
+
+        _ROWS_FN[key] = _JAX.jit(fn)
+    return _ROWS_FN[key](store, w, count)
+
+
+def row_overlaps(store, w, count):
+    """The overlaps <q_i|w> with the first `count` rows q_i of a (rows, N)
+    store, as an array of length `count` on NumPy and of length `rows` on
+    JAX (zero from `count` on). See _rows_chunked for why the JAX path
+    walks the store in chunks."""
+    if _NAME == "numpy":
+        return (store[:count] @ w.conj()).conj()
+    return _rows_chunked(store, w, count, False)[0]
+
+
+def project_rows(store, w, count):
+    """(c, w - sum_i c_i q_i) with c_i = <q_i|w> over the first `count`
+    rows of a (rows, N) store of orthonormal rows: one classical
+    Gram-Schmidt pass, c as in row_overlaps."""
+    if _NAME == "numpy":
+        Q = store[:count]
+        c = (Q @ w.conj()).conj()
+        return c, w - c @ Q
+    return _rows_chunked(store, w, count, True)
+
+
 _PAD_BONDS = None
 
 
