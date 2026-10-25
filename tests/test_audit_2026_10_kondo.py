@@ -1,8 +1,9 @@
 """Regressions of the 2026-10 hole hunt (docs/audit_2026_10_hole_hunt.md),
 cluster kondo: the potential term's es coverage warning on fermion chains
 (finding 2), the TASK warning for a state below the ground state (finding
-3), order=3 on a short chain and on v2 (finding 4), and nkry on the
-short-chain fallback (finding 6)."""
+3, and a state below it that the impurity spin does not reach), order=3
+on a short chain and on v2 (finding 4), and nkry on the short-chain
+fallback (finding 6)."""
 import warnings
 import numpy as np
 import pytest
@@ -78,6 +79,40 @@ def test_task_on_the_ground_state_does_not_warn():
         sc.get_kondo_spectrum(np.linspace(-0.3, 0.3, 5), T=0., mode="DMRG",
                               Jrho_s=-0.05, omega0=4., Gamma0=1e-2, kB=1.)
     assert not any("not the ground state" in str(x.message) for x in w)
+
+
+def _task_warnings(monkeypatch, coupled):
+    # a Ritz state at -0.5 next to the ground state and one excitation;
+    # the impurity spin reaches it from row 0 only when coupled
+    from dmrgpy import taskdmrg
+    from dmrgpy.kondospectrumtk.taskkondo import TaskKondoSpectrum
+    e = np.array([0., -0.5, 0.3])
+    M = np.diag([0.5, 0.5, -0.5]).astype(complex)
+    M[0, 2] = M[2, 0] = 0.4
+    if coupled:
+        M[1, 2] = M[2, 1] = 0.1
+    monkeypatch.setattr(taskdmrg, "session_spectrum",
+                        lambda chain, ops, nkry: (e, [M, 0*M, M], 10))
+    sc = heisenberg(3, itensor_version="python")
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        TaskKondoSpectrum(sc, 0, nkry=5)
+    return [str(x.message) for x in w]
+
+
+def test_task_state_below_e0_that_the_spin_does_not_reach_is_named_so(
+        monkeypatch):
+    # a promoted sector state: rounding seeds a lower charge sector, which
+    # carries no matrix element to the ground state (Ne=21 next to Ne=20)
+    msgs = _task_warnings(monkeypatch, coupled=False)
+    assert any("do not enter the spectrum" in m for m in msgs)
+    assert not any("not the ground state" in m for m in msgs)
+
+
+def test_task_state_below_e0_reached_through_an_excitation_still_warns(
+        monkeypatch):
+    msgs = _task_warnings(monkeypatch, coupled=True)
+    assert any("not the ground state" in m for m in msgs)
 
 
 def test_order3_with_a_correlator_submode_on_a_short_chain_uses_ed():

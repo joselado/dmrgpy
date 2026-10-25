@@ -61,19 +61,55 @@ class TaskKondoSpectrum():
         # below the snapping window means the state handed over is not the
         # ground state: on a near-degenerate doublet DMRG can stop at a
         # mixture of the two members, and the sums below then measured an
-        # order-one deviation from ED (2026-10 audit, finding 3).
+        # order-one deviation from ED (2026-10 audit, finding 3). The
+        # exception is a state the impurity spin does not connect to the
+        # ground state: on a state promoted from a conserved sector, P
+        # commutes with the charge, rounding seeds a lower sector and the
+        # Krylov space finds it at the bottom of the spectrum, with no
+        # matrix element to anything the sums reach (Ne=21 next to an
+        # Ne=20 sector 89 meV lower, on 7 orbitals of 20).
         if np.min(e) < 0.:
             import warnings
-            warnings.warn(
-                "get_kondo_spectrum(submode=\"TASK\"): the tangent space "
-                "of the ground state reaches a state %.3g below it, so the "
-                "state DMRG converged to is not the ground state (an "
-                "accidental near-degeneracy, or an unconverged solve). "
-                "Converge further, or pass n_gs= for a degenerate manifold."
-                % (np.min(e),), RuntimeWarning, stacklevel=4)
+            below = np.flatnonzero(e < 0.)
+            reached = connected_to_ground_state(mats)
+            coupled = below[reached[below]]
+            if len(coupled):
+                warnings.warn(
+                    "get_kondo_spectrum(submode=\"TASK\"): the tangent space "
+                    "of the ground state reaches a state %.3g below it, so the "
+                    "state DMRG converged to is not the ground state (an "
+                    "accidental near-degeneracy, or an unconverged solve). "
+                    "Converge further, or pass n_gs= for a degenerate manifold."
+                    % (np.min(e[coupled]),), RuntimeWarning, stacklevel=4)
+            else:
+                warnings.warn(
+                    "get_kondo_spectrum(submode=\"TASK\"): %d Ritz states "
+                    "lie below the ground state (the lowest %.3g below it), "
+                    "but the impurity spin does not connect them to it, so "
+                    "they do not enter the spectrum: on a state promoted "
+                    "from a conserved sector, rounding seeds a lower charge "
+                    "sector. Row 0 is the ground state, not argmin(e)."
+                    % (len(below), -np.min(e)), RuntimeWarning, stacklevel=4)
         self.e = e
         self.dim = len(self.e)
         self.tangent_dimension = dim
         self.p = np.zeros(self.dim)
         self.p[0] = 1.
         self.Sx, self.Sy, self.Sz = mats
+
+
+def connected_to_ground_state(mats, tol=1e-8):
+    """Which rows of the basis the operators in `mats` connect to row 0,
+    the ground state, through any chain of matrix elements above tol times
+    the largest one. A state outside that set has no amplitude in any of
+    the conductance sums, whatever its energy."""
+    A = sum(np.abs(M) for M in mats)
+    A = (A + A.T) > tol*max(np.max(A), 1e-300)
+    reached = np.zeros(len(A), dtype=bool)
+    reached[0] = True
+    front = [0]
+    while front:
+        new = np.flatnonzero(A[front].any(axis=0) & ~reached)
+        reached[new] = True
+        front = list(new)
+    return reached
