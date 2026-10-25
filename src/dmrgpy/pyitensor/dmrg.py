@@ -1,9 +1,11 @@
 """Two-site DMRG ground-state solver.
 
 Standard two-site sweep: build left/right environments of <psi|H|psi>,
-diagonalize the local two-site effective Hamiltonian at each bond via a
-hand-rolled Lanczos ground-state solver (_lanczos_ground_state below --
-the 2-site block is never densified beyond what its own matvec needs),
+diagonalize the local two-site effective Hamiltonian at each bond with a
+few steps of a diagonally preconditioned Davidson solver
+(_davidson_ground_state below, as ITensor's dmrg() does; the spectral-bound
+solve keeps the Lanczos solver _lanczos_ground_state -- the 2-site block is
+never densified beyond what its own matvec needs),
 SVD-split the result back into two site tensors with truncation, move the
 orthogonality center, and repeat sweeps per the given Sweeps schedule.
 
@@ -58,7 +60,7 @@ from . import kernels
 from .mpsalgebra import _link_at, inner
 from .mpsalgebra import sum as mps_sum
 from .svd import svd
-from .tensor import ITensor, contract_many, dag
+from .tensor import ITensor, commonIndex, contract_many, dag
 from .tensor import prime as _t_prime
 
 
@@ -421,6 +423,123 @@ def zero_site_heff(L, Lbra, R, Rbra, C, left_link, right_link):
 _NOISE_RNG = np.random.default_rng(0)
 
 
+# Davidson steps per two-site ground-state solve, at least: the counterpart
+# of chain_session.h's dmrg_niter_ (see the comment there for why ITensor's
+# own default of 2 is too few). The sweep schedule's niter can raise it.
+DAVIDSON_NITER = 4
+# The excited-state (overlap-penalized) solve needs more: with 4 or 8 steps
+# the excited-state tests missed ED by up to 3e-4 and lost orthogonality at
+# 2.6e-5, while 20 steps with a 1e-8 residual stop reach ED at an average of
+# 3.6 matvecs per solve.
+DAVIDSON_NITER_PENALIZED = 20
+_DAVIDSON_RTOL = 1e-12
+_DAVIDSON_RTOL_PENALIZED = 1e-8
+_DAVIDSON_VTOL = 1e-14
+
+
+def _heff_diagonal(L, Lbra, H, i, R, Rbra, order_in):
+    """The diagonal of the two-site effective Hamiltonian of
+    two_site_heff(), flattened in `order_in`'s axis order: the diagonals of
+    L, W_i, W_{i+1} and R (over their ket/bra pairs) contracted over the
+    MPO links, with no full matvec. Real, since Heff is Hermitian."""
+    xp = bk.xp()
+    H_i, H_j = H.A(i), H.A(i + 1)
+    mid = commonIndex(H_i, H_j)
+    s_i, s_j = [ind for ind in order_in if ind.hastags("Site")]
+    if L is not None:
+        a = commonIndex(L, H_i)
+        dL = xp.einsum("lal->la", L.transpose_to([order_in[0], a, Lbra]))
+        Wi = H_i.transpose_to([a, s_i, s_i.prime(1), mid])
+    else:
+        dL = bk.asarray(np.ones((1, 1)))
+        Wi = H_i.transpose_to([s_i, s_i.prime(1), mid])[None]
+    if R is not None:
+        c = commonIndex(R, H_j)
+        dR = xp.einsum("rcr->rc", R.transpose_to([order_in[-1], c, Rbra]))
+        Wj = H_j.transpose_to([mid, s_j, s_j.prime(1), c])
+    else:
+        dR = bk.asarray(np.ones((1, 1)))
+        Wj = H_j.transpose_to([mid, s_j, s_j.prime(1)])[..., None]
+    d = xp.einsum("la,asb,btc,rc->lstr", dL, xp.einsum("assb->asb", Wi),
+                  xp.einsum("bttc->btc", Wj), dR, optimize=True)
+    return d.reshape(-1).real
+
+
+def _davidson_ground_state(matvec, x0, diag, niter, rtol, hdiag=None, vtol=None):
+    """Lowest eigenpair of a Hermitian matvec by Davidson with the Jacobi
+    (diagonal) preconditioner, ITensor's davidson() in what matters: at most
+    `niter` matvecs, the correction (H_ii - theta)^-1 r, and an early stop
+    once the Ritz residual is below rtol times the operator's scale, the
+    larger of |theta| and max|hdiag|, hdiag being diag itself unless the
+    caller passes the diagonal of H without a penalty it added (whose weight
+    would otherwise loosen the stop). With vtol it also stops once the Ritz
+    value moves by less than vtol times that scale between two steps, the
+    stop _lanczos_ground_state uses. A converged sweep then takes 2 or 3
+    matvecs per bond instead of 4, about a third of the time on a 4-cell
+    sector chain at maxm=300. The vector is converged less than by the
+    200-step Lanczos solve this replaces: the energy variance of an exact
+    gapped product state (a staggered field) is 2e-12 against 7e-15, while
+    a truncation-limited state is unchanged (9.7e-6 against 9.8e-6, 16-site
+    Heisenberg chain at maxm=64). vtol=1e-14 rather than 1e-12 costs
+    nothing measurable there and keeps two runs of that product state in
+    different gauges within 4e-7 over a 40-step TDVP-GSE quench, where 1e-12
+    left 1.4e-6. Returns (eigenvalue, normalized eigenvector).
+
+    Why Davidson rather than the Lanczos above for a DMRG local solve: the
+    preconditioner is what lets a few steps per bond suffice. A sector's
+    charge penalty (sector.py) widens Heff's spectrum, and a residual-
+    stopped Lanczos then needed 140 to 200 matvecs per bond where the
+    unpenalized operator needed 2; the penalty is diagonal in the charge
+    basis, so the diagonal preconditioner absorbs it. On a 4-cell sector
+    chain at maxm=300 a 20-sweep solve went from 323 s to about 20 s on one
+    core (15 s on v3), with the energy unchanged at 1e-11.
+
+    The basis lives on the backend (the device, for a device backend); the
+    k x k Rayleigh matrix, k <= niter, comes back to the host for eigh."""
+    xp = bk.xp()
+    nx = float(bk.to_host(xp.linalg.norm(x0)))
+    if nx == 0:
+        x0 = bk.asarray(np.random.default_rng(0).standard_normal(x0.shape) + 0j)
+        nx = float(bk.to_host(xp.linalg.norm(x0)))
+    hdiag = diag if hdiag is None else hdiag
+    dscale = float(bk.to_host(xp.max(xp.abs(hdiag)))) if hdiag.size else 0.0
+    V = [x0 / nx]
+    AV = [matvec(V[0])]
+    theta_prev = None
+    for k in range(niter):
+        Vm, AVm = xp.column_stack(V), xp.column_stack(AV)
+        M = bk.to_host(Vm.conj().T @ AVm)
+        w, s = np.linalg.eigh((M + M.conj().T) / 2)
+        theta = float(w[0])
+        s0 = bk.asarray(s[:, 0])
+        u = Vm @ s0
+        r = AVm @ s0 - theta * u
+        scale = max(abs(theta), dscale)
+        rn = float(bk.to_host(xp.linalg.norm(r)))
+        if k == niter - 1 or not rn > rtol * scale:
+            break
+        if (vtol is not None and theta_prev is not None
+                and abs(theta - theta_prev) < vtol * scale):
+            break
+        theta_prev = theta
+        # a denominator near zero is clamped relative to the operator's
+        # scale, not to an absolute number, so the correction does not
+        # depend on the units of H
+        floor = 1e-12 * scale if scale > 0 else 1.0
+        den = diag - theta
+        den = xp.where(xp.abs(den) < floor, floor, den)
+        t = r / den
+        nt0 = float(bk.to_host(xp.linalg.norm(t)))
+        for _ in range(2):
+            t = t - Vm @ (Vm.conj().T @ t)
+        nt = float(bk.to_host(xp.linalg.norm(t)))
+        if not nt > 1e-10 * nt0:
+            break                    # the correction lies in the basis
+        V.append(t / nt)
+        AV.append(matvec(V[-1]))
+    return theta, u / xp.linalg.norm(u)
+
+
 def _noisy_start(x0, noise):
     """The Lanczos start x0 plus a random vector of relative weight noise
     (norm sqrt(noise)*||x0||). A Krylov space grown from a vector inside a
@@ -442,15 +561,18 @@ def _noisy_start(x0, noise):
     return x0 + (np.sqrt(noise)*nx/_xp.linalg.norm(r))*r
 
 
-def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=200,
+def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=None,
                         noise=0.0):
     """Diagonalize the 2-site effective Hamiltonian at bond (i,i+1) for its
     lowest eigenpair. Returns (energy, theta_ITensor).
 
-    niter_floor is the minimum Krylov dimension (see the comment below for
-    why 200); only a spectral-bound solve, whose answer is a window edge
-    rather than a state, passes a smaller one. noise, when positive, mixes
-    a random vector into the Lanczos start (_noisy_start)."""
+    The solve is _davidson_ground_state with max(niter, DAVIDSON_NITER)
+    steps, which leaves the converging to the sweeps, as ITensor's dmrg()
+    does. niter_floor, when given, selects the Lanczos solve with that
+    minimum Krylov dimension instead (see the comment below); only the
+    spectral-bound solve passes it, whose answer is a window edge rather
+    than a state. noise, when positive, mixes a random vector into the
+    start (_noisy_start)."""
     matvec, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
     x0 = _noisy_start(x0, noise)
 
@@ -481,7 +603,18 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=200,
         # early-stop-on-stable-Ritz-value logic means this floor costs
         # little in practice -- most bonds still exit in far fewer than
         # 200 iterations once bond dimension saturates.
-        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=max(niter, niter_floor))
+        # (This floor protected the full Lanczos solve, which stopped on a
+        # stable Ritz value; the Davidson solve below replaces it for every
+        # caller but the spectral bound, and its own step counts are set by
+        # DAVIDSON_NITER and DAVIDSON_NITER_PENALIZED.)
+        if niter_floor is not None:
+            eval0, evec0 = _lanczos_ground_state(matvec, x0,
+                                                 niter=max(niter, niter_floor))
+        else:
+            diag = _heff_diagonal(L, Lbra, H, i, R, Rbra, order_in)
+            eval0, evec0 = _davidson_ground_state(
+                matvec, x0, diag, max(niter, DAVIDSON_NITER), _DAVIDSON_RTOL,
+                vtol=_DAVIDSON_VTOL)
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(eval0.real), theta
@@ -506,7 +639,7 @@ def _apply_local_update(ket, i, theta, cutoff, maxdim, direction):
         ket.center = i
 
 
-def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=200,
+def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=None,
                     noise=0.0):
     """One full right-then-left two-site ground-state sweep against a
     fixed H, mutating psi in place. Returns the last local bond's
@@ -539,13 +672,14 @@ def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=200,
     return energy
 
 
-def dmrg(psi, H, sweeps, quiet=True, niter_floor=200, noisy_start=True):
+def dmrg(psi, H, sweeps, quiet=True, niter_floor=None, noisy_start=True):
     """Two-site ground-state DMRG. Mutates psi in place and returns the
     final energy -- mirrors ITensor's own dmrg(psi,H,sweeps,args) signature
     (minus the Args bag, which this package uses explicit kwargs for
     throughout, and minus the excited-state penalty overload -- see
-    dmrg_excited() for that). niter_floor is _local_ground_state's minimum
-    Krylov dimension; leave it alone except for a spectral-bound solve.
+    dmrg_excited() for that). niter_floor switches _local_ground_state to
+    its Lanczos solve with that minimum Krylov dimension; leave it alone
+    except for a spectral-bound solve.
     noisy_start=False keeps psi's own sector (_noisy_start), for a warm
     start the caller chose, such as one member of a degenerate level."""
     global _NOISE_RNG
@@ -797,7 +931,17 @@ def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, wei
         # early-stop-on-stable-Ritz-value logic means this floor costs
         # little in practice -- most bonds still exit in far fewer than
         # 200 iterations once bond dimension saturates.
-        eval0, evec0 = _lanczos_ground_state(matvec, x0, niter=max(niter, 200))
+        # (The Davidson solve keeps the larger budget this floor stood for:
+        # DAVIDSON_NITER_PENALIZED steps with a 1e-8 residual stop. The
+        # penalty's diagonal, weight*|proj_k|^2 elementwise, goes into the
+        # preconditioner.)
+        hdiag = _heff_diagonal(L, Lbra, H, i, R, Rbra, order_in)
+        diag = hdiag
+        for pf in proj_flats:
+            diag = diag + weight * bk.xp().abs(pf) ** 2
+        eval0, evec0 = _davidson_ground_state(
+            matvec, x0, diag, max(niter, DAVIDSON_NITER_PENALIZED),
+            _DAVIDSON_RTOL_PENALIZED, hdiag=hdiag)
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(eval0.real), theta

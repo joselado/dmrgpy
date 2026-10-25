@@ -131,15 +131,22 @@ def test_kpm_correlator_of_small_operators_scales(heisenberg6):
 # ------------------------------------------------------------ finding 10
 
 def _niter_record(monkeypatch):
-    """Record the Krylov dimension every local ground-state solve asks for."""
-    asked = []
+    """Record the Krylov dimension every local Lanczos solve asks for, and
+    the step budget of every local Davidson solve."""
+    asked, davidson = [], []
     orig = dmrgmod._lanczos_ground_state
+    orig_davidson = dmrgmod._davidson_ground_state
 
     def spy(matvec, v0, niter=30, **kw):
         asked.append(niter)
         return orig(matvec, v0, niter=niter, **kw)
+
+    def spy_davidson(matvec, x0, diag, niter, rtol, **kw):
+        davidson.append(niter)
+        return orig_davidson(matvec, x0, diag, niter, rtol, **kw)
     monkeypatch.setattr(dmrgmod, "_lanczos_ground_state", spy)
-    return asked
+    monkeypatch.setattr(dmrgmod, "_davidson_ground_state", spy_davidson)
+    return asked, davidson
 
 
 def _upper_edge(sc):
@@ -153,9 +160,10 @@ def _ed_top(sc):
 
 
 def test_upper_edge_is_capped_and_ground_state_floor_is_kept(monkeypatch):
-    """The bound solve asks for 20 Krylov steps at most; the ground-state
-    solve still asks for 200. On the 12-site Heisenberg chain Emax is the
-    ferromagnetic top 0.25*(n-1) = 2.75."""
+    """The bound solve asks for 20 Lanczos steps at most; the ground-state
+    solve is the Davidson one, with dmrg.DAVIDSON_NITER steps and no
+    Lanczos call. On the 12-site Heisenberg chain Emax is the ferromagnetic
+    top 0.25*(n-1) = 2.75."""
     n = 12
     sc = spinchain.Spin_Chain(["S=1/2"]*n, itensor_version="python")
     h = 0
@@ -164,10 +172,9 @@ def test_upper_edge_is_capped_and_ground_state_floor_is_kept(monkeypatch):
     sc.set_hamiltonian(h)
     sc.maxm, sc.nsweeps = 30, 6
     np.random.seed(1)
-    asked = _niter_record(monkeypatch)
+    asked, davidson = _niter_record(monkeypatch)
     sc.gs_energy()
-    assert asked and min(asked) == 200
-    del asked[:]
+    assert not asked and davidson and min(davidson) == dmrgmod.DAVIDSON_NITER
     emax = _upper_edge(sc)
     assert asked and max(asked) == 20
     assert emax == pytest.approx(0.25*(n - 1), abs=1e-8)

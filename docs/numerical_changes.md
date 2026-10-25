@@ -1174,3 +1174,23 @@ Heisenberg chain, and on v3 a singular A aborted the interpreter); and
 keeps (`("Nupdn",)`, `("F",)`, `("N2",)`, ...: one charge sector, error bar
 0). An NH-DMRG state that did not converge prints its warning again on
 every reuse.
+
+## The 2026-10-25 Davidson solver on `"python"`
+
+The two-site solve of `"python"` DMRG is now a Davidson solver with a
+diagonal preconditioner, at least 4 steps per bond, as v3 does. Before, it
+was Lanczos with up to 200 steps per bond. A ground state in a conserved
+sector is much faster: on a 4-cell c-f chain on native spinful sites,
+sector (8, 0), `maxm=300`, 20 sweeps on one core, 323 s before and about
+20 s now (15 s on v3). Excited states keep a larger budget, 20 steps with
+a 1e-8 residual stop. The spectral-bound solve is unchanged.
+
+| quantity | before | now |
+|---|---|---|
+| E0 of the sector chain above, against v3 (-4.081749584520) | 7e-11 | 5e-12 |
+| energy variance of an exact gapped product state (Néel state of a staggered field) | 7e-15 | 2e-12 |
+| energy variance of a 16-site Heisenberg chain at `maxm=64` | 9.8e-6 | 9.7e-6 |
+
+So the energy is unchanged at its convergence. The eigenvector of an exact
+state is converged a little less, to about 1e-6 in norm, since each bond
+stops once its energy is stable. A truncation-limited state is unchanged.
