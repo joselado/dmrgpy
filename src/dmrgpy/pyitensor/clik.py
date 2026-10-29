@@ -84,10 +84,29 @@ def mpo_product(A, B):
     return out
 
 
-def _step(psi, G, z, cutoff, maxdim, niter, hermitian):
-    """exp(G z)|psi>, normalized, and the log of the norm it had."""
-    out = tdvp_step(psi.copy(), G, 1j * z, cutoff=cutoff, maxdim=maxdim,
-                    niter=niter, hermitian=hermitian)
+def _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site=False):
+    """exp(G z)|psi>, normalized, and the log of the norm it had.
+    one_site=True is one-site TDVP after a global subspace expansion of
+    every step, the pairing of the paper; otherwise two-site TDVP.
+
+    one_site=True is experimental and off everywhere: on a generator with a
+    conserved charge it leaks out of the sector. On the seeded 3-site
+    Bose-Hubbard Lindbladian the middle bond grows past the in-sector rank
+    of 14 to 27, and the traceless branch is 0.62 off the two-site one after
+    five steps, for every expansion cutoff from 1e-10 to 1e-4. One-site TDVP
+    without the expansion does not leak (it agrees with two-site TDVP to
+    integrator error). The paper avoids this with block-sparse U(1)
+    symmetries; see docs/clik_mps_lindblad_plan.md, "Status 2026-10-30"."""
+    if one_site:
+        with bk.pad_bonds_suspended():
+            psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
+                                         maxdim=maxdim, bond_maxdim=maxdim)
+            out = tdvp_step(psi.copy(), G, 1j * z, cutoff=cutoff,
+                            maxdim=maxdim, niter=niter, num_center=1,
+                            hermitian=hermitian)
+    else:
+        out = tdvp_step(psi.copy(), G, 1j * z, cutoff=cutoff, maxdim=maxdim,
+                        niter=niter, hermitian=hermitian)
     nrm = float(np.sqrt(abs(_scalar(inner(out, out)))))
     out.normalize()
     return out, np.log(nrm)
@@ -105,26 +124,28 @@ _GSE_STEPS = 3
 _GSE_ORDER = 3
 
 
-def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None):
+def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
+                  one_site=False):
     """nk normalized snapshots exp(G z m)|psi0>, m = 0..nk-1, with a
-    global subspace expansion before each of the first _GSE_STEPS steps."""
+    global subspace expansion before each of the first _GSE_STEPS steps
+    (before every step for one_site=True)."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
     psi = psi0.copy()
     psi.normalize()
     states = [psi]
     for m in range(nk - 1):
-        if m < _GSE_STEPS:
+        if m < _GSE_STEPS and not one_site:
             with bk.pad_bonds_suspended():
                 psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
                                              maxdim=maxdim, bond_maxdim=maxdim)
-        psi, _ = _step(psi, G, z, cutoff, maxdim, niter, hermitian)
+        psi, _ = _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site)
         states.append(psi)
     return states
 
 
 def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
-                    angles=None, niter=50, hermitian=None):
+                    angles=None, niter=50, hermitian=None, one_site=False):
     """The first angle of `angles` at which the complex contour stops being
     stable, or pi/2 if none does (the paper's Algorithm 3).
 
@@ -150,7 +171,8 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
         psi.normalize()
         increments = []
         for _ in range(nsteps):
-            psi, lognorm = _step(psi, G, z, cutoff, maxdim, niter, hermitian)
+            psi, lognorm = _step(psi, G, z, cutoff, maxdim, niter, hermitian,
+                                 one_site)
             increments.append(lognorm - (lam0 * z).real)
         if np.mean(increments[nsteps // 2:]) > 0.0:
             return float(a)
@@ -257,7 +279,8 @@ class KrylovSpectrum:
 
 def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
                     cutoff=1e-10, gram_tol=1e-12, seed=0, start_maxdim=10,
-                    niter=50, starts=None, exact_residuals=False):
+                    niter=50, starts=None, exact_residuals=False,
+                    one_site=False):
     """The slowest eigenvalues of the MPO G (largest real part first) from
     the two-branch Krylov space described in the module docstring.
 
@@ -293,14 +316,16 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     else:
         psi_p, psi_u = starts
     km = KrylovMatrices(G)
-    for psi in evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter, herm):
+    for psi in evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter, herm,
+                             one_site):
         km.add(psi)
     if alpha is None:
         lam0 = project(km.M, km.Gm, gram_tol)[0][0]
         alpha = 0.25 * probe_alpha_max(G, psi_u, lam0, dt, cutoff, maxdim,
-                                       niter=niter, hermitian=herm)
+                                       niter=niter, hermitian=herm,
+                                       one_site=one_site)
     for psi in evolve_branch(G, psi_u, dt * np.exp(-1j * alpha), nk,
-                             cutoff, maxdim, niter, herm):
+                             cutoff, maxdim, niter, herm, one_site):
         km.add(psi)
     lam, C, ndim = project(km.M, km.Gm, gram_tol)
     keep = [i for i in range(2 * nk) if i not in (nk - 1, 2 * nk - 1)]

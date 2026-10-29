@@ -371,3 +371,103 @@ against ED.
    normalized, raw, or a keyword with one default.
 2. The name and signature of the Phase 1 method.
 3. A `Lindblad_Chain` class, or jumps as a keyword of the Phase 1 method.
+
+## Status 2026-10-30
+
+Committed so far: Phase 0 (Arnoldi exponentiator for non-Hermitian TDVP),
+Phase 1 (`get_krylov_spectrum`), Phase 2 (`Lindblad_Chain`), the sector
+seeds `start=(psi, phi)` with a global subspace expansion before the first
+three steps of each branch, and the paper's bookkeeping. The bookkeeping
+means two things: matrix elements grow one snapshot at a time, and `res` is
+the change of each eigenvalue when the last snapshot of each branch is
+dropped, with the exact residual opt-in (`exact_residuals=True`). The full
+test suite has not been run since Phase 0. The user asked for it once, at
+the very end, so it is the first thing to do.
+
+**What the paper does about cost.** I read the paper for this, and these
+are its statements. Matrix elements are "linear in the number of time
+evolved states" per step and "can be calculated in parallel".
+⟨⟨ρ|L†L|ρ⟩⟩ is computed "directly inside the Krylov subspace", but only
+for the steady-state bound of Appendix G, never for every pair or every
+mode. Convergence is judged by tracking the spectrum, with "no automated
+escape criteria". The large runs use 340 to 400 states at χ up to 2400 in
+SyTen. No CLIK-MPS runtimes or MPO bond dimensions are given.
+
+**The tracking estimate is not an error bar.** On 6-site chains against
+ED it was 3 to 40 times smaller than the true error of the eigenvalue. For
+example, the fourth Heisenberg level was 1.1e-5 off while it moved by only
+2.6e-7. It ranks the modes by convergence correctly (`tr.py`).
+
+**The paper's 5-site Bose-Hubbard check was not finished.** The target is
+5 sites, 4 bosons, J=U=κ=1, λ1 = -0.84+0.81i, run as `bh.py 64 20 0.5 ed`.
+It was stopped by the user after about 25 minutes, still in the
+evolution. The seeded 3-site version (`bh_small.py`) matches ED and is
+pinned in `tests/test_lindblad.py`.
+
+**Where the time goes (profiling subagent, `tdvp_profile/`).** The 5-site
+case is a doubled chain of 10 sites with local dimension 5. The MPO of L
+has bond dimensions 1, 8, 22, 14, 22, 14, 22, 14, 22, 8, and an exact SVD
+sweep does not shrink it. One two-site TDVP step at χ=64 takes about 56 s,
+so 2 branches × 19 steps is about 35 minutes of evolution. Of the step
+time, 74% is the local matvec, which already runs at the one-thread BLAS
+peak (about 35 GFlop/s), and about 17% is Arnoldi bookkeeping, mostly
+copying the conjugated basis every iteration. The SVDs, the environments
+and the expm are negligible. Options it measured or estimated:
+
+- One-site TDVP. Its solves cost 23 ms per iteration against 142 ms for
+  two-site, so it estimated 2 to 3 times faster steps, without the cost of
+  the expansion.
+- A row-major Krylov basis: 42 → 16 ms per iteration in a microbenchmark,
+  about 12% overall by estimate. It was not verified end to end, because
+  machine load spoiled that run.
+- `errgoal` 1e-8 or 1e-6: 33 → 29 or 25 matvecs, against the documented
+  1e-10 rule.
+- Two things did not help: selective reorthogonalization (the second pass
+  fired 97% of the time) and MPO sparsity.
+
+The Hermitian case was not profiled.
+
+**One-site TDVP with expansion leaks out of the sector**
+(`clik._step(one_site=True)`, experimental, off everywhere). On the seeded
+3-site Bose-Hubbard Lindbladian, the in-sector Schmidt rank at the middle
+cut is exactly 14; counting the (N_ket, N_bra) blocks across the cut gives
+that number. Two-site TDVP stays at 14. With an expansion before every
+one-site step, the middle bond grows to 27, and the traceless branch
+drifts from the two-site one: 1 - overlap = 2.4e-3, 2.1e-2, 0.14, 0.37 and
+0.62 over five steps of dt=0.5 (`os2.py`, `os4.py`). The steady state is
+still right, to 1e-6, but the slow modes are off by order 1. Two things
+are measured:
+
+- One-site TDVP without the expansion, started from the full-rank in-sector
+  snapshot, agrees with two-site TDVP to integrator error: 1.3e-5, 1.7e-9
+  and 1.8e-13 at dt = 0.5, 0.1 and 0.02. The bond stays at 14 (`os3.py`).
+  So the integrator is fine.
+- Raising the expansion cutoff from 1e-10 to 1e-4 does not stop the leak
+  (`os4.py`). So it does not come from tiny-weight bond directions, and its
+  source is open.
+
+The paper enforces both sublattice U(1) symmetries "to keep truncation
+errors from leaking into unphysical sectors" (Appendix H). In pyitensor a
+sector grading does not confine: storage is dense, link indices carry no
+charges, and `sector.py` confines variational solves only with a charge
+penalty. The candidates are:
+
+- a penalty on the generator, G' = G - λ[(N_ket-N)² + (N_bra-N)²], which
+  equals G on the target sector;
+- link-index charges in the tensor core, which is a rewrite;
+- dropping the one-site route.
+
+Whether one-site is faster at all was never measured on the 5-site case
+(`os_time.py` was stopped before its first step). On 4 sites it was
+slower, 14.3 s against 13.3 s.
+
+**Open, in order.**
+
+1. Run the full test suite.
+2. Decide whether one-site TDVP is worth pursuing. Time it first with
+   `os_time.py` on a quiet machine, and only then choose among the three
+   candidates above.
+3. Finish the 5-site check, possibly as a Slurm job.
+4. Left eigenvectors (Phase 1b), the Hermiticity projection of the steady
+   state, and the Phase 0 leftovers: the ED-against-DMRG norm convention,
+   the `julia_live` check and the audit record.
