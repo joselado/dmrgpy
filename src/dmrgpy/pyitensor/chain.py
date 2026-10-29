@@ -961,18 +961,25 @@ class Chain:
 
     def krylov_spectrum(self, terms_g, nk=20, dt=0.5, alpha=None,
                         gram_tol=1e-12, seed=0, starts=None,
-                        exact_residuals=False):
+                        exact_residuals=False, traceless=False):
         """clik.krylov_spectrum on the MPO of terms_g, evolved at this
         chain's maxm and cutoff; returns the clik.KrylovSpectrum. `starts`
         is a pair of local-vector lists, one vector per site, for the two
-        product-state starts (None: random starts)."""
+        product-state starts (None: random starts). traceless=True, for a
+        Lindbladian on a doubled chain, deflates the second start against
+        the vectorized identity (clik.krylov_spectrum's `deflate`)."""
         G = self._mpo(terms_g)
+        deflate = None
+        if traceless:
+            from .vectorize import identity_mps
+            deflate = identity_mps(self.sites)
         if starts is not None:
             from .metts import product_state
             starts = tuple(product_state(self.sites, v) for v in starts)
         return _clik_krylov_spectrum(G, self.sites, nk=nk, dt=dt, alpha=alpha,
                 maxdim=self.maxm, cutoff=self.cutoff, gram_tol=gram_tol,
-                seed=seed, starts=starts, exact_residuals=exact_residuals)
+                seed=seed, starts=starts, exact_residuals=exact_residuals,
+                deflate=deflate)
 
     def hermitian_operator(self, A):
         return mpo_dagger(A)

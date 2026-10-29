@@ -66,7 +66,9 @@ backend; the 2nk x 2nk algebra is host work, as in task.py.
 import numpy as np
 
 from . import backend as bk
-from .mpsalgebra import inner, mpo_dagger, mpo_is_hermitian, nmultMPO, randomMPS
+from .mpsalgebra import (BatchedBras, _bond_dims, inner, mpo_arrays_device,
+                         mpo_dagger, mpo_is_hermitian, nmultMPO, randomMPS,
+                         sum as mps_sum)
 from .gse import global_subspace_expand
 from .tdvp import tdvp_step
 
@@ -160,7 +162,8 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
     why the default angle is a quarter of what this returns.
 
     For a Hermitian generator every Im(lambda) vanishes, nothing overtakes,
-    and pi/2 comes back; the angle then only scales the damping."""
+    and pi/2 comes back; the angle then only scales the damping, and
+    krylov_spectrum does not call this at all."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
     if angles is None:
@@ -179,29 +182,74 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
     return np.pi / 2
 
 
+def _deflated(psi, d):
+    """psi - (<d|psi>/<d|d>) d, or psi itself when that component is
+    already below 1e-14 of it (a seeded traceless start)."""
+    c = _scalar(inner(d, psi)) / _scalar(inner(d, d))
+    if abs(c) * np.sqrt(abs(_scalar(inner(d, d)))) <= (
+            1e-14 * np.sqrt(abs(_scalar(inner(psi, psi))))):
+        return psi
+    return mps_sum(psi, (-c) * d)
+
+
 class KrylovMatrices:
     """The stored states with M_ij = <rho_i|rho_j> and G_ij =
-    <rho_i|G|rho_j>, grown one state at a time."""
+    <rho_i|G|rho_j>, grown one state at a time.
 
-    def __init__(self, G):
+    A new state psi gets its column from batched sweeps over every stored
+    state as a bra (mpsalgebra.BatchedBras): <rho_i|psi>, <rho_i|G|psi>,
+    and its row as <psi|G|rho_i> = conj(<rho_i|G^dag|psi>), or as the
+    conjugate of the column when G is Hermitian. That is three sweeps per
+    state (two for a Hermitian G) instead of three inner() calls per pair,
+    the same arithmetic with far fewer Python-level contractions. The
+    bras go through the sweep in chunks of at most _CHUNK_ENTRIES entries
+    of the largest intermediate, so memory stays bounded at large chi."""
+
+    _CHUNK_ENTRIES = 2 ** 23
+
+    def __init__(self, G, hermitian=None):
         self.G = G
+        self.hermitian = (mpo_is_hermitian(G) if hermitian is None
+                          else hermitian)
+        self._Wa = mpo_arrays_device(G)
+        self._Wd = None if self.hermitian else mpo_arrays_device(mpo_dagger(G))
         self.states = []
         self.M = np.zeros((0, 0), dtype=complex)
         self.Gm = np.zeros((0, 0), dtype=complex)
 
+    def _chunks(self, psi):
+        """The stored states split into groups whose batched sweep keeps
+        its largest intermediate under _CHUNK_ENTRIES entries."""
+        chi = max(_bond_dims(psi).values(), default=1)
+        chi_b = max((max(_bond_dims(r).values(), default=1)
+                     for r in self.states), default=1)
+        w = max(a.shape[0] * a.shape[1] for a in self._Wa)
+        per_bra = max(chi * chi_b * w * max(a.shape[2] for a in self._Wa), 1)
+        size = max(1, self._CHUNK_ENTRIES // per_bra)
+        return [self.states[i:i + size]
+                for i in range(0, len(self.states), size)]
+
     def add(self, psi):
         n = len(self.states)
         self.states.append(psi)
+        col_M, col_G, row_G = [], [], []
+        for chunk in self._chunks(psi):
+            bb = BatchedBras(chunk)
+            col_M.append(bb.overlaps(psi))
+            col_G.append(bb.sandwiches(self._Wa, psi))
+            if not self.hermitian:
+                row_G.append(np.conj(bb.sandwiches(self._Wd, psi)))
+        col_M = np.concatenate(col_M)
+        col_G = np.concatenate(col_G)
+        row_G = np.conj(col_G) if self.hermitian else np.concatenate(row_G)
         M = np.zeros((n + 1, n + 1), dtype=complex)
         Gm = np.zeros((n + 1, n + 1), dtype=complex)
         M[:n, :n] = self.M
         Gm[:n, :n] = self.Gm
-        for i, rho in enumerate(self.states):
-            M[i, n] = _scalar(inner(rho, psi))
-            M[n, i] = np.conj(M[i, n])
-            Gm[i, n] = _scalar(inner(rho, self.G, psi))
-            if i < n:
-                Gm[n, i] = _scalar(inner(psi, self.G, rho))
+        M[:, n] = col_M
+        M[n, :n] = np.conj(col_M[:n])
+        Gm[:, n] = col_G
+        Gm[n, :n] = row_G[:n]
         self.M, self.Gm = M, Gm
 
 
@@ -280,7 +328,7 @@ class KrylovSpectrum:
 def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
                     cutoff=1e-10, gram_tol=1e-12, seed=0, start_maxdim=10,
                     niter=50, starts=None, exact_residuals=False,
-                    one_site=False):
+                    one_site=False, deflate=None):
     """The slowest eigenvalues of the MPO G (largest real part first) from
     the two-branch Krylov space described in the module docstring.
 
@@ -292,7 +340,14 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     a pair of MPS, replaces the two random starts (real branch first): the
     way to keep the space inside one sector of a conserved quantity of G.
     exact_residuals=True adds ||G r - lambda r|| for every eigenvector (see
-    the module docstring for its cost).
+    the module docstring for its cost). `deflate`, an MPS d, takes the
+    component along d out of the second start, psi_u - (<d|psi_u>/<d|d>) d,
+    at the cost of dim(d) more bond on that start. For a Lindbladian d is
+    the identity |1>>, the left steady state, so the second start is
+    traceless, as in the paper: exp(L z) conserves the trace, the branch
+    then never contains the steady state, and its snapshots go to the
+    slowest decaying modes instead. On a driven 4-site XXZ chain this took
+    the gap mode from 2.2e-4 to 8.9e-5 off ED at the Lindblad defaults.
 
     The defaults are measured, on 6-site chains against ED with the
     hopping as the unit. A small dt makes consecutive imaginary-time
@@ -315,11 +370,18 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
         psi_u = randomMPS(sites, m0, rng=rng)
     else:
         psi_p, psi_u = starts
-    km = KrylovMatrices(G)
+    if deflate is not None:
+        psi_u = _deflated(psi_u, deflate)
+    km = KrylovMatrices(G, herm)
     for psi in evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter, herm,
                              one_site):
         km.add(psi)
-    if alpha is None:
+    if alpha is None and herm:
+        # Every Im(lambda) of a Hermitian G vanishes, so alpha_max is pi/2
+        # exactly; the probe would spend 7 x 8 evolution steps, more than
+        # both branches together at nk=20, to say so.
+        alpha = 0.25 * np.pi / 2
+    elif alpha is None:
         lam0 = project(km.M, km.Gm, gram_tol)[0][0]
         alpha = 0.25 * probe_alpha_max(G, psi_u, lam0, dt, cutoff, maxdim,
                                        niter=niter, hermitian=herm,

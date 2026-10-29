@@ -244,6 +244,67 @@ class BatchedBras:
             E = _batched_overlap_site(E, self._bras[i], kets[i])
         return np.asarray(bk.to_host(E.reshape(self._batch)))
 
+    def sandwiches(self, mpo, ket):
+        """[<bra_b|mpo|ket> for b] from one batched sweep, `mpo` given as
+        mpo_arrays_device(W) so that a caller sandwiching many kets with
+        one operator converts it once. The same numbers as a loop of
+        inner(bra_b, W, ket), with every bra carried through each GEMM at
+        once; on small chains the loop is dominated by Python overhead
+        (2729 inner calls were 65% of a 4-site Lindblad spectrum)."""
+        _xp = bk.xp()
+        kets = _mps_arrays_lpr_device(ket)
+        if len(kets) != self._nsites or len(mpo) != self._nsites:
+            raise ValueError("BatchedBras.sandwiches: the ket, the MPO and "
+                             "the bras need the same number of sites")
+        E = _xp.ones((self._batch, 1, 1, 1), dtype=complex)
+        for i in range(self._nsites):
+            E = _batched_sandwich_site(E, self._bras[i], mpo[i], kets[i])
+        return np.asarray(bk.to_host(E.reshape(self._batch)))
+
+
+def mpo_arrays_device(W):
+    """Every site tensor of the MPO W as a (w_left, s_out, s_in, w_right)
+    array in the active backend, length-1 axes at the open ends; s_out is
+    the primed (output) site index, contracted with the bra."""
+    n = W.length()
+    out = []
+    for i in range(1, n + 1):
+        T = W.A(i)
+        sites = [ind for ind in T.inds if ind.hastags("Site")]
+        s_in = next(ind for ind in sites if ind.plev == 0)
+        s_out = next(ind for ind in sites if ind.plev == 1)
+        left = commonIndex(W.A(i - 1), T) if i > 1 else None
+        right = commonIndex(T, W.A(i + 1)) if i < n else None
+        order = [ind for ind in (left, s_out, s_in, right) if ind is not None]
+        arr = T.transpose_to(order)
+        if left is None:
+            arr = arr.reshape((1,) + arr.shape)
+        if right is None:
+            arr = arr.reshape(arr.shape + (1,))
+        out.append(bk.asarray(arr))
+    return out
+
+
+def _batched_sandwich_site(E, bra, W, ket):
+    """One site of BatchedBras.sandwiches(): E[b,a,w,c] -> E'[b,A,v,C],
+    with bra (B, a, e, A) conjugated and padded, W (w, e, d, v) and ket
+    (c, d, C): three GEMMs, ket first, then the MPO, then the bras."""
+    _xp = bk.xp()
+    B, a, w, c = E.shape
+    _, d, C = ket.shape
+    _, e, _, v = W.shape
+    A = bra.shape[3]
+    X = _xp.matmul(E.reshape(B * a * w, c), ket.reshape(c, d * C))
+    X = X.reshape(B, a, w, d, C).transpose(0, 1, 4, 2, 3)
+    Y = _xp.matmul(X.reshape(B * a * C, w * d),
+                   W.transpose(0, 2, 1, 3).reshape(w * d, e * v))
+    Y = Y.reshape(B, a, C, e, v).transpose(0, 2, 4, 1, 3)
+    Z = _xp.matmul(Y.reshape(B, C * v, a * e), bra.reshape(B, a * e, A))
+    return Z.reshape(B, C, v, A).transpose(0, 3, 2, 1)
+
+
+_batched_sandwich_site = bk.jit(_batched_sandwich_site)
+
 
 def _dag_local(T):
     from .tensor import dag

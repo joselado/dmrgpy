@@ -200,7 +200,8 @@ class Lindblad_Chain():
         starts = None if start is None else self._seeds(*start)
         ks = krylov_spectrum_dmrg(dc, self.L, nk=nk, dt=dt, alpha=alpha,
                                   gram_tol=gram_tol, seed=seed, starts=starts,
-                                  exact_residuals=exact_residuals)
+                                  exact_residuals=exact_residuals,
+                                  traceless=True)
         one = identity_mps(dc._session.sites)
         traces = np.array([inner(one, rho) for rho in ks.states])
 
