@@ -3746,6 +3746,25 @@ the site set of every wavefunction handed to `vev`/`apply_operator`/
 mode on both backends, for the physical reason on this one: it averages
 over an ensemble sampled from every sector at once.
 
+**Spectrum from time-evolved snapshots (`pyitensor/clik.py`,
+`krylovspectrum.py`).** `Many_Body_Chain.get_krylov_spectrum` is the
+eigensolver of arXiv:2509.07709 for any generator G (default `-H`), and is
+Phase 1 of `docs/clik_mps_lindblad_plan.md`. It exists on `"python"` only.
+Every other backend raises `NotImplementedError`, and so does a conserved
+sector, since the random starts are not confined to it. `mode="ED"` is a
+dense `eig` of G in the same order. The evolution is `tdvp_step` with
+`dt -> i z` on the MPO of G itself, so G's Hermiticity picks the
+exponentiator once, as in the chain loops. Two things are easy to get
+wrong. First, `nmultMPO(X, prime(Y))` followed by `mapPrime(2, 1)` is the
+product `Y X`, so `clik.mpo_product(A, B)` swaps its arguments to return
+`A B`; this is pinned in `tests/test_krylov_spectrum.py`. Second, the
+residual is a quadratic form in the snapshot coefficients, a difference of
+numbers of order `||G||^2`, so it cannot certify residuals below about 1e-8
+of the operator scale. Above that floor it agrees with the residual of the
+reconstructed MPS to three digits. Random starts come from
+`randomMPS(..., rng=)`, never from the global stream (2026-10-23 finding
+11).
+
 ### 4.6 The Julia backend (`mpsjulialive/`)
 
 `itensor_version="julia_live"` drives a live, in-process Julia session

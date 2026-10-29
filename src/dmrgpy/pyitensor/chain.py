@@ -32,6 +32,7 @@ from .svd import svd
 from .sweeps import Sweeps
 from .mpscontainer import _link_at
 from .tdvp import tdvp_step as _tdvp_step_fn
+from .clik import krylov_spectrum as _clik_krylov_spectrum
 from .tebd import TEBDEvolver as _TEBDEvolver
 from .gse import global_subspace_expand as _global_subspace_expand_fn
 from .kpm_energy_truncation import energy_truncate as _kpm_energy_truncate
@@ -957,6 +958,15 @@ class Chain:
 
     def trace_operator(self, A):
         return traceC(A)
+
+    def krylov_spectrum(self, terms_g, nk=20, dt=0.5, alpha=None,
+                        gram_tol=1e-12, seed=0):
+        """clik.krylov_spectrum on the MPO of terms_g, evolved at this
+        chain's maxm and cutoff; returns the clik.KrylovSpectrum."""
+        G = self._mpo(terms_g)
+        return _clik_krylov_spectrum(G, self.sites, nk=nk, dt=dt, alpha=alpha,
+                maxdim=self.maxm, cutoff=self.cutoff, gram_tol=gram_tol,
+                seed=seed)
 
     def hermitian_operator(self, A):
         return mpo_dagger(A)

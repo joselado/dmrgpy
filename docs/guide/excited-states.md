@@ -195,6 +195,48 @@ time the unconverged state is used.
     --8<-- "excited-states_nonhermitian/plot.py"
     ```
 
+## Spectrum from time evolution
+
+We will now see a second way to get several low eigenvalues at once, for a
+Hermitian or a non-Hermitian $H$. We evolve two random states in imaginary
+time, $|\rho_m\rangle=e^{Gzm}|\rho_0\rangle$ with $G=-H$, and keep every
+snapshot. One state evolves along $z=\delta t$, the other along the complex
+contour $z=\delta t\,e^{-i\alpha}$, which slows down the decay of modes
+with $\mathrm{Im}\,\lambda>0$. Then we diagonalize $G$ in the space spanned
+by the snapshots. The eigenvalues $\lambda$ with the largest real part come
+first, so for $G=-H$ the energies are $E=-\lambda$, lowest first. This is
+the method of arXiv:2509.07709, where $G$ is a Lindbladian.
+
+```python
+sc = spinchain.Spin_Chain(["S=1/2" for i in range(n)], itensor_version="python")
+sc.set_hamiltonian(h)
+ev, res, obs = sc.get_krylov_spectrum()  # eigenvalues of G = -H
+es = -ev                                 # energies, lowest first
+zz = obs(sc.Sz[0]*sc.Sz[1], 0)           # <Sz0 Sz1> in the lowest state
+```
+
+`res[k]` is the residual $\lVert G|r_k\rangle-\lambda_k|r_k\rangle\rVert$
+of the normalized eigenvector. Only the eigenvalues with a small residual
+are converged; the others are rough estimates. On the 20-site chain the
+lowest energy agrees with `gs_energy()` to $10^{-5}$, with a residual of
+about $5\times10^{-3}$. For a Hermitian $H$ each energy is an upper bound
+on the exact one at the same position. Two random starts give at most two
+copies of a degenerate level, so a triplet appears twice. The keywords are:
+
+- `G`: the generator, a `MultiOperator` (default $-H$).
+- `nk`: the number of snapshots per state (default 20).
+- `dt`: the time step (default 0.5). A small `dt` gives snapshots that are
+  almost parallel, and the spectrum becomes worse.
+- `alpha`: the contour angle (default: estimated from a short run).
+- `gram_tol`: relative threshold below which directions of the snapshot
+  space are dropped (default `1e-12`).
+- `mode="ED"`: every eigenvalue of the dense $G$, in the same order, as a
+  reference.
+
+!!! note "Backends"
+    `get_krylov_spectrum` runs on `itensor_version="python"` only, and
+    not yet in a conserved sector.
+
 ## Generalized eigenvalue problem
 
 For a Hermitian positive definite

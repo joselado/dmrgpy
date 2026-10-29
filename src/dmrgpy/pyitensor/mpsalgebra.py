@@ -602,12 +602,14 @@ def nmultMPO(A, B, cutoff=0.0, maxdim=None):
     return _apply_chain(A, B, MPO, cutoff=cutoff, maxdim=maxdim)
 
 
-def randomMPS(sites, m):
+def randomMPS(sites, m, rng=None):
     """A random MPS at (at most) bond dimension m, immediately
     canonicalized (bond dimension capped by the smaller Hilbert space on
     either side of each cut, matching how an MPS's bond dimension is
     physically meaningless beyond that) and normalized. Mirrors
-    mpscpp3/chain_session.h's default_mps()."""
+    mpscpp3/chain_session.h's default_mps(). `rng`, a numpy Generator,
+    draws the entries from a caller's own stream; None keeps the global
+    np.random stream every existing caller uses."""
     n = sites.length()
     dims = [sites.dim(i) for i in range(1, n + 1)]
 
@@ -633,7 +635,10 @@ def randomMPS(sites, m):
         if i < n - 1:
             inds.append(links[i])
         shape = tuple(ind.dim for ind in inds)
-        arr = np.random.randn(*shape) + 1j * np.random.randn(*shape)
+        if rng is None:
+            arr = np.random.randn(*shape) + 1j * np.random.randn(*shape)
+        else:
+            arr = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
         tensors.append(ITensor(tuple(inds), arr))
 
     mps = MPS(tensors)

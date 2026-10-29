@@ -12,7 +12,22 @@ Arnoldi exponentiator for a non-Hermitian MPO, and "python" now matches v3
 `tests/test_nh_time_evolution.py`, recorded in `docs/numerical_changes.md`,
 and checked under the JAX backend (1e-13 from NumPy). Three things are open
 in Phase 0: the ED-against-DMRG norm convention (decision 1 in section 8),
-the `julia_live` check, and an audit record. Phase 1 can start.
+the `julia_live` check, and an audit record.
+
+**Phase 1 implemented (2026-10-29)** as `Many_Body_Chain.get_krylov_spectrum`
+(`pyitensor/clik.py`, `krylovspectrum.py`, `tests/test_krylov_spectrum.py`,
+user guide "Excited states"). Measured at the defaults (`nk=20`, `dt=0.5`,
+`gram_tol=1e-12`) on 6-site chains against ED: Heisenberg ground state
+1e-11, first triplet 1e-8, and the lowest four levels of the three
+non-Hermitian test chains 3e-7 to 2.6e-4. The 20-site Heisenberg ground
+state is 1.1e-5 from DMRG. Three findings change the plan. First,
+`dt=0.1` is too small: consecutive snapshots are nearly parallel and the
+lowest levels stay 1e-3 off, which is why the default is 0.5. Second, at
+equal Krylov size the contour angle gave no measurable gain on these
+Hamiltonian chains, so the test planned for it was not pinned; its
+benefit is expected for Lindbladian modes and is checked in Phase 2.
+Third, two random starts resolve at most two copies of a degenerate
+level. Left eigenvectors (Phase 1b) are not done.
 
 ## 1. The idea
 

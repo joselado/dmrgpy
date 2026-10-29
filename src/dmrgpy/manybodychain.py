@@ -1235,6 +1235,14 @@ class Many_Body_Chain():
       Hamiltonian is set."""
       groundstate.require_hamiltonian(self)
       return self.get_ED_obj()
+  def get_krylov_spectrum(self,G=None,nk=20,dt=0.5,alpha=None,
+          gram_tol=1e-12,seed=0,mode="DMRG"):
+      """Slowest eigenvalues of a generator G (default -H, so the energies
+      are -ev) from a Krylov space of time-evolved states; returns
+      (ev,res,obs). See krylovspectrum.py"""
+      from .krylovspectrum import get_krylov_spectrum
+      return get_krylov_spectrum(self,G=G,nk=nk,dt=dt,alpha=alpha,
+              gram_tol=gram_tol,seed=seed,mode=mode)
   def nhdmrg(self,**kwargs):
       """Non-Hermitian DMRG (itensor_version 2, 3 or "python"): return
       (energy,psil,psir), the eigenvalue with smallest real part of the
