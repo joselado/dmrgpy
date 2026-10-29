@@ -50,6 +50,7 @@ import numpy as np
 
 from . import backend as bk
 from .mpsalgebra import inner, mpo_dagger, mpo_is_hermitian, nmultMPO, randomMPS
+from .gse import global_subspace_expand
 from .tdvp import tdvp_step
 
 
@@ -75,14 +76,31 @@ def _step(psi, G, z, cutoff, maxdim, niter, hermitian):
     return out, np.log(nrm)
 
 
+# Steps of each branch preceded by a global subspace expansion, and its
+# Krylov order. Two-site TDVP cannot move a product state under terms that
+# couple next-nearest neighbors, which on the doubled chain of a
+# Lindbladian is every hopping and every dissipator: the projected
+# generator is then diagonal, and a seeded product start never moved
+# (two eigenvalues, residual 10, on the 5-site Bose-Hubbard check).
+# Expanding with G|psi> and G^2|psi> first gives the bonds the directions
+# those terms need; after a few steps two-site TDVP grows them itself.
+_GSE_STEPS = 3
+_GSE_ORDER = 3
+
+
 def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None):
-    """nk normalized snapshots exp(G z m)|psi0>, m = 0..nk-1."""
+    """nk normalized snapshots exp(G z m)|psi0>, m = 0..nk-1, with a
+    global subspace expansion before each of the first _GSE_STEPS steps."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
     psi = psi0.copy()
     psi.normalize()
     states = [psi]
-    for _ in range(nk - 1):
+    for m in range(nk - 1):
+        if m < _GSE_STEPS:
+            with bk.pad_bonds_suspended():
+                psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
+                                             maxdim=maxdim, bond_maxdim=maxdim)
         psi, _ = _step(psi, G, z, cutoff, maxdim, niter, hermitian)
         states.append(psi)
     return states
@@ -187,7 +205,7 @@ class KrylovSpectrum:
 
 def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
                     cutoff=1e-10, gram_tol=1e-12, seed=0, start_maxdim=10,
-                    niter=50):
+                    niter=50, starts=None):
     """The slowest eigenvalues of the MPO G (largest real part first) from
     the two-branch Krylov space described in the module docstring.
 
@@ -195,7 +213,9 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     second branch (None: a quarter of probe_alpha_max; 0 puts it on the
     real contour too, from its own random start), maxdim and
     cutoff for the TDVP evolution, gram_tol the relative deflation
-    threshold of the Gram matrix, seed for the two random starts.
+    threshold of the Gram matrix, seed for the two random starts. `starts`,
+    a pair of MPS, replaces the two random starts (real branch first): the
+    way to keep the space inside one sector of a conserved quantity of G.
 
     The defaults are measured, on 6-site chains against ED with the
     hopping as the unit. A small dt makes consecutive imaginary-time
@@ -213,11 +233,14 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     rng = np.random.default_rng(seed)
     herm = mpo_is_hermitian(G)
     m0 = max(1, min(int(maxdim), int(start_maxdim)))
-    states = evolve_branch(G, randomMPS(sites, m0, rng=rng), dt, nk,
-                           cutoff, maxdim, niter, herm)
+    if starts is None:
+        psi_p = randomMPS(sites, m0, rng=rng)
+        psi_u = randomMPS(sites, m0, rng=rng)
+    else:
+        psi_p, psi_u = starts
+    states = evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter, herm)
     Gm = matrix_elements(states, G)
     M = matrix_elements(states)
-    psi_u = randomMPS(sites, m0, rng=rng)
     if alpha is None:
         lam0 = project(M, Gm, gram_tol)[0][0]
         alpha = 0.25 * probe_alpha_max(G, psi_u, lam0, dt, cutoff, maxdim,

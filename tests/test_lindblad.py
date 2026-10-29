@@ -143,3 +143,34 @@ def test_refuses_fermions():
     fc = fermionchain.Fermionic_Chain(2, itensor_version="python")
     with pytest.raises(NotImplementedError):
         Lindblad_Chain(fc, [fc.C[0]], H=fc.N[0])
+
+
+def test_seeded_sector_bose_hubbard_against_ed():
+    """The paper's model on 3 sites, 2 bosons. Number conservation gives
+    one steady state per sector; seeding |psi><psi| and |psi><phi| keeps the
+    space in N=2. Without the global subspace expansion of the first steps,
+    two-site TDVP never moved these product starts (the next-nearest-
+    neighbor terms of the doubled chain). Measured: occupations 1e-7, the
+    slowest pair 1e-5 with residual 3e-6."""
+    L, N = 3, 2
+    bc = bosonchain.Bosonic_Chain(L, maxnb=[N + 1] * L,
+                                  itensor_version="python")
+    h = sum(-(bc.Adag[j + 1] * bc.A[j] + bc.Adag[j] * bc.A[j + 1])
+            for j in range(L - 1))
+    h = h + 0.5 * sum(bc.N[j] * (bc.N[j] - 1) for j in range(L))
+    bc.set_hamiltonian(h)
+    bc.maxm = 64
+    jumps = [(bc.Adag[j + 1] + bc.Adag[j]) * (bc.A[j + 1] - bc.A[j])
+             for j in range(L - 1)]
+    lc = Lindblad_Chain(bc, jumps)
+    lam, res, obs = lc.get_spectrum(nk=20, dt=0.5, start=([1, 1, 0], [0, 1, 1]))
+    n_dmrg = [obs(bc.N[j], 0).real for j in range(L)]
+    bc.set_conserved_sector(Nb=N)
+    lam_ed, _, obs_ed = lc.get_spectrum(mode="ED")
+    assert abs(lam[0]) < 1e-6
+    for j in range(L):
+        assert abs(n_dmrg[j] - obs_ed(bc.N[j], 0).real) < 1e-5
+    target = lam_ed[1] if lam_ed[1].imag > 0 else lam_ed[2]  # Im > 0 member
+    k = int(np.argmin(np.abs(lam - target)))
+    assert abs(lam[k] - target) < 1e-4
+    assert res[k] < 1e-4

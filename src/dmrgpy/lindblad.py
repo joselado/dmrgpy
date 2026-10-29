@@ -149,7 +149,7 @@ class Lindblad_Chain():
         self._spectrum = None
 
     def get_spectrum(self, nk=20, dt=2.0, alpha=None, gram_tol=1e-12,
-                     seed=0, mode="DMRG"):
+                     seed=0, start=None, mode="DMRG"):
         """(lam, res, obs): eigenvalues of L, largest real part first (the
         steady state, lambda ~ 0, comes first), the residual of each
         normalized eigenvector, and obs(O, k) = Tr(O r_k)/Tr(r_k) for an
@@ -164,11 +164,17 @@ class Lindblad_Chain():
         9e-7 off at nk*dt=40, hence dt=2.0 here against 0.5 for a
         Hamiltonian. A conserved quantity of L (a strong symmetry) gives one
         steady state per sector, and random starts then find a degenerate
-        set at lambda ~ 0."""
+        set at lambda ~ 0. `start=(psi, phi)`, two lists with one local
+        basis state per physical site (the occupation, for bosons), seeds
+        the two branches with |psi><psi| and the traceless |psi><phi|
+        instead of random states, as in arXiv:2509.07709. Both lie in the
+        sector of psi when phi has the same charge, and the evolution
+        keeps them there, so only that sector's steady state and modes
+        appear."""
         if mode == "ED":
             out = self._spectrum_ed()
         elif mode == "DMRG":
-            out = self._spectrum_dmrg(nk, dt, alpha, gram_tol, seed)
+            out = self._spectrum_dmrg(nk, dt, alpha, gram_tol, seed, start)
         else:
             raise ValueError("Lindblad_Chain: unrecognized mode " + repr(mode))
         self._spectrum = out
@@ -182,13 +188,14 @@ class Lindblad_Chain():
             self.get_spectrum(**kwargs)
         return self._spectrum[2](O, 0)
 
-    def _spectrum_dmrg(self, nk, dt, alpha, gram_tol, seed):
+    def _spectrum_dmrg(self, nk, dt, alpha, gram_tol, seed, start=None):
         from .krylovspectrum import krylov_spectrum_dmrg
         from .pyitensor.mpsalgebra import inner
         from .pyitensor.vectorize import identity_mps
         dc = self.doubled
+        starts = None if start is None else self._seeds(*start)
         ks = krylov_spectrum_dmrg(dc, self.L, nk=nk, dt=dt, alpha=alpha,
-                                  gram_tol=gram_tol, seed=seed)
+                                  gram_tol=gram_tol, seed=seed, starts=starts)
         one = identity_mps(dc._session.sites)
         traces = np.array([inner(one, rho) for rho in ks.states])
 
@@ -202,6 +209,23 @@ class Lindblad_Chain():
                 return value / tr
             return value / np.sqrt(abs(np.vdot(c, ks.M @ c)))
         return ks.eigenvalues, ks.residuals, obs
+
+    def _seeds(self, psi, phi):
+        """Local vectors of |psi>|psi> and |psi>|phi> on the doubled chain."""
+        n = len(self.chain.sites)
+        if len(psi) != n or len(phi) != n:
+            raise ValueError("Lindblad_Chain: start=(psi, phi) needs one "
+                             "basis state per site, %d of them" % n)
+        sites = self.doubled._session.sites
+
+        def basis(k, j):
+            v = np.zeros(sites.dim(k), dtype=complex)
+            v[j] = 1.0
+            return v
+        p = [basis(2 * i + o, psi[i]) for i in range(n) for o in (1, 2)]
+        u = [basis(2 * i + 1, psi[i]) if o == 1 else basis(2 * i + 2, phi[i])
+             for i in range(n) for o in (1, 2)]
+        return p, u
 
     def _spectrum_ed(self):
         """Dense L on the physical Hilbert space, vec(rho)_{ab} = rho_ab

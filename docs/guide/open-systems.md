@@ -57,7 +57,14 @@ profile agrees with ED to $3\times10^{-4}$. The keywords are those of
 
 When $\mathcal L$ conserves a quantity, for example the particle number
 for number-conserving jumps, every sector has its own steady state, and
-several eigenvalues come back at $\lambda\approx 0$.
+several eigenvalues come back at $\lambda\approx 0$. To stay in one sector
+we start from product states of that sector:
+
+- `start=(psi, phi)`: one local basis state per site (the occupation, for
+  bosons). The evolution starts from $|\psi\rangle\langle\psi|$ and from
+  the traceless $|\psi\rangle\langle\phi|$, and the sector of $\psi$ is
+  kept, for example `start=([1,1,0],[0,1,1])` for two bosons on three
+  sites.
 
 !!! note "Backends"
     `Lindblad_Chain` works for spin and boson chains on

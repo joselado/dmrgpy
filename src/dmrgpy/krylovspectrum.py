@@ -44,10 +44,11 @@ def get_krylov_spectrum(self, G=None, nk=20, dt=0.5, alpha=None,
 
 
 def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
-                         seed=0):
+                         seed=0, starts=None):
     """The pyitensor clik.KrylovSpectrum of the MultiOperator G on this
     chain, with its stored states, for a caller that needs more than
-    <r|O|r> (Lindblad_Chain reads traces off it)."""
+    <r|O|r> (Lindblad_Chain reads traces off it). `starts`: see
+    pyitensor Chain.krylov_spectrum."""
     if self.itensor_version != "python":
         raise NotImplementedError(
             "get_krylov_spectrum runs on itensor_version=\"python\" only (got "
@@ -62,7 +63,7 @@ def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
     self._session.set_mpomaxm(max(self.maxm, self.mpomaxm))
     return self._session.krylov_spectrum(G.to_terms(), nk=nk, dt=dt,
                                          alpha=alpha, gram_tol=gram_tol,
-                                         seed=seed)
+                                         seed=seed, starts=starts)
 
 
 def _krylov_spectrum_ed(self, G):
