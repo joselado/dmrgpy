@@ -3765,6 +3765,25 @@ reconstructed MPS to three digits. Random starts come from
 `randomMPS(..., rng=)`, never from the global stream (2026-10-23 finding
 11).
 
+**Open systems (`lindblad.py`, `pyitensor/vectorize.py`).**
+`Lindblad_Chain(chain, jumps, H=None)` builds the vectorized Lindbladian as
+a `MultiOperator` on a doubled chain of the same model class, `Spin_Chain`
+or `Bosonic_Chain` on `"python"`, so that the doubled chain also has the
+model's ED route. Physical site i becomes 2i (the ket) and 2i+1 (the bra).
+The bra side needs the transpose of every operator, and `get_dagger`
+cannot give it. `lindblad.transpose` uses an explicit table of names
+instead: `Sy` and `ISy` change sign, ladder operators swap, a listed set of
+real symmetric names stays the same, and any other name raises. Fermion
+sites raise, since Jordan-Wigner strings on a doubled chain need the
+superfermion treatment. The spectrum is `krylov_spectrum_dmrg` on the
+doubled chain. Traces come from `vectorize.identity_mps`, which has bond
+dimension d inside each pair and 1 between pairs, so
+`Tr(O r) = <<1|O x 1|r>>` is one linear functional per stored state.
+`mode="ED"` builds `kron(A, B^T)` from the physical matrices, an
+independent route; `tests/test_lindblad.py` matches its `Tr(L^k)` against
+the doubled-chain operator. Strong symmetries are not projected out, so
+every conserved sector gives its own `lambda = 0`.
+
 ### 4.6 The Julia backend (`mpsjulialive/`)
 
 `itensor_version="julia_live"` drives a live, in-process Julia session

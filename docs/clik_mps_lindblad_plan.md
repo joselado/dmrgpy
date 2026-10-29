@@ -29,6 +29,23 @@ benefit is expected for Lindbladian modes and is checked in Phase 2.
 Third, two random starts resolve at most two copies of a degenerate
 level. Left eigenvectors (Phase 1b) are not done.
 
+**Phase 2 implemented (2026-10-29)** as `Lindblad_Chain` (`lindblad.py`,
+`pyitensor/vectorize.py`, `tests/test_lindblad.py`, user guide "Open
+systems"). This is the plan's decision 3, a class; its doubled chain is the
+same model class as the physical one. Checked as follows. The decaying spin
+gives the closed form to 1e-8. `Tr(L^k)` of the doubled-chain operator
+matches the `kron` superoperator to 1e-16 for spin-1/2, spin-1 and bosons
+with dissipative hopping. `<<1|L|rho>>` vanishes to 1e-17. On a driven,
+dephased 4-site XXZ chain the steady state is 1e-6 off, the gap mode 2e-4
+and the magnetization profile 3e-6. On 6 sites at the chain's default
+`maxm` the gap is 0.0924 against 0.0926 and the profile is 3e-4 off. The
+Lindbladian needs much longer evolutions than a Hamiltonian, since `nk*dt`
+must be several times 1/gap, so `get_spectrum` defaults to `dt=2.0`.
+Again no measurable gain from the angle at these sizes. Two things are not
+done. First, per-sublattice sector seeding, needed for the paper's 5-site
+Bose-Hubbard check, since number conservation gives one steady state per
+sector. Second, the Hermiticity projection of the steady state.
+
 ## 1. The idea
 
 Let us start with the question the paper answers. We have a generator $G$

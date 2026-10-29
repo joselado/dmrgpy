@@ -35,6 +35,19 @@ def get_krylov_spectrum(self, G=None, nk=20, dt=0.5, alpha=None,
         return _krylov_spectrum_ed(self, G)
     if mode != "DMRG":
         raise ValueError("get_krylov_spectrum: unrecognized mode " + repr(mode))
+    ks = krylov_spectrum_dmrg(self, G, nk=nk, dt=dt, alpha=alpha,
+                              gram_tol=gram_tol, seed=seed)
+
+    def obs(O, k):
+        return ks.expectation(self._session._mpo(O.to_terms()), k)
+    return ks.eigenvalues, ks.residuals, obs
+
+
+def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
+                         seed=0):
+    """The pyitensor clik.KrylovSpectrum of the MultiOperator G on this
+    chain, with its stored states, for a caller that needs more than
+    <r|O|r> (Lindblad_Chain reads traces off it)."""
     if self.itensor_version != "python":
         raise NotImplementedError(
             "get_krylov_spectrum runs on itensor_version=\"python\" only (got "
@@ -47,13 +60,9 @@ def get_krylov_spectrum(self, G=None, nk=20, dt=0.5, alpha=None,
     self._session.set_sweep_params(self.maxm, self.nsweeps, self.cutoff,
                                    self.noise)
     self._session.set_mpomaxm(max(self.maxm, self.mpomaxm))
-    ks = self._session.krylov_spectrum(G.to_terms(), nk=nk, dt=dt,
-                                       alpha=alpha, gram_tol=gram_tol,
-                                       seed=seed)
-
-    def obs(O, k):
-        return ks.expectation(self._session._mpo(O.to_terms()), k)
-    return ks.eigenvalues, ks.residuals, obs
+    return self._session.krylov_spectrum(G.to_terms(), nk=nk, dt=dt,
+                                         alpha=alpha, gram_tol=gram_tol,
+                                         seed=seed)
 
 
 def _krylov_spectrum_ed(self, G):
