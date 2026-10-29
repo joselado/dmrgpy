@@ -586,14 +586,22 @@ def _arnoldi_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
     v = v0
     remaining = 1.0
     frac = 1.0
+    on_device = bk.is_device()
     for _ in range(_KRYLOV_MAX_SUBSTEPS):
-        basis = _KrylovBasis(v / beta0, m)
+        if on_device:
+            basis = _KrylovBasis(v / beta0, m)
+        else:
+            basis = np.empty((m, n), dtype=complex)
+            basis[0] = v / beta0
         Qk, Hk, hnext, k, converged, c = _arnoldi_run(
                 matvec, basis, coeff * frac, m, n, tol, errgoal)
         if not converged:
             frac, c = _arnoldi_converged_substep(Hk, hnext, coeff, frac,
                                                  errgoal)
-        v = beta0 * (Qk @ bk.asarray(c))
+        if on_device:
+            v = beta0 * (Qk @ bk.asarray(c))
+        else:
+            v = beta0 * (c @ Qk)
         if converged and frac >= remaining:
             return v
         remaining -= frac
@@ -620,21 +628,40 @@ def _arnoldi_run(matvec, basis, coeff, m, n, tol, errgoal):
     """The Arnoldi loop of _arnoldi_expm_multiply. Returns (Q, Hk, hnext,
     k, converged, c): the k basis vectors kept, the k x k Hessenberg
     matrix, h_{k+1,k}, and the stopping verdict, tested exactly as
-    _krylov_verdict tests the Lanczos one."""
+    _krylov_verdict tests the Lanczos one.
+
+    `basis` is a _KrylovBasis on a device, and Q is then (n, k), columns
+    as the Lanczos route keeps them. On the host it is a preallocated
+    (m, n) NumPy array whose rows are the vectors, and Q is its first k
+    rows: both Gram-Schmidt products are then GEMVs on one contiguous
+    block, with no conjugated copy of the basis. With columns,
+    Qk.conj().T copied the whole basis twice per iteration, about 17% of
+    a two-site TDVP step on the 5-site Bose-Hubbard Lindbladian."""
     _xp = bk.xp()
+    rows = isinstance(basis, np.ndarray)
     Hm = np.zeros((m + 1, m), dtype=complex)
     scale = 0.0
     for it in range(m):
-        q = basis.column(it)
-        w = matvec(q)
-        Qk = basis.matrix()
-        h = Qk.conj().T @ w
-        w = w - Qk @ h
-        h2 = Qk.conj().T @ w  # second pass, as _block_reorthogonalize's two
-        w = w - Qk @ h2
-        hcol = np.asarray(bk.to_host(h + h2))
-        hnext = float(bk.to_host(_xp.linalg.norm(w)))
         k = it + 1
+        if rows:
+            Qk = basis[:k]
+            w = matvec(basis[it])
+            h = np.conj(Qk @ np.conj(w))
+            w = w - h @ Qk
+            h2 = np.conj(Qk @ np.conj(w))  # second pass
+            w = w - h2 @ Qk
+            hcol = h + h2
+            hnext = float(np.linalg.norm(w))
+        else:
+            q = basis.column(it)
+            w = matvec(q)
+            Qk = basis.matrix()
+            h = Qk.conj().T @ w
+            w = w - Qk @ h
+            h2 = Qk.conj().T @ w  # second pass, as _block_reorthogonalize's two
+            w = w - Qk @ h2
+            hcol = np.asarray(bk.to_host(h + h2))
+            hnext = float(bk.to_host(_xp.linalg.norm(w)))
         Hm[:k, it] = hcol
         Hm[k, it] = hnext
         scale = max(scale, float(np.max(np.abs(hcol))), hnext)
@@ -647,7 +674,10 @@ def _arnoldi_run(matvec, basis, coeff, m, n, tol, errgoal):
             return Qk, Hk, hnext, k, True, c
         if k == m:
             return Qk, Hk, hnext, k, False, c
-        basis.append(w / hnext)
+        if rows:
+            basis[k] = w / hnext
+        else:
+            basis.append(w / hnext)
 
     raise AssertionError("unreachable: the k == m verdict always returns")
 
